@@ -14,6 +14,16 @@ To run:
 bun run src/index.ts
 ```
 
+To build the Tailwind CSS stylesheet:
+
+```bash
+bun run css:build
+```
+
+The source stylesheet is `src/styles.css`, and the generated stylesheet is
+written to `dist/styles.css`. During frontend development, run
+`bun run css:watch` to rebuild it when source files change.
+
 To run all static checks:
 
 ```bash

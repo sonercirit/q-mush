@@ -48,6 +48,8 @@ task-specific progress, guesses, or sensitive values.
 
 - Install dependencies: `bun install`
 - Run the application: `bun run src/index.ts`
+- Build Tailwind CSS: `bun run css:build`
+- Watch Tailwind CSS: `bun run css:watch`
 - Run tests: `bun test`
 - Check repository constraints: `bun run repository-check`
 - Check formatting: `bun run format:check`
@@ -63,6 +65,8 @@ task-specific progress, guesses, or sensitive values.
 
 - Bun manages dependencies through `package.json` and the committed `bun.lock`
   lockfile.
+- Tailwind CSS v4 is built with `@tailwindcss/cli`; `src/styles.css` is the
+  source entry point and the ignored `dist/styles.css` is generated output.
 - `bunfig.toml` requires package releases to be at least one week old before
   installation.
 - TypeScript is configured for strict, no-emit, bundler-style checking in
@@ -96,7 +100,8 @@ task-specific progress, guesses, or sensitive values.
   authoritative included-issue list complete so it can generate every error
   rule.
 - Add each new runtime source root and executable entry to
-  `knip.production.config.ts`; keep test files and test-support directories out
-  of its production project patterns.
+  `knip.production.config.ts`. Add standalone non-TypeScript build entries, such
+  as `src/styles.css`, to both Knip configs; keep test files and test-support
+  directories out of production project patterns.
 - Put every test file under a directory named `test`; the directory may appear
   at any depth, such as `scripts/test` or `apps/control-center/test`.
