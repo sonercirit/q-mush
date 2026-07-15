@@ -4,10 +4,12 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "check": "bun run typecheck && bun run lint && bun run knip",
+    "check": "bun run file-length && bun run typecheck && bun run lint && bun run knip",
+    "file-length": "bun run scripts/check-file-length.ts",
     "knip": "knip",
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix --max-warnings 0",
+    "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

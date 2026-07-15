@@ -6,7 +6,7 @@ Living project memory for coding agents. Update it whenever work reveals durable
 
 - Private Bun project using strict TypeScript and ES modules.
 - `index.ts` is the application entry point.
-- No test runner has been selected yet.
+- Tests use Bun's built-in test runner.
 
 ## Working Agreements
 
@@ -35,6 +35,8 @@ Keep entries concise and factual. Remove or revise stale notes rather than accum
 
 - Install dependencies: `bun install`
 - Run the application: `bun run index.ts`
+- Run tests: `bun test`
+- Check file lengths: `bun run file-length`
 - Type-check: `bun run typecheck`
 - Check for dead code and dependency issues: `bun run knip`
 - Lint: `bun run lint`
@@ -48,6 +50,7 @@ Keep entries concise and factual. Remove or revise stale notes rather than accum
 - TypeScript is configured for strict, no-emit, bundler-style checking in `tsconfig.json`, including unused and unreachable code diagnostics.
 - `eslint.config.ts` uses ESLint flat config with type-aware strict and stylistic `typescript-eslint` presets; ESLint loads it through the `jiti` development dependency.
 - `knip.json` treats every Knip issue type as an error and checks exports from entry files.
+- `scripts/check-file-length.ts` checks tracked and unignored files, excluding `bun.lock`; files reaching 20,000 Unicode code points fail with guidance to split or condense them.
 
 ## Decisions and Gotchas
 
