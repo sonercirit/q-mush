@@ -52,6 +52,7 @@ task-specific progress, guesses, or sensitive values.
 - Format files: `bun run format`
 - Type-check: `bun run typecheck`
 - Check for dead code and dependency issues: `bun run knip`
+- Check for duplicate code: `bun run cpd`
 - Lint: `bun run lint`
 - Apply safe lint fixes: `bun run lint:fix`
 - Run all static checks: `bun run check`
@@ -69,6 +70,9 @@ task-specific progress, guesses, or sensitive values.
   development dependency.
 - `knip.json` treats every Knip issue type as an error and checks exports from
   entry files.
+- `.jscpd.json` maps all supported JavaScript and TypeScript extensions to the
+  TSX format for cross-extension detection; clones of at least 20 tokens and one
+  line fail the zero-percent threshold.
 - `scripts/check-file-length.ts` checks tracked and unignored files, excluding
   `bun.lock`; files reaching 20,000 Unicode code points fail with guidance to
   split or condense them.

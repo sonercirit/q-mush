@@ -1,0 +1,10 @@
+{
+  "minLines": 1,
+  "minTokens": 20,
+  "threshold": 0,
+  "noTips": true,
+  "format": ["tsx"],
+  "formatsExts": {
+    "tsx": ["js", "jsx", "mjs", "cjs", "es", "es6", "ts", "tsx", "mts", "cts"]
+  }
+}

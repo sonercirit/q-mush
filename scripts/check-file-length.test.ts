@@ -7,11 +7,21 @@ import {
   formatFileLengthViolations,
 } from "./check-file-length.ts";
 
+async function withTemporaryDirectory(
+  run: (directory: string) => Promise<void>,
+): Promise<void> {
+  const directory = await mkdtemp(join(tmpdir(), "q-mush-file-length-"));
+
+  try {
+    await run(directory);
+  } finally {
+    await rm(directory, { force: true, recursive: true });
+  }
+}
+
 describe("file length check", () => {
   test("flags a file when it reaches 20,000 characters", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "q-mush-file-length-"));
-
-    try {
+    await withTemporaryDirectory(async (directory) => {
       await Promise.all([
         writeFile(join(directory, "under-limit.txt"), "😀".repeat(19_999)),
         writeFile(join(directory, "at-limit.txt"), "😀".repeat(20_000)),
@@ -28,15 +38,11 @@ describe("file length check", () => {
       expect(formatFileLengthViolations(violations)).toContain(
         "Split or condense each listed file",
       );
-    } finally {
-      await rm(directory, { force: true, recursive: true });
-    }
+    });
   });
 
   test("excludes bun.lock", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "q-mush-file-length-"));
-
-    try {
+    await withTemporaryDirectory(async (directory) => {
       await writeFile(join(directory, "bun.lock"), "x".repeat(20_000));
 
       const violations = await findFileLengthViolations(directory, [
@@ -44,8 +50,6 @@ describe("file length check", () => {
       ]);
 
       expect(violations).toEqual([]);
-    } finally {
-      await rm(directory, { force: true, recursive: true });
-    }
+    });
   });
 });
