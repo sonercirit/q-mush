@@ -35,13 +35,17 @@ Keep entries concise and factual. Remove or revise stale notes rather than accum
 
 - Install dependencies: `bun install`
 - Run the application: `bun run index.ts`
-- Type-check: `bun run tsc --noEmit`
+- Type-check: `bun run typecheck`
+- Lint: `bun run lint`
+- Apply safe lint fixes: `bun run lint:fix`
+- Run all static checks: `bun run check`
 
 ## Architecture and Conventions
 
 - Bun manages dependencies through `package.json` and the committed `bun.lock` lockfile.
 - `bunfig.toml` requires package releases to be at least one week old before installation.
 - TypeScript is configured for strict, no-emit, bundler-style checking in `tsconfig.json`.
+- `eslint.config.ts` uses ESLint flat config with type-aware strict and stylistic `typescript-eslint` presets; ESLint loads it through the `jiti` development dependency.
 
 ## Decisions and Gotchas
 

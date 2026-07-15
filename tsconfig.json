@@ -1,30 +1,36 @@
 {
   "compilerOptions": {
-    // Environment setup & latest features
+    // Runtime environment and latest language features
     "lib": ["ESNext"],
     "target": "ESNext",
     "module": "Preserve",
     "moduleDetection": "force",
     "jsx": "react-jsx",
-    "allowJs": true,
     "types": ["bun"],
 
-    // Bundler mode
+    // Bundler-compatible, type-check-only compilation
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
+    "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,
 
-    // Best practices
+    // Strict type safety and correctness
     "strict": true,
-    "skipLibCheck": true,
+    "exactOptionalPropertyTypes": true,
     "noFallthroughCasesInSwitch": true,
-    "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
-
-    // Some stricter flags (disabled by default)
-    "noUnusedLocals": false,
-    "noUnusedParameters": false,
-    "noPropertyAccessFromIndexSignature": false
-  }
+    "noImplicitReturns": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noUncheckedIndexedAccess": true,
+    "noUncheckedSideEffectImports": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": false
+  },
+  "include": ["**/*.ts", "**/*.tsx", "**/*.mts", "**/*.cts"],
+  "exclude": ["coverage", "dist", "node_modules", "out"]
 }
