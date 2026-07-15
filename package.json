@@ -1,17 +1,19 @@
 {
   "name": "q-mush",
-  "module": "index.ts",
+  "module": "src/index.ts",
   "type": "module",
   "private": true,
   "scripts": {
-    "check": "bun run file-length && bun run format:check && bun run typecheck && bun run lint && bun run knip && bun run cpd",
+    "check": "bun run repository-check && bun run format:check && bun run typecheck && bun run lint && bun run knip && bun run cpd",
     "cpd": "cpd .",
-    "file-length": "bun run scripts/check-file-length.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "knip": "knip",
+    "knip": "bun run knip:production && bun run knip:test",
+    "knip:production": "knip --production --config knip.production.config.ts",
+    "knip:test": "knip --config knip.config.ts",
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix --max-warnings 0",
+    "repository-check": "bun run scripts/repository-check.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },

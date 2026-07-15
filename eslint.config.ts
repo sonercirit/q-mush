@@ -1,11 +1,12 @@
 import eslint from "@eslint/js";
-import { defineConfig } from "eslint/config";
+import { defineConfig, includeIgnoreFile } from "eslint/config";
+import { fileURLToPath } from "node:url";
 import tseslint from "typescript-eslint";
 
+const gitignorePath = fileURLToPath(new URL(".gitignore", import.meta.url));
+
 export default defineConfig(
-  {
-    ignores: ["coverage/**", "dist/**", "out/**"],
-  },
+  includeIgnoreFile(gitignorePath, { gitignoreResolution: true }),
   eslint.configs.recommended,
   tseslint.configs.strictTypeChecked,
   tseslint.configs.stylisticTypeChecked,
@@ -19,6 +20,17 @@ export default defineConfig(
     linterOptions: {
       reportUnusedDisableDirectives: "error",
       reportUnusedInlineConfigs: "error",
+    },
+  },
+  {
+    files: ["**/*.{cts,mts,ts,tsx}"],
+    rules: {
+      "@typescript-eslint/consistent-type-assertions": [
+        "error",
+        { assertionStyle: "never" },
+      ],
+      "@typescript-eslint/consistent-type-imports": "error",
+      "@typescript-eslint/switch-exhaustiveness-check": "error",
     },
   },
   {

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import {
   findFileLengthViolations,
   formatFileLengthViolations,
-} from "./check-file-length.ts";
+} from "../check-file-length.ts";
 
 async function withTemporaryDirectory(
   run: (directory: string) => Promise<void>,

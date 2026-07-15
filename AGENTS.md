@@ -6,7 +6,7 @@ information.
 ## Project Snapshot
 
 - Private Bun project using strict TypeScript and ES modules.
-- `index.ts` is the application entry point.
+- `src/index.ts` is the application entry point.
 - Tests use Bun's built-in test runner.
 
 ## Working Agreements
@@ -45,9 +45,9 @@ task-specific progress, guesses, or sensitive values.
 ## Setup and Commands
 
 - Install dependencies: `bun install`
-- Run the application: `bun run index.ts`
+- Run the application: `bun run src/index.ts`
 - Run tests: `bun test`
-- Check file lengths: `bun run file-length`
+- Check repository constraints: `bun run repository-check`
 - Check formatting: `bun run format:check`
 - Format files: `bun run format`
 - Type-check: `bun run typecheck`
@@ -67,21 +67,34 @@ task-specific progress, guesses, or sensitive values.
   `tsconfig.json`, including unused and unreachable code diagnostics.
 - `eslint.config.ts` uses ESLint flat config with type-aware strict and
   stylistic `typescript-eslint` presets; ESLint loads it through the `jiti`
-  development dependency.
-- `knip.json` treats every Knip issue type as an error and checks exports from
-  entry files.
+  development dependency. It imports `.gitignore`, bans non-const type
+  assertions, and enforces exhaustive switches and type-only imports.
+- `knip.config.ts` checks every issue type and entry exports;
+  `knip.production.config.ts` limits the production graph to runtime source.
+  `bun run knip` runs both production and comprehensive test/tooling passes, so
+  tests cannot keep production code alive while unused test helpers still fail.
 - `.jscpd.json` maps all supported JavaScript and TypeScript extensions to the
   TSX format for cross-extension detection; clones of at least 20 tokens and one
   line fail the zero-percent threshold.
-- `scripts/check-file-length.ts` checks tracked and unignored files, excluding
-  `bun.lock`; files reaching 20,000 Unicode code points fail with guidance to
-  split or condense them.
+- `scripts/repository-check.ts` lists existing tracked and unignored files and
+  calls the live APIs in `scripts/check-file-length.ts` and
+  `scripts/test-location.ts`. It rejects files reaching 20,000 Unicode code
+  points (excluding `bun.lock`) and JavaScript/TypeScript test files outside a
+  directory named `test`.
 - Prettier wraps Markdown prose at its print width and uses
   `prettier-plugin-organize-imports` to sort, combine, and remove unused
-  imports; it ignores `bun.lock` and is enforced by `bun run check`.
+  imports; generated/dependency output ignores come from `.gitignore`, while
+  `bun.lock` is ignored separately and formatting is enforced by
+  `bun run check`.
 
 ## Decisions and Gotchas
 
 - The package is marked private and uses ESM (`"type": "module"`).
-- Knip rule severities alone do not activate default-off issue types; keep the
-  explicit `include` list aligned with the `rules` map.
+- Knip rule severities alone do not activate default-off issue types; keep its
+  authoritative included-issue list complete so it can generate every error
+  rule.
+- Add each new runtime source root and executable entry to
+  `knip.production.config.ts`; keep test files and test-support directories out
+  of its production project patterns.
+- Put every test file under a directory named `test`; the directory may appear
+  at any depth, such as `scripts/test` or `apps/control-center/test`.
