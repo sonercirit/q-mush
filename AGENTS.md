@@ -1,11 +1,12 @@
 # AGENTS.md
 
-Living project memory for coding agents. Read this file before making changes and update it whenever work reveals durable information.
+Living project memory for coding agents. Update it whenever work reveals durable information.
 
 ## Project Snapshot
 
-- Repository is currently empty aside from this file.
-- No language, framework, build system, or test runner has been selected yet.
+- Private Bun project using strict TypeScript and ES modules.
+- `index.ts` is the application entry point.
+- No test runner has been selected yet.
 
 ## Working Agreements
 
@@ -32,12 +33,15 @@ Keep entries concise and factual. Remove or revise stale notes rather than accum
 
 ## Setup and Commands
 
-_To be documented when project tooling is introduced._
+- Install dependencies: `bun install`
+- Run the application: `bun run index.ts`
+- Type-check: `bun run tsc --noEmit`
 
 ## Architecture and Conventions
 
-_To be documented as the project takes shape._
+- Bun manages dependencies through `package.json` and the committed `bun.lock` lockfile.
+- TypeScript is configured for strict, no-emit, bundler-style checking in `tsconfig.json`.
 
 ## Decisions and Gotchas
 
-_None recorded yet._
+- The package is marked private and uses ESM (`"type": "module"`).
