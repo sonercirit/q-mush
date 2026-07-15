@@ -40,6 +40,7 @@ Keep entries concise and factual. Remove or revise stale notes rather than accum
 ## Architecture and Conventions
 
 - Bun manages dependencies through `package.json` and the committed `bun.lock` lockfile.
+- `bunfig.toml` requires package releases to be at least one week old before installation.
 - TypeScript is configured for strict, no-emit, bundler-style checking in `tsconfig.json`.
 
 ## Decisions and Gotchas
