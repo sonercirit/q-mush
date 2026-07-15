@@ -11,6 +11,9 @@ Living project memory for coding agents. Read this file before making changes an
 
 - Inspect the repository and `git status` before changing files.
 - Preserve established patterns once they exist; do not introduce a new tool or dependency without a concrete need.
+- Practice test-driven development (TDD) for behavioral changes: write or update a failing test first, implement the minimum needed to pass, then refactor while keeping tests green.
+- Follow DRY (Don't Repeat Yourself): keep each piece of knowledge or logic in one authoritative place, while avoiding premature abstractions.
+- Follow KISS (Keep It Simple, Stupid): prefer the simplest clear solution that meets the requirements and avoid unnecessary complexity.
 - Run the narrowest relevant checks after each change, then broader checks when practical.
 - Keep changes focused and avoid modifying unrelated files.
 - Never commit secrets, credentials, generated artifacts, or local environment files.
