@@ -18,7 +18,7 @@ To run all static checks:
 bun run check
 ```
 
-The checks are also available separately as `bun run typecheck` and `bun run lint`.
-Run `bun run lint:fix` to apply safe lint fixes.
+The checks are also available separately as `bun run typecheck`, `bun run lint`, and
+`bun run knip`. Run `bun run lint:fix` to apply safe lint fixes.
 
 This project was created using `bun init` in bun v1.3.14. [Bun](https://bun.com) is a fast all-in-one JavaScript runtime.

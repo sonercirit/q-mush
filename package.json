@@ -4,7 +4,8 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "check": "bun run typecheck && bun run lint",
+    "check": "bun run typecheck && bun run lint && bun run knip",
+    "knip": "knip",
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix --max-warnings 0",
     "typecheck": "tsc --noEmit"
@@ -14,6 +15,7 @@
     "@types/bun": "latest",
     "eslint": "^10.6.0",
     "jiti": "^2.7.0",
+    "knip": "^6.25.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.63.0"
   }
