@@ -1,4 +1,6 @@
-# q-mush
+# Q Mush
+
+The local-first distributed agent swarm harness.
 
 To install dependencies:
 

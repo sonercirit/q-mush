@@ -21,6 +21,8 @@ information.
   one authoritative place, while avoiding premature abstractions.
 - Follow KISS (Keep It Simple, Stupid): prefer the simplest clear solution that
   meets the requirements and avoid unnecessary complexity.
+- Follow local-first: keep data and core workflows on the user's machine by
+  default, with remote services enhancing rather than gating functionality.
 - Run the narrowest relevant checks after each change, then broader checks when
   practical.
 - Keep changes focused and avoid modifying unrelated files.
