@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-
 import {
   findFileLengthViolations,
   formatFileLengthViolations,
@@ -40,7 +39,9 @@ describe("file length check", () => {
     try {
       await writeFile(join(directory, "bun.lock"), "x".repeat(20_000));
 
-      const violations = await findFileLengthViolations(directory, ["bun.lock"]);
+      const violations = await findFileLengthViolations(directory, [
+        "bun.lock",
+      ]);
 
       expect(violations).toEqual([]);
     } finally {

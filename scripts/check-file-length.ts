@@ -8,7 +8,8 @@ interface FileLengthViolation {
   readonly path: string;
 }
 
-const countCharacters = (contents: string): number => Array.from(contents).length;
+const countCharacters = (contents: string): number =>
+  Array.from(contents).length;
 
 export async function findFileLengthViolations(
   rootDirectory: string,
@@ -54,14 +55,7 @@ export function formatFileLengthViolations(
 
 async function listProjectFiles(rootDirectory: string): Promise<string[]> {
   const git = Bun.spawn(
-    [
-      "git",
-      "ls-files",
-      "--cached",
-      "--others",
-      "--exclude-standard",
-      "-z",
-    ],
+    ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
     {
       cwd: rootDirectory,
       stderr: "pipe",
