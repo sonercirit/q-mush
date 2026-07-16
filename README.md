@@ -20,24 +20,17 @@ To run the server in watch mode during development:
 bun run dev
 ```
 
-The server builds the browser entry in memory at startup and exposes two pages:
+The server builds the browser entry and Tailwind stylesheet in memory at
+startup, then exposes two pages and their assets:
 
 - `/` renders the homepage to HTML on the server.
 - `/app` serves an empty application shell, then `/app.js` renders the app in
   the browser.
+- `/styles.css` serves the stylesheet shared by both pages.
 
 Both pages use the small framework-free TSX runtime in `src/jsx.ts`; no frontend
-framework is installed.
-
-To build the Tailwind CSS stylesheet:
-
-```bash
-bun run css:build
-```
-
-The source stylesheet is `src/styles.css`, and the generated stylesheet is
-written to `dist/styles.css`. During frontend development, run
-`bun run css:watch` to rebuild it when source files change.
+framework is installed. `src/styles.css` is the Tailwind source entry point, and
+no generated frontend assets are written to disk.
 
 To run all static checks:
 

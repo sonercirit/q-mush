@@ -1,6 +1,15 @@
-import { buildClientJavaScript, createRequestHandler } from "./server.ts";
+import {
+  buildClientJavaScript,
+  buildClientStylesheet,
+  createRequestHandler,
+} from "./server.ts";
 
-const clientJavaScript = await buildClientJavaScript();
-const server = Bun.serve({ fetch: createRequestHandler(clientJavaScript) });
+const [clientJavaScript, stylesheet] = await Promise.all([
+  buildClientJavaScript(),
+  buildClientStylesheet(),
+]);
+const server = Bun.serve({
+  fetch: createRequestHandler(clientJavaScript, stylesheet),
+});
 
 console.log(`Q Mush is running at ${server.url}`);
