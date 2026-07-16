@@ -8,6 +8,7 @@
     "cpd": "cpd .",
     "css:build": "tailwindcss -i src/styles.css -o dist/styles.css --minify",
     "css:watch": "tailwindcss -i src/styles.css -o dist/styles.css --watch",
+    "dev": "bun --watch src/index.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "knip": "bun run knip:production && bun run knip:test",

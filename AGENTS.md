@@ -6,7 +6,9 @@ information.
 ## Project Snapshot
 
 - Private Bun project using strict TypeScript and ES modules.
-- `src/index.ts` is the application entry point.
+- `src/index.ts` is the Bun HTTP server entry point.
+- The server-rendered homepage lives at `/`; the browser-rendered app lives at
+  `/app`.
 - Tests use Bun's built-in test runner.
 
 ## Working Agreements
@@ -48,6 +50,7 @@ task-specific progress, guesses, or sensitive values.
 
 - Install dependencies: `bun install`
 - Run the application: `bun run src/index.ts`
+- Run the development server in watch mode: `bun run dev`
 - Build Tailwind CSS: `bun run css:build`
 - Watch Tailwind CSS: `bun run css:watch`
 - Run tests: `bun test`
@@ -65,6 +68,13 @@ task-specific progress, guesses, or sensitive values.
 
 - Bun manages dependencies through `package.json` and the committed `bun.lock`
   lockfile.
+- `src/server.ts` builds `src/client.tsx` in memory with `Bun.build` at startup
+  and serves it from `/app.js`; no generated browser bundle is written to disk.
+- `src/pages.tsx` contains server page markup, while `src/client.tsx` mounts the
+  browser app. Shared route paths are defined in `src/routes.ts`.
+- `src/jsx.ts` is the framework-free classic JSX factory and renders its small
+  element tree either to escaped HTML or browser DOM. TSX files must import
+  `createElement`; `tsconfig.json` configures it as `jsxFactory`.
 - Tailwind CSS v4 is built with `@tailwindcss/cli`; `src/styles.css` is the
   source entry point and the ignored `dist/styles.css` is generated output.
 - `bunfig.toml` requires package releases to be at least one week old before

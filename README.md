@@ -14,6 +14,21 @@ To run:
 bun run src/index.ts
 ```
 
+To run the server in watch mode during development:
+
+```bash
+bun run dev
+```
+
+The server builds the browser entry in memory at startup and exposes two pages:
+
+- `/` renders the homepage to HTML on the server.
+- `/app` serves an empty application shell, then `/app.js` renders the app in
+  the browser.
+
+Both pages use the small framework-free TSX runtime in `src/jsx.ts`; no frontend
+framework is installed.
+
 To build the Tailwind CSS stylesheet:
 
 ```bash

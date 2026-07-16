@@ -1,11 +1,12 @@
 {
   "compilerOptions": {
     // Runtime environment and latest language features
-    "lib": ["ESNext"],
+    "lib": ["DOM", "DOM.Iterable", "ESNext"],
     "target": "ESNext",
     "module": "Preserve",
     "moduleDetection": "force",
-    "jsx": "react-jsx",
+    "jsx": "react",
+    "jsxFactory": "createElement",
     "types": ["bun"],
 
     // Bundler-compatible, type-check-only compilation
