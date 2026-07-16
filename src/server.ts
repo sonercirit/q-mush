@@ -1,9 +1,15 @@
 import { fileURLToPath } from "node:url";
 import { brotliCompressSync, deflateSync } from "node:zlib";
+import type { GoogleAuth } from "./auth.ts";
 import { renderAppPage, renderHomePage } from "./pages.tsx";
 import {
+  API_BASE_PATH,
   APP_PATH,
   APP_SCRIPT_PATH,
+  AUTH_GOOGLE_CALLBACK_PATH,
+  AUTH_GOOGLE_PATH,
+  AUTH_LOGOUT_PATH,
+  AUTH_SESSION_PATH,
   HOME_PATH,
   STYLESHEET_PATH,
 } from "./routes.ts";
@@ -146,15 +152,34 @@ function createTextResponse(
 export function createRequestHandler(
   clientJavaScript: string,
   stylesheet: string,
-): (request: Request) => Response {
+  googleAuth: GoogleAuth,
+): (request: Request) => Promise<Response> {
   const appPage = prepareBody(renderAppPage());
   const browserBundle = prepareBody(clientJavaScript);
   const homePage = prepareBody(renderHomePage());
   const notFound = prepareBody("Not found");
   const styles = prepareBody(stylesheet);
 
-  return (request) => {
+  return async (request) => {
     const { pathname } = new URL(request.url);
+
+    if (pathname.startsWith(`${API_BASE_PATH}/`)) {
+      if (pathname === AUTH_GOOGLE_PATH) {
+        return googleAuth.begin(request);
+      }
+
+      if (pathname === AUTH_GOOGLE_CALLBACK_PATH) {
+        return googleAuth.complete(request);
+      }
+
+      if (pathname === AUTH_LOGOUT_PATH) {
+        return googleAuth.logout(request);
+      }
+
+      if (pathname === AUTH_SESSION_PATH) {
+        return googleAuth.session(request);
+      }
+    }
 
     if (pathname === HOME_PATH) {
       return createTextResponse(request, homePage, HTML_HEADERS);

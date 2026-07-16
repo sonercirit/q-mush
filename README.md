@@ -8,6 +8,22 @@ To install dependencies:
 bun install
 ```
 
+To configure Google login, copy the environment template and fill in the web
+OAuth client credentials from Google Cloud:
+
+```bash
+cp .env.example .env.local
+```
+
+Register this exact authorized redirect URI on the Google OAuth client:
+
+```text
+http://localhost:3000/api/auth/google/callback
+```
+
+Keep `.env.local` private; it is ignored by Git. Set `GOOGLE_REDIRECT_URI` to
+the deployed HTTPS callback URL when running on another origin.
+
 To run:
 
 ```bash
@@ -27,6 +43,15 @@ startup, then exposes two pages and their assets:
 - `/app` serves an empty application shell, then `/app.js` renders the app in
   the browser.
 - `/styles.css` serves the stylesheet shared by both pages.
+- `/api` is the base path for APIs. `/api/auth/google` starts Google OpenID
+  Connect login and `/api/auth/google/callback` completes it.
+- `/api/auth/session` returns the local session, while `POST /api/auth/logout`
+  clears it.
+
+The login flow uses an authorization code, PKCE, and a short-lived state cookie.
+Only the basic Google profile and email scopes are requested. Google tokens are
+discarded after profile lookup; the resulting session is held in memory on the
+local server and is cleared by a server restart.
 
 Both pages use the small framework-free TSX runtime in `src/jsx.ts`; no frontend
 framework is installed. `src/styles.css` is the Tailwind source entry point, and

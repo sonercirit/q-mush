@@ -1,4 +1,10 @@
+export const API_BASE_PATH = "/api";
 export const APP_PATH = "/app";
 export const APP_SCRIPT_PATH = "/app.js";
+const AUTH_BASE_PATH = `${API_BASE_PATH}/auth`;
+export const AUTH_GOOGLE_PATH = `${AUTH_BASE_PATH}/google`;
+export const AUTH_GOOGLE_CALLBACK_PATH = `${AUTH_GOOGLE_PATH}/callback`;
+export const AUTH_LOGOUT_PATH = `${AUTH_BASE_PATH}/logout`;
+export const AUTH_SESSION_PATH = `${AUTH_BASE_PATH}/session`;
 export const HOME_PATH = "/";
 export const STYLESHEET_PATH = "/styles.css";

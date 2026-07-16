@@ -5,7 +5,19 @@ import {
   inflateSync,
   zstdDecompressSync,
 } from "node:zlib";
-import { buildClientStylesheet, createRequestHandler } from "../server.ts";
+import { createGoogleAuthFromEnvironment } from "../auth.ts";
+import {
+  API_BASE_PATH,
+  AUTH_GOOGLE_CALLBACK_PATH,
+  AUTH_GOOGLE_PATH,
+  AUTH_LOGOUT_PATH,
+  AUTH_SESSION_PATH,
+} from "../routes.ts";
+import {
+  buildClientJavaScript,
+  buildClientStylesheet,
+  createRequestHandler,
+} from "../server.ts";
 
 interface CompressionCase {
   readonly decompress: (body: Uint8Array) => Uint8Array;
@@ -20,7 +32,11 @@ const compressionCases: readonly CompressionCase[] = [
 ];
 const clientJavaScript = 'document.querySelector("#app")?.replaceChildren();';
 const stylesheet = ".min-h-screen{min-height:100vh}";
-const handleRequest = createRequestHandler(clientJavaScript, stylesheet);
+const handleRequest = createRequestHandler(
+  clientJavaScript,
+  stylesheet,
+  createGoogleAuthFromEnvironment({}),
+);
 
 function expectCompressionHeaders(
   response: Response,
@@ -44,16 +60,21 @@ async function expectUnencodedResponse(
   expect(await response.text()).toBe(body);
 }
 
-function sendRequest(path: string, acceptEncoding?: string): Response {
+async function sendRequest(
+  path: string,
+  acceptEncoding?: string,
+  method = "GET",
+): Promise<Response> {
   const headers = new Headers();
 
   if (acceptEncoding !== undefined) {
     headers.set("accept-encoding", acceptEncoding);
   }
 
-  return handleRequest(
+  return await handleRequest(
     new Request(`http://localhost${path}`, {
       headers,
+      method,
     }),
   );
 }
@@ -62,10 +83,20 @@ async function request(path: string): Promise<{
   readonly body: string;
   readonly response: Response;
 }> {
-  const response = sendRequest(path);
+  const response = await sendRequest(path);
 
   return { body: await response.text(), response };
 }
+
+describe("routes", () => {
+  test("places every authentication endpoint beneath the API base path", () => {
+    expect(API_BASE_PATH).toBe("/api");
+    expect(AUTH_GOOGLE_PATH).toBe("/api/auth/google");
+    expect(AUTH_GOOGLE_CALLBACK_PATH).toBe("/api/auth/google/callback");
+    expect(AUTH_LOGOUT_PATH).toBe("/api/auth/logout");
+    expect(AUTH_SESSION_PATH).toBe("/api/auth/session");
+  });
+});
 
 describe("page server", () => {
   test("server renders the home page", async () => {
@@ -112,6 +143,33 @@ describe("page server", () => {
     expect(body).toBe(stylesheet);
   });
 
+  test("serves the authentication session endpoint", async () => {
+    const response = await sendRequest("/api/auth/session");
+
+    expect(response.ok).toBeTrue();
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.text()).toBe(
+      '{"googleLoginAvailable":false,"user":null}',
+    );
+  });
+
+  test("routes authentication requests beneath the API base path", async () => {
+    const loginResponse = await sendRequest("/api/auth/google");
+    const invalidLogoutResponse = await sendRequest("/api/auth/logout");
+    const logoutResponse = await sendRequest(
+      "/api/auth/logout",
+      undefined,
+      "POST",
+    );
+    const outsideApiResponse = await sendRequest("/auth/google");
+
+    expect(loginResponse.status).toBe(503);
+    expect(invalidLogoutResponse.status).toBe(405);
+    expect(invalidLogoutResponse.headers.get("allow")).toBe("POST");
+    expect(logoutResponse.status).toBe(204);
+    expect(outsideApiResponse.status).toBe(404);
+  });
+
   test("returns not found for unknown paths", async () => {
     const { body, response } = await request("/missing");
 
@@ -123,7 +181,7 @@ describe("page server", () => {
 describe("response compression", () => {
   for (const { decompress, encoding } of compressionCases) {
     test(`serves ${encoding}-compressed responses`, async () => {
-      const response = sendRequest("/styles.css", encoding);
+      const response = await sendRequest("/styles.css", encoding);
       const compressedBody = new Uint8Array(await response.arrayBuffer());
 
       expectCompressionHeaders(response, encoding);
@@ -133,14 +191,17 @@ describe("response compression", () => {
     });
   }
 
-  test("prefers zstd when the client accepts every supported encoding", () => {
-    const response = sendRequest("/styles.css", "gzip, deflate, br, zstd");
+  test("prefers zstd when the client accepts every supported encoding", async () => {
+    const response = await sendRequest(
+      "/styles.css",
+      "gzip, deflate, br, zstd",
+    );
 
     expectCompressionHeaders(response, "zstd");
   });
 
-  test("honors client encoding quality preferences", () => {
-    const response = sendRequest(
+  test("honors client encoding quality preferences", async () => {
+    const response = await sendRequest(
       "/styles.css",
       "gzip;q=1, deflate;q=0.8, br;q=0.5, zstd;q=0.2",
     );
@@ -149,15 +210,28 @@ describe("response compression", () => {
   });
 
   test("uses identity when the client prefers it", async () => {
-    const response = sendRequest("/styles.css", "gzip;q=0.5, identity;q=1");
+    const response = await sendRequest(
+      "/styles.css",
+      "gzip;q=0.5, identity;q=1",
+    );
 
     await expectUnencodedResponse(response, 200, stylesheet);
   });
 
   test("returns not acceptable when the client rejects every representation", async () => {
-    const response = sendRequest("/styles.css", "identity;q=0, *;q=0");
+    const response = await sendRequest("/styles.css", "identity;q=0, *;q=0");
 
     await expectUnencodedResponse(response, 406, "");
+  });
+});
+
+describe("browser build", () => {
+  test("builds the Google login and session controls", async () => {
+    const javaScript = await buildClientJavaScript();
+
+    expect(javaScript).toContain("Continue with Google");
+    expect(javaScript).toContain("AUTH_GOOGLE_PATH");
+    expect(javaScript).toContain("AUTH_LOGOUT_PATH");
   });
 });
 

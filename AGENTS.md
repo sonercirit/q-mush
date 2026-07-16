@@ -73,6 +73,12 @@ task-specific progress, guesses, or sensitive values.
   `Accept-Encoding`, in that server-preference order.
 - `src/pages.tsx` contains server page markup, while `src/client.tsx` mounts the
   browser app. Shared route paths are defined in `src/routes.ts`.
+- `src/auth.ts` implements Google OpenID Connect with an authorization-code +
+  PKCE flow. It uses HttpOnly state/verifier cookies, fetches the basic profile,
+  discards provider tokens, and keeps seven-day application sessions in memory.
+  `src/client.tsx` reads `/api/auth/session`, gates the control center, and
+  posts logout to `/api/auth/logout`. All API routes derive from the `/api` base
+  path in `src/routes.ts`.
 - `src/jsx.ts` is the framework-free classic JSX factory and renders its small
   element tree either to escaped HTML or browser DOM. TSX files must import
   `createElement`; `tsconfig.json` configures it as `jsxFactory`.
@@ -107,6 +113,11 @@ task-specific progress, guesses, or sensitive values.
 ## Decisions and Gotchas
 
 - The package is marked private and uses ESM (`"type": "module"`).
+- Google login reads `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and the
+  optional `GOOGLE_REDIRECT_URI`; both credentials must be present together. The
+  default local callback is `http://localhost:3000/api/auth/google/callback`,
+  which must be registered exactly on the Google web OAuth client. Never expose
+  the client secret to browser code or tracked files.
 - Keep HTTP `deflate` zlib-wrapped: `node:zlib`'s `deflateSync` produces the
   interoperable content-coding, while `Bun.deflateSync` produces a raw stream.
 - Knip rule severities alone do not activate default-off issue types; keep its
