@@ -68,7 +68,9 @@ task-specific progress, guesses, or sensitive values.
   lockfile.
 - `src/server.ts` builds `src/client.tsx` and the Tailwind stylesheet in memory
   at startup, then serves them from `/app.js` and `/styles.css`; no generated
-  browser assets are written to disk.
+  browser assets are written to disk. It precompresses textual response bodies
+  once per handler and negotiates `zstd`, Brotli, gzip, or deflate from
+  `Accept-Encoding`, in that server-preference order.
 - `src/pages.tsx` contains server page markup, while `src/client.tsx` mounts the
   browser app. Shared route paths are defined in `src/routes.ts`.
 - `src/jsx.ts` is the framework-free classic JSX factory and renders its small
@@ -105,6 +107,8 @@ task-specific progress, guesses, or sensitive values.
 ## Decisions and Gotchas
 
 - The package is marked private and uses ESM (`"type": "module"`).
+- Keep HTTP `deflate` zlib-wrapped: `node:zlib`'s `deflateSync` produces the
+  interoperable content-coding, while `Bun.deflateSync` produces a raw stream.
 - Knip rule severities alone do not activate default-off issue types; keep its
   authoritative included-issue list complete so it can generate every error
   rule.

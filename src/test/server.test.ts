@@ -1,19 +1,68 @@
 import { describe, expect, test } from "bun:test";
+import {
+  brotliDecompressSync,
+  gunzipSync,
+  inflateSync,
+  zstdDecompressSync,
+} from "node:zlib";
 import { buildClientStylesheet, createRequestHandler } from "../server.ts";
 
+interface CompressionCase {
+  readonly decompress: (body: Uint8Array) => Uint8Array;
+  readonly encoding: string;
+}
+
+const compressionCases: readonly CompressionCase[] = [
+  { decompress: (body) => gunzipSync(body), encoding: "gzip" },
+  { decompress: (body) => inflateSync(body), encoding: "deflate" },
+  { decompress: (body) => brotliDecompressSync(body), encoding: "br" },
+  { decompress: (body) => zstdDecompressSync(body), encoding: "zstd" },
+];
 const clientJavaScript = 'document.querySelector("#app")?.replaceChildren();';
 const stylesheet = ".min-h-screen{min-height:100vh}";
 const handleRequest = createRequestHandler(clientJavaScript, stylesheet);
 
+function expectCompressionHeaders(
+  response: Response,
+  encoding: string | null,
+): void {
+  expect(response.headers.get("content-encoding")).toBe(encoding);
+  expect(response.headers.get("vary")).toBe("Accept-Encoding");
+}
+
 function expectStylesheetLink(body: string): void {
   expect(body).toContain('href="/styles.css" rel="stylesheet"');
+}
+
+async function expectUnencodedResponse(
+  response: Response,
+  status: number,
+  body: string,
+): Promise<void> {
+  expect(response.status).toBe(status);
+  expectCompressionHeaders(response, null);
+  expect(await response.text()).toBe(body);
+}
+
+function sendRequest(path: string, acceptEncoding?: string): Response {
+  const headers = new Headers();
+
+  if (acceptEncoding !== undefined) {
+    headers.set("accept-encoding", acceptEncoding);
+  }
+
+  return handleRequest(
+    new Request(`http://localhost${path}`, {
+      headers,
+    }),
+  );
 }
 
 async function request(path: string): Promise<{
   readonly body: string;
   readonly response: Response;
 }> {
-  const response = handleRequest(new Request(`http://localhost${path}`));
+  const response = sendRequest(path);
 
   return { body: await response.text(), response };
 }
@@ -59,6 +108,7 @@ describe("page server", () => {
     expect(response.headers.get("content-type")).toBe(
       "text/css; charset=utf-8",
     );
+    expectCompressionHeaders(response, null);
     expect(body).toBe(stylesheet);
   });
 
@@ -67,6 +117,47 @@ describe("page server", () => {
 
     expect(response.status).toBe(404);
     expect(body).toBe("Not found");
+  });
+});
+
+describe("response compression", () => {
+  for (const { decompress, encoding } of compressionCases) {
+    test(`serves ${encoding}-compressed responses`, async () => {
+      const response = sendRequest("/styles.css", encoding);
+      const compressedBody = new Uint8Array(await response.arrayBuffer());
+
+      expectCompressionHeaders(response, encoding);
+      expect(new TextDecoder().decode(decompress(compressedBody))).toBe(
+        stylesheet,
+      );
+    });
+  }
+
+  test("prefers zstd when the client accepts every supported encoding", () => {
+    const response = sendRequest("/styles.css", "gzip, deflate, br, zstd");
+
+    expectCompressionHeaders(response, "zstd");
+  });
+
+  test("honors client encoding quality preferences", () => {
+    const response = sendRequest(
+      "/styles.css",
+      "gzip;q=1, deflate;q=0.8, br;q=0.5, zstd;q=0.2",
+    );
+
+    expectCompressionHeaders(response, "gzip");
+  });
+
+  test("uses identity when the client prefers it", async () => {
+    const response = sendRequest("/styles.css", "gzip;q=0.5, identity;q=1");
+
+    await expectUnencodedResponse(response, 200, stylesheet);
+  });
+
+  test("returns not acceptable when the client rejects every representation", async () => {
+    const response = sendRequest("/styles.css", "identity;q=0, *;q=0");
+
+    await expectUnencodedResponse(response, 406, "");
   });
 });
 
