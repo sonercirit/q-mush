@@ -4,15 +4,19 @@ import * as fileSystem from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDatabase } from "../../src/database.ts";
-import { sessions, users } from "../../src/database/schema.ts";
+import {
+  providerCredentials,
+  sessions,
+  users,
+} from "../../src/database/schema.ts";
 import { SYSTEM_ID } from "../../src/ids.ts";
 
 const ROOT_DIRECTORY = join(import.meta.dir, "../..");
-const INITIAL_MIGRATION_PATH = join(
-  ROOT_DIRECTORY,
-  "drizzle/0000_whole_paibok.sql",
-);
-const INITIAL_MIGRATION_TIMESTAMP = 1_784_476_796_446;
+const MIGRATIONS = [
+  { file: "0000_whole_paibok.sql", timestamp: 1_784_476_796_446 },
+  { file: "0001_audited-identifiers.sql", timestamp: 1_784_478_537_706 },
+  { file: "0002_swift_micromacro.sql", timestamp: 1_784_484_507_050 },
+] as const;
 const SESSION_LIFETIME_MILLISECONDS = 7 * 24 * 60 * 60 * 1000;
 const UUID_V7_PATTERN =
   /^[\da-f]{8}-[\da-f]{4}-7[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/u;
@@ -45,8 +49,13 @@ async function runMigrationCommand(databasePath: string): Promise<void> {
   expect(exitCode).toBe(0);
 }
 
-async function applyInitialMigration(database: Database): Promise<void> {
-  const migration = await Bun.file(INITIAL_MIGRATION_PATH).text();
+async function applyMigrationFile(
+  database: Database,
+  file: string,
+): Promise<void> {
+  const migration = await Bun.file(
+    join(ROOT_DIRECTORY, "drizzle", file),
+  ).text();
 
   for (const statement of migration.split("--> statement-breakpoint")) {
     const sql = statement.trim();
@@ -55,7 +64,12 @@ async function applyInitialMigration(database: Database): Promise<void> {
       database.run(sql);
     }
   }
+}
 
+function createMigrationJournal(
+  database: Database,
+  migrations: readonly { readonly file: string; readonly timestamp: number }[],
+): void {
   database.run(`
     CREATE TABLE __drizzle_migrations (
       id SERIAL PRIMARY KEY,
@@ -63,10 +77,19 @@ async function applyInitialMigration(database: Database): Promise<void> {
       created_at numeric
     )
   `);
-  database.run(
-    "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)",
-    ["initial", INITIAL_MIGRATION_TIMESTAMP],
-  );
+
+  for (const migration of migrations) {
+    database.run(
+      "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)",
+      [migration.file, migration.timestamp],
+    );
+  }
+}
+
+async function applyInitialMigration(database: Database): Promise<void> {
+  const initialMigration = MIGRATIONS[0];
+  await applyMigrationFile(database, initialMigration.file);
+  createMigrationJournal(database, [initialMigration]);
 }
 
 test("database migration command applies pending migrations", async () => {
@@ -87,6 +110,84 @@ test("database migration command applies pending migrations", async () => {
 
   expect(tables).toContain("sessions");
   expect(tables).toContain("users");
+});
+
+test("OpenAI migration preserves existing OpenRouter credentials", async () => {
+  temporaryDirectory = fileSystem.mkdtempSync(
+    join(tmpdir(), "q-mush-provider-upgrade-test-"),
+  );
+  const databasePath = join(temporaryDirectory, "openrouter.sqlite");
+  const legacyDatabase = new Database(databasePath, { create: true });
+
+  for (const migration of MIGRATIONS) {
+    await applyMigrationFile(legacyDatabase, migration.file);
+  }
+  createMigrationJournal(legacyDatabase, MIGRATIONS);
+
+  const timestamp = 1_700_000_000_000;
+  const userId = "018bcfe5-6800-7000-8000-000000000071";
+  const credentialId = "018bcfe5-6800-7000-8000-000000000072";
+  legacyDatabase.run(
+    `INSERT INTO users (
+      id, google_subject, email, name, created_at, created_by_id,
+      updated_at, updated_by_id, is_deleted
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      userId,
+      "provider-migration-google-subject",
+      "provider-migration@example.com",
+      "Provider Migration",
+      timestamp,
+      SYSTEM_ID,
+      timestamp,
+      SYSTEM_ID,
+      false,
+    ],
+  );
+  legacyDatabase.run(
+    `INSERT INTO openrouter_credentials (
+      id, user_id, created_at, created_by_id, updated_at, updated_by_id,
+      is_deleted, openrouter_user_id, label, source, encrypted_api_key,
+      api_key_fingerprint
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      credentialId,
+      userId,
+      timestamp,
+      userId,
+      timestamp,
+      userId,
+      false,
+      "openrouter-account",
+      "Migrated key",
+      "api_key",
+      "encrypted-openrouter-key",
+      "openrouter-key-fingerprint",
+    ],
+  );
+  legacyDatabase.close();
+
+  await runMigrationCommand(databasePath);
+
+  const migratedDatabase = createDatabase(databasePath);
+  expect(migratedDatabase.select().from(providerCredentials).all()).toEqual([
+    {
+      createdAt: new Date(timestamp),
+      createdById: userId,
+      credentialFingerprint: "openrouter-key-fingerprint",
+      encryptedCredential: "encrypted-openrouter-key",
+      id: credentialId,
+      isDeleted: false,
+      label: "Migrated key",
+      provider: "openrouter",
+      providerAccountId: "openrouter-account",
+      source: "api_key",
+      updatedAt: new Date(timestamp),
+      updatedById: userId,
+      userId,
+    },
+  ]);
+  migratedDatabase.$client.close();
 });
 
 test("migration preserves records created by the initial schema", async () => {

@@ -33,26 +33,29 @@ function userIdColumn() {
     .references(() => users.id, { onDelete: "restrict" });
 }
 
-export const openRouterCredentials = sqliteTable(
-  "openrouter_credentials",
+export const providerCredentials = sqliteTable(
+  "provider_credentials",
   {
     id: text("id").primaryKey(),
     userId: userIdColumn(),
     ...auditColumns(),
-    openRouterUserId: text("openrouter_user_id"),
+    provider: text("provider", { enum: ["openai", "openrouter"] }).notNull(),
+    providerAccountId: text("provider_account_id"),
     label: text("label").notNull(),
     source: text("source", { enum: ["oauth", "api_key"] }).notNull(),
-    encryptedApiKey: text("encrypted_api_key").notNull(),
-    apiKeyFingerprint: text("api_key_fingerprint").notNull(),
+    encryptedCredential: text("encrypted_credential").notNull(),
+    credentialFingerprint: text("credential_fingerprint").notNull(),
   },
   (table) => [
-    index("openrouter_credentials_user_deletion_index").on(
+    index("provider_credentials_user_provider_deletion_index").on(
       table.userId,
+      table.provider,
       table.isDeleted,
     ),
-    uniqueIndex("openrouter_credentials_user_fingerprint_unique").on(
+    uniqueIndex("provider_credentials_user_provider_fingerprint_unique").on(
       table.userId,
-      table.apiKeyFingerprint,
+      table.provider,
+      table.credentialFingerprint,
     ),
   ],
 );

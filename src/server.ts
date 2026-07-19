@@ -1,8 +1,10 @@
 import { fileURLToPath } from "node:url";
 import { brotliCompressSync, deflateSync } from "node:zlib";
 import type { GoogleAuth } from "./auth.ts";
+import type { OpenAiIntegration } from "./openai.ts";
 import type { OpenRouterIntegration } from "./openrouter.ts";
 import { renderAppPage, renderHomePage } from "./pages.tsx";
+import type { ProviderIntegration } from "./provider-integration.ts";
 import {
   API_BASE_PATH,
   APP_PATH,
@@ -12,6 +14,9 @@ import {
   AUTH_LOGOUT_PATH,
   AUTH_SESSION_PATH,
   HOME_PATH,
+  OPENAI_CREDENTIALS_PATH,
+  OPENAI_OAUTH_CALLBACK_PATH,
+  OPENAI_OAUTH_PATH,
   OPENROUTER_CREDENTIALS_PATH,
   OPENROUTER_OAUTH_CALLBACK_PATH,
   OPENROUTER_OAUTH_PATH,
@@ -153,10 +158,48 @@ function createTextResponse(
   });
 }
 
+interface ProviderRoutes {
+  readonly credentials: string;
+  readonly oauth: string;
+  readonly oauthCallback: string;
+}
+
+function routeProviderRequest(
+  pathname: string,
+  request: Request,
+  integration: ProviderIntegration,
+  routes: ProviderRoutes,
+): Promise<Response> | Response | undefined {
+  if (pathname === routes.oauth) {
+    return integration.begin(request);
+  }
+
+  if (pathname === routes.oauthCallback) {
+    return integration.complete(request);
+  }
+
+  if (pathname === routes.credentials) {
+    return integration.credentials(request);
+  }
+
+  const credentialPathPrefix = `${routes.credentials}/`;
+
+  if (pathname.startsWith(credentialPathPrefix)) {
+    const credentialId = pathname.slice(credentialPathPrefix.length);
+
+    if (credentialId.length > 0 && !credentialId.includes("/")) {
+      return integration.remove(request, credentialId);
+    }
+  }
+
+  return undefined;
+}
+
 export function createRequestHandler(
   clientJavaScript: string,
   stylesheet: string,
   googleAuth: GoogleAuth,
+  openAi: OpenAiIntegration,
   openRouter: OpenRouterIntegration,
 ): (request: Request) => Promise<Response> {
   const appPage = prepareBody(renderAppPage());
@@ -185,26 +228,29 @@ export function createRequestHandler(
         return googleAuth.session(request);
       }
 
-      if (pathname === OPENROUTER_OAUTH_PATH) {
-        return openRouter.begin(request);
+      const openAiResponse = routeProviderRequest(pathname, request, openAi, {
+        credentials: OPENAI_CREDENTIALS_PATH,
+        oauth: OPENAI_OAUTH_PATH,
+        oauthCallback: OPENAI_OAUTH_CALLBACK_PATH,
+      });
+
+      if (openAiResponse !== undefined) {
+        return openAiResponse;
       }
 
-      if (pathname === OPENROUTER_OAUTH_CALLBACK_PATH) {
-        return openRouter.complete(request);
-      }
+      const openRouterResponse = routeProviderRequest(
+        pathname,
+        request,
+        openRouter,
+        {
+          credentials: OPENROUTER_CREDENTIALS_PATH,
+          oauth: OPENROUTER_OAUTH_PATH,
+          oauthCallback: OPENROUTER_OAUTH_CALLBACK_PATH,
+        },
+      );
 
-      if (pathname === OPENROUTER_CREDENTIALS_PATH) {
-        return openRouter.credentials(request);
-      }
-
-      const credentialPathPrefix = `${OPENROUTER_CREDENTIALS_PATH}/`;
-
-      if (pathname.startsWith(credentialPathPrefix)) {
-        const credentialId = pathname.slice(credentialPathPrefix.length);
-
-        if (credentialId.length > 0 && !credentialId.includes("/")) {
-          return openRouter.remove(request, credentialId);
-        }
+      if (openRouterResponse !== undefined) {
+        return openRouterResponse;
       }
     }
 

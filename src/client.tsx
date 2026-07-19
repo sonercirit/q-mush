@@ -7,10 +7,12 @@ import { requestJson } from "./browser-http.ts";
 import { providerNotice } from "./client-notices.ts";
 import { createElement, mount, type JsxNode } from "./jsx.ts";
 import {
-  renderOpenRouterPanel,
-  type OpenRouterViewState,
-} from "./openrouter-client.tsx";
-import { OpenRouterController } from "./openrouter-controller.ts";
+  OPENAI_PANEL,
+  OPENROUTER_PANEL,
+  renderProviderPanel,
+  type ProviderViewState,
+} from "./provider-client.tsx";
+import { ProviderController } from "./provider-controller.ts";
 import {
   AUTH_GOOGLE_PATH,
   AUTH_LOGOUT_PATH,
@@ -66,14 +68,21 @@ function readAuthSession(value: unknown): AuthSession {
 function readNotices(): readonly string[] {
   const url = new URL(window.location.href);
   const authResult = url.searchParams.get("auth");
+  const openAiResult = url.searchParams.get("openai");
   const openRouterResult = url.searchParams.get("openrouter");
   const notices = [
     providerNotice("google", authResult),
+    providerNotice("openai", openAiResult),
     providerNotice("openrouter", openRouterResult),
   ].filter((notice) => notice !== undefined);
 
-  if (authResult !== null || openRouterResult !== null) {
+  if (
+    authResult !== null ||
+    openAiResult !== null ||
+    openRouterResult !== null
+  ) {
     url.searchParams.delete("auth");
+    url.searchParams.delete("openai");
     url.searchParams.delete("openrouter");
     window.history.replaceState(
       null,
@@ -246,7 +255,8 @@ function renderSignIn(googleLoginAvailable: boolean): JsxNode {
 function renderWorkspace(
   actionCount: number,
   logoutPending: boolean,
-  openRouterState: OpenRouterViewState,
+  openAiState: ProviderViewState,
+  openRouterState: ProviderViewState,
   user: AuthenticatedUser,
 ): JsxNode {
   return (
@@ -321,7 +331,8 @@ function renderWorkspace(
           </button>
         </aside>
       </div>
-      {renderOpenRouterPanel(openRouterState)}
+      {renderProviderPanel(OPENAI_PANEL, openAiState)}
+      {renderProviderPanel(OPENROUTER_PANEL, openRouterState)}
     </div>
   );
 }
@@ -331,7 +342,8 @@ function renderApp(
   loadFailed: boolean,
   logoutPending: boolean,
   notices: readonly string[],
-  openRouterState: OpenRouterViewState,
+  openAiState: ProviderViewState,
+  openRouterState: ProviderViewState,
   session: AuthSession | undefined,
 ): JsxNode {
   return (
@@ -381,6 +393,7 @@ function renderApp(
                 : renderWorkspace(
                     actionCount,
                     logoutPending,
+                    openAiState,
                     openRouterState,
                     session.user,
                   )}
@@ -414,21 +427,29 @@ let loadFailed = false;
 let logoutPending = false;
 let session: AuthSession | undefined;
 const notices = readNotices();
-const openRouter = new OpenRouterController(() => {
+const openAi = new ProviderController(OPENAI_PANEL, () => {
   updateApp(root);
 });
+const openRouter = new ProviderController(OPENROUTER_PANEL, () => {
+  updateApp(root);
+});
+const providerControllers = [openAi, openRouter] as const;
 
 async function loadSession(): Promise<void> {
   loadFailed = false;
   session = undefined;
-  openRouter.reset();
+  for (const controller of providerControllers) {
+    controller.reset();
+  }
   updateApp(root);
 
   try {
     session = readAuthSession(await requestJson(AUTH_SESSION_PATH));
 
     if (session.user !== null) {
-      await openRouter.load();
+      await Promise.all(
+        providerControllers.map((controller) => controller.load()),
+      );
     }
   } catch {
     loadFailed = true;
@@ -449,7 +470,9 @@ async function logout(): Promise<void> {
     }
 
     actionCount = 0;
-    openRouter.reset();
+    for (const controller of providerControllers) {
+      controller.reset();
+    }
     session = {
       googleLoginAvailable: session?.googleLoginAvailable ?? true,
       user: null,
@@ -470,12 +493,15 @@ function updateApp(container: Element): void {
       loadFailed,
       logoutPending,
       notices,
+      openAi.state,
       openRouter.state,
       session,
     ),
     container,
   );
-  openRouter.bind(container);
+  for (const controller of providerControllers) {
+    controller.bind(container);
+  }
 
   container
     .querySelector('[data-action="run-agent"]')

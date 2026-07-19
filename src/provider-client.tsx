@@ -1,24 +1,81 @@
 import { isRecord } from "./auth-model.ts";
 import { createElement, type JsxNode } from "./jsx.ts";
-import { OPENROUTER_OAUTH_PATH } from "./routes.ts";
+import {
+  OPENAI_CREDENTIALS_PATH,
+  OPENAI_OAUTH_PATH,
+  OPENROUTER_CREDENTIALS_PATH,
+  OPENROUTER_OAUTH_PATH,
+} from "./routes.ts";
 
-export interface OpenRouterCredential {
+type BrowserProviderId = "openai" | "openrouter";
+
+export interface ProviderCredential {
   readonly accountId: string | null;
   readonly id: string;
   readonly label: string;
   readonly source: "api_key" | "oauth";
 }
 
-export interface OpenRouterViewState {
-  readonly credentials: readonly OpenRouterCredential[] | undefined;
+export interface ProviderViewState {
+  readonly credentials: readonly ProviderCredential[] | undefined;
   readonly error: string | undefined;
   readonly removingId: string | undefined;
   readonly savePending: boolean;
 }
 
-function readCredential(value: unknown): OpenRouterCredential {
+export interface ProviderPanelConfiguration {
+  readonly accountIdUnavailable: string;
+  readonly connectLabel: string;
+  readonly credentialsPath: string;
+  readonly description: string;
+  readonly emptyMessage: string;
+  readonly id: BrowserProviderId;
+  readonly keyPlaceholder: string;
+  readonly name: string;
+  readonly oauthPath: string;
+  readonly removalHelp: string;
+}
+
+export const OPENAI_PANEL: ProviderPanelConfiguration = {
+  accountIdUnavailable: "OpenAI account ID unavailable",
+  connectLabel: "Connect OpenAI account",
+  credentialsPath: OPENAI_CREDENTIALS_PATH,
+  description:
+    "Connect multiple OpenAI accounts with OAuth or save multiple API keys. Credentials stay encrypted in the local database.",
+  emptyMessage:
+    "No OpenAI accounts or keys yet. Connect an account or add as many keys as you need.",
+  id: "openai",
+  keyPlaceholder: "sk-…",
+  name: "OpenAI",
+  oauthPath: OPENAI_OAUTH_PATH,
+  removalHelp:
+    "Removing a credential only removes the local copy. Revoke connected access in OpenAI if you no longer want it to exist there.",
+};
+
+export const OPENROUTER_PANEL: ProviderPanelConfiguration = {
+  accountIdUnavailable: "OpenRouter account ID unavailable",
+  connectLabel: "Connect OpenRouter account",
+  credentialsPath: OPENROUTER_CREDENTIALS_PATH,
+  description:
+    "Connect multiple OpenRouter accounts with OAuth or save multiple API keys. Credentials stay encrypted in the local database.",
+  emptyMessage:
+    "No OpenRouter accounts or keys yet. Connect an account or add as many keys as you need.",
+  id: "openrouter",
+  keyPlaceholder: "sk-or-v1-…",
+  name: "OpenRouter",
+  oauthPath: OPENROUTER_OAUTH_PATH,
+  removalHelp:
+    "Removing a credential only removes the local copy. Revoke OAuth-created keys from OpenRouter if you no longer want them to exist there.",
+};
+
+function readCredential(
+  value: unknown,
+  providerName: string,
+): ProviderCredential {
   if (!isRecord(value)) {
-    throw new Error("The server returned an invalid OpenRouter credential");
+    throw new Error(
+      `The server returned an invalid ${providerName} credential`,
+    );
   }
 
   const accountId = value["accountId"];
@@ -32,26 +89,32 @@ function readCredential(value: unknown): OpenRouterCredential {
     typeof label !== "string" ||
     (source !== "api_key" && source !== "oauth")
   ) {
-    throw new Error("The server returned an invalid OpenRouter credential");
+    throw new Error(
+      `The server returned an invalid ${providerName} credential`,
+    );
   }
 
   return { accountId, id, label, source };
 }
 
-export function readOpenRouterCredentials(
+export function readProviderCredentials(
   value: unknown,
-): readonly OpenRouterCredential[] {
+  providerName: string,
+): readonly ProviderCredential[] {
   if (!isRecord(value) || !Array.isArray(value["credentials"])) {
     throw new Error(
-      "The server returned an invalid OpenRouter credential list",
+      `The server returned an invalid ${providerName} credential list`,
     );
   }
 
-  return value["credentials"].map((credential) => readCredential(credential));
+  return value["credentials"].map((credential) =>
+    readCredential(credential, providerName),
+  );
 }
 
 function renderCredential(
-  credential: OpenRouterCredential,
+  configuration: ProviderPanelConfiguration,
+  credential: ProviderCredential,
   removingId: string | undefined,
 ): JsxNode {
   const removing = removingId === credential.id;
@@ -68,12 +131,12 @@ function renderCredential(
           </span>
         </div>
         <p className="mt-2 truncate text-sm text-slate-400">
-          {credential.accountId ?? "OpenRouter account ID unavailable"}
+          {credential.accountId ?? configuration.accountIdUnavailable}
         </p>
       </div>
       <button
         className="shrink-0 rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-rose-300/30 hover:text-rose-200 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
-        data-action="remove-openrouter-credential"
+        data-action="remove-provider-credential"
         data-credential-id={credential.id}
         disabled={removing}
         type="button"
@@ -84,11 +147,14 @@ function renderCredential(
   );
 }
 
-function renderCredentialList(state: OpenRouterViewState): JsxNode {
+function renderCredentialList(
+  configuration: ProviderPanelConfiguration,
+  state: ProviderViewState,
+): JsxNode {
   if (state.credentials === undefined) {
     return state.error === undefined ? (
       <p className="mt-6 text-sm text-slate-400" role="status">
-        Loading OpenRouter connections…
+        {`Loading ${configuration.name} connections…`}
       </p>
     ) : null;
   }
@@ -96,8 +162,7 @@ function renderCredentialList(state: OpenRouterViewState): JsxNode {
   if (state.credentials.length === 0) {
     return (
       <div className="mt-6 rounded-2xl border border-dashed border-white/15 p-6 text-sm leading-6 text-slate-400">
-        No OpenRouter accounts or keys yet. Connect an account or add as many
-        keys as you need.
+        {configuration.emptyMessage}
       </div>
     );
   }
@@ -105,58 +170,61 @@ function renderCredentialList(state: OpenRouterViewState): JsxNode {
   return (
     <ul className="mt-6 space-y-3">
       {state.credentials.map((credential) =>
-        renderCredential(credential, state.removingId),
+        renderCredential(configuration, credential, state.removingId),
       )}
     </ul>
   );
 }
 
-export function renderOpenRouterPanel(state: OpenRouterViewState): JsxNode {
+export function renderProviderPanel(
+  configuration: ProviderPanelConfiguration,
+  state: ProviderViewState,
+): JsxNode {
+  const titleId = `${configuration.id}-title`;
+  const inputId = `${configuration.id}-api-key`;
+
   return (
     <section
-      aria-labelledby="openrouter-title"
+      aria-labelledby={titleId}
       className="rounded-3xl border border-white/10 bg-white/[0.06] p-6 shadow-2xl shadow-emerald-950/30 backdrop-blur-xl sm:p-8"
+      data-provider-panel={configuration.id}
     >
       <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-sm font-medium text-cyan-300">Model access</p>
-          <h2
-            className="mt-2 text-2xl font-semibold text-white"
-            id="openrouter-title"
-          >
-            OpenRouter
+          <h2 className="mt-2 text-2xl font-semibold text-white" id={titleId}>
+            {configuration.name}
           </h2>
           <p className="mt-3 max-w-2xl leading-7 text-slate-400">
-            Connect multiple OpenRouter accounts with OAuth or save multiple API
-            keys. Credentials stay encrypted in the local database.
+            {configuration.description}
           </p>
         </div>
         <a
           className="inline-flex shrink-0 items-center justify-center rounded-2xl bg-cyan-300 px-5 py-3 font-semibold text-slate-950 transition hover:bg-cyan-200 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300"
-          href={OPENROUTER_OAUTH_PATH}
+          href={configuration.oauthPath}
         >
-          Connect OpenRouter account
+          {configuration.connectLabel}
         </a>
       </div>
 
       <form
         className="mt-7 grid gap-3 rounded-2xl border border-white/10 bg-slate-900/70 p-4 sm:grid-cols-[minmax(0,1fr)_auto]"
-        data-action="add-openrouter-key"
+        data-action="add-provider-key"
       >
         <div>
           <label
             className="text-sm font-medium text-slate-200"
-            htmlFor="openrouter-api-key"
+            htmlFor={inputId}
           >
-            OpenRouter API key
+            {`${configuration.name} API key`}
           </label>
           <input
             autocomplete="off"
             className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none"
             disabled={state.savePending}
-            id="openrouter-api-key"
+            id={inputId}
             name="apiKey"
-            placeholder="sk-or-v1-…"
+            placeholder={configuration.keyPlaceholder}
             required
             type="password"
           />
@@ -178,7 +246,7 @@ export function renderOpenRouterPanel(state: OpenRouterViewState): JsxNode {
           <p>{state.error}</p>
           <button
             className="shrink-0 font-semibold underline underline-offset-4"
-            data-action="retry-openrouter"
+            data-action="retry-provider"
             type="button"
           >
             Retry
@@ -186,10 +254,9 @@ export function renderOpenRouterPanel(state: OpenRouterViewState): JsxNode {
         </div>
       )}
 
-      {renderCredentialList(state)}
+      {renderCredentialList(configuration, state)}
       <p className="mt-5 text-xs leading-5 text-slate-500">
-        Removing a credential only removes the local copy. Revoke OAuth-created
-        keys from OpenRouter if you no longer want them to exist there.
+        {configuration.removalHelp}
       </p>
     </section>
   );

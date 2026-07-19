@@ -2,6 +2,7 @@ import { join } from "node:path";
 
 const CHARACTER_LIMIT = 20_000;
 const EXCLUDED_PATH = "bun.lock";
+const MIGRATIONS_PATH_PREFIX = "drizzle/";
 
 interface FileLengthViolation {
   readonly characterCount: number;
@@ -18,7 +19,7 @@ export async function findFileLengthViolations(
   const violations: FileLengthViolation[] = [];
 
   for (const path of paths) {
-    if (path === EXCLUDED_PATH) {
+    if (path === EXCLUDED_PATH || path.startsWith(MIGRATIONS_PATH_PREFIX)) {
       continue;
     }
 

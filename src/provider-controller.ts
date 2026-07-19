@@ -1,59 +1,48 @@
 import { HttpResponseError, request, requestJson } from "./browser-http.ts";
 import {
-  readOpenRouterCredentials,
-  type OpenRouterViewState,
-} from "./openrouter-client.tsx";
-import { OPENROUTER_CREDENTIALS_PATH } from "./routes.ts";
-
-const CONFIGURATION_ERROR =
-  "OpenRouter storage is not configured. Set OPENROUTER_CREDENTIAL_KEY on the local server and restart it.";
-const LOAD_ERROR =
-  "We could not load your OpenRouter credentials. Please try again.";
-const REMOVE_ERROR = "We could not remove that OpenRouter credential.";
-const SAVE_ERROR =
-  "We could not add that OpenRouter API key. Please try again.";
+  readProviderCredentials,
+  type ProviderPanelConfiguration,
+  type ProviderViewState,
+} from "./provider-client.tsx";
 
 type ChangeListener = () => void;
 type ErrorMessage = (status: number) => string;
-type StatePatch = Partial<OpenRouterViewState>;
+type StatePatch = Partial<ProviderViewState>;
 
-function loadError(status: number): string {
-  return status === 503 ? CONFIGURATION_ERROR : LOAD_ERROR;
-}
-
-function saveError(status: number): string {
-  if (status === 400) {
-    return "OpenRouter rejected that API key. Check it and try again.";
-  }
-
-  if (status === 409) {
-    return "That OpenRouter credential is already saved.";
-  }
-
-  return status === 503 ? CONFIGURATION_ERROR : SAVE_ERROR;
-}
-
-export class OpenRouterController {
+export class ProviderController {
+  readonly #configuration: ProviderPanelConfiguration;
   readonly #onChange: ChangeListener;
   #revision = 0;
-  #state: OpenRouterViewState = {
+  #state: ProviderViewState = {
     credentials: undefined,
     error: undefined,
     removingId: undefined,
     savePending: false,
   };
 
-  constructor(onChange: ChangeListener) {
+  constructor(
+    configuration: ProviderPanelConfiguration,
+    onChange: ChangeListener,
+  ) {
+    this.#configuration = configuration;
     this.#onChange = onChange;
   }
 
-  get state(): OpenRouterViewState {
+  get state(): ProviderViewState {
     return this.#state;
   }
 
   bind(container: Element): void {
-    const form = container.querySelector<HTMLFormElement>(
-      '[data-action="add-openrouter-key"]',
+    const panel = container.querySelector(
+      `[data-provider-panel="${this.#configuration.id}"]`,
+    );
+
+    if (panel === null) {
+      return;
+    }
+
+    const form = panel.querySelector<HTMLFormElement>(
+      '[data-action="add-provider-key"]',
     );
     form?.addEventListener("submit", (event) => {
       event.preventDefault();
@@ -64,8 +53,8 @@ export class OpenRouterController {
       }
     });
 
-    for (const button of container.querySelectorAll<HTMLButtonElement>(
-      '[data-action="remove-openrouter-credential"]',
+    for (const button of panel.querySelectorAll<HTMLButtonElement>(
+      '[data-action="remove-provider-credential"]',
     )) {
       button.addEventListener("click", () => {
         const credentialId = button.dataset["credentialId"];
@@ -76,8 +65,8 @@ export class OpenRouterController {
       });
     }
 
-    container
-      .querySelector('[data-action="retry-openrouter"]')
+    panel
+      .querySelector('[data-action="retry-provider"]')
       ?.addEventListener("click", () => {
         void this.load();
       });
@@ -88,8 +77,9 @@ export class OpenRouterController {
     this.#patch({ credentials: undefined, error: undefined });
 
     try {
-      const credentials = readOpenRouterCredentials(
-        await requestJson(OPENROUTER_CREDENTIALS_PATH),
+      const credentials = readProviderCredentials(
+        await requestJson(this.#configuration.credentialsPath),
+        this.#configuration.name,
       );
 
       if (revision === this.#revision) {
@@ -100,8 +90,8 @@ export class OpenRouterController {
         this.#patch({
           error:
             error instanceof HttpResponseError
-              ? loadError(error.status)
-              : LOAD_ERROR,
+              ? this.#loadError(error.status)
+              : this.#loadError(0),
         });
       }
     }
@@ -119,7 +109,7 @@ export class OpenRouterController {
 
   async #add(apiKey: string): Promise<void> {
     await this.#mutate(
-      OPENROUTER_CREDENTIALS_PATH,
+      this.#configuration.credentialsPath,
       {
         body: JSON.stringify({ apiKey }),
         headers: { "content-type": "application/json" },
@@ -127,8 +117,19 @@ export class OpenRouterController {
       },
       { savePending: true },
       { savePending: false },
-      saveError,
+      (status) => this.#saveError(status),
     );
+  }
+
+  #configurationError(): string {
+    const variable = `${this.#configuration.id.toUpperCase()}_CREDENTIAL_KEY`;
+    return `${this.#configuration.name} storage is not configured. Set ${variable} on the local server and restart it.`;
+  }
+
+  #loadError(status: number): string {
+    return status === 503
+      ? this.#configurationError()
+      : `We could not load your ${this.#configuration.name} credentials. Please try again.`;
   }
 
   async #mutate(
@@ -162,16 +163,30 @@ export class OpenRouterController {
 
   #remove(credentialId: string): Promise<void> {
     return this.#mutate(
-      `${OPENROUTER_CREDENTIALS_PATH}/${encodeURIComponent(credentialId)}`,
+      `${this.#configuration.credentialsPath}/${encodeURIComponent(credentialId)}`,
       { method: "DELETE" },
       { removingId: credentialId },
       { removingId: undefined },
-      () => REMOVE_ERROR,
+      () => `We could not remove that ${this.#configuration.name} credential.`,
     );
   }
 
-  #replace(state: OpenRouterViewState): void {
+  #replace(state: ProviderViewState): void {
     this.#state = state;
     this.#onChange();
+  }
+
+  #saveError(status: number): string {
+    if (status === 400) {
+      return `${this.#configuration.name} rejected that API key. Check it and try again.`;
+    }
+
+    if (status === 409) {
+      return `That ${this.#configuration.name} credential is already saved.`;
+    }
+
+    return status === 503
+      ? this.#configurationError()
+      : `We could not add that ${this.#configuration.name} API key. Please try again.`;
   }
 }

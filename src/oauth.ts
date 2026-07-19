@@ -44,6 +44,8 @@ export interface FlowCookies {
   readonly verifier: string;
 }
 
+export type JsonRecord = Readonly<Record<string, unknown>>;
+
 export interface StartedPkceFlow {
   readonly challenge: string;
   readonly cookies: readonly string[];
@@ -82,6 +84,25 @@ export function createFlowCookie(
   return createCookie(name, value, FLOW_LIFETIME_SECONDS, path, secure);
 }
 
+export function createPkceAuthorizationUrl(
+  url: string,
+  parameters: URLSearchParams,
+  challenge: string,
+): URL {
+  addPkceChallenge(parameters, challenge);
+  const authorizationUrl = new URL(url);
+  authorizationUrl.search = parameters.toString();
+  return authorizationUrl;
+}
+
+function addPkceChallenge(
+  parameters: URLSearchParams,
+  challenge: string,
+): void {
+  parameters.set("code_challenge", challenge);
+  parameters.set("code_challenge_method", "S256");
+}
+
 export function clearPkceCookies(
   names: FlowCookies,
   secure: boolean,
@@ -113,10 +134,27 @@ export function normalizeOptionalValue(
     : normalized;
 }
 
+export async function postFormJson(
+  runtime: OAuthRuntime,
+  url: string,
+  parameters: Readonly<Record<string, string>>,
+  errorMessage: string,
+): Promise<JsonRecord> {
+  const response = await runtime.fetch(url, {
+    body: new URLSearchParams(parameters),
+    headers: {
+      accept: "application/json",
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    method: "POST",
+  });
+  return readJsonRecord(response, errorMessage);
+}
+
 export async function readJsonRecord(
   response: Response,
   errorMessage: string,
-): Promise<Readonly<Record<string, unknown>>> {
+): Promise<JsonRecord> {
   if (!response.ok) {
     throw new Error(errorMessage);
   }
@@ -216,7 +254,20 @@ export function resolveRedirectUri(
   return configuredUri ?? new URL(callbackPath, request.url).toString();
 }
 
-export function startPkceFlow(
+export function startPkceFlowForRedirect(
+  runtime: OAuthRuntime,
+  names: FlowCookies,
+  redirectUri: string,
+): StartedPkceFlow & { readonly secure: boolean } {
+  const secure = usesSecureCookies(redirectUri);
+  return { ...startPkceFlow(runtime, names, secure), secure };
+}
+
+export function usesSecureCookies(redirectUri: string): boolean {
+  return new URL(redirectUri).protocol === "https:";
+}
+
+function startPkceFlow(
   runtime: OAuthRuntime,
   names: FlowCookies,
   secure: boolean,

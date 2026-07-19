@@ -13,12 +13,14 @@ import {
   createOAuthRuntime,
   generateOAuthToken,
   normalizeOptionalValue,
+  postFormJson,
   readJsonRecord,
   readOAuthCallback,
   readProviderString,
   redirectToApp,
   resolveRedirectUri,
-  startPkceFlow,
+  startPkceFlowForRedirect,
+  usesSecureCookies,
   validateRedirectUri,
   type FlowCookies,
   type OAuthDependencies,
@@ -157,8 +159,11 @@ class GoogleAuthentication implements GoogleAuth {
     }
 
     const redirectUri = this.#redirectUri(request);
-    const secure = new URL(redirectUri).protocol === "https:";
-    const flow = startPkceFlow(this.#runtime, GOOGLE_FLOW_COOKIES, secure);
+    const flow = startPkceFlowForRedirect(
+      this.#runtime,
+      GOOGLE_FLOW_COOKIES,
+      redirectUri,
+    );
     const authorizationUrl = new URL(GOOGLE_AUTHORIZATION_URL);
     authorizationUrl.search = new URLSearchParams({
       client_id: this.#configuration.clientId,
@@ -280,24 +285,17 @@ class GoogleAuthentication implements GoogleAuth {
     redirectUri: string,
     configuration: GoogleAuthConfiguration,
   ): Promise<GoogleUserProfile> {
-    const tokenResponse = await this.#runtime.fetch(GOOGLE_TOKEN_URL, {
-      body: new URLSearchParams({
+    const tokenValue = await postFormJson(
+      this.#runtime,
+      GOOGLE_TOKEN_URL,
+      {
         client_id: configuration.clientId,
         client_secret: configuration.clientSecret,
         code,
         code_verifier: verifier,
         grant_type: "authorization_code",
         redirect_uri: redirectUri,
-      }),
-      headers: {
-        accept: "application/json",
-        "content-type": "application/x-www-form-urlencoded",
       },
-      method: "POST",
-    });
-
-    const tokenValue = await readJsonRecord(
-      tokenResponse,
       "Google rejected the authorization code",
     );
     const accessToken = readProviderString(
@@ -335,7 +333,7 @@ class GoogleAuthentication implements GoogleAuth {
   }
 
   #usesSecureCookies(request: Request): boolean {
-    return new URL(this.#redirectUri(request)).protocol === "https:";
+    return usesSecureCookies(this.#redirectUri(request));
   }
 }
 

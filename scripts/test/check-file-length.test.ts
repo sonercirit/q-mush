@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -41,15 +41,23 @@ describe("file length check", () => {
     });
   });
 
-  test("excludes bun.lock", async () => {
+  test("excludes bun.lock and the Drizzle migrations directory", async () => {
     await withTemporaryDirectory(async (directory) => {
-      await writeFile(join(directory, "bun.lock"), "x".repeat(20_000));
-
-      const violations = await findFileLengthViolations(directory, [
+      await mkdir(join(directory, "drizzle", "meta"), { recursive: true });
+      const excludedPaths = [
         "bun.lock",
-      ]);
+        "drizzle/0001_migration.sql",
+        "drizzle/meta/snapshot.json",
+      ];
+      await Promise.all(
+        excludedPaths.map((path) =>
+          writeFile(join(directory, path), "x".repeat(20_000)),
+        ),
+      );
 
-      expect(violations).toEqual([]);
+      expect(await findFileLengthViolations(directory, excludedPaths)).toEqual(
+        [],
+      );
     });
   });
 });

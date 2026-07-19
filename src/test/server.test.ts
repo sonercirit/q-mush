@@ -6,6 +6,7 @@ import {
   zstdDecompressSync,
 } from "node:zlib";
 import { createGoogleAuthFromEnvironment } from "../auth.ts";
+import { createOpenAiIntegrationFromEnvironment } from "../openai.ts";
 import { createOpenRouterIntegrationFromEnvironment } from "../openrouter.ts";
 import {
   API_BASE_PATH,
@@ -13,6 +14,9 @@ import {
   AUTH_GOOGLE_PATH,
   AUTH_LOGOUT_PATH,
   AUTH_SESSION_PATH,
+  OPENAI_CREDENTIALS_PATH,
+  OPENAI_OAUTH_CALLBACK_PATH,
+  OPENAI_OAUTH_PATH,
   OPENROUTER_CREDENTIALS_PATH,
   OPENROUTER_OAUTH_CALLBACK_PATH,
   OPENROUTER_OAUTH_PATH,
@@ -41,6 +45,7 @@ const handleRequest = createRequestHandler(
   clientJavaScript,
   stylesheet,
   googleAuth,
+  createOpenAiIntegrationFromEnvironment({}, googleAuth),
   createOpenRouterIntegrationFromEnvironment({}, googleAuth),
 );
 
@@ -101,6 +106,9 @@ describe("routes", () => {
     expect(AUTH_GOOGLE_CALLBACK_PATH).toBe("/api/auth/google/callback");
     expect(AUTH_LOGOUT_PATH).toBe("/api/auth/logout");
     expect(AUTH_SESSION_PATH).toBe("/api/auth/session");
+    expect(OPENAI_CREDENTIALS_PATH).toBe("/api/openai/credentials");
+    expect(OPENAI_OAUTH_PATH).toBe("/api/openai/oauth");
+    expect(OPENAI_OAUTH_CALLBACK_PATH).toBe("/api/openai/oauth/callback");
     expect(OPENROUTER_CREDENTIALS_PATH).toBe("/api/openrouter/credentials");
     expect(OPENROUTER_OAUTH_PATH).toBe("/api/openrouter/oauth");
     expect(OPENROUTER_OAUTH_CALLBACK_PATH).toBe(
@@ -181,23 +189,39 @@ describe("page server", () => {
     expect(outsideApiResponse.status).toBe(404);
   });
 
-  test("routes protected OpenRouter requests", async () => {
-    const oauthResponse = await sendRequest(OPENROUTER_OAUTH_PATH);
-    const callbackResponse = await sendRequest(OPENROUTER_OAUTH_CALLBACK_PATH);
-    const credentialsResponse = await sendRequest(OPENROUTER_CREDENTIALS_PATH);
-    const removeResponse = await sendRequest(
-      `${OPENROUTER_CREDENTIALS_PATH}/credential-id`,
-      undefined,
-      "DELETE",
-    );
-    const outsideApiResponse = await sendRequest("/openrouter/oauth");
+  for (const provider of [
+    {
+      callbackPath: OPENAI_OAUTH_CALLBACK_PATH,
+      credentialsPath: OPENAI_CREDENTIALS_PATH,
+      name: "OpenAI",
+      oauthPath: OPENAI_OAUTH_PATH,
+      outsidePath: "/openai/oauth",
+    },
+    {
+      callbackPath: OPENROUTER_OAUTH_CALLBACK_PATH,
+      credentialsPath: OPENROUTER_CREDENTIALS_PATH,
+      name: "OpenRouter",
+      oauthPath: OPENROUTER_OAUTH_PATH,
+      outsidePath: "/openrouter/oauth",
+    },
+  ]) {
+    test(`routes protected ${provider.name} requests`, async () => {
+      const responses = await Promise.all([
+        sendRequest(provider.oauthPath),
+        sendRequest(provider.callbackPath),
+        sendRequest(provider.credentialsPath),
+        sendRequest(
+          `${provider.credentialsPath}/credential-id`,
+          undefined,
+          "DELETE",
+        ),
+      ]);
+      const outsideApiResponse = await sendRequest(provider.outsidePath);
 
-    expect(oauthResponse.status).toBe(401);
-    expect(callbackResponse.status).toBe(401);
-    expect(credentialsResponse.status).toBe(401);
-    expect(removeResponse.status).toBe(401);
-    expect(outsideApiResponse.status).toBe(404);
-  });
+      expect(responses.every(({ status }) => status === 401)).toBeTrue();
+      expect(outsideApiResponse.status).toBe(404);
+    });
+  }
 
   test("returns not found for unknown paths", async () => {
     const { body, response } = await request("/missing");
@@ -255,14 +279,16 @@ describe("response compression", () => {
 });
 
 describe("browser build", () => {
-  test("builds the login, session, and OpenRouter credential controls", async () => {
+  test("builds the login, session, and provider credential controls", async () => {
     const javaScript = await buildClientJavaScript();
 
     expect(javaScript).toContain("Continue with Google");
+    expect(javaScript).toContain("Connect OpenAI account");
     expect(javaScript).toContain("Connect OpenRouter account");
     expect(javaScript).toContain("Add API key");
     expect(javaScript).toContain("AUTH_GOOGLE_PATH");
     expect(javaScript).toContain("AUTH_LOGOUT_PATH");
+    expect(javaScript).toContain("OPENAI_CREDENTIALS_PATH");
     expect(javaScript).toContain("OPENROUTER_CREDENTIALS_PATH");
   });
 });

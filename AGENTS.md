@@ -92,15 +92,18 @@ task-specific progress, guesses, or sensitive values.
   `src/http.ts`. `src/client.tsx` reads `/api/auth/session`, gates the control
   center, and posts logout to `/api/auth/logout`. All API routes derive from the
   `/api` base path in `src/routes.ts`.
-- `src/openrouter.ts` manages authenticated OpenRouter PKCE connections and
-  validates manually supplied keys against `/api/v1/key`.
-  `src/openrouter-store.ts` persists any number of OAuth-created or manual
-  credentials per local user in `openrouter_credentials`; provider user IDs are
-  metadata rather than local identities. API keys are AES-256-GCM encrypted with
+- `src/openai.ts` and `src/openrouter.ts` manage authenticated provider PKCE
+  connections and validate manually supplied keys against OpenAI `/v1/me` and
+  OpenRouter `/api/v1/key`, respectively. OpenAI OAuth persists the access and
+  refresh token bundle with its expiry, while OpenRouter OAuth issues an API
+  key. `src/provider-credential-store.ts` persists any number of OAuth or manual
+  credentials per local user in `provider_credentials`; provider account IDs are
+  metadata rather than local identities. Secrets are AES-256-GCM encrypted with
   per-record authenticated context by `src/credential-cipher.ts`, and API
-  responses expose only labels, sources, and provider account IDs. The browser
-  manager is split between `src/openrouter-client.tsx` and
-  `src/openrouter-controller.ts`.
+  responses expose only labels, sources, and provider account IDs. Shared
+  endpoint/OAuth behavior lives in `src/provider-credentials.ts` and
+  `src/connected-account-oauth.ts`; the shared browser panel and controller live
+  in `src/provider-client.tsx` and `src/provider-controller.ts`.
 - `src/jsx.ts` is the framework-free classic JSX factory and renders its small
   element tree either to escaped HTML or browser DOM. TSX files must import
   `createElement`; `tsconfig.json` configures it as `jsxFactory`.
@@ -129,8 +132,8 @@ task-specific progress, guesses, or sensitive values.
 - `scripts/repository-check.ts` lists existing tracked and unignored files and
   calls the live APIs in `scripts/check-file-length.ts` and
   `scripts/test-location.ts`. It rejects files reaching 20,000 Unicode code
-  points (excluding `bun.lock`) and JavaScript/TypeScript test files outside a
-  directory named `test`.
+  points (excluding `bun.lock` and the generated `drizzle/` migration tree) and
+  JavaScript/TypeScript test files outside a directory named `test`.
 - Prettier wraps Markdown prose at its print width and uses
   `prettier-plugin-organize-imports` to sort, combine, and remove unused
   imports; generated/dependency output ignores come from `.gitignore`, while
@@ -151,14 +154,18 @@ task-specific progress, guesses, or sensitive values.
   migration and Drizzle metadata. `bun run db:migrate` applies migrations
   without starting the HTTP server. Drizzle Kit loads its config under Node, so
   shared config imports must not transitively import `bun:sqlite`.
-- OpenRouter storage requires `OPENROUTER_CREDENTIAL_KEY`, a 32-byte base64url
-  secret that must stay stable and outside Git; changing or losing it makes
-  stored keys unreadable. `OPENROUTER_REDIRECT_URI` is optional and must end in
-  `/api/openrouter/oauth/callback`; the request origin is the default. The OAuth
-  authorization URL needs no client credentials, embeds the CSRF state in its
-  callback URL, and exchanges the returned code for a user-controlled key.
-  Removing a credential soft-deletes its audit record and clears its encrypted
-  payload, but cannot revoke the provider-side key.
+- OpenAI and OpenRouter storage require their respective `OPENAI_CREDENTIAL_KEY`
+  and `OPENROUTER_CREDENTIAL_KEY` 32-byte base64url secrets; each must stay
+  stable and outside Git. Their optional redirect URIs must end in the matching
+  `/api/<provider>/oauth/callback` path. OpenAI uses the Codex public OAuth
+  client ID by default and starts a localhost-only callback server on its
+  registered `http://localhost:1455/auth/callback`; keep that port free.
+  `OPENAI_CLIENT_ID` overrides the client and disables the default loopback when
+  it differs, so that client must allow the configured or request-origin
+  callback. OpenRouter's OAuth authorization needs no client credentials and
+  exchanges a code for a user-controlled key. Removing any provider credential
+  soft-deletes its audit record and clears its encrypted payload, but cannot
+  revoke provider-side access.
 - `src/ids.ts` is the authoritative UUIDv7 generator and defines `SYSTEM` as the
   audit actor for system actions. User actions use the internal user UUID. Never
   issue hard deletes for application records: set `isDeleted`, `updatedAt`, and
