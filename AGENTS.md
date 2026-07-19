@@ -122,6 +122,9 @@ task-specific progress, guesses, or sensitive values.
   stylistic `typescript-eslint` presets; ESLint loads it through the `jiti`
   development dependency. It imports `.gitignore`, bans non-const type
   assertions, and enforces exhaustive switches and type-only imports.
+  Application source also rejects unsafe DOM HTML injection properties,
+  `dangerouslySetInnerHTML`, and direct HTML-like string or template bodies in
+  `Response`; TSX, tests, and fixtures are allowed.
 - `knip.config.ts` checks every issue type and entry exports;
   `knip.production.config.ts` limits the production graph to runtime source.
   `bun run knip` runs both production and comprehensive test/tooling passes, so
@@ -130,10 +133,11 @@ task-specific progress, guesses, or sensitive values.
   TSX format for cross-extension detection; clones of at least 20 tokens and one
   line fail the zero-percent threshold.
 - `scripts/repository-check.ts` lists existing tracked and unignored files and
-  calls the live APIs in `scripts/check-file-length.ts` and
-  `scripts/test-location.ts`. It rejects files reaching 20,000 Unicode code
-  points (excluding `bun.lock` and the generated `drizzle/` migration tree) and
-  JavaScript/TypeScript test files outside a directory named `test`.
+  calls the focused policy APIs under `scripts/`. It rejects files reaching
+  20,000 Unicode code points (excluding `bun.lock` and the generated `drizzle/`
+  migration tree), JavaScript/TypeScript test files outside a directory named
+  `test`, and `.htm`/`.html`/`.xhtml` application files outside directories
+  named `test` or `fixtures`.
 - Prettier wraps Markdown prose at its print width and uses
   `prettier-plugin-organize-imports` to sort, combine, and remove unused
   imports; generated/dependency output ignores come from `.gitignore`, while

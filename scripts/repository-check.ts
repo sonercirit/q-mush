@@ -4,6 +4,10 @@ import {
   formatFileLengthViolations,
 } from "./check-file-length.ts";
 import {
+  findRawHtmlFileViolations,
+  formatRawHtmlFileViolations,
+} from "./raw-html-files.ts";
+import {
   findTestLocationViolations,
   formatTestLocationViolations,
 } from "./test-location.ts";
@@ -51,11 +55,16 @@ async function run(): Promise<void> {
     rootDirectory,
     paths,
   );
+  const rawHtmlFileViolations = findRawHtmlFileViolations(paths);
   const testLocationViolations = findTestLocationViolations(paths);
   const messages: string[] = [];
 
   if (fileLengthViolations.length > 0) {
     messages.push(formatFileLengthViolations(fileLengthViolations));
+  }
+
+  if (rawHtmlFileViolations.length > 0) {
+    messages.push(formatRawHtmlFileViolations(rawHtmlFileViolations));
   }
 
   if (testLocationViolations.length > 0) {

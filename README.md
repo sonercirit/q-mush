@@ -124,9 +124,13 @@ The checks are also available separately as `bun run repository-check`,
 `bun run cpd`. The repository check requires every tracked or unignored file
 except `bun.lock` and files in the generated `drizzle/` migration tree to stay
 below 20,000 characters, and every JavaScript or TypeScript test file to be
-inside a directory named `test` at any depth. The CPD check rejects JavaScript
-or TypeScript clones of at least 20 tokens on one or more lines, including
-clones across source extensions. Run `bun run format` to format files,
+inside a directory named `test` at any depth. It also rejects application
+`.htm`, `.html`, and `.xhtml` files outside test and fixture directories. ESLint
+rejects direct HTML-like `Response` bodies and unsafe DOM HTML injection APIs in
+application source, while allowing TSX, tests, and fixtures. Both checks
+recommend TSX for application markup. The CPD check rejects JavaScript or
+TypeScript clones of at least 20 tokens on one or more lines, including clones
+across source extensions. Run `bun run format` to format files,
 `bun run lint:fix` to apply safe lint fixes, and `bun test` to run the tests.
 
 This project was created using `bun init` in bun v1.3.14. [Bun](https://bun.com)
