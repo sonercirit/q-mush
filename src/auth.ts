@@ -1,6 +1,9 @@
 import { Buffer } from "node:buffer";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { isRecord, type AuthenticatedUser } from "./auth-model.ts";
+import { DrizzleAuthStore, type GoogleUserProfile } from "./auth-store.ts";
+import { createDatabase, type AppDatabase } from "./database.ts";
+import { createUuidV7, type IdGenerator } from "./ids.ts";
 import {
   APP_PATH,
   AUTH_GOOGLE_CALLBACK_PATH,
@@ -18,11 +21,6 @@ const FLOW_LIFETIME_SECONDS = 10 * 60;
 const SESSION_LIFETIME_SECONDS = 7 * 24 * 60 * 60;
 const TOKEN_PATTERN = /^[A-Za-z\d_-]+$/u;
 
-interface StoredSession {
-  readonly expiresAt: number;
-  readonly user: AuthenticatedUser;
-}
-
 interface GoogleAuthConfiguration {
   readonly clientId: string;
   readonly clientSecret: string;
@@ -35,8 +33,10 @@ type ProviderFetch = (
 ) => Promise<Response>;
 
 interface GoogleAuthDependencies {
+  readonly database?: AppDatabase;
   readonly fetch?: ProviderFetch;
   readonly now?: () => number;
+  readonly randomId?: IdGenerator;
   readonly randomToken?: () => string;
 }
 
@@ -200,13 +200,13 @@ function readRequiredString(
   return value;
 }
 
-function readGoogleUser(value: unknown): AuthenticatedUser {
+function readGoogleUser(value: unknown): GoogleUserProfile {
   if (!isRecord(value)) {
     throw new Error("Google returned an invalid user profile");
   }
 
   const email = readRequiredString(value, "email");
-  const id = readRequiredString(value, "sub");
+  const googleSubject = readRequiredString(value, "sub");
 
   if (value["email_verified"] !== true) {
     throw new Error("Google did not verify the account email address");
@@ -220,10 +220,10 @@ function readGoogleUser(value: unknown): AuthenticatedUser {
   const providedPicture = value["picture"];
 
   if (typeof providedPicture === "string" && providedPicture.length > 0) {
-    return { email, id, name, picture: providedPicture };
+    return { email, googleSubject, name, picture: providedPicture };
   }
 
-  return { email, id, name };
+  return { email, googleSubject, name };
 }
 
 class GoogleAuthentication implements GoogleAuth {
@@ -231,7 +231,7 @@ class GoogleAuthentication implements GoogleAuth {
   readonly #now: () => number;
   readonly #providerFetch: ProviderFetch;
   readonly #randomToken: () => string;
-  readonly #sessions = new Map<string, StoredSession>();
+  readonly #store: DrizzleAuthStore;
 
   constructor(
     configuration: GoogleAuthConfiguration | undefined,
@@ -244,6 +244,10 @@ class GoogleAuthentication implements GoogleAuth {
     this.#now = dependencies.now ?? Date.now;
     this.#providerFetch = dependencies.fetch ?? globalThis.fetch;
     this.#randomToken = dependencies.randomToken ?? defaultRandomToken;
+    this.#store = new DrizzleAuthStore(
+      dependencies.database ?? createDatabase(":memory:"),
+      dependencies.randomId ?? createUuidV7,
+    );
   }
 
   begin(request: Request): Response {
@@ -339,19 +343,22 @@ class GoogleAuthentication implements GoogleAuth {
         this.#redirectUri(request),
         this.#configuration,
       );
-      const sessionId = this.#generateToken();
+      const sessionToken = this.#generateToken();
+      const now = this.#now();
 
-      this.#removeExpiredSessions();
-      this.#sessions.set(sessionId, {
-        expiresAt: this.#now() + SESSION_LIFETIME_SECONDS * 1000,
+      this.#store.expireSessions(now);
+      this.#store.createSession(
+        sessionToken,
         user,
-      });
+        now + SESSION_LIFETIME_SECONDS * 1000,
+        now,
+      );
 
       return this.#appRedirect(request, undefined, [
         ...clearedFlowCookies,
         createCookie(
           SESSION_COOKIE,
-          sessionId,
+          sessionToken,
           SESSION_LIFETIME_SECONDS,
           "/",
           secure,
@@ -367,10 +374,10 @@ class GoogleAuthentication implements GoogleAuth {
       return createMethodNotAllowedResponse("POST");
     }
 
-    const sessionId = readCookie(request, SESSION_COOKIE);
+    const sessionToken = readCookie(request, SESSION_COOKIE);
 
-    if (sessionId !== undefined) {
-      this.#sessions.delete(sessionId);
+    if (sessionToken !== undefined) {
+      this.#store.revokeSession(sessionToken, this.#now());
     }
 
     const headers = new Headers({ "cache-control": "no-store" });
@@ -390,16 +397,16 @@ class GoogleAuthentication implements GoogleAuth {
 
   session(request: Request): Response {
     if (request.method === "GET") {
-      this.#removeExpiredSessions();
+      const now = this.#now();
+      this.#store.expireSessions(now);
 
-      const sessionId = readCookie(request, SESSION_COOKIE);
-      const storedSession =
-        sessionId === undefined ? undefined : this.#sessions.get(sessionId);
+      const sessionToken = readCookie(request, SESSION_COOKIE);
+      const user =
+        sessionToken === undefined
+          ? null
+          : this.#store.readSessionUser(sessionToken, now);
 
-      return createSessionResponse(
-        this.#configuration !== undefined,
-        storedSession?.user ?? null,
-      );
+      return createSessionResponse(this.#configuration !== undefined, user);
     }
 
     return createMethodNotAllowedResponse("GET");
@@ -424,7 +431,7 @@ class GoogleAuthentication implements GoogleAuth {
     verifier: string,
     redirectUri: string,
     configuration: GoogleAuthConfiguration,
-  ): Promise<AuthenticatedUser> {
+  ): Promise<GoogleUserProfile> {
     const tokenResponse = await this.#providerFetch(GOOGLE_TOKEN_URL, {
       body: new URLSearchParams({
         client_id: configuration.clientId,
@@ -491,24 +498,14 @@ class GoogleAuthentication implements GoogleAuth {
     );
   }
 
-  #removeExpiredSessions(): void {
-    const now = this.#now();
-
-    for (const [sessionId, session] of this.#sessions) {
-      if (session.expiresAt <= now) {
-        this.#sessions.delete(sessionId);
-      }
-    }
-  }
-
   #usesSecureCookies(request: Request): boolean {
     return new URL(this.#redirectUri(request)).protocol === "https:";
   }
 }
 
 function createGoogleAuth(
-  configuration?: GoogleAuthConfiguration,
-  dependencies: GoogleAuthDependencies = {},
+  configuration: GoogleAuthConfiguration | undefined,
+  dependencies: GoogleAuthDependencies,
 ): GoogleAuth {
   return new GoogleAuthentication(configuration, dependencies);
 }

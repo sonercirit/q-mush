@@ -1,6 +1,12 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createGoogleAuthFromEnvironment, type GoogleAuth } from "../auth.ts";
+import { createDatabase, type AppDatabase } from "../database.ts";
+import { sessions, users } from "../database/schema.ts";
+import { SYSTEM_ID } from "../ids.ts";
 
 const CALLBACK_URL = "http://localhost:3000/api/auth/google/callback";
 const TEST_ENVIRONMENT = {
@@ -10,7 +16,51 @@ const TEST_ENVIRONMENT = {
 };
 const STATE = "test-state-token";
 const VERIFIER = "test-pkce-code-verifier";
-const SESSION_ID = "test-session-id";
+const SESSION_TOKEN = "test-session-token";
+const NOW = 1_700_000_000_000;
+const LOGOUT_NOW = NOW + 1000;
+const SESSION_EXPIRES_AT = NOW + 7 * 24 * 60 * 60 * 1000;
+const USER_ID = "018bcfe5-6800-7000-8000-000000000001";
+const SESSION_ID = "018bcfe5-6800-7000-8000-000000000002";
+const EXPECTED_USER = {
+  email: "mushroom@example.com",
+  id: USER_ID,
+  name: "Mush Room",
+  picture: "https://example.com/avatar.png",
+};
+const EXPECTED_STORED_USER = {
+  ...EXPECTED_USER,
+  createdAt: new Date(NOW),
+  createdById: SYSTEM_ID,
+  googleSubject: "google-user-1",
+  isDeleted: false,
+  updatedAt: new Date(NOW),
+  updatedById: SYSTEM_ID,
+};
+const EXPECTED_ACTIVE_SESSION = {
+  createdAt: new Date(NOW),
+  createdById: USER_ID,
+  expiresAt: new Date(SESSION_EXPIRES_AT),
+  id: SESSION_ID,
+  isDeleted: false,
+  token: SESSION_TOKEN,
+  updatedAt: new Date(NOW),
+  updatedById: USER_ID,
+  userId: USER_ID,
+};
+const temporaryDirectories: string[] = [];
+
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+function createTemporaryDatabasePath(): string {
+  const directory = mkdtempSync(join(tmpdir(), "q-mush-auth-test-"));
+  temporaryDirectories.push(directory);
+  return join(directory, "auth.sqlite");
+}
 
 function readSetCookie(response: Response, name: string): string {
   const cookie = response.headers
@@ -35,7 +85,7 @@ function readCookiePair(response: Response, name: string): string {
 }
 
 function createTokenGenerator(): () => string {
-  const tokens = [STATE, VERIFIER, SESSION_ID];
+  const tokens = [STATE, VERIFIER, SESSION_TOKEN];
 
   return () => {
     const token = tokens.shift();
@@ -45,6 +95,24 @@ function createTokenGenerator(): () => string {
     }
 
     return token;
+  };
+}
+
+function createIdGenerator(): (timestamp: number) => string {
+  const ids = [USER_ID, SESSION_ID];
+
+  return (timestamp) => {
+    if (timestamp !== NOW) {
+      throw new Error("The test received an unexpected ID timestamp");
+    }
+
+    const id = ids.shift();
+
+    if (id === undefined) {
+      throw new Error("The test ran out of deterministic IDs");
+    }
+
+    return id;
   };
 }
 
@@ -58,12 +126,18 @@ interface StartedFlow {
   readonly response: Response;
 }
 
-function createTestAuth(providerFetch?: ProviderFetch): GoogleAuth {
+function createTestAuth(
+  providerFetch?: ProviderFetch,
+  database: AppDatabase = createDatabase(":memory:"),
+  currentTime = NOW,
+): GoogleAuth {
+  const randomId = createIdGenerator();
   const randomToken = createTokenGenerator();
+  const now = (): number => currentTime;
   const dependencies =
     providerFetch === undefined
-      ? { randomToken }
-      : { fetch: providerFetch, randomToken };
+      ? { database, now, randomId, randomToken }
+      : { database, fetch: providerFetch, now, randomId, randomToken };
 
   return createGoogleAuthFromEnvironment(TEST_ENVIRONMENT, dependencies);
 }
@@ -177,7 +251,9 @@ describe("Google authentication", () => {
         new Response("Unexpected provider request", { status: 500 }),
       );
     };
-    const auth = createTestAuth(providerFetch);
+    const databasePath = createTemporaryDatabasePath();
+    const database = createDatabase(databasePath);
+    const auth = createTestAuth(providerFetch, database);
     const { cookies: flowCookies } = startFlow(auth);
     const callbackResponse = await auth.complete(
       createCallbackRequest(`code=google-code&state=${STATE}`, flowCookies),
@@ -218,34 +294,52 @@ describe("Google authentication", () => {
     );
 
     const sessionCookie = readCookiePair(callbackResponse, "q_mush_session");
-    const sessionResponse = auth.session(
+    database.$client.close();
+
+    const reloadedDatabase = createDatabase(databasePath);
+    const reloadedAuth = createTestAuth(
+      undefined,
+      reloadedDatabase,
+      LOGOUT_NOW,
+    );
+    const sessionResponse = reloadedAuth.session(
       createAuthenticatedRequest("/api/auth/session", sessionCookie),
     );
 
+    expect(reloadedDatabase.select().from(users).all()).toEqual([
+      EXPECTED_STORED_USER,
+    ]);
+    expect(reloadedDatabase.select().from(sessions).all()).toEqual([
+      EXPECTED_ACTIVE_SESSION,
+    ]);
     expect(sessionResponse.headers.get("cache-control")).toBe("no-store");
     expect(await sessionResponse.json()).toEqual({
       googleLoginAvailable: true,
-      user: {
-        email: "mushroom@example.com",
-        id: "google-user-1",
-        name: "Mush Room",
-        picture: "https://example.com/avatar.png",
-      },
+      user: EXPECTED_USER,
     });
 
-    const logoutResponse = auth.logout(
+    const logoutResponse = reloadedAuth.logout(
       createAuthenticatedRequest("/api/auth/logout", sessionCookie, "POST"),
     );
 
+    const remainingSessions = reloadedDatabase.select().from(sessions).all();
+    expect(remainingSessions).toEqual([
+      {
+        ...EXPECTED_ACTIVE_SESSION,
+        isDeleted: true,
+        updatedAt: new Date(LOGOUT_NOW),
+      },
+    ]);
     expect(logoutResponse.status).toBe(204);
     expect(readSetCookie(logoutResponse, "q_mush_session")).toContain(
       "Max-Age=0",
     );
     expect(
-      await auth
+      await reloadedAuth
         .session(createAuthenticatedRequest("/api/auth/session", sessionCookie))
         .json(),
     ).toEqual({ googleLoginAvailable: true, user: null });
+    reloadedDatabase.$client.close();
   });
 
   test("rejects a callback whose state does not match", async () => {

@@ -51,6 +51,8 @@ task-specific progress, guesses, or sensitive values.
 - Install dependencies: `bun install`
 - Run the application: `bun run src/index.ts`
 - Run the development server in watch mode: `bun run dev`
+- Generate a database migration after schema changes: `bun run db:generate`
+- Apply pending database migrations: `bun run db:migrate`
 - Run tests: `bun test`
 - Check repository constraints: `bun run repository-check`
 - Check formatting: `bun run format:check`
@@ -75,10 +77,17 @@ task-specific progress, guesses, or sensitive values.
   browser app. Shared route paths are defined in `src/routes.ts`.
 - `src/auth.ts` implements Google OpenID Connect with an authorization-code +
   PKCE flow. It uses HttpOnly state/verifier cookies, fetches the basic profile,
-  discards provider tokens, and keeps seven-day application sessions in memory.
-  `src/client.tsx` reads `/api/auth/session`, gates the control center, and
-  posts logout to `/api/auth/logout`. All API routes derive from the `/api` base
-  path in `src/routes.ts`.
+  and discards provider tokens. `src/auth-store.ts` uses Drizzle with Bun SQLite
+  to upsert users and persist seven-day sessions in the tables defined by
+  `src/database/schema.ts`. Application primary keys are UUIDv7 values; Google
+  subjects and session cookie tokens are separate unique fields. Every
+  application table has creation/update timestamps, actor IDs, and an
+  `isDeleted` soft-delete flag. `src/database.ts` applies committed `drizzle/`
+  migrations when opening a connection. `src/index.ts` injects the persistent
+  connection; the auth factory falls back to isolated in-memory SQLite when a
+  connection is not supplied. `src/client.tsx` reads `/api/auth/session`, gates
+  the control center, and posts logout to `/api/auth/logout`. All API routes
+  derive from the `/api` base path in `src/routes.ts`.
 - `src/jsx.ts` is the framework-free classic JSX factory and renders its small
   element tree either to escaped HTML or browser DOM. TSX files must import
   `createElement`; `tsconfig.json` configures it as `jsxFactory`.
@@ -87,7 +96,12 @@ task-specific progress, guesses, or sensitive values.
 - `bunfig.toml` requires package releases to be at least one week old before
   installation.
 - TypeScript is configured for strict, no-emit, bundler-style checking in
-  `tsconfig.json`, including unused and unreachable code diagnostics.
+  `tsconfig.json`, including unused and unreachable code diagnostics. Library
+  declaration checking is skipped because Drizzle publishes declarations for
+  optional cross-dialect integrations that do not pass this project's TypeScript
+  version; application source remains fully checked. Neither TypeScript 7.0.2
+  nor Drizzle ORM 1.0.0-rc.4 resolves these declaration errors, so re-enable
+  library checking only after verifying an upstream Drizzle fix.
 - `eslint.config.ts` uses ESLint flat config with type-aware strict and
   stylistic `typescript-eslint` presets; ESLint loads it through the `jiti`
   development dependency. It imports `.gitignore`, bans non-const type
@@ -107,8 +121,8 @@ task-specific progress, guesses, or sensitive values.
 - Prettier wraps Markdown prose at its print width and uses
   `prettier-plugin-organize-imports` to sort, combine, and remove unused
   imports; generated/dependency output ignores come from `.gitignore`, while
-  `bun.lock` is ignored separately and formatting is enforced by
-  `bun run check`.
+  `bun.lock` is ignored separately. Drizzle migrations and metadata are included
+  in formatting, which is enforced by `bun run check`.
 
 ## Decisions and Gotchas
 
@@ -118,6 +132,17 @@ task-specific progress, guesses, or sensitive values.
   default local callback is `http://localhost:3000/api/auth/google/callback`,
   which must be registered exactly on the Google web OAuth client. Never expose
   the client secret to browser code or tracked files.
+- `DATABASE_PATH` selects the local SQLite file and defaults to
+  `data/q-mush.sqlite`; the default `data/` directory is ignored. Change
+  `src/database/schema.ts`, run `bun run db:generate`, and commit the resulting
+  migration and Drizzle metadata. `bun run db:migrate` applies migrations
+  without starting the HTTP server. Drizzle Kit loads its config under Node, so
+  shared config imports must not transitively import `bun:sqlite`.
+- `src/ids.ts` is the authoritative UUIDv7 generator and defines `SYSTEM` as the
+  audit actor for system actions. User actions use the internal user UUID. Never
+  issue hard deletes for application records: set `isDeleted`, `updatedAt`, and
+  `updatedById`, and exclude soft-deleted rows from active queries. Audit actor
+  fields deliberately are not foreign keys because `SYSTEM` is not a user row.
 - Keep HTTP `deflate` zlib-wrapped: `node:zlib`'s `deflateSync` produces the
   interoperable content-coding, while `Bun.deflateSync` produces a raw stream.
 - Knip rule severities alone do not activate default-off issue types; keep its

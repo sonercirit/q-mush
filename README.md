@@ -8,8 +8,8 @@ To install dependencies:
 bun install
 ```
 
-To configure Google login, copy the environment template and fill in the web
-OAuth client credentials from Google Cloud:
+To configure local storage and Google login, copy the environment template and
+fill in the web OAuth client credentials from Google Cloud:
 
 ```bash
 cp .env.example .env.local
@@ -21,8 +21,10 @@ Register this exact authorized redirect URI on the Google OAuth client:
 http://localhost:3000/api/auth/google/callback
 ```
 
-Keep `.env.local` private; it is ignored by Git. Set `GOOGLE_REDIRECT_URI` to
-the deployed HTTPS callback URL when running on another origin.
+Keep `.env.local` private; it is ignored by Git. By default, local data is
+stored in `data/q-mush.sqlite`; set `DATABASE_PATH` to use another SQLite file.
+Set `GOOGLE_REDIRECT_URI` to the deployed HTTPS callback URL when running on
+another origin.
 
 To run:
 
@@ -50,12 +52,28 @@ startup, then exposes two pages and their assets:
 
 The login flow uses an authorization code, PKCE, and a short-lived state cookie.
 Only the basic Google profile and email scopes are requested. Google tokens are
-discarded after profile lookup; the resulting session is held in memory on the
-local server and is cleared by a server restart.
+discarded after profile lookup. Drizzle stores users and seven-day application
+sessions in the local SQLite database, so login sessions survive server
+restarts. Application primary keys use UUIDv7; Google subjects and cookie tokens
+remain separate external identifiers. Every application row carries creation,
+update, actor, and soft-deletion audit fields. Committed migrations in
+`drizzle/` are applied automatically at startup.
 
 Both pages use the small framework-free TSX runtime in `src/jsx.ts`; no frontend
 framework is installed. `src/styles.css` is the Tailwind source entry point, and
 no generated frontend assets are written to disk.
+
+Apply pending migrations without starting the server:
+
+```bash
+bun run db:migrate
+```
+
+After changing `src/database/schema.ts`, generate and review a migration:
+
+```bash
+bun run db:generate
+```
 
 To run all static checks:
 
