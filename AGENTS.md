@@ -63,6 +63,8 @@ task-specific progress, guesses, or sensitive values.
 - Lint: `bun run lint`
 - Apply safe lint fixes: `bun run lint:fix`
 - Run all static checks: `bun run check`
+- CI runs tests and static checks on every push through
+  `.github/workflows/checks.yml` using Bun 1.3.14 and a frozen lockfile.
 
 ## Architecture and Conventions
 
