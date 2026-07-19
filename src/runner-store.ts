@@ -1,0 +1,267 @@
+import { and, asc, eq, type SQL } from "drizzle-orm";
+import { createHash } from "node:crypto";
+import { softDeletedAuditFields, updatedAuditFields } from "./audit.ts";
+import type { AppDatabase } from "./database.ts";
+import { runners } from "./database/schema.ts";
+import { createUuidV7, type IdGenerator } from "./ids.ts";
+import {
+  createPendingRunnerSummary,
+  type RunnerStatus,
+  type RunnerSummary,
+} from "./runner-model.ts";
+
+const RUNNER_ONLINE_WINDOW_MILLISECONDS = 45_000;
+
+export interface RunnerMetadata {
+  readonly architecture: string;
+  readonly machineFingerprint: string;
+  readonly name: string;
+  readonly platform: string;
+}
+
+export type RunnerRegistrationResult =
+  | { readonly id: string; readonly status: "registered" }
+  | { readonly status: "runner_exists" | "token_already_used" }
+  | { readonly status: "unknown_token" };
+
+type StoredRunnerSummary = Pick<
+  typeof runners.$inferSelect,
+  | "architecture"
+  | "id"
+  | "lastSeenAt"
+  | "machineFingerprint"
+  | "name"
+  | "platform"
+>;
+
+interface RunnerStoreContext {
+  readonly database: AppDatabase;
+  readonly generateId: IdGenerator;
+}
+
+interface ActiveRunnerFilter {
+  readonly id?: string;
+  readonly tokenHash?: string;
+  readonly userId?: string;
+}
+
+function activeRunnerCondition(
+  filter: ActiveRunnerFilter = {},
+): SQL | undefined {
+  return and(
+    eq(runners.isDeleted, false),
+    filter.tokenHash === undefined
+      ? undefined
+      : eq(runners.tokenHash, filter.tokenHash),
+    filter.userId === undefined ? undefined : eq(runners.userId, filter.userId),
+    filter.id === undefined ? undefined : eq(runners.id, filter.id),
+  );
+}
+
+function hashToken(token: string): string {
+  return createHash("sha256").update(token).digest("base64url");
+}
+
+function summarizeRunner(
+  runner: StoredRunnerSummary,
+  now: number,
+): RunnerSummary {
+  const lastSeenAt = runner.lastSeenAt?.getTime() ?? null;
+  let status: RunnerStatus;
+
+  if (runner.machineFingerprint === null) {
+    status = "pending";
+  } else if (
+    lastSeenAt !== null &&
+    now - lastSeenAt <= RUNNER_ONLINE_WINDOW_MILLISECONDS
+  ) {
+    status = "online";
+  } else {
+    status = "offline";
+  }
+
+  return {
+    architecture: runner.architecture,
+    id: runner.id,
+    lastSeenAt,
+    name: runner.name,
+    platform: runner.platform,
+    status,
+  };
+}
+
+function runnerSummarySelection() {
+  return {
+    architecture: runners.architecture,
+    id: runners.id,
+    lastSeenAt: runners.lastSeenAt,
+    machineFingerprint: runners.machineFingerprint,
+    name: runners.name,
+    platform: runners.platform,
+  };
+}
+
+function runnerIdentitySelection() {
+  return {
+    id: runners.id,
+    machineFingerprint: runners.machineFingerprint,
+    userId: runners.userId,
+  };
+}
+
+export class RunnerStore {
+  readonly #context: RunnerStoreContext;
+
+  constructor(database: AppDatabase, generateId: IdGenerator = createUuidV7) {
+    this.#context = { database, generateId };
+  }
+
+  get #database(): AppDatabase {
+    return this.#context.database;
+  }
+
+  create(userId: string, token: string, now: number): RunnerSummary {
+    const id = this.#context.generateId(now);
+    const timestamp = new Date(now);
+
+    this.#database
+      .insert(runners)
+      .values({
+        createdAt: timestamp,
+        createdById: userId,
+        id,
+        isDeleted: false,
+        tokenHash: hashToken(token),
+        updatedAt: timestamp,
+        updatedById: userId,
+        userId,
+      })
+      .run();
+
+    return createPendingRunnerSummary(id);
+  }
+
+  hasActiveToken(token: string): boolean {
+    return this.#activeRunnerForToken(token) !== undefined;
+  }
+
+  heartbeat(token: string, now: number): boolean {
+    const stored = this.#activeRunnerForToken(token);
+
+    if (stored?.machineFingerprint == null) {
+      return false;
+    }
+
+    this.#markSeen(stored.id, stored.userId, now);
+    return true;
+  }
+
+  list(userId: string, now: number): readonly RunnerSummary[] {
+    return this.#database
+      .select(runnerSummarySelection())
+      .from(runners)
+      .where(activeRunnerCondition({ userId }))
+      .orderBy(asc(runners.createdAt), asc(runners.id))
+      .all()
+      .map((runner) => summarizeRunner(runner, now));
+  }
+
+  register(
+    token: string,
+    metadata: RunnerMetadata,
+    now: number,
+  ): RunnerRegistrationResult {
+    const tokenHash = hashToken(token);
+
+    return this.#database.transaction((transaction) => {
+      const stored = transaction
+        .select(runnerIdentitySelection())
+        .from(runners)
+        .where(activeRunnerCondition({ tokenHash }))
+        .get();
+
+      if (stored === undefined) {
+        return { status: "unknown_token" };
+      }
+
+      if (
+        stored.machineFingerprint !== null &&
+        stored.machineFingerprint !== metadata.machineFingerprint
+      ) {
+        return { status: "token_already_used" };
+      }
+
+      const computerRunner = transaction
+        .select({ id: runners.id, userId: runners.userId })
+        .from(runners)
+        .where(
+          and(
+            eq(runners.isDeleted, false),
+            eq(runners.machineFingerprint, metadata.machineFingerprint),
+          ),
+        )
+        .get();
+
+      let runnerId = stored.id;
+
+      if (computerRunner !== undefined && computerRunner.id !== stored.id) {
+        if (computerRunner.userId !== stored.userId) {
+          return { status: "runner_exists" };
+        }
+
+        transaction
+          .update(runners)
+          .set(softDeletedAuditFields(stored.userId, now))
+          .where(eq(runners.id, stored.id))
+          .run();
+        runnerId = computerRunner.id;
+      }
+
+      const timestamp = new Date(now);
+      transaction
+        .update(runners)
+        .set({
+          architecture: metadata.architecture,
+          lastSeenAt: timestamp,
+          machineFingerprint: metadata.machineFingerprint,
+          name: metadata.name,
+          platform: metadata.platform,
+          tokenHash,
+          ...updatedAuditFields(stored.userId, now),
+        })
+        .where(eq(runners.id, runnerId))
+        .run();
+
+      return { id: runnerId, status: "registered" };
+    });
+  }
+
+  remove(userId: string, runnerId: string, now: number): boolean {
+    const removed = this.#database
+      .update(runners)
+      .set(softDeletedAuditFields(userId, now))
+      .where(activeRunnerCondition({ id: runnerId, userId }))
+      .returning({ id: runners.id })
+      .all();
+    return removed.length > 0;
+  }
+
+  #markSeen(id: string, userId: string, now: number): void {
+    this.#database
+      .update(runners)
+      .set({
+        ...updatedAuditFields(userId, now),
+        lastSeenAt: new Date(now),
+      })
+      .where(eq(runners.id, id))
+      .run();
+  }
+
+  #activeRunnerForToken(token: string) {
+    return this.#database
+      .select(runnerIdentitySelection())
+      .from(runners)
+      .where(activeRunnerCondition({ tokenHash: hashToken(token) }))
+      .get();
+  }
+}

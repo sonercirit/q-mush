@@ -1,4 +1,5 @@
 import { isRecord } from "./auth-model.ts";
+import { renderRemovalButton, renderRetryError } from "./client-controls.tsx";
 import { createElement, type JsxNode } from "./jsx.ts";
 import {
   OPENAI_CREDENTIALS_PATH,
@@ -134,15 +135,12 @@ function renderCredential(
           {credential.accountId ?? configuration.accountIdUnavailable}
         </p>
       </div>
-      <button
-        className="shrink-0 rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-rose-300/30 hover:text-rose-200 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
-        data-action="remove-provider-credential"
-        data-credential-id={credential.id}
-        disabled={removing}
-        type="button"
-      >
-        {removing ? "Removing…" : "Remove"}
-      </button>
+      {renderRemovalButton({
+        action: "remove-provider-credential",
+        dataAttribute: "data-credential-id",
+        id: credential.id,
+        pending: removing,
+      })}
     </li>
   );
 }
@@ -238,21 +236,7 @@ export function renderProviderPanel(
         </button>
       </form>
 
-      {state.error === undefined ? null : (
-        <div
-          className="mt-5 flex flex-col gap-3 rounded-2xl border border-rose-300/20 bg-rose-300/10 p-4 text-sm text-rose-100 sm:flex-row sm:items-center sm:justify-between"
-          role="alert"
-        >
-          <p>{state.error}</p>
-          <button
-            className="shrink-0 font-semibold underline underline-offset-4"
-            data-action="retry-provider"
-            type="button"
-          >
-            Retry
-          </button>
-        </div>
-      )}
+      {renderRetryError(state.error, "retry-provider")}
 
       {renderCredentialList(configuration, state)}
       <p className="mt-5 text-xs leading-5 text-slate-500">

@@ -20,10 +20,17 @@ import {
   OPENROUTER_CREDENTIALS_PATH,
   OPENROUTER_OAUTH_CALLBACK_PATH,
   OPENROUTER_OAUTH_PATH,
+  RUNNER_HEARTBEAT_PATH,
+  RUNNER_INSTALLER_PATH,
+  RUNNER_REGISTER_PATH,
+  RUNNER_SCRIPT_PATH,
+  RUNNERS_PATH,
 } from "../routes.ts";
+import { createRunnerIntegration } from "../runners.ts";
 import {
   buildClientJavaScript,
   buildClientStylesheet,
+  buildRunnerJavaScript,
   createRequestHandler,
 } from "../server.ts";
 
@@ -39,6 +46,7 @@ const compressionCases: readonly CompressionCase[] = [
   { decompress: (body) => zstdDecompressSync(body), encoding: "zstd" },
 ];
 const clientJavaScript = 'document.querySelector("#app")?.replaceChildren();';
+const runnerJavaScript = 'console.log("runner");';
 const stylesheet = ".min-h-screen{min-height:100vh}";
 const googleAuth = createGoogleAuthFromEnvironment({});
 const handleRequest = createRequestHandler(
@@ -47,6 +55,8 @@ const handleRequest = createRequestHandler(
   googleAuth,
   createOpenAiIntegrationFromEnvironment({}, googleAuth),
   createOpenRouterIntegrationFromEnvironment({}, googleAuth),
+  createRunnerIntegration(googleAuth),
+  runnerJavaScript,
 );
 
 function expectCompressionHeaders(
@@ -99,6 +109,17 @@ async function request(path: string): Promise<{
   return { body: await response.text(), response };
 }
 
+async function expectAsset(
+  path: string,
+  contentType: string,
+  expectedBody: string,
+): Promise<Response> {
+  const { body, response } = await request(path);
+  expect(response.headers.get("content-type")).toBe(contentType);
+  expect(body).toBe(expectedBody);
+  return response;
+}
+
 describe("routes", () => {
   test("places every authentication endpoint beneath the API base path", () => {
     expect(API_BASE_PATH).toBe("/api");
@@ -114,6 +135,11 @@ describe("routes", () => {
     expect(OPENROUTER_OAUTH_CALLBACK_PATH).toBe(
       "/api/openrouter/oauth/callback",
     );
+    expect(RUNNERS_PATH).toBe("/api/runners");
+    expect(RUNNER_REGISTER_PATH).toBe("/api/runner/register");
+    expect(RUNNER_HEARTBEAT_PATH).toBe("/api/runner/heartbeat");
+    expect(RUNNER_INSTALLER_PATH).toBe("/runner/install.sh");
+    expect(RUNNER_SCRIPT_PATH).toBe("/runner.js");
   });
 });
 
@@ -144,22 +170,52 @@ describe("page server", () => {
   });
 
   test("serves the browser bundle", async () => {
-    const { body, response } = await request("/app.js");
-
-    expect(response.headers.get("content-type")).toBe(
+    await expectAsset(
+      "/app.js",
       "text/javascript; charset=utf-8",
+      clientJavaScript,
     );
-    expect(body).toBe(clientJavaScript);
   });
 
   test("serves the stylesheet", async () => {
-    const { body, response } = await request("/styles.css");
-
-    expect(response.headers.get("content-type")).toBe(
+    const response = await expectAsset(
+      "/styles.css",
       "text/css; charset=utf-8",
+      stylesheet,
     );
     expectCompressionHeaders(response, null);
-    expect(body).toBe(stylesheet);
+  });
+
+  test("serves the runner bundle", async () => {
+    await expectAsset(
+      RUNNER_SCRIPT_PATH,
+      "text/javascript; charset=utf-8",
+      runnerJavaScript,
+    );
+  });
+
+  test("protects user runner routes and exposes runner callbacks", async () => {
+    const collectionResponse = await sendRequest(RUNNERS_PATH);
+    const setupResponse = await sendRequest(RUNNERS_PATH, undefined, "POST");
+    const registrationResponse = await sendRequest(
+      RUNNER_REGISTER_PATH,
+      undefined,
+      "POST",
+    );
+    const heartbeatResponse = await sendRequest(
+      RUNNER_HEARTBEAT_PATH,
+      undefined,
+      "POST",
+    );
+    const installerResponse = await sendRequest(
+      `${RUNNER_INSTALLER_PATH}?token=qmr_unknown-token`,
+    );
+
+    expect(collectionResponse.status).toBe(401);
+    expect(setupResponse.status).toBe(401);
+    expect(registrationResponse.status).toBe(401);
+    expect(heartbeatResponse.status).toBe(401);
+    expect(installerResponse.status).toBe(404);
   });
 
   test("serves the authentication session endpoint", async () => {
@@ -286,10 +342,23 @@ describe("browser build", () => {
     expect(javaScript).toContain("Connect OpenAI account");
     expect(javaScript).toContain("Connect OpenRouter account");
     expect(javaScript).toContain("Add API key");
+    expect(javaScript).toContain("Set up a runner");
+    expect(javaScript).toContain("Download installer");
     expect(javaScript).toContain("AUTH_GOOGLE_PATH");
     expect(javaScript).toContain("AUTH_LOGOUT_PATH");
     expect(javaScript).toContain("OPENAI_CREDENTIALS_PATH");
     expect(javaScript).toContain("OPENROUTER_CREDENTIALS_PATH");
+    expect(javaScript).toContain("RUNNERS_PATH");
+  });
+});
+
+describe("runner build", () => {
+  test("builds the runner callback client", async () => {
+    const javaScript = await buildRunnerJavaScript();
+
+    expect(javaScript).toContain("RUNNER_REGISTER_PATH");
+    expect(javaScript).toContain("RUNNER_HEARTBEAT_PATH");
+    expect(javaScript).toContain("machineId");
   });
 });
 

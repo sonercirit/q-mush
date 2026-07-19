@@ -5,23 +5,31 @@ import type { OpenAiIntegration } from "./openai.ts";
 import type { OpenRouterIntegration } from "./openrouter.ts";
 import { renderAppPage, renderHomePage } from "./pages.tsx";
 import type { ProviderIntegration } from "./provider-integration.ts";
-import {
-  API_BASE_PATH,
-  APP_PATH,
-  APP_SCRIPT_PATH,
-  AUTH_GOOGLE_CALLBACK_PATH,
-  AUTH_GOOGLE_PATH,
-  AUTH_LOGOUT_PATH,
-  AUTH_SESSION_PATH,
-  HOME_PATH,
-  OPENAI_CREDENTIALS_PATH,
-  OPENAI_OAUTH_CALLBACK_PATH,
-  OPENAI_OAUTH_PATH,
-  OPENROUTER_CREDENTIALS_PATH,
-  OPENROUTER_OAUTH_CALLBACK_PATH,
-  OPENROUTER_OAUTH_PATH,
+import * as routePaths from "./routes.ts";
+import type { RunnerIntegration } from "./runners.ts";
+
+const {
   STYLESHEET_PATH,
-} from "./routes.ts";
+  RUNNERS_PATH,
+  RUNNER_SCRIPT_PATH,
+  RUNNER_REGISTER_PATH,
+  RUNNER_INSTALLER_PATH,
+  RUNNER_HEARTBEAT_PATH,
+  OPENROUTER_OAUTH_PATH,
+  OPENROUTER_OAUTH_CALLBACK_PATH,
+  OPENROUTER_CREDENTIALS_PATH,
+  OPENAI_OAUTH_PATH,
+  OPENAI_OAUTH_CALLBACK_PATH,
+  OPENAI_CREDENTIALS_PATH,
+  HOME_PATH,
+  AUTH_SESSION_PATH,
+  AUTH_LOGOUT_PATH,
+  AUTH_GOOGLE_PATH,
+  AUTH_GOOGLE_CALLBACK_PATH,
+  APP_SCRIPT_PATH,
+  APP_PATH,
+  API_BASE_PATH,
+} = routePaths;
 
 const CSS_HEADERS = { "content-type": "text/css; charset=utf-8" };
 const HTML_HEADERS = { "content-type": "text/html; charset=utf-8" };
@@ -201,10 +209,13 @@ export function createRequestHandler(
   googleAuth: GoogleAuth,
   openAi: OpenAiIntegration,
   openRouter: OpenRouterIntegration,
+  runners: RunnerIntegration,
+  runnerJavaScript: string,
 ): (request: Request) => Promise<Response> {
   const appPage = prepareBody(renderAppPage());
   const browserBundle = prepareBody(clientJavaScript);
   const homePage = prepareBody(renderHomePage());
+  const runnerBundle = prepareBody(runnerJavaScript);
   const notFound = prepareBody("Not found");
   const styles = prepareBody(stylesheet);
 
@@ -226,6 +237,28 @@ export function createRequestHandler(
 
       if (pathname === AUTH_SESSION_PATH) {
         return googleAuth.session(request);
+      }
+
+      if (pathname === RUNNER_REGISTER_PATH) {
+        return runners.register(request);
+      }
+
+      if (pathname === RUNNER_HEARTBEAT_PATH) {
+        return runners.heartbeat(request);
+      }
+
+      if (pathname === RUNNERS_PATH) {
+        return runners.collection(request);
+      }
+
+      const runnerPathPrefix = `${RUNNERS_PATH}/`;
+
+      if (pathname.startsWith(runnerPathPrefix)) {
+        const runnerId = pathname.slice(runnerPathPrefix.length);
+
+        if (runnerId.length > 0 && !runnerId.includes("/")) {
+          return runners.remove(request, runnerId);
+        }
       }
 
       const openAiResponse = routeProviderRequest(pathname, request, openAi, {
@@ -264,6 +297,14 @@ export function createRequestHandler(
 
     if (pathname === APP_SCRIPT_PATH) {
       return createTextResponse(request, browserBundle, JAVASCRIPT_HEADERS);
+    }
+
+    if (pathname === RUNNER_INSTALLER_PATH) {
+      return runners.installer(request);
+    }
+
+    if (pathname === RUNNER_SCRIPT_PATH) {
+      return createTextResponse(request, runnerBundle, JAVASCRIPT_HEADERS);
     }
 
     if (pathname === STYLESHEET_PATH) {
@@ -308,24 +349,36 @@ export async function buildClientStylesheet(): Promise<string> {
   return stylesheet;
 }
 
-export async function buildClientJavaScript(): Promise<string> {
+async function buildJavaScript(
+  entrypoint: string,
+  target: "browser" | "bun",
+  label: string,
+): Promise<string> {
   const result = await Bun.build({
-    entrypoints: [fileURLToPath(new URL("client.tsx", import.meta.url))],
+    entrypoints: [fileURLToPath(new URL(entrypoint, import.meta.url))],
     format: "esm",
     minify: Bun.env.NODE_ENV === "production",
-    target: "browser",
+    target,
   });
 
   if (!result.success) {
     const details = result.logs.map(({ message }) => message).join("\n");
-    throw new Error(`Could not build the browser app:\n${details}`);
+    throw new Error(`Could not build the ${label}:\n${details}`);
   }
 
   const output = result.outputs[0];
 
   if (output === undefined) {
-    throw new Error("The browser build did not produce JavaScript");
+    throw new Error(`The ${label} build did not produce JavaScript`);
   }
 
   return output.text();
+}
+
+export function buildClientJavaScript(): Promise<string> {
+  return buildJavaScript("client.tsx", "browser", "browser app");
+}
+
+export function buildRunnerJavaScript(): Promise<string> {
+  return buildJavaScript("runner-agent.ts", "bun", "runner");
 }

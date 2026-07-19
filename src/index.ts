@@ -8,15 +8,18 @@ import {
   usesOpenAiLoopbackCallback,
 } from "./openai.ts";
 import { createOpenRouterIntegrationFromEnvironment } from "./openrouter.ts";
+import { createRunnerIntegration } from "./runners.ts";
 import {
   buildClientJavaScript,
   buildClientStylesheet,
+  buildRunnerJavaScript,
   createRequestHandler,
 } from "./server.ts";
 
 const database = createDatabase(readDatabasePath(Bun.env));
-const [clientJavaScript, stylesheet] = await Promise.all([
+const [clientJavaScript, runnerJavaScript, stylesheet] = await Promise.all([
   buildClientJavaScript(),
+  buildRunnerJavaScript(),
   buildClientStylesheet(),
 ]);
 const googleAuth = createGoogleAuthFromEnvironment(Bun.env, { database });
@@ -28,6 +31,7 @@ const openRouter = createOpenRouterIntegrationFromEnvironment(
   googleAuth,
   { database },
 );
+const runners = createRunnerIntegration(googleAuth, { database });
 const server = Bun.serve({
   fetch: createRequestHandler(
     clientJavaScript,
@@ -35,6 +39,8 @@ const server = Bun.serve({
     googleAuth,
     openAi,
     openRouter,
+    runners,
+    runnerJavaScript,
   ),
 });
 

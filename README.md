@@ -57,13 +57,15 @@ To run the server in watch mode during development:
 bun run dev
 ```
 
-The server builds the browser entry and Tailwind stylesheet in memory at
-startup, then exposes two pages and their assets:
+The server builds the browser app, runner program, and Tailwind stylesheet in
+memory at startup, then exposes two pages and their assets:
 
 - `/` renders the homepage to HTML on the server.
 - `/app` serves an empty application shell, then `/app.js` renders the app in
   the browser.
 - `/styles.css` serves the stylesheet shared by both pages.
+- `/runner.js` serves the Bun runner program, while `/runner/install.sh` serves
+  token-scoped macOS and Linux installers.
 - `/api` is the base path for APIs. `/api/auth/google` starts Google OpenID
   Connect login and `/api/auth/google/callback` completes it.
 - `/api/auth/session` returns the local session, while `POST /api/auth/logout`
@@ -75,6 +77,25 @@ startup, then exposes two pages and their assets:
 - Authenticated users manage OpenRouter access through
   `/api/openrouter/credentials`. `/api/openrouter/oauth` connects an account and
   `/api/openrouter/oauth/callback` completes the flow.
+- Authenticated users list and create runner setups at `/api/runners` and remove
+  one at `/api/runners/:id`. Installed runners register through
+  `/api/runner/register` and maintain presence through `/api/runner/heartbeat`.
+
+After signing in, use **Set up a runner** in the control center. Run the shown
+one-liner on a macOS or Linux computer, or download and run the installer. The
+installer downloads Bun when needed, installs the runner under
+`~/.q-mush/runner` (override with `Q_MUSH_RUNNER_HOME`), and starts one
+background process. The setup command contains a private token that connects
+that computer to the signed-in user, so do not share it. To install on another
+computer, create another setup; users can add as many runners as needed.
+
+The install command uses the origin from which the control center was opened.
+For another computer to connect, open Q Mush through an address that computer
+can reach instead of `localhost`. A runner derives an opaque machine fingerprint
+and the database allows only one active runner for a computer. It reports its
+hostname, platform, architecture, and a heartbeat every 15 seconds; the control
+center refreshes presence without exposing its token. Removing a runner revokes
+its server-side registration, but it does not delete files from that computer.
 
 The Google login flow uses an authorization code, PKCE, and a short-lived state
 cookie. Only the basic Google profile and email scopes are requested. Google
@@ -90,12 +111,14 @@ payload and retains a soft-deleted audit row. It does not revoke provider-side
 access, so revoke the credential with its provider when it should no longer
 exist there.
 
-Drizzle stores users, seven-day application sessions, and provider credentials
-in local SQLite, so they survive server restarts. Application primary keys use
-UUIDv7; provider IDs, credential fingerprints, and cookie tokens remain separate
-external identifiers. Every application row carries creation, update, actor, and
-soft-deletion audit fields. Committed migrations in `drizzle/` are applied
-automatically at startup.
+Drizzle stores users, seven-day application sessions, provider credentials, and
+runner registrations in local SQLite, so they survive server restarts.
+Application primary keys use UUIDv7; provider IDs, credential fingerprints,
+runner token hashes, machine fingerprints, and cookie tokens remain separate
+external identifiers. Plaintext runner tokens appear only in setup artifacts and
+the installed computer's private config. Every application row carries creation,
+update, actor, and soft-deletion audit fields. Committed migrations in
+`drizzle/` are applied automatically at startup.
 
 Both pages use the small framework-free TSX runtime in `src/jsx.ts`; no frontend
 framework is installed. `src/styles.css` is the Tailwind source entry point, and

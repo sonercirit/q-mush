@@ -5,6 +5,8 @@ export default {
   ...knipConfig,
   entry: [
     "src/index.ts!",
+    "src/client.tsx!",
+    "src/runner-agent.ts!",
     "src/styles.css!",
     "scripts/migrate-database.ts!",
     "scripts/repository-check.ts!",

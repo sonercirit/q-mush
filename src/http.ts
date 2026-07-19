@@ -31,6 +31,40 @@ export function createJsonResponse(value: unknown, status = 200): Response {
   });
 }
 
+export function createApiError(error: string, status: number): Response {
+  return createJsonResponse({ error }, status);
+}
+
+export function createNoContentResponse(): Response {
+  return new Response(null, {
+    headers: { "cache-control": "no-store" },
+    status: 204,
+  });
+}
+
+type JsonRequestResult =
+  { readonly ok: false } | { readonly ok: true; readonly value: unknown };
+
+export async function readJsonRequest(
+  request: Request,
+): Promise<JsonRequestResult> {
+  if (
+    request.headers
+      .get("content-type")
+      ?.toLowerCase()
+      .startsWith("application/json") !== true
+  ) {
+    return { ok: false };
+  }
+
+  try {
+    const value: unknown = await request.json();
+    return { ok: true, value };
+  } catch {
+    return { ok: false };
+  }
+}
+
 export function createMethodNotAllowedResponse(
   allowedMethod: string,
 ): Response {

@@ -19,6 +19,8 @@ import {
   AUTH_SESSION_PATH,
   HOME_PATH,
 } from "./routes.ts";
+import { renderRunnerPanel, type RunnerViewState } from "./runner-client.tsx";
+import { RunnerController } from "./runner-controller.ts";
 
 function readAuthenticatedUser(value: unknown): AuthenticatedUser | null {
   if (value === null) {
@@ -257,10 +259,12 @@ function renderWorkspace(
   logoutPending: boolean,
   openAiState: ProviderViewState,
   openRouterState: ProviderViewState,
+  runnerState: RunnerViewState,
   user: AuthenticatedUser,
 ): JsxNode {
   return (
     <div className="mt-12 space-y-6">
+      {renderRunnerPanel(runnerState)}
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <section
           aria-labelledby="agent-action-title"
@@ -344,6 +348,7 @@ function renderApp(
   notices: readonly string[],
   openAiState: ProviderViewState,
   openRouterState: ProviderViewState,
+  runnerState: RunnerViewState,
   session: AuthSession | undefined,
 ): JsxNode {
   return (
@@ -395,6 +400,7 @@ function renderApp(
                     logoutPending,
                     openAiState,
                     openRouterState,
+                    runnerState,
                     session.user,
                   )}
 
@@ -433,23 +439,32 @@ const openAi = new ProviderController(OPENAI_PANEL, () => {
 const openRouter = new ProviderController(OPENROUTER_PANEL, () => {
   updateApp(root);
 });
+const runners = new RunnerController(() => {
+  updateApp(root);
+});
 const providerControllers = [openAi, openRouter] as const;
+
+function resetWorkspaceConnections(): void {
+  runners.reset();
+  for (const controller of providerControllers) {
+    controller.reset();
+  }
+}
 
 async function loadSession(): Promise<void> {
   loadFailed = false;
   session = undefined;
-  for (const controller of providerControllers) {
-    controller.reset();
-  }
+  resetWorkspaceConnections();
   updateApp(root);
 
   try {
     session = readAuthSession(await requestJson(AUTH_SESSION_PATH));
 
     if (session.user !== null) {
-      await Promise.all(
-        providerControllers.map((controller) => controller.load()),
-      );
+      await Promise.all([
+        runners.load(),
+        ...providerControllers.map((controller) => controller.load()),
+      ]);
     }
   } catch {
     loadFailed = true;
@@ -470,9 +485,7 @@ async function logout(): Promise<void> {
     }
 
     actionCount = 0;
-    for (const controller of providerControllers) {
-      controller.reset();
-    }
+    resetWorkspaceConnections();
     session = {
       googleLoginAvailable: session?.googleLoginAvailable ?? true,
       user: null,
@@ -495,10 +508,12 @@ function updateApp(container: Element): void {
       notices,
       openAi.state,
       openRouter.state,
+      runners.state,
       session,
     ),
     container,
   );
+  runners.bind(container);
   for (const controller of providerControllers) {
     controller.bind(container);
   }
@@ -520,6 +535,12 @@ function updateApp(container: Element): void {
       void logout();
     });
 }
+
+window.setInterval(() => {
+  if (session?.user !== null && session?.user !== undefined) {
+    void runners.refresh();
+  }
+}, 15_000);
 
 updateApp(root);
 void loadSession();

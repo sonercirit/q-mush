@@ -32,7 +32,12 @@ function createErrorRules(
 }
 
 export default {
-  entry: ["knip.production.config.ts", "src/styles.css!"],
+  entry: [
+    "knip.production.config.ts",
+    "src/client.tsx!",
+    "src/runner-agent.ts!",
+    "src/styles.css!",
+  ],
   include: includedIssueTypes,
   includeEntryExports: true,
   rules: createErrorRules(includedIssueTypes),

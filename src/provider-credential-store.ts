@@ -1,4 +1,5 @@
 import { and, asc, eq, type SQL } from "drizzle-orm";
+import { softDeletedAuditFields } from "./audit.ts";
 import type { CredentialCipher } from "./credential-cipher.ts";
 import { fingerprintCredential } from "./credential-cipher.ts";
 import type { AppDatabase } from "./database.ts";
@@ -183,10 +184,8 @@ export class ProviderCredentialStore {
     this.#database
       .update(providerCredentials)
       .set({
+        ...softDeletedAuditFields(userId, now),
         encryptedCredential: "",
-        isDeleted: true,
-        updatedAt: new Date(now),
-        updatedById: userId,
       })
       .where(condition)
       .run();

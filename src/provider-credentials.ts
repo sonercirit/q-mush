@@ -1,6 +1,16 @@
 import { isRecord, type AuthenticatedUser } from "./auth-model.ts";
 import type { GoogleAuth } from "./auth.ts";
-import { createJsonResponse, createMethodNotAllowedResponse } from "./http.ts";
+import {
+  withAuthenticatedUser,
+  type AuthenticatedAction,
+} from "./authenticated-request.ts";
+import {
+  createApiError,
+  createJsonResponse,
+  createMethodNotAllowedResponse,
+  createNoContentResponse,
+  readJsonRequest,
+} from "./http.ts";
 import { readJsonRecord, type OAuthRuntime } from "./oauth.ts";
 import {
   DuplicateProviderCredentialError,
@@ -16,6 +26,10 @@ class InvalidProviderApiKeyError extends Error {
     super("The provider rejected the API key");
     this.name = "InvalidProviderApiKeyError";
   }
+}
+
+function invalidApiKeyResponse(): Response {
+  return createApiError("invalid_api_key", 400);
 }
 
 export function createApiKeyMetadataReader(
@@ -73,17 +87,13 @@ export class ProviderCredentialEndpoints {
 
   authorize<T extends Promise<Response> | Response>(
     request: Request,
-    action: (user: AuthenticatedUser) => T,
+    action: AuthenticatedAction<T>,
   ): Response | T {
-    const user = this.#auth.authenticatedUser(request);
-
-    if (user === null) {
-      return createJsonResponse({ error: "authentication_required" }, 401);
-    }
-
-    return this.#store === undefined
-      ? createJsonResponse({ error: "not_configured" }, 503)
-      : action(user);
+    return withAuthenticatedUser(this.#auth, request, (user) =>
+      this.#store === undefined
+        ? createApiError("not_configured", 503)
+        : action(user),
+    );
   }
 
   credentials(request: Request): Promise<Response> {
@@ -108,35 +118,24 @@ export class ProviderCredentialEndpoints {
       return createMethodNotAllowedResponse("GET, POST");
     }
 
+    const json = await readJsonRequest(request);
+
     if (
-      request.headers
-        .get("content-type")
-        ?.toLowerCase()
-        .startsWith("application/json") !== true
+      !json.ok ||
+      !isRecord(json.value) ||
+      typeof json.value["apiKey"] !== "string"
     ) {
-      return createJsonResponse({ error: "invalid_request" }, 400);
+      return createApiError("invalid_request", 400);
     }
 
-    let value: unknown;
-
-    try {
-      value = await request.json();
-    } catch {
-      return createJsonResponse({ error: "invalid_request" }, 400);
-    }
-
-    if (!isRecord(value) || typeof value["apiKey"] !== "string") {
-      return createJsonResponse({ error: "invalid_request" }, 400);
-    }
-
-    const apiKey = value["apiKey"].trim();
+    const apiKey = json.value["apiKey"].trim();
 
     if (
       apiKey.length === 0 ||
       apiKey.length > API_KEY_MAXIMUM_LENGTH ||
       /\s/u.test(apiKey)
     ) {
-      return createJsonResponse({ error: "invalid_api_key" }, 400);
+      return invalidApiKeyResponse();
     }
 
     try {
@@ -151,14 +150,14 @@ export class ProviderCredentialEndpoints {
       return createJsonResponse(credential, 201);
     } catch (error) {
       if (error instanceof InvalidProviderApiKeyError) {
-        return createJsonResponse({ error: "invalid_api_key" }, 400);
+        return invalidApiKeyResponse();
       }
 
       if (error instanceof DuplicateProviderCredentialError) {
-        return createJsonResponse({ error: "credential_exists" }, 409);
+        return createApiError("credential_exists", 409);
       }
 
-      return createJsonResponse({ error: "provider_unavailable" }, 502);
+      return createApiError("provider_unavailable", 502);
     }
   }
 
@@ -188,13 +187,10 @@ export class ProviderCredentialEndpoints {
 
   #removeAuthorized(user: AuthenticatedUser, credentialId: string): Response {
     if (this.#credentialStore().remove(user.id, credentialId, this.#now())) {
-      return new Response(null, {
-        headers: { "cache-control": "no-store" },
-        status: 204,
-      });
+      return createNoContentResponse();
     }
 
-    return createJsonResponse({ error: "not_found" }, 404);
+    return createApiError("not_found", 404);
   }
 
   #credentialStore(): ProviderCredentialStore {

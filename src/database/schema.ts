@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   index,
   integer,
@@ -33,12 +34,18 @@ function userIdColumn() {
     .references(() => users.id, { onDelete: "restrict" });
 }
 
-export const providerCredentials = sqliteTable(
-  "provider_credentials",
-  {
+function ownedAuditColumns() {
+  return {
     id: text("id").primaryKey(),
     userId: userIdColumn(),
     ...auditColumns(),
+  };
+}
+
+export const providerCredentials = sqliteTable(
+  "provider_credentials",
+  {
+    ...ownedAuditColumns(),
     provider: text("provider", { enum: ["openai", "openrouter"] }).notNull(),
     providerAccountId: text("provider_account_id"),
     label: text("label").notNull(),
@@ -57,6 +64,28 @@ export const providerCredentials = sqliteTable(
       table.provider,
       table.credentialFingerprint,
     ),
+  ],
+);
+
+export const runners = sqliteTable(
+  "runners",
+  {
+    ...ownedAuditColumns(),
+    name: text("name"),
+    machineFingerprint: text("machine_fingerprint"),
+    platform: text("platform"),
+    architecture: text("architecture"),
+    tokenHash: text("token_hash").notNull(),
+    lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    index("runners_user_deletion_index").on(table.userId, table.isDeleted),
+    uniqueIndex("runners_active_machine_unique")
+      .on(table.machineFingerprint)
+      .where(sql`${table.isDeleted} = false`),
+    uniqueIndex("runners_active_token_unique")
+      .on(table.tokenHash)
+      .where(sql`${table.isDeleted} = false`),
   ],
 );
 

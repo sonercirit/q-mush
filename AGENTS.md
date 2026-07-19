@@ -70,10 +70,11 @@ task-specific progress, guesses, or sensitive values.
 
 - Bun manages dependencies through `package.json` and the committed `bun.lock`
   lockfile.
-- `src/server.ts` builds `src/client.tsx` and the Tailwind stylesheet in memory
-  at startup, then serves them from `/app.js` and `/styles.css`; no generated
-  browser assets are written to disk. It precompresses textual response bodies
-  once per handler and negotiates `zstd`, Brotli, gzip, or deflate from
+- `src/server.ts` builds `src/client.tsx`, the standalone Bun runner in
+  `src/runner-agent.ts`, and the Tailwind stylesheet in memory at startup, then
+  serves them from `/app.js`, `/runner.js`, and `/styles.css`; no generated
+  assets are written to disk. It precompresses textual response bodies once per
+  handler and negotiates `zstd`, Brotli, gzip, or deflate from
   `Accept-Encoding`, in that server-preference order.
 - `src/pages.tsx` contains server page markup, while `src/client.tsx` mounts the
   browser app. Shared route paths are defined in `src/routes.ts`.
@@ -92,6 +93,19 @@ task-specific progress, guesses, or sensitive values.
   `src/http.ts`. `src/client.tsx` reads `/api/auth/session`, gates the control
   center, and posts logout to `/api/auth/logout`. All API routes derive from the
   `/api` base path in `src/routes.ts`.
+- `src/runner-store.ts` persists any number of runner registrations per user in
+  `runners`, while a partial unique index permits only one active registration
+  for a machine fingerprint. `src/runners.ts` issues hashed opaque setup tokens,
+  owns the authenticated management and token-authenticated callback APIs, and
+  derives installer commands from the request origin. `src/runner-installer.ts`
+  emits the macOS/Linux one-line installer; it downloads the in-memory
+  `src/runner-agent.ts` bundle, installs Bun when absent, and starts one
+  background process under `~/.q-mush/runner` by default. The runner reports
+  machine metadata and sends 15-second heartbeats; the browser panel/controller
+  refreshes online presence. Reinstalling for the same user and machine rotates
+  the existing registration to the new token instead of creating a second
+  runner; another user's registration remains protected. Runner tokens never
+  appear in list responses.
 - `src/openai.ts` and `src/openrouter.ts` manage authenticated provider PKCE
   connections and validate manually supplied keys against OpenAI `/v1/me` and
   OpenRouter `/api/v1/key`, respectively. OpenAI OAuth persists the access and
@@ -180,6 +194,10 @@ task-specific progress, guesses, or sensitive values.
 - Knip rule severities alone do not activate default-off issue types; keep its
   authoritative included-issue list complete so it can generate every error
   rule.
+- A runner install command uses the HTTP request origin. To connect another
+  computer, access the control center through an origin reachable from that
+  computer rather than `localhost`. Removing a runner revokes its server-side
+  registration but does not remove `~/.q-mush/runner` from the computer.
 - Add each new runtime source root and executable entry to
   `knip.production.config.ts`. Add standalone non-TypeScript build entries, such
   as `src/styles.css`, to both Knip configs; keep test files and test-support
