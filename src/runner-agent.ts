@@ -1,12 +1,18 @@
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { arch, hostname, networkInterfaces, platform } from "node:os";
 import { dirname, join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { RUNNER_HEARTBEAT_PATH, RUNNER_REGISTER_PATH } from "./routes.ts";
+import { updateRunnerIfAvailable } from "./runner-update.ts";
+
+declare const Q_MUSH_RUNNER_TARGET: string;
+declare const Q_MUSH_RUNNER_VERSION: string;
 
 const HEARTBEAT_INTERVAL_MILLISECONDS = 15_000;
 const RETRY_INTERVAL_MILLISECONDS = 5_000;
 const REQUEST_TIMEOUT_MILLISECONDS = 10_000;
+const UPDATE_INTERVAL_MILLISECONDS = 5 * 60_000;
 const TOKEN_PATTERN = /^qmr_[A-Za-z\d_-]{8,200}$/u;
 
 class RunnerRequestError extends Error {
@@ -173,30 +179,82 @@ async function connect(
       return;
     } catch (error) {
       handleConnectionFailure(error, "Could not reach Q Mush; retrying setup…");
-      await Bun.sleep(RETRY_INTERVAL_MILLISECONDS);
+      await sleep(RETRY_INTERVAL_MILLISECONDS);
     }
+  }
+}
+
+async function installUpdateIfAvailable(
+  configuration: RunnerConfiguration,
+  configurationPath: string,
+): Promise<boolean> {
+  try {
+    const updated = await updateRunnerIfAvailable({
+      configurationPath,
+      executablePath: realpathSync(process.execPath),
+      serverOrigin: configuration.serverOrigin,
+      target: Q_MUSH_RUNNER_TARGET,
+      version: Q_MUSH_RUNNER_VERSION,
+    });
+
+    if (updated) {
+      console.log("Q Mush runner updated; starting the new version.");
+    }
+
+    return updated;
+  } catch {
+    console.warn("Could not check for a Q Mush runner update; retrying later…");
+    return false;
   }
 }
 
 async function maintainConnection(
   configuration: RunnerConfiguration,
+  configurationPath: string,
 ): Promise<void> {
+  let nextUpdateAt = Date.now() + UPDATE_INTERVAL_MILLISECONDS;
+
   for (;;) {
-    await Bun.sleep(HEARTBEAT_INTERVAL_MILLISECONDS);
+    await sleep(HEARTBEAT_INTERVAL_MILLISECONDS);
 
     try {
       await postToServer(configuration, RUNNER_HEARTBEAT_PATH);
     } catch (error) {
       handleConnectionFailure(error, "Q Mush connection lost; retrying…");
     }
+
+    if (Date.now() >= nextUpdateAt) {
+      if (await installUpdateIfAvailable(configuration, configurationPath)) {
+        return;
+      }
+
+      nextUpdateAt = Date.now() + UPDATE_INTERVAL_MILLISECONDS;
+    }
   }
 }
 
 async function run(): Promise<void> {
+  if (process.argv.includes("--version")) {
+    console.log(`Q Mush runner ${Q_MUSH_RUNNER_VERSION}`);
+    return;
+  }
+
   const configurationPath = readConfigurationPath();
   const configuration = readConfiguration(configurationPath);
+  writeFileSync(
+    join(dirname(configurationPath), "runner.pid"),
+    `${String(process.pid)}\n`,
+    {
+      mode: 0o600,
+    },
+  );
+
+  if (await installUpdateIfAvailable(configuration, configurationPath)) {
+    return;
+  }
+
   await connect(configuration, configurationPath);
-  await maintainConnection(configuration);
+  await maintainConnection(configuration, configurationPath);
 }
 
 function reportFatalError(error: unknown): void {

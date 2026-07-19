@@ -214,7 +214,11 @@ describe("runner setup", () => {
     expect(script).toStartWith("#!/bin/sh\n");
     expect(script).toContain("http://localhost:3000");
     expect(script).toContain(FIRST_TOKEN);
-    expect(script).toContain("q-mush-runner.js");
+    expect(script).toContain('RUNNER_FILE="$INSTALL_DIR/q-mush-runner"');
+    expect(script).toContain("uname -s");
+    expect(script).toContain("chmod 755");
+    expect(script).not.toContain("bun.sh/install");
+    expect(script).not.toContain("command -v bun");
 
     expect(
       setup.integration.installer(installerRequest("qmr_unknown")).status,

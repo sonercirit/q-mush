@@ -20,17 +20,17 @@ import {
   OPENROUTER_CREDENTIALS_PATH,
   OPENROUTER_OAUTH_CALLBACK_PATH,
   OPENROUTER_OAUTH_PATH,
+  RUNNER_EXECUTABLE_PATH,
   RUNNER_HEARTBEAT_PATH,
   RUNNER_INSTALLER_PATH,
   RUNNER_REGISTER_PATH,
-  RUNNER_SCRIPT_PATH,
   RUNNERS_PATH,
 } from "../routes.ts";
+import type { RunnerExecutableProvider } from "../runner-executable.ts";
 import { createRunnerIntegration } from "../runners.ts";
 import {
   buildClientJavaScript,
   buildClientStylesheet,
-  buildRunnerJavaScript,
   createRequestHandler,
 } from "../server.ts";
 
@@ -46,7 +46,16 @@ const compressionCases: readonly CompressionCase[] = [
   { decompress: (body) => zstdDecompressSync(body), encoding: "zstd" },
 ];
 const clientJavaScript = 'document.querySelector("#app")?.replaceChildren();';
-const runnerJavaScript = 'console.log("runner");';
+const runnerExecutable = "standalone runner executable";
+const runnerExecutables: RunnerExecutableProvider = {
+  version: "a".repeat(64),
+  serve: () =>
+    Promise.resolve(
+      new Response(runnerExecutable, {
+        headers: { "content-type": "application/octet-stream" },
+      }),
+    ),
+};
 const stylesheet = ".min-h-screen{min-height:100vh}";
 const googleAuth = createGoogleAuthFromEnvironment({});
 const handleRequest = createRequestHandler(
@@ -56,7 +65,7 @@ const handleRequest = createRequestHandler(
   createOpenAiIntegrationFromEnvironment({}, googleAuth),
   createOpenRouterIntegrationFromEnvironment({}, googleAuth),
   createRunnerIntegration(googleAuth),
-  runnerJavaScript,
+  runnerExecutables,
 );
 
 function expectCompressionHeaders(
@@ -139,7 +148,7 @@ describe("routes", () => {
     expect(RUNNER_REGISTER_PATH).toBe("/api/runner/register");
     expect(RUNNER_HEARTBEAT_PATH).toBe("/api/runner/heartbeat");
     expect(RUNNER_INSTALLER_PATH).toBe("/runner/install.sh");
-    expect(RUNNER_SCRIPT_PATH).toBe("/runner.js");
+    expect(RUNNER_EXECUTABLE_PATH).toBe("/runner/executable");
   });
 });
 
@@ -186,11 +195,11 @@ describe("page server", () => {
     expectCompressionHeaders(response, null);
   });
 
-  test("serves the runner bundle", async () => {
+  test("serves the standalone runner executable", async () => {
     await expectAsset(
-      RUNNER_SCRIPT_PATH,
-      "text/javascript; charset=utf-8",
-      runnerJavaScript,
+      `${RUNNER_EXECUTABLE_PATH}?target=bun-linux-x64-baseline`,
+      "application/octet-stream",
+      runnerExecutable,
     );
   });
 
@@ -349,16 +358,6 @@ describe("browser build", () => {
     expect(javaScript).toContain("OPENAI_CREDENTIALS_PATH");
     expect(javaScript).toContain("OPENROUTER_CREDENTIALS_PATH");
     expect(javaScript).toContain("RUNNERS_PATH");
-  });
-});
-
-describe("runner build", () => {
-  test("builds the runner callback client", async () => {
-    const javaScript = await buildRunnerJavaScript();
-
-    expect(javaScript).toContain("RUNNER_REGISTER_PATH");
-    expect(javaScript).toContain("RUNNER_HEARTBEAT_PATH");
-    expect(javaScript).toContain("machineId");
   });
 });
 

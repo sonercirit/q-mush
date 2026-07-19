@@ -70,12 +70,14 @@ task-specific progress, guesses, or sensitive values.
 
 - Bun manages dependencies through `package.json` and the committed `bun.lock`
   lockfile.
-- `src/server.ts` builds `src/client.tsx`, the standalone Bun runner in
-  `src/runner-agent.ts`, and the Tailwind stylesheet in memory at startup, then
-  serves them from `/app.js`, `/runner.js`, and `/styles.css`; no generated
-  assets are written to disk. It precompresses textual response bodies once per
-  handler and negotiates `zstd`, Brotli, gzip, or deflate from
-  `Accept-Encoding`, in that server-preference order.
+- `src/server.ts` builds `src/client.tsx` and the Tailwind stylesheet in memory
+  at startup, then serves them from `/app.js` and `/styles.css`.
+  `src/runner-executable.ts` fingerprints the runner source and Bun compiler,
+  lazily cross-compiles each requested target through a temporary directory, and
+  caches the standalone executable in memory for `/runner/executable`; no
+  generated assets are written into the project. Textual response bodies are
+  precompressed once per handler, with `zstd`, Brotli, gzip, or deflate
+  negotiated in that server-preference order.
 - `src/pages.tsx` contains server page markup, while `src/client.tsx` mounts the
   browser app. Shared route paths are defined in `src/routes.ts`.
 - `src/auth.ts` implements Google OpenID Connect with an authorization-code +
@@ -98,14 +100,17 @@ task-specific progress, guesses, or sensitive values.
   for a machine fingerprint. `src/runners.ts` issues hashed opaque setup tokens,
   owns the authenticated management and token-authenticated callback APIs, and
   derives installer commands from the request origin. `src/runner-installer.ts`
-  emits the macOS/Linux one-line installer; it downloads the in-memory
-  `src/runner-agent.ts` bundle, installs Bun when absent, and starts one
-  background process under `~/.q-mush/runner` by default. The runner reports
-  machine metadata and sends 15-second heartbeats; the browser panel/controller
-  refreshes online presence. Reinstalling for the same user and machine rotates
-  the existing registration to the new token instead of creating a second
-  runner; another user's registration remains protected. Runner tokens never
-  appear in list responses.
+  emits the macOS/Linux one-line installer; it selects an x64/ARM64 and
+  glibc/musl target, downloads one standalone executable, and starts it under
+  `~/.q-mush/runner` by default without requiring Bun on that computer. The
+  runner reports machine metadata, sends 15-second heartbeats, and checks for an
+  update at startup and every five minutes. Updates use a source/compiler
+  version ETag, verify a server-provided SHA-256 digest, atomically replace the
+  executable, and restart it. The browser panel/controller refreshes online
+  presence. Reinstalling for the same user and machine rotates the existing
+  registration to the new token instead of creating a second runner; another
+  user's registration remains protected. Runner tokens never appear in list
+  responses.
 - `src/openai.ts` and `src/openrouter.ts` manage authenticated provider PKCE
   connections and validate manually supplied keys against OpenAI `/v1/me` and
   OpenRouter `/api/v1/key`, respectively. OpenAI OAuth persists the access and
@@ -197,7 +202,15 @@ task-specific progress, guesses, or sensitive values.
 - A runner install command uses the HTTP request origin. To connect another
   computer, access the control center through an origin reachable from that
   computer rather than `localhost`. Removing a runner revokes its server-side
-  registration but does not remove `~/.q-mush/runner` from the computer.
+  registration but does not remove `~/.q-mush/runner` from the computer. Legacy
+  `q-mush-runner.js` installations need the installer rerun once before they can
+  auto-update.
+- Bun 1.3.14's `Bun.build({ compile: ... })` writes the actual standalone binary
+  only to `compile.outfile`; `outputs[0]` is still the bundled JavaScript. Keep
+  runner builds in a temporary directory and read the outfile before cleanup.
+  Cross-target compilation may first download the matching Bun executable into
+  Bun's user cache, while subsequent runner downloads use the in-process binary
+  cache.
 - Add each new runtime source root and executable entry to
   `knip.production.config.ts`. Add standalone non-TypeScript build entries, such
   as `src/styles.css`, to both Knip configs; keep test files and test-support

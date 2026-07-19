@@ -57,15 +57,17 @@ To run the server in watch mode during development:
 bun run dev
 ```
 
-The server builds the browser app, runner program, and Tailwind stylesheet in
-memory at startup, then exposes two pages and their assets:
+The server builds the browser app and Tailwind stylesheet in memory at startup
+and prepares versioned standalone runner builds, then exposes two pages and
+their assets:
 
 - `/` renders the homepage to HTML on the server.
 - `/app` serves an empty application shell, then `/app.js` renders the app in
   the browser.
 - `/styles.css` serves the stylesheet shared by both pages.
-- `/runner.js` serves the Bun runner program, while `/runner/install.sh` serves
-  token-scoped macOS and Linux installers.
+- `/runner/install.sh` serves token-scoped macOS and Linux installers, while
+  `/runner/executable` builds and caches the requested standalone runner
+  executable.
 - `/api` is the base path for APIs. `/api/auth/google` starts Google OpenID
   Connect login and `/api/auth/google/callback` completes it.
 - `/api/auth/session` returns the local session, while `POST /api/auth/logout`
@@ -83,19 +85,25 @@ memory at startup, then exposes two pages and their assets:
 
 After signing in, use **Set up a runner** in the control center. Run the shown
 one-liner on a macOS or Linux computer, or download and run the installer. The
-installer downloads Bun when needed, installs the runner under
-`~/.q-mush/runner` (override with `Q_MUSH_RUNNER_HOME`), and starts one
-background process. The setup command contains a private token that connects
-that computer to the signed-in user, so do not share it. To install on another
-computer, create another setup; users can add as many runners as needed.
+installer detects macOS or Linux, x64 or ARM64, and glibc or musl where
+applicable. It downloads one self-contained executable under `~/.q-mush/runner`
+(override with `Q_MUSH_RUNNER_HOME`) and starts one background process. Bun does
+not need to be installed on the runner computer. The setup command contains a
+private token that connects that computer to the signed-in user, so do not share
+it. To install on another computer, create another setup; users can add as many
+runners as needed.
 
 The install command uses the origin from which the control center was opened.
 For another computer to connect, open Q Mush through an address that computer
 can reach instead of `localhost`. A runner derives an opaque machine fingerprint
 and the database allows only one active runner for a computer. It reports its
 hostname, platform, architecture, and a heartbeat every 15 seconds; the control
-center refreshes presence without exposing its token. Removing a runner revokes
-its server-side registration, but it does not delete files from that computer.
+center refreshes presence without exposing its token. The runner checks for a
+versioned update at startup and every five minutes. It verifies the executable's
+SHA-256 digest, atomically replaces itself, and restarts. Removing a runner
+revokes its server-side registration, but it does not delete files from that
+computer. Rerun the installer once to migrate a legacy `q-mush-runner.js`
+installation to the self-updating executable.
 
 The Google login flow uses an authorization code, PKCE, and a short-lived state
 cookie. Only the basic Google profile and email scopes are requested. Google
@@ -121,8 +129,10 @@ update, actor, and soft-deletion audit fields. Committed migrations in
 `drizzle/` are applied automatically at startup.
 
 Both pages use the small framework-free TSX runtime in `src/jsx.ts`; no frontend
-framework is installed. `src/styles.css` is the Tailwind source entry point, and
-no generated frontend assets are written to disk.
+framework is installed. `src/styles.css` is the Tailwind source entry point.
+Runner cross-compilation uses a temporary directory, then keeps each requested
+platform executable in server memory; no generated application assets are
+written into the project.
 
 Apply pending migrations without starting the server:
 

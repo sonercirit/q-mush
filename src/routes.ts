@@ -20,5 +20,6 @@ const RUNNER_BASE_PATH = `${API_BASE_PATH}/runner`;
 export const RUNNER_HEARTBEAT_PATH = `${RUNNER_BASE_PATH}/heartbeat`;
 export const RUNNER_REGISTER_PATH = `${RUNNER_BASE_PATH}/register`;
 export const RUNNER_INSTALLER_PATH = "/runner/install.sh";
-export const RUNNER_SCRIPT_PATH = "/runner.js";
+export const RUNNER_EXECUTABLE_PATH = "/runner/executable";
+export const RUNNER_EXECUTABLE_SHA256_HEADER = "x-q-mush-runner-sha256";
 export const STYLESHEET_PATH = "/styles.css";

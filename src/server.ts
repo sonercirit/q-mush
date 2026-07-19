@@ -1,17 +1,19 @@
 import { fileURLToPath } from "node:url";
 import { brotliCompressSync, deflateSync } from "node:zlib";
 import type { GoogleAuth } from "./auth.ts";
+import { readBuildArtifact } from "./build.ts";
 import type { OpenAiIntegration } from "./openai.ts";
 import type { OpenRouterIntegration } from "./openrouter.ts";
 import { renderAppPage, renderHomePage } from "./pages.tsx";
 import type { ProviderIntegration } from "./provider-integration.ts";
 import * as routePaths from "./routes.ts";
+import type { RunnerExecutableProvider } from "./runner-executable.ts";
 import type { RunnerIntegration } from "./runners.ts";
 
 const {
   STYLESHEET_PATH,
   RUNNERS_PATH,
-  RUNNER_SCRIPT_PATH,
+  RUNNER_EXECUTABLE_PATH,
   RUNNER_REGISTER_PATH,
   RUNNER_INSTALLER_PATH,
   RUNNER_HEARTBEAT_PATH,
@@ -210,12 +212,11 @@ export function createRequestHandler(
   openAi: OpenAiIntegration,
   openRouter: OpenRouterIntegration,
   runners: RunnerIntegration,
-  runnerJavaScript: string,
+  runnerExecutables: RunnerExecutableProvider,
 ): (request: Request) => Promise<Response> {
   const appPage = prepareBody(renderAppPage());
   const browserBundle = prepareBody(clientJavaScript);
   const homePage = prepareBody(renderHomePage());
-  const runnerBundle = prepareBody(runnerJavaScript);
   const notFound = prepareBody("Not found");
   const styles = prepareBody(stylesheet);
 
@@ -303,8 +304,8 @@ export function createRequestHandler(
       return runners.installer(request);
     }
 
-    if (pathname === RUNNER_SCRIPT_PATH) {
-      return createTextResponse(request, runnerBundle, JAVASCRIPT_HEADERS);
+    if (pathname === RUNNER_EXECUTABLE_PATH) {
+      return runnerExecutables.serve(request);
     }
 
     if (pathname === STYLESHEET_PATH) {
@@ -351,7 +352,7 @@ export async function buildClientStylesheet(): Promise<string> {
 
 async function buildJavaScript(
   entrypoint: string,
-  target: "browser" | "bun",
+  target: "browser",
   label: string,
 ): Promise<string> {
   const result = await Bun.build({
@@ -361,24 +362,9 @@ async function buildJavaScript(
     target,
   });
 
-  if (!result.success) {
-    const details = result.logs.map(({ message }) => message).join("\n");
-    throw new Error(`Could not build the ${label}:\n${details}`);
-  }
-
-  const output = result.outputs[0];
-
-  if (output === undefined) {
-    throw new Error(`The ${label} build did not produce JavaScript`);
-  }
-
-  return output.text();
+  return readBuildArtifact(label, result).text();
 }
 
 export function buildClientJavaScript(): Promise<string> {
   return buildJavaScript("client.tsx", "browser", "browser app");
-}
-
-export function buildRunnerJavaScript(): Promise<string> {
-  return buildJavaScript("runner-agent.ts", "bun", "runner");
 }
