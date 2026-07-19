@@ -3,7 +3,14 @@ import {
   type AuthenticatedUser,
   type AuthSession,
 } from "./auth-model.ts";
+import { requestJson } from "./browser-http.ts";
+import { providerNotice } from "./client-notices.ts";
 import { createElement, mount, type JsxNode } from "./jsx.ts";
+import {
+  renderOpenRouterPanel,
+  type OpenRouterViewState,
+} from "./openrouter-client.tsx";
+import { OpenRouterController } from "./openrouter-controller.ts";
 import {
   AUTH_GOOGLE_PATH,
   AUTH_LOGOUT_PATH,
@@ -56,30 +63,26 @@ function readAuthSession(value: unknown): AuthSession {
   };
 }
 
-function readAuthenticationNotice(): string | undefined {
+function readNotices(): readonly string[] {
   const url = new URL(window.location.href);
-  const result = url.searchParams.get("auth");
+  const authResult = url.searchParams.get("auth");
+  const openRouterResult = url.searchParams.get("openrouter");
+  const notices = [
+    providerNotice("google", authResult),
+    providerNotice("openrouter", openRouterResult),
+  ].filter((notice) => notice !== undefined);
 
-  if (result === null) {
-    return undefined;
+  if (authResult !== null || openRouterResult !== null) {
+    url.searchParams.delete("auth");
+    url.searchParams.delete("openrouter");
+    window.history.replaceState(
+      null,
+      "",
+      `${url.pathname}${url.search}${url.hash}`,
+    );
   }
 
-  url.searchParams.delete("auth");
-  window.history.replaceState(
-    null,
-    "",
-    `${url.pathname}${url.search}${url.hash}`,
-  );
-
-  if (result === "denied") {
-    return "Google sign-in was canceled. You can try again when you are ready.";
-  }
-
-  if (result === "invalid_state") {
-    return "That sign-in attempt could not be verified. Please start a new one.";
-  }
-
-  return "Google sign-in did not finish. Please try again.";
+  return notices;
 }
 
 function renderAvatar(user: AuthenticatedUser): JsxNode {
@@ -243,83 +246,92 @@ function renderSignIn(googleLoginAvailable: boolean): JsxNode {
 function renderWorkspace(
   actionCount: number,
   logoutPending: boolean,
+  openRouterState: OpenRouterViewState,
   user: AuthenticatedUser,
 ): JsxNode {
   return (
-    <div className="mt-12 grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
-      <section
-        aria-labelledby="agent-action-title"
-        className="rounded-3xl border border-white/10 bg-white/[0.06] p-6 shadow-2xl shadow-emerald-950/30 backdrop-blur-xl sm:p-8"
-      >
-        <div className="flex items-start justify-between gap-6">
-          <div>
-            <p className="text-sm font-medium text-emerald-300">Agent action</p>
-            <h2
-              className="mt-3 text-2xl font-semibold text-white"
-              id="agent-action-title"
+    <div className="mt-12 space-y-6">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+        <section
+          aria-labelledby="agent-action-title"
+          className="rounded-3xl border border-white/10 bg-white/[0.06] p-6 shadow-2xl shadow-emerald-950/30 backdrop-blur-xl sm:p-8"
+        >
+          <div className="flex items-start justify-between gap-6">
+            <div>
+              <p className="text-sm font-medium text-emerald-300">
+                Agent action
+              </p>
+              <h2
+                className="mt-3 text-2xl font-semibold text-white"
+                id="agent-action-title"
+              >
+                Wake the swarm
+              </h2>
+              <p className="mt-3 max-w-xl leading-7 text-slate-400">
+                Send a local signal through the harness and watch this session
+                update instantly.
+              </p>
+            </div>
+            <span
+              aria-hidden="true"
+              className="grid size-12 shrink-0 place-items-center rounded-2xl border border-white/10 bg-slate-900 text-xl"
             >
-              Wake the swarm
-            </h2>
-            <p className="mt-3 max-w-xl leading-7 text-slate-400">
-              Send a local signal through the harness and watch this session
-              update instantly.
-            </p>
+              ⚡
+            </span>
           </div>
-          <span
-            aria-hidden="true"
-            className="grid size-12 shrink-0 place-items-center rounded-2xl border border-white/10 bg-slate-900 text-xl"
+          <button
+            className="mt-10 inline-flex w-full items-center justify-center rounded-2xl bg-emerald-300 px-5 py-3 font-semibold text-slate-950 shadow-lg shadow-emerald-950/40 transition hover:bg-emerald-200 active:translate-y-px focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300 sm:w-auto"
+            data-action="run-agent"
+            type="button"
           >
-            ⚡
-          </span>
-        </div>
-        <button
-          className="mt-10 inline-flex w-full items-center justify-center rounded-2xl bg-emerald-300 px-5 py-3 font-semibold text-slate-950 shadow-lg shadow-emerald-950/40 transition hover:bg-emerald-200 active:translate-y-px focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300 sm:w-auto"
-          data-action="run-agent"
-          type="button"
-        >
-          Run an action
-        </button>
-      </section>
+            Run an action
+          </button>
+        </section>
 
-      <aside
-        aria-label="Google account and session activity"
-        className="rounded-3xl border border-white/10 bg-slate-900/80 p-6 sm:p-8"
-      >
-        <div className="flex min-w-0 items-center gap-4">
-          {renderAvatar(user)}
-          <div className="min-w-0">
-            <p className="truncate font-semibold text-white">{user.name}</p>
-            <p className="truncate text-sm text-slate-400">{user.email}</p>
+        <aside
+          aria-label="Google account and session activity"
+          className="rounded-3xl border border-white/10 bg-slate-900/80 p-6 sm:p-8"
+        >
+          <div className="flex min-w-0 items-center gap-4">
+            {renderAvatar(user)}
+            <div className="min-w-0">
+              <p className="truncate font-semibold text-white">{user.name}</p>
+              <p className="truncate text-sm text-slate-400">{user.email}</p>
+            </div>
           </div>
-        </div>
-        <p className="mt-6 text-sm font-medium text-slate-400">
-          Session activity
-        </p>
-        <p
-          aria-live="polite"
-          className="mt-3 text-5xl font-semibold tracking-tight text-white"
-        >
-          {actionCount}
-        </p>
-        <p className="mt-2 text-sm text-slate-400">Actions run this session</p>
-        <button
-          className="mt-7 w-full rounded-2xl border border-white/10 px-4 py-2.5 text-sm font-semibold text-slate-300 transition hover:border-rose-300/30 hover:text-rose-200 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
-          data-action="logout"
-          disabled={logoutPending}
-          type="button"
-        >
-          {logoutPending ? "Signing out…" : "Sign out"}
-        </button>
-      </aside>
+          <p className="mt-6 text-sm font-medium text-slate-400">
+            Session activity
+          </p>
+          <p
+            aria-live="polite"
+            className="mt-3 text-5xl font-semibold tracking-tight text-white"
+          >
+            {actionCount}
+          </p>
+          <p className="mt-2 text-sm text-slate-400">
+            Actions run this session
+          </p>
+          <button
+            className="mt-7 w-full rounded-2xl border border-white/10 px-4 py-2.5 text-sm font-semibold text-slate-300 transition hover:border-rose-300/30 hover:text-rose-200 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
+            data-action="logout"
+            disabled={logoutPending}
+            type="button"
+          >
+            {logoutPending ? "Signing out…" : "Sign out"}
+          </button>
+        </aside>
+      </div>
+      {renderOpenRouterPanel(openRouterState)}
     </div>
   );
 }
 
 function renderApp(
   actionCount: number,
-  authNotice: string | undefined,
   loadFailed: boolean,
   logoutPending: boolean,
+  notices: readonly string[],
+  openRouterState: OpenRouterViewState,
   session: AuthSession | undefined,
 ): JsxNode {
   return (
@@ -352,21 +364,26 @@ function renderApp(
             Coordinate your local swarm from one authenticated workspace.
           </p>
 
-          {authNotice === undefined ? null : (
+          {notices.map((notice) => (
             <p
               className="mt-8 rounded-2xl border border-amber-300/20 bg-amber-300/10 p-4 text-sm text-amber-100"
               role="alert"
             >
-              {authNotice}
+              {notice}
             </p>
-          )}
+          ))}
           {loadFailed
             ? renderSessionError()
             : session === undefined
               ? renderLoadingCard()
               : session.user === null
                 ? renderSignIn(session.googleLoginAvailable)
-                : renderWorkspace(actionCount, logoutPending, session.user)}
+                : renderWorkspace(
+                    actionCount,
+                    logoutPending,
+                    openRouterState,
+                    session.user,
+                  )}
 
           <a
             className="mt-10 inline-flex items-center gap-2 text-sm font-medium text-slate-400 transition hover:text-emerald-200 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
@@ -396,24 +413,23 @@ let actionCount = 0;
 let loadFailed = false;
 let logoutPending = false;
 let session: AuthSession | undefined;
-const authNotice = readAuthenticationNotice();
+const notices = readNotices();
+const openRouter = new OpenRouterController(() => {
+  updateApp(root);
+});
 
 async function loadSession(): Promise<void> {
   loadFailed = false;
   session = undefined;
+  openRouter.reset();
   updateApp(root);
 
   try {
-    const response = await fetch(AUTH_SESSION_PATH, {
-      headers: { accept: "application/json" },
-    });
+    session = readAuthSession(await requestJson(AUTH_SESSION_PATH));
 
-    if (!response.ok) {
-      throw new Error("The session request failed");
+    if (session.user !== null) {
+      await openRouter.load();
     }
-
-    const value: unknown = await response.json();
-    session = readAuthSession(value);
   } catch {
     loadFailed = true;
   }
@@ -433,6 +449,7 @@ async function logout(): Promise<void> {
     }
 
     actionCount = 0;
+    openRouter.reset();
     session = {
       googleLoginAvailable: session?.googleLoginAvailable ?? true,
       user: null,
@@ -448,9 +465,17 @@ async function logout(): Promise<void> {
 
 function updateApp(container: Element): void {
   mount(
-    renderApp(actionCount, authNotice, loadFailed, logoutPending, session),
+    renderApp(
+      actionCount,
+      loadFailed,
+      logoutPending,
+      notices,
+      openRouter.state,
+      session,
+    ),
     container,
   );
+  openRouter.bind(container);
 
   container
     .querySelector('[data-action="run-agent"]')

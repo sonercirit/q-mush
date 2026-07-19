@@ -87,9 +87,20 @@ task-specific progress, guesses, or sensitive values.
   `isDeleted` soft-delete flag. `src/database.ts` applies committed `drizzle/`
   migrations when opening a connection. `src/index.ts` injects the persistent
   connection; the auth factory falls back to isolated in-memory SQLite when a
-  connection is not supplied. `src/client.tsx` reads `/api/auth/session`, gates
-  the control center, and posts logout to `/api/auth/logout`. All API routes
-  derive from the `/api` base path in `src/routes.ts`.
+  connection is not supplied. Shared PKCE, provider parsing, and redirect logic
+  lives in `src/oauth.ts`, while shared cookie and response helpers live in
+  `src/http.ts`. `src/client.tsx` reads `/api/auth/session`, gates the control
+  center, and posts logout to `/api/auth/logout`. All API routes derive from the
+  `/api` base path in `src/routes.ts`.
+- `src/openrouter.ts` manages authenticated OpenRouter PKCE connections and
+  validates manually supplied keys against `/api/v1/key`.
+  `src/openrouter-store.ts` persists any number of OAuth-created or manual
+  credentials per local user in `openrouter_credentials`; provider user IDs are
+  metadata rather than local identities. API keys are AES-256-GCM encrypted with
+  per-record authenticated context by `src/credential-cipher.ts`, and API
+  responses expose only labels, sources, and provider account IDs. The browser
+  manager is split between `src/openrouter-client.tsx` and
+  `src/openrouter-controller.ts`.
 - `src/jsx.ts` is the framework-free classic JSX factory and renders its small
   element tree either to escaped HTML or browser DOM. TSX files must import
   `createElement`; `tsconfig.json` configures it as `jsxFactory`.
@@ -140,6 +151,14 @@ task-specific progress, guesses, or sensitive values.
   migration and Drizzle metadata. `bun run db:migrate` applies migrations
   without starting the HTTP server. Drizzle Kit loads its config under Node, so
   shared config imports must not transitively import `bun:sqlite`.
+- OpenRouter storage requires `OPENROUTER_CREDENTIAL_KEY`, a 32-byte base64url
+  secret that must stay stable and outside Git; changing or losing it makes
+  stored keys unreadable. `OPENROUTER_REDIRECT_URI` is optional and must end in
+  `/api/openrouter/oauth/callback`; the request origin is the default. The OAuth
+  authorization URL needs no client credentials, embeds the CSRF state in its
+  callback URL, and exchanges the returned code for a user-controlled key.
+  Removing a credential soft-deletes its audit record and clears its encrypted
+  payload, but cannot revoke the provider-side key.
 - `src/ids.ts` is the authoritative UUIDv7 generator and defines `SYSTEM` as the
   audit actor for system actions. User actions use the internal user UUID. Never
   issue hard deletes for application records: set `isDeleted`, `updatedAt`, and

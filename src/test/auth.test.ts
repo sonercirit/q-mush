@@ -7,6 +7,11 @@ import { createGoogleAuthFromEnvironment, type GoogleAuth } from "../auth.ts";
 import { createDatabase, type AppDatabase } from "../database.ts";
 import { sessions, users } from "../database/schema.ts";
 import { SYSTEM_ID } from "../ids.ts";
+import {
+  expectPkceParameters,
+  expectRedirect,
+  takeValue,
+} from "./oauth-test-helpers.ts";
 
 const CALLBACK_URL = "http://localhost:3000/api/auth/google/callback";
 const TEST_ENVIRONMENT = {
@@ -86,16 +91,7 @@ function readCookiePair(response: Response, name: string): string {
 
 function createTokenGenerator(): () => string {
   const tokens = [STATE, VERIFIER, SESSION_TOKEN];
-
-  return () => {
-    const token = tokens.shift();
-
-    if (token === undefined) {
-      throw new Error("The test ran out of deterministic tokens");
-    }
-
-    return token;
-  };
+  return () => takeValue(tokens, "The test ran out of deterministic tokens");
 }
 
 function createIdGenerator(): (timestamp: number) => string {
@@ -106,13 +102,7 @@ function createIdGenerator(): (timestamp: number) => string {
       throw new Error("The test received an unexpected ID timestamp");
     }
 
-    const id = ids.shift();
-
-    if (id === undefined) {
-      throw new Error("The test ran out of deterministic IDs");
-    }
-
-    return id;
+    return takeValue(ids, "The test ran out of deterministic IDs");
   };
 }
 
@@ -208,12 +198,7 @@ describe("Google authentication", () => {
       "openid email profile",
     );
     expect(authorizationUrl.searchParams.get("state")).toBe(STATE);
-    expect(authorizationUrl.searchParams.get("code_challenge")).toBe(
-      expectedChallenge,
-    );
-    expect(authorizationUrl.searchParams.get("code_challenge_method")).toBe(
-      "S256",
-    );
+    expectPkceParameters(authorizationUrl, expectedChallenge);
     expect(readSetCookie(response, "q_mush_oauth_state")).toContain("HttpOnly");
     expect(readSetCookie(response, "q_mush_oauth_verifier")).toContain(
       "SameSite=Lax",
@@ -259,10 +244,7 @@ describe("Google authentication", () => {
       createCallbackRequest(`code=google-code&state=${STATE}`, flowCookies),
     );
 
-    expect(callbackResponse.status).toBe(302);
-    expect(callbackResponse.headers.get("location")).toBe(
-      "http://localhost:3000/app",
-    );
+    expectRedirect(callbackResponse, "http://localhost:3000/app");
     expect(readSetCookie(callbackResponse, "q_mush_oauth_state")).toContain(
       "Max-Age=0",
     );

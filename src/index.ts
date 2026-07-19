@@ -1,6 +1,7 @@
 import { createGoogleAuthFromEnvironment } from "./auth.ts";
 import { createDatabase } from "./database.ts";
 import { readDatabasePath } from "./database/config.ts";
+import { createOpenRouterIntegrationFromEnvironment } from "./openrouter.ts";
 import {
   buildClientJavaScript,
   buildClientStylesheet,
@@ -13,8 +14,18 @@ const [clientJavaScript, stylesheet] = await Promise.all([
   buildClientStylesheet(),
 ]);
 const googleAuth = createGoogleAuthFromEnvironment(Bun.env, { database });
+const openRouter = createOpenRouterIntegrationFromEnvironment(
+  Bun.env,
+  googleAuth,
+  { database },
+);
 const server = Bun.serve({
-  fetch: createRequestHandler(clientJavaScript, stylesheet, googleAuth),
+  fetch: createRequestHandler(
+    clientJavaScript,
+    stylesheet,
+    googleAuth,
+    openRouter,
+  ),
 });
 
 console.log(`Q Mush is running at ${server.url}`);

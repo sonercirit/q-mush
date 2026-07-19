@@ -6,12 +6,16 @@ import {
   zstdDecompressSync,
 } from "node:zlib";
 import { createGoogleAuthFromEnvironment } from "../auth.ts";
+import { createOpenRouterIntegrationFromEnvironment } from "../openrouter.ts";
 import {
   API_BASE_PATH,
   AUTH_GOOGLE_CALLBACK_PATH,
   AUTH_GOOGLE_PATH,
   AUTH_LOGOUT_PATH,
   AUTH_SESSION_PATH,
+  OPENROUTER_CREDENTIALS_PATH,
+  OPENROUTER_OAUTH_CALLBACK_PATH,
+  OPENROUTER_OAUTH_PATH,
 } from "../routes.ts";
 import {
   buildClientJavaScript,
@@ -32,10 +36,12 @@ const compressionCases: readonly CompressionCase[] = [
 ];
 const clientJavaScript = 'document.querySelector("#app")?.replaceChildren();';
 const stylesheet = ".min-h-screen{min-height:100vh}";
+const googleAuth = createGoogleAuthFromEnvironment({});
 const handleRequest = createRequestHandler(
   clientJavaScript,
   stylesheet,
-  createGoogleAuthFromEnvironment({}),
+  googleAuth,
+  createOpenRouterIntegrationFromEnvironment({}, googleAuth),
 );
 
 function expectCompressionHeaders(
@@ -95,6 +101,11 @@ describe("routes", () => {
     expect(AUTH_GOOGLE_CALLBACK_PATH).toBe("/api/auth/google/callback");
     expect(AUTH_LOGOUT_PATH).toBe("/api/auth/logout");
     expect(AUTH_SESSION_PATH).toBe("/api/auth/session");
+    expect(OPENROUTER_CREDENTIALS_PATH).toBe("/api/openrouter/credentials");
+    expect(OPENROUTER_OAUTH_PATH).toBe("/api/openrouter/oauth");
+    expect(OPENROUTER_OAUTH_CALLBACK_PATH).toBe(
+      "/api/openrouter/oauth/callback",
+    );
   });
 });
 
@@ -170,6 +181,24 @@ describe("page server", () => {
     expect(outsideApiResponse.status).toBe(404);
   });
 
+  test("routes protected OpenRouter requests", async () => {
+    const oauthResponse = await sendRequest(OPENROUTER_OAUTH_PATH);
+    const callbackResponse = await sendRequest(OPENROUTER_OAUTH_CALLBACK_PATH);
+    const credentialsResponse = await sendRequest(OPENROUTER_CREDENTIALS_PATH);
+    const removeResponse = await sendRequest(
+      `${OPENROUTER_CREDENTIALS_PATH}/credential-id`,
+      undefined,
+      "DELETE",
+    );
+    const outsideApiResponse = await sendRequest("/openrouter/oauth");
+
+    expect(oauthResponse.status).toBe(401);
+    expect(callbackResponse.status).toBe(401);
+    expect(credentialsResponse.status).toBe(401);
+    expect(removeResponse.status).toBe(401);
+    expect(outsideApiResponse.status).toBe(404);
+  });
+
   test("returns not found for unknown paths", async () => {
     const { body, response } = await request("/missing");
 
@@ -226,12 +255,15 @@ describe("response compression", () => {
 });
 
 describe("browser build", () => {
-  test("builds the Google login and session controls", async () => {
+  test("builds the login, session, and OpenRouter credential controls", async () => {
     const javaScript = await buildClientJavaScript();
 
     expect(javaScript).toContain("Continue with Google");
+    expect(javaScript).toContain("Connect OpenRouter account");
+    expect(javaScript).toContain("Add API key");
     expect(javaScript).toContain("AUTH_GOOGLE_PATH");
     expect(javaScript).toContain("AUTH_LOGOUT_PATH");
+    expect(javaScript).toContain("OPENROUTER_CREDENTIALS_PATH");
   });
 });
 

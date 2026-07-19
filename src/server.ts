@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { brotliCompressSync, deflateSync } from "node:zlib";
 import type { GoogleAuth } from "./auth.ts";
+import type { OpenRouterIntegration } from "./openrouter.ts";
 import { renderAppPage, renderHomePage } from "./pages.tsx";
 import {
   API_BASE_PATH,
@@ -11,6 +12,9 @@ import {
   AUTH_LOGOUT_PATH,
   AUTH_SESSION_PATH,
   HOME_PATH,
+  OPENROUTER_CREDENTIALS_PATH,
+  OPENROUTER_OAUTH_CALLBACK_PATH,
+  OPENROUTER_OAUTH_PATH,
   STYLESHEET_PATH,
 } from "./routes.ts";
 
@@ -153,6 +157,7 @@ export function createRequestHandler(
   clientJavaScript: string,
   stylesheet: string,
   googleAuth: GoogleAuth,
+  openRouter: OpenRouterIntegration,
 ): (request: Request) => Promise<Response> {
   const appPage = prepareBody(renderAppPage());
   const browserBundle = prepareBody(clientJavaScript);
@@ -178,6 +183,28 @@ export function createRequestHandler(
 
       if (pathname === AUTH_SESSION_PATH) {
         return googleAuth.session(request);
+      }
+
+      if (pathname === OPENROUTER_OAUTH_PATH) {
+        return openRouter.begin(request);
+      }
+
+      if (pathname === OPENROUTER_OAUTH_CALLBACK_PATH) {
+        return openRouter.complete(request);
+      }
+
+      if (pathname === OPENROUTER_CREDENTIALS_PATH) {
+        return openRouter.credentials(request);
+      }
+
+      const credentialPathPrefix = `${OPENROUTER_CREDENTIALS_PATH}/`;
+
+      if (pathname.startsWith(credentialPathPrefix)) {
+        const credentialId = pathname.slice(credentialPathPrefix.length);
+
+        if (credentialId.length > 0 && !credentialId.includes("/")) {
+          return openRouter.remove(request, credentialId);
+        }
       }
     }
 

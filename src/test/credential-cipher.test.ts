@@ -1,0 +1,31 @@
+import { expect, test } from "bun:test";
+import { Buffer } from "node:buffer";
+import {
+  createCredentialCipher,
+  CredentialCipher,
+} from "../credential-cipher.ts";
+
+const API_KEY = "sk-or-v1-sensitive-api-key";
+const CONTEXT = "user-id:credential-id";
+
+test("encrypts credentials with authenticated context", () => {
+  const cipher = new CredentialCipher(Buffer.alloc(32, 3), () =>
+    Buffer.alloc(12, 5),
+  );
+  const encrypted = cipher.seal(API_KEY, CONTEXT);
+
+  expect(encrypted).toStartWith("v1.");
+  expect(encrypted).not.toContain(API_KEY);
+  expect(cipher.open(encrypted, CONTEXT)).toBe(API_KEY);
+  expect(() => cipher.open(encrypted, "another-user:credential-id")).toThrow();
+  expect(() => cipher.open(`${encrypted}.extra`, CONTEXT)).toThrow("malformed");
+});
+
+test("requires a 32-byte base64url encryption key", () => {
+  const encodedKey = Buffer.alloc(32, 9).toString("base64url");
+
+  expect(createCredentialCipher(encodedKey)).toBeInstanceOf(CredentialCipher);
+  expect(() => createCredentialCipher("not-base64url!")).toThrow(
+    "32-byte base64url",
+  );
+});

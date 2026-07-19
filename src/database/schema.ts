@@ -1,4 +1,10 @@
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+  index,
+  integer,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 
 function auditColumns() {
   return {
@@ -21,14 +27,42 @@ export const users = sqliteTable("users", {
   ...auditColumns(),
 });
 
+function userIdColumn() {
+  return text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "restrict" });
+}
+
+export const openRouterCredentials = sqliteTable(
+  "openrouter_credentials",
+  {
+    id: text("id").primaryKey(),
+    userId: userIdColumn(),
+    ...auditColumns(),
+    openRouterUserId: text("openrouter_user_id"),
+    label: text("label").notNull(),
+    source: text("source", { enum: ["oauth", "api_key"] }).notNull(),
+    encryptedApiKey: text("encrypted_api_key").notNull(),
+    apiKeyFingerprint: text("api_key_fingerprint").notNull(),
+  },
+  (table) => [
+    index("openrouter_credentials_user_deletion_index").on(
+      table.userId,
+      table.isDeleted,
+    ),
+    uniqueIndex("openrouter_credentials_user_fingerprint_unique").on(
+      table.userId,
+      table.apiKeyFingerprint,
+    ),
+  ],
+);
+
 export const sessions = sqliteTable(
   "sessions",
   {
     id: text("id").primaryKey(),
     token: text("token").notNull().unique(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "restrict" }),
+    userId: userIdColumn(),
     expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
     ...auditColumns(),
   },
