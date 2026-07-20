@@ -437,6 +437,10 @@ function renderDetail(state: SessionViewState): JsxNode {
   const detail = state.detail;
   const active = detail.status === "queued" || detail.status === "running";
   const lastMessageId = detail.messages.at(-1)?.id ?? "";
+  const agentFileRevision =
+    detail.agentFile === null
+      ? "none"
+      : `${detail.agentFile.name}:${String(detail.agentFile.content.length)}`;
   return (
     <div>
       <div className="flex flex-col gap-4 border-b border-white/10 pb-5 sm:flex-row sm:items-start sm:justify-between">
@@ -446,7 +450,7 @@ function renderDetail(state: SessionViewState): JsxNode {
             {statusBadge(detail.status)}
           </div>
           <p className="mt-2 truncate text-xs text-slate-500">
-            {`${sessionModelLabel(detail)} · ${detail.workingDirectory}`}
+            {`${sessionModelLabel(detail)} · ${detail.workingDirectory} · Agent file: ${detail.agentFile?.name ?? "None"}`}
           </p>
         </div>
         {active ? (
@@ -465,9 +469,9 @@ function renderDetail(state: SessionViewState): JsxNode {
         className="mt-5 max-h-[36rem] space-y-3 overflow-y-auto pr-1"
         data-scroll-key={`session-transcript:${detail.id}`}
         data-scroll-on-change="end"
-        data-scroll-revision={`${String(detail.messages.length)}:${lastMessageId}`}
+        data-scroll-revision={`${agentFileRevision}:${String(detail.messages.length)}:${lastMessageId}`}
       >
-        {renderSessionTranscript(detail.messages)}
+        {renderSessionTranscript(detail.messages, detail.agentFile)}
       </ul>
       {!active ? (
         <form className="mt-5 flex gap-3" data-action="send-session-message">

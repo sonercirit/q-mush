@@ -47,6 +47,7 @@ describe("chat completions agent model", () => {
         model: "openai/gpt-4.1-mini",
         provider: "openrouter",
         reasoningEffort: "high",
+        systemPrompt: "Workspace instructions from AGENTS.md",
       },
       {
         choices: [
@@ -89,7 +90,10 @@ describe("chat completions agent model", () => {
     const body = await capturedBody(capture);
     expect(body).toMatchObject({
       messages: [
-        { role: "system" },
+        {
+          content: "Workspace instructions from AGENTS.md",
+          role: "system",
+        },
         { content: "Inspect the source", role: "user" },
       ],
       model: "openai/gpt-4.1-mini",

@@ -5,6 +5,7 @@ import {
   type AgentModelOption,
   type AgentReasoningEffort,
 } from "./agent-configuration.ts";
+import { readAgentFile } from "./agent-file.ts";
 import { readAgentToolCalls } from "./agent-loop.ts";
 import { isRecord, readNullableString } from "./auth-model.ts";
 import type { ProviderId } from "./provider-credential-store.ts";
@@ -197,6 +198,7 @@ export function readSessionDetail(value: unknown): AgentSessionDetail {
 
   return {
     ...readSummary(value),
+    agentFile: readAgentFile(value["agentFile"]),
     messages: value["messages"].map(readMessage),
   };
 }

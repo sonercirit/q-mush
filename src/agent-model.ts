@@ -33,6 +33,7 @@ interface ChatCompletionsAgentModelOptions {
   readonly model: string;
   readonly provider: ProviderId;
   readonly reasoningEffort?: AgentReasoningEffort | null;
+  readonly systemPrompt?: string;
 }
 
 function providerName(provider: ProviderId): string {
@@ -195,6 +196,7 @@ function requestBody(
   provider: ProviderId,
   codexOAuth: boolean,
   reasoningEffort: AgentReasoningEffort | undefined,
+  systemPrompt: string,
 ): unknown {
   const reasoning = reasoningConfiguration(
     provider,
@@ -205,7 +207,7 @@ function requestBody(
   if (!codexOAuth) {
     return {
       messages: [
-        { content: AGENT_SYSTEM_PROMPT, role: "system" },
+        { content: systemPrompt, role: "system" },
         ...messages.map(modelMessage),
       ],
       model,
@@ -218,7 +220,7 @@ function requestBody(
   return {
     include: ["reasoning.encrypted_content"],
     input: messages.flatMap(responsesInput),
-    instructions: AGENT_SYSTEM_PROMPT,
+    instructions: systemPrompt,
     model,
     parallel_tool_calls: false,
     ...reasoning,
@@ -577,6 +579,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
   readonly #model: string;
   readonly #provider: ProviderId;
   readonly #reasoningEffort: AgentReasoningEffort | undefined;
+  readonly #systemPrompt: string;
 
   constructor(options: ChatCompletionsAgentModelOptions) {
     this.#credential = options.credential;
@@ -584,6 +587,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
     this.#model = options.model;
     this.#provider = options.provider;
     this.#reasoningEffort = options.reasoningEffort ?? undefined;
+    this.#systemPrompt = options.systemPrompt ?? AGENT_SYSTEM_PROMPT;
   }
 
   async complete(
@@ -599,6 +603,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
           this.#provider,
           codexOAuth,
           this.#reasoningEffort,
+          this.#systemPrompt,
         ),
       ),
       headers: agentProviderRequestHeaders(

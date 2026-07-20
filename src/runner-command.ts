@@ -1,4 +1,6 @@
+import { RUNNER_AGENT_FILE_COMMAND } from "./agent-file.ts";
 import { isRecord } from "./auth-model.ts";
+import { loadRunnerAgentFile } from "./runner-agent-file.ts";
 import type { RunnerToolCommand } from "./runner-command-broker.ts";
 import { listRunnerDirectories } from "./runner-directories.ts";
 import { RUNNER_DIRECTORY_COMMAND } from "./runner-directory-model.ts";
@@ -79,6 +81,12 @@ export async function executeRunnerCommand(
     if (command.tool === RUNNER_DIRECTORY_COMMAND) {
       return JSON.stringify(
         await listRunnerDirectories(command.workingDirectory),
+      );
+    }
+
+    if (command.tool === RUNNER_AGENT_FILE_COMMAND) {
+      return JSON.stringify(
+        await loadRunnerAgentFile(command.workingDirectory),
       );
     }
 

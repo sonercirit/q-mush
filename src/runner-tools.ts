@@ -1,12 +1,15 @@
 import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import {
   isAgentToolName,
   isBaseAgentToolName,
   type BaseAgentToolName,
 } from "./agent-tools.ts";
 import { isRecord } from "./auth-model.ts";
-import { expandRunnerHome } from "./runner-path.ts";
+import {
+  resolveRunnerWorkspace,
+  runnerPathIsWithin,
+} from "./runner-workspace.ts";
 
 const MAX_FILE_BYTES = 1024 * 1024;
 const MAX_READ_OUTPUT_BYTES = 50 * 1024;
@@ -64,18 +67,8 @@ function optionalInteger(
   return value;
 }
 
-function isWithin(root: string, candidate: string): boolean {
-  const pathFromRoot = relative(root, candidate);
-  return (
-    pathFromRoot === "" ||
-    (!pathFromRoot.startsWith(`..${sep}`) &&
-      pathFromRoot !== ".." &&
-      !isAbsolute(pathFromRoot))
-  );
-}
-
 function assertWithin(root: string, candidate: string): void {
-  if (!isWithin(root, candidate)) {
+  if (!runnerPathIsWithin(root, candidate)) {
     throw new Error("The requested path is outside the session workspace");
   }
 }
@@ -96,17 +89,6 @@ async function existingAncestor(path: string): Promise<string> {
       candidate = parent;
     }
   }
-}
-
-async function workspaceRoot(path: string): Promise<string> {
-  const root = await realpath(expandRunnerHome(path));
-  const details = await stat(root);
-
-  if (!details.isDirectory()) {
-    throw new Error("The session workspace is not a directory");
-  }
-
-  return root;
 }
 
 async function securePath(
@@ -525,7 +507,7 @@ export async function executeRunnerTool(
     throw new Error(`Unknown runner tool: ${name}`);
   }
 
-  const root = await workspaceRoot(workingDirectory);
+  const root = await resolveRunnerWorkspace(workingDirectory);
   return name === "parallel"
     ? parallelTool(root, arguments_, signal)
     : RUNNER_TOOLS[name](root, arguments_, signal);

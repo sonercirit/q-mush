@@ -71,6 +71,7 @@ describe("session store", () => {
       TEST_NOW,
     );
 
+    expect(created.agentFile).toBeNull();
     expect(created.id).toBe(SESSION_ID);
     expect(created.status).toBe("queued");
     expect(created.reasoningEffort).toBe("high");
@@ -87,6 +88,11 @@ describe("session store", () => {
       },
     ]);
     expect(store.mark(SESSION_ID, "running", TEST_NOW + 1)).toBeTrue();
+    store.setAgentFile(
+      SESSION_ID,
+      { content: "Use Bun for tests.", name: "AGENTS.md" },
+      TEST_NOW + 2,
+    );
 
     const thinkingMessage = {
       content: "I should inspect the repository before changing it.",
@@ -109,17 +115,21 @@ describe("session store", () => {
       toolCallId: "call-1",
       toolName: "bash",
     };
-    store.appendAgentMessage(SESSION_ID, thinkingMessage, TEST_NOW + 2);
-    store.appendAgentMessage(SESSION_ID, assistantMessage, TEST_NOW + 3);
-    store.appendAgentMessage(SESSION_ID, toolMessage, TEST_NOW + 4);
-    expect(store.mark(SESSION_ID, "idle", TEST_NOW + 5)).toBeTrue();
+    store.appendAgentMessage(SESSION_ID, thinkingMessage, TEST_NOW + 3);
+    store.appendAgentMessage(SESSION_ID, assistantMessage, TEST_NOW + 4);
+    store.appendAgentMessage(SESSION_ID, toolMessage, TEST_NOW + 5);
+    expect(store.mark(SESSION_ID, "idle", TEST_NOW + 6)).toBeTrue();
 
     const detail = store.get(TEST_USER_ID, SESSION_ID);
+    expect(detail?.agentFile).toEqual({
+      content: "Use Bun for tests.",
+      name: "AGENTS.md",
+    });
     expect(detail?.status).toBe("idle");
     expect(detail?.messages.slice(1)).toEqual([
       {
         ...thinkingMessage,
-        createdAt: TEST_NOW + 2,
+        createdAt: TEST_NOW + 3,
         id: THINKING_MESSAGE_ID,
         toolCallId: null,
         toolCalls: [],
@@ -127,14 +137,14 @@ describe("session store", () => {
       },
       {
         ...assistantMessage,
-        createdAt: TEST_NOW + 3,
+        createdAt: TEST_NOW + 4,
         id: ASSISTANT_MESSAGE_ID,
         toolCallId: null,
         toolName: null,
       },
       {
         ...toolMessage,
-        createdAt: TEST_NOW + 4,
+        createdAt: TEST_NOW + 5,
         id: TOOL_MESSAGE_ID,
         toolCalls: [],
       },

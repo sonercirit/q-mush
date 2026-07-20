@@ -130,26 +130,34 @@ task-specific progress, guesses, or sensitive values.
   and opens the interactive browser in `src/directory-picker-client.tsx`; its
   controller posts to `/api/runners/:id/directories`, which dispatches the
   private `list_directories` runner command and returns a canonical path, its
-  parent, and up to 500 child directories. `src/session-transcript.tsx` renders
-  the complete tool definitions plus the raw arguments, call ID, name, and
-  result for each tool entry. The control center creates, inspects, follows up,
-  stops, and polls sessions through `src/session-client.tsx` and
-  `src/session-controller.ts`. Poll controllers suppress render notifications
-  when refreshed data has no visible change. Browser rendering preserves the
-  document viewport and keyed `data-scroll-key` regions across full-root
-  remounts; the session transcript starts at the bottom and returns there when
-  its message revision changes. It defers remounts while a select has focus,
-  flushing on change or focus loss, and periodic polls pause so the native
-  picker stays open. `src/agent-model-discovery.ts` queries the selected
-  credential's provider for compatible models and reasoning metadata;
-  `src/agent-configuration.ts` owns shared catalog types, accepted effort
-  values, and API fallback models. Model and effort selections are persisted
-  with the session. `src/agent-prompt.ts` is the shared source for the model
-  system prompt and its transcript display. Provider-returned OpenRouter
-  reasoning and Codex reasoning summaries are persisted as `thinking` transcript
-  messages but excluded from provider conversation replay. Session and
-  transcript rows live in `agent_sessions` and `agent_messages`; an interrupted
-  server process marks active sessions failed so they can be resumed explicitly.
+  parent, and up to 500 child directories. Before each initial or follow-up
+  agent run, the private `read_agent_file` runner command uses
+  `src/runner-agent-file.ts` to load at most 64 KiB from an exact-root
+  `AGENTS.md`, falling back to `CLAUDE.md`; only `AGENTS.md` is used when both
+  exist, and no extra context is added when neither exists.
+  `src/runner-workspace.ts` shares canonical workspace resolution and
+  containment with the file tools. The latest agent-file selection is persisted
+  on the session and appended to the model system prompt.
+  `src/session-transcript.tsx` renders that effective prompt and the complete
+  tool definitions plus the raw arguments, call ID, name, and result for each
+  tool entry. The control center creates, inspects, follows up, stops, and polls
+  sessions through `src/session-client.tsx` and `src/session-controller.ts`.
+  Poll controllers suppress render notifications when refreshed data has no
+  visible change. Browser rendering preserves the document viewport and keyed
+  `data-scroll-key` regions across full-root remounts; the session transcript
+  starts at the bottom and returns there when its message or agent-file revision
+  changes. It defers remounts while a select has focus, flushing on change or
+  focus loss, and periodic polls pause so the native picker stays open.
+  `src/agent-model-discovery.ts` queries the selected credential's provider for
+  compatible models and reasoning metadata; `src/agent-configuration.ts` owns
+  shared catalog types, accepted effort values, and API fallback models. Model
+  and effort selections are persisted with the session. `src/agent-prompt.ts` is
+  the shared source for building the model system prompt and its transcript
+  display. Provider-returned OpenRouter reasoning and Codex reasoning summaries
+  are persisted as `thinking` transcript messages but excluded from provider
+  conversation replay. Session and transcript rows live in `agent_sessions` and
+  `agent_messages`; an interrupted server process marks active sessions failed
+  so they can be resumed explicitly.
 - `src/openai.ts` and `src/openrouter.ts` manage authenticated provider PKCE
   connections and validate manually supplied keys against OpenAI `/v1/me` and
   OpenRouter `/api/v1/key`, respectively. OpenAI OAuth persists the access and

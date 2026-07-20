@@ -5,21 +5,7 @@ import {
   expectRefreshToRemainSilent,
   requestUrl,
 } from "./controller-test-helpers.ts";
-
-const SESSION = {
-  createdAt: 1,
-  credentialId: "credential-1",
-  id: "session-1",
-  messages: [],
-  model: "gpt-5-codex",
-  provider: "openai",
-  reasoningEffort: null,
-  runnerId: "runner-1",
-  status: "idle",
-  title: "Fix the selects",
-  updatedAt: 2,
-  workingDirectory: ".",
-};
+import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
 test("an unchanged session refresh does not notify the view", async () => {
   await expectRefreshToRemainSilent(
@@ -29,8 +15,8 @@ test("an unchanged session refresh does not notify the view", async () => {
       return Promise.resolve(
         Response.json(
           path === SESSIONS_PATH
-            ? { sessions: [{ ...SESSION, messages: undefined }] }
-            : SESSION,
+            ? { sessions: [{ ...TEST_SESSION_DETAIL, messages: undefined }] }
+            : TEST_SESSION_DETAIL,
         ),
       );
     },

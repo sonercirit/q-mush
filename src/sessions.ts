@@ -13,6 +13,7 @@ import {
   ChatCompletionsAgentModel,
   type AgentProviderCredential,
 } from "./agent-model.ts";
+import { createAgentSystemPrompt } from "./agent-prompt.ts";
 import { isRecord, type AuthenticatedUser } from "./auth-model.ts";
 import type { GoogleAuth } from "./auth.ts";
 import { withAuthenticatedUser } from "./authenticated-request.ts";
@@ -40,6 +41,7 @@ import {
   RUNNER_DIRECTORY_COMMAND,
 } from "./runner-directory-model.ts";
 import type { RunnerIntegration } from "./runners.ts";
+import { loadSessionAgentFile } from "./session-agent-file.ts";
 import type { AgentSessionDetail } from "./session-model.ts";
 import { SessionStore, type CreateAgentSession } from "./session-store.ts";
 
@@ -67,6 +69,7 @@ interface AgentModelFactoryOptions {
   readonly model: string;
   readonly provider: ProviderId;
   readonly reasoningEffort: AgentReasoningEffort | null;
+  readonly systemPrompt: string;
 }
 
 type AgentModelFactory = (options: AgentModelFactoryOptions) => AgentModel;
@@ -593,11 +596,20 @@ class DrizzleSessionIntegration implements SessionIntegration {
     this.#runtimes.set(detail.id, controller);
 
     try {
+      const agentFile = await loadSessionAgentFile(
+        this.#broker,
+        detail,
+        controller.signal,
+      );
+
+      this.#store.setAgentFile(detail.id, agentFile, this.#now());
+
       const model = this.#modelFactory({
         credential,
         model: detail.model,
         provider: detail.provider,
         reasoningEffort: detail.reasoningEffort,
+        systemPrompt: createAgentSystemPrompt(agentFile),
       });
       await runAgentLoop({
         executeTool: (call) => {

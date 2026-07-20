@@ -1,10 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { dirname } from "node:path";
+import { writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { RUNNER_AGENT_FILE_COMMAND } from "../agent-file.ts";
 import {
   executeRunnerCommand,
   readRunnerCommand,
   readRunnerCommandStatus,
 } from "../runner-command.ts";
+import { useTemporaryDirectories } from "./temporary-directories.ts";
+
+const temporaryDirectory = useTemporaryDirectories("q-mush-command-test-");
 
 describe("runner work protocol", () => {
   test("reads command cancellation status", () => {
@@ -26,6 +31,25 @@ describe("runner work protocol", () => {
 
     expect(command).toEqual(expected);
     expect(await executeRunnerCommand(command)).toStartWith("Error:");
+  });
+
+  test("loads the preferred workspace agent file for the server", async () => {
+    const root = await temporaryDirectory();
+    await writeFile(join(root, "AGENTS.md"), "Preferred instructions");
+    await writeFile(join(root, "CLAUDE.md"), "Ignored instructions");
+
+    const output = await executeRunnerCommand({
+      arguments: {},
+      id: "agent-file-command",
+      sessionId: "session-1",
+      tool: RUNNER_AGENT_FILE_COMMAND,
+      workingDirectory: root,
+    });
+
+    expect(JSON.parse(output)).toEqual({
+      content: "Preferred instructions",
+      name: "AGENTS.md",
+    });
   });
 
   test("executes directory-browser commands outside an agent workspace", async () => {

@@ -1,4 +1,5 @@
 import type { AgentReasoningEffort } from "./agent-configuration.ts";
+import type { AgentFile } from "./agent-file.ts";
 import type { AgentToolCall } from "./agent-loop.ts";
 import type { ProviderId } from "./provider-credential-store.ts";
 
@@ -33,5 +34,6 @@ export interface AgentSessionSummary {
 }
 
 export interface AgentSessionDetail extends AgentSessionSummary {
+  readonly agentFile: AgentFile | null;
   readonly messages: readonly AgentSessionMessage[];
 }

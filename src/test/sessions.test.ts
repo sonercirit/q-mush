@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentModelCatalog } from "../agent-configuration.ts";
+import { RUNNER_AGENT_FILE_COMMAND } from "../agent-file.ts";
 import type {
   AgentConversationMessage,
   AgentModel,
@@ -16,7 +17,10 @@ import {
   SESSION_MODELS_PATH,
   SESSIONS_PATH,
 } from "../routes.ts";
-import { RunnerCommandBroker } from "../runner-command-broker.ts";
+import {
+  RunnerCommandBroker,
+  type RunnerToolCommand,
+} from "../runner-command-broker.ts";
 import { createRunnerIntegration } from "../runners.ts";
 import { createSessionIntegration } from "../sessions.ts";
 import {
@@ -144,6 +148,7 @@ async function connectedSetup(
   ];
   const selectedModels: string[] = [];
   const selectedReasoningEfforts: (string | null)[] = [];
+  const selectedSystemPrompts: string[] = [];
   const sessions = createSessionIntegration(
     auth,
     runners,
@@ -159,17 +164,25 @@ async function connectedSetup(
         credential: selectedCredential,
         model: selectedModel,
         reasoningEffort,
+        systemPrompt,
       }) => {
         expect(selectedCredential.secret).toBe("provider-secret");
         selectedModels.push(selectedModel);
         selectedReasoningEfforts.push(reasoningEffort);
+        selectedSystemPrompts.push(systemPrompt);
         return model;
       },
       now: () => TEST_NOW,
       randomId: () => takeValue(ids, "The session test ran out of IDs"),
     },
   );
-  return { database, selectedModels, selectedReasoningEfforts, sessions };
+  return {
+    database,
+    selectedModels,
+    selectedReasoningEfforts,
+    selectedSystemPrompts,
+    sessions,
+  };
 }
 
 function createSessionRequest(
@@ -207,6 +220,15 @@ async function takeRunnerCommand(
   return response;
 }
 
+async function expectRunnerCommand(
+  sessions: ReturnType<typeof createSessionIntegration>,
+  expected: RunnerToolCommand,
+  missingMessage: string,
+): Promise<void> {
+  const response = await takeRunnerCommand(sessions, missingMessage);
+  expect(await response.json()).toEqual({ command: expected });
+}
+
 function completeRunnerCommand(
   sessions: ReturnType<typeof createSessionIntegration>,
   output: string,
@@ -215,6 +237,26 @@ function completeRunnerCommand(
     createRunnerRequest(RUNNER_COMMAND_PATH, RUNNER_TOKEN, { output }),
     RUNNER_COMMAND_ID,
   );
+}
+
+async function completeAgentFileLookup(
+  sessions: ReturnType<typeof createSessionIntegration>,
+  agentFile: unknown = null,
+): Promise<void> {
+  await expectRunnerCommand(
+    sessions,
+    {
+      arguments: {},
+      id: RUNNER_COMMAND_ID,
+      sessionId: SESSION_ID,
+      tool: RUNNER_AGENT_FILE_COMMAND,
+      workingDirectory: "/work/project",
+    },
+    "The runner did not receive the agent-file command",
+  );
+  expect(
+    (await completeRunnerCommand(sessions, JSON.stringify(agentFile))).status,
+  ).toBe(204);
 }
 
 async function commandActivity(
@@ -243,6 +285,7 @@ async function expectSessionReaches(
   status: string,
 ): Promise<void> {
   expect(response.status).toBe(201);
+  await completeAgentFileLookup(sessions);
   await waitFor(() => sessionDetail(sessions), hasStatus(status));
 }
 
@@ -257,6 +300,35 @@ async function sessionDetail(
 }
 
 describe("agent sessions", () => {
+  test("loads the workspace agent file before starting the model", async () => {
+    const model = new ScriptedAgentModel([
+      { content: "Instructions followed.", toolCalls: [] },
+    ]);
+    const setup = await connectedSetup(model);
+    const createResponse = await setup.sessions.collection(
+      createSessionRequest(),
+    );
+    expect(createResponse.status).toBe(201);
+    await completeAgentFileLookup(setup.sessions, {
+      content: "Use the repository test command.",
+      name: "CLAUDE.md",
+    });
+    await waitFor(() => sessionDetail(setup.sessions), hasStatus("idle"));
+
+    expect(setup.selectedSystemPrompts).toHaveLength(1);
+    expect(setup.selectedSystemPrompts[0]).toContain("CLAUDE.md");
+    expect(setup.selectedSystemPrompts[0]).toContain(
+      "Use the repository test command.",
+    );
+    expect(await sessionDetail(setup.sessions)).toMatchObject({
+      agentFile: {
+        content: "Use the repository test command.",
+        name: "CLAUDE.md",
+      },
+    });
+    setup.database.$client.close();
+  });
+
   test("spawns a session, executes tools on its runner, and accepts follow-ups", async () => {
     const model = new ScriptedAgentModel([
       {
@@ -284,6 +356,7 @@ describe("agent sessions", () => {
       status: "queued",
       title: "Inspect README.md",
     });
+    await completeAgentFileLookup(sessions);
 
     const workResponse = await takeRunnerCommand(
       sessions,
@@ -329,6 +402,7 @@ describe("agent sessions", () => {
       SESSION_ID,
     );
     expect(followUp.status).toBe(202);
+    await completeAgentFileLookup(sessions);
     const continued = await waitFor(
       () => sessionDetail(sessions),
       (value) =>
@@ -353,20 +427,17 @@ describe("agent sessions", () => {
       ),
       RUNNER_ID,
     );
-    const workResponse = await takeRunnerCommand(
+    await expectRunnerCommand(
       sessions,
-      "The runner did not receive a directory command",
-    );
-
-    expect(await workResponse.json()).toEqual({
-      command: {
+      {
         arguments: {},
         id: RUNNER_COMMAND_ID,
         sessionId: `directory-picker:${TEST_USER_ID}`,
         tool: "list_directories",
         workingDirectory: "~/projects",
       },
-    });
+      "The runner did not receive a directory command",
+    );
 
     const listing = {
       directories: [{ name: "q-mush", path: "/home/mush/projects/q-mush" }],

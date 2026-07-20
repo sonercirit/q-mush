@@ -1,4 +1,5 @@
-import { AGENT_SYSTEM_PROMPT } from "./agent-prompt.ts";
+import type { AgentFile } from "./agent-file.ts";
+import { createAgentSystemPrompt } from "./agent-prompt.ts";
 import { AGENT_TOOLS } from "./agent-tools.ts";
 import { createElement, type JsxNode } from "./jsx.ts";
 import type { AgentSessionMessage } from "./session-model.ts";
@@ -118,11 +119,12 @@ function renderMessage(message: AgentSessionMessage): JsxNode {
 
 export function renderSessionTranscript(
   messages: readonly AgentSessionMessage[],
+  agentFile: AgentFile | null,
 ): JsxNode {
   return [
     renderTranscriptNote({
       classes: "border-amber-300/20 bg-amber-300/10",
-      content: AGENT_SYSTEM_PROMPT,
+      content: createAgentSystemPrompt(agentFile),
       label: "System prompt",
       labelClasses: "text-amber-200",
     }),

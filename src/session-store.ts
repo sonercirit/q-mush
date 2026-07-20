@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, inArray, type SQL } from "drizzle-orm";
+import { readAgentFile, type AgentFile } from "./agent-file.ts";
 import {
   readAgentToolCalls,
   type AgentConversationMessage,
@@ -43,6 +44,14 @@ function activeSessionCondition(filter: SessionFilter): SQL | undefined {
       ? undefined
       : eq(agentSessions.userId, filter.userId),
   );
+}
+
+function requireStoredSession<Value>(stored: Value | undefined): Value {
+  if (stored === undefined) {
+    throw new Error("The agent session no longer exists");
+  }
+
+  return stored;
 }
 
 function sessionSelection() {
@@ -257,6 +266,7 @@ export class SessionStore {
 
     return {
       ...summarizeSession(stored),
+      agentFile: this.#agentFile(sessionId),
       messages: this.#messages(sessionId),
     };
   }
@@ -302,6 +312,27 @@ export class SessionStore {
     }
 
     return conversation;
+  }
+
+  setAgentFile(
+    sessionId: string,
+    agentFile: AgentFile | null,
+    now: number,
+  ): void {
+    this.#database
+      .update(agentSessions)
+      .set({
+        agentFileContent: agentFile?.content ?? null,
+        agentFileName: agentFile?.name ?? null,
+        ...updatedAuditFields(SYSTEM_ID, now),
+      })
+      .where(
+        and(
+          activeSessionCondition({ id: sessionId }),
+          eq(agentSessions.status, "running"),
+        ),
+      )
+      .run();
   }
 
   appendAgentMessage(
@@ -436,15 +467,13 @@ export class SessionStore {
     now: number,
   ): void {
     this.#database.transaction((transaction) => {
-      const session = transaction
-        .select({ userId: agentSessions.userId })
-        .from(agentSessions)
-        .where(activeSessionCondition({ id: sessionId }))
-        .get();
-
-      if (session === undefined) {
-        throw new Error("The agent session no longer exists");
-      }
+      const session = requireStoredSession(
+        transaction
+          .select({ userId: agentSessions.userId })
+          .from(agentSessions)
+          .where(activeSessionCondition({ id: sessionId }))
+          .get(),
+      );
 
       transaction
         .insert(agentMessages)
@@ -469,6 +498,24 @@ export class SessionStore {
       .select(sessionSelection())
       .from(agentSessions)
       .where(activeSessionCondition(filter));
+  }
+
+  #agentFile(sessionId: string): AgentFile | null {
+    const condition = activeSessionCondition({ id: sessionId });
+    const stored = requireStoredSession(
+      this.#database
+        .select({
+          content: agentSessions.agentFileContent,
+          name: agentSessions.agentFileName,
+        })
+        .from(agentSessions)
+        .where(condition)
+        .get(),
+    );
+
+    return readAgentFile(
+      stored.content === null && stored.name === null ? null : stored,
+    );
   }
 
   #messages(sessionId: string): readonly AgentSessionMessage[] {
