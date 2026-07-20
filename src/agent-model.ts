@@ -6,6 +6,7 @@ import type {
   AgentToolCall,
 } from "./agent-loop.ts";
 import { AGENT_SYSTEM_PROMPT } from "./agent-prompt.ts";
+import { AGENT_TOOLS } from "./agent-tools.ts";
 import { isRecord, readRequiredArray } from "./auth-model.ts";
 import { readOpenAiOAuthCredential } from "./openai-credential.ts";
 import type {
@@ -33,86 +34,6 @@ interface ChatCompletionsAgentModelOptions {
   readonly provider: ProviderId;
   readonly reasoningEffort?: AgentReasoningEffort | null;
 }
-
-const STRING_PARAMETER = { type: "string" } as const;
-
-function toolDefinition(options: {
-  readonly description: string;
-  readonly name: string;
-  readonly properties: Readonly<Record<string, unknown>>;
-  readonly required?: readonly string[];
-}) {
-  return {
-    function: {
-      description: options.description,
-      name: options.name,
-      parameters: {
-        additionalProperties: false,
-        properties: options.properties,
-        ...(options.required === undefined
-          ? {}
-          : { required: options.required }),
-        type: "object",
-      },
-    },
-    type: "function",
-  } as const;
-}
-
-const AGENT_TOOLS = [
-  toolDefinition({
-    description:
-      "Read a UTF-8 text file in the workspace. Use offset and limit for large files.",
-    name: "read_file",
-    properties: {
-      limit: { maximum: 2000, minimum: 1, type: "integer" },
-      offset: { minimum: 1, type: "integer" },
-      path: STRING_PARAMETER,
-    },
-    required: ["path"],
-  }),
-  toolDefinition({
-    description:
-      "List files recursively from a workspace-relative path. Common dependency and VCS directories are not traversed.",
-    name: "list_files",
-    properties: { path: STRING_PARAMETER },
-  }),
-  toolDefinition({
-    description:
-      "Search UTF-8 files for a literal string and return matching file names, line numbers, and lines.",
-    name: "search_files",
-    properties: { path: STRING_PARAMETER, query: STRING_PARAMETER },
-    required: ["query"],
-  }),
-  toolDefinition({
-    description:
-      "Write a complete UTF-8 file, creating parent directories when necessary.",
-    name: "write_file",
-    properties: { content: STRING_PARAMETER, path: STRING_PARAMETER },
-    required: ["path", "content"],
-  }),
-  toolDefinition({
-    description:
-      "Replace one exact, uniquely occurring text block in a UTF-8 file.",
-    name: "edit_file",
-    properties: {
-      newText: STRING_PARAMETER,
-      oldText: STRING_PARAMETER,
-      path: STRING_PARAMETER,
-    },
-    required: ["path", "oldText", "newText"],
-  }),
-  toolDefinition({
-    description:
-      "Run a shell command in the workspace and return bounded stdout, stderr, and the exit status.",
-    name: "run_command",
-    properties: {
-      command: STRING_PARAMETER,
-      timeoutSeconds: { maximum: 300, minimum: 1, type: "integer" },
-    },
-    required: ["command"],
-  }),
-] as const;
 
 function providerName(provider: ProviderId): string {
   return provider === "openai" ? "OpenAI" : "OpenRouter";
@@ -440,6 +361,34 @@ function readCodexSummary(value: unknown): readonly string[] {
   });
 }
 
+function readCodexToolCall(
+  item: Readonly<Record<string, unknown>>,
+): AgentToolCall {
+  const arguments_ = item["arguments"];
+  const id = item["call_id"];
+  const name = item["name"];
+
+  if (
+    typeof arguments_ !== "string" ||
+    typeof id !== "string" ||
+    typeof name !== "string"
+  ) {
+    throw new Error("The Codex model returned an invalid tool call");
+  }
+
+  return { arguments: arguments_, id, name };
+}
+
+function readCodexOutputItem(
+  value: unknown,
+): Readonly<Record<string, unknown>> {
+  if (!isRecord(value)) {
+    throw new Error("The Codex model returned an invalid output item");
+  }
+
+  return value;
+}
+
 function readCodexTurn(value: unknown): AgentModelTurn {
   const output = readRequiredArray(
     value,
@@ -450,27 +399,13 @@ function readCodexTurn(value: unknown): AgentModelTurn {
   const thinking: string[] = [];
   const toolCalls: AgentToolCall[] = [];
 
-  for (const item of output) {
-    if (!isRecord(item)) {
-      throw new Error("The Codex model returned an invalid output item");
-    }
+  for (const value of output) {
+    const item = readCodexOutputItem(value);
 
     if (item["type"] === "reasoning") {
       thinking.push(...readCodexSummary(item["summary"]));
     } else if (item["type"] === "function_call") {
-      const arguments_ = item["arguments"];
-      const id = item["call_id"];
-      const name = item["name"];
-
-      if (
-        typeof arguments_ !== "string" ||
-        typeof id !== "string" ||
-        typeof name !== "string"
-      ) {
-        throw new Error("The Codex model returned an invalid tool call");
-      }
-
-      toolCalls.push({ arguments: arguments_, id, name });
+      toolCalls.push(readCodexToolCall(item));
     } else if (item["type"] === "message") {
       const content = item["content"];
 
@@ -493,6 +428,50 @@ function readCodexTurn(value: unknown): AgentModelTurn {
   }
 
   return { content: text.join(""), thinking: thinking.join("\n\n"), toolCalls };
+}
+
+function readCodexOutputIndex(
+  event: Readonly<Record<string, unknown>>,
+): number {
+  const outputIndex = event["output_index"];
+
+  if (
+    typeof outputIndex !== "number" ||
+    !Number.isSafeInteger(outputIndex) ||
+    outputIndex < 0
+  ) {
+    throw new Error("The Codex model returned an invalid output index");
+  }
+
+  return outputIndex;
+}
+
+function updateStreamedCodexToolCalls(
+  event: Readonly<Record<string, unknown>>,
+  toolCalls: Map<number, AgentToolCall>,
+): void {
+  if (event["type"] === "response.output_item.added") {
+    const item = readCodexOutputItem(event["item"]);
+
+    if (item["type"] === "function_call") {
+      toolCalls.set(readCodexOutputIndex(event), readCodexToolCall(item));
+    }
+
+    return;
+  }
+
+  const outputIndex = readCodexOutputIndex(event);
+  const call = toolCalls.get(outputIndex);
+  const delta = event["delta"];
+
+  if (call === undefined || typeof delta !== "string") {
+    throw new Error("The Codex model returned an invalid tool-call delta");
+  }
+
+  toolCalls.set(outputIndex, {
+    ...call,
+    arguments: call.arguments + delta,
+  });
 }
 
 function appendCodexDelta(
@@ -520,6 +499,7 @@ async function readCodexEventStream(
 
   const streamedText: string[] = [];
   const streamedThinking: string[] = [];
+  const streamedToolCalls = new Map<number, AgentToolCall>();
 
   for (const block of body.replaceAll("\r\n", "\n").split("\n\n")) {
     const data = block
@@ -552,6 +532,12 @@ async function readCodexEventStream(
           turn.thinking.length === 0 && streamedThinking.length > 0
             ? streamedThinking.join("")
             : turn.thinking,
+        toolCalls:
+          turn.toolCalls.length === 0 && streamedToolCalls.size > 0
+            ? [...streamedToolCalls.entries()]
+                .sort(([left], [right]) => left - right)
+                .map(([, call]) => call)
+            : turn.toolCalls,
       };
     }
 
@@ -560,6 +546,14 @@ async function readCodexEventStream(
       (event["type"] === "response.failed" || event["type"] === "error")
     ) {
       throw new Error("The Codex model failed to complete the request");
+    }
+
+    if (
+      isRecord(event) &&
+      (event["type"] === "response.output_item.added" ||
+        event["type"] === "response.function_call_arguments.delta")
+    ) {
+      updateStreamedCodexToolCalls(event, streamedToolCalls);
     }
 
     if (

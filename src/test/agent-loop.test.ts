@@ -26,7 +26,7 @@ describe("first-party agent loop", () => {
     const readCall = {
       arguments: '{"path":"README.md"}',
       id: "call-1",
-      name: "read_file",
+      name: "read",
     };
     const assistantMessage = {
       content: "I will inspect the project.",
@@ -37,7 +37,7 @@ describe("first-party agent loop", () => {
       content: "# Q Mush",
       role: "tool" as const,
       toolCallId: "call-1",
-      toolName: "read_file",
+      toolName: "read",
     };
     const model = new ScriptedAgentModel([
       {
@@ -57,7 +57,7 @@ describe("first-party agent loop", () => {
       },
     );
 
-    expect(executed).toEqual(["read_file:README.md"]);
+    expect(executed).toEqual(["read:README.md"]);
     expect(recorded).toEqual([
       {
         content: "I should read the project documentation first.",
@@ -78,9 +78,7 @@ describe("first-party agent loop", () => {
     const model = new ScriptedAgentModel([
       {
         content: "",
-        toolCalls: [
-          { arguments: "not-json", id: "bad-call", name: "write_file" },
-        ],
+        toolCalls: [{ arguments: "not-json", id: "bad-call", name: "write" }],
       },
       { content: "I corrected the request.", toolCalls: [] },
     ]);
@@ -95,7 +93,7 @@ describe("first-party agent loop", () => {
       content: "Error: the tool arguments were not a JSON object.",
       role: "tool",
       toolCallId: "bad-call",
-      toolName: "write_file",
+      toolName: "write",
     });
   });
 });

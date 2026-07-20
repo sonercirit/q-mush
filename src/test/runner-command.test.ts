@@ -18,7 +18,7 @@ describe("runner work protocol", () => {
       arguments: { path: "missing.txt" },
       id: "command-1",
       sessionId: "session-1",
-      tool: "read_file",
+      tool: "read",
       workingDirectory: "/missing-workspace",
     };
     const command = readRunnerCommand({ command: expected });
@@ -35,7 +35,7 @@ describe("runner work protocol", () => {
         arguments: { command: "sleep 10" },
         id: "command-2",
         sessionId: "session-1",
-        tool: "run_command",
+        tool: "bash",
         workingDirectory: process.cwd(),
       },
       controller.signal,

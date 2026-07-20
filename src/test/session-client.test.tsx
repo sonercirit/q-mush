@@ -98,6 +98,30 @@ test("renders the system prompt and model thinking in a transcript", () => {
           toolCalls: [],
           toolName: null,
         },
+        {
+          content: "",
+          createdAt: 3,
+          id: "assistant-1",
+          role: "assistant",
+          toolCallId: null,
+          toolCalls: [
+            {
+              arguments: '{"path":"README.md","offset":1}',
+              id: "call-1",
+              name: "read",
+            },
+          ],
+          toolName: null,
+        },
+        {
+          content: "# Q Mush",
+          createdAt: 4,
+          id: "tool-1",
+          role: "tool",
+          toolCallId: "call-1",
+          toolCalls: [],
+          toolName: "read",
+        },
       ],
       model: "gpt-5-codex",
       provider: "openai",
@@ -118,8 +142,19 @@ test("renders the system prompt and model thinking in a transcript", () => {
   expect(html).toContain(
     "You are Q Mush, a careful coding agent operating in a user-selected workspace.",
   );
+  expect(html).toContain("Tool definitions");
+  expect(html).toContain('"name": "read"');
+  expect(html).toContain('"name": "bash"');
+  expect(html).toContain('"name": "edit"');
+  expect(html).toContain('"name": "write"');
+  expect(html).toContain('"name": "parallel"');
   expect(html).toContain("Thinking");
   expect(html).toContain("I should inspect the existing files first.");
+  expect(html).toContain("Tool call · read");
+  expect(html).toContain("Tool result · read");
+  expect(html).toContain("call-1");
+  expect(html).toContain('{"path":"README.md","offset":1}');
+  expect(html).toContain("# Q Mush");
 });
 
 test("renders model and reasoning effort as selects", () => {

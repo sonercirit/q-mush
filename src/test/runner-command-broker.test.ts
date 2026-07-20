@@ -14,7 +14,7 @@ describe("runner command broker", () => {
     const command = {
       arguments: { path: "README.md" },
       sessionId: SESSION_ID,
-      tool: "read_file",
+      tool: "read",
       workingDirectory: "/work/project",
     };
     const result = broker.dispatch({ ...command, runnerId: RUNNER_ID });
@@ -37,7 +37,7 @@ describe("runner command broker", () => {
       arguments: { command: "sleep 10" },
       runnerId: RUNNER_ID,
       sessionId: SESSION_ID,
-      tool: "run_command",
+      tool: "bash",
       workingDirectory: "/work/project",
     });
     broker.cancelSession(SESSION_ID);

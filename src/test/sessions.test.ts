@@ -228,7 +228,7 @@ describe("agent sessions", () => {
           {
             arguments: '{"path":"README.md"}',
             id: "model-tool-1",
-            name: "read_file",
+            name: "read",
           },
         ],
       },
@@ -262,7 +262,7 @@ describe("agent sessions", () => {
         arguments: { path: "README.md" },
         id: "agent-command-1",
         sessionId: SESSION_ID,
-        tool: "read_file",
+        tool: "read",
         workingDirectory: "/work/project",
       },
     });

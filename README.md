@@ -115,11 +115,13 @@ the control center. Select an online computer and credential; Q Mush discovers
 that credential's available agent models and model-specific reasoning efforts.
 Then select a model, reasoning effort (or the model default), working directory
 on that computer, and task. Q Mush implements its own model/tool loop without an
-external agent framework. It can read, list, search, write, and exactly edit
-workspace files, plus run bounded shell commands. Session transcripts and status
-survive page reloads; a ready, stopped, or failed session accepts follow-up
-instructions. **Stop session** aborts the model request and cancels an active
-runner command.
+external agent framework. It exposes Pi's four base tool interfaces—`read`,
+`bash`, `edit`, and `write`—plus a `parallel` wrapper for independent calls,
+with batched exact edits and bounded file and command output. Transcripts show
+system instructions, complete tool definitions, reasoning summaries, tool calls,
+and tool results. Session transcripts and status survive page reloads; a ready,
+stopped, or failed session accepts follow-up instructions. **Stop session**
+aborts the model request and cancels an active runner command.
 
 The runner executes tools with the runner process's local account permissions.
 File tools reject paths outside the selected workspace, while shell commands are

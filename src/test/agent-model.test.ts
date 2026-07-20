@@ -33,9 +33,9 @@ describe("chat completions agent model", () => {
   test("sends the native tool protocol to OpenRouter and reads tool calls", async () => {
     const capture = new RequestCapture();
     const expectedTool = {
-      arguments: '{"path":"src"}',
+      arguments: '{"path":"src/index.ts"}',
       id: "tool-1",
-      name: "list_files",
+      name: "read",
     };
     const model = respondingModel(
       {
@@ -96,8 +96,21 @@ describe("chat completions agent model", () => {
       reasoning: { effort: "high", summary: "auto" },
       tool_choice: "auto",
     });
-    expect(JSON.stringify(body)).toContain("read_file");
-    expect(JSON.stringify(body)).toContain("run_command");
+    const serializedBody = JSON.stringify(body);
+    const toolNames =
+      isRecord(body) && Array.isArray(body["tools"])
+        ? body["tools"].map((tool) =>
+            isRecord(tool) && isRecord(tool["function"])
+              ? tool["function"]["name"]
+              : undefined,
+          )
+        : [];
+    expect(toolNames).toEqual(["read", "bash", "edit", "write", "parallel"]);
+    expect(serializedBody).toContain('"edits"');
+    expect(serializedBody).toContain('"tool_uses"');
+    expect(serializedBody).toContain('"timeout"');
+    expect(serializedBody).not.toContain("read_file");
+    expect(serializedBody).not.toContain("list_files");
   });
 
   test("uses the OpenAI chat-completions reasoning parameter", async () => {
@@ -176,7 +189,7 @@ describe("chat completions agent model", () => {
           {
             arguments: '{"path":"README.md"}',
             id: "previous-call",
-            name: "read_file",
+            name: "read",
           },
         ],
       },
@@ -184,7 +197,7 @@ describe("chat completions agent model", () => {
         content: "# Project",
         role: "tool" as const,
         toolCallId: "previous-call",
-        toolName: "read_file",
+        toolName: "read",
       },
     ];
     expect(await model.complete(conversation)).toEqual({
@@ -216,7 +229,7 @@ describe("chat completions agent model", () => {
     expect(JSON.stringify(body)).toContain("previous-call");
   });
 
-  test("uses streamed Codex text when the completed response omits output", async () => {
+  test("uses streamed Codex output when the completed response omits it", async () => {
     const model = new ChatCompletionsAgentModel({
       credential: {
         accountId: "chatgpt-account",
@@ -231,6 +244,9 @@ describe("chat completions agent model", () => {
               'event: response.reasoning_summary_text.delta\ndata: {"type":"response.reasoning_summary_text.delta","delta":" the request."}',
               'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"Hello"}',
               'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":" there."}',
+              'event: response.output_item.added\ndata: {"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"function-1","call_id":"call-1","name":"read","arguments":""}}',
+              'event: response.function_call_arguments.delta\ndata: {"type":"response.function_call_arguments.delta","output_index":1,"delta":"{\\"path\\":"}',
+              'event: response.function_call_arguments.delta\ndata: {"type":"response.function_call_arguments.delta","output_index":1,"delta":"\\"src/index.ts\\"}"}',
               'event: response.completed\ndata: {"type":"response.completed","response":{"output":[]}}',
               "data: [DONE]",
               "",
@@ -245,7 +261,13 @@ describe("chat completions agent model", () => {
     expect(await model.complete([{ content: "Hello", role: "user" }])).toEqual({
       content: "Hello there.",
       thinking: "I considered the request.",
-      toolCalls: [],
+      toolCalls: [
+        {
+          arguments: '{"path":"src/index.ts"}',
+          id: "call-1",
+          name: "read",
+        },
+      ],
     });
   });
 

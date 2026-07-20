@@ -2,7 +2,6 @@ import {
   reasoningEffortLabel,
   type AgentModelCatalog,
 } from "./agent-configuration.ts";
-import { AGENT_SYSTEM_PROMPT } from "./agent-prompt.ts";
 import { renderRetryError } from "./client-controls.tsx";
 import { createElement, type JsxNode } from "./jsx.ts";
 import type {
@@ -14,10 +13,10 @@ import type { RunnerViewState } from "./runner-client.tsx";
 import type { RunnerSummary } from "./runner-model.ts";
 import type {
   AgentSessionDetail,
-  AgentSessionMessage,
   AgentSessionStatus,
   AgentSessionSummary,
 } from "./session-model.ts";
+import { renderSessionTranscript } from "./session-transcript.tsx";
 
 export interface SessionDraft {
   readonly credential: string;
@@ -427,76 +426,6 @@ function renderSessionList(state: SessionViewState): JsxNode {
   );
 }
 
-function renderTranscriptNote(options: {
-  readonly classes: string;
-  readonly content: string;
-  readonly label: string;
-  readonly labelClasses: string;
-}): JsxNode {
-  return (
-    <li className={`rounded-xl border p-4 ${options.classes}`}>
-      <p
-        className={`text-xs font-semibold tracking-wide uppercase ${options.labelClasses}`}
-      >
-        {options.label}
-      </p>
-      <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-200">
-        {options.content}
-      </p>
-    </li>
-  );
-}
-
-function renderMessage(message: AgentSessionMessage): JsxNode {
-  if (message.role === "thinking") {
-    return renderTranscriptNote({
-      classes: "border-violet-300/20 bg-violet-300/10",
-      content: message.content,
-      label: "Thinking",
-      labelClasses: "text-violet-200",
-    });
-  }
-
-  if (message.role === "tool") {
-    return (
-      <li className="rounded-xl border border-white/10 bg-slate-950/80 p-4">
-        <p className="text-xs font-semibold tracking-wide text-cyan-300 uppercase">
-          {message.toolName ?? "Tool result"}
-        </p>
-        <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap text-xs leading-5 text-slate-300">
-          {message.content}
-        </pre>
-      </li>
-    );
-  }
-
-  const user = message.role === "user";
-  const system = message.role === "system";
-  return (
-    <li
-      className={`rounded-2xl border p-4 ${user ? "ml-8 border-emerald-300/20 bg-emerald-300/10" : system ? "border-rose-300/20 bg-rose-300/10" : "mr-8 border-white/10 bg-white/[0.04]"}`}
-    >
-      <p className="text-xs font-semibold tracking-wide text-slate-400 uppercase">
-        {user ? "You" : system ? "Session" : "Agent"}
-      </p>
-      {message.content.length > 0 ? (
-        <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-200">
-          {message.content}
-        </p>
-      ) : null}
-      {message.toolCalls.length > 0 ? (
-        <ul className="mt-3 flex flex-wrap gap-2">
-          {message.toolCalls.map((call) => (
-            <li className="rounded-lg border border-cyan-300/20 bg-cyan-300/10 px-2.5 py-1 text-xs text-cyan-200">
-              {`Requested ${call.name}`}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </li>
-  );
-}
-
 function renderDetail(state: SessionViewState): JsxNode {
   if (state.selectedId === undefined) {
     return (
@@ -539,13 +468,7 @@ function renderDetail(state: SessionViewState): JsxNode {
         aria-live="polite"
         className="mt-5 max-h-[36rem] space-y-3 overflow-y-auto pr-1"
       >
-        {renderTranscriptNote({
-          classes: "border-amber-300/20 bg-amber-300/10",
-          content: AGENT_SYSTEM_PROMPT,
-          label: "System prompt",
-          labelClasses: "text-amber-200",
-        })}
-        {detail.messages.map(renderMessage)}
+        {renderSessionTranscript(detail.messages)}
       </ul>
       {!active ? (
         <form className="mt-5 flex gap-3" data-action="send-session-message">

@@ -22,29 +22,31 @@ afterEach(async () => {
 });
 
 describe("runner tools", () => {
-  test("reads, writes, and exactly edits files inside the workspace", async () => {
+  test("reads, writes, and applies Pi-style batched edits in the workspace", async () => {
     const root = await workspace();
 
     expect(
-      await executeRunnerTool(root, "write_file", {
-        content: "hello mushroom\n",
+      await executeRunnerTool(root, "write", {
+        content: "hello mushroom\nsecond line\n",
         path: "notes/message.txt",
       }),
-    ).toContain("Wrote 15 bytes");
+    ).toContain("Wrote 27 bytes");
     expect(
-      await executeRunnerTool(root, "read_file", {
+      await executeRunnerTool(root, "read", {
         path: "notes/message.txt",
       }),
-    ).toBe("hello mushroom\n");
+    ).toBe("hello mushroom\nsecond line\n");
     expect(
-      await executeRunnerTool(root, "edit_file", {
-        newText: "swarm",
-        oldText: "mushroom",
+      await executeRunnerTool(root, "edit", {
+        edits: [
+          { newText: "swarm", oldText: "mushroom" },
+          { newText: "next", oldText: "second" },
+        ],
         path: "notes/message.txt",
       }),
-    ).toContain("Updated notes/message.txt");
+    ).toContain("replaced 2 block(s)");
     expect(await readFile(join(root, "notes/message.txt"), "utf8")).toBe(
-      "hello swarm\n",
+      "hello swarm\nnext line\n",
     );
   });
 
@@ -52,30 +54,66 @@ describe("runner tools", () => {
     const root = await workspace();
 
     const error = await captureRejection(
-      executeRunnerTool(root, "read_file", { path: "../secret.txt" }),
+      executeRunnerTool(root, "read", { path: "../secret.txt" }),
     );
     expect(requireError(error).message).toContain(
       "outside the session workspace",
     );
   });
 
-  test("searches files and runs bounded shell commands", async () => {
+  test("runs bounded bash commands for listing and searching", async () => {
     const root = await workspace();
     await writeFile(join(root, "one.txt"), "alpha\nneedle here\n", "utf8");
     await writeFile(join(root, "two.txt"), "nothing\n", "utf8");
 
-    expect(
-      await executeRunnerTool(root, "search_files", {
-        path: ".",
-        query: "needle",
-      }),
-    ).toContain("one.txt:2:needle here");
-    const commandOutput = await executeRunnerTool(root, "run_command", {
-      command: "printf 'working'; pwd",
-      timeoutSeconds: 5,
+    const commandOutput = await executeRunnerTool(root, "bash", {
+      command: "grep -n needle *.txt; pwd",
+      timeout: 5,
     });
-    expect(commandOutput).toContain("working");
+    expect(commandOutput).toContain("one.txt:2:needle here");
     expect(commandOutput).toContain(root);
     expect(commandOutput).toContain("Exit code: 0");
+  });
+
+  test("runs independent base tools through the parallel wrapper", async () => {
+    const root = await workspace();
+
+    const output = await executeRunnerTool(root, "parallel", {
+      tool_uses: [
+        {
+          parameters: { content: "first", path: "first.txt" },
+          recipient_name: "write",
+        },
+        {
+          parameters: { content: "second", path: "second.txt" },
+          recipient_name: "write",
+        },
+      ],
+    });
+
+    expect(output).toContain('"recipient_name": "write"');
+    expect(output).toContain("Wrote 5 bytes to first.txt");
+    expect(output).toContain("Wrote 6 bytes to second.txt");
+    expect(await readFile(join(root, "first.txt"), "utf8")).toBe("first");
+    expect(await readFile(join(root, "second.txt"), "utf8")).toBe("second");
+  });
+
+  test("rejects overlapping edits without changing the file", async () => {
+    const root = await workspace();
+    const path = join(root, "message.txt");
+    await writeFile(path, "one two three", "utf8");
+
+    const error = await captureRejection(
+      executeRunnerTool(root, "edit", {
+        edits: [
+          { newText: "first", oldText: "one two" },
+          { newText: "second", oldText: "two three" },
+        ],
+        path: "message.txt",
+      }),
+    );
+
+    expect(requireError(error).message).toContain("overlap");
+    expect(await readFile(path, "utf8")).toBe("one two three");
   });
 });

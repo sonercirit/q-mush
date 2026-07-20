@@ -114,16 +114,19 @@ task-specific progress, guesses, or sensitive values.
 - `src/sessions.ts`, `src/session-store.ts`, and `src/agent-model.ts` implement
   persistent first-party coding sessions without an external agent harness. The
   server owns the model/tool loop so provider secrets never enter browser or
-  runner work payloads; `src/runner-command-broker.ts` queues authenticated tool
-  calls, and the runner polls `/api/runner/work`, executes the bounded tools in
-  `src/runner-tools.ts`, and returns results. The control center creates,
-  inspects, follows up, stops, and polls sessions through
-  `src/session-client.tsx` and `src/session-controller.ts`. Poll controllers
-  suppress render notifications when refreshed data has no visible change.
-  Browser rendering defers full-root remounts while a select has focus, flushing
-  on change or focus loss, and periodic polls pause so the native picker stays
-  open. `src/agent-model-discovery.ts` queries the selected credential's
-  provider for compatible models and reasoning metadata;
+  runner work payloads; `src/agent-tools.ts` defines the Pi-compatible `read`,
+  `bash`, `edit`, and `write` base tools plus the `parallel` wrapper,
+  `src/runner-command-broker.ts` queues their authenticated calls, and the
+  runner polls `/api/runner/work`, executes them in `src/runner-tools.ts`, and
+  returns results. `src/session-transcript.tsx` renders the complete tool
+  definitions plus the raw arguments, call ID, name, and result for each tool
+  entry. The control center creates, inspects, follows up, stops, and polls
+  sessions through `src/session-client.tsx` and `src/session-controller.ts`.
+  Poll controllers suppress render notifications when refreshed data has no
+  visible change. Browser rendering defers full-root remounts while a select has
+  focus, flushing on change or focus loss, and periodic polls pause so the
+  native picker stays open. `src/agent-model-discovery.ts` queries the selected
+  credential's provider for compatible models and reasoning metadata;
   `src/agent-configuration.ts` owns shared catalog types, accepted effort
   values, and API fallback models. Model and effort selections are persisted
   with the session. `src/agent-prompt.ts` is the shared source for the model
@@ -236,22 +239,22 @@ task-specific progress, guesses, or sensitive values.
   Bun's user cache, while subsequent runner downloads use the in-process binary
   cache.
 - Agent file tools are confined to the selected runner workspace, including
-  symlink resolution, but `run_command` intentionally has the runner account's
-  full shell permissions and is only rooted at that directory. Stopping a
-  session aborts its model request and causes a polling runner to terminate an
-  active shell command. OpenAI API keys and OpenRouter use chat completions;
-  OpenAI OAuth uses the streaming ChatGPT Codex Responses endpoint and refreshes
-  its encrypted token bundle shortly before expiry. Provider defaults are
+  symlink resolution, but `bash` intentionally has the runner account's full
+  shell permissions and is only rooted at that directory. Stopping a session
+  aborts its model request and causes a polling runner to terminate an active
+  shell command. OpenAI API keys and OpenRouter use chat completions; OpenAI
+  OAuth uses the streaming ChatGPT Codex Responses endpoint and refreshes its
+  encrypted token bundle shortly before expiry. Provider defaults are
   `gpt-4.1-mini`, `openai/gpt-4.1-mini`, and `gpt-5-codex` for OpenAI keys,
   OpenRouter, and OpenAI OAuth respectively; they are API fallbacks and
   preferred discovered defaults when present, not browser catalog sources.
   Browser catalogs come from OpenAI `/v1/models`, OpenRouter
   `/api/v1/models/user`, or the ChatGPT Codex `/models` endpoint. Codex response
-  parsing retains streamed output-text deltas because a completed event may omit
-  its `output` items. OpenAI's standard model list has no reasoning
-  capabilities, while OpenRouter and Codex return model-specific efforts.
-  Optional reasoning uses `reasoning_effort` for OpenAI chat completions and
-  `reasoning.effort` for OpenRouter and Codex Responses.
+  parsing retains streamed output-text and function-call argument deltas because
+  a completed event may omit its `output` items. OpenAI's standard model list
+  has no reasoning capabilities, while OpenRouter and Codex return
+  model-specific efforts. Optional reasoning uses `reasoning_effort` for OpenAI
+  chat completions and `reasoning.effort` for OpenRouter and Codex Responses.
 - Add each new runtime source root and executable entry to
   `knip.production.config.ts`. Add standalone non-TypeScript build entries, such
   as `src/styles.css`, to both Knip configs; keep test files and test-support

@@ -97,9 +97,9 @@ describe("session store", () => {
       role: "assistant" as const,
       toolCalls: [
         {
-          arguments: '{"path":"."}',
+          arguments: '{"command":"ls"}',
           id: "call-1",
-          name: "list_files",
+          name: "bash",
         },
       ],
     };
@@ -107,7 +107,7 @@ describe("session store", () => {
       content: "README.md",
       role: "tool" as const,
       toolCallId: "call-1",
-      toolName: "list_files",
+      toolName: "bash",
     };
     store.appendAgentMessage(SESSION_ID, thinkingMessage, TEST_NOW + 2);
     store.appendAgentMessage(SESSION_ID, assistantMessage, TEST_NOW + 3);

@@ -1,22 +1,22 @@
-import {
-  mkdir,
-  readdir,
-  readFile,
-  realpath,
-  stat,
-  writeFile,
-} from "node:fs/promises";
+import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import {
+  isAgentToolName,
+  isBaseAgentToolName,
+  type BaseAgentToolName,
+} from "./agent-tools.ts";
+import { isRecord } from "./auth-model.ts";
 
 const MAX_FILE_BYTES = 1024 * 1024;
-const MAX_READ_BYTES = 256 * 1024;
+const MAX_READ_OUTPUT_BYTES = 50 * 1024;
+const MAX_READ_LINES = 2_000;
 const MAX_COMMAND_OUTPUT_BYTES = 256 * 1024;
-const MAX_SEARCH_FILES = 1_000;
-const MAX_LIST_ENTRIES = 1_000;
+const MAXIMUM_EDITS = 100;
+const MAXIMUM_PARALLEL_TOOLS = 8;
+const MAX_PARALLEL_TOOL_OUTPUT_BYTES = 50 * 1_024;
 const DEFAULT_COMMAND_TIMEOUT_SECONDS = 30;
 const MAX_COMMAND_TIMEOUT_SECONDS = 300;
-const SKIPPED_DIRECTORIES = new Set([".git", "node_modules"]);
 
 type ToolArguments = Readonly<Record<string, unknown>>;
 
@@ -135,12 +135,6 @@ async function securePath(
   return canonical;
 }
 
-function optionalPathArgument(arguments_: ToolArguments): string {
-  return arguments_["path"] === undefined
-    ? "."
-    : requiredString(arguments_, "path", 4_096);
-}
-
 async function pathArgument(
   root: string,
   arguments_: ToolArguments,
@@ -175,24 +169,70 @@ async function readTextFile(
   return readFile(path, "utf8");
 }
 
-async function readFileTool(
+async function readPathContent(
+  root: string,
+  arguments_: ToolArguments,
+): Promise<{ readonly content: string; readonly path: string }> {
+  const path = await pathArgument(root, arguments_);
+  return { content: await readTextFile(path, MAX_FILE_BYTES), path };
+}
+
+function truncateReadLines(lines: readonly string[]): readonly string[] {
+  const output: string[] = [];
+  let bytes = 0;
+
+  for (const line of lines.slice(0, MAX_READ_LINES)) {
+    const lineBytes =
+      Buffer.byteLength(line, "utf8") + (output.length > 0 ? 1 : 0);
+
+    if (bytes + lineBytes > MAX_READ_OUTPUT_BYTES) {
+      break;
+    }
+
+    output.push(line);
+    bytes += lineBytes;
+  }
+
+  return output;
+}
+
+async function readTool(
   root: string,
   arguments_: ToolArguments,
 ): Promise<string> {
-  const path = await pathArgument(root, arguments_);
-  const content = await readTextFile(path, MAX_READ_BYTES);
+  const { content } = await readPathContent(root, arguments_);
   const offset = optionalInteger(arguments_, "offset", 1, 1, 1_000_000_000);
-  const limit = optionalInteger(arguments_, "limit", 2_000, 1, 2_000);
+  const limit = optionalInteger(
+    arguments_,
+    "limit",
+    MAX_READ_LINES,
+    1,
+    1_000_000_000,
+  );
+  const lines = content.split("\n");
+  const start = offset - 1;
 
-  if (offset === 1 && limit === 2_000) {
-    return content;
+  if (start >= lines.length) {
+    throw new Error(
+      `Offset ${String(offset)} is beyond end of file (${String(lines.length)} lines total)`,
+    );
   }
 
-  const lines = content.split("\n");
-  return lines.slice(offset - 1, offset - 1 + limit).join("\n");
+  const requested = lines.slice(start, start + limit);
+  const shown = truncateReadLines(requested);
+
+  if (shown.length === 0 && requested.length > 0) {
+    return `[Line ${String(offset)} exceeds the ${String(MAX_READ_OUTPUT_BYTES / 1_024)}KB read limit. Use bash to read a bounded segment.]`;
+  }
+
+  const output = shown.join("\n");
+  const nextOffset = start + shown.length + 1;
+  return nextOffset <= lines.length
+    ? `${output}\n\n[Showing lines ${String(offset)}-${String(nextOffset - 1)} of ${String(lines.length)}. Use offset=${String(nextOffset)} to continue.]`
+    : output;
 }
 
-async function writeFileTool(
+async function writeTool(
   root: string,
   arguments_: ToolArguments,
 ): Promise<string> {
@@ -203,136 +243,96 @@ async function writeFileTool(
   return `Wrote ${String(Buffer.byteLength(content))} bytes to ${displayPath(root, path)}.`;
 }
 
-async function editFileTool(
+interface EditReplacement {
+  readonly newText: string;
+  readonly oldText: string;
+}
+
+interface LocatedEdit extends EditReplacement {
+  readonly end: number;
+  readonly start: number;
+}
+
+function editReplacements(
+  arguments_: ToolArguments,
+): readonly EditReplacement[] {
+  const value = arguments_["edits"];
+
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.length > MAXIMUM_EDITS
+  ) {
+    throw new Error("Tool argument edits must contain valid replacements");
+  }
+
+  return value.map((replacement) => {
+    if (!isRecord(replacement)) {
+      throw new Error("Tool argument edits must contain valid replacements");
+    }
+
+    return {
+      newText: requiredString(replacement, "newText", MAX_FILE_BYTES, true),
+      oldText: requiredString(replacement, "oldText", MAX_FILE_BYTES),
+    };
+  });
+}
+
+function locateEdits(
+  content: string,
+  replacements: readonly EditReplacement[],
+): readonly LocatedEdit[] {
+  const located = replacements
+    .map((replacement) => {
+      const start = content.indexOf(replacement.oldText);
+
+      if (start < 0) {
+        throw new Error("The edit text was not found in the file");
+      }
+
+      if (content.includes(replacement.oldText, start + 1)) {
+        throw new Error("The edit text occurs more than once in the file");
+      }
+
+      return {
+        ...replacement,
+        end: start + replacement.oldText.length,
+        start,
+      };
+    })
+    .sort((left, right) => left.start - right.start);
+
+  for (let index = 1; index < located.length; index += 1) {
+    const previous = located[index - 1];
+    const current = located[index];
+
+    if (
+      previous !== undefined &&
+      current !== undefined &&
+      current.start < previous.end
+    ) {
+      throw new Error("The requested edits overlap");
+    }
+  }
+
+  return located;
+}
+
+async function editTool(
   root: string,
   arguments_: ToolArguments,
 ): Promise<string> {
-  const oldText = requiredString(arguments_, "oldText", MAX_FILE_BYTES);
-  const newText = requiredString(arguments_, "newText", MAX_FILE_BYTES, true);
-  const path = await pathArgument(root, arguments_);
-  const content = await readTextFile(path, MAX_FILE_BYTES);
-  const firstIndex = content.indexOf(oldText);
+  const replacements = editReplacements(arguments_);
+  const { content, path } = await readPathContent(root, arguments_);
+  const edits = locateEdits(content, replacements);
+  let updated = content;
 
-  if (firstIndex < 0) {
-    throw new Error("The edit text was not found in the file");
+  for (const edit of [...edits].reverse()) {
+    updated = `${updated.slice(0, edit.start)}${edit.newText}${updated.slice(edit.end)}`;
   }
 
-  if (content.includes(oldText, firstIndex + oldText.length)) {
-    throw new Error("The edit text occurs more than once in the file");
-  }
-
-  const updated = `${content.slice(0, firstIndex)}${newText}${content.slice(firstIndex + oldText.length)}`;
   await writeFile(path, updated, "utf8");
-  return `Updated ${displayPath(root, path)}.`;
-}
-
-interface WalkEntry {
-  readonly path: string;
-  readonly type: "directory" | "file" | "link";
-}
-
-async function walk(
-  start: string,
-  maximumEntries: number,
-): Promise<readonly WalkEntry[]> {
-  const entries: WalkEntry[] = [];
-  const pending = [start];
-
-  while (pending.length > 0 && entries.length < maximumEntries) {
-    const directory = pending.shift();
-
-    if (directory === undefined) {
-      break;
-    }
-
-    const children = await readdir(directory, { withFileTypes: true });
-    children.sort((left, right) => left.name.localeCompare(right.name));
-
-    for (const child of children) {
-      if (entries.length >= maximumEntries) {
-        break;
-      }
-
-      const path = resolve(directory, child.name);
-
-      if (child.isDirectory()) {
-        entries.push({ path, type: "directory" });
-
-        if (!SKIPPED_DIRECTORIES.has(child.name)) {
-          pending.push(path);
-        }
-      } else if (child.isFile()) {
-        entries.push({ path, type: "file" });
-      } else if (child.isSymbolicLink()) {
-        entries.push({ path, type: "link" });
-      }
-    }
-  }
-
-  return entries;
-}
-
-const listFilesTool = async (
-  root: string,
-  arguments_: ToolArguments,
-): Promise<string> => {
-  const path = await securePath(root, optionalPathArgument(arguments_));
-  const details = await stat(path);
-
-  if (!details.isDirectory()) {
-    return displayPath(root, path);
-  }
-
-  const entries = await walk(path, MAX_LIST_ENTRIES);
-  return entries
-    .map(
-      (entry) =>
-        `${displayPath(root, entry.path)}${entry.type === "directory" ? "/" : entry.type === "link" ? "@" : ""}`,
-    )
-    .join("\n");
-};
-
-async function searchFilesTool(
-  root: string,
-  arguments_: ToolArguments,
-): Promise<string> {
-  const query = requiredString(arguments_, "query", 1_000);
-  const start = await securePath(root, optionalPathArgument(arguments_));
-  const details = await stat(start);
-  const candidates = details.isFile()
-    ? [{ path: start, type: "file" as const }]
-    : await walk(start, MAX_SEARCH_FILES);
-  const matches: string[] = [];
-
-  for (const candidate of candidates) {
-    if (candidate.type !== "file" || matches.length >= 500) {
-      continue;
-    }
-
-    let content: string;
-
-    try {
-      content = await readTextFile(candidate.path, MAX_READ_BYTES);
-    } catch {
-      continue;
-    }
-
-    const lines = content.split("\n");
-
-    for (const [index, line] of lines.entries()) {
-      if (line.includes(query)) {
-        matches.push(
-          `${displayPath(root, candidate.path)}:${String(index + 1)}:${line}`,
-        );
-
-        if (matches.length >= 500) {
-          break;
-        }
-      }
-    }
-  }
-
-  return matches.length === 0 ? "No matches found." : matches.join("\n");
+  return `Successfully replaced ${String(edits.length)} block(s) in ${displayPath(root, path)}.`;
 }
 
 async function readLimitedStream(
@@ -368,7 +368,7 @@ async function readLimitedStream(
   return truncated ? `${output}\n[output truncated]` : output;
 }
 
-async function runCommandTool(
+async function bashTool(
   root: string,
   arguments_: ToolArguments,
   signal: AbortSignal | undefined,
@@ -376,7 +376,7 @@ async function runCommandTool(
   const command = requiredString(arguments_, "command", 32_768);
   const timeoutSeconds = optionalInteger(
     arguments_,
-    "timeoutSeconds",
+    "timeout",
     DEFAULT_COMMAND_TIMEOUT_SECONDS,
     1,
     MAX_COMMAND_TIMEOUT_SECONDS,
@@ -425,6 +425,100 @@ async function runCommandTool(
   }
 }
 
+interface ParallelToolUse {
+  readonly parameters: ToolArguments;
+  readonly recipientName: BaseAgentToolName;
+}
+
+function parallelToolUses(
+  arguments_: ToolArguments,
+): readonly ParallelToolUse[] {
+  const value = arguments_["tool_uses"];
+
+  if (
+    !Array.isArray(value) ||
+    value.length < 2 ||
+    value.length > MAXIMUM_PARALLEL_TOOLS
+  ) {
+    throw new Error("Tool argument tool_uses must contain 2 to 8 calls");
+  }
+
+  return value.map((toolUse) => {
+    if (!isRecord(toolUse) || !isRecord(toolUse["parameters"])) {
+      throw new Error("Tool argument tool_uses contains an invalid call");
+    }
+
+    const recipientName = requiredString(toolUse, "recipient_name", 100);
+
+    if (!isBaseAgentToolName(recipientName)) {
+      throw new Error(`Unknown parallel recipient: ${recipientName}`);
+    }
+
+    return { parameters: toolUse["parameters"], recipientName };
+  });
+}
+
+type RunnerTool = (
+  root: string,
+  arguments_: ToolArguments,
+  signal?: AbortSignal,
+) => Promise<string>;
+
+const RUNNER_TOOLS: Readonly<Record<BaseAgentToolName, RunnerTool>> = {
+  bash: bashTool,
+  edit: editTool,
+  read: readTool,
+  write: writeTool,
+};
+
+function truncateParallelOutput(output: string): string {
+  const bytes = Buffer.from(output, "utf8");
+
+  if (bytes.byteLength <= MAX_PARALLEL_TOOL_OUTPUT_BYTES) {
+    return output;
+  }
+
+  let end = MAX_PARALLEL_TOOL_OUTPUT_BYTES;
+
+  while (end > 0 && (bytes[end] ?? 0) >> 6 === 2) {
+    end -= 1;
+  }
+
+  return `${bytes.subarray(0, end).toString("utf8")}\n[parallel output truncated]`;
+}
+
+function parallelError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+const parallelTool: RunnerTool = async (root, arguments_, signal) => {
+  const results = await Promise.all(
+    parallelToolUses(arguments_).map(async (toolUse) => {
+      try {
+        const output = await RUNNER_TOOLS[toolUse.recipientName](
+          root,
+          toolUse.parameters,
+          signal,
+        );
+        return {
+          output: truncateParallelOutput(output),
+          recipient_name: toolUse.recipientName,
+        };
+      } catch (error) {
+        if (signal?.aborted === true) {
+          throw error;
+        }
+
+        return {
+          error: parallelError(error),
+          recipient_name: toolUse.recipientName,
+        };
+      }
+    }),
+  );
+  return JSON.stringify(results, null, 2);
+};
+
 export async function executeRunnerTool(
   workingDirectory: string,
   name: string,
@@ -435,22 +529,12 @@ export async function executeRunnerTool(
     throw new Error("The runner command was stopped");
   }
 
-  const root = await workspaceRoot(workingDirectory);
-
-  switch (name) {
-    case "edit_file":
-      return editFileTool(root, arguments_);
-    case "list_files":
-      return listFilesTool(root, arguments_);
-    case "read_file":
-      return readFileTool(root, arguments_);
-    case "run_command":
-      return runCommandTool(root, arguments_, signal);
-    case "search_files":
-      return searchFilesTool(root, arguments_);
-    case "write_file":
-      return writeFileTool(root, arguments_);
-    default:
-      throw new Error(`Unknown runner tool: ${name}`);
+  if (!isAgentToolName(name)) {
+    throw new Error(`Unknown runner tool: ${name}`);
   }
+
+  const root = await workspaceRoot(workingDirectory);
+  return name === "parallel"
+    ? parallelTool(root, arguments_, signal)
+    : RUNNER_TOOLS[name](root, arguments_, signal);
 }
