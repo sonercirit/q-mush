@@ -16,6 +16,10 @@ const KNIP_SOURCE_PROBE = join(SCRIPTS_DIRECTORY, "knip-isolation-probe.ts");
 const KNIP_TEST_PROBE = join(import.meta.dir, "knip-isolation-probe.test.ts");
 const KNIP_TEST_SUPPORT_PROBE = join(import.meta.dir, "knip-isolation-probe");
 const KNIP_TEST_HELPER_PROBE = join(KNIP_TEST_SUPPORT_PROBE, "helper.ts");
+const CPD_IMPORT_PROBES = [
+  sourceProbePath("cpd-import-policy-probe-a.ts"),
+  sourceProbePath("cpd-import-policy-probe-b.ts"),
+];
 const RAW_HTML_FILE_PROBE = join(ROOT_DIRECTORY, "raw-html-policy-probe.html");
 
 setDefaultTimeout(15_000);
@@ -45,6 +49,15 @@ function expectCommandFailure(result: CommandResult): string {
   return result.output;
 }
 
+function runCpdImportProbes(): Promise<CommandResult> {
+  return runCommand([
+    "node",
+    "node_modules/cpd/run-cpd.js",
+    "--no-colors",
+    ...CPD_IMPORT_PROBES.map((probe) => relative(ROOT_DIRECTORY, probe)),
+  ]);
+}
+
 async function removeProbes(): Promise<void> {
   await Promise.all([
     rm(ESLINT_POLICY_PROBE, { force: true }),
@@ -54,6 +67,7 @@ async function removeProbes(): Promise<void> {
     rm(KNIP_SOURCE_PROBE, { force: true }),
     rm(KNIP_TEST_PROBE, { force: true }),
     rm(KNIP_TEST_SUPPORT_PROBE, { force: true, recursive: true }),
+    ...CPD_IMPORT_PROBES.map((probe) => rm(probe, { force: true })),
     rm(RAW_HTML_FILE_PROBE, { force: true }),
   ]);
 }
@@ -147,6 +161,45 @@ console.log(<iframe srcDoc="<main>Raw frame</main>"></iframe>);
     ]);
 
     expect(result.exitCode).toBe(0);
+  });
+
+  test("CPD ignores imports without ignoring executable duplicates", async () => {
+    const duplicatedImports = `import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  setDefaultTimeout,
+  spyOn,
+  test,
+} from "bun:test";
+`;
+    await Promise.all(
+      CPD_IMPORT_PROBES.map((probe) => writeFile(probe, duplicatedImports)),
+    );
+
+    const importResult = await runCpdImportProbes();
+    expect(importResult.exitCode).toBe(0);
+    expect(importResult.output).toContain("Found 0 clones");
+
+    const duplicatedImplementation = `export function normalizeDuplicatedValue(
+  input: string,
+): string {
+  const normalized = input.trim().toLowerCase();
+  return normalized.split("").reverse().join("");
+}
+`;
+    await Promise.all(
+      CPD_IMPORT_PROBES.map((probe) =>
+        writeFile(probe, duplicatedImplementation),
+      ),
+    );
+
+    const duplicateResult = await runCpdImportProbes();
+    expect(expectCommandFailure(duplicateResult)).toContain("Found 1 clones");
   });
 
   test("repository check rejects application HTML files", async () => {

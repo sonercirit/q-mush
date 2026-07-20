@@ -149,8 +149,9 @@ task-specific progress, guesses, or sensitive values.
   `bun run knip` runs both production and comprehensive test/tooling passes, so
   tests cannot keep production code alive while unused test helpers still fail.
 - `.jscpd.json` maps all supported JavaScript and TypeScript extensions to the
-  TSX format for cross-extension detection; clones of at least 20 tokens and one
-  line fail the zero-percent threshold.
+  TSX format for cross-extension detection; import declarations are ignored,
+  while other clones of at least 20 tokens and one line fail the zero-percent
+  threshold.
 - `scripts/repository-check.ts` lists existing tracked and unignored files and
   calls the focused policy APIs under `scripts/`. It rejects files reaching
   20,000 Unicode code points (excluding `bun.lock` and the generated `drizzle/`
