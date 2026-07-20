@@ -5,6 +5,10 @@ import type {
   AgentModelTurn,
   AgentToolCall,
 } from "./agent-loop.ts";
+import {
+  fetchModelRequestWithRetries,
+  type ModelRequestSleep,
+} from "./agent-model-retry.ts";
 import { AGENT_SYSTEM_PROMPT } from "./agent-prompt.ts";
 import { AGENT_TOOLS } from "./agent-tools.ts";
 import { isRecord, readRequiredArray } from "./auth-model.ts";
@@ -33,6 +37,7 @@ interface ChatCompletionsAgentModelOptions {
   readonly model: string;
   readonly provider: ProviderId;
   readonly reasoningEffort?: AgentReasoningEffort | null;
+  readonly sleep?: ModelRequestSleep;
   readonly systemPrompt?: string;
 }
 
@@ -650,6 +655,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
   readonly #model: string;
   readonly #provider: ProviderId;
   readonly #reasoningEffort: AgentReasoningEffort | undefined;
+  readonly #sleep: ModelRequestSleep | undefined;
   readonly #systemPrompt: string;
 
   constructor(options: ChatCompletionsAgentModelOptions) {
@@ -658,6 +664,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
     this.#model = options.model;
     this.#provider = options.provider;
     this.#reasoningEffort = options.reasoningEffort ?? undefined;
+    this.#sleep = options.sleep;
     this.#systemPrompt = options.systemPrompt ?? AGENT_SYSTEM_PROMPT;
   }
 
@@ -685,7 +692,11 @@ export class ChatCompletionsAgentModel implements AgentModel {
       method: "POST",
       ...(signal === undefined ? {} : { signal }),
     });
-    const response = await this.#fetch(request);
+    const response = await fetchModelRequestWithRetries(
+      this.#fetch,
+      request,
+      this.#sleep,
+    );
 
     if (!response.ok) {
       throw new Error(

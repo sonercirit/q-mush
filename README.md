@@ -169,7 +169,9 @@ the Codex account catalog, OpenAI `/v1/models`, or OpenRouter
 OpenRouter publish reasoning metadata, so their effort select is model-specific.
 OpenAI's standard models endpoint only publishes model availability, so API-key
 models use their default reasoning setting. A selected effort is sent using each
-provider's native request shape. The first-party loop passes explicit function
+provider's native request shape. Model calls automatically retry transient
+network and provider failures with short exponential backoff, while **Stop
+session** aborts a pending retry. The first-party loop passes explicit function
 calls to the runner and feeds bounded results back to the selected model.
 
 The Google login flow uses an authorization code, PKCE, and a short-lived state
