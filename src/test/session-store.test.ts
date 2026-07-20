@@ -19,6 +19,26 @@ const THINKING_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000045";
 const ASSISTANT_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000046";
 const TOOL_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000047";
 
+function createTestSession(store: SessionStore) {
+  return store.create(
+    {
+      credentialId: CREDENTIAL_ID,
+      model: "gpt-4.1-mini",
+      prompt: "Inspect the repository\nand make it shine",
+      provider: "openai",
+      reasoningEffort: "high",
+      runnerId: RUNNER_ID,
+      userId: TEST_USER_ID,
+      workingDirectory: "/work/project",
+    },
+    TEST_NOW,
+  );
+}
+
+function markTestSessionRunning(store: SessionStore): void {
+  expect(store.mark(SESSION_ID, "running", TEST_NOW + 1)).toBeTrue();
+}
+
 function createStore() {
   const database = createAuthenticatedTestDatabase();
   const timestamp = new Date(TEST_NOW);
@@ -57,19 +77,7 @@ function createStore() {
 describe("session store", () => {
   test("persists a session transcript and lifecycle", () => {
     const { database, store } = createStore();
-    const created = store.create(
-      {
-        credentialId: CREDENTIAL_ID,
-        model: "gpt-4.1-mini",
-        prompt: "Inspect the repository\nand make it shine",
-        provider: "openai",
-        reasoningEffort: "high",
-        runnerId: RUNNER_ID,
-        userId: TEST_USER_ID,
-        workingDirectory: "/work/project",
-      },
-      TEST_NOW,
-    );
+    const created = createTestSession(store);
 
     expect(created.agentFile).toBeNull();
     expect(created.id).toBe(SESSION_ID);
@@ -87,7 +95,7 @@ describe("session store", () => {
         toolName: null,
       },
     ]);
-    expect(store.mark(SESSION_ID, "running", TEST_NOW + 1)).toBeTrue();
+    markTestSessionRunning(store);
     store.setAgentFile(
       SESSION_ID,
       { content: "Use Bun for tests.", name: "AGENTS.md" },
@@ -150,6 +158,49 @@ describe("session store", () => {
       },
     ]);
     expect(store.list(TEST_USER_ID)).toHaveLength(1);
+    database.$client.close();
+  });
+
+  test("repairs interrupted tool calls when rebuilding a conversation", () => {
+    const { database, store } = createStore();
+    createTestSession(store);
+    markTestSessionRunning(store);
+    const interruptedCall = {
+      arguments: '{"command":"bun run dev:restart"}',
+      id: "interrupted-call",
+      name: "bash",
+    };
+    const assistantMessage = {
+      content: "Restarting the server.",
+      role: "assistant" as const,
+      toolCalls: [interruptedCall],
+    };
+    store.appendAgentMessage(SESSION_ID, assistantMessage, TEST_NOW + 2);
+    expect(store.mark(SESSION_ID, "failed", TEST_NOW + 3)).toBeTrue();
+    expect(
+      store.queuePrompt(
+        TEST_USER_ID,
+        SESSION_ID,
+        "Why was it failing?",
+        TEST_NOW + 4,
+      ).status,
+    ).toBe("queued");
+
+    expect(store.conversation(SESSION_ID)).toEqual([
+      {
+        content: "Inspect the repository\nand make it shine",
+        role: "user",
+      },
+      assistantMessage,
+      {
+        content:
+          "Error: the tool call was interrupted before it returned a result.",
+        role: "tool",
+        toolCallId: interruptedCall.id,
+        toolName: interruptedCall.name,
+      },
+      { content: "Why was it failing?", role: "user" },
+    ]);
     database.$client.close();
   });
 });

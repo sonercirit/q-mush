@@ -158,7 +158,9 @@ task-specific progress, guesses, or sensitive values.
   are persisted as `thinking` transcript messages but excluded from provider
   conversation replay. Session and transcript rows live in `agent_sessions` and
   `agent_messages`; an interrupted server process marks active sessions failed
-  so they can be resumed explicitly.
+  so they can be resumed explicitly. Rebuilt conversations synthesize an error
+  result for any tool call interrupted before its output was persisted, keeping
+  provider tool-call history valid on resume.
 
 - `src/openai.ts` and `src/openrouter.ts` manage authenticated provider PKCE
   connections and validate manually supplied keys against OpenAI `/v1/me` and
