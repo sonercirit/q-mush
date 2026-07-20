@@ -118,9 +118,17 @@ task-specific progress, guesses, or sensitive values.
   calls, and the runner polls `/api/runner/work`, executes the bounded tools in
   `src/runner-tools.ts`, and returns results. The control center creates,
   inspects, follows up, stops, and polls sessions through
-  `src/session-client.tsx` and `src/session-controller.ts`. Session and
-  transcript rows live in `agent_sessions` and `agent_messages`; an interrupted
-  server process marks active sessions failed so they can be resumed explicitly.
+  `src/session-client.tsx` and `src/session-controller.ts`. Poll controllers
+  suppress render notifications when refreshed data has no visible change.
+  Browser rendering defers full-root remounts while a select has focus, flushing
+  on change or focus loss, and periodic polls pause so the native picker stays
+  open. `src/agent-model-discovery.ts` queries the selected credential's
+  provider for compatible models and reasoning metadata;
+  `src/agent-configuration.ts` owns shared catalog types, accepted effort
+  values, and API fallback models. Model and effort selections are persisted
+  with the session. Session and transcript rows live in `agent_sessions` and
+  `agent_messages`; an interrupted server process marks active sessions failed
+  so they can be resumed explicitly.
 - `src/openai.ts` and `src/openrouter.ts` manage authenticated provider PKCE
   connections and validate manually supplied keys against OpenAI `/v1/me` and
   OpenRouter `/api/v1/key`, respectively. OpenAI OAuth persists the access and
@@ -230,7 +238,14 @@ task-specific progress, guesses, or sensitive values.
   OpenAI OAuth uses the streaming ChatGPT Codex Responses endpoint and refreshes
   its encrypted token bundle shortly before expiry. Provider defaults are
   `gpt-4.1-mini`, `openai/gpt-4.1-mini`, and `gpt-5-codex` for OpenAI keys,
-  OpenRouter, and OpenAI OAuth respectively.
+  OpenRouter, and OpenAI OAuth respectively; they are API fallbacks and
+  preferred discovered defaults when present, not browser catalog sources.
+  Browser catalogs come from OpenAI `/v1/models`, OpenRouter
+  `/api/v1/models/user`, or the ChatGPT Codex `/models` endpoint. OpenAI's
+  standard model list has no reasoning capabilities, while OpenRouter and Codex
+  return model-specific efforts. Optional reasoning uses `reasoning_effort` for
+  OpenAI chat completions and `reasoning.effort` for OpenRouter and Codex
+  Responses.
 - Add each new runtime source root and executable entry to
   `knip.production.config.ts`. Add standalone non-TypeScript build entries, such
   as `src/styles.css`, to both Knip configs; keep test files and test-support

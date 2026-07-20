@@ -1,4 +1,14 @@
+import {
+  defaultAgentModel,
+  isAgentModelId,
+  isAgentReasoningEffort,
+  type AgentReasoningEffort,
+} from "./agent-configuration.ts";
 import { runAgentLoop, type AgentModel } from "./agent-loop.ts";
+import {
+  discoverAgentModels,
+  type AgentModelDiscoverer,
+} from "./agent-model-discovery.ts";
 import {
   ChatCompletionsAgentModel,
   type AgentProviderCredential,
@@ -32,7 +42,6 @@ const MAXIMUM_PROMPT_LENGTH = 32_768;
 const MAXIMUM_PATH_LENGTH = 4_096;
 const MAXIMUM_RESULT_LENGTH = 512 * 1_024;
 const IDENTIFIER_PATTERN = /^[A-Za-z\d._:-]{1,200}$/u;
-const MODEL_PATTERN = /^[A-Za-z\d][A-Za-z\d._:/-]{0,199}$/u;
 
 interface SessionCredentialReader {
   readCredential(
@@ -52,6 +61,7 @@ interface AgentModelFactoryOptions {
   readonly credential: AgentProviderCredential;
   readonly model: string;
   readonly provider: ProviderId;
+  readonly reasoningEffort: AgentReasoningEffort | null;
 }
 
 type AgentModelFactory = (options: AgentModelFactoryOptions) => AgentModel;
@@ -59,6 +69,7 @@ type AgentModelFactory = (options: AgentModelFactoryOptions) => AgentModel;
 interface SessionDependencies {
   readonly broker?: RunnerCommandBroker;
   readonly database?: AppDatabase;
+  readonly discoverModels?: AgentModelDiscoverer;
   readonly modelFactory?: AgentModelFactory;
   readonly now?: () => number;
   readonly randomId?: IdGenerator;
@@ -66,9 +77,12 @@ interface SessionDependencies {
 
 type CreateSessionInput = Omit<CreateAgentSession, "userId">;
 
-interface RuntimeSelection {
+interface CredentialSelection {
   readonly credentialId: string;
   readonly provider: ProviderId;
+}
+
+interface RuntimeSelection extends CredentialSelection {
   readonly runnerId: string;
 }
 
@@ -76,20 +90,10 @@ export interface SessionIntegration {
   collection(request: Request): Promise<Response>;
   item(request: Request, sessionId: string): Response;
   message(request: Request, sessionId: string): Promise<Response>;
+  models(request: Request): Promise<Response>;
   stop(request: Request, sessionId: string): Promise<Response>;
   work(request: Request): Response;
   workResult(request: Request, commandId: string): Promise<Response>;
-}
-
-function defaultModel(
-  provider: ProviderId,
-  source: ProviderCredentialAccess["source"],
-): string {
-  if (provider === "openrouter") {
-    return "openai/gpt-4.1-mini";
-  }
-
-  return source === "oauth" ? "gpt-5-codex" : "gpt-4.1-mini";
 }
 
 function readIdentifier(value: unknown): string | undefined {
@@ -142,6 +146,7 @@ function readCreateSession(value: unknown): CreateSessionInput | undefined {
     { trim: true },
   );
   const modelValue = value["model"];
+  const reasoningEffortValue = value["reasoningEffort"];
 
   if (
     credentialId === undefined ||
@@ -150,8 +155,9 @@ function readCreateSession(value: unknown): CreateSessionInput | undefined {
     prompt === undefined ||
     workingDirectory === undefined ||
     workingDirectory.includes("\0") ||
-    (modelValue !== undefined &&
-      (typeof modelValue !== "string" || !MODEL_PATTERN.test(modelValue)))
+    (modelValue !== undefined && !isAgentModelId(modelValue)) ||
+    (reasoningEffortValue !== undefined &&
+      !isAgentReasoningEffort(reasoningEffortValue))
   ) {
     return undefined;
   }
@@ -161,6 +167,9 @@ function readCreateSession(value: unknown): CreateSessionInput | undefined {
     model: typeof modelValue === "string" ? modelValue : "",
     prompt,
     provider,
+    reasoningEffort: isAgentReasoningEffort(reasoningEffortValue)
+      ? reasoningEffortValue
+      : null,
     runnerId,
     workingDirectory,
   };
@@ -200,6 +209,7 @@ function withRequestMethod<Result>(
 class DrizzleSessionIntegration implements SessionIntegration {
   readonly #auth: GoogleAuth;
   readonly #broker: RunnerCommandBroker;
+  readonly #discoverModels: AgentModelDiscoverer;
   readonly #modelFactory: AgentModelFactory;
   readonly #now: () => number;
   readonly #providers: SessionCredentialReaders;
@@ -215,6 +225,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
   ) {
     this.#auth = auth;
     this.#broker = dependencies.broker ?? new RunnerCommandBroker();
+    this.#discoverModels = dependencies.discoverModels ?? discoverAgentModels;
     this.#modelFactory =
       dependencies.modelFactory ??
       ((options) => new ChatCompletionsAgentModel(options));
@@ -248,6 +259,14 @@ class DrizzleSessionIntegration implements SessionIntegration {
         this.#messageForUser(request, user, sessionId),
       ),
     );
+  }
+
+  models(request: Request): Promise<Response> {
+    const response =
+      request.method === "GET"
+        ? this.#forUser(request, (user) => this.#modelsForUser(request, user))
+        : createMethodNotAllowedResponse("GET");
+    return Promise.resolve(response);
   }
 
   async stop(request: Request, sessionId: string): Promise<Response> {
@@ -335,15 +354,13 @@ class DrizzleSessionIntegration implements SessionIntegration {
       : action(session);
   }
 
-  async #withRuntimeAccess(
+  async #withCredentialAccess(
     userId: string,
-    selection: RuntimeSelection,
-    action: (credential: ProviderCredentialAccess) => Response,
+    selection: CredentialSelection,
+    action: (
+      credential: ProviderCredentialAccess,
+    ) => Promise<Response> | Response,
   ): Promise<Response> {
-    if (!this.#runners.runnerIsAvailable(userId, selection.runnerId)) {
-      return createApiError("runner_unavailable", 409);
-    }
-
     let credential: ProviderCredentialAccess | undefined;
 
     try {
@@ -358,6 +375,18 @@ class DrizzleSessionIntegration implements SessionIntegration {
     return credential === undefined
       ? createApiError("credential_unavailable", 409)
       : action(credential);
+  }
+
+  async #withRuntimeAccess(
+    userId: string,
+    selection: RuntimeSelection,
+    action: (credential: ProviderCredentialAccess) => Response,
+  ): Promise<Response> {
+    if (!this.#runners.runnerIsAvailable(userId, selection.runnerId)) {
+      return createApiError("runner_unavailable", 409);
+    }
+
+    return this.#withCredentialAccess(userId, selection, action);
   }
 
   #detailResponse(userId: string, sessionId: string): Response {
@@ -391,6 +420,33 @@ class DrizzleSessionIntegration implements SessionIntegration {
     }
   }
 
+  async #modelsForUser(
+    request: Request,
+    user: AuthenticatedUser,
+  ): Promise<Response> {
+    const search = new URL(request.url).searchParams;
+    const credentialId = readIdentifier(search.get("credentialId"));
+    const provider = readProvider(search.get("provider"));
+
+    if (credentialId === undefined || provider === undefined) {
+      return createApiError("invalid_request", 400);
+    }
+
+    return this.#withCredentialAccess(
+      user.id,
+      { credentialId, provider },
+      async (credential) => {
+        try {
+          return createJsonResponse(
+            await this.#discoverModels(provider, credential),
+          );
+        } catch {
+          return createApiError("provider_unavailable", 502);
+        }
+      },
+    );
+  }
+
   async #createForUser(
     request: Request,
     user: AuthenticatedUser,
@@ -410,7 +466,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
         ...input,
         model:
           input.model.length === 0
-            ? defaultModel(input.provider, credential.source)
+            ? defaultAgentModel(input.provider, credential.source)
             : input.model,
       };
       const detail = this.#store.create(
@@ -481,6 +537,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
         credential,
         model: detail.model,
         provider: detail.provider,
+        reasoningEffort: detail.reasoningEffort,
       });
       await runAgentLoop({
         executeTool: (call) => {

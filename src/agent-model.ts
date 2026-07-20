@@ -1,10 +1,11 @@
+import type { AgentReasoningEffort } from "./agent-configuration.ts";
 import type {
   AgentConversationMessage,
   AgentModel,
   AgentModelTurn,
   AgentToolCall,
 } from "./agent-loop.ts";
-import { isRecord } from "./auth-model.ts";
+import { isRecord, readRequiredArray } from "./auth-model.ts";
 import { readOpenAiOAuthCredential } from "./openai-credential.ts";
 import type {
   ProviderCredentialSource,
@@ -32,6 +33,7 @@ interface ChatCompletionsAgentModelOptions {
   readonly fetch?: AgentModelFetch;
   readonly model: string;
   readonly provider: ProviderId;
+  readonly reasoningEffort?: AgentReasoningEffort | null;
 }
 
 const STRING_PARAMETER = { type: "string" } as const;
@@ -147,12 +149,13 @@ function accessToken(
     : credential.secret;
 }
 
-function requestHeaders(
+export function agentProviderRequestHeaders(
   provider: ProviderId,
   credential: AgentProviderCredential,
+  accept: string,
 ): Headers {
   const headers = new Headers({
-    accept: "application/json",
+    accept,
     authorization: `Bearer ${accessToken(provider, credential)}`,
     "content-type": "application/json",
   });
@@ -161,8 +164,10 @@ function requestHeaders(
     headers.set("http-referer", "https://q-mush.local");
     headers.set("x-title", "Q Mush");
   } else if (credential.source === "oauth") {
-    headers.set("accept", "text/event-stream");
-    headers.set("openai-beta", "responses=experimental");
+    if (accept === "text/event-stream") {
+      headers.set("openai-beta", "responses=experimental");
+    }
+
     headers.set("originator", "q_mush");
 
     if (credential.accountId !== null) {
@@ -242,11 +247,33 @@ function responsesInput(message: AgentConversationMessage): readonly unknown[] {
   }
 }
 
+function reasoningConfiguration(
+  provider: ProviderId,
+  codexOAuth: boolean,
+  reasoningEffort: AgentReasoningEffort | undefined,
+): Readonly<Record<string, unknown>> {
+  if (reasoningEffort === undefined) {
+    return {};
+  }
+
+  return codexOAuth || provider === "openrouter"
+    ? { reasoning: { effort: reasoningEffort } }
+    : { reasoning_effort: reasoningEffort };
+}
+
 function requestBody(
   messages: readonly AgentConversationMessage[],
   model: string,
+  provider: ProviderId,
   codexOAuth: boolean,
+  reasoningEffort: AgentReasoningEffort | undefined,
 ): unknown {
+  const reasoning = reasoningConfiguration(
+    provider,
+    codexOAuth,
+    reasoningEffort,
+  );
+
   if (!codexOAuth) {
     return {
       messages: [
@@ -254,6 +281,7 @@ function requestBody(
         ...messages.map(modelMessage),
       ],
       model,
+      ...reasoning,
       tool_choice: "auto",
       tools: AGENT_TOOLS,
     };
@@ -265,6 +293,7 @@ function requestBody(
     instructions: SYSTEM_PROMPT,
     model,
     parallel_tool_calls: false,
+    ...reasoning,
     store: false,
     stream: true,
     tool_choice: "auto",
@@ -297,22 +326,8 @@ function readToolCall(value: unknown): AgentToolCall {
   return { arguments: arguments_, id, name };
 }
 
-function readRecordArray(
-  value: unknown,
-  key: string,
-  errorMessage: string,
-): readonly unknown[] {
-  const items = isRecord(value) ? value[key] : undefined;
-
-  if (!Array.isArray(items)) {
-    throw new Error(errorMessage);
-  }
-
-  return items;
-}
-
 function readTurn(value: unknown): AgentModelTurn {
-  const choices = readRecordArray(
+  const choices = readRequiredArray(
     value,
     "choices",
     "The model returned an invalid completion",
@@ -346,7 +361,7 @@ function readTurn(value: unknown): AgentModelTurn {
 }
 
 function readCodexTurn(value: unknown): AgentModelTurn {
-  const output = readRecordArray(
+  const output = readRequiredArray(
     value,
     "output",
     "The Codex model returned an invalid response",
@@ -445,12 +460,14 @@ export class ChatCompletionsAgentModel implements AgentModel {
   readonly #fetch: AgentModelFetch;
   readonly #model: string;
   readonly #provider: ProviderId;
+  readonly #reasoningEffort: AgentReasoningEffort | undefined;
 
   constructor(options: ChatCompletionsAgentModelOptions) {
     this.#credential = options.credential;
     this.#fetch = options.fetch ?? ((request) => globalThis.fetch(request));
     this.#model = options.model;
     this.#provider = options.provider;
+    this.#reasoningEffort = options.reasoningEffort ?? undefined;
   }
 
   async complete(
@@ -459,8 +476,20 @@ export class ChatCompletionsAgentModel implements AgentModel {
   ): Promise<AgentModelTurn> {
     const codexOAuth = usesCodexOAuth(this.#provider, this.#credential);
     const request = new Request(endpoint(this.#provider, this.#credential), {
-      body: JSON.stringify(requestBody(messages, this.#model, codexOAuth)),
-      headers: requestHeaders(this.#provider, this.#credential),
+      body: JSON.stringify(
+        requestBody(
+          messages,
+          this.#model,
+          this.#provider,
+          codexOAuth,
+          this.#reasoningEffort,
+        ),
+      ),
+      headers: agentProviderRequestHeaders(
+        this.#provider,
+        this.#credential,
+        codexOAuth ? "text/event-stream" : "application/json",
+      ),
       method: "POST",
       ...(signal === undefined ? {} : { signal }),
     });

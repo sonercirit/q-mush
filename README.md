@@ -83,7 +83,8 @@ their assets:
   one at `/api/runners/:id`. Installed runners register through
   `/api/runner/register`, maintain presence through `/api/runner/heartbeat`, and
   poll `/api/runner/work` for session tools.
-- Authenticated users create and list agent sessions at `/api/sessions`, inspect
+- Authenticated users create and list agent sessions at `/api/sessions`,
+  discover models for an owned credential at `/api/sessions/models`, inspect
   `/api/sessions/:id`, send follow-ups to `/api/sessions/:id/messages`, and stop
   work through `/api/sessions/:id/stop`.
 
@@ -110,13 +111,15 @@ computer. Rerun the installer once to migrate a legacy `q-mush-runner.js`
 installation to the self-updating executable.
 
 After a runner and provider credential are ready, use **New agent session** in
-the control center. Select an online computer, credential, model (or its
-default), working directory on that computer, and task. Q Mush implements its
-own model/tool loop without an external agent framework. It can read, list,
-search, write, and exactly edit workspace files, plus run bounded shell
-commands. Session transcripts and status survive page reloads; a ready, stopped,
-or failed session accepts follow-up instructions. **Stop session** aborts the
-model request and cancels an active runner command.
+the control center. Select an online computer and credential; Q Mush discovers
+that credential's available agent models and model-specific reasoning efforts.
+Then select a model, reasoning effort (or the model default), working directory
+on that computer, and task. Q Mush implements its own model/tool loop without an
+external agent framework. It can read, list, search, write, and exactly edit
+workspace files, plus run bounded shell commands. Session transcripts and status
+survive page reloads; a ready, stopped, or failed session accepts follow-up
+instructions. **Stop session** aborts the model request and cancels an active
+runner command.
 
 The runner executes tools with the runner process's local account permissions.
 File tools reject paths outside the selected workspace, while shell commands are
@@ -127,9 +130,14 @@ the browser and runner work protocol never receive them.
 
 OpenAI API keys and OpenRouter credentials use their chat-completions APIs.
 OpenAI connected accounts use the subscription-backed Codex Responses endpoint;
-Q Mush refreshes and re-encrypts expiring OAuth tokens. The first-party loop
-passes explicit function calls to the runner and feeds bounded results back to
-the selected model.
+Q Mush refreshes and re-encrypts expiring OAuth tokens. Model discovery queries
+the Codex account catalog, OpenAI `/v1/models`, or OpenRouter
+`/api/v1/models/user` with the selected server-side credential. Codex and
+OpenRouter publish reasoning metadata, so their effort select is model-specific.
+OpenAI's standard models endpoint only publishes model availability, so API-key
+models use their default reasoning setting. A selected effort is sent using each
+provider's native request shape. The first-party loop passes explicit function
+calls to the runner and feeds bounded results back to the selected model.
 
 The Google login flow uses an authorization code, PKCE, and a short-lived state
 cookie. Only the basic Google profile and email scopes are requested. Google

@@ -34,6 +34,36 @@ function setupAfterRefresh(
   return setupRunner?.status === "pending" ? setup : undefined;
 }
 
+function runnerPresentationMatches(
+  left: RunnerSummary,
+  right: RunnerSummary,
+): boolean {
+  return (
+    left.architecture === right.architecture &&
+    left.id === right.id &&
+    left.name === right.name &&
+    left.platform === right.platform &&
+    left.status === right.status &&
+    (left.status === "online" || left.lastSeenAt === right.lastSeenAt)
+  );
+}
+
+function runnerListsMatch(
+  left: readonly RunnerSummary[] | undefined,
+  right: readonly RunnerSummary[],
+): boolean {
+  return (
+    left?.length === right.length &&
+    left.every((runner, index) => {
+      const refreshedRunner = right[index];
+      return (
+        refreshedRunner !== undefined &&
+        runnerPresentationMatches(runner, refreshedRunner)
+      );
+    })
+  );
+}
+
 export class RunnerController {
   readonly #onChange: RunnerChangeListener;
   #revision = 0;
@@ -155,11 +185,19 @@ export class RunnerController {
       const runners = readRunners(await requestJson(RUNNERS_PATH));
 
       if (this.#isCurrent(revision)) {
-        this.#patch({
-          error: undefined,
-          runners,
-          setup: setupAfterRefresh(this.#state.setup, runners),
-        });
+        const setup = setupAfterRefresh(this.#state.setup, runners);
+
+        if (
+          !showLoading &&
+          this.#state.error === undefined &&
+          runnerListsMatch(this.#state.runners, runners) &&
+          this.#state.setup === setup
+        ) {
+          this.#state = { ...this.#state, runners };
+          return;
+        }
+
+        this.#patch({ error: undefined, runners, setup });
       }
     } catch {
       if (this.#isCurrent(revision) && showLoading) {

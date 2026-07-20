@@ -1,15 +1,24 @@
+import type { AgentModelCatalog } from "./agent-configuration.ts";
 import { HttpResponseError, requestJson } from "./browser-http.ts";
 import { bindActionClicks } from "./client-actions.ts";
 import type { ProviderId } from "./provider-credential-store.ts";
 import { RevisionState } from "./revision-state.ts";
-import { SESSIONS_PATH } from "./routes.ts";
-import type { SessionDraft, SessionViewState } from "./session-client.tsx";
+import { SESSION_MODELS_PATH, SESSIONS_PATH } from "./routes.ts";
+import type {
+  SessionDraft,
+  SessionModelDiscoveryState,
+  SessionViewState,
+} from "./session-client.tsx";
 import {
+  readAgentModelCatalog,
   readSessionDetail,
   readSessionList,
   summaryFromDetail,
 } from "./session-codec.ts";
-import type { AgentSessionDetail } from "./session-model.ts";
+import type {
+  AgentSessionDetail,
+  AgentSessionSummary,
+} from "./session-model.ts";
 
 type ChangeListener = () => void;
 
@@ -18,9 +27,19 @@ function initialDraft(): SessionDraft {
     credential: "",
     model: "",
     prompt: "",
+    reasoningEffort: "",
     runnerId: "",
     workingDirectory: ".",
   };
+}
+
+function modelDiscoveryState(
+  credential: string | undefined,
+  loading: boolean,
+  catalog?: AgentModelCatalog,
+  error?: string,
+): SessionModelDiscoveryState {
+  return { catalog, credential, error, loading };
 }
 
 function initialState(): SessionViewState {
@@ -31,6 +50,7 @@ function initialState(): SessionViewState {
     error: undefined,
     followUp: "",
     loadingDetail: false,
+    modelDiscovery: modelDiscoveryState(undefined, false),
     selectedId: undefined,
     sending: false,
     sessions: undefined,
@@ -67,15 +87,19 @@ function selectedCredential(value: string):
 function bindPanelForm(
   panel: Element,
   action: string,
-  onInput: (form: HTMLFormElement) => void,
+  onInput: (form: HTMLFormElement, inputName?: string) => void,
   onSubmit: () => void,
 ): void {
   const form = panel.querySelector<HTMLFormElement>(
     `form[data-action="${action}"]`,
   );
 
-  form?.addEventListener("input", () => {
-    onInput(form);
+  form?.addEventListener("input", (event) => {
+    const inputName =
+      event.target instanceof Element
+        ? (event.target.getAttribute("name") ?? undefined)
+        : undefined;
+    onInput(form, inputName);
   });
   form?.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -94,7 +118,16 @@ function replaceSummary(
   );
 }
 
+function sessionDataMatches(
+  left: AgentSessionDetail | readonly AgentSessionSummary[] | undefined,
+  right: AgentSessionDetail | readonly AgentSessionSummary[] | undefined,
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 export class SessionController {
+  readonly #modelCatalogs = new Map<string, AgentModelCatalog>();
+  #modelRequest = 0;
   readonly #view: RevisionState<SessionViewState>;
 
   constructor(onChange: ChangeListener) {
@@ -111,8 +144,8 @@ export class SessionController {
     bindPanelForm(
       panel,
       "create-session",
-      (form) => {
-        this.#rememberDraft(form);
+      (form, inputName) => {
+        this.#rememberDraft(form, inputName);
       },
       () => {
         void this.#create();
@@ -140,8 +173,18 @@ export class SessionController {
         void this.#stop();
       } else if (action === "retry-sessions") {
         void this.load();
+      } else if (action === "retry-models") {
+        void this.#ensureModels(this.#view.value.draft.credential, true);
       }
     });
+
+    const credential = panel.querySelector<HTMLSelectElement>(
+      'select[name="credential"]',
+    )?.value;
+
+    if (credential !== undefined && credential.length > 0) {
+      void this.#ensureModels(credential);
+    }
   }
 
   get state(): SessionViewState {
@@ -173,6 +216,8 @@ export class SessionController {
   }
 
   reset(): void {
+    this.#modelCatalogs.clear();
+    this.#modelRequest += 1;
     this.#view.reset(initialState());
   }
 
@@ -189,10 +234,18 @@ export class SessionController {
         previousId !== undefined && sessions.some(({ id }) => id === previousId)
           ? previousId
           : sessions[0]?.id;
-      this.#view.patch({ selectedId, sessions });
+
+      if (
+        selectedId !== this.#view.value.selectedId ||
+        !sessionDataMatches(this.#view.value.sessions, sessions)
+      ) {
+        this.#view.patch({ selectedId, sessions });
+      }
 
       if (selectedId === undefined) {
-        this.#view.patch({ detail: undefined });
+        if (this.#view.value.detail !== undefined) {
+          this.#view.patch({ detail: undefined });
+        }
       } else {
         await this.#readDetail(selectedId, revision, initial);
       }
@@ -212,11 +265,13 @@ export class SessionController {
     if (
       credential === undefined ||
       this.#view.value.draft.runnerId.length === 0 ||
+      this.#view.value.draft.model.length === 0 ||
       this.#view.value.draft.prompt.trim().length === 0 ||
       this.#view.value.draft.workingDirectory.trim().length === 0
     ) {
       this.#view.patch({
-        error: "Choose a runner and credential, then describe the task.",
+        error:
+          "Choose a runner, credential, and model, then describe the task.",
       });
       return;
     }
@@ -232,6 +287,11 @@ export class SessionController {
               ? {}
               : { model: this.#view.value.draft.model.trim() }),
             prompt: this.#view.value.draft.prompt.trim(),
+            ...(this.#view.value.draft.reasoningEffort.length === 0
+              ? {}
+              : {
+                  reasoningEffort: this.#view.value.draft.reasoningEffort,
+                }),
             runnerId: this.#view.value.draft.runnerId,
             workingDirectory: this.#view.value.draft.workingDirectory.trim(),
           }),
@@ -270,10 +330,20 @@ export class SessionController {
       );
 
       if (this.#view.value.selectedId === sessionId) {
-        this.#view.patchCurrent(
-          revision,
-          this.#detailState(detail, { loadingDetail: false }),
-        );
+        const detailState = this.#detailState(detail, {
+          loadingDetail: false,
+        });
+
+        if (
+          !showLoading &&
+          !this.#view.value.loadingDetail &&
+          sessionDataMatches(this.#view.value.detail, detail) &&
+          sessionDataMatches(this.#view.value.sessions, detailState.sessions)
+        ) {
+          return;
+        }
+
+        this.#view.patchCurrent(revision, detailState);
       }
     } catch {
       if (showLoading) {
@@ -285,16 +355,116 @@ export class SessionController {
     }
   }
 
-  #rememberDraft(form: HTMLFormElement): void {
-    this.#remember({
-      draft: {
-        credential: formString(form, "credential"),
-        model: formString(form, "model"),
-        prompt: formString(form, "prompt"),
-        runnerId: formString(form, "runnerId"),
-        workingDirectory: formString(form, "workingDirectory"),
-      },
+  #rememberDraft(form: HTMLFormElement, inputName?: string): void {
+    const draft: SessionDraft = {
+      credential: formString(form, "credential"),
+      model: formString(form, "model"),
+      prompt: formString(form, "prompt"),
+      reasoningEffort: formString(form, "reasoningEffort"),
+      runnerId: formString(form, "runnerId"),
+      workingDirectory: formString(form, "workingDirectory"),
+    };
+
+    if (inputName === "credential") {
+      const nextDraft = { ...draft, model: "", reasoningEffort: "" };
+      this.#view.patch({ draft: nextDraft });
+      void this.#ensureModels(nextDraft.credential);
+    } else if (inputName === "model") {
+      this.#view.patch({ draft: { ...draft, reasoningEffort: "" } });
+    } else {
+      this.#remember({ draft });
+    }
+  }
+
+  #applyModelCatalog(credential: string, catalog: AgentModelCatalog): void {
+    const current = this.#view.value.draft;
+    const model = catalog.models.some(({ id }) => id === current.model)
+      ? current.model
+      : (catalog.defaultModel ?? catalog.models[0]?.id ?? "");
+    const efforts = catalog.models.find(
+      ({ id }) => id === model,
+    )?.reasoningEfforts;
+    const reasoningEffort = efforts?.some(
+      (effort) => effort === current.reasoningEffort,
+    )
+      ? current.reasoningEffort
+      : "";
+    this.#view.patch({
+      draft: { ...current, credential, model, reasoningEffort },
+      modelDiscovery: modelDiscoveryState(credential, false, catalog),
     });
+  }
+
+  async #ensureModels(credentialValue: string, force = false): Promise<void> {
+    const credential = selectedCredential(credentialValue);
+
+    if (credential === undefined) {
+      return;
+    }
+
+    if (this.#view.value.draft.credential !== credentialValue) {
+      this.#remember({
+        draft: {
+          ...this.#view.value.draft,
+          credential: credentialValue,
+          model: "",
+          reasoningEffort: "",
+        },
+      });
+    }
+
+    const discovery = this.#view.value.modelDiscovery;
+
+    if (
+      !force &&
+      discovery.credential === credentialValue &&
+      (discovery.loading || discovery.catalog !== undefined)
+    ) {
+      return;
+    }
+
+    const cached = force ? undefined : this.#modelCatalogs.get(credentialValue);
+
+    if (cached !== undefined) {
+      this.#applyModelCatalog(credentialValue, cached);
+      return;
+    }
+
+    const request = (this.#modelRequest += 1);
+    this.#view.patch({
+      modelDiscovery: modelDiscoveryState(credentialValue, true),
+    });
+
+    try {
+      const search = new URLSearchParams(credential);
+      const catalog = readAgentModelCatalog(
+        await requestJson(`${SESSION_MODELS_PATH}?${search.toString()}`),
+      );
+
+      if (
+        request !== this.#modelRequest ||
+        this.#view.value.draft.credential !== credentialValue
+      ) {
+        return;
+      }
+
+      this.#modelCatalogs.set(credentialValue, catalog);
+      this.#applyModelCatalog(credentialValue, catalog);
+    } catch {
+      if (
+        request === this.#modelRequest &&
+        this.#view.value.draft.credential === credentialValue
+      ) {
+        this.#view.patch({
+          modelDiscovery: modelDiscoveryState(
+            credentialValue,
+            false,
+            undefined,
+            "Model discovery failed",
+          ),
+        });
+      }
+    }
   }
 
   #rememberFollowUp(form: HTMLFormElement): void {

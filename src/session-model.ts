@@ -1,3 +1,4 @@
+import type { AgentReasoningEffort } from "./agent-configuration.ts";
 import type { AgentToolCall } from "./agent-loop.ts";
 import type { ProviderId } from "./provider-credential-store.ts";
 
@@ -22,6 +23,7 @@ export interface AgentSessionSummary {
   readonly id: string;
   readonly model: string;
   readonly provider: ProviderId;
+  readonly reasoningEffort: AgentReasoningEffort | null;
   readonly runnerId: string;
   readonly status: AgentSessionStatus;
   readonly title: string;

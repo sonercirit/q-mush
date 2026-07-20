@@ -14,6 +14,20 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+export function readRequiredArray(
+  value: unknown,
+  key: string,
+  errorMessage: string,
+): readonly unknown[] {
+  const items = isRecord(value) ? value[key] : undefined;
+
+  if (!Array.isArray(items)) {
+    throw new Error(errorMessage);
+  }
+
+  return items;
+}
+
 export function readNullableString(value: unknown): string | null | undefined {
   return value === null || typeof value === "string" ? value : undefined;
 }

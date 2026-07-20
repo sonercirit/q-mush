@@ -12,6 +12,14 @@ export function expectPkceParameters(
   );
 }
 
+export function createOpenAiOAuthSecret(): string {
+  return JSON.stringify({
+    access: "oauth-access-token",
+    expires: Date.now() + 60_000,
+    refresh: "refresh-token",
+  });
+}
+
 export function expectRedirect(response: Response, location: string): void {
   expect(response.status).toBe(302);
   expect(response.headers.get("location")).toBe(location);

@@ -6,6 +6,7 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+import { AGENT_REASONING_EFFORTS } from "../agent-configuration.ts";
 
 function auditColumns() {
   return {
@@ -105,6 +106,9 @@ export const agentSessions = sqliteTable(
       .references(() => providerCredentials.id, { onDelete: "restrict" }),
     provider: providerColumn(),
     model: text("model").notNull(),
+    reasoningEffort: text("reasoning_effort", {
+      enum: AGENT_REASONING_EFFORTS,
+    }),
     workingDirectory: text("working_directory").notNull(),
     title: text("title").notNull(),
     status: text("status", {

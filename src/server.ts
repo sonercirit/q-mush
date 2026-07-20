@@ -20,6 +20,7 @@ const {
   RUNNER_HEARTBEAT_PATH,
   RUNNER_WORK_PATH,
   SESSIONS_PATH,
+  SESSION_MODELS_PATH,
   OPENROUTER_OAUTH_PATH,
   OPENROUTER_OAUTH_CALLBACK_PATH,
   OPENROUTER_CREDENTIALS_PATH,
@@ -282,6 +283,10 @@ export function createRequestHandler(
 
       if (pathname === SESSIONS_PATH) {
         return sessions.collection(request);
+      }
+
+      if (pathname === SESSION_MODELS_PATH) {
+        return sessions.models(request);
       }
 
       const sessionPathPrefix = `${SESSIONS_PATH}/`;

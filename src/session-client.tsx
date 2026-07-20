@@ -1,3 +1,7 @@
+import {
+  reasoningEffortLabel,
+  type AgentModelCatalog,
+} from "./agent-configuration.ts";
 import { renderRetryError } from "./client-controls.tsx";
 import { createElement, type JsxNode } from "./jsx.ts";
 import type {
@@ -18,8 +22,16 @@ export interface SessionDraft {
   readonly credential: string;
   readonly model: string;
   readonly prompt: string;
+  readonly reasoningEffort: string;
   readonly runnerId: string;
   readonly workingDirectory: string;
+}
+
+export interface SessionModelDiscoveryState {
+  readonly catalog: AgentModelCatalog | undefined;
+  readonly credential: string | undefined;
+  readonly error: string | undefined;
+  readonly loading: boolean;
 }
 
 export interface SessionViewState {
@@ -29,6 +41,7 @@ export interface SessionViewState {
   readonly error: string | undefined;
   readonly followUp: string;
   readonly loadingDetail: boolean;
+  readonly modelDiscovery: SessionModelDiscoveryState;
   readonly selectedId: string | undefined;
   readonly sending: boolean;
   readonly sessions: readonly AgentSessionSummary[] | undefined;
@@ -103,6 +116,36 @@ function optionValue(option: CredentialOption): string {
   return `${option.provider}:${option.credential.id}`;
 }
 
+function selectedCredential(
+  credentials: readonly CredentialOption[],
+  value: string,
+): CredentialOption | undefined {
+  return (
+    credentials.find((option) => optionValue(option) === value) ??
+    credentials[0]
+  );
+}
+
+function renderSelectOptions(
+  options: readonly { readonly label: string; readonly value: string }[],
+  selectedValue: string,
+): JsxNode {
+  return options.map((option) => (
+    <option selected={selectedValue === option.value} value={option.value}>
+      {option.label}
+    </option>
+  ));
+}
+
+function sessionModelLabel(
+  session: Pick<AgentSessionSummary, "model" | "provider" | "reasoningEffort">,
+): string {
+  const model = `${session.provider} · ${session.model}`;
+  return session.reasoningEffort === null
+    ? model
+    : `${model} · ${reasoningEffortLabel(session.reasoningEffort)} reasoning`;
+}
+
 function renderSessionField(options: {
   readonly control: JsxNode;
   readonly id: string;
@@ -170,11 +213,16 @@ function renderSessionTextInput(
 }
 
 function renderSessionSelect(
-  options: SessionControlOptions & { readonly children: JsxNode },
+  options: SessionControlOptions & {
+    readonly children: JsxNode;
+    readonly required?: boolean;
+  },
 ): JsxNode {
   return renderSessionField({
     control: (
-      <select {...sessionControlAttributes(options, true)}>
+      <select
+        {...sessionControlAttributes(options, options.required !== false)}
+      >
         {options.children}
       </select>
     ),
@@ -188,7 +236,23 @@ function renderNewSessionForm(
   runners: readonly RunnerSummary[],
   credentials: readonly CredentialOption[],
 ): JsxNode {
-  const available = runners.length > 0 && credentials.length > 0;
+  const resourcesAvailable = runners.length > 0 && credentials.length > 0;
+  const credential = selectedCredential(credentials, state.draft.credential);
+  const credentialValue =
+    credential === undefined ? undefined : optionValue(credential);
+  const discovery =
+    state.modelDiscovery.credential === credentialValue
+      ? state.modelDiscovery
+      : undefined;
+  const catalog = discovery?.catalog;
+  const models = catalog?.models ?? [];
+  const modelValue = models.some(({ id }) => id === state.draft.model)
+    ? state.draft.model
+    : (catalog?.defaultModel ?? models[0]?.id ?? "");
+  const model = models.find(({ id }) => id === modelValue);
+  const loadingModels =
+    credential !== undefined && (discovery === undefined || discovery.loading);
+  const available = resourcesAvailable && models.length > 0;
 
   return (
     <form
@@ -231,14 +295,43 @@ function renderNewSessionForm(
         placeholder: "/path/to/project",
         value: state.draft.workingDirectory,
       })}
-      {renderSessionTextInput({
-        disabled: state.creating,
+      {renderSessionSelect({
+        children:
+          models.length === 0 ? (
+            <option value="">
+              {discovery?.error === undefined
+                ? loadingModels
+                  ? "Loading models…"
+                  : "No compatible models"
+                : "Models unavailable"}
+            </option>
+          ) : (
+            renderSelectOptions(
+              models.map(({ id, label }) => ({ label, value: id })),
+              modelValue,
+            )
+          ),
+        disabled: state.creating || models.length === 0,
         id: "session-model",
         label: "Model",
         name: "model",
-        optional: true,
-        placeholder: "Provider default",
-        value: state.draft.model,
+      })}
+      {renderSessionSelect({
+        children: renderSelectOptions(
+          [
+            { label: "Model default", value: "" },
+            ...(model?.reasoningEfforts ?? []).map((effort) => ({
+              label: reasoningEffortLabel(effort),
+              value: effort,
+            })),
+          ],
+          state.draft.reasoningEffort,
+        ),
+        disabled: state.creating || (model?.reasoningEfforts.length ?? 0) === 0,
+        id: "session-reasoning-effort",
+        label: "Reasoning effort",
+        name: "reasoningEffort",
+        required: false,
       })}
       <div className="lg:col-span-2">
         <label
@@ -271,10 +364,21 @@ function renderNewSessionForm(
           {state.creating ? "Starting…" : "Start session"}
         </button>
       </div>
-      {!available ? (
+      {!resourcesAvailable ? (
         <p className="text-sm text-amber-200 lg:col-span-2">
           Connect an online runner and add a provider credential before starting
           a session.
+        </p>
+      ) : discovery?.error !== undefined ? (
+        <p className="flex items-center gap-3 text-sm text-amber-200 lg:col-span-2">
+          We could not discover models for that credential.
+          <button
+            className="font-semibold underline underline-offset-4"
+            data-action="retry-models"
+            type="button"
+          >
+            Retry
+          </button>
         </p>
       ) : null}
     </form>
@@ -310,7 +414,7 @@ function renderSessionList(state: SessionViewState): JsxNode {
                   {session.title}
                 </span>
                 <span className="mt-1 block truncate text-xs text-slate-500">
-                  {`${session.provider} · ${session.model}`}
+                  {sessionModelLabel(session)}
                 </span>
               </span>
               {statusBadge(session.status)}
@@ -387,7 +491,7 @@ function renderDetail(state: SessionViewState): JsxNode {
             {statusBadge(detail.status)}
           </div>
           <p className="mt-2 truncate text-xs text-slate-500">
-            {`${detail.provider} · ${detail.model} · ${detail.workingDirectory}`}
+            {`${sessionModelLabel(detail)} · ${detail.workingDirectory}`}
           </p>
         </div>
         {active ? (

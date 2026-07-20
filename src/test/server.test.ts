@@ -26,6 +26,7 @@ import {
   RUNNER_REGISTER_PATH,
   RUNNER_WORK_PATH,
   RUNNERS_PATH,
+  SESSION_MODELS_PATH,
   SESSIONS_PATH,
 } from "../routes.ts";
 import type { RunnerExecutableProvider } from "../runner-executable.ts";
@@ -251,6 +252,9 @@ describe("page server", () => {
     const responses = await Promise.all([
       sendRequest(SESSIONS_PATH),
       sendRequest(SESSIONS_PATH, undefined, "POST"),
+      sendRequest(
+        `${SESSION_MODELS_PATH}?provider=openai&credentialId=credential-id`,
+      ),
       sendRequest(`${SESSIONS_PATH}/session-id`),
       sendRequest(`${SESSIONS_PATH}/session-id/messages`, undefined, "POST"),
       sendRequest(`${SESSIONS_PATH}/session-id/stop`, undefined, "POST"),

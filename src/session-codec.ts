@@ -1,3 +1,10 @@
+import {
+  isAgentModelId,
+  isAgentReasoningEffort,
+  type AgentModelCatalog,
+  type AgentModelOption,
+  type AgentReasoningEffort,
+} from "./agent-configuration.ts";
 import { readAgentToolCalls } from "./agent-loop.ts";
 import { isRecord, readNullableString } from "./auth-model.ts";
 import type { ProviderId } from "./provider-credential-store.ts";
@@ -7,6 +14,54 @@ import type {
   AgentSessionStatus,
   AgentSessionSummary,
 } from "./session-model.ts";
+
+function readModelReasoningEfforts(
+  value: unknown,
+): readonly AgentReasoningEffort[] {
+  if (!Array.isArray(value) || !value.every(isAgentReasoningEffort)) {
+    throw new Error("The server returned invalid model reasoning efforts");
+  }
+
+  return value;
+}
+
+function readModelOption(value: unknown): AgentModelOption {
+  if (!isRecord(value)) {
+    throw new Error("The server returned an invalid agent model");
+  }
+
+  const id = value["id"];
+  const label = value["label"];
+
+  if (!isAgentModelId(id) || typeof label !== "string") {
+    throw new Error("The server returned an invalid agent model");
+  }
+
+  return {
+    id,
+    label,
+    reasoningEfforts: readModelReasoningEfforts(value["reasoningEfforts"]),
+  };
+}
+
+export function readAgentModelCatalog(value: unknown): AgentModelCatalog {
+  if (!isRecord(value) || !Array.isArray(value["models"])) {
+    throw new Error("The server returned an invalid agent model catalog");
+  }
+
+  const defaultModel = value["defaultModel"];
+  const models = value["models"].map(readModelOption);
+
+  if (
+    (defaultModel !== null && !isAgentModelId(defaultModel)) ||
+    (typeof defaultModel === "string" &&
+      !models.some(({ id }) => id === defaultModel))
+  ) {
+    throw new Error("The server returned an invalid agent model catalog");
+  }
+
+  return { defaultModel, models };
+}
 
 function readStatus(value: unknown): AgentSessionStatus | undefined {
   switch (value) {
@@ -47,6 +102,7 @@ function readSummary(value: unknown): AgentSessionSummary {
   const id = value["id"];
   const model = value["model"];
   const provider = readProvider(value["provider"]);
+  const reasoningEffort = readNullableString(value["reasoningEffort"]);
   const runnerId = value["runnerId"];
   const status = readStatus(value["status"]);
   const title = value["title"];
@@ -59,6 +115,8 @@ function readSummary(value: unknown): AgentSessionSummary {
     typeof id !== "string" ||
     typeof model !== "string" ||
     provider === undefined ||
+    reasoningEffort === undefined ||
+    (reasoningEffort !== null && !isAgentReasoningEffort(reasoningEffort)) ||
     typeof runnerId !== "string" ||
     status === undefined ||
     typeof title !== "string" ||
@@ -74,6 +132,7 @@ function readSummary(value: unknown): AgentSessionSummary {
     id,
     model,
     provider,
+    reasoningEffort,
     runnerId,
     status,
     title,
@@ -160,6 +219,7 @@ export function summaryFromDetail(
     id: detail.id,
     model: detail.model,
     provider: detail.provider,
+    reasoningEffort: detail.reasoningEffort,
     runnerId: detail.runnerId,
     status: detail.status,
     title: detail.title,

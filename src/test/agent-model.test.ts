@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { ChatCompletionsAgentModel } from "../agent-model.ts";
 import { isRecord } from "../auth-model.ts";
 import { createJsonResponse } from "../http.ts";
+import { createOpenAiOAuthSecret } from "./oauth-test-helpers.ts";
 import { captureRejection, requireError } from "./promise-test-helpers.ts";
 
 type ModelOptions = ConstructorParameters<typeof ChatCompletionsAgentModel>[0];
@@ -45,6 +46,7 @@ describe("chat completions agent model", () => {
         },
         model: "openai/gpt-4.1-mini",
         provider: "openrouter",
+        reasoningEffort: "high",
       },
       {
         choices: [
@@ -86,19 +88,41 @@ describe("chat completions agent model", () => {
         { content: "Inspect the source", role: "user" },
       ],
       model: "openai/gpt-4.1-mini",
+      reasoning: { effort: "high" },
       tool_choice: "auto",
     });
     expect(JSON.stringify(body)).toContain("read_file");
     expect(JSON.stringify(body)).toContain("run_command");
   });
 
+  test("uses the OpenAI chat-completions reasoning parameter", async () => {
+    const capture = new RequestCapture();
+    const model = respondingModel(
+      {
+        credential: {
+          accountId: null,
+          secret: "sk-openai-secret",
+          source: "api_key",
+        },
+        model: "gpt-5-codex",
+        provider: "openai",
+        reasoningEffort: "low",
+      },
+      { choices: [{ message: { content: "Done." } }] },
+      capture,
+    );
+
+    await model.complete([{ content: "Fix the bug", role: "user" }]);
+
+    expect(await capturedBody(capture)).toMatchObject({
+      model: "gpt-5-codex",
+      reasoning_effort: "low",
+    });
+  });
+
   test("uses the Codex Responses protocol for an OpenAI OAuth credential", async () => {
     const capture = new RequestCapture();
-    const oauthSecret = JSON.stringify({
-      access: "oauth-access-token",
-      expires: Date.now() + 60_000,
-      refresh: "refresh-token",
-    });
+    const oauthSecret = createOpenAiOAuthSecret();
     const model = new ChatCompletionsAgentModel({
       credential: {
         accountId: "chatgpt-account",
@@ -126,6 +150,7 @@ describe("chat completions agent model", () => {
       },
       model: "gpt-5-codex",
       provider: "openai",
+      reasoningEffort: "medium",
     });
 
     const conversation = [
@@ -165,6 +190,7 @@ describe("chat completions agent model", () => {
     const body = await capturedBody(capture);
     expect(body).toMatchObject({
       model: "gpt-5-codex",
+      reasoning: { effort: "medium" },
       store: false,
       stream: true,
     });

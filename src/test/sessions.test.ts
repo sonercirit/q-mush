@@ -1,15 +1,18 @@
 import { describe, expect, test } from "bun:test";
+import type { AgentModelCatalog } from "../agent-configuration.ts";
 import type {
   AgentConversationMessage,
   AgentModel,
   AgentModelTurn,
 } from "../agent-loop.ts";
+import type { AgentModelDiscoverer } from "../agent-model-discovery.ts";
 import { isRecord } from "../auth-model.ts";
 import { createGoogleAuthFromEnvironment } from "../auth.ts";
 import type { ProviderCredentialAccess } from "../provider-credential-store.ts";
 import {
   RUNNER_REGISTER_PATH,
   RUNNER_WORK_PATH,
+  SESSION_MODELS_PATH,
   SESSIONS_PATH,
 } from "../routes.ts";
 import { RunnerCommandBroker } from "../runner-command-broker.ts";
@@ -80,6 +83,7 @@ function hasStatus(expected: string): (value: unknown) => boolean {
 async function connectedSetup(
   model: AgentModel,
   credentialSource: ProviderCredentialAccess["source"] = "api_key",
+  discoverModels?: AgentModelDiscoverer,
 ) {
   const database = createAuthenticatedTestDatabase();
   const auth = createGoogleAuthFromEnvironment(
@@ -136,6 +140,7 @@ async function connectedSetup(
     "018bcfe5-6800-7000-8000-000000000070",
   ];
   const selectedModels: string[] = [];
+  const selectedReasoningEfforts: (string | null)[] = [];
   const sessions = createSessionIntegration(
     auth,
     runners,
@@ -146,22 +151,28 @@ async function connectedSetup(
         timeoutMilliseconds: 5_000,
       }),
       database,
+      ...(discoverModels === undefined ? {} : { discoverModels }),
       modelFactory: ({
         credential: selectedCredential,
         model: selectedModel,
+        reasoningEffort,
       }) => {
         expect(selectedCredential.secret).toBe("provider-secret");
         selectedModels.push(selectedModel);
+        selectedReasoningEfforts.push(reasoningEffort);
         return model;
       },
       now: () => TEST_NOW,
       randomId: () => takeValue(ids, "The session test ran out of IDs"),
     },
   );
-  return { database, selectedModels, sessions };
+  return { database, selectedModels, selectedReasoningEfforts, sessions };
 }
 
-function createSessionRequest(includeModel = true): Request {
+function createSessionRequest(
+  includeModel = true,
+  reasoningEffort = "high",
+): Request {
   return createAuthenticatedRequest(
     SESSIONS_PATH,
     {
@@ -169,6 +180,7 @@ function createSessionRequest(includeModel = true): Request {
       ...(includeModel ? { model: "gpt-4.1-mini" } : {}),
       prompt: "Inspect README.md",
       provider: "openai",
+      reasoningEffort,
       runnerId: RUNNER_ID,
       workingDirectory: "/work/project",
     },
@@ -222,12 +234,14 @@ describe("agent sessions", () => {
       { content: "README inspected.", toolCalls: [] },
       { content: "Follow-up complete.", toolCalls: [] },
     ]);
-    const { database, sessions } = await connectedSetup(model);
+    const { database, selectedReasoningEfforts, sessions } =
+      await connectedSetup(model);
     const createResponse = await sessions.collection(createSessionRequest());
 
     expect(createResponse.status).toBe(201);
     expect(await createResponse.json()).toMatchObject({
       id: SESSION_ID,
+      reasoningEffort: "high",
       status: "queued",
       title: "Inspect README.md",
     });
@@ -291,6 +305,39 @@ describe("agent sessions", () => {
     );
     expect(JSON.stringify(continued)).toContain("Now summarize it");
     expect(model.requests).toHaveLength(3);
+    expect(selectedReasoningEfforts).toEqual(["high", "high"]);
+    database.$client.close();
+  });
+
+  test("discovers models through an owned provider credential", async () => {
+    const catalog: AgentModelCatalog = {
+      defaultModel: "gpt-discovered",
+      models: [
+        {
+          id: "gpt-discovered",
+          label: "GPT Discovered",
+          reasoningEfforts: ["low", "high"],
+        },
+      ],
+    };
+    const discoverModels: AgentModelDiscoverer = (provider, credential) => {
+      expect(provider).toBe("openai");
+      expect(credential.secret).toBe("provider-secret");
+      return Promise.resolve(catalog);
+    };
+    const { database, sessions } = await connectedSetup(
+      new ScriptedAgentModel([]),
+      "api_key",
+      discoverModels,
+    );
+    const response = await sessions.models(
+      createAuthenticatedRequest(
+        `${SESSION_MODELS_PATH}?provider=openai&credentialId=${CREDENTIAL_ID}`,
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(catalog);
     database.$client.close();
   });
 
@@ -306,6 +353,19 @@ describe("agent sessions", () => {
 
     await expectSessionReaches(sessions, response, "idle");
     expect(selectedModels).toEqual(["gpt-5-codex"]);
+    database.$client.close();
+  });
+
+  test("rejects an unsupported reasoning effort", async () => {
+    const { database, sessions } = await connectedSetup(
+      new ScriptedAgentModel([]),
+    );
+    const response = await sessions.collection(
+      createSessionRequest(true, "maximum"),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "invalid_request" });
     database.$client.close();
   });
 

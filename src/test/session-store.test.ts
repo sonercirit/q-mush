@@ -61,6 +61,7 @@ describe("session store", () => {
         model: "gpt-4.1-mini",
         prompt: "Inspect the repository\nand make it shine",
         provider: "openai",
+        reasoningEffort: "high",
         runnerId: RUNNER_ID,
         userId: TEST_USER_ID,
         workingDirectory: "/work/project",
@@ -70,6 +71,7 @@ describe("session store", () => {
 
     expect(created.id).toBe(SESSION_ID);
     expect(created.status).toBe("queued");
+    expect(created.reasoningEffort).toBe("high");
     expect(created.title).toBe("Inspect the repository");
     expect(created.messages).toEqual([
       {

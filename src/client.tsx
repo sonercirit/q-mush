@@ -389,6 +389,7 @@ function findAppRoot(): Element {
 }
 
 const root = findAppRoot();
+let appUpdateDeferred = false;
 let loadFailed = false;
 let logoutPending = false;
 let session: AuthSession | undefined;
@@ -463,7 +464,19 @@ async function logout(): Promise<void> {
   updateApp(root);
 }
 
-function updateApp(container: Element): void {
+function updateApp(container: Element, replaceFocusedSelect = false): void {
+  const activeElement = container.ownerDocument.activeElement;
+
+  if (
+    !replaceFocusedSelect &&
+    activeElement?.localName === "select" &&
+    container.contains(activeElement)
+  ) {
+    appUpdateDeferred = true;
+    return;
+  }
+
+  appUpdateDeferred = false;
   mount(
     renderApp(
       loadFailed,
@@ -497,11 +510,35 @@ function updateApp(container: Element): void {
 
 function refreshWhileAuthenticated(action: () => Promise<void>): () => void {
   return () => {
-    if (session?.user !== null && session?.user !== undefined) {
+    if (
+      session?.user !== null &&
+      session?.user !== undefined &&
+      document.activeElement?.localName !== "select"
+    ) {
       void action();
     }
   };
 }
+
+function flushDeferredUpdateAfterSelect(
+  event: Event,
+  replaceFocusedSelect: boolean,
+): void {
+  if (event.target instanceof Element && event.target.localName === "select") {
+    window.setTimeout(() => {
+      if (appUpdateDeferred) {
+        updateApp(root, replaceFocusedSelect);
+      }
+    }, 0);
+  }
+}
+
+root.addEventListener("change", (event) => {
+  flushDeferredUpdateAfterSelect(event, true);
+});
+root.addEventListener("focusout", (event) => {
+  flushDeferredUpdateAfterSelect(event, false);
+});
 
 window.setInterval(
   refreshWhileAuthenticated(() => agentSessions.refresh()),

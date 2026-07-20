@@ -8,7 +8,6 @@ import { createdAuditFields, updatedAuditFields } from "./audit.ts";
 import type { AppDatabase } from "./database.ts";
 import { agentMessages, agentSessions } from "./database/schema.ts";
 import { createUuidV7, SYSTEM_ID, type IdGenerator } from "./ids.ts";
-import type { ProviderId } from "./provider-credential-store.ts";
 import type {
   AgentSessionDetail,
   AgentSessionMessage,
@@ -21,14 +20,13 @@ type AgentRecordedMessage = Extract<
   { readonly role: "assistant" | "tool" }
 >;
 
-export interface CreateAgentSession {
+export interface CreateAgentSession extends Pick<
+  AgentSessionSummary,
+  "model" | "provider" | "reasoningEffort" | "runnerId" | "workingDirectory"
+> {
   readonly credentialId: string;
-  readonly model: string;
   readonly prompt: string;
-  readonly provider: ProviderId;
-  readonly runnerId: string;
   readonly userId: string;
-  readonly workingDirectory: string;
 }
 
 export type QueuePromptResult =
@@ -58,6 +56,7 @@ function sessionSelection() {
     id: agentSessions.id,
     model: agentSessions.model,
     provider: agentSessions.provider,
+    reasoningEffort: agentSessions.reasoningEffort,
     runnerId: agentSessions.runnerId,
     status: agentSessions.status,
     title: agentSessions.title,
@@ -84,6 +83,7 @@ type StoredSessionSummary = Pick<
   | "id"
   | "model"
   | "provider"
+  | "reasoningEffort"
   | "runnerId"
   | "status"
   | "title"
@@ -211,6 +211,7 @@ export class SessionStore {
           model: input.model,
           provider: input.provider,
           providerCredentialId: input.credentialId,
+          reasoningEffort: input.reasoningEffort,
           runnerId: input.runnerId,
           status: "queued",
           title: titleFromPrompt(input.prompt),
