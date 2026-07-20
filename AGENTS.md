@@ -241,11 +241,12 @@ task-specific progress, guesses, or sensitive values.
   OpenRouter, and OpenAI OAuth respectively; they are API fallbacks and
   preferred discovered defaults when present, not browser catalog sources.
   Browser catalogs come from OpenAI `/v1/models`, OpenRouter
-  `/api/v1/models/user`, or the ChatGPT Codex `/models` endpoint. OpenAI's
-  standard model list has no reasoning capabilities, while OpenRouter and Codex
-  return model-specific efforts. Optional reasoning uses `reasoning_effort` for
-  OpenAI chat completions and `reasoning.effort` for OpenRouter and Codex
-  Responses.
+  `/api/v1/models/user`, or the ChatGPT Codex `/models` endpoint. Codex response
+  parsing retains streamed output-text deltas because a completed event may omit
+  its `output` items. OpenAI's standard model list has no reasoning
+  capabilities, while OpenRouter and Codex return model-specific efforts.
+  Optional reasoning uses `reasoning_effort` for OpenAI chat completions and
+  `reasoning.effort` for OpenRouter and Codex Responses.
 - Add each new runtime source root and executable entry to
   `knip.production.config.ts`. Add standalone non-TypeScript build entries, such
   as `src/styles.css`, to both Knip configs; keep test files and test-support

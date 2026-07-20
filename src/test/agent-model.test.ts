@@ -201,6 +201,36 @@ describe("chat completions agent model", () => {
     expect(JSON.stringify(body)).toContain("previous-call");
   });
 
+  test("uses streamed Codex text when the completed response omits output", async () => {
+    const model = new ChatCompletionsAgentModel({
+      credential: {
+        accountId: "chatgpt-account",
+        secret: createOpenAiOAuthSecret(),
+        source: "oauth",
+      },
+      fetch: () =>
+        Promise.resolve(
+          new Response(
+            [
+              'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"Hello"}',
+              'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":" there."}',
+              'event: response.completed\ndata: {"type":"response.completed","response":{"output":[]}}',
+              "data: [DONE]",
+              "",
+            ].join("\n\n"),
+          ),
+        ),
+      model: "gpt-5.6-sol",
+      provider: "openai",
+      reasoningEffort: "max",
+    });
+
+    expect(await model.complete([{ content: "Hello", role: "user" }])).toEqual({
+      content: "Hello there.",
+      toolCalls: [],
+    });
+  });
+
   test("does not expose provider response bodies in errors", async () => {
     const model = new ChatCompletionsAgentModel({
       credential: { accountId: null, secret: "secret", source: "api_key" },

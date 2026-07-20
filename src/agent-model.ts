@@ -421,6 +421,8 @@ async function readCodexEventStream(
     throw new Error("The Codex model response was too large");
   }
 
+  const streamedText: string[] = [];
+
   for (const block of body.replaceAll("\r\n", "\n").split("\n\n")) {
     const data = block
       .split("\n")
@@ -441,7 +443,10 @@ async function readCodexEventStream(
     }
 
     if (isRecord(event) && event["type"] === "response.completed") {
-      return readCodexTurn(event["response"]);
+      const turn = readCodexTurn(event["response"]);
+      return turn.content.length === 0 && streamedText.length > 0
+        ? { ...turn, content: streamedText.join("") }
+        : turn;
     }
 
     if (
@@ -449,6 +454,16 @@ async function readCodexEventStream(
       (event["type"] === "response.failed" || event["type"] === "error")
     ) {
       throw new Error("The Codex model failed to complete the request");
+    }
+
+    if (isRecord(event) && event["type"] === "response.output_text.delta") {
+      const delta = event["delta"];
+
+      if (typeof delta !== "string") {
+        throw new Error("The Codex model returned an invalid text delta");
+      }
+
+      streamedText.push(delta);
     }
   }
 
