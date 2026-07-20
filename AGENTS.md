@@ -77,11 +77,12 @@ task-specific progress, guesses, or sensitive values.
   deliberately does not restart for source edits. `scripts/dev.ts` watches only
   the ignored `data/development-server.restart` trigger written by
   `bun run dev:restart`. `src/runner-executable.ts` fingerprints the runner
-  source and Bun compiler, lazily cross-compiles each requested target through a
-  temporary directory, and caches the standalone executable in memory for
-  `/runner/executable`; no generated assets are written into the project.
-  Textual response bodies are precompressed once per handler, with `zstd`,
-  Brotli, gzip, or deflate negotiated in that server-preference order.
+  source and compiler, builds in a private temporary directory, caches it in
+  memory, and serves it from `/runner/executable`. Triggered development
+  restarts reject new agent work, let active sessions finish, then replace the
+  server process, so a session can safely request its own restart. Textual
+  response bodies are precompressed once per handler, with `zstd`, Brotli, gzip,
+  or deflate negotiated in that server-preference order.
 - `src/pages.tsx` contains server page markup, while `src/client.tsx` mounts the
   browser app. Shared route paths are defined in `src/routes.ts`.
 - `src/auth.ts` implements Google OpenID Connect with an authorization-code +
@@ -112,13 +113,11 @@ task-specific progress, guesses, or sensitive values.
   current executable version, which also triggers a check between commands as
   soon as the runner contacts a restarted development server. Updates use a
   source/compiler version ETag, verify a server-provided SHA-256 digest,
-  atomically replace the executable, and restart it. Run the development restart
-  trigger only after active sessions finish because restarting the server still
-  interrupts in-flight server work. The browser panel/controller refreshes
-  online presence. Reinstalling for the same user and machine rotates the
-  existing registration to the new token instead of creating a second runner;
-  another user's registration remains protected. Runner tokens never appear in
-  list responses.
+  atomically replace the executable, and restart it. Development restarts drain
+  active sessions first. The browser panel/controller refreshes online presence.
+  Reinstalling for the same user and machine rotates the existing registration
+  to the new token instead of creating a second runner; another user's
+  registration remains protected. Runner tokens never appear in list responses.
 - `src/sessions.ts`, `src/session-store.ts`, and `src/agent-model.ts` implement
   persistent first-party coding sessions without an external agent harness. A
   session records the latest reported input-token usage (or `Not reported`) and

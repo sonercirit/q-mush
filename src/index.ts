@@ -39,6 +39,7 @@ const sessions = createSessionIntegration(
   { openai: openAi, openrouter: openRouter },
   { database },
 );
+let callbackServer: Bun.Server<undefined> | undefined;
 const server = Bun.serve({
   fetch: createRequestHandler(
     clientJavaScript,
@@ -54,7 +55,7 @@ const server = Bun.serve({
 
 if (usesOpenAiLoopbackCallback(Bun.env)) {
   try {
-    const callbackServer = Bun.serve({
+    callbackServer = Bun.serve({
       fetch: createOpenAiLoopbackCallbackHandler(openAi, server.url),
       hostname: "localhost",
       port: OPENAI_LOOPBACK_CALLBACK_PORT,
@@ -65,5 +66,25 @@ if (usesOpenAiLoopbackCallback(Bun.env)) {
     console.warn(`OpenAI OAuth callback could not start: ${message}`);
   }
 }
+
+let shuttingDown = false;
+
+async function shutDown(): Promise<void> {
+  if (shuttingDown) {
+    return;
+  }
+
+  shuttingDown = true;
+  await sessions.drain();
+  await Promise.all([server.stop(), callbackServer?.stop()]);
+  database.$client.close();
+}
+
+process.on("SIGINT", () => {
+  void shutDown();
+});
+process.on("SIGTERM", () => {
+  void shutDown();
+});
 
 console.log(`Q Mush is running at ${server.url}`);

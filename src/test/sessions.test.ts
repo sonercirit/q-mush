@@ -550,6 +550,60 @@ describe("agent sessions", () => {
     database.$client.close();
   });
 
+  test("drains a running session before a graceful restart", async () => {
+    const restartCall = {
+      arguments: '{"command":"bun run dev:restart","timeout":30}',
+      id: "restart-call",
+      name: "bash",
+    };
+    const model = new ScriptedAgentModel([
+      {
+        content: "Requesting a development restart.",
+        toolCalls: [restartCall],
+      },
+      { content: "Restart completed.", toolCalls: [] },
+    ]);
+    const setup = await connectedSetup(model);
+    const { sessions } = setup;
+    const created = await sessions.collection(createSessionRequest());
+    expect(created.status).toBe(201);
+    await completeAgentFileLookup(sessions);
+    await expectRunnerCommand(
+      sessions,
+      {
+        arguments: {
+          command: "bun run dev:restart",
+          timeout: 30,
+        },
+        id: RUNNER_COMMAND_ID,
+        sessionId: SESSION_ID,
+        tool: "bash",
+        workingDirectory: "/work/project",
+      },
+      "The runner did not receive the restart command",
+    );
+
+    let drained = false;
+    const drain = sessions.drain().then(() => {
+      drained = true;
+    });
+    await Bun.sleep(1);
+    expect(drained).toBeFalse();
+    await expectJsonResponse(
+      await sessions.collection(createSessionRequest()),
+      503,
+      { error: "server_restarting" },
+    );
+
+    expect(
+      (await completeRunnerCommand(sessions, "Restart requested.")).status,
+    ).toBe(204);
+    await drain;
+    expect(await sessionDetail(sessions)).toMatchObject({ status: "idle" });
+    expect(model.requests).toHaveLength(2);
+    setup.database.$client.close();
+  });
+
   test("stops a running model request", async () => {
     const model = new BlockingModel();
     const { database, sessions } = await connectedSetup(model);

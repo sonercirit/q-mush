@@ -43,12 +43,10 @@ import {
 import type { RunnerIntegration } from "./runners.ts";
 import { loadSessionAgentFile } from "./session-agent-file.ts";
 import type { AgentSessionDetail } from "./session-model.ts";
+import { SessionRuntimes } from "./session-runtime.ts";
 import { SessionStore, type CreateAgentSession } from "./session-store.ts";
 
 const MAXIMUM_PROMPT_LENGTH = 32_768;
-const DIRECTORY_REQUEST_TIMEOUT_MILLISECONDS = 15_000;
-const IDENTIFIER_PATTERN = /^[A-Za-z\d._:-]{1,200}$/u;
-
 interface SessionCredentialReader {
   readCredential(
     userId: string,
@@ -103,6 +101,7 @@ interface RuntimeSelection extends CredentialSelection {
 export interface SessionIntegration {
   collection(request: Request): Promise<Response>;
   directories(request: Request, runnerId: string): Promise<Response>;
+  drain(): Promise<void>;
   item(request: Request, sessionId: string): Response;
   message(request: Request, sessionId: string): Promise<Response>;
   models(request: Request): Promise<Response>;
@@ -112,7 +111,7 @@ export interface SessionIntegration {
 }
 
 function readIdentifier(value: unknown): string | undefined {
-  return typeof value === "string" && IDENTIFIER_PATTERN.test(value)
+  return typeof value === "string" && /^[A-Za-z\d._:-]{1,200}$/u.test(value)
     ? value
     : undefined;
 }
@@ -226,7 +225,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
   readonly #now: () => number;
   readonly #providers: SessionCredentialReaders;
   readonly #runners: RunnerIntegration;
-  readonly #runtimes = new Map<string, AbortController>();
+  readonly #runtimes = new SessionRuntimes();
   readonly #store: SessionStore;
 
   constructor(
@@ -257,6 +256,10 @@ class DrizzleSessionIntegration implements SessionIntegration {
     );
   }
 
+  drain(): Promise<void> {
+    return this.#runtimes.drain();
+  }
+
   async directories(request: Request, runnerId: string): Promise<Response> {
     return withRequestMethod(request, "POST", () =>
       this.#forUser(request, (user) =>
@@ -276,7 +279,9 @@ class DrizzleSessionIntegration implements SessionIntegration {
   message(request: Request, sessionId: string): Promise<Response> {
     return Promise.resolve(
       this.#postForUser(request, (user) =>
-        this.#messageForUser(request, user, sessionId),
+        this.#runtimes.draining
+          ? createApiError("server_restarting", 503)
+          : this.#messageForUser(request, user, sessionId),
       ),
     );
   }
@@ -296,7 +301,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
           this.#store.stop(user.id, sessionId, this.#now());
         }
 
-        this.#runtimes.get(sessionId)?.abort();
+        this.#runtimes.abort(sessionId);
         this.#broker.cancelSession(sessionId);
         return this.#detailResponse(user.id, sessionId);
       }),
@@ -365,10 +370,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
           tool: RUNNER_DIRECTORY_COMMAND,
           workingDirectory: path,
         },
-        AbortSignal.any([
-          request.signal,
-          AbortSignal.timeout(DIRECTORY_REQUEST_TIMEOUT_MILLISECONDS),
-        ]),
+        AbortSignal.any([request.signal, AbortSignal.timeout(15_000)]),
       );
       const value: unknown = JSON.parse(output);
       return createJsonResponse(readRunnerDirectoryListing(value));
@@ -478,7 +480,9 @@ class DrizzleSessionIntegration implements SessionIntegration {
       case "GET":
         return createJsonResponse({ sessions: this.#store.list(user.id) });
       case "POST":
-        return this.#createForUser(request, user);
+        return this.#runtimes.draining
+          ? createApiError("server_restarting", 503)
+          : this.#createForUser(request, user);
       default:
         return createMethodNotAllowedResponse("GET, POST");
     }
@@ -541,6 +545,10 @@ class DrizzleSessionIntegration implements SessionIntegration {
         // Model discovery enhances context display but does not gate a session.
       }
 
+      if (this.#runtimes.draining) {
+        return createApiError("server_restarting", 503);
+      }
+
       const detail = this.#store.create(
         { ...input, maxContextTokens, model: selectedModel, userId: user.id },
         this.#now(),
@@ -563,6 +571,10 @@ class DrizzleSessionIntegration implements SessionIntegration {
 
     return this.#withStoredSession(user, sessionId, (existing) =>
       this.#withRuntimeAccess(user.id, existing, (credential) => {
+        if (this.#runtimes.draining) {
+          return createApiError("server_restarting", 503);
+        }
+
         const queued = this.#store.queuePrompt(
           user.id,
           sessionId,
@@ -588,21 +600,19 @@ class DrizzleSessionIntegration implements SessionIntegration {
     detail: AgentSessionDetail,
     credential: ProviderCredentialAccess,
   ): void {
-    queueMicrotask(() => {
-      void this.#run(detail, credential);
-    });
+    this.#runtimes.launch(detail.id, (controller) =>
+      this.#run(detail, credential, controller),
+    );
   }
 
   async #run(
     detail: AgentSessionDetail,
     credential: ProviderCredentialAccess,
+    controller: AbortController,
   ): Promise<void> {
     if (!this.#store.mark(detail.id, "running", this.#now())) {
       return;
     }
-
-    const controller = new AbortController();
-    this.#runtimes.set(detail.id, controller);
 
     try {
       const agentFile = await loadSessionAgentFile(
@@ -650,10 +660,6 @@ class DrizzleSessionIntegration implements SessionIntegration {
           this.#now(),
         );
         this.#store.mark(detail.id, "failed", this.#now());
-      }
-    } finally {
-      if (this.#runtimes.get(detail.id) === controller) {
-        this.#runtimes.delete(detail.id);
       }
     }
   }

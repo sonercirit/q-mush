@@ -58,17 +58,18 @@ bun run dev
 ```
 
 Source edits intentionally leave the running process untouched so an agent can
-modify Q Mush without interrupting its own session. Once the change is ready and
-the self-modifying session is idle, restart explicitly:
+modify Q Mush without interrupting its own session. Once the change is ready,
+restart explicitly:
 
 ```bash
 bun run dev:restart
 ```
 
-The restart rebuilds the browser assets and runner version. Connected runners
-observe that version on their next API response and immediately check for a
-changed executable. Run the trigger only after active sessions finish because a
-server restart still interrupts in-flight server work.
+The restart rejects new agent work, lets active agent sessions finish, then
+rebuilds the browser assets and runner version. Connected runners observe that
+version on their next API response and immediately check for a changed
+executable. A session can therefore request the restart that will apply its own
+changes without being marked failed.
 
 The server builds the browser app and Tailwind stylesheet in memory at startup
 and prepares versioned standalone runner builds, then exposes two pages and
@@ -187,14 +188,15 @@ exist there.
 
 Drizzle stores users, seven-day application sessions, provider credentials,
 runner registrations, agent sessions, and agent transcripts in local SQLite, so
-they survive server restarts. Sessions interrupted by a server restart are
-marked failed and can be continued from the control center. Application primary
-keys use UUIDv7; provider IDs, credential fingerprints, runner token hashes,
-machine fingerprints, and cookie tokens remain separate external identifiers.
-Plaintext runner tokens appear only in setup artifacts and the installed
-computer's private config. Every application row carries creation, update,
-actor, and soft-deletion audit fields. Committed migrations in `drizzle/` are
-applied automatically at startup.
+they survive server restarts. Graceful development restarts drain active
+sessions; sessions interrupted by an unexpected process exit are marked failed
+and can be continued from the control center. Application primary keys use
+UUIDv7; provider IDs, credential fingerprints, runner token hashes, machine
+fingerprints, and cookie tokens remain separate external identifiers. Plaintext
+runner tokens appear only in setup artifacts and the installed computer's
+private config. Every application row carries creation, update, actor, and
+soft-deletion audit fields. Committed migrations in `drizzle/` are applied
+automatically at startup.
 
 Both pages use the small framework-free TSX runtime in `src/jsx.ts`; no frontend
 framework is installed. `src/styles.css` is the Tailwind source entry point.
