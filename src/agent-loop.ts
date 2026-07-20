@@ -55,8 +55,16 @@ export type AgentConversationMessage =
       readonly toolName: string;
     };
 
+export type AgentRecordedMessage =
+  | Extract<AgentConversationMessage, { readonly role: "assistant" | "tool" }>
+  | {
+      readonly content: string;
+      readonly role: "thinking";
+    };
+
 export interface AgentModelTurn {
   readonly content: string;
+  readonly thinking: string;
   readonly toolCalls: readonly AgentToolCall[];
 }
 
@@ -75,7 +83,7 @@ interface AgentLoopOptions {
   readonly maximumTurns?: number;
   readonly model: AgentModel;
   readonly recordMessage: (
-    message: AgentConversationMessage,
+    message: AgentRecordedMessage,
   ) => Promise<void> | void;
   readonly signal?: AbortSignal;
 }
@@ -114,6 +122,13 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<void> {
     throwIfAborted(options.signal);
     const turn = await options.model.complete(messages, options.signal);
     throwIfAborted(options.signal);
+    if (turn.thinking.length > 0) {
+      await options.recordMessage({
+        content: turn.thinking,
+        role: "thinking",
+      });
+    }
+
     const assistantMessage: AgentConversationMessage = {
       content: turn.content,
       role: "assistant",

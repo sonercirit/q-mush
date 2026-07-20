@@ -5,6 +5,7 @@ import type {
   AgentModelTurn,
   AgentToolCall,
 } from "./agent-loop.ts";
+import { AGENT_SYSTEM_PROMPT } from "./agent-prompt.ts";
 import { isRecord, readRequiredArray } from "./auth-model.ts";
 import { readOpenAiOAuthCredential } from "./openai-credential.ts";
 import type {
@@ -17,9 +18,6 @@ const OPENAI_CODEX_RESPONSES_URL =
   "https://chatgpt.com/backend-api/codex/responses";
 const OPENROUTER_COMPLETIONS_URL =
   "https://openrouter.ai/api/v1/chat/completions";
-const SYSTEM_PROMPT = `You are Q Mush, a careful coding agent operating in a user-selected workspace.
-Inspect existing files before changing them. Make the smallest coherent change that satisfies the request. Use tools rather than guessing about repository contents. Preserve existing conventions, avoid secrets, and run focused checks after edits. Explain the result concisely when the work is complete. Never claim that a tool succeeded unless its result says so.`;
-
 export interface AgentProviderCredential {
   readonly accountId: string | null;
   readonly secret: string;
@@ -252,12 +250,21 @@ function reasoningConfiguration(
   codexOAuth: boolean,
   reasoningEffort: AgentReasoningEffort | undefined,
 ): Readonly<Record<string, unknown>> {
+  if (codexOAuth) {
+    return {
+      reasoning: {
+        ...(reasoningEffort === undefined ? {} : { effort: reasoningEffort }),
+        summary: "auto",
+      },
+    };
+  }
+
   if (reasoningEffort === undefined) {
     return {};
   }
 
-  return codexOAuth || provider === "openrouter"
-    ? { reasoning: { effort: reasoningEffort } }
+  return provider === "openrouter"
+    ? { reasoning: { effort: reasoningEffort, summary: "auto" } }
     : { reasoning_effort: reasoningEffort };
 }
 
@@ -277,7 +284,7 @@ function requestBody(
   if (!codexOAuth) {
     return {
       messages: [
-        { content: SYSTEM_PROMPT, role: "system" },
+        { content: AGENT_SYSTEM_PROMPT, role: "system" },
         ...messages.map(modelMessage),
       ],
       model,
@@ -290,7 +297,7 @@ function requestBody(
   return {
     include: ["reasoning.encrypted_content"],
     input: messages.flatMap(responsesInput),
-    instructions: SYSTEM_PROMPT,
+    instructions: AGENT_SYSTEM_PROMPT,
     model,
     parallel_tool_calls: false,
     ...reasoning,
@@ -326,6 +333,56 @@ function readToolCall(value: unknown): AgentToolCall {
   return { arguments: arguments_, id, name };
 }
 
+function readReasoningDetails(value: unknown): string {
+  if (value === undefined || value === null) {
+    return "";
+  }
+
+  if (!Array.isArray(value)) {
+    throw new Error("The model returned invalid reasoning details");
+  }
+
+  const thinking: string[] = [];
+
+  for (const detail of value) {
+    if (!isRecord(detail)) {
+      throw new Error("The model returned invalid reasoning details");
+    }
+
+    const type = detail["type"];
+    const content =
+      type === "reasoning.summary"
+        ? detail["summary"]
+        : type === "reasoning.text"
+          ? detail["text"]
+          : undefined;
+
+    if (content !== undefined && typeof content !== "string") {
+      throw new Error("The model returned invalid reasoning details");
+    }
+
+    if (typeof content === "string" && content.length > 0) {
+      thinking.push(content);
+    }
+  }
+
+  return thinking.join("\n\n");
+}
+
+function readMessageThinking(
+  message: Readonly<Record<string, unknown>>,
+): string {
+  const value = message["reasoning"] ?? message["reasoning_content"];
+
+  if (value !== undefined && value !== null && typeof value !== "string") {
+    throw new Error("The model returned invalid reasoning content");
+  }
+
+  return typeof value === "string" && value.length > 0
+    ? value
+    : readReasoningDetails(message["reasoning_details"]);
+}
+
 function readTurn(value: unknown): AgentModelTurn {
   const choices = readRequiredArray(
     value,
@@ -356,8 +413,31 @@ function readTurn(value: unknown): AgentModelTurn {
 
   return {
     content: typeof content === "string" ? content : "",
+    thinking: readMessageThinking(message),
     toolCalls: (rawToolCalls ?? []).map(readToolCall),
   };
+}
+
+function readCodexSummary(value: unknown): readonly string[] {
+  if (value === undefined || value === null) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    throw new Error("The Codex model returned invalid reasoning content");
+  }
+
+  return value.map((part) => {
+    if (
+      !isRecord(part) ||
+      part["type"] !== "summary_text" ||
+      typeof part["text"] !== "string"
+    ) {
+      throw new Error("The Codex model returned invalid reasoning content");
+    }
+
+    return part["text"];
+  });
 }
 
 function readCodexTurn(value: unknown): AgentModelTurn {
@@ -367,6 +447,7 @@ function readCodexTurn(value: unknown): AgentModelTurn {
     "The Codex model returned an invalid response",
   );
   const text: string[] = [];
+  const thinking: string[] = [];
   const toolCalls: AgentToolCall[] = [];
 
   for (const item of output) {
@@ -374,7 +455,9 @@ function readCodexTurn(value: unknown): AgentModelTurn {
       throw new Error("The Codex model returned an invalid output item");
     }
 
-    if (item["type"] === "function_call") {
+    if (item["type"] === "reasoning") {
+      thinking.push(...readCodexSummary(item["summary"]));
+    } else if (item["type"] === "function_call") {
       const arguments_ = item["arguments"];
       const id = item["call_id"];
       const name = item["name"];
@@ -409,7 +492,21 @@ function readCodexTurn(value: unknown): AgentModelTurn {
     }
   }
 
-  return { content: text.join(""), toolCalls };
+  return { content: text.join(""), thinking: thinking.join("\n\n"), toolCalls };
+}
+
+function appendCodexDelta(
+  event: Readonly<Record<string, unknown>>,
+  destination: string[],
+  kind: "reasoning" | "text",
+): void {
+  const delta = event["delta"];
+
+  if (typeof delta !== "string") {
+    throw new Error(`The Codex model returned an invalid ${kind} delta`);
+  }
+
+  destination.push(delta);
 }
 
 async function readCodexEventStream(
@@ -422,6 +519,7 @@ async function readCodexEventStream(
   }
 
   const streamedText: string[] = [];
+  const streamedThinking: string[] = [];
 
   for (const block of body.replaceAll("\r\n", "\n").split("\n\n")) {
     const data = block
@@ -444,9 +542,17 @@ async function readCodexEventStream(
 
     if (isRecord(event) && event["type"] === "response.completed") {
       const turn = readCodexTurn(event["response"]);
-      return turn.content.length === 0 && streamedText.length > 0
-        ? { ...turn, content: streamedText.join("") }
-        : turn;
+      return {
+        ...turn,
+        content:
+          turn.content.length === 0 && streamedText.length > 0
+            ? streamedText.join("")
+            : turn.content,
+        thinking:
+          turn.thinking.length === 0 && streamedThinking.length > 0
+            ? streamedThinking.join("")
+            : turn.thinking,
+      };
     }
 
     if (
@@ -456,14 +562,15 @@ async function readCodexEventStream(
       throw new Error("The Codex model failed to complete the request");
     }
 
+    if (
+      isRecord(event) &&
+      event["type"] === "response.reasoning_summary_text.delta"
+    ) {
+      appendCodexDelta(event, streamedThinking, "reasoning");
+    }
+
     if (isRecord(event) && event["type"] === "response.output_text.delta") {
-      const delta = event["delta"];
-
-      if (typeof delta !== "string") {
-        throw new Error("The Codex model returned an invalid text delta");
-      }
-
-      streamedText.push(delta);
+      appendCodexDelta(event, streamedText, "text");
     }
   }
 

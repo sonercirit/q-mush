@@ -15,8 +15,9 @@ const RUNNER_ID = "018bcfe5-6800-7000-8000-000000000041";
 const CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000042";
 const SESSION_ID = "018bcfe5-6800-7000-8000-000000000043";
 const USER_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000044";
-const ASSISTANT_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000045";
-const TOOL_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000046";
+const THINKING_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000045";
+const ASSISTANT_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000046";
+const TOOL_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000047";
 
 function createStore() {
   const database = createAuthenticatedTestDatabase();
@@ -41,6 +42,7 @@ function createStore() {
   const ids = [
     SESSION_ID,
     USER_MESSAGE_ID,
+    THINKING_MESSAGE_ID,
     ASSISTANT_MESSAGE_ID,
     TOOL_MESSAGE_ID,
   ];
@@ -86,6 +88,10 @@ describe("session store", () => {
     ]);
     expect(store.mark(SESSION_ID, "running", TEST_NOW + 1)).toBeTrue();
 
+    const thinkingMessage = {
+      content: "I should inspect the repository before changing it.",
+      role: "thinking" as const,
+    };
     const assistantMessage = {
       content: "I will inspect it.",
       role: "assistant" as const,
@@ -103,23 +109,32 @@ describe("session store", () => {
       toolCallId: "call-1",
       toolName: "list_files",
     };
-    store.appendAgentMessage(SESSION_ID, assistantMessage, TEST_NOW + 2);
-    store.appendAgentMessage(SESSION_ID, toolMessage, TEST_NOW + 3);
-    expect(store.mark(SESSION_ID, "idle", TEST_NOW + 4)).toBeTrue();
+    store.appendAgentMessage(SESSION_ID, thinkingMessage, TEST_NOW + 2);
+    store.appendAgentMessage(SESSION_ID, assistantMessage, TEST_NOW + 3);
+    store.appendAgentMessage(SESSION_ID, toolMessage, TEST_NOW + 4);
+    expect(store.mark(SESSION_ID, "idle", TEST_NOW + 5)).toBeTrue();
 
     const detail = store.get(TEST_USER_ID, SESSION_ID);
     expect(detail?.status).toBe("idle");
     expect(detail?.messages.slice(1)).toEqual([
       {
-        ...assistantMessage,
+        ...thinkingMessage,
         createdAt: TEST_NOW + 2,
+        id: THINKING_MESSAGE_ID,
+        toolCallId: null,
+        toolCalls: [],
+        toolName: null,
+      },
+      {
+        ...assistantMessage,
+        createdAt: TEST_NOW + 3,
         id: ASSISTANT_MESSAGE_ID,
         toolCallId: null,
         toolName: null,
       },
       {
         ...toolMessage,
-        createdAt: TEST_NOW + 3,
+        createdAt: TEST_NOW + 4,
         id: TOOL_MESSAGE_ID,
         toolCalls: [],
       },

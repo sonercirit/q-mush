@@ -5,7 +5,8 @@ import type { ProviderId } from "./provider-credential-store.ts";
 export type AgentSessionStatus =
   "queued" | "running" | "idle" | "stopped" | "failed";
 
-type AgentSessionMessageRole = "user" | "assistant" | "tool" | "system";
+type AgentSessionMessageRole =
+  "user" | "assistant" | "tool" | "thinking" | "system";
 
 export interface AgentSessionMessage {
   readonly content: string;

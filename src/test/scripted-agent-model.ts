@@ -4,12 +4,19 @@ import type {
   AgentModelTurn,
 } from "../agent-loop.ts";
 
+type ScriptedTurn = Omit<AgentModelTurn, "thinking"> & {
+  readonly thinking?: string;
+};
+
 export class ScriptedAgentModel implements AgentModel {
   readonly requests: AgentConversationMessage[][] = [];
   readonly #turns: AgentModelTurn[];
 
-  constructor(turns: AgentModelTurn[]) {
-    this.#turns = turns;
+  constructor(turns: ScriptedTurn[]) {
+    this.#turns = turns.map((turn) => ({
+      ...turn,
+      thinking: turn.thinking ?? "",
+    }));
   }
 
   complete(

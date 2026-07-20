@@ -53,6 +53,7 @@ describe("chat completions agent model", () => {
           {
             message: {
               content: "Inspecting.",
+              reasoning: "I should inspect the workspace first.",
               tool_calls: [
                 {
                   function: {
@@ -74,7 +75,11 @@ describe("chat completions agent model", () => {
       { content: "Inspect the source", role: "user" },
     ]);
 
-    expect(turn).toEqual({ content: "Inspecting.", toolCalls: [expectedTool] });
+    expect(turn).toEqual({
+      content: "Inspecting.",
+      thinking: "I should inspect the workspace first.",
+      toolCalls: [expectedTool],
+    });
     expect(capture.request?.url).toBe(
       "https://openrouter.ai/api/v1/chat/completions",
     );
@@ -88,7 +93,7 @@ describe("chat completions agent model", () => {
         { content: "Inspect the source", role: "user" },
       ],
       model: "openai/gpt-4.1-mini",
-      reasoning: { effort: "high" },
+      reasoning: { effort: "high", summary: "auto" },
       tool_choice: "auto",
     });
     expect(JSON.stringify(body)).toContain("read_file");
@@ -135,6 +140,15 @@ describe("chat completions agent model", () => {
           response: {
             output: [
               {
+                summary: [
+                  {
+                    text: "I checked the prior tool result.",
+                    type: "summary_text",
+                  },
+                ],
+                type: "reasoning",
+              },
+              {
                 content: [{ text: "Done.", type: "output_text" }],
                 type: "message",
               },
@@ -175,6 +189,7 @@ describe("chat completions agent model", () => {
     ];
     expect(await model.complete(conversation)).toEqual({
       content: "Done.",
+      thinking: "I checked the prior tool result.",
       toolCalls: [],
     });
     expect(capture.request?.url).toBe(
@@ -190,7 +205,7 @@ describe("chat completions agent model", () => {
     const body = await capturedBody(capture);
     expect(body).toMatchObject({
       model: "gpt-5-codex",
-      reasoning: { effort: "medium" },
+      reasoning: { effort: "medium", summary: "auto" },
       store: false,
       stream: true,
     });
@@ -212,6 +227,8 @@ describe("chat completions agent model", () => {
         Promise.resolve(
           new Response(
             [
+              'event: response.reasoning_summary_text.delta\ndata: {"type":"response.reasoning_summary_text.delta","delta":"I considered"}',
+              'event: response.reasoning_summary_text.delta\ndata: {"type":"response.reasoning_summary_text.delta","delta":" the request."}',
               'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"Hello"}',
               'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":" there."}',
               'event: response.completed\ndata: {"type":"response.completed","response":{"output":[]}}',
@@ -227,6 +244,7 @@ describe("chat completions agent model", () => {
 
     expect(await model.complete([{ content: "Hello", role: "user" }])).toEqual({
       content: "Hello there.",
+      thinking: "I considered the request.",
       toolCalls: [],
     });
   });

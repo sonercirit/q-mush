@@ -171,6 +171,7 @@ function readMessage(value: unknown): AgentSessionMessage {
     (role !== "user" &&
       role !== "assistant" &&
       role !== "tool" &&
+      role !== "thinking" &&
       role !== "system") ||
     toolCallId === undefined ||
     toolName === undefined

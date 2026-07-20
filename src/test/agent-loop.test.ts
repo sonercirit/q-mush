@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { runAgentLoop, type AgentConversationMessage } from "../agent-loop.ts";
+import { runAgentLoop, type AgentRecordedMessage } from "../agent-loop.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 
 type ExecuteTool = Parameters<typeof runAgentLoop>[0]["executeTool"];
@@ -8,8 +8,8 @@ async function runRecordedLoop(
   model: ScriptedAgentModel,
   prompt: string,
   executeTool: ExecuteTool,
-): Promise<AgentConversationMessage[]> {
-  const recorded: AgentConversationMessage[] = [];
+): Promise<AgentRecordedMessage[]> {
+  const recorded: AgentRecordedMessage[] = [];
   await runAgentLoop({
     executeTool,
     initialMessages: [{ content: prompt, role: "user" }],
@@ -28,10 +28,22 @@ describe("first-party agent loop", () => {
       id: "call-1",
       name: "read_file",
     };
+    const assistantMessage = {
+      content: "I will inspect the project.",
+      role: "assistant" as const,
+      toolCalls: [readCall],
+    };
+    const toolMessage = {
+      content: "# Q Mush",
+      role: "tool" as const,
+      toolCallId: "call-1",
+      toolName: "read_file",
+    };
     const model = new ScriptedAgentModel([
       {
-        content: "I will inspect the project.",
-        toolCalls: [readCall],
+        content: assistantMessage.content,
+        thinking: "I should read the project documentation first.",
+        toolCalls: assistantMessage.toolCalls,
       },
       { content: "The project is ready.", toolCalls: [] },
     ]);
@@ -48,21 +60,17 @@ describe("first-party agent loop", () => {
     expect(executed).toEqual(["read_file:README.md"]);
     expect(recorded).toEqual([
       {
-        content: "I will inspect the project.",
-        role: "assistant",
-        toolCalls: [readCall],
+        content: "I should read the project documentation first.",
+        role: "thinking",
       },
-      {
-        content: "# Q Mush",
-        role: "tool",
-        toolCallId: "call-1",
-        toolName: "read_file",
-      },
+      assistantMessage,
+      toolMessage,
       { content: "The project is ready.", role: "assistant", toolCalls: [] },
     ]);
     expect(model.requests[1]).toEqual([
       { content: "Inspect this project", role: "user" },
-      ...recorded.slice(0, 2),
+      assistantMessage,
+      toolMessage,
     ]);
   });
 

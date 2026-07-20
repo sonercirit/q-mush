@@ -2,6 +2,7 @@ import { and, asc, desc, eq, inArray, type SQL } from "drizzle-orm";
 import {
   readAgentToolCalls,
   type AgentConversationMessage,
+  type AgentRecordedMessage,
   type AgentToolCall,
 } from "./agent-loop.ts";
 import { createdAuditFields, updatedAuditFields } from "./audit.ts";
@@ -14,11 +15,6 @@ import type {
   AgentSessionStatus,
   AgentSessionSummary,
 } from "./session-model.ts";
-
-type AgentRecordedMessage = Extract<
-  AgentConversationMessage,
-  { readonly role: "assistant" | "tool" }
->;
 
 export interface CreateAgentSession extends Pick<
   AgentSessionSummary,
@@ -143,13 +139,23 @@ type StoredMessageValues = Pick<
   "content" | "role" | "toolCallId" | "toolCalls" | "toolName"
 >;
 
-function assistantValues(message: AgentRecordedMessage): StoredMessageValues {
+function recordedMessageValues(
+  message: AgentRecordedMessage,
+): StoredMessageValues {
   if (message.role === "assistant") {
     return {
       ...emptyToolMetadata(),
       content: message.content,
       role: "assistant",
       toolCalls: JSON.stringify(message.toolCalls),
+    };
+  }
+
+  if (message.role === "thinking") {
+    return {
+      ...emptyToolMetadata(),
+      content: message.content,
+      role: "thinking",
     };
   }
 
@@ -290,6 +296,7 @@ export class SessionStore {
           conversation.push({ content: message.content, role: "user" });
           break;
         case "system":
+        case "thinking":
           break;
       }
     }
@@ -302,7 +309,12 @@ export class SessionStore {
     message: AgentRecordedMessage,
     now: number,
   ): void {
-    this.#appendMessage(sessionId, assistantValues(message), SYSTEM_ID, now);
+    this.#appendMessage(
+      sessionId,
+      recordedMessageValues(message),
+      SYSTEM_ID,
+      now,
+    );
   }
 
   appendSystemMessage(sessionId: string, content: string, now: number): void {

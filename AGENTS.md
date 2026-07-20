@@ -126,9 +126,12 @@ task-specific progress, guesses, or sensitive values.
   provider for compatible models and reasoning metadata;
   `src/agent-configuration.ts` owns shared catalog types, accepted effort
   values, and API fallback models. Model and effort selections are persisted
-  with the session. Session and transcript rows live in `agent_sessions` and
-  `agent_messages`; an interrupted server process marks active sessions failed
-  so they can be resumed explicitly.
+  with the session. `src/agent-prompt.ts` is the shared source for the model
+  system prompt and its transcript display. Provider-returned OpenRouter
+  reasoning and Codex reasoning summaries are persisted as `thinking` transcript
+  messages but excluded from provider conversation replay. Session and
+  transcript rows live in `agent_sessions` and `agent_messages`; an interrupted
+  server process marks active sessions failed so they can be resumed explicitly.
 - `src/openai.ts` and `src/openrouter.ts` manage authenticated provider PKCE
   connections and validate manually supplied keys against OpenAI `/v1/me` and
   OpenRouter `/api/v1/key`, respectively. OpenAI OAuth persists the access and
@@ -217,7 +220,9 @@ task-specific progress, guesses, or sensitive values.
   interoperable content-coding, while `Bun.deflateSync` produces a raw stream.
 - Knip rule severities alone do not activate default-off issue types; keep its
   authoritative included-issue list complete so it can generate every error
-  rule.
+  rule. Do not run the full test suite in parallel with lint or other repository
+  scans: tooling-policy tests briefly create intentionally invalid probe files
+  under `src`.
 - A runner install command uses the HTTP request origin. To connect another
   computer, access the control center through an origin reachable from that
   computer rather than `localhost`. Removing a runner revokes its server-side

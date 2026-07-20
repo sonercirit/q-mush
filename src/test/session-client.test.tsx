@@ -81,6 +81,47 @@ const EMPTY_PROVIDER_STATE: ProviderViewState = {
   savePending: false,
 };
 
+test("renders the system prompt and model thinking in a transcript", () => {
+  const state: SessionViewState = {
+    ...SESSION_STATE,
+    detail: {
+      createdAt: 1,
+      credentialId: "credential-1",
+      id: "session-1",
+      messages: [
+        {
+          content: "I should inspect the existing files first.",
+          createdAt: 2,
+          id: "thinking-1",
+          role: "thinking",
+          toolCallId: null,
+          toolCalls: [],
+          toolName: null,
+        },
+      ],
+      model: "gpt-5-codex",
+      provider: "openai",
+      reasoningEffort: "high",
+      runnerId: "runner-1",
+      status: "idle",
+      title: "Inspect the app",
+      updatedAt: 2,
+      workingDirectory: ".",
+    },
+    selectedId: "session-1",
+  };
+  const html = renderToHtml(
+    renderSessionPanel(state, RUNNER_STATE, OPENAI_STATE, EMPTY_PROVIDER_STATE),
+  );
+
+  expect(html).toContain("System prompt");
+  expect(html).toContain(
+    "You are Q Mush, a careful coding agent operating in a user-selected workspace.",
+  );
+  expect(html).toContain("Thinking");
+  expect(html).toContain("I should inspect the existing files first.");
+});
+
 test("renders model and reasoning effort as selects", () => {
   const html = renderToHtml(
     renderSessionPanel(

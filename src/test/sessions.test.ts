@@ -223,6 +223,7 @@ describe("agent sessions", () => {
     const model = new ScriptedAgentModel([
       {
         content: "Reading the file.",
+        thinking: "I need to inspect README before answering.",
         toolCalls: [
           {
             arguments: '{"path":"README.md"}',
@@ -286,6 +287,9 @@ describe("agent sessions", () => {
       hasStatus("idle"),
     );
     expect(JSON.stringify(idle)).toContain("README inspected.");
+    expect(JSON.stringify(idle)).toContain(
+      "I need to inspect README before answering.",
+    );
     expect(JSON.stringify(idle)).toContain("# Q Mush");
 
     const followUp = await sessions.message(

@@ -136,7 +136,7 @@ export const agentMessages = sqliteTable(
       .notNull()
       .references(() => agentSessions.id, { onDelete: "restrict" }),
     role: text("role", {
-      enum: ["user", "assistant", "tool", "system"],
+      enum: ["user", "assistant", "tool", "thinking", "system"],
     }).notNull(),
     content: text("content").notNull(),
     toolCallId: text("tool_call_id"),

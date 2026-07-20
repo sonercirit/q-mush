@@ -553,9 +553,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
         initialMessages: this.#store.conversation(detail.id),
         model,
         recordMessage: (message) => {
-          if (message.role !== "user") {
-            this.#store.appendAgentMessage(detail.id, message, this.#now());
-          }
+          this.#store.appendAgentMessage(detail.id, message, this.#now());
         },
         signal: controller.signal,
       });

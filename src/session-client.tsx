@@ -2,6 +2,7 @@ import {
   reasoningEffortLabel,
   type AgentModelCatalog,
 } from "./agent-configuration.ts";
+import { AGENT_SYSTEM_PROMPT } from "./agent-prompt.ts";
 import { renderRetryError } from "./client-controls.tsx";
 import { createElement, type JsxNode } from "./jsx.ts";
 import type {
@@ -426,7 +427,36 @@ function renderSessionList(state: SessionViewState): JsxNode {
   );
 }
 
+function renderTranscriptNote(options: {
+  readonly classes: string;
+  readonly content: string;
+  readonly label: string;
+  readonly labelClasses: string;
+}): JsxNode {
+  return (
+    <li className={`rounded-xl border p-4 ${options.classes}`}>
+      <p
+        className={`text-xs font-semibold tracking-wide uppercase ${options.labelClasses}`}
+      >
+        {options.label}
+      </p>
+      <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-200">
+        {options.content}
+      </p>
+    </li>
+  );
+}
+
 function renderMessage(message: AgentSessionMessage): JsxNode {
+  if (message.role === "thinking") {
+    return renderTranscriptNote({
+      classes: "border-violet-300/20 bg-violet-300/10",
+      content: message.content,
+      label: "Thinking",
+      labelClasses: "text-violet-200",
+    });
+  }
+
   if (message.role === "tool") {
     return (
       <li className="rounded-xl border border-white/10 bg-slate-950/80 p-4">
@@ -509,6 +539,12 @@ function renderDetail(state: SessionViewState): JsxNode {
         aria-live="polite"
         className="mt-5 max-h-[36rem] space-y-3 overflow-y-auto pr-1"
       >
+        {renderTranscriptNote({
+          classes: "border-amber-300/20 bg-amber-300/10",
+          content: AGENT_SYSTEM_PROMPT,
+          label: "System prompt",
+          labelClasses: "text-amber-200",
+        })}
         {detail.messages.map(renderMessage)}
       </ul>
       {!active ? (
