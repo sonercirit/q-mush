@@ -51,11 +51,24 @@ To run:
 bun run src/index.ts
 ```
 
-To run the server in watch mode during development:
+To run the supervised development server:
 
 ```bash
 bun run dev
 ```
+
+Source edits intentionally leave the running process untouched so an agent can
+modify Q Mush without interrupting its own session. Once the change is ready and
+the self-modifying session is idle, restart explicitly:
+
+```bash
+bun run dev:restart
+```
+
+The restart rebuilds the browser assets and runner version. Connected runners
+observe that version on their next API response and immediately check for a
+changed executable. Run the trigger only after active sessions finish because a
+server restart still interrupts in-flight server work.
 
 The server builds the browser app and Tailwind stylesheet in memory at startup
 and prepares versioned standalone runner builds, then exposes two pages and
@@ -105,7 +118,9 @@ can reach instead of `localhost`. A runner derives an opaque machine fingerprint
 and the database allows only one active runner for a computer. It reports its
 hostname, platform, architecture, and a heartbeat every 15 seconds; the control
 center refreshes presence without exposing its token. The runner checks for a
-versioned update at startup and every five minutes. It verifies the executable's
+versioned update at startup and every five minutes. Runner API responses also
+advertise the current version, so a runner checks between commands immediately
+after contacting a triggered development restart. It verifies the executable's
 SHA-256 digest, atomically replaces itself, and restarts. Removing a runner
 revokes its server-side registration, but it does not delete files from that
 computer. Rerun the installer once to migrate a legacy `q-mush-runner.js`

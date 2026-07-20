@@ -14,6 +14,7 @@ import {
   readRunnerCommand,
   readRunnerCommandStatus,
 } from "./runner-command.ts";
+import { RunnerUpdateTrigger } from "./runner-update-trigger.ts";
 import { updateRunnerIfAvailable } from "./runner-update.ts";
 
 declare const Q_MUSH_RUNNER_TARGET: string;
@@ -25,6 +26,7 @@ const RETRY_INTERVAL_MILLISECONDS = 5_000;
 const REQUEST_TIMEOUT_MILLISECONDS = 10_000;
 const UPDATE_INTERVAL_MILLISECONDS = 5 * 60_000;
 const TOKEN_PATTERN = /^qmr_[A-Za-z\d_-]{8,200}$/u;
+const runnerUpdateTrigger = new RunnerUpdateTrigger(Q_MUSH_RUNNER_VERSION);
 
 class RunnerRequestError extends Error {
   readonly status: number;
@@ -160,6 +162,7 @@ async function requestServer(
     new URL(path, configuration.serverOrigin),
     requestOptions,
   );
+  runnerUpdateTrigger.observe(response);
 
   if (!response.ok) {
     throw new RunnerRequestError(response.status);
@@ -350,6 +353,14 @@ async function maintainConnection(
   let nextUpdateAt = Date.now() + UPDATE_INTERVAL_MILLISECONDS;
 
   for (;;) {
+    if (runnerUpdateTrigger.take() || Date.now() >= nextUpdateAt) {
+      if (await installUpdateIfAvailable(configuration, configurationPath)) {
+        return;
+      }
+
+      nextUpdateAt = Date.now() + UPDATE_INTERVAL_MILLISECONDS;
+    }
+
     try {
       await processWithHeartbeats(configuration);
     } catch (error) {
@@ -365,14 +376,6 @@ async function maintainConnection(
       }
 
       nextHeartbeatAt = Date.now() + HEARTBEAT_INTERVAL_MILLISECONDS;
-    }
-
-    if (Date.now() >= nextUpdateAt) {
-      if (await installUpdateIfAvailable(configuration, configurationPath)) {
-        return;
-      }
-
-      nextUpdateAt = Date.now() + UPDATE_INTERVAL_MILLISECONDS;
     }
 
     await sleep(WORK_POLL_INTERVAL_MILLISECONDS);

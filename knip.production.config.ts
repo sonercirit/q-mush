@@ -11,6 +11,7 @@ export default {
     "scripts/dev.ts!",
     "scripts/migrate-database.ts!",
     "scripts/repository-check.ts!",
+    "scripts/restart-development-server.ts!",
   ],
   project: [
     "src/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}!",

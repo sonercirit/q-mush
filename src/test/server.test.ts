@@ -24,6 +24,7 @@ import {
   RUNNER_HEARTBEAT_PATH,
   RUNNER_INSTALLER_PATH,
   RUNNER_REGISTER_PATH,
+  RUNNER_VERSION_HEADER,
   RUNNER_WORK_PATH,
   runnerDirectoriesPath,
   RUNNERS_PATH,
@@ -170,6 +171,7 @@ describe("routes", () => {
     );
     expect(RUNNER_REGISTER_PATH).toBe("/api/runner/register");
     expect(RUNNER_HEARTBEAT_PATH).toBe("/api/runner/heartbeat");
+    expect(RUNNER_VERSION_HEADER).toBe("x-q-mush-runner-version");
     expect(RUNNER_WORK_PATH).toBe("/api/runner/work");
     expect(SESSIONS_PATH).toBe("/api/sessions");
     expect(RUNNER_INSTALLER_PATH).toBe("/runner/install.sh");
@@ -248,7 +250,13 @@ describe("page server", () => {
     expect(collectionResponse.status).toBe(401);
     expect(setupResponse.status).toBe(401);
     expect(registrationResponse.status).toBe(401);
+    expect(registrationResponse.headers.get(RUNNER_VERSION_HEADER)).toBe(
+      runnerExecutables.version,
+    );
     expect(heartbeatResponse.status).toBe(401);
+    expect(heartbeatResponse.headers.get(RUNNER_VERSION_HEADER)).toBe(
+      runnerExecutables.version,
+    );
     expect(installerResponse.status).toBe(404);
   });
 
@@ -268,6 +276,15 @@ describe("page server", () => {
     ]);
 
     expectAllStatuses(responses, 401);
+    expect(
+      responses
+        .slice(-2)
+        .every(
+          (response) =>
+            response.headers.get(RUNNER_VERSION_HEADER) ===
+            runnerExecutables.version,
+        ),
+    ).toBeTrue();
   });
 
   test("serves the authentication session endpoint", async () => {

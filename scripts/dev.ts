@@ -1,12 +1,19 @@
 import { fileURLToPath } from "node:url";
-import { startDevelopmentServer } from "./development-server.ts";
+import {
+  developmentRestartTriggerPath,
+  prepareDevelopmentRestartTrigger,
+  startDevelopmentServer,
+} from "./development-server.ts";
 
 const projectRoot = fileURLToPath(new URL("..", import.meta.url));
+const restartTriggerPath = developmentRestartTriggerPath(projectRoot);
+await prepareDevelopmentRestartTrigger(restartTriggerPath);
 const developmentServer = startDevelopmentServer({
   command: [process.execPath, "run", "src/index.ts"],
   cwd: projectRoot,
-  watchPaths: [fileURLToPath(new URL("../src", import.meta.url))],
+  restartTriggerPath,
 });
+console.log("Run `bun run dev:restart` to restart Q Mush and update runners.");
 let exiting = false;
 
 function shutDown(exitCode: number): void {

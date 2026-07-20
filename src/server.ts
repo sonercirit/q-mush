@@ -19,6 +19,7 @@ const {
   RUNNER_REGISTER_PATH,
   RUNNER_INSTALLER_PATH,
   RUNNER_HEARTBEAT_PATH,
+  RUNNER_VERSION_HEADER,
   RUNNER_WORK_PATH,
   SESSIONS_PATH,
   SESSION_MODELS_PATH,
@@ -179,6 +180,15 @@ interface ProviderRoutes {
   readonly oauthCallback: string;
 }
 
+async function advertiseRunnerVersion(
+  response: Promise<Response> | Response,
+  version: string,
+): Promise<Response> {
+  const resolved = await response;
+  resolved.headers.set(RUNNER_VERSION_HEADER, version);
+  return resolved;
+}
+
 function routeProviderRequest(
   pathname: string,
   request: Request,
@@ -247,15 +257,24 @@ export function createRequestHandler(
       }
 
       if (pathname === RUNNER_REGISTER_PATH) {
-        return runners.register(request);
+        return advertiseRunnerVersion(
+          runners.register(request),
+          runnerExecutables.version,
+        );
       }
 
       if (pathname === RUNNER_HEARTBEAT_PATH) {
-        return runners.heartbeat(request);
+        return advertiseRunnerVersion(
+          runners.heartbeat(request),
+          runnerExecutables.version,
+        );
       }
 
       if (pathname === RUNNER_WORK_PATH) {
-        return sessions.work(request);
+        return advertiseRunnerVersion(
+          sessions.work(request),
+          runnerExecutables.version,
+        );
       }
 
       const runnerWorkPrefix = `${RUNNER_WORK_PATH}/`;
@@ -264,7 +283,10 @@ export function createRequestHandler(
         const commandId = pathname.slice(runnerWorkPrefix.length);
 
         if (commandId.length > 0 && !commandId.includes("/")) {
-          return sessions.workResult(request, commandId);
+          return advertiseRunnerVersion(
+            sessions.workResult(request, commandId),
+            runnerExecutables.version,
+          );
         }
       }
 

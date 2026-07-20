@@ -1,14 +1,34 @@
 import { watch } from "node:fs";
+import { appendFile, mkdir } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 interface DevelopmentServerOptions {
   readonly command: readonly string[];
   readonly cwd: string;
   readonly restartDelayMilliseconds?: number;
-  readonly watchPaths: readonly string[];
+  readonly restartTriggerPath: string;
 }
 
 export interface DevelopmentServer {
   stop(): Promise<void>;
+}
+
+export function developmentRestartTriggerPath(projectRoot: string): string {
+  return join(projectRoot, "data", "development-server.restart");
+}
+
+export async function prepareDevelopmentRestartTrigger(
+  pathname: string,
+): Promise<void> {
+  await mkdir(dirname(pathname), { recursive: true });
+  await appendFile(pathname, "");
+}
+
+export async function triggerDevelopmentRestart(
+  pathname: string,
+): Promise<void> {
+  await prepareDevelopmentRestartTrigger(pathname);
+  await appendFile(pathname, `${String(Date.now())}\n`);
 }
 
 export function startDevelopmentServer(
@@ -49,9 +69,7 @@ export function startDevelopmentServer(
     }, options.restartDelayMilliseconds ?? 50);
   };
 
-  const watchers = options.watchPaths.map((pathname) =>
-    watch(pathname, { recursive: true }, scheduleRestart),
-  );
+  const restartTrigger = watch(options.restartTriggerPath, scheduleRestart);
 
   return {
     stop: () => {
@@ -66,9 +84,7 @@ export function startDevelopmentServer(
         restartTimer = undefined;
       }
 
-      for (const watcher of watchers) {
-        watcher.close();
-      }
+      restartTrigger.close();
 
       stopPromise = operation.then(stopChild);
       return stopPromise;

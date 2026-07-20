@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   startDevelopmentServer,
+  triggerDevelopmentRestart,
   type DevelopmentServer,
 } from "../development-server.ts";
 
@@ -36,15 +37,25 @@ async function waitForStartCount(
   );
 }
 
-test("restarts the development server when a watched source file changes", async () => {
+async function expectStableStartCount(
+  pathname: string,
+  expected: number,
+): Promise<void> {
+  await Bun.sleep(100);
+  expect(await readStartCount(pathname)).toBe(expected);
+}
+
+test("keeps changed source running until the restart trigger changes", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "q-mush-dev-test-"));
   const sourceDirectory = path.join(directory, "src");
   const childPath = path.join(directory, "child.ts");
   const startsPath = path.join(directory, "starts.txt");
+  const triggerPath = path.join(directory, "restart.trigger");
   let server: DevelopmentServer | undefined;
 
   try {
     await mkdir(sourceDirectory);
+    await Bun.write(triggerPath, "");
     await Bun.write(
       childPath,
       `import { appendFileSync } from "node:fs";
@@ -58,15 +69,16 @@ await new Promise(() => {});
       command: [process.execPath, childPath, startsPath],
       cwd: directory,
       restartDelayMilliseconds: 20,
-      watchPaths: [sourceDirectory],
+      restartTriggerPath: triggerPath,
     });
 
     await waitForStartCount(startsPath, 1);
     await Bun.write(path.join(sourceDirectory, "client.tsx"), "changed\n");
-    await waitForStartCount(startsPath, 2);
-    await Bun.sleep(100);
+    await expectStableStartCount(startsPath, 1);
 
-    expect(await readStartCount(startsPath)).toBe(2);
+    await triggerDevelopmentRestart(triggerPath);
+    await waitForStartCount(startsPath, 2);
+    await expectStableStartCount(startsPath, 2);
   } finally {
     await server?.stop();
     await rm(directory, { force: true, recursive: true });

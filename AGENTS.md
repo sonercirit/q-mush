@@ -50,7 +50,8 @@ task-specific progress, guesses, or sensitive values.
 
 - Install dependencies: `bun install`
 - Run the application: `bun run src/index.ts`
-- Run the development server in watch mode: `bun run dev`
+- Run the supervised development server: `bun run dev`
+- Restart the development server after source changes: `bun run dev:restart`
 - Generate a database migration after schema changes: `bun run db:generate`
 - Apply pending database migrations: `bun run db:migrate`
 - Run tests: `bun test`
@@ -71,10 +72,11 @@ task-specific progress, guesses, or sensitive values.
 - Bun manages dependencies through `package.json` and the committed `bun.lock`
   lockfile.
 - `src/server.ts` builds `src/client.tsx` and the Tailwind stylesheet in memory
-  at startup, then serves them from `/app.js` and `/styles.css`. Because these
-  build inputs are not runtime imports, `scripts/dev.ts` supervises the server
-  and watches the entire `src` tree so `bun run dev` also restarts for browser
-  and stylesheet changes. `src/runner-executable.ts` fingerprints the runner
+  at startup, then serves them from `/app.js` and `/styles.css`. Because an
+  agent may modify this repository through the running app, `bun run dev`
+  deliberately does not restart for source edits. `scripts/dev.ts` watches only
+  the ignored `data/development-server.restart` trigger written by
+  `bun run dev:restart`. `src/runner-executable.ts` fingerprints the runner
   source and Bun compiler, lazily cross-compiles each requested target through a
   temporary directory, and caches the standalone executable in memory for
   `/runner/executable`; no generated assets are written into the project.
@@ -106,13 +108,17 @@ task-specific progress, guesses, or sensitive values.
   glibc/musl target, downloads one standalone executable, and starts it under
   `~/.q-mush/runner` by default without requiring Bun on that computer. The
   runner reports machine metadata, sends 15-second heartbeats, and checks for an
-  update at startup and every five minutes. Updates use a source/compiler
-  version ETag, verify a server-provided SHA-256 digest, atomically replace the
-  executable, and restart it. The browser panel/controller refreshes online
-  presence. Reinstalling for the same user and machine rotates the existing
-  registration to the new token instead of creating a second runner; another
-  user's registration remains protected. Runner tokens never appear in list
-  responses.
+  update at startup and every five minutes. Runner API responses advertise the
+  current executable version, which also triggers a check between commands as
+  soon as the runner contacts a restarted development server. Updates use a
+  source/compiler version ETag, verify a server-provided SHA-256 digest,
+  atomically replace the executable, and restart it. Run the development restart
+  trigger only after active sessions finish because restarting the server still
+  interrupts in-flight server work. The browser panel/controller refreshes
+  online presence. Reinstalling for the same user and machine rotates the
+  existing registration to the new token instead of creating a second runner;
+  another user's registration remains protected. Runner tokens never appear in
+  list responses.
 - `src/sessions.ts`, `src/session-store.ts`, and `src/agent-model.ts` implement
   persistent first-party coding sessions without an external agent harness. The
   server owns the model/tool loop so provider secrets never enter browser or
