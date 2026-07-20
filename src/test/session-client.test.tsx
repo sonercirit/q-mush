@@ -139,6 +139,9 @@ test("renders the system prompt and model thinking in a transcript", () => {
   );
 
   expect(html).toContain("System prompt");
+  expect(html).toContain('data-scroll-key="session-transcript:session-1"');
+  expect(html).toContain('data-scroll-on-change="end"');
+  expect(html).toContain('data-scroll-revision="3:tool-1"');
   expect(html).toContain(
     "You are Q Mush, a careful coding agent operating in a user-selected workspace.",
   );

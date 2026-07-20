@@ -441,6 +441,7 @@ function renderDetail(state: SessionViewState): JsxNode {
 
   const detail = state.detail;
   const active = detail.status === "queued" || detail.status === "running";
+  const lastMessageId = detail.messages.at(-1)?.id ?? "";
   return (
     <div>
       <div className="flex flex-col gap-4 border-b border-white/10 pb-5 sm:flex-row sm:items-start sm:justify-between">
@@ -467,6 +468,9 @@ function renderDetail(state: SessionViewState): JsxNode {
       <ul
         aria-live="polite"
         className="mt-5 max-h-[36rem] space-y-3 overflow-y-auto pr-1"
+        data-scroll-key={`session-transcript:${detail.id}`}
+        data-scroll-on-change="end"
+        data-scroll-revision={`${String(detail.messages.length)}:${lastMessageId}`}
       >
         {renderSessionTranscript(detail.messages)}
       </ul>

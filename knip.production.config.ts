@@ -8,6 +8,7 @@ export default {
     "src/client.tsx!",
     "src/runner-agent.ts!",
     "src/styles.css!",
+    "scripts/dev.ts!",
     "scripts/migrate-database.ts!",
     "scripts/repository-check.ts!",
   ],

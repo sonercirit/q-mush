@@ -21,6 +21,7 @@ import {
 } from "./routes.ts";
 import { renderRunnerPanel, type RunnerViewState } from "./runner-client.tsx";
 import { RunnerController } from "./runner-controller.ts";
+import { updatePreservingScrollPositions } from "./scroll-position.ts";
 import {
   renderSessionPanel,
   type SessionViewState,
@@ -464,6 +465,26 @@ async function logout(): Promise<void> {
   updateApp(root);
 }
 
+function readScrollTargets(container: Element): ReadonlyMap<string, Element> {
+  const targets = new Map<string, Element>();
+  const ownerDocument = container.ownerDocument;
+
+  targets.set(
+    "document",
+    ownerDocument.scrollingElement ?? ownerDocument.documentElement,
+  );
+
+  for (const element of container.querySelectorAll("[data-scroll-key]")) {
+    const key = element.getAttribute("data-scroll-key");
+
+    if (key !== null) {
+      targets.set(`region:${key}`, element);
+    }
+  }
+
+  return targets;
+}
+
 function updateApp(container: Element, replaceFocusedSelect = false): void {
   const activeElement = container.ownerDocument.activeElement;
 
@@ -477,18 +498,23 @@ function updateApp(container: Element, replaceFocusedSelect = false): void {
   }
 
   appUpdateDeferred = false;
-  mount(
-    renderApp(
-      loadFailed,
-      logoutPending,
-      notices,
-      openAi.state,
-      openRouter.state,
-      runners.state,
-      agentSessions.state,
-      session,
-    ),
-    container,
+  updatePreservingScrollPositions(
+    () => readScrollTargets(container),
+    () => {
+      mount(
+        renderApp(
+          loadFailed,
+          logoutPending,
+          notices,
+          openAi.state,
+          openRouter.state,
+          runners.state,
+          agentSessions.state,
+          session,
+        ),
+        container,
+      );
+    },
   );
   agentSessions.bind(container);
   runners.bind(container);

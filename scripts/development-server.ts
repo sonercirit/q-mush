@@ -1,0 +1,77 @@
+import { watch } from "node:fs";
+
+interface DevelopmentServerOptions {
+  readonly command: readonly string[];
+  readonly cwd: string;
+  readonly restartDelayMilliseconds?: number;
+  readonly watchPaths: readonly string[];
+}
+
+export interface DevelopmentServer {
+  stop(): Promise<void>;
+}
+
+export function startDevelopmentServer(
+  options: DevelopmentServerOptions,
+): DevelopmentServer {
+  const spawn = () =>
+    Bun.spawn([...options.command], {
+      cwd: options.cwd,
+      stderr: "inherit",
+      stdin: "inherit",
+      stdout: "inherit",
+    });
+  let child = spawn();
+  let operation = Promise.resolve();
+  let restartTimer: ReturnType<typeof setTimeout> | undefined;
+  let stopping = false;
+  let stopPromise: Promise<void> | undefined;
+
+  const stopChild = async (): Promise<void> => {
+    child.kill();
+    await child.exited;
+  };
+
+  const scheduleRestart = (): void => {
+    if (restartTimer !== undefined) {
+      clearTimeout(restartTimer);
+    }
+
+    restartTimer = setTimeout(() => {
+      restartTimer = undefined;
+      operation = operation.then(async () => {
+        await stopChild();
+
+        if (!stopping) {
+          child = spawn();
+        }
+      });
+    }, options.restartDelayMilliseconds ?? 50);
+  };
+
+  const watchers = options.watchPaths.map((pathname) =>
+    watch(pathname, { recursive: true }, scheduleRestart),
+  );
+
+  return {
+    stop: () => {
+      if (stopPromise !== undefined) {
+        return stopPromise;
+      }
+
+      stopping = true;
+
+      if (restartTimer !== undefined) {
+        clearTimeout(restartTimer);
+        restartTimer = undefined;
+      }
+
+      for (const watcher of watchers) {
+        watcher.close();
+      }
+
+      stopPromise = operation.then(stopChild);
+      return stopPromise;
+    },
+  };
+}

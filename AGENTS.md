@@ -71,13 +71,15 @@ task-specific progress, guesses, or sensitive values.
 - Bun manages dependencies through `package.json` and the committed `bun.lock`
   lockfile.
 - `src/server.ts` builds `src/client.tsx` and the Tailwind stylesheet in memory
-  at startup, then serves them from `/app.js` and `/styles.css`.
-  `src/runner-executable.ts` fingerprints the runner source and Bun compiler,
-  lazily cross-compiles each requested target through a temporary directory, and
-  caches the standalone executable in memory for `/runner/executable`; no
-  generated assets are written into the project. Textual response bodies are
-  precompressed once per handler, with `zstd`, Brotli, gzip, or deflate
-  negotiated in that server-preference order.
+  at startup, then serves them from `/app.js` and `/styles.css`. Because these
+  build inputs are not runtime imports, `scripts/dev.ts` supervises the server
+  and watches the entire `src` tree so `bun run dev` also restarts for browser
+  and stylesheet changes. `src/runner-executable.ts` fingerprints the runner
+  source and Bun compiler, lazily cross-compiles each requested target through a
+  temporary directory, and caches the standalone executable in memory for
+  `/runner/executable`; no generated assets are written into the project.
+  Textual response bodies are precompressed once per handler, with `zstd`,
+  Brotli, gzip, or deflate negotiated in that server-preference order.
 - `src/pages.tsx` contains server page markup, while `src/client.tsx` mounts the
   browser app. Shared route paths are defined in `src/routes.ts`.
 - `src/auth.ts` implements Google OpenID Connect with an authorization-code +
@@ -123,18 +125,21 @@ task-specific progress, guesses, or sensitive values.
   entry. The control center creates, inspects, follows up, stops, and polls
   sessions through `src/session-client.tsx` and `src/session-controller.ts`.
   Poll controllers suppress render notifications when refreshed data has no
-  visible change. Browser rendering defers full-root remounts while a select has
-  focus, flushing on change or focus loss, and periodic polls pause so the
-  native picker stays open. `src/agent-model-discovery.ts` queries the selected
-  credential's provider for compatible models and reasoning metadata;
-  `src/agent-configuration.ts` owns shared catalog types, accepted effort
-  values, and API fallback models. Model and effort selections are persisted
-  with the session. `src/agent-prompt.ts` is the shared source for the model
-  system prompt and its transcript display. Provider-returned OpenRouter
-  reasoning and Codex reasoning summaries are persisted as `thinking` transcript
-  messages but excluded from provider conversation replay. Session and
-  transcript rows live in `agent_sessions` and `agent_messages`; an interrupted
-  server process marks active sessions failed so they can be resumed explicitly.
+  visible change. Browser rendering preserves the document viewport and keyed
+  `data-scroll-key` regions across full-root remounts; the session transcript
+  starts at the bottom and returns there when its message revision changes. It
+  defers remounts while a select has focus, flushing on change or focus loss,
+  and periodic polls pause so the native picker stays open.
+  `src/agent-model-discovery.ts` queries the selected credential's provider for
+  compatible models and reasoning metadata; `src/agent-configuration.ts` owns
+  shared catalog types, accepted effort values, and API fallback models. Model
+  and effort selections are persisted with the session. `src/agent-prompt.ts` is
+  the shared source for the model system prompt and its transcript display.
+  Provider-returned OpenRouter reasoning and Codex reasoning summaries are
+  persisted as `thinking` transcript messages but excluded from provider
+  conversation replay. Session and transcript rows live in `agent_sessions` and
+  `agent_messages`; an interrupted server process marks active sessions failed
+  so they can be resumed explicitly.
 - `src/openai.ts` and `src/openrouter.ts` manage authenticated provider PKCE
   connections and validate manually supplied keys against OpenAI `/v1/me` and
   OpenRouter `/api/v1/key`, respectively. OpenAI OAuth persists the access and

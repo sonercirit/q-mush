@@ -8,7 +8,7 @@
     "cpd": "cpd .",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun run scripts/migrate-database.ts",
-    "dev": "bun --watch src/index.ts",
+    "dev": "bun run scripts/dev.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "knip": "bun run knip:production && bun run knip:test",
