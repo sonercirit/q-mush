@@ -189,6 +189,8 @@ export class SessionController {
         }
       } else if (action === "stop-session") {
         void this.#stop();
+      } else if (action === "continue-session") {
+        void this.#continue();
       } else if (action === "retry-sessions") {
         void this.load();
       } else if (action === "retry-models") {
@@ -620,16 +622,28 @@ export class SessionController {
     });
   }
 
+  async #continue(): Promise<void> {
+    await this.#postSelected("continue", "continue that session", "sending");
+  }
+
   async #stop(): Promise<void> {
+    await this.#postSelected("stop", "stop that session", "stopping");
+  }
+
+  async #postSelected(
+    endpoint: "continue" | "stop",
+    action: string,
+    pending: "sending" | "stopping",
+  ): Promise<void> {
     const sessionId = this.#view.value.selectedId;
 
     if (sessionId !== undefined) {
       await this.#mutateDetail({
-        action: "stop that session",
-        pending: "stopping",
+        action,
+        pending,
         request: () =>
           requestJson(
-            `${SESSIONS_PATH}/${encodeURIComponent(sessionId)}/stop`,
+            `${SESSIONS_PATH}/${encodeURIComponent(sessionId)}/${endpoint}`,
             { method: "POST" },
           ),
       });
@@ -642,10 +656,8 @@ export class SessionController {
     readonly request: () => Promise<unknown>;
     readonly success?: Partial<SessionViewState>;
   }): Promise<void> {
-    const pending =
-      options.pending === "sending" ? { sending: true } : { stopping: true };
-    const settled =
-      options.pending === "sending" ? { sending: false } : { stopping: false };
+    const pending = { [options.pending]: true };
+    const settled = { [options.pending]: false };
     const revision = this.#view.begin({ error: undefined, ...pending });
 
     try {

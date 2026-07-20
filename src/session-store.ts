@@ -31,7 +31,7 @@ export interface CreateAgentSession extends Pick<
   readonly userId: string;
 }
 
-export type QueuePromptResult =
+export type QueueSessionResult =
   | { readonly detail: AgentSessionDetail; readonly status: "queued" }
   | { readonly status: "busy" }
   | { readonly status: "not_found" };
@@ -503,13 +503,13 @@ export class SessionStore {
     );
   }
 
-  queuePrompt(
+  queue(
     userId: string,
     sessionId: string,
-    prompt: string,
     now: number,
-  ): QueuePromptResult {
-    const messageId = this.#generateId(now);
+    prompt?: string,
+  ): QueueSessionResult {
+    const messageId = prompt === undefined ? undefined : this.#generateId(now);
     const status = this.#database.transaction((transaction) => {
       const stored = transaction
         .select({ status: agentSessions.status })
@@ -529,18 +529,20 @@ export class SessionStore {
         return "busy" as const;
       }
 
-      transaction
-        .insert(agentMessages)
-        .values(
-          userMessageValues({
-            content: prompt,
-            id: messageId,
-            now,
-            sessionId,
-            userId,
-          }),
-        )
-        .run();
+      if (prompt !== undefined && messageId !== undefined) {
+        transaction
+          .insert(agentMessages)
+          .values(
+            userMessageValues({
+              content: prompt,
+              id: messageId,
+              now,
+              sessionId,
+              userId,
+            }),
+          )
+          .run();
+      }
       transaction
         .update(agentSessions)
         .set({ status: "queued", ...updatedAuditFields(userId, now) })

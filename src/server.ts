@@ -335,6 +335,8 @@ export function createRequestHandler(
 
           if (segments.length === 2) {
             switch (segments[1]) {
+              case "continue":
+                return sessions.continue(request, sessionId);
               case "messages":
                 return sessions.message(request, sessionId);
               case "stop":

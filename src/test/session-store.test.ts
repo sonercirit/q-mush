@@ -70,6 +70,7 @@ function createStore() {
     THINKING_MESSAGE_ID,
     ASSISTANT_MESSAGE_ID,
     TOOL_MESSAGE_ID,
+    "018bcfe5-6800-7000-8000-000000000048",
   ];
   return {
     database,
@@ -168,7 +169,22 @@ describe("session store", () => {
     database.$client.close();
   });
 
-  test("shows and replays interrupted tool-call results", () => {
+  test("continues without appending a user message", () => {
+    const setup = createStore();
+    createTestSession(setup.store);
+    markTestSessionRunning(setup.store);
+    expect(setup.store.mark(SESSION_ID, "idle", TEST_NOW + 2)).toBeTrue();
+    const before = setup.store.conversation(SESSION_ID);
+
+    const queued = setup.store.queue(TEST_USER_ID, SESSION_ID, TEST_NOW + 3);
+
+    expect(queued.status).toBe("queued");
+    expect(setup.store.conversation(SESSION_ID)).toEqual(before);
+    expect(setup.store.get(TEST_USER_ID, SESSION_ID)?.status).toBe("queued");
+    setup.database.$client.close();
+  });
+
+  test("fills missing tool results when replaying a transcript", () => {
     const { database, store } = createStore();
     createTestSession(store);
     markTestSessionRunning(store);
@@ -191,12 +207,8 @@ describe("session store", () => {
       "tool",
     ]);
     expect(
-      store.queuePrompt(
-        TEST_USER_ID,
-        SESSION_ID,
-        "Why was it failing?",
-        TEST_NOW + 4,
-      ).status,
+      store.queue(TEST_USER_ID, SESSION_ID, TEST_NOW + 4, "Why was it failing?")
+        .status,
     ).toBe("queued");
     const interruptedToolResult = {
       content:

@@ -171,6 +171,8 @@ test("renders the system prompt and model thinking in a transcript", () => {
   expect(html).toContain("call-1");
   expect(html).toContain('{"path":"README.md","offset":1}');
   expect(html).toContain("# Q Mush");
+  expect(html).toContain('data-action="continue-session"');
+  expect(html).toContain(">Continue</button>");
 });
 
 test("renders a directory browser beside the working-directory input", () => {

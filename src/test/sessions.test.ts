@@ -1,45 +1,39 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentModelCatalog } from "../agent-configuration.ts";
-import { RUNNER_AGENT_FILE_COMMAND } from "../agent-file.ts";
 import type {
   AgentConversationMessage,
   AgentModel,
   AgentModelTurn,
 } from "../agent-loop.ts";
 import type { AgentModelDiscoverer } from "../agent-model-discovery.ts";
-import { isRecord } from "../auth-model.ts";
-import { createGoogleAuthFromEnvironment } from "../auth.ts";
-import type { ProviderCredentialAccess } from "../provider-credential-store.ts";
 import {
-  RUNNER_REGISTER_PATH,
   RUNNER_WORK_PATH,
   runnerDirectoriesPath,
   SESSION_MODELS_PATH,
   SESSIONS_PATH,
 } from "../routes.ts";
+import type { createSessionIntegration } from "../sessions.ts";
 import {
-  RunnerCommandBroker,
-  type RunnerToolCommand,
-} from "../runner-command-broker.ts";
-import { createRunnerIntegration } from "../runners.ts";
-import { createSessionIntegration } from "../sessions.ts";
-import {
-  addTestProviderCredential,
   createAuthenticatedRequest,
-  createAuthenticatedTestDatabase,
-  createRunnerRequest,
-  TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
-import { takeValue } from "./oauth-test-helpers.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
-
-const RUNNER_ID = "018bcfe5-6800-7000-8000-000000000061";
-const SESSION_ID = "018bcfe5-6800-7000-8000-000000000062";
-const CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000063";
-const RUNNER_TOKEN = "qmr_session-runner-token";
-const RUNNER_COMMAND_ID = "agent-command-1";
-const RUNNER_COMMAND_PATH = `${RUNNER_WORK_PATH}/${RUNNER_COMMAND_ID}`;
+import {
+  connectedSessionSetup,
+  createSessionRequest,
+  CREDENTIAL_ID,
+  RUNNER_COMMAND_ID,
+  RUNNER_ID,
+  SESSION_ID,
+} from "./session-integration-fixtures.ts";
+import {
+  completeAgentFileLookup,
+  completeRunnerCommand,
+  expectRunnerCommand,
+  hasSessionStatus,
+  sessionDetail,
+  waitForSessionValue,
+} from "./session-integration-helpers.ts";
 
 class BlockingModel implements AgentModel {
   aborted = false;
@@ -66,209 +60,6 @@ class BlockingModel implements AgentModel {
   }
 }
 
-async function waitFor(
-  readValue: () => unknown,
-  predicate: (value: unknown) => boolean,
-): Promise<unknown> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const value = await Promise.resolve(readValue());
-
-    if (predicate(value)) {
-      return value;
-    }
-
-    await Bun.sleep(1);
-  }
-
-  throw new Error("The session test timed out");
-}
-
-function hasStatus(expected: string): (value: unknown) => boolean {
-  return (value) => isRecord(value) && value["status"] === expected;
-}
-
-async function connectedSetup(
-  model: AgentModel,
-  credentialSource: ProviderCredentialAccess["source"] = "api_key",
-  discoverModels?: AgentModelDiscoverer,
-) {
-  const database = createAuthenticatedTestDatabase();
-  const auth = createGoogleAuthFromEnvironment(
-    {},
-    {
-      database,
-      now: () => TEST_NOW,
-    },
-  );
-  const runners = createRunnerIntegration(auth, {
-    database,
-    now: () => TEST_NOW,
-    randomId: () => RUNNER_ID,
-    randomToken: () => "session-runner-token",
-  });
-  runners.collection(
-    createAuthenticatedRequest("/api/runners", undefined, "POST"),
-  );
-  const registration = await runners.register(
-    createRunnerRequest(RUNNER_REGISTER_PATH, RUNNER_TOKEN, {
-      architecture: "x64",
-      machineId: "session-test-machine",
-      name: "workstation",
-      platform: "linux",
-    }),
-  );
-
-  if (registration.status !== 201) {
-    throw new Error("The session test runner did not register");
-  }
-
-  addTestProviderCredential(database, CREDENTIAL_ID);
-  const credential: ProviderCredentialAccess = {
-    accountId: "provider-account",
-    id: CREDENTIAL_ID,
-    label: "Agent key",
-    secret: "provider-secret",
-    source: credentialSource,
-  };
-  const reader = {
-    readCredential: (userId: string, credentialId: string) =>
-      userId === TEST_USER_ID && credentialId === CREDENTIAL_ID
-        ? credential
-        : undefined,
-  };
-  const ids = [
-    SESSION_ID,
-    "018bcfe5-6800-7000-8000-000000000064",
-    "018bcfe5-6800-7000-8000-000000000065",
-    "018bcfe5-6800-7000-8000-000000000066",
-    "018bcfe5-6800-7000-8000-000000000067",
-    "018bcfe5-6800-7000-8000-000000000068",
-    "018bcfe5-6800-7000-8000-000000000069",
-    "018bcfe5-6800-7000-8000-000000000070",
-  ];
-  const selectedModels: string[] = [];
-  const selectedReasoningEfforts: (string | null)[] = [];
-  const selectedSystemPrompts: string[] = [];
-  const sessions = createSessionIntegration(
-    auth,
-    runners,
-    { openai: reader, openrouter: reader },
-    {
-      broker: new RunnerCommandBroker({
-        commandId: () => RUNNER_COMMAND_ID,
-      }),
-      database,
-      ...(discoverModels === undefined ? {} : { discoverModels }),
-      modelFactory: ({
-        credential: selectedCredential,
-        model: selectedModel,
-        reasoningEffort,
-        systemPrompt,
-      }) => {
-        expect(selectedCredential.secret).toBe("provider-secret");
-        selectedModels.push(selectedModel);
-        selectedReasoningEfforts.push(reasoningEffort);
-        selectedSystemPrompts.push(systemPrompt);
-        return model;
-      },
-      now: () => TEST_NOW,
-      randomId: () => takeValue(ids, "The session test ran out of IDs"),
-    },
-  );
-  return {
-    database,
-    selectedModels,
-    selectedReasoningEfforts,
-    selectedSystemPrompts,
-    sessions,
-  };
-}
-
-function createSessionRequest(
-  includeModel = true,
-  reasoningEffort = "high",
-  model = "gpt-4.1-mini",
-): Request {
-  return createAuthenticatedRequest(
-    SESSIONS_PATH,
-    {
-      credentialId: CREDENTIAL_ID,
-      ...(includeModel ? { model } : {}),
-      prompt: "Inspect README.md",
-      provider: "openai",
-      reasoningEffort,
-      runnerId: RUNNER_ID,
-      workingDirectory: "/work/project",
-    },
-    "POST",
-  );
-}
-
-async function takeRunnerCommand(
-  sessions: ReturnType<typeof createSessionIntegration>,
-  missingMessage: string,
-): Promise<Response> {
-  const response = await waitFor(
-    () => sessions.work(createRunnerRequest(RUNNER_WORK_PATH, RUNNER_TOKEN)),
-    (value) => value instanceof Response && value.status === 200,
-  );
-
-  if (!(response instanceof Response)) {
-    throw new Error(missingMessage);
-  }
-
-  return response;
-}
-
-async function expectRunnerCommand(
-  sessions: ReturnType<typeof createSessionIntegration>,
-  expected: RunnerToolCommand,
-  missingMessage: string,
-): Promise<void> {
-  const response = await takeRunnerCommand(sessions, missingMessage);
-  expect(await response.json()).toEqual({ command: expected });
-}
-
-function completeRunnerCommand(
-  sessions: ReturnType<typeof createSessionIntegration>,
-  output: string,
-): Promise<Response> {
-  return sessions.workResult(
-    createRunnerRequest(RUNNER_COMMAND_PATH, RUNNER_TOKEN, { output }),
-    RUNNER_COMMAND_ID,
-  );
-}
-
-async function completeAgentFileLookup(
-  sessions: ReturnType<typeof createSessionIntegration>,
-  agentFile: unknown = null,
-): Promise<void> {
-  await expectRunnerCommand(
-    sessions,
-    {
-      arguments: {},
-      id: RUNNER_COMMAND_ID,
-      sessionId: SESSION_ID,
-      tool: RUNNER_AGENT_FILE_COMMAND,
-      workingDirectory: "/work/project",
-    },
-    "The runner did not receive the agent-file command",
-  );
-  expect(
-    (await completeRunnerCommand(sessions, JSON.stringify(agentFile))).status,
-  ).toBe(204);
-}
-
-async function commandActivity(
-  sessions: ReturnType<typeof createSessionIntegration>,
-): Promise<unknown> {
-  const response = await sessions.workResult(
-    createRunnerRequest(RUNNER_COMMAND_PATH, RUNNER_TOKEN, undefined, "GET"),
-    RUNNER_COMMAND_ID,
-  );
-  return response.json();
-}
-
 async function expectJsonResponse(
   response: Response,
   status: number,
@@ -286,31 +77,27 @@ async function expectSessionReaches(
 ): Promise<void> {
   expect(response.status).toBe(201);
   await completeAgentFileLookup(sessions);
-  await waitFor(() => sessionDetail(sessions), hasStatus(status));
-}
-
-async function sessionDetail(
-  sessions: ReturnType<typeof createSessionIntegration>,
-): Promise<unknown> {
-  const response = sessions.item(
-    createAuthenticatedRequest(`${SESSIONS_PATH}/${SESSION_ID}`),
-    SESSION_ID,
+  await waitForSessionValue(
+    () => sessionDetail(sessions),
+    hasSessionStatus(status),
   );
-  return response.json();
 }
 
 async function startSessionWithAgentFile(
   model: AgentModel,
   agentFile: unknown,
-): Promise<Awaited<ReturnType<typeof connectedSetup>>> {
-  const setup = await connectedSetup(model);
+): Promise<Awaited<ReturnType<typeof connectedSessionSetup>>> {
+  const setup = await connectedSessionSetup(model);
   const createResponse = await setup.sessions.collection(
     createSessionRequest(),
   );
 
   expect(createResponse.status).toBe(201);
   await completeAgentFileLookup(setup.sessions, agentFile);
-  await waitFor(() => sessionDetail(setup.sessions), hasStatus("idle"));
+  await waitForSessionValue(
+    () => sessionDetail(setup.sessions),
+    hasSessionStatus("idle"),
+  );
   return setup;
 }
 
@@ -352,98 +139,8 @@ describe("agent sessions", () => {
     setup.database.$client.close();
   });
 
-  test("spawns a session, executes tools on its runner, and accepts follow-ups", async () => {
-    const model = new ScriptedAgentModel([
-      {
-        content: "Reading the file.",
-        contextTokens: 12_345,
-        thinking: "I need to inspect README before answering.",
-        toolCalls: [
-          {
-            arguments: '{"path":"README.md"}',
-            id: "model-tool-1",
-            name: "read",
-          },
-        ],
-      },
-      { content: "README inspected.", contextTokens: 13_000, toolCalls: [] },
-      { content: "Follow-up complete.", contextTokens: 14_000, toolCalls: [] },
-    ]);
-    const { database, selectedReasoningEfforts, sessions } =
-      await connectedSetup(model);
-    const createResponse = await sessions.collection(createSessionRequest());
-
-    expect(createResponse.status).toBe(201);
-    expect(await createResponse.json()).toMatchObject({
-      currentContextTokens: 0,
-      id: SESSION_ID,
-      maxContextTokens: null,
-      reasoningEffort: "high",
-      status: "queued",
-      title: "Inspect README.md",
-    });
-    await completeAgentFileLookup(sessions);
-
-    const workResponse = await takeRunnerCommand(
-      sessions,
-      "The runner did not receive an agent command",
-    );
-
-    const command: unknown = await workResponse.json();
-    expect(command).toEqual({
-      command: {
-        arguments: { path: "README.md" },
-        id: RUNNER_COMMAND_ID,
-        sessionId: SESSION_ID,
-        tool: "read",
-        workingDirectory: "/work/project",
-      },
-    });
-    expect(JSON.stringify(command)).not.toContain("provider-secret");
-    expect(await commandActivity(sessions)).toEqual({
-      active: true,
-    });
-
-    const resultResponse = await completeRunnerCommand(sessions, "# Q Mush");
-    expect(resultResponse.status).toBe(204);
-    expect(await commandActivity(sessions)).toEqual({
-      active: false,
-    });
-    const idle = await waitFor(
-      () => sessionDetail(sessions),
-      hasStatus("idle"),
-    );
-    expect(JSON.stringify(idle)).toContain("README inspected.");
-    expect(JSON.stringify(idle)).toContain(
-      "I need to inspect README before answering.",
-    );
-    expect(JSON.stringify(idle)).toContain("# Q Mush");
-    expect(idle).toMatchObject({ currentContextTokens: 13_000 });
-
-    const followUp = await sessions.message(
-      createAuthenticatedRequest(
-        `${SESSIONS_PATH}/${SESSION_ID}/messages`,
-        { prompt: "Now summarize it" },
-        "POST",
-      ),
-      SESSION_ID,
-    );
-    expect(followUp.status).toBe(202);
-    await completeAgentFileLookup(sessions);
-    const continued = await waitFor(
-      () => sessionDetail(sessions),
-      (value) =>
-        hasStatus("idle")(value) &&
-        JSON.stringify(value).includes("Follow-up complete."),
-    );
-    expect(JSON.stringify(continued)).toContain("Now summarize it");
-    expect(model.requests).toHaveLength(3);
-    expect(selectedReasoningEfforts).toEqual(["high", "high"]);
-    database.$client.close();
-  });
-
   test("browses directories through an owned online runner", async () => {
-    const { database, sessions } = await connectedSetup(
+    const { database, sessions } = await connectedSessionSetup(
       new ScriptedAgentModel([]),
     );
     const browseResponse = sessions.directories(
@@ -499,7 +196,7 @@ describe("agent sessions", () => {
       expect(credential.secret).toBe("provider-secret");
       return Promise.resolve(catalog);
     };
-    const { database, sessions } = await connectedSetup(
+    const { database, sessions } = await connectedSessionSetup(
       new ScriptedAgentModel([
         { content: "Discovered model complete.", toolCalls: [] },
       ]),
@@ -528,7 +225,7 @@ describe("agent sessions", () => {
     const model = new ScriptedAgentModel([
       { content: "OAuth session complete.", toolCalls: [] },
     ]);
-    const { database, selectedModels, sessions } = await connectedSetup(
+    const { database, selectedModels, sessions } = await connectedSessionSetup(
       model,
       "oauth",
     );
@@ -541,7 +238,7 @@ describe("agent sessions", () => {
 
   test("rejects an unsupported reasoning effort", async () => {
     const model = new ScriptedAgentModel([]);
-    const { database, sessions } = await connectedSetup(model);
+    const { database, sessions } = await connectedSessionSetup(model);
     const response = await sessions.collection(
       createSessionRequest(true, "maximum"),
     );
@@ -563,7 +260,7 @@ describe("agent sessions", () => {
       },
       { content: "Restart completed.", toolCalls: [] },
     ]);
-    const setup = await connectedSetup(model);
+    const setup = await connectedSessionSetup(model);
     const { sessions } = setup;
     const created = await sessions.collection(createSessionRequest());
     expect(created.status).toBe(201);
@@ -606,7 +303,7 @@ describe("agent sessions", () => {
 
   test("stops a running model request", async () => {
     const model = new BlockingModel();
-    const { database, sessions } = await connectedSetup(model);
+    const { database, sessions } = await connectedSessionSetup(model);
     const created = await sessions.collection(createSessionRequest());
     await expectSessionReaches(sessions, created, "running");
 
@@ -621,7 +318,7 @@ describe("agent sessions", () => {
 
     expect(stopped.status).toBe(200);
     expect(await stopped.json()).toMatchObject({ status: "stopped" });
-    await waitFor(
+    await waitForSessionValue(
       () => model.aborted,
       (value) => value === true,
     );
@@ -630,7 +327,7 @@ describe("agent sessions", () => {
   });
 
   test("protects session and runner-control endpoints", async () => {
-    const setup = await connectedSetup(new ScriptedAgentModel([]));
+    const setup = await connectedSessionSetup(new ScriptedAgentModel([]));
     const { database, sessions } = setup;
 
     expect(

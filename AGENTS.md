@@ -145,14 +145,15 @@ task-specific progress, guesses, or sensitive values.
   on the session and appended to the model system prompt.
   `src/session-transcript.tsx` renders that effective prompt and the complete
   tool definitions plus the raw arguments, call ID, name, and result for each
-  tool entry. The control center creates, inspects, follows up, stops, and polls
-  sessions through `src/session-client.tsx` and `src/session-controller.ts`.
-  Poll controllers suppress render notifications when refreshed data has no
-  visible change. Browser rendering preserves the document viewport and keyed
-  `data-scroll-key` regions across full-root remounts; the session transcript
-  starts at the bottom and returns there when its message or agent-file revision
-  changes. It defers remounts while a select has focus, flushing on change or
-  focus loss, and periodic polls pause so the native picker stays open.
+  tool entry. The control center creates, inspects, follows up, continues
+  without appending a user message, stops, and polls sessions through
+  `src/session-client.tsx` and `src/session-controller.ts`. Poll controllers
+  suppress render notifications when refreshed data has no visible change.
+  Browser rendering preserves the document viewport and keyed `data-scroll-key`
+  regions across full-root remounts; the session transcript starts at the bottom
+  and returns there when its message or agent-file revision changes. It defers
+  remounts while a select has focus, flushing on change or focus loss, and
+  periodic polls pause so the native picker stays open.
   `src/agent-model-discovery.ts` queries the selected credential's provider for
   compatible models and reasoning metadata; `src/agent-configuration.ts` owns
   shared catalog types, accepted effort values, and API fallback models. The

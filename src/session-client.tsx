@@ -485,6 +485,7 @@ function renderDetail(state: SessionViewState): JsxNode {
   }
 
   const detail = state.detail;
+  const { sending } = state;
   const active = detail.status === "queued" || detail.status === "running";
   const lastMessageId = detail.messages.at(-1)?.id ?? "";
   const agentFileRevision =
@@ -524,24 +525,34 @@ function renderDetail(state: SessionViewState): JsxNode {
         {renderSessionTranscript(detail.messages, detail.agentFile)}
       </ul>
       {!active ? (
-        <form className="mt-5 flex gap-3" data-action="send-session-message">
-          <textarea
-            className="min-h-20 min-w-0 flex-1 resize-y rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none"
-            disabled={state.sending}
-            name="prompt"
-            placeholder="Give this session another instruction…"
-            required
-          >
-            {state.followUp}
-          </textarea>
+        <div className="mt-5 flex gap-3">
+          <form className="contents" data-action="send-session-message">
+            <textarea
+              className="min-h-20 min-w-0 flex-1 resize-y rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none"
+              disabled={sending}
+              name="prompt"
+              placeholder="Give this session another instruction…"
+              required
+            >
+              {state.followUp}
+            </textarea>
+            <button
+              className="self-end rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:opacity-50"
+              disabled={sending}
+              type="submit"
+            >
+              {sending ? "Sending…" : "Send"}
+            </button>
+          </form>
           <button
-            className="self-end rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:opacity-50"
-            disabled={state.sending}
-            type="submit"
+            className="self-end rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950"
+            data-action="continue-session"
+            disabled={sending}
+            type="button"
           >
-            {state.sending ? "Sending…" : "Send"}
+            Continue
           </button>
-        </form>
+        </div>
       ) : null}
     </div>
   );
