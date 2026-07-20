@@ -8,6 +8,7 @@ import { createUuidV7, SYSTEM_ID, type IdGenerator } from "./ids.ts";
 
 export type ProviderCredentialSource = "api_key" | "oauth";
 export type ProviderId = "openai" | "openrouter";
+export type CredentialProviderId = ProviderId | "brave_search";
 
 export interface ProviderCredentialDetails {
   readonly accountId: string | null;
@@ -31,7 +32,7 @@ export class DuplicateProviderCredentialError extends Error {
 }
 
 function activeCredentialCondition(
-  provider: ProviderId,
+  provider: CredentialProviderId,
   userId: string,
   credentialId?: string,
 ): SQL | undefined {
@@ -59,7 +60,7 @@ function credentialSummarySelection() {
 }
 
 function fingerprintCondition(
-  provider: ProviderId,
+  provider: CredentialProviderId,
   userId: string,
   fingerprint: string,
 ): SQL | undefined {
@@ -74,12 +75,12 @@ export class ProviderCredentialStore {
   readonly #cipher: CredentialCipher;
   readonly #database: AppDatabase;
   readonly #generateId: IdGenerator;
-  readonly #provider: ProviderId;
+  readonly #provider: CredentialProviderId;
 
   constructor(
     database: AppDatabase,
     cipher: CredentialCipher,
-    provider: ProviderId,
+    provider: CredentialProviderId,
     generateId: IdGenerator = createUuidV7,
   ) {
     this.#cipher = cipher;

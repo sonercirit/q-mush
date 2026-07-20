@@ -170,18 +170,17 @@ task-specific progress, guesses, or sensitive values.
   output was persisted, keeping the transcript and provider history complete on
   resume without showing an interruption while a tool is still running.
 
-- `src/openai.ts` and `src/openrouter.ts` manage authenticated provider PKCE
-  connections and validate manually supplied keys against OpenAI `/v1/me` and
-  OpenRouter `/api/v1/key`, respectively. OpenAI OAuth persists the access and
-  refresh token bundle with its expiry, while OpenRouter OAuth issues an API
-  key. `src/provider-credential-store.ts` persists any number of OAuth or manual
-  credentials per local user in `provider_credentials`; provider account IDs are
-  metadata rather than local identities. Secrets are AES-256-GCM encrypted with
-  per-record authenticated context by `src/credential-cipher.ts`, and API
-  responses expose only labels, sources, and provider account IDs. Shared
-  endpoint/OAuth behavior lives in `src/provider-credentials.ts` and
-  `src/connected-account-oauth.ts`; the shared browser panel and controller live
-  in `src/provider-client.tsx` and `src/provider-controller.ts`.
+- `src/openai.ts` and `src/openrouter.ts` implement provider connections.
+  Multiple OAuth or manual credentials live in `provider_credentials`, encrypted
+  with per-record AES-256-GCM context; API responses expose only metadata.
+  Shared behavior lives in `src/provider-credentials.ts`,
+  `src/connected-account-oauth.ts`, `src/provider-client.tsx`, and
+  `src/provider-controller.ts`.
+- `src/brave-search.ts` implements the authenticated server-side `brave_search`
+  skill and key API. Users can keep multiple encrypted keys in
+  `provider_credentials`; failures fall through keys in creation order, and
+  secrets never reach the browser, runner, or model provider. Its UI reuses the
+  shared credential panel and controller.
 - `src/jsx.ts` is the framework-free classic JSX factory and renders its small
   element tree either to escaped HTML or browser DOM. TSX files must import
   `createElement`; `tsconfig.json` configures it as `jsxFactory`.
@@ -237,9 +236,9 @@ task-specific progress, guesses, or sensitive values.
   migration and Drizzle metadata. `bun run db:migrate` applies migrations
   without starting the HTTP server. Drizzle Kit loads its config under Node, so
   shared config imports must not transitively import `bun:sqlite`.
-- OpenAI and OpenRouter storage require their respective `OPENAI_CREDENTIAL_KEY`
-  and `OPENROUTER_CREDENTIAL_KEY` 32-byte base64url secrets; each must stay
-  stable and outside Git. Their optional redirect URIs must end in the matching
+- Credential storage needs stable, private, 32-byte base64url secrets:
+  `OPENAI_CREDENTIAL_KEY`, `OPENROUTER_CREDENTIAL_KEY`, and
+  `BRAVE_SEARCH_CREDENTIAL_KEY`. Provider redirect URIs must end in the matching
   `/api/<provider>/oauth/callback` path. OpenAI uses the Codex public OAuth
   client ID by default and starts a localhost-only callback server on its
   registered `http://localhost:1455/auth/callback`; keep that port free.

@@ -2,13 +2,14 @@ import { isRecord } from "./auth-model.ts";
 import { renderRemovalButton, renderRetryError } from "./client-controls.tsx";
 import { createElement, type JsxNode } from "./jsx.ts";
 import {
+  BRAVE_SEARCH_KEYS_PATH,
   OPENAI_CREDENTIALS_PATH,
   OPENAI_OAUTH_PATH,
   OPENROUTER_CREDENTIALS_PATH,
   OPENROUTER_OAUTH_PATH,
 } from "./routes.ts";
 
-type BrowserProviderId = "openai" | "openrouter";
+type BrowserProviderId = "brave-search" | "openai" | "openrouter";
 
 export interface ProviderCredential {
   readonly accountId: string | null;
@@ -26,14 +27,15 @@ export interface ProviderViewState {
 
 export interface ProviderPanelConfiguration {
   readonly accountIdUnavailable: string;
-  readonly connectLabel: string;
+  readonly connectLabel?: string;
   readonly credentialsPath: string;
   readonly description: string;
   readonly emptyMessage: string;
   readonly id: BrowserProviderId;
   readonly keyPlaceholder: string;
+  readonly keyRequiresLabel?: boolean;
   readonly name: string;
-  readonly oauthPath: string;
+  readonly oauthPath?: string;
   readonly removalHelp: string;
 }
 
@@ -67,6 +69,21 @@ export const OPENROUTER_PANEL: ProviderPanelConfiguration = {
   oauthPath: OPENROUTER_OAUTH_PATH,
   removalHelp:
     "Removing a credential only removes the local copy. Revoke OAuth-created keys from OpenRouter if you no longer want them to exist there.",
+};
+
+export const BRAVE_SEARCH_PANEL: ProviderPanelConfiguration = {
+  accountIdUnavailable: "Available to the Brave Search agent skill",
+  credentialsPath: BRAVE_SEARCH_KEYS_PATH,
+  description:
+    "Give agents server-side web search without exposing keys to the browser, model provider, or runner. Keys stay encrypted in the local database.",
+  emptyMessage:
+    "No Brave Search keys yet. Add as many keys as you need; the skill can try another saved key when one is unavailable.",
+  id: "brave-search",
+  keyPlaceholder: "BSA…",
+  keyRequiresLabel: true,
+  name: "Brave Search",
+  removalHelp:
+    "Removing a key clears the encrypted local copy. Revoke it in Brave if it should no longer work outside Q Mush.",
 };
 
 function readCredential(
@@ -152,7 +169,7 @@ function renderCredentialList(
   if (state.credentials === undefined) {
     return state.error === undefined ? (
       <p className="mt-6 text-sm text-slate-400" role="status">
-        {`Loading ${configuration.name} connections…`}
+        {`Loading ${configuration.name} ${configuration.id === "brave-search" ? "keys" : "connections"}…`}
       </p>
     ) : null;
   }
@@ -189,7 +206,11 @@ export function renderProviderPanel(
     >
       <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="text-sm font-medium text-cyan-300">Model access</p>
+          <p className="text-sm font-medium text-cyan-300">
+            {configuration.id === "brave-search"
+              ? "Agent skill"
+              : "Model access"}
+          </p>
           <h2 className="mt-2 text-2xl font-semibold text-white" id={titleId}>
             {configuration.name}
           </h2>
@@ -197,18 +218,42 @@ export function renderProviderPanel(
             {configuration.description}
           </p>
         </div>
-        <a
-          className="inline-flex shrink-0 items-center justify-center rounded-2xl bg-cyan-300 px-5 py-3 font-semibold text-slate-950 transition hover:bg-cyan-200 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300"
-          href={configuration.oauthPath}
-        >
-          {configuration.connectLabel}
-        </a>
+        {configuration.oauthPath === undefined ||
+        configuration.connectLabel === undefined ? null : (
+          <a
+            className="inline-flex shrink-0 items-center justify-center rounded-2xl bg-cyan-300 px-5 py-3 font-semibold text-slate-950 transition hover:bg-cyan-200 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300"
+            href={configuration.oauthPath}
+          >
+            {configuration.connectLabel}
+          </a>
+        )}
       </div>
 
       <form
-        className="mt-7 grid gap-3 rounded-2xl border border-white/10 bg-slate-900/70 p-4 sm:grid-cols-[minmax(0,1fr)_auto]"
+        className={`mt-7 grid gap-3 rounded-2xl border border-white/10 bg-slate-900/70 p-4 ${configuration.keyRequiresLabel === true ? "sm:grid-cols-[minmax(0,0.7fr)_minmax(0,1fr)_auto]" : "sm:grid-cols-[minmax(0,1fr)_auto]"}`}
         data-action="add-provider-key"
       >
+        {configuration.keyRequiresLabel === true ? (
+          <div>
+            <label
+              className="text-sm font-medium text-slate-200"
+              htmlFor={`${configuration.id}-key-label`}
+            >
+              Label
+            </label>
+            <input
+              autocomplete="off"
+              className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none"
+              disabled={state.savePending}
+              id={`${configuration.id}-key-label`}
+              maxlength="100"
+              name="label"
+              placeholder="Primary"
+              required
+              type="text"
+            />
+          </div>
+        ) : null}
         <div>
           <label
             className="text-sm font-medium text-slate-200"

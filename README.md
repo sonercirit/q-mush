@@ -22,18 +22,18 @@ Register this exact authorized redirect URI on the Google OAuth client:
 http://localhost:3000/api/auth/google/callback
 ```
 
-Generate separate 32-byte keys for encrypted OpenAI and OpenRouter storage, then
-copy the output into `.env.local`:
+Generate separate 32-byte keys for encrypted OpenAI, OpenRouter, and Brave
+Search credential storage, then copy the output into `.env.local`:
 
 ```bash
-bun -e 'import { randomBytes } from "node:crypto"; for (const name of ["OPENAI_CREDENTIAL_KEY", "OPENROUTER_CREDENTIAL_KEY"]) console.log(`${name}=${randomBytes(32).toString("base64url")}`)'
+bun -e 'import { randomBytes } from "node:crypto"; for (const name of ["OPENAI_CREDENTIAL_KEY", "OPENROUTER_CREDENTIAL_KEY", "BRAVE_SEARCH_CREDENTIAL_KEY"]) console.log(`${name}=${randomBytes(32).toString("base64url")}`)'
 ```
 
-Keep `.env.local` private; it is ignored by Git. Losing or changing either key
-makes that provider's stored credentials unreadable. By default, local data is
-stored in `data/q-mush.sqlite`; set `DATABASE_PATH` to use another SQLite file.
-Set `GOOGLE_REDIRECT_URI` to the deployed HTTPS Google callback URL when running
-on another origin.
+Keep `.env.local` private; it is ignored by Git. Losing or changing a credential
+encryption key makes that integration's stored credentials unreadable. By
+default, local data is stored in `data/q-mush.sqlite`; set `DATABASE_PATH` to
+use another SQLite file. Set `GOOGLE_REDIRECT_URI` to the deployed HTTPS Google
+callback URL when running on another origin.
 
 OpenAI account connection uses the Codex authorization-code flow. With its
 public client ID, Q Mush listens on the registered
@@ -93,6 +93,9 @@ their assets:
 - Authenticated users manage OpenRouter access through
   `/api/openrouter/credentials`. `/api/openrouter/oauth` connects an account and
   `/api/openrouter/oauth/callback` completes the flow.
+- Authenticated users add and remove Brave Search API keys through
+  `/api/skills/brave-search/keys`. These keys power the server-side
+  `brave_search` agent skill.
 - Authenticated users list and create runner setups at `/api/runners`, remove
   one at `/api/runners/:id`, and browse an online runner through
   `POST /api/runners/:id/directories`. Installed runners register through
@@ -143,12 +146,15 @@ prompt, and shown in the transcript. Agent launches, queued runner commands, and
 brokered command execution have no application-owned count or elapsed-time
 limits. Every shell command must choose a positive timeout; Q Mush supplies no
 default or configured maximum. It exposes Pi's four base tool interfaces—`read`,
-`bash`, `edit`, and `write`—plus a `parallel` wrapper for independent calls,
-with batched exact edits and bounded file and command output. Transcripts show
-system instructions, complete tool definitions, reasoning summaries, tool calls,
-and tool results. Session transcripts and status survive page reloads; a ready,
-stopped, or failed session accepts follow-up instructions. **Stop session**
-aborts the model request and cancels an active runner command.
+`bash`, `edit`, and `write`—plus a `parallel` wrapper for independent calls and
+the server-side `brave_search` skill for current web results, with batched exact
+edits and bounded file and command output. Brave Search tries the signed-in
+user's saved keys in order when a key is rejected, rate limited, or temporarily
+unavailable. Transcripts show system instructions, complete tool definitions,
+reasoning summaries, tool calls, and tool results. Session transcripts and
+status survive page reloads; a ready, stopped, or failed session accepts
+follow-up instructions. **Stop session** aborts the model request and cancels an
+active runner command.
 
 The runner executes tools with the runner process's local account permissions.
 File tools reject paths outside the selected workspace, while shell commands are
@@ -181,24 +187,24 @@ multiple OpenAI or OpenRouter accounts through PKCE flows or add multiple
 existing API keys for either provider. OpenAI OAuth represents Codex/ChatGPT
 subscription access, while OpenAI Platform API keys use API billing. OpenAI keys
 are validated with `/v1/me`, and OpenRouter keys are validated with its key
-metadata endpoint. OpenAI OAuth access and refresh tokens and all provider API
-keys are encrypted with AES-256-GCM in the local database; the API never returns
-plaintext credentials to the browser. Removing a credential clears its encrypted
-payload and retains a soft-deleted audit row. It does not revoke provider-side
-access, so revoke the credential with its provider when it should no longer
-exist there.
+metadata endpoint. OpenAI OAuth access and refresh tokens, provider API keys,
+and Brave Search API keys are encrypted with AES-256-GCM in the local database;
+the API never returns plaintext credentials to the browser. Removing a
+credential clears its encrypted payload and retains a soft-deleted audit row. It
+does not revoke provider-side access, so revoke the credential with its provider
+when it should no longer exist there.
 
-Drizzle stores users, seven-day application sessions, provider credentials,
-runner registrations, agent sessions, and agent transcripts in local SQLite, so
-they survive server restarts. Graceful development restarts drain active
-sessions; sessions interrupted by an unexpected process exit are marked failed
-and can be continued from the control center. Application primary keys use
-UUIDv7; provider IDs, credential fingerprints, runner token hashes, machine
-fingerprints, and cookie tokens remain separate external identifiers. Plaintext
-runner tokens appear only in setup artifacts and the installed computer's
-private config. Every application row carries creation, update, actor, and
-soft-deletion audit fields. Committed migrations in `drizzle/` are applied
-automatically at startup.
+Drizzle stores users, seven-day application sessions, provider and skill
+credentials, runner registrations, agent sessions, and agent transcripts in
+local SQLite, so they survive server restarts. Graceful development restarts
+drain active sessions; sessions interrupted by an unexpected process exit are
+marked failed and can be continued from the control center. Application primary
+keys use UUIDv7; provider IDs, credential fingerprints, runner token hashes,
+machine fingerprints, and cookie tokens remain separate external identifiers.
+Plaintext runner tokens appear only in setup artifacts and the installed
+computer's private config. Every application row carries creation, update,
+actor, and soft-deletion audit fields. Committed migrations in `drizzle/` are
+applied automatically at startup.
 
 Both pages use the small framework-free TSX runtime in `src/jsx.ts`; no frontend
 framework is installed. `src/styles.css` is the Tailwind source entry point.

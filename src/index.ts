@@ -1,4 +1,5 @@
 import { createGoogleAuthFromEnvironment } from "./auth.ts";
+import { createBraveSearchSkillFromEnvironment } from "./brave-search.ts";
 import { createDatabase } from "./database.ts";
 import { readDatabasePath } from "./database/config.ts";
 import {
@@ -24,6 +25,9 @@ const [clientJavaScript, runnerExecutables, stylesheet] = await Promise.all([
   buildClientStylesheet(),
 ]);
 const googleAuth = createGoogleAuthFromEnvironment(Bun.env, { database });
+const braveSearch = createBraveSearchSkillFromEnvironment(Bun.env, googleAuth, {
+  database,
+});
 const openAi = createOpenAiIntegrationFromEnvironment(Bun.env, googleAuth, {
   database,
 });
@@ -37,7 +41,7 @@ const sessions = createSessionIntegration(
   googleAuth,
   runners,
   { openai: openAi, openrouter: openRouter },
-  { database },
+  { braveSearch, database },
 );
 let callbackServer: Bun.Server<undefined> | undefined;
 const server = Bun.serve({
@@ -47,6 +51,7 @@ const server = Bun.serve({
     googleAuth,
     openAi,
     openRouter,
+    braveSearch,
     runners,
     sessions,
     runnerExecutables,

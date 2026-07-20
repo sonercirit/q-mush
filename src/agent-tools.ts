@@ -1,4 +1,5 @@
 const STRING_PARAMETER = { type: "string" } as const;
+const BRAVE_SEARCH_TOOL_NAME = "brave_search";
 
 function toolDefinition<const Name extends string>(options: {
   readonly description: string;
@@ -149,14 +150,46 @@ const PARALLEL_TOOL = toolDefinition({
   required: ["tool_uses"],
 });
 
-export const AGENT_TOOLS = [...BASE_AGENT_TOOLS, PARALLEL_TOOL] as const;
+const BRAVE_SEARCH_TOOL = toolDefinition({
+  description:
+    "Search the public web with the signed-in user's saved Brave Search API keys. Use this for current documentation, facts, and sources. Returns JSON with the query and web results.",
+  name: BRAVE_SEARCH_TOOL_NAME,
+  properties: {
+    count: {
+      description: "Number of results to return (1-20; defaults to 10)",
+      maximum: 20,
+      minimum: 1,
+      type: "number",
+    },
+    query: {
+      description: "Search query",
+      type: "string",
+    },
+  },
+  required: ["query"],
+});
 
-export type AgentToolName = (typeof AGENT_TOOLS)[number]["function"]["name"];
+export const AGENT_TOOLS = [
+  ...BASE_AGENT_TOOLS,
+  PARALLEL_TOOL,
+  BRAVE_SEARCH_TOOL,
+] as const;
+
 export type BaseAgentToolName =
   (typeof BASE_AGENT_TOOLS)[number]["function"]["name"];
 
-export function isAgentToolName(name: string): name is AgentToolName {
-  return AGENT_TOOLS.some((tool) => tool.function.name === name);
+type RunnerAgentToolName =
+  BaseAgentToolName | typeof PARALLEL_TOOL.function.name;
+
+const RUNNER_AGENT_TOOL_NAMES: readonly RunnerAgentToolName[] = [
+  ...BASE_AGENT_TOOLS.map((tool) => tool.function.name),
+  PARALLEL_TOOL.function.name,
+];
+
+export function isRunnerAgentToolName(
+  name: string,
+): name is RunnerAgentToolName {
+  return RUNNER_AGENT_TOOL_NAMES.some((toolName) => toolName === name);
 }
 
 export function isBaseAgentToolName(name: string): name is BaseAgentToolName {

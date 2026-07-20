@@ -26,11 +26,13 @@ export class CredentialCipher {
   readonly #key: Buffer;
   readonly #randomBytes: NonceGenerator;
 
-  constructor(key: Uint8Array, nonceGenerator: NonceGenerator = randomBytes) {
+  constructor(
+    key: Uint8Array,
+    nonceGenerator: NonceGenerator = randomBytes,
+    keyName = "Credential encryption key",
+  ) {
     if (key.byteLength !== 32) {
-      throw new Error(
-        "OPENROUTER_CREDENTIAL_KEY must be a 32-byte base64url value",
-      );
+      throw new Error(`${keyName} must be a 32-byte base64url value`);
     }
 
     this.#key = Buffer.from(key);
@@ -91,14 +93,19 @@ export class CredentialCipher {
   }
 }
 
-export function createCredentialCipher(encodedKey: string): CredentialCipher {
+export function createCredentialCipher(
+  encodedKey: string,
+  keyName = "Credential encryption key",
+): CredentialCipher {
   if (!BASE64URL_PATTERN.test(encodedKey)) {
-    throw new Error(
-      "OPENROUTER_CREDENTIAL_KEY must be a 32-byte base64url value",
-    );
+    throw new Error(`${keyName} must be a 32-byte base64url value`);
   }
 
-  return new CredentialCipher(Buffer.from(encodedKey, "base64url"));
+  return new CredentialCipher(
+    Buffer.from(encodedKey, "base64url"),
+    randomBytes,
+    keyName,
+  );
 }
 
 export function fingerprintCredential(value: string): string {

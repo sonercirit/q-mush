@@ -90,6 +90,10 @@ export async function connectedSessionSetup(
     runners,
     { openai: reader, openrouter: reader },
     {
+      braveSearch: {
+        execute: () =>
+          Promise.resolve("Error: no Brave Search API keys are available."),
+      },
       broker: new RunnerCommandBroker({ commandId: () => RUNNER_COMMAND_ID }),
       database,
       ...(discoverModels === undefined ? {} : { discoverModels }),

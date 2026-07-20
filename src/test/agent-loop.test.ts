@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { runAgentLoop, type AgentRecordedMessage } from "../agent-loop.ts";
+import { createAgentSkills } from "../agent-skills.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 
 type ExecuteTool = Parameters<typeof runAgentLoop>[0]["executeTool"];
@@ -141,5 +142,46 @@ describe("first-party agent loop", () => {
       toolCallId: "bad-call",
       toolName: "write",
     });
+  });
+
+  test("executes server-side skills without dispatching them to a runner", async () => {
+    const runnerCalls: string[] = [];
+    const searchCalls: Readonly<Record<string, unknown>>[] = [];
+    const skills = createAgentSkills({
+      braveSearch: {
+        execute: (_userId, arguments_) => {
+          searchCalls.push(arguments_);
+          return Promise.resolve('{"results":[]}');
+        },
+      },
+      userId: "user-id",
+    });
+    const model = new ScriptedAgentModel([
+      {
+        content: "I will search the web.",
+        toolCalls: [
+          {
+            arguments: '{"query":"Bun documentation"}',
+            id: "search-call",
+            name: "brave_search",
+          },
+        ],
+      },
+      { content: "Search complete.", toolCalls: [] },
+    ]);
+
+    await runRecordedLoop(model, "Research Bun", (call) => {
+      const skill = skills.execute(call.name, call.arguments);
+
+      if (skill !== undefined) {
+        return skill;
+      }
+
+      runnerCalls.push(call.name);
+      return Promise.resolve("runner result");
+    });
+
+    expect(searchCalls).toEqual([{ query: "Bun documentation" }]);
+    expect(runnerCalls).toEqual([]);
   });
 });

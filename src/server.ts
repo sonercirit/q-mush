@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { brotliCompressSync, deflateSync } from "node:zlib";
 import type { GoogleAuth } from "./auth.ts";
+import type { BraveSearchSkill } from "./brave-search.ts";
 import { readBuildArtifact } from "./build.ts";
 import type { OpenAiIntegration } from "./openai.ts";
 import type { OpenRouterIntegration } from "./openrouter.ts";
@@ -23,6 +24,7 @@ const {
   RUNNER_WORK_PATH,
   SESSIONS_PATH,
   SESSION_MODELS_PATH,
+  BRAVE_SEARCH_KEYS_PATH,
   OPENROUTER_OAUTH_PATH,
   OPENROUTER_OAUTH_CALLBACK_PATH,
   OPENROUTER_CREDENTIALS_PATH,
@@ -226,6 +228,7 @@ export function createRequestHandler(
   googleAuth: GoogleAuth,
   openAi: OpenAiIntegration,
   openRouter: OpenRouterIntegration,
+  braveSearch: BraveSearchSkill,
   runners: RunnerIntegration,
   sessions: SessionIntegration,
   runnerExecutables: RunnerExecutableProvider,
@@ -316,6 +319,20 @@ export function createRequestHandler(
 
       if (pathname === SESSIONS_PATH) {
         return sessions.collection(request);
+      }
+
+      if (pathname === BRAVE_SEARCH_KEYS_PATH) {
+        return braveSearch.keys(request);
+      }
+
+      const braveSearchKeyPrefix = `${BRAVE_SEARCH_KEYS_PATH}/`;
+
+      if (pathname.startsWith(braveSearchKeyPrefix)) {
+        const keyId = pathname.slice(braveSearchKeyPrefix.length);
+
+        if (keyId.length > 0 && !keyId.includes("/")) {
+          return braveSearch.remove(request, keyId);
+        }
       }
 
       if (pathname === SESSION_MODELS_PATH) {

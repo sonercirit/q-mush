@@ -14,8 +14,10 @@ import {
   type AgentProviderCredential,
 } from "./agent-model.ts";
 import { createAgentSystemPrompt } from "./agent-prompt.ts";
+import { createAgentSkills } from "./agent-skills.ts";
 import { isRecord, type AuthenticatedUser } from "./auth-model.ts";
 import type { GoogleAuth } from "./auth.ts";
+import type { BraveSearchSkill } from "./brave-search.ts";
 import type { AppDatabase } from "./database.ts";
 import { createDatabase } from "./database.ts";
 import {
@@ -78,6 +80,7 @@ type AgentModelFactory = (options: AgentModelFactoryOptions) => AgentModel;
 
 interface SessionDependencies {
   readonly broker?: RunnerCommandBroker;
+  readonly braveSearch: Pick<BraveSearchSkill, "execute">;
   readonly database?: AppDatabase;
   readonly discoverModels?: AgentModelDiscoverer;
   readonly modelFactory?: AgentModelFactory;
@@ -180,6 +183,7 @@ function isAbort(error: unknown): boolean {
 
 class DrizzleSessionIntegration implements SessionIntegration {
   readonly #broker: RunnerCommandBroker;
+  readonly #braveSearch: Pick<BraveSearchSkill, "execute">;
   readonly #discoverModels: AgentModelDiscoverer;
   readonly #modelFactory: AgentModelFactory;
   readonly #now: () => number;
@@ -196,6 +200,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
     dependencies: SessionDependencies,
   ) {
     this.#broker = dependencies.broker ?? new RunnerCommandBroker();
+    this.#braveSearch = dependencies.braveSearch;
     this.#discoverModels = dependencies.discoverModels ?? discoverAgentModels;
     this.#modelFactory =
       dependencies.modelFactory ??
@@ -441,7 +446,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
         { ...input, maxContextTokens, model: selectedModel, userId: user.id },
         this.#now(),
       );
-      this.#launch(detail, credential);
+      this.#launch(detail, credential, user.id);
       return createJsonResponse(detail, 201);
     });
   }
@@ -497,7 +502,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
         );
       }
 
-      this.#launch(queued.detail, credential);
+      this.#launch(queued.detail, credential, user.id);
       return createJsonResponse(queued.detail, 202);
     });
   }
@@ -505,15 +510,17 @@ class DrizzleSessionIntegration implements SessionIntegration {
   #launch(
     detail: AgentSessionDetail,
     credential: ProviderCredentialAccess,
+    userId: string,
   ): void {
     this.#runtimes.launch(detail.id, (controller) =>
-      this.#run(detail, credential, controller),
+      this.#run(detail, credential, userId, controller),
     );
   }
 
   async #run(
     detail: AgentSessionDetail,
     credential: ProviderCredentialAccess,
+    userId: string,
     controller: AbortController,
   ): Promise<void> {
     if (!this.#store.mark(detail.id, "running", this.#now())) {
@@ -536,8 +543,18 @@ class DrizzleSessionIntegration implements SessionIntegration {
         reasoningEffort: detail.reasoningEffort,
         systemPrompt: createAgentSystemPrompt(agentFile),
       });
+      const skills = createAgentSkills({
+        braveSearch: this.#braveSearch,
+        userId,
+      });
       await runAgentLoop({
         executeTool: (call) => {
+          const skillOutput = skills.execute(call.name, call.arguments);
+
+          if (skillOutput !== undefined) {
+            return skillOutput;
+          }
+
           const command: DispatchRunnerToolCommand = {
             arguments: call.arguments,
             runnerId: detail.runnerId,
@@ -575,7 +592,7 @@ export function createSessionIntegration(
   auth: GoogleAuth,
   runners: RunnerIntegration,
   providers: SessionCredentialReaders,
-  dependencies: SessionDependencies = {},
+  dependencies: SessionDependencies,
 ): SessionIntegration {
   return new DrizzleSessionIntegration(auth, runners, providers, dependencies);
 }

@@ -22,10 +22,12 @@ test("encrypts credentials with authenticated context", () => {
 });
 
 test("requires a 32-byte base64url encryption key", () => {
-  const encodedKey = Buffer.alloc(32, 9).toString("base64url");
+  const braveKey = Buffer.alloc(32, 4).toString("base64url");
 
-  expect(createCredentialCipher(encodedKey)).toBeInstanceOf(CredentialCipher);
-  expect(() => createCredentialCipher("not-base64url!")).toThrow(
-    "32-byte base64url",
-  );
+  expect(
+    createCredentialCipher(braveKey, "BRAVE_SEARCH_CREDENTIAL_KEY"),
+  ).toBeInstanceOf(CredentialCipher);
+  expect(() =>
+    createCredentialCipher("not-base64url!", "BRAVE_SEARCH_CREDENTIAL_KEY"),
+  ).toThrow("BRAVE_SEARCH_CREDENTIAL_KEY must be a 32-byte base64url value");
 });

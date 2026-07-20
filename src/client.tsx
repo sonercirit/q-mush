@@ -7,6 +7,7 @@ import { requestJson } from "./browser-http.ts";
 import { providerNotice } from "./client-notices.ts";
 import { createElement, mount, type JsxNode } from "./jsx.ts";
 import {
+  BRAVE_SEARCH_PANEL,
   OPENAI_PANEL,
   OPENROUTER_PANEL,
   renderProviderPanel,
@@ -261,6 +262,7 @@ function renderSignIn(googleLoginAvailable: boolean): JsxNode {
 }
 
 function renderWorkspace(
+  braveSearchState: ProviderViewState,
   logoutPending: boolean,
   openAiState: ProviderViewState,
   openRouterState: ProviderViewState,
@@ -299,11 +301,13 @@ function renderWorkspace(
       </aside>
       {renderProviderPanel(OPENAI_PANEL, openAiState)}
       {renderProviderPanel(OPENROUTER_PANEL, openRouterState)}
+      {renderProviderPanel(BRAVE_SEARCH_PANEL, braveSearchState)}
     </div>
   );
 }
 
 function renderApp(
+  braveSearchState: ProviderViewState,
   loadFailed: boolean,
   logoutPending: boolean,
   notices: readonly string[],
@@ -358,6 +362,7 @@ function renderApp(
               : session.user === null
                 ? renderSignIn(session.googleLoginAvailable)
                 : renderWorkspace(
+                    braveSearchState,
                     logoutPending,
                     openAiState,
                     openRouterState,
@@ -395,6 +400,9 @@ let loadFailed = false;
 let logoutPending = false;
 let session: AuthSession | undefined;
 const notices = readNotices();
+const braveSearch = new ProviderController(BRAVE_SEARCH_PANEL, () => {
+  updateApp(root);
+});
 const openAi = new ProviderController(OPENAI_PANEL, () => {
   updateApp(root);
 });
@@ -407,7 +415,7 @@ const runners = new RunnerController(() => {
 const agentSessions = new SessionController(() => {
   updateApp(root);
 });
-const providerControllers = [openAi, openRouter] as const;
+const providerControllers = [openAi, openRouter, braveSearch] as const;
 
 function resetWorkspaceConnections(): void {
   agentSessions.reset();
@@ -503,6 +511,7 @@ function updateApp(container: Element, replaceFocusedSelect = false): void {
     () => {
       mount(
         renderApp(
+          braveSearch.state,
           loadFailed,
           logoutPending,
           notices,

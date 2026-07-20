@@ -60,7 +60,10 @@ export function readProviderIntegrationConfiguration(
   }
 
   return {
-    cipher: createCredentialCipher(encodedCredentialKey),
+    cipher: createCredentialCipher(
+      encodedCredentialKey,
+      options.credentialKeyVariable,
+    ),
     ...(redirectUri === undefined
       ? {}
       : {

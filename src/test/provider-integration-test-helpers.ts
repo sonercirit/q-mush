@@ -1,6 +1,5 @@
 import { expect } from "bun:test";
 import { eq } from "drizzle-orm";
-import { createGoogleAuthFromEnvironment } from "../auth.ts";
 import type { AppDatabase } from "../database.ts";
 import { providerCredentials } from "../database/schema.ts";
 import type { OAuthDependencies } from "../oauth.ts";
@@ -11,7 +10,7 @@ import type { ProviderIntegration } from "../provider-integration.ts";
 import {
   addFlowCookies,
   createAuthenticatedRequest,
-  createAuthenticatedTestDatabase,
+  createAuthenticatedTestContext,
   TEST_NOW,
 } from "./authenticated-integration-test-helpers.ts";
 import { takeValue } from "./oauth-test-helpers.ts";
@@ -76,12 +75,8 @@ function setupProviderIntegration<Details>(
   configuration: ProviderTestConfiguration<Details>,
   details: Readonly<Record<string, Details>> = {},
 ): ProviderTestSetup {
-  const database = createAuthenticatedTestDatabase();
+  const { auth, database } = createAuthenticatedTestContext();
   const providerRequests: Request[] = [];
-  const auth = createGoogleAuthFromEnvironment(
-    {},
-    { database, now: () => TEST_NOW },
-  );
   const ids = [...configuration.ids];
   const tokens = [...configuration.tokens];
   const integration = configuration.factory(configuration.environment, auth, {

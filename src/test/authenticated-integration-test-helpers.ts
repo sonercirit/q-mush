@@ -1,4 +1,5 @@
 import { createdAuditFields } from "../audit.ts";
+import { createGoogleAuthFromEnvironment, type GoogleAuth } from "../auth.ts";
 import * as databaseModule from "../database.ts";
 import * as schema from "../database/schema.ts";
 import { SYSTEM_ID } from "../ids.ts";
@@ -37,6 +38,18 @@ export function createAuthenticatedTestDatabase(): databaseModule.AppDatabase {
     .run();
 
   return database;
+}
+
+export function createAuthenticatedTestContext(): {
+  readonly auth: GoogleAuth;
+  readonly database: databaseModule.AppDatabase;
+} {
+  const database = createAuthenticatedTestDatabase();
+  const auth = createGoogleAuthFromEnvironment(
+    {},
+    { database, now: () => TEST_NOW },
+  );
+  return { auth, database };
 }
 
 export function addTestProviderCredential(

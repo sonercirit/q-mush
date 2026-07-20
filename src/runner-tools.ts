@@ -1,8 +1,8 @@
 import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
 import {
-  isAgentToolName,
   isBaseAgentToolName,
+  isRunnerAgentToolName,
   type BaseAgentToolName,
 } from "./agent-tools.ts";
 import { isRecord } from "./auth-model.ts";
@@ -518,7 +518,7 @@ export async function executeRunnerTool(
     throw new Error("The runner command was stopped");
   }
 
-  if (!isAgentToolName(name)) {
+  if (!isRunnerAgentToolName(name)) {
     throw new Error(`Unknown runner tool: ${name}`);
   }
 

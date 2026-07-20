@@ -21,6 +21,7 @@ import {
 } from "./provider-credential-store.ts";
 
 const API_KEY_MAXIMUM_LENGTH = 1024;
+const API_KEY_LABEL_MAXIMUM_LENGTH = 100;
 
 class InvalidProviderApiKeyError extends Error {
   constructor() {
@@ -70,20 +71,45 @@ export type ReadCredentialDetails = (
 
 export class ProviderCredentialEndpoints {
   readonly #auth: GoogleAuth;
+  readonly #labelRequired: boolean;
   readonly #now: () => number;
-  readonly #readCredentialDetails: ReadCredentialDetails;
+  readonly #readCredentialDetails: (
+    apiKey: string,
+    label: string | undefined,
+  ) => Promise<ProviderCredentialDetails>;
   readonly #store: ProviderCredentialStore | undefined;
+  readonly #validateApiKey: (apiKey: string) => boolean;
 
   constructor(options: {
     readonly auth: GoogleAuth;
+    readonly labelRequired?: boolean;
     readonly now: () => number;
     readonly readCredentialDetails: ReadCredentialDetails;
+    readonly readLabeledCredentialDetails?: (
+      apiKey: string,
+      label: string,
+    ) => Promise<ProviderCredentialDetails>;
     readonly store: ProviderCredentialStore | undefined;
+    readonly validateApiKey?: (apiKey: string) => boolean;
   }) {
     this.#auth = options.auth;
+    this.#labelRequired = options.labelRequired ?? false;
     this.#now = options.now;
-    this.#readCredentialDetails = options.readCredentialDetails;
+    const readLabeledDetails = options.readLabeledCredentialDetails;
+    if (readLabeledDetails !== undefined) {
+      this.#readCredentialDetails = (apiKey, label) => {
+        if (label === undefined) {
+          return Promise.reject(new Error("The credential label is required"));
+        }
+
+        return readLabeledDetails(apiKey, label);
+      };
+    } else {
+      this.#readCredentialDetails = (apiKey) =>
+        options.readCredentialDetails(apiKey);
+    }
     this.#store = options.store;
+    this.#validateApiKey = options.validateApiKey ?? (() => true);
   }
 
   authorize<T extends Promise<Response> | Response>(
@@ -119,31 +145,51 @@ export class ProviderCredentialEndpoints {
       return createMethodNotAllowedResponse("GET, POST");
     }
 
-    const suppliedKey = await parseJsonRequest(request, (value) => {
+    const supplied = await parseJsonRequest(request, (value) => {
       if (!isRecord(value)) {
         return undefined;
       }
 
       const apiKey = value["apiKey"];
-      return typeof apiKey === "string" ? apiKey : undefined;
+      const label = value["label"];
+
+      if (
+        typeof apiKey !== "string" ||
+        (label !== undefined && typeof label !== "string")
+      ) {
+        return undefined;
+      }
+
+      const normalizedLabel = label?.trim();
+
+      if (
+        (this.#labelRequired && normalizedLabel === undefined) ||
+        normalizedLabel?.length === 0 ||
+        (normalizedLabel?.length ?? 0) > API_KEY_LABEL_MAXIMUM_LENGTH
+      ) {
+        return undefined;
+      }
+
+      return { apiKey, label: normalizedLabel };
     });
 
-    if (suppliedKey === undefined) {
+    if (supplied === undefined) {
       return createApiError("invalid_request", 400);
     }
 
-    const apiKey = suppliedKey.trim();
+    const apiKey = supplied.apiKey.trim();
 
     if (
       apiKey.length === 0 ||
       apiKey.length > API_KEY_MAXIMUM_LENGTH ||
-      /\s/u.test(apiKey)
+      /\s/u.test(apiKey) ||
+      !this.#validateApiKey(apiKey)
     ) {
       return invalidApiKeyResponse();
     }
 
     try {
-      const details = await this.#readCredentialDetails(apiKey);
+      const details = await this.#readCredentialDetails(apiKey, supplied.label);
       const credential = this.#credentialStore().add(
         user.id,
         apiKey,

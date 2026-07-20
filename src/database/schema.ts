@@ -48,11 +48,17 @@ function providerColumn() {
   return text("provider", { enum: ["openai", "openrouter"] }).notNull();
 }
 
+function credentialProviderColumn() {
+  return text("provider", {
+    enum: ["openai", "openrouter", "brave_search"],
+  }).notNull();
+}
+
 export const providerCredentials = sqliteTable(
   "provider_credentials",
   {
     ...ownedAuditColumns(),
-    provider: providerColumn(),
+    provider: credentialProviderColumn(),
     providerAccountId: text("provider_account_id"),
     label: text("label").notNull(),
     source: text("source", { enum: ["oauth", "api_key"] }).notNull(),

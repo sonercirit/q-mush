@@ -46,10 +46,12 @@ export class ProviderController {
     );
     form?.addEventListener("submit", (event) => {
       event.preventDefault();
-      const apiKey = new FormData(form).get("apiKey");
+      const data = new FormData(form);
+      const apiKey = data.get("apiKey");
+      const label = data.get("label");
 
       if (typeof apiKey === "string") {
-        void this.#add(apiKey);
+        void this.#add(apiKey, typeof label === "string" ? label : undefined);
       }
     });
 
@@ -107,11 +109,14 @@ export class ProviderController {
     });
   }
 
-  async #add(apiKey: string): Promise<void> {
+  async #add(apiKey: string, label: string | undefined): Promise<void> {
     await this.#mutate(
       this.#configuration.credentialsPath,
       {
-        body: JSON.stringify({ apiKey }),
+        body: JSON.stringify({
+          apiKey,
+          ...(this.#configuration.keyRequiresLabel === true ? { label } : {}),
+        }),
         headers: { "content-type": "application/json" },
         method: "POST",
       },
@@ -122,7 +127,10 @@ export class ProviderController {
   }
 
   #configurationError(): string {
-    const variable = `${this.#configuration.id.toUpperCase()}_CREDENTIAL_KEY`;
+    const variable =
+      this.#configuration.id === "brave-search"
+        ? "BRAVE_SEARCH_CREDENTIAL_KEY"
+        : `${this.#configuration.id.toUpperCase()}_CREDENTIAL_KEY`;
     return `${this.#configuration.name} storage is not configured. Set ${variable} on the local server and restart it.`;
   }
 

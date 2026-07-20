@@ -6,6 +6,7 @@ import {
   zstdDecompressSync,
 } from "node:zlib";
 import { createGoogleAuthFromEnvironment } from "../auth.ts";
+import type { BraveSearchSkill } from "../brave-search.ts";
 import { createOpenAiIntegrationFromEnvironment } from "../openai.ts";
 import { createOpenRouterIntegrationFromEnvironment } from "../openrouter.ts";
 import {
@@ -14,6 +15,7 @@ import {
   AUTH_GOOGLE_PATH,
   AUTH_LOGOUT_PATH,
   AUTH_SESSION_PATH,
+  BRAVE_SEARCH_KEYS_PATH,
   OPENAI_CREDENTIALS_PATH,
   OPENAI_OAUTH_CALLBACK_PATH,
   OPENAI_OAUTH_PATH,
@@ -66,21 +68,33 @@ const stylesheet = ".min-h-screen{min-height:100vh}";
 const googleAuth = createGoogleAuthFromEnvironment({});
 const openAi = createOpenAiIntegrationFromEnvironment({}, googleAuth);
 const openRouter = createOpenRouterIntegrationFromEnvironment({}, googleAuth);
+const braveSearch: BraveSearchSkill = {
+  execute: () =>
+    Promise.resolve("Error: no Brave Search API keys are available."),
+  keys: () => Promise.resolve(new Response(null, { status: 401 })),
+  remove: () => new Response(null, { status: 401 }),
+};
 const runners = createRunnerIntegration(googleAuth);
-const sessions = createSessionIntegration(googleAuth, runners, {
-  openai: openAi,
-  openrouter: openRouter,
-});
-const handleRequest = createRequestHandler(
-  clientJavaScript,
-  stylesheet,
-  googleAuth,
-  openAi,
-  openRouter,
-  runners,
-  sessions,
-  runnerExecutables,
-);
+function createTestRequestHandler(): (request: Request) => Promise<Response> {
+  const modelProviders = { openai: openAi, openrouter: openRouter };
+  const sessions = createSessionIntegration(
+    googleAuth,
+    runners,
+    modelProviders,
+    { braveSearch },
+  );
+  const integrations = [googleAuth, openAi, openRouter, braveSearch] as const;
+  return createRequestHandler(
+    clientJavaScript,
+    stylesheet,
+    ...integrations,
+    runners,
+    sessions,
+    runnerExecutables,
+  );
+}
+
+const handleRequest = createTestRequestHandler();
 
 function expectAllStatuses(
   responses: readonly Response[],
@@ -157,6 +171,7 @@ describe("routes", () => {
     expect(AUTH_GOOGLE_CALLBACK_PATH).toBe("/api/auth/google/callback");
     expect(AUTH_LOGOUT_PATH).toBe("/api/auth/logout");
     expect(AUTH_SESSION_PATH).toBe("/api/auth/session");
+    expect(BRAVE_SEARCH_KEYS_PATH).toBe("/api/skills/brave-search/keys");
     expect(OPENAI_CREDENTIALS_PATH).toBe("/api/openai/credentials");
     expect(OPENAI_OAUTH_PATH).toBe("/api/openai/oauth");
     expect(OPENAI_OAUTH_CALLBACK_PATH).toBe("/api/openai/oauth/callback");
@@ -258,6 +273,16 @@ describe("page server", () => {
       runnerExecutables.version,
     );
     expect(installerResponse.status).toBe(404);
+  });
+
+  test("protects Brave Search key routes", async () => {
+    const responses = await Promise.all([
+      sendRequest(BRAVE_SEARCH_KEYS_PATH),
+      sendRequest(BRAVE_SEARCH_KEYS_PATH, undefined, "POST"),
+      sendRequest(`${BRAVE_SEARCH_KEYS_PATH}/key-id`, undefined, "DELETE"),
+    ]);
+
+    expectAllStatuses(responses, 401);
   });
 
   test("protects agent session and runner work routes", async () => {
@@ -411,6 +436,7 @@ describe("browser build", () => {
     expect(javaScript).toContain("Continue with Google");
     expect(javaScript).toContain("Connect OpenAI account");
     expect(javaScript).toContain("Connect OpenRouter account");
+    expect(javaScript).toContain("Brave Search");
     expect(javaScript).toContain("Add API key");
     expect(javaScript).toContain("Set up a runner");
     expect(javaScript).toContain("Download installer");
@@ -420,6 +446,7 @@ describe("browser build", () => {
     expect(javaScript).toContain("AUTH_LOGOUT_PATH");
     expect(javaScript).toContain("OPENAI_CREDENTIALS_PATH");
     expect(javaScript).toContain("OPENROUTER_CREDENTIALS_PATH");
+    expect(javaScript).toContain("BRAVE_SEARCH_KEYS_PATH");
     expect(javaScript).toContain("RUNNERS_PATH");
     expect(javaScript).toContain("SESSIONS_PATH");
   });

@@ -151,7 +151,14 @@ describe("chat completions agent model", () => {
               : undefined,
           )
         : [];
-    expect(toolNames).toEqual(["read", "bash", "edit", "write", "parallel"]);
+    expect(toolNames).toEqual([
+      "read",
+      "bash",
+      "edit",
+      "write",
+      "parallel",
+      "brave_search",
+    ]);
     expect(serializedBody).toContain('"edits"');
     expect(serializedBody).toContain('"tool_uses"');
     expect(serializedBody).toContain('"timeout"');
