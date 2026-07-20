@@ -39,6 +39,10 @@ function markTestSessionRunning(store: SessionStore): void {
   expect(store.mark(SESSION_ID, "running", TEST_NOW + 1)).toBeTrue();
 }
 
+function testSessionMessageRoles(store: SessionStore) {
+  return store.get(TEST_USER_ID, SESSION_ID)?.messages.map(({ role }) => role);
+}
+
 function createStore() {
   const database = createAuthenticatedTestDatabase();
   const timestamp = new Date(TEST_NOW);
@@ -161,7 +165,7 @@ describe("session store", () => {
     database.$client.close();
   });
 
-  test("repairs interrupted tool calls when rebuilding a conversation", () => {
+  test("shows and replays interrupted tool-call results", () => {
     const { database, store } = createStore();
     createTestSession(store);
     markTestSessionRunning(store);
@@ -176,7 +180,13 @@ describe("session store", () => {
       toolCalls: [interruptedCall],
     };
     store.appendAgentMessage(SESSION_ID, assistantMessage, TEST_NOW + 2);
+    expect(testSessionMessageRoles(store)).toEqual(["user", "assistant"]);
     expect(store.mark(SESSION_ID, "failed", TEST_NOW + 3)).toBeTrue();
+    expect(testSessionMessageRoles(store)).toEqual([
+      "user",
+      "assistant",
+      "tool",
+    ]);
     expect(
       store.queuePrompt(
         TEST_USER_ID,
@@ -185,20 +195,34 @@ describe("session store", () => {
         TEST_NOW + 4,
       ).status,
     ).toBe("queued");
+    const interruptedToolResult = {
+      content:
+        "Error: the tool call was interrupted before it returned a result.",
+      role: "tool" as const,
+      toolCallId: interruptedCall.id,
+      toolName: interruptedCall.name,
+    };
 
+    const detail = store.get(TEST_USER_ID, SESSION_ID);
+    expect(testSessionMessageRoles(store)).toEqual([
+      "user",
+      "assistant",
+      "tool",
+      "user",
+    ]);
+    expect(detail?.messages[2]).toEqual({
+      ...interruptedToolResult,
+      createdAt: TEST_NOW + 2,
+      id: `${THINKING_MESSAGE_ID}:interrupted:${interruptedCall.id}`,
+      toolCalls: [],
+    });
     expect(store.conversation(SESSION_ID)).toEqual([
       {
         content: "Inspect the repository\nand make it shine",
         role: "user",
       },
       assistantMessage,
-      {
-        content:
-          "Error: the tool call was interrupted before it returned a result.",
-        role: "tool",
-        toolCallId: interruptedCall.id,
-        toolName: interruptedCall.name,
-      },
+      interruptedToolResult,
       { content: "Why was it failing?", role: "user" },
     ]);
     database.$client.close();

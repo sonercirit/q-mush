@@ -138,18 +138,68 @@ function summarizeMessage(stored: StoredMessage): AgentSessionMessage {
 const INTERRUPTED_TOOL_OUTPUT =
   "Error: the tool call was interrupted before it returned a result.";
 
-function appendInterruptedToolResults(
-  conversation: AgentConversationMessage[],
-  calls: readonly AgentToolCall[],
-): void {
-  for (const call of calls) {
-    conversation.push({
-      content: INTERRUPTED_TOOL_OUTPUT,
-      role: "tool",
-      toolCallId: call.id,
-      toolName: call.name,
-    });
+interface PendingToolResult {
+  readonly call: AgentToolCall;
+  readonly createdAt: number;
+  readonly messageId: string;
+}
+
+function interruptedToolResult(
+  pending: PendingToolResult,
+): AgentSessionMessage {
+  return {
+    content: INTERRUPTED_TOOL_OUTPUT,
+    createdAt: pending.createdAt,
+    id: `${pending.messageId}:interrupted:${pending.call.id}`,
+    role: "tool",
+    toolCallId: pending.call.id,
+    toolCalls: [],
+    toolName: pending.call.name,
+  };
+}
+
+function withInterruptedToolResults(
+  messages: readonly AgentSessionMessage[],
+  finishTrailingCalls: boolean,
+): readonly AgentSessionMessage[] {
+  const complete: AgentSessionMessage[] = [];
+  let pending: readonly PendingToolResult[] = [];
+  const finishPending = () => {
+    complete.push(...pending.map(interruptedToolResult));
+    pending = [];
+  };
+
+  for (const message of messages) {
+    switch (message.role) {
+      case "assistant":
+        finishPending();
+        complete.push(message);
+        pending = message.toolCalls.map((call) => ({
+          call,
+          createdAt: message.createdAt,
+          messageId: message.id,
+        }));
+        break;
+      case "tool":
+        complete.push(message);
+        pending = pending.filter(({ call }) => call.id !== message.toolCallId);
+        break;
+      case "user":
+        finishPending();
+        complete.push(message);
+        break;
+      case "system":
+      case "thinking":
+        complete.push(message);
+        break;
+    }
   }
+
+  if (finishTrailingCalls) {
+    finishPending();
+  }
+
+  return complete;
 }
 
 function titleFromPrompt(prompt: string): string {
@@ -284,7 +334,10 @@ export class SessionStore {
     return {
       ...summarizeSession(stored),
       agentFile: this.#agentFile(sessionId),
-      messages: this.#messages(sessionId),
+      messages: withInterruptedToolResults(
+        this.#messages(sessionId),
+        stored.status !== "queued" && stored.status !== "running",
+      ),
     };
   }
 
@@ -297,22 +350,19 @@ export class SessionStore {
 
   conversation(sessionId: string): readonly AgentConversationMessage[] {
     const conversation: AgentConversationMessage[] = [];
-    let pendingToolCalls: readonly AgentToolCall[] = [];
-    const finishInterruptedToolCalls = () => {
-      appendInterruptedToolResults(conversation, pendingToolCalls);
-      pendingToolCalls = [];
-    };
+    const messages = withInterruptedToolResults(
+      this.#messages(sessionId),
+      true,
+    );
 
-    for (const message of this.#messages(sessionId)) {
+    for (const message of messages) {
       switch (message.role) {
         case "assistant":
-          finishInterruptedToolCalls();
           conversation.push({
             content: message.content,
             role: "assistant",
             toolCalls: message.toolCalls,
           });
-          pendingToolCalls = message.toolCalls;
           break;
         case "tool":
           if (message.toolCallId === null || message.toolName === null) {
@@ -325,12 +375,8 @@ export class SessionStore {
             toolCallId: message.toolCallId,
             toolName: message.toolName,
           });
-          pendingToolCalls = pendingToolCalls.filter(
-            (call) => call.id !== message.toolCallId,
-          );
           break;
         case "user":
-          finishInterruptedToolCalls();
           conversation.push({ content: message.content, role: "user" });
           break;
         case "system":
@@ -339,7 +385,6 @@ export class SessionStore {
       }
     }
 
-    finishInterruptedToolCalls();
     return conversation;
   }
 
