@@ -1,6 +1,9 @@
 import type { AgentModelCatalog } from "./agent-configuration.ts";
 import { HttpResponseError, requestJson } from "./browser-http.ts";
-import { bindActionClicks } from "./client-actions.ts";
+import {
+  bindActionClicks,
+  submitFormOnControlEnter,
+} from "./client-actions.ts";
 import {
   DirectoryPickerController,
   initialDirectoryPickerState,
@@ -170,6 +173,17 @@ export class SessionController {
         void this.#send();
       },
     );
+    for (const textarea of panel.querySelectorAll<HTMLTextAreaElement>(
+      'textarea[name="prompt"]',
+    )) {
+      textarea.addEventListener("keydown", (event) => {
+        const form = textarea.form;
+
+        if (form !== null) {
+          submitFormOnControlEnter(event, form);
+        }
+      });
+    }
 
     bindActionClicks(panel, (control, action) => {
       if (action === "select-session") {
