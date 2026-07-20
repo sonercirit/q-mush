@@ -302,12 +302,21 @@ describe("chat completions agent model", () => {
     });
   });
 
-  test("does not expose provider response bodies in errors", async () => {
+  test("shows the provider's error message", async () => {
     const model = new ChatCompletionsAgentModel({
       credential: { accountId: null, secret: "secret", source: "api_key" },
       fetch: () =>
         Promise.resolve(
-          new Response("sensitive provider detail", { status: 429 }),
+          createJsonResponse(
+            {
+              error: {
+                code: "unsupported_parameter",
+                message: "The selected model does not support tools.",
+                type: "invalid_request_error",
+              },
+            },
+            400,
+          ),
         ),
       model: "gpt-4.1-mini",
       provider: "openai",
@@ -316,8 +325,8 @@ describe("chat completions agent model", () => {
       model.complete([{ content: "Hello", role: "user" }]),
     );
 
-    const message = requireError(error).message;
-    expect(message).toContain("OpenAI request failed with status 429");
-    expect(message).not.toContain("sensitive provider detail");
+    expect(requireError(error).message).toBe(
+      "OpenAI request failed with status 400: The selected model does not support tools.",
+    );
   });
 });

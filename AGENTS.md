@@ -283,6 +283,9 @@ task-specific progress, guesses, or sensitive values.
   has no reasoning capabilities, while OpenRouter and Codex return
   model-specific efforts. Optional reasoning uses `reasoning_effort` for OpenAI
   chat completions and `reasoning.effort` for OpenRouter and Codex Responses.
+  Failed model requests surface the provider's structured error message, or its
+  plain-text response fallback, in the session transcript alongside the HTTP
+  status.
 - Agent launches and brokered runner commands have no application-owned turn,
   queue, or elapsed-time limits. Every shell command must choose a positive
   timeout; no default or configured maximum is supplied. Provider requests

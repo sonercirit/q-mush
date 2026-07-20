@@ -40,6 +40,48 @@ function providerName(provider: ProviderId): string {
   return provider === "openai" ? "OpenAI" : "OpenRouter";
 }
 
+function providerErrorDetail(body: string): string {
+  const fallback = body.trim();
+
+  if (fallback.length === 0) {
+    return "";
+  }
+
+  let value: unknown;
+
+  try {
+    value = JSON.parse(fallback);
+  } catch {
+    return fallback;
+  }
+
+  if (!isRecord(value)) {
+    return fallback;
+  }
+
+  const error = value["error"];
+  const errorMessage = isRecord(error) ? error["message"] : error;
+  const detail = errorMessage ?? value["message"] ?? value["detail"];
+
+  return typeof detail === "string" && detail.trim().length > 0
+    ? detail.trim()
+    : fallback;
+}
+
+async function providerRequestErrorMessage(
+  provider: ProviderId,
+  response: Response,
+): Promise<string> {
+  const summary = `${providerName(provider)} request failed with status ${String(response.status)}`;
+
+  try {
+    const detail = providerErrorDetail(await response.text());
+    return detail.length === 0 ? summary : `${summary}: ${detail}`;
+  } catch {
+    return summary;
+  }
+}
+
 function usesCodexOAuth(
   provider: ProviderId,
   credential: AgentProviderCredential,
@@ -613,7 +655,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
 
     if (!response.ok) {
       throw new Error(
-        `${providerName(this.#provider)} request failed with status ${String(response.status)}`,
+        await providerRequestErrorMessage(this.#provider, response),
       );
     }
 
