@@ -74,6 +74,40 @@ describe("first-party agent loop", () => {
     ]);
   });
 
+  test("continues until the model finishes without a turn limit", async () => {
+    const toolTurns = Array.from({ length: 33 }, (_, index) => ({
+      content: "",
+      toolCalls: [
+        {
+          arguments: "{}",
+          id: `call-${String(index)}`,
+          name: "bash",
+        },
+      ],
+    }));
+    const model = new ScriptedAgentModel([
+      ...toolTurns,
+      { content: "Long-running task complete.", toolCalls: [] },
+    ]);
+    const executedCallIds: string[] = [];
+
+    const recorded = await runRecordedLoop(
+      model,
+      "Complete a long task",
+      (call) => {
+        executedCallIds.push(call.id);
+        return Promise.resolve("Tool complete.");
+      },
+    );
+
+    expect(executedCallIds).toHaveLength(33);
+    expect(recorded.at(-1)).toEqual({
+      content: "Long-running task complete.",
+      role: "assistant",
+      toolCalls: [],
+    });
+  });
+
   test("reports malformed tool arguments to the model without executing them", async () => {
     const model = new ScriptedAgentModel([
       {

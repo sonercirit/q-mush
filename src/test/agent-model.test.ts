@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { AgentModelTurn } from "../agent-loop.ts";
 import { ChatCompletionsAgentModel } from "../agent-model.ts";
 import { isRecord } from "../auth-model.ts";
 import { createJsonResponse } from "../http.ts";
@@ -6,6 +7,11 @@ import { createOpenAiOAuthSecret } from "./oauth-test-helpers.ts";
 import { captureRejection, requireError } from "./promise-test-helpers.ts";
 
 type ModelOptions = ConstructorParameters<typeof ChatCompletionsAgentModel>[0];
+
+const DONE_CODEX_OUTPUT = {
+  content: [{ text: "Done.", type: "output_text" }],
+  type: "message",
+};
 
 class RequestCapture {
   request?: Request;
@@ -27,6 +33,36 @@ function respondingModel(
       return Promise.resolve(createJsonResponse(responseBody));
     },
   });
+}
+
+function codexModel(
+  options: Omit<ModelOptions, "credential" | "provider">,
+): ChatCompletionsAgentModel {
+  return new ChatCompletionsAgentModel({
+    ...options,
+    credential: {
+      accountId: "chatgpt-account",
+      secret: createOpenAiOAuthSecret(),
+      source: "oauth",
+    },
+    provider: "openai",
+  });
+}
+
+function codexEventResponse(output: readonly unknown[], prefix = ""): Response {
+  const completed = {
+    response: { output },
+    type: "response.completed",
+  };
+  return new Response(
+    `${prefix}data: ${JSON.stringify(completed)}\n\ndata: [DONE]\n\n`,
+  );
+}
+
+function completeHello(
+  model: ChatCompletionsAgentModel,
+): Promise<AgentModelTurn> {
+  return model.complete([{ content: "Hello", role: "user" }]);
 }
 
 describe("chat completions agent model", () => {
@@ -144,43 +180,25 @@ describe("chat completions agent model", () => {
 
   test("uses the Codex Responses protocol for an OpenAI OAuth credential", async () => {
     const capture = new RequestCapture();
-    const oauthSecret = createOpenAiOAuthSecret();
-    const model = new ChatCompletionsAgentModel({
-      credential: {
-        accountId: "chatgpt-account",
-        secret: oauthSecret,
-        source: "oauth",
-      },
+    const model = codexModel({
       fetch: (request) => {
         capture.request = request;
-        const completed = {
-          response: {
-            output: [
-              {
-                summary: [
-                  {
-                    text: "I checked the prior tool result.",
-                    type: "summary_text",
-                  },
-                ],
-                type: "reasoning",
-              },
-              {
-                content: [{ text: "Done.", type: "output_text" }],
-                type: "message",
-              },
-            ],
-          },
-          type: "response.completed",
-        };
         return Promise.resolve(
-          new Response(
-            `data: ${JSON.stringify(completed)}\n\ndata: [DONE]\n\n`,
-          ),
+          codexEventResponse([
+            {
+              summary: [
+                {
+                  text: "I checked the prior tool result.",
+                  type: "summary_text",
+                },
+              ],
+              type: "reasoning",
+            },
+            DONE_CODEX_OUTPUT,
+          ]),
         );
       },
       model: "gpt-5-codex",
-      provider: "openai",
       reasoningEffort: "medium",
     });
 
@@ -234,12 +252,7 @@ describe("chat completions agent model", () => {
   });
 
   test("uses streamed Codex output when the completed response omits it", async () => {
-    const model = new ChatCompletionsAgentModel({
-      credential: {
-        accountId: "chatgpt-account",
-        secret: createOpenAiOAuthSecret(),
-        source: "oauth",
-      },
+    const model = codexModel({
       fetch: () =>
         Promise.resolve(
           new Response(
@@ -258,11 +271,10 @@ describe("chat completions agent model", () => {
           ),
         ),
       model: "gpt-5.6-sol",
-      provider: "openai",
       reasoningEffort: "max",
     });
 
-    expect(await model.complete([{ content: "Hello", role: "user" }])).toEqual({
+    expect(await completeHello(model)).toEqual({
       content: "Hello there.",
       thinking: "I considered the request.",
       toolCalls: [
@@ -272,6 +284,21 @@ describe("chat completions agent model", () => {
           name: "read",
         },
       ],
+    });
+  });
+
+  test("accepts Codex event streams without a local response-size limit", async () => {
+    const padding = `:${"x".repeat(10 * 1_024 * 1_024)}\n\n`;
+    const model = codexModel({
+      fetch: () =>
+        Promise.resolve(codexEventResponse([DONE_CODEX_OUTPUT], padding)),
+      model: "gpt-5-codex",
+    });
+
+    expect(await completeHello(model)).toEqual({
+      content: "Done.",
+      thinking: "",
+      toolCalls: [],
     });
   });
 

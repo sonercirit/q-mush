@@ -18,8 +18,6 @@ const MAX_COMMAND_OUTPUT_BYTES = 256 * 1024;
 const MAXIMUM_EDITS = 100;
 const MAXIMUM_PARALLEL_TOOLS = 8;
 const MAX_PARALLEL_TOOL_OUTPUT_BYTES = 50 * 1_024;
-const DEFAULT_COMMAND_TIMEOUT_SECONDS = 30;
-const MAX_COMMAND_TIMEOUT_SECONDS = 300;
 
 type ToolArguments = Readonly<Record<string, unknown>>;
 
@@ -42,17 +40,16 @@ function requiredString(
   return value;
 }
 
-function optionalInteger(
+function readOptionalInteger(
   arguments_: ToolArguments,
   name: string,
-  fallback: number,
   minimum: number,
-  maximum: number,
-): number {
+  maximum = Number.MAX_SAFE_INTEGER,
+): number | undefined {
   const value = arguments_[name];
 
   if (value === undefined) {
-    return fallback;
+    return undefined;
   }
 
   if (
@@ -61,6 +58,30 @@ function optionalInteger(
     value < minimum ||
     value > maximum
   ) {
+    throw new Error(`Tool argument ${name} must be an integer`);
+  }
+
+  return value;
+}
+
+function optionalInteger(
+  arguments_: ToolArguments,
+  name: string,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  return readOptionalInteger(arguments_, name, minimum, maximum) ?? fallback;
+}
+
+function requiredInteger(
+  arguments_: ToolArguments,
+  name: string,
+  minimum: number,
+): number {
+  const value = readOptionalInteger(arguments_, name, minimum);
+
+  if (value === undefined) {
     throw new Error(`Tool argument ${name} must be an integer`);
   }
 
@@ -348,13 +369,7 @@ async function bashTool(
   signal: AbortSignal | undefined,
 ): Promise<string> {
   const command = requiredString(arguments_, "command", 32_768);
-  const timeoutSeconds = optionalInteger(
-    arguments_,
-    "timeout",
-    DEFAULT_COMMAND_TIMEOUT_SECONDS,
-    1,
-    MAX_COMMAND_TIMEOUT_SECONDS,
-  );
+  const timeoutSeconds = requiredInteger(arguments_, "timeout", 1);
   const child = Bun.spawn(["/bin/sh", "-lc", command], {
     cwd: root,
     stderr: "pipe",

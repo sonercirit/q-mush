@@ -494,11 +494,6 @@ async function readCodexEventStream(
   response: Response,
 ): Promise<AgentModelTurn> {
   const body = await response.text();
-
-  if (body.length > 10 * 1_024 * 1_024) {
-    throw new Error("The Codex model response was too large");
-  }
-
   const streamedText: string[] = [];
   const streamedThinking: string[] = [];
   const streamedToolCalls = new Map<number, AgentToolCall>();

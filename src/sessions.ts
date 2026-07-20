@@ -47,7 +47,6 @@ import { SessionStore, type CreateAgentSession } from "./session-store.ts";
 
 const MAXIMUM_PROMPT_LENGTH = 32_768;
 const DIRECTORY_REQUEST_TIMEOUT_MILLISECONDS = 15_000;
-const MAXIMUM_RESULT_LENGTH = 512 * 1_024;
 const IDENTIFIER_PATTERN = /^[A-Za-z\d._:-]{1,200}$/u;
 
 interface SessionCredentialReader {
@@ -119,7 +118,7 @@ function readStringField(
   value: unknown,
   key: string,
   maximumLength: number,
-  options: { readonly allowEmpty?: boolean; readonly trim?: boolean } = {},
+  options: { readonly trim?: boolean } = {},
 ): string | undefined {
   if (!isRecord(value)) {
     return undefined;
@@ -132,9 +131,7 @@ function readStringField(
   }
 
   const normalized = options.trim === true ? field.trim() : field;
-  return options.allowEmpty === true || normalized.length > 0
-    ? normalized
-    : undefined;
+  return normalized.length > 0 ? normalized : undefined;
 }
 
 function readCreateSession(value: unknown): CreateSessionInput | undefined {
@@ -191,9 +188,8 @@ function readPrompt(value: unknown): string | undefined {
 }
 
 function readToolOutput(value: unknown): string | undefined {
-  return readStringField(value, "output", MAXIMUM_RESULT_LENGTH, {
-    allowEmpty: true,
-  });
+  const output = isRecord(value) ? value["output"] : undefined;
+  return typeof output === "string" ? output : undefined;
 }
 
 function isAbort(error: unknown): boolean {

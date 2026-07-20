@@ -2,7 +2,6 @@ import { readFile, realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AGENT_FILE_NAMES,
-  MAXIMUM_AGENT_FILE_BYTES,
   type AgentFile,
   type AgentFileName,
 } from "./agent-file.ts";
@@ -45,21 +44,7 @@ async function loadCandidate(
     return undefined;
   }
 
-  if (details.size > MAXIMUM_AGENT_FILE_BYTES) {
-    throw new Error(
-      `The agent file exceeds ${String(MAXIMUM_AGENT_FILE_BYTES)} bytes`,
-    );
-  }
-
-  const content = await readFile(path, "utf8");
-
-  if (Buffer.byteLength(content, "utf8") > MAXIMUM_AGENT_FILE_BYTES) {
-    throw new Error(
-      `The agent file exceeds ${String(MAXIMUM_AGENT_FILE_BYTES)} bytes`,
-    );
-  }
-
-  return { content, name };
+  return { content: await readFile(path, "utf8"), name };
 }
 
 export async function loadRunnerAgentFile(

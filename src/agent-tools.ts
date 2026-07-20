@@ -62,7 +62,7 @@ const BASE_AGENT_TOOLS = [
   }),
   toolDefinition({
     description:
-      "Execute a bash command in the workspace. Returns bounded stdout, stderr, and the exit status. Optionally provide a timeout in seconds.",
+      "Execute a bash command in the workspace. Returns bounded stdout, stderr, and the exit status. A positive timeout in seconds is required.",
     name: "bash",
     properties: {
       command: {
@@ -70,13 +70,13 @@ const BASE_AGENT_TOOLS = [
         type: "string",
       },
       timeout: {
-        description: "Timeout in seconds (optional)",
-        maximum: 300,
+        description:
+          "Required positive timeout in seconds; no default or configured maximum is applied",
         minimum: 1,
         type: "number",
       },
     },
-    required: ["command"],
+    required: ["command", "timeout"],
   }),
   toolDefinition({
     description:

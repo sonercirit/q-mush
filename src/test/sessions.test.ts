@@ -156,7 +156,6 @@ async function connectedSetup(
     {
       broker: new RunnerCommandBroker({
         commandId: () => RUNNER_COMMAND_ID,
-        timeoutMilliseconds: 5_000,
       }),
       database,
       ...(discoverModels === undefined ? {} : { discoverModels }),
@@ -299,21 +298,30 @@ async function sessionDetail(
   return response.json();
 }
 
+async function startSessionWithAgentFile(
+  model: AgentModel,
+  agentFile: unknown,
+): Promise<Awaited<ReturnType<typeof connectedSetup>>> {
+  const setup = await connectedSetup(model);
+  const createResponse = await setup.sessions.collection(
+    createSessionRequest(),
+  );
+
+  expect(createResponse.status).toBe(201);
+  await completeAgentFileLookup(setup.sessions, agentFile);
+  await waitFor(() => sessionDetail(setup.sessions), hasStatus("idle"));
+  return setup;
+}
+
 describe("agent sessions", () => {
   test("loads the workspace agent file before starting the model", async () => {
     const model = new ScriptedAgentModel([
       { content: "Instructions followed.", toolCalls: [] },
     ]);
-    const setup = await connectedSetup(model);
-    const createResponse = await setup.sessions.collection(
-      createSessionRequest(),
-    );
-    expect(createResponse.status).toBe(201);
-    await completeAgentFileLookup(setup.sessions, {
+    const setup = await startSessionWithAgentFile(model, {
       content: "Use the repository test command.",
       name: "CLAUDE.md",
     });
-    await waitFor(() => sessionDetail(setup.sessions), hasStatus("idle"));
 
     expect(setup.selectedSystemPrompts).toHaveLength(1);
     expect(setup.selectedSystemPrompts[0]).toContain("CLAUDE.md");
@@ -326,6 +334,20 @@ describe("agent sessions", () => {
         name: "CLAUDE.md",
       },
     });
+    setup.database.$client.close();
+  });
+
+  test("accepts agent instructions without a runner-result size limit", async () => {
+    const model = new ScriptedAgentModel([
+      { content: "Large instructions loaded.", toolCalls: [] },
+    ]);
+    const content = "x".repeat(600 * 1_024);
+    const setup = await startSessionWithAgentFile(model, {
+      content,
+      name: "AGENTS.md",
+    });
+
+    expect(setup.selectedSystemPrompts[0]).toContain(content);
     setup.database.$client.close();
   });
 

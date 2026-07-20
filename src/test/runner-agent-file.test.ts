@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { MAXIMUM_AGENT_FILE_BYTES } from "../agent-file.ts";
 import { loadRunnerAgentFile } from "../runner-agent-file.ts";
 import { useTemporaryDirectories } from "./temporary-directories.ts";
 
@@ -41,7 +40,7 @@ describe("runner agent file", () => {
     }
   });
 
-  test("confines bounded agent files to the workspace", async () => {
+  test("confines agent files to the workspace", async () => {
     const root = await temporaryDirectory();
     const outside = await temporaryDirectory();
     const outsideFile = join(outside, "instructions.md");
@@ -51,12 +50,16 @@ describe("runner agent file", () => {
     expect(loadRunnerAgentFile(root)).rejects.toThrow(
       "outside the session workspace",
     );
+  });
 
-    const largeRoot = await temporaryDirectory();
-    await writeFile(
-      join(largeRoot, "AGENTS.md"),
-      "x".repeat(MAXIMUM_AGENT_FILE_BYTES + 1),
-    );
-    expect(loadRunnerAgentFile(largeRoot)).rejects.toThrow("exceeds");
+  test("loads agent files without a size limit", async () => {
+    const root = await temporaryDirectory();
+    const content = "x".repeat(65 * 1_024);
+    await writeFile(join(root, "AGENTS.md"), content);
+
+    expect(await loadRunnerAgentFile(root)).toEqual({
+      content,
+      name: "AGENTS.md",
+    });
   });
 });

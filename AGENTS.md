@@ -132,9 +132,10 @@ task-specific progress, guesses, or sensitive values.
   private `list_directories` runner command and returns a canonical path, its
   parent, and up to 500 child directories. Before each initial or follow-up
   agent run, the private `read_agent_file` runner command uses
-  `src/runner-agent-file.ts` to load at most 64 KiB from an exact-root
-  `AGENTS.md`, falling back to `CLAUDE.md`; only `AGENTS.md` is used when both
-  exist, and no extra context is added when neither exists.
+  `src/runner-agent-file.ts` to load an exact-root `AGENTS.md`, falling back to
+  `CLAUDE.md`; only `AGENTS.md` is used when both exist, and no extra context is
+  added when neither exists.
+
   `src/runner-workspace.ts` shares canonical workspace resolution and
   containment with the file tools. The latest agent-file selection is persisted
   on the session and appended to the model system prompt.
@@ -158,6 +159,7 @@ task-specific progress, guesses, or sensitive values.
   conversation replay. Session and transcript rows live in `agent_sessions` and
   `agent_messages`; an interrupted server process marks active sessions failed
   so they can be resumed explicitly.
+
 - `src/openai.ts` and `src/openrouter.ts` manage authenticated provider PKCE
   connections and validate manually supplied keys against OpenAI `/v1/me` and
   OpenRouter `/api/v1/key`, respectively. OpenAI OAuth persists the access and
@@ -281,6 +283,11 @@ task-specific progress, guesses, or sensitive values.
   has no reasoning capabilities, while OpenRouter and Codex return
   model-specific efforts. Optional reasoning uses `reasoning_effort` for OpenAI
   chat completions and `reasoning.effort` for OpenRouter and Codex Responses.
+- Agent launches and brokered runner commands have no application-owned turn,
+  queue, or elapsed-time limits. Every shell command must choose a positive
+  timeout; no default or configured maximum is supplied. Provider requests
+  replay the full conversation without compaction or automatic retries and have
+  no application-level timeout.
 - Add each new runtime source root and executable entry to
   `knip.production.config.ts`. Add standalone non-TypeScript build entries, such
   as `src/styles.css`, to both Knip configs; keep test files and test-support

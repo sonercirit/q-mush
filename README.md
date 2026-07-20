@@ -137,15 +137,17 @@ implements its own model/tool loop without an external agent framework. Before
 each initial or follow-up agent run, the runner loads `AGENTS.md` from the
 selected working directory, falling back to `CLAUDE.md`; when both exist, only
 `AGENTS.md` is used, and when neither exists, no project instructions are added.
-The selected file is limited to 64 KiB, persisted with the session, included in
-the model's system prompt, and shown in the transcript. It exposes Pi's four
-base tool interfaces—`read`, `bash`, `edit`, and `write`—plus a `parallel`
-wrapper for independent calls, with batched exact edits and bounded file and
-command output. Transcripts show system instructions, complete tool definitions,
-reasoning summaries, tool calls, and tool results. Session transcripts and
-status survive page reloads; a ready, stopped, or failed session accepts
-follow-up instructions. **Stop session** aborts the model request and cancels an
-active runner command.
+The selected file is persisted with the session, included in the model's system
+prompt, and shown in the transcript. Agent launches, queued runner commands, and
+brokered command execution have no application-owned count or elapsed-time
+limits. Every shell command must choose a positive timeout; Q Mush supplies no
+default or configured maximum. It exposes Pi's four base tool interfaces—`read`,
+`bash`, `edit`, and `write`—plus a `parallel` wrapper for independent calls,
+with batched exact edits and bounded file and command output. Transcripts show
+system instructions, complete tool definitions, reasoning summaries, tool calls,
+and tool results. Session transcripts and status survive page reloads; a ready,
+stopped, or failed session accepts follow-up instructions. **Stop session**
+aborts the model request and cancels an active runner command.
 
 The runner executes tools with the runner process's local account permissions.
 File tools reject paths outside the selected workspace, while shell commands are

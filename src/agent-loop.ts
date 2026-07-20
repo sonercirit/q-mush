@@ -80,7 +80,6 @@ type ParsedAgentToolCall = AgentToolRequest<Readonly<Record<string, unknown>>>;
 interface AgentLoopOptions {
   readonly executeTool: (call: ParsedAgentToolCall) => Promise<string>;
   readonly initialMessages: readonly AgentConversationMessage[];
-  readonly maximumTurns?: number;
   readonly model: AgentModel;
   readonly recordMessage: (
     message: AgentRecordedMessage,
@@ -88,7 +87,6 @@ interface AgentLoopOptions {
   readonly signal?: AbortSignal;
 }
 
-const DEFAULT_MAXIMUM_TURNS = 32;
 const INVALID_ARGUMENTS_MESSAGE =
   "Error: the tool arguments were not a JSON object.";
 
@@ -110,15 +108,9 @@ function parseArguments(
 }
 
 export async function runAgentLoop(options: AgentLoopOptions): Promise<void> {
-  const maximumTurns = options.maximumTurns ?? DEFAULT_MAXIMUM_TURNS;
-
-  if (!Number.isSafeInteger(maximumTurns) || maximumTurns <= 0) {
-    throw new Error("The agent turn limit must be a positive integer");
-  }
-
   const messages = [...options.initialMessages];
 
-  for (let turnIndex = 0; turnIndex < maximumTurns; turnIndex += 1) {
+  for (;;) {
     throwIfAborted(options.signal);
     const turn = await options.model.complete(messages, options.signal);
     throwIfAborted(options.signal);
@@ -163,6 +155,4 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<void> {
       messages.push(toolMessage);
     }
   }
-
-  throw new Error("The agent reached its tool-call turn limit");
 }

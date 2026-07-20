@@ -1,8 +1,5 @@
 import { randomUUID } from "node:crypto";
 
-const DEFAULT_COMMAND_TIMEOUT_MILLISECONDS = 10 * 60_000;
-const MAXIMUM_QUEUED_COMMANDS_PER_RUNNER = 100;
-
 export interface RunnerToolCommand {
   readonly arguments: Readonly<Record<string, unknown>>;
   readonly id: string;
@@ -20,7 +17,6 @@ export interface DispatchRunnerToolCommand extends Omit<
 
 interface RunnerCommandBrokerOptions {
   readonly commandId?: () => string;
-  readonly timeoutMilliseconds?: number;
 }
 
 interface PendingCommand {
@@ -30,7 +26,6 @@ interface PendingCommand {
   readonly resolve: (output: string) => void;
   readonly runnerId: string;
   readonly signal: AbortSignal | undefined;
-  readonly timer: ReturnType<typeof setTimeout>;
   phase: "in_flight" | "queued";
 }
 
@@ -42,19 +37,9 @@ export class RunnerCommandBroker {
   readonly #commandId: () => string;
   readonly #pending = new Map<string, PendingCommand>();
   readonly #queues = new Map<string, RunnerToolCommand[]>();
-  readonly #timeoutMilliseconds: number;
 
   constructor(options: RunnerCommandBrokerOptions = {}) {
     this.#commandId = options.commandId ?? randomUUID;
-    this.#timeoutMilliseconds =
-      options.timeoutMilliseconds ?? DEFAULT_COMMAND_TIMEOUT_MILLISECONDS;
-
-    if (
-      !Number.isSafeInteger(this.#timeoutMilliseconds) ||
-      this.#timeoutMilliseconds <= 0
-    ) {
-      throw new Error("The runner command timeout must be a positive integer");
-    }
   }
 
   dispatch(
@@ -66,11 +51,6 @@ export class RunnerCommandBroker {
     }
 
     const queue = this.#queues.get(input.runnerId) ?? [];
-
-    if (queue.length >= MAXIMUM_QUEUED_COMMANDS_PER_RUNNER) {
-      return Promise.reject(new Error("The runner command queue is full"));
-    }
-
     const id = this.#commandId();
 
     if (id.length === 0 || this.#pending.has(id)) {
@@ -91,9 +71,6 @@ export class RunnerCommandBroker {
       const cancel = () => {
         this.#reject(id, abortError("The agent session was stopped"));
       };
-      const timer = setTimeout(() => {
-        this.#reject(id, new Error("The runner command timed out"));
-      }, this.#timeoutMilliseconds);
       const pending: PendingCommand = {
         abort: signal === undefined ? undefined : cancel,
         command,
@@ -102,7 +79,6 @@ export class RunnerCommandBroker {
         resolve,
         runnerId: input.runnerId,
         signal,
-        timer,
       };
       this.#pending.set(id, pending);
       queue.push(command);
@@ -179,7 +155,6 @@ export class RunnerCommandBroker {
 
   #settle(commandId: string, pending: PendingCommand): void {
     this.#pending.delete(commandId);
-    clearTimeout(pending.timer);
 
     if (pending.abort !== undefined) {
       pending.signal?.removeEventListener("abort", pending.abort);

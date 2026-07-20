@@ -74,7 +74,7 @@ describe("runner work protocol", () => {
     const startedAt = Date.now();
     const result = executeRunnerCommand(
       {
-        arguments: { command: "sleep 10" },
+        arguments: { command: "sleep 10", timeout: 60 },
         id: "command-2",
         sessionId: "session-1",
         tool: "bash",

@@ -1,11 +1,26 @@
 import { describe, expect, test } from "bun:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { AGENT_TOOLS } from "../agent-tools.ts";
 import { executeRunnerTool } from "../runner-tools.ts";
 import { captureRejection, requireError } from "./promise-test-helpers.ts";
 import { useTemporaryDirectories } from "./temporary-directories.ts";
 
 const workspace = useTemporaryDirectories("q-mush-tools-test-");
+
+function executeBash(
+  root: string,
+  command: string,
+  timeout: number,
+): Promise<string> {
+  return executeRunnerTool(root, "bash", { command, timeout });
+}
+
+async function captureToolError(
+  ...parameters: Parameters<typeof executeRunnerTool>
+): Promise<Error> {
+  return requireError(await captureRejection(executeRunnerTool(...parameters)));
+}
 
 describe("runner tools", () => {
   test("reads, writes, and applies Pi-style batched edits in the workspace", async () => {
@@ -36,15 +51,24 @@ describe("runner tools", () => {
     );
   });
 
-  test("does not let file tools escape the selected workspace", async () => {
+  test("rejects unsafe or incomplete tool calls", async () => {
     const root = await workspace();
+    const pathError = await captureToolError(root, "read", {
+      path: "../secret.txt",
+    });
+    const timeoutError = await captureToolError(root, "bash", {
+      command: "printf completed",
+    });
+    const bashDefinition = AGENT_TOOLS.find(
+      ({ function: definition }) => definition.name === "bash",
+    );
 
-    const error = await captureRejection(
-      executeRunnerTool(root, "read", { path: "../secret.txt" }),
-    );
-    expect(requireError(error).message).toContain(
-      "outside the session workspace",
-    );
+    expect(pathError.message).toContain("outside the session workspace");
+    expect(timeoutError.message).toContain("timeout");
+    expect(bashDefinition?.function.parameters.required).toEqual([
+      "command",
+      "timeout",
+    ]);
   });
 
   test("runs bounded bash commands for listing and searching", async () => {
@@ -52,13 +76,22 @@ describe("runner tools", () => {
     await writeFile(join(root, "one.txt"), "alpha\nneedle here\n", "utf8");
     await writeFile(join(root, "two.txt"), "nothing\n", "utf8");
 
-    const commandOutput = await executeRunnerTool(root, "bash", {
-      command: "grep -n needle *.txt; pwd",
-      timeout: 5,
-    });
+    const commandOutput = await executeBash(
+      root,
+      "grep -n needle *.txt; pwd",
+      5,
+    );
     expect(commandOutput).toContain("one.txt:2:needle here");
     expect(commandOutput).toContain(root);
     expect(commandOutput).toContain("Exit code: 0");
+  });
+
+  test("accepts explicit shell timeouts longer than five minutes", async () => {
+    const root = await workspace();
+    const output = await executeBash(root, "printf completed", 301);
+
+    expect(output).toContain("completed");
+    expect(output).toContain("Exit code: 0");
   });
 
   test("runs independent base tools through the parallel wrapper", async () => {
