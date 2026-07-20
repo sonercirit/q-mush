@@ -1,5 +1,4 @@
 import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import {
   isAgentToolName,
@@ -7,6 +6,7 @@ import {
   type BaseAgentToolName,
 } from "./agent-tools.ts";
 import { isRecord } from "./auth-model.ts";
+import { expandRunnerHome } from "./runner-path.ts";
 
 const MAX_FILE_BYTES = 1024 * 1024;
 const MAX_READ_OUTPUT_BYTES = 50 * 1024;
@@ -64,14 +64,6 @@ function optionalInteger(
   return value;
 }
 
-function expandsHome(path: string): string {
-  if (path === "~") {
-    return homedir();
-  }
-
-  return path.startsWith(`~${sep}`) ? resolve(homedir(), path.slice(2)) : path;
-}
-
 function isWithin(root: string, candidate: string): boolean {
   const pathFromRoot = relative(root, candidate);
   return (
@@ -107,7 +99,7 @@ async function existingAncestor(path: string): Promise<string> {
 }
 
 async function workspaceRoot(path: string): Promise<string> {
-  const root = await realpath(expandsHome(path));
+  const root = await realpath(expandRunnerHome(path));
   const details = await stat(root);
 
   if (!details.isDirectory()) {

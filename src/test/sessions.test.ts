@@ -12,6 +12,7 @@ import type { ProviderCredentialAccess } from "../provider-credential-store.ts";
 import {
   RUNNER_REGISTER_PATH,
   RUNNER_WORK_PATH,
+  runnerDirectoriesPath,
   SESSION_MODELS_PATH,
   SESSIONS_PATH,
 } from "../routes.ts";
@@ -33,6 +34,8 @@ const RUNNER_ID = "018bcfe5-6800-7000-8000-000000000061";
 const SESSION_ID = "018bcfe5-6800-7000-8000-000000000062";
 const CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000063";
 const RUNNER_TOKEN = "qmr_session-runner-token";
+const RUNNER_COMMAND_ID = "agent-command-1";
+const RUNNER_COMMAND_PATH = `${RUNNER_WORK_PATH}/${RUNNER_COMMAND_ID}`;
 
 class BlockingModel implements AgentModel {
   aborted = false;
@@ -147,7 +150,7 @@ async function connectedSetup(
     { openai: reader, openrouter: reader },
     {
       broker: new RunnerCommandBroker({
-        commandId: () => "agent-command-1",
+        commandId: () => RUNNER_COMMAND_ID,
         timeoutMilliseconds: 5_000,
       }),
       database,
@@ -188,15 +191,50 @@ function createSessionRequest(
   );
 }
 
+async function takeRunnerCommand(
+  sessions: ReturnType<typeof createSessionIntegration>,
+  missingMessage: string,
+): Promise<Response> {
+  const response = await waitFor(
+    () => sessions.work(createRunnerRequest(RUNNER_WORK_PATH, RUNNER_TOKEN)),
+    (value) => value instanceof Response && value.status === 200,
+  );
+
+  if (!(response instanceof Response)) {
+    throw new Error(missingMessage);
+  }
+
+  return response;
+}
+
+function completeRunnerCommand(
+  sessions: ReturnType<typeof createSessionIntegration>,
+  output: string,
+): Promise<Response> {
+  return sessions.workResult(
+    createRunnerRequest(RUNNER_COMMAND_PATH, RUNNER_TOKEN, { output }),
+    RUNNER_COMMAND_ID,
+  );
+}
+
 async function commandActivity(
   sessions: ReturnType<typeof createSessionIntegration>,
-  path: string,
 ): Promise<unknown> {
   const response = await sessions.workResult(
-    createRunnerRequest(path, RUNNER_TOKEN, undefined, "GET"),
-    "agent-command-1",
+    createRunnerRequest(RUNNER_COMMAND_PATH, RUNNER_TOKEN, undefined, "GET"),
+    RUNNER_COMMAND_ID,
   );
   return response.json();
+}
+
+async function expectJsonResponse(
+  response: Response,
+  status: number,
+  expected: unknown,
+): Promise<void> {
+  const body: unknown = await response.json();
+  expect(body).toEqual(expected);
+  expect(response.status).toBe(status);
 }
 
 async function expectSessionReaches(
@@ -247,39 +285,29 @@ describe("agent sessions", () => {
       title: "Inspect README.md",
     });
 
-    const workResponse = await waitFor(
-      () => sessions.work(createRunnerRequest(RUNNER_WORK_PATH, RUNNER_TOKEN)),
-      (value) => value instanceof Response && value.status === 200,
+    const workResponse = await takeRunnerCommand(
+      sessions,
+      "The runner did not receive an agent command",
     );
-
-    if (!(workResponse instanceof Response)) {
-      throw new Error("The runner did not receive a response");
-    }
 
     const command: unknown = await workResponse.json();
     expect(command).toEqual({
       command: {
         arguments: { path: "README.md" },
-        id: "agent-command-1",
+        id: RUNNER_COMMAND_ID,
         sessionId: SESSION_ID,
         tool: "read",
         workingDirectory: "/work/project",
       },
     });
     expect(JSON.stringify(command)).not.toContain("provider-secret");
-    const commandPath = `${RUNNER_WORK_PATH}/agent-command-1`;
-    expect(await commandActivity(sessions, commandPath)).toEqual({
+    expect(await commandActivity(sessions)).toEqual({
       active: true,
     });
 
-    const resultResponse = await sessions.workResult(
-      createRunnerRequest(commandPath, RUNNER_TOKEN, {
-        output: "# Q Mush",
-      }),
-      "agent-command-1",
-    );
+    const resultResponse = await completeRunnerCommand(sessions, "# Q Mush");
     expect(resultResponse.status).toBe(204);
-    expect(await commandActivity(sessions, commandPath)).toEqual({
+    expect(await commandActivity(sessions)).toEqual({
       active: false,
     });
     const idle = await waitFor(
@@ -313,6 +341,49 @@ describe("agent sessions", () => {
     database.$client.close();
   });
 
+  test("browses directories through an owned online runner", async () => {
+    const { database, sessions } = await connectedSetup(
+      new ScriptedAgentModel([]),
+    );
+    const browseResponse = sessions.directories(
+      createAuthenticatedRequest(
+        runnerDirectoriesPath(RUNNER_ID),
+        { path: "~/projects" },
+        "POST",
+      ),
+      RUNNER_ID,
+    );
+    const workResponse = await takeRunnerCommand(
+      sessions,
+      "The runner did not receive a directory command",
+    );
+
+    expect(await workResponse.json()).toEqual({
+      command: {
+        arguments: {},
+        id: RUNNER_COMMAND_ID,
+        sessionId: `directory-picker:${TEST_USER_ID}`,
+        tool: "list_directories",
+        workingDirectory: "~/projects",
+      },
+    });
+
+    const listing = {
+      directories: [{ name: "q-mush", path: "/home/mush/projects/q-mush" }],
+      parent: "/home/mush",
+      path: "/home/mush/projects",
+      truncated: false,
+    };
+    const resultResponse = await completeRunnerCommand(
+      sessions,
+      JSON.stringify(listing),
+    );
+
+    expect(resultResponse.status).toBe(204);
+    await expectJsonResponse(await browseResponse, 200, listing);
+    database.$client.close();
+  });
+
   test("discovers models through an owned provider credential", async () => {
     const catalog: AgentModelCatalog = {
       defaultModel: "gpt-discovered",
@@ -340,8 +411,7 @@ describe("agent sessions", () => {
       ),
     );
 
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual(catalog);
+    await expectJsonResponse(response, 200, catalog);
     database.$client.close();
   });
 
@@ -361,15 +431,13 @@ describe("agent sessions", () => {
   });
 
   test("rejects an unsupported reasoning effort", async () => {
-    const { database, sessions } = await connectedSetup(
-      new ScriptedAgentModel([]),
-    );
+    const model = new ScriptedAgentModel([]);
+    const { database, sessions } = await connectedSetup(model);
     const response = await sessions.collection(
       createSessionRequest(true, "maximum"),
     );
 
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: "invalid_request" });
+    await expectJsonResponse(response, 400, { error: "invalid_request" });
     database.$client.close();
   });
 
@@ -399,8 +467,8 @@ describe("agent sessions", () => {
   });
 
   test("protects session and runner-control endpoints", async () => {
-    const model = new ScriptedAgentModel([]);
-    const { database, sessions } = await connectedSetup(model);
+    const setup = await connectedSetup(new ScriptedAgentModel([]));
+    const { database, sessions } = setup;
 
     expect(
       (await sessions.collection(new Request("http://localhost/api/sessions")))

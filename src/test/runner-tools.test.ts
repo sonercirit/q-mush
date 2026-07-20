@@ -1,25 +1,11 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { describe, expect, test } from "bun:test";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { executeRunnerTool } from "../runner-tools.ts";
 import { captureRejection, requireError } from "./promise-test-helpers.ts";
+import { useTemporaryDirectories } from "./temporary-directories.ts";
 
-const temporaryDirectories: string[] = [];
-
-async function workspace(): Promise<string> {
-  const path = await mkdtemp(join(tmpdir(), "q-mush-tools-test-"));
-  temporaryDirectories.push(path);
-  return path;
-}
-
-afterEach(async () => {
-  await Promise.all(
-    temporaryDirectories
-      .splice(0)
-      .map((path) => rm(path, { force: true, recursive: true })),
-  );
-});
+const workspace = useTemporaryDirectories("q-mush-tools-test-");
 
 describe("runner tools", () => {
   test("reads, writes, and applies Pi-style batched edits in the workspace", async () => {

@@ -1,5 +1,7 @@
 import { isRecord } from "./auth-model.ts";
 import type { RunnerToolCommand } from "./runner-command-broker.ts";
+import { listRunnerDirectories } from "./runner-directories.ts";
+import { RUNNER_DIRECTORY_COMMAND } from "./runner-directory-model.ts";
 import { executeRunnerTool } from "./runner-tools.ts";
 
 const MAXIMUM_IDENTIFIER_LENGTH = 200;
@@ -74,6 +76,12 @@ export async function executeRunnerCommand(
   signal?: AbortSignal,
 ): Promise<string> {
   try {
+    if (command.tool === RUNNER_DIRECTORY_COMMAND) {
+      return JSON.stringify(
+        await listRunnerDirectories(command.workingDirectory),
+      );
+    }
+
     return await executeRunnerTool(
       command.workingDirectory,
       command.tool,

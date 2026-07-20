@@ -34,12 +34,17 @@ import {
   RunnerCommandBroker,
   type DispatchRunnerToolCommand,
 } from "./runner-command-broker.ts";
+import {
+  MAXIMUM_RUNNER_PATH_LENGTH,
+  readRunnerDirectoryListing,
+  RUNNER_DIRECTORY_COMMAND,
+} from "./runner-directory-model.ts";
 import type { RunnerIntegration } from "./runners.ts";
 import type { AgentSessionDetail } from "./session-model.ts";
 import { SessionStore, type CreateAgentSession } from "./session-store.ts";
 
 const MAXIMUM_PROMPT_LENGTH = 32_768;
-const MAXIMUM_PATH_LENGTH = 4_096;
+const DIRECTORY_REQUEST_TIMEOUT_MILLISECONDS = 15_000;
 const MAXIMUM_RESULT_LENGTH = 512 * 1_024;
 const IDENTIFIER_PATTERN = /^[A-Za-z\d._:-]{1,200}$/u;
 
@@ -88,6 +93,7 @@ interface RuntimeSelection extends CredentialSelection {
 
 export interface SessionIntegration {
   collection(request: Request): Promise<Response>;
+  directories(request: Request, runnerId: string): Promise<Response>;
   item(request: Request, sessionId: string): Response;
   message(request: Request, sessionId: string): Promise<Response>;
   models(request: Request): Promise<Response>;
@@ -142,7 +148,7 @@ function readCreateSession(value: unknown): CreateSessionInput | undefined {
   const workingDirectory = readStringField(
     value,
     "workingDirectory",
-    MAXIMUM_PATH_LENGTH,
+    MAXIMUM_RUNNER_PATH_LENGTH,
     { trim: true },
   );
   const modelValue = value["model"];
@@ -245,6 +251,14 @@ class DrizzleSessionIntegration implements SessionIntegration {
     );
   }
 
+  async directories(request: Request, runnerId: string): Promise<Response> {
+    return withRequestMethod(request, "POST", () =>
+      this.#forUser(request, (user) =>
+        this.#directoriesForUser(request, user, runnerId),
+      ),
+    );
+  }
+
   item(request: Request, sessionId: string): Response {
     return withRequestMethod(request, "GET", () =>
       this.#forUser(request, (user) =>
@@ -309,6 +323,52 @@ class DrizzleSessionIntegration implements SessionIntegration {
         }
       }),
     );
+  }
+
+  async #directoriesForUser(
+    request: Request,
+    user: AuthenticatedUser,
+    runnerId: string,
+  ): Promise<Response> {
+    const path = await parseJsonRequest(request, (value) => {
+      const parsed = readStringField(
+        value,
+        "path",
+        MAXIMUM_RUNNER_PATH_LENGTH,
+        { trim: true },
+      );
+      return parsed?.includes("\0") === false ? parsed : undefined;
+    });
+
+    if (
+      path === undefined ||
+      readIdentifier(runnerId) === undefined ||
+      !this.#runners.runnerIsAvailable(user.id, runnerId)
+    ) {
+      return path === undefined
+        ? createApiError("invalid_request", 400)
+        : createApiError("runner_unavailable", 409);
+    }
+
+    try {
+      const output = await this.#broker.dispatch(
+        {
+          arguments: {},
+          runnerId,
+          sessionId: `directory-picker:${user.id}`,
+          tool: RUNNER_DIRECTORY_COMMAND,
+          workingDirectory: path,
+        },
+        AbortSignal.any([
+          request.signal,
+          AbortSignal.timeout(DIRECTORY_REQUEST_TIMEOUT_MILLISECONDS),
+        ]),
+      );
+      const value: unknown = JSON.parse(output);
+      return createJsonResponse(readRunnerDirectoryListing(value));
+    } catch {
+      return createApiError("directory_unavailable", 502);
+    }
   }
 
   async #recordWorkResult(

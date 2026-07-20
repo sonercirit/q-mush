@@ -16,6 +16,10 @@ export const OPENROUTER_CREDENTIALS_PATH = `${OPENROUTER_BASE_PATH}/credentials`
 export const OPENROUTER_OAUTH_PATH = `${OPENROUTER_BASE_PATH}/oauth`;
 export const OPENROUTER_OAUTH_CALLBACK_PATH = `${OPENROUTER_OAUTH_PATH}/callback`;
 export const RUNNERS_PATH = `${API_BASE_PATH}/runners`;
+export const RUNNER_DIRECTORIES_SEGMENT = "directories";
+export function runnerDirectoriesPath(runnerId: string): string {
+  return `${RUNNERS_PATH}/${encodeURIComponent(runnerId)}/${RUNNER_DIRECTORIES_SEGMENT}`;
+}
 const RUNNER_BASE_PATH = `${API_BASE_PATH}/runner`;
 export const RUNNER_HEARTBEAT_PATH = `${RUNNER_BASE_PATH}/heartbeat`;
 export const RUNNER_WORK_PATH = `${RUNNER_BASE_PATH}/work`;

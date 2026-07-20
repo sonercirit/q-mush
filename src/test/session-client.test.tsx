@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { initialDirectoryPickerState } from "../directory-picker-controller.ts";
 import { renderToHtml } from "../jsx.ts";
 import type { ProviderViewState } from "../provider-client.tsx";
 import type { RunnerViewState } from "../runner-client.tsx";
@@ -8,6 +9,7 @@ import {
 } from "../session-client.tsx";
 
 const SESSION_STATE: SessionViewState = {
+  directoryPicker: initialDirectoryPickerState(),
   sessions: [],
   stopping: false,
   sending: false,
@@ -158,6 +160,88 @@ test("renders the system prompt and model thinking in a transcript", () => {
   expect(html).toContain("call-1");
   expect(html).toContain('{"path":"README.md","offset":1}');
   expect(html).toContain("# Q Mush");
+});
+
+test("renders a directory browser beside the working-directory input", () => {
+  const closedHtml = renderToHtml(
+    renderSessionPanel(
+      SESSION_STATE,
+      RUNNER_STATE,
+      OPENAI_STATE,
+      EMPTY_PROVIDER_STATE,
+    ),
+  );
+
+  expect(closedHtml).toMatch(
+    /<input[^>]*id="session-directory"[^>]*name="workingDirectory"/u,
+  );
+  expect(closedHtml).toContain('data-action="open-directory-picker"');
+  expect(closedHtml).toContain(">Browse</button>");
+  expect(closedHtml).not.toContain('data-directory-picker="true"');
+  expect(closedHtml).not.toContain(" inert");
+
+  const defaultRunnerHtml = renderToHtml(
+    renderSessionPanel(
+      {
+        ...SESSION_STATE,
+        draft: { ...SESSION_STATE.draft, runnerId: "" },
+      },
+      RUNNER_STATE,
+      OPENAI_STATE,
+      EMPTY_PROVIDER_STATE,
+    ),
+  );
+  const browseControl =
+    /<button[^>]*data-action="open-directory-picker"[^>]*>/u.exec(
+      defaultRunnerHtml,
+    )?.[0];
+  expect(browseControl).not.toMatch(/\sdisabled(?:\s|>)/u);
+
+  const openHtml = renderToHtml(
+    renderSessionPanel(
+      {
+        ...SESSION_STATE,
+        directoryPicker: {
+          error: undefined,
+          listing: {
+            directories: [
+              {
+                name: "mush room",
+                path: "/home/mush/projects/mush room",
+              },
+            ],
+            parent: "/home/mush",
+            path: "/home/mush/projects",
+            truncated: false,
+          },
+          loading: false,
+          open: true,
+          requestedPath: ".",
+          runnerId: "runner-1",
+        },
+      },
+      RUNNER_STATE,
+      OPENAI_STATE,
+      EMPTY_PROVIDER_STATE,
+    ),
+  );
+
+  expect(openHtml).toContain('aria-modal="true"');
+  expect(openHtml).toContain('data-directory-picker="true"');
+  expect(openHtml).toContain('tabindex="-1"');
+  expect(openHtml).toContain("<section inert");
+  expect(openHtml).toContain("Choose a working directory");
+  expect(openHtml).toContain("/home/mush/projects");
+  expect(openHtml).toContain('data-action="browse-parent-directory"');
+  expect(openHtml).toContain('data-action="browse-home-directory"');
+  expect(openHtml).toContain('data-action="browse-directory"');
+  expect(openHtml).toContain(
+    'data-directory-path="/home/mush/projects/mush room"',
+  );
+  expect(openHtml).toContain(">mush room</span>");
+  expect(openHtml).toContain('data-action="choose-directory"');
+  expect(openHtml).toContain("Choose this directory");
+  expect(openHtml).toContain('data-action="close-directory-picker"');
 });
 
 test("renders model and reasoning effort as selects", () => {

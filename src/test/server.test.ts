@@ -25,6 +25,7 @@ import {
   RUNNER_INSTALLER_PATH,
   RUNNER_REGISTER_PATH,
   RUNNER_WORK_PATH,
+  runnerDirectoriesPath,
   RUNNERS_PATH,
   SESSION_MODELS_PATH,
   SESSIONS_PATH,
@@ -164,6 +165,9 @@ describe("routes", () => {
       "/api/openrouter/oauth/callback",
     );
     expect(RUNNERS_PATH).toBe("/api/runners");
+    expect(runnerDirectoriesPath("runner/id")).toBe(
+      "/api/runners/runner%2Fid/directories",
+    );
     expect(RUNNER_REGISTER_PATH).toBe("/api/runner/register");
     expect(RUNNER_HEARTBEAT_PATH).toBe("/api/runner/heartbeat");
     expect(RUNNER_WORK_PATH).toBe("/api/runner/work");
@@ -258,6 +262,7 @@ describe("page server", () => {
       sendRequest(`${SESSIONS_PATH}/session-id`),
       sendRequest(`${SESSIONS_PATH}/session-id/messages`, undefined, "POST"),
       sendRequest(`${SESSIONS_PATH}/session-id/stop`, undefined, "POST"),
+      sendRequest(runnerDirectoriesPath("runner-id"), undefined, "POST"),
       sendRequest(RUNNER_WORK_PATH, undefined, "POST"),
       sendRequest(`${RUNNER_WORK_PATH}/command-id`, undefined, "POST"),
     ]);

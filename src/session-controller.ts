@@ -1,6 +1,10 @@
 import type { AgentModelCatalog } from "./agent-configuration.ts";
 import { HttpResponseError, requestJson } from "./browser-http.ts";
 import { bindActionClicks } from "./client-actions.ts";
+import {
+  DirectoryPickerController,
+  initialDirectoryPickerState,
+} from "./directory-picker-controller.ts";
 import type { ProviderId } from "./provider-credential-store.ts";
 import { RevisionState } from "./revision-state.ts";
 import { SESSION_MODELS_PATH, SESSIONS_PATH } from "./routes.ts";
@@ -46,6 +50,7 @@ function initialState(): SessionViewState {
   return {
     creating: false,
     detail: undefined,
+    directoryPicker: initialDirectoryPickerState(),
     draft: initialDraft(),
     error: undefined,
     followUp: "",
@@ -126,12 +131,16 @@ function sessionDataMatches(
 }
 
 export class SessionController {
+  readonly #directoryPicker: DirectoryPickerController;
   readonly #modelCatalogs = new Map<string, AgentModelCatalog>();
   #modelRequest = 0;
   readonly #view: RevisionState<SessionViewState>;
 
   constructor(onChange: ChangeListener) {
     this.#view = new RevisionState(initialState(), onChange);
+    this.#directoryPicker = new DirectoryPickerController(() => {
+      this.#view.patch({ directoryPicker: this.#directoryPicker.state });
+    });
   }
 
   bind(container: Element): void {
@@ -175,8 +184,68 @@ export class SessionController {
         void this.load();
       } else if (action === "retry-models") {
         void this.#ensureModels(this.#view.value.draft.credential, true);
+      } else if (action === "open-directory-picker") {
+        const form = control.closest<HTMLFormElement>(
+          'form[data-action="create-session"]',
+        );
+
+        if (form !== null) {
+          this.#rememberDraft(form);
+        }
+
+        const draft = this.#view.value.draft;
+
+        if (draft.runnerId.length > 0) {
+          void this.#directoryPicker.open(
+            draft.runnerId,
+            draft.workingDirectory.trim() || "~",
+          );
+        }
+      } else if (action === "browse-directory") {
+        const path = control.dataset["directoryPath"];
+
+        if (path !== undefined) {
+          void this.#directoryPicker.browse(path);
+        }
+      } else if (action === "browse-parent-directory") {
+        const parent = this.#directoryPicker.state.listing?.parent;
+
+        if (parent !== null && parent !== undefined) {
+          void this.#directoryPicker.browse(parent);
+        }
+      } else if (action === "browse-home-directory") {
+        void this.#directoryPicker.browse("~");
+      } else if (action === "retry-directory-picker") {
+        void this.#directoryPicker.retry();
+      } else if (action === "close-directory-picker") {
+        this.#directoryPicker.close();
+      } else if (action === "choose-directory") {
+        const path = this.#directoryPicker.choose();
+
+        if (path !== undefined) {
+          this.#view.patch({
+            draft: { ...this.#view.value.draft, workingDirectory: path },
+          });
+        }
       }
     });
+
+    const directoryPicker = panel.querySelector<HTMLElement>(
+      '[data-directory-picker="true"]',
+    );
+    directoryPicker?.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        this.#directoryPicker.close();
+      }
+    });
+
+    if (
+      directoryPicker !== null &&
+      !directoryPicker.contains(panel.ownerDocument.activeElement)
+    ) {
+      directoryPicker.focus();
+    }
 
     const credential = panel.querySelector<HTMLSelectElement>(
       'select[name="credential"]',
@@ -216,6 +285,7 @@ export class SessionController {
   }
 
   reset(): void {
+    this.#directoryPicker.reset();
     this.#modelCatalogs.clear();
     this.#modelRequest += 1;
     this.#view.reset(initialState());

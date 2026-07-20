@@ -9,6 +9,14 @@ type FetchImplementation = (
   ...parameters: Parameters<typeof globalThis.fetch>
 ) => ReturnType<typeof globalThis.fetch>;
 
+export function requestUrl(input: RequestInfo | URL): string {
+  return typeof input === "string"
+    ? input
+    : input instanceof URL
+      ? input.href
+      : input.url;
+}
+
 export async function expectRefreshToRemainSilent(
   createController: (onChange: () => void) => RefreshController,
   fetchImplementation: FetchImplementation,

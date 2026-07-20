@@ -3,6 +3,8 @@ import {
   type AgentModelCatalog,
 } from "./agent-configuration.ts";
 import { renderRetryError } from "./client-controls.tsx";
+import { renderDirectoryPicker } from "./directory-picker-client.tsx";
+import type { DirectoryPickerState } from "./directory-picker-controller.ts";
 import { createElement, type JsxNode } from "./jsx.ts";
 import type {
   ProviderCredential,
@@ -36,6 +38,7 @@ export interface SessionModelDiscoveryState {
 
 export interface SessionViewState {
   readonly creating: boolean;
+  readonly directoryPicker: DirectoryPickerState;
   readonly detail: AgentSessionDetail | undefined;
   readonly draft: SessionDraft;
   readonly error: string | undefined;
@@ -146,20 +149,17 @@ function sessionModelLabel(
     : `${model} · ${reasoningEffortLabel(session.reasoningEffort)} reasoning`;
 }
 
-function renderSessionField(options: {
-  readonly control: JsxNode;
-  readonly id: string;
-  readonly label: JsxNode;
-}): JsxNode {
+function renderSessionField(
+  id: string,
+  label: JsxNode,
+  control: JsxNode,
+): JsxNode {
   return (
     <div>
-      <label
-        className="text-sm font-medium text-slate-200"
-        htmlFor={options.id}
-      >
-        {options.label}
+      <label className="text-sm font-medium text-slate-200" htmlFor={id}>
+        {label}
       </label>
-      {options.control}
+      {control}
     </div>
   );
 }
@@ -177,7 +177,7 @@ function sessionControlAttributes(
 ) {
   return {
     className:
-      "mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none",
+      "mt-2 min-w-0 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none",
     disabled: options.disabled,
     id: options.id,
     name: options.name,
@@ -185,31 +185,37 @@ function sessionControlAttributes(
   };
 }
 
-function renderSessionTextInput(
-  options: SessionControlOptions & {
-    readonly optional?: boolean;
-    readonly placeholder: string;
-    readonly value: string;
-  },
+function renderDirectoryInput(
+  state: SessionViewState,
+  runnerAvailable: boolean,
 ): JsxNode {
-  const label: JsxNode = [
+  const options = {
+    disabled: state.creating,
+    id: "session-directory",
+    label: "Working directory on runner",
+    name: "workingDirectory",
+  };
+
+  return renderSessionField(
+    options.id,
     options.label,
-    options.optional === true ? (
-      <span className="font-normal text-slate-500"> (optional)</span>
-    ) : null,
-  ];
-  return renderSessionField({
-    control: (
+    <div className="flex items-center gap-2">
       <input
-        {...sessionControlAttributes(options, options.optional !== true)}
-        placeholder={options.placeholder}
+        {...sessionControlAttributes(options, true)}
+        placeholder="/path/to/project"
         type="text"
-        value={options.value}
+        value={state.draft.workingDirectory}
       />
-    ),
-    id: options.id,
-    label,
-  });
+      <button
+        className="mt-2 shrink-0 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm font-semibold text-slate-200 transition hover:border-emerald-300/30 hover:text-emerald-200 disabled:cursor-not-allowed disabled:opacity-50"
+        data-action="open-directory-picker"
+        disabled={state.creating || !runnerAvailable}
+        type="button"
+      >
+        Browse
+      </button>
+    </div>,
+  );
 }
 
 function renderSessionSelect(
@@ -218,17 +224,13 @@ function renderSessionSelect(
     readonly required?: boolean;
   },
 ): JsxNode {
-  return renderSessionField({
-    control: (
-      <select
-        {...sessionControlAttributes(options, options.required !== false)}
-      >
-        {options.children}
-      </select>
-    ),
-    id: options.id,
-    label: options.label,
-  });
+  return renderSessionField(
+    options.id,
+    options.label,
+    <select {...sessionControlAttributes(options, options.required !== false)}>
+      {options.children}
+    </select>,
+  );
 }
 
 function renderNewSessionForm(
@@ -287,14 +289,7 @@ function renderNewSessionForm(
         label: "Model credential",
         name: "credential",
       })}
-      {renderSessionTextInput({
-        disabled: state.creating,
-        id: "session-directory",
-        label: "Working directory on runner",
-        name: "workingDirectory",
-        placeholder: "/path/to/project",
-        value: state.draft.workingDirectory,
-      })}
+      {renderDirectoryInput(state, runners.length > 0)}
       {renderSessionSelect({
         children:
           models.length === 0 ? (
@@ -506,34 +501,43 @@ export function renderSessionPanel(
 ): JsxNode {
   const runners = onlineRunners(runnerState);
   const credentials = credentialOptions(openAiState, openRouterState);
+  const selectedRunner = runners.find(
+    ({ id }) => id === state.directoryPicker.runnerId,
+  );
 
   return (
-    <section
-      aria-labelledby="agent-sessions-title"
-      className="rounded-3xl border border-emerald-300/15 bg-white/[0.06] p-6 shadow-2xl shadow-emerald-950/30 backdrop-blur-xl sm:p-8"
-      data-session-panel="true"
-    >
-      <p className="text-sm font-medium text-emerald-300">
-        First-party agent runtime
-      </p>
-      <h2
-        className="mt-2 text-2xl font-semibold text-white"
-        id="agent-sessions-title"
+    <div data-session-panel="true">
+      <section
+        inert={state.directoryPicker.open}
+        aria-labelledby="agent-sessions-title"
+        className="rounded-3xl border border-emerald-300/15 bg-white/[0.06] p-6 shadow-2xl shadow-emerald-950/30 backdrop-blur-xl sm:p-8"
       >
-        New agent session
-      </h2>
-      <p className="mt-3 max-w-3xl leading-7 text-slate-400">
-        Start and steer coding sessions on your connected computers. Q Mush owns
-        the model loop and runner tools end to end.
-      </p>
-      {renderNewSessionForm(state, runners, credentials)}
-      {renderRetryError(state.error, "retry-sessions")}
-      <div className="mt-7 grid gap-5 lg:grid-cols-[18rem_minmax(0,1fr)]">
-        <aside aria-label="Agent sessions">{renderSessionList(state)}</aside>
-        <div className="min-w-0 rounded-2xl border border-white/10 bg-slate-900/70 p-5">
-          {renderDetail(state)}
+        <p className="text-sm font-medium text-emerald-300">
+          First-party agent runtime
+        </p>
+        <h2
+          className="mt-2 text-2xl font-semibold text-white"
+          id="agent-sessions-title"
+        >
+          New agent session
+        </h2>
+        <p className="mt-3 max-w-3xl leading-7 text-slate-400">
+          Start and steer coding sessions on your connected computers. Q Mush
+          owns the model loop and runner tools end to end.
+        </p>
+        {renderNewSessionForm(state, runners, credentials)}
+        {renderRetryError(state.error, "retry-sessions")}
+        <div className="mt-7 grid gap-5 lg:grid-cols-[18rem_minmax(0,1fr)]">
+          <aside aria-label="Agent sessions">{renderSessionList(state)}</aside>
+          <div className="min-w-0 rounded-2xl border border-white/10 bg-slate-900/70 p-5">
+            {renderDetail(state)}
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
+      {renderDirectoryPicker(
+        state.directoryPicker,
+        selectedRunner?.name ?? "Selected runner",
+      )}
+    </div>
   );
 }

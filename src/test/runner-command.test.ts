@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { dirname } from "node:path";
 import {
   executeRunnerCommand,
   readRunnerCommand,
@@ -25,6 +26,23 @@ describe("runner work protocol", () => {
 
     expect(command).toEqual(expected);
     expect(await executeRunnerCommand(command)).toStartWith("Error:");
+  });
+
+  test("executes directory-browser commands outside an agent workspace", async () => {
+    const output = await executeRunnerCommand({
+      arguments: {},
+      id: "directory-command",
+      sessionId: "directory-picker",
+      tool: "list_directories",
+      workingDirectory: process.cwd(),
+    });
+    const listing: unknown = await new Response(output).json();
+
+    expect(listing).toMatchObject({
+      parent: dirname(process.cwd()),
+      path: process.cwd(),
+      truncated: false,
+    });
   });
 
   test("stops a running shell command when the session is canceled", async () => {

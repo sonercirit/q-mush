@@ -14,6 +14,7 @@ import type { SessionIntegration } from "./sessions.ts";
 const {
   STYLESHEET_PATH,
   RUNNERS_PATH,
+  RUNNER_DIRECTORIES_SEGMENT,
   RUNNER_EXECUTABLE_PATH,
   RUNNER_REGISTER_PATH,
   RUNNER_INSTALLER_PATH,
@@ -274,10 +275,20 @@ export function createRequestHandler(
       const runnerPathPrefix = `${RUNNERS_PATH}/`;
 
       if (pathname.startsWith(runnerPathPrefix)) {
-        const runnerId = pathname.slice(runnerPathPrefix.length);
+        const segments = pathname.slice(runnerPathPrefix.length).split("/");
+        const runnerId = segments[0];
 
-        if (runnerId.length > 0 && !runnerId.includes("/")) {
-          return runners.remove(request, runnerId);
+        if (runnerId !== undefined && runnerId.length > 0) {
+          if (segments.length === 1) {
+            return runners.remove(request, runnerId);
+          }
+
+          if (
+            segments.length === 2 &&
+            segments[1] === RUNNER_DIRECTORIES_SEGMENT
+          ) {
+            return sessions.directories(request, runnerId);
+          }
         }
       }
 

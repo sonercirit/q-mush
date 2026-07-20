@@ -79,10 +79,11 @@ their assets:
 - Authenticated users manage OpenRouter access through
   `/api/openrouter/credentials`. `/api/openrouter/oauth` connects an account and
   `/api/openrouter/oauth/callback` completes the flow.
-- Authenticated users list and create runner setups at `/api/runners` and remove
-  one at `/api/runners/:id`. Installed runners register through
+- Authenticated users list and create runner setups at `/api/runners`, remove
+  one at `/api/runners/:id`, and browse an online runner through
+  `POST /api/runners/:id/directories`. Installed runners register through
   `/api/runner/register`, maintain presence through `/api/runner/heartbeat`, and
-  poll `/api/runner/work` for session tools.
+  poll `/api/runner/work` for session tools and directory requests.
 - Authenticated users create and list agent sessions at `/api/sessions`,
   discover models for an owned credential at `/api/sessions/models`, inspect
   `/api/sessions/:id`, send follow-ups to `/api/sessions/:id/messages`, and stop
@@ -114,21 +115,27 @@ After a runner and provider credential are ready, use **New agent session** in
 the control center. Select an online computer and credential; Q Mush discovers
 that credential's available agent models and model-specific reasoning efforts.
 Then select a model, reasoning effort (or the model default), working directory
-on that computer, and task. Q Mush implements its own model/tool loop without an
-external agent framework. It exposes Pi's four base tool interfaces—`read`,
-`bash`, `edit`, and `write`—plus a `parallel` wrapper for independent calls,
-with batched exact edits and bounded file and command output. Transcripts show
-system instructions, complete tool definitions, reasoning summaries, tool calls,
-and tool results. Session transcripts and status survive page reloads; a ready,
-stopped, or failed session accepts follow-up instructions. **Stop session**
-aborts the model request and cancels an active runner command.
+on that computer, and task. The working-directory field accepts a path directly
+or opens an interactive browser with Home, Up, and child-directory navigation;
+choosing a location writes its canonical path back to the form. Q Mush
+implements its own model/tool loop without an external agent framework. It
+exposes Pi's four base tool interfaces—`read`, `bash`, `edit`, and `write`—plus
+a `parallel` wrapper for independent calls, with batched exact edits and bounded
+file and command output. Transcripts show system instructions, complete tool
+definitions, reasoning summaries, tool calls, and tool results. Session
+transcripts and status survive page reloads; a ready, stopped, or failed session
+accepts follow-up instructions. **Stop session** aborts the model request and
+cancels an active runner command.
 
 The runner executes tools with the runner process's local account permissions.
 File tools reject paths outside the selected workspace, while shell commands are
 intentionally full shell commands rooted in that directory and can access
-anything that account can access. Only use runners and model credentials you
-trust with the selected project. Provider secrets remain on the Q Mush server:
-the browser and runner work protocol never receive them.
+anything that account can access. Before a workspace is selected, the
+authenticated directory browser can inspect directories readable by that same
+runner account; each response contains only the canonical location, parent, and
+at most 500 child directories. Only use runners and model credentials you trust
+with the selected project. Provider secrets remain on the Q Mush server: the
+browser and runner work protocol never receive them.
 
 OpenAI API keys and OpenRouter credentials use their chat-completions APIs.
 OpenAI connected accounts use the subscription-backed Codex Responses endpoint;
