@@ -1,10 +1,10 @@
 import { and, asc, eq, type SQL } from "drizzle-orm";
-import { softDeletedAuditFields } from "./audit.ts";
+import { softDeletedAuditFields, updatedAuditFields } from "./audit.ts";
 import type { CredentialCipher } from "./credential-cipher.ts";
 import { fingerprintCredential } from "./credential-cipher.ts";
 import type { AppDatabase } from "./database.ts";
 import { providerCredentials } from "./database/schema.ts";
-import { createUuidV7, type IdGenerator } from "./ids.ts";
+import { createUuidV7, SYSTEM_ID, type IdGenerator } from "./ids.ts";
 
 export type ProviderCredentialSource = "api_key" | "oauth";
 export type ProviderId = "openai" | "openrouter";
@@ -17,6 +17,10 @@ export interface ProviderCredentialDetails {
 export interface ProviderCredentialSummary extends ProviderCredentialDetails {
   readonly id: string;
   readonly source: ProviderCredentialSource;
+}
+
+export interface ProviderCredentialAccess extends ProviderCredentialSummary {
+  readonly secret: string;
 }
 
 export class DuplicateProviderCredentialError extends Error {
@@ -43,6 +47,15 @@ function activeCredentialCondition(
 
 function encryptionContext(userId: string, credentialId: string): string {
   return `${userId}:${credentialId}`;
+}
+
+function credentialSummarySelection() {
+  return {
+    accountId: providerCredentials.providerAccountId,
+    id: providerCredentials.id,
+    label: providerCredentials.label,
+    source: providerCredentials.source,
+  };
 }
 
 function fingerprintCondition(
@@ -138,31 +151,63 @@ export class ProviderCredentialStore {
 
   list(userId: string): readonly ProviderCredentialSummary[] {
     return this.#database
-      .select({
-        accountId: providerCredentials.providerAccountId,
-        id: providerCredentials.id,
-        label: providerCredentials.label,
-        source: providerCredentials.source,
-      })
+      .select(credentialSummarySelection())
       .from(providerCredentials)
       .where(activeCredentialCondition(this.#provider, userId))
       .orderBy(asc(providerCredentials.createdAt), asc(providerCredentials.id))
       .all();
   }
 
-  readSecret(userId: string, credentialId: string): string | undefined {
+  read(
+    userId: string,
+    credentialId: string,
+  ): ProviderCredentialAccess | undefined {
     const stored = this.#database
-      .select({ encryptedCredential: providerCredentials.encryptedCredential })
+      .select({
+        ...credentialSummarySelection(),
+        encryptedCredential: providerCredentials.encryptedCredential,
+      })
       .from(providerCredentials)
       .where(activeCredentialCondition(this.#provider, userId, credentialId))
       .get();
 
-    return stored === undefined
-      ? undefined
-      : this.#cipher.open(
-          stored.encryptedCredential,
+    if (stored === undefined) {
+      return undefined;
+    }
+
+    const { encryptedCredential, ...summary } = stored;
+    return {
+      ...summary,
+      secret: this.#cipher.open(
+        encryptedCredential,
+        encryptionContext(userId, credentialId),
+      ),
+    };
+  }
+
+  readSecret(userId: string, credentialId: string): string | undefined {
+    return this.read(userId, credentialId)?.secret;
+  }
+
+  updateSecret(
+    userId: string,
+    credentialId: string,
+    secret: string,
+    now: number,
+  ): boolean {
+    const updated = this.#database
+      .update(providerCredentials)
+      .set({
+        encryptedCredential: this.#cipher.seal(
+          secret,
           encryptionContext(userId, credentialId),
-        );
+        ),
+        ...updatedAuditFields(SYSTEM_ID, now),
+      })
+      .where(activeCredentialCondition(this.#provider, userId, credentialId))
+      .returning({ id: providerCredentials.id })
+      .all();
+    return updated.length > 0;
   }
 
   remove(userId: string, credentialId: string, now: number): boolean {

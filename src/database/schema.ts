@@ -42,11 +42,15 @@ function ownedAuditColumns() {
   };
 }
 
+function providerColumn() {
+  return text("provider", { enum: ["openai", "openrouter"] }).notNull();
+}
+
 export const providerCredentials = sqliteTable(
   "provider_credentials",
   {
     ...ownedAuditColumns(),
-    provider: text("provider", { enum: ["openai", "openrouter"] }).notNull(),
+    provider: providerColumn(),
     providerAccountId: text("provider_account_id"),
     label: text("label").notNull(),
     source: text("source", { enum: ["oauth", "api_key"] }).notNull(),
@@ -86,6 +90,65 @@ export const runners = sqliteTable(
     uniqueIndex("runners_active_token_unique")
       .on(table.tokenHash)
       .where(sql`${table.isDeleted} = false`),
+  ],
+);
+
+export const agentSessions = sqliteTable(
+  "agent_sessions",
+  {
+    ...ownedAuditColumns(),
+    runnerId: text("runner_id")
+      .notNull()
+      .references(() => runners.id, { onDelete: "restrict" }),
+    providerCredentialId: text("provider_credential_id")
+      .notNull()
+      .references(() => providerCredentials.id, { onDelete: "restrict" }),
+    provider: providerColumn(),
+    model: text("model").notNull(),
+    workingDirectory: text("working_directory").notNull(),
+    title: text("title").notNull(),
+    status: text("status", {
+      enum: ["queued", "running", "idle", "stopped", "failed"],
+    }).notNull(),
+  },
+  (table) => [
+    index("agent_sessions_user_deletion_update_index").on(
+      table.userId,
+      table.isDeleted,
+      table.updatedAt,
+    ),
+    index("agent_sessions_runner_status_index").on(
+      table.runnerId,
+      table.status,
+    ),
+  ],
+);
+
+export const agentMessages = sqliteTable(
+  "agent_messages",
+  {
+    ...ownedAuditColumns(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: "restrict" }),
+    role: text("role", {
+      enum: ["user", "assistant", "tool", "system"],
+    }).notNull(),
+    content: text("content").notNull(),
+    toolCallId: text("tool_call_id"),
+    toolName: text("tool_name"),
+    toolCalls: text("tool_calls"),
+  },
+  (table) => [
+    index("agent_messages_session_deletion_creation_index").on(
+      table.sessionId,
+      table.isDeleted,
+      table.createdAt,
+    ),
+    index("agent_messages_user_deletion_index").on(
+      table.userId,
+      table.isDeleted,
+    ),
   ],
 );
 

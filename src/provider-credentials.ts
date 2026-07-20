@@ -9,11 +9,12 @@ import {
   createJsonResponse,
   createMethodNotAllowedResponse,
   createNoContentResponse,
-  readJsonRequest,
+  parseJsonRequest,
 } from "./http.ts";
 import { readJsonRecord, type OAuthRuntime } from "./oauth.ts";
 import {
   DuplicateProviderCredentialError,
+  type ProviderCredentialAccess,
   type ProviderCredentialDetails,
   type ProviderCredentialStore,
   type ProviderCredentialSummary,
@@ -118,17 +119,20 @@ export class ProviderCredentialEndpoints {
       return createMethodNotAllowedResponse("GET, POST");
     }
 
-    const json = await readJsonRequest(request);
+    const suppliedKey = await parseJsonRequest(request, (value) => {
+      if (!isRecord(value)) {
+        return undefined;
+      }
 
-    if (
-      !json.ok ||
-      !isRecord(json.value) ||
-      typeof json.value["apiKey"] !== "string"
-    ) {
+      const apiKey = value["apiKey"];
+      return typeof apiKey === "string" ? apiKey : undefined;
+    });
+
+    if (suppliedKey === undefined) {
       return createApiError("invalid_request", 400);
     }
 
-    const apiKey = json.value["apiKey"].trim();
+    const apiKey = suppliedKey.trim();
 
     if (
       apiKey.length === 0 ||
@@ -158,6 +162,24 @@ export class ProviderCredentialEndpoints {
       }
 
       return createApiError("provider_unavailable", 502);
+    }
+  }
+
+  readCredential(
+    userId: string,
+    credentialId: string,
+  ): ProviderCredentialAccess | undefined {
+    return this.#store?.read(userId, credentialId);
+  }
+
+  updateCredentialSecret(
+    userId: string,
+    credentialId: string,
+    secret: string,
+    now: number,
+  ): void {
+    if (this.#store?.updateSecret(userId, credentialId, secret, now) !== true) {
+      throw new Error("The provider credential is no longer available");
     }
   }
 

@@ -81,7 +81,11 @@ their assets:
   `/api/openrouter/oauth/callback` completes the flow.
 - Authenticated users list and create runner setups at `/api/runners` and remove
   one at `/api/runners/:id`. Installed runners register through
-  `/api/runner/register` and maintain presence through `/api/runner/heartbeat`.
+  `/api/runner/register`, maintain presence through `/api/runner/heartbeat`, and
+  poll `/api/runner/work` for session tools.
+- Authenticated users create and list agent sessions at `/api/sessions`, inspect
+  `/api/sessions/:id`, send follow-ups to `/api/sessions/:id/messages`, and stop
+  work through `/api/sessions/:id/stop`.
 
 After signing in, use **Set up a runner** in the control center. Run the shown
 one-liner on a macOS or Linux computer, or download and run the installer. The
@@ -105,6 +109,28 @@ revokes its server-side registration, but it does not delete files from that
 computer. Rerun the installer once to migrate a legacy `q-mush-runner.js`
 installation to the self-updating executable.
 
+After a runner and provider credential are ready, use **New agent session** in
+the control center. Select an online computer, credential, model (or its
+default), working directory on that computer, and task. Q Mush implements its
+own model/tool loop without an external agent framework. It can read, list,
+search, write, and exactly edit workspace files, plus run bounded shell
+commands. Session transcripts and status survive page reloads; a ready, stopped,
+or failed session accepts follow-up instructions. **Stop session** aborts the
+model request and cancels an active runner command.
+
+The runner executes tools with the runner process's local account permissions.
+File tools reject paths outside the selected workspace, while shell commands are
+intentionally full shell commands rooted in that directory and can access
+anything that account can access. Only use runners and model credentials you
+trust with the selected project. Provider secrets remain on the Q Mush server:
+the browser and runner work protocol never receive them.
+
+OpenAI API keys and OpenRouter credentials use their chat-completions APIs.
+OpenAI connected accounts use the subscription-backed Codex Responses endpoint;
+Q Mush refreshes and re-encrypts expiring OAuth tokens. The first-party loop
+passes explicit function calls to the runner and feeds bounded results back to
+the selected model.
+
 The Google login flow uses an authorization code, PKCE, and a short-lived state
 cookie. Only the basic Google profile and email scopes are requested. Google
 tokens are discarded after profile lookup. Once logged in, a user can connect
@@ -119,14 +145,16 @@ payload and retains a soft-deleted audit row. It does not revoke provider-side
 access, so revoke the credential with its provider when it should no longer
 exist there.
 
-Drizzle stores users, seven-day application sessions, provider credentials, and
-runner registrations in local SQLite, so they survive server restarts.
-Application primary keys use UUIDv7; provider IDs, credential fingerprints,
-runner token hashes, machine fingerprints, and cookie tokens remain separate
-external identifiers. Plaintext runner tokens appear only in setup artifacts and
-the installed computer's private config. Every application row carries creation,
-update, actor, and soft-deletion audit fields. Committed migrations in
-`drizzle/` are applied automatically at startup.
+Drizzle stores users, seven-day application sessions, provider credentials,
+runner registrations, agent sessions, and agent transcripts in local SQLite, so
+they survive server restarts. Sessions interrupted by a server restart are
+marked failed and can be continued from the control center. Application primary
+keys use UUIDv7; provider IDs, credential fingerprints, runner token hashes,
+machine fingerprints, and cookie tokens remain separate external identifiers.
+Plaintext runner tokens appear only in setup artifacts and the installed
+computer's private config. Every application row carries creation, update,
+actor, and soft-deletion audit fields. Committed migrations in `drizzle/` are
+applied automatically at startup.
 
 Both pages use the small framework-free TSX runtime in `src/jsx.ts`; no frontend
 framework is installed. `src/styles.css` is the Tailwind source entry point.

@@ -74,6 +74,14 @@ interface OAuthAccount {
   readonly refreshToken: string;
 }
 
+async function readFormBody(
+  request: Request | undefined,
+): Promise<Record<string, string>> {
+  return Object.fromEntries(
+    new URLSearchParams(await request?.text()).entries(),
+  );
+}
+
 function createIdToken(email: string, accountId: string): string {
   const header = Buffer.from(
     JSON.stringify({ alg: "RS256", typ: "JWT" }),
@@ -144,6 +152,17 @@ const createProviderFetch = (
               expires_in: 3600,
               refresh_token: account.refreshToken,
             });
+      }
+
+      if (
+        body.get("grant_type") === "refresh_token" &&
+        body.get("refresh_token") === "oauth-refresh-token-one"
+      ) {
+        return Response.json({
+          access_token: "refreshed-access-token",
+          expires_in: 7200,
+          refresh_token: "refreshed-refresh-token",
+        });
       }
 
       return Response.json(
@@ -280,11 +299,7 @@ describe("OpenAI credentials", () => {
     expect(providerRequests[0]?.headers.get("content-type")).toContain(
       "application/x-www-form-urlencoded",
     );
-    expect(
-      Object.fromEntries(
-        new URLSearchParams(await providerRequests[0]?.text()).entries(),
-      ),
-    ).toEqual({
+    expect(await readFormBody(providerRequests[0])).toEqual({
       client_id: CLIENT_ID,
       code: "authorization-code-one",
       code_verifier: FIRST_VERIFIER,
@@ -305,6 +320,31 @@ describe("OpenAI credentials", () => {
       access: "oauth-access-token-one",
       expires: TEST_NOW + 3_600_000,
       refresh: "oauth-refresh-token-one",
+    });
+
+    credentialStore.updateSecret(
+      TEST_USER_ID,
+      FIRST_OAUTH_ID,
+      JSON.stringify({
+        access: "expired-access-token",
+        expires: TEST_NOW,
+        refresh: "oauth-refresh-token-one",
+      }),
+      TEST_NOW,
+    );
+    const refreshed = await integration.readCredential(
+      TEST_USER_ID,
+      FIRST_OAUTH_ID,
+    );
+    expect(JSON.parse(refreshed?.secret ?? "null")).toEqual({
+      access: "refreshed-access-token",
+      expires: TEST_NOW + 7_200_000,
+      refresh: "refreshed-refresh-token",
+    });
+    expect(await readFormBody(providerRequests.at(-1))).toEqual({
+      client_id: CLIENT_ID,
+      grant_type: "refresh_token",
+      refresh_token: "oauth-refresh-token-one",
     });
 
     providerTest.expectRemovedProviderCredential(

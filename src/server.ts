@@ -9,6 +9,7 @@ import type { ProviderIntegration } from "./provider-integration.ts";
 import * as routePaths from "./routes.ts";
 import type { RunnerExecutableProvider } from "./runner-executable.ts";
 import type { RunnerIntegration } from "./runners.ts";
+import type { SessionIntegration } from "./sessions.ts";
 
 const {
   STYLESHEET_PATH,
@@ -17,6 +18,8 @@ const {
   RUNNER_REGISTER_PATH,
   RUNNER_INSTALLER_PATH,
   RUNNER_HEARTBEAT_PATH,
+  RUNNER_WORK_PATH,
+  SESSIONS_PATH,
   OPENROUTER_OAUTH_PATH,
   OPENROUTER_OAUTH_CALLBACK_PATH,
   OPENROUTER_CREDENTIALS_PATH,
@@ -212,6 +215,7 @@ export function createRequestHandler(
   openAi: OpenAiIntegration,
   openRouter: OpenRouterIntegration,
   runners: RunnerIntegration,
+  sessions: SessionIntegration,
   runnerExecutables: RunnerExecutableProvider,
 ): (request: Request) => Promise<Response> {
   const appPage = prepareBody(renderAppPage());
@@ -248,6 +252,20 @@ export function createRequestHandler(
         return runners.heartbeat(request);
       }
 
+      if (pathname === RUNNER_WORK_PATH) {
+        return sessions.work(request);
+      }
+
+      const runnerWorkPrefix = `${RUNNER_WORK_PATH}/`;
+
+      if (pathname.startsWith(runnerWorkPrefix)) {
+        const commandId = pathname.slice(runnerWorkPrefix.length);
+
+        if (commandId.length > 0 && !commandId.includes("/")) {
+          return sessions.workResult(request, commandId);
+        }
+      }
+
       if (pathname === RUNNERS_PATH) {
         return runners.collection(request);
       }
@@ -259,6 +277,35 @@ export function createRequestHandler(
 
         if (runnerId.length > 0 && !runnerId.includes("/")) {
           return runners.remove(request, runnerId);
+        }
+      }
+
+      if (pathname === SESSIONS_PATH) {
+        return sessions.collection(request);
+      }
+
+      const sessionPathPrefix = `${SESSIONS_PATH}/`;
+
+      if (pathname.startsWith(sessionPathPrefix)) {
+        const segments = pathname.slice(sessionPathPrefix.length).split("/");
+        const sessionId = segments[0];
+
+        if (sessionId !== undefined && sessionId.length > 0) {
+          if (segments.length === 1) {
+            return sessions.item(request, sessionId);
+          }
+
+          if (segments.length === 2) {
+            switch (segments[1]) {
+              case "messages":
+                return sessions.message(request, sessionId);
+              case "stop":
+                return sessions.stop(request, sessionId);
+              case undefined:
+              default:
+                break;
+            }
+          }
         }
       }
 

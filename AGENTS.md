@@ -111,6 +111,16 @@ task-specific progress, guesses, or sensitive values.
   registration to the new token instead of creating a second runner; another
   user's registration remains protected. Runner tokens never appear in list
   responses.
+- `src/sessions.ts`, `src/session-store.ts`, and `src/agent-model.ts` implement
+  persistent first-party coding sessions without an external agent harness. The
+  server owns the model/tool loop so provider secrets never enter browser or
+  runner work payloads; `src/runner-command-broker.ts` queues authenticated tool
+  calls, and the runner polls `/api/runner/work`, executes the bounded tools in
+  `src/runner-tools.ts`, and returns results. The control center creates,
+  inspects, follows up, stops, and polls sessions through
+  `src/session-client.tsx` and `src/session-controller.ts`. Session and
+  transcript rows live in `agent_sessions` and `agent_messages`; an interrupted
+  server process marks active sessions failed so they can be resumed explicitly.
 - `src/openai.ts` and `src/openrouter.ts` manage authenticated provider PKCE
   connections and validate manually supplied keys against OpenAI `/v1/me` and
   OpenRouter `/api/v1/key`, respectively. OpenAI OAuth persists the access and
@@ -212,6 +222,15 @@ task-specific progress, guesses, or sensitive values.
   Cross-target compilation may first download the matching Bun executable into
   Bun's user cache, while subsequent runner downloads use the in-process binary
   cache.
+- Agent file tools are confined to the selected runner workspace, including
+  symlink resolution, but `run_command` intentionally has the runner account's
+  full shell permissions and is only rooted at that directory. Stopping a
+  session aborts its model request and causes a polling runner to terminate an
+  active shell command. OpenAI API keys and OpenRouter use chat completions;
+  OpenAI OAuth uses the streaming ChatGPT Codex Responses endpoint and refreshes
+  its encrypted token bundle shortly before expiry. Provider defaults are
+  `gpt-4.1-mini`, `openai/gpt-4.1-mini`, and `gpt-5-codex` for OpenAI keys,
+  OpenRouter, and OpenAI OAuth respectively.
 - Add each new runtime source root and executable entry to
   `knip.production.config.ts`. Add standalone non-TypeScript build entries, such
   as `src/styles.css`, to both Knip configs; keep test files and test-support

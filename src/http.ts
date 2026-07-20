@@ -65,6 +65,14 @@ export async function readJsonRequest(
   }
 }
 
+export async function parseJsonRequest<Value>(
+  request: Request,
+  parse: (value: unknown) => Value | undefined,
+): Promise<Value | undefined> {
+  const json = await readJsonRequest(request);
+  return json.ok ? parse(json.value) : undefined;
+}
+
 export function createMethodNotAllowedResponse(
   allowedMethod: string,
 ): Response {

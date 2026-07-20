@@ -21,6 +21,11 @@ import {
 } from "./routes.ts";
 import { renderRunnerPanel, type RunnerViewState } from "./runner-client.tsx";
 import { RunnerController } from "./runner-controller.ts";
+import {
+  renderSessionPanel,
+  type SessionViewState,
+} from "./session-client.tsx";
+import { SessionController } from "./session-controller.ts";
 
 function readAuthenticatedUser(value: unknown): AuthenticatedUser | null {
   if (value === null) {
@@ -255,86 +260,42 @@ function renderSignIn(googleLoginAvailable: boolean): JsxNode {
 }
 
 function renderWorkspace(
-  actionCount: number,
   logoutPending: boolean,
   openAiState: ProviderViewState,
   openRouterState: ProviderViewState,
   runnerState: RunnerViewState,
+  sessionState: SessionViewState,
   user: AuthenticatedUser,
 ): JsxNode {
   return (
     <div className="mt-12 space-y-6">
+      {renderSessionPanel(
+        sessionState,
+        runnerState,
+        openAiState,
+        openRouterState,
+      )}
       {renderRunnerPanel(runnerState)}
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
-        <section
-          aria-labelledby="agent-action-title"
-          className="rounded-3xl border border-white/10 bg-white/[0.06] p-6 shadow-2xl shadow-emerald-950/30 backdrop-blur-xl sm:p-8"
-        >
-          <div className="flex items-start justify-between gap-6">
-            <div>
-              <p className="text-sm font-medium text-emerald-300">
-                Agent action
-              </p>
-              <h2
-                className="mt-3 text-2xl font-semibold text-white"
-                id="agent-action-title"
-              >
-                Wake the swarm
-              </h2>
-              <p className="mt-3 max-w-xl leading-7 text-slate-400">
-                Send a local signal through the harness and watch this session
-                update instantly.
-              </p>
-            </div>
-            <span
-              aria-hidden="true"
-              className="grid size-12 shrink-0 place-items-center rounded-2xl border border-white/10 bg-slate-900 text-xl"
-            >
-              ⚡
-            </span>
+      <aside
+        aria-label="Google account"
+        className="flex flex-col gap-5 rounded-3xl border border-white/10 bg-slate-900/80 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8"
+      >
+        <div className="flex min-w-0 items-center gap-4">
+          {renderAvatar(user)}
+          <div className="min-w-0">
+            <p className="truncate font-semibold text-white">{user.name}</p>
+            <p className="truncate text-sm text-slate-400">{user.email}</p>
           </div>
-          <button
-            className="mt-10 inline-flex w-full items-center justify-center rounded-2xl bg-emerald-300 px-5 py-3 font-semibold text-slate-950 shadow-lg shadow-emerald-950/40 transition hover:bg-emerald-200 active:translate-y-px focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300 sm:w-auto"
-            data-action="run-agent"
-            type="button"
-          >
-            Run an action
-          </button>
-        </section>
-
-        <aside
-          aria-label="Google account and session activity"
-          className="rounded-3xl border border-white/10 bg-slate-900/80 p-6 sm:p-8"
+        </div>
+        <button
+          className="rounded-2xl border border-white/10 px-5 py-2.5 text-sm font-semibold text-slate-300 transition hover:border-rose-300/30 hover:text-rose-200 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
+          data-action="logout"
+          disabled={logoutPending}
+          type="button"
         >
-          <div className="flex min-w-0 items-center gap-4">
-            {renderAvatar(user)}
-            <div className="min-w-0">
-              <p className="truncate font-semibold text-white">{user.name}</p>
-              <p className="truncate text-sm text-slate-400">{user.email}</p>
-            </div>
-          </div>
-          <p className="mt-6 text-sm font-medium text-slate-400">
-            Session activity
-          </p>
-          <p
-            aria-live="polite"
-            className="mt-3 text-5xl font-semibold tracking-tight text-white"
-          >
-            {actionCount}
-          </p>
-          <p className="mt-2 text-sm text-slate-400">
-            Actions run this session
-          </p>
-          <button
-            className="mt-7 w-full rounded-2xl border border-white/10 px-4 py-2.5 text-sm font-semibold text-slate-300 transition hover:border-rose-300/30 hover:text-rose-200 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
-            data-action="logout"
-            disabled={logoutPending}
-            type="button"
-          >
-            {logoutPending ? "Signing out…" : "Sign out"}
-          </button>
-        </aside>
-      </div>
+          {logoutPending ? "Signing out…" : "Sign out"}
+        </button>
+      </aside>
       {renderProviderPanel(OPENAI_PANEL, openAiState)}
       {renderProviderPanel(OPENROUTER_PANEL, openRouterState)}
     </div>
@@ -342,13 +303,13 @@ function renderWorkspace(
 }
 
 function renderApp(
-  actionCount: number,
   loadFailed: boolean,
   logoutPending: boolean,
   notices: readonly string[],
   openAiState: ProviderViewState,
   openRouterState: ProviderViewState,
   runnerState: RunnerViewState,
+  sessionState: SessionViewState,
   session: AuthSession | undefined,
 ): JsxNode {
   return (
@@ -396,11 +357,11 @@ function renderApp(
               : session.user === null
                 ? renderSignIn(session.googleLoginAvailable)
                 : renderWorkspace(
-                    actionCount,
                     logoutPending,
                     openAiState,
                     openRouterState,
                     runnerState,
+                    sessionState,
                     session.user,
                   )}
 
@@ -428,7 +389,6 @@ function findAppRoot(): Element {
 }
 
 const root = findAppRoot();
-let actionCount = 0;
 let loadFailed = false;
 let logoutPending = false;
 let session: AuthSession | undefined;
@@ -442,9 +402,13 @@ const openRouter = new ProviderController(OPENROUTER_PANEL, () => {
 const runners = new RunnerController(() => {
   updateApp(root);
 });
+const agentSessions = new SessionController(() => {
+  updateApp(root);
+});
 const providerControllers = [openAi, openRouter] as const;
 
 function resetWorkspaceConnections(): void {
+  agentSessions.reset();
   runners.reset();
   for (const controller of providerControllers) {
     controller.reset();
@@ -462,6 +426,7 @@ async function loadSession(): Promise<void> {
 
     if (session.user !== null) {
       await Promise.all([
+        agentSessions.load(),
         runners.load(),
         ...providerControllers.map((controller) => controller.load()),
       ]);
@@ -484,7 +449,6 @@ async function logout(): Promise<void> {
       throw new Error("The logout request failed");
     }
 
-    actionCount = 0;
     resetWorkspaceConnections();
     session = {
       googleLoginAvailable: session?.googleLoginAvailable ?? true,
@@ -502,28 +466,23 @@ async function logout(): Promise<void> {
 function updateApp(container: Element): void {
   mount(
     renderApp(
-      actionCount,
       loadFailed,
       logoutPending,
       notices,
       openAi.state,
       openRouter.state,
       runners.state,
+      agentSessions.state,
       session,
     ),
     container,
   );
+  agentSessions.bind(container);
   runners.bind(container);
   for (const controller of providerControllers) {
     controller.bind(container);
   }
 
-  container
-    .querySelector('[data-action="run-agent"]')
-    ?.addEventListener("click", () => {
-      actionCount += 1;
-      updateApp(container);
-    });
   container
     .querySelector('[data-action="retry-session"]')
     ?.addEventListener("click", () => {
@@ -536,11 +495,22 @@ function updateApp(container: Element): void {
     });
 }
 
-window.setInterval(() => {
-  if (session?.user !== null && session?.user !== undefined) {
-    void runners.refresh();
-  }
-}, 15_000);
+function refreshWhileAuthenticated(action: () => Promise<void>): () => void {
+  return () => {
+    if (session?.user !== null && session?.user !== undefined) {
+      void action();
+    }
+  };
+}
+
+window.setInterval(
+  refreshWhileAuthenticated(() => agentSessions.refresh()),
+  2_000,
+);
+window.setInterval(
+  refreshWhileAuthenticated(() => runners.refresh()),
+  15_000,
+);
 
 updateApp(root);
 void loadSession();

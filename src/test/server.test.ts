@@ -24,7 +24,9 @@ import {
   RUNNER_HEARTBEAT_PATH,
   RUNNER_INSTALLER_PATH,
   RUNNER_REGISTER_PATH,
+  RUNNER_WORK_PATH,
   RUNNERS_PATH,
+  SESSIONS_PATH,
 } from "../routes.ts";
 import type { RunnerExecutableProvider } from "../runner-executable.ts";
 import { createRunnerIntegration } from "../runners.ts";
@@ -33,6 +35,7 @@ import {
   buildClientStylesheet,
   createRequestHandler,
 } from "../server.ts";
+import { createSessionIntegration } from "../sessions.ts";
 
 interface CompressionCase {
   readonly decompress: (body: Uint8Array) => Uint8Array;
@@ -58,15 +61,30 @@ const runnerExecutables: RunnerExecutableProvider = {
 };
 const stylesheet = ".min-h-screen{min-height:100vh}";
 const googleAuth = createGoogleAuthFromEnvironment({});
+const openAi = createOpenAiIntegrationFromEnvironment({}, googleAuth);
+const openRouter = createOpenRouterIntegrationFromEnvironment({}, googleAuth);
+const runners = createRunnerIntegration(googleAuth);
+const sessions = createSessionIntegration(googleAuth, runners, {
+  openai: openAi,
+  openrouter: openRouter,
+});
 const handleRequest = createRequestHandler(
   clientJavaScript,
   stylesheet,
   googleAuth,
-  createOpenAiIntegrationFromEnvironment({}, googleAuth),
-  createOpenRouterIntegrationFromEnvironment({}, googleAuth),
-  createRunnerIntegration(googleAuth),
+  openAi,
+  openRouter,
+  runners,
+  sessions,
   runnerExecutables,
 );
+
+function expectAllStatuses(
+  responses: readonly Response[],
+  status: number,
+): void {
+  expect(responses.every((response) => response.status === status)).toBeTrue();
+}
 
 function expectCompressionHeaders(
   response: Response,
@@ -147,6 +165,8 @@ describe("routes", () => {
     expect(RUNNERS_PATH).toBe("/api/runners");
     expect(RUNNER_REGISTER_PATH).toBe("/api/runner/register");
     expect(RUNNER_HEARTBEAT_PATH).toBe("/api/runner/heartbeat");
+    expect(RUNNER_WORK_PATH).toBe("/api/runner/work");
+    expect(SESSIONS_PATH).toBe("/api/sessions");
     expect(RUNNER_INSTALLER_PATH).toBe("/runner/install.sh");
     expect(RUNNER_EXECUTABLE_PATH).toBe("/runner/executable");
   });
@@ -227,6 +247,20 @@ describe("page server", () => {
     expect(installerResponse.status).toBe(404);
   });
 
+  test("protects agent session and runner work routes", async () => {
+    const responses = await Promise.all([
+      sendRequest(SESSIONS_PATH),
+      sendRequest(SESSIONS_PATH, undefined, "POST"),
+      sendRequest(`${SESSIONS_PATH}/session-id`),
+      sendRequest(`${SESSIONS_PATH}/session-id/messages`, undefined, "POST"),
+      sendRequest(`${SESSIONS_PATH}/session-id/stop`, undefined, "POST"),
+      sendRequest(RUNNER_WORK_PATH, undefined, "POST"),
+      sendRequest(`${RUNNER_WORK_PATH}/command-id`, undefined, "POST"),
+    ]);
+
+    expectAllStatuses(responses, 401);
+  });
+
   test("serves the authentication session endpoint", async () => {
     const response = await sendRequest("/api/auth/session");
 
@@ -283,7 +317,7 @@ describe("page server", () => {
       ]);
       const outsideApiResponse = await sendRequest(provider.outsidePath);
 
-      expect(responses.every(({ status }) => status === 401)).toBeTrue();
+      expectAllStatuses(responses, 401);
       expect(outsideApiResponse.status).toBe(404);
     });
   }
@@ -353,11 +387,14 @@ describe("browser build", () => {
     expect(javaScript).toContain("Add API key");
     expect(javaScript).toContain("Set up a runner");
     expect(javaScript).toContain("Download installer");
+    expect(javaScript).toContain("New agent session");
+    expect(javaScript).toContain("Stop session");
     expect(javaScript).toContain("AUTH_GOOGLE_PATH");
     expect(javaScript).toContain("AUTH_LOGOUT_PATH");
     expect(javaScript).toContain("OPENAI_CREDENTIALS_PATH");
     expect(javaScript).toContain("OPENROUTER_CREDENTIALS_PATH");
     expect(javaScript).toContain("RUNNERS_PATH");
+    expect(javaScript).toContain("SESSIONS_PATH");
   });
 });
 

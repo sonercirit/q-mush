@@ -3,6 +3,8 @@ import { isRecord } from "./auth-model.ts";
 import type { GoogleAuth } from "./auth.ts";
 import type * as account from "./connected-account-oauth.ts";
 import * as oauth from "./oauth.ts";
+import { readOpenAiOAuthCredential } from "./openai-credential.ts";
+import type { ProviderCredentialAccess } from "./provider-credential-store.ts";
 import { createApiKeyMetadataReader } from "./provider-credentials.ts";
 import * as provider from "./provider-integration.ts";
 import { APP_PATH, OPENAI_OAUTH_CALLBACK_PATH } from "./routes.ts";
@@ -20,6 +22,8 @@ const OPENAI_FLOW_COOKIES: oauth.FlowCookies = {
   verifier: "q_mush_openai_verifier",
 };
 const AUTHORIZATION_CODE_GRANT = "authorization_code";
+const REFRESH_TOKEN_GRANT = "refresh_token";
+const TOKEN_REFRESH_LEEWAY_MILLISECONDS = 60_000;
 const readOpenAiApiKeyMetadata = createApiKeyMetadataReader(
   OPENAI_KEY_METADATA_URL,
   "OpenAI could not validate the API key",
@@ -59,6 +63,36 @@ function createAuthorizationUrl(
   );
 }
 
+function readTokenSecret(
+  runtime: oauth.OAuthRuntime,
+  tokens: Readonly<Record<string, unknown>>,
+  fallbackRefreshToken?: string,
+): string {
+  const access = oauth.readProviderString(tokens, "access_token", "OpenAI");
+  const refreshValue = tokens["refresh_token"];
+  const refresh =
+    refreshValue === undefined && fallbackRefreshToken !== undefined
+      ? fallbackRefreshToken
+      : oauth.readProviderString(tokens, "refresh_token", "OpenAI");
+  const expiresIn = tokens["expires_in"];
+
+  if (
+    typeof expiresIn !== "number" ||
+    !Number.isSafeInteger(expiresIn) ||
+    expiresIn <= 0
+  ) {
+    throw new Error("OpenAI returned an invalid expires_in");
+  }
+
+  const expires = runtime.now() + expiresIn * 1000;
+
+  if (!Number.isSafeInteger(expires)) {
+    throw new Error("OpenAI returned an invalid token lifetime");
+  }
+
+  return JSON.stringify({ access, expires, refresh });
+}
+
 async function exchangeCredential(
   runtime: oauth.OAuthRuntime,
   clientId: string,
@@ -76,29 +110,39 @@ async function exchangeCredential(
     },
     "OpenAI rejected the authorization code",
   );
-  const access = oauth.readProviderString(tokens, "access_token", "OpenAI");
-  const refresh = oauth.readProviderString(tokens, "refresh_token", "OpenAI");
   const idToken = oauth.readProviderString(tokens, "id_token", "OpenAI");
-  const expiresIn = tokens["expires_in"];
-
-  if (
-    typeof expiresIn !== "number" ||
-    !Number.isSafeInteger(expiresIn) ||
-    expiresIn <= 0
-  ) {
-    throw new Error("OpenAI returned an invalid expires_in");
-  }
-
-  const expires = runtime.now() + expiresIn * 1000;
-
-  if (!Number.isSafeInteger(expires)) {
-    throw new Error("OpenAI returned an invalid token lifetime");
-  }
-
   return {
     details: readOpenAiAccountDetails(idToken),
-    secret: JSON.stringify({ access, expires, refresh }),
+    secret: readTokenSecret(runtime, tokens),
   };
+}
+
+async function prepareCredential(
+  runtime: oauth.OAuthRuntime,
+  clientId: string,
+  credential: ProviderCredentialAccess,
+): Promise<string | undefined> {
+  if (credential.source !== "oauth") {
+    return undefined;
+  }
+
+  const stored = readOpenAiOAuthCredential(credential.secret);
+
+  if (stored.expires > runtime.now() + TOKEN_REFRESH_LEEWAY_MILLISECONDS) {
+    return undefined;
+  }
+
+  const tokens = await oauth.postFormJson(
+    runtime,
+    OPENAI_TOKEN_URL,
+    {
+      client_id: clientId,
+      grant_type: REFRESH_TOKEN_GRANT,
+      refresh_token: stored.refresh,
+    },
+    "OpenAI rejected the refresh token",
+  );
+  return readTokenSecret(runtime, tokens, stored.refresh);
 }
 
 function readOptionalString(
@@ -296,6 +340,8 @@ function createOpenAiIntegration(
       userCookie: "q_mush_openai_user",
     }),
     dependencies: context.dependencies,
+    prepareCredential: (runtime, credential) =>
+      prepareCredential(runtime, clientId, credential),
     provider: "openai",
     readCredentialDetails,
   });

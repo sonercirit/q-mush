@@ -3,13 +3,24 @@ import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { arch, hostname, networkInterfaces, platform } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { RUNNER_HEARTBEAT_PATH, RUNNER_REGISTER_PATH } from "./routes.ts";
+import {
+  RUNNER_HEARTBEAT_PATH,
+  RUNNER_REGISTER_PATH,
+  RUNNER_WORK_PATH,
+} from "./routes.ts";
+import type { RunnerToolCommand } from "./runner-command-broker.ts";
+import {
+  executeRunnerCommand,
+  readRunnerCommand,
+  readRunnerCommandStatus,
+} from "./runner-command.ts";
 import { updateRunnerIfAvailable } from "./runner-update.ts";
 
 declare const Q_MUSH_RUNNER_TARGET: string;
 declare const Q_MUSH_RUNNER_VERSION: string;
 
 const HEARTBEAT_INTERVAL_MILLISECONDS = 15_000;
+const WORK_POLL_INTERVAL_MILLISECONDS = 750;
 const RETRY_INTERVAL_MILLISECONDS = 5_000;
 const REQUEST_TIMEOUT_MILLISECONDS = 10_000;
 const UPDATE_INTERVAL_MILLISECONDS = 5 * 60_000;
@@ -129,15 +140,20 @@ function runnerRequestHeaders(
   return headers;
 }
 
-async function postToServer(
+interface ServerRequestOptions {
+  readonly body?: Readonly<Record<string, string>>;
+  readonly method?: string;
+}
+
+async function requestServer(
   configuration: RunnerConfiguration,
   path: string,
-  body?: Readonly<Record<string, string>>,
-): Promise<void> {
+  options: ServerRequestOptions = {},
+): Promise<Response> {
   const requestOptions: RequestInit = {
-    headers: runnerRequestHeaders(configuration, body !== undefined),
-    body: body === undefined ? null : JSON.stringify(body),
-    method: "POST",
+    headers: runnerRequestHeaders(configuration, options.body !== undefined),
+    body: options.body === undefined ? null : JSON.stringify(options.body),
+    method: options.method ?? "POST",
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MILLISECONDS),
   };
   const response = await fetch(
@@ -148,6 +164,96 @@ async function postToServer(
   if (!response.ok) {
     throw new RunnerRequestError(response.status);
   }
+
+  return response;
+}
+
+async function pollForCommand(
+  configuration: RunnerConfiguration,
+): Promise<RunnerToolCommand | undefined> {
+  const response = await requestServer(configuration, RUNNER_WORK_PATH);
+
+  if (response.status === 204) {
+    return undefined;
+  }
+
+  const value: unknown = await response.json();
+  return readRunnerCommand(value);
+}
+
+async function commandIsActive(
+  configuration: RunnerConfiguration,
+  commandId: string,
+): Promise<boolean> {
+  const response = await requestServer(
+    configuration,
+    `${RUNNER_WORK_PATH}/${encodeURIComponent(commandId)}`,
+    { method: "GET" },
+  );
+  const value: unknown = await response.json();
+  return readRunnerCommandStatus(value);
+}
+
+async function executeCancelableCommand(
+  configuration: RunnerConfiguration,
+  command: RunnerToolCommand,
+): Promise<string | undefined> {
+  const controller = new AbortController();
+  const execution = executeRunnerCommand(command, controller.signal).then(
+    (output) => ({ output }),
+  );
+
+  for (;;) {
+    const outcome = await Promise.race([
+      execution,
+      sleep(WORK_POLL_INTERVAL_MILLISECONDS).then(() => undefined),
+    ]);
+
+    if (outcome !== undefined) {
+      return outcome.output;
+    }
+
+    try {
+      if (!(await commandIsActive(configuration, command.id))) {
+        controller.abort();
+        await execution;
+        return undefined;
+      }
+    } catch (error) {
+      try {
+        handleConnectionFailure(
+          error,
+          "Could not check the agent command; continuing it…",
+        );
+      } catch (fatalError) {
+        controller.abort();
+        await execution;
+        throw fatalError;
+      }
+    }
+  }
+}
+
+async function processOneCommand(
+  configuration: RunnerConfiguration,
+): Promise<void> {
+  const command = await pollForCommand(configuration);
+
+  if (command === undefined) {
+    return;
+  }
+
+  const output = await executeCancelableCommand(configuration, command);
+
+  if (output === undefined) {
+    return;
+  }
+
+  await requestServer(
+    configuration,
+    `${RUNNER_WORK_PATH}/${encodeURIComponent(command.id)}`,
+    { body: { output } },
+  );
 }
 
 function handleConnectionFailure(error: unknown, message: string): void {
@@ -174,7 +280,9 @@ async function connect(
 
   for (;;) {
     try {
-      await postToServer(configuration, RUNNER_REGISTER_PATH, metadata);
+      await requestServer(configuration, RUNNER_REGISTER_PATH, {
+        body: metadata,
+      });
       console.log(`Q Mush runner connected as ${metadata.name}.`);
       return;
     } catch (error) {
@@ -208,19 +316,55 @@ async function installUpdateIfAvailable(
   }
 }
 
+async function processWithHeartbeats(
+  configuration: RunnerConfiguration,
+): Promise<void> {
+  const outcome = processOneCommand(configuration).then(
+    () => ({ status: "completed" as const }),
+    (error: unknown) => ({ error, status: "failed" as const }),
+  );
+
+  for (;;) {
+    const result = await Promise.race([
+      outcome,
+      sleep(HEARTBEAT_INTERVAL_MILLISECONDS).then(() => undefined),
+    ]);
+
+    if (result !== undefined) {
+      if (result.status === "failed") {
+        throw result.error;
+      }
+
+      return;
+    }
+
+    await requestServer(configuration, RUNNER_HEARTBEAT_PATH);
+  }
+}
+
 async function maintainConnection(
   configuration: RunnerConfiguration,
   configurationPath: string,
 ): Promise<void> {
+  let nextHeartbeatAt = Date.now() + HEARTBEAT_INTERVAL_MILLISECONDS;
   let nextUpdateAt = Date.now() + UPDATE_INTERVAL_MILLISECONDS;
 
   for (;;) {
-    await sleep(HEARTBEAT_INTERVAL_MILLISECONDS);
-
     try {
-      await postToServer(configuration, RUNNER_HEARTBEAT_PATH);
+      await processWithHeartbeats(configuration);
     } catch (error) {
       handleConnectionFailure(error, "Q Mush connection lost; retrying…");
+      await sleep(RETRY_INTERVAL_MILLISECONDS);
+    }
+
+    if (Date.now() >= nextHeartbeatAt) {
+      try {
+        await requestServer(configuration, RUNNER_HEARTBEAT_PATH);
+      } catch (error) {
+        handleConnectionFailure(error, "Q Mush connection lost; retrying…");
+      }
+
+      nextHeartbeatAt = Date.now() + HEARTBEAT_INTERVAL_MILLISECONDS;
     }
 
     if (Date.now() >= nextUpdateAt) {
@@ -230,6 +374,8 @@ async function maintainConnection(
 
       nextUpdateAt = Date.now() + UPDATE_INTERVAL_MILLISECONDS;
     }
+
+    await sleep(WORK_POLL_INTERVAL_MILLISECONDS);
   }
 }
 

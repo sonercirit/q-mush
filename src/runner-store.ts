@@ -1,6 +1,10 @@
 import { and, asc, eq, type SQL } from "drizzle-orm";
 import { createHash } from "node:crypto";
-import { softDeletedAuditFields, updatedAuditFields } from "./audit.ts";
+import {
+  createdAuditFields,
+  softDeletedAuditFields,
+  updatedAuditFields,
+} from "./audit.ts";
 import type { AppDatabase } from "./database.ts";
 import { runners } from "./database/schema.ts";
 import { createUuidV7, type IdGenerator } from "./ids.ts";
@@ -11,6 +15,11 @@ import {
 } from "./runner-model.ts";
 
 const RUNNER_ONLINE_WINDOW_MILLISECONDS = 45_000;
+
+export interface RunnerConnection {
+  readonly id: string;
+  readonly userId: string;
+}
 
 export interface RunnerMetadata {
   readonly architecture: string;
@@ -122,18 +131,12 @@ export class RunnerStore {
 
   create(userId: string, token: string, now: number): RunnerSummary {
     const id = this.#context.generateId(now);
-    const timestamp = new Date(now);
-
     this.#database
       .insert(runners)
       .values({
-        createdAt: timestamp,
-        createdById: userId,
+        ...createdAuditFields(userId, now),
         id,
-        isDeleted: false,
         tokenHash: hashToken(token),
-        updatedAt: timestamp,
-        updatedById: userId,
         userId,
       })
       .run();
@@ -143,6 +146,32 @@ export class RunnerStore {
 
   hasActiveToken(token: string): boolean {
     return this.#activeRunnerForToken(token) !== undefined;
+  }
+
+  authenticate(token: string): RunnerConnection | undefined {
+    const stored = this.#activeRunnerForToken(token);
+
+    return stored?.machineFingerprint == null
+      ? undefined
+      : { id: stored.id, userId: stored.userId };
+  }
+
+  isAvailable(userId: string, runnerId: string, now: number): boolean {
+    const stored = this.#database
+      .select({
+        lastSeenAt: runners.lastSeenAt,
+        machineFingerprint: runners.machineFingerprint,
+      })
+      .from(runners)
+      .where(activeRunnerCondition({ id: runnerId, userId }))
+      .get();
+    const lastSeenAt = stored?.lastSeenAt?.getTime();
+    return (
+      stored?.machineFingerprint !== null &&
+      stored?.machineFingerprint !== undefined &&
+      lastSeenAt !== undefined &&
+      now - lastSeenAt <= RUNNER_ONLINE_WINDOW_MILLISECONDS
+    );
   }
 
   heartbeat(token: string, now: number): boolean {

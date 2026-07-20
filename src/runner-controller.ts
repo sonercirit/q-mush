@@ -1,4 +1,5 @@
 import { HttpResponseError, request, requestJson } from "./browser-http.ts";
+import { bindActionClicks } from "./client-actions.ts";
 import { RUNNERS_PATH } from "./routes.ts";
 import {
   readCreatedRunner,
@@ -45,14 +46,7 @@ export class RunnerController {
   bind(container: Element): void {
     const panel = container.querySelector('[data-runner-panel="true"]');
 
-    panel?.addEventListener("click", (event) => {
-      if (!(event.target instanceof Element)) {
-        return;
-      }
-
-      const control = event.target.closest<HTMLElement>("[data-action]");
-      const action = control?.dataset["action"];
-
+    bindActionClicks(panel, (control, action) => {
       if (action === "create-runner") {
         void this.#create();
       } else if (action === "copy-runner-command") {
@@ -60,7 +54,7 @@ export class RunnerController {
       } else if (action === "retry-runners") {
         void this.load();
       } else if (action === "remove-runner") {
-        const runnerId = control?.dataset["runnerId"];
+        const runnerId = control.dataset["runnerId"];
 
         if (runnerId !== undefined) {
           void this.#remove(runnerId);

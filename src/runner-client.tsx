@@ -1,4 +1,4 @@
-import { isRecord } from "./auth-model.ts";
+import { isRecord, readNullableString } from "./auth-model.ts";
 import * as clientControls from "./client-controls.tsx";
 import { createElement, type JsxNode } from "./jsx.ts";
 import type { RunnerStatus, RunnerSummary } from "./runner-model.ts";
@@ -39,10 +39,6 @@ const STATUS_PRESENTATION: Readonly<
     label: "Setup pending",
   },
 };
-
-function readNullableString(value: unknown): string | null | undefined {
-  return value === null || typeof value === "string" ? value : undefined;
-}
 
 function readRunner(value: unknown): RunnerSummary {
   if (!isRecord(value)) {

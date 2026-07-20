@@ -15,6 +15,7 @@ import {
   buildClientStylesheet,
   createRequestHandler,
 } from "./server.ts";
+import { createSessionIntegration } from "./sessions.ts";
 
 const database = createDatabase(readDatabasePath(Bun.env));
 const [clientJavaScript, runnerExecutables, stylesheet] = await Promise.all([
@@ -32,6 +33,12 @@ const openRouter = createOpenRouterIntegrationFromEnvironment(
   { database },
 );
 const runners = createRunnerIntegration(googleAuth, { database });
+const sessions = createSessionIntegration(
+  googleAuth,
+  runners,
+  { openai: openAi, openrouter: openRouter },
+  { database },
+);
 const server = Bun.serve({
   fetch: createRequestHandler(
     clientJavaScript,
@@ -40,6 +47,7 @@ const server = Bun.serve({
     openAi,
     openRouter,
     runners,
+    sessions,
     runnerExecutables,
   ),
 });

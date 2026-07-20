@@ -1,3 +1,4 @@
+import { createdAuditFields } from "../audit.ts";
 import * as databaseModule from "../database.ts";
 import * as schema from "../database/schema.ts";
 import { SYSTEM_ID } from "../ids.ts";
@@ -7,35 +8,30 @@ export const TEST_USER_ID = "018bcfe5-6800-7000-8000-000000000021";
 const SESSION_ID = "018bcfe5-6800-7000-8000-000000000022";
 const SESSION_TOKEN = "authenticated-session";
 
+export function testAuditFields(actorId = TEST_USER_ID) {
+  return createdAuditFields(actorId, TEST_NOW);
+}
+
 export function createAuthenticatedTestDatabase(): databaseModule.AppDatabase {
   const database = databaseModule.createDatabase(":memory:");
-  const timestamp = new Date(TEST_NOW);
 
   database
     .insert(schema.users)
     .values({
-      createdAt: timestamp,
-      createdById: SYSTEM_ID,
+      ...testAuditFields(SYSTEM_ID),
       email: "mushroom@example.com",
       googleSubject: "google-user",
       id: TEST_USER_ID,
-      isDeleted: false,
       name: "Mush Room",
-      updatedAt: timestamp,
-      updatedById: SYSTEM_ID,
     })
     .run();
   database
     .insert(schema.sessions)
     .values({
-      createdAt: timestamp,
-      createdById: TEST_USER_ID,
+      ...testAuditFields(),
       expiresAt: new Date(TEST_NOW + 60_000),
       id: SESSION_ID,
-      isDeleted: false,
       token: SESSION_TOKEN,
-      updatedAt: timestamp,
-      updatedById: TEST_USER_ID,
       userId: TEST_USER_ID,
     })
     .run();
@@ -43,23 +39,68 @@ export function createAuthenticatedTestDatabase(): databaseModule.AppDatabase {
   return database;
 }
 
+export function addTestProviderCredential(
+  database: databaseModule.AppDatabase,
+  id: string,
+  provider: "openai" | "openrouter" = "openai",
+): void {
+  database
+    .insert(schema.providerCredentials)
+    .values({
+      ...testAuditFields(),
+      credentialFingerprint: `fingerprint-${id}`,
+      encryptedCredential: "test-encrypted-credential",
+      id,
+      label: "Test credential",
+      provider,
+      source: "api_key",
+      userId: TEST_USER_ID,
+    })
+    .run();
+}
+
+function createTestRequest(
+  path: string,
+  headers: Headers,
+  body: Readonly<Record<string, string>> | undefined,
+  method: string,
+): Request {
+  if (body !== undefined) {
+    headers.set("content-type", "application/json");
+  }
+
+  return new Request(`http://localhost:3000${path}`, {
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    headers,
+    method,
+  });
+}
+
+export function createRunnerRequest(
+  path: string,
+  token: string,
+  body?: Readonly<Record<string, string>>,
+  method = "POST",
+): Request {
+  return createTestRequest(
+    path,
+    new Headers({ authorization: `Bearer ${token}` }),
+    body,
+    method,
+  );
+}
+
 export function createAuthenticatedRequest(
   path: string,
   body?: Readonly<Record<string, string>>,
   method = "GET",
 ): Request {
-  const headers = new Headers({ cookie: `q_mush_session=${SESSION_TOKEN}` });
-
-  if (body !== undefined) {
-    headers.set("content-type", "application/json");
-  }
-
-  const init: RequestInit =
-    body === undefined
-      ? { headers, method }
-      : { body: JSON.stringify(body), headers, method };
-
-  return new Request(`http://localhost:3000${path}`, init);
+  return createTestRequest(
+    path,
+    new Headers({ cookie: `q_mush_session=${SESSION_TOKEN}` }),
+    body,
+    method,
+  );
 }
 
 function flowCookies(response: Response): string {

@@ -10,6 +10,7 @@ import {
 import * as oauth from "./oauth.ts";
 import {
   ProviderCredentialStore,
+  type ProviderCredentialAccess,
   type ProviderCredentialDetails,
   type ProviderId,
 } from "./provider-credential-store.ts";
@@ -17,6 +18,10 @@ import { ProviderCredentialEndpoints } from "./provider-credentials.ts";
 
 export interface ProviderIntegration extends oauth.OAuthEndpoints {
   credentials(request: Request): Promise<Response>;
+  readCredential(
+    userId: string,
+    credentialId: string,
+  ): Promise<ProviderCredentialAccess | undefined>;
   remove(request: Request, credentialId: string): Response;
 }
 
@@ -78,6 +83,10 @@ export function createProviderIntegration(options: {
   readonly configuration: ProviderIntegrationConfiguration | undefined;
   readonly createOAuthConfiguration: OAuthConfigurationFactory;
   readonly dependencies: oauth.OAuthDependencies;
+  readonly prepareCredential?: (
+    runtime: oauth.OAuthRuntime,
+    credential: ProviderCredentialAccess,
+  ) => Promise<string | undefined>;
   readonly provider: ProviderId;
   readonly readCredentialDetails: CredentialDetailsReader;
 }): ProviderIntegration {
@@ -110,10 +119,36 @@ export function createProviderIntegration(options: {
     runtime,
   );
 
+  const readCredential = async (
+    userId: string,
+    credentialId: string,
+  ): Promise<ProviderCredentialAccess | undefined> => {
+    const credential = credentials.readCredential(userId, credentialId);
+
+    if (credential === undefined || options.prepareCredential === undefined) {
+      return credential;
+    }
+
+    const preparedSecret = await options.prepareCredential(runtime, credential);
+
+    if (preparedSecret === undefined) {
+      return credential;
+    }
+
+    credentials.updateCredentialSecret(
+      userId,
+      credentialId,
+      preparedSecret,
+      runtime.now(),
+    );
+    return { ...credential, secret: preparedSecret };
+  };
+
   return {
     begin: (request) => connectedAccount.begin(request),
     complete: (request) => connectedAccount.complete(request),
     credentials: (request) => credentials.credentials(request),
+    readCredential,
     remove: (request, credentialId) =>
       credentials.remove(request, credentialId),
   };

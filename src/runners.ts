@@ -16,6 +16,7 @@ import { RUNNER_INSTALLER_PATH } from "./routes.ts";
 import { quoteShellValue, renderRunnerInstaller } from "./runner-installer.ts";
 import {
   RunnerStore,
+  type RunnerConnection,
   type RunnerMetadata,
   type RunnerRegistrationResult,
 } from "./runner-store.ts";
@@ -30,11 +31,13 @@ type RunnerDependencies = Pick<
 >;
 
 export interface RunnerIntegration {
+  authenticatedRunner(request: Request): RunnerConnection | undefined;
   collection(request: Request): Response;
   heartbeat(request: Request): Response;
   installer(request: Request): Response;
   register(request: Request): Promise<Response>;
   remove(request: Request, runnerId: string): Response;
+  runnerIsAvailable(userId: string, runnerId: string): boolean;
 }
 
 function defaultRandomToken(): string {
@@ -123,6 +126,11 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
     );
   }
 
+  authenticatedRunner(request: Request): RunnerConnection | undefined {
+    const token = readBearerToken(request);
+    return token === undefined ? undefined : this.#store.authenticate(token);
+  }
+
   collection(request: Request): Response {
     return withAuthenticatedUser(this.#auth, request, (user) =>
       this.#collectionForUser(request, user),
@@ -155,6 +163,10 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
             : createApiError("not_found", 404),
         )
       : createMethodNotAllowedResponse("DELETE");
+  }
+
+  runnerIsAvailable(userId: string, runnerId: string): boolean {
+    return this.#store.isAvailable(userId, runnerId, this.#now());
   }
 
   #collectionForUser(

@@ -18,7 +18,9 @@ import { createRunnerIntegration } from "../runners.ts";
 import {
   createAuthenticatedRequest,
   createAuthenticatedTestDatabase,
+  createRunnerRequest,
   TEST_NOW,
+  TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { takeValue } from "./oauth-test-helpers.ts";
 
@@ -63,22 +65,6 @@ function createSetup(): Setup {
   };
 }
 
-function runnerRequest(
-  path: string,
-  token: string,
-  body?: Readonly<Record<string, string>>,
-): Request {
-  const headers = new Headers({ authorization: `Bearer ${token}` });
-  const init: RequestInit = { headers, method: "POST" };
-
-  if (body !== undefined) {
-    headers.set("content-type", "application/json");
-    init.body = JSON.stringify(body);
-  }
-
-  return new Request(`http://localhost:3000${path}`, init);
-}
-
 function createRunner(setup: Setup): Response {
   return setup.integration.collection(
     createAuthenticatedRequest(RUNNERS_PATH, undefined, "POST"),
@@ -90,7 +76,7 @@ function registrationRequest(
   machineId: string,
   name = "workstation",
 ): Request {
-  return runnerRequest(RUNNER_REGISTER_PATH, token, {
+  return createRunnerRequest(RUNNER_REGISTER_PATH, token, {
     architecture: "x64",
     machineId,
     name,
@@ -118,8 +104,12 @@ async function connectFirstRunner(setup: Setup): Promise<void> {
 
 function heartbeatStatus(setup: Setup, token: string): number {
   return setup.integration.heartbeat(
-    runnerRequest(RUNNER_HEARTBEAT_PATH, token),
+    createRunnerRequest(RUNNER_HEARTBEAT_PATH, token),
   ).status;
+}
+
+function expectRevoked(setup: Setup, token: string): void {
+  expect(heartbeatStatus(setup, token)).toBe(401);
 }
 
 function installerRequest(token: string, download = false): Request {
@@ -252,7 +242,15 @@ describe("runner connections", () => {
     );
     expect(reinstalledComputer.status).toBe(201);
     expect(await reinstalledComputer.json()).toEqual({ id: FIRST_RUNNER_ID });
-    expect(heartbeatStatus(setup, FIRST_TOKEN)).toBe(401);
+    expectRevoked(setup, FIRST_TOKEN);
+    expect(
+      setup.integration.authenticatedRunner(
+        createRunnerRequest(RUNNER_HEARTBEAT_PATH, SECOND_TOKEN),
+      ),
+    ).toEqual({ id: FIRST_RUNNER_ID, userId: TEST_USER_ID });
+    expect(
+      setup.integration.runnerIsAvailable(TEST_USER_ID, FIRST_RUNNER_ID),
+    ).toBeTrue();
 
     const reusedConnectionToken = await setup.integration.register(
       registrationRequest(SECOND_TOKEN, "another-machine"),
@@ -280,7 +278,7 @@ describe("runner connections", () => {
     setup.setNow(TEST_NOW + 30_000);
 
     const heartbeat = setup.integration.heartbeat(
-      runnerRequest(RUNNER_HEARTBEAT_PATH, FIRST_TOKEN),
+      createRunnerRequest(RUNNER_HEARTBEAT_PATH, FIRST_TOKEN),
     );
     expect(heartbeat.status).toBe(204);
 
@@ -311,7 +309,7 @@ describe("runner connections", () => {
       FIRST_RUNNER_ID,
     );
     expect(response.status).toBe(204);
-    expect(heartbeatStatus(setup, FIRST_TOKEN)).toBe(401);
+    expectRevoked(setup, FIRST_TOKEN);
     expect(
       setup.database
         .select({ isDeleted: runners.isDeleted })
