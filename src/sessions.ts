@@ -63,6 +63,10 @@ export type SessionCredentialReaders = Readonly<
   Record<ProviderId, SessionCredentialReader>
 >;
 
+type SessionAction = (
+  credential: ProviderCredentialAccess,
+) => Promise<Response> | Response;
+
 interface AgentModelFactoryOptions {
   readonly credential: AgentProviderCredential;
   readonly model: string;
@@ -82,7 +86,10 @@ interface SessionDependencies {
   readonly randomId?: IdGenerator;
 }
 
-type CreateSessionInput = Omit<CreateAgentSession, "userId">;
+type CreateSessionInput = Omit<
+  CreateAgentSession,
+  "maxContextTokens" | "userId"
+>;
 
 interface CredentialSelection {
   readonly credentialId: string;
@@ -416,9 +423,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
   async #withCredentialAccess(
     userId: string,
     selection: CredentialSelection,
-    action: (
-      credential: ProviderCredentialAccess,
-    ) => Promise<Response> | Response,
+    action: SessionAction,
   ): Promise<Response> {
     let credential: ProviderCredentialAccess | undefined;
 
@@ -439,7 +444,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
   async #withRuntimeAccess(
     userId: string,
     selection: RuntimeSelection,
-    action: (credential: ProviderCredentialAccess) => Response,
+    action: SessionAction,
   ): Promise<Response> {
     if (!this.#runners.runnerIsAvailable(userId, selection.runnerId)) {
       return createApiError("runner_unavailable", 409);
@@ -520,16 +525,24 @@ class DrizzleSessionIntegration implements SessionIntegration {
     user: AuthenticatedUser,
     input: CreateSessionInput,
   ): Promise<Response> {
-    return this.#withRuntimeAccess(user.id, input, (credential) => {
-      const configuredInput = {
-        ...input,
-        model:
-          input.model.length === 0
-            ? defaultAgentModel(input.provider, credential.source)
-            : input.model,
-      };
+    return this.#withRuntimeAccess(user.id, input, async (credential) => {
+      const selectedModel =
+        input.model.length === 0
+          ? defaultAgentModel(input.provider, credential.source)
+          : input.model;
+      let maxContextTokens: number | null = null;
+
+      try {
+        const catalog = await this.#discoverModels(input.provider, credential);
+        maxContextTokens =
+          catalog.models.find(({ id }) => id === selectedModel)
+            ?.contextWindow ?? null;
+      } catch {
+        // Model discovery enhances context display but does not gate a session.
+      }
+
       const detail = this.#store.create(
-        { ...configuredInput, userId: user.id },
+        { ...input, maxContextTokens, model: selectedModel, userId: user.id },
         this.#now(),
       );
       this.#launch(detail, credential);
@@ -620,6 +633,9 @@ class DrizzleSessionIntegration implements SessionIntegration {
         },
         initialMessages: this.#store.conversation(detail.id),
         model,
+        recordContextTokens: (tokens) => {
+          this.#store.updateContextTokens(detail.id, tokens, this.#now());
+        },
         recordMessage: (message) => {
           this.#store.appendAgentMessage(detail.id, message, this.#now());
         },

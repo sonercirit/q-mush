@@ -120,21 +120,26 @@ task-specific progress, guesses, or sensitive values.
   another user's registration remains protected. Runner tokens never appear in
   list responses.
 - `src/sessions.ts`, `src/session-store.ts`, and `src/agent-model.ts` implement
-  persistent first-party coding sessions without an external agent harness. The
-  server owns the model/tool loop so provider secrets never enter browser or
-  runner work payloads; `src/agent-tools.ts` defines the Pi-compatible `read`,
-  `bash`, `edit`, and `write` base tools plus the `parallel` wrapper,
-  `src/runner-command-broker.ts` queues their authenticated calls, and the
-  runner polls `/api/runner/work`, executes them in `src/runner-tools.ts`, and
-  returns results. The new-session working-directory field retains manual entry
-  and opens the interactive browser in `src/directory-picker-client.tsx`; its
-  controller posts to `/api/runners/:id/directories`, which dispatches the
-  private `list_directories` runner command and returns a canonical path, its
-  parent, and up to 500 child directories. Before each initial or follow-up
-  agent run, the private `read_agent_file` runner command uses
-  `src/runner-agent-file.ts` to load an exact-root `AGENTS.md`, falling back to
-  `CLAUDE.md`; only `AGENTS.md` is used when both exist, and no extra context is
-  added when neither exists.
+  persistent first-party coding sessions without an external agent harness. A
+  session records the latest reported input-token usage (or `Not reported`) and
+  the selected model's discovered context-window limit. Codex catalogs expose
+  the limit as `context_window` or `context_window_size` either directly or
+  under `capabilities`, OpenRouter as `context_length`, and OpenAI API-key
+  catalogs may omit it. The server owns the model/tool loop so provider secrets
+  never enter browser or runner work payloads; `src/agent-tools.ts` defines the
+  Pi-compatible `read`, `bash`, `edit`, and `write` base tools plus the
+  `parallel` wrapper, `src/runner-command-broker.ts` queues their authenticated
+  calls, and the runner polls `/api/runner/work`, executes them in
+  `src/runner-tools.ts`, and returns results. The new-session working-directory
+  field retains manual entry and opens the interactive browser in
+  `src/directory-picker-client.tsx`; its controller posts to
+  `/api/runners/:id/directories`, which dispatches the private
+  `list_directories` runner command and returns a canonical path, its parent,
+  and up to 500 child directories. Before each initial or follow-up agent run,
+  the private `read_agent_file` runner command uses `src/runner-agent-file.ts`
+  to load an exact-root `AGENTS.md`, falling back to `CLAUDE.md`; only
+  `AGENTS.md` is used when both exist, and no extra context is added when
+  neither exists.
 
   `src/runner-workspace.ts` shares canonical workspace resolution and
   containment with the file tools. The latest agent-file selection is persisted
@@ -151,7 +156,9 @@ task-specific progress, guesses, or sensitive values.
   focus loss, and periodic polls pause so the native picker stays open.
   `src/agent-model-discovery.ts` queries the selected credential's provider for
   compatible models and reasoning metadata; `src/agent-configuration.ts` owns
-  shared catalog types, accepted effort values, and API fallback models. Model
+  shared catalog types, accepted effort values, and API fallback models. The
+  new-session controls use the framework-free custom listbox in
+  `src/custom-select.tsx`; model options show discovered context limits. Model
   and effort selections are persisted with the session. `src/agent-prompt.ts` is
   the shared source for building the model system prompt and its transcript
   display. Provider-returned OpenRouter reasoning and Codex reasoning summaries

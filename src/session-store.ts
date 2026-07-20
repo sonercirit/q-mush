@@ -19,7 +19,12 @@ import type {
 
 export interface CreateAgentSession extends Pick<
   AgentSessionSummary,
-  "model" | "provider" | "reasoningEffort" | "runnerId" | "workingDirectory"
+  | "maxContextTokens"
+  | "model"
+  | "provider"
+  | "reasoningEffort"
+  | "runnerId"
+  | "workingDirectory"
 > {
   readonly credentialId: string;
   readonly prompt: string;
@@ -58,7 +63,9 @@ function sessionSelection() {
   return {
     createdAt: agentSessions.createdAt,
     credentialId: agentSessions.providerCredentialId,
+    currentContextTokens: agentSessions.currentContextTokens,
     id: agentSessions.id,
+    maxContextTokens: agentSessions.maxContextTokens,
     model: agentSessions.model,
     provider: agentSessions.provider,
     reasoningEffort: agentSessions.reasoningEffort,
@@ -85,7 +92,9 @@ function messageSelection() {
 type StoredSessionSummary = Pick<
   typeof agentSessions.$inferSelect,
   | "createdAt"
+  | "currentContextTokens"
   | "id"
+  | "maxContextTokens"
   | "model"
   | "provider"
   | "reasoningEffort"
@@ -281,6 +290,14 @@ export class SessionStore {
   }
 
   create(input: CreateAgentSession, now: number): AgentSessionDetail {
+    if (
+      input.maxContextTokens !== null &&
+      (!Number.isSafeInteger(input.maxContextTokens) ||
+        input.maxContextTokens <= 0)
+    ) {
+      throw new Error("The agent session context limit is invalid");
+    }
+
     const sessionId = this.#generateId(now);
     const messageId = this.#generateId(now);
 
@@ -290,6 +307,7 @@ export class SessionStore {
         .values({
           ...createdAuditFields(input.userId, now),
           id: sessionId,
+          maxContextTokens: input.maxContextTokens,
           model: input.model,
           provider: input.provider,
           providerCredentialId: input.credentialId,
@@ -388,18 +406,14 @@ export class SessionStore {
     return conversation;
   }
 
-  setAgentFile(
+  #updateRunningSession(
     sessionId: string,
-    agentFile: AgentFile | null,
+    values: Partial<typeof agentSessions.$inferInsert>,
     now: number,
   ): void {
     this.#database
       .update(agentSessions)
-      .set({
-        agentFileContent: agentFile?.content ?? null,
-        agentFileName: agentFile?.name ?? null,
-        ...updatedAuditFields(SYSTEM_ID, now),
-      })
+      .set({ ...values, ...updatedAuditFields(SYSTEM_ID, now) })
       .where(
         and(
           activeSessionCondition({ id: sessionId }),
@@ -407,6 +421,33 @@ export class SessionStore {
         ),
       )
       .run();
+  }
+
+  setAgentFile(
+    sessionId: string,
+    agentFile: AgentFile | null,
+    now: number,
+  ): void {
+    this.#updateRunningSession(
+      sessionId,
+      {
+        agentFileContent: agentFile?.content ?? null,
+        agentFileName: agentFile?.name ?? null,
+      },
+      now,
+    );
+  }
+
+  updateContextTokens(sessionId: string, tokens: number, now: number): void {
+    if (!Number.isSafeInteger(tokens) || tokens < 0) {
+      throw new Error("The agent session context usage is invalid");
+    }
+
+    this.#updateRunningSession(
+      sessionId,
+      { currentContextTokens: tokens },
+      now,
+    );
   }
 
   appendAgentMessage(

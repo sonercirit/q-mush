@@ -22,7 +22,9 @@ export interface AgentSessionMessage {
 export interface AgentSessionSummary {
   readonly createdAt: number;
   readonly credentialId: string;
+  readonly currentContextTokens: number;
   readonly id: string;
+  readonly maxContextTokens: number | null;
   readonly model: string;
   readonly provider: ProviderId;
   readonly reasoningEffort: AgentReasoningEffort | null;

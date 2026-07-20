@@ -57,6 +57,13 @@
       "when": 1784531749727,
       "tag": "0007_foamy_mercury",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1784561914460,
+      "tag": "0008_dry_prowler",
+      "breakpoints": true
     }
   ]
 }

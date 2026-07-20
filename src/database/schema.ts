@@ -107,6 +107,10 @@ export const agentSessions = sqliteTable(
       .references(() => providerCredentials.id, { onDelete: "restrict" }),
     provider: providerColumn(),
     model: text("model").notNull(),
+    currentContextTokens: integer("current_context_tokens")
+      .notNull()
+      .default(0),
+    maxContextTokens: integer("max_context_tokens"),
     agentFileName: text("agent_file_name", { enum: AGENT_FILE_NAMES }),
     agentFileContent: text("agent_file_content"),
     reasoningEffort: text("reasoning_effort", {

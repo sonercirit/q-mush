@@ -3,6 +3,10 @@ import {
   type AgentModelCatalog,
 } from "./agent-configuration.ts";
 import { renderRetryError } from "./client-controls.tsx";
+import {
+  renderCustomSelect,
+  type CustomSelectOption,
+} from "./custom-select.tsx";
 import { renderDirectoryPicker } from "./directory-picker-client.tsx";
 import type { DirectoryPickerState } from "./directory-picker-controller.ts";
 import { createElement, type JsxNode } from "./jsx.ts";
@@ -45,6 +49,8 @@ export interface SessionViewState {
   readonly followUp: string;
   readonly loadingDetail: boolean;
   readonly modelDiscovery: SessionModelDiscoveryState;
+  readonly openSelect:
+    "credential" | "model" | "reasoningEffort" | "runnerId" | undefined;
   readonly selectedId: string | undefined;
   readonly sending: boolean;
   readonly sessions: readonly AgentSessionSummary[] | undefined;
@@ -129,15 +135,36 @@ function selectedCredential(
   );
 }
 
-function renderSelectOptions(
-  options: readonly { readonly label: string; readonly value: string }[],
-  selectedValue: string,
-): JsxNode {
-  return options.map((option) => (
-    <option selected={selectedValue === option.value} value={option.value}>
-      {option.label}
-    </option>
-  ));
+function formatTokenCount(tokens: number): string {
+  if (tokens < 1_000) {
+    return String(tokens);
+  }
+
+  const units =
+    tokens < 1_000_000
+      ? { divisor: 1_000, suffix: "K" }
+      : { divisor: 1_000_000, suffix: "M" };
+  const scaled = tokens / units.divisor;
+  const value =
+    scaled >= 100 || Number.isInteger(scaled)
+      ? scaled.toFixed(0)
+      : scaled.toFixed(1);
+  return `${value}${units.suffix}`;
+}
+
+function sessionContextLabel(
+  session: Pick<
+    AgentSessionSummary,
+    "currentContextTokens" | "maxContextTokens" | "status"
+  >,
+): string {
+  const current =
+    session.currentContextTokens === 0
+      ? session.status === "queued" || session.status === "running"
+        ? "Pending"
+        : "Not reported"
+      : formatTokenCount(session.currentContextTokens);
+  return `Context: ${current} / ${session.maxContextTokens === null ? "Not reported" : formatTokenCount(session.maxContextTokens)}`;
 }
 
 function sessionModelLabel(
@@ -218,19 +245,43 @@ function renderDirectoryInput(
   );
 }
 
-function renderSessionSelect(
-  options: SessionControlOptions & {
-    readonly children: JsxNode;
-    readonly required?: boolean;
-  },
-): JsxNode {
-  return renderSessionField(
-    options.id,
-    options.label,
-    <select {...sessionControlAttributes(options, options.required !== false)}>
-      {options.children}
-    </select>,
-  );
+function credentialSelectOptions(
+  credentials: readonly CredentialOption[],
+): readonly CustomSelectOption[] {
+  return credentials.map((option) => ({
+    label: `${option.provider === "openai" ? "OpenAI" : "OpenRouter"} · ${option.credential.label}`,
+    value: optionValue(option),
+  }));
+}
+
+function runnerSelectOptions(
+  runners: readonly RunnerSummary[],
+): readonly CustomSelectOption[] {
+  return runners.map((runner) => ({
+    label: runner.name ?? "Online runner",
+    value: runner.id,
+  }));
+}
+
+function selectValue(
+  options: readonly CustomSelectOption[],
+  requested: string,
+): string {
+  return options.some((option) => option.value === requested)
+    ? requested
+    : (options[0]?.value ?? "");
+}
+
+function modelSelectOptions(
+  models: AgentModelCatalog["models"],
+): readonly CustomSelectOption[] {
+  return models.map(({ contextWindow, id, label }) => ({
+    ...(contextWindow === null
+      ? {}
+      : { detail: `${formatTokenCount(contextWindow)} context` }),
+    label,
+    value: id,
+  }));
 }
 
 function renderNewSessionForm(
@@ -239,7 +290,14 @@ function renderNewSessionForm(
   credentials: readonly CredentialOption[],
 ): JsxNode {
   const resourcesAvailable = runners.length > 0 && credentials.length > 0;
-  const credential = selectedCredential(credentials, state.draft.credential);
+  const runnerOptions = runnerSelectOptions(runners);
+  const selectedRunnerId = selectValue(runnerOptions, state.draft.runnerId);
+  const credentialOptions = credentialSelectOptions(credentials);
+  const selectedCredentialValue = selectValue(
+    credentialOptions,
+    state.draft.credential,
+  );
+  const credential = selectedCredential(credentials, selectedCredentialValue);
   const credentialValue =
     credential === undefined ? undefined : optionValue(credential);
   const discovery =
@@ -261,72 +319,64 @@ function renderNewSessionForm(
       className="mt-6 grid gap-4 rounded-2xl border border-white/10 bg-slate-950/60 p-5 lg:grid-cols-2"
       data-action="create-session"
     >
-      {renderSessionSelect({
-        children: runners.map((runner) => (
-          <option
-            selected={state.draft.runnerId === runner.id}
-            value={runner.id}
-          >
-            {runner.name ?? "Online runner"}
-          </option>
-        )),
+      {renderCustomSelect({
         disabled: state.creating || runners.length === 0,
+        emptyLabel: "No online runners",
         id: "session-runner",
         label: "Runner",
         name: "runnerId",
+        open: state.openSelect === "runnerId",
+        options: runnerOptions,
+        required: true,
+        selectedValue: selectedRunnerId,
       })}
-      {renderSessionSelect({
-        children: credentials.map((option) => (
-          <option
-            selected={state.draft.credential === optionValue(option)}
-            value={optionValue(option)}
-          >
-            {`${option.provider === "openai" ? "OpenAI" : "OpenRouter"} · ${option.credential.label}`}
-          </option>
-        )),
+      {renderCustomSelect({
         disabled: state.creating || credentials.length === 0,
+        emptyLabel: "No model credentials",
         id: "session-credential",
         label: "Model credential",
         name: "credential",
+        open: state.openSelect === "credential",
+        options: credentialOptions,
+        required: true,
+        selectedValue: selectedCredentialValue,
       })}
       {renderDirectoryInput(state, runners.length > 0)}
-      {renderSessionSelect({
-        children:
-          models.length === 0 ? (
-            <option value="">
-              {discovery?.error === undefined
-                ? loadingModels
-                  ? "Loading models…"
-                  : "No compatible models"
-                : "Models unavailable"}
-            </option>
-          ) : (
-            renderSelectOptions(
-              models.map(({ id, label }) => ({ label, value: id })),
-              modelValue,
-            )
-          ),
+      {renderCustomSelect({
         disabled: state.creating || models.length === 0,
+        emptyLabel:
+          discovery?.error === undefined
+            ? loadingModels
+              ? "Loading models…"
+              : "No compatible models"
+            : "Models unavailable",
         id: "session-model",
         label: "Model",
         name: "model",
+        open: state.openSelect === "model",
+        options: modelSelectOptions(models),
+        required: true,
+        selectedValue: modelValue,
       })}
-      {renderSessionSelect({
-        children: renderSelectOptions(
-          [
-            { label: "Model default", value: "" },
-            ...(model?.reasoningEfforts ?? []).map((effort) => ({
-              label: reasoningEffortLabel(effort),
-              value: effort,
-            })),
-          ],
-          state.draft.reasoningEffort,
-        ),
-        disabled: state.creating || (model?.reasoningEfforts.length ?? 0) === 0,
+      {renderCustomSelect({
+        disabled:
+          state.creating ||
+          models.length === 0 ||
+          (model?.reasoningEfforts.length ?? 0) === 0,
+        emptyLabel: "Model default",
         id: "session-reasoning-effort",
         label: "Reasoning effort",
         name: "reasoningEffort",
+        open: state.openSelect === "reasoningEffort",
+        options: [
+          { label: "Model default", value: "" },
+          ...(model?.reasoningEfforts ?? []).map((effort) => ({
+            label: reasoningEffortLabel(effort),
+            value: effort,
+          })),
+        ],
         required: false,
+        selectedValue: state.draft.reasoningEffort,
       })}
       <div className="lg:col-span-2">
         <label
@@ -450,7 +500,7 @@ function renderDetail(state: SessionViewState): JsxNode {
             {statusBadge(detail.status)}
           </div>
           <p className="mt-2 truncate text-xs text-slate-500">
-            {`${sessionModelLabel(detail)} · ${detail.workingDirectory} · Agent file: ${detail.agentFile?.name ?? "None"}`}
+            {`${sessionModelLabel(detail)} · ${sessionContextLabel(detail)} · ${detail.workingDirectory} · Agent file: ${detail.agentFile?.name ?? "None"}`}
           </p>
         </div>
         {active ? (

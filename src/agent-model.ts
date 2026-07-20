@@ -348,6 +348,30 @@ function readMessageThinking(
     : readReasoningDetails(message["reasoning_details"]);
 }
 
+function readTokenCount(value: unknown, key: string): number | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const count = value[key];
+  return typeof count === "number" && Number.isSafeInteger(count) && count >= 0
+    ? count
+    : undefined;
+}
+
+function readContextTokens(value: unknown, usageKey: string): number | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const usage = value[usageKey];
+  return (
+    readTokenCount(usage, "input_tokens") ??
+    readTokenCount(usage, "prompt_tokens") ??
+    null
+  );
+}
+
 function readTurn(value: unknown): AgentModelTurn {
   const choices = readRequiredArray(
     value,
@@ -378,6 +402,7 @@ function readTurn(value: unknown): AgentModelTurn {
 
   return {
     content: typeof content === "string" ? content : "",
+    contextTokens: readContextTokens(value, "usage"),
     thinking: readMessageThinking(message),
     toolCalls: (rawToolCalls ?? []).map(readToolCall),
   };
@@ -434,6 +459,10 @@ function readCodexOutputItem(
 }
 
 function readCodexTurn(value: unknown): AgentModelTurn {
+  if (!isRecord(value)) {
+    throw new Error("The Codex model returned an invalid response");
+  }
+
   const output = readRequiredArray(
     value,
     "output",
@@ -471,7 +500,12 @@ function readCodexTurn(value: unknown): AgentModelTurn {
     }
   }
 
-  return { content: text.join(""), thinking: thinking.join("\n\n"), toolCalls };
+  return {
+    content: text.join(""),
+    contextTokens: readContextTokens(value, "usage"),
+    thinking: thinking.join("\n\n"),
+    toolCalls,
+  };
 }
 
 function readCodexOutputIndex(

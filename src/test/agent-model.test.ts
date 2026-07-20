@@ -49,9 +49,13 @@ function codexModel(
   });
 }
 
-function codexEventResponse(output: readonly unknown[], prefix = ""): Response {
+function codexEventResponse(
+  output: readonly unknown[],
+  prefix = "",
+  usage?: Readonly<Record<string, number>>,
+): Response {
   const completed = {
-    response: { output },
+    response: { output, ...(usage === undefined ? {} : { usage }) },
     type: "response.completed",
   };
   return new Response(
@@ -104,6 +108,7 @@ describe("chat completions agent model", () => {
             },
           },
         ],
+        usage: { prompt_tokens: 12_345 },
       },
       capture,
     );
@@ -114,6 +119,7 @@ describe("chat completions agent model", () => {
 
     expect(turn).toEqual({
       content: "Inspecting.",
+      contextTokens: 12_345,
       thinking: "I should inspect the workspace first.",
       toolCalls: [expectedTool],
     });
@@ -184,18 +190,22 @@ describe("chat completions agent model", () => {
       fetch: (request) => {
         capture.request = request;
         return Promise.resolve(
-          codexEventResponse([
-            {
-              summary: [
-                {
-                  text: "I checked the prior tool result.",
-                  type: "summary_text",
-                },
-              ],
-              type: "reasoning",
-            },
-            DONE_CODEX_OUTPUT,
-          ]),
+          codexEventResponse(
+            [
+              {
+                summary: [
+                  {
+                    text: "I checked the prior tool result.",
+                    type: "summary_text",
+                  },
+                ],
+                type: "reasoning",
+              },
+              DONE_CODEX_OUTPUT,
+            ],
+            "",
+            { input_tokens: 23_456 },
+          ),
         );
       },
       model: "gpt-5-codex",
@@ -224,6 +234,7 @@ describe("chat completions agent model", () => {
     ];
     expect(await model.complete(conversation)).toEqual({
       content: "Done.",
+      contextTokens: 23_456,
       thinking: "I checked the prior tool result.",
       toolCalls: [],
     });
@@ -276,6 +287,7 @@ describe("chat completions agent model", () => {
 
     expect(await completeHello(model)).toEqual({
       content: "Hello there.",
+      contextTokens: null,
       thinking: "I considered the request.",
       toolCalls: [
         {
@@ -297,6 +309,7 @@ describe("chat completions agent model", () => {
 
     expect(await completeHello(model)).toEqual({
       content: "Done.",
+      contextTokens: null,
       thinking: "",
       toolCalls: [],
     });

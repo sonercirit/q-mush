@@ -73,11 +73,47 @@ function reasoningEfforts(value: unknown): readonly AgentReasoningEffort[] {
   return efforts;
 }
 
+function positiveSafeInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+    ? value
+    : null;
+}
+
+function rawContextWindow(
+  value: Readonly<Record<string, unknown>>,
+  key: string,
+): unknown {
+  const direct = value[key];
+
+  if (direct !== undefined) {
+    return direct;
+  }
+
+  const capabilities = value["capabilities"];
+  return isRecord(capabilities) ? capabilities[key] : undefined;
+}
+
+function modelContextWindow(
+  value: Readonly<Record<string, unknown>>,
+  keys: readonly string[],
+): number | null {
+  for (const key of keys) {
+    const contextWindow = positiveSafeInteger(rawContextWindow(value, key));
+
+    if (contextWindow !== null) {
+      return contextWindow;
+    }
+  }
+
+  return null;
+}
+
 function modelOption(
   value: unknown,
   idKey: string,
   labelKey: string,
   efforts: readonly AgentReasoningEffort[],
+  contextKeys: readonly string[],
 ): AgentModelOption | undefined {
   if (!isRecord(value)) {
     return undefined;
@@ -90,6 +126,7 @@ function modelOption(
   }
 
   return {
+    contextWindow: modelContextWindow(value, contextKeys),
     id,
     label: modelLabel(value[labelKey], id),
     reasoningEfforts: efforts,
@@ -143,6 +180,7 @@ function readCodexCatalog(value: unknown): AgentModelCatalog {
       "slug",
       "display_name",
       reasoningEfforts(item["supported_reasoning_levels"]),
+      ["context_window", "context_window_size"],
     );
 
     if (model !== undefined) {
@@ -213,6 +251,7 @@ function readOpenRouterCatalog(
       "id",
       "name",
       openRouterReasoningEfforts(item, supportedParameters),
+      ["context_length"],
     );
 
     if (model !== undefined) {
@@ -250,7 +289,15 @@ function readOpenAiCatalog(
   credential: ProviderCredentialAccess,
 ): AgentModelCatalog {
   const models = providerModelList(value, "data")
-    .map((item) => modelOption(item, "id", "id", []))
+    .map((item) =>
+      modelOption(
+        item,
+        "id",
+        "id",
+        [],
+        ["context_window", "context_window_size"],
+      ),
+    )
     .filter(
       (model): model is AgentModelOption =>
         model !== undefined && supportsOpenAiAgentLoop(model.id),

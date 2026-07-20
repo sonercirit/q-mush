@@ -8,16 +8,22 @@ async function runRecordedLoop(
   model: ScriptedAgentModel,
   prompt: string,
   executeTool: ExecuteTool,
+  expectedContextTokens?: number,
 ): Promise<AgentRecordedMessage[]> {
+  const recordedContextTokens: number[] = [];
   const recorded: AgentRecordedMessage[] = [];
   await runAgentLoop({
     executeTool,
     initialMessages: [{ content: prompt, role: "user" }],
     model,
+    recordContextTokens: (tokens) => {
+      recordedContextTokens.push(tokens);
+    },
     recordMessage: (message) => {
       recorded.push(message);
     },
   });
+  expect(recordedContextTokens.at(-1)).toBe(expectedContextTokens);
   return recorded;
 }
 
@@ -41,11 +47,16 @@ describe("first-party agent loop", () => {
     };
     const model = new ScriptedAgentModel([
       {
-        content: assistantMessage.content,
+        content: "I will inspect the project.",
+        contextTokens: 12_000,
         thinking: "I should read the project documentation first.",
         toolCalls: assistantMessage.toolCalls,
       },
-      { content: "The project is ready.", toolCalls: [] },
+      {
+        content: "The project is ready.",
+        contextTokens: 13_000,
+        toolCalls: [],
+      },
     ]);
     const executed: string[] = [];
     const recorded = await runRecordedLoop(
@@ -55,6 +66,7 @@ describe("first-party agent loop", () => {
         executed.push(`${call.name}:${String(call.arguments["path"])}`);
         return Promise.resolve("# Q Mush");
       },
+      13_000,
     );
 
     expect(executed).toEqual(["read:README.md"]);

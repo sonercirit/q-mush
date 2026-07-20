@@ -23,6 +23,7 @@ function createTestSession(store: SessionStore) {
   return store.create(
     {
       credentialId: CREDENTIAL_ID,
+      maxContextTokens: 200_000,
       model: "gpt-4.1-mini",
       prompt: "Inspect the repository\nand make it shine",
       provider: "openai",
@@ -86,6 +87,8 @@ describe("session store", () => {
     expect(created.agentFile).toBeNull();
     expect(created.id).toBe(SESSION_ID);
     expect(created.status).toBe("queued");
+    expect(created.currentContextTokens).toBe(0);
+    expect(created.maxContextTokens).toBe(200_000);
     expect(created.reasoningEffort).toBe("high");
     expect(created.title).toBe("Inspect the repository");
     expect(created.messages).toEqual([

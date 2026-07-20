@@ -4,18 +4,12 @@ import {
   bindActionClicks,
   submitFormOnControlEnter,
 } from "./client-actions.ts";
-import {
-  DirectoryPickerController,
-  initialDirectoryPickerState,
-} from "./directory-picker-controller.ts";
+import { customSelectValues } from "./custom-select-controller.ts";
+import { DirectoryPickerController } from "./directory-picker-controller.ts";
 import type { ProviderId } from "./provider-credential-store.ts";
 import { RevisionState } from "./revision-state.ts";
 import { SESSION_MODELS_PATH, SESSIONS_PATH } from "./routes.ts";
-import type {
-  SessionDraft,
-  SessionModelDiscoveryState,
-  SessionViewState,
-} from "./session-client.tsx";
+import type { SessionDraft, SessionViewState } from "./session-client.tsx";
 import {
   readAgentModelCatalog,
   readSessionDetail,
@@ -26,45 +20,16 @@ import type {
   AgentSessionDetail,
   AgentSessionSummary,
 } from "./session-model.ts";
+import {
+  applySessionModelCatalog,
+  chooseSessionOption,
+} from "./session-selection.ts";
+import {
+  initialSessionViewState,
+  sessionModelDiscoveryState,
+} from "./session-state.ts";
 
 type ChangeListener = () => void;
-
-function initialDraft(): SessionDraft {
-  return {
-    credential: "",
-    model: "",
-    prompt: "",
-    reasoningEffort: "",
-    runnerId: "",
-    workingDirectory: ".",
-  };
-}
-
-function modelDiscoveryState(
-  credential: string | undefined,
-  loading: boolean,
-  catalog?: AgentModelCatalog,
-  error?: string,
-): SessionModelDiscoveryState {
-  return { catalog, credential, error, loading };
-}
-
-function initialState(): SessionViewState {
-  return {
-    creating: false,
-    detail: undefined,
-    directoryPicker: initialDirectoryPickerState(),
-    draft: initialDraft(),
-    error: undefined,
-    followUp: "",
-    loadingDetail: false,
-    modelDiscovery: modelDiscoveryState(undefined, false),
-    selectedId: undefined,
-    sending: false,
-    sessions: undefined,
-    stopping: false,
-  };
-}
 
 function formString(form: HTMLFormElement, name: string): string {
   const value = new FormData(form).get(name);
@@ -140,7 +105,7 @@ export class SessionController {
   readonly #view: RevisionState<SessionViewState>;
 
   constructor(onChange: ChangeListener) {
-    this.#view = new RevisionState(initialState(), onChange);
+    this.#view = new RevisionState(initialSessionViewState(), onChange);
     this.#directoryPicker = new DirectoryPickerController(() => {
       this.#view.patch({ directoryPicker: this.#directoryPicker.state });
     });
@@ -186,7 +151,37 @@ export class SessionController {
     }
 
     bindActionClicks(panel, (control, action) => {
-      if (action === "select-session") {
+      if (action === "toggle-session-select") {
+        const name = control.dataset["selectName"];
+
+        if (
+          name === "credential" ||
+          name === "model" ||
+          name === "reasoningEffort" ||
+          name === "runnerId"
+        ) {
+          this.#view.patch({
+            openSelect: this.#view.value.openSelect === name ? undefined : name,
+          });
+        }
+      } else if (action === "choose-session-option") {
+        const select = control.closest("[data-custom-select]");
+        const name = control.dataset["selectName"];
+        const value = control.dataset["optionValue"];
+        if (
+          select !== null &&
+          name !== undefined &&
+          value !== undefined &&
+          select.getAttribute("data-custom-select") === name
+        ) {
+          const availableValues = customSelectValues(select);
+
+          if (availableValues.includes(value)) {
+            this.#rememberCreateForm(control);
+            this.#chooseOption(name, value, availableValues);
+          }
+        }
+      } else if (action === "select-session") {
         const sessionId = control.dataset["sessionId"];
 
         if (sessionId !== undefined) {
@@ -199,13 +194,7 @@ export class SessionController {
       } else if (action === "retry-models") {
         void this.#ensureModels(this.#view.value.draft.credential, true);
       } else if (action === "open-directory-picker") {
-        const form = control.closest<HTMLFormElement>(
-          'form[data-action="create-session"]',
-        );
-
-        if (form !== null) {
-          this.#rememberDraft(form);
-        }
+        this.#rememberCreateForm(control);
 
         const draft = this.#view.value.draft;
 
@@ -261,8 +250,8 @@ export class SessionController {
       directoryPicker.focus();
     }
 
-    const credential = panel.querySelector<HTMLSelectElement>(
-      'select[name="credential"]',
+    const credential = panel.querySelector<HTMLInputElement>(
+      'input[type="hidden"][name="credential"]',
     )?.value;
 
     if (credential !== undefined && credential.length > 0) {
@@ -302,7 +291,7 @@ export class SessionController {
     this.#directoryPicker.reset();
     this.#modelCatalogs.clear();
     this.#modelRequest += 1;
-    this.#view.reset(initialState());
+    this.#view.reset(initialSessionViewState());
   }
 
   async #loadSessions(revision: number, initial: boolean): Promise<void> {
@@ -439,6 +428,43 @@ export class SessionController {
     }
   }
 
+  #rememberCreateForm(control: Element): void {
+    const form = control.closest<HTMLFormElement>(
+      'form[data-action="create-session"]',
+    );
+
+    if (form !== null) {
+      this.#rememberDraft(form);
+    }
+  }
+
+  #chooseOption(
+    name: string,
+    value: string,
+    availableValues: readonly string[],
+  ): void {
+    const panel = this.#view.value;
+    const draft = chooseSessionOption(
+      panel,
+      {
+        availableValues,
+        models: panel.modelDiscovery.catalog,
+      },
+      name,
+      value,
+    );
+
+    if (draft === undefined) {
+      return;
+    }
+
+    this.#view.patch({ draft, openSelect: undefined });
+
+    if (name === "credential") {
+      void this.#ensureModels(value);
+    }
+  }
+
   #rememberDraft(form: HTMLFormElement, inputName?: string): void {
     const draft: SessionDraft = {
       credential: formString(form, "credential"),
@@ -461,21 +487,14 @@ export class SessionController {
   }
 
   #applyModelCatalog(credential: string, catalog: AgentModelCatalog): void {
-    const current = this.#view.value.draft;
-    const model = catalog.models.some(({ id }) => id === current.model)
-      ? current.model
-      : (catalog.defaultModel ?? catalog.models[0]?.id ?? "");
-    const efforts = catalog.models.find(
-      ({ id }) => id === model,
-    )?.reasoningEfforts;
-    const reasoningEffort = efforts?.some(
-      (effort) => effort === current.reasoningEffort,
-    )
-      ? current.reasoningEffort
-      : "";
     this.#view.patch({
-      draft: { ...current, credential, model, reasoningEffort },
-      modelDiscovery: modelDiscoveryState(credential, false, catalog),
+      draft: applySessionModelCatalog(
+        this.#view.value.draft,
+        credential,
+        catalog,
+      ),
+      modelDiscovery: sessionModelDiscoveryState(credential, false, catalog),
+      openSelect: undefined,
     });
   }
 
@@ -516,7 +535,7 @@ export class SessionController {
 
     const request = (this.#modelRequest += 1);
     this.#view.patch({
-      modelDiscovery: modelDiscoveryState(credentialValue, true),
+      modelDiscovery: sessionModelDiscoveryState(credentialValue, true),
     });
 
     try {
@@ -540,7 +559,7 @@ export class SessionController {
         this.#view.value.draft.credential === credentialValue
       ) {
         this.#view.patch({
-          modelDiscovery: modelDiscoveryState(
+          modelDiscovery: sessionModelDiscoveryState(
             credentialValue,
             false,
             undefined,

@@ -64,6 +64,7 @@ export type AgentRecordedMessage =
 
 export interface AgentModelTurn {
   readonly content: string;
+  readonly contextTokens: number | null;
   readonly thinking: string;
   readonly toolCalls: readonly AgentToolCall[];
 }
@@ -84,6 +85,7 @@ interface AgentLoopOptions {
   readonly recordMessage: (
     message: AgentRecordedMessage,
   ) => Promise<void> | void;
+  readonly recordContextTokens?: (tokens: number) => Promise<void> | void;
   readonly signal?: AbortSignal;
 }
 
@@ -121,12 +123,22 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<void> {
       });
     }
 
+    if (
+      turn.contextTokens !== null &&
+      (turn.contextTokens < 0 || !Number.isSafeInteger(turn.contextTokens))
+    ) {
+      throw new Error("The model returned invalid context usage");
+    }
+
     const assistantMessage: AgentConversationMessage = {
       content: turn.content,
       role: "assistant",
       toolCalls: turn.toolCalls,
     };
     await options.recordMessage(assistantMessage);
+    if (turn.contextTokens !== null) {
+      await options.recordContextTokens?.(turn.contextTokens);
+    }
     messages.push(assistantMessage);
 
     if (turn.toolCalls.length === 0) {

@@ -26,19 +26,37 @@ function readModelReasoningEfforts(
   return value;
 }
 
+function readPositiveSafeInteger(value: unknown): number | null {
+  if (typeof value !== "number" || value <= 0) {
+    return null;
+  }
+
+  return Number.isSafeInteger(value) ? value : null;
+}
+
 function readModelOption(value: unknown): AgentModelOption {
   if (!isRecord(value)) {
     throw new Error("The server returned an invalid agent model");
   }
 
+  const contextWindowValue =
+    value["contextWindow"] === undefined
+      ? value["context_window"]
+      : value["contextWindow"];
+  const contextWindow = readPositiveSafeInteger(contextWindowValue);
   const id = value["id"];
   const label = value["label"];
 
-  if (!isAgentModelId(id) || typeof label !== "string") {
+  if (
+    !isAgentModelId(id) ||
+    typeof label !== "string" ||
+    (contextWindowValue !== null && contextWindow === null)
+  ) {
     throw new Error("The server returned an invalid agent model");
   }
 
   return {
+    contextWindow,
     id,
     label,
     reasoningEfforts: readModelReasoningEfforts(value["reasoningEfforts"]),
@@ -100,7 +118,9 @@ function readSummary(value: unknown): AgentSessionSummary {
 
   const createdAt = readFiniteNumber(value["createdAt"]);
   const credentialId = value["credentialId"];
+  const currentContextTokens = readFiniteNumber(value["currentContextTokens"]);
   const id = value["id"];
+  const maxContextTokens = value["maxContextTokens"];
   const model = value["model"];
   const provider = readProvider(value["provider"]);
   const reasoningEffort = readNullableString(value["reasoningEffort"]);
@@ -113,7 +133,14 @@ function readSummary(value: unknown): AgentSessionSummary {
   if (
     createdAt === undefined ||
     typeof credentialId !== "string" ||
+    currentContextTokens === undefined ||
+    currentContextTokens < 0 ||
+    !Number.isSafeInteger(currentContextTokens) ||
     typeof id !== "string" ||
+    (maxContextTokens !== null &&
+      (typeof maxContextTokens !== "number" ||
+        !Number.isSafeInteger(maxContextTokens) ||
+        maxContextTokens <= 0)) ||
     typeof model !== "string" ||
     provider === undefined ||
     reasoningEffort === undefined ||
@@ -130,7 +157,9 @@ function readSummary(value: unknown): AgentSessionSummary {
   return {
     createdAt,
     credentialId,
+    currentContextTokens,
     id,
+    maxContextTokens,
     model,
     provider,
     reasoningEffort,
@@ -219,7 +248,9 @@ export function summaryFromDetail(
   return {
     createdAt: detail.createdAt,
     credentialId: detail.credentialId,
+    currentContextTokens: detail.currentContextTokens,
     id: detail.id,
+    maxContextTokens: detail.maxContextTokens,
     model: detail.model,
     provider: detail.provider,
     reasoningEffort: detail.reasoningEffort,

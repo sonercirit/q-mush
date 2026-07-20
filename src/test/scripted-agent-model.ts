@@ -4,7 +4,8 @@ import type {
   AgentModelTurn,
 } from "../agent-loop.ts";
 
-type ScriptedTurn = Omit<AgentModelTurn, "thinking"> & {
+type ScriptedTurn = Omit<AgentModelTurn, "contextTokens" | "thinking"> & {
+  readonly contextTokens?: number | null;
   readonly thinking?: string;
 };
 
@@ -15,6 +16,8 @@ export class ScriptedAgentModel implements AgentModel {
   constructor(turns: ScriptedTurn[]) {
     this.#turns = turns.map((turn) => ({
       ...turn,
+      contextTokens:
+        turn.contextTokens === undefined ? null : turn.contextTokens,
       thinking: turn.thinking ?? "",
     }));
   }

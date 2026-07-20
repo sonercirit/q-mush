@@ -187,12 +187,13 @@ async function connectedSetup(
 function createSessionRequest(
   includeModel = true,
   reasoningEffort = "high",
+  model = "gpt-4.1-mini",
 ): Request {
   return createAuthenticatedRequest(
     SESSIONS_PATH,
     {
       credentialId: CREDENTIAL_ID,
-      ...(includeModel ? { model: "gpt-4.1-mini" } : {}),
+      ...(includeModel ? { model } : {}),
       prompt: "Inspect README.md",
       provider: "openai",
       reasoningEffort,
@@ -355,6 +356,7 @@ describe("agent sessions", () => {
     const model = new ScriptedAgentModel([
       {
         content: "Reading the file.",
+        contextTokens: 12_345,
         thinking: "I need to inspect README before answering.",
         toolCalls: [
           {
@@ -364,8 +366,8 @@ describe("agent sessions", () => {
           },
         ],
       },
-      { content: "README inspected.", toolCalls: [] },
-      { content: "Follow-up complete.", toolCalls: [] },
+      { content: "README inspected.", contextTokens: 13_000, toolCalls: [] },
+      { content: "Follow-up complete.", contextTokens: 14_000, toolCalls: [] },
     ]);
     const { database, selectedReasoningEfforts, sessions } =
       await connectedSetup(model);
@@ -373,7 +375,9 @@ describe("agent sessions", () => {
 
     expect(createResponse.status).toBe(201);
     expect(await createResponse.json()).toMatchObject({
+      currentContextTokens: 0,
       id: SESSION_ID,
+      maxContextTokens: null,
       reasoningEffort: "high",
       status: "queued",
       title: "Inspect README.md",
@@ -414,6 +418,7 @@ describe("agent sessions", () => {
       "I need to inspect README before answering.",
     );
     expect(JSON.stringify(idle)).toContain("# Q Mush");
+    expect(idle).toMatchObject({ currentContextTokens: 13_000 });
 
     const followUp = await sessions.message(
       createAuthenticatedRequest(
@@ -482,6 +487,7 @@ describe("agent sessions", () => {
       defaultModel: "gpt-discovered",
       models: [
         {
+          contextWindow: 200_000,
           id: "gpt-discovered",
           label: "GPT Discovered",
           reasoningEfforts: ["low", "high"],
@@ -494,7 +500,9 @@ describe("agent sessions", () => {
       return Promise.resolve(catalog);
     };
     const { database, sessions } = await connectedSetup(
-      new ScriptedAgentModel([]),
+      new ScriptedAgentModel([
+        { content: "Discovered model complete.", toolCalls: [] },
+      ]),
       "api_key",
       discoverModels,
     );
@@ -505,6 +513,14 @@ describe("agent sessions", () => {
     );
 
     await expectJsonResponse(response, 200, catalog);
+
+    const createResponse = await sessions.collection(
+      createSessionRequest(true, "high", "gpt-discovered"),
+    );
+    expect(await createResponse.json()).toMatchObject({
+      maxContextTokens: 200_000,
+    });
+    await expectSessionReaches(sessions, createResponse, "idle");
     database.$client.close();
   });
 

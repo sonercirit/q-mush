@@ -38,8 +38,9 @@ function model(
   id: string,
   label: string,
   reasoningEfforts: readonly AgentReasoningEffort[],
+  contextWindow: number | null = null,
 ): AgentModelOption {
-  return { id, label, reasoningEfforts };
+  return { contextWindow, id, label, reasoningEfforts };
 }
 
 function catalog(
@@ -98,6 +99,7 @@ describe("agent model discovery", () => {
             visibility: "hide",
           },
           {
+            capabilities: { context_window: 128_000 },
             display_name: "GPT Live Mini",
             priority: 2,
             slug: "gpt-live-mini",
@@ -108,6 +110,7 @@ describe("agent model discovery", () => {
             visibility: "list",
           },
           {
+            context_window_size: 200_000,
             display_name: "GPT Live",
             priority: 1,
             slug: "gpt-live",
@@ -124,8 +127,8 @@ describe("agent model discovery", () => {
 
     expect(discovered).toEqual(
       catalog("gpt-live", [
-        model("gpt-live", "GPT Live", ["high", "xhigh"]),
-        model("gpt-live-mini", "GPT Live Mini", ["low", "medium"]),
+        model("gpt-live", "GPT Live", ["high", "xhigh"], 200_000),
+        model("gpt-live-mini", "GPT Live Mini", ["low", "medium"], 128_000),
       ]),
     );
     expect(request.url).toStartWith(
@@ -147,6 +150,7 @@ describe("agent model discovery", () => {
             supported_parameters: ["temperature"],
           },
           {
+            context_length: 131_072,
             id: "vendor/reasoning-model",
             name: "Reasoning Model",
             reasoning: {
@@ -161,12 +165,12 @@ describe("agent model discovery", () => {
 
     expect(discovered).toEqual(
       catalog("vendor/reasoning-model", [
-        model("vendor/reasoning-model", "Reasoning Model", [
-          "low",
-          "medium",
-          "high",
-          "max",
-        ]),
+        model(
+          "vendor/reasoning-model",
+          "Reasoning Model",
+          ["low", "medium", "high", "max"],
+          131_072,
+        ),
       ]),
     );
     expect(request.url).toBe("https://openrouter.ai/api/v1/models/user");
@@ -176,7 +180,7 @@ describe("agent model discovery", () => {
   test("discovers compatible models available to an OpenAI API key", async () => {
     const availableModels = [
       { id: "text-embedding-3-small" },
-      { id: "gpt-live" },
+      { context_window: 1_047_576, id: "gpt-live" },
       { id: "gpt-live-audio-preview" },
     ];
     const result = await capturedDiscovery(
@@ -187,7 +191,7 @@ describe("agent model discovery", () => {
     const { catalog: discovered, request } = result;
 
     expect(discovered).toEqual(
-      catalog("gpt-live", [model("gpt-live", "gpt-live", [])]),
+      catalog("gpt-live", [model("gpt-live", "gpt-live", [], 1_047_576)]),
     );
     expect(request.url).toBe("https://api.openai.com/v1/models");
     expectBearer(request, "sk-openai-secret");

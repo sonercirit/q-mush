@@ -19,6 +19,7 @@ const SESSION_STATE: SessionViewState = {
       defaultModel: "gpt-5-codex",
       models: [
         {
+          contextWindow: 200_000,
           id: "gpt-5-codex",
           label: "GPT-5 Codex (discovered)",
           reasoningEfforts: ["medium", "high", "xhigh"],
@@ -30,6 +31,7 @@ const SESSION_STATE: SessionViewState = {
     loading: false,
   },
   loadingDetail: false,
+  openSelect: "model",
   followUp: "",
   error: undefined,
   draft: {
@@ -93,6 +95,7 @@ test("renders the system prompt and model thinking in a transcript", () => {
       },
       createdAt: 1,
       credentialId: "credential-1",
+      currentContextTokens: 0,
       id: "session-1",
       messages: [
         {
@@ -129,6 +132,7 @@ test("renders the system prompt and model thinking in a transcript", () => {
           toolName: "read",
         },
       ],
+      maxContextTokens: 200_000,
       model: "gpt-5-codex",
       provider: "openai",
       reasoningEffort: "high",
@@ -153,6 +157,7 @@ test("renders the system prompt and model thinking in a transcript", () => {
   );
   expect(html).toContain("Always run Bun tests.");
   expect(html).toContain("Agent file: AGENTS.md");
+  expect(html).toContain("Context: Not reported / 200K");
   expect(html).toContain("Tool definitions");
   expect(html).toContain('"name": "read"');
   expect(html).toContain('"name": "bash"');
@@ -250,8 +255,8 @@ test("renders a directory browser beside the working-directory input", () => {
   expect(openHtml).toContain('data-action="close-directory-picker"');
 });
 
-test("renders model and reasoning effort as selects", () => {
-  const html = renderToHtml(
+test("renders custom model and reasoning selectors with context limits", () => {
+  const modelHtml = renderToHtml(
     renderSessionPanel(
       SESSION_STATE,
       RUNNER_STATE,
@@ -260,15 +265,28 @@ test("renders model and reasoning effort as selects", () => {
     ),
   );
 
-  expect(html).toMatch(/<select[^>]*id="session-model"[^>]*name="model"/u);
-  expect(html).not.toMatch(/<input[^>]*id="session-model"/u);
-  expect(html).toContain(
-    '<option selected value="gpt-5-codex">GPT-5 Codex (discovered)</option>',
+  expect(modelHtml).toContain('data-custom-select="runnerId"');
+  expect(modelHtml).toContain('data-custom-select="credential"');
+  expect(modelHtml).not.toMatch(/<select/u);
+  expect(modelHtml).toContain('data-custom-select="model"');
+  expect(modelHtml).not.toMatch(/<select[^>]*id="session-model"/u);
+  expect(modelHtml).toContain('data-action="toggle-session-select"');
+  expect(modelHtml).toContain('data-action="choose-session-option"');
+  expect(modelHtml).toContain('data-option-value="gpt-5-codex"');
+  expect(modelHtml).toContain("GPT-5 Codex (discovered)");
+  expect(modelHtml).toContain("200K context");
+  expect(modelHtml).toContain('data-custom-select="reasoningEffort"');
+  expect(modelHtml).not.toMatch(/<select[^>]*id="session-reasoning-effort"/u);
+
+  const reasoningHtml = renderToHtml(
+    renderSessionPanel(
+      { ...SESSION_STATE, openSelect: "reasoningEffort" },
+      RUNNER_STATE,
+      OPENAI_STATE,
+      EMPTY_PROVIDER_STATE,
+    ),
   );
-  expect(html).toMatch(
-    /<select[^>]*id="session-reasoning-effort"[^>]*name="reasoningEffort"/u,
-  );
-  expect(html).toContain('<option selected value="high">High</option>');
-  expect(html).toContain('<option value="xhigh">Extra high</option>');
-  expect(html).not.toContain('<option value="low">Low</option>');
+  expect(reasoningHtml).toContain('data-option-value="high"');
+  expect(reasoningHtml).toContain("Extra high");
+  expect(reasoningHtml).not.toContain('data-option-value="low"');
 });
