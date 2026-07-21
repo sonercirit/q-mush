@@ -98,6 +98,46 @@ test("uses the matching read call path to colorize file results", () => {
   }
 });
 
+test("renders successful edit results as a diff", () => {
+  const editCall = assistantToolCall({
+    arguments: JSON.stringify({
+      edits: [
+        {
+          newText: "const ready = true;\nstart();",
+          oldText: "const ready = false;\nstop();",
+        },
+        {
+          newText: "",
+          oldText: "removeMe();\n",
+        },
+      ],
+      path: "src/example.ts",
+    }),
+    id: "edit-1",
+    name: "edit",
+  });
+  const html = renderMessages([
+    editCall,
+    toolResult({
+      content: "Successfully replaced 2 block(s) in src/example.ts.",
+      id: "edit-1",
+      name: "edit",
+    }),
+  ]);
+
+  expect(html).toContain('aria-label="Diff for src/example.ts"');
+  expect(html).toContain('data-language="diff"');
+  expect(html).toContain(
+    'data-diff-line="removed">-const ready = false;</span>',
+  );
+  expect(html).toContain('data-diff-line="removed">-stop();</span>');
+  expect(html).toContain('data-diff-line="added">+const ready = true;</span>');
+  expect(html).toContain('data-diff-line="added">+start();</span>');
+  expect(html).toContain('data-diff-line="removed">-removeMe();</span>');
+  expect(html).not.toContain('data-diff-line="removed">-</span>');
+  expect(html).toContain("Successfully replaced 2 block(s) in src/example.ts.");
+});
+
 test("expands parallel results into individually formatted tool outputs", () => {
   const html = renderMessages([
     assistantToolCall({

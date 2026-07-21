@@ -135,12 +135,12 @@ task-specific progress, guesses, or sensitive values.
   `src/runner-workspace.ts` shares canonical workspace resolution and
   containment with the file tools. The latest agent-file selection is persisted
   on the session and appended to the model system prompt.
-  `src/session-transcript.tsx` renders that effective prompt and the complete
-  tool definitions plus the raw arguments, call ID, name, and result for each
-  tool entry. It renders Markdown, colorized code/JSON, and context-aware shell,
-  read, and parallel results. The control center creates, inspects, follows up,
-  continues without appending a user message, stops, and receives live sessions
-  through `src/realtime-client.ts`, `src/session-client.tsx`, and
+  `src/session-transcript.tsx` renders the effective prompt, complete tool
+  definitions, raw arguments, call IDs, names, and results. It renders Markdown,
+  colorized code/JSON and edit diffs, plus context-aware shell, read, and
+  parallel results. The control center creates, inspects, follows up, continues
+  without appending a user message, stops, and receives live sessions through
+  `src/realtime-client.ts`, `src/session-client.tsx`, and
   `src/session-controller.ts`. Unchanged snapshots suppress render
   notifications. Browser rendering preserves the document viewport and keyed
   `data-scroll-key` regions across full-root remounts; the session transcript

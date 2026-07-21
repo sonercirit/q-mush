@@ -11,6 +11,16 @@ interface ToolCallContext {
   readonly name: string;
 }
 
+interface EditReplacement {
+  readonly newText: string;
+  readonly oldText: string;
+}
+
+interface EditCall {
+  readonly edits: readonly EditReplacement[];
+  readonly path: string;
+}
+
 interface ParallelResult {
   readonly error: string | undefined;
   readonly output: string | undefined;
@@ -221,6 +231,97 @@ function renderReadOutput(options: ToolOutputOptions): JsxNode {
   return renderStructuredCode(options.content);
 }
 
+function editCall(
+  arguments_: Readonly<Record<string, unknown>> | undefined,
+): EditCall | undefined {
+  const path = arguments_?.["path"];
+  const edits = arguments_?.["edits"];
+
+  if (typeof path !== "string" || !Array.isArray(edits) || edits.length === 0) {
+    return undefined;
+  }
+
+  const replacements = edits.map((edit): EditReplacement | undefined => {
+    if (!isRecord(edit)) {
+      return undefined;
+    }
+
+    const oldText = edit["oldText"];
+    const newText = edit["newText"];
+    return typeof oldText === "string" && typeof newText === "string"
+      ? { newText, oldText }
+      : undefined;
+  });
+
+  return replacements.every((edit) => edit !== undefined)
+    ? { edits: replacements, path }
+    : undefined;
+}
+
+function diffLines(content: string): readonly string[] {
+  if (content.length === 0) {
+    return [];
+  }
+
+  const lines = content.replaceAll("\r\n", "\n").split("\n");
+  return lines.at(-1) === "" ? lines.slice(0, -1) : lines;
+}
+
+function renderDiffLine(content: string, kind: "added" | "removed"): JsxNode {
+  const added = kind === "added";
+  return (
+    <span
+      className={`block min-w-max px-3 ${added ? "bg-emerald-400/10 text-emerald-200" : "bg-rose-400/10 text-rose-200"}`}
+      data-diff-line={kind}
+    >
+      {`${added ? "+" : "-"}${content}`}
+    </span>
+  );
+}
+
+function renderEditOutput(options: ToolOutputOptions): JsxNode | undefined {
+  if (!options.content.startsWith("Successfully replaced ")) {
+    return undefined;
+  }
+
+  const call = editCall(options.arguments);
+
+  if (call === undefined) {
+    return undefined;
+  }
+
+  return (
+    <div className="space-y-2">
+      <section
+        aria-label={`Diff for ${call.path}`}
+        className="overflow-hidden rounded-lg border border-white/10 bg-slate-950/90"
+      >
+        <p className="border-b border-white/10 px-3 py-2 font-mono text-[0.65rem] text-slate-400">
+          {call.path}
+        </p>
+        <pre
+          className="max-h-80 overflow-auto py-2 font-mono text-xs leading-5"
+          data-language="diff"
+        >
+          <code>
+            {call.edits.flatMap((edit) => [
+              ...diffLines(edit.oldText).map((line) =>
+                renderDiffLine(line, "removed"),
+              ),
+              ...diffLines(edit.newText).map((line) =>
+                renderDiffLine(line, "added"),
+              ),
+            ])}
+          </code>
+        </pre>
+      </section>
+      <p className="rounded-lg border border-emerald-300/20 bg-emerald-300/10 px-3 py-2 font-mono text-xs text-emerald-300">
+        {options.content}
+      </p>
+    </div>
+  );
+}
+
 function renderToolOutput(
   name: string,
   content: string,
@@ -228,6 +329,13 @@ function renderToolOutput(
 ): JsxNode {
   if (name === "bash") {
     return renderShellOutput(content) ?? renderStructuredCode(content);
+  }
+
+  if (name === "edit") {
+    return (
+      renderEditOutput({ arguments: arguments_, content }) ??
+      renderStructuredCode(content)
+    );
   }
 
   if (name === "read") {
