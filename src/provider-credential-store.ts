@@ -1,7 +1,9 @@
 import { and, asc, eq, type SQL } from "drizzle-orm";
 import { softDeletedAuditFields, updatedAuditFields } from "./audit.ts";
-import type { CredentialCipher } from "./credential-cipher.ts";
-import { fingerprintCredential } from "./credential-cipher.ts";
+import {
+  fingerprintCredential,
+  type CredentialCipher,
+} from "./credential-cipher.ts";
 import type { AppDatabase } from "./database.ts";
 import { providerCredentials } from "./database/schema.ts";
 import { createUuidV7, SYSTEM_ID, type IdGenerator } from "./ids.ts";

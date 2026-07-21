@@ -6,8 +6,7 @@ import { ChatCompletionsAgentModel } from "./agent-model.ts";
 import type { AuthenticatedUser } from "./auth-model.ts";
 import type { GoogleAuth } from "./auth.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
-import type { AppDatabase } from "./database.ts";
-import { createDatabase } from "./database.ts";
+import { createDatabase, type AppDatabase } from "./database.ts";
 import {
   createApiError,
   createJsonResponse,

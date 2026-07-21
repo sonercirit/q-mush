@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import * as authModel from "./auth-model.ts";
+import { isRecord, type AuthenticatedUser } from "./auth-model.ts";
 import type { GoogleAuth } from "./auth.ts";
 import { withAuthenticatedUser } from "./authenticated-request.ts";
 import { createDatabase } from "./database.ts";
@@ -81,7 +81,7 @@ function normalizeMachineValue(value: unknown): string | undefined {
 }
 
 export function readRunnerMetadata(value: unknown): RunnerMetadata | undefined {
-  if (!authModel.isRecord(value)) {
+  if (!isRecord(value)) {
     return undefined;
   }
 
@@ -182,10 +182,7 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
     this.#setOnline(runner, true);
   }
 
-  #collectionForUser(
-    request: Request,
-    user: authModel.AuthenticatedUser,
-  ): Response {
+  #collectionForUser(request: Request, user: AuthenticatedUser): Response {
     if (request.method === "GET") {
       return createJsonResponse({
         runners: this.#store.list(user.id, this.#now()),
@@ -226,7 +223,7 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
     return new Response(renderRunnerInstaller(url.origin, token), { headers });
   }
 
-  #createSetup(request: Request, user: authModel.AuthenticatedUser): Response {
+  #createSetup(request: Request, user: AuthenticatedUser): Response {
     const token = createRunnerToken(this.#randomToken);
     const runner = this.#store.create(user.id, token, this.#now());
     const installerUrl = new URL(RUNNER_INSTALLER_PATH, request.url);

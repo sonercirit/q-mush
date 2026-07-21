@@ -5,10 +5,10 @@ import { SESSIONS_PATH } from "../routes.ts";
 import type { RunnerToolCommand } from "../runner-command-broker.ts";
 import type { createSessionIntegration } from "../sessions.ts";
 import { createAuthenticatedRequest } from "./authenticated-integration-test-helpers.ts";
-import type { connectedSessionSetup } from "./session-integration-fixtures.ts";
 import {
   RUNNER_COMMAND_ID,
   SESSION_ID,
+  type connectedSessionSetup,
 } from "./session-integration-fixtures.ts";
 
 type ConnectedSessionSetup = Awaited<ReturnType<typeof connectedSessionSetup>>;

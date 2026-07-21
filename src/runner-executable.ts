@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import * as fileSystem from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -67,9 +67,7 @@ async function compileRunnerExecutable(
   target: RunnerExecutableTarget,
   version: string,
 ): Promise<Blob> {
-  const directory = await fileSystem.mkdtemp(
-    join(tmpdir(), "q-mush-runner-build-"),
-  );
+  const directory = await mkdtemp(join(tmpdir(), "q-mush-runner-build-"));
   const executablePath = join(directory, "q-mush-runner");
 
   try {
@@ -96,7 +94,7 @@ async function compileRunnerExecutable(
 
     return new Blob([executable]);
   } finally {
-    await fileSystem.rm(directory, { recursive: true });
+    await rm(directory, { recursive: true });
   }
 }
 

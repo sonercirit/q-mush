@@ -31,7 +31,7 @@ function createErrorRules(
   return rules;
 }
 
-export default {
+export const knipConfig = {
   entry: [
     "knip.production.config.ts",
     "src/client.tsx!",
@@ -42,3 +42,5 @@ export default {
   includeEntryExports: true,
   rules: createErrorRules(includedIssueTypes),
 };
+
+export default knipConfig;

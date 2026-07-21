@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { arch, hostname, networkInterfaces, platform } from "node:os";
 import { dirname, join } from "node:path";
-import { setTimeout as sleep } from "node:timers/promises";
+import { setTimeout } from "node:timers/promises";
 import { parseJsonRecord } from "./json-record.ts";
 import { RUNNER_REALTIME_PATH } from "./routes.ts";
 import type { RunnerToolCommand } from "./runner-command-broker.ts";
@@ -224,7 +224,7 @@ async function connectRunner(
     } catch {
       socket.close();
       console.warn("Could not reach Q Mush; retrying setup…");
-      await sleep(RETRY_INTERVAL_MILLISECONDS);
+      await setTimeout(RETRY_INTERVAL_MILLISECONDS);
     }
   }
 }
@@ -332,7 +332,7 @@ async function maintainConnection(
     if (socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ type: "heartbeat" }));
     }
-    await sleep(HEARTBEAT_INTERVAL_MILLISECONDS);
+    await setTimeout(HEARTBEAT_INTERVAL_MILLISECONDS);
   }
 }
 

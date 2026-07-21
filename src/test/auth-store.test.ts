@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 import { DrizzleAuthStore } from "../auth-store.ts";
 import { createDatabase } from "../database.ts";
-import * as schema from "../database/schema.ts";
-import { SYSTEM_ID as SYSTEM_ACTOR_ID } from "../ids.ts";
+import { sessions, users } from "../database/schema.ts";
+import { SYSTEM_ID } from "../ids.ts";
 
 const CREATED_AT = 1_700_000_000_000;
 const PROFILE_UPDATED_AT = CREATED_AT + 50;
@@ -57,10 +57,10 @@ test("audits profile updates and soft-deletes expired sessions", () => {
   );
   store.expireSessions(FIRST_SESSION_EXPIRES_AT);
 
-  expect(database.select().from(schema.users).all()).toEqual([
+  expect(database.select().from(users).all()).toEqual([
     {
       createdAt: new Date(CREATED_AT),
-      createdById: SYSTEM_ACTOR_ID,
+      createdById: SYSTEM_ID,
       email: "after@example.com",
       googleSubject: "google-subject",
       id: USER_ID,
@@ -68,11 +68,11 @@ test("audits profile updates and soft-deletes expired sessions", () => {
       name: "After",
       picture: null,
       updatedAt: new Date(PROFILE_UPDATED_AT),
-      updatedById: SYSTEM_ACTOR_ID,
+      updatedById: SYSTEM_ID,
     },
   ]);
 
-  const storedSessions = database.select().from(schema.sessions).all();
+  const storedSessions = database.select().from(sessions).all();
   const firstSession = storedSessions.find(
     ({ token }) => token === "first-token",
   );
@@ -88,7 +88,7 @@ test("audits profile updates and soft-deletes expired sessions", () => {
     isDeleted: true,
     token: "first-token",
     updatedAt: new Date(FIRST_SESSION_EXPIRES_AT),
-    updatedById: SYSTEM_ACTOR_ID,
+    updatedById: SYSTEM_ID,
     userId: USER_ID,
   });
   expect(secondSession).toEqual({

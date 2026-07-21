@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
-import * as fileSystem from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDatabase } from "../../src/database.ts";
@@ -26,7 +26,7 @@ setDefaultTimeout(15_000);
 
 afterEach(() => {
   if (temporaryDirectory !== undefined) {
-    fileSystem.rmSync(temporaryDirectory, { force: true, recursive: true });
+    rmSync(temporaryDirectory, { force: true, recursive: true });
     temporaryDirectory = undefined;
   }
 });
@@ -93,9 +93,7 @@ async function applyInitialMigration(database: Database): Promise<void> {
 }
 
 test("database migration command applies pending migrations", async () => {
-  temporaryDirectory = fileSystem.mkdtempSync(
-    join(tmpdir(), "q-mush-migrate-test-"),
-  );
+  temporaryDirectory = mkdtempSync(join(tmpdir(), "q-mush-migrate-test-"));
   const databasePath = join(temporaryDirectory, "migrated.sqlite");
   await runMigrationCommand(databasePath);
 
@@ -113,7 +111,7 @@ test("database migration command applies pending migrations", async () => {
 });
 
 test("OpenAI migration preserves existing OpenRouter credentials", async () => {
-  temporaryDirectory = fileSystem.mkdtempSync(
+  temporaryDirectory = mkdtempSync(
     join(tmpdir(), "q-mush-provider-upgrade-test-"),
   );
   const databasePath = join(temporaryDirectory, "openrouter.sqlite");
@@ -191,9 +189,7 @@ test("OpenAI migration preserves existing OpenRouter credentials", async () => {
 });
 
 test("migration preserves records created by the initial schema", async () => {
-  temporaryDirectory = fileSystem.mkdtempSync(
-    join(tmpdir(), "q-mush-upgrade-test-"),
-  );
+  temporaryDirectory = mkdtempSync(join(tmpdir(), "q-mush-upgrade-test-"));
   const databasePath = join(temporaryDirectory, "legacy.sqlite");
   const legacyDatabase = new Database(databasePath, { create: true });
   await applyInitialMigration(legacyDatabase);

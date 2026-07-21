@@ -1,12 +1,29 @@
 import { Buffer } from "node:buffer";
 import { isRecord } from "./auth-model.ts";
 import type { GoogleAuth } from "./auth.ts";
-import type * as account from "./connected-account-oauth.ts";
-import * as oauth from "./oauth.ts";
+import type {
+  AuthorizationRequest,
+  ConnectedAccountCredential,
+  CredentialExchangeRequest,
+} from "./connected-account-oauth.ts";
+import {
+  createPkceAuthorizationUrl,
+  normalizeOptionalValue,
+  postFormJson,
+  readProviderString,
+  type FlowCookies,
+  type OAuthDependencies,
+  type OAuthRuntime,
+} from "./oauth.ts";
 import { readOpenAiOAuthCredential } from "./openai-credential.ts";
 import type { ProviderCredentialAccess } from "./provider-credential-store.ts";
 import { createApiKeyMetadataReader } from "./provider-credentials.ts";
-import * as provider from "./provider-integration.ts";
+import {
+  createProviderIntegration,
+  readProviderIntegrationConfiguration,
+  type ProviderIntegration,
+  type ProviderIntegrationConfiguration,
+} from "./provider-integration.ts";
 import { APP_PATH, OPENAI_OAUTH_CALLBACK_PATH } from "./routes.ts";
 
 const OPENAI_AUTHORIZATION_URL = "https://auth.openai.com/oauth/authorize";
@@ -16,7 +33,7 @@ const DEFAULT_OPENAI_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 export const OPENAI_LOOPBACK_CALLBACK_PORT = 1455;
 const OPENAI_LOOPBACK_CALLBACK_PATH = "/auth/callback";
 const OPENAI_LOOPBACK_REDIRECT_URI = `http://localhost:${String(OPENAI_LOOPBACK_CALLBACK_PORT)}${OPENAI_LOOPBACK_CALLBACK_PATH}`;
-const OPENAI_FLOW_COOKIES: oauth.FlowCookies = {
+const OPENAI_FLOW_COOKIES: FlowCookies = {
   path: "/",
   state: "q_mush_openai_state",
   verifier: "q_mush_openai_verifier",
@@ -29,8 +46,7 @@ const readOpenAiApiKeyMetadata = createApiKeyMetadataReader(
   "OpenAI could not validate the API key",
 );
 
-interface OpenAiConfiguration
-  extends provider.ProviderIntegrationConfiguration {
+interface OpenAiConfiguration extends ProviderIntegrationConfiguration {
   readonly clientId: string;
   readonly redirectUri?: string;
 }
@@ -40,11 +56,11 @@ interface OpenAiAccountDetails {
   readonly label: string;
 }
 
-export type OpenAiIntegration = provider.ProviderIntegration;
+export type OpenAiIntegration = ProviderIntegration;
 
 function createAuthorizationUrl(
   clientId: string,
-  request: account.AuthorizationRequest,
+  request: AuthorizationRequest,
 ): URL {
   const parameters = new URLSearchParams({
     client_id: clientId,
@@ -56,7 +72,7 @@ function createAuthorizationUrl(
     scope: "openid profile email offline_access",
     state: request.state,
   });
-  return oauth.createPkceAuthorizationUrl(
+  return createPkceAuthorizationUrl(
     OPENAI_AUTHORIZATION_URL,
     parameters,
     request.challenge,
@@ -64,16 +80,16 @@ function createAuthorizationUrl(
 }
 
 function readTokenSecret(
-  runtime: oauth.OAuthRuntime,
+  runtime: OAuthRuntime,
   tokens: Readonly<Record<string, unknown>>,
   fallbackRefreshToken?: string,
 ): string {
-  const access = oauth.readProviderString(tokens, "access_token", "OpenAI");
+  const access = readProviderString(tokens, "access_token", "OpenAI");
   const refreshValue = tokens["refresh_token"];
   const refresh =
     refreshValue === undefined && fallbackRefreshToken !== undefined
       ? fallbackRefreshToken
-      : oauth.readProviderString(tokens, "refresh_token", "OpenAI");
+      : readProviderString(tokens, "refresh_token", "OpenAI");
   const expiresIn = tokens["expires_in"];
 
   if (
@@ -94,11 +110,11 @@ function readTokenSecret(
 }
 
 async function exchangeCredential(
-  runtime: oauth.OAuthRuntime,
+  runtime: OAuthRuntime,
   clientId: string,
-  request: account.CredentialExchangeRequest,
-): Promise<account.ConnectedAccountCredential> {
-  const tokens = await oauth.postFormJson(
+  request: CredentialExchangeRequest,
+): Promise<ConnectedAccountCredential> {
+  const tokens = await postFormJson(
     runtime,
     OPENAI_TOKEN_URL,
     {
@@ -110,7 +126,7 @@ async function exchangeCredential(
     },
     "OpenAI rejected the authorization code",
   );
-  const idToken = oauth.readProviderString(tokens, "id_token", "OpenAI");
+  const idToken = readProviderString(tokens, "id_token", "OpenAI");
   return {
     details: readOpenAiAccountDetails(idToken),
     secret: readTokenSecret(runtime, tokens),
@@ -118,7 +134,7 @@ async function exchangeCredential(
 }
 
 async function prepareCredential(
-  runtime: oauth.OAuthRuntime,
+  runtime: OAuthRuntime,
   clientId: string,
   credential: ProviderCredentialAccess,
 ): Promise<string | undefined> {
@@ -132,7 +148,7 @@ async function prepareCredential(
     return undefined;
   }
 
-  const tokens = await oauth.postFormJson(
+  const tokens = await postFormJson(
     runtime,
     OPENAI_TOKEN_URL,
     {
@@ -209,7 +225,7 @@ function readOpenAiAccountDetails(idToken: string): OpenAiAccountDetails {
 }
 
 async function readCredentialDetails(
-  runtime: oauth.OAuthRuntime,
+  runtime: OAuthRuntime,
   apiKey: string,
 ): Promise<OpenAiAccountDetails> {
   const value = await readOpenAiApiKeyMetadata(runtime, apiKey);
@@ -227,11 +243,11 @@ export function createOpenAiIntegrationFromEnvironment(
   ...parameters: [
     environment: Readonly<Record<string, string | undefined>>,
     auth: GoogleAuth,
-    dependencies?: oauth.OAuthDependencies,
+    dependencies?: OAuthDependencies,
   ]
 ): OpenAiIntegration {
   const [environment, auth, dependencies = {}] = parameters;
-  const configuredClientId = oauth.normalizeOptionalValue(
+  const configuredClientId = normalizeOptionalValue(
     environment["OPENAI_CLIENT_ID"],
   );
   if (
@@ -241,7 +257,7 @@ export function createOpenAiIntegrationFromEnvironment(
     throw new Error("OPENAI_CLIENT_ID cannot be empty");
   }
 
-  const storage = provider.readProviderIntegrationConfiguration(environment, {
+  const storage = readProviderIntegrationConfiguration(environment, {
     callbackPath: OPENAI_OAUTH_CALLBACK_PATH,
     credentialKeyVariable: "OPENAI_CREDENTIAL_KEY",
     missingKeyMessage:
@@ -270,13 +286,12 @@ export function usesOpenAiLoopbackCallback(
   environment: Readonly<Record<string, string | undefined>>,
 ): boolean {
   const clientId =
-    oauth.normalizeOptionalValue(environment["OPENAI_CLIENT_ID"]) ??
+    normalizeOptionalValue(environment["OPENAI_CLIENT_ID"]) ??
     DEFAULT_OPENAI_CLIENT_ID;
   return (
-    oauth.normalizeOptionalValue(environment["OPENAI_CREDENTIAL_KEY"]) !==
+    normalizeOptionalValue(environment["OPENAI_CREDENTIAL_KEY"]) !==
       undefined &&
-    oauth.normalizeOptionalValue(environment["OPENAI_REDIRECT_URI"]) ===
-      undefined &&
+    normalizeOptionalValue(environment["OPENAI_REDIRECT_URI"]) === undefined &&
     clientId === DEFAULT_OPENAI_CLIENT_ID
   );
 }
@@ -322,11 +337,11 @@ function createOpenAiIntegration(
   configuration: OpenAiConfiguration | undefined,
   context: {
     readonly auth: GoogleAuth;
-    readonly dependencies: oauth.OAuthDependencies;
+    readonly dependencies: OAuthDependencies;
   },
 ): OpenAiIntegration {
   const clientId = configuration?.clientId ?? DEFAULT_OPENAI_CLIENT_ID;
-  return provider.createProviderIntegration({
+  return createProviderIntegration({
     auth: context.auth,
     configuration,
     createOAuthConfiguration: (runtime) => ({

@@ -24,7 +24,7 @@ import type { ProviderTextDelta } from "./provider-stream.ts";
 import {
   completeProviderWebSocket,
   ProviderWebSocketError,
-  type ProviderWebSocketFactory as AgentModelWebSocket,
+  type ProviderWebSocketFactory,
 } from "./provider-websocket.ts";
 import { createServerWebSocket } from "./server-websocket.ts";
 
@@ -53,7 +53,7 @@ interface ChatCompletionsAgentModelOptions {
   readonly reasoningEffort?: AgentReasoningEffort | null;
   readonly sleep?: ModelRequestSleep;
   readonly systemPrompt?: string;
-  readonly webSocket?: AgentModelWebSocket;
+  readonly webSocket?: ProviderWebSocketFactory;
 }
 
 function usesCodexOAuth(
@@ -294,7 +294,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
   readonly #reasoningEffort: AgentReasoningEffort | undefined;
   readonly #sleep: ModelRequestSleep | undefined;
   readonly #systemPrompt: string;
-  readonly #webSocket: AgentModelWebSocket;
+  readonly #webSocket: ProviderWebSocketFactory;
 
   constructor(options: ChatCompletionsAgentModelOptions) {
     this.#credential = options.credential;

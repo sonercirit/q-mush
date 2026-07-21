@@ -1,4 +1,4 @@
-import knipConfig from "./knip.config.ts";
+import { knipConfig } from "./knip.config.ts";
 
 /** @public Loaded by the Knip CLI through `--config`. */
 export default {

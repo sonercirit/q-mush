@@ -7,35 +7,33 @@ import type { OpenAiIntegration } from "./openai.ts";
 import type { OpenRouterIntegration } from "./openrouter.ts";
 import { renderAppPage, renderHomePage } from "./pages.tsx";
 import type { ProviderIntegration } from "./provider-integration.ts";
-import * as routePaths from "./routes.ts";
-import type { RunnerExecutableProvider } from "./runner-executable.ts";
-import type { RunnerIntegration } from "./runners.ts";
-import type { SessionIntegration } from "./sessions.ts";
-
-const {
-  STYLESHEET_PATH,
-  RUNNERS_PATH,
+import {
+  API_BASE_PATH,
+  APP_PATH,
+  APP_SCRIPT_PATH,
+  AUTH_GOOGLE_CALLBACK_PATH,
+  AUTH_GOOGLE_PATH,
+  AUTH_LOGOUT_PATH,
+  AUTH_SESSION_PATH,
+  BRAVE_SEARCH_KEYS_PATH,
+  HOME_PATH,
+  OPENAI_CREDENTIALS_PATH,
+  OPENAI_OAUTH_CALLBACK_PATH,
+  OPENAI_OAUTH_PATH,
+  OPENROUTER_CREDENTIALS_PATH,
+  OPENROUTER_OAUTH_CALLBACK_PATH,
+  OPENROUTER_OAUTH_PATH,
   RUNNER_DIRECTORIES_SEGMENT,
   RUNNER_EXECUTABLE_PATH,
   RUNNER_INSTALLER_PATH,
-  SESSIONS_PATH,
+  RUNNERS_PATH,
   SESSION_MODELS_PATH,
-  BRAVE_SEARCH_KEYS_PATH,
-  OPENROUTER_OAUTH_PATH,
-  OPENROUTER_OAUTH_CALLBACK_PATH,
-  OPENROUTER_CREDENTIALS_PATH,
-  OPENAI_OAUTH_PATH,
-  OPENAI_OAUTH_CALLBACK_PATH,
-  OPENAI_CREDENTIALS_PATH,
-  HOME_PATH,
-  AUTH_SESSION_PATH,
-  AUTH_LOGOUT_PATH,
-  AUTH_GOOGLE_PATH,
-  AUTH_GOOGLE_CALLBACK_PATH,
-  APP_SCRIPT_PATH,
-  APP_PATH,
-  API_BASE_PATH,
-} = routePaths;
+  SESSIONS_PATH,
+  STYLESHEET_PATH,
+} from "./routes.ts";
+import type { RunnerExecutableProvider } from "./runner-executable.ts";
+import type { RunnerIntegration } from "./runners.ts";
+import type { SessionIntegration } from "./sessions.ts";
 
 const CSS_HEADERS = { "content-type": "text/css; charset=utf-8" };
 const HTML_HEADERS = { "content-type": "text/html; charset=utf-8" };

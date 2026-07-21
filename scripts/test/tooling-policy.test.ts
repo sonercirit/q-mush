@@ -7,6 +7,12 @@ const SCRIPTS_DIRECTORY = join(import.meta.dir, "..");
 const sourceProbePath = (fileName: string): string =>
   join(ROOT_DIRECTORY, "src", fileName);
 const ESLINT_POLICY_PROBE = sourceProbePath("eslint-policy-probe.ts");
+const ESLINT_IMPORT_POLICY_PROBE = sourceProbePath(
+  "eslint-import-policy-probe.ts",
+);
+const ESLINT_VALID_IMPORT_POLICY_PROBE = sourceProbePath(
+  "eslint-valid-import-policy-probe.ts",
+);
 const ESLINT_TSX_POLICY_PROBE = sourceProbePath("eslint-tsx-policy-probe.tsx");
 const ESLINT_UNSAFE_TSX_POLICY_PROBE = sourceProbePath(
   "eslint-unsafe-tsx-policy-probe.tsx",
@@ -61,6 +67,8 @@ function runCpdImportProbes(): Promise<CommandResult> {
 async function removeProbes(): Promise<void> {
   await Promise.all([
     rm(ESLINT_POLICY_PROBE, { force: true }),
+    rm(ESLINT_IMPORT_POLICY_PROBE, { force: true }),
+    rm(ESLINT_VALID_IMPORT_POLICY_PROBE, { force: true }),
     rm(ESLINT_TSX_POLICY_PROBE, { force: true }),
     rm(ESLINT_UNSAFE_TSX_POLICY_PROBE, { force: true }),
     rm(IGNORED_DIRECTORY_PROBE, { force: true, recursive: true }),
@@ -146,6 +154,68 @@ console.log(<iframe srcDoc="<main>Raw frame</main>"></iframe>);
       relative(ROOT_DIRECTORY, ESLINT_TSX_POLICY_PROBE),
     ]);
     expect(tsxResult.exitCode).toBe(0);
+  });
+
+  test("ESLint enforces canonical named imports", async () => {
+    await Promise.all([
+      writeFile(
+        ESLINT_IMPORT_POLICY_PROBE,
+        `import type { AppDatabase } from "./database.ts";
+import { createDatabase } from "./database.ts";
+import { setTimeout as sleep } from "node:timers/promises";
+import filePath = require("node:path");
+import * as fileSystem from "node:fs";
+import operatingSystem from "node:os";
+import packageMetadata from "../package.json" with { type: "json" };
+import "./routes.ts";
+
+type RouteModule = typeof import("./routes.ts");
+const database: AppDatabase = createDatabase(":memory:");
+const routeModule: Promise<RouteModule> = import("./routes.ts");
+console.log(
+  database,
+  filePath,
+  fileSystem.constants,
+  operatingSystem,
+  packageMetadata,
+  routeModule,
+  sleep,
+);
+`,
+      ),
+      writeFile(
+        ESLINT_VALID_IMPORT_POLICY_PROBE,
+        `import { createDatabase, type AppDatabase } from "./database.ts";
+
+const database: AppDatabase = createDatabase(":memory:");
+console.log(database);
+`,
+      ),
+    ]);
+
+    const invalidResult = await runCommand([
+      "node",
+      "node_modules/eslint/bin/eslint.js",
+      "--format",
+      "json",
+      relative(ROOT_DIRECTORY, ESLINT_IMPORT_POLICY_PROBE),
+    ]);
+    const output = expectCommandFailure(invalidResult);
+    expect(output).toContain("q-mush/canonical-imports");
+    expect(output).toContain("no-duplicate-imports");
+    expect(output).toContain("Default imports");
+    expect(output).toContain("Dynamic imports");
+    expect(output).toContain("Import attributes");
+    expect(output).toContain("Import-equals declarations");
+    expect(output).toContain("import() types");
+    expect(output).toContain("side effects");
+
+    const validResult = await runCommand([
+      "node",
+      "node_modules/eslint/bin/eslint.js",
+      relative(ROOT_DIRECTORY, ESLINT_VALID_IMPORT_POLICY_PROBE),
+    ]);
+    expect(validResult.exitCode).toBe(0);
   });
 
   test("ESLint reads generated-output ignores from .gitignore", async () => {

@@ -1,4 +1,4 @@
-import { setTimeout as sleep } from "node:timers/promises";
+import { setTimeout } from "node:timers/promises";
 
 const MODEL_REQUEST_RETRY_DELAYS_MILLISECONDS = [1_000, 2_000, 4_000] as const;
 const RETRYABLE_MODEL_REQUEST_STATUSES = new Set([408, 409, 429]);
@@ -14,7 +14,7 @@ function defaultModelRequestSleep(
   milliseconds: number,
   signal?: AbortSignal,
 ): Promise<void> {
-  return sleep(milliseconds, undefined, { signal });
+  return setTimeout(milliseconds, undefined, { signal });
 }
 
 async function fetchModelRequest(

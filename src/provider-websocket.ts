@@ -1,6 +1,8 @@
 import type { AgentModelTurn } from "./agent-loop.ts";
-import type { ProviderTextDelta } from "./provider-stream.ts";
-import { createProviderStreamAccumulator } from "./provider-stream.ts";
+import {
+  createProviderStreamAccumulator,
+  type ProviderTextDelta,
+} from "./provider-stream.ts";
 
 interface ProviderWebSocket extends EventTarget {
   readonly readyState: number;

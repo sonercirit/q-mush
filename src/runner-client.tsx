@@ -1,5 +1,5 @@
 import { isRecord, readNullableString } from "./auth-model.ts";
-import * as clientControls from "./client-controls.tsx";
+import { renderRemovalButton, renderRetryError } from "./client-controls.tsx";
 import { createElement, type JsxNode } from "./jsx.ts";
 import type { RunnerStatus, RunnerSummary } from "./runner-model.ts";
 
@@ -162,7 +162,7 @@ function renderRunner(
           </p>
         </div>
       </div>
-      {clientControls.renderRemovalButton({
+      {renderRemovalButton({
         action: "remove-runner",
         dataAttribute: "data-runner-id",
         id: runner.id,
@@ -273,7 +273,7 @@ export function renderRunnerPanel(state: RunnerViewState): JsxNode {
       </div>
 
       {renderSetup(state)}
-      {clientControls.renderRetryError(state.error, "retry-runners")}
+      {renderRetryError(state.error, "retry-runners")}
       {renderRunnerList(state)}
     </section>
   );

@@ -1,7 +1,7 @@
 import { createdAuditFields } from "../audit.ts";
 import { createGoogleAuthFromEnvironment, type GoogleAuth } from "../auth.ts";
-import * as databaseModule from "../database.ts";
-import * as schema from "../database/schema.ts";
+import { createDatabase, type AppDatabase } from "../database.ts";
+import { providerCredentials, sessions, users } from "../database/schema.ts";
 import { SYSTEM_ID } from "../ids.ts";
 
 export const TEST_NOW = 1_700_000_000_000;
@@ -13,11 +13,11 @@ export function testAuditFields(actorId = TEST_USER_ID) {
   return createdAuditFields(actorId, TEST_NOW);
 }
 
-export function createAuthenticatedTestDatabase(): databaseModule.AppDatabase {
-  const database = databaseModule.createDatabase(":memory:");
+export function createAuthenticatedTestDatabase(): AppDatabase {
+  const database = createDatabase(":memory:");
 
   database
-    .insert(schema.users)
+    .insert(users)
     .values({
       ...testAuditFields(SYSTEM_ID),
       email: "mushroom@example.com",
@@ -27,7 +27,7 @@ export function createAuthenticatedTestDatabase(): databaseModule.AppDatabase {
     })
     .run();
   database
-    .insert(schema.sessions)
+    .insert(sessions)
     .values({
       ...testAuditFields(),
       expiresAt: new Date(TEST_NOW + 60_000),
@@ -42,7 +42,7 @@ export function createAuthenticatedTestDatabase(): databaseModule.AppDatabase {
 
 export function createAuthenticatedTestContext(): {
   readonly auth: GoogleAuth;
-  readonly database: databaseModule.AppDatabase;
+  readonly database: AppDatabase;
 } {
   const database = createAuthenticatedTestDatabase();
   const auth = createGoogleAuthFromEnvironment(
@@ -53,12 +53,12 @@ export function createAuthenticatedTestContext(): {
 }
 
 export function addTestProviderCredential(
-  database: databaseModule.AppDatabase,
+  database: AppDatabase,
   id: string,
   provider: "openai" | "openrouter" = "openai",
 ): void {
   database
-    .insert(schema.providerCredentials)
+    .insert(providerCredentials)
     .values({
       ...testAuditFields(),
       credentialFingerprint: `fingerprint-${id}`,

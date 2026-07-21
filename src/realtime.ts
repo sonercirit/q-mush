@@ -9,8 +9,7 @@ import {
 import { REALTIME_PATH, RUNNER_REALTIME_PATH } from "./routes.ts";
 import type { RunnerToolCommand } from "./runner-command-broker.ts";
 import type { RunnerConnection, RunnerMetadata } from "./runner-store.ts";
-import type { RunnerIntegration } from "./runners.ts";
-import { readRunnerMetadata } from "./runners.ts";
+import { readRunnerMetadata, type RunnerIntegration } from "./runners.ts";
 import type { SessionIntegration } from "./sessions.ts";
 
 interface UserSocketData {

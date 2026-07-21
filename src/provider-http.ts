@@ -1,6 +1,8 @@
 import type { AgentModelTurn } from "./agent-loop.ts";
-import type { ModelRequestSleep } from "./agent-model-retry.ts";
-import { fetchModelRequestWithRetries } from "./agent-model-retry.ts";
+import {
+  fetchModelRequestWithRetries,
+  type ModelRequestSleep,
+} from "./agent-model-retry.ts";
 import type { AgentModelFetch } from "./agent-model.ts";
 import { isRecord } from "./auth-model.ts";
 import type { ProviderId } from "./provider-credential-store.ts";

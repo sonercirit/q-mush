@@ -191,8 +191,12 @@ task-specific progress, guesses, or sensitive values.
 - `eslint.config.ts` uses ESLint flat config with type-aware strict and
   stylistic `typescript-eslint` presets; ESLint loads it through the `jiti`
   development dependency. It imports `.gitignore`, bans non-const type
-  assertions, and enforces exhaustive switches and type-only imports.
-  Application source also rejects unsafe DOM HTML injection properties,
+  assertions, and enforces exhaustive switches and canonical named imports.
+  Value and type bindings from one module share one declaration, with inline
+  `type` markers. Default imports (except the default-only `@eslint/js`), import
+  aliases, namespaces, side-effect imports, dynamic imports, import attributes,
+  import-equals declarations, and `import()` types are rejected. Application
+  source also rejects unsafe DOM HTML injection properties,
   `dangerouslySetInnerHTML`, and direct HTML-like string or template bodies in
   `Response`; TSX, tests, and fixtures are allowed.
 - `knip.config.ts` checks every issue type and entry exports;
@@ -225,7 +229,8 @@ task-specific progress, guesses, or sensitive values.
   the client secret to browser code or tracked files.
 - `DATABASE_PATH` selects the local SQLite file and defaults to
   `data/q-mush.sqlite`; the default `data/` directory is ignored. Change
-  `src/database/schema.ts`, run `bun run db:generate`, and commit the resulting
+  `src/database/schema.ts`, add every new table to `databaseSchema` in
+  `src/database.ts`, run `bun run db:generate`, and commit the resulting
   migration and Drizzle metadata. `bun run db:migrate` applies migrations
   without starting the HTTP server. Drizzle Kit loads its config under Node, so
   shared config imports must not transitively import `bun:sqlite`.

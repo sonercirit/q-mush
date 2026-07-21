@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   startDevelopmentServer,
   triggerDevelopmentRestart,
@@ -46,11 +46,11 @@ async function expectStableStartCount(
 }
 
 test("keeps changed source running until the restart trigger changes", async () => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "q-mush-dev-test-"));
-  const sourceDirectory = path.join(directory, "src");
-  const childPath = path.join(directory, "child.ts");
-  const startsPath = path.join(directory, "starts.txt");
-  const triggerPath = path.join(directory, "restart.trigger");
+  const directory = await mkdtemp(join(tmpdir(), "q-mush-dev-test-"));
+  const sourceDirectory = join(directory, "src");
+  const childPath = join(directory, "child.ts");
+  const startsPath = join(directory, "starts.txt");
+  const triggerPath = join(directory, "restart.trigger");
   let server: DevelopmentServer | undefined;
 
   try {
@@ -73,7 +73,7 @@ await new Promise(() => {});
     });
 
     await waitForStartCount(startsPath, 1);
-    await Bun.write(path.join(sourceDirectory, "client.tsx"), "changed\n");
+    await Bun.write(join(sourceDirectory, "client.tsx"), "changed\n");
     await expectStableStartCount(startsPath, 1);
 
     await triggerDevelopmentRestart(triggerPath);

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import * as fileSystem from "node:fs";
-import * as operatingSystem from "node:os";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   RUNNER_EXECUTABLE_PATH,
@@ -122,15 +122,13 @@ describe("runner executable downloads", () => {
     const response = await provider.serve(
       executableRequest(localRunnerTarget()),
     );
-    const directory = fileSystem.mkdtempSync(
-      join(operatingSystem.tmpdir(), "q-mush-runner-build-test-"),
-    );
+    const directory = mkdtempSync(join(tmpdir(), "q-mush-runner-build-test-"));
     const executablePath = join(directory, "q-mush-runner");
 
     try {
       const executable = new Uint8Array(await response.arrayBuffer());
-      fileSystem.writeFileSync(executablePath, executable);
-      fileSystem.chmodSync(executablePath, 0o755);
+      writeFileSync(executablePath, executable);
+      chmodSync(executablePath, 0o755);
       const runner = Bun.spawn([executablePath, "--version"], {
         env: { PATH: "" },
         stderr: "pipe",
@@ -148,7 +146,7 @@ describe("runner executable downloads", () => {
         `Q Mush runner ${provider.version}\n`,
       );
     } finally {
-      fileSystem.rmSync(directory, { force: true, recursive: true });
+      rmSync(directory, { force: true, recursive: true });
     }
   }, 120_000);
 });

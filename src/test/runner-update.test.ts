@@ -1,7 +1,13 @@
 import { afterEach, expect, test } from "bun:test";
-import * as fileSystem from "node:fs";
-import * as operatingSystem from "node:os";
-import * as path from "node:path";
+import {
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { RUNNER_EXECUTABLE_SHA256_HEADER } from "../routes.ts";
 import { updateRunnerIfAvailable } from "../runner-update.ts";
 
@@ -17,19 +23,17 @@ interface UpdateFixture {
 }
 
 function createFixture(): UpdateFixture {
-  const directory = fileSystem.mkdtempSync(
-    path.join(operatingSystem.tmpdir(), "q-mush-runner-update-"),
-  );
-  const executablePath = path.join(directory, "q-mush-runner");
-  const configurationPath = path.join(directory, "config");
+  const directory = mkdtempSync(join(tmpdir(), "q-mush-runner-update-"));
+  const executablePath = join(directory, "q-mush-runner");
+  const configurationPath = join(directory, "config");
   fixtureDirectories.add(directory);
-  fileSystem.writeFileSync(executablePath, "old executable", { mode: 0o755 });
-  fileSystem.writeFileSync(configurationPath, "configuration");
+  writeFileSync(executablePath, "old executable", { mode: 0o755 });
+  writeFileSync(configurationPath, "configuration");
   return { configurationPath, executablePath };
 }
 
 function installedExecutable(fixture: UpdateFixture): string {
-  return fileSystem.readFileSync(fixture.executablePath, "utf8");
+  return readFileSync(fixture.executablePath, "utf8");
 }
 
 function unexpectedLaunch(message: string): () => never {
@@ -40,7 +44,7 @@ function unexpectedLaunch(message: string): () => never {
 
 function removeFixtures(): void {
   for (const directory of fixtureDirectories) {
-    fileSystem.rmSync(directory, { force: true, recursive: true });
+    rmSync(directory, { force: true, recursive: true });
   }
 
   fixtureDirectories.clear();
@@ -91,10 +95,10 @@ test("atomically installs and launches an available runner update", async () => 
   });
 
   expect(updated).toBeTrue();
-  expect(
-    new Uint8Array(fileSystem.readFileSync(fixture.executablePath)),
-  ).toEqual(UPDATED_EXECUTABLE);
-  expect(fileSystem.statSync(fixture.executablePath).mode & 0o777).toBe(0o755);
+  expect(new Uint8Array(readFileSync(fixture.executablePath))).toEqual(
+    UPDATED_EXECUTABLE,
+  );
+  expect(statSync(fixture.executablePath).mode & 0o777).toBe(0o755);
   expect(launched).toEqual({
     arguments: ["--config", fixture.configurationPath],
     path: fixture.executablePath,

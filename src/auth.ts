@@ -270,13 +270,8 @@ class GoogleAuthentication implements GoogleAuth {
     result: "denied" | "failed" | "invalid_state" | undefined,
     cookies: readonly string[],
   ): Response {
-    return redirectToApp(
-      APP_PATH,
-      this.#redirectUri(request),
-      "auth",
-      result,
-      cookies,
-    );
+    const redirectUri = this.#redirectUri(request);
+    return redirectToApp(APP_PATH, redirectUri, "auth", result, cookies);
   }
 
   async #authenticateWithGoogle(

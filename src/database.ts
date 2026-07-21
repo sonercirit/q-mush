@@ -4,12 +4,27 @@ import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import * as schema from "./database/schema.ts";
+import {
+  agentMessages,
+  agentSessions,
+  providerCredentials,
+  runners,
+  sessions,
+  users,
+} from "./database/schema.ts";
 
 const MIGRATIONS_DIRECTORY = fileURLToPath(
   new URL("../drizzle", import.meta.url),
 );
-export type AppDatabase = BunSQLiteDatabase<typeof schema> & {
+const databaseSchema = {
+  agentMessages,
+  agentSessions,
+  providerCredentials,
+  runners,
+  sessions,
+  users,
+};
+export type AppDatabase = BunSQLiteDatabase<typeof databaseSchema> & {
   readonly $client: Database;
 };
 
@@ -20,7 +35,7 @@ export function createDatabase(path: string): AppDatabase {
 
   const client = new Database(path, { create: true });
   client.run("PRAGMA foreign_keys = ON");
-  const database = drizzle(client, { schema });
+  const database = drizzle(client, { schema: databaseSchema });
 
   try {
     migrate(database, { migrationsFolder: MIGRATIONS_DIRECTORY });

@@ -5,7 +5,15 @@ import type {
   ConnectedAccountCredential,
   CredentialExchangeRequest,
 } from "./connected-account-oauth.ts";
-import * as oauth from "./oauth.ts";
+import {
+  createPkceAuthorizationUrl,
+  readJsonRecord,
+  readProviderString,
+  readProviderUserId,
+  type FlowCookies,
+  type OAuthDependencies,
+  type OAuthRuntime,
+} from "./oauth.ts";
 import { createApiKeyMetadataReader } from "./provider-credentials.ts";
 import {
   createProviderIntegration,
@@ -24,7 +32,7 @@ const readOpenRouterApiKeyMetadata = createApiKeyMetadataReader(
   OPENROUTER_KEY_METADATA_URL,
   "OpenRouter could not validate the API key",
 );
-const OPENROUTER_FLOW_COOKIES: oauth.FlowCookies = {
+const OPENROUTER_FLOW_COOKIES: FlowCookies = {
   path: OPENROUTER_OAUTH_PATH,
   state: "q_mush_openrouter_state",
   verifier: "q_mush_openrouter_verifier",
@@ -38,7 +46,7 @@ function createAuthorizationUrl(request: AuthorizationRequest): URL {
   const parameters = new URLSearchParams({
     callback_url: callbackUrl.toString(),
   });
-  const finishAuthorizationUrl = oauth.createPkceAuthorizationUrl;
+  const finishAuthorizationUrl = createPkceAuthorizationUrl;
   return finishAuthorizationUrl(
     OPENROUTER_AUTHORIZATION_URL,
     parameters,
@@ -47,7 +55,7 @@ function createAuthorizationUrl(request: AuthorizationRequest): URL {
 }
 
 const exchangeCredential = async (
-  runtime: oauth.OAuthRuntime,
+  runtime: OAuthRuntime,
   request: CredentialExchangeRequest,
 ): Promise<ConnectedAccountCredential> => {
   const response = await runtime.fetch(OPENROUTER_TOKEN_URL, {
@@ -62,26 +70,26 @@ const exchangeCredential = async (
     },
     method: "POST",
   });
-  const value = await oauth.readJsonRecord(
+  const value = await readJsonRecord(
     response,
     "OpenRouter rejected the authorization code",
   );
 
   return {
     details: {
-      accountId: oauth.readProviderUserId({
+      accountId: readProviderUserId({
         key: "user_id",
         provider: "OpenRouter",
         record: value,
       }),
       label: "OpenRouter account",
     },
-    secret: oauth.readProviderString(value, "key", "OpenRouter"),
+    secret: readProviderString(value, "key", "OpenRouter"),
   };
 };
 
 const readCredentialDetails = async (
-  runtime: oauth.OAuthRuntime,
+  runtime: OAuthRuntime,
   apiKey: string,
 ): Promise<{ readonly accountId: string | null; readonly label: string }> => {
   const value = await readOpenRouterApiKeyMetadata(runtime, apiKey);
@@ -92,19 +100,19 @@ const readCredentialDetails = async (
   }
 
   return {
-    accountId: oauth.readProviderUserId({
+    accountId: readProviderUserId({
       key: "creator_user_id",
       provider: "OpenRouter",
       record: data,
     }),
-    label: oauth.readProviderString(data, "label", "OpenRouter"),
+    label: readProviderString(data, "label", "OpenRouter"),
   };
 };
 
 export function createOpenRouterIntegrationFromEnvironment(
   environment: Readonly<Record<string, string | undefined>>,
   auth: GoogleAuth,
-  dependencies: oauth.OAuthDependencies = {},
+  dependencies: OAuthDependencies = {},
 ): OpenRouterIntegration {
   const configuration = readProviderIntegrationConfiguration(environment, {
     callbackPath: OPENROUTER_OAUTH_CALLBACK_PATH,

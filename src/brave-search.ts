@@ -1,8 +1,7 @@
 import { isRecord } from "./auth-model.ts";
 import type { GoogleAuth } from "./auth.ts";
 import { createCredentialCipher } from "./credential-cipher.ts";
-import type { AppDatabase } from "./database.ts";
-import { createDatabase } from "./database.ts";
+import { createDatabase, type AppDatabase } from "./database.ts";
 import { createUuidV7, type IdGenerator } from "./ids.ts";
 import {
   normalizeOptionalValue,

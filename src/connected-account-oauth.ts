@@ -6,7 +6,17 @@ import {
   readCookie,
   valuesMatch,
 } from "./http.ts";
-import * as oauth from "./oauth.ts";
+import {
+  clearPkceCookies,
+  createFlowCookie,
+  readOAuthCallback,
+  redirectToApp,
+  resolveRedirectUri,
+  startPkceFlowForRedirect,
+  usesSecureCookies,
+  type FlowCookies,
+  type OAuthRuntime,
+} from "./oauth.ts";
 import type { ProviderCredentialDetails } from "./provider-credential-store.ts";
 import type { ProviderCredentialEndpoints } from "./provider-credentials.ts";
 import { APP_PATH } from "./routes.ts";
@@ -34,7 +44,7 @@ export interface ConnectedAccountOAuthConfiguration {
   readonly exchangeCredential: (
     request: CredentialExchangeRequest,
   ) => Promise<ConnectedAccountCredential>;
-  readonly flowCookies: oauth.FlowCookies;
+  readonly flowCookies: FlowCookies;
   readonly redirectUri?: string;
   readonly resultParameter: string;
   readonly userCookie: string;
@@ -43,12 +53,12 @@ export interface ConnectedAccountOAuthConfiguration {
 export class ConnectedAccountOAuth {
   readonly #configuration: ConnectedAccountOAuthConfiguration;
   readonly #credentials: ProviderCredentialEndpoints;
-  readonly #runtime: oauth.OAuthRuntime;
+  readonly #runtime: OAuthRuntime;
 
   constructor(
     configuration: ConnectedAccountOAuthConfiguration,
     credentials: ProviderCredentialEndpoints,
-    runtime: oauth.OAuthRuntime,
+    runtime: OAuthRuntime,
   ) {
     this.#configuration = configuration;
     this.#credentials = credentials;
@@ -67,18 +77,17 @@ export class ConnectedAccountOAuth {
 
   #beginAuthorized(request: Request, user: AuthenticatedUser): Response {
     const redirectUri = this.#redirectUri(request);
-    const { challenge, cookies, secure, state } =
-      oauth.startPkceFlowForRedirect(
-        this.#runtime,
-        this.#configuration.flowCookies,
-        redirectUri,
-      );
+    const { challenge, cookies, secure, state } = startPkceFlowForRedirect(
+      this.#runtime,
+      this.#configuration.flowCookies,
+      redirectUri,
+    );
     const authorizationUrl = this.#configuration.createAuthorizationUrl({
       callbackUri: redirectUri,
       challenge,
       state,
     });
-    const userCookie = oauth.createFlowCookie(
+    const userCookie = createFlowCookie(
       this.#configuration.userCookie,
       user.id,
       this.#configuration.flowCookies.path,
@@ -103,9 +112,9 @@ export class ConnectedAccountOAuth {
     user: AuthenticatedUser,
   ): Promise<Response> {
     const redirectUri = this.#redirectUri(request);
-    const secure = oauth.usesSecureCookies(redirectUri);
+    const secure = usesSecureCookies(redirectUri);
     const clearedCookies = [
-      ...oauth.clearPkceCookies(this.#configuration.flowCookies, secure),
+      ...clearPkceCookies(this.#configuration.flowCookies, secure),
       createCookie(
         this.#configuration.userCookie,
         "",
@@ -114,7 +123,7 @@ export class ConnectedAccountOAuth {
         secure,
       ),
     ];
-    const callback = oauth.readOAuthCallback(
+    const callback = readOAuthCallback(
       request,
       this.#configuration.flowCookies,
     );
@@ -156,7 +165,7 @@ export class ConnectedAccountOAuth {
     result: "connected" | "denied" | "failed" | "invalid_state",
     cookies: readonly string[],
   ): Response {
-    return oauth.redirectToApp(
+    return redirectToApp(
       APP_PATH,
       this.#redirectUri(request),
       this.#configuration.resultParameter,
@@ -166,7 +175,7 @@ export class ConnectedAccountOAuth {
   }
 
   #redirectUri(request: Request): string {
-    return oauth.resolveRedirectUri(
+    return resolveRedirectUri(
       this.#configuration.redirectUri,
       this.#configuration.callbackPath,
       request,

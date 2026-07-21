@@ -7,7 +7,14 @@ import {
   createCredentialCipher,
   type CredentialCipher,
 } from "./credential-cipher.ts";
-import * as oauth from "./oauth.ts";
+import {
+  createOAuthRuntime,
+  normalizeOptionalValue,
+  validateRedirectUri,
+  type OAuthDependencies,
+  type OAuthEndpoints,
+  type OAuthRuntime,
+} from "./oauth.ts";
 import {
   ProviderCredentialStore,
   type ProviderCredentialAccess,
@@ -16,7 +23,7 @@ import {
 } from "./provider-credential-store.ts";
 import { ProviderCredentialEndpoints } from "./provider-credentials.ts";
 
-export interface ProviderIntegration extends oauth.OAuthEndpoints {
+export interface ProviderIntegration extends OAuthEndpoints {
   credentials(request: Request): Promise<Response>;
   readCredential(
     userId: string,
@@ -31,7 +38,7 @@ export interface ProviderIntegrationConfiguration {
 }
 
 type OAuthConfigurationFactory = (
-  runtime: oauth.OAuthRuntime,
+  runtime: OAuthRuntime,
 ) => Omit<ConnectedAccountOAuthConfiguration, "redirectUri">;
 
 export function readProviderIntegrationConfiguration(
@@ -44,10 +51,10 @@ export function readProviderIntegrationConfiguration(
     readonly settingsConfigured?: boolean;
   },
 ): ProviderIntegrationConfiguration | undefined {
-  const encodedCredentialKey = oauth.normalizeOptionalValue(
+  const encodedCredentialKey = normalizeOptionalValue(
     environment[options.credentialKeyVariable],
   );
-  const redirectUri = oauth.normalizeOptionalValue(
+  const redirectUri = normalizeOptionalValue(
     environment[options.redirectUriVariable],
   );
 
@@ -67,7 +74,7 @@ export function readProviderIntegrationConfiguration(
     ...(redirectUri === undefined
       ? {}
       : {
-          redirectUri: oauth.validateRedirectUri(
+          redirectUri: validateRedirectUri(
             redirectUri,
             options.callbackPath,
             options.redirectUriVariable,
@@ -77,7 +84,7 @@ export function readProviderIntegrationConfiguration(
 }
 
 type CredentialDetailsReader = (
-  runtime: oauth.OAuthRuntime,
+  runtime: OAuthRuntime,
   apiKey: string,
 ) => Promise<ProviderCredentialDetails>;
 
@@ -85,15 +92,15 @@ export function createProviderIntegration(options: {
   readonly auth: GoogleAuth;
   readonly configuration: ProviderIntegrationConfiguration | undefined;
   readonly createOAuthConfiguration: OAuthConfigurationFactory;
-  readonly dependencies: oauth.OAuthDependencies;
+  readonly dependencies: OAuthDependencies;
   readonly prepareCredential?: (
-    runtime: oauth.OAuthRuntime,
+    runtime: OAuthRuntime,
     credential: ProviderCredentialAccess,
   ) => Promise<string | undefined>;
   readonly provider: ProviderId;
   readonly readCredentialDetails: CredentialDetailsReader;
 }): ProviderIntegration {
-  const runtime = oauth.createOAuthRuntime(options.dependencies);
+  const runtime = createOAuthRuntime(options.dependencies);
   const store =
     options.configuration === undefined
       ? undefined

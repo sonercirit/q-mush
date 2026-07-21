@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Buffer } from "node:buffer";
-import * as crypto from "node:crypto";
+import { createHash } from "node:crypto";
 import { createGoogleAuthFromEnvironment } from "../auth.ts";
 import { createCredentialCipher } from "../credential-cipher.ts";
 import {
@@ -15,7 +15,21 @@ import {
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { expectPkceParameters, expectRedirect } from "./oauth-test-helpers.ts";
-import * as providerTest from "./provider-integration-test-helpers.ts";
+import {
+  addProviderApiKeys,
+  beginProviderAccount,
+  createProviderAccountConnector,
+  createProviderTestSetup,
+  credentialSummaries,
+  defineProviderTestConfiguration,
+  defineProviderTestRoutes,
+  expectInvalidProviderState,
+  expectProtectedInvalidApiKey,
+  expectRemovedProviderCredential,
+  readBearerApiKey,
+  readStoredProviderCredentials,
+  recordProviderRequest,
+} from "./provider-integration-test-helpers.ts";
 
 const FIRST_OAUTH_ID = "018bcfe5-6800-7000-8000-000000000031";
 const SECOND_OAUTH_ID = "018bcfe5-6800-7000-8000-000000000032";
@@ -130,12 +144,7 @@ const createProviderFetch = (
   requests: Request[],
 ): ((input: RequestInfo | URL, init?: RequestInit) => Promise<Response>) =>
   async function openAiProviderFetch(input, init) {
-    const request = providerTest.recordProviderRequest(
-      requests,
-      input,
-      init,
-      true,
-    );
+    const request = recordProviderRequest(requests, input, init, true);
 
     if (request.url === "https://auth.openai.com/oauth/token") {
       const body = new URLSearchParams(await request.text());
@@ -172,7 +181,7 @@ const createProviderFetch = (
     }
 
     if (request.url === "https://api.openai.com/v1/me") {
-      const details = detailsByKey[providerTest.readBearerApiKey(request)];
+      const details = detailsByKey[readBearerApiKey(request)];
 
       if (details === undefined) {
         return Response.json({ error: "invalid key" }, { status: 401 });
@@ -184,20 +193,18 @@ const createProviderFetch = (
     return new Response(null, { status: 500 });
   };
 
-const TEST_ROUTES = providerTest.defineProviderTestRoutes("openai");
-const INTEGRATION_TEST_CONFIGURATION =
-  providerTest.defineProviderTestConfiguration(
+const TEST_ROUTES = defineProviderTestRoutes("openai");
+const setupIntegration = createProviderTestSetup(
+  defineProviderTestConfiguration(
     createProviderFetch,
     ENVIRONMENT,
     createOpenAiIntegrationFromEnvironment,
     [FIRST_OAUTH_ID, SECOND_OAUTH_ID, FIRST_KEY_ID, SECOND_KEY_ID],
     "openai",
     [FIRST_STATE, FIRST_VERIFIER, SECOND_STATE, SECOND_VERIFIER],
-  );
-const setupIntegration = providerTest.createProviderTestSetup(
-  INTEGRATION_TEST_CONFIGURATION,
+  ),
 );
-const connectAccount = providerTest.createProviderAccountConnector(TEST_ROUTES);
+const connectAccount = createProviderAccountConnector(TEST_ROUTES);
 
 describe("OpenAI credentials", () => {
   test("connects multiple accounts with OAuth PKCE and stores multiple API keys", async () => {
@@ -241,7 +248,7 @@ describe("OpenAI credentials", () => {
     ).toBe("q_mush");
     expectPkceParameters(
       firstConnection.authorizationUrl,
-      crypto.createHash("sha256").update(FIRST_VERIFIER).digest("base64url"),
+      createHash("sha256").update(FIRST_VERIFIER).digest("base64url"),
     );
     expectRedirect(
       firstConnection.response,
@@ -258,17 +265,16 @@ describe("OpenAI credentials", () => {
       "http://localhost:3000/app?openai=connected",
     );
 
-    await providerTest.addProviderApiKeys(
-      integration,
-      TEST_ROUTES.credentialsPath,
-      [FIRST_MANUAL_KEY, SECOND_MANUAL_KEY],
-    );
+    await addProviderApiKeys(integration, TEST_ROUTES.credentialsPath, [
+      FIRST_MANUAL_KEY,
+      SECOND_MANUAL_KEY,
+    ]);
 
     const listResponse = await integration.credentials(
       createAuthenticatedRequest(TEST_ROUTES.credentialsPath),
     );
     expect(await listResponse.json()).toEqual(
-      providerTest.credentialSummaries([
+      credentialSummaries([
         FIRST_OAUTH_CREDENTIAL,
         SECOND_OAUTH_CREDENTIAL,
         FIRST_MANUAL_CREDENTIAL,
@@ -276,10 +282,7 @@ describe("OpenAI credentials", () => {
       ]),
     );
 
-    const storedCredentials = providerTest.readStoredProviderCredentials(
-      database,
-      "openai",
-    );
+    const storedCredentials = readStoredProviderCredentials(database, "openai");
     expect(storedCredentials).toHaveLength(4);
     const secrets = [
       ...OAUTH_ACCOUNTS.flatMap(({ accessToken, idToken, refreshToken }) => [
@@ -347,27 +350,30 @@ describe("OpenAI credentials", () => {
       refresh_token: "oauth-refresh-token-one",
     });
 
-    providerTest.expectRemovedProviderCredential(
-      { database, integration, providerRequests },
-      TEST_ROUTES,
-      FIRST_KEY_ID,
-    );
-    database.$client.close();
+    try {
+      expectRemovedProviderCredential(
+        { database, integration, providerRequests },
+        TEST_ROUTES,
+        FIRST_KEY_ID,
+      );
+    } finally {
+      database.$client.close();
+    }
   });
 
   test("rejects an OAuth callback with unverifiable state", () =>
-    providerTest.expectInvalidProviderState(
+    expectInvalidProviderState(
       setupIntegration(),
       TEST_ROUTES,
       "authorization-code-one",
     ));
 
   test("protects access and rejects an invalid API key", () =>
-    providerTest.expectProtectedInvalidApiKey(setupIntegration(), TEST_ROUTES));
+    expectProtectedInvalidApiKey(setupIntegration(), TEST_ROUTES));
 
   test("uses the registered Codex loopback callback by default", async () => {
-    const setupLoopbackIntegration = providerTest.createProviderTestSetup(
-      providerTest.defineProviderTestConfiguration(
+    const setupLoopbackIntegration = createProviderTestSetup(
+      defineProviderTestConfiguration(
         createProviderFetch,
         { OPENAI_CREDENTIAL_KEY: ENVIRONMENT.OPENAI_CREDENTIAL_KEY },
         createOpenAiIntegrationFromEnvironment,
@@ -377,14 +383,13 @@ describe("OpenAI credentials", () => {
       ),
     );
     const { database, integration } = setupLoopbackIntegration();
-    const { authorizationUrl, callbackRequest } =
-      providerTest.beginProviderAccount({
-        callbackPath: "/auth/callback",
-        code: "authorization-code-one",
-        integration,
-        oauthPath: TEST_ROUTES.oauthPath,
-        state: FIRST_STATE,
-      });
+    const { authorizationUrl, callbackRequest } = beginProviderAccount({
+      callbackPath: "/auth/callback",
+      code: "authorization-code-one",
+      integration,
+      oauthPath: TEST_ROUTES.oauthPath,
+      state: FIRST_STATE,
+    });
     expect(authorizationUrl.searchParams.get("redirect_uri")).toBe(
       "http://localhost:1455/auth/callback",
     );
