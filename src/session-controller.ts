@@ -20,7 +20,10 @@ import {
   readSessionDraft,
   selectedDraftOption,
 } from "./session-form.ts";
-import { appendAgentImageFiles } from "./session-image-input.ts";
+import {
+  appendAgentImageFiles,
+  readPastedAgentImageFiles,
+} from "./session-image-input.ts";
 import { SessionModelController } from "./session-model-controller.ts";
 import type {
   AgentSessionDetail,
@@ -136,12 +139,27 @@ export class SessionController {
       'input[type="file"][data-action]',
     )) {
       input.addEventListener("change", () => {
-        void this.#addImages(input);
+        const files = input.files === null ? [] : [...input.files];
+        input.value = "";
+        if (files.length > 0) {
+          void this.#addImages(
+            files,
+            input.dataset["action"] === "add-follow-up-images",
+          );
+        }
       });
     }
     for (const textarea of panel.querySelectorAll<HTMLTextAreaElement>(
       'textarea[name="prompt"]',
     )) {
+      textarea.addEventListener("paste", (event) => {
+        const files = readPastedAgentImageFiles(event);
+        if (files.length > 0) {
+          const follow =
+            textarea.form?.dataset["action"] === "send-session-message";
+          void this.#addImages(files, follow);
+        }
+      });
       textarea.addEventListener("keydown", (event) => {
         const form = textarea.form;
 
@@ -479,22 +497,14 @@ export class SessionController {
     }
   }
 
-  async #addImages(input: HTMLInputElement): Promise<void> {
-    const files = input.files === null ? [] : [...input.files];
-    input.value = "";
-    if (files.length === 0) {
-      return;
-    }
-
-    const followUp = input.dataset["action"] === "add-follow-up-images";
-    const current = followUp
+  async #addImages(files: readonly File[], follow: boolean): Promise<void> {
+    const current = follow
       ? this.#view.value.followUpImages
       : this.#view.value.draft.images;
-
     try {
       const images = await appendAgentImageFiles(current, files);
       this.#view.patch(
-        followUp
+        follow
           ? { error: undefined, followUpImages: images }
           : {
               draft: { ...this.#view.value.draft, images },

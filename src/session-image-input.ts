@@ -9,6 +9,53 @@ import {
 
 export const AGENT_IMAGE_ACCEPT = AGENT_IMAGE_MEDIA_TYPES.join(",");
 
+interface ClipboardImageData {
+  readonly files: Iterable<File>;
+  readonly items: Iterable<{
+    getAsFile(): File | null;
+    readonly kind: string;
+  }>;
+}
+
+interface ImagePasteEvent {
+  readonly clipboardData: ClipboardImageData | null;
+  preventDefault(): void;
+}
+
+function namedPastedImage(file: File): File {
+  if (file.name.length > 0) {
+    return file;
+  }
+
+  const subtype = file.type.slice("image/".length);
+  const extension = subtype === "jpeg" ? "jpg" : subtype;
+  return new File([file], `pasted-image.${extension}`, { type: file.type });
+}
+
+export function readPastedAgentImageFiles(
+  event: ImagePasteEvent,
+): readonly File[] {
+  if (event.clipboardData === null) {
+    return [];
+  }
+
+  const itemFiles = [...event.clipboardData.items]
+    .filter(({ kind }) => kind === "file")
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => file !== null);
+  const files =
+    itemFiles.length > 0 ? itemFiles : [...event.clipboardData.files];
+  const images = files
+    .filter(({ type }) => type.startsWith("image/"))
+    .map(namedPastedImage);
+
+  if (images.length > 0) {
+    event.preventDefault();
+  }
+
+  return images;
+}
+
 function encodeBase64(bytes: Uint8Array): string {
   let binary = "";
   const chunkSize = 32_768;

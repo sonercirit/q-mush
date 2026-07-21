@@ -118,20 +118,20 @@ task-specific progress, guesses, or sensitive values.
   another user's registration remains protected. Runner tokens never appear in
   list responses.
 - `src/sessions.ts` and `src/session-store.ts` implement persistent first-party
-  coding sessions. User messages support up to eight 10 MB PNG, JPEG, GIF, or
-  WebP images, persisted with the transcript and sent as native multimodal
-  input. A session records latest input-token usage and its discovered context
-  limit. Usage shows a percentage, yellow at 80%, and red at 90%.
-  Auto-compaction defaults on and summarizes completed history before the next
-  request at 95%; idle sessions can compact manually. Compaction soft-deletes
-  prior active messages and inserts a replayable handoff. Provider secrets never
-  enter browser or runner work payloads; `src/agent-tools.ts` defines the
-  Pi-compatible `read`, `bash`, `edit`, and `write` tools plus `parallel`, while
-  `src/runner-command-broker.ts` carries authenticated calls over the runner
-  WebSocket. The working-directory field also opens the interactive browser in
-  `src/directory-picker-client.tsx`; its controller posts to
-  `/api/runners/:id/directories` for canonical directory metadata. Before each
-  run, `read_agent_file` loads exact-root `AGENTS.md`, falling back to
+  coding sessions. User messages support selecting or pasting up to eight 10 MB
+  PNG, JPEG, GIF, or WebP images, persisted with the transcript and sent as
+  native multimodal input. A session records latest input-token usage and its
+  discovered context limit. Usage shows a percentage, yellow at 80%, and red at
+  90%. Auto-compaction defaults on and summarizes completed history before the
+  next request at 95%; idle sessions can compact manually. Compaction
+  soft-deletes prior active messages and inserts a replayable handoff. Provider
+  secrets never enter browser or runner work payloads; `src/agent-tools.ts`
+  defines the Pi-compatible `read`, `bash`, `edit`, and `write` tools plus
+  `parallel`, while `src/runner-command-broker.ts` carries authenticated calls
+  over the runner WebSocket. The working-directory field also opens the
+  interactive browser in `src/directory-picker-client.tsx`; its controller posts
+  to `/api/runners/:id/directories` for canonical directory metadata. Before
+  each run, `read_agent_file` loads exact-root `AGENTS.md`, falling back to
   `CLAUDE.md`; only `AGENTS.md` is used when both exist.
 
   `src/runner-workspace.ts` shares canonical workspace resolution and

@@ -70,7 +70,8 @@ export function renderSessionImageInput(
         />
       </label>
       <p className="text-xs text-slate-500">
-        PNG, JPEG, GIF, or WebP. Up to 8 images, 10 MB each.
+        Select or paste PNG, JPEG, GIF, or WebP images. Up to 8 images, 10 MB
+        each.
       </p>
     </div>
   );

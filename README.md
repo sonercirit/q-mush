@@ -138,9 +138,9 @@ After a runner and provider credential are ready, use **New agent session** in
 the control center. Select an online computer and credential; Q Mush discovers
 that credential's available agent models and model-specific reasoning efforts.
 Reasoning effort defaults to the model maximum. Then select the model, working
-directory, and task. Tasks and follow-up messages can attach up to eight PNG,
-JPEG, GIF, or WebP images of 10 MB each; attachments are persisted in the
-transcript and sent directly to the selected model provider. The
+directory, and task. Tasks and follow-up messages can select or paste up to
+eight PNG, JPEG, GIF, or WebP images of 10 MB each; attachments are persisted in
+the transcript and sent directly to the selected model provider. The
 working-directory field accepts a path directly or opens an interactive browser
 with Home, Up, and child-directory navigation; choosing a location writes its
 canonical path back to the form. Q Mush implements its own model/tool loop
