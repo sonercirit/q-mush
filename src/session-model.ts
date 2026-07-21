@@ -20,6 +20,7 @@ export interface AgentSessionMessage {
 }
 
 export interface AgentSessionSummary {
+  readonly autoCompact: boolean;
   readonly createdAt: number;
   readonly credentialId: string;
   readonly currentContextTokens: number;

@@ -20,7 +20,10 @@ test("reads a session agent file from the server", () => {
   ).toThrow("invalid agent file");
 });
 
-test("requires explicit context metadata from session and model responses", () => {
+test("requires explicit context and compaction metadata from session responses", () => {
+  expect(() =>
+    readSessionDetail({ ...DETAIL, autoCompact: undefined }),
+  ).toThrow("invalid agent session");
   expect(() =>
     readSessionDetail({ ...DETAIL, maxContextTokens: undefined }),
   ).toThrow("invalid agent session");

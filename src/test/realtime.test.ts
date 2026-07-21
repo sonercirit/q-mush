@@ -64,6 +64,8 @@ function runners(
 function sessions(): SessionIntegration {
   return {
     collection: () => Promise.resolve(new Response()),
+    compact: () => Promise.resolve(new Response()),
+    compaction: () => Promise.resolve(new Response()),
     completeRunnerCommand: () => false,
     continue: () => Promise.resolve(new Response()),
     deliverRunnerCommands: () => undefined,

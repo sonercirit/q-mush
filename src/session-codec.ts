@@ -116,6 +116,7 @@ function readSummary(value: unknown): AgentSessionSummary {
     throw new Error("The server returned an invalid agent session");
   }
 
+  const autoCompact = value["autoCompact"];
   const createdAt = readFiniteNumber(value["createdAt"]);
   const credentialId = value["credentialId"];
   const currentContextTokens = readFiniteNumber(value["currentContextTokens"]);
@@ -131,6 +132,7 @@ function readSummary(value: unknown): AgentSessionSummary {
   const workingDirectory = value["workingDirectory"];
 
   if (
+    typeof autoCompact !== "boolean" ||
     createdAt === undefined ||
     typeof credentialId !== "string" ||
     currentContextTokens === undefined ||
@@ -155,6 +157,7 @@ function readSummary(value: unknown): AgentSessionSummary {
   }
 
   return {
+    autoCompact,
     createdAt,
     credentialId,
     currentContextTokens,
@@ -246,6 +249,7 @@ export function summaryFromDetail(
   detail: AgentSessionDetail,
 ): AgentSessionSummary {
   return {
+    autoCompact: detail.autoCompact,
     createdAt: detail.createdAt,
     credentialId: detail.credentialId,
     currentContextTokens: detail.currentContextTokens,

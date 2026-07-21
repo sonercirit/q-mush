@@ -1,0 +1,1 @@
+ALTER TABLE `agent_sessions` ADD `auto_compact` integer DEFAULT true NOT NULL;

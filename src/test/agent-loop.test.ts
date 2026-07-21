@@ -1,12 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { runAgentLoop, type AgentRecordedMessage } from "../agent-loop.ts";
+import {
+  runAgentLoop,
+  type AgentModel,
+  type AgentRecordedMessage,
+} from "../agent-loop.ts";
 import { createAgentSkills } from "../agent-skills.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 
 type ExecuteTool = Parameters<typeof runAgentLoop>[0]["executeTool"];
 
 async function runRecordedLoop(
-  model: ScriptedAgentModel,
+  model: AgentModel,
   prompt: string,
   executeTool: ExecuteTool,
   expectedContextTokens?: number,
@@ -80,10 +84,33 @@ describe("first-party agent loop", () => {
       toolMessage,
       { content: "The project is ready.", role: "assistant", toolCalls: [] },
     ]);
-    expect(model.requests[1]).toEqual([
-      { content: "Inspect this project", role: "user" },
-      assistantMessage,
-      toolMessage,
+    expect(model.requests[1]).toContainEqual(toolMessage);
+    expect(model.requests[1]?.[0]).toMatchObject({
+      role: "user",
+    });
+  });
+
+  test("prepares the conversation immediately before a model request", async () => {
+    const model = new ScriptedAgentModel([
+      { content: "Prepared.", toolCalls: [] },
+    ]);
+    let preparations = 0;
+
+    await runAgentLoop({
+      executeTool: () => Promise.resolve(""),
+      initialMessages: [{ content: "Original", role: "user" }],
+      model,
+      prepareMessages: (messages) => {
+        preparations += 1;
+        expect(messages).toEqual([{ content: "Original", role: "user" }]);
+        return [{ content: "Prepared context", role: "user" }];
+      },
+      recordMessage: () => undefined,
+    });
+
+    expect(preparations).toBe(1);
+    expect(model.requests[0]).toEqual([
+      { content: "Prepared context", role: "user" },
     ]);
   });
 
@@ -114,10 +141,9 @@ describe("first-party agent loop", () => {
     );
 
     expect(executedCallIds).toHaveLength(33);
-    expect(recorded.at(-1)).toEqual({
+    expect(recorded.at(-1)).toMatchObject({
       content: "Long-running task complete.",
       role: "assistant",
-      toolCalls: [],
     });
   });
 

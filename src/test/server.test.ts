@@ -281,6 +281,8 @@ describe("page server", () => {
         `${SESSION_MODELS_PATH}?provider=openai&credentialId=credential-id`,
       ),
       sendRequest(`${SESSIONS_PATH}/session-id`),
+      sendRequest(`${SESSIONS_PATH}/session-id/compact`, undefined, "POST"),
+      sendRequest(`${SESSIONS_PATH}/session-id/compaction`, undefined, "POST"),
       sendRequest(`${SESSIONS_PATH}/session-id/continue`, undefined, "POST"),
       sendRequest(`${SESSIONS_PATH}/session-id/messages`, undefined, "POST"),
       sendRequest(`${SESSIONS_PATH}/session-id/stop`, undefined, "POST"),

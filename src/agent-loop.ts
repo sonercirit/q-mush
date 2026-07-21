@@ -78,10 +78,16 @@ export interface AgentModel {
 
 type ParsedAgentToolCall = AgentToolRequest<Readonly<Record<string, unknown>>>;
 
-interface AgentLoopOptions {
+export interface AgentLoopOptions {
   readonly executeTool: (call: ParsedAgentToolCall) => Promise<string>;
   readonly initialMessages: readonly AgentConversationMessage[];
   readonly model: AgentModel;
+  readonly prepareMessages?: (
+    messages: readonly AgentConversationMessage[],
+    signal?: AbortSignal,
+  ) =>
+    | Promise<readonly AgentConversationMessage[]>
+    | readonly AgentConversationMessage[];
   readonly recordMessage: (
     message: AgentRecordedMessage,
   ) => Promise<void> | void;
@@ -109,11 +115,17 @@ function parseArguments(
   }
 }
 
-export async function runAgentLoop(options: AgentLoopOptions): Promise<void> {
-  const messages = [...options.initialMessages];
+export async function runAgentLoop(
+  options: AgentLoopOptions,
+): Promise<readonly AgentConversationMessage[]> {
+  let messages = [...options.initialMessages];
 
   for (;;) {
     throwIfAborted(options.signal);
+    if (options.prepareMessages !== undefined) {
+      messages = [...(await options.prepareMessages(messages, options.signal))];
+      throwIfAborted(options.signal);
+    }
     const turn = await options.model.complete(messages, options.signal);
     throwIfAborted(options.signal);
     if (turn.thinking.length > 0) {
@@ -142,7 +154,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<void> {
     messages.push(assistantMessage);
 
     if (turn.toolCalls.length === 0) {
-      return;
+      return messages;
     }
 
     for (const call of turn.toolCalls) {

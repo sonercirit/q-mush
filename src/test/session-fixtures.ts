@@ -2,6 +2,7 @@ import type { AgentSessionDetail } from "../session-model.ts";
 
 export const TEST_SESSION_DETAIL: AgentSessionDetail = {
   agentFile: null,
+  autoCompact: true,
   createdAt: 1,
   credentialId: "credential-1",
   currentContextTokens: 1_250,

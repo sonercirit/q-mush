@@ -47,6 +47,7 @@ describe("session continuation", () => {
     expect(createResponse.status).toBe(201);
     expect(await createResponse.json()).toMatchObject({
       currentContextTokens: 0,
+      autoCompact: true,
       id: SESSION_ID,
       maxContextTokens: null,
       reasoningEffort: "high",
@@ -91,9 +92,13 @@ describe("session continuation", () => {
     await completeAgentFileLookup(setup);
     const continued = await waitForSessionValue(
       () => sessionDetail(sessions),
-      (value) =>
-        hasSessionStatus("idle")(value) &&
-        JSON.stringify(value).includes("Follow-up complete."),
+      (value) => {
+        const serialized = JSON.stringify(value);
+        return (
+          hasSessionStatus("idle")(value) &&
+          serialized.includes("Follow-up complete.")
+        );
+      },
     );
     const followUpRequest = model.requests[2];
     expect(followUpRequest).toBeDefined();

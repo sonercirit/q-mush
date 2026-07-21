@@ -23,6 +23,7 @@ function createTestSession(store: SessionStore) {
   return store.create(
     {
       credentialId: CREDENTIAL_ID,
+      autoCompact: true,
       maxContextTokens: 200_000,
       model: "gpt-4.1-mini",
       prompt: "Inspect the repository\nand make it shine",
@@ -71,6 +72,8 @@ function createStore() {
     ASSISTANT_MESSAGE_ID,
     TOOL_MESSAGE_ID,
     "018bcfe5-6800-7000-8000-000000000048",
+    "018bcfe5-6800-7000-8000-000000000049",
+    "018bcfe5-6800-7000-8000-000000000050",
   ];
   return {
     database,
@@ -89,6 +92,7 @@ describe("session store", () => {
     expect(created.id).toBe(SESSION_ID);
     expect(created.status).toBe("queued");
     expect(created.currentContextTokens).toBe(0);
+    expect(created.autoCompact).toBeTrue();
     expect(created.maxContextTokens).toBe(200_000);
     expect(created.reasoningEffort).toBe("high");
     expect(created.title).toBe("Inspect the repository");
@@ -166,6 +170,34 @@ describe("session store", () => {
       },
     ]);
     expect(store.list(TEST_USER_ID)).toHaveLength(1);
+    database.$client.close();
+  });
+
+  test("compacts stored work into a replayable handoff", () => {
+    const { database, store } = createStore();
+    const session = createTestSession(store);
+    expect(session.status).toBe("queued");
+    markTestSessionRunning(store);
+    store.appendAgentMessage(
+      SESSION_ID,
+      { content: "Work in progress.", role: "assistant", toolCalls: [] },
+      TEST_NOW + 2,
+    );
+
+    store.compact(
+      SESSION_ID,
+      "Keep the completed work and run tests.",
+      TEST_NOW + 3,
+    );
+
+    expect(store.conversation(SESSION_ID)).toEqual([
+      {
+        content:
+          "Conversation compacted:\n\nKeep the completed work and run tests.",
+        role: "user",
+      },
+    ]);
+    expect(store.get(TEST_USER_ID, SESSION_ID)?.currentContextTokens).toBe(0);
     database.$client.close();
   });
 

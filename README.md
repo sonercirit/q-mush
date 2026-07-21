@@ -105,8 +105,10 @@ their assets:
   `/api/realtime` WebSocket.
 - Authenticated users create and list agent sessions at `/api/sessions`,
   discover models for an owned credential at `/api/sessions/models`, inspect
-  `/api/sessions/:id`, send follow-ups to `/api/sessions/:id/messages`, and stop
-  work through `/api/sessions/:id/stop`.
+  `/api/sessions/:id`, send follow-ups to `/api/sessions/:id/messages`, compact
+  history through `/api/sessions/:id/compact`, toggle automatic compaction at
+  `/api/sessions/:id/compaction`, and stop work through
+  `/api/sessions/:id/stop`.
 
 After signing in, use **Set up a runner** in the control center. Run the shown
 one-liner on a macOS or Linux computer, or download and run the installer. The
@@ -153,8 +155,12 @@ the server-side `brave_search` skill for current web results, with batched exact
 edits and bounded file and command output. Brave Search tries the signed-in
 user's saved keys in order when a key is rejected, rate limited, or temporarily
 unavailable. Transcripts show system instructions, complete tool definitions,
-reasoning summaries, tool calls, and tool results. Session transcripts and
-status survive page reloads; a ready, stopped, or failed session accepts
+reasoning summaries, tool calls, and tool results. Context use includes a
+percentage, turns yellow at 80%, and red at 90%. Automatic compaction is enabled
+per session by default and replaces completed history with a model-generated
+handoff summary before the next request after usage reaches 95%; it can be
+turned off, and a ready session can be compacted manually. Session transcripts
+and status survive page reloads; a ready, stopped, or failed session accepts
 follow-up instructions. **Stop session** aborts the model request and cancels an
 active runner command.
 

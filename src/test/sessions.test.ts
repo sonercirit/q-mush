@@ -221,10 +221,88 @@ describe("agent sessions", () => {
       createSessionRequest(true, "high", "gpt-discovered"),
     );
     expect(await createResponse.json()).toMatchObject({
+      autoCompact: true,
       maxContextTokens: 200_000,
     });
     await expectSessionReaches(setup, createResponse, "idle");
     database.$client.close();
+  });
+
+  test("updates compaction mode and manually compacts an idle session", async () => {
+    const model = new ScriptedAgentModel([
+      {
+        content: "Initial work complete.",
+        contextTokens: 90_000,
+        toolCalls: [],
+      },
+      { content: "Concise handoff.", toolCalls: [] },
+    ]);
+    const setup = connectedSessionSetup(model, "api_key", () =>
+      Promise.resolve({
+        defaultModel: "gpt-4.1-mini",
+        models: [
+          {
+            contextWindow: null,
+            id: "gpt-4.1-mini",
+            label: "GPT",
+            reasoningEfforts: [],
+          },
+        ],
+      }),
+    );
+    const created = await setup.sessions.collection(createSessionRequest());
+    await expectSessionReaches(setup, created, "idle");
+
+    const modeResponse = await setup.sessions.compaction(
+      createAuthenticatedRequest(
+        `${SESSIONS_PATH}/${SESSION_ID}/compaction`,
+        { autoCompact: "false" },
+        "POST",
+      ),
+      SESSION_ID,
+    );
+    expect(modeResponse.status).toBe(400);
+    const validModeResponse = await setup.sessions.compaction(
+      new Request(
+        `http://localhost:3000${SESSIONS_PATH}/${SESSION_ID}/compaction`,
+        {
+          body: JSON.stringify({ autoCompact: false }),
+          headers: {
+            "content-type": "application/json",
+            cookie: "q_mush_session=authenticated-session",
+          },
+          method: "POST",
+        },
+      ),
+      SESSION_ID,
+    );
+    expect(validModeResponse.status).toBe(200);
+    expect(await validModeResponse.json()).toMatchObject({
+      autoCompact: false,
+    });
+
+    const compactResponse = await setup.sessions.compact(
+      createAuthenticatedRequest(
+        `${SESSIONS_PATH}/${SESSION_ID}/compact`,
+        undefined,
+        "POST",
+      ),
+      SESSION_ID,
+    );
+    expect(compactResponse.status).toBe(202);
+    await completeAgentFileLookup(setup);
+    const compacted = await waitForSessionValue(
+      () => sessionDetail(setup.sessions),
+      (value) => {
+        if (!hasSessionStatus("idle")(value)) {
+          return false;
+        }
+        return JSON.stringify(value).includes("Concise handoff.");
+      },
+    );
+    expect(JSON.stringify(compacted)).not.toContain("Initial work complete.");
+    expect(compacted).toMatchObject({ currentContextTokens: 0 });
+    setup.database.$client.close();
   });
 
   test("uses a Codex model by default for OpenAI OAuth", async () => {

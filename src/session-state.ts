@@ -28,6 +28,7 @@ export function sessionModelDiscoveryState(
 
 export function initialSessionViewState(): SessionViewState {
   return {
+    compacting: false,
     creating: false,
     detail: undefined,
     directoryPicker: initialDirectoryPickerState(),

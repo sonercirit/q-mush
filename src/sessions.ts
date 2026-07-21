@@ -1,21 +1,9 @@
 import {
-  defaultAgentModel,
-  isAgentModelId,
-  isAgentReasoningEffort,
-  type AgentReasoningEffort,
-} from "./agent-configuration.ts";
-import { runAgentLoop, type AgentModel } from "./agent-loop.ts";
-import {
   discoverAgentModels,
   type AgentModelDiscoverer,
 } from "./agent-model-discovery.ts";
-import {
-  ChatCompletionsAgentModel,
-  type AgentProviderCredential,
-} from "./agent-model.ts";
-import { createAgentSystemPrompt } from "./agent-prompt.ts";
-import { createAgentSkills } from "./agent-skills.ts";
-import { isRecord, type AuthenticatedUser } from "./auth-model.ts";
+import { ChatCompletionsAgentModel } from "./agent-model.ts";
+import type { AuthenticatedUser } from "./auth-model.ts";
 import type { GoogleAuth } from "./auth.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
 import type { AppDatabase } from "./database.ts";
@@ -34,26 +22,38 @@ import type {
 import type { RealtimeHub } from "./realtime-hub.ts";
 import {
   RunnerCommandBroker,
-  type DispatchRunnerToolCommand,
   type RunnerToolCommand,
 } from "./runner-command-broker.ts";
-import { MAXIMUM_RUNNER_PATH_LENGTH } from "./runner-directory-model.ts";
 import type { RunnerIntegration } from "./runners.ts";
-import { loadSessionAgentFile } from "./session-agent-file.ts";
+import type { AgentModelFactory } from "./session-agent-models.ts";
+import {
+  compactSessionConversation,
+  runSessionAgent,
+  type SessionAgentRuntimeDependencies,
+} from "./session-agent-runtime.ts";
+import { unavailableSessionResponse } from "./session-availability.ts";
+import {
+  startManualSessionCompaction,
+  updateSessionCompactionMode,
+} from "./session-compaction-actions.ts";
+import {
+  readCreateSession,
+  readPrompt,
+  readProvider,
+  selectedSessionModel,
+  type CreateSessionInput,
+} from "./session-input.ts";
 import type {
   AgentSessionDetail,
   AgentSessionSummary,
 } from "./session-model.ts";
-import { SessionRecorder } from "./session-recorder.ts";
 import {
   SessionRequestHelpers,
   readIdentifier,
-  readStringField,
 } from "./session-request-helpers.ts";
 import { SessionRuntimes } from "./session-runtime.ts";
-import { SessionStore, type CreateAgentSession } from "./session-store.ts";
+import { SessionStore } from "./session-store.ts";
 
-const MAXIMUM_PROMPT_LENGTH = 32_768;
 interface SessionCredentialReader {
   readCredential(
     userId: string,
@@ -72,20 +72,6 @@ type SessionAction = (
   credential: ProviderCredentialAccess,
 ) => Promise<Response> | Response;
 
-interface AgentModelFactoryOptions {
-  readonly credential: AgentProviderCredential;
-  readonly model: string;
-  readonly onDelta?: (delta: {
-    readonly content: string;
-    readonly thinking: string;
-  }) => void;
-  readonly provider: ProviderId;
-  readonly reasoningEffort: AgentReasoningEffort | null;
-  readonly systemPrompt: string;
-}
-
-type AgentModelFactory = (options: AgentModelFactoryOptions) => AgentModel;
-
 interface SessionDependencies {
   readonly broker?: RunnerCommandBroker;
   readonly braveSearch: Pick<BraveSearchSkill, "execute">;
@@ -96,11 +82,6 @@ interface SessionDependencies {
   readonly randomId?: IdGenerator;
   readonly realtime?: RealtimeHub;
 }
-
-type CreateSessionInput = Omit<
-  CreateAgentSession,
-  "maxContextTokens" | "userId"
->;
 
 interface CredentialSelection {
   readonly credentialId: string;
@@ -113,6 +94,8 @@ interface RuntimeSelection extends CredentialSelection {
 
 export interface SessionIntegration {
   collection(request: Request): Promise<Response>;
+  compact(request: Request, sessionId: string): Promise<Response>;
+  compaction(request: Request, sessionId: string): Promise<Response>;
   completeRunnerCommand(
     runnerId: string,
     commandId: string,
@@ -137,63 +120,6 @@ export interface SessionIntegration {
   stop(request: Request, sessionId: string): Promise<Response>;
 }
 
-function readProvider(value: unknown): ProviderId | undefined {
-  return value === "openai" || value === "openrouter" ? value : undefined;
-}
-
-function readCreateSession(value: unknown): CreateSessionInput | undefined {
-  if (!isRecord(value)) {
-    return undefined;
-  }
-
-  const credentialId = readIdentifier(value["credentialId"]);
-  const provider = readProvider(value["provider"]);
-  const runnerId = readIdentifier(value["runnerId"]);
-  const prompt = readStringField(value, "prompt", MAXIMUM_PROMPT_LENGTH, {
-    trim: true,
-  });
-  const workingDirectory = readStringField(
-    value,
-    "workingDirectory",
-    MAXIMUM_RUNNER_PATH_LENGTH,
-    { trim: true },
-  );
-  const modelValue = value["model"];
-  const reasoningEffortValue = value["reasoningEffort"];
-
-  if (
-    credentialId === undefined ||
-    provider === undefined ||
-    runnerId === undefined ||
-    prompt === undefined ||
-    workingDirectory === undefined ||
-    workingDirectory.includes("\0") ||
-    (modelValue !== undefined && !isAgentModelId(modelValue)) ||
-    (reasoningEffortValue !== undefined &&
-      !isAgentReasoningEffort(reasoningEffortValue))
-  ) {
-    return undefined;
-  }
-
-  return {
-    credentialId,
-    model: typeof modelValue === "string" ? modelValue : "",
-    prompt,
-    provider,
-    reasoningEffort: isAgentReasoningEffort(reasoningEffortValue)
-      ? reasoningEffortValue
-      : null,
-    runnerId,
-    workingDirectory,
-  };
-}
-
-function readPrompt(value: unknown): string | undefined {
-  return readStringField(value, "prompt", MAXIMUM_PROMPT_LENGTH, {
-    trim: true,
-  });
-}
-
 function safeErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : "Unknown error";
   return `Session failed: ${message.slice(0, 500)}`;
@@ -205,6 +131,7 @@ function isAbort(error: unknown): boolean {
 
 class DrizzleSessionIntegration implements SessionIntegration {
   readonly #broker: RunnerCommandBroker;
+  readonly #auth: GoogleAuth;
   readonly #braveSearch: Pick<BraveSearchSkill, "execute">;
   readonly #discoverModels: AgentModelDiscoverer;
   readonly #modelFactory: AgentModelFactory;
@@ -223,6 +150,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
     providers: SessionCredentialReaders,
     dependencies: SessionDependencies,
   ) {
+    this.#auth = auth;
     this.#realtime = dependencies.realtime;
     this.#broker =
       dependencies.broker ??
@@ -251,6 +179,29 @@ class DrizzleSessionIntegration implements SessionIntegration {
   async collection(request: Request): Promise<Response> {
     return this.#requests.forUser(request, (user) =>
       this.#collectionForUser(request, user),
+    );
+  }
+
+  async compact(request: Request, sessionId: string): Promise<Response> {
+    return await Promise.resolve(
+      this.#requests.postForUser(request, (user) =>
+        this.#compactForUser(user, sessionId),
+      ),
+    );
+  }
+
+  async compaction(request: Request, sessionId: string): Promise<Response> {
+    return updateSessionCompactionMode(
+      {
+        auth: this.#auth,
+        now: this.#now,
+        onChanged: (detail, userId) => {
+          this.#notify(userId, detail.id);
+        },
+        store: this.#store,
+      },
+      request,
+      sessionId,
     );
   }
 
@@ -335,11 +286,11 @@ class DrizzleSessionIntegration implements SessionIntegration {
     );
   }
 
-  #notify(userId: string, sessionId: string): void {
+  readonly #notify = (userId: string, sessionId: string): void => {
     for (const listener of this.#onChange) {
       listener(userId, sessionId);
     }
-  }
+  };
 
   #withStoredSession(
     user: AuthenticatedUser,
@@ -450,10 +401,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
     input: CreateSessionInput,
   ): Promise<Response> {
     return this.#withRuntimeAccess(user.id, input, async (credential) => {
-      const selectedModel =
-        input.model.length === 0
-          ? defaultAgentModel(input.provider, credential.source)
-          : input.model;
+      const selectedModel = selectedSessionModel(input, credential.source);
       let maxContextTokens: number | null = null;
 
       try {
@@ -470,7 +418,13 @@ class DrizzleSessionIntegration implements SessionIntegration {
       }
 
       const detail = this.#store.create(
-        { ...input, maxContextTokens, model: selectedModel, userId: user.id },
+        {
+          ...input,
+          autoCompact: true,
+          maxContextTokens,
+          model: selectedModel,
+          userId: user.id,
+        },
         this.#now(),
       );
       this.#launch(detail, credential, user.id);
@@ -493,6 +447,61 @@ class DrizzleSessionIntegration implements SessionIntegration {
       : this.#queueForUser(user, sessionId, prompt);
   }
 
+  async #compactForUser(
+    user: AuthenticatedUser,
+    sessionId: string,
+  ): Promise<Response> {
+    return startManualSessionCompaction(
+      {
+        credential: (userId, detail, action) =>
+          this.#withCredentialAccess(userId, detail, action),
+        launch: (detail, credential, userId) => {
+          this.#launch(detail, credential, userId, true);
+        },
+        notify: this.#notify,
+        now: this.#now,
+        runtimes: this.#runtimes,
+        store: this.#store,
+      },
+      user,
+      sessionId,
+    );
+  }
+
+  #modelRuntime(
+    detail: AgentSessionDetail,
+    credential: ProviderCredentialAccess,
+    userId: string,
+    controller: AbortController,
+  ): SessionAgentRuntimeDependencies {
+    return {
+      braveSearch: this.#braveSearch,
+      broker: this.#broker,
+      credential,
+      detail,
+      modelFactory: this.#modelFactory,
+      now: this.#now,
+      notify: () => {
+        this.#notify(userId, detail.id);
+      },
+      realtime: this.#realtime,
+      signal: controller.signal,
+      store: this.#store,
+      userId,
+    };
+  }
+
+  #launch(
+    detail: AgentSessionDetail,
+    credential: ProviderCredentialAccess,
+    userId: string,
+    compact = false,
+  ): void {
+    this.#runtimes.launch(detail.id, (controller) =>
+      this.#run(detail, credential, userId, controller, compact),
+    );
+  }
+
   #resume(request: Request, sessionId: string): Promise<Response> | Response {
     return this.#requests.postForUser(request, (user) =>
       this.#runtimes.draining
@@ -507,8 +516,9 @@ class DrizzleSessionIntegration implements SessionIntegration {
     prompt?: string,
   ): Promise<Response> {
     const existing = this.#store.get(user.id, sessionId);
-    if (existing === undefined) {
-      return createApiError("not_found", 404);
+    const unavailable = unavailableSessionResponse(existing);
+    if (unavailable !== undefined || existing === undefined) {
+      return unavailable ?? createApiError("not_found", 404);
     }
 
     if (!this.#runners.runnerIsAvailable(user.id, existing.runnerId)) {
@@ -536,16 +546,6 @@ class DrizzleSessionIntegration implements SessionIntegration {
     });
   }
 
-  #launch(
-    detail: AgentSessionDetail,
-    credential: ProviderCredentialAccess,
-    userId: string,
-  ): void {
-    this.#runtimes.launch(detail.id, (controller) =>
-      this.#run(detail, credential, userId, controller),
-    );
-  }
-
   #finish(detail: AgentSessionDetail, userId: string, error?: unknown): void {
     if (error !== undefined) {
       this.#store.appendSystemMessage(
@@ -567,6 +567,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
     credential: ProviderCredentialAccess,
     userId: string,
     controller: AbortController,
+    compact: boolean,
   ): Promise<void> {
     if (!this.#store.mark(detail.id, "running", this.#now())) {
       return;
@@ -574,72 +575,15 @@ class DrizzleSessionIntegration implements SessionIntegration {
     this.#notify(userId, detail.id);
 
     try {
-      const agentFile = await loadSessionAgentFile(
-        this.#broker,
+      const runtime = this.#modelRuntime(
         detail,
-        controller.signal,
-      );
-
-      this.#store.setAgentFile(detail.id, agentFile, this.#now());
-      this.#notify(userId, detail.id);
-
-      const model = this.#modelFactory({
         credential,
-        model: detail.model,
-        onDelta: (delta) => {
-          try {
-            this.#realtime?.publishUser(userId, {
-              ...delta,
-              sessionId: detail.id,
-              type: "session_delta",
-            });
-          } catch {
-            // Live delivery must never interrupt the persisted model turn.
-          }
-        },
-        provider: detail.provider,
-        reasoningEffort: detail.reasoningEffort,
-        systemPrompt: createAgentSystemPrompt(agentFile),
-      });
-      const skills = createAgentSkills({
-        braveSearch: this.#braveSearch,
         userId,
-      });
-      const recorder = new SessionRecorder(
-        this.#store,
-        detail.id,
-        this.#now,
-        () => {
-          this.#notify(userId, detail.id);
-        },
+        controller,
       );
-      await runAgentLoop({
-        executeTool: (call) => {
-          const skillOutput = skills.execute(call.name, call.arguments);
-
-          if (skillOutput !== undefined) {
-            return skillOutput;
-          }
-
-          const command: DispatchRunnerToolCommand = {
-            arguments: call.arguments,
-            runnerId: detail.runnerId,
-            sessionId: detail.id,
-            tool: call.name,
-            workingDirectory: detail.workingDirectory,
-          };
-          return this.#broker.dispatch(command, controller.signal);
-        },
-        initialMessages: this.#store.conversation(detail.id),
-        model,
-        recordContextTokens: (tokens) => {
-          recorder.contextTokens(tokens);
-        },
-        recordMessage: (message) => {
-          recorder.message(message);
-        },
-        signal: controller.signal,
-      });
+      await (compact
+        ? compactSessionConversation(runtime)
+        : runSessionAgent(runtime));
       this.#finish(detail, userId);
     } catch (error) {
       if (!controller.signal.aborted && !isAbort(error)) {

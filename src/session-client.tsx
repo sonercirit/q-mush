@@ -17,6 +17,12 @@ import type {
 import type { ProviderId } from "./provider-credential-store.ts";
 import type { RunnerViewState } from "./runner-client.tsx";
 import type { RunnerSummary } from "./runner-model.ts";
+import {
+  formatTokenCount,
+  renderCompactionControls,
+  sessionContextClasses,
+  sessionContextLabel,
+} from "./session-context-client.tsx";
 import type {
   AgentSessionDetail,
   AgentSessionStatus,
@@ -41,6 +47,7 @@ export interface SessionModelDiscoveryState {
 }
 
 export interface SessionViewState {
+  readonly compacting: boolean;
   readonly creating: boolean;
   readonly directoryPicker: DirectoryPickerState;
   readonly detail: AgentSessionDetail | undefined;
@@ -133,38 +140,6 @@ function selectedCredential(
     credentials.find((option) => optionValue(option) === value) ??
     credentials[0]
   );
-}
-
-function formatTokenCount(tokens: number): string {
-  if (tokens < 1_000) {
-    return String(tokens);
-  }
-
-  const units =
-    tokens < 1_000_000
-      ? { divisor: 1_000, suffix: "K" }
-      : { divisor: 1_000_000, suffix: "M" };
-  const scaled = tokens / units.divisor;
-  const value =
-    scaled >= 100 || Number.isInteger(scaled)
-      ? scaled.toFixed(0)
-      : scaled.toFixed(1);
-  return `${value}${units.suffix}`;
-}
-
-function sessionContextLabel(
-  session: Pick<
-    AgentSessionSummary,
-    "currentContextTokens" | "maxContextTokens" | "status"
-  >,
-): string {
-  const current =
-    session.currentContextTokens === 0
-      ? session.status === "queued" || session.status === "running"
-        ? "Pending"
-        : "Not reported"
-      : formatTokenCount(session.currentContextTokens);
-  return `Context: ${current} / ${session.maxContextTokens === null ? "Not reported" : formatTokenCount(session.maxContextTokens)}`;
 }
 
 function sessionModelLabel(
@@ -500,7 +475,9 @@ function renderDetail(state: SessionViewState): JsxNode {
             <h3 className="text-xl font-semibold text-white">{detail.title}</h3>
             {statusBadge(detail.status)}
           </div>
-          <p className="mt-2 truncate text-xs text-slate-500">
+          <p
+            className={`mt-2 truncate text-xs ${sessionContextClasses(detail)}`}
+          >
             {`${sessionModelLabel(detail)} · ${sessionContextLabel(detail)} · ${detail.workingDirectory} · Agent file: ${detail.agentFile?.name ?? "None"}`}
           </p>
         </div>
@@ -525,33 +502,39 @@ function renderDetail(state: SessionViewState): JsxNode {
         {renderSessionTranscript(detail.messages, detail.agentFile)}
       </ul>
       {!active ? (
-        <div className="mt-5 flex gap-3">
-          <form className="contents" data-action="send-session-message">
-            <textarea
-              className="min-h-20 min-w-0 flex-1 resize-y rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none"
-              disabled={sending}
-              name="prompt"
-              placeholder="Give this session another instruction…"
-              required
-            >
-              {state.followUp}
-            </textarea>
+        <div className="mt-5 flex flex-col gap-3">
+          {renderCompactionControls({
+            autoCompact: detail.autoCompact,
+            compacting: state.compacting,
+          })}
+          <div className="flex gap-3">
+            <form className="contents" data-action="send-session-message">
+              <textarea
+                className="min-h-20 min-w-0 flex-1 resize-y rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none"
+                disabled={sending}
+                name="prompt"
+                placeholder="Give this session another instruction…"
+                required
+              >
+                {state.followUp}
+              </textarea>
+              <button
+                className="self-end rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:opacity-50"
+                disabled={sending}
+                type="submit"
+              >
+                {sending ? "Sending…" : "Send"}
+              </button>
+            </form>
             <button
-              className="self-end rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:opacity-50"
+              className="self-end rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950"
+              data-action="continue-session"
               disabled={sending}
-              type="submit"
+              type="button"
             >
-              {sending ? "Sending…" : "Send"}
+              Continue
             </button>
-          </form>
-          <button
-            className="self-end rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950"
-            data-action="continue-session"
-            disabled={sending}
-            type="button"
-          >
-            Continue
-          </button>
+          </div>
         </div>
       ) : null}
     </div>

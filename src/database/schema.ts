@@ -113,6 +113,9 @@ export const agentSessions = sqliteTable(
       .references(() => providerCredentials.id, { onDelete: "restrict" }),
     provider: providerColumn(),
     model: text("model").notNull(),
+    autoCompact: integer("auto_compact", { mode: "boolean" })
+      .notNull()
+      .default(true),
     currentContextTokens: integer("current_context_tokens")
       .notNull()
       .default(0),

@@ -189,6 +189,7 @@ export class SessionRealtimeState {
   applySessions(sessions: readonly AgentSessionSummary[]): void {
     if (
       this.#view.value.sessions === undefined ||
+      this.#view.value.compacting ||
       this.#view.value.creating ||
       this.#view.value.sending ||
       this.#view.value.stopping ||

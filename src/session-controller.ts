@@ -1,5 +1,5 @@
 import type { AgentModelCatalog } from "./agent-configuration.ts";
-import { HttpResponseError, requestJson } from "./browser-http.ts";
+import { requestJson } from "./browser-http.ts";
 import {
   bindActionClicks,
   submitFormOnControlEnter,
@@ -25,6 +25,15 @@ import type {
   AgentSessionSummary,
 } from "./session-model.ts";
 import {
+  compactionModeMutation,
+  compactSessionMutation,
+  continueSessionMutation,
+  executeSessionMutation,
+  sessionMutationError,
+  stopSessionMutation,
+  type SessionMutation,
+} from "./session-mutations.ts";
+import {
   applySessionModelCatalog,
   chooseSessionOption,
 } from "./session-selection.ts";
@@ -34,6 +43,13 @@ import {
 } from "./session-state.ts";
 
 type ChangeListener = () => void;
+
+function selectedMutation(
+  sessionId: string | undefined,
+  create: (sessionId: string) => SessionMutation,
+): SessionMutation | undefined {
+  return sessionId === undefined ? undefined : create(sessionId);
+}
 
 function formString(form: HTMLFormElement, name: string): string {
   const value = new FormData(form).get(name);
@@ -80,12 +96,15 @@ export class SessionController {
   }
 
   applyDetail(detail: AgentSessionDetail): void {
-    if (this.#view.value.creating) {
+    if (
+      this.#view.value.creating ||
+      this.#view.value.compacting ||
+      this.#view.value.sending ||
+      this.#view.value.stopping
+    ) {
       return;
     }
-    if (!this.#view.value.sending && !this.#view.value.stopping) {
-      this.#realtime.applyDetail(detail);
-    }
+    this.#realtime.applyDetail(detail);
   }
 
   applyDelta(event: Parameters<SessionRealtimeState["applyDelta"]>[0]): void {
@@ -136,7 +155,9 @@ export class SessionController {
     }
 
     bindActionClicks(panel, (control, action) => {
-      if (action === "toggle-session-select") {
+      if (action === "toggle-auto-compact") {
+        void this.#toggleAutoCompact(control);
+      } else if (action === "toggle-session-select") {
         const name = control.dataset["selectName"];
 
         if (
@@ -176,6 +197,8 @@ export class SessionController {
         void this.#stop();
       } else if (action === "continue-session") {
         void this.#continue();
+      } else if (action === "compact-session") {
+        void this.#compact();
       } else if (action === "retry-sessions") {
         void this.load();
       } else if (action === "retry-models") {
@@ -597,46 +620,54 @@ export class SessionController {
     });
   }
 
+  async #compact(): Promise<void> {
+    await this.#mutateSelected(compactSessionMutation);
+  }
+
+  async #toggleAutoCompact(control: HTMLElement): Promise<void> {
+    const autoCompact = control.dataset["autoCompact"];
+    if (autoCompact !== "true" && autoCompact !== "false") {
+      return;
+    }
+
+    const sessionId = this.#view.value.selectedId;
+    if (sessionId === undefined) {
+      return;
+    }
+
+    await this.#mutateDetail(
+      compactionModeMutation(sessionId, autoCompact === "true"),
+    );
+  }
+
   async #continue(): Promise<void> {
-    await this.#postSelected("continue", "continue that session", "sending");
+    await this.#mutateSelected(continueSessionMutation);
   }
 
   async #stop(): Promise<void> {
-    await this.#postSelected("stop", "stop that session", "stopping");
+    await this.#mutateSelected(stopSessionMutation);
   }
 
-  async #postSelected(
-    endpoint: "continue" | "stop",
-    action: string,
-    pending: "sending" | "stopping",
+  async #mutateSelected(
+    create: (sessionId: string) => SessionMutation,
   ): Promise<void> {
-    const sessionId = this.#view.value.selectedId;
-
-    if (sessionId !== undefined) {
-      await this.#mutateDetail({
-        action,
-        pending,
-        request: () =>
-          requestJson(
-            `${SESSIONS_PATH}/${encodeURIComponent(sessionId)}/${endpoint}`,
-            { method: "POST" },
-          ),
-      });
+    const mutation = selectedMutation(this.#view.value.selectedId, create);
+    if (mutation !== undefined) {
+      await this.#mutateDetail(mutation);
     }
   }
 
-  async #mutateDetail(options: {
-    readonly action: string;
-    readonly pending: "sending" | "stopping";
-    readonly request: () => Promise<unknown>;
-    readonly success?: Partial<SessionViewState>;
-  }): Promise<void> {
+  async #mutateDetail(
+    options: SessionMutation & {
+      readonly success?: Partial<SessionViewState>;
+    },
+  ): Promise<void> {
     const pending = { [options.pending]: true };
     const settled = { [options.pending]: false };
     const revision = this.#view.begin({ error: undefined, ...pending });
 
     try {
-      const detail = readSessionDetail(await options.request());
+      const detail = await executeSessionMutation(options);
 
       this.#view.patchCurrent(
         revision,
@@ -666,15 +697,7 @@ export class SessionController {
   ): void {
     this.#view.patchCurrent(revision, {
       ...settled,
-      error: this.#mutationError(error, action),
+      error: sessionMutationError(error, action),
     });
-  }
-
-  #mutationError(error: unknown, action: string): string {
-    if (error instanceof HttpResponseError && error.status === 409) {
-      return "The selected runner or credential is unavailable, or the session is busy.";
-    }
-
-    return `We could not ${action}. Please try again.`;
   }
 }

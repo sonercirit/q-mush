@@ -118,27 +118,20 @@ task-specific progress, guesses, or sensitive values.
   existing registration to the new token instead of creating a second runner;
   another user's registration remains protected. Runner tokens never appear in
   list responses.
-- `src/sessions.ts`, `src/session-store.ts`, and `src/agent-model.ts` implement
-  persistent first-party coding sessions without an external agent harness. A
-  session records the latest reported input-token usage (or `Not reported`) and
-  the selected model's discovered context-window limit. Codex catalogs expose
-  the limit as `context_window` or `context_window_size` either directly or
-  under `capabilities`, OpenRouter as `context_length`, and OpenAI API-key
-  catalogs may omit it. The server owns the model/tool loop so provider secrets
-  never enter browser or runner work payloads; `src/agent-tools.ts` defines the
-  Pi-compatible `read`, `bash`, `edit`, and `write` base tools plus the
-  `parallel` wrapper, `src/runner-command-broker.ts` queues their authenticated
-  calls, and the runner receives them immediately through its authenticated
-  WebSocket, executes them in `src/runner-tools.ts`, and returns results on the
-  same connection. The new-session working-directory field retains manual entry
-  and opens the interactive browser in `src/directory-picker-client.tsx`; its
-  controller posts to `/api/runners/:id/directories`, which dispatches the
-  private `list_directories` runner command and returns a canonical path, its
-  parent, and up to 500 child directories. Before each initial or follow-up
-  agent run, the private `read_agent_file` runner command uses
-  `src/runner-agent-file.ts` to load an exact-root `AGENTS.md`, falling back to
-  `CLAUDE.md`; only `AGENTS.md` is used when both exist, and no extra context is
-  added when neither exists.
+- `src/sessions.ts` and `src/session-store.ts` implement persistent first-party
+  coding sessions. A session records latest input-token usage and its discovered
+  context limit. Usage shows a percentage, yellow at 80%, and red at 90%.
+  Auto-compaction defaults on and summarizes completed history before the next
+  request at 95%; idle sessions can compact manually. Compaction soft-deletes
+  prior active messages and inserts a replayable handoff. Provider secrets never
+  enter browser or runner work payloads; `src/agent-tools.ts` defines the
+  Pi-compatible `read`, `bash`, `edit`, and `write` tools plus `parallel`, while
+  `src/runner-command-broker.ts` carries authenticated calls over the runner
+  WebSocket. The working-directory field also opens the interactive browser in
+  `src/directory-picker-client.tsx`; its controller posts to
+  `/api/runners/:id/directories` for canonical directory metadata. Before each
+  run, `read_agent_file` loads exact-root `AGENTS.md`, falling back to
+  `CLAUDE.md`; only `AGENTS.md` is used when both exist.
 
   `src/runner-workspace.ts` shares canonical workspace resolution and
   containment with the file tools. The latest agent-file selection is persisted
@@ -299,9 +292,9 @@ task-specific progress, guesses, or sensitive values.
   abortable backoff, honoring `Retry-After`.
 - Agent launches and brokered runner commands have no application-owned turn,
   queue, or elapsed-time limits. Every shell command must choose a positive
-  timeout; no default or configured maximum is supplied. Provider requests
-  replay the full conversation without compaction and have no application-level
-  timeout.
+  timeout; no default or configured maximum is supplied. Outside explicit or
+  95%-threshold compaction, provider requests replay the full active
+  conversation and have no application-level timeout.
 - Add each new runtime source root and executable entry to
   `knip.production.config.ts`. Add standalone non-TypeScript build entries, such
   as `src/styles.css`, to both Knip configs; keep test files and test-support

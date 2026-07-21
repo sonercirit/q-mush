@@ -8,8 +8,10 @@ import {
   type SessionViewState,
 } from "../session-client.tsx";
 import { runnerSummary } from "./runner-fixtures.ts";
+import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
 const SESSION_STATE: SessionViewState = {
+  compacting: false,
   directoryPicker: initialDirectoryPickerState(),
   sessions: [],
   stopping: false,
@@ -85,6 +87,7 @@ test("renders the system prompt and model thinking in a transcript", () => {
         content: "Always run Bun tests.",
         name: "AGENTS.md",
       },
+      autoCompact: true,
       createdAt: 1,
       credentialId: "credential-1",
       currentContextTokens: 0,
@@ -150,6 +153,10 @@ test("renders the system prompt and model thinking in a transcript", () => {
   expect(html).toContain("Always run Bun tests.");
   expect(html).toContain("Agent file: AGENTS.md");
   expect(html).toContain("Context: Not reported / 200K");
+  expect(html).toContain("Auto compact");
+  expect(html).toContain('data-action="toggle-auto-compact"');
+  expect(html).toContain('data-auto-compact="false"');
+  expect(html).toContain('data-action="compact-session"');
   expect(html).toContain("Tool definitions");
   expect(html).toContain('"name": "read"');
   expect(html).toContain('"name": "bash"');
@@ -165,6 +172,32 @@ test("renders the system prompt and model thinking in a transcript", () => {
   expect(html).toContain("# Q Mush");
   expect(html).toContain('data-action="continue-session"');
   expect(html).toContain(">Continue</button>");
+});
+
+test("shows context percentage and warning colors", () => {
+  const renderContext = (currentContextTokens: number): string =>
+    renderToHtml(
+      renderSessionPanel(
+        {
+          ...SESSION_STATE,
+          detail: {
+            ...TEST_SESSION_DETAIL,
+            currentContextTokens,
+          },
+          selectedId: TEST_SESSION_DETAIL.id,
+        },
+        RUNNER_STATE,
+        OPENAI_STATE,
+        EMPTY_PROVIDER_STATE,
+      ),
+    );
+  const yellow = renderContext(160_000);
+  const red = renderContext(180_000);
+
+  expect(yellow).toContain("Context: 160K / 200K (80%)");
+  expect(yellow).toContain("text-amber-200");
+  expect(red).toContain("Context: 180K / 200K (90%)");
+  expect(red).toContain("text-rose-200");
 });
 
 test("renders a directory browser beside the working-directory input", () => {

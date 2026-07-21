@@ -305,6 +305,10 @@ export function createRequestHandler(
 
           if (segments.length === 2) {
             switch (segments[1]) {
+              case "compact":
+                return sessions.compact(request, sessionId);
+              case "compaction":
+                return sessions.compaction(request, sessionId);
               case "continue":
                 return sessions.continue(request, sessionId);
               case "messages":

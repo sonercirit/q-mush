@@ -10,6 +10,7 @@ import { createdAuditFields, updatedAuditFields } from "./audit.ts";
 import type { AppDatabase } from "./database.ts";
 import { agentMessages, agentSessions } from "./database/schema.ts";
 import { createUuidV7, SYSTEM_ID, type IdGenerator } from "./ids.ts";
+import { compactStoredConversation } from "./session-compaction.ts";
 import type {
   AgentSessionDetail,
   AgentSessionMessage,
@@ -19,6 +20,7 @@ import type {
 
 export interface CreateAgentSession extends Pick<
   AgentSessionSummary,
+  | "autoCompact"
   | "maxContextTokens"
   | "model"
   | "provider"
@@ -61,6 +63,7 @@ function requireStoredSession<Value>(stored: Value | undefined): Value {
 
 function sessionSelection() {
   return {
+    autoCompact: agentSessions.autoCompact,
     createdAt: agentSessions.createdAt,
     credentialId: agentSessions.providerCredentialId,
     currentContextTokens: agentSessions.currentContextTokens,
@@ -91,6 +94,7 @@ function messageSelection() {
 
 type StoredSessionSummary = Pick<
   typeof agentSessions.$inferSelect,
+  | "autoCompact"
   | "createdAt"
   | "currentContextTokens"
   | "id"
@@ -306,6 +310,7 @@ export class SessionStore {
         .insert(agentSessions)
         .values({
           ...createdAuditFields(input.userId, now),
+          autoCompact: input.autoCompact,
           id: sessionId,
           maxContextTokens: input.maxContextTokens,
           model: input.model,
@@ -436,6 +441,33 @@ export class SessionStore {
       },
       now,
     );
+  }
+
+  compact(sessionId: string, summary: string, now: number): void {
+    compactStoredConversation({
+      database: this.#database,
+      generateId: (timestamp) => this.#generateId(timestamp),
+      now,
+      sessionId,
+      summary,
+    });
+  }
+
+  setAutoCompact(
+    userId: string,
+    sessionId: string,
+    autoCompact: boolean,
+    now: number,
+  ): AgentSessionDetail | undefined {
+    const updated = this.#database
+      .update(agentSessions)
+      .set({ autoCompact, ...updatedAuditFields(userId, now) })
+      .where(activeSessionCondition({ id: sessionId, userId }))
+      .returning({ id: agentSessions.id })
+      .all();
+    return updated[0] === undefined
+      ? undefined
+      : this.get(userId, updated[0].id);
   }
 
   updateContextTokens(sessionId: string, tokens: number, now: number): void {
@@ -667,20 +699,21 @@ export class SessionStore {
     now: number,
     userId?: string,
   ): boolean {
-    const updated = this.#database
-      .update(agentSessions)
-      .set({ status: to, ...updatedAuditFields(actorId, now) })
-      .where(
-        and(
-          activeSessionCondition({
-            id: sessionId,
-            ...(userId === undefined ? {} : { userId }),
-          }),
-          inArray(agentSessions.status, from),
-        ),
-      )
-      .returning({ id: agentSessions.id })
-      .all();
-    return updated.length > 0;
+    return (
+      this.#database
+        .update(agentSessions)
+        .set({ status: to, ...updatedAuditFields(actorId, now) })
+        .where(
+          and(
+            activeSessionCondition({
+              id: sessionId,
+              ...(userId === undefined ? {} : { userId }),
+            }),
+            inArray(agentSessions.status, from),
+          ),
+        )
+        .returning({ id: agentSessions.id })
+        .all().length > 0
+    );
   }
 }
