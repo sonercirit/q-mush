@@ -3,6 +3,7 @@ import type { AgentModelTurn } from "../agent-loop.ts";
 import { ChatCompletionsAgentModel } from "../agent-model.ts";
 import { isRecord } from "../auth-model.ts";
 import { createJsonResponse } from "../http.ts";
+import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import { createOpenAiOAuthSecret } from "./oauth-test-helpers.ts";
 import { captureRejection, requireError } from "./promise-test-helpers.ts";
 import { expectDoneTurn } from "./provider-turn-fixtures.ts";
@@ -13,6 +14,20 @@ const DONE_CODEX_OUTPUT = {
   content: [{ text: "Done.", type: "output_text" }],
   type: "message",
 };
+const IMAGE_MESSAGE = {
+  content: "Implement this design",
+  images: [TEST_AGENT_IMAGE],
+  role: "user" as const,
+};
+const OPENROUTER_IMAGE_OPTIONS = {
+  credential: {
+    accountId: null,
+    secret: "sk-or-secret",
+    source: "api_key" as const,
+  },
+  model: "openai/gpt-4.1-mini",
+  provider: "openrouter" as const,
+};
 
 class RequestCapture {
   request?: Request;
@@ -22,6 +37,16 @@ async function capturedBody(capture: RequestCapture): Promise<unknown> {
   return capture.request?.json();
 }
 
+function captureRequest(
+  capture: RequestCapture,
+  response: () => Response,
+): (request: Request) => Promise<Response> {
+  return (request) => {
+    capture.request = request;
+    return Promise.resolve(response());
+  };
+}
+
 function respondingModel(
   options: Omit<ModelOptions, "fetch">,
   responseBody: unknown,
@@ -29,10 +54,7 @@ function respondingModel(
 ): ChatCompletionsAgentModel {
   return new ChatCompletionsAgentModel({
     ...options,
-    fetch: (request) => {
-      capture.request = request;
-      return Promise.resolve(createJsonResponse(responseBody));
-    },
+    fetch: captureRequest(capture, () => createJsonResponse(responseBody)),
   });
 }
 
@@ -48,6 +70,14 @@ function codexModel(
     },
     provider: "openai",
   });
+}
+
+function capturedCodexModel(
+  capture: RequestCapture,
+  response: Response,
+  model = "gpt-5-codex",
+): ChatCompletionsAgentModel {
+  return codexModel({ fetch: captureRequest(capture, () => response), model });
 }
 
 function codexEventResponse(
@@ -167,6 +197,63 @@ describe("chat completions agent model", () => {
     expect(serializedBody).not.toContain("list_files");
   });
 
+  test("sends image inputs through chat completions", async () => {
+    const capture = new RequestCapture();
+    const model = respondingModel(
+      OPENROUTER_IMAGE_OPTIONS,
+      { choices: [{ message: { content: "I see the image." } }] },
+      capture,
+    );
+
+    await model.complete([
+      { ...IMAGE_MESSAGE, content: "What is in this screenshot?" },
+    ]);
+
+    expect(await capturedBody(capture)).toMatchObject({
+      messages: [
+        { role: "system" },
+        {
+          content: [
+            { text: "What is in this screenshot?", type: "text" },
+            {
+              image_url: {
+                url: `data:image/png;base64,${TEST_AGENT_IMAGE.data}`,
+              },
+              type: "image_url",
+            },
+          ],
+          role: "user",
+        },
+      ],
+    });
+  });
+
+  test("sends image inputs through the Responses protocol", async () => {
+    const capture = new RequestCapture();
+    const model = capturedCodexModel(
+      capture,
+      codexEventResponse([DONE_CODEX_OUTPUT]),
+    );
+
+    await model.complete([IMAGE_MESSAGE]);
+
+    expect(await capturedBody(capture)).toMatchObject({
+      input: [
+        {
+          content: [
+            { text: "Implement this design", type: "input_text" },
+            {
+              image_url: `data:image/png;base64,${TEST_AGENT_IMAGE.data}`,
+              type: "input_image",
+            },
+          ],
+          role: "user",
+          type: "message",
+        },
+      ],
+    });
+  });
+
   test("uses the OpenAI chat-completions reasoning parameter", async () => {
     const capture = new RequestCapture();
     const model = respondingModel(
@@ -194,28 +281,24 @@ describe("chat completions agent model", () => {
 
   test("uses the Codex Responses protocol for an OpenAI OAuth credential", async () => {
     const capture = new RequestCapture();
+    const response = codexEventResponse(
+      [
+        {
+          summary: [
+            {
+              text: "I checked the prior tool result.",
+              type: "summary_text",
+            },
+          ],
+          type: "reasoning",
+        },
+        DONE_CODEX_OUTPUT,
+      ],
+      "",
+      { input_tokens: 23_456 },
+    );
     const model = codexModel({
-      fetch: (request) => {
-        capture.request = request;
-        return Promise.resolve(
-          codexEventResponse(
-            [
-              {
-                summary: [
-                  {
-                    text: "I checked the prior tool result.",
-                    type: "summary_text",
-                  },
-                ],
-                type: "reasoning",
-              },
-              DONE_CODEX_OUTPUT,
-            ],
-            "",
-            { input_tokens: 23_456 },
-          ),
-        );
-      },
+      fetch: captureRequest(capture, () => response),
       model: "gpt-5-codex",
       reasoningEffort: "medium",
     });

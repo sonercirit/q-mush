@@ -1,5 +1,6 @@
 import type { AgentReasoningEffort } from "./agent-configuration.ts";
 import type { AgentFile } from "./agent-file.ts";
+import type { AgentImage } from "./agent-images.ts";
 import type { AgentToolCall } from "./agent-loop.ts";
 import type { ProviderId } from "./provider-credential-store.ts";
 
@@ -13,6 +14,7 @@ export interface AgentSessionMessage {
   readonly content: string;
   readonly createdAt: number;
   readonly id: string;
+  readonly images: readonly AgentImage[];
   readonly role: AgentSessionMessageRole;
   readonly toolCallId: string | null;
   readonly toolCalls: readonly AgentToolCall[];

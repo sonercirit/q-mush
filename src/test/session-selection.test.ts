@@ -34,6 +34,7 @@ const CATALOG: AgentModelCatalog = {
 
 const DRAFT: SessionDraft = {
   credential: "",
+  images: [],
   model: "",
   prompt: "Inspect the workspace",
   reasoningEffort: "",

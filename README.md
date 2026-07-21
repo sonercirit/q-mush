@@ -138,33 +138,35 @@ After a runner and provider credential are ready, use **New agent session** in
 the control center. Select an online computer and credential; Q Mush discovers
 that credential's available agent models and model-specific reasoning efforts.
 Reasoning effort defaults to the model maximum. Then select the model, working
-directory, and task. The working-directory field accepts a path directly or
-opens an interactive browser with Home, Up, and child-directory navigation;
-choosing a location writes its canonical path back to the form. Q Mush
-implements its own model/tool loop without an external agent framework. Before
-each initial or follow-up agent run, the runner loads `AGENTS.md` from the
-selected working directory, falling back to `CLAUDE.md`; when both exist, only
-`AGENTS.md` is used, and when neither exists, no project instructions are added.
-The selected file is persisted with the session, included in the model's system
-prompt, and shown in the transcript. Agent launches, queued runner commands, and
-brokered command execution have no application-owned count or elapsed-time
-limits. Every shell command must choose a positive timeout; Q Mush supplies no
-default or configured maximum. It exposes Pi's four base tool interfaces—`read`,
-`bash`, `edit`, and `write`—plus a `parallel` wrapper for independent calls and
-the server-side `brave_search` skill for current web results, with batched exact
-edits and bounded file and command output. Brave Search tries the signed-in
-user's saved keys in order when a key is rejected, rate limited, or temporarily
-unavailable. Transcripts show system instructions, complete tool definitions,
-reasoning summaries, tool calls, and tool results. Transcript prose renders as
-Markdown, fenced code is syntax-colored, and structured tool arguments/results
-are pretty-printed with colorized JSON. Context use includes a percentage, turns
-yellow at 80%, and red at 90%. Automatic compaction is enabled per session by
-default and replaces completed history with a model-generated handoff summary
-before the next request after usage reaches 95%; it can be turned off, and a
-ready session can be compacted manually. Session transcripts and status survive
-page reloads; a ready, stopped, or failed session accepts follow-up
-instructions. **Stop session** aborts the model request and cancels an active
-runner command.
+directory, and task. Tasks and follow-up messages can attach up to eight PNG,
+JPEG, GIF, or WebP images of 10 MB each; attachments are persisted in the
+transcript and sent directly to the selected model provider. The
+working-directory field accepts a path directly or opens an interactive browser
+with Home, Up, and child-directory navigation; choosing a location writes its
+canonical path back to the form. Q Mush implements its own model/tool loop
+without an external agent framework. Before each initial or follow-up agent run,
+the runner loads `AGENTS.md` from the selected working directory, falling back
+to `CLAUDE.md`; when both exist, only `AGENTS.md` is used, and when neither
+exists, no project instructions are added. The selected file is persisted with
+the session, included in the model's system prompt, and shown in the transcript.
+Agent launches, queued runner commands, and brokered command execution have no
+application-owned count or elapsed-time limits. Every shell command must choose
+a positive timeout; Q Mush supplies no default or configured maximum. It exposes
+Pi's four base tool interfaces—`read`, `bash`, `edit`, and `write`—plus a
+`parallel` wrapper for independent calls and the server-side `brave_search`
+skill for current web results, with batched exact edits and bounded file and
+command output. Brave Search tries the signed-in user's saved keys in order when
+a key is rejected, rate limited, or temporarily unavailable. Transcripts show
+system instructions, complete tool definitions, reasoning summaries, tool calls,
+and tool results. Transcript prose renders as Markdown, fenced code is
+syntax-colored, and structured tool arguments/results are pretty-printed with
+colorized JSON. Context use includes a percentage, turns yellow at 80%, and red
+at 90%. Automatic compaction is enabled per session by default and replaces
+completed history with a model-generated handoff summary before the next request
+after usage reaches 95%; it can be turned off, and a ready session can be
+compacted manually. Session transcripts and status survive page reloads; a
+ready, stopped, or failed session accepts follow-up instructions. **Stop
+session** aborts the model request and cancels an active runner command.
 
 The runner executes tools with the runner process's local account permissions.
 File tools reject paths outside the selected workspace, while shell commands are

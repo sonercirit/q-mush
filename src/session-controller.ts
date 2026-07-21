@@ -1,4 +1,3 @@
-import type { AgentModelCatalog } from "./agent-configuration.ts";
 import { requestJson } from "./browser-http.ts";
 import {
   bindActionClicks,
@@ -7,19 +6,22 @@ import {
 import { customSelectValues } from "./custom-select-controller.ts";
 import { DirectoryPickerController } from "./directory-picker-controller.ts";
 import { RevisionState } from "./revision-state.ts";
-import { SESSION_MODELS_PATH, SESSIONS_PATH } from "./routes.ts";
-import type { SessionDraft, SessionViewState } from "./session-client.tsx";
-import {
-  readAgentModelCatalog,
-  readSessionDetail,
-  readSessionList,
-} from "./session-codec.ts";
+import { SESSIONS_PATH } from "./routes.ts";
+import type { SessionViewState } from "./session-client.tsx";
+import { readSessionDetail, readSessionList } from "./session-codec.ts";
 import {
   replaceSessionSummary,
   selectedSessionCredential,
   sessionDataMatches,
   SessionRealtimeState,
 } from "./session-controller-state.ts";
+import {
+  formString,
+  readSessionDraft,
+  selectedDraftOption,
+} from "./session-form.ts";
+import { appendAgentImageFiles } from "./session-image-input.ts";
+import { SessionModelController } from "./session-model-controller.ts";
 import type {
   AgentSessionDetail,
   AgentSessionSummary,
@@ -33,14 +35,7 @@ import {
   stopSessionMutation,
   type SessionMutation,
 } from "./session-mutations.ts";
-import {
-  applySessionModelCatalog,
-  chooseSessionOption,
-} from "./session-selection.ts";
-import {
-  initialSessionViewState,
-  sessionModelDiscoveryState,
-} from "./session-state.ts";
+import { initialSessionViewState } from "./session-state.ts";
 
 type ChangeListener = () => void;
 
@@ -49,11 +44,6 @@ function selectedMutation(
   create: (sessionId: string) => SessionMutation,
 ): SessionMutation | undefined {
   return sessionId === undefined ? undefined : create(sessionId);
-}
-
-function formString(form: HTMLFormElement, name: string): string {
-  const value = new FormData(form).get(name);
-  return typeof value === "string" ? value : "";
 }
 
 function bindPanelForm(
@@ -82,14 +72,14 @@ function bindPanelForm(
 
 export class SessionController {
   readonly #directoryPicker: DirectoryPickerController;
-  readonly #modelCatalogs = new Map<string, AgentModelCatalog>();
-  #modelRequest = 0;
+  readonly #models: SessionModelController;
   readonly #realtime: SessionRealtimeState;
   readonly #view: RevisionState<SessionViewState>;
 
   constructor(onChange: ChangeListener) {
     this.#view = new RevisionState(initialSessionViewState(), onChange);
     this.#realtime = new SessionRealtimeState(this.#view);
+    this.#models = new SessionModelController(this.#view);
     this.#directoryPicker = new DirectoryPickerController(() => {
       this.#view.patch({ directoryPicker: this.#directoryPicker.state });
     });
@@ -142,6 +132,13 @@ export class SessionController {
         void this.#send();
       },
     );
+    for (const input of panel.querySelectorAll<HTMLInputElement>(
+      'input[type="file"][data-action]',
+    )) {
+      input.addEventListener("change", () => {
+        void this.#addImages(input);
+      });
+    }
     for (const textarea of panel.querySelectorAll<HTMLTextAreaElement>(
       'textarea[name="prompt"]',
     )) {
@@ -187,6 +184,10 @@ export class SessionController {
             this.#chooseOption(name, value, availableValues);
           }
         }
+      } else if (action === "remove-session-image") {
+        this.#removeImage(control, "draft");
+      } else if (action === "remove-follow-up-image") {
+        this.#removeImage(control, "followUp");
       } else if (action === "select-session") {
         const sessionId = control.dataset["sessionId"];
 
@@ -202,7 +203,7 @@ export class SessionController {
       } else if (action === "retry-sessions") {
         void this.load();
       } else if (action === "retry-models") {
-        void this.#ensureModels(this.#view.value.draft.credential, true);
+        this.#models.ensure(this.#view.value.draft.credential, true);
       } else if (action === "open-directory-picker") {
         this.#rememberCreateForm(control);
 
@@ -265,7 +266,7 @@ export class SessionController {
     )?.value;
 
     if (credential !== undefined && credential.length > 0) {
-      void this.#ensureModels(credential);
+      this.#models.ensure(credential);
     }
   }
 
@@ -286,9 +287,8 @@ export class SessionController {
 
   reset(): void {
     this.#directoryPicker.reset();
-    this.#modelCatalogs.clear();
+    this.#models.reset();
     this.#realtime.reset();
-    this.#modelRequest += 1;
     this.#view.reset(initialSessionViewState());
   }
 
@@ -339,7 +339,8 @@ export class SessionController {
       credential === undefined ||
       this.#view.value.draft.runnerId.length === 0 ||
       this.#view.value.draft.model.length === 0 ||
-      this.#view.value.draft.prompt.trim().length === 0 ||
+      (this.#view.value.draft.prompt.trim().length === 0 &&
+        this.#view.value.draft.images.length === 0) ||
       this.#view.value.draft.workingDirectory.trim().length === 0
     ) {
       this.#view.patch({
@@ -355,6 +356,9 @@ export class SessionController {
       const detail = readSessionDetail(
         await requestJson(SESSIONS_PATH, {
           body: JSON.stringify({
+            ...(this.#view.value.draft.images.length === 0
+              ? {}
+              : { images: this.#view.value.draft.images }),
             ...credential,
             ...(this.#view.value.draft.model.trim().length === 0
               ? {}
@@ -377,7 +381,11 @@ export class SessionController {
         revision,
         this.#detailState(detail, {
           creating: false,
-          draft: { ...this.#view.value.draft, prompt: "" },
+          draft: {
+            ...this.#view.value.draft,
+            images: [],
+            prompt: "",
+          },
           selectedId: detail.id,
         }),
       );
@@ -444,15 +452,7 @@ export class SessionController {
     availableValues: readonly string[],
   ): void {
     const panel = this.#view.value;
-    const draft = chooseSessionOption(
-      panel,
-      {
-        availableValues,
-        models: panel.modelDiscovery.catalog,
-      },
-      name,
-      value,
-    );
+    const draft = selectedDraftOption(panel, name, value, availableValues);
 
     if (draft === undefined) {
       return;
@@ -461,24 +461,17 @@ export class SessionController {
     this.#view.patch({ draft, openSelect: undefined });
 
     if (name === "credential") {
-      void this.#ensureModels(value);
+      this.#models.ensure(value);
     }
   }
 
   #rememberDraft(form: HTMLFormElement, inputName?: string): void {
-    const draft: SessionDraft = {
-      credential: formString(form, "credential"),
-      model: formString(form, "model"),
-      prompt: formString(form, "prompt"),
-      reasoningEffort: formString(form, "reasoningEffort"),
-      runnerId: formString(form, "runnerId"),
-      workingDirectory: formString(form, "workingDirectory"),
-    };
+    const draft = readSessionDraft(form, this.#view.value.draft);
 
     if (inputName === "credential") {
       const nextDraft = { ...draft, model: "", reasoningEffort: "" };
       this.#view.patch({ draft: nextDraft });
-      void this.#ensureModels(nextDraft.credential);
+      this.#models.ensure(nextDraft.credential);
     } else if (inputName === "model") {
       this.#view.patch({ draft: { ...draft, reasoningEffort: "" } });
     } else {
@@ -486,88 +479,57 @@ export class SessionController {
     }
   }
 
-  #applyModelCatalog(credential: string, catalog: AgentModelCatalog): void {
-    this.#view.patch({
-      draft: applySessionModelCatalog(
-        this.#view.value.draft,
-        credential,
-        catalog,
-      ),
-      modelDiscovery: sessionModelDiscoveryState(credential, false, catalog),
-      openSelect: undefined,
-    });
-  }
-
-  async #ensureModels(credentialValue: string, force = false): Promise<void> {
-    const credential = selectedSessionCredential(credentialValue);
-
-    if (credential === undefined) {
+  async #addImages(input: HTMLInputElement): Promise<void> {
+    const files = input.files === null ? [] : [...input.files];
+    input.value = "";
+    if (files.length === 0) {
       return;
     }
 
-    if (this.#view.value.draft.credential !== credentialValue) {
-      this.#remember({
-        draft: {
-          ...this.#view.value.draft,
-          credential: credentialValue,
-          model: "",
-          reasoningEffort: "",
-        },
-      });
-    }
-
-    const discovery = this.#view.value.modelDiscovery;
-
-    if (
-      !force &&
-      discovery.credential === credentialValue &&
-      (discovery.loading || discovery.catalog !== undefined)
-    ) {
-      return;
-    }
-
-    const cached = force ? undefined : this.#modelCatalogs.get(credentialValue);
-
-    if (cached !== undefined) {
-      this.#applyModelCatalog(credentialValue, cached);
-      return;
-    }
-
-    const request = (this.#modelRequest += 1);
-    this.#view.patch({
-      modelDiscovery: sessionModelDiscoveryState(credentialValue, true),
-    });
+    const followUp = input.dataset["action"] === "add-follow-up-images";
+    const current = followUp
+      ? this.#view.value.followUpImages
+      : this.#view.value.draft.images;
 
     try {
-      const search = new URLSearchParams(credential);
-      const catalog = readAgentModelCatalog(
-        await requestJson(`${SESSION_MODELS_PATH}?${search.toString()}`),
+      const images = await appendAgentImageFiles(current, files);
+      this.#view.patch(
+        followUp
+          ? { error: undefined, followUpImages: images }
+          : {
+              draft: { ...this.#view.value.draft, images },
+              error: undefined,
+            },
       );
-
-      if (
-        request !== this.#modelRequest ||
-        this.#view.value.draft.credential !== credentialValue
-      ) {
-        return;
-      }
-
-      this.#modelCatalogs.set(credentialValue, catalog);
-      this.#applyModelCatalog(credentialValue, catalog);
-    } catch {
-      if (
-        request === this.#modelRequest &&
-        this.#view.value.draft.credential === credentialValue
-      ) {
-        this.#view.patch({
-          modelDiscovery: sessionModelDiscoveryState(
-            credentialValue,
-            false,
-            undefined,
-            "Model discovery failed",
-          ),
-        });
-      }
+    } catch (error) {
+      this.#view.patch({
+        error:
+          error instanceof Error
+            ? error.message
+            : "We could not attach those images.",
+      });
     }
+  }
+
+  #removeImage(control: HTMLElement, target: "draft" | "followUp"): void {
+    const index = Number(control.dataset["imageIndex"]);
+    const images =
+      target === "draft"
+        ? this.#view.value.draft.images
+        : this.#view.value.followUpImages;
+
+    if (!Number.isSafeInteger(index) || index < 0 || index >= images.length) {
+      return;
+    }
+
+    const remaining = images.filter(
+      (_image, imageIndex) => imageIndex !== index,
+    );
+    this.#view.patch(
+      target === "draft"
+        ? { draft: { ...this.#view.value.draft, images: remaining } }
+        : { followUpImages: remaining },
+    );
   }
 
   #rememberFollowUp(form: HTMLFormElement): void {
@@ -590,6 +552,7 @@ export class SessionController {
       detail: undefined,
       error: undefined,
       followUp: "",
+      followUpImages: [],
       loadingDetail: true,
       selectedId: sessionId,
     });
@@ -600,7 +563,10 @@ export class SessionController {
     const sessionId = this.#view.value.selectedId;
     const prompt = this.#view.value.followUp.trim();
 
-    if (sessionId === undefined || prompt.length === 0) {
+    if (
+      sessionId === undefined ||
+      (prompt.length === 0 && this.#view.value.followUpImages.length === 0)
+    ) {
       return;
     }
 
@@ -611,12 +577,17 @@ export class SessionController {
         requestJson(
           `${SESSIONS_PATH}/${encodeURIComponent(sessionId)}/messages`,
           {
-            body: JSON.stringify({ prompt }),
+            body: JSON.stringify({
+              ...(this.#view.value.followUpImages.length === 0
+                ? {}
+                : { images: this.#view.value.followUpImages }),
+              prompt,
+            }),
             headers: { "content-type": "application/json" },
             method: "POST",
           },
         ),
-      success: { followUp: "" },
+      success: { followUp: "", followUpImages: [] },
     });
   }
 

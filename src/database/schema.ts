@@ -158,6 +158,7 @@ export const agentMessages = sqliteTable(
     toolCallId: text("tool_call_id"),
     toolName: text("tool_name"),
     toolCalls: text("tool_calls"),
+    images: text("images"),
   },
   (table) => [
     index("agent_messages_session_deletion_creation_index").on(

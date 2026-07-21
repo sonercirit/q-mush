@@ -2,6 +2,7 @@ import {
   reasoningEffortLabel,
   type AgentModelCatalog,
 } from "./agent-configuration.ts";
+import type { AgentImage } from "./agent-images.ts";
 import { renderRetryError } from "./client-controls.tsx";
 import {
   renderCustomSelect,
@@ -22,6 +23,10 @@ import type { ProviderId } from "./provider-credential-store.ts";
 import type { RunnerViewState } from "./runner-client.tsx";
 import type { RunnerSummary } from "./runner-model.ts";
 import {
+  renderSessionFollowUp,
+  renderSessionPromptInput,
+} from "./session-client-forms.tsx";
+import {
   formatTokenCount,
   renderCompactionControls,
   sessionContextClasses,
@@ -36,6 +41,7 @@ import { renderSessionTranscript } from "./session-transcript.tsx";
 
 export interface SessionDraft {
   readonly credential: string;
+  readonly images: readonly AgentImage[];
   readonly model: string;
   readonly prompt: string;
   readonly reasoningEffort: string;
@@ -58,6 +64,7 @@ export interface SessionViewState {
   readonly draft: SessionDraft;
   readonly error: string | undefined;
   readonly followUp: string;
+  readonly followUpImages: readonly AgentImage[];
   readonly loadingDetail: boolean;
   readonly modelDiscovery: SessionModelDiscoveryState;
   readonly openSelect:
@@ -359,24 +366,11 @@ function renderNewSessionForm(
         selectedValue: state.draft.reasoningEffort,
       })}
       {renderModelModalities(model)}
-      <div className="lg:col-span-2">
-        <label
-          className="text-sm font-medium text-slate-200"
-          htmlFor="session-prompt"
-        >
-          Task
-        </label>
-        <textarea
-          className="mt-2 min-h-28 w-full resize-y rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm leading-6 text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none"
-          disabled={state.creating}
-          id="session-prompt"
-          name="prompt"
-          placeholder="Describe the change you want the agent to make…"
-          required
-        >
-          {state.draft.prompt}
-        </textarea>
-      </div>
+      {renderSessionPromptInput({
+        disabled: state.creating,
+        images: state.draft.images,
+        prompt: state.draft.prompt,
+      })}
       <div className="flex flex-col gap-3 lg:col-span-2 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-xs leading-5 text-slate-500">
           The model runs through Q Mush; file and shell tools run only on the
@@ -514,24 +508,11 @@ function renderDetail(state: SessionViewState): JsxNode {
             compacting: state.compacting,
           })}
           <div className="flex gap-3">
-            <form className="contents" data-action="send-session-message">
-              <textarea
-                className="min-h-20 min-w-0 flex-1 resize-y rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none"
-                disabled={sending}
-                name="prompt"
-                placeholder="Give this session another instruction…"
-                required
-              >
-                {state.followUp}
-              </textarea>
-              <button
-                className="self-end rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:opacity-50"
-                disabled={sending}
-                type="submit"
-              >
-                {sending ? "Sending…" : "Send"}
-              </button>
-            </form>
+            {renderSessionFollowUp({
+              images: state.followUpImages,
+              prompt: state.followUp,
+              sending,
+            })}
             <button
               className="self-end rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950"
               data-action="continue-session"

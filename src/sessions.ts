@@ -41,6 +41,7 @@ import {
   readProvider,
   selectedSessionModel,
   type CreateSessionInput,
+  type PromptInput,
 } from "./session-input.ts";
 import type {
   AgentSessionDetail,
@@ -440,10 +441,10 @@ class DrizzleSessionIntegration implements SessionIntegration {
     if (this.#runtimes.draining) {
       return createApiError("server_restarting", 503);
     }
-    const prompt = await parseJsonRequest(request, readPrompt);
-    return prompt === undefined
+    const input = await parseJsonRequest(request, readPrompt);
+    return input === undefined
       ? createApiError("invalid_request", 400)
-      : this.#queueForUser(user, sessionId, prompt);
+      : this.#queueForUser(user, sessionId, input);
   }
 
   async #compactForUser(
@@ -512,7 +513,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
   async #queueForUser(
     user: AuthenticatedUser,
     sessionId: string,
-    prompt?: string,
+    prompt?: PromptInput,
   ): Promise<Response> {
     const existing = this.#store.get(user.id, sessionId);
     const unavailable = unavailableSessionResponse(existing);
@@ -529,7 +530,9 @@ class DrizzleSessionIntegration implements SessionIntegration {
         user.id,
         existing.id,
         this.#now(),
-        prompt,
+        prompt === undefined
+          ? undefined
+          : { content: prompt.prompt, images: prompt.images },
       );
 
       if (queued.status !== "queued") {

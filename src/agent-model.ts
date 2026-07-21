@@ -5,6 +5,7 @@ import {
   type OptionalTurn,
 } from "./agent-completion.ts";
 import type { AgentReasoningEffort } from "./agent-configuration.ts";
+import { agentImageDataUrl } from "./agent-images.ts";
 import type {
   AgentConversationMessage,
   AgentModel,
@@ -122,10 +123,29 @@ export function agentProviderRequestHeaders(
   return headers;
 }
 
+function textInputItems(
+  content: string,
+  type: "input_text" | "text",
+): readonly unknown[] {
+  return content.length === 0 ? [] : [{ text: content, type }];
+}
+
 function modelMessage(message: AgentConversationMessage): unknown {
   switch (message.role) {
     case "user":
-      return { content: message.content, role: "user" };
+      return {
+        content:
+          message.images === undefined || message.images.length === 0
+            ? message.content
+            : [
+                ...textInputItems(message.content, "text"),
+                ...message.images.map((image) => ({
+                  image_url: { url: agentImageDataUrl(image) },
+                  type: "image_url",
+                })),
+              ],
+        role: "user",
+      };
     case "assistant":
       return {
         content: message.content.length === 0 ? null : message.content,
@@ -154,7 +174,13 @@ function responsesInput(message: AgentConversationMessage): readonly unknown[] {
     case "user":
       return [
         {
-          content: [{ text: message.content, type: "input_text" }],
+          content: [
+            ...textInputItems(message.content, "input_text"),
+            ...(message.images ?? []).map((image) => ({
+              image_url: agentImageDataUrl(image),
+              type: "input_image",
+            })),
+          ],
           role: "user",
           type: "message",
         },

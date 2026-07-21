@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, inArray, type SQL } from "drizzle-orm";
 import { readAgentFile, type AgentFile } from "./agent-file.ts";
+import { readAgentImages, type AgentImage } from "./agent-images.ts";
 import {
   readAgentToolCalls,
   type AgentConversationMessage,
@@ -29,6 +30,7 @@ export interface CreateAgentSession extends Pick<
   | "workingDirectory"
 > {
   readonly credentialId: string;
+  readonly images: readonly AgentImage[];
   readonly prompt: string;
   readonly userId: string;
 }
@@ -85,6 +87,7 @@ function messageSelection() {
     content: agentMessages.content,
     createdAt: agentMessages.createdAt,
     id: agentMessages.id,
+    images: agentMessages.images,
     role: agentMessages.role,
     toolCallId: agentMessages.toolCallId,
     toolCalls: agentMessages.toolCalls,
@@ -135,15 +138,37 @@ function parseToolCalls(value: string | null): readonly AgentToolCall[] {
   throw new Error("Stored agent tool calls are invalid");
 }
 
-type StoredMessage = Omit<AgentSessionMessage, "createdAt" | "toolCalls"> & {
+type StoredMessage = Omit<
+  AgentSessionMessage,
+  "createdAt" | "images" | "toolCalls"
+> & {
   readonly createdAt: Date;
+  readonly images: string | null;
   readonly toolCalls: string | null;
 };
+
+function parseImages(value: string | null): readonly AgentImage[] {
+  if (value === null) {
+    return [];
+  }
+
+  try {
+    const images = readAgentImages(JSON.parse(value));
+    if (images !== undefined) {
+      return images;
+    }
+  } catch {
+    // The common error below identifies corrupt local data.
+  }
+
+  throw new Error("Stored agent images are invalid");
+}
 
 function summarizeMessage(stored: StoredMessage): AgentSessionMessage {
   return {
     ...stored,
     createdAt: stored.createdAt.getTime(),
+    images: parseImages(stored.images),
     toolCalls: parseToolCalls(stored.toolCalls),
   };
 }
@@ -168,6 +193,7 @@ function interruptedToolResult(
     toolCallId: pending.call.id,
     toolCalls: [],
     toolName: pending.call.name,
+    images: [],
   };
 }
 
@@ -220,12 +246,12 @@ function titleFromPrompt(prompt: string): string {
     .split(/\r?\n/u)
     .map((line) => line.trim())
     .find((line) => line.length > 0);
-  return (firstLine ?? "New agent session").slice(0, 80);
+  return (firstLine ?? "Image task").slice(0, 80);
 }
 
 type StoredMessageValues = Pick<
   StoredMessage,
-  "content" | "role" | "toolCallId" | "toolCalls" | "toolName"
+  "content" | "images" | "role" | "toolCallId" | "toolCalls" | "toolName"
 >;
 
 function recordedMessageValues(
@@ -250,6 +276,7 @@ function recordedMessageValues(
 
   return {
     content: message.content,
+    images: null,
     role: "tool",
     toolCallId: message.toolCallId,
     toolCalls: null,
@@ -258,12 +285,18 @@ function recordedMessageValues(
 }
 
 function emptyToolMetadata() {
-  return { toolCallId: null, toolCalls: null, toolName: null };
+  return {
+    images: null,
+    toolCallId: null,
+    toolCalls: null,
+    toolName: null,
+  };
 }
 
 function userMessageValues(options: {
   readonly content: string;
   readonly id: string;
+  readonly images: readonly AgentImage[];
   readonly now: number;
   readonly sessionId: string;
   readonly userId: string;
@@ -272,6 +305,7 @@ function userMessageValues(options: {
     ...createdAuditFields(options.userId, options.now),
     content: options.content,
     id: options.id,
+    images: options.images.length === 0 ? null : JSON.stringify(options.images),
     role: "user" as const,
     sessionId: options.sessionId,
     userId: options.userId,
@@ -330,6 +364,7 @@ export class SessionStore {
           userMessageValues({
             content: input.prompt,
             id: messageId,
+            images: input.images,
             now,
             sessionId,
             userId: input.userId,
@@ -400,7 +435,11 @@ export class SessionStore {
           });
           break;
         case "user":
-          conversation.push({ content: message.content, role: "user" });
+          conversation.push({
+            content: message.content,
+            ...(message.images.length === 0 ? {} : { images: message.images }),
+            role: "user",
+          });
           break;
         case "system":
         case "thinking":
@@ -539,7 +578,10 @@ export class SessionStore {
     userId: string,
     sessionId: string,
     now: number,
-    prompt?: string,
+    prompt?: {
+      readonly content: string;
+      readonly images: readonly AgentImage[];
+    },
   ): QueueSessionResult {
     const messageId = prompt === undefined ? undefined : this.#generateId(now);
     const status = this.#database.transaction((transaction) => {
@@ -566,8 +608,9 @@ export class SessionStore {
           .insert(agentMessages)
           .values(
             userMessageValues({
-              content: prompt,
+              content: prompt.content,
               id: messageId,
+              images: prompt.images,
               now,
               sessionId,
               userId,

@@ -3,6 +3,10 @@ import { createHash } from "node:crypto";
 import { runners } from "../database/schema.ts";
 import { SessionStore } from "../session-store.ts";
 import {
+  TEST_AGENT_IMAGE,
+  testUserImageMessage,
+} from "./agent-image-fixtures.ts";
+import {
   addTestProviderCredential,
   createAuthenticatedTestDatabase,
   TEST_NOW,
@@ -19,22 +23,24 @@ const THINKING_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000045";
 const ASSISTANT_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000046";
 const TOOL_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000047";
 
+function testSessionInput() {
+  return {
+    credentialId: CREDENTIAL_ID,
+    autoCompact: true,
+    images: [TEST_AGENT_IMAGE],
+    maxContextTokens: 200_000,
+    model: "gpt-4.1-mini",
+    prompt: "Inspect the repository\nand make it shine",
+    provider: "openai" as const,
+    reasoningEffort: "high" as const,
+    runnerId: RUNNER_ID,
+    userId: TEST_USER_ID,
+    workingDirectory: "/work/project",
+  };
+}
+
 function createTestSession(store: SessionStore) {
-  return store.create(
-    {
-      credentialId: CREDENTIAL_ID,
-      autoCompact: true,
-      maxContextTokens: 200_000,
-      model: "gpt-4.1-mini",
-      prompt: "Inspect the repository\nand make it shine",
-      provider: "openai",
-      reasoningEffort: "high",
-      runnerId: RUNNER_ID,
-      userId: TEST_USER_ID,
-      workingDirectory: "/work/project",
-    },
-    TEST_NOW,
-  );
+  return store.create(testSessionInput(), TEST_NOW);
 }
 
 function markTestSessionRunning(store: SessionStore): void {
@@ -98,13 +104,11 @@ describe("session store", () => {
     expect(created.title).toBe("Inspect the repository");
     expect(created.messages).toEqual([
       {
-        content: "Inspect the repository\nand make it shine",
+        ...testUserImageMessage(
+          USER_MESSAGE_ID,
+          "Inspect the repository\nand make it shine",
+        ),
         createdAt: TEST_NOW,
-        id: USER_MESSAGE_ID,
-        role: "user",
-        toolCallId: null,
-        toolCalls: [],
-        toolName: null,
       },
     ]);
     markTestSessionRunning(store);
@@ -151,6 +155,7 @@ describe("session store", () => {
         ...thinkingMessage,
         createdAt: TEST_NOW + 3,
         id: THINKING_MESSAGE_ID,
+        images: [],
         toolCallId: null,
         toolCalls: [],
         toolName: null,
@@ -159,6 +164,7 @@ describe("session store", () => {
         ...assistantMessage,
         createdAt: TEST_NOW + 4,
         id: ASSISTANT_MESSAGE_ID,
+        images: [],
         toolCallId: null,
         toolName: null,
       },
@@ -166,10 +172,27 @@ describe("session store", () => {
         ...toolMessage,
         createdAt: TEST_NOW + 5,
         id: TOOL_MESSAGE_ID,
+        images: [],
         toolCalls: [],
       },
     ]);
     expect(store.list(TEST_USER_ID)).toHaveLength(1);
+    database.$client.close();
+  });
+
+  test("uses a fallback title for an image-only task", () => {
+    const { database, store } = createStore();
+    const detail = store.create(
+      {
+        ...testSessionInput(),
+        maxContextTokens: null,
+        prompt: "",
+        reasoningEffort: null,
+      },
+      TEST_NOW,
+    );
+
+    expect(detail.title).toBe("Image task");
     database.$client.close();
   });
 
@@ -239,8 +262,10 @@ describe("session store", () => {
       "tool",
     ]);
     expect(
-      store.queue(TEST_USER_ID, SESSION_ID, TEST_NOW + 4, "Why was it failing?")
-        .status,
+      store.queue(TEST_USER_ID, SESSION_ID, TEST_NOW + 4, {
+        content: "Why was it failing?",
+        images: [],
+      }).status,
     ).toBe("queued");
     const interruptedToolResult = {
       content:
@@ -261,11 +286,13 @@ describe("session store", () => {
       ...interruptedToolResult,
       createdAt: TEST_NOW + 2,
       id: `${THINKING_MESSAGE_ID}:interrupted:${interruptedCall.id}`,
+      images: [],
       toolCalls: [],
     });
     expect(store.conversation(SESSION_ID)).toEqual([
       {
         content: "Inspect the repository\nand make it shine",
+        images: [TEST_AGENT_IMAGE],
         role: "user",
       },
       assistantMessage,

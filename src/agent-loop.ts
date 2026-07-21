@@ -1,3 +1,4 @@
+import type { AgentImage } from "./agent-images.ts";
 import { isRecord } from "./auth-model.ts";
 
 interface AgentToolRequest<Arguments> {
@@ -41,6 +42,7 @@ export function readAgentToolCalls(
 export type AgentConversationMessage =
   | {
       readonly content: string;
+      readonly images?: readonly AgentImage[];
       readonly role: "user";
     }
   | {

@@ -1,7 +1,12 @@
 import type { AgentModelOption } from "./agent-configuration.ts";
 import { createElement, type JsxNode } from "./jsx.ts";
 
-const Q_MUSH_SUPPORTED_MODALITIES = ["text"] as const;
+function qMushSupports(
+  direction: "input" | "output",
+  modality: string,
+): boolean {
+  return modality === "text" || (direction === "input" && modality === "image");
+}
 
 function modalityLabel(modality: string): string {
   return modality.length === 0
@@ -15,23 +20,21 @@ function modalityListLabel(modalities: readonly string[] | null): string {
     : modalities.map(modalityLabel).join(", ") || "None";
 }
 
-function qMushModalityListLabel(modalities: readonly string[] | null): string {
+function qMushModalityListLabel(
+  direction: "input" | "output",
+  modalities: readonly string[] | null,
+): string {
   return modalityListLabel(
-    modalities?.filter((modality) => qMushSupports(modality)) ?? null,
+    modalities?.filter((modality) => qMushSupports(direction, modality)) ??
+      null,
   );
 }
 
 export function modelModalitiesLabel(model: AgentModelOption): string {
   return [
     `All modalities · Input: ${modalityListLabel(model.inputModalities)} · Output: ${modalityListLabel(model.outputModalities)}`,
-    `Supported by Q Mush · Input: ${qMushModalityListLabel(model.inputModalities)} · Output: ${qMushModalityListLabel(model.outputModalities)}`,
+    `Supported by Q Mush · Input: ${qMushModalityListLabel("input", model.inputModalities)} · Output: ${qMushModalityListLabel("output", model.outputModalities)}`,
   ].join("\n");
-}
-
-function qMushSupports(modality: string): boolean {
-  return Q_MUSH_SUPPORTED_MODALITIES.some(
-    (supportedModality) => supportedModality === modality,
-  );
 }
 
 function renderModalityGroup(
@@ -50,7 +53,7 @@ function renderModalityGroup(
           <span className="text-xs text-slate-500">None</span>
         ) : (
           modalities.map((modality) => {
-            const supported = qMushSupports(modality);
+            const supported = qMushSupports(direction, modality);
             return (
               <span
                 className={`rounded-full border px-2.5 py-1 text-xs font-medium ${supported ? "border-emerald-300/20 bg-emerald-300/10 text-emerald-200" : "border-slate-400/20 bg-slate-400/10 text-slate-400"}`}

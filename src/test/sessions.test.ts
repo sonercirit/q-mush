@@ -11,6 +11,7 @@ import {
   SESSION_MODELS_PATH,
   SESSIONS_PATH,
 } from "../routes.ts";
+import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import {
   createAuthenticatedRequest,
   TEST_USER_ID,
@@ -109,6 +110,33 @@ async function unauthenticatedSessionStatus(): Promise<number> {
 }
 
 describe("agent sessions", () => {
+  test("persists image inputs and sends them to the model", async () => {
+    const model = new ScriptedAgentModel([
+      { content: "Screenshot implemented.", toolCalls: [] },
+    ]);
+    const setup = connectedSessionSetup(model);
+    const response = await setup.sessions.collection(
+      createSessionRequest(true, "high", "gpt-4.1-mini", [TEST_AGENT_IMAGE]),
+    );
+
+    await expectSessionReaches(setup, response, "idle");
+    expect(model.requests[0]?.[0]).toEqual({
+      content: "Inspect README.md",
+      images: [TEST_AGENT_IMAGE],
+      role: "user",
+    });
+    expect(await sessionDetail(setup.sessions)).toMatchObject({
+      messages: [
+        {
+          images: [TEST_AGENT_IMAGE],
+          role: "user",
+        },
+        { role: "assistant" },
+      ],
+    });
+    setup.database.$client.close();
+  });
+
   test("loads the workspace agent file before starting the model", async () => {
     const model = new ScriptedAgentModel([
       { content: "Instructions followed.", toolCalls: [] },

@@ -2,6 +2,7 @@ import type { AgentFile } from "./agent-file.ts";
 import { createAgentSystemPrompt } from "./agent-prompt.ts";
 import { AGENT_TOOLS } from "./agent-tools.ts";
 import { createElement, type JsxNode } from "./jsx.ts";
+import { renderSessionImagePreviews } from "./session-image-client.tsx";
 import { renderMarkdown } from "./session-markdown.tsx";
 import type { AgentSessionMessage } from "./session-model.ts";
 import { renderStructuredCode } from "./session-syntax.tsx";
@@ -90,6 +91,9 @@ function renderMessage(message: AgentSessionMessage): JsxNode {
       </p>
       {message.content.length > 0 ? (
         <div className="mt-2">{renderMarkdown(message.content)}</div>
+      ) : null}
+      {message.images.length > 0 ? (
+        <div className="mt-3">{renderSessionImagePreviews(message.images)}</div>
       ) : null}
       {message.toolCalls.length > 0 ? (
         <ul className="mt-3 space-y-2">

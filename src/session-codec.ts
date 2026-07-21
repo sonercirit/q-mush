@@ -6,6 +6,7 @@ import {
   type AgentReasoningEffort,
 } from "./agent-configuration.ts";
 import { readAgentFile } from "./agent-file.ts";
+import { readAgentImages } from "./agent-images.ts";
 import { readAgentToolCalls } from "./agent-loop.ts";
 import { isRecord, readNullableString } from "./auth-model.ts";
 import type { ProviderId } from "./provider-credential-store.ts";
@@ -215,6 +216,7 @@ function readMessage(value: unknown): AgentSessionMessage {
   const content = value["content"];
   const createdAt = readFiniteNumber(value["createdAt"]);
   const id = value["id"];
+  const images = readAgentImages(value["images"]);
   const role = value["role"];
   const toolCallId = readNullableString(value["toolCallId"]);
   const toolName = readNullableString(value["toolName"]);
@@ -223,6 +225,7 @@ function readMessage(value: unknown): AgentSessionMessage {
     typeof content !== "string" ||
     createdAt === undefined ||
     typeof id !== "string" ||
+    images === undefined ||
     (role !== "user" &&
       role !== "assistant" &&
       role !== "tool" &&
@@ -238,6 +241,7 @@ function readMessage(value: unknown): AgentSessionMessage {
     content,
     createdAt,
     id,
+    images,
     role,
     toolCallId,
     toolCalls: readToolCalls(value["toolCalls"]),

@@ -75,7 +75,7 @@ export function addTestProviderCredential(
 function createTestRequest(
   path: string,
   headers: Headers,
-  body: Readonly<Record<string, string>> | undefined,
+  body: Readonly<Record<string, unknown>> | undefined,
   method: string,
 ): Request {
   if (body !== undefined) {
@@ -92,7 +92,7 @@ function createTestRequest(
 export function createRunnerRequest(
   path: string,
   token: string,
-  body?: Readonly<Record<string, string>>,
+  body?: Readonly<Record<string, unknown>>,
   method = "POST",
 ): Request {
   return createTestRequest(
@@ -105,7 +105,7 @@ export function createRunnerRequest(
 
 export function createAuthenticatedRequest(
   path: string,
-  body?: Readonly<Record<string, string>>,
+  body?: Readonly<Record<string, unknown>>,
   method = "GET",
 ): Request {
   return createTestRequest(

@@ -66,6 +66,7 @@ function streamedMessages(
         content,
         createdAt: detail.updatedAt,
         id: streamedMessageId(detail.id, role),
+        images: [],
         role,
         toolCallId: null,
         toolCalls: [],

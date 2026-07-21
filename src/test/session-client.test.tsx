@@ -7,6 +7,10 @@ import {
   renderSessionPanel,
   type SessionViewState,
 } from "../session-client.tsx";
+import {
+  TEST_AGENT_IMAGE,
+  testUserImageMessage,
+} from "./agent-image-fixtures.ts";
 import { runnerSummary } from "./runner-fixtures.ts";
 import {
   FORMATTED_SESSION_MESSAGES,
@@ -50,8 +54,10 @@ const SESSION_STATE: SessionViewState = {
   loadingDetail: false,
   openSelect: "model",
   followUp: "",
+  followUpImages: [],
   error: undefined,
   draft: {
+    images: [],
     workingDirectory: ".",
     runnerId: "runner-1",
     reasoningEffort: "high",
@@ -117,6 +123,7 @@ test("renders the system prompt and model thinking in a transcript", () => {
           content: "I should inspect the existing files first.",
           createdAt: 2,
           id: "thinking-1",
+          images: [],
           role: "thinking",
           toolCallId: null,
           toolCalls: [],
@@ -126,6 +133,7 @@ test("renders the system prompt and model thinking in a transcript", () => {
           content: "",
           createdAt: 3,
           id: "assistant-1",
+          images: [],
           role: "assistant",
           toolCallId: null,
           toolCalls: [
@@ -141,6 +149,7 @@ test("renders the system prompt and model thinking in a transcript", () => {
           content: "# Q Mush",
           createdAt: 4,
           id: "tool-1",
+          images: [],
           role: "tool",
           toolCallId: "call-1",
           toolCalls: [],
@@ -197,6 +206,27 @@ test("renders the system prompt and model thinking in a transcript", () => {
   expect(html).toContain("# Q Mush");
   expect(html).toContain('data-action="continue-session"');
   expect(html).toContain(">Continue</button>");
+});
+
+test("renders image pickers, previews, and transcript images", () => {
+  const state = sessionStateWithMessages(SESSION_STATE, [
+    testUserImageMessage("user-image", "Use this design"),
+  ]);
+  const html = renderPanel({
+    ...state,
+    draft: { ...state.draft, images: [TEST_AGENT_IMAGE] },
+    followUpImages: [TEST_AGENT_IMAGE],
+  });
+
+  expect(html).toContain('accept="image/png,image/jpeg,image/gif,image/webp"');
+  expect(html).toContain('data-action="add-session-images"');
+  expect(html).toContain('data-action="add-follow-up-images"');
+  expect(html).toContain('data-action="remove-session-image"');
+  expect(html).toContain('data-action="remove-follow-up-image"');
+  expect(html).toContain(
+    `src="data:image/png;base64,${TEST_AGENT_IMAGE.data}"`,
+  );
+  expect(html).toContain('alt="pixel.png"');
 });
 
 test("pretty prints markdown and colorizes structured transcript content", () => {
@@ -359,17 +389,17 @@ test("shows input and output modalities in the model select list", () => {
   expect(modelHtml).toContain("GPT-5 Codex (discovered)");
   expect(modelHtml).toContain("200K context");
   expect(modelHtml).toMatch(
-    /data-option-value="gpt-5-codex"[^>]*>[\s\S]*?All modalities · Input: Text, Image, Audio · Output: Text[\s\S]*?Supported by Q Mush · Input: Text · Output: Text[\s\S]*?<\/button>/u,
+    /data-option-value="gpt-5-codex"[^>]*>[\s\S]*?All modalities · Input: Text, Image, Audio · Output: Text[\s\S]*?Supported by Q Mush · Input: Text, Image · Output: Text[\s\S]*?<\/button>/u,
   );
   expect(modelHtml).toMatch(
-    /data-option-value="image-model"[^>]*>[\s\S]*?All modalities · Input: Image · Output: Image[\s\S]*?Supported by Q Mush · Input: None · Output: None[\s\S]*?<\/button>/u,
+    /data-option-value="image-model"[^>]*>[\s\S]*?All modalities · Input: Image · Output: Image[\s\S]*?Supported by Q Mush · Input: Image · Output: None[\s\S]*?<\/button>/u,
   );
   expect(modelHtml).toContain('data-model-modalities-direction="input"');
   expect(modelHtml).toContain('data-model-modalities-direction="output"');
   expect(modelHtml).toContain("Input modalities");
   expect(modelHtml).toContain("Output modalities");
   expect(modelHtml).toContain("Text · Supported by Q Mush");
-  expect(modelHtml).toContain("Image · Not yet supported by Q Mush");
+  expect(modelHtml).toContain("Image · Supported by Q Mush");
   expect(modelHtml).toContain("Audio · Not yet supported by Q Mush");
   expect(modelHtml).toContain('data-custom-select="reasoningEffort"');
   expect(modelHtml).not.toMatch(/<select[^>]*id="session-reasoning-effort"/u);

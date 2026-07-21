@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { SESSIONS_PATH } from "../routes.ts";
+import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import { createAuthenticatedRequest } from "./authenticated-integration-test-helpers.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
@@ -83,7 +84,7 @@ describe("session continuation", () => {
     const followUp = await sessions.message(
       createAuthenticatedRequest(
         `${SESSIONS_PATH}/${SESSION_ID}/messages`,
-        { prompt: "Now summarize it" },
+        { images: [TEST_AGENT_IMAGE], prompt: "Now summarize it" },
         "POST",
       ),
       SESSION_ID,
@@ -103,6 +104,11 @@ describe("session continuation", () => {
     const followUpRequest = model.requests[2];
     expect(followUpRequest).toBeDefined();
     expect(JSON.stringify(continued)).toContain("Now summarize it");
+    expect(followUpRequest).toContainEqual({
+      content: "Now summarize it",
+      images: [TEST_AGENT_IMAGE],
+      role: "user",
+    });
 
     const resumed = await sessions.continue(
       createAuthenticatedRequest(

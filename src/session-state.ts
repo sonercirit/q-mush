@@ -9,6 +9,7 @@ import type {
 function initialSessionDraft(): SessionDraft {
   return {
     credential: "",
+    images: [],
     model: "",
     prompt: "",
     reasoningEffort: "",
@@ -35,6 +36,7 @@ export function initialSessionViewState(): SessionViewState {
     draft: initialSessionDraft(),
     error: undefined,
     followUp: "",
+    followUpImages: [],
     loadingDetail: false,
     modelDiscovery: sessionModelDiscoveryState(undefined, false),
     openSelect: undefined,

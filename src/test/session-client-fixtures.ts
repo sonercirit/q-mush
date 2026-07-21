@@ -12,6 +12,7 @@ function sessionMessage(
     content,
     createdAt: 2,
     id,
+    images: [],
     role,
     toolCallId: toolName === null ? null : `call-${id}`,
     toolCalls: [],

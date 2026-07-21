@@ -49,9 +49,8 @@ task-specific progress, guesses, or sensitive values.
 ## Setup and Commands
 
 - Install dependencies: `bun install`
-- Run the application: `bun run src/index.ts`
-- Run the supervised development server: `bun run dev`
-- Restart the development server after source changes: `bun run dev:restart`
+- Run: `bun run src/index.ts`
+- Develop: `bun run dev`; restart: `bun run dev:restart`
 - Generate a database migration after schema changes: `bun run db:generate`
 - Apply pending database migrations: `bun run db:migrate`
 - Run tests: `bun test`
@@ -119,8 +118,10 @@ task-specific progress, guesses, or sensitive values.
   another user's registration remains protected. Runner tokens never appear in
   list responses.
 - `src/sessions.ts` and `src/session-store.ts` implement persistent first-party
-  coding sessions. A session records latest input-token usage and its discovered
-  context limit. Usage shows a percentage, yellow at 80%, and red at 90%.
+  coding sessions. User messages support up to eight 10 MB PNG, JPEG, GIF, or
+  WebP images, persisted with the transcript and sent as native multimodal
+  input. A session records latest input-token usage and its discovered context
+  limit. Usage shows a percentage, yellow at 80%, and red at 90%.
   Auto-compaction defaults on and summarizes completed history before the next
   request at 95%; idle sessions can compact manually. Compaction soft-deletes
   prior active messages and inserts a replayable handoff. Provider secrets never
@@ -251,8 +252,7 @@ task-specific progress, guesses, or sensitive values.
   issue hard deletes for application records: set `isDeleted`, `updatedAt`, and
   `updatedById`, and exclude soft-deleted rows from active queries. Audit actor
   fields deliberately are not foreign keys because `SYSTEM` is not a user row.
-- Keep HTTP `deflate` zlib-wrapped: `node:zlib`'s `deflateSync` produces the
-  interoperable content-coding, while `Bun.deflateSync` produces a raw stream.
+- Keep HTTP `deflate` zlib-wrapped; Bun's implementation is raw.
 - Knip rule severities alone do not activate default-off issue types; keep its
   authoritative included-issue list complete so it can generate every error
   rule. Do not run the full test suite in parallel with lint or other repository

@@ -1,4 +1,5 @@
 import { expect } from "bun:test";
+import type { AgentImage } from "../agent-images.ts";
 import type { AgentModel } from "../agent-loop.ts";
 import type { AgentModelDiscoverer } from "../agent-model-discovery.ts";
 import { createGoogleAuthFromEnvironment } from "../auth.ts";
@@ -133,11 +134,13 @@ export function createSessionRequest(
   includeModel = true,
   reasoningEffort = "high",
   model = "gpt-4.1-mini",
+  images: readonly AgentImage[] = [],
 ): Request {
   return createAuthenticatedRequest(
     SESSIONS_PATH,
     {
       credentialId: CREDENTIAL_ID,
+      ...(images.length === 0 ? {} : { images }),
       ...(includeModel ? { model } : {}),
       prompt: "Inspect README.md",
       provider: "openai",

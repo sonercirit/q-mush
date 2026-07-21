@@ -1,11 +1,34 @@
 import { expect, test } from "bun:test";
 import { readAgentModelCatalog, readSessionDetail } from "../session-codec.ts";
+import {
+  TEST_AGENT_IMAGE,
+  testUserImageMessage,
+} from "./agent-image-fixtures.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
 const DETAIL = {
   ...TEST_SESSION_DETAIL,
   agentFile: { content: "Project instructions", name: "CLAUDE.md" },
 };
+
+test("reads message image metadata from the server", () => {
+  const detail = {
+    ...DETAIL,
+    messages: [testUserImageMessage("message-1", "Review this screenshot")],
+  };
+
+  expect(readSessionDetail(detail).messages[0]?.images).toEqual([
+    TEST_AGENT_IMAGE,
+  ]);
+  expect(() =>
+    readSessionDetail({
+      ...detail,
+      messages: [
+        { ...detail.messages[0], images: [{ ...TEST_AGENT_IMAGE, data: "!" }] },
+      ],
+    }),
+  ).toThrow("invalid session message");
+});
 
 test("reads a session agent file from the server", () => {
   expect(readSessionDetail(DETAIL).agentFile).toEqual({
