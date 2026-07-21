@@ -145,22 +145,23 @@ task-specific progress, guesses, or sensitive values.
   notifications. Browser rendering preserves the document viewport and keyed
   `data-scroll-key` regions across full-root remounts; the session transcript
   starts at the bottom and returns there when its message or agent-file revision
-  changes. It defers remounts while a select has focus, flushing on change or
-  focus loss. `src/agent-model-discovery.ts` queries the selected credential's
-  provider for compatible models, modalities, and reasoning metadata;
-  `src/agent-configuration.ts` owns shared catalog types, efforts, and
-  fallbacks. New sessions use the default online runner and model credential,
-  each falling back to the first entry. The working directory uses the latest
-  session; provider models use the first option and reasoning the maximum
-  effort. Model choices show all provider and Q Mush-supported input/output
-  modalities. Controls use the listbox in `src/custom-select.tsx`; model options
-  show discovered context limits. Model and effort selections are persisted with
-  the session. `src/agent-prompt.ts` is the shared source for building the model
-  system prompt and its transcript display. Reasoning summaries persist as
-  `thinking` messages but are excluded from replay. Session and transcript rows
-  live in `agent_sessions` and `agent_messages`; interrupted processes mark
-  active sessions failed so they can be resumed. Rebuilt conversations add error
-  results for interrupted tool calls only on resume.
+  changes. It preserves input focus across updates and defers remounts while a
+  select has focus, flushing on change or focus loss.
+  `src/agent-model-discovery.ts` queries providers for compatible models,
+  modalities, and reasoning metadata; `src/agent-configuration.ts` owns shared
+  catalog types, efforts, and fallbacks. New sessions use the default online
+  runner and model credential, each falling back to the first entry. The working
+  directory uses the latest session; provider models use the first option and
+  reasoning the maximum effort. Model choices show all provider and Q
+  Mush-supported input/output modalities. Controls use the listbox in
+  `src/custom-select.tsx`; model options show discovered context limits. Model
+  and effort selections are persisted with the session. `src/agent-prompt.ts` is
+  the shared source for building the model system prompt and its transcript
+  display. Reasoning summaries persist as `thinking` messages but are excluded
+  from replay. Session and transcript rows live in `agent_sessions` and
+  `agent_messages`; interrupted processes mark active sessions failed so they
+  can be resumed. Rebuilt conversations add error results for interrupted tool
+  calls only on resume.
 
 - `src/openai.ts` and `src/openrouter.ts` implement provider connections.
   Multiple OAuth or manual credentials live in `provider_credentials`, encrypted

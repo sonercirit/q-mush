@@ -5,6 +5,7 @@ import {
 } from "./auth-model.ts";
 import { requestJson } from "./browser-http.ts";
 import { providerNotice } from "./client-notices.ts";
+import { updatePreservingFocus } from "./focus-position.ts";
 import { createElement, mount, type JsxNode } from "./jsx.ts";
 import {
   BRAVE_SEARCH_PANEL,
@@ -512,6 +513,10 @@ function readScrollTargets(container: Element): ReadonlyMap<string, Element> {
   return targets;
 }
 
+function focusKeySelector(key: string): string {
+  return `[data-focus-key="${CSS.escape(key)}"]`;
+}
+
 function updateApp(container: Element, replaceFocusedSelect = false): void {
   const activeElement = container.ownerDocument.activeElement;
 
@@ -525,22 +530,31 @@ function updateApp(container: Element, replaceFocusedSelect = false): void {
   }
 
   appUpdateDeferred = false;
-  updatePreservingScrollPositions(
-    () => readScrollTargets(container),
+  updatePreservingFocus(
     () => {
-      mount(
-        renderApp(
-          braveSearch.state,
-          loadFailed,
-          logoutPending,
-          notices,
-          openAi.state,
-          openRouter.state,
-          runners.state,
-          agentSessions.state,
-          session,
-        ),
-        container,
+      const focused = container.ownerDocument.activeElement;
+      return focused !== null && container.contains(focused) ? focused : null;
+    },
+    (key) => container.querySelector(focusKeySelector(key)),
+    () => {
+      updatePreservingScrollPositions(
+        () => readScrollTargets(container),
+        () => {
+          mount(
+            renderApp(
+              braveSearch.state,
+              loadFailed,
+              logoutPending,
+              notices,
+              openAi.state,
+              openRouter.state,
+              runners.state,
+              agentSessions.state,
+              session,
+            ),
+            container,
+          );
+        },
       );
     },
   );

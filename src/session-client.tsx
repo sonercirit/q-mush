@@ -187,8 +187,6 @@ function renderSessionField(
 
 interface SessionControlOptions {
   readonly disabled: boolean;
-  readonly id: string;
-  readonly label: string;
   readonly name: string;
 }
 
@@ -200,9 +198,10 @@ function sessionControlAttributes(
     className:
       "mt-2 min-w-0 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none",
     disabled: options.disabled,
-    id: options.id,
+    id: "session-directory",
     name: options.name,
     required,
+    "data-focus-key": "session-directory",
   };
 }
 
@@ -212,13 +211,12 @@ function renderDirectoryInput(
 ): JsxNode {
   const options = {
     disabled: state.creating,
-    id: "session-directory",
     label: "Working directory on runner",
     name: "workingDirectory",
   };
 
   return renderSessionField(
-    options.id,
+    "session-directory",
     options.label,
     <div className="flex items-center gap-2">
       <input

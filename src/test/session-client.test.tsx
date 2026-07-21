@@ -128,6 +128,17 @@ function renderPanel(state: SessionViewState): string {
   );
 }
 
+test("marks editable session controls for focus preservation", () => {
+  const newSessionHtml = renderPanel(SESSION_STATE);
+  const followUpHtml = renderPanel(
+    sessionStateWithMessages(SESSION_STATE, FORMATTED_SESSION_MESSAGES),
+  );
+
+  expect(newSessionHtml).toContain('data-focus-key="session-directory"');
+  expect(newSessionHtml).toContain('data-focus-key="session-prompt"');
+  expect(followUpHtml).toContain('data-focus-key="session-follow-up"');
+});
+
 test("renders the session list as an independent scroll region", () => {
   const html = renderPanel({
     ...SESSION_STATE,

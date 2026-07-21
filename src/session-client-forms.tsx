@@ -17,6 +17,7 @@ export function renderSessionPromptInput(options: {
       </label>
       <textarea
         className="mt-2 min-h-28 w-full resize-y rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm leading-6 text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none"
+        data-focus-key="session-prompt"
         disabled={options.disabled}
         id="session-prompt"
         name="prompt"
@@ -49,6 +50,7 @@ export function renderSessionFollowUp(options: {
     >
       <textarea
         className="min-h-20 w-full resize-y rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none"
+        data-focus-key="session-follow-up"
         disabled={options.sending}
         name="prompt"
         placeholder="Give this session another instruction…"
