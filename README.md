@@ -155,14 +155,16 @@ the server-side `brave_search` skill for current web results, with batched exact
 edits and bounded file and command output. Brave Search tries the signed-in
 user's saved keys in order when a key is rejected, rate limited, or temporarily
 unavailable. Transcripts show system instructions, complete tool definitions,
-reasoning summaries, tool calls, and tool results. Context use includes a
-percentage, turns yellow at 80%, and red at 90%. Automatic compaction is enabled
-per session by default and replaces completed history with a model-generated
-handoff summary before the next request after usage reaches 95%; it can be
-turned off, and a ready session can be compacted manually. Session transcripts
-and status survive page reloads; a ready, stopped, or failed session accepts
-follow-up instructions. **Stop session** aborts the model request and cancels an
-active runner command.
+reasoning summaries, tool calls, and tool results. Transcript prose renders as
+Markdown, fenced code is syntax-colored, and structured tool arguments/results
+are pretty-printed with colorized JSON. Context use includes a percentage, turns
+yellow at 80%, and red at 90%. Automatic compaction is enabled per session by
+default and replaces completed history with a model-generated handoff summary
+before the next request after usage reaches 95%; it can be turned off, and a
+ready session can be compacted manually. Session transcripts and status survive
+page reloads; a ready, stopped, or failed session accepts follow-up
+instructions. **Stop session** aborts the model request and cancels an active
+runner command.
 
 The runner executes tools with the runner process's local account permissions.
 File tools reject paths outside the selected workspace, while shell commands are

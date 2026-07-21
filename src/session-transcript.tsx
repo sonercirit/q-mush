@@ -2,7 +2,9 @@ import type { AgentFile } from "./agent-file.ts";
 import { createAgentSystemPrompt } from "./agent-prompt.ts";
 import { AGENT_TOOLS } from "./agent-tools.ts";
 import { createElement, type JsxNode } from "./jsx.ts";
+import { renderMarkdown } from "./session-markdown.tsx";
 import type { AgentSessionMessage } from "./session-model.ts";
+import { renderStructuredCode } from "./session-syntax.tsx";
 
 const SERIALIZED_AGENT_TOOLS = JSON.stringify(AGENT_TOOLS, null, 2);
 
@@ -19,9 +21,7 @@ function renderTranscriptNote(options: {
       >
         {options.label}
       </p>
-      <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-200">
-        {options.content}
-      </p>
+      <div className="mt-2">{renderMarkdown(options.content)}</div>
     </li>
   );
 }
@@ -32,9 +32,7 @@ function renderToolDefinitions(): JsxNode {
       <p className="text-xs font-semibold tracking-wide text-cyan-200 uppercase">
         Tool definitions
       </p>
-      <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap text-xs leading-5 text-slate-300">
-        {SERIALIZED_AGENT_TOOLS}
-      </pre>
+      <div className="mt-3">{renderStructuredCode(SERIALIZED_AGENT_TOOLS)}</div>
     </li>
   );
 }
@@ -76,9 +74,7 @@ function renderMessage(message: AgentSessionMessage): JsxNode {
           kind: "Tool result",
           name: message.toolName ?? "Unknown tool",
         })}
-        <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap text-xs leading-5 text-slate-300">
-          {message.content}
-        </pre>
+        <div className="mt-3">{renderStructuredCode(message.content)}</div>
       </li>
     );
   }
@@ -93,9 +89,7 @@ function renderMessage(message: AgentSessionMessage): JsxNode {
         {user ? "You" : system ? "Session" : "Agent"}
       </p>
       {message.content.length > 0 ? (
-        <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-200">
-          {message.content}
-        </p>
+        <div className="mt-2">{renderMarkdown(message.content)}</div>
       ) : null}
       {message.toolCalls.length > 0 ? (
         <ul className="mt-3 space-y-2">
@@ -106,9 +100,7 @@ function renderMessage(message: AgentSessionMessage): JsxNode {
                 kind: "Tool call",
                 name: call.name,
               })}
-              <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap text-xs leading-5 text-slate-300">
-                {call.arguments}
-              </pre>
+              <div className="mt-2">{renderStructuredCode(call.arguments)}</div>
             </li>
           ))}
         </ul>

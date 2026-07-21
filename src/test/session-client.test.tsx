@@ -8,6 +8,10 @@ import {
   type SessionViewState,
 } from "../session-client.tsx";
 import { runnerSummary } from "./runner-fixtures.ts";
+import {
+  FORMATTED_SESSION_MESSAGES,
+  sessionStateWithMessages,
+} from "./session-client-fixtures.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
 const SESSION_STATE: SessionViewState = {
@@ -79,6 +83,12 @@ const EMPTY_PROVIDER_STATE: ProviderViewState = {
   savePending: false,
 };
 
+function renderPanel(state: SessionViewState): string {
+  return renderToHtml(
+    renderSessionPanel(state, RUNNER_STATE, OPENAI_STATE, EMPTY_PROVIDER_STATE),
+  );
+}
+
 test("renders the system prompt and model thinking in a transcript", () => {
   const state: SessionViewState = {
     ...SESSION_STATE,
@@ -139,9 +149,7 @@ test("renders the system prompt and model thinking in a transcript", () => {
     },
     selectedId: "session-1",
   };
-  const html = renderToHtml(
-    renderSessionPanel(state, RUNNER_STATE, OPENAI_STATE, EMPTY_PROVIDER_STATE),
-  );
+  const html = renderPanel(state);
 
   expect(html).toContain("System prompt");
   expect(html).toContain('data-scroll-key="session-transcript:session-1"');
@@ -151,6 +159,8 @@ test("renders the system prompt and model thinking in a transcript", () => {
     "You are Q Mush, a careful coding agent operating in a user-selected workspace.",
   );
   expect(html).toContain("Always run Bun tests.");
+  expect(html).toContain('&lt;project_instructions path="AGENTS.md"&gt;');
+  expect(html).not.toContain('<em class="text-slate-100 italic">instructions');
   expect(html).toContain("Agent file: AGENTS.md");
   expect(html).toContain("Context: Not reported / 200K");
   expect(html).toContain("Auto compact");
@@ -158,20 +168,56 @@ test("renders the system prompt and model thinking in a transcript", () => {
   expect(html).toContain('data-auto-compact="false"');
   expect(html).toContain('data-action="compact-session"');
   expect(html).toContain("Tool definitions");
-  expect(html).toContain('"name": "read"');
-  expect(html).toContain('"name": "bash"');
-  expect(html).toContain('"name": "edit"');
-  expect(html).toContain('"name": "write"');
-  expect(html).toContain('"name": "parallel"');
+  for (const toolName of ["read", "bash", "edit", "write", "parallel"]) {
+    expect(html).toContain(
+      `<span class="text-cyan-300">"name"</span>: <span class="text-emerald-300">"${toolName}"</span>`,
+    );
+  }
   expect(html).toContain("Thinking");
   expect(html).toContain("I should inspect the existing files first.");
   expect(html).toContain("Tool call · read");
   expect(html).toContain("Tool result · read");
   expect(html).toContain("call-1");
-  expect(html).toContain('{"path":"README.md","offset":1}');
+  expect(html).toContain(
+    '{\n  <span class="text-cyan-300">"path"</span>: <span class="text-emerald-300">"README.md"</span>,\n  <span class="text-cyan-300">"offset"</span>: <span class="text-amber-300">1</span>\n}',
+  );
+  expect(html).not.toContain(
+    "{&quot;path&quot;:&quot;README.md&quot;,&quot;offset&quot;:1}",
+  );
   expect(html).toContain("# Q Mush");
   expect(html).toContain('data-action="continue-session"');
   expect(html).toContain(">Continue</button>");
+});
+
+test("pretty prints markdown and colorizes structured transcript content", () => {
+  const state = sessionStateWithMessages(
+    SESSION_STATE,
+    FORMATTED_SESSION_MESSAGES,
+  );
+  const html = renderPanel(state);
+
+  expect(html).toContain(
+    '<h2 class="text-base font-semibold text-white">Finished</h2>',
+  );
+  expect(html).toContain(
+    '<strong class="font-semibold text-white">two files</strong>',
+  );
+  expect(html).toContain(
+    '<code class="rounded bg-slate-950/80 px-1.5 py-0.5 font-mono text-[0.8em] text-cyan-200">bun test</code>',
+  );
+  expect(html).toContain('data-language="ts"');
+  expect(html).toContain('<span class="text-fuchsia-300">const</span>');
+  expect(html).toContain('<span class="text-cyan-300">ready</span>');
+  expect(html).toContain('<span class="text-violet-300">true</span>');
+  expect(html).toContain('<ul class="list-disc space-y-1 pl-5">');
+  expect(html).toContain(
+    '<span class="text-cyan-300">"recipient_name"</span>: <span class="text-emerald-300">"bash"</span>',
+  );
+  expect(html).toContain(
+    '<span class="text-cyan-300">"error"</span>: <span class="text-violet-300">null</span>',
+  );
+  expect(html).toContain("&lt;script&gt;alert('unsafe')&lt;/script&gt;");
+  expect(html).not.toContain("<script>alert");
 });
 
 test("shows context percentage and warning colors", () => {
