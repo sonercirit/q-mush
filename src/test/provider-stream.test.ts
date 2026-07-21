@@ -78,6 +78,57 @@ test("retains non-streaming chat-completion reasoning details", () => {
   });
 });
 
+test("separates streamed Responses reasoning summaries with newlines", () => {
+  const deltas: string[] = [];
+  const recordThinking = (delta: { readonly thinking: string }): void => {
+    deltas.push(delta.thinking);
+  };
+  const accumulator = createProviderStreamAccumulator(
+    "responses",
+    recordThinking,
+  );
+
+  for (const event of [
+    {
+      delta: "Summarizing final test results and output features",
+      output_index: 0,
+      summary_index: 0,
+      type: "response.reasoning_summary_text.delta",
+    },
+    {
+      delta: "Reviewing shell output parsing logic",
+      output_index: 0,
+      summary_index: 1,
+      type: "response.reasoning_summary_text.delta",
+    },
+    {
+      delta: "Confirming unique call ID handling",
+      output_index: 1,
+      summary_index: 0,
+      type: "response.reasoning_summary_text.delta",
+    },
+  ]) {
+    accumulator.push(event);
+  }
+  accumulator.push({
+    response: { output: [] },
+    type: "response.completed",
+  });
+
+  expect(deltas).toEqual([
+    "Summarizing final test results and output features",
+    "\n\nReviewing shell output parsing logic",
+    "\n\nConfirming unique call ID handling",
+  ]);
+  expect(accumulator.finish().thinking).toBe(
+    [
+      "Summarizing final test results and output features",
+      "Reviewing shell output parsing logic",
+      "Confirming unique call ID handling",
+    ].join("\n\n"),
+  );
+});
+
 test("surfaces provider stream error details", () => {
   const accumulator = createProviderStreamAccumulator("responses");
 

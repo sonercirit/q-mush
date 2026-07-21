@@ -282,6 +282,8 @@ class ResponsesAccumulator
   extends BufferedAccumulator
   implements ProviderStreamAccumulator
 {
+  #reasoningSummary:
+    { readonly outputIndex: number; readonly summaryIndex: number } | undefined;
   readonly #toolCalls = new Map<number, AgentToolCall>();
   #completed: AgentModelTurn | undefined;
 
@@ -351,7 +353,28 @@ class ResponsesAccumulator
     }
 
     if (type === "response.reasoning_summary_text.delta") {
-      const thinking = stringDelta(value, "reasoning");
+      const outputIndexValue = outputIndex(value);
+      const summaryIndexValue = value["summary_index"];
+      if (
+        typeof summaryIndexValue !== "number" ||
+        !Number.isSafeInteger(summaryIndexValue) ||
+        summaryIndexValue < 0
+      ) {
+        throw new Error(
+          "The Responses model returned an invalid summary index",
+        );
+      }
+      const separator =
+        this.#reasoningSummary !== undefined &&
+        (this.#reasoningSummary.outputIndex !== outputIndexValue ||
+          this.#reasoningSummary.summaryIndex !== summaryIndexValue)
+          ? "\n\n"
+          : "";
+      const thinking = separator + stringDelta(value, "reasoning");
+      this.#reasoningSummary = {
+        outputIndex: outputIndexValue,
+        summaryIndex: summaryIndexValue,
+      };
       this.buffers.thinking.push(thinking);
       emitProviderDelta(this.buffers.onDelta, "", thinking);
       return;

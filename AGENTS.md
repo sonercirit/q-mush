@@ -156,12 +156,11 @@ task-specific progress, guesses, or sensitive values.
   modalities. Controls use the listbox in `src/custom-select.tsx`; model options
   show discovered context limits. Model and effort selections are persisted with
   the session. `src/agent-prompt.ts` is the shared source for building the model
-  system prompt and its transcript display. Provider reasoning summaries persist
-  as `thinking` transcript messages but are excluded from replay. Session and
-  transcript rows live in `agent_sessions` and `agent_messages`; an interrupted
-  server process marks active sessions failed so they can be resumed explicitly.
-  Rebuilt conversations synthesize visible error results for interrupted tool
-  calls only on resume, keeping transcript and provider history complete.
+  system prompt and its transcript display. Reasoning summaries persist as
+  `thinking` messages but are excluded from replay. Session and transcript rows
+  live in `agent_sessions` and `agent_messages`; interrupted processes mark
+  active sessions failed so they can be resumed. Rebuilt conversations add error
+  results for interrupted tool calls only on resume.
 
 - `src/openai.ts` and `src/openrouter.ts` implement provider connections.
   Multiple OAuth or manual credentials live in `provider_credentials`, encrypted
@@ -291,9 +290,11 @@ task-specific progress, guesses, or sensitive values.
   has no reasoning capabilities, while OpenRouter and Codex return
   model-specific efforts. Session drafts use each model's maximum discovered
   effort. Optional reasoning uses `reasoning_effort` for OpenAI chat completions
-  and `reasoning.effort` for OpenRouter and Codex Responses. OpenAI Responses
-  WebSockets omit HTTP stream fields and fall back to HTTP only before any
-  provider event, avoiding replay after partial output. Agent model calls retry
+  and `reasoning.effort` for OpenRouter and Codex Responses. Streamed reasoning
+  deltas are grouped by `output_index` and `summary_index`; separate summary
+  parts with paragraphs because completed responses may omit their output.
+  Responses WebSockets omit HTTP stream fields and fall back to HTTP only before
+  any provider event, avoiding replay after partial output. Model calls retry
   network failures and retryable HTTP responses three times with abortable
   backoff, honoring `Retry-After`.
 - Agent launches and brokered runner commands have no application-owned turn,

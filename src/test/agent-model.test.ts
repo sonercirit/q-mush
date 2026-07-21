@@ -359,8 +359,8 @@ describe("chat completions agent model", () => {
         Promise.resolve(
           new Response(
             [
-              'event: response.reasoning_summary_text.delta\ndata: {"type":"response.reasoning_summary_text.delta","delta":"I considered"}',
-              'event: response.reasoning_summary_text.delta\ndata: {"type":"response.reasoning_summary_text.delta","delta":" the request."}',
+              'event: response.reasoning_summary_text.delta\ndata: {"type":"response.reasoning_summary_text.delta","output_index":0,"summary_index":0,"delta":"I considered"}',
+              'event: response.reasoning_summary_text.delta\ndata: {"type":"response.reasoning_summary_text.delta","output_index":0,"summary_index":0,"delta":" the request."}',
               'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"Hello"}',
               'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":" there."}',
               'event: response.output_item.added\ndata: {"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"function-1","call_id":"call-1","name":"read","arguments":""}}',
