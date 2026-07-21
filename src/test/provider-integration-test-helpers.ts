@@ -181,6 +181,24 @@ export function createProviderAccountConnector(
     });
 }
 
+export function setProviderDefaults(
+  integration: ProviderIntegration,
+  credentialsPath: string,
+  credentialIds: readonly string[],
+): readonly number[] {
+  return credentialIds.map(
+    (credentialId) =>
+      integration.setDefault(
+        createAuthenticatedRequest(
+          `${credentialsPath}/${credentialId}/default`,
+          undefined,
+          "POST",
+        ),
+        credentialId,
+      ).status,
+  );
+}
+
 export async function addProviderApiKeys(
   integration: ProviderIntegration,
   credentialsPath: string,
@@ -276,4 +294,21 @@ export function credentialSummaries<T>(credentials: readonly T[]): {
   readonly credentials: readonly T[];
 } {
   return { credentials };
+}
+
+export function expectProviderCredentialSummaries(
+  actual: unknown,
+  credentials: readonly unknown[],
+): void {
+  expect(actual).toEqual(credentialSummaries(credentials));
+}
+
+export async function readProviderCredentialSummaries(
+  integration: ProviderIntegration,
+  credentialsPath: string,
+): Promise<unknown> {
+  const response = await integration.credentials(
+    createAuthenticatedRequest(credentialsPath),
+  );
+  return response.json();
 }

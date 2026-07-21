@@ -1,8 +1,6 @@
 import { expect, test } from "bun:test";
 import { initialDirectoryPickerState } from "../directory-picker-controller.ts";
 import { renderToHtml } from "../jsx.ts";
-import type { ProviderViewState } from "../provider-client.tsx";
-import type { RunnerViewState } from "../runner-client.tsx";
 import {
   renderSessionPanel,
   type SessionViewState,
@@ -11,6 +9,7 @@ import {
   TEST_AGENT_IMAGE,
   testUserImageMessage,
 } from "./agent-image-fixtures.ts";
+import { providerViewState, runnerViewState } from "./client-state-fixtures.ts";
 import { runnerSummary } from "./runner-fixtures.ts";
 import {
   FORMATTED_SESSION_MESSAGES,
@@ -69,35 +68,59 @@ const SESSION_STATE: SessionViewState = {
   creating: false,
 };
 
-const RUNNER_STATE: RunnerViewState = {
-  copied: false,
-  creating: false,
-  error: undefined,
-  removingId: undefined,
-  runners: [runnerSummary(1)],
-  setup: undefined,
-};
+const RUNNER_STATE = runnerViewState([runnerSummary(1)]);
 
-const OPENAI_STATE: ProviderViewState = {
-  credentials: [
-    {
-      accountId: "account-1",
-      id: "credential-1",
-      label: "OpenAI account",
-      source: "oauth",
+const SECOND_RUNNER_STATE = runnerViewState([
+  runnerSummary(1),
+  {
+    ...runnerSummary(2),
+    id: "runner-2",
+    isDefault: true,
+    name: "laptop",
+  },
+]);
+
+const OPENAI_STATE = providerViewState([
+  {
+    accountId: "account-1",
+    id: "credential-1",
+    isDefault: false,
+    label: "OpenAI account",
+    source: "oauth",
+  },
+]);
+
+const DEFAULT_OPENAI_STATE = providerViewState([
+  ...(OPENAI_STATE.credentials ?? []),
+  {
+    accountId: "account-2",
+    id: "credential-2",
+    isDefault: true,
+    label: "Default OpenAI account",
+    source: "api_key",
+  },
+]);
+
+const EMPTY_PROVIDER_STATE = providerViewState([]);
+
+function stateWithoutSelections(): SessionViewState {
+  return {
+    ...SESSION_STATE,
+    draft: {
+      ...SESSION_STATE.draft,
+      credential: "",
+      model: "",
+      reasoningEffort: "",
+      runnerId: "",
     },
-  ],
-  error: undefined,
-  removingId: undefined,
-  savePending: false,
-};
-
-const EMPTY_PROVIDER_STATE: ProviderViewState = {
-  credentials: [],
-  error: undefined,
-  removingId: undefined,
-  savePending: false,
-};
+    modelDiscovery: {
+      catalog: undefined,
+      credential: undefined,
+      error: undefined,
+      loading: false,
+    },
+  };
+}
 
 function renderPanel(state: SessionViewState): string {
   return renderToHtml(
@@ -366,6 +389,98 @@ test("renders a directory browser beside the working-directory input", () => {
   expect(openHtml).toContain('data-action="choose-directory"');
   expect(openHtml).toContain("Choose this directory");
   expect(openHtml).toContain('data-action="close-directory-picker"');
+});
+
+test("defaults runner and credential choices to the first entries", () => {
+  const html = renderPanel(stateWithoutSelections());
+
+  expect(html).toMatch(
+    /data-custom-select="runnerId"[\s\S]*?<input name="runnerId" required type="hidden" value="runner-1">/u,
+  );
+  expect(html).toMatch(
+    /data-custom-select="credential"[\s\S]*?<input name="credential" required type="hidden" value="openai:credential-1">/u,
+  );
+  expect(html).not.toContain("Choose a runner");
+  expect(html).not.toContain("Choose a model credential");
+});
+
+test("defers the credential fallback until both providers settle", () => {
+  const loadingProvider = providerViewState(undefined);
+  const unsettledHtml = renderToHtml(
+    renderSessionPanel(
+      stateWithoutSelections(),
+      RUNNER_STATE,
+      OPENAI_STATE,
+      loadingProvider,
+    ),
+  );
+
+  expect(unsettledHtml).toMatch(
+    /data-custom-select="credential"[\s\S]*?<input name="credential" required type="hidden" value="">/u,
+  );
+  expect(unsettledHtml).toContain('data-credentials-settled="false"');
+
+  const openRouterDefault = providerViewState([
+    {
+      accountId: "router-account",
+      id: "router-default",
+      isDefault: true,
+      label: "Default OpenRouter account",
+      source: "oauth",
+    },
+  ]);
+  const settledHtml = renderToHtml(
+    renderSessionPanel(
+      stateWithoutSelections(),
+      RUNNER_STATE,
+      OPENAI_STATE,
+      openRouterDefault,
+    ),
+  );
+
+  expect(settledHtml).toMatch(
+    /data-custom-select="credential"[\s\S]*?<input name="credential" required type="hidden" value="openrouter:router-default">/u,
+  );
+  expect(settledHtml).toContain('data-credentials-settled="true"');
+});
+
+test("selects marked runner and credential defaults", () => {
+  const html = renderToHtml(
+    renderSessionPanel(
+      stateWithoutSelections(),
+      SECOND_RUNNER_STATE,
+      DEFAULT_OPENAI_STATE,
+      EMPTY_PROVIDER_STATE,
+    ),
+  );
+
+  expect(html).toMatch(
+    /data-custom-select="runnerId"[\s\S]*?<input name="runnerId" required type="hidden" value="runner-2">/u,
+  );
+  expect(html).toMatch(
+    /data-custom-select="credential"[\s\S]*?<input name="credential" required type="hidden" value="openai:credential-2">/u,
+  );
+});
+
+test("defaults the model control to the provider's first option", () => {
+  const catalog = SESSION_STATE.modelDiscovery.catalog;
+
+  if (catalog === undefined) {
+    throw new Error("The test model catalog is missing");
+  }
+
+  const html = renderPanel({
+    ...SESSION_STATE,
+    draft: { ...SESSION_STATE.draft, model: "", reasoningEffort: "" },
+    modelDiscovery: {
+      ...SESSION_STATE.modelDiscovery,
+      catalog: { ...catalog, defaultModel: "image-model" },
+    },
+  });
+
+  expect(html).toMatch(
+    /data-custom-select="model"[\s\S]*?<input name="model" required type="hidden" value="gpt-5-codex"/u,
+  );
 });
 
 test("shows input and output modalities in the model select list", () => {

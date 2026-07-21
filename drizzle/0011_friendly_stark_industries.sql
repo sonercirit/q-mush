@@ -1,0 +1,4 @@
+ALTER TABLE `provider_credentials` ADD `is_default` integer DEFAULT false NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX `provider_credentials_user_model_default_unique` ON `provider_credentials` (`user_id`) WHERE "provider_credentials"."provider" IN ('openai', 'openrouter') AND "provider_credentials"."is_default" AND NOT "provider_credentials"."is_deleted";--> statement-breakpoint
+ALTER TABLE `runners` ADD `is_default` integer DEFAULT false NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX `runners_user_default_unique` ON `runners` (`user_id`) WHERE NOT "runners"."is_deleted" AND "runners"."is_default";

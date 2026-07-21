@@ -1,5 +1,6 @@
 import { isRecord } from "./auth-model.ts";
 import { renderRemovalButton, renderRetryError } from "./client-controls.tsx";
+import { renderDefaultableActions } from "./defaultable-actions.tsx";
 import { createElement, type JsxNode } from "./jsx.ts";
 import {
   BRAVE_SEARCH_KEYS_PATH,
@@ -14,16 +15,32 @@ type BrowserProviderId = "brave-search" | "openai" | "openrouter";
 export interface ProviderCredential {
   readonly accountId: string | null;
   readonly id: string;
+  readonly isDefault: boolean;
   readonly label: string;
   readonly source: "api_key" | "oauth";
 }
 
-export interface ProviderViewState {
+interface ProviderViewStateBase {
   readonly credentials: readonly ProviderCredential[] | undefined;
   readonly error: string | undefined;
   readonly removingId: string | undefined;
   readonly savePending: boolean;
+  readonly settingDefaultId: string | undefined;
 }
+
+export function createProviderViewState(
+  credentials: readonly ProviderCredential[] | undefined,
+): ProviderViewStateBase {
+  return {
+    credentials,
+    error: undefined,
+    removingId: undefined,
+    savePending: false,
+    settingDefaultId: undefined,
+  };
+}
+
+export type ProviderViewState = ProviderViewStateBase;
 
 export interface ProviderPanelConfiguration {
   readonly accountIdUnavailable: string;
@@ -99,11 +116,13 @@ function readCredential(
   const accountId = value["accountId"];
   const id = value["id"];
   const label = value["label"];
+  const isDefault = value["isDefault"];
   const source = value["source"];
 
   if (
     (accountId !== null && typeof accountId !== "string") ||
     typeof id !== "string" ||
+    typeof isDefault !== "boolean" ||
     typeof label !== "string" ||
     (source !== "api_key" && source !== "oauth")
   ) {
@@ -112,7 +131,7 @@ function readCredential(
     );
   }
 
-  return { accountId, id, label, source };
+  return { accountId, id, isDefault, label, source };
 }
 
 export function readProviderCredentials(
@@ -130,12 +149,38 @@ export function readProviderCredentials(
   );
 }
 
+function renderCredentialActions(
+  configuration: ProviderPanelConfiguration,
+  credential: ProviderCredential,
+  removing: boolean,
+  settingDefault: boolean,
+): JsxNode {
+  return configuration.id === "brave-search"
+    ? renderRemovalButton({
+        action: "remove-provider-credential",
+        dataAttribute: "data-credential-id",
+        id: credential.id,
+        pending: removing,
+      })
+    : renderDefaultableActions({
+        defaultAction: "set-default-provider-credential",
+        id: credential.id,
+        idAttribute: "data-credential-id",
+        isDefault: credential.isDefault,
+        removeAction: "remove-provider-credential",
+        removing,
+        settingDefault,
+      });
+}
+
 function renderCredential(
   configuration: ProviderPanelConfiguration,
   credential: ProviderCredential,
   removingId: string | undefined,
+  settingDefaultId: string | undefined,
 ): JsxNode {
   const removing = removingId === credential.id;
+  const settingDefault = settingDefaultId === credential.id;
 
   return (
     <li className="flex flex-col gap-4 rounded-2xl border border-white/10 bg-slate-950/60 p-5 sm:flex-row sm:items-center sm:justify-between">
@@ -152,12 +197,12 @@ function renderCredential(
           {credential.accountId ?? configuration.accountIdUnavailable}
         </p>
       </div>
-      {renderRemovalButton({
-        action: "remove-provider-credential",
-        dataAttribute: "data-credential-id",
-        id: credential.id,
-        pending: removing,
-      })}
+      {renderCredentialActions(
+        configuration,
+        credential,
+        removing,
+        settingDefault,
+      )}
     </li>
   );
 }
@@ -185,7 +230,12 @@ function renderCredentialList(
   return (
     <ul className="mt-6 space-y-3">
       {state.credentials.map((credential) =>
-        renderCredential(configuration, credential, state.removingId),
+        renderCredential(
+          configuration,
+          credential,
+          state.removingId,
+          state.settingDefaultId,
+        ),
       )}
     </ul>
   );

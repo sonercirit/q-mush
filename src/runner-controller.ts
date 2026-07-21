@@ -1,25 +1,33 @@
 import { HttpResponseError, request, requestJson } from "./browser-http.ts";
 import { bindActionClicks } from "./client-actions.ts";
-import { RUNNERS_PATH } from "./routes.ts";
+import { RUNNERS_PATH, runnerDefaultPath } from "./routes.ts";
 import {
+  createRunnerViewState,
   readCreatedRunner,
   readRunners,
   type RunnerSetupInstructions,
   type RunnerViewState,
 } from "./runner-client.tsx";
+import {
+  defaultedRunners,
+  setupWithoutRunner,
+} from "./runner-controller-state.ts";
 import type { RunnerSummary } from "./runner-model.ts";
 
 type RunnerChangeListener = () => void;
 
+type RunnerMutation = "default" | "remove";
+
+interface RunnerMutationConfiguration {
+  readonly failure: string;
+  readonly input: RequestInfo;
+  readonly method: "DELETE" | "POST";
+  readonly pending: "removingId" | "settingDefaultId";
+  readonly success: (runnerId: string) => Partial<RunnerViewState>;
+}
+
 function initialRunnerState(): RunnerViewState {
-  return {
-    copied: false,
-    creating: false,
-    error: undefined,
-    removingId: undefined,
-    runners: undefined,
-    setup: undefined,
-  };
+  return createRunnerViewState(undefined);
 }
 
 function setupAfterRefresh(
@@ -41,6 +49,7 @@ function runnerPresentationMatches(
   return (
     left.architecture === right.architecture &&
     left.id === right.id &&
+    left.isDefault === right.isDefault &&
     left.name === right.name &&
     left.platform === right.platform &&
     left.status === right.status &&
@@ -74,7 +83,11 @@ export class RunnerController {
   }
 
   applyRealtime(runners: readonly RunnerSummary[]): void {
-    if (this.#state.creating || this.#state.removingId !== undefined) {
+    if (
+      this.#state.creating ||
+      this.#state.removingId !== undefined ||
+      this.#state.settingDefaultId !== undefined
+    ) {
       return;
     }
 
@@ -105,11 +118,15 @@ export class RunnerController {
         void this.#copyCommand();
       } else if (action === "retry-runners") {
         void this.load();
-      } else if (action === "remove-runner") {
+      } else if (
+        action === "set-default-runner" ||
+        action === "remove-runner"
+      ) {
         const runnerId = control.dataset["runnerId"];
-
         if (runnerId !== undefined) {
-          void this.#remove(runnerId);
+          void (action === "set-default-runner"
+            ? this.#setDefault(runnerId)
+            : this.#remove(runnerId));
         }
       }
     });
@@ -212,32 +229,63 @@ export class RunnerController {
     }
   }
 
-  async #remove(runnerId: string): Promise<void> {
-    const revision = this.#begin({ error: undefined, removingId: runnerId });
+  #mutationConfiguration(
+    mutation: RunnerMutation,
+    runnerId: string,
+  ): RunnerMutationConfiguration {
+    return mutation === "default"
+      ? {
+          failure: "We could not make that runner the default.",
+          input: runnerDefaultPath(runnerId),
+          method: "POST",
+          pending: "settingDefaultId",
+          success: (id) => ({
+            runners: defaultedRunners(this.#state.runners, id),
+            settingDefaultId: undefined,
+          }),
+        }
+      : {
+          failure: "We could not remove that runner.",
+          input: `${RUNNERS_PATH}/${encodeURIComponent(runnerId)}`,
+          method: "DELETE",
+          pending: "removingId",
+          success: (id) => ({
+            removingId: undefined,
+            runners: this.#state.runners?.filter((runner) => runner.id !== id),
+            setup: setupWithoutRunner(this.#state.setup, id),
+          }),
+        };
+  }
+
+  async #mutate(mutation: RunnerMutation, runnerId: string): Promise<void> {
+    const configuration = this.#mutationConfiguration(mutation, runnerId);
+    const revision = this.#begin({
+      error: undefined,
+      [configuration.pending]: runnerId,
+    });
 
     try {
-      await request(`${RUNNERS_PATH}/${encodeURIComponent(runnerId)}`, {
-        method: "DELETE",
-      });
+      await request(configuration.input, { method: configuration.method });
 
       if (this.#isCurrent(revision)) {
-        this.#patch({
-          removingId: undefined,
-          runners: this.#state.runners?.filter(({ id }) => id !== runnerId),
-          setup:
-            this.#state.setup?.runnerId === runnerId
-              ? undefined
-              : this.#state.setup,
-        });
+        this.#patch(configuration.success(runnerId));
       }
     } catch {
       if (this.#isCurrent(revision)) {
         this.#patch({
-          error: "We could not remove that runner.",
-          removingId: undefined,
+          error: configuration.failure,
+          [configuration.pending]: undefined,
         });
       }
     }
+  }
+
+  #setDefault(runnerId: string): Promise<void> {
+    return this.#mutate("default", runnerId);
+  }
+
+  #remove(runnerId: string): Promise<void> {
+    return this.#mutate("remove", runnerId);
   }
 
   #patch(patch: Partial<RunnerViewState>): void {

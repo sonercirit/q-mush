@@ -176,6 +176,35 @@ interface ProviderRoutes {
   readonly oauthCallback: string;
 }
 
+function pathSegments(pathname: string, prefix: string): readonly string[] {
+  return pathname.startsWith(prefix)
+    ? pathname.slice(prefix.length).split("/")
+    : [];
+}
+
+interface ItemRouteActions {
+  readonly default?: (id: string) => Promise<Response> | Response;
+  readonly item: (id: string) => Promise<Response> | Response;
+}
+
+function routeItemSegments(
+  segments: readonly string[],
+  actions: ItemRouteActions,
+): Promise<Response> | Response | undefined {
+  const id = segments[0];
+  if (id === undefined || id.length === 0) {
+    return undefined;
+  }
+
+  if (segments.length === 1) {
+    return actions.item(id);
+  }
+
+  return segments.length === 2 && segments[1] === "default"
+    ? actions.default?.(id)
+    : undefined;
+}
+
 function routeProviderRequest(
   pathname: string,
   request: Request,
@@ -194,17 +223,10 @@ function routeProviderRequest(
     return integration.credentials(request);
   }
 
-  const credentialPathPrefix = `${routes.credentials}/`;
-
-  if (pathname.startsWith(credentialPathPrefix)) {
-    const credentialId = pathname.slice(credentialPathPrefix.length);
-
-    if (credentialId.length > 0 && !credentialId.includes("/")) {
-      return integration.remove(request, credentialId);
-    }
-  }
-
-  return undefined;
+  return routeItemSegments(pathSegments(pathname, `${routes.credentials}/`), {
+    default: (credentialId) => integration.setDefault(request, credentialId),
+    item: (credentialId) => integration.remove(request, credentialId),
+  });
 }
 
 export function createRequestHandler(
@@ -248,24 +270,23 @@ export function createRequestHandler(
         return runners.collection(request);
       }
 
-      const runnerPathPrefix = `${RUNNERS_PATH}/`;
+      const runnerSegments = pathSegments(pathname, `${RUNNERS_PATH}/`);
+      const runnerResponse = routeItemSegments(runnerSegments, {
+        default: (runnerId) => runners.setDefault(request, runnerId),
+        item: (runnerId) => runners.remove(request, runnerId),
+      });
 
-      if (pathname.startsWith(runnerPathPrefix)) {
-        const segments = pathname.slice(runnerPathPrefix.length).split("/");
-        const runnerId = segments[0];
+      if (runnerResponse !== undefined) {
+        return runnerResponse;
+      }
 
-        if (runnerId !== undefined && runnerId.length > 0) {
-          if (segments.length === 1) {
-            return runners.remove(request, runnerId);
-          }
-
-          if (
-            segments.length === 2 &&
-            segments[1] === RUNNER_DIRECTORIES_SEGMENT
-          ) {
-            return sessions.directories(request, runnerId);
-          }
-        }
+      const runnerId = runnerSegments[0];
+      if (
+        runnerId !== undefined &&
+        runnerSegments.length === 2 &&
+        runnerSegments[1] === RUNNER_DIRECTORIES_SEGMENT
+      ) {
+        return sessions.directories(request, runnerId);
       }
 
       if (pathname === SESSIONS_PATH) {

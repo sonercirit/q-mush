@@ -175,6 +175,7 @@ test("OpenAI migration preserves existing OpenRouter credentials", async () => {
       credentialFingerprint: "openrouter-key-fingerprint",
       encryptedCredential: "encrypted-openrouter-key",
       id: credentialId,
+      isDefault: false,
       isDeleted: false,
       label: "Migrated key",
       provider: "openrouter",

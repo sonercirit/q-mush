@@ -34,6 +34,7 @@ describe("provider credential agent access", () => {
       accountId: "provider-account",
       id: CREDENTIAL_ID,
       label: "Work key",
+      isDefault: false,
       secret: "sk-or-secret",
       source: "api_key",
     });

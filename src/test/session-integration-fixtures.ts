@@ -58,6 +58,7 @@ export function connectedSessionSetup(
   const credential: ProviderCredentialAccess = {
     accountId: "provider-account",
     id: CREDENTIAL_ID,
+    isDefault: false,
     label: "Agent key",
     secret: "provider-secret",
     source: credentialSource,

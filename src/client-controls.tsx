@@ -3,22 +3,57 @@ import { createElement, type JsxNode } from "./jsx.ts";
 const REMOVE_BUTTON_CLASSES =
   "shrink-0 rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-rose-300/30 hover:text-rose-200 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300";
 
-export function renderRemovalButton(options: {
+interface ItemActionOptions {
   readonly action: string;
   readonly dataAttribute: string;
   readonly id: string;
   readonly pending: boolean;
-}): JsxNode {
+}
+
+function renderItemAction(
+  options: ItemActionOptions,
+  classes: string,
+  idleLabel: string,
+  pendingLabel: string,
+): JsxNode {
   return createElement(
     "button",
     {
-      className: REMOVE_BUTTON_CLASSES,
+      className: classes,
       "data-action": options.action,
       [options.dataAttribute]: options.id,
       disabled: options.pending,
       type: "button",
     },
-    options.pending ? "Removing…" : "Remove",
+    options.pending ? pendingLabel : idleLabel,
+  );
+}
+
+export function renderDefaultControl(
+  options: ItemActionOptions & { readonly isDefault: boolean },
+): JsxNode {
+  if (options.isDefault) {
+    return (
+      <span className="rounded-full border border-emerald-300/20 bg-emerald-300/10 px-3 py-2 text-xs font-semibold text-emerald-200">
+        Default
+      </span>
+    );
+  }
+
+  return renderItemAction(
+    options,
+    "rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-emerald-300/30 hover:text-emerald-200 disabled:cursor-wait disabled:opacity-60",
+    "Make default",
+    "Setting…",
+  );
+}
+
+export function renderRemovalButton(options: ItemActionOptions): JsxNode {
+  return renderItemAction(
+    options,
+    REMOVE_BUTTON_CLASSES,
+    "Remove",
+    "Removing…",
   );
 }
 

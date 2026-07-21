@@ -1,24 +1,25 @@
 import { HttpResponseError, request, requestJson } from "./browser-http.ts";
 import {
+  createProviderViewState,
   readProviderCredentials,
   type ProviderPanelConfiguration,
   type ProviderViewState,
 } from "./provider-client.tsx";
+import { providerCredentialDefaultPath } from "./routes.ts";
 
 type ChangeListener = () => void;
 type ErrorMessage = (status: number) => string;
 type StatePatch = Partial<ProviderViewState>;
 
+function initialProviderState(): ProviderViewState {
+  return createProviderViewState(undefined);
+}
+
 export class ProviderController {
   readonly #configuration: ProviderPanelConfiguration;
   readonly #onChange: ChangeListener;
   #revision = 0;
-  #state: ProviderViewState = {
-    credentials: undefined,
-    error: undefined,
-    removingId: undefined,
-    savePending: false,
-  };
+  #state: ProviderViewState = initialProviderState();
 
   constructor(
     configuration: ProviderPanelConfiguration,
@@ -55,16 +56,20 @@ export class ProviderController {
       }
     });
 
-    for (const button of panel.querySelectorAll<HTMLButtonElement>(
-      '[data-action="remove-provider-credential"]',
-    )) {
-      button.addEventListener("click", () => {
-        const credentialId = button.dataset["credentialId"];
-
-        if (credentialId !== undefined) {
-          void this.#remove(credentialId);
-        }
-      });
+    for (const [action, mutation] of [
+      ["set-default-provider-credential", this.#setDefault.bind(this)],
+      ["remove-provider-credential", this.#remove.bind(this)],
+    ] as const) {
+      for (const button of panel.querySelectorAll<HTMLButtonElement>(
+        `[data-action="${action}"]`,
+      )) {
+        button.addEventListener("click", () => {
+          const credentialId = button.dataset["credentialId"];
+          if (credentialId !== undefined) {
+            void mutation(credentialId);
+          }
+        });
+      }
     }
 
     panel
@@ -101,12 +106,7 @@ export class ProviderController {
 
   reset(): void {
     this.#revision += 1;
-    this.#replace({
-      credentials: undefined,
-      error: undefined,
-      removingId: undefined,
-      savePending: false,
-    });
+    this.#replace(initialProviderState());
   }
 
   async #add(apiKey: string, label: string | undefined): Promise<void> {
@@ -176,6 +176,20 @@ export class ProviderController {
       { removingId: credentialId },
       { removingId: undefined },
       () => `We could not remove that ${this.#configuration.name} credential.`,
+    );
+  }
+
+  #setDefault(credentialId: string): Promise<void> {
+    return this.#mutate(
+      providerCredentialDefaultPath(
+        this.#configuration.credentialsPath,
+        credentialId,
+      ),
+      { method: "POST" },
+      { settingDefaultId: credentialId },
+      { settingDefaultId: undefined },
+      () =>
+        `We could not make that ${this.#configuration.name} credential the default.`,
     );
   }
 

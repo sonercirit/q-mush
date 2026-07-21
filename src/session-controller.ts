@@ -1,8 +1,5 @@
 import { requestJson } from "./browser-http.ts";
-import {
-  bindActionClicks,
-  submitFormOnControlEnter,
-} from "./client-actions.ts";
+import { bindActionClicks } from "./client-actions.ts";
 import { customSelectValues } from "./custom-select-controller.ts";
 import { DirectoryPickerController } from "./directory-picker-controller.ts";
 import { RevisionState } from "./revision-state.ts";
@@ -15,15 +12,14 @@ import {
   sessionDataMatches,
   SessionRealtimeState,
 } from "./session-controller-state.ts";
+import { defaultedSessionDraft } from "./session-defaults.ts";
 import {
   formString,
   readSessionDraft,
   selectedDraftOption,
 } from "./session-form.ts";
-import {
-  appendAgentImageFiles,
-  readPastedAgentImageFiles,
-} from "./session-image-input.ts";
+import { bindSessionImageInputs } from "./session-image-bindings.ts";
+import { appendAgentImageFiles } from "./session-image-input.ts";
 import { SessionModelController } from "./session-model-controller.ts";
 import type {
   AgentSessionDetail,
@@ -38,7 +34,10 @@ import {
   stopSessionMutation,
   type SessionMutation,
 } from "./session-mutations.ts";
-import { initialSessionViewState } from "./session-state.ts";
+import {
+  initialSessionViewState,
+  mostRecentSessionDirectory,
+} from "./session-state.ts";
 
 type ChangeListener = () => void;
 
@@ -121,9 +120,7 @@ export class SessionController {
       (form, inputName) => {
         this.#rememberDraft(form, inputName);
       },
-      () => {
-        void this.#create();
-      },
+      () => void this.#create(),
     );
     bindPanelForm(
       panel,
@@ -131,43 +128,11 @@ export class SessionController {
       (form) => {
         this.#rememberFollowUp(form);
       },
-      () => {
-        void this.#send();
-      },
+      () => void this.#send(),
     );
-    for (const input of panel.querySelectorAll<HTMLInputElement>(
-      'input[type="file"][data-action]',
-    )) {
-      input.addEventListener("change", () => {
-        const files = input.files === null ? [] : [...input.files];
-        input.value = "";
-        if (files.length > 0) {
-          void this.#addImages(
-            files,
-            input.dataset["action"] === "add-follow-up-images",
-          );
-        }
-      });
-    }
-    for (const textarea of panel.querySelectorAll<HTMLTextAreaElement>(
-      'textarea[name="prompt"]',
-    )) {
-      textarea.addEventListener("paste", (event) => {
-        const files = readPastedAgentImageFiles(event);
-        if (files.length > 0) {
-          const follow =
-            textarea.form?.dataset["action"] === "send-session-message";
-          void this.#addImages(files, follow);
-        }
-      });
-      textarea.addEventListener("keydown", (event) => {
-        const form = textarea.form;
-
-        if (form !== null) {
-          submitFormOnControlEnter(event, form);
-        }
-      });
-    }
+    bindSessionImageInputs(panel, (files, follow) =>
+      this.#addImages(files, follow),
+    );
 
     bindActionClicks(panel, (control, action) => {
       if (action === "toggle-auto-compact") {
@@ -255,9 +220,8 @@ export class SessionController {
         const path = this.#directoryPicker.choose();
 
         if (path !== undefined) {
-          this.#view.patch({
-            draft: { ...this.#view.value.draft, workingDirectory: path },
-          });
+          const draft = { ...this.#view.value.draft, workingDirectory: path };
+          this.#view.patch({ draft });
         }
       }
     });
@@ -279,12 +243,17 @@ export class SessionController {
       directoryPicker.focus();
     }
 
-    const credential = panel.querySelector<HTMLInputElement>(
-      'input[type="hidden"][name="credential"]',
-    )?.value;
+    const defaultedDraft = defaultedSessionDraft(panel, this.#view.value.draft);
 
-    if (credential !== undefined && credential.length > 0) {
-      this.#models.ensure(credential);
+    if (defaultedDraft !== undefined) {
+      this.#view.replaceSilently({
+        ...this.#view.value,
+        draft: defaultedDraft,
+      });
+    }
+
+    if (defaultedDraft?.credential !== undefined) {
+      this.#models.ensure(defaultedDraft.credential);
     }
   }
 
@@ -328,7 +297,14 @@ export class SessionController {
         selectedId !== this.#view.value.selectedId ||
         !sessionDataMatches(this.#view.value.sessions, sessions)
       ) {
-        this.#view.patch({ selectedId, sessions });
+        this.#view.patch({
+          draft: {
+            ...this.#view.value.draft,
+            workingDirectory: mostRecentSessionDirectory(sessions),
+          },
+          selectedId,
+          sessions,
+        });
       }
 
       if (selectedId === undefined) {

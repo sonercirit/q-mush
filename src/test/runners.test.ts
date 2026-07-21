@@ -70,6 +70,14 @@ function createRunner(setup: Setup): Response {
   );
 }
 
+function defaultRunnerRequest(runnerId: string): Request {
+  return createAuthenticatedRequest(
+    `${RUNNERS_PATH}/${runnerId}/default`,
+    undefined,
+    "POST",
+  );
+}
+
 function metadata(machineId: string, name = "workstation") {
   return {
     architecture: "x64",
@@ -92,6 +100,7 @@ function connectedRunner(id: string, name: string): RunnerSummary {
   return {
     architecture: "x64",
     id,
+    isDefault: false,
     lastSeenAt: TEST_NOW,
     name,
     platform: "linux",
@@ -185,6 +194,31 @@ describe("runner setup", () => {
     await expectRunnerListAndClose(setup, [
       createPendingRunnerSummary(FIRST_RUNNER_ID),
       createPendingRunnerSummary(SECOND_RUNNER_ID),
+    ]);
+  });
+
+  test("sets one owned runner as the user's default", async () => {
+    const setup = createSetup();
+    for (let runner = 0; runner < 2; runner += 1) {
+      createRunner(setup);
+    }
+
+    const responses = [
+      setup.integration.setDefault(
+        defaultRunnerRequest(FIRST_RUNNER_ID),
+        FIRST_RUNNER_ID,
+      ),
+      setup.integration.setDefault(
+        defaultRunnerRequest(SECOND_RUNNER_ID),
+        SECOND_RUNNER_ID,
+      ),
+      setup.integration.setDefault(defaultRunnerRequest("missing"), "missing"),
+    ];
+
+    expect(responses.map(({ status }) => status)).toEqual([204, 204, 404]);
+    await expectRunnerListAndClose(setup, [
+      createPendingRunnerSummary(FIRST_RUNNER_ID),
+      { ...createPendingRunnerSummary(SECOND_RUNNER_ID), isDefault: true },
     ]);
   });
 

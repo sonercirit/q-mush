@@ -5,6 +5,13 @@ import type {
   SessionModelDiscoveryState,
   SessionViewState,
 } from "./session-client.tsx";
+import type { AgentSessionSummary } from "./session-model.ts";
+
+export function mostRecentSessionDirectory(
+  sessions: readonly Pick<AgentSessionSummary, "workingDirectory">[],
+): string {
+  return sessions[0]?.workingDirectory ?? ".";
+}
 
 function initialSessionDraft(): SessionDraft {
   return {

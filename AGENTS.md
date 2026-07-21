@@ -5,7 +5,7 @@ information.
 
 ## Project Snapshot
 
-- Private Bun project using strict TypeScript and ES modules.
+- Private strict-TypeScript ESM Bun project.
 - `src/index.ts` is the Bun HTTP server entry point.
 - The server-rendered homepage lives at `/`; the browser-rendered app lives at
   `/app`.
@@ -13,7 +13,7 @@ information.
 
 ## Working Agreements
 
-- Inspect the repository and `git status` before changing files.
+- Inspect the repository and `git status` before edits.
 - Preserve established patterns once they exist; do not introduce a new tool or
   dependency without a concrete need.
 - Practice test-driven development (TDD) for behavioral changes: write or update
@@ -27,7 +27,7 @@ information.
   default, with remote services enhancing rather than gating functionality.
 - Run the narrowest relevant checks after each change, then broader checks when
   practical.
-- Keep changes focused and avoid modifying unrelated files.
+- Keep changes focused; do not modify unrelated files.
 - Never commit secrets, credentials, generated artifacts, or local environment
   files.
 
@@ -72,16 +72,16 @@ task-specific progress, guesses, or sensitive values.
 - `src/server.ts` serves the browser JavaScript and Tailwind CSS. Browser state,
   session updates, and runner work use authenticated WebSockets at
   `/api/realtime` and `/api/runner/realtime`; there is no polling or SSE
-  application transport. Because an agent may modify this repository through the
-  running app, `bun run dev` deliberately does not restart for source edits.
-  `scripts/dev.ts` watches only the ignored `data/development-server.restart`
-  trigger written by `bun run dev:restart`. `src/runner-executable.ts`
-  fingerprints the runner source and compiler, builds in a private temporary
-  directory, caches it in memory, and serves it from `/runner/executable`.
-  Triggered development restarts reject new agent work, let active sessions
-  finish, then replace the server process, so a session can safely request its
-  own restart. Textual response bodies are precompressed once per handler, with
-  `zstd`, Brotli, gzip, or deflate negotiated in that server-preference order.
+  application transport. Because agents may modify this repository through the
+  running app, `bun run dev` does not restart for source edits. `scripts/dev.ts`
+  watches only the ignored `data/development-server.restart` trigger written by
+  `bun run dev:restart`. `src/runner-executable.ts` fingerprints the runner
+  source and compiler, builds in a private temporary directory, caches it in
+  memory, and serves it from `/runner/executable`. Triggered development
+  restarts reject new agent work, let active sessions finish, then replace the
+  server process, so a session can safely request its own restart. Textual
+  response bodies are precompressed once per handler, with `zstd`, Brotli, gzip,
+  or deflate negotiated in that server-preference order.
 - `src/pages.tsx` contains server page markup, while `src/client.tsx` mounts the
   browser app. Shared route paths are defined in `src/routes.ts`.
 - `src/auth.ts` implements Google OpenID Connect with an authorization-code +
@@ -99,13 +99,14 @@ task-specific progress, guesses, or sensitive values.
   `src/http.ts`. `src/client.tsx` reads `/api/auth/session`, gates the control
   center, and posts logout to `/api/auth/logout`. All API routes derive from the
   `/api` base path in `src/routes.ts`.
-- `src/runner-store.ts` persists any number of runner registrations per user in
-  `runners`, while a partial unique index permits only one active registration
-  for a machine fingerprint. `src/runners.ts` issues hashed opaque setup tokens,
-  owns the authenticated management and token-authenticated callback APIs, and
-  derives installer commands from the request origin. `src/runner-installer.ts`
-  emits the macOS/Linux one-line installer; it selects an x64/ARM64 and
-  glibc/musl target, downloads one standalone executable, and starts it under
+- `src/runner-store.ts` persists any number of user runner registrations, with
+  `runners`, with one active registration per machine fingerprint and one
+  default runner per user. New sessions use the default online runner or the
+  first one. `src/runners.ts` issues hashed opaque setup tokens, owns
+  authenticated management and token-authenticated callback APIs, and derives
+  installer commands from the request origin. `src/runner-installer.ts` emits
+  the macOS/Linux one-line installer; it selects an x64/ARM64 and glibc/musl
+  target, downloads one standalone executable, and starts it under
   `~/.q-mush/runner` by default without requiring Bun on that computer. The
   runner reports metadata and 15-second heartbeats on its authenticated
   WebSocket and checks for updates at startup and every five minutes. Its
@@ -125,14 +126,11 @@ task-specific progress, guesses, or sensitive values.
   90%. Auto-compaction defaults on and summarizes completed history before the
   next request at 95%; idle sessions can compact manually. Compaction
   soft-deletes prior active messages and inserts a replayable handoff. Provider
-  secrets never enter browser or runner work payloads; `src/agent-tools.ts`
-  defines the Pi-compatible `read`, `bash`, `edit`, and `write` tools plus
-  `parallel`, while `src/runner-command-broker.ts` carries authenticated calls
-  over the runner WebSocket. The working-directory field also opens the
-  interactive browser in `src/directory-picker-client.tsx`; its controller posts
-  to `/api/runners/:id/directories` for canonical directory metadata. Before
-  each run, `read_agent_file` loads exact-root `AGENTS.md`, falling back to
-  `CLAUDE.md`; only `AGENTS.md` is used when both exist.
+  secrets never enter browser or runner work payloads. The working-directory
+  field opens the interactive browser in `src/directory-picker-client.tsx`; its
+  controller posts to `/api/runners/:id/directories` for canonical directory
+  metadata. Before each run, `read_agent_file` loads exact-root `AGENTS.md`,
+  falling back to `CLAUDE.md`; only `AGENTS.md` is used when both exist.
 
   `src/runner-workspace.ts` shares canonical workspace resolution and
   containment with the file tools. The latest agent-file selection is persisted
@@ -151,23 +149,25 @@ task-specific progress, guesses, or sensitive values.
   focus loss. `src/agent-model-discovery.ts` queries the selected credential's
   provider for compatible models, modalities, and reasoning metadata;
   `src/agent-configuration.ts` owns shared catalog types, efforts, and
-  fallbacks. Selected-model details show modality support; each model-list
-  option shows all provider and Q Mush-supported input/output modalities. The
-  new-session controls use the framework-free custom listbox in
-  `src/custom-select.tsx`; model options show discovered context limits. Model
-  and effort selections are persisted with the session. `src/agent-prompt.ts` is
-  the shared source for building the model system prompt and its transcript
-  display. Provider reasoning summaries persist as `thinking` transcript
-  messages but are excluded from replay. Session and transcript rows live in
-  `agent_sessions` and `agent_messages`; an interrupted server process marks
-  active sessions failed so they can be resumed explicitly. Rebuilt
-  conversations synthesize visible error results for interrupted tool calls only
-  on resume, keeping transcript and provider history complete.
+  fallbacks. New sessions use the default online runner and model credential,
+  each falling back to the first entry. The working directory uses the latest
+  session; provider models use the first option and reasoning the maximum
+  effort. Model choices show all provider and Q Mush-supported input/output
+  modalities. Controls use the listbox in `src/custom-select.tsx`; model options
+  show discovered context limits. Model and effort selections are persisted with
+  the session. `src/agent-prompt.ts` is the shared source for building the model
+  system prompt and its transcript display. Provider reasoning summaries persist
+  as `thinking` transcript messages but are excluded from replay. Session and
+  transcript rows live in `agent_sessions` and `agent_messages`; an interrupted
+  server process marks active sessions failed so they can be resumed explicitly.
+  Rebuilt conversations synthesize visible error results for interrupted tool
+  calls only on resume, keeping transcript and provider history complete.
 
 - `src/openai.ts` and `src/openrouter.ts` implement provider connections.
   Multiple OAuth or manual credentials live in `provider_credentials`, encrypted
-  with per-record AES-256-GCM context; API responses expose only metadata.
-  Shared behavior lives in `src/provider-credentials.ts`,
+  with per-record AES-256-GCM context; API responses expose only metadata. One
+  OpenAI or OpenRouter credential may be the user's model default across both
+  providers. Shared behavior is in `src/provider-credentials.ts`,
   `src/connected-account-oauth.ts`, `src/provider-client.tsx`, and
   `src/provider-controller.ts`.
 - `src/brave-search.ts` implements the authenticated server-side `brave_search`
@@ -248,8 +248,8 @@ task-specific progress, guesses, or sensitive values.
   soft-deletes its audit record and clears its encrypted payload, but cannot
   revoke provider-side access.
 - `src/ids.ts` is the authoritative UUIDv7 generator and defines `SYSTEM` as the
-  audit actor for system actions. User actions use the internal user UUID. Never
-  issue hard deletes for application records: set `isDeleted`, `updatedAt`, and
+  system audit actor. User actions use the internal user UUID. Never issue hard
+  deletes for application records: set `isDeleted`, `updatedAt`, and
   `updatedById`, and exclude soft-deleted rows from active queries. Audit actor
   fields deliberately are not foreign keys because `SYSTEM` is not a user row.
 - Keep HTTP `deflate` zlib-wrapped; Bun's implementation is raw.
@@ -283,7 +283,7 @@ task-specific progress, guesses, or sensitive values.
   OAuth refreshes its encrypted token bundle shortly before expiry. Provider
   defaults are `gpt-4.1-mini`, `openai/gpt-4.1-mini`, and `gpt-5-codex` for
   OpenAI keys, OpenRouter, and OpenAI OAuth respectively; they are API fallbacks
-  and preferred discovered defaults when present, not browser catalog sources.
+  and catalog metadata, not browser selection defaults or catalog sources.
   Browser catalogs come from OpenAI `/v1/models`, OpenRouter
   `/api/v1/models/user`, or the ChatGPT Codex `/models` endpoint. Codex response
   parsing retains streamed output-text and function-call argument deltas because

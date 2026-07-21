@@ -17,10 +17,13 @@ import {
   defineProviderTestRoutes,
   expectInvalidProviderState,
   expectProtectedInvalidApiKey,
+  expectProviderCredentialSummaries,
   expectRemovedProviderCredential,
   readBearerApiKey,
+  readProviderCredentialSummaries,
   readStoredProviderCredentials,
   recordProviderRequest,
+  setProviderDefaults,
 } from "./provider-integration-test-helpers.ts";
 
 const OAUTH_CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000023";
@@ -41,20 +44,34 @@ const ENVIRONMENT = {
 const OAUTH_CREDENTIAL = {
   accountId: "openrouter-account-oauth",
   id: OAUTH_CREDENTIAL_ID,
+  isDefault: false,
   label: "OpenRouter account",
   source: "oauth",
 };
 const FIRST_MANUAL_CREDENTIAL = {
   accountId: "openrouter-account-first",
   id: FIRST_KEY_ID,
+  isDefault: false,
   label: "First manual key",
   source: "api_key",
 };
 const SECOND_MANUAL_CREDENTIAL = {
   accountId: "openrouter-account-second",
   id: SECOND_KEY_ID,
+  isDefault: false,
   label: "Second manual key",
   source: "api_key",
+};
+
+const MANUAL_KEY_DETAILS = {
+  [FIRST_KEY]: {
+    accountId: "openrouter-account-first",
+    label: "First manual key",
+  },
+  [SECOND_KEY]: {
+    accountId: "openrouter-account-second",
+    label: "Second manual key",
+  },
 };
 
 interface KeyDetails {
@@ -107,20 +124,17 @@ const INTEGRATION_TEST_CONFIGURATION = defineProviderTestConfiguration(
 const setupIntegration = createProviderTestSetup(
   INTEGRATION_TEST_CONFIGURATION,
 );
+const setupDefaultIntegration = createProviderTestSetup({
+  ...INTEGRATION_TEST_CONFIGURATION,
+  ids: [FIRST_KEY_ID, SECOND_KEY_ID],
+  tokens: [],
+});
 const connectAccount = createProviderAccountConnector(TEST_ROUTES);
 
 describe("OpenRouter credentials", () => {
   test("connects accounts with OAuth PKCE and stores multiple accounts or keys", async () => {
-    const { database, integration, providerRequests } = setupIntegration({
-      [FIRST_KEY]: {
-        accountId: "openrouter-account-first",
-        label: "First manual key",
-      },
-      [SECOND_KEY]: {
-        accountId: "openrouter-account-second",
-        label: "Second manual key",
-      },
-    });
+    const { database, integration, providerRequests } =
+      setupIntegration(MANUAL_KEY_DETAILS);
     const {
       authorizationUrl,
       beginResponse,
@@ -148,10 +162,12 @@ describe("OpenRouter credentials", () => {
       "http://localhost:3000/app?openrouter=connected",
     );
 
-    await addProviderApiKeys(integration, TEST_ROUTES.credentialsPath, [
-      FIRST_KEY,
-      SECOND_KEY,
-    ]);
+    const manualKeys = [FIRST_KEY, SECOND_KEY];
+    await addProviderApiKeys(
+      integration,
+      TEST_ROUTES.credentialsPath,
+      manualKeys,
+    );
 
     const listResponse = await integration.credentials(
       createRequest(TEST_ROUTES.credentialsPath),
@@ -191,14 +207,43 @@ describe("OpenRouter credentials", () => {
       TEST_ROUTES,
       FIRST_KEY_ID,
     );
-    expect(
-      await integration
-        .credentials(createRequest(TEST_ROUTES.credentialsPath))
-        .then((response) => response.json()),
-    ).toEqual(
-      credentialSummaries([OAUTH_CREDENTIAL, SECOND_MANUAL_CREDENTIAL]),
+    expectProviderCredentialSummaries(
+      await readProviderCredentialSummaries(
+        integration,
+        TEST_ROUTES.credentialsPath,
+      ),
+      [OAUTH_CREDENTIAL, SECOND_MANUAL_CREDENTIAL],
     );
 
+    database.$client.close();
+  });
+
+  test("sets one model credential as the user's default", async () => {
+    const { database, integration } =
+      setupDefaultIntegration(MANUAL_KEY_DETAILS);
+    await addProviderApiKeys(
+      integration,
+      TEST_ROUTES.credentialsPath,
+      Object.keys(MANUAL_KEY_DETAILS),
+    );
+
+    expect(
+      setProviderDefaults(integration, TEST_ROUTES.credentialsPath, [
+        FIRST_KEY_ID,
+        SECOND_KEY_ID,
+        "missing",
+      ]),
+    ).toEqual([204, 204, 404]);
+    expectProviderCredentialSummaries(
+      await readProviderCredentialSummaries(
+        integration,
+        TEST_ROUTES.credentialsPath,
+      ),
+      [
+        { ...FIRST_MANUAL_CREDENTIAL, isDefault: false },
+        { ...SECOND_MANUAL_CREDENTIAL, isDefault: true },
+      ],
+    );
     database.$client.close();
   });
 

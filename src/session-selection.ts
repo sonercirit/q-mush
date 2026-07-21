@@ -68,13 +68,16 @@ export function applySessionModelCatalog(
   credential: string,
   catalog: AgentModelCatalog,
 ): SessionDraft {
-  const model = catalog.models.some(({ id }) => id === current.model)
-    ? current.model
-    : (catalog.defaultModel ?? catalog.models[0]?.id ?? "");
+  const sameCredential = current.credential === credential;
+  const model =
+    sameCredential && catalog.models.some(({ id }) => id === current.model)
+      ? current.model
+      : (catalog.models[0]?.id ?? "");
   const efforts = catalog.models.find(
     ({ id }) => id === model,
   )?.reasoningEfforts;
   const reasoningEffort =
+    sameCredential &&
     efforts?.some((effort) => effort === current.reasoningEffort) === true
       ? current.reasoningEffort
       : (maximumAgentReasoningEffort(efforts ?? []) ?? "");

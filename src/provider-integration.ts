@@ -29,6 +29,7 @@ export interface ProviderIntegration extends OAuthEndpoints {
     userId: string,
     credentialId: string,
   ): Promise<ProviderCredentialAccess | undefined>;
+  setDefault(request: Request, credentialId: string): Response;
   remove(request: Request, credentialId: string): Response;
 }
 
@@ -159,6 +160,8 @@ export function createProviderIntegration(options: {
     complete: (request) => connectedAccount.complete(request),
     credentials: (request) => credentials.credentials(request),
     readCredential,
+    setDefault: (request, credentialId) =>
+      credentials.setDefault(request, credentialId),
     remove: (request, credentialId) =>
       credentials.remove(request, credentialId),
   };

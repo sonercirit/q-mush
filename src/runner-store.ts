@@ -1,4 +1,4 @@
-import { and, asc, eq, type SQL } from "drizzle-orm";
+import { and, asc, eq, not, type SQL } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import {
   createdAuditFields,
@@ -7,6 +7,7 @@ import {
 } from "./audit.ts";
 import type { AppDatabase } from "./database.ts";
 import { runners } from "./database/schema.ts";
+import { defaultValues } from "./default-store.ts";
 import { createUuidV7, type IdGenerator } from "./ids.ts";
 import {
   createPendingRunnerSummary,
@@ -37,6 +38,7 @@ type StoredRunnerSummary = Pick<
   typeof runners.$inferSelect,
   | "architecture"
   | "id"
+  | "isDefault"
   | "lastSeenAt"
   | "machineFingerprint"
   | "name"
@@ -67,6 +69,14 @@ function activeRunnerCondition(
   );
 }
 
+function defaultRunnerCondition(userId: string): SQL | undefined {
+  return and(
+    eq(runners.userId, userId),
+    not(runners.isDeleted),
+    runners.isDefault,
+  );
+}
+
 function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("base64url");
 }
@@ -92,6 +102,7 @@ function summarizeRunner(
   return {
     architecture: runner.architecture,
     id: runner.id,
+    isDefault: runner.isDefault,
     lastSeenAt,
     name: runner.name,
     platform: runner.platform,
@@ -103,6 +114,7 @@ function runnerSummarySelection() {
   return {
     architecture: runners.architecture,
     id: runners.id,
+    isDefault: runners.isDefault,
     lastSeenAt: runners.lastSeenAt,
     machineFingerprint: runners.machineFingerprint,
     name: runners.name,
@@ -172,6 +184,33 @@ export class RunnerStore {
       lastSeenAt !== undefined &&
       now - lastSeenAt <= RUNNER_ONLINE_WINDOW_MILLISECONDS
     );
+  }
+
+  setDefault(userId: string, runnerId: string, now: number): boolean {
+    return this.#database.transaction((transaction) => {
+      const runner = transaction.query.runners
+        .findFirst({
+          columns: { id: true },
+          where: activeRunnerCondition({ id: runnerId, userId }),
+        })
+        .sync();
+
+      if (runner === undefined) {
+        return false;
+      }
+
+      transaction
+        .update(runners)
+        .set(defaultValues(userId, now, false))
+        .where(defaultRunnerCondition(userId))
+        .run();
+      transaction
+        .update(runners)
+        .set(defaultValues(userId, now, true))
+        .where(eq(runners.id, runnerId))
+        .run();
+      return true;
+    });
   }
 
   setOnline(id: string, userId: string, now: number, online: boolean): void {
@@ -269,7 +308,7 @@ export class RunnerStore {
   remove(userId: string, runnerId: string, now: number): boolean {
     const removed = this.#database
       .update(runners)
-      .set(softDeletedAuditFields(userId, now))
+      .set({ ...softDeletedAuditFields(userId, now), isDefault: false })
       .where(activeRunnerCondition({ id: runnerId, userId }))
       .returning({ id: runners.id })
       .all();

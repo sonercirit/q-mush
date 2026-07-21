@@ -11,6 +11,7 @@ import {
 } from "./http.ts";
 import { createUuidV7 } from "./ids.ts";
 import type { OAuthDependencies } from "./oauth.ts";
+import { setOwnedDefault } from "./owned-default.ts";
 import { RUNNER_INSTALLER_PATH } from "./routes.ts";
 import { quoteShellValue, renderRunnerInstaller } from "./runner-installer.ts";
 import type { RunnerSummary } from "./runner-model.ts";
@@ -44,6 +45,7 @@ export interface RunnerIntegration {
   runnerIsAvailable(userId: string, runnerId: string): boolean;
   runnerToken(request: Request): string | undefined;
   seen(runner: RunnerConnection): void;
+  setDefault(request: Request, runnerId: string): Response;
 }
 
 function defaultRandomToken(): string {
@@ -180,6 +182,12 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
 
   seen(runner: RunnerConnection): void {
     this.#setOnline(runner, true);
+  }
+
+  setDefault(request: Request, runnerId: string): Response {
+    return setOwnedDefault(request, this.#auth, (userId) => {
+      return this.#store.setDefault(userId, runnerId, this.#now());
+    });
   }
 
   #collectionForUser(request: Request, user: AuthenticatedUser): Response {

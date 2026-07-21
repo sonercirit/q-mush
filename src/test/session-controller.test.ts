@@ -56,6 +56,9 @@ test("renders incremental model deltas in the selected transcript", async () => 
 
   try {
     await controller.load();
+    expect(controller.state.draft.workingDirectory).toBe(
+      TEST_SESSION_DETAIL.workingDirectory,
+    );
     controller.applyDelta({
       content: "Hello",
       sessionId: TEST_SESSION_DETAIL.id,

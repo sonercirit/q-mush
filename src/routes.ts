@@ -18,7 +18,16 @@ const OPENROUTER_BASE_PATH = `${API_BASE_PATH}/openrouter`;
 export const OPENROUTER_CREDENTIALS_PATH = `${OPENROUTER_BASE_PATH}/credentials`;
 export const OPENROUTER_OAUTH_PATH = `${OPENROUTER_BASE_PATH}/oauth`;
 export const OPENROUTER_OAUTH_CALLBACK_PATH = `${OPENROUTER_OAUTH_PATH}/callback`;
+export function providerCredentialDefaultPath(
+  credentialsPath: string,
+  credentialId: string,
+): string {
+  return `${credentialsPath}/${encodeURIComponent(credentialId)}/default`;
+}
 export const RUNNERS_PATH = `${API_BASE_PATH}/runners`;
+export function runnerDefaultPath(runnerId: string): string {
+  return `${RUNNERS_PATH}/${encodeURIComponent(runnerId)}/default`;
+}
 export const RUNNER_DIRECTORIES_SEGMENT = "directories";
 export function runnerDirectoriesPath(runnerId: string): string {
   return `${RUNNERS_PATH}/${encodeURIComponent(runnerId)}/${RUNNER_DIRECTORIES_SEGMENT}`;

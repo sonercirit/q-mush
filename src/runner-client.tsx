@@ -1,5 +1,6 @@
 import { isRecord, readNullableString } from "./auth-model.ts";
-import { renderRemovalButton, renderRetryError } from "./client-controls.tsx";
+import { renderRetryError } from "./client-controls.tsx";
+import { renderDefaultableActions } from "./defaultable-actions.tsx";
 import { createElement, type JsxNode } from "./jsx.ts";
 import type { RunnerStatus, RunnerSummary } from "./runner-model.ts";
 
@@ -14,8 +15,23 @@ export interface RunnerViewState {
   readonly creating: boolean;
   readonly error: string | undefined;
   readonly removingId: string | undefined;
+  readonly settingDefaultId: string | undefined;
   readonly runners: readonly RunnerSummary[] | undefined;
   readonly setup: RunnerSetupInstructions | undefined;
+}
+
+export function createRunnerViewState(
+  runners: readonly RunnerSummary[] | undefined,
+): RunnerViewState {
+  return {
+    copied: false,
+    creating: false,
+    error: undefined,
+    removingId: undefined,
+    runners,
+    settingDefaultId: undefined,
+    setup: undefined,
+  };
 }
 
 export interface CreatedRunnerSetup {
@@ -55,6 +71,7 @@ function readRunner(value: unknown): RunnerSummary {
   if (
     architecture === undefined ||
     typeof id !== "string" ||
+    typeof value["isDefault"] !== "boolean" ||
     (lastSeenAt !== null &&
       (typeof lastSeenAt !== "number" || !Number.isFinite(lastSeenAt))) ||
     name === undefined ||
@@ -64,7 +81,15 @@ function readRunner(value: unknown): RunnerSummary {
     throw new Error("The server returned an invalid runner");
   }
 
-  return { architecture, id, lastSeenAt, name, platform, status };
+  return {
+    architecture,
+    id,
+    isDefault: value["isDefault"],
+    lastSeenAt,
+    name,
+    platform,
+    status,
+  };
 }
 
 export function readRunners(value: unknown): readonly RunnerSummary[] {
@@ -129,12 +154,30 @@ function runnerActivity(runner: RunnerSummary): string {
     : `Last connected ${new Date(runner.lastSeenAt).toLocaleString()}`;
 }
 
+function renderRunnerActions(
+  runner: RunnerSummary,
+  removing: boolean,
+  settingDefault: boolean,
+): JsxNode {
+  return renderDefaultableActions({
+    defaultAction: "set-default-runner",
+    id: runner.id,
+    idAttribute: "data-runner-id",
+    isDefault: runner.isDefault,
+    removeAction: "remove-runner",
+    removing,
+    settingDefault,
+  });
+}
+
 function renderRunner(
   runner: RunnerSummary,
   removingId: string | undefined,
+  settingDefaultId: string | undefined,
 ): JsxNode {
   const presentation = STATUS_PRESENTATION[runner.status];
   const removing = removingId === runner.id;
+  const settingDefault = settingDefaultId === runner.id;
 
   return (
     <li className="flex flex-col gap-4 rounded-2xl border border-white/10 bg-slate-950/60 p-5 sm:flex-row sm:items-center sm:justify-between">
@@ -162,12 +205,7 @@ function renderRunner(
           </p>
         </div>
       </div>
-      {renderRemovalButton({
-        action: "remove-runner",
-        dataAttribute: "data-runner-id",
-        id: runner.id,
-        pending: removing,
-      })}
+      {renderRunnerActions(runner, removing, settingDefault)}
     </li>
   );
 }
@@ -234,7 +272,9 @@ function renderRunnerList(state: RunnerViewState): JsxNode {
 
   return (
     <ul className="mt-7 space-y-3">
-      {state.runners.map((runner) => renderRunner(runner, state.removingId))}
+      {state.runners.map((runner) =>
+        renderRunner(runner, state.removingId, state.settingDefaultId),
+      )}
     </ul>
   );
 }

@@ -1,4 +1,4 @@
-import { and, asc, eq, type SQL } from "drizzle-orm";
+import { and, asc, eq, not, type SQL } from "drizzle-orm";
 import { softDeletedAuditFields, updatedAuditFields } from "./audit.ts";
 import {
   fingerprintCredential,
@@ -6,6 +6,7 @@ import {
 } from "./credential-cipher.ts";
 import type { AppDatabase } from "./database.ts";
 import { providerCredentials } from "./database/schema.ts";
+import { defaultValues } from "./default-store.ts";
 import { createUuidV7, SYSTEM_ID, type IdGenerator } from "./ids.ts";
 
 export type ProviderCredentialSource = "api_key" | "oauth";
@@ -19,6 +20,7 @@ export interface ProviderCredentialDetails {
 
 export interface ProviderCredentialSummary extends ProviderCredentialDetails {
   readonly id: string;
+  readonly isDefault: boolean;
   readonly source: ProviderCredentialSource;
 }
 
@@ -48,6 +50,20 @@ function activeCredentialCondition(
   );
 }
 
+function ownedDefaultCondition(
+  userId: string,
+  provider?: CredentialProviderId,
+): SQL | undefined {
+  const condition = and(
+    eq(providerCredentials.userId, userId),
+    not(providerCredentials.isDeleted),
+    providerCredentials.isDefault,
+  );
+  return provider === undefined
+    ? condition
+    : and(condition, eq(providerCredentials.provider, provider));
+}
+
 function encryptionContext(userId: string, credentialId: string): string {
   return `${userId}:${credentialId}`;
 }
@@ -56,6 +72,7 @@ function credentialSummarySelection() {
   return {
     accountId: providerCredentials.providerAccountId,
     id: providerCredentials.id,
+    isDefault: providerCredentials.isDefault,
     label: providerCredentials.label,
     source: providerCredentials.source,
   };
@@ -121,6 +138,7 @@ export class ProviderCredentialStore {
     const mutableValues = {
       encryptedCredential,
       isDeleted: false,
+      isDefault: false,
       label: details.label,
       providerAccountId: details.accountId,
       source,
@@ -149,7 +167,7 @@ export class ProviderCredentialStore {
         .run();
     }
 
-    return { ...details, id, source };
+    return { ...details, id, isDefault: false, source };
   }
 
   list(userId: string): readonly ProviderCredentialSummary[] {
@@ -161,28 +179,40 @@ export class ProviderCredentialStore {
       .all();
   }
 
+  #readStored(userId: string, credentialId: string) {
+    return this.#database.query.providerCredentials
+      .findFirst({
+        columns: {
+          encryptedCredential: true,
+          id: true,
+          label: true,
+          providerAccountId: true,
+          isDefault: true,
+          source: true,
+        },
+        where: activeCredentialCondition(this.#provider, userId, credentialId),
+      })
+      .sync();
+  }
+
   read(
     userId: string,
     credentialId: string,
   ): ProviderCredentialAccess | undefined {
-    const stored = this.#database
-      .select({
-        ...credentialSummarySelection(),
-        encryptedCredential: providerCredentials.encryptedCredential,
-      })
-      .from(providerCredentials)
-      .where(activeCredentialCondition(this.#provider, userId, credentialId))
-      .get();
+    const stored = this.#readStored(userId, credentialId);
 
     if (stored === undefined) {
       return undefined;
     }
 
-    const { encryptedCredential, ...summary } = stored;
     return {
-      ...summary,
+      accountId: stored.providerAccountId,
+      id: stored.id,
+      isDefault: stored.isDefault,
+      label: stored.label,
+      source: stored.source,
       secret: this.#cipher.open(
-        encryptedCredential,
+        stored.encryptedCredential,
         encryptionContext(userId, credentialId),
       ),
     };
@@ -190,6 +220,41 @@ export class ProviderCredentialStore {
 
   readSecret(userId: string, credentialId: string): string | undefined {
     return this.read(userId, credentialId)?.secret;
+  }
+
+  setDefault(userId: string, credentialId: string, now: number): boolean {
+    let changed = false;
+
+    this.#database.transaction((transaction) => {
+      const [credential] = transaction
+        .select({ id: providerCredentials.id })
+        .from(providerCredentials)
+        .where(activeCredentialCondition(this.#provider, userId, credentialId))
+        .all();
+
+      if (credential === undefined) {
+        return;
+      }
+
+      transaction
+        .update(providerCredentials)
+        .set(defaultValues(userId, now, false))
+        .where(
+          ownedDefaultCondition(
+            userId,
+            this.#provider === "brave_search" ? "brave_search" : undefined,
+          ),
+        )
+        .run();
+      transaction
+        .update(providerCredentials)
+        .set(defaultValues(userId, now, true))
+        .where(eq(providerCredentials.id, credentialId))
+        .run();
+      changed = true;
+    });
+
+    return changed;
   }
 
   updateSecret(
@@ -234,6 +299,7 @@ export class ProviderCredentialStore {
       .set({
         ...softDeletedAuditFields(userId, now),
         encryptedCredential: "",
+        isDefault: false,
       })
       .where(condition)
       .run();

@@ -123,6 +123,17 @@ function onlineRunners(state: RunnerViewState): readonly RunnerSummary[] {
   return state.runners?.filter(({ status }) => status === "online") ?? [];
 }
 
+function providerIsLoading(state: ProviderViewState): boolean {
+  return state.credentials === undefined && state.error === undefined;
+}
+
+function credentialFallbackReady(
+  openAi: ProviderViewState,
+  openRouter: ProviderViewState,
+): boolean {
+  return !providerIsLoading(openAi) && !providerIsLoading(openRouter);
+}
+
 function credentialOptions(
   openAi: ProviderViewState,
   openRouter: ProviderViewState,
@@ -147,10 +158,7 @@ function selectedCredential(
   credentials: readonly CredentialOption[],
   value: string,
 ): CredentialOption | undefined {
-  return (
-    credentials.find((option) => optionValue(option) === value) ??
-    credentials[0]
-  );
+  return credentials.find((option) => optionValue(option) === value);
 }
 
 function sessionModelLabel(
@@ -252,10 +260,23 @@ function runnerSelectOptions(
 function selectValue(
   options: readonly CustomSelectOption[],
   requested: string,
+  fallback: string,
 ): string {
   return options.some((option) => option.value === requested)
     ? requested
-    : (options[0]?.value ?? "");
+    : fallback;
+}
+
+function defaultRunnerId(runners: readonly RunnerSummary[]): string {
+  return runners.find(({ isDefault }) => isDefault)?.id ?? runners[0]?.id ?? "";
+}
+
+function defaultCredentialValue(
+  credentials: readonly CredentialOption[],
+): string {
+  const credential =
+    credentials.find((option) => option.credential.isDefault) ?? credentials[0];
+  return credential === undefined ? "" : optionValue(credential);
 }
 
 function modelSelectOptions(
@@ -275,14 +296,20 @@ function renderNewSessionForm(
   state: SessionViewState,
   runners: readonly RunnerSummary[],
   credentials: readonly CredentialOption[],
+  credentialsSettled: boolean,
 ): JsxNode {
   const resourcesAvailable = runners.length > 0 && credentials.length > 0;
   const runnerOptions = runnerSelectOptions(runners);
-  const selectedRunnerId = selectValue(runnerOptions, state.draft.runnerId);
+  const selectedRunnerId = selectValue(
+    runnerOptions,
+    state.draft.runnerId,
+    defaultRunnerId(runners),
+  );
   const credentialOptions = credentialSelectOptions(credentials);
   const selectedCredentialValue = selectValue(
     credentialOptions,
     state.draft.credential,
+    credentialsSettled ? defaultCredentialValue(credentials) : "",
   );
   const credential = selectedCredential(credentials, selectedCredentialValue);
   const credentialValue =
@@ -295,11 +322,15 @@ function renderNewSessionForm(
   const models = catalog?.models ?? [];
   const modelValue = models.some(({ id }) => id === state.draft.model)
     ? state.draft.model
-    : (catalog?.defaultModel ?? models[0]?.id ?? "");
+    : (models[0]?.id ?? "");
   const model = models.find(({ id }) => id === modelValue);
   const loadingModels =
     credential !== undefined && (discovery === undefined || discovery.loading);
-  const available = resourcesAvailable && models.length > 0;
+  const available =
+    resourcesAvailable &&
+    selectedRunnerId.length > 0 &&
+    credential !== undefined &&
+    models.length > 0;
 
   return (
     <form
@@ -319,7 +350,9 @@ function renderNewSessionForm(
       })}
       {renderCustomSelect({
         disabled: state.creating || credentials.length === 0,
-        emptyLabel: "No model credentials",
+        emptyLabel: credentialsSettled
+          ? "No model credentials"
+          : "Loading credentials…",
         id: "session-credential",
         label: "Model credential",
         name: "credential",
@@ -328,7 +361,7 @@ function renderNewSessionForm(
         required: true,
         selectedValue: selectedCredentialValue,
       })}
-      {renderDirectoryInput(state, runners.length > 0)}
+      {renderDirectoryInput(state, selectedRunnerId.length > 0)}
       {renderCustomSelect({
         disabled: state.creating || models.length === 0,
         emptyLabel:
@@ -541,7 +574,12 @@ export function renderSessionPanel(
   );
 
   return (
-    <div data-session-panel="true">
+    <div
+      data-credentials-settled={String(
+        credentialFallbackReady(openAiState, openRouterState),
+      )}
+      data-session-panel="true"
+    >
       <section
         inert={state.directoryPicker.open}
         aria-labelledby="agent-sessions-title"
@@ -560,7 +598,12 @@ export function renderSessionPanel(
           Start and steer coding sessions on your connected computers. Q Mush
           owns the model loop and runner tools end to end.
         </p>
-        {renderNewSessionForm(state, runners, credentials)}
+        {renderNewSessionForm(
+          state,
+          runners,
+          credentials,
+          credentialFallbackReady(openAiState, openRouterState),
+        )}
         {renderRetryError(state.error, "retry-sessions")}
         <div className="mt-7 grid gap-5 lg:grid-cols-[18rem_minmax(0,1fr)]">
           <aside aria-label="Agent sessions">{renderSessionList(state)}</aside>

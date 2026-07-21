@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { readRealtimeServerEvent } from "../realtime-client-codec.ts";
+import { runnerSummary } from "./runner-fixtures.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
 function roundTrip(payload: Readonly<Record<string, unknown>>): unknown {
@@ -10,6 +11,13 @@ test("reads complete session snapshots from realtime messages", () => {
   expect(roundTrip({ session: TEST_SESSION_DETAIL, type: "session" })).toEqual({
     session: TEST_SESSION_DETAIL,
     type: "session",
+  });
+});
+
+test("reads runner snapshots from realtime messages", () => {
+  expect(roundTrip({ runners: [runnerSummary(1)], type: "runners" })).toEqual({
+    runners: [runnerSummary(1)],
+    type: "runners",
   });
 });
 

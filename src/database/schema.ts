@@ -44,6 +44,10 @@ function ownedAuditColumns() {
   };
 }
 
+function defaultBooleanColumn() {
+  return integer("is_default", { mode: "boolean" }).notNull().default(false);
+}
+
 function providerColumn() {
   return text("provider", { enum: ["openai", "openrouter"] }).notNull();
 }
@@ -64,6 +68,7 @@ export const providerCredentials = sqliteTable(
     source: text("source", { enum: ["oauth", "api_key"] }).notNull(),
     encryptedCredential: text("encrypted_credential").notNull(),
     credentialFingerprint: text("credential_fingerprint").notNull(),
+    isDefault: defaultBooleanColumn(),
   },
   (table) => [
     index("provider_credentials_user_provider_deletion_index").on(
@@ -76,6 +81,11 @@ export const providerCredentials = sqliteTable(
       table.provider,
       table.credentialFingerprint,
     ),
+    uniqueIndex("provider_credentials_user_model_default_unique")
+      .on(table.userId)
+      .where(
+        sql`${table.provider} IN ('openai', 'openrouter') AND ${table.isDefault} AND NOT ${table.isDeleted}`,
+      ),
   ],
 );
 
@@ -89,6 +99,7 @@ export const runners = sqliteTable(
     architecture: text("architecture"),
     tokenHash: text("token_hash").notNull(),
     lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" }),
+    isDefault: defaultBooleanColumn(),
   },
   (table) => [
     index("runners_user_deletion_index").on(table.userId, table.isDeleted),
@@ -98,6 +109,9 @@ export const runners = sqliteTable(
     uniqueIndex("runners_active_token_unique")
       .on(table.tokenHash)
       .where(sql`${table.isDeleted} = false`),
+    uniqueIndex("runners_user_default_unique")
+      .on(table.userId)
+      .where(sql`NOT ${table.isDeleted} AND ${table.isDefault}`),
   ],
 );
 

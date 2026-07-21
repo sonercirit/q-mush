@@ -22,11 +22,13 @@ import {
   OPENROUTER_CREDENTIALS_PATH,
   OPENROUTER_OAUTH_CALLBACK_PATH,
   OPENROUTER_OAUTH_PATH,
+  providerCredentialDefaultPath,
   REALTIME_PATH,
   RUNNER_EXECUTABLE_PATH,
   RUNNER_INSTALLER_PATH,
   RUNNER_REALTIME_PATH,
   RUNNER_VERSION_HEADER,
+  runnerDefaultPath,
   runnerDirectoriesPath,
   RUNNERS_PATH,
   SESSION_MODELS_PATH,
@@ -172,6 +174,9 @@ describe("routes", () => {
     expect(AUTH_SESSION_PATH).toBe("/api/auth/session");
     expect(BRAVE_SEARCH_KEYS_PATH).toBe("/api/skills/brave-search/keys");
     expect(OPENAI_CREDENTIALS_PATH).toBe("/api/openai/credentials");
+    expect(
+      providerCredentialDefaultPath(OPENAI_CREDENTIALS_PATH, "credential/id"),
+    ).toBe("/api/openai/credentials/credential%2Fid/default");
     expect(OPENAI_OAUTH_PATH).toBe("/api/openai/oauth");
     expect(OPENAI_OAUTH_CALLBACK_PATH).toBe("/api/openai/oauth/callback");
     expect(OPENROUTER_CREDENTIALS_PATH).toBe("/api/openrouter/credentials");
@@ -180,6 +185,9 @@ describe("routes", () => {
       "/api/openrouter/oauth/callback",
     );
     expect(RUNNERS_PATH).toBe("/api/runners");
+    expect(runnerDefaultPath("runner/id")).toBe(
+      "/api/runners/runner%2Fid/default",
+    );
     expect(runnerDirectoriesPath("runner/id")).toBe(
       "/api/runners/runner%2Fid/directories",
     );
@@ -246,6 +254,11 @@ describe("page server", () => {
   test("protects user runner routes and does not expose removed callbacks", async () => {
     const collectionResponse = await sendRequest(RUNNERS_PATH);
     const setupResponse = await sendRequest(RUNNERS_PATH, undefined, "POST");
+    const defaultResponse = await sendRequest(
+      runnerDefaultPath("runner-id"),
+      undefined,
+      "POST",
+    );
     const removedCallbackResponses = await Promise.all([
       sendRequest("/api/runner/register", undefined, "POST"),
       sendRequest("/api/runner/heartbeat", undefined, "POST"),
@@ -256,6 +269,7 @@ describe("page server", () => {
     );
 
     expect(collectionResponse.status).toBe(401);
+    expect(defaultResponse.status).toBe(401);
     expect(setupResponse.status).toBe(401);
     expect(
       removedCallbackResponses.every(({ status }) => status === 404),
@@ -340,6 +354,14 @@ describe("page server", () => {
         sendRequest(provider.oauthPath),
         sendRequest(provider.callbackPath),
         sendRequest(provider.credentialsPath),
+        sendRequest(
+          providerCredentialDefaultPath(
+            provider.credentialsPath,
+            "credential-id",
+          ),
+          undefined,
+          "POST",
+        ),
         sendRequest(
           `${provider.credentialsPath}/credential-id`,
           undefined,

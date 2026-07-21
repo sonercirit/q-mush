@@ -57,6 +57,7 @@ function runners(
     runnerIsAvailable: () => false,
     runnerToken: () => token,
     seen: () => undefined,
+    setDefault: () => new Response(),
     ...overrides,
   };
 }

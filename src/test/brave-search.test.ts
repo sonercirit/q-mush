@@ -92,12 +92,14 @@ describe("Brave Search skill", () => {
         {
           accountId: null,
           id: FIRST_KEY_ID,
+          isDefault: false,
           label: "Primary",
           source: "api_key",
         },
         {
           accountId: null,
           id: SECOND_KEY_ID,
+          isDefault: false,
           label: "Backup",
           source: "api_key",
         },

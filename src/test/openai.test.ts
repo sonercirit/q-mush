@@ -51,24 +51,28 @@ const ENVIRONMENT = {
 const FIRST_OAUTH_CREDENTIAL = {
   accountId: "chatgpt-workspace-one",
   id: FIRST_OAUTH_ID,
+  isDefault: false,
   label: "one@example.com",
   source: "oauth",
 };
 const SECOND_OAUTH_CREDENTIAL = {
   accountId: "chatgpt-workspace-two",
   id: SECOND_OAUTH_ID,
+  isDefault: false,
   label: "two@example.com",
   source: "oauth",
 };
 const FIRST_MANUAL_CREDENTIAL = {
   accountId: "openai-user-one",
   id: FIRST_KEY_ID,
+  isDefault: false,
   label: "First OpenAI user",
   source: "api_key",
 };
 const SECOND_MANUAL_CREDENTIAL = {
   accountId: "openai-user-two",
   id: SECOND_KEY_ID,
+  isDefault: false,
   label: "Second OpenAI user",
   source: "api_key",
 };

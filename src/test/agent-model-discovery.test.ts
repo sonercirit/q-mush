@@ -28,6 +28,7 @@ function credential(
   return {
     accountId,
     id: "credential-id",
+    isDefault: false,
     label: "Provider credential",
     secret,
     source,

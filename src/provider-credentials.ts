@@ -12,6 +12,7 @@ import {
   parseJsonRequest,
 } from "./http.ts";
 import { readJsonRecord, type OAuthRuntime } from "./oauth.ts";
+import { setOwnedDefault } from "./owned-default.ts";
 import {
   DuplicateProviderCredentialError,
   type ProviderCredentialAccess,
@@ -241,6 +242,12 @@ export class ProviderCredentialEndpoints {
       "oauth",
       this.#now(),
     );
+  }
+
+  setDefault(request: Request, credentialId: string): Response {
+    const change = (userId: string): boolean =>
+      this.#credentialStore().setDefault(userId, credentialId, this.#now());
+    return setOwnedDefault(request, this.#auth, change);
   }
 
   remove(request: Request, credentialId: string): Response {
