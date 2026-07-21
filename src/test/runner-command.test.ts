@@ -2,23 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { RUNNER_AGENT_FILE_COMMAND } from "../agent-file.ts";
-import {
-  executeRunnerCommand,
-  readRunnerCommand,
-  readRunnerCommandStatus,
-} from "../runner-command.ts";
+import { executeRunnerCommand, readRunnerCommand } from "../runner-command.ts";
 import { useTemporaryDirectories } from "./temporary-directories.ts";
 
 const temporaryDirectory = useTemporaryDirectories("q-mush-command-test-");
 
-describe("runner work protocol", () => {
-  test("reads command cancellation status", () => {
-    expect(readRunnerCommandStatus({ active: true })).toBeTrue();
-    expect(() => readRunnerCommandStatus({ active: "yes" })).toThrow(
-      "invalid runner command status",
-    );
-  });
-
+describe("runner WebSocket protocol", () => {
   test("validates commands before executing them", async () => {
     const expected = {
       arguments: { path: "missing.txt" },

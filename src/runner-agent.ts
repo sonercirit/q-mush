@@ -3,38 +3,27 @@ import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { arch, hostname, networkInterfaces, platform } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import {
-  RUNNER_HEARTBEAT_PATH,
-  RUNNER_REGISTER_PATH,
-  RUNNER_WORK_PATH,
-} from "./routes.ts";
+import { parseJsonRecord } from "./json-record.ts";
+import { RUNNER_REALTIME_PATH } from "./routes.ts";
 import type { RunnerToolCommand } from "./runner-command-broker.ts";
-import {
-  executeRunnerCommand,
-  readRunnerCommand,
-  readRunnerCommandStatus,
-} from "./runner-command.ts";
+import { executeRunnerCommand, readRunnerCommand } from "./runner-command.ts";
 import { RunnerUpdateTrigger } from "./runner-update-trigger.ts";
 import { updateRunnerIfAvailable } from "./runner-update.ts";
+import { createServerWebSocket } from "./server-websocket.ts";
 
 declare const Q_MUSH_RUNNER_TARGET: string;
 declare const Q_MUSH_RUNNER_VERSION: string;
 
 const HEARTBEAT_INTERVAL_MILLISECONDS = 15_000;
-const WORK_POLL_INTERVAL_MILLISECONDS = 750;
 const RETRY_INTERVAL_MILLISECONDS = 5_000;
-const REQUEST_TIMEOUT_MILLISECONDS = 10_000;
 const UPDATE_INTERVAL_MILLISECONDS = 5 * 60_000;
 const TOKEN_PATTERN = /^qmr_[A-Za-z\d_-]{8,200}$/u;
 const runnerUpdateTrigger = new RunnerUpdateTrigger(Q_MUSH_RUNNER_VERSION);
 
-class RunnerRequestError extends Error {
-  readonly status: number;
-
-  constructor(status: number) {
-    super(`The Q Mush server returned status ${String(status)}`);
-    this.name = "RunnerRequestError";
-    this.status = status;
+class RunnerConnectionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RunnerConnectionError";
   }
 }
 
@@ -126,154 +115,97 @@ function machineName(): string {
   return normalized.length === 0 ? "Q Mush runner" : normalized;
 }
 
-function runnerRequestHeaders(
-  configuration: RunnerConfiguration,
-  hasBody: boolean,
-): Headers {
-  const headers = new Headers({
-    accept: "application/json",
-    authorization: `Bearer ${configuration.token}`,
+function runnerWebSocketUrl(configuration: RunnerConfiguration): string {
+  const url = new URL(RUNNER_REALTIME_PATH, configuration.serverOrigin);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString();
+}
+
+function runnerWebSocket(configuration: RunnerConfiguration): WebSocket {
+  return createServerWebSocket(
+    runnerWebSocketUrl(configuration),
+    { authorization: `Bearer ${configuration.token}` },
+    "The runtime does not support runner WebSockets",
+  );
+}
+
+interface ActiveCommand {
+  readonly controller: AbortController;
+}
+
+function parseServerMessage(
+  message: string,
+): Readonly<Record<string, unknown>> {
+  return parseJsonRecord(message, "The server returned an invalid message");
+}
+
+function waitForSocket(socket: WebSocket): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (error?: RunnerConnectionError): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (error === undefined) {
+        resolve();
+      } else {
+        reject(error);
+      }
+    };
+    socket.addEventListener(
+      "open",
+      () => {
+        settle();
+      },
+      { once: true },
+    );
+    socket.addEventListener(
+      "error",
+      () => {
+        settle(new RunnerConnectionError("The WebSocket connection failed"));
+      },
+      { once: true },
+    );
+    socket.addEventListener(
+      "close",
+      () => {
+        settle(new RunnerConnectionError("The WebSocket connection closed"));
+      },
+      { once: true },
+    );
   });
-
-  if (hasBody) {
-    headers.set("content-type", "application/json");
-  }
-
-  return headers;
 }
 
-interface ServerRequestOptions {
-  readonly body?: Readonly<Record<string, string>>;
-  readonly method?: string;
-}
-
-async function requestServer(
-  configuration: RunnerConfiguration,
-  path: string,
-  options: ServerRequestOptions = {},
-): Promise<Response> {
-  const requestOptions: RequestInit = {
-    headers: runnerRequestHeaders(configuration, options.body !== undefined),
-    body: options.body === undefined ? null : JSON.stringify(options.body),
-    method: options.method ?? "POST",
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MILLISECONDS),
-  };
-  const response = await fetch(
-    new URL(path, configuration.serverOrigin),
-    requestOptions,
-  );
-  runnerUpdateTrigger.observe(response);
-
-  if (!response.ok) {
-    throw new RunnerRequestError(response.status);
-  }
-
-  return response;
-}
-
-async function pollForCommand(
-  configuration: RunnerConfiguration,
-): Promise<RunnerToolCommand | undefined> {
-  const response = await requestServer(configuration, RUNNER_WORK_PATH);
-
-  if (response.status === 204) {
-    return undefined;
-  }
-
-  const value: unknown = await response.json();
-  return readRunnerCommand(value);
-}
-
-async function commandIsActive(
-  configuration: RunnerConfiguration,
-  commandId: string,
-): Promise<boolean> {
-  const response = await requestServer(
-    configuration,
-    `${RUNNER_WORK_PATH}/${encodeURIComponent(commandId)}`,
-    { method: "GET" },
-  );
-  const value: unknown = await response.json();
-  return readRunnerCommandStatus(value);
-}
-
-async function executeCancelableCommand(
-  configuration: RunnerConfiguration,
+function executeCommand(
+  socket: WebSocket,
   command: RunnerToolCommand,
-): Promise<string | undefined> {
+  active: Map<string, ActiveCommand>,
+): void {
+  if (active.has(command.id)) {
+    socket.close(1008, "Duplicate command ID");
+    return;
+  }
+
   const controller = new AbortController();
-  const execution = executeRunnerCommand(command, controller.signal).then(
-    (output) => ({ output }),
-  );
-
-  for (;;) {
-    const outcome = await Promise.race([
-      execution,
-      sleep(WORK_POLL_INTERVAL_MILLISECONDS).then(() => undefined),
-    ]);
-
-    if (outcome !== undefined) {
-      return outcome.output;
-    }
-
-    try {
-      if (!(await commandIsActive(configuration, command.id))) {
-        controller.abort();
-        await execution;
-        return undefined;
-      }
-    } catch (error) {
-      try {
-        handleConnectionFailure(
-          error,
-          "Could not check the agent command; continuing it…",
+  void executeRunnerCommand(command, controller.signal)
+    .then((output) => {
+      if (!controller.signal.aborted && socket.readyState === WebSocket.OPEN) {
+        socket.send(
+          JSON.stringify({ commandId: command.id, output, type: "result" }),
         );
-      } catch (fatalError) {
-        controller.abort();
-        await execution;
-        throw fatalError;
       }
-    }
-  }
+    })
+    .finally(() => {
+      active.delete(command.id);
+    });
+  active.set(command.id, { controller });
 }
 
-async function processOneCommand(
-  configuration: RunnerConfiguration,
-): Promise<void> {
-  const command = await pollForCommand(configuration);
-
-  if (command === undefined) {
-    return;
-  }
-
-  const output = await executeCancelableCommand(configuration, command);
-
-  if (output === undefined) {
-    return;
-  }
-
-  await requestServer(
-    configuration,
-    `${RUNNER_WORK_PATH}/${encodeURIComponent(command.id)}`,
-    { body: { output } },
-  );
-}
-
-function handleConnectionFailure(error: unknown, message: string): void {
-  if (
-    error instanceof RunnerRequestError &&
-    (error.status === 401 || error.status === 409)
-  ) {
-    throw error;
-  }
-
-  console.warn(message);
-}
-
-async function connect(
+async function connectRunner(
   configuration: RunnerConfiguration,
   configurationPath: string,
-): Promise<void> {
+): Promise<WebSocket> {
   const metadata = {
     architecture: arch(),
     machineId: machineFingerprint(configurationPath),
@@ -282,14 +214,16 @@ async function connect(
   };
 
   for (;;) {
+    const socket = runnerWebSocket(configuration);
+
     try {
-      await requestServer(configuration, RUNNER_REGISTER_PATH, {
-        body: metadata,
-      });
+      await waitForSocket(socket);
+      socket.send(JSON.stringify({ ...metadata, type: "connect" }));
       console.log(`Q Mush runner connected as ${metadata.name}.`);
-      return;
-    } catch (error) {
-      handleConnectionFailure(error, "Could not reach Q Mush; retrying setup…");
+      return socket;
+    } catch {
+      socket.close();
+      console.warn("Could not reach Q Mush; retrying setup…");
       await sleep(RETRY_INTERVAL_MILLISECONDS);
     }
   }
@@ -319,29 +253,13 @@ async function installUpdateIfAvailable(
   }
 }
 
-async function processWithHeartbeats(
-  configuration: RunnerConfiguration,
-): Promise<void> {
-  const outcome = processOneCommand(configuration).then(
-    () => ({ status: "completed" as const }),
-    (error: unknown) => ({ error, status: "failed" as const }),
-  );
-
-  for (;;) {
-    const result = await Promise.race([
-      outcome,
-      sleep(HEARTBEAT_INTERVAL_MILLISECONDS).then(() => undefined),
-    ]);
-
-    if (result !== undefined) {
-      if (result.status === "failed") {
-        throw result.error;
-      }
-
-      return;
-    }
-
-    await requestServer(configuration, RUNNER_HEARTBEAT_PATH);
+function parseRunnerServerMessage(
+  message: string,
+): Readonly<Record<string, unknown>> | undefined {
+  try {
+    return parseServerMessage(message);
+  } catch {
+    return undefined;
   }
 }
 
@@ -349,36 +267,72 @@ async function maintainConnection(
   configuration: RunnerConfiguration,
   configurationPath: string,
 ): Promise<void> {
-  let nextHeartbeatAt = Date.now() + HEARTBEAT_INTERVAL_MILLISECONDS;
+  let socket = await connectRunner(configuration, configurationPath);
+  const active = new Map<string, ActiveCommand>();
   let nextUpdateAt = Date.now() + UPDATE_INTERVAL_MILLISECONDS;
+  const bindSocket = (connected: WebSocket): void => {
+    connected.addEventListener("message", (event) => {
+      if (typeof event.data !== "string") {
+        connected.close(1003, "Text messages required");
+        return;
+      }
+
+      const message = parseRunnerServerMessage(event.data);
+      if (message === undefined) {
+        connected.close(1003, "Invalid server message");
+        return;
+      }
+
+      if (message["type"] === "ready") {
+        const version = message["version"];
+        if (typeof version === "string" && version !== Q_MUSH_RUNNER_VERSION) {
+          runnerUpdateTrigger.observe(
+            new Response(null, {
+              headers: { "x-q-mush-runner-version": version },
+            }),
+          );
+        }
+      } else if (message["type"] === "command") {
+        executeCommand(
+          connected,
+          readRunnerCommand({ command: message["command"] }),
+          active,
+        );
+      } else if (
+        message["type"] === "cancel" &&
+        typeof message["commandId"] === "string"
+      ) {
+        active.get(message["commandId"])?.controller.abort();
+      }
+    });
+    connected.addEventListener("close", () => {
+      for (const command of active.values()) {
+        command.controller.abort();
+      }
+      active.clear();
+    });
+  };
+  bindSocket(socket);
 
   for (;;) {
     if (runnerUpdateTrigger.take() || Date.now() >= nextUpdateAt) {
       if (await installUpdateIfAvailable(configuration, configurationPath)) {
+        socket.close(1000, "Updating");
         return;
       }
 
       nextUpdateAt = Date.now() + UPDATE_INTERVAL_MILLISECONDS;
     }
 
-    try {
-      await processWithHeartbeats(configuration);
-    } catch (error) {
-      handleConnectionFailure(error, "Q Mush connection lost; retrying…");
-      await sleep(RETRY_INTERVAL_MILLISECONDS);
+    if (socket.readyState !== WebSocket.OPEN) {
+      socket = await connectRunner(configuration, configurationPath);
+      bindSocket(socket);
     }
 
-    if (Date.now() >= nextHeartbeatAt) {
-      try {
-        await requestServer(configuration, RUNNER_HEARTBEAT_PATH);
-      } catch (error) {
-        handleConnectionFailure(error, "Q Mush connection lost; retrying…");
-      }
-
-      nextHeartbeatAt = Date.now() + HEARTBEAT_INTERVAL_MILLISECONDS;
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: "heartbeat" }));
     }
-
-    await sleep(WORK_POLL_INTERVAL_MILLISECONDS);
+    await sleep(HEARTBEAT_INTERVAL_MILLISECONDS);
   }
 }
 
@@ -402,7 +356,6 @@ async function run(): Promise<void> {
     return;
   }
 
-  await connect(configuration, configurationPath);
   await maintainConnection(configuration, configurationPath);
 }
 

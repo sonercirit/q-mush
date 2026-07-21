@@ -16,7 +16,9 @@ export interface DispatchRunnerToolCommand extends Omit<
 }
 
 interface RunnerCommandBrokerOptions {
+  readonly cancel?: (runnerId: string, commandId: string) => void;
   readonly commandId?: () => string;
+  readonly deliver?: (runnerId: string, command: RunnerToolCommand) => boolean;
 }
 
 interface PendingCommand {
@@ -34,12 +36,17 @@ function abortError(message: string): DOMException {
 }
 
 export class RunnerCommandBroker {
+  readonly #cancel: ((runnerId: string, commandId: string) => void) | undefined;
   readonly #commandId: () => string;
+  readonly #deliver:
+    ((runnerId: string, command: RunnerToolCommand) => boolean) | undefined;
   readonly #pending = new Map<string, PendingCommand>();
   readonly #queues = new Map<string, RunnerToolCommand[]>();
 
   constructor(options: RunnerCommandBrokerOptions = {}) {
+    this.#cancel = options.cancel;
     this.#commandId = options.commandId ?? randomUUID;
+    this.#deliver = options.deliver;
   }
 
   dispatch(
@@ -50,7 +57,6 @@ export class RunnerCommandBroker {
       return Promise.reject(abortError("The agent session was stopped"));
     }
 
-    const queue = this.#queues.get(input.runnerId) ?? [];
     const id = this.#commandId();
 
     if (id.length === 0 || this.#pending.has(id)) {
@@ -81,9 +87,20 @@ export class RunnerCommandBroker {
         signal,
       };
       this.#pending.set(id, pending);
-      queue.push(command);
-      this.#queues.set(input.runnerId, queue);
       signal?.addEventListener("abort", cancel, { once: true });
+
+      if (signal?.aborted === true) {
+        cancel();
+        return;
+      }
+
+      if (this.#deliver?.(input.runnerId, command) === true) {
+        pending.phase = "in_flight";
+      } else {
+        const queue = this.#queues.get(input.runnerId) ?? [];
+        queue.push(command);
+        this.#queues.set(input.runnerId, queue);
+      }
     });
   }
 
@@ -102,16 +119,55 @@ export class RunnerCommandBroker {
         return undefined;
       }
 
-      const pending = this.#pending.get(command.id);
+      const pending = this.#setPhase(command, "in_flight");
 
       if (pending !== undefined) {
-        pending.phase = "in_flight";
-
         if (queue.length === 0) {
           this.#queues.delete(runnerId);
         }
 
         return command;
+      }
+    }
+  }
+
+  #queue(runnerId: string): RunnerToolCommand[] {
+    const queue = this.#queues.get(runnerId) ?? [];
+    this.#queues.set(runnerId, queue);
+    return queue;
+  }
+
+  #setPhase(
+    command: RunnerToolCommand,
+    phase: PendingCommand["phase"],
+  ): PendingCommand | undefined {
+    const pending = this.#pending.get(command.id);
+    if (pending !== undefined) {
+      pending.phase = phase;
+    }
+    return pending;
+  }
+
+  #requeue(runnerId: string, command: RunnerToolCommand): void {
+    if (this.#setPhase(command, "queued") !== undefined) {
+      this.#queue(runnerId).unshift(command);
+    }
+  }
+
+  deliverQueued(
+    runnerId: string,
+    deliver: (command: RunnerToolCommand) => boolean,
+  ): void {
+    for (;;) {
+      const command = this.take(runnerId);
+
+      if (command === undefined) {
+        return;
+      }
+
+      if (!deliver(command)) {
+        this.#requeue(runnerId, command);
+        return;
       }
     }
   }
@@ -150,6 +206,9 @@ export class RunnerCommandBroker {
     }
 
     this.#settle(commandId, pending);
+    if (pending.phase === "in_flight") {
+      this.#cancel?.(pending.runnerId, commandId);
+    }
     pending.reject(error);
   }
 

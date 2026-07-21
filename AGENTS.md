@@ -69,20 +69,20 @@ task-specific progress, guesses, or sensitive values.
 
 ## Architecture and Conventions
 
-- Bun manages dependencies through `package.json` and the committed `bun.lock`
-  lockfile.
-- `src/server.ts` builds `src/client.tsx` and the Tailwind stylesheet in memory
-  at startup, then serves them from `/app.js` and `/styles.css`. Because an
-  agent may modify this repository through the running app, `bun run dev`
-  deliberately does not restart for source edits. `scripts/dev.ts` watches only
-  the ignored `data/development-server.restart` trigger written by
-  `bun run dev:restart`. `src/runner-executable.ts` fingerprints the runner
-  source and compiler, builds in a private temporary directory, caches it in
-  memory, and serves it from `/runner/executable`. Triggered development
-  restarts reject new agent work, let active sessions finish, then replace the
-  server process, so a session can safely request its own restart. Textual
-  response bodies are precompressed once per handler, with `zstd`, Brotli, gzip,
-  or deflate negotiated in that server-preference order.
+- Bun manages dependencies through the committed `package.json` and `bun.lock`.
+- `src/server.ts` serves the browser JavaScript and Tailwind CSS. Browser state,
+  session updates, and runner work use authenticated WebSockets at
+  `/api/realtime` and `/api/runner/realtime`; there is no polling or SSE
+  application transport. Because an agent may modify this repository through the
+  running app, `bun run dev` deliberately does not restart for source edits.
+  `scripts/dev.ts` watches only the ignored `data/development-server.restart`
+  trigger written by `bun run dev:restart`. `src/runner-executable.ts`
+  fingerprints the runner source and compiler, builds in a private temporary
+  directory, caches it in memory, and serves it from `/runner/executable`.
+  Triggered development restarts reject new agent work, let active sessions
+  finish, then replace the server process, so a session can safely request its
+  own restart. Textual response bodies are precompressed once per handler, with
+  `zstd`, Brotli, gzip, or deflate negotiated in that server-preference order.
 - `src/pages.tsx` contains server page markup, while `src/client.tsx` mounts the
   browser app. Shared route paths are defined in `src/routes.ts`.
 - `src/auth.ts` implements Google OpenID Connect with an authorization-code +
@@ -108,16 +108,16 @@ task-specific progress, guesses, or sensitive values.
   emits the macOS/Linux one-line installer; it selects an x64/ARM64 and
   glibc/musl target, downloads one standalone executable, and starts it under
   `~/.q-mush/runner` by default without requiring Bun on that computer. The
-  runner reports machine metadata, sends 15-second heartbeats, and checks for an
-  update at startup and every five minutes. Runner API responses advertise the
-  current executable version, which also triggers a check between commands as
-  soon as the runner contacts a restarted development server. Updates use a
-  source/compiler version ETag, verify a server-provided SHA-256 digest,
-  atomically replace the executable, and restart it. Development restarts drain
-  active sessions first. The browser panel/controller refreshes online presence.
-  Reinstalling for the same user and machine rotates the existing registration
-  to the new token instead of creating a second runner; another user's
-  registration remains protected. Runner tokens never appear in list responses.
+  runner reports metadata and 15-second heartbeats on its authenticated
+  WebSocket and checks for updates at startup and every five minutes. Its
+  handshake version triggers update checks after server restarts; reconnecting
+  replaces an older socket for the same runner. Updates use a source/compiler
+  ETag and SHA-256 digest, atomically replace the executable, and restart it.
+  Development restarts drain active sessions first. The browser panel/controller
+  online presence. Reinstalling for the same user and machine rotates the
+  existing registration to the new token instead of creating a second runner;
+  another user's registration remains protected. Runner tokens never appear in
+  list responses.
 - `src/sessions.ts`, `src/session-store.ts`, and `src/agent-model.ts` implement
   persistent first-party coding sessions without an external agent harness. A
   session records the latest reported input-token usage (or `Not reported`) and
@@ -128,17 +128,17 @@ task-specific progress, guesses, or sensitive values.
   never enter browser or runner work payloads; `src/agent-tools.ts` defines the
   Pi-compatible `read`, `bash`, `edit`, and `write` base tools plus the
   `parallel` wrapper, `src/runner-command-broker.ts` queues their authenticated
-  calls, and the runner polls `/api/runner/work`, executes them in
-  `src/runner-tools.ts`, and returns results. The new-session working-directory
-  field retains manual entry and opens the interactive browser in
-  `src/directory-picker-client.tsx`; its controller posts to
-  `/api/runners/:id/directories`, which dispatches the private
-  `list_directories` runner command and returns a canonical path, its parent,
-  and up to 500 child directories. Before each initial or follow-up agent run,
-  the private `read_agent_file` runner command uses `src/runner-agent-file.ts`
-  to load an exact-root `AGENTS.md`, falling back to `CLAUDE.md`; only
-  `AGENTS.md` is used when both exist, and no extra context is added when
-  neither exists.
+  calls, and the runner receives them immediately through its authenticated
+  WebSocket, executes them in `src/runner-tools.ts`, and returns results on the
+  same connection. The new-session working-directory field retains manual entry
+  and opens the interactive browser in `src/directory-picker-client.tsx`; its
+  controller posts to `/api/runners/:id/directories`, which dispatches the
+  private `list_directories` runner command and returns a canonical path, its
+  parent, and up to 500 child directories. Before each initial or follow-up
+  agent run, the private `read_agent_file` runner command uses
+  `src/runner-agent-file.ts` to load an exact-root `AGENTS.md`, falling back to
+  `CLAUDE.md`; only `AGENTS.md` is used when both exist, and no extra context is
+  added when neither exists.
 
   `src/runner-workspace.ts` shares canonical workspace resolution and
   containment with the file tools. The latest agent-file selection is persisted
@@ -146,29 +146,29 @@ task-specific progress, guesses, or sensitive values.
   `src/session-transcript.tsx` renders that effective prompt and the complete
   tool definitions plus the raw arguments, call ID, name, and result for each
   tool entry. The control center creates, inspects, follows up, continues
-  without appending a user message, stops, and polls sessions through
-  `src/session-client.tsx` and `src/session-controller.ts`. Poll controllers
-  suppress render notifications when refreshed data has no visible change.
-  Browser rendering preserves the document viewport and keyed `data-scroll-key`
-  regions across full-root remounts; the session transcript starts at the bottom
-  and returns there when its message or agent-file revision changes. It defers
-  remounts while a select has focus, flushing on change or focus loss, and
-  periodic polls pause so the native picker stays open.
-  `src/agent-model-discovery.ts` queries the selected credential's provider for
-  compatible models and reasoning metadata; `src/agent-configuration.ts` owns
-  shared catalog types, accepted effort values, and API fallback models. The
-  new-session controls use the framework-free custom listbox in
-  `src/custom-select.tsx`; model options show discovered context limits. Model
-  and effort selections are persisted with the session. `src/agent-prompt.ts` is
-  the shared source for building the model system prompt and its transcript
-  display. Provider-returned OpenRouter reasoning and Codex reasoning summaries
-  are persisted as `thinking` transcript messages but excluded from provider
-  conversation replay. Session and transcript rows live in `agent_sessions` and
-  `agent_messages`; an interrupted server process marks active sessions failed
-  so they can be resumed explicitly. Session details and rebuilt conversations
-  synthesize a visible error result for any tool call interrupted before its
-  output was persisted, keeping the transcript and provider history complete on
-  resume without showing an interruption while a tool is still running.
+  without appending a user message, stops, and receives live sessions through
+  `src/realtime-client.ts`, `src/session-client.tsx`, and
+  `src/session-controller.ts`. Unchanged snapshots suppress render
+  notifications. Browser rendering preserves the document viewport and keyed
+  `data-scroll-key` regions across full-root remounts; the session transcript
+  starts at the bottom and returns there when its message or agent-file revision
+  changes. It defers remounts while a select has focus, flushing on change or
+  focus loss. `src/agent-model-discovery.ts` queries the selected credential's
+  provider for compatible models and reasoning metadata;
+  `src/agent-configuration.ts` owns shared catalog types, accepted effort
+  values, and API fallback models. The new-session controls use the
+  framework-free custom listbox in `src/custom-select.tsx`; model options show
+  discovered context limits. Model and effort selections are persisted with the
+  session. `src/agent-prompt.ts` is the shared source for building the model
+  system prompt and its transcript display. Provider-returned OpenRouter
+  reasoning and Codex reasoning summaries are persisted as `thinking` transcript
+  messages but excluded from provider conversation replay. Session and
+  transcript rows live in `agent_sessions` and `agent_messages`; an interrupted
+  server process marks active sessions failed so they can be resumed explicitly.
+  Session details and rebuilt conversations synthesize a visible error result
+  for any tool call interrupted before its output was persisted, keeping the
+  transcript and provider history complete on resume without showing an
+  interruption while a tool is still running.
 
 - `src/openai.ts` and `src/openrouter.ts` implement provider connections.
   Multiple OAuth or manual credentials live in `provider_credentials`, encrypted
@@ -278,13 +278,14 @@ task-specific progress, guesses, or sensitive values.
   directory picker intentionally browses outside a session workspace with the
   selected runner account's filesystem permissions; it returns directory
   metadata only, bounds each listing, and times out stalled requests. Stopping a
-  session aborts its model request and causes a polling runner to terminate an
-  active shell command. OpenAI API keys and OpenRouter use chat completions;
-  OpenAI OAuth uses the streaming ChatGPT Codex Responses endpoint and refreshes
-  its encrypted token bundle shortly before expiry. Provider defaults are
-  `gpt-4.1-mini`, `openai/gpt-4.1-mini`, and `gpt-5-codex` for OpenAI keys,
-  OpenRouter, and OpenAI OAuth respectively; they are API fallbacks and
-  preferred discovered defaults when present, not browser catalog sources.
+  session aborts its model request and pushes runner-command cancellation over
+  WebSocket so an active shell command terminates. OpenAI API-key and OAuth
+  requests prefer Responses WebSocket mode and fall back to HTTP streaming;
+  OpenRouter uses its supported streaming chat-completions transport. OpenAI
+  OAuth refreshes its encrypted token bundle shortly before expiry. Provider
+  defaults are `gpt-4.1-mini`, `openai/gpt-4.1-mini`, and `gpt-5-codex` for
+  OpenAI keys, OpenRouter, and OpenAI OAuth respectively; they are API fallbacks
+  and preferred discovered defaults when present, not browser catalog sources.
   Browser catalogs come from OpenAI `/v1/models`, OpenRouter
   `/api/v1/models/user`, or the ChatGPT Codex `/models` endpoint. Codex response
   parsing retains streamed output-text and function-call argument deltas because
@@ -292,9 +293,10 @@ task-specific progress, guesses, or sensitive values.
   has no reasoning capabilities, while OpenRouter and Codex return
   model-specific efforts. Optional reasoning uses `reasoning_effort` for OpenAI
   chat completions and `reasoning.effort` for OpenRouter and Codex Responses.
-  Agent model calls retry network failures and retryable HTTP responses three
-  times with abortable backoff, honoring `Retry-After`. Final errors include
-  provider detail and status.
+  OpenAI Responses WebSockets omit HTTP stream fields and fall back to HTTP only
+  before any provider event, avoiding replay after partial output. Agent model
+  calls retry network failures and retryable HTTP responses three times with
+  abortable backoff, honoring `Retry-After`.
 - Agent launches and brokered runner commands have no application-owned turn,
   queue, or elapsed-time limits. Every shell command must choose a positive
   timeout; no default or configured maximum is supplied. Provider requests

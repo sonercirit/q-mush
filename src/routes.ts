@@ -1,4 +1,5 @@
 export const API_BASE_PATH = "/api";
+export const REALTIME_PATH = `${API_BASE_PATH}/realtime`;
 export const APP_PATH = "/app";
 export const APP_SCRIPT_PATH = "/app.js";
 const AUTH_BASE_PATH = `${API_BASE_PATH}/auth`;
@@ -23,9 +24,7 @@ export function runnerDirectoriesPath(runnerId: string): string {
   return `${RUNNERS_PATH}/${encodeURIComponent(runnerId)}/${RUNNER_DIRECTORIES_SEGMENT}`;
 }
 const RUNNER_BASE_PATH = `${API_BASE_PATH}/runner`;
-export const RUNNER_HEARTBEAT_PATH = `${RUNNER_BASE_PATH}/heartbeat`;
-export const RUNNER_WORK_PATH = `${RUNNER_BASE_PATH}/work`;
-export const RUNNER_REGISTER_PATH = `${RUNNER_BASE_PATH}/register`;
+export const RUNNER_REALTIME_PATH = `${RUNNER_BASE_PATH}/realtime`;
 export const RUNNER_VERSION_HEADER = "x-q-mush-runner-version";
 export const RUNNER_INSTALLER_PATH = "/runner/install.sh";
 export const RUNNER_EXECUTABLE_PATH = "/runner/executable";

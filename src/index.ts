@@ -9,6 +9,12 @@ import {
   usesOpenAiLoopbackCallback,
 } from "./openai.ts";
 import { createOpenRouterIntegrationFromEnvironment } from "./openrouter.ts";
+import { RealtimeHub } from "./realtime-hub.ts";
+import {
+  createRealtimeIntegration,
+  isRealtimePath,
+  type QmushWebSocketData,
+} from "./realtime.ts";
 import { buildRunnerExecutableProvider } from "./runner-executable.ts";
 import { createRunnerIntegration } from "./runners.ts";
 import {
@@ -37,25 +43,41 @@ const openRouter = createOpenRouterIntegrationFromEnvironment(
   { database },
 );
 const runners = createRunnerIntegration(googleAuth, { database });
+const realtimeHub = new RealtimeHub();
 const sessions = createSessionIntegration(
   googleAuth,
   runners,
   { openai: openAi, openrouter: openRouter },
-  { braveSearch, database },
+  { braveSearch, database, realtime: realtimeHub },
+);
+const realtime = createRealtimeIntegration({
+  auth: googleAuth,
+  hub: realtimeHub,
+  runnerVersion: runnerExecutables.version,
+  runners,
+  sessions,
+});
+const handleRequest = createRequestHandler(
+  clientJavaScript,
+  stylesheet,
+  googleAuth,
+  openAi,
+  openRouter,
+  braveSearch,
+  runners,
+  sessions,
+  runnerExecutables,
 );
 let callbackServer: Bun.Server<undefined> | undefined;
-const server = Bun.serve({
-  fetch: createRequestHandler(
-    clientJavaScript,
-    stylesheet,
-    googleAuth,
-    openAi,
-    openRouter,
-    braveSearch,
-    runners,
-    sessions,
-    runnerExecutables,
-  ),
+const server = Bun.serve<QmushWebSocketData>({
+  fetch(request, server) {
+    if (isRealtimePath(request)) {
+      return realtime.upgrade(request, server);
+    }
+
+    return handleRequest(request);
+  },
+  websocket: realtime.websocket,
 });
 
 if (usesOpenAiLoopbackCallback(Bun.env)) {

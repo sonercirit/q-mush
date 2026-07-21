@@ -1,8 +1,8 @@
 import { expect } from "bun:test";
 
-interface RefreshController {
+interface RealtimeController<Value> {
+  applyRealtime(value: Value): void;
   load(): Promise<void>;
-  refresh(): Promise<void>;
 }
 
 type FetchImplementation = (
@@ -17,9 +17,10 @@ export function requestUrl(input: RequestInfo | URL): string {
       : input.url;
 }
 
-export async function expectRefreshToRemainSilent(
-  createController: (onChange: () => void) => RefreshController,
+export async function expectRealtimeToRemainSilent<Value>(
+  createController: (onChange: () => void) => RealtimeController<Value>,
   fetchImplementation: FetchImplementation,
+  realtimeValue: Value,
 ): Promise<void> {
   const originalFetch = globalThis.fetch;
   let changes = 0;
@@ -36,7 +37,7 @@ export async function expectRefreshToRemainSilent(
     await controller.load();
     const changesAfterLoad = changes;
 
-    await controller.refresh();
+    controller.applyRealtime(realtimeValue);
 
     expect(changes).toBe(changesAfterLoad);
   } finally {

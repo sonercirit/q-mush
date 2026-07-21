@@ -1,28 +1,19 @@
-import { test } from "bun:test";
+import { expect, test } from "bun:test";
 import { RunnerController } from "../runner-controller.ts";
-import { expectRefreshToRemainSilent } from "./controller-test-helpers.ts";
+import { expectRealtimeToRemainSilent } from "./controller-test-helpers.ts";
+import { runnerSummary } from "./runner-fixtures.ts";
 
-test("an online heartbeat refresh does not notify the unchanged view", async () => {
+test("an online heartbeat update does not notify the unchanged view", async () => {
   let requests = 0;
+  const online = [runnerSummary(1)];
 
-  await expectRefreshToRemainSilent(
+  await expectRealtimeToRemainSilent(
     (onChange) => new RunnerController(onChange),
     () => {
       requests += 1;
-      return Promise.resolve(
-        Response.json({
-          runners: [
-            {
-              architecture: "x64",
-              id: "runner-1",
-              lastSeenAt: requests,
-              name: "workstation",
-              platform: "linux",
-              status: "online",
-            },
-          ],
-        }),
-      );
+      return Promise.resolve(Response.json({ runners: online }));
     },
+    [runnerSummary(2)],
   );
+  expect(requests).toBe(1);
 });

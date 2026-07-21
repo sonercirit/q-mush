@@ -1,37 +1,21 @@
 import { describe, expect, test } from "bun:test";
 import { SESSIONS_PATH } from "../routes.ts";
-import type { createSessionIntegration } from "../sessions.ts";
-import {
-  createAuthenticatedRequest,
-  createRunnerRequest,
-} from "./authenticated-integration-test-helpers.ts";
+import { createAuthenticatedRequest } from "./authenticated-integration-test-helpers.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
   connectedSessionSetup,
   createSessionRequest,
   RUNNER_COMMAND_ID,
-  RUNNER_COMMAND_PATH,
-  RUNNER_TOKEN,
   SESSION_ID,
 } from "./session-integration-fixtures.ts";
 import {
   completeAgentFileLookup,
   completeRunnerCommand,
+  expectRunnerCommand,
   hasSessionStatus,
   sessionDetail,
-  takeRunnerCommand,
   waitForSessionValue,
 } from "./session-integration-helpers.ts";
-
-async function commandActivity(
-  sessions: ReturnType<typeof createSessionIntegration>,
-): Promise<unknown> {
-  const response = await sessions.workResult(
-    createRunnerRequest(RUNNER_COMMAND_PATH, RUNNER_TOKEN, undefined, "GET"),
-    RUNNER_COMMAND_ID,
-  );
-  return response.json();
-}
 
 describe("session continuation", () => {
   test("spawns a session, executes tools on its runner, and accepts follow-ups", async () => {
@@ -56,8 +40,8 @@ describe("session continuation", () => {
         toolCalls: [],
       },
     ]);
-    const { database, selectedReasoningEfforts, sessions } =
-      await connectedSessionSetup(model);
+    const setup = connectedSessionSetup(model);
+    const { database, selectedReasoningEfforts, sessions } = setup;
     const createResponse = await sessions.collection(createSessionRequest());
 
     expect(createResponse.status).toBe(201);
@@ -69,33 +53,21 @@ describe("session continuation", () => {
       status: "queued",
       title: "Inspect README.md",
     });
-    await completeAgentFileLookup(sessions);
-
-    const workResponse = await takeRunnerCommand(
-      sessions,
-      "The runner did not receive an agent command",
-    );
-
-    const command: unknown = await workResponse.json();
-    expect(command).toEqual({
-      command: {
+    await completeAgentFileLookup(setup);
+    await expectRunnerCommand(
+      setup,
+      {
         arguments: { path: "README.md" },
         id: RUNNER_COMMAND_ID,
         sessionId: SESSION_ID,
         tool: "read",
         workingDirectory: "/work/project",
       },
-    });
-    expect(JSON.stringify(command)).not.toContain("provider-secret");
-    expect(await commandActivity(sessions)).toEqual({
-      active: true,
-    });
+      "The runner did not receive an agent command",
+    );
 
-    const resultResponse = await completeRunnerCommand(sessions, "# Q Mush");
+    const resultResponse = completeRunnerCommand(setup, "# Q Mush");
     expect(resultResponse.status).toBe(204);
-    expect(await commandActivity(sessions)).toEqual({
-      active: false,
-    });
     const idle = await waitForSessionValue(
       () => sessionDetail(sessions),
       hasSessionStatus("idle"),
@@ -116,7 +88,7 @@ describe("session continuation", () => {
       SESSION_ID,
     );
     expect(followUp.status).toBe(202);
-    await completeAgentFileLookup(sessions);
+    await completeAgentFileLookup(setup);
     const continued = await waitForSessionValue(
       () => sessionDetail(sessions),
       (value) =>
@@ -136,7 +108,7 @@ describe("session continuation", () => {
       SESSION_ID,
     );
     expect(resumed.status).toBe(202);
-    await completeAgentFileLookup(sessions);
+    await completeAgentFileLookup(setup);
     const continuationRequest = await waitForSessionValue(
       () => model.requests[3],
       (value) => value !== undefined,

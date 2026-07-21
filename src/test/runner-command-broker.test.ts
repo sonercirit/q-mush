@@ -21,7 +21,88 @@ function runnerCommand(
   };
 }
 
+async function expectCanceledCommand(
+  delivered: boolean,
+  commandId: string,
+): Promise<readonly string[]> {
+  const canceled: string[] = [];
+  const broker = new RunnerCommandBroker({
+    cancel: (_runnerId, canceledId) => canceled.push(canceledId),
+    commandId: () => commandId,
+    deliver: () => delivered,
+  });
+  const result = broker.dispatch(runnerCommand());
+  broker.cancelSession(SESSION_ID);
+  expect(await captureRejection(result)).toMatchObject({ name: "AbortError" });
+  return canceled;
+}
+
+test("delivers a command immediately when a runner socket is connected", async () => {
+  const delivered: unknown[] = [];
+  const broker = new RunnerCommandBroker({
+    commandId: () => "websocket-command",
+    deliver: (runnerId, command) => {
+      delivered.push({ command, runnerId });
+      return true;
+    },
+  });
+  const result = broker.dispatch(runnerCommand());
+
+  expect(delivered).toEqual([
+    {
+      command: {
+        arguments: {},
+        id: "websocket-command",
+        sessionId: SESSION_ID,
+        tool: "bash",
+        workingDirectory: "/work/project",
+      },
+      runnerId: RUNNER_ID,
+    },
+  ]);
+  expect(broker.take(RUNNER_ID)).toBeUndefined();
+  expect(broker.complete(RUNNER_ID, "websocket-command", "done")).toBeTrue();
+  expect(await result).toBe("done");
+});
+
+test("pushes cancellation for an in-flight WebSocket command", async () => {
+  expect(await expectCanceledCommand(true, "cancel-websocket-command")).toEqual(
+    ["cancel-websocket-command"],
+  );
+});
+
 describe("runner command broker", () => {
+  test("does not deliver when the signal aborts while subscribing", async () => {
+    const controller = new AbortController();
+    const delivered: unknown[] = [];
+    const originalAdd = controller.signal.addEventListener.bind(
+      controller.signal,
+    );
+    controller.signal.addEventListener = (
+      type: "abort",
+      listener: (this: AbortSignal, event: Event) => unknown,
+      options?: AddEventListenerOptions | boolean,
+    ) => {
+      originalAdd(type, listener, options);
+      controller.abort();
+    };
+    const broker = new RunnerCommandBroker({
+      commandId: () => "racing-command",
+      deliver: () => Boolean(delivered.push("delivered")),
+    });
+
+    const result = broker.dispatch(runnerCommand(), controller.signal);
+
+    expect(delivered).toEqual([]);
+    expect(await captureRejection(result)).toMatchObject({
+      name: "AbortError",
+    });
+  });
+
+  test("does not push cancellation for a queued command", async () => {
+    expect(await expectCanceledCommand(false, "queued-command")).toEqual([]);
+  });
+
   test("delivers a tool command only to its runner and resolves its result", async () => {
     const broker = new RunnerCommandBroker({
       commandId: () => "command-1",

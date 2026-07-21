@@ -93,8 +93,10 @@ function rawContextWindow(
   return isRecord(capabilities) ? capabilities[key] : undefined;
 }
 
+type ContextWindowRecord = Readonly<Record<string, unknown>>;
+
 function modelContextWindow(
-  value: Readonly<Record<string, unknown>>,
+  value: ContextWindowRecord,
   keys: readonly string[],
 ): number | null {
   for (const key of keys) {

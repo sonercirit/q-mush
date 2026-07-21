@@ -24,7 +24,6 @@ import {
   createApiError,
   createJsonResponse,
   createMethodNotAllowedResponse,
-  createNoContentResponse,
   parseJsonRequest,
 } from "./http.ts";
 import { createUuidV7, type IdGenerator } from "./ids.ts";
@@ -32,19 +31,24 @@ import type {
   ProviderCredentialAccess,
   ProviderId,
 } from "./provider-credential-store.ts";
+import type { RealtimeHub } from "./realtime-hub.ts";
 import {
   RunnerCommandBroker,
   type DispatchRunnerToolCommand,
+  type RunnerToolCommand,
 } from "./runner-command-broker.ts";
 import { MAXIMUM_RUNNER_PATH_LENGTH } from "./runner-directory-model.ts";
 import type { RunnerIntegration } from "./runners.ts";
 import { loadSessionAgentFile } from "./session-agent-file.ts";
-import type { AgentSessionDetail } from "./session-model.ts";
+import type {
+  AgentSessionDetail,
+  AgentSessionSummary,
+} from "./session-model.ts";
+import { SessionRecorder } from "./session-recorder.ts";
 import {
   SessionRequestHelpers,
   readIdentifier,
   readStringField,
-  withRequestMethod,
 } from "./session-request-helpers.ts";
 import { SessionRuntimes } from "./session-runtime.ts";
 import { SessionStore, type CreateAgentSession } from "./session-store.ts";
@@ -71,6 +75,10 @@ type SessionAction = (
 interface AgentModelFactoryOptions {
   readonly credential: AgentProviderCredential;
   readonly model: string;
+  readonly onDelta?: (delta: {
+    readonly content: string;
+    readonly thinking: string;
+  }) => void;
   readonly provider: ProviderId;
   readonly reasoningEffort: AgentReasoningEffort | null;
   readonly systemPrompt: string;
@@ -86,6 +94,7 @@ interface SessionDependencies {
   readonly modelFactory?: AgentModelFactory;
   readonly now?: () => number;
   readonly randomId?: IdGenerator;
+  readonly realtime?: RealtimeHub;
 }
 
 type CreateSessionInput = Omit<
@@ -104,15 +113,28 @@ interface RuntimeSelection extends CredentialSelection {
 
 export interface SessionIntegration {
   collection(request: Request): Promise<Response>;
+  completeRunnerCommand(
+    runnerId: string,
+    commandId: string,
+    output: string,
+  ): boolean;
   continue(request: Request, sessionId: string): Promise<Response>;
+  deliverRunnerCommands(
+    runnerId: string,
+    deliver: (command: RunnerToolCommand) => boolean,
+  ): void;
+  detailForUser(
+    userId: string,
+    sessionId: string,
+  ): AgentSessionDetail | undefined;
   directories(request: Request, runnerId: string): Promise<Response>;
   drain(): Promise<void>;
   item(request: Request, sessionId: string): Response;
+  listForUser(userId: string): readonly AgentSessionSummary[];
   message(request: Request, sessionId: string): Promise<Response>;
   models(request: Request): Promise<Response>;
+  onChange(listener: (userId: string, sessionId: string) => void): void;
   stop(request: Request, sessionId: string): Promise<Response>;
-  work(request: Request): Response;
-  workResult(request: Request, commandId: string): Promise<Response>;
 }
 
 function readProvider(value: unknown): ProviderId | undefined {
@@ -187,7 +209,9 @@ class DrizzleSessionIntegration implements SessionIntegration {
   readonly #discoverModels: AgentModelDiscoverer;
   readonly #modelFactory: AgentModelFactory;
   readonly #now: () => number;
+  readonly #onChange = new Set<(userId: string, sessionId: string) => void>();
   readonly #providers: SessionCredentialReaders;
+  readonly #realtime: RealtimeHub | undefined;
   readonly #requests: SessionRequestHelpers;
   readonly #runners: RunnerIntegration;
   readonly #runtimes = new SessionRuntimes();
@@ -199,7 +223,15 @@ class DrizzleSessionIntegration implements SessionIntegration {
     providers: SessionCredentialReaders,
     dependencies: SessionDependencies,
   ) {
-    this.#broker = dependencies.broker ?? new RunnerCommandBroker();
+    this.#realtime = dependencies.realtime;
+    this.#broker =
+      dependencies.broker ??
+      new RunnerCommandBroker({
+        cancel: (runnerId, commandId) =>
+          this.#realtime?.publishRunnerCancellation(runnerId, commandId),
+        deliver: (runnerId, command) =>
+          this.#realtime?.publishRunnerCommand(runnerId, command) === true,
+      });
     this.#braveSearch = dependencies.braveSearch;
     this.#discoverModels = dependencies.discoverModels ?? discoverAgentModels;
     this.#modelFactory =
@@ -222,8 +254,23 @@ class DrizzleSessionIntegration implements SessionIntegration {
     );
   }
 
+  completeRunnerCommand(
+    runnerId: string,
+    commandId: string,
+    output: string,
+  ): boolean {
+    return this.#broker.complete(runnerId, commandId, output);
+  }
+
   async continue(request: Request, sessionId: string): Promise<Response> {
     return await this.#resume(request, sessionId);
+  }
+
+  deliverRunnerCommands(
+    runnerId: string,
+    deliver: (command: RunnerToolCommand) => boolean,
+  ): void {
+    this.#broker.deliverQueued(runnerId, deliver);
   }
 
   drain(): Promise<void> {
@@ -234,10 +281,21 @@ class DrizzleSessionIntegration implements SessionIntegration {
     return await this.#requests.directories(request, runnerId);
   }
 
+  detailForUser(
+    userId: string,
+    sessionId: string,
+  ): AgentSessionDetail | undefined {
+    return this.#store.get(userId, sessionId);
+  }
+
   item(request: Request, sessionId: string): Response {
     return this.#requests.authenticate(request, "GET", (user) =>
       this.#detailResponse(user.id, sessionId),
     );
+  }
+
+  listForUser(userId: string): readonly AgentSessionSummary[] {
+    return this.#store.list(userId);
   }
 
   message(request: Request, sessionId: string): Promise<Response> {
@@ -258,6 +316,10 @@ class DrizzleSessionIntegration implements SessionIntegration {
     return Promise.resolve(response);
   }
 
+  onChange(listener: (userId: string, sessionId: string) => void): void {
+    this.#onChange.add(listener);
+  }
+
   async stop(request: Request, sessionId: string): Promise<Response> {
     return this.#requests.postForUser(request, (user) =>
       this.#withStoredSession(user, sessionId, (existing) => {
@@ -267,41 +329,16 @@ class DrizzleSessionIntegration implements SessionIntegration {
 
         this.#runtimes.abort(sessionId);
         this.#broker.cancelSession(sessionId);
+        this.#notify(user.id, sessionId);
         return this.#detailResponse(user.id, sessionId);
       }),
     );
   }
 
-  work(request: Request): Response {
-    return this.#withRunner(request, (runnerId) =>
-      withRequestMethod(request, "POST", () => {
-        const command = this.#broker.take(runnerId);
-        return command === undefined
-          ? createNoContentResponse()
-          : createJsonResponse({ command });
-      }),
-    );
-  }
-
-  workResult(request: Request, commandId: string): Promise<Response> {
-    return Promise.resolve(
-      this.#withRunner(request, (runnerId) => {
-        switch (request.method) {
-          case "GET":
-            return createJsonResponse({
-              active: this.#broker.isActive(runnerId, commandId),
-            });
-          case "POST":
-            return this.#requests.recordWorkResult(
-              request,
-              runnerId,
-              commandId,
-            );
-          default:
-            return createMethodNotAllowedResponse("GET, POST");
-        }
-      }),
-    );
+  #notify(userId: string, sessionId: string): void {
+    for (const listener of this.#onChange) {
+      listener(userId, sessionId);
+    }
   }
 
   #withStoredSession(
@@ -353,16 +390,6 @@ class DrizzleSessionIntegration implements SessionIntegration {
     return detail === undefined
       ? createApiError("not_found", 404)
       : createJsonResponse(detail);
-  }
-
-  #withRunner<Result>(
-    request: Request,
-    action: (runnerId: string) => Result,
-  ): Response | Result {
-    const runner = this.#runners.authenticatedRunner(request);
-    return runner === undefined
-      ? createApiError("invalid_token", 401)
-      : action(runner.id);
   }
 
   #collectionForUser(
@@ -447,6 +474,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
         this.#now(),
       );
       this.#launch(detail, credential, user.id);
+      this.#notify(user.id, detail.id);
       return createJsonResponse(detail, 201);
     });
   }
@@ -503,6 +531,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
       }
 
       this.#launch(queued.detail, credential, user.id);
+      this.#notify(user.id, sessionId);
       return createJsonResponse(queued.detail, 202);
     });
   }
@@ -517,6 +546,22 @@ class DrizzleSessionIntegration implements SessionIntegration {
     );
   }
 
+  #finish(detail: AgentSessionDetail, userId: string, error?: unknown): void {
+    if (error !== undefined) {
+      this.#store.appendSystemMessage(
+        detail.id,
+        safeErrorMessage(error),
+        this.#now(),
+      );
+    }
+    this.#store.mark(
+      detail.id,
+      error === undefined ? "idle" : "failed",
+      this.#now(),
+    );
+    this.#notify(userId, detail.id);
+  }
+
   async #run(
     detail: AgentSessionDetail,
     credential: ProviderCredentialAccess,
@@ -526,6 +571,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
     if (!this.#store.mark(detail.id, "running", this.#now())) {
       return;
     }
+    this.#notify(userId, detail.id);
 
     try {
       const agentFile = await loadSessionAgentFile(
@@ -535,10 +581,22 @@ class DrizzleSessionIntegration implements SessionIntegration {
       );
 
       this.#store.setAgentFile(detail.id, agentFile, this.#now());
+      this.#notify(userId, detail.id);
 
       const model = this.#modelFactory({
         credential,
         model: detail.model,
+        onDelta: (delta) => {
+          try {
+            this.#realtime?.publishUser(userId, {
+              ...delta,
+              sessionId: detail.id,
+              type: "session_delta",
+            });
+          } catch {
+            // Live delivery must never interrupt the persisted model turn.
+          }
+        },
         provider: detail.provider,
         reasoningEffort: detail.reasoningEffort,
         systemPrompt: createAgentSystemPrompt(agentFile),
@@ -547,6 +605,14 @@ class DrizzleSessionIntegration implements SessionIntegration {
         braveSearch: this.#braveSearch,
         userId,
       });
+      const recorder = new SessionRecorder(
+        this.#store,
+        detail.id,
+        this.#now,
+        () => {
+          this.#notify(userId, detail.id);
+        },
+      );
       await runAgentLoop({
         executeTool: (call) => {
           const skillOutput = skills.execute(call.name, call.arguments);
@@ -567,22 +633,17 @@ class DrizzleSessionIntegration implements SessionIntegration {
         initialMessages: this.#store.conversation(detail.id),
         model,
         recordContextTokens: (tokens) => {
-          this.#store.updateContextTokens(detail.id, tokens, this.#now());
+          recorder.contextTokens(tokens);
         },
         recordMessage: (message) => {
-          this.#store.appendAgentMessage(detail.id, message, this.#now());
+          recorder.message(message);
         },
         signal: controller.signal,
       });
-      this.#store.mark(detail.id, "idle", this.#now());
+      this.#finish(detail, userId);
     } catch (error) {
       if (!controller.signal.aborted && !isAbort(error)) {
-        this.#store.appendSystemMessage(
-          detail.id,
-          safeErrorMessage(error),
-          this.#now(),
-        );
-        this.#store.mark(detail.id, "failed", this.#now());
+        this.#finish(detail, userId, error);
       }
     }
   }

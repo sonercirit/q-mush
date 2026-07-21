@@ -8,17 +8,16 @@ import {
   createJsonResponse,
   createMethodNotAllowedResponse,
   createNoContentResponse,
-  readJsonRequest,
 } from "./http.ts";
 import { createUuidV7 } from "./ids.ts";
 import type { OAuthDependencies } from "./oauth.ts";
 import { RUNNER_INSTALLER_PATH } from "./routes.ts";
 import { quoteShellValue, renderRunnerInstaller } from "./runner-installer.ts";
+import type { RunnerSummary } from "./runner-model.ts";
 import {
   RunnerStore,
   type RunnerConnection,
   type RunnerMetadata,
-  type RunnerRegistrationResult,
 } from "./runner-store.ts";
 
 const RUNNER_TOKEN_PATTERN = /^qmr_[A-Za-z\d_-]{8,200}$/u;
@@ -30,14 +29,21 @@ type RunnerDependencies = Pick<
   "database" | "now" | "randomId" | "randomToken"
 >;
 
+interface ConnectedRunner {
+  readonly connection: RunnerConnection;
+  readonly userId: string;
+}
+
 export interface RunnerIntegration {
-  authenticatedRunner(request: Request): RunnerConnection | undefined;
   collection(request: Request): Response;
-  heartbeat(request: Request): Response;
+  connect(token: string, metadata: RunnerMetadata): ConnectedRunner | undefined;
+  disconnected(runner: RunnerConnection): void;
   installer(request: Request): Response;
-  register(request: Request): Promise<Response>;
+  listForUser(userId: string): readonly RunnerSummary[];
   remove(request: Request, runnerId: string): Response;
   runnerIsAvailable(userId: string, runnerId: string): boolean;
+  runnerToken(request: Request): string | undefined;
+  seen(runner: RunnerConnection): void;
 }
 
 function defaultRandomToken(): string {
@@ -74,7 +80,7 @@ function normalizeMachineValue(value: unknown): string | undefined {
   return MACHINE_VALUE_PATTERN.test(normalized) ? normalized : undefined;
 }
 
-function readRunnerMetadata(value: unknown): RunnerMetadata | undefined {
+export function readRunnerMetadata(value: unknown): RunnerMetadata | undefined {
   if (!authModel.isRecord(value)) {
     return undefined;
   }
@@ -97,19 +103,6 @@ function readRunnerMetadata(value: unknown): RunnerMetadata | undefined {
   return { architecture, machineFingerprint, name, platform };
 }
 
-function registrationResponse(result: RunnerRegistrationResult): Response {
-  switch (result.status) {
-    case "registered":
-      return createJsonResponse({ id: result.id }, 201);
-    case "runner_exists":
-      return createApiError("runner_exists", 409);
-    case "token_already_used":
-      return createApiError("token_already_used", 409);
-    case "unknown_token":
-      return createApiError("invalid_token", 401);
-  }
-}
-
 class DrizzleRunnerIntegration implements RunnerIntegration {
   readonly #auth: GoogleAuth;
   readonly #now: () => number;
@@ -126,33 +119,42 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
     );
   }
 
-  authenticatedRunner(request: Request): RunnerConnection | undefined {
-    const token = readBearerToken(request);
-    return token === undefined ? undefined : this.#store.authenticate(token);
-  }
-
   collection(request: Request): Response {
     return withAuthenticatedUser(this.#auth, request, (user) =>
       this.#collectionForUser(request, user),
     );
   }
 
-  heartbeat(request: Request): Response {
-    return request.method === "POST"
-      ? this.#recordHeartbeat(request)
-      : createMethodNotAllowedResponse("POST");
+  connect(
+    token: string,
+    metadata: RunnerMetadata,
+  ): ConnectedRunner | undefined {
+    const result = this.#store.register(token, metadata, this.#now());
+    const connection =
+      result.status === "registered"
+        ? this.#store.authenticate(token)
+        : undefined;
+    return connection === undefined
+      ? undefined
+      : { connection, userId: connection.userId };
+  }
+
+  #setOnline(runner: RunnerConnection, online: boolean): void {
+    this.#store.setOnline(runner.id, runner.userId, this.#now(), online);
+  }
+
+  disconnected(runner: RunnerConnection): void {
+    this.#setOnline(runner, false);
+  }
+
+  listForUser(userId: string): readonly RunnerSummary[] {
+    return this.#store.list(userId, this.#now());
   }
 
   installer(request: Request): Response {
     return request.method === "GET"
       ? this.#serveInstaller(request)
       : createMethodNotAllowedResponse("GET");
-  }
-
-  async register(request: Request): Promise<Response> {
-    return request.method === "POST"
-      ? this.#registerComputer(request)
-      : createMethodNotAllowedResponse("POST");
   }
 
   remove(request: Request, runnerId: string): Response {
@@ -169,6 +171,17 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
     return this.#store.isAvailable(userId, runnerId, this.#now());
   }
 
+  runnerToken(request: Request): string | undefined {
+    const token = readBearerToken(request);
+    return token !== undefined && this.#store.hasActiveToken(token)
+      ? token
+      : undefined;
+  }
+
+  seen(runner: RunnerConnection): void {
+    this.#setOnline(runner, true);
+  }
+
   #collectionForUser(
     request: Request,
     user: authModel.AuthenticatedUser,
@@ -182,31 +195,6 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
     return request.method === "POST"
       ? this.#createSetup(request, user)
       : createMethodNotAllowedResponse("GET, POST");
-  }
-
-  #recordHeartbeat(request: Request): Response {
-    const token = readBearerToken(request);
-    const connected =
-      token !== undefined && this.#store.heartbeat(token, this.#now());
-    return connected
-      ? createNoContentResponse()
-      : createApiError("invalid_token", 401);
-  }
-
-  async #registerComputer(request: Request): Promise<Response> {
-    const token = readBearerToken(request);
-
-    if (token === undefined) {
-      return createApiError("invalid_token", 401);
-    }
-
-    const json = await readJsonRequest(request);
-    const metadata = json.ok ? readRunnerMetadata(json.value) : undefined;
-    return metadata === undefined
-      ? createApiError("invalid_request", 400)
-      : registrationResponse(
-          this.#store.register(token, metadata, this.#now()),
-        );
   }
 
   #serveInstaller(request: Request): Response {

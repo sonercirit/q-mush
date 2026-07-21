@@ -22,12 +22,11 @@ import {
   OPENROUTER_CREDENTIALS_PATH,
   OPENROUTER_OAUTH_CALLBACK_PATH,
   OPENROUTER_OAUTH_PATH,
+  REALTIME_PATH,
   RUNNER_EXECUTABLE_PATH,
-  RUNNER_HEARTBEAT_PATH,
   RUNNER_INSTALLER_PATH,
-  RUNNER_REGISTER_PATH,
+  RUNNER_REALTIME_PATH,
   RUNNER_VERSION_HEADER,
-  RUNNER_WORK_PATH,
   runnerDirectoriesPath,
   RUNNERS_PATH,
   SESSION_MODELS_PATH,
@@ -184,10 +183,9 @@ describe("routes", () => {
     expect(runnerDirectoriesPath("runner/id")).toBe(
       "/api/runners/runner%2Fid/directories",
     );
-    expect(RUNNER_REGISTER_PATH).toBe("/api/runner/register");
-    expect(RUNNER_HEARTBEAT_PATH).toBe("/api/runner/heartbeat");
+    expect(RUNNER_REALTIME_PATH).toBe("/api/runner/realtime");
+    expect(REALTIME_PATH).toBe("/api/realtime");
     expect(RUNNER_VERSION_HEADER).toBe("x-q-mush-runner-version");
-    expect(RUNNER_WORK_PATH).toBe("/api/runner/work");
     expect(SESSIONS_PATH).toBe("/api/sessions");
     expect(RUNNER_INSTALLER_PATH).toBe("/runner/install.sh");
     expect(RUNNER_EXECUTABLE_PATH).toBe("/runner/executable");
@@ -245,33 +243,23 @@ describe("page server", () => {
     );
   });
 
-  test("protects user runner routes and exposes runner callbacks", async () => {
+  test("protects user runner routes and does not expose removed callbacks", async () => {
     const collectionResponse = await sendRequest(RUNNERS_PATH);
     const setupResponse = await sendRequest(RUNNERS_PATH, undefined, "POST");
-    const registrationResponse = await sendRequest(
-      RUNNER_REGISTER_PATH,
-      undefined,
-      "POST",
-    );
-    const heartbeatResponse = await sendRequest(
-      RUNNER_HEARTBEAT_PATH,
-      undefined,
-      "POST",
-    );
+    const removedCallbackResponses = await Promise.all([
+      sendRequest("/api/runner/register", undefined, "POST"),
+      sendRequest("/api/runner/heartbeat", undefined, "POST"),
+      sendRequest("/api/runner/work", undefined, "POST"),
+    ]);
     const installerResponse = await sendRequest(
       `${RUNNER_INSTALLER_PATH}?token=qmr_unknown-token`,
     );
 
     expect(collectionResponse.status).toBe(401);
     expect(setupResponse.status).toBe(401);
-    expect(registrationResponse.status).toBe(401);
-    expect(registrationResponse.headers.get(RUNNER_VERSION_HEADER)).toBe(
-      runnerExecutables.version,
-    );
-    expect(heartbeatResponse.status).toBe(401);
-    expect(heartbeatResponse.headers.get(RUNNER_VERSION_HEADER)).toBe(
-      runnerExecutables.version,
-    );
+    expect(
+      removedCallbackResponses.every(({ status }) => status === 404),
+    ).toBeTrue();
     expect(installerResponse.status).toBe(404);
   });
 
@@ -285,7 +273,7 @@ describe("page server", () => {
     expectAllStatuses(responses, 401);
   });
 
-  test("protects agent session and runner work routes", async () => {
+  test("protects agent session routes", async () => {
     const responses = await Promise.all([
       sendRequest(SESSIONS_PATH),
       sendRequest(SESSIONS_PATH, undefined, "POST"),
@@ -297,20 +285,9 @@ describe("page server", () => {
       sendRequest(`${SESSIONS_PATH}/session-id/messages`, undefined, "POST"),
       sendRequest(`${SESSIONS_PATH}/session-id/stop`, undefined, "POST"),
       sendRequest(runnerDirectoriesPath("runner-id"), undefined, "POST"),
-      sendRequest(RUNNER_WORK_PATH, undefined, "POST"),
-      sendRequest(`${RUNNER_WORK_PATH}/command-id`, undefined, "POST"),
     ]);
 
     expectAllStatuses(responses, 401);
-    expect(
-      responses
-        .slice(-2)
-        .every(
-          (response) =>
-            response.headers.get(RUNNER_VERSION_HEADER) ===
-            runnerExecutables.version,
-        ),
-    ).toBeTrue();
   });
 
   test("serves the authentication session endpoint", async () => {

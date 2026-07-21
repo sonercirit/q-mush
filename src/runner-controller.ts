@@ -73,6 +73,28 @@ export class RunnerController {
     this.#onChange = onChange;
   }
 
+  applyRealtime(runners: readonly RunnerSummary[]): void {
+    if (this.#state.creating || this.#state.removingId !== undefined) {
+      return;
+    }
+
+    this.#applyList(runners);
+  }
+
+  #applyList(runners: readonly RunnerSummary[]): void {
+    const setup = setupAfterRefresh(this.#state.setup, runners);
+
+    if (
+      runnerListsMatch(this.#state.runners, runners) &&
+      this.#state.setup === setup
+    ) {
+      this.#state = { ...this.#state, runners };
+      return;
+    }
+
+    this.#patch({ error: undefined, runners, setup });
+  }
+
   bind(container: Element): void {
     const panel = container.querySelector('[data-runner-panel="true"]');
 
@@ -99,12 +121,6 @@ export class RunnerController {
 
   load(): Promise<void> {
     return this.#readList(true);
-  }
-
-  refresh(): Promise<void> {
-    return this.#state.creating || this.#state.removingId !== undefined
-      ? Promise.resolve()
-      : this.#readList(false);
   }
 
   reset(): void {
@@ -185,19 +201,7 @@ export class RunnerController {
       const runners = readRunners(await requestJson(RUNNERS_PATH));
 
       if (this.#isCurrent(revision)) {
-        const setup = setupAfterRefresh(this.#state.setup, runners);
-
-        if (
-          !showLoading &&
-          this.#state.error === undefined &&
-          runnerListsMatch(this.#state.runners, runners) &&
-          this.#state.setup === setup
-        ) {
-          this.#state = { ...this.#state, runners };
-          return;
-        }
-
-        this.#patch({ error: undefined, runners, setup });
+        this.#applyList(runners);
       }
     } catch {
       if (this.#isCurrent(revision) && showLoading) {

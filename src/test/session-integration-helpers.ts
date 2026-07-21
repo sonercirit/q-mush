@@ -1,19 +1,17 @@
 import { expect } from "bun:test";
 import { RUNNER_AGENT_FILE_COMMAND } from "../agent-file.ts";
 import { isRecord } from "../auth-model.ts";
-import { RUNNER_WORK_PATH, SESSIONS_PATH } from "../routes.ts";
+import { SESSIONS_PATH } from "../routes.ts";
 import type { RunnerToolCommand } from "../runner-command-broker.ts";
 import type { createSessionIntegration } from "../sessions.ts";
-import {
-  createAuthenticatedRequest,
-  createRunnerRequest,
-} from "./authenticated-integration-test-helpers.ts";
+import { createAuthenticatedRequest } from "./authenticated-integration-test-helpers.ts";
+import type { connectedSessionSetup } from "./session-integration-fixtures.ts";
 import {
   RUNNER_COMMAND_ID,
-  RUNNER_COMMAND_PATH,
-  RUNNER_TOKEN,
   SESSION_ID,
 } from "./session-integration-fixtures.ts";
+
+type ConnectedSessionSetup = Awaited<ReturnType<typeof connectedSessionSetup>>;
 
 export async function waitForSessionValue(
   readValue: () => unknown,
@@ -38,47 +36,44 @@ export function hasSessionStatus(
   return (value) => isRecord(value) && value["status"] === expected;
 }
 
-export async function takeRunnerCommand(
-  sessions: ReturnType<typeof createSessionIntegration>,
-  missingMessage: string,
-): Promise<Response> {
-  const response = await waitForSessionValue(
-    () => sessions.work(createRunnerRequest(RUNNER_WORK_PATH, RUNNER_TOKEN)),
-    (value) => value instanceof Response && value.status === 200,
-  );
-
-  if (!(response instanceof Response)) {
-    throw new Error(missingMessage);
-  }
-
-  return response;
-}
-
 export async function expectRunnerCommand(
-  sessions: ReturnType<typeof createSessionIntegration>,
+  setup: ConnectedSessionSetup,
   expected: RunnerToolCommand,
   missingMessage: string,
 ): Promise<void> {
-  const response = await takeRunnerCommand(sessions, missingMessage);
-  expect(await response.json()).toEqual({ command: expected });
+  const command = await waitForSessionValue(
+    () => setup.runnerCommands.shift(),
+    (value) => value !== undefined,
+  );
+
+  if (command === undefined) {
+    throw new Error(missingMessage);
+  }
+
+  expect(command).toEqual(expected);
 }
 
 export function completeRunnerCommand(
-  sessions: ReturnType<typeof createSessionIntegration>,
+  setup: ConnectedSessionSetup,
   output: string,
-): Promise<Response> {
-  return sessions.workResult(
-    createRunnerRequest(RUNNER_COMMAND_PATH, RUNNER_TOKEN, { output }),
-    RUNNER_COMMAND_ID,
-  );
+): Response {
+  return new Response(null, {
+    status: setup.sessions.completeRunnerCommand(
+      "018bcfe5-6800-7000-8000-000000000061",
+      setup.latestRunnerCommand()?.id ?? "missing-command",
+      output,
+    )
+      ? 204
+      : 404,
+  });
 }
 
 export async function completeAgentFileLookup(
-  sessions: ReturnType<typeof createSessionIntegration>,
+  setup: ConnectedSessionSetup,
   agentFile: unknown = null,
 ): Promise<void> {
   await expectRunnerCommand(
-    sessions,
+    setup,
     {
       arguments: {},
       id: RUNNER_COMMAND_ID,
@@ -88,9 +83,9 @@ export async function completeAgentFileLookup(
     },
     "The runner did not receive the agent-file command",
   );
-  expect(
-    (await completeRunnerCommand(sessions, JSON.stringify(agentFile))).status,
-  ).toBe(204);
+  expect(completeRunnerCommand(setup, JSON.stringify(agentFile)).status).toBe(
+    204,
+  );
 }
 
 export async function sessionDetail(

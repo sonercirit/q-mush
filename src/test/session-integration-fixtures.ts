@@ -3,19 +3,17 @@ import type { AgentModel } from "../agent-loop.ts";
 import type { AgentModelDiscoverer } from "../agent-model-discovery.ts";
 import { createGoogleAuthFromEnvironment } from "../auth.ts";
 import type { ProviderCredentialAccess } from "../provider-credential-store.ts";
+import { SESSIONS_PATH } from "../routes.ts";
 import {
-  RUNNER_REGISTER_PATH,
-  RUNNER_WORK_PATH,
-  SESSIONS_PATH,
-} from "../routes.ts";
-import { RunnerCommandBroker } from "../runner-command-broker.ts";
+  RunnerCommandBroker,
+  type RunnerToolCommand,
+} from "../runner-command-broker.ts";
 import { createRunnerIntegration } from "../runners.ts";
 import { createSessionIntegration } from "../sessions.ts";
 import {
   addTestProviderCredential,
   createAuthenticatedRequest,
   createAuthenticatedTestDatabase,
-  createRunnerRequest,
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
@@ -24,11 +22,10 @@ import { takeValue } from "./oauth-test-helpers.ts";
 export const RUNNER_ID = "018bcfe5-6800-7000-8000-000000000061";
 export const SESSION_ID = "018bcfe5-6800-7000-8000-000000000062";
 export const CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000063";
-export const RUNNER_TOKEN = "qmr_session-runner-token";
+const RUNNER_TOKEN = "qmr_session-runner-token";
 export const RUNNER_COMMAND_ID = "agent-command-1";
-export const RUNNER_COMMAND_PATH = `${RUNNER_WORK_PATH}/${RUNNER_COMMAND_ID}`;
 
-export async function connectedSessionSetup(
+export function connectedSessionSetup(
   model: AgentModel,
   credentialSource: ProviderCredentialAccess["source"] = "api_key",
   discoverModels?: AgentModelDiscoverer,
@@ -45,16 +42,14 @@ export async function connectedSessionSetup(
   runners.collection(
     createAuthenticatedRequest("/api/runners", undefined, "POST"),
   );
-  const registration = await runners.register(
-    createRunnerRequest(RUNNER_REGISTER_PATH, RUNNER_TOKEN, {
-      architecture: "x64",
-      machineId: "session-test-machine",
-      name: "workstation",
-      platform: "linux",
-    }),
-  );
+  const registration = runners.connect(RUNNER_TOKEN, {
+    architecture: "x64",
+    machineFingerprint: "session-test-machine",
+    name: "workstation",
+    platform: "linux",
+  });
 
-  if (registration.status !== 201) {
+  if (registration === undefined) {
     throw new Error("The session test runner did not register");
   }
 
@@ -85,6 +80,16 @@ export async function connectedSessionSetup(
   const selectedModels: string[] = [];
   const selectedReasoningEfforts: (string | null)[] = [];
   const selectedSystemPrompts: string[] = [];
+  const runnerCommands: RunnerToolCommand[] = [];
+  let latestRunnerCommand: RunnerToolCommand | undefined;
+  const broker = new RunnerCommandBroker({
+    commandId: () => RUNNER_COMMAND_ID,
+    deliver: (_runnerId, command) => {
+      latestRunnerCommand = command;
+      runnerCommands.push(command);
+      return true;
+    },
+  });
   const sessions = createSessionIntegration(
     auth,
     runners,
@@ -94,7 +99,7 @@ export async function connectedSessionSetup(
         execute: () =>
           Promise.resolve("Error: no Brave Search API keys are available."),
       },
-      broker: new RunnerCommandBroker({ commandId: () => RUNNER_COMMAND_ID }),
+      broker,
       database,
       ...(discoverModels === undefined ? {} : { discoverModels }),
       modelFactory: ({
@@ -115,6 +120,8 @@ export async function connectedSessionSetup(
   );
   return {
     database,
+    latestRunnerCommand: () => latestRunnerCommand,
+    runnerCommands,
     selectedModels,
     selectedReasoningEfforts,
     selectedSystemPrompts,

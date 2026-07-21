@@ -42,16 +42,6 @@ export function readStringField(
   return normalized.length > 0 ? normalized : undefined;
 }
 
-export function withRequestMethod<Result>(
-  request: Request,
-  method: string,
-  action: () => Result,
-): Response | Result {
-  return request.method === method
-    ? action()
-    : createMethodNotAllowedResponse(method);
-}
-
 export class SessionRequestHelpers {
   readonly #auth: GoogleAuth;
   readonly #broker: RunnerCommandBroker;

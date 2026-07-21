@@ -1,12 +1,24 @@
 import { expect, test } from "bun:test";
 import { submitFormOnControlEnter } from "../client-actions.ts";
 import { SESSIONS_PATH } from "../routes.ts";
+import { summaryFromDetail } from "../session-codec.ts";
 import { SessionController } from "../session-controller.ts";
 import {
-  expectRefreshToRemainSilent,
+  expectRealtimeToRemainSilent,
   requestUrl,
 } from "./controller-test-helpers.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
+
+function sessionResponse(input: RequestInfo | URL): Promise<Response> {
+  const path = new URL(requestUrl(input), "http://localhost").pathname;
+  return Promise.resolve(
+    Response.json(
+      path === SESSIONS_PATH
+        ? { sessions: [summaryFromDetail(TEST_SESSION_DETAIL)] }
+        : TEST_SESSION_DETAIL,
+    ),
+  );
+}
 
 test("Control+Enter submits a form while Enter remains available", () => {
   let prevented = 0;
@@ -35,18 +47,41 @@ test("Control+Enter submits a form while Enter remains available", () => {
   expect(submissions).toBe(1);
 });
 
+test("renders incremental model deltas in the selected transcript", async () => {
+  const controller = new SessionController(() => undefined);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = Object.assign(sessionResponse, {
+    preconnect: originalFetch.preconnect,
+  });
+
+  try {
+    await controller.load();
+    controller.applyDelta({
+      content: "Hello",
+      sessionId: TEST_SESSION_DETAIL.id,
+      thinking: "Considering",
+      type: "session_delta",
+    });
+    controller.applyDelta({
+      content: " world",
+      sessionId: TEST_SESSION_DETAIL.id,
+      thinking: " carefully",
+      type: "session_delta",
+    });
+
+    expect(controller.state.detail?.messages.slice(-2)).toMatchObject([
+      { content: "Considering carefully", role: "thinking" },
+      { content: "Hello world", role: "assistant" },
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("an unchanged session refresh does not notify the view", async () => {
-  await expectRefreshToRemainSilent(
+  await expectRealtimeToRemainSilent(
     (onChange) => new SessionController(onChange),
-    (input) => {
-      const path = new URL(requestUrl(input), "http://localhost").pathname;
-      return Promise.resolve(
-        Response.json(
-          path === SESSIONS_PATH
-            ? { sessions: [{ ...TEST_SESSION_DETAIL, messages: undefined }] }
-            : TEST_SESSION_DETAIL,
-        ),
-      );
-    },
+    sessionResponse,
+    [summaryFromDetail(TEST_SESSION_DETAIL)],
   );
 });

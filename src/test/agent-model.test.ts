@@ -5,6 +5,7 @@ import { isRecord } from "../auth-model.ts";
 import { createJsonResponse } from "../http.ts";
 import { createOpenAiOAuthSecret } from "./oauth-test-helpers.ts";
 import { captureRejection, requireError } from "./promise-test-helpers.ts";
+import { expectDoneTurn } from "./provider-turn-fixtures.ts";
 
 type ModelOptions = ConstructorParameters<typeof ChatCompletionsAgentModel>[0];
 
@@ -314,12 +315,7 @@ describe("chat completions agent model", () => {
       model: "gpt-5-codex",
     });
 
-    expect(await completeHello(model)).toEqual({
-      content: "Done.",
-      contextTokens: null,
-      thinking: "",
-      toolCalls: [],
-    });
+    expectDoneTurn(await completeHello(model));
   });
 
   test("shows the provider's error message", async () => {

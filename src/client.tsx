@@ -14,6 +14,7 @@ import {
   type ProviderViewState,
 } from "./provider-client.tsx";
 import { ProviderController } from "./provider-controller.ts";
+import { RealtimeConnection } from "./realtime-client.ts";
 import {
   AUTH_GOOGLE_PATH,
   AUTH_LOGOUT_PATH,
@@ -416,8 +417,25 @@ const agentSessions = new SessionController(() => {
   updateApp(root);
 });
 const providerControllers = [openAi, openRouter, braveSearch] as const;
+const realtime = new RealtimeConnection((event) => {
+  switch (event.type) {
+    case "runners":
+      runners.applyRealtime(event.runners);
+      break;
+    case "sessions":
+      agentSessions.applyRealtime(event.sessions);
+      break;
+    case "session":
+      agentSessions.applyDetail(event.session);
+      break;
+    case "session_delta":
+      agentSessions.applyDelta(event);
+      break;
+  }
+});
 
 function resetWorkspaceConnections(): void {
+  realtime.stop();
   agentSessions.reset();
   runners.reset();
   for (const controller of providerControllers) {
@@ -440,6 +458,7 @@ async function loadSession(): Promise<void> {
         runners.load(),
         ...providerControllers.map((controller) => controller.load()),
       ]);
+      realtime.start();
     }
   } catch {
     loadFailed = true;
@@ -543,18 +562,6 @@ function updateApp(container: Element, replaceFocusedSelect = false): void {
     });
 }
 
-function refreshWhileAuthenticated(action: () => Promise<void>): () => void {
-  return () => {
-    if (
-      session?.user !== null &&
-      session?.user !== undefined &&
-      document.activeElement?.localName !== "select"
-    ) {
-      void action();
-    }
-  };
-}
-
 function flushDeferredUpdateAfterSelect(
   event: Event,
   replaceFocusedSelect: boolean,
@@ -574,15 +581,6 @@ root.addEventListener("change", (event) => {
 root.addEventListener("focusout", (event) => {
   flushDeferredUpdateAfterSelect(event, false);
 });
-
-window.setInterval(
-  refreshWhileAuthenticated(() => agentSessions.refresh()),
-  2_000,
-);
-window.setInterval(
-  refreshWhileAuthenticated(() => runners.refresh()),
-  15_000,
-);
 
 updateApp(root);
 void loadSession();

@@ -98,9 +98,11 @@ their assets:
   `brave_search` agent skill.
 - Authenticated users list and create runner setups at `/api/runners`, remove
   one at `/api/runners/:id`, and browse an online runner through
-  `POST /api/runners/:id/directories`. Installed runners register through
-  `/api/runner/register`, maintain presence through `/api/runner/heartbeat`, and
-  poll `/api/runner/work` for session tools and directory requests.
+  `POST /api/runners/:id/directories`. Installed runners register, report
+  presence, receive work, return results, and accept cancellation through the
+  authenticated `/api/runner/realtime` WebSocket. The browser receives runner
+  and session snapshots plus streaming model output through the authenticated
+  `/api/realtime` WebSocket.
 - Authenticated users create and list agent sessions at `/api/sessions`,
   discover models for an owned credential at `/api/sessions/models`, inspect
   `/api/sessions/:id`, send follow-ups to `/api/sessions/:id/messages`, and stop
@@ -120,11 +122,11 @@ The install command uses the origin from which the control center was opened.
 For another computer to connect, open Q Mush through an address that computer
 can reach instead of `localhost`. A runner derives an opaque machine fingerprint
 and the database allows only one active runner for a computer. It reports its
-hostname, platform, architecture, and a heartbeat every 15 seconds; the control
-center refreshes presence without exposing its token. The runner checks for a
-versioned update at startup and every five minutes. Runner API responses also
-advertise the current version, so a runner checks between commands immediately
-after contacting a triggered development restart. It verifies the executable's
+hostname, platform, architecture, and a heartbeat every 15 seconds over its
+WebSocket; the control center receives live presence without exposing its token.
+The runner checks for a versioned update at startup and every five minutes. The
+WebSocket handshake advertises the current version, so a runner checks
+immediately after contacting a restarted server. It verifies the executable's
 SHA-256 digest, atomically replaces itself, and restarts. Removing a runner
 revokes its server-side registration, but it does not delete files from that
 computer. Rerun the installer once to migrate a legacy `q-mush-runner.js`
@@ -167,18 +169,20 @@ with the selected project. The selected agent file is sent to the model provider
 as project instructions. Provider secrets remain on the Q Mush server: the
 browser and runner work protocol never receive them.
 
-OpenAI API keys and OpenRouter credentials use their chat-completions APIs.
-OpenAI connected accounts use the subscription-backed Codex Responses endpoint;
-Q Mush refreshes and re-encrypts expiring OAuth tokens. Model discovery queries
-the Codex account catalog, OpenAI `/v1/models`, or OpenRouter
-`/api/v1/models/user` with the selected server-side credential. Codex and
-OpenRouter publish reasoning metadata, so their effort select is model-specific.
-OpenAI's standard models endpoint only publishes model availability, so API-key
-models use their default reasoning setting. A selected effort is sent using each
-provider's native request shape. Model calls automatically retry transient
-network and provider failures with short exponential backoff, while **Stop
-session** aborts a pending retry. The first-party loop passes explicit function
-calls to the runner and feeds bounded results back to the selected model.
+OpenAI API keys and connected accounts prefer the streaming Responses WebSocket
+and fall back to HTTP streaming when that transport is unavailable. OpenRouter
+credentials use its streaming chat-completions API. OpenAI connected accounts
+use the subscription-backed Codex Responses endpoint; Q Mush refreshes and
+re-encrypts expiring OAuth tokens. Model discovery queries the Codex account
+catalog, OpenAI `/v1/models`, or OpenRouter `/api/v1/models/user` with the
+selected server-side credential. Codex and OpenRouter publish reasoning
+metadata, so their effort select is model-specific. OpenAI's standard models
+endpoint only publishes model availability, so API-key models use their default
+reasoning setting. A selected effort is sent using each provider's native
+request shape. Model calls automatically retry transient network and provider
+failures with short exponential backoff, while **Stop session** aborts a pending
+retry. The first-party loop passes explicit function calls to the runner and
+feeds bounded results back to the selected model.
 
 The Google login flow uses an authorization code, PKCE, and a short-lived state
 cookie. Only the basic Google profile and email scopes are requested. Google

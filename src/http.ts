@@ -45,9 +45,7 @@ export function createNoContentResponse(): Response {
 type JsonRequestResult =
   { readonly ok: false } | { readonly ok: true; readonly value: unknown };
 
-export async function readJsonRequest(
-  request: Request,
-): Promise<JsonRequestResult> {
+async function readJsonRequest(request: Request): Promise<JsonRequestResult> {
   if (
     request.headers
       .get("content-type")

@@ -6,7 +6,6 @@ import {
 } from "./client-actions.ts";
 import { customSelectValues } from "./custom-select-controller.ts";
 import { DirectoryPickerController } from "./directory-picker-controller.ts";
-import type { ProviderId } from "./provider-credential-store.ts";
 import { RevisionState } from "./revision-state.ts";
 import { SESSION_MODELS_PATH, SESSIONS_PATH } from "./routes.ts";
 import type { SessionDraft, SessionViewState } from "./session-client.tsx";
@@ -14,8 +13,13 @@ import {
   readAgentModelCatalog,
   readSessionDetail,
   readSessionList,
-  summaryFromDetail,
 } from "./session-codec.ts";
+import {
+  replaceSessionSummary,
+  selectedSessionCredential,
+  sessionDataMatches,
+  SessionRealtimeState,
+} from "./session-controller-state.ts";
 import type {
   AgentSessionDetail,
   AgentSessionSummary,
@@ -34,27 +38,6 @@ type ChangeListener = () => void;
 function formString(form: HTMLFormElement, name: string): string {
   const value = new FormData(form).get(name);
   return typeof value === "string" ? value : "";
-}
-
-function selectedCredential(value: string):
-  | {
-      readonly credentialId: string;
-      readonly provider: ProviderId;
-    }
-  | undefined {
-  const separator = value.indexOf(":");
-  const provider = value.slice(0, separator);
-  const credentialId = value.slice(separator + 1);
-
-  if (
-    separator < 1 ||
-    (provider !== "openai" && provider !== "openrouter") ||
-    credentialId.length === 0
-  ) {
-    return undefined;
-  }
-
-  return { credentialId, provider };
 }
 
 function bindPanelForm(
@@ -81,34 +64,36 @@ function bindPanelForm(
   });
 }
 
-function replaceSummary(
-  sessions: readonly ReturnType<typeof summaryFromDetail>[],
-  detail: AgentSessionDetail,
-): readonly ReturnType<typeof summaryFromDetail>[] {
-  const summary = summaryFromDetail(detail);
-  return [summary, ...sessions.filter(({ id }) => id !== summary.id)].sort(
-    (left, right) => right.updatedAt - left.updatedAt,
-  );
-}
-
-function sessionDataMatches(
-  left: AgentSessionDetail | readonly AgentSessionSummary[] | undefined,
-  right: AgentSessionDetail | readonly AgentSessionSummary[] | undefined,
-): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
 export class SessionController {
   readonly #directoryPicker: DirectoryPickerController;
   readonly #modelCatalogs = new Map<string, AgentModelCatalog>();
   #modelRequest = 0;
+  readonly #realtime: SessionRealtimeState;
   readonly #view: RevisionState<SessionViewState>;
 
   constructor(onChange: ChangeListener) {
     this.#view = new RevisionState(initialSessionViewState(), onChange);
+    this.#realtime = new SessionRealtimeState(this.#view);
     this.#directoryPicker = new DirectoryPickerController(() => {
       this.#view.patch({ directoryPicker: this.#directoryPicker.state });
     });
+  }
+
+  applyDetail(detail: AgentSessionDetail): void {
+    if (this.#view.value.creating) {
+      return;
+    }
+    if (!this.#view.value.sending && !this.#view.value.stopping) {
+      this.#realtime.applyDetail(detail);
+    }
+  }
+
+  applyDelta(event: Parameters<SessionRealtimeState["applyDelta"]>[0]): void {
+    this.#realtime.applyDelta(event);
+  }
+
+  applyRealtime(sessions: readonly AgentSessionSummary[]): void {
+    this.#realtime.applySessions(sessions);
   }
 
   bind(container: Element): void {
@@ -276,22 +261,10 @@ export class SessionController {
     await this.#loadSessions(revision, true);
   }
 
-  async refresh(): Promise<void> {
-    if (
-      this.#view.value.sessions === undefined ||
-      this.#view.value.creating ||
-      this.#view.value.sending ||
-      this.#view.value.stopping
-    ) {
-      return;
-    }
-
-    await this.#loadSessions(this.#view.begin(), false);
-  }
-
   reset(): void {
     this.#directoryPicker.reset();
     this.#modelCatalogs.clear();
+    this.#realtime.reset();
     this.#modelRequest += 1;
     this.#view.reset(initialSessionViewState());
   }
@@ -335,7 +308,9 @@ export class SessionController {
   }
 
   async #create(): Promise<void> {
-    const credential = selectedCredential(this.#view.value.draft.credential);
+    const credential = selectedSessionCredential(
+      this.#view.value.draft.credential,
+    );
 
     if (
       credential === undefined ||
@@ -501,7 +476,7 @@ export class SessionController {
   }
 
   async #ensureModels(credentialValue: string, force = false): Promise<void> {
-    const credential = selectedCredential(credentialValue);
+    const credential = selectedSessionCredential(credentialValue);
 
     if (credential === undefined) {
       return;
@@ -678,7 +653,7 @@ export class SessionController {
   ): Partial<SessionViewState> {
     return {
       detail,
-      sessions: replaceSummary(this.#view.value.sessions ?? [], detail),
+      sessions: replaceSessionSummary(this.#view.value.sessions ?? [], detail),
       ...extra,
     };
   }

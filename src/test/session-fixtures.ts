@@ -1,4 +1,6 @@
-export const TEST_SESSION_DETAIL = {
+import type { AgentSessionDetail } from "../session-model.ts";
+
+export const TEST_SESSION_DETAIL: AgentSessionDetail = {
   agentFile: null,
   createdAt: 1,
   credentialId: "credential-1",

@@ -7,12 +7,10 @@ import type {
 } from "../agent-loop.ts";
 import type { AgentModelDiscoverer } from "../agent-model-discovery.ts";
 import {
-  RUNNER_WORK_PATH,
   runnerDirectoriesPath,
   SESSION_MODELS_PATH,
   SESSIONS_PATH,
 } from "../routes.ts";
-import type { createSessionIntegration } from "../sessions.ts";
 import {
   createAuthenticatedRequest,
   TEST_USER_ID,
@@ -71,14 +69,14 @@ async function expectJsonResponse(
 }
 
 async function expectSessionReaches(
-  sessions: ReturnType<typeof createSessionIntegration>,
+  setup: Awaited<ReturnType<typeof connectedSessionSetup>>,
   response: Response,
   status: string,
 ): Promise<void> {
   expect(response.status).toBe(201);
-  await completeAgentFileLookup(sessions);
+  await completeAgentFileLookup(setup);
   await waitForSessionValue(
-    () => sessionDetail(sessions),
+    () => sessionDetail(setup.sessions),
     hasSessionStatus(status),
   );
 }
@@ -87,18 +85,27 @@ async function startSessionWithAgentFile(
   model: AgentModel,
   agentFile: unknown,
 ): Promise<Awaited<ReturnType<typeof connectedSessionSetup>>> {
-  const setup = await connectedSessionSetup(model);
+  const setup = connectedSessionSetup(model);
   const createResponse = await setup.sessions.collection(
     createSessionRequest(),
   );
 
   expect(createResponse.status).toBe(201);
-  await completeAgentFileLookup(setup.sessions, agentFile);
+  await completeAgentFileLookup(setup, agentFile);
   await waitForSessionValue(
     () => sessionDetail(setup.sessions),
     hasSessionStatus("idle"),
   );
   return setup;
+}
+
+async function unauthenticatedSessionStatus(): Promise<number> {
+  const setup = connectedSessionSetup(new ScriptedAgentModel([]));
+  const response = await setup.sessions.collection(
+    new Request("http://localhost/api/sessions"),
+  );
+  setup.database.$client.close();
+  return response.status;
 }
 
 describe("agent sessions", () => {
@@ -140,10 +147,8 @@ describe("agent sessions", () => {
   });
 
   test("browses directories through an owned online runner", async () => {
-    const { database, sessions } = await connectedSessionSetup(
-      new ScriptedAgentModel([]),
-    );
-    const browseResponse = sessions.directories(
+    const setup = connectedSessionSetup(new ScriptedAgentModel([]));
+    const browseResponse = setup.sessions.directories(
       createAuthenticatedRequest(
         runnerDirectoriesPath(RUNNER_ID),
         { path: "~/projects" },
@@ -152,7 +157,7 @@ describe("agent sessions", () => {
       RUNNER_ID,
     );
     await expectRunnerCommand(
-      sessions,
+      setup,
       {
         arguments: {},
         id: RUNNER_COMMAND_ID,
@@ -169,14 +174,14 @@ describe("agent sessions", () => {
       path: "/home/mush/projects",
       truncated: false,
     };
-    const resultResponse = await completeRunnerCommand(
-      sessions,
+    const resultResponse = completeRunnerCommand(
+      setup,
       JSON.stringify(listing),
     );
 
     expect(resultResponse.status).toBe(204);
     await expectJsonResponse(await browseResponse, 200, listing);
-    database.$client.close();
+    setup.database.$client.close();
   });
 
   test("discovers models through an owned provider credential", async () => {
@@ -196,13 +201,14 @@ describe("agent sessions", () => {
       expect(credential.secret).toBe("provider-secret");
       return Promise.resolve(catalog);
     };
-    const { database, sessions } = await connectedSessionSetup(
+    const setup = connectedSessionSetup(
       new ScriptedAgentModel([
         { content: "Discovered model complete.", toolCalls: [] },
       ]),
       "api_key",
       discoverModels,
     );
+    const { database, sessions } = setup;
     const response = await sessions.models(
       createAuthenticatedRequest(
         `${SESSION_MODELS_PATH}?provider=openai&credentialId=${CREDENTIAL_ID}`,
@@ -217,7 +223,7 @@ describe("agent sessions", () => {
     expect(await createResponse.json()).toMatchObject({
       maxContextTokens: 200_000,
     });
-    await expectSessionReaches(sessions, createResponse, "idle");
+    await expectSessionReaches(setup, createResponse, "idle");
     database.$client.close();
   });
 
@@ -225,20 +231,18 @@ describe("agent sessions", () => {
     const model = new ScriptedAgentModel([
       { content: "OAuth session complete.", toolCalls: [] },
     ]);
-    const { database, selectedModels, sessions } = await connectedSessionSetup(
-      model,
-      "oauth",
-    );
+    const setup = connectedSessionSetup(model, "oauth");
+    const { database, selectedModels, sessions } = setup;
     const response = await sessions.collection(createSessionRequest(false));
 
-    await expectSessionReaches(sessions, response, "idle");
+    await expectSessionReaches(setup, response, "idle");
     expect(selectedModels).toEqual(["gpt-5-codex"]);
     database.$client.close();
   });
 
   test("rejects an unsupported reasoning effort", async () => {
     const model = new ScriptedAgentModel([]);
-    const { database, sessions } = await connectedSessionSetup(model);
+    const { database, sessions } = connectedSessionSetup(model);
     const response = await sessions.collection(
       createSessionRequest(true, "maximum"),
     );
@@ -260,13 +264,13 @@ describe("agent sessions", () => {
       },
       { content: "Restart completed.", toolCalls: [] },
     ]);
-    const setup = await connectedSessionSetup(model);
+    const setup = connectedSessionSetup(model);
     const { sessions } = setup;
     const created = await sessions.collection(createSessionRequest());
     expect(created.status).toBe(201);
-    await completeAgentFileLookup(sessions);
+    await completeAgentFileLookup(setup);
     await expectRunnerCommand(
-      sessions,
+      setup,
       {
         arguments: {
           command: "bun run dev:restart",
@@ -292,9 +296,7 @@ describe("agent sessions", () => {
       { error: "server_restarting" },
     );
 
-    expect(
-      (await completeRunnerCommand(sessions, "Restart requested.")).status,
-    ).toBe(204);
+    expect(completeRunnerCommand(setup, "Restart requested.").status).toBe(204);
     await drain;
     expect(await sessionDetail(sessions)).toMatchObject({ status: "idle" });
     expect(model.requests).toHaveLength(2);
@@ -303,9 +305,10 @@ describe("agent sessions", () => {
 
   test("stops a running model request", async () => {
     const model = new BlockingModel();
-    const { database, sessions } = await connectedSessionSetup(model);
+    const setup = connectedSessionSetup(model);
+    const { database, sessions } = setup;
     const created = await sessions.collection(createSessionRequest());
-    await expectSessionReaches(sessions, created, "running");
+    await expectSessionReaches(setup, created, "running");
 
     const stopped = await sessions.stop(
       createAuthenticatedRequest(
@@ -326,29 +329,7 @@ describe("agent sessions", () => {
     database.$client.close();
   });
 
-  test("protects session and runner-control endpoints", async () => {
-    const setup = await connectedSessionSetup(new ScriptedAgentModel([]));
-    const { database, sessions } = setup;
-
-    expect(
-      (await sessions.collection(new Request("http://localhost/api/sessions")))
-        .status,
-    ).toBe(401);
-    expect(
-      sessions.work(
-        new Request(`http://localhost${RUNNER_WORK_PATH}`, { method: "POST" }),
-      ).status,
-    ).toBe(401);
-    expect(
-      (
-        await sessions.workResult(
-          new Request(`http://localhost${RUNNER_WORK_PATH}/missing`, {
-            method: "POST",
-          }),
-          "missing",
-        )
-      ).status,
-    ).toBe(401);
-    database.$client.close();
+  test("protects session endpoints", async () => {
+    expect(await unauthenticatedSessionStatus()).toBe(401);
   });
 });

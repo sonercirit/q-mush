@@ -7,6 +7,7 @@ import {
   renderSessionPanel,
   type SessionViewState,
 } from "../session-client.tsx";
+import { runnerSummary } from "./runner-fixtures.ts";
 
 const SESSION_STATE: SessionViewState = {
   directoryPicker: initialDirectoryPickerState(),
@@ -51,16 +52,7 @@ const RUNNER_STATE: RunnerViewState = {
   creating: false,
   error: undefined,
   removingId: undefined,
-  runners: [
-    {
-      architecture: "arm64",
-      id: "runner-1",
-      lastSeenAt: 1,
-      name: "workstation",
-      platform: "linux",
-      status: "online",
-    },
-  ],
+  runners: [runnerSummary(1)],
   setup: undefined,
 };
 

@@ -63,16 +63,6 @@ export function readRunnerCommand(value: unknown): RunnerToolCommand {
   };
 }
 
-export function readRunnerCommandStatus(value: unknown): boolean {
-  const active = isRecord(value) ? value["active"] : undefined;
-
-  if (typeof active !== "boolean") {
-    throw new Error("The server returned an invalid runner command status");
-  }
-
-  return active;
-}
-
 export async function executeRunnerCommand(
   command: RunnerToolCommand,
   signal?: AbortSignal,

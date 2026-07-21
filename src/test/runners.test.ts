@@ -5,9 +5,8 @@ import { createGoogleAuthFromEnvironment } from "../auth.ts";
 import { runners } from "../database/schema.ts";
 import { readJsonRecord } from "../oauth.ts";
 import {
-  RUNNER_HEARTBEAT_PATH,
   RUNNER_INSTALLER_PATH,
-  RUNNER_REGISTER_PATH,
+  RUNNER_REALTIME_PATH,
   RUNNERS_PATH,
 } from "../routes.ts";
 import {
@@ -71,17 +70,22 @@ function createRunner(setup: Setup): Response {
   );
 }
 
-function registrationRequest(
-  token: string,
-  machineId: string,
-  name = "workstation",
-): Request {
-  return createRunnerRequest(RUNNER_REGISTER_PATH, token, {
+function metadata(machineId: string, name = "workstation") {
+  return {
     architecture: "x64",
-    machineId,
+    machineFingerprint: machineId,
     name,
     platform: "linux",
-  });
+  };
+}
+
+function connect(
+  setup: Setup,
+  token: string,
+  machineId: string,
+  name?: string,
+) {
+  return setup.integration.connect(token, metadata(machineId, name));
 }
 
 function connectedRunner(id: string, name: string): RunnerSummary {
@@ -95,21 +99,17 @@ function connectedRunner(id: string, name: string): RunnerSummary {
   };
 }
 
-async function connectFirstRunner(setup: Setup): Promise<void> {
+function connectFirstRunner(setup: Setup): void {
   createRunner(setup);
-  await setup.integration.register(
-    registrationRequest(FIRST_TOKEN, "machine-fingerprint-one"),
-  );
-}
-
-function heartbeatStatus(setup: Setup, token: string): number {
-  return setup.integration.heartbeat(
-    createRunnerRequest(RUNNER_HEARTBEAT_PATH, token),
-  ).status;
+  connect(setup, FIRST_TOKEN, "machine-fingerprint-one");
 }
 
 function expectRevoked(setup: Setup, token: string): void {
-  expect(heartbeatStatus(setup, token)).toBe(401);
+  expect(
+    setup.integration.runnerToken(
+      createRunnerRequest(RUNNER_REALTIME_PATH, token),
+    ),
+  ).toBeUndefined();
 }
 
 function installerRequest(token: string, download = false): Request {
@@ -223,48 +223,47 @@ describe("runner connections", () => {
     createRunner(setup);
     createRunner(setup);
 
-    const firstRegistration = await setup.integration.register(
-      registrationRequest(FIRST_TOKEN, "machine-fingerprint-one"),
+    const firstRegistration = connect(
+      setup,
+      FIRST_TOKEN,
+      "machine-fingerprint-one",
     );
-    expect(firstRegistration.status).toBe(201);
-    expect(await firstRegistration.json()).toEqual({
-      id: FIRST_RUNNER_ID,
-    });
+    expect(firstRegistration?.connection.id).toBe(FIRST_RUNNER_ID);
 
-    const reusedToken = await setup.integration.register(
-      registrationRequest(FIRST_TOKEN, "another-machine"),
-    );
-    expect(reusedToken.status).toBe(409);
-    expect(await reusedToken.json()).toEqual({ error: "token_already_used" });
+    const reusedToken = connect(setup, FIRST_TOKEN, "another-machine");
+    expect(reusedToken).toBeUndefined();
 
-    const reinstalledComputer = await setup.integration.register(
-      registrationRequest(SECOND_TOKEN, "machine-fingerprint-one"),
+    const reinstalledComputer = connect(
+      setup,
+      SECOND_TOKEN,
+      "machine-fingerprint-one",
     );
-    expect(reinstalledComputer.status).toBe(201);
-    expect(await reinstalledComputer.json()).toEqual({ id: FIRST_RUNNER_ID });
+    expect(reinstalledComputer?.connection.id).toBe(FIRST_RUNNER_ID);
     expectRevoked(setup, FIRST_TOKEN);
     expect(
-      setup.integration.authenticatedRunner(
-        createRunnerRequest(RUNNER_HEARTBEAT_PATH, SECOND_TOKEN),
+      setup.integration.runnerToken(
+        createRunnerRequest(RUNNER_REALTIME_PATH, SECOND_TOKEN),
       ),
-    ).toEqual({ id: FIRST_RUNNER_ID, userId: TEST_USER_ID });
+    ).toBe(SECOND_TOKEN);
     expect(
       setup.integration.runnerIsAvailable(TEST_USER_ID, FIRST_RUNNER_ID),
     ).toBeTrue();
 
-    const reusedConnectionToken = await setup.integration.register(
-      registrationRequest(SECOND_TOKEN, "another-machine"),
+    const reusedConnectionToken = connect(
+      setup,
+      SECOND_TOKEN,
+      "another-machine",
     );
-    expect(reusedConnectionToken.status).toBe(409);
-    expect(await reusedConnectionToken.json()).toEqual({
-      error: "token_already_used",
-    });
+    expect(reusedConnectionToken).toBeUndefined();
 
     createRunner(setup);
-    const secondRegistration = await setup.integration.register(
-      registrationRequest(THIRD_TOKEN, "machine-fingerprint-two", "laptop"),
+    const secondRegistration = connect(
+      setup,
+      THIRD_TOKEN,
+      "machine-fingerprint-two",
+      "laptop",
     );
-    expect(secondRegistration.status).toBe(201);
+    expect(secondRegistration?.connection.id).toBe(THIRD_RUNNER_ID);
 
     await expectRunnerListAndClose(setup, [
       connectedRunner(FIRST_RUNNER_ID, "workstation"),
@@ -272,15 +271,20 @@ describe("runner connections", () => {
     ]);
   });
 
-  test("uses authenticated heartbeats to report online state", async () => {
+  test("uses WebSocket activity to report online state", async () => {
     const setup = createSetup();
-    await connectFirstRunner(setup);
+    connectFirstRunner(setup);
     setup.setNow(TEST_NOW + 30_000);
-
-    const heartbeat = setup.integration.heartbeat(
-      createRunnerRequest(RUNNER_HEARTBEAT_PATH, FIRST_TOKEN),
+    const connected = setup.integration.connect(
+      FIRST_TOKEN,
+      metadata("machine-fingerprint-one"),
     );
-    expect(heartbeat.status).toBe(204);
+    const connection = connected?.connection;
+    expect(connection).toBeDefined();
+
+    if (connection !== undefined) {
+      setup.integration.seen(connection);
+    }
 
     setup.setNow(TEST_NOW + 60_001);
     const onlineList = setup.integration.collection(
@@ -293,12 +297,26 @@ describe("runner connections", () => {
       createAuthenticatedRequest(RUNNERS_PATH),
     );
     expect(await readFirstRunnerStatus(offlineList)).toBe("offline");
+
+    if (connection !== undefined) {
+      setup.setNow(TEST_NOW + 80_000);
+      setup.integration.seen(connection);
+      const reconnectedList = setup.integration.collection(
+        createAuthenticatedRequest(RUNNERS_PATH),
+      );
+      expect(await readFirstRunnerStatus(reconnectedList)).toBe("online");
+      setup.integration.disconnected(connection);
+    }
+    const disconnectedList = setup.integration.collection(
+      createAuthenticatedRequest(RUNNERS_PATH),
+    );
+    expect(await readFirstRunnerStatus(disconnectedList)).toBe("offline");
     setup.database.$client.close();
   });
 
-  test("soft deletes a runner and rejects its token", async () => {
+  test("soft deletes a runner and rejects its token", () => {
     const setup = createSetup();
-    await connectFirstRunner(setup);
+    connectFirstRunner(setup);
 
     const response = setup.integration.remove(
       createAuthenticatedRequest(

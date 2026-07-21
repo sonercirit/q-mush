@@ -174,15 +174,16 @@ export class RunnerStore {
     );
   }
 
-  heartbeat(token: string, now: number): boolean {
-    const stored = this.#activeRunnerForToken(token);
-
-    if (stored?.machineFingerprint == null) {
-      return false;
-    }
-
-    this.#markSeen(stored.id, stored.userId, now);
-    return true;
+  setOnline(id: string, userId: string, now: number, online: boolean): void {
+    const lastSeenAt = online ? now : 0;
+    this.#database
+      .update(runners)
+      .set({
+        ...updatedAuditFields(userId, now),
+        lastSeenAt: new Date(lastSeenAt),
+      })
+      .where(activeRunnerCondition({ id, userId }))
+      .run();
   }
 
   list(userId: string, now: number): readonly RunnerSummary[] {
@@ -273,17 +274,6 @@ export class RunnerStore {
       .returning({ id: runners.id })
       .all();
     return removed.length > 0;
-  }
-
-  #markSeen(id: string, userId: string, now: number): void {
-    this.#database
-      .update(runners)
-      .set({
-        ...updatedAuditFields(userId, now),
-        lastSeenAt: new Date(now),
-      })
-      .where(eq(runners.id, id))
-      .run();
   }
 
   #activeRunnerForToken(token: string) {
