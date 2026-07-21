@@ -452,7 +452,7 @@ function renderSessionList(state: SessionViewState): JsxNode {
   }
 
   return (
-    <ul className="space-y-2">
+    <ul className="max-h-144 space-y-2 overflow-y-auto" data-scroll-key="list">
       {state.sessions.map((session) => (
         <li>
           <button

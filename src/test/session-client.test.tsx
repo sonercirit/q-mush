@@ -128,6 +128,17 @@ function renderPanel(state: SessionViewState): string {
   );
 }
 
+test("renders the session list as an independent scroll region", () => {
+  const html = renderPanel({
+    ...SESSION_STATE,
+    sessions: [TEST_SESSION_DETAIL],
+  });
+
+  expect(html).toMatch(
+    /<ul class="[^"]*max-h-144[^"]*overflow-y-auto[^"]*"[^>]*data-scroll-key="list"/u,
+  );
+});
+
 test("renders the system prompt and model thinking in a transcript", () => {
   const state: SessionViewState = {
     ...SESSION_STATE,
