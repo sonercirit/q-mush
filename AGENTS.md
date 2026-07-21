@@ -289,12 +289,13 @@ task-specific progress, guesses, or sensitive values.
   parsing retains streamed output-text and function-call argument deltas because
   a completed event may omit its `output` items. OpenAI's standard model list
   has no reasoning capabilities, while OpenRouter and Codex return
-  model-specific efforts. Optional reasoning uses `reasoning_effort` for OpenAI
-  chat completions and `reasoning.effort` for OpenRouter and Codex Responses.
-  OpenAI Responses WebSockets omit HTTP stream fields and fall back to HTTP only
-  before any provider event, avoiding replay after partial output. Agent model
-  calls retry network failures and retryable HTTP responses three times with
-  abortable backoff, honoring `Retry-After`.
+  model-specific efforts. Session drafts use each model's maximum discovered
+  effort. Optional reasoning uses `reasoning_effort` for OpenAI chat completions
+  and `reasoning.effort` for OpenRouter and Codex Responses. OpenAI Responses
+  WebSockets omit HTTP stream fields and fall back to HTTP only before any
+  provider event, avoiding replay after partial output. Agent model calls retry
+  network failures and retryable HTTP responses three times with abortable
+  backoff, honoring `Retry-After`.
 - Agent launches and brokered runner commands have no application-owned turn,
   queue, or elapsed-time limits. Every shell command must choose a positive
   timeout; no default or configured maximum is supplied. Outside explicit or

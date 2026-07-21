@@ -137,9 +137,9 @@ installation to the self-updating executable.
 After a runner and provider credential are ready, use **New agent session** in
 the control center. Select an online computer and credential; Q Mush discovers
 that credential's available agent models and model-specific reasoning efforts.
-Then select a model, reasoning effort (or the model default), working directory
-on that computer, and task. The working-directory field accepts a path directly
-or opens an interactive browser with Home, Up, and child-directory navigation;
+Reasoning effort defaults to the model maximum. Then select the model, working
+directory, and task. The working-directory field accepts a path directly or
+opens an interactive browser with Home, Up, and child-directory navigation;
 choosing a location writes its canonical path back to the form. Q Mush
 implements its own model/tool loop without an external agent framework. Before
 each initial or follow-up agent run, the runner loads `AGENTS.md` from the

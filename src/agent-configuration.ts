@@ -53,6 +53,20 @@ export function isAgentReasoningEffort(
   return AGENT_REASONING_EFFORTS.some((effort) => effort === value);
 }
 
+export function maximumAgentReasoningEffort(
+  efforts: readonly AgentReasoningEffort[],
+): AgentReasoningEffort | undefined {
+  for (let index = AGENT_REASONING_EFFORTS.length - 1; index >= 0; index -= 1) {
+    const effort = AGENT_REASONING_EFFORTS[index];
+
+    if (effort !== undefined && efforts.includes(effort)) {
+      return effort;
+    }
+  }
+
+  return undefined;
+}
+
 export function reasoningEffortLabel(effort: AgentReasoningEffort): string {
   switch (effort) {
     case "none":

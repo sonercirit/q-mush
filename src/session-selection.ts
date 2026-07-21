@@ -1,6 +1,7 @@
-import type {
-  AgentModelCatalog,
-  AgentModelOption,
+import {
+  maximumAgentReasoningEffort,
+  type AgentModelCatalog,
+  type AgentModelOption,
 } from "./agent-configuration.ts";
 import type { SessionDraft, SessionViewState } from "./session-client.tsx";
 
@@ -43,7 +44,12 @@ export function chooseSessionOption(
     const model = selectedModel(selection.models, value);
     return model === undefined
       ? undefined
-      : { ...state.draft, model: model.id, reasoningEffort: "" };
+      : {
+          ...state.draft,
+          model: model.id,
+          reasoningEffort:
+            maximumAgentReasoningEffort(model.reasoningEfforts) ?? "",
+        };
   }
 
   if (name !== "reasoningEffort") {
@@ -68,10 +74,9 @@ export function applySessionModelCatalog(
   const efforts = catalog.models.find(
     ({ id }) => id === model,
   )?.reasoningEfforts;
-  const reasoningEffort = efforts?.some(
-    (effort) => effort === current.reasoningEffort,
-  )
-    ? current.reasoningEffort
-    : "";
+  const reasoningEffort =
+    efforts?.some((effort) => effort === current.reasoningEffort) === true
+      ? current.reasoningEffort
+      : (maximumAgentReasoningEffort(efforts ?? []) ?? "");
   return { ...current, credential, model, reasoningEffort };
 }
