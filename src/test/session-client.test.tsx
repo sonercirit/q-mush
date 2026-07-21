@@ -28,8 +28,18 @@ const SESSION_STATE: SessionViewState = {
         {
           contextWindow: 200_000,
           id: "gpt-5-codex",
+          inputModalities: ["text", "image", "audio"],
           label: "GPT-5 Codex (discovered)",
+          outputModalities: ["text"],
           reasoningEfforts: ["medium", "high", "xhigh"],
+        },
+        {
+          contextWindow: 64_000,
+          id: "image-model",
+          inputModalities: ["image"],
+          label: "Image Model",
+          outputModalities: ["image"],
+          reasoningEfforts: [],
         },
       ],
     },
@@ -328,7 +338,7 @@ test("renders a directory browser beside the working-directory input", () => {
   expect(openHtml).toContain('data-action="close-directory-picker"');
 });
 
-test("renders custom model and reasoning selectors with context limits", () => {
+test("shows input and output modalities in the model select list", () => {
   const modelHtml = renderToHtml(
     renderSessionPanel(
       SESSION_STATE,
@@ -348,6 +358,19 @@ test("renders custom model and reasoning selectors with context limits", () => {
   expect(modelHtml).toContain('data-option-value="gpt-5-codex"');
   expect(modelHtml).toContain("GPT-5 Codex (discovered)");
   expect(modelHtml).toContain("200K context");
+  expect(modelHtml).toMatch(
+    /data-option-value="gpt-5-codex"[^>]*>[\s\S]*?Input: Text, Image, Audio · Output: Text[\s\S]*?<\/button>/u,
+  );
+  expect(modelHtml).toMatch(
+    /data-option-value="image-model"[^>]*>[\s\S]*?Input: Image · Output: Image[\s\S]*?<\/button>/u,
+  );
+  expect(modelHtml).toContain('data-model-modalities-direction="input"');
+  expect(modelHtml).toContain('data-model-modalities-direction="output"');
+  expect(modelHtml).toContain("Input modalities");
+  expect(modelHtml).toContain("Output modalities");
+  expect(modelHtml).toContain("Text · Supported by Q Mush");
+  expect(modelHtml).toContain("Image · Not yet supported by Q Mush");
+  expect(modelHtml).toContain("Audio · Not yet supported by Q Mush");
   expect(modelHtml).toContain('data-custom-select="reasoningEffort"');
   expect(modelHtml).not.toMatch(/<select[^>]*id="session-reasoning-effort"/u);
 

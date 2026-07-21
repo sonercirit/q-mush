@@ -26,6 +26,22 @@ function readModelReasoningEfforts(
   return value;
 }
 
+function readModelModalities(value: unknown): readonly string[] | null {
+  if (value === null) {
+    return null;
+  }
+
+  if (
+    !Array.isArray(value) ||
+    !value.every((item) => typeof item === "string" && item.length > 0)
+  ) {
+    throw new Error("The server returned invalid model modalities");
+  }
+
+  const items: readonly unknown[] = value;
+  return items.map((item) => String(item));
+}
+
 function readPositiveSafeInteger(value: unknown): number | null {
   if (typeof value !== "number" || value <= 0) {
     return null;
@@ -45,11 +61,15 @@ function readModelOption(value: unknown): AgentModelOption {
       : value["contextWindow"];
   const contextWindow = readPositiveSafeInteger(contextWindowValue);
   const id = value["id"];
+  const inputModalitiesValue = value["inputModalities"];
   const label = value["label"];
+  const outputModalitiesValue = value["outputModalities"];
 
   if (
     !isAgentModelId(id) ||
+    inputModalitiesValue === undefined ||
     typeof label !== "string" ||
+    outputModalitiesValue === undefined ||
     (contextWindowValue !== null && contextWindow === null)
   ) {
     throw new Error("The server returned an invalid agent model");
@@ -58,7 +78,9 @@ function readModelOption(value: unknown): AgentModelOption {
   return {
     contextWindow,
     id,
+    inputModalities: readModelModalities(inputModalitiesValue),
     label,
+    outputModalities: readModelModalities(outputModalitiesValue),
     reasoningEfforts: readModelReasoningEfforts(value["reasoningEfforts"]),
   };
 }

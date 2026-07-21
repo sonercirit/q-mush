@@ -39,8 +39,17 @@ function model(
   label: string,
   reasoningEfforts: readonly AgentReasoningEffort[],
   contextWindow: number | null = null,
+  inputModalities: readonly string[] | null = null,
+  outputModalities: readonly string[] | null = null,
 ): AgentModelOption {
-  return { contextWindow, id, label, reasoningEfforts };
+  return {
+    contextWindow,
+    id,
+    inputModalities,
+    label,
+    outputModalities,
+    reasoningEfforts,
+  };
 }
 
 function catalog(
@@ -101,6 +110,7 @@ describe("agent model discovery", () => {
           {
             capabilities: { context_window: 128_000 },
             display_name: "GPT Live Mini",
+            input_modalities: ["text"],
             priority: 2,
             slug: "gpt-live-mini",
             supported_reasoning_levels: [
@@ -112,6 +122,7 @@ describe("agent model discovery", () => {
           {
             context_window_size: 200_000,
             display_name: "GPT Live",
+            input_modalities: ["text", "image", "audio"],
             priority: 1,
             slug: "gpt-live",
             supported_reasoning_levels: [
@@ -127,8 +138,14 @@ describe("agent model discovery", () => {
 
     expect(discovered).toEqual(
       catalog("gpt-live", [
-        model("gpt-live", "GPT Live", ["high", "xhigh"], 200_000),
-        model("gpt-live-mini", "GPT Live Mini", ["low", "medium"], 128_000),
+        model("gpt-live", "GPT Live", ["high", "xhigh"], 200_000, [
+          "text",
+          "image",
+          "audio",
+        ]),
+        model("gpt-live-mini", "GPT Live Mini", ["low", "medium"], 128_000, [
+          "text",
+        ]),
       ]),
     );
     expect(request.url).toStartWith(
@@ -150,6 +167,10 @@ describe("agent model discovery", () => {
             supported_parameters: ["temperature"],
           },
           {
+            architecture: {
+              input_modalities: ["text", "image", "file"],
+              output_modalities: ["text", "image"],
+            },
             context_length: 131_072,
             id: "vendor/reasoning-model",
             name: "Reasoning Model",
@@ -170,6 +191,8 @@ describe("agent model discovery", () => {
           "Reasoning Model",
           ["low", "medium", "high", "max"],
           131_072,
+          ["text", "image", "file"],
+          ["text", "image"],
         ),
       ]),
     );

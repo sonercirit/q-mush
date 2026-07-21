@@ -191,7 +191,9 @@ describe("agent sessions", () => {
         {
           contextWindow: 200_000,
           id: "gpt-discovered",
+          inputModalities: null,
           label: "GPT Discovered",
+          outputModalities: null,
           reasoningEfforts: ["low", "high"],
         },
       ],
@@ -244,7 +246,9 @@ describe("agent sessions", () => {
           {
             contextWindow: null,
             id: "gpt-4.1-mini",
+            inputModalities: null,
             label: "GPT",
+            outputModalities: null,
             reasoningEfforts: [],
           },
         ],

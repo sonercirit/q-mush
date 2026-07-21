@@ -20,6 +20,34 @@ test("reads a session agent file from the server", () => {
   ).toThrow("invalid agent file");
 });
 
+function modelCatalogValue(
+  inputModalities: unknown,
+  includeInput = true,
+): Readonly<Record<string, unknown>> {
+  return {
+    defaultModel: "gpt-test",
+    models: [
+      {
+        contextWindow: 128_000,
+        id: "gpt-test",
+        ...(includeInput ? { inputModalities } : {}),
+        label: "GPT Test",
+        outputModalities: ["text"],
+        reasoningEfforts: [],
+      },
+    ],
+  };
+}
+
+test("requires explicit context and modality metadata from model responses", () => {
+  expect(() => readAgentModelCatalog(modelCatalogValue(null, false))).toThrow(
+    "invalid agent model",
+  );
+  expect(() => readAgentModelCatalog(modelCatalogValue(["text", 1]))).toThrow(
+    "invalid model modalities",
+  );
+});
+
 test("requires explicit context and compaction metadata from session responses", () => {
   expect(() =>
     readSessionDetail({ ...DETAIL, autoCompact: undefined }),

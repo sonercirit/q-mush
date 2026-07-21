@@ -148,21 +148,20 @@ task-specific progress, guesses, or sensitive values.
   starts at the bottom and returns there when its message or agent-file revision
   changes. It defers remounts while a select has focus, flushing on change or
   focus loss. `src/agent-model-discovery.ts` queries the selected credential's
-  provider for compatible models and reasoning metadata;
-  `src/agent-configuration.ts` owns shared catalog types, accepted effort
-  values, and API fallback models. The new-session controls use the
-  framework-free custom listbox in `src/custom-select.tsx`; model options show
-  discovered context limits. Model and effort selections are persisted with the
-  session. `src/agent-prompt.ts` is the shared source for building the model
-  system prompt and its transcript display. Provider-returned OpenRouter
-  reasoning and Codex reasoning summaries are persisted as `thinking` transcript
-  messages but excluded from provider conversation replay. Session and
+  provider for compatible models, modalities, and reasoning metadata;
+  `src/agent-configuration.ts` owns shared catalog types, accepted efforts, and
+  API fallbacks. Provider-advertised input/output modalities appear separately
+  beneath the selected model and in each model-list option; Q Mush currently
+  marks only text as supported. The new-session controls use the framework-free
+  custom listbox in `src/custom-select.tsx`; model options show discovered
+  context limits. Model and effort selections are persisted with the session.
+  `src/agent-prompt.ts` is the shared source for building the model system
+  prompt and its transcript display. Provider reasoning summaries persist as
+  `thinking` transcript messages but are excluded from replay. Session and
   transcript rows live in `agent_sessions` and `agent_messages`; an interrupted
   server process marks active sessions failed so they can be resumed explicitly.
-  Session details and rebuilt conversations synthesize a visible error result
-  for any tool call interrupted before its output was persisted, keeping the
-  transcript and provider history complete on resume without showing an
-  interruption while a tool is still running.
+  Rebuilt conversations synthesize visible error results for interrupted tool
+  calls only on resume, keeping transcript and provider history complete.
 
 - `src/openai.ts` and `src/openrouter.ts` implement provider connections.
   Multiple OAuth or manual credentials live in `provider_credentials`, encrypted

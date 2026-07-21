@@ -73,15 +73,25 @@ function reasoningEfforts(value: unknown): readonly AgentReasoningEffort[] {
   return efforts;
 }
 
-function positiveSafeInteger(value: unknown): number | null {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
-    ? value
-    : null;
+function uniqueStrings(value: unknown): readonly string[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const items: readonly unknown[] = value;
+  return [
+    ...new Set(
+      items.filter(
+        (item): item is string => typeof item === "string" && item.length > 0,
+      ),
+    ),
+  ];
 }
 
-function rawContextWindow(
+function nestedValue(
   value: Readonly<Record<string, unknown>>,
   key: string,
+  parentKey: string,
 ): unknown {
   const direct = value[key];
 
@@ -89,8 +99,14 @@ function rawContextWindow(
     return direct;
   }
 
-  const capabilities = value["capabilities"];
-  return isRecord(capabilities) ? capabilities[key] : undefined;
+  const parent = value[parentKey];
+  return isRecord(parent) ? parent[key] : undefined;
+}
+
+function positiveSafeInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+    ? value
+    : null;
 }
 
 type ContextWindowRecord = Readonly<Record<string, unknown>>;
@@ -100,7 +116,9 @@ function modelContextWindow(
   keys: readonly string[],
 ): number | null {
   for (const key of keys) {
-    const contextWindow = positiveSafeInteger(rawContextWindow(value, key));
+    const contextWindow = positiveSafeInteger(
+      nestedValue(value, key, "capabilities"),
+    );
 
     if (contextWindow !== null) {
       return contextWindow;
@@ -130,7 +148,13 @@ function modelOption(
   return {
     contextWindow: modelContextWindow(value, contextKeys),
     id,
+    inputModalities: uniqueStrings(
+      nestedValue(value, "input_modalities", "architecture"),
+    ),
     label: modelLabel(value[labelKey], id),
+    outputModalities: uniqueStrings(
+      nestedValue(value, "output_modalities", "architecture"),
+    ),
     reasoningEfforts: efforts,
   };
 }

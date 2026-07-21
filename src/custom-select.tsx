@@ -1,6 +1,7 @@
 import { createElement, type JsxNode } from "./jsx.ts";
 
 export interface CustomSelectOption {
+  readonly description?: string;
   readonly detail?: string;
   readonly label: string;
   readonly value: string;
@@ -30,8 +31,15 @@ function selectedOption(
 
 function optionContent(option: CustomSelectOption): JsxNode {
   return (
-    <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
-      <span className="truncate">{option.label}</span>
+    <span className="flex min-w-0 flex-1 items-start justify-between gap-3">
+      <span className="min-w-0">
+        <span className="block truncate">{option.label}</span>
+        {option.description === undefined ? null : (
+          <span className="mt-1 block truncate text-xs text-slate-500">
+            {option.description}
+          </span>
+        )}
+      </span>
       {option.detail === undefined ? null : (
         <span className="shrink-0 text-xs text-slate-500">{option.detail}</span>
       )}

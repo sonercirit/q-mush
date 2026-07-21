@@ -10,6 +10,10 @@ import {
 import { renderDirectoryPicker } from "./directory-picker-client.tsx";
 import type { DirectoryPickerState } from "./directory-picker-controller.ts";
 import { createElement, type JsxNode } from "./jsx.ts";
+import {
+  modelModalitiesLabel,
+  renderModelModalities,
+} from "./model-modalities-client.tsx";
 import type {
   ProviderCredential,
   ProviderViewState,
@@ -250,12 +254,13 @@ function selectValue(
 function modelSelectOptions(
   models: AgentModelCatalog["models"],
 ): readonly CustomSelectOption[] {
-  return models.map(({ contextWindow, id, label }) => ({
-    ...(contextWindow === null
+  return models.map((model) => ({
+    description: modelModalitiesLabel(model),
+    ...(model.contextWindow === null
       ? {}
-      : { detail: `${formatTokenCount(contextWindow)} context` }),
-    label,
-    value: id,
+      : { detail: `${formatTokenCount(model.contextWindow)} context` }),
+    label: model.label,
+    value: model.id,
   }));
 }
 
@@ -353,6 +358,7 @@ function renderNewSessionForm(
         required: false,
         selectedValue: state.draft.reasoningEffort,
       })}
+      {renderModelModalities(model)}
       <div className="lg:col-span-2">
         <label
           className="text-sm font-medium text-slate-200"
