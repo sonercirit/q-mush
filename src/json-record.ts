@@ -1,5 +1,14 @@
 import { isRecord } from "./auth-model.ts";
 
+export function parseOptionalJsonRecord(message: string) {
+  try {
+    const parsed: unknown = JSON.parse(message);
+    return isRecord(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function parseJsonRecord(message: string, errorMessage: string) {
   let parsed: unknown;
 

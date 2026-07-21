@@ -6,6 +6,7 @@ import { renderSessionImagePreviews } from "./session-image-client.tsx";
 import { renderMarkdown } from "./session-markdown.tsx";
 import type { AgentSessionMessage } from "./session-model.ts";
 import { renderStructuredCode } from "./session-syntax.tsx";
+import { renderToolResult } from "./session-tool-result.tsx";
 
 const SERIALIZED_AGENT_TOOLS = JSON.stringify(AGENT_TOOLS, null, 2);
 
@@ -57,7 +58,20 @@ function renderToolHeader(options: {
   );
 }
 
-function renderMessage(message: AgentSessionMessage): JsxNode {
+function toolCallArguments(
+  messages: readonly AgentSessionMessage[],
+): ReadonlyMap<string, string> {
+  return new Map(
+    messages.flatMap((message) =>
+      message.toolCalls.map((call) => [call.id, call.arguments] as const),
+    ),
+  );
+}
+
+function renderMessage(
+  message: AgentSessionMessage,
+  callArguments: ReadonlyMap<string, string>,
+): JsxNode {
   if (message.role === "thinking") {
     return renderTranscriptNote({
       classes: "border-violet-300/20 bg-violet-300/10",
@@ -75,7 +89,16 @@ function renderMessage(message: AgentSessionMessage): JsxNode {
           kind: "Tool result",
           name: message.toolName ?? "Unknown tool",
         })}
-        <div className="mt-3">{renderStructuredCode(message.content)}</div>
+        <div className="mt-3">
+          {renderToolResult({
+            arguments:
+              message.toolCallId === null
+                ? undefined
+                : callArguments.get(message.toolCallId),
+            content: message.content,
+            name: message.toolName ?? "Unknown tool",
+          })}
+        </div>
       </li>
     );
   }
@@ -117,6 +140,7 @@ export function renderSessionTranscript(
   messages: readonly AgentSessionMessage[],
   agentFile: AgentFile | null,
 ): JsxNode {
+  const callArguments = toolCallArguments(messages);
   return [
     renderTranscriptNote({
       classes: "border-amber-300/20 bg-amber-300/10",
@@ -125,6 +149,6 @@ export function renderSessionTranscript(
       labelClasses: "text-amber-200",
     }),
     renderToolDefinitions(),
-    ...messages.map(renderMessage),
+    ...messages.map((message) => renderMessage(message, callArguments)),
   ];
 }

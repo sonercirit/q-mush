@@ -1,5 +1,6 @@
 import type { AgentImage } from "./agent-images.ts";
 import { isRecord } from "./auth-model.ts";
+import { parseOptionalJsonRecord } from "./json-record.ts";
 
 interface AgentToolRequest<Arguments> {
   readonly arguments: Arguments;
@@ -109,12 +110,7 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 function parseArguments(
   value: string,
 ): Readonly<Record<string, unknown>> | undefined {
-  try {
-    const parsed: unknown = JSON.parse(value);
-    return isRecord(parsed) ? parsed : undefined;
-  } catch {
-    return undefined;
-  }
+  return parseOptionalJsonRecord(value);
 }
 
 export async function runAgentLoop(
