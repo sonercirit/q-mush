@@ -149,19 +149,19 @@ task-specific progress, guesses, or sensitive values.
   changes. It defers remounts while a select has focus, flushing on change or
   focus loss. `src/agent-model-discovery.ts` queries the selected credential's
   provider for compatible models, modalities, and reasoning metadata;
-  `src/agent-configuration.ts` owns shared catalog types, accepted efforts, and
-  API fallbacks. Provider-advertised input/output modalities appear separately
-  beneath the selected model and in each model-list option; Q Mush currently
-  marks only text as supported. The new-session controls use the framework-free
-  custom listbox in `src/custom-select.tsx`; model options show discovered
-  context limits. Model and effort selections are persisted with the session.
-  `src/agent-prompt.ts` is the shared source for building the model system
-  prompt and its transcript display. Provider reasoning summaries persist as
-  `thinking` transcript messages but are excluded from replay. Session and
-  transcript rows live in `agent_sessions` and `agent_messages`; an interrupted
-  server process marks active sessions failed so they can be resumed explicitly.
-  Rebuilt conversations synthesize visible error results for interrupted tool
-  calls only on resume, keeping transcript and provider history complete.
+  `src/agent-configuration.ts` owns shared catalog types, efforts, and
+  fallbacks. Selected-model details show modality support; each model-list
+  option shows all provider and Q Mush-supported input/output modalities. The
+  new-session controls use the framework-free custom listbox in
+  `src/custom-select.tsx`; model options show discovered context limits. Model
+  and effort selections are persisted with the session. `src/agent-prompt.ts` is
+  the shared source for building the model system prompt and its transcript
+  display. Provider reasoning summaries persist as `thinking` transcript
+  messages but are excluded from replay. Session and transcript rows live in
+  `agent_sessions` and `agent_messages`; an interrupted server process marks
+  active sessions failed so they can be resumed explicitly. Rebuilt
+  conversations synthesize visible error results for interrupted tool calls only
+  on resume, keeping transcript and provider history complete.
 
 - `src/openai.ts` and `src/openrouter.ts` implement provider connections.
   Multiple OAuth or manual credentials live in `provider_credentials`, encrypted

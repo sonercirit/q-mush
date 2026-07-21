@@ -359,10 +359,10 @@ test("shows input and output modalities in the model select list", () => {
   expect(modelHtml).toContain("GPT-5 Codex (discovered)");
   expect(modelHtml).toContain("200K context");
   expect(modelHtml).toMatch(
-    /data-option-value="gpt-5-codex"[^>]*>[\s\S]*?Input: Text, Image, Audio · Output: Text[\s\S]*?<\/button>/u,
+    /data-option-value="gpt-5-codex"[^>]*>[\s\S]*?All modalities · Input: Text, Image, Audio · Output: Text[\s\S]*?Supported by Q Mush · Input: Text · Output: Text[\s\S]*?<\/button>/u,
   );
   expect(modelHtml).toMatch(
-    /data-option-value="image-model"[^>]*>[\s\S]*?Input: Image · Output: Image[\s\S]*?<\/button>/u,
+    /data-option-value="image-model"[^>]*>[\s\S]*?All modalities · Input: Image · Output: Image[\s\S]*?Supported by Q Mush · Input: None · Output: None[\s\S]*?<\/button>/u,
   );
   expect(modelHtml).toContain('data-model-modalities-direction="input"');
   expect(modelHtml).toContain('data-model-modalities-direction="output"');

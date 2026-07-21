@@ -35,7 +35,7 @@ function optionContent(option: CustomSelectOption): JsxNode {
       <span className="min-w-0">
         <span className="block truncate">{option.label}</span>
         {option.description === undefined ? null : (
-          <span className="mt-1 block truncate text-xs text-slate-500">
+          <span className="mt-1 block whitespace-pre-line text-xs leading-5 text-slate-500">
             {option.description}
           </span>
         )}

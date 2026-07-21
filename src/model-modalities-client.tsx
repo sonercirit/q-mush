@@ -15,8 +15,17 @@ function modalityListLabel(modalities: readonly string[] | null): string {
     : modalities.map(modalityLabel).join(", ") || "None";
 }
 
+function qMushModalityListLabel(modalities: readonly string[] | null): string {
+  return modalityListLabel(
+    modalities?.filter((modality) => qMushSupports(modality)) ?? null,
+  );
+}
+
 export function modelModalitiesLabel(model: AgentModelOption): string {
-  return `Input: ${modalityListLabel(model.inputModalities)} · Output: ${modalityListLabel(model.outputModalities)}`;
+  return [
+    `All modalities · Input: ${modalityListLabel(model.inputModalities)} · Output: ${modalityListLabel(model.outputModalities)}`,
+    `Supported by Q Mush · Input: ${qMushModalityListLabel(model.inputModalities)} · Output: ${qMushModalityListLabel(model.outputModalities)}`,
+  ].join("\n");
 }
 
 function qMushSupports(modality: string): boolean {
