@@ -48,7 +48,7 @@ set `OPENROUTER_REDIRECT_URI` to the deployed HTTPS URL ending in
 To run:
 
 ```bash
-bun run src/index.ts
+bun run sync-engine/index.ts
 ```
 
 To run the supervised development server:
@@ -71,9 +71,20 @@ version on their next API response and immediately check for a changed
 executable. A session can therefore request the restart that will apply its own
 changes without being marked failed.
 
-The server builds the browser app and Tailwind stylesheet in memory at startup
-and prepares versioned standalone runner builds, then exposes two pages and
-their assets:
+Production source is split into four top-level workspaces: `solid/` owns the
+browser UI, `sync-engine/` owns the Bun server and synchronization/model
+integrations, `runner/` owns the standalone runner, and `shared/` owns code used
+across those boundaries. Each of the first three may import only itself and
+`shared`; `shared` cannot import another workspace. Application code outside
+`scripts/` also cannot import script internals. ESLint enforces these rules.
+Tests and support modules are colocated under `solid/test/`,
+`sync-engine/test/`, `runner/test/`, `shared/test/`, and `scripts/test/`;
+cross-workspace integration tests belong to `sync-engine/test/`. The former
+`src/` tree has been removed.
+
+The server builds the SolidJS browser app and Tailwind stylesheet with Vite in
+memory at startup and prepares versioned standalone runner builds, then exposes
+two pages and their assets:
 
 - `/` renders the homepage to HTML on the server.
 - `/app` serves an empty application shell, then `/app.js` renders the app in
@@ -220,11 +231,12 @@ computer's private config. Every application row carries creation, update,
 actor, and soft-deletion audit fields. Committed migrations in `drizzle/` are
 applied automatically at startup.
 
-Both pages use the small framework-free TSX runtime in `src/jsx.ts`; no frontend
-framework is installed. `src/styles.css` is the Tailwind source entry point.
-Runner cross-compilation uses a temporary directory, then keeps each requested
-platform executable in server memory; no generated application assets are
-written into the project.
+The browser application in `solid/` uses SolidJS. Vite and its Tailwind plugin
+build `solid/client.tsx` and `solid/styles.css`; the server invokes that build
+in memory at startup, while `bun run build` can emit the same assets to `dist/`.
+The small classic JSX renderer retained in `shared/server-rendering/` renders
+the server-owned page shells. Runner cross-compilation uses a temporary
+directory, then keeps each requested platform executable in server memory.
 
 Apply pending migrations without starting the server:
 
@@ -232,7 +244,7 @@ Apply pending migrations without starting the server:
 bun run db:migrate
 ```
 
-After changing `src/database/schema.ts`, generate and review a migration:
+After changing `shared/database/schema.ts`, generate and review a migration:
 
 ```bash
 bun run db:generate
@@ -256,8 +268,8 @@ application source, while allowing TSX, tests, and fixtures. Both checks
 recommend TSX for application markup. The CPD check ignores import declarations
 and rejects other JavaScript or TypeScript clones of at least 20 tokens on one
 or more lines, including clones across source extensions. Run `bun run format`
-to format files, `bun run lint:fix` to apply safe lint fixes, and `bun test` to
-run the tests.
+to format files, `bun run lint:fix` to apply safe lint fixes, and `bun run test`
+to run Vitest under Bun.
 
 This project was created using `bun init` in bun v1.3.14. [Bun](https://bun.com)
 is a fast all-in-one JavaScript runtime.

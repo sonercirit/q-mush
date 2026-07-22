@@ -31,15 +31,19 @@ function createErrorRules(
   return rules;
 }
 
-export const knipConfig = {
-  entry: [
-    "knip.production.config.ts",
-    "src/client.tsx!",
-    "src/runner-agent.ts!",
-    "src/styles.css!",
-  ],
+const knipConfig = {
+  entry: ["knip.production.config.ts", "**/test/**/*.test.{ts,tsx}!"],
   include: includedIssueTypes,
   includeEntryExports: true,
+  ignoreDependencies: ["tailwindcss"],
+  project: [
+    "runner/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}!",
+    "shared/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}!",
+    "solid/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}!",
+    "sync-engine/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}!",
+    "scripts/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}!",
+    "*.{cts,mts,ts}!",
+  ],
   rules: createErrorRules(includedIssueTypes),
 };
 

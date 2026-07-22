@@ -1,0 +1,154 @@
+import { expect } from "vitest";
+import type { AgentImage } from "../../shared/agent-images.ts";
+import type { AgentModel } from "../../shared/agent-loop.ts";
+import type { ProviderCredentialAccess } from "../../shared/provider-credential-store.ts";
+import { SESSIONS_PATH } from "../../shared/routes.ts";
+import {
+  RunnerCommandBroker,
+  type RunnerToolCommand,
+} from "../../shared/runner-command-broker.ts";
+import type { AgentModelDiscoverer } from "../../sync-engine/agent-model-discovery.ts";
+import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
+import { createRunnerIntegration } from "../../sync-engine/runners.ts";
+import { createSessionIntegration } from "../../sync-engine/sessions.ts";
+import {
+  addTestProviderCredential,
+  createAuthenticatedRequest,
+  createAuthenticatedTestDatabase,
+  TEST_NOW,
+  TEST_USER_ID,
+} from "./authenticated-integration-test-helpers.ts";
+import { takeValue } from "./oauth-test-helpers.ts";
+
+export const RUNNER_ID = "018bcfe5-6800-7000-8000-000000000061";
+export const SESSION_ID = "018bcfe5-6800-7000-8000-000000000062";
+export const CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000063";
+const RUNNER_TOKEN = "qmr_session-runner-token";
+export const RUNNER_COMMAND_ID = "agent-command-1";
+
+export function connectedSessionSetup(
+  model: AgentModel,
+  credentialSource: ProviderCredentialAccess["source"] = "api_key",
+  discoverModels?: AgentModelDiscoverer,
+) {
+  const database = createAuthenticatedTestDatabase();
+  const authOptions = { database, now: () => TEST_NOW };
+  const auth = createGoogleAuthFromEnvironment({}, authOptions);
+  const runners = createRunnerIntegration(auth, {
+    database,
+    now: () => TEST_NOW,
+    randomId: () => RUNNER_ID,
+    randomToken: () => "session-runner-token",
+  });
+  runners.collection(
+    createAuthenticatedRequest("/api/runners", undefined, "POST"),
+  );
+  const registration = runners.connect(RUNNER_TOKEN, {
+    architecture: "x64",
+    machineFingerprint: "session-test-machine",
+    name: "workstation",
+    platform: "linux",
+  });
+
+  if (registration === undefined) {
+    throw new Error("The session test runner did not register");
+  }
+
+  addTestProviderCredential(database, CREDENTIAL_ID);
+  const credential: ProviderCredentialAccess = {
+    accountId: "provider-account",
+    id: CREDENTIAL_ID,
+    isDefault: false,
+    label: "Agent key",
+    secret: "provider-secret",
+    source: credentialSource,
+  };
+  const reader = {
+    readCredential: (userId: string, credentialId: string) =>
+      userId === TEST_USER_ID && credentialId === CREDENTIAL_ID
+        ? credential
+        : undefined,
+  };
+  const ids = [
+    SESSION_ID,
+    "018bcfe5-6800-7000-8000-000000000064",
+    "018bcfe5-6800-7000-8000-000000000065",
+    "018bcfe5-6800-7000-8000-000000000066",
+    "018bcfe5-6800-7000-8000-000000000067",
+    "018bcfe5-6800-7000-8000-000000000068",
+    "018bcfe5-6800-7000-8000-000000000069",
+    "018bcfe5-6800-7000-8000-000000000070",
+  ];
+  const selectedModels: string[] = [];
+  const selectedReasoningEfforts: (string | null)[] = [];
+  const selectedSystemPrompts: string[] = [];
+  const runnerCommands: RunnerToolCommand[] = [];
+  let latestRunnerCommand: RunnerToolCommand | undefined;
+  const broker = new RunnerCommandBroker({
+    commandId: () => RUNNER_COMMAND_ID,
+    deliver: (_runnerId, command) => {
+      latestRunnerCommand = command;
+      runnerCommands.push(command);
+      return true;
+    },
+  });
+  const sessions = createSessionIntegration(
+    auth,
+    runners,
+    { openai: reader, openrouter: reader },
+    {
+      braveSearch: {
+        execute: () =>
+          Promise.resolve("Error: no Brave Search API keys are available."),
+      },
+      broker,
+      database,
+      ...(discoverModels === undefined ? {} : { discoverModels }),
+      modelFactory: ({
+        credential: selectedCredential,
+        model: selectedModel,
+        reasoningEffort,
+        systemPrompt,
+      }) => {
+        expect(selectedCredential.secret).toBe("provider-secret");
+        selectedModels.push(selectedModel);
+        selectedReasoningEfforts.push(reasoningEffort);
+        selectedSystemPrompts.push(systemPrompt);
+        return model;
+      },
+      now: () => TEST_NOW,
+      randomId: () => takeValue(ids, "The session test ran out of IDs"),
+    },
+  );
+  return {
+    database,
+    latestRunnerCommand: () => latestRunnerCommand,
+    runnerCommands,
+    selectedModels,
+    selectedReasoningEfforts,
+    selectedSystemPrompts,
+    sessions,
+  };
+}
+
+export function createSessionRequest(
+  includeModel = true,
+  reasoningEffort = "high",
+  model = "gpt-4.1-mini",
+  images: readonly AgentImage[] = [],
+): Request {
+  return createAuthenticatedRequest(
+    SESSIONS_PATH,
+    {
+      credentialId: CREDENTIAL_ID,
+      ...(images.length === 0 ? {} : { images }),
+      ...(includeModel ? { model } : {}),
+      prompt: "Inspect README.md",
+      provider: "openai",
+      reasoningEffort,
+      runnerId: RUNNER_ID,
+      workingDirectory: "/work/project",
+    },
+    "POST",
+  );
+}

@@ -5,11 +5,12 @@ information.
 
 ## Project Snapshot
 
-- Private strict-TypeScript ESM Bun project.
-- `src/index.ts` is the Bun HTTP server entry point.
-- The server-rendered homepage lives at `/`; the browser-rendered app lives at
-  `/app`.
-- Tests use Bun's built-in test runner.
+- Private strict-TypeScript ESM Bun project with a SolidJS browser app.
+- Production source is split across `solid/`, `sync-engine/`, `runner/`, and
+  `shared/`; `sync-engine/index.ts` is the server entry point.
+- Tests are in workspace `test/` directories; there is no `src/`.
+- The server-rendered homepage lives at `/`; the browser app lives at `/app`.
+- Tests use Vitest under Bun.
 
 ## Working Agreements
 
@@ -31,157 +32,146 @@ information.
 - Never commit secrets, credentials, generated artifacts, or local environment
   files.
 
-## Living-Memory Rules
-
-Update this file during the task—not only at the end—when you learn something
-future agents should know, including:
-
-- architecture, important directories, and data flow;
-- canonical setup, build, lint, test, and run commands;
-- conventions that are not obvious from the code;
-- consequential decisions and their rationale;
-- recurring pitfalls, environment constraints, and known issues.
-
-Keep entries concise and factual. Remove or revise stale notes rather than
-accumulating a chronological log. Do not record transient command output,
-task-specific progress, guesses, or sensitive values.
-
 ## Setup and Commands
 
-- Install dependencies: `bun install`
-- Run: `bun run src/index.ts`
-- Develop: `bun run dev`; restart: `bun run dev:restart`
-- Generate a database migration after schema changes: `bun run db:generate`
-- Apply pending database migrations: `bun run db:migrate`
-- Run tests: `bun test`
+- Install dependencies: `bun install`; run: `bun run sync-engine/index.ts`
+- Develop: `bun run dev`; restart: `bun run dev:restart`; build: `bun run build`
+- Generate/apply database migrations: `bun run db:generate` /
+  `bun run db:migrate`
+- Run tests: `bun run test`; watch: `bun run test:watch`
 - Check repository constraints: `bun run repository-check`
 - Check formatting: `bun run format:check`
 - Format files: `bun run format`
 - Type-check: `bun run typecheck`
-- Check for dead code and dependency issues: `bun run knip`
-- Check for duplicate code: `bun run cpd`
-- Lint: `bun run lint`
-- Apply safe lint fixes: `bun run lint:fix`
-- Run all static checks: `bun run check`
+- Check dead code/dependencies: `bun run knip`; duplicates: `bun run cpd`
+- Lint/fix: `bun run lint` / `bun run lint:fix`; all static checks:
+  `bun run check`
 - CI runs tests and static checks on every push through
   `.github/workflows/checks.yml` using Bun 1.3.14 and a frozen lockfile.
 
 ## Architecture and Conventions
 
 - Bun manages dependencies through the committed `package.json` and `bun.lock`.
-- `src/server.ts` serves the browser JavaScript and Tailwind CSS. Browser state,
-  session updates, and runner work use authenticated WebSockets at
-  `/api/realtime` and `/api/runner/realtime`; there is no polling or SSE
-  application transport. Because agents may modify this repository through the
-  running app, `bun run dev` does not restart for source edits. `scripts/dev.ts`
-  watches only the ignored `data/development-server.restart` trigger written by
-  `bun run dev:restart`. `src/runner-executable.ts` fingerprints the runner
-  source and compiler, builds in a private temporary directory, caches it in
-  memory, and serves it from `/runner/executable`. Triggered development
-  restarts reject new agent work, let active sessions finish, then replace the
-  server process, so a session can safely request its own restart. Textual
-  response bodies are precompressed once per handler, with `zstd`, Brotli, gzip,
-  or deflate negotiated in that server-preference order.
-- `src/pages.tsx` contains server page markup, while `src/client.tsx` mounts the
-  browser app. Shared route paths are defined in `src/routes.ts`.
-- `src/auth.ts` implements Google OpenID Connect with an authorization-code +
-  PKCE flow. It uses HttpOnly state/verifier cookies, fetches the basic profile,
-  and discards provider tokens. `src/auth-store.ts` uses Drizzle with Bun SQLite
-  to upsert users and persist seven-day sessions in the tables defined by
-  `src/database/schema.ts`. Application primary keys are UUIDv7 values; Google
-  subjects and session cookie tokens are separate unique fields. Every
+- Production source has four enforced top-level workspaces. `solid` owns the
+  SolidJS browser UI, `sync-engine` owns the Bun server and integrations,
+  `runner` owns the standalone runner, and `shared` owns cross-workspace code.
+  The first three may import only themselves and `shared`; `shared` cannot
+  import another workspace. Code outside `scripts` cannot import from `scripts`.
+- `sync-engine/server.ts` serves the browser JavaScript and Tailwind CSS built
+  in memory by Vite. Browser state, session updates, and runner work use
+  authenticated WebSockets at `/api/realtime` and `/api/runner/realtime`; there
+  is no polling or SSE application transport. Because agents may modify this
+  repository through the running app, `bun run dev` does not restart for source
+  edits. `scripts/dev.ts` watches only the ignored
+  `data/development-server.restart` trigger written by `bun run dev:restart`.
+  `sync-engine/runner-executable.ts` fingerprints the runner source and
+  compiler, builds in a private temporary directory, caches it in memory, and
+  serves it from `/runner/executable`. Triggered development restarts reject new
+  agent work, let active sessions finish, then replace the server process, so a
+  session can safely request its own restart. Textual response bodies are
+  precompressed once per handler, with `zstd`, Brotli, gzip, or deflate
+  negotiated in that server-preference order.
+- `shared/server-rendering/pages.tsx` renders server page shells;
+  `solid/client.tsx` mounts the browser app; routes live in `shared/routes.ts`.
+- `sync-engine/auth.ts` implements Google OpenID Connect with an
+  authorization-code + PKCE flow. It uses HttpOnly state/verifier cookies,
+  fetches the basic profile, and discards provider tokens.
+  `sync-engine/auth-store.ts` uses Drizzle with Bun SQLite to upsert users and
+  persist seven-day sessions in the tables defined by
+  `shared/database/schema.ts`. Application primary keys are UUIDv7 values;
+  Google subjects and session cookie tokens are separate unique fields. Every
   application table has creation/update timestamps, actor IDs, and an
-  `isDeleted` soft-delete flag. `src/database.ts` applies committed `drizzle/`
-  migrations when opening a connection. `src/index.ts` injects the persistent
-  connection; the auth factory falls back to isolated in-memory SQLite when a
-  connection is not supplied. Shared PKCE, provider parsing, and redirect logic
-  lives in `src/oauth.ts`, while shared cookie and response helpers live in
-  `src/http.ts`. `src/client.tsx` reads `/api/auth/session`, gates the control
-  center, and posts logout to `/api/auth/logout`. All API routes derive from the
-  `/api` base path in `src/routes.ts`.
-- `src/runner-store.ts` persists any number of user runner registrations, with
-  `runners`, with one active registration per machine fingerprint and one
-  default runner per user. New sessions use the default online runner or the
-  first one. `src/runners.ts` issues hashed opaque setup tokens, owns
-  authenticated management and token-authenticated callback APIs, and derives
-  installer commands from the request origin. `src/runner-installer.ts` emits
-  the macOS/Linux one-line installer; it selects an x64/ARM64 and glibc/musl
-  target, downloads one standalone executable, and starts it under
-  `~/.q-mush/runner` by default without requiring Bun on that computer. The
-  runner reports metadata and 15-second heartbeats on its authenticated
-  WebSocket and checks for updates at startup and every five minutes. Its
-  handshake version triggers update checks after server restarts; reconnecting
-  replaces an older socket for the same runner. Updates use a source/compiler
-  ETag and SHA-256 digest, atomically replace the executable, and restart it.
-  Development restarts drain active sessions first. The browser panel/controller
-  online presence. Reinstalling for the same user and machine rotates the
-  existing registration to the new token instead of creating a second runner;
-  another user's registration remains protected. Runner tokens never appear in
-  list responses.
-- `src/sessions.ts` and `src/session-store.ts` persist coding sessions. User
-  messages support selecting or pasting up to eight 10 MB PNG, JPEG, GIF, or
-  WebP images, persisted with the transcript and sent as native multimodal
-  input. A session records latest input-token usage and its discovered context
-  limit. Usage shows a percentage, yellow at 80%, and red at 90%.
-  Auto-compaction defaults on and summarizes completed history before the next
-  request at 95%; idle sessions can compact manually. Compaction soft-deletes
-  prior active messages and inserts a replayable handoff. Provider secrets never
-  enter browser or runner work payloads. The working-directory field opens the
-  interactive browser in `src/directory-picker-client.tsx`; its controller posts
-  to `/api/runners/:id/directories` for canonical directory metadata. Before
-  each run, `read_agent_file` loads exact-root `AGENTS.md`, falling back to
-  `CLAUDE.md`; only `AGENTS.md` is used when both exist.
+  `isDeleted` soft-delete flag. `shared/database.ts` applies committed
+  `drizzle/` migrations when opening a connection. `sync-engine/index.ts`
+  injects the persistent connection; the auth factory falls back to isolated
+  in-memory SQLite when a connection is not supplied. Shared PKCE, provider
+  parsing, and redirect logic lives in `sync-engine/oauth.ts`, while shared
+  cookie and response helpers live in `sync-engine/http.ts`. `solid/client.tsx`
+  reads `/api/auth/session`, gates the control center, and posts logout to
+  `/api/auth/logout`. All API routes derive from the `/api` base path in
+  `shared/routes.ts`.
+- `sync-engine/runner-store.ts` persists any number of user runner
+  registrations, with `runners`, with one active registration per machine
+  fingerprint and one default runner per user. New sessions use the default
+  online runner or the first one. `sync-engine/runners.ts` issues hashed opaque
+  setup tokens, owns authenticated management and token-authenticated callback
+  APIs, and derives installer commands from the request origin.
+  `sync-engine/runner-installer.ts` emits the macOS/Linux one-line installer; it
+  selects an x64/ARM64 and glibc/musl target, downloads one standalone
+  executable, and starts it under `~/.q-mush/runner` by default without
+  requiring Bun on that computer. The runner reports metadata and 15-second
+  heartbeats on its authenticated WebSocket and checks for updates at startup
+  and every five minutes. Its handshake version triggers update checks after
+  server restarts; reconnecting replaces an older socket for the same runner.
+  Updates use a source/compiler ETag and SHA-256 digest, atomically replace the
+  executable, and restart it. Development restarts drain active sessions first.
+  The browser panel/controller online presence. Reinstalling for the same user
+  and machine rotates the existing registration to the new token instead of
+  creating a second runner; another user's registration remains protected.
+  Runner tokens never appear in list responses.
+- `sync-engine/sessions.ts` and `sync-engine/session-store.ts` persist coding
+  sessions. User messages support selecting or pasting up to eight 10 MB PNG,
+  JPEG, GIF, or WebP images, persisted with the transcript and sent as native
+  multimodal input. A session records latest input-token usage and its
+  discovered context limit. Usage shows a percentage, yellow at 80%, and red at
+  90%. Auto-compaction defaults on and summarizes completed history before the
+  next request at 95%; idle sessions can compact manually. Compaction
+  soft-deletes prior active messages and inserts a replayable handoff. Provider
+  secrets never enter browser or runner work payloads. The working-directory
+  field opens the interactive browser in `solid/directory-picker-client.tsx`;
+  its controller posts to `/api/runners/:id/directories` for canonical directory
+  metadata. Before each run, `read_agent_file` loads exact-root `AGENTS.md`,
+  falling back to `CLAUDE.md`; only `AGENTS.md` is used when both exist.
 
-  `src/runner-workspace.ts` shares canonical workspace resolution and
+  `runner/runner-workspace.ts` shares canonical workspace resolution and
   containment with the file tools. The latest agent-file selection is persisted
   on the session and appended to the model system prompt.
-  `src/session-transcript.tsx` renders the effective prompt, tool definitions,
+  `solid/session-transcript.tsx` renders the effective prompt, tool definitions,
   and raw tool details. User messages preserve source line breaks; transcript
   output supports Markdown, colorized code/JSON, edit diffs, and context-aware
   shell, read, and parallel results. The control center creates, inspects,
   follows up, continues without appending a user message, stops, and receives
-  live sessions through `src/realtime-client.ts`, `src/session-client.tsx`, and
-  `src/session-controller.ts`. Unchanged snapshots suppress render
+  live sessions through `solid/realtime-client.ts`, `solid/session-client.tsx`,
+  and `solid/session-controller.ts`. Unchanged snapshots suppress render
   notifications. Browser rendering preserves the document viewport and keyed
   `data-scroll-key` regions across full-root remounts; the session transcript
   starts at the bottom and returns there when its message or agent-file revision
   changes. It preserves input focus across updates and defers remounts while a
   select has focus, flushing on change or focus loss.
-  `src/agent-model-discovery.ts` queries providers for compatible models,
-  modalities, and reasoning metadata; `src/agent-configuration.ts` owns shared
-  catalog types, efforts, and fallbacks. New sessions use the default online
-  runner and model credential, each falling back to the first entry. The working
-  directory uses the latest session; provider models use the first option and
-  reasoning the maximum effort. Model choices show all provider and Q
-  Mush-supported input/output modalities. Controls use the listbox in
-  `src/custom-select.tsx`; model options show discovered context limits. Model
-  and effort selections are persisted with the session. `src/agent-prompt.ts` is
-  the shared source for building the model system prompt and its transcript
+  `sync-engine/agent-model-discovery.ts` queries providers for compatible
+  models, modalities, and reasoning metadata; `shared/agent-configuration.ts`
+  owns shared catalog types, efforts, and fallbacks. New sessions use the
+  default online runner and model credential, each falling back to the first
+  entry. The working directory uses the latest session; provider models use the
+  first option and reasoning the maximum effort. Model choices show all provider
+  and Q Mush-supported input/output modalities. Controls use the listbox in
+  `solid/custom-select.tsx`; model options show discovered context limits. Model
+  and effort selections are persisted with the session. `shared/agent-prompt.ts`
+  is the shared source for building the model system prompt and its transcript
   display. Reasoning summaries persist as `thinking` messages but are excluded
   from replay. Session and transcript rows live in `agent_sessions` and
   `agent_messages`; interrupted processes mark active sessions failed so they
   can be resumed. Rebuilt conversations add error results for interrupted tool
   calls only on resume.
 
-- `src/openai.ts` and `src/openrouter.ts` implement provider connections.
-  Multiple OAuth or manual credentials live in `provider_credentials`, encrypted
-  with per-record AES-256-GCM context; API responses expose only metadata. One
-  OpenAI or OpenRouter credential may be the user's model default across both
-  providers. Shared behavior is in `src/provider-credentials.ts`,
-  `src/connected-account-oauth.ts`, `src/provider-client.tsx`, and
-  `src/provider-controller.ts`.
-- `src/brave-search.ts` implements the authenticated server-side `brave_search`
-  skill and key API. Users can keep multiple encrypted keys in
+- `sync-engine/openai.ts` and `sync-engine/openrouter.ts` implement provider
+  connections. Multiple OAuth or manual credentials live in
+  `provider_credentials`, encrypted with per-record AES-256-GCM context; API
+  responses expose only metadata. One OpenAI or OpenRouter credential may be the
+  user's model default across both providers. Shared behavior is in
+  `sync-engine/provider-credentials.ts`,
+  `sync-engine/connected-account-oauth.ts`, `solid/provider-client.tsx`, and
+  `solid/provider-controller.ts`.
+- `sync-engine/brave-search.ts` implements the authenticated server-side
+  `brave_search` skill and key API. Users can keep multiple encrypted keys in
   `provider_credentials`; failures fall through keys in creation order, and
   secrets never reach the browser, runner, or model provider. Its UI reuses the
   shared credential panel and controller.
-- `src/jsx.ts` is the framework-free classic JSX factory and renders its small
-  element tree either to escaped HTML or browser DOM. TSX files must import
-  `createElement`; `tsconfig.json` configures it as `jsxFactory`.
-- Tailwind CSS v4 is built with `@tailwindcss/cli`; `src/styles.css` is the
-  source entry point and limits automatic class detection to `src`.
-- `bunfig.toml` requires package releases to be at least one week old before
-  installation.
+- The browser uses SolidJS and Vite. `solid/client.tsx` is the browser entry,
+  `solid/styles.css` is the Tailwind source, and the classic JSX runtime under
+  `shared/server-rendering` is retained only for server page shells. Vitest uses
+  an SSR Solid transform for TSX string-rendering tests and must run under Bun
+  because tests and application modules use Bun APIs and `bun:sqlite`.
 - TypeScript is configured for strict, no-emit, bundler-style checking in
   `tsconfig.json`, including unused and unreachable code diagnostics. Library
   declaration checking is skipped because Drizzle publishes declarations for
@@ -189,17 +179,16 @@ task-specific progress, guesses, or sensitive values.
   version; application source remains fully checked. Neither TypeScript 7.0.2
   nor Drizzle ORM 1.0.0-rc.4 resolves these declaration errors, so re-enable
   library checking only after verifying an upstream Drizzle fix.
-- `eslint.config.ts` uses ESLint flat config with type-aware strict and
-  stylistic `typescript-eslint` presets; ESLint loads it through the `jiti`
-  development dependency. It imports `.gitignore`, bans non-const type
-  assertions, and enforces exhaustive switches and canonical named imports.
-  Value and type bindings from one module share one declaration, with inline
-  `type` markers. Default imports (except the default-only `@eslint/js`), import
-  aliases, namespaces, side-effect imports, dynamic imports, import attributes,
-  import-equals declarations, and `import()` types are rejected. Application
-  source also rejects unsafe DOM HTML injection properties,
-  `dangerouslySetInnerHTML`, and direct HTML-like string or template bodies in
-  `Response`; TSX, tests, and fixtures are allowed.
+- `eslint.config.ts` uses type-aware strict/stylistic `typescript-eslint`
+  presets. It imports `.gitignore`, bans non-const assertions, and enforces
+  exhaustive switches and canonical named imports. Bindings from one module
+  share one declaration with inline `type` markers. Default imports are allowed
+  only for `@eslint/js`, `@tailwindcss/vite`, and `vite-plugin-solid`; aliases,
+  namespaces, dynamic imports, import attributes, import-equals declarations,
+  and `import()` types are rejected, as are side-effect imports except
+  `solid/styles.css`. Application source also rejects unsafe DOM HTML injection
+  properties, `dangerouslySetInnerHTML`, and direct HTML-like string or template
+  bodies in `Response`; TSX, tests, and fixtures are allowed.
 - `knip.config.ts` checks every issue type and entry exports;
   `knip.production.config.ts` limits the production graph to runtime source.
   `bun run knip` runs both production and comprehensive test/tooling passes, so
@@ -230,8 +219,8 @@ task-specific progress, guesses, or sensitive values.
   the client secret to browser code or tracked files.
 - `DATABASE_PATH` selects the local SQLite file and defaults to
   `data/q-mush.sqlite`; the default `data/` directory is ignored. Change
-  `src/database/schema.ts`, add every new table to `databaseSchema` in
-  `src/database.ts`, run `bun run db:generate`, and commit the resulting
+  `shared/database/schema.ts`, add every new table to `databaseSchema` in
+  `shared/database.ts`, run `bun run db:generate`, and commit the resulting
   migration and Drizzle metadata. `bun run db:migrate` applies migrations
   without starting the HTTP server. Drizzle Kit loads its config under Node, so
   shared config imports must not transitively import `bun:sqlite`.
@@ -247,9 +236,9 @@ task-specific progress, guesses, or sensitive values.
   exchanges a code for a user-controlled key. Removing any provider credential
   soft-deletes its audit record and clears its encrypted payload, but cannot
   revoke provider-side access.
-- `src/ids.ts` is the authoritative UUIDv7 generator and defines `SYSTEM` as the
-  system audit actor. User actions use the internal user UUID. Never issue hard
-  deletes for application records: set `isDeleted`, `updatedAt`, and
+- `shared/ids.ts` is the authoritative UUIDv7 generator and defines `SYSTEM` as
+  the system audit actor. User actions use the internal user UUID. Never issue
+  hard deletes for application records: set `isDeleted`, `updatedAt`, and
   `updatedById`, and exclude soft-deleted rows from active queries. Audit actor
   fields deliberately are not foreign keys because `SYSTEM` is not a user row.
 - Keep HTTP `deflate` zlib-wrapped; Bun's implementation is raw.
@@ -257,7 +246,7 @@ task-specific progress, guesses, or sensitive values.
   authoritative included-issue list complete so it can generate every error
   rule. Do not run the full test suite in parallel with lint or other repository
   scans: tooling-policy tests briefly create intentionally invalid probe files
-  under `src`.
+  under `solid`.
 - A runner install command uses the HTTP request origin. To connect another
   computer, access the control center through an origin reachable from that
   computer rather than `localhost`. Removing a runner revokes its server-side
@@ -305,7 +294,7 @@ task-specific progress, guesses, or sensitive values.
   conversation and have no application-level timeout.
 - Add each new runtime source root and executable entry to
   `knip.production.config.ts`. Add standalone non-TypeScript build entries, such
-  as `src/styles.css`, to both Knip configs; keep test files and test-support
+  as `solid/styles.css`, to both Knip configs; keep test files and test-support
   directories out of production project patterns.
 - Put every test file under a directory named `test`; the directory may appear
   at any depth, such as `scripts/test` or `apps/control-center/test`.

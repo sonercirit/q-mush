@@ -1,0 +1,36 @@
+import { expect } from "vitest";
+
+export function expectPkceParameters(
+  authorizationUrl: URL,
+  expectedChallenge: string,
+): void {
+  expect(authorizationUrl.searchParams.get("code_challenge")).toBe(
+    expectedChallenge,
+  );
+  expect(authorizationUrl.searchParams.get("code_challenge_method")).toBe(
+    "S256",
+  );
+}
+
+export function createOpenAiOAuthSecret(): string {
+  return JSON.stringify({
+    access: "oauth-access-token",
+    expires: Date.now() + 60_000,
+    refresh: "refresh-token",
+  });
+}
+
+export function expectRedirect(response: Response, location: string): void {
+  expect(response.status).toBe(302);
+  expect(response.headers.get("location")).toBe(location);
+}
+
+export function takeValue<T>(values: T[], errorMessage: string): T {
+  const value = values.shift();
+
+  if (value === undefined) {
+    throw new Error(errorMessage);
+  }
+
+  return value;
+}

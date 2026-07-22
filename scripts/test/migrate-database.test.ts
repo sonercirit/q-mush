@@ -1,17 +1,17 @@
 import { Database } from "bun:sqlite";
-import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createDatabase } from "../../src/database.ts";
+import { afterEach, expect, test } from "vitest";
+import { createDatabase } from "../../shared/database.ts";
 import {
   providerCredentials,
   sessions,
   users,
-} from "../../src/database/schema.ts";
-import { SYSTEM_ID } from "../../src/ids.ts";
+} from "../../shared/database/schema.ts";
+import { SYSTEM_ID } from "../../shared/ids.ts";
 
-const ROOT_DIRECTORY = join(import.meta.dir, "../..");
+const ROOT_DIRECTORY = join(import.meta.dirname, "../..");
 const MIGRATIONS = [
   { file: "0000_whole_paibok.sql", timestamp: 1_784_476_796_446 },
   { file: "0001_audited-identifiers.sql", timestamp: 1_784_478_537_706 },
@@ -21,8 +21,6 @@ const SESSION_LIFETIME_MILLISECONDS = 7 * 24 * 60 * 60 * 1000;
 const UUID_V7_PATTERN =
   /^[\da-f]{8}-[\da-f]{4}-7[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/u;
 let temporaryDirectory: string | undefined;
-
-setDefaultTimeout(15_000);
 
 afterEach(() => {
   if (temporaryDirectory !== undefined) {

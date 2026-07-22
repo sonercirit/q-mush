@@ -1,11 +1,12 @@
-import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
+import { afterEach, describe, expect, test } from "vitest";
 
-const ROOT_DIRECTORY = join(import.meta.dir, "../..");
-const SCRIPTS_DIRECTORY = join(import.meta.dir, "..");
+const ROOT_DIRECTORY = join(import.meta.dirname, "../..");
+const SCRIPTS_DIRECTORY = join(import.meta.dirname, "..");
+const ESLINT_PROBE_DIRECTORY = join(ROOT_DIRECTORY, "solid");
 const sourceProbePath = (fileName: string): string =>
-  join(ROOT_DIRECTORY, "src", fileName);
+  join(ESLINT_PROBE_DIRECTORY, fileName);
 const ESLINT_POLICY_PROBE = sourceProbePath("eslint-policy-probe.ts");
 const ESLINT_IMPORT_POLICY_PROBE = sourceProbePath(
   "eslint-import-policy-probe.ts",
@@ -19,16 +20,20 @@ const ESLINT_UNSAFE_TSX_POLICY_PROBE = sourceProbePath(
 );
 const IGNORED_DIRECTORY_PROBE = join(ROOT_DIRECTORY, "eslint-ignore-probe.tgz");
 const KNIP_SOURCE_PROBE = join(SCRIPTS_DIRECTORY, "knip-isolation-probe.ts");
-const KNIP_TEST_PROBE = join(import.meta.dir, "knip-isolation-probe.test.ts");
-const KNIP_TEST_SUPPORT_PROBE = join(import.meta.dir, "knip-isolation-probe");
+const KNIP_TEST_PROBE = join(
+  import.meta.dirname,
+  "knip-isolation-probe.test.ts",
+);
+const KNIP_TEST_SUPPORT_PROBE = join(
+  import.meta.dirname,
+  "knip-isolation-probe",
+);
 const KNIP_TEST_HELPER_PROBE = join(KNIP_TEST_SUPPORT_PROBE, "helper.ts");
 const CPD_IMPORT_PROBES = [
   sourceProbePath("cpd-import-policy-probe-a.ts"),
   sourceProbePath("cpd-import-policy-probe-b.ts"),
 ];
 const RAW_HTML_FILE_PROBE = join(ROOT_DIRECTORY, "raw-html-policy-probe.html");
-
-setDefaultTimeout(15_000);
 
 interface CommandResult {
   readonly exitCode: number;
@@ -112,17 +117,13 @@ console.log(eslint, response, templateResponse);
       ),
       writeFile(
         ESLINT_TSX_POLICY_PROBE,
-        `import { createElement } from "./jsx.ts";
-
-const htmlExample = "<main>Displayed as escaped text</main>";
+        `const htmlExample = "<main>Displayed as escaped text</main>";
 console.log(<main>{htmlExample}</main>);
 `,
       ),
       writeFile(
         ESLINT_UNSAFE_TSX_POLICY_PROBE,
-        `import { createElement } from "./jsx.ts";
-
-console.log(<iframe srcDoc="<main>Raw frame</main>"></iframe>);
+        `console.log(<iframe srcdoc="<main>Raw frame</main>"></iframe>);
 `,
       ),
     ]);
@@ -160,14 +161,14 @@ console.log(<iframe srcDoc="<main>Raw frame</main>"></iframe>);
     await Promise.all([
       writeFile(
         ESLINT_IMPORT_POLICY_PROBE,
-        `import type { AppDatabase } from "./database.ts";
-import { createDatabase } from "./database.ts";
+        `import type { AppDatabase } from "../shared/database.ts";
+import { createDatabase } from "../shared/database.ts";
 import { setTimeout as sleep } from "node:timers/promises";
 import filePath = require("node:path");
 import * as fileSystem from "node:fs";
 import operatingSystem from "node:os";
 import packageMetadata from "../package.json" with { type: "json" };
-import "./routes.ts";
+import "../shared/routes.ts";
 
 type RouteModule = typeof import("./routes.ts");
 const database: AppDatabase = createDatabase(":memory:");
@@ -185,7 +186,7 @@ console.log(
       ),
       writeFile(
         ESLINT_VALID_IMPORT_POLICY_PROBE,
-        `import { createDatabase, type AppDatabase } from "./database.ts";
+        `import { createDatabase, type AppDatabase } from "../shared/database.ts";
 
 const database: AppDatabase = createDatabase(":memory:");
 console.log(database);
@@ -245,7 +246,7 @@ console.log(database);
   setDefaultTimeout,
   spyOn,
   test,
-} from "bun:test";
+} from "vitest";
 `;
     await Promise.all(
       CPD_IMPORT_PROBES.map((probe) => writeFile(probe, duplicatedImports)),

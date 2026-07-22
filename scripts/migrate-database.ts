@@ -1,5 +1,5 @@
-import { createDatabase } from "../src/database.ts";
-import { readDatabasePath } from "../src/database/config.ts";
+import { createDatabase } from "../shared/database.ts";
+import { readDatabasePath } from "../shared/database/config.ts";
 
 const databasePath = readDatabasePath(Bun.env);
 const database = createDatabase(databasePath);

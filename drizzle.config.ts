@@ -1,5 +1,5 @@
 import { defineConfig } from "drizzle-kit";
-import { readDatabasePath } from "./src/database/config.ts";
+import { readDatabasePath } from "./shared/database/config.ts";
 
 export default defineConfig({
   dbCredentials: {
@@ -7,6 +7,6 @@ export default defineConfig({
   },
   dialect: "sqlite",
   out: "./drizzle",
-  schema: "./src/database/schema.ts",
+  schema: "./shared/database/schema.ts",
   strict: true,
 });

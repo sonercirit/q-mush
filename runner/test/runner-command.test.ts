@@ -1,0 +1,92 @@
+import { writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { describe, expect, test } from "vitest";
+import {
+  executeRunnerCommand,
+  readRunnerCommand,
+} from "../../runner/runner-command.ts";
+import { RUNNER_AGENT_FILE_COMMAND } from "../../shared/agent-file.ts";
+import { useTemporaryDirectories } from "./temporary-directories.ts";
+
+const temporaryDirectory = useTemporaryDirectories("q-mush-command-test-");
+
+describe("runner WebSocket protocol", () => {
+  test("validates commands before executing them", async () => {
+    const expected = {
+      arguments: { path: "missing.txt" },
+      id: "command-1",
+      sessionId: "session-1",
+      tool: "read",
+      workingDirectory: "/missing-workspace",
+    };
+    const command = readRunnerCommand({ command: expected });
+
+    expect(command).toEqual(expected);
+    const output = await executeRunnerCommand(command);
+
+    expect(output.startsWith("Error:")).toBe(true);
+  });
+
+  test("loads the preferred workspace agent file for the server", async () => {
+    const root = await temporaryDirectory();
+    await writeFile(join(root, "AGENTS.md"), "Preferred instructions");
+    await writeFile(join(root, "CLAUDE.md"), "Ignored instructions");
+
+    const output = await executeRunnerCommand({
+      arguments: {},
+      id: "agent-file-command",
+      sessionId: "session-1",
+      tool: RUNNER_AGENT_FILE_COMMAND,
+      workingDirectory: root,
+    });
+
+    expect(JSON.parse(output)).toEqual({
+      content: "Preferred instructions",
+      name: "AGENTS.md",
+    });
+  });
+
+  test("executes directory-browser commands outside an agent workspace", async () => {
+    const output = await executeRunnerCommand({
+      arguments: {},
+      id: "directory-command",
+      sessionId: "directory-picker",
+      tool: "list_directories",
+      workingDirectory: process.cwd(),
+    });
+    const listing: unknown = await new Response(output).json();
+
+    expect(listing).toMatchObject({
+      parent: dirname(process.cwd()),
+      path: process.cwd(),
+      truncated: false,
+    });
+  });
+
+  test("stops a running shell command when the session is canceled", async () => {
+    const controller = new AbortController();
+    const startedAt = Date.now();
+    const result = executeRunnerCommand(
+      {
+        arguments: { command: "sleep 10", timeout: 60 },
+        id: "command-2",
+        sessionId: "session-1",
+        tool: "bash",
+        workingDirectory: process.cwd(),
+      },
+      controller.signal,
+    );
+    setTimeout(() => {
+      controller.abort();
+    }, 20);
+
+    expect(await result).toContain("stopped");
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+  });
+
+  test("rejects malformed server commands", () => {
+    expect(() =>
+      readRunnerCommand({ command: { id: "command-without-fields" } }),
+    ).toThrow("invalid runner command");
+  });
+});

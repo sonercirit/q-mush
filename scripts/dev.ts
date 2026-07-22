@@ -9,7 +9,7 @@ const projectRoot = fileURLToPath(new URL("..", import.meta.url));
 const restartTriggerPath = developmentRestartTriggerPath(projectRoot);
 await prepareDevelopmentRestartTrigger(restartTriggerPath);
 const developmentServer = startDevelopmentServer({
-  command: [process.execPath, "run", "src/index.ts"],
+  command: [process.execPath, "run", "sync-engine/index.ts"],
   cwd: projectRoot,
   restartTriggerPath,
 });

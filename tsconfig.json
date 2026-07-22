@@ -5,9 +5,9 @@
     "target": "ESNext",
     "module": "Preserve",
     "moduleDetection": "force",
-    "jsx": "react",
-    "jsxFactory": "createElement",
-    "types": ["bun"],
+    "jsx": "preserve",
+    "jsxImportSource": "solid-js",
+    "types": ["bun", "vitest/globals"],
 
     // Bundler-compatible, type-check-only compilation
     "moduleResolution": "bundler",

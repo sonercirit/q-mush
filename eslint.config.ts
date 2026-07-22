@@ -1,11 +1,107 @@
 import eslint from "@eslint/js";
 import type { Rule } from "eslint";
 import { defineConfig, includeIgnoreFile } from "eslint/config";
+import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { configs } from "typescript-eslint";
 
 const gitignorePath = fileURLToPath(new URL(".gitignore", import.meta.url));
+const ROOT_DIRECTORY = dirname(gitignorePath);
+const APPLICATION_WORKSPACES = new Set([
+  "runner",
+  "shared",
+  "solid",
+  "sync-engine",
+]);
+const DEFAULT_ONLY_DEPENDENCIES = new Set([
+  "@eslint/js",
+  "@tailwindcss/vite",
+  "vite-plugin-solid",
+]);
 const TSX_MIGRATION_MESSAGE = "Render and mount TSX instead.";
+
+function workspaceForPath(path: string): string | undefined {
+  const [workspace] = relative(ROOT_DIRECTORY, path).split(sep);
+  return workspace !== undefined && APPLICATION_WORKSPACES.has(workspace)
+    ? workspace
+    : workspace === "scripts"
+      ? workspace
+      : undefined;
+}
+
+function reportImportBoundary(
+  context: Rule.RuleContext,
+  node: Rule.Node,
+  source: string,
+): void {
+  if (!source.startsWith(".")) {
+    return;
+  }
+
+  const importerWorkspace = workspaceForPath(context.filename);
+  const targetWorkspace = workspaceForPath(
+    resolve(dirname(context.filename), source),
+  );
+
+  if (targetWorkspace === "scripts" && importerWorkspace !== "scripts") {
+    context.report({ messageId: "scripts", node });
+    return;
+  }
+
+  if (
+    importerWorkspace === undefined ||
+    targetWorkspace === importerWorkspace ||
+    importerWorkspace === "scripts"
+  ) {
+    return;
+  }
+
+  if (targetWorkspace === undefined) {
+    context.report({ messageId: "workspace", node });
+    return;
+  }
+
+  if (targetWorkspace !== "shared") {
+    context.report({ messageId: "workspace", node });
+  }
+}
+
+function reportImportSource(
+  context: Rule.RuleContext,
+  node: Rule.Node,
+  source: { readonly value?: unknown } | null | undefined,
+): void {
+  if (source !== undefined && source !== null) {
+    reportImportBoundary(context, node, String(source.value));
+  }
+}
+
+const importBoundariesRule: Rule.RuleModule = {
+  meta: {
+    type: "problem",
+    docs: {
+      description: "Enforce top-level workspace import boundaries",
+    },
+    messages: {
+      scripts: "Importing from scripts is forbidden outside scripts.",
+      workspace: "Import only within this workspace or from shared.",
+    },
+    schema: [],
+  },
+  create(context) {
+    return {
+      ExportAllDeclaration(node) {
+        reportImportSource(context, node, node.source);
+      },
+      ExportNamedDeclaration(node) {
+        reportImportSource(context, node, node.source);
+      },
+      ImportDeclaration(node) {
+        reportImportSource(context, node, node.source);
+      },
+    };
+  },
+};
 
 const canonicalImportsRule: Rule.RuleModule = {
   meta: {
@@ -33,14 +129,17 @@ const canonicalImportsRule: Rule.RuleModule = {
           context.report({ messageId: "attributes", node });
         }
 
-        if (node.specifiers.length === 0) {
+        if (
+          node.specifiers.length === 0 &&
+          node.source.value !== "./styles.css"
+        ) {
           context.report({ messageId: "sideEffect", node });
         }
 
         for (const specifier of node.specifiers) {
           if (
             specifier.type === "ImportDefaultSpecifier" &&
-            node.source.value !== "@eslint/js"
+            !DEFAULT_ONLY_DEPENDENCIES.has(String(node.source.value))
           ) {
             context.report({ messageId: "default", node: specifier });
           }
@@ -92,7 +191,10 @@ export default defineConfig(
     files: ["**/*.{cts,mts,ts,tsx}"],
     plugins: {
       "q-mush": {
-        rules: { "canonical-imports": canonicalImportsRule },
+        rules: {
+          "canonical-imports": canonicalImportsRule,
+          "import-boundaries": importBoundariesRule,
+        },
       },
     },
     rules: {
@@ -107,12 +209,18 @@ export default defineConfig(
       "@typescript-eslint/switch-exhaustiveness-check": "error",
       "no-duplicate-imports": ["error", { allowSeparateTypeImports: false }],
       "q-mush/canonical-imports": "error",
+      "q-mush/import-boundaries": "error",
     },
   },
   {
     // HTML-like text can be valid data, so restrict raw HTML sinks instead.
-    files: ["src/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}"],
-    ignores: ["src/**/fixtures/**", "src/**/test/**"],
+    files: [
+      "runner/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+      "shared/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+      "solid/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+      "sync-engine/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+    ],
+    ignores: ["**/fixtures/**", "**/test/**"],
     rules: {
       "no-restricted-properties": [
         "error",
