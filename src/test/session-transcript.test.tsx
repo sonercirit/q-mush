@@ -45,9 +45,34 @@ function toolResult(
   return transcriptMessage(options, "result");
 }
 
+function userMessage(content: string): AgentSessionMessage {
+  const message = transcriptMessage(
+    { content, id: "user-1", name: "unused" },
+    "result",
+  );
+  return {
+    ...message,
+    role: "user",
+    toolCallId: null,
+    toolName: null,
+  };
+}
+
 function renderMessages(messages: readonly AgentSessionMessage[]): string {
   return renderToHtml(renderSessionTranscript(messages, null));
 }
+
+test("preserves consecutive user message line breaks", () => {
+  const html = renderMessages([
+    userMessage(
+      "Are we removing multi line breaks from the input?\n\n\nHow many breaks do you see in this message?",
+    ),
+  ]);
+
+  expect(html).toContain(
+    '<p class="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-200">Are we removing multi line breaks from the input?\n\n\nHow many breaks do you see in this message?</p>',
+  );
+});
 
 test("separates and colorizes shell output and its exit status", () => {
   const call = assistantToolCall({

@@ -113,7 +113,13 @@ function renderMessage(
         {user ? "You" : system ? "Session" : "Agent"}
       </p>
       {message.content.length > 0 ? (
-        <div className="mt-2">{renderMarkdown(message.content)}</div>
+        user ? (
+          <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-200">
+            {message.content}
+          </p>
+        ) : (
+          <div className="mt-2">{renderMarkdown(message.content)}</div>
+        )
       ) : null}
       {message.images.length > 0 ? (
         <div className="mt-3">{renderSessionImagePreviews(message.images)}</div>

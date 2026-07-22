@@ -118,29 +118,29 @@ task-specific progress, guesses, or sensitive values.
   existing registration to the new token instead of creating a second runner;
   another user's registration remains protected. Runner tokens never appear in
   list responses.
-- `src/sessions.ts` and `src/session-store.ts` implement persistent first-party
-  coding sessions. User messages support selecting or pasting up to eight 10 MB
-  PNG, JPEG, GIF, or WebP images, persisted with the transcript and sent as
-  native multimodal input. A session records latest input-token usage and its
-  discovered context limit. Usage shows a percentage, yellow at 80%, and red at
-  90%. Auto-compaction defaults on and summarizes completed history before the
-  next request at 95%; idle sessions can compact manually. Compaction
-  soft-deletes prior active messages and inserts a replayable handoff. Provider
-  secrets never enter browser or runner work payloads. The working-directory
-  field opens the interactive browser in `src/directory-picker-client.tsx`; its
-  controller posts to `/api/runners/:id/directories` for canonical directory
-  metadata. Before each run, `read_agent_file` loads exact-root `AGENTS.md`,
-  falling back to `CLAUDE.md`; only `AGENTS.md` is used when both exist.
+- `src/sessions.ts` and `src/session-store.ts` persist coding sessions. User
+  messages support selecting or pasting up to eight 10 MB PNG, JPEG, GIF, or
+  WebP images, persisted with the transcript and sent as native multimodal
+  input. A session records latest input-token usage and its discovered context
+  limit. Usage shows a percentage, yellow at 80%, and red at 90%.
+  Auto-compaction defaults on and summarizes completed history before the next
+  request at 95%; idle sessions can compact manually. Compaction soft-deletes
+  prior active messages and inserts a replayable handoff. Provider secrets never
+  enter browser or runner work payloads. The working-directory field opens the
+  interactive browser in `src/directory-picker-client.tsx`; its controller posts
+  to `/api/runners/:id/directories` for canonical directory metadata. Before
+  each run, `read_agent_file` loads exact-root `AGENTS.md`, falling back to
+  `CLAUDE.md`; only `AGENTS.md` is used when both exist.
 
   `src/runner-workspace.ts` shares canonical workspace resolution and
   containment with the file tools. The latest agent-file selection is persisted
   on the session and appended to the model system prompt.
-  `src/session-transcript.tsx` renders the effective prompt, complete tool
-  definitions, raw arguments, call IDs, names, and results. It renders Markdown,
-  colorized code/JSON and edit diffs, plus context-aware shell, read, and
-  parallel results. The control center creates, inspects, follows up, continues
-  without appending a user message, stops, and receives live sessions through
-  `src/realtime-client.ts`, `src/session-client.tsx`, and
+  `src/session-transcript.tsx` renders the effective prompt, tool definitions,
+  and raw tool details. User messages preserve source line breaks; transcript
+  output supports Markdown, colorized code/JSON, edit diffs, and context-aware
+  shell, read, and parallel results. The control center creates, inspects,
+  follows up, continues without appending a user message, stops, and receives
+  live sessions through `src/realtime-client.ts`, `src/session-client.tsx`, and
   `src/session-controller.ts`. Unchanged snapshots suppress render
   notifications. Browser rendering preserves the document viewport and keyed
   `data-scroll-key` regions across full-root remounts; the session transcript
