@@ -9,6 +9,7 @@ import {
   usesOpenAiLoopbackCallback,
 } from "./openai.ts";
 import { createOpenRouterIntegrationFromEnvironment } from "./openrouter.ts";
+import { renderPages } from "./pages.ts";
 import { RealtimeHub } from "./realtime-hub.ts";
 import {
   createRealtimeIntegration,
@@ -25,11 +26,13 @@ import {
 import { createSessionIntegration } from "./sessions.ts";
 
 const database = createDatabase(readDatabasePath(Bun.env));
-const [clientJavaScript, runnerExecutables, stylesheet] = await Promise.all([
-  buildClientJavaScript(),
-  buildRunnerExecutableProvider(),
-  buildClientStylesheet(),
-]);
+const [clientJavaScript, pages, runnerExecutables, stylesheet] =
+  await Promise.all([
+    buildClientJavaScript(),
+    renderPages(),
+    buildRunnerExecutableProvider(),
+    buildClientStylesheet(),
+  ]);
 const googleAuth = createGoogleAuthFromEnvironment(Bun.env, { database });
 const braveSearch = createBraveSearchSkillFromEnvironment(Bun.env, googleAuth, {
   database,
@@ -60,6 +63,7 @@ const realtime = createRealtimeIntegration({
 const handleRequest = createRequestHandler(
   clientJavaScript,
   stylesheet,
+  pages,
   googleAuth,
   openAi,
   openRouter,

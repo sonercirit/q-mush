@@ -1,5 +1,4 @@
 @import "tailwindcss" source(".");
-@source "../shared/server-rendering";
 
 .render-debug-scale {
   background: linear-gradient(

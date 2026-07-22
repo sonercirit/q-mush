@@ -24,10 +24,6 @@ import {
   SESSIONS_PATH,
   STYLESHEET_PATH,
 } from "../shared/routes.ts";
-import {
-  renderAppPage,
-  renderHomePage,
-} from "../shared/server-rendering/pages.tsx";
 import type { GoogleAuth } from "./auth.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
 import {
@@ -36,6 +32,7 @@ import {
 } from "./client-build.ts";
 import type { OpenAiIntegration } from "./openai.ts";
 import type { OpenRouterIntegration } from "./openrouter.ts";
+import type { RenderedPages } from "./pages.ts";
 import type { ProviderIntegration } from "./provider-integration.ts";
 import type { RunnerExecutableProvider } from "./runner-executable.ts";
 import type { RunnerIntegration } from "./runners.ts";
@@ -232,6 +229,7 @@ function routeProviderRequest(
 export function createRequestHandler(
   clientJavaScript: string,
   stylesheet: string,
+  pages: RenderedPages,
   googleAuth: GoogleAuth,
   openAi: OpenAiIntegration,
   openRouter: OpenRouterIntegration,
@@ -240,9 +238,9 @@ export function createRequestHandler(
   sessions: SessionIntegration,
   runnerExecutables: RunnerExecutableProvider,
 ): (request: Request) => Promise<Response> {
-  const appPage = prepareBody(renderAppPage());
+  const appPage = prepareBody(pages.app);
   const browserBundle = prepareBody(clientJavaScript);
-  const homePage = prepareBody(renderHomePage());
+  const homePage = prepareBody(pages.home);
   const notFound = prepareBody("Not found");
   const styles = prepareBody(stylesheet);
 

@@ -5,10 +5,10 @@ information.
 
 ## Project Snapshot
 
-- Private strict-TypeScript ESM Bun project with a SolidJS browser app.
+- Private strict-TypeScript ESM Bun project with SolidJS.
 - Production source is split across `solid/`, `sync-engine/`, `runner/`, and
   `shared/`; `sync-engine/index.ts` is the server entry point.
-- Tests are in workspace `test/` directories; there is no `src/`.
+- Tests live in `test/` directories; there is no `src/`.
 - The server-rendered homepage lives at `/`; the browser app lives at `/app`.
 - Tests use Vitest under Bun.
 
@@ -71,8 +71,9 @@ information.
   session can safely request its own restart. Textual response bodies are
   precompressed once per handler, with `zstd`, Brotli, gzip, or deflate
   negotiated in that server-preference order.
-- `shared/server-rendering/pages.tsx` renders server page shells;
-  `solid/client.tsx` mounts the browser app; routes live in `shared/routes.ts`.
+- `solid/pages.tsx` renders both server page shells through Solid's SSR runtime;
+  `sync-engine/pages.ts` loads it with Vite's SSR runner for Bun. The browser
+  app mounts from `solid/client.tsx`; routes live in `shared/routes.ts`.
 - `sync-engine/auth.ts` implements Google OpenID Connect with an
   authorization-code + PKCE flow. It uses HttpOnly state/verifier cookies,
   fetches the basic profile, and discards provider tokens.
@@ -167,11 +168,11 @@ information.
   `provider_credentials`; failures fall through keys in creation order, and
   secrets never reach the browser, runner, or model provider. Its UI reuses the
   shared credential panel and controller.
-- The browser uses SolidJS and Vite. `solid/client.tsx` is the browser entry,
-  `solid/styles.css` is the Tailwind source, and the classic JSX runtime under
-  `shared/server-rendering` is retained only for server page shells. Vitest uses
-  an SSR Solid transform for TSX string-rendering tests and must run under Bun
-  because tests and application modules use Bun APIs and `bun:sqlite`.
+- The UI uses SolidJS and Vite. `solid/client.tsx` is the browser entry,
+  `solid/pages.tsx` owns server-rendered page shells, and `solid/styles.css` is
+  the Tailwind source. Vitest uses an SSR Solid transform for TSX
+  string-rendering tests and must run under Bun because tests and application
+  modules use Bun APIs and `bun:sqlite`.
 - TypeScript is configured for strict, no-emit, bundler-style checking in
   `tsconfig.json`, including unused and unreachable code diagnostics. Library
   declaration checking is skipped because Drizzle publishes declarations for

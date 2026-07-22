@@ -34,6 +34,7 @@ import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
 import type { BraveSearchSkill } from "../../sync-engine/brave-search.ts";
 import { createOpenAiIntegrationFromEnvironment } from "../../sync-engine/openai.ts";
 import { createOpenRouterIntegrationFromEnvironment } from "../../sync-engine/openrouter.ts";
+import { renderPages } from "../../sync-engine/pages.ts";
 import type { RunnerExecutableProvider } from "../../sync-engine/runner-executable.ts";
 import { createRunnerIntegration } from "../../sync-engine/runners.ts";
 import {
@@ -75,6 +76,7 @@ const braveSearch: BraveSearchSkill = {
   keys: () => Promise.resolve(new Response(null, { status: 401 })),
   remove: () => new Response(null, { status: 401 }),
 };
+const pages = await renderPages();
 const runners = createRunnerIntegration(googleAuth);
 function createTestRequestHandler(): (request: Request) => Promise<Response> {
   const modelProviders = { openai: openAi, openrouter: openRouter };
@@ -88,6 +90,7 @@ function createTestRequestHandler(): (request: Request) => Promise<Response> {
   return createRequestHandler(
     clientJavaScript,
     stylesheet,
+    pages,
     ...integrations,
     runners,
     sessions,

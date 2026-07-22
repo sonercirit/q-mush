@@ -2,12 +2,7 @@ import solid from "vite-plugin-solid";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
-  plugins: [
-    solid({
-      exclude: [/shared\/server-rendering\//u],
-      ssr: true,
-    }),
-  ],
+  plugins: [solid({ ssr: true })],
   test: {
     environment: "node",
     include: ["**/test/**/*.test.{ts,tsx}"],

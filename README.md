@@ -232,12 +232,13 @@ computer's private config. Every application row carries creation, update,
 actor, and soft-deletion audit fields. Committed migrations in `drizzle/` are
 applied automatically at startup.
 
-The browser application in `solid/` uses SolidJS. Vite and its Tailwind plugin
-build `solid/client.tsx` and `solid/styles.css`; the server invokes that build
-in memory at startup, while `bun run build` can emit the same assets to `dist/`.
-The small classic JSX renderer retained in `shared/server-rendering/` renders
-the server-owned page shells. Runner cross-compilation uses a temporary
-directory, then keeps each requested platform executable in server memory.
+The UI in `solid/` uses SolidJS throughout. Vite and its Tailwind plugin build
+`solid/client.tsx` and `solid/styles.css`; the server invokes that build in
+memory at startup, while `bun run build` can emit the same assets to `dist/`.
+`solid/pages.tsx` renders the server-owned page shells with Solid's SSR runtime;
+`sync-engine/pages.ts` loads that TSX through Vite's SSR runner at startup.
+Runner cross-compilation uses a temporary directory, then keeps each requested
+platform executable in server memory.
 
 Apply pending migrations without starting the server:
 
