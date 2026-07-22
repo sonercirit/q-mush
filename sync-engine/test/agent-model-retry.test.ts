@@ -109,6 +109,18 @@ describe("agent model request retries", () => {
     expect(delays).toEqual([3_000]);
   });
 
+  test("keeps retrying a rate-limited request until it succeeds", async () => {
+    const responses = Array.from(
+      { length: 4 },
+      () => new Response(null, { status: 429 }),
+    );
+    responses.push(createJsonResponse({ completion: "Accepted." }));
+    const result = await requestWithRecordedDelays(responses);
+
+    expect(await result.response.json()).toEqual({ completion: "Accepted." });
+    expect(result.delays.join(",")).toBe("1000,2000,4000,4000");
+  });
+
   test("does not retry a non-retryable response", async () => {
     const requestCount = { value: 0 };
     const response = await fetchModelRequestWithRetries(

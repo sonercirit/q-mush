@@ -1,10 +1,20 @@
 import { setTimeout } from "node:timers/promises";
 
 const MODEL_REQUEST_RETRY_DELAYS_MILLISECONDS = [1_000, 2_000, 4_000] as const;
-const RETRYABLE_MODEL_REQUEST_STATUSES = new Set([408, 409, 429]);
+const MODEL_REQUEST_MAX_RETRY_DELAY_MILLISECONDS =
+  MODEL_REQUEST_RETRY_DELAYS_MILLISECONDS.at(-1) ?? 4_000;
+const RATE_LIMITED_MODEL_REQUEST_STATUS = 429;
+const RETRYABLE_MODEL_REQUEST_STATUSES = new Set([
+  408,
+  409,
+  RATE_LIMITED_MODEL_REQUEST_STATUS,
+]);
 const RETRY_AFTER_MAX_MILLISECONDS = 60_000;
 
 type ModelRequestFetch = (request: Request) => Promise<Response>;
+type ModelRequestResult =
+  | { readonly error: unknown; readonly type: "error" }
+  | { readonly response: Response; readonly type: "response" };
 export type ModelRequestSleep = (
   milliseconds: number,
   signal?: AbortSignal,
@@ -20,29 +30,38 @@ function defaultModelRequestSleep(
 async function fetchModelRequest(
   fetch: ModelRequestFetch,
   request: Request,
-  canRetry: boolean,
-): Promise<Response | undefined> {
+): Promise<ModelRequestResult> {
   try {
-    return await fetch(request.clone());
+    return { response: await fetch(request.clone()), type: "response" };
   } catch (error) {
-    if (request.signal.aborted || !canRetry) {
+    if (request.signal.aborted) {
       throw error;
     }
 
-    return undefined;
+    return { error, type: "error" };
   }
 }
 
-function modelRequestIsRetryable(response: Response | undefined): boolean {
+function modelRequestIsRetryable(result: ModelRequestResult): boolean {
   return (
-    response === undefined ||
-    RETRYABLE_MODEL_REQUEST_STATUSES.has(response.status) ||
-    (response.status >= 500 && response.status <= 599)
+    result.type === "error" ||
+    RETRYABLE_MODEL_REQUEST_STATUSES.has(result.response.status) ||
+    (result.response.status >= 500 && result.response.status <= 599)
   );
 }
 
-function retryDelay(response: Response | undefined, fallback: number): number {
-  const retryAfter = response?.headers.get("retry-after");
+function modelRequestIsRateLimited(result: ModelRequestResult): boolean {
+  return (
+    result.type === "response" &&
+    result.response.status === RATE_LIMITED_MODEL_REQUEST_STATUS
+  );
+}
+
+function retryDelay(result: ModelRequestResult, fallback: number): number {
+  const retryAfter =
+    result.type === "response"
+      ? result.response.headers.get("retry-after")
+      : undefined;
 
   if (retryAfter === undefined || retryAfter === null) {
     return fallback;
@@ -63,27 +82,25 @@ export async function fetchModelRequestWithRetries(
   sleepFor?: ModelRequestSleep,
 ): Promise<Response> {
   const wait = sleepFor ?? defaultModelRequestSleep;
-  const requestModel = (canRetry: boolean) =>
-    fetchModelRequest(fetch, request, canRetry);
-  let response = await requestModel(true);
+  let result = await fetchModelRequest(fetch, request);
+  let retryCount = 0;
 
-  for (const [
-    index,
-    delay,
-  ] of MODEL_REQUEST_RETRY_DELAYS_MILLISECONDS.entries()) {
-    if (!modelRequestIsRetryable(response)) {
-      break;
-    }
-
-    await wait(retryDelay(response, delay), request.signal);
-    response = await requestModel(
-      index < MODEL_REQUEST_RETRY_DELAYS_MILLISECONDS.length - 1,
-    );
+  while (
+    modelRequestIsRetryable(result) &&
+    (retryCount < MODEL_REQUEST_RETRY_DELAYS_MILLISECONDS.length ||
+      modelRequestIsRateLimited(result))
+  ) {
+    const delay =
+      MODEL_REQUEST_RETRY_DELAYS_MILLISECONDS[retryCount] ??
+      MODEL_REQUEST_MAX_RETRY_DELAY_MILLISECONDS;
+    await wait(retryDelay(result, delay), request.signal);
+    retryCount += 1;
+    result = await fetchModelRequest(fetch, request);
   }
 
-  if (response === undefined) {
-    throw new Error("The model request failed without a response");
+  if (result.type === "error") {
+    throw result.error;
   }
 
-  return response;
+  return result.response;
 }

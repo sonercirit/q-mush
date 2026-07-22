@@ -201,9 +201,10 @@ metadata, so their effort select is model-specific. OpenAI's standard models
 endpoint only publishes model availability, so API-key models use their default
 reasoning setting. A selected effort is sent using each provider's native
 request shape. Model calls automatically retry transient network and provider
-failures with short exponential backoff, while **Stop session** aborts a pending
-retry. The first-party loop passes explicit function calls to the runner and
-feeds bounded results back to the selected model.
+failures with short exponential backoff. Rate-limited requests remain pending
+and retry until the provider accepts them, while **Stop session** aborts a
+pending retry. The first-party loop passes explicit function calls to the runner
+and feeds bounded results back to the selected model.
 
 The Google login flow uses an authorization code, PKCE, and a short-lived state
 cookie. Only the basic Google profile and email scopes are requested. Google
