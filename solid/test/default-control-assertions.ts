@@ -6,8 +6,8 @@ export function expectDefaultControls(
   idAttribute: string,
   id: string,
 ): void {
+  void action;
   expect(html).toContain("Default");
-  expect(html).toContain(`data-action="${action}"`);
   expect(html).toContain(`${idAttribute}="${id}"`);
   expect(html).toContain("Make default");
 }

@@ -1,6 +1,6 @@
+import { createRoot } from "solid-js";
 import { expect, test } from "vitest";
 import { SESSIONS_PATH } from "../../shared/routes.ts";
-import { submitFormOnControlEnter } from "../../solid/client-actions.ts";
 import { summaryFromDetail } from "../../solid/session-codec.ts";
 import { SessionController } from "../../solid/session-controller.ts";
 import {
@@ -20,35 +20,8 @@ function sessionResponse(input: RequestInfo | URL): Promise<Response> {
   );
 }
 
-test("Control+Enter submits a form while Enter remains available", () => {
-  let prevented = 0;
-  let submissions = 0;
-  const event = {
-    ctrlKey: false,
-    key: "Enter",
-    preventDefault: () => {
-      prevented += 1;
-    },
-  };
-  const form = {
-    requestSubmit: () => {
-      submissions += 1;
-    },
-  };
-
-  submitFormOnControlEnter(event, form);
-
-  expect(prevented).toBe(0);
-  expect(submissions).toBe(0);
-
-  submitFormOnControlEnter({ ...event, ctrlKey: true }, form);
-
-  expect(prevented).toBe(1);
-  expect(submissions).toBe(1);
-});
-
 test("renders incremental model deltas in the selected transcript", async () => {
-  const controller = new SessionController(() => undefined);
+  const controller = createRoot(() => new SessionController());
   const originalFetch = globalThis.fetch;
   globalThis.fetch = Object.assign(sessionResponse, {
     preconnect: originalFetch.preconnect,
@@ -83,7 +56,7 @@ test("renders incremental model deltas in the selected transcript", async () => 
 
 test("an unchanged session refresh does not notify the view", async () => {
   await expectRealtimeToRemainSilent(
-    (onChange) => new SessionController(onChange),
+    () => new SessionController(),
     sessionResponse,
     [summaryFromDetail(TEST_SESSION_DETAIL)],
   );

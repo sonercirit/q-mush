@@ -1,15 +1,17 @@
-export class RevisionState<State extends object> {
-  readonly #onChange: () => void;
-  #revision = 0;
-  #value: State;
+import { type Accessor } from "solid-js";
 
-  constructor(initialValue: State, onChange: () => void) {
-    this.#onChange = onChange;
-    this.#value = initialValue;
+export class RevisionState<State extends object> {
+  #revision = 0;
+  readonly #setValue: (value: State) => void;
+  readonly #value: Accessor<State>;
+
+  constructor(value: Accessor<State>, setValue: (value: State) => void) {
+    this.#setValue = setValue;
+    this.#value = value;
   }
 
   get value(): State {
-    return this.#value;
+    return this.#value();
   }
 
   begin(patch?: Partial<State>): number {
@@ -27,8 +29,7 @@ export class RevisionState<State extends object> {
   }
 
   patch(patch: Partial<State>): void {
-    this.#value = { ...this.#value, ...patch };
-    this.#onChange();
+    this.#setValue({ ...this.value, ...patch });
   }
 
   patchCurrent(revision: number, patch: Partial<State>): boolean {
@@ -41,12 +42,11 @@ export class RevisionState<State extends object> {
   }
 
   replaceSilently(value: State): void {
-    this.#value = value;
+    this.#setValue(value);
   }
 
   reset(value: State): void {
     this.#revision += 1;
-    this.#value = value;
-    this.#onChange();
+    this.#setValue(value);
   }
 }

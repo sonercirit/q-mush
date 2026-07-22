@@ -1,7 +1,8 @@
+import { type Accessor } from "solid-js";
 import { RUNNERS_PATH, runnerDefaultPath } from "../shared/routes.ts";
 import type { RunnerSummary } from "../shared/runner-model.ts";
 import { HttpResponseError, request, requestJson } from "./browser-http.ts";
-import { bindActionClicks } from "./client-actions.ts";
+import { createReactiveState, type ReactiveState } from "./reactive-state.ts";
 import {
   createRunnerViewState,
   readCreatedRunner,
@@ -13,8 +14,6 @@ import {
   defaultedRunners,
   setupWithoutRunner,
 } from "./runner-controller-state.ts";
-
-type RunnerChangeListener = () => void;
 
 type RunnerMutation = "default" | "remove";
 
@@ -74,19 +73,26 @@ function runnerListsMatch(
 }
 
 export class RunnerController {
-  readonly #onChange: RunnerChangeListener;
+  readonly #view: ReactiveState<RunnerViewState>;
   #revision = 0;
-  #state: RunnerViewState = initialRunnerState();
 
-  constructor(onChange: RunnerChangeListener) {
-    this.#onChange = onChange;
+  constructor(view = createReactiveState(initialRunnerState())) {
+    this.#view = view;
+  }
+
+  get state(): RunnerViewState {
+    return this.#view.state();
+  }
+
+  get view(): Accessor<RunnerViewState> {
+    return this.#view.state;
   }
 
   applyRealtime(runners: readonly RunnerSummary[]): void {
     if (
-      this.#state.creating ||
-      this.#state.removingId !== undefined ||
-      this.#state.settingDefaultId !== undefined
+      this.state.creating ||
+      this.state.removingId !== undefined ||
+      this.state.settingDefaultId !== undefined
     ) {
       return;
     }
@@ -94,60 +100,47 @@ export class RunnerController {
     this.#applyList(runners);
   }
 
-  #applyList(runners: readonly RunnerSummary[]): void {
-    const setup = setupAfterRefresh(this.#state.setup, runners);
-
-    if (
-      runnerListsMatch(this.#state.runners, runners) &&
-      this.#state.setup === setup
-    ) {
-      this.#state = { ...this.#state, runners };
-      return;
-    }
-
-    this.#patch({ error: undefined, runners, setup });
+  copyCommand(): Promise<void> {
+    return this.#copyCommand();
   }
 
-  bind(container: Element): void {
-    const panel = container.querySelector('[data-runner-panel="true"]');
-
-    bindActionClicks(panel, (control, action) => {
-      if (action === "create-runner") {
-        void this.#create();
-      } else if (action === "copy-runner-command") {
-        void this.#copyCommand();
-      } else if (action === "retry-runners") {
-        void this.load();
-      } else if (
-        action === "set-default-runner" ||
-        action === "remove-runner"
-      ) {
-        const runnerId = control.dataset["runnerId"];
-        if (runnerId !== undefined) {
-          void (action === "set-default-runner"
-            ? this.#setDefault(runnerId)
-            : this.#remove(runnerId));
-        }
-      }
-    });
-  }
-
-  get state(): RunnerViewState {
-    return this.#state;
+  create(): Promise<void> {
+    return this.#createRunner();
   }
 
   load(): Promise<void> {
     return this.#readList(true);
   }
 
+  remove(runnerId: string): Promise<void> {
+    return this.#mutate("remove", runnerId);
+  }
+
   reset(): void {
     this.#revision += 1;
-    this.#state = initialRunnerState();
-    this.#onChange();
+    this.#view.setState(initialRunnerState());
+  }
+
+  setDefault(runnerId: string): Promise<void> {
+    return this.#mutate("default", runnerId);
+  }
+
+  #applyList(runners: readonly RunnerSummary[]): void {
+    const setup = setupAfterRefresh(this.state.setup, runners);
+
+    if (
+      runnerListsMatch(this.state.runners, runners) &&
+      this.state.setup === setup
+    ) {
+      this.#view.setState({ ...this.state, runners });
+      return;
+    }
+
+    this.#patch({ error: undefined, runners, setup });
   }
 
   async #copyCommand(): Promise<void> {
-    const command = this.#state.setup?.command;
+    const command = this.state.setup?.command;
 
     if (command === undefined) {
       return;
@@ -165,7 +158,7 @@ export class RunnerController {
     }
   }
 
-  async #create(): Promise<void> {
+  async #createRunner(): Promise<void> {
     const revision = this.#begin({
       copied: false,
       creating: true,
@@ -178,7 +171,7 @@ export class RunnerController {
       );
 
       if (this.#isCurrent(revision)) {
-        const current = this.#state.runners ?? [];
+        const current = this.state.runners ?? [];
         this.#patch({
           creating: false,
           runners: [...current, created.runner],
@@ -240,7 +233,7 @@ export class RunnerController {
           method: "POST",
           pending: "settingDefaultId",
           success: (id) => ({
-            runners: defaultedRunners(this.#state.runners, id),
+            runners: defaultedRunners(this.state.runners, id),
             settingDefaultId: undefined,
           }),
         }
@@ -251,8 +244,8 @@ export class RunnerController {
           pending: "removingId",
           success: (id) => ({
             removingId: undefined,
-            runners: this.#state.runners?.filter((runner) => runner.id !== id),
-            setup: setupWithoutRunner(this.#state.setup, id),
+            runners: this.state.runners?.filter((runner) => runner.id !== id),
+            setup: setupWithoutRunner(this.state.setup, id),
           }),
         };
   }
@@ -280,16 +273,7 @@ export class RunnerController {
     }
   }
 
-  #setDefault(runnerId: string): Promise<void> {
-    return this.#mutate("default", runnerId);
-  }
-
-  #remove(runnerId: string): Promise<void> {
-    return this.#mutate("remove", runnerId);
-  }
-
   #patch(patch: Partial<RunnerViewState>): void {
-    this.#state = { ...this.#state, ...patch };
-    this.#onChange();
+    this.#view.setState({ ...this.state, ...patch });
   }
 }

@@ -1,12 +1,12 @@
+import { type Accessor } from "solid-js";
 import { SESSIONS_PATH } from "../shared/routes.ts";
 import type {
   AgentSessionDetail,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
 import { requestJson } from "./browser-http.ts";
-import { bindActionClicks } from "./client-actions.ts";
-import { customSelectValues } from "./custom-select-controller.ts";
 import { DirectoryPickerController } from "./directory-picker-controller.ts";
+import { createReactiveState, type ReactiveState } from "./reactive-state.ts";
 import { RevisionState } from "./revision-state.ts";
 import type { SessionViewState } from "./session-client.tsx";
 import { readSessionDetail, readSessionList } from "./session-codec.ts";
@@ -16,13 +16,8 @@ import {
   sessionDataMatches,
   SessionRealtimeState,
 } from "./session-controller-state.ts";
-import { defaultedSessionDraft } from "./session-defaults.ts";
-import {
-  formString,
-  readSessionDraft,
-  selectedDraftOption,
-} from "./session-form.ts";
-import { bindSessionImageInputs } from "./session-image-bindings.ts";
+
+import { selectedDraftOption } from "./session-form.ts";
 import { appendAgentImageFiles } from "./session-image-input.ts";
 import { SessionModelController } from "./session-model-controller.ts";
 import {
@@ -39,8 +34,6 @@ import {
   mostRecentSessionDirectory,
 } from "./session-state.ts";
 
-type ChangeListener = () => void;
-
 function selectedMutation(
   sessionId: string | undefined,
   create: (sessionId: string) => SessionMutation,
@@ -48,43 +41,22 @@ function selectedMutation(
   return sessionId === undefined ? undefined : create(sessionId);
 }
 
-function bindPanelForm(
-  panel: Element,
-  action: string,
-  onInput: (form: HTMLFormElement, inputName?: string) => void,
-  onSubmit: () => void,
-): void {
-  const form = panel.querySelector<HTMLFormElement>(
-    `form[data-action="${action}"]`,
-  );
-
-  form?.addEventListener("input", (event) => {
-    const inputName =
-      event.target instanceof Element
-        ? (event.target.getAttribute("name") ?? undefined)
-        : undefined;
-    onInput(form, inputName);
-  });
-  form?.addEventListener("submit", (event) => {
-    event.preventDefault();
-    onInput(form);
-    onSubmit();
-  });
-}
-
 export class SessionController {
   readonly #directoryPicker: DirectoryPickerController;
   readonly #models: SessionModelController;
   readonly #realtime: SessionRealtimeState;
   readonly #view: RevisionState<SessionViewState>;
+  readonly #reactiveView: ReactiveState<SessionViewState>;
 
-  constructor(onChange: ChangeListener) {
-    this.#view = new RevisionState(initialSessionViewState(), onChange);
+  constructor(
+    reactiveView = createReactiveState(initialSessionViewState()),
+    directoryPicker = new DirectoryPickerController(),
+  ) {
+    this.#reactiveView = reactiveView;
+    this.#view = new RevisionState(reactiveView.state, reactiveView.setState);
     this.#realtime = new SessionRealtimeState(this.#view);
     this.#models = new SessionModelController(this.#view);
-    this.#directoryPicker = new DirectoryPickerController(() => {
-      this.#view.patch({ directoryPicker: this.#directoryPicker.state });
-    });
+    this.#directoryPicker = directoryPicker;
   }
 
   applyDetail(detail: AgentSessionDetail): void {
@@ -107,158 +79,144 @@ export class SessionController {
     this.#realtime.applySessions(sessions);
   }
 
-  bind(container: Element): void {
-    const panel = container.querySelector('[data-session-panel="true"]');
-
-    if (panel === null) {
-      return;
-    }
-
-    bindPanelForm(
-      panel,
-      "create-session",
-      (form, inputName) => {
-        this.#rememberDraft(form, inputName);
-      },
-      () => void this.#create(),
-    );
-    bindPanelForm(
-      panel,
-      "send-session-message",
-      (form) => {
-        this.#rememberFollowUp(form);
-      },
-      () => void this.#send(),
-    );
-    bindSessionImageInputs(panel, (files, follow) =>
-      this.#addImages(files, follow),
-    );
-
-    bindActionClicks(panel, (control, action) => {
-      if (action === "toggle-auto-compact") {
-        void this.#toggleAutoCompact(control);
-      } else if (action === "toggle-session-select") {
-        const name = control.dataset["selectName"];
-
-        if (
-          name === "credential" ||
-          name === "model" ||
-          name === "reasoningEffort" ||
-          name === "runnerId"
-        ) {
-          this.#view.patch({
-            openSelect: this.#view.value.openSelect === name ? undefined : name,
-          });
-        }
-      } else if (action === "choose-session-option") {
-        const select = control.closest("[data-custom-select]");
-        const name = control.dataset["selectName"];
-        const value = control.dataset["optionValue"];
-        if (
-          select !== null &&
-          name !== undefined &&
-          value !== undefined &&
-          select.getAttribute("data-custom-select") === name
-        ) {
-          const availableValues = customSelectValues(select);
-
-          if (availableValues.includes(value)) {
-            this.#rememberCreateForm(control);
-            this.#chooseOption(name, value, availableValues);
-          }
-        }
-      } else if (action === "remove-session-image") {
-        this.#removeImage(control, "draft");
-      } else if (action === "remove-follow-up-image") {
-        this.#removeImage(control, "followUp");
-      } else if (action === "select-session") {
-        const sessionId = control.dataset["sessionId"];
-
-        if (sessionId !== undefined) {
-          void this.#select(sessionId);
-        }
-      } else if (action === "stop-session") {
-        void this.#stop();
-      } else if (action === "continue-session") {
-        void this.#continue();
-      } else if (action === "compact-session") {
-        void this.#compact();
-      } else if (action === "retry-sessions") {
-        void this.load();
-      } else if (action === "retry-models") {
-        this.#models.ensure(this.#view.value.draft.credential, true);
-      } else if (action === "open-directory-picker") {
-        this.#rememberCreateForm(control);
-
-        const draft = this.#view.value.draft;
-
-        if (draft.runnerId.length > 0) {
-          void this.#directoryPicker.open(
-            draft.runnerId,
-            draft.workingDirectory.trim() || "~",
-          );
-        }
-      } else if (action === "browse-directory") {
-        const path = control.dataset["directoryPath"];
-
-        if (path !== undefined) {
-          void this.#directoryPicker.browse(path);
-        }
-      } else if (action === "browse-parent-directory") {
-        const parent = this.#directoryPicker.state.listing?.parent;
-
-        if (parent !== null && parent !== undefined) {
-          void this.#directoryPicker.browse(parent);
-        }
-      } else if (action === "browse-home-directory") {
-        void this.#directoryPicker.browse("~");
-      } else if (action === "retry-directory-picker") {
-        void this.#directoryPicker.retry();
-      } else if (action === "close-directory-picker") {
-        this.#directoryPicker.close();
-      } else if (action === "choose-directory") {
-        const path = this.#directoryPicker.choose();
-
-        if (path !== undefined) {
-          const draft = { ...this.#view.value.draft, workingDirectory: path };
-          this.#view.patch({ draft });
-        }
-      }
-    });
-
-    const directoryPicker = panel.querySelector<HTMLElement>(
-      '[data-directory-picker="true"]',
-    );
-    directoryPicker?.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        this.#directoryPicker.close();
-      }
-    });
-
-    if (
-      directoryPicker !== null &&
-      !directoryPicker.contains(panel.ownerDocument.activeElement)
-    ) {
-      directoryPicker.focus();
-    }
-
-    const defaultedDraft = defaultedSessionDraft(panel, this.#view.value.draft);
-
-    if (defaultedDraft !== undefined) {
-      this.#view.replaceSilently({
-        ...this.#view.value,
-        draft: defaultedDraft,
-      });
-    }
-
-    if (defaultedDraft?.credential !== undefined) {
-      this.#models.ensure(defaultedDraft.credential);
-    }
+  get directoryPicker(): DirectoryPickerController {
+    return this.#directoryPicker;
   }
 
   get state(): SessionViewState {
-    return this.#view.value;
+    return {
+      ...this.#view.value,
+      directoryPicker: this.#directoryPicker.state,
+    };
+  }
+
+  get view(): Accessor<SessionViewState> {
+    return this.#reactiveView.state;
+  }
+
+  addImages(files: readonly File[], follow: boolean): Promise<void> {
+    return this.#addImages(files, follow);
+  }
+
+  chooseDirectory(): void {
+    const workingDirectory = this.#directoryPicker.choose();
+
+    if (workingDirectory !== undefined) {
+      this.setDraftField("workingDirectory", workingDirectory);
+    }
+  }
+
+  chooseOption(
+    name: string,
+    value: string,
+    availableValues: readonly string[],
+  ): void {
+    const panel = this.#view.value;
+    const draft = selectedDraftOption(panel, name, value, availableValues);
+
+    if (draft === undefined) {
+      return;
+    }
+
+    this.#view.patch({ draft, openSelect: undefined });
+
+    if (name === "credential") {
+      this.#models.ensure(value);
+    }
+  }
+
+  compact(): Promise<void> {
+    return this.#compact();
+  }
+
+  continueSession(): Promise<void> {
+    return this.#continue();
+  }
+
+  create(): Promise<void> {
+    return this.#create();
+  }
+
+  initializeDefaults(
+    runnerId: string,
+    credential: string,
+    credentialSettled: boolean,
+  ): void {
+    const draft = this.#view.value.draft;
+    const defaultedCredential = credentialSettled
+      ? credential
+      : draft.credential;
+    const next = {
+      ...draft,
+      credential: defaultedCredential,
+      ...(defaultedCredential === draft.credential
+        ? {}
+        : { model: "", reasoningEffort: "" }),
+      runnerId,
+    };
+
+    if (
+      next.credential !== draft.credential ||
+      next.runnerId !== draft.runnerId
+    ) {
+      this.#view.patch({ draft: next });
+    }
+
+    if (next.credential.length > 0) {
+      this.#models.ensure(next.credential);
+    }
+  }
+
+  openDirectoryPicker(): void {
+    const draft = this.#view.value.draft;
+
+    if (draft.runnerId.length > 0) {
+      void this.#directoryPicker.open(
+        draft.runnerId,
+        draft.workingDirectory.trim() || "~",
+      );
+    }
+  }
+
+  removeImage(index: number, target: "draft" | "followUp"): void {
+    this.#removeImage(index, target);
+  }
+
+  retryModels(): void {
+    this.#models.ensure(this.#view.value.draft.credential, true);
+  }
+
+  select(sessionId: string): Promise<void> {
+    return this.#select(sessionId);
+  }
+
+  send(): Promise<void> {
+    return this.#send();
+  }
+
+  setDraftField(name: "prompt" | "workingDirectory", value: string): void {
+    const draft = this.#view.value.draft;
+    this.#view.patch({ draft: { ...draft, [name]: value } });
+  }
+
+  setFollowUp(value: string): void {
+    this.#view.patch({ followUp: value });
+  }
+
+  stop(): Promise<void> {
+    return this.#stop();
+  }
+
+  toggleAutoCompact(autoCompact: boolean): Promise<void> {
+    return this.#toggleAutoCompact(autoCompact);
+  }
+
+  toggleSelect(
+    name: "credential" | "model" | "reasoningEffort" | "runnerId",
+  ): void {
+    this.#view.patch({
+      openSelect: this.#view.value.openSelect === name ? undefined : name,
+    });
   }
 
   async load(): Promise<void> {
@@ -430,49 +388,6 @@ export class SessionController {
     }
   }
 
-  #rememberCreateForm(control: Element): void {
-    const form = control.closest<HTMLFormElement>(
-      'form[data-action="create-session"]',
-    );
-
-    if (form !== null) {
-      this.#rememberDraft(form);
-    }
-  }
-
-  #chooseOption(
-    name: string,
-    value: string,
-    availableValues: readonly string[],
-  ): void {
-    const panel = this.#view.value;
-    const draft = selectedDraftOption(panel, name, value, availableValues);
-
-    if (draft === undefined) {
-      return;
-    }
-
-    this.#view.patch({ draft, openSelect: undefined });
-
-    if (name === "credential") {
-      this.#models.ensure(value);
-    }
-  }
-
-  #rememberDraft(form: HTMLFormElement, inputName?: string): void {
-    const draft = readSessionDraft(form, this.#view.value.draft);
-
-    if (inputName === "credential") {
-      const nextDraft = { ...draft, model: "", reasoningEffort: "" };
-      this.#view.patch({ draft: nextDraft });
-      this.#models.ensure(nextDraft.credential);
-    } else if (inputName === "model") {
-      this.#view.patch({ draft: { ...draft, reasoningEffort: "" } });
-    } else {
-      this.#remember({ draft });
-    }
-  }
-
   async #addImages(files: readonly File[], follow: boolean): Promise<void> {
     const current = follow
       ? this.#view.value.followUpImages
@@ -497,8 +412,7 @@ export class SessionController {
     }
   }
 
-  #removeImage(control: HTMLElement, target: "draft" | "followUp"): void {
-    const index = Number(control.dataset["imageIndex"]);
+  #removeImage(index: number, target: "draft" | "followUp"): void {
     const images =
       target === "draft"
         ? this.#view.value.draft.images
@@ -516,14 +430,6 @@ export class SessionController {
         ? { draft: { ...this.#view.value.draft, images: remaining } }
         : { followUpImages: remaining },
     );
-  }
-
-  #rememberFollowUp(form: HTMLFormElement): void {
-    this.#remember({ followUp: formString(form, "prompt") });
-  }
-
-  #remember(patch: Partial<SessionViewState>): void {
-    this.#view.replaceSilently({ ...this.#view.value, ...patch });
   }
 
   async #select(sessionId: string): Promise<void> {
@@ -581,20 +487,13 @@ export class SessionController {
     await this.#mutateSelected(compactSessionMutation);
   }
 
-  async #toggleAutoCompact(control: HTMLElement): Promise<void> {
-    const autoCompact = control.dataset["autoCompact"];
-    if (autoCompact !== "true" && autoCompact !== "false") {
-      return;
-    }
-
+  async #toggleAutoCompact(autoCompact: boolean): Promise<void> {
     const sessionId = this.#view.value.selectedId;
     if (sessionId === undefined) {
       return;
     }
 
-    await this.#mutateDetail(
-      compactionModeMutation(sessionId, autoCompact === "true"),
-    );
+    await this.#mutateDetail(compactionModeMutation(sessionId, autoCompact));
   }
 
   async #continue(): Promise<void> {

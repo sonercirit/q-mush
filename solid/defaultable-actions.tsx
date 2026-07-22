@@ -1,37 +1,36 @@
 import { type JSX } from "solid-js";
-import {
-  renderDefaultControl,
-  renderRemovalButton,
-} from "./client-controls.tsx";
+import { DefaultControl, RemovalButton } from "./client-controls.tsx";
 
-interface DefaultableActions {
-  readonly defaultAction: string;
-  readonly id: string;
-  readonly idAttribute: string;
+interface DefaultableActionsProps {
+  readonly data?: Readonly<Record<string, string>>;
   readonly isDefault: boolean;
-  readonly removeAction: string;
+  readonly onRemove: () => void;
+  readonly onSetDefault: () => void;
   readonly removing: boolean;
   readonly settingDefault: boolean;
 }
 
-export function renderDefaultableActions(
-  options: DefaultableActions,
+export function DefaultableActions(
+  props: DefaultableActionsProps,
 ): JSX.Element {
+  const data = (): { readonly data?: Readonly<Record<string, string>> } =>
+    props.data === undefined ? {} : { data: props.data };
+
   return (
     <div class="flex shrink-0 items-center gap-2">
-      {renderDefaultControl({
-        action: options.defaultAction,
-        dataAttribute: options.idAttribute,
-        id: options.id,
-        isDefault: options.isDefault,
-        pending: options.settingDefault,
-      })}
-      {renderRemovalButton({
-        action: options.removeAction,
-        dataAttribute: options.idAttribute,
-        id: options.id,
-        pending: options.removing,
-      })}
+      <DefaultControl
+        {...data()}
+        idleLabel="Make default"
+        isDefault={props.isDefault}
+        onClick={props.onSetDefault}
+        pending={props.settingDefault}
+        pendingLabel="Setting…"
+      />
+      <RemovalButton
+        {...data()}
+        onClick={props.onRemove}
+        pending={props.removing}
+      />
     </div>
   );
 }

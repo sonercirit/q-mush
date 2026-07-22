@@ -1,5 +1,7 @@
 import { test } from "vitest";
-import { renderRunnerPanel } from "../../solid/runner-client.tsx";
+import { createReactiveState } from "../../solid/reactive-state.ts";
+import { RunnerPanel } from "../../solid/runner-client.tsx";
+import { RunnerController } from "../../solid/runner-controller.ts";
 import { runnerViewState } from "./client-state-fixtures.ts";
 import { expectDefaultControls } from "./default-control-assertions.ts";
 import { renderSolidToString } from "./render-solid.tsx";
@@ -11,7 +13,10 @@ const STATE = runnerViewState([
 ]);
 
 test("renders runner default controls", () => {
-  const html = renderSolidToString(() => renderRunnerPanel(STATE));
+  const controller = new RunnerController(createReactiveState(STATE));
+  const html = renderSolidToString(() => (
+    <RunnerPanel controller={controller} />
+  ));
 
   expectDefaultControls(
     html,

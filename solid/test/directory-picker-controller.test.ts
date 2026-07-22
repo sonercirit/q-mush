@@ -1,6 +1,11 @@
+import { createRoot } from "solid-js";
 import { afterEach, describe, expect, test } from "vitest";
 import { runnerDirectoriesPath } from "../../shared/routes.ts";
-import { DirectoryPickerController } from "../../solid/directory-picker-controller.ts";
+import {
+  DirectoryPickerController,
+  initialDirectoryPickerState,
+} from "../../solid/directory-picker-controller.ts";
+import { createReactiveState } from "../../solid/reactive-state.ts";
 import { requestUrl } from "./controller-test-helpers.ts";
 
 const originalFetch = globalThis.fetch;
@@ -31,10 +36,8 @@ describe("directory picker controller", () => {
       },
       { preconnect: originalFetch.preconnect },
     );
-    let changes = 0;
-    const controller = new DirectoryPickerController(() => {
-      changes += 1;
-    });
+    const view = createReactiveState(initialDirectoryPickerState());
+    const controller = new DirectoryPickerController(view);
 
     await controller.open("runner/one", "~");
 
@@ -54,7 +57,6 @@ describe("directory picker controller", () => {
     });
     expect(controller.choose()).toBe("/home/mush");
     expect(controller.state.open).toBe(false);
-    expect(changes).toBeGreaterThanOrEqual(3);
   });
 
   test("keeps the picker open with a retryable error", async () => {
@@ -62,7 +64,7 @@ describe("directory picker controller", () => {
       () => Promise.resolve(new Response(null, { status: 409 })),
       { preconnect: originalFetch.preconnect },
     );
-    const controller = new DirectoryPickerController(() => undefined);
+    const controller = createRoot(() => new DirectoryPickerController());
 
     await controller.open("runner-1", "/missing");
 

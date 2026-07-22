@@ -4,7 +4,7 @@ import { createAgentSystemPrompt } from "../shared/agent-prompt.ts";
 import { AGENT_TOOLS } from "../shared/agent-tools.ts";
 import type { AgentSessionMessage } from "../shared/session-model.ts";
 import { renderDebugBoundary } from "./render-debug.tsx";
-import { renderSessionImagePreviews } from "./session-image-client.tsx";
+import { SessionImagePreviews } from "./session-image-client.tsx";
 import { renderMarkdown } from "./session-markdown.tsx";
 import { renderStructuredCode } from "./session-syntax.tsx";
 import { renderToolResult } from "./session-tool-result.tsx";
@@ -138,7 +138,9 @@ function renderMessage(
         )
       ) : null}
       {message.images.length > 0 ? (
-        <div class="mt-3">{renderSessionImagePreviews(message.images)}</div>
+        <div class="mt-3">
+          <SessionImagePreviews images={message.images} />
+        </div>
       ) : null}
       {message.toolCalls.length > 0 ? (
         <ul class="mt-3 space-y-2">

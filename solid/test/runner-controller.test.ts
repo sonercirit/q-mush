@@ -8,7 +8,7 @@ test("an online heartbeat update does not notify the unchanged view", async () =
   const online = [runnerSummary(1)];
 
   await expectRealtimeToRemainSilent(
-    (onChange) => new RunnerController(onChange),
+    () => new RunnerController(),
     () => {
       requests += 1;
       return Promise.resolve(Response.json({ runners: online }));

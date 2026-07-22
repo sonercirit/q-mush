@@ -1,4 +1,4 @@
-import { type JSX } from "solid-js";
+import { createSignal, Show, type Accessor, type JSX } from "solid-js";
 import { isRecord } from "../shared/auth-model.ts";
 import {
   BRAVE_SEARCH_KEYS_PATH,
@@ -7,8 +7,9 @@ import {
   OPENROUTER_CREDENTIALS_PATH,
   OPENROUTER_OAUTH_PATH,
 } from "../shared/routes.ts";
-import { renderRemovalButton, renderRetryError } from "./client-controls.tsx";
-import { renderDefaultableActions } from "./defaultable-actions.tsx";
+import { RemovalButton } from "./client-controls.tsx";
+import { Collection } from "./collection.tsx";
+import { DefaultableActions } from "./defaultable-actions.tsx";
 import { renderDebugBoundary } from "./render-debug.tsx";
 
 type BrowserProviderId = "brave-search" | "openai" | "openrouter";
@@ -150,165 +151,211 @@ export function readProviderCredentials(
   );
 }
 
-function renderCredentialActions(
-  configuration: ProviderPanelConfiguration,
-  credential: ProviderCredential,
-  removing: boolean,
-  settingDefault: boolean,
-): JSX.Element {
-  return configuration.id === "brave-search"
-    ? renderRemovalButton({
-        action: "remove-provider-credential",
-        dataAttribute: "data-credential-id",
-        id: credential.id,
-        pending: removing,
-      })
-    : renderDefaultableActions({
-        defaultAction: "set-default-provider-credential",
-        id: credential.id,
-        idAttribute: "data-credential-id",
-        isDefault: credential.isDefault,
-        removeAction: "remove-provider-credential",
-        removing,
-        settingDefault,
-      });
+interface ProviderPanelProps {
+  readonly configuration: ProviderPanelConfiguration;
+  readonly controller: ProviderPanelController;
 }
 
-function renderCredential(
-  configuration: ProviderPanelConfiguration,
-  state: {
-    readonly credential: ProviderCredential;
-    readonly removingId: string | undefined;
-    readonly settingDefaultId: string | undefined;
-  },
-): JSX.Element {
-  const { credential, removingId, settingDefaultId } = state;
+interface CredentialItemProps {
+  readonly configuration: ProviderPanelConfiguration;
+  readonly controller: ProviderPanelController;
+  readonly credential: ProviderCredential;
+  readonly state: ProviderViewState;
+}
 
+function CredentialActions(props: CredentialItemProps): JSX.Element {
+  const remove = (): void => {
+    void props.controller.remove(props.credential.id);
+  };
+  const removing = (): boolean =>
+    props.state.removingId === props.credential.id;
+  const settingDefault = (): boolean =>
+    props.state.settingDefaultId === props.credential.id;
+
+  return (
+    <Show
+      fallback={
+        <DefaultableActions
+          data={{ "data-credential-id": props.credential.id }}
+          isDefault={props.credential.isDefault}
+          onRemove={remove}
+          onSetDefault={() => {
+            void props.controller.setDefault(props.credential.id);
+          }}
+          removing={removing()}
+          settingDefault={settingDefault()}
+        />
+      }
+      when={props.configuration.id === "brave-search"}
+    >
+      <RemovalButton onClick={remove} pending={removing()} />
+    </Show>
+  );
+}
+
+function ProviderCredentialItem(props: CredentialItemProps): JSX.Element {
   return (
     <li
       class="flex flex-col gap-4 rounded-2xl border border-white/10 bg-slate-950/60 p-5 sm:flex-row sm:items-center sm:justify-between"
       {...renderDebugBoundary(
-        `provider-credential:${configuration.id}:${credential.id}`,
-        `${configuration.name} credential: ${credential.label}`,
+        `provider-credential:${props.configuration.id}:${props.credential.id}`,
+        `${props.configuration.name} credential: ${props.credential.label}`,
       )}
     >
       <div class="min-w-0">
         <div class="flex flex-wrap items-center gap-2">
-          <p class="truncate font-semibold text-white">{credential.label}</p>
+          <p class="truncate font-semibold text-white">
+            {props.credential.label}
+          </p>
           <span class="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-2.5 py-1 text-xs font-medium text-cyan-200">
-            {credential.source === "oauth" ? "Connected account" : "API key"}
+            {props.credential.source === "oauth"
+              ? "Connected account"
+              : "API key"}
           </span>
         </div>
         <p class="mt-2 truncate text-sm text-slate-400">
-          {credential.accountId ?? configuration.accountIdUnavailable}
+          {props.credential.accountId ??
+            props.configuration.accountIdUnavailable}
         </p>
       </div>
-      {renderCredentialActions(
-        configuration,
-        credential,
-        removingId === credential.id,
-        settingDefaultId === credential.id,
-      )}
+      <CredentialActions {...props} />
     </li>
   );
 }
 
-function renderCredentialList(
-  configuration: ProviderPanelConfiguration,
-  state: ProviderViewState,
-): JSX.Element {
-  if (state.credentials === undefined) {
-    return state.error === undefined ? (
-      <p class="mt-6 text-sm text-slate-400" role="status">
-        {`Loading ${configuration.name} ${configuration.id === "brave-search" ? "keys" : "connections"}…`}
-      </p>
-    ) : null;
-  }
-
-  if (state.credentials.length === 0) {
-    return (
-      <div class="mt-6 rounded-2xl border border-dashed border-white/15 p-6 text-sm leading-6 text-slate-400">
-        {configuration.emptyMessage}
-      </div>
-    );
-  }
-
+function ProviderCredentialList({
+  configuration,
+  controller,
+}: ProviderPanelProps): JSX.Element {
+  const state = controller.view;
+  const retry = {
+    get error(): string | undefined {
+      return state().error;
+    },
+    onRetry: (): void => void controller.load(),
+  };
   return (
-    <ul class="mt-6 space-y-3">
-      {state.credentials.map((credential) =>
-        renderCredential(configuration, {
+    <Collection
+      empty={
+        <div class="mt-6 rounded-2xl border border-dashed border-white/15 p-6 text-sm leading-6 text-slate-400">
+          {configuration.emptyMessage}
+        </div>
+      }
+      items={state().credentials}
+      listClass="mt-6 space-y-3"
+      loading={
+        <p class="mt-6 text-sm text-slate-400" role="status">
+          {`Loading ${configuration.name} ${configuration.id === "brave-search" ? "keys" : "connections"}…`}
+        </p>
+      }
+      retry={retry}
+    >
+      {(credential) => {
+        const item: CredentialItemProps = {
+          configuration,
+          controller,
           credential,
-          removingId: state.removingId,
-          settingDefaultId: state.settingDefaultId,
-        }),
-      )}
-    </ul>
+          state: state(),
+        };
+        return <ProviderCredentialItem {...item} />;
+      }}
+    </Collection>
   );
 }
 
-export function renderProviderPanel(
-  configuration: ProviderPanelConfiguration,
-  state: ProviderViewState,
-): JSX.Element {
-  const titleId = `${configuration.id}-title`;
-  const inputId = `${configuration.id}-api-key`;
+function credentialInputAttributes(disabled: boolean) {
+  return {
+    autocomplete: "off",
+    class:
+      "mt-2 w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none",
+    disabled,
+  } as const;
+}
+
+export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
+  const state = props.controller.view;
+  const titleId = (): string => `${props.configuration.id}-title`;
+  const inputId = (): string => `${props.configuration.id}-api-key`;
+  const [form, setForm] = createSignal<HTMLFormElement>();
 
   return (
     <section
-      aria-labelledby={titleId}
+      aria-labelledby={titleId()}
       class="rounded-3xl border border-white/10 bg-white/[0.06] p-6 shadow-2xl shadow-emerald-950/30 backdrop-blur-xl sm:p-8"
-      data-provider-panel={configuration.id}
+      data-provider-panel={props.configuration.id}
       {...renderDebugBoundary(
-        `provider-panel:${configuration.id}`,
-        `${configuration.name} panel`,
+        `provider-panel:${props.configuration.id}`,
+        `${props.configuration.name} panel`,
       )}
     >
       <div class="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p class="text-sm font-medium text-cyan-300">
-            {configuration.id === "brave-search"
+            {props.configuration.id === "brave-search"
               ? "Agent skill"
               : "Model access"}
           </p>
-          <h2 class="mt-2 text-2xl font-semibold text-white" id={titleId}>
-            {configuration.name}
+          <h2 class="mt-2 text-2xl font-semibold text-white" id={titleId()}>
+            {props.configuration.name}
           </h2>
           <p class="mt-3 max-w-2xl leading-7 text-slate-400">
-            {configuration.description}
+            {props.configuration.description}
           </p>
         </div>
-        {configuration.oauthPath === undefined ||
-        configuration.connectLabel === undefined ? null : (
-          <a
-            class="inline-flex shrink-0 items-center justify-center rounded-2xl bg-cyan-300 px-5 py-3 font-semibold text-slate-950 transition hover:bg-cyan-200 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300"
-            href={configuration.oauthPath}
-          >
-            {configuration.connectLabel}
-          </a>
-        )}
+        <Show
+          when={
+            props.configuration.oauthPath === undefined ||
+            props.configuration.connectLabel === undefined
+              ? undefined
+              : {
+                  label: props.configuration.connectLabel,
+                  path: props.configuration.oauthPath,
+                }
+          }
+        >
+          {(oauth) => (
+            <a
+              class="inline-flex shrink-0 items-center justify-center rounded-2xl bg-cyan-300 px-5 py-3 font-semibold text-slate-950 transition hover:bg-cyan-200 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300"
+              href={oauth().path}
+            >
+              {oauth().label}
+            </a>
+          )}
+        </Show>
       </div>
 
       <form
-        class={`mt-7 grid gap-3 rounded-2xl border border-white/10 bg-slate-900/70 p-4 ${configuration.keyRequiresLabel === true ? "sm:grid-cols-[minmax(0,0.7fr)_minmax(0,1fr)_auto]" : "sm:grid-cols-[minmax(0,1fr)_auto]"}`}
-        data-action="add-provider-key"
+        class={`mt-7 grid gap-3 rounded-2xl border border-white/10 bg-slate-900/70 p-4 ${props.configuration.keyRequiresLabel === true ? "sm:grid-cols-[minmax(0,0.7fr)_minmax(0,1fr)_auto]" : "sm:grid-cols-[minmax(0,1fr)_auto]"}`}
+        onSubmit={(event) => {
+          event.preventDefault();
+          const data = new FormData(event.currentTarget);
+          const apiKey = data.get("apiKey");
+          const label = data.get("label");
+          if (typeof apiKey === "string") {
+            void props.controller
+              .add(apiKey, typeof label === "string" ? label : undefined)
+              .then(() => {
+                form()?.reset();
+              });
+          }
+        }}
+        ref={setForm}
         {...renderDebugBoundary(
-          `provider-form:${configuration.id}`,
-          `${configuration.name} key form`,
+          `provider-form:${props.configuration.id}`,
+          `${props.configuration.name} key form`,
         )}
       >
-        {configuration.keyRequiresLabel === true ? (
+        <Show when={props.configuration.keyRequiresLabel === true}>
           <div>
             <label
               class="text-sm font-medium text-slate-200"
-              for={`${configuration.id}-key-label`}
+              for={`${props.configuration.id}-key-label`}
             >
               Label
             </label>
             <input
-              autocomplete="off"
-              class="mt-2 w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none"
-              disabled={state.savePending}
-              id={`${configuration.id}-key-label`}
+              {...credentialInputAttributes(state().savePending)}
+              id={`${props.configuration.id}-key-label`}
               maxLength="100"
               name="label"
               placeholder="Primary"
@@ -316,37 +363,44 @@ export function renderProviderPanel(
               type="text"
             />
           </div>
-        ) : null}
+        </Show>
         <div>
-          <label class="text-sm font-medium text-slate-200" for={inputId}>
-            {`${configuration.name} API key`}
+          <label class="text-sm font-medium text-slate-200" for={inputId()}>
+            {`${props.configuration.name} API key`}
           </label>
           <input
-            autocomplete="off"
-            class="mt-2 w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none"
-            disabled={state.savePending}
-            id={inputId}
+            {...credentialInputAttributes(state().savePending)}
+            id={inputId()}
             name="apiKey"
-            placeholder={configuration.keyPlaceholder}
+            placeholder={props.configuration.keyPlaceholder}
             required
             type="password"
           />
         </div>
         <button
           class="self-end rounded-xl border border-emerald-300/30 bg-emerald-300/10 px-5 py-3 font-semibold text-emerald-200 transition hover:bg-emerald-300/20 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
-          disabled={state.savePending}
+          disabled={state().savePending}
           type="submit"
         >
-          {state.savePending ? "Adding…" : "Add API key"}
+          {state().savePending ? "Adding…" : "Add API key"}
         </button>
       </form>
 
-      {renderRetryError(state.error, "retry-provider")}
-
-      {renderCredentialList(configuration, state)}
+      <ProviderCredentialList
+        configuration={props.configuration}
+        controller={props.controller}
+      />
       <p class="mt-5 text-xs leading-5 text-slate-500">
-        {configuration.removalHelp}
+        {props.configuration.removalHelp}
       </p>
     </section>
   );
+}
+
+interface ProviderPanelController {
+  readonly view: Accessor<ProviderViewState>;
+  add(apiKey: string, label?: string): Promise<void>;
+  load(): Promise<void>;
+  remove(credentialId: string): Promise<void>;
+  setDefault(credentialId: string): Promise<void>;
 }

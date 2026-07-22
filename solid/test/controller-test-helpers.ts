@@ -1,3 +1,4 @@
+import { createEffect, createRoot } from "solid-js";
 import { expect } from "vitest";
 
 interface RealtimeController<Value> {
@@ -18,28 +19,34 @@ export function requestUrl(input: RequestInfo | URL): string {
 }
 
 export async function expectRealtimeToRemainSilent<Value>(
-  createController: (onChange: () => void) => RealtimeController<Value>,
+  createController: () => RealtimeController<Value> & {
+    readonly view: () => unknown;
+  },
   fetchImplementation: FetchImplementation,
   realtimeValue: Value,
 ): Promise<void> {
   const originalFetch = globalThis.fetch;
-  let changes = 0;
 
   globalThis.fetch = Object.assign(fetchImplementation, {
     preconnect: originalFetch.preconnect,
   });
 
   try {
-    const controller = createController(() => {
-      changes += 1;
+    await createRoot(async (dispose) => {
+      let changes = 0;
+      const controller = createController();
+      createEffect(() => {
+        controller.view();
+        changes += 1;
+      });
+
+      await controller.load();
+      const changesAfterLoad = changes;
+      controller.applyRealtime(realtimeValue);
+
+      expect(changes).toBe(changesAfterLoad);
+      dispose();
     });
-
-    await controller.load();
-    const changesAfterLoad = changes;
-
-    controller.applyRealtime(realtimeValue);
-
-    expect(changes).toBe(changesAfterLoad);
   } finally {
     globalThis.fetch = originalFetch;
   }

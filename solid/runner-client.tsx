@@ -1,8 +1,8 @@
-import { type JSX } from "solid-js";
+import { Show, type Accessor, type JSX } from "solid-js";
 import { isRecord, readNullableString } from "../shared/auth-model.ts";
 import type { RunnerStatus, RunnerSummary } from "../shared/runner-model.ts";
-import { renderRetryError } from "./client-controls.tsx";
-import { renderDefaultableActions } from "./defaultable-actions.tsx";
+import { Collection } from "./collection.tsx";
+import { DefaultableActions } from "./defaultable-actions.tsx";
 import { renderDebugBoundary } from "./render-debug.tsx";
 
 export interface RunnerSetupInstructions {
@@ -155,35 +155,38 @@ function runnerActivity(runner: RunnerSummary): string {
     : `Last connected ${new Date(runner.lastSeenAt).toLocaleString()}`;
 }
 
-function renderRunnerActions(
-  runner: RunnerSummary,
-  removing: boolean,
-  settingDefault: boolean,
-): JSX.Element {
-  return renderDefaultableActions({
-    defaultAction: "set-default-runner",
-    id: runner.id,
-    idAttribute: "data-runner-id",
-    isDefault: runner.isDefault,
-    removeAction: "remove-runner",
-    removing,
-    settingDefault,
-  });
+interface RunnerItemProps {
+  readonly controller: RunnerPanelController;
+  readonly runner: RunnerSummary;
+  readonly state: RunnerViewState;
 }
 
-function renderRunner(
-  runner: RunnerSummary,
-  removingId: string | undefined,
-  settingDefaultId: string | undefined,
-): JSX.Element {
-  const presentation = STATUS_PRESENTATION[runner.status];
+function RunnerActions(props: RunnerItemProps): JSX.Element {
+  return (
+    <DefaultableActions
+      data={{ "data-runner-id": props.runner.id }}
+      isDefault={props.runner.isDefault}
+      onRemove={() => {
+        void props.controller.remove(props.runner.id);
+      }}
+      onSetDefault={() => {
+        void props.controller.setDefault(props.runner.id);
+      }}
+      removing={props.state.removingId === props.runner.id}
+      settingDefault={props.state.settingDefaultId === props.runner.id}
+    />
+  );
+}
+
+function RunnerItem(props: RunnerItemProps): JSX.Element {
+  const presentation = () => STATUS_PRESENTATION[props.runner.status];
 
   return (
     <li
       class="flex flex-col gap-4 rounded-2xl border border-white/10 bg-slate-950/60 p-5 sm:flex-row sm:items-center sm:justify-between"
       {...renderDebugBoundary(
-        `runner:${runner.id}`,
-        `Runner: ${runner.name ?? "New runner"}`,
+        `runner:${props.runner.id}`,
+        `Runner: ${props.runner.name ?? "New runner"}`,
       )}
     >
       <div class="flex min-w-0 items-start gap-4">
@@ -196,97 +199,119 @@ function renderRunner(
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-2">
             <p class="truncate font-semibold text-white">
-              {runner.name ?? "New runner"}
+              {props.runner.name ?? "New runner"}
             </p>
             <span
-              class={`rounded-full border px-2.5 py-1 text-xs font-medium ${presentation.classes}`}
+              class={`rounded-full border px-2.5 py-1 text-xs font-medium ${presentation().classes}`}
             >
-              {presentation.label}
+              {presentation().label}
             </span>
           </div>
-          <p class="mt-2 text-sm text-slate-400">{runnerDetails(runner)}</p>
-          <p class="mt-1 text-xs text-slate-500">{runnerActivity(runner)}</p>
+          <p class="mt-2 text-sm text-slate-400">
+            {runnerDetails(props.runner)}
+          </p>
+          <p class="mt-1 text-xs text-slate-500">
+            {runnerActivity(props.runner)}
+          </p>
         </div>
       </div>
-      {renderRunnerActions(
-        runner,
-        removingId === runner.id,
-        settingDefaultId === runner.id,
-      )}
+      <RunnerActions {...props} />
     </li>
   );
 }
 
-function renderSetup(state: RunnerViewState): JSX.Element {
-  if (state.setup === undefined) {
-    return null;
-  }
+interface RunnerPanelProps {
+  readonly controller: RunnerPanelController;
+  readonly state: RunnerViewState;
+}
 
+function RunnerSetup(props: RunnerPanelProps): JSX.Element {
   return (
-    <div class="mt-7 rounded-2xl border border-emerald-300/20 bg-emerald-300/[0.08] p-5 sm:p-6">
-      <p class="text-sm font-medium text-emerald-200">
-        Install on one computer
-      </p>
-      <p class="mt-2 text-sm leading-6 text-slate-300">
-        Paste this one line into a macOS or Linux terminal. It downloads the
-        runner, starts it in the background, and connects it to your account.
-      </p>
-      <div class="mt-4 flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950 p-3">
-        <code class="min-w-0 flex-1 overflow-x-auto whitespace-nowrap text-sm text-emerald-200">
-          {state.setup.command}
-        </code>
-        <button
-          class="shrink-0 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:border-emerald-300/40"
-          data-action="copy-runner-command"
-          type="button"
-        >
-          {state.copied ? "Copied" : "Copy"}
-        </button>
-      </div>
-      <a
-        class="mt-4 inline-flex items-center justify-center rounded-xl border border-emerald-300/30 bg-emerald-300/10 px-4 py-2.5 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-300/20 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
-        download="q-mush-runner-install.sh"
-        href={state.setup.downloadUrl}
-      >
-        Download installer
-      </a>
-      <p class="mt-4 text-xs leading-5 text-slate-500">
-        This command connects to the address currently open in your browser. A
-        localhost address works only on this computer. Keep the command private;
-        its token connects the runner back to your Q Mush user.
-      </p>
+    <Show when={props.state.setup}>
+      {(setup) => (
+        <div class="mt-7 rounded-2xl border border-emerald-300/20 bg-emerald-300/[0.08] p-5 sm:p-6">
+          <p class="text-sm font-medium text-emerald-200">
+            Install on one computer
+          </p>
+          <p class="mt-2 text-sm leading-6 text-slate-300">
+            Paste this one line into a macOS or Linux terminal. It downloads the
+            runner, starts it in the background, and connects it to your
+            account.
+          </p>
+          <div class="mt-4 flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950 p-3">
+            <code class="min-w-0 flex-1 overflow-x-auto whitespace-nowrap text-sm text-emerald-200">
+              {setup().command}
+            </code>
+            <button
+              class="shrink-0 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:border-emerald-300/40"
+              onClick={() => {
+                void props.controller.copyCommand();
+              }}
+              type="button"
+            >
+              {props.state.copied ? "Copied" : "Copy"}
+            </button>
+          </div>
+          <a
+            class="mt-4 inline-flex items-center justify-center rounded-xl border border-emerald-300/30 bg-emerald-300/10 px-4 py-2.5 text-sm font-semibold text-emerald-200 transition hover:bg-emerald-300/20 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
+            download="q-mush-runner-install.sh"
+            href={setup().downloadUrl}
+          >
+            Download installer
+          </a>
+          <p class="mt-4 text-xs leading-5 text-slate-500">
+            This command connects to the address currently open in your browser.
+            A localhost address works only on this computer. Keep the command
+            private; its token connects the runner back to your Q Mush user.
+          </p>
+        </div>
+      )}
+    </Show>
+  );
+}
+
+interface RunnerControllerProps {
+  readonly controller: RunnerPanelController;
+}
+
+function RunnerList(props: RunnerControllerProps): JSX.Element {
+  const state = props.controller.view;
+  const loading = (): JSX.Element => (
+    <p class="mt-7 text-sm text-slate-400" role="status">
+      Loading runners…
+    </p>
+  );
+  const empty = (): JSX.Element => (
+    <div class="mt-7 rounded-2xl border border-dashed border-white/15 p-6 text-sm leading-6 text-slate-400">
+      No runners yet. Set up one on every computer where you want Q Mush to run
+      agents.
     </div>
   );
-}
-
-function renderRunnerList(state: RunnerViewState): JSX.Element {
-  if (state.runners === undefined) {
-    return state.error === undefined ? (
-      <p class="mt-7 text-sm text-slate-400" role="status">
-        Loading runners…
-      </p>
-    ) : null;
-  }
-
-  if (state.runners.length === 0) {
-    return (
-      <div class="mt-7 rounded-2xl border border-dashed border-white/15 p-6 text-sm leading-6 text-slate-400">
-        No runners yet. Set up one on every computer where you want Q Mush to
-        run agents.
-      </div>
-    );
-  }
-
   return (
-    <ul class="mt-7 space-y-3">
-      {state.runners.map((runner) =>
-        renderRunner(runner, state.removingId, state.settingDefaultId),
-      )}
-    </ul>
+    <Collection
+      empty={empty()}
+      items={state().runners}
+      listClass="mt-7 space-y-3"
+      loading={loading()}
+      retry={{
+        error: state().error,
+        onRetry: (): void => void props.controller.load(),
+      }}
+    >
+      {(runner) => {
+        const item: RunnerItemProps = {
+          controller: props.controller,
+          runner,
+          state: state(),
+        };
+        return <RunnerItem {...item} />;
+      }}
+    </Collection>
   );
 }
 
-export function renderRunnerPanel(state: RunnerViewState): JSX.Element {
+export function RunnerPanel(props: RunnerControllerProps): JSX.Element {
+  const state = props.controller.view;
   return (
     <section
       aria-labelledby="runners-title"
@@ -309,17 +334,27 @@ export function renderRunnerPanel(state: RunnerViewState): JSX.Element {
         </div>
         <button
           class="inline-flex shrink-0 items-center justify-center rounded-2xl bg-emerald-300 px-5 py-3 font-semibold text-slate-950 transition hover:bg-emerald-200 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
-          data-action="create-runner"
-          disabled={state.creating}
+          disabled={state().creating}
+          onClick={() => {
+            void props.controller.create();
+          }}
           type="button"
         >
-          {state.creating ? "Preparing…" : "Set up a runner"}
+          {state().creating ? "Preparing…" : "Set up a runner"}
         </button>
       </div>
 
-      {renderSetup(state)}
-      {renderRetryError(state.error, "retry-runners")}
-      {renderRunnerList(state)}
+      <RunnerSetup controller={props.controller} state={state()} />
+      <RunnerList controller={props.controller} />
     </section>
   );
+}
+
+interface RunnerPanelController {
+  readonly view: Accessor<RunnerViewState>;
+  copyCommand(): Promise<void>;
+  create(): Promise<void>;
+  load(): Promise<void>;
+  remove(runnerId: string): Promise<void>;
+  setDefault(runnerId: string): Promise<void>;
 }

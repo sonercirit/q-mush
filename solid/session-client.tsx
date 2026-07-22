@@ -1,4 +1,10 @@
-import { type JSX } from "solid-js";
+import {
+  createEffect,
+  createMemo,
+  Show,
+  type Accessor,
+  type JSX,
+} from "solid-js";
 import {
   reasoningEffortLabel,
   type AgentModelCatalog,
@@ -8,15 +14,11 @@ import type { ProviderId } from "../shared/provider-credential-store.ts";
 import type { RunnerSummary } from "../shared/runner-model.ts";
 import type {
   AgentSessionDetail,
-  AgentSessionStatus,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
-import { renderRetryError } from "./client-controls.tsx";
-import {
-  renderCustomSelect,
-  type CustomSelectOption,
-} from "./custom-select.tsx";
-import { renderDirectoryPicker } from "./directory-picker-client.tsx";
+import { RetryNotice } from "./collection.tsx";
+import { CustomSelect, type CustomSelectOption } from "./custom-select.tsx";
+import { DirectoryPicker } from "./directory-picker-client.tsx";
 import type { DirectoryPickerState } from "./directory-picker-controller.ts";
 import {
   modelModalitiesLabel,
@@ -28,17 +30,10 @@ import type {
 } from "./provider-client.tsx";
 import { renderDebugBoundary } from "./render-debug.tsx";
 import type { RunnerViewState } from "./runner-client.tsx";
-import {
-  renderSessionFollowUp,
-  renderSessionPromptInput,
-} from "./session-client-forms.tsx";
-import {
-  formatTokenCount,
-  renderCompactionControls,
-  sessionContextClasses,
-  sessionContextLabel,
-} from "./session-context-client.tsx";
-import { renderSessionTranscript } from "./session-transcript.tsx";
+import { SessionPromptInput } from "./session-client-forms.tsx";
+import { formatTokenCount } from "./session-context-client.tsx";
+import type { SessionController } from "./session-controller.ts";
+import { SessionDetail, SessionList } from "./session-detail-client.tsx";
 
 export interface SessionDraft {
   readonly credential: string;
@@ -79,45 +74,6 @@ export interface SessionViewState {
 interface CredentialOption {
   readonly credential: ProviderCredential;
   readonly provider: ProviderId;
-}
-
-const STATUS_PRESENTATION: Readonly<
-  Record<
-    AgentSessionStatus,
-    { readonly classes: string; readonly label: string }
-  >
-> = {
-  failed: {
-    classes: "border-rose-300/20 bg-rose-300/10 text-rose-200",
-    label: "Failed",
-  },
-  idle: {
-    classes: "border-cyan-300/20 bg-cyan-300/10 text-cyan-200",
-    label: "Ready",
-  },
-  queued: {
-    classes: "border-amber-300/20 bg-amber-300/10 text-amber-200",
-    label: "Queued",
-  },
-  running: {
-    classes: "border-emerald-300/20 bg-emerald-300/10 text-emerald-200",
-    label: "Running",
-  },
-  stopped: {
-    classes: "border-slate-400/20 bg-slate-400/10 text-slate-300",
-    label: "Stopped",
-  },
-};
-
-function statusBadge(status: AgentSessionStatus): JSX.Element {
-  const presentation = STATUS_PRESENTATION[status];
-  return (
-    <span
-      class={`rounded-full border px-2.5 py-1 text-xs font-medium ${presentation.classes}`}
-    >
-      {presentation.label}
-    </span>
-  );
 }
 
 function onlineRunners(state: RunnerViewState): readonly RunnerSummary[] {
@@ -162,15 +118,6 @@ function selectedCredential(
   return credentials.find((option) => optionValue(option) === value);
 }
 
-function sessionModelLabel(
-  session: Pick<AgentSessionSummary, "model" | "provider" | "reasoningEffort">,
-): string {
-  const model = `${session.provider} · ${session.model}`;
-  return session.reasoningEffort === null
-    ? model
-    : `${model} · ${reasoningEffortLabel(session.reasoningEffort)} reasoning`;
-}
-
 function renderSessionField(
   id: string,
   label: JSX.Element,
@@ -202,34 +149,42 @@ function sessionControlAttributes(
     id: "session-directory",
     name: options.name,
     required,
-    "data-focus-key": "session-directory",
   };
 }
 
-function renderDirectoryInput(
-  state: SessionViewState,
-  runnerAvailable: boolean,
-): JSX.Element {
-  const options = {
-    disabled: state.creating,
+function DirectoryInput(props: {
+  readonly controller: SessionController;
+  readonly runnerAvailable: boolean;
+  readonly state: SessionViewState;
+}): JSX.Element {
+  const options = () => ({
+    disabled: props.state.creating,
     label: "Working directory on runner",
     name: "workingDirectory",
-  };
+  });
 
   return renderSessionField(
     "session-directory",
-    options.label,
+    options().label,
     <div class="flex items-center gap-2">
       <input
-        {...sessionControlAttributes(options, true)}
+        {...sessionControlAttributes(options(), true)}
+        onInput={(event) => {
+          props.controller.setDraftField(
+            "workingDirectory",
+            event.currentTarget.value,
+          );
+        }}
         placeholder="/path/to/project"
         type="text"
-        value={state.draft.workingDirectory}
+        value={props.state.draft.workingDirectory}
       />
       <button
         class="mt-2 shrink-0 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm font-semibold text-slate-200 transition hover:border-emerald-300/30 hover:text-emerald-200 disabled:cursor-not-allowed disabled:opacity-50"
-        data-action="open-directory-picker"
-        disabled={state.creating || !runnerAvailable}
+        disabled={props.state.creating || !props.runnerAvailable}
+        onClick={() => {
+          props.controller.openDirectoryPicker();
+        }}
         type="button"
       >
         Browse
@@ -238,7 +193,7 @@ function renderDirectoryInput(
   );
 }
 
-function credentialSelectOptions(
+function credentialSelectOptionsFor(
   credentials: readonly CredentialOption[],
 ): readonly CustomSelectOption[] {
   return credentials.map((option) => ({
@@ -291,118 +246,226 @@ function modelSelectOptions(
   }));
 }
 
-function renderNewSessionForm(
-  state: SessionViewState,
-  runners: readonly RunnerSummary[],
-  credentials: readonly CredentialOption[],
-  credentialsSettled: boolean,
-): JSX.Element {
-  const resourcesAvailable = runners.length > 0 && credentials.length > 0;
-  const runnerOptions = runnerSelectOptions(runners);
-  const selectedRunnerId = selectValue(
-    runnerOptions,
-    state.draft.runnerId,
-    defaultRunnerId(runners),
+function modelAvailabilityAttributes(
+  creating: boolean,
+  models: AgentModelCatalog["models"],
+): { readonly disabled: boolean } {
+  return { disabled: creating || models.length === 0 };
+}
+
+function ModelDiscoveryError(props: {
+  readonly controller: SessionController;
+  readonly visible: boolean;
+}): JSX.Element {
+  return (
+    <Show when={props.visible}>
+      <RetryNotice
+        error="We could not discover models for that credential."
+        onRetry={() => {
+          props.controller.retryModels();
+        }}
+        retryLabel="Retry model discovery"
+      />
+    </Show>
   );
-  const credentialOptions = credentialSelectOptions(credentials);
-  const selectedCredentialValue = selectValue(
-    credentialOptions,
-    state.draft.credential,
-    credentialsSettled ? defaultCredentialValue(credentials) : "",
+}
+
+function NewSessionForm(props: {
+  readonly controller: SessionController;
+  readonly credentials: readonly CredentialOption[];
+  readonly credentialsSettled: boolean;
+  readonly runners: readonly RunnerSummary[];
+  readonly state: SessionViewState;
+}): JSX.Element {
+  const runners = createMemo(() => props.runners);
+  const credentials = createMemo(() => props.credentials);
+  const runnerOptions = createMemo(() => runnerSelectOptions(runners()));
+  const selectedRunnerId = createMemo(() =>
+    selectValue(
+      runnerOptions(),
+      props.state.draft.runnerId,
+      defaultRunnerId(runners()),
+    ),
   );
-  const credential = selectedCredential(credentials, selectedCredentialValue);
-  const credentialValue =
-    credential === undefined ? undefined : optionValue(credential);
-  const discovery =
-    state.modelDiscovery.credential === credentialValue
-      ? state.modelDiscovery
+  const credentialSelectOptions = createMemo(() =>
+    credentialSelectOptionsFor(credentials()),
+  );
+  const selectedCredentialValue = createMemo(() =>
+    selectValue(
+      credentialSelectOptions(),
+      props.state.draft.credential,
+      props.credentialsSettled ? defaultCredentialValue(credentials()) : "",
+    ),
+  );
+  const credential = createMemo(() =>
+    selectedCredential(credentials(), selectedCredentialValue()),
+  );
+  const discovery = createMemo(() => {
+    const selected = credential();
+    const value = selected === undefined ? undefined : optionValue(selected);
+    return props.state.modelDiscovery.credential === value
+      ? props.state.modelDiscovery
       : undefined;
-  const catalog = discovery?.catalog;
-  const models = catalog?.models ?? [];
-  const modelValue = models.some(({ id }) => id === state.draft.model)
-    ? state.draft.model
-    : (models[0]?.id ?? "");
-  const model = models.find(({ id }) => id === modelValue);
-  const loadingModels =
-    credential !== undefined && (discovery === undefined || discovery.loading);
-  const available =
-    resourcesAvailable &&
-    selectedRunnerId.length > 0 &&
-    credential !== undefined &&
-    models.length > 0;
+  });
+  const models = createMemo(() => discovery()?.catalog?.models ?? []);
+  const modelValue = createMemo(() =>
+    models().some(({ id }) => id === props.state.draft.model)
+      ? props.state.draft.model
+      : (models()[0]?.id ?? ""),
+  );
+  const model = createMemo(() =>
+    models().find(({ id }) => id === modelValue()),
+  );
+  const resourcesAvailable = createMemo(
+    () => runners().length > 0 && credentials().length > 0,
+  );
+  const available = createMemo(
+    () =>
+      resourcesAvailable() &&
+      selectedRunnerId().length > 0 &&
+      credential() !== undefined &&
+      models().length > 0,
+  );
+
+  const optionValues = (
+    options: readonly CustomSelectOption[],
+  ): readonly string[] => options.map(({ value }) => value);
+  const select = (
+    name: "credential" | "model" | "reasoningEffort" | "runnerId",
+    value: string,
+    values: readonly string[],
+  ): void => {
+    props.controller.chooseOption(name, value, values);
+  };
+  const toggleSelect = (
+    name: "credential" | "model" | "reasoningEffort" | "runnerId",
+  ): void => {
+    props.controller.toggleSelect(name);
+  };
 
   return (
     <form
       class="mt-6 grid gap-4 rounded-2xl border border-white/10 bg-slate-950/60 p-5 lg:grid-cols-2"
-      data-action="create-session"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void props.controller.create();
+      }}
     >
-      {renderCustomSelect({
-        disabled: state.creating || runners.length === 0,
-        emptyLabel: "No online runners",
-        id: "session-runner",
-        label: "Runner",
-        name: "runnerId",
-        open: state.openSelect === "runnerId",
-        options: runnerOptions,
-        required: true,
-        selectedValue: selectedRunnerId,
-      })}
-      {renderCustomSelect({
-        disabled: state.creating || credentials.length === 0,
-        emptyLabel: credentialsSettled
-          ? "No model credentials"
-          : "Loading credentials…",
-        id: "session-credential",
-        label: "Model credential",
-        name: "credential",
-        open: state.openSelect === "credential",
-        options: credentialOptions,
-        required: true,
-        selectedValue: selectedCredentialValue,
-      })}
-      {renderDirectoryInput(state, selectedRunnerId.length > 0)}
-      {renderCustomSelect({
-        disabled: state.creating || models.length === 0,
-        emptyLabel:
-          discovery?.error === undefined
-            ? loadingModels
+      <CustomSelect
+        disabled={props.state.creating || runners().length === 0}
+        emptyLabel="No online runners"
+        id="session-runner"
+        label="Runner"
+        name="runnerId"
+        onChoose={(value) => {
+          select("runnerId", value, optionValues(runnerOptions()));
+        }}
+        onToggle={() => {
+          toggleSelect("runnerId");
+        }}
+        open={props.state.openSelect === "runnerId"}
+        options={runnerOptions()}
+        required
+        selectedValue={selectedRunnerId()}
+      />
+      <CustomSelect
+        disabled={props.state.creating || credentials().length === 0}
+        emptyLabel={
+          props.credentialsSettled
+            ? "No model credentials"
+            : "Loading credentials…"
+        }
+        id="session-credential"
+        label="Model credential"
+        name="credential"
+        onChoose={(value) => {
+          select("credential", value, optionValues(credentialSelectOptions()));
+        }}
+        onToggle={() => {
+          toggleSelect("credential");
+        }}
+        open={props.state.openSelect === "credential"}
+        options={credentialSelectOptions()}
+        required
+        selectedValue={selectedCredentialValue()}
+      />
+      <DirectoryInput
+        controller={props.controller}
+        runnerAvailable={selectedRunnerId().length > 0}
+        state={props.state}
+      />
+      <CustomSelect
+        {...modelAvailabilityAttributes(props.state.creating, models())}
+        emptyLabel={
+          discovery()?.error === undefined
+            ? credential() !== undefined &&
+              (discovery() === undefined || discovery()?.loading === true)
               ? "Loading models…"
               : "No compatible models"
-            : "Models unavailable",
-        id: "session-model",
-        label: "Model",
-        name: "model",
-        open: state.openSelect === "model",
-        options: modelSelectOptions(models),
-        required: true,
-        selectedValue: modelValue,
-      })}
-      {renderCustomSelect({
-        disabled:
-          state.creating ||
-          models.length === 0 ||
-          (model?.reasoningEfforts.length ?? 0) === 0,
-        emptyLabel: "Model default",
-        id: "session-reasoning-effort",
-        label: "Reasoning effort",
-        name: "reasoningEffort",
-        open: state.openSelect === "reasoningEffort",
-        options: [
+            : "Models unavailable"
+        }
+        id="session-model"
+        label="Model"
+        name="model"
+        onChoose={(value) => {
+          select(
+            "model",
+            value,
+            modelSelectOptions(models()).map(({ value }) => value),
+          );
+        }}
+        onToggle={() => {
+          toggleSelect("model");
+        }}
+        open={props.state.openSelect === "model"}
+        options={modelSelectOptions(models())}
+        required
+        selectedValue={modelValue()}
+      />
+      <CustomSelect
+        disabled={
+          modelAvailabilityAttributes(props.state.creating, models())
+            .disabled || (model()?.reasoningEfforts.length ?? 0) === 0
+        }
+        emptyLabel="Model default"
+        id="session-reasoning-effort"
+        label="Reasoning effort"
+        name="reasoningEffort"
+        onChoose={(value) => {
+          select("reasoningEffort", value, [
+            "",
+            ...(model()?.reasoningEfforts ?? []),
+          ]);
+        }}
+        onToggle={() => {
+          toggleSelect("reasoningEffort");
+        }}
+        open={props.state.openSelect === "reasoningEffort"}
+        options={[
           { label: "Model default", value: "" },
-          ...(model?.reasoningEfforts ?? []).map((effort) => ({
+          ...(model()?.reasoningEfforts ?? []).map((effort) => ({
             label: reasoningEffortLabel(effort),
             value: effort,
           })),
-        ],
-        required: false,
-        selectedValue: state.draft.reasoningEffort,
-      })}
-      {renderModelModalities(model)}
-      {renderSessionPromptInput({
-        disabled: state.creating,
-        images: state.draft.images,
-        prompt: state.draft.prompt,
-      })}
+        ]}
+        required={false}
+        selectedValue={props.state.draft.reasoningEffort}
+      />
+      {renderModelModalities(model())}
+      <SessionPromptInput
+        disabled={props.state.creating}
+        images={props.state.draft.images}
+        onAddImages={(files) => {
+          void props.controller.addImages(files, false);
+        }}
+        onInput={(value) => {
+          props.controller.setDraftField("prompt", value);
+        }}
+        onRemoveImage={(index) => {
+          props.controller.removeImage(index, "draft");
+        }}
+        prompt={props.state.draft.prompt}
+      />
       <div class="flex flex-col gap-3 lg:col-span-2 sm:flex-row sm:items-center sm:justify-between">
         <p class="text-xs leading-5 text-slate-500">
           The model runs through Q Mush; file and shell tools run only on the
@@ -410,177 +473,80 @@ function renderNewSessionForm(
         </p>
         <button
           class="shrink-0 rounded-xl bg-emerald-300 px-5 py-3 font-semibold text-slate-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={state.creating || !available}
+          disabled={props.state.creating || !available()}
           type="submit"
         >
-          {state.creating ? "Starting…" : "Start session"}
+          {props.state.creating ? "Starting…" : "Start session"}
         </button>
       </div>
-      {!resourcesAvailable ? (
+      <Show when={!resourcesAvailable()}>
         <p class="text-sm text-amber-200 lg:col-span-2">
           Connect an online runner and add a provider credential before starting
           a session.
         </p>
-      ) : discovery?.error !== undefined ? (
-        <p class="flex items-center gap-3 text-sm text-amber-200 lg:col-span-2">
-          We could not discover models for that credential.
-          <button
-            class="font-semibold underline underline-offset-4"
-            data-action="retry-models"
-            type="button"
-          >
-            Retry
-          </button>
-        </p>
-      ) : null}
+      </Show>
+      <ModelDiscoveryError
+        controller={props.controller}
+        visible={resourcesAvailable() && discovery()?.error !== undefined}
+      />
     </form>
   );
 }
 
-function renderSessionList(state: SessionViewState): JSX.Element {
-  if (state.sessions === undefined) {
-    return <p class="text-sm text-slate-400">Loading sessions…</p>;
-  }
-
-  if (state.sessions.length === 0) {
-    return (
-      <p class="rounded-2xl border border-dashed border-white/15 p-5 text-sm leading-6 text-slate-400">
-        No sessions yet. Start one above to give an agent a task.
-      </p>
-    );
-  }
-
-  return (
-    <ul class="max-h-144 space-y-2 overflow-y-auto" data-scroll-key="list">
-      {state.sessions.map((session) => (
-        <li>
-          <button
-            class={`w-full rounded-2xl border p-4 text-left transition ${state.selectedId === session.id ? "border-emerald-300/30 bg-emerald-300/10" : "border-white/10 bg-slate-950/60 hover:border-white/20"}`}
-            data-action="select-session"
-            data-session-id={session.id}
-            type="button"
-          >
-            <span class="flex items-start justify-between gap-3">
-              <span class="min-w-0">
-                <span class="block truncate font-semibold text-white">
-                  {session.title}
-                </span>
-                <span class="mt-1 block truncate text-xs text-slate-500">
-                  {sessionModelLabel(session)}
-                </span>
-              </span>
-              {statusBadge(session.status)}
-            </span>
-          </button>
-        </li>
-      ))}
-    </ul>
-  );
+interface SessionResultsProps {
+  readonly controller: SessionController;
 }
 
-function renderDetail(state: SessionViewState): JSX.Element {
-  if (state.selectedId === undefined) {
-    return (
-      <div class="grid min-h-64 place-items-center rounded-2xl border border-dashed border-white/15 text-sm text-slate-500">
-        Select a session to view its transcript.
-      </div>
-    );
-  }
-
-  if (state.loadingDetail || state.detail === undefined) {
-    return <p class="text-sm text-slate-400">Loading transcript…</p>;
-  }
-
-  const detail = state.detail;
-  const { sending } = state;
-  const active = detail.status === "queued" || detail.status === "running";
-  const lastMessageId = detail.messages.at(-1)?.id ?? "";
-  const agentFileRevision =
-    detail.agentFile === null
-      ? "none"
-      : `${detail.agentFile.name}:${String(detail.agentFile.content.length)}`;
+function SessionResults(props: SessionResultsProps): JSX.Element {
+  const state = props.controller.view;
   return (
-    <div>
-      <div class="flex flex-col gap-4 border-b border-white/10 pb-5 sm:flex-row sm:items-start sm:justify-between">
-        <div class="min-w-0">
-          <div class="flex flex-wrap items-center gap-2">
-            <h3 class="text-xl font-semibold text-white">{detail.title}</h3>
-            {statusBadge(detail.status)}
-          </div>
-          <p class={`mt-2 truncate text-xs ${sessionContextClasses(detail)}`}>
-            {`${sessionModelLabel(detail)} · ${sessionContextLabel(detail)} · ${detail.workingDirectory} · Agent file: ${detail.agentFile?.name ?? "None"}`}
-          </p>
-        </div>
-        {active ? (
-          <button
-            class="shrink-0 rounded-xl border border-rose-300/30 bg-rose-300/10 px-4 py-2 text-sm font-semibold text-rose-200 disabled:opacity-50"
-            data-action="stop-session"
-            disabled={state.stopping}
-            type="button"
-          >
-            {state.stopping ? "Stopping…" : "Stop session"}
-          </button>
-        ) : null}
+    <div class="mt-7 grid gap-5 lg:grid-cols-[18rem_minmax(0,1fr)]">
+      <aside aria-label="Agent sessions">
+        <SessionList controller={props.controller} />
+      </aside>
+      <div class="min-w-0 rounded-2xl border border-white/10 bg-slate-900/70 p-5">
+        <SessionDetail controller={props.controller} state={state()} />
       </div>
-      <ul
-        aria-live="polite"
-        class="mt-5 max-h-[36rem] space-y-3 overflow-y-auto pr-1"
-        data-scroll-key={`session-transcript:${detail.id}`}
-        data-scroll-on-change="end"
-        data-scroll-revision={`${agentFileRevision}:${String(detail.messages.length)}:${lastMessageId}`}
-      >
-        {renderSessionTranscript(detail.messages, detail.agentFile)}
-      </ul>
-      {!active ? (
-        <div class="mt-5 flex flex-col gap-3">
-          {renderCompactionControls({
-            autoCompact: detail.autoCompact,
-            compacting: state.compacting,
-          })}
-          <div class="flex gap-3">
-            {renderSessionFollowUp({
-              images: state.followUpImages,
-              prompt: state.followUp,
-              sending,
-            })}
-            <button
-              class="self-end rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950"
-              data-action="continue-session"
-              disabled={sending}
-              type="button"
-            >
-              Continue
-            </button>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
 
-export function renderSessionPanel(
-  state: SessionViewState,
-  runnerState: RunnerViewState,
-  openAiState: ProviderViewState,
-  openRouterState: ProviderViewState,
-): JSX.Element {
-  const runners = onlineRunners(runnerState);
-  const credentials = credentialOptions(openAiState, openRouterState);
-  const selectedRunner = runners.find(
-    ({ id }) => id === state.directoryPicker.runnerId,
-  );
+export function SessionPanel(props: {
+  readonly controller: SessionController;
+  readonly openAi: Accessor<ProviderViewState>;
+  readonly openRouter: Accessor<ProviderViewState>;
+  readonly runners: Accessor<RunnerViewState>;
+}): JSX.Element {
+  const state = props.controller.view;
+  const online = (): readonly RunnerSummary[] => onlineRunners(props.runners());
+  const credentials = (): readonly CredentialOption[] =>
+    credentialOptions(props.openAi(), props.openRouter());
+  const credentialsSettled = (): boolean =>
+    credentialFallbackReady(props.openAi(), props.openRouter());
+  const selectedRunner = (): RunnerSummary | undefined =>
+    online().find(
+      ({ id }) => id === props.controller.directoryPicker.state.runnerId,
+    );
+
+  createEffect(() => {
+    const runners = online();
+    const options = credentials();
+    props.controller.initializeDefaults(
+      defaultRunnerId(runners),
+      defaultCredentialValue(options),
+      credentialsSettled(),
+    );
+  });
 
   return (
     <div
-      data-credentials-settled={String(
-        credentialFallbackReady(openAiState, openRouterState),
-      )}
+      data-credentials-settled={String(credentialsSettled())}
       data-session-panel="true"
     >
       <section
-        inert={state.directoryPicker.open}
         aria-labelledby="agent-sessions-title"
         class="rounded-3xl border border-emerald-300/15 bg-white/[0.06] p-6 shadow-2xl shadow-emerald-950/30 backdrop-blur-xl sm:p-8"
+        inert={props.controller.directoryPicker.view().open}
         {...renderDebugBoundary("sessions-panel", "Agent sessions panel")}
       >
         <p class="text-sm font-medium text-emerald-300">
@@ -596,24 +562,28 @@ export function renderSessionPanel(
           Start and steer coding sessions on your connected computers. Q Mush
           owns the model loop and runner tools end to end.
         </p>
-        {renderNewSessionForm(
-          state,
-          runners,
-          credentials,
-          credentialFallbackReady(openAiState, openRouterState),
-        )}
-        {renderRetryError(state.error, "retry-sessions")}
-        <div class="mt-7 grid gap-5 lg:grid-cols-[18rem_minmax(0,1fr)]">
-          <aside aria-label="Agent sessions">{renderSessionList(state)}</aside>
-          <div class="min-w-0 rounded-2xl border border-white/10 bg-slate-900/70 p-5">
-            {renderDetail(state)}
-          </div>
-        </div>
+        <NewSessionForm
+          controller={props.controller}
+          credentials={credentials()}
+          credentialsSettled={credentialsSettled()}
+          runners={online()}
+          state={state()}
+        />
+        <RetryNotice
+          error={state().error}
+          onRetry={() => {
+            void props.controller.load();
+          }}
+        />
+        <SessionResults controller={props.controller} />
       </section>
-      {renderDirectoryPicker(
-        state.directoryPicker,
-        selectedRunner?.name ?? "Selected runner",
-      )}
+      <DirectoryPicker
+        controller={props.controller.directoryPicker}
+        onChoose={() => {
+          props.controller.chooseDirectory();
+        }}
+        runnerName={selectedRunner()?.name ?? "Selected runner"}
+      />
     </div>
   );
 }

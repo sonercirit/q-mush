@@ -1,10 +1,17 @@
+import { type JSX } from "solid-js";
 import { expect, test } from "vitest";
 import {
+  renderDebugBoundary,
+  RenderDebugLegend,
+  RenderDebugProvider,
+  RenderDebugToggle,
   RenderDebugView,
-  renderDebugLegend,
-  renderDebugToggle,
 } from "../../solid/render-debug.tsx";
 import { renderSolidToString } from "./render-solid.tsx";
+
+function TestBoundary(): JSX.Element {
+  return <div {...renderDebugBoundary("sessions", "Agent sessions panel")} />;
+}
 
 test("moves repeated boundary renders from green to red and resets", () => {
   const view = new RenderDebugView();
@@ -30,19 +37,39 @@ test("moves repeated boundary renders from green to red and resets", () => {
   expect(resetMeasurement.heat).toBe("green");
 });
 
+test("renders reactive boundary attributes through context", () => {
+  const view = new RenderDebugView();
+  view.toggle();
+
+  const rendered = renderSolidToString(() => (
+    <RenderDebugProvider view={view}>
+      <TestBoundary />
+    </RenderDebugProvider>
+  ));
+
+  expect(rendered).toContain('data-render-boundary="sessions"');
+  expect(rendered).toContain('data-render-label="Agent sessions panel"');
+  expect(rendered).toContain('data-render-count="1"');
+  expect(rendered).toContain('data-render-debug="true"');
+  expect(rendered).toContain('data-render-heat="green"');
+});
+
 test("renders a debug toggle and a green-to-red legend", () => {
-  const disabled = renderSolidToString(() => renderDebugToggle(false));
+  const disabledView = new RenderDebugView();
+  const enabledView = new RenderDebugView();
+  enabledView.toggle();
+  const disabled = renderSolidToString(() => (
+    <RenderDebugToggle view={disabledView} />
+  ));
   const enabled = renderSolidToString(() => (
     <>
-      {renderDebugToggle(true)}
-      {renderDebugLegend()}
+      <RenderDebugToggle view={enabledView} />
+      <RenderDebugLegend view={enabledView} />
     </>
   ));
 
   expect(disabled).toContain('aria-pressed="false"');
-  expect(disabled).toContain('data-action="toggle-render-debug"');
   expect(enabled).toContain('aria-pressed="true"');
   expect(enabled).toContain("Few renders");
   expect(enabled).toContain("Frequent renders");
-  expect(enabled).toContain('data-action="reset-render-debug"');
 });

@@ -1,4 +1,11 @@
-import { type JSX } from "solid-js";
+import {
+  createSignal,
+  For,
+  onCleanup,
+  onMount,
+  Show,
+  type JSX,
+} from "solid-js";
 import { render } from "solid-js/web";
 import {
   isRecord,
@@ -13,29 +20,24 @@ import {
 } from "../shared/routes.ts";
 import { requestJson } from "./browser-http.ts";
 import { providerNotice } from "./client-notices.ts";
-import { updatePreservingFocus } from "./focus-position.ts";
 import {
   BRAVE_SEARCH_PANEL,
   OPENAI_PANEL,
   OPENROUTER_PANEL,
-  renderProviderPanel,
-  type ProviderViewState,
+  ProviderPanel,
 } from "./provider-client.tsx";
 import { ProviderController } from "./provider-controller.ts";
 import { RealtimeConnection } from "./realtime-client.ts";
 import {
   renderDebugBoundary,
-  renderDebugLegend,
-  renderDebugToggle,
+  RenderDebugLegend,
+  RenderDebugProvider,
+  RenderDebugToggle,
   RenderDebugView,
 } from "./render-debug.tsx";
-import { renderRunnerPanel, type RunnerViewState } from "./runner-client.tsx";
+import { RunnerPanel } from "./runner-client.tsx";
 import { RunnerController } from "./runner-controller.ts";
-import { updatePreservingScrollPositions } from "./scroll-position.ts";
-import {
-  renderSessionPanel,
-  type SessionViewState,
-} from "./session-client.tsx";
+import { SessionPanel } from "./session-client.tsx";
 import { SessionController } from "./session-controller.ts";
 import "./styles.css";
 
@@ -113,32 +115,33 @@ function readNotices(): readonly string[] {
   return notices;
 }
 
-function renderAvatar(user: AuthenticatedUser): JSX.Element {
-  if (user.picture !== undefined) {
-    return (
-      <img
-        alt=""
-        class="size-12 rounded-2xl bg-slate-800 object-cover ring-1 ring-white/10"
-        referrerPolicy="no-referrer"
-        src={user.picture}
-      />
-    );
-  }
-
+function Avatar(props: { readonly user: AuthenticatedUser }): JSX.Element {
   return (
-    <span
-      aria-hidden="true"
-      class="grid size-12 place-items-center rounded-2xl bg-gradient-to-br from-emerald-300 to-cyan-400 text-lg font-bold text-slate-950"
+    <Show
+      fallback={
+        <img
+          alt=""
+          class="size-12 rounded-2xl bg-slate-800 object-cover ring-1 ring-white/10"
+          referrerPolicy="no-referrer"
+          src={props.user.picture}
+        />
+      }
+      when={props.user.picture === undefined}
     >
-      {user.name.charAt(0).toUpperCase()}
-    </span>
+      <span
+        aria-hidden="true"
+        class="grid size-12 place-items-center rounded-2xl bg-gradient-to-br from-emerald-300 to-cyan-400 text-lg font-bold text-slate-950"
+      >
+        {props.user.name.charAt(0).toUpperCase()}
+      </span>
+    </Show>
   );
 }
 
-function renderHeader(
-  user: AuthenticatedUser | null | undefined,
-  renderDebugEnabled: boolean,
-): JSX.Element {
+function Header(props: {
+  readonly debug: RenderDebugView;
+  readonly user: AuthenticatedUser | null | undefined;
+}): JSX.Element {
   return (
     <header
       class="flex flex-col gap-4 border-b border-white/10 pb-6 sm:flex-row sm:items-center sm:justify-between"
@@ -157,24 +160,24 @@ function renderHeader(
         Q Mush
       </a>
       <div class="flex flex-wrap items-center gap-2">
-        {renderDebugToggle(renderDebugEnabled)}
+        <RenderDebugToggle view={props.debug} />
         <span class="inline-flex min-w-0 items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-300/10 px-3 py-1 text-sm text-emerald-200">
           <span
             aria-hidden="true"
             class="size-2 shrink-0 rounded-full bg-emerald-300"
-          ></span>
-          {user === undefined
+          />
+          {props.user === undefined
             ? "Checking session"
-            : user === null
+            : props.user === null
               ? "Local runtime"
-              : `Signed in as ${user.name}`}
+              : `Signed in as ${props.user.name}`}
         </span>
       </div>
     </header>
   );
 }
 
-function renderLoadingCard(): JSX.Element {
+function LoadingCard(): JSX.Element {
   return (
     <div
       class="mt-12 rounded-3xl border border-white/10 bg-white/[0.06] p-8 shadow-2xl shadow-emerald-950/30 backdrop-blur-xl"
@@ -184,14 +187,14 @@ function renderLoadingCard(): JSX.Element {
         <span
           aria-hidden="true"
           class="size-3 animate-pulse rounded-full bg-emerald-300 shadow-[0_0_18px_rgba(110,231,183,0.8)]"
-        ></span>
+        />
         <p class="font-medium text-slate-200">Checking your session…</p>
       </div>
     </div>
   );
 }
 
-function renderSessionError(): JSX.Element {
+function SessionError(props: { readonly onRetry: () => void }): JSX.Element {
   return (
     <div
       class="mt-12 rounded-3xl border border-rose-300/20 bg-rose-300/10 p-8"
@@ -206,7 +209,7 @@ function renderSessionError(): JSX.Element {
       </p>
       <button
         class="mt-7 rounded-full border border-white/15 px-5 py-2.5 font-semibold text-white transition hover:border-emerald-300/40 hover:text-emerald-200 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
-        data-action="retry-session"
+        onClick={props.onRetry}
         type="button"
       >
         Retry
@@ -215,7 +218,9 @@ function renderSessionError(): JSX.Element {
   );
 }
 
-function renderSignIn(googleLoginAvailable: boolean): JSX.Element {
+function SignIn(props: {
+  readonly googleLoginAvailable: boolean;
+}): JSX.Element {
   return (
     <div class="mt-12 grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
       <section
@@ -233,7 +238,18 @@ function renderSignIn(googleLoginAvailable: boolean): JSX.Element {
           Use your Google Account to identify yourself. Your Q Mush session
           remains on this machine.
         </p>
-        {googleLoginAvailable ? (
+        <Show
+          fallback={
+            <div class="mt-8 rounded-2xl border border-amber-300/20 bg-amber-300/10 p-5 text-amber-100">
+              <p class="font-medium">Google login needs configuration</p>
+              <p class="mt-2 text-sm leading-6 text-amber-100/70">
+                Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET on the local
+                server, then restart it.
+              </p>
+            </div>
+          }
+          when={props.googleLoginAvailable}
+        >
           <a
             class="mt-8 inline-flex w-full items-center justify-center gap-3 rounded-2xl bg-white px-5 py-3 font-semibold text-slate-900 shadow-lg shadow-black/20 transition hover:bg-slate-100 active:translate-y-px focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300 sm:w-auto"
             href={AUTH_GOOGLE_PATH}
@@ -246,17 +262,8 @@ function renderSignIn(googleLoginAvailable: boolean): JSX.Element {
             </span>
             Continue with Google
           </a>
-        ) : (
-          <div class="mt-8 rounded-2xl border border-amber-300/20 bg-amber-300/10 p-5 text-amber-100">
-            <p class="font-medium">Google login needs configuration</p>
-            <p class="mt-2 text-sm leading-6 text-amber-100/70">
-              Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET on the local server,
-              then restart it.
-            </p>
-          </div>
-        )}
+        </Show>
       </section>
-
       <aside
         aria-label="Login details"
         class="rounded-3xl border border-white/10 bg-slate-900/80 p-7 sm:p-8"
@@ -280,364 +287,243 @@ function renderSignIn(googleLoginAvailable: boolean): JSX.Element {
   );
 }
 
-function renderWorkspace(
-  braveSearchState: ProviderViewState,
-  logoutPending: boolean,
-  openAiState: ProviderViewState,
-  openRouterState: ProviderViewState,
-  runnerState: RunnerViewState,
-  sessionState: SessionViewState,
-  user: AuthenticatedUser,
-): JSX.Element {
+function Workspace(props: {
+  readonly agentSessions: SessionController;
+  readonly braveSearch: ProviderController;
+  readonly logout: () => Promise<void>;
+  readonly logoutPending: boolean;
+  readonly openAi: ProviderController;
+  readonly openRouter: ProviderController;
+  readonly runners: RunnerController;
+  readonly user: AuthenticatedUser;
+}): JSX.Element {
   return (
     <div
       class="mt-12 space-y-6"
       {...renderDebugBoundary("workspace", "Authenticated workspace")}
     >
-      {renderSessionPanel(
-        sessionState,
-        runnerState,
-        openAiState,
-        openRouterState,
-      )}
-      {renderRunnerPanel(runnerState)}
+      <SessionPanel
+        controller={props.agentSessions}
+        openAi={props.openAi.view}
+        openRouter={props.openRouter.view}
+        runners={props.runners.view}
+      />
+      <RunnerPanel controller={props.runners} />
       <aside
         aria-label="Google account"
         class="flex flex-col gap-5 rounded-3xl border border-white/10 bg-slate-900/80 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8"
         {...renderDebugBoundary("google-account", "Google account")}
       >
         <div class="flex min-w-0 items-center gap-4">
-          {renderAvatar(user)}
+          <Avatar user={props.user} />
           <div class="min-w-0">
-            <p class="truncate font-semibold text-white">{user.name}</p>
-            <p class="truncate text-sm text-slate-400">{user.email}</p>
+            <p class="truncate font-semibold text-white">{props.user.name}</p>
+            <p class="truncate text-sm text-slate-400">{props.user.email}</p>
           </div>
         </div>
         <button
           class="rounded-2xl border border-white/10 px-5 py-2.5 text-sm font-semibold text-slate-300 transition hover:border-rose-300/30 hover:text-rose-200 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
-          data-action="logout"
-          disabled={logoutPending}
+          disabled={props.logoutPending}
+          onClick={() => {
+            void props.logout();
+          }}
           type="button"
         >
-          {logoutPending ? "Signing out…" : "Sign out"}
+          {props.logoutPending ? "Signing out…" : "Sign out"}
         </button>
       </aside>
-      {renderProviderPanel(OPENAI_PANEL, openAiState)}
-      {renderProviderPanel(OPENROUTER_PANEL, openRouterState)}
-      {renderProviderPanel(BRAVE_SEARCH_PANEL, braveSearchState)}
+      <ProviderPanel configuration={OPENAI_PANEL} controller={props.openAi} />
+      <ProviderPanel
+        configuration={OPENROUTER_PANEL}
+        controller={props.openRouter}
+      />
+      <ProviderPanel
+        configuration={BRAVE_SEARCH_PANEL}
+        controller={props.braveSearch}
+      />
     </div>
   );
 }
 
-function renderApp(
-  braveSearchState: ProviderViewState,
-  loadFailed: boolean,
-  logoutPending: boolean,
-  notices: readonly string[],
-  openAiState: ProviderViewState,
-  openRouterState: ProviderViewState,
-  renderDebugEnabled: boolean,
-  runnerState: RunnerViewState,
-  sessionState: SessionViewState,
-  session: AuthSession | undefined,
-): JSX.Element {
-  return (
-    <section
-      aria-labelledby="app-title"
-      class="relative min-h-screen overflow-hidden bg-slate-950 px-6 py-8 text-slate-100 sm:px-10 lg:px-12"
-      {...renderDebugBoundary("app", "App")}
-    >
-      <div
-        aria-hidden="true"
-        class="absolute -right-40 -top-40 size-96 rounded-full bg-cyan-500/15 blur-3xl"
-      ></div>
-      <div
-        aria-hidden="true"
-        class="absolute -bottom-48 left-1/4 size-96 rounded-full bg-emerald-500/15 blur-3xl"
-      ></div>
-
-      <div class="relative mx-auto max-w-6xl">
-        {renderHeader(session?.user, renderDebugEnabled)}
-        <main class="py-12 sm:py-16">
-          <p class="text-sm font-semibold tracking-[0.2em] text-emerald-300 uppercase">
-            Local control center
-          </p>
-          <h1
-            class="mt-4 text-4xl font-semibold tracking-tight text-white sm:text-6xl"
-            id="app-title"
-          >
-            Q Mush App
-          </h1>
-          <p class="mt-5 max-w-2xl text-lg leading-8 text-slate-400">
-            Coordinate your local swarm from one authenticated workspace.
-          </p>
-
-          {notices.map((notice, index) => (
-            <p
-              class="mt-8 rounded-2xl border border-amber-300/20 bg-amber-300/10 p-4 text-sm text-amber-100"
-              role="alert"
-              {...renderDebugBoundary(`notice:${String(index)}`, "Notice")}
-            >
-              {notice}
-            </p>
-          ))}
-          {loadFailed
-            ? renderSessionError()
-            : session === undefined
-              ? renderLoadingCard()
-              : session.user === null
-                ? renderSignIn(session.googleLoginAvailable)
-                : renderWorkspace(
-                    braveSearchState,
-                    logoutPending,
-                    openAiState,
-                    openRouterState,
-                    runnerState,
-                    sessionState,
-                    session.user,
-                  )}
-
-          <a
-            class="mt-10 inline-flex items-center gap-2 text-sm font-medium text-slate-400 transition hover:text-emerald-200 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
-            href={HOME_PATH}
-          >
-            <span aria-hidden="true">←</span>
-            Back to the homepage
-          </a>
-        </main>
-      </div>
-      {renderDebugEnabled ? renderDebugLegend() : null}
-    </section>
-  );
-}
-
-function findAppRoot(): Element {
-  const root = document.querySelector("#app");
-
-  if (root === null) {
-    throw new Error("The app root was not found");
-  }
-
-  return root;
-}
-
-const root = findAppRoot();
-const renderDebug = new RenderDebugView();
-let appUpdateDeferred = false;
-let disposeApp: (() => void) | undefined;
-let loadFailed = false;
-let logoutPending = false;
-let session: AuthSession | undefined;
-const notices = readNotices();
-const braveSearch = new ProviderController(BRAVE_SEARCH_PANEL, () => {
-  updateApp(root);
-});
-const openAi = new ProviderController(OPENAI_PANEL, () => {
-  updateApp(root);
-});
-const openRouter = new ProviderController(OPENROUTER_PANEL, () => {
-  updateApp(root);
-});
-const runners = new RunnerController(() => {
-  updateApp(root);
-});
-const agentSessions = new SessionController(() => {
-  updateApp(root);
-});
-const providerControllers = [openAi, openRouter, braveSearch] as const;
-const realtime = new RealtimeConnection((event) => {
-  switch (event.type) {
-    case "runners":
-      runners.applyRealtime(event.runners);
-      break;
-    case "sessions":
-      agentSessions.applyRealtime(event.sessions);
-      break;
-    case "session":
-      agentSessions.applyDetail(event.session);
-      break;
-    case "session_delta":
-      agentSessions.applyDelta(event);
-      break;
-  }
-});
-
-function resetWorkspaceConnections(): void {
-  realtime.stop();
-  agentSessions.reset();
-  runners.reset();
-  for (const controller of providerControllers) {
-    controller.reset();
-  }
-}
-
-async function loadSession(): Promise<void> {
-  loadFailed = false;
-  session = undefined;
-  resetWorkspaceConnections();
-  updateApp(root);
-
-  try {
-    session = readAuthSession(await requestJson(AUTH_SESSION_PATH));
-
-    if (session.user !== null) {
-      await Promise.all([
-        agentSessions.load(),
-        runners.load(),
-        ...providerControllers.map((controller) => controller.load()),
-      ]);
-      realtime.start();
+function App(): JSX.Element {
+  const [loadFailed, setLoadFailed] = createSignal(false);
+  const [logoutPending, setLogoutPending] = createSignal(false);
+  const [session, setSession] = createSignal<AuthSession>();
+  const notices = readNotices();
+  const debug = new RenderDebugView();
+  const braveSearch = new ProviderController(BRAVE_SEARCH_PANEL);
+  const openAi = new ProviderController(OPENAI_PANEL);
+  const openRouter = new ProviderController(OPENROUTER_PANEL);
+  const runners = new RunnerController();
+  const agentSessions = new SessionController();
+  const providerControllers = [openAi, openRouter, braveSearch] as const;
+  const realtime = new RealtimeConnection((event) => {
+    switch (event.type) {
+      case "runners":
+        runners.applyRealtime(event.runners);
+        break;
+      case "sessions":
+        agentSessions.applyRealtime(event.sessions);
+        break;
+      case "session":
+        agentSessions.applyDetail(event.session);
+        break;
+      case "session_delta":
+        agentSessions.applyDelta(event);
+        break;
     }
-  } catch {
-    loadFailed = true;
-  }
+  });
 
-  updateApp(root);
-}
-
-async function logout(): Promise<void> {
-  logoutPending = true;
-  updateApp(root);
-
-  try {
-    const response = await fetch(AUTH_LOGOUT_PATH, { method: "POST" });
-
-    if (!response.ok) {
-      throw new Error("The logout request failed");
+  const resetWorkspaceConnections = (): void => {
+    realtime.stop();
+    agentSessions.reset();
+    runners.reset();
+    for (const controller of providerControllers) {
+      controller.reset();
     }
+  };
 
+  const loadSession = async (): Promise<void> => {
+    setLoadFailed(false);
+    setSession(undefined);
     resetWorkspaceConnections();
-    session = {
-      googleLoginAvailable: session?.googleLoginAvailable ?? true,
-      user: null,
-    };
-  } catch {
-    loadFailed = true;
-    session = undefined;
-  }
 
-  logoutPending = false;
-  updateApp(root);
-}
-
-function readScrollTargets(container: Element): ReadonlyMap<string, Element> {
-  const targets = new Map<string, Element>();
-  const ownerDocument = container.ownerDocument;
-
-  targets.set(
-    "document",
-    ownerDocument.scrollingElement ?? ownerDocument.documentElement,
-  );
-
-  for (const element of container.querySelectorAll("[data-scroll-key]")) {
-    const key = element.getAttribute("data-scroll-key");
-
-    if (key !== null) {
-      targets.set(`region:${key}`, element);
-    }
-  }
-
-  return targets;
-}
-
-function focusKeySelector(key: string): string {
-  return `[data-focus-key="${CSS.escape(key)}"]`;
-}
-
-function updateApp(container: Element, replaceFocusedSelect = false): void {
-  const activeElement = container.ownerDocument.activeElement;
-
-  if (
-    !replaceFocusedSelect &&
-    activeElement?.localName === "select" &&
-    container.contains(activeElement)
-  ) {
-    appUpdateDeferred = true;
-    return;
-  }
-
-  appUpdateDeferred = false;
-  updatePreservingFocus(
-    () => {
-      const focused = container.ownerDocument.activeElement;
-      return focused !== null && container.contains(focused) ? focused : null;
-    },
-    (key) => container.querySelector(focusKeySelector(key)),
-    () => {
-      updatePreservingScrollPositions(
-        () => readScrollTargets(container),
-        () => {
-          disposeApp?.();
-          disposeApp = render(
-            () =>
-              renderApp(
-                braveSearch.state,
-                loadFailed,
-                logoutPending,
-                notices,
-                openAi.state,
-                openRouter.state,
-                renderDebug.enabled,
-                runners.state,
-                agentSessions.state,
-                session,
-              ),
-            container,
-          );
-        },
-      );
-    },
-  );
-  renderDebug.apply(container);
-  agentSessions.bind(container);
-  runners.bind(container);
-  for (const controller of providerControllers) {
-    controller.bind(container);
-  }
-
-  container
-    .querySelector('[data-action="toggle-render-debug"]')
-    ?.addEventListener("click", () => {
-      renderDebug.toggle();
-      updateApp(root);
-    });
-  container
-    .querySelector('[data-action="reset-render-debug"]')
-    ?.addEventListener("click", () => {
-      renderDebug.reset();
-      updateApp(root);
-    });
-  container
-    .querySelector('[data-action="retry-session"]')
-    ?.addEventListener("click", () => {
-      void loadSession();
-    });
-  container
-    .querySelector('[data-action="logout"]')
-    ?.addEventListener("click", () => {
-      void logout();
-    });
-}
-
-function flushDeferredUpdateAfterSelect(
-  event: Event,
-  replaceFocusedSelect: boolean,
-): void {
-  if (event.target instanceof Element && event.target.localName === "select") {
-    window.setTimeout(() => {
-      if (appUpdateDeferred) {
-        updateApp(root, replaceFocusedSelect);
+    try {
+      const loaded = readAuthSession(await requestJson(AUTH_SESSION_PATH));
+      setSession(loaded);
+      if (loaded.user !== null) {
+        await Promise.all([
+          agentSessions.load(),
+          runners.load(),
+          ...providerControllers.map((controller) => controller.load()),
+        ]);
+        realtime.start();
       }
-    }, 0);
-  }
+    } catch {
+      setLoadFailed(true);
+    }
+  };
+
+  const logout = async (): Promise<void> => {
+    setLogoutPending(true);
+    try {
+      const response = await fetch(AUTH_LOGOUT_PATH, { method: "POST" });
+      if (!response.ok) {
+        throw new Error("The logout request failed");
+      }
+      resetWorkspaceConnections();
+      setSession({
+        googleLoginAvailable: session()?.googleLoginAvailable ?? true,
+        user: null,
+      });
+    } catch {
+      setLoadFailed(true);
+      setSession(undefined);
+    } finally {
+      setLogoutPending(false);
+    }
+  };
+
+  onMount(() => {
+    void loadSession();
+  });
+  onCleanup(resetWorkspaceConnections);
+
+  return (
+    <RenderDebugProvider view={debug}>
+      <section
+        aria-labelledby="app-title"
+        class="relative min-h-screen overflow-hidden bg-slate-950 px-6 py-8 text-slate-100 sm:px-10 lg:px-12"
+        {...renderDebugBoundary("app", "App")}
+      >
+        <div
+          aria-hidden="true"
+          class="absolute -right-40 -top-40 size-96 rounded-full bg-cyan-500/15 blur-3xl"
+        />
+        <div
+          aria-hidden="true"
+          class="absolute -bottom-48 left-1/4 size-96 rounded-full bg-emerald-500/15 blur-3xl"
+        />
+        <div class="relative mx-auto max-w-6xl">
+          <Header debug={debug} user={session()?.user} />
+          <main class="py-12 sm:py-16">
+            <p class="text-sm font-semibold tracking-[0.2em] text-emerald-300 uppercase">
+              Local control center
+            </p>
+            <h1
+              class="mt-4 text-4xl font-semibold tracking-tight text-white sm:text-6xl"
+              id="app-title"
+            >
+              Q Mush App
+            </h1>
+            <p class="mt-5 max-w-2xl text-lg leading-8 text-slate-400">
+              Coordinate your local swarm from one authenticated workspace.
+            </p>
+            <For each={notices}>
+              {(notice) => (
+                <p
+                  class="mt-8 rounded-2xl border border-amber-300/20 bg-amber-300/10 p-4 text-sm text-amber-100"
+                  role="alert"
+                >
+                  {notice}
+                </p>
+              )}
+            </For>
+            <Show
+              fallback={<LoadingCard />}
+              when={loadFailed() || session() !== undefined}
+            >
+              <Show
+                fallback={<SessionError onRetry={() => void loadSession()} />}
+                when={!loadFailed()}
+              >
+                <Show when={session()}>
+                  {(authenticated) => (
+                    <Show
+                      fallback={
+                        <SignIn
+                          googleLoginAvailable={
+                            authenticated().googleLoginAvailable
+                          }
+                        />
+                      }
+                      when={authenticated().user}
+                    >
+                      {(user) => (
+                        <Workspace
+                          agentSessions={agentSessions}
+                          braveSearch={braveSearch}
+                          logout={logout}
+                          logoutPending={logoutPending()}
+                          openAi={openAi}
+                          openRouter={openRouter}
+                          runners={runners}
+                          user={user()}
+                        />
+                      )}
+                    </Show>
+                  )}
+                </Show>
+              </Show>
+            </Show>
+            <a
+              class="mt-10 inline-flex items-center gap-2 text-sm font-medium text-slate-400 transition hover:text-emerald-200 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
+              href={HOME_PATH}
+            >
+              <span aria-hidden="true">←</span>
+              Back to the homepage
+            </a>
+          </main>
+        </div>
+        <RenderDebugLegend view={debug} />
+      </section>
+    </RenderDebugProvider>
+  );
 }
 
-root.addEventListener("change", (event) => {
-  flushDeferredUpdateAfterSelect(event, true);
-});
-root.addEventListener("focusout", (event) => {
-  flushDeferredUpdateAfterSelect(event, false);
-});
+const root = document.getElementById("app");
+if (root === null) {
+  throw new Error("The app root was not found");
+}
 
-updateApp(root);
-void loadSession();
+render(() => <App />, root);

@@ -134,26 +134,25 @@ information.
   follows up, continues without appending a user message, stops, and receives
   live sessions through `solid/realtime-client.ts`, `solid/session-client.tsx`,
   and `solid/session-controller.ts`. Unchanged snapshots suppress render
-  notifications. Header debug heat-maps remounts. Browser rendering preserves
-  viewport and keyed `data-scroll-key` regions across root remounts; the
-  transcript starts at the bottom and returns there when its message or
-  agent-file revision changes. It preserves input focus across updates and
-  defers remounts while a select has focus, flushing on change or focus loss.
-  `sync-engine/agent-model-discovery.ts` queries providers for compatible
-  models, modalities, and reasoning metadata; `shared/agent-configuration.ts`
-  owns shared catalog types, efforts, and fallbacks. New sessions use the
-  default online runner and model credential, each falling back to the first
-  entry. The working directory uses the latest session; provider models use the
-  first option and reasoning the maximum effort. Model choices show all provider
-  and Q Mush-supported input/output modalities. Controls use the listbox in
-  `solid/custom-select.tsx`; model options show discovered context limits. Model
-  and effort selections are persisted with the session. `shared/agent-prompt.ts`
-  is the shared source for building the model system prompt and its transcript
-  display. Reasoning summaries persist as `thinking` messages but are excluded
-  from replay. Session and transcript rows live in `agent_sessions` and
-  `agent_messages`; interrupted processes mark active sessions failed so they
-  can be resumed. Rebuilt conversations add error results for interrupted tool
-  calls only on resume.
+  notifications. Render debug heat-maps component renders. The browser uses one
+  long-lived Solid root, reactive controller accessors, and JSX event handlers.
+  Fine-grained updates retain focus and ordinary scroll state. The transcript
+  starts at the bottom and returns there when its message or agent-file revision
+  changes. `sync-engine/agent-model-discovery.ts` queries providers for
+  compatible models, modalities, and reasoning metadata;
+  `shared/agent-configuration.ts` owns shared catalog types, efforts, and
+  fallbacks. New sessions use the default online runner and model credential,
+  each falling back to the first entry. The working directory uses the latest
+  session; provider models use the first option and reasoning the maximum
+  effort. Model choices show all provider and Q Mush-supported input/output
+  modalities. Controls use the listbox in `solid/custom-select.tsx`; model
+  options show discovered context limits. Model and effort selections are
+  persisted with the session. `shared/agent-prompt.ts` is the shared source for
+  building the model system prompt and its transcript display. Reasoning
+  summaries persist as `thinking` messages but are excluded from replay. Session
+  and transcript rows live in `agent_sessions` and `agent_messages`; interrupted
+  processes mark active sessions failed so they can be resumed. Rebuilt
+  conversations add error results for interrupted tool calls only on resume.
 
 - `sync-engine/openai.ts` and `sync-engine/openrouter.ts` implement provider
   connections. Multiple OAuth or manual credentials live in
@@ -169,10 +168,10 @@ information.
   secrets never reach the browser, runner, or model provider. Its UI reuses the
   shared credential panel and controller.
 - The UI uses SolidJS and Vite. `solid/client.tsx` is the browser entry,
-  `solid/pages.tsx` owns server-rendered page shells, and `solid/styles.css` is
-  the Tailwind source. Vitest uses an SSR Solid transform for TSX
-  string-rendering tests and must run under Bun because tests and application
-  modules use Bun APIs and `bun:sqlite`.
+  `solid/pages.tsx` owns server-rendered shells, and `solid/styles.css` is
+  Tailwind's source. Vitest uses an SSR Solid transform for string-rendering
+  tests and a Happy DOM project for post-mount reactivity tests. Run it under
+  Bun because tests and application modules use Bun APIs and `bun:sqlite`.
 - TypeScript is configured for strict, no-emit, bundler-style checking in
   `tsconfig.json`, including unused and unreachable code diagnostics. Library
   declaration checking is skipped because Drizzle publishes declarations for

@@ -1,9 +1,14 @@
 import { expect, test } from "vitest";
-import { initialDirectoryPickerState } from "../../solid/directory-picker-controller.ts";
 import {
-  renderSessionPanel,
+  DirectoryPickerController,
+  initialDirectoryPickerState,
+} from "../../solid/directory-picker-controller.ts";
+import { createReactiveState } from "../../solid/reactive-state.ts";
+import {
+  SessionPanel,
   type SessionViewState,
 } from "../../solid/session-client.tsx";
+import { SessionController } from "../../solid/session-controller.ts";
 import {
   TEST_AGENT_IMAGE,
   testUserImageMessage,
@@ -128,35 +133,47 @@ function renderPanelWithProviders(
   openAiState = OPENAI_STATE,
   openRouterState = EMPTY_PROVIDER_STATE,
 ): string {
-  return renderSolidToString(() =>
-    renderSessionPanel(state, runnerState, openAiState, openRouterState),
-  );
+  return renderSolidToString(() => {
+    const controller = new SessionController(
+      createReactiveState(state),
+      new DirectoryPickerController(createReactiveState(state.directoryPicker)),
+    );
+    return (
+      <SessionPanel
+        controller={controller}
+        openAi={() => openAiState}
+        openRouter={() => openRouterState}
+        runners={() => runnerState}
+      />
+    );
+  });
 }
 
 function renderPanel(state: SessionViewState): string {
   return renderPanelWithProviders(state);
 }
 
-test("marks editable session controls for focus preservation", () => {
+test("keeps editable session controls in the reactive tree", () => {
   const newSessionHtml = renderPanel(SESSION_STATE);
   const followUpHtml = renderPanel(
     sessionStateWithMessages(SESSION_STATE, FORMATTED_SESSION_MESSAGES),
   );
 
-  expect(newSessionHtml).toContain('data-focus-key="session-directory"');
-  expect(newSessionHtml).toContain('data-focus-key="session-prompt"');
-  expect(followUpHtml).toContain('data-focus-key="session-follow-up"');
+  expect(newSessionHtml).toContain('id="session-directory"');
+  expect(newSessionHtml).toContain('id="session-prompt"');
+  expect(followUpHtml).toContain('name="prompt"');
+  expect(newSessionHtml).not.toContain("data-focus-key");
+  expect(followUpHtml).not.toContain("data-focus-key");
 });
 
-test("renders the session list as an independent scroll region", () => {
+test("renders the session list as a scrollable region", () => {
   const html = renderPanel({
     ...SESSION_STATE,
     sessions: [TEST_SESSION_DETAIL],
   });
 
-  expect(html).toMatch(
-    /<ul class="[^"]*max-h-144[^"]*overflow-y-auto[^"]*"[^>]*data-scroll-key="list"/u,
-  );
+  expect(html).toMatch(/<ul class="[^"]*max-h-144[^"]*overflow-y-auto[^"]*"/u);
+  expect(html).not.toContain("data-scroll-key");
 });
 
 test("renders the system prompt and model thinking in a transcript", () => {
@@ -225,9 +242,9 @@ test("renders the system prompt and model thinking in a transcript", () => {
   const html = renderPanel(state);
 
   expect(html).toContain("System prompt");
-  expect(html).toContain('data-scroll-key="session-transcript:session-1"');
-  expect(html).toContain('data-scroll-on-change="end"');
-  expect(html).toContain('data-scroll-revision="AGENTS.md:21:3:tool-1"');
+  expect(html).not.toContain("data-scroll-key");
+  expect(html).not.toContain("data-scroll-on-change");
+  expect(html).not.toContain("data-scroll-revision");
   expect(html).toContain(
     "You are Q Mush, a careful coding agent operating in a user-selected workspace.",
   );
@@ -237,9 +254,6 @@ test("renders the system prompt and model thinking in a transcript", () => {
   expect(html).toContain("Agent file: AGENTS.md");
   expect(html).toContain("Context: Not reported / 200K");
   expect(html).toContain("Auto compact");
-  expect(html).toContain('data-action="toggle-auto-compact"');
-  expect(html).toContain('data-auto-compact="false"');
-  expect(html).toContain('data-action="compact-session"');
   expect(html).toContain("Tool definitions");
   for (const toolName of ["read", "bash", "edit", "write", "parallel"]) {
     expect(html).toContain(
@@ -261,7 +275,6 @@ test("renders the system prompt and model thinking in a transcript", () => {
     "{&quot;path&quot;:&quot;README.md&quot;,&quot;offset&quot;:1}",
   );
   expect(html).toContain("# Q Mush");
-  expect(html).toContain('data-action="continue-session"');
   expect(html).toContain(">Continue</button>");
 });
 
@@ -276,10 +289,6 @@ test("renders image pickers, previews, and transcript images", () => {
   });
 
   expect(html).toContain('accept="image/png,image/jpeg,image/gif,image/webp"');
-  expect(html).toContain('data-action="add-session-images"');
-  expect(html).toContain('data-action="add-follow-up-images"');
-  expect(html).toContain('data-action="remove-session-image"');
-  expect(html).toContain('data-action="remove-follow-up-image"');
   expect(html).toContain(
     `src="data:image/png;base64,${TEST_AGENT_IMAGE.data}"`,
   );
@@ -319,21 +328,14 @@ test("pretty prints markdown and colorizes structured transcript content", () =>
 
 test("shows context percentage and warning colors", () => {
   const renderContext = (currentContextTokens: number): string =>
-    renderSolidToString(() =>
-      renderSessionPanel(
-        {
-          ...SESSION_STATE,
-          detail: {
-            ...TEST_SESSION_DETAIL,
-            currentContextTokens,
-          },
-          selectedId: TEST_SESSION_DETAIL.id,
-        },
-        RUNNER_STATE,
-        OPENAI_STATE,
-        EMPTY_PROVIDER_STATE,
-      ),
-    );
+    renderPanel({
+      ...SESSION_STATE,
+      detail: {
+        ...TEST_SESSION_DETAIL,
+        currentContextTokens,
+      },
+      selectedId: TEST_SESSION_DETAIL.id,
+    });
   const yellow = renderContext(160_000);
   const red = renderContext(180_000);
 
@@ -349,7 +351,6 @@ test("renders a directory browser beside the working-directory input", () => {
   expect(closedHtml).toMatch(
     /<input[^>]*id="session-directory"[^>]*name="workingDirectory"/u,
   );
-  expect(closedHtml).toContain('data-action="open-directory-picker"');
   expect(closedHtml).toContain(">Browse</button>");
   expect(closedHtml).not.toContain('data-directory-picker="true"');
   expect(closedHtml).not.toContain(" inert");
@@ -358,10 +359,9 @@ test("renders a directory browser beside the working-directory input", () => {
     ...SESSION_STATE,
     draft: { ...SESSION_STATE.draft, runnerId: "" },
   });
-  const browseControl =
-    /<button[^>]*data-action="open-directory-picker"[^>]*>/u.exec(
-      defaultRunnerHtml,
-    )?.[0];
+  const browseControl = /<button[^>]*>Browse<\/button>/u.exec(
+    defaultRunnerHtml,
+  )?.[0];
   expect(browseControl).not.toMatch(/\sdisabled(?:\s|>)/u);
 
   const openHtml = renderPanel({
@@ -389,19 +389,14 @@ test("renders a directory browser beside the working-directory input", () => {
   expect(openHtml).toContain('aria-modal="true"');
   expect(openHtml).toContain('data-directory-picker="true"');
   expect(openHtml).toContain('tabindex="-1"');
-  expect(openHtml).toContain("<section inert");
+  expect(openHtml).toMatch(/<section[^>]*\sinert(?:\s|>)/u);
   expect(openHtml).toContain("Choose a working directory");
   expect(openHtml).toContain("/home/mush/projects");
-  expect(openHtml).toContain('data-action="browse-parent-directory"');
-  expect(openHtml).toContain('data-action="browse-home-directory"');
-  expect(openHtml).toContain('data-action="browse-directory"');
   expect(openHtml).toContain(
     'data-directory-path="/home/mush/projects/mush room"',
   );
   expect(openHtml).toContain(">mush room</span>");
-  expect(openHtml).toContain('data-action="choose-directory"');
   expect(openHtml).toContain("Choose this directory");
-  expect(openHtml).toContain('data-action="close-directory-picker"');
 });
 
 test("defaults runner and credential choices to the first entries", () => {
@@ -497,8 +492,6 @@ test("shows input and output modalities in the model select list", () => {
   expect(modelHtml).not.toMatch(/<select/u);
   expect(modelHtml).toContain('data-custom-select="model"');
   expect(modelHtml).not.toMatch(/<select[^>]*id="session-model"/u);
-  expect(modelHtml).toContain('data-action="toggle-session-select"');
-  expect(modelHtml).toContain('data-action="choose-session-option"');
   expect(modelHtml).toContain('data-option-value="gpt-5-codex"');
   expect(modelHtml).toContain("GPT-5 Codex (discovered)");
   expect(modelHtml).toContain("200K context");
