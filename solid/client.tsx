@@ -23,6 +23,12 @@ import {
 } from "./provider-client.tsx";
 import { ProviderController } from "./provider-controller.ts";
 import { RealtimeConnection } from "./realtime-client.ts";
+import {
+  renderDebugBoundary,
+  renderDebugLegend,
+  renderDebugToggle,
+  RenderDebugView,
+} from "./render-debug.tsx";
 import { renderRunnerPanel, type RunnerViewState } from "./runner-client.tsx";
 import { RunnerController } from "./runner-controller.ts";
 import { updatePreservingScrollPositions } from "./scroll-position.ts";
@@ -129,11 +135,17 @@ function renderAvatar(user: AuthenticatedUser): JSX.Element {
   );
 }
 
-function renderHeader(user: AuthenticatedUser | null | undefined): JSX.Element {
+function renderHeader(
+  user: AuthenticatedUser | null | undefined,
+  renderDebugEnabled: boolean,
+): JSX.Element {
   return (
-    <header class="flex items-center justify-between gap-4 border-b border-white/10 pb-6">
+    <header
+      class="flex flex-col gap-4 border-b border-white/10 pb-6 sm:flex-row sm:items-center sm:justify-between"
+      {...renderDebugBoundary("header", "Header")}
+    >
       <a
-        class="inline-flex items-center gap-3 rounded-full font-semibold text-white focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
+        class="inline-flex items-center gap-3 self-start rounded-full font-semibold text-white focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
         href={HOME_PATH}
       >
         <span
@@ -144,17 +156,20 @@ function renderHeader(user: AuthenticatedUser | null | undefined): JSX.Element {
         </span>
         Q Mush
       </a>
-      <span class="inline-flex min-w-0 items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-300/10 px-3 py-1 text-sm text-emerald-200">
-        <span
-          aria-hidden="true"
-          class="size-2 shrink-0 rounded-full bg-emerald-300"
-        ></span>
-        {user === undefined
-          ? "Checking session"
-          : user === null
-            ? "Local runtime"
-            : `Signed in as ${user.name}`}
-      </span>
+      <div class="flex flex-wrap items-center gap-2">
+        {renderDebugToggle(renderDebugEnabled)}
+        <span class="inline-flex min-w-0 items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-300/10 px-3 py-1 text-sm text-emerald-200">
+          <span
+            aria-hidden="true"
+            class="size-2 shrink-0 rounded-full bg-emerald-300"
+          ></span>
+          {user === undefined
+            ? "Checking session"
+            : user === null
+              ? "Local runtime"
+              : `Signed in as ${user.name}`}
+        </span>
+      </div>
     </header>
   );
 }
@@ -275,7 +290,10 @@ function renderWorkspace(
   user: AuthenticatedUser,
 ): JSX.Element {
   return (
-    <div class="mt-12 space-y-6">
+    <div
+      class="mt-12 space-y-6"
+      {...renderDebugBoundary("workspace", "Authenticated workspace")}
+    >
       {renderSessionPanel(
         sessionState,
         runnerState,
@@ -286,6 +304,7 @@ function renderWorkspace(
       <aside
         aria-label="Google account"
         class="flex flex-col gap-5 rounded-3xl border border-white/10 bg-slate-900/80 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8"
+        {...renderDebugBoundary("google-account", "Google account")}
       >
         <div class="flex min-w-0 items-center gap-4">
           {renderAvatar(user)}
@@ -317,6 +336,7 @@ function renderApp(
   notices: readonly string[],
   openAiState: ProviderViewState,
   openRouterState: ProviderViewState,
+  renderDebugEnabled: boolean,
   runnerState: RunnerViewState,
   sessionState: SessionViewState,
   session: AuthSession | undefined,
@@ -325,6 +345,7 @@ function renderApp(
     <section
       aria-labelledby="app-title"
       class="relative min-h-screen overflow-hidden bg-slate-950 px-6 py-8 text-slate-100 sm:px-10 lg:px-12"
+      {...renderDebugBoundary("app", "App")}
     >
       <div
         aria-hidden="true"
@@ -336,7 +357,7 @@ function renderApp(
       ></div>
 
       <div class="relative mx-auto max-w-6xl">
-        {renderHeader(session?.user)}
+        {renderHeader(session?.user, renderDebugEnabled)}
         <main class="py-12 sm:py-16">
           <p class="text-sm font-semibold tracking-[0.2em] text-emerald-300 uppercase">
             Local control center
@@ -351,10 +372,11 @@ function renderApp(
             Coordinate your local swarm from one authenticated workspace.
           </p>
 
-          {notices.map((notice) => (
+          {notices.map((notice, index) => (
             <p
               class="mt-8 rounded-2xl border border-amber-300/20 bg-amber-300/10 p-4 text-sm text-amber-100"
               role="alert"
+              {...renderDebugBoundary(`notice:${String(index)}`, "Notice")}
             >
               {notice}
             </p>
@@ -384,6 +406,7 @@ function renderApp(
           </a>
         </main>
       </div>
+      {renderDebugEnabled ? renderDebugLegend() : null}
     </section>
   );
 }
@@ -399,6 +422,7 @@ function findAppRoot(): Element {
 }
 
 const root = findAppRoot();
+const renderDebug = new RenderDebugView();
 let appUpdateDeferred = false;
 let disposeApp: (() => void) | undefined;
 let loadFailed = false;
@@ -553,6 +577,7 @@ function updateApp(container: Element, replaceFocusedSelect = false): void {
                 notices,
                 openAi.state,
                 openRouter.state,
+                renderDebug.enabled,
                 runners.state,
                 agentSessions.state,
                 session,
@@ -563,12 +588,25 @@ function updateApp(container: Element, replaceFocusedSelect = false): void {
       );
     },
   );
+  renderDebug.apply(container);
   agentSessions.bind(container);
   runners.bind(container);
   for (const controller of providerControllers) {
     controller.bind(container);
   }
 
+  container
+    .querySelector('[data-action="toggle-render-debug"]')
+    ?.addEventListener("click", () => {
+      renderDebug.toggle();
+      updateApp(root);
+    });
+  container
+    .querySelector('[data-action="reset-render-debug"]')
+    ?.addEventListener("click", () => {
+      renderDebug.reset();
+      updateApp(root);
+    });
   container
     .querySelector('[data-action="retry-session"]')
     ?.addEventListener("click", () => {

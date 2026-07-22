@@ -9,6 +9,7 @@ import {
 } from "../shared/routes.ts";
 import { renderRemovalButton, renderRetryError } from "./client-controls.tsx";
 import { renderDefaultableActions } from "./defaultable-actions.tsx";
+import { renderDebugBoundary } from "./render-debug.tsx";
 
 type BrowserProviderId = "brave-search" | "openai" | "openrouter";
 
@@ -184,7 +185,13 @@ function renderCredential(
   const { credential, removingId, settingDefaultId } = state;
 
   return (
-    <li class="flex flex-col gap-4 rounded-2xl border border-white/10 bg-slate-950/60 p-5 sm:flex-row sm:items-center sm:justify-between">
+    <li
+      class="flex flex-col gap-4 rounded-2xl border border-white/10 bg-slate-950/60 p-5 sm:flex-row sm:items-center sm:justify-between"
+      {...renderDebugBoundary(
+        `provider-credential:${configuration.id}:${credential.id}`,
+        `${configuration.name} credential: ${credential.label}`,
+      )}
+    >
       <div class="min-w-0">
         <div class="flex flex-wrap items-center gap-2">
           <p class="truncate font-semibold text-white">{credential.label}</p>
@@ -251,6 +258,10 @@ export function renderProviderPanel(
       aria-labelledby={titleId}
       class="rounded-3xl border border-white/10 bg-white/[0.06] p-6 shadow-2xl shadow-emerald-950/30 backdrop-blur-xl sm:p-8"
       data-provider-panel={configuration.id}
+      {...renderDebugBoundary(
+        `provider-panel:${configuration.id}`,
+        `${configuration.name} panel`,
+      )}
     >
       <div class="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
         <div>
@@ -280,6 +291,10 @@ export function renderProviderPanel(
       <form
         class={`mt-7 grid gap-3 rounded-2xl border border-white/10 bg-slate-900/70 p-4 ${configuration.keyRequiresLabel === true ? "sm:grid-cols-[minmax(0,0.7fr)_minmax(0,1fr)_auto]" : "sm:grid-cols-[minmax(0,1fr)_auto]"}`}
         data-action="add-provider-key"
+        {...renderDebugBoundary(
+          `provider-form:${configuration.id}`,
+          `${configuration.name} key form`,
+        )}
       >
         {configuration.keyRequiresLabel === true ? (
           <div>

@@ -26,6 +26,7 @@ import type {
   ProviderCredential,
   ProviderViewState,
 } from "./provider-client.tsx";
+import { renderDebugBoundary } from "./render-debug.tsx";
 import type { RunnerViewState } from "./runner-client.tsx";
 import {
   renderSessionFollowUp,
@@ -580,6 +581,7 @@ export function renderSessionPanel(
         inert={state.directoryPicker.open}
         aria-labelledby="agent-sessions-title"
         class="rounded-3xl border border-emerald-300/15 bg-white/[0.06] p-6 shadow-2xl shadow-emerald-950/30 backdrop-blur-xl sm:p-8"
+        {...renderDebugBoundary("sessions-panel", "Agent sessions panel")}
       >
         <p class="text-sm font-medium text-emerald-300">
           First-party agent runtime

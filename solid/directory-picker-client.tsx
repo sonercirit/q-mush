@@ -1,6 +1,7 @@
 import { type JSX } from "solid-js";
 import { MAXIMUM_RUNNER_DIRECTORY_ENTRIES } from "../shared/runner-directory-model.ts";
 import type { DirectoryPickerState } from "./directory-picker-controller.ts";
+import { renderDebugBoundary } from "./render-debug.tsx";
 
 function renderDirectoryContents(state: DirectoryPickerState): JSX.Element {
   const listing = state.listing;
@@ -70,7 +71,10 @@ function renderOpenDirectoryPicker(
       role="dialog"
       tabindex="-1"
     >
-      <div class="flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-white/15 bg-slate-900 shadow-2xl shadow-black/60">
+      <div
+        class="flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-white/15 bg-slate-900 shadow-2xl shadow-black/60"
+        {...renderDebugBoundary("directory-picker", "Directory picker")}
+      >
         <div class="flex items-start justify-between gap-4 border-b border-white/10 p-5 sm:p-6">
           <div class="min-w-0">
             <p class="text-xs font-semibold tracking-wider text-emerald-300 uppercase">

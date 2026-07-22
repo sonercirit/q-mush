@@ -1,2 +1,68 @@
 @import "tailwindcss" source(".");
 @source "../shared/server-rendering";
+
+.render-debug-scale {
+  background: linear-gradient(
+    to right,
+    rgb(34 197 94),
+    rgb(132 204 22),
+    rgb(250 204 21),
+    rgb(249 115 22),
+    rgb(239 68 68)
+  );
+}
+
+[data-render-debug="true"] {
+  position: relative;
+  outline: 2px solid var(--render-debug-color);
+  outline-offset: 2px;
+}
+
+[data-render-debug="true"]::after {
+  position: absolute;
+  z-index: 90;
+  top: 0.25rem;
+  left: 0.25rem;
+  display: none;
+  max-width: calc(100% - 0.5rem);
+  padding: 0.2rem 0.45rem;
+  overflow: hidden;
+  border-radius: 0.35rem;
+  background: rgb(2 6 23 / 95%);
+  color: white;
+  content: attr(data-render-label) " · " attr(data-render-count) " renders";
+  font:
+    600 0.65rem/1.2 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    monospace;
+  pointer-events: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-render-debug="true"]:hover::after {
+  display: block;
+}
+
+[data-render-heat="green"] {
+  --render-debug-color: rgb(34 197 94);
+}
+
+[data-render-heat="lime"] {
+  --render-debug-color: rgb(132 204 22);
+}
+
+[data-render-heat="yellow"] {
+  --render-debug-color: rgb(250 204 21);
+}
+
+[data-render-heat="orange"] {
+  --render-debug-color: rgb(249 115 22);
+}
+
+[data-render-heat="red"] {
+  --render-debug-color: rgb(239 68 68);
+}

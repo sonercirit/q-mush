@@ -133,11 +133,11 @@ information.
   follows up, continues without appending a user message, stops, and receives
   live sessions through `solid/realtime-client.ts`, `solid/session-client.tsx`,
   and `solid/session-controller.ts`. Unchanged snapshots suppress render
-  notifications. Browser rendering preserves the document viewport and keyed
-  `data-scroll-key` regions across full-root remounts; the session transcript
-  starts at the bottom and returns there when its message or agent-file revision
-  changes. It preserves input focus across updates and defers remounts while a
-  select has focus, flushing on change or focus loss.
+  notifications. Header debug heat-maps remounts. Browser rendering preserves
+  viewport and keyed `data-scroll-key` regions across root remounts; the
+  transcript starts at the bottom and returns there when its message or
+  agent-file revision changes. It preserves input focus across updates and
+  defers remounts while a select has focus, flushing on change or focus loss.
   `sync-engine/agent-model-discovery.ts` queries providers for compatible
   models, modalities, and reasoning metadata; `shared/agent-configuration.ts`
   owns shared catalog types, efforts, and fallbacks. New sessions use the

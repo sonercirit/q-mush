@@ -3,6 +3,7 @@ import type { AgentFile } from "../shared/agent-file.ts";
 import { createAgentSystemPrompt } from "../shared/agent-prompt.ts";
 import { AGENT_TOOLS } from "../shared/agent-tools.ts";
 import type { AgentSessionMessage } from "../shared/session-model.ts";
+import { renderDebugBoundary } from "./render-debug.tsx";
 import { renderSessionImagePreviews } from "./session-image-client.tsx";
 import { renderMarkdown } from "./session-markdown.tsx";
 import { renderStructuredCode } from "./session-syntax.tsx";
@@ -11,13 +12,17 @@ import { renderToolResult } from "./session-tool-result.tsx";
 const SERIALIZED_AGENT_TOOLS = JSON.stringify(AGENT_TOOLS, null, 2);
 
 function renderTranscriptNote(options: {
+  readonly boundaryKey: string;
   readonly classes: string;
   readonly content: string;
   readonly label: string;
   readonly labelClasses: string;
 }): JSX.Element {
   return (
-    <li class={`rounded-xl border p-4 ${options.classes}`}>
+    <li
+      class={`rounded-xl border p-4 ${options.classes}`}
+      {...renderDebugBoundary(options.boundaryKey, options.label)}
+    >
       <p
         class={`text-xs font-semibold tracking-wide uppercase ${options.labelClasses}`}
       >
@@ -30,7 +35,10 @@ function renderTranscriptNote(options: {
 
 function renderToolDefinitions(): JSX.Element {
   return (
-    <li class="rounded-xl border border-cyan-300/20 bg-cyan-300/10 p-4">
+    <li
+      class="rounded-xl border border-cyan-300/20 bg-cyan-300/10 p-4"
+      {...renderDebugBoundary("tool-definitions", "Tool definitions")}
+    >
       <p class="text-xs font-semibold tracking-wide text-cyan-200 uppercase">
         Tool definitions
       </p>
@@ -74,6 +82,7 @@ function renderMessage(
 ): JSX.Element {
   if (message.role === "thinking") {
     return renderTranscriptNote({
+      boundaryKey: `message:${message.id}`,
       classes: "border-violet-300/20 bg-violet-300/10",
       content: message.content,
       label: "Thinking",
@@ -83,7 +92,10 @@ function renderMessage(
 
   if (message.role === "tool") {
     return (
-      <li class="rounded-xl border border-white/10 bg-slate-950/80 p-4">
+      <li
+        class="rounded-xl border border-white/10 bg-slate-950/80 p-4"
+        {...renderDebugBoundary(`message:${message.id}`, "Tool result")}
+      >
         {renderToolHeader({
           id: message.toolCallId,
           kind: "Tool result",
@@ -108,6 +120,10 @@ function renderMessage(
   return (
     <li
       class={`rounded-2xl border p-4 ${user ? "ml-8 border-emerald-300/20 bg-emerald-300/10" : system ? "border-rose-300/20 bg-rose-300/10" : "mr-8 border-white/10 bg-white/[0.04]"}`}
+      {...renderDebugBoundary(
+        `message:${message.id}`,
+        `${user ? "User" : system ? "Session" : "Agent"} message`,
+      )}
     >
       <p class="text-xs font-semibold tracking-wide text-slate-400 uppercase">
         {user ? "You" : system ? "Session" : "Agent"}
@@ -127,7 +143,13 @@ function renderMessage(
       {message.toolCalls.length > 0 ? (
         <ul class="mt-3 space-y-2">
           {message.toolCalls.map((call) => (
-            <li class="rounded-lg border border-cyan-300/20 bg-cyan-300/10 p-3">
+            <li
+              class="rounded-lg border border-cyan-300/20 bg-cyan-300/10 p-3"
+              {...renderDebugBoundary(
+                `tool-call:${call.id}`,
+                `Tool call: ${call.name}`,
+              )}
+            >
               {renderToolHeader({
                 id: call.id,
                 kind: "Tool call",
@@ -149,6 +171,7 @@ export function renderSessionTranscript(
   const callArguments = toolCallArguments(messages);
   return [
     renderTranscriptNote({
+      boundaryKey: "system-prompt",
       classes: "border-amber-300/20 bg-amber-300/10",
       content: createAgentSystemPrompt(agentFile),
       label: "System prompt",
