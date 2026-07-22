@@ -127,6 +127,15 @@ function scrollRevision(detail: AgentSessionDetail): string {
   return `${agentFileRevision}:${String(detail.messages.length)}:${detail.messages.at(-1)?.id ?? ""}`;
 }
 
+const SCROLL_END_TOLERANCE = 1;
+
+function isAtScrollEnd(element: HTMLElement): boolean {
+  return (
+    element.scrollHeight - element.clientHeight - element.scrollTop <=
+    SCROLL_END_TOLERANCE
+  );
+}
+
 function LoadedSessionDetail(props: {
   readonly controller: SessionController;
   readonly detail: AgentSessionDetail;
@@ -134,11 +143,22 @@ function LoadedSessionDetail(props: {
 }): JSX.Element {
   const active = (): boolean =>
     props.detail.status === "queued" || props.detail.status === "running";
+  const [scrollLockEnabled, setScrollLockEnabled] = createSignal(true);
   const [transcript, setTranscript] = createSignal<HTMLUListElement>();
   const scrollToEnd = (): void => {
     const element = transcript();
-    if (element !== undefined) {
+    if (scrollLockEnabled() && element !== undefined) {
       element.scrollTop = element.scrollHeight;
+    }
+  };
+  const handleTranscriptScroll = (element: HTMLUListElement): void => {
+    setScrollLockEnabled(isAtScrollEnd(element));
+  };
+  const toggleScrollLock = (): void => {
+    const enabled = !scrollLockEnabled();
+    setScrollLockEnabled(enabled);
+    if (enabled) {
+      scrollToEnd();
     }
   };
 
@@ -161,22 +181,37 @@ function LoadedSessionDetail(props: {
             {`${sessionModelLabel(props.detail)} · ${sessionContextLabel(props.detail)} · ${props.detail.workingDirectory} · Agent file: ${props.detail.agentFile?.name ?? "None"}`}
           </p>
         </div>
-        <Show when={active()}>
+        <div class="flex shrink-0 flex-wrap items-center gap-2">
           <button
-            class="shrink-0 rounded-xl border border-rose-300/30 bg-rose-300/10 px-4 py-2 text-sm font-semibold text-rose-200 disabled:opacity-50"
-            disabled={props.state.stopping}
-            onClick={() => {
-              void props.controller.stop();
-            }}
+            aria-pressed={scrollLockEnabled()}
+            class={`rounded-full border px-3 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300 ${scrollLockEnabled() ? "border-emerald-300/30 bg-emerald-300/10 text-emerald-200" : "border-white/10 bg-white/[0.04] text-slate-400 hover:border-white/20 hover:text-slate-200"}`}
+            data-scroll-lock-toggle="true"
+            onClick={toggleScrollLock}
             type="button"
           >
-            {props.state.stopping ? "Stopping…" : "Stop session"}
+            {`Scroll lock: ${scrollLockEnabled() ? "On" : "Off"}`}
           </button>
-        </Show>
+          <Show when={active()}>
+            <button
+              class="rounded-xl border border-rose-300/30 bg-rose-300/10 px-4 py-2 text-sm font-semibold text-rose-200 disabled:opacity-50"
+              disabled={props.state.stopping}
+              onClick={() => {
+                void props.controller.stop();
+              }}
+              type="button"
+            >
+              {props.state.stopping ? "Stopping…" : "Stop session"}
+            </button>
+          </Show>
+        </div>
       </div>
       <ul
         aria-live="polite"
         class="mt-5 max-h-[36rem] space-y-3 overflow-y-auto pr-1"
+        data-session-transcript="true"
+        onScroll={(event) => {
+          handleTranscriptScroll(event.currentTarget);
+        }}
         ref={setTranscript}
       >
         <SessionTranscript

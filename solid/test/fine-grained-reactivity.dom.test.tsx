@@ -44,6 +44,25 @@ function query(container: ParentNode, selector: string): Element {
   return element;
 }
 
+function transcript(container: ParentNode): HTMLUListElement {
+  const element = query(container, "[data-session-transcript='true']");
+  if (!(element instanceof HTMLUListElement)) {
+    throw new TypeError("The session transcript is not a list");
+  }
+  return element;
+}
+
+function setScrollableDimensions(
+  element: HTMLElement,
+  clientHeight: number,
+  scrollHeight: number,
+): void {
+  Object.defineProperties(element, {
+    clientHeight: { configurable: true, value: clientHeight },
+    scrollHeight: { configurable: true, value: scrollHeight },
+  });
+}
+
 function click(container: ParentNode, selector: string): void {
   const control = query(container, selector);
   if (!(control instanceof HTMLButtonElement)) {
@@ -192,6 +211,65 @@ function expectTranscriptBoundariesToRenderOnce(
     expect(debug.measurement(key).count).toBe(1);
   }
 }
+
+test("scrolling away from and back to the transcript end updates scroll lock", () => {
+  const detail: AgentSessionDetail = {
+    ...TEST_SESSION_DETAIL,
+    messages: [transcriptMessage("user-1", "Initial task", "user", 2)],
+    status: "running",
+  };
+  const reactive = createReactiveState<SessionViewState>({
+    ...initialSessionViewState(),
+    detail,
+    selectedId: detail.id,
+  });
+  const controller = new SessionController(reactive);
+  const container = mount(() => (
+    <SessionDetail controller={controller} state={reactive.state()} />
+  ));
+  const element = transcript(container);
+  const toggle = query(container, "[data-scroll-lock-toggle='true']");
+  setScrollableDimensions(element, 100, 500);
+
+  expect(toggle.textContent).toContain("Scroll lock: On");
+  expect(toggle.getAttribute("aria-pressed")).toBe("true");
+
+  element.scrollTop = 180;
+  element.dispatchEvent(new Event("scroll"));
+
+  expect(toggle.textContent).toContain("Scroll lock: Off");
+  expect(toggle.getAttribute("aria-pressed")).toBe("false");
+
+  controller.applyDelta({
+    content: "New output",
+    sessionId: detail.id,
+    thinking: "",
+    type: "session_delta",
+  });
+  expect(element.scrollTop).toBe(180);
+
+  element.scrollTop = 400;
+  element.dispatchEvent(new Event("scroll"));
+
+  expect(toggle.textContent).toContain("Scroll lock: On");
+  expect(toggle.getAttribute("aria-pressed")).toBe("true");
+
+  setScrollableDimensions(element, 100, 650);
+  controller.applyDelta({
+    content: " continues",
+    sessionId: detail.id,
+    thinking: "",
+    type: "session_delta",
+  });
+  expect(element.scrollTop).toBe(650);
+
+  if (!(toggle instanceof HTMLButtonElement)) {
+    throw new TypeError("The scroll lock control is not a button");
+  }
+  toggle.click();
+  expect(toggle.textContent).toContain("Scroll lock: Off");
+  expect(toggle.getAttribute("aria-pressed")).toBe("false");
+});
 
 test("a streamed message update only renders that transcript message", () => {
   const messages: AgentSessionDetail["messages"] = [
