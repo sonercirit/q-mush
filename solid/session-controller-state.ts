@@ -39,11 +39,49 @@ export function replaceSessionSummary(
   );
 }
 
+function serializedDataMatches(left: unknown, right: unknown): boolean {
+  return left === right || JSON.stringify(left) === JSON.stringify(right);
+}
+
 export function sessionDataMatches(
   left: AgentSessionDetail | readonly AgentSessionSummary[] | undefined,
   right: AgentSessionDetail | readonly AgentSessionSummary[] | undefined,
 ): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+  return serializedDataMatches(left, right);
+}
+
+function retainUnchangedMessages(
+  current: AgentSessionDetail,
+  messages: AgentSessionDetail["messages"],
+): AgentSessionDetail["messages"] {
+  const currentById = new Map(
+    current.messages.map((message) => [message.id, message]),
+  );
+  return messages.map((message) => {
+    const existing = currentById.get(message.id);
+    return existing === message ||
+      (existing !== undefined && serializedDataMatches(existing, message))
+      ? existing
+      : message;
+  });
+}
+
+export function retainUnchangedSessionData(
+  current: AgentSessionDetail | undefined,
+  detail: AgentSessionDetail,
+): AgentSessionDetail {
+  if (current?.id !== detail.id) {
+    return detail;
+  }
+
+  const agentFile = serializedDataMatches(current.agentFile, detail.agentFile)
+    ? current.agentFile
+    : detail.agentFile;
+  const messages = retainUnchangedMessages(current, detail.messages);
+  return agentFile !== detail.agentFile ||
+    messages.some((message, index) => message !== detail.messages[index])
+    ? { ...detail, agentFile, messages }
+    : detail;
 }
 
 interface StreamedSessionContent {
@@ -97,13 +135,14 @@ export class SessionRealtimeState {
     const streamed = this.#streamedContent.get(detail.id);
     const streamIsPersisted =
       streamed !== undefined && this.#streamIsPersisted(persistable, streamed);
-    const visibleDetail =
+    const visibleMessages =
       streamed === undefined || streamIsPersisted
-        ? persistable
-        : {
-            ...persistable,
-            messages: streamedMessages(persistable, streamed),
-          };
+        ? persistable.messages
+        : streamedMessages(persistable, streamed);
+    const visibleDetail = retainUnchangedSessionData(current, {
+      ...persistable,
+      messages: visibleMessages,
+    });
     if (streamed !== undefined && streamIsPersisted) {
       this.#streamedContent.delete(detail.id);
     }
@@ -176,15 +215,14 @@ export class SessionRealtimeState {
       return;
     }
 
-    this.#view.patch({
-      detail: {
-        ...detail,
-        messages: streamedMessages(
-          this.#withoutStreamedMessages(detail),
-          streamed,
-        ),
-      },
+    const visibleDetail = retainUnchangedSessionData(detail, {
+      ...detail,
+      messages: streamedMessages(
+        this.#withoutStreamedMessages(detail),
+        streamed,
+      ),
     });
+    this.#view.patch({ detail: visibleDetail });
   }
 
   applySessions(sessions: readonly AgentSessionSummary[]): void {

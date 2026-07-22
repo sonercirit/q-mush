@@ -1,4 +1,4 @@
-import { type JSX } from "solid-js";
+import { For, type Accessor, type JSX } from "solid-js";
 import type { AgentFile } from "../shared/agent-file.ts";
 import { createAgentSystemPrompt } from "../shared/agent-prompt.ts";
 import { AGENT_TOOLS } from "../shared/agent-tools.ts";
@@ -11,7 +11,7 @@ import { renderToolResult } from "./session-tool-result.tsx";
 
 const SERIALIZED_AGENT_TOOLS = JSON.stringify(AGENT_TOOLS, null, 2);
 
-function renderTranscriptNote(options: {
+function TranscriptNote(props: {
   readonly boundaryKey: string;
   readonly classes: string;
   readonly content: string;
@@ -20,15 +20,15 @@ function renderTranscriptNote(options: {
 }): JSX.Element {
   return (
     <li
-      class={`rounded-xl border p-4 ${options.classes}`}
-      {...renderDebugBoundary(options.boundaryKey, options.label)}
+      class={`rounded-xl border p-4 ${props.classes}`}
+      {...renderDebugBoundary(props.boundaryKey, props.label)}
     >
       <p
-        class={`text-xs font-semibold tracking-wide uppercase ${options.labelClasses}`}
+        class={`text-xs font-semibold tracking-wide uppercase ${props.labelClasses}`}
       >
-        {options.label}
+        {props.label}
       </p>
-      <div class="mt-2">{renderMarkdown(options.content)}</div>
+      <div class="mt-2">{renderMarkdown(props.content)}</div>
     </li>
   );
 }
@@ -76,75 +76,77 @@ function toolCallArguments(
   );
 }
 
-function renderMessage(
-  message: AgentSessionMessage,
-  callArguments: ReadonlyMap<string, string>,
-): JSX.Element {
-  if (message.role === "thinking") {
-    return renderTranscriptNote({
-      boundaryKey: `message:${message.id}`,
-      classes: "border-violet-300/20 bg-violet-300/10",
-      content: message.content,
-      label: "Thinking",
-      labelClasses: "text-violet-200",
-    });
+function TranscriptMessage(props: {
+  readonly callArguments: Accessor<ReadonlyMap<string, string>>;
+  readonly message: AgentSessionMessage;
+}): JSX.Element {
+  if (props.message.role === "thinking") {
+    return (
+      <TranscriptNote
+        boundaryKey={`message:${props.message.id}`}
+        classes="border-violet-300/20 bg-violet-300/10"
+        content={props.message.content}
+        label="Thinking"
+        labelClasses="text-violet-200"
+      />
+    );
   }
 
-  if (message.role === "tool") {
+  if (props.message.role === "tool") {
     return (
       <li
         class="rounded-xl border border-white/10 bg-slate-950/80 p-4"
-        {...renderDebugBoundary(`message:${message.id}`, "Tool result")}
+        {...renderDebugBoundary(`message:${props.message.id}`, "Tool result")}
       >
         {renderToolHeader({
-          id: message.toolCallId,
+          id: props.message.toolCallId,
           kind: "Tool result",
-          name: message.toolName ?? "Unknown tool",
+          name: props.message.toolName ?? "Unknown tool",
         })}
         <div class="mt-3">
           {renderToolResult({
             arguments:
-              message.toolCallId === null
+              props.message.toolCallId === null
                 ? undefined
-                : callArguments.get(message.toolCallId),
-            content: message.content,
-            name: message.toolName ?? "Unknown tool",
+                : props.callArguments().get(props.message.toolCallId),
+            content: props.message.content,
+            name: props.message.toolName ?? "Unknown tool",
           })}
         </div>
       </li>
     );
   }
 
-  const user = message.role === "user";
-  const system = message.role === "system";
+  const user = props.message.role === "user";
+  const system = props.message.role === "system";
   return (
     <li
       class={`rounded-2xl border p-4 ${user ? "ml-8 border-emerald-300/20 bg-emerald-300/10" : system ? "border-rose-300/20 bg-rose-300/10" : "mr-8 border-white/10 bg-white/[0.04]"}`}
       {...renderDebugBoundary(
-        `message:${message.id}`,
+        `message:${props.message.id}`,
         `${user ? "User" : system ? "Session" : "Agent"} message`,
       )}
     >
       <p class="text-xs font-semibold tracking-wide text-slate-400 uppercase">
         {user ? "You" : system ? "Session" : "Agent"}
       </p>
-      {message.content.length > 0 ? (
+      {props.message.content.length > 0 ? (
         user ? (
           <p class="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-200">
-            {message.content}
+            {props.message.content}
           </p>
         ) : (
-          <div class="mt-2">{renderMarkdown(message.content)}</div>
+          <div class="mt-2">{renderMarkdown(props.message.content)}</div>
         )
       ) : null}
-      {message.images.length > 0 ? (
+      {props.message.images.length > 0 ? (
         <div class="mt-3">
-          <SessionImagePreviews images={message.images} />
+          <SessionImagePreviews images={props.message.images} />
         </div>
       ) : null}
-      {message.toolCalls.length > 0 ? (
+      {props.message.toolCalls.length > 0 ? (
         <ul class="mt-3 space-y-2">
-          {message.toolCalls.map((call) => (
+          {props.message.toolCalls.map((call) => (
             <li
               class="rounded-lg border border-cyan-300/20 bg-cyan-300/10 p-3"
               {...renderDebugBoundary(
@@ -166,20 +168,27 @@ function renderMessage(
   );
 }
 
-export function renderSessionTranscript(
-  messages: readonly AgentSessionMessage[],
-  agentFile: AgentFile | null,
-): JSX.Element {
-  const callArguments = toolCallArguments(messages);
-  return [
-    renderTranscriptNote({
-      boundaryKey: "system-prompt",
-      classes: "border-amber-300/20 bg-amber-300/10",
-      content: createAgentSystemPrompt(agentFile),
-      label: "System prompt",
-      labelClasses: "text-amber-200",
-    }),
-    renderToolDefinitions(),
-    ...messages.map((message) => renderMessage(message, callArguments)),
-  ];
+export function SessionTranscript(props: {
+  readonly agentFile: AgentFile | null;
+  readonly messages: readonly AgentSessionMessage[];
+}): JSX.Element {
+  const callArguments = (): ReadonlyMap<string, string> =>
+    toolCallArguments(props.messages);
+  return (
+    <>
+      <TranscriptNote
+        boundaryKey="system-prompt"
+        classes="border-amber-300/20 bg-amber-300/10"
+        content={createAgentSystemPrompt(props.agentFile)}
+        label="System prompt"
+        labelClasses="text-amber-200"
+      />
+      {renderToolDefinitions()}
+      <For each={props.messages}>
+        {(message) => (
+          <TranscriptMessage callArguments={callArguments} message={message} />
+        )}
+      </For>
+    </>
+  );
 }

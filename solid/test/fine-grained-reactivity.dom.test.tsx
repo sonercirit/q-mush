@@ -2,6 +2,7 @@ import { type JSX } from "solid-js";
 import { render } from "solid-js/web";
 import { afterEach, expect, test, vi } from "vitest";
 import type { AgentModelCatalog } from "../../shared/agent-configuration.ts";
+import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import {
   OPENAI_PANEL,
   ProviderPanel,
@@ -11,6 +12,7 @@ import {
 } from "../provider-client.tsx";
 import { ProviderController } from "../provider-controller.ts";
 import { createReactiveState } from "../reactive-state.ts";
+import { RenderDebugProvider, RenderDebugView } from "../render-debug.tsx";
 import {
   RunnerPanel,
   createRunnerViewState,
@@ -20,6 +22,7 @@ import { RunnerController } from "../runner-controller.ts";
 import { SessionPanel, type SessionViewState } from "../session-client.tsx";
 import { summaryFromDetail } from "../session-codec.ts";
 import { SessionController } from "../session-controller.ts";
+import { SessionDetail } from "../session-detail-client.tsx";
 import { initialSessionViewState } from "../session-state.ts";
 import { runnerSummary } from "./runner-fixtures.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
@@ -147,6 +150,132 @@ test("realtime runner changes update the list without remounting the panel", () 
     query(container, "[data-runner-id='runner-1']").closest("li"),
   ).not.toBe(runnerItem);
   expect(container.querySelector("[data-runner-panel='true']")).toBe(panel);
+});
+
+function transcriptMessage(
+  id: string,
+  content: string,
+  role: "assistant" | "user",
+  createdAt: number,
+): AgentSessionDetail["messages"][number] {
+  const message: AgentSessionDetail["messages"][number] = {
+    content,
+    createdAt,
+    id,
+    role,
+    toolName: null,
+    images: [],
+    toolCalls: [],
+    toolCallId: null,
+  };
+  return message;
+}
+
+function messageBoundary(container: ParentNode, id: string): Element {
+  return query(container, `[data-render-boundary='message:${id}']`);
+}
+
+function expectStableMessages(
+  container: ParentNode,
+  stableUser: Element,
+  stableAssistant: Element,
+): void {
+  expect(messageBoundary(container, "user-stable")).toBe(stableUser);
+  expect(messageBoundary(container, "assistant-stable")).toBe(stableAssistant);
+}
+
+function expectTranscriptBoundariesToRenderOnce(
+  debug: RenderDebugView,
+  messageIds: readonly string[],
+): void {
+  for (const key of ["system-prompt", "tool-definitions", ...messageIds]) {
+    expect(debug.measurement(key).count).toBe(1);
+  }
+}
+
+test("a streamed message update only renders that transcript message", () => {
+  const messages: AgentSessionDetail["messages"] = [
+    transcriptMessage("user-stable", "Keep this message stable", "user", 2),
+    transcriptMessage(
+      "assistant-stable",
+      "This one is also complete",
+      "assistant",
+      3,
+    ),
+  ];
+  const detail: AgentSessionDetail = {
+    ...TEST_SESSION_DETAIL,
+    messages,
+    status: "running",
+  };
+  const reactive = createReactiveState<SessionViewState>({
+    ...initialSessionViewState(),
+    detail,
+    selectedId: detail.id,
+    sessions: [summaryFromDetail(detail)],
+  });
+  const controller = new SessionController(reactive);
+  const debug = new RenderDebugView();
+  const container = mount(() => (
+    <RenderDebugProvider view={debug}>
+      <SessionDetail controller={controller} state={reactive.state()} />
+    </RenderDebugProvider>
+  ));
+  const stableUser = messageBoundary(container, "user-stable");
+  const stableAssistant = messageBoundary(container, "assistant-stable");
+
+  controller.applyDelta({
+    content: "Streaming",
+    sessionId: detail.id,
+    thinking: "",
+    type: "session_delta",
+  });
+  controller.applyDelta({
+    content: " response",
+    sessionId: detail.id,
+    thinking: "",
+    type: "session_delta",
+  });
+
+  expectStableMessages(container, stableUser, stableAssistant);
+  expectTranscriptBoundariesToRenderOnce(debug, [
+    "message:user-stable",
+    "message:assistant-stable",
+  ]);
+  expect(debug.measurement(`message:stream:${detail.id}:assistant`).count).toBe(
+    2,
+  );
+  const streamedMessage = query(
+    container,
+    `[data-render-boundary='message:stream:${detail.id}:assistant']`,
+  );
+
+  controller.applyDetail({
+    ...detail,
+    messages: [
+      ...messages.map((message) => ({ ...message })),
+      transcriptMessage(
+        "assistant-persisted",
+        "Streaming response",
+        "assistant",
+        4,
+      ),
+    ],
+    updatedAt: 4,
+  });
+
+  expectStableMessages(container, stableUser, stableAssistant);
+  expect(
+    container.querySelector(
+      `[data-render-boundary='message:stream:${detail.id}:assistant']`,
+    ),
+  ).not.toBe(streamedMessage);
+  expectTranscriptBoundariesToRenderOnce(debug, [
+    "message:user-stable",
+    "message:assistant-stable",
+    "message:assistant-persisted",
+  ]);
+  expect(container.textContent).toContain("Streaming response");
 });
 
 test("session resources, drafts, realtime lists, and selected details update in place", async () => {

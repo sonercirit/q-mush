@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { AgentSessionMessage } from "../../shared/session-model.ts";
-import { renderSessionTranscript } from "../../solid/session-transcript.tsx";
+import { SessionTranscript } from "../../solid/session-transcript.tsx";
 import { renderSolidToString } from "./render-solid.tsx";
 
 interface TranscriptTestMessageOptions {
@@ -59,7 +59,9 @@ function userMessage(content: string): AgentSessionMessage {
 }
 
 function renderMessages(messages: readonly AgentSessionMessage[]): string {
-  return renderSolidToString(() => renderSessionTranscript(messages, null));
+  return renderSolidToString(() => (
+    <SessionTranscript agentFile={null} messages={messages} />
+  ));
 }
 
 test("preserves consecutive user message line breaks", () => {

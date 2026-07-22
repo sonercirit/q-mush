@@ -12,6 +12,7 @@ import type { SessionViewState } from "./session-client.tsx";
 import { readSessionDetail, readSessionList } from "./session-codec.ts";
 import {
   replaceSessionSummary,
+  retainUnchangedSessionData,
   selectedSessionCredential,
   sessionDataMatches,
   SessionRealtimeState,
@@ -538,9 +539,16 @@ export class SessionController {
     detail: AgentSessionDetail,
     extra: Partial<SessionViewState>,
   ): Partial<SessionViewState> {
-    return {
+    const visibleDetail = retainUnchangedSessionData(
+      this.#view.value.detail,
       detail,
-      sessions: replaceSessionSummary(this.#view.value.sessions ?? [], detail),
+    );
+    return {
+      detail: visibleDetail,
+      sessions: replaceSessionSummary(
+        this.#view.value.sessions ?? [],
+        visibleDetail,
+      ),
       ...extra,
     };
   }

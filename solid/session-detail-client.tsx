@@ -1,6 +1,5 @@
 import {
   createEffect,
-  createMemo,
   createSignal,
   on,
   onMount,
@@ -22,7 +21,7 @@ import {
   sessionContextLabel,
 } from "./session-context-client.tsx";
 import type { SessionController } from "./session-controller.ts";
-import { renderSessionTranscript } from "./session-transcript.tsx";
+import { SessionTranscript } from "./session-transcript.tsx";
 
 const STATUS_PRESENTATION: Readonly<
   Record<
@@ -135,9 +134,6 @@ function LoadedSessionDetail(props: {
 }): JSX.Element {
   const active = (): boolean =>
     props.detail.status === "queued" || props.detail.status === "running";
-  const transcriptContent = createMemo(() =>
-    renderSessionTranscript(props.detail.messages, props.detail.agentFile),
-  );
   const [transcript, setTranscript] = createSignal<HTMLUListElement>();
   const scrollToEnd = (): void => {
     const element = transcript();
@@ -183,7 +179,10 @@ function LoadedSessionDetail(props: {
         class="mt-5 max-h-[36rem] space-y-3 overflow-y-auto pr-1"
         ref={setTranscript}
       >
-        {transcriptContent()}
+        <SessionTranscript
+          agentFile={props.detail.agentFile}
+          messages={props.detail.messages}
+        />
       </ul>
       <Show when={!active()}>
         <div class="mt-5 flex flex-col gap-3">
