@@ -1,4 +1,3 @@
-import { expect } from "vitest";
 import type { AgentImage } from "../../shared/agent-images.ts";
 import type { AgentModel } from "../../shared/agent-loop.ts";
 import {
@@ -12,6 +11,7 @@ import {
   RunnerCommandBroker,
   type RunnerToolCommand,
 } from "../../shared/runner-command-broker.ts";
+import type { RunnerSummary } from "../../shared/runner-model.ts";
 import type { AgentModelDiscoverer } from "../../sync-engine/agent-model-discovery.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
 import { createRunnerIntegration } from "../../sync-engine/runners.ts";
@@ -35,6 +35,14 @@ export function connectedSessionSetup(
   model: AgentModel,
   credentialSource: ProviderCredentialAccess["source"] = "api_key",
   discoverModels?: AgentModelDiscoverer,
+  options: {
+    readonly credentials?: Readonly<
+      Partial<
+        Record<"openai" | "openrouter", readonly ProviderCredentialAccess[]>
+      >
+    >;
+    readonly runners?: readonly RunnerSummary[];
+  } = {},
 ) {
   const database = createAuthenticatedTestDatabase();
   const authOptions = { database, now: () => TEST_NOW };
@@ -68,24 +76,35 @@ export function connectedSessionSetup(
     secret: "provider-secret",
     source: credentialSource,
   };
-  const reader = {
-    readCredential: (userId: string, credentialId: string) =>
-      userId === TEST_USER_ID && credentialId === CREDENTIAL_ID
-        ? credential
-        : undefined,
+  const configuredCredentials = {
+    openai: options.credentials?.openai ?? [credential],
+    openrouter: options.credentials?.openrouter ?? [],
   };
-  const ids = [
-    SESSION_ID,
-    "018bcfe5-6800-7000-8000-000000000064",
-    "018bcfe5-6800-7000-8000-000000000065",
-    "018bcfe5-6800-7000-8000-000000000066",
-    "018bcfe5-6800-7000-8000-000000000067",
-    "018bcfe5-6800-7000-8000-000000000068",
-    "018bcfe5-6800-7000-8000-000000000069",
-    "018bcfe5-6800-7000-8000-000000000070",
-    "018bcfe5-6800-7000-8000-000000000071",
-    "018bcfe5-6800-7000-8000-000000000072",
-  ];
+  const insertedCredentialIds = new Set([CREDENTIAL_ID]);
+  for (const provider of ["openai", "openrouter"] as const) {
+    for (const configured of configuredCredentials[provider]) {
+      if (!insertedCredentialIds.has(configured.id)) {
+        addTestProviderCredential(database, configured.id, provider, {
+          accountId: configured.accountId,
+          isDefault: configured.isDefault,
+          label: configured.label,
+          source: configured.source,
+        });
+        insertedCredentialIds.add(configured.id);
+      }
+    }
+  }
+  const reader = (provider: "openai" | "openrouter") => ({
+    readCredential: (userId: string, credentialId: string) =>
+      userId === TEST_USER_ID
+        ? configuredCredentials[provider].find(({ id }) => id === credentialId)
+        : undefined,
+  });
+  const ids = Array.from({ length: 100 }, (_, index) =>
+    index === 0
+      ? SESSION_ID
+      : `018bcfe5-6800-7000-8000-${String(index + 63).padStart(12, "0")}`,
+  );
   const selectedModels: string[] = [];
   const selectedPricing: (ProviderModelPricing | null)[] = [];
   const selectedReasoningEfforts: (string | null)[] = [];
@@ -101,10 +120,27 @@ export function connectedSessionSetup(
       return true;
     },
   });
+  const runnerIntegration: typeof runners = {
+    collection: (request) => runners.collection(request),
+    connect: (token, metadata) => runners.connect(token, metadata),
+    disconnected: (runner) => {
+      runners.disconnected(runner);
+    },
+    installer: (request) => runners.installer(request),
+    listForUser: (userId) => options.runners ?? runners.listForUser(userId),
+    remove: (request, runnerId) => runners.remove(request, runnerId),
+    runnerIsAvailable: (userId, runnerId) =>
+      runners.runnerIsAvailable(userId, runnerId),
+    runnerToken: (request) => runners.runnerToken(request),
+    seen: (runner) => {
+      runners.seen(runner);
+    },
+    setDefault: (request, runnerId) => runners.setDefault(request, runnerId),
+  };
   const sessions = createSessionIntegration(
     auth,
-    runners,
-    { openai: reader, openrouter: reader },
+    runnerIntegration,
+    { openai: reader("openai"), openrouter: reader("openrouter") },
     {
       braveSearch: {
         execute: () =>
@@ -113,15 +149,18 @@ export function connectedSessionSetup(
       broker,
       database,
       ...(discoverModels === undefined ? {} : { discoverModels }),
-      modelFactory: ({
-        credential: selectedCredential,
-        model: selectedModel,
-        providerPricing,
-        reasoningEffort,
-        systemPrompt,
-        tools,
-      }) => {
-        expect(selectedCredential.secret).toBe("provider-secret");
+      modelFactory: (factoryOptions) => {
+        const {
+          credential: selectedCredential,
+          model: selectedModel,
+          providerPricing,
+          reasoningEffort,
+          systemPrompt,
+          tools,
+        } = factoryOptions;
+        if (selectedCredential.secret !== "provider-secret") {
+          throw new Error("Unexpected test credential");
+        }
         selectedModels.push(selectedModel);
         selectedPricing.push(providerPricing);
         selectedReasoningEfforts.push(reasoningEffort);

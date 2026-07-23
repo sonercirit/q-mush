@@ -1,3 +1,4 @@
+const NUMBER_PARAMETER = { type: "number" } as const;
 const STRING_PARAMETER = { type: "string" } as const;
 const STRING_ARRAY_PARAMETER = {
   items: STRING_PARAMETER,
@@ -152,7 +153,6 @@ const SESSION_AGENT_TOOLS = [
       },
       provider: {
         description: "Model provider",
-        enum: ["openai", "openrouter"],
         type: "string",
       },
       reasoningEffort: {
@@ -191,9 +191,67 @@ const SESSION_AGENT_TOOLS = [
     required: [],
   }),
   toolDefinition({
-    description: "Read an owned agent session and its transcript by ID.",
+    description:
+      "Discover bounded, paginated options accepted by spawn_session. Model lookups require provider and credentialId. Results never contain credential secrets or runner tokens.",
+    name: "get_session_options",
+    properties: {
+      category: {
+        description: "Option category",
+        enum: [
+          "runners",
+          "credentials",
+          "models",
+          "reasoning_efforts",
+          "tools",
+        ],
+        type: "string",
+      },
+      credentialId: {
+        description: "Owned model credential ID; required only for models",
+        ...STRING_PARAMETER,
+      },
+      page: {
+        description: "1-indexed result page (defaults to 1)",
+        minimum: 1,
+        ...NUMBER_PARAMETER,
+      },
+      provider: {
+        description:
+          "Model provider; required only for models and must match credentialId",
+        ...STRING_PARAMETER,
+      },
+      search: {
+        description:
+          "Optional case-insensitive search applied before pagination",
+        ...STRING_PARAMETER,
+      },
+    },
+    required: ["category"],
+  }),
+  toolDefinition({
+    description:
+      "Read bounded sections of an owned session. Defaults to the last 20 user/assistant records. Tool history and reasoning are always excluded; tools returns effective definitions, not calls.",
     name: "read_session",
-    properties: SESSION_ID_PARAMETER,
+    properties: {
+      ...SESSION_ID_PARAMETER,
+      categories: {
+        description: "Nonempty selection of system, user, assistant, and tools",
+        items: {
+          enum: ["system", "user", "assistant", "tools"],
+          type: "string",
+        },
+        minItems: 1,
+        type: "array",
+        uniqueItems: true,
+      },
+      limit: {
+        description:
+          "Last matching user/assistant transcript records (defaults to 20, maximum 100)",
+        maximum: 100,
+        minimum: 1,
+        ...NUMBER_PARAMETER,
+      },
+    },
     required: ["sessionId"],
   }),
   toolDefinition({
@@ -318,6 +376,7 @@ const AGENT_TOOL_LABELS: Readonly<Record<AgentSessionToolName, string>> = {
   brave_search: "Brave Search",
   continue_session: "Continue session",
   edit: "Edit files",
+  get_session_options: "Get session options",
   list_sessions: "List sessions",
   parallel: "Parallel calls",
   read: "Read files",

@@ -10,8 +10,13 @@ import { defaultValues } from "./default-store.ts";
 import { createUuidV7, SYSTEM_ID, type IdGenerator } from "./ids.ts";
 
 export type ProviderCredentialSource = "api_key" | "oauth";
-export type ProviderId = "openai" | "openrouter";
+const PROVIDER_IDS = ["openai", "openrouter"] as const;
+export type ProviderId = (typeof PROVIDER_IDS)[number];
 export type CredentialProviderId = ProviderId | "brave_search";
+
+export function isProviderId(value: unknown): value is ProviderId {
+  return PROVIDER_IDS.some((provider) => provider === value);
+}
 
 export interface ProviderCredentialDetails {
   readonly accountId: string | null;
@@ -66,6 +71,10 @@ function ownedDefaultCondition(
 
 function encryptionContext(userId: string, credentialId: string): string {
   return `${userId}:${credentialId}`;
+}
+
+function credentialOrder() {
+  return [asc(providerCredentials.createdAt), asc(providerCredentials.id)];
 }
 
 function credentialSummarySelection() {
@@ -175,8 +184,35 @@ export class ProviderCredentialStore {
       .select(credentialSummarySelection())
       .from(providerCredentials)
       .where(activeCredentialCondition(this.#provider, userId))
-      .orderBy(asc(providerCredentials.createdAt), asc(providerCredentials.id))
+      .orderBy(...credentialOrder())
       .all();
+  }
+
+  static listModelCredentials(
+    database: AppDatabase,
+    userId: string,
+  ): readonly (ProviderCredentialSummary & {
+    readonly provider: ProviderId;
+  })[] {
+    return database
+      .select({
+        ...credentialSummarySelection(),
+        provider: providerCredentials.provider,
+      })
+      .from(providerCredentials)
+      .where(
+        and(
+          eq(providerCredentials.userId, userId),
+          eq(providerCredentials.isDeleted, false),
+        ),
+      )
+      .orderBy(...credentialOrder())
+      .all()
+      .flatMap((credential) =>
+        isProviderId(credential.provider)
+          ? [{ ...credential, provider: credential.provider }]
+          : [],
+      );
   }
 
   #readStored(userId: string, credentialId: string) {

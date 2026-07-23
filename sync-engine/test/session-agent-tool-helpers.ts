@@ -1,13 +1,14 @@
 import { isRecord } from "../../shared/auth-model.ts";
 
-export function findToolResultContent(
+export function findToolResultContents(
   value: unknown,
   name: string,
-): string | undefined {
+): readonly string[] {
   const messagesValue = isRecord(value) ? value["messages"] : null;
-  if (messagesValue === null || !Array.isArray(messagesValue)) {
-    return undefined;
+  if (!Array.isArray(messagesValue)) {
+    return [];
   }
+  const contents: string[] = [];
   const messages: readonly unknown[] = messagesValue;
   for (const message of messages) {
     if (
@@ -16,8 +17,15 @@ export function findToolResultContent(
       message["toolName"] === name &&
       typeof message["content"] === "string"
     ) {
-      return message["content"];
+      contents.push(message["content"]);
     }
   }
-  return undefined;
+  return contents;
+}
+
+export function findToolResultContent(
+  value: unknown,
+  name: string,
+): string | undefined {
+  return findToolResultContents(value, name)[0];
 }

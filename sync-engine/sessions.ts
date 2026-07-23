@@ -1,10 +1,7 @@
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
 import { createDatabase, type AppDatabase } from "../shared/database.ts";
 import { createUuidV7, type IdGenerator } from "../shared/ids.ts";
-import type {
-  ProviderCredentialAccess,
-  ProviderId,
-} from "../shared/provider-credential-store.ts";
+import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import {
   RunnerCommandBroker,
   type RunnerToolCommand,
@@ -40,6 +37,13 @@ import {
   updateSessionCompactionMode,
 } from "./session-compaction-actions.ts";
 import {
+  readSessionCredential,
+  withSessionCredential,
+  type SessionCredentialAction,
+  type SessionCredentialReaders,
+  type SessionCredentialSelection,
+} from "./session-credential-access.ts";
+import {
   readCreateSession,
   readPrompt,
   readProvider,
@@ -55,24 +59,6 @@ import {
 import { SessionRuntimes } from "./session-runtime.ts";
 import { SessionStore } from "./session-store.ts";
 
-interface SessionCredentialReader {
-  readCredential(
-    userId: string,
-    credentialId: string,
-  ):
-    | Promise<ProviderCredentialAccess | undefined>
-    | ProviderCredentialAccess
-    | undefined;
-}
-
-export type SessionCredentialReaders = Readonly<
-  Record<ProviderId, SessionCredentialReader>
->;
-
-type SessionAction = (
-  credential: ProviderCredentialAccess,
-) => Promise<Response> | Response;
-
 interface SessionDependencies {
   readonly broker?: RunnerCommandBroker;
   readonly braveSearch: Pick<BraveSearchSkill, "execute">;
@@ -84,12 +70,7 @@ interface SessionDependencies {
   readonly realtime?: RealtimeHub;
 }
 
-interface CredentialSelection {
-  readonly credentialId: string;
-  readonly provider: ProviderId;
-}
-
-interface RuntimeSelection extends CredentialSelection {
+interface RuntimeSelection extends SessionCredentialSelection {
   readonly runnerId: string;
 }
 
@@ -164,6 +145,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
           this.#realtime?.publishRunnerCommand(runnerId, command) === true,
       });
     this.#braveSearch = dependencies.braveSearch;
+    const database = dependencies.database ?? createDatabase(":memory:");
     this.#discoverModels = dependencies.discoverModels ?? discoverAgentModels;
     this.#modelFactory =
       dependencies.modelFactory ??
@@ -173,20 +155,22 @@ class DrizzleSessionIntegration implements SessionIntegration {
     this.#requests = new SessionRequestHelpers(auth, this.#broker, runners);
     this.#runners = runners;
     this.#store = new SessionStore(
-      dependencies.database ?? createDatabase(":memory:"),
+      database,
       dependencies.randomId ?? createUuidV7,
     );
-    this.#actions = this.#createActions();
+    this.#actions = this.#createActions(database);
     this.#actions.reportAll(this.#store.failInterrupted(this.#now()));
   }
 
-  #createActions(): SessionAgentActions {
+  #createActions(database: AppDatabase): SessionAgentActions {
     return new SessionAgentActions({
       activeSession: (sessionId) => this.#runtimes.active(sessionId),
       abortSession: (sessionId) => {
         this.#runtimes.abort(sessionId);
       },
       broker: this.#broker,
+      database,
+      discoverModels: this.#discoverModels,
       draining: () => this.#runtimes.draining,
       discoverSessionMetadata: async (input, credential) => {
         try {
@@ -205,8 +189,11 @@ class DrizzleSessionIntegration implements SessionIntegration {
       },
       launchSession: (credential, detail, userId) =>
         this.#launch(detail, credential, userId),
+      listRunners: (userId) => this.#runners.listForUser(userId),
       notify: this.#notify,
       now: this.#now,
+      readCredential: (userId, selection) =>
+        this.#readCredential(userId, selection),
       runnerIsAvailable: (userId, runnerId) =>
         this.#runners.runnerIsAvailable(userId, runnerId),
       store: this.#store,
@@ -345,31 +332,25 @@ class DrizzleSessionIntegration implements SessionIntegration {
       : action(session);
   }
 
-  async #withCredentialAccess(
+  async #readCredential(
     userId: string,
-    selection: CredentialSelection,
-    action: SessionAction,
+    selection: SessionCredentialSelection,
+  ): Promise<ProviderCredentialAccess | undefined> {
+    return readSessionCredential(this.#providers, userId, selection);
+  }
+
+  #withCredentialAccess(
+    userId: string,
+    selection: SessionCredentialSelection,
+    action: SessionCredentialAction,
   ): Promise<Response> {
-    let credential: ProviderCredentialAccess | undefined;
-
-    try {
-      credential = await this.#providers[selection.provider].readCredential(
-        userId,
-        selection.credentialId,
-      );
-    } catch {
-      return createApiError("credential_refresh_failed", 502);
-    }
-
-    return credential === undefined
-      ? createApiError("credential_unavailable", 409)
-      : action(credential);
+    return withSessionCredential(this.#providers, userId, selection, action);
   }
 
   async #withRuntimeAccess(
     userId: string,
     selection: RuntimeSelection,
-    action: SessionAction,
+    action: SessionCredentialAction,
   ): Promise<Response> {
     if (!this.#runners.runnerIsAvailable(userId, selection.runnerId)) {
       return createApiError("runner_unavailable", 409);

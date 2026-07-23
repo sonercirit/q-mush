@@ -63,6 +63,12 @@ export function addTestProviderCredential(
   database: AppDatabase,
   id: string,
   provider: "openai" | "openrouter" = "openai",
+  metadata: {
+    readonly accountId?: string | null;
+    readonly isDefault?: boolean;
+    readonly label?: string;
+    readonly source?: "api_key" | "oauth";
+  } = {},
 ): void {
   database
     .insert(providerCredentials)
@@ -71,9 +77,11 @@ export function addTestProviderCredential(
       credentialFingerprint: `fingerprint-${id}`,
       encryptedCredential: "test-encrypted-credential",
       id,
-      label: "Test credential",
+      isDefault: metadata.isDefault ?? false,
+      label: metadata.label ?? "Test credential",
       provider,
-      source: "api_key",
+      providerAccountId: metadata.accountId ?? null,
+      source: metadata.source ?? "api_key",
       userId: TEST_USER_ID,
     })
     .run();

@@ -45,6 +45,7 @@ test("defines the session tools as one selectable group", () => {
   expect(SESSION_AGENT_TOOL_NAMES).toEqual([
     "spawn_session",
     "list_sessions",
+    "get_session_options",
     "read_session",
     "send_to_session",
     "continue_session",
