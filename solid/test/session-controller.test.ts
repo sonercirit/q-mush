@@ -1,18 +1,30 @@
 import { createRoot } from "solid-js";
-import { expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { SESSIONS_PATH } from "../../shared/routes.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
+import { createReactiveState } from "../../solid/reactive-state.ts";
+import type { SessionViewState } from "../../solid/session-client.tsx";
 import { summaryFromDetail } from "../../solid/session-codec.ts";
 import { SessionController } from "../../solid/session-controller.ts";
+import { initialSessionViewState } from "../../solid/session-state.ts";
+import {
+  DEFAULT_SESSION_TRANSCRIPT_FILTERS,
+  writeSessionTranscriptFilters,
+} from "../../solid/session-transcript-filters.ts";
 import {
   expectRealtimeToRemainSilent,
   requestUrl,
 } from "./controller-test-helpers.ts";
+import { MemoryStorage } from "./memory-storage.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 import {
   sessionDetailWithStatus,
   transcriptMessage,
 } from "./transcript-ordering-fixtures.ts";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function assistantMessage(id = "assistant-1", content = "Response") {
   return transcriptMessage(id, content, "assistant", 2);
@@ -378,6 +390,48 @@ test("replaces a streaming transcript with a compacted snapshot", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("loads persisted transcript filters into the controller and keeps them on reset", () => {
+  const storage = new MemoryStorage();
+  writeSessionTranscriptFilters(storage, {
+    ...DEFAULT_SESSION_TRANSCRIPT_FILTERS,
+    toolDefinitions: false,
+  });
+  const controller = new SessionController(
+    createReactiveState(initialSessionViewState()),
+    undefined,
+    storage,
+  );
+
+  expect(controller.state.transcriptFilters.toolDefinitions).toBe(false);
+  controller.reset();
+  expect(controller.state.transcriptFilters.toolDefinitions).toBe(false);
+});
+
+test.each(["send", "continueSession", "stop"] as const)(
+  "guards invalid or duplicate %s mutations in the controller",
+  async (action) => {
+    const active = action === "stop";
+    const detail = {
+      ...TEST_SESSION_DETAIL,
+      status: active ? ("idle" as const) : ("running" as const),
+    };
+    const reactive = createReactiveState<SessionViewState>({
+      ...initialSessionViewState(),
+      detail,
+      followUp: "Do not submit",
+      selectedId: detail.id,
+      sending: action === "stop",
+    });
+    const controller = new SessionController(reactive);
+    const fetch = vi.spyOn(globalThis, "fetch");
+
+    await controller[action]();
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(controller.state.followUp).toBe("Do not submit");
+  },
+);
 
 test("an unchanged session refresh does not notify the view", async () => {
   await expectRealtimeToRemainSilent(
