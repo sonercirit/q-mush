@@ -36,6 +36,8 @@ import { formatTokenCount } from "./session-context-client.tsx";
 import type { SessionController } from "./session-controller.ts";
 import { SessionDetail, SessionList } from "./session-detail-client.tsx";
 import { SessionToolPicker } from "./session-tool-picker.tsx";
+import { ShortcutHint, shortcutKeys } from "./shortcut-client.tsx";
+import { SHORTCUT_ACTIONS } from "./shortcut-registry.ts";
 
 export interface SessionDraft {
   readonly credential: string;
@@ -134,6 +136,13 @@ function renderSessionField(
       {control}
     </div>
   );
+}
+
+function sessionHasInput(
+  prompt: string,
+  images: readonly AgentImage[],
+): boolean {
+  return prompt.trim().length > 0 || images.length > 0;
 }
 
 interface SessionControlOptions {
@@ -322,14 +331,22 @@ function NewSessionForm(props: {
   const resourcesAvailable = createMemo(
     () => runners().length > 0 && credentials().length > 0,
   );
-  const available = createMemo(
+  const validConfiguration = createMemo(
     () =>
       resourcesAvailable() &&
       selectedRunnerId().length > 0 &&
       credential() !== undefined &&
       models().length > 0,
   );
+  const available = createMemo(
+    () =>
+      validConfiguration() &&
+      sessionHasInput(props.state.draft.prompt, props.state.draft.images),
+  );
 
+  const setPrompt = (value: string): void => {
+    props.controller.setDraftField("prompt", value);
+  };
   const optionValues = (
     options: readonly CustomSelectOption[],
   ): readonly string[] => options.map(({ value }) => value);
@@ -463,14 +480,13 @@ function NewSessionForm(props: {
         tools={props.state.draft.tools}
       />
       <SessionPromptInput
+        available={validConfiguration()}
         disabled={props.state.creating}
         images={props.state.draft.images}
         onAddImages={(files) => {
-          void props.controller.addImages(files, false);
+          props.controller.addImages(files, false).catch(() => undefined);
         }}
-        onInput={(value) => {
-          props.controller.setDraftField("prompt", value);
-        }}
+        onInput={setPrompt}
         onRemoveImage={(index) => {
           props.controller.removeImage(index, "draft");
         }}
@@ -482,11 +498,13 @@ function NewSessionForm(props: {
           selected runner.
         </p>
         <button
+          aria-keyshortcuts={shortcutKeys(SHORTCUT_ACTIONS.startSession)}
           class="shrink-0 rounded-xl bg-emerald-300 px-5 py-3 font-semibold text-slate-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-50"
           disabled={props.state.creating || !available()}
           type="submit"
         >
           {props.state.creating ? "Starting…" : "Start session"}
+          <ShortcutHint action={SHORTCUT_ACTIONS.startSession} />
         </button>
       </div>
       <Show when={!resourcesAvailable()}>

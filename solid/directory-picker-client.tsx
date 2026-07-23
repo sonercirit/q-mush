@@ -10,6 +10,8 @@ import {
 import { MAXIMUM_RUNNER_DIRECTORY_ENTRIES } from "../shared/runner-directory-model.ts";
 import type { DirectoryPickerController } from "./directory-picker-controller.ts";
 import { renderDebugBoundary } from "./render-debug.tsx";
+import { registerShortcut, shortcutKeys } from "./shortcut-client.tsx";
+import { SHORTCUT_ACTIONS } from "./shortcut-registry.ts";
 
 export function DirectoryPicker(props: {
   readonly controller: DirectoryPickerController;
@@ -24,6 +26,11 @@ export function DirectoryPicker(props: {
     props.controller.close();
   };
   const [dialog, setDialog] = createSignal<HTMLDivElement>();
+  registerShortcut(
+    SHORTCUT_ACTIONS.closeDirectoryPicker,
+    () => state().open,
+    close,
+  );
 
   onMount(() => {
     createEffect(
@@ -45,12 +52,6 @@ export function DirectoryPicker(props: {
         aria-modal="true"
         class="fixed inset-0 z-50 grid place-items-center bg-slate-950/80 p-4 backdrop-blur-sm"
         data-directory-picker="true"
-        onKeyDown={(event) => {
-          if (event.key === "Escape") {
-            event.preventDefault();
-            props.controller.close();
-          }
-        }}
         ref={setDialog}
         role="dialog"
         tabindex="-1"
@@ -72,6 +73,9 @@ export function DirectoryPicker(props: {
               </h3>
             </div>
             <button
+              aria-keyshortcuts={shortcutKeys(
+                SHORTCUT_ACTIONS.closeDirectoryPicker,
+              )}
               aria-label="Close directory picker"
               class="grid size-9 shrink-0 place-items-center rounded-full border border-white/10 text-slate-400 transition hover:border-white/20 hover:text-white"
               onClick={close}

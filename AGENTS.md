@@ -168,6 +168,9 @@ Living project memory. Update it with durable information.
   `provider_credentials`; failures fall through keys in creation order, and
   secrets never reach the browser, runner, or model provider. Its UI reuses the
   shared credential panel and controller.
+- `solid/shortcut-registry.ts` owns shortcut actions, matching, conflicts, and
+  labels; `solid/shortcut-client.tsx` owns registration, hints, and `?` help.
+  Composer shortcuts use it; reserved `Shift`+`Enter` does not fire.
 - The UI uses SolidJS and Vite. `solid/client.tsx` is the browser entry,
   `solid/pages.tsx` owns server-rendered shells, and `solid/styles.css` is
   Tailwind's source. Vitest uses an SSR Solid transform for string-rendering
@@ -194,16 +197,10 @@ Living project memory. Update it with durable information.
   `knip.production.config.ts` limits the production graph to runtime source.
   `bun run knip` runs both production and comprehensive test/tooling passes, so
   tests cannot keep production code alive while unused test helpers still fail.
-- `.jscpd.json` maps all supported JavaScript and TypeScript extensions to the
-  TSX format for cross-extension detection; import declarations are ignored,
-  while other clones of at least 20 tokens and one line fail the zero-percent
-  threshold.
-- `scripts/repository-check.ts` lists existing tracked and unignored files and
-  calls the focused policy APIs under `scripts/`. It rejects files reaching
-  20,000 Unicode code points (excluding `bun.lock` and the generated `drizzle/`
-  migration tree), JavaScript/TypeScript test files outside a directory named
-  `test`, and `.htm`/`.html`/`.xhtml` application files outside directories
-  named `test` or `fixtures`.
+- `.jscpd.json` maps JS/TS to TSX, ignores imports/tests, and rejects production
+  clones of 20+ tokens.
+- `scripts/repository-check.ts` rejects files reaching 20,000 Unicode code
+  points, misplaced tests, and misplaced HTML application files.
 - Prettier wraps Markdown prose at its print width and uses
   `prettier-plugin-organize-imports` to sort, combine, and remove unused
   imports; generated/dependency output ignores come from `.gitignore`, while

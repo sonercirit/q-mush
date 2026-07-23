@@ -259,6 +259,10 @@ function isAtScrollEnd(element: HTMLElement): boolean {
   );
 }
 
+function hasFollowUpInput(state: SessionViewState): boolean {
+  return state.followUp.trim().length > 0 || state.followUpImages.length > 0;
+}
+
 function LoadedSessionDetail(props: {
   readonly controller: SessionController;
   readonly detail: AgentSessionDetail;
@@ -360,18 +364,13 @@ function LoadedSessionDetail(props: {
           />
           <div class="flex gap-3">
             <SessionFollowUp
+              available={hasFollowUpInput(props.state) && !props.state.sending}
               images={props.state.followUpImages}
               onAddImages={(files) => {
                 void props.controller.addImages(files, true);
               }}
               onInput={(value) => {
                 props.controller.setFollowUp(value);
-              }}
-              onKeyDown={(event) => {
-                if (event.ctrlKey && event.key === "Enter") {
-                  event.preventDefault();
-                  event.currentTarget.form?.requestSubmit();
-                }
               }}
               onRemoveImage={(index) => {
                 props.controller.removeImage(index, "followUp");

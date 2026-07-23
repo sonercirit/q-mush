@@ -39,6 +39,7 @@ import { RunnerPanel } from "./runner-client.tsx";
 import { RunnerController } from "./runner-controller.ts";
 import { SessionPanel } from "./session-client.tsx";
 import { SessionController } from "./session-controller.ts";
+import { ShortcutProvider } from "./shortcut-client.tsx";
 import "./styles.css";
 
 function readAuthenticatedUser(value: unknown): AuthenticatedUser | null {
@@ -431,92 +432,94 @@ function App(): JSX.Element {
 
   return (
     <RenderDebugProvider view={debug}>
-      <section
-        aria-labelledby="app-title"
-        class="relative min-h-screen overflow-hidden bg-slate-950 px-6 py-8 text-slate-100 sm:px-10 lg:px-12"
-        {...renderDebugBoundary("app", "App")}
-      >
-        <div
-          aria-hidden="true"
-          class="absolute -right-40 -top-40 size-96 rounded-full bg-cyan-500/15 blur-3xl"
-        />
-        <div
-          aria-hidden="true"
-          class="absolute -bottom-48 left-1/4 size-96 rounded-full bg-emerald-500/15 blur-3xl"
-        />
-        <div class="relative mx-auto max-w-6xl">
-          <Header debug={debug} user={session()?.user} />
-          <main class="py-12 sm:py-16">
-            <p class="text-sm font-semibold tracking-[0.2em] text-emerald-300 uppercase">
-              Local control center
-            </p>
-            <h1
-              class="mt-4 text-4xl font-semibold tracking-tight text-white sm:text-6xl"
-              id="app-title"
-            >
-              Q Mush App
-            </h1>
-            <p class="mt-5 max-w-2xl text-lg leading-8 text-slate-400">
-              Coordinate your local swarm from one authenticated workspace.
-            </p>
-            <For each={notices}>
-              {(notice) => (
-                <p
-                  class="mt-8 rounded-2xl border border-amber-300/20 bg-amber-300/10 p-4 text-sm text-amber-100"
-                  role="alert"
-                >
-                  {notice}
-                </p>
-              )}
-            </For>
-            <Show
-              fallback={<LoadingCard />}
-              when={loadFailed() || session() !== undefined}
-            >
-              <Show
-                fallback={<SessionError onRetry={() => void loadSession()} />}
-                when={!loadFailed()}
+      <ShortcutProvider>
+        <section
+          aria-labelledby="app-title"
+          class="relative min-h-screen overflow-hidden bg-slate-950 px-6 py-8 text-slate-100 sm:px-10 lg:px-12"
+          {...renderDebugBoundary("app", "App")}
+        >
+          <div
+            aria-hidden="true"
+            class="absolute -right-40 -top-40 size-96 rounded-full bg-cyan-500/15 blur-3xl"
+          />
+          <div
+            aria-hidden="true"
+            class="absolute -bottom-48 left-1/4 size-96 rounded-full bg-emerald-500/15 blur-3xl"
+          />
+          <div class="relative mx-auto max-w-6xl">
+            <Header debug={debug} user={session()?.user} />
+            <main class="py-12 sm:py-16">
+              <p class="text-sm font-semibold tracking-[0.2em] text-emerald-300 uppercase">
+                Local control center
+              </p>
+              <h1
+                class="mt-4 text-4xl font-semibold tracking-tight text-white sm:text-6xl"
+                id="app-title"
               >
-                <Show when={session()}>
-                  {(authenticated) => (
-                    <Show
-                      fallback={
-                        <SignIn
-                          googleLoginAvailable={
-                            authenticated().googleLoginAvailable
-                          }
-                        />
-                      }
-                      when={authenticated().user}
-                    >
-                      {(user) => (
-                        <Workspace
-                          agentSessions={agentSessions}
-                          braveSearch={braveSearch}
-                          logout={logout}
-                          logoutPending={logoutPending()}
-                          openAi={openAi}
-                          openRouter={openRouter}
-                          runners={runners}
-                          user={user()}
-                        />
-                      )}
-                    </Show>
-                  )}
+                Q Mush App
+              </h1>
+              <p class="mt-5 max-w-2xl text-lg leading-8 text-slate-400">
+                Coordinate your local swarm from one authenticated workspace.
+              </p>
+              <For each={notices}>
+                {(notice) => (
+                  <p
+                    class="mt-8 rounded-2xl border border-amber-300/20 bg-amber-300/10 p-4 text-sm text-amber-100"
+                    role="alert"
+                  >
+                    {notice}
+                  </p>
+                )}
+              </For>
+              <Show
+                fallback={<LoadingCard />}
+                when={loadFailed() || session() !== undefined}
+              >
+                <Show
+                  fallback={<SessionError onRetry={() => void loadSession()} />}
+                  when={!loadFailed()}
+                >
+                  <Show when={session()}>
+                    {(authenticated) => (
+                      <Show
+                        fallback={
+                          <SignIn
+                            googleLoginAvailable={
+                              authenticated().googleLoginAvailable
+                            }
+                          />
+                        }
+                        when={authenticated().user}
+                      >
+                        {(user) => (
+                          <Workspace
+                            agentSessions={agentSessions}
+                            braveSearch={braveSearch}
+                            logout={logout}
+                            logoutPending={logoutPending()}
+                            openAi={openAi}
+                            openRouter={openRouter}
+                            runners={runners}
+                            user={user()}
+                          />
+                        )}
+                      </Show>
+                    )}
+                  </Show>
                 </Show>
               </Show>
-            </Show>
-            <a
-              class="mt-10 inline-flex items-center gap-2 text-sm font-medium text-slate-400 transition hover:text-emerald-200 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
-              href={HOME_PATH}
-            >
-              <span aria-hidden="true">←</span>
-              Back to the homepage
-            </a>
-          </main>
-        </div>
-        <RenderDebugLegend view={debug} />
-      </section>
+              <a
+                class="mt-10 inline-flex items-center gap-2 text-sm font-medium text-slate-400 transition hover:text-emerald-200 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
+                href={HOME_PATH}
+              >
+                <span aria-hidden="true">←</span>
+                Back to the homepage
+              </a>
+            </main>
+          </div>
+          <RenderDebugLegend view={debug} />
+        </section>
+      </ShortcutProvider>
     </RenderDebugProvider>
   );
 }
