@@ -5,6 +5,7 @@ import {
   SESSION_AGENT_TOOL_NAMES,
   selectedAgentTools,
 } from "../../shared/agent-tools.ts";
+import { isRecord } from "../../shared/auth-model.ts";
 
 function expectParallelRecipients(
   tools: ReturnType<typeof selectedAgentTools>,
@@ -57,8 +58,45 @@ test("defines the session tools as one selectable group", () => {
   expect(
     AGENT_SESSION_TOOL_OPTIONS.filter(({ name }) =>
       SESSION_AGENT_TOOL_NAMES.includes(name),
-    ).every(({ kind }) => kind === "tool"),
+    ).every(({ classification }) => classification === "session_tool"),
   ).toBe(true);
+});
+
+test("defines two or more parallel calls without an arbitrary count maximum", () => {
+  const serialized: unknown = JSON.parse(JSON.stringify(AGENT_TOOLS));
+  expect(Array.isArray(serialized)).toBe(true);
+  const parallel = AGENT_TOOLS.find(
+    ({ function: definition }) => definition.name === "parallel",
+  );
+  const properties: unknown = parallel?.function.parameters.properties;
+  const toolUses = isRecord(properties) ? properties["tool_uses"] : undefined;
+
+  expect(toolUses).toMatchObject({ minItems: 2, type: "array" });
+  expect(isRecord(toolUses) ? toolUses["maxItems"] : "missing schema").toBe(
+    undefined,
+  );
+  expect(JSON.stringify(parallel)).not.toContain('"maxItems"');
+});
+
+test("derives picker metadata and classifications from every tool definition", () => {
+  expect(
+    AGENT_SESSION_TOOL_OPTIONS.map(({ classification, definition, name }) => ({
+      classification,
+      definitionName: definition.name,
+      name,
+    })),
+  ).toEqual(
+    AGENT_TOOLS.map(({ function: definition }) => ({
+      classification:
+        definition.name === "brave_search"
+          ? "skill"
+          : SESSION_AGENT_TOOL_NAMES.includes(definition.name)
+            ? "session_tool"
+            : "runner_tool",
+      definitionName: definition.name,
+      name: definition.name,
+    })),
+  );
 });
 
 test("limits parallel calls to enabled tools and skills", () => {

@@ -226,11 +226,12 @@ const SESSION_AGENT_TOOLS = [
 
 const PARALLEL_TOOL = toolDefinition({
   description:
-    "Run multiple independent tool or skill calls concurrently. Do not use this when one call depends on another call's result.",
+    "Run multiple independent tool or skill calls with bounded concurrency. The number of accepted calls has no application-defined maximum, but only a small worker pool runs simultaneously. Do not use this when one call depends on another call's result.",
   name: "parallel",
   properties: {
     tool_uses: {
-      description: "Independent tool or skill calls to run concurrently",
+      description:
+        "Independent tool or skill calls to run with bounded concurrency; all accepted calls run and results preserve input order",
       items: {
         additionalProperties: false,
         properties: {
@@ -252,7 +253,6 @@ const PARALLEL_TOOL = toolDefinition({
         required: ["recipient_name", "parameters"],
         type: "object",
       },
-      maxItems: 8,
       minItems: 2,
       type: "array",
     },
@@ -328,17 +328,31 @@ const AGENT_TOOL_LABELS: Readonly<Record<AgentSessionToolName, string>> = {
   write: "Write files",
 };
 
+type AgentToolClassification = "runner_tool" | "session_tool" | "skill";
+
 export interface AgentSessionToolOption {
+  readonly classification: AgentToolClassification;
+  readonly definition: AgentToolDefinition["function"];
   readonly description: string;
-  readonly kind: "skill" | "tool";
   readonly label: string;
   readonly name: AgentSessionToolName;
 }
 
+function agentToolClassification(
+  name: AgentSessionToolName,
+): AgentToolClassification {
+  return name === BRAVE_SEARCH_TOOL_NAME
+    ? "skill"
+    : SESSION_AGENT_TOOL_NAMES.some((sessionName) => sessionName === name)
+      ? "session_tool"
+      : "runner_tool";
+}
+
 export const AGENT_SESSION_TOOL_OPTIONS: readonly AgentSessionToolOption[] =
   AGENT_TOOLS.map(({ function: definition }) => ({
+    classification: agentToolClassification(definition.name),
+    definition,
     description: definition.description,
-    kind: definition.name === BRAVE_SEARCH_TOOL_NAME ? "skill" : "tool",
     label: AGENT_TOOL_LABELS[definition.name],
     name: definition.name,
   }));
