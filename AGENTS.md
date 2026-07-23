@@ -285,11 +285,11 @@ Living project memory. Update it with durable information.
   OpenAI Responses WebSockets retry interruptions after deltas, which remain
   UI-only until persistence. Retries reset the browser stream; exhausted
   attempts use HTTP. Failures persist as non-replayed `error` messages.
-- Agent launches and brokered runner commands have no application-owned turn,
-  queue, or elapsed-time limits. Every shell command must choose a positive
-  timeout; no default or configured maximum is supplied. Outside explicit or
-  95%-threshold compaction, provider requests replay the full active
-  conversation and have no application-level timeout.
+- Shell commands require a positive timeout. On macOS/Linux each has a POSIX
+  session; stop/timeout signals only its group, including descendants retaining
+  pipes. Agent launches and runner commands otherwise have no application-owned
+  turn, queue, or elapsed-time limits. Outside explicit or 95%-threshold
+  compaction, providers replay the full conversation without a timeout.
 - Add each new runtime source root and executable entry to
   `knip.production.config.ts`. Add standalone non-TypeScript build entries, such
   as `solid/styles.css`, to both Knip configs; keep test files and test-support
