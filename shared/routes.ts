@@ -18,6 +18,10 @@ const OPENROUTER_BASE_PATH = `${API_BASE_PATH}/openrouter`;
 export const OPENROUTER_CREDENTIALS_PATH = `${OPENROUTER_BASE_PATH}/credentials`;
 export const OPENROUTER_OAUTH_PATH = `${OPENROUTER_BASE_PATH}/oauth`;
 export const OPENROUTER_OAUTH_CALLBACK_PATH = `${OPENROUTER_OAUTH_PATH}/callback`;
+export const PROMPTS_PATH = `${API_BASE_PATH}/prompts`;
+export function promptPath(promptId: string): string {
+  return `${PROMPTS_PATH}/${encodeURIComponent(promptId)}`;
+}
 export function providerCredentialDefaultPath(
   credentialsPath: string,
   credentialId: string,

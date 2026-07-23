@@ -34,3 +34,11 @@ export function takeValue<T>(values: T[], errorMessage: string): T {
 
   return value;
 }
+
+export function createValueSequence<T>(
+  values: readonly T[],
+  errorMessage: string,
+): () => T {
+  const remaining = [...values];
+  return () => takeValue(remaining, errorMessage);
+}

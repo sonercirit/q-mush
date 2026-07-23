@@ -18,6 +18,24 @@ export function requestUrl(input: RequestInfo | URL): string {
       : input.url;
 }
 
+interface InstalledTestFetch {
+  restore(): void;
+}
+
+export function installTestFetch(
+  implementation: FetchImplementation,
+): InstalledTestFetch {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = Object.assign(implementation, {
+    preconnect: originalFetch.preconnect,
+  });
+  return {
+    restore: () => {
+      globalThis.fetch = originalFetch;
+    },
+  };
+}
+
 export async function expectRealtimeToRemainSilent<Value>(
   createController: () => RealtimeController<Value> & {
     readonly view: () => unknown;
@@ -25,11 +43,7 @@ export async function expectRealtimeToRemainSilent<Value>(
   fetchImplementation: FetchImplementation,
   realtimeValue: Value,
 ): Promise<void> {
-  const originalFetch = globalThis.fetch;
-
-  globalThis.fetch = Object.assign(fetchImplementation, {
-    preconnect: originalFetch.preconnect,
-  });
+  const restoreFetch = installTestFetch(fetchImplementation);
 
   try {
     await createRoot(async (dispose) => {
@@ -48,6 +62,6 @@ export async function expectRealtimeToRemainSilent<Value>(
       dispose();
     });
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreFetch.restore();
   }
 }

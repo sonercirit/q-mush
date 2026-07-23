@@ -21,6 +21,7 @@ import type {
   AgentSessionStatus,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
+import { readFiniteNumber } from "./codec.ts";
 
 function readModelReasoningEfforts(
   value: unknown,
@@ -142,12 +143,6 @@ function readProvider(value: unknown): ProviderId | undefined {
     default:
       return undefined;
   }
-}
-
-function readFiniteNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value)
-    ? value
-    : undefined;
 }
 
 function readSummary(value: unknown): AgentSessionSummary {

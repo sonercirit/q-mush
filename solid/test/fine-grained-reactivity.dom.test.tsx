@@ -3,6 +3,9 @@ import { render } from "solid-js/web";
 import { afterEach, expect, test, vi } from "vitest";
 import type { AgentModelCatalog } from "../../shared/agent-configuration.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
+import { PromptBank } from "../prompt-client.tsx";
+import { PromptController } from "../prompt-controller.ts";
+import { createPromptViewState } from "../prompt-state.ts";
 import {
   OPENAI_PANEL,
   ProviderPanel,
@@ -24,6 +27,7 @@ import { summaryFromDetail } from "../session-codec.ts";
 import { SessionController } from "../session-controller.ts";
 import { SessionDetail, SessionList } from "../session-detail-client.tsx";
 import { initialSessionViewState } from "../session-state.ts";
+import { TEST_PROMPT } from "./prompt-fixtures.ts";
 import { runnerSummary } from "./runner-fixtures.ts";
 import { sessionDetailState } from "./session-detail-test-state.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
@@ -452,6 +456,52 @@ test("paginates the session list ten sessions at a time", () => {
 
   expect(sessionButtons()).toHaveLength(10);
   expect(container.textContent).toContain("Page 1 of 2");
+});
+
+test("inserts a saved prompt as an independently editable session draft", () => {
+  const sessionController = new SessionController();
+  const promptState = createReactiveState(createPromptViewState([TEST_PROMPT]));
+  const promptController = new PromptController(promptState);
+  const container = mount(() => (
+    <>
+      <SessionPanel
+        controller={sessionController}
+        openAi={() => createProviderViewState([])}
+        openRouter={() => createProviderViewState([])}
+        runners={() => createRunnerViewState([])}
+      />
+      <PromptBank
+        controller={promptController}
+        onInsert={(body) => {
+          sessionController.insertPrompt(body);
+        }}
+      />
+    </>
+  ));
+  const task = query(container, "#session-prompt");
+  if (!(task instanceof HTMLTextAreaElement)) {
+    throw new TypeError("The session task is not a textarea");
+  }
+
+  click(container, `[data-prompt-id='${TEST_PROMPT.id}'] > button`);
+  const insert = [...container.querySelectorAll("button")].find(
+    ({ textContent }) => textContent.trim() === "Insert into task",
+  );
+  if (insert === undefined) {
+    throw new Error("The prompt insert control was not rendered");
+  }
+  insert.click();
+  expect(task.value).toBe(TEST_PROMPT.body);
+
+  task.value = "Freely edited copied prompt";
+  task.dispatchEvent(new InputEvent("input", { bubbles: true }));
+  promptController.beginEdit(TEST_PROMPT.id);
+  promptController.setEditField("body", "Changed bank prompt");
+
+  expect(sessionController.state.draft.prompt).toBe(
+    "Freely edited copied prompt",
+  );
+  expect(task.value).toBe("Freely edited copied prompt");
 });
 
 test("session resources, drafts, realtime lists, and selected details update in place", async () => {

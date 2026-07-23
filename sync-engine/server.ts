@@ -16,6 +16,7 @@ import {
   OPENROUTER_CREDENTIALS_PATH,
   OPENROUTER_OAUTH_CALLBACK_PATH,
   OPENROUTER_OAUTH_PATH,
+  PROMPTS_PATH,
   RUNNER_DIRECTORIES_SEGMENT,
   RUNNER_EXECUTABLE_PATH,
   RUNNER_INSTALLER_PATH,
@@ -33,6 +34,7 @@ import {
 import type { OpenAiIntegration } from "./openai.ts";
 import type { OpenRouterIntegration } from "./openrouter.ts";
 import type { RenderedPages } from "./pages.ts";
+import type { PromptIntegration } from "./prompts.ts";
 import type { ProviderIntegration } from "./provider-integration.ts";
 import type { RunnerExecutableProvider } from "./runner-executable.ts";
 import type { RunnerIntegration } from "./runners.ts";
@@ -236,6 +238,7 @@ export function createRequestHandler(
   braveSearch: BraveSearchSkill,
   runners: RunnerIntegration,
   sessions: SessionIntegration,
+  prompts: PromptIntegration,
   runnerExecutables: RunnerExecutableProvider,
 ): (request: Request) => Promise<Response> {
   const appPage = prepareBody(pages.app);
@@ -289,6 +292,21 @@ export function createRequestHandler(
 
       if (pathname === SESSIONS_PATH) {
         return sessions.collection(request);
+      }
+
+      if (pathname === PROMPTS_PATH) {
+        return prompts.collection(request);
+      }
+
+      const promptResponse = routeItemSegments(
+        pathSegments(pathname, `${PROMPTS_PATH}/`),
+        {
+          item: (promptId) => prompts.item(request, promptId),
+        },
+      );
+
+      if (promptResponse !== undefined) {
+        return promptResponse;
       }
 
       if (pathname === BRAVE_SEARCH_KEYS_PATH) {

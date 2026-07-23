@@ -4,7 +4,7 @@ import {
   readRunnerDirectoryListing,
   type RunnerDirectoryListing,
 } from "../shared/runner-directory-model.ts";
-import { HttpResponseError, requestJson } from "./browser-http.ts";
+import { hasHttpStatus, requestJson } from "./browser-http.ts";
 import { createReactiveState, type ReactiveState } from "./reactive-state.ts";
 
 export interface DirectoryPickerState {
@@ -28,7 +28,7 @@ export function initialDirectoryPickerState(): DirectoryPickerState {
 }
 
 function browsingError(error: unknown): string {
-  return error instanceof HttpResponseError && error.status === 409
+  return hasHttpStatus(error, 409)
     ? "That runner is no longer available."
     : "We could not open that directory on the runner.";
 }

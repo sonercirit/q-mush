@@ -1,6 +1,6 @@
 import { SESSIONS_PATH } from "../shared/routes.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
-import { HttpResponseError, requestJson } from "./browser-http.ts";
+import { hasHttpStatus, requestJson } from "./browser-http.ts";
 import { readSessionDetail } from "./session-codec.ts";
 
 type SessionPendingAction = "compacting" | "sending" | "stopping";
@@ -76,9 +76,7 @@ export async function executeSessionMutation(
 }
 
 export function sessionMutationError(error: unknown, action: string): string {
-  if (error instanceof HttpResponseError && error.status === 409) {
-    return "The selected runner or credential is unavailable, or the session is busy.";
-  }
-
-  return `We could not ${action}. Please try again.`;
+  return hasHttpStatus(error, 409)
+    ? "The selected runner or credential is unavailable, or the session is busy."
+    : `We could not ${action}. Please try again.`;
 }

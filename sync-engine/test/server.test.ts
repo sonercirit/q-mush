@@ -18,6 +18,8 @@ import {
   OPENROUTER_CREDENTIALS_PATH,
   OPENROUTER_OAUTH_CALLBACK_PATH,
   OPENROUTER_OAUTH_PATH,
+  promptPath,
+  PROMPTS_PATH,
   providerCredentialDefaultPath,
   REALTIME_PATH,
   RUNNER_EXECUTABLE_PATH,
@@ -35,6 +37,7 @@ import type { BraveSearchSkill } from "../../sync-engine/brave-search.ts";
 import { createOpenAiIntegrationFromEnvironment } from "../../sync-engine/openai.ts";
 import { createOpenRouterIntegrationFromEnvironment } from "../../sync-engine/openrouter.ts";
 import { renderPages } from "../../sync-engine/pages.ts";
+import { createPromptIntegration } from "../../sync-engine/prompts.ts";
 import type { RunnerExecutableProvider } from "../../sync-engine/runner-executable.ts";
 import { createRunnerIntegration } from "../../sync-engine/runners.ts";
 import {
@@ -86,6 +89,7 @@ function createTestRequestHandler(): (request: Request) => Promise<Response> {
     modelProviders,
     { braveSearch },
   );
+  const prompts = createPromptIntegration(googleAuth);
   const integrations = [googleAuth, openAi, openRouter, braveSearch] as const;
   return createRequestHandler(
     clientJavaScript,
@@ -94,11 +98,25 @@ function createTestRequestHandler(): (request: Request) => Promise<Response> {
     ...integrations,
     runners,
     sessions,
+    prompts,
     runnerExecutables,
   );
 }
 
 const handleRequest = createTestRequestHandler();
+
+interface RequestCase {
+  readonly method?: string;
+  readonly path: string;
+}
+
+async function sendRequests(
+  cases: readonly RequestCase[],
+): Promise<Response[]> {
+  return await Promise.all(
+    cases.map(({ method, path }) => sendRequest(path, undefined, method)),
+  );
+}
 
 function expectAllStatuses(
   responses: readonly Response[],
@@ -187,6 +205,8 @@ describe("routes", () => {
     expect(OPENROUTER_OAUTH_CALLBACK_PATH).toBe(
       "/api/openrouter/oauth/callback",
     );
+    expect(PROMPTS_PATH).toBe("/api/prompts");
+    expect(promptPath("prompt/id")).toBe("/api/prompts/prompt%2Fid");
     expect(RUNNERS_PATH).toBe("/api/runners");
     expect(runnerDefaultPath("runner/id")).toBe(
       "/api/runners/runner%2Fid/default",
@@ -281,10 +301,23 @@ describe("page server", () => {
   });
 
   test("protects Brave Search key routes", async () => {
-    const responses = await Promise.all([
-      sendRequest(BRAVE_SEARCH_KEYS_PATH),
-      sendRequest(BRAVE_SEARCH_KEYS_PATH, undefined, "POST"),
-      sendRequest(`${BRAVE_SEARCH_KEYS_PATH}/key-id`, undefined, "DELETE"),
+    const responses = await sendRequests([
+      { path: BRAVE_SEARCH_KEYS_PATH },
+      { method: "POST", path: BRAVE_SEARCH_KEYS_PATH },
+      { method: "DELETE", path: `${BRAVE_SEARCH_KEYS_PATH}/key-id` },
+    ]);
+
+    expectAllStatuses(responses, 401);
+  });
+
+  test("protects prompt routes", async () => {
+    const itemPath = promptPath("prompt-id");
+    const responses = await sendRequests([
+      { path: PROMPTS_PATH },
+      { method: "POST", path: PROMPTS_PATH },
+      { path: itemPath },
+      { method: "PUT", path: itemPath },
+      { method: "DELETE", path: itemPath },
     ]);
 
     expectAllStatuses(responses, 401);

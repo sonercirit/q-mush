@@ -16,6 +16,21 @@ export const TEST_USER_ID = "018bcfe5-6800-7000-8000-000000000021";
 const SESSION_ID = "018bcfe5-6800-7000-8000-000000000022";
 const SESSION_TOKEN = "authenticated-session";
 
+export const OTHER_TEST_USER_ID = "018bcfe5-6800-7000-8000-000000000073";
+
+export function addOtherTestUser(database: AppDatabase): void {
+  database
+    .insert(users)
+    .values({
+      ...createdAuditFields(SYSTEM_ID, TEST_NOW),
+      email: "other@example.com",
+      googleSubject: "other-google-user",
+      id: OTHER_TEST_USER_ID,
+      name: "Other User",
+    })
+    .run();
+}
+
 export function testAuditFields(actorId = TEST_USER_ID) {
   return createdAuditFields(actorId, TEST_NOW);
 }
@@ -115,11 +130,19 @@ export function createAuthenticatedRequest(
   body?: Readonly<Record<string, unknown>>,
   method = "GET",
 ): Request {
-  return createTestRequest(
-    path,
-    new Headers({ cookie: `q_mush_session=${SESSION_TOKEN}` }),
-    body,
-    method,
+  return createTestRequest(path, authenticatedHeaders(), body, method);
+}
+
+function authenticatedHeaders(): Headers {
+  return new Headers({ cookie: `q_mush_session=${SESSION_TOKEN}` });
+}
+
+export function createAuthenticatedIntegration<Integration>(
+  database: AppDatabase,
+  create: (auth: GoogleAuth) => Integration,
+): Integration {
+  return create(
+    createGoogleAuthFromEnvironment({}, { database, now: () => TEST_NOW }),
   );
 }
 

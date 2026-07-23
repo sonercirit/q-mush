@@ -8,6 +8,10 @@ export class HttpResponseError extends Error {
   }
 }
 
+export function hasHttpStatus(error: unknown, status: number): boolean {
+  return error instanceof HttpResponseError && error.status === status;
+}
+
 export async function request(
   input: RequestInfo | URL,
   init: RequestInit = {},

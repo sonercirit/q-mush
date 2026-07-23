@@ -10,6 +10,7 @@ import {
 } from "./openai.ts";
 import { createOpenRouterIntegrationFromEnvironment } from "./openrouter.ts";
 import { renderPages } from "./pages.ts";
+import { createPromptIntegration } from "./prompts.ts";
 import { RealtimeHub } from "./realtime-hub.ts";
 import {
   createRealtimeIntegration,
@@ -46,6 +47,7 @@ const openRouter = createOpenRouterIntegrationFromEnvironment(
   { database },
 );
 const runners = createRunnerIntegration(googleAuth, { database });
+const prompts = createPromptIntegration(googleAuth, { database });
 const realtimeHub = new RealtimeHub();
 const sessions = createSessionIntegration(
   googleAuth,
@@ -70,6 +72,7 @@ const handleRequest = createRequestHandler(
   braveSearch,
   runners,
   sessions,
+  prompts,
   runnerExecutables,
 );
 let callbackServer: Bun.Server<undefined> | undefined;

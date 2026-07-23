@@ -60,6 +60,26 @@ function credentialProviderColumn() {
   }).notNull();
 }
 
+export const prompts = sqliteTable(
+  "prompts",
+  {
+    ...ownedAuditColumns(),
+    name: text("name").notNull(),
+    normalizedName: text("normalized_name").notNull(),
+    body: text("body").notNull(),
+  },
+  (table) => [
+    index("prompts_user_deletion_update_index").on(
+      table.userId,
+      table.isDeleted,
+      table.updatedAt,
+    ),
+    uniqueIndex("prompts_user_normalized_name_active_unique")
+      .on(table.userId, table.normalizedName)
+      .where(sql`NOT ${table.isDeleted}`),
+  ],
+);
+
 export const providerCredentials = sqliteTable(
   "provider_credentials",
   {

@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import {
   agentMessages,
   agentSessions,
+  prompts,
   providerCredentials,
   runners,
   sessions,
@@ -19,6 +20,7 @@ const MIGRATIONS_DIRECTORY = fileURLToPath(
 const databaseSchema = {
   agentMessages,
   agentSessions,
+  prompts,
   providerCredentials,
   runners,
   sessions,

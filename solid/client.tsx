@@ -20,6 +20,8 @@ import {
 } from "../shared/routes.ts";
 import { requestJson } from "./browser-http.ts";
 import { providerNotice } from "./client-notices.ts";
+import { PromptBank } from "./prompt-client.tsx";
+import { PromptController } from "./prompt-controller.ts";
 import {
   BRAVE_SEARCH_PANEL,
   OPENAI_PANEL,
@@ -294,6 +296,7 @@ function Workspace(props: {
   readonly logoutPending: boolean;
   readonly openAi: ProviderController;
   readonly openRouter: ProviderController;
+  readonly prompts: PromptController;
   readonly runners: RunnerController;
   readonly user: AuthenticatedUser;
 }): JSX.Element {
@@ -307,6 +310,12 @@ function Workspace(props: {
         openAi={props.openAi.view}
         openRouter={props.openRouter.view}
         runners={props.runners.view}
+      />
+      <PromptBank
+        controller={props.prompts}
+        onInsert={(body) => {
+          props.agentSessions.insertPrompt(body);
+        }}
       />
       <RunnerPanel controller={props.runners} />
       <aside
@@ -354,6 +363,7 @@ function App(): JSX.Element {
   const braveSearch = new ProviderController(BRAVE_SEARCH_PANEL);
   const openAi = new ProviderController(OPENAI_PANEL);
   const openRouter = new ProviderController(OPENROUTER_PANEL);
+  const prompts = new PromptController();
   const runners = new RunnerController();
   const agentSessions = new SessionController();
   const providerControllers = [openAi, openRouter, braveSearch] as const;
@@ -377,6 +387,7 @@ function App(): JSX.Element {
   const resetWorkspaceConnections = (): void => {
     realtime.stop();
     agentSessions.reset();
+    prompts.reset();
     runners.reset();
     for (const controller of providerControllers) {
       controller.reset();
@@ -394,6 +405,7 @@ function App(): JSX.Element {
       if (loaded.user !== null) {
         await Promise.all([
           agentSessions.load(),
+          prompts.load(),
           runners.load(),
           ...providerControllers.map((controller) => controller.load()),
         ]);
@@ -497,6 +509,7 @@ function App(): JSX.Element {
                           logoutPending={logoutPending()}
                           openAi={openAi}
                           openRouter={openRouter}
+                          prompts={prompts}
                           runners={runners}
                           user={user()}
                         />

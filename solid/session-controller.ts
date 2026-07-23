@@ -204,6 +204,10 @@ export class SessionController {
     this.#patchDraft({ [name]: value });
   }
 
+  insertPrompt(value: string): void {
+    this.setDraftField("prompt", value);
+  }
+
   setFollowUp(value: string): void {
     this.#view.patch({ followUp: value });
   }

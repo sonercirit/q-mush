@@ -74,19 +74,21 @@ Living project memory. Update it with durable information.
   authorization-code + PKCE flow. It uses HttpOnly state/verifier cookies,
   fetches the basic profile, and discards provider tokens.
   `sync-engine/auth-store.ts` uses Drizzle with Bun SQLite to upsert users and
-  persist seven-day sessions in the tables defined by
-  `shared/database/schema.ts`. Application primary keys are UUIDv7 values;
-  Google subjects and session cookie tokens are separate unique fields. Every
-  application table has creation/update timestamps, actor IDs, and an
-  `isDeleted` soft-delete flag. `shared/database.ts` applies committed
-  `drizzle/` migrations when opening a connection. `sync-engine/index.ts`
-  injects the persistent connection; the auth factory falls back to isolated
-  in-memory SQLite when a connection is not supplied. Shared PKCE, provider
-  parsing, and redirect logic lives in `sync-engine/oauth.ts`, while shared
-  cookie and response helpers live in `sync-engine/http.ts`. `solid/client.tsx`
-  reads `/api/auth/session`, gates the control center, and posts logout to
-  `/api/auth/logout`. All API routes derive from the `/api` base path in
-  `shared/routes.ts`.
+  persist seven-day sessions in `shared/database/schema.ts`.
+- Prompt bank: `sync-engine/prompt-store.ts` owns user prompts at
+  `/api/prompts`; names are NFKC-normalized and active-unique per user, and
+  deletion is soft. The UI copies bodies into unlinked session drafts.
+- Application primary keys are UUIDv7 values; Google subjects and session cookie
+  tokens are separate unique fields. Every application table has creation/update
+  timestamps, actor IDs, and an `isDeleted` soft-delete flag.
+  `shared/database.ts` applies committed `drizzle/` migrations when opening a
+  connection. `sync-engine/index.ts` injects the persistent connection; the auth
+  factory falls back to isolated in-memory SQLite when a connection is not
+  supplied. Shared PKCE, provider parsing, and redirect logic lives in
+  `sync-engine/oauth.ts`, while shared cookie and response helpers live in
+  `sync-engine/http.ts`. `solid/client.tsx` reads `/api/auth/session`, gates the
+  control center, and posts logout to `/api/auth/logout`. All API routes derive
+  from the `/api` base path in `shared/routes.ts`.
 - `sync-engine/runner-store.ts` persists any number of user runner
   registrations, with `runners`, with one active registration per machine
   fingerprint and one default runner per user. New sessions use the default
@@ -171,13 +173,10 @@ Living project memory. Update it with durable information.
   Tailwind's source. Vitest uses an SSR Solid transform for string-rendering
   tests and a Happy DOM project for post-mount reactivity tests. Run it under
   Bun because tests and application modules use Bun APIs and `bun:sqlite`.
-- TypeScript is configured for strict, no-emit, bundler-style checking in
-  `tsconfig.json`, including unused and unreachable code diagnostics. Library
-  declaration checking is skipped because Drizzle publishes declarations for
-  optional cross-dialect integrations that do not pass this project's TypeScript
-  version; application source remains fully checked. Neither TypeScript 7.0.2
-  nor Drizzle ORM 1.0.0-rc.4 resolves these declaration errors, so re-enable
-  library checking only after verifying an upstream Drizzle fix.
+- `tsconfig.json` uses strict, no-emit, bundler checks, including unused and
+  unreachable diagnostics. Library declaration checking stays skipped until
+  Drizzle's optional cross-dialect declarations pass the project TypeScript
+  version; application source remains checked.
 - `eslint.config.ts` uses type-aware strict/stylistic `typescript-eslint`
   presets. It imports `.gitignore`, bans non-const assertions, and enforces
   exhaustive switches and canonical named imports. Bindings from one module
@@ -216,6 +215,7 @@ Living project memory. Update it with durable information.
   default local callback is `http://localhost:3000/api/auth/google/callback`,
   which must be registered exactly on the Google web OAuth client. Never expose
   the client secret to browser code or tracked files.
+- Prompt tests cover ownership, uniqueness, deletion, and unlinked insertion.
 - `DATABASE_PATH` selects SQLite (default `data/q-mush.sqlite`; `data/` is
   ignored). Update `shared/database/schema.ts` and register new tables in
   `databaseSchema`; run `bun run db:generate` and commit its migration and
