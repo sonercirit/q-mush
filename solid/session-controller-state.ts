@@ -1,12 +1,15 @@
 import type { ProviderId } from "../shared/provider-credential-store.ts";
+import { canonicalAgentSessionMessages } from "../shared/session-message-order.ts";
 import type {
   AgentSessionDetail,
+  AgentSessionMessage,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
 import type { RealtimeServerEvent } from "./realtime-client-codec.ts";
 import type { RevisionState } from "./revision-state.ts";
 import type { SessionViewState } from "./session-client.tsx";
 import { summaryFromDetail } from "./session-codec.ts";
+import { createDisplaySessionMessage } from "./session-message.ts";
 
 export function selectedSessionCredential(value: string):
   | {
@@ -50,6 +53,12 @@ export function sessionDataMatches(
   return serializedDataMatches(left, right);
 }
 
+function canonicalSessionMessages(
+  messages: AgentSessionDetail["messages"],
+): AgentSessionDetail["messages"] {
+  return canonicalAgentSessionMessages(messages);
+}
+
 function retainUnchangedMessages(
   current: AgentSessionDetail,
   messages: AgentSessionDetail["messages"],
@@ -66,55 +75,181 @@ function retainUnchangedMessages(
   });
 }
 
+function sortedMessages(
+  detail: AgentSessionDetail,
+): AgentSessionDetail["messages"] {
+  return detail.messages.some((message) =>
+    isStreamedMessage(detail.id, message),
+  )
+    ? detail.messages
+    : canonicalSessionMessages(detail.messages);
+}
+
 export function retainUnchangedSessionData(
   current: AgentSessionDetail | undefined,
   detail: AgentSessionDetail,
 ): AgentSessionDetail {
+  const orderedMessages = sortedMessages(detail);
   if (current?.id !== detail.id) {
-    return detail;
+    return orderedMessages === detail.messages
+      ? detail
+      : { ...detail, messages: orderedMessages };
   }
 
   const agentFile = serializedDataMatches(current.agentFile, detail.agentFile)
     ? current.agentFile
     : detail.agentFile;
-  const messages = retainUnchangedMessages(current, detail.messages);
+  const messages = retainUnchangedMessages(current, orderedMessages);
   return agentFile !== detail.agentFile ||
     messages.some((message, index) => message !== detail.messages[index])
     ? { ...detail, agentFile, messages }
     : detail;
 }
 
+type StreamRole = "assistant" | "thinking";
+
 interface StreamedSessionContent {
+  readonly baseMessageId: string | null | undefined;
   readonly content: string;
   readonly thinking: string;
 }
 
-function streamedMessageId(sessionId: string, role: string): string {
+interface ReconciledStream {
+  readonly messages: AgentSessionDetail["messages"];
+  readonly persisted: boolean;
+}
+
+function streamedMessageId(sessionId: string, role: StreamRole): string {
   return `stream:${sessionId}:${role}`;
 }
 
-function streamedMessages(
+function isStreamedMessage(
+  sessionId: string,
+  message: AgentSessionMessage,
+): boolean {
+  return (
+    message.id === streamedMessageId(sessionId, "thinking") ||
+    message.id === streamedMessageId(sessionId, "assistant")
+  );
+}
+
+function persistedMessages(
+  detail: AgentSessionDetail,
+): AgentSessionDetail["messages"] {
+  return canonicalSessionMessages(
+    detail.messages.filter((message) => !isStreamedMessage(detail.id, message)),
+  );
+}
+
+function persistedDetail(detail: AgentSessionDetail): AgentSessionDetail {
+  return { ...detail, messages: persistedMessages(detail) };
+}
+
+function sessionIsActive(detail: AgentSessionDetail): boolean {
+  return detail.status === "queued" || detail.status === "running";
+}
+
+function resolveStreamBase(
   detail: AgentSessionDetail,
   streamed: StreamedSessionContent,
-): AgentSessionDetail["messages"] {
+): StreamedSessionContent {
+  return streamed.baseMessageId === undefined
+    ? { ...streamed, baseMessageId: detail.messages.at(-1)?.id ?? null }
+    : streamed;
+}
+
+function streamStartIndex(
+  messages: AgentSessionDetail["messages"],
+  baseMessageId: StreamedSessionContent["baseMessageId"],
+): number {
+  if (baseMessageId === null) {
+    return 0;
+  }
+  if (baseMessageId === undefined) {
+    return messages.length;
+  }
+  const baseIndex = messages.findIndex(({ id }) => id === baseMessageId);
+  return baseIndex < 0 ? messages.length : baseIndex + 1;
+}
+
+function matchingStreamMessageIndex(
+  messages: AgentSessionDetail["messages"],
+  startIndex: number,
+  role: StreamRole,
+  content: string,
+): number {
+  return content.length === 0
+    ? -1
+    : messages.findIndex(
+        (message, index) =>
+          index >= startIndex &&
+          message.role === role &&
+          message.content === content,
+      );
+}
+
+function transientMessage(
+  detail: AgentSessionDetail,
+  role: StreamRole,
+  content: string,
+): AgentSessionMessage {
+  return createDisplaySessionMessage({
+    content,
+    createdAt: detail.updatedAt,
+    id: streamedMessageId(detail.id, role),
+    role,
+  });
+}
+
+function reconcileStream(
+  detail: AgentSessionDetail,
+  streamed: StreamedSessionContent,
+): ReconciledStream {
   const messages = [...detail.messages];
-  const append = (role: "assistant" | "thinking", content: string): void => {
-    if (content.length > 0) {
-      messages.push({
-        content,
-        createdAt: detail.updatedAt,
-        id: streamedMessageId(detail.id, role),
-        images: [],
-        role,
-        toolCallId: null,
-        toolCalls: [],
-        toolName: null,
-      });
-    }
-  };
-  append("thinking", streamed.thinking);
-  append("assistant", streamed.content);
-  return messages;
+  const startIndex = streamStartIndex(messages, streamed.baseMessageId);
+  const thinkingIndex = matchingStreamMessageIndex(
+    messages,
+    startIndex,
+    "thinking",
+    streamed.thinking,
+  );
+  const assistantIndex = matchingStreamMessageIndex(
+    messages,
+    startIndex,
+    "assistant",
+    streamed.content,
+  );
+  const thinkingPersisted =
+    streamed.thinking.length === 0 || thinkingIndex >= 0;
+  const assistantPersisted =
+    streamed.content.length === 0 || assistantIndex >= 0;
+
+  if (thinkingPersisted && assistantPersisted) {
+    return { messages, persisted: true };
+  }
+
+  if (!thinkingPersisted && assistantPersisted) {
+    messages.splice(
+      assistantIndex < 0 ? startIndex : assistantIndex,
+      0,
+      transientMessage(detail, "thinking", streamed.thinking),
+    );
+  } else if (thinkingPersisted && !assistantPersisted) {
+    messages.splice(
+      thinkingIndex < 0 ? startIndex : thinkingIndex + 1,
+      0,
+      transientMessage(detail, "assistant", streamed.content),
+    );
+  } else {
+    messages.splice(
+      startIndex,
+      0,
+      transientMessage(detail, "thinking", streamed.thinking),
+      transientMessage(detail, "assistant", streamed.content),
+    );
+  }
+
+  return { messages, persisted: false };
 }
 
 export class SessionRealtimeState {
@@ -126,29 +261,38 @@ export class SessionRealtimeState {
   }
 
   applyDetail(detail: AgentSessionDetail): void {
-    const persistable = this.#withoutStreamedMessages(detail);
+    const persistable = persistedDetail(detail);
+    if (!sessionIsActive(persistable)) {
+      this.#streamedContent.delete(detail.id);
+    }
+
+    const currentStream = this.#streamedContent.get(detail.id);
+    const streamed =
+      currentStream === undefined
+        ? undefined
+        : resolveStreamBase(persistable, currentStream);
+    const reconciled =
+      streamed === undefined
+        ? { messages: persistable.messages, persisted: true }
+        : reconcileStream(persistable, streamed);
+
+    if (streamed !== undefined) {
+      if (reconciled.persisted) {
+        this.#streamedContent.delete(detail.id);
+      } else {
+        this.#streamedContent.set(detail.id, streamed);
+      }
+    }
+
     if (this.#view.value.selectedId !== detail.id) {
       return;
     }
 
     const current = this.#view.value.detail;
-    const streamed = this.#streamedContent.get(detail.id);
-    const sessionFinished =
-      detail.status !== "queued" && detail.status !== "running";
-    const streamIsPersisted =
-      streamed !== undefined &&
-      (sessionFinished || this.#streamIsPersisted(persistable, streamed));
-    const visibleMessages =
-      streamed === undefined || streamIsPersisted
-        ? persistable.messages
-        : streamedMessages(persistable, streamed);
     const visibleDetail = retainUnchangedSessionData(current, {
       ...persistable,
-      messages: visibleMessages,
+      messages: reconciled.messages,
     });
-    if (streamed !== undefined && streamIsPersisted) {
-      this.#streamedContent.delete(detail.id);
-    }
     if (current !== undefined && sessionDataMatches(current, visibleDetail)) {
       return;
     }
@@ -163,71 +307,65 @@ export class SessionRealtimeState {
     });
   }
 
-  #streamIsPersisted(
-    detail: AgentSessionDetail,
-    streamed: StreamedSessionContent,
-  ): boolean {
-    const recent = detail.messages.slice(-2);
-    const persistedContent = recent.find(
-      ({ role }) => role === "assistant",
-    )?.content;
-    const persistedThinking = recent.find(
-      ({ role }) => role === "thinking",
-    )?.content;
-    return (
-      (streamed.content.length === 0 ||
-        persistedContent === streamed.content) &&
-      (streamed.thinking.length === 0 ||
-        persistedThinking === streamed.thinking)
-    );
-  }
-
-  #withoutStreamedMessages(detail: AgentSessionDetail): AgentSessionDetail {
-    return {
-      ...detail,
-      messages: detail.messages.filter(
-        ({ id }) =>
-          id !== streamedMessageId(detail.id, "thinking") &&
-          id !== streamedMessageId(detail.id, "assistant"),
-      ),
-    };
-  }
-
   applyDelta(
     event: Extract<RealtimeServerEvent, { type: "session_delta" }>,
   ): void {
-    const current = event.reset
-      ? { content: "", thinking: "" }
-      : (this.#streamedContent.get(event.sessionId) ?? {
-          content: "",
-          thinking: "",
-        });
-    this.#streamedContent.set(event.sessionId, {
-      content: current.content + event.content,
-      thinking: current.thinking + event.thinking,
-    });
+    const view = this.#view.value;
+    const selected = view.selectedId === event.sessionId;
+    const selectedDetail =
+      selected && view.detail?.id === event.sessionId
+        ? persistedDetail(view.detail)
+        : undefined;
+    const active =
+      selectedDetail !== undefined && sessionIsActive(selectedDetail);
 
-    const detail = this.#view.value.detail;
     if (
-      this.#view.value.selectedId !== event.sessionId ||
-      detail === undefined
+      selectedDetail !== undefined &&
+      (!sessionIsActive(selectedDetail) || view.stopping)
     ) {
       return;
     }
 
-    const streamed = this.#streamedContent.get(event.sessionId);
-    if (streamed === undefined) {
+    const initialBase = active
+      ? (selectedDetail.messages.at(-1)?.id ?? null)
+      : undefined;
+    const current = event.reset
+      ? {
+          baseMessageId: initialBase,
+          content: "",
+          thinking: "",
+        }
+      : (this.#streamedContent.get(event.sessionId) ?? {
+          baseMessageId: initialBase,
+          content: "",
+          thinking: "",
+        });
+    const next: StreamedSessionContent = {
+      baseMessageId: current.baseMessageId,
+      content: current.content + event.content,
+      thinking: current.thinking + event.thinking,
+    };
+    this.#streamedContent.set(event.sessionId, next);
+
+    if (!active) {
       return;
     }
 
-    const visibleDetail = retainUnchangedSessionData(detail, {
-      ...detail,
-      messages: streamedMessages(
-        this.#withoutStreamedMessages(detail),
-        streamed,
-      ),
+    const currentMessages = view.detail?.messages ?? [];
+    const visibleMessages = reconcileStream(selectedDetail, next).messages;
+    const visibleDetail = retainUnchangedSessionData(view.detail, {
+      ...selectedDetail,
+      messages: visibleMessages.map((message) => {
+        if (!isStreamedMessage(event.sessionId, message)) {
+          return message;
+        }
+        const existing = currentMessages.find(({ id }) => id === message.id);
+        return existing?.content !== message.content ? message : existing;
+      }),
     });
-    this.#view.patch({ detail: visibleDetail });
+    if (!sessionDataMatches(view.detail, visibleDetail)) {
+      this.#view.patch({ detail: visibleDetail });
+    }
   }
 
   applySessions(sessions: readonly AgentSessionSummary[]): void {

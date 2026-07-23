@@ -7,13 +7,13 @@ Living project memory. Update it with durable information.
 - Private strict-TypeScript ESM Bun/SolidJS project.
 - Source is split across `solid/`, `sync-engine/`, `runner/`, and `shared/`;
   `sync-engine/index.ts` is the server entry point.
-- Tests live in `test/` directories; there is no `src/`.
-- The homepage is `/`; the browser app is `/app`.
-- Tests use Vitest under Bun.
+- Tests live in `test/` directories; no `src/`.
+- Homepage `/`; app `/app`.
+- Tests use Vitest with Bun.
 
 ## Working Agreements
 
-- Inspect the repository and `git status` before edits.
+- Inspect repository before edits.
 - Preserve existing patterns; add tools or dependencies only when needed.
 - Practice TDD for behavior: first update a failing test, then implement and
   refactor while green.
@@ -30,7 +30,7 @@ Living project memory. Update it with durable information.
 
 ## Setup and Commands
 
-- Install dependencies: `bun install`; run: `bun run sync-engine/index.ts`
+- Install: `bun install`; run: `bun run sync-engine/index.ts`
 - Develop: `bun run dev`; restart: `bun run dev:restart`; build: `bun run build`
 - Generate/apply database migrations: `bun run db:generate` /
   `bun run db:migrate`
@@ -48,11 +48,11 @@ Living project memory. Update it with durable information.
 ## Architecture and Conventions
 
 - Bun manages dependencies through the committed `package.json` and `bun.lock`.
-- Production source has four enforced top-level workspaces. `solid` owns the
-  SolidJS browser UI, `sync-engine` owns the Bun server and integrations,
-  `runner` owns the standalone runner, and `shared` owns cross-workspace code.
-  The first three may import only themselves and `shared`; `shared` cannot
-  import another workspace. Code outside `scripts` cannot import from `scripts`.
+- Production source has four enforced top-level workspaces. `solid` owns browser
+  UI, `sync-engine` the Bun server and integrations, `runner` the standalone
+  runner, and `shared` cross-workspace code. The first three may import only
+  themselves and `shared`; `shared` cannot import another workspace. Code
+  outside `scripts` cannot import from `scripts`.
 - `sync-engine/server.ts` serves the browser JavaScript and Tailwind CSS built
   in memory by Vite. Browser state, session updates, and runner work use
   authenticated WebSockets at `/api/realtime` and `/api/runner/realtime`; there
@@ -106,6 +106,8 @@ Living project memory. Update it with durable information.
   and machine rotates the existing registration to the new token instead of
   creating a second runner; another user's registration remains protected.
   Runner tokens never appear in list responses.
+- Browser messages sort by time then ID. Live output anchors after the
+  initiating message; snapshots replace it in place.
 - `sync-engine/sessions.ts` and `sync-engine/session-store.ts` persist coding
   sessions. User messages support selecting or pasting up to eight 10 MB PNG,
   JPEG, GIF, or WebP images, persisted with the transcript and sent as native
@@ -210,7 +212,7 @@ Living project memory. Update it with durable information.
 
 ## Decisions and Gotchas
 
-- The package is marked private and uses ESM (`"type": "module"`).
+- The package is private ESM (`"type": "module"`).
 - Google login reads `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and the
   optional `GOOGLE_REDIRECT_URI`; both credentials must be present together. The
   default local callback is `http://localhost:3000/api/auth/google/callback`,

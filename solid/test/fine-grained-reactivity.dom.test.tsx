@@ -1,5 +1,4 @@
-import { type JSX } from "solid-js";
-import { render } from "solid-js/web";
+import type { JSX } from "solid-js";
 import { afterEach, expect, test, vi } from "vitest";
 import type { AgentModelCatalog } from "../../shared/agent-configuration.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
@@ -12,7 +11,6 @@ import {
 } from "../provider-client.tsx";
 import { ProviderController } from "../provider-controller.ts";
 import { createReactiveState } from "../reactive-state.ts";
-import { RenderDebugProvider, RenderDebugView } from "../render-debug.tsx";
 import {
   RunnerPanel,
   createRunnerViewState,
@@ -22,27 +20,29 @@ import { RunnerController } from "../runner-controller.ts";
 import { SessionPanel, type SessionViewState } from "../session-client.tsx";
 import { summaryFromDetail } from "../session-codec.ts";
 import { SessionController } from "../session-controller.ts";
-import { SessionDetail, SessionList } from "../session-detail-client.tsx";
+import { SessionList } from "../session-detail-client.tsx";
 import { initialSessionViewState } from "../session-state.ts";
 import { runnerSummary } from "./runner-fixtures.ts";
-import { sessionDetailState } from "./session-detail-test-state.ts";
+import {
+  disposeTestViews,
+  mountTestSessionDetail,
+  mountTestView,
+  queryTestElement,
+} from "./session-dom-test-helpers.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
+import {
+  runningSessionDetail,
+  transcriptMessage,
+} from "./transcript-ordering-fixtures.ts";
 
 const disposals: (() => void)[] = [];
 
 function mount(renderView: () => JSX.Element): HTMLDivElement {
-  const container = document.createElement("div");
-  document.body.append(container);
-  disposals.push(render(renderView, container));
-  return container;
+  return mountTestView(renderView, disposals);
 }
 
 function query(container: ParentNode, selector: string): Element {
-  const element = container.querySelector(selector);
-  if (element === null) {
-    throw new Error(`The test element ${selector} was not rendered`);
-  }
-  return element;
+  return queryTestElement(container, selector);
 }
 
 function transcript(container: ParentNode): HTMLUListElement {
@@ -115,10 +115,7 @@ function stubSessionRequests(catalog: AgentModelCatalog): void {
 }
 
 afterEach(() => {
-  while (disposals.length > 0) {
-    disposals.pop()?.();
-  }
-  document.body.replaceChildren();
+  disposeTestViews(disposals);
 });
 
 test("provider loading, error, retry, and list updates preserve the panel", async () => {
@@ -183,56 +180,11 @@ test("realtime runner changes update the list without remounting the panel", () 
   expect(container.querySelector("[data-runner-panel='true']")).toBe(panel);
 });
 
-function transcriptMessage(
-  id: string,
-  content: string,
-  role: "assistant" | "user",
-  createdAt: number,
-): AgentSessionDetail["messages"][number] {
-  const message: AgentSessionDetail["messages"][number] = {
-    content,
-    createdAt,
-    id,
-    role,
-    toolName: null,
-    images: [],
-    toolCalls: [],
-    toolCallId: null,
-  };
-  return message;
-}
-
-function runningSessionDetail(
-  messages: AgentSessionDetail["messages"],
-): AgentSessionDetail {
-  return { ...TEST_SESSION_DETAIL, messages, status: "running" };
-}
-
-function mountedSessionDetail(detail: AgentSessionDetail): {
+function mountSessionDetail(detail: AgentSessionDetail): {
   readonly container: HTMLDivElement;
   readonly controller: SessionController;
 } {
-  const reactive = sessionDetailState(detail);
-  const controller = new SessionController(reactive);
-  return {
-    container: mount(() => (
-      <SessionDetail controller={controller} state={reactive.state()} />
-    )),
-    controller,
-  };
-}
-
-function messageBoundary(container: ParentNode, id: string): Element {
-  return query(container, `[data-render-boundary='message:${id}']`);
-}
-
-function expectStableMessages(
-  container: ParentNode,
-  stableUser: Element,
-  stableAssistant: Element,
-): void {
-  expect(messageBoundary(container, "user-stable")).toBe(stableUser);
-  expect(messageBoundary(container, "assistant-stable")).toBe(stableAssistant);
+  return mountTestSessionDetail(detail, disposals);
 }
 
 function applySessionDelta(
@@ -255,15 +207,6 @@ function expectScrollLock(toggle: Element, enabled: boolean): void {
   expect(toggle.getAttribute("aria-pressed")).toBe(String(enabled));
 }
 
-function expectTranscriptBoundariesToRenderOnce(
-  debug: RenderDebugView,
-  messageIds: readonly string[],
-): void {
-  for (const key of ["system-prompt", "tool-definitions", ...messageIds]) {
-    expect(debug.measurement(key).count).toBe(1);
-  }
-}
-
 test("a mounted session timer starts when the session begins running", () => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date(10_000));
@@ -271,7 +214,7 @@ test("a mounted session timer starts when the session begins running", () => {
     vi.useRealTimers();
   });
   const queued = { ...TEST_SESSION_DETAIL, status: "queued" as const };
-  const { container, controller } = mountedSessionDetail(queued);
+  const { container, controller } = mountSessionDetail(queued);
 
   expect(sessionTimeText(container)).toBe("Time: 0s");
   controller.applyDetail({
@@ -289,7 +232,7 @@ test("scrolling away from and back to the transcript end updates scroll lock", (
   const detail = runningSessionDetail([
     transcriptMessage("user-1", "Initial task", "user", 2),
   ]);
-  const { container, controller } = mountedSessionDetail(detail);
+  const { container, controller } = mountSessionDetail(detail);
   const element = transcript(container);
   const toggle = query(container, "[data-scroll-lock-toggle='true']");
   setScrollableDimensions(element, 100, 500);
@@ -318,82 +261,6 @@ test("scrolling away from and back to the transcript end updates scroll lock", (
   }
   toggle.click();
   expectScrollLock(toggle, false);
-});
-
-test("a streamed message update only renders that transcript message", () => {
-  const messages: AgentSessionDetail["messages"] = [
-    transcriptMessage("user-stable", "Keep this message stable", "user", 2),
-    transcriptMessage(
-      "assistant-stable",
-      "This one is also complete",
-      "assistant",
-      3,
-    ),
-  ];
-  const detail = runningSessionDetail(messages);
-  const reactive = sessionDetailState(detail, [summaryFromDetail(detail)]);
-  const controller = new SessionController(reactive);
-  const debug = new RenderDebugView();
-  const container = mount(() => (
-    <RenderDebugProvider view={debug}>
-      <SessionDetail controller={controller} state={reactive.state()} />
-    </RenderDebugProvider>
-  ));
-  const stableUser = messageBoundary(container, "user-stable");
-  const stableAssistant = messageBoundary(container, "assistant-stable");
-
-  controller.applyDelta({
-    content: "Streaming",
-    sessionId: detail.id,
-    thinking: "",
-    type: "session_delta",
-  });
-  controller.applyDelta({
-    content: " response",
-    sessionId: detail.id,
-    thinking: "",
-    type: "session_delta",
-  });
-
-  expectStableMessages(container, stableUser, stableAssistant);
-  expectTranscriptBoundariesToRenderOnce(debug, [
-    "message:user-stable",
-    "message:assistant-stable",
-  ]);
-  expect(debug.measurement(`message:stream:${detail.id}:assistant`).count).toBe(
-    2,
-  );
-  const streamedMessage = query(
-    container,
-    `[data-render-boundary='message:stream:${detail.id}:assistant']`,
-  );
-
-  controller.applyDetail({
-    ...detail,
-    messages: [
-      ...messages.map((message) => ({ ...message })),
-      transcriptMessage(
-        "assistant-persisted",
-        "Streaming response",
-        "assistant",
-        4,
-      ),
-    ],
-    updatedAt: 4,
-  });
-
-  expectStableMessages(container, stableUser, stableAssistant);
-  expect(
-    container.querySelector(
-      `[data-render-boundary='message:stream:${detail.id}:assistant']`,
-    ),
-  ).not.toBe(streamedMessage);
-  expectTranscriptBoundariesToRenderOnce(debug, [
-    "message:user-stable",
-    "message:assistant-stable",
-    "message:assistant-persisted",
-  ]);
-  expect(container.textContent).toContain("Streaming response");
 });
 
 test("paginates the session list ten sessions at a time", () => {
