@@ -23,6 +23,20 @@ class CoalescingSocket extends EventTarget {
   }
 }
 
+function expectFramesAndLatest(
+  events: readonly RealtimeServerEvent[],
+  frames: readonly (() => void)[],
+  frameCount: number,
+  frameIndex: number,
+  eventCount: number,
+  expected: Readonly<Record<string, unknown>>,
+): void {
+  expect(frames).toHaveLength(frameCount);
+  frames[frameIndex]?.();
+  expect(events).toHaveLength(eventCount);
+  expect(events.at(-1)).toMatchObject(expected);
+}
+
 test("coalesces session deltas into one update per animation frame", () => {
   const events: RealtimeServerEvent[] = [];
   const frames: (() => void)[] = [];
@@ -86,11 +100,34 @@ test("coalesces session deltas into one update per animation frame", () => {
     thinking: "",
     type: "session_delta",
   });
+  socket.receive({
+    content: "other",
+    sessionId: "session-other",
+    thinking: "",
+    type: "session_delta",
+  });
+  expect(frames).toHaveLength(2);
   socket.receive({ session: TEST_SESSION_DETAIL, type: "session" });
   expect(events.at(-2)).toMatchObject({ content: "!", thinking: "" });
   expect(events.at(-1)).toEqual({
     session: TEST_SESSION_DETAIL,
     type: "session",
+  });
+  expectFramesAndLatest(events, frames, 3, 2, 5, {
+    content: "other",
+    sessionId: "session-other",
+  });
+
+  socket.receive({
+    content: "fresh",
+    sessionId: TEST_SESSION_DETAIL.id,
+    thinking: "",
+    type: "session_delta",
+  });
+  frames[1]?.();
+  expectFramesAndLatest(events, frames, 4, 3, 6, {
+    content: "fresh",
+    thinking: "",
   });
 
   socket.receive({
@@ -99,8 +136,8 @@ test("coalesces session deltas into one update per animation frame", () => {
     thinking: "",
     type: "session_delta",
   });
-  expect(frames).toHaveLength(2);
+  expect(frames).toHaveLength(5);
   connection.stop();
-  frames[1]?.();
-  expect(events).toHaveLength(4);
+  frames[4]?.();
+  expect(events).toHaveLength(6);
 });

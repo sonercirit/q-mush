@@ -4,7 +4,8 @@ import {
   AGENT_SESSION_TOOL_NAMES,
   type AgentSessionToolName,
 } from "../../shared/agent-tools.ts";
-import { runners } from "../../shared/database/schema.ts";
+import { agentMessages, runners } from "../../shared/database/schema.ts";
+import { SYSTEM_ID } from "../../shared/ids.ts";
 import type { AgentSessionMessage } from "../../shared/session-model.ts";
 import { SessionStore } from "../../sync-engine/session-store.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
@@ -266,6 +267,35 @@ describe("session store", () => {
       },
     ]);
     expect(store.list(TEST_USER_ID)).toHaveLength(1);
+    database.$client.close();
+  });
+
+  test("orders equal-timestamp transcript records by message id", () => {
+    const { database, store } = runningStore();
+    const timestamp = new Date(TEST_NOW + 2);
+    const common = {
+      ...testAuditFields(SYSTEM_ID),
+      content: "same timestamp",
+      createdAt: timestamp,
+      sessionId: SESSION_ID,
+      updatedAt: timestamp,
+      userId: TEST_USER_ID,
+    };
+    database
+      .insert(agentMessages)
+      .values([
+        { ...common, id: "message-z", role: "assistant" },
+        { ...common, id: "message-a", role: "thinking" },
+        { ...common, id: "message-m", role: "assistant" },
+      ])
+      .run();
+
+    expect(
+      store
+        .get(TEST_USER_ID, SESSION_ID)
+        ?.messages.filter(({ createdAt }) => createdAt === TEST_NOW + 2)
+        .map(({ id }) => id),
+    ).toEqual(["message-a", "message-m", "message-z"]);
     database.$client.close();
   });
 

@@ -8,6 +8,7 @@ import {
 import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages } from "../shared/database/schema.ts";
 import { readProviderModelPricing } from "../shared/provider-model-pricing.ts";
+import { compareAgentSessionMessages } from "../shared/session-message-order.ts";
 import type {
   AgentSessionMessage,
   AgentSessionSummary,
@@ -152,7 +153,8 @@ export function storedSessionMessages(
     )
     .orderBy(asc(agentMessages.createdAt), asc(agentMessages.id))
     .all()
-    .map(summarizeMessage);
+    .map(summarizeMessage)
+    .sort(compareAgentSessionMessages);
 }
 
 export function conversationFromMessages(
