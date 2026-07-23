@@ -4,6 +4,7 @@ export default {
     "sync-engine/index.ts!",
     "solid/client.tsx!",
     "runner/runner-agent.ts!",
+    "solid/favicon.svg!",
     "solid/styles.css!",
     "scripts/dev.ts!",
     "scripts/migrate-database.ts!",

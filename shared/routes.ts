@@ -9,6 +9,7 @@ export const AUTH_LOGOUT_PATH = `${AUTH_BASE_PATH}/logout`;
 export const AUTH_SESSION_PATH = `${AUTH_BASE_PATH}/session`;
 const BRAVE_SEARCH_BASE_PATH = `${API_BASE_PATH}/skills/brave-search`;
 export const BRAVE_SEARCH_KEYS_PATH = `${BRAVE_SEARCH_BASE_PATH}/keys`;
+export const FAVICON_PATH = "/favicon.svg";
 export const HOME_PATH = "/";
 const OPENAI_BASE_PATH = `${API_BASE_PATH}/openai`;
 export const OPENAI_CREDENTIALS_PATH = `${OPENAI_BASE_PATH}/credentials`;

@@ -1,9 +1,12 @@
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   brotliDecompressSync,
   gunzipSync,
   inflateSync,
   zstdDecompressSync,
 } from "node:zlib";
+import { build } from "vite";
 import { describe, expect, test } from "vitest";
 import {
   API_BASE_PATH,
@@ -12,6 +15,7 @@ import {
   AUTH_LOGOUT_PATH,
   AUTH_SESSION_PATH,
   BRAVE_SEARCH_KEYS_PATH,
+  FAVICON_PATH,
   OPENAI_CREDENTIALS_PATH,
   OPENAI_OAUTH_CALLBACK_PATH,
   OPENAI_OAUTH_PATH,
@@ -32,6 +36,11 @@ import {
 } from "../../shared/routes.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
 import type { BraveSearchSkill } from "../../sync-engine/brave-search.ts";
+import {
+  clientBuildConfiguration,
+  createClientPlugins,
+  readFavicon,
+} from "../../sync-engine/client-build.ts";
 import { createOpenAiIntegrationFromEnvironment } from "../../sync-engine/openai.ts";
 import { createOpenRouterIntegrationFromEnvironment } from "../../sync-engine/openrouter.ts";
 import { renderPages } from "../../sync-engine/pages.ts";
@@ -176,6 +185,7 @@ describe("routes", () => {
     expect(AUTH_LOGOUT_PATH).toBe("/api/auth/logout");
     expect(AUTH_SESSION_PATH).toBe("/api/auth/session");
     expect(BRAVE_SEARCH_KEYS_PATH).toBe("/api/skills/brave-search/keys");
+    expect(FAVICON_PATH).toBe("/favicon.svg");
     expect(OPENAI_CREDENTIALS_PATH).toBe("/api/openai/credentials");
     expect(
       providerCredentialDefaultPath(OPENAI_CREDENTIALS_PATH, "credential/id"),
@@ -244,6 +254,28 @@ describe("page server", () => {
       stylesheet,
     );
     expectCompressionHeaders(response, null);
+  });
+
+  test("serves the favicon as a public cacheable SVG", async () => {
+    const source = readFavicon();
+    const response = await expectAsset(
+      FAVICON_PATH,
+      "image/svg+xml; charset=utf-8",
+      source,
+    );
+
+    expect(source).toContain('viewBox="0 0 64 64"');
+    expect(source).not.toContain("<script");
+    expect(response.headers.get("cache-control")).toBe("public, max-age=86400");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expectCompressionHeaders(response, null);
+  });
+
+  test("does not disguise HTML or SVG as a legacy icon", async () => {
+    const response = await sendRequest("/favicon.ico");
+
+    await expectUnencodedResponse(response, 404, "Not found");
+    expect(response.headers.get("content-type")).toBeNull();
   });
 
   test("serves the standalone runner executable", async () => {
@@ -434,6 +466,22 @@ describe("response compression", () => {
 });
 
 describe("browser build", () => {
+  test("emits the favicon with the production browser assets", async () => {
+    const faviconPath = fileURLToPath(
+      new URL("../../dist/favicon.svg", import.meta.url),
+    );
+
+    await build({
+      build: clientBuildConfiguration,
+      configFile: false,
+      logLevel: "silent",
+      plugins: createClientPlugins(),
+    });
+
+    expect(existsSync(faviconPath)).toBe(true);
+    expect(await Bun.file(faviconPath).text()).toContain("Q Mush");
+  });
+
   test("builds the login, session, and provider credential controls", async () => {
     const javaScript = await buildClientJavaScript();
 

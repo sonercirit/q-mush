@@ -3,6 +3,7 @@ import { renderToString } from "solid-js/web";
 import {
   APP_PATH,
   APP_SCRIPT_PATH,
+  FAVICON_PATH,
   STYLESHEET_PATH,
 } from "../shared/routes.ts";
 
@@ -23,6 +24,7 @@ function renderDocument(title: string, body: JSX.Element[]): string {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="theme-color" content="#020617" />
         <title>{title}</title>
+        <link rel="icon" href={FAVICON_PATH} type="image/svg+xml" />
         <link href={STYLESHEET_PATH} rel="stylesheet" />
       </head>
       <body class="min-h-screen bg-slate-950 text-slate-100 antialiased">

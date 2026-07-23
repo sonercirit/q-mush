@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Q Mush">
+  <rect width="64" height="64" rx="14" fill="#020617"/>
+  <path fill="#6ee7b7" d="M11 29C12 17 21 9 32 9s20 8 21 20c0 3-2 5-5 5H16c-3 0-5-2-5-5Z"/>
+  <path fill="#22d3ee" d="M29 34h7v8l10 8-5 6-8-7-8 7-5-6 9-8Z"/>
+  <circle cx="23" cy="23" r="3" fill="#020617"/>
+  <circle cx="40" cy="20" r="4" fill="#020617"/>
+</svg>
