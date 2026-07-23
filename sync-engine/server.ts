@@ -9,6 +9,7 @@ import {
   AUTH_LOGOUT_PATH,
   AUTH_SESSION_PATH,
   BRAVE_SEARCH_KEYS_PATH,
+  FAVICON_PATH,
   HOME_PATH,
   OPENAI_CREDENTIALS_PATH,
   OPENAI_OAUTH_CALLBACK_PATH,
@@ -29,6 +30,7 @@ import type { BraveSearchSkill } from "./brave-search.ts";
 import {
   clientBuildConfiguration,
   createClientPlugins,
+  readFavicon,
 } from "./client-build.ts";
 import type { OpenAiIntegration } from "./openai.ts";
 import type { OpenRouterIntegration } from "./openrouter.ts";
@@ -39,6 +41,11 @@ import type { RunnerIntegration } from "./runners.ts";
 import type { SessionIntegration } from "./sessions.ts";
 
 const CSS_HEADERS = { "content-type": "text/css; charset=utf-8" };
+const FAVICON_HEADERS = {
+  "cache-control": "public, max-age=86400",
+  "content-type": "image/svg+xml; charset=utf-8",
+  "x-content-type-options": "nosniff",
+};
 const HTML_HEADERS = { "content-type": "text/html; charset=utf-8" };
 const JAVASCRIPT_HEADERS = {
   "content-type": "text/javascript; charset=utf-8",
@@ -240,6 +247,7 @@ export function createRequestHandler(
 ): (request: Request) => Promise<Response> {
   const appPage = prepareBody(pages.app);
   const browserBundle = prepareBody(clientJavaScript);
+  const favicon = prepareBody(readFavicon());
   const homePage = prepareBody(pages.home);
   const notFound = prepareBody("Not found");
   const styles = prepareBody(stylesheet);
@@ -364,6 +372,10 @@ export function createRequestHandler(
       if (openRouterResponse !== undefined) {
         return openRouterResponse;
       }
+    }
+
+    if (pathname === FAVICON_PATH) {
+      return createTextResponse(request, favicon, FAVICON_HEADERS);
     }
 
     if (pathname === HOME_PATH) {
