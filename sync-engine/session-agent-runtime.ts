@@ -8,6 +8,7 @@ import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { estimateAgentTurnCost } from "./agent-cost.ts";
 import { createAgentSkills } from "./agent-skills.ts";
+import type { BraveSearchSkill } from "./brave-search.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
 import { loadSessionAgentFile } from "./session-agent-file.ts";
 import { runCompactingAgentLoop } from "./session-agent-loop.ts";
@@ -24,12 +25,7 @@ import { SessionRecorder } from "./session-recorder.ts";
 import type { SessionStore } from "./session-store.ts";
 
 export interface SessionAgentRuntimeDependencies {
-  readonly braveSearch: {
-    execute(
-      userId: string,
-      arguments_: Readonly<Record<string, unknown>>,
-    ): Promise<string>;
-  };
+  readonly braveSearch: Pick<BraveSearchSkill, "execute">;
   readonly broker: RunnerCommandBroker;
   readonly credential: ProviderCredentialAccess;
   readonly detail: AgentSessionDetail;
