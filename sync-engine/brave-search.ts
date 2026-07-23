@@ -29,7 +29,11 @@ interface BraveSearchDependencies {
 type BraveSearchArguments = JsonRecord;
 
 export interface BraveSearchSkill {
-  execute(userId: string, arguments_: BraveSearchArguments): Promise<string>;
+  execute(
+    userId: string,
+    arguments_: BraveSearchArguments,
+    signal?: AbortSignal,
+  ): Promise<string>;
   keys(request: Request): Promise<Response>;
   remove(request: Request, keyId: string): Response;
 }
@@ -99,12 +103,14 @@ async function searchResponse(
   fetch: BraveSearchFetch,
   apiKey: string,
   parameters: URLSearchParams,
+  signal?: AbortSignal,
 ): Promise<Response> {
   return fetch(`${BRAVE_SEARCH_API_URL}?${parameters.toString()}`, {
     headers: {
       accept: "application/json",
       "x-subscription-token": apiKey,
     },
+    ...(signal === undefined ? {} : { signal }),
   });
 }
 
@@ -129,6 +135,8 @@ async function readSearchOutput(
     results: (results ?? []).map(resultSummary),
   });
 }
+
+type BraveSearchExecute = BraveSearchSkill["execute"];
 
 class BraveSearchSkillIntegration implements BraveSearchSkill {
   readonly #credentials: ProviderCredentialEndpoints;
@@ -174,10 +182,7 @@ class BraveSearchSkillIntegration implements BraveSearchSkill {
     return this.#credentials.remove(request, keyId);
   }
 
-  async execute(
-    userId: string,
-    arguments_: BraveSearchArguments,
-  ): Promise<string> {
+  execute: BraveSearchExecute = async (userId, arguments_, signal) => {
     if (this.#store === undefined) {
       return "Error: Brave Search credential storage is not configured.";
     }
@@ -202,7 +207,12 @@ class BraveSearchSkillIntegration implements BraveSearchSkill {
           continue;
         }
 
-        const response = await searchResponse(this.#fetch, secret, parameters);
+        const response = await searchResponse(
+          this.#fetch,
+          secret,
+          parameters,
+          signal,
+        );
 
         if (response.ok) {
           return await readSearchOutput(response, parameters.get("q") ?? "");
@@ -218,13 +228,16 @@ class BraveSearchSkillIntegration implements BraveSearchSkill {
         }
 
         return `Error: Brave Search failed with status ${String(response.status)}.`;
-      } catch {
+      } catch (error) {
+        if (signal?.aborted === true) {
+          throw error;
+        }
         // Try the next owned key when the provider or network rejects this one.
       }
     }
 
     return "Error: Brave Search failed with every saved API key.";
-  }
+  };
 }
 
 export function createBraveSearchSkillFromEnvironment(

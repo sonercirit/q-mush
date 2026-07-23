@@ -4,6 +4,7 @@ import { describe, expect, test } from "vitest";
 import { providerCredentials } from "../../shared/database/schema.ts";
 import { BRAVE_SEARCH_KEYS_PATH } from "../../shared/routes.ts";
 import { createBraveSearchSkillFromEnvironment } from "../../sync-engine/brave-search.ts";
+import type { OAuthDependencies } from "../../sync-engine/oauth.ts";
 import {
   createAuthenticatedRequest,
   createAuthenticatedTestContext,
@@ -23,7 +24,7 @@ const ENVIRONMENT = {
 function createSetup() {
   const { auth, database } = createAuthenticatedTestContext();
   const requests: Request[] = [];
-  const fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+  const fetch: NonNullable<OAuthDependencies["fetch"]> = (input, init) => {
     const request = new Request(input, init);
     requests.push(request.clone());
     const apiKey = request.headers.get("x-subscription-token");
@@ -156,6 +157,49 @@ describe("Brave Search skill", () => {
       { encryptedCredential: "", isDeleted: true },
     ]);
     setup.database.$client.close();
+  });
+
+  test("aborts an in-flight provider request without falling through keys", async () => {
+    const { auth, database } = createAuthenticatedTestContext();
+    const controller = new AbortController();
+    let requestSignal: AbortSignal | undefined;
+    const skill = createBraveSearchSkillFromEnvironment(ENVIRONMENT, auth, {
+      database,
+      fetch: (_input, init) => {
+        requestSignal = init?.signal ?? undefined;
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            "abort",
+            () => {
+              reject(new DOMException("stopped", "AbortError"));
+            },
+            { once: true },
+          );
+        });
+      },
+      now: () => TEST_NOW,
+      randomId: () => FIRST_KEY_ID,
+    });
+    const keyResponse = await skill.keys(
+      createAuthenticatedRequest(
+        BRAVE_SEARCH_KEYS_PATH,
+        { apiKey: FIRST_KEY, label: "Primary" },
+        "POST",
+      ),
+    );
+    expect(keyResponse.status).toBe(201);
+
+    const running = skill.execute(
+      TEST_USER_ID,
+      { query: "cancel me" },
+      controller.signal,
+    );
+    await Promise.resolve();
+    expect(requestSignal).toBe(controller.signal);
+    controller.abort();
+
+    await expect(running).rejects.toMatchObject({ name: "AbortError" });
+    database.$client.close();
   });
 
   test("requires login and reports unconfigured encrypted storage", async () => {
