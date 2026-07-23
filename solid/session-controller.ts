@@ -390,6 +390,7 @@ export class SessionController {
         }
 
         this.#view.patchCurrent(revision, detailState);
+        this.#realtime.applyDetail(detail);
       }
     } catch {
       if (showLoading) {
@@ -538,10 +539,14 @@ export class SessionController {
     try {
       const detail = await executeSessionMutation(options);
 
-      this.#view.patchCurrent(
-        revision,
-        this.#detailState(detail, { ...options.success, ...settled }),
-      );
+      if (
+        this.#view.patchCurrent(revision, {
+          ...settled,
+          ...options.success,
+        })
+      ) {
+        this.#realtime.applyDetail(detail);
+      }
     } catch (error) {
       this.#patchMutationError(revision, error, options.action, settled);
     }

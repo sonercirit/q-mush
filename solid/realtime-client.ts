@@ -147,8 +147,8 @@ export class RealtimeConnection {
     }
 
     const delta = this.#sessionDeltas.get(sessionId);
+    this.#sessionDeltas.delete(sessionId);
     if (delta !== undefined) {
-      this.#sessionDeltas.delete(sessionId);
       this.#listener(delta);
     }
   }
@@ -186,9 +186,26 @@ export class RealtimeConnection {
       return;
     }
     if (event.type === "session") {
+      const hadQueuedDelta = this.#sessionDeltas.has(event.session.id);
       this.#flushSessionDelta(event.session.id);
+      if (hadQueuedDelta) {
+        this.#sessionDeltaGeneration += 1;
+        this.#sessionDeltaFrame = undefined;
+        this.#rescheduleSessionDeltaFrame();
+      }
     }
     this.#listener(event);
+  }
+
+  #rescheduleSessionDeltaFrame(): void {
+    if (this.#sessionDeltas.size === 0) {
+      return;
+    }
+    const queued = this.#sessionDeltas;
+    this.#sessionDeltas = new Map();
+    for (const delta of queued.values()) {
+      this.#queueSessionDelta(delta);
+    }
   }
 
   #scheduleReconnect(): void {
