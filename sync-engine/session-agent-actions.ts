@@ -1,3 +1,10 @@
+import { AGENT_REASONING_EFFORTS } from "../shared/agent-configuration.ts";
+import { createAgentSystemPrompt } from "../shared/agent-prompt.ts";
+import {
+  AGENT_SESSION_TOOL_OPTIONS,
+  selectedAgentTools,
+} from "../shared/agent-tools.ts";
+import { ProviderCredentialStore } from "../shared/provider-credential-store.ts";
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { createJsonResponse } from "./http.ts";
@@ -8,6 +15,15 @@ import {
   type SessionAgentActionDependencies,
 } from "./session-agent-action-helpers.ts";
 import {
+  sessionOptionsOutput,
+  type GetSessionOptionsToolInput,
+  type SessionOptionsSource,
+} from "./session-agent-options.ts";
+import {
+  readSessionOutput,
+  type ReadSessionToolInput,
+} from "./session-agent-read.ts";
+import {
   sessionToolOutput,
   type SessionAgentToolActions,
   type SpawnSessionToolInput,
@@ -17,8 +33,9 @@ import type { PendingSpawnedSession } from "./session-store-spawns.ts";
 
 interface SessionAgentActionsDependencies extends SessionAgentActionDependencies {
   readonly abortSession: (sessionId: string) => void;
-  readonly broker: Pick<RunnerCommandBroker, "cancelSession">;
   readonly activeSession: (sessionId: string) => boolean;
+  readonly broker: Pick<RunnerCommandBroker, "cancelSession">;
+  readonly listRunners: (userId: string) => SessionOptionsSource["runners"];
 }
 
 export class SessionAgentActions {
@@ -40,10 +57,10 @@ export class SessionAgentActions {
     return {
       continueSession: (sessionId) =>
         this.#queue(userId, anotherSession(sessionId)),
+      getSessionOptions: (input) => this.#options(userId, input),
       listSessions: () =>
         sessionToolOutput(this.#dependencies.store.list(userId)),
-      readSession: (sessionId) =>
-        sessionToolOutput(this.#detail(userId, sessionId)),
+      readSession: (input) => this.#read(userId, input),
       sendToSession: (sessionId, message) =>
         this.#queue(userId, anotherSession(sessionId), message),
       spawnSession: (input) => this.#spawn(parentSessionId, userId, input),
@@ -144,6 +161,63 @@ export class SessionAgentActions {
       throw new Error("Session not found");
     }
     return found;
+  }
+
+  #read(userId: string, input: ReadSessionToolInput): string {
+    const detail = this.#detail(userId, input.sessionId);
+    return readSessionOutput({
+      input,
+      messages: detail.messages,
+      session: { id: detail.id, status: detail.status, title: detail.title },
+      systemPrompt: createAgentSystemPrompt(detail.agentFile),
+      toolDefinitions: selectedAgentTools(detail.tools).map(
+        ({ function: definition }) => definition,
+      ),
+    });
+  }
+
+  async #options(
+    userId: string,
+    input: GetSessionOptionsToolInput,
+  ): Promise<string> {
+    let models: SessionOptionsSource["models"] = [];
+    let reasoningEfforts: SessionOptionsSource["reasoningEfforts"] =
+      AGENT_REASONING_EFFORTS;
+    if (
+      input.category === "models" &&
+      input.credentialId !== undefined &&
+      input.provider !== undefined
+    ) {
+      const provider = input.provider;
+      const credentialId = input.credentialId;
+      try {
+        const credential = await this.#dependencies.readCredential(userId, {
+          credentialId,
+          provider,
+        });
+        if (credential === undefined) {
+          throw new Error("The credential is unavailable");
+        }
+        const catalog = await this.#dependencies.discoverModels(
+          provider,
+          credential,
+        );
+        models = catalog.models;
+        reasoningEfforts = [];
+      } catch {
+        throw new Error("The model credential or provider is unavailable");
+      }
+    }
+    return sessionOptionsOutput(input, {
+      credentials: ProviderCredentialStore.listModelCredentials(
+        this.#dependencies.database,
+        userId,
+      ),
+      models,
+      reasoningEfforts,
+      runners: this.#dependencies.listRunners(userId),
+      tools: AGENT_SESSION_TOOL_OPTIONS,
+    });
   }
 
   async #queue(

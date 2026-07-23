@@ -1,35 +1,47 @@
 import {
   isAgentModelId,
   isAgentReasoningEffort,
-  type AgentReasoningEffort,
 } from "../shared/agent-configuration.ts";
 import type { AgentImage } from "../shared/agent-images.ts";
 import {
   readAgentSessionToolNames,
   type SessionAgentToolName,
 } from "../shared/agent-tools.ts";
+import { isProviderId } from "../shared/provider-credential-store.ts";
 import { MAXIMUM_RUNNER_PATH_LENGTH } from "../shared/runner-directory-model.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
+import type { GetSessionOptionsToolInput } from "./session-agent-options.ts";
+import type { ReadSessionToolInput } from "./session-agent-read.ts";
+import {
+  getSessionOptionsToolInput,
+  hasOnlySessionToolArguments,
+  readSessionToolInput,
+} from "./session-agent-tool-input.ts";
 import { readIdentifier, readStringField } from "./session-request-helpers.ts";
 
 const MAXIMUM_SESSION_MESSAGE_LENGTH = 32_768;
 
-export interface SpawnSessionToolInput {
-  readonly tools: NonNullable<ReturnType<typeof readAgentSessionToolNames>>;
+export interface SpawnSessionToolInput extends Pick<
+  AgentSessionDetail,
+  | "credentialId"
+  | "model"
+  | "provider"
+  | "reasoningEffort"
+  | "runnerId"
+  | "tools"
+  | "workingDirectory"
+> {
   readonly images: readonly AgentImage[];
-  readonly reasoningEffort: AgentReasoningEffort | null;
-  readonly provider: "openai" | "openrouter";
-  readonly workingDirectory: string;
-  readonly credentialId: string;
-  readonly runnerId: string;
   readonly prompt: string;
-  readonly model: string;
 }
 
 export interface SessionAgentToolActions {
   readonly continueSession: (sessionId: string) => Promise<string>;
+  readonly getSessionOptions: (
+    input: GetSessionOptionsToolInput,
+  ) => Promise<string>;
   readonly listSessions: () => string;
-  readonly readSession: (sessionId: string) => string;
+  readonly readSession: (input: ReadSessionToolInput) => string;
   readonly sendToSession: (
     sessionId: string,
     message: string,
@@ -70,10 +82,20 @@ function spawnInput(
   );
 
   if (
+    !hasOnlySessionToolArguments(arguments_, [
+      "credentialId",
+      "model",
+      "prompt",
+      "provider",
+      "reasoningEffort",
+      "runnerId",
+      "tools",
+      "workingDirectory",
+    ]) ||
     credentialId === undefined ||
     model === undefined ||
     prompt === undefined ||
-    (provider !== "openai" && provider !== "openrouter") ||
+    !isProviderId(provider) ||
     (reasoningEffort !== undefined &&
       !isAgentReasoningEffort(reasoningEffort)) ||
     runnerId === undefined ||
@@ -106,7 +128,10 @@ function message(arguments_: Readonly<Record<string, unknown>>): string {
     MAXIMUM_SESSION_MESSAGE_LENGTH,
     { trim: true },
   );
-  if (value === undefined) {
+  if (
+    !hasOnlySessionToolArguments(arguments_, ["sessionId", "message"]) ||
+    value === undefined
+  ) {
     throw new Error("Tool argument message is invalid");
   }
   return value;
@@ -126,7 +151,15 @@ export function executeSessionAgentTool(
     let output: Promise<string>;
     switch (name) {
       case "continue_session":
+        if (!hasOnlySessionToolArguments(arguments_, ["sessionId"])) {
+          throw new Error("continue_session received invalid arguments");
+        }
         output = actions.continueSession(sessionId(arguments_));
+        break;
+      case "get_session_options":
+        output = actions.getSessionOptions(
+          getSessionOptionsToolInput(arguments_),
+        );
         break;
       case "list_sessions":
         if (Object.keys(arguments_).length > 0) {
@@ -135,7 +168,9 @@ export function executeSessionAgentTool(
         output = Promise.resolve(actions.listSessions());
         break;
       case "read_session":
-        output = Promise.resolve(actions.readSession(sessionId(arguments_)));
+        output = Promise.resolve(
+          actions.readSession(readSessionToolInput(arguments_)),
+        );
         break;
       case "send_to_session":
         output = actions.sendToSession(
@@ -147,6 +182,9 @@ export function executeSessionAgentTool(
         output = actions.spawnSession(spawnInput(arguments_));
         break;
       case "stop_session":
+        if (!hasOnlySessionToolArguments(arguments_, ["sessionId"])) {
+          throw new Error("stop_session received invalid arguments");
+        }
         output = Promise.resolve(actions.stopSession(sessionId(arguments_)));
         break;
     }

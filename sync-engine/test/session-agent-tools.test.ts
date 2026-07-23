@@ -1,12 +1,18 @@
 import { describe, expect, test } from "vitest";
 import type { AgentModel, AgentModelTurn } from "../../shared/agent-loop.ts";
 import { isRecord } from "../../shared/auth-model.ts";
+import {
+  jsonRecord,
+  records,
+  testRecord,
+} from "./session-agent-output-helpers.ts";
 import { findToolResultContent } from "./session-agent-tool-helpers.ts";
 import {
   completedParentDetail,
   scriptedModel,
   startToolSession,
   toolCall,
+  waitForSessionContent,
 } from "./session-agent-tool-setup.ts";
 import {
   CREDENTIAL_ID,
@@ -144,12 +150,11 @@ describe("session agent tools", () => {
   test("lists and reads only the spawning user's sessions", async () => {
     const model = scriptedModel([
       {
-        content: "Checking sessions.",
-        toolCalls: [toolCall("list_sessions", {})],
-      },
-      {
-        content: "Reading this session.",
-        toolCalls: [toolCall("read_session", { sessionId: SESSION_ID })],
+        content: "Read this session after listing it.",
+        toolCalls: [
+          toolCall("list_sessions", {}),
+          toolCall("read_session", { sessionId: SESSION_ID }),
+        ],
       },
       { content: "Session inspection complete.", toolCalls: [] },
     ]);
@@ -160,7 +165,13 @@ describe("session agent tools", () => {
     const listed = findToolResultContent(readDetail, "list_sessions");
     expect(listed).toContain(SESSION_ID);
     const read = findToolResultContent(readDetail, "read_session");
-    expect(read).toContain("Inspect README.md");
+    const readOutput = jsonRecord(read ?? "null");
+    const readContent = testRecord(readOutput["content"]);
+    expect(records(readContent["records"])).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ content: "Inspect README.md", role: "user" }),
+      ]),
+    );
     readSetup.database.$client.close();
   });
 
@@ -219,6 +230,7 @@ describe("session agent tools", () => {
 
     expect(output).toContain("list_sessions");
     expect(output).toContain("read_session");
+    expect(output).toContain('\\"role\\": \\"user\\"');
     expect(output).toContain("Inspect README.md");
     expect(parallelSetup.runnerCommands).toEqual([]);
     parallelSetup.database.$client.close();
@@ -284,14 +296,14 @@ describe("session agent tools", () => {
   test("rejects a spawn that races with server draining", async () => {
     const model = scriptedModel([
       {
-        content: "Delegating during restart.",
+        content: "Delegate during restart; it must not launch.",
         toolCalls: [spawnCall("This should not launch")],
       },
       { content: "Restart race handled.", toolCalls: [] },
     ]);
     const setup = await startToolSession(model);
     const draining = setup.sessions.drain();
-    const detail = await completedParentDetail(setup, "idle");
+    const detail = await waitForSessionContent(setup, "server_restarting");
     const output = findToolResultContent(detail, "spawn_session");
 
     expect(output).toContain("server_restarting");
@@ -353,7 +365,7 @@ describe("session agent tools", () => {
 
     await waitForRunnerSession(setup, SESSION_ID);
     completeChildAgentFile(setup);
-    const parent = await waitForParentContent(
+    const parent = await waitForSessionContent(
       setup,
       "I received the child report.",
     );
@@ -373,7 +385,7 @@ describe("session agent tools", () => {
     await childSessionId(failureSetup);
     completeChildAgentFile(failureSetup);
 
-    const updatedParent = await waitForParentContent(
+    const updatedParent = await waitForSessionContent(
       failureSetup,
       '\\"status\\": \\"failed\\"',
     );
@@ -390,7 +402,7 @@ describe("session agent tools", () => {
     model.childSessionId = childId;
     completeChildAgentFile(setup);
 
-    const updatedParent = await waitForParentContent(
+    const updatedParent = await waitForSessionContent(
       setup,
       '\\"status\\": \\"stopped\\"',
     );

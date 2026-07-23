@@ -1,3 +1,5 @@
+import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
+import type { AppDatabase } from "../shared/database.ts";
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { createJsonResponse } from "./http.ts";
@@ -23,6 +25,11 @@ type SessionAgentCredentialAction = (
 ) => Promise<Response> | Response;
 
 export interface SessionAgentActionDependencies {
+  readonly database: AppDatabase;
+  readonly discoverModels: (
+    provider: "openai" | "openrouter",
+    credential: ProviderCredentialAccess,
+  ) => Promise<AgentModelCatalog>;
   readonly store: SessionStore;
   readonly draining: () => boolean;
   readonly now: () => number;
@@ -40,6 +47,10 @@ export interface SessionAgentActionDependencies {
     readonly maxContextTokens: number | null;
     readonly providerPricing: AgentSessionDetail["providerPricing"];
   }>;
+  readonly readCredential: (
+    userId: string,
+    selection: SessionAgentCredentialSelection,
+  ) => Promise<ProviderCredentialAccess | undefined>;
   readonly withCredential: (
     userId: string,
     selection: SessionAgentCredentialSelection,
