@@ -48,7 +48,11 @@ function indexForValue(
 }
 
 function normalizedSearch(value: string): string {
-  return value.trim().toLocaleLowerCase();
+  return value
+    .trim()
+    .normalize("NFKD")
+    .replaceAll(/\p{M}/gu, "")
+    .toLocaleLowerCase();
 }
 
 function selectedPage(props: CustomSelectProps): number {
@@ -64,7 +68,7 @@ function OptionContent(props: {
   return (
     <span class="flex min-w-0 flex-1 flex-col items-start gap-1 sm:flex-row sm:justify-between sm:gap-3">
       <span class="min-w-0">
-        <span class="block truncate">{props.option.label}</span>
+        <span class="block min-w-0 break-words">{props.option.label}</span>
         <Show when={props.option.description}>
           {(description) => (
             <span class="mt-1 block whitespace-pre-line text-xs leading-5 text-slate-500">
@@ -166,7 +170,8 @@ export function CustomSelect(props: CustomSelectProps): JSX.Element {
     }
     return props.options.filter((option) =>
       [option.label, option.value, option.description, option.detail].some(
-        (value) => value?.toLocaleLowerCase().includes(search) === true,
+        (value) =>
+          value !== undefined && normalizedSearch(value).includes(search),
       ),
     );
   });
@@ -404,6 +409,24 @@ export function CustomSelect(props: CustomSelectProps): JSX.Element {
   });
   createEffect(
     on(
+      [() => props.options, () => props.selectedValue],
+      () => {
+        if (!props.open) {
+          return;
+        }
+        setQuery("");
+        const index = Math.max(
+          0,
+          indexForValue(props.options, props.selectedValue),
+        );
+        setPage(Math.floor(index / PAGE_SIZE));
+        setActiveValue(props.options[index]?.value);
+      },
+      { defer: true },
+    ),
+  );
+  createEffect(
+    on(
       () => props.open,
       (open, wasOpen) => {
         if (open && !wasOpen) {
@@ -512,7 +535,7 @@ export function CustomSelect(props: CustomSelectProps): JSX.Element {
             onKeyDown={handleListNavigation}
             ref={setListbox}
             role="listbox"
-            tabindex={searchable() ? "-1" : "0"}
+            tabindex="0"
           >
             <For each={pageOptions()}>
               {(option) => {
