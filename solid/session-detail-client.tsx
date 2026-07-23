@@ -24,6 +24,7 @@ import {
   sessionContextLabel,
 } from "./session-context-client.tsx";
 import type { SessionController } from "./session-controller.ts";
+import { SessionTranscriptFilterControls } from "./session-transcript-filter-controls.tsx";
 import { SessionTranscript } from "./session-transcript.tsx";
 
 const STATUS_PRESENTATION: Readonly<
@@ -142,6 +143,8 @@ function SessionMetrics(props: {
 
 interface SessionViewProps {
   readonly controller: SessionController;
+  readonly credentialAvailable?: boolean | undefined;
+  readonly runnerAvailable?: boolean | undefined;
   readonly state: SessionViewState;
 }
 
@@ -259,13 +262,61 @@ function isAtScrollEnd(element: HTMLElement): boolean {
   );
 }
 
+function composerUnavailableReason(
+  detail: AgentSessionDetail,
+  state: SessionViewState,
+  runnerAvailable: boolean | undefined,
+  credentialAvailable: boolean | undefined,
+): string | undefined {
+  if (state.loadingDetail) {
+    return "Refreshing session state…";
+  }
+  if (state.sending) {
+    return "Sending…";
+  }
+  if (state.stopping) {
+    return "Stopping…";
+  }
+  if (state.compacting) {
+    return "Compacting…";
+  }
+  if (detail.status === "queued") {
+    return "Session is queued. You can send when it is ready.";
+  }
+  if (detail.status === "running") {
+    return "Session is running. You can send when it is ready.";
+  }
+  if (runnerAvailable === false) {
+    return "The session runner is offline or unavailable.";
+  }
+  if (credentialAvailable === false) {
+    return "The session credential is unavailable.";
+  }
+  return undefined;
+}
+
 function LoadedSessionDetail(props: {
   readonly controller: SessionController;
+  readonly credentialAvailable: boolean | undefined;
   readonly detail: AgentSessionDetail;
+  readonly runnerAvailable: boolean | undefined;
   readonly state: SessionViewState;
 }): JSX.Element {
   const active = (): boolean =>
     props.detail.status === "queued" || props.detail.status === "running";
+  const composerReason = (): string | undefined =>
+    composerUnavailableReason(
+      props.detail,
+      props.state,
+      props.runnerAvailable,
+      props.credentialAvailable,
+    );
+  const composerDisabled = (): boolean => composerReason() !== undefined;
+  const compactionDisabled = (): boolean =>
+    active() ||
+    props.state.compacting ||
+    props.state.sending ||
+    props.state.stopping;
   const [scrollLockEnabled, setScrollLockEnabled] = createSignal(true);
   const [transcript, setTranscript] = createSignal<HTMLUListElement>();
   const scrollToEnd = (): void => {
@@ -331,6 +382,12 @@ function LoadedSessionDetail(props: {
           </Show>
         </div>
       </div>
+      <SessionTranscriptFilterControls
+        filters={props.state.transcriptFilters}
+        onChange={(name, visible) => {
+          props.controller.setTranscriptFilter(name, visible);
+        }}
+      />
       <ul
         aria-live="polite"
         class="mt-5 max-h-[36rem] space-y-3 overflow-y-auto pr-1"
@@ -342,15 +399,17 @@ function LoadedSessionDetail(props: {
       >
         <SessionTranscript
           agentFile={props.detail.agentFile}
+          filters={props.state.transcriptFilters}
           messages={props.detail.messages}
           tools={props.detail.tools}
         />
       </ul>
-      <Show when={!active()}>
-        <div class="mt-5 flex flex-col gap-3">
+      <div class="mt-5 flex flex-col gap-3">
+        <Show when={!active()}>
           <CompactionControls
             autoCompact={props.detail.autoCompact}
             compacting={props.state.compacting}
+            disabled={compactionDisabled()}
             onCompact={() => {
               void props.controller.compact();
             }}
@@ -358,43 +417,63 @@ function LoadedSessionDetail(props: {
               void props.controller.toggleAutoCompact(enabled);
             }}
           />
-          <div class="flex gap-3">
-            <SessionFollowUp
-              images={props.state.followUpImages}
-              onAddImages={(files) => {
+        </Show>
+        <div class="flex flex-col gap-3 sm:flex-row">
+          <SessionFollowUp
+            availabilityDescriptionId="session-composer-state"
+            availabilityLabel={
+              composerReason() ?? "Ready for another instruction."
+            }
+            disabled={composerDisabled()}
+            images={props.state.followUpImages}
+            onAddImages={(files) => {
+              if (!composerDisabled()) {
                 void props.controller.addImages(files, true);
-              }}
-              onInput={(value) => {
-                props.controller.setFollowUp(value);
-              }}
-              onKeyDown={(event) => {
-                if (event.ctrlKey && event.key === "Enter") {
-                  event.preventDefault();
-                  event.currentTarget.form?.requestSubmit();
-                }
-              }}
-              onRemoveImage={(index) => {
+              }
+            }}
+            onInput={(value) => {
+              props.controller.setFollowUp(value);
+            }}
+            onKeyDown={(event) => {
+              if (
+                !composerDisabled() &&
+                event.ctrlKey &&
+                event.key === "Enter"
+              ) {
+                event.preventDefault();
+                event.currentTarget.form?.requestSubmit();
+              }
+            }}
+            onRemoveImage={(index) => {
+              if (!composerDisabled()) {
                 props.controller.removeImage(index, "followUp");
-              }}
-              onSubmit={() => {
+              }
+            }}
+            onSubmit={() => {
+              if (!composerDisabled()) {
                 void props.controller.send();
-              }}
-              prompt={props.state.followUp}
-              sending={props.state.sending}
-            />
+              }
+            }}
+            prompt={props.state.followUp}
+            sending={props.state.sending}
+          />
+          <Show when={!active()}>
             <button
-              class="self-end rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950"
-              disabled={props.state.sending}
+              aria-describedby="session-composer-state"
+              class="self-end rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={composerDisabled()}
               onClick={() => {
-                void props.controller.continueSession();
+                if (!composerDisabled()) {
+                  void props.controller.continueSession();
+                }
               }}
               type="button"
             >
               Continue
             </button>
-          </div>
+          </Show>
         </div>
-      </Show>
+      </div>
     </div>
   );
 }
@@ -416,7 +495,9 @@ export function SessionDetail(props: SessionViewProps): JSX.Element {
         {(detail) => (
           <LoadedSessionDetail
             controller={props.controller}
+            credentialAvailable={props.credentialAvailable}
             detail={detail()}
+            runnerAvailable={props.runnerAvailable}
             state={props.state}
           />
         )}

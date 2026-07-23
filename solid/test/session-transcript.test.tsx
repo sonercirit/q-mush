@@ -1,6 +1,11 @@
 import { expect, test } from "vitest";
+import type { AgentFile } from "../../shared/agent-file.ts";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import type { AgentSessionMessage } from "../../shared/session-model.ts";
+import {
+  DEFAULT_SESSION_TRANSCRIPT_FILTERS,
+  type SessionTranscriptFilters,
+} from "../../solid/session-transcript-filters.ts";
 import { SessionTranscript } from "../../solid/session-transcript.tsx";
 import { renderSolidToString } from "./render-solid.tsx";
 
@@ -9,6 +14,13 @@ interface TranscriptTestMessageOptions {
   readonly id: string;
   readonly name: string;
 }
+
+const EMPTY_MESSAGE_METADATA = {
+  images: [],
+  toolCallId: null,
+  toolCalls: [],
+  toolName: null,
+} as const;
 
 function transcriptMessage(
   options: TranscriptTestMessageOptions,
@@ -62,11 +74,139 @@ function userMessage(content: string): AgentSessionMessage {
 function renderMessages(
   messages: readonly AgentSessionMessage[],
   tools = AGENT_SESSION_TOOL_NAMES,
+  filters: SessionTranscriptFilters = DEFAULT_SESSION_TRANSCRIPT_FILTERS,
+  agentFile: AgentFile | null = null,
 ): string {
   return renderSolidToString(() => (
-    <SessionTranscript agentFile={null} messages={messages} tools={tools} />
+    <SessionTranscript
+      agentFile={agentFile}
+      filters={filters}
+      messages={messages}
+      tools={tools}
+    />
   ));
 }
+
+function message(
+  id: string,
+  content: string,
+  role: AgentSessionMessage["role"],
+): AgentSessionMessage {
+  return {
+    content,
+    createdAt: 1,
+    id,
+    role,
+    ...EMPTY_MESSAGE_METADATA,
+  };
+}
+
+function filtersWith(
+  category: keyof SessionTranscriptFilters,
+): SessionTranscriptFilters {
+  return {
+    assistantMessages: false,
+    notices: false,
+    systemPrompt: false,
+    thinking: false,
+    toolActivity: false,
+    toolDefinitions: false,
+    userMessages: false,
+    [category]: true,
+  };
+}
+
+test.each([
+  ["systemPrompt", "System prompt", "Project rule"],
+  ["toolDefinitions", "Tool definitions", '"read"'],
+  ["userMessages", "User category", "User category"],
+  ["thinking", "Thinking category", "Thinking category"],
+  ["assistantMessages", "Assistant category", "Assistant category"],
+  ["notices", "Notice category", "Notice category"],
+] as const)(
+  "renders only the selected %s transcript category",
+  (category, expectedLabel, expectedContent) => {
+    const html = renderMessages(
+      [
+        message("user-category", "User category", "user"),
+        message("thinking-category", "Thinking category", "thinking"),
+        message("assistant-category", "Assistant category", "assistant"),
+        message("notice-category", "Notice category", "error"),
+      ],
+      ["read"],
+      filtersWith(category),
+      { content: "Project rule", name: "AGENTS.md" },
+    );
+
+    expect(html).toContain(expectedLabel);
+    expect(html).toContain(expectedContent);
+    for (const hidden of [
+      "User category",
+      "Thinking category",
+      "Assistant category",
+      "Notice category",
+    ]) {
+      if (hidden !== expectedContent) {
+        expect(html).not.toContain(hidden);
+      }
+    }
+  },
+);
+
+test("keeps tool calls and matching responses in one filter category", () => {
+  const call = assistantToolCall({
+    arguments: '{"path":"README.md"}',
+    id: "read-category",
+    name: "read",
+  });
+  const result = toolResult({
+    content: "Tool category result",
+    id: "read-category",
+    name: "read",
+  });
+  const visible = renderMessages(
+    [call, result],
+    ["read"],
+    filtersWith("toolActivity"),
+  );
+  const hidden = renderMessages(
+    [call, result],
+    ["read"],
+    filtersWith("assistantMessages"),
+  );
+
+  expect(visible).toContain("Tool call · read");
+  expect(visible).toContain("Tool result · read");
+  expect(visible).toContain("Tool category result");
+  expect(hidden).not.toContain("Tool call · read");
+  expect(hidden).not.toContain("Tool result · read");
+});
+
+test("preserves canonical order among visible transcript categories", () => {
+  const html = renderMessages(
+    [
+      message("user-order", "First visible", "user"),
+      message("thinking-order", "Hidden middle", "thinking"),
+      message("assistant-order", "Second visible", "assistant"),
+      message("notice-order", "Third visible", "system"),
+    ],
+    [],
+    {
+      ...DEFAULT_SESSION_TRANSCRIPT_FILTERS,
+      systemPrompt: false,
+      thinking: false,
+      toolDefinitions: false,
+    },
+  );
+
+  expect(html.indexOf("First visible")).toBeLessThan(
+    html.indexOf("Second visible"),
+  );
+  expect(html.indexOf("Second visible")).toBeLessThan(
+    html.indexOf("Third visible"),
+  );
+  expect(html).not.toContain("Hidden middle");
+});
 
 test("shows only the session's selected tool definitions", () => {
   const html = renderMessages([], ["read", "brave_search"]);
