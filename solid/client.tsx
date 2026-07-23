@@ -37,6 +37,8 @@ import {
 } from "./render-debug.tsx";
 import { RunnerPanel } from "./runner-client.tsx";
 import { RunnerController } from "./runner-controller.ts";
+import { RunningSessionsController } from "./running-sessions-controller.ts";
+import { RunningSessionsPanel } from "./running-sessions-panel.tsx";
 import { SessionPanel } from "./session-client.tsx";
 import { SessionController } from "./session-controller.ts";
 import "./styles.css";
@@ -295,51 +297,72 @@ function Workspace(props: {
   readonly openAi: ProviderController;
   readonly openRouter: ProviderController;
   readonly runners: RunnerController;
+  readonly runningSessions: RunningSessionsController;
   readonly user: AuthenticatedUser;
 }): JSX.Element {
   return (
     <div
-      class="mt-12 space-y-6"
+      class="mt-12 lg:grid lg:grid-cols-[minmax(0,1fr)_17rem] lg:items-start lg:gap-6 xl:grid-cols-[minmax(0,1fr)_18rem] 2xl:grid-cols-[minmax(0,1fr)_20rem]"
+      data-workspace-layout="desktop-status-panel"
       {...renderDebugBoundary("workspace", "Authenticated workspace")}
     >
-      <SessionPanel
-        controller={props.agentSessions}
-        openAi={props.openAi.view}
-        openRouter={props.openRouter.view}
-        runners={props.runners.view}
-      />
-      <RunnerPanel controller={props.runners} />
-      <aside
-        aria-label="Google account"
-        class="flex flex-col gap-5 rounded-3xl border border-white/10 bg-slate-900/80 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8"
-        {...renderDebugBoundary("google-account", "Google account")}
-      >
-        <div class="flex min-w-0 items-center gap-4">
-          <Avatar user={props.user} />
-          <div class="min-w-0">
-            <p class="truncate font-semibold text-white">{props.user.name}</p>
-            <p class="truncate text-sm text-slate-400">{props.user.email}</p>
-          </div>
-        </div>
-        <button
-          class="rounded-2xl border border-white/10 px-5 py-2.5 text-sm font-semibold text-slate-300 transition hover:border-rose-300/30 hover:text-rose-200 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
-          disabled={props.logoutPending}
-          onClick={() => {
-            void props.logout();
-          }}
-          type="button"
+      <div class="space-y-6">
+        <SessionPanel
+          controller={props.agentSessions}
+          openAi={props.openAi.view}
+          openRouter={props.openRouter.view}
+          runners={props.runners.view}
+        />
+        <RunnerPanel controller={props.runners} />
+        <aside
+          aria-label="Google account"
+          class="flex flex-col gap-5 rounded-3xl border border-white/10 bg-slate-900/80 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8"
+          {...renderDebugBoundary("google-account", "Google account")}
         >
-          {props.logoutPending ? "Signing out…" : "Sign out"}
-        </button>
-      </aside>
-      <ProviderPanel configuration={OPENAI_PANEL} controller={props.openAi} />
-      <ProviderPanel
-        configuration={OPENROUTER_PANEL}
-        controller={props.openRouter}
-      />
-      <ProviderPanel
-        configuration={BRAVE_SEARCH_PANEL}
-        controller={props.braveSearch}
+          <div class="flex min-w-0 items-center gap-4">
+            <Avatar user={props.user} />
+            <div class="min-w-0">
+              <p class="truncate font-semibold text-white">{props.user.name}</p>
+              <p class="truncate text-sm text-slate-400">{props.user.email}</p>
+            </div>
+          </div>
+          <button
+            class="rounded-2xl border border-white/10 px-5 py-2.5 text-sm font-semibold text-slate-300 transition hover:border-rose-300/30 hover:text-rose-200 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
+            disabled={props.logoutPending}
+            onClick={() => {
+              void props.logout();
+            }}
+            type="button"
+          >
+            {props.logoutPending ? "Signing out…" : "Sign out"}
+          </button>
+        </aside>
+        <ProviderPanel configuration={OPENAI_PANEL} controller={props.openAi} />
+        <ProviderPanel
+          configuration={OPENROUTER_PANEL}
+          controller={props.openRouter}
+        />
+        <ProviderPanel
+          configuration={BRAVE_SEARCH_PANEL}
+          controller={props.braveSearch}
+        />
+      </div>
+      <RunningSessionsPanel
+        controller={props.runningSessions}
+        focusSessionList={() => {
+          props.agentSessions.focusList();
+        }}
+        selectSession={(sessionId) => {
+          void props.agentSessions
+            .selectAndFocus(sessionId)
+            .catch(() => undefined);
+        }}
+        runners={() =>
+          (props.runners.view().runners ?? []).map(({ id, name }) => ({
+            id,
+            name,
+          }))
+        }
       />
     </div>
   );
@@ -356,26 +379,54 @@ function App(): JSX.Element {
   const openRouter = new ProviderController(OPENROUTER_PANEL);
   const runners = new RunnerController();
   const agentSessions = new SessionController();
+  const runningSessions = new RunningSessionsController();
+  let authenticatedWorkspace = false;
   const providerControllers = [openAi, openRouter, braveSearch] as const;
-  const realtime = new RealtimeConnection((event) => {
-    switch (event.type) {
-      case "runners":
-        runners.applyRealtime(event.runners);
-        break;
-      case "sessions":
-        agentSessions.applyRealtime(event.sessions);
-        break;
-      case "session":
-        agentSessions.applyDetail(event.session);
-        break;
-      case "session_delta":
-        agentSessions.applyDelta(event);
-        break;
-    }
-  });
+  const realtime = new RealtimeConnection(
+    (event) => {
+      switch (event.type) {
+        case "runners":
+          if (!authenticatedWorkspace) {
+            break;
+          }
+          runners.applyRealtime(event.runners);
+          break;
+        case "sessions":
+          if (!authenticatedWorkspace) {
+            break;
+          }
+          agentSessions.applyRealtime(event.sessions);
+          runningSessions.applySnapshot(event.sessions);
+          break;
+        case "session":
+          if (!authenticatedWorkspace) {
+            break;
+          }
+          agentSessions.applyDetail(event.session);
+          runningSessions.applySession(event.session);
+          break;
+        case "session_delta":
+          if (!authenticatedWorkspace) {
+            break;
+          }
+          agentSessions.applyDelta(event);
+          runningSessions.applyDelta();
+          break;
+      }
+    },
+    {
+      onConnectionChange: (state) => {
+        if (state === "disconnected") {
+          runningSessions.connectionLost();
+        }
+      },
+    },
+  );
 
   const resetWorkspaceConnections = (): void => {
+    authenticatedWorkspace = false;
     realtime.stop();
+    runningSessions.reset();
     agentSessions.reset();
     runners.reset();
     for (const controller of providerControllers) {
@@ -392,6 +443,7 @@ function App(): JSX.Element {
       const loaded = readAuthSession(await requestJson(AUTH_SESSION_PATH));
       setSession(loaded);
       if (loaded.user !== null) {
+        authenticatedWorkspace = true;
         await Promise.all([
           agentSessions.load(),
           runners.load(),
@@ -433,7 +485,7 @@ function App(): JSX.Element {
     <RenderDebugProvider view={debug}>
       <section
         aria-labelledby="app-title"
-        class="relative min-h-screen overflow-hidden bg-slate-950 px-6 py-8 text-slate-100 sm:px-10 lg:px-12"
+        class="relative min-h-screen overflow-x-hidden bg-slate-950 px-6 py-8 text-slate-100 sm:px-10 lg:px-12"
         {...renderDebugBoundary("app", "App")}
       >
         <div
@@ -498,6 +550,7 @@ function App(): JSX.Element {
                           openAi={openAi}
                           openRouter={openRouter}
                           runners={runners}
+                          runningSessions={runningSessions}
                           user={user()}
                         />
                       )}

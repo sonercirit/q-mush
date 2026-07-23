@@ -52,6 +52,7 @@ export function initialSessionViewState(): SessionViewState {
     selectedId: undefined,
     sending: false,
     sessions: undefined,
+    sessionsSource: undefined,
     stopping: false,
   };
 }

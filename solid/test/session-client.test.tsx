@@ -27,6 +27,7 @@ const SESSION_STATE: SessionViewState = {
   compacting: false,
   directoryPicker: initialDirectoryPickerState(),
   sessions: [],
+  sessionsSource: "http",
   stopping: false,
   sending: false,
   selectedId: undefined,

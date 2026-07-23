@@ -43,12 +43,18 @@ function selectedMutation(
   return sessionId === undefined ? undefined : create(sessionId);
 }
 
+function focusSessionList(element: HTMLElement | undefined): void {
+  element?.scrollIntoView({ behavior: "smooth", block: "start" });
+  element?.focus({ preventScroll: true });
+}
+
 export class SessionController {
   readonly #directoryPicker: DirectoryPickerController;
   readonly #models: SessionModelController;
   readonly #realtime: SessionRealtimeState;
   readonly #view: RevisionState<SessionViewState>;
   readonly #reactiveView: ReactiveState<SessionViewState>;
+  #listElement: HTMLElement | undefined;
 
   constructor(
     reactiveView = createReactiveState(initialSessionViewState()),
@@ -94,6 +100,14 @@ export class SessionController {
 
   get view(): Accessor<SessionViewState> {
     return this.#reactiveView.state;
+  }
+
+  focusList(): void {
+    focusSessionList(this.#listElement);
+  }
+
+  setListElement(element: HTMLElement): void {
+    this.#listElement = element;
   }
 
   addImages(files: readonly File[], follow: boolean): Promise<void> {
@@ -192,6 +206,13 @@ export class SessionController {
     return this.#select(sessionId);
   }
 
+  selectAndFocus(sessionId: string): Promise<void> {
+    this.#listElement?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return this.#select(sessionId).finally(() => {
+      focusSessionList(this.#listElement);
+    });
+  }
+
   send(): Promise<void> {
     return this.#send();
   }
@@ -243,6 +264,7 @@ export class SessionController {
     this.#directoryPicker.reset();
     this.#models.reset();
     this.#realtime.reset();
+    this.#listElement = undefined;
     this.#view.reset(initialSessionViewState());
   }
 
@@ -270,6 +292,7 @@ export class SessionController {
         this.#view.patch({
           selectedId,
           sessions,
+          sessionsSource: "http",
         });
       }
 

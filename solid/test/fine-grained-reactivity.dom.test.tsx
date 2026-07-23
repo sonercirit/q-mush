@@ -393,6 +393,16 @@ test("session resources, drafts, realtime lists, and selected details update in 
 
   controller.applyRealtime([summaryFromDetail(TEST_SESSION_DETAIL)]);
   expect(container.textContent).toContain("Fix the app");
+  const sessionItem = query(
+    container,
+    `[data-session-id='${TEST_SESSION_DETAIL.id}']`,
+  ).closest("li");
+  controller.applyRealtime([{ ...summaryFromDetail(TEST_SESSION_DETAIL) }]);
+  expect(
+    query(container, `[data-session-id='${TEST_SESSION_DETAIL.id}']`).closest(
+      "li",
+    ),
+  ).toBe(sessionItem);
   click(container, `[data-session-id='${TEST_SESSION_DETAIL.id}']`);
   const sessionPromptLabel = "System prompt";
   await vi.waitFor(() => {

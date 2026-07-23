@@ -54,13 +54,26 @@ function connectionOptions(sockets: BrowserSocket[]) {
   };
 }
 
+function createTestConnection(
+  sockets: BrowserSocket[],
+  listener: ConstructorParameters<typeof RealtimeConnection>[0] = () =>
+    undefined,
+  options: ConstructorParameters<typeof RealtimeConnection>[1] = {},
+): RealtimeConnection {
+  return new RealtimeConnection(listener, {
+    ...connectionOptions(sockets),
+    ...options,
+  });
+}
+
 test("connects to the same-origin realtime WebSocket and decodes events", () => {
   const sockets: BrowserSocket[] = [];
   const events: unknown[] = [];
-  const connection = new RealtimeConnection((event) => events.push(event), {
-    ...connectionOptions(sockets),
-    setTimeout: () => 1,
-  });
+  const connection = createTestConnection(
+    sockets,
+    (event) => events.push(event),
+    { setTimeout: () => 1 },
+  );
 
   connection.start();
   sockets[0]?.dispatchEvent(new Event("open"));
@@ -72,11 +85,38 @@ test("connects to the same-origin realtime WebSocket and decodes events", () => 
   connection.stop();
 });
 
+test("reports connection lifecycle around reconnect snapshots", () => {
+  const sockets: BrowserSocket[] = [];
+  const timers: (() => void)[] = [];
+  const connectionStates: string[] = [];
+  const connection = createTestConnection(sockets, undefined, {
+    onConnectionChange: (state) => connectionStates.push(state),
+    setTimeout: (callback) => {
+      timers.push(callback);
+      return timers.length;
+    },
+  });
+
+  connection.start();
+  expect(connectionStates).toEqual(["connecting"]);
+  sockets[0]?.dispatchEvent(new Event("open"));
+  expect(connectionStates).toEqual(["connecting", "connected"]);
+
+  sockets[0]?.close();
+  expect(connectionStates).toEqual(["connecting", "connected", "disconnected"]);
+  timers.shift()?.();
+  expect(connectionStates.at(-1)).toBe("connecting");
+  sockets[1]?.dispatchEvent(new Event("open"));
+  expect(connectionStates.at(-1)).toBe("connected");
+
+  connection.stop();
+  expect(connectionStates.at(-1)).toBe("stopped");
+});
+
 test("reconnects after a close and stops retrying after stop", () => {
   const sockets: BrowserSocket[] = [];
   const timers: (() => void)[] = [];
-  const connection = new RealtimeConnection(() => undefined, {
-    ...connectionOptions(sockets),
+  const connection = createTestConnection(sockets, undefined, {
     setTimeout: (callback) => {
       timers.push(callback);
       return timers.length;

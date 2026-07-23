@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Living project memory. Update it with durable information.
+Living project memory.
 
 ## Project Snapshot
 
@@ -8,8 +8,7 @@ Living project memory. Update it with durable information.
 - Source is split across `solid/`, `sync-engine/`, `runner/`, and `shared/`;
   `sync-engine/index.ts` is the server entry point.
 - Tests live in `test/` directories; no `src/`.
-- Homepage `/`; app `/app`.
-- Tests use Vitest with Bun.
+- Homepage `/`; app `/app`; tests use Vitest with Bun.
 
 ## Working Agreements
 
@@ -109,21 +108,22 @@ Living project memory. Update it with durable information.
 - Browser messages sort by time then ID. Live output anchors after the
   initiating message; snapshots replace it in place.
 - `sync-engine/sessions.ts` and `sync-engine/session-store.ts` persist coding
-  sessions. User messages support selecting or pasting up to eight 10 MB PNG,
-  JPEG, GIF, or WebP images, persisted with the transcript and sent as native
-  multimodal input. Sessions record cumulative active time, model cost
-  (including compaction), token usage, and the context limit. OpenRouter charges
-  are authoritative; others use captured/OpenAI estimates, with unknown prices
-  unavailable. OAuth figures are API equivalents, not subscription charges.
-  Usage is yellow at 80% and red at 90%. Auto-compaction defaults on and
-  summarizes completed history before the next request at 95%; idle sessions can
-  compact manually. Compaction soft-deletes prior active messages and inserts a
-  replayable handoff. Provider secrets never enter browser or runner work
-  payloads. The working-directory field opens the interactive browser in
-  `solid/directory-picker-client.tsx`; its controller posts to
-  `/api/runners/:id/directories` for canonical directory metadata. Before each
-  run, `read_agent_file` loads exact-root `AGENTS.md`, falling back to
-  `CLAUDE.md`; only `AGENTS.md` is used when both exist.
+  sessions. A realtime desktop panel separates Running/Queued, retains stale
+  reconnect data, bounds its keyed list at four, and becomes a mobile full-list
+  button. User messages support up to eight 10 MB PNG, JPEG, GIF, or WebP
+  images, persisted with the transcript and sent as native multimodal input.
+  Sessions record active time, cost (including compaction), token usage, and
+  context. OpenRouter charges are authoritative; others use captured/OpenAI
+  estimates, with unknown prices unavailable. OAuth figures are API equivalents,
+  not subscription charges. Usage is yellow at 80% and red at 90%.
+  Auto-compaction defaults on and summarizes completed history before the next
+  request at 95%; idle sessions can compact manually. Compaction soft-deletes
+  prior active messages and inserts a replayable handoff. Provider secrets never
+  enter browser or runner work payloads. The working-directory field opens the
+  interactive browser in `solid/directory-picker-client.tsx`; its controller
+  posts to `/api/runners/:id/directories` for canonical directory metadata.
+  Before each run, `read_agent_file` loads exact-root `AGENTS.md`, falling back
+  to `CLAUDE.md`; only `AGENTS.md` is used when both exist.
 
   `runner/runner-workspace.ts` shares canonical workspace resolution and
   containment with the file tools. Tool and skill selections persist per
@@ -194,10 +194,8 @@ Living project memory. Update it with durable information.
   `knip.production.config.ts` limits the production graph to runtime source.
   `bun run knip` runs both production and comprehensive test/tooling passes, so
   tests cannot keep production code alive while unused test helpers still fail.
-- `.jscpd.json` maps all supported JavaScript and TypeScript extensions to the
-  TSX format for cross-extension detection; import declarations are ignored,
-  while other clones of at least 20 tokens and one line fail the zero-percent
-  threshold.
+- `.jscpd.json` checks production code across JS/TS extensions as TSX, ignoring
+  imports and tests; any clone of at least 20 tokens and one line fails.
 - `scripts/repository-check.ts` lists existing tracked and unignored files and
   calls the focused policy APIs under `scripts/`. It rejects files reaching
   20,000 Unicode code points (excluding `bun.lock` and the generated `drizzle/`

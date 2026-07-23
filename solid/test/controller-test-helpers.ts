@@ -6,6 +6,21 @@ interface RealtimeController<Value> {
   load(): Promise<void>;
 }
 
+export interface ReactiveController {
+  readonly view: () => unknown;
+}
+
+export function countReactiveChanges(controller: ReactiveController): {
+  readonly count: () => number;
+} {
+  let changes = 0;
+  createEffect(() => {
+    controller.view();
+    changes += 1;
+  });
+  return { count: () => changes };
+}
+
 type FetchImplementation = (
   ...parameters: Parameters<typeof globalThis.fetch>
 ) => ReturnType<typeof globalThis.fetch>;
@@ -33,18 +48,14 @@ export async function expectRealtimeToRemainSilent<Value>(
 
   try {
     await createRoot(async (dispose) => {
-      let changes = 0;
       const controller = createController();
-      createEffect(() => {
-        controller.view();
-        changes += 1;
-      });
+      const changes = countReactiveChanges(controller);
 
       await controller.load();
-      const changesAfterLoad = changes;
+      const changesAfterLoad = changes.count();
       controller.applyRealtime(realtimeValue);
 
-      expect(changes).toBe(changesAfterLoad);
+      expect(changes.count()).toBe(changesAfterLoad);
       dispose();
     });
   } finally {

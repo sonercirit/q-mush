@@ -10,6 +10,10 @@ import type { RevisionState } from "./revision-state.ts";
 import type { SessionViewState } from "./session-client.tsx";
 import { summaryFromDetail } from "./session-codec.ts";
 import { createDisplaySessionMessage } from "./session-message.ts";
+import {
+  mergeSessionSummaries,
+  sessionSummaryListsMatch,
+} from "./session-summary-state.ts";
 
 export function selectedSessionCredential(value: string):
   | {
@@ -47,8 +51,16 @@ function serializedDataMatches(left: unknown, right: unknown): boolean {
 }
 
 export function sessionDataMatches(
-  left: AgentSessionDetail | readonly AgentSessionSummary[] | undefined,
-  right: AgentSessionDetail | readonly AgentSessionSummary[] | undefined,
+  left:
+    | AgentSessionDetail
+    | AgentSessionSummary
+    | readonly AgentSessionSummary[]
+    | undefined,
+  right:
+    | AgentSessionDetail
+    | AgentSessionSummary
+    | readonly AgentSessionSummary[]
+    | undefined,
 ): boolean {
   return serializedDataMatches(left, right);
 }
@@ -252,6 +264,27 @@ function reconcileStream(
   return { messages, persisted: false };
 }
 
+interface SessionSummaryUpdate {
+  readonly current: readonly AgentSessionSummary[] | undefined;
+  readonly incoming: readonly AgentSessionSummary[];
+}
+
+function realtimeSessionDataMatches(update: SessionSummaryUpdate): boolean {
+  return sessionSummaryListsMatch({
+    ...update,
+    matches: sessionDataMatches,
+  });
+}
+
+function mergeRealtimeSessions(
+  update: SessionSummaryUpdate,
+): readonly AgentSessionSummary[] {
+  return mergeSessionSummaries({
+    ...update,
+    matches: sessionDataMatches,
+  });
+}
+
 export class SessionRealtimeState {
   readonly #streamedContent = new Map<string, StreamedSessionContent>();
   readonly #view: RevisionState<SessionViewState>;
@@ -370,17 +403,26 @@ export class SessionRealtimeState {
 
   applySessions(sessions: readonly AgentSessionSummary[]): void {
     if (
-      this.#view.value.sessions === undefined ||
       this.#view.value.compacting ||
       this.#view.value.creating ||
       this.#view.value.sending ||
       this.#view.value.stopping ||
-      sessionDataMatches(this.#view.value.sessions, sessions)
+      (this.#view.value.sessionsSource === "realtime" &&
+        realtimeSessionDataMatches({
+          current: this.#view.value.sessions,
+          incoming: sessions,
+        }))
     ) {
       return;
     }
 
-    this.#view.patch({ sessions });
+    this.#view.patch({
+      sessions: mergeRealtimeSessions({
+        current: this.#view.value.sessions,
+        incoming: sessions,
+      }),
+      sessionsSource: "realtime",
+    });
   }
 
   reset(): void {

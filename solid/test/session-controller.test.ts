@@ -4,10 +4,7 @@ import { SESSIONS_PATH } from "../../shared/routes.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { summaryFromDetail } from "../../solid/session-codec.ts";
 import { SessionController } from "../../solid/session-controller.ts";
-import {
-  expectRealtimeToRemainSilent,
-  requestUrl,
-} from "./controller-test-helpers.ts";
+import { countReactiveChanges, requestUrl } from "./controller-test-helpers.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 import {
   sessionDetailWithStatus,
@@ -379,10 +376,39 @@ test("replaces a streaming transcript with a compacted snapshot", async () => {
   }
 });
 
-test("an unchanged session refresh does not notify the view", async () => {
-  await expectRealtimeToRemainSilent(
-    () => new SessionController(),
-    sessionResponse,
-    [summaryFromDetail(TEST_SESSION_DETAIL)],
-  );
+test("the first realtime snapshot replaces an HTTP-loaded session list", async () => {
+  await withRestoredFetch(async () => {
+    globalThis.fetch = Object.assign(sessionResponse, {
+      preconnect: globalThis.fetch.preconnect,
+    });
+    const controller = createRoot(() => new SessionController());
+    await controller.load();
+    expect(controller.state.sessions).toHaveLength(1);
+
+    controller.applyRealtime([]);
+
+    expect(controller.state.sessions).toEqual([]);
+    expect(controller.state.sessionsSource).toBe("realtime");
+  });
+});
+
+test("an unchanged realtime snapshot does not notify the view", async () => {
+  await withRestoredFetch(async () => {
+    globalThis.fetch = Object.assign(sessionResponse, {
+      preconnect: globalThis.fetch.preconnect,
+    });
+    await createRoot(async (dispose) => {
+      const controller = new SessionController();
+      const session = summaryFromDetail(TEST_SESSION_DETAIL);
+      const changes = countReactiveChanges(controller);
+
+      await controller.load();
+      controller.applyRealtime([session]);
+      const changesAfterSnapshot = changes.count();
+      controller.applyRealtime([{ ...session }]);
+
+      expect(changes.count()).toBe(changesAfterSnapshot);
+      dispose();
+    });
+  });
 });

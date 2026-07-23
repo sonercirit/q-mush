@@ -13,6 +13,9 @@ interface BrowserWebSocket extends EventTarget {
 type BrowserWebSocketFactory = (url: string) => BrowserWebSocket;
 type FrameCallback = (callback: () => void) => number;
 type RealtimeListener = (event: RealtimeServerEvent) => void;
+type RealtimeConnectionState =
+  "connected" | "connecting" | "disconnected" | "stopped";
+type ConnectionListener = (state: RealtimeConnectionState) => void;
 type SessionDelta = Extract<
   RealtimeServerEvent,
   { readonly type: "session_delta" }
@@ -35,9 +38,11 @@ export class RealtimeConnection {
   readonly #createSocket: BrowserWebSocketFactory;
   readonly #listener: RealtimeListener;
   readonly #location: RealtimeLocation;
+  readonly #onConnectionChange: ConnectionListener;
   readonly #requestFrame: FrameCallback;
   readonly #setTimeout: (callback: () => void, delay: number) => number;
   readonly #clearTimeout: (id: number) => void;
+  #connectionState: RealtimeConnectionState = "stopped";
   #reconnectAttempt = 0;
   #reconnectTimer: number | undefined;
   #sessionDeltaGeneration = 0;
@@ -52,6 +57,7 @@ export class RealtimeConnection {
       readonly clearTimeout?: (id: number) => void;
       readonly createSocket?: BrowserWebSocketFactory;
       readonly location?: RealtimeLocation;
+      readonly onConnectionChange?: ConnectionListener;
       readonly requestFrame?: FrameCallback;
       readonly setTimeout?: (callback: () => void, delay: number) => number;
     } = {},
@@ -59,6 +65,7 @@ export class RealtimeConnection {
     this.#createSocket = options.createSocket ?? ((url) => new WebSocket(url));
     this.#listener = listener;
     this.#location = options.location ?? window.location;
+    this.#onConnectionChange = options.onConnectionChange ?? (() => undefined);
     this.#requestFrame =
       options.requestFrame ??
       ((callback) => window.requestAnimationFrame(callback));
@@ -72,7 +79,16 @@ export class RealtimeConnection {
     }
 
     this.#stopped = false;
+    this.#reconnectAttempt = 0;
+    this.#notifyConnection("connecting");
     this.#connect();
+  }
+
+  #notifyConnection(state: RealtimeConnectionState): void {
+    if (state !== this.#connectionState) {
+      this.#connectionState = state;
+      this.#onConnectionChange(state);
+    }
   }
 
   stop(): void {
@@ -89,6 +105,7 @@ export class RealtimeConnection {
     this.#sessionDeltaFrame = undefined;
     this.#sessionDeltas.clear();
     socket?.close();
+    this.#notifyConnection("stopped");
   }
 
   #connect(): void {
@@ -106,6 +123,7 @@ export class RealtimeConnection {
     this.#socket = socket;
     socket.addEventListener("open", () => {
       this.#reconnectAttempt = 0;
+      this.#notifyConnection("connected");
       try {
         socket.send(JSON.stringify({ type: "refresh" }));
       } catch {
@@ -124,6 +142,7 @@ export class RealtimeConnection {
     socket.addEventListener("close", () => {
       if (this.#socket === socket) {
         this.#socket = undefined;
+        this.#notifyConnection("disconnected");
         this.#scheduleReconnect();
       }
     });
@@ -220,6 +239,7 @@ export class RealtimeConnection {
     this.#reconnectAttempt += 1;
     this.#reconnectTimer = this.#setTimeout(() => {
       this.#reconnectTimer = undefined;
+      this.#notifyConnection("connecting");
       this.#connect();
     }, delay);
   }

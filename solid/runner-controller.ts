@@ -2,6 +2,7 @@ import { type Accessor } from "solid-js";
 import { RUNNERS_PATH, runnerDefaultPath } from "../shared/routes.ts";
 import type { RunnerSummary } from "../shared/runner-model.ts";
 import { HttpResponseError, request, requestJson } from "./browser-http.ts";
+import { listsMatchByIdentity, retainById } from "./collection-state.ts";
 import { createReactiveState, type ReactiveState } from "./reactive-state.ts";
 import {
   createRunnerViewState,
@@ -60,15 +61,9 @@ function runnerListsMatch(
   left: readonly RunnerSummary[] | undefined,
   right: readonly RunnerSummary[],
 ): boolean {
-  return (
-    left?.length === right.length &&
-    left.every((runner, index) => {
-      const refreshedRunner = right[index];
-      return (
-        refreshedRunner !== undefined &&
-        runnerPresentationMatches(runner, refreshedRunner)
-      );
-    })
+  return listsMatchByIdentity(
+    left,
+    retainById(left, right, runnerPresentationMatches),
   );
 }
 

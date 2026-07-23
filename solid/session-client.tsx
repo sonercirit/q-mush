@@ -71,6 +71,7 @@ export interface SessionViewState {
   readonly selectedId: string | undefined;
   readonly sending: boolean;
   readonly sessions: readonly AgentSessionSummary[] | undefined;
+  readonly sessionsSource: "http" | "realtime" | undefined;
   readonly stopping: boolean;
 }
 
@@ -511,7 +512,13 @@ function SessionResults(props: SessionResultsProps): JSX.Element {
   const state = props.controller.view;
   return (
     <div class="mt-7 grid gap-5 lg:grid-cols-[18rem_minmax(0,1fr)]">
-      <aside aria-label="Agent sessions">
+      <aside
+        aria-label="Agent sessions"
+        ref={(element) => {
+          props.controller.setListElement(element);
+        }}
+        tabindex="-1"
+      >
         <SessionList controller={props.controller} />
       </aside>
       <div class="min-w-0 rounded-2xl border border-white/10 bg-slate-900/70 p-5">
