@@ -7,6 +7,11 @@ import {
 } from "../shared/agent-tools.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import {
+  boundedParallelOutput,
+  executeParallelCall,
+  mapWithParallelConcurrency,
+} from "../shared/parallel.ts";
+import {
   resolveRunnerWorkspace,
   runnerPathIsWithin,
 } from "./runner-workspace.ts";
@@ -16,8 +21,6 @@ const MAX_READ_OUTPUT_BYTES = 50 * 1024;
 const MAX_READ_LINES = 2_000;
 const MAX_COMMAND_OUTPUT_BYTES = 256 * 1024;
 const MAXIMUM_EDITS = 100;
-const MAXIMUM_PARALLEL_TOOLS = 8;
-const MAX_PARALLEL_TOOL_OUTPUT_BYTES = 50 * 1_024;
 const COMMAND_GROUP_WRAPPER = `
 terminate_command_group() {
   trap - TERM
@@ -453,12 +456,8 @@ function parallelToolUses(
 ): readonly ParallelToolUse[] {
   const value = arguments_["tool_uses"];
 
-  if (
-    !Array.isArray(value) ||
-    value.length < 2 ||
-    value.length > MAXIMUM_PARALLEL_TOOLS
-  ) {
-    throw new Error("Tool argument tool_uses must contain 2 to 8 calls");
+  if (!Array.isArray(value) || value.length < 2) {
+    throw new Error("Tool argument tool_uses must contain at least 2 calls");
   }
 
   return value.map((toolUse) => {
@@ -489,52 +488,39 @@ const RUNNER_TOOLS: Readonly<Record<BaseAgentToolName, RunnerTool>> = {
   write: writeTool,
 };
 
-function truncateParallelOutput(output: string): string {
-  const bytes = Buffer.from(output, "utf8");
-
-  if (bytes.byteLength <= MAX_PARALLEL_TOOL_OUTPUT_BYTES) {
-    return output;
-  }
-
-  let end = MAX_PARALLEL_TOOL_OUTPUT_BYTES;
-
-  while (end > 0 && (bytes[end] ?? 0) >> 6 === 2) {
-    end -= 1;
-  }
-
-  return `${bytes.subarray(0, end).toString("utf8")}\n[parallel output truncated]`;
+export interface RunnerParallelExecutionOptions {
+  readonly execute: (
+    root: string,
+    toolUse: {
+      readonly parameters: ToolArguments;
+      readonly recipientName: BaseAgentToolName;
+    },
+    signal?: AbortSignal,
+  ) => Promise<string>;
 }
 
-function parallelError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
+const DEFAULT_PARALLEL_EXECUTION: RunnerParallelExecutionOptions = {
+  execute: (root, toolUse, signal) =>
+    RUNNER_TOOLS[toolUse.recipientName](root, toolUse.parameters, signal),
+};
 
-const parallelTool: RunnerTool = async (root, arguments_, signal) => {
-  const results = await Promise.all(
-    parallelToolUses(arguments_).map(async (toolUse) => {
-      try {
-        const output = await RUNNER_TOOLS[toolUse.recipientName](
-          root,
-          toolUse.parameters,
-          signal,
-        );
-        return {
-          output: truncateParallelOutput(output),
-          recipient_name: toolUse.recipientName,
-        };
-      } catch (error) {
-        if (signal?.aborted === true) {
-          throw error;
-        }
-
-        return {
-          error: parallelError(error),
-          recipient_name: toolUse.recipientName,
-        };
-      }
-    }),
+const parallelTool = async (
+  root: string,
+  arguments_: ToolArguments,
+  signal?: AbortSignal,
+  execution: RunnerParallelExecutionOptions = DEFAULT_PARALLEL_EXECUTION,
+): Promise<string> => {
+  const results = await mapWithParallelConcurrency(
+    parallelToolUses(arguments_),
+    (toolUse) =>
+      executeParallelCall(
+        toolUse.recipientName,
+        () => execution.execute(root, toolUse, signal),
+        signal,
+      ),
+    signal,
   );
-  return JSON.stringify(results, null, 2);
+  return boundedParallelOutput(results);
 };
 
 export async function executeRunnerTool(
@@ -542,6 +528,7 @@ export async function executeRunnerTool(
   name: string,
   arguments_: ToolArguments,
   signal?: AbortSignal,
+  parallelExecution?: RunnerParallelExecutionOptions,
 ): Promise<string> {
   if (signal?.aborted === true) {
     throw new Error("The runner command was stopped");
@@ -553,6 +540,6 @@ export async function executeRunnerTool(
 
   const root = await resolveRunnerWorkspace(workingDirectory);
   return name === "parallel"
-    ? parallelTool(root, arguments_, signal)
+    ? parallelTool(root, arguments_, signal, parallelExecution)
     : RUNNER_TOOLS[name](root, arguments_, signal);
 }
