@@ -1,6 +1,8 @@
 import { For, Show, type JSX } from "solid-js";
 import { isRecord } from "../shared/auth-model.ts";
 
+const MAXIMUM_SCHEMA_DEPTH = 20;
+
 interface SchemaProperty {
   readonly description: string | undefined;
   readonly name: string;
@@ -65,6 +67,19 @@ function constraintText(label: string, value: unknown): string | undefined {
     : undefined;
 }
 
+function schemaAdditionalProperties(
+  schema: Readonly<Record<string, unknown>>,
+): string | undefined {
+  const additional = schema["additionalProperties"];
+  return additional === false
+    ? "Additional properties: not allowed"
+    : additional === true
+      ? "Additional properties: allowed"
+      : isRecord(additional)
+        ? `Additional properties: ${schemaType(additional)}`
+        : undefined;
+}
+
 function SchemaConstraints(props: {
   readonly schema: Readonly<Record<string, unknown>>;
 }): JSX.Element {
@@ -76,6 +91,7 @@ function SchemaConstraints(props: {
       constraintText("Maximum items", props.schema["maxItems"]),
     ].filter((value) => value !== undefined);
   const enumeration = () => enumValues(props.schema["enum"]);
+  const additionalProperties = () => schemaAdditionalProperties(props.schema);
   return (
     <>
       <For each={constraints()}>
@@ -83,6 +99,9 @@ function SchemaConstraints(props: {
       </For>
       <Show when={enumeration().length > 0}>
         <span class="block">Allowed values: {enumeration().join(", ")}</span>
+      </Show>
+      <Show when={additionalProperties() !== undefined}>
+        <span class="block">{additionalProperties()}</span>
       </Show>
     </>
   );
@@ -94,7 +113,9 @@ function NestedSchemaProperties(props: {
   readonly properties: readonly SchemaProperty[];
 }): JSX.Element {
   return (
-    <Show when={props.depth < 3 && props.properties.length > 0}>
+    <Show
+      when={props.depth < MAXIMUM_SCHEMA_DEPTH && props.properties.length > 0}
+    >
       <Show when={props.label !== undefined}>
         <p class="mt-2 text-[0.65rem] font-semibold tracking-wide text-slate-500 uppercase">
           {props.label}
@@ -130,11 +151,15 @@ function SchemaPropertyDetail(props: {
         <span class="text-[0.7rem] font-medium tracking-wide text-slate-500 uppercase">
           {schemaType(props.property.schema)}
         </span>
-        <Show when={props.property.required}>
-          <span class="rounded-full bg-amber-300/10 px-2 py-0.5 text-[0.65rem] font-semibold text-amber-200">
-            Required
-          </span>
-        </Show>
+        <span
+          class={
+            props.property.required
+              ? "rounded-full bg-amber-300/10 px-2 py-0.5 text-[0.65rem] font-semibold text-amber-200"
+              : "rounded-full bg-white/5 px-2 py-0.5 text-[0.65rem] font-semibold text-slate-400"
+          }
+        >
+          {props.property.required ? "Required" : "Optional"}
+        </span>
       </div>
       <Show when={props.property.description !== undefined}>
         <p class="mt-1 text-xs leading-5 text-slate-400">
@@ -157,20 +182,31 @@ function SchemaPropertyDetail(props: {
   );
 }
 
+function SchemaPropertyList(props: {
+  readonly properties: readonly SchemaProperty[];
+}): JSX.Element {
+  return (
+    <ul class="space-y-3">
+      <For each={props.properties}>
+        {(property) => <SchemaPropertyDetail property={property} />}
+      </For>
+    </ul>
+  );
+}
+
 export function ToolParameterDetails(props: {
   readonly parameters: Readonly<Record<string, unknown>>;
 }): JSX.Element {
   const properties = () => schemaProperties(props.parameters);
   return (
-    <Show
-      fallback={<p class="text-xs text-slate-500">No parameters.</p>}
-      when={properties().length > 0}
-    >
-      <ul class="space-y-3">
-        <For each={properties()}>
-          {(property) => <SchemaPropertyDetail property={property} />}
-        </For>
-      </ul>
-    </Show>
+    <div class="text-[0.7rem] leading-5 text-slate-500">
+      <SchemaConstraints schema={props.parameters} />
+      <Show
+        fallback={<p class="text-xs text-slate-500">No parameters.</p>}
+        when={properties().length > 0}
+      >
+        <SchemaPropertyList properties={properties()} />
+      </Show>
+    </div>
   );
 }

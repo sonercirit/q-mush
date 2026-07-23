@@ -80,7 +80,7 @@ test("runner parallel captures failures and truncates output", async () => {
   const item = (index: number): unknown =>
     Array.isArray(results) ? results[index] : undefined;
 
-  expect(Buffer.byteLength(output, "utf8")).toBeLessThanOrEqual(256 * 1_024);
+  expect(Buffer.byteLength(output, "utf8")).toBeLessThan(262_145);
   expect(output).toContain("[parallel output truncated]");
   expect(results).toHaveLength(20);
   expect(item(3)).toEqual({
