@@ -129,7 +129,8 @@ Living project memory. Update it with durable information.
   `parallel` can mix every enabled tool or server-side skill except itself.
   `solid/session-transcript.tsx` renders prompts, tool definitions, raw details,
   Markdown, code/JSON, diffs, and contextual tool results while preserving user
-  line breaks. The control center manages live sessions through
+  line breaks. The session list paginates summaries ten at a time in the
+  browser. The control center manages live sessions through
   `solid/realtime-client.ts`, `solid/session-client.tsx`, and
   `solid/session-controller.ts`. Model deltas are combined per session once per
   animation frame; snapshots and other events remain immediate. Unchanged

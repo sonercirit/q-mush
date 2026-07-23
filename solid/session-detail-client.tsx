@@ -1,5 +1,6 @@
 import {
   createEffect,
+  createMemo,
   createSignal,
   on,
   onCleanup,
@@ -144,49 +145,100 @@ interface SessionViewProps {
   readonly state: SessionViewState;
 }
 
+const SESSION_PAGE_SIZE = 10;
+
 export function SessionList(props: {
   readonly controller: SessionController;
 }): JSX.Element {
   const state = props.controller.view;
+  const [page, setPage] = createSignal(1);
+  const pageCount = createMemo(() =>
+    Math.max(1, Math.ceil((state().sessions?.length ?? 0) / SESSION_PAGE_SIZE)),
+  );
+  const sessions = createMemo(() => {
+    const start = (page() - 1) * SESSION_PAGE_SIZE;
+    return state().sessions?.slice(start, start + SESSION_PAGE_SIZE);
+  });
+
+  createEffect(() => {
+    if (page() > pageCount()) {
+      setPage(pageCount());
+    }
+  });
+
   return (
-    <Collection
-      empty={
-        <p class="rounded-2xl border border-dashed border-white/15 p-5 text-sm leading-6 text-slate-400">
-          No sessions yet. Start one above to give an agent a task.
-        </p>
-      }
-      items={state().sessions}
-      listClass="max-h-144 space-y-2 overflow-y-auto"
-      loading={<p class="text-sm text-slate-400">Loading sessions…</p>}
-    >
-      {(session) => (
-        <li>
+    <>
+      <Collection
+        empty={
+          <p class="rounded-2xl border border-dashed border-white/15 p-5 text-sm leading-6 text-slate-400">
+            No sessions yet. Start one above to give an agent a task.
+          </p>
+        }
+        items={sessions()}
+        listClass="max-h-144 space-y-2 overflow-y-auto"
+        loading={<p class="text-sm text-slate-400">Loading sessions…</p>}
+      >
+        {(session) => (
+          <li>
+            <button
+              class={`w-full rounded-2xl border p-4 text-left transition ${state().selectedId === session.id ? "border-emerald-300/30 bg-emerald-300/10" : "border-white/10 bg-slate-950/60 hover:border-white/20"}`}
+              data-session-id={session.id}
+              onClick={() => {
+                void props.controller.select(session.id);
+              }}
+              type="button"
+            >
+              <span class="flex items-start justify-between gap-3">
+                <span class="min-w-0">
+                  <span class="block truncate font-semibold text-white">
+                    {session.title}
+                  </span>
+                  <span class="mt-1 block truncate text-xs text-slate-500">
+                    {sessionModelLabel(session)}
+                  </span>
+                  <span class="mt-2 block">
+                    <SessionMetrics session={session} />
+                  </span>
+                </span>
+                {statusBadge(session.status)}
+              </span>
+            </button>
+          </li>
+        )}
+      </Collection>
+      <Show when={(state().sessions?.length ?? 0) > SESSION_PAGE_SIZE}>
+        <nav
+          aria-label="Session list pagination"
+          class="mt-3 flex items-center justify-between gap-3"
+        >
           <button
-            class={`w-full rounded-2xl border p-4 text-left transition ${state().selectedId === session.id ? "border-emerald-300/30 bg-emerald-300/10" : "border-white/10 bg-slate-950/60 hover:border-white/20"}`}
-            data-session-id={session.id}
+            aria-label="Previous session page"
+            class="rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 transition hover:border-emerald-300/30 hover:text-emerald-200 disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={page() === 1}
             onClick={() => {
-              void props.controller.select(session.id);
+              setPage((current) => Math.max(1, current - 1));
             }}
             type="button"
           >
-            <span class="flex items-start justify-between gap-3">
-              <span class="min-w-0">
-                <span class="block truncate font-semibold text-white">
-                  {session.title}
-                </span>
-                <span class="mt-1 block truncate text-xs text-slate-500">
-                  {sessionModelLabel(session)}
-                </span>
-                <span class="mt-2 block">
-                  <SessionMetrics session={session} />
-                </span>
-              </span>
-              {statusBadge(session.status)}
-            </span>
+            Previous
           </button>
-        </li>
-      )}
-    </Collection>
+          <span class="text-xs text-slate-500">
+            {`Page ${String(page())} of ${String(pageCount())}`}
+          </span>
+          <button
+            aria-label="Next session page"
+            class="rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 transition hover:border-emerald-300/30 hover:text-emerald-200 disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={page() === pageCount()}
+            onClick={() => {
+              setPage((current) => Math.min(pageCount(), current + 1));
+            }}
+            type="button"
+          >
+            Next
+          </button>
+        </nav>
+      </Show>
+    </>
   );
 }
 

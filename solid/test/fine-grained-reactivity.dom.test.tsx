@@ -22,7 +22,7 @@ import { RunnerController } from "../runner-controller.ts";
 import { SessionPanel, type SessionViewState } from "../session-client.tsx";
 import { summaryFromDetail } from "../session-codec.ts";
 import { SessionController } from "../session-controller.ts";
-import { SessionDetail } from "../session-detail-client.tsx";
+import { SessionDetail, SessionList } from "../session-detail-client.tsx";
 import { initialSessionViewState } from "../session-state.ts";
 import { runnerSummary } from "./runner-fixtures.ts";
 import { sessionDetailState } from "./session-detail-test-state.ts";
@@ -394,6 +394,64 @@ test("a streamed message update only renders that transcript message", () => {
     "message:assistant-persisted",
   ]);
   expect(container.textContent).toContain("Streaming response");
+});
+
+test("paginates the session list ten sessions at a time", () => {
+  const sessions = Array.from({ length: 12 }, (_, index) => ({
+    ...summaryFromDetail(TEST_SESSION_DETAIL),
+    id: `session-${String(index + 1)}`,
+    title: `Task ${String(index + 1)}`,
+    updatedAt: 100 - index,
+  }));
+  const reactive = createReactiveState<SessionViewState>({
+    ...initialSessionViewState(),
+    sessions,
+  });
+  const controller = new SessionController(reactive);
+  const container = mount(() => <SessionList controller={controller} />);
+  const sessionButtons = (): NodeListOf<HTMLButtonElement> =>
+    container.querySelectorAll("button[data-session-id]");
+  const previous = query(
+    container,
+    "button[aria-label='Previous session page']",
+  );
+  const next = query(container, "button[aria-label='Next session page']");
+
+  if (
+    !(previous instanceof HTMLButtonElement) ||
+    !(next instanceof HTMLButtonElement)
+  ) {
+    throw new TypeError("The session pagination controls are not buttons");
+  }
+
+  expect([
+    sessionButtons().length,
+    container.textContent.includes("Page 1 of 2"),
+    previous.disabled,
+    next.disabled,
+  ]).toEqual([10, true, true, false]);
+  expect(
+    container.querySelector("[data-session-id='session-1']"),
+  ).not.toBeNull();
+  expect(container.querySelector("[data-session-id='session-11']")).toBeNull();
+
+  next.click();
+
+  expect([
+    sessionButtons().length,
+    container.textContent.includes("Page 2 of 2"),
+    previous.disabled,
+    next.disabled,
+  ]).toEqual([2, true, false, true]);
+  expect(container.querySelector("[data-session-id='session-1']")).toBeNull();
+  expect(
+    container.querySelector("[data-session-id='session-11']"),
+  ).not.toBeNull();
+
+  previous.click();
+
+  expect(sessionButtons()).toHaveLength(10);
+  expect(container.textContent).toContain("Page 1 of 2");
 });
 
 test("session resources, drafts, realtime lists, and selected details update in place", async () => {
