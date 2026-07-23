@@ -151,7 +151,9 @@ describe("chat completions agent model", () => {
     expect(turn).toEqual({
       content: "Inspecting.",
       contextTokens: 12_345,
+      costUsd: null,
       thinking: "I should inspect the workspace first.",
+      tokenUsage: null,
       toolCalls: [expectedTool],
     });
     expect(capture.request?.url).toBe(
@@ -326,7 +328,9 @@ describe("chat completions agent model", () => {
     expect(await model.complete(conversation)).toEqual({
       content: "Done.",
       contextTokens: 23_456,
+      costUsd: null,
       thinking: "I checked the prior tool result.",
+      tokenUsage: null,
       toolCalls: [],
     });
     expect(capture.request?.url).toBe(
@@ -379,7 +383,9 @@ describe("chat completions agent model", () => {
     expect(await completeHello(model)).toEqual({
       content: "Hello there.",
       contextTokens: null,
+      costUsd: null,
       thinking: "I considered the request.",
+      tokenUsage: null,
       toolCalls: [
         {
           arguments: '{"path":"src/index.ts"}',

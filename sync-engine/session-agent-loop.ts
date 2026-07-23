@@ -1,7 +1,9 @@
 import {
   runAgentLoop,
   type AgentConversationMessage,
+  type AgentLoopOptions,
   type AgentModel,
+  type AgentModelTurn,
   type AgentRecordedMessage,
 } from "../shared/agent-loop.ts";
 import {
@@ -10,6 +12,9 @@ import {
 } from "./agent-compaction.ts";
 
 interface CompactingAgentLoopOptions {
+  readonly agentCost: (
+    turn: Pick<AgentModelTurn, "costUsd" | "tokenUsage">,
+  ) => number | null;
   readonly autoCompact: boolean;
   readonly createCompactor: () => AgentConversationCompactor;
   readonly executeTool: Parameters<typeof runAgentLoop>[0]["executeTool"];
@@ -17,7 +22,7 @@ interface CompactingAgentLoopOptions {
   readonly maxContextTokens: number | null;
   readonly model: AgentModel;
   readonly recordCompaction: (summary: string) => Promise<void> | void;
-  readonly recordContextTokens: (tokens: number) => Promise<void> | void;
+  readonly recordUsage: NonNullable<AgentLoopOptions["recordUsage"]>;
   readonly recordMessage: (
     message: AgentRecordedMessage,
   ) => Promise<void> | void;
@@ -39,6 +44,32 @@ interface CompactionState {
   pending: boolean;
 }
 
+async function compactConversation(
+  options: Pick<
+    CompactingAgentLoopOptions,
+    "agentCost" | "createCompactor" | "recordCompaction" | "recordUsage"
+  >,
+  messages: readonly AgentConversationMessage[],
+  signal?: AbortSignal,
+): Promise<readonly AgentConversationMessage[]> {
+  const compacted = await options.createCompactor().compact(messages, signal);
+  const costUsd =
+    compacted.costUsd ??
+    options.agentCost({
+      costUsd: compacted.costUsd,
+      tokenUsage: compacted.tokenUsage,
+    });
+  if (costUsd !== null) {
+    await options.recordUsage({
+      contextTokens: null,
+      costBasis: compacted.costUsd === null ? "estimated" : "reported",
+      costUsd,
+    });
+  }
+  await options.recordCompaction(compacted.summary);
+  return compacted.messages;
+}
+
 export async function runCompactingAgentLoop(
   options: CompactingAgentLoopOptions,
 ): Promise<void> {
@@ -50,6 +81,20 @@ export async function runCompactingAgentLoop(
     model: {
       complete: async (conversation, signal) => {
         const turn = await options.model.complete(conversation, signal);
+        const costUsd = turn.costUsd ?? options.agentCost(turn);
+        if (turn.contextTokens !== null || costUsd !== null) {
+          const costBasis =
+            costUsd === null
+              ? null
+              : turn.costUsd === null
+                ? "estimated"
+                : "reported";
+          await options.recordUsage({
+            contextTokens: turn.contextTokens,
+            costBasis,
+            costUsd,
+          });
+        }
         compaction.pending = shouldCompactFinalTurn(
           options,
           turn.contextTokens,
@@ -62,22 +107,19 @@ export async function runCompactingAgentLoop(
         return messages;
       }
 
-      const compacted = await options
-        .createCompactor()
-        .compact(messages, signal);
-      await options.recordCompaction(compacted.summary);
+      const compactedMessages = await compactConversation(
+        options,
+        messages,
+        signal,
+      );
       compaction.pending = false;
-      return compacted.messages;
+      return compactedMessages;
     },
-    recordContextTokens: options.recordContextTokens,
     recordMessage: options.recordMessage,
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   });
 
   if (compaction.pending) {
-    const compacted = await options
-      .createCompactor()
-      .compact(finalMessages, options.signal);
-    await options.recordCompaction(compacted.summary);
+    await compactConversation(options, finalMessages, options.signal);
   }
 }

@@ -10,6 +10,10 @@ import { readAgentImages } from "../shared/agent-images.ts";
 import { readAgentToolCalls } from "../shared/agent-loop.ts";
 import { isRecord, readNullableString } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
+import {
+  readProviderModelPricing,
+  type ProviderModelPricing,
+} from "../shared/provider-model-pricing.ts";
 import type {
   AgentSessionDetail,
   AgentSessionMessage,
@@ -51,6 +55,14 @@ function readPositiveSafeInteger(value: unknown): number | null {
   return Number.isSafeInteger(value) ? value : null;
 }
 
+function readModelPricing(value: unknown): ProviderModelPricing | null {
+  const pricing = readProviderModelPricing(value);
+  if (pricing === undefined) {
+    throw new Error("The server returned invalid model pricing");
+  }
+  return pricing;
+}
+
 function readModelOption(value: unknown): AgentModelOption {
   if (!isRecord(value)) {
     throw new Error("The server returned an invalid agent model");
@@ -65,12 +77,14 @@ function readModelOption(value: unknown): AgentModelOption {
   const inputModalitiesValue = value["inputModalities"];
   const label = value["label"];
   const outputModalitiesValue = value["outputModalities"];
+  const pricingValue = value["pricing"];
 
   if (
     !isAgentModelId(id) ||
     inputModalitiesValue === undefined ||
     typeof label !== "string" ||
     outputModalitiesValue === undefined ||
+    pricingValue === undefined ||
     (contextWindowValue !== null && contextWindow === null)
   ) {
     throw new Error("The server returned an invalid agent model");
@@ -82,6 +96,7 @@ function readModelOption(value: unknown): AgentModelOption {
     inputModalities: readModelModalities(inputModalitiesValue),
     label,
     outputModalities: readModelModalities(outputModalitiesValue),
+    pricing: readModelPricing(pricingValue),
     reasoningEfforts: readModelReasoningEfforts(value["reasoningEfforts"]),
   };
 }
@@ -139,7 +154,21 @@ function readSummary(value: unknown): AgentSessionSummary {
     throw new Error("The server returned an invalid agent session");
   }
 
+  const activeDurationMs = readFiniteNumber(value["activeDurationMs"]);
+  const activeStartedAtValue = value["activeStartedAt"];
+  const activeStartedAt =
+    activeStartedAtValue === null
+      ? null
+      : readFiniteNumber(activeStartedAtValue);
+  let providerPricing: ProviderModelPricing | null;
+  try {
+    providerPricing = readModelPricing(value["providerPricing"]);
+  } catch {
+    throw new Error("The server returned an invalid agent session");
+  }
   const autoCompact = value["autoCompact"];
+  const costBasis = value["costBasis"];
+  const costUsd = readFiniteNumber(value["costUsd"]);
   const createdAt = readFiniteNumber(value["createdAt"]);
   const credentialId = value["credentialId"];
   const currentContextTokens = readFiniteNumber(value["currentContextTokens"]);
@@ -155,7 +184,18 @@ function readSummary(value: unknown): AgentSessionSummary {
   const workingDirectory = value["workingDirectory"];
 
   if (
+    activeDurationMs === undefined ||
+    activeDurationMs < 0 ||
+    !Number.isSafeInteger(activeDurationMs) ||
+    activeStartedAt === undefined ||
+    (activeStartedAt !== null && !Number.isSafeInteger(activeStartedAt)) ||
     typeof autoCompact !== "boolean" ||
+    (costBasis !== "none" &&
+      costBasis !== "reported" &&
+      costBasis !== "estimated") ||
+    costUsd === undefined ||
+    costUsd < 0 ||
+    (costBasis === "none" && costUsd !== 0) ||
     createdAt === undefined ||
     typeof credentialId !== "string" ||
     currentContextTokens === undefined ||
@@ -168,6 +208,7 @@ function readSummary(value: unknown): AgentSessionSummary {
         maxContextTokens <= 0)) ||
     typeof model !== "string" ||
     provider === undefined ||
+    value["providerPricing"] === undefined ||
     reasoningEffort === undefined ||
     (reasoningEffort !== null && !isAgentReasoningEffort(reasoningEffort)) ||
     typeof runnerId !== "string" ||
@@ -180,7 +221,11 @@ function readSummary(value: unknown): AgentSessionSummary {
   }
 
   return {
+    activeDurationMs,
+    activeStartedAt,
     autoCompact,
+    costBasis,
+    costUsd,
     createdAt,
     credentialId,
     currentContextTokens,
@@ -188,6 +233,7 @@ function readSummary(value: unknown): AgentSessionSummary {
     maxContextTokens,
     model,
     provider,
+    providerPricing,
     reasoningEffort,
     runnerId,
     status,
@@ -275,7 +321,11 @@ export function summaryFromDetail(
   detail: AgentSessionDetail,
 ): AgentSessionSummary {
   return {
+    activeDurationMs: detail.activeDurationMs,
+    activeStartedAt: detail.activeStartedAt,
     autoCompact: detail.autoCompact,
+    costBasis: detail.costBasis,
+    costUsd: detail.costUsd,
     createdAt: detail.createdAt,
     credentialId: detail.credentialId,
     currentContextTokens: detail.currentContextTokens,
@@ -283,6 +333,7 @@ export function summaryFromDetail(
     maxContextTokens: detail.maxContextTokens,
     model: detail.model,
     provider: detail.provider,
+    providerPricing: detail.providerPricing,
     reasoningEffort: detail.reasoningEffort,
     runnerId: detail.runnerId,
     status: detail.status,

@@ -25,6 +25,7 @@ import { SessionController } from "../session-controller.ts";
 import { SessionDetail } from "../session-detail-client.tsx";
 import { initialSessionViewState } from "../session-state.ts";
 import { runnerSummary } from "./runner-fixtures.ts";
+import { sessionDetailState } from "./session-detail-test-state.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
 const disposals: (() => void)[] = [];
@@ -50,6 +51,17 @@ function transcript(container: ParentNode): HTMLUListElement {
     throw new TypeError("The session transcript is not a list");
   }
   return element;
+}
+
+function sessionTimeText(container: ParentNode): string {
+  const text = [...container.querySelectorAll("span")].find(
+    ({ textContent }) =>
+      textContent.startsWith("Time: ") && !textContent.includes("Cost:"),
+  )?.textContent;
+  if (text === undefined) {
+    throw new Error("The session time was not rendered");
+  }
+  return text;
 }
 
 function setScrollableDimensions(
@@ -190,6 +202,26 @@ function transcriptMessage(
   return message;
 }
 
+function runningSessionDetail(
+  messages: AgentSessionDetail["messages"],
+): AgentSessionDetail {
+  return { ...TEST_SESSION_DETAIL, messages, status: "running" };
+}
+
+function mountedSessionDetail(detail: AgentSessionDetail): {
+  readonly container: HTMLDivElement;
+  readonly controller: SessionController;
+} {
+  const reactive = sessionDetailState(detail);
+  const controller = new SessionController(reactive);
+  return {
+    container: mount(() => (
+      <SessionDetail controller={controller} state={reactive.state()} />
+    )),
+    controller,
+  };
+}
+
 function messageBoundary(container: ParentNode, id: string): Element {
   return query(container, `[data-render-boundary='message:${id}']`);
 }
@@ -203,6 +235,26 @@ function expectStableMessages(
   expect(messageBoundary(container, "assistant-stable")).toBe(stableAssistant);
 }
 
+function applySessionDelta(
+  controller: SessionController,
+  sessionId: string,
+  content: string,
+): void {
+  controller.applyDelta({
+    content,
+    sessionId,
+    thinking: "",
+    type: "session_delta",
+  });
+}
+
+function expectScrollLock(toggle: Element, enabled: boolean): void {
+  expect(toggle.textContent).toContain(
+    `Scroll lock: ${enabled ? "On" : "Off"}`,
+  );
+  expect(toggle.getAttribute("aria-pressed")).toBe(String(enabled));
+}
+
 function expectTranscriptBoundariesToRenderOnce(
   debug: RenderDebugView,
   messageIds: readonly string[],
@@ -212,63 +264,60 @@ function expectTranscriptBoundariesToRenderOnce(
   }
 }
 
-test("scrolling away from and back to the transcript end updates scroll lock", () => {
-  const detail: AgentSessionDetail = {
-    ...TEST_SESSION_DETAIL,
-    messages: [transcriptMessage("user-1", "Initial task", "user", 2)],
-    status: "running",
-  };
-  const reactive = createReactiveState<SessionViewState>({
-    ...initialSessionViewState(),
-    detail,
-    selectedId: detail.id,
+test("a mounted session timer starts when the session begins running", () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date(10_000));
+  disposals.push(() => {
+    vi.useRealTimers();
   });
-  const controller = new SessionController(reactive);
-  const container = mount(() => (
-    <SessionDetail controller={controller} state={reactive.state()} />
-  ));
+  const queued = { ...TEST_SESSION_DETAIL, status: "queued" as const };
+  const { container, controller } = mountedSessionDetail(queued);
+
+  expect(sessionTimeText(container)).toBe("Time: 0s");
+  controller.applyDetail({
+    ...queued,
+    activeStartedAt: Date.now(),
+    status: "running",
+    updatedAt: queued.updatedAt + 1,
+  });
+  vi.advanceTimersByTime(2_000);
+
+  expect(sessionTimeText(container)).toBe("Time: 2s");
+});
+
+test("scrolling away from and back to the transcript end updates scroll lock", () => {
+  const detail = runningSessionDetail([
+    transcriptMessage("user-1", "Initial task", "user", 2),
+  ]);
+  const { container, controller } = mountedSessionDetail(detail);
   const element = transcript(container);
   const toggle = query(container, "[data-scroll-lock-toggle='true']");
   setScrollableDimensions(element, 100, 500);
 
-  expect(toggle.textContent).toContain("Scroll lock: On");
-  expect(toggle.getAttribute("aria-pressed")).toBe("true");
+  expectScrollLock(toggle, true);
 
   element.scrollTop = 180;
   element.dispatchEvent(new Event("scroll"));
 
-  expect(toggle.textContent).toContain("Scroll lock: Off");
-  expect(toggle.getAttribute("aria-pressed")).toBe("false");
+  expectScrollLock(toggle, false);
 
-  controller.applyDelta({
-    content: "New output",
-    sessionId: detail.id,
-    thinking: "",
-    type: "session_delta",
-  });
+  applySessionDelta(controller, detail.id, "New output");
   expect(element.scrollTop).toBe(180);
 
   element.scrollTop = 400;
   element.dispatchEvent(new Event("scroll"));
 
-  expect(toggle.textContent).toContain("Scroll lock: On");
-  expect(toggle.getAttribute("aria-pressed")).toBe("true");
+  expectScrollLock(toggle, true);
 
   setScrollableDimensions(element, 100, 650);
-  controller.applyDelta({
-    content: " continues",
-    sessionId: detail.id,
-    thinking: "",
-    type: "session_delta",
-  });
+  applySessionDelta(controller, detail.id, " continues");
   expect(element.scrollTop).toBe(650);
 
   if (!(toggle instanceof HTMLButtonElement)) {
     throw new TypeError("The scroll lock control is not a button");
   }
   toggle.click();
-  expect(toggle.textContent).toContain("Scroll lock: Off");
-  expect(toggle.getAttribute("aria-pressed")).toBe("false");
+  expectScrollLock(toggle, false);
 });
 
 test("a streamed message update only renders that transcript message", () => {
@@ -281,17 +330,8 @@ test("a streamed message update only renders that transcript message", () => {
       3,
     ),
   ];
-  const detail: AgentSessionDetail = {
-    ...TEST_SESSION_DETAIL,
-    messages,
-    status: "running",
-  };
-  const reactive = createReactiveState<SessionViewState>({
-    ...initialSessionViewState(),
-    detail,
-    selectedId: detail.id,
-    sessions: [summaryFromDetail(detail)],
-  });
+  const detail = runningSessionDetail(messages);
+  const reactive = sessionDetailState(detail, [summaryFromDetail(detail)]);
   const controller = new SessionController(reactive);
   const debug = new RenderDebugView();
   const container = mount(() => (
@@ -382,6 +422,7 @@ test("session resources, drafts, realtime lists, and selected details update in 
         inputModalities: ["text"],
         label: modelLabel,
         outputModalities: ["text"],
+        pricing: null,
         reasoningEfforts: ["high"],
       },
     ],

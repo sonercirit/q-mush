@@ -12,6 +12,7 @@ import type {
   ProviderCredentialAccess,
   ProviderId,
 } from "../shared/provider-credential-store.ts";
+import type { ProviderModelPricing } from "../shared/provider-model-pricing.ts";
 import {
   agentProviderRequestHeaders,
   type AgentProviderCredential,
@@ -128,6 +129,39 @@ function modelContextWindow(
   return null;
 }
 
+function modelPricing(value: unknown): ProviderModelPricing | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const pricing: Partial<
+    Record<
+      "cacheWriteInput" | "cachedInput" | "input" | "output",
+      string | number
+    >
+  > = {};
+  const add = (
+    target: "cacheWriteInput" | "cachedInput" | "input" | "output",
+    keys: readonly string[],
+  ): void => {
+    for (const key of keys) {
+      const price = value[key];
+      if (
+        (typeof price === "string" && price.trim().length > 0) ||
+        (typeof price === "number" && Number.isFinite(price) && price >= 0)
+      ) {
+        pricing[target] = price;
+        return;
+      }
+    }
+  };
+  add("cacheWriteInput", ["cache_write_input", "input_cache_write"]);
+  add("cachedInput", ["cached_input", "input_cache_read"]);
+  add("input", ["prompt", "input"]);
+  add("output", ["completion", "output"]);
+  return Object.keys(pricing).length === 0 ? null : pricing;
+}
+
 function modelOption(
   value: unknown,
   idKey: string,
@@ -155,6 +189,7 @@ function modelOption(
     outputModalities: uniqueStrings(
       nestedValue(value, "output_modalities", "architecture"),
     ),
+    pricing: modelPricing(value["pricing"]),
     reasoningEfforts: efforts,
   };
 }

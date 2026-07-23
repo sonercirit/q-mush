@@ -1,23 +1,29 @@
-import { and, asc, desc, eq, inArray, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { readAgentFile, type AgentFile } from "../shared/agent-file.ts";
-import { readAgentImages, type AgentImage } from "../shared/agent-images.ts";
-import {
-  readAgentToolCalls,
-  type AgentConversationMessage,
-  type AgentRecordedMessage,
-  type AgentToolCall,
+import type { AgentImage } from "../shared/agent-images.ts";
+import type {
+  AgentConversationMessage,
+  AgentRecordedMessage,
 } from "../shared/agent-loop.ts";
 import { createdAuditFields, updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
 import { createUuidV7, SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 import type {
+  AgentSessionCostBasis,
   AgentSessionDetail,
-  AgentSessionMessage,
   AgentSessionStatus,
   AgentSessionSummary,
+  AgentSessionUsageUpdate,
 } from "../shared/session-model.ts";
+import { activeSessionDuration } from "../shared/session-timing.ts";
 import { compactStoredConversation } from "./session-compaction.ts";
+import {
+  conversationFromMessages,
+  parseProviderPricing,
+  storedSessionMessages,
+  withInterruptedToolResults,
+} from "./session-store-read.ts";
 
 export interface CreateAgentSession extends Pick<
   AgentSessionSummary,
@@ -25,6 +31,7 @@ export interface CreateAgentSession extends Pick<
   | "maxContextTokens"
   | "model"
   | "provider"
+  | "providerPricing"
   | "reasoningEffort"
   | "runnerId"
   | "workingDirectory"
@@ -42,6 +49,7 @@ export type QueueSessionResult =
 
 interface SessionFilter {
   readonly id?: string;
+  readonly status?: AgentSessionStatus;
   readonly userId?: string;
 }
 
@@ -49,10 +57,21 @@ function activeSessionCondition(filter: SessionFilter): SQL | undefined {
   return and(
     eq(agentSessions.isDeleted, false),
     filter.id === undefined ? undefined : eq(agentSessions.id, filter.id),
+    filter.status === undefined
+      ? undefined
+      : eq(agentSessions.status, filter.status),
     filter.userId === undefined
       ? undefined
       : eq(agentSessions.userId, filter.userId),
   );
+}
+
+function runningCondition(sessionId: string, userId?: string): SQL | undefined {
+  return activeSessionCondition({
+    id: sessionId,
+    status: "running",
+    ...(userId === undefined ? {} : { userId }),
+  });
 }
 
 function requireStoredSession<Value>(stored: Value | undefined): Value {
@@ -63,9 +82,22 @@ function requireStoredSession<Value>(stored: Value | undefined): Value {
   return stored;
 }
 
+const SESSION_TIMING_SELECTION = {
+  activeDurationMs: agentSessions.activeDurationMs,
+  activeStartedAt: agentSessions.activeStartedAt,
+};
+
+function didUpdate(rows: readonly unknown[]): boolean {
+  return rows.length > 0;
+}
+
 function sessionSelection() {
   return {
+    activeDurationMs: agentSessions.activeDurationMs,
+    activeStartedAt: agentSessions.activeStartedAt,
     autoCompact: agentSessions.autoCompact,
+    costBasis: agentSessions.costBasis,
+    costUsd: agentSessions.costUsd,
     createdAt: agentSessions.createdAt,
     credentialId: agentSessions.providerCredentialId,
     currentContextTokens: agentSessions.currentContextTokens,
@@ -73,6 +105,7 @@ function sessionSelection() {
     maxContextTokens: agentSessions.maxContextTokens,
     model: agentSessions.model,
     provider: agentSessions.provider,
+    providerPricing: agentSessions.providerPricing,
     reasoningEffort: agentSessions.reasoningEffort,
     runnerId: agentSessions.runnerId,
     status: agentSessions.status,
@@ -82,28 +115,20 @@ function sessionSelection() {
   };
 }
 
-function messageSelection() {
-  return {
-    content: agentMessages.content,
-    createdAt: agentMessages.createdAt,
-    id: agentMessages.id,
-    images: agentMessages.images,
-    role: agentMessages.role,
-    toolCallId: agentMessages.toolCallId,
-    toolCalls: agentMessages.toolCalls,
-    toolName: agentMessages.toolName,
-  };
-}
-
 type StoredSessionSummary = Pick<
   typeof agentSessions.$inferSelect,
+  | "activeDurationMs"
+  | "activeStartedAt"
   | "autoCompact"
+  | "costBasis"
+  | "costUsd"
   | "createdAt"
   | "currentContextTokens"
   | "id"
   | "maxContextTokens"
   | "model"
   | "provider"
+  | "providerPricing"
   | "reasoningEffort"
   | "runnerId"
   | "status"
@@ -115,130 +140,11 @@ type StoredSessionSummary = Pick<
 function summarizeSession(stored: StoredSessionSummary): AgentSessionSummary {
   return {
     ...stored,
+    activeStartedAt: stored.activeStartedAt?.getTime() ?? null,
     createdAt: stored.createdAt.getTime(),
+    providerPricing: parseProviderPricing(stored.providerPricing),
     updatedAt: stored.updatedAt.getTime(),
   };
-}
-
-function parseToolCalls(value: string | null): readonly AgentToolCall[] {
-  if (value === null) {
-    return [];
-  }
-
-  try {
-    const parsed: unknown = JSON.parse(value);
-
-    if (Array.isArray(parsed)) {
-      return readAgentToolCalls(parsed, "A stored agent tool call is invalid");
-    }
-  } catch {
-    // The common error below identifies corrupt local data.
-  }
-
-  throw new Error("Stored agent tool calls are invalid");
-}
-
-type StoredMessage = Omit<
-  AgentSessionMessage,
-  "createdAt" | "images" | "toolCalls"
-> & {
-  readonly createdAt: Date;
-  readonly images: string | null;
-  readonly toolCalls: string | null;
-};
-
-function parseImages(value: string | null): readonly AgentImage[] {
-  if (value === null) {
-    return [];
-  }
-
-  try {
-    const images = readAgentImages(JSON.parse(value));
-    if (images !== undefined) {
-      return images;
-    }
-  } catch {
-    // The common error below identifies corrupt local data.
-  }
-
-  throw new Error("Stored agent images are invalid");
-}
-
-function summarizeMessage(stored: StoredMessage): AgentSessionMessage {
-  return {
-    ...stored,
-    createdAt: stored.createdAt.getTime(),
-    images: parseImages(stored.images),
-    toolCalls: parseToolCalls(stored.toolCalls),
-  };
-}
-
-const INTERRUPTED_TOOL_OUTPUT =
-  "Error: the tool call was interrupted before it returned a result.";
-
-interface PendingToolResult {
-  readonly call: AgentToolCall;
-  readonly createdAt: number;
-  readonly messageId: string;
-}
-
-function interruptedToolResult(
-  pending: PendingToolResult,
-): AgentSessionMessage {
-  return {
-    content: INTERRUPTED_TOOL_OUTPUT,
-    createdAt: pending.createdAt,
-    id: `${pending.messageId}:interrupted:${pending.call.id}`,
-    role: "tool",
-    toolCallId: pending.call.id,
-    toolCalls: [],
-    toolName: pending.call.name,
-    images: [],
-  };
-}
-
-function withInterruptedToolResults(
-  messages: readonly AgentSessionMessage[],
-  finishTrailingCalls: boolean,
-): readonly AgentSessionMessage[] {
-  const complete: AgentSessionMessage[] = [];
-  let pending: readonly PendingToolResult[] = [];
-  const finishPending = () => {
-    complete.push(...pending.map(interruptedToolResult));
-    pending = [];
-  };
-
-  for (const message of messages) {
-    switch (message.role) {
-      case "assistant":
-        finishPending();
-        complete.push(message);
-        pending = message.toolCalls.map((call) => ({
-          call,
-          createdAt: message.createdAt,
-          messageId: message.id,
-        }));
-        break;
-      case "tool":
-        complete.push(message);
-        pending = pending.filter(({ call }) => call.id !== message.toolCallId);
-        break;
-      case "user":
-        finishPending();
-        complete.push(message);
-        break;
-      case "system":
-      case "thinking":
-        complete.push(message);
-        break;
-    }
-  }
-
-  if (finishTrailingCalls) {
-    finishPending();
-  }
-
-  return complete;
 }
 
 function titleFromPrompt(prompt: string): string {
@@ -249,10 +155,14 @@ function titleFromPrompt(prompt: string): string {
   return (firstLine ?? "Image task").slice(0, 80);
 }
 
-type StoredMessageValues = Pick<
-  StoredMessage,
-  "content" | "images" | "role" | "toolCallId" | "toolCalls" | "toolName"
->;
+interface StoredMessageValues {
+  readonly content: string;
+  readonly images: string | null;
+  readonly role: "assistant" | "system" | "thinking" | "tool";
+  readonly toolCallId: string | null;
+  readonly toolCalls: string | null;
+  readonly toolName: string | null;
+}
 
 function recordedMessageValues(
   message: AgentRecordedMessage,
@@ -350,6 +260,10 @@ export class SessionStore {
           model: input.model,
           provider: input.provider,
           providerCredentialId: input.credentialId,
+          providerPricing:
+            input.providerPricing === null
+              ? null
+              : JSON.stringify(input.providerPricing),
           reasoningEffort: input.reasoningEffort,
           runnerId: input.runnerId,
           status: "queued",
@@ -393,7 +307,7 @@ export class SessionStore {
       ...summarizeSession(stored),
       agentFile: this.#agentFile(sessionId),
       messages: withInterruptedToolResults(
-        this.#messages(sessionId),
+        storedSessionMessages(this.#database, sessionId),
         stored.status !== "queued" && stored.status !== "running",
       ),
     };
@@ -407,63 +321,29 @@ export class SessionStore {
   }
 
   conversation(sessionId: string): readonly AgentConversationMessage[] {
-    const conversation: AgentConversationMessage[] = [];
-    const messages = withInterruptedToolResults(
-      this.#messages(sessionId),
-      true,
+    return conversationFromMessages(
+      withInterruptedToolResults(
+        storedSessionMessages(this.#database, sessionId),
+        true,
+      ),
     );
-
-    for (const message of messages) {
-      switch (message.role) {
-        case "assistant":
-          conversation.push({
-            content: message.content,
-            role: "assistant",
-            toolCalls: message.toolCalls,
-          });
-          break;
-        case "tool":
-          if (message.toolCallId === null || message.toolName === null) {
-            throw new Error("A stored tool result has no tool identity");
-          }
-
-          conversation.push({
-            content: message.content,
-            role: "tool",
-            toolCallId: message.toolCallId,
-            toolName: message.toolName,
-          });
-          break;
-        case "user":
-          conversation.push({
-            content: message.content,
-            ...(message.images.length === 0 ? {} : { images: message.images }),
-            role: "user",
-          });
-          break;
-        case "system":
-        case "thinking":
-          break;
-      }
-    }
-
-    return conversation;
   }
 
   #updateRunningSession(
     sessionId: string,
-    values: Partial<typeof agentSessions.$inferInsert>,
+    values: Omit<
+      Partial<typeof agentSessions.$inferInsert>,
+      "costBasis" | "costUsd"
+    > & {
+      readonly costBasis?: AgentSessionCostBasis | SQL;
+      readonly costUsd?: number | SQL;
+    },
     now: number,
   ): void {
     this.#database
       .update(agentSessions)
       .set({ ...values, ...updatedAuditFields(SYSTEM_ID, now) })
-      .where(
-        and(
-          activeSessionCondition({ id: sessionId }),
-          eq(agentSessions.status, "running"),
-        ),
-      )
+      .where(runningCondition(sessionId))
       .run();
   }
 
@@ -509,14 +389,40 @@ export class SessionStore {
       : this.get(userId, updated[0].id);
   }
 
-  updateContextTokens(sessionId: string, tokens: number, now: number): void {
-    if (!Number.isSafeInteger(tokens) || tokens < 0) {
-      throw new Error("The agent session context usage is invalid");
+  updateUsage(
+    sessionId: string,
+    input: AgentSessionUsageUpdate,
+    now: number,
+  ): void {
+    const invalidCost =
+      (input.costUsd === null) !== (input.costBasis === null) ||
+      (input.costUsd !== null &&
+        (!Number.isFinite(input.costUsd) || input.costUsd < 0));
+    if (
+      (input.contextTokens !== null &&
+        (!Number.isSafeInteger(input.contextTokens) ||
+          input.contextTokens < 0)) ||
+      invalidCost
+    ) {
+      throw new Error("The agent session usage is invalid");
     }
 
     this.#updateRunningSession(
       sessionId,
-      { currentContextTokens: tokens },
+      {
+        ...(input.contextTokens === null
+          ? {}
+          : { currentContextTokens: input.contextTokens }),
+        ...(input.costUsd === null
+          ? {}
+          : {
+              costBasis:
+                input.costBasis === "estimated"
+                  ? "estimated"
+                  : sql`CASE WHEN ${agentSessions.costBasis} = 'none' THEN 'reported' ELSE ${agentSessions.costBasis} END`,
+              costUsd: sql`${agentSessions.costUsd} + ${input.costUsd}`,
+            }),
+      },
       now,
     );
   }
@@ -550,20 +456,22 @@ export class SessionStore {
   ): boolean {
     switch (status) {
       case "failed":
-        return this.#systemTransition(
-          sessionId,
-          ["queued", "running"],
-          status,
-          now,
+        return (
+          this.#finishActiveSession(sessionId, "failed", now) ||
+          this.#systemTransition(sessionId, ["queued"], status, now)
         );
       case "idle":
-        return this.#systemTransition(sessionId, ["running"], status, now);
+        return this.#finishActiveSession(sessionId, "idle", now);
       case "running":
-        return this.#systemTransition(sessionId, ["queued"], status, now);
+        return this.#startActiveSession(sessionId, now);
     }
   }
 
   stop(userId: string, sessionId: string, now: number): boolean {
+    if (this.#finishActiveSession(sessionId, "stopped", now, userId, userId)) {
+      return true;
+    }
+
     return this.#transition(
       sessionId,
       ["queued", "running", "idle", "failed"],
@@ -620,7 +528,11 @@ export class SessionStore {
       }
       transaction
         .update(agentSessions)
-        .set({ status: "queued", ...updatedAuditFields(userId, now) })
+        .set({
+          activeStartedAt: null,
+          status: "queued",
+          ...updatedAuditFields(userId, now),
+        })
         .where(eq(agentSessions.id, sessionId))
         .run();
       return "queued" as const;
@@ -640,16 +552,30 @@ export class SessionStore {
   }
 
   failInterrupted(now: number): void {
-    this.#database
-      .update(agentSessions)
-      .set({ status: "failed", ...updatedAuditFields(SYSTEM_ID, now) })
+    const interrupted = this.#database
+      .select({ ...SESSION_TIMING_SELECTION, id: agentSessions.id })
+      .from(agentSessions)
       .where(
         and(
           eq(agentSessions.isDeleted, false),
           inArray(agentSessions.status, ["queued", "running"]),
         ),
       )
-      .run();
+      .all();
+
+    for (const session of interrupted) {
+      const duration = activeSessionDuration(session, now);
+      this.#database
+        .update(agentSessions)
+        .set({
+          activeDurationMs: duration,
+          activeStartedAt: null,
+          status: "failed",
+          ...updatedAuditFields(SYSTEM_ID, now),
+        })
+        .where(eq(agentSessions.id, session.id))
+        .run();
+    }
   }
 
   #appendMessage(
@@ -710,19 +636,50 @@ export class SessionStore {
     );
   }
 
-  #messages(sessionId: string): readonly AgentSessionMessage[] {
-    return this.#database
-      .select(messageSelection())
-      .from(agentMessages)
-      .where(
-        and(
-          eq(agentMessages.isDeleted, false),
-          eq(agentMessages.sessionId, sessionId),
-        ),
-      )
-      .orderBy(asc(agentMessages.createdAt), asc(agentMessages.id))
-      .all()
-      .map(summarizeMessage);
+  #startActiveSession(sessionId: string, now: number): boolean {
+    return didUpdate(
+      this.#database
+        .update(agentSessions)
+        .set({
+          activeStartedAt: new Date(now),
+          status: "running",
+          ...updatedAuditFields(SYSTEM_ID, now),
+        })
+        .where(activeSessionCondition({ id: sessionId, status: "queued" }))
+        .returning()
+        .all(),
+    );
+  }
+
+  #finishActiveSession(
+    sessionId: string,
+    status: "failed" | "idle" | "stopped",
+    now: number,
+    actorId: string = SYSTEM_ID,
+    userId?: string,
+  ): boolean {
+    const session = this.#database
+      .select(SESSION_TIMING_SELECTION)
+      .from(agentSessions)
+      .where(runningCondition(sessionId, userId))
+      .get();
+    if (session?.activeStartedAt === null || session === undefined) {
+      return false;
+    }
+
+    return didUpdate(
+      this.#database
+        .update(agentSessions)
+        .set({
+          activeDurationMs: activeSessionDuration(session, now),
+          activeStartedAt: null,
+          status,
+          ...updatedAuditFields(actorId, now),
+        })
+        .where(runningCondition(sessionId, userId))
+        .returning({ status: agentSessions.status })
+        .all(),
+    );
   }
 
   #systemTransition(
@@ -742,7 +699,7 @@ export class SessionStore {
     now: number,
     userId?: string,
   ): boolean {
-    return (
+    return didUpdate(
       this.#database
         .update(agentSessions)
         .set({ status: to, ...updatedAuditFields(actorId, now) })
@@ -755,8 +712,8 @@ export class SessionStore {
             inArray(agentSessions.status, from),
           ),
         )
-        .returning({ id: agentSessions.id })
-        .all().length > 0
+        .returning({ updatedAt: agentSessions.updatedAt })
+        .all(),
     );
   }
 }

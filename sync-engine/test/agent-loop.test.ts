@@ -21,8 +21,10 @@ async function runRecordedLoop(
     executeTool,
     initialMessages: [{ content: prompt, role: "user" }],
     model,
-    recordContextTokens: (tokens) => {
-      recordedContextTokens.push(tokens);
+    recordUsage: ({ contextTokens }) => {
+      if (contextTokens !== null) {
+        recordedContextTokens.push(contextTokens);
+      }
     },
     recordMessage: (message) => {
       recorded.push(message);

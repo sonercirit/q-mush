@@ -9,6 +9,7 @@ import type {
   ProviderCredentialSource,
   ProviderId,
 } from "../../shared/provider-credential-store.ts";
+import type { ProviderModelPricing } from "../../shared/provider-model-pricing.ts";
 import {
   discoverAgentModels,
   type AgentModelDiscoveryFetch,
@@ -42,6 +43,7 @@ function model(
   contextWindow: number | null = null,
   inputModalities: readonly string[] | null = null,
   outputModalities: readonly string[] | null = null,
+  pricing: ProviderModelPricing | null = null,
 ): AgentModelOption {
   return {
     contextWindow,
@@ -49,6 +51,7 @@ function model(
     inputModalities,
     label,
     outputModalities,
+    pricing,
     reasoningEfforts,
   };
 }
@@ -177,6 +180,11 @@ describe("agent model discovery", () => {
             context_length: 131_072,
             id: "vendor/reasoning-model",
             name: "Reasoning Model",
+            pricing: {
+              cached_input: "0.0000001",
+              completion: "0.0000016",
+              prompt: "0.0000004",
+            },
             reasoning: {
               default_effort: "medium",
               supported_efforts: ["low", "medium", "high", "max"],
@@ -196,6 +204,11 @@ describe("agent model discovery", () => {
           131_072,
           ["text", "image", "file"],
           ["text", "image"],
+          {
+            cachedInput: "0.0000001",
+            input: "0.0000004",
+            output: "0.0000016",
+          },
         ),
       ]),
     );

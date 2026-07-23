@@ -65,10 +65,19 @@ export type AgentRecordedMessage =
       readonly role: "thinking";
     };
 
+export interface AgentTokenUsage {
+  readonly cacheWriteInputTokens: number;
+  readonly cachedInputTokens: number;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+}
+
 export interface AgentModelTurn {
   readonly content: string;
   readonly contextTokens: number | null;
+  readonly costUsd: number | null;
   readonly thinking: string;
+  readonly tokenUsage: AgentTokenUsage | null;
   readonly toolCalls: readonly AgentToolCall[];
 }
 
@@ -94,7 +103,11 @@ export interface AgentLoopOptions {
   readonly recordMessage: (
     message: AgentRecordedMessage,
   ) => Promise<void> | void;
-  readonly recordContextTokens?: (tokens: number) => Promise<void> | void;
+  readonly recordUsage?: (input: {
+    readonly contextTokens: number | null;
+    readonly costBasis: "estimated" | "reported" | null;
+    readonly costUsd: number | null;
+  }) => Promise<void> | void;
   readonly signal?: AbortSignal;
 }
 
@@ -146,8 +159,12 @@ export async function runAgentLoop(
       toolCalls: turn.toolCalls,
     };
     await options.recordMessage(assistantMessage);
-    if (turn.contextTokens !== null) {
-      await options.recordContextTokens?.(turn.contextTokens);
+    if (turn.contextTokens !== null || turn.costUsd !== null) {
+      await options.recordUsage?.({
+        contextTokens: turn.contextTokens,
+        costBasis: turn.costUsd === null ? null : "reported",
+        costUsd: turn.costUsd,
+      });
     }
     messages.push(assistantMessage);
 

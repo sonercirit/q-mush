@@ -222,6 +222,11 @@ describe("agent sessions", () => {
           inputModalities: null,
           label: "GPT Discovered",
           outputModalities: null,
+          pricing: {
+            cachedInput: "0.0000001",
+            input: "0.0000004",
+            output: "0.0000016",
+          },
           reasoningEfforts: ["low", "high"],
         },
       ],
@@ -253,8 +258,10 @@ describe("agent sessions", () => {
     expect(await createResponse.json()).toMatchObject({
       autoCompact: true,
       maxContextTokens: 200_000,
+      providerPricing: catalog.models[0]?.pricing,
     });
     await expectSessionReaches(setup, createResponse, "idle");
+    expect(setup.selectedPricing).toEqual([catalog.models[0]?.pricing]);
     database.$client.close();
   });
 
@@ -265,7 +272,16 @@ describe("agent sessions", () => {
         contextTokens: 90_000,
         toolCalls: [],
       },
-      { content: "Concise handoff.", toolCalls: [] },
+      {
+        content: "Concise handoff.",
+        tokenUsage: {
+          cacheWriteInputTokens: 0,
+          cachedInputTokens: 1_000,
+          inputTokens: 2_000,
+          outputTokens: 500,
+        },
+        toolCalls: [],
+      },
     ]);
     const setup = connectedSessionSetup(model, "api_key", () =>
       Promise.resolve({
@@ -277,6 +293,7 @@ describe("agent sessions", () => {
             inputModalities: null,
             label: "GPT",
             outputModalities: null,
+            pricing: null,
             reasoningEfforts: [],
           },
         ],
@@ -333,7 +350,11 @@ describe("agent sessions", () => {
       },
     );
     expect(JSON.stringify(compacted)).not.toContain("Initial work complete.");
-    expect(compacted).toMatchObject({ currentContextTokens: 0 });
+    expect(compacted).toMatchObject({
+      costBasis: "estimated",
+      costUsd: 0.0013,
+      currentContextTokens: 0,
+    });
     setup.database.$client.close();
   });
 

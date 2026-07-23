@@ -1,4 +1,5 @@
 import type { AgentRecordedMessage } from "../shared/agent-loop.ts";
+import type { AgentSessionUsageUpdate } from "../shared/session-model.ts";
 import type { SessionStore } from "./session-store.ts";
 
 export class SessionRecorder {
@@ -19,8 +20,8 @@ export class SessionRecorder {
     this.#store = store;
   }
 
-  contextTokens(tokens: number): void {
-    this.#store.updateContextTokens(this.#sessionId, tokens, this.#now());
+  usage(input: AgentSessionUsageUpdate): void {
+    this.#store.updateUsage(this.#sessionId, input, this.#now());
     this.#notify();
   }
 

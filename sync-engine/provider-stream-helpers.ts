@@ -1,4 +1,8 @@
-import type { AgentModelTurn, AgentToolCall } from "../shared/agent-loop.ts";
+import type {
+  AgentModelTurn,
+  AgentTokenUsage,
+  AgentToolCall,
+} from "../shared/agent-loop.ts";
 import type { ProviderTextDelta } from "./provider-stream.ts";
 
 export function sortedToolCalls(
@@ -31,6 +35,8 @@ export function providerTurn(
   contextTokens: number | null,
   thinking: string,
   toolCalls: readonly AgentToolCall[],
+  costUsd: number | null = null,
+  tokenUsage: AgentTokenUsage | null = null,
 ): AgentModelTurn {
-  return { content, contextTokens, thinking, toolCalls };
+  return { content, contextTokens, costUsd, thinking, tokenUsage, toolCalls };
 }

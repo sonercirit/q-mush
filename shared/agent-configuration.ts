@@ -2,6 +2,7 @@ import type {
   ProviderCredentialSource,
   ProviderId,
 } from "./provider-credential-store.ts";
+import type { ProviderModelPricing } from "./provider-model-pricing.ts";
 
 // `ultra` is Codex client orchestration, not a provider reasoning value.
 export const AGENT_REASONING_EFFORTS = [
@@ -22,6 +23,7 @@ export interface AgentModelOption {
   readonly inputModalities: readonly string[] | null;
   readonly label: string;
   readonly outputModalities: readonly string[] | null;
+  readonly pricing: ProviderModelPricing | null;
   readonly reasoningEfforts: readonly AgentReasoningEffort[];
 }
 

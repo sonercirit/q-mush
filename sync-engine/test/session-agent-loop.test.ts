@@ -20,24 +20,29 @@ describe("compacting agent session loop", () => {
       {
         content: "Done after compaction.",
         contextTokens: 2_000,
+        costUsd: 0.25,
         toolCalls: [],
       },
     ]);
     const compactorRequests: unknown[] = [];
-    const compactor: AgentConversationCompactor = {
+    const createCompactor = (): AgentConversationCompactor => ({
       compact: (messages) => {
         compactorRequests.push(messages);
         return Promise.resolve({
+          costUsd: 0.1,
           messages: [{ content: "Compacted handoff", role: "user" }],
           summary: "Compacted handoff",
+          tokenUsage: null,
         });
       },
-    };
+    });
     const summaries: string[] = [];
+    const costs: (number | null)[] = [];
 
     await runCompactingAgentLoop({
+      agentCost: () => null,
       autoCompact: true,
-      createCompactor: () => compactor,
+      createCompactor,
       executeTool: () => Promise.resolve("# Project"),
       initialMessages: [{ content: "Inspect the project", role: "user" }],
       maxContextTokens: 100_000,
@@ -45,7 +50,10 @@ describe("compacting agent session loop", () => {
       recordCompaction: (summary) => {
         summaries.push(summary);
       },
-      recordContextTokens: () => undefined,
+      recordUsage: ({ costBasis, costUsd }) => {
+        expect(costBasis).toBe(costUsd === null ? null : "reported");
+        costs.push(costUsd);
+      },
       recordMessage: () => undefined,
     });
 
@@ -64,18 +72,23 @@ describe("compacting agent session loop", () => {
       { content: "Compacted handoff", role: "user" },
     ]);
     expect(summaries).toContain("Compacted handoff");
+    expect(costs).toEqual([null, 0.1, 0.25]);
   });
 
   test("compacts a final turn that reaches 95%", async () => {
     let summary = "";
+    let compactionCost = 0;
     const finalCompactor: AgentConversationCompactor = {
       compact: () =>
         Promise.resolve({
+          costUsd: 0.15,
           messages: [{ content: "Final handoff", role: "user" }],
           summary: "Final handoff",
+          tokenUsage: null,
         }),
     };
     await runCompactingAgentLoop({
+      agentCost: () => null,
       autoCompact: true,
       createCompactor: () => finalCompactor,
       executeTool: () => Promise.reject(new Error("No tool expected")),
@@ -87,13 +100,17 @@ describe("compacting agent session loop", () => {
       recordCompaction: (compactedSummary) => {
         summary = compactedSummary;
       },
-      recordContextTokens: (tokens) => {
-        expect(Number.isSafeInteger(tokens)).toBe(true);
+      recordUsage: ({ contextTokens, costUsd }) => {
+        if (contextTokens !== null) {
+          expect(Number.isSafeInteger(contextTokens)).toBe(true);
+        }
+        compactionCost += costUsd ?? 0;
       },
       recordMessage: () => undefined,
     });
 
     expect(summary).toBe("Final handoff");
+    expect(compactionCost).toBe(0.15);
   });
 
   test("does not compact a full context when automatic compaction is off", async () => {
@@ -108,6 +125,7 @@ describe("compacting agent session loop", () => {
     let compacted = false;
 
     await runCompactingAgentLoop({
+      agentCost: () => null,
       autoCompact: false,
       createCompactor: () => ({
         compact: () => {
@@ -124,8 +142,8 @@ describe("compacting agent session loop", () => {
       recordCompaction: (summary) => {
         throw new Error(`Unexpected summary: ${summary}`);
       },
-      recordContextTokens: (tokens) => {
-        expect(tokens).toBeGreaterThanOrEqual(0);
+      recordUsage: ({ contextTokens }) => {
+        expect(contextTokens).toBeGreaterThanOrEqual(0);
       },
       recordMessage: () => undefined,
     });

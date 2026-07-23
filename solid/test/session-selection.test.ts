@@ -19,6 +19,7 @@ const CATALOG: AgentModelCatalog = {
       inputModalities: null,
       label: "Balanced",
       outputModalities: null,
+      pricing: null,
       reasoningEfforts: ["low", "medium"],
     },
     {
@@ -27,6 +28,7 @@ const CATALOG: AgentModelCatalog = {
       inputModalities: null,
       label: "Powerful",
       outputModalities: null,
+      pricing: null,
       reasoningEfforts: ["max", "low", "xhigh"],
     },
   ],

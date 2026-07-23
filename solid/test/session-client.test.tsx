@@ -39,6 +39,7 @@ const SESSION_STATE: SessionViewState = {
           inputModalities: ["text", "image", "audio"],
           label: "GPT-5 Codex (discovered)",
           outputModalities: ["text"],
+          pricing: null,
           reasoningEfforts: ["medium", "high", "xhigh"],
         },
         {
@@ -47,6 +48,7 @@ const SESSION_STATE: SessionViewState = {
           inputModalities: ["image"],
           label: "Image Model",
           outputModalities: ["image"],
+          pricing: null,
           reasoningEfforts: [],
         },
       ],
@@ -166,6 +168,25 @@ test("keeps editable session controls in the reactive tree", () => {
   expect(followUpHtml).not.toContain("data-focus-key");
 });
 
+test("shows session time and cost in the list and detail", () => {
+  const session = {
+    ...TEST_SESSION_DETAIL,
+    activeDurationMs: 65_000,
+    activeStartedAt: null,
+    costBasis: "estimated" as const,
+    costUsd: 0.0042,
+  };
+  const html = renderPanel({
+    ...SESSION_STATE,
+    detail: session,
+    selectedId: session.id,
+    sessions: [session],
+  });
+
+  expect(html.match(/Time: 1m 5s/gu)).toHaveLength(2);
+  expect(html.match(/Estimated cost: \$0\.0042/gu)).toHaveLength(2);
+});
+
 test("renders the session list as a scrollable region", () => {
   const html = renderPanel({
     ...SESSION_STATE,
@@ -180,6 +201,7 @@ test("renders the system prompt and model thinking in a transcript", () => {
   const state: SessionViewState = {
     ...SESSION_STATE,
     detail: {
+      ...TEST_SESSION_DETAIL,
       agentFile: {
         content: "Always run Bun tests.",
         name: "AGENTS.md",
@@ -188,7 +210,6 @@ test("renders the system prompt and model thinking in a transcript", () => {
       createdAt: 1,
       credentialId: "credential-1",
       currentContextTokens: 0,
-      id: "session-1",
       messages: [
         {
           content: "I should inspect the existing files first.",
@@ -230,6 +251,7 @@ test("renders the system prompt and model thinking in a transcript", () => {
       maxContextTokens: 200_000,
       model: "gpt-5-codex",
       provider: "openai",
+      providerPricing: null,
       reasoningEffort: "high",
       runnerId: "runner-1",
       status: "idle",

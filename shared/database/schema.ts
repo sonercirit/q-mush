@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   index,
   integer,
+  real,
   sqliteTable,
   text,
   uniqueIndex,
@@ -126,10 +127,19 @@ export const agentSessions = sqliteTable(
       .notNull()
       .references(() => providerCredentials.id, { onDelete: "restrict" }),
     provider: providerColumn(),
+    providerPricing: text("provider_pricing"),
     model: text("model").notNull(),
     autoCompact: integer("auto_compact", { mode: "boolean" })
       .notNull()
       .default(true),
+    activeDurationMs: integer("active_duration_ms").notNull().default(0),
+    activeStartedAt: integer("active_started_at", { mode: "timestamp_ms" }),
+    costBasis: text("cost_basis", {
+      enum: ["none", "reported", "estimated"],
+    })
+      .notNull()
+      .default("none"),
+    costUsd: real("cost_usd").notNull().default(0),
     currentContextTokens: integer("current_context_tokens")
       .notNull()
       .default(0),

@@ -52,6 +52,7 @@ function testSessionInput() {
     model: "gpt-4.1-mini",
     prompt: "Inspect the repository\nand make it shine",
     provider: "openai" as const,
+    providerPricing: null,
     reasoningEffort: "high" as const,
     runnerId: RUNNER_ID,
     userId: TEST_USER_ID,
@@ -65,6 +66,13 @@ function createTestSession(store: SessionStore) {
 
 function markTestSessionRunning(store: SessionStore): void {
   expect(store.mark(SESSION_ID, "running", TEST_NOW + 1)).toBe(true);
+}
+
+function runningStore(): ReturnType<typeof createStore> {
+  const setup = createStore();
+  createTestSession(setup.store);
+  markTestSessionRunning(setup.store);
+  return setup;
 }
 
 function testSessionMessageRoles(store: SessionStore) {
@@ -117,6 +125,10 @@ describe("session store", () => {
     expect(created.agentFile).toBeNull();
     expect(created.id).toBe(SESSION_ID);
     expect(created.status).toBe("queued");
+    expect(created.activeDurationMs).toBe(0);
+    expect(created.activeStartedAt).toBeNull();
+    expect(created.costBasis).toBe("none");
+    expect(created.costUsd).toBe(0);
     expect(created.currentContextTokens).toBe(0);
     expect(created.autoCompact).toBe(true);
     expect(created.maxContextTokens).toBe(200_000);
@@ -162,6 +174,16 @@ describe("session store", () => {
     store.appendAgentMessage(SESSION_ID, thinkingMessage, TEST_NOW + 3);
     store.appendAgentMessage(SESSION_ID, assistantMessage, TEST_NOW + 4);
     store.appendAgentMessage(SESSION_ID, toolMessage, TEST_NOW + 5);
+    store.updateUsage(
+      SESSION_ID,
+      { contextTokens: 1_000, costBasis: "reported", costUsd: 0.1 },
+      TEST_NOW + 5,
+    );
+    store.updateUsage(
+      SESSION_ID,
+      { contextTokens: null, costBasis: "estimated", costUsd: 0.05 },
+      TEST_NOW + 5,
+    );
     expect(store.mark(SESSION_ID, "idle", TEST_NOW + 6)).toBe(true);
 
     const detail = store.get(TEST_USER_ID, SESSION_ID);
@@ -170,6 +192,11 @@ describe("session store", () => {
       name: "AGENTS.md",
     });
     expect(detail?.status).toBe("idle");
+    expect(detail?.activeDurationMs).toBe(5);
+    expect(detail?.activeStartedAt).toBeNull();
+    expect(detail?.costBasis).toBe("estimated");
+    expect(detail?.costUsd).toBeCloseTo(0.15);
+    expect(detail?.currentContextTokens).toBe(1_000);
     expect(detail?.messages.slice(1)).toEqual([
       {
         ...thinkingMessage,
@@ -197,6 +224,34 @@ describe("session store", () => {
       },
     ]);
     expect(store.list(TEST_USER_ID)).toHaveLength(1);
+    database.$client.close();
+  });
+
+  test("keeps an estimated cost basis after a provider-reported charge", () => {
+    const { database, store } = runningStore();
+
+    store.updateUsage(
+      SESSION_ID,
+      { contextTokens: null, costBasis: "estimated", costUsd: 0.02 },
+      TEST_NOW + 2,
+    );
+    store.updateUsage(
+      SESSION_ID,
+      { contextTokens: null, costBasis: "reported", costUsd: 0.03 },
+      TEST_NOW + 3,
+    );
+    expect(() => {
+      store.updateUsage(
+        SESSION_ID,
+        { contextTokens: null, costBasis: null, costUsd: 0.01 },
+        TEST_NOW + 4,
+      );
+    }).toThrow("usage is invalid");
+
+    expect(store.get(TEST_USER_ID, SESSION_ID)).toMatchObject({
+      costBasis: "estimated",
+      costUsd: 0.05,
+    });
     database.$client.close();
   });
 
@@ -245,9 +300,7 @@ describe("session store", () => {
   });
 
   test("continues without appending a user message", () => {
-    const setup = createStore();
-    createTestSession(setup.store);
-    markTestSessionRunning(setup.store);
+    const setup = runningStore();
     expect(setup.store.mark(SESSION_ID, "idle", TEST_NOW + 2)).toBe(true);
     const before = setup.store.conversation(SESSION_ID);
 
@@ -260,9 +313,7 @@ describe("session store", () => {
   });
 
   test("fills missing tool results when replaying a transcript", () => {
-    const { database, store } = createStore();
-    createTestSession(store);
-    markTestSessionRunning(store);
+    const { database, store } = runningStore();
     const interruptedCall = {
       arguments: '{"command":"bun run dev:restart"}',
       id: "interrupted-call",
@@ -276,6 +327,11 @@ describe("session store", () => {
     store.appendAgentMessage(SESSION_ID, assistantMessage, TEST_NOW + 2);
     expect(testSessionMessageRoles(store)).toEqual(["user", "assistant"]);
     expect(store.mark(SESSION_ID, "failed", TEST_NOW + 3)).toBe(true);
+    expect(store.get(TEST_USER_ID, SESSION_ID)).toMatchObject({
+      activeDurationMs: 2,
+      activeStartedAt: null,
+      status: "failed",
+    });
     expect(testSessionMessageRoles(store)).toEqual([
       "user",
       "assistant",

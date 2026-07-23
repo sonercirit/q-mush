@@ -4,9 +4,14 @@ import type {
   AgentModelTurn,
 } from "../../shared/agent-loop.ts";
 
-type ScriptedTurn = Omit<AgentModelTurn, "contextTokens" | "thinking"> & {
+type ScriptedTurn = Omit<
+  AgentModelTurn,
+  "contextTokens" | "costUsd" | "thinking" | "tokenUsage"
+> & {
   readonly contextTokens?: number | null;
+  readonly costUsd?: number | null;
   readonly thinking?: string;
+  readonly tokenUsage?: AgentModelTurn["tokenUsage"];
 };
 
 export class ScriptedAgentModel implements AgentModel {
@@ -18,7 +23,9 @@ export class ScriptedAgentModel implements AgentModel {
       ...turn,
       contextTokens:
         turn.contextTokens === undefined ? null : turn.contextTokens,
+      costUsd: turn.costUsd ?? null,
       thinking: turn.thinking ?? "",
+      tokenUsage: turn.tokenUsage ?? null,
     }));
   }
 

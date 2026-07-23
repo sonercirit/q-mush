@@ -1,11 +1,7 @@
-import type { AgentReasoningEffort } from "../shared/agent-configuration.ts";
 import type { AgentFile } from "../shared/agent-file.ts";
 import type { AgentModel } from "../shared/agent-loop.ts";
 import { createAgentSystemPrompt } from "../shared/agent-prompt.ts";
-import type {
-  ProviderCredentialAccess,
-  ProviderId,
-} from "../shared/provider-credential-store.ts";
+import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import {
   AGENT_COMPACTION_SYSTEM_PROMPT,
@@ -14,15 +10,15 @@ import {
 import type { AgentProviderCredential } from "./agent-model.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
 
-interface AgentModelFactoryOptions {
+interface AgentModelFactoryOptions extends Pick<
+  AgentSessionDetail,
+  "model" | "provider" | "providerPricing" | "reasoningEffort"
+> {
   readonly credential: AgentProviderCredential;
-  readonly model: string;
   readonly onDelta?: (delta: {
     readonly content: string;
     readonly thinking: string;
   }) => void;
-  readonly provider: ProviderId;
-  readonly reasoningEffort: AgentReasoningEffort | null;
   readonly systemPrompt: string;
 }
 
@@ -46,6 +42,7 @@ function modelOptions(
     model: detail.model,
     ...(onDelta === undefined ? {} : { onDelta }),
     provider: detail.provider,
+    providerPricing: detail.providerPricing,
     reasoningEffort: detail.reasoningEffort,
     systemPrompt,
   };

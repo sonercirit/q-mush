@@ -42,7 +42,9 @@ test("accumulates OpenAI-compatible chat completion chunks", () => {
   expect(accumulator.finish()).toEqual({
     content: "Inspecting now.",
     contextTokens: 123,
+    costUsd: null,
     thinking: "Need to read.",
+    tokenUsage: null,
     toolCalls: [
       {
         arguments: '{"path":"README.md"}',
@@ -50,6 +52,34 @@ test("accumulates OpenAI-compatible chat completion chunks", () => {
         name: "read",
       },
     ],
+  });
+});
+
+test("accumulates provider-reported cost and detailed token usage", () => {
+  const accumulator = createProviderStreamAccumulator(
+    "chat_completions",
+    () => undefined,
+  );
+
+  accumulator.push({
+    choices: [],
+    usage: {
+      output_tokens: 13,
+      cost: "0.0042",
+      prompt_tokens: 123,
+      prompt_tokens_details: { cached_tokens: 100 },
+    },
+  });
+
+  expect(accumulator.finish()).toMatchObject({
+    contextTokens: 123,
+    costUsd: 0.0042,
+    tokenUsage: {
+      cacheWriteInputTokens: 0,
+      cachedInputTokens: 100,
+      inputTokens: 123,
+      outputTokens: 13,
+    },
   });
 });
 
@@ -73,7 +103,9 @@ test("retains non-streaming chat-completion reasoning details", () => {
   expect(accumulator.finish()).toEqual({
     content: "Done.",
     contextTokens: 9,
+    costUsd: null,
     thinking: "First thought\n\nSecond thought",
+    tokenUsage: null,
     toolCalls: [],
   });
 });
@@ -159,7 +191,9 @@ test("emits every provider text delta before completion", () => {
   expect(accumulator.finish()).toEqual({
     content: "Hello world",
     contextTokens: 45,
+    costUsd: null,
     thinking: "",
+    tokenUsage: null,
     toolCalls: [],
   });
 });

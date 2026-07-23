@@ -59,6 +59,7 @@ function modelCatalogValue(
         ...(includeInput ? { inputModalities } : {}),
         label: "GPT Test",
         outputModalities: ["text"],
+        pricing: null,
         reasoningEfforts: [],
       },
     ],
@@ -74,13 +75,15 @@ test("requires explicit context and modality metadata from model responses", () 
   );
 });
 
-test("requires explicit context and compaction metadata from session responses", () => {
-  expect(() =>
-    readSessionDetail({ ...DETAIL, autoCompact: undefined }),
-  ).toThrow("invalid agent session");
-  expect(() =>
-    readSessionDetail({ ...DETAIL, maxContextTokens: undefined }),
-  ).toThrow("invalid agent session");
+test("requires explicit context, cost, and compaction metadata from session responses", () => {
+  for (const invalid of [
+    { ...DETAIL, autoCompact: undefined },
+    { ...DETAIL, costBasis: undefined },
+    { ...DETAIL, costBasis: "none", costUsd: 1 },
+    { ...DETAIL, maxContextTokens: undefined },
+  ]) {
+    expect(() => readSessionDetail(invalid)).toThrow("invalid agent session");
+  }
   expect(() =>
     readAgentModelCatalog({
       defaultModel: "gpt-test",

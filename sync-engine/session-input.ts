@@ -14,7 +14,7 @@ const MAXIMUM_PROMPT_LENGTH = 32_768;
 
 export type CreateSessionInput = Omit<
   CreateAgentSession,
-  "autoCompact" | "maxContextTokens" | "userId"
+  "autoCompact" | "maxContextTokens" | "providerPricing" | "userId"
 >;
 
 export function readProvider(value: unknown): ProviderId | undefined {

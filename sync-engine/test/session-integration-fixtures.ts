@@ -2,6 +2,7 @@ import { expect } from "vitest";
 import type { AgentImage } from "../../shared/agent-images.ts";
 import type { AgentModel } from "../../shared/agent-loop.ts";
 import type { ProviderCredentialAccess } from "../../shared/provider-credential-store.ts";
+import type { ProviderModelPricing } from "../../shared/provider-model-pricing.ts";
 import { SESSIONS_PATH } from "../../shared/routes.ts";
 import {
   RunnerCommandBroker,
@@ -80,6 +81,7 @@ export function connectedSessionSetup(
     "018bcfe5-6800-7000-8000-000000000070",
   ];
   const selectedModels: string[] = [];
+  const selectedPricing: (ProviderModelPricing | null)[] = [];
   const selectedReasoningEfforts: (string | null)[] = [];
   const selectedSystemPrompts: string[] = [];
   const runnerCommands: RunnerToolCommand[] = [];
@@ -107,11 +109,13 @@ export function connectedSessionSetup(
       modelFactory: ({
         credential: selectedCredential,
         model: selectedModel,
+        providerPricing,
         reasoningEffort,
         systemPrompt,
       }) => {
         expect(selectedCredential.secret).toBe("provider-secret");
         selectedModels.push(selectedModel);
+        selectedPricing.push(providerPricing);
         selectedReasoningEfforts.push(reasoningEffort);
         selectedSystemPrompts.push(systemPrompt);
         return model;
@@ -125,6 +129,7 @@ export function connectedSessionSetup(
     latestRunnerCommand: () => latestRunnerCommand,
     runnerCommands,
     selectedModels,
+    selectedPricing,
     selectedReasoningEfforts,
     selectedSystemPrompts,
     sessions,

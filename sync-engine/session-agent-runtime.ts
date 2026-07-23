@@ -1,6 +1,7 @@
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
+import { estimateAgentTurnCost } from "./agent-cost.ts";
 import { createAgentSkills } from "./agent-skills.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
 import { loadSessionAgentFile } from "./session-agent-file.ts";
@@ -60,6 +61,23 @@ export async function compactSessionConversation(
   const conversation = runtime.store.conversation(runtime.detail.id);
   const compactor = models.createCompactor();
   const compacted = await compactor.compact(conversation, runtime.signal);
+  const costUsd =
+    compacted.costUsd ??
+    estimateAgentTurnCost(runtime.detail, compacted.tokenUsage);
+  const costBasis =
+    costUsd === null
+      ? null
+      : compacted.costUsd === null
+        ? "estimated"
+        : "reported";
+  if (costBasis !== null) {
+    runtime.store.updateUsage(
+      runtime.detail.id,
+      { contextTokens: null, costBasis, costUsd },
+      runtime.now(),
+    );
+    runtime.notify();
+  }
   runtime.store.compact(runtime.detail.id, compacted.summary, runtime.now());
 }
 
@@ -79,6 +97,7 @@ export async function runSessionAgent(
   );
 
   await runCompactingAgentLoop({
+    agentCost: (turn) => estimateAgentTurnCost(runtime.detail, turn.tokenUsage),
     autoCompact: runtime.detail.autoCompact,
     createCompactor: models.createCompactor,
     executeTool: (call) => {
@@ -104,11 +123,11 @@ export async function runSessionAgent(
       runtime.store.compact(runtime.detail.id, summary, runtime.now());
       runtime.notify();
     },
-    recordContextTokens: (tokens) => {
-      recorder.contextTokens(tokens);
-    },
     recordMessage: (message) => {
       recorder.message(message);
+    },
+    recordUsage: (usage) => {
+      recorder.usage(usage);
     },
     signal: runtime.signal,
   });

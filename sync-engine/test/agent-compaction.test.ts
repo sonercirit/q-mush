@@ -23,6 +23,7 @@ describe("agent conversation compaction", () => {
     ]);
 
     expect(compacted.summary).toBe("Keep the current changes and run tests.");
+    expect(compacted).toMatchObject({ costUsd: null, tokenUsage: null });
     expect(compacted.messages).toEqual([
       {
         content:

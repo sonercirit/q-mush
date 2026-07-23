@@ -21,8 +21,10 @@ type CompactionArguments = readonly [
 ];
 
 export interface CompactedConversation {
+  readonly costUsd: number | null;
   readonly messages: readonly AgentConversationMessage[];
   readonly summary: string;
+  readonly tokenUsage: AgentModelTurn["tokenUsage"];
 }
 
 function toolCallsAreComplete(
@@ -88,8 +90,10 @@ export class ModelConversationCompactor implements AgentConversationCompactor {
 
     const summary = turn.content.trim();
     return {
+      costUsd: turn.costUsd,
       messages: [{ content: `${COMPACTION_PREFIX}${summary}`, role: "user" }],
       summary,
+      tokenUsage: turn.tokenUsage,
     };
   }
 }

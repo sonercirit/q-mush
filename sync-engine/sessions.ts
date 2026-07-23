@@ -403,12 +403,13 @@ class DrizzleSessionIntegration implements SessionIntegration {
     return this.#withRuntimeAccess(user.id, input, async (credential) => {
       const selectedModel = selectedSessionModel(input, credential.source);
       let maxContextTokens: number | null = null;
+      let providerPricing: AgentSessionSummary["providerPricing"] = null;
 
       try {
         const catalog = await this.#discoverModels(input.provider, credential);
-        maxContextTokens =
-          catalog.models.find(({ id }) => id === selectedModel)
-            ?.contextWindow ?? null;
+        const model = catalog.models.find(({ id }) => id === selectedModel);
+        maxContextTokens = model?.contextWindow ?? null;
+        providerPricing = model?.pricing ?? null;
       } catch {
         // Model discovery enhances context display but does not gate a session.
       }
@@ -423,6 +424,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
           autoCompact: true,
           maxContextTokens,
           model: selectedModel,
+          providerPricing,
           userId: user.id,
         },
         this.#now(),

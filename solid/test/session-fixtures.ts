@@ -1,8 +1,12 @@
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 
 export const TEST_SESSION_DETAIL: AgentSessionDetail = {
+  activeDurationMs: 0,
+  activeStartedAt: null,
   agentFile: null,
   autoCompact: true,
+  costBasis: "none",
+  costUsd: 0,
   createdAt: 1,
   credentialId: "credential-1",
   currentContextTokens: 1_250,
@@ -11,6 +15,7 @@ export const TEST_SESSION_DETAIL: AgentSessionDetail = {
   messages: [],
   model: "gpt-5-codex",
   provider: "openai",
+  providerPricing: null,
   reasoningEffort: null,
   runnerId: "runner-1",
   status: "idle",

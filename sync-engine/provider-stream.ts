@@ -1,4 +1,8 @@
-import type { AgentModelTurn, AgentToolCall } from "../shared/agent-loop.ts";
+import type {
+  AgentModelTurn,
+  AgentTokenUsage,
+  AgentToolCall,
+} from "../shared/agent-loop.ts";
 import { isRecord, readRequiredArray } from "../shared/auth-model.ts";
 import { requiredRecordString } from "../shared/json-record.ts";
 import {
@@ -36,12 +40,53 @@ function readTokenCount(value: unknown, key: string): number | undefined {
     : undefined;
 }
 
-function readContextTokens(value: unknown, usageKey: string): number | null {
-  if (!isRecord(value)) {
-    return null;
-  }
+function usageRecord(
+  value: unknown,
+  usageKey: string,
+): Readonly<Record<string, unknown>> | undefined {
+  return isRecord(value) && isRecord(value[usageKey])
+    ? value[usageKey]
+    : undefined;
+}
 
-  const usage = value[usageKey];
+function readTokenUsage(
+  value: unknown,
+  usageKey: string,
+): AgentTokenUsage | null {
+  const usage = usageRecord(value, usageKey) ?? {};
+
+  const inputTokens =
+    readTokenCount(usage, "input_tokens") ??
+    readTokenCount(usage, "prompt_tokens");
+  const outputTokens =
+    readTokenCount(usage, "output_tokens") ??
+    readTokenCount(usage, "completion_tokens");
+  const inputDetails =
+    usage["input_tokens_details"] ?? usage["prompt_tokens_details"];
+  const cachedInputTokens = readTokenCount(inputDetails, "cached_tokens") ?? 0;
+  const cacheWriteInputTokens =
+    readTokenCount(inputDetails, "cache_write_tokens") ?? 0;
+
+  return inputTokens === undefined || outputTokens === undefined
+    ? null
+    : {
+        cacheWriteInputTokens,
+        cachedInputTokens,
+        inputTokens,
+        outputTokens,
+      };
+}
+
+function readCostUsd(value: unknown, usageKey: string): number | null {
+  const cost = usageRecord(value, usageKey)?.["cost"];
+  const parsed = typeof cost === "string" ? Number(cost) : cost;
+  return typeof parsed === "number" && Number.isFinite(parsed) && parsed >= 0
+    ? parsed
+    : null;
+}
+
+function readContextTokens(value: unknown, usageKey: string): number | null {
+  const usage = usageRecord(value, usageKey);
   return (
     readTokenCount(usage, "input_tokens") ??
     readTokenCount(usage, "prompt_tokens") ??
@@ -151,6 +196,8 @@ function readChatTurn(value: unknown): AgentModelTurn {
     readContextTokens(value, "usage"),
     readChatThinking(message),
     (rawToolCalls ?? []).map(readChatToolCall),
+    readCostUsd(value, "usage"),
+    readTokenUsage(value, "usage"),
   );
 }
 
@@ -234,7 +281,9 @@ function readResponsesTurn(value: unknown): AgentModelTurn {
   return {
     content: text.join(""),
     contextTokens: readContextTokens(value, "usage"),
+    costUsd: readCostUsd(value, "usage"),
     thinking: thinking.join("\n\n"),
+    tokenUsage: readTokenUsage(value, "usage"),
     toolCalls,
   };
 }
@@ -307,6 +356,8 @@ class ResponsesAccumulator
       this.#completed.toolCalls.length === 0 && this.#toolCalls.size > 0
         ? sortedToolCalls(this.#toolCalls)
         : this.#completed.toolCalls,
+      this.#completed.costUsd,
+      this.#completed.tokenUsage,
     );
   }
 
@@ -435,6 +486,8 @@ class ChatCompletionsAccumulator
   implements ProviderStreamAccumulator
 {
   #contextTokens: number | null = null;
+  #costUsd: number | null = null;
+  #tokenUsage: AgentTokenUsage | null = null;
   readonly #toolCalls = new Map<number, PartialChatToolCall>();
 
   readonly completed = false;
@@ -445,6 +498,8 @@ class ChatCompletionsAccumulator
       this.#contextTokens,
       this.buffers.thinking.join(""),
       sortedToolCalls(this.#toolCalls),
+      this.#costUsd,
+      this.#tokenUsage,
     );
   }
 
@@ -503,6 +558,14 @@ class ChatCompletionsAccumulator
     const contextTokens = readContextTokens(value, "usage");
     if (contextTokens !== null) {
       this.#contextTokens = contextTokens;
+    }
+    const costUsd = readCostUsd(value, "usage");
+    if (costUsd !== null) {
+      this.#costUsd = costUsd;
+    }
+    const tokenUsage = readTokenUsage(value, "usage");
+    if (tokenUsage !== null) {
+      this.#tokenUsage = tokenUsage;
     }
   }
 }

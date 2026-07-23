@@ -1,25 +1,22 @@
 # AGENTS.md
 
-Living project memory for coding agents. Update it whenever work reveals durable
-information.
+Living project memory for coding agents. Update it with durable information.
 
 ## Project Snapshot
 
 - Private strict-TypeScript ESM Bun project with SolidJS.
-- Production source is split across `solid/`, `sync-engine/`, `runner/`, and
-  `shared/`; `sync-engine/index.ts` is the server entry point.
+- Source is split across `solid/`, `sync-engine/`, `runner/`, and `shared/`;
+  `sync-engine/index.ts` is the server entry point.
 - Tests live in `test/` directories; there is no `src/`.
-- The server-rendered homepage lives at `/`; the browser app lives at `/app`.
+- The homepage is `/`; the browser app is `/app`.
 - Tests use Vitest under Bun.
 
 ## Working Agreements
 
 - Inspect the repository and `git status` before edits.
-- Preserve established patterns once they exist; do not introduce a new tool or
-  dependency without a concrete need.
-- Practice test-driven development (TDD) for behavioral changes: write or update
-  a failing test first, implement the minimum needed to pass, then refactor
-  while keeping tests green.
+- Preserve existing patterns; add tools or dependencies only when needed.
+- Practice TDD for behavior: first update a failing test, then implement and
+  refactor while green.
 - Follow DRY (Don't Repeat Yourself): keep each piece of knowledge or logic in
   one authoritative place, while avoiding premature abstractions.
 - Follow KISS (Keep It Simple, Stupid): prefer the simplest clear solution that
@@ -29,8 +26,7 @@ information.
 - Run the narrowest relevant checks after each change, then broader checks when
   practical.
 - Keep changes focused; do not modify unrelated files.
-- Never commit secrets, credentials, generated artifacts, or local environment
-  files.
+- Never commit secrets, credentials, generated artifacts, or local env files.
 
 ## Setup and Commands
 
@@ -113,16 +109,19 @@ information.
 - `sync-engine/sessions.ts` and `sync-engine/session-store.ts` persist coding
   sessions. User messages support selecting or pasting up to eight 10 MB PNG,
   JPEG, GIF, or WebP images, persisted with the transcript and sent as native
-  multimodal input. A session records latest input-token usage and its
-  discovered context limit. Usage shows a percentage, yellow at 80%, and red at
-  90%. Auto-compaction defaults on and summarizes completed history before the
-  next request at 95%; idle sessions can compact manually. Compaction
-  soft-deletes prior active messages and inserts a replayable handoff. Provider
-  secrets never enter browser or runner work payloads. The working-directory
-  field opens the interactive browser in `solid/directory-picker-client.tsx`;
-  its controller posts to `/api/runners/:id/directories` for canonical directory
-  metadata. Before each run, `read_agent_file` loads exact-root `AGENTS.md`,
-  falling back to `CLAUDE.md`; only `AGENTS.md` is used when both exist.
+  multimodal input. Sessions record cumulative active time, model cost
+  (including compaction), token usage, and the context limit. OpenRouter charges
+  are authoritative; others use captured/OpenAI estimates, with unknown prices
+  unavailable. OAuth figures are API equivalents, not subscription charges.
+  Usage is yellow at 80% and red at 90%. Auto-compaction defaults on and
+  summarizes completed history before the next request at 95%; idle sessions can
+  compact manually. Compaction soft-deletes prior active messages and inserts a
+  replayable handoff. Provider secrets never enter browser or runner work
+  payloads. The working-directory field opens the interactive browser in
+  `solid/directory-picker-client.tsx`; its controller posts to
+  `/api/runners/:id/directories` for canonical directory metadata. Before each
+  run, `read_agent_file` loads exact-root `AGENTS.md`, falling back to
+  `CLAUDE.md`; only `AGENTS.md` is used when both exist.
 
   `runner/runner-workspace.ts` shares canonical workspace resolution and
   containment with the file tools. The latest agent-file selection is persisted
