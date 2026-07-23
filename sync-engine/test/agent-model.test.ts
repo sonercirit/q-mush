@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { AgentModelTurn } from "../../shared/agent-loop.ts";
+import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import { isRecord } from "../../shared/auth-model.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import { createJsonResponse } from "../../sync-engine/http.ts";
@@ -184,14 +185,7 @@ describe("chat completions agent model", () => {
       "Bearer sk-or-secret",
     );
     const body = await capturedBody(capture);
-    expect(capturedToolNames(body)).toEqual([
-      "read",
-      "bash",
-      "edit",
-      "write",
-      "parallel",
-      "brave_search",
-    ]);
+    expect(capturedToolNames(body)).toEqual(AGENT_SESSION_TOOL_NAMES);
     expect(body).toMatchObject({
       messages: [
         {

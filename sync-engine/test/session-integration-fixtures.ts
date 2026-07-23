@@ -83,6 +83,8 @@ export function connectedSessionSetup(
     "018bcfe5-6800-7000-8000-000000000068",
     "018bcfe5-6800-7000-8000-000000000069",
     "018bcfe5-6800-7000-8000-000000000070",
+    "018bcfe5-6800-7000-8000-000000000071",
+    "018bcfe5-6800-7000-8000-000000000072",
   ];
   const selectedModels: string[] = [];
   const selectedPricing: (ProviderModelPricing | null)[] = [];

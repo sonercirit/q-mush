@@ -34,11 +34,14 @@ export function createDatabase(path: string): AppDatabase {
   }
 
   const client = new Database(path, { create: true });
-  client.run("PRAGMA foreign_keys = ON");
   const database = drizzle(client, { schema: databaseSchema });
 
   try {
+    // Drizzle wraps migrations in a transaction, where SQLite ignores changes
+    // to foreign_keys. Disable it beforehand so generated table rebuilds work.
+    client.run("PRAGMA foreign_keys = OFF");
     migrate(database, { migrationsFolder: MIGRATIONS_DIRECTORY });
+    client.run("PRAGMA foreign_keys = ON");
   } catch (error) {
     client.close();
     throw error;

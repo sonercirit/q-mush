@@ -13,6 +13,10 @@ export class SessionRuntimes {
     return this.#draining;
   }
 
+  active(sessionId: string): boolean {
+    return this.#active.has(sessionId);
+  }
+
   abort(sessionId: string): void {
     this.#active.get(sessionId)?.controller.abort();
   }
@@ -24,7 +28,10 @@ export class SessionRuntimes {
     );
   }
 
-  launch(sessionId: string, run: SessionRuntime): void {
+  launch(sessionId: string, run: SessionRuntime): boolean {
+    if (this.#draining) {
+      return false;
+    }
     const controller = new AbortController();
     const settled = Promise.resolve().then(() => run(controller));
     const runtime = { controller, settled };
@@ -35,5 +42,6 @@ export class SessionRuntimes {
     };
     this.#active.set(sessionId, runtime);
     void settled.then(clear, clear);
+    return true;
   }
 }

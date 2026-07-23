@@ -165,6 +165,7 @@ export function createRealtimeIntegration(
             options.sessions.deliverRunnerCommands(runner.id, (command) =>
               sendCommand(socket, command),
             );
+            options.sessions.runnerConnected();
             publishRunners(connected.userId);
             return;
           }

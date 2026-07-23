@@ -1,5 +1,6 @@
 import {
   isAgentSessionToolName,
+  isSessionAgentToolName,
   type AgentSessionToolName,
 } from "../shared/agent-tools.ts";
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
@@ -15,6 +16,10 @@ import {
   type AgentModelFactory,
   type SessionAgentModels,
 } from "./session-agent-models.ts";
+import {
+  executeSessionAgentTool,
+  type SessionAgentToolActions,
+} from "./session-agent-tools.ts";
 import { SessionRecorder } from "./session-recorder.ts";
 import type { SessionStore } from "./session-store.ts";
 
@@ -32,6 +37,7 @@ export interface SessionAgentRuntimeDependencies {
   readonly now: () => number;
   readonly notify: () => void;
   readonly realtime: RealtimeHub | undefined;
+  readonly sessionTools: SessionAgentToolActions;
   readonly signal: AbortSignal;
   readonly store: SessionStore;
   readonly userId: string;
@@ -92,6 +98,7 @@ export async function runSessionAgent(
   const dispatchRunnerTool = (
     name: string,
     toolArguments: Readonly<Record<string, unknown>>,
+    signal: AbortSignal = runtime.signal,
   ): Promise<string> =>
     runtime.broker.dispatch(
       {
@@ -101,11 +108,19 @@ export async function runSessionAgent(
         tool: name,
         workingDirectory: runtime.detail.workingDirectory,
       },
-      runtime.signal,
+      signal,
     );
+  const dispatchTool = (
+    name: string,
+    toolArguments: Readonly<Record<string, unknown>>,
+    signal?: AbortSignal,
+  ): Promise<string> =>
+    isAgentSessionToolName(name) && isSessionAgentToolName(name)
+      ? executeSessionAgentTool(runtime.sessionTools, name, toolArguments)
+      : dispatchRunnerTool(name, toolArguments, signal);
   const skills = createAgentSkills({
     braveSearch: runtime.braveSearch,
-    executeTool: dispatchRunnerTool,
+    executeTool: dispatchTool,
     tools: runtime.detail.tools,
     userId: runtime.userId,
   });
@@ -127,8 +142,15 @@ export async function runSessionAgent(
           `Error: ${call.name} is not enabled for this session.`,
         );
       }
-      const skillOutput = skills.execute(call.name, call.arguments);
-      return skillOutput ?? dispatchRunnerTool(call.name, call.arguments);
+      const skillOutput = skills.execute(
+        call.name,
+        call.arguments,
+        runtime.signal,
+      );
+      if (skillOutput !== undefined) {
+        return skillOutput;
+      }
+      return dispatchTool(call.name, call.arguments);
     },
     initialMessages: runtime.store.conversation(runtime.detail.id),
     maxContextTokens: runtime.detail.maxContextTokens,

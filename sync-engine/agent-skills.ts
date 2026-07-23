@@ -11,13 +11,18 @@ interface AgentSkillsOptions {
   readonly executeTool: (
     name: string,
     arguments_: JsonRecord,
+    signal?: AbortSignal,
   ) => Promise<string>;
   readonly tools: readonly AgentSessionToolName[];
   readonly userId: string;
 }
 
 export interface AgentSkills {
-  execute(name: string, arguments_: JsonRecord): Promise<string> | undefined;
+  execute(
+    name: string,
+    arguments_: JsonRecord,
+    signal?: AbortSignal,
+  ): Promise<string> | undefined;
 }
 
 interface ParallelSkillCall {
@@ -54,6 +59,7 @@ function parallelSkillCalls(
 function executeParallelSkills(
   options: AgentSkillsOptions,
   arguments_: JsonRecord,
+  signal?: AbortSignal,
 ): Promise<string> | undefined {
   const calls = parallelSkillCalls(arguments_);
   if (calls === undefined) {
@@ -66,7 +72,7 @@ function executeParallelSkills(
         ? `Error: ${recipientName} is not enabled for this session.`
         : recipientName === BRAVE_SEARCH_TOOL_NAME
           ? options.braveSearch.execute(options.userId, parameters)
-          : options.executeTool(recipientName, parameters)),
+          : options.executeTool(recipientName, parameters, signal)),
       recipient_name: recipientName,
     })),
   ).then((results) => JSON.stringify(results, null, 2));
@@ -74,11 +80,11 @@ function executeParallelSkills(
 
 export function createAgentSkills(options: AgentSkillsOptions): AgentSkills {
   return {
-    execute: (name, arguments_) =>
+    execute: (name, arguments_, signal) =>
       name === BRAVE_SEARCH_TOOL_NAME
         ? options.braveSearch.execute(options.userId, arguments_)
         : name === PARALLEL_TOOL_NAME
-          ? executeParallelSkills(options, arguments_)
+          ? executeParallelSkills(options, arguments_, signal)
           : undefined,
   };
 }

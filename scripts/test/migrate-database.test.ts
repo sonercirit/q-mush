@@ -3,8 +3,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
-import { createDatabase } from "../../shared/database.ts";
+import { createDatabase, type AppDatabase } from "../../shared/database.ts";
 import {
+  agentMessages,
+  agentSessions,
   providerCredentials,
   sessions,
   users,
@@ -17,9 +19,32 @@ const MIGRATIONS = [
   { file: "0001_audited-identifiers.sql", timestamp: 1_784_478_537_706 },
   { file: "0002_swift_micromacro.sql", timestamp: 1_784_484_507_050 },
 ] as const;
+const AGENT_SESSION_MIGRATIONS = [
+  ...MIGRATIONS,
+  { file: "0003_first_talos.sql", timestamp: 1_784_490_290_030 },
+  { file: "0004_yummy_ma_gnuci.sql", timestamp: 1_784_497_769_503 },
+  { file: "0005_unusual_madrox.sql", timestamp: 1_784_511_387_878 },
+  { file: "0006_rainy_norrin_radd.sql", timestamp: 1_784_516_569_469 },
+  { file: "0007_foamy_mercury.sql", timestamp: 1_784_531_749_727 },
+  { file: "0008_dry_prowler.sql", timestamp: 1_784_561_914_460 },
+  { file: "0009_mature_korg.sql", timestamp: 1_784_632_073_725 },
+  { file: "0010_silky_spacker_dave.sql", timestamp: 1_784_645_366_890 },
+  {
+    file: "0011_friendly_stark_industries.sql",
+    timestamp: 1_784_659_836_986,
+  },
+  { file: "0012_damp_khan.sql", timestamp: 1_784_773_990_609 },
+  { file: "0013_session-tools.sql", timestamp: 1_784_776_192_396 },
+] as const;
 const SESSION_LIFETIME_MILLISECONDS = 7 * 24 * 60 * 60 * 1000;
 const UUID_V7_PATTERN =
   /^[\da-f]{8}-[\da-f]{4}-7[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/u;
+
+interface Migration {
+  readonly file: string;
+  readonly timestamp: number;
+}
+
 let temporaryDirectory: string | undefined;
 
 afterEach(() => {
@@ -66,7 +91,7 @@ async function applyMigrationFile(
 
 function createMigrationJournal(
   database: Database,
-  migrations: readonly { readonly file: string; readonly timestamp: number }[],
+  migrations: readonly Migration[],
 ): void {
   database.run(`
     CREATE TABLE __drizzle_migrations (
@@ -90,6 +115,32 @@ async function applyInitialMigration(database: Database): Promise<void> {
   createMigrationJournal(database, [initialMigration]);
 }
 
+async function createLegacyDatabase(
+  directoryPrefix: string,
+  file: string,
+  migrations: readonly Migration[],
+): Promise<{ readonly database: Database; readonly path: string }> {
+  temporaryDirectory = mkdtempSync(join(tmpdir(), directoryPrefix));
+  const path = join(temporaryDirectory, file);
+  const database = new Database(path, { create: true });
+
+  for (const migration of migrations) {
+    await applyMigrationFile(database, migration.file);
+  }
+  createMigrationJournal(database, migrations);
+
+  return { database, path };
+}
+
+async function migrateLegacyDatabase(
+  database: Database,
+  path: string,
+): Promise<AppDatabase> {
+  database.close();
+  await runMigrationCommand(path);
+  return createDatabase(path);
+}
+
 test("database migration command applies pending migrations", async () => {
   temporaryDirectory = mkdtempSync(join(tmpdir(), "q-mush-migrate-test-"));
   const databasePath = join(temporaryDirectory, "migrated.sqlite");
@@ -108,17 +159,139 @@ test("database migration command applies pending migrations", async () => {
   expect(tables).toContain("users");
 });
 
-test("OpenAI migration preserves existing OpenRouter credentials", async () => {
-  temporaryDirectory = mkdtempSync(
-    join(tmpdir(), "q-mush-provider-upgrade-test-"),
+test("session migration preserves transcripts with foreign keys", async () => {
+  const { database: legacyDatabase, path } = await createLegacyDatabase(
+    "q-mush-session-upgrade-test-",
+    "sessions.sqlite",
+    AGENT_SESSION_MIGRATIONS,
   );
-  const databasePath = join(temporaryDirectory, "openrouter.sqlite");
-  const legacyDatabase = new Database(databasePath, { create: true });
 
-  for (const migration of MIGRATIONS) {
-    await applyMigrationFile(legacyDatabase, migration.file);
-  }
-  createMigrationJournal(legacyDatabase, MIGRATIONS);
+  const timestamp = 1_700_000_000_000;
+  const userId = "018bcfe5-6800-7000-8000-000000000081";
+  const credentialId = "018bcfe5-6800-7000-8000-000000000082";
+  const runnerId = "018bcfe5-6800-7000-8000-000000000083";
+  const sessionId = "018bcfe5-6800-7000-8000-000000000084";
+  const messageId = "018bcfe5-6800-7000-8000-000000000085";
+  legacyDatabase.run(
+    `INSERT INTO users (
+      id, google_subject, email, name, created_at, created_by_id,
+      updated_at, updated_by_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      userId,
+      "session-migration-google-subject",
+      "session-migration@example.com",
+      "Session Migration",
+      timestamp,
+      SYSTEM_ID,
+      timestamp,
+      SYSTEM_ID,
+    ],
+  );
+  legacyDatabase.run(
+    `INSERT INTO provider_credentials (
+      id, user_id, created_at, created_by_id, updated_at, updated_by_id,
+      provider, label, source, encrypted_credential, credential_fingerprint
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      credentialId,
+      userId,
+      timestamp,
+      userId,
+      timestamp,
+      userId,
+      "openrouter",
+      "Session migration key",
+      "api_key",
+      "encrypted-session-migration-key",
+      "session-migration-key-fingerprint",
+    ],
+  );
+  legacyDatabase.run(
+    `INSERT INTO runners (
+      id, user_id, created_at, created_by_id, updated_at, updated_by_id,
+      token_hash
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      runnerId,
+      userId,
+      timestamp,
+      userId,
+      timestamp,
+      userId,
+      "session-migration-runner-token-hash",
+    ],
+  );
+  legacyDatabase.run(
+    `INSERT INTO agent_sessions (
+      id, user_id, created_at, created_by_id, updated_at, updated_by_id,
+      runner_id, provider_credential_id, provider, model, working_directory,
+      title, status
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      sessionId,
+      userId,
+      timestamp,
+      userId,
+      timestamp,
+      userId,
+      runnerId,
+      credentialId,
+      "openrouter",
+      "openai/gpt-4.1-mini",
+      "/workspace",
+      "Existing session",
+      "idle",
+    ],
+  );
+  legacyDatabase.run(
+    `INSERT INTO agent_messages (
+      id, user_id, created_at, created_by_id, updated_at, updated_by_id,
+      session_id, role, content
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      messageId,
+      userId,
+      timestamp,
+      userId,
+      timestamp,
+      userId,
+      sessionId,
+      "user",
+      "Preserve this message",
+    ],
+  );
+  const upgradedDatabase = await migrateLegacyDatabase(legacyDatabase, path);
+  expect(
+    upgradedDatabase
+      .select({
+        id: agentSessions.id,
+        parentSessionId: agentSessions.parentSessionId,
+      })
+      .from(agentSessions)
+      .all(),
+  ).toEqual([{ id: sessionId, parentSessionId: null }]);
+  expect(
+    upgradedDatabase
+      .select({ content: agentMessages.content, id: agentMessages.id })
+      .from(agentMessages)
+      .all(),
+  ).toEqual([{ content: "Preserve this message", id: messageId }]);
+  expect(
+    upgradedDatabase.$client.query("PRAGMA foreign_key_check").all(),
+  ).toEqual([]);
+  expect(upgradedDatabase.$client.query("PRAGMA foreign_keys").get()).toEqual({
+    foreign_keys: 1,
+  });
+  upgradedDatabase.$client.close();
+});
+
+test("OpenAI migration preserves existing OpenRouter credentials", async () => {
+  const { database: legacyDatabase, path } = await createLegacyDatabase(
+    "q-mush-provider-upgrade-test-",
+    "openrouter.sqlite",
+    MIGRATIONS,
+  );
 
   const timestamp = 1_700_000_000_000;
   const userId = "018bcfe5-6800-7000-8000-000000000071";
@@ -161,11 +334,7 @@ test("OpenAI migration preserves existing OpenRouter credentials", async () => {
       "openrouter-key-fingerprint",
     ],
   );
-  legacyDatabase.close();
-
-  await runMigrationCommand(databasePath);
-
-  const migratedDatabase = createDatabase(databasePath);
+  const migratedDatabase = await migrateLegacyDatabase(legacyDatabase, path);
   expect(migratedDatabase.select().from(providerCredentials).all()).toEqual([
     {
       createdAt: new Date(timestamp),

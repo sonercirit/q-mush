@@ -69,6 +69,19 @@ function createTestSession(store: SessionStore) {
   return store.create(testSessionInput(), TEST_NOW);
 }
 
+function completedChildWithParent(
+  store: SessionStore,
+  parentSessionId: string,
+) {
+  const child = store.create(
+    { ...testSessionInput(), parentSessionId },
+    TEST_NOW + 1,
+  );
+  expect(store.mark(child.id, "running", TEST_NOW + 2)).toBe(true);
+  expect(store.mark(child.id, "idle", TEST_NOW + 3)).toBe(true);
+  return child;
+}
+
 function markTestSessionRunning(store: SessionStore): void {
   expect(store.mark(SESSION_ID, "running", TEST_NOW + 1)).toBe(true);
 }
@@ -269,6 +282,51 @@ describe("session store", () => {
 
     expect(detail.tools).toEqual(tools);
     expect(store.list(TEST_USER_ID)[0]?.tools).toEqual(tools);
+    database.$client.close();
+  });
+
+  test("persists and claims a spawned session's parent callback", () => {
+    const { database, store } = createStore();
+    const parent = createTestSession(store);
+    const child = completedChildWithParent(store, parent.id);
+
+    expect(store.pendingSpawnedSessions()).toEqual([
+      { detail: store.get(TEST_USER_ID, child.id), userId: TEST_USER_ID },
+    ]);
+    expect(store.parentSessionId(TEST_USER_ID, child.id)).toBe(parent.id);
+    expect(
+      store.appendSpawnedSessionReport(
+        TEST_USER_ID,
+        child.id,
+        parent.id,
+        "Child complete",
+        TEST_NOW + 4,
+      ),
+    ).toBe(true);
+    expect(store.parentSessionId(TEST_USER_ID, child.id)).toBeUndefined();
+    expect(store.pendingSpawnedSessions()).toEqual([]);
+    expect(store.get(TEST_USER_ID, parent.id)?.messages.at(-1)?.content).toBe(
+      "Child complete",
+    );
+    database.$client.close();
+  });
+
+  test("does not claim a child callback when its parent is missing", () => {
+    const { database, store } = createStore();
+    const child = completedChildWithParent(store, "missing-parent");
+
+    expect(
+      store.appendSpawnedSessionReport(
+        TEST_USER_ID,
+        child.id,
+        "missing-parent",
+        "Child complete",
+        TEST_NOW + 3,
+      ),
+    ).toBe(false);
+    expect(store.parentSessionId(TEST_USER_ID, child.id)).toBe(
+      "missing-parent",
+    );
     database.$client.close();
   });
 

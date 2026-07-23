@@ -28,6 +28,19 @@ import {
   storedSessionMessages,
   withInterruptedToolResults,
 } from "./session-store-read.ts";
+import {
+  appendSpawnedSessionReport,
+  parentSessionId,
+  pendingSpawnedSessions,
+  type PendingSpawnedSession,
+} from "./session-store-spawns.ts";
+import {
+  appendSessionUserMessage,
+  emptyToolMetadata,
+  recordedMessageValues,
+  userMessageValues,
+  type StoredMessageValues,
+} from "./session-store-values.ts";
 
 export interface CreateAgentSession extends Pick<
   AgentSessionSummary,
@@ -43,6 +56,7 @@ export interface CreateAgentSession extends Pick<
 > {
   readonly credentialId: string;
   readonly images: readonly AgentImage[];
+  readonly parentSessionId?: string;
   readonly prompt: string;
   readonly userId: string;
 }
@@ -175,73 +189,6 @@ function titleFromPrompt(prompt: string): string {
   return (firstLine ?? "Image task").slice(0, 80);
 }
 
-interface StoredMessageValues {
-  readonly content: string;
-  readonly images: string | null;
-  readonly role: "assistant" | "system" | "thinking" | "tool";
-  readonly toolCallId: string | null;
-  readonly toolCalls: string | null;
-  readonly toolName: string | null;
-}
-
-function recordedMessageValues(
-  message: AgentRecordedMessage,
-): StoredMessageValues {
-  if (message.role === "assistant") {
-    return {
-      ...emptyToolMetadata(),
-      content: message.content,
-      role: "assistant",
-      toolCalls: JSON.stringify(message.toolCalls),
-    };
-  }
-
-  if (message.role === "thinking") {
-    return {
-      ...emptyToolMetadata(),
-      content: message.content,
-      role: "thinking",
-    };
-  }
-
-  return {
-    content: message.content,
-    images: null,
-    role: "tool",
-    toolCallId: message.toolCallId,
-    toolCalls: null,
-    toolName: message.toolName,
-  };
-}
-
-function emptyToolMetadata() {
-  return {
-    images: null,
-    toolCallId: null,
-    toolCalls: null,
-    toolName: null,
-  };
-}
-
-function userMessageValues(options: {
-  readonly content: string;
-  readonly id: string;
-  readonly images: readonly AgentImage[];
-  readonly now: number;
-  readonly sessionId: string;
-  readonly userId: string;
-}) {
-  return {
-    ...createdAuditFields(options.userId, options.now),
-    content: options.content,
-    id: options.id,
-    images: options.images.length === 0 ? null : JSON.stringify(options.images),
-    role: "user" as const,
-    sessionId: options.sessionId,
-    userId: options.userId,
-  };
-}
-
 export class SessionStore {
   readonly #resources: readonly [AppDatabase, IdGenerator];
 
@@ -278,6 +225,7 @@ export class SessionStore {
           id: sessionId,
           maxContextTokens: input.maxContextTokens,
           model: input.model,
+          parentSessionId: input.parentSessionId ?? null,
           provider: input.provider,
           providerCredentialId: input.credentialId,
           providerPricing:
@@ -470,6 +418,49 @@ export class SessionStore {
     );
   }
 
+  appendUserMessage(
+    userId: string,
+    sessionId: string,
+    content: string,
+    now: number,
+  ): boolean {
+    return appendSessionUserMessage({
+      content,
+      now,
+      resources: { database: this.#database, generateId: this.#resources[1] },
+      sessionId,
+      userId,
+    });
+  }
+
+  appendSpawnedSessionReport(
+    userId: string,
+    childId: string,
+    parentId: string,
+    content: string,
+    now: number,
+  ): boolean {
+    return appendSpawnedSessionReport({
+      childId,
+      content,
+      database: this.#database,
+      generateId: this.#resources[1],
+      now,
+      parentId,
+      userId,
+    });
+  }
+
+  parentSessionId(userId: string, sessionId: string): string | undefined {
+    return parentSessionId(this.#database, userId, sessionId);
+  }
+
+  pendingSpawnedSessions(): readonly PendingSpawnedSession[] {
+    return pendingSpawnedSessions(this.#database, (userId, sessionId) =>
+      this.get(userId, sessionId),
+    );
+  }
+
   mark(
     sessionId: string,
     status: "failed" | "idle" | "running",
@@ -572,7 +563,7 @@ export class SessionStore {
     return { detail, status };
   }
 
-  failInterrupted(now: number): void {
+  failInterrupted(now: number): readonly PendingSpawnedSession[] {
     const interrupted = this.#database
       .select({ ...SESSION_TIMING_SELECTION, id: agentSessions.id })
       .from(agentSessions)
@@ -597,6 +588,7 @@ export class SessionStore {
         .where(eq(agentSessions.id, session.id))
         .run();
     }
+    return this.pendingSpawnedSessions();
   }
 
   #appendMessage(

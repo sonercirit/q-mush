@@ -1,4 +1,8 @@
 const STRING_PARAMETER = { type: "string" } as const;
+const STRING_ARRAY_PARAMETER = {
+  items: STRING_PARAMETER,
+  type: "array",
+} as const;
 const BRAVE_SEARCH_TOOL_NAME = "brave_search";
 
 function toolDefinition<
@@ -121,6 +125,105 @@ const BASE_AGENT_TOOLS = [
   }),
 ] as const;
 
+const SESSION_ID_PARAMETER = {
+  sessionId: {
+    description: "Owned session ID",
+    ...STRING_PARAMETER,
+  },
+} as const;
+
+const SESSION_AGENT_TOOLS = [
+  toolDefinition({
+    description:
+      "Spawn another agent session and return immediately. Configure it with the same fields available in the new-session pane. When it finishes or fails, its last message is sent back to this session.",
+    name: "spawn_session",
+    properties: {
+      credentialId: {
+        description: "Model credential ID",
+        ...STRING_PARAMETER,
+      },
+      model: {
+        description: "Provider model ID",
+        ...STRING_PARAMETER,
+      },
+      prompt: {
+        description: "Task for the spawned session",
+        ...STRING_PARAMETER,
+      },
+      provider: {
+        description: "Model provider",
+        enum: ["openai", "openrouter"],
+        type: "string",
+      },
+      reasoningEffort: {
+        description: "Optional model reasoning effort",
+        enum: ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+        type: "string",
+      },
+      runnerId: {
+        description: "Runner ID",
+        ...STRING_PARAMETER,
+      },
+      tools: {
+        description: "Tools and skills enabled for the spawned session",
+        ...STRING_ARRAY_PARAMETER,
+      },
+      workingDirectory: {
+        description: "Working directory on the selected runner",
+        ...STRING_PARAMETER,
+      },
+    },
+    required: [
+      "credentialId",
+      "model",
+      "prompt",
+      "provider",
+      "runnerId",
+      "tools",
+      "workingDirectory",
+    ],
+  }),
+  toolDefinition({
+    description:
+      "List your agent sessions, including their IDs, titles, statuses, and configurations.",
+    name: "list_sessions",
+    properties: {},
+    required: [],
+  }),
+  toolDefinition({
+    description: "Read an owned agent session and its transcript by ID.",
+    name: "read_session",
+    properties: SESSION_ID_PARAMETER,
+    required: ["sessionId"],
+  }),
+  toolDefinition({
+    description:
+      "Send a user message to another idle, failed, or stopped owned session and start it.",
+    name: "send_to_session",
+    properties: {
+      ...SESSION_ID_PARAMETER,
+      message: {
+        description: "Instruction to send",
+        ...STRING_PARAMETER,
+      },
+    },
+    required: ["sessionId", "message"],
+  }),
+  toolDefinition({
+    description:
+      "Continue another idle, failed, or stopped owned session without adding a message.",
+    name: "continue_session",
+    properties: SESSION_ID_PARAMETER,
+    required: ["sessionId"],
+  }),
+  toolDefinition({
+    description: "Stop an owned agent session.",
+    name: "stop_session",
+    properties: SESSION_ID_PARAMETER,
+    required: ["sessionId"],
+  }),
+] as const;
+
 const PARALLEL_TOOL = toolDefinition({
   description:
     "Run multiple independent tool or skill calls concurrently. Do not use this when one call depends on another call's result.",
@@ -141,6 +244,7 @@ const PARALLEL_TOOL = toolDefinition({
             enum: [
               ...BASE_AGENT_TOOLS.map((tool) => tool.function.name),
               BRAVE_SEARCH_TOOL_NAME,
+              ...SESSION_AGENT_TOOLS.map((tool) => tool.function.name),
             ],
             type: "string",
           },
@@ -179,6 +283,7 @@ export const AGENT_TOOLS = [
   ...BASE_AGENT_TOOLS,
   PARALLEL_TOOL,
   BRAVE_SEARCH_TOOL,
+  ...SESSION_AGENT_TOOLS,
 ] as const;
 
 export interface AgentToolDefinition {
@@ -193,15 +298,33 @@ export type AgentSessionToolName =
   (typeof AGENT_TOOLS)[number]["function"]["name"];
 type BaseAgentToolName = (typeof BASE_AGENT_TOOLS)[number]["function"]["name"];
 
+export const SESSION_AGENT_TOOL_NAMES: readonly AgentSessionToolName[] =
+  SESSION_AGENT_TOOLS.map(({ function: definition }) => definition.name);
+
+export type SessionAgentToolName =
+  (typeof SESSION_AGENT_TOOLS)[number]["function"]["name"];
+
+export function isSessionAgentToolName(
+  value: AgentSessionToolName,
+): value is SessionAgentToolName {
+  return SESSION_AGENT_TOOL_NAMES.some((name) => name === value);
+}
+
 export const AGENT_SESSION_TOOL_NAMES: readonly AgentSessionToolName[] =
   AGENT_TOOLS.map(({ function: definition }) => definition.name);
 
 const AGENT_TOOL_LABELS: Readonly<Record<AgentSessionToolName, string>> = {
   bash: "Shell",
   brave_search: "Brave Search",
+  continue_session: "Continue session",
   edit: "Edit files",
+  list_sessions: "List sessions",
   parallel: "Parallel calls",
   read: "Read files",
+  read_session: "Read session",
+  send_to_session: "Send to session",
+  spawn_session: "Spawn session",
+  stop_session: "Stop session",
   write: "Write files",
 };
 

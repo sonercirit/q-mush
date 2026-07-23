@@ -62,7 +62,9 @@ function runners(
   };
 }
 
-function sessions(): SessionIntegration {
+function sessions(
+  overrides: Partial<Pick<SessionIntegration, "runnerConnected">> = {},
+): SessionIntegration {
   return {
     collection: () => Promise.resolve(new Response()),
     compact: () => Promise.resolve(new Response()),
@@ -78,7 +80,9 @@ function sessions(): SessionIntegration {
     message: () => Promise.resolve(new Response()),
     models: () => Promise.resolve(new Response()),
     onChange: () => undefined,
+    runnerConnected: () => undefined,
     stop: () => Promise.resolve(new Response()),
+    ...overrides,
   };
 }
 
@@ -86,13 +90,14 @@ function integration(
   user: AuthenticatedUser | null,
   token?: string,
   runnerOverrides?: RunnerIntegrationOverrides,
+  sessionOverrides?: Partial<Pick<SessionIntegration, "runnerConnected">>,
 ) {
   return createRealtimeIntegration({
     auth: auth(user),
     hub: new RealtimeHub(),
     runnerVersion: "runner-version",
     runners: runners(token, runnerOverrides),
-    sessions: sessions(),
+    sessions: sessions(sessionOverrides),
   });
 }
 
@@ -108,6 +113,41 @@ function upgrade(
     }),
     server,
   );
+}
+
+interface TestSocket {
+  readonly data: QmushWebSocketData;
+  close(): void;
+  publish(): number;
+  send(): number;
+  subscribe(): void;
+  unsubscribe(): void;
+}
+
+function testSocket(data: QmushWebSocketData | undefined): TestSocket {
+  if (data === undefined) {
+    throw new Error("The test WebSocket did not upgrade");
+  }
+  return {
+    close: () => undefined,
+    data,
+    publish: () => 1,
+    send: () => 1,
+    subscribe: () => undefined,
+    unsubscribe: () => undefined,
+  };
+}
+
+function websocketMessage(
+  handler: Bun.WebSocketHandler<QmushWebSocketData>,
+  socket: TestSocket,
+  message: string,
+): unknown {
+  const method: unknown = Reflect.get(handler, "message");
+  if (typeof method !== "function") {
+    throw new TypeError("The realtime message handler is unavailable");
+  }
+  return Reflect.apply(method, undefined, [socket, message]);
 }
 
 function expectUpgrade(
@@ -141,6 +181,45 @@ test("rejects unauthorized and non-WebSocket realtime requests", () => {
   expect(missingUpgrade?.status).toBe(426);
 });
 
+test("recovers and wakes completed child callbacks when a runner connects", () => {
+  const connectedUsers: string[] = [];
+  const realtime = integration(
+    null,
+    "qmr_runner-token",
+    {
+      connect: () => ({
+        connection: {
+          id: "runner-1",
+          tokenHash: "hash",
+          userId: USER.id,
+        },
+        userId: USER.id,
+      }),
+    },
+    {
+      runnerConnected: () => {
+        connectedUsers.push(USER.id);
+      },
+    },
+  );
+  const server = new UpgradeServer();
+  expect(upgrade(realtime, RUNNER_REALTIME_PATH, server)).toBeUndefined();
+  const socket = testSocket(server.data);
+
+  void websocketMessage(
+    realtime.websocket,
+    socket,
+    JSON.stringify({
+      architecture: "x64",
+      machineId: "machine-1",
+      name: "runner",
+      platform: "linux",
+      type: "connect",
+    }),
+  );
+
+  expect(connectedUsers).toEqual([USER.id]);
+});
 test("upgrades a token-authenticated runner realtime request", () => {
   expectUpgrade(integration(null, "qmr_runner-token"), RUNNER_REALTIME_PATH, {
     kind: "runner",

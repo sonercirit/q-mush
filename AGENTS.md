@@ -125,15 +125,16 @@ Living project memory. Update it with durable information.
 
   `runner/runner-workspace.ts` shares canonical workspace resolution and
   containment with the file tools. Tool and skill selections persist per
-  session, filter definitions and execution, default to all, and may be empty;
-  `parallel` can mix every enabled tool or server-side skill except itself.
-  `solid/session-transcript.tsx` renders prompts, tool definitions, raw details,
-  Markdown, code/JSON, diffs, and contextual tool results while preserving user
-  line breaks. The session list paginates summaries ten at a time in the
-  browser. The control center manages live sessions through
-  `solid/realtime-client.ts`, `solid/session-client.tsx`, and
-  `solid/session-controller.ts`. Model deltas are combined per session once per
-  animation frame; snapshots and other events remain immediate. Unchanged
+  session. Grouped session tools spawn non-blocking child sessions, manage owned
+  sessions, report each child's final message to its parent, and resume an idle
+  parent when the report arrives. `parallel` can mix every enabled tool or
+  server-side skill except itself. `solid/session-transcript.tsx` renders
+  prompts, tool definitions, raw details, Markdown, code/JSON, diffs, and
+  contextual tool results while preserving user line breaks. The session list
+  paginates summaries ten at a time in the browser. The control center manages
+  live sessions through `solid/realtime-client.ts`, `solid/session-client.tsx`,
+  and `solid/session-controller.ts`. Model deltas are combined per session once
+  per animation frame; snapshots and other events remain immediate. Unchanged
   snapshots suppress notifications, and keyed messages preserve identity so only
   the affected message rerenders. The long-lived Solid root preserves focus and
   scroll. The transcript starts and returns to the bottom when messages or the
@@ -215,13 +216,13 @@ Living project memory. Update it with durable information.
   default local callback is `http://localhost:3000/api/auth/google/callback`,
   which must be registered exactly on the Google web OAuth client. Never expose
   the client secret to browser code or tracked files.
-- `DATABASE_PATH` selects the local SQLite file and defaults to
-  `data/q-mush.sqlite`; the default `data/` directory is ignored. Change
-  `shared/database/schema.ts`, add every new table to `databaseSchema` in
-  `shared/database.ts`, run `bun run db:generate`, and commit the resulting
-  migration and Drizzle metadata. `bun run db:migrate` applies migrations
-  without starting the HTTP server. Drizzle Kit loads its config under Node, so
-  shared config imports must not transitively import `bun:sqlite`.
+- `DATABASE_PATH` selects SQLite (default `data/q-mush.sqlite`; `data/` is
+  ignored). Update `shared/database/schema.ts` and register new tables in
+  `databaseSchema`; run `bun run db:generate` and commit its migration and
+  metadata. `bun run db:migrate` runs without HTTP. Drizzle Kit runs config
+  under Node, so it must not transitively import `bun:sqlite`. Drizzle's
+  migration transaction nullifies its foreign-key PRAGMAs; `createDatabase`
+  disables foreign keys beforehand and reenables them afterward.
 - Credential storage needs stable, private, 32-byte base64url secrets:
   `OPENAI_CREDENTIAL_KEY`, `OPENROUTER_CREDENTIAL_KEY`, and
   `BRAVE_SEARCH_CREDENTIAL_KEY`. Provider redirect URIs must end in the matching

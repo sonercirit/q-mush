@@ -121,6 +121,7 @@ export const agentSessions = sqliteTable(
   "agent_sessions",
   {
     ...ownedAuditColumns(),
+    parentSessionId: text("parent_session_id"),
     runnerId: text("runner_id")
       .notNull()
       .references(() => runners.id, { onDelete: "restrict" }),
