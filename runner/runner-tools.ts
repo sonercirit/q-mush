@@ -18,6 +18,19 @@ const MAX_COMMAND_OUTPUT_BYTES = 256 * 1024;
 const MAXIMUM_EDITS = 100;
 const MAXIMUM_PARALLEL_TOOLS = 8;
 const MAX_PARALLEL_TOOL_OUTPUT_BYTES = 50 * 1_024;
+const COMMAND_GROUP_WRAPPER = `
+terminate_command_group() {
+  trap - TERM
+  kill -TERM 0
+}
+trap terminate_command_group TERM
+/bin/sh -lc "$1" &
+command_pid=$!
+wait "$command_pid"
+exit $?
+`;
+
+type CommandTermination = "stopped" | "timed-out";
 
 type ToolArguments = Readonly<Record<string, unknown>>;
 
@@ -370,19 +383,35 @@ async function bashTool(
 ): Promise<string> {
   const command = requiredString(arguments_, "command", 32_768);
   const timeoutSeconds = requiredInteger(arguments_, "timeout", 1);
-  const child = Bun.spawn(["/bin/sh", "-lc", command], {
-    cwd: root,
-    stderr: "pipe",
-    stdout: "pipe",
-  });
-  const state = { stopped: false, timedOut: false };
+  const state: {
+    settled: boolean;
+    termination: CommandTermination | undefined;
+  } = { settled: false, termination: undefined };
+  const child = Bun.spawn(
+    ["/bin/sh", "-c", COMMAND_GROUP_WRAPPER, "q-mush-command", command],
+    {
+      cwd: root,
+      detached: true,
+      onExit: () => {
+        state.settled = true;
+      },
+      stderr: "pipe",
+      stdout: "pipe",
+    },
+  );
+  const terminate = (reason: CommandTermination): void => {
+    if (state.settled || state.termination !== undefined) {
+      return;
+    }
+
+    state.termination = reason;
+    child.kill("SIGTERM");
+  };
   const stop = () => {
-    state.stopped = true;
-    child.kill();
+    terminate("stopped");
   };
   const timer = setTimeout(() => {
-    state.timedOut = true;
-    child.kill();
+    terminate("timed-out");
   }, timeoutSeconds * 1_000);
   signal?.addEventListener("abort", stop, { once: true });
 
@@ -396,14 +425,14 @@ async function bashTool(
       readLimitedStream(child.stderr, MAX_COMMAND_OUTPUT_BYTES / 2),
       readLimitedStream(child.stdout, MAX_COMMAND_OUTPUT_BYTES / 2),
     ]);
-    if (state.stopped) {
+    if (state.termination === "stopped") {
       throw new Error("The runner command was stopped");
     }
 
     const sections = [
       standardOutput.length === 0 ? undefined : `stdout:\n${standardOutput}`,
       standardError.length === 0 ? undefined : `stderr:\n${standardError}`,
-      state.timedOut
+      state.termination === "timed-out"
         ? `Timed out after ${String(timeoutSeconds)} seconds.`
         : `Exit code: ${String(exitCode)}`,
     ].filter((section) => section !== undefined);

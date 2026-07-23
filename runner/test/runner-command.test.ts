@@ -10,6 +10,72 @@ import { useTemporaryDirectories } from "./temporary-directories.ts";
 
 const temporaryDirectory = useTemporaryDirectories("q-mush-command-test-");
 
+function shellCommand(
+  root: string,
+  command: string,
+  timeout: number,
+  signal?: AbortSignal,
+): Promise<string> {
+  return executeRunnerCommand(
+    {
+      arguments: { command, timeout },
+      id: "shell-command",
+      sessionId: "session-1",
+      tool: "bash",
+      workingDirectory: root,
+    },
+    signal,
+  );
+}
+
+async function expectQuickResult(
+  result: Promise<string>,
+  maximumMilliseconds: number,
+): Promise<string> {
+  return Promise.race([
+    result,
+    Bun.sleep(maximumMilliseconds).then(() => {
+      throw new Error("The shell command did not settle after termination");
+    }),
+  ]);
+}
+
+async function waitForFile(path: string): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (await Bun.file(path).exists()) {
+      return;
+    }
+
+    await Bun.sleep(10);
+  }
+
+  throw new Error("The descendant shell did not start");
+}
+
+async function abortAfterFileExists(
+  result: Promise<string>,
+  controller: AbortController,
+  path: string,
+): Promise<string> {
+  try {
+    await waitForFile(path);
+  } catch (error) {
+    controller.abort();
+    await expectQuickResult(result, QUICK_TERMINATION_MILLISECONDS);
+    throw error;
+  }
+
+  controller.abort();
+  return expectQuickResult(result, QUICK_TERMINATION_MILLISECONDS);
+}
+
+const DESCENDANT_MARKER = ".runner-descendant-ready";
+const DESCENDANT_COMMAND =
+  `/bin/sh -c "/bin/sh -c 'printf descendant-ready; ` +
+  `printf ready > ${DESCENDANT_MARKER}; sleep 10; :' & wait" & wait`;
+const QUICK_TERMINATION_MILLISECONDS = 750;
+const TIMEOUT_SECONDS = 1;
+
 describe("runner WebSocket protocol", () => {
   test("validates commands before executing them", async () => {
     const expected = {
@@ -63,25 +129,72 @@ describe("runner WebSocket protocol", () => {
     });
   });
 
-  test("stops a running shell command when the session is canceled", async () => {
+  test("stops a shell descendant and grandchild retaining pipes", async () => {
+    const root = await temporaryDirectory();
     const controller = new AbortController();
-    const startedAt = Date.now();
-    const result = executeRunnerCommand(
+    const result = shellCommand(
+      root,
+      DESCENDANT_COMMAND,
+      60,
+      controller.signal,
+    );
+
+    expect(
+      await abortAfterFileExists(
+        result,
+        controller,
+        join(root, DESCENDANT_MARKER),
+      ),
+    ).toContain("stopped");
+  });
+
+  test("times out a shell descendant and grandchild retaining pipes", async () => {
+    const root = await temporaryDirectory();
+    const result = await expectQuickResult(
+      shellCommand(root, DESCENDANT_COMMAND, TIMEOUT_SECONDS),
+      TIMEOUT_SECONDS * 1_000 + QUICK_TERMINATION_MILLISECONDS,
+    );
+
+    expect(await Bun.file(join(root, DESCENDANT_MARKER)).exists()).toBe(true);
+    expect(result).toContain("stdout:\ndescendant-ready");
+    expect(result).toContain(
+      `Timed out after ${String(TIMEOUT_SECONDS)} seconds.`,
+    );
+    expect(result).not.toContain("stopped");
+  });
+
+  test("does not start a shell for an already-aborted signal", async () => {
+    const root = await temporaryDirectory();
+    const marker = join(root, "started.txt");
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await executeRunnerCommand(
       {
-        arguments: { command: "sleep 10", timeout: 60 },
-        id: "command-2",
+        arguments: {
+          command: `printf started > ${JSON.stringify(marker)}`,
+          timeout: 60,
+        },
+        id: "already-stopped-command",
         sessionId: "session-1",
         tool: "bash",
-        workingDirectory: process.cwd(),
+        workingDirectory: root,
       },
       controller.signal,
     );
-    setTimeout(() => {
-      controller.abort();
-    }, 20);
 
-    expect(await result).toContain("stopped");
-    expect(Date.now() - startedAt).toBeLessThan(1_000);
+    expect(result).toContain("stopped");
+    expect(await Bun.file(marker).exists()).toBe(false);
+  });
+
+  test("preserves normal shell completion and exit reporting", async () => {
+    const result = await shellCommand(
+      process.cwd(),
+      "printf completed; exit 7",
+      5,
+    );
+
+    expect(result).toBe("stdout:\ncompleted\nExit code: 7");
   });
 
   test("rejects malformed server commands", () => {
