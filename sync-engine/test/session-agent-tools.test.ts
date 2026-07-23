@@ -78,16 +78,24 @@ class SelfStoppingChildModel implements AgentModel {
   }
 }
 
-async function runRejectedSpawn(model: AgentModel): Promise<{
+interface CompletedToolOutput {
   readonly output: string | undefined;
   readonly setup: Awaited<ReturnType<typeof startToolSession>>;
-}> {
+}
+
+async function completedToolOutput(
+  model: AgentModel,
+  name: string,
+): Promise<CompletedToolOutput> {
   const setup = await startToolSession(model);
   const detail = await completedParentDetail(setup, "idle");
-  return {
-    output: findToolResultContent(detail, "spawn_session"),
-    setup,
-  };
+  return { output: findToolResultContent(detail, name), setup };
+}
+
+async function runRejectedSpawn(
+  model: AgentModel,
+): Promise<CompletedToolOutput> {
+  return completedToolOutput(model, "spawn_session");
 }
 
 async function waitForParentContent(
@@ -156,6 +164,36 @@ describe("session agent tools", () => {
     readSetup.database.$client.close();
   });
 
+  test("routes more than eight mixed session and runner recipients through parallel", async () => {
+    const toolUses = Array.from({ length: 20 }, (_, index) =>
+      index % 2 === 0
+        ? { parameters: {}, recipient_name: "list_sessions" }
+        : {
+            parameters: { sessionId: SESSION_ID },
+            recipient_name: "read_session",
+          },
+    );
+    const model = scriptedModel([
+      {
+        content: "Inspecting sessions in a large parallel batch.",
+        toolCalls: [toolCall("parallel", { tool_uses: toolUses })],
+      },
+      { content: "Large parallel inspection complete.", toolCalls: [] },
+    ]);
+    const { output, setup } = await completedToolOutput(model, "parallel");
+    const results: unknown = JSON.parse(output ?? "null");
+
+    expect(results).toHaveLength(20);
+    expect(Array.isArray(results) ? results[0] : undefined).toMatchObject({
+      recipient_name: "list_sessions",
+    });
+    expect(Array.isArray(results) ? results[19] : undefined).toMatchObject({
+      recipient_name: "read_session",
+    });
+    expect(setup.runnerCommands).toEqual([]);
+    setup.database.$client.close();
+  });
+
   test("routes session recipients in parallel without sending them to the runner", async () => {
     const model = scriptedModel([
       {
@@ -174,9 +212,10 @@ describe("session agent tools", () => {
       },
       { content: "Parallel inspection complete.", toolCalls: [] },
     ]);
-    const parallelSetup = await startToolSession(model);
-    const detail = await completedParentDetail(parallelSetup, "idle");
-    const output = findToolResultContent(detail, "parallel");
+    const { output, setup: parallelSetup } = await completedToolOutput(
+      model,
+      "parallel",
+    );
 
     expect(output).toContain("list_sessions");
     expect(output).toContain("read_session");

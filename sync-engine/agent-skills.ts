@@ -1,5 +1,10 @@
 import type { AgentSessionToolName } from "../shared/agent-tools.ts";
 import { isRecord } from "../shared/auth-model.ts";
+import {
+  boundedParallelOutput,
+  executeParallelCall,
+  mapWithParallelConcurrency,
+} from "../shared/parallel.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
 import type { JsonRecord } from "./oauth.ts";
 
@@ -34,7 +39,7 @@ function parallelSkillCalls(
   arguments_: JsonRecord,
 ): readonly ParallelSkillCall[] | undefined {
   const toolUses = arguments_["tool_uses"];
-  if (!Array.isArray(toolUses) || toolUses.length < 2 || toolUses.length > 8) {
+  if (!Array.isArray(toolUses) || toolUses.length < 2) {
     return undefined;
   }
 
@@ -42,7 +47,8 @@ function parallelSkillCalls(
     if (
       !isRecord(toolUse) ||
       typeof toolUse["recipient_name"] !== "string" ||
-      !isRecord(toolUse["parameters"])
+      !isRecord(toolUse["parameters"]) ||
+      toolUse["recipient_name"] === PARALLEL_TOOL_NAME
     ) {
       return [];
     }
@@ -66,16 +72,23 @@ function executeParallelSkills(
     return undefined;
   }
 
-  return Promise.all(
-    calls.map(async ({ parameters, recipientName }) => ({
-      output: await (!options.tools.some((name) => name === recipientName)
-        ? `Error: ${recipientName} is not enabled for this session.`
-        : recipientName === BRAVE_SEARCH_TOOL_NAME
-          ? options.braveSearch.execute(options.userId, parameters)
-          : options.executeTool(recipientName, parameters, signal)),
-      recipient_name: recipientName,
-    })),
-  ).then((results) => JSON.stringify(results, null, 2));
+  return mapWithParallelConcurrency(
+    calls,
+    ({ parameters, recipientName }) =>
+      executeParallelCall(
+        recipientName,
+        () =>
+          !options.tools.some((name) => name === recipientName)
+            ? Promise.resolve(
+                `Error: ${recipientName} is not enabled for this session.`,
+              )
+            : recipientName === BRAVE_SEARCH_TOOL_NAME
+              ? options.braveSearch.execute(options.userId, parameters)
+              : options.executeTool(recipientName, parameters, signal),
+        signal,
+      ),
+    signal,
+  ).then(boundedParallelOutput);
 }
 
 export function createAgentSkills(options: AgentSkillsOptions): AgentSkills {
