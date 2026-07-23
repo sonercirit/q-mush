@@ -62,6 +62,22 @@ test("paginates more than ten options and opens on the selected option page", ()
   );
 });
 
+test("wraps long labels instead of truncating them", () => {
+  const html = renderSelect(
+    [
+      {
+        label:
+          "/home/mush/a-very-long-project-directory/with-a-long-option-label",
+        value: "long-path",
+      },
+    ],
+    "long-path",
+  );
+
+  expect(html).toContain("break-words");
+  expect(html).not.toContain('class="block truncate"');
+});
+
 test("renders exactly ten options without search or pagination", () => {
   const html = renderSelect(customSelectOptions(10), "option-1");
 

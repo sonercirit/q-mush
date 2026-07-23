@@ -89,6 +89,10 @@ function search(container: ParentNode): HTMLInputElement {
   );
 }
 
+function enterSearch(container: ParentNode, value: string): void {
+  input(search(container), value);
+}
+
 function searchAndNavigate(
   container: ParentNode,
   value: string,
@@ -96,7 +100,7 @@ function searchAndNavigate(
 ): HTMLInputElement {
   const searchbox = search(container);
   searchbox.focus();
-  input(searchbox, value);
+  enterSearch(container, value);
   for (const key of keys) {
     keydown(searchbox, key);
   }
@@ -112,6 +116,17 @@ function pageButton(
     `[data-custom-select-${direction}='testChoice']`,
     HTMLButtonElement,
   );
+}
+
+function expectFirstPage(container: ParentNode): void {
+  expect([
+    optionValues(container),
+    container.textContent?.includes("Page 1 of 3") === true,
+  ]).toEqual([expectedOptionValues(0, 10), true]);
+}
+
+function triggerText(container: ParentNode): string | null {
+  return query(container, "#test-select", HTMLButtonElement).textContent;
 }
 
 function closeSelect(
@@ -165,6 +180,60 @@ test("search is case-insensitive and no-results navigation is inert", () => {
   expect(mounted.container.querySelector("[role='option']")).toBeNull();
 });
 
+test("matches Unicode labels and metadata without changing stable order", () => {
+  const unicodeOptions: readonly CustomSelectOption[] = [
+    {
+      description: "Crème brûlée",
+      detail: "İstanbul",
+      label: "Café",
+      value: "coffee",
+    },
+    ...customSelectOptions(10),
+  ];
+  const { container } = mountSelect(unicodeOptions, "coffee");
+
+  for (const query of ["cafe", "istanbul"]) {
+    enterSearch(container, query);
+    expect(optionValues(container)).toEqual(["coffee"]);
+  }
+
+  enterSearch(container, "option");
+  expect(optionValues(container)).toEqual(
+    customSelectOptions(10).map(({ value }) => value),
+  );
+});
+
+test("filters large option sets without mutating their stable order", () => {
+  const options = customSelectOptions(5_000);
+  const { container } = mountSelect(options, "option-1");
+
+  enterSearch(container, "Option 49");
+
+  expect(optionValues(container)).toEqual(
+    options
+      .filter(({ label }) => label.includes("Option 49"))
+      .slice(0, 10)
+      .map(({ value }) => value),
+  );
+  expect(options[0]?.value).toBe("option-1");
+  expect(options.at(-1)?.value).toBe("option-5000");
+});
+
+test("resets an open select when options or selection change", () => {
+  const { container, setOptions, setSelected } = mountSelect(
+    customSelectOptions(25),
+    "option-24",
+  );
+
+  pageButton(container, "previous").click();
+  setSelected("option-3");
+  expectFirstPage(container);
+
+  pageButton(container, "next").click();
+  setOptions(customSelectOptions(30));
+  expectFirstPage(container);
+});
+
 test("pages ten options at a time and resets the page when search changes", () => {
   const { container } = mountSelect();
 
@@ -174,7 +243,7 @@ test("pages ten options at a time and resets the page when search changes", () =
   expect(optionValues(container)).toEqual(expectedOptionValues(10, 20));
   expect(container.textContent).toContain("Page 2 of 3");
 
-  input(search(container), "Option");
+  enterSearch(container, "Option");
   expect(optionValues(container)).toEqual(expectedOptionValues(0, 10));
   expect(container.textContent).toContain("Page 1 of 3");
 });
@@ -189,13 +258,11 @@ test("external option and selected-value changes reset to the selected page", ()
   expect(container.textContent).toContain("Page 3 of 3");
   pageButton(container, "previous").click();
   expect(container.textContent).toContain("Page 2 of 3");
-  expect(
-    query(container, "#test-select", HTMLButtonElement).textContent,
-  ).toContain("Option 24");
+  expect(triggerText(container)).toContain("Option 24");
 
   setSelected("option-3");
   expect(container.textContent).toContain("Option 3");
-  expect(container.textContent).toContain("Page 2 of 3");
+  expect(container.textContent).toContain("Page 1 of 3");
   setOpen(false);
   setOpen(true);
   expect(container.textContent).toContain("Page 1 of 3");
@@ -203,6 +270,21 @@ test("external option and selected-value changes reset to the selected page", ()
   setOptions(customSelectOptions(5));
   expect(container.textContent).not.toContain("Page 2 of");
   expect(optionValues(container)).toHaveLength(5);
+});
+
+test("keeps selected values valid while filtering other pages", () => {
+  const { container } = mountSelect(customSelectOptions(25), "option-24");
+  const hiddenInput = query(
+    container,
+    "input[name='testChoice']",
+    HTMLInputElement,
+  );
+
+  enterSearch(container, "Option 1");
+
+  expect(optionValues(container)).not.toContain("option-24");
+  expect(hiddenInput.value).toBe("option-24");
+  expect(triggerText(container)).toContain("Option 24");
 });
 
 test("supports trigger and listbox keyboard navigation with focus restoration", async () => {
@@ -239,6 +321,15 @@ test("supports trigger and listbox keyboard navigation with focus restoration", 
   await Promise.resolve();
   expect(container.querySelector("[role='listbox']")).toBeNull();
   expect(document.activeElement).toBe(trigger);
+});
+
+test("keeps search and the listbox reachable in sequential focus order", () => {
+  const { container } = mountSelect();
+
+  expect(search(container).tabIndex).toBe(0);
+  expect(
+    query(container, "#test-select-options", HTMLUListElement).tabIndex,
+  ).toBe(0);
 });
 
 test("Enter opens the popup and focuses search", async () => {
