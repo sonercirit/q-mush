@@ -15,10 +15,29 @@ interface ParallelExecutor<Input, Output> {
   readonly signal: AbortSignal | undefined;
 }
 
+interface ParallelExecutionState {
+  failure: ((error: unknown) => void) | undefined;
+  nextIndex: number;
+  stopped: boolean;
+}
+
+interface ParallelWorkerOptions<Input, Output> extends ParallelExecutor<
+  Input,
+  Output
+> {
+  readonly complete: () => void;
+  readonly results: ({ readonly value: Output } | undefined)[];
+  readonly state: ParallelExecutionState;
+}
+
 interface NormalizedParallelResult {
   readonly field: "error" | "output";
   readonly recipientName: string;
   readonly value: string;
+}
+
+function parallelError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
 }
 
 function parallelAbortError(signal: AbortSignal): Error {
@@ -35,21 +54,60 @@ function ensureParallelActive(signal: AbortSignal | undefined): void {
   throw parallelAbortError(signal);
 }
 
-async function parallelWorker<Input, Output>(
-  options: ParallelExecutor<Input, Output>,
-  results: ({ readonly value: Output } | undefined)[],
-  state: { nextIndex: number },
-): Promise<void> {
-  for (;;) {
-    ensureParallelActive(options.signal);
-    const index = state.nextIndex;
-    const item = options.items[index];
-    if (item === undefined) {
+function parallelStopped(state: ParallelExecutionState, error: unknown): void {
+  state.stopped = true;
+  state.failure?.(error);
+}
+
+function stopParallelExecution(
+  state: ParallelExecutionState,
+  error: unknown,
+  complete: () => void,
+): void {
+  parallelStopped(state, error);
+  complete();
+}
+
+function parallelWorker<Input, Output>(
+  worker: ParallelWorkerOptions<Input, Output>,
+): void {
+  const { complete, execute, items, results, signal, state } = worker;
+  const advance = (): void => {
+    if (state.stopped) {
+      complete();
       return;
     }
-    state.nextIndex += 1;
-    results[index] = { value: await options.execute(item, index) };
-  }
+
+    try {
+      ensureParallelActive(signal);
+      const index = state.nextIndex;
+      const item = items[index];
+      if (item === undefined) {
+        complete();
+        return;
+      }
+      state.nextIndex += 1;
+      let execution: Promise<Output>;
+      try {
+        execution = execute(item, index);
+      } catch (error) {
+        stopParallelExecution(state, error, complete);
+        return;
+      }
+      void execution.then(
+        (value) => {
+          results[index] = { value };
+          advance();
+        },
+        (error: unknown) => {
+          stopParallelExecution(state, error, complete);
+        },
+      );
+    } catch (error) {
+      stopParallelExecution(state, error, complete);
+    }
+  };
+  advance();
 }
 
 function completedParallelResults<Output>(
@@ -60,6 +118,57 @@ function completedParallelResults<Output>(
       throw new Error("Parallel execution did not produce every result");
     }
     return result.value;
+  });
+}
+
+function waitForParallelExecution<Input, Output>(
+  options: ParallelExecutor<Input, Output>,
+  results: ({ readonly value: Output } | undefined)[],
+  state: ParallelExecutionState,
+  workerCount: number,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let completedWorkers = 0;
+    let settled = false;
+    const finish = (error?: unknown): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      state.failure = undefined;
+      options.signal?.removeEventListener("abort", onAbort);
+      if (error === undefined) {
+        resolve();
+      } else {
+        reject(parallelError(error));
+      }
+    };
+    const onAbort = (): void => {
+      state.stopped = true;
+      if (options.signal !== undefined) {
+        finish(parallelAbortError(options.signal));
+      }
+    };
+    const completeWorker = (): void => {
+      completedWorkers += 1;
+      if (completedWorkers === workerCount) {
+        finish();
+      }
+    };
+    state.failure = finish;
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    if (options.signal?.aborted === true) {
+      onAbort();
+      return;
+    }
+    for (let index = 0; index < workerCount; index += 1) {
+      parallelWorker({
+        ...options,
+        complete: completeWorker,
+        results,
+        state,
+      });
+    }
   });
 }
 
@@ -77,17 +186,14 @@ export async function mapWithParallelConcurrency<Input, Output>(
     length: items.length,
   });
   const executor: ParallelExecutor<Input, Output> = { execute, items, signal };
-  const state = { nextIndex: 0 };
-  const workers = Array.from(
-    { length: Math.min(PARALLEL_CALL_CONCURRENCY, items.length) },
-    () => parallelWorker(executor, results, state),
-  );
-  const settlements = await Promise.allSettled(workers);
-  const failure = settlements.find(
-    (settlement) => settlement.status === "rejected",
-  );
-  if (failure?.status === "rejected") {
-    throw failure.reason;
+  const state: ParallelExecutionState = {
+    failure: undefined,
+    nextIndex: 0,
+    stopped: false,
+  };
+  const workerCount = Math.min(PARALLEL_CALL_CONCURRENCY, items.length);
+  if (workerCount > 0) {
+    await waitForParallelExecution(executor, results, state, workerCount);
   }
   ensureParallelActive(signal);
   return completedParallelResults(results);
@@ -201,11 +307,7 @@ export function boundedParallelOutput(
   results: readonly ParallelCallResult[],
 ): string {
   const normalized = results.map(normalizeParallelResult);
-  const complete = JSON.stringify(
-    normalized.map((result) => resultValue(result, result.value)),
-    null,
-    2,
-  );
+  const complete = JSON.stringify(results, null, 2);
   if (serializedBytes(complete) <= MAXIMUM_PARALLEL_OUTPUT_BYTES) {
     return complete;
   }
@@ -238,18 +340,32 @@ export function boundedParallelOutput(
   return `[${parts.join(",")}]`;
 }
 
+function childText(
+  recipientName: string,
+  field: "error" | "output",
+  value: string,
+): ParallelCallResult {
+  const bounded = truncateParallelText(
+    value,
+    MAXIMUM_PARALLEL_CHILD_OUTPUT_BYTES,
+  );
+  return field === "error"
+    ? { error: bounded, recipient_name: recipientName }
+    : { output: bounded, recipient_name: recipientName };
+}
+
 export async function executeParallelCall(
   recipientName: string,
   execute: () => Promise<string>,
   signal?: AbortSignal,
 ): Promise<ParallelCallResult> {
   try {
-    return { output: await execute(), recipient_name: recipientName };
+    return childText(recipientName, "output", await execute());
   } catch (error) {
-    if (signal?.aborted === true) {
-      throw error;
+    if (signal?.aborted !== true) {
+      return parallelCallFailure(recipientName, error);
     }
-    return parallelCallFailure(recipientName, error);
+    return Promise.reject(parallelError(error));
   }
 }
 
@@ -257,8 +373,5 @@ function parallelCallFailure(
   recipientName: string,
   error: unknown,
 ): ParallelCallResult {
-  return {
-    error: error instanceof Error ? error.message : String(error),
-    recipient_name: recipientName,
-  };
+  return childText(recipientName, "error", parallelError(error).message);
 }

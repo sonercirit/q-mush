@@ -27,7 +27,8 @@ function ToolDetailsPanel(props: {
   return (
     <aside
       aria-label={`Details for ${props.option.name}`}
-      class="absolute top-full right-0 z-30 mt-2 w-full max-w-md min-w-0 rounded-2xl border border-white/15 bg-slate-950 p-4 text-left shadow-2xl shadow-black/40 sm:min-w-80"
+      aria-live="polite"
+      class="absolute top-full right-0 z-30 mt-2 max-h-[min(70vh,36rem)] w-full max-w-md min-w-0 overflow-y-auto overscroll-contain rounded-2xl border border-white/15 bg-slate-950 p-4 text-left shadow-2xl shadow-black/40 sm:min-w-80"
       data-tool-detail-panel={props.option.name}
       id={`tool-details-${props.option.name}`}
     >

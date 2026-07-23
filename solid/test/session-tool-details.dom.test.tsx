@@ -117,11 +117,14 @@ test("shows authoritative descriptions, classifications, and nested schema detai
   expect(parallel.textContent).toContain("Array of object");
   expect(parallel.textContent).toContain("Minimum items: 2");
   expect(parallel.textContent).toContain("recipient_name");
+  expect(parallel.textContent).toContain("Additional properties: not allowed");
+  expect(parallel.textContent).toContain("Additional properties: allowed");
   expect(parallel.textContent).toContain("Allowed values:");
   expect(parallel.textContent).not.toContain("Maximum items");
 
   const search = openPanel(container, "brave_search");
   expect(search.textContent).toContain("Skill");
+  expect(search.textContent).toContain("Optional");
   expect(search.textContent).toContain("Minimum: 1");
   expect(search.textContent).toContain("Maximum: 20");
 
@@ -178,5 +181,7 @@ test("does not close for interaction inside the responsive detail panel", () => 
     "true",
   );
   expect(panel.className).toContain("max-w");
+  expect(panel.className).toContain("max-h");
+  expect(panel.className).toContain("overflow-y-auto");
   expect(panel.className).toContain("w-full");
 });

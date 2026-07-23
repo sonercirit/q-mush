@@ -83,7 +83,7 @@ function executeParallelSkills(
                 `Error: ${recipientName} is not enabled for this session.`,
               )
             : recipientName === BRAVE_SEARCH_TOOL_NAME
-              ? options.braveSearch.execute(options.userId, parameters)
+              ? options.braveSearch.execute(options.userId, parameters, signal)
               : options.executeTool(recipientName, parameters, signal),
         signal,
       ),
@@ -95,7 +95,7 @@ export function createAgentSkills(options: AgentSkillsOptions): AgentSkills {
   return {
     execute: (name, arguments_, signal) =>
       name === BRAVE_SEARCH_TOOL_NAME
-        ? options.braveSearch.execute(options.userId, arguments_)
+        ? options.braveSearch.execute(options.userId, arguments_, signal)
         : name === PARALLEL_TOOL_NAME
           ? executeParallelSkills(options, arguments_, signal)
           : undefined,
