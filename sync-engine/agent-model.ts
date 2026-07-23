@@ -1,3 +1,4 @@
+import { setTimeout } from "node:timers/promises";
 import type { AgentReasoningEffort } from "../shared/agent-configuration.ts";
 import { agentImageDataUrl } from "../shared/agent-images.ts";
 import type {
@@ -40,6 +41,9 @@ const OPENAI_CODEX_RESPONSES_URL =
   "https://chatgpt.com/backend-api/codex/responses";
 const OPENAI_CODEX_RESPONSES_WEBSOCKET_URL =
   "wss://chatgpt.com/backend-api/codex/responses";
+const PROVIDER_WEBSOCKET_RETRY_DELAYS_MILLISECONDS = [
+  1_000, 2_000, 4_000,
+] as const;
 const OPENROUTER_COMPLETIONS_URL =
   "https://openrouter.ai/api/v1/chat/completions";
 export interface AgentProviderCredential {
@@ -374,22 +378,47 @@ export class ChatCompletionsAgentModel implements AgentModel {
     return this.#completeHttp(...parameters);
   }
 
+  #acceptWebSocketInterruption(
+    error: unknown,
+    signal: AbortSignal | undefined,
+  ): void {
+    if (
+      signal?.aborted === true ||
+      !(error instanceof ProviderWebSocketError)
+    ) {
+      throw error;
+    }
+    if (error.started) {
+      this.#onDelta?.({ content: "", reset: true, thinking: "" });
+    }
+  }
+
   async #tryWebSocket(
     ...parameters: CompletionArguments
   ): Promise<OptionalTurn> {
-    try {
-      return await this.#completeWebSocket(...parameters);
-    } catch (error) {
-      const aborting = parameters[1]?.aborted === true;
-      const started =
-        error instanceof ProviderWebSocketError
-          ? error.started
-          : error instanceof DOMException && error.name === "AbortError";
-      if (aborting || started) {
-        throw error;
+    const signal = completionSignal(parameters);
+
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await this.#completeWebSocket(...parameters);
+      } catch (error) {
+        this.#acceptWebSocketInterruption(error, signal);
+        const delay = PROVIDER_WEBSOCKET_RETRY_DELAYS_MILLISECONDS[attempt];
+        if (delay === undefined) {
+          return undefined;
+        }
+        await this.#waitForRetry(delay, signal);
       }
-      return undefined;
     }
+  }
+
+  #waitForRetry(
+    milliseconds: number,
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    return this.#sleep === undefined
+      ? setTimeout(milliseconds, undefined, { signal })
+      : this.#sleep(milliseconds, signal);
   }
 
   #requestBody(

@@ -282,10 +282,9 @@ Living project memory. Update it with durable information.
   and `reasoning.effort` for OpenRouter and Codex Responses. Streamed reasoning
   deltas are grouped by `output_index` and `summary_index`; separate summary
   parts with paragraphs because completed responses may omit their output.
-  Responses WebSockets fall back to HTTP only before any provider event,
-  avoiding replay after partial output. Model calls retry transient failures
-  three times; 429 retries until success or abort with capped backoff honoring
-  `Retry-After`.
+  OpenAI Responses WebSockets retry interruptions after deltas, which remain
+  UI-only until persistence. Retries reset the browser stream; exhausted
+  attempts use HTTP. Failures persist as non-replayed `error` messages.
 - Agent launches and brokered runner commands have no application-owned turn,
   queue, or elapsed-time limits. Every shell command must choose a positive
   timeout; no default or configured maximum is supplied. Outside explicit or

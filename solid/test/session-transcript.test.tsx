@@ -89,6 +89,19 @@ test("preserves consecutive user message line breaks", () => {
   );
 });
 
+test("renders persisted session errors distinctly", () => {
+  const error = {
+    ...userMessage("The provider connection failed"),
+    id: "error-1",
+    role: "error" as const,
+  };
+  const html = renderMessages([error]);
+
+  expect(html).toContain("Error message");
+  expect(html).toContain("The provider connection failed");
+  expect(html).toContain("text-rose-200");
+});
+
 test("separates and colorizes shell output and its exit status", () => {
   const call = assistantToolCall({
     arguments: '{"command":"bun test","timeout":30}',

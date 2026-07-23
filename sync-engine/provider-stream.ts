@@ -20,6 +20,7 @@ type ProviderStreamProtocol =
 
 export interface ProviderTextDelta {
   readonly content: string;
+  readonly reset?: true;
   readonly thinking: string;
 }
 

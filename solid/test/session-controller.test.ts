@@ -45,10 +45,45 @@ test("renders incremental model deltas in the selected transcript", async () => 
       type: "session_delta",
     });
 
+    controller.applyDelta({
+      content: "",
+      reset: true,
+      sessionId: TEST_SESSION_DETAIL.id,
+      thinking: "",
+      type: "session_delta",
+    });
+
+    expect(controller.state.detail?.messages).toEqual([]);
+
+    controller.applyDelta({
+      content: "Replacement",
+      sessionId: TEST_SESSION_DETAIL.id,
+      thinking: "Reconsidering",
+      type: "session_delta",
+    });
+
     expect(controller.state.detail?.messages.slice(-2)).toMatchObject([
-      { content: "Considering carefully", role: "thinking" },
-      { content: "Hello world", role: "assistant" },
+      { content: "Reconsidering", role: "thinking" },
+      { content: "Replacement", role: "assistant" },
     ]);
+
+    const errorMessage = {
+      content: "Session failed: the provider connection was lost",
+      createdAt: 3,
+      id: "error-1",
+      images: [],
+      role: "error" as const,
+      toolCallId: null,
+      toolCalls: [],
+      toolName: null,
+    };
+    controller.applyDetail({
+      ...TEST_SESSION_DETAIL,
+      messages: [errorMessage],
+      status: "failed",
+      updatedAt: 3,
+    });
+    expect(controller.state.detail?.messages).toEqual([errorMessage]);
   } finally {
     globalThis.fetch = originalFetch;
   }

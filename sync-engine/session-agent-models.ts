@@ -17,6 +17,7 @@ interface AgentModelFactoryOptions extends Pick<
   readonly credential: AgentProviderCredential;
   readonly onDelta?: (delta: {
     readonly content: string;
+    readonly reset?: true;
     readonly thinking: string;
   }) => void;
   readonly systemPrompt: string;

@@ -115,6 +115,7 @@ export function withInterruptedToolResults(
         finishPending();
         complete.push(message);
         break;
+      case "error":
       case "system":
       case "thinking":
         complete.push(message);
@@ -185,6 +186,7 @@ export function conversationFromMessages(
           role: "user",
         });
         break;
+      case "error":
       case "system":
       case "thinking":
         break;

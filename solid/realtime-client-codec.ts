@@ -19,6 +19,7 @@ export type RealtimeServerEvent =
     }
   | {
       readonly content: string;
+      readonly reset?: true;
       readonly sessionId: string;
       readonly thinking: string;
       readonly type: "session_delta";
@@ -48,13 +49,19 @@ export function readRealtimeServerEvent(message: string): RealtimeServerEvent {
       return { sessions: readSessionList(value), type: "sessions" };
     case "session":
       return { session: readSessionDetail(value["session"]), type: "session" };
-    case "session_delta":
+    case "session_delta": {
+      const reset = value["reset"];
+      if (reset !== undefined && reset !== true) {
+        throw new Error("The realtime server event was invalid");
+      }
       return {
         content: requiredString(value, "content"),
+        ...(reset === true ? { reset } : {}),
         sessionId: requiredString(value, "sessionId"),
         thinking: requiredString(value, "thinking"),
         type: "session_delta",
       };
+    }
     default:
       throw new Error("The realtime server event type was invalid");
   }

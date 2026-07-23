@@ -581,7 +581,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
       return;
     }
     if (error !== undefined) {
-      this.#store.appendSystemMessage(
+      this.#store.appendErrorMessage(
         detail.id,
         safeErrorMessage(error),
         this.#now(),

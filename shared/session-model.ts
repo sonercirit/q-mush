@@ -18,7 +18,7 @@ export interface AgentSessionUsageUpdate {
 }
 
 type AgentSessionMessageRole =
-  "user" | "assistant" | "tool" | "thinking" | "system";
+  "user" | "assistant" | "tool" | "thinking" | "system" | "error";
 
 export interface AgentSessionMessage {
   readonly content: string;

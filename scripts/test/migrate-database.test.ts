@@ -172,6 +172,7 @@ test("session migration preserves transcripts with foreign keys", async () => {
   const runnerId = "018bcfe5-6800-7000-8000-000000000083";
   const sessionId = "018bcfe5-6800-7000-8000-000000000084";
   const messageId = "018bcfe5-6800-7000-8000-000000000085";
+  const errorMessageId = "018bcfe5-6800-7000-8000-000000000086";
   legacyDatabase.run(
     `INSERT INTO users (
       id, google_subject, email, name, created_at, created_by_id,
@@ -261,6 +262,23 @@ test("session migration preserves transcripts with foreign keys", async () => {
       "Preserve this message",
     ],
   );
+  legacyDatabase.run(
+    `INSERT INTO agent_messages (
+      id, user_id, created_at, created_by_id, updated_at, updated_by_id,
+      session_id, role, content
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      errorMessageId,
+      userId,
+      timestamp + 1,
+      SYSTEM_ID,
+      timestamp + 1,
+      SYSTEM_ID,
+      sessionId,
+      "system",
+      "Session failed: legacy provider error",
+    ],
+  );
   const upgradedDatabase = await migrateLegacyDatabase(legacyDatabase, path);
   expect(
     upgradedDatabase
@@ -273,10 +291,21 @@ test("session migration preserves transcripts with foreign keys", async () => {
   ).toEqual([{ id: sessionId, parentSessionId: null }]);
   expect(
     upgradedDatabase
-      .select({ content: agentMessages.content, id: agentMessages.id })
+      .select({
+        content: agentMessages.content,
+        id: agentMessages.id,
+        role: agentMessages.role,
+      })
       .from(agentMessages)
       .all(),
-  ).toEqual([{ content: "Preserve this message", id: messageId }]);
+  ).toEqual([
+    { content: "Preserve this message", id: messageId, role: "user" },
+    {
+      content: "Session failed: legacy provider error",
+      id: errorMessageId,
+      role: "error",
+    },
+  ]);
   expect(
     upgradedDatabase.$client.query("PRAGMA foreign_key_check").all(),
   ).toEqual([]);

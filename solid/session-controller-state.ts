@@ -133,8 +133,11 @@ export class SessionRealtimeState {
 
     const current = this.#view.value.detail;
     const streamed = this.#streamedContent.get(detail.id);
+    const sessionFinished =
+      detail.status !== "queued" && detail.status !== "running";
     const streamIsPersisted =
-      streamed !== undefined && this.#streamIsPersisted(persistable, streamed);
+      streamed !== undefined &&
+      (sessionFinished || this.#streamIsPersisted(persistable, streamed));
     const visibleMessages =
       streamed === undefined || streamIsPersisted
         ? persistable.messages
@@ -193,10 +196,12 @@ export class SessionRealtimeState {
   applyDelta(
     event: Extract<RealtimeServerEvent, { type: "session_delta" }>,
   ): void {
-    const current = this.#streamedContent.get(event.sessionId) ?? {
-      content: "",
-      thinking: "",
-    };
+    const current = event.reset
+      ? { content: "", thinking: "" }
+      : (this.#streamedContent.get(event.sessionId) ?? {
+          content: "",
+          thinking: "",
+        });
     this.#streamedContent.set(event.sessionId, {
       content: current.content + event.content,
       thinking: current.thinking + event.thinking,

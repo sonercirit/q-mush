@@ -111,7 +111,7 @@ export async function spawnAgentSession(options: {
     if (
       !options.dependencies.launchSession(credential, child, options.userId)
     ) {
-      options.dependencies.store.appendSystemMessage(
+      options.dependencies.store.appendErrorMessage(
         child.id,
         "Session failed: the child session could not be launched",
         options.dependencies.now(),

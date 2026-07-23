@@ -280,7 +280,8 @@ function readMessage(value: unknown): AgentSessionMessage {
       role !== "assistant" &&
       role !== "tool" &&
       role !== "thinking" &&
-      role !== "system") ||
+      role !== "system" &&
+      role !== "error") ||
     toolCallId === undefined ||
     toolName === undefined
   ) {

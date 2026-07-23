@@ -81,6 +81,18 @@ function TranscriptMessage(props: {
   readonly callArguments: Accessor<ReadonlyMap<string, string>>;
   readonly message: AgentSessionMessage;
 }): JSX.Element {
+  if (props.message.role === "error") {
+    return (
+      <TranscriptNote
+        boundaryKey={`message:${props.message.id}`}
+        classes="border-rose-300/20 bg-rose-300/10"
+        content={props.message.content}
+        label="Error message"
+        labelClasses="text-rose-200"
+      />
+    );
+  }
+
   if (props.message.role === "thinking") {
     return (
       <TranscriptNote

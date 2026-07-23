@@ -21,12 +21,25 @@ test("reads runner snapshots from realtime messages", () => {
   });
 });
 
-test("reads incremental model deltas from realtime messages", () => {
+test("reads reset model deltas from realtime messages", () => {
   const delta = {
-    content: "hello",
+    content: "replacement",
+    reset: true,
     sessionId: "session-1",
-    thinking: "considering",
+    thinking: "reconsidering",
     type: "session_delta",
   } as const;
   expect(roundTrip(delta)).toEqual(delta);
+});
+
+test("rejects invalid reset model deltas", () => {
+  expect(() =>
+    roundTrip({
+      content: "replacement",
+      reset: "true",
+      sessionId: "session-1",
+      thinking: "",
+      type: "session_delta",
+    }),
+  ).toThrow("invalid");
 });

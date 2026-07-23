@@ -36,7 +36,9 @@ import {
 } from "./session-store-spawns.ts";
 import {
   appendSessionUserMessage,
-  emptyToolMetadata,
+  errorMessageValues,
+  insertStoredMessage,
+  interruptedSessionErrorValues,
   recordedMessageValues,
   userMessageValues,
   type StoredMessageValues,
@@ -409,13 +411,8 @@ export class SessionStore {
     );
   }
 
-  appendSystemMessage(sessionId: string, content: string, now: number): void {
-    this.#appendMessage(
-      sessionId,
-      { ...emptyToolMetadata(), content, role: "system" },
-      SYSTEM_ID,
-      now,
-    );
+  appendErrorMessage(sessionId: string, content: string, now: number): void {
+    this.#appendMessage(sessionId, errorMessageValues(content), SYSTEM_ID, now);
   }
 
   appendUserMessage(
@@ -565,7 +562,11 @@ export class SessionStore {
 
   failInterrupted(now: number): readonly PendingSpawnedSession[] {
     const interrupted = this.#database
-      .select({ ...SESSION_TIMING_SELECTION, id: agentSessions.id })
+      .select({
+        ...SESSION_TIMING_SELECTION,
+        id: agentSessions.id,
+        userId: agentSessions.userId,
+      })
       .from(agentSessions)
       .where(
         and(
@@ -577,16 +578,25 @@ export class SessionStore {
 
     for (const session of interrupted) {
       const duration = activeSessionDuration(session, now);
-      this.#database
-        .update(agentSessions)
-        .set({
-          activeDurationMs: duration,
-          activeStartedAt: null,
-          status: "failed",
-          ...updatedAuditFields(SYSTEM_ID, now),
-        })
-        .where(eq(agentSessions.id, session.id))
-        .run();
+      this.#database.transaction((transaction) => {
+        insertStoredMessage(transaction, interruptedSessionErrorValues(), {
+          actorId: SYSTEM_ID,
+          id: this.#generateId(now),
+          now,
+          sessionId: session.id,
+          userId: session.userId,
+        });
+        transaction
+          .update(agentSessions)
+          .set({
+            activeDurationMs: duration,
+            activeStartedAt: null,
+            status: "failed",
+            ...updatedAuditFields(SYSTEM_ID, now),
+          })
+          .where(eq(agentSessions.id, session.id))
+          .run();
+      });
     }
     return this.pendingSpawnedSessions();
   }
@@ -606,16 +616,13 @@ export class SessionStore {
           .get(),
       );
 
-      transaction
-        .insert(agentMessages)
-        .values({
-          ...createdAuditFields(actorId, now),
-          ...message,
-          id: this.#generateId(now),
-          sessionId,
-          userId: session.userId,
-        })
-        .run();
+      insertStoredMessage(transaction, message, {
+        actorId,
+        id: this.#generateId(now),
+        now,
+        sessionId,
+        userId: session.userId,
+      });
       transaction
         .update(agentSessions)
         .set(updatedAuditFields(actorId, now))

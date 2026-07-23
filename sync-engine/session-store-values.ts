@@ -6,10 +6,13 @@ import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 
+const INTERRUPTED_SESSION_ERROR =
+  "Session failed: the server stopped before the session completed";
+
 export interface StoredMessageValues {
   readonly content: string;
   readonly images: string | null;
-  readonly role: "assistant" | "system" | "thinking" | "tool";
+  readonly role: "assistant" | "error" | "system" | "thinking" | "tool";
   readonly toolCallId: string | null;
   readonly toolCalls: string | null;
   readonly toolName: string | null;
@@ -20,13 +23,21 @@ export interface SessionWriteResources {
   readonly generateId: IdGenerator;
 }
 
-export function emptyToolMetadata() {
+function emptyToolMetadata() {
   return {
     images: null,
     toolCallId: null,
     toolCalls: null,
     toolName: null,
   };
+}
+
+export function errorMessageValues(content: string): StoredMessageValues {
+  return { ...emptyToolMetadata(), content, role: "error" };
+}
+
+export function interruptedSessionErrorValues(): StoredMessageValues {
+  return errorMessageValues(INTERRUPTED_SESSION_ERROR);
 }
 
 export function recordedMessageValues(
@@ -76,6 +87,38 @@ export function userMessageValues(options: {
   };
 }
 
+export interface StoredMessageInsertOptions {
+  readonly actorId: string;
+  readonly id: string;
+  readonly now: number;
+  readonly sessionId: string;
+  readonly userId: string;
+}
+
+export function insertStoredMessage(
+  database: Pick<AppDatabase, "insert">,
+  message: StoredMessageValues,
+  options: StoredMessageInsertOptions,
+): void {
+  database
+    .insert(agentMessages)
+    .values({
+      ...createdAuditFields(options.actorId, options.now),
+      ...message,
+      id: options.id,
+      sessionId: options.sessionId,
+      userId: options.userId,
+    })
+    .run();
+}
+
+function insertAgentMessage(
+  database: Pick<AppDatabase, "insert">,
+  values: typeof agentMessages.$inferInsert,
+): void {
+  database.insert(agentMessages).values(values).run();
+}
+
 export function appendSessionUserMessage(options: {
   readonly resources: SessionWriteResources;
   readonly userId: string;
@@ -96,19 +139,17 @@ export function appendSessionUserMessage(options: {
     if (exists === undefined) {
       return false;
     }
-    transaction
-      .insert(agentMessages)
-      .values(
-        userMessageValues({
-          content,
-          id: resources.generateId(now),
-          images: [],
-          now,
-          sessionId: sessionIdentifier,
-          userId,
-        }),
-      )
-      .run();
+    insertAgentMessage(
+      transaction,
+      userMessageValues({
+        content,
+        id: resources.generateId(now),
+        images: [],
+        now,
+        sessionId: sessionIdentifier,
+        userId,
+      }),
+    );
     transaction
       .update(agentSessions)
       .set({ updatedAt: new Date(now), updatedById: SYSTEM_ID })

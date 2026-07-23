@@ -1,6 +1,7 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import type { AgentConversationMessage } from "../../shared/agent-loop.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
+import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
 import { createOpenAiOAuthSecret } from "./oauth-test-helpers.ts";
 import { captureRejection } from "./promise-test-helpers.ts";
 import { expectDoneTurn } from "./provider-turn-fixtures.ts";
@@ -25,6 +26,10 @@ class FakeProviderSocket extends EventTarget {
   close(): void {
     this.readyState = WebSocket.CLOSED;
     this.dispatchEvent(new CloseEvent("close", { code: 1000 }));
+  }
+
+  fail(): void {
+    this.dispatchEvent(new Event("error"));
   }
 
   open(): void {
@@ -52,11 +57,32 @@ function complete(
   return model.complete(messages);
 }
 
-function unavailableHttp(onFetch: () => void) {
-  return () => {
-    onFetch();
-    return Promise.reject(new Error("HTTP should not be used"));
+function neverFetch(): Promise<Response> {
+  return Promise.reject(new Error("HTTP should not be used"));
+}
+
+function recordDelay(delays: number[]) {
+  return (milliseconds: number): Promise<void> => {
+    delays.push(milliseconds);
+    return Promise.resolve();
   };
+}
+
+class FakeProviderSockets {
+  readonly created: FakeProviderSocket[] = [];
+
+  readonly create: WebSocketFactory = () => {
+    const socket = new FakeProviderSocket();
+    this.created.push(socket);
+    return socket;
+  };
+
+  async closeAttempt(index: number): Promise<void> {
+    await vi.waitFor(() => {
+      expect(this.created).toHaveLength(index + 1);
+    });
+    this.created[index]?.close();
+  }
 }
 
 function apiKeyOptions() {
@@ -71,34 +97,71 @@ function apiKeyOptions() {
   };
 }
 
-function apiKeyModel(
-  onFetch: () => void,
-  webSocket: NonNullable<
-    ConstructorParameters<typeof ChatCompletionsAgentModel>[0]["webSocket"]
-  >,
-): ChatCompletionsAgentModel {
+type WebSocketFactory = NonNullable<
+  ConstructorParameters<typeof ChatCompletionsAgentModel>[0]["webSocket"]
+>;
+
+function apiKeyModel(options: {
+  readonly onDelta?: (delta: ProviderTextDelta) => void;
+  readonly sleep?: (
+    milliseconds: number,
+    signal?: AbortSignal,
+  ) => Promise<void>;
+  readonly webSocket: WebSocketFactory;
+}): ChatCompletionsAgentModel {
   return new ChatCompletionsAgentModel({
     ...apiKeyOptions(),
-    fetch: unavailableHttp(onFetch),
+    fetch: neverFetch,
+    ...(options.onDelta === undefined ? {} : { onDelta: options.onDelta }),
+    ...(options.sleep === undefined ? {} : { sleep: options.sleep }),
+    webSocket: options.webSocket,
+  });
+}
+
+function oauthModel(
+  fetch: () => Promise<Response>,
+  sleep: (milliseconds: number) => Promise<void>,
+  webSocket: WebSocketFactory,
+): ChatCompletionsAgentModel {
+  const credential = {
+    accountId: "chatgpt-account",
+    secret: createOpenAiOAuthSecret(),
+    source: "oauth" as const,
+  };
+  return new ChatCompletionsAgentModel({
+    credential,
+    fetch,
+    model: "gpt-5-codex",
+    provider: "openai",
+    sleep,
     webSocket,
   });
 }
 
+async function expectAbortWithoutHttp(
+  model: ChatCompletionsAgentModel,
+  controller: AbortController,
+  interrupt: () => void,
+): Promise<void> {
+  const pending = model.complete(
+    [{ content: "Hello", role: "user" }],
+    controller.signal,
+  );
+  interrupt();
+  expect(await captureRejection(pending)).toMatchObject({ name: "AbortError" });
+}
+
 test("prefers the Responses WebSocket for OpenAI API keys", async () => {
   const sockets: FakeProviderSocket[] = [];
-  let fetched = false;
-  const model = apiKeyModel(
-    () => {
-      fetched = true;
-    },
-    (url, options) => {
+  const model = apiKeyModel({
+    webSocket: (url, options) => {
       expect(url).toBe("wss://api.openai.com/v1/responses");
       expect(options.headers["authorization"]).toBe("Bearer sk-openai");
       const socket = new FakeProviderSocket();
       sockets.push(socket);
       return socket;
     },
-  );
+  });
 
   const pending = complete(model);
   const socket = sockets[0];
@@ -115,82 +178,105 @@ test("prefers the Responses WebSocket for OpenAI API keys", async () => {
   socket?.receive(COMPLETED_EVENT);
 
   expectDoneTurn(await pending);
-  expect(fetched).toBe(false);
 });
 
 test("does not start an HTTP fallback after a WebSocket abort", async () => {
-  const socket = new FakeProviderSocket();
-  let fetched = false;
   const controller = new AbortController();
-  const model = apiKeyModel(
-    () => {
-      fetched = true;
-    },
-    () => socket,
-  );
-
-  const pending = model.complete(
-    [{ content: "Hello", role: "user" }],
-    controller.signal,
-  );
-  socket.open();
-  controller.abort();
-
-  expect(await captureRejection(pending)).toMatchObject({ name: "AbortError" });
-  expect(fetched).toBe(false);
-});
-
-test("does not replay a partial WebSocket turn over HTTP", async () => {
-  const socket = new FakeProviderSocket();
-  const deltas: string[] = [];
-  let fetched = false;
-  const model = new ChatCompletionsAgentModel({
-    ...apiKeyOptions(),
-    fetch: () => {
-      fetched = true;
-      return Promise.resolve(
-        Response.json({ choices: [{ message: { content: "Complete." } }] }),
-      );
-    },
-    onDelta: ({ content }) => deltas.push(content),
-    webSocket: () => socket,
-  });
-
-  const pending = complete(model);
-  socket.open();
-  socket.receive({ delta: "Partial", type: "response.output_text.delta" });
-  socket.close();
-
-  expect(await captureRejection(pending)).toMatchObject({
-    message: "The provider WebSocket closed before completion",
-  });
-  expect(deltas).toEqual(["Partial"]);
-  expect(fetched).toBe(false);
-});
-
-test("falls back from an unavailable provider WebSocket to HTTP streaming", async () => {
-  const socket = new FakeProviderSocket();
-  const model = new ChatCompletionsAgentModel({
-    credential: {
-      accountId: "chatgpt-account",
-      secret: createOpenAiOAuthSecret(),
-      source: "oauth",
-    },
-    fetch: () =>
-      Promise.resolve(
-        new Response(
-          `data: ${JSON.stringify(COMPLETED_EVENT)}\n\ndata: [DONE]\n\n`,
-        ),
-      ),
-    model: "gpt-5-codex",
-    provider: "openai",
+  let socket: FakeProviderSocket | undefined;
+  const model = apiKeyModel({
     webSocket: () => {
+      socket = new FakeProviderSocket();
       return socket;
     },
   });
 
+  await expectAbortWithoutHttp(model, controller, () => {
+    socket?.open();
+    controller.abort();
+  });
+});
+
+test("aborts immediately during WebSocket retry backoff", async () => {
+  const controller = new AbortController();
+  const sockets = new FakeProviderSockets();
+  const model = apiKeyModel({
+    sleep: (_milliseconds, signal) => {
+      if (signal !== controller.signal) {
+        throw new Error("The retry used the wrong abort signal");
+      }
+      const abort = new DOMException("Stopped", "AbortError");
+      controller.abort(abort);
+      return Promise.reject(abort);
+    },
+    webSocket: sockets.create,
+  });
+
+  await expectAbortWithoutHttp(model, controller, () => {
+    sockets.created[0]?.close();
+  });
+});
+
+test("retries a partial WebSocket turn without persisting duplicate output", async () => {
+  const sockets = new FakeProviderSockets();
+  const deltas: ProviderTextDelta[] = [];
+  const delays: number[] = [];
+  const model = apiKeyModel({
+    onDelta: (delta) => {
+      deltas.push(delta);
+    },
+    sleep: recordDelay(delays),
+    webSocket: sockets.create,
+  });
+
   const pending = complete(model);
-  socket.close();
+  sockets.created[0]?.open();
+  sockets.created[0]?.receive({
+    delta: "Partial",
+    type: "response.output_text.delta",
+  });
+  sockets.created[0]?.fail();
+  await vi.waitFor(() => {
+    expect(sockets.created).toHaveLength(2);
+  });
+  expect(sockets.created[0]?.readyState).toBe(WebSocket.CLOSED);
+  sockets.created[0]?.receive({
+    delta: " stale",
+    type: "response.output_text.delta",
+  });
+  sockets.created[1]?.open();
+  sockets.created[1]?.receive({
+    delta: "Done.",
+    type: "response.output_text.delta",
+  });
+  sockets.created[1]?.receive(COMPLETED_EVENT);
+
+  expectDoneTurn(await pending);
+  const expectedDeltas: ProviderTextDelta[] = [
+    { content: "Partial", thinking: "" },
+    { content: "", reset: true, thinking: "" },
+    { content: "Done.", thinking: "" },
+  ];
+  expect(deltas).toStrictEqual(expectedDeltas);
+  expect(delays).toEqual([1_000]);
+});
+
+test("falls back to HTTP after bounded WebSocket retries", async () => {
+  const sockets = new FakeProviderSockets();
+  const delays: number[] = [];
+  let fetchCount = 0;
+  const fetch = (): Promise<Response> => {
+    fetchCount += 1;
+    const event = JSON.stringify(COMPLETED_EVENT);
+    return Promise.resolve(new Response(`data: ${event}\n\ndata: [DONE]\n\n`));
+  };
+  const model = oauthModel(fetch, recordDelay(delays), sockets.create);
+
+  const pending = complete(model);
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await sockets.closeAttempt(attempt);
+  }
 
   expect(await pending).toMatchObject({ content: "Done." });
+  expect(delays).toEqual([1_000, 2_000, 4_000]);
+  expect(fetchCount).toBe(1);
 });

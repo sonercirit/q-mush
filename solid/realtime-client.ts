@@ -154,12 +154,15 @@ export class RealtimeConnection {
   }
 
   #queueSessionDelta(event: SessionDelta): void {
-    const current = this.#sessionDeltas.get(event.sessionId);
+    const current = event.reset
+      ? undefined
+      : this.#sessionDeltas.get(event.sessionId);
     let combined = event;
     if (current !== undefined) {
       const fragments = [current, event];
       combined = {
         ...event,
+        ...(current.reset === true ? { reset: true } : {}),
         content: fragments.map(({ content }) => content).join(""),
         thinking: fragments.map(({ thinking }) => thinking).join(""),
       };

@@ -60,10 +60,24 @@ test("coalesces session deltas into one update per animation frame", () => {
   expect(events).toHaveLength(1);
   expect(events[0]?.type).toBe("sessions");
   expect(frames).toHaveLength(1);
+  socket.receive({
+    content: "Replacement",
+    reset: true,
+    sessionId: "session-1",
+    thinking: "Reconsidering",
+    type: "session_delta",
+  });
+  socket.receive({
+    content: " response",
+    sessionId: "session-1",
+    thinking: " from scratch",
+    type: "session_delta",
+  });
   frames[0]?.();
   expect(events.at(-1)).toMatchObject({
-    content: "Hello world",
-    thinking: "Considering carefully",
+    content: "Replacement response",
+    reset: true,
+    thinking: "Reconsidering from scratch",
   });
 
   socket.receive({

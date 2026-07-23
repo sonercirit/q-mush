@@ -33,6 +33,23 @@ test("reads message image metadata from the server", () => {
   ).toThrow("invalid session message");
 });
 
+test("reads persisted session error messages", () => {
+  const error = {
+    content: "The provider connection failed",
+    createdAt: 3,
+    id: "error-1",
+    images: [],
+    role: "error",
+    toolCallId: null,
+    toolCalls: [],
+    toolName: null,
+  };
+
+  expect(readSessionDetail({ ...DETAIL, messages: [error] }).messages).toEqual([
+    error,
+  ]);
+});
+
 test("reads a session's tool and skill selection", () => {
   expect(readSessionDetail(DETAIL).tools).toEqual(DETAIL.tools);
   expect(() =>

@@ -97,6 +97,29 @@ function testSessionMessageRoles(store: SessionStore) {
   return store.get(TEST_USER_ID, SESSION_ID)?.messages.map(({ role }) => role);
 }
 
+function expectedTranscriptRoles(
+  includeError: boolean,
+  includeFollowUp = false,
+): readonly string[] {
+  return [
+    "user",
+    "assistant",
+    ...(includeError ? ["error"] : []),
+    "tool",
+    ...(includeFollowUp ? ["user"] : []),
+  ];
+}
+
+function initialConversation() {
+  return [
+    {
+      content: "Inspect the repository\nand make it shine",
+      images: [TEST_AGENT_IMAGE],
+      role: "user" as const,
+    },
+  ];
+}
+
 function createStore() {
   const database = createAuthenticatedTestDatabase();
   const timestamp = new Date(TEST_NOW);
@@ -387,6 +410,27 @@ describe("session store", () => {
     setup.database.$client.close();
   });
 
+  test("records an error when an active session is interrupted", () => {
+    const { database, store } = runningStore();
+
+    store.failInterrupted(TEST_NOW + 2);
+
+    expect(store.get(TEST_USER_ID, SESSION_ID)).toMatchObject({
+      activeDurationMs: 1,
+      activeStartedAt: null,
+      messages: [
+        { role: "user" },
+        {
+          content:
+            "Session failed: the server stopped before the session completed",
+          role: "error",
+        },
+      ],
+      status: "failed",
+    });
+    database.$client.close();
+  });
+
   test("fills missing tool results when replaying a transcript", () => {
     const { database, store } = runningStore();
     const interruptedCall = {
@@ -401,19 +445,18 @@ describe("session store", () => {
     };
     store.appendAgentMessage(SESSION_ID, assistantMessage, TEST_NOW + 2);
     expect(testSessionMessageRoles(store)).toEqual(["user", "assistant"]);
-    expect(store.mark(SESSION_ID, "failed", TEST_NOW + 3)).toBe(true);
+    store.appendErrorMessage(SESSION_ID, "Session failed", TEST_NOW + 3);
+    expect(store.mark(SESSION_ID, "failed", TEST_NOW + 4)).toBe(true);
     expect(store.get(TEST_USER_ID, SESSION_ID)).toMatchObject({
-      activeDurationMs: 2,
+      activeDurationMs: 3,
       activeStartedAt: null,
       status: "failed",
     });
-    expect(testSessionMessageRoles(store)).toEqual([
-      "user",
-      "assistant",
-      "tool",
-    ]);
+    expect(testSessionMessageRoles(store)).toEqual(
+      expectedTranscriptRoles(true),
+    );
     expect(
-      store.queue(TEST_USER_ID, SESSION_ID, TEST_NOW + 4, {
+      store.queue(TEST_USER_ID, SESSION_ID, TEST_NOW + 5, {
         content: "Why was it failing?",
         images: [],
       }).status,
@@ -427,13 +470,10 @@ describe("session store", () => {
     };
 
     const detail = store.get(TEST_USER_ID, SESSION_ID);
-    expect(testSessionMessageRoles(store)).toEqual([
-      "user",
-      "assistant",
-      "tool",
-      "user",
-    ]);
-    expect(detail?.messages[2]).toEqual({
+    expect(testSessionMessageRoles(store)).toEqual(
+      expectedTranscriptRoles(true, true),
+    );
+    expect(detail?.messages[3]).toEqual({
       ...interruptedToolResult,
       createdAt: TEST_NOW + 2,
       id: `${THINKING_MESSAGE_ID}:interrupted:${interruptedCall.id}`,
@@ -441,11 +481,7 @@ describe("session store", () => {
       toolCalls: [],
     });
     expect(store.conversation(SESSION_ID)).toEqual([
-      {
-        content: "Inspect the repository\nand make it shine",
-        images: [TEST_AGENT_IMAGE],
-        role: "user",
-      },
+      ...initialConversation(),
       assistantMessage,
       interruptedToolResult,
       { content: "Why was it failing?", role: "user" },

@@ -34,6 +34,12 @@ import {
   waitForSessionValue,
 } from "./session-integration-helpers.ts";
 
+class FailingModel implements AgentModel {
+  complete(): Promise<AgentModelTurn> {
+    return Promise.reject(new Error("Provider unavailable"));
+  }
+}
+
 class BlockingModel implements AgentModel {
   aborted = false;
   started = false;
@@ -73,13 +79,14 @@ async function expectSessionReaches(
   setup: Awaited<ReturnType<typeof connectedSessionSetup>>,
   response: Response,
   status: string,
-): Promise<void> {
+) {
   expect(response.status).toBe(201);
   await completeAgentFileLookup(setup);
   await waitForSessionValue(
     () => sessionDetail(setup.sessions),
     hasSessionStatus(status),
   );
+  return sessionDetail(setup.sessions);
 }
 
 async function startSessionWithAgentFile(
@@ -133,19 +140,28 @@ async function unauthenticatedSessionStatus(): Promise<number> {
 }
 
 describe("agent sessions", () => {
+  test("stores session failures as error messages", async () => {
+    const setup = connectedSessionSetup(new FailingModel());
+    const response = await setup.sessions.collection(createSessionRequest());
+
+    expect(await expectSessionReaches(setup, response, "failed")).toMatchObject(
+      {
+        messages: [
+          { role: "user" },
+          { content: "Session failed: Provider unavailable", role: "error" },
+        ],
+      },
+    );
+    setup.database.$client.close();
+  });
+
   test("persists image inputs and sends them to the model", async () => {
     const setup = completingSessionSetup("Screenshot implemented.");
     const response = await setup.sessions.collection(
       createSessionRequest(true, "high", "gpt-4.1-mini", [TEST_AGENT_IMAGE]),
     );
 
-    await expectSessionReaches(setup, response, "idle");
-    expect(setup.model.requests[0]?.[0]).toEqual({
-      content: "Inspect README.md",
-      images: [TEST_AGENT_IMAGE],
-      role: "user",
-    });
-    expect(await sessionDetail(setup.sessions)).toMatchObject({
+    expect(await expectSessionReaches(setup, response, "idle")).toMatchObject({
       messages: [
         {
           images: [TEST_AGENT_IMAGE],
@@ -153,6 +169,11 @@ describe("agent sessions", () => {
         },
         { role: "assistant" },
       ],
+    });
+    expect(setup.model.requests[0]?.[0]).toEqual({
+      content: "Inspect README.md",
+      images: [TEST_AGENT_IMAGE],
+      role: "user",
     });
     setup.database.$client.close();
   });

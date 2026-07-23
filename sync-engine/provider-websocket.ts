@@ -99,6 +99,9 @@ export function completeProviderWebSocket(options: {
       }
     });
     socket.addEventListener("message", (event) => {
+      if (settled) {
+        return;
+      }
       try {
         const value: unknown = JSON.parse(messageText(event));
         accumulator.push(value);
@@ -114,12 +117,16 @@ export function completeProviderWebSocket(options: {
       }
     });
     socket.addEventListener("error", () => {
+      if (settled) {
+        return;
+      }
       fail(
         new ProviderWebSocketError(
           "The provider WebSocket connection failed",
           receivedEvent,
         ),
       );
+      socket.close(1011, "Provider connection failed");
     });
     socket.addEventListener("close", () => {
       if (!settled) {
