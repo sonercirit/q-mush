@@ -291,6 +291,7 @@ function LoadedSessionDetail(props: {
         <SessionTranscript
           agentFile={props.detail.agentFile}
           messages={props.detail.messages}
+          tools={props.detail.tools}
         />
       </ul>
       <Show when={!active()}>

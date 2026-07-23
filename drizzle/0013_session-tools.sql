@@ -1,0 +1,1 @@
+ALTER TABLE `agent_sessions` ADD `tools` text DEFAULT '["read","bash","edit","write","parallel","brave_search"]' NOT NULL;

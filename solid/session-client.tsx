@@ -10,6 +10,7 @@ import {
   type AgentModelCatalog,
 } from "../shared/agent-configuration.ts";
 import type { AgentImage } from "../shared/agent-images.ts";
+import type { AgentSessionToolName } from "../shared/agent-tools.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
 import type { RunnerSummary } from "../shared/runner-model.ts";
 import type {
@@ -34,6 +35,7 @@ import { SessionPromptInput } from "./session-client-forms.tsx";
 import { formatTokenCount } from "./session-context-client.tsx";
 import type { SessionController } from "./session-controller.ts";
 import { SessionDetail, SessionList } from "./session-detail-client.tsx";
+import { SessionToolPicker } from "./session-tool-picker.tsx";
 
 export interface SessionDraft {
   readonly credential: string;
@@ -42,6 +44,7 @@ export interface SessionDraft {
   readonly prompt: string;
   readonly reasoningEffort: string;
   readonly runnerId: string;
+  readonly tools: readonly AgentSessionToolName[];
   readonly workingDirectory: string;
 }
 
@@ -452,6 +455,13 @@ function NewSessionForm(props: {
         selectedValue={props.state.draft.reasoningEffort}
       />
       {renderModelModalities(model())}
+      <SessionToolPicker
+        disabled={props.state.creating}
+        onChange={(tools) => {
+          props.controller.setTools(tools);
+        }}
+        tools={props.state.draft.tools}
+      />
       <SessionPromptInput
         disabled={props.state.creating}
         images={props.state.draft.images}

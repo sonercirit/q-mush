@@ -1,15 +1,16 @@
 import { For, type Accessor, type JSX } from "solid-js";
 import type { AgentFile } from "../shared/agent-file.ts";
 import { createAgentSystemPrompt } from "../shared/agent-prompt.ts";
-import { AGENT_TOOLS } from "../shared/agent-tools.ts";
+import {
+  selectedAgentTools,
+  type AgentSessionToolName,
+} from "../shared/agent-tools.ts";
 import type { AgentSessionMessage } from "../shared/session-model.ts";
 import { renderDebugBoundary } from "./render-debug.tsx";
 import { SessionImagePreviews } from "./session-image-client.tsx";
 import { renderMarkdown } from "./session-markdown.tsx";
 import { renderStructuredCode } from "./session-syntax.tsx";
 import { renderToolResult } from "./session-tool-result.tsx";
-
-const SERIALIZED_AGENT_TOOLS = JSON.stringify(AGENT_TOOLS, null, 2);
 
 function TranscriptNote(props: {
   readonly boundaryKey: string;
@@ -33,7 +34,7 @@ function TranscriptNote(props: {
   );
 }
 
-function renderToolDefinitions(): JSX.Element {
+function renderToolDefinitions(serializedTools: string): JSX.Element {
   return (
     <li
       class="rounded-xl border border-cyan-300/20 bg-cyan-300/10 p-4"
@@ -42,7 +43,7 @@ function renderToolDefinitions(): JSX.Element {
       <p class="text-xs font-semibold tracking-wide text-cyan-200 uppercase">
         Tool definitions
       </p>
-      <div class="mt-3">{renderStructuredCode(SERIALIZED_AGENT_TOOLS)}</div>
+      <div class="mt-3">{renderStructuredCode(serializedTools)}</div>
     </li>
   );
 }
@@ -171,9 +172,15 @@ function TranscriptMessage(props: {
 export function SessionTranscript(props: {
   readonly agentFile: AgentFile | null;
   readonly messages: readonly AgentSessionMessage[];
+  readonly tools: readonly AgentSessionToolName[];
 }): JSX.Element {
   const callArguments = (): ReadonlyMap<string, string> =>
     toolCallArguments(props.messages);
+  const serializedTools = JSON.stringify(
+    selectedAgentTools(props.tools),
+    null,
+    2,
+  );
   return (
     <>
       <TranscriptNote
@@ -183,7 +190,7 @@ export function SessionTranscript(props: {
         label="System prompt"
         labelClasses="text-amber-200"
       />
-      {renderToolDefinitions()}
+      {renderToolDefinitions(serializedTools)}
       <For each={props.messages}>
         {(message) => (
           <TranscriptMessage callArguments={callArguments} message={message} />

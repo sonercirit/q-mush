@@ -1,3 +1,4 @@
+import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 
 export const TEST_SESSION_DETAIL: AgentSessionDetail = {
@@ -20,6 +21,7 @@ export const TEST_SESSION_DETAIL: AgentSessionDetail = {
   runnerId: "runner-1",
   status: "idle",
   title: "Fix the app",
+  tools: AGENT_SESSION_TOOL_NAMES,
   updatedAt: 2,
   workingDirectory: ".",
 };

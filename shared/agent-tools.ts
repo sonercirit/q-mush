@@ -1,10 +1,13 @@
 const STRING_PARAMETER = { type: "string" } as const;
 const BRAVE_SEARCH_TOOL_NAME = "brave_search";
 
-function toolDefinition<const Name extends string>(options: {
+function toolDefinition<
+  const Name extends string,
+  const Properties extends Readonly<Record<string, unknown>>,
+>(options: {
   readonly description: string;
   readonly name: Name;
-  readonly properties: Readonly<Record<string, unknown>>;
+  readonly properties: Properties;
   readonly required: readonly string[];
 }) {
   return {
@@ -175,8 +178,120 @@ export const AGENT_TOOLS = [
   BRAVE_SEARCH_TOOL,
 ] as const;
 
-export type BaseAgentToolName =
-  (typeof BASE_AGENT_TOOLS)[number]["function"]["name"];
+export interface AgentToolDefinition {
+  readonly function: {
+    readonly description: string;
+    readonly name: AgentSessionToolName;
+    readonly parameters: Readonly<Record<string, unknown>>;
+  };
+  readonly type: "function";
+}
+export type AgentSessionToolName =
+  (typeof AGENT_TOOLS)[number]["function"]["name"];
+type BaseAgentToolName = (typeof BASE_AGENT_TOOLS)[number]["function"]["name"];
+
+export const AGENT_SESSION_TOOL_NAMES: readonly AgentSessionToolName[] =
+  AGENT_TOOLS.map(({ function: definition }) => definition.name);
+
+const AGENT_TOOL_LABELS: Readonly<Record<AgentSessionToolName, string>> = {
+  bash: "Shell",
+  brave_search: "Brave Search",
+  edit: "Edit files",
+  parallel: "Parallel calls",
+  read: "Read files",
+  write: "Write files",
+};
+
+export interface AgentSessionToolOption {
+  readonly description: string;
+  readonly kind: "skill" | "tool";
+  readonly label: string;
+  readonly name: AgentSessionToolName;
+}
+
+export const AGENT_SESSION_TOOL_OPTIONS: readonly AgentSessionToolOption[] =
+  AGENT_TOOLS.map(({ function: definition }) => ({
+    description: definition.description,
+    kind: definition.name === BRAVE_SEARCH_TOOL_NAME ? "skill" : "tool",
+    label: AGENT_TOOL_LABELS[definition.name],
+    name: definition.name,
+  }));
+
+export function isAgentSessionToolName(
+  value: unknown,
+): value is AgentSessionToolName {
+  return AGENT_SESSION_TOOL_NAMES.some((name) => name === value);
+}
+
+export function readAgentSessionToolNames(
+  value: unknown,
+): readonly AgentSessionToolName[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const selected: AgentSessionToolName[] = [];
+  for (const name of value) {
+    if (!isAgentSessionToolName(name) || selected.includes(name)) {
+      return undefined;
+    }
+    selected.push(name);
+  }
+  return selected;
+}
+
+function selectedParallelTool(
+  selectedBaseTools: readonly (typeof BASE_AGENT_TOOLS)[number][],
+): AgentToolDefinition {
+  return {
+    ...PARALLEL_TOOL,
+    function: {
+      ...PARALLEL_TOOL.function,
+      parameters: {
+        ...PARALLEL_TOOL.function.parameters,
+        properties: {
+          ...PARALLEL_TOOL.function.parameters.properties,
+          tool_uses: {
+            ...PARALLEL_TOOL.function.parameters.properties.tool_uses,
+            items: {
+              ...PARALLEL_TOOL.function.parameters.properties.tool_uses.items,
+              properties: {
+                ...PARALLEL_TOOL.function.parameters.properties.tool_uses.items
+                  .properties,
+                recipient_name: {
+                  ...PARALLEL_TOOL.function.parameters.properties.tool_uses
+                    .items.properties.recipient_name,
+                  enum: selectedBaseTools.map(
+                    ({ function: definition }) => definition.name,
+                  ),
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
+export function selectedAgentTools(
+  names: readonly AgentSessionToolName[],
+): readonly AgentToolDefinition[] {
+  const isSelected = (name: AgentSessionToolName): boolean =>
+    names.includes(name);
+  const selectedBaseTools = BASE_AGENT_TOOLS.filter(
+    ({ function: definition }) => isSelected(definition.name),
+  );
+  return AGENT_TOOLS.filter(({ function: definition }) =>
+    isSelected(definition.name),
+  ).map((tool) =>
+    tool.function.name === PARALLEL_TOOL.function.name
+      ? selectedParallelTool(selectedBaseTools)
+      : tool,
+  );
+}
+
+export { type BaseAgentToolName };
 
 type RunnerAgentToolName =
   BaseAgentToolName | typeof PARALLEL_TOOL.function.name;

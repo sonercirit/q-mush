@@ -12,7 +12,7 @@ import type { RealtimeHub } from "./realtime-hub.ts";
 
 interface AgentModelFactoryOptions extends Pick<
   AgentSessionDetail,
-  "model" | "provider" | "providerPricing" | "reasoningEffort"
+  "model" | "provider" | "providerPricing" | "reasoningEffort" | "tools"
 > {
   readonly credential: AgentProviderCredential;
   readonly onDelta?: (delta: {
@@ -45,6 +45,7 @@ function modelOptions(
     providerPricing: detail.providerPricing,
     reasoningEffort: detail.reasoningEffort,
     systemPrompt,
+    tools: detail.tools,
   };
 }
 

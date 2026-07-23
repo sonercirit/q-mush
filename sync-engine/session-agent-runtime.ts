@@ -1,3 +1,7 @@
+import {
+  isAgentSessionToolName,
+  type AgentSessionToolName,
+} from "../shared/agent-tools.ts";
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
@@ -96,11 +100,17 @@ export async function runSessionAgent(
     runtime.notify,
   );
 
+  const selectedTools = new Set<AgentSessionToolName>(runtime.detail.tools);
   await runCompactingAgentLoop({
     agentCost: (turn) => estimateAgentTurnCost(runtime.detail, turn.tokenUsage),
     autoCompact: runtime.detail.autoCompact,
     createCompactor: models.createCompactor,
     executeTool: (call) => {
+      if (!isAgentSessionToolName(call.name) || !selectedTools.has(call.name)) {
+        return Promise.resolve(
+          `Error: ${call.name} is not enabled for this session.`,
+        );
+      }
       const skillOutput = skills.execute(call.name, call.arguments);
       return (
         skillOutput ??

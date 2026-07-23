@@ -1,6 +1,10 @@
 import { expect } from "vitest";
 import type { AgentImage } from "../../shared/agent-images.ts";
 import type { AgentModel } from "../../shared/agent-loop.ts";
+import {
+  AGENT_SESSION_TOOL_NAMES,
+  type AgentSessionToolName,
+} from "../../shared/agent-tools.ts";
 import type { ProviderCredentialAccess } from "../../shared/provider-credential-store.ts";
 import type { ProviderModelPricing } from "../../shared/provider-model-pricing.ts";
 import { SESSIONS_PATH } from "../../shared/routes.ts";
@@ -84,6 +88,7 @@ export function connectedSessionSetup(
   const selectedPricing: (ProviderModelPricing | null)[] = [];
   const selectedReasoningEfforts: (string | null)[] = [];
   const selectedSystemPrompts: string[] = [];
+  const selectedTools: (readonly AgentSessionToolName[])[] = [];
   const runnerCommands: RunnerToolCommand[] = [];
   let latestRunnerCommand: RunnerToolCommand | undefined;
   const broker = new RunnerCommandBroker({
@@ -112,12 +117,14 @@ export function connectedSessionSetup(
         providerPricing,
         reasoningEffort,
         systemPrompt,
+        tools,
       }) => {
         expect(selectedCredential.secret).toBe("provider-secret");
         selectedModels.push(selectedModel);
         selectedPricing.push(providerPricing);
         selectedReasoningEfforts.push(reasoningEffort);
         selectedSystemPrompts.push(systemPrompt);
+        selectedTools.push(tools);
         return model;
       },
       now: () => TEST_NOW,
@@ -132,6 +139,7 @@ export function connectedSessionSetup(
     selectedPricing,
     selectedReasoningEfforts,
     selectedSystemPrompts,
+    selectedTools,
     sessions,
   };
 }
@@ -152,6 +160,7 @@ export function createSessionRequest(
       provider: "openai",
       reasoningEffort,
       runnerId: RUNNER_ID,
+      tools: AGENT_SESSION_TOOL_NAMES,
       workingDirectory: "/work/project",
     },
     "POST",

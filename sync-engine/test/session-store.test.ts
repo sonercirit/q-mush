@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
 import { describe, expect, test } from "vitest";
+import {
+  AGENT_SESSION_TOOL_NAMES,
+  type AgentSessionToolName,
+} from "../../shared/agent-tools.ts";
 import { runners } from "../../shared/database/schema.ts";
 import type { AgentSessionMessage } from "../../shared/session-model.ts";
 import { SessionStore } from "../../sync-engine/session-store.ts";
@@ -55,6 +59,7 @@ function testSessionInput() {
     providerPricing: null,
     reasoningEffort: "high" as const,
     runnerId: RUNNER_ID,
+    tools: AGENT_SESSION_TOOL_NAMES,
     userId: TEST_USER_ID,
     workingDirectory: "/work/project",
   };
@@ -133,6 +138,7 @@ describe("session store", () => {
     expect(created.autoCompact).toBe(true);
     expect(created.maxContextTokens).toBe(200_000);
     expect(created.reasoningEffort).toBe("high");
+    expect(created.tools).toEqual(AGENT_SESSION_TOOL_NAMES);
     expect(created.title).toBe("Inspect the repository");
     expect(created.messages).toEqual([
       {
@@ -252,6 +258,17 @@ describe("session store", () => {
       costBasis: "estimated",
       costUsd: 0.05,
     });
+    database.$client.close();
+  });
+
+  test("persists a session's selected tools", () => {
+    const { database, store } = createStore();
+    const tools: readonly AgentSessionToolName[] = ["read", "brave_search"];
+
+    const detail = store.create({ ...testSessionInput(), tools }, TEST_NOW);
+
+    expect(detail.tools).toEqual(tools);
+    expect(store.list(TEST_USER_ID)[0]?.tools).toEqual(tools);
     database.$client.close();
   });
 

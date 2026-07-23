@@ -8,6 +8,7 @@ import {
 import { readAgentFile } from "../shared/agent-file.ts";
 import { readAgentImages } from "../shared/agent-images.ts";
 import { readAgentToolCalls } from "../shared/agent-loop.ts";
+import { readAgentSessionToolNames } from "../shared/agent-tools.ts";
 import { isRecord, readNullableString } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
 import {
@@ -180,6 +181,7 @@ function readSummary(value: unknown): AgentSessionSummary {
   const runnerId = value["runnerId"];
   const status = readStatus(value["status"]);
   const title = value["title"];
+  const tools = readAgentSessionToolNames(value["tools"]);
   const updatedAt = readFiniteNumber(value["updatedAt"]);
   const workingDirectory = value["workingDirectory"];
 
@@ -214,6 +216,7 @@ function readSummary(value: unknown): AgentSessionSummary {
     typeof runnerId !== "string" ||
     status === undefined ||
     typeof title !== "string" ||
+    tools === undefined ||
     updatedAt === undefined ||
     typeof workingDirectory !== "string"
   ) {
@@ -238,6 +241,7 @@ function readSummary(value: unknown): AgentSessionSummary {
     runnerId,
     status,
     title,
+    tools,
     updatedAt,
     workingDirectory,
   };
@@ -338,6 +342,7 @@ export function summaryFromDetail(
     runnerId: detail.runnerId,
     status: detail.status,
     title: detail.title,
+    tools: detail.tools,
     updatedAt: detail.updatedAt,
     workingDirectory: detail.workingDirectory,
   };

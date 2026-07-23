@@ -100,8 +100,31 @@ async function startSessionWithAgentFile(
   return setup;
 }
 
+function isObject(value: unknown): value is object {
+  return typeof value === "object" && value !== null;
+}
+
+async function sessionRequestWithTools(
+  tools: readonly string[],
+): Promise<Request> {
+  const input: unknown = await createSessionRequest().json();
+  if (!isObject(input)) {
+    throw new Error("The session request fixture is invalid");
+  }
+  return createAuthenticatedRequest(SESSIONS_PATH, { ...input, tools }, "POST");
+}
+
+function emptySessionSetup() {
+  return connectedSessionSetup(new ScriptedAgentModel([]));
+}
+
+function completingSessionSetup(content: string) {
+  const model = new ScriptedAgentModel([{ content, toolCalls: [] }]);
+  return { model, ...connectedSessionSetup(model) };
+}
+
 async function unauthenticatedSessionStatus(): Promise<number> {
-  const setup = connectedSessionSetup(new ScriptedAgentModel([]));
+  const setup = emptySessionSetup();
   const response = await setup.sessions.collection(
     new Request("http://localhost/api/sessions"),
   );
@@ -111,16 +134,13 @@ async function unauthenticatedSessionStatus(): Promise<number> {
 
 describe("agent sessions", () => {
   test("persists image inputs and sends them to the model", async () => {
-    const model = new ScriptedAgentModel([
-      { content: "Screenshot implemented.", toolCalls: [] },
-    ]);
-    const setup = connectedSessionSetup(model);
+    const setup = completingSessionSetup("Screenshot implemented.");
     const response = await setup.sessions.collection(
       createSessionRequest(true, "high", "gpt-4.1-mini", [TEST_AGENT_IMAGE]),
     );
 
     await expectSessionReaches(setup, response, "idle");
-    expect(model.requests[0]?.[0]).toEqual({
+    expect(setup.model.requests[0]?.[0]).toEqual({
       content: "Inspect README.md",
       images: [TEST_AGENT_IMAGE],
       role: "user",
@@ -380,6 +400,37 @@ describe("agent sessions", () => {
 
     await expectJsonResponse(response, 400, { error: "invalid_request" });
     database.$client.close();
+  });
+
+  test("runs a session with only its selected tools and skills", async () => {
+    const model = new ScriptedAgentModel([
+      { content: "Selection respected.", toolCalls: [] },
+    ]);
+    const setup = connectedSessionSetup(model);
+    const response = await setup.sessions.collection(
+      await sessionRequestWithTools(["read", "brave_search"]),
+    );
+
+    await expectSessionReaches(setup, response, "idle");
+    expect(setup.selectedTools).toEqual([["read", "brave_search"]]);
+    const selectedDetail = await sessionDetail(setup.sessions);
+    expect(selectedDetail).toMatchObject({ tools: ["read", "brave_search"] });
+    setup.database.$client.close();
+  });
+
+  test("rejects duplicate or unknown tool selections", async () => {
+    for (const tools of [
+      ["read", "read"],
+      ["read", "unknown_tool"],
+    ]) {
+      const setup = emptySessionSetup();
+      const response = await setup.sessions.collection(
+        await sessionRequestWithTools(tools),
+      );
+
+      await expectJsonResponse(response, 400, { error: "invalid_request" });
+      setup.database.$client.close();
+    }
   });
 
   test("drains a running session before a graceful restart", async () => {

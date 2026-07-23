@@ -4,6 +4,10 @@ import {
   isAgentReasoningEffort,
 } from "../shared/agent-configuration.ts";
 import { readAgentImages } from "../shared/agent-images.ts";
+import {
+  AGENT_SESSION_TOOL_NAMES,
+  readAgentSessionToolNames,
+} from "../shared/agent-tools.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
 import { MAXIMUM_RUNNER_PATH_LENGTH } from "../shared/runner-directory-model.ts";
@@ -52,6 +56,11 @@ export function readCreateSession(
   );
   const modelValue = value["model"];
   const reasoningEffortValue = value["reasoningEffort"];
+  const toolsValue = value["tools"];
+  const tools =
+    toolsValue === undefined
+      ? AGENT_SESSION_TOOL_NAMES
+      : readAgentSessionToolNames(toolsValue);
 
   if (
     credentialId === undefined ||
@@ -62,7 +71,8 @@ export function readCreateSession(
     workingDirectory.includes("\0") ||
     (modelValue !== undefined && !isAgentModelId(modelValue)) ||
     (reasoningEffortValue !== undefined &&
-      !isAgentReasoningEffort(reasoningEffortValue))
+      !isAgentReasoningEffort(reasoningEffortValue)) ||
+    tools === undefined
   ) {
     return undefined;
   }
@@ -76,6 +86,7 @@ export function readCreateSession(
       ? reasoningEffortValue
       : null,
     runnerId,
+    tools,
     workingDirectory,
   };
 }

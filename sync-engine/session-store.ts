@@ -5,6 +5,10 @@ import type {
   AgentConversationMessage,
   AgentRecordedMessage,
 } from "../shared/agent-loop.ts";
+import {
+  readAgentSessionToolNames,
+  type AgentSessionToolName,
+} from "../shared/agent-tools.ts";
 import { createdAuditFields, updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
@@ -34,6 +38,7 @@ export interface CreateAgentSession extends Pick<
   | "providerPricing"
   | "reasoningEffort"
   | "runnerId"
+  | "tools"
   | "workingDirectory"
 > {
   readonly credentialId: string;
@@ -110,6 +115,7 @@ function sessionSelection() {
     runnerId: agentSessions.runnerId,
     status: agentSessions.status,
     title: agentSessions.title,
+    tools: agentSessions.tools,
     updatedAt: agentSessions.updatedAt,
     workingDirectory: agentSessions.workingDirectory,
   };
@@ -133,9 +139,22 @@ type StoredSessionSummary = Pick<
   | "runnerId"
   | "status"
   | "title"
+  | "tools"
   | "updatedAt"
   | "workingDirectory"
 > & { readonly credentialId: string };
+
+function parseStoredTools(value: string): readonly AgentSessionToolName[] {
+  try {
+    const tools = readAgentSessionToolNames(JSON.parse(value));
+    if (tools !== undefined) {
+      return tools;
+    }
+  } catch {
+    // The common error below identifies corrupt local data.
+  }
+  throw new Error("Stored agent session tools are invalid");
+}
 
 function summarizeSession(stored: StoredSessionSummary): AgentSessionSummary {
   return {
@@ -143,6 +162,7 @@ function summarizeSession(stored: StoredSessionSummary): AgentSessionSummary {
     activeStartedAt: stored.activeStartedAt?.getTime() ?? null,
     createdAt: stored.createdAt.getTime(),
     providerPricing: parseProviderPricing(stored.providerPricing),
+    tools: parseStoredTools(stored.tools),
     updatedAt: stored.updatedAt.getTime(),
   };
 }
@@ -268,6 +288,7 @@ export class SessionStore {
           runnerId: input.runnerId,
           status: "queued",
           title: titleFromPrompt(input.prompt),
+          tools: JSON.stringify(input.tools),
           userId: input.userId,
           workingDirectory: input.workingDirectory,
         })

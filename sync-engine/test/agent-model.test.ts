@@ -47,6 +47,27 @@ function captureRequest(
   };
 }
 
+function capturedToolNames(body: unknown): readonly unknown[] {
+  return isRecord(body) && Array.isArray(body["tools"])
+    ? body["tools"].map((tool) =>
+        isRecord(tool) && isRecord(tool["function"])
+          ? tool["function"]["name"]
+          : undefined,
+      )
+    : [];
+}
+
+function doneResponse(): unknown {
+  return { choices: [{ message: { content: "Done." } }] };
+}
+
+function capturedModel(
+  capture: RequestCapture,
+  options: Omit<ModelOptions, "fetch">,
+): ChatCompletionsAgentModel {
+  return respondingModel(options, doneResponse(), capture);
+}
+
 function respondingModel(
   options: Omit<ModelOptions, "fetch">,
   responseBody: unknown,
@@ -163,6 +184,14 @@ describe("chat completions agent model", () => {
       "Bearer sk-or-secret",
     );
     const body = await capturedBody(capture);
+    expect(capturedToolNames(body)).toEqual([
+      "read",
+      "bash",
+      "edit",
+      "write",
+      "parallel",
+      "brave_search",
+    ]);
     expect(body).toMatchObject({
       messages: [
         {
@@ -176,27 +205,39 @@ describe("chat completions agent model", () => {
       tool_choice: "auto",
     });
     const serializedBody = JSON.stringify(body);
-    const toolNames =
-      isRecord(body) && Array.isArray(body["tools"])
-        ? body["tools"].map((tool) =>
-            isRecord(tool) && isRecord(tool["function"])
-              ? tool["function"]["name"]
-              : undefined,
-          )
-        : [];
-    expect(toolNames).toEqual([
-      "read",
-      "bash",
-      "edit",
-      "write",
-      "parallel",
-      "brave_search",
-    ]);
     expect(serializedBody).toContain('"edits"');
     expect(serializedBody).toContain('"tool_uses"');
     expect(serializedBody).toContain('"timeout"');
     expect(serializedBody).not.toContain("read_file");
     expect(serializedBody).not.toContain("list_files");
+  });
+
+  test("filters definitions to the selected tools and skills", async () => {
+    const capture = new RequestCapture();
+    const modelOptions = {
+      ...OPENROUTER_IMAGE_OPTIONS,
+      tools: ["read", "brave_search"] as const,
+    };
+    const model = capturedModel(capture, modelOptions);
+
+    await completeHello(model);
+
+    const selectedBody = await capturedBody(capture);
+    expect(capturedToolNames(selectedBody)).toEqual(["read", "brave_search"]);
+  });
+
+  test("omits the tool protocol when none are selected", async () => {
+    const capture = new RequestCapture();
+    const model = capturedModel(capture, {
+      ...OPENROUTER_IMAGE_OPTIONS,
+      tools: [],
+    });
+
+    await completeHello(model);
+
+    const body = await capturedBody(capture);
+    expect(body).not.toMatchObject({ tool_choice: "auto" });
+    expect(capturedToolNames(body)).toEqual([]);
   });
 
   test("sends image inputs through chat completions", async () => {
@@ -269,7 +310,7 @@ describe("chat completions agent model", () => {
         provider: "openai",
         reasoningEffort: "low",
       },
-      { choices: [{ message: { content: "Done." } }] },
+      doneResponse(),
       capture,
     );
 

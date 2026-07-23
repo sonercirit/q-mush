@@ -1,10 +1,10 @@
 # AGENTS.md
 
-Living project memory for coding agents. Update it with durable information.
+Living project memory. Update it with durable information.
 
 ## Project Snapshot
 
-- Private strict-TypeScript ESM Bun project with SolidJS.
+- Private strict-TypeScript ESM Bun/SolidJS project.
 - Source is split across `solid/`, `sync-engine/`, `runner/`, and `shared/`;
   `sync-engine/index.ts` is the server entry point.
 - Tests live in `test/` directories; there is no `src/`.
@@ -124,8 +124,9 @@ Living project memory for coding agents. Update it with durable information.
   `CLAUDE.md`; only `AGENTS.md` is used when both exist.
 
   `runner/runner-workspace.ts` shares canonical workspace resolution and
-  containment with the file tools. The latest agent-file selection is persisted
-  on the session and appended to the model system prompt.
+  containment with the file tools. The latest agent-file and tool/skill
+  selections are persisted on each session; tool selections filter model
+  definitions and execution, default to all, and may be empty.
   `solid/session-transcript.tsx` renders the effective prompt, tool definitions,
   and raw tool details. User messages preserve source line breaks; transcript
   output supports Markdown, colorized code/JSON, edit diffs, and context-aware

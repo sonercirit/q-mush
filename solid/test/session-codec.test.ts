@@ -33,6 +33,16 @@ test("reads message image metadata from the server", () => {
   ).toThrow("invalid session message");
 });
 
+test("reads a session's tool and skill selection", () => {
+  expect(readSessionDetail(DETAIL).tools).toEqual(DETAIL.tools);
+  expect(() =>
+    readSessionDetail({ ...DETAIL, tools: ["read", "read"] }),
+  ).toThrow("invalid agent session");
+  expect(() =>
+    readSessionDetail({ ...DETAIL, tools: ["unknown_tool"] }),
+  ).toThrow("invalid agent session");
+});
+
 test("reads a session agent file from the server", () => {
   expect(readSessionDetail(DETAIL).agentFile).toEqual({
     content: "Project instructions",

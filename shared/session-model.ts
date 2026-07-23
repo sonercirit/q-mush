@@ -2,6 +2,7 @@ import type { AgentReasoningEffort } from "./agent-configuration.ts";
 import type { AgentFile } from "./agent-file.ts";
 import type { AgentImage } from "./agent-images.ts";
 import type { AgentToolCall } from "./agent-loop.ts";
+import type { AgentSessionToolName } from "./agent-tools.ts";
 import type { ProviderId } from "./provider-credential-store.ts";
 import type { ProviderModelPricing } from "./provider-model-pricing.ts";
 
@@ -48,6 +49,7 @@ export interface AgentSessionSummary {
   readonly runnerId: string;
   readonly status: AgentSessionStatus;
   readonly title: string;
+  readonly tools: readonly AgentSessionToolName[];
   readonly updatedAt: number;
   readonly workingDirectory: string;
 }

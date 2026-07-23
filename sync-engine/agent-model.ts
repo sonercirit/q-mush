@@ -6,7 +6,12 @@ import type {
   AgentModelTurn,
 } from "../shared/agent-loop.ts";
 import { AGENT_SYSTEM_PROMPT } from "../shared/agent-prompt.ts";
-import { AGENT_TOOLS } from "../shared/agent-tools.ts";
+import {
+  AGENT_TOOLS,
+  selectedAgentTools,
+  type AgentSessionToolName,
+  type AgentToolDefinition,
+} from "../shared/agent-tools.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import type {
   ProviderCredentialSource,
@@ -54,6 +59,7 @@ interface ChatCompletionsAgentModelOptions {
   readonly reasoningEffort?: AgentReasoningEffort | null;
   readonly sleep?: ModelRequestSleep;
   readonly systemPrompt?: string;
+  readonly tools?: readonly AgentSessionToolName[];
   readonly webSocket?: ProviderWebSocketFactory;
 }
 
@@ -240,6 +246,24 @@ function reasoningConfiguration(
     : { reasoning_effort: reasoningEffort };
 }
 
+function toolConfiguration(
+  tools: readonly AgentToolDefinition[],
+  responsesProtocol: boolean,
+): Readonly<Record<string, unknown>> {
+  if (tools.length === 0) {
+    return {};
+  }
+  return {
+    tool_choice: "auto",
+    tools: responsesProtocol
+      ? tools.map(({ function: definition }) => ({
+          ...definition,
+          type: "function",
+        }))
+      : tools,
+  };
+}
+
 function requestBody(
   messages: readonly AgentConversationMessage[],
   model: string,
@@ -247,6 +271,7 @@ function requestBody(
   responsesProtocol: boolean,
   reasoningEffort: AgentReasoningEffort | undefined,
   systemPrompt: string,
+  tools: readonly AgentToolDefinition[],
   stream = false,
 ): unknown {
   const reasoning = reasoningConfiguration(
@@ -266,8 +291,7 @@ function requestBody(
       ...(stream
         ? { stream: true, stream_options: { include_usage: true } }
         : {}),
-      tool_choice: "auto",
-      tools: AGENT_TOOLS,
+      ...toolConfiguration(tools, false),
     };
   }
 
@@ -280,11 +304,7 @@ function requestBody(
     ...reasoning,
     store: false,
     ...(stream ? { stream: true } : {}),
-    tool_choice: "auto",
-    tools: AGENT_TOOLS.map(({ function: definition }) => ({
-      ...definition,
-      type: "function",
-    })),
+    ...toolConfiguration(tools, true),
   };
 }
 
@@ -320,6 +340,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
   readonly #reasoningEffort: AgentReasoningEffort | undefined;
   readonly #sleep: ModelRequestSleep | undefined;
   readonly #systemPrompt: string;
+  readonly #tools: readonly AgentToolDefinition[];
   readonly #webSocket: ProviderWebSocketFactory;
 
   constructor(options: ChatCompletionsAgentModelOptions) {
@@ -331,6 +352,10 @@ export class ChatCompletionsAgentModel implements AgentModel {
     this.#reasoningEffort = options.reasoningEffort ?? undefined;
     this.#sleep = options.sleep;
     this.#systemPrompt = options.systemPrompt ?? AGENT_SYSTEM_PROMPT;
+    this.#tools =
+      options.tools === undefined
+        ? AGENT_TOOLS
+        : selectedAgentTools(options.tools);
     this.#webSocket = options.webSocket ?? defaultWebSocket;
   }
 
@@ -379,6 +404,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
       responsesProtocol,
       this.#reasoningEffort,
       this.#systemPrompt,
+      this.#tools,
       stream,
     );
   }

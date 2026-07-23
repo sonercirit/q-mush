@@ -1,4 +1,5 @@
 import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
+import { AGENT_SESSION_TOOL_NAMES } from "../shared/agent-tools.ts";
 import type { AgentSessionSummary } from "../shared/session-model.ts";
 import { initialDirectoryPickerState } from "./directory-picker-controller.ts";
 import type {
@@ -21,6 +22,7 @@ function initialSessionDraft(): SessionDraft {
     prompt: "",
     reasoningEffort: "",
     runnerId: "",
+    tools: AGENT_SESSION_TOOL_NAMES,
     workingDirectory: ".",
   };
 }

@@ -9,6 +9,7 @@ import {
 } from "drizzle-orm/sqlite-core";
 import { AGENT_REASONING_EFFORTS } from "../agent-configuration.ts";
 import { AGENT_FILE_NAMES } from "../agent-file.ts";
+import { AGENT_SESSION_TOOL_NAMES } from "../agent-tools.ts";
 
 function auditColumns() {
   return {
@@ -151,6 +152,9 @@ export const agentSessions = sqliteTable(
     }),
     workingDirectory: text("working_directory").notNull(),
     title: text("title").notNull(),
+    tools: text("tools")
+      .notNull()
+      .default(JSON.stringify(AGENT_SESSION_TOOL_NAMES)),
     status: text("status", {
       enum: ["queued", "running", "idle", "stopped", "failed"],
     }).notNull(),

@@ -1,4 +1,5 @@
 import { type Accessor } from "solid-js";
+import type { AgentSessionToolName } from "../shared/agent-tools.ts";
 import { SESSIONS_PATH } from "../shared/routes.ts";
 import type {
   AgentSessionDetail,
@@ -195,13 +196,20 @@ export class SessionController {
     return this.#send();
   }
 
+  #patchDraft(values: Partial<SessionViewState["draft"]>): void {
+    this.#view.patch({ draft: { ...this.#view.value.draft, ...values } });
+  }
+
   setDraftField(name: "prompt" | "workingDirectory", value: string): void {
-    const draft = this.#view.value.draft;
-    this.#view.patch({ draft: { ...draft, [name]: value } });
+    this.#patchDraft({ [name]: value });
   }
 
   setFollowUp(value: string): void {
     this.#view.patch({ followUp: value });
+  }
+
+  setTools(tools: readonly AgentSessionToolName[]): void {
+    this.#patchDraft({ tools: [...tools] });
   }
 
   stop(): Promise<void> {
@@ -256,11 +264,10 @@ export class SessionController {
         selectedId !== this.#view.value.selectedId ||
         !sessionDataMatches(this.#view.value.sessions, sessions)
       ) {
+        this.#patchDraft({
+          workingDirectory: mostRecentSessionDirectory(sessions),
+        });
         this.#view.patch({
-          draft: {
-            ...this.#view.value.draft,
-            workingDirectory: mostRecentSessionDirectory(sessions),
-          },
           selectedId,
           sessions,
         });
@@ -323,6 +330,7 @@ export class SessionController {
                   reasoningEffort: this.#view.value.draft.reasoningEffort,
                 }),
             runnerId: this.#view.value.draft.runnerId,
+            tools: this.#view.value.draft.tools,
             workingDirectory: this.#view.value.draft.workingDirectory.trim(),
           }),
           headers: { "content-type": "application/json" },

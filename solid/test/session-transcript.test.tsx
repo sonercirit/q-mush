@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import type { AgentSessionMessage } from "../../shared/session-model.ts";
 import { SessionTranscript } from "../../solid/session-transcript.tsx";
 import { renderSolidToString } from "./render-solid.tsx";
@@ -58,11 +59,23 @@ function userMessage(content: string): AgentSessionMessage {
   };
 }
 
-function renderMessages(messages: readonly AgentSessionMessage[]): string {
+function renderMessages(
+  messages: readonly AgentSessionMessage[],
+  tools = AGENT_SESSION_TOOL_NAMES,
+): string {
   return renderSolidToString(() => (
-    <SessionTranscript agentFile={null} messages={messages} />
+    <SessionTranscript agentFile={null} messages={messages} tools={tools} />
   ));
 }
+
+test("shows only the session's selected tool definitions", () => {
+  const html = renderMessages([], ["read", "brave_search"]);
+
+  expect(html).toContain('"read"');
+  expect(html).toContain('"brave_search"');
+  expect(html).not.toContain('"bash"');
+  expect(html).not.toContain('"parallel"');
+});
 
 test("preserves consecutive user message line breaks", () => {
   const html = renderMessages([

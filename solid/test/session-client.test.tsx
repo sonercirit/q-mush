@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import {
   DirectoryPickerController,
   initialDirectoryPickerState,
@@ -69,6 +70,7 @@ const SESSION_STATE: SessionViewState = {
     reasoningEffort: "high",
     prompt: "",
     model: "gpt-5-codex",
+    tools: AGENT_SESSION_TOOL_NAMES,
     credential: "openai:credential-1",
   },
   detail: undefined,
@@ -163,6 +165,9 @@ test("keeps editable session controls in the reactive tree", () => {
 
   expect(newSessionHtml).toContain('id="session-directory"');
   expect(newSessionHtml).toContain('id="session-prompt"');
+  expect(newSessionHtml).toContain("Tools &amp; skills");
+  expect(newSessionHtml).toContain('name="tools"');
+  expect(newSessionHtml).toContain("Brave Search");
   expect(followUpHtml).toContain('name="prompt"');
   expect(newSessionHtml).not.toContain("data-focus-key");
   expect(followUpHtml).not.toContain("data-focus-key");
