@@ -182,6 +182,11 @@ describe("first-party agent loop", () => {
           return Promise.resolve('{"results":[]}');
         },
       },
+      executeTool: (name) => {
+        runnerCalls.push(name);
+        return Promise.resolve("runner result");
+      },
+      tools: ["brave_search"],
       userId: "user-id",
     });
     const model = new ScriptedAgentModel([
@@ -211,5 +216,107 @@ describe("first-party agent loop", () => {
 
     expect(searchCalls).toEqual([{ query: "Bun documentation" }]);
     expect(runnerCalls).toEqual([]);
+  });
+
+  test("executes mixed parallel tools and skills without dispatching the wrapper", async () => {
+    const searchCalls: Readonly<Record<string, unknown>>[] = [];
+    const runnerCalls: string[] = [];
+    const completions: string[] = [];
+    let releaseSearch: (() => void) | undefined;
+    let releaseTool: (() => void) | undefined;
+    const braveSearch = {
+      execute: (
+        _userId: string,
+        arguments_: Readonly<Record<string, unknown>>,
+      ) => {
+        searchCalls.push(arguments_);
+        return new Promise<string>((resolve) => {
+          releaseSearch = () => {
+            completions.push("brave_search");
+            resolve(JSON.stringify(arguments_));
+          };
+        });
+      },
+    };
+    const skills = createAgentSkills({
+      braveSearch,
+      executeTool: (name, arguments_) => {
+        runnerCalls.push(name);
+        return new Promise<string>((resolve) => {
+          releaseTool = () => {
+            completions.push(name);
+            resolve(JSON.stringify(arguments_));
+          };
+        });
+      },
+      tools: ["read", "parallel", "brave_search"],
+      userId: "user-id",
+    });
+
+    const output = skills.execute("parallel", {
+      tool_uses: [
+        {
+          parameters: { query: "Bun" },
+          recipient_name: "brave_search",
+        },
+        {
+          parameters: { path: "README.md" },
+          recipient_name: "read",
+        },
+      ],
+    });
+
+    expect(searchCalls).toEqual([{ query: "Bun" }]);
+    expect(runnerCalls).toEqual(["read"]);
+    releaseTool?.();
+    await Promise.resolve();
+    expect(completions).toEqual(["read"]);
+    releaseSearch?.();
+    expect(JSON.parse((await output) ?? "null")).toEqual([
+      {
+        output: '{"query":"Bun"}',
+        recipient_name: "brave_search",
+      },
+      {
+        output: '{"path":"README.md"}',
+        recipient_name: "read",
+      },
+    ]);
+  });
+
+  test("rejects disabled recipients inside parallel calls", async () => {
+    let searchCalled = false;
+    let runnerCall: string | undefined;
+    const skills = createAgentSkills({
+      braveSearch: {
+        execute: () => {
+          searchCalled = true;
+          return Promise.resolve("unexpected search result");
+        },
+      },
+      executeTool: (name) => {
+        runnerCall = name;
+        return Promise.resolve("enabled runner result");
+      },
+      tools: ["read", "parallel"],
+      userId: "user-id",
+    });
+
+    const output = await skills.execute("parallel", {
+      tool_uses: [
+        { parameters: { path: "README.md" }, recipient_name: "read" },
+        { parameters: { query: "disabled" }, recipient_name: "brave_search" },
+      ],
+    });
+
+    expect(searchCalled).toBe(false);
+    expect(runnerCall).toBe("read");
+    expect(JSON.parse(output ?? "null")).toEqual([
+      { output: "enabled runner result", recipient_name: "read" },
+      {
+        output: "Error: brave_search is not enabled for this session.",
+        recipient_name: "brave_search",
+      },
+    ]);
   });
 });

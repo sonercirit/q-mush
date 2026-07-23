@@ -123,22 +123,25 @@ const BASE_AGENT_TOOLS = [
 
 const PARALLEL_TOOL = toolDefinition({
   description:
-    "Run multiple independent read, bash, edit, or write calls concurrently. Do not use this when one call depends on another call's result.",
+    "Run multiple independent tool or skill calls concurrently. Do not use this when one call depends on another call's result.",
   name: "parallel",
   properties: {
     tool_uses: {
-      description: "Independent base-tool calls to run concurrently",
+      description: "Independent tool or skill calls to run concurrently",
       items: {
         additionalProperties: false,
         properties: {
           parameters: {
             additionalProperties: true,
-            description: "Arguments for the selected base tool",
+            description: "Arguments for the selected tool or skill",
             type: "object",
           },
           recipient_name: {
-            description: "Base tool to call",
-            enum: BASE_AGENT_TOOLS.map((tool) => tool.function.name),
+            description: "Tool or skill to call",
+            enum: [
+              ...BASE_AGENT_TOOLS.map((tool) => tool.function.name),
+              BRAVE_SEARCH_TOOL_NAME,
+            ],
             type: "string",
           },
         },
@@ -241,7 +244,7 @@ export function readAgentSessionToolNames(
 }
 
 function selectedParallelTool(
-  selectedBaseTools: readonly (typeof BASE_AGENT_TOOLS)[number][],
+  selectedTools: readonly AgentToolDefinition[],
 ): AgentToolDefinition {
   return {
     ...PARALLEL_TOOL,
@@ -261,9 +264,9 @@ function selectedParallelTool(
                 recipient_name: {
                   ...PARALLEL_TOOL.function.parameters.properties.tool_uses
                     .items.properties.recipient_name,
-                  enum: selectedBaseTools.map(
-                    ({ function: definition }) => definition.name,
-                  ),
+                  enum: selectedTools
+                    .map(({ function: definition }) => definition.name)
+                    .filter((name) => name !== PARALLEL_TOOL.function.name),
                 },
               },
             },
@@ -279,14 +282,12 @@ export function selectedAgentTools(
 ): readonly AgentToolDefinition[] {
   const isSelected = (name: AgentSessionToolName): boolean =>
     names.includes(name);
-  const selectedBaseTools = BASE_AGENT_TOOLS.filter(
-    ({ function: definition }) => isSelected(definition.name),
-  );
-  return AGENT_TOOLS.filter(({ function: definition }) =>
+  const selectedTools = AGENT_TOOLS.filter(({ function: definition }) =>
     isSelected(definition.name),
-  ).map((tool) =>
+  );
+  return selectedTools.map((tool) =>
     tool.function.name === PARALLEL_TOOL.function.name
-      ? selectedParallelTool(selectedBaseTools)
+      ? selectedParallelTool(selectedTools)
       : tool,
   );
 }

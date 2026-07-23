@@ -124,35 +124,32 @@ Living project memory. Update it with durable information.
   `CLAUDE.md`; only `AGENTS.md` is used when both exist.
 
   `runner/runner-workspace.ts` shares canonical workspace resolution and
-  containment with the file tools. The latest agent-file and tool/skill
-  selections are persisted on each session; tool selections filter model
-  definitions and execution, default to all, and may be empty.
-  `solid/session-transcript.tsx` renders the effective prompt, tool definitions,
-  and raw tool details. User messages preserve source line breaks; transcript
-  output supports Markdown, colorized code/JSON, edit diffs, and context-aware
-  shell, read, and parallel results. The control center creates, inspects,
-  follows up, continues without appending a user message, stops, and receives
-  live sessions through `solid/realtime-client.ts`, `solid/session-client.tsx`,
-  and `solid/session-controller.ts`. Unchanged snapshots suppress render
-  notifications. Keyed transcript messages retain unchanged identities, so
-  updates rerender only the affected message. Render debug heat-maps component
-  renders. The browser uses one long-lived Solid root and declarative events.
-  Fine-grained updates retain focus and scroll state. The transcript starts at
-  the bottom and returns there when messages or the agent file change.
-  `sync-engine/agent-model-discovery.ts` queries provider model metadata;
-  `shared/agent-configuration.ts` owns catalog types and fallbacks. New sessions
-  default to the online runner and model credential, then the first entry. The
-  working directory uses the latest session; models use the first option and
-  maximum reasoning effort. Model choices show all provider and Q Mush-supported
-  input/output modalities. Controls use the listbox in
-  `solid/custom-select.tsx`; model options show discovered context limits. Model
-  and effort selections are persisted with the session. `shared/agent-prompt.ts`
-  is the shared source for building the model system prompt and its transcript
-  display. Reasoning summaries persist as `thinking` messages but are excluded
-  from replay. Session and transcript rows live in `agent_sessions` and
-  `agent_messages`; interrupted processes mark active sessions failed so they
-  can be resumed. Rebuilt conversations add error results for interrupted tool
-  calls only on resume.
+  containment with the file tools. Tool and skill selections persist per
+  session, filter definitions and execution, default to all, and may be empty;
+  `parallel` can mix every enabled tool or server-side skill except itself.
+  `solid/session-transcript.tsx` renders prompts, tool definitions, raw details,
+  Markdown, code/JSON, diffs, and contextual tool results while preserving user
+  line breaks. The control center manages live sessions through
+  `solid/realtime-client.ts`, `solid/session-client.tsx`, and
+  `solid/session-controller.ts`. Model deltas are combined per session once per
+  animation frame; snapshots and other events remain immediate. Unchanged
+  snapshots suppress notifications, and keyed messages preserve identity so only
+  the affected message rerenders. The long-lived Solid root preserves focus and
+  scroll. The transcript starts and returns to the bottom when messages or the
+  agent file change. `sync-engine/agent-model-discovery.ts` queries provider
+  model metadata; `shared/agent-configuration.ts` owns catalog types and
+  fallbacks. New sessions default to the online runner and model credential,
+  then the first entry. The working directory uses the latest session; models
+  use the first option and maximum reasoning effort. Model choices show all
+  provider and Q Mush-supported input/output modalities. Controls use the
+  listbox in `solid/custom-select.tsx`; model options show discovered context
+  limits. Model and effort selections are persisted with the session.
+  `shared/agent-prompt.ts` is the shared source for building the model system
+  prompt and its transcript display. Reasoning summaries persist as `thinking`
+  messages but are excluded from replay. Session and transcript rows live in
+  `agent_sessions` and `agent_messages`; interrupted processes mark active
+  sessions failed so they can be resumed. Rebuilt conversations add error
+  results for interrupted tool calls only on resume.
 
 - `sync-engine/openai.ts` and `sync-engine/openrouter.ts` implement provider
   connections. Multiple OAuth or manual credentials live in

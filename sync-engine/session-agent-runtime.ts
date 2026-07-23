@@ -89,8 +89,24 @@ export async function runSessionAgent(
   runtime: SessionAgentRuntimeDependencies,
 ): Promise<void> {
   const models = await loadModels(runtime);
+  const dispatchRunnerTool = (
+    name: string,
+    toolArguments: Readonly<Record<string, unknown>>,
+  ): Promise<string> =>
+    runtime.broker.dispatch(
+      {
+        arguments: toolArguments,
+        runnerId: runtime.detail.runnerId,
+        sessionId: runtime.detail.id,
+        tool: name,
+        workingDirectory: runtime.detail.workingDirectory,
+      },
+      runtime.signal,
+    );
   const skills = createAgentSkills({
     braveSearch: runtime.braveSearch,
+    executeTool: dispatchRunnerTool,
+    tools: runtime.detail.tools,
     userId: runtime.userId,
   });
   const recorder = new SessionRecorder(
@@ -112,19 +128,7 @@ export async function runSessionAgent(
         );
       }
       const skillOutput = skills.execute(call.name, call.arguments);
-      return (
-        skillOutput ??
-        runtime.broker.dispatch(
-          {
-            arguments: call.arguments,
-            runnerId: runtime.detail.runnerId,
-            sessionId: runtime.detail.id,
-            tool: call.name,
-            workingDirectory: runtime.detail.workingDirectory,
-          },
-          runtime.signal,
-        )
-      );
+      return skillOutput ?? dispatchRunnerTool(call.name, call.arguments);
     },
     initialMessages: runtime.store.conversation(runtime.detail.id),
     maxContextTokens: runtime.detail.maxContextTokens,
