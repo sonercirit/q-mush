@@ -10,7 +10,6 @@ import {
 import { RemovalButton } from "./client-controls.tsx";
 import { Collection } from "./collection.tsx";
 import { DefaultableActions } from "./defaultable-actions.tsx";
-import { renderDebugBoundary } from "./render-debug.tsx";
 
 type BrowserProviderId = "brave-search" | "openai" | "openrouter";
 
@@ -195,13 +194,7 @@ function CredentialActions(props: CredentialItemProps): JSX.Element {
 
 function ProviderCredentialItem(props: CredentialItemProps): JSX.Element {
   return (
-    <li
-      class="flex flex-col gap-4 rounded-2xl border border-white/10 bg-slate-950/60 p-5 sm:flex-row sm:items-center sm:justify-between"
-      {...renderDebugBoundary(
-        `provider-credential:${props.configuration.id}:${props.credential.id}`,
-        `${props.configuration.name} credential: ${props.credential.label}`,
-      )}
-    >
+    <li class="flex flex-col gap-4 rounded-2xl border border-white/10 bg-slate-950/60 p-5 sm:flex-row sm:items-center sm:justify-between">
       <div class="min-w-0">
         <div class="flex flex-wrap items-center gap-2">
           <p class="truncate font-semibold text-white">
@@ -283,10 +276,6 @@ export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
       aria-labelledby={titleId()}
       class="rounded-3xl border border-white/10 bg-white/[0.06] p-6 shadow-2xl shadow-emerald-950/30 backdrop-blur-xl sm:p-8"
       data-provider-panel={props.configuration.id}
-      {...renderDebugBoundary(
-        `provider-panel:${props.configuration.id}`,
-        `${props.configuration.name} panel`,
-      )}
     >
       <div class="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
         <div>
@@ -340,10 +329,6 @@ export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
           }
         }}
         ref={setForm}
-        {...renderDebugBoundary(
-          `provider-form:${props.configuration.id}`,
-          `${props.configuration.name} key form`,
-        )}
       >
         <Show when={props.configuration.keyRequiresLabel === true}>
           <div>

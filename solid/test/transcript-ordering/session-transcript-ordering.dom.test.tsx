@@ -1,11 +1,10 @@
 import { afterEach, expect, test } from "vitest";
 import type { AgentSessionDetail } from "../../../shared/session-model.ts";
-import { RenderDebugView } from "../../render-debug.tsx";
 import type { SessionController } from "../../session-controller.ts";
 import {
-  disposeTestViews,
-  messageBoundary,
+  cleanupTestViews,
   mountTestTranscript,
+  queryTestElement,
   type MountedTestTranscript,
 } from "../session-dom-test-helpers.tsx";
 import { transcriptMessage } from "../transcript-ordering-fixtures.ts";
@@ -14,9 +13,8 @@ const disposals: (() => void)[] = [];
 
 function mountedTranscript(
   messages: AgentSessionDetail["messages"],
-  debug?: RenderDebugView,
 ): MountedTestTranscript {
-  return mountTestTranscript(messages, disposals, debug);
+  return mountTestTranscript(messages, disposals);
 }
 
 function clonedBaseMessages(
@@ -26,29 +24,31 @@ function clonedBaseMessages(
   return [...messages.map((message) => ({ ...message })), ...appended];
 }
 
-function transientBoundary(
+function messageItem(container: ParentNode, id: string): Element {
+  return queryTestElement(container, `[data-session-message-id='${id}']`);
+}
+
+function transientMessage(
   container: ParentNode,
   sessionId: string,
   role: "assistant" | "thinking",
 ): Element | null {
   return container.querySelector(
-    `[data-render-boundary='message:stream:${sessionId}:${role}']`,
+    `[data-session-message-id='stream:${sessionId}:${role}']`,
   );
 }
 
 function transcriptMessageOrder(container: ParentNode): readonly string[] {
-  return [...container.querySelectorAll("[data-render-boundary^='message:']")]
-    .map((element) => element.getAttribute("data-render-boundary"))
-    .filter((boundary): boundary is string => boundary !== null);
+  return [...container.querySelectorAll("[data-session-message-id]")]
+    .map((element) => element.getAttribute("data-session-message-id"))
+    .filter((id): id is string => id !== null);
 }
 
 function expectTranscriptOrder(
   container: ParentNode,
   messageIds: readonly string[],
 ): void {
-  expect(transcriptMessageOrder(container)).toEqual(
-    messageIds.map((id) => `message:${id}`),
-  );
+  expect(transcriptMessageOrder(container)).toEqual(messageIds);
 }
 
 function expectStableStreamBase(
@@ -56,8 +56,8 @@ function expectStableStreamBase(
   stableUser: Element,
   stableAssistant: Element,
 ): void {
-  expect(messageBoundary(container, "user-stable")).toBe(stableUser);
-  expect(messageBoundary(container, "assistant-stable")).toBe(stableAssistant);
+  expect(messageItem(container, "user-stable")).toBe(stableUser);
+  expect(messageItem(container, "assistant-stable")).toBe(stableAssistant);
 }
 
 function expectStreamReplaced(
@@ -69,11 +69,11 @@ function expectStreamReplaced(
   previous?: Element,
 ): void {
   expectStableStreamBase(container, stableUser, stableAssistant);
-  const boundary = transientBoundary(container, detail.id, role);
+  const message = transientMessage(container, detail.id, role);
   if (previous === undefined) {
-    expect(boundary).toBeNull();
+    expect(message).toBeNull();
   } else {
-    expect(boundary).not.toBe(previous);
+    expect(message).not.toBe(previous);
   }
 }
 
@@ -90,18 +90,7 @@ function applyStreamSnapshot(
   });
 }
 
-function expectTranscriptBoundariesToRenderOnce(
-  debug: RenderDebugView,
-  messageIds: readonly string[],
-): void {
-  for (const key of ["system-prompt", "tool-definitions", ...messageIds]) {
-    expect(debug.measurement(key).count).toBe(1);
-  }
-}
-
-afterEach(() => {
-  disposeTestViews(disposals);
-});
+afterEach(cleanupTestViews(disposals));
 
 test("keeps persisted and streamed turns in canonical DOM order", () => {
   const messages: AgentSessionDetail["messages"] = [
@@ -111,8 +100,8 @@ test("keeps persisted and streamed turns in canonical DOM order", () => {
   ];
   const { container, controller, detail } = mountedTranscript(messages);
   controller.applyDetail(detail);
-  const stableUser = messageBoundary(container, "user-earlier");
-  const stableAssistant = messageBoundary(container, "assistant-earlier");
+  const stableUser = messageItem(container, "user-earlier");
+  const stableAssistant = messageItem(container, "assistant-earlier");
 
   controller.applyDelta({
     content: "Live answer",
@@ -150,10 +139,8 @@ test("keeps persisted and streamed turns in canonical DOM order", () => {
       "thinking-current",
       "assistant-current",
     ]);
-    expect(messageBoundary(container, "user-earlier")).toBe(stableUser);
-    expect(messageBoundary(container, "assistant-earlier")).toBe(
-      stableAssistant,
-    );
+    expect(messageItem(container, "user-earlier")).toBe(stableUser);
+    expect(messageItem(container, "assistant-earlier")).toBe(stableAssistant);
   };
   expectCurrentTranscript();
 
@@ -172,10 +159,9 @@ test("reconciles a persisted thinking snapshot before its assistant", () => {
       3,
     ),
   ];
-  const debug = new RenderDebugView();
-  const { container, controller, detail } = mountedTranscript(messages, debug);
-  const stableUser = messageBoundary(container, "user-stable");
-  const stableAssistant = messageBoundary(container, "assistant-stable");
+  const { container, controller, detail } = mountedTranscript(messages);
+  const stableUser = messageItem(container, "user-stable");
+  const stableAssistant = messageItem(container, "assistant-stable");
 
   controller.applyDelta({
     content: "Streaming",
@@ -191,14 +177,7 @@ test("reconciles a persisted thinking snapshot before its assistant", () => {
   });
 
   expectStableStreamBase(container, stableUser, stableAssistant);
-  expectTranscriptBoundariesToRenderOnce(debug, [
-    "message:user-stable",
-    "message:assistant-stable",
-  ]);
-  expect(debug.measurement(`message:stream:${detail.id}:assistant`).count).toBe(
-    2,
-  );
-  const streamedMessage = messageBoundary(
+  const streamedMessage = messageItem(
     container,
     `stream:${detail.id}:assistant`,
   );
@@ -247,11 +226,11 @@ test("reconciles a persisted thinking snapshot before its assistant", () => {
     "assistant",
     streamedMessage,
   );
-  expectTranscriptBoundariesToRenderOnce(debug, [
-    "message:user-stable",
-    "message:assistant-stable",
-    "message:thinking-persisted",
-    "message:assistant-persisted",
+  expectTranscriptOrder(container, [
+    "user-stable",
+    "assistant-stable",
+    "thinking-persisted",
+    "assistant-persisted",
   ]);
   expect(container.textContent).toContain("Streaming response");
 });

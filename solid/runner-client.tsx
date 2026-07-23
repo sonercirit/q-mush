@@ -3,7 +3,6 @@ import { isRecord, readNullableString } from "../shared/auth-model.ts";
 import type { RunnerStatus, RunnerSummary } from "../shared/runner-model.ts";
 import { Collection } from "./collection.tsx";
 import { DefaultableActions } from "./defaultable-actions.tsx";
-import { renderDebugBoundary } from "./render-debug.tsx";
 
 export interface RunnerSetupInstructions {
   readonly command: string;
@@ -182,13 +181,7 @@ function RunnerItem(props: RunnerItemProps): JSX.Element {
   const presentation = () => STATUS_PRESENTATION[props.runner.status];
 
   return (
-    <li
-      class="flex flex-col gap-4 rounded-2xl border border-white/10 bg-slate-950/60 p-5 sm:flex-row sm:items-center sm:justify-between"
-      {...renderDebugBoundary(
-        `runner:${props.runner.id}`,
-        `Runner: ${props.runner.name ?? "New runner"}`,
-      )}
-    >
+    <li class="flex flex-col gap-4 rounded-2xl border border-white/10 bg-slate-950/60 p-5 sm:flex-row sm:items-center sm:justify-between">
       <div class="flex min-w-0 items-start gap-4">
         <span
           aria-hidden="true"
@@ -317,7 +310,6 @@ export function RunnerPanel(props: RunnerControllerProps): JSX.Element {
       aria-labelledby="runners-title"
       class="rounded-3xl border border-white/10 bg-white/[0.06] p-6 shadow-2xl shadow-emerald-950/30 backdrop-blur-xl sm:p-8"
       data-runner-panel="true"
-      {...renderDebugBoundary("runners-panel", "Runners panel")}
     >
       <div class="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
         <div>

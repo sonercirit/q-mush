@@ -6,40 +6,36 @@ import {
   type AgentSessionToolName,
 } from "../shared/agent-tools.ts";
 import type { AgentSessionMessage } from "../shared/session-model.ts";
-import { renderDebugBoundary } from "./render-debug.tsx";
 import { SessionImagePreviews } from "./session-image-client.tsx";
 import { renderMarkdown } from "./session-markdown.tsx";
 import { renderStructuredCode } from "./session-syntax.tsx";
 import { renderToolResult } from "./session-tool-result.tsx";
 
-function TranscriptNote(props: {
-  readonly boundaryKey: string;
+function renderTranscriptNote(options: {
   readonly classes: string;
   readonly content: string;
   readonly label: string;
   readonly labelClasses: string;
+  readonly messageId?: string;
 }): JSX.Element {
   return (
     <li
-      class={`rounded-xl border p-4 ${props.classes}`}
-      {...renderDebugBoundary(props.boundaryKey, props.label)}
+      class={`rounded-xl border p-4 ${options.classes}`}
+      data-session-message-id={options.messageId}
     >
       <p
-        class={`text-xs font-semibold tracking-wide uppercase ${props.labelClasses}`}
+        class={`text-xs font-semibold tracking-wide uppercase ${options.labelClasses}`}
       >
-        {props.label}
+        {options.label}
       </p>
-      <div class="mt-2">{renderMarkdown(props.content)}</div>
+      <div class="mt-2">{renderMarkdown(options.content)}</div>
     </li>
   );
 }
 
 function renderToolDefinitions(serializedTools: string): JSX.Element {
   return (
-    <li
-      class="rounded-xl border border-cyan-300/20 bg-cyan-300/10 p-4"
-      {...renderDebugBoundary("tool-definitions", "Tool definitions")}
-    >
+    <li class="rounded-xl border border-cyan-300/20 bg-cyan-300/10 p-4">
       <p class="text-xs font-semibold tracking-wide text-cyan-200 uppercase">
         Tool definitions
       </p>
@@ -81,35 +77,24 @@ function TranscriptMessage(props: {
   readonly callArguments: Accessor<ReadonlyMap<string, string>>;
   readonly message: AgentSessionMessage;
 }): JSX.Element {
-  if (props.message.role === "error") {
-    return (
-      <TranscriptNote
-        boundaryKey={`message:${props.message.id}`}
-        classes="border-rose-300/20 bg-rose-300/10"
-        content={props.message.content}
-        label="Error message"
-        labelClasses="text-rose-200"
-      />
-    );
-  }
-
-  if (props.message.role === "thinking") {
-    return (
-      <TranscriptNote
-        boundaryKey={`message:${props.message.id}`}
-        classes="border-violet-300/20 bg-violet-300/10"
-        content={props.message.content}
-        label="Thinking"
-        labelClasses="text-violet-200"
-      />
-    );
+  if (props.message.role === "error" || props.message.role === "thinking") {
+    const thinking = props.message.role === "thinking";
+    return renderTranscriptNote({
+      classes: thinking
+        ? "border-violet-300/20 bg-violet-300/10"
+        : "border-rose-300/20 bg-rose-300/10",
+      content: props.message.content,
+      label: thinking ? "Thinking" : "Error message",
+      labelClasses: thinking ? "text-violet-200" : "text-rose-200",
+      messageId: props.message.id,
+    });
   }
 
   if (props.message.role === "tool") {
     return (
       <li
         class="rounded-xl border border-white/10 bg-slate-950/80 p-4"
-        {...renderDebugBoundary(`message:${props.message.id}`, "Tool result")}
+        data-session-message-id={props.message.id}
       >
         {renderToolHeader({
           id: props.message.toolCallId,
@@ -135,10 +120,7 @@ function TranscriptMessage(props: {
   return (
     <li
       class={`rounded-2xl border p-4 ${user ? "ml-8 border-emerald-300/20 bg-emerald-300/10" : system ? "border-rose-300/20 bg-rose-300/10" : "mr-8 border-white/10 bg-white/[0.04]"}`}
-      {...renderDebugBoundary(
-        `message:${props.message.id}`,
-        `${user ? "User" : system ? "Session" : "Agent"} message`,
-      )}
+      data-session-message-id={props.message.id}
     >
       <p class="text-xs font-semibold tracking-wide text-slate-400 uppercase">
         {user ? "You" : system ? "Session" : "Agent"}
@@ -160,13 +142,7 @@ function TranscriptMessage(props: {
       {props.message.toolCalls.length > 0 ? (
         <ul class="mt-3 space-y-2">
           {props.message.toolCalls.map((call) => (
-            <li
-              class="rounded-lg border border-cyan-300/20 bg-cyan-300/10 p-3"
-              {...renderDebugBoundary(
-                `tool-call:${call.id}`,
-                `Tool call: ${call.name}`,
-              )}
-            >
+            <li class="rounded-lg border border-cyan-300/20 bg-cyan-300/10 p-3">
               {renderToolHeader({
                 id: call.id,
                 kind: "Tool call",
@@ -195,13 +171,12 @@ export function SessionTranscript(props: {
   );
   return (
     <>
-      <TranscriptNote
-        boundaryKey="system-prompt"
-        classes="border-amber-300/20 bg-amber-300/10"
-        content={createAgentSystemPrompt(props.agentFile)}
-        label="System prompt"
-        labelClasses="text-amber-200"
-      />
+      {renderTranscriptNote({
+        classes: "border-amber-300/20 bg-amber-300/10",
+        content: createAgentSystemPrompt(props.agentFile),
+        label: "System prompt",
+        labelClasses: "text-amber-200",
+      })}
       {renderToolDefinitions(serializedTools)}
       <For each={props.messages}>
         {(message) => (

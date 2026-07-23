@@ -29,11 +29,8 @@ import {
 import { ProviderController } from "./provider-controller.ts";
 import { RealtimeConnection } from "./realtime-client.ts";
 import {
-  renderDebugBoundary,
-  RenderDebugLegend,
-  RenderDebugProvider,
+  RenderDebugInstrumentation,
   RenderDebugToggle,
-  RenderDebugView,
 } from "./render-debug.tsx";
 import { RunnerPanel } from "./runner-client.tsx";
 import { RunnerController } from "./runner-controller.ts";
@@ -139,14 +136,11 @@ function Avatar(props: { readonly user: AuthenticatedUser }): JSX.Element {
 }
 
 function Header(props: {
-  readonly debug: RenderDebugView;
+  readonly debug: RenderDebugInstrumentation;
   readonly user: AuthenticatedUser | null | undefined;
 }): JSX.Element {
   return (
-    <header
-      class="flex flex-col gap-4 border-b border-white/10 pb-6 sm:flex-row sm:items-center sm:justify-between"
-      {...renderDebugBoundary("header", "Header")}
-    >
+    <header class="flex flex-col gap-4 border-b border-white/10 pb-6 sm:flex-row sm:items-center sm:justify-between">
       <a
         class="inline-flex items-center gap-3 self-start rounded-full font-semibold text-white focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
         href={HOME_PATH}
@@ -160,7 +154,7 @@ function Header(props: {
         Q Mush
       </a>
       <div class="flex flex-wrap items-center gap-2">
-        <RenderDebugToggle view={props.debug} />
+        <RenderDebugToggle instrumentation={props.debug} />
         <span class="inline-flex min-w-0 items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-300/10 px-3 py-1 text-sm text-emerald-200">
           <span
             aria-hidden="true"
@@ -298,10 +292,7 @@ function Workspace(props: {
   readonly user: AuthenticatedUser;
 }): JSX.Element {
   return (
-    <div
-      class="mt-12 space-y-6"
-      {...renderDebugBoundary("workspace", "Authenticated workspace")}
-    >
+    <div class="mt-12 space-y-6">
       <SessionPanel
         controller={props.agentSessions}
         openAi={props.openAi.view}
@@ -312,7 +303,6 @@ function Workspace(props: {
       <aside
         aria-label="Google account"
         class="flex flex-col gap-5 rounded-3xl border border-white/10 bg-slate-900/80 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8"
-        {...renderDebugBoundary("google-account", "Google account")}
       >
         <div class="flex min-w-0 items-center gap-4">
           <Avatar user={props.user} />
@@ -345,12 +335,21 @@ function Workspace(props: {
   );
 }
 
+const debugInstrumentation = new RenderDebugInstrumentation();
+const appRoot = (): HTMLElement => {
+  const root = document.getElementById("app");
+  if (root === null) {
+    throw new Error("The app root was not found");
+  }
+  return root;
+};
+
 function App(): JSX.Element {
   const [loadFailed, setLoadFailed] = createSignal(false);
   const [logoutPending, setLogoutPending] = createSignal(false);
   const [session, setSession] = createSignal<AuthSession>();
   const notices = readNotices();
-  const debug = new RenderDebugView();
+  const debug = debugInstrumentation;
   const braveSearch = new ProviderController(BRAVE_SEARCH_PANEL);
   const openAi = new ProviderController(OPENAI_PANEL);
   const openRouter = new ProviderController(OPENROUTER_PANEL);
@@ -425,105 +424,101 @@ function App(): JSX.Element {
   };
 
   onMount(() => {
+    debug.attach(appRoot());
     void loadSession();
   });
-  onCleanup(resetWorkspaceConnections);
+  onCleanup(() => {
+    debug.detach();
+    resetWorkspaceConnections();
+  });
 
   return (
-    <RenderDebugProvider view={debug}>
-      <section
-        aria-labelledby="app-title"
-        class="relative min-h-screen overflow-hidden bg-slate-950 px-6 py-8 text-slate-100 sm:px-10 lg:px-12"
-        {...renderDebugBoundary("app", "App")}
-      >
-        <div
-          aria-hidden="true"
-          class="absolute -right-40 -top-40 size-96 rounded-full bg-cyan-500/15 blur-3xl"
-        />
-        <div
-          aria-hidden="true"
-          class="absolute -bottom-48 left-1/4 size-96 rounded-full bg-emerald-500/15 blur-3xl"
-        />
-        <div class="relative mx-auto max-w-6xl">
-          <Header debug={debug} user={session()?.user} />
-          <main class="py-12 sm:py-16">
-            <p class="text-sm font-semibold tracking-[0.2em] text-emerald-300 uppercase">
-              Local control center
-            </p>
-            <h1
-              class="mt-4 text-4xl font-semibold tracking-tight text-white sm:text-6xl"
-              id="app-title"
-            >
-              Q Mush App
-            </h1>
-            <p class="mt-5 max-w-2xl text-lg leading-8 text-slate-400">
-              Coordinate your local swarm from one authenticated workspace.
-            </p>
-            <For each={notices}>
-              {(notice) => (
-                <p
-                  class="mt-8 rounded-2xl border border-amber-300/20 bg-amber-300/10 p-4 text-sm text-amber-100"
-                  role="alert"
-                >
-                  {notice}
-                </p>
-              )}
-            </For>
-            <Show
-              fallback={<LoadingCard />}
-              when={loadFailed() || session() !== undefined}
-            >
-              <Show
-                fallback={<SessionError onRetry={() => void loadSession()} />}
-                when={!loadFailed()}
+    <section
+      aria-labelledby="app-title"
+      class="relative min-h-screen overflow-hidden bg-slate-950 px-6 py-8 text-slate-100 sm:px-10 lg:px-12"
+    >
+      <div
+        aria-hidden="true"
+        class="absolute -right-40 -top-40 size-96 rounded-full bg-cyan-500/15 blur-3xl"
+      />
+      <div
+        aria-hidden="true"
+        class="absolute -bottom-48 left-1/4 size-96 rounded-full bg-emerald-500/15 blur-3xl"
+      />
+      <div class="relative mx-auto max-w-6xl">
+        <Header debug={debug} user={session()?.user} />
+        <main class="py-12 sm:py-16">
+          <p class="text-sm font-semibold tracking-[0.2em] text-emerald-300 uppercase">
+            Local control center
+          </p>
+          <h1
+            class="mt-4 text-4xl font-semibold tracking-tight text-white sm:text-6xl"
+            id="app-title"
+          >
+            Q Mush App
+          </h1>
+          <p class="mt-5 max-w-2xl text-lg leading-8 text-slate-400">
+            Coordinate your local swarm from one authenticated workspace.
+          </p>
+          <For each={notices}>
+            {(notice) => (
+              <p
+                class="mt-8 rounded-2xl border border-amber-300/20 bg-amber-300/10 p-4 text-sm text-amber-100"
+                role="alert"
               >
-                <Show when={session()}>
-                  {(authenticated) => (
-                    <Show
-                      fallback={
-                        <SignIn
-                          googleLoginAvailable={
-                            authenticated().googleLoginAvailable
-                          }
-                        />
-                      }
-                      when={authenticated().user}
-                    >
-                      {(user) => (
-                        <Workspace
-                          agentSessions={agentSessions}
-                          braveSearch={braveSearch}
-                          logout={logout}
-                          logoutPending={logoutPending()}
-                          openAi={openAi}
-                          openRouter={openRouter}
-                          runners={runners}
-                          user={user()}
-                        />
-                      )}
-                    </Show>
-                  )}
-                </Show>
+                {notice}
+              </p>
+            )}
+          </For>
+          <Show
+            fallback={<LoadingCard />}
+            when={loadFailed() || session() !== undefined}
+          >
+            <Show
+              fallback={<SessionError onRetry={() => void loadSession()} />}
+              when={!loadFailed()}
+            >
+              <Show when={session()}>
+                {(authenticated) => (
+                  <Show
+                    fallback={
+                      <SignIn
+                        googleLoginAvailable={
+                          authenticated().googleLoginAvailable
+                        }
+                      />
+                    }
+                    when={authenticated().user}
+                  >
+                    {(user) => (
+                      <Workspace
+                        agentSessions={agentSessions}
+                        braveSearch={braveSearch}
+                        logout={logout}
+                        logoutPending={logoutPending()}
+                        openAi={openAi}
+                        openRouter={openRouter}
+                        runners={runners}
+                        user={user()}
+                      />
+                    )}
+                  </Show>
+                )}
               </Show>
             </Show>
-            <a
-              class="mt-10 inline-flex items-center gap-2 text-sm font-medium text-slate-400 transition hover:text-emerald-200 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
-              href={HOME_PATH}
-            >
-              <span aria-hidden="true">←</span>
-              Back to the homepage
-            </a>
-          </main>
-        </div>
-        <RenderDebugLegend view={debug} />
-      </section>
-    </RenderDebugProvider>
+          </Show>
+          <a
+            class="mt-10 inline-flex items-center gap-2 text-sm font-medium text-slate-400 transition hover:text-emerald-200 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
+            href={HOME_PATH}
+          >
+            <span aria-hidden="true">←</span>
+            Back to the homepage
+          </a>
+        </main>
+      </div>
+    </section>
   );
 }
 
-const root = document.getElementById("app");
-if (root === null) {
-  throw new Error("The app root was not found");
-}
-
+const root = appRoot();
 render(() => <App />, root);

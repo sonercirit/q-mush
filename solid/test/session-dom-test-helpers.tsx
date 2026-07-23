@@ -1,7 +1,6 @@
 import type { JSX } from "solid-js";
 import { render } from "solid-js/web";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
-import { RenderDebugProvider, type RenderDebugView } from "../render-debug.tsx";
 import { summaryFromDetail } from "../session-codec.ts";
 import { SessionController } from "../session-controller.ts";
 import { SessionDetail } from "../session-detail-client.tsx";
@@ -29,15 +28,17 @@ export function queryTestElement(
   return element;
 }
 
-export function messageBoundary(container: ParentNode, id: string): Element {
-  return queryTestElement(container, `[data-render-boundary='message:${id}']`);
-}
-
-export function disposeTestViews(disposals: (() => void)[]): void {
+function disposeTestViews(disposals: (() => void)[]): void {
   for (const dispose of disposals.splice(0).reverse()) {
     dispose();
   }
   document.body.replaceChildren();
+}
+
+export function cleanupTestViews(disposals: (() => void)[]): () => void {
+  return () => {
+    disposeTestViews(disposals);
+  };
 }
 
 export interface MountedTestSession {
@@ -49,11 +50,15 @@ export interface MountedTestTranscript extends MountedTestSession {
   readonly detail: AgentSessionDetail;
 }
 
-export function mountTestSessionDetail(
+function mountedSession(
   detail: AgentSessionDetail,
   disposals: (() => void)[],
+  includeSummary: boolean,
 ): MountedTestSession {
-  const reactive = sessionDetailState(detail);
+  const reactive = sessionDetailState(
+    detail,
+    includeSummary ? [summaryFromDetail(detail)] : undefined,
+  );
   const controller = new SessionController(reactive);
   const container = mountTestView(
     () => <SessionDetail controller={controller} state={reactive.state()} />,
@@ -62,25 +67,17 @@ export function mountTestSessionDetail(
   return { container, controller };
 }
 
+export function mountTestSessionDetail(
+  detail: AgentSessionDetail,
+  disposals: (() => void)[],
+): MountedTestSession {
+  return mountedSession(detail, disposals, false);
+}
+
 export function mountTestTranscript(
   messages: AgentSessionDetail["messages"],
   disposals: (() => void)[],
-  debug?: RenderDebugView,
 ): MountedTestTranscript {
   const detail = runningSessionDetail(messages);
-  const reactive = sessionDetailState(detail, [summaryFromDetail(detail)]);
-  const controller = new SessionController(reactive);
-  const session = () => (
-    <SessionDetail controller={controller} state={reactive.state()} />
-  );
-  const container = mountTestView(
-    () =>
-      debug === undefined ? (
-        session()
-      ) : (
-        <RenderDebugProvider view={debug}>{session()}</RenderDebugProvider>
-      ),
-    disposals,
-  );
-  return { container, controller, detail };
+  return { ...mountedSession(detail, disposals, true), detail };
 }

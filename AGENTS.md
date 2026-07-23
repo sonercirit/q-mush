@@ -168,11 +168,10 @@ Living project memory. Update it with durable information.
   `provider_credentials`; failures fall through keys in creation order, and
   secrets never reach the browser, runner, or model provider. Its UI reuses the
   shared credential panel and controller.
-- The UI uses SolidJS and Vite. `solid/client.tsx` is the browser entry,
-  `solid/pages.tsx` owns server-rendered shells, and `solid/styles.css` is
-  Tailwind's source. Vitest uses an SSR Solid transform for string-rendering
-  tests and a Happy DOM project for post-mount reactivity tests. Run it under
-  Bun because tests and application modules use Bun APIs and `bun:sqlite`.
+- The UI uses SolidJS and Vite. `solid/client.tsx` is the browser entry and
+  `solid/pages.tsx` owns SSR shells. While enabled, render debug observes the
+  app root and batches DOM highlights into an excluded overlay; disabling cleans
+  it up. Vitest uses SSR and Happy DOM projects under Bun.
 - TypeScript is configured for strict, no-emit, bundler-style checking in
   `tsconfig.json`, including unused and unreachable code diagnostics. Library
   declaration checking is skipped because Drizzle publishes declarations for

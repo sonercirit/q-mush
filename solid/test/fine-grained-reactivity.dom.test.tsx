@@ -24,7 +24,7 @@ import { SessionList } from "../session-detail-client.tsx";
 import { initialSessionViewState } from "../session-state.ts";
 import { runnerSummary } from "./runner-fixtures.ts";
 import {
-  disposeTestViews,
+  cleanupTestViews,
   mountTestSessionDetail,
   mountTestView,
   queryTestElement,
@@ -114,9 +114,7 @@ function stubSessionRequests(catalog: AgentModelCatalog): void {
   });
 }
 
-afterEach(() => {
-  disposeTestViews(disposals);
-});
+afterEach(cleanupTestViews(disposals));
 
 test("provider loading, error, retry, and list updates preserve the panel", async () => {
   const reactive = createReactiveState<ProviderViewState>(

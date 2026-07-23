@@ -1,55 +1,122 @@
-import {
-  createContext,
-  createSignal,
-  Show,
-  useContext,
-  type Accessor,
-  type JSX,
-  type Setter,
-} from "solid-js";
+import { createSignal, type Accessor, type JSX, type Setter } from "solid-js";
 
-type RenderHeat = "green" | "lime" | "orange" | "red" | "yellow";
+type RenderDebugMutationKind =
+  "attribute" | "initial" | "insert" | "remove" | "text";
 
-interface RenderMeasurement {
-  readonly count: number;
-  readonly heat: RenderHeat;
+interface MutationSummary {
+  readonly attributeNames: Set<string>;
+  readonly counts: Map<RenderDebugMutationKind, number>;
 }
 
-interface RenderDebugBoundaryAttributes {
-  readonly "data-render-boundary": string;
-  readonly "data-render-count": string | undefined;
-  readonly "data-render-debug": "true" | undefined;
-  readonly "data-render-heat": RenderHeat | undefined;
-  readonly "data-render-label": string;
+interface RenderDebugOverlay {
+  readonly highlights: HTMLDivElement;
+  readonly root: HTMLDivElement;
 }
 
-function renderHeat(count: number): RenderHeat {
-  if (count >= 9) {
-    return "red";
-  }
-  if (count >= 7) {
-    return "orange";
-  }
-  if (count >= 5) {
-    return "yellow";
-  }
-  return count >= 3 ? "lime" : "green";
+const MUTATION_KINDS: readonly RenderDebugMutationKind[] = [
+  "initial",
+  "insert",
+  "remove",
+  "text",
+  "attribute",
+];
+
+function createMutationSummary(): MutationSummary {
+  return { attributeNames: new Set(), counts: new Map() };
 }
 
-export class RenderDebugView {
-  readonly #counts = new Map<string, number>();
+function clipped(value: string, maximumLength: number): string {
+  return value.length <= maximumLength
+    ? value
+    : `${value.slice(0, maximumLength - 1)}…`;
+}
+
+function elementLabel(element: Element): string {
+  const id = element.id.length === 0 ? "" : `#${clipped(element.id, 32)}`;
+  if (id.length > 0) {
+    return `${element.localName}${id}`;
+  }
+
+  const accessibleLabel = element.getAttribute("aria-label")?.trim();
+  return accessibleLabel === undefined || accessibleLabel.length === 0
+    ? element.localName
+    : `${element.localName} “${clipped(accessibleLabel, 36)}”`;
+}
+
+function mutationDescription(summary: MutationSummary): string {
+  return MUTATION_KINDS.flatMap((kind) => {
+    const count = summary.counts.get(kind) ?? 0;
+    if (count === 0) {
+      return [];
+    }
+
+    const amount = count === 1 ? "" : ` ×${String(count)}`;
+    if (kind !== "attribute" || summary.attributeNames.size === 0) {
+      return [`${kind}${amount}`];
+    }
+
+    const names = clipped([...summary.attributeNames].join(", "), 44);
+    return [`${kind}${amount} (${names})`];
+  }).join(" · ");
+}
+
+function appendLegendRow(
+  document: Document,
+  legend: HTMLElement,
+  kind: Exclude<RenderDebugMutationKind, "initial">,
+): void {
+  const row = document.createElement("span");
+  const swatch = document.createElement("span");
+  swatch.className = `render-debug-legend__swatch render-debug-legend__swatch--${kind}`;
+  row.append(swatch, kind);
+  legend.append(row);
+}
+
+function createOverlay(document: Document): RenderDebugOverlay {
+  const root = document.createElement("div");
+  root.id = "render-debug-overlay";
+  root.className = "render-debug-overlay";
+  root.setAttribute("aria-hidden", "true");
+
+  const highlights = document.createElement("div");
+  highlights.className = "render-debug-highlights";
+
+  const legend = document.createElement("aside");
+  legend.className = "render-debug-legend";
+  const title = document.createElement("strong");
+  title.textContent = "DOM updates";
+  const description = document.createElement("span");
+  description.textContent = "Every element is instrumented automatically";
+  legend.append(title, description);
+  appendLegendRow(document, legend, "insert");
+  appendLegendRow(document, legend, "remove");
+  appendLegendRow(document, legend, "text");
+  appendLegendRow(document, legend, "attribute");
+
+  root.append(highlights, legend);
+  return { highlights, root };
+}
+
+function nearestElement(node: Node): Element | null {
+  return node instanceof Element ? node : node.parentElement;
+}
+
+export class RenderDebugInstrumentation {
   readonly #enabled: Accessor<boolean>;
-  readonly #revision: Accessor<number>;
+  readonly #highlights = new Map<Element, HTMLDivElement>();
+  readonly #pending = new Map<Element, MutationSummary>();
   readonly #setEnabled: Setter<boolean>;
-  readonly #setRevision: Setter<number>;
+  #animationFrame: number | undefined;
+  #browserWindow: Window | undefined;
+  #highlightLayer: HTMLDivElement | undefined;
+  #observer: MutationObserver | undefined;
+  #overlay: HTMLDivElement | undefined;
+  #root: Element | undefined;
 
   constructor() {
     const [enabled, setEnabled] = createSignal(false);
-    const [revision, setRevision] = createSignal(0);
     this.#enabled = enabled;
-    this.#revision = revision;
     this.#setEnabled = setEnabled;
-    this.#setRevision = setRevision;
   }
 
   get enabled(): boolean {
@@ -60,123 +127,353 @@ export class RenderDebugView {
     return this.#enabled;
   }
 
-  get revisionView(): Accessor<number> {
-    return this.#revision;
+  attach(root: Element): void {
+    if (this.#root === root) {
+      if (this.enabled) {
+        this.#start();
+      }
+      return;
+    }
+
+    this.#stop();
+    this.#root = root;
+    if (this.enabled) {
+      this.#start();
+    }
   }
 
-  measurement(key: string): RenderMeasurement {
-    const count = this.#counts.get(key) ?? 0;
-    return { count, heat: renderHeat(count) };
-  }
-
-  record(key: string): RenderMeasurement {
-    const count = (this.#counts.get(key) ?? 0) + 1;
-    this.#counts.set(key, count);
-    return { count, heat: renderHeat(count) };
-  }
-
-  reset(): void {
-    this.#counts.clear();
-    this.#setRevision((revision) => revision + 1);
+  detach(): void {
+    this.#stop();
+    this.#root = undefined;
   }
 
   toggle(): void {
-    this.#setEnabled((enabled) => !enabled);
+    const enabled = !this.enabled;
+    this.#setEnabled(enabled);
+    if (enabled) {
+      this.#start();
+    } else {
+      this.#stop();
+    }
+  }
+
+  readonly #viewportChanged = (): void => {
+    this.#scheduleFrame();
+  };
+
+  #start(): void {
+    const root = this.#root;
+    if (
+      root === undefined ||
+      this.#observer !== undefined ||
+      !root.isConnected
+    ) {
+      return;
+    }
+
+    const browserWindow = root.ownerDocument.defaultView;
+    if (browserWindow === null) {
+      return;
+    }
+
+    const overlay = createOverlay(root.ownerDocument);
+    root.ownerDocument.body.append(overlay.root);
+    const Observer = browserWindow.MutationObserver;
+    const observer = new Observer((mutations) => {
+      this.#recordMutations(mutations);
+    });
+    observer.observe(root, {
+      attributes: true,
+      characterData: true,
+      childList: true,
+      subtree: true,
+    });
+    root.ownerDocument.addEventListener("scroll", this.#viewportChanged, true);
+    browserWindow.addEventListener("resize", this.#viewportChanged);
+
+    this.#browserWindow = browserWindow;
+    this.#highlightLayer = overlay.highlights;
+    this.#observer = observer;
+    this.#overlay = overlay.root;
+
+    this.#record(root, "initial");
+    for (const element of root.querySelectorAll("*")) {
+      if (this.#includes(element)) {
+        this.#record(element, "initial");
+      }
+    }
+  }
+
+  #stop(): void {
+    this.#observer?.disconnect();
+    this.#root?.ownerDocument.removeEventListener(
+      "scroll",
+      this.#viewportChanged,
+      true,
+    );
+    this.#browserWindow?.removeEventListener("resize", this.#viewportChanged);
+    if (
+      this.#animationFrame !== undefined &&
+      this.#browserWindow !== undefined
+    ) {
+      this.#browserWindow.cancelAnimationFrame(this.#animationFrame);
+    }
+
+    this.#overlay?.remove();
+    this.#highlights.clear();
+    this.#pending.clear();
+    this.#animationFrame = undefined;
+    this.#browserWindow = undefined;
+    this.#highlightLayer = undefined;
+    this.#observer = undefined;
+    this.#overlay = undefined;
+  }
+
+  #recordMutations(mutations: readonly MutationRecord[]): void {
+    if (!this.enabled || this.#overlay === undefined) {
+      return;
+    }
+
+    for (const mutation of mutations) {
+      if (this.#isOverlayNode(mutation.target)) {
+        continue;
+      }
+
+      switch (mutation.type) {
+        case "attributes": {
+          this.#recordElementMutation(
+            mutation,
+            "attribute",
+            mutation.attributeName ?? undefined,
+          );
+          break;
+        }
+        case "characterData": {
+          this.#recordElementMutation(mutation, "text");
+          break;
+        }
+        case "childList": {
+          this.#recordChildListMutation(mutation);
+          break;
+        }
+      }
+    }
+  }
+
+  #recordElementMutation(
+    mutation: MutationRecord,
+    kind: "attribute" | "text",
+    attributeName?: string,
+  ): void {
+    const target = this.#observedElement(mutation.target);
+    if (target !== null) {
+      this.#record(target, kind, 1, attributeName);
+    }
+  }
+
+  #recordChildListMutation(mutation: MutationRecord): void {
+    const parent = this.#observedElement(mutation.target);
+    if (parent === null) {
+      return;
+    }
+
+    if (mutation.addedNodes.length > 0) {
+      this.#record(parent, "insert", mutation.addedNodes.length);
+      for (const added of mutation.addedNodes) {
+        this.#recordInsertedElements(added);
+      }
+    }
+
+    if (mutation.removedNodes.length > 0) {
+      this.#record(parent, "remove", mutation.removedNodes.length);
+      for (const removed of mutation.removedNodes) {
+        this.#forgetRemovedElements(removed);
+      }
+    }
+  }
+
+  #recordInsertedElements(node: Node): void {
+    if (node instanceof Element) {
+      this.#recordInsertedElement(node);
+      for (const descendant of node.querySelectorAll("*")) {
+        this.#recordInsertedElement(descendant);
+      }
+    }
+  }
+
+  #recordInsertedElement(element: Element): void {
+    if (this.#includes(element)) {
+      this.#record(element, "insert");
+    }
+  }
+
+  #forgetRemovedElements(node: Node): void {
+    if (!(node instanceof Element)) {
+      return;
+    }
+
+    this.#removeContainedHighlights(node);
+    for (const element of this.#pending.keys()) {
+      if (element === node || node.contains(element)) {
+        this.#pending.delete(element);
+      }
+    }
+  }
+
+  #removeContainedHighlights(node: Element): void {
+    for (const [element, highlight] of this.#highlights) {
+      if (element === node || node.contains(element)) {
+        highlight.remove();
+        this.#highlights.delete(element);
+      }
+    }
+  }
+
+  #observedElement(node: Node): Element | null {
+    const element = nearestElement(node);
+    return element !== null && this.#includes(element) ? element : null;
+  }
+
+  #includes(element: Element): boolean {
+    const root = this.#root;
+    if (root === undefined || this.#isOverlayNode(element)) {
+      return false;
+    }
+    return element === root || root.contains(element);
+  }
+
+  #isOverlayNode(node: Node): boolean {
+    const overlay = this.#overlay;
+    return (
+      overlay !== undefined && (node === overlay || overlay.contains(node))
+    );
+  }
+
+  #record(
+    element: Element,
+    kind: RenderDebugMutationKind,
+    count = 1,
+    attributeName?: string,
+  ): void {
+    let summary = this.#pending.get(element);
+    if (summary === undefined) {
+      summary = createMutationSummary();
+      this.#pending.set(element, summary);
+    }
+    summary.counts.set(kind, (summary.counts.get(kind) ?? 0) + count);
+    if (attributeName !== undefined) {
+      summary.attributeNames.add(attributeName);
+    }
+    this.#scheduleFrame();
+  }
+
+  #scheduleFrame(): void {
+    if (
+      this.#animationFrame !== undefined ||
+      this.#browserWindow === undefined ||
+      this.#overlay === undefined
+    ) {
+      return;
+    }
+
+    this.#animationFrame = this.#browserWindow.requestAnimationFrame(
+      (timestamp) => {
+        this.#flush(timestamp);
+      },
+    );
+  }
+
+  #flush(timestamp: DOMHighResTimeStamp): void {
+    this.#animationFrame = undefined;
+    if (!this.enabled || this.#highlightLayer === undefined) {
+      return;
+    }
+
+    const updates = [...this.#pending];
+    this.#pending.clear();
+    for (const [element, summary] of updates) {
+      if (this.#includes(element)) {
+        this.#showHighlight(element, summary, timestamp);
+      }
+    }
+
+    this.#positionHighlights();
+  }
+
+  #positionHighlights(): void {
+    for (const [element, highlight] of this.#highlights) {
+      const included = this.#includes(element);
+      if (included) {
+        this.#positionHighlight(element, highlight);
+      } else {
+        highlight.remove();
+        this.#highlights.delete(element);
+      }
+    }
+  }
+
+  #showHighlight(
+    element: Element,
+    summary: MutationSummary,
+    timestamp: DOMHighResTimeStamp,
+  ): void {
+    const document = element.ownerDocument;
+    const highlight = document.createElement("div");
+    const kinds = MUTATION_KINDS.filter(
+      (kind) => (summary.counts.get(kind) ?? 0) > 0,
+    );
+    const sequence = String(Math.round(timestamp / 16) % 6);
+    highlight.style.setProperty("--render-debug-sequence", sequence);
+    highlight.classList.add(
+      "render-debug-highlight",
+      ...kinds.map((kind) => `render-debug-highlight--${kind}`),
+    );
+    if (kinds.length > 1) {
+      highlight.classList.add("render-debug-highlight--mixed");
+    }
+
+    const label = document.createElement("span");
+    label.className = "render-debug-highlight__label";
+    label.textContent = `${elementLabel(element)} · ${mutationDescription(summary)}`;
+    highlight.append(label);
+
+    const previous = this.#highlights.get(element);
+    previous?.remove();
+    this.#highlights.set(element, highlight);
+    this.#highlightLayer?.append(highlight);
+    highlight.addEventListener(
+      "animationend",
+      () => {
+        if (this.#highlights.get(element) === highlight) {
+          this.#highlights.delete(element);
+          highlight.remove();
+        }
+      },
+      { once: true },
+    );
+  }
+
+  #positionHighlight(element: Element, highlight: HTMLElement): void {
+    const bounds = element.getBoundingClientRect();
+    highlight.style.height = `${String(Math.max(bounds.height, 1))}px`;
+    highlight.style.transform = `translate3d(${String(bounds.left)}px, ${String(bounds.top)}px, 0)`;
+    highlight.style.width = `${String(Math.max(bounds.width, 1))}px`;
   }
 }
 
-const RenderDebugContext = createContext<RenderDebugView>();
-
-export function RenderDebugProvider(props: {
-  readonly children: JSX.Element;
-  readonly view: RenderDebugView;
-}): JSX.Element {
-  return (
-    <RenderDebugContext.Provider value={props.view}>
-      {props.children}
-    </RenderDebugContext.Provider>
-  );
-}
-
-export function renderDebugBoundary(
-  key: string,
-  label: string,
-): RenderDebugBoundaryAttributes {
-  const view = useContext(RenderDebugContext);
-  const measurement = view?.record(key);
-  const currentMeasurement = (): RenderMeasurement | undefined => {
-    view?.revisionView();
-    return view?.measurement(key) ?? measurement;
-  };
-
-  return {
-    "data-render-boundary": key,
-    get "data-render-count"(): string | undefined {
-      return view?.enabled === true
-        ? String(currentMeasurement()?.count ?? 0)
-        : undefined;
-    },
-    get "data-render-debug"(): "true" | undefined {
-      return view?.enabled === true ? "true" : undefined;
-    },
-    get "data-render-heat"(): RenderHeat | undefined {
-      return view?.enabled === true ? currentMeasurement()?.heat : undefined;
-    },
-    "data-render-label": label,
-  };
-}
-
 export function RenderDebugToggle(props: {
-  readonly view: RenderDebugView;
+  readonly instrumentation: RenderDebugInstrumentation;
 }): JSX.Element {
   return (
     <button
-      aria-pressed={props.view.enabledView()}
-      class={`rounded-full border px-3 py-1 text-sm font-medium transition focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300 ${props.view.enabledView() ? "border-amber-300/40 bg-amber-300/15 text-amber-100" : "border-white/10 bg-white/[0.04] text-slate-400 hover:border-white/20 hover:text-slate-200"}`}
+      aria-pressed={props.instrumentation.enabledView()}
+      class={`rounded-full border px-3 py-1 text-sm font-medium transition focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300 ${props.instrumentation.enabledView() ? "border-amber-300/40 bg-amber-300/15 text-amber-100" : "border-white/10 bg-white/[0.04] text-slate-400 hover:border-white/20 hover:text-slate-200"}`}
       onClick={() => {
-        props.view.toggle();
+        props.instrumentation.toggle();
       }}
       type="button"
     >
       Render debug
     </button>
-  );
-}
-
-export function RenderDebugLegend(props: {
-  readonly view: RenderDebugView;
-}): JSX.Element {
-  return (
-    <Show when={props.view.enabledView()}>
-      <aside
-        aria-label="Render debug legend"
-        class="fixed right-4 bottom-4 z-[100] w-64 rounded-2xl border border-white/15 bg-slate-950/95 p-4 shadow-2xl shadow-black/60 backdrop-blur sm:right-6 sm:bottom-6"
-      >
-        <div class="flex items-center justify-between gap-3">
-          <p class="text-sm font-semibold text-white">Render debug</p>
-          <button
-            class="text-xs font-semibold text-slate-400 underline underline-offset-4 hover:text-white"
-            onClick={() => {
-              props.view.reset();
-            }}
-            type="button"
-          >
-            Reset
-          </button>
-        </div>
-        <p class="mt-2 text-xs leading-5 text-slate-400">
-          Borders heat up as a visible UI boundary renders again. Hover a border
-          to identify it and see its count.
-        </p>
-        <div
-          aria-hidden="true"
-          class="render-debug-scale mt-3 h-2 rounded-full"
-        />
-        <div class="mt-1.5 flex justify-between text-[0.65rem] font-medium text-slate-500">
-          <span>Few renders</span>
-          <span>Frequent renders</span>
-        </div>
-      </aside>
-    </Show>
   );
 }
