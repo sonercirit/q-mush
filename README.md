@@ -90,6 +90,8 @@ two pages and their assets:
 - `/app` serves an empty application shell, then `/app.js` renders the app in
   the browser.
 - `/styles.css` serves the stylesheet shared by both pages.
+- `/manifest.webmanifest`, `/service-worker.js`, and `/icons/*` provide the
+  installable production PWA shell.
 - `/runner/install.sh` serves token-scoped macOS and Linux installers, while
   `/runner/executable` builds and caches the requested standalone runner
   executable.
@@ -242,11 +244,24 @@ applied automatically at startup.
 
 The UI in `solid/` uses SolidJS throughout. Vite and its Tailwind plugin build
 `solid/client.tsx` and `solid/styles.css`; the server invokes that build in
-memory at startup, while `bun run build` can emit the same assets to `dist/`.
+memory at startup, while `bun run build` emits a production bundle to `dist/`.
 `solid/pages.tsx` renders the server-owned page shells with Solid's SSR runtime;
 `sync-engine/pages.ts` loads that TSX through Vite's SSR runner at startup.
 Runner cross-compilation uses a temporary directory, then keeps each requested
 platform executable in server memory.
+
+Production builds register Q Mush as an installable PWA on secure origins. The
+service worker precaches only the fixed public app shell (`/app`, its local
+JavaScript/CSS, manifest, and generated icons), versions that cache with the
+application build, removes older Q Mush shell caches, and falls back only for an
+exact `/app` navigation. It deliberately does not handle API, WebSocket, OAuth,
+provider, runner-installer, transcript, POST, query-bearing, cross-origin, or
+arbitrary requests. A cold offline launch therefore renders only the neutral
+shell and asks the user to reconnect before Q Mush verifies a session; it never
+replays authenticated data. Development and test builds do not register a
+service worker. If a worker was installed from a production build, clear the
+site's service-worker/storage data before switching the same origin to local
+development.
 
 Apply pending migrations without starting the server:
 

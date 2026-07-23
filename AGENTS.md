@@ -1,10 +1,8 @@
 # AGENTS.md
 
-Living project memory. Update it with durable information.
+## Snapshot
 
-## Project Snapshot
-
-- Private strict-TypeScript ESM Bun/SolidJS project.
+- Strict TS ESM Bun/SolidJS project.
 - Source is split across `solid/`, `sync-engine/`, `runner/`, and `shared/`;
   `sync-engine/index.ts` is the server entry point.
 - Tests live in `test/` directories; no `src/`.
@@ -64,7 +62,8 @@ Living project memory. Update it with durable information.
   compiler, builds in a private temporary directory, caches it in memory, and
   serves it from `/runner/executable`. Triggered development restarts reject new
   agent work, let active sessions finish, then replace the server process, so a
-  session can safely request its own restart. Textual response bodies are
+  session can safely request its own restart. The PWA caches only `/app` shell
+  assets, never user/API data; offline asks users to reconnect. Data bodies are
   precompressed once per handler, with `zstd`, Brotli, gzip, or deflate
   negotiated in that server-preference order.
 - `solid/pages.tsx` renders both server page shells through Solid's SSR runtime;

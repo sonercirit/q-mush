@@ -4,7 +4,7 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "build": "vite build",
+    "build": "NODE_ENV=production vite build",
     "check": "bun run repository-check && bun run format:check && bun run typecheck && bun run lint && bun run knip && bun run cpd",
     "cpd": "cpd .",
     "db:generate": "drizzle-kit generate",

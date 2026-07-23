@@ -1,8 +1,11 @@
 import { type JSX } from "solid-js";
 import { renderToString } from "solid-js/web";
+import { PWA_BACKGROUND_COLOR, PWA_THEME_COLOR } from "../shared/pwa.ts";
 import {
   APP_PATH,
   APP_SCRIPT_PATH,
+  MANIFEST_PATH,
+  PWA_ICON_192_PATH,
   STYLESHEET_PATH,
 } from "../shared/routes.ts";
 
@@ -21,7 +24,18 @@ function renderDocument(title: string, body: JSX.Element[]): string {
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <meta name="theme-color" content="#020617" />
+        <meta name="application-name" content="Q Mush" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta
+          name="apple-mobile-web-app-status-bar-style"
+          content="black-translucent"
+        />
+        <meta name="apple-mobile-web-app-title" content="Q Mush" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="msapplication-TileColor" content={PWA_BACKGROUND_COLOR} />
+        <meta name="theme-color" content={PWA_THEME_COLOR} />
+        <link href={PWA_ICON_192_PATH} rel="apple-touch-icon" />
+        <link href={MANIFEST_PATH} rel="manifest" />
         <title>{title}</title>
         <link href={STYLESHEET_PATH} rel="stylesheet" />
       </head>

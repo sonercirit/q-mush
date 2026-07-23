@@ -18,7 +18,11 @@ export async function request(
     headers.set("accept", "application/json");
   }
 
-  const response = await fetch(input, { ...init, headers });
+  const response = await fetch(input, {
+    ...init,
+    cache: init.cache ?? "no-store",
+    headers,
+  });
 
   if (!response.ok) {
     throw new HttpResponseError(response.status);

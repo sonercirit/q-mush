@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import { brotliCompressSync, deflateSync } from "node:zlib";
 import { build } from "vite";
+import { PWA_MANIFEST } from "../shared/pwa.ts";
 import {
   API_BASE_PATH,
   APP_PATH,
@@ -10,16 +12,21 @@ import {
   AUTH_SESSION_PATH,
   BRAVE_SEARCH_KEYS_PATH,
   HOME_PATH,
+  MANIFEST_PATH,
   OPENAI_CREDENTIALS_PATH,
   OPENAI_OAUTH_CALLBACK_PATH,
   OPENAI_OAUTH_PATH,
   OPENROUTER_CREDENTIALS_PATH,
   OPENROUTER_OAUTH_CALLBACK_PATH,
   OPENROUTER_OAUTH_PATH,
+  PWA_ICON_192_PATH,
+  PWA_ICON_512_MASKABLE_PATH,
+  PWA_ICON_512_PATH,
   RUNNER_DIRECTORIES_SEGMENT,
   RUNNER_EXECUTABLE_PATH,
   RUNNER_INSTALLER_PATH,
   RUNNERS_PATH,
+  SERVICE_WORKER_PATH,
   SESSION_MODELS_PATH,
   SESSIONS_PATH,
   STYLESHEET_PATH,
@@ -34,14 +41,31 @@ import type { OpenAiIntegration } from "./openai.ts";
 import type { OpenRouterIntegration } from "./openrouter.ts";
 import type { RenderedPages } from "./pages.ts";
 import type { ProviderIntegration } from "./provider-integration.ts";
+import { createPwaIcon } from "./pwa-icon.ts";
 import type { RunnerExecutableProvider } from "./runner-executable.ts";
 import type { RunnerIntegration } from "./runners.ts";
+import { createServiceWorkerJavaScript } from "./service-worker.ts";
 import type { SessionIntegration } from "./sessions.ts";
 
 const CSS_HEADERS = { "content-type": "text/css; charset=utf-8" };
-const HTML_HEADERS = { "content-type": "text/html; charset=utf-8" };
+const HTML_HEADERS = {
+  "cache-control": "no-cache",
+  "content-type": "text/html; charset=utf-8",
+};
+const IMMUTABLE_ASSET_HEADERS = {
+  "cache-control": "public, max-age=31536000, immutable",
+};
 const JAVASCRIPT_HEADERS = {
   "content-type": "text/javascript; charset=utf-8",
+};
+const MANIFEST_HEADERS = {
+  "cache-control": "public, max-age=3600",
+  "content-type": "application/manifest+json; charset=utf-8",
+};
+const SERVICE_WORKER_HEADERS = {
+  "cache-control": "no-cache, no-store, must-revalidate",
+  "content-type": "text/javascript; charset=utf-8",
+  "service-worker-allowed": "/",
 };
 
 type ContentEncoding = "br" | "deflate" | "gzip" | "zstd";
@@ -241,8 +265,28 @@ export function createRequestHandler(
   const appPage = prepareBody(pages.app);
   const browserBundle = prepareBody(clientJavaScript);
   const homePage = prepareBody(pages.home);
+  const manifestJson = JSON.stringify(PWA_MANIFEST);
+  const manifest = prepareBody(manifestJson);
   const notFound = prepareBody("Not found");
+  const shellVersion = createHash("sha256")
+    .update("q-mush-pwa-v1\0")
+    .update(clientJavaScript)
+    .update("\0")
+    .update(stylesheet)
+    .update("\0")
+    .update(pages.app)
+    .update("\0")
+    .update(manifestJson)
+    .digest("hex");
+  const serviceWorker = prepareBody(
+    createServiceWorkerJavaScript(shellVersion),
+  );
   const styles = prepareBody(stylesheet);
+  const icons = new Map<string, Uint8Array>([
+    [PWA_ICON_192_PATH, createPwaIcon(192)],
+    [PWA_ICON_512_PATH, createPwaIcon(512)],
+    [PWA_ICON_512_MASKABLE_PATH, createPwaIcon(512, true)],
+  ]);
 
   return async (request) => {
     const { pathname } = new URL(request.url);
@@ -376,6 +420,25 @@ export function createRequestHandler(
 
     if (pathname === APP_SCRIPT_PATH) {
       return createTextResponse(request, browserBundle, JAVASCRIPT_HEADERS);
+    }
+
+    if (pathname === MANIFEST_PATH) {
+      return createTextResponse(request, manifest, MANIFEST_HEADERS);
+    }
+
+    if (pathname === SERVICE_WORKER_PATH) {
+      return createTextResponse(request, serviceWorker, SERVICE_WORKER_HEADERS);
+    }
+
+    const icon = icons.get(pathname);
+    if (icon !== undefined) {
+      return new Response(toArrayBuffer(icon), {
+        headers: {
+          ...IMMUTABLE_ASSET_HEADERS,
+          "content-type": "image/png",
+          "x-content-type-options": "nosniff",
+        },
+      });
     }
 
     if (pathname === RUNNER_INSTALLER_PATH) {

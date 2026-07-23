@@ -77,6 +77,7 @@ export function createMethodNotAllowedResponse(
   return new Response("Method not allowed", {
     headers: {
       allow: allowedMethod,
+      "cache-control": "no-store",
       "content-type": "text/plain; charset=utf-8",
     },
     status: 405,

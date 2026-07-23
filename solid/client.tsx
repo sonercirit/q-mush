@@ -18,7 +18,7 @@ import {
   AUTH_SESSION_PATH,
   HOME_PATH,
 } from "../shared/routes.ts";
-import { requestJson } from "./browser-http.ts";
+import { request, requestJson } from "./browser-http.ts";
 import { providerNotice } from "./client-notices.ts";
 import {
   BRAVE_SEARCH_PANEL,
@@ -27,6 +27,7 @@ import {
   ProviderPanel,
 } from "./provider-client.tsx";
 import { ProviderController } from "./provider-controller.ts";
+import { PwaController } from "./pwa-controller.tsx";
 import { RealtimeConnection } from "./realtime-client.ts";
 import {
   renderDebugBoundary,
@@ -220,6 +221,7 @@ function SessionError(props: { readonly onRetry: () => void }): JSX.Element {
 
 function SignIn(props: {
   readonly googleLoginAvailable: boolean;
+  readonly offline: boolean;
 }): JSX.Element {
   return (
     <div class="mt-12 grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
@@ -251,8 +253,14 @@ function SignIn(props: {
           when={props.googleLoginAvailable}
         >
           <a
-            class="mt-8 inline-flex w-full items-center justify-center gap-3 rounded-2xl bg-white px-5 py-3 font-semibold text-slate-900 shadow-lg shadow-black/20 transition hover:bg-slate-100 active:translate-y-px focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300 sm:w-auto"
-            href={AUTH_GOOGLE_PATH}
+            aria-disabled={props.offline}
+            class="mt-8 inline-flex w-full items-center justify-center gap-3 rounded-2xl bg-white px-5 py-3 font-semibold text-slate-900 shadow-lg shadow-black/20 transition hover:bg-slate-100 aria-disabled:cursor-not-allowed aria-disabled:opacity-50 active:translate-y-px focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300 sm:w-auto"
+            href={props.offline ? undefined : AUTH_GOOGLE_PATH}
+            onClick={(event) => {
+              if (props.offline) {
+                event.preventDefault();
+              }
+            }}
           >
             <span
               aria-hidden="true"
@@ -262,6 +270,11 @@ function SignIn(props: {
             </span>
             Continue with Google
           </a>
+          <Show when={props.offline}>
+            <p class="mt-4 text-sm text-amber-200">
+              Reconnect before signing in.
+            </p>
+          </Show>
         </Show>
       </section>
       <aside
@@ -347,6 +360,7 @@ function Workspace(props: {
 
 function App(): JSX.Element {
   const [loadFailed, setLoadFailed] = createSignal(false);
+  const [offline, setOffline] = createSignal(false);
   const [logoutPending, setLogoutPending] = createSignal(false);
   const [session, setSession] = createSignal<AuthSession>();
   const notices = readNotices();
@@ -407,7 +421,7 @@ function App(): JSX.Element {
   const logout = async (): Promise<void> => {
     setLogoutPending(true);
     try {
-      const response = await fetch(AUTH_LOGOUT_PATH, { method: "POST" });
+      const response = await request(AUTH_LOGOUT_PATH, { method: "POST" });
       if (!response.ok) {
         throw new Error("The logout request failed");
       }
@@ -446,6 +460,10 @@ function App(): JSX.Element {
         />
         <div class="relative mx-auto max-w-6xl">
           <Header debug={debug} user={session()?.user} />
+          <PwaController
+            onOfflineChange={setOffline}
+            onOnline={() => void loadSession()}
+          />
           <main class="py-12 sm:py-16">
             <p class="text-sm font-semibold tracking-[0.2em] text-emerald-300 uppercase">
               Local control center
@@ -485,6 +503,7 @@ function App(): JSX.Element {
                           googleLoginAvailable={
                             authenticated().googleLoginAvailable
                           }
+                          offline={offline()}
                         />
                       }
                       when={authenticated().user}

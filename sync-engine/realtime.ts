@@ -55,13 +55,16 @@ export function isRealtimePath(request: Request): boolean {
 
 function upgradeRequired(): Response {
   return new Response("WebSocket upgrade required", {
-    headers: { upgrade: "websocket" },
+    headers: { "cache-control": "no-store", upgrade: "websocket" },
     status: 426,
   });
 }
 
 function invalidUpgrade(): Response {
-  return new Response("WebSocket upgrade failed", { status: 400 });
+  return new Response("WebSocket upgrade failed", {
+    headers: { "cache-control": "no-store" },
+    status: 400,
+  });
 }
 
 function textMessage(message: string | Buffer): string {
@@ -234,7 +237,10 @@ export function createRealtimeIntegration(
             })();
 
       if (data === undefined) {
-        return new Response("Unauthorized", { status: 401 });
+        return new Response("Unauthorized", {
+          headers: { "cache-control": "no-store" },
+          status: 401,
+        });
       }
 
       return server.upgrade(request, { data }) ? undefined : invalidUpgrade();

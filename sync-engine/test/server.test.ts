@@ -12,6 +12,7 @@ import {
   AUTH_LOGOUT_PATH,
   AUTH_SESSION_PATH,
   BRAVE_SEARCH_KEYS_PATH,
+  MANIFEST_PATH,
   OPENAI_CREDENTIALS_PATH,
   OPENAI_OAUTH_CALLBACK_PATH,
   OPENAI_OAUTH_PATH,
@@ -19,6 +20,9 @@ import {
   OPENROUTER_OAUTH_CALLBACK_PATH,
   OPENROUTER_OAUTH_PATH,
   providerCredentialDefaultPath,
+  PWA_ICON_192_PATH,
+  PWA_ICON_512_MASKABLE_PATH,
+  PWA_ICON_512_PATH,
   REALTIME_PATH,
   RUNNER_EXECUTABLE_PATH,
   RUNNER_INSTALLER_PATH,
@@ -27,6 +31,7 @@ import {
   runnerDefaultPath,
   runnerDirectoriesPath,
   RUNNERS_PATH,
+  SERVICE_WORKER_PATH,
   SESSION_MODELS_PATH,
   SESSIONS_PATH,
 } from "../../shared/routes.ts";
@@ -200,6 +205,11 @@ describe("routes", () => {
     expect(SESSIONS_PATH).toBe("/api/sessions");
     expect(RUNNER_INSTALLER_PATH).toBe("/runner/install.sh");
     expect(RUNNER_EXECUTABLE_PATH).toBe("/runner/executable");
+    expect(MANIFEST_PATH).toBe("/manifest.webmanifest");
+    expect(SERVICE_WORKER_PATH).toMatch(/service-worker/u);
+    expect(PWA_ICON_192_PATH).toBe("/icons/q-mush-192.png");
+    expect(PWA_ICON_512_PATH).toBe("/icons/q-mush-512.png");
+    expect(PWA_ICON_512_MASKABLE_PATH).toBe("/icons/q-mush-maskable-512.png");
   });
 });
 
@@ -214,7 +224,7 @@ describe("page server", () => {
     expect(body.startsWith("<!doctype html>")).toBe(true);
     expect(body).toContain("<h1");
     expect(body).toContain(">Q Mush</h1>");
-    expect(body).toContain('href="/app"');
+    expect(body).toMatch(/href="\/app"/u);
     expectStylesheetLink(body);
     expect(body).not.toContain('src="/app.js"');
   });
@@ -244,6 +254,68 @@ describe("page server", () => {
       stylesheet,
     );
     expectCompressionHeaders(response, null);
+  });
+
+  test("serves PWA assets with secure MIME and cache headers", async () => {
+    const manifestResponse = await sendRequest(MANIFEST_PATH);
+    const serviceWorkerResponse = await sendRequest(SERVICE_WORKER_PATH);
+    const iconResponses = await Promise.all([
+      sendRequest(PWA_ICON_192_PATH),
+      sendRequest(PWA_ICON_512_PATH),
+      sendRequest(PWA_ICON_512_MASKABLE_PATH),
+    ]);
+    const manifest: unknown = await manifestResponse.json();
+
+    expect(manifestResponse.headers.get("content-type")).toBe(
+      "application/manifest+json; charset=utf-8",
+    );
+    expect(manifestResponse.headers.get("cache-control")).toBe(
+      "public, max-age=3600",
+    );
+    expect(manifest).toMatchObject({
+      display: "standalone",
+      name: "Q Mush",
+      scope: "/",
+      start_url: "/app",
+    });
+    expect(serviceWorkerResponse.headers.get("content-type")).toBe(
+      "text/javascript; charset=utf-8",
+    );
+    expect(serviceWorkerResponse.headers.get("cache-control")).toBe(
+      "no-cache, no-store, must-revalidate",
+    );
+    expect(serviceWorkerResponse.headers.get("service-worker-allowed")).toMatch(
+      /^\/$/u,
+    );
+    expect(await serviceWorkerResponse.text()).toContain("q-mush-shell-");
+    for (const response of iconResponses) {
+      expect(response.status).toBeLessThan(300);
+      expect(response.headers.get("content-type")).toMatch(/^image\/png$/u);
+      expect(response.headers.get("cache-control")).toBe(
+        "public, max-age=31536000, immutable",
+      );
+      expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(100);
+    }
+  });
+
+  test("gives shell documents revalidation headers and APIs no storage", async () => {
+    const homeResponse = await sendRequest("/");
+    const appResponse = await sendRequest("/app");
+    const apiResponse = await sendRequest(AUTH_SESSION_PATH);
+
+    expect(homeResponse.headers.get("cache-control")).toBe("no-cache");
+    expect(appResponse.headers.get("cache-control")).toBe("no-cache");
+    expect(apiResponse.headers.get("cache-control")).toBe("no-store");
+  });
+
+  test("uses only the app shell as a safe navigation fallback", async () => {
+    const missingResponse = await sendRequest("/missing");
+    const apiResponse = await sendRequest("/api/missing");
+
+    expect(missingResponse.status).toBe(404);
+    expect(apiResponse.status).toBe(404);
+    expect(await missingResponse.text()).toBe("Not found");
+    expect(await apiResponse.text()).toBe("Not found");
   });
 
   test("serves the standalone runner executable", async () => {
@@ -332,6 +404,7 @@ describe("page server", () => {
     expect(loginResponse.status).toBe(503);
     expect(invalidLogoutResponse.status).toBe(405);
     expect(invalidLogoutResponse.headers.get("allow")).toBe("POST");
+    expect(invalidLogoutResponse.headers.get("cache-control")).toBe("no-store");
     expect(logoutResponse.status).toBe(204);
     expect(outsideApiResponse.status).toBe(404);
   });
