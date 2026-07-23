@@ -6,6 +6,7 @@ import { summaryFromDetail } from "../../solid/session-codec.ts";
 import { SessionController } from "../../solid/session-controller.ts";
 import {
   expectRealtimeToRemainSilent,
+  installTestFetch,
   requestUrl,
 } from "./controller-test-helpers.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
@@ -150,10 +151,7 @@ function installFetch(
     ...parameters: Parameters<typeof fetch>
   ) => Promise<Response>,
 ): void {
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = Object.assign(implementation, {
-    preconnect: originalFetch.preconnect,
-  });
+  installTestFetch(implementation);
 }
 
 function jsonFetch(response: unknown): typeof globalThis.fetch {

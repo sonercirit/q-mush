@@ -217,7 +217,7 @@ Living project memory. Update it with durable information.
   default local callback is `http://localhost:3000/api/auth/google/callback`,
   which must be registered exactly on the Google web OAuth client. Never expose
   the client secret to browser code or tracked files.
-- Prompt tests cover ownership, uniqueness, deletion, and unlinked insertion.
+- Prompt tests cover ownership, uniqueness, deletion, and insertion.
 - `DATABASE_PATH` selects SQLite (default `data/q-mush.sqlite`; `data/` is
   ignored). Update `shared/database/schema.ts` and register new tables in
   `databaseSchema`; run `bun run db:generate` and commit its migration and
