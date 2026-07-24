@@ -6,6 +6,10 @@ import {
   type ProviderCredentialStore,
   type ProviderCredentialSummary,
 } from "../shared/provider-credential-store.ts";
+import {
+  GLOBAL_WORKSPACE_ID,
+  isWorkspaceId,
+} from "../shared/workspace-model.ts";
 import type { GoogleAuth } from "./auth.ts";
 import {
   withAuthenticatedUser,
@@ -137,8 +141,28 @@ export class ProviderCredentialEndpoints {
     user: AuthenticatedUser,
   ): Promise<Response> {
     if (request.method === "GET") {
+      const workspaceId = new URL(request.url).searchParams.get("workspaceId");
+      if (
+        workspaceId !== null &&
+        !this.validateScopes(user.id, [workspaceId])
+      ) {
+        return createApiError("invalid_scope", 409);
+      }
+      const summaries = this.#credentialStore().list(
+        user.id,
+        workspaceId ?? undefined,
+      );
       return createJsonResponse({
-        credentials: this.#credentialStore().list(user.id),
+        credentials:
+          workspaceId === null
+            ? summaries.map((credential) => ({
+                accountId: credential.accountId,
+                id: credential.id,
+                isDefault: credential.isDefault,
+                label: credential.label,
+                source: credential.source,
+              }))
+            : summaries,
       });
     }
 
@@ -153,10 +177,15 @@ export class ProviderCredentialEndpoints {
 
       const apiKey = value["apiKey"];
       const label = value["label"];
+      const workspaceIds = value["workspaceIds"];
 
       if (
         typeof apiKey !== "string" ||
-        (label !== undefined && typeof label !== "string")
+        (label !== undefined && typeof label !== "string") ||
+        (workspaceIds !== undefined &&
+          (!Array.isArray(workspaceIds) ||
+            workspaceIds.length === 0 ||
+            !workspaceIds.every(isWorkspaceId)))
       ) {
         return undefined;
       }
@@ -171,7 +200,12 @@ export class ProviderCredentialEndpoints {
         return undefined;
       }
 
-      return { apiKey, label: normalizedLabel };
+      return {
+        apiKey,
+        label: normalizedLabel,
+        workspaceIds:
+          workspaceIds === undefined ? undefined : workspaceIds.map(String),
+      };
     });
 
     if (supplied === undefined) {
@@ -189,6 +223,13 @@ export class ProviderCredentialEndpoints {
       return invalidApiKeyResponse();
     }
 
+    const normalizedWorkspaceIds = supplied.workspaceIds ?? [
+      GLOBAL_WORKSPACE_ID,
+    ];
+    if (!this.validateScopes(user.id, normalizedWorkspaceIds)) {
+      return createApiError("invalid_scope", 409);
+    }
+
     try {
       const details = await this.#readCredentialDetails(apiKey, supplied.label);
       const credential = this.#credentialStore().add(
@@ -197,6 +238,7 @@ export class ProviderCredentialEndpoints {
         details,
         "api_key",
         this.#now(),
+        normalizedWorkspaceIds,
       );
       return createJsonResponse(credential, 201);
     } catch (error) {
@@ -215,8 +257,21 @@ export class ProviderCredentialEndpoints {
   readCredential(
     userId: string,
     credentialId: string,
+    workspaceId?: string,
   ): ProviderCredentialAccess | undefined {
-    return this.#store?.read(userId, credentialId);
+    return this.#store?.read(userId, credentialId, workspaceId);
+  }
+
+  validateScopes(userId: string, workspaceIds: readonly string[]): boolean {
+    if (this.#store === undefined) {
+      return false;
+    }
+    try {
+      this.#store.validateScopes(userId, workspaceIds);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   updateCredentialSecret(
@@ -234,6 +289,7 @@ export class ProviderCredentialEndpoints {
     user: AuthenticatedUser,
     secret: string,
     details: ProviderCredentialDetails,
+    workspaceIds: readonly string[],
   ): ProviderCredentialSummary {
     return this.#credentialStore().add(
       user.id,
@@ -241,6 +297,7 @@ export class ProviderCredentialEndpoints {
       details,
       "oauth",
       this.#now(),
+      workspaceIds,
     );
   }
 
@@ -248,6 +305,39 @@ export class ProviderCredentialEndpoints {
     const change = (userId: string): boolean =>
       this.#credentialStore().setDefault(userId, credentialId, this.#now());
     return setOwnedDefault(request, this.#auth, change);
+  }
+
+  async setScopes(request: Request, credentialId: string): Promise<Response> {
+    if (request.method !== "PUT") {
+      return createMethodNotAllowedResponse("PUT");
+    }
+    return await Promise.resolve(
+      this.authorize(request, async (user) => {
+        const workspaceIds = await parseJsonRequest(request, (value) => {
+          const ids = isRecord(value) ? value["workspaceIds"] : undefined;
+          return Array.isArray(ids) &&
+            ids.length > 0 &&
+            ids.every(isWorkspaceId)
+            ? ids.map(String)
+            : undefined;
+        });
+        if (workspaceIds === undefined) {
+          return createApiError("invalid_request", 400);
+        }
+        try {
+          return this.#credentialStore().setScopes(
+            user.id,
+            credentialId,
+            workspaceIds,
+            this.#now(),
+          )
+            ? createNoContentResponse()
+            : createApiError("not_found", 404);
+        } catch {
+          return createApiError("invalid_scope", 409);
+        }
+      }),
+    );
   }
 
   remove(request: Request, credentialId: string): Response {

@@ -6,6 +6,7 @@ import {
   zstdDecompressSync,
 } from "node:zlib";
 import { describe, expect, test } from "vitest";
+import { createDatabase } from "../../shared/database.ts";
 import {
   API_BASE_PATH,
   AUTH_GOOGLE_CALLBACK_PATH,
@@ -46,6 +47,8 @@ import {
   createRequestHandler,
 } from "../../sync-engine/server.ts";
 import { createSessionIntegration } from "../../sync-engine/sessions.ts";
+import { WorkspaceStore } from "../../sync-engine/workspace-store.ts";
+import { createWorkspaceIntegration } from "../../sync-engine/workspaces.ts";
 
 interface CompressionCase {
   readonly decompress: (body: Uint8Array) => Uint8Array;
@@ -78,6 +81,7 @@ const braveSearch: BraveSearchSkill = {
     Promise.resolve("Error: no Brave Search API keys are available."),
   keys: () => Promise.resolve(new Response(null, { status: 401 })),
   remove: () => new Response(null, { status: 401 }),
+  setScopes: () => Promise.resolve(new Response(null, { status: 401 })),
 };
 const pages = await renderPages();
 const runners = createRunnerIntegration(googleAuth);
@@ -90,6 +94,10 @@ function createTestRequestHandler(): (request: Request) => Promise<Response> {
     { braveSearch },
   );
   const integrations = [googleAuth, openAi, openRouter, braveSearch] as const;
+  const workspaces = createWorkspaceIntegration({
+    auth: googleAuth,
+    store: new WorkspaceStore(createDatabase(":memory:")),
+  });
   return createRequestHandler(
     clientJavaScript,
     stylesheet,
@@ -97,6 +105,7 @@ function createTestRequestHandler(): (request: Request) => Promise<Response> {
     ...integrations,
     runners,
     sessions,
+    workspaces,
     runnerExecutables,
   );
 }

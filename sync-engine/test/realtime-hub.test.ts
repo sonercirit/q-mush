@@ -52,25 +52,32 @@ test("continues publishing when one user socket is closing", () => {
   expect(active.messages).toEqual(['{"sessions":[],"type":"sessions"}']);
 });
 
-test("publishes snapshots only to the authenticated user's sockets", () => {
+test("publishes workspace events only to matching authenticated sockets", () => {
   const hub = new RealtimeHub();
   const first = new TestSocket();
   const second = new TestSocket();
+  const otherWorkspace = new TestSocket();
   const other = new TestSocket();
 
-  hub.setUser("user-1", first, true);
-  hub.setUser("user-1", second, true);
-  hub.setUser("user-2", other, true);
-  hub.publishUser("user-1", { runners: [{ id: "runner-1" }], type: "runners" });
+  hub.setUser("user-1", first, true, "workspace-1");
+  hub.setUser("user-1", second, true, "workspace-1");
+  hub.setUser("user-1", otherWorkspace, true, "workspace-2");
+  hub.setUser("user-2", other, true, "workspace-1");
+  hub.publishUser(
+    "user-1",
+    { runners: [{ id: "runner-1" }], type: "runners" },
+    "workspace-1",
+  );
 
   expect(first.messages).toEqual([
     '{"runners":[{"id":"runner-1"}],"type":"runners"}',
   ]);
   expect(second.messages).toEqual(first.messages);
+  expect(otherWorkspace.messages).toEqual([]);
   expect(other.messages).toEqual([]);
 
-  hub.setUser("user-1", first, false);
-  hub.publishUser("user-1", { sessions: [], type: "sessions" });
+  hub.setUser("user-1", first, false, "workspace-1");
+  hub.publishUser("user-1", { sessions: [], type: "sessions" }, "workspace-1");
   expect(first.messages).toHaveLength(1);
   expect(second.messages).toHaveLength(2);
 });

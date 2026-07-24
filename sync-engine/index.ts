@@ -1,5 +1,6 @@
 import { createDatabase } from "../shared/database.ts";
 import { readDatabasePath } from "../shared/database/config.ts";
+import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 import { createGoogleAuthFromEnvironment } from "./auth.ts";
 import { createBraveSearchSkillFromEnvironment } from "./brave-search.ts";
 import {
@@ -24,6 +25,8 @@ import {
   createRequestHandler,
 } from "./server.ts";
 import { createSessionIntegration } from "./sessions.ts";
+import { WorkspaceStore } from "./workspace-store.ts";
+import { createWorkspaceIntegration } from "./workspaces.ts";
 
 const database = createDatabase(readDatabasePath(Bun.env));
 const [clientJavaScript, pages, runnerExecutables, stylesheet] =
@@ -46,12 +49,17 @@ const openRouter = createOpenRouterIntegrationFromEnvironment(
   { database },
 );
 const runners = createRunnerIntegration(googleAuth, { database });
+const workspaceStore = new WorkspaceStore(database);
+const workspaces = createWorkspaceIntegration({
+  auth: googleAuth,
+  store: workspaceStore,
+});
 const realtimeHub = new RealtimeHub();
 const sessions = createSessionIntegration(
   googleAuth,
   runners,
   { openai: openAi, openrouter: openRouter },
-  { braveSearch, database, realtime: realtimeHub },
+  { braveSearch, database, realtime: realtimeHub, workspaces },
 );
 const realtime = createRealtimeIntegration({
   auth: googleAuth,
@@ -59,6 +67,9 @@ const realtime = createRealtimeIntegration({
   runnerVersion: runnerExecutables.version,
   runners,
   sessions,
+  workspaceExists: (userId, workspaceId) =>
+    workspaceId === GLOBAL_WORKSPACE_ID ||
+    workspaces.exists(userId, workspaceId),
 });
 const handleRequest = createRequestHandler(
   clientJavaScript,
@@ -70,6 +81,7 @@ const handleRequest = createRequestHandler(
   braveSearch,
   runners,
   sessions,
+  workspaces,
   runnerExecutables,
 );
 let callbackServer: Bun.Server<undefined> | undefined;

@@ -51,7 +51,7 @@ test("coalesces session deltas into one update per animation frame", () => {
     },
     setTimeout: () => 1,
   });
-  connection.start();
+  connection.start("workspace-1");
 
   for (const event of [
     {

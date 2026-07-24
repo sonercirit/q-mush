@@ -15,6 +15,7 @@ import type { SessionIntegration } from "./sessions.ts";
 interface UserSocketData {
   readonly kind: "user";
   readonly user: AuthenticatedUser;
+  readonly workspaceId: string;
 }
 
 interface RunnerSocketData {
@@ -31,6 +32,7 @@ interface RealtimeIntegrationOptions {
   readonly runnerVersion: string;
   readonly runners: RunnerIntegration;
   readonly sessions: SessionIntegration;
+  readonly workspaceExists: (userId: string, workspaceId: string) => boolean;
 }
 
 interface RealtimeUpgradeServer {
@@ -86,29 +88,54 @@ function sendCommand(
 export function createRealtimeIntegration(
   options: RealtimeIntegrationOptions,
 ): RealtimeIntegration {
-  const publishSessions = (userId: string): void => {
-    options.hub.publishUser(userId, {
-      sessions: options.sessions.listForUser(userId),
-      type: "sessions",
-    });
+  const publishSessions = (userId: string, workspaceId: string): void => {
+    options.hub.publishUser(
+      userId,
+      {
+        sessions: options.sessions.listForUser(userId, workspaceId),
+        type: "sessions",
+      },
+      workspaceId,
+    );
   };
-  const publishRunners = (userId: string): void => {
-    options.hub.publishUser(userId, {
-      runners: options.runners.listForUser(userId),
-      type: "runners",
-    });
+  const publishRunners = (userId: string, workspaceId: string): void => {
+    options.hub.publishUser(
+      userId,
+      {
+        runners: options.runners.listForUser(userId, workspaceId),
+        type: "runners",
+      },
+      workspaceId,
+    );
   };
-  const publishUserSnapshots = (userId: string): void => {
-    publishRunners(userId);
-    publishSessions(userId);
+  const publishRunnerActivity = (userId: string): void => {
+    for (const workspaceId of options.hub.userWorkspaces(userId)) {
+      publishRunners(userId, workspaceId);
+    }
+  };
+  const publishUserSnapshots = (userId: string, workspaceId: string): void => {
+    publishRunners(userId, workspaceId);
+    publishSessions(userId, workspaceId);
   };
   options.sessions.onChange((userId, sessionId) => {
-    const session = options.sessions.detailForUser(userId, sessionId);
-
-    if (session !== undefined) {
-      options.hub.publishUser(userId, { session, type: "session" });
+    const sessionWorkspaceIds = options.hub.userWorkspaces(userId);
+    for (const workspaceId of sessionWorkspaceIds) {
+      const session = options.sessions.detailForUser(
+        userId,
+        sessionId,
+        workspaceId,
+      );
+      if (session === undefined) {
+        continue;
+      }
+      options.hub.publishUser(
+        userId,
+        { session, type: "session" },
+        workspaceId,
+      );
+      publishSessions(userId, workspaceId);
+      break;
     }
-    publishSessions(userId);
   });
 
   const websocket: Bun.WebSocketHandler<QmushWebSocketData> = {
@@ -119,11 +146,16 @@ export function createRealtimeIntegration(
           const disconnected = options.hub.setRunner(runner.id, socket, false);
           if (disconnected !== undefined) {
             options.runners.disconnected(runner);
-            publishRunners(runner.userId);
+            publishRunnerActivity(runner.userId);
           }
         }
       } else {
-        options.hub.setUser(socket.data.user.id, socket, false);
+        options.hub.setUser(
+          socket.data.user.id,
+          socket,
+          false,
+          socket.data.workspaceId,
+        );
       }
     },
     idleTimeout: 0,
@@ -166,14 +198,14 @@ export function createRealtimeIntegration(
               sendCommand(socket, command),
             );
             options.sessions.runnerConnected();
-            publishRunners(connected.userId);
+            publishRunnerActivity(connected.userId);
             return;
           }
 
           const event = readRunnerClientMessage(message);
           const connectedRunner = socket.data.runner;
           options.runners.seen(connectedRunner);
-          publishRunners(connectedRunner.userId);
+          publishRunnerActivity(connectedRunner.userId);
 
           if (event.type === "result") {
             options.sessions.completeRunnerCommand(
@@ -186,7 +218,7 @@ export function createRealtimeIntegration(
         }
 
         readQmushClientMessage(message);
-        publishUserSnapshots(socket.data.user.id);
+        publishUserSnapshots(socket.data.user.id, socket.data.workspaceId);
       } catch {
         try {
           socket.close(1008, "Invalid message");
@@ -199,8 +231,13 @@ export function createRealtimeIntegration(
       if (socket.data.kind === "runner") {
         // Runner registration starts with a metadata message after the upgrade.
       } else {
-        options.hub.setUser(socket.data.user.id, socket, true);
-        publishUserSnapshots(socket.data.user.id);
+        options.hub.setUser(
+          socket.data.user.id,
+          socket,
+          true,
+          socket.data.workspaceId,
+        );
+        publishUserSnapshots(socket.data.user.id, socket.data.workspaceId);
       }
     },
     perMessageDeflate: true,
@@ -208,7 +245,8 @@ export function createRealtimeIntegration(
 
   return {
     upgrade(request, server) {
-      const pathname = new URL(request.url).pathname;
+      const requestUrl = new URL(request.url);
+      const pathname = requestUrl.pathname;
 
       if (pathname !== REALTIME_PATH && pathname !== RUNNER_REALTIME_PATH) {
         return undefined;
@@ -222,9 +260,16 @@ export function createRealtimeIntegration(
         pathname === REALTIME_PATH
           ? (() => {
               const user = options.auth.authenticatedUser(request);
-              return user === null
+              const workspaceId = requestUrl.searchParams.get("workspaceId");
+              return user === null ||
+                workspaceId === null ||
+                !options.workspaceExists(user.id, workspaceId)
                 ? undefined
-                : { kind: "user" as const, user };
+                : {
+                    kind: "user" as const,
+                    user,
+                    workspaceId,
+                  };
             })()
           : (() => {
               const token = options.runners.runnerToken(request);

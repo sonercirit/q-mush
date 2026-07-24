@@ -2,6 +2,7 @@ import type { JSX } from "solid-js";
 import { afterEach, expect, test, vi } from "vitest";
 import type { AgentModelCatalog } from "../../shared/agent-configuration.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
+import { GLOBAL_WORKSPACE_ID } from "../../shared/workspace-model.ts";
 import {
   OPENAI_PANEL,
   ProviderPanel,
@@ -17,11 +18,18 @@ import {
   type RunnerViewState,
 } from "../runner-client.tsx";
 import { RunnerController } from "../runner-controller.ts";
-import { SessionPanel, type SessionViewState } from "../session-client.tsx";
+import type { SessionViewState } from "../session-client.tsx";
 import { summaryFromDetail } from "../session-codec.ts";
 import { SessionController } from "../session-controller.ts";
 import { SessionList } from "../session-detail-client.tsx";
+import { SessionPanel } from "../session-panel-view.tsx";
 import { initialSessionViewState } from "../session-state.ts";
+import {
+  WorkspacePanel,
+  WorkspaceSwitcher,
+  createWorkspaceViewState,
+} from "../workspace-client.tsx";
+import { WorkspaceController } from "../workspace-controller.ts";
 import {
   clickTestButton,
   disposeTestViews,
@@ -103,6 +111,39 @@ function stubSessionRequests(catalog: AgentModelCatalog): void {
 
 afterEach(() => {
   disposeTestViews(disposals);
+});
+
+test("workspace selection updates mounted workspace views immediately", () => {
+  const reactive = createReactiveState(
+    createWorkspaceViewState({
+      defaultWorkspaceId: "workspace-1",
+      workspaces: [
+        { id: "workspace-1", isDefault: true, name: "Default" },
+        { id: "workspace-2", isDefault: false, name: "Projects" },
+      ],
+    }),
+  );
+  const controller = new WorkspaceController(undefined, reactive);
+  const container = mount(() => (
+    <>
+      <WorkspaceSwitcher controller={controller} />
+      <WorkspacePanel controller={controller} />
+      <span data-selected-workspace="true">{controller.selectedIdView()}</span>
+    </>
+  ));
+  const selector = query(container, "select");
+  if (!(selector instanceof HTMLSelectElement)) {
+    throw new TypeError("The workspace switcher is not a select");
+  }
+
+  expect(selector.value).toBe(GLOBAL_WORKSPACE_ID);
+  controller.select("workspace-2");
+
+  expect(selector.value).toBe("workspace-2");
+  expect(query(container, "[data-selected-workspace='true']").textContent).toBe(
+    "workspace-2",
+  );
+  expect(container.textContent).toContain("Selected");
 });
 
 test("provider loading, error, retry, and list updates preserve the panel", async () => {

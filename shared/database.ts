@@ -8,9 +8,12 @@ import {
   agentMessages,
   agentSessions,
   providerCredentials,
+  providerCredentialWorkspaces,
   runners,
+  runnerWorkspaces,
   sessions,
   users,
+  workspaces,
 } from "./database/schema.ts";
 
 const MIGRATIONS_DIRECTORY = fileURLToPath(
@@ -20,9 +23,12 @@ const databaseSchema = {
   agentMessages,
   agentSessions,
   providerCredentials,
+  providerCredentialWorkspaces,
   runners,
+  runnerWorkspaces,
   sessions,
   users,
+  workspaces,
 };
 export type AppDatabase = BunSQLiteDatabase<typeof databaseSchema> & {
   readonly $client: Database;

@@ -2,6 +2,10 @@ import type { AuthenticatedUser } from "../shared/auth-model.ts";
 import type { ProviderCredentialDetails } from "../shared/provider-credential-store.ts";
 import { APP_PATH } from "../shared/routes.ts";
 import {
+  GLOBAL_WORKSPACE_ID,
+  isWorkspaceId,
+} from "../shared/workspace-model.ts";
+import {
   createCookie,
   createMethodNotAllowedResponse,
   createRedirect,
@@ -19,7 +23,6 @@ import {
   type FlowCookies,
   type OAuthRuntime,
 } from "./oauth.ts";
-import type { ProviderCredentialEndpoints } from "./provider-credentials.ts";
 
 export interface AuthorizationRequest {
   readonly callbackUri: string;
@@ -48,16 +51,31 @@ export interface ConnectedAccountOAuthConfiguration {
   readonly redirectUri?: string;
   readonly resultParameter: string;
   readonly userCookie: string;
+  readonly workspaceCookie: string;
+}
+
+export interface ConnectedAccountCredentialWriter {
+  addConnectedAccount(
+    user: AuthenticatedUser,
+    secret: string,
+    details: ProviderCredentialDetails,
+    workspaceIds: readonly string[],
+  ): unknown;
+  authorize<T extends Promise<Response> | Response>(
+    request: Request,
+    action: (user: AuthenticatedUser) => T,
+  ): Response | T;
+  validateScopes(userId: string, workspaceIds: readonly string[]): boolean;
 }
 
 export class ConnectedAccountOAuth {
   readonly #configuration: ConnectedAccountOAuthConfiguration;
-  readonly #credentials: ProviderCredentialEndpoints;
+  readonly #credentials: ConnectedAccountCredentialWriter;
   readonly #runtime: OAuthRuntime;
 
   constructor(
     configuration: ConnectedAccountOAuthConfiguration,
-    credentials: ProviderCredentialEndpoints,
+    credentials: ConnectedAccountCredentialWriter,
     runtime: OAuthRuntime,
   ) {
     this.#configuration = configuration;
@@ -93,8 +111,28 @@ export class ConnectedAccountOAuth {
       this.#configuration.flowCookies.path,
       secure,
     );
+    const requestedWorkspaceId = new URL(request.url).searchParams.get(
+      "workspaceId",
+    );
+    const workspaceId = requestedWorkspaceId ?? GLOBAL_WORKSPACE_ID;
+    if (
+      !isWorkspaceId(workspaceId) ||
+      !this.#credentials.validateScopes(user.id, [workspaceId])
+    ) {
+      return new Response("Invalid workspace scope", { status: 409 });
+    }
+    const workspaceCookie = createFlowCookie(
+      this.#configuration.workspaceCookie,
+      workspaceId,
+      this.#configuration.flowCookies.path,
+      secure,
+    );
 
-    return createRedirect(authorizationUrl, [...cookies, userCookie]);
+    return createRedirect(authorizationUrl, [
+      ...cookies,
+      userCookie,
+      workspaceCookie,
+    ]);
   }
 
   async complete(request: Request): Promise<Response> {
@@ -122,6 +160,13 @@ export class ConnectedAccountOAuth {
         this.#configuration.flowCookies.path,
         secure,
       ),
+      createCookie(
+        this.#configuration.workspaceCookie,
+        "",
+        0,
+        this.#configuration.flowCookies.path,
+        secure,
+      ),
     ];
     const callback = readOAuthCallback(
       request,
@@ -143,6 +188,18 @@ export class ConnectedAccountOAuth {
       return this.#appRedirect(request, "invalid_state", clearedCookies);
     }
 
+    const workspaceId = readCookie(
+      request,
+      this.#configuration.workspaceCookie,
+    );
+    if (
+      workspaceId === undefined ||
+      !isWorkspaceId(workspaceId) ||
+      !this.#credentials.validateScopes(user.id, [workspaceId])
+    ) {
+      return this.#appRedirect(request, "invalid_state", clearedCookies);
+    }
+
     try {
       const credential = await this.#configuration.exchangeCredential({
         code: callback.code,
@@ -153,6 +210,7 @@ export class ConnectedAccountOAuth {
         user,
         credential.secret,
         credential.details,
+        [workspaceId],
       );
       return this.#appRedirect(request, "connected", clearedCookies);
     } catch {

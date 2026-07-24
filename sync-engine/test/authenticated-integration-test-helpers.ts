@@ -4,8 +4,10 @@ import {
   providerCredentials,
   sessions,
   users,
+  workspaces,
 } from "../../shared/database/schema.ts";
 import { SYSTEM_ID } from "../../shared/ids.ts";
+import { DEFAULT_WORKSPACE_NAME } from "../../shared/workspace-model.ts";
 import {
   createGoogleAuthFromEnvironment,
   type GoogleAuth,
@@ -14,6 +16,8 @@ import {
 export const TEST_NOW = 1_700_000_000_000;
 export const TEST_USER_ID = "018bcfe5-6800-7000-8000-000000000021";
 export const TEST_FOREIGN_USER_ID = "018bcfe5-6800-7000-8000-000000000023";
+export const TEST_WORKSPACE_ID = "018bcfe5-6800-7000-8000-000000000020";
+const TEST_FOREIGN_WORKSPACE_ID = "018bcfe5-6800-7000-8000-000000000024";
 const SESSION_ID = "018bcfe5-6800-7000-8000-000000000022";
 const SESSION_TOKEN = "authenticated-session";
 
@@ -32,6 +36,16 @@ export function createAuthenticatedTestDatabase(): AppDatabase {
       googleSubject: "google-user",
       id: TEST_USER_ID,
       name: "Mush Room",
+    })
+    .run();
+  database
+    .insert(workspaces)
+    .values({
+      ...testAuditFields(),
+      id: TEST_WORKSPACE_ID,
+      isDefault: true,
+      name: DEFAULT_WORKSPACE_NAME,
+      userId: TEST_USER_ID,
     })
     .run();
   database
@@ -62,16 +76,43 @@ export function createAuthenticatedTestContext(): {
 
 export function addTestUser(
   database: AppDatabase,
-  id = TEST_FOREIGN_USER_ID,
+  userId = TEST_FOREIGN_USER_ID,
+  workspaceId = TEST_FOREIGN_WORKSPACE_ID,
 ): void {
   database
     .insert(users)
     .values({
       ...testAuditFields(SYSTEM_ID),
-      email: `${id}@example.test`,
-      googleSubject: `google-${id}`,
-      id,
+      email: `${userId}@example.test`,
+      googleSubject: `google-${userId}`,
+      id: userId,
       name: "Test User",
+    })
+    .run();
+  database
+    .insert(workspaces)
+    .values({
+      ...testAuditFields(userId),
+      id: workspaceId,
+      isDefault: true,
+      name: DEFAULT_WORKSPACE_NAME,
+      userId,
+    })
+    .run();
+}
+
+export function addTestWorkspace(
+  database: AppDatabase,
+  workspaceId: string,
+  name = "Projects",
+): void {
+  database
+    .insert(workspaces)
+    .values({
+      ...testAuditFields(),
+      id: workspaceId,
+      name,
+      userId: TEST_USER_ID,
     })
     .run();
 }
@@ -84,6 +125,7 @@ export function addTestProviderCredential(
     readonly accountId?: string | null;
     readonly isDefault?: boolean;
     readonly isDeleted?: boolean;
+    readonly isGlobal?: boolean;
     readonly label?: string;
     readonly source?: "api_key" | "oauth";
     readonly userId?: string;
@@ -101,6 +143,7 @@ export function addTestProviderCredential(
       encryptedCredential: "test-encrypted-credential",
       id,
       isDefault: options.isDefault ?? false,
+      isGlobal: options.isGlobal ?? true,
       label: options.label ?? "Test credential",
       provider,
       providerAccountId: options.accountId ?? null,

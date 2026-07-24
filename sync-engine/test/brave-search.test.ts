@@ -6,17 +6,24 @@ import { BRAVE_SEARCH_KEYS_PATH } from "../../shared/routes.ts";
 import { createBraveSearchSkillFromEnvironment } from "../../sync-engine/brave-search.ts";
 import type { OAuthDependencies } from "../../sync-engine/oauth.ts";
 import {
+  addTestUser,
+  addTestWorkspace,
   createAuthenticatedRequest,
   createAuthenticatedTestContext,
   TEST_NOW,
   TEST_USER_ID,
+  TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { takeValue } from "./oauth-test-helpers.ts";
 
 const FIRST_KEY_ID = "018bcfe5-6800-7000-8000-000000000081";
 const SECOND_KEY_ID = "018bcfe5-6800-7000-8000-000000000082";
+const THIRD_ID = "018bcfe5-6800-7000-8000-000000000083";
+const FOURTH_ID = "018bcfe5-6800-7000-8000-000000000084";
 const FIRST_KEY = "BSA-first-secret";
 const SECOND_KEY = "BSA-second-secret";
+const OTHER_USER_ID = "018bcfe5-6800-7000-8000-000000000091";
+const OTHER_WORKSPACE_ID = "018bcfe5-6800-7000-8000-000000000092";
 const ENVIRONMENT = {
   BRAVE_SEARCH_CREDENTIAL_KEY: Buffer.alloc(32, 11).toString("base64url"),
 };
@@ -56,7 +63,7 @@ function createSetup() {
       Response.json({ message: "invalid key" }, { status: 401 }),
     );
   };
-  const ids = [FIRST_KEY_ID, SECOND_KEY_ID];
+  const ids = [FIRST_KEY_ID, SECOND_KEY_ID, THIRD_ID, FOURTH_ID];
   const skill = createBraveSearchSkillFromEnvironment(ENVIRONMENT, auth, {
     database,
     fetch,
@@ -107,6 +114,23 @@ describe("Brave Search skill", () => {
       ],
     });
 
+    const scoped = await setup.skill.keys(
+      createAuthenticatedRequest(
+        `${BRAVE_SEARCH_KEYS_PATH}?workspaceId=${TEST_WORKSPACE_ID}`,
+      ),
+    );
+    const scopedBody = await scoped.text();
+    expect(scoped.status).toBe(200);
+    expect(scopedBody).not.toContain(FIRST_KEY);
+    expect(scopedBody).not.toContain(SECOND_KEY);
+    expect(scopedBody).not.toContain("encryptedCredential");
+    expect(JSON.parse(scopedBody)).toMatchObject({
+      credentials: [
+        { id: FIRST_KEY_ID, isGlobal: true, workspaceIds: [] },
+        { id: SECOND_KEY_ID, isGlobal: true, workspaceIds: [] },
+      ],
+    });
+
     const stored = setup.database.select().from(providerCredentials).all();
     const encryptedCredentials = stored.map(
       ({ encryptedCredential }) => encryptedCredential,
@@ -114,7 +138,7 @@ describe("Brave Search skill", () => {
     expect(encryptedCredentials).not.toContain(FIRST_KEY);
     expect(encryptedCredentials).not.toContain(SECOND_KEY);
 
-    const output = await setup.skill.execute(TEST_USER_ID, {
+    const output = await setup.skill.execute(TEST_USER_ID, TEST_WORKSPACE_ID, {
       count: 2,
       query: "bun typescript",
     });
@@ -191,6 +215,7 @@ describe("Brave Search skill", () => {
 
     const running = skill.execute(
       TEST_USER_ID,
+      TEST_WORKSPACE_ID,
       { query: "cancel me" },
       controller.signal,
     );
@@ -200,6 +225,66 @@ describe("Brave Search skill", () => {
 
     await expect(running).rejects.toMatchObject({ name: "AbortError" });
     database.$client.close();
+  });
+
+  test("uses only keys available in the selected workspace", async () => {
+    const setup = createSetup();
+    const otherWorkspaceId = "018bcfe5-6800-7000-8000-000000000093";
+    addTestWorkspace(setup.database, otherWorkspaceId, "Other workspace");
+    for (const key of [
+      {
+        apiKey: FIRST_KEY,
+        label: "Scoped",
+        workspaceIds: [TEST_WORKSPACE_ID],
+      },
+      {
+        apiKey: SECOND_KEY,
+        label: "Other",
+        workspaceIds: [otherWorkspaceId],
+      },
+    ]) {
+      expect(
+        (
+          await setup.skill.keys(
+            createAuthenticatedRequest(BRAVE_SEARCH_KEYS_PATH, key, "POST"),
+          )
+        ).status,
+      ).toBe(201);
+    }
+
+    expect(
+      await setup.skill.execute(TEST_USER_ID, TEST_WORKSPACE_ID, {
+        query: "scope",
+      }),
+    ).toBe("Error: Brave Search failed with every saved API key.");
+    expect(
+      setup.requests.map((request) =>
+        request.headers.get("x-subscription-token"),
+      ),
+    ).toEqual([FIRST_KEY]);
+    setup.database.$client.close();
+  });
+
+  test("rejects a key scoped to another user's workspace", async () => {
+    const setup = createSetup();
+    addTestUser(setup.database, OTHER_USER_ID, OTHER_WORKSPACE_ID);
+
+    const response = await setup.skill.keys(
+      createAuthenticatedRequest(
+        BRAVE_SEARCH_KEYS_PATH,
+        {
+          apiKey: FIRST_KEY,
+          label: "Cross-user key",
+          workspaceIds: [OTHER_WORKSPACE_ID],
+        },
+        "POST",
+      ),
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "invalid_scope" });
+    expect(setup.database.select().from(providerCredentials).all()).toEqual([]);
+    setup.database.$client.close();
   });
 
   test("requires login and reports unconfigured encrypted storage", async () => {
@@ -236,9 +321,11 @@ describe("Brave Search skill", () => {
         )
       ).status,
     ).toBe(503);
-    expect(await unconfigured.execute(TEST_USER_ID, { query: "test" })).toBe(
-      "Error: Brave Search credential storage is not configured.",
-    );
+    expect(
+      await unconfigured.execute(TEST_USER_ID, TEST_WORKSPACE_ID, {
+        query: "test",
+      }),
+    ).toBe("Error: Brave Search credential storage is not configured.");
     database.$client.close();
   });
 });

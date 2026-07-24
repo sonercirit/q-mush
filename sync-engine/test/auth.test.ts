@@ -29,7 +29,8 @@ const NOW = 1_700_000_000_000;
 const LOGOUT_NOW = NOW + 1000;
 const SESSION_EXPIRES_AT = NOW + 7 * 24 * 60 * 60 * 1000;
 const USER_ID = "018bcfe5-6800-7000-8000-000000000001";
-const SESSION_ID = "018bcfe5-6800-7000-8000-000000000002";
+const WORKSPACE_ID = "018bcfe5-6800-7000-8000-000000000002";
+const SESSION_ID = "018bcfe5-6800-7000-8000-000000000003";
 const EXPECTED_USER = {
   email: "mushroom@example.com",
   id: USER_ID,
@@ -98,7 +99,7 @@ function createTokenGenerator(): () => string {
 }
 
 function createIdGenerator(): (timestamp: number) => string {
-  const ids = [USER_ID, SESSION_ID];
+  const ids = [USER_ID, WORKSPACE_ID, SESSION_ID];
 
   return (timestamp) => {
     if (timestamp !== NOW) {

@@ -2,9 +2,9 @@ import { readFileSync } from "node:fs";
 import { afterEach, expect, test, vi } from "vitest";
 import { createProviderViewState } from "../provider-client.tsx";
 import { createRunnerViewState } from "../runner-client.tsx";
-import { SessionPanel } from "../session-client.tsx";
 import { summaryFromDetail } from "../session-codec.ts";
 import { SessionController } from "../session-controller.ts";
+import { SessionPanel } from "../session-panel-view.tsx";
 import {
   clickTestButton,
   disposeTestViews,

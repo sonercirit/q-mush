@@ -14,6 +14,7 @@ import {
   createAuthenticatedTestDatabase,
   TEST_NOW,
   TEST_USER_ID,
+  TEST_WORKSPACE_ID,
   testAuditFields,
 } from "./authenticated-integration-test-helpers.ts";
 import { takeValue } from "./oauth-test-helpers.ts";
@@ -63,6 +64,7 @@ function testSessionInput() {
     tools: AGENT_SESSION_TOOL_NAMES,
     userId: TEST_USER_ID,
     workingDirectory: "/work/project",
+    workspaceId: TEST_WORKSPACE_ID,
   };
 }
 

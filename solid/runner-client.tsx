@@ -1,7 +1,9 @@
 import { Show, type Accessor, type JSX } from "solid-js";
 import { isRecord, readNullableString } from "../shared/auth-model.ts";
 import type { RunnerStatus, RunnerSummary } from "../shared/runner-model.ts";
+import type { WorkspaceList } from "../shared/workspace-model.ts";
 import { Collection } from "./collection.tsx";
+import { ConnectionScopeEditor } from "./connection-scope-client.tsx";
 import { DefaultableActions } from "./defaultable-actions.tsx";
 import { renderDebugBoundary } from "./render-debug.tsx";
 
@@ -64,20 +66,26 @@ function readRunner(value: unknown): RunnerSummary {
 
   const architecture = readNullableString(value["architecture"]);
   const id = value["id"];
+  const isGlobal = value["isGlobal"];
   const lastSeenAt = value["lastSeenAt"];
   const name = readNullableString(value["name"]);
   const platform = readNullableString(value["platform"]);
   const status = value["status"];
+  const workspaceIds = value["workspaceIds"];
 
   if (
     architecture === undefined ||
     typeof id !== "string" ||
     typeof value["isDefault"] !== "boolean" ||
+    (isGlobal !== undefined && typeof isGlobal !== "boolean") ||
     (lastSeenAt !== null &&
       (typeof lastSeenAt !== "number" || !Number.isFinite(lastSeenAt))) ||
     name === undefined ||
     platform === undefined ||
-    (status !== "offline" && status !== "online" && status !== "pending")
+    (status !== "offline" && status !== "online" && status !== "pending") ||
+    (workspaceIds !== undefined &&
+      (!Array.isArray(workspaceIds) ||
+        !workspaceIds.every((workspaceId) => typeof workspaceId === "string")))
   ) {
     throw new Error("The server returned an invalid runner");
   }
@@ -86,10 +94,14 @@ function readRunner(value: unknown): RunnerSummary {
     architecture,
     id,
     isDefault: value["isDefault"],
+    ...(isGlobal === undefined ? {} : { isGlobal }),
     lastSeenAt,
     name,
     platform,
     status,
+    ...(workspaceIds === undefined
+      ? {}
+      : { workspaceIds: workspaceIds.map(String) }),
   };
 }
 
@@ -159,6 +171,7 @@ interface RunnerItemProps {
   readonly controller: RunnerPanelController;
   readonly runner: RunnerSummary;
   readonly state: RunnerViewState;
+  readonly workspaces?: Accessor<WorkspaceList | undefined>;
 }
 
 function RunnerActions(props: RunnerItemProps): JSX.Element {
@@ -213,6 +226,20 @@ function RunnerItem(props: RunnerItemProps): JSX.Element {
           <p class="path-wrap mt-1 text-xs text-slate-500">
             {runnerActivity(props.runner)}
           </p>
+          <p class="mt-1 text-xs text-slate-500">
+            {props.runner.isGlobal === true
+              ? "Scope: Global"
+              : `Scope: ${String(props.runner.workspaceIds?.length ?? 0)} workspace(s)`}
+          </p>
+          <Show when={props.workspaces}>
+            {(workspaces) => (
+              <ConnectionScopeEditor
+                connection={props.runner}
+                controller={props.controller}
+                workspaces={workspaces()}
+              />
+            )}
+          </Show>
         </div>
       </div>
       <RunnerActions {...props} />
@@ -272,6 +299,7 @@ function RunnerSetup(props: RunnerPanelProps): JSX.Element {
 
 interface RunnerControllerProps {
   readonly controller: RunnerPanelController;
+  readonly workspaces?: Accessor<WorkspaceList | undefined>;
 }
 
 function RunnerList(props: RunnerControllerProps): JSX.Element {
@@ -303,6 +331,9 @@ function RunnerList(props: RunnerControllerProps): JSX.Element {
           controller: props.controller,
           runner,
           state: state(),
+          ...(props.workspaces === undefined
+            ? {}
+            : { workspaces: props.workspaces }),
         };
         return <RunnerItem {...item} />;
       }}
@@ -345,7 +376,12 @@ export function RunnerPanel(props: RunnerControllerProps): JSX.Element {
       </header>
 
       <RunnerSetup controller={props.controller} state={state()} />
-      <RunnerList controller={props.controller} />
+      <RunnerList
+        controller={props.controller}
+        {...(props.workspaces === undefined
+          ? {}
+          : { workspaces: props.workspaces })}
+      />
     </section>
   );
 }
@@ -357,4 +393,5 @@ interface RunnerPanelController {
   load(): Promise<void>;
   remove(runnerId: string): Promise<void>;
   setDefault(runnerId: string): Promise<void>;
+  setScopes(runnerId: string, workspaceIds: readonly string[]): Promise<void>;
 }

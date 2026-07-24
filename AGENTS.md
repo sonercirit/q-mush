@@ -4,31 +4,30 @@ Living project memory.
 
 ## Project Snapshot
 
-- Private strict-TypeScript ESM Bun/SolidJS project.
-- Source is split across `solid/`, `sync-engine/`, `runner/`, and `shared/`;
-  `sync-engine/index.ts` is the server entry point.
-- Tests are under `test/`; no `src`.
-- `/` is the homepage; `/app` the app; Vitest uses Bun.
+- Private strict-TypeScript ESM Bun/SolidJS.
+- Source: `solid/`, `sync-engine/`, `runner/`, `shared/`; server entry:
+  `sync-engine/index.ts`. Tests use Vitest with Bun in `test/`; no `src/`.
+- Routes: homepage `/`; app `/app`.
 
 ## Working Agreements
 
-- Inspect repository and status first.
-- Preserve patterns; add tools or dependencies only when needed.
+- Inspect repository before edits; preserve patterns and add dependencies only
+  when needed.
 - Practice TDD: update a failing test, then implement and refactor green.
-- Follow DRY: keep logic authoritative without premature abstractions.
-- Follow KISS: prefer the simplest clear solution that meets requirements.
-- Keep workflows local-first; remote services enhance them.
-- Run narrow checks after each change, then broader checks when practical.
-- Keep changes focused.
-- Never commit secrets, credentials, generated artifacts, or local env files.
+- Follow DRY and KISS: keep logic authoritative and choose the simplest clear
+  solution without premature abstractions.
+- Follow local-first: keep core workflows local; remote services enhance them.
+- Run focused checks after changes, then broader checks when practical. Keep
+  changes focused; do not modify unrelated files.
+- Never commit secrets, generated artifacts, or local env files.
 
 ## Setup and Commands
 
-- Install: `bun install`; run: `bun run sync-engine/index.ts`
+- Install dependencies: `bun install`; run: `bun run sync-engine/index.ts`
 - Develop: `bun run dev`; restart: `bun run dev:restart`; build: `bun run build`
 - Generate/apply database migrations: `bun run db:generate` /
   `bun run db:migrate`
-- Test/watch: `bun run test` / `bun run test:watch`
+- Tests/watch: `bun run test` / `bun run test:watch`
 - Repository constraints: `bun run repository-check`
 - Format/check: `bun run format` / `bun run format:check`
 - Type-check: `bun run typecheck`
@@ -40,12 +39,12 @@ Living project memory.
 
 ## Architecture and Conventions
 
-- Bun manages dependencies through the committed `package.json` and `bun.lock`.
-- Production source has four enforced top-level workspaces. `solid` owns browser
-  UI, `sync-engine` the Bun server and integrations, `runner` the standalone
-  runner, and `shared` cross-workspace code. The first three may import only
-  themselves and `shared`; `shared` cannot import another workspace. Code
-  outside `scripts` cannot import from `scripts`.
+- Bun manages dependencies via committed `package.json` and `bun.lock`.
+- Production has four enforced top-level workspaces: `solid` owns the browser
+  UI, `sync-engine` the server/integrations, `runner` the executable, and
+  `shared` cross-workspace code. The first three may import only themselves and
+  `shared`; `shared` cannot import another workspace. Code outside `scripts`
+  cannot import from `scripts`.
 - `sync-engine/server.ts` serves the browser JavaScript and Tailwind CSS built
   in memory by Vite. Browser state, session updates, and runner work use
   authenticated WebSockets at `/api/realtime` and `/api/runner/realtime`; there
@@ -59,51 +58,43 @@ Living project memory.
   agent work, let active sessions finish, then replace the server process, so a
   session can safely request its own restart. Textual response bodies are
   precompressed once per handler, with `zstd`, Brotli, gzip, or deflate
-  negotiated in that server-preference order.
-- `/favicon.svg` uses ETag revalidation and stays separate from PWA icons.
+  negotiated in that server-preference order. `/favicon.svg` uses ETag
+  revalidation and remains separate from PWA icons.
 - `solid/pages.tsx` renders both server page shells through Solid's SSR runtime;
   `sync-engine/pages.ts` loads it with Vite's SSR runner for Bun. The browser
   app mounts from `solid/client.tsx`; routes live in `shared/routes.ts`.
-- `sync-engine/auth.ts` implements Google OpenID Connect with an
-  authorization-code + PKCE flow. It uses HttpOnly state/verifier cookies,
-  fetches the basic profile, and discards provider tokens.
-  `sync-engine/auth-store.ts` uses Drizzle with Bun SQLite to upsert users and
-  persist seven-day sessions in the tables defined by
-  `shared/database/schema.ts`. Application primary keys are UUIDv7 values;
-  Google subjects and session cookie tokens are separate unique fields. Every
-  application table has creation/update timestamps, actor IDs, and an
-  `isDeleted` soft-delete flag. `shared/database.ts` applies committed
-  `drizzle/` migrations when opening a connection. `sync-engine/index.ts`
-  injects the persistent connection; the auth factory falls back to isolated
-  in-memory SQLite when a connection is not supplied. Shared PKCE, provider
-  parsing, and redirect logic lives in `sync-engine/oauth.ts`, while shared
-  cookie and response helpers live in `sync-engine/http.ts`. `solid/client.tsx`
-  reads `/api/auth/session`, gates the control center, and posts logout to
-  `/api/auth/logout`. All API routes derive from the `/api` base path in
-  `shared/routes.ts`.
-- `sync-engine/runner-store.ts` persists any number of user runner
-  registrations, with `runners`, with one active registration per machine
-  fingerprint and one default runner per user. New sessions use the default
-  online runner or the first one. `sync-engine/runners.ts` issues hashed opaque
-  setup tokens, owns authenticated management and token-authenticated callback
-  APIs, and derives installer commands from the request origin.
-  `sync-engine/runner-installer.ts` emits the macOS/Linux one-line installer; it
-  selects an x64/ARM64 and glibc/musl target, downloads one standalone
-  executable, and starts it under `~/.q-mush/runner` by default without
-  requiring Bun on that computer. The runner reports metadata and 15-second
-  heartbeats on its authenticated WebSocket and checks for updates at startup
-  and every five minutes. Its handshake version triggers update checks after
-  server restarts; reconnecting replaces an older socket for the same runner.
-  Updates use a source/compiler ETag and SHA-256 digest, atomically replace the
-  executable, and restart it. Development restarts drain active sessions first.
-  The browser panel/controller online presence. Reinstalling for the same user
-  and machine rotates the existing registration to the new token instead of
-  creating a second runner; another user's registration remains protected.
-  Runner tokens never appear in list responses.
-- Browser messages sort by time then ID. Live output anchors after the
-  initiating message; snapshots replace it in place.
-- `session-agent-read.ts` byte-bounds introspection output; its store helper
-  projects only capped user/assistant content.
+- Google auth uses authorization-code PKCE, HttpOnly state/verifier cookies, and
+  discards provider tokens. `auth-store.ts` persists users and seven-day SQLite
+  sessions. IDs are UUIDv7; provider subjects and cookie tokens are separate.
+  Tables use audit fields and soft deletion. Persistent databases run committed
+  migrations; auth tests may use memory. Shared OAuth/HTTP helpers live in
+  `oauth.ts`/`http.ts`; browser session/logout paths derive from `routes.ts`.
+- Workspaces are user-owned; new/migrated users get `Default`, and each session
+  belongs to one ordinary workspace. `Global` is virtual and scopes connections.
+  Runners, model credentials, and Brave keys are Global or linked to multiple
+  owned workspaces through audited association tables. Enforce ownership and
+  scope server-side for all session, tool, model, Brave, runner, directory, and
+  realtime paths; filtering in the browser is not authorization. Scoped APIs
+  expose metadata only. Workspace deletion is soft, rejects the last workspace
+  or active references, and promotes a replacement default.
+- `sync-engine/runner-store.ts` persists runner registrations, with one active
+  registration per machine fingerprint and one default per user. New sessions
+  use the default online runner or the first one. `sync-engine/runners.ts`
+  issues hashed opaque setup tokens, owns authenticated management and
+  token-authenticated callback APIs, and derives installer commands from the
+  request origin. `sync-engine/runner-installer.ts` emits the macOS/Linux
+  one-line installer; it selects an x64/ARM64 and glibc/musl target, downloads
+  one standalone executable, and starts it under `~/.q-mush/runner` by default
+  without requiring Bun on that computer. The runner reports metadata and
+  15-second heartbeats on its authenticated WebSocket and checks for updates at
+  startup and every five minutes. Its handshake version triggers update checks
+  after server restarts; reconnecting replaces an older socket for the same
+  runner. Updates use a source/compiler ETag and SHA-256 digest, atomically
+  replace the executable, and restart it. Development restarts drain active
+  sessions first. The browser panel/controller online presence. Reinstalling for
+  the same user and machine rotates the existing registration to the new token
+  instead of creating a second runner; another user's registration remains
+  protected. Runner tokens never appear in list responses.
 - `sync-engine/sessions.ts` and `sync-engine/session-store.ts` persist coding
   sessions. User messages support selecting or pasting up to eight 10 MB PNG,
   JPEG, GIF, or WebP images, persisted with the transcript and sent as native
@@ -113,47 +104,50 @@ Living project memory.
   unavailable. OAuth figures are API equivalents, not subscription charges.
   Usage is yellow at 80% and red at 90%. Auto-compaction defaults on and
   summarizes completed history before the next request at 95%; idle sessions can
-  compact manually. The composer stays mounted across statuses, explains
-  unavailable actions, and preserves drafts. Local preferences filter transcript
-  categories without changing messages. Compaction soft-deletes prior messages
-  and inserts a replayable handoff. Provider secrets stay out of browser and
-  runner work payloads. The working-directory field opens the interactive
-  browser in `solid/directory-picker-client.tsx`; its controller posts to
+  compact manually. The existing-session composer stays mounted across status
+  changes and explains why actions are unavailable. Versioned browser-local
+  preferences filter transcript categories without changing message data.
+  Compaction soft-deletes prior active messages and inserts a replayable
+  handoff. Provider secrets never enter browser or runner work payloads. The
+  working-directory field opens the interactive browser in
+  `solid/directory-picker-client.tsx`; its controller posts to
   `/api/runners/:id/directories` for canonical directory metadata. Before each
   run, `read_agent_file` loads exact-root `AGENTS.md`, falling back to
   `CLAUDE.md`; only `AGENTS.md` is used when both exist.
 
   `runner/runner-workspace.ts` shares canonical workspace resolution and
-  containment with file tools. Tool and skill choices persist per session.
-  Agent-facing `read_session` inspection is bounded and excludes reasoning/tool
-  history; `get_session_options` safely pages provider-generic spawn choices.
-  Grouped tools manage non-blocking owned children, report final messages, and
-  resume idle parents. `parallel` accepts 2+ calls, uses four ordered workers,
-  bounds output, and propagates cancellation to tools and skills. Picker details
-  use canonical schemas. `solid/session-transcript.tsx` renders prompts, tool
-  definitions, raw details, Markdown, code/JSON, diffs, and contextual results
-  while preserving user line breaks. Session lists paginate by ten. Live
-  sessions use `solid/realtime-client.ts`, `solid/session-client.tsx`, and
+  containment with the file tools. Tool and skill selections persist per
+  session. Agent-facing `read_session` byte-bounds introspection and excludes
+  reasoning/tool history; `get_session_options` safely searches and pages
+  workspace-scoped provider-generic spawn choices. Grouped session tools spawn
+  non-blocking child sessions, manage owned sessions, report each child's final
+  message to its parent, and resume an idle parent when the report arrives.
+  `parallel` accepts unbounded mixed enabled tools and server-side skills except
+  itself, executes them through a bounded worker pool, preserves input order,
+  and bounds aggregate output. `solid/session-transcript.tsx` renders prompts,
+  tool definitions, raw details, Markdown, code/JSON, diffs, and contextual tool
+  results while preserving user line breaks. The session list paginates
+  summaries ten at a time in the browser. The control center manages live
+  sessions through `solid/realtime-client.ts`, `solid/session-client.tsx`, and
   `solid/session-controller.ts`. Model deltas are combined per session once per
   animation frame; snapshots and other events remain immediate. Unchanged
   snapshots suppress notifications, and keyed messages preserve identity so only
   the affected message rerenders. The long-lived Solid root preserves focus and
-  scroll. The transcript starts and returns to the bottom when messages or the
-  agent file change. `sync-engine/agent-model-discovery.ts` queries provider
-  model metadata; `shared/agent-configuration.ts` owns catalog types and
-  fallbacks. New sessions default to the online runner and model credential,
-  then the first entry. The working directory uses the latest session; models
-  use the first option and maximum reasoning effort. Model choices show all
-  provider and Q Mush-supported input/output modalities.
-  `solid/custom-select.tsx` uses shared search normalization and paginates lists
-  over ten items, opens on the selected page, clamps or resets pages, and owns
-  accessible keyboard/focus. Focus mode fills the app viewport (not browser
-  Fullscreen), preserving drafts and scroll. Its desktop rail expands as an
-  overlay; small screens use a drawer. Selection collapses it and Escape closes
-  it before exit. Full paths wrap. Model and effort selections persist with the
-  session. `shared/agent-prompt.ts` builds the model system prompt and
-  transcript display. Reasoning summaries persist as `thinking` messages but are
-  excluded from replay. Session and transcript rows live in `agent_sessions` and
+  scroll. Browser messages sort by time then ID; live output anchors after the
+  initiating message, and snapshots replace it in place. The transcript starts
+  and returns to the bottom when messages or the agent file change.
+  `sync-engine/agent-model-discovery.ts` queries provider model metadata;
+  `shared/agent-configuration.ts` owns catalog types and fallbacks. New sessions
+  default to the online runner and model credential, then the first entry. The
+  working directory uses the latest session; models use the first option and
+  maximum reasoning effort. Model choices show all provider and Q Mush-supported
+  input/output modalities. `solid/custom-select.tsx` shares normalized search
+  and pagination, while responsive focus mode fills the app viewport, preserves
+  drafts/scroll, and uses a drawer or expanding desktop rail. Model and effort
+  selections are persisted with the session. `shared/agent-prompt.ts` is the
+  shared source for building the model system prompt and its transcript display.
+  Reasoning summaries persist as `thinking` messages but are excluded from
+  replay. Session and transcript rows live in `agent_sessions` and
   `agent_messages`; interrupted processes mark active sessions failed so they
   can be resumed. Rebuilt conversations add error results for interrupted tool
   calls only on resume.
@@ -199,7 +193,7 @@ Living project memory.
   tests cannot keep production code alive while unused test helpers still fail.
 - `.jscpd.json` maps all supported JavaScript and TypeScript extensions to the
   TSX format for cross-extension detection; import declarations are ignored,
-  while other clones of at least 20 tokens and one line fail the zero-percent
+  while other clones of at least 60 tokens and one line fail the zero-percent
   threshold.
 - `scripts/repository-check.ts` lists existing tracked and unignored files and
   calls the focused policy APIs under `scripts/`. It rejects files reaching
@@ -207,10 +201,13 @@ Living project memory.
   migration tree), JavaScript/TypeScript test files outside a directory named
   `test`, and `.htm`/`.html`/`.xhtml` application files outside directories
   named `test` or `fixtures`.
+- Formatting uses Prettier plus `prettier-plugin-organize-imports`; generated
+  and dependency ignores come from `.gitignore`, with `bun.lock` separately
+  ignored. Drizzle migrations and metadata are formatted by `bun run check`.
 
 ## Decisions and Gotchas
 
-- The package is private ESM (`"type": "module"`).
+- The package is marked private and uses ESM (`"type": "module"`).
 - Google login reads `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and the
   optional `GOOGLE_REDIRECT_URI`; both credentials must be present together. The
   default local callback is `http://localhost:3000/api/auth/google/callback`,

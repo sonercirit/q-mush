@@ -11,30 +11,59 @@ export interface SessionMutation {
   readonly request: () => Promise<unknown>;
 }
 
-export function compactSessionMutation(sessionId: string): SessionMutation {
+function sessionMutationPath(
+  sessionId: string,
+  workspaceId: string,
+  endpoint: "compact" | "continue" | "stop",
+): string {
+  return (
+    `${SESSIONS_PATH}/${encodeURIComponent(sessionId)}/${endpoint}` +
+    `?workspaceId=${encodeURIComponent(workspaceId)}`
+  );
+}
+
+export function compactSessionMutation(
+  sessionId: string,
+  workspaceId: string,
+): SessionMutation {
   return postMutation(
     sessionId,
+    workspaceId,
     "compact",
     "compact that session",
     "compacting",
   );
 }
 
-export function continueSessionMutation(sessionId: string): SessionMutation {
+export function continueSessionMutation(
+  sessionId: string,
+  workspaceId: string,
+): SessionMutation {
   return postMutation(
     sessionId,
+    workspaceId,
     "continue",
     "continue that session",
     "sending",
   );
 }
 
-export function stopSessionMutation(sessionId: string): SessionMutation {
-  return postMutation(sessionId, "stop", "stop that session", "stopping");
+export function stopSessionMutation(
+  sessionId: string,
+  workspaceId: string,
+): SessionMutation {
+  return postMutation(
+    sessionId,
+    workspaceId,
+    "stop",
+    "stop that session",
+    "stopping",
+  );
 }
 
 export function compactionModeMutation(
   sessionId: string,
+  workspaceId: string,
   autoCompact: boolean,
 ): SessionMutation {
   return {
@@ -42,7 +71,7 @@ export function compactionModeMutation(
     pending: "compacting",
     request: () =>
       requestJson(
-        `${SESSIONS_PATH}/${encodeURIComponent(sessionId)}/compaction`,
+        `${SESSIONS_PATH}/${encodeURIComponent(sessionId)}/compaction?workspaceId=${encodeURIComponent(workspaceId)}`,
         {
           body: JSON.stringify({ autoCompact }),
           headers: { "content-type": "application/json" },
@@ -54,6 +83,7 @@ export function compactionModeMutation(
 
 function postMutation(
   sessionId: string,
+  workspaceId: string,
   endpoint: "compact" | "continue" | "stop",
   action: string,
   pending: SessionPendingAction,
@@ -62,10 +92,9 @@ function postMutation(
     action,
     pending,
     request: () =>
-      requestJson(
-        `${SESSIONS_PATH}/${encodeURIComponent(sessionId)}/${endpoint}`,
-        { method: "POST" },
-      ),
+      requestJson(sessionMutationPath(sessionId, workspaceId, endpoint), {
+        method: "POST",
+      }),
   };
 }
 

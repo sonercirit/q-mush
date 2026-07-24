@@ -388,11 +388,11 @@ test("replaces a streaming transcript with a compacted snapshot", async () => {
   }
 });
 
-test("loads persisted transcript filters into the controller and keeps them on reset", () => {
+test("loads persisted transcript filters and keeps them across resets and workspaces", () => {
   const storage = new MemoryStorage();
   writeSessionTranscriptFilters(storage, {
     ...DEFAULT_SESSION_TRANSCRIPT_FILTERS,
-    toolDefinitions: false,
+    toolDefinitions: true,
   });
   const controller = new SessionController(
     createReactiveState(initialSessionViewState()),
@@ -400,9 +400,11 @@ test("loads persisted transcript filters into the controller and keeps them on r
     storage,
   );
 
-  expect(controller.state.transcriptFilters.toolDefinitions).toBe(false);
+  expect(controller.state.transcriptFilters.toolDefinitions).toBe(true);
+  controller.setWorkspace("workspace-projects");
+  expect(controller.state.transcriptFilters.toolDefinitions).toBe(true);
   controller.reset();
-  expect(controller.state.transcriptFilters.toolDefinitions).toBe(false);
+  expect(controller.state.transcriptFilters.toolDefinitions).toBe(true);
 });
 
 test.each([
@@ -454,6 +456,52 @@ test.each(["compact", "continueSession", "stop", "toggleAutoCompact"] as const)(
     expect(fetch).not.toHaveBeenCalled();
   },
 );
+
+test("uses the selected workspace for model discovery", async () => {
+  const controller = createRoot(() => new SessionController());
+  const originalFetch = globalThis.fetch;
+  const requests: string[] = [];
+  globalThis.fetch = Object.assign(
+    (input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      requests.push(url);
+      return Promise.resolve(
+        Response.json(
+          url.includes("/models?")
+            ? {
+                defaultModel: "gpt-4.1-mini",
+                models: [
+                  {
+                    contextWindow: 128_000,
+                    id: "gpt-4.1-mini",
+                    inputModalities: ["text"],
+                    label: "GPT-4.1 mini",
+                    outputModalities: ["text"],
+                    pricing: null,
+                    reasoningEfforts: [],
+                  },
+                ],
+              }
+            : { sessions: [] },
+        ),
+      );
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+
+  try {
+    controller.setWorkspace("workspace-projects");
+    controller.initializeDefaults("runner-1", "openai:credential-1", true);
+    await vi.waitFor(() => {
+      expect(requests.some((url) => url.includes("/models?"))).toBe(true);
+    });
+    expect(requests.find((url) => url.includes("/models?"))).toContain(
+      "workspaceId=workspace-projects",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 test("an unchanged session refresh does not notify the view", async () => {
   await expectRealtimeToRemainSilent(
     () => new SessionController(),

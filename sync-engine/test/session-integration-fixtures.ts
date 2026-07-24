@@ -17,6 +17,7 @@ import type { AgentModelDiscoverer } from "../../sync-engine/agent-model-discove
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
 import { createRunnerIntegration } from "../../sync-engine/runners.ts";
 import { createSessionIntegration } from "../../sync-engine/sessions.ts";
+import { WorkspaceStore } from "../../sync-engine/workspace-store.ts";
 import {
   addTestProviderCredential,
   addTestUser,
@@ -25,6 +26,7 @@ import {
   TEST_FOREIGN_USER_ID,
   TEST_NOW,
   TEST_USER_ID,
+  TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { takeValue } from "./oauth-test-helpers.ts";
 
@@ -73,13 +75,16 @@ export function connectedSessionSetup(
   }
 
   addTestProviderCredential(database, CREDENTIAL_ID);
+  const workspaceStore = new WorkspaceStore(database);
   const credential: ProviderCredentialAccess = {
     accountId: "provider-account",
     id: CREDENTIAL_ID,
     isDefault: false,
+    isGlobal: true,
     label: "Agent key",
     secret: "provider-secret",
     source: credentialSource,
+    workspaceIds: [],
   };
   const configuredCredentials = {
     openai: options.credentials?.openai ?? [credential],
@@ -125,8 +130,12 @@ export function connectedSessionSetup(
     }
   }
   const reader = (provider: "openai" | "openrouter") => ({
-    readCredential: (userId: string, credentialId: string) =>
-      userId === TEST_USER_ID
+    readCredential: (
+      userId: string,
+      credentialId: string,
+      workspaceId: string,
+    ) =>
+      userId === TEST_USER_ID && workspaceId === TEST_WORKSPACE_ID
         ? configuredCredentials[provider].find(({ id }) => id === credentialId)
         : undefined,
   });
@@ -158,15 +167,15 @@ export function connectedSessionSetup(
       runners.disconnected(runner);
     },
     installer: (request) => runners.installer(request),
-    listForUser: (userId) => {
+    listForUser: (userId, workspaceId) => {
       listRunnerCalls += 1;
-      return options.runners ?? runners.listForUser(userId);
+      return options.runners ?? runners.listForUser(userId, workspaceId);
     },
-    listOnlineForUser: (userId, queryOptions) => {
+    listOnlineForUser: (userId, queryOptions, workspaceId) => {
       listRunnerCalls += 1;
       const { limit, offset, search } = queryOptions;
       if (options.runners === undefined) {
-        return runners.listOnlineForUser(userId, queryOptions);
+        return runners.listOnlineForUser(userId, queryOptions, workspaceId);
       }
       const query =
         search === undefined ? undefined : normalizeSearchText(search);
@@ -185,13 +194,14 @@ export function connectedSessionSetup(
       };
     },
     remove: (request, runnerId) => runners.remove(request, runnerId),
-    runnerIsAvailable: (userId, runnerId) =>
-      runners.runnerIsAvailable(userId, runnerId),
+    runnerIsAvailable: (userId, runnerId, workspaceId) =>
+      runners.runnerIsAvailable(userId, runnerId, workspaceId),
     runnerToken: (request) => runners.runnerToken(request),
     seen: (runner) => {
       runners.seen(runner);
     },
     setDefault: (request, runnerId) => runners.setDefault(request, runnerId),
+    setScopes: (request, runnerId) => runners.setScopes(request, runnerId),
   };
   const sessions = createSessionIntegration(
     auth,
@@ -226,6 +236,11 @@ export function connectedSessionSetup(
       },
       now: () => TEST_NOW,
       randomId: () => takeValue(ids, "The session test ran out of IDs"),
+      workspaces: {
+        defaultForUser: (userId) => workspaceStore.defaultForUser(userId),
+        exists: (userId, workspaceId) =>
+          workspaceStore.exists(userId, workspaceId),
+      },
     },
   );
   return {
@@ -258,6 +273,7 @@ export function createSessionRequest(
       provider: "openai",
       reasoningEffort,
       runnerId: RUNNER_ID,
+      workspaceId: TEST_WORKSPACE_ID,
       tools: AGENT_SESSION_TOOL_NAMES,
       workingDirectory: "/work/project",
     },

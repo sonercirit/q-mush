@@ -24,6 +24,10 @@ import { activeSessionDuration } from "../shared/session-timing.ts";
 import { compactStoredConversation } from "./session-compaction.ts";
 import { storedSessionAgentFile } from "./session-store-agent-file.ts";
 import {
+  activeSessionCondition,
+  type SessionFilter,
+} from "./session-store-filter.ts";
+import {
   conversationFromMessages,
   parseProviderPricing,
   storedSessionMessages,
@@ -56,6 +60,7 @@ export interface CreateAgentSession extends Pick<
   | "runnerId"
   | "tools"
   | "workingDirectory"
+  | "workspaceId"
 > {
   readonly credentialId: string;
   readonly images: readonly AgentImage[];
@@ -68,25 +73,6 @@ export type QueueSessionResult =
   | { readonly detail: AgentSessionDetail; readonly status: "queued" }
   | { readonly status: "busy" }
   | { readonly status: "not_found" };
-
-interface SessionFilter {
-  readonly id?: string;
-  readonly status?: AgentSessionStatus;
-  readonly userId?: string;
-}
-
-function activeSessionCondition(filter: SessionFilter): SQL | undefined {
-  return and(
-    eq(agentSessions.isDeleted, false),
-    filter.id === undefined ? undefined : eq(agentSessions.id, filter.id),
-    filter.status === undefined
-      ? undefined
-      : eq(agentSessions.status, filter.status),
-    filter.userId === undefined
-      ? undefined
-      : eq(agentSessions.userId, filter.userId),
-  );
-}
 
 function runningCondition(sessionId: string, userId?: string): SQL | undefined {
   return activeSessionCondition({
@@ -135,6 +121,7 @@ function sessionSelection() {
     tools: agentSessions.tools,
     updatedAt: agentSessions.updatedAt,
     workingDirectory: agentSessions.workingDirectory,
+    workspaceId: agentSessions.workspaceId,
   };
 }
 
@@ -159,8 +146,8 @@ type StoredSessionSummary = Pick<
   | "tools"
   | "updatedAt"
   | "workingDirectory"
+  | "workspaceId"
 > & { readonly credentialId: string };
-
 function parseStoredTools(value: string): readonly AgentSessionToolName[] {
   try {
     const tools = readAgentSessionToolNames(JSON.parse(value));
@@ -208,6 +195,7 @@ export class SessionStore {
   }
 
   create(input: CreateAgentSession, now: number): AgentSessionDetail {
+    const workspaceId = input.workspaceId;
     if (
       input.maxContextTokens !== null &&
       (!Number.isSafeInteger(input.maxContextTokens) ||
@@ -242,6 +230,7 @@ export class SessionStore {
           tools: JSON.stringify(input.tools),
           userId: input.userId,
           workingDirectory: input.workingDirectory,
+          workspaceId,
         })
         .run();
       transaction
@@ -268,8 +257,16 @@ export class SessionStore {
     return created;
   }
 
-  get(userId: string, sessionId: string): AgentSessionDetail | undefined {
-    const stored = this.#selectSessions({ id: sessionId, userId }).get();
+  get(
+    userId: string,
+    sessionId: string,
+    workspaceId?: string,
+  ): AgentSessionDetail | undefined {
+    const stored = this.#selectSessions({
+      id: sessionId,
+      userId,
+      ...(workspaceId === undefined ? {} : { workspaceId }),
+    }).get();
 
     if (stored === undefined) {
       return undefined;
@@ -285,8 +282,11 @@ export class SessionStore {
     };
   }
 
-  list(userId: string): readonly AgentSessionSummary[] {
-    return this.#selectSessions({ userId })
+  list(userId: string, workspaceId?: string): readonly AgentSessionSummary[] {
+    return this.#selectSessions({
+      userId,
+      ...(workspaceId === undefined ? {} : { workspaceId }),
+    })
       .orderBy(desc(agentSessions.updatedAt), desc(agentSessions.id))
       .all()
       .map(summarizeSession);

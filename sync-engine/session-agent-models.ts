@@ -60,11 +60,15 @@ export function createSessionAgentModels(options: {
 }): SessionAgentModels {
   const onDelta: AgentModelFactoryOptions["onDelta"] = (delta) => {
     try {
-      options.realtime?.publishUser(options.userId, {
-        ...delta,
-        sessionId: options.detail.id,
-        type: "session_delta",
-      });
+      options.realtime?.publishUser(
+        options.userId,
+        {
+          ...delta,
+          sessionId: options.detail.id,
+          type: "session_delta",
+        },
+        options.detail.workspaceId,
+      );
     } catch {
       // Live delivery must never interrupt the persisted model turn.
     }

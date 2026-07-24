@@ -4,6 +4,7 @@ import { createDatabase } from "../shared/database.ts";
 import { createUuidV7 } from "../shared/ids.ts";
 import { RUNNER_INSTALLER_PATH } from "../shared/routes.ts";
 import type { RunnerSummary } from "../shared/runner-model.ts";
+import { isWorkspaceId } from "../shared/workspace-model.ts";
 import type { GoogleAuth } from "./auth.ts";
 import { withAuthenticatedUser } from "./authenticated-request.ts";
 import {
@@ -11,6 +12,7 @@ import {
   createJsonResponse,
   createMethodNotAllowedResponse,
   createNoContentResponse,
+  parseJsonRequest,
 } from "./http.ts";
 import type { OAuthDependencies } from "./oauth.ts";
 import { setOwnedDefault } from "./owned-default.ts";
@@ -47,13 +49,22 @@ export interface RunnerIntegration {
   connect(token: string, metadata: RunnerMetadata): ConnectedRunner | undefined;
   disconnected(runner: RunnerConnection): void;
   installer(request: Request): Response;
-  listForUser(userId: string): readonly RunnerSummary[];
-  listOnlineForUser(userId: string, query: RunnerOptionQuery): RunnerPage;
+  listForUser(userId: string, workspaceId: string): readonly RunnerSummary[];
+  listOnlineForUser(
+    userId: string,
+    query: RunnerOptionQuery,
+    workspaceId: string,
+  ): RunnerPage;
   remove(request: Request, runnerId: string): Response;
-  runnerIsAvailable(userId: string, runnerId: string): boolean;
+  runnerIsAvailable(
+    userId: string,
+    runnerId: string,
+    workspaceId: string,
+  ): boolean;
   runnerToken(request: Request): string | undefined;
   seen(runner: RunnerConnection): void;
   setDefault(request: Request, runnerId: string): Response;
+  setScopes(request: Request, runnerId: string): Promise<Response>;
 }
 
 function defaultRandomToken(): string {
@@ -79,6 +90,20 @@ function readBearerToken(request: Request): string | undefined {
 
   const token = authorization.slice("Bearer ".length);
   return RUNNER_TOKEN_PATTERN.test(token) ? token : undefined;
+}
+
+function parseConnectionScopes(
+  request: Request,
+): Promise<readonly string[] | undefined> {
+  return parseJsonRequest(request, (value) => {
+    if (!isRecord(value) || !Array.isArray(value["workspaceIds"])) {
+      return undefined;
+    }
+    const workspaceIds: readonly unknown[] = value["workspaceIds"];
+    return workspaceIds.length > 0 && workspaceIds.every(isWorkspaceId)
+      ? workspaceIds.map(String)
+      : undefined;
+  });
 }
 
 function normalizeMachineValue(value: unknown): string | undefined {
@@ -157,17 +182,22 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
     this.#setOnline(runner, false);
   }
 
-  listForUser(userId: string): readonly RunnerSummary[] {
-    return this.#store.list(userId, this.#now());
+  listForUser(userId: string, workspaceId: string): readonly RunnerSummary[] {
+    return this.#store.list(userId, this.#now(), workspaceId);
   }
 
-  listOnlineForUser(userId: string, query: RunnerOptionQuery): RunnerPage {
+  listOnlineForUser(
+    userId: string,
+    query: RunnerOptionQuery,
+    workspaceId: string,
+  ): RunnerPage {
     return this.#store.listOnline(
       userId,
       this.#now(),
       query.offset,
       query.limit,
       query.search,
+      workspaceId,
     );
   }
 
@@ -187,8 +217,12 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
       : createMethodNotAllowedResponse("DELETE");
   }
 
-  runnerIsAvailable(userId: string, runnerId: string): boolean {
-    return this.#store.isAvailable(userId, runnerId, this.#now());
+  runnerIsAvailable(
+    userId: string,
+    runnerId: string,
+    workspaceId: string,
+  ): boolean {
+    return this.#store.isAvailable(userId, runnerId, this.#now(), workspaceId);
   }
 
   runnerToken(request: Request): string | undefined {
@@ -208,10 +242,47 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
     });
   }
 
+  async setScopes(request: Request, runnerId: string): Promise<Response> {
+    if (request.method !== "PUT") {
+      return createMethodNotAllowedResponse("PUT");
+    }
+    return await Promise.resolve(
+      withAuthenticatedUser(this.#auth, request, async (user) => {
+        const workspaceIds = await parseConnectionScopes(request);
+        if (workspaceIds === undefined) {
+          return createApiError("invalid_request", 400);
+        }
+        try {
+          return this.#store.setScopes(
+            user.id,
+            runnerId,
+            workspaceIds,
+            this.#now(),
+          )
+            ? createNoContentResponse()
+            : createApiError("not_found", 404);
+        } catch {
+          return createApiError("invalid_scope", 409);
+        }
+      }),
+    );
+  }
+
   #collectionForUser(request: Request, user: AuthenticatedUser): Response {
     if (request.method === "GET") {
+      const workspaceId = new URL(request.url).searchParams.get("workspaceId");
+      if (
+        workspaceId !== null &&
+        !this.#store.workspaceScopesAreValid(user.id, [workspaceId])
+      ) {
+        return createApiError("invalid_scope", 409);
+      }
       return createJsonResponse({
-        runners: this.#store.list(user.id, this.#now()),
+        runners: this.#store.list(
+          user.id,
+          this.#now(),
+          workspaceId ?? undefined,
+        ),
       });
     }
 
@@ -250,8 +321,24 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
   }
 
   #createSetup(request: Request, user: AuthenticatedUser): Response {
+    const workspaceId = new URL(request.url).searchParams.get("workspaceId");
+    const workspaceIds =
+      workspaceId === null
+        ? undefined
+        : isWorkspaceId(workspaceId) &&
+            this.#store.workspaceScopesAreValid(user.id, [workspaceId])
+          ? [workspaceId]
+          : [];
+    if (workspaceIds?.length === 0) {
+      return createApiError("invalid_scope", 409);
+    }
     const token = createRunnerToken(this.#randomToken);
-    const runner = this.#store.create(user.id, token, this.#now());
+    let runner: RunnerSummary;
+    try {
+      runner = this.#store.create(user.id, token, this.#now(), workspaceIds);
+    } catch {
+      return createApiError("invalid_scope", 409);
+    }
     const installerUrl = new URL(RUNNER_INSTALLER_PATH, request.url);
     installerUrl.searchParams.set("token", token);
     const downloadUrl = new URL(installerUrl);

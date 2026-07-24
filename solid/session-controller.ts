@@ -6,6 +6,7 @@ import type {
   AgentSessionStatus,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
+import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 import { requestJson } from "./browser-http.ts";
 import { DirectoryPickerController } from "./directory-picker-controller.ts";
 import { createReactiveState, type ReactiveState } from "./reactive-state.ts";
@@ -92,6 +93,7 @@ export class SessionController {
   readonly #transcriptFilterStorage: SessionTranscriptFilterStorage | undefined;
   readonly #view: RevisionState<SessionViewState>;
   readonly #reactiveView: ReactiveState<SessionViewState>;
+  #workspaceId = GLOBAL_WORKSPACE_ID;
 
   constructor(
     reactiveView = createReactiveState(initialSessionViewState()),
@@ -256,6 +258,15 @@ export class SessionController {
     this.#view.patch({ followUp: value });
   }
 
+  setWorkspace(workspaceId: string): void {
+    const transcriptFilters = this.#view.value.transcriptFilters;
+    this.#workspaceId = workspaceId;
+    this.#directoryPicker.setWorkspace(workspaceId);
+    this.#models.setWorkspace(workspaceId);
+    this.#realtime.reset();
+    this.#view.reset({ ...initialSessionViewState(), transcriptFilters });
+  }
+
   setTools(tools: readonly AgentSessionToolName[]): void {
     this.#patchDraft({ tools: [...tools] });
   }
@@ -306,6 +317,7 @@ export class SessionController {
     const transcriptFilters = readSessionTranscriptFilters(
       this.#transcriptFilterStorage,
     );
+    this.#workspaceId = GLOBAL_WORKSPACE_ID;
     this.#directoryPicker.reset();
     this.#models.reset();
     this.#realtime.reset();
@@ -314,7 +326,11 @@ export class SessionController {
 
   async #loadSessions(revision: number, initial: boolean): Promise<void> {
     try {
-      const sessions = readSessionList(await requestJson(SESSIONS_PATH));
+      const sessions = readSessionList(
+        await requestJson(
+          `${SESSIONS_PATH}?workspaceId=${encodeURIComponent(this.#workspaceId)}`,
+        ),
+      );
 
       if (!this.#view.isCurrent(revision)) {
         return;
@@ -396,6 +412,7 @@ export class SessionController {
                   reasoningEffort: this.#view.value.draft.reasoningEffort,
                 }),
             runnerId: this.#view.value.draft.runnerId,
+            workspaceId: this.#workspaceId,
             tools: this.#view.value.draft.tools,
             workingDirectory: this.#view.value.draft.workingDirectory.trim(),
           }),
@@ -434,7 +451,9 @@ export class SessionController {
 
     try {
       const detail = readSessionDetail(
-        await requestJson(`${SESSIONS_PATH}/${encodeURIComponent(sessionId)}`),
+        await requestJson(
+          `${SESSIONS_PATH}/${encodeURIComponent(sessionId)}?workspaceId=${encodeURIComponent(this.#workspaceId)}`,
+        ),
       );
 
       if (this.#view.value.selectedId === sessionId) {
@@ -548,7 +567,7 @@ export class SessionController {
       pending: "sending",
       request: () =>
         requestJson(
-          `${SESSIONS_PATH}/${encodeURIComponent(sessionId)}/messages`,
+          `${SESSIONS_PATH}/${encodeURIComponent(sessionId)}/messages?workspaceId=${encodeURIComponent(this.#workspaceId)}`,
           {
             body: JSON.stringify({
               ...(this.#view.value.followUpImages.length === 0
@@ -577,7 +596,9 @@ export class SessionController {
   }
 
   async #compact(): Promise<void> {
-    await this.#mutateWhen(sessionCanResume, compactSessionMutation);
+    await this.#mutateWhen(sessionCanResume, (sessionId) =>
+      compactSessionMutation(sessionId, this.#workspaceId),
+    );
   }
 
   async #toggleAutoCompact(autoCompact: boolean): Promise<void> {
@@ -590,15 +611,21 @@ export class SessionController {
       return;
     }
 
-    await this.#mutateDetail(compactionModeMutation(sessionId, autoCompact));
+    await this.#mutateDetail(
+      compactionModeMutation(sessionId, this.#workspaceId, autoCompact),
+    );
   }
 
   async #continue(): Promise<void> {
-    await this.#mutateWhen(sessionCanResume, continueSessionMutation);
+    await this.#mutateWhen(sessionCanResume, (sessionId) =>
+      continueSessionMutation(sessionId, this.#workspaceId),
+    );
   }
 
   async #stop(): Promise<void> {
-    await this.#mutateWhen(sessionIsActive, stopSessionMutation);
+    await this.#mutateWhen(sessionIsActive, (sessionId) =>
+      stopSessionMutation(sessionId, this.#workspaceId),
+    );
   }
 
   #detailMutationPending(): boolean {

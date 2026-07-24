@@ -76,11 +76,21 @@ export class RealtimeHub {
   }
 
   #sockets(kind: "runner" | "user", id: string) {
-    return this.#connections[kind].get(`${kind}:${id}`);
+    const key = kind === "runner" ? `runner:${id}` : id;
+    return this.#connections[kind].get(key);
   }
 
-  #updateUser(userId: string, socket: RealtimeSocket, add: boolean): void {
-    this.#update("user", `user:${userId}`, socket, add);
+  #updateUser(
+    userId: string,
+    workspaceId: string | undefined,
+    socket: RealtimeSocket,
+    add: boolean,
+  ): void {
+    this.#update("user", this.#userKey(userId, workspaceId), socket, add);
+  }
+
+  #userKey(userId: string, workspaceId?: string): string {
+    return `user:${userId}:${workspaceId ?? "*"}`;
   }
 
   setRunner(
@@ -107,11 +117,24 @@ export class RealtimeHub {
     return undefined;
   }
 
-  setUser(userId: string, socket: RealtimeSocket, connected: boolean): void {
+  setUser(
+    userId: string,
+    socket: RealtimeSocket,
+    connected: boolean,
+    workspaceId?: string,
+  ): void {
     if (connected) {
       this.#removeSocket(socket);
     }
-    this.#updateUser(userId, socket, connected);
+    this.#updateUser(userId, workspaceId, socket, connected);
+  }
+
+  userWorkspaces(userId: string): readonly string[] {
+    const prefix = `user:${userId}:`;
+    return [...this.#connections.user.keys()]
+      .filter((key) => key.startsWith(prefix))
+      .map((key) => key.slice(prefix.length))
+      .filter((workspaceId) => workspaceId !== "*");
   }
 
   publishRunnerCancellation(runnerId: string, commandId: string): void {
@@ -125,7 +148,11 @@ export class RealtimeHub {
     });
   }
 
-  publishUser(userId: string, payload: RealtimePayload): void {
-    publish(this.#sockets("user", userId), payload);
+  publishUser(
+    userId: string,
+    payload: RealtimePayload,
+    workspaceId?: string,
+  ): void {
+    publish(this.#sockets("user", this.#userKey(userId, workspaceId)), payload);
   }
 }

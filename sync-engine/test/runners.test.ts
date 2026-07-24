@@ -11,15 +11,19 @@ import {
   createPendingRunnerSummary,
   type RunnerSummary,
 } from "../../shared/runner-model.ts";
+import { GLOBAL_WORKSPACE_ID } from "../../shared/workspace-model.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
 import { readJsonRecord } from "../../sync-engine/oauth.ts";
 import { createRunnerIntegration } from "../../sync-engine/runners.ts";
 import {
+  addTestUser,
+  addTestWorkspace,
   createAuthenticatedRequest,
   createAuthenticatedTestDatabase,
   createRunnerRequest,
   TEST_NOW,
   TEST_USER_ID,
+  TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { takeValue } from "./oauth-test-helpers.ts";
 
@@ -29,6 +33,9 @@ const THIRD_RUNNER_ID = "018bcfe5-6800-7000-8000-000000000033";
 const FIRST_TOKEN = "qmr_first-setup-token";
 const SECOND_TOKEN = "qmr_second-setup-token";
 const THIRD_TOKEN = "qmr_third-setup-token";
+const SECOND_WORKSPACE_ID = "018bcfe5-6800-7000-8000-000000000034";
+const OTHER_USER_ID = "018bcfe5-6800-7000-8000-000000000035";
+const OTHER_WORKSPACE_ID = "018bcfe5-6800-7000-8000-000000000036";
 
 interface Setup {
   readonly database: ReturnType<typeof createAuthenticatedTestDatabase>;
@@ -198,7 +205,10 @@ describe("runner setup", () => {
 
     expect(firstResponse.status).toBe(201);
     expect(await firstResponse.json()).toEqual({
-      runner: createPendingRunnerSummary(FIRST_RUNNER_ID),
+      runner: createPendingRunnerSummary(FIRST_RUNNER_ID, {
+        isGlobal: true,
+        workspaceIds: [],
+      }),
       setup: {
         command: `curl -fsSL 'http://localhost:3000${RUNNER_INSTALLER_PATH}?token=${FIRST_TOKEN}' | sh`,
         downloadUrl: `${RUNNER_INSTALLER_PATH}?token=${FIRST_TOKEN}&download=1`,
@@ -295,7 +305,11 @@ describe("runner connections", () => {
       ),
     ).toBe(SECOND_TOKEN);
     expect(
-      setup.integration.runnerIsAvailable(TEST_USER_ID, FIRST_RUNNER_ID),
+      setup.integration.runnerIsAvailable(
+        TEST_USER_ID,
+        FIRST_RUNNER_ID,
+        TEST_WORKSPACE_ID,
+      ),
     ).toBe(true);
 
     const reusedConnectionToken = connect(
@@ -339,12 +353,18 @@ describe("runner connections", () => {
     }
 
     expect(
-      setup.integration.listOnlineForUser(TEST_USER_ID, runnerOptionQuery(0)),
+      setup.integration.listOnlineForUser(
+        TEST_USER_ID,
+        runnerOptionQuery(0),
+        TEST_WORKSPACE_ID,
+      ),
     ).toEqual({
       items: [
         {
           ...connectedRunner(THIRD_RUNNER_ID, "Fresh alpha"),
+          isGlobal: true,
           lastSeenAt: TEST_NOW + 60_000,
+          workspaceIds: [],
         },
       ],
       totalItems: 1,
@@ -353,14 +373,105 @@ describe("runner connections", () => {
       setup.integration.listOnlineForUser(
         TEST_USER_ID,
         runnerOptionQuery(0, "ALPHA"),
+        TEST_WORKSPACE_ID,
       ),
     ).toMatchObject({ items: [{ id: THIRD_RUNNER_ID }], totalItems: 1 });
     expect(
       setup.integration.listOnlineForUser(
         TEST_USER_ID,
         runnerOptionQuery(1, "alpha"),
+        TEST_WORKSPACE_ID,
       ),
     ).toEqual({ items: [], totalItems: 1 });
+    setup.database.$client.close();
+  });
+
+  test("enforces Global and multi-workspace runner scopes", async () => {
+    const setup = createSetup();
+    addTestWorkspace(setup.database, SECOND_WORKSPACE_ID);
+    addTestUser(setup.database, OTHER_USER_ID, OTHER_WORKSPACE_ID);
+    connectFirstRunner(setup);
+
+    const scoped = await setup.integration.setScopes(
+      createAuthenticatedRequest(
+        `${RUNNERS_PATH}/${FIRST_RUNNER_ID}/scopes`,
+        { workspaceIds: [TEST_WORKSPACE_ID, SECOND_WORKSPACE_ID] },
+        "PUT",
+      ),
+      FIRST_RUNNER_ID,
+    );
+    expect(scoped.status).toBe(204);
+    expect(
+      setup.integration.runnerIsAvailable(
+        TEST_USER_ID,
+        FIRST_RUNNER_ID,
+        TEST_WORKSPACE_ID,
+      ),
+    ).toBe(true);
+    expect(
+      setup.integration.runnerIsAvailable(
+        TEST_USER_ID,
+        FIRST_RUNNER_ID,
+        SECOND_WORKSPACE_ID,
+      ),
+    ).toBe(true);
+    expect(
+      setup.integration.runnerIsAvailable(
+        TEST_USER_ID,
+        FIRST_RUNNER_ID,
+        GLOBAL_WORKSPACE_ID,
+      ),
+    ).toBe(false);
+
+    expect(
+      setup.integration.runnerIsAvailable(
+        TEST_USER_ID,
+        FIRST_RUNNER_ID,
+        OTHER_WORKSPACE_ID,
+      ),
+    ).toBe(false);
+    expect(
+      setup.integration.runnerIsAvailable(
+        OTHER_USER_ID,
+        FIRST_RUNNER_ID,
+        TEST_WORKSPACE_ID,
+      ),
+    ).toBe(false);
+
+    const scopedList = setup.integration.collection(
+      createAuthenticatedRequest(
+        `${RUNNERS_PATH}?workspaceId=${SECOND_WORKSPACE_ID}`,
+      ),
+    );
+    const body = await scopedList.text();
+    expect(JSON.parse(body)).toMatchObject({
+      runners: [
+        {
+          id: FIRST_RUNNER_ID,
+          isGlobal: false,
+          workspaceIds: [TEST_WORKSPACE_ID, SECOND_WORKSPACE_ID],
+        },
+      ],
+    });
+    expect(body).not.toContain(FIRST_TOKEN);
+    expect(body).not.toContain("tokenHash");
+
+    const crossUser = await setup.integration.setScopes(
+      createAuthenticatedRequest(
+        `${RUNNERS_PATH}/${FIRST_RUNNER_ID}/scopes`,
+        { workspaceIds: [OTHER_WORKSPACE_ID] },
+        "PUT",
+      ),
+      FIRST_RUNNER_ID,
+    );
+    expect(crossUser.status).toBe(409);
+    expect(
+      setup.integration.collection(
+        createAuthenticatedRequest(
+          `${RUNNERS_PATH}?workspaceId=${OTHER_WORKSPACE_ID}`,
+        ),
+      ).status,
+    ).toBe(409);
     setup.database.$client.close();
   });
 

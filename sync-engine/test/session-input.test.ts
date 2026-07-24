@@ -15,6 +15,7 @@ test("validates session tool and skill selections", () => {
     runnerId: "runner-1",
     tools: ["read", "brave_search"],
     workingDirectory: ".",
+    workspaceId: "workspace-1",
   };
 
   expect(readCreateSession(input)?.tools).toEqual(["read", "brave_search"]);
@@ -26,6 +27,9 @@ test("validates session tool and skill selections", () => {
     readCreateSession({ ...input, tools: ["read", "read"] }),
   ).toBeUndefined();
   expect(readCreateSession({ ...input, tools: ["unknown"] })).toBeUndefined();
+  expect(
+    readCreateSession({ ...input, workspaceId: undefined }),
+  ).toBeUndefined();
 });
 
 test("accepts an image-only user message", () => {

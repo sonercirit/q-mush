@@ -38,13 +38,14 @@ describe("directory picker controller", () => {
     );
     const view = createReactiveState(initialDirectoryPickerState());
     const controller = new DirectoryPickerController(view);
+    controller.setWorkspace("workspace/one");
 
     await controller.open("runner/one", "~");
 
     expect(requests).toEqual([
       {
         body: { path: "~" },
-        url: runnerDirectoriesPath("runner/one"),
+        url: runnerDirectoriesPath("runner/one", "workspace/one"),
       },
     ]);
     expect(controller.state).toMatchObject({

@@ -1,6 +1,6 @@
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
-import type { BraveSearchSkill } from "./brave-search.ts";
+import type { BraveSearchExecutor } from "./brave-search.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
 import type { SessionAgentActions } from "./session-agent-actions.ts";
 import type { AgentModelFactory } from "./session-agent-models.ts";
@@ -9,7 +9,7 @@ import type { SessionStore } from "./session-store.ts";
 
 export interface SessionModelRuntimeResources {
   readonly actions: SessionAgentActions;
-  readonly braveSearch: Pick<BraveSearchSkill, "execute">;
+  readonly braveSearch: BraveSearchExecutor;
   readonly broker: SessionAgentRuntimeDependencies["broker"];
   readonly modelFactory: AgentModelFactory;
   readonly now: typeof Date.now;

@@ -131,6 +131,7 @@ export function createOpenRouterIntegrationFromEnvironment(
       flowCookies: OPENROUTER_FLOW_COOKIES,
       resultParameter: "openrouter",
       userCookie: "q_mush_openrouter_user",
+      workspaceCookie: "q_mush_openrouter_workspace",
     }),
     dependencies,
     provider: "openrouter",

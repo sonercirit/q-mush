@@ -52,6 +52,7 @@ export interface AgentSessionSummary {
   readonly tools: readonly AgentSessionToolName[];
   readonly updatedAt: number;
   readonly workingDirectory: string;
+  readonly workspaceId: string;
 }
 
 export interface AgentSessionDetail extends AgentSessionSummary {

@@ -1,8 +1,9 @@
 import { and, eq, gt, lte, type SQL } from "drizzle-orm";
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
 import type { AppDatabase } from "../shared/database.ts";
-import { sessions, users } from "../shared/database/schema.ts";
+import { sessions, users, workspaces } from "../shared/database/schema.ts";
 import { createUuidV7, SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
+import { DEFAULT_WORKSPACE_NAME } from "../shared/workspace-model.ts";
 
 export interface GoogleUserProfile {
   readonly email: string;
@@ -77,6 +78,20 @@ export class DrizzleAuthStore {
             isDeleted: false,
             updatedAt: timestamp,
             updatedById: SYSTEM_ID,
+          })
+          .run();
+        transaction
+          .insert(workspaces)
+          .values({
+            createdAt: timestamp,
+            createdById: userId,
+            id: this.#generateId(now),
+            isDefault: true,
+            isDeleted: false,
+            name: DEFAULT_WORKSPACE_NAME,
+            updatedAt: timestamp,
+            updatedById: userId,
+            userId,
           })
           .run();
       } else {

@@ -4,6 +4,7 @@ import {
   readRunnerDirectoryListing,
   type RunnerDirectoryListing,
 } from "../shared/runner-directory-model.ts";
+import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 import { HttpResponseError, requestJson } from "./browser-http.ts";
 import { createReactiveState, type ReactiveState } from "./reactive-state.ts";
 
@@ -36,6 +37,7 @@ function browsingError(error: unknown): string {
 export class DirectoryPickerController {
   #abort: AbortController | undefined;
   #request = 0;
+  #workspaceId = GLOBAL_WORKSPACE_ID;
   readonly #view: ReactiveState<DirectoryPickerState>;
 
   constructor(view = createReactiveState(initialDirectoryPickerState())) {
@@ -76,6 +78,12 @@ export class DirectoryPickerController {
   }
 
   reset(): void {
+    this.#workspaceId = GLOBAL_WORKSPACE_ID;
+    this.#reset();
+  }
+
+  setWorkspace(workspaceId: string): void {
+    this.#workspaceId = workspaceId;
     this.#reset();
   }
 
@@ -115,7 +123,7 @@ export class DirectoryPickerController {
 
     try {
       const listing = readRunnerDirectoryListing(
-        await requestJson(runnerDirectoriesPath(runnerId), {
+        await requestJson(runnerDirectoriesPath(runnerId, this.#workspaceId), {
           body: JSON.stringify({ path }),
           headers: { "content-type": "application/json" },
           method: "POST",

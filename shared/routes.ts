@@ -26,12 +26,30 @@ export function providerCredentialDefaultPath(
   return `${credentialsPath}/${encodeURIComponent(credentialId)}/default`;
 }
 export const RUNNERS_PATH = `${API_BASE_PATH}/runners`;
+export const WORKSPACES_PATH = `${API_BASE_PATH}/workspaces`;
+export function connectionScopesPath(
+  collectionPath: string,
+  connectionId: string,
+): string {
+  return `${collectionPath}/${encodeURIComponent(connectionId)}/scopes`;
+}
+
+export function workspaceDefaultPath(workspaceId: string): string {
+  return `${WORKSPACES_PATH}/${encodeURIComponent(workspaceId)}/default`;
+}
+
 export function runnerDefaultPath(runnerId: string): string {
   return `${RUNNERS_PATH}/${encodeURIComponent(runnerId)}/default`;
 }
 export const RUNNER_DIRECTORIES_SEGMENT = "directories";
-export function runnerDirectoriesPath(runnerId: string): string {
-  return `${RUNNERS_PATH}/${encodeURIComponent(runnerId)}/${RUNNER_DIRECTORIES_SEGMENT}`;
+export function runnerDirectoriesPath(
+  runnerId: string,
+  workspaceId?: string,
+): string {
+  const path = `${RUNNERS_PATH}/${encodeURIComponent(runnerId)}/${RUNNER_DIRECTORIES_SEGMENT}`;
+  return workspaceId === undefined
+    ? path
+    : `${path}?workspaceId=${encodeURIComponent(workspaceId)}`;
 }
 const RUNNER_BASE_PATH = `${API_BASE_PATH}/runner`;
 export const RUNNER_REALTIME_PATH = `${RUNNER_BASE_PATH}/realtime`;

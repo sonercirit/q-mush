@@ -68,10 +68,14 @@ export class SessionRequestHelpers {
     return withAuthenticatedUser(this.#auth, request, action);
   }
 
-  directories(request: Request, runnerId: string): Promise<Response> {
+  directories(
+    request: Request,
+    runnerId: string,
+    workspaceId: string,
+  ): Promise<Response> {
     return Promise.resolve(
       this.authenticate(request, "POST", (user) =>
-        this.#directoriesForUser(request, user, runnerId),
+        this.#directoriesForUser(request, user, runnerId, workspaceId),
       ),
     );
   }
@@ -113,6 +117,7 @@ export class SessionRequestHelpers {
     request: Request,
     user: AuthenticatedUser,
     runnerId: string,
+    workspaceId: string,
   ): Promise<Response> {
     const path = await parseJsonRequest(request, (value) => {
       const parsed = readStringField(
@@ -127,7 +132,7 @@ export class SessionRequestHelpers {
     if (
       path === undefined ||
       readIdentifier(runnerId) === undefined ||
-      !this.#runners.runnerIsAvailable(user.id, runnerId)
+      !this.#runners.runnerIsAvailable(user.id, runnerId, workspaceId)
     ) {
       return path === undefined
         ? createApiError("invalid_request", 400)

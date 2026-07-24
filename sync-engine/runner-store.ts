@@ -1,13 +1,32 @@
-import { and, asc, count, eq, not, or, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  eq,
+  inArray,
+  not,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import { createHash } from "node:crypto";
 import {
   createdAuditFields,
   softDeletedAuditFields,
   updatedAuditFields,
 } from "../shared/audit.ts";
+import {
+  connectionIsAccessible,
+  connectionWorkspaceIsAvailable,
+  readConnectionScopes,
+  removeConnectionScopes,
+  replaceConnectionScopes,
+  validateConnectionScopes,
+  type ConnectionScopeConfiguration,
+} from "../shared/connection-scopes.ts";
 import { escapedLikePattern, lowerLike } from "../shared/database-search.ts";
 import type { AppDatabase } from "../shared/database.ts";
-import { runners } from "../shared/database/schema.ts";
+import { runners, runnerWorkspaces } from "../shared/database/schema.ts";
 import { defaultValues } from "../shared/default-store.ts";
 import { createUuidV7, type IdGenerator } from "../shared/ids.ts";
 import { validPageWindow } from "../shared/pagination.ts";
@@ -16,6 +35,7 @@ import {
   type RunnerStatus,
   type RunnerSummary,
 } from "../shared/runner-model.ts";
+import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 
 const RUNNER_ONLINE_WINDOW_MILLISECONDS = 45_000;
 
@@ -46,6 +66,7 @@ type StoredRunnerSummary = Pick<
   | "architecture"
   | "id"
   | "isDefault"
+  | "isGlobal"
   | "lastSeenAt"
   | "machineFingerprint"
   | "name"
@@ -135,18 +156,13 @@ function summarizeRunner(
     architecture: runner.architecture,
     id: runner.id,
     isDefault: runner.isDefault,
+    isGlobal: runner.isGlobal,
     lastSeenAt,
     name: runner.name,
     platform: runner.platform,
     status,
+    workspaceIds: [],
   };
-}
-
-function summarizeRunners(
-  rows: readonly StoredRunnerSummary[],
-  now: number,
-): readonly RunnerSummary[] {
-  return rows.map((runner) => summarizeRunner(runner, now));
 }
 
 function runnerSummarySelection() {
@@ -154,6 +170,7 @@ function runnerSummarySelection() {
     architecture: runners.architecture,
     id: runners.id,
     isDefault: runners.isDefault,
+    isGlobal: runners.isGlobal,
     lastSeenAt: runners.lastSeenAt,
     machineFingerprint: runners.machineFingerprint,
     name: runners.name,
@@ -179,28 +196,71 @@ function orderedRunnerQuery(database: AppDatabase, condition: SQL | undefined) {
 
 export class RunnerStore {
   readonly #context: RunnerStoreContext;
+  readonly #scopeConfiguration: ConnectionScopeConfiguration;
 
   constructor(database: AppDatabase, generateId: IdGenerator = createUuidV7) {
     this.#context = { database, generateId };
+    this.#scopeConfiguration = {
+      associationTable: runnerWorkspaces,
+      generateId,
+      ownerIdColumn: runnerWorkspaces.runnerId,
+      ownerTable: runners,
+    };
   }
 
   get #database(): AppDatabase {
     return this.#context.database;
   }
 
-  create(userId: string, token: string, now: number): RunnerSummary {
-    const id = this.#context.generateId(now);
-    this.#database
-      .insert(runners)
-      .values({
-        ...createdAuditFields(userId, now),
-        id,
-        tokenHash: hashToken(token),
-        userId,
-      })
-      .run();
+  workspaceScopesAreValid(
+    userId: string,
+    workspaceIds: readonly string[],
+  ): boolean {
+    try {
+      validateConnectionScopes(this.#database, userId, workspaceIds);
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
-    return createPendingRunnerSummary(id);
+  create(
+    userId: string,
+    token: string,
+    now: number,
+    workspaceIds: readonly string[] = [GLOBAL_WORKSPACE_ID],
+  ): RunnerSummary {
+    const scopes = validateConnectionScopes(
+      this.#database,
+      userId,
+      workspaceIds,
+    );
+    return this.#database.transaction((transaction) => {
+      const id = this.#context.generateId(now);
+      transaction
+        .insert(runners)
+        .values({
+          ...createdAuditFields(userId, now),
+          id,
+          isGlobal: scopes.includes(GLOBAL_WORKSPACE_ID),
+          tokenHash: hashToken(token),
+          userId,
+        })
+        .run();
+      replaceConnectionScopes(
+        transaction,
+        this.#scopeConfiguration,
+        userId,
+        id,
+        scopes,
+        now,
+      );
+
+      return createPendingRunnerSummary(id, {
+        isGlobal: scopes.includes(GLOBAL_WORKSPACE_ID),
+        workspaceIds: scopes.filter((scope) => scope !== GLOBAL_WORKSPACE_ID),
+      });
+    });
   }
 
   hasActiveToken(token: string): boolean {
@@ -215,9 +275,21 @@ export class RunnerStore {
       : { id: stored.id, userId: stored.userId };
   }
 
-  isAvailable(userId: string, runnerId: string, now: number): boolean {
+  isAvailable(
+    userId: string,
+    runnerId: string,
+    now: number,
+    workspaceId?: string,
+  ): boolean {
+    if (
+      workspaceId !== undefined &&
+      !connectionWorkspaceIsAvailable(this.#database, userId, workspaceId)
+    ) {
+      return false;
+    }
     const stored = this.#database
       .select({
+        isGlobal: runners.isGlobal,
         lastSeenAt: runners.lastSeenAt,
         machineFingerprint: runners.machineFingerprint,
       })
@@ -225,12 +297,62 @@ export class RunnerStore {
       .where(activeRunnerCondition({ id: runnerId, userId }))
       .get();
     const lastSeenAt = stored?.lastSeenAt?.getTime();
+    if (stored === undefined) {
+      return false;
+    }
+    const scopeAvailable = connectionIsAccessible(
+      {
+        isGlobal: stored.isGlobal,
+        workspaceIds: this.#workspaceIds(userId, runnerId),
+      },
+      workspaceId,
+    );
     return (
-      stored?.machineFingerprint !== null &&
-      stored?.machineFingerprint !== undefined &&
+      scopeAvailable &&
+      stored.machineFingerprint !== null &&
       lastSeenAt !== undefined &&
       now - lastSeenAt <= RUNNER_ONLINE_WINDOW_MILLISECONDS
     );
+  }
+
+  setScopes(
+    userId: string,
+    runnerId: string,
+    workspaceIds: readonly string[],
+    now: number,
+  ): boolean {
+    const stored = this.#database
+      .select({ id: runners.id })
+      .from(runners)
+      .where(activeRunnerCondition({ id: runnerId, userId }))
+      .get();
+    if (stored === undefined) {
+      return false;
+    }
+    const scopes = validateConnectionScopes(
+      this.#database,
+      userId,
+      workspaceIds,
+    );
+    return this.#database.transaction((transaction) => {
+      transaction
+        .update(runners)
+        .set({
+          isGlobal: scopes.includes(GLOBAL_WORKSPACE_ID),
+          ...updatedAuditFields(userId, now),
+        })
+        .where(eq(runners.id, runnerId))
+        .run();
+      replaceConnectionScopes(
+        transaction,
+        this.#scopeConfiguration,
+        userId,
+        runnerId,
+        scopes,
+        now,
+      );
+      return true;
+    });
   }
 
   setDefault(userId: string, runnerId: string, now: number): boolean {
@@ -272,14 +394,47 @@ export class RunnerStore {
       .run();
   }
 
-  list(userId: string, now: number): readonly RunnerSummary[] {
-    return summarizeRunners(
-      orderedRunnerQuery(
-        this.#database,
-        activeRunnerCondition({ userId }),
-      ).all(),
-      now,
-    );
+  list(
+    userId: string,
+    now: number,
+    workspaceId?: string,
+  ): readonly RunnerSummary[] {
+    if (
+      workspaceId !== undefined &&
+      !connectionWorkspaceIsAvailable(this.#database, userId, workspaceId)
+    ) {
+      return [];
+    }
+    const accessibleIds =
+      workspaceId === undefined
+        ? undefined
+        : this.#accessibleIds(userId, workspaceId);
+    const rows = orderedRunnerQuery(
+      this.#database,
+      accessibleIds === undefined
+        ? activeRunnerCondition({ userId })
+        : and(
+            activeRunnerCondition({ userId }),
+            inArray(runners.id, accessibleIds),
+          ),
+    ).all();
+    return rows.map((runner) => {
+      const summary = {
+        ...summarizeRunner(runner, now),
+        workspaceIds: this.#workspaceIds(userId, runner.id),
+      };
+      return workspaceId === undefined
+        ? {
+            architecture: summary.architecture,
+            id: summary.id,
+            isDefault: summary.isDefault,
+            lastSeenAt: summary.lastSeenAt,
+            name: summary.name,
+            platform: summary.platform,
+            status: summary.status,
+          }
+        : summary;
+    });
   }
 
   listOnline(
@@ -288,24 +443,40 @@ export class RunnerStore {
     offset: number,
     limit: number,
     search?: string,
+    workspaceId?: string,
   ): RunnerPage {
     if (!validPageWindow(offset, limit)) {
       throw new Error("The runner page is invalid");
     }
-    const condition = onlineRunnerCondition(userId, now, search);
+    if (
+      workspaceId !== undefined &&
+      !connectionWorkspaceIsAvailable(this.#database, userId, workspaceId)
+    ) {
+      return { items: [], totalItems: 0 };
+    }
+    const accessibleIds =
+      workspaceId === undefined
+        ? undefined
+        : this.#accessibleIds(userId, workspaceId);
+    const baseCondition = onlineRunnerCondition(userId, now, search);
+    const condition =
+      accessibleIds === undefined
+        ? baseCondition
+        : and(baseCondition, inArray(runners.id, accessibleIds));
     const totalItems =
       this.#database
         .select({ value: count() })
         .from(runners)
         .where(condition)
         .get()?.value ?? 0;
-    const items = summarizeRunners(
-      orderedRunnerQuery(this.#database, condition)
-        .limit(limit)
-        .offset(offset)
-        .all(),
-      now,
-    );
+    const items = orderedRunnerQuery(this.#database, condition)
+      .limit(limit)
+      .offset(offset)
+      .all()
+      .map((runner) => ({
+        ...summarizeRunner(runner, now),
+        workspaceIds: this.#workspaceIds(userId, runner.id),
+      }));
     return { items, totalItems };
   }
 
@@ -352,12 +523,59 @@ export class RunnerStore {
           return { status: "runner_exists" };
         }
 
+        const pendingScopes = transaction
+          .select({ workspaceId: runnerWorkspaces.workspaceId })
+          .from(runnerWorkspaces)
+          .where(
+            and(
+              eq(runnerWorkspaces.userId, stored.userId),
+              eq(runnerWorkspaces.runnerId, stored.id),
+              not(runnerWorkspaces.isDeleted),
+            ),
+          )
+          .all()
+          .map(({ workspaceId }) => workspaceId);
+        const pendingIsGlobal = transaction
+          .select({ isGlobal: runners.isGlobal })
+          .from(runners)
+          .where(eq(runners.id, stored.id))
+          .get()?.isGlobal;
+
+        transaction
+          .update(runnerWorkspaces)
+          .set(softDeletedAuditFields(stored.userId, now))
+          .where(
+            and(
+              eq(runnerWorkspaces.userId, stored.userId),
+              eq(runnerWorkspaces.runnerId, stored.id),
+              not(runnerWorkspaces.isDeleted),
+            ),
+          )
+          .run();
         transaction
           .update(runners)
-          .set(softDeletedAuditFields(stored.userId, now))
+          .set({
+            ...softDeletedAuditFields(stored.userId, now),
+            isGlobal: false,
+          })
           .where(eq(runners.id, stored.id))
           .run();
         runnerId = computerRunner.id;
+        const transferredScopes =
+          pendingIsGlobal === true ? [GLOBAL_WORKSPACE_ID] : pendingScopes;
+        transaction
+          .update(runners)
+          .set({ isGlobal: pendingIsGlobal === true })
+          .where(eq(runners.id, runnerId))
+          .run();
+        replaceConnectionScopes(
+          transaction,
+          this.#scopeConfiguration,
+          stored.userId,
+          runnerId,
+          transferredScopes,
+          now,
+        );
       }
 
       const timestamp = new Date(now);
@@ -380,13 +598,80 @@ export class RunnerStore {
   }
 
   remove(userId: string, runnerId: string, now: number): boolean {
-    const removed = this.#database
-      .update(runners)
-      .set({ ...softDeletedAuditFields(userId, now), isDefault: false })
-      .where(activeRunnerCondition({ id: runnerId, userId }))
-      .returning({ id: runners.id })
-      .all();
-    return removed.length > 0;
+    const exists =
+      this.#database
+        .select({ id: runners.id })
+        .from(runners)
+        .where(activeRunnerCondition({ id: runnerId, userId }))
+        .get() !== undefined;
+    if (!exists) {
+      return false;
+    }
+    this.#database.transaction((transaction) => {
+      removeConnectionScopes(
+        transaction,
+        this.#scopeConfiguration,
+        userId,
+        runnerId,
+        now,
+      );
+      transaction
+        .update(runners)
+        .set({
+          ...softDeletedAuditFields(userId, now),
+          isDefault: false,
+          isGlobal: false,
+        })
+        .where(activeRunnerCondition({ id: runnerId, userId }))
+        .run();
+    });
+    return true;
+  }
+
+  #accessibleIds(userId: string, workspaceId: string): readonly string[] {
+    const scopedIds = this.#database
+      .select({ id: runnerWorkspaces.runnerId })
+      .from(runnerWorkspaces)
+      .where(
+        and(
+          eq(runnerWorkspaces.userId, userId),
+          eq(runnerWorkspaces.workspaceId, workspaceId),
+          not(runnerWorkspaces.isDeleted),
+        ),
+      )
+      .all()
+      .map(({ id }) => id);
+    return this.#database
+      .select({ id: runners.id })
+      .from(runners)
+      .where(
+        and(
+          activeRunnerCondition({ userId }),
+          workspaceId === GLOBAL_WORKSPACE_ID
+            ? eq(runners.isGlobal, true)
+            : inArray(
+                runners.id,
+                this.#database
+                  .select({ id: runners.id })
+                  .from(runners)
+                  .where(eq(runners.isGlobal, true))
+                  .all()
+                  .map(({ id }) => id)
+                  .concat(scopedIds),
+              ),
+        ),
+      )
+      .all()
+      .map(({ id }) => id);
+  }
+
+  #workspaceIds(userId: string, runnerId: string): readonly string[] {
+    return readConnectionScopes(
+      this.#database,
+      this.#scopeConfiguration,
+      userId,
+      runnerId,
+    );
   }
 
   #activeRunnerForToken(token: string) {

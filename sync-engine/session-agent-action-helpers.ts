@@ -13,6 +13,7 @@ import type { SessionStore } from "./session-store.ts";
 interface SessionAgentCredentialSelection {
   readonly credentialId: string;
   readonly provider: "openai" | "openrouter";
+  readonly workspaceId: string;
 }
 
 interface ParentSessionReport {
@@ -34,7 +35,11 @@ export interface SessionAgentActionDependencies {
   readonly draining: () => boolean;
   readonly now: () => number;
   readonly notify: (userId: string, sessionId: string) => void;
-  readonly runnerIsAvailable: (userId: string, runnerId: string) => boolean;
+  readonly runnerIsAvailable: (
+    userId: string,
+    runnerId: string,
+    workspaceId: string,
+  ) => boolean;
   readonly launchSession: (
     credential: ProviderCredentialAccess,
     session: AgentSessionDetail,
@@ -99,7 +104,7 @@ export async function spawnAgentSession(options: {
   readonly userId: string;
 }): Promise<string> {
   async function enqueue(
-    input: SpawnSessionToolInput,
+    input: SpawnSessionToolInput & { readonly workspaceId: string },
     credential: ProviderCredentialAccess,
   ): Promise<Response> {
     const metadata = await options.dependencies.discoverSessionMetadata(
@@ -137,10 +142,22 @@ export async function spawnAgentSession(options: {
     options.dependencies.notify(options.userId, child.id);
     return createJsonResponse({ sessionId: child.id, status: "spawned" });
   }
+  const parentWorkspaceId = options.dependencies.store.get(
+    options.userId,
+    options.parentSessionId,
+  )?.workspaceId;
+  if (parentWorkspaceId === undefined) {
+    throw new Error("The parent workspace is unavailable");
+  }
+  const scopedInput: SpawnSessionToolInput & { readonly workspaceId: string } =
+    {
+      ...options.input,
+      workspaceId: parentWorkspaceId,
+    };
   const response = await options.dependencies.withCredential(
     options.userId,
-    options.input,
-    (credential) => enqueue(options.input, credential),
+    scopedInput,
+    (credential) => enqueue(scopedInput, credential),
   );
   return responseToolOutput(response);
 }

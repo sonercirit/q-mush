@@ -37,6 +37,7 @@ interface SessionCompactionSettingsDependencies {
   readonly auth: GoogleAuth;
   readonly now: () => number;
   readonly onChanged: (detail: AgentSessionDetail, userId: string) => void;
+  readonly requiredWorkspaceId: string;
   readonly store: SessionStore;
 }
 
@@ -53,6 +54,14 @@ export async function updateSessionCompactionMode(
       const autoCompact = await parseJsonRequest(request, readCompactionMode);
       if (autoCompact === undefined) {
         return createApiError("invalid_request", 400);
+      }
+      const existing = dependencies.store.get(
+        user.id,
+        sessionId,
+        dependencies.requiredWorkspaceId,
+      );
+      if (existing === undefined) {
+        return createApiError("not_found", 404);
       }
       const detail = dependencies.store.setAutoCompact(
         user.id,
@@ -87,6 +96,7 @@ interface ManualCompactionDependencies {
   readonly now: () => number;
   readonly runtimes: SessionRuntimes;
   readonly store: SessionStore;
+  readonly workspaceId: string;
 }
 
 export async function startManualSessionCompaction(
@@ -95,12 +105,13 @@ export async function startManualSessionCompaction(
   sessionId: string,
 ): Promise<Response> {
   if (dependencies.runtimes.draining) {
-    return new Response('{"error":"server_restarting"}', {
-      headers: { "content-type": "application/json; charset=utf-8" },
-      status: 503,
-    });
+    return createApiError("server_restarting", 503);
   }
-  const existing = dependencies.store.get(user.id, sessionId);
+  const existing = dependencies.store.get(
+    user.id,
+    sessionId,
+    dependencies.workspaceId,
+  );
   if (existing === undefined) {
     return createApiError("not_found", 404);
   }

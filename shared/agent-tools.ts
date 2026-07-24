@@ -136,7 +136,7 @@ const SESSION_ID_PARAMETER = {
 const SESSION_AGENT_TOOLS = [
   toolDefinition({
     description:
-      "Spawn another agent session and return immediately. Configure it with the same fields available in the new-session pane. When it finishes or fails, its last message is sent back to this session.",
+      "Spawn another agent session in this session's workspace and return immediately. Configure it with the same connection fields available in the new-session pane. When it finishes or fails, its last message is sent back to this session.",
     name: "spawn_session",
     properties: {
       credentialId: {

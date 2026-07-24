@@ -24,4 +24,5 @@ export const TEST_SESSION_DETAIL: AgentSessionDetail = {
   tools: AGENT_SESSION_TOOL_NAMES,
   updatedAt: 2,
   workingDirectory: ".",
+  workspaceId: "workspace-1",
 };

@@ -7,8 +7,10 @@ import {
   OPENROUTER_CREDENTIALS_PATH,
   OPENROUTER_OAUTH_PATH,
 } from "../shared/routes.ts";
+import type { WorkspaceList } from "../shared/workspace-model.ts";
 import { RemovalButton } from "./client-controls.tsx";
 import { Collection } from "./collection.tsx";
+import { ConnectionScopeEditor } from "./connection-scope-client.tsx";
 import { DefaultableActions } from "./defaultable-actions.tsx";
 import { renderDebugBoundary } from "./render-debug.tsx";
 
@@ -18,8 +20,10 @@ export interface ProviderCredential {
   readonly accountId: string | null;
   readonly id: string;
   readonly isDefault: boolean;
+  readonly isGlobal?: boolean;
   readonly label: string;
   readonly source: "api_key" | "oauth";
+  readonly workspaceIds?: readonly string[];
 }
 
 interface ProviderViewStateBase {
@@ -119,21 +123,34 @@ function readCredential(
   const id = value["id"];
   const label = value["label"];
   const isDefault = value["isDefault"];
+  const isGlobal = value["isGlobal"];
   const source = value["source"];
+  const workspaceIds = value["workspaceIds"];
 
   if (
     (accountId !== null && typeof accountId !== "string") ||
     typeof id !== "string" ||
     typeof isDefault !== "boolean" ||
+    typeof isGlobal !== "boolean" ||
     typeof label !== "string" ||
-    (source !== "api_key" && source !== "oauth")
+    (source !== "api_key" && source !== "oauth") ||
+    !Array.isArray(workspaceIds) ||
+    !workspaceIds.every((id) => typeof id === "string")
   ) {
     throw new Error(
       `The server returned an invalid ${providerName} credential`,
     );
   }
 
-  return { accountId, id, isDefault, label, source };
+  return {
+    accountId,
+    id,
+    isDefault,
+    isGlobal,
+    label,
+    source,
+    workspaceIds,
+  };
 }
 
 export function readProviderCredentials(
@@ -154,6 +171,8 @@ export function readProviderCredentials(
 interface ProviderPanelProps {
   readonly configuration: ProviderPanelConfiguration;
   readonly controller: ProviderPanelController;
+  readonly selectedWorkspaceId?: string;
+  readonly workspaces?: Accessor<WorkspaceList | undefined>;
 }
 
 interface CredentialItemProps {
@@ -161,6 +180,7 @@ interface CredentialItemProps {
   readonly controller: ProviderPanelController;
   readonly credential: ProviderCredential;
   readonly state: ProviderViewState;
+  readonly workspaces?: Accessor<WorkspaceList | undefined>;
 }
 
 function CredentialActions(props: CredentialItemProps): JSX.Element {
@@ -218,6 +238,22 @@ function ProviderCredentialItem(props: CredentialItemProps): JSX.Element {
             props.configuration.accountIdUnavailable}
         </p>
       </div>
+      <div class="min-w-0">
+        <p class="text-xs text-slate-500">
+          {props.credential.isGlobal === true
+            ? "Scope: Global"
+            : `Scope: ${String(props.credential.workspaceIds?.length ?? 0)} workspace(s)`}
+        </p>
+      </div>
+      <Show when={props.workspaces}>
+        {(workspaces) => (
+          <ConnectionScopeEditor
+            connection={props.credential}
+            controller={props.controller}
+            workspaces={workspaces()}
+          />
+        )}
+      </Show>
       <CredentialActions {...props} />
     </li>
   );
@@ -226,6 +262,7 @@ function ProviderCredentialItem(props: CredentialItemProps): JSX.Element {
 function ProviderCredentialList({
   configuration,
   controller,
+  workspaces,
 }: ProviderPanelProps): JSX.Element {
   const state = controller.view;
   const retry = {
@@ -256,6 +293,7 @@ function ProviderCredentialList({
           controller,
           credential,
           state: state(),
+          ...(workspaces === undefined ? {} : { workspaces }),
         };
         return <ProviderCredentialItem {...item} />;
       }}
@@ -316,7 +354,7 @@ export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
           {(oauth) => (
             <a
               class="inline-flex min-h-11 w-full shrink-0 items-center justify-center rounded-2xl bg-cyan-300 px-5 py-3 text-center font-semibold text-slate-950 transition hover:bg-cyan-200 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300 sm:w-auto"
-              href={oauth().path}
+              href={`${oauth().path}?workspaceId=${encodeURIComponent(props.selectedWorkspaceId ?? "global")}`}
             >
               {oauth().label}
             </a>
@@ -389,6 +427,9 @@ export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
       <ProviderCredentialList
         configuration={props.configuration}
         controller={props.controller}
+        {...(props.workspaces === undefined
+          ? {}
+          : { workspaces: props.workspaces })}
       />
       <p class="mt-5 text-xs leading-5 text-slate-500">
         {props.configuration.removalHelp}
@@ -403,4 +444,8 @@ interface ProviderPanelController {
   load(): Promise<void>;
   remove(credentialId: string): Promise<void>;
   setDefault(credentialId: string): Promise<void>;
+  setScopes(
+    credentialId: string,
+    workspaceIds: readonly string[],
+  ): Promise<void>;
 }

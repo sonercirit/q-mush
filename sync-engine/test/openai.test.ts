@@ -9,10 +9,13 @@ import {
   createOpenAiLoopbackCallbackHandler,
 } from "../../sync-engine/openai.ts";
 import {
+  addFlowCookies,
+  addTestWorkspace,
   createAuthenticatedRequest,
   readFlowCookies,
   TEST_NOW,
   TEST_USER_ID,
+  TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { expectPkceParameters, expectRedirect } from "./oauth-test-helpers.ts";
 import {
@@ -35,6 +38,7 @@ const FIRST_OAUTH_ID = "018bcfe5-6800-7000-8000-000000000031";
 const SECOND_OAUTH_ID = "018bcfe5-6800-7000-8000-000000000032";
 const FIRST_KEY_ID = "018bcfe5-6800-7000-8000-000000000033";
 const SECOND_KEY_ID = "018bcfe5-6800-7000-8000-000000000034";
+const SECOND_WORKSPACE_ID = "018bcfe5-6800-7000-8000-000000000036";
 const FIRST_STATE = "openai-state-one";
 const FIRST_VERIFIER = "openai-verifier-one";
 const SECOND_STATE = "openai-state-two";
@@ -342,6 +346,7 @@ describe("OpenAI credentials", () => {
     const refreshed = await integration.readCredential(
       TEST_USER_ID,
       FIRST_OAUTH_ID,
+      TEST_WORKSPACE_ID,
     );
     expect(JSON.parse(refreshed?.secret ?? "null")).toEqual({
       access: "refreshed-access-token",
@@ -363,6 +368,40 @@ describe("OpenAI credentials", () => {
     } finally {
       database.$client.close();
     }
+  });
+
+  test("keeps the selected OAuth workspace through the callback", async () => {
+    const { database, integration } = setupIntegration();
+    addTestWorkspace(database, SECOND_WORKSPACE_ID, "OAuth workspace");
+    const beginResponse = integration.begin(
+      createAuthenticatedRequest(
+        `${TEST_ROUTES.oauthPath}?workspaceId=${SECOND_WORKSPACE_ID}`,
+      ),
+    );
+    const callbackRequest = createAuthenticatedRequest(
+      `${TEST_ROUTES.callbackPath}?code=authorization-code-one&state=${FIRST_STATE}`,
+    );
+    addFlowCookies(callbackRequest, beginResponse);
+
+    expect((await integration.complete(callbackRequest)).status).toBe(302);
+    expect(
+      await integration.readCredential(
+        TEST_USER_ID,
+        FIRST_OAUTH_ID,
+        SECOND_WORKSPACE_ID,
+      ),
+    ).toMatchObject({
+      isGlobal: false,
+      workspaceIds: [SECOND_WORKSPACE_ID],
+    });
+    expect(
+      await integration.readCredential(
+        TEST_USER_ID,
+        FIRST_OAUTH_ID,
+        TEST_WORKSPACE_ID,
+      ),
+    ).toBeUndefined();
+    database.$client.close();
   });
 
   test("rejects an OAuth callback with unverifiable state", () =>

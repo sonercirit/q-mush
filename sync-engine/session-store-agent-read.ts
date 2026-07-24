@@ -114,13 +114,14 @@ function storedAgentFile(stored: {
 interface ReadSessionSnapshotInput extends ReadSessionLookup {
   readonly includeSystem: boolean;
   readonly limit: number;
+  readonly workspaceId: string;
 }
 
 export function readSessionSnapshot(
   database: AppDatabase,
   input: ReadSessionSnapshotInput,
 ): ReadSessionSnapshot | undefined {
-  const { includeSystem, limit, sessionId, userId } = input;
+  const { includeSystem, limit, sessionId, userId, workspaceId } = input;
   const selectedRoles = [...input.roles].sort();
   const rows = database
     .select({
@@ -155,6 +156,7 @@ export function readSessionSnapshot(
       and(
         eq(agentSessions.isDeleted, false),
         eq(agentSessions.userId, userId),
+        eq(agentSessions.workspaceId, workspaceId),
         eq(agentSessions.id, sessionId),
       ),
     )

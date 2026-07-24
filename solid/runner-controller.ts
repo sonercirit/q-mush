@@ -1,6 +1,11 @@
 import { type Accessor } from "solid-js";
-import { RUNNERS_PATH, runnerDefaultPath } from "../shared/routes.ts";
+import {
+  connectionScopesPath,
+  runnerDefaultPath,
+  RUNNERS_PATH,
+} from "../shared/routes.ts";
 import type { RunnerSummary } from "../shared/runner-model.ts";
+import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 import { HttpResponseError, request, requestJson } from "./browser-http.ts";
 import { createReactiveState, type ReactiveState } from "./reactive-state.ts";
 import {
@@ -49,9 +54,14 @@ function runnerPresentationMatches(
     left.architecture === right.architecture &&
     left.id === right.id &&
     left.isDefault === right.isDefault &&
+    left.isGlobal === right.isGlobal &&
     left.name === right.name &&
     left.platform === right.platform &&
     left.status === right.status &&
+    left.workspaceIds?.length === right.workspaceIds?.length &&
+    left.workspaceIds?.every(
+      (workspaceId, index) => workspaceId === right.workspaceIds?.[index],
+    ) !== false &&
     (left.status === "online" || left.lastSeenAt === right.lastSeenAt)
   );
 }
@@ -75,6 +85,7 @@ function runnerListsMatch(
 export class RunnerController {
   readonly #view: ReactiveState<RunnerViewState>;
   #revision = 0;
+  #workspaceId = GLOBAL_WORKSPACE_ID;
 
   constructor(view = createReactiveState(initialRunnerState())) {
     this.#view = view;
@@ -117,6 +128,17 @@ export class RunnerController {
   }
 
   reset(): void {
+    this.#revision += 1;
+    this.#workspaceId = GLOBAL_WORKSPACE_ID;
+    this.#view.setState(initialRunnerState());
+  }
+
+  setScopes(runnerId: string, workspaceIds: readonly string[]): Promise<void> {
+    return this.#setScopes(runnerId, workspaceIds);
+  }
+
+  setWorkspace(workspaceId: string): void {
+    this.#workspaceId = workspaceId;
     this.#revision += 1;
     this.#view.setState(initialRunnerState());
   }
@@ -167,7 +189,10 @@ export class RunnerController {
 
     try {
       const created = readCreatedRunner(
-        await requestJson(RUNNERS_PATH, { method: "POST" }),
+        await requestJson(
+          `${RUNNERS_PATH}?workspaceId=${encodeURIComponent(this.#workspaceId)}`,
+          { method: "POST" },
+        ),
       );
 
       if (this.#isCurrent(revision)) {
@@ -208,7 +233,11 @@ export class RunnerController {
       : ++this.#revision;
 
     try {
-      const runners = readRunners(await requestJson(RUNNERS_PATH));
+      const runners = readRunners(
+        await requestJson(
+          `${RUNNERS_PATH}?workspaceId=${encodeURIComponent(this.#workspaceId)}`,
+        ),
+      );
 
       if (this.#isCurrent(revision)) {
         this.#applyList(runners);
@@ -269,6 +298,27 @@ export class RunnerController {
           error: configuration.failure,
           [configuration.pending]: undefined,
         });
+      }
+    }
+  }
+
+  async #setScopes(
+    runnerId: string,
+    workspaceIds: readonly string[],
+  ): Promise<void> {
+    const revision = this.#begin({ error: undefined });
+    try {
+      await request(connectionScopesPath(RUNNERS_PATH, runnerId), {
+        body: JSON.stringify({ workspaceIds }),
+        headers: { "content-type": "application/json" },
+        method: "PUT",
+      });
+      if (this.#isCurrent(revision)) {
+        await this.#readList(false);
+      }
+    } catch {
+      if (this.#isCurrent(revision)) {
+        this.#patch({ error: "We could not update that runner scope." });
       }
     }
   }

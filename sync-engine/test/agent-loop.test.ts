@@ -66,13 +66,14 @@ function testSkills(options: {
 }) {
   return createAgentSkills({
     braveSearch: {
-      execute: (_userId, arguments_) =>
+      execute: (_userId, _workspaceId, arguments_) =>
         options.braveSearch?.(arguments_) ?? Promise.resolve("unused"),
     },
     executeTool:
       options.executeTool ?? (() => Promise.resolve("unused runner output")),
     tools: options.tools ?? ["read", "parallel"],
     userId: "user-id",
+    workspaceId: "workspace-id",
   });
 }
 
@@ -219,7 +220,7 @@ describe("first-party agent loop", () => {
     const searchCalls: Readonly<Record<string, unknown>>[] = [];
     const skills = createAgentSkills({
       braveSearch: {
-        execute: (_userId, arguments_) => {
+        execute: (_userId, _workspaceId, arguments_) => {
           searchCalls.push(arguments_);
           return Promise.resolve('{"results":[]}');
         },
@@ -230,6 +231,7 @@ describe("first-party agent loop", () => {
       },
       tools: ["brave_search"],
       userId: "user-id",
+      workspaceId: "workspace-id",
     });
     const model = new ScriptedAgentModel([
       {
@@ -466,6 +468,7 @@ describe("first-party agent loop", () => {
         runnerCall = name;
         return Promise.resolve("enabled runner result");
       },
+      tools: ["read", "parallel"],
     });
 
     const output = await skills.execute("parallel", {

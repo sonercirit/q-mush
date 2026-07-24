@@ -57,6 +57,7 @@ export function readCreateSession(
   const modelValue = value["model"];
   const reasoningEffortValue = value["reasoningEffort"];
   const toolsValue = value["tools"];
+  const workspaceId = readIdentifier(value["workspaceId"]);
   const tools =
     toolsValue === undefined
       ? AGENT_SESSION_TOOL_NAMES
@@ -72,6 +73,7 @@ export function readCreateSession(
     (modelValue !== undefined && !isAgentModelId(modelValue)) ||
     (reasoningEffortValue !== undefined &&
       !isAgentReasoningEffort(reasoningEffortValue)) ||
+    workspaceId === undefined ||
     tools === undefined
   ) {
     return undefined;
@@ -87,6 +89,7 @@ export function readCreateSession(
       : null,
     runnerId,
     tools,
+    workspaceId,
     workingDirectory,
   };
 }

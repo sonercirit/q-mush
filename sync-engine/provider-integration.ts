@@ -28,8 +28,10 @@ export interface ProviderIntegration extends OAuthEndpoints {
   readCredential(
     userId: string,
     credentialId: string,
+    workspaceId: string,
   ): Promise<ProviderCredentialAccess | undefined>;
   setDefault(request: Request, credentialId: string): Response;
+  setScopes(request: Request, credentialId: string): Promise<Response>;
   remove(request: Request, credentialId: string): Response;
 }
 
@@ -133,8 +135,13 @@ export function createProviderIntegration(options: {
   const readCredential = async (
     userId: string,
     credentialId: string,
+    workspaceId: string,
   ): Promise<ProviderCredentialAccess | undefined> => {
-    const credential = credentials.readCredential(userId, credentialId);
+    const credential = credentials.readCredential(
+      userId,
+      credentialId,
+      workspaceId,
+    );
 
     if (credential === undefined || options.prepareCredential === undefined) {
       return credential;
@@ -162,6 +169,8 @@ export function createProviderIntegration(options: {
     readCredential,
     setDefault: (request, credentialId) =>
       credentials.setDefault(request, credentialId),
+    setScopes: (request, credentialId) =>
+      credentials.setScopes(request, credentialId),
     remove: (request, credentialId) =>
       credentials.remove(request, credentialId),
   };

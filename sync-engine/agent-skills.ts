@@ -5,14 +5,14 @@ import {
   executeParallelCall,
   mapWithParallelConcurrency,
 } from "../shared/parallel.ts";
-import type { BraveSearchSkill } from "./brave-search.ts";
+import type { BraveSearchExecutor } from "./brave-search.ts";
 import type { JsonRecord } from "./oauth.ts";
 
 const BRAVE_SEARCH_TOOL_NAME = "brave_search";
 const PARALLEL_TOOL_NAME = "parallel";
 
 interface AgentSkillsOptions {
-  readonly braveSearch: Pick<BraveSearchSkill, "execute">;
+  readonly braveSearch: BraveSearchExecutor;
   readonly executeTool: (
     name: string,
     arguments_: JsonRecord,
@@ -20,6 +20,7 @@ interface AgentSkillsOptions {
   ) => Promise<string>;
   readonly tools: readonly AgentSessionToolName[];
   readonly userId: string;
+  readonly workspaceId: string;
 }
 
 export interface AgentSkills {
@@ -62,6 +63,19 @@ function parallelSkillCalls(
   return calls.length === toolUses.length ? calls : undefined;
 }
 
+function executeSearch(
+  options: AgentSkillsOptions,
+  arguments_: JsonRecord,
+  signal?: AbortSignal,
+): Promise<string> {
+  return options.braveSearch.execute(
+    options.userId,
+    options.workspaceId,
+    arguments_,
+    signal,
+  );
+}
+
 function executeParallelSkills(
   options: AgentSkillsOptions,
   arguments_: JsonRecord,
@@ -83,7 +97,7 @@ function executeParallelSkills(
                 `Error: ${recipientName} is not enabled for this session.`,
               )
             : recipientName === BRAVE_SEARCH_TOOL_NAME
-              ? options.braveSearch.execute(options.userId, parameters, signal)
+              ? executeSearch(options, parameters, signal)
               : options.executeTool(recipientName, parameters, signal),
         signal,
       ),
@@ -95,7 +109,7 @@ export function createAgentSkills(options: AgentSkillsOptions): AgentSkills {
   return {
     execute: (name, arguments_, signal) =>
       name === BRAVE_SEARCH_TOOL_NAME
-        ? options.braveSearch.execute(options.userId, arguments_, signal)
+        ? executeSearch(options, arguments_, signal)
         : name === PARALLEL_TOOL_NAME
           ? executeParallelSkills(options, arguments_, signal)
           : undefined,

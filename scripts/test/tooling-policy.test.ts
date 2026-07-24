@@ -258,9 +258,17 @@ console.log(database);
 
     const duplicatedImplementation = `export function normalizeDuplicatedValue(
   input: string,
+  prefix: string,
 ): string {
-  const normalized = input.trim().toLowerCase();
-  return normalized.split("").reverse().join("");
+  const trimmedInput = input.trim();
+  const normalizedPrefix = prefix.trim().toLowerCase();
+  const lowercaseInput = trimmedInput.toLowerCase();
+  const collapsedWhitespace = lowercaseInput.replace(/\\s+/gu, " ");
+  const characters = collapsedWhitespace.split("");
+  const reversedCharacters = characters.reverse();
+  const reversedInput = reversedCharacters.join("");
+  const combinedValue = normalizedPrefix.concat(":", reversedInput);
+  return combinedValue.normalize("NFC");
 }
 `;
     await Promise.all(

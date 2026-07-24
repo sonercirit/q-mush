@@ -25,6 +25,7 @@ import {
   SESSION_MODELS_PATH,
   SESSIONS_PATH,
   STYLESHEET_PATH,
+  WORKSPACES_PATH,
 } from "../shared/routes.ts";
 import type { GoogleAuth } from "./auth.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
@@ -41,6 +42,7 @@ import type { ProviderIntegration } from "./provider-integration.ts";
 import type { RunnerExecutableProvider } from "./runner-executable.ts";
 import type { RunnerIntegration } from "./runners.ts";
 import type { SessionIntegration } from "./sessions.ts";
+import type { WorkspaceIntegration } from "./workspaces.ts";
 
 const CSS_HEADERS = { "content-type": "text/css; charset=utf-8" };
 const FAVICON_HEADERS = {
@@ -253,6 +255,7 @@ function pathSegments(pathname: string, prefix: string): readonly string[] {
 interface ItemRouteActions {
   readonly default?: (id: string) => Promise<Response> | Response;
   readonly item: (id: string) => Promise<Response> | Response;
+  readonly scopes?: (id: string) => Promise<Response> | Response;
 }
 
 function routeItemSegments(
@@ -268,8 +271,11 @@ function routeItemSegments(
     return actions.item(id);
   }
 
-  return segments.length === 2 && segments[1] === "default"
-    ? actions.default?.(id)
+  if (segments.length === 2 && segments[1] === "default") {
+    return actions.default?.(id);
+  }
+  return segments.length === 2 && segments[1] === "scopes"
+    ? actions.scopes?.(id)
     : undefined;
 }
 
@@ -294,6 +300,7 @@ function routeProviderRequest(
   return routeItemSegments(pathSegments(pathname, `${routes.credentials}/`), {
     default: (credentialId) => integration.setDefault(request, credentialId),
     item: (credentialId) => integration.remove(request, credentialId),
+    scopes: (credentialId) => integration.setScopes(request, credentialId),
   });
 }
 
@@ -307,6 +314,7 @@ export function createRequestHandler(
   braveSearch: BraveSearchSkill,
   runners: RunnerIntegration,
   sessions: SessionIntegration,
+  workspaces: WorkspaceIntegration,
   runnerExecutables: RunnerExecutableProvider,
 ): (request: Request) => Promise<Response> {
   const appPage = prepareBody(pages.app);
@@ -338,6 +346,21 @@ export function createRequestHandler(
         return googleAuth.session(request);
       }
 
+      if (pathname === WORKSPACES_PATH) {
+        return workspaces.collection(request);
+      }
+
+      const workspaceResponse = routeItemSegments(
+        pathSegments(pathname, `${WORKSPACES_PATH}/`),
+        {
+          default: (workspaceId) => workspaces.setDefault(request, workspaceId),
+          item: (workspaceId) => workspaces.item(request, workspaceId),
+        },
+      );
+      if (workspaceResponse !== undefined) {
+        return workspaceResponse;
+      }
+
       if (pathname === RUNNERS_PATH) {
         return runners.collection(request);
       }
@@ -346,6 +369,7 @@ export function createRequestHandler(
       const runnerResponse = routeItemSegments(runnerSegments, {
         default: (runnerId) => runners.setDefault(request, runnerId),
         item: (runnerId) => runners.remove(request, runnerId),
+        scopes: (runnerId) => runners.setScopes(request, runnerId),
       });
 
       if (runnerResponse !== undefined) {
@@ -358,7 +382,11 @@ export function createRequestHandler(
         runnerSegments.length === 2 &&
         runnerSegments[1] === RUNNER_DIRECTORIES_SEGMENT
       ) {
-        return sessions.directories(request, runnerId);
+        return sessions.directories(
+          request,
+          runnerId,
+          new URL(request.url).searchParams.get("workspaceId"),
+        );
       }
 
       if (pathname === SESSIONS_PATH) {
@@ -369,14 +397,15 @@ export function createRequestHandler(
         return braveSearch.keys(request);
       }
 
-      const braveSearchKeyPrefix = `${BRAVE_SEARCH_KEYS_PATH}/`;
-
-      if (pathname.startsWith(braveSearchKeyPrefix)) {
-        const keyId = pathname.slice(braveSearchKeyPrefix.length);
-
-        if (keyId.length > 0 && !keyId.includes("/")) {
-          return braveSearch.remove(request, keyId);
-        }
+      const braveSearchKeyResponse = routeItemSegments(
+        pathSegments(pathname, `${BRAVE_SEARCH_KEYS_PATH}/`),
+        {
+          item: (keyId) => braveSearch.remove(request, keyId),
+          scopes: (keyId) => braveSearch.setScopes(request, keyId),
+        },
+      );
+      if (braveSearchKeyResponse !== undefined) {
+        return braveSearchKeyResponse;
       }
 
       if (pathname === SESSION_MODELS_PATH) {

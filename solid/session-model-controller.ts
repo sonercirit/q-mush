@@ -1,5 +1,6 @@
 import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
 import { SESSION_MODELS_PATH } from "../shared/routes.ts";
+import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 import { requestJson } from "./browser-http.ts";
 import type { RevisionState } from "./revision-state.ts";
 import type { SessionViewState } from "./session-client.tsx";
@@ -11,6 +12,7 @@ import { sessionModelDiscoveryState } from "./session-state.ts";
 export class SessionModelController {
   readonly #catalogs = new Map<string, AgentModelCatalog>();
   #request = 0;
+  #workspaceId = GLOBAL_WORKSPACE_ID;
   readonly #state: RevisionState<SessionViewState>;
 
   constructor(state: RevisionState<SessionViewState>) {
@@ -18,8 +20,14 @@ export class SessionModelController {
   }
 
   reset(): void {
+    this.#workspaceId = GLOBAL_WORKSPACE_ID;
     this.#catalogs.clear();
     this.#request += 1;
+  }
+
+  setWorkspace(workspaceId: string): void {
+    this.reset();
+    this.#workspaceId = workspaceId;
   }
 
   ensure(credentialValue: string, force = false): void {
@@ -65,7 +73,10 @@ export class SessionModelController {
     });
 
     try {
-      const search = new URLSearchParams(credential);
+      const search = new URLSearchParams({
+        ...credential,
+        workspaceId: this.#workspaceId,
+      });
       const catalog = readAgentModelCatalog(
         await requestJson(`${SESSION_MODELS_PATH}?${search.toString()}`),
       );

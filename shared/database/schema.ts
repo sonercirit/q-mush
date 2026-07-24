@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  type AnySQLiteColumn,
   index,
   integer,
   real,
@@ -32,10 +33,34 @@ export const users = sqliteTable("users", {
   ...auditColumns(),
 });
 
+export const workspaces = sqliteTable(
+  "workspaces",
+  {
+    id: text("id").primaryKey(),
+    userId: userIdColumn(),
+    name: text("name").notNull(),
+    isDefault: integer("is_default", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    ...auditColumns(),
+  },
+  (table) => [
+    index("workspaces_user_deletion_index").on(table.userId, table.isDeleted),
+    uniqueIndex("workspaces_user_active_name_unique")
+      .on(table.userId, table.name)
+      .where(sql`NOT ${table.isDeleted}`),
+    uniqueIndex("workspaces_user_default_unique")
+      .on(table.userId)
+      .where(sql`NOT ${table.isDeleted} AND ${table.isDefault}`),
+  ],
+);
+
+function ownedForeignKey(name: string, reference: () => AnySQLiteColumn) {
+  return text(name).notNull().references(reference, { onDelete: "restrict" });
+}
+
 function userIdColumn() {
-  return text("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "restrict" });
+  return ownedForeignKey("user_id", () => users.id);
 }
 
 function ownedAuditColumns() {
@@ -48,6 +73,18 @@ function ownedAuditColumns() {
 
 function defaultBooleanColumn() {
   return integer("is_default", { mode: "boolean" }).notNull().default(false);
+}
+
+function workspaceIdColumn() {
+  return text("workspace_id")
+    .notNull()
+    .references(() => workspaces.id, { onDelete: "restrict" });
+}
+
+function connectionScopeColumns() {
+  return {
+    isGlobal: integer("is_global", { mode: "boolean" }).notNull().default(true),
+  };
 }
 
 function providerColumn() {
@@ -71,6 +108,7 @@ export const providerCredentials = sqliteTable(
     encryptedCredential: text("encrypted_credential").notNull(),
     credentialFingerprint: text("credential_fingerprint").notNull(),
     isDefault: defaultBooleanColumn(),
+    ...connectionScopeColumns(),
   },
   (table) => [
     index("provider_credentials_user_provider_deletion_index").on(
@@ -91,6 +129,42 @@ export const providerCredentials = sqliteTable(
   ],
 );
 
+function scopeIndexes(
+  prefix: string,
+  table: {
+    readonly isDeleted: Parameters<ReturnType<typeof index>["on"]>[0];
+    readonly userId: Parameters<ReturnType<typeof index>["on"]>[0];
+    readonly workspaceId: Parameters<ReturnType<typeof index>["on"]>[0];
+  },
+  ownerId: Parameters<ReturnType<typeof index>["on"]>[0],
+) {
+  return [
+    index(`${prefix}_user_deletion_index`).on(table.userId, table.isDeleted),
+    uniqueIndex(`${prefix}_active_unique`)
+      .on(ownerId, table.workspaceId)
+      .where(sql`NOT ${table.isDeleted}`),
+  ];
+}
+
+export const providerCredentialWorkspaces = sqliteTable(
+  "provider_credential_workspaces",
+  {
+    id: text("id").primaryKey(),
+    userId: userIdColumn(),
+    providerCredentialId: text("provider_credential_id")
+      .notNull()
+      .references(() => providerCredentials.id, { onDelete: "restrict" }),
+    workspaceId: workspaceIdColumn(),
+    ...auditColumns(),
+  },
+  (table) =>
+    scopeIndexes(
+      "provider_credential_workspaces",
+      table,
+      table.providerCredentialId,
+    ),
+);
+
 export const runners = sqliteTable(
   "runners",
   {
@@ -102,6 +176,7 @@ export const runners = sqliteTable(
     tokenHash: text("token_hash").notNull(),
     lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" }),
     isDefault: defaultBooleanColumn(),
+    ...connectionScopeColumns(),
   },
   (table) => [
     index("runners_user_deletion_index").on(table.userId, table.isDeleted),
@@ -117,10 +192,25 @@ export const runners = sqliteTable(
   ],
 );
 
+export const runnerWorkspaces = sqliteTable(
+  "runner_workspaces",
+  {
+    id: text("id").primaryKey(),
+    userId: userIdColumn(),
+    runnerId: text("runner_id")
+      .notNull()
+      .references(() => runners.id, { onDelete: "restrict" }),
+    workspaceId: workspaceIdColumn(),
+    ...auditColumns(),
+  },
+  (table) => scopeIndexes("runner_workspaces", table, table.runnerId),
+);
+
 export const agentSessions = sqliteTable(
   "agent_sessions",
   {
     ...ownedAuditColumns(),
+    workspaceId: workspaceIdColumn(),
     parentSessionId: text("parent_session_id"),
     runnerId: text("runner_id")
       .notNull()
@@ -161,8 +251,9 @@ export const agentSessions = sqliteTable(
     }).notNull(),
   },
   (table) => [
-    index("agent_sessions_user_deletion_update_index").on(
+    index("agent_sessions_user_workspace_deletion_update_index").on(
       table.userId,
+      table.workspaceId,
       table.isDeleted,
       table.updatedAt,
     ),

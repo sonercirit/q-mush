@@ -1,5 +1,9 @@
 import { type Accessor } from "solid-js";
-import { providerCredentialDefaultPath } from "../shared/routes.ts";
+import {
+  connectionScopesPath,
+  providerCredentialDefaultPath,
+} from "../shared/routes.ts";
+import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 import { HttpResponseError, request, requestJson } from "./browser-http.ts";
 import {
   createProviderViewState,
@@ -20,6 +24,7 @@ export class ProviderController {
   readonly #configuration: ProviderPanelConfiguration;
   readonly #view: ReactiveState<ProviderViewState>;
   #revision = 0;
+  #workspaceId = GLOBAL_WORKSPACE_ID;
 
   constructor(
     configuration: ProviderPanelConfiguration,
@@ -44,6 +49,7 @@ export class ProviderController {
         body: JSON.stringify({
           apiKey,
           ...(this.#configuration.keyRequiresLabel === true ? { label } : {}),
+          workspaceIds: [this.#workspaceId],
         }),
         headers: { "content-type": "application/json" },
         method: "POST",
@@ -60,7 +66,9 @@ export class ProviderController {
 
     try {
       const credentials = readProviderCredentials(
-        await requestJson(this.#configuration.credentialsPath),
+        await requestJson(
+          `${this.#configuration.credentialsPath}?workspaceId=${encodeURIComponent(this.#workspaceId)}`,
+        ),
         this.#configuration.name,
       );
 
@@ -90,6 +98,30 @@ export class ProviderController {
   }
 
   reset(): void {
+    this.#revision += 1;
+    this.#workspaceId = GLOBAL_WORKSPACE_ID;
+    this.#replace(initialProviderState());
+  }
+
+  setScopes(
+    credentialId: string,
+    workspaceIds: readonly string[],
+  ): Promise<void> {
+    return this.#mutate(
+      connectionScopesPath(this.#configuration.credentialsPath, credentialId),
+      {
+        body: JSON.stringify({ workspaceIds }),
+        headers: { "content-type": "application/json" },
+        method: "PUT",
+      },
+      {},
+      {},
+      () => `We could not update that ${this.#configuration.name} scope.`,
+    );
+  }
+
+  setWorkspace(workspaceId: string): void {
+    this.#workspaceId = workspaceId;
     this.#revision += 1;
     this.#replace(initialProviderState());
   }

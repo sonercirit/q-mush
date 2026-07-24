@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
 import type { AgentModelCatalog } from "../../shared/agent-configuration.ts";
 import type {
@@ -6,6 +7,11 @@ import type {
   AgentModelTurn,
 } from "../../shared/agent-loop.ts";
 import {
+  agentSessions,
+  providerCredentials,
+  runners,
+} from "../../shared/database/schema.ts";
+import {
   runnerDirectoriesPath,
   SESSION_MODELS_PATH,
   SESSIONS_PATH,
@@ -13,8 +19,10 @@ import {
 import type { AgentModelDiscoverer } from "../../sync-engine/agent-model-discovery.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import {
+  addTestWorkspace,
   createAuthenticatedRequest,
   TEST_USER_ID,
+  TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
@@ -33,6 +41,12 @@ import {
   sessionDetail,
   waitForSessionValue,
 } from "./session-integration-helpers.ts";
+import {
+  expectSessionReaches,
+  startSessionWithAgentFile,
+} from "./session-test-helpers.ts";
+
+const OTHER_WORKSPACE_ID = "018bcfe5-6800-7000-8000-000000000073";
 
 class FailingModel implements AgentModel {
   complete(): Promise<AgentModelTurn> {
@@ -75,38 +89,6 @@ async function expectJsonResponse(
   expect(response.status).toBe(status);
 }
 
-async function expectSessionReaches(
-  setup: Awaited<ReturnType<typeof connectedSessionSetup>>,
-  response: Response,
-  status: string,
-) {
-  expect(response.status).toBe(201);
-  await completeAgentFileLookup(setup);
-  await waitForSessionValue(
-    () => sessionDetail(setup.sessions),
-    hasSessionStatus(status),
-  );
-  return sessionDetail(setup.sessions);
-}
-
-async function startSessionWithAgentFile(
-  model: AgentModel,
-  agentFile: unknown,
-): Promise<Awaited<ReturnType<typeof connectedSessionSetup>>> {
-  const setup = connectedSessionSetup(model);
-  const createResponse = await setup.sessions.collection(
-    createSessionRequest(),
-  );
-
-  expect(createResponse.status).toBe(201);
-  await completeAgentFileLookup(setup, agentFile);
-  await waitForSessionValue(
-    () => sessionDetail(setup.sessions),
-    hasSessionStatus("idle"),
-  );
-  return setup;
-}
-
 function isObject(value: unknown): value is object {
   return typeof value === "object" && value !== null;
 }
@@ -140,6 +122,100 @@ async function unauthenticatedSessionStatus(): Promise<number> {
 }
 
 describe("agent sessions", () => {
+  test("isolates session operations and connection access by workspace", async () => {
+    const setup = connectedSessionSetup(
+      new ScriptedAgentModel([
+        { content: "Scoped session done.", toolCalls: [] },
+      ]),
+    );
+    addTestWorkspace(setup.database, OTHER_WORKSPACE_ID);
+    const created = await setup.sessions.collection(createSessionRequest());
+    expect(created.status).toBe(201);
+
+    const wrongWorkspacePath = `${SESSIONS_PATH}/${SESSION_ID}?workspaceId=${OTHER_WORKSPACE_ID}`;
+    expect(
+      setup.sessions.item(
+        createAuthenticatedRequest(wrongWorkspacePath),
+        SESSION_ID,
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await setup.sessions.message(
+          createAuthenticatedRequest(
+            `${SESSIONS_PATH}/${SESSION_ID}/messages?workspaceId=${OTHER_WORKSPACE_ID}`,
+            { prompt: "Cross workspace" },
+            "POST",
+          ),
+          SESSION_ID,
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await setup.sessions.continue(
+          createAuthenticatedRequest(
+            `${SESSIONS_PATH}/${SESSION_ID}/continue?workspaceId=${OTHER_WORKSPACE_ID}`,
+            undefined,
+            "POST",
+          ),
+          SESSION_ID,
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await setup.sessions.stop(
+          createAuthenticatedRequest(
+            `${SESSIONS_PATH}/${SESSION_ID}/stop?workspaceId=${OTHER_WORKSPACE_ID}`,
+            undefined,
+            "POST",
+          ),
+          SESSION_ID,
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      setup.sessions.listForUser(TEST_USER_ID, OTHER_WORKSPACE_ID),
+    ).toEqual([]);
+    expect(
+      setup.sessions.listForUser(TEST_USER_ID, TEST_WORKSPACE_ID),
+    ).toHaveLength(1);
+
+    setup.database
+      .update(runners)
+      .set({ isGlobal: false })
+      .where(eq(runners.id, RUNNER_ID))
+      .run();
+    setup.database
+      .update(providerCredentials)
+      .set({ isGlobal: false })
+      .where(eq(providerCredentials.id, CREDENTIAL_ID))
+      .run();
+    const deniedCreate = await setup.sessions.collection(
+      createSessionRequest(),
+    );
+    expect(deniedCreate.status).toBe(409);
+    expect(await deniedCreate.json()).toEqual({ error: "runner_unavailable" });
+    const deniedModels = await setup.sessions.models(
+      createAuthenticatedRequest(
+        `${SESSION_MODELS_PATH}?provider=openai&credentialId=${CREDENTIAL_ID}&workspaceId=${OTHER_WORKSPACE_ID}`,
+      ),
+    );
+    expect(deniedModels.status).toBe(409);
+    expect(await deniedModels.json()).toEqual({
+      error: "credential_unavailable",
+    });
+    expect(
+      setup.database
+        .select({ workspaceId: agentSessions.workspaceId })
+        .from(agentSessions)
+        .where(eq(agentSessions.id, SESSION_ID))
+        .get(),
+    ).toEqual({ workspaceId: TEST_WORKSPACE_ID });
+    setup.database.$client.close();
+  });
+
   test("stores session failures as error messages", async () => {
     const setup = connectedSessionSetup(new FailingModel());
     const response = await setup.sessions.collection(createSessionRequest());
@@ -219,7 +295,7 @@ describe("agent sessions", () => {
     const setup = connectedSessionSetup(new ScriptedAgentModel([]));
     const browseResponse = setup.sessions.directories(
       createAuthenticatedRequest(
-        runnerDirectoriesPath(RUNNER_ID),
+        runnerDirectoriesPath(RUNNER_ID, TEST_WORKSPACE_ID),
         { path: "~/projects" },
         "POST",
       ),
@@ -340,6 +416,7 @@ describe("agent sessions", () => {
         ],
       }),
     );
+    addTestWorkspace(setup.database, OTHER_WORKSPACE_ID);
     const created = await setup.sessions.collection(createSessionRequest());
     await expectSessionReaches(setup, created, "idle");
 
@@ -354,7 +431,7 @@ describe("agent sessions", () => {
     expect(modeResponse.status).toBe(400);
     const validModeResponse = await setup.sessions.compaction(
       new Request(
-        `http://localhost:3000${SESSIONS_PATH}/${SESSION_ID}/compaction`,
+        `http://localhost:3000${SESSIONS_PATH}/${SESSION_ID}/compaction?workspaceId=${TEST_WORKSPACE_ID}`,
         {
           body: JSON.stringify({ autoCompact: false }),
           headers: {
@@ -370,10 +447,29 @@ describe("agent sessions", () => {
     expect(await validModeResponse.json()).toMatchObject({
       autoCompact: false,
     });
+    const crossWorkspaceModeResponse = await setup.sessions.compaction(
+      createAuthenticatedRequest(
+        `${SESSIONS_PATH}/${SESSION_ID}/compaction?workspaceId=${OTHER_WORKSPACE_ID}`,
+        { autoCompact: true },
+        "POST",
+      ),
+      SESSION_ID,
+    );
+    expect(crossWorkspaceModeResponse.status).toBe(404);
+
+    const crossWorkspaceCompactResponse = await setup.sessions.compact(
+      createAuthenticatedRequest(
+        `${SESSIONS_PATH}/${SESSION_ID}/compact?workspaceId=${OTHER_WORKSPACE_ID}`,
+        undefined,
+        "POST",
+      ),
+      SESSION_ID,
+    );
+    expect(crossWorkspaceCompactResponse.status).toBe(404);
 
     const compactResponse = await setup.sessions.compact(
       createAuthenticatedRequest(
-        `${SESSIONS_PATH}/${SESSION_ID}/compact`,
+        `${SESSIONS_PATH}/${SESSION_ID}/compact?workspaceId=${TEST_WORKSPACE_ID}`,
         undefined,
         "POST",
       ),

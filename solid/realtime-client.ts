@@ -1,4 +1,5 @@
 import { REALTIME_PATH } from "../shared/routes.ts";
+import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 import {
   readRealtimeServerEvent,
   type RealtimeServerEvent,
@@ -25,8 +26,9 @@ interface RealtimeLocation {
   readonly protocol: string;
 }
 
-function realtimeUrl(location: RealtimeLocation): string {
+function realtimeUrl(location: RealtimeLocation, workspaceId: string): string {
   const url = new URL(REALTIME_PATH, location.href);
+  url.searchParams.set("workspaceId", workspaceId);
   url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
   return url.toString();
 }
@@ -45,6 +47,7 @@ export class RealtimeConnection {
   #sessionDeltaFrame: number | undefined;
   #socket: BrowserWebSocket | undefined;
   #stopped = true;
+  #workspaceId = GLOBAL_WORKSPACE_ID;
 
   constructor(
     listener: RealtimeListener,
@@ -66,11 +69,12 @@ export class RealtimeConnection {
     this.#setTimeout = options.setTimeout ?? window.setTimeout;
   }
 
-  start(): void {
+  start(workspaceId: string): void {
     if (!this.#stopped) {
       return;
     }
 
+    this.#workspaceId = workspaceId;
     this.#stopped = false;
     this.#connect();
   }
@@ -98,7 +102,9 @@ export class RealtimeConnection {
 
     let socket: BrowserWebSocket;
     try {
-      socket = this.#createSocket(realtimeUrl(this.#location));
+      socket = this.#createSocket(
+        realtimeUrl(this.#location, this.#workspaceId),
+      );
     } catch {
       this.#scheduleReconnect();
       return;
@@ -113,7 +119,11 @@ export class RealtimeConnection {
       }
     });
     socket.addEventListener("message", (event) => {
-      if (event instanceof MessageEvent && typeof event.data === "string") {
+      if (
+        socket === this.#socket &&
+        event instanceof MessageEvent &&
+        typeof event.data === "string"
+      ) {
         try {
           this.#receive(readRealtimeServerEvent(event.data));
         } catch {

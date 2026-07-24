@@ -1,6 +1,13 @@
 import { describe, expect, test } from "vitest";
 import type { AgentModel, AgentModelTurn } from "../../shared/agent-loop.ts";
 import { isRecord } from "../../shared/auth-model.ts";
+import { agentSessions } from "../../shared/database/schema.ts";
+import {
+  addTestWorkspace,
+  TEST_NOW,
+  TEST_USER_ID,
+  TEST_WORKSPACE_ID,
+} from "./authenticated-integration-test-helpers.ts";
 import {
   jsonRecord,
   records,
@@ -136,6 +143,42 @@ function completeChildAgentFile(
   ).toBe(true);
 }
 
+function addIdleSessionInWorkspace(
+  setup: Awaited<ReturnType<typeof startToolSession>>,
+  workspaceId: string,
+  sessionId: string,
+): void {
+  addTestWorkspace(setup.database, workspaceId, "Hidden workspace");
+  const parent = setup.sessions.detailForUser(
+    TEST_USER_ID,
+    SESSION_ID,
+    TEST_WORKSPACE_ID,
+  );
+  if (parent === undefined) {
+    throw new Error("The parent session was not created");
+  }
+  setup.database
+    .insert(agentSessions)
+    .values({
+      createdAt: new Date(TEST_NOW),
+      createdById: TEST_USER_ID,
+      id: sessionId,
+      model: parent.model,
+      provider: parent.provider,
+      providerCredentialId: parent.credentialId,
+      runnerId: parent.runnerId,
+      status: "idle",
+      title: "Hidden session",
+      tools: JSON.stringify(parent.tools),
+      updatedAt: new Date(TEST_NOW),
+      updatedById: TEST_USER_ID,
+      userId: TEST_USER_ID,
+      workingDirectory: parent.workingDirectory,
+      workspaceId,
+    })
+    .run();
+}
+
 describe("session agent tools", () => {
   test("lists and reads only the spawning user's sessions", async () => {
     const model = scriptedModel([
@@ -192,6 +235,72 @@ describe("session agent tools", () => {
       recipient_name: "read_session",
     });
     expect(setup.runnerCommands).toEqual([]);
+    setup.database.$client.close();
+  });
+
+  test("does not expose sessions from another workspace to agent tools", async () => {
+    const otherWorkspaceId = "018bcfe5-6800-7000-8000-000000000073";
+    const hiddenSessionId = "018bcfe5-6800-7000-8000-000000000074";
+    const model = scriptedModel([
+      {
+        content: "Checking scoped sessions.",
+        toolCalls: [
+          toolCall("list_sessions", {}),
+          toolCall("read_session", { sessionId: hiddenSessionId }),
+        ],
+      },
+      { content: "Workspace isolation confirmed.", toolCalls: [] },
+    ]);
+    const setup = await startToolSession(model);
+    addIdleSessionInWorkspace(setup, otherWorkspaceId, hiddenSessionId);
+    const detail = await completedParentDetail(setup, "idle");
+
+    expect(findToolResultContent(detail, "list_sessions")).not.toContain(
+      hiddenSessionId,
+    );
+    expect(findToolResultContent(detail, "read_session")).toContain(
+      "Session not found",
+    );
+    setup.database.$client.close();
+  });
+
+  test("cannot control sessions in another workspace", async () => {
+    const otherWorkspaceId = "018bcfe5-6800-7000-8000-000000000075";
+    const hiddenSessionId = "018bcfe5-6800-7000-8000-000000000076";
+    const model = scriptedModel([
+      {
+        content: "Checking scoped session controls.",
+        toolCalls: [
+          toolCall("send_to_session", {
+            message: "Do not deliver this",
+            sessionId: hiddenSessionId,
+          }),
+          toolCall("continue_session", { sessionId: hiddenSessionId }),
+          toolCall("stop_session", { sessionId: hiddenSessionId }),
+        ],
+      },
+      { content: "Workspace control isolation confirmed.", toolCalls: [] },
+    ]);
+    const setup = await startToolSession(model);
+    addIdleSessionInWorkspace(setup, otherWorkspaceId, hiddenSessionId);
+    const detail = await completedParentDetail(setup, "idle");
+
+    for (const toolName of [
+      "send_to_session",
+      "continue_session",
+      "stop_session",
+    ]) {
+      expect(findToolResultContent(detail, toolName)).toContain(
+        "Session not found",
+      );
+    }
+    expect(
+      setup.sessions.detailForUser(
+        TEST_USER_ID,
+        hiddenSessionId,
+        otherWorkspaceId,
+      ),
+    ).toMatchObject({ messages: [], status: "idle" });
     setup.database.$client.close();
   });
 
@@ -278,7 +387,10 @@ describe("session agent tools", () => {
 
     expect(output).toContain("credential_unavailable");
     expect(
-      setup.sessions.listForUser("018bcfe5-6800-7000-8000-000000000021"),
+      setup.sessions.listForUser(
+        "018bcfe5-6800-7000-8000-000000000021",
+        TEST_WORKSPACE_ID,
+      ),
     ).toHaveLength(1);
     setup.database.$client.close();
   });
@@ -325,6 +437,7 @@ describe("session agent tools", () => {
         spawnSetup.sessions.detailForUser(
           "018bcfe5-6800-7000-8000-000000000021",
           childId,
+          TEST_WORKSPACE_ID,
         ),
       hasSessionStatus("idle"),
     );

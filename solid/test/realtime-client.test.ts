@@ -54,20 +54,41 @@ function connectionOptions(sockets: BrowserSocket[]) {
   };
 }
 
-test("connects to the same-origin realtime WebSocket and decodes events", () => {
+function recordingConnection() {
   const sockets: BrowserSocket[] = [];
   const events: unknown[] = [];
   const connection = new RealtimeConnection((event) => events.push(event), {
     ...connectionOptions(sockets),
     setTimeout: () => 1,
   });
+  return { connection, events, sockets };
+}
 
-  connection.start();
+test("connects to the same-origin realtime WebSocket and decodes events", () => {
+  const { connection, events, sockets } = recordingConnection();
+
+  connection.start("workspace/one");
   sockets[0]?.dispatchEvent(new Event("open"));
   sockets[0]?.receive('{"sessions":[],"type":"sessions"}');
 
-  expect(sockets[0]?.url).toBe("wss://qmush.example/api/realtime");
+  expect(sockets[0]?.url).toBe(
+    "wss://qmush.example/api/realtime?workspaceId=workspace%2Fone",
+  );
   expect(sockets[0]?.sent).toEqual(['{"type":"refresh"}']);
+  expect(events).toEqual([{ sessions: [], type: "sessions" }]);
+  connection.stop();
+});
+
+test("ignores events from a workspace socket after switching scopes", () => {
+  const { connection, events, sockets } = recordingConnection();
+
+  connection.start("workspace-1");
+  const previous = sockets[0];
+  connection.stop();
+  connection.start("workspace-2");
+  previous?.receive('{"runners":[],"type":"runners"}');
+  sockets[1]?.receive('{"sessions":[],"type":"sessions"}');
+
   expect(events).toEqual([{ sessions: [], type: "sessions" }]);
   connection.stop();
 });
@@ -83,7 +104,7 @@ test("reconnects after a close and stops retrying after stop", () => {
     },
   });
 
-  connection.start();
+  connection.start("workspace-1");
   sockets[0]?.close();
   expect(timers).toHaveLength(1);
   timers.shift()?.();

@@ -150,6 +150,13 @@ function readFiniteNumber(value: unknown): number | undefined {
     : undefined;
 }
 
+function requiredStringValue(value: unknown): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error("The server returned an invalid agent session");
+  }
+  return value;
+}
+
 function readSummary(value: unknown): AgentSessionSummary {
   if (!isRecord(value)) {
     throw new Error("The server returned an invalid agent session");
@@ -184,6 +191,7 @@ function readSummary(value: unknown): AgentSessionSummary {
   const tools = readAgentSessionToolNames(value["tools"]);
   const updatedAt = readFiniteNumber(value["updatedAt"]);
   const workingDirectory = value["workingDirectory"];
+  const workspaceId = requiredStringValue(value["workspaceId"]);
 
   if (
     activeDurationMs === undefined ||
@@ -218,7 +226,8 @@ function readSummary(value: unknown): AgentSessionSummary {
     typeof title !== "string" ||
     tools === undefined ||
     updatedAt === undefined ||
-    typeof workingDirectory !== "string"
+    typeof workingDirectory !== "string" ||
+    typeof workspaceId !== "string"
   ) {
     throw new Error("The server returned an invalid agent session");
   }
@@ -244,6 +253,7 @@ function readSummary(value: unknown): AgentSessionSummary {
     tools,
     updatedAt,
     workingDirectory,
+    workspaceId,
   };
 }
 
@@ -346,5 +356,6 @@ export function summaryFromDetail(
     tools: detail.tools,
     updatedAt: detail.updatedAt,
     workingDirectory: detail.workingDirectory,
+    workspaceId: detail.workspaceId,
   };
 }

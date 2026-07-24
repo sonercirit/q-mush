@@ -45,6 +45,7 @@ interface SessionAgentActionsDependencies extends SessionAgentActionDependencies
     userId: string,
     offset: number,
     limit: number,
+    workspaceId: string,
     search?: string,
   ) => {
     readonly items: SessionOptionsSource["runners"];
@@ -60,6 +61,16 @@ export class SessionAgentActions {
   }
 
   actions(parentSessionId: string, userId: string): SessionAgentToolActions {
+    const parentWorkspaceId = (): string => {
+      const workspaceId = this.#dependencies.store.get(
+        userId,
+        parentSessionId,
+      )?.workspaceId;
+      if (workspaceId === undefined) {
+        throw new Error("The parent session is unavailable");
+      }
+      return workspaceId;
+    };
     const anotherSession = (sessionId: string): string => {
       if (sessionId === parentSessionId) {
         throw new Error(
@@ -70,16 +81,24 @@ export class SessionAgentActions {
     };
     return {
       continueSession: (sessionId) =>
-        this.#queue(userId, anotherSession(sessionId)),
-      getSessionOptions: (input) => this.#options(userId, input),
+        this.#queue(userId, anotherSession(sessionId), parentWorkspaceId()),
+      getSessionOptions: (input) =>
+        this.#options(userId, input, parentWorkspaceId()),
       listSessions: () =>
-        sessionToolOutput(this.#dependencies.store.list(userId)),
-      readSession: (input) => this.#read(userId, input),
+        sessionToolOutput(
+          this.#dependencies.store.list(userId, parentWorkspaceId()),
+        ),
+      readSession: (input) => this.#read(userId, input, parentWorkspaceId()),
       sendToSession: (sessionId, message) =>
-        this.#queue(userId, anotherSession(sessionId), message),
+        this.#queue(
+          userId,
+          anotherSession(sessionId),
+          parentWorkspaceId(),
+          message,
+        ),
       spawnSession: (input) => this.#spawn(parentSessionId, userId, input),
       stopSession: (sessionId) =>
-        this.#stop(parentSessionId, userId, sessionId),
+        this.#stop(parentSessionId, userId, sessionId, parentWorkspaceId()),
     };
   }
 
@@ -163,21 +182,33 @@ export class SessionAgentActions {
       parent.status !== "queued" &&
       parent.status !== "running" &&
       !this.#dependencies.activeSession(parent.id) &&
-      this.#dependencies.runnerIsAvailable(userId, parent.runnerId)
+      this.#dependencies.runnerIsAvailable(
+        userId,
+        parent.runnerId,
+        parent.workspaceId,
+      )
     ) {
-      void this.#queue(userId, parent.id);
+      void this.#queue(userId, parent.id, parent.workspaceId);
     }
   }
 
-  #detail(userId: string, sessionId: string): AgentSessionDetail {
-    const found = this.#dependencies.store.get(userId, sessionId);
+  #detail(
+    userId: string,
+    sessionId: string,
+    workspaceId?: string,
+  ): AgentSessionDetail {
+    const found = this.#dependencies.store.get(userId, sessionId, workspaceId);
     if (found === undefined) {
       throw new Error("Session not found");
     }
     return found;
   }
 
-  #read(userId: string, input: ReadSessionToolInput): string {
+  #read(
+    userId: string,
+    input: ReadSessionToolInput,
+    workspaceId: string,
+  ): string {
     const selected = new Set(input.categories);
     const detail = readSessionSnapshot(this.#dependencies.database, {
       includeSystem: selected.has("system"),
@@ -187,6 +218,7 @@ export class SessionAgentActions {
       ),
       sessionId: input.sessionId,
       userId,
+      workspaceId,
     });
     if (detail === undefined) {
       throw new Error("Session not found");
@@ -206,6 +238,7 @@ export class SessionAgentActions {
   async #options(
     userId: string,
     input: GetSessionOptionsToolInput,
+    workspaceId: string,
   ): Promise<string> {
     let models: SessionOptionsSource["models"] = [];
     let reasoningEfforts: SessionOptionsSource["reasoningEfforts"] =
@@ -223,6 +256,7 @@ export class SessionAgentActions {
           userId,
           provider,
           credentialId,
+          workspaceId,
         )
       ) {
         throw new Error("The model credential or provider is unavailable");
@@ -232,6 +266,7 @@ export class SessionAgentActions {
         credential = await this.#dependencies.readCredential(userId, {
           credentialId,
           provider,
+          workspaceId,
         });
       } catch {
         throw new Error("The model credential or provider is unavailable");
@@ -259,6 +294,7 @@ export class SessionAgentActions {
             offset,
             SESSION_OPTIONS_PAGE_SIZE,
             input.search,
+            workspaceId,
           )
         : undefined;
     const runnerPage =
@@ -267,6 +303,7 @@ export class SessionAgentActions {
             userId,
             offset,
             SESSION_OPTIONS_PAGE_SIZE,
+            workspaceId,
             input.search,
           )
         : undefined;
@@ -290,19 +327,26 @@ export class SessionAgentActions {
   async #queue(
     userId: string,
     sessionId: string,
+    workspaceId?: string,
     message?: string,
   ): Promise<string> {
-    const target = this.#detail(userId, sessionId);
+    const target = this.#detail(userId, sessionId, workspaceId);
     const unavailable = unavailableSessionResponse(target);
     if (unavailable !== undefined) {
       return responseToolOutput(unavailable);
     }
-    if (!this.#dependencies.runnerIsAvailable(userId, target.runnerId)) {
+    if (
+      !this.#dependencies.runnerIsAvailable(
+        userId,
+        target.runnerId,
+        target.workspaceId,
+      )
+    ) {
       return sessionToolOutput({ error: "runner_unavailable" });
     }
     const response = await this.#dependencies.withCredential(
       userId,
-      target,
+      { ...target, workspaceId: target.workspaceId },
       (credential) => {
         const queued = this.#dependencies.store.queue(
           userId,
@@ -333,7 +377,22 @@ export class SessionAgentActions {
     if (this.#dependencies.draining()) {
       return Promise.resolve(sessionToolOutput({ error: "server_restarting" }));
     }
-    if (!this.#dependencies.runnerIsAvailable(userId, input.runnerId)) {
+    const parentWorkspaceId = this.#dependencies.store.get(
+      userId,
+      parentSessionId,
+    )?.workspaceId;
+    if (parentWorkspaceId === undefined) {
+      return Promise.resolve(
+        sessionToolOutput({ error: "workspace_unavailable" }),
+      );
+    }
+    if (
+      !this.#dependencies.runnerIsAvailable(
+        userId,
+        input.runnerId,
+        parentWorkspaceId,
+      )
+    ) {
       return Promise.resolve(
         sessionToolOutput({ error: "runner_unavailable" }),
       );
@@ -346,8 +405,13 @@ export class SessionAgentActions {
     });
   }
 
-  #stop(parentSessionId: string, userId: string, sessionId: string): string {
-    const target = this.#detail(userId, sessionId);
+  #stop(
+    parentSessionId: string,
+    userId: string,
+    sessionId: string,
+    workspaceId: string,
+  ): string {
+    const target = this.#detail(userId, sessionId, workspaceId);
     if (target.status !== "stopped") {
       this.#dependencies.store.stop(
         userId,

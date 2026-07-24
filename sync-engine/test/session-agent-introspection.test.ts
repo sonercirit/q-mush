@@ -1,8 +1,12 @@
+import { eq } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
 import {
   agentMessages,
   agentSessions,
   providerCredentials,
+  providerCredentialWorkspaces,
+  runners,
+  runnerWorkspaces,
   users,
 } from "../../shared/database/schema.ts";
 import { SYSTEM_ID } from "../../shared/ids.ts";
@@ -12,6 +16,7 @@ import {
 } from "../../shared/provider-credential-store.ts";
 import {
   addTestProviderCredential,
+  addTestWorkspace,
   createAuthenticatedTestDatabase,
   TEST_USER_ID,
   testAuditFields,
@@ -33,7 +38,14 @@ import {
   toolCall,
   waitForToolResults,
 } from "./session-agent-tool-setup.ts";
-import { CREDENTIAL_ID, SESSION_ID } from "./session-integration-fixtures.ts";
+import {
+  connectedSessionSetup,
+  createSessionRequest,
+  CREDENTIAL_ID,
+  RUNNER_ID,
+  SESSION_ID,
+} from "./session-integration-fixtures.ts";
+import { completeAgentFileLookup } from "./session-integration-helpers.ts";
 
 function credential(
   id: string,
@@ -400,6 +412,91 @@ describe("session agent introspection tools", () => {
       "get_session_options",
     ]);
     expect(setup.listRunnerCalls()).toBe(1);
+    setup.database.$client.close();
+  });
+
+  test("scopes connection options and model discovery to the parent workspace", async () => {
+    const otherWorkspaceId = "018bcfe5-6800-7000-8000-000000000077";
+    const hiddenCredentialId = "018bcfe5-6800-7000-8000-000000000078";
+    const model = scriptedModel([
+      {
+        content: "Checking workspace-scoped connection options.",
+        toolCalls: [
+          toolCall("get_session_options", { category: "credentials" }),
+          toolCall("get_session_options", { category: "runners" }),
+          toolCall("get_session_options", {
+            category: "models",
+            credentialId: hiddenCredentialId,
+            provider: "openai",
+          }),
+        ],
+      },
+      { content: "Scoped option discovery confirmed.", toolCalls: [] },
+    ]);
+    const hiddenCredential = credential(hiddenCredentialId, "Hidden key");
+    const configuredCredentials = [
+      {
+        ...credential(CREDENTIAL_ID, "Visible key"),
+        secret: "provider-secret",
+      },
+      hiddenCredential,
+    ];
+    let discoveryCalls = 0;
+    const setup = connectedSessionSetup(
+      model,
+      "api_key",
+      () => {
+        discoveryCalls += 1;
+        return Promise.resolve({
+          defaultModel: "hidden-model",
+          models: [modelOption("hidden-model")],
+        });
+      },
+      { credentials: { openai: configuredCredentials } },
+    );
+    const response = await setup.sessions.collection(createSessionRequest());
+    expect(response.status).toBe(201);
+    addTestWorkspace(setup.database, otherWorkspaceId, "Hidden workspace");
+    setup.database
+      .update(providerCredentials)
+      .set({ isGlobal: false })
+      .where(eq(providerCredentials.id, hiddenCredentialId))
+      .run();
+    setup.database
+      .insert(providerCredentialWorkspaces)
+      .values({
+        ...testAuditFields(),
+        id: "018bcfe5-6800-7000-8000-000000000079",
+        providerCredentialId: hiddenCredentialId,
+        userId: TEST_USER_ID,
+        workspaceId: otherWorkspaceId,
+      })
+      .run();
+    setup.database
+      .update(runners)
+      .set({ isGlobal: false })
+      .where(eq(runners.id, RUNNER_ID))
+      .run();
+    setup.database
+      .insert(runnerWorkspaces)
+      .values({
+        ...testAuditFields(),
+        id: "018bcfe5-6800-7000-8000-000000000080",
+        runnerId: RUNNER_ID,
+        userId: TEST_USER_ID,
+        workspaceId: otherWorkspaceId,
+      })
+      .run();
+    discoveryCalls = 0;
+    await completeAgentFileLookup(setup);
+    const detail = await waitForToolResults(setup, "get_session_options", 3);
+    const outputs = findToolResultContents(detail, "get_session_options");
+
+    expect(outputs[0]).not.toContain(hiddenCredentialId);
+    expect(outputs[0]).not.toContain("Hidden key");
+    expect(outputs[1]).not.toContain(RUNNER_ID);
+    expect(outputs[2]).toContain("credential or provider is unavailable");
+    expect(discoveryCalls).toBe(0);
     setup.database.$client.close();
   });
 

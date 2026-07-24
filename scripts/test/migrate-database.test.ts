@@ -8,8 +8,10 @@ import {
   agentMessages,
   agentSessions,
   providerCredentials,
+  runners,
   sessions,
   users,
+  workspaces,
 } from "../../shared/database/schema.ts";
 import { SYSTEM_ID } from "../../shared/ids.ts";
 
@@ -168,11 +170,15 @@ test("session migration preserves transcripts with foreign keys", async () => {
 
   const timestamp = 1_700_000_000_000;
   const userId = "018bcfe5-6800-7000-8000-000000000081";
+  const deletedUserId = "018bcfe5-6800-7000-8000-000000000087";
   const credentialId = "018bcfe5-6800-7000-8000-000000000082";
   const runnerId = "018bcfe5-6800-7000-8000-000000000083";
   const sessionId = "018bcfe5-6800-7000-8000-000000000084";
   const messageId = "018bcfe5-6800-7000-8000-000000000085";
   const errorMessageId = "018bcfe5-6800-7000-8000-000000000086";
+  const deletedCredentialId = "018bcfe5-6800-7000-8000-000000000088";
+  const deletedRunnerId = "018bcfe5-6800-7000-8000-000000000089";
+  const deletedSessionId = "018bcfe5-6800-7000-8000-000000000090";
   legacyDatabase.run(
     `INSERT INTO users (
       id, google_subject, email, name, created_at, created_by_id,
@@ -187,6 +193,79 @@ test("session migration preserves transcripts with foreign keys", async () => {
       SYSTEM_ID,
       timestamp,
       SYSTEM_ID,
+    ],
+  );
+  legacyDatabase.run(
+    `INSERT INTO users (
+      id, google_subject, email, name, created_at, created_by_id,
+      updated_at, updated_by_id, is_deleted
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      deletedUserId,
+      "deleted-session-migration-google-subject",
+      "deleted-session-migration@example.com",
+      "Deleted Session Migration",
+      timestamp,
+      SYSTEM_ID,
+      timestamp,
+      SYSTEM_ID,
+      true,
+    ],
+  );
+  legacyDatabase.run(
+    `INSERT INTO provider_credentials (
+      id, user_id, created_at, created_by_id, updated_at, updated_by_id,
+      provider, label, source, encrypted_credential, credential_fingerprint
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      deletedCredentialId,
+      deletedUserId,
+      timestamp,
+      deletedUserId,
+      timestamp,
+      deletedUserId,
+      "openrouter",
+      "Deleted user key",
+      "api_key",
+      "encrypted-deleted-user-key",
+      "deleted-user-key-fingerprint",
+    ],
+  );
+  legacyDatabase.run(
+    `INSERT INTO runners (
+      id, user_id, created_at, created_by_id, updated_at, updated_by_id,
+      token_hash
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      deletedRunnerId,
+      deletedUserId,
+      timestamp,
+      deletedUserId,
+      timestamp,
+      deletedUserId,
+      "deleted-user-runner-token-hash",
+    ],
+  );
+  legacyDatabase.run(
+    `INSERT INTO agent_sessions (
+      id, user_id, created_at, created_by_id, updated_at, updated_by_id,
+      runner_id, provider_credential_id, provider, model, working_directory,
+      title, status
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      deletedSessionId,
+      deletedUserId,
+      timestamp,
+      deletedUserId,
+      timestamp,
+      deletedUserId,
+      deletedRunnerId,
+      deletedCredentialId,
+      "openrouter",
+      "openai/gpt-4.1-mini",
+      "/deleted-workspace",
+      "Deleted user session",
+      "idle",
     ],
   );
   legacyDatabase.run(
@@ -280,15 +359,64 @@ test("session migration preserves transcripts with foreign keys", async () => {
     ],
   );
   const upgradedDatabase = await migrateLegacyDatabase(legacyDatabase, path);
+  const upgradedSessions = upgradedDatabase
+    .select({
+      id: agentSessions.id,
+      parentSessionId: agentSessions.parentSessionId,
+      workspaceId: agentSessions.workspaceId,
+    })
+    .from(agentSessions)
+    .all();
+  expect(upgradedSessions).toHaveLength(2);
+  const activeSession = upgradedSessions.find(({ id }) => id === sessionId);
+  expect(activeSession).toMatchObject({
+    id: sessionId,
+    parentSessionId: null,
+  });
+  expect(activeSession?.workspaceId).toMatch(UUID_V7_PATTERN);
+  const deletedSession = upgradedSessions.find(
+    ({ id }) => id === deletedSessionId,
+  );
+  expect(deletedSession).toMatchObject({
+    id: deletedSessionId,
+    parentSessionId: null,
+  });
+  expect(deletedSession?.workspaceId).toMatch(UUID_V7_PATTERN);
+  const migratedWorkspaces = upgradedDatabase.select().from(workspaces).all();
+  const defaultWorkspace = migratedWorkspaces.find(
+    ({ userId: workspaceUserId }) => workspaceUserId === userId,
+  );
+  expect(defaultWorkspace).toMatchObject({
+    isDefault: true,
+    isDeleted: false,
+    name: "Default",
+    userId,
+  });
+  expect(defaultWorkspace?.id).toMatch(UUID_V7_PATTERN);
+  const migratedTimestamp = Number.parseInt(
+    defaultWorkspace?.id.slice(0, 13).replace("-", "") ?? "",
+    16,
+  );
+  expect(Math.abs(Date.now() - migratedTimestamp)).toBeLessThan(60_000);
+  expect(
+    migratedWorkspaces.find(
+      ({ userId: workspaceUserId }) => workspaceUserId === deletedUserId,
+    ),
+  ).toMatchObject({
+    isDefault: true,
+    isDeleted: false,
+    name: "Default",
+    userId: deletedUserId,
+  });
   expect(
     upgradedDatabase
-      .select({
-        id: agentSessions.id,
-        parentSessionId: agentSessions.parentSessionId,
-      })
-      .from(agentSessions)
+      .select({ isGlobal: providerCredentials.isGlobal })
+      .from(providerCredentials)
       .all(),
-  ).toEqual([{ id: sessionId, parentSessionId: null }]);
+  ).toEqual([{ isGlobal: true }, { isGlobal: true }]);
+  expect(
+    upgradedDatabase.select({ isGlobal: runners.isGlobal }).from(runners).all(),
+  ).toEqual([{ isGlobal: true }, { isGlobal: true }]);
   expect(
     upgradedDatabase
       .select({
@@ -373,6 +501,7 @@ test("OpenAI migration preserves existing OpenRouter credentials", async () => {
       id: credentialId,
       isDefault: false,
       isDeleted: false,
+      isGlobal: true,
       label: "Migrated key",
       provider: "openrouter",
       providerAccountId: "openrouter-account",

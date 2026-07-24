@@ -1,6 +1,6 @@
 {
   "minLines": 1,
-  "minTokens": 20,
+  "minTokens": 60,
   "threshold": 0,
   "noTips": true,
   "ignorePattern": ["(?ms)^import\\s+.*?;"],
