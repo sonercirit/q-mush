@@ -185,12 +185,12 @@ supported pricing or usage is unavailable, cost is shown as unavailable rather
 than zero. OpenAI connected-account estimates are API-equivalent reference
 prices; subscription billing can differ. Automatic compaction is enabled per
 session by default and replaces completed history with a model-generated handoff
-summary before the next request after usage reaches 95%; automatic and manual
-compaction model calls are included in cumulative cost. It can be turned off,
-and a ready session can be compacted manually. Session transcripts and status
-survive page reloads; a ready, stopped, or failed session accepts follow-up
-instructions. **Stop session** aborts the model request and cancels an active
-runner command.
+once usage reaches 95%, then transparently continues the active session from
+that summary. Automatic and manual compaction model calls are included in
+cumulative cost. It can be turned off, and a ready session can be compacted
+manually without continuing it. Session transcripts and status survive page
+reloads; a ready, stopped, or failed session accepts follow-up instructions.
+**Stop session** aborts the model request and cancels an active runner command.
 
 The runner executes tools with the runner process's local account permissions.
 File tools reject paths outside the selected workspace, while shell commands are

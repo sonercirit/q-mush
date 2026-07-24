@@ -110,18 +110,18 @@ Living project memory; update durable information.
   (including compaction), token usage, and the context limit. OpenRouter charges
   are authoritative; others use captured/OpenAI estimates, with unknown prices
   unavailable. OAuth figures are API equivalents, not subscription charges.
-  Usage is yellow at 80% and red at 90%. Auto-compaction defaults on and
-  summarizes completed history before the next request at 95%; idle sessions can
-  compact manually. The existing-session composer stays mounted across status
-  changes and explains why actions are unavailable. Versioned browser-local
-  preferences filter transcript categories without changing message data.
-  Compaction soft-deletes prior active messages and inserts a replayable
-  handoff. Provider secrets never enter browser or runner work payloads. The
-  working-directory field opens the interactive browser in
-  `solid/directory-picker-client.tsx`; its controller posts to
-  `/api/runners/:id/directories` for canonical directory metadata. Before each
-  run, `read_agent_file` loads exact-root `AGENTS.md`, falling back to
-  `CLAUDE.md`; only `AGENTS.md` is used when both exist.
+  Usage is yellow at 80% and red at 90%. Auto-compaction defaults on; at 95% it
+  summarizes completed history and transparently continues the active run from
+  the handoff. Idle sessions can compact manually without continuing. The
+  existing-session composer stays mounted across status changes and explains why
+  actions are unavailable. Versioned browser-local preferences filter transcript
+  categories without changing message data. Compaction soft-deletes prior active
+  messages and inserts a replayable handoff. Provider secrets never enter
+  browser or runner work payloads. The working-directory field opens the
+  interactive browser in `solid/directory-picker-client.tsx`; its controller
+  posts to `/api/runners/:id/directories` for canonical directory metadata.
+  Before each run, `read_agent_file` loads exact-root `AGENTS.md`, falling back
+  to `CLAUDE.md`; only `AGENTS.md` is used when both exist.
 
   `runner/runner-workspace.ts` shares canonical workspace resolution and
   containment with the file tools. Tool and skill selections persist per

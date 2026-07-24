@@ -114,7 +114,7 @@ export interface AgentLoopOptions {
 const INVALID_ARGUMENTS_MESSAGE =
   "Error: the tool arguments were not a JSON object.";
 
-function throwIfAborted(signal: AbortSignal | undefined): void {
+export function throwIfAgentAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted === true) {
     throw new DOMException("The agent session was stopped", "AbortError");
   }
@@ -132,13 +132,13 @@ export async function runAgentLoop(
   let messages = [...options.initialMessages];
 
   for (;;) {
-    throwIfAborted(options.signal);
+    throwIfAgentAborted(options.signal);
     if (options.prepareMessages !== undefined) {
       messages = [...(await options.prepareMessages(messages, options.signal))];
-      throwIfAborted(options.signal);
+      throwIfAgentAborted(options.signal);
     }
     const turn = await options.model.complete(messages, options.signal);
-    throwIfAborted(options.signal);
+    throwIfAgentAborted(options.signal);
     if (turn.thinking.length > 0) {
       await options.recordMessage({
         content: turn.thinking,
@@ -173,7 +173,7 @@ export async function runAgentLoop(
     }
 
     for (const call of turn.toolCalls) {
-      throwIfAborted(options.signal);
+      throwIfAgentAborted(options.signal);
       const arguments_ = parseArguments(call.arguments);
       const output =
         arguments_ === undefined
@@ -183,7 +183,7 @@ export async function runAgentLoop(
               id: call.id,
               name: call.name,
             });
-      throwIfAborted(options.signal);
+      throwIfAgentAborted(options.signal);
       const toolMessage: AgentConversationMessage = {
         content: output,
         role: "tool",
