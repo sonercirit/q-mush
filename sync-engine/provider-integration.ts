@@ -22,6 +22,8 @@ import {
   type OAuthRuntime,
 } from "./oauth.ts";
 import { ProviderCredentialEndpoints } from "./provider-credentials.ts";
+import { SessionCredentialReassignmentStore } from "./session-credential-reassignment-store.ts";
+import { SessionCredentialReassignmentEndpoints } from "./session-credential-reassignment.ts";
 
 export interface ProviderIntegration extends OAuthEndpoints {
   credentials(request: Request): Promise<Response>;
@@ -29,6 +31,7 @@ export interface ProviderIntegration extends OAuthEndpoints {
     userId: string,
     credentialId: string,
   ): Promise<ProviderCredentialAccess | undefined>;
+  reassignSessions(request: Request, credentialId: string): Promise<Response>;
   setDefault(request: Request, credentialId: string): Response;
   remove(request: Request, credentialId: string): Response;
 }
@@ -118,6 +121,18 @@ export function createProviderIntegration(options: {
       options.readCredentialDetails(runtime, apiKey),
     store,
   });
+  const reassignment = new SessionCredentialReassignmentEndpoints({
+    auth: options.auth,
+    now: runtime.now,
+    ...(options.dependencies.onSessionsChanged === undefined
+      ? {}
+      : { onChanged: options.dependencies.onSessionsChanged }),
+    provider: options.provider,
+    store:
+      options.configuration === undefined
+        ? undefined
+        : new SessionCredentialReassignmentStore(runtime.database),
+  });
   const baseOAuthConfiguration = options.createOAuthConfiguration(runtime);
   const connectedAccount = new ConnectedAccountOAuth(
     {
@@ -160,6 +175,8 @@ export function createProviderIntegration(options: {
     complete: (request) => connectedAccount.complete(request),
     credentials: (request) => credentials.credentials(request),
     readCredential,
+    reassignSessions: (request, credentialId) =>
+      reassignment.reassign(request, credentialId),
     setDefault: (request, credentialId) =>
       credentials.setDefault(request, credentialId),
     remove: (request, credentialId) =>

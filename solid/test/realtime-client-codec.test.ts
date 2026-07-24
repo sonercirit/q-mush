@@ -21,6 +21,12 @@ test("reads runner snapshots from realtime messages", () => {
   });
 });
 
+test("reads one aggregate session-change event", () => {
+  expect(roundTrip({ type: "sessions_changed" })).toEqual({
+    type: "sessions_changed",
+  });
+});
+
 test("reads reset model deltas from realtime messages", () => {
   const delta = {
     content: "replacement",

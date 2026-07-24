@@ -3,19 +3,9 @@ import {
   RealtimeHub,
   type RealtimeSocket,
 } from "../../sync-engine/realtime-hub.ts";
+import { RecordingSocket } from "./realtime-test-helpers.ts";
 
-class TestSocket implements RealtimeSocket {
-  readonly messages: string[] = [];
-
-  close(): void {
-    // Test sockets stay open until explicitly removed from the hub.
-  }
-
-  send(message: string): number {
-    this.messages.push(message);
-    return message.length;
-  }
-}
+class TestSocket extends RecordingSocket {}
 
 class FailingSocket implements RealtimeSocket {
   close(): void {

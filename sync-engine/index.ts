@@ -23,6 +23,7 @@ import {
   buildClientStylesheet,
   createRequestHandler,
 } from "./server.ts";
+import { createSessionsChangedPublisher } from "./session-credential-reassignment-realtime.ts";
 import { createSessionIntegration } from "./sessions.ts";
 
 const database = createDatabase(readDatabasePath(Bun.env));
@@ -34,19 +35,25 @@ const [clientJavaScript, pages, runnerExecutables, stylesheet] =
     buildClientStylesheet(),
   ]);
 const googleAuth = createGoogleAuthFromEnvironment(Bun.env, { database });
+const realtimeHub = new RealtimeHub();
+const providerDependencies = {
+  database,
+  onSessionsChanged: createSessionsChangedPublisher(realtimeHub),
+};
 const braveSearch = createBraveSearchSkillFromEnvironment(Bun.env, googleAuth, {
   database,
 });
-const openAi = createOpenAiIntegrationFromEnvironment(Bun.env, googleAuth, {
-  database,
-});
+const openAi = createOpenAiIntegrationFromEnvironment(
+  Bun.env,
+  googleAuth,
+  providerDependencies,
+);
 const openRouter = createOpenRouterIntegrationFromEnvironment(
   Bun.env,
   googleAuth,
-  { database },
+  providerDependencies,
 );
 const runners = createRunnerIntegration(googleAuth, { database });
-const realtimeHub = new RealtimeHub();
 const sessions = createSessionIntegration(
   googleAuth,
   runners,

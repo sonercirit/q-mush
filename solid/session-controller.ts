@@ -302,6 +302,10 @@ export class SessionController {
     await this.#loadSessions(revision, true);
   }
 
+  async refresh(): Promise<void> {
+    await this.#loadSessions(this.#view.revision, false);
+  }
+
   reset(): void {
     const transcriptFilters = readSessionTranscriptFilters(
       this.#transcriptFilterStorage,

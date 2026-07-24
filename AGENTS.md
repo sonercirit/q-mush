@@ -153,14 +153,10 @@ Living project memory; update durable information.
   sessions failed so they can be resumed. Rebuilt conversations add error
   results for interrupted tool calls only on resume.
 
-- `sync-engine/openai.ts` and `sync-engine/openrouter.ts` implement provider
-  connections. Multiple OAuth or manual credentials live in
-  `provider_credentials`, encrypted with per-record AES-256-GCM context; API
-  responses expose only metadata. One OpenAI or OpenRouter credential may be the
-  user's model default across both providers. Shared behavior is in
-  `sync-engine/provider-credentials.ts`,
-  `sync-engine/connected-account-oauth.ts`, `solid/provider-client.tsx`, and
-  `solid/provider-controller.ts`.
+- Multiple provider credentials are encrypted locally; the model-account default
+  is independent of the explicit same-provider bulk session reassignment action,
+  which updates only non-deleted sessions and emits one aggregate realtime
+  refresh.
 - `sync-engine/brave-search.ts` implements the authenticated server-side
   `brave_search` skill and key API. Users can keep multiple encrypted keys in
   `provider_credentials`; failures fall through keys in creation order, and

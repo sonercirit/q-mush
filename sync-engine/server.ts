@@ -182,6 +182,7 @@ function pathSegments(pathname: string, prefix: string): readonly string[] {
 interface ItemRouteActions {
   readonly default?: (id: string) => Promise<Response> | Response;
   readonly item: (id: string) => Promise<Response> | Response;
+  readonly sessionReassignment?: (id: string) => Promise<Response> | Response;
 }
 
 function routeItemSegments(
@@ -197,9 +198,19 @@ function routeItemSegments(
     return actions.item(id);
   }
 
-  return segments.length === 2 && segments[1] === "default"
-    ? actions.default?.(id)
-    : undefined;
+  if (segments.length !== 2) {
+    return undefined;
+  }
+
+  switch (segments[1]) {
+    case "default":
+      return actions.default?.(id);
+    case "session-reassignment":
+      return actions.sessionReassignment?.(id);
+    case undefined:
+    default:
+      return undefined;
+  }
 }
 
 function routeProviderRequest(
@@ -223,6 +234,8 @@ function routeProviderRequest(
   return routeItemSegments(pathSegments(pathname, `${routes.credentials}/`), {
     default: (credentialId) => integration.setDefault(request, credentialId),
     item: (credentialId) => integration.remove(request, credentialId),
+    sessionReassignment: (credentialId) =>
+      integration.reassignSessions(request, credentialId),
   });
 }
 

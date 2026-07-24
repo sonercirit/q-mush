@@ -19,6 +19,7 @@ import {
   OPENROUTER_OAUTH_CALLBACK_PATH,
   OPENROUTER_OAUTH_PATH,
   providerCredentialDefaultPath,
+  providerCredentialSessionReassignmentPath,
   REALTIME_PATH,
   RUNNER_EXECUTABLE_PATH,
   RUNNER_INSTALLER_PATH,
@@ -180,6 +181,12 @@ describe("routes", () => {
     expect(
       providerCredentialDefaultPath(OPENAI_CREDENTIALS_PATH, "credential/id"),
     ).toBe("/api/openai/credentials/credential%2Fid/default");
+    expect(
+      providerCredentialSessionReassignmentPath(
+        OPENAI_CREDENTIALS_PATH,
+        "credential/id",
+      ),
+    ).toBe("/api/openai/credentials/credential%2Fid/session-reassignment");
     expect(OPENAI_OAUTH_PATH).toBe("/api/openai/oauth");
     expect(OPENAI_OAUTH_CALLBACK_PATH).toBe("/api/openai/oauth/callback");
     expect(OPENROUTER_CREDENTIALS_PATH).toBe("/api/openrouter/credentials");
@@ -359,6 +366,14 @@ describe("page server", () => {
         sendRequest(provider.credentialsPath),
         sendRequest(
           providerCredentialDefaultPath(
+            provider.credentialsPath,
+            "credential-id",
+          ),
+          undefined,
+          "POST",
+        ),
+        sendRequest(
+          providerCredentialSessionReassignmentPath(
             provider.credentialsPath,
             "credential-id",
           ),

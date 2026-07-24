@@ -104,15 +104,18 @@ async function withRestoredFetch(action: () => Promise<void>): Promise<void> {
   }
 }
 
-function sessionResponse(input: RequestInfo | URL): Promise<Response> {
+function detailResponse(
+  detail: AgentSessionDetail,
+  input: RequestInfo | URL,
+): Response {
   const path = new URL(requestUrl(input), "http://localhost").pathname;
-  return Promise.resolve(
-    Response.json(
-      path === SESSIONS_PATH
-        ? { sessions: [summaryFromDetail(TEST_SESSION_DETAIL)] }
-        : TEST_SESSION_DETAIL,
-    ),
+  return Response.json(
+    path === SESSIONS_PATH ? { sessions: [summaryFromDetail(detail)] } : detail,
   );
+}
+
+function sessionResponse(input: RequestInfo | URL): Promise<Response> {
+  return Promise.resolve(detailResponse(TEST_SESSION_DETAIL, input));
 }
 
 function applyDelta(
@@ -454,6 +457,37 @@ test.each(["compact", "continueSession", "stop", "toggleAutoCompact"] as const)(
     expect(fetch).not.toHaveBeenCalled();
   },
 );
+
+function changedSessionDetail(credentialId: string) {
+  return {
+    ...TEST_SESSION_DETAIL,
+    credentialId,
+    updatedAt: TEST_SESSION_DETAIL.updatedAt + 1,
+  };
+}
+
+test("refreshes the list and selected detail after an aggregate credential change", async () => {
+  await withRestoredFetch(async () => {
+    const migrated = changedSessionDetail("credential-target");
+    let requests = 0;
+    installFetch((input) => {
+      requests += 1;
+      return Promise.resolve(detailResponse(migrated, input));
+    });
+    const controller = createRoot(() => new SessionController());
+    await controller.select(TEST_SESSION_DETAIL.id);
+    requests = 0;
+
+    await controller.refresh();
+
+    expect(requests).toBe(2);
+    expect(controller.state.sessions?.[0]?.credentialId).toBe(
+      "credential-target",
+    );
+    expect(controller.state.detail?.credentialId).toBe("credential-target");
+  });
+});
+
 test("an unchanged session refresh does not notify the view", async () => {
   await expectRealtimeToRemainSilent(
     () => new SessionController(),

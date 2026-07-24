@@ -1,5 +1,10 @@
-import { test } from "vitest";
-import { OPENAI_PANEL, ProviderPanel } from "../../solid/provider-client.tsx";
+import { expect, test } from "vitest";
+import {
+  BRAVE_SEARCH_PANEL,
+  OPENAI_PANEL,
+  OPENROUTER_PANEL,
+  ProviderPanel,
+} from "../../solid/provider-client.tsx";
 import { ProviderController } from "../../solid/provider-controller.ts";
 import { createReactiveState } from "../../solid/reactive-state.ts";
 import { providerViewState } from "./client-state-fixtures.ts";
@@ -23,14 +28,36 @@ const STATE = providerViewState([
   },
 ]);
 
-test("renders provider default controls", () => {
+function renderPanel(
+  configuration: typeof OPENAI_PANEL,
+  state = STATE,
+): string {
   const controller = new ProviderController(
-    OPENAI_PANEL,
-    createReactiveState(STATE),
+    configuration,
+    createReactiveState(state),
   );
-  const html = renderSolidToString(() => (
-    <ProviderPanel configuration={OPENAI_PANEL} controller={controller} />
+  return renderSolidToString(() => (
+    <ProviderPanel configuration={configuration} controller={controller} />
   ));
+}
+
+test("renders standalone session switching for every model credential only", () => {
+  for (const configuration of [OPENAI_PANEL, OPENROUTER_PANEL]) {
+    const html = renderPanel(configuration);
+
+    expect(html.match(/Switch sessions to this account/gu)).toHaveLength(2);
+    expect(html).toContain('data-credential-id="credential-1"');
+    expect(html).toContain('data-credential-id="credential-2"');
+    expect(html).toContain("Default");
+    expect(html).toContain("Make default");
+  }
+
+  const braveHtml = renderPanel(BRAVE_SEARCH_PANEL);
+  expect(braveHtml).not.toContain("Switch sessions to this account");
+});
+
+test("renders provider default controls", () => {
+  const html = renderPanel(OPENAI_PANEL);
 
   expectDefaultControls(
     html,

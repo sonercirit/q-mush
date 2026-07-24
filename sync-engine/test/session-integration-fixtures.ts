@@ -31,10 +31,16 @@ export const CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000063";
 const RUNNER_TOKEN = "qmr_session-runner-token";
 export const RUNNER_COMMAND_ID = "agent-command-1";
 
+export interface ConnectedSessionOptions {
+  readonly credentials?: Readonly<Record<string, string>>;
+  readonly onCredentialSelected?: (secret: string) => void;
+}
+
 export function connectedSessionSetup(
   model: AgentModel,
   credentialSource: ProviderCredentialAccess["source"] = "api_key",
   discoverModels?: AgentModelDiscoverer,
+  options: ConnectedSessionOptions = {},
 ) {
   const database = createAuthenticatedTestDatabase();
   const authOptions = { database, now: () => TEST_NOW };
@@ -60,19 +66,28 @@ export function connectedSessionSetup(
   }
 
   addTestProviderCredential(database, CREDENTIAL_ID);
-  const credential: ProviderCredentialAccess = {
-    accountId: "provider-account",
-    id: CREDENTIAL_ID,
-    isDefault: false,
-    label: "Agent key",
-    secret: "provider-secret",
-    source: credentialSource,
+  for (const credentialId of Object.keys(options.credentials ?? {})) {
+    if (credentialId !== CREDENTIAL_ID) {
+      addTestProviderCredential(database, credentialId);
+    }
+  }
+  const credentials = options.credentials ?? {
+    [CREDENTIAL_ID]: "provider-secret",
   };
   const reader = {
-    readCredential: (userId: string, credentialId: string) =>
-      userId === TEST_USER_ID && credentialId === CREDENTIAL_ID
-        ? credential
-        : undefined,
+    readCredential: (userId: string, credentialId: string) => {
+      const secret = credentials[credentialId];
+      return userId === TEST_USER_ID && secret !== undefined
+        ? {
+            accountId: "provider-account",
+            id: credentialId,
+            isDefault: false,
+            label: "Agent key",
+            secret,
+            source: credentialSource,
+          }
+        : undefined;
+    },
   };
   const ids = [
     SESSION_ID,
@@ -121,7 +136,10 @@ export function connectedSessionSetup(
         systemPrompt,
         tools,
       }) => {
-        expect(selectedCredential.secret).toBe("provider-secret");
+        options.onCredentialSelected?.(selectedCredential.secret);
+        if (options.credentials === undefined) {
+          expect(selectedCredential.secret).toBe("provider-secret");
+        }
         selectedModels.push(selectedModel);
         selectedPricing.push(providerPricing);
         selectedReasoningEfforts.push(reasoningEffort);

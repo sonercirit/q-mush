@@ -28,6 +28,10 @@ export class RevisionState<State extends object> {
     return revision === this.#revision;
   }
 
+  get revision(): number {
+    return this.#revision;
+  }
+
   patch(patch: Partial<State>): void {
     this.#setValue({ ...this.value, ...patch });
   }

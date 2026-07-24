@@ -11,6 +11,11 @@ import { RemovalButton } from "./client-controls.tsx";
 import { Collection } from "./collection.tsx";
 import { DefaultableActions } from "./defaultable-actions.tsx";
 import { renderDebugBoundary } from "./render-debug.tsx";
+import {
+  SessionReassignmentDialogController,
+  type SessionReassignmentDialogState,
+} from "./session-reassignment-dialog-controller.ts";
+import { SessionReassignmentDialog } from "./session-reassignment-dialog.tsx";
 
 type BrowserProviderId = "brave-search" | "openai" | "openrouter";
 
@@ -27,6 +32,8 @@ interface ProviderViewStateBase {
   readonly error: string | undefined;
   readonly removingId: string | undefined;
   readonly savePending: boolean;
+  readonly sessionReassignment: SessionReassignmentDialogState | undefined;
+  readonly sessionReassignmentNotice: string | undefined;
   readonly settingDefaultId: string | undefined;
 }
 
@@ -38,6 +45,8 @@ export function createProviderViewState(
     error: undefined,
     removingId: undefined,
     savePending: false,
+    sessionReassignment: undefined,
+    sessionReassignmentNotice: undefined,
     settingDefaultId: undefined,
   };
 }
@@ -160,6 +169,10 @@ interface CredentialItemProps {
   readonly configuration: ProviderPanelConfiguration;
   readonly controller: ProviderPanelController;
   readonly credential: ProviderCredential;
+  readonly onOpenSessionReassignment: (
+    credential: ProviderCredential,
+    trigger: HTMLElement,
+  ) => void;
   readonly state: ProviderViewState;
 }
 
@@ -175,16 +188,31 @@ function CredentialActions(props: CredentialItemProps): JSX.Element {
   return (
     <Show
       fallback={
-        <DefaultableActions
-          data={{ "data-credential-id": props.credential.id }}
-          isDefault={props.credential.isDefault}
-          onRemove={remove}
-          onSetDefault={() => {
-            void props.controller.setDefault(props.credential.id);
-          }}
-          removing={removing()}
-          settingDefault={settingDefault()}
-        />
+        <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <button
+            class="rounded-xl border border-cyan-300/20 px-4 py-2 text-sm font-semibold text-cyan-200 transition hover:border-cyan-300/40 hover:bg-cyan-300/10 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300"
+            data-credential-id={props.credential.id}
+            onClick={(event) => {
+              props.onOpenSessionReassignment(
+                props.credential,
+                event.currentTarget,
+              );
+            }}
+            type="button"
+          >
+            Switch sessions to this account
+          </button>
+          <DefaultableActions
+            data={{ "data-credential-id": props.credential.id }}
+            isDefault={props.credential.isDefault}
+            onRemove={remove}
+            onSetDefault={() => {
+              void props.controller.setDefault(props.credential.id);
+            }}
+            removing={removing()}
+            settingDefault={settingDefault()}
+          />
+        </div>
       }
       when={props.configuration.id === "brave-search"}
     >
@@ -223,10 +251,12 @@ function ProviderCredentialItem(props: CredentialItemProps): JSX.Element {
   );
 }
 
-function ProviderCredentialList({
-  configuration,
-  controller,
-}: ProviderPanelProps): JSX.Element {
+function ProviderCredentialList(
+  props: ProviderPanelProps & {
+    readonly onOpenSessionReassignment: CredentialItemProps["onOpenSessionReassignment"];
+  },
+): JSX.Element {
+  const { configuration, controller } = props;
   const state = controller.view;
   const retry = {
     get error(): string | undefined {
@@ -255,6 +285,7 @@ function ProviderCredentialList({
           configuration,
           controller,
           credential,
+          onOpenSessionReassignment: props.onOpenSessionReassignment,
           state: state(),
         };
         return <ProviderCredentialItem {...item} />;
@@ -277,6 +308,13 @@ export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
   const titleId = (): string => `${props.configuration.id}-title`;
   const inputId = (): string => `${props.configuration.id}-api-key`;
   const [form, setForm] = createSignal<HTMLFormElement>();
+  const [reassignmentTrigger, setReassignmentTrigger] =
+    createSignal<HTMLElement>();
+  const reassignmentDialog = new SessionReassignmentDialogController(
+    (value) => {
+      props.controller.setSessionReassignment(value);
+    },
+  );
 
   return (
     <section
@@ -386,13 +424,39 @@ export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
         </button>
       </form>
 
+      <Show when={state().sessionReassignmentNotice}>
+        {(notice) => (
+          <p
+            class="mt-5 rounded-2xl border border-emerald-300/20 bg-emerald-300/10 p-4 text-sm text-emerald-100"
+            role="status"
+          >
+            {notice()}
+          </p>
+        )}
+      </Show>
       <ProviderCredentialList
         configuration={props.configuration}
         controller={props.controller}
+        onOpenSessionReassignment={(credential, trigger) => {
+          setReassignmentTrigger(trigger);
+          reassignmentDialog.open(credential);
+        }}
       />
       <p class="mt-5 text-xs leading-5 text-slate-500">
         {props.configuration.removalHelp}
       </p>
+      <Show when={props.configuration.id !== "brave-search"}>
+        <SessionReassignmentDialog
+          configuration={props.configuration}
+          controller={reassignmentDialog}
+          onConfirm={() => {
+            void props.controller.confirmSessionReassignment(
+              reassignmentDialog,
+            );
+          }}
+          trigger={reassignmentTrigger()}
+        />
+      </Show>
     </section>
   );
 }
@@ -401,6 +465,12 @@ interface ProviderPanelController {
   readonly view: Accessor<ProviderViewState>;
   add(apiKey: string, label?: string): Promise<void>;
   load(): Promise<void>;
+  confirmSessionReassignment(
+    dialog: SessionReassignmentDialogController,
+  ): Promise<void>;
   remove(credentialId: string): Promise<void>;
   setDefault(credentialId: string): Promise<void>;
+  setSessionReassignment(
+    state: SessionReassignmentDialogState | undefined,
+  ): void;
 }

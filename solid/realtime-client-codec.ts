@@ -13,6 +13,7 @@ import { readSessionDetail, readSessionList } from "./session-codec.ts";
 export type RealtimeServerEvent =
   | { readonly runners: readonly RunnerSummary[]; readonly type: "runners" }
   | { readonly session: AgentSessionDetail; readonly type: "session" }
+  | { readonly type: "sessions_changed" }
   | {
       readonly sessions: readonly AgentSessionSummary[];
       readonly type: "sessions";
@@ -49,6 +50,8 @@ export function readRealtimeServerEvent(message: string): RealtimeServerEvent {
       return { sessions: readSessionList(value), type: "sessions" };
     case "session":
       return { session: readSessionDetail(value["session"]), type: "session" };
+    case "sessions_changed":
+      return { type: "sessions_changed" };
     case "session_delta": {
       const reset = value["reset"];
       if (reset !== undefined && reset !== true) {

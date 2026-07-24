@@ -1,5 +1,4 @@
 import type { JSX } from "solid-js";
-import { render } from "solid-js/web";
 import type {
   AgentSessionDetail,
   AgentSessionMessage,
@@ -9,6 +8,7 @@ import { summaryFromDetail } from "../session-codec.ts";
 import { SessionController } from "../session-controller.ts";
 import { SessionDetail } from "../session-detail-client.tsx";
 import type { SessionTranscriptFilterStorage } from "../session-transcript-filters.ts";
+import { mountDomView } from "./dom-view-fixtures.tsx";
 import { sessionDetailState } from "./session-detail-test-state.ts";
 import { runningSessionDetail } from "./transcript-ordering-fixtures.ts";
 
@@ -18,10 +18,9 @@ export function mountTestView(
   renderView: () => JSX.Element,
   disposals: (() => void)[] = DOM_TEST_DISPOSALS,
 ): HTMLDivElement {
-  const container = document.createElement("div");
-  document.body.append(container);
-  disposals.push(render(renderView, container));
-  return container;
+  const mounted = mountDomView(renderView);
+  disposals.push(mounted.dispose);
+  return mounted.container;
 }
 
 export function queryTestElement(

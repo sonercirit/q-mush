@@ -30,6 +30,7 @@ import {
   readStoredProviderCredentials,
   recordProviderRequest,
 } from "./provider-integration-test-helpers.ts";
+import { expectPreparedProviderSessionReassignment } from "./provider-session-reassignment-assertions.ts";
 
 const FIRST_OAUTH_ID = "018bcfe5-6800-7000-8000-000000000031";
 const SECOND_OAUTH_ID = "018bcfe5-6800-7000-8000-000000000032";
@@ -363,6 +364,42 @@ describe("OpenAI credentials", () => {
     } finally {
       database.$client.close();
     }
+  });
+
+  test("reassigns sessions to an OAuth target without changing the default", async () => {
+    const setup = setupIntegration({
+      [FIRST_MANUAL_KEY]: {
+        email: "manual@example.com",
+        id: "openai-user-one",
+        name: "Manual OpenAI user",
+      },
+    });
+    await expectPreparedProviderSessionReassignment({
+      expected: {
+        defaultCredentialId: FIRST_KEY_ID,
+        provider: "openai",
+        sessionId: "openai-session",
+        targetCredentialId: FIRST_OAUTH_ID,
+      },
+      input: { routes: TEST_ROUTES, setup },
+      prepare: async () => {
+        await connectAccount(
+          setup.integration,
+          FIRST_STATE,
+          "authorization-code-one",
+        );
+        await connectAccount(
+          setup.integration,
+          SECOND_STATE,
+          "authorization-code-two",
+        );
+        await addProviderApiKeys(
+          setup.integration,
+          TEST_ROUTES.credentialsPath,
+          [FIRST_MANUAL_KEY],
+        );
+      },
+    });
   });
 
   test("rejects an OAuth callback with unverifiable state", () =>

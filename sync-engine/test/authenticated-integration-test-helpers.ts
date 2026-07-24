@@ -1,7 +1,9 @@
 import { createdAuditFields } from "../../shared/audit.ts";
 import { createDatabase, type AppDatabase } from "../../shared/database.ts";
 import {
+  agentSessions,
   providerCredentials,
+  runners,
   sessions,
   users,
 } from "../../shared/database/schema.ts";
@@ -75,6 +77,42 @@ export function addTestProviderCredential(
       provider,
       source: "api_key",
       userId: TEST_USER_ID,
+    })
+    .run();
+}
+
+export function addTestRunner(database: AppDatabase, id: string): void {
+  database
+    .insert(runners)
+    .values({
+      ...testAuditFields(),
+      id,
+      tokenHash: `hash-${id}`,
+      userId: TEST_USER_ID,
+    })
+    .run();
+}
+
+export function addTestAgentSession(
+  database: AppDatabase,
+  id: string,
+  provider: "openai" | "openrouter",
+  credentialId: string,
+  runnerId: string,
+): void {
+  database
+    .insert(agentSessions)
+    .values({
+      ...testAuditFields(),
+      id,
+      model: "test-model",
+      provider,
+      providerCredentialId: credentialId,
+      runnerId,
+      status: "idle",
+      title: "Test session",
+      userId: TEST_USER_ID,
+      workingDirectory: ".",
     })
     .run();
 }

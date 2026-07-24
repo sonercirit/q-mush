@@ -1,4 +1,4 @@
-import { test } from "vitest";
+import { expect, test } from "vitest";
 import { createReactiveState } from "../../solid/reactive-state.ts";
 import { RunnerPanel } from "../../solid/runner-client.tsx";
 import { RunnerController } from "../../solid/runner-controller.ts";
@@ -12,7 +12,7 @@ const STATE = runnerViewState([
   { ...runnerSummary(2), id: "runner-2", name: "laptop" },
 ]);
 
-test("renders runner default controls", () => {
+test("renders runner default controls without provider reassignment actions", () => {
   const controller = new RunnerController(createReactiveState(STATE));
   const html = renderSolidToString(() => (
     <RunnerPanel controller={controller} />
@@ -24,4 +24,5 @@ test("renders runner default controls", () => {
     "data-runner-id",
     "runner-2",
   );
+  expect(html).not.toContain("Switch sessions to this account");
 });

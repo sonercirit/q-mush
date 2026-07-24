@@ -25,6 +25,7 @@ import {
   recordProviderRequest,
   setProviderDefaults,
 } from "./provider-integration-test-helpers.ts";
+import { expectPreparedProviderSessionReassignment } from "./provider-session-reassignment-assertions.ts";
 
 const OAUTH_CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000023";
 const FIRST_KEY_ID = "018bcfe5-6800-7000-8000-000000000024";
@@ -245,6 +246,25 @@ describe("OpenRouter credentials", () => {
       ],
     );
     database.$client.close();
+  });
+
+  test("reassigns sessions to a non-default API-key target without changing the default", async () => {
+    const setup = setupDefaultIntegration(MANUAL_KEY_DETAILS);
+    await expectPreparedProviderSessionReassignment({
+      expected: {
+        defaultCredentialId: FIRST_KEY_ID,
+        provider: "openrouter",
+        sessionId: "openrouter-session",
+        targetCredentialId: SECOND_KEY_ID,
+      },
+      input: { routes: TEST_ROUTES, setup },
+      prepare: () =>
+        addProviderApiKeys(
+          setup.integration,
+          TEST_ROUTES.credentialsPath,
+          Object.keys(MANUAL_KEY_DETAILS),
+        ),
+    });
   });
 
   test("does not exchange a callback whose state cannot be verified", async () => {

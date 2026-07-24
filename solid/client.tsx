@@ -365,6 +365,9 @@ function App(): JSX.Element {
       case "sessions":
         agentSessions.applyRealtime(event.sessions);
         break;
+      case "sessions_changed":
+        void agentSessions.refresh();
+        break;
       case "session":
         agentSessions.applyDetail(event.session);
         break;

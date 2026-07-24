@@ -18,12 +18,24 @@ const OPENROUTER_BASE_PATH = `${API_BASE_PATH}/openrouter`;
 export const OPENROUTER_CREDENTIALS_PATH = `${OPENROUTER_BASE_PATH}/credentials`;
 export const OPENROUTER_OAUTH_PATH = `${OPENROUTER_BASE_PATH}/oauth`;
 export const OPENROUTER_OAUTH_CALLBACK_PATH = `${OPENROUTER_OAUTH_PATH}/callback`;
-export function providerCredentialDefaultPath(
+function providerCredentialActionPath(
   credentialsPath: string,
   credentialId: string,
+  action: "default" | "session-reassignment",
 ): string {
-  return `${credentialsPath}/${encodeURIComponent(credentialId)}/default`;
+  const encodedId = encodeURIComponent(credentialId);
+  return [credentialsPath, encodedId, action].join("/");
 }
+
+export const providerCredentialDefaultPath = (
+  credentialsPath: string,
+  credentialId: string,
+): string =>
+  providerCredentialActionPath(credentialsPath, credentialId, "default");
+export const providerCredentialSessionReassignmentPath = (
+  ...parameters: readonly [credentialsPath: string, credentialId: string]
+): string =>
+  providerCredentialActionPath(...parameters, "session-reassignment");
 export const RUNNERS_PATH = `${API_BASE_PATH}/runners`;
 export function runnerDefaultPath(runnerId: string): string {
   return `${RUNNERS_PATH}/${encodeURIComponent(runnerId)}/default`;

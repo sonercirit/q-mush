@@ -1,7 +1,10 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { expect } from "vitest";
 import type { AppDatabase } from "../../shared/database.ts";
-import { providerCredentials } from "../../shared/database/schema.ts";
+import {
+  agentSessions,
+  providerCredentials,
+} from "../../shared/database/schema.ts";
 import type { ProviderId } from "../../shared/provider-credential-store.ts";
 import type { OAuthDependencies } from "../../sync-engine/oauth.ts";
 import type { createOpenAiIntegrationFromEnvironment } from "../../sync-engine/openai.ts";
@@ -9,6 +12,8 @@ import type { createOpenRouterIntegrationFromEnvironment } from "../../sync-engi
 import type { ProviderIntegration } from "../../sync-engine/provider-integration.ts";
 import {
   addFlowCookies,
+  addTestAgentSession,
+  addTestRunner,
   createAuthenticatedRequest,
   createAuthenticatedTestContext,
   TEST_NOW,
@@ -69,6 +74,7 @@ export interface ProviderTestSetup {
   readonly database: AppDatabase;
   readonly integration: ProviderIntegration;
   readonly providerRequests: Request[];
+  readonly sessionsChanged?: string[];
 }
 
 function setupProviderIntegration<Details>(
@@ -77,17 +83,21 @@ function setupProviderIntegration<Details>(
 ): ProviderTestSetup {
   const { auth, database } = createAuthenticatedTestContext();
   const providerRequests: Request[] = [];
+  const sessionsChanged: string[] = [];
   const ids = [...configuration.ids];
   const tokens = [...configuration.tokens];
   const integration = configuration.factory(configuration.environment, auth, {
     database,
     fetch: configuration.createFetch(details, providerRequests),
     now: () => TEST_NOW,
+    onSessionsChanged: (userId) => {
+      sessionsChanged.push(userId);
+    },
     randomId: () => takeValue(ids, "The test ran out of credential IDs"),
     randomToken: () => takeValue(tokens, "The test ran out of OAuth tokens"),
   });
 
-  return { database, integration, providerRequests };
+  return { database, integration, providerRequests, sessionsChanged };
 }
 
 export function createProviderTestSetup<Details>(
@@ -179,6 +189,55 @@ export function createProviderAccountConnector(
       oauthPath: routes.oauthPath,
       state,
     });
+}
+
+export async function reassignProviderSessions(
+  setup: ProviderTestSetup,
+  routes: ProviderTestRoutes,
+  credentialId: string,
+): Promise<Response> {
+  return setup.integration.reassignSessions(
+    createAuthenticatedRequest(
+      `${routes.credentialsPath}/${credentialId}/session-reassignment`,
+      {},
+      "POST",
+    ),
+    credentialId,
+  );
+}
+
+export function addProviderSessionFixture(
+  setup: ProviderTestSetup,
+  options: {
+    readonly otherCredentialId: string;
+    readonly provider: ProviderId;
+    readonly sessionId: string;
+  },
+): void {
+  const runnerId = `runner-${options.sessionId}`;
+  addTestRunner(setup.database, runnerId);
+  addTestAgentSession(
+    setup.database,
+    options.sessionId,
+    options.provider,
+    options.otherCredentialId,
+    runnerId,
+  );
+}
+
+export function readSessionCredential(
+  database: AppDatabase,
+  ownerId: string,
+  sessionId: string,
+): string | undefined {
+  const row = database
+    .select({ credentialId: agentSessions.providerCredentialId })
+    .from(agentSessions)
+    .where(
+      and(eq(agentSessions.id, sessionId), eq(agentSessions.userId, ownerId)),
+    )
+    .get();
+  return row?.credentialId;
 }
 
 export function setProviderDefaults(

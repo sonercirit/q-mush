@@ -1,5 +1,9 @@
 import { type Accessor } from "solid-js";
-import { providerCredentialDefaultPath } from "../shared/routes.ts";
+import {
+  providerCredentialDefaultPath,
+  providerCredentialSessionReassignmentPath,
+} from "../shared/routes.ts";
+import { readSessionCredentialReassignmentResult } from "../shared/session-credential-reassignment.ts";
 import { HttpResponseError, request, requestJson } from "./browser-http.ts";
 import {
   createProviderViewState,
@@ -8,6 +12,7 @@ import {
   type ProviderViewState,
 } from "./provider-client.tsx";
 import { createReactiveState, type ReactiveState } from "./reactive-state.ts";
+import type { SessionReassignmentDialogController } from "./session-reassignment-dialog-controller.ts";
 
 type ErrorMessage = (status: number) => string;
 type StatePatch = Partial<ProviderViewState>;
@@ -54,6 +59,44 @@ export class ProviderController {
     );
   }
 
+  async confirmSessionReassignment(
+    dialog: SessionReassignmentDialogController,
+  ): Promise<void> {
+    const state = dialog.state;
+    if (state === undefined || state.pending) {
+      return;
+    }
+
+    dialog.pending();
+    try {
+      const result = readSessionCredentialReassignmentResult(
+        await requestJson(
+          providerCredentialSessionReassignmentPath(
+            this.#configuration.credentialsPath,
+            state.credential.id,
+          ),
+          {
+            body: "{}",
+            headers: { "content-type": "application/json" },
+            method: "POST",
+          },
+        ),
+      );
+      const count = result.migratedSessionCount;
+      dialog.succeeded();
+      this.#patch({
+        sessionReassignmentNotice:
+          count === 0
+            ? "No sessions needed switching; they already use this account."
+            : `${String(count)} ${count === 1 ? "session" : "sessions"} switched to this account.`,
+      });
+    } catch {
+      dialog.failed(
+        `We could not switch your ${this.#configuration.name} sessions. Please try again.`,
+      );
+    }
+  }
+
   async load(): Promise<void> {
     const revision = ++this.#revision;
     this.#patch({ credentials: undefined, error: undefined });
@@ -92,6 +135,12 @@ export class ProviderController {
   reset(): void {
     this.#revision += 1;
     this.#replace(initialProviderState());
+  }
+
+  setSessionReassignment(
+    sessionReassignment: ProviderViewState["sessionReassignment"],
+  ): void {
+    this.#patch({ sessionReassignment });
   }
 
   setDefault(credentialId: string): Promise<void> {
