@@ -6,6 +6,7 @@ import {
   type Accessor,
   type JSX,
 } from "solid-js";
+import type { RunnerSummary } from "../shared/runner-model.ts";
 import type { SessionController } from "./session-controller.ts";
 import { SessionDetail, SessionList } from "./session-detail-client.tsx";
 
@@ -13,7 +14,8 @@ interface SessionResultsProps {
   readonly controller: SessionController;
   readonly credentialAvailable: boolean | undefined;
   readonly focusMode: Accessor<boolean>;
-  readonly runnerAvailable: boolean | undefined;
+  readonly onOpenDirectoryPicker: () => void;
+  readonly runners: readonly RunnerSummary[];
   readonly setFocusMode: (focused: boolean) => void;
 }
 
@@ -204,7 +206,8 @@ export function SessionResults(props: SessionResultsProps): JSX.Element {
           <SessionDetail
             controller={props.controller}
             credentialAvailable={props.credentialAvailable}
-            runnerAvailable={props.runnerAvailable}
+            onOpenDirectoryPicker={props.onOpenDirectoryPicker}
+            runners={props.runners}
             state={state()}
           />
         </div>

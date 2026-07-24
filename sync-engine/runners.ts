@@ -26,10 +26,17 @@ const RUNNER_TOKEN_PATTERN = /^qmr_[A-Za-z\d_-]{8,200}$/u;
 const MACHINE_FINGERPRINT_PATTERN = /^[A-Za-z\d._:-]{8,200}$/u;
 const MACHINE_VALUE_PATTERN = /^[A-Za-z\d._ -]{1,100}$/u;
 
-type RunnerDependencies = Pick<
+type RunnerRemovedListener = (
+  userId: string,
+  runnerId: string,
+) => Promise<void> | void;
+
+interface RunnerDependencies extends Pick<
   OAuthDependencies,
   "database" | "now" | "randomId" | "randomToken"
->;
+> {
+  readonly onRemoved?: RunnerRemovedListener;
+}
 
 interface ConnectedRunner {
   readonly connection: RunnerConnection;
@@ -49,7 +56,9 @@ export interface RunnerIntegration {
   installer(request: Request): Response;
   listForUser(userId: string): readonly RunnerSummary[];
   listOnlineForUser(userId: string, query: RunnerOptionQuery): RunnerPage;
-  remove(request: Request, runnerId: string): Response;
+  onRemoved(listener: RunnerRemovedListener): void;
+  onlineForUser(userId: string): readonly RunnerSummary[];
+  remove(request: Request, runnerId: string): Promise<Response>;
   runnerIsAvailable(userId: string, runnerId: string): boolean;
   runnerToken(request: Request): string | undefined;
   seen(runner: RunnerConnection): void;
@@ -116,12 +125,16 @@ export function readRunnerMetadata(value: unknown): RunnerMetadata | undefined {
 class DrizzleRunnerIntegration implements RunnerIntegration {
   readonly #auth: GoogleAuth;
   readonly #now: () => number;
+  readonly #onRemoved = new Set<RunnerRemovedListener>();
   readonly #randomToken: () => string;
   readonly #store: RunnerStore;
 
   constructor(auth: GoogleAuth, dependencies: RunnerDependencies) {
     this.#auth = auth;
     this.#now = dependencies.now ?? Date.now;
+    if (dependencies.onRemoved !== undefined) {
+      this.#onRemoved.add(dependencies.onRemoved);
+    }
     this.#randomToken = dependencies.randomToken ?? defaultRandomToken;
     this.#store = new RunnerStore(
       dependencies.database ?? createDatabase(":memory:"),
@@ -157,8 +170,12 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
     this.#setOnline(runner, false);
   }
 
-  listForUser(userId: string): readonly RunnerSummary[] {
+  #list(userId: string): readonly RunnerSummary[] {
     return this.#store.list(userId, this.#now());
+  }
+
+  listForUser(userId: string): readonly RunnerSummary[] {
+    return this.#list(userId);
   }
 
   listOnlineForUser(userId: string, query: RunnerOptionQuery): RunnerPage {
@@ -171,20 +188,37 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
     );
   }
 
+  onRemoved(listener: RunnerRemovedListener): void {
+    this.#onRemoved.add(listener);
+  }
+
+  onlineForUser(userId: string): readonly RunnerSummary[] {
+    return this.#list(userId).filter(({ status }) => status === "online");
+  }
+
   installer(request: Request): Response {
     return request.method === "GET"
       ? this.#serveInstaller(request)
       : createMethodNotAllowedResponse("GET");
   }
 
-  remove(request: Request, runnerId: string): Response {
-    return request.method === "DELETE"
-      ? withAuthenticatedUser(this.#auth, request, (user) =>
-          this.#store.remove(user.id, runnerId, this.#now())
-            ? createNoContentResponse()
-            : createApiError("not_found", 404),
-        )
-      : createMethodNotAllowedResponse("DELETE");
+  async remove(request: Request, runnerId: string): Promise<Response> {
+    if (request.method !== "DELETE") {
+      return createMethodNotAllowedResponse("DELETE");
+    }
+    return await Promise.resolve(
+      withAuthenticatedUser(this.#auth, request, async (user) => {
+        if (!this.#store.remove(user.id, runnerId, this.#now())) {
+          return createApiError("not_found", 404);
+        }
+        await Promise.all(
+          [...this.#onRemoved].map(async (listener) => {
+            await listener(user.id, runnerId);
+          }),
+        );
+        return createNoContentResponse();
+      }),
+    );
   }
 
   runnerIsAvailable(userId: string, runnerId: string): boolean {

@@ -83,10 +83,10 @@ interface ManualCompactionDependencies {
     credential: ProviderCredentialAccess,
     userId: string,
   ) => void;
-  readonly notify: (userId: string, sessionId: string) => void;
   readonly now: () => number;
   readonly runtimes: SessionRuntimes;
   readonly store: SessionStore;
+  readonly notify: (userId: string, sessionId: string) => void;
 }
 
 export async function startManualSessionCompaction(
@@ -103,6 +103,9 @@ export async function startManualSessionCompaction(
   const existing = dependencies.store.get(user.id, sessionId);
   if (existing === undefined) {
     return createApiError("not_found", 404);
+  }
+  if (existing.runnerRequired) {
+    return createApiError("runner_required", 409);
   }
   if (existing.status === "queued" || existing.status === "running") {
     return createApiError("session_busy", 409);

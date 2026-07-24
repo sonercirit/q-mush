@@ -9,6 +9,9 @@ import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 const INTERRUPTED_SESSION_ERROR =
   "Session failed: the server stopped before the session completed";
 
+const INTERRUPTED_RUNNER_TOOL_OUTPUT =
+  "Error: the runner was removed before this tool call returned a result.";
+
 export interface StoredMessageValues {
   readonly content: string;
   readonly images: string | null;
@@ -34,6 +37,20 @@ function emptyToolMetadata() {
 
 export function errorMessageValues(content: string): StoredMessageValues {
   return { ...emptyToolMetadata(), content, role: "error" };
+}
+
+export function interruptedRunnerToolValues(
+  toolCallId: string,
+  toolName: string,
+): StoredMessageValues {
+  return {
+    content: INTERRUPTED_RUNNER_TOOL_OUTPUT,
+    images: null,
+    role: "tool",
+    toolCallId,
+    toolCalls: null,
+    toolName,
+  };
 }
 
 export function interruptedSessionErrorValues(): StoredMessageValues {

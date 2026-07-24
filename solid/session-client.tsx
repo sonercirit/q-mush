@@ -19,8 +19,10 @@ import type {
 } from "../shared/session-model.ts";
 import { RetryNotice } from "./collection.tsx";
 import { CustomSelect, type CustomSelectOption } from "./custom-select.tsx";
+import { DirectoryBrowseButton } from "./directory-browse-button.tsx";
 import { DirectoryPicker } from "./directory-picker-client.tsx";
 import type { DirectoryPickerState } from "./directory-picker-controller.ts";
+import { findById } from "./id-selection.ts";
 import {
   modelModalitiesLabel,
   renderModelModalities,
@@ -37,9 +39,10 @@ import type { SessionController } from "./session-controller.ts";
 import { SessionResults } from "./session-focus-client.tsx";
 import type { SessionPanelResources } from "./session-panel-resources.ts";
 import {
-  selectedSessionCredentialAvailable,
-  selectedSessionRunnerAvailable,
-} from "./session-resource-availability.ts";
+  runnerSelectOptions,
+  type SessionReassignmentDraft,
+} from "./session-reassignment-client.ts";
+import { selectedSessionCredentialAvailable } from "./session-resource-availability.ts";
 import { SessionToolPicker } from "./session-tool-picker.tsx";
 import type { SessionTranscriptFilters } from "./session-transcript-filters.ts";
 
@@ -73,7 +76,14 @@ export interface SessionViewState {
   readonly loadingDetail: boolean;
   readonly modelDiscovery: SessionModelDiscoveryState;
   readonly openSelect:
-    "credential" | "model" | "reasoningEffort" | "runnerId" | undefined;
+    | "credential"
+    | "model"
+    | "reasoningEffort"
+    | "reassignmentRunnerId"
+    | "runnerId"
+    | undefined;
+  readonly reassigning: boolean;
+  readonly reassignment: SessionReassignmentDraft;
   readonly selectedId: string | undefined;
   readonly sending: boolean;
   readonly sessions: readonly AgentSessionSummary[] | undefined;
@@ -202,14 +212,11 @@ function DirectoryInput(props: {
           {props.state.draft.workingDirectory}
         </code>
       </div>
-      <button
+      <DirectoryBrowseButton
         class="min-h-11 shrink-0 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm font-semibold text-slate-200 transition hover:border-emerald-300/30 hover:text-emerald-200 disabled:cursor-not-allowed disabled:opacity-50 sm:mt-2 sm:self-start"
         disabled={props.state.creating || !props.runnerAvailable}
         onClick={openDirectoryPicker}
-        type="button"
-      >
-        Browse
-      </button>
+      />
     </div>,
   );
 }
@@ -220,15 +227,6 @@ function credentialSelectOptionsFor(
   return credentials.map((option) => ({
     label: `${option.provider === "openai" ? "OpenAI" : "OpenRouter"} · ${option.credential.label}`,
     value: optionValue(option),
-  }));
-}
-
-function runnerSelectOptions(
-  runners: readonly RunnerSummary[],
-): readonly CustomSelectOption[] {
-  return runners.map((runner) => ({
-    label: runner.name ?? "Online runner",
-    value: runner.id,
   }));
 }
 
@@ -335,9 +333,7 @@ function NewSessionForm(props: {
       ? props.state.draft.model
       : (models()[0]?.id ?? ""),
   );
-  const model = createMemo(() =>
-    models().find(({ id }) => id === modelValue()),
-  );
+  const model = createMemo(() => findById(models(), modelValue()));
   const resourcesAvailable = createMemo(
     () => runners().length > 0 && credentials().length > 0,
   );
@@ -606,10 +602,8 @@ export function SessionPanel(
             props.openRouter(),
           )}
           focusMode={focusMode}
-          runnerAvailable={selectedSessionRunnerAvailable(
-            state().detail,
-            props.runners(),
-          )}
+          onOpenDirectoryPicker={openDirectoryPicker}
+          runners={online()}
           setFocusMode={setFocusMode}
         />
       </section>

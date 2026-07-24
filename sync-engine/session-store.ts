@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { desc, eq, sql, type SQL } from "drizzle-orm";
 import type { AgentFile } from "../shared/agent-file.ts";
 import type { AgentImage } from "../shared/agent-images.ts";
 import type {
@@ -30,6 +30,19 @@ import {
   withInterruptedToolResults,
 } from "./session-store-read.ts";
 import {
+  activeSessionCondition,
+  didUpdate,
+  interruptedStoredSessions,
+  reassignStoredSession,
+  runningCondition,
+  SESSION_TIMING_SELECTION,
+  sessionTimingUpdate,
+  transitionStoredSession,
+  updateStoredSession,
+  type ReassignSessionResult,
+  type SessionFilter,
+} from "./session-store-reassignment.ts";
+import {
   appendSpawnedSessionReport,
   parentSessionId,
   pendingSpawnedSessions,
@@ -39,6 +52,7 @@ import {
   appendSessionUserMessage,
   errorMessageValues,
   insertStoredMessage,
+  interruptedRunnerToolValues,
   interruptedSessionErrorValues,
   recordedMessageValues,
   userMessageValues,
@@ -69,48 +83,12 @@ export type QueueSessionResult =
   | { readonly status: "busy" }
   | { readonly status: "not_found" };
 
-interface SessionFilter {
-  readonly id?: string;
-  readonly status?: AgentSessionStatus;
-  readonly userId?: string;
-}
-
-function activeSessionCondition(filter: SessionFilter): SQL | undefined {
-  return and(
-    eq(agentSessions.isDeleted, false),
-    filter.id === undefined ? undefined : eq(agentSessions.id, filter.id),
-    filter.status === undefined
-      ? undefined
-      : eq(agentSessions.status, filter.status),
-    filter.userId === undefined
-      ? undefined
-      : eq(agentSessions.userId, filter.userId),
-  );
-}
-
-function runningCondition(sessionId: string, userId?: string): SQL | undefined {
-  return activeSessionCondition({
-    id: sessionId,
-    status: "running",
-    ...(userId === undefined ? {} : { userId }),
-  });
-}
-
 function requireStoredSession<Value>(stored: Value | undefined): Value {
   if (stored === undefined) {
     throw new Error("The agent session no longer exists");
   }
 
   return stored;
-}
-
-const SESSION_TIMING_SELECTION = {
-  activeDurationMs: agentSessions.activeDurationMs,
-  activeStartedAt: agentSessions.activeStartedAt,
-};
-
-function didUpdate(rows: readonly unknown[]): boolean {
-  return rows.length > 0;
 }
 
 function sessionSelection() {
@@ -130,6 +108,7 @@ function sessionSelection() {
     providerPricing: agentSessions.providerPricing,
     reasoningEffort: agentSessions.reasoningEffort,
     runnerId: agentSessions.runnerId,
+    runnerRequired: agentSessions.runnerRequired,
     status: agentSessions.status,
     title: agentSessions.title,
     tools: agentSessions.tools,
@@ -154,6 +133,7 @@ type StoredSessionSummary = Pick<
   | "providerPricing"
   | "reasoningEffort"
   | "runnerId"
+  | "runnerRequired"
   | "status"
   | "title"
   | "tools"
@@ -344,6 +324,24 @@ export class SessionStore {
     });
   }
 
+  reassign(
+    userId: string,
+    sessionId: string,
+    runnerId: string,
+    workingDirectory: string,
+    now: number,
+  ): ReassignSessionResult {
+    return reassignStoredSession({
+      database: this.#database,
+      now,
+      read: (ownerId, id) => this.get(ownerId, id),
+      runnerId,
+      sessionId,
+      userId,
+      workingDirectory,
+    });
+  }
+
   setAutoCompact(
     userId: string,
     sessionId: string,
@@ -416,6 +414,20 @@ export class SessionStore {
     this.#appendMessage(sessionId, errorMessageValues(content), SYSTEM_ID, now);
   }
 
+  appendInterruptedRunnerTool(
+    sessionId: string,
+    toolCallId: string,
+    toolName: string,
+    now: number,
+  ): void {
+    this.#appendMessage(
+      sessionId,
+      interruptedRunnerToolValues(toolCallId, toolName),
+      SYSTEM_ID,
+      now,
+    );
+  }
+
   appendUserMessage(
     userId: string,
     sessionId: string,
@@ -478,18 +490,31 @@ export class SessionStore {
   }
 
   stop(userId: string, sessionId: string, now: number): boolean {
-    if (this.#finishActiveSession(sessionId, "stopped", now, userId, userId)) {
-      return true;
-    }
-
-    return this.#transition(
+    const stoppedActive = this.#finishActiveSession(
       sessionId,
-      ["queued", "running", "idle", "failed"],
       "stopped",
-      userId,
       now,
       userId,
+      userId,
     );
+    const stopped =
+      stoppedActive ||
+      this.#transition(
+        sessionId,
+        ["queued", "running", "idle", "failed"],
+        "stopped",
+        userId,
+        now,
+        userId,
+      );
+    if (stopped) {
+      this.#database
+        .update(agentSessions)
+        .set({ runnerRequired: false })
+        .where(activeSessionCondition({ id: sessionId, userId }))
+        .run();
+    }
+    return stopped;
   }
 
   queue(
@@ -540,6 +565,7 @@ export class SessionStore {
         .update(agentSessions)
         .set({
           activeStartedAt: null,
+          runnerRequired: false,
           status: "queued",
           ...updatedAuditFields(userId, now),
         })
@@ -562,20 +588,7 @@ export class SessionStore {
   }
 
   failInterrupted(now: number): readonly PendingSpawnedSession[] {
-    const interrupted = this.#database
-      .select({
-        ...SESSION_TIMING_SELECTION,
-        id: agentSessions.id,
-        userId: agentSessions.userId,
-      })
-      .from(agentSessions)
-      .where(
-        and(
-          eq(agentSessions.isDeleted, false),
-          inArray(agentSessions.status, ["queued", "running"]),
-        ),
-      )
-      .all();
+    const interrupted = interruptedStoredSessions(this.#database);
 
     for (const session of interrupted) {
       const duration = activeSessionDuration(session, now);
@@ -587,16 +600,12 @@ export class SessionStore {
           sessionId: session.id,
           userId: session.userId,
         });
-        transaction
-          .update(agentSessions)
-          .set({
-            activeDurationMs: duration,
-            activeStartedAt: null,
-            status: "failed",
-            ...updatedAuditFields(SYSTEM_ID, now),
-          })
-          .where(eq(agentSessions.id, session.id))
-          .run();
+        updateStoredSession(transaction, session.id, {
+          activeDurationMs: duration,
+          activeStartedAt: null,
+          status: "failed",
+          ...updatedAuditFields(SYSTEM_ID, now),
+        });
       });
     }
     return this.pendingSpawnedSessions();
@@ -679,8 +688,7 @@ export class SessionStore {
       this.#database
         .update(agentSessions)
         .set({
-          activeDurationMs: activeSessionDuration(session, now),
-          activeStartedAt: null,
+          ...sessionTimingUpdate(session, now),
           status,
           ...updatedAuditFields(actorId, now),
         })
@@ -707,21 +715,14 @@ export class SessionStore {
     now: number,
     userId?: string,
   ): boolean {
-    return didUpdate(
-      this.#database
-        .update(agentSessions)
-        .set({ status: to, ...updatedAuditFields(actorId, now) })
-        .where(
-          and(
-            activeSessionCondition({
-              id: sessionId,
-              ...(userId === undefined ? {} : { userId }),
-            }),
-            inArray(agentSessions.status, from),
-          ),
-        )
-        .returning({ updatedAt: agentSessions.updatedAt })
-        .all(),
-    );
+    return transitionStoredSession({
+      actorId,
+      database: this.#database,
+      from,
+      now,
+      sessionId,
+      to,
+      ...(userId === undefined ? {} : { userId }),
+    });
   }
 }

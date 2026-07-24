@@ -4,6 +4,7 @@ import {
   MAXIMUM_RUNNER_PATH_LENGTH,
   readRunnerDirectoryListing,
   RUNNER_DIRECTORY_COMMAND,
+  type RunnerDirectoryListing,
 } from "../shared/runner-directory-model.ts";
 import type { GoogleAuth } from "./auth.ts";
 import { withAuthenticatedUser } from "./authenticated-request.ts";
@@ -42,6 +43,30 @@ export function readStringField(
   return normalized.length > 0 ? normalized : undefined;
 }
 
+export type SessionRequestAuthenticator = <
+  Result extends Promise<Response> | Response,
+>(
+  request: Request,
+  method: string,
+  action: (user: AuthenticatedUser) => Result,
+) => Response | Result;
+
+export type RunnerDirectoryBrowseResult =
+  | { readonly listing: RunnerDirectoryListing; readonly status: "listed" }
+  | { readonly status: "directory_unavailable" | "runner_unavailable" };
+
+export function readWorkingDirectory(value: unknown): string | undefined {
+  const workingDirectory = readStringField(
+    value,
+    "workingDirectory",
+    MAXIMUM_RUNNER_PATH_LENGTH,
+    { trim: true },
+  );
+  return workingDirectory?.includes("\0") === false
+    ? workingDirectory
+    : undefined;
+}
+
 export class SessionRequestHelpers {
   readonly #auth: GoogleAuth;
   readonly #broker: RunnerCommandBroker;
@@ -57,15 +82,42 @@ export class SessionRequestHelpers {
     this.#runners = runners;
   }
 
-  authenticate<Result extends Promise<Response> | Response>(
-    request: Request,
-    method: string,
-    action: (user: AuthenticatedUser) => Result,
-  ): Response | Result {
+  authenticate: SessionRequestAuthenticator = (request, method, action) => {
     if (request.method !== method) {
       return createMethodNotAllowedResponse(method);
     }
     return withAuthenticatedUser(this.#auth, request, action);
+  };
+
+  async browseDirectories(
+    userId: string,
+    runnerId: string,
+    path: string,
+    signal: AbortSignal = AbortSignal.timeout(15_000),
+  ): Promise<RunnerDirectoryBrowseResult> {
+    if (!this.#runners.runnerIsAvailable(userId, runnerId)) {
+      return { status: "runner_unavailable" };
+    }
+
+    try {
+      const output = await this.#broker.dispatch(
+        {
+          arguments: {},
+          runnerId,
+          sessionId: `directory-picker:${userId}`,
+          tool: RUNNER_DIRECTORY_COMMAND,
+          workingDirectory: path,
+        },
+        signal,
+      );
+      const value: unknown = JSON.parse(output);
+      return {
+        listing: readRunnerDirectoryListing(value),
+        status: "listed",
+      };
+    } catch {
+      return { status: "directory_unavailable" };
+    }
   }
 
   directories(request: Request, runnerId: string): Promise<Response> {
@@ -134,21 +186,19 @@ export class SessionRequestHelpers {
         : createApiError("runner_unavailable", 409);
     }
 
-    try {
-      const output = await this.#broker.dispatch(
-        {
-          arguments: {},
-          runnerId,
-          sessionId: `directory-picker:${user.id}`,
-          tool: RUNNER_DIRECTORY_COMMAND,
-          workingDirectory: path,
-        },
-        AbortSignal.any([request.signal, AbortSignal.timeout(15_000)]),
-      );
-      const value: unknown = JSON.parse(output);
-      return createJsonResponse(readRunnerDirectoryListing(value));
-    } catch {
-      return createApiError("directory_unavailable", 502);
+    const result = await this.browseDirectories(
+      user.id,
+      runnerId,
+      path,
+      AbortSignal.any([request.signal, AbortSignal.timeout(15_000)]),
+    );
+    switch (result.status) {
+      case "directory_unavailable":
+        return createApiError("directory_unavailable", 502);
+      case "listed":
+        return createJsonResponse(result.listing);
+      case "runner_unavailable":
+        return createApiError("runner_unavailable", 409);
     }
   }
 }

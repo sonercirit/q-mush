@@ -1,12 +1,20 @@
 import { describe, expect, test } from "vitest";
 import type { AgentModel, AgentModelTurn } from "../../shared/agent-loop.ts";
 import { isRecord } from "../../shared/auth-model.ts";
+import { SessionStore } from "../../sync-engine/session-store.ts";
+import {
+  createAuthenticatedRequest,
+  TEST_USER_ID,
+} from "./authenticated-integration-test-helpers.ts";
 import {
   jsonRecord,
   records,
   testRecord,
 } from "./session-agent-output-helpers.ts";
-import { findToolResultContent } from "./session-agent-tool-helpers.ts";
+import {
+  closeToolSession,
+  findToolResultContent,
+} from "./session-agent-tool-helpers.ts";
 import {
   completedParentDetail,
   completedParentToolOutputs,
@@ -22,6 +30,8 @@ import {
   SESSION_ID,
 } from "./session-integration-fixtures.ts";
 import {
+  expectRunnerRequired,
+  expectTranscriptExcludes,
   hasSessionStatus,
   sessionDetail,
   waitForSessionValue,
@@ -128,6 +138,15 @@ async function childSessionId(
   return childId;
 }
 
+async function startedChild(model: AgentModel): Promise<{
+  readonly childId: string;
+  readonly setup: Awaited<ReturnType<typeof startToolSession>>;
+}> {
+  const setup = await startToolSession(model);
+  const childId = await childSessionId(setup);
+  return { childId, setup };
+}
+
 function completeChildAgentFile(
   setup: Awaited<ReturnType<typeof startToolSession>>,
 ): void {
@@ -222,8 +241,7 @@ describe("session agent tools", () => {
     expect(output).toContain("read_session");
     expect(output).toContain('\\"role\\": \\"user\\"');
     expect(output).toContain("Inspect README.md");
-    expect(parallelSetup.runnerCommands).toEqual([]);
-    parallelSetup.database.$client.close();
+    closeToolSession(parallelSetup);
   });
 
   test("sends to, continues, and stops owned sessions", async () => {
@@ -360,6 +378,47 @@ describe("session agent tools", () => {
       "I received the child report.",
     );
     expect(JSON.stringify(parent)).toContain("Child work is complete.");
+    setup.database.$client.close();
+  });
+
+  test("does not report a runner-required spawned child as completed", async () => {
+    const model = scriptedModel([
+      { content: "Delegating work.", toolCalls: [spawnCall("Keep working")] },
+      { content: "Parent waiting.", toolCalls: [] },
+      {
+        content: "Child began runner work.",
+        toolCalls: [toolCall("bash", { command: "sleep 30", timeout: 60 })],
+      },
+    ]);
+    const { childId, setup } = await startedChild(model);
+    completeChildAgentFile(setup);
+    await waitForSessionValue(
+      () =>
+        setup.sessions
+          .detailForUser(TEST_USER_ID, childId)
+          ?.messages.some(({ toolCalls }) =>
+            toolCalls.some(({ name }) => name === "bash"),
+          ),
+      (value) => value === true,
+    );
+
+    await setup.runners.remove(
+      createAuthenticatedRequest(
+        `/api/runners/${RUNNER_ID}`,
+        undefined,
+        "DELETE",
+      ),
+      RUNNER_ID,
+    );
+
+    const child = setup.sessions.detailForUser(TEST_USER_ID, childId);
+    expectRunnerRequired(child);
+    await expectTranscriptExcludes(setup, "Spawned session completed");
+    const restartedStore = new SessionStore(setup.database);
+    expect(restartedStore.pendingSpawnedSessions()).toEqual([]);
+    expect(restartedStore.parentSessionId(TEST_USER_ID, childId)).toBe(
+      SESSION_ID,
+    );
     setup.database.$client.close();
   });
 

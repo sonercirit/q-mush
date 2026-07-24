@@ -1,0 +1,2 @@
+ALTER TABLE `agent_sessions` ADD `runner_required` integer DEFAULT false NOT NULL;--> statement-breakpoint
+UPDATE `agent_sessions` SET `tools` = '["read","bash","edit","write","parallel","brave_search","spawn_session","browse_runner_directories","list_runners","list_sessions","get_session_options","read_session","reassign_session","send_to_session","continue_session","stop_session"]' WHERE `tools` = '["read","bash","edit","write","parallel","brave_search","spawn_session","list_sessions","read_session","send_to_session","continue_session","stop_session"]';

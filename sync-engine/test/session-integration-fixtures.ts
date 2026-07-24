@@ -31,6 +31,7 @@ import { takeValue } from "./oauth-test-helpers.ts";
 export const RUNNER_ID = "018bcfe5-6800-7000-8000-000000000061";
 export const SESSION_ID = "018bcfe5-6800-7000-8000-000000000062";
 export const CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000063";
+export const REPLACEMENT_RUNNER_ID = "018bcfe5-6800-7000-8000-000000000073";
 const RUNNER_TOKEN = "qmr_session-runner-token";
 export const RUNNER_COMMAND_ID = "agent-command-1";
 
@@ -38,25 +39,31 @@ type FixtureCredentials = Readonly<
   Partial<Record<"openai" | "openrouter", readonly ProviderCredentialAccess[]>>
 >;
 
+interface ConnectedSessionOptions {
+  readonly commandId?: () => string;
+  readonly credentials?: FixtureCredentials;
+  readonly deletedCredentials?: FixtureCredentials;
+  readonly foreignCredentials?: FixtureCredentials;
+  readonly runners?: readonly RunnerSummary[];
+}
+
 export function connectedSessionSetup(
   model: AgentModel,
   credentialSource: ProviderCredentialAccess["source"] = "api_key",
   discoverModels?: AgentModelDiscoverer,
-  options: {
-    readonly credentials?: FixtureCredentials;
-    readonly deletedCredentials?: FixtureCredentials;
-    readonly foreignCredentials?: FixtureCredentials;
-    readonly runners?: readonly RunnerSummary[];
-  } = {},
+  options: ConnectedSessionOptions = {},
 ) {
   const database = createAuthenticatedTestDatabase();
   const authOptions = { database, now: () => TEST_NOW };
   const auth = createGoogleAuthFromEnvironment({}, authOptions);
+  const runnerIds = [RUNNER_ID, REPLACEMENT_RUNNER_ID];
+  const runnerTokens = ["session-runner-token", "replacement-runner-token"];
   const runners = createRunnerIntegration(auth, {
     database,
     now: () => TEST_NOW,
-    randomId: () => RUNNER_ID,
-    randomToken: () => "session-runner-token",
+    randomId: () => takeValue(runnerIds, "The test ran out of runner IDs"),
+    randomToken: () =>
+      takeValue(runnerTokens, "The test ran out of runner tokens"),
   });
   runners.collection(
     createAuthenticatedRequest("/api/runners", undefined, "POST"),
@@ -143,7 +150,7 @@ export function connectedSessionSetup(
   const runnerCommands: RunnerToolCommand[] = [];
   let latestRunnerCommand: RunnerToolCommand | undefined;
   const broker = new RunnerCommandBroker({
-    commandId: () => RUNNER_COMMAND_ID,
+    commandId: options.commandId ?? (() => RUNNER_COMMAND_ID),
     deliver: (_runnerId, command) => {
       latestRunnerCommand = command;
       runnerCommands.push(command);
@@ -184,6 +191,13 @@ export function connectedSessionSetup(
         totalItems: matching.length,
       };
     },
+    onRemoved: (listener) => {
+      runners.onRemoved(listener);
+    },
+    onlineForUser: (userId) =>
+      (options.runners ?? runners.onlineForUser(userId)).filter(
+        ({ status }) => status === "online",
+      ),
     remove: (request, runnerId) => runners.remove(request, runnerId),
     runnerIsAvailable: (userId, runnerId) =>
       runners.runnerIsAvailable(userId, runnerId),
@@ -233,6 +247,7 @@ export function connectedSessionSetup(
     latestRunnerCommand: () => latestRunnerCommand,
     listRunnerCalls: () => listRunnerCalls,
     runnerCommands,
+    runners,
     selectedModels,
     selectedPricing,
     selectedReasoningEfforts,

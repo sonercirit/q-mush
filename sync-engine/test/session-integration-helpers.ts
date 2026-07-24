@@ -6,12 +6,22 @@ import type { RunnerToolCommand } from "../../shared/runner-command-broker.ts";
 import type { createSessionIntegration } from "../../sync-engine/sessions.ts";
 import { createAuthenticatedRequest } from "./authenticated-integration-test-helpers.ts";
 import {
+  createSessionRequest,
   RUNNER_COMMAND_ID,
   SESSION_ID,
   type connectedSessionSetup,
 } from "./session-integration-fixtures.ts";
 
 type ConnectedSessionSetup = Awaited<ReturnType<typeof connectedSessionSetup>>;
+
+export function directoryListing() {
+  return {
+    directories: [{ name: "q-mush", path: "/home/mush/projects/q-mush" }],
+    parent: "/home/mush",
+    path: "/home/mush/projects",
+    truncated: false,
+  };
+}
 
 export async function waitForSessionValue(
   readValue: () => unknown,
@@ -34,6 +44,24 @@ export function hasSessionStatus(
   expected: string,
 ): (value: unknown) => boolean {
   return (value) => isRecord(value) && value["status"] === expected;
+}
+
+export function expectRunnerRequired(value: unknown): void {
+  expect(value).toEqual(
+    expect.objectContaining({ runnerRequired: true, status: "idle" }),
+  );
+}
+
+export function expectedRunnerCommand(
+  command: Partial<RunnerToolCommand> &
+    Pick<RunnerToolCommand, "arguments" | "tool">,
+): RunnerToolCommand {
+  return {
+    id: RUNNER_COMMAND_ID,
+    sessionId: SESSION_ID,
+    workingDirectory: "/work/project",
+    ...command,
+  };
 }
 
 export async function expectRunnerCommand(
@@ -86,6 +114,32 @@ export async function completeAgentFileLookup(
   expect(completeRunnerCommand(setup, JSON.stringify(agentFile)).status).toBe(
     204,
   );
+}
+
+export async function expectTranscriptExcludes(
+  setup: ReturnType<typeof connectedSessionSetup>,
+  content: string,
+): Promise<void> {
+  expect(JSON.stringify(await sessionDetail(setup.sessions))).not.toContain(
+    content,
+  );
+}
+
+export async function startSession(
+  setup: ReturnType<typeof connectedSessionSetup>,
+): Promise<Response> {
+  return setup.sessions.collection(createSessionRequest());
+}
+
+export async function startSessionAndExpectRunnerCommand(
+  setup: ReturnType<typeof connectedSessionSetup>,
+  command: ReturnType<typeof expectedRunnerCommand>,
+  missingMessage: string,
+): Promise<void> {
+  const created = await startSession(setup);
+  expect(created.status).toBe(201);
+  await completeAgentFileLookup(setup);
+  await expectRunnerCommand(setup, command, missingMessage);
 }
 
 export async function sessionDetail(

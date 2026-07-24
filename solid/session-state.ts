@@ -7,6 +7,7 @@ import type {
   SessionModelDiscoveryState,
   SessionViewState,
 } from "./session-client.tsx";
+import { emptySessionReassignmentDraft } from "./session-reassignment-client.ts";
 import { DEFAULT_SESSION_TRANSCRIPT_FILTERS } from "./session-transcript-filters.ts";
 
 export function mostRecentSessionDirectory(
@@ -50,6 +51,8 @@ export function initialSessionViewState(): SessionViewState {
     loadingDetail: false,
     modelDiscovery: sessionModelDiscoveryState(undefined, false),
     openSelect: undefined,
+    reassigning: false,
+    reassignment: emptySessionReassignmentDraft(),
     selectedId: undefined,
     sending: false,
     sessions: undefined,

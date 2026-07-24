@@ -125,6 +125,9 @@ export const agentSessions = sqliteTable(
     runnerId: text("runner_id")
       .notNull()
       .references(() => runners.id, { onDelete: "restrict" }),
+    runnerRequired: integer("runner_required", { mode: "boolean" })
+      .notNull()
+      .default(false),
     providerCredentialId: text("provider_credential_id")
       .notNull()
       .references(() => providerCredentials.id, { onDelete: "restrict" }),

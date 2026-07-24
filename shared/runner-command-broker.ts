@@ -188,14 +188,35 @@ export class RunnerCommandBroker {
     return true;
   }
 
+  runnerRemoved(
+    runnerId: string,
+  ): readonly { readonly command: RunnerToolCommand; readonly error: Error }[] {
+    const removed = [...this.#pending.values()]
+      .filter((pending) => pending.runnerId === runnerId)
+      .map((pending) => ({
+        command: pending.command,
+        error: abortError("The assigned runner was removed"),
+      }));
+    for (const { command, error } of removed) {
+      this.#reject(command.id, error);
+    }
+    return removed;
+  }
+
   cancelSession(sessionId: string): void {
-    const commandIds = [...this.#pending.entries()]
+    this.cancelSessionCommands(sessionId);
+  }
+
+  cancelSessionCommands(sessionId: string): readonly RunnerToolCommand[] {
+    const commands = [...this.#pending.entries()]
       .filter(([, pending]) => pending.command.sessionId === sessionId)
-      .map(([id]) => id);
+      .map(([, pending]) => pending.command);
+    const commandIds = commands.map(({ id }) => id);
 
     for (const commandId of commandIds) {
       this.#reject(commandId, abortError("The agent session was stopped"));
     }
+    return commands;
   }
 
   #reject(commandId: string, error: Error): void {

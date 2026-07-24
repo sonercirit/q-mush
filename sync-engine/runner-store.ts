@@ -16,6 +16,7 @@ import {
   type RunnerStatus,
   type RunnerSummary,
 } from "../shared/runner-model.ts";
+import { requireRunnerReassignment } from "./runner-reassignment-store.ts";
 
 const RUNNER_ONLINE_WINDOW_MILLISECONDS = 45_000;
 
@@ -380,13 +381,21 @@ export class RunnerStore {
   }
 
   remove(userId: string, runnerId: string, now: number): boolean {
-    const removed = this.#database
-      .update(runners)
-      .set({ ...softDeletedAuditFields(userId, now), isDefault: false })
-      .where(activeRunnerCondition({ id: runnerId, userId }))
-      .returning({ id: runners.id })
-      .all();
-    return removed.length > 0;
+    const removed = this.#database.transaction((transaction) => {
+      const removed = transaction
+        .update(runners)
+        .set({ ...softDeletedAuditFields(userId, now), isDefault: false })
+        .where(activeRunnerCondition({ id: runnerId, userId }))
+        .returning({ id: runners.id })
+        .all();
+      if (removed.length === 0) {
+        return false;
+      }
+
+      requireRunnerReassignment(transaction, userId, runnerId, now);
+      return true;
+    });
+    return removed;
   }
 
   #activeRunnerForToken(token: string) {

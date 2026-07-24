@@ -6,7 +6,7 @@ import {
   initialDirectoryPickerState,
 } from "../../solid/directory-picker-controller.ts";
 import { createReactiveState } from "../../solid/reactive-state.ts";
-import { requestUrl } from "./controller-test-helpers.ts";
+import { installFetch, requestUrl } from "./controller-test-helpers.ts";
 
 const originalFetch = globalThis.fetch;
 
@@ -17,25 +17,22 @@ afterEach(() => {
 describe("directory picker controller", () => {
   test("browses a runner and chooses its current directory", async () => {
     const requests: { readonly body: unknown; readonly url: string }[] = [];
-    globalThis.fetch = Object.assign(
-      (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = requestUrl(input);
-        requests.push({
-          body:
-            typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
-          url,
-        });
-        return Promise.resolve(
-          Response.json({
-            directories: [{ name: "project", path: "/home/mush/project" }],
-            parent: "/home",
-            path: "/home/mush",
-            truncated: false,
-          }),
-        );
-      },
-      { preconnect: originalFetch.preconnect },
-    );
+    installFetch((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      requests.push({
+        body:
+          typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
+        url,
+      });
+      return Promise.resolve(
+        Response.json({
+          directories: [{ name: "project", path: "/home/mush/project" }],
+          parent: "/home",
+          path: "/home/mush",
+          truncated: false,
+        }),
+      );
+    });
     const view = createReactiveState(initialDirectoryPickerState());
     const controller = new DirectoryPickerController(view);
 

@@ -10,8 +10,11 @@ import {
 } from "../shared/agent-tools.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
-import { MAXIMUM_RUNNER_PATH_LENGTH } from "../shared/runner-directory-model.ts";
-import { readIdentifier, readStringField } from "./session-request-helpers.ts";
+import {
+  readIdentifier,
+  readStringField,
+  readWorkingDirectory,
+} from "./session-request-helpers.ts";
 import type { CreateAgentSession } from "./session-store.ts";
 
 const MAXIMUM_PROMPT_LENGTH = 32_768;
@@ -48,12 +51,7 @@ export function readCreateSession(
   const message = promptInput(value);
   const provider = readProvider(value["provider"]);
   const runnerId = readIdentifier(value["runnerId"]);
-  const workingDirectory = readStringField(
-    value,
-    "workingDirectory",
-    MAXIMUM_RUNNER_PATH_LENGTH,
-    { trim: true },
-  );
+  const workingDirectory = readWorkingDirectory(value);
   const modelValue = value["model"];
   const reasoningEffortValue = value["reasoningEffort"];
   const toolsValue = value["tools"];
@@ -68,7 +66,6 @@ export function readCreateSession(
     provider === undefined ||
     runnerId === undefined ||
     workingDirectory === undefined ||
-    workingDirectory.includes("\0") ||
     (modelValue !== undefined && !isAgentModelId(modelValue)) ||
     (reasoningEffortValue !== undefined &&
       !isAgentReasoningEffort(reasoningEffortValue)) ||

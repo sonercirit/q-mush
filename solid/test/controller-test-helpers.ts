@@ -18,6 +18,16 @@ export function requestUrl(input: RequestInfo | URL): string {
       : input.url;
 }
 
+export function installFetch(
+  implementation: FetchImplementation,
+): typeof globalThis.fetch {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = Object.assign(implementation, {
+    preconnect: originalFetch.preconnect,
+  });
+  return originalFetch;
+}
+
 export async function expectRealtimeToRemainSilent<Value>(
   createController: () => RealtimeController<Value> & {
     readonly view: () => unknown;
@@ -25,11 +35,7 @@ export async function expectRealtimeToRemainSilent<Value>(
   fetchImplementation: FetchImplementation,
   realtimeValue: Value,
 ): Promise<void> {
-  const originalFetch = globalThis.fetch;
-
-  globalThis.fetch = Object.assign(fetchImplementation, {
-    preconnect: originalFetch.preconnect,
-  });
+  const originalFetch = installFetch(fetchImplementation);
 
   try {
     await createRoot(async (dispose) => {

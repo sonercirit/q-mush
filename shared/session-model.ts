@@ -47,6 +47,7 @@ export interface AgentSessionSummary {
   readonly providerPricing: ProviderModelPricing | null;
   readonly reasoningEffort: AgentReasoningEffort | null;
   readonly runnerId: string;
+  readonly runnerRequired: boolean;
   readonly status: AgentSessionStatus;
   readonly title: string;
   readonly tools: readonly AgentSessionToolName[];

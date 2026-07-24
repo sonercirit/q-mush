@@ -1,9 +1,10 @@
-import { SESSIONS_PATH } from "../shared/routes.ts";
+import { SESSIONS_PATH, sessionReassignPath } from "../shared/routes.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { HttpResponseError, requestJson } from "./browser-http.ts";
 import { readSessionDetail } from "./session-codec.ts";
 
-type SessionPendingAction = "compacting" | "sending" | "stopping";
+type SessionPendingAction =
+  "compacting" | "reassigning" | "sending" | "stopping";
 
 export interface SessionMutation {
   readonly action: string;
@@ -27,6 +28,23 @@ export function continueSessionMutation(sessionId: string): SessionMutation {
     "continue that session",
     "sending",
   );
+}
+
+export function reassignSessionMutation(
+  sessionId: string,
+  runnerId: string,
+  workingDirectory: string,
+): SessionMutation {
+  return {
+    action: "reassign that session",
+    pending: "reassigning",
+    request: () =>
+      requestJson(sessionReassignPath(sessionId), {
+        body: JSON.stringify({ runnerId, workingDirectory }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+  };
 }
 
 export function stopSessionMutation(sessionId: string): SessionMutation {

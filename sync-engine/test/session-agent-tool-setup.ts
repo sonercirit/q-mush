@@ -38,6 +38,15 @@ export async function completedParentDetail(
   }
 }
 
+export async function startToolSessionSetup(
+  setup: Awaited<ReturnType<typeof connectedSessionSetup>>,
+  agentFile: unknown = null,
+): Promise<void> {
+  const response = await setup.sessions.collection(createSessionRequest());
+  expect(response.status).toBe(201);
+  await completeAgentFileLookup(setup, agentFile);
+}
+
 export async function startToolSession(
   model: AgentModel,
   options: Parameters<typeof connectedSessionSetup>[3] & {
@@ -52,9 +61,7 @@ export async function startToolSession(
     discoverModels,
     sessionOptions,
   );
-  const response = await setup.sessions.collection(createSessionRequest());
-  expect(response.status).toBe(201);
-  await completeAgentFileLookup(setup, agentFile);
+  await startToolSessionSetup(setup, agentFile);
   return setup;
 }
 

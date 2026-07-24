@@ -29,6 +29,7 @@ export function pendingSpawnedSessions(
       and(
         isNotNull(agentSessions.parentSessionId),
         eq(agentSessions.isDeleted, false),
+        eq(agentSessions.runnerRequired, false),
         inArray(agentSessions.status, ["idle", "stopped", "failed"]),
       ),
     )

@@ -10,6 +10,7 @@ import type { RevisionState } from "./revision-state.ts";
 import type { SessionViewState } from "./session-client.tsx";
 import { summaryFromDetail } from "./session-codec.ts";
 import { createDisplaySessionMessage } from "./session-message.ts";
+import { sessionMutationPending } from "./session-pending.ts";
 
 export function selectedSessionCredential(value: string):
   | {
@@ -371,10 +372,7 @@ export class SessionRealtimeState {
   applySessions(sessions: readonly AgentSessionSummary[]): void {
     if (
       this.#view.value.sessions === undefined ||
-      this.#view.value.compacting ||
-      this.#view.value.creating ||
-      this.#view.value.sending ||
-      this.#view.value.stopping ||
+      sessionMutationPending(this.#view.value) ||
       sessionDataMatches(this.#view.value.sessions, sessions)
     ) {
       return;

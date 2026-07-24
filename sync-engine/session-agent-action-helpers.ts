@@ -31,10 +31,8 @@ export interface SessionAgentActionDependencies {
     credential: ProviderCredentialAccess,
   ) => Promise<AgentModelCatalog>;
   readonly store: SessionStore;
-  readonly draining: () => boolean;
   readonly now: () => number;
-  readonly notify: (userId: string, sessionId: string) => void;
-  readonly runnerIsAvailable: (userId: string, runnerId: string) => boolean;
+  readonly draining: () => boolean;
   readonly launchSession: (
     credential: ProviderCredentialAccess,
     session: AgentSessionDetail,
@@ -51,6 +49,8 @@ export interface SessionAgentActionDependencies {
     userId: string,
     selection: SessionAgentCredentialSelection,
   ) => Promise<ProviderCredentialAccess | undefined>;
+  readonly notify: (userId: string, sessionId: string) => void;
+  readonly runnerIsAvailable: (userId: string, runnerId: string) => boolean;
   readonly withCredential: (
     userId: string,
     selection: SessionAgentCredentialSelection,

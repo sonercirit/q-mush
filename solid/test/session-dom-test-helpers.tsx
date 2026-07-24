@@ -31,11 +31,29 @@ function renderTestSessionDetail(
   controller: SessionController,
   state: ReturnType<typeof sessionDetailState>["state"],
 ): JSX.Element {
+  const detail = () => state().detail;
   return (
     <SessionDetail
       controller={controller}
       credentialAvailable
-      runnerAvailable
+      onOpenDirectoryPicker={() => {
+        controller.openDirectoryPicker();
+      }}
+      runners={
+        detail() === undefined
+          ? []
+          : [
+              {
+                architecture: null,
+                id: detail()?.runnerId ?? "",
+                isDefault: true,
+                lastSeenAt: null,
+                name: "Test runner",
+                platform: null,
+                status: "online",
+              },
+            ]
+      }
       state={state()}
     />
   );

@@ -95,6 +95,39 @@ test("keeps editable session controls in the reactive tree", () => {
   expect(followUpHtml).not.toContain("data-focus-key");
 });
 
+test("renders runner reassignment without enabling session execution", () => {
+  const required = { ...TEST_SESSION_DETAIL, runnerRequired: true };
+  const html = renderPanelWithProviders(
+    {
+      ...SESSION_STATE,
+      detail: required,
+      reassignment: {
+        runnerId: "runner-2",
+        workingDirectory: "/work/replacement",
+      },
+      selectedId: required.id,
+      sessions: [required],
+    },
+    SECOND_RUNNER_STATE,
+  );
+
+  expect(html).toContain("Choose runner");
+  expect(html).toContain("Choose a replacement runner");
+  expect(html).toContain("session-reassignment-runner");
+  expect(html).toContain("session-reassignment-directory");
+  expect(html).toContain("/work/replacement");
+  expect(html).toContain(">Reassign</button>");
+  expect(html).toMatch(
+    /<textarea[^>]*aria-disabled="true"[^>]*name="prompt"[^>]*readOnly="true"/u,
+  );
+  expect(html).toContain(
+    "Choose a replacement runner before continuing this session.",
+  );
+  expect(html).toMatch(
+    /<button[^>]*aria-label="Continue without another instruction"[^>]*disabled/u,
+  );
+});
+
 test("shows session time and cost in the list and detail", () => {
   const session = {
     ...TEST_SESSION_DETAIL,

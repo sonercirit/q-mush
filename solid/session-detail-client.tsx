@@ -16,6 +16,7 @@ import type {
 } from "../shared/session-model.ts";
 import { activeSessionDuration } from "../shared/session-timing.ts";
 import { Collection } from "./collection.tsx";
+import { findById } from "./id-selection.ts";
 import { SessionFollowUp } from "./session-client-forms.tsx";
 import type { SessionViewState } from "./session-client.tsx";
 import {
@@ -24,6 +25,11 @@ import {
   sessionContextLabel,
 } from "./session-context-client.tsx";
 import type { SessionController } from "./session-controller.ts";
+import type {
+  LoadedSessionDetailViewProps,
+  SessionDetailViewProps,
+} from "./session-detail-view-props.ts";
+import { RunnerReassignment } from "./session-reassignment-view.tsx";
 import { SessionTranscriptFilterControls } from "./session-transcript-filter-controls.tsx";
 import {
   SessionTranscript,
@@ -58,8 +64,15 @@ const STATUS_PRESENTATION: Readonly<
   },
 };
 
-function statusBadge(status: AgentSessionStatus): JSX.Element {
-  const presentation = STATUS_PRESENTATION[status];
+function statusBadge(
+  session: Pick<AgentSessionSummary, "runnerRequired" | "status">,
+): JSX.Element {
+  const presentation = session.runnerRequired
+    ? {
+        classes: "border-amber-300/20 bg-amber-300/10 text-amber-200",
+        label: "Choose runner",
+      }
+    : STATUS_PRESENTATION[session.status];
   return (
     <span
       class={`rounded-full border px-2.5 py-1 text-xs font-medium ${presentation.classes}`}
@@ -144,13 +157,6 @@ function SessionMetrics(props: {
   );
 }
 
-interface SessionViewProps {
-  readonly controller: SessionController;
-  readonly credentialAvailable?: boolean | undefined;
-  readonly runnerAvailable?: boolean | undefined;
-  readonly state: SessionViewState;
-}
-
 const SESSION_PAGE_SIZE = 10;
 
 export function SessionList(props: {
@@ -211,7 +217,7 @@ export function SessionList(props: {
                     <SessionMetrics session={session} />
                   </span>
                 </span>
-                {statusBadge(session.status)}
+                {statusBadge(session)}
               </span>
             </button>
           </li>
@@ -288,6 +294,12 @@ function composerUnavailableReason(
   if (state.compacting) {
     return "Compacting…";
   }
+  if (state.reassigning) {
+    return "Reassigning…";
+  }
+  if (detail.runnerRequired) {
+    return "Choose a replacement runner before continuing this session.";
+  }
   if (detail.status === "queued") {
     return "Session is queued. You can send when it is ready.";
   }
@@ -327,26 +339,22 @@ function composerUnavailableReason(
   return undefined;
 }
 
-function LoadedSessionDetail(props: {
-  readonly controller: SessionController;
-  readonly credentialAvailable: boolean | undefined;
-  readonly detail: AgentSessionDetail;
-  readonly runnerAvailable: boolean | undefined;
-  readonly state: SessionViewState;
-}): JSX.Element {
+function LoadedSessionDetail(props: LoadedSessionDetailViewProps): JSX.Element {
   const active = (): boolean =>
     props.detail.status === "queued" || props.detail.status === "running";
   const composerReason = (): string | undefined =>
     composerUnavailableReason(
       props.detail,
       props.state,
-      props.runnerAvailable,
+      findById(props.runners, props.detail.runnerId) !== undefined,
       props.credentialAvailable,
     );
   const composerDisabled = (): boolean => composerReason() !== undefined;
   const compactionDisabled = (): boolean =>
     active() ||
+    props.detail.runnerRequired ||
     props.state.compacting ||
+    props.state.reassigning ||
     props.state.sending ||
     props.state.stopping;
   const [scrollLockEnabled, setScrollLockEnabled] = createSignal(true);
@@ -386,7 +394,7 @@ function LoadedSessionDetail(props: {
             <h3 class="text-xl font-semibold text-white">
               {props.detail.title}
             </h3>
-            {statusBadge(props.detail.status)}
+            {statusBadge(props.detail)}
           </div>
           <div class="mt-2 flex min-w-0 flex-wrap items-baseline gap-x-1 gap-y-1 text-xs">
             <span class={sessionContextClasses(props.detail)}>
@@ -430,6 +438,14 @@ function LoadedSessionDetail(props: {
           </Show>
         </div>
       </div>
+      <Show when={props.detail.runnerRequired}>
+        <RunnerReassignment
+          controller={props.controller}
+          onOpenDirectoryPicker={props.onOpenDirectoryPicker}
+          runners={props.runners}
+          state={props.state}
+        />
+      </Show>
       <SessionTranscriptFilterControls
         counts={filterCounts()}
         filters={props.state.transcriptFilters}
@@ -530,7 +546,7 @@ function LoadedSessionDetail(props: {
   );
 }
 
-export function SessionDetail(props: SessionViewProps): JSX.Element {
+export function SessionDetail(props: SessionDetailViewProps): JSX.Element {
   return (
     <Show
       fallback={
@@ -549,7 +565,8 @@ export function SessionDetail(props: SessionViewProps): JSX.Element {
             controller={props.controller}
             credentialAvailable={props.credentialAvailable}
             detail={detail()}
-            runnerAvailable={props.runnerAvailable}
+            onOpenDirectoryPicker={props.onOpenDirectoryPicker}
+            runners={props.runners}
             state={props.state}
           />
         )}

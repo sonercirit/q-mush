@@ -7,6 +7,7 @@ import {
 import { agentMessages, runners } from "../../shared/database/schema.ts";
 import { SYSTEM_ID } from "../../shared/ids.ts";
 import type { AgentSessionMessage } from "../../shared/session-model.ts";
+import { RunnerStore } from "../../sync-engine/runner-store.ts";
 import { SessionStore } from "../../sync-engine/session-store.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import {
@@ -17,6 +18,13 @@ import {
   testAuditFields,
 } from "./authenticated-integration-test-helpers.ts";
 import { takeValue } from "./oauth-test-helpers.ts";
+import {
+  addReplacementRunner,
+  expectRecoveredSession,
+  expectStoredSession,
+  removeTestRunner,
+  removeTestRunnerAndExpect,
+} from "./session-store-reassignment-helpers.ts";
 
 const RUNNER_ID = "018bcfe5-6800-7000-8000-000000000041";
 const CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000042";
@@ -87,7 +95,36 @@ function markTestSessionRunning(store: SessionStore): void {
   expect(store.mark(SESSION_ID, "running", TEST_NOW + 1)).toBe(true);
 }
 
-function runningStore(): ReturnType<typeof createStore> {
+type StoreSetup = ReturnType<typeof createStore>;
+
+function spawnedChildSetup(parentId?: string): StoreSetup & {
+  readonly childId: string;
+  readonly parentId: string;
+} {
+  const setup = createStore();
+  const parent = createTestSession(setup.store);
+  const selectedParentId = parentId ?? parent.id;
+  const child = completedChildWithParent(setup.store, selectedParentId);
+  return { ...setup, childId: child.id, parentId: selectedParentId };
+}
+
+interface SpawnedChildReference extends StoreSetup {
+  readonly childId: string;
+  readonly parentId: string;
+}
+
+function expectParentId(setup: SpawnedChildReference): void {
+  expect(setup.store.parentSessionId(TEST_USER_ID, setup.childId)).toBe(
+    setup.parentId,
+  );
+}
+
+function expectPendingParent(setup: SpawnedChildReference): void {
+  expect(setup.store.pendingSpawnedSessions()).toEqual([]);
+  expectParentId(setup);
+}
+
+function runningStore(): StoreSetup {
   const setup = createStore();
   createTestSession(setup.store);
   markTestSessionRunning(setup.store);
@@ -339,48 +376,52 @@ describe("session store", () => {
   });
 
   test("persists and claims a spawned session's parent callback", () => {
-    const { database, store } = createStore();
-    const parent = createTestSession(store);
-    const child = completedChildWithParent(store, parent.id);
+    const { childId, database, parentId, store } = spawnedChildSetup();
 
     expect(store.pendingSpawnedSessions()).toEqual([
-      { detail: store.get(TEST_USER_ID, child.id), userId: TEST_USER_ID },
+      { detail: store.get(TEST_USER_ID, childId), userId: TEST_USER_ID },
     ]);
-    expect(store.parentSessionId(TEST_USER_ID, child.id)).toBe(parent.id);
+    expect(store.parentSessionId(TEST_USER_ID, childId)).toBe(parentId);
     expect(
       store.appendSpawnedSessionReport(
         TEST_USER_ID,
-        child.id,
-        parent.id,
+        childId,
+        parentId,
         "Child complete",
         TEST_NOW + 4,
       ),
     ).toBe(true);
-    expect(store.parentSessionId(TEST_USER_ID, child.id)).toBeUndefined();
+    expect(store.parentSessionId(TEST_USER_ID, childId)).toBeUndefined();
     expect(store.pendingSpawnedSessions()).toEqual([]);
-    expect(store.get(TEST_USER_ID, parent.id)?.messages.at(-1)?.content).toBe(
+    expect(store.get(TEST_USER_ID, parentId)?.messages.at(-1)?.content).toBe(
       "Child complete",
     );
     database.$client.close();
   });
 
-  test("does not claim a child callback when its parent is missing", () => {
-    const { database, store } = createStore();
-    const child = completedChildWithParent(store, "missing-parent");
+  test("keeps a runner-required spawned child awaiting recovery", () => {
+    const setup = spawnedChildSetup();
+
+    removeTestRunnerAndExpect(setup, RUNNER_ID, TEST_NOW + 4);
+
+    expectPendingParent(setup);
+    setup.database.$client.close();
+  });
+
+  test("retains a child callback for an absent parent", () => {
+    const setup = spawnedChildSetup("missing-parent");
 
     expect(
-      store.appendSpawnedSessionReport(
+      setup.store.appendSpawnedSessionReport(
         TEST_USER_ID,
-        child.id,
-        "missing-parent",
+        setup.childId,
+        setup.parentId,
         "Child complete",
         TEST_NOW + 3,
       ),
     ).toBe(false);
-    expect(store.parentSessionId(TEST_USER_ID, child.id)).toBe(
-      "missing-parent",
-    );
-    database.$client.close();
+    expectParentId(setup);
+    setup.database.$client.close();
   });
 
   test("uses a fallback title for an image-only task", () => {
@@ -427,6 +468,45 @@ describe("session store", () => {
     database.$client.close();
   });
 
+  test("reassigns only an owned runner-required session with a new path", () => {
+    const { database, store } = runningStore();
+    const replacementId = "018bcfe5-6800-7000-8000-000000000099";
+    addReplacementRunner(database, replacementId);
+    removeTestRunnerAndExpect({ database, store }, RUNNER_ID, TEST_NOW + 4);
+
+    const before = store.get(TEST_USER_ID, SESSION_ID);
+    expect(
+      store.reassign(
+        "another-user",
+        SESSION_ID,
+        replacementId,
+        "/replacement/project",
+        TEST_NOW + 4,
+      ),
+    ).toEqual({ status: "not_found" });
+    const reassigned = store.reassign(
+      TEST_USER_ID,
+      SESSION_ID,
+      replacementId,
+      "/replacement/project",
+      TEST_NOW + 4,
+    );
+    expect(reassigned.status).toBe("reassigned");
+    expect(reassigned).toMatchObject({
+      detail: {
+        runnerId: replacementId,
+        runnerRequired: false,
+        status: "idle",
+        workingDirectory: "/replacement/project",
+      },
+    });
+    const after = store.get(TEST_USER_ID, SESSION_ID);
+    expect(after?.messages).toEqual(before?.messages);
+    expect(after?.costUsd).toBe(before?.costUsd);
+    expect(after?.tools).toEqual(before?.tools);
+    database.$client.close();
+  });
+
   test("continues without appending a user message", () => {
     const setup = runningStore();
     expect(setup.store.mark(SESSION_ID, "idle", TEST_NOW + 2)).toBe(true);
@@ -438,6 +518,74 @@ describe("session store", () => {
     expect(setup.store.conversation(SESSION_ID)).toEqual(before);
     expect(setup.store.get(TEST_USER_ID, SESSION_ID)?.status).toBe("queued");
     setup.database.$client.close();
+  });
+
+  test("requires explicit reassignment when an assigned runner is removed", () => {
+    const { database, store } = runningStore();
+    store.appendAgentMessage(
+      SESSION_ID,
+      {
+        content: "I will inspect the workspace.",
+        role: "assistant",
+        toolCalls: [],
+      },
+      TEST_NOW + 2,
+    );
+
+    removeTestRunnerAndExpect({ database, store }, RUNNER_ID, TEST_NOW + 3);
+
+    expectStoredSession(store, SESSION_ID, {
+      activeDurationMs: 2,
+      activeStartedAt: null,
+      runnerId: RUNNER_ID,
+      runnerRequired: true,
+      status: "idle",
+    });
+    expect(store.get(TEST_USER_ID, SESSION_ID)?.messages).toEqual([
+      expect.objectContaining({ role: "user" }),
+      expect.objectContaining({
+        content: "I will inspect the workspace.",
+        role: "assistant",
+      }),
+    ]);
+    database.$client.close();
+  });
+
+  test("stopping a runner-required session clears reassignment", () => {
+    const { database, store } = runningStore();
+    removeTestRunnerAndExpect({ database, store }, RUNNER_ID);
+
+    expect(store.stop(TEST_USER_ID, SESSION_ID, TEST_NOW + 3)).toBe(true);
+
+    expectStoredSession(store, SESSION_ID, {
+      runnerRequired: false,
+      status: "stopped",
+    });
+    database.$client.close();
+  });
+
+  test("keeps an offline runner assigned without requiring reassignment", () => {
+    const { database, store } = createStore();
+    createTestSession(store);
+
+    const runnerStore = new RunnerStore(database);
+    runnerStore.setOnline(RUNNER_ID, TEST_USER_ID, TEST_NOW + 1, false);
+
+    expectStoredSession(store, SESSION_ID, {
+      runnerId: RUNNER_ID,
+      runnerRequired: false,
+      status: "queued",
+    });
+    database.$client.close();
+  });
+
+  test("recovers runner-required sessions without rewriting them on restart", () => {
+    const { database, store } = runningStore();
+    removeTestRunner({ database, store }, RUNNER_ID);
+    const before = store.get(TEST_USER_ID, SESSION_ID);
+
+    expectRecoveredSession(database, before, SESSION_ID);
+    database.$client.close();
   });
 
   test("records an error when an active session is interrupted", () => {
@@ -477,7 +625,7 @@ describe("session store", () => {
     expect(testSessionMessageRoles(store)).toEqual(["user", "assistant"]);
     store.appendErrorMessage(SESSION_ID, "Session failed", TEST_NOW + 3);
     expect(store.mark(SESSION_ID, "failed", TEST_NOW + 4)).toBe(true);
-    expect(store.get(TEST_USER_ID, SESSION_ID)).toMatchObject({
+    expectStoredSession(store, SESSION_ID, {
       activeDurationMs: 3,
       activeStartedAt: null,
       status: "failed",

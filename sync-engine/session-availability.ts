@@ -7,6 +7,9 @@ export function unavailableSessionResponse(
   if (detail === undefined) {
     return createApiError("not_found", 404);
   }
+  if (detail.runnerRequired) {
+    return createApiError("runner_required", 409);
+  }
   return detail.status === "queued" || detail.status === "running"
     ? createApiError("session_busy", 409)
     : undefined;

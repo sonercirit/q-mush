@@ -13,6 +13,7 @@ import {
 } from "../../solid/session-transcript-filters.ts";
 import {
   expectRealtimeToRemainSilent,
+  installFetch,
   requestUrl,
 } from "./controller-test-helpers.ts";
 import { MemoryStorage } from "./memory-storage.ts";
@@ -158,17 +159,6 @@ function queuedDetail(
   return { ...detail, messages, status: "queued" };
 }
 
-function installFetch(
-  implementation: (
-    ...parameters: Parameters<typeof fetch>
-  ) => Promise<Response>,
-): void {
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = Object.assign(implementation, {
-    preconnect: originalFetch.preconnect,
-  });
-}
-
 function jsonFetch(response: unknown): typeof globalThis.fetch {
   return createResponseFetch(response);
 }
@@ -180,6 +170,60 @@ function selectedController(
   const controller = createRoot(() => new SessionController());
   return controller.select(selected.id).then(() => controller);
 }
+
+test("posts an explicit runner reassignment without starting the session", async () => {
+  const required = { ...TEST_SESSION_DETAIL, runnerRequired: true };
+  const reactive = createReactiveState<SessionViewState>({
+    ...initialSessionViewState(),
+    detail: required,
+    reassignment: {
+      runnerId: "runner-2",
+      workingDirectory: "/replacement/project",
+    },
+    selectedId: required.id,
+    sessions: [required],
+  });
+  const controller = createRoot(() => new SessionController(reactive));
+  const requests: Request[] = [];
+  const originalFetch = installFetch((input, init) => {
+    const request = new Request(
+      new URL(requestUrl(input), "http://localhost"),
+      init,
+    );
+    requests.push(request);
+    return Promise.resolve(
+      Response.json({
+        ...required,
+        runnerId: "runner-2",
+        runnerRequired: false,
+        workingDirectory: "/replacement/project",
+      }),
+    );
+  });
+
+  try {
+    await controller.reassign(["runner-2"]);
+
+    expect(requests).toHaveLength(1);
+    expect(new URL(requests[0]?.url ?? "").pathname).toBe(
+      `${SESSIONS_PATH}/${required.id}/reassign`,
+    );
+    expect(await requests[0]?.json()).toEqual({
+      runnerId: "runner-2",
+      workingDirectory: "/replacement/project",
+    });
+    expect(controller.state.detail).toEqual(
+      expect.objectContaining({
+        runnerId: "runner-2",
+        runnerRequired: false,
+        status: "idle",
+      }),
+    );
+    expect(requests.some(({ url }) => url.endsWith("/continue"))).toBe(false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 
 test("renders incremental model deltas in the selected transcript", async () => {
   const controller = createRoot(() => new SessionController());
