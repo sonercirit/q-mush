@@ -303,12 +303,14 @@ class DrizzleSessionIntegration implements SessionIntegration {
         return createApiError("not_found", 404);
       }
       if (existing.status !== "stopped") {
-        this.#store.stop(user.id, sessionId, this.#now());
+        const now = this.#now();
+        this.#store.stop(user.id, sessionId, now, () => {
+          this.#questions.cancel(user.id, sessionId, now);
+        });
       }
 
       this.#runtimes.abort(sessionId);
       this.#broker.cancelSession(sessionId);
-      this.#questions.cancel(user.id, sessionId, this.#now());
       this.#notify(user.id, sessionId);
       return this.#detailResponse(user.id, sessionId);
     });

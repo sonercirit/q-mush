@@ -422,7 +422,22 @@ export class SessionStore {
     }
   }
 
-  stop(userId: string, sessionId: string, now: number): boolean {
+  stop(
+    userId: string,
+    sessionId: string,
+    now: number,
+    onStopped?: () => void,
+  ): boolean {
+    return this.#database.transaction(() => {
+      const stopped = this.#stop(userId, sessionId, now);
+      if (stopped) {
+        onStopped?.();
+      }
+      return stopped;
+    });
+  }
+
+  #stop(userId: string, sessionId: string, now: number): boolean {
     if (this.#finishActiveSession(sessionId, "stopped", now, userId, userId)) {
       return true;
     }

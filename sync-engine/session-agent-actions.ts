@@ -211,11 +211,10 @@ export class SessionAgentActions {
   #stop(parentSessionId: string, userId: string, sessionId: string): string {
     const target = this.#detail(userId, sessionId);
     if (target.status !== "stopped") {
-      this.#dependencies.store.stop(
-        userId,
-        sessionId,
-        this.#dependencies.now(),
-      );
+      const now = this.#dependencies.now();
+      this.#dependencies.store.stop(userId, sessionId, now, () => {
+        this.#dependencies.cancelQuestions(userId, sessionId);
+      });
     }
     const cancel = () => {
       this.#dependencies.abortSession(sessionId);
@@ -226,7 +225,6 @@ export class SessionAgentActions {
     } else {
       cancel();
     }
-    this.#dependencies.cancelQuestions(userId, sessionId);
     this.#dependencies.notify(userId, sessionId);
     this.finished(target, userId);
     return sessionToolOutput({ sessionId, status: "stopped" });

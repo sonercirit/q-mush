@@ -8,6 +8,7 @@ import {
 import {
   agentMessages,
   agentQuestionRequests,
+  agentSessions,
   runners,
 } from "../../shared/database/schema.ts";
 import { AskQuestionsStore } from "../../sync-engine/ask-questions-store.ts";
@@ -283,6 +284,33 @@ describe("ask questions store", () => {
     );
 
     expect(store.recoverable()).toEqual([]);
+    database.$client.close();
+  });
+
+  test("rolls back a stopped session if pending cancellation fails", () => {
+    const { database, sessions, store } = setup();
+    store.create(
+      TEST_USER_ID,
+      SESSION_ID,
+      "call-question",
+      input,
+      TEST_NOW + 2,
+    );
+
+    expect(() =>
+      sessions.stop(TEST_USER_ID, SESSION_ID, TEST_NOW + 3, () => {
+        store.cancel(TEST_USER_ID, SESSION_ID, TEST_NOW + 3);
+        throw new Error("simulated cancellation crash");
+      }),
+    ).toThrow("simulated cancellation crash");
+    expect(sessions.get(TEST_USER_ID, SESSION_ID)?.status).toBe("waiting");
+    expect(store.pending(TEST_USER_ID, SESSION_ID)).not.toBeNull();
+    expect(
+      database
+        .select({ status: agentSessions.status })
+        .from(agentSessions)
+        .get(),
+    ).toEqual({ status: "waiting" });
     database.$client.close();
   });
 
