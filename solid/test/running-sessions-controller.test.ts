@@ -4,10 +4,7 @@ import type {
   AgentSessionStatus,
   AgentSessionSummary,
 } from "../../shared/session-model.ts";
-import {
-  deriveRunningSessions,
-  RunningSessionsController,
-} from "../running-sessions-controller.ts";
+import { RunningSessionsController } from "../running-sessions-controller.ts";
 import { summaryFromDetail } from "../session-codec.ts";
 import { countReactiveChanges } from "./controller-test-helpers.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
@@ -27,8 +24,21 @@ function sessionSummary(
   };
 }
 
-test("derives explicit running and queued counts with a bounded useful list", () => {
-  const sessions = [
+function overview(controller: RunningSessionsController) {
+  const current = controller.state.overview;
+  if (current === undefined) {
+    throw new Error("The running-sessions overview was not initialized");
+  }
+  return current;
+}
+
+function visibleIds(controller: RunningSessionsController): readonly string[] {
+  return overview(controller).visibleSessions.map(({ id }) => id);
+}
+
+test("derives bounded active-session counts in deterministic useful order", () => {
+  const controller = createRoot(() => new RunningSessionsController());
+  controller.applySnapshot([
     sessionSummary("queued-new", "queued", 9),
     sessionSummary("idle", "idle", 20),
     sessionSummary("running-old", "running", 3),
@@ -37,134 +47,84 @@ test("derives explicit running and queued counts with a bounded useful list", ()
     sessionSummary("queued-old", "queued", 2),
     sessionSummary("running-middle", "running", 6),
     sessionSummary("stopped", "stopped", 18),
-  ];
-
-  const overview = deriveRunningSessions(sessions, 4);
-
-  expect(overview).toMatchObject({
+  ]);
+  const derived = overview(controller);
+  expect(derived).toMatchObject({
     overflowCount: 1,
     queuedCount: 2,
     runningCount: 3,
   });
-  expect(overview.visibleSessions.map(({ id }) => id)).toEqual([
+  expect(derived.visibleSessions.map(({ id }) => id)).toEqual([
     "running-new",
     "running-middle",
     "running-old",
     "queued-new",
   ]);
-  expect(overview.visibleSessions).toHaveLength(4);
-});
 
-test("breaks equal timestamps deterministically by session id", () => {
-  const overview = deriveRunningSessions([
+  controller.applySnapshot([
     sessionSummary("running-a", "running", 10),
     sessionSummary("running-c", "running", 10),
     sessionSummary("running-b", "running", 10),
   ]);
-
-  expect(overview.visibleSessions.map(({ id }) => id)).toEqual([
+  expect(visibleIds(controller)).toEqual([
     "running-c",
     "running-b",
     "running-a",
   ]);
 });
 
-test("tracks queued, running, finished, failed, stopped, and spawned realtime events", () => {
+test("stores only an authoritative bounded overview through its lifecycle", () => {
   const controller = createRoot(() => new RunningSessionsController());
-  const queued = sessionSummary("owned-session", "queued", 1);
-
   expect(controller.state).toEqual({
     freshness: "loading",
-    sessions: undefined,
+    overview: undefined,
   });
 
-  controller.applySnapshot([
-    queued,
-    sessionSummary("failed-session", "failed", 2),
-    sessionSummary("stopped-session", "stopped", 3),
-  ]);
-  expect(deriveRunningSessions(controller.state.sessions ?? [])).toMatchObject({
+  expect(controller.state.overview).toBeUndefined();
+  const hundred = Array.from({ length: 100 }, (_, index) =>
+    sessionSummary(`running-${String(index)}`, "running", index),
+  );
+  controller.applySnapshot(hundred);
+  expect(overview(controller)).toMatchObject({
+    overflowCount: 96,
+    runningCount: 100,
+  });
+  expect(overview(controller).visibleSessions).toHaveLength(4);
+
+  const queued = sessionSummary("owned-session", "queued", 101);
+  controller.applySnapshot([queued]);
+  expect(overview(controller)).toMatchObject({
     queuedCount: 1,
     runningCount: 0,
   });
-
-  controller.applySession({
-    ...queued,
-    activeStartedAt: 2_000,
-    status: "running",
-    updatedAt: 4,
-  });
-  expect(deriveRunningSessions(controller.state.sessions ?? [])).toMatchObject({
-    queuedCount: 0,
-    runningCount: 1,
-  });
-
-  controller.applySession(sessionSummary("spawned-session", "running", 5));
-  expect(
-    deriveRunningSessions(controller.state.sessions ?? []).runningCount,
-  ).toBe(2);
-
-  controller.applySession(sessionSummary("owned-session", "idle", 6));
-  controller.applySession(sessionSummary("spawned-session", "failed", 7));
-  expect(controller.state.sessions).toEqual([]);
-});
-
-test("ignores an out-of-order detail older than the current snapshot", () => {
-  const controller = createRoot(() => new RunningSessionsController());
-  const current = sessionSummary("owned-session", "running", 10);
-  controller.applySnapshot([current]);
-
-  controller.applySession({ ...current, status: "idle", updatedAt: 9 });
-
-  expect(controller.state.sessions).toEqual([current]);
-});
-
-test("marks a disconnected snapshot stale and replaces it exactly on reconnect", () => {
-  const controller = createRoot(() => new RunningSessionsController());
-  controller.applySnapshot([
-    sessionSummary("previous-user-session", "running", 1),
-  ]);
+  const running = sessionSummary("owned-session", "running", 102);
+  const spawned = sessionSummary("spawned-session", "running", 103);
+  controller.applySnapshot([running, spawned]);
+  expect(overview(controller).runningCount).toBe(2);
 
   controller.connectionLost();
   expect(controller.state.freshness).toBe("stale");
-  expect(controller.state.sessions?.map(({ id }) => id)).toEqual([
-    "previous-user-session",
-  ]);
+  expect(visibleIds(controller)).toEqual(["spawned-session", "owned-session"]);
+  controller.applySnapshot([sessionSummary("current-session", "queued", 104)]);
+  expect(controller.state.freshness).toBe("live");
+  expect(visibleIds(controller)).toEqual(["current-session"]);
 
-  controller.applySnapshot([sessionSummary("current-session", "queued", 2)]);
-  expect(controller.state).toMatchObject({ freshness: "live" });
-  expect(controller.state.sessions?.map(({ id }) => id)).toEqual([
-    "current-session",
+  controller.applySnapshot([
+    sessionSummary("owned-session", "idle", 105),
+    sessionSummary("spawned-session", "failed", 106),
   ]);
-
-  controller.reset();
-  expect(controller.state).toEqual({
-    freshness: "loading",
-    sessions: undefined,
+  expect(overview(controller)).toEqual({
+    overflowCount: 0,
+    queuedCount: 0,
+    runningCount: 0,
+    visibleSessions: [],
   });
-});
-
-test("waits for the authoritative snapshot before accepting detail events", () => {
-  const controller = createRoot(() => new RunningSessionsController());
-
-  controller.applySession(
-    sessionSummary("detail-before-snapshot", "running", 1),
-  );
-
-  expect(controller.state.sessions).toBeUndefined();
-  controller.applySnapshot([]);
-  expect(controller.state.sessions).toEqual([]);
-});
-
-test("marks a disconnected snapshot stale before any snapshot arrives", () => {
-  const controller = createRoot(() => new RunningSessionsController());
-
+  controller.reset();
   controller.connectionLost();
-
-  expect(controller.state).toEqual({ freshness: "stale", sessions: undefined });
+  expect(controller.state).toEqual({ freshness: "stale", overview: undefined });
 });
 
-test("retains item identity and does not notify for panel-irrelevant session changes", () => {
+test("retains keyed identity and skips panel-irrelevant notifications", () => {
   createRoot((dispose) => {
     const controller = new RunningSessionsController();
     const running = sessionSummary("stable-session", "running", 1);
@@ -172,13 +132,8 @@ test("retains item identity and does not notify for panel-irrelevant session cha
 
     controller.applySnapshot([running]);
     const afterSnapshot = notifications.count();
-    const retained = controller.state.sessions?.[0];
-
-    controller.applySession({
-      ...running,
-      currentContextTokens: running.currentContextTokens + 500,
-      updatedAt: running.updatedAt + 1,
-    });
+    const retained = overview(controller).visibleSessions[0];
+    controller.applyDelta();
     expect(notifications.count()).toBe(afterSnapshot);
 
     controller.applySnapshot([
@@ -189,7 +144,7 @@ test("retains item identity and does not notify for panel-irrelevant session cha
       },
       sessionSummary("new-session", "queued", 4),
     ]);
-    expect(controller.state.sessions?.[0]).toBe(retained);
+    expect(overview(controller).visibleSessions[0]).toBe(retained);
     dispose();
   });
 });

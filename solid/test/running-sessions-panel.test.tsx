@@ -1,44 +1,56 @@
-import { expect, test, vi } from "vitest";
-import {
-  deriveRunningSessions,
-  RunningSessionsController,
-  type RunningSessionsViewState,
-} from "../running-sessions-controller.ts";
-import { RunningSessionsPanel } from "../running-sessions-panel.tsx";
+import { expect, test } from "vitest";
+import type { RunningSessionsViewState } from "../running-sessions-controller.ts";
 import { summaryFromDetail } from "../session-codec.ts";
 import { renderSolidToString } from "./render-solid.tsx";
+import {
+  createRunningSessionsController,
+  runningSessionsController,
+  TestRunningSessionsPanel,
+} from "./running-sessions-panel-fixtures.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
 function panelState(
   freshness: RunningSessionsViewState["freshness"],
   statuses: readonly ("queued" | "running")[],
 ): RunningSessionsViewState {
-  return {
-    freshness,
-    sessions: statuses.map((status, index) => ({
-      ...summaryFromDetail(TEST_SESSION_DETAIL),
-      activeDurationMs: index * 1_000,
-      activeStartedAt: null,
-      id: `active-${String(index + 1)}`,
-      model: index === 0 ? "gpt-5-codex" : "gpt-4.1-mini",
-      runnerId: index === 0 ? "runner-1" : "runner-2",
-      status,
-      title: `Active task ${String(index + 1)}`,
-      updatedAt: statuses.length - index,
-    })),
-  };
+  const sessions = statuses.map((status, index) => ({
+    ...summaryFromDetail(TEST_SESSION_DETAIL),
+    activeDurationMs: index * 1_000,
+    activeStartedAt: null,
+    id: `active-${String(index + 1)}`,
+    model: index === 0 ? "gpt-5-codex" : "gpt-4.1-mini",
+    runnerId: index === 0 ? "runner-1" : "runner-2",
+    status,
+    title: `Active task ${String(index + 1)}`,
+    updatedAt: statuses.length - index,
+  }));
+  const controller = createRunningSessionsController(sessions, freshness);
+  return controller.state;
 }
 
 function renderPanel(state: RunningSessionsViewState): string {
-  const controller = new RunningSessionsController(state);
   return renderSolidToString(() => (
-    <RunningSessionsPanel
-      controller={controller}
-      focusSessionList={() => undefined}
-      selectSession={() => undefined}
-      runners={() => [
-        { id: "runner-1", name: "workstation" },
-        { id: "runner-2", name: "laptop" },
+    <TestRunningSessionsPanel
+      controller={runningSessionsController(state)}
+      runners={[
+        {
+          architecture: null,
+          id: "runner-1",
+          isDefault: false,
+          lastSeenAt: null,
+          name: "workstation",
+          platform: null,
+          status: "online",
+        },
+        {
+          architecture: null,
+          id: "runner-2",
+          isDefault: false,
+          lastSeenAt: 1,
+          name: null,
+          platform: null,
+          status: "offline",
+        },
       ]}
     />
   ));
@@ -50,6 +62,9 @@ test("renders explicit, pluralized counts and an accessible bounded panel", () =
   );
 
   expect(html).toContain('aria-labelledby="running-sessions-title"');
+  expect(html).toMatch(
+    /<h2[^>]*id="running-sessions-title"[^>]*>Active sessions<\/h2>/u,
+  );
   expect(html).toContain('aria-live="polite"');
   expect(html).toContain('aria-atomic="true"');
   expect(html).toContain("2 Running");
@@ -61,13 +76,14 @@ test("renders explicit, pluralized counts and an accessible bounded panel", () =
   expect(html).toContain("Running");
   expect(html).toContain("openai · gpt-5-codex");
   expect(html).toContain("workstation");
+  expect(html).toContain("Runner (offline)");
   expect(html).toContain("Open Active task 1");
   expect(html).toContain("Time: 0s");
   expect(html).not.toContain("+1 more");
 });
 
 test("renders loading, zero, and stale connection states without ambiguous totals", () => {
-  const loading = renderPanel({ freshness: "loading", sessions: undefined });
+  const loading = renderPanel({ freshness: "loading", overview: undefined });
   expect(loading).toContain("Loading active sessions…");
   expect(loading).toContain("Loading active sessions. Focus the session list.");
   expect(loading).not.toContain("0 Running");
@@ -84,7 +100,7 @@ test("renders loading, zero, and stale connection states without ambiguous total
 });
 
 test("shows a mobile loading badge before the first snapshot", () => {
-  const html = renderPanel({ freshness: "loading", sessions: undefined });
+  const html = renderPanel({ freshness: "loading", overview: undefined });
 
   expect(html).toContain(">Loading…");
   expect(html).not.toContain("0 Running");
@@ -121,24 +137,14 @@ test("bounds the session list and exposes a control for the remaining sessions",
   expect(html.match(/data-running-session-id=/gu)).toHaveLength(4);
   expect(html).toContain("+2 more");
   expect(html).toContain("Show 2 more active sessions in the session list");
-  expect(
-    deriveRunningSessions(panelState("live", []).sessions ?? []).runningCount,
-  ).toBe(0);
 });
 
 test("status items are buttons that open sessions", () => {
-  const select = vi.fn();
-  const focus = vi.fn();
-  const controller = new RunningSessionsController(
+  const controller = runningSessionsController(
     panelState("live", ["running", "running", "running", "running", "queued"]),
   );
   const html = renderSolidToString(() => (
-    <RunningSessionsPanel
-      controller={controller}
-      focusSessionList={focus}
-      selectSession={select}
-      runners={() => []}
-    />
+    <TestRunningSessionsPanel controller={controller} />
   ));
 
   expect(html).toMatch(

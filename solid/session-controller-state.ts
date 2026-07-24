@@ -433,12 +433,15 @@ export class SessionRealtimeState {
       selectedId !== undefined && selectedSummary === undefined;
     const selectedBecameInactive =
       selectedSummary !== undefined && !statusIsActive(selectedSummary.status);
+    const selectedDetail = this.#view.value.detail;
+    const selectedDetailNeedsRefresh =
+      selectedBecameInactive &&
+      selectedDetail !== undefined &&
+      (sessionIsActive(selectedDetail) ||
+        compareSessionRecency(selectedDetail, selectedSummary) > 0);
     if (
       selectedId !== undefined &&
-      (selectedWasRemoved ||
-        (selectedBecameInactive &&
-          this.#view.value.detail !== undefined &&
-          sessionIsActive(this.#view.value.detail)))
+      (selectedWasRemoved || selectedDetailNeedsRefresh)
     ) {
       this.#streamedContent.delete(selectedId);
     }
@@ -453,17 +456,14 @@ export class SessionRealtimeState {
       return;
     }
 
-    const nextSelectedId = selectedWasRemoved
-      ? sessions[0]?.id
-      : this.#view.value.selectedId;
     this.#view.patch({
       ...(selectedWasRemoved
         ? {
             detail: undefined,
             loadingDetail: false,
-            selectedId: nextSelectedId,
+            selectedId: undefined,
           }
-        : selectedBecameInactive && this.#view.value.detail !== undefined
+        : selectedDetailNeedsRefresh
           ? { detail: undefined, loadingDetail: true }
           : {}),
       sessions: mergeRealtimeSessions({

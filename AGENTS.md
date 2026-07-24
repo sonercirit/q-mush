@@ -194,8 +194,8 @@ Living project memory.
   `knip.production.config.ts` limits the production graph to runtime source.
   `bun run knip` runs both production and comprehensive test/tooling passes, so
   tests cannot keep production code alive while unused test helpers still fail.
-- `.jscpd.json` checks production JS/TS as TSX, ignoring imports/tests; any
-  clone of at least 20 tokens and one line fails.
+- `.jscpd.json` checks all JS/TS, including tests, as TSX while ignoring
+  imports; any clone of at least 20 tokens and one line fails.
 - `scripts/repository-check.ts` lists existing tracked and unignored files and
   calls the focused policy APIs under `scripts/`. It rejects files reaching
   20,000 Unicode code points (excluding `bun.lock` and the generated `drizzle/`

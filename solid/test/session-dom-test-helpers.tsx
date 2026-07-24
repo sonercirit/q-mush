@@ -1,5 +1,6 @@
 import type { JSX } from "solid-js";
 import { render } from "solid-js/web";
+import { vi } from "vitest";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { RenderDebugProvider, type RenderDebugView } from "../render-debug.tsx";
 import { summaryFromDetail } from "../session-codec.ts";
@@ -8,14 +9,70 @@ import { SessionDetail } from "../session-detail-client.tsx";
 import { sessionDetailState } from "./session-detail-test-state.ts";
 import { runningSessionDetail } from "./transcript-ordering-fixtures.ts";
 
-export function mountTestView(
+function mountIntoDocument(
   renderView: () => JSX.Element,
-  disposals: (() => void)[],
+  register: (dispose: () => void) => void,
 ): HTMLDivElement {
   const container = document.createElement("div");
   document.body.append(container);
-  disposals.push(render(renderView, container));
+  register(render(renderView, container));
   return container;
+}
+
+function disposeAll(disposals: (() => void)[]): void {
+  for (const dispose of disposals.splice(0).reverse()) {
+    dispose();
+  }
+}
+
+function clearDocument(): void {
+  document.body.replaceChildren();
+}
+
+class DomTestScope {
+  readonly #disposals: (() => void)[] = [];
+
+  dispose(): void {
+    disposeAll(this.#disposals);
+    clearDocument();
+  }
+
+  mount(renderView: () => JSX.Element): HTMLDivElement {
+    return mountIntoDocument(renderView, (dispose) => {
+      this.#disposals.push(dispose);
+    });
+  }
+
+  restore(restore: () => void): void {
+    this.#disposals.push(restore);
+  }
+
+  useFakeTime(timestamp: number): void {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(timestamp));
+    this.#disposals.push(() => {
+      vi.useRealTimers();
+    });
+  }
+
+  withDisposals<Value>(setup: (disposals: (() => void)[]) => Value): Value {
+    return setup(this.#disposals);
+  }
+}
+
+export const DOM_TEST_SCOPE = new DomTestScope();
+
+export function cleanupDomTestScope(): void {
+  DOM_TEST_SCOPE.dispose();
+}
+
+function mountTestView(
+  renderView: () => JSX.Element,
+  disposals: (() => void)[],
+): HTMLDivElement {
+  return mountIntoDocument(renderView, (dispose) => {
+    disposals.push(dispose);
+  });
 }
 
 export function queryTestElement(
@@ -34,10 +91,8 @@ export function messageBoundary(container: ParentNode, id: string): Element {
 }
 
 export function disposeTestViews(disposals: (() => void)[]): void {
-  for (const dispose of disposals.splice(0).reverse()) {
-    dispose();
-  }
-  document.body.replaceChildren();
+  disposeAll(disposals);
+  clearDocument();
 }
 
 export interface MountedTestSession {

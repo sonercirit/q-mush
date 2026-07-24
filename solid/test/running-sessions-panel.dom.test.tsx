@@ -2,24 +2,24 @@ import { afterEach, expect, test, vi } from "vitest";
 import { SESSIONS_PATH } from "../../shared/routes.ts";
 import type { AgentSessionSummary } from "../../shared/session-model.ts";
 import { createReactiveState } from "../reactive-state.ts";
-import { RenderDebugProvider, RenderDebugView } from "../render-debug.tsx";
-import { RunningSessionsController } from "../running-sessions-controller.ts";
-import { RunningSessionsPanel } from "../running-sessions-panel.tsx";
-import { SessionClockProvider } from "../session-active-time.tsx";
+import { RenderDebugView } from "../render-debug.tsx";
 import type { SessionViewState } from "../session-client.tsx";
 import { summaryFromDetail } from "../session-codec.ts";
 import { SessionController } from "../session-controller.ts";
 import { initialSessionViewState } from "../session-state.ts";
-import { mountTestView } from "./dom-test-helpers.tsx";
+import { installFetch, requestUrl } from "./controller-test-helpers.ts";
+import {
+  createRunningSessionsController,
+  TestRunningSessionsPanel,
+} from "./running-sessions-panel-fixtures.tsx";
+import {
+  cleanupDomTestScope,
+  DOM_TEST_SCOPE,
+} from "./session-dom-test-helpers.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
-const disposals: (() => void)[] = [];
-
-function mount(
-  renderView: Parameters<typeof mountTestView>[0],
-): HTMLDivElement {
-  return mountTestView(renderView, disposals);
-}
+const dom = DOM_TEST_SCOPE;
+const mount = dom.mount.bind(dom);
 
 function runningSession(id: string, title: string): AgentSessionSummary {
   return {
@@ -31,36 +31,35 @@ function runningSession(id: string, title: string): AgentSessionSummary {
   };
 }
 
-afterEach(() => {
-  while (disposals.length > 0) {
-    disposals.pop()?.();
-  }
-  document.body.replaceChildren();
-});
+function renderPanel(
+  controller: ReturnType<typeof createRunningSessionsController>,
+  options: {
+    readonly focusSessionList?: () => void;
+    readonly selectSession?: (sessionId: string) => void;
+  } = {},
+): HTMLDivElement {
+  return mount(() => (
+    <TestRunningSessionsPanel controller={controller} {...options} />
+  ));
+}
+
+afterEach(cleanupDomTestScope);
 
 test("realtime transitions update counts with keyed stable session identity", () => {
   const first = runningSession("session-1", "First task");
   const second = runningSession("session-2", "Second task");
-  const controller = new RunningSessionsController({
-    freshness: "live",
-    sessions: [first, second],
-  });
+  const controller = createRunningSessionsController([first, second]);
   const select = vi.fn();
-  const container = mount(() => (
-    <RunningSessionsPanel
-      controller={controller}
-      focusSessionList={() => undefined}
-      selectSession={select}
-      runners={() => []}
-    />
-  ));
+  const container = renderPanel(controller, { selectSession: select });
   const firstButton = container.querySelector(
     "[data-running-session-id='session-1']",
   );
 
   expect(container.textContent).toContain("2 Running");
-  controller.applySession({ ...second, status: "idle", updatedAt: 3 });
-
+  controller.applySnapshot([
+    { ...second, status: "idle", updatedAt: 3 },
+    first,
+  ]);
   expect(container.textContent).toContain("1 Running");
   expect(container.querySelector("[data-running-session-id='session-1']")).toBe(
     firstButton,
@@ -80,22 +79,10 @@ test("realtime transitions update counts with keyed stable session identity", ()
 
 test("model deltas do not rerender or recount the running panel", () => {
   const session = runningSession("session-1", "Stable task");
-  const controller = new RunningSessionsController({
-    freshness: "live",
-    sessions: [session],
-  });
+  const controller = createRunningSessionsController([session]);
   const debug = new RenderDebugView();
   const container = mount(() => (
-    <SessionClockProvider>
-      <RenderDebugProvider view={debug}>
-        <RunningSessionsPanel
-          controller={controller}
-          focusSessionList={() => undefined}
-          selectSession={() => undefined}
-          runners={() => []}
-        />
-      </RenderDebugProvider>
-    </SessionClockProvider>
+    <TestRunningSessionsPanel controller={controller} debug={debug} />
   ));
   const panel = container.querySelector("[data-running-sessions-panel='true']");
   const liveRegion = container.querySelector("[aria-live='polite']");
@@ -117,28 +104,14 @@ test("model deltas do not rerender or recount the running panel", () => {
 });
 
 test("uses one shared timer for every running-session time display", () => {
-  vi.useFakeTimers();
-  vi.setSystemTime(new Date(10_000));
-  disposals.push(() => {
-    vi.useRealTimers();
-  });
+  dom.useFakeTime(10_000);
   const setInterval = vi.spyOn(window, "setInterval");
-  const controller = new RunningSessionsController({
-    freshness: "live",
-    sessions: [
-      runningSession("session-1", "First task"),
-      runningSession("session-2", "Second task"),
-    ],
-  });
+  const controller = createRunningSessionsController([
+    runningSession("session-1", "First task"),
+    runningSession("session-2", "Second task"),
+  ]);
   const container = mount(() => (
-    <SessionClockProvider>
-      <RunningSessionsPanel
-        controller={controller}
-        focusSessionList={() => undefined}
-        selectSession={() => undefined}
-        runners={() => []}
-      />
-    </SessionClockProvider>
+    <TestRunningSessionsPanel controller={controller} />
   ));
 
   expect(setInterval).toHaveBeenCalledOnce();
@@ -164,15 +137,9 @@ test("selecting a status item opens the session and focuses its full-list entry"
   list.scrollIntoView = scrollIntoView;
   document.body.append(list);
   sessionController.setListElement(list);
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = Object.assign(
-    (input: RequestInfo | URL): Promise<Response> => {
-      const url =
-        typeof input === "string"
-          ? input
-          : input instanceof URL
-            ? input.href
-            : input.url;
+  dom.restore(
+    installFetch((input) => {
+      const url = requestUrl(input);
       if (url !== `${SESSIONS_PATH}/${session.id}`) {
         throw new Error(`Unexpected request: ${url}`);
       }
@@ -185,26 +152,14 @@ test("selecting a status item opens the session and focuses its full-list entry"
           title: session.title,
         }),
       );
-    },
-    { preconnect: originalFetch.preconnect },
+    }),
   );
-  disposals.push(() => {
-    globalThis.fetch = originalFetch;
-  });
-  const runningController = new RunningSessionsController({
-    freshness: "live",
-    sessions: [session],
-  });
   const container = mount(() => (
-    <RunningSessionsPanel
-      controller={runningController}
-      focusSessionList={() => {
-        sessionController.focusList();
-      }}
+    <TestRunningSessionsPanel
+      controller={createRunningSessionsController([session])}
       selectSession={(sessionId) => {
         void sessionController.selectAndFocus(sessionId);
       }}
-      runners={() => []}
     />
   ));
   const control = container.querySelector(
@@ -215,7 +170,6 @@ test("selecting a status item opens the session and focuses its full-list entry"
     throw new TypeError("The running-session control is not a button");
   }
   control.click();
-
   await vi.waitFor(() => {
     expect(sessionController.state.selectedId).toBe("session-1");
     expect(document.activeElement).toBe(list);
@@ -224,24 +178,13 @@ test("selecting a status item opens the session and focuses its full-list entry"
 });
 
 test("the overflow control focuses the full session list", () => {
-  const controller = new RunningSessionsController({
-    freshness: "live",
-    sessions: Array.from({ length: 5 }, (_, index) =>
-      runningSession(
-        `session-${String(index + 1)}`,
-        `Task ${String(index + 1)}`,
-      ),
-    ),
-  });
+  const sessions = Array.from({ length: 5 }, (_, index) =>
+    runningSession(`session-${String(index + 1)}`, `Task ${String(index + 1)}`),
+  );
   const focus = vi.fn();
-  const container = mount(() => (
-    <RunningSessionsPanel
-      controller={controller}
-      focusSessionList={focus}
-      selectSession={() => undefined}
-      runners={() => []}
-    />
-  ));
+  const container = renderPanel(createRunningSessionsController(sessions), {
+    focusSessionList: focus,
+  });
   const more = container.querySelector("[data-active-sessions-more='true']");
 
   if (!(more instanceof HTMLButtonElement)) {

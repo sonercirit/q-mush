@@ -13,10 +13,10 @@ type RunningSessionsFreshness = "live" | "loading" | "stale";
 
 export interface RunningSessionsViewState {
   readonly freshness: RunningSessionsFreshness;
-  readonly sessions: readonly AgentSessionSummary[] | undefined;
+  readonly overview: RunningSessionsOverview | undefined;
 }
 
-export interface RunningSessionsOverview {
+interface RunningSessionsOverview {
   readonly overflowCount: number;
   readonly queuedCount: number;
   readonly runningCount: number;
@@ -40,12 +40,6 @@ function compareActiveSessions(
   return statusDifference === 0 ? updatedAtDifference : statusDifference;
 }
 
-function activeSessions(
-  sessions: readonly AgentSessionSummary[],
-): readonly AgentSessionSummary[] {
-  return sessions.filter(({ status }) => isActiveStatus(status));
-}
-
 function panelSessionMatches(
   left: AgentSessionSummary,
   right: AgentSessionSummary,
@@ -64,32 +58,13 @@ function panelSessionMatches(
   );
 }
 
-function retainPanelSessions(
-  current: readonly AgentSessionSummary[] | undefined,
-  incoming: readonly AgentSessionSummary[],
-): readonly AgentSessionSummary[] {
-  const retained = retainById(
-    current,
-    activeSessions(incoming),
-    panelSessionMatches,
-  );
-  return retained.length < 2
-    ? retained
-    : [...retained].sort(compareActiveSessions);
-}
-
-function sessionListsMatch(
-  left: readonly AgentSessionSummary[] | undefined,
-  right: readonly AgentSessionSummary[],
-): boolean {
-  return listsMatchByIdentity(left, right);
-}
-
-export function deriveRunningSessions(
+function deriveRunningSessions(
   sessions: readonly AgentSessionSummary[],
   limit = ACTIVE_SESSION_DISPLAY_LIMIT,
 ): RunningSessionsOverview {
-  const active = [...activeSessions(sessions)].sort(compareActiveSessions);
+  const active = sessions
+    .filter(({ status }) => isActiveStatus(status))
+    .toSorted(compareActiveSessions);
   const runningCount = active.filter(
     ({ status }) => status === "running",
   ).length;
@@ -103,8 +78,35 @@ export function deriveRunningSessions(
   };
 }
 
+function retainedOverview(
+  current: RunningSessionsOverview | undefined,
+  sessions: readonly AgentSessionSummary[],
+): RunningSessionsOverview {
+  const incoming = deriveRunningSessions(sessions);
+  return {
+    ...incoming,
+    visibleSessions: retainById(
+      current?.visibleSessions,
+      incoming.visibleSessions,
+      panelSessionMatches,
+    ),
+  };
+}
+
+function overviewsMatch(
+  left: RunningSessionsOverview | undefined,
+  right: RunningSessionsOverview,
+): boolean {
+  return (
+    left?.overflowCount === right.overflowCount &&
+    left.queuedCount === right.queuedCount &&
+    left.runningCount === right.runningCount &&
+    listsMatchByIdentity(left.visibleSessions, right.visibleSessions)
+  );
+}
+
 function initialRunningSessionsState(): RunningSessionsViewState {
-  return { freshness: "loading", sessions: undefined };
+  return { freshness: "loading", overview: undefined };
 }
 
 export class RunningSessionsController {
@@ -126,44 +128,15 @@ export class RunningSessionsController {
     // Streaming text cannot affect active-session status or counts.
   }
 
-  #replaceSessions(
-    current: RunningSessionsViewState,
-    sessions: readonly AgentSessionSummary[],
-  ): void {
-    if (!sessionListsMatch(current.sessions, sessions)) {
-      this.#reactive.setState({ ...current, sessions });
-    }
-  }
-
-  applySession(session: AgentSessionSummary): void {
-    const current = this.state;
-    if (current.sessions === undefined) {
-      return;
-    }
-    const currentSession = current.sessions.find(({ id }) => id === session.id);
-    if (
-      currentSession !== undefined &&
-      compareSessionRecency(session, currentSession) > 0
-    ) {
-      return;
-    }
-    const sessions = retainPanelSessions(current.sessions, [
-      ...current.sessions.filter(({ id }) => id !== session.id),
-      session,
-    ]);
-
-    this.#replaceSessions(current, sessions);
-  }
-
   applySnapshot(sessions: readonly AgentSessionSummary[]): void {
     const current = this.state;
-    const retained = retainPanelSessions(current.sessions, sessions);
+    const overview = retainedOverview(current.overview, sessions);
 
     if (
       current.freshness !== "live" ||
-      !sessionListsMatch(current.sessions, retained)
+      !overviewsMatch(current.overview, overview)
     ) {
-      this.#reactive.setState({ freshness: "live", sessions: retained });
+      this.#reactive.setState({ freshness: "live", overview });
     }
   }
 

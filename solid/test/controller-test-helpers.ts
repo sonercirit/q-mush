@@ -25,6 +25,27 @@ type FetchImplementation = (
   ...parameters: Parameters<typeof globalThis.fetch>
 ) => ReturnType<typeof globalThis.fetch>;
 
+export function installFetch(implementation: FetchImplementation): () => void {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = Object.assign(implementation, {
+    preconnect: originalFetch.preconnect,
+  });
+  return () => {
+    globalThis.fetch = originalFetch;
+  };
+}
+
+export async function withRestoredFetch(
+  action: () => Promise<void>,
+): Promise<void> {
+  const originalFetch = globalThis.fetch;
+  try {
+    await action();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
 export function requestUrl(input: RequestInfo | URL): string {
   return typeof input === "string"
     ? input

@@ -22,11 +22,12 @@ import { summaryFromDetail } from "../session-codec.ts";
 import { SessionController } from "../session-controller.ts";
 import { SessionList } from "../session-detail-client.tsx";
 import { initialSessionViewState } from "../session-state.ts";
+import { installFetch, requestUrl } from "./controller-test-helpers.ts";
 import { runnerSummary } from "./runner-fixtures.ts";
 import {
-  disposeTestViews,
+  DOM_TEST_SCOPE,
+  cleanupDomTestScope,
   mountTestSessionDetail,
-  mountTestView,
   queryTestElement,
 } from "./session-dom-test-helpers.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
@@ -35,11 +36,8 @@ import {
   transcriptMessage,
 } from "./transcript-ordering-fixtures.ts";
 
-const disposals: (() => void)[] = [];
-
-function mount(renderView: () => JSX.Element): HTMLDivElement {
-  return mountTestView(renderView, disposals);
-}
+const dom = DOM_TEST_SCOPE;
+const mount = dom.mount.bind(dom);
 
 function query(container: ParentNode, selector: string): Element {
   return queryTestElement(container, selector);
@@ -94,29 +92,20 @@ function credential(id: string, label: string): ProviderCredential {
 }
 
 function stubSessionRequests(catalog: AgentModelCatalog): void {
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = Object.assign(
-    (input: RequestInfo | URL): Promise<Response> => {
-      const url =
-        typeof input === "string"
-          ? input
-          : input instanceof URL
-            ? input.href
-            : input.url;
-      return Promise.resolve(
-        Response.json(url.includes("/models?") ? catalog : TEST_SESSION_DETAIL),
-      );
-    },
-    { preconnect: originalFetch.preconnect },
+  dom.restore(
+    installFetch((input) =>
+      Promise.resolve(
+        Response.json(
+          requestUrl(input).includes("/models?")
+            ? catalog
+            : TEST_SESSION_DETAIL,
+        ),
+      ),
+    ),
   );
-  disposals.push(() => {
-    globalThis.fetch = originalFetch;
-  });
 }
 
-afterEach(() => {
-  disposeTestViews(disposals);
-});
+afterEach(cleanupDomTestScope);
 
 test("provider loading, error, retry, and list updates preserve the panel", async () => {
   const reactive = createReactiveState<ProviderViewState>(
@@ -184,7 +173,9 @@ function mountSessionDetail(detail: AgentSessionDetail): {
   readonly container: HTMLDivElement;
   readonly controller: SessionController;
 } {
-  return mountTestSessionDetail(detail, disposals);
+  return dom.withDisposals((disposals) =>
+    mountTestSessionDetail(detail, disposals),
+  );
 }
 
 function applySessionDelta(
@@ -208,11 +199,7 @@ function expectScrollLock(toggle: Element, enabled: boolean): void {
 }
 
 test("a mounted session timer starts when the session begins running", () => {
-  vi.useFakeTimers();
-  vi.setSystemTime(new Date(10_000));
-  disposals.push(() => {
-    vi.useRealTimers();
-  });
+  dom.useFakeTime(10_000);
   const queued = { ...TEST_SESSION_DETAIL, status: "queued" as const };
   const { container, controller } = mountSessionDetail(queued);
 

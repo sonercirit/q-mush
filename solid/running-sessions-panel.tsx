@@ -1,15 +1,14 @@
 import { createMemo, For, Show, type Accessor, type JSX } from "solid-js";
+import type { RunnerStatus } from "../shared/runner-model.ts";
 import type { AgentSessionSummary } from "../shared/session-model.ts";
 import { renderDebugBoundary } from "./render-debug.tsx";
-import {
-  deriveRunningSessions,
-  type RunningSessionsController,
-} from "./running-sessions-controller.ts";
+import { type RunningSessionsController } from "./running-sessions-controller.ts";
 import { SessionActiveTime } from "./session-active-time.tsx";
 
 interface RunningSessionRunner {
   readonly id: string;
   readonly name: string | null;
+  readonly status: RunnerStatus;
 }
 
 interface RunningSessionsPanelProps {
@@ -99,7 +98,15 @@ function freshnessLabel(
 }
 
 function panelOverview(state: RunningSessionsPanelProps["controller"]["view"]) {
-  return createMemo(() => deriveRunningSessions(state().sessions ?? []));
+  return createMemo(
+    () =>
+      state().overview ?? {
+        overflowCount: 0,
+        queuedCount: 0,
+        runningCount: 0,
+        visibleSessions: [],
+      },
+  );
 }
 
 interface PanelState {
@@ -118,24 +125,39 @@ function RunningSessionsContent(props: RunningSessionsPanelProps): JSX.Element {
   const view = runningSessionsView(props.controller);
   const state = view.state;
   const overview = view.overview;
-  const runnerNames = createMemo(
-    () => new Map(props.runners().map((runner) => [runner.id, runner.name])),
+  const runners = createMemo(
+    () => new Map(props.runners().map((runner) => [runner.id, runner])),
   );
   const runnerName = (runnerId: string): string => {
-    const name = runnerNames().get(runnerId);
-    return name === undefined || name === null || name.trim().length === 0
-      ? "Runner"
-      : name;
+    const runner = runners().get(runnerId);
+    if (runner === undefined) {
+      return "Runner unavailable";
+    }
+    const name =
+      runner.name === null || runner.name.trim().length === 0
+        ? "Runner"
+        : runner.name;
+    switch (runner.status) {
+      case "offline":
+        return `${name} (offline)`;
+      case "online":
+        return name;
+      case "pending":
+        return `${name} (setup pending)`;
+    }
   };
 
   return (
     <>
       <div class="flex items-end justify-between gap-3">
         <div>
-          <p class="text-[0.65rem] font-semibold tracking-[0.16em] text-slate-500 uppercase">
+          <h2
+            class="text-[0.65rem] font-semibold tracking-[0.16em] text-slate-500 uppercase"
+            id="running-sessions-title"
+          >
             Active sessions
-          </p>
-          <p class="mt-1 flex items-baseline gap-2" id="running-sessions-title">
+          </h2>
+          <p class="mt-1 flex items-baseline gap-2">
             <Show
               fallback={
                 <span class="text-sm font-semibold text-slate-300">

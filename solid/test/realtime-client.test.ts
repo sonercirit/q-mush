@@ -66,6 +66,51 @@ function createTestConnection(
   });
 }
 
+function scheduledConnection(
+  sockets: BrowserSocket[],
+  timers: (() => void)[],
+  onConnectionChange?: (state: string) => void,
+): RealtimeConnection {
+  return createTestConnection(sockets, undefined, {
+    ...(onConnectionChange === undefined ? {} : { onConnectionChange }),
+    setTimeout: (callback) => {
+      timers.push(callback);
+      return timers.length;
+    },
+  });
+}
+
+interface ReconnectTest {
+  readonly connection: RealtimeConnection;
+  readonly sockets: BrowserSocket[];
+  readonly timers: (() => void)[];
+}
+
+function reconnectTest(
+  onConnectionChange?: (state: string) => void,
+): ReconnectTest {
+  const sockets: BrowserSocket[] = [];
+  const timers: (() => void)[] = [];
+  return {
+    connection: scheduledConnection(sockets, timers, onConnectionChange),
+    sockets,
+    timers,
+  };
+}
+
+function beginReconnect(
+  connection: RealtimeConnection,
+  sockets: BrowserSocket[],
+): void {
+  connection.start();
+  sockets[0]?.close();
+}
+
+function reconnect(sockets: BrowserSocket[], timers: (() => void)[]): void {
+  timers.shift()?.();
+  sockets[1]?.dispatchEvent(new Event("open"));
+}
+
 test("connects to the same-origin realtime WebSocket and decodes events", () => {
   const sockets: BrowserSocket[] = [];
   const events: unknown[] = [];
@@ -86,16 +131,10 @@ test("connects to the same-origin realtime WebSocket and decodes events", () => 
 });
 
 test("reports connection lifecycle around reconnect snapshots", () => {
-  const sockets: BrowserSocket[] = [];
-  const timers: (() => void)[] = [];
   const connectionStates: string[] = [];
-  const connection = createTestConnection(sockets, undefined, {
-    onConnectionChange: (state) => connectionStates.push(state),
-    setTimeout: (callback) => {
-      timers.push(callback);
-      return timers.length;
-    },
-  });
+  const { connection, sockets, timers } = reconnectTest((state) =>
+    connectionStates.push(state),
+  );
 
   connection.start();
   expect(connectionStates).toEqual(["connecting"]);
@@ -104,9 +143,7 @@ test("reports connection lifecycle around reconnect snapshots", () => {
 
   sockets[0]?.close();
   expect(connectionStates).toEqual(["connecting", "connected", "disconnected"]);
-  timers.shift()?.();
-  expect(connectionStates.at(-1)).toBe("connecting");
-  sockets[1]?.dispatchEvent(new Event("open"));
+  reconnect(sockets, timers);
   expect(connectionStates.at(-1)).toBe("connected");
 
   connection.stop();
@@ -114,21 +151,12 @@ test("reports connection lifecycle around reconnect snapshots", () => {
 });
 
 test("reconnects after a close and stops retrying after stop", () => {
-  const sockets: BrowserSocket[] = [];
-  const timers: (() => void)[] = [];
-  const connection = createTestConnection(sockets, undefined, {
-    setTimeout: (callback) => {
-      timers.push(callback);
-      return timers.length;
-    },
-  });
+  const { connection, sockets, timers } = reconnectTest();
 
-  connection.start();
-  sockets[0]?.close();
+  beginReconnect(connection, sockets);
   expect(timers).toHaveLength(1);
-  timers.shift()?.();
+  reconnect(sockets, timers);
   expect(sockets).toHaveLength(2);
-
   connection.stop();
   sockets[1]?.dispatchEvent(new Event("close"));
   expect(timers).toHaveLength(0);

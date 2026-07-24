@@ -4,7 +4,12 @@ import { SESSIONS_PATH } from "../../shared/routes.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { summaryFromDetail } from "../../solid/session-codec.ts";
 import { SessionController } from "../../solid/session-controller.ts";
-import { countReactiveChanges, requestUrl } from "./controller-test-helpers.ts";
+import {
+  countReactiveChanges,
+  installFetch,
+  requestUrl,
+  withRestoredFetch,
+} from "./controller-test-helpers.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 import {
   sessionDetailWithStatus,
@@ -79,15 +84,6 @@ async function selectedIdleTurn(sessionId: string): Promise<SelectedIdleTurn> {
   return selectedTurn(sessionId, "idle");
 }
 
-async function withRestoredFetch(action: () => Promise<void>): Promise<void> {
-  const originalFetch = globalThis.fetch;
-  try {
-    await action();
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-}
-
 function sessionResponse(input: RequestInfo | URL): Promise<Response> {
   const path = new URL(requestUrl(input), "http://localhost").pathname;
   return Promise.resolve(
@@ -140,17 +136,6 @@ function queuedDetail(
   messages: AgentSessionDetail["messages"] = detail.messages,
 ): AgentSessionDetail {
   return { ...detail, messages, status: "queued" };
-}
-
-function installFetch(
-  implementation: (
-    ...parameters: Parameters<typeof fetch>
-  ) => Promise<Response>,
-): void {
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = Object.assign(implementation, {
-    preconnect: originalFetch.preconnect,
-  });
 }
 
 function jsonFetch(response: unknown): typeof globalThis.fetch {
@@ -376,13 +361,38 @@ test("replaces a streaming transcript with a compacted snapshot", async () => {
   }
 });
 
+function expectClearedSelection(
+  controller: SessionController,
+  sessions: readonly ReturnType<typeof summaryFromDetail>[],
+): void {
+  expect(controller.state).toMatchObject({
+    detail: undefined,
+    loadingDetail: false,
+    selectedId: undefined,
+    sessions,
+  });
+}
+
+function expectAwaitingFinishedDetail(controller: SessionController): void {
+  expect(controller.state.detail).toBeUndefined();
+  expect(controller.state.loadingDetail).toBe(true);
+}
+
+function selectedRunningController(id: string): Promise<SessionController> {
+  return selectedController(sessionDetail("running", id, []));
+}
+
+function loadedController(): Promise<SessionController> {
+  globalThis.fetch = Object.assign(sessionResponse, {
+    preconnect: globalThis.fetch.preconnect,
+  });
+  const controller = createRoot(() => new SessionController());
+  return controller.load().then(() => controller);
+}
+
 test("the first realtime snapshot replaces an HTTP-loaded session list", async () => {
   await withRestoredFetch(async () => {
-    globalThis.fetch = Object.assign(sessionResponse, {
-      preconnect: globalThis.fetch.preconnect,
-    });
-    const controller = createRoot(() => new SessionController());
-    await controller.load();
+    const controller = await loadedController();
     expect(controller.state.sessions).toHaveLength(1);
 
     controller.applyRealtime([]);
@@ -392,18 +402,53 @@ test("the first realtime snapshot replaces an HTTP-loaded session list", async (
   });
 });
 
-test("a realtime removal clears invalid selected state", async () => {
+async function withSelectedRunning(
+  id: string,
+  action: (controller: SessionController) => void | Promise<void>,
+): Promise<void> {
   await withRestoredFetch(async () => {
-    const selected = sessionDetail("running", "removed-session", []);
-    const controller = await selectedController(selected);
+    await action(await selectedRunningController(id));
+  });
+}
 
+test("realtime removal clears selection instead of half-selecting", async () => {
+  await withSelectedRunning("removed-session", async (controller) => {
     controller.applyRealtime([]);
+    expectClearedSelection(controller, []);
+
+    const remaining = sessionDetail("idle", "remaining-session", []);
+    const remainingSummary = summaryFromDetail(remaining);
+    const secondController = await selectedRunningController("removed-session");
+    secondController.applyRealtime([remainingSummary]);
+    expectClearedSelection(secondController, [remainingSummary]);
+  });
+});
+
+function finishedSession(controller: SessionController): AgentSessionDetail {
+  const running = controller.state.detail;
+  if (running === undefined) {
+    throw new Error("The selected running session was not loaded");
+  }
+  return {
+    ...running,
+    messages: [assistantMessage()],
+    status: "idle",
+    updatedAt: running.updatedAt + 1,
+  };
+}
+
+test("a matching completion snapshot preserves the finished detail", async () => {
+  await withSelectedRunning("completed-session", (controller) => {
+    const finished = finishedSession(controller);
+
+    controller.applyDetail(finished);
+    controller.applyRealtime([summaryFromDetail(finished)]);
 
     expect(controller.state).toMatchObject({
-      detail: undefined,
+      detail: finished,
       loadingDetail: false,
-      selectedId: undefined,
-      sessions: [],
+      selectedId: finished.id,
+      sessions: [summaryFromDetail(finished)],
     });
   });
 });
@@ -417,11 +462,8 @@ test("a summary completion clears stale active detail until its detail event", a
       { ...summaryFromDetail(selected), status: "idle", updatedAt: 10 },
     ]);
 
-    expect(controller.state).toMatchObject({
-      detail: undefined,
-      loadingDetail: true,
-      selectedId: selected.id,
-    });
+    expectAwaitingFinishedDetail(controller);
+    expect(controller.state.selectedId).toBe(selected.id);
   });
 });
 
@@ -435,10 +477,7 @@ test("ignores a delayed detail older than an authoritative summary", async () =>
 
     controller.applyDetail({ ...current, updatedAt: 9 });
 
-    expect(controller.state).toMatchObject({
-      detail: undefined,
-      loadingDetail: true,
-    });
+    expectAwaitingFinishedDetail(controller);
   });
 });
 
@@ -482,15 +521,11 @@ test("orders same-timestamp session details deterministically", async () => {
 
 test("an unchanged realtime snapshot does not notify the view", async () => {
   await withRestoredFetch(async () => {
-    globalThis.fetch = Object.assign(sessionResponse, {
-      preconnect: globalThis.fetch.preconnect,
-    });
     await createRoot(async (dispose) => {
-      const controller = new SessionController();
+      const controller = await loadedController();
       const session = summaryFromDetail(TEST_SESSION_DETAIL);
       const changes = countReactiveChanges(controller);
 
-      await controller.load();
       controller.applyRealtime([session]);
       const changesAfterSnapshot = changes.count();
       controller.applyRealtime([{ ...session }]);

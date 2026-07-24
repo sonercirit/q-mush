@@ -4,7 +4,6 @@
   "threshold": 0,
   "noTips": true,
   "ignorePattern": ["(?ms)^import\\s+.*?;"],
-  "ignore": ["**/test/**"],
   "format": ["tsx"],
   "formatsExts": {
     "tsx": ["js", "jsx", "mjs", "cjs", "es", "es6", "ts", "tsx", "mts", "cts"]

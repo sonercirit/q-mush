@@ -4,7 +4,7 @@ async function readClient(): Promise<string> {
   return Bun.file(new URL("../client.tsx", import.meta.url)).text();
 }
 
-test("integrates the status panel as a modular desktop workspace column", async () => {
+test("client integration keeps the panel modular and realtime-only", async () => {
   const client = await readClient();
 
   expect(client).toContain('data-workspace-layout="desktop-status-panel"');
@@ -13,13 +13,8 @@ test("integrates the status panel as a modular desktop workspace column", async 
   expect(client).toContain("2xl:grid-cols-[minmax(0,1fr)_20rem]");
   expect(client).toContain("min-h-screen overflow-x-hidden");
   expect(client).toContain("<RunningSessionsPanel");
-});
-
-test("routes only authenticated realtime session events into the panel", async () => {
-  const client = await readClient();
 
   expect(client).toContain("runningSessions.applySnapshot(event.sessions)");
-  expect(client).toContain("runningSessions.applySession(event.session)");
   expect(client).toContain("runningSessions.applyDelta()");
   expect(client).toContain("runningSessions.connectionLost()");
   expect(client).toContain("if (!authenticatedWorkspace)");

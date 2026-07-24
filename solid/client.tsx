@@ -367,12 +367,7 @@ function Workspace(props: {
                 .selectAndFocus(sessionId)
                 .catch(() => undefined);
             }}
-            runners={() =>
-              (props.runners.view().runners ?? []).map(({ id, name }) => ({
-                id,
-                name,
-              }))
-            }
+            runners={() => props.runners.view().runners ?? []}
           />
         </div>
       </SessionClockProvider>
@@ -415,7 +410,6 @@ function App(): JSX.Element {
             break;
           }
           agentSessions.applyDetail(event.session);
-          runningSessions.applySession(event.session);
           break;
         case "session_delta":
           if (!authenticatedWorkspace) {
