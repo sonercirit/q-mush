@@ -146,7 +146,11 @@ function persistedDetail(detail: AgentSessionDetail): AgentSessionDetail {
 }
 
 function sessionIsActive(detail: AgentSessionDetail): boolean {
-  return detail.status === "queued" || detail.status === "running";
+  return (
+    detail.status === "queued" ||
+    detail.status === "running" ||
+    detail.status === "paused"
+  );
 }
 
 function resolveStreamBase(

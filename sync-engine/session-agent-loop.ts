@@ -18,6 +18,7 @@ interface CompactingAgentLoopOptions {
   readonly autoCompact: boolean;
   readonly createCompactor: () => AgentConversationCompactor;
   readonly executeTool: Parameters<typeof runAgentLoop>[0]["executeTool"];
+  readonly handoffRequested?: () => boolean;
   readonly initialMessages: readonly AgentConversationMessage[];
   readonly maxContextTokens: number | null;
   readonly model: AgentModel;
@@ -72,11 +73,14 @@ async function compactConversation(
 
 export async function runCompactingAgentLoop(
   options: CompactingAgentLoopOptions,
-): Promise<void> {
+): Promise<"complete" | "handoff"> {
   const compaction: CompactionState = { pending: false };
 
-  const finalMessages = await runAgentLoop({
+  const final = await runAgentLoop({
     executeTool: options.executeTool,
+    ...(options.handoffRequested === undefined
+      ? {}
+      : { handoffRequested: options.handoffRequested }),
     initialMessages: options.initialMessages,
     model: {
       complete: async (conversation, signal) => {
@@ -119,7 +123,8 @@ export async function runCompactingAgentLoop(
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   });
 
-  if (compaction.pending) {
-    await compactConversation(options, finalMessages, options.signal);
+  if (compaction.pending && final.status === "complete") {
+    await compactConversation(options, final.messages, options.signal);
   }
+  return final.status;
 }

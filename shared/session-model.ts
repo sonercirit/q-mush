@@ -7,7 +7,16 @@ import type { ProviderId } from "./provider-credential-store.ts";
 import type { ProviderModelPricing } from "./provider-model-pricing.ts";
 
 export type AgentSessionStatus =
-  "queued" | "running" | "idle" | "stopped" | "failed";
+  "queued" | "running" | "paused" | "idle" | "stopped" | "failed";
+
+export type RestartHandoffRequester = "runner" | "server";
+
+export interface RestartHandoff {
+  /** Reserved ordered input queue for Follow up / Steer recovery. */
+  readonly pendingInput: readonly unknown[];
+  readonly requestedBy: RestartHandoffRequester;
+  readonly restartId: string;
+}
 
 export type AgentSessionCostBasis = "estimated" | "none" | "reported";
 
@@ -46,6 +55,7 @@ export interface AgentSessionSummary {
   readonly provider: ProviderId;
   readonly providerPricing: ProviderModelPricing | null;
   readonly reasoningEffort: AgentReasoningEffort | null;
+  readonly restartHandoff: RestartHandoff | null;
   readonly runnerId: string;
   readonly status: AgentSessionStatus;
   readonly title: string;

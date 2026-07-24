@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   runAgentLoop,
   type AgentModel,
+  type AgentModelTurn,
   type AgentRecordedMessage,
 } from "../../shared/agent-loop.ts";
 import { createParallelToolUses } from "../../shared/test/parallel-fixtures.ts";
@@ -12,6 +13,7 @@ import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 type ExecuteTool = Parameters<typeof runAgentLoop>[0]["executeTool"];
 
 async function runRecordedLoop(
+  // cpd-ignore-start -- Agent-loop tests intentionally retain complete model contracts and turns.
   model: AgentModel,
   prompt: string,
   executeTool: ExecuteTool,
@@ -19,7 +21,7 @@ async function runRecordedLoop(
 ): Promise<AgentRecordedMessage[]> {
   const recordedContextTokens: number[] = [];
   const recorded: AgentRecordedMessage[] = [];
-  await runAgentLoop({
+  const result = await runAgentLoop({
     executeTool,
     initialMessages: [{ content: prompt, role: "user" }],
     model,
@@ -32,6 +34,7 @@ async function runRecordedLoop(
       recorded.push(message);
     },
   });
+  expect(result.status).toBe("complete");
   expect(recordedContextTokens.at(-1)).toBe(expectedContextTokens);
   return recorded;
 }
@@ -134,7 +137,75 @@ describe("first-party agent loop", () => {
     });
   });
 
+  test("stops at a requested safe turn boundary after all tool results", async () => {
+    const toolCalls = [
+      { arguments: "{}", id: "call-1", name: "read" },
+      { arguments: "{}", id: "call-2", name: "bash" },
+    ];
+    const model = new ScriptedAgentModel([
+      { content: "Running tools.", toolCalls },
+      { content: "This turn must wait for recovery.", toolCalls: [] },
+    ]);
+    const recorded: AgentRecordedMessage[] = [];
+    let handoffRequested = false;
+
+    const result = await runAgentLoop({
+      executeTool: (call) => {
+        if (call.id === "call-1") {
+          handoffRequested = true;
+        }
+        return Promise.resolve(`${call.id} complete`);
+      },
+      handoffRequested: () => handoffRequested,
+      initialMessages: [{ content: "Work", role: "user" }],
+      model,
+      recordMessage: (message) => {
+        recorded.push(message);
+      },
+    });
+
+    expect(result.status).toBe("handoff");
+    expect(model.requests).toHaveLength(1);
+    expect(recorded.map(({ role }) => role)).toEqual([
+      "assistant",
+      "tool",
+      "tool",
+    ]);
+  });
+
+  test("finishes a model response before stopping for a handoff", async () => {
+    let releaseTurn: ((turn: AgentModelTurn) => void) | undefined;
+    let handoffRequested = false;
+    const model: AgentModel = {
+      complete: () =>
+        new Promise((resolve) => {
+          releaseTurn = resolve;
+        }),
+    };
+    const loop = runAgentLoop({
+      executeTool: () => Promise.reject(new Error("No tool expected")),
+      handoffRequested: () => handoffRequested,
+      initialMessages: [{ content: "Work", role: "user" }],
+      model,
+      recordMessage: () => undefined,
+    });
+
+    await Promise.resolve();
+    handoffRequested = true;
+    releaseTurn?.({
+      content: "Durable response.",
+      contextTokens: null,
+      costUsd: null,
+      thinking: "",
+      tokenUsage: null,
+      toolCalls: [],
+    });
+
+    await expect(loop).resolves.toMatchObject({ status: "handoff" });
+  });
+
   test("prepares the conversation immediately before a model request", async () => {
+    // cpd-ignore-end
     const model = new ScriptedAgentModel([
       { content: "Prepared.", toolCalls: [] },
     ]);

@@ -19,6 +19,12 @@ interface UserSocketData {
 
 interface RunnerSocketData {
   readonly kind: "runner";
+  restart:
+    | {
+        readonly promise: Promise<void>;
+        readonly restartId: string;
+      }
+    | undefined;
   runner: RunnerConnection | undefined;
   readonly token: string;
 }
@@ -114,6 +120,7 @@ export function createRealtimeIntegration(
   const websocket: Bun.WebSocketHandler<QmushWebSocketData> = {
     close(socket) {
       if (socket.data.kind === "runner") {
+        socket.data.restart = undefined;
         if (socket.data.runner !== undefined) {
           const runner = socket.data.runner;
           const disconnected = options.hub.setRunner(runner.id, socket, false);
@@ -165,7 +172,7 @@ export function createRealtimeIntegration(
             options.sessions.deliverRunnerCommands(runner.id, (command) =>
               sendCommand(socket, command),
             );
-            options.sessions.runnerConnected();
+            options.sessions.runnerConnected(runner.id);
             publishRunners(connected.userId);
             return;
           }
@@ -181,6 +188,42 @@ export function createRealtimeIntegration(
               event.commandId,
               event.output,
             );
+          } else if (event.type === "restart") {
+            if (socket.data.restart === undefined) {
+              const promise = options.sessions.drainRunner(
+                connectedRunner.id,
+                event.restartId,
+              );
+              const restart = { promise, restartId: event.restartId };
+              socket.data.restart = restart;
+              void promise.then(
+                // cpd-ignore-start -- Both settlement branches guard the same live restart.
+                () => {
+                  if (
+                    socket.data.kind === "runner" &&
+                    socket.data.restart === restart
+                  ) {
+                    socket.send(
+                      JSON.stringify({
+                        restartId: restart.restartId,
+                        type: "restart_ready",
+                      }),
+                    );
+                  }
+                },
+                () => {
+                  if (
+                    socket.data.kind === "runner" &&
+                    socket.data.restart === restart
+                  ) {
+                    socket.close(1011, "Runner restart handoff failed");
+                  }
+                },
+                // cpd-ignore-end
+              );
+            } else if (socket.data.restart.restartId !== event.restartId) {
+              socket.close(1008, "Conflicting runner restart ID");
+            }
           }
           return;
         }
@@ -230,7 +273,12 @@ export function createRealtimeIntegration(
               const token = options.runners.runnerToken(request);
               return token === undefined
                 ? undefined
-                : { kind: "runner" as const, runner: undefined, token };
+                : {
+                    kind: "runner" as const,
+                    restart: undefined,
+                    runner: undefined,
+                    token,
+                  };
             })();
 
       if (data === undefined) {

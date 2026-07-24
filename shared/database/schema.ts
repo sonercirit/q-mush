@@ -151,13 +151,14 @@ export const agentSessions = sqliteTable(
     reasoningEffort: text("reasoning_effort", {
       enum: AGENT_REASONING_EFFORTS,
     }),
+    restartHandoff: text("restart_handoff"),
     workingDirectory: text("working_directory").notNull(),
     title: text("title").notNull(),
     tools: text("tools")
       .notNull()
       .default(JSON.stringify(AGENT_SESSION_TOOL_NAMES)),
     status: text("status", {
-      enum: ["queued", "running", "idle", "stopped", "failed"],
+      enum: ["queued", "running", "paused", "idle", "stopped", "failed"],
     }).notNull(),
   },
   (table) => [

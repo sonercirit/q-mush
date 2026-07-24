@@ -33,6 +33,10 @@ const CPD_IMPORT_PROBES = [
   sourceProbePath("cpd-import-policy-probe-a.ts"),
   sourceProbePath("cpd-import-policy-probe-b.ts"),
 ];
+const CPD_IGNORE_PROBES = [
+  sourceProbePath("cpd-ignore-policy-probe-a.ts"),
+  sourceProbePath("cpd-ignore-policy-probe-b.ts"),
+];
 const RAW_HTML_FILE_PROBE = join(ROOT_DIRECTORY, "raw-html-policy-probe.html");
 
 interface CommandResult {
@@ -60,13 +64,17 @@ function expectCommandFailure(result: CommandResult): string {
   return result.output;
 }
 
-function runCpdImportProbes(): Promise<CommandResult> {
+function runCpdProbes(probes: readonly string[]): Promise<CommandResult> {
   return runCommand([
     "node",
     "node_modules/cpd/run-cpd.js",
     "--no-colors",
-    ...CPD_IMPORT_PROBES.map((probe) => relative(ROOT_DIRECTORY, probe)),
+    ...probes.map((probe) => relative(ROOT_DIRECTORY, probe)),
   ]);
+}
+
+function runCpdImportProbes(): Promise<CommandResult> {
+  return runCpdProbes(CPD_IMPORT_PROBES);
 }
 
 async function removeProbes(): Promise<void> {
@@ -81,6 +89,7 @@ async function removeProbes(): Promise<void> {
     rm(KNIP_TEST_PROBE, { force: true }),
     rm(KNIP_TEST_SUPPORT_PROBE, { force: true, recursive: true }),
     ...CPD_IMPORT_PROBES.map((probe) => rm(probe, { force: true })),
+    ...CPD_IGNORE_PROBES.map((probe) => rm(probe, { force: true })),
     rm(RAW_HTML_FILE_PROBE, { force: true }),
   ]);
 }
@@ -271,6 +280,30 @@ console.log(database);
 
     const duplicateResult = await runCpdImportProbes();
     expect(expectCommandFailure(duplicateResult)).toContain("Found 1 clones");
+  });
+
+  test("CPD supports explicit local ignore regions", async () => {
+    const duplicate = `export function duplicatedPolicyProbe(input: string): string {
+  const normalized = input.trim().toLowerCase();
+  return normalized.split("").reverse().join("");
+}`;
+    await Promise.all(
+      CPD_IGNORE_PROBES.map((probe) =>
+        writeFile(
+          probe,
+          `// cpd-ignore-start -- Intentional policy probe.\n${duplicate}\n// cpd-ignore-end\n`,
+        ),
+      ),
+    );
+    const ignored = await runCpdProbes(CPD_IGNORE_PROBES);
+    expect(ignored.exitCode).toBe(0);
+    expect(ignored.output).toContain("Found 0 clones");
+
+    await Promise.all(
+      CPD_IGNORE_PROBES.map((probe) => writeFile(probe, `${duplicate}\n`)),
+    );
+    const detected = await runCpdProbes(CPD_IGNORE_PROBES);
+    expect(expectCommandFailure(detected)).toContain("Found 1 clones");
   });
 
   test("repository check rejects application HTML files", async () => {

@@ -5,6 +5,7 @@ import {
   AGENT_SESSION_TOOL_NAMES,
   type AgentSessionToolName,
 } from "../../shared/agent-tools.ts";
+import type { AppDatabase } from "../../shared/database.ts";
 import type { ProviderCredentialAccess } from "../../shared/provider-credential-store.ts";
 import type { ProviderModelPricing } from "../../shared/provider-model-pricing.ts";
 import { SESSIONS_PATH } from "../../shared/routes.ts";
@@ -31,23 +32,34 @@ export const CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000063";
 const RUNNER_TOKEN = "qmr_session-runner-token";
 export const RUNNER_COMMAND_ID = "agent-command-1";
 
+interface ConnectedSessionOptions {
+  readonly database?: AppDatabase;
+  readonly runners?: ReturnType<typeof createRunnerIntegration>;
+  readonly restartId?: () => string;
+}
+
 export function connectedSessionSetup(
   model: AgentModel,
   credentialSource: ProviderCredentialAccess["source"] = "api_key",
   discoverModels?: AgentModelDiscoverer,
+  options: ConnectedSessionOptions = {},
 ) {
-  const database = createAuthenticatedTestDatabase();
+  const database = options.database ?? createAuthenticatedTestDatabase();
   const authOptions = { database, now: () => TEST_NOW };
   const auth = createGoogleAuthFromEnvironment({}, authOptions);
-  const runners = createRunnerIntegration(auth, {
-    database,
-    now: () => TEST_NOW,
-    randomId: () => RUNNER_ID,
-    randomToken: () => "session-runner-token",
-  });
-  runners.collection(
-    createAuthenticatedRequest("/api/runners", undefined, "POST"),
-  );
+  const runners =
+    options.runners ??
+    createRunnerIntegration(auth, {
+      database,
+      now: () => TEST_NOW,
+      randomId: () => RUNNER_ID,
+      randomToken: () => "session-runner-token",
+    });
+  if (options.runners === undefined) {
+    runners.collection(
+      createAuthenticatedRequest("/api/runners", undefined, "POST"),
+    );
+  }
   const registration = runners.connect(RUNNER_TOKEN, {
     architecture: "x64",
     machineFingerprint: "session-test-machine",
@@ -59,7 +71,9 @@ export function connectedSessionSetup(
     throw new Error("The session test runner did not register");
   }
 
-  addTestProviderCredential(database, CREDENTIAL_ID);
+  if (options.runners === undefined) {
+    addTestProviderCredential(database, CREDENTIAL_ID);
+  }
   const credential: ProviderCredentialAccess = {
     accountId: "provider-account",
     id: CREDENTIAL_ID,
@@ -131,12 +145,16 @@ export function connectedSessionSetup(
       },
       now: () => TEST_NOW,
       randomId: () => takeValue(ids, "The session test ran out of IDs"),
+      ...(options.restartId === undefined
+        ? {}
+        : { restartId: options.restartId }),
     },
   );
   return {
     database,
     latestRunnerCommand: () => latestRunnerCommand,
     runnerCommands,
+    runners,
     selectedModels,
     selectedPricing,
     selectedReasoningEfforts,

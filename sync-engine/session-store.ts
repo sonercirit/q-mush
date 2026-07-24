@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { readAgentFile, type AgentFile } from "../shared/agent-file.ts";
 import type { AgentImage } from "../shared/agent-images.ts";
 import type {
@@ -14,14 +14,22 @@ import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
 import { createUuidV7, SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 import type {
-  AgentSessionCostBasis,
   AgentSessionDetail,
-  AgentSessionStatus,
   AgentSessionSummary,
   AgentSessionUsageUpdate,
+  RestartHandoffRequester,
 } from "../shared/session-model.ts";
 import { activeSessionDuration } from "../shared/session-timing.ts";
 import { compactStoredConversation } from "./session-compaction.ts";
+import {
+  activeSessionCondition,
+  SessionLifecycleStore,
+  type SessionFilter,
+} from "./session-lifecycle-store.ts";
+import {
+  RestartHandoffStore,
+  type PendingRestartSession,
+} from "./session-restart-store.ts";
 import {
   conversationFromMessages,
   parseProviderPricing,
@@ -68,33 +76,6 @@ export type QueueSessionResult =
   | { readonly status: "busy" }
   | { readonly status: "not_found" };
 
-interface SessionFilter {
-  readonly id?: string;
-  readonly status?: AgentSessionStatus;
-  readonly userId?: string;
-}
-
-function activeSessionCondition(filter: SessionFilter): SQL | undefined {
-  return and(
-    eq(agentSessions.isDeleted, false),
-    filter.id === undefined ? undefined : eq(agentSessions.id, filter.id),
-    filter.status === undefined
-      ? undefined
-      : eq(agentSessions.status, filter.status),
-    filter.userId === undefined
-      ? undefined
-      : eq(agentSessions.userId, filter.userId),
-  );
-}
-
-function runningCondition(sessionId: string, userId?: string): SQL | undefined {
-  return activeSessionCondition({
-    id: sessionId,
-    status: "running",
-    ...(userId === undefined ? {} : { userId }),
-  });
-}
-
 function requireStoredSession<Value>(stored: Value | undefined): Value {
   if (stored === undefined) {
     throw new Error("The agent session no longer exists");
@@ -107,10 +88,6 @@ const SESSION_TIMING_SELECTION = {
   activeDurationMs: agentSessions.activeDurationMs,
   activeStartedAt: agentSessions.activeStartedAt,
 };
-
-function didUpdate(rows: readonly unknown[]): boolean {
-  return rows.length > 0;
-}
 
 function sessionSelection() {
   return {
@@ -128,6 +105,7 @@ function sessionSelection() {
     provider: agentSessions.provider,
     providerPricing: agentSessions.providerPricing,
     reasoningEffort: agentSessions.reasoningEffort,
+    restartHandoff: agentSessions.restartHandoff,
     runnerId: agentSessions.runnerId,
     status: agentSessions.status,
     title: agentSessions.title,
@@ -152,6 +130,7 @@ type StoredSessionSummary = Pick<
   | "provider"
   | "providerPricing"
   | "reasoningEffort"
+  | "restartHandoff"
   | "runnerId"
   | "status"
   | "title"
@@ -172,12 +151,16 @@ function parseStoredTools(value: string): readonly AgentSessionToolName[] {
   throw new Error("Stored agent session tools are invalid");
 }
 
-function summarizeSession(stored: StoredSessionSummary): AgentSessionSummary {
+function summarizeSession(
+  stored: StoredSessionSummary,
+  restartHandoff: AgentSessionSummary["restartHandoff"],
+): AgentSessionSummary {
   return {
     ...stored,
     activeStartedAt: stored.activeStartedAt?.getTime() ?? null,
     createdAt: stored.createdAt.getTime(),
     providerPricing: parseProviderPricing(stored.providerPricing),
+    restartHandoff,
     tools: parseStoredTools(stored.tools),
     updatedAt: stored.updatedAt.getTime(),
   };
@@ -191,11 +174,48 @@ function titleFromPrompt(prompt: string): string {
   return (firstLine ?? "Image task").slice(0, 80);
 }
 
+function interruptedStatusValues(
+  status: "failed" | "paused",
+  activeDurationMs: number,
+  now: number,
+) {
+  return {
+    activeDurationMs,
+    activeStartedAt: null,
+    status,
+    ...updatedAuditFields(SYSTEM_ID, now),
+  };
+}
+
+type SessionDatabaseExecutor = Pick<AppDatabase, "update">;
+
+function setInterruptedStatus(
+  database: SessionDatabaseExecutor,
+  sessionId: string,
+  status: "failed" | "paused",
+  activeDurationMs: number,
+  now: number,
+): void {
+  const condition = eq(agentSessions.id, sessionId);
+  database
+    .update(agentSessions)
+    .set(interruptedStatusValues(status, activeDurationMs, now))
+    .where(condition)
+    .run();
+}
+
 export class SessionStore {
+  readonly #lifecycle: SessionLifecycleStore;
+  readonly #restartHandoffs: RestartHandoffStore;
   readonly #resources: readonly [AppDatabase, IdGenerator];
 
   constructor(database: AppDatabase, generateId: IdGenerator = createUuidV7) {
     this.#resources = [database, generateId];
+    this.#lifecycle = new SessionLifecycleStore({ database });
+    this.#restartHandoffs = new RestartHandoffStore({
+      database,
+      read: (userId, sessionId) => this.get(userId, sessionId),
+    });
   }
 
   get #database(): AppDatabase {
@@ -275,11 +295,16 @@ export class SessionStore {
     }
 
     return {
-      ...summarizeSession(stored),
+      ...summarizeSession(
+        stored,
+        this.#restartHandoffs.parse(stored.restartHandoff),
+      ),
       agentFile: this.#agentFile(sessionId),
       messages: withInterruptedToolResults(
         storedSessionMessages(this.#database, sessionId),
-        stored.status !== "queued" && stored.status !== "running",
+        stored.status !== "queued" &&
+          stored.status !== "running" &&
+          stored.status !== "paused",
       ),
     };
   }
@@ -288,7 +313,12 @@ export class SessionStore {
     return this.#selectSessions({ userId })
       .orderBy(desc(agentSessions.updatedAt), desc(agentSessions.id))
       .all()
-      .map(summarizeSession);
+      .map((stored) =>
+        summarizeSession(
+          stored,
+          this.#restartHandoffs.parse(stored.restartHandoff),
+        ),
+      );
   }
 
   conversation(sessionId: string): readonly AgentConversationMessage[] {
@@ -300,30 +330,12 @@ export class SessionStore {
     );
   }
 
-  #updateRunningSession(
-    sessionId: string,
-    values: Omit<
-      Partial<typeof agentSessions.$inferInsert>,
-      "costBasis" | "costUsd"
-    > & {
-      readonly costBasis?: AgentSessionCostBasis | SQL;
-      readonly costUsd?: number | SQL;
-    },
-    now: number,
-  ): void {
-    this.#database
-      .update(agentSessions)
-      .set({ ...values, ...updatedAuditFields(SYSTEM_ID, now) })
-      .where(runningCondition(sessionId))
-      .run();
-  }
-
   setAgentFile(
     sessionId: string,
     agentFile: AgentFile | null,
     now: number,
   ): void {
-    this.#updateRunningSession(
+    this.#lifecycle.updateRunning(
       sessionId,
       {
         agentFileContent: agentFile?.content ?? null,
@@ -378,7 +390,7 @@ export class SessionStore {
       throw new Error("The agent session usage is invalid");
     }
 
-    this.#updateRunningSession(
+    this.#lifecycle.updateRunning(
       sessionId,
       {
         ...(input.contextTokens === null
@@ -463,32 +475,11 @@ export class SessionStore {
     status: "failed" | "idle" | "running",
     now: number,
   ): boolean {
-    switch (status) {
-      case "failed":
-        return (
-          this.#finishActiveSession(sessionId, "failed", now) ||
-          this.#systemTransition(sessionId, ["queued"], status, now)
-        );
-      case "idle":
-        return this.#finishActiveSession(sessionId, "idle", now);
-      case "running":
-        return this.#startActiveSession(sessionId, now);
-    }
+    return this.#lifecycle.mark(sessionId, status, now);
   }
 
   stop(userId: string, sessionId: string, now: number): boolean {
-    if (this.#finishActiveSession(sessionId, "stopped", now, userId, userId)) {
-      return true;
-    }
-
-    return this.#transition(
-      sessionId,
-      ["queued", "running", "idle", "failed"],
-      "stopped",
-      userId,
-      now,
-      userId,
-    );
+    return this.#lifecycle.stop(userId, sessionId, now);
   }
 
   queue(
@@ -515,7 +506,8 @@ export class SessionStore {
       if (
         stored.status !== "idle" &&
         stored.status !== "failed" &&
-        stored.status !== "stopped"
+        stored.status !== "stopped" &&
+        stored.status !== "paused"
       ) {
         return "busy" as const;
       }
@@ -560,11 +552,67 @@ export class SessionStore {
     return { detail, status };
   }
 
+  pauseQueuedForRestart(
+    // cpd-ignore-start -- Queued and running handoffs intentionally share one facade signature.
+    sessionId: string,
+    requestedBy: RestartHandoffRequester,
+    restartId: string,
+    now: number,
+  ): boolean {
+    return this.#restartHandoffs.pauseQueued(
+      sessionId,
+      requestedBy,
+      restartId,
+      now,
+    );
+  }
+
+  pauseForRestart(
+    sessionId: string,
+    requestedBy: RestartHandoffRequester,
+    restartId: string,
+    now: number,
+  ): boolean {
+    return this.#restartHandoffs.pauseRunning(
+      sessionId,
+      requestedBy,
+      restartId,
+      now,
+    );
+  }
+  // cpd-ignore-end
+
+  pendingRestartHandoffs(runnerId?: string): readonly PendingRestartSession[] {
+    return this.#restartHandoffs.pending(runnerId);
+  }
+
+  claimRestartHandoff(
+    userId: string,
+    sessionId: string,
+    restartId: string,
+    now: number,
+  ): AgentSessionDetail | undefined {
+    return this.#restartHandoffs.claim(userId, sessionId, restartId, now);
+  }
+
+  completeRestartHandoff(sessionId: string): void {
+    this.#restartHandoffs.complete(sessionId);
+  }
+
+  finishRestartHandoff(sessionId: string): void {
+    this.#restartHandoffs.finish(sessionId);
+  }
+
+  restoreRestartHandoff(sessionId: string, now: number): void {
+    this.#restartHandoffs.restore(sessionId, now);
+  }
+
   failInterrupted(now: number): readonly PendingSpawnedSession[] {
     const interrupted = this.#database
       .select({
         ...SESSION_TIMING_SELECTION,
         id: agentSessions.id,
+        restartHandoff: agentSessions.restartHandoff,
         userId: agentSessions.userId,
       })
       .from(agentSessions)
@@ -578,6 +626,16 @@ export class SessionStore {
 
     for (const session of interrupted) {
       const duration = activeSessionDuration(session, now);
+      if (session.restartHandoff !== null) {
+        setInterruptedStatus(
+          this.#database,
+          session.id,
+          "paused",
+          duration,
+          now,
+        );
+        continue;
+      }
       this.#database.transaction((transaction) => {
         insertStoredMessage(transaction, interruptedSessionErrorValues(), {
           actorId: SYSTEM_ID,
@@ -586,16 +644,7 @@ export class SessionStore {
           sessionId: session.id,
           userId: session.userId,
         });
-        transaction
-          .update(agentSessions)
-          .set({
-            activeDurationMs: duration,
-            activeStartedAt: null,
-            status: "failed",
-            ...updatedAuditFields(SYSTEM_ID, now),
-          })
-          .where(eq(agentSessions.id, session.id))
-          .run();
+        setInterruptedStatus(transaction, session.id, "failed", duration, now);
       });
     }
     return this.pendingSpawnedSessions();
@@ -653,87 +702,6 @@ export class SessionStore {
 
     return readAgentFile(
       stored.content === null && stored.name === null ? null : stored,
-    );
-  }
-
-  #startActiveSession(sessionId: string, now: number): boolean {
-    return didUpdate(
-      this.#database
-        .update(agentSessions)
-        .set({
-          activeStartedAt: new Date(now),
-          status: "running",
-          ...updatedAuditFields(SYSTEM_ID, now),
-        })
-        .where(activeSessionCondition({ id: sessionId, status: "queued" }))
-        .returning()
-        .all(),
-    );
-  }
-
-  #finishActiveSession(
-    sessionId: string,
-    status: "failed" | "idle" | "stopped",
-    now: number,
-    actorId: string = SYSTEM_ID,
-    userId?: string,
-  ): boolean {
-    const session = this.#database
-      .select(SESSION_TIMING_SELECTION)
-      .from(agentSessions)
-      .where(runningCondition(sessionId, userId))
-      .get();
-    if (session?.activeStartedAt === null || session === undefined) {
-      return false;
-    }
-
-    return didUpdate(
-      this.#database
-        .update(agentSessions)
-        .set({
-          activeDurationMs: activeSessionDuration(session, now),
-          activeStartedAt: null,
-          status,
-          ...updatedAuditFields(actorId, now),
-        })
-        .where(runningCondition(sessionId, userId))
-        .returning({ status: agentSessions.status })
-        .all(),
-    );
-  }
-
-  #systemTransition(
-    sessionId: string,
-    from: readonly AgentSessionStatus[],
-    to: AgentSessionStatus,
-    now: number,
-  ): boolean {
-    return this.#transition(sessionId, from, to, SYSTEM_ID, now);
-  }
-
-  #transition(
-    sessionId: string,
-    from: readonly AgentSessionStatus[],
-    to: AgentSessionStatus,
-    actorId: string,
-    now: number,
-    userId?: string,
-  ): boolean {
-    return didUpdate(
-      this.#database
-        .update(agentSessions)
-        .set({ status: to, ...updatedAuditFields(actorId, now) })
-        .where(
-          and(
-            activeSessionCondition({
-              id: sessionId,
-              ...(userId === undefined ? {} : { userId }),
-            }),
-            inArray(agentSessions.status, from),
-          ),
-        )
-        .returning({ updatedAt: agentSessions.updatedAt })
-        .all(),
     );
   }
 }

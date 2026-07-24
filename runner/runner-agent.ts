@@ -8,6 +8,7 @@ import { RUNNER_REALTIME_PATH } from "../shared/routes.ts";
 import type { RunnerToolCommand } from "../shared/runner-command-broker.ts";
 import { createServerWebSocket } from "../shared/server-websocket.ts";
 import { executeRunnerCommand, readRunnerCommand } from "./runner-command.ts";
+import { RunnerRestartCoordinator } from "./runner-restart.ts";
 import { RunnerUpdateTrigger } from "./runner-update-trigger.ts";
 import { updateRunnerIfAvailable } from "./runner-update.ts";
 
@@ -19,6 +20,9 @@ const RETRY_INTERVAL_MILLISECONDS = 5_000;
 const UPDATE_INTERVAL_MILLISECONDS = 5 * 60_000;
 const TOKEN_PATTERN = /^qmr_[A-Za-z\d_-]{8,200}$/u;
 const runnerUpdateTrigger = new RunnerUpdateTrigger(Q_MUSH_RUNNER_VERSION);
+const runnerRestart = new RunnerRestartCoordinator({
+  restartId: () => randomBytes(32).toString("base64url"),
+});
 
 class RunnerConnectionError extends Error {
   constructor(message: string) {
@@ -232,15 +236,19 @@ async function connectRunner(
 async function installUpdateIfAvailable(
   configuration: RunnerConfiguration,
   configurationPath: string,
+  beforeRestart?: () => Promise<void>,
 ): Promise<boolean> {
   try {
-    const updated = await updateRunnerIfAvailable({
-      configurationPath,
-      executablePath: realpathSync(process.execPath),
-      serverOrigin: configuration.serverOrigin,
-      target: Q_MUSH_RUNNER_TARGET,
-      version: Q_MUSH_RUNNER_VERSION,
-    });
+    const updated = await updateRunnerIfAvailable(
+      {
+        configurationPath,
+        executablePath: realpathSync(process.execPath),
+        serverOrigin: configuration.serverOrigin,
+        target: Q_MUSH_RUNNER_TARGET,
+        version: Q_MUSH_RUNNER_VERSION,
+      },
+      beforeRestart === undefined ? {} : { beforeRestart },
+    );
 
     if (updated) {
       console.log("Q Mush runner updated; starting the new version.");
@@ -316,7 +324,11 @@ async function maintainConnection(
 
   for (;;) {
     if (runnerUpdateTrigger.take() || Date.now() >= nextUpdateAt) {
-      if (await installUpdateIfAvailable(configuration, configurationPath)) {
+      if (
+        await installUpdateIfAvailable(configuration, configurationPath, () =>
+          runnerRestart.request(socket),
+        )
+      ) {
         socket.close(1000, "Updating");
         return;
       }

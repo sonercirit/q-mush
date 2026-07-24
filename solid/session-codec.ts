@@ -20,6 +20,7 @@ import type {
   AgentSessionMessage,
   AgentSessionStatus,
   AgentSessionSummary,
+  RestartHandoff,
 } from "../shared/session-model.ts";
 
 function readModelReasoningEfforts(
@@ -121,10 +122,35 @@ export function readAgentModelCatalog(value: unknown): AgentModelCatalog {
   return { defaultModel, models };
 }
 
+function readRestartHandoff(value: unknown): RestartHandoff | null {
+  if (value === null) {
+    return null;
+  }
+  // cpd-ignore-start -- Wire records intentionally use the shared object guard.
+  if (
+    !isRecord(value) ||
+    !Array.isArray(value["pendingInput"]) ||
+    (value["requestedBy"] !== "runner" && value["requestedBy"] !== "server") ||
+    typeof value["restartId"] !== "string" ||
+    value["restartId"].length === 0 ||
+    value["restartId"].length > 200
+  ) {
+    throw new Error("The server returned an invalid restart handoff");
+  }
+  // cpd-ignore-end
+  const requestedBy = value["requestedBy"];
+  return {
+    pendingInput: value["pendingInput"],
+    requestedBy,
+    restartId: value["restartId"],
+  };
+}
+
 function readStatus(value: unknown): AgentSessionStatus | undefined {
   switch (value) {
     case "failed":
     case "idle":
+    case "paused":
     case "queued":
     case "running":
     case "stopped":
@@ -178,6 +204,12 @@ function readSummary(value: unknown): AgentSessionSummary {
   const model = value["model"];
   const provider = readProvider(value["provider"]);
   const reasoningEffort = readNullableString(value["reasoningEffort"]);
+  let restartHandoff;
+  try {
+    restartHandoff = readRestartHandoff(value["restartHandoff"]);
+  } catch {
+    throw new Error("The server returned an invalid agent session");
+  }
   const runnerId = value["runnerId"];
   const status = readStatus(value["status"]);
   const title = value["title"];
@@ -238,6 +270,7 @@ function readSummary(value: unknown): AgentSessionSummary {
     provider,
     providerPricing,
     reasoningEffort,
+    restartHandoff,
     runnerId,
     status,
     title,
@@ -340,6 +373,7 @@ export function summaryFromDetail(
     provider: detail.provider,
     providerPricing: detail.providerPricing,
     reasoningEffort: detail.reasoningEffort,
+    restartHandoff: detail.restartHandoff,
     runnerId: detail.runnerId,
     status: detail.status,
     title: detail.title,

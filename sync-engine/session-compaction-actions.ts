@@ -70,6 +70,7 @@ export async function updateSessionCompactionMode(
   );
 }
 
+// cpd-ignore-start -- Session orchestration boundaries intentionally repeat dependency contracts.
 interface ManualCompactionDependencies {
   readonly credential: (
     userId: string,
@@ -82,29 +83,40 @@ interface ManualCompactionDependencies {
     detail: AgentSessionDetail,
     credential: ProviderCredentialAccess,
     userId: string,
-  ) => void;
+  ) => boolean;
   readonly notify: (userId: string, sessionId: string) => void;
   readonly now: () => number;
   readonly runtimes: SessionRuntimes;
   readonly store: SessionStore;
 }
+// cpd-ignore-end
+
+function restartingResponse(): Response {
+  return createApiError("server_restarting", 503);
+}
 
 export async function startManualSessionCompaction(
+  // cpd-ignore-start -- Queueing manual compaction deliberately mirrors session queueing.
   dependencies: ManualCompactionDependencies,
   user: AuthenticatedUser,
   sessionId: string,
 ): Promise<Response> {
-  if (dependencies.runtimes.draining) {
-    return new Response('{"error":"server_restarting"}', {
-      headers: { "content-type": "application/json; charset=utf-8" },
-      status: 503,
-    });
-  }
   const existing = dependencies.store.get(user.id, sessionId);
+  if (
+    dependencies.runtimes.draining ||
+    (existing !== undefined &&
+      !dependencies.runtimes.accepts(existing.runnerId))
+  ) {
+    return restartingResponse();
+  }
   if (existing === undefined) {
     return createApiError("not_found", 404);
   }
-  if (existing.status === "queued" || existing.status === "running") {
+  if (
+    existing.status === "queued" ||
+    existing.status === "running" ||
+    existing.status === "paused"
+  ) {
     return createApiError("session_busy", 409);
   }
 
@@ -118,7 +130,34 @@ export async function startManualSessionCompaction(
       return createApiError("session_busy", 409);
     }
 
-    dependencies.launch(queued.detail, credential, user.id);
+    if (!dependencies.launch(queued.detail, credential, user.id)) {
+      const restart = dependencies.runtimes.pendingRestart(
+        queued.detail.runnerId,
+      );
+      if (restart !== undefined) {
+        if (
+          !dependencies.store.pauseQueuedForRestart(
+            queued.detail.id,
+            restart.requestedBy,
+            restart.restartId,
+            dependencies.now(),
+          )
+        ) {
+          dependencies.store.mark(
+            queued.detail.id,
+            "failed",
+            dependencies.now(),
+          );
+          dependencies.notify(user.id, queued.detail.id);
+          return createApiError("session_launch_failed", 500);
+        }
+        dependencies.notify(user.id, queued.detail.id);
+        return restartingResponse();
+      }
+      dependencies.store.mark(queued.detail.id, "failed", dependencies.now());
+      dependencies.notify(user.id, queued.detail.id);
+      return createApiError("session_launch_failed", 500);
+    }
     const notify = withUserNotification(
       dependencies,
       user.id,
@@ -127,4 +166,5 @@ export async function startManualSessionCompaction(
     queueMicrotask(notify);
     return createJsonResponse(queued.detail, 202);
   });
+  // cpd-ignore-end
 }

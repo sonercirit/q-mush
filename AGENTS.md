@@ -56,9 +56,9 @@ Living project memory; update durable information.
   edits. `scripts/dev.ts` watches only the ignored
   `data/development-server.restart` trigger written by `bun run dev:restart`.
   `sync-engine/runner-executable.ts` fingerprints the runner source and
-  compiler, builds in a private temporary directory, caches it in memory, and
-  serves it from `/runner/executable`. Triggered development restarts reject new
-  agent work, let active sessions finish, then replace the server process, so a
+  compiler, builds in a temporary directory, caches it in memory, and serves it
+  from `/runner/executable`. Triggered development restarts reject new agent
+  work, let active sessions finish, then replace the server process, so a
   session can safely request its own restart. Textual response bodies are
   precompressed once per handler, with `zstd`, Brotli, gzip, or deflate
   negotiated in that server-preference order.
@@ -149,9 +149,12 @@ Living project memory; update durable information.
   accessible keyboard/focus. `shared/agent-prompt.ts` builds the model system
   prompt and its transcript display. Reasoning summaries persist as `thinking`
   messages but are excluded from replay. Session and transcript rows live in
-  `agent_sessions` and `agent_messages`; interrupted processes mark active
-  sessions failed so they can be resumed. Rebuilt conversations add error
-  results for interrupted tool calls only on resume.
+  `agent_sessions` and `agent_messages`; interrupted active sessions fail.
+  Rebuilt conversations add synthetic tool results for crashes only. Restarts
+  pause affected sessions at a durable turn boundary, persist a `paused` handoff
+  with a stable restart ID and reserved ordered `pendingInput`, and resume once
+  on startup or assigned-runner reconnect. Runner updates wait for WebSocket
+  restart-ready; user stops abort.
 
 - `sync-engine/openai.ts` and `sync-engine/openrouter.ts` implement provider
   connections. Multiple OAuth or manual credentials live in
@@ -192,16 +195,13 @@ Living project memory; update durable information.
   `knip.production.config.ts` limits the production graph to runtime source.
   `bun run knip` runs both production and comprehensive test/tooling passes, so
   tests cannot keep production code alive while unused test helpers still fail.
-- `.jscpd.json` maps all supported JavaScript and TypeScript extensions to the
-  TSX format for cross-extension detection; import declarations are ignored,
-  while other clones of at least 20 tokens and one line fail the zero-percent
-  threshold.
+- `.jscpd.json` maps JS/TS extensions to TSX; imports and explicit `cpd-ignore`
+  regions are ignored; other 20-token clones fail the zero threshold.
 - `scripts/repository-check.ts` lists existing tracked and unignored files and
   calls the focused policy APIs under `scripts/`. It rejects files reaching
   20,000 Unicode code points (excluding `bun.lock` and the generated `drizzle/`
-  migration tree), JavaScript/TypeScript test files outside a directory named
-  `test`, and `.htm`/`.html`/`.xhtml` application files outside directories
-  named `test` or `fixtures`.
+  migration tree), JS/TS tests outside a directory named `test`, and application
+  HTML files outside directories named `test` or `fixtures`.
 - Prettier wraps Markdown prose at its print width and uses
   `prettier-plugin-organize-imports` to sort, combine, and remove unused
   imports; generated/dependency output ignores come from `.gitignore`, while
@@ -219,10 +219,10 @@ Living project memory; update durable information.
 - `DATABASE_PATH` selects SQLite (default `data/q-mush.sqlite`; `data/` is
   ignored). Update `shared/database/schema.ts` and register new tables in
   `databaseSchema`; run `bun run db:generate` and commit its migration and
-  metadata. `bun run db:migrate` runs without HTTP. Drizzle Kit runs config
-  under Node, so it must not transitively import `bun:sqlite`. Drizzle's
-  migration transaction nullifies its foreign-key PRAGMAs; `createDatabase`
-  disables foreign keys beforehand and reenables them afterward.
+  metadata. Drizzle Kit runs config under Node, so it must not transitively
+  import `bun:sqlite`. Drizzle's migration transaction nullifies its foreign-key
+  PRAGMAs; `createDatabase` disables foreign keys beforehand and reenables them
+  afterward.
 - Credential storage needs stable, private, 32-byte base64url secrets:
   `OPENAI_CREDENTIAL_KEY`, `OPENROUTER_CREDENTIAL_KEY`, and
   `BRAVE_SEARCH_CREDENTIAL_KEY`. Provider redirect URIs must end in the matching

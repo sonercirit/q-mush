@@ -31,6 +31,7 @@ export interface SessionAgentRuntimeDependencies {
   readonly detail: AgentSessionDetail;
   readonly modelFactory: AgentModelFactory;
   readonly now: () => number;
+  readonly restartHandoffRequested: () => boolean;
   readonly notify: () => void;
   readonly realtime: RealtimeHub | undefined;
   readonly sessionTools: SessionAgentToolActions;
@@ -61,9 +62,15 @@ async function loadModels(
 
 export async function compactSessionConversation(
   runtime: SessionAgentRuntimeDependencies,
-): Promise<void> {
+): Promise<"complete" | "handoff"> {
   await Promise.resolve();
+  if (runtime.restartHandoffRequested()) {
+    return "handoff";
+  }
   const models = await loadModels(runtime);
+  if (runtime.restartHandoffRequested()) {
+    return "handoff";
+  }
   const conversation = runtime.store.conversation(runtime.detail.id);
   const compactor = models.createCompactor();
   const compacted = await compactor.compact(conversation, runtime.signal);
@@ -85,11 +92,12 @@ export async function compactSessionConversation(
     runtime.notify();
   }
   runtime.store.compact(runtime.detail.id, compacted.summary, runtime.now());
+  return runtime.restartHandoffRequested() ? "handoff" : "complete";
 }
 
 export async function runSessionAgent(
   runtime: SessionAgentRuntimeDependencies,
-): Promise<void> {
+): Promise<"complete" | "handoff"> {
   const models = await loadModels(runtime);
   const dispatchRunnerTool = (
     name: string,
@@ -128,7 +136,7 @@ export async function runSessionAgent(
   );
 
   const selectedTools = new Set<AgentSessionToolName>(runtime.detail.tools);
-  await runCompactingAgentLoop({
+  return runCompactingAgentLoop({
     agentCost: (turn) => estimateAgentTurnCost(runtime.detail, turn.tokenUsage),
     autoCompact: runtime.detail.autoCompact,
     createCompactor: models.createCompactor,
@@ -149,6 +157,7 @@ export async function runSessionAgent(
       return dispatchTool(call.name, call.arguments);
     },
     initialMessages: runtime.store.conversation(runtime.detail.id),
+    handoffRequested: runtime.restartHandoffRequested,
     maxContextTokens: runtime.detail.maxContextTokens,
     model: models.agent,
     recordCompaction: (summary) => {

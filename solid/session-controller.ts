@@ -59,7 +59,7 @@ function selectedDetailHasStatus(
 }
 
 function sessionIsActive(status: AgentSessionStatus): boolean {
-  return status === "queued" || status === "running";
+  return status === "queued" || status === "running" || status === "paused";
 }
 
 function sessionCanResume(status: AgentSessionStatus): boolean {
@@ -537,6 +537,7 @@ export class SessionController {
       detail?.id !== sessionId ||
       detail.status === "queued" ||
       detail.status === "running" ||
+      detail.status === "paused" ||
       this.#detailMutationPending() ||
       (prompt.length === 0 && this.#view.value.followUpImages.length === 0)
     ) {

@@ -6,6 +6,7 @@ import {
   sessionToolOutput,
   type SpawnSessionToolInput,
 } from "./session-agent-tools.ts";
+import type { RestartRequest } from "./session-runtime.ts";
 import type { SessionStore } from "./session-store.ts";
 
 interface SessionAgentCredentialSelection {
@@ -23,8 +24,10 @@ type SessionAgentCredentialAction = (
 ) => Promise<Response> | Response;
 
 export interface SessionAgentActionDependencies {
+  // cpd-ignore-start -- Session orchestration boundaries intentionally repeat dependency contracts.
   readonly store: SessionStore;
-  readonly draining: () => boolean;
+  readonly acceptsRunner: (runnerId: string) => boolean;
+  readonly pendingRestart: (runnerId: string) => RestartRequest | undefined;
   readonly now: () => number;
   readonly notify: (userId: string, sessionId: string) => void;
   readonly runnerIsAvailable: (userId: string, runnerId: string) => boolean;
@@ -33,6 +36,7 @@ export interface SessionAgentActionDependencies {
     session: AgentSessionDetail,
     ownerId: string,
   ) => boolean;
+  // cpd-ignore-end
   readonly discoverSessionMetadata: (
     input: SpawnSessionToolInput,
     credential: ProviderCredentialAccess,
@@ -45,6 +49,27 @@ export interface SessionAgentActionDependencies {
     selection: SessionAgentCredentialSelection,
     action: SessionAgentCredentialAction,
   ) => Promise<Response>;
+}
+
+export function pauseQueuedSessionForRestart(
+  dependencies: SessionAgentActionDependencies,
+  detail: AgentSessionDetail,
+  userId: string,
+): boolean {
+  const restart = dependencies.pendingRestart(detail.runnerId);
+  if (restart === undefined) {
+    return false;
+  }
+  const paused = dependencies.store.pauseQueuedForRestart(
+    detail.id,
+    restart.requestedBy,
+    restart.restartId,
+    dependencies.now(),
+  );
+  if (paused) {
+    dependencies.notify(userId, detail.id);
+  }
+  return paused;
 }
 
 export async function responseToolOutput(response: Response): Promise<string> {
@@ -66,7 +91,12 @@ export function spawnedSessionReport(options: {
     return undefined;
   }
   const lastMessage = lastSessionMessage(completed);
-  const status = completed.status === "idle" ? "completed" : completed.status;
+  const status =
+    completed.status === "idle"
+      ? "completed"
+      : completed.status === "paused"
+        ? "running"
+        : completed.status;
   const summary = sessionToolOutput({
     lastMessage:
       lastMessage === undefined
@@ -87,6 +117,9 @@ export async function spawnAgentSession(options: {
   readonly parentSessionId: string;
   readonly userId: string;
 }): Promise<string> {
+  const notifyChild = (childId: string): void => {
+    options.dependencies.notify(options.userId, childId);
+  };
   async function enqueue(
     input: SpawnSessionToolInput,
     credential: ProviderCredentialAccess,
@@ -95,7 +128,7 @@ export async function spawnAgentSession(options: {
       input,
       credential,
     );
-    if (options.dependencies.draining()) {
+    if (!options.dependencies.acceptsRunner(input.runnerId)) {
       return createJsonResponse({ error: "server_restarting" }, 503);
     }
     const child = options.dependencies.store.create(
@@ -111,19 +144,30 @@ export async function spawnAgentSession(options: {
     if (
       !options.dependencies.launchSession(credential, child, options.userId)
     ) {
+      const restart = options.dependencies.pendingRestart(child.runnerId);
+      if (restart !== undefined) {
+        const paused = options.dependencies.store.pauseQueuedForRestart(
+          child.id,
+          restart.requestedBy,
+          restart.restartId,
+          options.dependencies.now(),
+        );
+        if (!paused) {
+          throw new Error("The child restart handoff could not be persisted");
+        }
+        notifyChild(child.id);
+        return createJsonResponse({ error: "server_restarting" }, 503);
+      }
+      const failedAt = options.dependencies.now();
       options.dependencies.store.appendErrorMessage(
         child.id,
         "Session failed: the child session could not be launched",
-        options.dependencies.now(),
+        failedAt,
       );
-      options.dependencies.store.mark(
-        child.id,
-        "failed",
-        options.dependencies.now(),
-      );
+      options.dependencies.store.mark(child.id, "failed", failedAt);
       throw new Error("The child session could not be launched");
     }
-    options.dependencies.notify(options.userId, child.id);
+    notifyChild(child.id);
     return createJsonResponse({ sessionId: child.id, status: "spawned" });
   }
   const response = await options.dependencies.withCredential(

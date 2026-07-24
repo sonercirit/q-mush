@@ -271,6 +271,7 @@ describe("session store", () => {
   });
 
   test("orders equal-timestamp transcript records by message id", () => {
+    // cpd-ignore-start -- Store tests intentionally retain complete persisted lifecycle assertions.
     const { database, store } = runningStore();
     const timestamp = new Date(TEST_NOW + 2);
     const common = {
@@ -440,6 +441,105 @@ describe("session store", () => {
     setup.database.$client.close();
   });
 
+  test("persists and atomically claims restart handoffs", () => {
+    const { database, store } = runningStore();
+
+    expect(
+      store.pauseForRestart(SESSION_ID, "server", "restart-1", TEST_NOW + 2),
+    ).toBe(true);
+    expect(store.get(TEST_USER_ID, SESSION_ID)).toMatchObject({
+      activeStartedAt: null,
+      restartHandoff: {
+        pendingInput: [],
+        requestedBy: "server",
+        restartId: "restart-1",
+      },
+      status: "paused",
+    });
+    expect(store.pendingRestartHandoffs()).toHaveLength(1);
+    const claimed = store.claimRestartHandoff(
+      TEST_USER_ID,
+      SESSION_ID,
+      "restart-1",
+      TEST_NOW + 3,
+    );
+    expect(claimed).toBeDefined();
+    expect(store.mark(SESSION_ID, "running", TEST_NOW + 4)).toBe(true);
+    expect(store.get(TEST_USER_ID, SESSION_ID)).toMatchObject({
+      activeStartedAt: TEST_NOW + 4,
+      restartHandoff: { restartId: "restart-1" },
+      status: "running",
+    });
+    store.completeRestartHandoff(SESSION_ID);
+    expect(store.get(TEST_USER_ID, SESSION_ID)).toMatchObject({
+      restartHandoff: null,
+      status: "running",
+    });
+    expect(
+      store.claimRestartHandoff(
+        TEST_USER_ID,
+        SESSION_ID,
+        "restart-1",
+        TEST_NOW + 5,
+      ),
+    ).toBeUndefined();
+    database.$client.close();
+  });
+
+  test("recovers only restart handoffs instead of failing them at startup", () => {
+    const { database, store } = runningStore();
+    store.pauseForRestart(SESSION_ID, "runner", "restart-2", TEST_NOW + 2);
+
+    expect(store.failInterrupted(TEST_NOW + 3)).toEqual([]);
+    expect(store.get(TEST_USER_ID, SESSION_ID)).toMatchObject({
+      messages: [{ role: "user" }],
+      status: "paused",
+    });
+    expect(store.pendingRestartHandoffs()).toHaveLength(1);
+    database.$client.close();
+  });
+
+  test("preserves a claimed restart handoff across another startup", () => {
+    const { database, store } = runningStore();
+    store.pauseForRestart(
+      SESSION_ID,
+      "runner",
+      "restart-claimed",
+      TEST_NOW + 2,
+    );
+    expect(
+      store.claimRestartHandoff(
+        TEST_USER_ID,
+        SESSION_ID,
+        "restart-claimed",
+        TEST_NOW + 3,
+      ),
+    ).toBeDefined();
+
+    expect(store.failInterrupted(TEST_NOW + 4)).toEqual([]);
+    expect(store.get(TEST_USER_ID, SESSION_ID)).toMatchObject({
+      activeStartedAt: null,
+      messages: [{ role: "user" }],
+      restartHandoff: { restartId: "restart-claimed" },
+      status: "paused",
+    });
+    expect(store.pendingRestartHandoffs()).toHaveLength(1);
+    database.$client.close();
+  });
+
+  test("clears a restart handoff when the user stops a paused session", () => {
+    const { database, store } = runningStore();
+    store.pauseForRestart(SESSION_ID, "server", "restart-stop", TEST_NOW + 2);
+
+    expect(store.stop(TEST_USER_ID, SESSION_ID, TEST_NOW + 3)).toBe(true);
+    expect(store.get(TEST_USER_ID, SESSION_ID)).toMatchObject({
+      restartHandoff: null,
+      status: "stopped",
+    });
+    expect(store.pendingRestartHandoffs()).toEqual([]);
+    database.$client.close();
+  });
+
   test("records an error when an active session is interrupted", () => {
     const { database, store } = runningStore();
 
@@ -462,6 +562,7 @@ describe("session store", () => {
   });
 
   test("fills missing tool results when replaying a transcript", () => {
+    // cpd-ignore-end
     const { database, store } = runningStore();
     const interruptedCall = {
       arguments: '{"command":"bun run dev:restart"}',

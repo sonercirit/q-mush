@@ -76,6 +76,7 @@ async function expectJsonResponse(
 }
 
 async function expectSessionReaches(
+  // cpd-ignore-start -- Session integration cases intentionally retain complete runner and recovery lifecycles.
   setup: Awaited<ReturnType<typeof connectedSessionSetup>>,
   response: Response,
   status: string,
@@ -454,7 +455,7 @@ describe("agent sessions", () => {
     }
   });
 
-  test("drains a running session before a graceful restart", async () => {
+  test("hands off at the current turn boundary and resumes after startup", async () => {
     const restartCall = {
       arguments: '{"command":"bun run dev:restart","timeout":30}',
       id: "restart-call",
@@ -467,7 +468,9 @@ describe("agent sessions", () => {
       },
       { content: "Restart completed.", toolCalls: [] },
     ]);
-    const setup = connectedSessionSetup(model);
+    const setup = connectedSessionSetup(model, "api_key", undefined, {
+      restartId: () => "server-restart-1",
+    });
     const { sessions } = setup;
     const created = await sessions.collection(createSessionRequest());
     expect(created.status).toBe(201);
@@ -475,10 +478,7 @@ describe("agent sessions", () => {
     await expectRunnerCommand(
       setup,
       {
-        arguments: {
-          command: "bun run dev:restart",
-          timeout: 30,
-        },
+        arguments: { command: "bun run dev:restart", timeout: 30 },
         id: RUNNER_COMMAND_ID,
         sessionId: SESSION_ID,
         tool: "bash",
@@ -493,20 +493,104 @@ describe("agent sessions", () => {
     });
     await Bun.sleep(1);
     expect(drained).toBe(false);
-    await expectJsonResponse(
-      await sessions.collection(createSessionRequest()),
-      503,
-      { error: "server_restarting" },
-    );
-
     expect(completeRunnerCommand(setup, "Restart requested.").status).toBe(204);
     await drain;
-    expect(await sessionDetail(sessions)).toMatchObject({ status: "idle" });
+
+    expect(model.requests).toHaveLength(1);
+    expect(await sessionDetail(sessions)).toMatchObject({
+      messages: [
+        { role: "user" },
+        { role: "assistant", toolCalls: [restartCall] },
+        { role: "tool", toolCallId: restartCall.id },
+      ],
+      restartHandoff: {
+        pendingInput: [],
+        requestedBy: "server",
+        restartId: "server-restart-1",
+      },
+      status: "paused",
+    });
+
+    const recovered = connectedSessionSetup(model, "api_key", undefined, {
+      database: setup.database,
+      runners: setup.runners,
+      restartId: () => "unused",
+    });
+    recovered.sessions.recover();
+    recovered.sessions.recover();
+    await completeAgentFileLookup(recovered);
+    await waitForSessionValue(
+      () => sessionDetail(recovered.sessions),
+      hasSessionStatus("idle"),
+    );
+    expect(model.requests).toHaveLength(2);
+    expect(model.requests[1]).toContainEqual({
+      content: "Restart requested.",
+      role: "tool",
+      toolCallId: restartCall.id,
+      toolName: restartCall.name,
+    });
+    expect(await sessionDetail(recovered.sessions)).toMatchObject({
+      restartHandoff: null,
+      status: "idle",
+    });
+    setup.database.$client.close();
+  });
+
+  test("coordinates runner restart without draining another runner", async () => {
+    const toolCall = { arguments: "{}", id: "tool-1", name: "read" };
+    const model = new ScriptedAgentModel([
+      { content: "Read first.", toolCalls: [toolCall] },
+      { content: "Resumed.", toolCalls: [] },
+    ]);
+    const setup = connectedSessionSetup(model);
+    await setup.sessions.collection(createSessionRequest());
+    await completeAgentFileLookup(setup);
+    await expectRunnerCommand(
+      setup,
+      {
+        arguments: {},
+        id: RUNNER_COMMAND_ID,
+        sessionId: SESSION_ID,
+        tool: "read",
+        workingDirectory: "/work/project",
+      },
+      "The runner did not receive the tool command",
+    );
+
+    let unrelatedDrained = false;
+    await setup.sessions
+      .drainRunner("unrelated-runner", "other-restart")
+      .then(() => {
+        unrelatedDrained = true;
+      });
+    expect(unrelatedDrained).toBe(true);
+    expect(model.requests).toHaveLength(1);
+
+    const drain = setup.sessions.drainRunner(RUNNER_ID, "runner-restart-1");
+    expect(completeRunnerCommand(setup, "# README").status).toBe(204);
+    await drain;
+    expect(model.requests).toHaveLength(1);
+    expect(await sessionDetail(setup.sessions)).toMatchObject({
+      restartHandoff: {
+        requestedBy: "runner",
+        restartId: "runner-restart-1",
+      },
+      status: "paused",
+    });
+
+    setup.sessions.runnerConnected(RUNNER_ID);
+    await completeAgentFileLookup(setup);
+    await waitForSessionValue(
+      () => sessionDetail(setup.sessions),
+      hasSessionStatus("idle"),
+    );
     expect(model.requests).toHaveLength(2);
     setup.database.$client.close();
   });
 
   test("stops a running model request", async () => {
+    // cpd-ignore-end
     const model = new BlockingModel();
     const setup = connectedSessionSetup(model);
     const { database, sessions } = setup;

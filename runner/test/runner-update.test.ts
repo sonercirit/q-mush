@@ -78,10 +78,16 @@ function updateResponse(
 
 test("atomically installs and launches an available runner update", async () => {
   const fixture = createFixture();
+  const operations: string[] = [];
   let launched:
     | { readonly arguments: readonly string[]; readonly path: string }
     | undefined;
   const updated = await updateRunnerIfAvailable(updateContext(fixture), {
+    beforeRestart: () => {
+      operations.push("handoff");
+      expect(installedExecutable(fixture)).toBe("old executable");
+      return Promise.resolve();
+    },
     fetch: (request) => {
       expect(request.url).toBe(
         `http://localhost:3000/runner/executable?target=${RUNNER_TARGET}`,
@@ -90,11 +96,13 @@ test("atomically installs and launches an available runner update", async () => 
       return Promise.resolve(updateResponse());
     },
     launch: (path, arguments_) => {
+      operations.push("launch");
       launched = { arguments: arguments_, path };
     },
   });
 
   expect(updated).toBe(true);
+  expect(operations).toEqual(["handoff", "launch"]);
   expect(new Uint8Array(readFileSync(fixture.executablePath))).toEqual(
     UPDATED_EXECUTABLE,
   );
@@ -113,7 +121,20 @@ test("keeps running when the server reports that the runner is current", async (
   });
 
   expect(updated).toBe(false);
-  expect(installedExecutable(fixture)).toBe("old executable");
+  expect(readFileSync(fixture.executablePath, "utf8")).toBe("old executable");
+});
+
+test("does not install or launch when the restart handoff fails", async () => {
+  const fixture = createFixture();
+
+  await expect(
+    updateRunnerIfAvailable(updateContext(fixture), {
+      beforeRestart: () => Promise.reject(new Error("handoff failed")),
+      fetch: () => Promise.resolve(updateResponse()),
+      launch: unexpectedLaunch("A failed handoff must not launch"),
+    }),
+  ).rejects.toThrow("handoff failed");
+  expect(statSync(fixture.executablePath).size).toBe("old executable".length);
 });
 
 test("rejects an update whose checksum does not match", async () => {

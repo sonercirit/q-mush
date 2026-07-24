@@ -90,8 +90,19 @@ export interface AgentModel {
 
 type ParsedAgentToolCall = AgentToolRequest<Readonly<Record<string, unknown>>>;
 
+export type AgentLoopResult =
+  | {
+      readonly messages: readonly AgentConversationMessage[];
+      readonly status: "complete";
+    }
+  | {
+      readonly messages: readonly AgentConversationMessage[];
+      readonly status: "handoff";
+    };
+
 export interface AgentLoopOptions {
   readonly executeTool: (call: ParsedAgentToolCall) => Promise<string>;
+  readonly handoffRequested?: () => boolean;
   readonly initialMessages: readonly AgentConversationMessage[];
   readonly model: AgentModel;
   readonly prepareMessages?: (
@@ -126,16 +137,29 @@ function parseArguments(
   return parseOptionalJsonRecord(value);
 }
 
+function handoffResult(
+  messages: readonly AgentConversationMessage[],
+): AgentLoopResult {
+  return { messages, status: "handoff" };
+}
+
 export async function runAgentLoop(
   options: AgentLoopOptions,
-): Promise<readonly AgentConversationMessage[]> {
+): Promise<AgentLoopResult> {
   let messages = [...options.initialMessages];
 
   for (;;) {
+    // cpd-ignore-start -- Handoff checks intentionally guard each durable model boundary.
+    if (options.handoffRequested?.() === true) {
+      return handoffResult(messages);
+    }
     throwIfAborted(options.signal);
     if (options.prepareMessages !== undefined) {
       messages = [...(await options.prepareMessages(messages, options.signal))];
       throwIfAborted(options.signal);
+      if (options.handoffRequested?.() === true) {
+        return handoffResult(messages);
+      }
     }
     const turn = await options.model.complete(messages, options.signal);
     throwIfAborted(options.signal);
@@ -169,7 +193,10 @@ export async function runAgentLoop(
     messages.push(assistantMessage);
 
     if (turn.toolCalls.length === 0) {
-      return messages;
+      return {
+        messages,
+        status: options.handoffRequested?.() === true ? "handoff" : "complete",
+      };
     }
 
     for (const call of turn.toolCalls) {
@@ -193,5 +220,10 @@ export async function runAgentLoop(
       await options.recordMessage(toolMessage);
       messages.push(toolMessage);
     }
+
+    if (options.handoffRequested?.() === true) {
+      return handoffResult(messages);
+    }
+    // cpd-ignore-end
   }
 }

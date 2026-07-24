@@ -26,6 +26,7 @@ export interface RunnerUpdateContext {
 }
 
 interface RunnerUpdateDependencies {
+  readonly beforeRestart?: () => Promise<void>;
   readonly fetch?: UpdateFetch;
   readonly launch?: LaunchRunner;
 }
@@ -125,6 +126,7 @@ export async function updateRunnerIfAvailable(
 
   const expectedDigest = validateUpdateResponse(response);
   const executable = await readVerifiedExecutable(response, expectedDigest);
+  await dependencies.beforeRestart?.();
   replaceExecutable(context.executablePath, executable);
   (dependencies.launch ?? launchRunner)(context.executablePath, [
     "--config",

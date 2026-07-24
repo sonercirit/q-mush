@@ -18,6 +18,7 @@ export const TEST_SESSION_DETAIL: AgentSessionDetail = {
   provider: "openai",
   providerPricing: null,
   reasoningEffort: null,
+  restartHandoff: null,
   runnerId: "runner-1",
   status: "idle",
   title: "Fix the app",

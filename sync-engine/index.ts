@@ -60,6 +60,7 @@ const realtime = createRealtimeIntegration({
   runners,
   sessions,
 });
+sessions.recover();
 const handleRequest = createRequestHandler(
   clientJavaScript,
   stylesheet,

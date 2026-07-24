@@ -44,6 +44,10 @@ const STATUS_PRESENTATION: Readonly<
     classes: "border-cyan-300/20 bg-cyan-300/10 text-cyan-200",
     label: "Ready",
   },
+  paused: {
+    classes: "border-violet-300/20 bg-violet-300/10 text-violet-200",
+    label: "Restarting",
+  },
   queued: {
     classes: "border-amber-300/20 bg-amber-300/10 text-amber-200",
     label: "Queued",
@@ -283,6 +287,9 @@ function composerUnavailableReason(
   if (state.compacting) {
     return "Compacting…";
   }
+  if (detail.status === "paused") {
+    return "Session is restarting. You can send when it is ready.";
+  }
   if (detail.status === "queued") {
     return "Session is queued. You can send when it is ready.";
   }
@@ -330,7 +337,9 @@ function LoadedSessionDetail(props: {
   readonly state: SessionViewState;
 }): JSX.Element {
   const active = (): boolean =>
-    props.detail.status === "queued" || props.detail.status === "running";
+    props.detail.status === "queued" ||
+    props.detail.status === "running" ||
+    props.detail.status === "paused";
   const composerReason = (): string | undefined =>
     composerUnavailableReason(
       props.detail,

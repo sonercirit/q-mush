@@ -263,6 +263,7 @@ describe("session agent tools", () => {
   });
 
   test("rejects a spawn without access to its credential", async () => {
+    // cpd-ignore-start -- Adjacent session-tool cases intentionally assert the same owner session count.
     const model = scriptedModel([
       {
         content: "Trying another credential.",
@@ -291,12 +292,15 @@ describe("session agent tools", () => {
     ]);
     const setup = await startToolSession(model);
     const draining = setup.sessions.drain();
-    const detail = await completedParentDetail(setup, "idle");
-    const output = findToolResultContent(detail, "spawn_session");
+    const detail = await completedParentDetail(setup, "paused");
 
-    expect(output).toContain("server_restarting");
+    expect(findToolResultContent(detail, "spawn_session")).toBeUndefined();
+    expect(
+      setup.sessions.listForUser("018bcfe5-6800-7000-8000-000000000021"),
+    ).toHaveLength(1);
     await draining;
     setup.database.$client.close();
+    // cpd-ignore-end
   });
 
   test("spawns without blocking and reports the child final message later", async () => {

@@ -7,7 +7,9 @@ export function unavailableSessionResponse(
   if (detail === undefined) {
     return createApiError("not_found", 404);
   }
-  return detail.status === "queued" || detail.status === "running"
+  return detail.status === "queued" ||
+    detail.status === "running" ||
+    detail.status === "paused"
     ? createApiError("session_busy", 409)
     : undefined;
 }

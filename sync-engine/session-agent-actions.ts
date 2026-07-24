@@ -2,6 +2,7 @@ import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { createJsonResponse } from "./http.ts";
 import {
+  pauseQueuedSessionForRestart,
   responseToolOutput,
   spawnAgentSession,
   spawnedSessionReport,
@@ -81,7 +82,8 @@ export class SessionAgentActions {
     if (
       current !== undefined &&
       current.status !== "queued" &&
-      current.status !== "running"
+      current.status !== "running" &&
+      current.status !== "paused"
     ) {
       this.reportOne(current, userId);
     }
@@ -131,7 +133,9 @@ export class SessionAgentActions {
       parent !== undefined &&
       parent.status !== "queued" &&
       parent.status !== "running" &&
+      parent.status !== "paused" &&
       !this.#dependencies.activeSession(parent.id) &&
+      this.#dependencies.acceptsRunner(parent.runnerId) &&
       this.#dependencies.runnerIsAvailable(userId, parent.runnerId)
     ) {
       void this.#queue(userId, parent.id);
@@ -156,6 +160,9 @@ export class SessionAgentActions {
     if (unavailable !== undefined) {
       return responseToolOutput(unavailable);
     }
+    if (!this.#dependencies.acceptsRunner(target.runnerId)) {
+      return sessionToolOutput({ error: "server_restarting" });
+    }
     if (!this.#dependencies.runnerIsAvailable(userId, target.runnerId)) {
       return sessionToolOutput({ error: "runner_unavailable" });
     }
@@ -175,7 +182,22 @@ export class SessionAgentActions {
         if (
           !this.#dependencies.launchSession(credential, queued.detail, userId)
         ) {
-          return createJsonResponse({ error: "server_restarting" }, 503);
+          if (
+            pauseQueuedSessionForRestart(
+              this.#dependencies,
+              queued.detail,
+              userId,
+            )
+          ) {
+            return createJsonResponse({ error: "server_restarting" }, 503);
+          }
+          this.#dependencies.store.mark(
+            queued.detail.id,
+            "failed",
+            this.#dependencies.now(),
+          );
+          this.#dependencies.notify(userId, queued.detail.id);
+          return createJsonResponse({ error: "session_launch_failed" }, 500);
         }
         this.#dependencies.notify(userId, sessionId);
         return createJsonResponse({ sessionId, status: "queued" });
@@ -189,7 +211,7 @@ export class SessionAgentActions {
     userId: string,
     input: SpawnSessionToolInput,
   ): Promise<string> {
-    if (this.#dependencies.draining()) {
+    if (!this.#dependencies.acceptsRunner(input.runnerId)) {
       return Promise.resolve(sessionToolOutput({ error: "server_restarting" }));
     }
     if (!this.#dependencies.runnerIsAvailable(userId, input.runnerId)) {

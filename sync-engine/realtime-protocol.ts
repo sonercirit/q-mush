@@ -10,6 +10,7 @@ export type RunnerClientMessage =
       readonly output: string;
       readonly type: "result";
     }
+  | { readonly restartId: string; readonly type: "restart" }
   | { readonly type: "heartbeat" };
 
 export interface RunnerConnectMessage {
@@ -61,6 +62,18 @@ export function readRunnerClientMessage(message: string): RunnerClientMessage {
 
   if (value["type"] === "heartbeat") {
     return { type: "heartbeat" };
+  }
+
+  if (value["type"] === "restart") {
+    const restartId = value["restartId"];
+    if (
+      typeof restartId === "string" &&
+      restartId.length > 0 &&
+      restartId.length <= 200
+    ) {
+      return { restartId, type: "restart" };
+    }
+    throw new Error("The runner restart message was invalid");
   }
 
   const commandId = value["commandId"];

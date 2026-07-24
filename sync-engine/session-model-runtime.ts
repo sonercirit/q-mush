@@ -24,6 +24,7 @@ export function sessionModelRuntime(
   credential: ProviderCredentialAccess,
   userId: string,
   controller: AbortController,
+  restartHandoffRequested: () => boolean,
 ): SessionAgentRuntimeDependencies {
   return {
     braveSearch: resources.braveSearch,
@@ -32,6 +33,7 @@ export function sessionModelRuntime(
     detail,
     modelFactory: resources.modelFactory,
     now: resources.now,
+    restartHandoffRequested,
     notify: () => {
       resources.notify(userId, detail.id);
     },
