@@ -111,9 +111,10 @@ Living project memory.
   (including compaction), token usage, and the context limit. OpenRouter charges
   are authoritative; others use captured/OpenAI estimates, with unknown prices
   unavailable. OAuth figures are API equivalents, not subscription charges.
-  Usage is yellow at 80% and red at 90%. Auto-compaction defaults on and
-  summarizes completed history before the next request at 95%; idle sessions can
-  compact manually. The composer stays mounted across statuses, explains
+  Usage is yellow at 80% and red at 90%. Auto-compaction defaults on; at 95% it
+  summarizes completed history and transparently continues the active run from
+  the handoff. Idle sessions can compact manually without continuing. The
+  composer stays mounted across statuses, explains
   unavailable actions, and preserves drafts. Local preferences filter transcript
   categories without changing messages. Compaction soft-deletes prior messages
   and inserts a replayable handoff. Provider secrets stay out of browser and
