@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "ec60f915-5435-4423-83b9-47abb9304428",
-  "prevId": "00f1e870-6534-47b7-8fab-eed87ff5e2e6",
+  "id": "69862e82-58ed-403d-a926-de94e570d4f4",
+  "prevId": "ec60f915-5435-4423-83b9-47abb9304428",
   "tables": {
     "agent_messages": {
       "name": "agent_messages",
@@ -230,13 +230,25 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "sequence": {
+          "name": "sequence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
         }
       },
       "indexes": {
-        "agent_pending_inputs_session_deletion_creation_index": {
-          "name": "agent_pending_inputs_session_deletion_creation_index",
-          "columns": ["session_id", "is_deleted", "created_at"],
+        "agent_pending_inputs_session_deletion_sequence_index": {
+          "name": "agent_pending_inputs_session_deletion_sequence_index",
+          "columns": ["session_id", "is_deleted", "sequence"],
           "isUnique": false
+        },
+        "agent_pending_inputs_session_sequence_unique": {
+          "name": "agent_pending_inputs_session_sequence_unique",
+          "columns": ["session_id", "sequence"],
+          "isUnique": true
         },
         "agent_pending_inputs_user_request_unique": {
           "name": "agent_pending_inputs_user_request_unique",

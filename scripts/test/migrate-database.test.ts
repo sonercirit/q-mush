@@ -6,12 +6,14 @@ import { afterEach, expect, test } from "vitest";
 import { createDatabase, type AppDatabase } from "../../shared/database.ts";
 import {
   agentMessages,
+  agentPendingInputs,
   agentSessions,
   providerCredentials,
   sessions,
   users,
 } from "../../shared/database/schema.ts";
 import { SYSTEM_ID } from "../../shared/ids.ts";
+import { SessionStore } from "../../sync-engine/session-store.ts";
 
 const ROOT_DIRECTORY = join(import.meta.dirname, "../..");
 const MIGRATIONS = [
@@ -36,9 +38,23 @@ const AGENT_SESSION_MIGRATIONS = [
   { file: "0012_damp_khan.sql", timestamp: 1_784_773_990_609 },
   { file: "0013_session-tools.sql", timestamp: 1_784_776_192_396 },
 ] as const;
+const PENDING_INPUT_MIGRATIONS = [
+  ...AGENT_SESSION_MIGRATIONS,
+  { file: "0014_mushy_jean_grey.sql", timestamp: 1_784_825_553_938 },
+  { file: "0015_agent-message-errors.sql", timestamp: 1_784_832_440_988 },
+  { file: "0016_polite_the_professor.sql", timestamp: 1_784_843_598_313 },
+] as const;
 const SESSION_LIFETIME_MILLISECONDS = 7 * 24 * 60 * 60 * 1000;
 const UUID_V7_PATTERN =
   /^[\da-f]{8}-[\da-f]{4}-7[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/u;
+
+interface LegacyAgentSessionSeed {
+  readonly credentialId: string;
+  readonly runnerId: string;
+  readonly sessionId: string;
+  readonly timestamp: number;
+  readonly userId: string;
+}
 
 interface Migration {
   readonly file: string;
@@ -141,6 +157,123 @@ async function migrateLegacyDatabase(
   return createDatabase(path);
 }
 
+function seedLegacyAgentSession(database: Database): LegacyAgentSessionSeed {
+  const seed = {
+    credentialId: "018bcfe5-6800-7000-8000-000000000092",
+    runnerId: "018bcfe5-6800-7000-8000-000000000093",
+    sessionId: "018bcfe5-6800-7000-8000-000000000094",
+    timestamp: 1_700_000_000_000,
+    userId: "018bcfe5-6800-7000-8000-000000000091",
+  } as const;
+  database.run(
+    `INSERT INTO users (
+      id, google_subject, email, name, created_at, created_by_id,
+      updated_at, updated_by_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      seed.userId,
+      "pending-migration-google-subject",
+      "pending-migration@example.com",
+      "Pending Migration",
+      seed.timestamp,
+      SYSTEM_ID,
+      seed.timestamp,
+      SYSTEM_ID,
+    ],
+  );
+  database.run(
+    `INSERT INTO provider_credentials (
+      id, user_id, created_at, created_by_id, updated_at, updated_by_id,
+      provider, label, source, encrypted_credential, credential_fingerprint
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      seed.credentialId,
+      ...ownedAuditValues(seed),
+      "openrouter",
+      "Pending migration key",
+      "api_key",
+      "encrypted-pending-migration-key",
+      "pending-migration-key-fingerprint",
+    ],
+  );
+  database.run(
+    `INSERT INTO runners (
+      id, user_id, created_at, created_by_id, updated_at, updated_by_id,
+      token_hash
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      seed.runnerId,
+      ...ownedAuditValues(seed),
+      "pending-migration-runner-token-hash",
+    ],
+  );
+  database.run(
+    `INSERT INTO agent_sessions (
+      id, user_id, created_at, created_by_id, updated_at, updated_by_id,
+      runner_id, provider_credential_id, provider, model, working_directory,
+      title, status
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      seed.sessionId,
+      ...ownedAuditValues(seed),
+      seed.runnerId,
+      seed.credentialId,
+      "openrouter",
+      "openai/gpt-4.1-mini",
+      "/workspace",
+      "Pending migration session",
+      "running",
+    ],
+  );
+  return seed;
+}
+
+function ownedAuditValues(seed: LegacyAgentSessionSeed) {
+  return [
+    seed.userId,
+    seed.timestamp,
+    seed.userId,
+    seed.timestamp,
+    seed.userId,
+  ] as const;
+}
+
+function insertLegacyPendingInput(
+  database: Database,
+  seed: LegacyAgentSessionSeed,
+  input: {
+    readonly createdAt: number;
+    readonly id: string;
+    readonly isDeleted?: boolean;
+    readonly kind: "follow_up" | "steer";
+  },
+): void {
+  database.run(
+    `INSERT INTO agent_pending_inputs (
+      id, user_id, created_at, created_by_id, updated_at, updated_by_id,
+      is_deleted, session_id, client_request_id, kind, content, images
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      input.id,
+      seed.userId,
+      input.createdAt,
+      seed.userId,
+      input.createdAt,
+      seed.userId,
+      input.isDeleted ?? false,
+      seed.sessionId,
+      `request-${input.id}`,
+      input.kind,
+      `content-${input.id}`,
+      null,
+    ],
+  );
+}
+
+function expectNoForeignKeyViolations(database: AppDatabase): void {
+  expect(database.$client.query("PRAGMA foreign_key_check").all()).toEqual([]);
+}
+
 test("database migration command applies pending migrations", async () => {
   temporaryDirectory = mkdtempSync(join(tmpdir(), "q-mush-migrate-test-"));
   const databasePath = join(temporaryDirectory, "migrated.sqlite");
@@ -157,6 +290,87 @@ test("database migration command applies pending migrations", async () => {
 
   expect(tables).toContain("sessions");
   expect(tables).toContain("users");
+});
+
+test("pending-input migration backfills a deterministic durable sequence", async () => {
+  const { database: legacyDatabase, path } = await createLegacyDatabase(
+    "q-mush-pending-input-upgrade-test-",
+    "pending-inputs.sqlite",
+    PENDING_INPUT_MIGRATIONS,
+  );
+  const seed = seedLegacyAgentSession(legacyDatabase);
+  const legacyInputs = [
+    { createdAt: seed.timestamp + 2, id: "pending-z", kind: "steer" },
+    { createdAt: seed.timestamp + 1, id: "pending-a", kind: "follow_up" },
+    {
+      createdAt: seed.timestamp + 1,
+      id: "pending-m",
+      isDeleted: true,
+      kind: "steer",
+    },
+  ] as const;
+  for (const input of legacyInputs) {
+    insertLegacyPendingInput(legacyDatabase, seed, input);
+  }
+
+  const upgradedDatabase = await migrateLegacyDatabase(legacyDatabase, path);
+  expect(
+    upgradedDatabase
+      .select({
+        content: agentPendingInputs.content,
+        id: agentPendingInputs.id,
+        isDeleted: agentPendingInputs.isDeleted,
+        sequence: agentPendingInputs.sequence,
+      })
+      .from(agentPendingInputs)
+      .all(),
+  ).toEqual([
+    {
+      content: "content-pending-a",
+      id: "pending-a",
+      isDeleted: false,
+      sequence: 1,
+    },
+    {
+      content: "content-pending-m",
+      id: "pending-m",
+      isDeleted: true,
+      sequence: 2,
+    },
+    {
+      content: "content-pending-z",
+      id: "pending-z",
+      isDeleted: false,
+      sequence: 3,
+    },
+  ]);
+  expect(
+    new SessionStore(upgradedDatabase).get(seed.userId, seed.sessionId)
+      ?.pendingInputs,
+  ).toEqual([
+    {
+      content: "content-pending-a",
+      createdAt: seed.timestamp + 1,
+      id: "pending-a",
+      images: [],
+      kind: "follow_up",
+    },
+    {
+      content: "content-pending-z",
+      createdAt: seed.timestamp + 2,
+      id: "pending-z",
+      images: [],
+      kind: "steer",
+    },
+  ]);
+  expect(() =>
+    upgradedDatabase.$client.run(
+      "UPDATE agent_pending_inputs SET sequence = 1 WHERE id = ?",
+      ["pending-z"],
+    ),
+  ).toThrow();
+  expectNoForeignKeyViolations(upgradedDatabase);
+  upgradedDatabase.$client.close();
 });
 
 test("session migration preserves transcripts with foreign keys", async () => {
@@ -306,9 +520,7 @@ test("session migration preserves transcripts with foreign keys", async () => {
       role: "error",
     },
   ]);
-  expect(
-    upgradedDatabase.$client.query("PRAGMA foreign_key_check").all(),
-  ).toEqual([]);
+  expectNoForeignKeyViolations(upgradedDatabase);
   expect(upgradedDatabase.$client.query("PRAGMA foreign_keys").get()).toEqual({
     foreign_keys: 1,
   });
