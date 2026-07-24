@@ -11,7 +11,6 @@ export default {
     "scripts/repository-check.ts!",
     "scripts/restart-development-server.ts!",
   ],
-  ignoreDependencies: ["@tailwindcss/vite", "vite-plugin-solid"],
   ignoreFiles: ["knip.config.ts"],
   project: [
     "runner/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}!",

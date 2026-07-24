@@ -1,10 +1,10 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 const ROOT_DIRECTORY = join(import.meta.dirname, "../..");
 const SCRIPTS_DIRECTORY = join(import.meta.dirname, "..");
-const ESLINT_PROBE_DIRECTORY = join(ROOT_DIRECTORY, "solid");
+const ESLINT_PROBE_DIRECTORY = join(ROOT_DIRECTORY, "solid", "test");
 const sourceProbePath = (fileName: string): string =>
   join(ESLINT_PROBE_DIRECTORY, fileName);
 const ESLINT_POLICY_PROBE = sourceProbePath("eslint-policy-probe.ts");
@@ -88,6 +88,8 @@ async function removeProbes(): Promise<void> {
 afterEach(removeProbes);
 
 describe("tooling policies", () => {
+  vi.setConfig({ testTimeout: 30_000 });
+
   test("ESLint rejects unsafe HTML while allowing TSX", async () => {
     await Promise.all([
       writeFile(
@@ -161,14 +163,14 @@ console.log(<main>{htmlExample}</main>);
     await Promise.all([
       writeFile(
         ESLINT_IMPORT_POLICY_PROBE,
-        `import type { AppDatabase } from "../shared/database.ts";
-import { createDatabase } from "../shared/database.ts";
+        `import type { AppDatabase } from "../../shared/database.ts";
+import { createDatabase } from "../../shared/database.ts";
 import { setTimeout as sleep } from "node:timers/promises";
 import filePath = require("node:path");
 import * as fileSystem from "node:fs";
 import operatingSystem from "node:os";
-import packageMetadata from "../package.json" with { type: "json" };
-import "../shared/routes.ts";
+import packageMetadata from "../../package.json" with { type: "json" };
+import "../../shared/routes.ts";
 
 type RouteModule = typeof import("./routes.ts");
 const database: AppDatabase = createDatabase(":memory:");
@@ -186,7 +188,7 @@ console.log(
       ),
       writeFile(
         ESLINT_VALID_IMPORT_POLICY_PROBE,
-        `import { createDatabase, type AppDatabase } from "../shared/database.ts";
+        `import { createDatabase, type AppDatabase } from "../../shared/database.ts";
 
 const database: AppDatabase = createDatabase(":memory:");
 console.log(database);

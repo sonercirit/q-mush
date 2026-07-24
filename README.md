@@ -273,7 +273,7 @@ After changing `shared/database/schema.ts`, generate and review a migration:
 bun run db:generate
 ```
 
-To run all static checks:
+To run all static checks (every subcheck runs even if an earlier one fails):
 
 ```bash
 bun run check
@@ -287,12 +287,12 @@ below 20,000 characters, and every JavaScript or TypeScript test file to be
 inside a directory named `test` at any depth. It also rejects application
 `.htm`, `.html`, and `.xhtml` files outside test and fixture directories. ESLint
 rejects direct HTML-like `Response` bodies and unsafe DOM HTML injection APIs in
-application source, while allowing TSX, tests, and fixtures. Both checks
-recommend TSX for application markup. The CPD check ignores import declarations
-and rejects other JavaScript or TypeScript clones of at least 20 tokens on one
-or more lines, including clones across source extensions. Run `bun run format`
-to format files, `bun run lint:fix` to apply safe lint fixes, and `bun run test`
-to run Vitest under Bun.
+all first-party source and tests, while allowing HTML-like data and TSX. Both
+checks recommend TSX for application markup. The CPD check ignores import
+declarations and rejects other JavaScript or TypeScript clones of at least 20
+tokens on one or more lines, including clones across source extensions. Run
+`bun run format` to format files, `bun run lint:fix` to apply safe lint fixes,
+and `bun run test` to run Vitest under Bun.
 
 This project was created using `bun init` in bun v1.3.14. [Bun](https://bun.com)
 is a fast all-in-one JavaScript runtime.

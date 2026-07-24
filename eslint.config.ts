@@ -216,11 +216,11 @@ export default defineConfig(
     // HTML-like text can be valid data, so restrict raw HTML sinks instead.
     files: [
       "runner/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
+      "scripts/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
       "shared/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
       "solid/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
       "sync-engine/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
     ],
-    ignores: ["**/fixtures/**", "**/test/**"],
     rules: {
       "no-restricted-properties": [
         "error",

@@ -35,8 +35,8 @@ Living project memory.
 - Check dead code/dependencies: `bun run knip`; duplicates: `bun run cpd`
 - Lint/fix: `bun run lint` / `bun run lint:fix`; all static checks:
   `bun run check`
-- CI runs tests and static checks on every push through
-  `.github/workflows/checks.yml` using Bun 1.3.14 and a frozen lockfile.
+- CI runs tests, static checks, the build, and whitespace checks for main and
+  PRs via `.github/workflows/checks.yml`, Bun 1.3.14, and a frozen lockfile.
 
 ## Architecture and Conventions
 
@@ -190,9 +190,9 @@ Living project memory.
   only for `@eslint/js`, `@tailwindcss/vite`, and `vite-plugin-solid`; aliases,
   namespaces, dynamic imports, import attributes, import-equals declarations,
   and `import()` types are rejected, as are side-effect imports except
-  `solid/styles.css`. Application source also rejects unsafe DOM HTML injection
-  properties, `dangerouslySetInnerHTML`, and direct HTML-like string or template
-  bodies in `Response`; TSX, tests, and fixtures are allowed.
+  `solid/styles.css`. First-party code rejects unsafe DOM HTML injection
+  properties, `dangerouslySetInnerHTML`, and HTML-like `Response` bodies while
+  allowing HTML-like data and TSX.
 - `knip.config.ts` checks every issue type and entry exports;
   `knip.production.config.ts` limits the production graph to runtime source.
   `bun run knip` runs both production and comprehensive test/tooling passes, so
