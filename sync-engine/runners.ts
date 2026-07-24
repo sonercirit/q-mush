@@ -33,11 +33,17 @@ type RunnerRemovedListener = (
 
 type RunnerRemovingListener = (userId: string, runnerId: string) => void;
 
+interface RunnerRemovalListeners {
+  readonly removed: RunnerRemovedListener;
+  readonly removing: RunnerRemovingListener;
+}
+
 interface RunnerDependencies extends Pick<
   OAuthDependencies,
   "database" | "now" | "randomId" | "randomToken"
 > {
   readonly onRemoved?: RunnerRemovedListener;
+  readonly store?: RunnerStore;
 }
 
 interface ConnectedRunner {
@@ -59,7 +65,6 @@ export interface RunnerIntegration {
   listForUser(userId: string): readonly RunnerSummary[];
   listOnlineForUser(userId: string, query: RunnerOptionQuery): RunnerPage;
   onRemoved(listener: RunnerRemovedListener): void;
-  onRemovalFailed(listener: RunnerRemovingListener): void;
   onRemoving(listener: RunnerRemovingListener): void;
   onlineForUser(userId: string): readonly RunnerSummary[];
   remove(request: Request, runnerId: string): Promise<Response>;
@@ -129,9 +134,7 @@ export function readRunnerMetadata(value: unknown): RunnerMetadata | undefined {
 class DrizzleRunnerIntegration implements RunnerIntegration {
   readonly #auth: GoogleAuth;
   readonly #now: () => number;
-  readonly #onRemoved = new Set<RunnerRemovedListener>();
-  readonly #onRemovalFailed = new Set<RunnerRemovingListener>();
-  readonly #onRemoving = new Set<RunnerRemovingListener>();
+  readonly #removalListeners = new Set<RunnerRemovalListeners>();
   readonly #randomToken: () => string;
   readonly #store: RunnerStore;
 
@@ -139,13 +142,18 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
     this.#auth = auth;
     this.#now = dependencies.now ?? Date.now;
     if (dependencies.onRemoved !== undefined) {
-      this.#onRemoved.add(dependencies.onRemoved);
+      this.#removalListeners.add({
+        removed: dependencies.onRemoved,
+        removing: () => undefined,
+      });
     }
     this.#randomToken = dependencies.randomToken ?? defaultRandomToken;
-    this.#store = new RunnerStore(
-      dependencies.database ?? createDatabase(":memory:"),
-      dependencies.randomId ?? createUuidV7,
-    );
+    this.#store =
+      dependencies.store ??
+      new RunnerStore(
+        dependencies.database ?? createDatabase(":memory:"),
+        dependencies.randomId ?? createUuidV7,
+      );
   }
 
   collection(request: Request): Response {
@@ -195,15 +203,17 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
   }
 
   onRemoved(listener: RunnerRemovedListener): void {
-    this.#onRemoved.add(listener);
-  }
-
-  onRemovalFailed(listener: RunnerRemovingListener): void {
-    this.#onRemovalFailed.add(listener);
+    this.#removalListeners.add({
+      removed: listener,
+      removing: () => undefined,
+    });
   }
 
   onRemoving(listener: RunnerRemovingListener): void {
-    this.#onRemoving.add(listener);
+    this.#removalListeners.add({
+      removed: () => undefined,
+      removing: listener,
+    });
   }
 
   onlineForUser(userId: string): readonly RunnerSummary[] {
@@ -225,36 +235,23 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
         if (!this.#store.exists(user.id, runnerId)) {
           return createApiError("not_found", 404);
         }
-        for (const listener of this.#onRemoving) {
-          listener(user.id, runnerId);
+        const removed = this.#store.remove(user.id, runnerId, this.#now());
+        if (!removed) {
+          return createApiError("not_found", 404);
         }
-        let removed = false;
-        try {
-          removed = this.#store.remove(user.id, runnerId, this.#now());
-          if (!removed) {
-            return createApiError("not_found", 404);
-          }
-          await this.#notifyRemoved(this.#onRemoved, user.id, runnerId);
-          return createNoContentResponse();
-        } finally {
-          if (!removed) {
-            for (const listener of this.#onRemovalFailed) {
-              listener(user.id, runnerId);
-            }
-          }
+        for (const { removing } of this.#removalListeners) {
+          removing(user.id, runnerId);
         }
+        await this.#notifyRemoved(user.id, runnerId);
+        return createNoContentResponse();
       }),
     );
   }
 
-  async #notifyRemoved(
-    listeners: ReadonlySet<RunnerRemovedListener>,
-    userId: string,
-    runnerId: string,
-  ): Promise<void> {
+  async #notifyRemoved(userId: string, runnerId: string): Promise<void> {
     await Promise.all(
-      [...listeners].map(async (listener) => {
-        await listener(userId, runnerId);
+      [...this.#removalListeners].map(async ({ removed }) => {
+        await removed(userId, runnerId);
       }),
     );
   }

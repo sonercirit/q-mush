@@ -120,6 +120,13 @@
       "when": 1784845867828,
       "tag": "0016_thankful_silver_sable",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1784917618203,
+      "tag": "0017_plain_silver_samurai",
+      "breakpoints": true
     }
   ]
 }

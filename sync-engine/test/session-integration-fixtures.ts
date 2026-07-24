@@ -40,10 +40,13 @@ type FixtureCredentials = Readonly<
 >;
 
 interface ConnectedSessionOptions {
+  readonly broker?: RunnerCommandBroker;
   readonly commandId?: () => string;
   readonly credentials?: FixtureCredentials;
+  readonly credentialGate?: Promise<void>;
   readonly deletedCredentials?: FixtureCredentials;
   readonly foreignCredentials?: FixtureCredentials;
+  readonly onCredentialRead?: () => void;
   readonly runners?: readonly RunnerSummary[];
 }
 
@@ -132,10 +135,13 @@ export function connectedSessionSetup(
     }
   }
   const reader = (provider: "openai" | "openrouter") => ({
-    readCredential: (userId: string, credentialId: string) =>
-      userId === TEST_USER_ID
+    readCredential: async (userId: string, credentialId: string) => {
+      options.onCredentialRead?.();
+      await (options.credentialGate ?? Promise.resolve());
+      return userId === TEST_USER_ID
         ? configuredCredentials[provider].find(({ id }) => id === credentialId)
-        : undefined,
+        : undefined;
+    },
   });
   const ids = Array.from({ length: 100 }, (_, index) =>
     index === 0
@@ -149,14 +155,16 @@ export function connectedSessionSetup(
   const selectedTools: (readonly AgentSessionToolName[])[] = [];
   const runnerCommands: RunnerToolCommand[] = [];
   let latestRunnerCommand: RunnerToolCommand | undefined;
-  const broker = new RunnerCommandBroker({
-    commandId: options.commandId ?? (() => RUNNER_COMMAND_ID),
-    deliver: (_runnerId, command) => {
-      latestRunnerCommand = command;
-      runnerCommands.push(command);
-      return true;
-    },
-  });
+  const broker =
+    options.broker ??
+    new RunnerCommandBroker({
+      commandId: options.commandId ?? (() => RUNNER_COMMAND_ID),
+      deliver: (_runnerId, command) => {
+        latestRunnerCommand = command;
+        runnerCommands.push(command);
+        return true;
+      },
+    });
   let listRunnerCalls = 0;
   const runnerIntegration: typeof runners = {
     collection: (request) => runners.collection(request),
@@ -193,9 +201,6 @@ export function connectedSessionSetup(
     },
     onRemoved: (listener) => {
       runners.onRemoved(listener);
-    },
-    onRemovalFailed: (listener) => {
-      runners.onRemovalFailed(listener);
     },
     onRemoving: (listener) => {
       runners.onRemoving(listener);

@@ -15,7 +15,7 @@ import {
   readStringField,
   readWorkingDirectory,
 } from "./session-request-helpers.ts";
-import type { CreateAgentSession } from "./session-store.ts";
+import type { CreateAgentSession } from "./session-store-create.ts";
 
 const MAXIMUM_PROMPT_LENGTH = 32_768;
 

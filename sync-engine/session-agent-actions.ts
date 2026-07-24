@@ -33,20 +33,23 @@ import {
 } from "./session-agent-tools.ts";
 import { unavailableSessionResponse } from "./session-availability.ts";
 import type { RunnerDirectoryBrowseResult } from "./session-request-helpers.ts";
+import type { RunnerDirectoryRequest } from "./session-runner-directory-request.ts";
 import { readSessionSnapshot } from "./session-store-agent-read.ts";
 import type { PendingSpawnedSession } from "./session-store-spawns.ts";
 
 const optionsPageOffset = (page: number): number =>
   (page - 1) * SESSION_OPTIONS_PAGE_SIZE;
 
+function runnerUnavailableOutput(): string {
+  return sessionToolOutput({ error: "runner_unavailable" });
+}
+
 interface SessionAgentActionsDependencies extends SessionAgentActionDependencies {
   readonly abortSession: (sessionId: string) => void;
   readonly activeSession: (sessionId: string) => boolean;
   readonly broker: Pick<RunnerCommandBroker, "cancelSession">;
   readonly browseDirectories: (
-    userId: string,
-    runnerId: string,
-    path: string,
+    request: RunnerDirectoryRequest,
   ) => Promise<RunnerDirectoryBrowseResult>;
   readonly listOnlineRunners: (userId: string) => readonly RunnerSummary[];
   readonly listRunnerOptions: (
@@ -77,7 +80,27 @@ export class SessionAgentActions {
     this.#dependencies = dependencies;
   }
 
-  actions(parentSessionId: string, userId: string): SessionAgentToolActions {
+  actions(
+    parentSessionId: string,
+    userId: string,
+    parentGeneration?: number,
+  ): SessionAgentToolActions {
+    const currentParent = (): boolean =>
+      parentGeneration === undefined ||
+      this.#dependencies.store.executionIsCurrent(
+        parentSessionId,
+        parentGeneration,
+      );
+    const guardParent =
+      <Arguments extends readonly unknown[], Result>(
+        action: (...arguments_: Arguments) => Result,
+      ) =>
+      (...arguments_: Arguments): Result => {
+        if (!currentParent()) {
+          throw new DOMException("The agent session was stopped", "AbortError");
+        }
+        return action(...arguments_);
+      };
     const anotherSession = (sessionId: string): string => {
       if (sessionId === parentSessionId) {
         throw new Error(
@@ -87,17 +110,18 @@ export class SessionAgentActions {
       return sessionId;
     };
     return {
-      continueSession: (sessionId) =>
+      continueSession: guardParent((sessionId) =>
         this.#queue(userId, anotherSession(sessionId)),
+      ),
       browseRunnerDirectories: (runnerId, path) =>
-        this.#browseDirectories(userId, runnerId, path),
+        this.#browseDirectories(userId, runnerId, path, currentParent),
       getSessionOptions: (input) => this.#options(userId, input),
       listRunners: () =>
         sessionToolOutput(this.#dependencies.listOnlineRunners(userId)),
       listSessions: () =>
         sessionToolOutput(this.#dependencies.store.list(userId)),
       readSession: (input) => this.#read(userId, input),
-      reassignSession: (sessionId, runnerId, workingDirectory) =>
+      reassignSession: guardParent((sessionId, runnerId, workingDirectory) =>
         this.#reassign(
           parentSessionId,
           userId,
@@ -105,11 +129,16 @@ export class SessionAgentActions {
           runnerId,
           workingDirectory,
         ),
-      sendToSession: (sessionId, message) =>
+      ),
+      sendToSession: guardParent((sessionId, message) =>
         this.#queue(userId, anotherSession(sessionId), message),
-      spawnSession: (input) => this.#spawn(parentSessionId, userId, input),
-      stopSession: (sessionId) =>
+      ),
+      spawnSession: guardParent((input) =>
+        this.#spawn(parentSessionId, userId, input),
+      ),
+      stopSession: guardParent((sessionId) =>
         this.#stop(parentSessionId, userId, sessionId),
+      ),
     };
   }
 
@@ -154,27 +183,25 @@ export class SessionAgentActions {
     userId: string,
     runnerId: string,
     path: string,
+    authorize?: () => boolean,
   ): Promise<string> {
     const online = this.#onlineRunnerExists(userId, runnerId);
-    if (!online) {
-      return this.#runnerUnavailableOutput();
+    if (!online || authorize?.() === false) {
+      return runnerUnavailableOutput();
     }
     try {
-      const result = await this.#dependencies.browseDirectories(
-        userId,
-        runnerId,
+      const result = await this.#dependencies.browseDirectories({
+        ...(authorize === undefined ? {} : { authorize }),
         path,
-      );
+        runnerId,
+        userId,
+      });
       return sessionToolOutput(
         result.status === "listed" ? result.listing : { error: result.status },
       );
     } catch {
       return sessionToolOutput({ error: "directory_unavailable" });
     }
-  }
-
-  #runnerUnavailableOutput(): string {
-    return sessionToolOutput({ error: "runner_unavailable" });
   }
 
   #parentSessionId(
@@ -356,7 +383,7 @@ export class SessionAgentActions {
       return responseToolOutput(unavailable);
     }
     if (!this.#dependencies.runnerIsAvailable(userId, target.runnerId)) {
-      return this.#runnerUnavailableOutput();
+      return runnerUnavailableOutput();
     }
     const response = await this.#dependencies.withCredential(
       userId,
@@ -369,7 +396,7 @@ export class SessionAgentActions {
           message === undefined ? undefined : { content: message, images: [] },
         );
         if (queued.status !== "queued") {
-          return createJsonResponse({ error: queued.status });
+          return createJsonResponse({ error: queued.status }, 409);
         }
         if (
           !this.#dependencies.launchSession(credential, queued.detail, userId)
@@ -404,7 +431,7 @@ export class SessionAgentActions {
     );
     if (result.status !== "reassigned") {
       return result.status === "runner_unavailable"
-        ? this.#runnerUnavailableOutput()
+        ? runnerUnavailableOutput()
         : sessionToolOutput({ error: `session_${result.status}` });
     }
     this.#dependencies.notify(userId, sessionId);

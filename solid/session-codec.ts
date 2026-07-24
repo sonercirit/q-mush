@@ -173,6 +173,7 @@ function readSummary(value: unknown): AgentSessionSummary {
   const createdAt = readFiniteNumber(value["createdAt"]);
   const credentialId = value["credentialId"];
   const currentContextTokens = readFiniteNumber(value["currentContextTokens"]);
+  const generation = readFiniteNumber(value["generation"]);
   const id = value["id"];
   const maxContextTokens = value["maxContextTokens"];
   const model = value["model"];
@@ -204,6 +205,9 @@ function readSummary(value: unknown): AgentSessionSummary {
     currentContextTokens === undefined ||
     currentContextTokens < 0 ||
     !Number.isSafeInteger(currentContextTokens) ||
+    generation === undefined ||
+    generation < 0 ||
+    !Number.isSafeInteger(generation) ||
     typeof id !== "string" ||
     (maxContextTokens !== null &&
       (typeof maxContextTokens !== "number" ||
@@ -234,6 +238,7 @@ function readSummary(value: unknown): AgentSessionSummary {
     createdAt,
     credentialId,
     currentContextTokens,
+    generation,
     id,
     maxContextTokens,
     model,
@@ -337,6 +342,7 @@ export function summaryFromDetail(
     createdAt: detail.createdAt,
     credentialId: detail.credentialId,
     currentContextTokens: detail.currentContextTokens,
+    generation: detail.generation,
     id: detail.id,
     maxContextTokens: detail.maxContextTokens,
     model: detail.model,

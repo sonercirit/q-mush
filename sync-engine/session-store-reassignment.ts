@@ -1,14 +1,15 @@
-import { and, eq, gte, inArray, isNotNull, type SQL } from "drizzle-orm";
+import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
-import { agentSessions, runners } from "../shared/database/schema.ts";
+import { agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID } from "../shared/ids.ts";
-import { RUNNER_ONLINE_WINDOW_MILLISECONDS } from "../shared/runner-model.ts";
 import type {
   AgentSessionDetail,
   AgentSessionStatus,
 } from "../shared/session-model.ts";
 import { activeSessionDuration } from "../shared/session-timing.ts";
+import { runnerIsAvailable } from "./runner-availability-store.ts";
+import { readStoredSessionState } from "./session-store-state.ts";
 
 export const SESSION_TIMING_SELECTION = {
   activeDurationMs: agentSessions.activeDurationMs,
@@ -18,6 +19,7 @@ export const SESSION_TIMING_SELECTION = {
 export interface StoredSessionTiming {
   readonly activeDurationMs: number;
   readonly activeStartedAt: Date | null;
+  readonly status?: AgentSessionStatus;
 }
 
 export function sessionTimingUpdate(
@@ -33,7 +35,10 @@ export function sessionTimingUpdate(
 export function updateStoredSession(
   database: Pick<AppDatabase, "update">,
   sessionId: string,
-  values: Partial<typeof agentSessions.$inferInsert>,
+  values: Omit<
+    Partial<typeof agentSessions.$inferInsert>,
+    "executionGeneration"
+  > & { readonly executionGeneration?: number | SQL },
 ): void {
   database
     .update(agentSessions)
@@ -50,8 +55,9 @@ export function transitionSessionRunner(
   updateStoredSession(database, session.id, {
     ...sessionTimingUpdate(session, now),
     ...updatedAuditFields(SYSTEM_ID, now),
+    executionGeneration: sql`${agentSessions.executionGeneration} + 1`,
     runnerRequired: true,
-    status: "idle",
+    status: session.status === "stopped" ? "stopped" : "idle",
   });
 }
 
@@ -74,15 +80,31 @@ export function activeSessionCondition(filter: SessionFilter): SQL | undefined {
   );
 }
 
+export function sessionGenerationCondition(
+  filter: SessionFilter,
+  generation?: number,
+): SQL | undefined {
+  return and(
+    activeSessionCondition(filter),
+    generation === undefined
+      ? undefined
+      : eq(agentSessions.executionGeneration, generation),
+  );
+}
+
 export function runningCondition(
   sessionId: string,
   userId?: string,
+  generation?: number,
 ): SQL | undefined {
-  return activeSessionCondition({
-    id: sessionId,
-    status: "running",
-    ...(userId === undefined ? {} : { userId }),
-  });
+  return sessionGenerationCondition(
+    {
+      id: sessionId,
+      status: "running",
+      ...(userId === undefined ? {} : { userId }),
+    },
+    generation,
+  );
 }
 
 export function didUpdate(rows: readonly unknown[]): boolean {
@@ -95,21 +117,6 @@ export type ReassignSessionResult =
       readonly status:
         "busy" | "not_found" | "not_required" | "runner_unavailable";
     };
-
-function availableRunnerCondition(
-  userId: string,
-  runnerId: string,
-  now: number,
-): SQL | undefined {
-  return and(
-    eq(runners.id, runnerId),
-    eq(runners.userId, userId),
-    eq(runners.isDeleted, false),
-    isNotNull(runners.machineFingerprint),
-    isNotNull(runners.lastSeenAt),
-    gte(runners.lastSeenAt, new Date(now - RUNNER_ONLINE_WINDOW_MILLISECONDS)),
-  );
-}
 
 export function reassignStoredSession(options: {
   readonly database: AppDatabase;
@@ -128,18 +135,10 @@ export function reassignStoredSession(options: {
     userId: options.userId,
   });
   const status = options.database.transaction((transaction) => {
-    const stored = transaction
-      .select({
-        runnerRequired: agentSessions.runnerRequired,
-        status: agentSessions.status,
-      })
-      .from(agentSessions)
-      .where(ownedSession)
-      .get();
+    const stored = readStoredSessionState(transaction, ownedSession);
 
     if (stored === undefined) {
-      const status = "not_found" as const;
-      return status;
+      return "not_found" as const;
     }
     if (stored.status === "queued" || stored.status === "running") {
       return "busy" as const;
@@ -148,14 +147,14 @@ export function reassignStoredSession(options: {
       return "not_required" as const;
     }
 
-    const runner = transaction
-      .select({ id: runners.id })
-      .from(runners)
-      .where(
-        availableRunnerCondition(options.userId, options.runnerId, options.now),
+    if (
+      !runnerIsAvailable(
+        transaction,
+        options.userId,
+        options.runnerId,
+        options.now,
       )
-      .get();
-    if (runner === undefined) {
+    ) {
       return "runner_unavailable" as const;
     }
 
@@ -164,6 +163,7 @@ export function reassignStoredSession(options: {
       .set({
         runnerId: options.runnerId,
         runnerRequired: false,
+        executionGeneration: sql`${agentSessions.executionGeneration} + 1`,
         workingDirectory: options.workingDirectory,
         ...updatedAuditFields(options.userId, options.now),
       })
@@ -208,6 +208,7 @@ export function transitionStoredSession(options: {
   readonly actorId: string;
   readonly database: AppDatabase;
   readonly from: readonly AgentSessionStatus[];
+  readonly generation?: number;
   readonly now: number;
   readonly sessionId: string;
   readonly to: AgentSessionStatus;
@@ -227,6 +228,9 @@ export function transitionStoredSession(options: {
             ...(options.userId === undefined ? {} : { userId: options.userId }),
           }),
           inArray(agentSessions.status, options.from),
+          options.generation === undefined
+            ? undefined
+            : eq(agentSessions.executionGeneration, options.generation),
         ),
       )
       .returning({ updatedAt: agentSessions.updatedAt })

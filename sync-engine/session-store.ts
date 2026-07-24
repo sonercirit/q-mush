@@ -1,4 +1,4 @@
-import { desc, eq, sql, type SQL } from "drizzle-orm";
+import { desc, sql, type SQL } from "drizzle-orm";
 import type { AgentFile } from "../shared/agent-file.ts";
 import type { AgentImage } from "../shared/agent-images.ts";
 import type {
@@ -9,9 +9,9 @@ import {
   readAgentSessionToolNames,
   type AgentSessionToolName,
 } from "../shared/agent-tools.ts";
-import { createdAuditFields, updatedAuditFields } from "../shared/audit.ts";
+import { updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
-import { agentMessages, agentSessions } from "../shared/database/schema.ts";
+import { agentSessions } from "../shared/database/schema.ts";
 import { createUuidV7, SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 import type {
   AgentSessionCostBasis,
@@ -23,6 +23,15 @@ import type {
 import { activeSessionDuration } from "../shared/session-timing.ts";
 import { compactStoredConversation } from "./session-compaction.ts";
 import { storedSessionAgentFile } from "./session-store-agent-file.ts";
+import {
+  createStoredSession,
+  type CreateAgentSession,
+  type CreateSessionResult,
+} from "./session-store-create.ts";
+import {
+  queueStoredSession,
+  type QueueSessionResult,
+} from "./session-store-queue.ts";
 import {
   appendInterruptedRunnerToolResult,
   conversationFromMessages,
@@ -37,6 +46,7 @@ import {
   reassignStoredSession,
   runningCondition,
   SESSION_TIMING_SELECTION,
+  sessionGenerationCondition,
   sessionTimingUpdate,
   transitionStoredSession,
   updateStoredSession,
@@ -55,39 +65,13 @@ import {
   insertStoredMessage,
   interruptedSessionErrorValues,
   recordedMessageValues,
-  userMessageValues,
   type StoredMessageValues,
 } from "./session-store-values.ts";
 
-export interface CreateAgentSession extends Pick<
-  AgentSessionSummary,
-  | "autoCompact"
-  | "maxContextTokens"
-  | "model"
-  | "provider"
-  | "providerPricing"
-  | "reasoningEffort"
-  | "runnerId"
-  | "tools"
-  | "workingDirectory"
-> {
-  readonly credentialId: string;
-  readonly images: readonly AgentImage[];
-  readonly parentSessionId?: string;
-  readonly prompt: string;
-  readonly userId: string;
-}
-
-export type QueueSessionResult =
-  | { readonly detail: AgentSessionDetail; readonly status: "queued" }
-  | { readonly status: "busy" }
-  | { readonly status: "not_found" };
-
 function requireStoredSession<Value>(stored: Value | undefined): Value {
   if (stored === undefined) {
-    throw new Error("The agent session no longer exists");
+    throw new DOMException("The agent session was stopped", "AbortError");
   }
-
   return stored;
 }
 
@@ -101,6 +85,7 @@ function sessionSelection() {
     createdAt: agentSessions.createdAt,
     credentialId: agentSessions.providerCredentialId,
     currentContextTokens: agentSessions.currentContextTokens,
+    executionGeneration: agentSessions.executionGeneration,
     id: agentSessions.id,
     maxContextTokens: agentSessions.maxContextTokens,
     model: agentSessions.model,
@@ -126,6 +111,7 @@ type StoredSessionSummary = Pick<
   | "costUsd"
   | "createdAt"
   | "currentContextTokens"
+  | "executionGeneration"
   | "id"
   | "maxContextTokens"
   | "model"
@@ -154,22 +140,16 @@ function parseStoredTools(value: string): readonly AgentSessionToolName[] {
 }
 
 function summarizeSession(stored: StoredSessionSummary): AgentSessionSummary {
+  const { executionGeneration: generation, ...summary } = stored;
   return {
-    ...stored,
+    ...summary,
+    generation,
     activeStartedAt: stored.activeStartedAt?.getTime() ?? null,
     createdAt: stored.createdAt.getTime(),
     providerPricing: parseProviderPricing(stored.providerPricing),
     tools: parseStoredTools(stored.tools),
     updatedAt: stored.updatedAt.getTime(),
   };
-}
-
-function titleFromPrompt(prompt: string): string {
-  const firstLine = prompt
-    .split(/\r?\n/u)
-    .map((line) => line.trim())
-    .find((line) => line.length > 0);
-  return (firstLine ?? "Image task").slice(0, 80);
 }
 
 export class SessionStore {
@@ -187,70 +167,34 @@ export class SessionStore {
     return this.#resources[1](now);
   }
 
-  create(input: CreateAgentSession, now: number): AgentSessionDetail {
-    if (
-      input.maxContextTokens !== null &&
-      (!Number.isSafeInteger(input.maxContextTokens) ||
-        input.maxContextTokens <= 0)
-    ) {
-      throw new Error("The agent session context limit is invalid");
-    }
-
-    const sessionId = this.#generateId(now);
-    const messageId = this.#generateId(now);
-
-    this.#database.transaction((transaction) => {
-      transaction
-        .insert(agentSessions)
-        .values({
-          ...createdAuditFields(input.userId, now),
-          autoCompact: input.autoCompact,
-          id: sessionId,
-          maxContextTokens: input.maxContextTokens,
-          model: input.model,
-          parentSessionId: input.parentSessionId ?? null,
-          provider: input.provider,
-          providerCredentialId: input.credentialId,
-          providerPricing:
-            input.providerPricing === null
-              ? null
-              : JSON.stringify(input.providerPricing),
-          reasoningEffort: input.reasoningEffort,
-          runnerId: input.runnerId,
-          status: "queued",
-          title: titleFromPrompt(input.prompt),
-          tools: JSON.stringify(input.tools),
-          userId: input.userId,
-          workingDirectory: input.workingDirectory,
-        })
-        .run();
-      transaction
-        .insert(agentMessages)
-        .values(
-          userMessageValues({
-            content: input.prompt,
-            id: messageId,
-            images: input.images,
-            now,
-            sessionId,
-            userId: input.userId,
-          }),
+  create(input: CreateAgentSession, now: number): CreateSessionResult {
+    return createStoredSession(
+      {
+        database: this.#database,
+        generateId: this.#resources[1],
+        read: (userId, sessionId) => this.get(userId, sessionId),
+      },
+      input,
+      now,
+    );
+  }
+  executionIsCurrent(sessionId: string, generation: number): boolean {
+    return (
+      this.#database
+        .select({ id: agentSessions.id })
+        .from(agentSessions)
+        .where(
+          sessionGenerationCondition(
+            { id: sessionId, status: "running" },
+            generation,
+          ),
         )
-        .run();
-    });
-
-    const created = this.get(input.userId, sessionId);
-
-    if (created === undefined) {
-      throw new Error("The agent session could not be read after creation");
-    }
-
-    return created;
+        .get() !== undefined
+    );
   }
 
   get(userId: string, sessionId: string): AgentSessionDetail | undefined {
     const stored = this.#selectSessions({ id: sessionId, userId }).get();
-
     if (stored === undefined) {
       return undefined;
     }
@@ -264,7 +208,6 @@ export class SessionStore {
       ),
     };
   }
-
   list(userId: string): readonly AgentSessionSummary[] {
     return this.#selectSessions({ userId })
       .orderBy(desc(agentSessions.updatedAt), desc(agentSessions.id))
@@ -280,7 +223,6 @@ export class SessionStore {
       ),
     );
   }
-
   #updateRunningSession(
     sessionId: string,
     values: Omit<
@@ -289,13 +231,15 @@ export class SessionStore {
     > & {
       readonly costBasis?: AgentSessionCostBasis | SQL;
       readonly costUsd?: number | SQL;
+      readonly executionGeneration?: number | SQL;
     },
     now: number,
+    generation?: number,
   ): void {
     this.#database
       .update(agentSessions)
       .set({ ...values, ...updatedAuditFields(SYSTEM_ID, now) })
-      .where(runningCondition(sessionId))
+      .where(runningCondition(sessionId, undefined, generation))
       .run();
   }
 
@@ -303,6 +247,7 @@ export class SessionStore {
     sessionId: string,
     agentFile: AgentFile | null,
     now: number,
+    generation?: number,
   ): void {
     this.#updateRunningSession(
       sessionId,
@@ -311,13 +256,20 @@ export class SessionStore {
         agentFileName: agentFile?.name ?? null,
       },
       now,
+      generation,
     );
   }
 
-  compact(sessionId: string, summary: string, now: number): void {
+  compact(
+    sessionId: string,
+    summary: string,
+    now: number,
+    generation?: number,
+  ): void {
     compactStoredConversation({
       database: this.#database,
       generateId: (timestamp) => this.#generateId(timestamp),
+      ...(generation === undefined ? {} : { generation }),
       now,
       sessionId,
       summary,
@@ -363,6 +315,7 @@ export class SessionStore {
     sessionId: string,
     input: AgentSessionUsageUpdate,
     now: number,
+    generation?: number,
   ): void {
     const invalidCost =
       (input.costUsd === null) !== (input.costBasis === null) ||
@@ -394,6 +347,7 @@ export class SessionStore {
             }),
       },
       now,
+      generation,
     );
   }
 
@@ -401,17 +355,20 @@ export class SessionStore {
     sessionId: string,
     message: AgentRecordedMessage,
     now: number,
+    generation?: number,
   ): void {
-    this.#appendMessage(
-      sessionId,
-      recordedMessageValues(message),
-      SYSTEM_ID,
-      now,
-    );
+    const stored = recordedMessageValues(message);
+    this.#appendSystemMessage(sessionId, stored, now, generation);
   }
 
-  appendErrorMessage(sessionId: string, content: string, now: number): void {
-    this.#appendMessage(sessionId, errorMessageValues(content), SYSTEM_ID, now);
+  appendErrorMessage(
+    sessionId: string,
+    content: string,
+    now: number,
+    generation?: number,
+  ): void {
+    const error = errorMessageValues(content);
+    this.#appendSystemMessage(sessionId, error, now, generation);
   }
 
   appendInterruptedRunnerTool(sessionId: string, now: number): void {
@@ -470,17 +427,32 @@ export class SessionStore {
     sessionId: string,
     status: "failed" | "idle" | "running",
     now: number,
+    generation?: number,
   ): boolean {
     switch (status) {
       case "failed":
         return (
-          this.#finishActiveSession(sessionId, "failed", now) ||
-          this.#systemTransition(sessionId, ["queued"], status, now)
+          this.#finishActiveSession(
+            sessionId,
+            "failed",
+            now,
+            SYSTEM_ID,
+            undefined,
+            generation,
+          ) ||
+          this.#systemTransition(sessionId, ["queued"], status, now, generation)
         );
       case "idle":
-        return this.#finishActiveSession(sessionId, "idle", now);
+        return this.#finishActiveSession(
+          sessionId,
+          "idle",
+          now,
+          SYSTEM_ID,
+          undefined,
+          generation,
+        );
       case "running":
-        return this.#startActiveSession(sessionId, now);
+        return this.#startActiveSession(sessionId, now, generation);
     }
   }
 
@@ -492,7 +464,7 @@ export class SessionStore {
       userId,
       userId,
     );
-    const stopped =
+    return (
       stoppedActive ||
       this.#transition(
         sessionId,
@@ -501,15 +473,8 @@ export class SessionStore {
         userId,
         now,
         userId,
-      );
-    if (stopped) {
-      this.#database
-        .update(agentSessions)
-        .set({ runnerRequired: false })
-        .where(activeSessionCondition({ id: sessionId, userId }))
-        .run();
-    }
-    return stopped;
+      )
+    );
   }
 
   queue(
@@ -521,65 +486,17 @@ export class SessionStore {
       readonly images: readonly AgentImage[];
     },
   ): QueueSessionResult {
-    const messageId = prompt === undefined ? undefined : this.#generateId(now);
-    const status = this.#database.transaction((transaction) => {
-      const stored = transaction
-        .select({ status: agentSessions.status })
-        .from(agentSessions)
-        .where(activeSessionCondition({ id: sessionId, userId }))
-        .get();
-
-      if (stored === undefined) {
-        return "not_found" as const;
-      }
-
-      if (
-        stored.status !== "idle" &&
-        stored.status !== "failed" &&
-        stored.status !== "stopped"
-      ) {
-        return "busy" as const;
-      }
-
-      if (prompt !== undefined && messageId !== undefined) {
-        transaction
-          .insert(agentMessages)
-          .values(
-            userMessageValues({
-              content: prompt.content,
-              id: messageId,
-              images: prompt.images,
-              now,
-              sessionId,
-              userId,
-            }),
-          )
-          .run();
-      }
-      transaction
-        .update(agentSessions)
-        .set({
-          activeStartedAt: null,
-          runnerRequired: false,
-          status: "queued",
-          ...updatedAuditFields(userId, now),
-        })
-        .where(eq(agentSessions.id, sessionId))
-        .run();
-      return "queued" as const;
+    return queueStoredSession({
+      now,
+      ...(prompt === undefined ? {} : { prompt }),
+      resources: {
+        database: this.#database,
+        generateId: this.#resources[1],
+        read: (ownerId, id) => this.get(ownerId, id),
+      },
+      sessionId,
+      userId,
     });
-
-    if (status !== "queued") {
-      return { status };
-    }
-
-    const detail = this.get(userId, sessionId);
-
-    if (detail === undefined) {
-      throw new Error("The queued agent session could not be read");
-    }
-
-    return { detail, status };
   }
 
   failInterrupted(now: number): readonly PendingSpawnedSession[] {
@@ -606,11 +523,21 @@ export class SessionStore {
     return this.pendingSpawnedSessions();
   }
 
+  #appendSystemMessage(
+    sessionId: string,
+    message: StoredMessageValues,
+    now: number,
+    generation?: number,
+  ): void {
+    this.#appendMessage(sessionId, message, SYSTEM_ID, now, generation);
+  }
+
   #appendMessage(
     sessionId: string,
     message: StoredMessageValues,
     actorId: string,
     now: number,
+    generation?: number,
   ): void {
     this.#database.transaction((transaction) => {
       const session = requireStoredSession(
@@ -620,14 +547,10 @@ export class SessionStore {
             userId: agentSessions.userId,
           })
           .from(agentSessions)
-          .where(activeSessionCondition({ id: sessionId }))
+          .where(sessionGenerationCondition({ id: sessionId }, generation))
           .get(),
       );
-      if (
-        actorId === SYSTEM_ID &&
-        message.role !== "tool" &&
-        session.runnerRequired
-      ) {
+      if (actorId === SYSTEM_ID && session.runnerRequired) {
         throw new DOMException("The agent session was stopped", "AbortError");
       }
 
@@ -641,7 +564,7 @@ export class SessionStore {
       transaction
         .update(agentSessions)
         .set(updatedAuditFields(actorId, now))
-        .where(eq(agentSessions.id, sessionId))
+        .where(sessionGenerationCondition({ id: sessionId }, generation))
         .run();
     });
   }
@@ -653,7 +576,11 @@ export class SessionStore {
       .where(activeSessionCondition(filter));
   }
 
-  #startActiveSession(sessionId: string, now: number): boolean {
+  #startActiveSession(
+    sessionId: string,
+    now: number,
+    generation?: number,
+  ): boolean {
     return didUpdate(
       this.#database
         .update(agentSessions)
@@ -662,7 +589,12 @@ export class SessionStore {
           status: "running",
           ...updatedAuditFields(SYSTEM_ID, now),
         })
-        .where(activeSessionCondition({ id: sessionId, status: "queued" }))
+        .where(
+          sessionGenerationCondition(
+            { id: sessionId, status: "queued" },
+            generation,
+          ),
+        )
         .returning()
         .all(),
     );
@@ -674,11 +606,12 @@ export class SessionStore {
     now: number,
     actorId: string = SYSTEM_ID,
     userId?: string,
+    generation?: number,
   ): boolean {
     const session = this.#database
       .select(SESSION_TIMING_SELECTION)
       .from(agentSessions)
-      .where(runningCondition(sessionId, userId))
+      .where(runningCondition(sessionId, userId, generation))
       .get();
     if (session?.activeStartedAt === null || session === undefined) {
       return false;
@@ -692,7 +625,7 @@ export class SessionStore {
           status,
           ...updatedAuditFields(actorId, now),
         })
-        .where(runningCondition(sessionId, userId))
+        .where(runningCondition(sessionId, userId, generation))
         .returning({ status: agentSessions.status })
         .all(),
     );
@@ -703,8 +636,17 @@ export class SessionStore {
     from: readonly AgentSessionStatus[],
     to: AgentSessionStatus,
     now: number,
+    generation?: number,
   ): boolean {
-    return this.#transition(sessionId, from, to, SYSTEM_ID, now);
+    return this.#transition(
+      sessionId,
+      from,
+      to,
+      SYSTEM_ID,
+      now,
+      undefined,
+      generation,
+    );
   }
 
   #transition(
@@ -714,11 +656,13 @@ export class SessionStore {
     actorId: string,
     now: number,
     userId?: string,
+    generation?: number,
   ): boolean {
     return transitionStoredSession({
       actorId,
       database: this.#database,
       from,
+      ...(generation === undefined ? {} : { generation }),
       now,
       sessionId,
       to,

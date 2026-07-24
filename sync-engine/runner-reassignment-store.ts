@@ -19,13 +19,20 @@ function affectedRunnerSessions(
   const condition = and(
     eq(agentSessions.userId, userId),
     eq(agentSessions.runnerId, runnerId),
-    inArray(agentSessions.status, ["queued", "running", "idle", "failed"]),
+    inArray(agentSessions.status, [
+      "queued",
+      "running",
+      "idle",
+      "stopped",
+      "failed",
+    ]),
     eq(agentSessions.isDeleted, false),
   );
   return database
     .select({
       ...SESSION_TIMING_SELECTION,
       id: agentSessions.id,
+      status: agentSessions.status,
     })
     .from(agentSessions)
     .where(condition)

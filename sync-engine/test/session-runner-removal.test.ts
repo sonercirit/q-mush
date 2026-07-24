@@ -39,6 +39,7 @@ function testSession(): AgentSessionDetail {
     createdAt: 1,
     credentialId: "credential-1",
     currentContextTokens: 0,
+    generation: 0,
     id: SESSION_ID,
     maxContextTokens: null,
     messages: [
@@ -81,6 +82,12 @@ function dispatch(
   });
 }
 
+async function expectAborted(command: Promise<string>): Promise<void> {
+  expect(await captureBrokerRejection(command)).toMatchObject({
+    name: "AbortError",
+  });
+}
+
 function coordinator(
   broker: RunnerCommandBroker,
   appended: { readonly toolCallId: string; readonly toolName: string }[],
@@ -103,6 +110,24 @@ function coordinator(
 }
 
 describe("removed session runners", () => {
+  test("rechecks command authority at dispatch", async () => {
+    let authorized = true;
+    const broker = new RunnerCommandBroker();
+    authorized = false;
+
+    const command = broker.dispatch({
+      arguments: {},
+      authorize: () => authorized,
+      runnerId: REMOVED_RUNNER_ID,
+      sessionId: SESSION_ID,
+      tool: "read",
+      workingDirectory: "/work",
+    });
+
+    await expectAborted(command);
+    expect(broker.take(REMOVED_RUNNER_ID)).toBeUndefined();
+  });
+
   test("cancels every affected session command and records the unresolved outer call", async () => {
     const ids = ["runner-command-1", "runner-command-2"];
     const broker = new RunnerCommandBroker({
@@ -120,12 +145,8 @@ describe("removed session runners", () => {
     removal.removing("user-1", REMOVED_RUNNER_ID);
     await removal.removed("user-1", REMOVED_RUNNER_ID);
 
-    expect(await captureBrokerRejection(removedRunnerCommand)).toMatchObject({
-      name: "AbortError",
-    });
-    expect(await captureBrokerRejection(otherRunnerCommand)).toMatchObject({
-      name: "AbortError",
-    });
+    await expectAborted(removedRunnerCommand);
+    await expectAborted(otherRunnerCommand);
     expect(appended).toEqual([{ toolCallId: "call-1", toolName: "read" }]);
     expect(broker.complete(OTHER_RUNNER_ID, "runner-command-2", "late")).toBe(
       false,
@@ -138,15 +159,12 @@ describe("removed session runners", () => {
       deliver: () => true,
     });
     const command = dispatch(broker, REMOVED_RUNNER_ID);
-    let releaseRemoval: (() => void) | undefined;
-    const removalBlocked = new Promise<void>((resolve) => {
-      releaseRemoval = resolve;
-    });
+    const blocked = Promise.withResolvers<undefined>();
     const removal = coordinator(
       broker,
       [],
       testSession(),
-      () => removalBlocked,
+      () => blocked.promise,
     );
     removal.removing("user-1", REMOVED_RUNNER_ID);
     const removed = removal.removed("user-1", REMOVED_RUNNER_ID);
@@ -154,10 +172,8 @@ describe("removed session runners", () => {
     expect(broker.complete(REMOVED_RUNNER_ID, "call-1", "late result")).toBe(
       false,
     );
-    expect(await captureBrokerRejection(command)).toMatchObject({
-      name: "AbortError",
-    });
-    releaseRemoval?.();
+    await expectAborted(command);
+    blocked.resolve(undefined);
     await removed;
   });
 });

@@ -13,9 +13,11 @@ import {
 } from "../../shared/runner-model.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
 import { readJsonRecord } from "../../sync-engine/oauth.ts";
+import { RunnerStore } from "../../sync-engine/runner-store.ts";
 import { createRunnerIntegration } from "../../sync-engine/runners.ts";
 import {
   createAuthenticatedRequest,
+  createAuthenticatedTestContext,
   createAuthenticatedTestDatabase,
   createRunnerRequest,
   TEST_NOW,
@@ -29,6 +31,16 @@ const THIRD_RUNNER_ID = "018bcfe5-6800-7000-8000-000000000033";
 const FIRST_TOKEN = "qmr_first-setup-token";
 const SECOND_TOKEN = "qmr_second-setup-token";
 const THIRD_TOKEN = "qmr_third-setup-token";
+
+class FailingRemovalRunnerStore extends RunnerStore {
+  override exists(): boolean {
+    return true;
+  }
+
+  override remove(): boolean {
+    throw new Error("injected removal failure");
+  }
+}
 
 interface Setup {
   readonly database: ReturnType<typeof createAuthenticatedTestDatabase>;
@@ -131,7 +143,9 @@ function connectFirstRunner(setup: Setup): void {
   connect(setup, FIRST_TOKEN, "machine-fingerprint-one");
 }
 
-async function removeFirstRunner(setup: Setup): Promise<Response> {
+async function removeFirstRunner(
+  setup: Pick<Setup, "integration">,
+): Promise<Response> {
   return setup.integration.remove(
     createAuthenticatedRequest(
       `${RUNNERS_PATH}/${FIRST_RUNNER_ID}`,
@@ -436,6 +450,29 @@ describe("runner connections", () => {
 
     expect(removed).toEqual([`${TEST_USER_ID}:${FIRST_RUNNER_ID}`]);
     setup.database.$client.close();
+  });
+
+  test("does not run destructive listeners when the removal transaction fails", async () => {
+    const { auth, database } = createAuthenticatedTestContext();
+    let removingCalls = 0;
+    let removedCalls = 0;
+    const integration = createRunnerIntegration(auth, {
+      database,
+      now: () => TEST_NOW,
+      store: new FailingRemovalRunnerStore(database),
+    });
+    integration.onRemoving(() => {
+      removingCalls += 1;
+    });
+    integration.onRemoved(() => {
+      removedCalls += 1;
+    });
+
+    await expect(removeFirstRunner({ integration })).rejects.toThrow(
+      "injected removal failure",
+    );
+    expect([removingCalls, removedCalls]).toEqual([0, 0]);
+    database.$client.close();
   });
 
   test("soft deletes a runner and rejects its token", async () => {

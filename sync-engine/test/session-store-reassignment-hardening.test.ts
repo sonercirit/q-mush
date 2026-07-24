@@ -5,6 +5,26 @@ import {
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import {
+  assertUnavailableCreation,
+  closeHardeningDatabase,
+  closeStoppedSessionCycle,
+  expectRecoverableStoppedSession,
+  expectSessionUnchanged,
+  fenceTestSession,
+  idleHardeningStore,
+  queueStoppedTestSession,
+  reassignTestSession,
+  removeAssignedTestRunner,
+  removedHardeningStore,
+  requireSession,
+  stopTestSession,
+} from "./session-reassignment-hardening-helpers.ts";
+import {
+  expectLateModelWritesRejected,
+  expectRejectedWrite,
+  withRejectedWriteSetup,
+} from "./session-store-late-write-helpers.ts";
+import {
   addForeignReplacementRunner,
   addReplacementRunner,
   expectStoredSession,
@@ -14,6 +34,13 @@ import { createSessionStoreTestSetup } from "./session-store-test-helpers.ts";
 
 const RUNNER_ID = "018bcfe5-6800-7000-8000-000000000041";
 const SESSION_ID = "018bcfe5-6800-7000-8000-000000000043";
+
+const LATE_TOOL_MESSAGE = {
+  content: "Late tool output",
+  role: "tool" as const,
+  toolCallId: "old-call",
+  toolName: "bash",
+};
 
 function runningStore() {
   return createSessionStoreTestSetup();
@@ -58,7 +85,7 @@ describe("session store runner reassignment", () => {
     expect(after?.messages).toEqual(before?.messages);
     expect(after?.costUsd).toBe(before?.costUsd);
     expect(after?.tools).toEqual(before?.tools);
-    database.$client.close();
+    closeHardeningDatabase({ database, store });
   });
 
   test("rejects a foreign or offline replacement inside the store transaction", () => {
@@ -106,7 +133,7 @@ describe("session store runner reassignment", () => {
       runnerId: RUNNER_ID,
       runnerRequired: true,
     });
-    database.$client.close();
+    closeHardeningDatabase({ database, store });
   });
 
   test("records the first unresolved model call once for parallel runner commands", () => {
@@ -144,29 +171,79 @@ describe("session store runner reassignment", () => {
         toolName: "parallel",
       }),
     ]);
-    setup.database.$client.close();
+    closeHardeningDatabase(setup);
+  });
+
+  test("atomically rejects create and queue after runner removal", () => {
+    const { database, store } = idleHardeningStore();
+    const before = fenceTestSession({ database, store }, RUNNER_ID);
+
+    expect(
+      store.queue(TEST_USER_ID, SESSION_ID, TEST_NOW + 3, {
+        content: "Do not append this stale request",
+        images: [],
+      }),
+    ).toEqual({ status: "runner_required" });
+    expectSessionUnchanged(store, SESSION_ID, before);
+    assertUnavailableCreation(
+      store,
+      RUNNER_ID,
+      "Do not create this stale session",
+    );
+    closeHardeningDatabase({ database, store });
+  });
+
+  test("atomically rejects a spawn after its runner is removed", () => {
+    const { database, store } = removedHardeningStore(RUNNER_ID);
+
+    assertUnavailableCreation(
+      store,
+      RUNNER_ID,
+      "Do not create this spawned child",
+      SESSION_ID,
+    );
+    closeHardeningDatabase({ database, store });
+  });
+
+  test("fences stopped sessions without clearing reassignment", () => {
+    const { database, store } = idleHardeningStore();
+    stopTestSession(store, SESSION_ID);
+    removeAssignedTestRunner({ database, store }, RUNNER_ID);
+    expectRecoverableStoppedSession(store, SESSION_ID);
+
+    reassignTestSession({ database, store }, SESSION_ID);
+    queueStoppedTestSession(store, SESSION_ID);
+    closeHardeningDatabase({ database, store });
+  });
+
+  test("preserves reassignment when a fenced session is stopped", () => {
+    const { database, store } = removedHardeningStore(RUNNER_ID);
+
+    stopTestSession(store, SESSION_ID);
+    closeStoppedSessionCycle({ database, store }, SESSION_ID);
+  });
+
+  test("rejects writes from the removed execution after reassignment", () => {
+    const { database, store } = runningStore();
+    const beforeRemoval = requireSession(store, SESSION_ID);
+    removeAssignedTestRunner({ database, store }, RUNNER_ID);
+    reassignTestSession({ database, store }, SESSION_ID, TEST_NOW + 3);
+    const rejected = {
+      before: store.get(TEST_USER_ID, SESSION_ID),
+      setup: { database, store },
+    };
+
+    expectRejectedWrite(rejected, LATE_TOOL_MESSAGE, beforeRemoval.generation);
+    closeHardeningDatabase({ database, store });
+  });
+
+  test("rejects every model message role after runner removal", () => {
+    withRejectedWriteSetup(RUNNER_ID, (rejected) => {
+      expectRejectedWrite(rejected, LATE_TOOL_MESSAGE);
+    });
   });
 
   test("rejects model writes after runner removal", () => {
-    const { database, store } = runningStore();
-    expect(removeTestRunner({ database, store }, RUNNER_ID)).toBe(true);
-    const before = store.get(TEST_USER_ID, SESSION_ID);
-
-    const lateOutput = {
-      content: "Late model output",
-      role: "assistant" as const,
-      toolCalls: [],
-    };
-    expect(() => {
-      store.appendAgentMessage(SESSION_ID, lateOutput, TEST_NOW + 3);
-    }).toThrow("agent session was stopped");
-    store.updateUsage(
-      SESSION_ID,
-      { contextTokens: 10, costBasis: "reported", costUsd: 1 },
-      TEST_NOW + 3,
-    );
-    store.setAgentFile(SESSION_ID, null, TEST_NOW + 3);
-    expect(store.get(TEST_USER_ID, SESSION_ID)).toEqual(before);
-    database.$client.close();
+    withRejectedWriteSetup(RUNNER_ID, expectLateModelWritesRejected);
   });
 });

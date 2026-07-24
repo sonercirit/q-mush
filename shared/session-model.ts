@@ -40,6 +40,7 @@ export interface AgentSessionSummary {
   readonly createdAt: number;
   readonly credentialId: string;
   readonly currentContextTokens: number;
+  readonly generation: number;
   readonly id: string;
   readonly maxContextTokens: number | null;
   readonly model: string;

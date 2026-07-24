@@ -5,7 +5,10 @@ import {
 } from "../shared/agent-tools.ts";
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
-import type { AgentSessionDetail } from "../shared/session-model.ts";
+import type {
+  AgentSessionDetail,
+  AgentSessionUsageUpdate,
+} from "../shared/session-model.ts";
 import { estimateAgentTurnCost } from "./agent-cost.ts";
 import { createAgentSkills } from "./agent-skills.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
@@ -30,6 +33,7 @@ export interface SessionAgentRuntimeDependencies {
   readonly credential: ProviderCredentialAccess;
   readonly detail: AgentSessionDetail;
   readonly modelFactory: AgentModelFactory;
+  readonly isCurrent: () => boolean;
   readonly now: () => number;
   readonly notify: () => void;
   readonly realtime: RealtimeHub | undefined;
@@ -37,6 +41,23 @@ export interface SessionAgentRuntimeDependencies {
   readonly signal: AbortSignal;
   readonly store: SessionStore;
   readonly userId: string;
+}
+
+function writeRuntime(
+  runtime: SessionAgentRuntimeDependencies,
+  write: (sessionId: string, now: number, generation: number) => void,
+): void {
+  write(runtime.detail.id, runtime.now(), runtime.detail.generation);
+  runtime.notify();
+}
+
+function recordCompaction(
+  runtime: SessionAgentRuntimeDependencies,
+  summary: string,
+): void {
+  writeRuntime(runtime, (sessionId, now, generation) => {
+    runtime.store.compact(sessionId, summary, now, generation);
+  });
 }
 
 async function loadModels(
@@ -47,13 +68,15 @@ async function loadModels(
     runtime.detail,
     runtime.signal,
   );
-  runtime.store.setAgentFile(runtime.detail.id, agentFile, runtime.now());
-  runtime.notify();
+  writeRuntime(runtime, (sessionId, now, generation) => {
+    runtime.store.setAgentFile(sessionId, agentFile, now, generation);
+  });
   return createSessionAgentModels({
     agentFile,
     credential: runtime.credential,
     detail: runtime.detail,
     factory: runtime.modelFactory,
+    isCurrent: runtime.isCurrent,
     realtime: runtime.realtime,
     userId: runtime.userId,
   });
@@ -77,14 +100,16 @@ export async function compactSessionConversation(
         ? "estimated"
         : "reported";
   if (costBasis !== null) {
-    runtime.store.updateUsage(
-      runtime.detail.id,
-      { contextTokens: null, costBasis, costUsd },
-      runtime.now(),
-    );
-    runtime.notify();
+    const usage: AgentSessionUsageUpdate = {
+      contextTokens: null,
+      costBasis,
+      costUsd,
+    };
+    writeRuntime(runtime, (sessionId, now, generation) => {
+      runtime.store.updateUsage(sessionId, usage, now, generation);
+    });
   }
-  runtime.store.compact(runtime.detail.id, compacted.summary, runtime.now());
+  recordCompaction(runtime, compacted.summary);
 }
 
 export async function runSessionAgent(
@@ -99,6 +124,7 @@ export async function runSessionAgent(
     runtime.broker.dispatch(
       {
         arguments: toolArguments,
+        authorize: runtime.isCurrent,
         runnerId: runtime.detail.runnerId,
         sessionId: runtime.detail.id,
         tool: name,
@@ -125,6 +151,7 @@ export async function runSessionAgent(
     runtime.detail.id,
     runtime.now,
     runtime.notify,
+    runtime.detail.generation,
   );
 
   const selectedTools = new Set<AgentSessionToolName>(runtime.detail.tools);
@@ -152,8 +179,7 @@ export async function runSessionAgent(
     maxContextTokens: runtime.detail.maxContextTokens,
     model: models.agent,
     recordCompaction: (summary) => {
-      runtime.store.compact(runtime.detail.id, summary, runtime.now());
-      runtime.notify();
+      recordCompaction(runtime, summary);
     },
     recordMessage: (message) => {
       recorder.message(message);

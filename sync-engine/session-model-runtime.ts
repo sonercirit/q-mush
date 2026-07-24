@@ -30,13 +30,21 @@ export function sessionModelRuntime(
     broker: resources.broker,
     credential,
     detail,
+    isCurrent: () =>
+      resources.store.executionIsCurrent(detail.id, detail.generation),
     modelFactory: resources.modelFactory,
     now: resources.now,
     notify: () => {
-      resources.notify(userId, detail.id);
+      if (resources.store.executionIsCurrent(detail.id, detail.generation)) {
+        resources.notify(userId, detail.id);
+      }
     },
     realtime: resources.realtime,
-    sessionTools: resources.actions.actions(detail.id, userId),
+    sessionTools: resources.actions.actions(
+      detail.id,
+      userId,
+      detail.generation,
+    ),
     signal: controller.signal,
     store: resources.store,
     userId,

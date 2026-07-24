@@ -82,6 +82,15 @@ export function expectStoredSession(
   expect(store.get(TEST_USER_ID, sessionId)).toMatchObject(expected);
 }
 
+export function removeAndReadSession(
+  setup: SessionStoreTestSetup,
+  runnerId: string,
+  sessionId: string,
+) {
+  removeTestRunnerAndExpect(setup, runnerId);
+  return setup.store.get(TEST_USER_ID, sessionId);
+}
+
 export function expectRecoveredSession(
   database: AppDatabase,
   before: ReturnType<SessionStore["get"]>,

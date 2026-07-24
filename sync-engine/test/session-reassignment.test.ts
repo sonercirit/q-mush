@@ -21,6 +21,19 @@ import {
   startSessionAndExpectRunnerCommand,
   waitForSessionValue,
 } from "./session-integration-helpers.ts";
+import {
+  closeRaceSetup,
+  credentialRaceSetup,
+  expectNoStoredSessions,
+  expectRaceRejection,
+  finishRemovalRace,
+  rejectRaceAndClose,
+} from "./session-reassignment-race-helpers.ts";
+import {
+  expectRemovedRunner,
+  postSessionAction,
+  removeAssignedRunner,
+} from "./session-reassignment-test-helpers.ts";
 
 function addReplacementRunner(
   setup: ReturnType<typeof connectedSessionSetup>,
@@ -60,17 +73,15 @@ async function expectSessionReaches(
   );
 }
 
-async function removeAssignedRunner(
+function isSessionStillRecoverable(value: unknown): boolean {
+  return isRecord(value) && value["runnerRequired"] === true;
+}
+
+async function stopSession(
   setup: ReturnType<typeof connectedSessionSetup>,
-): Promise<Response> {
-  return setup.runners.remove(
-    createAuthenticatedRequest(
-      `${RUNNERS_PATH}/${RUNNER_ID}`,
-      undefined,
-      "DELETE",
-    ),
-    RUNNER_ID,
-  );
+): Promise<void> {
+  const response = await postSessionAction(setup, "stop");
+  expect(response.status).toBe(200);
 }
 
 async function createIdleSession(
@@ -83,7 +94,7 @@ async function createIdleSession(
 async function recoverCompletedSession() {
   const setup = completingSessionSetup();
   await createIdleSession(setup);
-  expect((await removeAssignedRunner(setup)).status).toBe(204);
+  await expectRemovedRunner(setup);
   return setup;
 }
 
@@ -103,6 +114,54 @@ async function reassignRequest(
 }
 
 describe("runner reassignment", () => {
+  test("rejects create when runner removal wins a credential race", async () => {
+    const race = credentialRaceSetup(false);
+    const creation = startSession(race.setup);
+    const response = await finishRemovalRace(race, creation);
+
+    await expectRaceRejection(race.setup, response, "runner_unavailable");
+    expectNoStoredSessions(race.setup);
+    closeRaceSetup(race.setup);
+  });
+
+  test("rejects continue and message when removal wins a credential race", async () => {
+    const race = credentialRaceSetup();
+    const continueRequest = postSessionAction(race.setup, "continue");
+    const continued = await finishRemovalRace(race, continueRequest);
+
+    await rejectRaceAndClose(race, continued, "runner_required");
+  });
+
+  test("rejects a follow-up message when removal wins a credential race", async () => {
+    const race = credentialRaceSetup();
+    const before = await sessionDetail(race.setup.sessions);
+    const messageRequest = race.setup.sessions.message(
+      createAuthenticatedRequest(
+        `${SESSIONS_PATH}/${SESSION_ID}/messages`,
+        { prompt: "Do not persist this stale message" },
+        "POST",
+      ),
+      SESSION_ID,
+    );
+    const response = await finishRemovalRace(race, messageRequest);
+
+    await expectRaceRejection(race.setup, response, "runner_required");
+    const after = await sessionDetail(race.setup.sessions);
+    expect(JSON.stringify(after)).not.toContain(
+      "Do not persist this stale message",
+    );
+    expect(after).not.toEqual(before);
+    closeRaceSetup(race.setup);
+  });
+
+  test("rejects manual compaction when removal wins a credential race", async () => {
+    const race = credentialRaceSetup();
+    const compaction = postSessionAction(race.setup, "compact");
+    const response = await finishRemovalRace(race, compaction);
+
+    await rejectRaceAndClose(race, response, "runner_required");
+  });
+
   test("cancels active runner work and fences late results on removal", async () => {
     const model = new ScriptedAgentModel([
       {
@@ -130,7 +189,7 @@ describe("runner reassignment", () => {
     expect(removal.status).toBe(204);
     const recovered = await waitForSessionValue(
       () => sessionDetail(setup.sessions),
-      (value) => isRecord(value) && value["runnerRequired"] === true,
+      isSessionStillRecoverable,
     );
     expect(recovered).toMatchObject({
       runnerRequired: true,
@@ -160,6 +219,36 @@ describe("runner reassignment", () => {
     ).toBe(false);
     await expectTranscriptExcludes(setup, "late output");
     setup.database.$client.close();
+  });
+
+  test("keeps stopped sessions recoverable in both stop/removal orders", async () => {
+    for (const order of ["stop_then_remove", "remove_then_stop"] as const) {
+      const setup = completingSessionSetup();
+      await createIdleSession(setup);
+      if (order === "stop_then_remove") {
+        await stopSession(setup);
+        await expectRemovedRunner(setup);
+      } else {
+        await expectRemovedRunner(setup);
+        await stopSession(setup);
+      }
+      expect(await sessionDetail(setup.sessions)).toMatchObject({
+        runnerRequired: true,
+        status: "stopped",
+      });
+      const replacementId = addReplacementRunner(setup);
+      const reassigned = await reassignRequest(
+        setup,
+        replacementId,
+        "/replacement/stopped-project",
+      );
+      expect(reassigned.status).toBe(200);
+      expect(await reassigned.json()).toMatchObject({
+        runnerRequired: false,
+        status: "stopped",
+      });
+      setup.database.$client.close();
+    }
   });
 
   test("reassigns to an owned online runner and does not auto-run", async () => {
