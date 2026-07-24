@@ -16,6 +16,10 @@ import {
 } from "./http.ts";
 import type { RunnerIntegration } from "./runners.ts";
 
+export function requestSearchParameters(request: Request): URLSearchParams {
+  return new URL(request.url).searchParams;
+}
+
 export function readIdentifier(value: unknown): string | undefined {
   return typeof value === "string" && /^[A-Za-z\d._:-]{1,200}$/u.test(value)
     ? value
@@ -81,6 +85,17 @@ export class SessionRequestHelpers {
     action: (user: AuthenticatedUser) => Result,
   ): Response | Result {
     return withAuthenticatedUser(this.#auth, request, action);
+  }
+
+  get(
+    request: Request,
+    action: (user: AuthenticatedUser) => Response | Promise<Response>,
+  ): Promise<Response> {
+    return Promise.resolve(
+      request.method === "GET"
+        ? this.forUser(request, action)
+        : createMethodNotAllowedResponse("GET"),
+    );
   }
 
   postForUser(

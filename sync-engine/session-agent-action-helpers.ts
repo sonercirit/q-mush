@@ -36,6 +36,7 @@ export interface SessionAgentActionDependencies {
   readonly discoverSessionMetadata: (
     input: SpawnSessionToolInput,
     credential: ProviderCredentialAccess,
+    userId: string,
   ) => Promise<{
     readonly maxContextTokens: number | null;
     readonly providerPricing: AgentSessionDetail["providerPricing"];
@@ -94,6 +95,7 @@ export async function spawnAgentSession(options: {
     const metadata = await options.dependencies.discoverSessionMetadata(
       input,
       credential,
+      options.userId,
     );
     if (options.dependencies.draining()) {
       return createJsonResponse({ error: "server_restarting" }, 503);

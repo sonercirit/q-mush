@@ -13,7 +13,6 @@ import type {
 } from "../shared/session-model.ts";
 import { RetryNotice } from "./collection.tsx";
 import { CustomSelect, type CustomSelectOption } from "./custom-select.tsx";
-import { DirectoryPicker } from "./directory-picker-client.tsx";
 import type { DirectoryPickerState } from "./directory-picker-controller.ts";
 import {
   modelModalitiesLabel,
@@ -29,7 +28,15 @@ import { SessionPromptInput } from "./session-client-forms.tsx";
 import { formatTokenCount } from "./session-context-client.tsx";
 import type { SessionController } from "./session-controller.ts";
 import { SessionDetail, SessionList } from "./session-detail-client.tsx";
+import {
+  SessionDirectoryInput,
+  SessionDirectoryPicker,
+} from "./session-directory-client.tsx";
 import type { SessionPanelResources } from "./session-panel-resources.ts";
+import {
+  OpenRouterProviderSelect,
+  type SessionProviderDiscoveryState,
+} from "./session-provider-select.tsx";
 import {
   selectedSessionCredentialAvailable,
   selectedSessionRunnerAvailable,
@@ -41,6 +48,7 @@ export interface SessionDraft {
   readonly credential: string;
   readonly images: readonly AgentImage[];
   readonly model: string;
+  readonly openRouterProviderTag: string;
   readonly prompt: string;
   readonly reasoningEffort: string;
   readonly runnerId: string;
@@ -66,8 +74,14 @@ export interface SessionViewState {
   readonly followUpImages: readonly AgentImage[];
   readonly loadingDetail: boolean;
   readonly modelDiscovery: SessionModelDiscoveryState;
+  readonly providerDiscovery: SessionProviderDiscoveryState;
   readonly openSelect:
-    "credential" | "model" | "reasoningEffort" | "runnerId" | undefined;
+    | "credential"
+    | "model"
+    | "openRouterProviderTag"
+    | "reasoningEffort"
+    | "runnerId"
+    | undefined;
   readonly selectedId: string | undefined;
   readonly sending: boolean;
   readonly sessions: readonly AgentSessionSummary[] | undefined;
@@ -120,81 +134,6 @@ function selectedCredential(
   value: string,
 ): CredentialOption | undefined {
   return credentials.find((option) => optionValue(option) === value);
-}
-
-function renderSessionField(
-  id: string,
-  label: JSX.Element,
-  control: JSX.Element,
-): JSX.Element {
-  return (
-    <div>
-      <label class="text-sm font-medium text-slate-200" for={id}>
-        {label}
-      </label>
-      {control}
-    </div>
-  );
-}
-
-interface SessionControlOptions {
-  readonly disabled: boolean;
-  readonly name: string;
-}
-
-function sessionControlAttributes(
-  options: SessionControlOptions,
-  required: boolean,
-) {
-  return {
-    className:
-      "mt-2 min-w-0 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none",
-    disabled: options.disabled,
-    id: "session-directory",
-    name: options.name,
-    required,
-  };
-}
-
-function DirectoryInput(props: {
-  readonly controller: SessionController;
-  readonly runnerAvailable: boolean;
-  readonly state: SessionViewState;
-}): JSX.Element {
-  const options = () => ({
-    disabled: props.state.creating,
-    label: "Working directory on runner",
-    name: "workingDirectory",
-  });
-
-  return renderSessionField(
-    "session-directory",
-    options().label,
-    <div class="flex items-center gap-2">
-      <input
-        {...sessionControlAttributes(options(), true)}
-        onInput={(event) => {
-          props.controller.setDraftField(
-            "workingDirectory",
-            event.currentTarget.value,
-          );
-        }}
-        placeholder="/path/to/project"
-        type="text"
-        value={props.state.draft.workingDirectory}
-      />
-      <button
-        class="mt-2 shrink-0 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm font-semibold text-slate-200 transition hover:border-emerald-300/30 hover:text-emerald-200 disabled:cursor-not-allowed disabled:opacity-50"
-        disabled={props.state.creating || !props.runnerAvailable}
-        onClick={() => {
-          props.controller.openDirectoryPicker();
-        }}
-        type="button"
-      >
-        Browse
-      </button>
-    </div>,
-  );
 }
 
 function credentialSelectOptionsFor(
@@ -250,13 +189,6 @@ function modelSelectOptions(
   }));
 }
 
-function modelAvailabilityAttributes(
-  creating: boolean,
-  models: AgentModelCatalog["models"],
-): { readonly disabled: boolean } {
-  return { disabled: creating || models.length === 0 };
-}
-
 function ModelDiscoveryError(props: {
   readonly controller: SessionController;
   readonly visible: boolean;
@@ -281,28 +213,25 @@ function NewSessionForm(props: {
   readonly runners: readonly RunnerSummary[];
   readonly state: SessionViewState;
 }): JSX.Element {
-  const runners = createMemo(() => props.runners);
-  const credentials = createMemo(() => props.credentials);
-  const runnerOptions = createMemo(() => runnerSelectOptions(runners()));
   const selectedRunnerId = createMemo(() =>
     selectValue(
-      runnerOptions(),
+      runnerSelectOptions(props.runners),
       props.state.draft.runnerId,
-      defaultRunnerId(runners()),
+      defaultRunnerId(props.runners),
     ),
   );
   const credentialSelectOptions = createMemo(() =>
-    credentialSelectOptionsFor(credentials()),
+    credentialSelectOptionsFor(props.credentials),
   );
   const selectedCredentialValue = createMemo(() =>
     selectValue(
       credentialSelectOptions(),
       props.state.draft.credential,
-      props.credentialsSettled ? defaultCredentialValue(credentials()) : "",
+      props.credentialsSettled ? defaultCredentialValue(props.credentials) : "",
     ),
   );
   const credential = createMemo(() =>
-    selectedCredential(credentials(), selectedCredentialValue()),
+    selectedCredential(props.credentials, selectedCredentialValue()),
   );
   const discovery = createMemo(() => {
     const selected = credential();
@@ -320,8 +249,26 @@ function NewSessionForm(props: {
   const model = createMemo(() =>
     models().find(({ id }) => id === modelValue()),
   );
+  const modelOptions = createMemo(() => modelSelectOptions(models()));
+  const reasoningOptions = createMemo<readonly CustomSelectOption[]>(() => [
+    { label: "Model default", value: "" },
+    ...(model()?.reasoningEfforts ?? []).map((effort) => ({
+      label: reasoningEffortLabel(effort),
+      value: effort,
+    })),
+  ]);
+  const providerDiscoveryKey = createMemo(() =>
+    credential()?.provider === "openrouter" && modelValue().length > 0
+      ? `${selectedCredentialValue()}\n${modelValue()}`
+      : undefined,
+  );
+  const providerDiscovery = createMemo(() =>
+    props.state.providerDiscovery.key === providerDiscoveryKey()
+      ? props.state.providerDiscovery
+      : undefined,
+  );
   const resourcesAvailable = createMemo(
-    () => runners().length > 0 && credentials().length > 0,
+    () => props.runners.length > 0 && props.credentials.length > 0,
   );
   const available = createMemo(
     () =>
@@ -335,14 +282,24 @@ function NewSessionForm(props: {
     options: readonly CustomSelectOption[],
   ): readonly string[] => options.map(({ value }) => value);
   const select = (
-    name: "credential" | "model" | "reasoningEffort" | "runnerId",
+    name:
+      | "credential"
+      | "model"
+      | "openRouterProviderTag"
+      | "reasoningEffort"
+      | "runnerId",
     value: string,
     values: readonly string[],
   ): void => {
     props.controller.chooseOption(name, value, values);
   };
   const toggleSelect = (
-    name: "credential" | "model" | "reasoningEffort" | "runnerId",
+    name:
+      | "credential"
+      | "model"
+      | "openRouterProviderTag"
+      | "reasoningEffort"
+      | "runnerId",
   ): void => {
     props.controller.toggleSelect(name);
   };
@@ -356,24 +313,28 @@ function NewSessionForm(props: {
       }}
     >
       <CustomSelect
-        disabled={props.state.creating || runners().length === 0}
+        disabled={props.state.creating || props.runners.length === 0}
         emptyLabel="No online runners"
         id="session-runner"
         label="Runner"
         name="runnerId"
         onChoose={(value) => {
-          select("runnerId", value, optionValues(runnerOptions()));
+          select(
+            "runnerId",
+            value,
+            optionValues(runnerSelectOptions(props.runners)),
+          );
         }}
         onToggle={() => {
           toggleSelect("runnerId");
         }}
         open={props.state.openSelect === "runnerId"}
-        options={runnerOptions()}
+        options={runnerSelectOptions(props.runners)}
         required
         selectedValue={selectedRunnerId()}
       />
       <CustomSelect
-        disabled={props.state.creating || credentials().length === 0}
+        disabled={props.state.creating || props.credentials.length === 0}
         emptyLabel={
           props.credentialsSettled
             ? "No model credentials"
@@ -393,13 +354,15 @@ function NewSessionForm(props: {
         required
         selectedValue={selectedCredentialValue()}
       />
-      <DirectoryInput
+      <SessionDirectoryInput
         controller={props.controller}
         runnerAvailable={selectedRunnerId().length > 0}
         state={props.state}
       />
       <CustomSelect
-        {...modelAvailabilityAttributes(props.state.creating, models())}
+        {...{
+          disabled: props.state.creating || models().length === 0,
+        }}
         emptyLabel={
           discovery()?.error === undefined
             ? credential() !== undefined &&
@@ -412,46 +375,48 @@ function NewSessionForm(props: {
         label="Model"
         name="model"
         onChoose={(value) => {
-          select(
-            "model",
-            value,
-            modelSelectOptions(models()).map(({ value }) => value),
-          );
+          select("model", value, optionValues(modelOptions()));
         }}
         onToggle={() => {
           toggleSelect("model");
         }}
         open={props.state.openSelect === "model"}
-        options={modelSelectOptions(models())}
+        options={modelOptions()}
         required
         selectedValue={modelValue()}
       />
+      <Show
+        when={
+          credential()?.provider === "openrouter" && modelValue().length > 0
+        }
+      >
+        <OpenRouterProviderSelect
+          controller={props.controller}
+          creating={props.state.creating}
+          credential={selectedCredentialValue()}
+          discovery={providerDiscovery()}
+          model={modelValue()}
+          open={props.state.openSelect === "openRouterProviderTag"}
+          selectedValue={props.state.draft.openRouterProviderTag}
+        />
+      </Show>
       <CustomSelect
         disabled={
-          modelAvailabilityAttributes(props.state.creating, models())
-            .disabled || (model()?.reasoningEfforts.length ?? 0) === 0
+          props.state.creating ||
+          models().length === 0 ||
+          (model()?.reasoningEfforts.length ?? 0) === 0
         }
         emptyLabel="Model default"
         id="session-reasoning-effort"
         label="Reasoning effort"
         name="reasoningEffort"
         onChoose={(value) => {
-          select("reasoningEffort", value, [
-            "",
-            ...(model()?.reasoningEfforts ?? []),
-          ]);
+          const values = optionValues(reasoningOptions());
+          select("reasoningEffort", value, values);
         }}
-        onToggle={() => {
-          toggleSelect("reasoningEffort");
-        }}
+        onToggle={props.controller.toggleReasoningSelect.bind(props.controller)}
         open={props.state.openSelect === "reasoningEffort"}
-        options={[
-          { label: "Model default", value: "" },
-          ...(model()?.reasoningEfforts ?? []).map((effort) => ({
-            label: reasoningEffortLabel(effort),
-            value: effort,
-          })),
-        ]}
+        options={reasoningOptions()}
         required={false}
         selectedValue={props.state.draft.reasoningEffort}
       />
@@ -546,10 +511,6 @@ export function SessionPanel(
     credentialOptions(props.openAi(), props.openRouter());
   const credentialsSettled = (): boolean =>
     credentialFallbackReady(props.openAi(), props.openRouter());
-  const selectedRunner = (): RunnerSummary | undefined =>
-    online().find(
-      ({ id }) => id === props.controller.directoryPicker.state.runnerId,
-    );
 
   createEffect(() => {
     const runners = online();
@@ -605,12 +566,12 @@ export function SessionPanel(
           runners={props.runners()}
         />
       </section>
-      <DirectoryPicker
+      <SessionDirectoryPicker
         controller={props.controller.directoryPicker}
         onChoose={() => {
           props.controller.chooseDirectory();
         }}
-        runnerName={selectedRunner()?.name ?? "Selected runner"}
+        runners={online()}
       />
     </div>
   );

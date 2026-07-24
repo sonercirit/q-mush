@@ -32,6 +32,7 @@ import {
   stopSessionMutation,
   type SessionMutation,
 } from "./session-mutations.ts";
+import { SessionProviderController } from "./session-provider-controller.ts";
 import {
   initialSessionViewState,
   mostRecentSessionDirectory,
@@ -88,6 +89,7 @@ function selectedMutation(
 export class SessionController {
   readonly #directoryPicker: DirectoryPickerController;
   readonly #models: SessionModelController;
+  readonly #providers: SessionProviderController;
   readonly #realtime: SessionRealtimeState;
   readonly #transcriptFilterStorage: SessionTranscriptFilterStorage | undefined;
   readonly #view: RevisionState<SessionViewState>;
@@ -110,6 +112,7 @@ export class SessionController {
     this.#view.patch({ transcriptFilters });
     this.#realtime = new SessionRealtimeState(this.#view);
     this.#models = new SessionModelController(this.#view);
+    this.#providers = new SessionProviderController(this.#view);
     this.#directoryPicker = directoryPicker;
     this.#transcriptFilterStorage = transcriptFilterStorage ?? undefined;
   }
@@ -171,7 +174,10 @@ export class SessionController {
     this.#view.patch({ draft, openSelect: undefined });
 
     if (name === "credential") {
+      this.#providers.clear();
       this.#models.ensure(value);
+    } else if (name === "model") {
+      this.#providers.ensure(draft.credential, draft.model);
     }
   }
 
@@ -185,6 +191,10 @@ export class SessionController {
 
   create(): Promise<void> {
     return this.#create();
+  }
+
+  ensureProviders(credential: string, model: string): void {
+    this.#providers.ensure(credential, model);
   }
 
   initializeDefaults(
@@ -201,7 +211,7 @@ export class SessionController {
       credential: defaultedCredential,
       ...(defaultedCredential === draft.credential
         ? {}
-        : { model: "", reasoningEffort: "" }),
+        : { model: "", openRouterProviderTag: "", reasoningEffort: "" }),
       runnerId,
     };
 
@@ -234,6 +244,11 @@ export class SessionController {
 
   retryModels(): void {
     this.#models.ensure(this.#view.value.draft.credential, true);
+  }
+
+  retryProviders(): void {
+    const draft = this.#view.value.draft;
+    this.#providers.ensure(draft.credential, draft.model, true);
   }
 
   select(sessionId: string): Promise<void> {
@@ -283,8 +298,17 @@ export class SessionController {
     );
   }
 
+  toggleReasoningSelect(): void {
+    this.toggleSelect("reasoningEffort");
+  }
+
   toggleSelect(
-    name: "credential" | "model" | "reasoningEffort" | "runnerId",
+    name:
+      | "credential"
+      | "model"
+      | "openRouterProviderTag"
+      | "reasoningEffort"
+      | "runnerId",
   ): void {
     this.#view.patch({
       openSelect: this.#view.value.openSelect === name ? undefined : name,
@@ -308,6 +332,7 @@ export class SessionController {
     );
     this.#directoryPicker.reset();
     this.#models.reset();
+    this.#providers.reset();
     this.#realtime.reset();
     this.#view.reset({ ...initialSessionViewState(), transcriptFilters });
   }
@@ -389,6 +414,12 @@ export class SessionController {
             ...(this.#view.value.draft.model.trim().length === 0
               ? {}
               : { model: this.#view.value.draft.model.trim() }),
+            ...(this.#view.value.draft.openRouterProviderTag.length === 0
+              ? {}
+              : {
+                  openRouterProviderTag:
+                    this.#view.value.draft.openRouterProviderTag,
+                }),
             prompt: this.#view.value.draft.prompt.trim(),
             ...(this.#view.value.draft.reasoningEffort.length === 0
               ? {}

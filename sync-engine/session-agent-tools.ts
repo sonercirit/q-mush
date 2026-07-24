@@ -24,6 +24,7 @@ export interface SpawnSessionToolInput {
   readonly runnerId: string;
   readonly prompt: string;
   readonly model: string;
+  readonly openRouterProviderTag: null;
 }
 
 export interface SessionAgentToolActions {
@@ -88,6 +89,7 @@ function spawnInput(
     credentialId,
     images: [],
     model,
+    openRouterProviderTag: null,
     prompt,
     provider,
     reasoningEffort: isAgentReasoningEffort(reasoningEffort)

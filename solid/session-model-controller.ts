@@ -1,105 +1,102 @@
 import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
 import { SESSION_MODELS_PATH } from "../shared/routes.ts";
 import { requestJson } from "./browser-http.ts";
-import type { RevisionState } from "./revision-state.ts";
+import { DiscoveryController } from "./discovery-controller-cache.ts";
 import type { SessionViewState } from "./session-client.tsx";
 import { readAgentModelCatalog } from "./session-codec.ts";
 import { selectedSessionCredential } from "./session-controller-state.ts";
 import { draftWithModelCatalog } from "./session-form.ts";
 import { sessionModelDiscoveryState } from "./session-state.ts";
 
-export class SessionModelController {
-  readonly #catalogs = new Map<string, AgentModelCatalog>();
-  #request = 0;
-  readonly #state: RevisionState<SessionViewState>;
+interface ModelDiscoverySelection {
+  readonly credential: NonNullable<
+    ReturnType<typeof selectedSessionCredential>
+  >;
+  readonly value: string;
+}
 
-  constructor(state: RevisionState<SessionViewState>) {
-    this.#state = state;
-  }
+abstract class SessionDiscoveryController<Catalog> extends DiscoveryController<
+  SessionViewState,
+  Catalog
+> {}
 
-  reset(): void {
-    this.#catalogs.clear();
-    this.#request += 1;
-  }
-
+export class SessionModelController extends SessionDiscoveryController<AgentModelCatalog> {
   ensure(credentialValue: string, force = false): void {
-    void this.#ensure(credentialValue, force);
-  }
-
-  async #ensure(credentialValue: string, force: boolean): Promise<void> {
-    const credential = selectedSessionCredential(credentialValue);
-    if (credential === undefined) {
+    const selection = this.#select(credentialValue);
+    if (selection === undefined) {
       return;
     }
 
-    if (this.#state.value.draft.credential !== credentialValue) {
-      this.#state.replaceSilently({
-        ...this.#state.value,
-        draft: {
-          ...this.#state.value.draft,
-          credential: credentialValue,
-          model: "",
-          reasoningEffort: "",
-        },
-      });
-    }
-
-    const discovery = this.#state.value.modelDiscovery;
+    const discovery = this.state.value.modelDiscovery;
     if (
-      !force &&
-      discovery.credential === credentialValue &&
-      (discovery.loading || discovery.catalog !== undefined)
+      !this.fresh(
+        force,
+        discovery.credential === selection.value,
+        discovery.loading,
+        discovery.catalog,
+      )
     ) {
       return;
     }
 
-    const cached = force ? undefined : this.#catalogs.get(credentialValue);
-    if (cached !== undefined) {
-      this.#apply(credentialValue, cached);
-      return;
-    }
-
-    const request = (this.#request += 1);
-    this.#state.patch({
-      modelDiscovery: sessionModelDiscoveryState(credentialValue, true),
-    });
-
-    try {
-      const search = new URLSearchParams(credential);
-      const catalog = readAgentModelCatalog(
-        await requestJson(`${SESSION_MODELS_PATH}?${search.toString()}`),
-      );
-      if (
-        request !== this.#request ||
-        this.#state.value.draft.credential !== credentialValue
-      ) {
-        return;
-      }
-
-      this.#catalogs.set(credentialValue, catalog);
-      this.#apply(credentialValue, catalog);
-    } catch {
-      if (
-        request === this.#request &&
-        this.#state.value.draft.credential === credentialValue
-      ) {
-        this.#state.patch({
-          modelDiscovery: sessionModelDiscoveryState(
-            credentialValue,
-            false,
-            undefined,
-            "Model discovery failed",
+    this.discover(selection.value, force, {
+      accept: (catalog) => {
+        this.state.patch({
+          draft: draftWithModelCatalog(
+            this.state.value,
+            selection.value,
+            catalog,
           ),
+          modelDiscovery: sessionModelDiscoveryState(
+            selection.value,
+            false,
+            catalog,
+          ),
+          openSelect: undefined,
         });
-      }
-    }
+      },
+      active: (current) => current.draft.credential === selection.value,
+      failed: () => {
+        const failedDiscovery = sessionModelDiscoveryState(
+          selection.value,
+          false,
+          undefined,
+          "Model discovery failed",
+        );
+        this.state.patch({ modelDiscovery: failedDiscovery });
+      },
+      load: async () => {
+        const search = new URLSearchParams(selection.credential);
+        return readAgentModelCatalog(
+          await requestJson(`${SESSION_MODELS_PATH}?${search.toString()}`),
+        );
+      },
+      started: () => {
+        this.state.patch({
+          modelDiscovery: sessionModelDiscoveryState(selection.value, true),
+        });
+      },
+    });
   }
 
-  #apply(credential: string, catalog: AgentModelCatalog): void {
-    this.#state.patch({
-      draft: draftWithModelCatalog(this.#state.value, credential, catalog),
-      modelDiscovery: sessionModelDiscoveryState(credential, false, catalog),
-      openSelect: undefined,
-    });
+  #select(value: string): ModelDiscoverySelection | undefined {
+    const credential = selectedSessionCredential(value);
+    if (credential === undefined) {
+      return undefined;
+    }
+
+    const current = this.state.value;
+    if (current.draft.credential !== value) {
+      this.state.replaceSilently({
+        ...current,
+        draft: Object.assign({}, current.draft, {
+          credential: value,
+          model: "",
+          openRouterProviderTag: "",
+          reasoningEffort: "",
+        }),
+      });
+    }
+    return { credential, value };
   }
 }

@@ -43,6 +43,7 @@ export interface AgentSessionSummary {
   readonly id: string;
   readonly maxContextTokens: number | null;
   readonly model: string;
+  readonly openRouterProviderTag: string | null;
   readonly provider: ProviderId;
   readonly providerPricing: ProviderModelPricing | null;
   readonly reasoningEffort: AgentReasoningEffort | null;

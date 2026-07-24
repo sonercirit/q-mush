@@ -70,12 +70,21 @@ function statusBadge(status: AgentSessionStatus): JSX.Element {
 }
 
 function sessionModelLabel(
-  session: Pick<AgentSessionSummary, "model" | "provider" | "reasoningEffort">,
+  session: Pick<
+    AgentSessionSummary,
+    "model" | "openRouterProviderTag" | "provider" | "reasoningEffort"
+  >,
 ): string {
   const model = `${session.provider} · ${session.model}`;
+  const servingProvider =
+    session.provider !== "openrouter"
+      ? ""
+      : session.openRouterProviderTag === null
+        ? " · OpenRouter automatic routing"
+        : ` · ${session.openRouterProviderTag} serving provider`;
   return session.reasoningEffort === null
-    ? model
-    : `${model} · ${reasoningEffortLabel(session.reasoningEffort)} reasoning`;
+    ? `${model}${servingProvider}`
+    : `${model}${servingProvider} · ${reasoningEffortLabel(session.reasoningEffort)} reasoning`;
 }
 
 function formatSessionTime(milliseconds: number): string {

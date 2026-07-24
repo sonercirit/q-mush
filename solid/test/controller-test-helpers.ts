@@ -6,9 +6,21 @@ interface RealtimeController<Value> {
   load(): Promise<void>;
 }
 
+const ORIGINAL_FETCH = globalThis.fetch;
+
 type FetchImplementation = (
   ...parameters: Parameters<typeof globalThis.fetch>
 ) => ReturnType<typeof globalThis.fetch>;
+
+export function installTestFetch(implementation: FetchImplementation): void {
+  globalThis.fetch = Object.assign(implementation, {
+    preconnect: ORIGINAL_FETCH.preconnect,
+  });
+}
+
+export function restoreTestFetch(): void {
+  globalThis.fetch = ORIGINAL_FETCH;
+}
 
 export function requestUrl(input: RequestInfo | URL): string {
   return typeof input === "string"

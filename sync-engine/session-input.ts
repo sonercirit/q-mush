@@ -2,6 +2,7 @@ import {
   defaultAgentModel,
   isAgentModelId,
   isAgentReasoningEffort,
+  isOpenRouterProviderTag,
 } from "../shared/agent-configuration.ts";
 import { readAgentImages } from "../shared/agent-images.ts";
 import {
@@ -55,6 +56,7 @@ export function readCreateSession(
     { trim: true },
   );
   const modelValue = value["model"];
+  const openRouterProviderTagValue = value["openRouterProviderTag"];
   const reasoningEffortValue = value["reasoningEffort"];
   const toolsValue = value["tools"];
   const tools =
@@ -70,6 +72,9 @@ export function readCreateSession(
     workingDirectory === undefined ||
     workingDirectory.includes("\0") ||
     (modelValue !== undefined && !isAgentModelId(modelValue)) ||
+    (openRouterProviderTagValue !== undefined &&
+      !isOpenRouterProviderTag(openRouterProviderTagValue)) ||
+    (provider !== "openrouter" && openRouterProviderTagValue !== undefined) ||
     (reasoningEffortValue !== undefined &&
       !isAgentReasoningEffort(reasoningEffortValue)) ||
     tools === undefined
@@ -81,6 +86,9 @@ export function readCreateSession(
     credentialId,
     ...message,
     model: typeof modelValue === "string" ? modelValue : "",
+    openRouterProviderTag: isOpenRouterProviderTag(openRouterProviderTagValue)
+      ? openRouterProviderTagValue
+      : null,
     provider,
     reasoningEffort: isAgentReasoningEffort(reasoningEffortValue)
       ? reasoningEffortValue

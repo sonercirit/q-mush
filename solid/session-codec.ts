@@ -1,9 +1,11 @@
 import {
   isAgentModelId,
   isAgentReasoningEffort,
+  isOpenRouterProviderTag,
   type AgentModelCatalog,
   type AgentModelOption,
   type AgentReasoningEffort,
+  type OpenRouterProviderCatalog,
 } from "../shared/agent-configuration.ts";
 import { readAgentFile } from "../shared/agent-file.ts";
 import { readAgentImages } from "../shared/agent-images.ts";
@@ -121,6 +123,41 @@ export function readAgentModelCatalog(value: unknown): AgentModelCatalog {
   return { defaultModel, models };
 }
 
+export function readOpenRouterProviderCatalog(
+  value: unknown,
+): OpenRouterProviderCatalog {
+  if (!isRecord(value) || !Array.isArray(value["providers"])) {
+    throw new Error("The server returned invalid OpenRouter providers");
+  }
+  const tags = new Set<string>();
+  const providers = value["providers"].map((provider) => {
+    if (!isRecord(provider)) {
+      throw new Error("The server returned an invalid OpenRouter provider");
+    }
+    const contextWindow = readPositiveSafeInteger(provider["contextWindow"]);
+    const name = provider["name"];
+    const tag = provider["tag"];
+    if (
+      (provider["contextWindow"] !== null && contextWindow === null) ||
+      typeof name !== "string" ||
+      name.length === 0 ||
+      name.length > 120 ||
+      !isOpenRouterProviderTag(tag) ||
+      tags.has(tag)
+    ) {
+      throw new Error("The server returned an invalid OpenRouter provider");
+    }
+    tags.add(tag);
+    return {
+      contextWindow,
+      name,
+      pricing: readModelPricing(provider["pricing"]),
+      tag,
+    };
+  });
+  return { providers };
+}
+
 function readStatus(value: unknown): AgentSessionStatus | undefined {
   switch (value) {
     case "failed":
@@ -177,6 +214,16 @@ function readSummary(value: unknown): AgentSessionSummary {
   const maxContextTokens = value["maxContextTokens"];
   const model = value["model"];
   const provider = readProvider(value["provider"]);
+  const openRouterProviderTagValue = value["openRouterProviderTag"];
+  const openRouterProviderTag =
+    provider === "openrouter"
+      ? openRouterProviderTagValue === undefined
+        ? null
+        : readNullableString(openRouterProviderTagValue)
+      : openRouterProviderTagValue === undefined ||
+          openRouterProviderTagValue === null
+        ? null
+        : undefined;
   const reasoningEffort = readNullableString(value["reasoningEffort"]);
   const runnerId = value["runnerId"];
   const status = readStatus(value["status"]);
@@ -209,6 +256,10 @@ function readSummary(value: unknown): AgentSessionSummary {
         !Number.isSafeInteger(maxContextTokens) ||
         maxContextTokens <= 0)) ||
     typeof model !== "string" ||
+    openRouterProviderTag === undefined ||
+    (openRouterProviderTag !== null &&
+      (provider !== "openrouter" ||
+        !isOpenRouterProviderTag(openRouterProviderTag))) ||
     provider === undefined ||
     value["providerPricing"] === undefined ||
     reasoningEffort === undefined ||
@@ -235,6 +286,7 @@ function readSummary(value: unknown): AgentSessionSummary {
     id,
     maxContextTokens,
     model,
+    openRouterProviderTag,
     provider,
     providerPricing,
     reasoningEffort,
@@ -337,6 +389,7 @@ export function summaryFromDetail(
     id: detail.id,
     maxContextTokens: detail.maxContextTokens,
     model: detail.model,
+    openRouterProviderTag: detail.openRouterProviderTag,
     provider: detail.provider,
     providerPricing: detail.providerPricing,
     reasoningEffort: detail.reasoningEffort,

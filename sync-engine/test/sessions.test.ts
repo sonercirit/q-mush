@@ -28,7 +28,9 @@ import {
 import {
   completeAgentFileLookup,
   completeRunnerCommand,
+  expectJsonResponse,
   expectRunnerCommand,
+  expectSessionReaches,
   hasSessionStatus,
   sessionDetail,
   waitForSessionValue,
@@ -63,30 +65,6 @@ class BlockingModel implements AgentModel {
       }
     });
   }
-}
-
-async function expectJsonResponse(
-  response: Response,
-  status: number,
-  expected: unknown,
-): Promise<void> {
-  const body: unknown = await response.json();
-  expect(body).toEqual(expected);
-  expect(response.status).toBe(status);
-}
-
-async function expectSessionReaches(
-  setup: Awaited<ReturnType<typeof connectedSessionSetup>>,
-  response: Response,
-  status: string,
-) {
-  expect(response.status).toBe(201);
-  await completeAgentFileLookup(setup);
-  await waitForSessionValue(
-    () => sessionDetail(setup.sessions),
-    hasSessionStatus(status),
-  );
-  return sessionDetail(setup.sessions);
 }
 
 async function startSessionWithAgentFile(

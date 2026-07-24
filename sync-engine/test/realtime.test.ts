@@ -79,6 +79,7 @@ function sessions(
     listForUser: () => [],
     message: () => Promise.resolve(new Response()),
     models: () => Promise.resolve(new Response()),
+    openRouterProviders: () => Promise.resolve(new Response()),
     onChange: () => undefined,
     runnerConnected: () => undefined,
     stop: () => Promise.resolve(new Response()),

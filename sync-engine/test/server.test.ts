@@ -28,6 +28,7 @@ import {
   runnerDirectoriesPath,
   RUNNERS_PATH,
   SESSION_MODELS_PATH,
+  SESSION_OPENROUTER_PROVIDERS_PATH,
   SESSIONS_PATH,
 } from "../../shared/routes.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
@@ -198,6 +199,9 @@ describe("routes", () => {
     expect(REALTIME_PATH).toBe("/api/realtime");
     expect(RUNNER_VERSION_HEADER).toBe("x-q-mush-runner-version");
     expect(SESSIONS_PATH).toBe("/api/sessions");
+    expect(SESSION_OPENROUTER_PROVIDERS_PATH).toBe(
+      "/api/sessions/openrouter-providers",
+    );
     expect(RUNNER_INSTALLER_PATH).toBe("/runner/install.sh");
     expect(RUNNER_EXECUTABLE_PATH).toBe("/runner/executable");
   });
@@ -296,6 +300,9 @@ describe("page server", () => {
       sendRequest(SESSIONS_PATH, undefined, "POST"),
       sendRequest(
         `${SESSION_MODELS_PATH}?provider=openai&credentialId=credential-id`,
+      ),
+      sendRequest(
+        `${SESSION_OPENROUTER_PROVIDERS_PATH}?credentialId=credential-id&model=vendor%2Fmodel`,
       ),
       sendRequest(`${SESSIONS_PATH}/session-id`),
       sendRequest(`${SESSIONS_PATH}/session-id/compact`, undefined, "POST"),

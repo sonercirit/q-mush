@@ -60,6 +60,7 @@ interface ChatCompletionsAgentModelOptions {
   readonly model: string;
   readonly onDelta?: (delta: ProviderTextDelta) => void;
   readonly provider: ProviderId;
+  readonly openRouterProviderTag?: string;
   readonly reasoningEffort?: AgentReasoningEffort | null;
   readonly sleep?: ModelRequestSleep;
   readonly systemPrompt?: string;
@@ -272,6 +273,7 @@ function requestBody(
   messages: readonly AgentConversationMessage[],
   model: string,
   provider: ProviderId,
+  openRouterProviderTag: string | undefined,
   responsesProtocol: boolean,
   reasoningEffort: AgentReasoningEffort | undefined,
   systemPrompt: string,
@@ -291,6 +293,9 @@ function requestBody(
         ...messages.map(modelMessage),
       ],
       model,
+      ...(provider === "openrouter" && openRouterProviderTag !== undefined
+        ? { provider: { only: [openRouterProviderTag] } }
+        : {}),
       ...reasoning,
       ...(stream
         ? { stream: true, stream_options: { include_usage: true } }
@@ -341,6 +346,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
   readonly #model: string;
   readonly #onDelta: ((delta: ProviderTextDelta) => void) | undefined;
   readonly #provider: ProviderId;
+  readonly #openRouterProviderTag: string | undefined;
   readonly #reasoningEffort: AgentReasoningEffort | undefined;
   readonly #sleep: ModelRequestSleep | undefined;
   readonly #systemPrompt: string;
@@ -353,6 +359,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
     this.#model = options.model;
     this.#onDelta = options.onDelta;
     this.#provider = options.provider;
+    this.#openRouterProviderTag = options.openRouterProviderTag;
     this.#reasoningEffort = options.reasoningEffort ?? undefined;
     this.#sleep = options.sleep;
     this.#systemPrompt = options.systemPrompt ?? AGENT_SYSTEM_PROMPT;
@@ -430,6 +437,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
       messages,
       this.#model,
       this.#provider,
+      this.#openRouterProviderTag,
       responsesProtocol,
       this.#reasoningEffort,
       this.#systemPrompt,

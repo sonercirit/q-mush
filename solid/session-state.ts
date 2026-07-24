@@ -7,6 +7,7 @@ import type {
   SessionModelDiscoveryState,
   SessionViewState,
 } from "./session-client.tsx";
+import type { SessionProviderDiscoveryState } from "./session-provider-select.tsx";
 import { DEFAULT_SESSION_TRANSCRIPT_FILTERS } from "./session-transcript-filters.ts";
 
 export function mostRecentSessionDirectory(
@@ -20,6 +21,7 @@ function initialSessionDraft(): SessionDraft {
     credential: "",
     images: [],
     model: "",
+    openRouterProviderTag: "",
     prompt: "",
     reasoningEffort: "",
     runnerId: "",
@@ -37,6 +39,15 @@ export function sessionModelDiscoveryState(
   return { catalog, credential, error, loading };
 }
 
+export function sessionProviderDiscoveryState(
+  key: string | undefined,
+  loading: boolean,
+  catalog?: SessionProviderDiscoveryState["catalog"],
+  error?: string,
+): SessionProviderDiscoveryState {
+  return { catalog, error, key, loading };
+}
+
 export function initialSessionViewState(): SessionViewState {
   return {
     compacting: false,
@@ -49,6 +60,7 @@ export function initialSessionViewState(): SessionViewState {
     followUpImages: [],
     loadingDetail: false,
     modelDiscovery: sessionModelDiscoveryState(undefined, false),
+    providerDiscovery: sessionProviderDiscoveryState(undefined, false),
     openSelect: undefined,
     selectedId: undefined,
     sending: false,

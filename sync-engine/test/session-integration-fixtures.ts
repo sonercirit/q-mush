@@ -1,4 +1,5 @@
 import { expect } from "vitest";
+import type { OpenRouterProviderCatalog } from "../../shared/agent-configuration.ts";
 import type { AgentImage } from "../../shared/agent-images.ts";
 import type { AgentModel } from "../../shared/agent-loop.ts";
 import {
@@ -14,6 +15,7 @@ import {
 } from "../../shared/runner-command-broker.ts";
 import type { AgentModelDiscoverer } from "../../sync-engine/agent-model-discovery.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
+import type { OpenRouterProviderDiscoverer } from "../../sync-engine/openrouter-provider-discovery.ts";
 import { createRunnerIntegration } from "../../sync-engine/runners.ts";
 import { createSessionIntegration } from "../../sync-engine/sessions.ts";
 import {
@@ -35,6 +37,7 @@ export function connectedSessionSetup(
   model: AgentModel,
   credentialSource: ProviderCredentialAccess["source"] = "api_key",
   discoverModels?: AgentModelDiscoverer,
+  discoverOpenRouterProviders?: OpenRouterProviderDiscoverer,
 ) {
   const database = createAuthenticatedTestDatabase();
   const authOptions = { database, now: () => TEST_NOW };
@@ -88,6 +91,8 @@ export function connectedSessionSetup(
   ];
   const selectedModels: string[] = [];
   const selectedPricing: (ProviderModelPricing | null)[] = [];
+  const selectedProviders: string[] = [];
+  const selectedOpenRouterProviderTags: (string | undefined)[] = [];
   const selectedReasoningEfforts: (string | null)[] = [];
   const selectedSystemPrompts: string[] = [];
   const selectedTools: (readonly AgentSessionToolName[])[] = [];
@@ -113,9 +118,14 @@ export function connectedSessionSetup(
       broker,
       database,
       ...(discoverModels === undefined ? {} : { discoverModels }),
+      ...(discoverOpenRouterProviders === undefined
+        ? {}
+        : { discoverOpenRouterProviders }),
       modelFactory: ({
         credential: selectedCredential,
         model: selectedModel,
+        openRouterProviderTag,
+        provider,
         providerPricing,
         reasoningEffort,
         systemPrompt,
@@ -123,7 +133,9 @@ export function connectedSessionSetup(
       }) => {
         expect(selectedCredential.secret).toBe("provider-secret");
         selectedModels.push(selectedModel);
+        selectedOpenRouterProviderTags.push(openRouterProviderTag);
         selectedPricing.push(providerPricing);
+        selectedProviders.push(provider);
         selectedReasoningEfforts.push(reasoningEffort);
         selectedSystemPrompts.push(systemPrompt);
         selectedTools.push(tools);
@@ -138,12 +150,63 @@ export function connectedSessionSetup(
     latestRunnerCommand: () => latestRunnerCommand,
     runnerCommands,
     selectedModels,
+    selectedOpenRouterProviderTags,
     selectedPricing,
+    selectedProviders,
     selectedReasoningEfforts,
     selectedSystemPrompts,
     selectedTools,
     sessions,
   };
+}
+
+export const OPENROUTER_PROVIDER_CATALOG: OpenRouterProviderCatalog = {
+  providers: [
+    {
+      contextWindow: 64_000,
+      name: "Together",
+      pricing: { input: "0.0000002", output: "0.0000008" },
+      tag: "together",
+    },
+  ],
+};
+
+interface SessionRequestOptions {
+  readonly images?: readonly AgentImage[];
+  readonly model?: string;
+  readonly openRouterProviderTag?: string;
+  readonly provider: "openai" | "openrouter";
+  readonly reasoningEffort?: string;
+}
+
+function createProviderSessionRequest(options: SessionRequestOptions): Request {
+  return createAuthenticatedRequest(
+    SESSIONS_PATH,
+    {
+      credentialId: CREDENTIAL_ID,
+      images: options.images,
+      model: options.model,
+      openRouterProviderTag: options.openRouterProviderTag,
+      prompt: "Inspect README.md",
+      provider: options.provider,
+      reasoningEffort: options.reasoningEffort,
+      runnerId: RUNNER_ID,
+      tools: AGENT_SESSION_TOOL_NAMES,
+      workingDirectory: "/work/project",
+    },
+    "POST",
+  );
+}
+
+export function createOpenRouterSessionRequest(
+  openRouterProviderTag?: string,
+  model = "anthropic/claude-3.5-sonnet",
+): Request {
+  return createProviderSessionRequest({
+    model,
+    ...(openRouterProviderTag === undefined ? {} : { openRouterProviderTag }),
+    provider: "openrouter",
+  });
 }
 
 export function createSessionRequest(
@@ -152,19 +215,10 @@ export function createSessionRequest(
   model = "gpt-4.1-mini",
   images: readonly AgentImage[] = [],
 ): Request {
-  return createAuthenticatedRequest(
-    SESSIONS_PATH,
-    {
-      credentialId: CREDENTIAL_ID,
-      ...(images.length === 0 ? {} : { images }),
-      ...(includeModel ? { model } : {}),
-      prompt: "Inspect README.md",
-      provider: "openai",
-      reasoningEffort,
-      runnerId: RUNNER_ID,
-      tools: AGENT_SESSION_TOOL_NAMES,
-      workingDirectory: "/work/project",
-    },
-    "POST",
-  );
+  return createProviderSessionRequest({
+    ...(images.length === 0 ? {} : { images }),
+    ...(includeModel ? { model } : {}),
+    provider: "openai",
+    reasoningEffort,
+  });
 }

@@ -55,6 +55,7 @@ function testSessionInput() {
     images: [TEST_AGENT_IMAGE],
     maxContextTokens: 200_000,
     model: "gpt-4.1-mini",
+    openRouterProviderTag: null,
     prompt: "Inspect the repository\nand make it shine",
     provider: "openai" as const,
     providerPricing: null,
@@ -335,6 +336,23 @@ describe("session store", () => {
 
     expect(detail.tools).toEqual(tools);
     expect(store.list(TEST_USER_ID)[0]?.tools).toEqual(tools);
+    database.$client.close();
+  });
+
+  test("persists an OpenRouter serving-provider tag", () => {
+    const { database, store } = createStore();
+    const input = {
+      ...testSessionInput(),
+      model: "anthropic/claude-3.5-sonnet",
+      openRouterProviderTag: "anthropic" as const,
+      provider: "openrouter" as const,
+    };
+    const detail = store.create(input, TEST_NOW);
+
+    expect(detail.openRouterProviderTag).toBe("anthropic");
+    expect(store.list(TEST_USER_ID)[0]?.openRouterProviderTag).toBe(
+      "anthropic",
+    );
     database.$client.close();
   });
 

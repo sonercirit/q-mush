@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import {
   readAgentModelCatalog,
+  readOpenRouterProviderCatalog,
   readSessionDetail,
 } from "../../solid/session-codec.ts";
 import {
@@ -92,6 +93,37 @@ function modelCatalogValue(
     ],
   };
 }
+
+test("reads OpenRouter serving-provider catalogs and legacy automatic routing", () => {
+  const provider = {
+    contextWindow: 64_000,
+    name: "Together",
+    pricing: { input: "0.1", output: "0.2" },
+    tag: "together",
+  };
+  expect(readOpenRouterProviderCatalog({ providers: [provider] })).toEqual({
+    providers: [provider],
+  });
+  expect(
+    readSessionDetail({
+      ...DETAIL,
+      openRouterProviderTag: undefined,
+      provider: "openrouter",
+    }).openRouterProviderTag,
+  ).toBeNull();
+  expect(() =>
+    readOpenRouterProviderCatalog({
+      providers: [
+        {
+          contextWindow: null,
+          name: "Forged",
+          pricing: null,
+          tag: "bad tag",
+        },
+      ],
+    }),
+  ).toThrow("invalid OpenRouter provider");
+});
 
 test("requires explicit context and modality metadata from model responses", () => {
   expect(() => readAgentModelCatalog(modelCatalogValue(null, false))).toThrow(

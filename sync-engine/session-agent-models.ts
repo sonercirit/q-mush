@@ -15,6 +15,7 @@ interface AgentModelFactoryOptions extends Pick<
   "model" | "provider" | "providerPricing" | "reasoningEffort" | "tools"
 > {
   readonly credential: AgentProviderCredential;
+  readonly openRouterProviderTag?: string;
   readonly onDelta?: (delta: {
     readonly content: string;
     readonly reset?: true;
@@ -41,6 +42,9 @@ function modelOptions(
   return {
     credential,
     model: detail.model,
+    ...(detail.openRouterProviderTag === null
+      ? {}
+      : { openRouterProviderTag: detail.openRouterProviderTag }),
     ...(onDelta === undefined ? {} : { onDelta }),
     provider: detail.provider,
     providerPricing: detail.providerPricing,

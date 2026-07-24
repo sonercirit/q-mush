@@ -5,6 +5,10 @@ import { isRecord } from "../../shared/auth-model.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import { createJsonResponse } from "../../sync-engine/http.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
+import {
+  jsonResponseQueueFetch,
+  testApiKeyCredential,
+} from "./agent-model-test-helpers.ts";
 import { createOpenAiOAuthSecret } from "./oauth-test-helpers.ts";
 import { captureRejection, requireError } from "./promise-test-helpers.ts";
 import { expectDoneTurn } from "./provider-turn-fixtures.ts";
@@ -21,11 +25,7 @@ const IMAGE_MESSAGE = {
   role: "user" as const,
 };
 const OPENROUTER_IMAGE_OPTIONS = {
-  credential: {
-    accountId: null,
-    secret: "sk-or-secret",
-    source: "api_key" as const,
-  },
+  credential: testApiKeyCredential("sk-or-secret"),
   model: "openai/gpt-4.1-mini",
   provider: "openrouter" as const,
 };
@@ -56,6 +56,18 @@ function capturedToolNames(body: unknown): readonly unknown[] {
           : undefined,
       )
     : [];
+}
+
+function openAiOptions(
+  model: string,
+  extra: Partial<ModelOptions> = {},
+): Omit<ModelOptions, "fetch"> {
+  return {
+    credential: testApiKeyCredential("sk-openai-secret"),
+    model,
+    provider: "openai",
+    ...extra,
+  };
 }
 
 function parallelToolUseSchema(
@@ -95,6 +107,14 @@ function expectUnboundedParallelSchema(body: unknown): void {
 
 function doneResponse(): unknown {
   return { choices: [{ message: { content: "Done." } }] };
+}
+
+async function bodyForModel(
+  options: Omit<ModelOptions, "fetch">,
+): Promise<unknown> {
+  const capture = new RequestCapture();
+  await completeHello(capturedModel(capture, options));
+  return capturedBody(capture);
 }
 
 function capturedModel(
@@ -242,6 +262,56 @@ describe("chat completions agent model", () => {
     expect(serializedBody).not.toContain("list_files");
   });
 
+  test("constrains every OpenRouter request to the selected serving provider", async () => {
+    const body = await bodyForModel({
+      ...OPENROUTER_IMAGE_OPTIONS,
+      openRouterProviderTag: "google-vertex.us",
+    });
+
+    expect(body).toMatchObject({
+      provider: { only: ["google-vertex.us"] },
+    });
+  });
+
+  test("keeps the selected serving provider on retry requests", async () => {
+    const bodies: unknown[] = [];
+    const responses = [
+      createJsonResponse({}, 503),
+      createJsonResponse(doneResponse()),
+    ];
+    const model = new ChatCompletionsAgentModel({
+      ...OPENROUTER_IMAGE_OPTIONS,
+      fetch: jsonResponseQueueFetch(bodies, responses),
+      openRouterProviderTag: "google-vertex/us",
+      sleep: () => Promise.resolve(),
+    });
+
+    await completeHello(model);
+
+    expect(bodies).toHaveLength(2);
+    expect(bodies).toEqual([
+      expect.objectContaining({
+        provider: { only: ["google-vertex/us"] },
+      }),
+      expect.objectContaining({
+        provider: { only: ["google-vertex/us"] },
+      }),
+    ]);
+  });
+
+  test("omits serving-provider routing for automatic OpenRouter routing", async () => {
+    const body = await bodyForModel(OPENROUTER_IMAGE_OPTIONS);
+    expect(body).not.toHaveProperty("provider");
+  });
+
+  test("does not add OpenRouter routing to OpenAI requests", async () => {
+    const body = await bodyForModel(
+      openAiOptions("gpt-4.1-mini", { openRouterProviderTag: "forged" }),
+    );
+
+    expect(body).not.toHaveProperty("provider");
+  });
+
   test("sends the unbounded schema through OpenAI Responses", async () => {
     const capture = new RequestCapture();
     const output = [DONE_CODEX_OUTPUT];
@@ -338,25 +408,11 @@ describe("chat completions agent model", () => {
   });
 
   test("uses the OpenAI chat-completions reasoning parameter", async () => {
-    const capture = new RequestCapture();
-    const model = respondingModel(
-      {
-        credential: {
-          accountId: null,
-          secret: "sk-openai-secret",
-          source: "api_key",
-        },
-        model: "gpt-5-codex",
-        provider: "openai",
-        reasoningEffort: "low",
-      },
-      doneResponse(),
-      capture,
+    const body = await bodyForModel(
+      openAiOptions("gpt-5-codex", { reasoningEffort: "low" }),
     );
 
-    await model.complete([{ content: "Fix the bug", role: "user" }]);
-
-    expect(await capturedBody(capture)).toMatchObject({
+    expect(body).toMatchObject({
       model: "gpt-5-codex",
       reasoning_effort: "low",
     });

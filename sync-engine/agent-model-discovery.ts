@@ -8,6 +8,7 @@ import {
   type AgentReasoningEffort,
 } from "../shared/agent-configuration.ts";
 import { isRecord, readRequiredArray } from "../shared/auth-model.ts";
+import { boundedPositiveInteger } from "../shared/numbers.ts";
 import type {
   ProviderCredentialAccess,
   ProviderId,
@@ -105,9 +106,7 @@ function nestedValue(
 }
 
 function positiveSafeInteger(value: unknown): number | null {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
-    ? value
-    : null;
+  return boundedPositiveInteger(value);
 }
 
 type ContextWindowRecord = Readonly<Record<string, unknown>>;

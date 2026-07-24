@@ -3,7 +3,6 @@ import {
   maximumAgentReasoningEffort,
   type AgentModelCatalog,
 } from "../../shared/agent-configuration.ts";
-import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import type { SessionDraft } from "../../solid/session-client.tsx";
 import {
   applySessionModelCatalog,
@@ -36,14 +35,9 @@ const CATALOG: AgentModelCatalog = {
 };
 
 const DRAFT: SessionDraft = {
-  credential: "",
-  images: [],
-  model: "",
+  ...initialSessionViewState().draft,
   prompt: "Inspect the workspace",
-  reasoningEffort: "",
   runnerId: "runner-1",
-  tools: AGENT_SESSION_TOOL_NAMES,
-  workingDirectory: ".",
 };
 
 const SELECTED_DRAFT: SessionDraft = {

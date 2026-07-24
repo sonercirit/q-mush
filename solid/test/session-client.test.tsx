@@ -170,6 +170,26 @@ test("shows session time and cost in the list and detail", () => {
   expect(html.match(/Estimated cost: \$0\.0042/gu)).toHaveLength(2);
 });
 
+test("shows a persisted OpenRouter routing choice even after discovery changes", () => {
+  const explicit = {
+    ...TEST_SESSION_DETAIL,
+    model: "vendor/model",
+    openRouterProviderTag: "provider/retired-region",
+    provider: "openrouter" as const,
+  };
+  const html = renderPanel({
+    ...SESSION_STATE,
+    detail: explicit,
+    selectedId: explicit.id,
+    sessions: [explicit],
+  });
+
+  expect(
+    html.match(/provider\/retired-region serving provider/gu),
+  ).toHaveLength(2);
+  expect(html).not.toContain("OpenRouter automatic routing");
+});
+
 test("renders the session list as a scrollable region", () => {
   const html = renderPanel({
     ...SESSION_STATE,

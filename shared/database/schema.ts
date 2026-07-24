@@ -130,6 +130,7 @@ export const agentSessions = sqliteTable(
       .references(() => providerCredentials.id, { onDelete: "restrict" }),
     provider: providerColumn(),
     providerPricing: text("provider_pricing"),
+    openRouterProviderTag: text("openrouter_provider_tag"),
     model: text("model").notNull(),
     autoCompact: integer("auto_compact", { mode: "boolean" })
       .notNull()

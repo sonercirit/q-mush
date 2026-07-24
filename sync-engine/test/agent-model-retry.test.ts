@@ -1,22 +1,16 @@
 import { describe, expect, test } from "vitest";
 import { fetchModelRequestWithRetries } from "../../sync-engine/agent-model-retry.ts";
 import { createJsonResponse } from "../../sync-engine/http.ts";
+import {
+  jsonResponseQueueFetch,
+  takeResponse,
+} from "./agent-model-test-helpers.ts";
 import { captureRejection, requireError } from "./promise-test-helpers.ts";
 
 const REQUEST = new Request("https://provider.example/completions", {
   body: '{"prompt":"Hello"}',
   method: "POST",
 });
-function takeResponse(responses: Response[]): Response {
-  const response = responses.shift();
-
-  if (response === undefined) {
-    throw new Error("The test ran out of provider responses");
-  }
-
-  return response;
-}
-
 function recordDelay(delays: number[]) {
   return (milliseconds: number) => {
     delays.push(milliseconds);
@@ -57,10 +51,7 @@ describe("agent model request retries", () => {
     const bodies: unknown[] = [];
     const delays: number[] = [];
     const response = await fetchModelRequestWithRetries(
-      async (request) => {
-        bodies.push(await request.json());
-        return takeResponse(responses);
-      },
+      jsonResponseQueueFetch(bodies, responses),
       REQUEST,
       recordDelay(delays),
     );

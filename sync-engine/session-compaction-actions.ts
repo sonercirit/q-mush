@@ -9,6 +9,7 @@ import {
   createMethodNotAllowedResponse,
   parseJsonRequest,
 } from "./http.ts";
+import type { CredentialResponseAction } from "./session-provider-selection.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
 import type { SessionStore } from "./session-store.ts";
 
@@ -74,9 +75,7 @@ interface ManualCompactionDependencies {
   readonly credential: (
     userId: string,
     detail: AgentSessionDetail,
-    action: (
-      credential: ProviderCredentialAccess,
-    ) => Promise<Response> | Response,
+    action: CredentialResponseAction,
   ) => Promise<Response>;
   readonly launch: (
     detail: AgentSessionDetail,

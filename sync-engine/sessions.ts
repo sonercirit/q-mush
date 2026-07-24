@@ -26,19 +26,20 @@ import {
   createMethodNotAllowedResponse,
   parseJsonRequest,
 } from "./http.ts";
+import {
+  discoverOpenRouterProviders,
+  type OpenRouterProviderDiscoverer,
+} from "./openrouter-provider-discovery.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
 import type { RunnerIntegration } from "./runners.ts";
 import { SessionAgentActions } from "./session-agent-actions.ts";
 import type { AgentModelFactory } from "./session-agent-models.ts";
-import {
-  compactSessionConversation,
-  runSessionAgent,
-} from "./session-agent-runtime.ts";
 import { unavailableSessionResponse } from "./session-availability.ts";
 import {
   startManualSessionCompaction,
   updateSessionCompactionMode,
 } from "./session-compaction-actions.ts";
+import { executeSession } from "./session-execution.ts";
 import {
   readCreateSession,
   readPrompt,
@@ -47,10 +48,16 @@ import {
   type CreateSessionInput,
   type PromptInput,
 } from "./session-input.ts";
-import { sessionModelRuntime } from "./session-model-runtime.ts";
+
+import {
+  openRouterProvidersForUser,
+  sessionMetadata,
+  type CredentialResponseAction,
+} from "./session-provider-selection.ts";
 import {
   SessionRequestHelpers,
   readIdentifier,
+  requestSearchParameters,
 } from "./session-request-helpers.ts";
 import { SessionRuntimes } from "./session-runtime.ts";
 import { SessionStore } from "./session-store.ts";
@@ -69,16 +76,13 @@ export type SessionCredentialReaders = Readonly<
   Record<ProviderId, SessionCredentialReader>
 >;
 
-type SessionAction = (
-  credential: ProviderCredentialAccess,
-) => Promise<Response> | Response;
-
 interface SessionDependencies {
   readonly broker?: RunnerCommandBroker;
   readonly braveSearch: Pick<BraveSearchSkill, "execute">;
   readonly database?: AppDatabase;
   readonly discoverModels?: AgentModelDiscoverer;
   readonly modelFactory?: AgentModelFactory;
+  readonly discoverOpenRouterProviders?: OpenRouterProviderDiscoverer;
   readonly now?: () => number;
   readonly randomId?: IdGenerator;
   readonly realtime?: RealtimeHub;
@@ -117,18 +121,10 @@ export interface SessionIntegration {
   listForUser(userId: string): readonly AgentSessionSummary[];
   message(request: Request, sessionId: string): Promise<Response>;
   models(request: Request): Promise<Response>;
+  openRouterProviders(request: Request): Promise<Response>;
   onChange(listener: (userId: string, sessionId: string) => void): void;
   runnerConnected(): void;
   stop(request: Request, sessionId: string): Promise<Response>;
-}
-
-function safeErrorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : "Unknown error";
-  return `Session failed: ${message.slice(0, 500)}`;
-}
-
-function isAbort(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "AbortError";
 }
 
 class DrizzleSessionIntegration implements SessionIntegration {
@@ -136,6 +132,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
   readonly #auth: GoogleAuth;
   readonly #braveSearch: Pick<BraveSearchSkill, "execute">;
   readonly #discoverModels: AgentModelDiscoverer;
+  readonly #discoverOpenRouterProviders: OpenRouterProviderDiscoverer;
   readonly #modelFactory: AgentModelFactory;
   readonly #now: () => number;
   readonly #onChange = new Set<(userId: string, sessionId: string) => void>();
@@ -165,6 +162,8 @@ class DrizzleSessionIntegration implements SessionIntegration {
       });
     this.#braveSearch = dependencies.braveSearch;
     this.#discoverModels = dependencies.discoverModels ?? discoverAgentModels;
+    this.#discoverOpenRouterProviders =
+      dependencies.discoverOpenRouterProviders ?? discoverOpenRouterProviders;
     this.#modelFactory =
       dependencies.modelFactory ??
       ((options) => new ChatCompletionsAgentModel(options));
@@ -180,6 +179,26 @@ class DrizzleSessionIntegration implements SessionIntegration {
     this.#actions.reportAll(this.#store.failInterrupted(this.#now()));
   }
 
+  #metadata(
+    input: Parameters<typeof sessionMetadata>[0]["input"],
+    credential: ProviderCredentialAccess,
+    ownerId: string,
+  ) {
+    return sessionMetadata({
+      credential,
+      discoverModels: this.#discoverModels,
+      discoverProviders: this.#discoverOpenRouterProviders,
+      input,
+      ownerId,
+    });
+  }
+
+  readonly #withCredential = (
+    userId: string,
+    selection: CredentialSelection,
+    action: CredentialResponseAction,
+  ): Promise<Response> => this.#withCredentialAccess(userId, selection, action);
+
   #createActions(): SessionAgentActions {
     return new SessionAgentActions({
       activeSession: (sessionId) => this.#runtimes.active(sessionId),
@@ -188,20 +207,16 @@ class DrizzleSessionIntegration implements SessionIntegration {
       },
       broker: this.#broker,
       draining: () => this.#runtimes.draining,
-      discoverSessionMetadata: async (input, credential) => {
-        try {
-          const catalog = await this.#discoverModels(
-            input.provider,
-            credential,
+      discoverSessionMetadata: async (input, credential, userId) => {
+        const metadata = await this.#metadata(input, credential, userId);
+        if ("error" in metadata) {
+          throw new Error(
+            metadata.error === "provider_unavailable"
+              ? "The OpenRouter serving provider is unavailable"
+              : "The OpenRouter serving provider could not be validated",
           );
-          const model = catalog.models.find(({ id }) => id === input.model);
-          return {
-            maxContextTokens: model?.contextWindow ?? null,
-            providerPricing: model?.pricing ?? null,
-          };
-        } catch {
-          return { maxContextTokens: null, providerPricing: null };
         }
+        return metadata;
       },
       launchSession: (credential, detail, userId) =>
         this.#launch(detail, credential, userId),
@@ -210,8 +225,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
       runnerIsAvailable: (userId, runnerId) =>
         this.#runners.runnerIsAvailable(userId, runnerId),
       store: this.#store,
-      withCredential: (userId, selection, action) =>
-        this.#withCredentialAccess(userId, selection, action),
+      withCredential: this.#withCredential,
     });
   }
 
@@ -296,14 +310,24 @@ class DrizzleSessionIntegration implements SessionIntegration {
     );
   }
 
+  #getDiscovery(
+    request: Request,
+    action: (user: AuthenticatedUser) => Promise<Response>,
+  ): Promise<Response> {
+    return this.#requests.get(request, action);
+  }
+
   models(request: Request): Promise<Response> {
-    const response =
-      request.method === "GET"
-        ? this.#requests.forUser(request, (user) =>
-            this.#modelsForUser(request, user),
-          )
-        : createMethodNotAllowedResponse("GET");
-    return Promise.resolve(response);
+    const modelsForUser = this.#modelsForUser.bind(this, request);
+    return this.#getDiscovery(request, modelsForUser);
+  }
+
+  openRouterProviders(request: Request): Promise<Response> {
+    const providersForUser = this.#openRouterProvidersForUser.bind(
+      this,
+      request,
+    );
+    return this.#getDiscovery(request, providersForUser);
   }
 
   onChange(listener: (userId: string, sessionId: string) => void): void {
@@ -348,7 +372,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
   async #withCredentialAccess(
     userId: string,
     selection: CredentialSelection,
-    action: SessionAction,
+    action: CredentialResponseAction,
   ): Promise<Response> {
     let credential: ProviderCredentialAccess | undefined;
 
@@ -369,7 +393,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
   async #withRuntimeAccess(
     userId: string,
     selection: RuntimeSelection,
-    action: SessionAction,
+    action: CredentialResponseAction,
   ): Promise<Response> {
     if (!this.#runners.runnerIsAvailable(userId, selection.runnerId)) {
       return createApiError("runner_unavailable", 409);
@@ -401,11 +425,23 @@ class DrizzleSessionIntegration implements SessionIntegration {
     }
   }
 
+  async #openRouterProvidersForUser(
+    request: Request,
+    user: AuthenticatedUser,
+  ): Promise<Response> {
+    return openRouterProvidersForUser({
+      discover: this.#discoverOpenRouterProviders,
+      request,
+      user,
+      withCredential: this.#withCredential,
+    });
+  }
+
   async #modelsForUser(
     request: Request,
     user: AuthenticatedUser,
   ): Promise<Response> {
-    const search = new URL(request.url).searchParams;
+    const search = requestSearchParameters(request);
     const credentialId = readIdentifier(search.get("credentialId"));
     const provider = readProvider(search.get("provider"));
 
@@ -444,16 +480,18 @@ class DrizzleSessionIntegration implements SessionIntegration {
   ): Promise<Response> {
     return this.#withRuntimeAccess(user.id, input, async (credential) => {
       const selectedModel = selectedSessionModel(input, credential.source);
-      let maxContextTokens: number | null = null;
-      let providerPricing: AgentSessionSummary["providerPricing"] = null;
-
-      try {
-        const catalog = await this.#discoverModels(input.provider, credential);
-        const model = catalog.models.find(({ id }) => id === selectedModel);
-        maxContextTokens = model?.contextWindow ?? null;
-        providerPricing = model?.pricing ?? null;
-      } catch {
-        // Model discovery enhances display but does not gate a session.
+      const metadata = await this.#metadata(
+        { ...input, model: selectedModel },
+        credential,
+        user.id,
+      );
+      if ("error" in metadata) {
+        return createApiError(
+          metadata.error === "provider_unavailable"
+            ? "openrouter_provider_unavailable"
+            : "openrouter_provider_validation_failed",
+          metadata.error === "provider_unavailable" ? 409 : 502,
+        );
       }
 
       if (this.#runtimes.draining) {
@@ -463,10 +501,9 @@ class DrizzleSessionIntegration implements SessionIntegration {
       const detail = this.#store.create(
         {
           ...input,
+          ...metadata,
           autoCompact: true,
-          maxContextTokens,
           model: selectedModel,
-          providerPricing,
           userId: user.id,
         },
         this.#now(),
@@ -574,27 +611,6 @@ class DrizzleSessionIntegration implements SessionIntegration {
     this.#actions.finished(detail, userId);
   }
 
-  #finish(detail: AgentSessionDetail, userId: string, error?: unknown): void {
-    const current = this.#store.get(userId, detail.id);
-    if (current?.status === "stopped") {
-      this.#notifyFinished(detail, userId);
-      return;
-    }
-    if (error !== undefined) {
-      this.#store.appendErrorMessage(
-        detail.id,
-        safeErrorMessage(error),
-        this.#now(),
-      );
-    }
-    this.#store.mark(
-      detail.id,
-      error === undefined ? "idle" : "failed",
-      this.#now(),
-    );
-    this.#notifyFinished(detail, userId);
-  }
-
   async #run(
     detail: AgentSessionDetail,
     credential: ProviderCredentialAccess,
@@ -602,37 +618,26 @@ class DrizzleSessionIntegration implements SessionIntegration {
     controller: AbortController,
     compact: boolean,
   ): Promise<void> {
-    if (!this.#store.mark(detail.id, "running", this.#now())) {
-      return;
-    }
-    this.#notify(userId, detail.id);
-
-    try {
-      const runtime = sessionModelRuntime(
-        {
-          actions: this.#actions,
-          braveSearch: this.#braveSearch,
-          broker: this.#broker,
-          modelFactory: this.#modelFactory,
-          now: this.#now,
-          notify: this.#notify,
-          realtime: this.#realtime,
-          store: this.#store,
+    await executeSession({
+      compact,
+      controller,
+      credential,
+      detail,
+      resources: {
+        actions: this.#actions,
+        braveSearch: this.#braveSearch,
+        broker: this.#broker,
+        finished: (finished, ownerId) => {
+          this.#notifyFinished(finished, ownerId);
         },
-        detail,
-        credential,
-        userId,
-        controller,
-      );
-      await (compact
-        ? compactSessionConversation(runtime)
-        : runSessionAgent(runtime));
-      this.#finish(detail, userId);
-    } catch (error) {
-      if (!controller.signal.aborted && !isAbort(error)) {
-        this.#finish(detail, userId, error);
-      }
-    }
+        modelFactory: this.#modelFactory,
+        now: this.#now,
+        notify: this.#notify,
+        realtime: this.#realtime,
+        store: this.#store,
+      },
+      userId,
+    });
   }
 }
 

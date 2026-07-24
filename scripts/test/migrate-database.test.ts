@@ -284,11 +284,14 @@ test("session migration preserves transcripts with foreign keys", async () => {
     upgradedDatabase
       .select({
         id: agentSessions.id,
+        openRouterProviderTag: agentSessions.openRouterProviderTag,
         parentSessionId: agentSessions.parentSessionId,
       })
       .from(agentSessions)
       .all(),
-  ).toEqual([{ id: sessionId, parentSessionId: null }]);
+  ).toEqual([
+    { id: sessionId, openRouterProviderTag: null, parentSessionId: null },
+  ]);
   expect(
     upgradedDatabase
       .select({

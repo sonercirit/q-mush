@@ -21,6 +21,7 @@ import {
   RUNNER_INSTALLER_PATH,
   RUNNERS_PATH,
   SESSION_MODELS_PATH,
+  SESSION_OPENROUTER_PROVIDERS_PATH,
   SESSIONS_PATH,
   STYLESHEET_PATH,
 } from "../shared/routes.ts";
@@ -307,6 +308,10 @@ export function createRequestHandler(
 
       if (pathname === SESSION_MODELS_PATH) {
         return sessions.models(request);
+      }
+
+      if (pathname === SESSION_OPENROUTER_PROVIDERS_PATH) {
+        return sessions.openRouterProviders(request);
       }
 
       const sessionPathPrefix = `${SESSIONS_PATH}/`;

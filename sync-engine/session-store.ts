@@ -5,10 +5,6 @@ import type {
   AgentConversationMessage,
   AgentRecordedMessage,
 } from "../shared/agent-loop.ts";
-import {
-  readAgentSessionToolNames,
-  type AgentSessionToolName,
-} from "../shared/agent-tools.ts";
 import { createdAuditFields, updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
@@ -24,7 +20,6 @@ import { activeSessionDuration } from "../shared/session-timing.ts";
 import { compactStoredConversation } from "./session-compaction.ts";
 import {
   conversationFromMessages,
-  parseProviderPricing,
   storedSessionMessages,
   withInterruptedToolResults,
 } from "./session-store-read.ts";
@@ -34,6 +29,7 @@ import {
   pendingSpawnedSessions,
   type PendingSpawnedSession,
 } from "./session-store-spawns.ts";
+import { sessionSelection, summarizeSession } from "./session-store-summary.ts";
 import {
   appendSessionUserMessage,
   errorMessageValues,
@@ -49,6 +45,7 @@ export interface CreateAgentSession extends Pick<
   | "autoCompact"
   | "maxContextTokens"
   | "model"
+  | "openRouterProviderTag"
   | "provider"
   | "providerPricing"
   | "reasoningEffort"
@@ -112,77 +109,6 @@ function didUpdate(rows: readonly unknown[]): boolean {
   return rows.length > 0;
 }
 
-function sessionSelection() {
-  return {
-    activeDurationMs: agentSessions.activeDurationMs,
-    activeStartedAt: agentSessions.activeStartedAt,
-    autoCompact: agentSessions.autoCompact,
-    costBasis: agentSessions.costBasis,
-    costUsd: agentSessions.costUsd,
-    createdAt: agentSessions.createdAt,
-    credentialId: agentSessions.providerCredentialId,
-    currentContextTokens: agentSessions.currentContextTokens,
-    id: agentSessions.id,
-    maxContextTokens: agentSessions.maxContextTokens,
-    model: agentSessions.model,
-    provider: agentSessions.provider,
-    providerPricing: agentSessions.providerPricing,
-    reasoningEffort: agentSessions.reasoningEffort,
-    runnerId: agentSessions.runnerId,
-    status: agentSessions.status,
-    title: agentSessions.title,
-    tools: agentSessions.tools,
-    updatedAt: agentSessions.updatedAt,
-    workingDirectory: agentSessions.workingDirectory,
-  };
-}
-
-type StoredSessionSummary = Pick<
-  typeof agentSessions.$inferSelect,
-  | "activeDurationMs"
-  | "activeStartedAt"
-  | "autoCompact"
-  | "costBasis"
-  | "costUsd"
-  | "createdAt"
-  | "currentContextTokens"
-  | "id"
-  | "maxContextTokens"
-  | "model"
-  | "provider"
-  | "providerPricing"
-  | "reasoningEffort"
-  | "runnerId"
-  | "status"
-  | "title"
-  | "tools"
-  | "updatedAt"
-  | "workingDirectory"
-> & { readonly credentialId: string };
-
-function parseStoredTools(value: string): readonly AgentSessionToolName[] {
-  try {
-    const tools = readAgentSessionToolNames(JSON.parse(value));
-    if (tools !== undefined) {
-      return tools;
-    }
-  } catch {
-    // The common error below identifies corrupt local data.
-  }
-  throw new Error("Stored agent session tools are invalid");
-}
-
-function summarizeSession(stored: StoredSessionSummary): AgentSessionSummary {
-  return {
-    ...stored,
-    activeStartedAt: stored.activeStartedAt?.getTime() ?? null,
-    createdAt: stored.createdAt.getTime(),
-    providerPricing: parseProviderPricing(stored.providerPricing),
-    tools: parseStoredTools(stored.tools),
-    updatedAt: stored.updatedAt.getTime(),
-  };
-}
-
 function titleFromPrompt(prompt: string): string {
   const firstLine = prompt
     .split(/\r?\n/u)
@@ -215,6 +141,13 @@ export class SessionStore {
       throw new Error("The agent session context limit is invalid");
     }
 
+    if (
+      input.openRouterProviderTag !== null &&
+      input.provider !== "openrouter"
+    ) {
+      throw new Error("The agent session serving provider is invalid");
+    }
+
     const sessionId = this.#generateId(now);
     const messageId = this.#generateId(now);
 
@@ -227,6 +160,7 @@ export class SessionStore {
           id: sessionId,
           maxContextTokens: input.maxContextTokens,
           model: input.model,
+          openRouterProviderTag: input.openRouterProviderTag,
           parentSessionId: input.parentSessionId ?? null,
           provider: input.provider,
           providerCredentialId: input.credentialId,

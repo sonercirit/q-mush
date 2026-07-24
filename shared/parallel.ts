@@ -36,15 +36,22 @@ interface NormalizedParallelResult {
   readonly value: string;
 }
 
-function parallelError(error: unknown): Error {
+export function errorFromUnknown(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
-function parallelAbortError(signal: AbortSignal): Error {
+export function abortSignalError(
+  signal: AbortSignal,
+  fallbackMessage = "The operation was stopped",
+): Error {
   const reason: unknown = signal.reason;
   return reason instanceof Error
     ? reason
-    : new DOMException("The operation was stopped", "AbortError");
+    : new DOMException(fallbackMessage, "AbortError");
+}
+
+function parallelAbortError(signal: AbortSignal): Error {
+  return abortSignalError(signal);
 }
 
 function ensureParallelActive(signal: AbortSignal | undefined): void {
@@ -140,7 +147,7 @@ function waitForParallelExecution<Input, Output>(
       if (error === undefined) {
         resolve();
       } else {
-        reject(parallelError(error));
+        reject(errorFromUnknown(error));
       }
     };
     const onAbort = (): void => {
@@ -365,7 +372,7 @@ export async function executeParallelCall(
     if (signal?.aborted !== true) {
       return parallelCallFailure(recipientName, error);
     }
-    return Promise.reject(parallelError(error));
+    return Promise.reject(errorFromUnknown(error));
   }
 }
 
@@ -373,5 +380,5 @@ function parallelCallFailure(
   recipientName: string,
   error: unknown,
 ): ParallelCallResult {
-  return childText(recipientName, "error", parallelError(error).message);
+  return childText(recipientName, "error", errorFromUnknown(error).message);
 }
