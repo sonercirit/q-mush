@@ -18,10 +18,25 @@ import {
 type ProviderStreamProtocol =
   "chat_completions" | "chat_completions_json" | "responses";
 
+export interface ProviderToolCallDelta {
+  readonly arguments: string;
+  readonly id: string;
+  readonly index: number;
+  readonly name: string;
+}
+
+function emitToolCallDelta(
+  onDelta: ((delta: ProviderTextDelta) => void) | undefined,
+  toolCall: ProviderToolCallDelta,
+): void {
+  onDelta?.({ content: "", thinking: "", toolCall });
+}
+
 export interface ProviderTextDelta {
   readonly content: string;
   readonly reset?: true;
   readonly thinking: string;
+  readonly toolCall?: ProviderToolCallDelta;
 }
 
 export interface ProviderStreamAccumulator {
@@ -382,7 +397,10 @@ class ResponsesAccumulator
       const item = value["item"];
 
       if (isRecord(item) && item["type"] === "function_call") {
-        this.#toolCalls.set(outputIndex(value), readResponsesToolCall(item));
+        const call = readResponsesToolCall(item);
+        const index = outputIndex(value);
+        this.#toolCalls.set(index, call);
+        emitToolCallDelta(this.buffers.onDelta, { ...call, index });
       }
       return;
     }
@@ -397,9 +415,16 @@ class ResponsesAccumulator
         );
       }
 
+      const argumentsDelta = stringDelta(value, "tool-call");
       this.#toolCalls.set(index, {
         ...call,
-        arguments: call.arguments + stringDelta(value, "tool-call"),
+        arguments: call.arguments + argumentsDelta,
+      });
+      emitToolCallDelta(this.buffers.onDelta, {
+        arguments: argumentsDelta,
+        id: "",
+        index,
+        name: "",
       });
       return;
     }
@@ -554,6 +579,18 @@ class ChatCompletionsAccumulator
         id: existing.id + idDelta,
         name: existing.name + nameDelta,
       });
+      if (
+        argumentsDelta.length > 0 ||
+        idDelta.length > 0 ||
+        nameDelta.length > 0
+      ) {
+        emitToolCallDelta(this.buffers.onDelta, {
+          arguments: argumentsDelta,
+          id: idDelta,
+          index,
+          name: nameDelta,
+        });
+      }
     }
 
     const contextTokens = readContextTokens(value, "usage");

@@ -53,5 +53,6 @@ export function initialSessionViewState(): SessionViewState {
     sending: false,
     sessions: undefined,
     stopping: false,
+    toolStreams: [],
   };
 }

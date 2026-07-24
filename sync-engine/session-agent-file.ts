@@ -11,7 +11,7 @@ export async function loadSessionAgentFile(
   session: AgentSessionDetail,
   signal: AbortSignal,
 ): Promise<AgentFile | null> {
-  const output = await broker.dispatch(
+  const result = await broker.dispatch(
     {
       arguments: {},
       runnerId: session.runnerId,
@@ -21,5 +21,5 @@ export async function loadSessionAgentFile(
     },
     signal,
   );
-  return readRunnerAgentFileOutput(output);
+  return readRunnerAgentFileOutput(result.output);
 }

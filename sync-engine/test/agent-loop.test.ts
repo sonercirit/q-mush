@@ -184,7 +184,7 @@ describe("first-party agent loop", () => {
       },
       executeTool: (name) => {
         runnerCalls.push(name);
-        return Promise.resolve("runner result");
+        return Promise.resolve({ output: "runner result", state: "completed" });
       },
       tools: ["brave_search"],
       userId: "user-id",
@@ -242,10 +242,13 @@ describe("first-party agent loop", () => {
       braveSearch,
       executeTool: (name, arguments_) => {
         runnerCalls.push(name);
-        return new Promise<string>((resolve) => {
+        return new Promise((resolve) => {
           releaseTool = () => {
             completions.push(name);
-            resolve(JSON.stringify(arguments_));
+            resolve({
+              output: JSON.stringify(arguments_),
+              state: "completed",
+            });
           };
         });
       },
@@ -272,7 +275,8 @@ describe("first-party agent loop", () => {
     await Promise.resolve();
     expect(completions).toEqual(["read"]);
     releaseSearch?.();
-    expect(JSON.parse((await output) ?? "null")).toEqual([
+    const result = await output;
+    expect(JSON.parse(result?.output ?? "null")).toEqual([
       {
         output: '{"query":"Bun"}',
         recipient_name: "brave_search",
@@ -282,6 +286,7 @@ describe("first-party agent loop", () => {
         recipient_name: "read",
       },
     ]);
+    expect(result?.state).toBe("completed");
   });
 
   test("rejects disabled recipients inside parallel calls", async () => {
@@ -296,7 +301,10 @@ describe("first-party agent loop", () => {
       },
       executeTool: (name) => {
         runnerCall = name;
-        return Promise.resolve("enabled runner result");
+        return Promise.resolve({
+          output: "enabled runner result",
+          state: "completed",
+        });
       },
       tools: ["read", "parallel"],
       userId: "user-id",
@@ -311,12 +319,13 @@ describe("first-party agent loop", () => {
 
     expect(searchCalled).toBe(false);
     expect(runnerCall).toBe("read");
-    expect(JSON.parse(output ?? "null")).toEqual([
+    expect(JSON.parse(output?.output ?? "null")).toEqual([
       { output: "enabled runner result", recipient_name: "read" },
       {
         output: "Error: brave_search is not enabled for this session.",
         recipient_name: "brave_search",
       },
     ]);
+    expect(output?.state).toBe("failed");
   });
 });

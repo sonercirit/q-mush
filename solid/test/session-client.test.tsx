@@ -28,6 +28,7 @@ const SESSION_STATE: SessionViewState = {
   directoryPicker: initialDirectoryPickerState(),
   sessions: [],
   stopping: false,
+  toolStreams: [],
   sending: false,
   selectedId: undefined,
   modelDiscovery: {

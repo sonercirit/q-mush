@@ -97,11 +97,9 @@ export interface SessionIntegration {
   collection(request: Request): Response | Promise<Response>;
   compact(request: Request, sessionId: string): Promise<Response>;
   compaction(request: Request, sessionId: string): Promise<Response>;
-  completeRunnerCommand(
-    runnerId: string,
-    commandId: string,
-    output: string,
-  ): boolean;
+  completeRunnerCommand: RunnerCommandBroker["complete"];
+  runnerDisconnected(runnerId: string): void;
+  streamRunnerCommand: RunnerCommandBroker["stream"];
   continue(request: Request, sessionId: string): Promise<Response>;
   deliverRunnerCommands(
     runnerId: string,
@@ -244,13 +242,16 @@ class DrizzleSessionIntegration implements SessionIntegration {
     );
   }
 
-  completeRunnerCommand(
-    runnerId: string,
-    commandId: string,
-    output: string,
-  ): boolean {
-    return this.#broker.complete(runnerId, commandId, output);
-  }
+  readonly completeRunnerCommand = (
+    ...parameters: Parameters<RunnerCommandBroker["complete"]>
+  ): boolean => this.#broker.complete(...parameters);
+
+  readonly runnerDisconnected = (id: string) =>
+    void this.#broker.disconnect(id);
+
+  readonly streamRunnerCommand = (
+    ...parameters: Parameters<RunnerCommandBroker["stream"]>
+  ): boolean => this.#broker.stream(...parameters);
 
   async continue(request: Request, sessionId: string): Promise<Response> {
     return await this.#resume(request, sessionId);

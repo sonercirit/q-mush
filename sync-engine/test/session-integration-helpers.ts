@@ -61,7 +61,7 @@ export function completeRunnerCommand(
     status: setup.sessions.completeRunnerCommand(
       "018bcfe5-6800-7000-8000-000000000061",
       setup.latestRunnerCommand()?.id ?? "missing-command",
-      output,
+      { output, state: "completed" },
     )
       ? 204
       : 404,

@@ -1,9 +1,24 @@
 import type { RunnerToolCommand } from "../shared/runner-command-broker.ts";
+import type {
+  ToolStreamDelta,
+  ToolStreamEntry,
+} from "../shared/tool-stream.ts";
 
 export interface RealtimeSocket {
   close(code?: number, reason?: string): void;
   send(message: string): number;
 }
+
+type ToolStreamSnapshotEntry = ToolStreamEntry;
+
+const MAXIMUM_TOOL_STREAM_SNAPSHOT_BYTES = 256 * 1_024;
+const MAXIMUM_TOOL_STREAMS_PER_USER = 1_000;
+const TERMINAL_TOOL_STATES = new Set([
+  "canceled",
+  "completed",
+  "failed",
+  "timed-out",
+]);
 
 type RealtimePayload = Readonly<Record<string, unknown>>;
 
@@ -55,6 +70,11 @@ export class RealtimeHub {
     runner: new Map(),
     user: new Map(),
   };
+
+  readonly #toolStreams = new Map<
+    string,
+    Map<string, ToolStreamSnapshotEntry>
+  >();
 
   #update(
     kind: "runner" | "user",
@@ -123,6 +143,145 @@ export class RealtimeHub {
       command,
       type: "command",
     });
+  }
+
+  publishToolStream(
+    userId: string,
+    payload: RealtimePayload & ToolStreamDelta,
+  ): void {
+    if (
+      payload.sequenceStart !== undefined ||
+      (payload.channel === undefined) !== (payload.content === undefined) ||
+      (payload.channel === undefined &&
+        payload.state === undefined &&
+        payload.previousCallId === undefined)
+    ) {
+      return;
+    }
+    const userStreams =
+      this.#toolStreams.get(userId) ??
+      new Map<string, ToolStreamSnapshotEntry>();
+    const key = `${payload.sessionId}:${payload.streamId}:${String(payload.index)}`;
+    const previousCallId = payload.previousCallId;
+    const previous = userStreams.get(key);
+    if (
+      previous !== undefined &&
+      previousCallId === undefined &&
+      previous.callId !== payload.callId
+    ) {
+      return;
+    }
+    if (
+      previous !== undefined &&
+      previousCallId === undefined &&
+      payload.sequence !== previous.sequence + 1
+    ) {
+      return;
+    }
+    if (
+      previous === undefined &&
+      previousCallId === undefined &&
+      payload.sequence !== 0
+    ) {
+      return;
+    }
+    if (
+      previousCallId !== undefined &&
+      (previous?.callId !== previousCallId ||
+        payload.sequence !== previous.sequence + 1)
+    ) {
+      return;
+    }
+    const base = previous;
+    const content = payload.content ?? "";
+    const channel = payload.channel;
+    const state = payload.state;
+    const next: ToolStreamSnapshotEntry = {
+      arguments:
+        channel === "arguments"
+          ? `${base?.arguments ?? ""}${content}`
+          : (base?.arguments ?? ""),
+      callId: payload.callId,
+      index: payload.index,
+      name:
+        channel === "name"
+          ? `${base?.name ?? ""}${content}`
+          : (base?.name ?? ""),
+      sequence: payload.sequence,
+      sessionId: payload.sessionId,
+      state: state ?? base?.state ?? "preparing",
+      stderr:
+        channel === "stderr"
+          ? `${base?.stderr ?? ""}${content}`
+          : (base?.stderr ?? ""),
+      stdout:
+        channel === "stdout"
+          ? `${base?.stdout ?? ""}${content}`
+          : (base?.stdout ?? ""),
+      streamId: payload.streamId,
+    };
+    const serialized = JSON.stringify(next);
+    userStreams.set(
+      key,
+      serialized.length <= MAXIMUM_TOOL_STREAM_SNAPSHOT_BYTES
+        ? next
+        : { ...next, stderr: "", stdout: "" },
+    );
+    if (userStreams.size > MAXIMUM_TOOL_STREAMS_PER_USER) {
+      const oldest = userStreams.keys().next().value;
+      if (oldest !== undefined) {
+        userStreams.delete(oldest);
+      }
+    }
+    this.#toolStreams.set(userId, userStreams);
+    this.publishUser(userId, payload);
+    if (state !== undefined && TERMINAL_TOOL_STATES.has(state)) {
+      queueMicrotask(() => {
+        const current = userStreams.get(key);
+        if (
+          current?.callId !== payload.callId ||
+          current.sequence !== payload.sequence
+        ) {
+          return;
+        }
+        userStreams.delete(key);
+        if (userStreams.size === 0) {
+          this.#toolStreams.delete(userId);
+        }
+      });
+    }
+  }
+
+  syncToolStreams(
+    userId: string,
+    sessionId: string,
+    streamId: string,
+    socket: RealtimeSocket,
+  ): void {
+    const streams = [...(this.#toolStreams.get(userId)?.values() ?? [])].filter(
+      (entry) => entry.sessionId === sessionId && entry.streamId === streamId,
+    );
+    publish(new Set([socket]), {
+      sessionId,
+      streamId,
+      streams,
+      type: "tool_stream_snapshot",
+    });
+  }
+
+  clearToolStreams(userId: string, sessionId: string): void {
+    const streams = this.#toolStreams.get(userId);
+    if (streams === undefined) {
+      return;
+    }
+    for (const [key, stream] of streams) {
+      if (stream.sessionId === sessionId) {
+        streams.delete(key);
+      }
+    }
+    if (streams.size === 0) {
+      this.#toolStreams.delete(userId);
+    }
   }
 
   publishUser(userId: string, payload: RealtimePayload): void {

@@ -3,6 +3,7 @@ import type {
   AgentSessionDetail,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
+import type { ToolStreamEntry } from "../shared/tool-stream.ts";
 import type { RealtimeServerEvent } from "./realtime-client-codec.ts";
 import type { RevisionState } from "./revision-state.ts";
 import type { SessionViewState } from "./session-client.tsx";
@@ -84,8 +85,26 @@ export function retainUnchangedSessionData(
     : detail;
 }
 
+function sessionMatches(
+  view: RevisionState<SessionViewState>,
+  sessionId: string,
+): boolean {
+  return view.value.selectedId === sessionId && view.value.detail !== undefined;
+}
+
+function sessionToolStreams(
+  view: RevisionState<SessionViewState>,
+  sessionId: string,
+  streamId: string,
+): readonly ToolStreamEntry[] {
+  return view.value.toolStreams.filter(
+    (stream) => stream.sessionId === sessionId && stream.streamId === streamId,
+  );
+}
+
 interface StreamedSessionContent {
   readonly content: string;
+  readonly streamId: string;
   readonly thinking: string;
 }
 
@@ -129,6 +148,14 @@ export class SessionRealtimeState {
     const persistable = this.#withoutStreamedMessages(detail);
     if (this.#view.value.selectedId !== detail.id) {
       return;
+    }
+    if (detail.status !== "queued" && detail.status !== "running") {
+      const remaining = this.#view.value.toolStreams.filter(
+        ({ sessionId }) => sessionId !== detail.id,
+      );
+      if (remaining.length !== this.#view.value.toolStreams.length) {
+        this.#view.patch({ toolStreams: remaining });
+      }
     }
 
     const current = this.#view.value.detail;
@@ -196,15 +223,15 @@ export class SessionRealtimeState {
   applyDelta(
     event: Extract<RealtimeServerEvent, { type: "session_delta" }>,
   ): void {
-    const current = event.reset
-      ? { content: "", thinking: "" }
-      : (this.#streamedContent.get(event.sessionId) ?? {
-          content: "",
-          thinking: "",
-        });
+    const current =
+      !event.reset &&
+      this.#streamedContent.get(event.sessionId)?.streamId === event.streamId
+        ? this.#streamedContent.get(event.sessionId)
+        : undefined;
     this.#streamedContent.set(event.sessionId, {
-      content: current.content + event.content,
-      thinking: current.thinking + event.thinking,
+      content: (current?.content ?? "") + event.content,
+      streamId: event.streamId,
+      thinking: (current?.thinking ?? "") + event.thinking,
     });
 
     const detail = this.#view.value.detail;
@@ -230,6 +257,104 @@ export class SessionRealtimeState {
     this.#view.patch({ detail: visibleDetail });
   }
 
+  applyToolDelta(
+    event: Extract<RealtimeServerEvent, { type: "tool_stream" }>,
+  ): void {
+    if (!sessionMatches(this.#view, event.sessionId)) {
+      return;
+    }
+
+    const local = sessionToolStreams(
+      this.#view,
+      event.sessionId,
+      event.streamId,
+    );
+    const current = local.find(
+      ({ callId, index }) =>
+        callId === event.callId ||
+        (index === event.index &&
+          event.previousCallId !== undefined &&
+          callId === event.previousCallId),
+    );
+    const otherStreams = this.#view.value.toolStreams.filter(
+      ({ sessionId }) => sessionId !== event.sessionId,
+    );
+    const existing = current;
+    const sequenceStart = event.sequenceStart ?? event.sequence;
+    if (existing === undefined && sequenceStart !== 0) {
+      return;
+    }
+    if (
+      existing !== undefined &&
+      event.previousCallId === undefined &&
+      existing.callId !== event.callId
+    ) {
+      return;
+    }
+    if (
+      existing !== undefined &&
+      (sequenceStart <= existing.sequence ||
+        sequenceStart > existing.sequence + 1)
+    ) {
+      return;
+    }
+
+    const created: ToolStreamEntry = existing ?? {
+      arguments: "",
+      callId: event.callId,
+      index: event.index,
+      name: "",
+      sequence: -1,
+      sessionId: event.sessionId,
+      state: "preparing",
+      stderr: "",
+      stdout: "",
+      streamId: event.streamId,
+    };
+    const content = event.content ?? "";
+    const updated: ToolStreamEntry = {
+      ...created,
+      callId: event.callId,
+      ...(event.channel === "arguments"
+        ? { arguments: created.arguments + content }
+        : event.channel === "name"
+          ? { name: created.name + content }
+          : event.channel === "stderr"
+            ? { stderr: created.stderr + content }
+            : event.channel === "stdout"
+              ? { stdout: created.stdout + content }
+              : {}),
+      sequence: event.sequence,
+      ...(event.state === undefined ? {} : { state: event.state }),
+    };
+    const toolStreams =
+      existing === undefined
+        ? [...local, updated]
+        : local.map((entry) => (entry === existing ? updated : entry));
+    this.#view.patch({ toolStreams: [...otherStreams, ...toolStreams] });
+  }
+
+  applyToolSnapshot(
+    event: Extract<RealtimeServerEvent, { type: "tool_stream_snapshot" }>,
+  ): void {
+    const selected = this.#view.value.selectedId;
+    const loaded = this.#view.value.detail;
+    if (selected !== event.sessionId || loaded === undefined) {
+      return;
+    }
+    const local = this.#view.value.toolStreams.filter(
+      (stream) =>
+        stream.sessionId === selected && stream.streamId === event.streamId,
+    );
+    const reconciled = event.streams.map((stream) => {
+      const current = local.find(({ callId }) => callId === stream.callId);
+      return current !== undefined && current.sequence > stream.sequence
+        ? current
+        : stream;
+    });
+    this.#view.patch({ toolStreams: reconciled });
+  }
+
   applySessions(sessions: readonly AgentSessionSummary[]): void {
     if (
       this.#view.value.sessions === undefined ||
@@ -247,5 +372,8 @@ export class SessionRealtimeState {
 
   reset(): void {
     this.#streamedContent.clear();
+    if (this.#view.value.toolStreams.length > 0) {
+      this.#view.patch({ toolStreams: [] });
+    }
   }
 }

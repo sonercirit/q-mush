@@ -2,23 +2,38 @@ import { describe, expect, test, vi } from "vitest";
 import {
   RunnerCommandBroker,
   type DispatchRunnerToolCommand,
+  type RunnerCommandResult,
 } from "../../shared/runner-command-broker.ts";
 import { captureBrokerRejection } from "./promise-test-helpers.ts";
 
 const RUNNER_ID = "runner-1";
 const SESSION_ID = "session-1";
 
-function runnerCommand(
-  overrides: Partial<DispatchRunnerToolCommand> = {},
-): DispatchRunnerToolCommand {
+function runnerCommand(): DispatchRunnerToolCommand {
   return {
     arguments: {},
     runnerId: RUNNER_ID,
     sessionId: SESSION_ID,
     tool: "bash",
     workingDirectory: "/work/project",
-    ...overrides,
   };
+}
+
+function changedRunnerCommand(
+  overrides: Partial<DispatchRunnerToolCommand>,
+): DispatchRunnerToolCommand {
+  return {
+    arguments: overrides.arguments ?? Object.freeze({}),
+    runnerId: overrides.runnerId ?? RUNNER_ID,
+    sessionId: overrides.sessionId ?? SESSION_ID,
+    tool: overrides.tool ?? "bash",
+    workingDirectory: overrides.workingDirectory ?? "/work/project",
+  };
+}
+
+function completed(output: string): RunnerCommandResult {
+  const result: RunnerCommandResult = { output, state: "completed" };
+  return result;
 }
 
 function expectAbortError(value: unknown): void {
@@ -65,8 +80,10 @@ test("delivers a command immediately when a runner socket is connected", async (
     },
   ]);
   expect(broker.take(RUNNER_ID)).toBeUndefined();
-  expect(broker.complete(RUNNER_ID, "websocket-command", "done")).toBe(true);
-  expect(await result).toBe("done");
+  expect(
+    broker.complete(RUNNER_ID, "websocket-command", completed("done")),
+  ).toBe(true);
+  expect(await result).toEqual(completed("done"));
 });
 
 test("pushes cancellation for an in-flight WebSocket command", async () => {
@@ -115,15 +132,19 @@ describe("runner command broker", () => {
       tool: "read",
       workingDirectory: "/work/project",
     };
-    const result = broker.dispatch(runnerCommand(command));
+    const result = broker.dispatch(changedRunnerCommand(command));
 
     expect(broker.take("another-runner")).toBeUndefined();
     expect(broker.take(RUNNER_ID)).toEqual({ ...command, id: "command-1" });
     expect(broker.isActive(RUNNER_ID, "command-1")).toBe(true);
-    expect(broker.complete("another-runner", "command-1", "wrong")).toBe(false);
-    expect(broker.complete(RUNNER_ID, "command-1", "# Q Mush")).toBe(true);
+    expect(
+      broker.complete("another-runner", "command-1", completed("wrong")),
+    ).toBe(false);
+    expect(broker.complete(RUNNER_ID, "command-1", completed("# Q Mush"))).toBe(
+      true,
+    );
     expect(broker.isActive(RUNNER_ID, "command-1")).toBe(false);
-    expect(await result).toBe("# Q Mush");
+    expect(await result).toEqual(completed("# Q Mush"));
   });
 
   test("keeps pending commands active until completion or cancellation", async () => {
@@ -134,21 +155,23 @@ describe("runner command broker", () => {
         commandId: () => "command-without-deadline",
       });
       const result = broker.dispatch(
-        runnerCommand({ arguments: { command: "long-running-command" } }),
+        changedRunnerCommand({
+          arguments: { command: "long-running-command" },
+        }),
       );
       void result.catch(() => undefined);
 
       vi.advanceTimersByTime(24 * 60 * 60_000);
       const command = broker.take(RUNNER_ID);
-      const completed = broker.complete(
+      const completedCommand = broker.complete(
         RUNNER_ID,
         "command-without-deadline",
-        "finished",
+        completed("finished"),
       );
 
       expect(command?.id).toBe("command-without-deadline");
-      expect(completed).toBe(true);
-      expect(await result).toBe("finished");
+      expect(completedCommand).toBe(true);
+      expect(await result).toEqual(completed("finished"));
     } finally {
       vi.useRealTimers();
     }
@@ -161,7 +184,7 @@ describe("runner command broker", () => {
     });
     const results = Array.from({ length: 101 }, (_, index) =>
       broker.dispatch(
-        runnerCommand({
+        changedRunnerCommand({
           arguments: { index },
           sessionId: `session-${String(index)}`,
           tool: "read",
@@ -173,7 +196,7 @@ describe("runner command broker", () => {
 
     for (const command of commands) {
       if (command !== undefined) {
-        broker.complete(RUNNER_ID, command.id, command.id);
+        broker.complete(RUNNER_ID, command.id, completed(command.id));
       }
     }
 
@@ -182,12 +205,30 @@ describe("runner command broker", () => {
     expect(settled.every(({ status }) => status === "fulfilled")).toBe(true);
   });
 
+  test("settles in-flight commands when their runner disconnects", async () => {
+    const broker = new RunnerCommandBroker({
+      commandId: () => "disconnected-command",
+      deliver: () => true,
+    });
+    const result = broker.dispatch(runnerCommand());
+
+    expect(broker.disconnect(RUNNER_ID)).toBe(1);
+    await expect(result).rejects.toThrow("disconnected");
+    expect(
+      broker.complete(
+        RUNNER_ID,
+        "disconnected-command",
+        completed("late result"),
+      ),
+    ).toBe(false);
+  });
+
   test("removes queued and in-flight commands when a session is stopped", async () => {
     const broker = new RunnerCommandBroker({
       commandId: () => "command-2",
     });
     const result = broker.dispatch(
-      runnerCommand({ arguments: { command: "sleep 10" } }),
+      changedRunnerCommand({ arguments: { command: "sleep 10" } }),
     );
     broker.cancelSession(SESSION_ID);
 

@@ -12,6 +12,7 @@ import {
 } from "../provider-client.tsx";
 import { ProviderController } from "../provider-controller.ts";
 import { createReactiveState } from "../reactive-state.ts";
+import type { RealtimeServerEvent } from "../realtime-client-codec.ts";
 import { RenderDebugProvider, RenderDebugView } from "../render-debug.tsx";
 import {
   RunnerPanel,
@@ -235,17 +236,25 @@ function expectStableMessages(
   expect(messageBoundary(container, "assistant-stable")).toBe(stableAssistant);
 }
 
+function streamedDelta(
+  sessionId: string,
+  content: string,
+): Extract<RealtimeServerEvent, { type: "session_delta" }> {
+  return {
+    content,
+    sessionId,
+    streamId: "stream-1",
+    thinking: "",
+    type: "session_delta",
+  };
+}
+
 function applySessionDelta(
   controller: SessionController,
   sessionId: string,
   content: string,
 ): void {
-  controller.applyDelta({
-    content,
-    sessionId,
-    thinking: "",
-    type: "session_delta",
-  });
+  controller.applyDelta(streamedDelta(sessionId, content));
 }
 
 function expectScrollLock(toggle: Element, enabled: boolean): void {
@@ -342,18 +351,8 @@ test("a streamed message update only renders that transcript message", () => {
   const stableUser = messageBoundary(container, "user-stable");
   const stableAssistant = messageBoundary(container, "assistant-stable");
 
-  controller.applyDelta({
-    content: "Streaming",
-    sessionId: detail.id,
-    thinking: "",
-    type: "session_delta",
-  });
-  controller.applyDelta({
-    content: " response",
-    sessionId: detail.id,
-    thinking: "",
-    type: "session_delta",
-  });
+  controller.applyDelta(streamedDelta(detail.id, "Streaming"));
+  controller.applyDelta(streamedDelta(detail.id, " response"));
 
   expectStableMessages(container, stableUser, stableAssistant);
   expectTranscriptBoundariesToRenderOnce(debug, [

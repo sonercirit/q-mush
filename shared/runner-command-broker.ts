@@ -1,4 +1,26 @@
 import { randomUUID } from "node:crypto";
+import type {
+  ToolStreamChannel,
+  ToolStreamTerminalState,
+} from "./tool-stream.ts";
+
+export type RunnerCommandTerminalState = ToolStreamTerminalState;
+
+export function failedRunnerCommandResult(
+  error: unknown,
+  maximumDetailLength: number,
+): RunnerCommandResult {
+  const detail = error instanceof Error ? error.message : String(error);
+  return {
+    output: `Error: ${detail.slice(0, maximumDetailLength)}`,
+    state: "failed",
+  };
+}
+
+export interface RunnerCommandResult {
+  readonly output: string;
+  readonly state: RunnerCommandTerminalState;
+}
 
 export interface RunnerToolCommand {
   readonly arguments: Readonly<Record<string, unknown>>;
@@ -6,6 +28,12 @@ export interface RunnerToolCommand {
   readonly sessionId: string;
   readonly tool: string;
   readonly workingDirectory: string;
+}
+
+export interface RunnerToolOutputDelta {
+  readonly channel: Extract<ToolStreamChannel, "stderr" | "stdout">;
+  readonly content: string;
+  readonly sequence: number;
 }
 
 export interface DispatchRunnerToolCommand extends Omit<
@@ -25,9 +53,11 @@ interface PendingCommand {
   readonly abort: (() => void) | undefined;
   readonly command: RunnerToolCommand;
   readonly reject: (error: Error) => void;
-  readonly resolve: (output: string) => void;
+  readonly resolve: (result: RunnerCommandResult) => void;
   readonly runnerId: string;
   readonly signal: AbortSignal | undefined;
+  readonly stream: ((delta: RunnerToolOutputDelta) => void) | undefined;
+  nextSequence: number;
   phase: "in_flight" | "queued";
 }
 
@@ -52,7 +82,8 @@ export class RunnerCommandBroker {
   dispatch(
     input: DispatchRunnerToolCommand,
     signal?: AbortSignal,
-  ): Promise<string> {
+    stream?: (delta: RunnerToolOutputDelta) => void,
+  ): Promise<RunnerCommandResult> {
     if (signal?.aborted) {
       return Promise.reject(abortError("The agent session was stopped"));
     }
@@ -73,18 +104,20 @@ export class RunnerCommandBroker {
       workingDirectory: input.workingDirectory,
     };
 
-    return new Promise<string>((resolve, reject) => {
+    return new Promise<RunnerCommandResult>((resolve, reject) => {
       const cancel = () => {
         this.#reject(id, abortError("The agent session was stopped"));
       };
       const pending: PendingCommand = {
         abort: signal === undefined ? undefined : cancel,
         command,
+        nextSequence: 0,
         phase: "queued",
         reject,
         resolve,
         runnerId: input.runnerId,
         signal,
+        stream,
       };
       this.#pending.set(id, pending);
       signal?.addEventListener("abort", cancel, { once: true });
@@ -176,26 +209,84 @@ export class RunnerCommandBroker {
     return this.#pending.get(commandId)?.runnerId === runnerId;
   }
 
-  complete(runnerId: string, commandId: string, output: string): boolean {
+  #pendingFor(runnerId: string, commandId: string): PendingCommand | undefined {
     const pending = this.#pending.get(commandId);
+    return pending?.runnerId === runnerId ? pending : undefined;
+  }
 
-    if (pending?.runnerId !== runnerId) {
+  stream(
+    runnerId: string,
+    commandId: string,
+    delta: RunnerToolOutputDelta,
+  ): boolean {
+    const pending = this.#activePending(runnerId, commandId);
+    if (
+      pending?.nextSequence === undefined ||
+      delta.sequence !== pending.nextSequence
+    ) {
+      return false;
+    }
+
+    pending.nextSequence += 1;
+    pending.stream?.(delta);
+    return true;
+  }
+
+  #activePending(
+    runnerId: string,
+    commandId: string,
+  ): PendingCommand | undefined {
+    const pending = this.#pendingFor(runnerId, commandId);
+    return pending?.phase === "in_flight" ? pending : undefined;
+  }
+
+  complete(
+    runnerId: string,
+    commandId: string,
+    result: RunnerCommandResult,
+  ): boolean {
+    const pending = this.#pendingFor(runnerId, commandId);
+
+    if (pending === undefined) {
       return false;
     }
 
     this.#settle(commandId, pending);
-    pending.resolve(output);
+    pending.resolve(result);
     return true;
   }
 
-  cancelSession(sessionId: string): void {
-    const commandIds = [...this.#pending.entries()]
-      .filter(([, pending]) => pending.command.sessionId === sessionId)
+  #commandIds(
+    predicate: (pending: PendingCommand) => boolean,
+  ): readonly string[] {
+    return [...this.#pending]
+      .filter(([, pending]) => predicate(pending))
       .map(([id]) => id);
+  }
 
+  #rejectCommands(commandIds: readonly string[], error: Error): void {
     for (const commandId of commandIds) {
-      this.#reject(commandId, abortError("The agent session was stopped"));
+      this.#reject(commandId, error);
     }
+  }
+
+  disconnect(runnerId: string): number {
+    const commandIds = this.#commandIds(
+      (pending) =>
+        pending.runnerId === runnerId && pending.phase === "in_flight",
+    );
+    this.#rejectCommands(
+      commandIds,
+      new Error("The runner disconnected while executing the command"),
+    );
+    return commandIds.length;
+  }
+
+  cancelSession(sessionId: string): void {
+    this.#rejectCommands(
+      this.#commandIds((pending) => pending.command.sessionId === sessionId),
+      abortError("The agent session was stopped"),
+    );
   }
 
   #reject(commandId: string, error: Error): void {

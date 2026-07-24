@@ -49,6 +49,7 @@ export class SessionController {
   readonly #realtime: SessionRealtimeState;
   readonly #view: RevisionState<SessionViewState>;
   readonly #reactiveView: ReactiveState<SessionViewState>;
+  #syncTools: ((sessionId: string) => void) | undefined;
 
   constructor(
     reactiveView = createReactiveState(initialSessionViewState()),
@@ -77,6 +78,18 @@ export class SessionController {
     this.#realtime.applyDelta(event);
   }
 
+  applyToolDelta(
+    event: Parameters<SessionRealtimeState["applyToolDelta"]>[0],
+  ): void {
+    this.#realtime.applyToolDelta(event);
+  }
+
+  applyToolSnapshot(
+    event: Parameters<SessionRealtimeState["applyToolSnapshot"]>[0],
+  ): void {
+    this.#realtime.applyToolSnapshot(event);
+  }
+
   applyRealtime(sessions: readonly AgentSessionSummary[]): void {
     this.#realtime.applySessions(sessions);
   }
@@ -94,6 +107,10 @@ export class SessionController {
 
   get view(): Accessor<SessionViewState> {
     return this.#reactiveView.state;
+  }
+
+  setToolSynchronizer(synchronizer: (sessionId: string) => void): void {
+    this.#syncTools = synchronizer;
   }
 
   addImages(files: readonly File[], follow: boolean): Promise<void> {
@@ -235,6 +252,7 @@ export class SessionController {
       loadingDetail: false,
       selectedId: undefined,
       sessions: undefined,
+      toolStreams: [],
     });
     await this.#loadSessions(revision, true);
   }
@@ -456,7 +474,9 @@ export class SessionController {
       followUpImages: [],
       loadingDetail: true,
       selectedId: sessionId,
+      toolStreams: [],
     });
+    this.#syncTools?.(sessionId);
     await this.#readDetail(sessionId, revision, true);
   }
 

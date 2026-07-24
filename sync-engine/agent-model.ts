@@ -54,11 +54,12 @@ export interface AgentProviderCredential {
 
 export type AgentModelFetch = (request: Request) => Promise<Response>;
 
-interface ChatCompletionsAgentModelOptions {
+export interface ChatCompletionsAgentModelOptions {
   readonly credential: AgentProviderCredential;
   readonly fetch?: AgentModelFetch;
   readonly model: string;
   readonly onDelta?: (delta: ProviderTextDelta) => void;
+  readonly onTurnStart?: () => void;
   readonly provider: ProviderId;
   readonly reasoningEffort?: AgentReasoningEffort | null;
   readonly sleep?: ModelRequestSleep;
@@ -360,8 +361,11 @@ export class ChatCompletionsAgentModel implements AgentModel {
       options.tools === undefined
         ? AGENT_TOOLS
         : selectedAgentTools(options.tools);
+    this.startTurn = options.onTurnStart ?? (() => undefined);
     this.#webSocket = options.webSocket ?? defaultWebSocket;
   }
+
+  readonly startTurn: () => void;
 
   async complete(...parameters: CompletionArguments): Promise<AgentModelTurn> {
     if (this.#provider !== "openai") {

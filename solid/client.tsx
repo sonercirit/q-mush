@@ -371,7 +371,16 @@ function App(): JSX.Element {
       case "session_delta":
         agentSessions.applyDelta(event);
         break;
+      case "tool_stream":
+        agentSessions.applyToolDelta(event);
+        break;
+      case "tool_stream_snapshot":
+        agentSessions.applyToolSnapshot(event);
+        break;
     }
+  });
+  agentSessions.setToolSynchronizer((sessionId) => {
+    realtime.syncTools(sessionId);
   });
 
   const resetWorkspaceConnections = (): void => {

@@ -118,6 +118,7 @@ export function createRealtimeIntegration(
           const runner = socket.data.runner;
           const disconnected = options.hub.setRunner(runner.id, socket, false);
           if (disconnected !== undefined) {
+            options.sessions.runnerDisconnected(runner.id);
             options.runners.disconnected(runner);
             publishRunners(runner.userId);
           }
@@ -179,14 +180,32 @@ export function createRealtimeIntegration(
             options.sessions.completeRunnerCommand(
               connectedRunner.id,
               event.commandId,
-              event.output,
+              {
+                output: event.output,
+                state: event.state,
+              },
+            );
+          } else if (event.type === "output") {
+            options.sessions.streamRunnerCommand(
+              connectedRunner.id,
+              event.commandId,
+              event,
             );
           }
           return;
         }
 
-        readQmushClientMessage(message);
-        publishUserSnapshots(socket.data.user.id);
+        const event = readQmushClientMessage(message);
+        if (event.type === "refresh") {
+          publishUserSnapshots(socket.data.user.id);
+        } else {
+          options.hub.syncToolStreams(
+            socket.data.user.id,
+            event.sessionId,
+            event.streamId,
+            socket,
+          );
+        }
       } catch {
         try {
           socket.close(1008, "Invalid message");

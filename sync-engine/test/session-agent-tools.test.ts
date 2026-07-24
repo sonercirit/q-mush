@@ -128,7 +128,10 @@ function completeChildAgentFile(
   setup: Awaited<ReturnType<typeof startToolSession>>,
 ): void {
   expect(
-    setup.sessions.completeRunnerCommand(RUNNER_ID, RUNNER_COMMAND_ID, "null"),
+    setup.sessions.completeRunnerCommand(RUNNER_ID, RUNNER_COMMAND_ID, {
+      output: "null",
+      state: "completed",
+    }),
   ).toBe(true);
 }
 

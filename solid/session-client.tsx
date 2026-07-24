@@ -17,6 +17,7 @@ import type {
   AgentSessionDetail,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
+import type { ToolStreamEntry } from "../shared/tool-stream.ts";
 import { RetryNotice } from "./collection.tsx";
 import { CustomSelect, type CustomSelectOption } from "./custom-select.tsx";
 import { DirectoryPicker } from "./directory-picker-client.tsx";
@@ -72,6 +73,7 @@ export interface SessionViewState {
   readonly sending: boolean;
   readonly sessions: readonly AgentSessionSummary[] | undefined;
   readonly stopping: boolean;
+  readonly toolStreams: readonly ToolStreamEntry[];
 }
 
 interface CredentialOption {

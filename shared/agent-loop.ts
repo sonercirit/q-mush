@@ -1,6 +1,7 @@
 import type { AgentImage } from "./agent-images.ts";
 import { isRecord } from "./auth-model.ts";
 import { parseOptionalJsonRecord } from "./json-record.ts";
+import type { ToolStreamTerminalState } from "./tool-stream.ts";
 
 interface AgentToolRequest<Arguments> {
   readonly arguments: Arguments;
@@ -86,14 +87,31 @@ export interface AgentModel {
     messages: readonly AgentConversationMessage[],
     signal?: AbortSignal,
   ) => Promise<AgentModelTurn>;
+  readonly startTurn?: () => void;
 }
 
 type ParsedAgentToolCall = AgentToolRequest<Readonly<Record<string, unknown>>>;
 
+interface AgentToolExecutionResult {
+  readonly output: string;
+  readonly state: ToolStreamTerminalState;
+}
+
 export interface AgentLoopOptions {
-  readonly executeTool: (call: ParsedAgentToolCall) => Promise<string>;
+  readonly executeTool: (
+    call: ParsedAgentToolCall,
+  ) => Promise<AgentToolExecutionResult | string>;
   readonly initialMessages: readonly AgentConversationMessage[];
   readonly model: AgentModel;
+  readonly onToolCall?: (call: AgentToolCall) => Promise<void> | void;
+  readonly onToolResult?: (
+    call: AgentToolCall,
+    outcome: {
+      readonly error?: unknown;
+      readonly output?: string;
+      readonly state?: ToolStreamTerminalState;
+    },
+  ) => Promise<void> | void;
   readonly prepareMessages?: (
     messages: readonly AgentConversationMessage[],
     signal?: AbortSignal,
@@ -126,6 +144,14 @@ function parseArguments(
   return parseOptionalJsonRecord(value);
 }
 
+function normalizedToolResult(
+  result: AgentToolExecutionResult | string,
+): AgentToolExecutionResult {
+  return typeof result === "string"
+    ? { output: result, state: "completed" }
+    : result;
+}
+
 export async function runAgentLoop(
   options: AgentLoopOptions,
 ): Promise<readonly AgentConversationMessage[]> {
@@ -137,6 +163,7 @@ export async function runAgentLoop(
       messages = [...(await options.prepareMessages(messages, options.signal))];
       throwIfAborted(options.signal);
     }
+    options.model.startTurn?.();
     const turn = await options.model.complete(messages, options.signal);
     throwIfAborted(options.signal);
     if (turn.thinking.length > 0) {
@@ -174,24 +201,34 @@ export async function runAgentLoop(
 
     for (const call of turn.toolCalls) {
       throwIfAborted(options.signal);
+      await options.onToolCall?.(call);
       const arguments_ = parseArguments(call.arguments);
-      const output =
-        arguments_ === undefined
-          ? INVALID_ARGUMENTS_MESSAGE
-          : await options.executeTool({
-              arguments: arguments_,
-              id: call.id,
-              name: call.name,
-            });
+      let result: AgentToolExecutionResult;
+      try {
+        result =
+          arguments_ === undefined
+            ? { output: INVALID_ARGUMENTS_MESSAGE, state: "failed" }
+            : normalizedToolResult(
+                await options.executeTool({
+                  arguments: arguments_,
+                  id: call.id,
+                  name: call.name,
+                }),
+              );
+      } catch (error) {
+        await options.onToolResult?.(call, { error });
+        throw error;
+      }
       throwIfAborted(options.signal);
       const toolMessage: AgentConversationMessage = {
-        content: output,
+        content: result.output,
         role: "tool",
         toolCallId: call.id,
         toolName: call.name,
       };
       await options.recordMessage(toolMessage);
       messages.push(toolMessage);
+      await options.onToolResult?.(call, result);
     }
   }
 }

@@ -3,8 +3,13 @@ import {
   isSessionAgentToolName,
   type AgentSessionToolName,
 } from "../shared/agent-tools.ts";
+import { createUuidV7 } from "../shared/ids.ts";
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
-import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
+import type {
+  RunnerCommandBroker,
+  RunnerCommandResult,
+  RunnerToolOutputDelta,
+} from "../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { estimateAgentTurnCost } from "./agent-cost.ts";
 import { createAgentSkills } from "./agent-skills.ts";
@@ -22,6 +27,7 @@ import {
 } from "./session-agent-tools.ts";
 import { SessionRecorder } from "./session-recorder.ts";
 import type { SessionStore } from "./session-store.ts";
+import { ToolStreamPublisher } from "./tool-stream-publisher.ts";
 
 export interface SessionAgentRuntimeDependencies {
   readonly braveSearch: {
@@ -45,6 +51,10 @@ export interface SessionAgentRuntimeDependencies {
 
 async function loadModels(
   runtime: SessionAgentRuntimeDependencies,
+  options: {
+    readonly streamId?: string;
+    readonly toolStream?: ToolStreamPublisher;
+  } = {},
 ): Promise<SessionAgentModels> {
   const agentFile = await loadSessionAgentFile(
     runtime.broker,
@@ -59,6 +69,10 @@ async function loadModels(
     detail: runtime.detail,
     factory: runtime.modelFactory,
     realtime: runtime.realtime,
+    ...(options.streamId === undefined ? {} : { streamId: options.streamId }),
+    ...(options.toolStream === undefined
+      ? {}
+      : { toolStream: options.toolStream }),
     userId: runtime.userId,
   });
 }
@@ -94,30 +108,53 @@ export async function compactSessionConversation(
 export async function runSessionAgent(
   runtime: SessionAgentRuntimeDependencies,
 ): Promise<void> {
-  const models = await loadModels(runtime);
-  const dispatchRunnerTool = (
-    name: string,
-    toolArguments: Readonly<Record<string, unknown>>,
-    signal: AbortSignal = runtime.signal,
-  ): Promise<string> =>
-    runtime.broker.dispatch(
+  const toolStream = new ToolStreamPublisher({
+    hub: runtime.realtime,
+    sessionId: runtime.detail.id,
+    streamId: createUuidV7(),
+    userId: runtime.userId,
+  });
+  const models = await loadModels(runtime, { toolStream });
+  const dispatchRunnerTool = async (
+    input: Readonly<{
+      callId: string | undefined;
+      name: string;
+      signal: AbortSignal | undefined;
+      toolArguments: Readonly<Record<string, unknown>>;
+    }>,
+  ): Promise<RunnerCommandResult> => {
+    const liveCallId = input.callId;
+    const stream =
+      liveCallId === undefined
+        ? undefined
+        : ({ channel, content }: RunnerToolOutputDelta) => {
+            toolStream.output(liveCallId, channel, content);
+          };
+    return runtime.broker.dispatch(
       {
-        arguments: toolArguments,
+        arguments: input.toolArguments,
         runnerId: runtime.detail.runnerId,
         sessionId: runtime.detail.id,
-        tool: name,
+        tool: input.name,
         workingDirectory: runtime.detail.workingDirectory,
       },
-      signal,
+      input.signal ?? runtime.signal,
+      stream,
     );
-  const dispatchTool = (
+  };
+  const dispatchTool = async (
     name: string,
     toolArguments: Readonly<Record<string, unknown>>,
     signal?: AbortSignal,
-  ): Promise<string> =>
-    isAgentSessionToolName(name) && isSessionAgentToolName(name)
-      ? executeSessionAgentTool(runtime.sessionTools, name, toolArguments)
-      : dispatchRunnerTool(name, toolArguments, signal);
+    callId?: string,
+  ): Promise<RunnerCommandResult> => {
+    const sessionTool =
+      isAgentSessionToolName(name) && isSessionAgentToolName(name);
+    if (sessionTool) {
+      return executeSessionAgentTool(runtime.sessionTools, name, toolArguments);
+    }
+    return dispatchRunnerTool({ callId, name, signal, toolArguments });
+  };
   const skills = createAgentSkills({
     braveSearch: runtime.braveSearch,
     executeTool: dispatchTool,
@@ -132,39 +169,68 @@ export async function runSessionAgent(
   );
 
   const selectedTools = new Set<AgentSessionToolName>(runtime.detail.tools);
-  await runCompactingAgentLoop({
-    agentCost: (turn) => estimateAgentTurnCost(runtime.detail, turn.tokenUsage),
-    autoCompact: runtime.detail.autoCompact,
-    createCompactor: models.createCompactor,
-    executeTool: (call) => {
-      if (!isAgentSessionToolName(call.name) || !selectedTools.has(call.name)) {
-        return Promise.resolve(
-          `Error: ${call.name} is not enabled for this session.`,
+  try {
+    await runCompactingAgentLoop({
+      agentCost: (turn) =>
+        estimateAgentTurnCost(runtime.detail, turn.tokenUsage),
+      autoCompact: runtime.detail.autoCompact,
+      createCompactor: models.createCompactor,
+      executeTool: (call) => {
+        if (
+          !isAgentSessionToolName(call.name) ||
+          !selectedTools.has(call.name)
+        ) {
+          return Promise.resolve({
+            output: `Error: ${call.name} is not enabled for this session.`,
+            state: "failed",
+          });
+        }
+        const skillOutput = skills.execute(
+          call.name,
+          call.arguments,
+          runtime.signal,
+          call.id,
         );
-      }
-      const skillOutput = skills.execute(
-        call.name,
-        call.arguments,
-        runtime.signal,
-      );
-      if (skillOutput !== undefined) {
-        return skillOutput;
-      }
-      return dispatchTool(call.name, call.arguments);
-    },
-    initialMessages: runtime.store.conversation(runtime.detail.id),
-    maxContextTokens: runtime.detail.maxContextTokens,
-    model: models.agent,
-    recordCompaction: (summary) => {
-      runtime.store.compact(runtime.detail.id, summary, runtime.now());
-      runtime.notify();
-    },
-    recordMessage: (message) => {
-      recorder.message(message);
-    },
-    recordUsage: (usage) => {
-      recorder.usage(usage);
-    },
-    signal: runtime.signal,
-  });
+        if (skillOutput !== undefined) {
+          return skillOutput;
+        }
+        return dispatchTool(call.name, call.arguments, undefined, call.id);
+      },
+      initialMessages: runtime.store.conversation(runtime.detail.id),
+      maxContextTokens: runtime.detail.maxContextTokens,
+      model: models.agent,
+      onToolResult: (call, outcome) => {
+        if (outcome.error !== undefined) {
+          toolStream.failed(call.id, outcome.error);
+        } else {
+          toolStream.finish(call.id, outcome.state ?? "completed");
+        }
+      },
+      recordCompaction: (summary) => {
+        runtime.store.compact(runtime.detail.id, summary, runtime.now());
+        runtime.notify();
+      },
+      recordMessage: (message) => {
+        recorder.message(message);
+        if (message.role === "assistant") {
+          for (const call of message.toolCalls) {
+            toolStream.running(call.id, call.name);
+          }
+        }
+      },
+      recordUsage: (usage) => {
+        recorder.usage(usage);
+      },
+      signal: runtime.signal,
+    });
+  } catch (error) {
+    toolStream.close(
+      error instanceof DOMException && error.name === "AbortError"
+        ? "canceled"
+        : "failed",
+    );
+    throw error;
+  } finally {
+    runtime.realtime?.clearToolStreams(runtime.userId, runtime.detail.id);
+  }
 }

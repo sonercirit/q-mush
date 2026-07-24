@@ -21,6 +21,8 @@ interface CompactingAgentLoopOptions {
   readonly initialMessages: readonly AgentConversationMessage[];
   readonly maxContextTokens: number | null;
   readonly model: AgentModel;
+  readonly onToolCall?: AgentLoopOptions["onToolCall"];
+  readonly onToolResult?: AgentLoopOptions["onToolResult"];
   readonly recordCompaction: (summary: string) => Promise<void> | void;
   readonly recordUsage: NonNullable<AgentLoopOptions["recordUsage"]>;
   readonly recordMessage: (
@@ -101,7 +103,16 @@ export async function runCompactingAgentLoop(
         );
         return turn;
       },
+      ...(options.model.startTurn === undefined
+        ? {}
+        : { startTurn: options.model.startTurn }),
     },
+    ...(options.onToolCall === undefined
+      ? {}
+      : { onToolCall: options.onToolCall }),
+    ...(options.onToolResult === undefined
+      ? {}
+      : { onToolResult: options.onToolResult }),
     prepareMessages: async (messages, signal) => {
       if (!compaction.pending) {
         return messages;

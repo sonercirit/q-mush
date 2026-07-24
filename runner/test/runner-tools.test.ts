@@ -1,8 +1,12 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { executeRunnerTool } from "../../runner/runner-tools.ts";
+import {
+  executeRunnerToolResult,
+  type RunnerToolStream,
+} from "../../runner/runner-tools.ts";
 import { AGENT_TOOLS } from "../../shared/agent-tools.ts";
+import type { RunnerToolOutputDelta } from "../../shared/runner-command-broker.ts";
 import {
   observeRunnerRejection,
   requireRunnerError,
@@ -10,6 +14,24 @@ import {
 import { useTemporaryDirectories } from "./temporary-directories.ts";
 
 const workspace = useTemporaryDirectories("q-mush-tools-test-");
+
+async function executeRunnerTool(
+  workingDirectory: string,
+  name: string,
+  arguments_: Readonly<Record<string, unknown>>,
+  signal?: AbortSignal,
+  stream?: RunnerToolStream,
+): Promise<string> {
+  return (
+    await executeRunnerToolResult(
+      workingDirectory,
+      name,
+      arguments_,
+      signal,
+      stream,
+    )
+  ).output;
+}
 
 function executeBash(
   root: string,
@@ -120,6 +142,45 @@ describe("runner tools", () => {
     expect(output).toContain("Wrote 6 bytes to second.txt");
     expect(await readFile(join(root, "first.txt"), "utf8")).toBe("first");
     expect(await readFile(join(root, "second.txt"), "utf8")).toBe("second");
+  });
+
+  test("streams interleaved parallel bash output through the wrapper", async () => {
+    const root = await workspace();
+    const streamed: Omit<RunnerToolOutputDelta, "sequence">[] = [];
+    const result = await executeRunnerToolResult(
+      root,
+      "parallel",
+      {
+        tool_uses: [
+          {
+            parameters: {
+              command: "printf first-out; printf first-error >&2",
+              timeout: 5,
+            },
+            recipient_name: "bash",
+          },
+          {
+            parameters: { command: "exit 7", timeout: 5 },
+            recipient_name: "bash",
+          },
+        ],
+      },
+      undefined,
+      (delta) => streamed.push(delta),
+    );
+
+    expect(streamed.filter(({ channel }) => channel === "stdout")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ content: "first-out" }),
+      ]),
+    );
+    expect(streamed.filter(({ channel }) => channel === "stderr")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ content: "first-error" }),
+      ]),
+    );
+    expect(result.output).toContain('"output": "Exit code: 7"');
+    expect(result.state).toBe("failed");
   });
 
   test("rejects overlapping edits without changing the file", async () => {

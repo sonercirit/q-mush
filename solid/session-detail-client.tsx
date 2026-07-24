@@ -250,6 +250,15 @@ function scrollRevision(detail: AgentSessionDetail): string {
   return `${agentFileRevision}:${String(detail.messages.length)}:${detail.messages.at(-1)?.id ?? ""}`;
 }
 
+function toolStreamRevision(state: SessionViewState): string {
+  return state.toolStreams
+    .map(
+      ({ callId, sequence, state: toolState }) =>
+        `${callId}:${String(sequence)}:${toolState}`,
+    )
+    .join("|");
+}
+
 const SCROLL_END_TOLERANCE = 1;
 
 function isAtScrollEnd(element: HTMLElement): boolean {
@@ -286,7 +295,13 @@ function LoadedSessionDetail(props: {
   };
 
   onMount(scrollToEnd);
-  createEffect(on(() => scrollRevision(props.detail), scrollToEnd));
+  createEffect(
+    on(
+      () =>
+        `${scrollRevision(props.detail)}:${toolStreamRevision(props.state)}`,
+      scrollToEnd,
+    ),
+  );
 
   return (
     <div>
@@ -343,6 +358,7 @@ function LoadedSessionDetail(props: {
         <SessionTranscript
           agentFile={props.detail.agentFile}
           messages={props.detail.messages}
+          toolStreams={props.state.toolStreams}
           tools={props.detail.tools}
         />
       </ul>

@@ -7,7 +7,10 @@ import { parseJsonRecord } from "../shared/json-record.ts";
 import { RUNNER_REALTIME_PATH } from "../shared/routes.ts";
 import type { RunnerToolCommand } from "../shared/runner-command-broker.ts";
 import { createServerWebSocket } from "../shared/server-websocket.ts";
-import { executeRunnerCommand, readRunnerCommand } from "./runner-command.ts";
+import {
+  executeRunnerCommandResult,
+  readRunnerCommand,
+} from "./runner-command.ts";
 import { RunnerUpdateTrigger } from "./runner-update-trigger.ts";
 import { updateRunnerIfAvailable } from "./runner-update.ts";
 
@@ -177,6 +180,15 @@ function waitForSocket(socket: WebSocket): Promise<void> {
   });
 }
 
+function sendRunnerMessage(
+  socket: WebSocket,
+  payload: Readonly<Record<string, unknown>>,
+): void {
+  if (socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify(payload));
+  }
+}
+
 function executeCommand(
   socket: WebSocket,
   command: RunnerToolCommand,
@@ -188,12 +200,25 @@ function executeCommand(
   }
 
   const controller = new AbortController();
-  void executeRunnerCommand(command, controller.signal)
-    .then((output) => {
-      if (!controller.signal.aborted && socket.readyState === WebSocket.OPEN) {
-        socket.send(
-          JSON.stringify({ commandId: command.id, output, type: "result" }),
-        );
+  let sequence = 0;
+  void executeRunnerCommandResult(command, controller.signal, (delta) => {
+    if (!controller.signal.aborted) {
+      sendRunnerMessage(socket, {
+        ...delta,
+        commandId: command.id,
+        sequence,
+        type: "output",
+      });
+      sequence += 1;
+    }
+  })
+    .then((result) => {
+      if (!controller.signal.aborted) {
+        sendRunnerMessage(socket, {
+          commandId: command.id,
+          ...result,
+          type: "result",
+        });
       }
     })
     .finally(() => {

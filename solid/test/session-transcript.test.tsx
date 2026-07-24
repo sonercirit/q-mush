@@ -1,6 +1,10 @@
 import { expect, test } from "vitest";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import type { AgentSessionMessage } from "../../shared/session-model.ts";
+import type {
+  ToolStreamEntry,
+  ToolStreamState,
+} from "../../shared/tool-stream.ts";
 import { SessionTranscript } from "../../solid/session-transcript.tsx";
 import { renderSolidToString } from "./render-solid.tsx";
 
@@ -59,6 +63,26 @@ function userMessage(content: string): AgentSessionMessage {
   };
 }
 
+function liveToolStream(state: ToolStreamState): ToolStreamEntry {
+  return {
+    arguments: '{"command":"printf ok","timeout":5}',
+    callId: "live-call",
+    index: 0,
+    name: "bash",
+    sequence: 4,
+    sessionId: "session-1",
+    state,
+    stderr: "warning",
+    stdout: "ok",
+    streamId: "turn-1",
+  };
+}
+
+function expectShellStreams(html: string): void {
+  expect(html).toContain('aria-label="Standard output"');
+  expect(html).toContain('aria-label="Standard error"');
+}
+
 function renderMessages(
   messages: readonly AgentSessionMessage[],
   tools = AGENT_SESSION_TOOL_NAMES,
@@ -67,6 +91,23 @@ function renderMessages(
     <SessionTranscript agentFile={null} messages={messages} tools={tools} />
   ));
 }
+
+test("renders live tools after persisted messages with separate streams", () => {
+  const html = renderSolidToString(() => (
+    <SessionTranscript
+      agentFile={null}
+      messages={[userMessage("Persisted first")]}
+      toolStreams={[liveToolStream("timed-out")]}
+      tools={["bash"]}
+    />
+  ));
+
+  expect(html.indexOf("Persisted first")).toBeLessThan(
+    html.indexOf("Live tool: bash"),
+  );
+  expect(html).toContain("Timed out");
+  expectShellStreams(html);
+});
 
 test("shows only the session's selected tool definitions", () => {
   const html = renderMessages([], ["read", "brave_search"]);
@@ -117,8 +158,7 @@ test("separates and colorizes shell output and its exit status", () => {
     }),
   ]);
 
-  expect(html).toContain('aria-label="Standard output"');
-  expect(html).toContain('aria-label="Standard error"');
+  expectShellStreams(html);
   expect(html).toContain('data-exit-status="error"');
   expect(html).toContain('<span class="text-cyan-300">stdout</span>');
   expect(html).toContain('<span class="text-rose-300">stderr</span>');

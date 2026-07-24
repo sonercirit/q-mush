@@ -4,6 +4,10 @@ import { RUNNER_REALTIME_PATH } from "../../shared/routes.ts";
 import type { GoogleAuth } from "../../sync-engine/auth.ts";
 import { RealtimeHub } from "../../sync-engine/realtime-hub.ts";
 import {
+  readQmushClientMessage,
+  readRunnerClientMessage,
+} from "../../sync-engine/realtime-protocol.ts";
+import {
   createRealtimeIntegration,
   type QmushWebSocketData,
 } from "../../sync-engine/realtime.ts";
@@ -63,7 +67,12 @@ function runners(
 }
 
 function sessions(
-  overrides: Partial<Pick<SessionIntegration, "runnerConnected">> = {},
+  overrides: Partial<
+    Pick<
+      SessionIntegration,
+      "runnerConnected" | "runnerDisconnected" | "streamRunnerCommand"
+    >
+  > = {},
 ): SessionIntegration {
   return {
     collection: () => Promise.resolve(new Response()),
@@ -81,6 +90,8 @@ function sessions(
     models: () => Promise.resolve(new Response()),
     onChange: () => undefined,
     runnerConnected: () => undefined,
+    runnerDisconnected: () => undefined,
+    streamRunnerCommand: () => false,
     stop: () => Promise.resolve(new Response()),
     ...overrides,
   };
@@ -90,7 +101,12 @@ function integration(
   user: AuthenticatedUser | null,
   token?: string,
   runnerOverrides?: RunnerIntegrationOverrides,
-  sessionOverrides?: Partial<Pick<SessionIntegration, "runnerConnected">>,
+  sessionOverrides?: Partial<
+    Pick<
+      SessionIntegration,
+      "runnerConnected" | "runnerDisconnected" | "streamRunnerCommand"
+    >
+  >,
 ) {
   return createRealtimeIntegration({
     auth: auth(user),
@@ -150,6 +166,50 @@ function websocketMessage(
   return Reflect.apply(method, undefined, [socket, message]);
 }
 
+function websocketClose(
+  handler: Bun.WebSocketHandler<QmushWebSocketData>,
+  socket: TestSocket,
+): unknown {
+  const method: unknown = Reflect.get(handler, "close");
+  if (typeof method !== "function") {
+    throw new TypeError("The realtime close handler is unavailable");
+  }
+  return Reflect.apply(method, undefined, [socket, 1006, "lost"]);
+}
+
+function runnerConnection(): RunnerIntegrationOverrides {
+  return {
+    connect: () => ({
+      connection: {
+        id: "runner-1",
+        tokenHash: "hash",
+        userId: USER.id,
+      },
+      userId: USER.id,
+    }),
+  };
+}
+
+function runnerConnectMessage(): string {
+  return JSON.stringify({
+    architecture: "x64",
+    machineId: "machine-1",
+    name: "runner",
+    platform: "linux",
+    type: "connect",
+  });
+}
+
+function connectRunnerSocket(
+  realtime: ReturnType<typeof createRealtimeIntegration>,
+): TestSocket {
+  const server = new UpgradeServer();
+  expect(upgrade(realtime, RUNNER_REALTIME_PATH, server)).toBeUndefined();
+  const socket = testSocket(server.data);
+  void websocketMessage(realtime.websocket, socket, runnerConnectMessage());
+  return socket;
+}
+
 function expectUpgrade(
   realtime: ReturnType<typeof createRealtimeIntegration>,
   path: string,
@@ -158,6 +218,26 @@ function expectUpgrade(
   const server = new UpgradeServer();
   expect(upgrade(realtime, path, server)).toBeUndefined();
   expect(server.data).toEqual(expected);
+}
+
+function runnerOutputDelta() {
+  return {
+    channel: "stderr" as const,
+    commandId: "command-1",
+    content: "warning",
+    sequence: 0,
+    type: "output" as const,
+  };
+}
+
+function runnerOutputMessage(): string {
+  return JSON.stringify(runnerOutputDelta());
+}
+
+const RUNNER_TOKEN = "qmr_runner-token";
+
+function runnerRealtime(sessionOverrides: Parameters<typeof integration>[3]) {
+  return integration(null, RUNNER_TOKEN, runnerConnection(), sessionOverrides);
 }
 
 test("upgrades an authenticated browser realtime request", () => {
@@ -181,49 +261,71 @@ test("rejects unauthorized and non-WebSocket realtime requests", () => {
   expect(missingUpgrade?.status).toBe(426);
 });
 
+test("bounds browser synchronization IDs and runner output bytes", () => {
+  const oversized = "é".repeat(16_385);
+  expect(() =>
+    readQmushClientMessage(
+      JSON.stringify({
+        sessionId: "session-1",
+        streamId: "x".repeat(1_025),
+        type: "sync_tools",
+      }),
+    ),
+  ).toThrow("invalid");
+  expect(() =>
+    readRunnerClientMessage(
+      JSON.stringify({
+        channel: "stdout",
+        commandId: "command-1",
+        content: oversized,
+        sequence: 0,
+        type: "output",
+      }),
+    ),
+  ).toThrow("invalid");
+});
+
+test("routes explicit runner output and disconnect settlement", () => {
+  const events: unknown[] = [];
+  const realtime = runnerRealtime({
+    runnerConnected: () => undefined,
+    runnerDisconnected: (runnerId) => {
+      events.push({ disconnected: runnerId });
+    },
+    streamRunnerCommand: (runnerId, commandId, delta) => {
+      events.push({ commandId, delta, runnerId });
+      return true;
+    },
+  });
+  const socket = connectRunnerSocket(realtime);
+  void websocketMessage(realtime.websocket, socket, runnerOutputMessage());
+
+  void websocketClose(realtime.websocket, socket);
+  expect(events).toEqual([
+    {
+      commandId: "command-1",
+      delta: runnerOutputDelta(),
+      runnerId: "runner-1",
+    },
+    { disconnected: "runner-1" },
+  ]);
+});
+
 test("recovers and wakes completed child callbacks when a runner connects", () => {
   const connectedUsers: string[] = [];
-  const realtime = integration(
-    null,
-    "qmr_runner-token",
-    {
-      connect: () => ({
-        connection: {
-          id: "runner-1",
-          tokenHash: "hash",
-          userId: USER.id,
-        },
-        userId: USER.id,
-      }),
+  const realtime = runnerRealtime({
+    runnerConnected: () => {
+      connectedUsers.push(USER.id);
     },
-    {
-      runnerConnected: () => {
-        connectedUsers.push(USER.id);
-      },
-    },
-  );
-  const server = new UpgradeServer();
-  expect(upgrade(realtime, RUNNER_REALTIME_PATH, server)).toBeUndefined();
-  const socket = testSocket(server.data);
-
-  void websocketMessage(
-    realtime.websocket,
-    socket,
-    JSON.stringify({
-      architecture: "x64",
-      machineId: "machine-1",
-      name: "runner",
-      platform: "linux",
-      type: "connect",
-    }),
-  );
-
+  });
+  connectRunnerSocket(realtime);
   expect(connectedUsers).toEqual([USER.id]);
 });
+
 test("upgrades a token-authenticated runner realtime request", () => {
-  expectUpgrade(integration(null, "qmr_runner-token"), RUNNER_REALTIME_PATH, {
+  expectUpgrade(integration(null, RUNNER_TOKEN), RUNNER_REALTIME_PATH, {
     kind: "runner",
     runner: undefined,
-    token: "qmr_runner-token",
+    token: RUNNER_TOKEN,
   });
 });

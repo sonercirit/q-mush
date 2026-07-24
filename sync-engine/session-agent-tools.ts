@@ -8,6 +8,10 @@ import {
   readAgentSessionToolNames,
   type SessionAgentToolName,
 } from "../shared/agent-tools.ts";
+import {
+  failedRunnerCommandResult,
+  type RunnerCommandResult,
+} from "../shared/runner-command-broker.ts";
 import { MAXIMUM_RUNNER_PATH_LENGTH } from "../shared/runner-directory-model.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { readIdentifier, readStringField } from "./session-request-helpers.ts";
@@ -112,16 +116,19 @@ function message(arguments_: Readonly<Record<string, unknown>>): string {
   return value;
 }
 
-function safeToolError(error: unknown): string {
-  const detail = error instanceof Error ? error.message : String(error);
-  return `Error: ${detail.slice(0, 500)}`;
+function completedToolOutput(output: string): RunnerCommandResult {
+  return { output, state: "completed" };
+}
+
+function failedToolOutput(error: unknown): RunnerCommandResult {
+  return failedRunnerCommandResult(error, 500);
 }
 
 export function executeSessionAgentTool(
   actions: SessionAgentToolActions,
   name: SessionAgentToolName,
   arguments_: Readonly<Record<string, unknown>>,
-): Promise<string> {
+): Promise<RunnerCommandResult> {
   try {
     let output: Promise<string>;
     switch (name) {
@@ -150,9 +157,9 @@ export function executeSessionAgentTool(
         output = Promise.resolve(actions.stopSession(sessionId(arguments_)));
         break;
     }
-    return output.catch((error: unknown) => safeToolError(error));
+    return output.then(completedToolOutput, failedToolOutput);
   } catch (error) {
-    return Promise.resolve(safeToolError(error));
+    return Promise.resolve(failedToolOutput(error));
   }
 }
 

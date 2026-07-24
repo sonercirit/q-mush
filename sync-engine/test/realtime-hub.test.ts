@@ -75,6 +75,50 @@ test("publishes snapshots only to the authenticated user's sockets", () => {
   expect(second.messages).toHaveLength(2);
 });
 
+test("keeps a replacement call when old terminal cleanup runs", async () => {
+  const hub = new RealtimeHub();
+  const live = new TestSocket();
+  hub.setUser("replacement-user", live, true);
+  const common = {
+    index: 0,
+    sessionId: "session-1",
+    streamId: "turn-1",
+    type: "tool_stream" as const,
+  };
+  hub.publishToolStream("replacement-user", {
+    ...common,
+    callId: "pending",
+    sequence: 0,
+    state: "preparing",
+  });
+  hub.publishToolStream("replacement-user", {
+    ...common,
+    callId: "call-1",
+    previousCallId: "pending",
+    sequence: 1,
+  });
+  hub.publishToolStream("replacement-user", {
+    ...common,
+    callId: "call-1",
+    sequence: 2,
+    state: "completed",
+  });
+  hub.publishToolStream("replacement-user", {
+    ...common,
+    callId: "call-2",
+    previousCallId: "call-1",
+    sequence: 3,
+    state: "running",
+  });
+  await Promise.resolve();
+
+  const snapshot = new TestSocket();
+  hub.syncToolStreams("replacement-user", "session-1", "turn-1", snapshot);
+  expect(JSON.parse(snapshot.messages[0] ?? "null")).toMatchObject({
+    streams: [expect.objectContaining({ callId: "call-2", state: "running" })],
+  });
+});
+
 test("delivers queued commands immediately and cancellation to a runner socket", () => {
   const hub = new RealtimeHub();
   const runner = new TestSocket();

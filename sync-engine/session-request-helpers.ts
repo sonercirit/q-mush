@@ -104,7 +104,10 @@ export class SessionRequestHelpers {
       return createApiError("invalid_request", 400);
     }
 
-    return this.#broker.complete(runnerId, commandId, output)
+    return this.#broker.complete(runnerId, commandId, {
+      output,
+      state: "completed",
+    })
       ? createNoContentResponse()
       : createApiError("not_found", 404);
   }
@@ -135,7 +138,7 @@ export class SessionRequestHelpers {
     }
 
     try {
-      const output = await this.#broker.dispatch(
+      const result = await this.#broker.dispatch(
         {
           arguments: {},
           runnerId,
@@ -145,7 +148,7 @@ export class SessionRequestHelpers {
         },
         AbortSignal.any([request.signal, AbortSignal.timeout(15_000)]),
       );
-      const value: unknown = JSON.parse(output);
+      const value: unknown = JSON.parse(result.output);
       return createJsonResponse(readRunnerDirectoryListing(value));
     } catch {
       return createApiError("directory_unavailable", 502);

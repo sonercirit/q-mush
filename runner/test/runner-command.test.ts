@@ -2,13 +2,19 @@ import { writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { describe, expect, test } from "vitest";
 import {
-  executeRunnerCommand,
+  executeRunnerCommandResult,
   readRunnerCommand,
 } from "../../runner/runner-command.ts";
 import { RUNNER_AGENT_FILE_COMMAND } from "../../shared/agent-file.ts";
 import { useTemporaryDirectories } from "./temporary-directories.ts";
 
 const temporaryDirectory = useTemporaryDirectories("q-mush-command-test-");
+
+async function executeRunnerCommand(
+  ...parameters: Parameters<typeof executeRunnerCommandResult>
+): Promise<string> {
+  return (await executeRunnerCommandResult(...parameters)).output;
+}
 
 function shellCommand(
   root: string,
@@ -195,6 +201,87 @@ describe("runner WebSocket protocol", () => {
     );
 
     expect(result).toBe("stdout:\ncompleted\nExit code: 7");
+  });
+
+  test("reports explicit runner terminal states without changing canonical output", async () => {
+    const root = await temporaryDirectory();
+    const failed = await executeRunnerCommandResult({
+      arguments: { command: "exit 7", timeout: 5 },
+      id: "failed-shell-command",
+      sessionId: "session-1",
+      tool: "bash",
+      workingDirectory: root,
+    });
+    const timedOut = await executeRunnerCommandResult({
+      arguments: { command: "sleep 2", timeout: 1 },
+      id: "timed-out-shell-command",
+      sessionId: "session-1",
+      tool: "bash",
+      workingDirectory: root,
+    });
+    const invalid = await executeRunnerCommandResult({
+      arguments: { path: "missing.txt" },
+      id: "failed-read-command",
+      sessionId: "session-1",
+      tool: "read",
+      workingDirectory: root,
+    });
+
+    expect(failed).toEqual({ output: "Exit code: 7", state: "failed" });
+    expect(timedOut).toEqual({
+      output: "Timed out after 1 seconds.",
+      state: "timed-out",
+    });
+    expect(invalid).toMatchObject({ state: "failed" });
+    expect(invalid.output).toContain("Error:");
+  });
+
+  test("streams split UTF-8 output without corrupting code points", async () => {
+    const streamed: string[] = [];
+    const output = await executeRunnerCommand(
+      {
+        arguments: {
+          command: "printf '\\303'; sleep 0.05; printf '\\251'",
+          timeout: 5,
+        },
+        id: "utf8-shell-command",
+        sessionId: "session-1",
+        tool: "bash",
+        workingDirectory: await temporaryDirectory(),
+      },
+      undefined,
+      (delta) => {
+        if (delta.channel === "stdout") {
+          streamed.push(delta.content);
+        }
+      },
+    );
+
+    expect(streamed.join("")).toBe("é");
+    expect(output).toContain("stdout:\né");
+  });
+
+  test("does not split UTF-8 when output reaches its byte limit", async () => {
+    const streamed: string[] = [];
+    const root = await temporaryDirectory();
+    const output = await executeRunnerCommand(
+      {
+        arguments: {
+          command: "head -c 131071 /dev/zero; printf '\\303\\251x'",
+          timeout: 5,
+        },
+        id: "bounded-utf8-shell-command",
+        sessionId: "session-1",
+        tool: "bash",
+        workingDirectory: root,
+      },
+      undefined,
+      (delta) => streamed.push(delta.content),
+    );
+
+    expect(streamed.join("")).not.toContain("�");
+    expect(output).not.toContain("�");
+    expect(output).toContain("[output truncated]");
   });
 
   test("rejects malformed server commands", () => {

@@ -1,10 +1,15 @@
 import { RUNNER_AGENT_FILE_COMMAND } from "../shared/agent-file.ts";
 import { isRecord } from "../shared/auth-model.ts";
-import type { RunnerToolCommand } from "../shared/runner-command-broker.ts";
+import {
+  failedRunnerCommandResult,
+  type RunnerCommandResult,
+  type RunnerToolCommand,
+  type RunnerToolOutputDelta,
+} from "../shared/runner-command-broker.ts";
 import { RUNNER_DIRECTORY_COMMAND } from "../shared/runner-directory-model.ts";
 import { loadRunnerAgentFile } from "./runner-agent-file.ts";
 import { listRunnerDirectories } from "./runner-directories.ts";
-import { executeRunnerTool } from "./runner-tools.ts";
+import { executeRunnerToolResult } from "./runner-tools.ts";
 
 const MAXIMUM_IDENTIFIER_LENGTH = 200;
 const MAXIMUM_PATH_LENGTH = 4_096;
@@ -63,34 +68,38 @@ export function readRunnerCommand(value: unknown): RunnerToolCommand {
   };
 }
 
-export async function executeRunnerCommand(
+export async function executeRunnerCommandResult(
   command: RunnerToolCommand,
   signal?: AbortSignal,
-): Promise<string> {
+  stream?: (delta: Omit<RunnerToolOutputDelta, "sequence">) => void,
+): Promise<RunnerCommandResult> {
   try {
     if (command.tool === RUNNER_DIRECTORY_COMMAND) {
-      return JSON.stringify(
-        await listRunnerDirectories(command.workingDirectory),
-      );
+      return {
+        output: JSON.stringify(
+          await listRunnerDirectories(command.workingDirectory),
+        ),
+        state: "completed",
+      };
     }
 
     if (command.tool === RUNNER_AGENT_FILE_COMMAND) {
-      return JSON.stringify(
-        await loadRunnerAgentFile(command.workingDirectory),
-      );
+      return {
+        output: JSON.stringify(
+          await loadRunnerAgentFile(command.workingDirectory),
+        ),
+        state: "completed",
+      };
     }
 
-    return await executeRunnerTool(
+    return await executeRunnerToolResult(
       command.workingDirectory,
       command.tool,
       command.arguments,
       signal,
+      stream,
     );
   } catch (error) {
-    if (error instanceof Error) {
-      return `Error: ${error.message.slice(0, 1_000)}`;
-    }
-
-    return `Error: ${String(error).slice(0, 1_000)}`;
+    return failedRunnerCommandResult(error, 1_000);
   }
 }

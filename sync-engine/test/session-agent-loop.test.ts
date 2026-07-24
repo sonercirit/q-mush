@@ -1,4 +1,8 @@
 import { describe, expect, test } from "vitest";
+import type {
+  AgentConversationMessage,
+  AgentModel,
+} from "../../shared/agent-loop.ts";
 import type { AgentConversationCompactor } from "../../sync-engine/agent-compaction.ts";
 import { runCompactingAgentLoop } from "../../sync-engine/session-agent-loop.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
@@ -73,6 +77,39 @@ describe("compacting agent session loop", () => {
     ]);
     expect(summaries).toContain("Compacted handoff");
     expect(costs).toEqual([null, 0.1, 0.25]);
+  });
+
+  test("starts every wrapped model turn", async () => {
+    let turns = 0;
+    const calls = new ScriptedAgentModel([
+      { content: "Calling.", toolCalls: [TOOL_CALL] },
+      { content: "Done.", toolCalls: [] },
+    ]);
+    const startedModel: AgentModel = {
+      complete: (messages: readonly AgentConversationMessage[]) =>
+        calls.complete(messages),
+      startTurn: () => {
+        turns += 1;
+      },
+    };
+    const unexpectedCompactor = (): AgentConversationCompactor => {
+      throw new Error("The compactor should not be created");
+    };
+
+    await runCompactingAgentLoop({
+      agentCost: () => 0,
+      autoCompact: false,
+      createCompactor: unexpectedCompactor,
+      executeTool: () => Promise.resolve("# Project"),
+      initialMessages: [{ content: "Inspect", role: "user" }],
+      maxContextTokens: null,
+      model: startedModel,
+      recordCompaction: () => undefined,
+      recordMessage: () => undefined,
+      recordUsage: () => undefined,
+    });
+
+    expect(turns).toBe(2);
   });
 
   test("compacts a final turn that reaches 95%", async () => {

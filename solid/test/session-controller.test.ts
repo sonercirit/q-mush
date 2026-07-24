@@ -8,6 +8,38 @@ import {
   requestUrl,
 } from "./controller-test-helpers.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
+import { testToolStreamEntry } from "./tool-stream-fixtures.ts";
+
+function mountedController(): {
+  readonly controller: SessionController;
+  readonly restore: () => void;
+} {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = Object.assign(sessionResponse, {
+    preconnect: originalFetch.preconnect,
+  });
+  return {
+    controller: createRoot(() => new SessionController()),
+    restore: () => {
+      globalThis.fetch = originalFetch;
+    },
+  };
+}
+
+function toolDelta(
+  common: Readonly<{
+    callId: string;
+    index: number;
+    sessionId: string;
+    streamId: string;
+    type: "tool_stream";
+  }>,
+  sequence: number,
+  channel: "name" | "stdout",
+  content: string,
+) {
+  return { ...common, channel, content, sequence };
+}
 
 function sessionResponse(input: RequestInfo | URL): Promise<Response> {
   const path = new URL(requestUrl(input), "http://localhost").pathname;
@@ -20,12 +52,15 @@ function sessionResponse(input: RequestInfo | URL): Promise<Response> {
   );
 }
 
+function createLoadedController(): {
+  readonly controller: SessionController;
+  readonly restore: () => void;
+} {
+  return mountedController();
+}
+
 test("renders incremental model deltas in the selected transcript", async () => {
-  const controller = createRoot(() => new SessionController());
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = Object.assign(sessionResponse, {
-    preconnect: originalFetch.preconnect,
-  });
+  const { controller, restore } = mountedController();
 
   try {
     await controller.load();
@@ -35,12 +70,14 @@ test("renders incremental model deltas in the selected transcript", async () => 
     controller.applyDelta({
       content: "Hello",
       sessionId: TEST_SESSION_DETAIL.id,
+      streamId: "stream-1",
       thinking: "Considering",
       type: "session_delta",
     });
     controller.applyDelta({
       content: " world",
       sessionId: TEST_SESSION_DETAIL.id,
+      streamId: "stream-1",
       thinking: " carefully",
       type: "session_delta",
     });
@@ -49,6 +86,7 @@ test("renders incremental model deltas in the selected transcript", async () => 
       content: "",
       reset: true,
       sessionId: TEST_SESSION_DETAIL.id,
+      streamId: ["stream", "1"].join("-"),
       thinking: "",
       type: "session_delta",
     });
@@ -58,6 +96,7 @@ test("renders incremental model deltas in the selected transcript", async () => 
     controller.applyDelta({
       content: "Replacement",
       sessionId: TEST_SESSION_DETAIL.id,
+      streamId: "stream-1",
       thinking: "Reconsidering",
       type: "session_delta",
     });
@@ -85,7 +124,53 @@ test("renders incremental model deltas in the selected transcript", async () => 
     });
     expect(controller.state.detail?.messages).toEqual([errorMessage]);
   } finally {
-    globalThis.fetch = originalFetch;
+    restore();
+  }
+});
+
+test("orders and reconciles live tool calls independently", async () => {
+  const { controller, restore } = createLoadedController();
+
+  try {
+    await controller.load();
+    const common = {
+      callId: "call-1",
+      index: 0,
+      sessionId: TEST_SESSION_DETAIL.id,
+      streamId: "turn-1",
+      type: "tool_stream" as const,
+    };
+    controller.applyToolDelta({ ...common, sequence: 0, state: "preparing" });
+    controller.applyToolDelta(toolDelta(common, 2, "name", "read"));
+    expect(controller.state.toolStreams[0]?.name).toBe("");
+    controller.applyToolDelta(toolDelta(common, 1, "name", "read"));
+    controller.applyToolDelta(toolDelta(common, 1, "stdout", "late duplicate"));
+    expect(controller.state.toolStreams[0]).toMatchObject({
+      name: "read",
+      sequence: 1,
+      stdout: "",
+    });
+
+    controller.applyToolDelta({
+      ...toolDelta(common, 2, "stdout", "coalesced"),
+      sequenceStart: 2,
+    });
+    const coalesced = controller.state.toolStreams[0];
+    expect(coalesced?.sequence).toBe(2);
+    expect(coalesced?.stdout).toBe("coalesced");
+
+    controller.applyToolSnapshot({
+      sessionId: TEST_SESSION_DETAIL.id,
+      streamId: "turn-1",
+      streams: [testToolStreamEntry(TEST_SESSION_DETAIL.id)],
+      type: "tool_stream_snapshot",
+    });
+    expect(controller.state.toolStreams[0]).toMatchObject({
+      sequence: 3,
+      stdout: "snapshot",
+    });
+  } finally {
+    restore();
   }
 });
 
