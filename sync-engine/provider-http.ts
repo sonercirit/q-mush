@@ -2,10 +2,14 @@ import type { AgentModelTurn } from "../shared/agent-loop.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
 import {
-  fetchModelRequestWithRetries,
+  fetchModelRequestAttempt,
+  modelResponseRetryAfterMilliseconds,
+  RetryableModelRequestError,
+  runModelRequestWithRetries,
   type ModelRequestSleep,
 } from "./agent-model-retry.ts";
 import type { AgentModelFetch } from "./agent-model.ts";
+import { ProviderStreamError } from "./provider-error.ts";
 import { readProviderEventStream } from "./provider-event-stream.ts";
 import {
   createProviderStreamAccumulator,
@@ -66,6 +70,57 @@ async function requestError(
   }
 }
 
+function streamFailure(
+  error: unknown,
+  response: Response,
+): RetryableModelRequestError | ProviderStreamError {
+  if (error instanceof ProviderStreamError && !error.transient) {
+    return error;
+  }
+  const retryAfterMilliseconds =
+    error instanceof ProviderStreamError
+      ? error.retryAfterMilliseconds
+      : modelResponseRetryAfterMilliseconds(response);
+  return new RetryableModelRequestError(error, { retryAfterMilliseconds });
+}
+
+async function readAcceptedResponse(
+  response: Response,
+  options: ProviderHttpOptions,
+): Promise<AgentModelTurn> {
+  if (!response.ok) {
+    throw await requestError(options.provider, response);
+  }
+
+  if (response.headers.get("content-type")?.includes("application/json")) {
+    const accumulator = createProviderStreamAccumulator(
+      "chat_completions_json",
+      options.onDelta,
+    );
+    try {
+      accumulator.push(await response.json());
+      return accumulator.finish();
+    } catch (error) {
+      if (error instanceof SyntaxError || error instanceof TypeError) {
+        throw new RetryableModelRequestError(error, {
+          retryAfterMilliseconds: modelResponseRetryAfterMilliseconds(response),
+        });
+      }
+      throw error;
+    }
+  }
+
+  try {
+    return await readProviderEventStream(
+      response,
+      options.responsesProtocol ? "responses" : "chat_completions",
+      options.onDelta,
+    );
+  } catch (error) {
+    throw streamFailure(error, response);
+  }
+}
+
 export async function completeProviderHttp(
   options: ProviderHttpOptions,
   signal?: AbortSignal,
@@ -76,28 +131,39 @@ export async function completeProviderHttp(
     method: "POST",
     ...(signal === undefined ? {} : { signal }),
   });
-  const response = await fetchModelRequestWithRetries(
-    options.fetch,
-    request,
-    options.sleep,
-  );
+  let streamed = false;
+  const retryAttempt = async (): Promise<AgentModelTurn> => {
+    const response = await fetchModelRequestAttempt(options.fetch, request);
+    try {
+      return await readAcceptedResponse(response, {
+        ...options,
+        onDelta: (delta) => {
+          streamed = true;
+          options.onDelta?.(delta);
+        },
+      });
+    } catch (error) {
+      if (streamed && error instanceof RetryableModelRequestError) {
+        options.onDelta?.({ content: "", reset: true, thinking: "" });
+        streamed = false;
+      }
+      throw error;
+    }
+  };
 
-  if (!response.ok) {
-    throw await requestError(options.provider, response);
-  }
-
-  if (response.headers.get("content-type")?.includes("application/json")) {
-    const accumulator = createProviderStreamAccumulator(
-      "chat_completions_json",
-      options.onDelta,
+  try {
+    return await runModelRequestWithRetries(
+      retryAttempt,
+      request.signal,
+      options.sleep,
     );
-    accumulator.push(await response.json());
-    return accumulator.finish();
+  } catch (error) {
+    if (error instanceof RetryableModelRequestError) {
+      if (error.response !== undefined) {
+        throw await requestError(options.provider, error.response);
+      }
+      throw error.failure;
+    }
+    throw error;
   }
-
-  return readProviderEventStream(
-    response,
-    options.responsesProtocol ? "responses" : "chat_completions",
-    options.onDelta,
-  );
 }

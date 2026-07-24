@@ -1,4 +1,5 @@
 import type { AgentModelTurn } from "../shared/agent-loop.ts";
+import { ProviderStreamError } from "./provider-error.ts";
 import {
   createProviderStreamAccumulator,
   type ProviderTextDelta,
@@ -20,11 +21,17 @@ export type ProviderWebSocketFactory = (
 ) => ProviderWebSocket;
 
 export class ProviderWebSocketError extends Error {
+  readonly retryAfterMilliseconds: number | undefined;
   readonly started: boolean;
 
-  constructor(message: string, started: boolean) {
+  constructor(
+    message: string,
+    started: boolean,
+    retryAfterMilliseconds?: number,
+  ) {
     super(message);
     this.name = "ProviderWebSocketError";
+    this.retryAfterMilliseconds = retryAfterMilliseconds;
     this.started = started;
   }
 }
@@ -81,6 +88,16 @@ export function completeProviderWebSocket(options: {
       settle(error);
     };
     const failUnknown = (error: unknown): void => {
+      if (error instanceof ProviderStreamError && error.transient) {
+        fail(
+          new ProviderWebSocketError(
+            error.message,
+            receivedEvent,
+            error.retryAfterMilliseconds,
+          ),
+        );
+        return;
+      }
       fail(error instanceof Error ? error : new Error(String(error)));
     };
     const onAbort = (): void => {
@@ -102,8 +119,10 @@ export function completeProviderWebSocket(options: {
       if (settled) {
         return;
       }
+      let invalidProviderMessage = true;
       try {
         const value: unknown = JSON.parse(messageText(event));
+        invalidProviderMessage = false;
         accumulator.push(value);
         receivedEvent = true;
 
@@ -112,8 +131,13 @@ export function completeProviderWebSocket(options: {
           socket.close(1000, "Complete");
         }
       } catch (error) {
-        socket.close(1002, "Invalid provider message");
         failUnknown(error);
+        socket.close(
+          invalidProviderMessage ? 1002 : 1011,
+          invalidProviderMessage
+            ? "Invalid provider message"
+            : "Provider request failed",
+        );
       }
     });
     socket.addEventListener("error", () => {

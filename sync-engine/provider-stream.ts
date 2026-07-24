@@ -6,6 +6,10 @@ import type {
 import { isRecord, readRequiredArray } from "../shared/auth-model.ts";
 import { requiredRecordString } from "../shared/json-record.ts";
 import {
+  isProviderStreamErrorEvent,
+  readProviderStreamError,
+} from "./provider-error.ts";
+import {
   createStreamBuffers,
   type StreamBuffers,
 } from "./provider-stream-buffers.ts";
@@ -24,11 +28,23 @@ export interface ProviderTextDelta {
   readonly thinking: string;
 }
 
-export interface ProviderStreamAccumulator {
+interface ProviderStreamAccumulatorBase {
   readonly completed: boolean;
+  readonly receivedEvent: boolean;
   finish(): AgentModelTurn;
   push(event: unknown): void;
 }
+
+interface ChatCompletionsStreamAccumulator extends ProviderStreamAccumulatorBase {
+  readonly protocol: "chat_completions";
+}
+
+interface CompletedStreamAccumulator extends ProviderStreamAccumulatorBase {
+  readonly protocol: "chat_completions_json" | "responses";
+}
+
+export type ProviderStreamAccumulator =
+  ChatCompletionsStreamAccumulator | CompletedStreamAccumulator;
 
 function readTokenCount(value: unknown, key: string): number | undefined {
   if (!isRecord(value)) {
@@ -314,24 +330,18 @@ function stringDelta(
 
 abstract class BufferedAccumulator {
   readonly buffers: StreamBuffers;
+  receivedEvent = false;
 
   constructor(onDelta?: (delta: ProviderTextDelta) => void) {
     this.buffers = createStreamBuffers(onDelta);
   }
 }
 
-function providerStreamError(event: Readonly<Record<string, unknown>>): string {
-  const nested = isRecord(event["error"]) ? event["error"] : undefined;
-  const detail = nested?.["message"] ?? event["message"];
-  return typeof detail === "string" && detail.trim().length > 0
-    ? `The provider failed to complete the request: ${detail.trim()}`
-    : "The provider failed to complete the request";
-}
-
 class ResponsesAccumulator
   extends BufferedAccumulator
-  implements ProviderStreamAccumulator
+  implements CompletedStreamAccumulator
 {
+  readonly protocol = "responses" as const;
   #reasoningSummary:
     { readonly outputIndex: number; readonly summaryIndex: number } | undefined;
   readonly #toolCalls = new Map<number, AgentToolCall>();
@@ -366,6 +376,7 @@ class ResponsesAccumulator
     if (!isRecord(value)) {
       throw new Error("The provider returned an invalid streaming event");
     }
+    this.receivedEvent = true;
 
     const type = value["type"];
 
@@ -374,8 +385,8 @@ class ResponsesAccumulator
       return;
     }
 
-    if (type === "response.failed" || type === "error") {
-      throw new Error(providerStreamError(value));
+    if (isProviderStreamErrorEvent(value)) {
+      throw readProviderStreamError(value);
     }
 
     if (type === "response.output_item.added") {
@@ -484,7 +495,7 @@ function optionalDeltaString(
 
 class ChatCompletionsAccumulator
   extends BufferedAccumulator
-  implements ProviderStreamAccumulator
+  implements ChatCompletionsStreamAccumulator
 {
   #contextTokens: number | null = null;
   #costUsd: number | null = null;
@@ -492,6 +503,7 @@ class ChatCompletionsAccumulator
   readonly #toolCalls = new Map<number, PartialChatToolCall>();
 
   readonly completed = false;
+  readonly protocol = "chat_completions" as const;
 
   finish(): AgentModelTurn {
     return providerTurn(
@@ -505,7 +517,16 @@ class ChatCompletionsAccumulator
   }
 
   push(value: unknown): void {
-    const delta = readChatDelta(value);
+    const event = isRecord(value) ? value : undefined;
+    if (event === undefined) {
+      throw new Error("The model returned an invalid completion chunk");
+    }
+    this.receivedEvent = true;
+    if (isProviderStreamErrorEvent(event)) {
+      throw readProviderStreamError(event);
+    }
+
+    const delta = readChatDelta(event);
     const content = optionalDeltaString(delta, ["content"]);
     const thinking = optionalDeltaString(delta, [
       "reasoning",
@@ -571,8 +592,10 @@ class ChatCompletionsAccumulator
   }
 }
 
-class JsonChatCompletionsAccumulator implements ProviderStreamAccumulator {
+class JsonChatCompletionsAccumulator implements CompletedStreamAccumulator {
   #turn: AgentModelTurn | undefined;
+  readonly protocol = "chat_completions_json" as const;
+  receivedEvent = false;
 
   get completed(): boolean {
     return this.#turn !== undefined;
@@ -586,6 +609,7 @@ class JsonChatCompletionsAccumulator implements ProviderStreamAccumulator {
   }
 
   push(value: unknown): void {
+    this.receivedEvent = true;
     this.#turn = readChatTurn(value);
   }
 }

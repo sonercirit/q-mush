@@ -282,17 +282,16 @@ Living project memory.
   and `reasoning.effort` for OpenRouter and Codex Responses. Streamed reasoning
   deltas are grouped by `output_index` and `summary_index`; separate summary
   parts with paragraphs because completed responses may omit their output.
-  OpenAI Responses WebSockets retry interruptions after deltas, which remain
-  UI-only until persistence. Retries reset the browser stream; exhausted
-  attempts use HTTP. Failures persist as non-replayed `error` messages.
+  OpenAI Responses WebSockets and accepted HTTP streams retry transient
+  interruptions or provider error events only before a model turn is persisted;
+  partial UI deltas reset before replay, and exhausted WebSockets fall back to
+  HTTP. Permanent provider errors and aborts do not retry, and terminal failures
+  persist as non-replayed `error` messages.
 - Shell commands require a positive timeout. On macOS/Linux each has a POSIX
   session; stop/timeout signals only its group, including descendants retaining
   pipes. Agent launches and runner commands otherwise have no application-owned
   turn, queue, or elapsed-time limits. Outside explicit or 95%-threshold
   compaction, providers replay the full conversation without a timeout.
-- Add each new runtime source root and executable entry to
-  `knip.production.config.ts`. Add standalone non-TypeScript build entries, such
-  as `solid/styles.css`, to both Knip configs; keep test files and test-support
-  directories out of production project patterns.
-- Put every test file under a directory named `test`; the directory may appear
-  at any depth, such as `scripts/test` or `apps/control-center/test`.
+- Add new runtime roots and standalone non-TypeScript build entries (for example
+  `solid/styles.css`) to the matching Knip configs; exclude test support from
+  production patterns. Put tests under a directory named `test`.

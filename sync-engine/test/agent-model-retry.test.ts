@@ -1,7 +1,34 @@
 import { describe, expect, test } from "vitest";
-import { fetchModelRequestWithRetries } from "../../sync-engine/agent-model-retry.ts";
+import {
+  fetchModelRequestAttempt,
+  RetryableModelRequestError,
+  runModelRequestWithRetries,
+  type ModelRequestSleep,
+} from "../../sync-engine/agent-model-retry.ts";
 import { createJsonResponse } from "../../sync-engine/http.ts";
 import { captureRejection, requireError } from "./promise-test-helpers.ts";
+
+function unwrapResponse(error: unknown): Response {
+  if (error instanceof RetryableModelRequestError) {
+    if (error.response !== undefined) {
+      return error.response;
+    }
+    throw error.failure;
+  }
+  throw error;
+}
+
+function fetchModelRequestWithRetries(
+  fetch: (request: Request) => Promise<Response>,
+  request: Request,
+  sleepFor?: ModelRequestSleep,
+): Promise<Response> {
+  return runModelRequestWithRetries(
+    () => fetchModelRequestAttempt(fetch, request),
+    request.signal,
+    sleepFor,
+  ).catch(unwrapResponse);
+}
 
 const REQUEST = new Request("https://provider.example/completions", {
   body: '{"prompt":"Hello"}',
