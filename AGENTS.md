@@ -145,10 +145,10 @@ Living project memory.
   fallbacks. New sessions default to the online runner and model credential,
   then the first entry. The working directory uses the latest session; models
   use the first option and maximum reasoning effort. Model choices show all
-  provider and Q Mush-supported input/output modalities. Controls use the
-  listbox in `solid/custom-select.tsx`; model options show discovered context
-  limits. Model and effort selections are persisted with the session.
-  `shared/agent-prompt.ts` is the shared source for building the model system
+  provider and Q Mush-supported input/output modalities.
+  `solid/custom-select.tsx` searches then paginates lists over ten items, ten
+  per page. It opens on the selected page, resets/clamps pages, and owns
+  accessible keyboard/focus. `shared/agent-prompt.ts` builds the model system
   prompt and its transcript display. Reasoning summaries persist as `thinking`
   messages but are excluded from replay. Session and transcript rows live in
   `agent_sessions` and `agent_messages`; interrupted processes mark active
