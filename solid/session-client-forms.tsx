@@ -1,4 +1,4 @@
-import { type JSX } from "solid-js";
+import { Show, type JSX } from "solid-js";
 import type { AgentImage } from "../shared/agent-images.ts";
 import { SessionImageInput } from "./session-image-client.tsx";
 import { readPastedAgentImageFiles } from "./session-image-input.ts";
@@ -27,7 +27,10 @@ interface SessionPromptInputProps extends PromptEventProps, SessionImagesProps {
 }
 
 interface SessionFollowUpProps extends PromptEventProps, SessionImagesProps {
-  readonly available: boolean;
+  readonly availabilityDescriptionId: string;
+  readonly availabilityLabel: string;
+  readonly continueVisible: boolean;
+  readonly disabled: boolean;
   readonly onContinue: () => void;
   readonly onSubmit: () => void;
   readonly prompt: string;
@@ -48,6 +51,13 @@ function promptEvents(props: PromptEventProps) {
   };
 }
 
+function hasPromptInput(
+  prompt: string,
+  images: readonly AgentImage[],
+): boolean {
+  return prompt.trim().length > 0 || images.length > 0;
+}
+
 function renderSessionImages(
   props: SessionImagesProps & {
     readonly disabled: boolean;
@@ -66,15 +76,16 @@ function renderSessionImages(
 }
 
 function SessionSubmitButton(props: {
+  readonly availabilityDescriptionId: string;
   readonly available: boolean;
   readonly label: string;
-  readonly pending: boolean;
 }): JSX.Element {
   return (
     <button
+      aria-describedby={props.availabilityDescriptionId}
       aria-keyshortcuts={shortcutKeys(SHORTCUT_ACTIONS.sendFollowUp)}
-      class="self-end rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:opacity-50"
-      disabled={!props.available || props.pending}
+      class="self-end rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+      disabled={!props.available}
       type="submit"
     >
       {props.label}
@@ -101,6 +112,18 @@ function registerComposerShortcut(
   };
 }
 
+function sendAvailable(props: SessionFollowUpProps): boolean {
+  return (
+    !props.disabled &&
+    !props.sending &&
+    hasPromptInput(props.prompt, props.images)
+  );
+}
+
+function continueAvailable(props: SessionFollowUpProps): boolean {
+  return props.continueVisible && !props.disabled && !props.sending;
+}
+
 function registerFollowUpShortcuts(
   props: SessionFollowUpProps,
 ): (element: HTMLTextAreaElement) => void {
@@ -108,7 +131,7 @@ function registerFollowUpShortcuts(
   const target = (): HTMLTextAreaElement | undefined => prompt;
   registerShortcut(
     SHORTCUT_ACTIONS.sendFollowUp,
-    () => props.available && !props.sending,
+    () => sendAvailable(props),
     () => {
       prompt?.form?.requestSubmit();
     },
@@ -116,7 +139,7 @@ function registerFollowUpShortcuts(
   );
   registerShortcut(
     SHORTCUT_ACTIONS.continueSession,
-    () => !props.sending,
+    () => continueAvailable(props),
     props.onContinue,
     target,
   );
@@ -149,6 +172,23 @@ function SessionPromptTextarea(
   );
 }
 
+export function SessionStartButton(props: {
+  readonly available: boolean;
+  readonly pending: boolean;
+}): JSX.Element {
+  return (
+    <button
+      aria-keyshortcuts={shortcutKeys(SHORTCUT_ACTIONS.startSession)}
+      class="shrink-0 rounded-xl bg-emerald-300 px-5 py-3 font-semibold text-slate-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-50"
+      disabled={!props.available || props.pending}
+      type="submit"
+    >
+      {props.pending ? "Starting…" : "Start session"}
+      <ShortcutHint action={SHORTCUT_ACTIONS.startSession} />
+    </button>
+  );
+}
+
 export function SessionPromptInput(
   props: SessionPromptInputProps,
 ): JSX.Element {
@@ -157,7 +197,7 @@ export function SessionPromptInput(
     () =>
       props.available &&
       !props.disabled &&
-      (props.prompt.trim().length > 0 || props.images.length > 0),
+      hasPromptInput(props.prompt, props.images),
   );
 
   return (
@@ -187,41 +227,62 @@ export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
 
   return (
     <form
+      aria-label="Send another instruction"
       class="flex min-w-0 flex-1 flex-col gap-3"
+      data-session-composer="true"
       onSubmit={(event) => {
         event.preventDefault();
-        props.onSubmit();
+        if (sendAvailable(props)) {
+          props.onSubmit();
+        }
       }}
     >
-      <SessionPromptTextarea
-        {...props}
-        class="min-h-20 w-full resize-y rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none"
-        disabled={props.sending}
+      <textarea
+        aria-describedby={props.availabilityDescriptionId}
+        aria-disabled={props.disabled}
+        aria-label="Follow-up instruction"
+        class="min-h-20 w-full resize-y rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
+        name="prompt"
         placeholder="Give this session another instruction…"
+        readOnly={props.disabled ? true : undefined}
         ref={promptRef}
+        value={props.prompt}
+        {...promptEvents(props)}
       />
       {renderSessionImages({
-        disabled: props.sending,
-        id: "follow-up-images",
         ...props,
+        disabled: props.disabled || props.sending,
+        id: "follow-up-images",
       })}
-      <div class="flex items-end gap-3">
+      <div class="flex flex-wrap items-end gap-3">
         <SessionSubmitButton
-          available={props.available}
+          availabilityDescriptionId={props.availabilityDescriptionId}
+          available={sendAvailable(props)}
           label={props.sending ? "Sending…" : "Send"}
-          pending={props.sending}
         />
-        <button
-          aria-keyshortcuts={shortcutKeys(SHORTCUT_ACTIONS.continueSession)}
-          class="self-end rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:opacity-50"
-          disabled={props.sending}
-          onClick={props.onContinue}
-          type="button"
-        >
-          Continue
-          <ShortcutHint action={SHORTCUT_ACTIONS.continueSession} />
-        </button>
+        <Show when={props.continueVisible}>
+          <button
+            aria-describedby={props.availabilityDescriptionId}
+            aria-keyshortcuts={shortcutKeys(SHORTCUT_ACTIONS.continueSession)}
+            aria-label="Continue without another instruction"
+            class="self-end rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!continueAvailable(props)}
+            onClick={props.onContinue}
+            type="button"
+          >
+            Continue without message
+            <ShortcutHint action={SHORTCUT_ACTIONS.continueSession} />
+          </button>
+        </Show>
       </div>
+      <p
+        aria-live="polite"
+        class="text-xs leading-5 text-slate-500"
+        id={props.availabilityDescriptionId}
+        role="status"
+      >
+        {props.availabilityLabel}
+      </p>
     </form>
   );
 }

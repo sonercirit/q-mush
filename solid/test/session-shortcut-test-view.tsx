@@ -3,7 +3,10 @@ import { SessionFollowUp } from "../session-client-forms.tsx";
 export function SessionShortcutTestView() {
   return (
     <SessionFollowUp
-      available={true}
+      availabilityDescriptionId="session-composer-state"
+      availabilityLabel="Ready for another instruction."
+      continueVisible
+      disabled={false}
       images={[]}
       onAddImages={() => undefined}
       onContinue={() => undefined}

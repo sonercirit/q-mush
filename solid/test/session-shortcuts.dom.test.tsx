@@ -145,7 +145,12 @@ test("Cmd+Enter sends an available follow-up and ignores pending or composing in
   const registry = shortcutRegistry("mac");
   const container = mount(() => (
     <ShortcutProvider registry={registry}>
-      <SessionDetail controller={controller} state={reactive.state()} />
+      <SessionDetail
+        controller={controller}
+        credentialAvailable
+        runnerAvailable
+        state={reactive.state()}
+      />
     </ShortcutProvider>
   ));
   const prompt = queryTextarea(container, "textarea[name='prompt']");
@@ -200,7 +205,12 @@ test("Ctrl+Shift+Enter continues with or without follow-up input", () => {
   const registry = shortcutRegistry("other");
   const container = mount(() => (
     <ShortcutProvider registry={registry}>
-      <SessionDetail controller={controller} state={reactive.state()} />
+      <SessionDetail
+        controller={controller}
+        credentialAvailable
+        runnerAvailable
+        state={reactive.state()}
+      />
     </ShortcutProvider>
   ));
   const prompt = queryTextarea(container, "textarea[name='prompt']");

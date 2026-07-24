@@ -1,10 +1,4 @@
-import {
-  createEffect,
-  createMemo,
-  Show,
-  type Accessor,
-  type JSX,
-} from "solid-js";
+import { createEffect, createMemo, Show, type JSX } from "solid-js";
 import {
   reasoningEffortLabel,
   type AgentModelCatalog,
@@ -31,13 +25,20 @@ import type {
 } from "./provider-client.tsx";
 import { renderDebugBoundary } from "./render-debug.tsx";
 import type { RunnerViewState } from "./runner-client.tsx";
-import { SessionPromptInput } from "./session-client-forms.tsx";
+import {
+  SessionPromptInput,
+  SessionStartButton,
+} from "./session-client-forms.tsx";
 import { formatTokenCount } from "./session-context-client.tsx";
 import type { SessionController } from "./session-controller.ts";
 import { SessionDetail, SessionList } from "./session-detail-client.tsx";
+import type { SessionPanelResources } from "./session-panel-resources.ts";
+import {
+  selectedSessionCredentialAvailable,
+  selectedSessionRunnerAvailable,
+} from "./session-resource-availability.ts";
 import { SessionToolPicker } from "./session-tool-picker.tsx";
-import { ShortcutHint, shortcutKeys } from "./shortcut-client.tsx";
-import { SHORTCUT_ACTIONS } from "./shortcut-registry.ts";
+import type { SessionTranscriptFilters } from "./session-transcript-filters.ts";
 
 export interface SessionDraft {
   readonly credential: string;
@@ -74,6 +75,7 @@ export interface SessionViewState {
   readonly sending: boolean;
   readonly sessions: readonly AgentSessionSummary[] | undefined;
   readonly stopping: boolean;
+  readonly transcriptFilters: SessionTranscriptFilters;
 }
 
 interface CredentialOption {
@@ -136,13 +138,6 @@ function renderSessionField(
       {control}
     </div>
   );
-}
-
-function sessionHasInput(
-  prompt: string,
-  images: readonly AgentImage[],
-): boolean {
-  return prompt.trim().length > 0 || images.length > 0;
 }
 
 interface SessionControlOptions {
@@ -331,22 +326,18 @@ function NewSessionForm(props: {
   const resourcesAvailable = createMemo(
     () => runners().length > 0 && credentials().length > 0,
   );
-  const validConfiguration = createMemo(
+  const hasInput = createMemo(
     () =>
-      resourcesAvailable() &&
-      selectedRunnerId().length > 0 &&
-      credential() !== undefined &&
-      models().length > 0,
+      props.state.draft.prompt.trim() !== "" ||
+      props.state.draft.images.length > 0,
   );
   const available = createMemo(
     () =>
-      validConfiguration() &&
-      sessionHasInput(props.state.draft.prompt, props.state.draft.images),
+      resourcesAvailable() &&
+      selectedRunnerId() !== "" &&
+      credential() !== undefined &&
+      models().length > 0,
   );
-
-  const setPrompt = (value: string): void => {
-    props.controller.setDraftField("prompt", value);
-  };
   const optionValues = (
     options: readonly CustomSelectOption[],
   ): readonly string[] => options.map(({ value }) => value);
@@ -480,13 +471,15 @@ function NewSessionForm(props: {
         tools={props.state.draft.tools}
       />
       <SessionPromptInput
-        available={validConfiguration()}
+        available={available()}
         disabled={props.state.creating}
         images={props.state.draft.images}
         onAddImages={(files) => {
-          props.controller.addImages(files, false).catch(() => undefined);
+          void props.controller.addImages(files, false);
         }}
-        onInput={setPrompt}
+        onInput={(value) => {
+          props.controller.setDraftField("prompt", value);
+        }}
         onRemoveImage={(index) => {
           props.controller.removeImage(index, "draft");
         }}
@@ -497,15 +490,10 @@ function NewSessionForm(props: {
           The model runs through Q Mush; file and shell tools run only on the
           selected runner.
         </p>
-        <button
-          aria-keyshortcuts={shortcutKeys(SHORTCUT_ACTIONS.startSession)}
-          class="shrink-0 rounded-xl bg-emerald-300 px-5 py-3 font-semibold text-slate-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={props.state.creating || !available()}
-          type="submit"
-        >
-          {props.state.creating ? "Starting…" : "Start session"}
-          <ShortcutHint action={SHORTCUT_ACTIONS.startSession} />
-        </button>
+        <SessionStartButton
+          available={available() && hasInput()}
+          pending={props.state.creating}
+        />
       </div>
       <Show when={!resourcesAvailable()}>
         <p class="text-sm text-amber-200 lg:col-span-2">
@@ -523,6 +511,9 @@ function NewSessionForm(props: {
 
 interface SessionResultsProps {
   readonly controller: SessionController;
+  readonly openAi: ProviderViewState;
+  readonly openRouter: ProviderViewState;
+  readonly runners: RunnerViewState;
 }
 
 function SessionResults(props: SessionResultsProps): JSX.Element {
@@ -533,18 +524,27 @@ function SessionResults(props: SessionResultsProps): JSX.Element {
         <SessionList controller={props.controller} />
       </aside>
       <div class="min-w-0 rounded-2xl border border-white/10 bg-slate-900/70 p-5">
-        <SessionDetail controller={props.controller} state={state()} />
+        <SessionDetail
+          controller={props.controller}
+          credentialAvailable={selectedSessionCredentialAvailable(
+            state().detail,
+            props.openAi,
+            props.openRouter,
+          )}
+          runnerAvailable={selectedSessionRunnerAvailable(
+            state().detail,
+            props.runners,
+          )}
+          state={state()}
+        />
       </div>
     </div>
   );
 }
 
-export function SessionPanel(props: {
-  readonly controller: SessionController;
-  readonly openAi: Accessor<ProviderViewState>;
-  readonly openRouter: Accessor<ProviderViewState>;
-  readonly runners: Accessor<RunnerViewState>;
-}): JSX.Element {
+export function SessionPanel(
+  props: SessionPanelResources & { readonly controller: SessionController },
+): JSX.Element {
   const state = props.controller.view;
   const online = (): readonly RunnerSummary[] => onlineRunners(props.runners());
   const credentials = (): readonly CredentialOption[] =>
@@ -603,7 +603,12 @@ export function SessionPanel(props: {
             void props.controller.load();
           }}
         />
-        <SessionResults controller={props.controller} />
+        <SessionResults
+          controller={props.controller}
+          openAi={props.openAi()}
+          openRouter={props.openRouter()}
+          runners={props.runners()}
+        />
       </section>
       <DirectoryPicker
         controller={props.controller.directoryPicker}

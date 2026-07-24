@@ -58,6 +58,41 @@ function capturedToolNames(body: unknown): readonly unknown[] {
     : [];
 }
 
+function parallelToolUseSchema(
+  body: unknown,
+): Readonly<Record<string, unknown>> {
+  if (!isRecord(body) || !Array.isArray(body["tools"])) {
+    return {};
+  }
+  const tools: readonly unknown[] = body["tools"];
+  const parallel = tools.find((tool) => {
+    if (!isRecord(tool)) {
+      return false;
+    }
+    const definition = isRecord(tool["function"]) ? tool["function"] : tool;
+    return definition["name"] === "parallel";
+  });
+  if (!isRecord(parallel)) {
+    return {};
+  }
+  const definition = isRecord(parallel["function"])
+    ? parallel["function"]
+    : parallel;
+  const parameters = definition["parameters"];
+  if (!isRecord(parameters) || !isRecord(parameters["properties"])) {
+    return {};
+  }
+  const toolUses = parameters["properties"]["tool_uses"];
+  return isRecord(toolUses) ? toolUses : {};
+}
+
+function expectUnboundedParallelSchema(body: unknown): void {
+  const schema = parallelToolUseSchema(body);
+  expect(schema).toMatchObject({ minItems: 2, type: "array" });
+  expect(schema).not.toHaveProperty("maxItems");
+  expect(() => JSON.stringify(body)).not.toThrow();
+}
+
 function doneResponse(): unknown {
   return { choices: [{ message: { content: "Done." } }] };
 }
@@ -198,12 +233,23 @@ describe("chat completions agent model", () => {
       reasoning: { effort: "high", summary: "auto" },
       tool_choice: "auto",
     });
+    expectUnboundedParallelSchema(body);
     const serializedBody = JSON.stringify(body);
     expect(serializedBody).toContain('"edits"');
     expect(serializedBody).toContain('"tool_uses"');
     expect(serializedBody).toContain('"timeout"');
     expect(serializedBody).not.toContain("read_file");
     expect(serializedBody).not.toContain("list_files");
+  });
+
+  test("sends the unbounded schema through OpenAI Responses", async () => {
+    const capture = new RequestCapture();
+    const output = [DONE_CODEX_OUTPUT];
+    const model = capturedCodexModel(capture, codexEventResponse(output));
+
+    await completeHello(model);
+
+    expectUnboundedParallelSchema(await capturedBody(capture));
   });
 
   test("filters definitions to the selected tools and skills", async () => {
