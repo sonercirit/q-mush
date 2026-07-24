@@ -108,6 +108,21 @@ function connectedRunner(id: string, name: string): RunnerSummary {
   };
 }
 
+function runnerOptionQuery(
+  offset: number,
+  search?: string,
+): {
+  readonly limit: number;
+  readonly offset: number;
+  readonly search?: string;
+} {
+  return {
+    limit: 10,
+    offset,
+    ...(search === undefined ? {} : { search }),
+  };
+}
+
 function connectFirstRunner(setup: Setup): void {
   createRunner(setup);
   connect(setup, FIRST_TOKEN, "machine-fingerprint-one");
@@ -303,6 +318,50 @@ describe("runner connections", () => {
       connectedRunner(FIRST_RUNNER_ID, "workstation"),
       connectedRunner(THIRD_RUNNER_ID, "laptop"),
     ]);
+  });
+
+  test("paginates and searches only online runners", () => {
+    const setup = createSetup();
+    for (let index = 0; index < 3; index += 1) {
+      createRunner(setup);
+    }
+    connect(setup, FIRST_TOKEN, "machine-fingerprint-one", "Alpha desktop");
+    connect(setup, SECOND_TOKEN, "machine-fingerprint-two", "Beta laptop");
+    setup.setNow(TEST_NOW + 60_000);
+    const third = connect(
+      setup,
+      THIRD_TOKEN,
+      "machine-fingerprint-three",
+      "Fresh alpha",
+    );
+    if (third !== undefined) {
+      setup.integration.seen(third.connection);
+    }
+
+    expect(
+      setup.integration.listOnlineForUser(TEST_USER_ID, runnerOptionQuery(0)),
+    ).toEqual({
+      items: [
+        {
+          ...connectedRunner(THIRD_RUNNER_ID, "Fresh alpha"),
+          lastSeenAt: TEST_NOW + 60_000,
+        },
+      ],
+      totalItems: 1,
+    });
+    expect(
+      setup.integration.listOnlineForUser(
+        TEST_USER_ID,
+        runnerOptionQuery(0, "ALPHA"),
+      ),
+    ).toMatchObject({ items: [{ id: THIRD_RUNNER_ID }], totalItems: 1 });
+    expect(
+      setup.integration.listOnlineForUser(
+        TEST_USER_ID,
+        runnerOptionQuery(1, "alpha"),
+      ),
+    ).toEqual({ items: [], totalItems: 1 });
+    setup.database.$client.close();
   });
 
   test("uses WebSocket activity to report online state", async () => {

@@ -7,6 +7,7 @@ import {
 import { ProviderCredentialStore } from "../shared/provider-credential-store.ts";
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
+import { safeAgentModelDiscoveryError } from "./agent-model-discovery.ts";
 import { createJsonResponse } from "./http.ts";
 import {
   responseToolOutput,
@@ -15,6 +16,7 @@ import {
   type SessionAgentActionDependencies,
 } from "./session-agent-action-helpers.ts";
 import {
+  SESSION_OPTIONS_PAGE_SIZE,
   sessionOptionsOutput,
   type GetSessionOptionsToolInput,
   type SessionOptionsSource,
@@ -29,13 +31,25 @@ import {
   type SpawnSessionToolInput,
 } from "./session-agent-tools.ts";
 import { unavailableSessionResponse } from "./session-availability.ts";
+import { readSessionSnapshot } from "./session-store-agent-read.ts";
 import type { PendingSpawnedSession } from "./session-store-spawns.ts";
+
+const optionsPageOffset = (page: number): number =>
+  (page - 1) * SESSION_OPTIONS_PAGE_SIZE;
 
 interface SessionAgentActionsDependencies extends SessionAgentActionDependencies {
   readonly abortSession: (sessionId: string) => void;
   readonly activeSession: (sessionId: string) => boolean;
   readonly broker: Pick<RunnerCommandBroker, "cancelSession">;
-  readonly listRunners: (userId: string) => SessionOptionsSource["runners"];
+  readonly listRunnerOptions: (
+    userId: string,
+    offset: number,
+    limit: number,
+    search?: string,
+  ) => {
+    readonly items: SessionOptionsSource["runners"];
+    readonly totalItems: number;
+  };
 }
 
 export class SessionAgentActions {
@@ -164,10 +178,23 @@ export class SessionAgentActions {
   }
 
   #read(userId: string, input: ReadSessionToolInput): string {
-    const detail = this.#detail(userId, input.sessionId);
+    const selected = new Set(input.categories);
+    const detail = readSessionSnapshot(this.#dependencies.database, {
+      includeSystem: selected.has("system"),
+      limit: input.limit,
+      roles: (["user", "assistant"] as const).filter((role) =>
+        selected.has(role),
+      ),
+      sessionId: input.sessionId,
+      userId,
+    });
+    if (detail === undefined) {
+      throw new Error("Session not found");
+    }
     return readSessionOutput({
       input,
-      messages: detail.messages,
+      matchedRecords: detail.transcript.matchedRecords,
+      messages: detail.transcript.messages,
       session: { id: detail.id, status: detail.status, title: detail.title },
       systemPrompt: createAgentSystemPrompt(detail.agentFile),
       toolDefinitions: selectedAgentTools(detail.tools).map(
@@ -190,32 +217,72 @@ export class SessionAgentActions {
     ) {
       const provider = input.provider;
       const credentialId = input.credentialId;
+      if (
+        !ProviderCredentialStore.hasActiveModelCredential(
+          this.#dependencies.database,
+          userId,
+          provider,
+          credentialId,
+        )
+      ) {
+        throw new Error("The model credential or provider is unavailable");
+      }
+      let credential;
       try {
-        const credential = await this.#dependencies.readCredential(userId, {
+        credential = await this.#dependencies.readCredential(userId, {
           credentialId,
           provider,
         });
-        if (credential === undefined) {
-          throw new Error("The credential is unavailable");
-        }
+      } catch {
+        throw new Error("The model credential or provider is unavailable");
+      }
+      if (credential?.id !== credentialId) {
+        throw new Error("The model credential or provider is unavailable");
+      }
+      try {
         const catalog = await this.#dependencies.discoverModels(
           provider,
           credential,
         );
         models = catalog.models;
         reasoningEfforts = [];
-      } catch {
-        throw new Error("The model credential or provider is unavailable");
+      } catch (error) {
+        throw new Error(safeAgentModelDiscoveryError(error), { cause: error });
       }
     }
+    const offset = optionsPageOffset(input.page);
+    const credentialPage =
+      input.category === "credentials"
+        ? ProviderCredentialStore.listModelCredentials(
+            this.#dependencies.database,
+            userId,
+            offset,
+            SESSION_OPTIONS_PAGE_SIZE,
+            input.search,
+          )
+        : undefined;
+    const runnerPage =
+      input.category === "runners"
+        ? this.#dependencies.listRunnerOptions(
+            userId,
+            offset,
+            SESSION_OPTIONS_PAGE_SIZE,
+            input.search,
+          )
+        : undefined;
     return sessionOptionsOutput(input, {
-      credentials: ProviderCredentialStore.listModelCredentials(
-        this.#dependencies.database,
-        userId,
-      ),
+      credentials: credentialPage?.items ?? [],
       models,
+      ...(credentialPage === undefined && runnerPage === undefined
+        ? {}
+        : {
+            page: {
+              totalItems:
+                credentialPage?.totalItems ?? runnerPage?.totalItems ?? 0,
+            },
+          }),
       reasoningEfforts,
-      runners: this.#dependencies.listRunners(userId),
+      runners: runnerPage?.items ?? [],
       tools: AGENT_SESSION_TOOL_OPTIONS,
     });
   }

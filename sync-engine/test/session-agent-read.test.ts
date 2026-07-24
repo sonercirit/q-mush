@@ -53,6 +53,24 @@ function message(
   };
 }
 
+function messageList(
+  length: number,
+  role: AgentSessionMessage["role"],
+  content: (index: number) => string,
+): readonly AgentSessionMessage[] {
+  return Array.from({ length }, (_, index) =>
+    message(`message-${String(index + 1)}`, role, content(index)),
+  );
+}
+
+function readSession(options: Parameters<typeof readSessionOutput>[0]): {
+  readonly parsed: Readonly<Record<string, unknown>>;
+  readonly serialized: string;
+} {
+  const serialized = readSessionOutput(options);
+  return { parsed: jsonRecord(serialized), serialized };
+}
+
 function output(
   input: Partial<ReadSessionToolInput> = {},
   messages: readonly AgentSessionMessage[] = [
@@ -62,6 +80,7 @@ function output(
     message("message-4", "tool", "tool-history result"),
     message("message-5", "user", "last user"),
   ],
+  matchedRecords?: number,
 ): Readonly<Record<string, unknown>> {
   return testRecord(
     parseTestJson(
@@ -72,6 +91,7 @@ function output(
           sessionId: SESSION.id,
           ...input,
         },
+        ...(matchedRecords === undefined ? {} : { matchedRecords }),
         messages,
         session: SESSION,
         systemPrompt: "base prompt\nworkspace instructions",
@@ -150,20 +170,75 @@ describe("bounded session reads", () => {
       truncated: true,
       truncation: { limit: true },
     });
-    expect(JSON.stringify(read)).not.toContain("private reasoning");
-    expect(JSON.stringify(read)).not.toContain("tool-history result");
-    expect(JSON.stringify(read)).not.toContain("tool-history");
+    const serializedRead = JSON.stringify(read);
+    expect(serializedRead).not.toContain("private reasoning");
+    expect(serializedRead).not.toContain("tool-history result");
+    expect(serializedRead).not.toContain("tool-history");
+  });
+
+  test("counts limit truncation even when the store prelimits records", () => {
+    const read = output(
+      { limit: 2 },
+      [
+        message("message-4", "assistant", "fourth"),
+        message("message-5", "user", "fifth"),
+      ],
+      5,
+    );
+
+    const readMetadata = metadata(read);
+    expect(readMetadata).toMatchObject({
+      matchedRecords: 5,
+      requestedLimit: 2,
+      returnedRecords: 2,
+      truncation: { limit: true },
+      truncated: true,
+    });
+  });
+
+  test("reports records dropped to satisfy the total output byte cap", () => {
+    const serialized = readSessionOutput({
+      input: {
+        categories: ["user"],
+        limit: 10,
+        sessionId: SESSION.id,
+      },
+      messages: Array.from({ length: 10 }, (_, index) =>
+        message(
+          `aggregate-${String(index + 1)}`,
+          "user",
+          `${String(index)}:${"x".repeat(3_900)}`,
+        ),
+      ),
+      session: SESSION,
+      systemPrompt: "",
+      toolDefinitions: [],
+    });
+    const read = jsonRecord(serialized);
+
+    expect(metadata(read)).toMatchObject({
+      matchedRecords: 10,
+      requestedLimit: 10,
+      returnedRecords: 8,
+      truncated: true,
+      truncation: {
+        characterCap: false,
+        limit: false,
+        outputBytes: true,
+        records: true,
+      },
+    });
+    expect(testNumber(metadata(read)["returnedRecords"])).toBeLessThan(10);
+    expect(Buffer.byteLength(serialized, "utf8")).toBeLessThanOrEqual(32_768);
   });
 
   test("caps records, prompt, definitions, and the serialized output", () => {
-    const hugeMessages = Array.from({ length: 100 }, (_, index) =>
-      message(
-        `message-${String(index + 1)}`,
-        "user",
-        `record-${String(index)}:${"x".repeat(20_000)}`,
-      ),
+    const hugeMessages = messageList(
+      100,
+      "user",
+      (index) => `record-${String(index)}:${"x".repeat(20_000)}`,
     );
-    const serialized = readSessionOutput({
+    const bounded = readSession({
       input: {
         categories: ["system", "user", "tools"],
         limit: 100,
@@ -178,15 +253,48 @@ describe("bounded session reads", () => {
         parameters: { properties: {}, required: [], type: "object" },
       })),
     });
-    const read = jsonRecord(serialized);
-    const truncation = testRecord(metadata(read)["truncation"]);
+    const { parsed: read, serialized } = bounded;
+    const capMetadata = metadata(read);
+    const truncation = testRecord(capMetadata["truncation"]);
 
-    expect(serialized.length).toBeLessThanOrEqual(32_768);
-    expect(metadata(read)["truncated"]).toBe(true);
+    expect(Buffer.byteLength(serialized, "utf8")).toBeLessThanOrEqual(32_768);
+    expect(capMetadata["truncated"]).toBe(true);
     expect(truncation["characterCap"]).toBe(true);
-    expect(testNumber(metadata(read)["returnedRecords"])).toBeLessThan(100);
-    expect(
-      testString(records(content(read)["records"])[0]?.["content"]),
-    ).toContain("[truncated]");
+    expect(testNumber(capMetadata["returnedRecords"])).toBeLessThan(100);
+    const firstRecord = records(content(read)["records"])[0];
+    expect(testString(firstRecord?.["content"])).toContain("[truncated]");
+  });
+
+  test("preserves Unicode boundaries and reports system truncation after records drop", () => {
+    const unicode = "😀".repeat(20_000);
+    const bounded = readSession({
+      input: {
+        categories: ["system", "user"],
+        limit: 100,
+        sessionId: SESSION.id,
+      },
+      matchedRecords: 101,
+      messages: messageList(100, "user", () => unicode),
+      session: SESSION,
+      systemPrompt: unicode,
+      toolDefinitions: [],
+    });
+    const { parsed: read, serialized } = bounded;
+    const readMetadata = metadata(read);
+    const truncation = testRecord(readMetadata["truncation"]);
+
+    const unicodeBytes = Buffer.byteLength(serialized, "utf8");
+    expect(unicodeBytes).toBeLessThanOrEqual(32_768);
+    expect(serialized).not.toContain("�");
+    expect(readMetadata).toMatchObject({
+      matchedRecords: 101,
+      requestedLimit: 100,
+      truncated: true,
+    });
+    expect(truncation).toMatchObject({
+      characterCap: true,
+      limit: true,
+      systemPrompt: true,
+    });
   });
 });

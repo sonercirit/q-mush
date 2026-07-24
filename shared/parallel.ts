@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { utf8Prefix } from "./utf8.ts";
 
 const PARALLEL_CALL_CONCURRENCY = 4;
 const MAXIMUM_PARALLEL_CHILD_OUTPUT_BYTES = 50 * 1_024;
@@ -197,19 +198,6 @@ export async function mapWithParallelConcurrency<Input, Output>(
   }
   ensureParallelActive(signal);
   return completedParallelResults(results);
-}
-
-function utf8Prefix(value: string, maximumBytes: number): string {
-  const bytes = Buffer.from(value, "utf8");
-  if (bytes.byteLength <= maximumBytes) {
-    return value;
-  }
-
-  let end = Math.max(0, maximumBytes);
-  while (end > 0 && (bytes[end] ?? 0) >> 6 === 2) {
-    end -= 1;
-  }
-  return bytes.subarray(0, end).toString("utf8");
 }
 
 function truncateParallelText(value: string, maximumBytes: number): string {

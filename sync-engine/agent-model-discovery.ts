@@ -1,5 +1,6 @@
 import {
   AGENT_REASONING_EFFORTS,
+  MAXIMUM_AGENT_MODEL_OPTIONS,
   defaultAgentModel,
   isAgentModelId,
   isAgentReasoningEffort,
@@ -13,6 +14,7 @@ import type {
   ProviderId,
 } from "../shared/provider-credential-store.ts";
 import type { ProviderModelPricing } from "../shared/provider-model-pricing.ts";
+import { utf8Prefix } from "../shared/utf8.ts";
 import {
   agentProviderRequestHeaders,
   type AgentProviderCredential,
@@ -23,6 +25,13 @@ const OPENAI_CODEX_MODELS_URL = "https://chatgpt.com/backend-api/codex/models";
 const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models/user";
 const MODEL_CLIENT_VERSION = "1.0.0";
 const MAXIMUM_RESPONSE_LENGTH = 5 * 1024 * 1024;
+const MAXIMUM_MODEL_LABEL_BYTES = 300;
+const MAXIMUM_MODEL_METADATA_ITEMS = 20;
+const MAXIMUM_MODEL_METADATA_INPUT_ITEMS = 100;
+const MAXIMUM_MODEL_METADATA_TEXT_BYTES = 100;
+const MODEL_CATALOG_TOO_LARGE = "The provider model catalog was too large";
+const MODEL_CATALOG_HAS_TOO_MANY_OPTIONS =
+  "The provider model catalog has too many options";
 const INCOMPATIBLE_OPENAI_MODEL_MARKERS = [
   "audio",
   "computer-use",
@@ -49,25 +58,51 @@ interface PrioritizedModel {
   readonly priority: number;
 }
 
+class AgentModelDiscoveryError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AgentModelDiscoveryError";
+  }
+}
+
+function modelDiscoveryError(message: string): AgentModelDiscoveryError {
+  return new AgentModelDiscoveryError(message);
+}
+
+export function safeAgentModelDiscoveryError(error: unknown): string {
+  return error instanceof AgentModelDiscoveryError
+    ? error.message
+    : "Model discovery failed because the provider is unavailable";
+}
+
 function modelLabel(value: unknown, fallback: string): string {
   return typeof value === "string" && value.trim().length > 0
-    ? value.trim().slice(0, 200)
+    ? utf8Prefix(value.trim(), MAXIMUM_MODEL_LABEL_BYTES)
     : fallback;
 }
 
+function boundedArray(value: unknown): readonly unknown[] | undefined {
+  return Array.isArray(value)
+    ? value.slice(0, MAXIMUM_MODEL_METADATA_INPUT_ITEMS)
+    : undefined;
+}
+
 function reasoningEfforts(value: unknown): readonly AgentReasoningEffort[] {
-  if (!Array.isArray(value)) {
+  const candidates = boundedArray(value);
+  if (candidates === undefined) {
     return [];
   }
 
   const efforts: AgentReasoningEffort[] = [];
-  const items: readonly unknown[] = value;
 
-  for (const item of items) {
+  for (const item of candidates) {
     const effort = isRecord(item) ? item["effort"] : item;
 
     if (isAgentReasoningEffort(effort) && !efforts.includes(effort)) {
       efforts.push(effort);
+      if (efforts.length === AGENT_REASONING_EFFORTS.length) {
+        break;
+      }
     }
   }
 
@@ -75,18 +110,27 @@ function reasoningEfforts(value: unknown): readonly AgentReasoningEffort[] {
 }
 
 function uniqueStrings(value: unknown): readonly string[] | null {
-  if (!Array.isArray(value)) {
+  const candidates = boundedArray(value);
+  if (candidates === undefined) {
     return null;
   }
 
-  const items: readonly unknown[] = value;
-  return [
-    ...new Set(
-      items.filter(
-        (item): item is string => typeof item === "string" && item.length > 0,
-      ),
-    ),
-  ];
+  const selected: string[] = [];
+  const seen = new Set<string>();
+  for (const item of candidates) {
+    if (selected.length >= MAXIMUM_MODEL_METADATA_ITEMS) {
+      break;
+    }
+    if (typeof item !== "string" || item.length === 0) {
+      continue;
+    }
+    const bounded = utf8Prefix(item, MAXIMUM_MODEL_METADATA_TEXT_BYTES);
+    if (bounded.length > 0 && !seen.has(bounded)) {
+      seen.add(bounded);
+      selected.push(bounded);
+    }
+  }
+  return selected;
 }
 
 function nestedValue(
@@ -146,11 +190,17 @@ function modelPricing(value: unknown): ProviderModelPricing | null {
   ): void => {
     for (const key of keys) {
       const price = value[key];
+      const boundedPrice =
+        typeof price === "string"
+          ? utf8Prefix(price.trim(), MAXIMUM_MODEL_METADATA_TEXT_BYTES)
+          : price;
       if (
-        (typeof price === "string" && price.trim().length > 0) ||
-        (typeof price === "number" && Number.isFinite(price) && price >= 0)
+        (typeof boundedPrice === "string" && boundedPrice.length > 0) ||
+        (typeof boundedPrice === "number" &&
+          Number.isFinite(boundedPrice) &&
+          boundedPrice >= 0)
       ) {
-        pricing[target] = price;
+        pricing[target] = boundedPrice;
         return;
       }
     }
@@ -221,11 +271,15 @@ function createCatalog(
 }
 
 function providerModelList(value: unknown, key: string): readonly unknown[] {
-  return readRequiredArray(
+  const items = readRequiredArray(
     value,
     key,
     "The provider returned an invalid model catalog",
   );
+  if (items.length > MAXIMUM_AGENT_MODEL_OPTIONS) {
+    throw modelDiscoveryError(MODEL_CATALOG_HAS_TOO_MANY_OPTIONS);
+  }
+  return items;
 }
 
 function readCodexCatalog(value: unknown): AgentModelCatalog {
@@ -260,15 +314,18 @@ function readCodexCatalog(value: unknown): AgentModelCatalog {
   return createCatalog(models.map(({ model }) => model));
 }
 
-function stringList(value: unknown): readonly string[] {
-  return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === "string")
-    : [];
+function supportsParameter(value: unknown, parameter: string): boolean {
+  return (
+    Array.isArray(value) &&
+    value
+      .slice(0, MAXIMUM_MODEL_METADATA_INPUT_ITEMS)
+      .some((item) => item === parameter)
+  );
 }
 
 function openRouterReasoningEfforts(
   value: Readonly<Record<string, unknown>>,
-  supportedParameters: readonly string[],
+  supportedParameters: unknown,
 ): readonly AgentReasoningEffort[] {
   const reasoning = value["reasoning"];
 
@@ -284,8 +341,8 @@ function openRouterReasoningEfforts(
     }
   }
 
-  return supportedParameters.includes("reasoning") ||
-    supportedParameters.includes("reasoning_effort")
+  return supportsParameter(supportedParameters, "reasoning") ||
+    supportsParameter(supportedParameters, "reasoning_effort")
     ? AGENT_REASONING_EFFORTS
     : [];
 }
@@ -301,9 +358,9 @@ function readOpenRouterCatalog(
       continue;
     }
 
-    const supportedParameters = stringList(item["supported_parameters"]);
+    const supportedParameters = item["supported_parameters"];
 
-    if (!supportedParameters.includes("tools")) {
+    if (!supportsParameter(supportedParameters, "tools")) {
       continue;
     }
 
@@ -368,7 +425,7 @@ function readOpenAiCatalog(
 
 async function readProviderResponse(response: Response): Promise<unknown> {
   if (!response.ok) {
-    throw new Error(
+    throw modelDiscoveryError(
       `Model discovery failed with status ${String(response.status)}`,
     );
   }
@@ -379,20 +436,40 @@ async function readProviderResponse(response: Response): Promise<unknown> {
     Number.isFinite(declaredLength) &&
     declaredLength > MAXIMUM_RESPONSE_LENGTH
   ) {
-    throw new Error("The provider model catalog was too large");
+    throw modelDiscoveryError(MODEL_CATALOG_TOO_LARGE);
   }
 
-  const body = await response.text();
-
-  if (body.length > MAXIMUM_RESPONSE_LENGTH) {
-    throw new Error("The provider model catalog was too large");
+  const reader = response.body?.getReader();
+  if (reader === undefined) {
+    return null;
+  }
+  const bytes = Buffer.allocUnsafe(MAXIMUM_RESPONSE_LENGTH);
+  let length = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      if (length + value.byteLength > MAXIMUM_RESPONSE_LENGTH) {
+        await reader.cancel().catch(() => undefined);
+        throw modelDiscoveryError(MODEL_CATALOG_TOO_LARGE);
+      }
+      bytes.set(value, length);
+      length += value.byteLength;
+    }
+  } finally {
+    reader.releaseLock();
   }
 
   try {
+    const body = new TextDecoder("utf-8", { fatal: true }).decode(
+      bytes.subarray(0, length),
+    );
     const value: unknown = JSON.parse(body);
     return value;
   } catch {
-    throw new Error("The provider returned an invalid model catalog");
+    throw modelDiscoveryError("The provider returned an invalid model catalog");
   }
 }
 
@@ -424,15 +501,19 @@ export async function discoverAgentModels(
   credential: ProviderCredentialAccess,
   fetch: AgentModelDiscoveryFetch = (request) => globalThis.fetch(request),
 ): Promise<AgentModelCatalog> {
-  const value = await readProviderResponse(
-    await fetch(discoveryRequest(provider, credential)),
-  );
+  try {
+    const value = await readProviderResponse(
+      await fetch(discoveryRequest(provider, credential)),
+    );
 
-  if (provider === "openrouter") {
-    return readOpenRouterCatalog(value, credential);
+    if (provider === "openrouter") {
+      return readOpenRouterCatalog(value, credential);
+    }
+
+    return credential.source === "oauth"
+      ? readCodexCatalog(value)
+      : readOpenAiCatalog(value, credential);
+  } catch (error) {
+    throw modelDiscoveryError(safeAgentModelDiscoveryError(error));
   }
-
-  return credential.source === "oauth"
-    ? readCodexCatalog(value)
-    : readOpenAiCatalog(value, credential);
 }

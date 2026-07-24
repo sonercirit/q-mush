@@ -1,14 +1,16 @@
-import { and, asc, eq, not, type SQL } from "drizzle-orm";
+import { and, asc, count, eq, not, or, sql, type SQL } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import {
   createdAuditFields,
   softDeletedAuditFields,
   updatedAuditFields,
 } from "../shared/audit.ts";
+import { escapedLikePattern, lowerLike } from "../shared/database-search.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { runners } from "../shared/database/schema.ts";
 import { defaultValues } from "../shared/default-store.ts";
 import { createUuidV7, type IdGenerator } from "../shared/ids.ts";
+import { validPageWindow } from "../shared/pagination.ts";
 import {
   createPendingRunnerSummary,
   type RunnerStatus,
@@ -16,6 +18,11 @@ import {
 } from "../shared/runner-model.ts";
 
 const RUNNER_ONLINE_WINDOW_MILLISECONDS = 45_000;
+
+export interface RunnerPage {
+  readonly items: readonly RunnerSummary[];
+  readonly totalItems: number;
+}
 
 export interface RunnerConnection {
   readonly id: string;
@@ -69,6 +76,31 @@ function activeRunnerCondition(
   );
 }
 
+function onlineRunnerCondition(
+  userId: string,
+  now: number,
+  search?: string,
+): SQL | undefined {
+  const online = and(
+    activeRunnerCondition({ userId }),
+    sql`${runners.machineFingerprint} IS NOT NULL`,
+    sql`${runners.lastSeenAt} >= ${now - RUNNER_ONLINE_WINDOW_MILLISECONDS}`,
+  );
+  if (search === undefined) {
+    return online;
+  }
+  const pattern = escapedLikePattern(search);
+  return and(
+    online,
+    or(
+      lowerLike(runners.id, pattern),
+      lowerLike(runners.name, pattern),
+      lowerLike(runners.platform, pattern),
+      lowerLike(runners.architecture, pattern),
+    ),
+  );
+}
+
 function defaultRunnerCondition(userId: string): SQL | undefined {
   return and(
     eq(runners.userId, userId),
@@ -110,6 +142,13 @@ function summarizeRunner(
   };
 }
 
+function summarizeRunners(
+  rows: readonly StoredRunnerSummary[],
+  now: number,
+): readonly RunnerSummary[] {
+  return rows.map((runner) => summarizeRunner(runner, now));
+}
+
 function runnerSummarySelection() {
   return {
     architecture: runners.architecture,
@@ -128,6 +167,14 @@ function runnerIdentitySelection() {
     machineFingerprint: runners.machineFingerprint,
     userId: runners.userId,
   };
+}
+
+function orderedRunnerQuery(database: AppDatabase, condition: SQL | undefined) {
+  return database
+    .select(runnerSummarySelection())
+    .from(runners)
+    .where(condition)
+    .orderBy(asc(runners.createdAt), asc(runners.id));
 }
 
 export class RunnerStore {
@@ -226,13 +273,40 @@ export class RunnerStore {
   }
 
   list(userId: string, now: number): readonly RunnerSummary[] {
-    return this.#database
-      .select(runnerSummarySelection())
-      .from(runners)
-      .where(activeRunnerCondition({ userId }))
-      .orderBy(asc(runners.createdAt), asc(runners.id))
-      .all()
-      .map((runner) => summarizeRunner(runner, now));
+    return summarizeRunners(
+      orderedRunnerQuery(
+        this.#database,
+        activeRunnerCondition({ userId }),
+      ).all(),
+      now,
+    );
+  }
+
+  listOnline(
+    userId: string,
+    now: number,
+    offset: number,
+    limit: number,
+    search?: string,
+  ): RunnerPage {
+    if (!validPageWindow(offset, limit)) {
+      throw new Error("The runner page is invalid");
+    }
+    const condition = onlineRunnerCondition(userId, now, search);
+    const totalItems =
+      this.#database
+        .select({ value: count() })
+        .from(runners)
+        .where(condition)
+        .get()?.value ?? 0;
+    const items = summarizeRunners(
+      orderedRunnerQuery(this.#database, condition)
+        .limit(limit)
+        .offset(offset)
+        .all(),
+      now,
+    );
+    return { items, totalItems };
   }
 
   register(

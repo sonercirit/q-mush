@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
-import { readAgentFile, type AgentFile } from "../shared/agent-file.ts";
+import type { AgentFile } from "../shared/agent-file.ts";
 import type { AgentImage } from "../shared/agent-images.ts";
 import type {
   AgentConversationMessage,
@@ -22,6 +22,7 @@ import type {
 } from "../shared/session-model.ts";
 import { activeSessionDuration } from "../shared/session-timing.ts";
 import { compactStoredConversation } from "./session-compaction.ts";
+import { storedSessionAgentFile } from "./session-store-agent-file.ts";
 import {
   conversationFromMessages,
   parseProviderPricing,
@@ -276,7 +277,7 @@ export class SessionStore {
 
     return {
       ...summarizeSession(stored),
-      agentFile: this.#agentFile(sessionId),
+      agentFile: storedSessionAgentFile(this.#database, sessionId),
       messages: withInterruptedToolResults(
         storedSessionMessages(this.#database, sessionId),
         stored.status !== "queued" && stored.status !== "running",
@@ -609,11 +610,16 @@ export class SessionStore {
   ): void {
     this.#database.transaction((transaction) => {
       const session = requireStoredSession(
-        transaction
-          .select({ userId: agentSessions.userId })
-          .from(agentSessions)
-          .where(activeSessionCondition({ id: sessionId }))
-          .get(),
+        transaction.query.agentSessions
+          .findFirst({
+            columns: { userId: true },
+            where: (table, operations) =>
+              operations.and(
+                operations.eq(table.id, sessionId),
+                operations.eq(table.isDeleted, false),
+              ),
+          })
+          .sync(),
       );
 
       insertStoredMessage(transaction, message, {
@@ -636,24 +642,6 @@ export class SessionStore {
       .select(sessionSelection())
       .from(agentSessions)
       .where(activeSessionCondition(filter));
-  }
-
-  #agentFile(sessionId: string): AgentFile | null {
-    const condition = activeSessionCondition({ id: sessionId });
-    const stored = requireStoredSession(
-      this.#database
-        .select({
-          content: agentSessions.agentFileContent,
-          name: agentSessions.agentFileName,
-        })
-        .from(agentSessions)
-        .where(condition)
-        .get(),
-    );
-
-    return readAgentFile(
-      stored.content === null && stored.name === null ? null : stored,
-    );
   }
 
   #startActiveSession(sessionId: string, now: number): boolean {

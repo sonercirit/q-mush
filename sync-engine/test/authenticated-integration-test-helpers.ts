@@ -13,6 +13,7 @@ import {
 
 export const TEST_NOW = 1_700_000_000_000;
 export const TEST_USER_ID = "018bcfe5-6800-7000-8000-000000000021";
+export const TEST_FOREIGN_USER_ID = "018bcfe5-6800-7000-8000-000000000023";
 const SESSION_ID = "018bcfe5-6800-7000-8000-000000000022";
 const SESSION_TOKEN = "authenticated-session";
 
@@ -59,30 +60,52 @@ export function createAuthenticatedTestContext(): {
   return { auth, database };
 }
 
+export function addTestUser(
+  database: AppDatabase,
+  id = TEST_FOREIGN_USER_ID,
+): void {
+  database
+    .insert(users)
+    .values({
+      ...testAuditFields(SYSTEM_ID),
+      email: `${id}@example.test`,
+      googleSubject: `google-${id}`,
+      id,
+      name: "Test User",
+    })
+    .run();
+}
+
 export function addTestProviderCredential(
   database: AppDatabase,
   id: string,
   provider: "openai" | "openrouter" = "openai",
-  metadata: {
+  options: {
     readonly accountId?: string | null;
     readonly isDefault?: boolean;
+    readonly isDeleted?: boolean;
     readonly label?: string;
     readonly source?: "api_key" | "oauth";
+    readonly userId?: string;
   } = {},
 ): void {
+  const userId = options.userId ?? TEST_USER_ID;
   database
     .insert(providerCredentials)
     .values({
-      ...testAuditFields(),
+      ...testAuditFields(userId),
+      ...(options.isDeleted === undefined
+        ? {}
+        : { isDeleted: options.isDeleted }),
       credentialFingerprint: `fingerprint-${id}`,
       encryptedCredential: "test-encrypted-credential",
       id,
-      isDefault: metadata.isDefault ?? false,
-      label: metadata.label ?? "Test credential",
+      isDefault: options.isDefault ?? false,
+      label: options.label ?? "Test credential",
       provider,
-      providerAccountId: metadata.accountId ?? null,
-      source: metadata.source ?? "api_key",
-      userId: TEST_USER_ID,
+      providerAccountId: options.accountId ?? null,
+      source: options.source ?? "api_key",
+      userId,
     })
     .run();
 }

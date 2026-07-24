@@ -19,6 +19,7 @@ import {
   RunnerStore,
   type RunnerConnection,
   type RunnerMetadata,
+  type RunnerPage,
 } from "./runner-store.ts";
 
 const RUNNER_TOKEN_PATTERN = /^qmr_[A-Za-z\d_-]{8,200}$/u;
@@ -35,12 +36,19 @@ interface ConnectedRunner {
   readonly userId: string;
 }
 
+interface RunnerOptionQuery {
+  readonly limit: number;
+  readonly offset: number;
+  readonly search?: string;
+}
+
 export interface RunnerIntegration {
   collection(request: Request): Response;
   connect(token: string, metadata: RunnerMetadata): ConnectedRunner | undefined;
   disconnected(runner: RunnerConnection): void;
   installer(request: Request): Response;
   listForUser(userId: string): readonly RunnerSummary[];
+  listOnlineForUser(userId: string, query: RunnerOptionQuery): RunnerPage;
   remove(request: Request, runnerId: string): Response;
   runnerIsAvailable(userId: string, runnerId: string): boolean;
   runnerToken(request: Request): string | undefined;
@@ -151,6 +159,16 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
 
   listForUser(userId: string): readonly RunnerSummary[] {
     return this.#store.list(userId, this.#now());
+  }
+
+  listOnlineForUser(userId: string, query: RunnerOptionQuery): RunnerPage {
+    return this.#store.listOnline(
+      userId,
+      this.#now(),
+      query.offset,
+      query.limit,
+      query.search,
+    );
   }
 
   installer(request: Request): Response {

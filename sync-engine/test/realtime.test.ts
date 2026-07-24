@@ -53,6 +53,7 @@ function runners(
     disconnected: () => undefined,
     installer: () => new Response(),
     listForUser: () => [],
+    listOnlineForUser: () => ({ items: [], totalItems: 0 }),
     remove: () => new Response(),
     runnerIsAvailable: () => false,
     runnerToken: () => token,
