@@ -110,9 +110,8 @@ export function createOverlay(document: Document): RenderDebugOverlay {
   interactive.value = "button, input, select, textarea, a[href]";
   interactive.textContent = "Interactive";
   const transcript = document.createElement("option");
-  transcript.value =
-    "[data-session-transcript] > li:not(:first-child):not(:nth-child(2))";
-  transcript.textContent = "Transcript messages";
+  transcript.value = "[data-session-transcript] > li";
+  transcript.textContent = "Transcript items";
   filter.append(allElements, interactive, transcript);
   filterLabel.append(filter);
   const details = document.createElement("div");

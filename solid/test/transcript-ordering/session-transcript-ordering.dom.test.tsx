@@ -5,6 +5,7 @@ import {
   cleanupTestViews,
   mountTestTranscript,
   queryTestElement,
+  transcriptMessageElement,
   type MountedTestTranscript,
 } from "../session-dom-test-helpers.tsx";
 import { transcriptMessage } from "../transcript-ordering-fixtures.ts";
@@ -36,15 +37,9 @@ function itemHasLabel(item: Element, label: string): boolean {
 function messageItem(
   container: ParentNode,
   content: string,
-  label: "Agent" | "Thinking" | "You" = "You",
+  label?: "Agent" | "Thinking" | "You",
 ): Element {
-  const message = transcriptItems(container).find(
-    (item) => itemHasLabel(item, label) && item.textContent.includes(content),
-  );
-  if (message === undefined) {
-    throw new Error(`The transcript message ${content} was not rendered`);
-  }
-  return message;
+  return transcriptMessageElement(container, content, label);
 }
 
 function transientMessage(

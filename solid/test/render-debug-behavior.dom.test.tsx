@@ -70,6 +70,7 @@ test("drains queued observer records before disabling", () => {
   const root = appRoot();
   const output = appendElement(root, "p", "queued");
   const harness = enabledHarness(root);
+  const filter = selectElement("#render-debug-filter");
   const queued = createMutationRecord({
     attributeName: "aria-busy",
     target: output,
@@ -79,6 +80,9 @@ test("drains queued observer records before disabling", () => {
   harness.debug.toggle();
   expect(harness.observer.takeRecords).toHaveBeenCalledOnce();
   expect(harness.observer.disconnect).toHaveBeenCalledOnce();
+  expect(() => {
+    filter.dispatchEvent(new Event("input"));
+  }).not.toThrow();
   expect(harness.frames.pending()).toBe(0);
   expect(document.querySelector("#render-debug-overlay")).toBeNull();
   harness.observer.takeRecords.mockClear();

@@ -28,6 +28,7 @@ import {
   mountTestSessionDetail,
   mountTestView,
   queryTestElement,
+  restoreFetchAfterTest,
 } from "./session-dom-test-helpers.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 import {
@@ -109,9 +110,7 @@ function stubSessionRequests(catalog: AgentModelCatalog): void {
     },
     { preconnect: originalFetch.preconnect },
   );
-  disposals.push(() => {
-    globalThis.fetch = originalFetch;
-  });
+  restoreFetchAfterTest(originalFetch, disposals);
 }
 
 afterEach(cleanupTestViews(disposals));
@@ -333,7 +332,7 @@ test("session resources, drafts, realtime lists, and selected details update in 
   const openRouterState = createReactiveState<ProviderViewState>(
     createProviderViewState(undefined),
   );
-  const controller = new SessionController(sessionState);
+  const controller = new SessionController(sessionState, undefined, undefined);
   const modelLabel = "Reactive model";
   const primaryCredentialLabel = "Primary";
   stubSessionRequests({
@@ -391,6 +390,7 @@ test("session resources, drafts, realtime lists, and selected details update in 
 
   controller.applyRealtime([summaryFromDetail(TEST_SESSION_DETAIL)]);
   expect(container.textContent).toContain("Fix the app");
+  controller.setTranscriptFilter("systemPrompt", true);
   click(container, `[data-session-id='${TEST_SESSION_DETAIL.id}']`);
   const sessionPromptLabel = "System prompt";
   await vi.waitFor(() => {

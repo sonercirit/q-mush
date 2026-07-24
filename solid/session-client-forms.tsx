@@ -20,6 +20,9 @@ interface SessionPromptInputProps extends PromptEventProps, SessionImagesProps {
 }
 
 interface SessionFollowUpProps extends PromptEventProps, SessionImagesProps {
+  readonly availabilityDescriptionId: string;
+  readonly availabilityLabel: string;
+  readonly disabled: boolean;
   readonly onKeyDown: (
     event: KeyboardEvent & { readonly currentTarget: HTMLTextAreaElement },
   ) => void;
@@ -89,33 +92,49 @@ export function SessionPromptInput(
 export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
   return (
     <form
+      aria-label="Send another instruction"
       class="flex min-w-0 flex-1 flex-col gap-3"
+      data-session-composer="true"
       onSubmit={(event) => {
         event.preventDefault();
-        props.onSubmit();
+        if (!props.disabled) {
+          props.onSubmit();
+        }
       }}
     >
       <textarea
-        class="min-h-20 w-full resize-y rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none"
-        disabled={props.sending}
+        aria-describedby={props.availabilityDescriptionId}
+        aria-disabled={props.disabled}
+        aria-label="Follow-up instruction"
+        class="min-h-20 w-full resize-y rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
         name="prompt"
         onKeyDown={props.onKeyDown}
         placeholder="Give this session another instruction…"
+        readOnly={props.disabled ? true : undefined}
         value={props.prompt}
         {...promptEvents(props)}
       />
       {renderSessionImages({
-        disabled: props.sending,
-        id: "follow-up-images",
         ...props,
+        disabled: props.disabled,
+        id: "follow-up-images",
       })}
       <button
-        class="self-end rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:opacity-50"
-        disabled={props.sending}
+        aria-describedby={props.availabilityDescriptionId}
+        class="self-end rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+        disabled={props.disabled}
         type="submit"
       >
         {props.sending ? "Sending…" : "Send"}
       </button>
+      <p
+        aria-live="polite"
+        class="text-xs leading-5 text-slate-500"
+        id={props.availabilityDescriptionId}
+        role="status"
+      >
+        {props.availabilityLabel}
+      </p>
     </form>
   );
 }

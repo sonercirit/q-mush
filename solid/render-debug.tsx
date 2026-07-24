@@ -21,11 +21,17 @@ export class RenderDebugInstrumentation {
   readonly #highlights = new Map<Element, HTMLDivElement>();
   readonly #summaries = new Map<Element, MutationSummary>();
   readonly #pending = new Map<Element, MutationSummary>();
+  readonly #filterChanged = (): void => {
+    if (this.#filterControl !== undefined) {
+      this.#setFilter(this.#filterControl.value);
+    }
+  };
   readonly #setEnabled: Setter<boolean>;
   #animationFrame: number | undefined;
   #browserWindow: Window | undefined;
   #details: HTMLDivElement | undefined;
   #filter = "";
+  #filterControl: HTMLSelectElement | undefined;
   #highlightLayer: HTMLDivElement | undefined;
   #observer: MutationObserver | undefined;
   #overlay: HTMLDivElement | undefined;
@@ -110,11 +116,10 @@ export class RenderDebugInstrumentation {
     const overlay = createOverlay(root.ownerDocument);
     this.#details = overlay.details;
     this.#filter = overlay.filter.value;
+    this.#filterControl = overlay.filter;
     this.#highlightLayer = overlay.highlights;
     this.#overlay = overlay.root;
-    overlay.filter.addEventListener("input", () => {
-      this.#setFilter(overlay.filter.value);
-    });
+    overlay.filter.addEventListener("input", this.#filterChanged);
     body.append(overlay.root);
     const observer = new Observer((mutations) => {
       this.#recordMutations(mutations);
@@ -145,6 +150,7 @@ export class RenderDebugInstrumentation {
       true,
     );
     this.#browserWindow?.removeEventListener("resize", this.#viewportChanged);
+    this.#filterControl?.removeEventListener("input", this.#filterChanged);
     if (
       this.#animationFrame !== undefined &&
       this.#browserWindow !== undefined
@@ -159,6 +165,7 @@ export class RenderDebugInstrumentation {
     this.#browserWindow = undefined;
     this.#details = undefined;
     this.#filter = "";
+    this.#filterControl = undefined;
     this.#highlightLayer = undefined;
     this.#observer = undefined;
     this.#overlay = undefined;
