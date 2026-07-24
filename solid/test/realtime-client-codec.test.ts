@@ -7,6 +7,38 @@ function roundTrip(payload: Readonly<Record<string, unknown>>): unknown {
   return readRealtimeServerEvent(JSON.stringify(payload));
 }
 
+test("reads provider limit updates and snapshots", () => {
+  const limits = {
+    dimensions: [
+      {
+        key: "requests",
+        label: "Requests",
+        limit: 10,
+        remaining: 0,
+        resetAt: null,
+        unit: "requests",
+      },
+    ],
+    observedAt: 1_700_000_000_000,
+    provider: "openrouter",
+    source: "http_headers",
+    stale: false,
+    status: "available",
+  } as const;
+  expect(
+    roundTrip({
+      credentialId: "credential-1",
+      limits,
+      type: "provider_limits",
+    }),
+  ).toEqual({ credentialId: "credential-1", limits, type: "provider_limits" });
+  const snapshot = {
+    credentials: [{ credentialId: "credential-1", limits }],
+    type: "provider_limits_snapshot",
+  } as const;
+  expect(roundTrip(snapshot)).toEqual(snapshot);
+});
+
 test("reads complete session snapshots from realtime messages", () => {
   expect(roundTrip({ session: TEST_SESSION_DETAIL, type: "session" })).toEqual({
     session: TEST_SESSION_DETAIL,

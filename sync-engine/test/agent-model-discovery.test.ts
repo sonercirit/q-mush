@@ -10,12 +10,11 @@ import type {
   ProviderId,
 } from "../../shared/provider-credential-store.ts";
 import type { ProviderModelPricing } from "../../shared/provider-model-pricing.ts";
-import {
-  discoverAgentModels,
-  type AgentModelDiscoveryFetch,
-} from "../../sync-engine/agent-model-discovery.ts";
+import { discoverAgentModels } from "../../sync-engine/agent-model-discovery.ts";
 import { createJsonResponse } from "../../sync-engine/http.ts";
 import { createOpenAiOAuthSecret } from "./oauth-test-helpers.ts";
+
+type AgentModelDiscoveryFetch = (request: Request) => Promise<Response>;
 
 class RequestCapture {
   request?: Request;

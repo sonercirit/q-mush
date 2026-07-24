@@ -1,5 +1,6 @@
 import {
   createProviderViewState,
+  type ProviderCredential,
   type ProviderViewState,
 } from "../../solid/provider-client.tsx";
 import {
@@ -8,9 +9,17 @@ import {
 } from "../../solid/runner-client.tsx";
 
 export function providerViewState(
-  credentials: ProviderViewState["credentials"],
+  credentials:
+    | readonly (Omit<ProviderCredential, "limits"> &
+        Partial<Pick<ProviderCredential, "limits">>)[]
+    | undefined,
 ): ProviderViewState {
-  return createProviderViewState(credentials);
+  return createProviderViewState(
+    credentials?.map((credential) => ({
+      limits: { status: "unavailable" },
+      ...credential,
+    })),
+  );
 }
 
 export function runnerViewState(

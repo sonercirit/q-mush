@@ -23,6 +23,7 @@ export function numberedCredentials(): readonly ProviderCredential[] {
     id: `credential-${position}`,
     isDefault: false,
     label: `Credential ${position}`,
+    limits: { status: "unavailable" },
     source: "api_key",
   }));
 }

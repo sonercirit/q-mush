@@ -12,11 +12,13 @@ import type {
   ProviderCredentialAccess,
   ProviderId,
 } from "../shared/provider-credential-store.ts";
+import type { ProviderLimitObservation } from "../shared/provider-limits.ts";
 import type { ProviderModelPricing } from "../shared/provider-model-pricing.ts";
 import {
   agentProviderRequestHeaders,
   type AgentProviderCredential,
 } from "./agent-model.ts";
+import { createProviderLimitObserver } from "./provider-limit-observer.ts";
 
 const OPENAI_MODELS_URL = "https://api.openai.com/v1/models";
 const OPENAI_CODEX_MODELS_URL = "https://chatgpt.com/backend-api/codex/models";
@@ -37,11 +39,13 @@ const INCOMPATIBLE_OPENAI_MODEL_MARKERS = [
   "whisper",
 ] as const;
 
-export type AgentModelDiscoveryFetch = (request: Request) => Promise<Response>;
+type AgentModelDiscoveryFetch = (request: Request) => Promise<Response>;
 
 export type AgentModelDiscoverer = (
   provider: ProviderId,
   credential: ProviderCredentialAccess,
+  fetch?: AgentModelDiscoveryFetch,
+  observeLimits?: (observation: ProviderLimitObservation) => void,
 ) => Promise<AgentModelCatalog>;
 
 interface PrioritizedModel {
@@ -423,10 +427,18 @@ export async function discoverAgentModels(
   provider: ProviderId,
   credential: ProviderCredentialAccess,
   fetch: AgentModelDiscoveryFetch = (request) => globalThis.fetch(request),
+  observeLimits?: (observation: ProviderLimitObservation) => void,
 ): Promise<AgentModelCatalog> {
-  const value = await readProviderResponse(
-    await fetch(discoveryRequest(provider, credential)),
-  );
+  const response = await fetch(discoveryRequest(provider, credential));
+  if (observeLimits !== undefined) {
+    createProviderLimitObserver({
+      credentialSource: credential.source,
+      now: Date.now,
+      observe: observeLimits,
+      provider,
+    }).response(response);
+  }
+  const value = await readProviderResponse(response);
 
   if (provider === "openrouter") {
     return readOpenRouterCatalog(value, credential);

@@ -1,5 +1,7 @@
 import { createSignal, Show, type Accessor, type JSX } from "solid-js";
 import { isRecord } from "../shared/auth-model.ts";
+import { readProviderLimitState } from "../shared/provider-limits-codec.ts";
+import type { ProviderLimitState } from "../shared/provider-limits.ts";
 import {
   BRAVE_SEARCH_KEYS_PATH,
   OPENAI_CREDENTIALS_PATH,
@@ -10,6 +12,7 @@ import {
 import { RemovalButton } from "./client-controls.tsx";
 import { Collection } from "./collection.tsx";
 import { DefaultableActions } from "./defaultable-actions.tsx";
+import { RemainingLimits } from "./provider-limits-client.tsx";
 import { renderDebugBoundary } from "./render-debug.tsx";
 
 type BrowserProviderId = "brave-search" | "openai" | "openrouter";
@@ -19,6 +22,7 @@ export interface ProviderCredential {
   readonly id: string;
   readonly isDefault: boolean;
   readonly label: string;
+  readonly limits: ProviderLimitState;
   readonly source: "api_key" | "oauth";
 }
 
@@ -119,6 +123,7 @@ function readCredential(
   const id = value["id"];
   const label = value["label"];
   const isDefault = value["isDefault"];
+  const limits = readProviderLimitState(value["limits"]);
   const source = value["source"];
 
   if (
@@ -126,6 +131,7 @@ function readCredential(
     typeof id !== "string" ||
     typeof isDefault !== "boolean" ||
     typeof label !== "string" ||
+    limits === undefined ||
     (source !== "api_key" && source !== "oauth")
   ) {
     throw new Error(
@@ -133,7 +139,7 @@ function readCredential(
     );
   }
 
-  return { accountId, id, isDefault, label, source };
+  return { accountId, id, isDefault, label, limits, source };
 }
 
 export function readProviderCredentials(
@@ -202,7 +208,7 @@ function ProviderCredentialItem(props: CredentialItemProps): JSX.Element {
         `${props.configuration.name} credential: ${props.credential.label}`,
       )}
     >
-      <div class="min-w-0">
+      <div class="min-w-0 flex-1">
         <div class="flex flex-wrap items-center gap-2">
           <p class="truncate font-semibold text-white">
             {props.credential.label}
@@ -217,6 +223,9 @@ function ProviderCredentialItem(props: CredentialItemProps): JSX.Element {
           {props.credential.accountId ??
             props.configuration.accountIdUnavailable}
         </p>
+        <Show when={props.configuration.id !== "brave-search"}>
+          <RemainingLimits limits={props.credential.limits} />
+        </Show>
       </div>
       <CredentialActions {...props} />
     </li>

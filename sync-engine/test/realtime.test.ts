@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import type { AuthenticatedUser } from "../../shared/auth-model.ts";
+import type { ProviderLimitState } from "../../shared/provider-limits.ts";
 import { RUNNER_REALTIME_PATH } from "../../shared/routes.ts";
 import type { GoogleAuth } from "../../sync-engine/auth.ts";
 import { RealtimeHub } from "../../sync-engine/realtime-hub.ts";
@@ -8,7 +9,7 @@ import {
   type QmushWebSocketData,
 } from "../../sync-engine/realtime.ts";
 import type { RunnerIntegration } from "../../sync-engine/runners.ts";
-import type { SessionIntegration } from "../../sync-engine/sessions.ts";
+import type { SessionIntegration } from "../../sync-engine/session-integration.ts";
 
 const USER: AuthenticatedUser = {
   email: "mush@example.com",
@@ -117,6 +118,7 @@ function upgrade(
 
 interface TestSocket {
   readonly data: QmushWebSocketData;
+  readonly messages: string[];
   close(): void;
   publish(): number;
   send(): number;
@@ -128,14 +130,35 @@ function testSocket(data: QmushWebSocketData | undefined): TestSocket {
   if (data === undefined) {
     throw new Error("The test WebSocket did not upgrade");
   }
+  const messages: string[] = [];
   return {
     close: () => undefined,
     data,
+    messages,
     publish: () => 1,
-    send: () => 1,
+    send: (message?: string) => {
+      if (message !== undefined) {
+        messages.push(message);
+      }
+      return 1;
+    },
     subscribe: () => undefined,
     unsubscribe: () => undefined,
   };
+}
+
+function websocketOpen(
+  handler: Bun.WebSocketHandler<QmushWebSocketData>,
+  socket: TestSocket,
+): unknown {
+  const method: unknown = Reflect.get(handler, "open");
+  if (method === undefined) {
+    return undefined;
+  }
+  if (typeof method !== "function") {
+    throw new TypeError("The realtime open handler is invalid");
+  }
+  return Reflect.apply(method, undefined, [socket]);
 }
 
 function websocketMessage(
@@ -159,6 +182,43 @@ function expectUpgrade(
   expect(upgrade(realtime, path, server)).toBeUndefined();
   expect(server.data).toEqual(expected);
 }
+
+test("sends owner-scoped provider limit snapshots on authenticated refresh", () => {
+  const limitSnapshot: readonly {
+    readonly credentialId: string;
+    readonly limits: ProviderLimitState;
+  }[] = [
+    {
+      credentialId: "credential-1",
+      limits: { status: "unavailable" },
+    },
+  ];
+  const realtime = createRealtimeIntegration({
+    auth: auth(USER),
+    hub: new RealtimeHub(),
+    limits: (userId) => (userId === USER.id ? limitSnapshot : []),
+    runnerVersion: "runner-version",
+    runners: runners(undefined),
+    sessions: sessions(),
+  });
+  const server = new UpgradeServer();
+  expect(upgrade(realtime, "/api/realtime", server)).toBeUndefined();
+  const socket = testSocket(server.data);
+  websocketOpen(realtime.websocket, socket);
+  websocketMessage(
+    realtime.websocket,
+    socket,
+    JSON.stringify({ type: "refresh" }),
+  );
+
+  const messages = socket.messages.map((message): unknown =>
+    JSON.parse(message),
+  );
+  expect(messages).toContainEqual({
+    credentials: limitSnapshot,
+    type: "provider_limits_snapshot",
+  });
+});
 
 test("upgrades an authenticated browser realtime request", () => {
   expectUpgrade(integration(USER), "/api/realtime", {

@@ -46,6 +46,7 @@ export function completeProviderWebSocket(options: {
   readonly createSocket: ProviderWebSocketFactory;
   readonly headers: Readonly<Record<string, string>>;
   readonly onDelta?: (delta: ProviderTextDelta) => void;
+  readonly onEvent?: (event: unknown) => void;
   readonly signal?: AbortSignal;
   readonly url: string;
 }): Promise<AgentModelTurn> {
@@ -104,6 +105,7 @@ export function completeProviderWebSocket(options: {
       }
       try {
         const value: unknown = JSON.parse(messageText(event));
+        options.onEvent?.(value);
         accumulator.push(value);
         receivedEvent = true;
 

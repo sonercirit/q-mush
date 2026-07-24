@@ -2,6 +2,7 @@ import type { AgentFile } from "../shared/agent-file.ts";
 import type { AgentModel } from "../shared/agent-loop.ts";
 import { createAgentSystemPrompt } from "../shared/agent-prompt.ts";
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
+import type { ProviderLimitObservation } from "../shared/provider-limits.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import {
   AGENT_COMPACTION_SYSTEM_PROMPT,
@@ -20,6 +21,7 @@ interface AgentModelFactoryOptions extends Pick<
     readonly reset?: true;
     readonly thinking: string;
   }) => void;
+  readonly onLimits?: (observation: ProviderLimitObservation) => void;
   readonly systemPrompt: string;
 }
 
@@ -37,11 +39,13 @@ function modelOptions(
   credential: ProviderCredentialAccess,
   systemPrompt: string,
   onDelta?: AgentModelFactoryOptions["onDelta"],
+  onLimits?: AgentModelFactoryOptions["onLimits"],
 ): AgentModelFactoryOptions {
   return {
     credential,
     model: detail.model,
     ...(onDelta === undefined ? {} : { onDelta }),
+    ...(onLimits === undefined ? {} : { onLimits }),
     provider: detail.provider,
     providerPricing: detail.providerPricing,
     reasoningEffort: detail.reasoningEffort,
@@ -50,14 +54,19 @@ function modelOptions(
   };
 }
 
-export function createSessionAgentModels(options: {
+interface SessionAgentModelOptions {
   readonly agentFile: AgentFile | null;
   readonly credential: ProviderCredentialAccess;
   readonly detail: AgentSessionDetail;
   readonly factory: AgentModelFactory;
+  readonly observeLimits?: AgentModelFactoryOptions["onLimits"];
   readonly realtime: RealtimeHub | undefined;
   readonly userId: string;
-}): SessionAgentModels {
+}
+
+export function createSessionAgentModels(
+  options: SessionAgentModelOptions,
+): SessionAgentModels {
   const onDelta: AgentModelFactoryOptions["onDelta"] = (delta) => {
     try {
       options.realtime?.publishUser(options.userId, {
@@ -76,6 +85,7 @@ export function createSessionAgentModels(options: {
         options.credential,
         createAgentSystemPrompt(options.agentFile),
         onDelta,
+        options.observeLimits,
       ),
     ),
     createCompactor: () =>
@@ -85,6 +95,8 @@ export function createSessionAgentModels(options: {
             options.detail,
             options.credential,
             AGENT_COMPACTION_SYSTEM_PROMPT,
+            undefined,
+            options.observeLimits,
           ),
         ),
       ),

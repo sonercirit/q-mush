@@ -16,6 +16,7 @@ import type {
 } from "../shared/session-model.ts";
 import { activeSessionDuration } from "../shared/session-timing.ts";
 import { Collection } from "./collection.tsx";
+import { RemainingLimits } from "./provider-limits-client.tsx";
 import { SessionFollowUp } from "./session-client-forms.tsx";
 import type { SessionViewState } from "./session-client.tsx";
 import {
@@ -391,6 +392,7 @@ function LoadedSessionDetail(props: {
           <span class="mt-2 block">
             <SessionMetrics session={props.detail} />
           </span>
+          <RemainingLimits compact limits={props.detail.providerLimits} />
         </div>
         <div class="flex shrink-0 flex-wrap items-center gap-2">
           <button

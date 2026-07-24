@@ -5,10 +5,11 @@ import {
 import {
   ProviderCredentialStore,
   type ProviderCredentialAccess,
-  type ProviderCredentialDetails,
   type ProviderId,
 } from "../shared/provider-credential-store.ts";
+import type { ProviderLimitObservation } from "../shared/provider-limits.ts";
 import type { GoogleAuth } from "./auth.ts";
+
 import {
   ConnectedAccountOAuth,
   type ConnectedAccountOAuthConfiguration,
@@ -21,7 +22,12 @@ import {
   type OAuthEndpoints,
   type OAuthRuntime,
 } from "./oauth.ts";
-import { ProviderCredentialEndpoints } from "./provider-credentials.ts";
+import {
+  ProviderCredentialEndpoints,
+  type ReadCredentialDetails,
+} from "./provider-credentials.ts";
+import { ProviderLimitStore } from "./provider-limit-store.ts";
+import { ProviderLimitsService } from "./provider-limits-service.ts";
 
 export interface ProviderIntegration extends OAuthEndpoints {
   credentials(request: Request): Promise<Response>;
@@ -87,7 +93,7 @@ export function readProviderIntegrationConfiguration(
 type CredentialDetailsReader = (
   runtime: OAuthRuntime,
   apiKey: string,
-) => Promise<ProviderCredentialDetails>;
+) => ReturnType<ReadCredentialDetails>;
 
 export function createProviderIntegration(options: {
   readonly auth: GoogleAuth;
@@ -111,11 +117,26 @@ export function createProviderIntegration(options: {
           options.provider,
           runtime.generateId,
         );
+  const limits =
+    options.dependencies.limits ??
+    new ProviderLimitsService(
+      new ProviderLimitStore(runtime.database, runtime.generateId),
+      runtime.now,
+    );
+  const observeLimits = (
+    userId: string,
+    credentialId: string,
+    observation: ProviderLimitObservation,
+  ): void => {
+    limits.observe(userId, credentialId, observation);
+  };
   const credentials = new ProviderCredentialEndpoints({
     auth: options.auth,
     now: runtime.now,
+    observeLimits,
     readCredentialDetails: (apiKey) =>
       options.readCredentialDetails(runtime, apiKey),
+    readLimits: (userId, credentialId) => limits.read(userId, credentialId),
     store,
   });
   const baseOAuthConfiguration = options.createOAuthConfiguration(runtime);
@@ -152,7 +173,14 @@ export function createProviderIntegration(options: {
       preparedSecret,
       runtime.now(),
     );
-    return { ...credential, secret: preparedSecret };
+    return {
+      accountId: credential.accountId,
+      id: credential.id,
+      isDefault: credential.isDefault,
+      label: credential.label,
+      source: credential.source,
+      secret: preparedSecret,
+    };
   };
 
   return {

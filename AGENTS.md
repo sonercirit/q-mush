@@ -285,14 +285,13 @@ Living project memory; update durable information.
   OpenAI Responses WebSockets retry interruptions after deltas, which remain
   UI-only until persistence. Retries reset the browser stream; exhausted
   attempts use HTTP. Failures persist as non-replayed `error` messages.
+- Provider limits come only from ordinary provider traffic: OpenAI request/token
+  or Codex headers/events, and OpenRouter key metadata or error headers. Persist
+  only owner/credential-scoped safe values, publish them over authenticated
+  realtime, and mark them stale after 15 minutes; missing is not zero. Bun
+  exposes no provider WebSocket upgrade headers, and no refresh calls are made.
 - Shell commands require a positive timeout. On macOS/Linux each has a POSIX
   session; stop/timeout signals only its group, including descendants retaining
   pipes. Agent launches and runner commands otherwise have no application-owned
   turn, queue, or elapsed-time limits. Outside explicit or 95%-threshold
   compaction, providers replay the full conversation without a timeout.
-- Add each new runtime source root and executable entry to
-  `knip.production.config.ts`. Add standalone non-TypeScript build entries, such
-  as `solid/styles.css`, to both Knip configs; keep test files and test-support
-  directories out of production project patterns.
-- Put every test file under a directory named `test`; the directory may appear
-  at any depth, such as `scripts/test` or `apps/control-center/test`.

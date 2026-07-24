@@ -227,15 +227,17 @@ function readOpenAiAccountDetails(idToken: string): OpenAiAccountDetails {
 async function readCredentialDetails(
   runtime: OAuthRuntime,
   apiKey: string,
-): Promise<OpenAiAccountDetails> {
+): Promise<{ readonly details: OpenAiAccountDetails }> {
   const value = await readOpenAiApiKeyMetadata(runtime, apiKey);
   const accountId = readOptionalString(value, "id", "OpenAI");
   const name = readOptionalString(value, "name", "OpenAI");
   const email = readOptionalString(value, "email", "OpenAI");
 
   return {
-    accountId,
-    label: name ?? email ?? "OpenAI API key",
+    details: {
+      accountId,
+      label: name ?? email ?? "OpenAI API key",
+    },
   };
 }
 

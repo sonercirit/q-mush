@@ -1,4 +1,5 @@
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
+import type { ProviderLimitState } from "../shared/provider-limits.ts";
 import { REALTIME_PATH, RUNNER_REALTIME_PATH } from "../shared/routes.ts";
 import type { RunnerToolCommand } from "../shared/runner-command-broker.ts";
 import type { GoogleAuth } from "./auth.ts";
@@ -10,7 +11,7 @@ import {
 } from "./realtime-protocol.ts";
 import type { RunnerConnection, RunnerMetadata } from "./runner-store.ts";
 import { readRunnerMetadata, type RunnerIntegration } from "./runners.ts";
-import type { SessionIntegration } from "./sessions.ts";
+import type { SessionIntegration } from "./session-integration.ts";
 
 interface UserSocketData {
   readonly kind: "user";
@@ -28,6 +29,10 @@ export type QmushWebSocketData = RunnerSocketData | UserSocketData;
 interface RealtimeIntegrationOptions {
   readonly auth: GoogleAuth;
   readonly hub: RealtimeHub;
+  readonly limits?: (userId: string) => readonly {
+    readonly credentialId: string;
+    readonly limits: ProviderLimitState;
+  }[];
   readonly runnerVersion: string;
   readonly runners: RunnerIntegration;
   readonly sessions: SessionIntegration;
@@ -101,6 +106,12 @@ export function createRealtimeIntegration(
   const publishUserSnapshots = (userId: string): void => {
     publishRunners(userId);
     publishSessions(userId);
+    if (options.limits !== undefined) {
+      options.hub.publishUser(userId, {
+        credentials: options.limits(userId),
+        type: "provider_limits_snapshot",
+      });
+    }
   };
   options.sessions.onChange((userId, sessionId) => {
     const session = options.sessions.detailForUser(userId, sessionId);

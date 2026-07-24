@@ -1,5 +1,6 @@
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
 import type { ProviderCredentialDetails } from "../shared/provider-credential-store.ts";
+import type { ProviderLimitObservation } from "../shared/provider-limits.ts";
 import { APP_PATH } from "../shared/routes.ts";
 import {
   createCookie,
@@ -35,6 +36,7 @@ export interface CredentialExchangeRequest {
 
 export interface ConnectedAccountCredential {
   readonly details: ProviderCredentialDetails;
+  readonly limits?: ProviderLimitObservation;
   readonly secret: string;
 }
 
@@ -153,6 +155,7 @@ export class ConnectedAccountOAuth {
         user,
         credential.secret,
         credential.details,
+        credential.limits,
       );
       return this.#appRedirect(request, "connected", clearedCookies);
     } catch {

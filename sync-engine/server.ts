@@ -36,7 +36,7 @@ import type { RenderedPages } from "./pages.ts";
 import type { ProviderIntegration } from "./provider-integration.ts";
 import type { RunnerExecutableProvider } from "./runner-executable.ts";
 import type { RunnerIntegration } from "./runners.ts";
-import type { SessionIntegration } from "./sessions.ts";
+import type { SessionIntegration } from "./session-integration.ts";
 
 const CSS_HEADERS = { "content-type": "text/css; charset=utf-8" };
 const HTML_HEADERS = { "content-type": "text/html; charset=utf-8" };

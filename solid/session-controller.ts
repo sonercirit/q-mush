@@ -1,5 +1,6 @@
 import { type Accessor } from "solid-js";
 import type { AgentSessionToolName } from "../shared/agent-tools.ts";
+import type { ProviderLimitState } from "../shared/provider-limits.ts";
 import { SESSIONS_PATH } from "../shared/routes.ts";
 import type {
   AgentSessionDetail,
@@ -123,6 +124,10 @@ export class SessionController {
 
   applyDelta(event: Parameters<SessionRealtimeState["applyDelta"]>[0]): void {
     this.#realtime.applyDelta(event);
+  }
+
+  applyProviderLimits(credentialId: string, limits: ProviderLimitState): void {
+    this.#realtime.applyProviderLimits(credentialId, limits);
   }
 
   applyRealtime(sessions: readonly AgentSessionSummary[]): void {

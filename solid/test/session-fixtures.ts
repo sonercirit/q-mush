@@ -16,6 +16,7 @@ export const TEST_SESSION_DETAIL: AgentSessionDetail = {
   messages: [],
   model: "gpt-5-codex",
   provider: "openai",
+  providerLimits: { status: "unavailable" },
   providerPricing: null,
   reasoningEffort: null,
   runnerId: "runner-1",

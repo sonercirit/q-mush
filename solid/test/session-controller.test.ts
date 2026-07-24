@@ -104,6 +104,22 @@ async function withRestoredFetch(action: () => Promise<void>): Promise<void> {
   }
 }
 
+async function withSessionController(
+  action: (controller: SessionController) => Promise<void> | void,
+): Promise<void> {
+  const controller = createRoot(() => new SessionController());
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = Object.assign(sessionResponse, {
+    preconnect: originalFetch.preconnect,
+  });
+  try {
+    await controller.load();
+    await action(controller);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
 function sessionResponse(input: RequestInfo | URL): Promise<Response> {
   const path = new URL(requestUrl(input), "http://localhost").pathname;
   return Promise.resolve(
@@ -182,14 +198,7 @@ function selectedController(
 }
 
 test("renders incremental model deltas in the selected transcript", async () => {
-  const controller = createRoot(() => new SessionController());
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = Object.assign(sessionResponse, {
-    preconnect: originalFetch.preconnect,
-  });
-
-  try {
-    await controller.load();
+  await withSessionController((controller) => {
     expect(controller.state.draft.workingDirectory).toBe(
       TEST_SESSION_DETAIL.workingDirectory,
     );
@@ -229,9 +238,34 @@ test("renders incremental model deltas in the selected transcript", async () => 
       updatedAt: 3,
     });
     expect(controller.state.detail?.messages).toEqual([errorMessage]);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+  });
+});
+
+test("applies credential limit updates to lists and selected details", async () => {
+  await withSessionController((controller) => {
+    const limits = {
+      dimensions: [
+        {
+          key: "session_requests",
+          label: "Session requests",
+          limit: 40,
+          remaining: 7,
+          resetAt: 20,
+          unit: "requests" as const,
+        },
+      ],
+      observedAt: 11,
+      provider: "openai" as const,
+      source: "response_event" as const,
+      stale: true,
+      status: "available" as const,
+    };
+    controller.applyProviderLimits(TEST_SESSION_DETAIL.credentialId, limits);
+
+    const [summary] = controller.state.sessions ?? [];
+    expect(summary?.providerLimits).toBe(limits);
+    expect(controller.state.detail?.providerLimits).toBe(limits);
+  });
 });
 
 test("ignores stale deltas after a finished snapshot and accepts a queued continuation", async () => {

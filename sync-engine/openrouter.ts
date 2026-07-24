@@ -1,4 +1,5 @@
 import { isRecord } from "../shared/auth-model.ts";
+import type { ProviderLimitObservation } from "../shared/provider-limits.ts";
 import {
   OPENROUTER_OAUTH_CALLBACK_PATH,
   OPENROUTER_OAUTH_PATH,
@@ -24,6 +25,7 @@ import {
   readProviderIntegrationConfiguration,
   type ProviderIntegration,
 } from "./provider-integration.ts";
+import { parseOpenRouterMetadataLimits } from "./provider-limit-parsers.ts";
 
 const OPENROUTER_AUTHORIZATION_URL = "https://openrouter.ai/auth";
 const OPENROUTER_KEY_METADATA_URL = "https://openrouter.ai/api/v1/key";
@@ -54,6 +56,18 @@ function createAuthorizationUrl(request: AuthorizationRequest): URL {
   );
 }
 
+function validatedCredential(
+  details: ConnectedAccountCredential["details"],
+  secret: string,
+  limits: ProviderLimitObservation | null,
+): ConnectedAccountCredential {
+  return {
+    details,
+    ...(limits === null ? {} : { limits }),
+    secret,
+  };
+}
+
 const exchangeCredential = async (
   runtime: OAuthRuntime,
   request: CredentialExchangeRequest,
@@ -74,9 +88,8 @@ const exchangeCredential = async (
     response,
     "OpenRouter rejected the authorization code",
   );
-
-  return {
-    details: {
+  return validatedCredential(
+    {
       accountId: readProviderUserId({
         key: "user_id",
         provider: "OpenRouter",
@@ -84,14 +97,21 @@ const exchangeCredential = async (
       }),
       label: "OpenRouter account",
     },
-    secret: readProviderString(value, "key", "OpenRouter"),
-  };
+    readProviderString(value, "key", "OpenRouter"),
+    parseOpenRouterMetadataLimits({ data: value }, runtime.now()),
+  );
 };
 
 const readCredentialDetails = async (
   runtime: OAuthRuntime,
   apiKey: string,
-): Promise<{ readonly accountId: string | null; readonly label: string }> => {
+): Promise<{
+  readonly details: {
+    readonly accountId: string | null;
+    readonly label: string;
+  };
+  readonly limits?: ProviderLimitObservation;
+}> => {
   const value = await readOpenRouterApiKeyMetadata(runtime, apiKey);
   const data = value["data"];
 
@@ -99,13 +119,17 @@ const readCredentialDetails = async (
     throw new Error("OpenRouter returned invalid API key metadata");
   }
 
+  const limits = parseOpenRouterMetadataLimits(value, runtime.now());
   return {
-    accountId: readProviderUserId({
-      key: "creator_user_id",
-      provider: "OpenRouter",
-      record: data,
-    }),
-    label: readProviderString(data, "label", "OpenRouter"),
+    details: {
+      accountId: readProviderUserId({
+        key: "creator_user_id",
+        provider: "OpenRouter",
+        record: data,
+      }),
+      label: readProviderString(data, "label", "OpenRouter"),
+    },
+    ...(limits === null ? {} : { limits }),
   };
 };
 

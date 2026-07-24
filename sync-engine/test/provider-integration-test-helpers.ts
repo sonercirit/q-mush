@@ -291,9 +291,16 @@ export function expectRemovedProviderCredential(
 }
 
 export function credentialSummaries<T>(credentials: readonly T[]): {
-  readonly credentials: readonly T[];
+  readonly credentials: readonly (T & {
+    readonly limits: { readonly status: "unavailable" };
+  })[];
 } {
-  return { credentials };
+  function withUnavailableLimits(credential: T) {
+    return { ...credential, limits: { status: "unavailable" as const } };
+  }
+  return {
+    credentials: credentials.map(withUnavailableLimits),
+  };
 }
 
 export function expectProviderCredentialSummaries(

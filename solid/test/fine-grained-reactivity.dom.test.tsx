@@ -90,6 +90,7 @@ function credential(id: string, label: string): ProviderCredential {
     id,
     isDefault: true,
     label,
+    limits: { status: "unavailable" },
     source: "api_key",
   };
 }

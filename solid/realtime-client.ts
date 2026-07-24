@@ -13,6 +13,10 @@ interface BrowserWebSocket extends EventTarget {
 type BrowserWebSocketFactory = (url: string) => BrowserWebSocket;
 type FrameCallback = (callback: () => void) => number;
 type RealtimeListener = (event: RealtimeServerEvent) => void;
+type ProviderLimitEvent = Extract<
+  RealtimeServerEvent,
+  { readonly type: "provider_limits" }
+>;
 type SessionDelta = Extract<
   RealtimeServerEvent,
   { readonly type: "session_delta" }
@@ -38,6 +42,8 @@ export class RealtimeConnection {
   readonly #requestFrame: FrameCallback;
   readonly #setTimeout: (callback: () => void, delay: number) => number;
   readonly #clearTimeout: (id: number) => void;
+  #providerLimitFrame: number | undefined;
+  #providerLimits = new Map<string, ProviderLimitEvent>();
   #reconnectAttempt = 0;
   #reconnectTimer: number | undefined;
   #sessionDeltaGeneration = 0;
@@ -85,6 +91,8 @@ export class RealtimeConnection {
 
     const socket = this.#socket;
     this.#socket = undefined;
+    this.#providerLimitFrame = undefined;
+    this.#providerLimits.clear();
     this.#sessionDeltaGeneration += 1;
     this.#sessionDeltaFrame = undefined;
     this.#sessionDeltas.clear();
@@ -180,9 +188,54 @@ export class RealtimeConnection {
     });
   }
 
+  #deliverProviderLimits(): void {
+    const pending = [...this.#providerLimits.values()];
+    this.#providerLimits.clear();
+    for (const event of pending) {
+      this.#listener(event);
+    }
+  }
+
+  #queueProviderLimit(event: ProviderLimitEvent): void {
+    const current = this.#providerLimits.get(event.credentialId);
+    const currentAt =
+      current?.limits.status === "available"
+        ? current.limits.observedAt
+        : Number.NEGATIVE_INFINITY;
+    const nextAt =
+      event.limits.status === "available"
+        ? event.limits.observedAt
+        : Number.NEGATIVE_INFINITY;
+    if (current === undefined || nextAt >= currentAt) {
+      this.#providerLimits.set(event.credentialId, event);
+    }
+    if (this.#providerLimitFrame !== undefined) {
+      return;
+    }
+    const generation = this.#sessionDeltaGeneration;
+    this.#providerLimitFrame = this.#requestFrame(() => {
+      this.#providerLimitFrame = undefined;
+      if (generation !== this.#sessionDeltaGeneration || this.#stopped) {
+        return;
+      }
+      this.#deliverProviderLimits();
+    });
+  }
+
+  #flushProviderLimits(): void {
+    if (this.#providerLimits.size === 0) {
+      return;
+    }
+    this.#deliverProviderLimits();
+  }
+
   #receive(event: RealtimeServerEvent): void {
     if (event.type === "session_delta") {
       this.#queueSessionDelta(event);
+      return;
+    }
+    if (event.type === "provider_limits") {
+      this.#queueProviderLimit(event);
       return;
     }
     if (event.type === "session") {
@@ -193,6 +246,9 @@ export class RealtimeConnection {
         this.#sessionDeltaFrame = undefined;
         this.#rescheduleSessionDeltaFrame();
       }
+    }
+    if (event.type === "provider_limits_snapshot") {
+      this.#flushProviderLimits();
     }
     this.#listener(event);
   }

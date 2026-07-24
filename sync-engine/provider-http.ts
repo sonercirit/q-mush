@@ -17,6 +17,8 @@ export interface ProviderHttpOptions {
   readonly fetch: AgentModelFetch;
   readonly headers: Headers;
   readonly onDelta: ((delta: ProviderTextDelta) => void) | undefined;
+  readonly onEvent?: (event: unknown) => void;
+  readonly onResponse?: (response: Response) => void;
   readonly provider: ProviderId;
   readonly responsesProtocol: boolean;
   readonly sleep: ModelRequestSleep | undefined;
@@ -80,6 +82,7 @@ export async function completeProviderHttp(
     options.fetch,
     request,
     options.sleep,
+    options.onResponse,
   );
 
   if (!response.ok) {
@@ -99,5 +102,6 @@ export async function completeProviderHttp(
     response,
     options.responsesProtocol ? "responses" : "chat_completions",
     options.onDelta,
+    options.onEvent,
   );
 }

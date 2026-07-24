@@ -1,7 +1,10 @@
+import { isRecord } from "../shared/auth-model.ts";
 import {
   parseJsonRecord,
   requiredRecordString,
 } from "../shared/json-record.ts";
+import { readProviderLimitState } from "../shared/provider-limits-codec.ts";
+import type { ProviderLimitState } from "../shared/provider-limits.ts";
 import type { RunnerSummary } from "../shared/runner-model.ts";
 import type {
   AgentSessionDetail,
@@ -11,6 +14,18 @@ import { readRunners } from "./runner-client.tsx";
 import { readSessionDetail, readSessionList } from "./session-codec.ts";
 
 export type RealtimeServerEvent =
+  | {
+      readonly credentialId: string;
+      readonly limits: ProviderLimitState;
+      readonly type: "provider_limits";
+    }
+  | {
+      readonly credentials: readonly {
+        readonly credentialId: string;
+        readonly limits: ProviderLimitState;
+      }[];
+      readonly type: "provider_limits_snapshot";
+    }
   | { readonly runners: readonly RunnerSummary[]; readonly type: "runners" }
   | { readonly session: AgentSessionDetail; readonly type: "session" }
   | {
@@ -36,6 +51,33 @@ function requiredString(
   );
 }
 
+function readLimits(value: unknown): ProviderLimitState {
+  const limits = readProviderLimitState(value);
+  if (limits === undefined) {
+    throw new Error("The realtime server event was invalid");
+  }
+  return limits;
+}
+
+function readArray(value: unknown): readonly unknown[] {
+  if (!Array.isArray(value)) {
+    throw new Error("The realtime server event was invalid");
+  }
+  return value;
+}
+
+function readLimitSnapshot(value: unknown) {
+  return readArray(value).map((item) => {
+    if (!isRecord(item)) {
+      throw new Error("The realtime server event was invalid");
+    }
+    return {
+      credentialId: requiredString(item, "credentialId"),
+      limits: readLimits(item["limits"]),
+    };
+  });
+}
+
 export function readRealtimeServerEvent(message: string): RealtimeServerEvent {
   const value = parseJsonRecord(
     message,
@@ -43,6 +85,17 @@ export function readRealtimeServerEvent(message: string): RealtimeServerEvent {
   );
 
   switch (value["type"]) {
+    case "provider_limits":
+      return {
+        credentialId: requiredString(value, "credentialId"),
+        limits: readLimits(value["limits"]),
+        type: "provider_limits",
+      };
+    case "provider_limits_snapshot":
+      return {
+        credentials: readLimitSnapshot(value["credentials"]),
+        type: "provider_limits_snapshot",
+      };
     case "runners":
       return { runners: readRunners(value), type: "runners" };
     case "sessions":

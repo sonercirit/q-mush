@@ -1,5 +1,6 @@
 import { createDatabase } from "../shared/database.ts";
 import { readDatabasePath } from "../shared/database/config.ts";
+import { createUuidV7 } from "../shared/ids.ts";
 import { createGoogleAuthFromEnvironment } from "./auth.ts";
 import { createBraveSearchSkillFromEnvironment } from "./brave-search.ts";
 import {
@@ -10,6 +11,8 @@ import {
 } from "./openai.ts";
 import { createOpenRouterIntegrationFromEnvironment } from "./openrouter.ts";
 import { renderPages } from "./pages.ts";
+import { ProviderLimitStore } from "./provider-limit-store.ts";
+import { ProviderLimitsService } from "./provider-limits-service.ts";
 import { RealtimeHub } from "./realtime-hub.ts";
 import {
   createRealtimeIntegration,
@@ -34,28 +37,35 @@ const [clientJavaScript, pages, runnerExecutables, stylesheet] =
     buildClientStylesheet(),
   ]);
 const googleAuth = createGoogleAuthFromEnvironment(Bun.env, { database });
+const realtimeHub = new RealtimeHub();
+const limits = new ProviderLimitsService(
+  new ProviderLimitStore(database, createUuidV7),
+  Date.now,
+  realtimeHub,
+);
 const braveSearch = createBraveSearchSkillFromEnvironment(Bun.env, googleAuth, {
   database,
 });
 const openAi = createOpenAiIntegrationFromEnvironment(Bun.env, googleAuth, {
   database,
+  limits,
 });
 const openRouter = createOpenRouterIntegrationFromEnvironment(
   Bun.env,
   googleAuth,
-  { database },
+  { database, limits },
 );
 const runners = createRunnerIntegration(googleAuth, { database });
-const realtimeHub = new RealtimeHub();
 const sessions = createSessionIntegration(
   googleAuth,
   runners,
   { openai: openAi, openrouter: openRouter },
-  { braveSearch, database, realtime: realtimeHub },
+  { braveSearch, database, limits, realtime: realtimeHub },
 );
 const realtime = createRealtimeIntegration({
   auth: googleAuth,
   hub: realtimeHub,
+  limits: (userId) => limits.snapshot(userId),
   runnerVersion: runnerExecutables.version,
   runners,
   sessions,

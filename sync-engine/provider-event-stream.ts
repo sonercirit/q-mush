@@ -26,6 +26,7 @@ export async function readProviderEventStream(
   response: Response,
   protocol: "chat_completions" | "responses",
   onDelta?: (delta: ProviderTextDelta) => void,
+  onEvent?: (event: unknown) => void,
 ): Promise<AgentModelTurn> {
   const accumulator = createProviderStreamAccumulator(protocol, onDelta);
   const body = response.body;
@@ -43,7 +44,9 @@ export async function readProviderEventStream(
     for (const block of blocks) {
       const data = eventData(block);
       if (data.length > 0 && data !== "[DONE]") {
-        accumulator.push(parseEventData(data));
+        const event = parseEventData(data);
+        onEvent?.(event);
+        accumulator.push(event);
       }
     }
   };

@@ -23,6 +23,13 @@ class CoalescingSocket extends EventTarget {
   }
 }
 
+interface ConnectionTestContext {
+  readonly connection: RealtimeConnection;
+  readonly events: RealtimeServerEvent[];
+  readonly frames: (() => void)[];
+  readonly socket: CoalescingSocket;
+}
+
 function expectFramesAndLatest(
   events: readonly RealtimeServerEvent[],
   frames: readonly (() => void)[],
@@ -37,7 +44,7 @@ function expectFramesAndLatest(
   expect(events.at(-1)).toMatchObject(expected);
 }
 
-test("coalesces session deltas into one update per animation frame", () => {
+function connectionTestContext(): ConnectionTestContext {
   const events: RealtimeServerEvent[] = [];
   const frames: (() => void)[] = [];
   const socket = new CoalescingSocket();
@@ -52,6 +59,56 @@ test("coalesces session deltas into one update per animation frame", () => {
     setTimeout: () => 1,
   });
   connection.start();
+  return { connection, events, frames, socket };
+}
+
+test("coalesces provider limits by credential and newest observation", () => {
+  const context = connectionTestContext();
+  const { connection, events, frames, socket } = context;
+  const limits = (observedAt: number) => ({
+    dimensions: [
+      {
+        key: "requests",
+        label: "Requests",
+        limit: 10,
+        remaining: 5,
+        resetAt: null,
+        unit: "requests" as const,
+      },
+    ],
+    observedAt,
+    provider: "openai" as const,
+    source: "http_headers" as const,
+    stale: false,
+    status: "available" as const,
+  });
+  socket.receive({
+    credentialId: "credential-1",
+    limits: limits(2),
+    type: "provider_limits",
+  });
+  socket.receive({
+    credentialId: "credential-1",
+    limits: limits(1),
+    type: "provider_limits",
+  });
+  socket.receive({
+    credentialId: "credential-2",
+    limits: limits(3),
+    type: "provider_limits",
+  });
+
+  expect(events).toEqual([]);
+  frames[0]?.();
+  expect(events).toMatchObject([
+    { credentialId: "credential-1", limits: { observedAt: 2 } },
+    { credentialId: "credential-2", limits: { observedAt: 3 } },
+  ]);
+  connection.stop();
+});
+
+test("coalesces session deltas into one update per animation frame", () => {
+  const { connection, events, frames, socket } = connectionTestContext();
 
   for (const event of [
     {

@@ -109,6 +109,21 @@ describe("agent model request retries", () => {
     expect(delays).toEqual([3_000]);
   });
 
+  test("bounds repeated rate-limited requests", async () => {
+    let count = 0;
+    const response = await fetchModelRequestWithRetries(
+      () => {
+        count += 1;
+        return Promise.resolve(new Response(null, { status: 429 }));
+      },
+      REQUEST,
+      () => Promise.resolve(),
+    );
+
+    expect(response.status).toBe(429);
+    expect(count).toBe(13);
+  });
+
   test("keeps retrying a rate-limited request until it succeeds", async () => {
     const responses = Array.from(
       { length: 4 },

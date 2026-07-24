@@ -95,6 +95,7 @@ describe("Brave Search skill", () => {
           id: FIRST_KEY_ID,
           isDefault: false,
           label: "Primary",
+          limits: { status: "unavailable" },
           source: "api_key",
         },
         {
@@ -102,6 +103,7 @@ describe("Brave Search skill", () => {
           id: SECOND_KEY_ID,
           isDefault: false,
           label: "Backup",
+          limits: { status: "unavailable" },
           source: "api_key",
         },
       ],

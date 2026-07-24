@@ -6,12 +6,15 @@ import { providerViewState } from "./client-state-fixtures.ts";
 import { expectDefaultControls } from "./default-control-assertions.ts";
 import { renderSolidToString } from "./render-solid.tsx";
 
+const TEST_LIMITS = { status: "unavailable" as const };
+
 const STATE = providerViewState([
   {
     accountId: "account-1",
     id: "credential-1",
     isDefault: true,
     label: "Primary",
+    limits: TEST_LIMITS,
     source: "oauth",
   },
   {
@@ -19,6 +22,7 @@ const STATE = providerViewState([
     id: "credential-2",
     isDefault: false,
     label: "Backup",
+    limits: TEST_LIMITS,
     source: "api_key",
   },
 ]);

@@ -11,6 +11,7 @@ import { readAgentToolCalls } from "../shared/agent-loop.ts";
 import { readAgentSessionToolNames } from "../shared/agent-tools.ts";
 import { isRecord, readNullableString } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
+import { readProviderLimitState } from "../shared/provider-limits-codec.ts";
 import {
   readProviderModelPricing,
   type ProviderModelPricing,
@@ -177,6 +178,7 @@ function readSummary(value: unknown): AgentSessionSummary {
   const maxContextTokens = value["maxContextTokens"];
   const model = value["model"];
   const provider = readProvider(value["provider"]);
+  const providerLimits = readProviderLimitState(value["providerLimits"]);
   const reasoningEffort = readNullableString(value["reasoningEffort"]);
   const runnerId = value["runnerId"];
   const status = readStatus(value["status"]);
@@ -210,6 +212,7 @@ function readSummary(value: unknown): AgentSessionSummary {
         maxContextTokens <= 0)) ||
     typeof model !== "string" ||
     provider === undefined ||
+    providerLimits === undefined ||
     value["providerPricing"] === undefined ||
     reasoningEffort === undefined ||
     (reasoningEffort !== null && !isAgentReasoningEffort(reasoningEffort)) ||
@@ -236,6 +239,7 @@ function readSummary(value: unknown): AgentSessionSummary {
     maxContextTokens,
     model,
     provider,
+    providerLimits,
     providerPricing,
     reasoningEffort,
     runnerId,
@@ -338,6 +342,7 @@ export function summaryFromDetail(
     maxContextTokens: detail.maxContextTokens,
     model: detail.model,
     provider: detail.provider,
+    providerLimits: detail.providerLimits,
     providerPricing: detail.providerPricing,
     reasoningEffort: detail.reasoningEffort,
     runnerId: detail.runnerId,

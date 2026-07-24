@@ -4,6 +4,7 @@ import {
   type AgentSessionToolName,
 } from "../shared/agent-tools.ts";
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
+import type { ProviderLimitObservation } from "../shared/provider-limits.ts";
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { estimateAgentTurnCost } from "./agent-cost.ts";
@@ -32,6 +33,7 @@ export interface SessionAgentRuntimeDependencies {
   readonly modelFactory: AgentModelFactory;
   readonly now: () => number;
   readonly notify: () => void;
+  readonly observeLimits?: (observation: ProviderLimitObservation) => void;
   readonly realtime: RealtimeHub | undefined;
   readonly sessionTools: SessionAgentToolActions;
   readonly signal: AbortSignal;
@@ -54,6 +56,9 @@ async function loadModels(
     credential: runtime.credential,
     detail: runtime.detail,
     factory: runtime.modelFactory,
+    ...(runtime.observeLimits === undefined
+      ? {}
+      : { observeLimits: runtime.observeLimits }),
     realtime: runtime.realtime,
     userId: runtime.userId,
   });

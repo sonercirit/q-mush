@@ -1,4 +1,5 @@
 import { type Accessor } from "solid-js";
+import type { ProviderLimitState } from "../shared/provider-limits.ts";
 import { providerCredentialDefaultPath } from "../shared/routes.ts";
 import { HttpResponseError, request, requestJson } from "./browser-http.ts";
 import {
@@ -92,6 +93,18 @@ export class ProviderController {
   reset(): void {
     this.#revision += 1;
     this.#replace(initialProviderState());
+  }
+
+  applyLimits(credentialId: string, limits: ProviderLimitState): void {
+    const credentials = this.state.credentials;
+    if (credentials === undefined) {
+      return;
+    }
+    this.#patch({
+      credentials: credentials.map((credential) =>
+        credential.id === credentialId ? { ...credential, limits } : credential,
+      ),
+    });
   }
 
   setDefault(credentialId: string): Promise<void> {

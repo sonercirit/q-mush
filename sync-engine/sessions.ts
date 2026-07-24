@@ -5,10 +5,7 @@ import type {
   ProviderCredentialAccess,
   ProviderId,
 } from "../shared/provider-credential-store.ts";
-import {
-  RunnerCommandBroker,
-  type RunnerToolCommand,
-} from "../shared/runner-command-broker.ts";
+import { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type {
   AgentSessionDetail,
   AgentSessionSummary,
@@ -26,6 +23,8 @@ import {
   createMethodNotAllowedResponse,
   parseJsonRequest,
 } from "./http.ts";
+import { ProviderLimitStore } from "./provider-limit-store.ts";
+import { ProviderLimitsService } from "./provider-limits-service.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
 import type { RunnerIntegration } from "./runners.ts";
 import { SessionAgentActions } from "./session-agent-actions.ts";
@@ -47,6 +46,7 @@ import {
   type CreateSessionInput,
   type PromptInput,
 } from "./session-input.ts";
+import type { SessionIntegration } from "./session-integration.ts";
 import { sessionModelRuntime } from "./session-model-runtime.ts";
 import {
   SessionRequestHelpers,
@@ -65,7 +65,7 @@ interface SessionCredentialReader {
     | undefined;
 }
 
-export type SessionCredentialReaders = Readonly<
+type SessionCredentialReaders = Readonly<
   Record<ProviderId, SessionCredentialReader>
 >;
 
@@ -82,6 +82,7 @@ interface SessionDependencies {
   readonly now?: () => number;
   readonly randomId?: IdGenerator;
   readonly realtime?: RealtimeHub;
+  readonly limits?: ProviderLimitsService;
 }
 
 interface CredentialSelection {
@@ -91,35 +92,6 @@ interface CredentialSelection {
 
 interface RuntimeSelection extends CredentialSelection {
   readonly runnerId: string;
-}
-
-export interface SessionIntegration {
-  collection(request: Request): Response | Promise<Response>;
-  compact(request: Request, sessionId: string): Promise<Response>;
-  compaction(request: Request, sessionId: string): Promise<Response>;
-  completeRunnerCommand(
-    runnerId: string,
-    commandId: string,
-    output: string,
-  ): boolean;
-  continue(request: Request, sessionId: string): Promise<Response>;
-  deliverRunnerCommands(
-    runnerId: string,
-    deliver: (command: RunnerToolCommand) => boolean,
-  ): void;
-  detailForUser(
-    userId: string,
-    sessionId: string,
-  ): AgentSessionDetail | undefined;
-  directories(request: Request, runnerId: string): Promise<Response>;
-  drain(): Promise<void>;
-  item(request: Request, sessionId: string): Response;
-  listForUser(userId: string): readonly AgentSessionSummary[];
-  message(request: Request, sessionId: string): Promise<Response>;
-  models(request: Request): Promise<Response>;
-  onChange(listener: (userId: string, sessionId: string) => void): void;
-  runnerConnected(): void;
-  stop(request: Request, sessionId: string): Promise<Response>;
 }
 
 function safeErrorMessage(error: unknown): string {
@@ -140,6 +112,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
   readonly #now: () => number;
   readonly #onChange = new Set<(userId: string, sessionId: string) => void>();
   readonly #providers: SessionCredentialReaders;
+  readonly #limits: ProviderLimitsService;
   readonly #realtime: RealtimeHub | undefined;
   readonly #requests: SessionRequestHelpers;
   readonly #runners: RunnerIntegration;
@@ -170,10 +143,18 @@ class DrizzleSessionIntegration implements SessionIntegration {
       ((options) => new ChatCompletionsAgentModel(options));
     this.#now = dependencies.now ?? Date.now;
     this.#providers = providers;
+    const database = dependencies.database ?? createDatabase(":memory:");
+    this.#limits =
+      dependencies.limits ??
+      new ProviderLimitsService(
+        new ProviderLimitStore(database, dependencies.randomId ?? createUuidV7),
+        this.#now,
+        this.#realtime,
+      );
     this.#requests = new SessionRequestHelpers(auth, this.#broker, runners);
     this.#runners = runners;
     this.#store = new SessionStore(
-      dependencies.database ?? createDatabase(":memory:"),
+      database,
       dependencies.randomId ?? createUuidV7,
     );
     this.#actions = this.#createActions();
@@ -188,13 +169,19 @@ class DrizzleSessionIntegration implements SessionIntegration {
       },
       broker: this.#broker,
       draining: () => this.#runtimes.draining,
-      discoverSessionMetadata: async (input, credential) => {
+      discoverSessionMetadata: async (input, credential, userId) => {
         try {
+          const observeLimits = this.#observeCredentialLimits(
+            userId,
+            input.credentialId,
+          );
           const catalog = await this.#discoverModels(
             input.provider,
             credential,
+            undefined,
+            observeLimits,
           );
-          const model = catalog.models.find(({ id }) => id === input.model);
+          const [model] = catalog.models.filter(({ id }) => id === input.model);
           return {
             maxContextTokens: model?.contextWindow ?? null,
             providerPricing: model?.pricing ?? null,
@@ -215,7 +202,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
     });
   }
 
-  collection(request: Request): Response | Promise<Response> {
+  collection(request: Request) {
     return this.#requests.forUser(request, (user) =>
       this.#collectionForUser(request, user),
     );
@@ -244,11 +231,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
     );
   }
 
-  completeRunnerCommand(
-    runnerId: string,
-    commandId: string,
-    output: string,
-  ): boolean {
+  completeRunnerCommand(runnerId: string, commandId: string, output: string) {
     return this.#broker.complete(runnerId, commandId, output);
   }
 
@@ -258,7 +241,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
 
   deliverRunnerCommands(
     runnerId: string,
-    deliver: (command: RunnerToolCommand) => boolean,
+    deliver: Parameters<SessionIntegration["deliverRunnerCommands"]>[1],
   ): void {
     this.#broker.deliverQueued(runnerId, deliver);
   }
@@ -275,7 +258,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
     userId: string,
     sessionId: string,
   ): AgentSessionDetail | undefined {
-    return this.#store.get(userId, sessionId);
+    return this.#limits.detail(userId, this.#store.get(userId, sessionId));
   }
 
   item(request: Request, sessionId: string): Response {
@@ -284,8 +267,8 @@ class DrizzleSessionIntegration implements SessionIntegration {
     );
   }
 
-  listForUser(userId: string): readonly AgentSessionSummary[] {
-    return this.#store.list(userId);
+  listForUser(userId: string) {
+    return this.#limits.list(userId, this.#store.list(userId));
   }
 
   message(request: Request, sessionId: string): Promise<Response> {
@@ -382,7 +365,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
     const detail = this.#store.get(userId, sessionId);
     return detail === undefined
       ? createApiError("not_found", 404)
-      : createJsonResponse(detail);
+      : createJsonResponse(this.#limits.apply(userId, detail));
   }
 
   #collectionForUser(
@@ -391,7 +374,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
   ): Promise<Response> | Response {
     switch (request.method) {
       case "GET":
-        return createJsonResponse({ sessions: this.#store.list(user.id) });
+        return createJsonResponse({ sessions: this.listForUser(user.id) });
       case "POST":
         return this.#runtimes.draining
           ? createApiError("server_restarting", 503)
@@ -399,6 +382,12 @@ class DrizzleSessionIntegration implements SessionIntegration {
       default:
         return createMethodNotAllowedResponse("GET, POST");
     }
+  }
+
+  #observeCredentialLimits(userId: string, credentialId: string) {
+    return (observation: Parameters<ProviderLimitsService["observe"]>[2]) => {
+      this.#limits.observe(userId, credentialId, observation);
+    };
   }
 
   async #modelsForUser(
@@ -418,9 +407,13 @@ class DrizzleSessionIntegration implements SessionIntegration {
       { credentialId, provider },
       async (credential) => {
         try {
-          return createJsonResponse(
-            await this.#discoverModels(provider, credential),
+          const catalog = await this.#discoverModels(
+            provider,
+            credential,
+            undefined,
+            this.#observeCredentialLimits(user.id, credentialId),
           );
+          return createJsonResponse(catalog);
         } catch {
           return createApiError("provider_unavailable", 502);
         }
@@ -448,7 +441,13 @@ class DrizzleSessionIntegration implements SessionIntegration {
       let providerPricing: AgentSessionSummary["providerPricing"] = null;
 
       try {
-        const catalog = await this.#discoverModels(input.provider, credential);
+        const fetchModel = this.#discoverModels;
+        const catalog = await fetchModel(
+          input.provider,
+          credential,
+          undefined,
+          this.#observeCredentialLimits(user.id, input.credentialId),
+        );
         const model = catalog.models.find(({ id }) => id === selectedModel);
         maxContextTokens = model?.contextWindow ?? null;
         providerPricing = model?.pricing ?? null;
@@ -616,6 +615,9 @@ class DrizzleSessionIntegration implements SessionIntegration {
           modelFactory: this.#modelFactory,
           now: this.#now,
           notify: this.#notify,
+          observeLimits: (ownerId, credentialId, observation) => {
+            this.#limits.observe(ownerId, credentialId, observation);
+          },
           realtime: this.#realtime,
           store: this.#store,
         },

@@ -18,6 +18,7 @@ import type {
   ProviderCredentialSource,
   ProviderId,
 } from "../shared/provider-credential-store.ts";
+import type { ProviderLimitObservation } from "../shared/provider-limits.ts";
 import { createServerWebSocket } from "../shared/server-websocket.ts";
 import {
   completionMessages,
@@ -28,6 +29,7 @@ import {
 import type { ModelRequestSleep } from "./agent-model-retry.ts";
 import { readOpenAiOAuthCredential } from "./openai-credential.ts";
 import { completeProviderHttp } from "./provider-http.ts";
+import { createProviderLimitObserver } from "./provider-limit-observer.ts";
 import type { ProviderTextDelta } from "./provider-stream.ts";
 import {
   completeProviderWebSocket,
@@ -59,6 +61,8 @@ interface ChatCompletionsAgentModelOptions {
   readonly fetch?: AgentModelFetch;
   readonly model: string;
   readonly onDelta?: (delta: ProviderTextDelta) => void;
+  readonly onLimits?: (observation: ProviderLimitObservation) => void;
+  readonly now?: () => number;
   readonly provider: ProviderId;
   readonly reasoningEffort?: AgentReasoningEffort | null;
   readonly sleep?: ModelRequestSleep;
@@ -339,7 +343,10 @@ export class ChatCompletionsAgentModel implements AgentModel {
   readonly #credential: AgentProviderCredential;
   readonly #fetch: AgentModelFetch;
   readonly #model: string;
+  readonly #now: () => number;
   readonly #onDelta: ((delta: ProviderTextDelta) => void) | undefined;
+  readonly #onLimits:
+    ((observation: ProviderLimitObservation) => void) | undefined;
   readonly #provider: ProviderId;
   readonly #reasoningEffort: AgentReasoningEffort | undefined;
   readonly #sleep: ModelRequestSleep | undefined;
@@ -351,7 +358,9 @@ export class ChatCompletionsAgentModel implements AgentModel {
     this.#credential = options.credential;
     this.#fetch = options.fetch ?? ((request) => globalThis.fetch(request));
     this.#model = options.model;
+    this.#now = options.now ?? Date.now;
     this.#onDelta = options.onDelta;
+    this.#onLimits = options.onLimits;
     this.#provider = options.provider;
     this.#reasoningEffort = options.reasoningEffort ?? undefined;
     this.#sleep = options.sleep;
@@ -438,6 +447,17 @@ export class ChatCompletionsAgentModel implements AgentModel {
     );
   }
 
+  #limitObserver() {
+    return createProviderLimitObserver({
+      credentialSource: this.#credential.source,
+      now: this.#now,
+      observe: (observation) => {
+        this.#onLimits?.(observation);
+      },
+      provider: this.#provider,
+    });
+  }
+
   #webSocketOptions(signal: AbortSignal | undefined): {
     onDelta?: (delta: ProviderTextDelta) => void;
     signal?: AbortSignal;
@@ -464,10 +484,14 @@ export class ChatCompletionsAgentModel implements AgentModel {
       throw new Error("The model request body was invalid");
     }
 
+    const observer = this.#limitObserver();
     return completeProviderWebSocket({
       body,
       createSocket: this.#webSocket,
       headers: headersRecord(headers),
+      onEvent: (event) => {
+        observer.event(event, "websocket_event");
+      },
       ...this.#webSocketOptions(signal),
       url: codexOAuth
         ? OPENAI_CODEX_RESPONSES_WEBSOCKET_URL
@@ -478,6 +502,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
   #completeHttp(...parameters: CompletionArguments): Promise<AgentModelTurn> {
     const input = completionInput(parameters);
     const responsesProtocol = usesCodexOAuth(this.#provider, this.#credential);
+    const observer = this.#limitObserver();
     return completeProviderHttp(
       {
         body: this.#requestBody(input.messages, responsesProtocol, true),
@@ -488,6 +513,12 @@ export class ChatCompletionsAgentModel implements AgentModel {
           "text/event-stream",
         ),
         onDelta: this.#onDelta,
+        onEvent: (event) => {
+          observer.event(event, "response_event");
+        },
+        onResponse: (response) => {
+          observer.response(response);
+        },
         provider: this.#provider,
         responsesProtocol,
         sleep: this.#sleep,

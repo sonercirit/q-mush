@@ -4,6 +4,7 @@ import type { AgentImage } from "./agent-images.ts";
 import type { AgentToolCall } from "./agent-loop.ts";
 import type { AgentSessionToolName } from "./agent-tools.ts";
 import type { ProviderId } from "./provider-credential-store.ts";
+import type { ProviderLimitState } from "./provider-limits.ts";
 import type { ProviderModelPricing } from "./provider-model-pricing.ts";
 
 export type AgentSessionStatus =
@@ -44,6 +45,7 @@ export interface AgentSessionSummary {
   readonly maxContextTokens: number | null;
   readonly model: string;
   readonly provider: ProviderId;
+  readonly providerLimits: ProviderLimitState;
   readonly providerPricing: ProviderModelPricing | null;
   readonly reasoningEffort: AgentReasoningEffort | null;
   readonly runnerId: string;

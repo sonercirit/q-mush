@@ -91,6 +91,40 @@ export const providerCredentials = sqliteTable(
   ],
 );
 
+function providerCredentialReference(name: string) {
+  return text(name)
+    .notNull()
+    .references(() => providerCredentials.id, { onDelete: "restrict" });
+}
+
+export const providerLimitObservations = sqliteTable(
+  "provider_limit_observations",
+  {
+    ...ownedAuditColumns(),
+    credentialId: providerCredentialReference("credential_id"),
+    dimensions: text("dimensions").notNull(),
+    observedAt: integer("observed_at", { mode: "timestamp_ms" }).notNull(),
+    provider: providerColumn(),
+    source: text("source", {
+      enum: [
+        "credential_metadata",
+        "http_headers",
+        "response_event",
+        "websocket_event",
+      ],
+    }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("provider_limit_observations_credential_unique").on(
+      table.credentialId,
+    ),
+    index("provider_limit_observations_user_deletion_index").on(
+      table.isDeleted,
+      table.userId,
+    ),
+  ],
+);
+
 export const runners = sqliteTable(
   "runners",
   {
@@ -125,9 +159,7 @@ export const agentSessions = sqliteTable(
     runnerId: text("runner_id")
       .notNull()
       .references(() => runners.id, { onDelete: "restrict" }),
-    providerCredentialId: text("provider_credential_id")
-      .notNull()
-      .references(() => providerCredentials.id, { onDelete: "restrict" }),
+    providerCredentialId: providerCredentialReference("provider_credential_id"),
     provider: providerColumn(),
     providerPricing: text("provider_pricing"),
     model: text("model").notNull(),

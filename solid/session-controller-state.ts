@@ -1,4 +1,5 @@
 import type { ProviderId } from "../shared/provider-credential-store.ts";
+import type { ProviderLimitState } from "../shared/provider-limits.ts";
 import { canonicalAgentSessionMessages } from "../shared/session-message-order.ts";
 import type {
   AgentSessionDetail,
@@ -366,6 +367,21 @@ export class SessionRealtimeState {
     if (!sessionDataMatches(view.detail, visibleDetail)) {
       this.#view.patch({ detail: visibleDetail });
     }
+  }
+
+  applyProviderLimits(credentialId: string, limits: ProviderLimitState): void {
+    const sessions = this.#view.value.sessions?.map((session) =>
+      session.credentialId === credentialId
+        ? { ...session, providerLimits: limits }
+        : session,
+    );
+    const detail = this.#view.value.detail;
+    this.#view.patch({
+      ...(sessions === undefined ? {} : { sessions }),
+      ...(detail?.credentialId === credentialId
+        ? { detail: { ...detail, providerLimits: limits } }
+        : {}),
+    });
   }
 
   applySessions(sessions: readonly AgentSessionSummary[]): void {

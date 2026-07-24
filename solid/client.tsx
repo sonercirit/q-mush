@@ -359,6 +359,18 @@ function App(): JSX.Element {
   const providerControllers = [openAi, openRouter, braveSearch] as const;
   const realtime = new RealtimeConnection((event) => {
     switch (event.type) {
+      case "provider_limits":
+        openAi.applyLimits(event.credentialId, event.limits);
+        openRouter.applyLimits(event.credentialId, event.limits);
+        agentSessions.applyProviderLimits(event.credentialId, event.limits);
+        break;
+      case "provider_limits_snapshot":
+        for (const item of event.credentials) {
+          openAi.applyLimits(item.credentialId, item.limits);
+          openRouter.applyLimits(item.credentialId, item.limits);
+          agentSessions.applyProviderLimits(item.credentialId, item.limits);
+        }
+        break;
       case "runners":
         runners.applyRealtime(event.runners);
         break;

@@ -8,10 +8,15 @@ import type { AppDatabase } from "./database.ts";
 import { providerCredentials } from "./database/schema.ts";
 import { defaultValues } from "./default-store.ts";
 import { createUuidV7, SYSTEM_ID, type IdGenerator } from "./ids.ts";
+import type { ProviderLimitState } from "./provider-limits.ts";
 
 export type ProviderCredentialSource = "api_key" | "oauth";
 export type ProviderId = "openai" | "openrouter";
 export type CredentialProviderId = ProviderId | "brave_search";
+
+export function isProviderId(value: unknown): value is ProviderId {
+  return value === "openai" || value === "openrouter";
+}
 
 export interface ProviderCredentialDetails {
   readonly accountId: string | null;
@@ -21,10 +26,14 @@ export interface ProviderCredentialDetails {
 export interface ProviderCredentialSummary extends ProviderCredentialDetails {
   readonly id: string;
   readonly isDefault: boolean;
+  readonly limits: ProviderLimitState;
   readonly source: ProviderCredentialSource;
 }
 
-export interface ProviderCredentialAccess extends ProviderCredentialSummary {
+export interface ProviderCredentialAccess extends Omit<
+  ProviderCredentialSummary,
+  "limits"
+> {
   readonly secret: string;
 }
 
@@ -167,16 +176,24 @@ export class ProviderCredentialStore {
         .run();
     }
 
-    return { ...details, id, isDefault: false, source };
+    return {
+      ...details,
+      id,
+      isDefault: false,
+      limits: { status: "unavailable" },
+      source,
+    };
   }
 
   list(userId: string): readonly ProviderCredentialSummary[] {
+    const unavailableLimits: ProviderLimitState = { status: "unavailable" };
     return this.#database
       .select(credentialSummarySelection())
       .from(providerCredentials)
       .where(activeCredentialCondition(this.#provider, userId))
       .orderBy(asc(providerCredentials.createdAt), asc(providerCredentials.id))
-      .all();
+      .all()
+      .map((credential) => ({ ...credential, limits: unavailableLimits }));
   }
 
   #readStored(userId: string, credentialId: string) {

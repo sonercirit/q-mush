@@ -8,6 +8,7 @@ import {
   readCookie,
   valuesMatch,
 } from "./http.ts";
+import type { ProviderLimitsService } from "./provider-limits-service.ts";
 
 const FLOW_LIFETIME_SECONDS = 10 * 60;
 const TOKEN_PATTERN = /^[A-Za-z\d_-]+$/u;
@@ -25,6 +26,7 @@ export interface OAuthEndpoints {
 export interface OAuthDependencies {
   readonly database?: AppDatabase;
   readonly fetch?: ProviderFetch;
+  readonly limits?: ProviderLimitsService;
   readonly now?: () => number;
   readonly randomId?: IdGenerator;
   readonly randomToken?: () => string;

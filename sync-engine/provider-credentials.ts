@@ -6,6 +6,10 @@ import {
   type ProviderCredentialStore,
   type ProviderCredentialSummary,
 } from "../shared/provider-credential-store.ts";
+import type {
+  ProviderLimitObservation,
+  ProviderLimitState,
+} from "../shared/provider-limits.ts";
 import type { GoogleAuth } from "./auth.ts";
 import {
   withAuthenticatedUser,
@@ -66,18 +70,34 @@ async function readApiKeyMetadata(
   return readJsonRecord(response, errorMessage);
 }
 
+export type ProviderLimitWriter = (
+  userId: string,
+  credentialId: string,
+  observation: ProviderLimitObservation,
+) => void;
+
+export interface ValidatedProviderCredentialDetails {
+  readonly details: ProviderCredentialDetails;
+  readonly limits?: ProviderLimitObservation;
+}
+
 export type ReadCredentialDetails = (
   apiKey: string,
-) => Promise<ProviderCredentialDetails>;
+) => Promise<ValidatedProviderCredentialDetails>;
 
 export class ProviderCredentialEndpoints {
   readonly #auth: GoogleAuth;
   readonly #labelRequired: boolean;
   readonly #now: () => number;
+  readonly #readLimits: (
+    userId: string,
+    credentialId: string,
+  ) => ProviderLimitState;
+  readonly #observeLimits: ProviderLimitWriter | undefined;
   readonly #readCredentialDetails: (
     apiKey: string,
     label: string | undefined,
-  ) => Promise<ProviderCredentialDetails>;
+  ) => Promise<ValidatedProviderCredentialDetails>;
   readonly #store: ProviderCredentialStore | undefined;
   readonly #validateApiKey: (apiKey: string) => boolean;
 
@@ -85,6 +105,11 @@ export class ProviderCredentialEndpoints {
     readonly auth: GoogleAuth;
     readonly labelRequired?: boolean;
     readonly now: () => number;
+    readonly observeLimits?: ProviderLimitWriter;
+    readonly readLimits?: (
+      userId: string,
+      credentialId: string,
+    ) => ProviderLimitState;
     readonly readCredentialDetails: ReadCredentialDetails;
     readonly readLabeledCredentialDetails?: (
       apiKey: string,
@@ -96,6 +121,8 @@ export class ProviderCredentialEndpoints {
     this.#auth = options.auth;
     this.#labelRequired = options.labelRequired ?? false;
     this.#now = options.now;
+    this.#readLimits =
+      options.readLimits ?? (() => ({ status: "unavailable" }));
     const readLabeledDetails = options.readLabeledCredentialDetails;
     if (readLabeledDetails !== undefined) {
       this.#readCredentialDetails = (apiKey, label) => {
@@ -103,12 +130,15 @@ export class ProviderCredentialEndpoints {
           return Promise.reject(new Error("The credential label is required"));
         }
 
-        return readLabeledDetails(apiKey, label);
+        return readLabeledDetails(apiKey, label).then((details) => ({
+          details,
+        }));
       };
     } else {
       this.#readCredentialDetails = (apiKey) =>
         options.readCredentialDetails(apiKey);
     }
+    this.#observeLimits = options.observeLimits;
     this.#store = options.store;
     this.#validateApiKey = options.validateApiKey ?? (() => true);
   }
@@ -132,13 +162,25 @@ export class ProviderCredentialEndpoints {
     );
   }
 
+  #withLimits(
+    userId: string,
+    credential: ProviderCredentialSummary,
+  ): ProviderCredentialSummary {
+    return {
+      ...credential,
+      limits: this.#readLimits(userId, credential.id),
+    };
+  }
+
   async #credentialsAuthorized(
     request: Request,
     user: AuthenticatedUser,
   ): Promise<Response> {
     if (request.method === "GET") {
       return createJsonResponse({
-        credentials: this.#credentialStore().list(user.id),
+        credentials: this.#credentialStore()
+          .list(user.id)
+          .map((credential) => this.#withLimits(user.id, credential)),
       });
     }
 
@@ -190,15 +232,21 @@ export class ProviderCredentialEndpoints {
     }
 
     try {
-      const details = await this.#readCredentialDetails(apiKey, supplied.label);
+      const validated = await this.#readCredentialDetails(
+        apiKey,
+        supplied.label,
+      );
       const credential = this.#credentialStore().add(
         user.id,
         apiKey,
-        details,
+        validated.details,
         "api_key",
         this.#now(),
       );
-      return createJsonResponse(credential, 201);
+      if (validated.limits !== undefined) {
+        this.#observeLimits?.(user.id, credential.id, validated.limits);
+      }
+      return createJsonResponse(this.#withLimits(user.id, credential), 201);
     } catch (error) {
       if (error instanceof InvalidProviderApiKeyError) {
         return invalidApiKeyResponse();
@@ -234,14 +282,19 @@ export class ProviderCredentialEndpoints {
     user: AuthenticatedUser,
     secret: string,
     details: ProviderCredentialDetails,
+    limits?: ProviderLimitObservation,
   ): ProviderCredentialSummary {
-    return this.#credentialStore().add(
+    const stored = this.#credentialStore().add(
       user.id,
       secret,
       details,
       "oauth",
       this.#now(),
     );
+    if (limits !== undefined) {
+      this.#observeLimits?.(user.id, stored.id, limits);
+    }
+    return { ...stored, limits: this.#readLimits(user.id, stored.id) };
   }
 
   setDefault(request: Request, credentialId: string): Response {
