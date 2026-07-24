@@ -5,8 +5,8 @@ import { renderAppPage, renderHomePage } from "../../solid/pages.tsx";
 
 function expectFaviconMetadata(html: string, pageUrl: string): void {
   const window = new Window({ url: pageUrl });
-  window.document.write(html);
-  const faviconLinks = window.document.head.querySelectorAll("link");
+  const document = new window.DOMParser().parseFromString(html, "text/html");
+  const faviconLinks = document.head.querySelectorAll("link");
   const faviconLink = [...faviconLinks].find(({ relList }) =>
     relList.contains("icon"),
   );
@@ -17,9 +17,7 @@ function expectFaviconMetadata(html: string, pageUrl: string): void {
   expect(faviconLink?.getAttribute("href")).toBe(FAVICON_PATH);
   expect(faviconLink?.getAttribute("type")).toBe("image/svg+xml");
   expect(faviconLink?.href).toBe(`https://q-mush.test${FAVICON_PATH}`);
-  expect(
-    window.document.body.querySelectorAll('link[rel~="icon"]'),
-  ).toHaveLength(0);
+  expect(document.body.querySelectorAll('link[rel~="icon"]')).toHaveLength(0);
 }
 
 test("renders every server page through Solid with absolute favicon metadata", () => {

@@ -2,13 +2,11 @@ name: Checks
 
 on:
   push:
+    branches: [main]
+  pull_request:
 
 permissions:
   contents: read
-
-concurrency:
-  group: checks-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   checks:
@@ -29,7 +27,17 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Run tests
+        if: ${{ !cancelled() }}
         run: bun run test
 
-      - name: Run static checks
+      - name: Run repository and static checks
+        if: ${{ !cancelled() }}
         run: bun run check
+
+      - name: Build production assets
+        if: ${{ !cancelled() }}
+        run: bun run build
+
+      - name: Check tracked whitespace
+        if: ${{ !cancelled() }}
+        run: git diff --check "$(git hash-object -t tree /dev/null)" HEAD
