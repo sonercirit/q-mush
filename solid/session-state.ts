@@ -7,6 +7,7 @@ import type {
   SessionModelDiscoveryState,
   SessionViewState,
 } from "./session-client.tsx";
+import { DEFAULT_SESSION_TRANSCRIPT_FILTERS } from "./session-transcript-filters.ts";
 
 export function mostRecentSessionDirectory(
   sessions: readonly Pick<AgentSessionSummary, "workingDirectory">[],
@@ -54,5 +55,6 @@ export function initialSessionViewState(): SessionViewState {
     sessions: undefined,
     sessionsSource: undefined,
     stopping: false,
+    transcriptFilters: { ...DEFAULT_SESSION_TRANSCRIPT_FILTERS },
   };
 }

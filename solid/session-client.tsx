@@ -1,10 +1,4 @@
-import {
-  createEffect,
-  createMemo,
-  Show,
-  type Accessor,
-  type JSX,
-} from "solid-js";
+import { createEffect, createMemo, Show, type JSX } from "solid-js";
 import {
   reasoningEffortLabel,
   type AgentModelCatalog,
@@ -35,7 +29,13 @@ import { SessionPromptInput } from "./session-client-forms.tsx";
 import { formatTokenCount } from "./session-context-client.tsx";
 import type { SessionController } from "./session-controller.ts";
 import { SessionDetail, SessionList } from "./session-detail-client.tsx";
+import type { SessionPanelResources } from "./session-panel-resources.ts";
+import {
+  selectedSessionCredentialAvailable,
+  selectedSessionRunnerAvailable,
+} from "./session-resource-availability.ts";
 import { SessionToolPicker } from "./session-tool-picker.tsx";
+import type { SessionTranscriptFilters } from "./session-transcript-filters.ts";
 
 export interface SessionDraft {
   readonly credential: string;
@@ -73,6 +73,7 @@ export interface SessionViewState {
   readonly sessions: readonly AgentSessionSummary[] | undefined;
   readonly sessionsSource: "http" | "realtime" | undefined;
   readonly stopping: boolean;
+  readonly transcriptFilters: SessionTranscriptFilters;
 }
 
 interface CredentialOption {
@@ -506,6 +507,9 @@ function NewSessionForm(props: {
 
 interface SessionResultsProps {
   readonly controller: SessionController;
+  readonly openAi: ProviderViewState;
+  readonly openRouter: ProviderViewState;
+  readonly runners: RunnerViewState;
 }
 
 function SessionResults(props: SessionResultsProps): JSX.Element {
@@ -522,18 +526,27 @@ function SessionResults(props: SessionResultsProps): JSX.Element {
         <SessionList controller={props.controller} />
       </aside>
       <div class="min-w-0 rounded-2xl border border-white/10 bg-slate-900/70 p-5">
-        <SessionDetail controller={props.controller} state={state()} />
+        <SessionDetail
+          controller={props.controller}
+          credentialAvailable={selectedSessionCredentialAvailable(
+            state().detail,
+            props.openAi,
+            props.openRouter,
+          )}
+          runnerAvailable={selectedSessionRunnerAvailable(
+            state().detail,
+            props.runners,
+          )}
+          state={state()}
+        />
       </div>
     </div>
   );
 }
 
-export function SessionPanel(props: {
-  readonly controller: SessionController;
-  readonly openAi: Accessor<ProviderViewState>;
-  readonly openRouter: Accessor<ProviderViewState>;
-  readonly runners: Accessor<RunnerViewState>;
-}): JSX.Element {
+export function SessionPanel(
+  props: SessionPanelResources & { readonly controller: SessionController },
+): JSX.Element {
   const state = props.controller.view;
   const online = (): readonly RunnerSummary[] => onlineRunners(props.runners());
   const credentials = (): readonly CredentialOption[] =>
@@ -592,7 +605,12 @@ export function SessionPanel(props: {
             void props.controller.load();
           }}
         />
-        <SessionResults controller={props.controller} />
+        <SessionResults
+          controller={props.controller}
+          openAi={props.openAi()}
+          openRouter={props.openRouter()}
+          runners={props.runners()}
+        />
       </section>
       <DirectoryPicker
         controller={props.controller.directoryPicker}

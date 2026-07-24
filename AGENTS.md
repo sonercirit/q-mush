@@ -1,31 +1,27 @@
 # AGENTS.md
 
-Living project memory.
+Living project memory; update durable information.
 
 ## Project Snapshot
 
-- Private strict-TypeScript ESM Bun/SolidJS project.
-- Source is split across `solid/`, `sync-engine/`, `runner/`, and `shared/`;
-  `sync-engine/index.ts` is the server entry point.
+- Private strict-TypeScript ESM Bun/SolidJS.
+- Source: `solid/`, `sync-engine/`, `runner/`, `shared/`; server:
+  `sync-engine/index.ts`.
 - Tests live in `test/` directories; no `src/`.
-- Homepage `/`; app `/app`; tests use Vitest with Bun.
+- Homepage `/`; app `/app`.
+- Tests use Vitest with Bun.
 
 ## Working Agreements
 
 - Inspect repository before edits.
-- Preserve existing patterns; add tools or dependencies only when needed.
-- Practice TDD for behavior: first update a failing test, then implement and
-  refactor while green.
-- Follow DRY (Don't Repeat Yourself): keep each piece of knowledge or logic in
-  one authoritative place, while avoiding premature abstractions.
-- Follow KISS (Keep It Simple, Stupid): prefer the simplest clear solution that
-  meets the requirements and avoid unnecessary complexity.
-- Follow local-first: keep data and core workflows on the user's machine by
-  default, with remote services enhancing rather than gating functionality.
-- Run the narrowest relevant checks after each change, then broader checks when
-  practical.
+- Preserve patterns; add dependencies only when needed.
+- Practice TDD: update a failing test, then implement and refactor green.
+- Follow DRY: keep facts and logic authoritative; avoid premature abstractions.
+- Follow KISS: prefer the simplest clear solution that meets requirements.
+- Follow local-first: keep core workflows local; remote services enhance them.
+- Run focused checks after changes, then broader checks when practical.
 - Keep changes focused; do not modify unrelated files.
-- Never commit secrets, credentials, generated artifacts, or local env files.
+- Never commit secrets, generated artifacts, or local env files.
 
 ## Setup and Commands
 
@@ -41,12 +37,12 @@ Living project memory.
 - Check dead code/dependencies: `bun run knip`; duplicates: `bun run cpd`
 - Lint/fix: `bun run lint` / `bun run lint:fix`; all static checks:
   `bun run check`
-- CI runs tests and static checks on every push through
-  `.github/workflows/checks.yml` using Bun 1.3.14 and a frozen lockfile.
+- CI runs tests/static checks on push via `.github/workflows/checks.yml` with
+  Bun 1.3.14 and a frozen lockfile.
 
 ## Architecture and Conventions
 
-- Bun manages dependencies through the committed `package.json` and `bun.lock`.
+- Bun manages dependencies via committed `package.json` and `bun.lock`.
 - Production source has four enforced top-level workspaces. `solid` owns browser
   UI, `sync-engine` the Bun server and integrations, `runner` the standalone
   runner, and `shared` cross-workspace code. The first three may import only
@@ -107,23 +103,27 @@ Living project memory.
   Runner tokens never appear in list responses.
 - Browser messages sort by time then ID. Live output anchors after the
   initiating message; snapshots replace it in place.
+- A realtime desktop panel separates Running/Queued, retains stale reconnect
+  data, bounds its keyed list at four, and becomes a mobile full-list button.
 - `sync-engine/sessions.ts` and `sync-engine/session-store.ts` persist coding
-  sessions. A realtime desktop panel separates Running/Queued, retains stale
-  reconnect data, bounds its keyed list at four, and becomes a mobile full-list
-  button. User messages support up to eight 10 MB PNG, JPEG, GIF, or WebP
-  images, persisted with the transcript and sent as native multimodal input.
-  Sessions record active time, cost (including compaction), token usage, and
-  context. OpenRouter charges are authoritative; others use captured/OpenAI
-  estimates, with unknown prices unavailable. OAuth figures are API equivalents,
-  not subscription charges. Usage is yellow at 80% and red at 90%.
-  Auto-compaction defaults on and summarizes completed history before the next
-  request at 95%; idle sessions can compact manually. Compaction soft-deletes
-  prior active messages and inserts a replayable handoff. Provider secrets never
-  enter browser or runner work payloads. The working-directory field opens the
-  interactive browser in `solid/directory-picker-client.tsx`; its controller
-  posts to `/api/runners/:id/directories` for canonical directory metadata.
-  Before each run, `read_agent_file` loads exact-root `AGENTS.md`, falling back
-  to `CLAUDE.md`; only `AGENTS.md` is used when both exist.
+  sessions. User messages support selecting or pasting up to eight 10 MB PNG,
+  JPEG, GIF, or WebP images, persisted with the transcript and sent as native
+  multimodal input. Sessions record cumulative active time, model cost
+  (including compaction), token usage, and the context limit. OpenRouter charges
+  are authoritative; others use captured/OpenAI estimates, with unknown prices
+  unavailable. OAuth figures are API equivalents, not subscription charges.
+  Usage is yellow at 80% and red at 90%. Auto-compaction defaults on and
+  summarizes completed history before the next request at 95%; idle sessions can
+  compact manually. The existing-session composer stays mounted across status
+  changes and explains why actions are unavailable. Versioned browser-local
+  preferences filter transcript categories without changing message data.
+  Compaction soft-deletes prior active messages and inserts a replayable
+  handoff. Provider secrets never enter browser or runner work payloads. The
+  working-directory field opens the interactive browser in
+  `solid/directory-picker-client.tsx`; its controller posts to
+  `/api/runners/:id/directories` for canonical directory metadata. Before each
+  run, `read_agent_file` loads exact-root `AGENTS.md`, falling back to
+  `CLAUDE.md`; only `AGENTS.md` is used when both exist.
 
   `runner/runner-workspace.ts` shares canonical workspace resolution and
   containment with the file tools. Tool and skill selections persist per
@@ -194,8 +194,9 @@ Living project memory.
   `knip.production.config.ts` limits the production graph to runtime source.
   `bun run knip` runs both production and comprehensive test/tooling passes, so
   tests cannot keep production code alive while unused test helpers still fail.
-- `.jscpd.json` checks all JS/TS, including tests, as TSX while ignoring
-  imports; any clone of at least 20 tokens and one line fails.
+- `.jscpd.json` maps all supported JavaScript and TypeScript extensions to the
+  TSX format for cross-extension detection. It checks tests too, ignores import
+  declarations, and rejects other clones of at least 20 tokens and one line.
 - `scripts/repository-check.ts` lists existing tracked and unignored files and
   calls the focused policy APIs under `scripts/`. It rejects files reaching
   20,000 Unicode code points (excluding `bun.lock` and the generated `drizzle/`

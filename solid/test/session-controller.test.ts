@@ -1,20 +1,33 @@
 import { createRoot } from "solid-js";
-import { expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { SESSIONS_PATH } from "../../shared/routes.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
+import { createReactiveState } from "../../solid/reactive-state.ts";
+import type { SessionViewState } from "../../solid/session-client.tsx";
 import { summaryFromDetail } from "../../solid/session-codec.ts";
 import { SessionController } from "../../solid/session-controller.ts";
+import { initialSessionViewState } from "../../solid/session-state.ts";
+import {
+  DEFAULT_SESSION_TRANSCRIPT_FILTERS,
+  writeSessionTranscriptFilters,
+} from "../../solid/session-transcript-filters.ts";
 import {
   countReactiveChanges,
   installFetch,
   requestUrl,
   withRestoredFetch,
 } from "./controller-test-helpers.ts";
+import { MemoryStorage } from "./memory-storage.ts";
+import { createResponseFetch } from "./session-dom-test-helpers.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 import {
   sessionDetailWithStatus,
   transcriptMessage,
 } from "./transcript-ordering-fixtures.ts";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function assistantMessage(id = "assistant-1", content = "Response") {
   return transcriptMessage(id, content, "assistant", 2);
@@ -139,11 +152,7 @@ function queuedDetail(
 }
 
 function jsonFetch(response: unknown): typeof globalThis.fetch {
-  const originalFetch = globalThis.fetch;
-  return Object.assign(
-    (): Promise<Response> => Promise.resolve(Response.json(response)),
-    { preconnect: originalFetch.preconnect },
-  );
+  return createResponseFetch(response);
 }
 
 function selectedController(
@@ -535,3 +544,70 @@ test("an unchanged realtime snapshot does not notify the view", async () => {
     });
   });
 });
+
+test("loads persisted transcript filters into the controller and keeps them on reset", () => {
+  const storage = new MemoryStorage();
+  writeSessionTranscriptFilters(storage, {
+    ...DEFAULT_SESSION_TRANSCRIPT_FILTERS,
+    toolDefinitions: false,
+  });
+  const controller = new SessionController(
+    createReactiveState(initialSessionViewState()),
+    undefined,
+    storage,
+  );
+
+  expect(controller.state.transcriptFilters.toolDefinitions).toBe(false);
+  controller.reset();
+  expect(controller.state.transcriptFilters.toolDefinitions).toBe(false);
+});
+
+test.each([
+  { action: "send", busy: { compacting: true } },
+  { action: "continueSession", busy: { stopping: true } },
+  { action: "stop", busy: { sending: true } },
+] as const)(
+  "guards invalid or duplicate $action mutations in the controller",
+  async ({ action, busy }) => {
+    const active = action === "stop";
+    const detail = {
+      ...TEST_SESSION_DETAIL,
+      status: active ? ("idle" as const) : ("running" as const),
+    };
+    const reactive = createReactiveState<SessionViewState>({
+      ...initialSessionViewState(),
+      ...busy,
+      detail,
+      followUp: "Do not submit",
+      selectedId: detail.id,
+    });
+    const controller = new SessionController(reactive);
+    const fetch = vi.spyOn(globalThis, "fetch");
+
+    await controller[action]();
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(controller.state.followUp).toBe("Do not submit");
+  },
+);
+
+test.each(["compact", "continueSession", "stop", "toggleAutoCompact"] as const)(
+  "rejects %s when the detail does not match the selected session",
+  async (action) => {
+    const reactive = createReactiveState<SessionViewState>({
+      ...initialSessionViewState(),
+      detail: { ...TEST_SESSION_DETAIL, id: "stale-detail" },
+      selectedId: TEST_SESSION_DETAIL.id,
+    });
+    const controller = new SessionController(reactive, undefined, null);
+    const fetch = vi.spyOn(globalThis, "fetch");
+
+    if (action === "toggleAutoCompact") {
+      await controller.toggleAutoCompact(false);
+    } else {
+      await controller[action]();
+    }
+
+    expect(fetch).not.toHaveBeenCalled();
+  },
+);

@@ -390,6 +390,7 @@ test("session resources, drafts, realtime lists, and selected details update in 
       "li",
     ),
   ).toBe(sessionItem);
+  controller.setTranscriptFilter("systemPrompt", true);
   click(container, `[data-session-id='${TEST_SESSION_DETAIL.id}']`);
   const sessionPromptLabel = "System prompt";
   await vi.waitFor(() => {

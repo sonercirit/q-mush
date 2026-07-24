@@ -1,15 +1,5 @@
 import { expect, test } from "vitest";
-import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
-import {
-  DirectoryPickerController,
-  initialDirectoryPickerState,
-} from "../../solid/directory-picker-controller.ts";
-import { createReactiveState } from "../../solid/reactive-state.ts";
-import {
-  SessionPanel,
-  type SessionViewState,
-} from "../../solid/session-client.tsx";
-import { SessionController } from "../../solid/session-controller.ts";
+import type { SessionViewState } from "../../solid/session-client.tsx";
 import {
   TEST_AGENT_IMAGE,
   testUserImageMessage,
@@ -20,88 +10,33 @@ import {
   numberedModels,
   numberedRunners,
 } from "./custom-select-consumer-fixtures.ts";
-import { renderSolidToString } from "./render-solid.tsx";
 import { runnerSummary } from "./runner-fixtures.ts";
 import {
   FORMATTED_SESSION_MESSAGES,
   sessionStateWithMessages,
 } from "./session-client-fixtures.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
+import {
+  renderSessionPanelForTest,
+  renderSessionPanelWithResources,
+  SESSION_PANEL_TEST_CONTEXT,
+} from "./session-panel-test-context.ts";
 
-const SESSION_STATE: SessionViewState = {
-  compacting: false,
-  directoryPicker: initialDirectoryPickerState(),
-  sessions: [],
-  sessionsSource: "http",
-  stopping: false,
-  sending: false,
-  selectedId: undefined,
-  modelDiscovery: {
-    catalog: {
-      defaultModel: "gpt-5-codex",
-      models: [
-        {
-          contextWindow: 200_000,
-          id: "gpt-5-codex",
-          inputModalities: ["text", "image", "audio"],
-          label: "GPT-5 Codex (discovered)",
-          outputModalities: ["text"],
-          pricing: null,
-          reasoningEfforts: ["medium", "high", "xhigh"],
-        },
-        {
-          contextWindow: 64_000,
-          id: "image-model",
-          inputModalities: ["image"],
-          label: "Image Model",
-          outputModalities: ["image"],
-          pricing: null,
-          reasoningEfforts: [],
-        },
-      ],
-    },
-    credential: "openai:credential-1",
-    error: undefined,
-    loading: false,
-  },
-  loadingDetail: false,
-  openSelect: "model",
-  followUp: "",
-  followUpImages: [],
-  error: undefined,
-  draft: {
-    images: [],
-    workingDirectory: ".",
-    runnerId: "runner-1",
-    reasoningEffort: "high",
-    prompt: "",
-    model: "gpt-5-codex",
-    tools: AGENT_SESSION_TOOL_NAMES,
-    credential: "openai:credential-1",
-  },
-  detail: undefined,
-  creating: false,
-};
-
-const RUNNER_STATE = runnerViewState([runnerSummary(1)]);
+const PANEL_CONTEXT = SESSION_PANEL_TEST_CONTEXT;
+const SESSION_STATE = PANEL_CONTEXT.state;
+const {
+  emptyProvider: EMPTY_PROVIDER_STATE,
+  openAi: OPENAI_STATE,
+  runners: RUNNER_STATE,
+} = PANEL_CONTEXT;
 
 const SECOND_RUNNER_STATE = runnerViewState([
-  runnerSummary(1),
+  ...(RUNNER_STATE.runners ?? []),
   {
     ...runnerSummary(2),
     id: "runner-2",
     isDefault: true,
     name: "laptop",
-  },
-]);
-
-const OPENAI_STATE = providerViewState([
-  {
-    accountId: "account-1",
-    id: "credential-1",
-    isDefault: false,
-    label: "OpenAI account",
-    source: "oauth",
   },
 ]);
 
@@ -115,8 +50,6 @@ const DEFAULT_OPENAI_STATE = providerViewState([
     source: "api_key",
   },
 ]);
-
-const EMPTY_PROVIDER_STATE = providerViewState([]);
 
 function stateWithoutSelections(): SessionViewState {
   return {
@@ -143,24 +76,12 @@ function renderPanelWithProviders(
   openAiState = OPENAI_STATE,
   openRouterState = EMPTY_PROVIDER_STATE,
 ): string {
-  return renderSolidToString(() => {
-    const controller = new SessionController(
-      createReactiveState(state),
-      new DirectoryPickerController(createReactiveState(state.directoryPicker)),
-    );
-    return (
-      <SessionPanel
-        controller={controller}
-        openAi={() => openAiState}
-        openRouter={() => openRouterState}
-        runners={() => runnerState}
-      />
-    );
-  });
+  const resources = [runnerState, openAiState, openRouterState] as const;
+  return renderSessionPanelWithResources(PANEL_CONTEXT, state, ...resources);
 }
 
 function renderPanel(state: SessionViewState): string {
-  return renderPanelWithProviders(state);
+  return renderSessionPanelForTest(PANEL_CONTEXT, state);
 }
 
 test("paginates every session select consumer without provider-specific behavior", () => {
@@ -259,7 +180,7 @@ test("renders the session list as a scrollable region", () => {
   expect(html).not.toContain("data-scroll-key");
 });
 
-test("renders the system prompt and model thinking in a transcript", () => {
+test("renders independently filtered session instructions and activity", () => {
   const state: SessionViewState = {
     ...SESSION_STATE,
     detail: {
@@ -322,9 +243,29 @@ test("renders the system prompt and model thinking in a transcript", () => {
       workingDirectory: ".",
     },
     selectedId: "session-1",
+    transcriptFilters: {
+      ...SESSION_STATE.transcriptFilters,
+      agentInstructions: true,
+      systemPrompt: true,
+      thinking: true,
+      toolDefinitions: true,
+    },
   };
   const html = renderPanel(state);
 
+  expect(html).toContain('aria-label="Transcript visibility"');
+  for (const category of [
+    "Base instructions",
+    "Stored agent instructions",
+    "Selected tool definitions",
+    "Tool calls and responses",
+    "User messages",
+    "Thinking and reasoning",
+    "Assistant messages",
+    "Errors and session notices",
+  ]) {
+    expect(html).toContain(category);
+  }
   expect(html).toContain("System prompt");
   expect(html).not.toContain("data-scroll-key");
   expect(html).not.toContain("data-scroll-on-change");
@@ -333,7 +274,7 @@ test("renders the system prompt and model thinking in a transcript", () => {
     "You are Q Mush, a careful coding agent operating in a user-selected workspace.",
   );
   expect(html).toContain("Always run Bun tests.");
-  expect(html).toContain('&lt;project_instructions path="AGENTS.md">');
+  expect(html).not.toContain('&lt;project_instructions path="AGENTS.md">');
   expect(html).not.toContain('<em class="text-slate-100 italic">instructions');
   expect(html).toContain("Agent file: AGENTS.md");
   expect(html).toContain("Context: Not reported / 200K");
@@ -359,7 +300,7 @@ test("renders the system prompt and model thinking in a transcript", () => {
     "{&quot;path&quot;:&quot;README.md&quot;,&quot;offset&quot;:1}",
   );
   expect(html).toContain("# Q Mush");
-  expect(html).toContain(">Continue</button>");
+  expect(html).toContain(">Continue without message</button>");
 });
 
 test("renders image pickers, previews, and transcript images", () => {

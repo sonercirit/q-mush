@@ -3,6 +3,7 @@ import type { AgentSessionToolName } from "../shared/agent-tools.ts";
 import { SESSIONS_PATH } from "../shared/routes.ts";
 import type {
   AgentSessionDetail,
+  AgentSessionStatus,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
 import { requestJson } from "./browser-http.ts";
@@ -35,6 +36,47 @@ import {
   initialSessionViewState,
   mostRecentSessionDirectory,
 } from "./session-state.ts";
+import {
+  readSessionTranscriptFilters,
+  writeSessionTranscriptFilters,
+  type SessionTranscriptFilterName,
+  type SessionTranscriptFilterStorage,
+} from "./session-transcript-filters.ts";
+
+function detailMutationPending(state: SessionViewState): boolean {
+  return state.compacting || state.sending || state.stopping;
+}
+
+function selectedDetailHasStatus(
+  state: SessionViewState,
+  allowed: (status: AgentSessionStatus) => boolean,
+): boolean {
+  return (
+    state.selectedId !== undefined &&
+    state.detail?.id === state.selectedId &&
+    allowed(state.detail.status)
+  );
+}
+
+function sessionIsActive(status: AgentSessionStatus): boolean {
+  return status === "queued" || status === "running";
+}
+
+function sessionCanResume(status: AgentSessionStatus): boolean {
+  return status === "idle" || status === "failed" || status === "stopped";
+}
+
+function browserTranscriptFilterStorage():
+  SessionTranscriptFilterStorage | undefined {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
 
 function selectedMutation(
   sessionId: string | undefined,
@@ -43,15 +85,11 @@ function selectedMutation(
   return sessionId === undefined ? undefined : create(sessionId);
 }
 
-function focusSessionList(element: HTMLElement | undefined): void {
-  element?.scrollIntoView({ behavior: "smooth", block: "start" });
-  element?.focus({ preventScroll: true });
-}
-
 export class SessionController {
   readonly #directoryPicker: DirectoryPickerController;
   readonly #models: SessionModelController;
   readonly #realtime: SessionRealtimeState;
+  readonly #transcriptFilterStorage: SessionTranscriptFilterStorage | undefined;
   readonly #view: RevisionState<SessionViewState>;
   readonly #reactiveView: ReactiveState<SessionViewState>;
   #listElement: HTMLElement | undefined;
@@ -59,21 +97,26 @@ export class SessionController {
   constructor(
     reactiveView = createReactiveState(initialSessionViewState()),
     directoryPicker = new DirectoryPickerController(),
+    transcriptFilterStorage:
+      | SessionTranscriptFilterStorage
+      | null
+      | undefined = browserTranscriptFilterStorage(),
   ) {
     this.#reactiveView = reactiveView;
     this.#view = new RevisionState(reactiveView.state, reactiveView.setState);
+    const transcriptFilters =
+      transcriptFilterStorage === null || transcriptFilterStorage === undefined
+        ? reactiveView.state().transcriptFilters
+        : readSessionTranscriptFilters(transcriptFilterStorage);
+    this.#view.patch({ transcriptFilters });
     this.#realtime = new SessionRealtimeState(this.#view);
     this.#models = new SessionModelController(this.#view);
     this.#directoryPicker = directoryPicker;
+    this.#transcriptFilterStorage = transcriptFilterStorage ?? undefined;
   }
 
   applyDetail(detail: AgentSessionDetail): void {
-    if (
-      this.#view.value.creating ||
-      this.#view.value.compacting ||
-      this.#view.value.sending ||
-      this.#view.value.stopping
-    ) {
+    if (this.#view.value.creating || detailMutationPending(this.#view.value)) {
       return;
     }
     this.#realtime.applyDetail(detail);
@@ -103,7 +146,8 @@ export class SessionController {
   }
 
   focusList(): void {
-    focusSessionList(this.#listElement);
+    this.#listElement?.scrollIntoView({ behavior: "smooth", block: "start" });
+    this.#listElement?.focus({ preventScroll: true });
   }
 
   setListElement(element: HTMLElement): void {
@@ -207,16 +251,10 @@ export class SessionController {
   }
 
   selectAndFocus(sessionId: string): Promise<void> {
-    if (this.#canSelect(sessionId)) {
-      this.#listElement?.scrollIntoView({
-        behavior: "smooth",
-        block: "start",
-      });
-      return this.#select(sessionId).finally(() => {
-        focusSessionList(this.#listElement);
-      });
-    }
-    return Promise.resolve();
+    this.#listElement?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return this.#select(sessionId).finally(() => {
+      this.focusList();
+    });
   }
 
   send(): Promise<void> {
@@ -247,6 +285,21 @@ export class SessionController {
     return this.#toggleAutoCompact(autoCompact);
   }
 
+  setTranscriptFilter(
+    name: SessionTranscriptFilterName,
+    visible: boolean,
+  ): void {
+    const transcriptFilters = {
+      ...this.#view.value.transcriptFilters,
+      [name]: visible,
+    };
+    this.#view.patch({ transcriptFilters });
+    writeSessionTranscriptFilters(
+      this.#transcriptFilterStorage,
+      transcriptFilters,
+    );
+  }
+
   toggleSelect(
     name: "credential" | "model" | "reasoningEffort" | "runnerId",
   ): void {
@@ -267,11 +320,14 @@ export class SessionController {
   }
 
   reset(): void {
+    const transcriptFilters = readSessionTranscriptFilters(
+      this.#transcriptFilterStorage,
+    );
     this.#directoryPicker.reset();
     this.#models.reset();
     this.#realtime.reset();
     this.#listElement = undefined;
-    this.#view.reset(initialSessionViewState());
+    this.#view.reset({ ...initialSessionViewState(), transcriptFilters });
   }
 
   async #loadSessions(revision: number, initial: boolean): Promise<void> {
@@ -482,7 +538,6 @@ export class SessionController {
     if (!this.#canSelect(sessionId)) {
       return;
     }
-
     if (
       sessionId === this.#view.value.selectedId &&
       this.#view.value.detail !== undefined
@@ -503,10 +558,15 @@ export class SessionController {
 
   async #send(): Promise<void> {
     const sessionId = this.#view.value.selectedId;
+    const detail = this.#view.value.detail;
     const prompt = this.#view.value.followUp.trim();
 
     if (
       sessionId === undefined ||
+      detail?.id !== sessionId ||
+      detail.status === "queued" ||
+      detail.status === "running" ||
+      this.#detailMutationPending() ||
       (prompt.length === 0 && this.#view.value.followUpImages.length === 0)
     ) {
       return;
@@ -533,13 +593,29 @@ export class SessionController {
     });
   }
 
+  async #mutateWhen(
+    allowed: (status: AgentSessionStatus) => boolean,
+    mutation: (sessionId: string) => SessionMutation,
+  ): Promise<void> {
+    if (
+      !this.#detailMutationPending() &&
+      selectedDetailHasStatus(this.#view.value, allowed)
+    ) {
+      await this.#mutateSelected(mutation);
+    }
+  }
+
   async #compact(): Promise<void> {
-    await this.#mutateSelected(compactSessionMutation);
+    await this.#mutateWhen(sessionCanResume, compactSessionMutation);
   }
 
   async #toggleAutoCompact(autoCompact: boolean): Promise<void> {
     const sessionId = this.#view.value.selectedId;
-    if (sessionId === undefined) {
+    if (
+      sessionId === undefined ||
+      this.#detailMutationPending() ||
+      !selectedDetailHasStatus(this.#view.value, sessionCanResume)
+    ) {
       return;
     }
 
@@ -547,11 +623,15 @@ export class SessionController {
   }
 
   async #continue(): Promise<void> {
-    await this.#mutateSelected(continueSessionMutation);
+    await this.#mutateWhen(sessionCanResume, continueSessionMutation);
   }
 
   async #stop(): Promise<void> {
-    await this.#mutateSelected(stopSessionMutation);
+    await this.#mutateWhen(sessionIsActive, stopSessionMutation);
+  }
+
+  #detailMutationPending(): boolean {
+    return detailMutationPending(this.#view.value);
   }
 
   async #mutateSelected(
