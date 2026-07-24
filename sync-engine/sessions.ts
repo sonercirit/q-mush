@@ -61,6 +61,10 @@ import {
 } from "./session-request-helpers.ts";
 import { RunnerRemovalCoordinator } from "./session-runner-removal.ts";
 import { SessionRuntimes } from "./session-runtime.ts";
+import {
+  storedSessionResponse,
+  withStoredSession,
+} from "./session-store-access.ts";
 import { SessionStore } from "./session-store.ts";
 
 export type { SessionCredentialReaders } from "./session-credential-access.ts";
@@ -270,7 +274,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
 
   item(request: Request, sessionId: string): Response {
     return this.#requests.authenticate(request, "GET", (user) =>
-      this.#detailResponse(user.id, sessionId),
+      storedSessionResponse(this.#store, user.id, sessionId),
     );
   }
 
@@ -323,7 +327,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
 
   async stop(request: Request, sessionId: string): Promise<Response> {
     return this.#requests.postForUser(request, (user) =>
-      this.#withStoredSession(user, sessionId, (existing) => {
+      withStoredSession(this.#store, user.id, sessionId, (existing) => {
         if (existing.status !== "stopped") {
           this.#store.stop(user.id, sessionId, this.#now());
         }
@@ -331,7 +335,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
         this.#runtimes.abort(sessionId);
         this.#broker.cancelSession(sessionId);
         this.#notify(user.id, sessionId);
-        return this.#detailResponse(user.id, sessionId);
+        return storedSessionResponse(this.#store, user.id, sessionId);
       }),
     );
   }
@@ -341,17 +345,6 @@ class DrizzleSessionIntegration implements SessionIntegration {
       listener(userId, sessionId);
     }
   };
-
-  #withStoredSession(
-    user: AuthenticatedUser,
-    sessionId: string,
-    action: (session: AgentSessionDetail) => Promise<Response> | Response,
-  ): Promise<Response> | Response {
-    const session = this.#store.get(user.id, sessionId);
-    return session === undefined
-      ? createApiError("not_found", 404)
-      : action(session);
-  }
 
   async #readCredential(
     userId: string,
@@ -376,13 +369,6 @@ class DrizzleSessionIntegration implements SessionIntegration {
     return this.#runners.runnerIsAvailable(userId, selection.runnerId)
       ? this.#withCredentialAccess(userId, selection, action)
       : createApiError("runner_unavailable", 409);
-  }
-
-  #detailResponse(userId: string, sessionId: string): Response {
-    const detail = this.#store.get(userId, sessionId);
-    return detail === undefined
-      ? createApiError("not_found", 404)
-      : createJsonResponse(detail);
   }
 
   #collectionForUser(

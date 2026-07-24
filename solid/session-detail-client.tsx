@@ -439,12 +439,7 @@ function LoadedSessionDetail(props: LoadedSessionDetailViewProps): JSX.Element {
         </div>
       </div>
       <Show when={props.detail.runnerRequired}>
-        <RunnerReassignment
-          controller={props.controller}
-          onOpenDirectoryPicker={props.onOpenDirectoryPicker}
-          runners={props.runners}
-          state={props.state}
-        />
+        <RunnerReassignment {...props} />
       </Show>
       <SessionTranscriptFilterControls
         counts={filterCounts()}
@@ -562,12 +557,9 @@ export function SessionDetail(props: SessionDetailViewProps): JSX.Element {
       >
         {(detail) => (
           <LoadedSessionDetail
-            controller={props.controller}
+            {...props}
             credentialAvailable={props.credentialAvailable}
             detail={detail()}
-            onOpenDirectoryPicker={props.onOpenDirectoryPicker}
-            runners={props.runners}
-            state={props.state}
           />
         )}
       </Show>
