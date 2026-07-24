@@ -30,26 +30,35 @@ describe("provider stream error classification", () => {
     }
   });
 
-  test("recognizes numeric-string and metadata transient codes", () => {
-    const numeric = readProviderStreamError({
-      error: { code: "503", message: "Provider unavailable" },
-      type: "response.failed",
-    });
-    const metadata = {
-      error: {
-        message: "Upstream unavailable",
-        metadata: { error_type: "provider_unavailable" },
+  test("recognizes numeric-string and metadata transient signals", () => {
+    const events = [
+      { error: { code: "503", message: "Provider unavailable" } },
+      { status: "503" },
+      { error: { status: "503" } },
+      {
+        error: {
+          message: "Upstream unavailable",
+          metadata: { error_type: "provider_unavailable" },
+        },
       },
-      type: "response.failed",
-    };
+    ];
 
-    expect(numeric.transient).toBe(true);
-    expect(numeric.message).toContain("code 503");
-    expectTransient(metadata);
+    for (const event of events) {
+      expectTransient({ ...event, type: "response.failed" });
+    }
+    expect(
+      readProviderStreamError({
+        ...events[0],
+        type: "response.failed",
+      }).message,
+    ).toContain("code 503");
   });
 
   test("known permanent signals override unknown or transient ones", () => {
     const errors: readonly Readonly<Record<string, unknown>>[] = [
+      { status: "401" },
+      { code: "insufficient_quota" },
+      { code: "context_length_exceeded" },
       {
         code: "policy_violation",
         metadata: { error_type: "provider_unavailable" },
