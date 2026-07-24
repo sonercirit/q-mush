@@ -28,6 +28,7 @@ interface SessionPromptInputProps extends PromptEventProps, SessionImagesProps {
 
 interface SessionFollowUpProps extends PromptEventProps, SessionImagesProps {
   readonly available: boolean;
+  readonly onContinue: () => void;
   readonly onSubmit: () => void;
   readonly prompt: string;
   readonly sending: boolean;
@@ -65,6 +66,7 @@ function renderSessionImages(
 }
 
 function SessionSubmitButton(props: {
+  readonly available: boolean;
   readonly label: string;
   readonly pending: boolean;
 }): JSX.Element {
@@ -72,7 +74,7 @@ function SessionSubmitButton(props: {
     <button
       aria-keyshortcuts={shortcutKeys(SHORTCUT_ACTIONS.sendFollowUp)}
       class="self-end rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:opacity-50"
-      disabled={props.pending}
+      disabled={!props.available || props.pending}
       type="submit"
     >
       {props.label}
@@ -82,8 +84,7 @@ function SessionSubmitButton(props: {
 }
 
 function registerComposerShortcut(
-  action:
-    typeof SHORTCUT_ACTIONS.sendFollowUp | typeof SHORTCUT_ACTIONS.startSession,
+  action: typeof SHORTCUT_ACTIONS.startSession,
   available: () => boolean,
 ): (element: HTMLTextAreaElement) => void {
   let prompt: HTMLTextAreaElement | undefined;
@@ -94,6 +95,30 @@ function registerComposerShortcut(
       prompt?.form?.requestSubmit();
     },
     () => prompt,
+  );
+  return (element) => {
+    prompt = element;
+  };
+}
+
+function registerFollowUpShortcuts(
+  props: SessionFollowUpProps,
+): (element: HTMLTextAreaElement) => void {
+  let prompt: HTMLTextAreaElement | undefined;
+  const target = (): HTMLTextAreaElement | undefined => prompt;
+  registerShortcut(
+    SHORTCUT_ACTIONS.sendFollowUp,
+    () => props.available && !props.sending,
+    () => {
+      prompt?.form?.requestSubmit();
+    },
+    target,
+  );
+  registerShortcut(
+    SHORTCUT_ACTIONS.continueSession,
+    () => !props.sending,
+    props.onContinue,
+    target,
   );
   return (element) => {
     prompt = element;
@@ -158,10 +183,7 @@ export function SessionPromptInput(
 }
 
 export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
-  const promptRef = registerComposerShortcut(
-    SHORTCUT_ACTIONS.sendFollowUp,
-    () => props.available && !props.sending,
-  );
+  const promptRef = registerFollowUpShortcuts(props);
 
   return (
     <form
@@ -183,10 +205,23 @@ export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
         id: "follow-up-images",
         ...props,
       })}
-      <SessionSubmitButton
-        label={props.sending ? "Sending…" : "Send"}
-        pending={props.sending}
-      />
+      <div class="flex items-end gap-3">
+        <SessionSubmitButton
+          available={props.available}
+          label={props.sending ? "Sending…" : "Send"}
+          pending={props.sending}
+        />
+        <button
+          aria-keyshortcuts={shortcutKeys(SHORTCUT_ACTIONS.continueSession)}
+          class="self-end rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:opacity-50"
+          disabled={props.sending}
+          onClick={props.onContinue}
+          type="button"
+        >
+          Continue
+          <ShortcutHint action={SHORTCUT_ACTIONS.continueSession} />
+        </button>
+      </div>
     </form>
   );
 }

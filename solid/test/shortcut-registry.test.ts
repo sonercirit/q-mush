@@ -4,9 +4,11 @@ import {
   KeyboardShortcutRegistry,
   SHORTCUT_ACTIONS,
   shortcutAriaKey,
+  shortcutDefinition,
   shortcutDisplayLabel,
   shortcutRegistryApi,
   type ShortcutDefinition,
+  type ShortcutKey,
 } from "../../solid/shortcut-registry.ts";
 
 function keyboardEvent(
@@ -47,6 +49,7 @@ describe("keyboard shortcut definitions", () => {
             .submit,
         ],
         label: "First action",
+        layer: "scoped",
         scope: "test-view",
       },
       {
@@ -58,6 +61,7 @@ describe("keyboard shortcut definitions", () => {
             .submit,
         ],
         label: "Second action",
+        layer: "scoped",
         scope: "test-view",
       },
     ];
@@ -67,6 +71,52 @@ describe("keyboard shortcut definitions", () => {
         .shortcutRegistryTestApi()
         .assertNoShortcutConflicts(conflicting);
     }).toThrow(/First action.*Second action/u);
+  });
+
+  test("rejects platform-resolved conflicts and malformed primary bindings", () => {
+    const malformed: readonly ShortcutDefinition[] = [
+      {
+        action: "malformed",
+        context: "Test view",
+        input: "ignore",
+        keys: [{ ctrl: true, key: "Enter", primary: true }],
+        label: "Malformed action",
+        layer: "scoped",
+        scope: "test-view",
+      },
+    ];
+
+    expect(() => {
+      shortcutRegistryApi
+        .shortcutRegistryTestApi()
+        .assertNoShortcutConflicts(malformed);
+    }).toThrow(/combines primary/u);
+
+    const platformConflict: readonly ShortcutDefinition[] = [
+      {
+        action: "primary",
+        context: "Test view",
+        input: "ignore",
+        keys: [{ key: "Enter", primary: true }],
+        label: "Primary action",
+        layer: "scoped",
+        scope: "test-view",
+      },
+      {
+        action: "control",
+        context: "Test view",
+        input: "ignore",
+        keys: [{ ctrl: true, key: "Enter" }],
+        label: "Control action",
+        layer: "scoped",
+        scope: "test-view",
+      },
+    ];
+    expect(() => {
+      shortcutRegistryApi
+        .shortcutRegistryTestApi()
+        .assertNoShortcutConflicts(platformConflict);
+    }).toThrow(/Primary action.*Control action/u);
   });
 
   test("formats primary shortcuts for the current platform", () => {
@@ -83,8 +133,13 @@ describe("keyboard shortcut definitions", () => {
     expect(
       shortcutRegistryApi
         .shortcutRegistryTestApi()
-        .detectShortcutPlatform("Win32"),
+        .detectShortcutPlatform("Linux x86_64 Mozilla/5.0 (X11; Linux x86_64)"),
     ).toBe("other");
+    expect(
+      shortcutRegistryApi
+        .shortcutRegistryTestApi()
+        .detectShortcutPlatform("Linux armv8l Mozilla/5.0 (Macintosh)"),
+    ).toBe("mac");
     expect(
       shortcutDisplayLabel(
         shortcutRegistryApi.shortcutRegistryTestApi().composerShortcutKeys
@@ -108,6 +163,12 @@ describe("keyboard shortcut definitions", () => {
     ).toBe("Meta+Enter");
     expect(
       shortcutAriaKey(
+        shortcutDefinition(SHORTCUT_ACTIONS.showShortcutHelp).keys[0],
+        "other",
+      ),
+    ).toBe("Shift+/");
+    expect(
+      shortcutAriaKey(
         shortcutRegistryApi.shortcutRegistryTestApi().composerShortcutKeys
           .submit,
         "other",
@@ -115,45 +176,48 @@ describe("keyboard shortcut definitions", () => {
     ).toBe("Control+Enter");
   });
 
-  test("models primary Enter and Shift Enter independently", () => {
+  test("assigns primary Enter and primary Shift+Enter without claiming bare Shift+Enter", () => {
     const commandEnter = keyboardEvent({ key: "Enter", metaKey: true });
+    const commandShiftEnter = keyboardEvent({
+      key: "Enter",
+      metaKey: true,
+      shiftKey: true,
+    });
     const controlEnter = keyboardEvent({ ctrlKey: true, key: "Enter" });
+    const controlShiftEnter = keyboardEvent({
+      ctrlKey: true,
+      key: "Enter",
+      shiftKey: true,
+    });
     const shiftEnter = keyboardEvent({ key: "Enter", shiftKey: true });
+    const start = shortcutDefinition(SHORTCUT_ACTIONS.startSession);
+    const followUp = shortcutDefinition(SHORTCUT_ACTIONS.sendFollowUp);
+    const continueSession = shortcutDefinition(
+      SHORTCUT_ACTIONS.continueSession,
+    );
+    const matches = (
+      event: ReturnType<typeof keyboardEvent>,
+      definition: { readonly keys: readonly ShortcutKey[] },
+      platform: "mac" | "other",
+    ): boolean =>
+      definition.keys.some((key) =>
+        shortcutRegistryApi
+          .shortcutRegistryTestApi()
+          .shortcutMatches(event, key, platform),
+      );
 
+    expect(matches(commandEnter, start, "mac")).toBe(true);
+    expect(matches(controlEnter, start, "other")).toBe(true);
+    expect(matches(commandEnter, followUp, "mac")).toBe(true);
+    expect(matches(controlEnter, followUp, "other")).toBe(true);
+    expect(matches(commandShiftEnter, continueSession, "mac")).toBe(true);
+    expect(matches(controlShiftEnter, continueSession, "other")).toBe(true);
+    expect(matches(shiftEnter, continueSession, "mac")).toBe(false);
+    expect(matches(shiftEnter, continueSession, "other")).toBe(false);
     expect(
-      shortcutRegistryApi
-        .shortcutRegistryTestApi()
-        .composerShortcutMatches(commandEnter, "submit", "mac"),
-    ).toBe(true);
-    expect(
-      shortcutRegistryApi
-        .shortcutRegistryTestApi()
-        .composerShortcutMatches(controlEnter, "submit", "other"),
-    ).toBe(true);
-    expect(
-      shortcutRegistryApi
-        .shortcutRegistryTestApi()
-        .composerShortcutMatches(shiftEnter, "steer", "other"),
-    ).toBe(true);
-    expect(
-      shortcutRegistryApi
-        .shortcutRegistryTestApi()
-        .shortcutMatches(
-          shiftEnter,
-          shortcutRegistryApi.shortcutRegistryTestApi().composerShortcutKeys
-            .submit,
-          "other",
-        ),
-    ).toBe(false);
-    expect(
-      shortcutRegistryApi
-        .shortcutRegistryTestApi()
-        .shortcutMatches(
-          controlEnter,
-          shortcutRegistryApi.shortcutRegistryTestApi().composerShortcutKeys
-            .steer,
-          "other",
-        ),
+      APPLICATION_SHORTCUTS.some((definition) =>
+        matches(shiftEnter, definition, "other"),
+      ),
     ).toBe(false);
   });
 });

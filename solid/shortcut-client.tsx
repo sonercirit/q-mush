@@ -5,8 +5,10 @@ import {
   onCleanup,
   Show,
   useContext,
+  type Accessor,
   type JSX,
 } from "solid-js";
+import { trapModalFocus } from "./modal-focus.ts";
 import {
   KeyboardShortcutRegistry,
   SHORTCUT_ACTIONS,
@@ -16,36 +18,59 @@ import {
   type ApplicationShortcutAction,
 } from "./shortcut-registry.ts";
 
-const ShortcutRegistryContext = createContext<KeyboardShortcutRegistry>();
+interface ShortcutContextValue {
+  readonly available: (action: ApplicationShortcutAction) => boolean;
+  readonly registry: KeyboardShortcutRegistry;
+  readonly revision: Accessor<number>;
+}
+
+const ShortcutRegistryContext = createContext<ShortcutContextValue>();
 const fallbackShortcutRegistry = new KeyboardShortcutRegistry({
   eventTarget: undefined,
   platform: "other",
 });
+const fallbackShortcutContext: ShortcutContextValue = {
+  available: () => true,
+  registry: fallbackShortcutRegistry,
+  revision: () => 0,
+};
 
-function useShortcutRegistry(): KeyboardShortcutRegistry {
-  return useContext(ShortcutRegistryContext) ?? fallbackShortcutRegistry;
+function useShortcutContext(): ShortcutContextValue {
+  return useContext(ShortcutRegistryContext) ?? fallbackShortcutContext;
 }
 
-export function shortcutKeys(action: ApplicationShortcutAction): string {
-  const registry = useShortcutRegistry();
+export function shortcutKeys(
+  action: ApplicationShortcutAction,
+): string | undefined {
+  const context = useShortcutContext();
+  void context.revision();
+  if (!context.available(action)) {
+    return undefined;
+  }
   return shortcutDefinition(action)
-    .keys.map((key) => shortcutAriaKey(key, registry.platform))
+    .keys.map((key) => shortcutAriaKey(key, context.registry.platform))
     .join(" ");
 }
 
 export function ShortcutHint(props: {
   readonly action: ApplicationShortcutAction;
 }): JSX.Element {
-  const registry = useShortcutRegistry();
+  const context = useShortcutContext();
   const definition = shortcutDefinition(props.action);
+  const available = (): boolean => {
+    void context.revision();
+    return context.available(props.action);
+  };
 
   return (
-    <kbd
-      aria-hidden="true"
-      class="ml-2 hidden rounded border border-slate-950/20 bg-slate-950/10 px-1.5 py-0.5 font-mono text-[0.7rem] font-semibold leading-none sm:inline-flex"
-    >
-      {shortcutDisplayLabel(definition.keys[0], registry.platform)}
-    </kbd>
+    <Show when={available()}>
+      <kbd
+        aria-hidden="true"
+        class="ml-2 hidden rounded border border-slate-950/20 bg-slate-950/10 px-1.5 py-0.5 font-mono text-[0.7rem] font-semibold leading-none sm:inline-flex"
+      >
+        {shortcutDisplayLabel(definition.keys[0], context.registry.platform)}
+      </kbd>
+    </Show>
   );
 }
 
@@ -55,8 +80,11 @@ export function registerShortcut(
   handler: () => void,
   target?: () => EventTarget | undefined,
 ): void {
-  const registry = useShortcutRegistry();
-  const unregister = registry.register({
+  const context = useContext(ShortcutRegistryContext);
+  if (context === undefined) {
+    return;
+  }
+  const unregister = context.registry.register({
     action,
     available,
     handler,
@@ -67,8 +95,9 @@ export function registerShortcut(
 
 function createShortcutHelp(
   registry: KeyboardShortcutRegistry,
-  revision: () => number,
+  revision: Accessor<number>,
 ): {
+  readonly active: Accessor<boolean>;
   readonly close: () => void;
   readonly open: () => void;
   readonly view: JSX.Element;
@@ -76,10 +105,18 @@ function createShortcutHelp(
   const [helpOpen, setHelpOpen] = createSignal(false);
   let closeButton: HTMLButtonElement | undefined;
   let returnFocus: HTMLElement | null = null;
+  const restoreFocus = (): void => {
+    queueMicrotask(() => {
+      returnFocus?.focus();
+      returnFocus = null;
+    });
+  };
   const close = (): void => {
+    if (!helpOpen()) {
+      return;
+    }
     setHelpOpen(false);
-    returnFocus?.focus();
-    returnFocus = null;
+    restoreFocus();
   };
   const open = (): void => {
     returnFocus =
@@ -88,24 +125,15 @@ function createShortcutHelp(
         ? document.activeElement
         : null;
     setHelpOpen(true);
-    if (typeof queueMicrotask === "function") {
-      queueMicrotask(() => {
-        closeButton?.focus();
-      });
-    }
-  };
-
-  const toggle = (): void => {
-    if (helpOpen()) {
-      close();
-    } else {
-      open();
-    }
+    queueMicrotask(() => {
+      closeButton?.focus();
+    });
   };
 
   return {
+    active: helpOpen,
     close,
-    open: toggle,
+    open,
     view: (
       <Show when={helpOpen()}>
         <ShortcutHelp
@@ -113,14 +141,8 @@ function createShortcutHelp(
             closeButton = element;
           }}
           onClose={close}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.preventDefault();
-              close();
-            }
-          }}
           registry={registry}
-          revision={revision()}
+          revision={revision}
         />
       </Show>
     ),
@@ -130,12 +152,11 @@ function createShortcutHelp(
 function ShortcutHelp(props: {
   readonly closeButton?: (element: HTMLButtonElement) => void;
   readonly onClose: () => void;
-  readonly onKeyDown?: JSX.EventHandlerUnion<HTMLDivElement, KeyboardEvent>;
   readonly registry: KeyboardShortcutRegistry;
-  readonly revision?: number;
+  readonly revision?: Accessor<number>;
 }): JSX.Element {
   const shortcuts = (): ReturnType<KeyboardShortcutRegistry["available"]> => {
-    void props.revision;
+    props.revision?.();
     return props.registry.available();
   };
 
@@ -145,8 +166,9 @@ function ShortcutHelp(props: {
       aria-modal="true"
       class="fixed inset-0 z-[100] grid place-items-center bg-slate-950/80 p-4 backdrop-blur-sm"
       data-shortcut-help="true"
-      onKeyDown={props.onKeyDown}
+      onKeyDown={trapModalFocus}
       role="dialog"
+      tabindex="-1"
     >
       <div class="flex max-h-[calc(100vh-2rem)] w-full max-w-xl flex-col overflow-hidden rounded-3xl border border-white/15 bg-slate-900 shadow-2xl shadow-black/60">
         <div class="flex items-start justify-between gap-4 border-b border-white/10 p-5 sm:p-6">
@@ -163,7 +185,7 @@ function ShortcutHelp(props: {
           </div>
           <button
             aria-label="Close keyboard shortcuts"
-            aria-keyshortcuts="Escape"
+            aria-keyshortcuts={shortcutKeys(SHORTCUT_ACTIONS.closeShortcutHelp)}
             class="grid size-9 shrink-0 place-items-center rounded-full border border-white/10 text-slate-400 transition hover:border-white/20 hover:text-white"
             onClick={props.onClose}
             ref={props.closeButton}
@@ -199,8 +221,8 @@ function ShortcutHelp(props: {
             </For>
           </ul>
           <p class="mt-4 text-xs leading-5 text-slate-500">
-            Shortcuts are disabled while their actions are unavailable. Plain
-            Enter keeps adding lines in prompt fields.
+            Shortcuts are disabled while their actions are unavailable. Enter
+            and Shift Enter keep their native behavior in prompt fields.
           </p>
         </div>
       </div>
@@ -226,26 +248,47 @@ export function ShortcutProvider(props: {
   readonly registry?: KeyboardShortcutRegistry;
 }): JSX.Element {
   const [revision, setRevision] = createSignal(0);
-  const registry =
-    props.registry ??
-    new KeyboardShortcutRegistry({
-      onChange: () => {
-        setRevision((current) => current + 1);
-      },
-    });
+  const [registryRevision, setRegistryRevision] = createSignal(0);
+  const ownsRegistry = props.registry === undefined;
+  const registry = props.registry ?? new KeyboardShortcutRegistry();
+  const unsubscribe = registry.subscribe(() => {
+    setRegistryRevision((current) => current + 1);
+    setRevision((current) => current + 1);
+  });
+  const active = (action: ApplicationShortcutAction): boolean => {
+    void registryRevision();
+    return registry.isAvailable(action);
+  };
   const help = createShortcutHelp(registry, revision);
-  registry.register({
+  const unregisterHelp = registry.register({
     action: SHORTCUT_ACTIONS.showShortcutHelp,
     available: () => true,
     handler: help.open,
   });
+  const unregisterClose = registry.register({
+    action: SHORTCUT_ACTIONS.closeShortcutHelp,
+    available: help.active,
+    handler: help.close,
+  });
   onCleanup(() => {
-    registry.dispose();
+    if (help.active()) {
+      help.close();
+    }
+    unregisterClose();
+    unregisterHelp();
+    unsubscribe();
+    if (ownsRegistry) {
+      registry.dispose();
+    }
   });
 
   return (
-    <ShortcutRegistryContext.Provider value={registry}>
-      {props.children}
+    <ShortcutRegistryContext.Provider
+      value={{ available: active, registry, revision }}
+    >
+      <div class="contents" inert={help.active()}>
+        {props.children}
+      </div>
       {help.view}
     </ShortcutRegistryContext.Provider>
   );

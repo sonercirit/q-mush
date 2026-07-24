@@ -9,6 +9,7 @@ import {
 } from "solid-js";
 import { MAXIMUM_RUNNER_DIRECTORY_ENTRIES } from "../shared/runner-directory-model.ts";
 import type { DirectoryPickerController } from "./directory-picker-controller.ts";
+import { trapModalFocus } from "./modal-focus.ts";
 import { renderDebugBoundary } from "./render-debug.tsx";
 import { registerShortcut, shortcutKeys } from "./shortcut-client.tsx";
 import { SHORTCUT_ACTIONS } from "./shortcut-registry.ts";
@@ -26,6 +27,7 @@ export function DirectoryPicker(props: {
     props.controller.close();
   };
   const [dialog, setDialog] = createSignal<HTMLDivElement>();
+  let returnFocus: HTMLElement | null = null;
   registerShortcut(
     SHORTCUT_ACTIONS.closeDirectoryPicker,
     () => state().open,
@@ -36,10 +38,18 @@ export function DirectoryPicker(props: {
     createEffect(
       on(
         () => state().open,
-        (open) => {
+        (open, wasOpen) => {
           if (open) {
+            returnFocus =
+              document.activeElement instanceof HTMLElement
+                ? document.activeElement
+                : null;
             dialog()?.focus();
+          } else if (wasOpen) {
+            returnFocus?.focus();
+            returnFocus = null;
           }
+          return open;
         },
       ),
     );
@@ -52,6 +62,7 @@ export function DirectoryPicker(props: {
         aria-modal="true"
         class="fixed inset-0 z-50 grid place-items-center bg-slate-950/80 p-4 backdrop-blur-sm"
         data-directory-picker="true"
+        onKeyDown={trapModalFocus}
         ref={setDialog}
         role="dialog"
         tabindex="-1"

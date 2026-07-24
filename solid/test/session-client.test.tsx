@@ -302,7 +302,8 @@ test("renders the system prompt and model thinking in a transcript", () => {
     "{&quot;path&quot;:&quot;README.md&quot;,&quot;offset&quot;:1}",
   );
   expect(html).toContain("# Q Mush");
-  expect(html).toContain(">Continue</button>");
+  expect(html).toContain(">Continue");
+  expect(html).toContain('aria-keyshortcuts="Control+Shift+Enter"');
 });
 
 test("renders image pickers, previews, and transcript images", () => {

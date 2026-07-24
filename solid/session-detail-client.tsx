@@ -362,36 +362,27 @@ function LoadedSessionDetail(props: {
               void props.controller.toggleAutoCompact(enabled);
             }}
           />
-          <div class="flex gap-3">
-            <SessionFollowUp
-              available={hasFollowUpInput(props.state) && !props.state.sending}
-              images={props.state.followUpImages}
-              onAddImages={(files) => {
-                void props.controller.addImages(files, true);
-              }}
-              onInput={(value) => {
-                props.controller.setFollowUp(value);
-              }}
-              onRemoveImage={(index) => {
-                props.controller.removeImage(index, "followUp");
-              }}
-              onSubmit={() => {
-                void props.controller.send();
-              }}
-              prompt={props.state.followUp}
-              sending={props.state.sending}
-            />
-            <button
-              class="self-end rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950"
-              disabled={props.state.sending}
-              onClick={() => {
-                void props.controller.continueSession();
-              }}
-              type="button"
-            >
-              Continue
-            </button>
-          </div>
+          <SessionFollowUp
+            available={hasFollowUpInput(props.state) && !props.state.sending}
+            images={props.state.followUpImages}
+            onAddImages={(files) => {
+              void props.controller.addImages(files, true);
+            }}
+            onContinue={() => {
+              void props.controller.continueSession();
+            }}
+            onInput={(value) => {
+              props.controller.setFollowUp(value);
+            }}
+            onRemoveImage={(index) => {
+              props.controller.removeImage(index, "followUp");
+            }}
+            onSubmit={() => {
+              void props.controller.send();
+            }}
+            prompt={props.state.followUp}
+            sending={props.state.sending}
+          />
         </div>
       </Show>
     </div>

@@ -1,5 +1,4 @@
 import { type JSX } from "solid-js";
-import { render } from "solid-js/web";
 import { afterEach, expect, test, vi } from "vitest";
 import { createProviderViewState } from "../provider-client.tsx";
 import { createReactiveState } from "../reactive-state.ts";
@@ -12,16 +11,17 @@ import { ShortcutProvider } from "../shortcut-client.tsx";
 import { KeyboardShortcutRegistry } from "../shortcut-registry.ts";
 import { runnerSummary } from "./runner-fixtures.ts";
 import { sessionDetailState } from "./session-detail-test-state.ts";
+import {
+  disposeTestViews,
+  mountTestView,
+} from "./session-dom-test-helpers.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 import { shortcutKeyEvent } from "./shortcut-test-helpers.ts";
 
 const disposals: (() => void)[] = [];
 
 function mount(renderView: () => JSX.Element): HTMLDivElement {
-  const container = document.createElement("div");
-  document.body.append(container);
-  disposals.push(render(renderView, container));
-  return container;
+  return mountTestView(renderView, disposals);
 }
 
 function queryTextarea(
@@ -57,13 +57,10 @@ function shortcutRegistry(platform: "mac" | "other"): KeyboardShortcutRegistry {
 }
 
 afterEach(() => {
-  while (disposals.length > 0) {
-    disposals.pop()?.();
-  }
-  document.body.replaceChildren();
+  disposeTestViews(disposals);
 });
 
-test("Ctrl+Enter submits new sessions while plain Enter stays multiline", () => {
+test("Ctrl+Enter submits valid new sessions and leaves invalid forms native", () => {
   const state = createReactiveState<SessionViewState>({
     ...initialSessionViewState(),
     draft: {
@@ -108,13 +105,35 @@ test("Ctrl+Enter submits new sessions while plain Enter stays multiline", () => 
     </ShortcutProvider>
   ));
   const prompt = queryTextarea(container, "#session-prompt");
+  const startButton = Array.from(container.querySelectorAll("button")).find(
+    (button) => button.textContent.includes("Start session"),
+  );
+  if (startButton === undefined) {
+    throw new TypeError("The Start session button was not rendered");
+  }
 
   const enter = shortcutKeyEvent(prompt, "Enter");
+  const shiftEnter = shortcutKeyEvent(prompt, "Enter", { shiftKey: true });
+  const controlShiftEnter = shortcutKeyEvent(prompt, "Enter", {
+    ctrlKey: true,
+    shiftKey: true,
+  });
   const controlEnter = shortcutKeyEvent(prompt, "Enter", { ctrlKey: true });
+  state.setState({
+    ...state.state(),
+    draft: { ...state.state().draft, prompt: "" },
+  });
+  const emptyControlEnter = shortcutKeyEvent(prompt, "Enter", {
+    ctrlKey: true,
+  });
 
   expect(create).toHaveBeenCalledOnce();
+  expect(startButton.getAttribute("aria-keyshortcuts")).toBeNull();
   expect(enter.defaultPrevented).toBe(false);
+  expect(shiftEnter.defaultPrevented).toBe(false);
+  expect(controlShiftEnter.defaultPrevented).toBe(false);
   expect(controlEnter.defaultPrevented).toBe(true);
+  expect(emptyControlEnter.defaultPrevented).toBe(false);
 });
 
 test("Cmd+Enter sends an available follow-up and ignores pending or composing input", () => {
@@ -130,21 +149,99 @@ test("Cmd+Enter sends an available follow-up and ignores pending or composing in
     </ShortcutProvider>
   ));
   const prompt = queryTextarea(container, "textarea[name='prompt']");
+  const sendButton = Array.from(container.querySelectorAll("button")).find(
+    (button) => button.textContent.includes("Send"),
+  );
+  if (sendButton === undefined) {
+    throw new TypeError("The Send button was not rendered");
+  }
 
   const enter = shortcutKeyEvent(prompt, "Enter");
+  const shiftEnter = shortcutKeyEvent(prompt, "Enter", { shiftKey: true });
   const composing = shortcutKeyEvent(prompt, "Enter", {
     isComposing: true,
     metaKey: true,
   });
   const commandEnter = shortcutKeyEvent(prompt, "Enter", { metaKey: true });
-  reactive.setState({ ...reactive.state(), sending: true });
+  reactive.setState({
+    ...reactive.state(),
+    followUp: "",
+    followUpImages: [],
+  });
+  const emptyCommandEnter = shortcutKeyEvent(prompt, "Enter", {
+    metaKey: true,
+  });
+  expect(sendButton.getAttribute("aria-keyshortcuts")).toBeNull();
+  reactive.setState({
+    ...reactive.state(),
+    followUp: "Please continue",
+    sending: true,
+  });
   const pendingCommandEnter = shortcutKeyEvent(prompt, "Enter", {
     metaKey: true,
   });
 
   expect(send).toHaveBeenCalledOnce();
   expect(enter.defaultPrevented).toBe(false);
+  expect(shiftEnter.defaultPrevented).toBe(false);
   expect(composing.defaultPrevented).toBe(false);
   expect(commandEnter.defaultPrevented).toBe(true);
+  expect(emptyCommandEnter.defaultPrevented).toBe(false);
   expect(pendingCommandEnter.defaultPrevented).toBe(false);
+});
+
+test("Ctrl+Shift+Enter continues with or without follow-up input", () => {
+  const detail = { ...TEST_SESSION_DETAIL, status: "idle" as const };
+  const reactive = sessionDetailState(detail);
+  const controller = new SessionController(reactive);
+  const continueSession = vi
+    .spyOn(controller, "continueSession")
+    .mockResolvedValue();
+  const registry = shortcutRegistry("other");
+  const container = mount(() => (
+    <ShortcutProvider registry={registry}>
+      <SessionDetail controller={controller} state={reactive.state()} />
+    </ShortcutProvider>
+  ));
+  const prompt = queryTextarea(container, "textarea[name='prompt']");
+  const continueButton = Array.from(container.querySelectorAll("button")).find(
+    (button) => button.textContent.includes("Continue"),
+  );
+  if (continueButton === undefined) {
+    throw new TypeError("The Continue button was not rendered");
+  }
+
+  const shiftEnter = shortcutKeyEvent(prompt, "Enter", { shiftKey: true });
+  const controlShiftEnter = shortcutKeyEvent(prompt, "Enter", {
+    ctrlKey: true,
+    shiftKey: true,
+  });
+  reactive.setState({ ...reactive.state(), followUp: "Draft instruction" });
+  const draftControlShiftEnter = shortcutKeyEvent(prompt, "Enter", {
+    ctrlKey: true,
+    shiftKey: true,
+  });
+  expect(registry.available().map(({ action }) => action)).toContain(
+    "continue-session",
+  );
+  expect(continueButton.getAttribute("aria-keyshortcuts")).toBe(
+    "Control+Shift+Enter",
+  );
+  expect(continueButton.disabled).toBe(false);
+  reactive.setState({
+    ...reactive.state(),
+    sending: true,
+  });
+  const pendingControlShiftEnter = shortcutKeyEvent(prompt, "Enter", {
+    ctrlKey: true,
+    shiftKey: true,
+  });
+
+  expect(continueSession).toHaveBeenCalledTimes(2);
+  expect(shiftEnter.defaultPrevented).toBe(false);
+  expect(controlShiftEnter.defaultPrevented).toBe(true);
+  expect(draftControlShiftEnter.defaultPrevented).toBe(true);
+  expect(pendingControlShiftEnter.defaultPrevented).toBe(false);
+  expect(continueButton.getAttribute("aria-keyshortcuts")).toBeNull();
+  expect(continueButton.disabled).toBe(true);
 });
