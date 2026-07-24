@@ -1,4 +1,4 @@
-import { For, Show, type JSX } from "solid-js";
+import { createSignal, For, Show, type JSX } from "solid-js";
 import {
   PROMPT_BODY_MAXIMUM_LENGTH,
   PROMPT_NAME_MAXIMUM_LENGTH,
@@ -11,7 +11,7 @@ import { renderDebugBoundary } from "./render-debug.tsx";
 
 interface PromptBankProps {
   readonly controller: PromptBankController;
-  readonly onInsert: (body: string) => void;
+  readonly onInsert: (body: string, replace: boolean) => boolean;
 }
 
 const FIELD_CLASSES =
@@ -97,6 +97,7 @@ function PromptForm(props: {
 }
 
 function SaveButton(props: {
+  readonly busy: boolean;
   readonly class: string;
   readonly disabled: boolean;
   readonly idleLabel: string;
@@ -104,7 +105,7 @@ function SaveButton(props: {
 }): JSX.Element {
   return (
     <button class={props.class} disabled={props.disabled} type="submit">
-      {props.disabled ? props.savingLabel : props.idleLabel}
+      {props.busy ? props.savingLabel : props.idleLabel}
     </button>
   );
 }
@@ -141,6 +142,7 @@ function EditPrompt(props: PromptBankProps): JSX.Element {
           Cancel
         </button>
         <SaveButton
+          busy={state().saving}
           class="rounded-xl bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-60"
           disabled={state().saving}
           idleLabel="Save changes"
@@ -151,14 +153,17 @@ function EditPrompt(props: PromptBankProps): JSX.Element {
   );
 }
 
+function promptBusy(state: ReturnType<PromptBankController["view"]>): boolean {
+  return state.loading || state.saving || state.removingId !== undefined;
+}
+
 function PromptItem(
   props: PromptBankProps & { readonly prompt: Prompt },
 ): JSX.Element {
   const state = props.controller.view;
   const selected = (): boolean => state().selectedId === props.prompt.id;
   const editing = (): boolean => state().editingId === props.prompt.id;
-  const actionsDisabled = (): boolean =>
-    state().saving || state().removingId !== undefined;
+  const actionsDisabled = (): boolean => promptBusy(state());
   return (
     <li
       class={`rounded-2xl border p-4 ${selected() ? "border-emerald-300/40 bg-emerald-300/[0.07]" : "border-white/10 bg-slate-950/60"}`}
@@ -171,6 +176,7 @@ function PromptItem(
       <button
         aria-pressed={selected()}
         class="w-full text-left"
+        disabled={actionsDisabled()}
         onClick={() => {
           props.controller.select(props.prompt.id);
         }}
@@ -194,15 +200,52 @@ function PromptItem(
         </button>
         <button
           class={`${SECONDARY_BUTTON} hover:text-rose-200 disabled:opacity-60`}
+          data-delete-prompt="true"
           disabled={actionsDisabled()}
           onClick={() => {
-            void props.controller.remove(props.prompt.id);
+            props.controller.requestDelete(props.prompt.id);
           }}
           type="button"
         >
           {state().removingId === props.prompt.id ? "Deleting…" : "Delete"}
         </button>
       </div>
+      <Show when={state().confirmDeleteId === props.prompt.id}>
+        <div
+          aria-labelledby={`prompt-delete-${props.prompt.id}`}
+          class="mt-4 rounded-xl border border-rose-300/30 bg-rose-300/10 p-4"
+          role="alertdialog"
+        >
+          <p id={`prompt-delete-${props.prompt.id}`}>
+            Delete this saved prompt?
+          </p>
+          <p class="mt-2 text-sm text-rose-100/70">
+            Existing session drafts are unchanged.
+          </p>
+          <div class="mt-4 flex justify-end gap-2">
+            <button
+              class={SECONDARY_BUTTON}
+              onClick={() => {
+                props.controller.cancelDelete();
+              }}
+              type="button"
+            >
+              Cancel
+            </button>
+            <button
+              autofocus
+              class="rounded-xl bg-rose-300 px-4 py-2 text-sm font-semibold text-slate-950"
+              data-confirm-prompt-delete="true"
+              onClick={() => {
+                void props.controller.remove(props.prompt.id);
+              }}
+              type="button"
+            >
+              Delete prompt
+            </button>
+          </div>
+        </div>
+      </Show>
       <Show when={editing()}>
         <EditPrompt {...props} />
       </Show>
@@ -210,7 +253,15 @@ function PromptItem(
   );
 }
 
-function PromptList(props: PromptBankProps): JSX.Element {
+function PromptList(
+  props: PromptBankProps & {
+    readonly busy: boolean;
+    readonly confirmInsert: boolean;
+    readonly onCancelInsert: () => void;
+    readonly onConfirmInsert: () => void;
+    readonly onInsertRequest: () => void;
+  },
+): JSX.Element {
   const state = props.controller.view;
   return (
     <Show
@@ -237,14 +288,43 @@ function PromptList(props: PromptBankProps): JSX.Element {
           </ul>
           <button
             class="mt-5 rounded-xl border border-emerald-300/30 bg-emerald-300/10 px-5 py-3 font-semibold text-emerald-200 disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={state().selectedId === undefined}
-            onClick={() => {
-              props.controller.insertSelected(props.onInsert);
-            }}
+            data-insert-prompt="true"
+            disabled={state().selectedId === undefined || props.busy}
+            onClick={props.onInsertRequest}
             type="button"
           >
             Insert into task
           </button>
+          <Show when={props.confirmInsert}>
+            <div
+              aria-labelledby="prompt-insert-confirmation"
+              class="mt-4 rounded-xl border border-amber-300/30 bg-amber-300/10 p-4"
+              role="alertdialog"
+            >
+              <p id="prompt-insert-confirmation">
+                Replace the current task draft?
+              </p>
+              <p class="mt-2 text-sm text-amber-100/70">
+                Attached images and the rest of the setup stay in place.
+              </p>
+              <button
+                class={SECONDARY_BUTTON}
+                onClick={props.onCancelInsert}
+                type="button"
+              >
+                Keep current draft
+              </button>
+              <button
+                autofocus
+                class="ml-2 rounded-xl bg-amber-300 px-4 py-2 text-sm font-semibold text-slate-950"
+                data-confirm-prompt-insert="true"
+                onClick={props.onConfirmInsert}
+                type="button"
+              >
+                Replace task draft
+              </button>
+            </div>
+          </Show>
         </Show>
       )}
     </Show>
@@ -253,6 +333,24 @@ function PromptList(props: PromptBankProps): JSX.Element {
 
 export function PromptBank(props: PromptBankProps): JSX.Element {
   const state = props.controller.view;
+  const busy = (): boolean => promptBusy(state());
+  const [confirmInsert, setConfirmInsert] = createSignal<string>();
+  const insert = (replace: boolean): void => {
+    const selectedId = state().selectedId;
+    const inserted = props.controller.insertSelected((body) =>
+      props.onInsert(body, replace),
+    );
+    setConfirmInsert(
+      !inserted && !replace && selectedId !== undefined
+        ? selectedId
+        : undefined,
+    );
+    if (inserted) {
+      queueMicrotask(() => {
+        document.querySelector<HTMLTextAreaElement>("#session-prompt")?.focus();
+      });
+    }
+  };
   const retry = (): void => {
     void props.controller.load();
   };
@@ -280,7 +378,7 @@ export function PromptBank(props: PromptBankProps): JSX.Element {
       >
         <PromptFields
           body={state().createDraft.body}
-          disabled={state().saving}
+          disabled={busy()}
           idPrefix="prompt"
           name={state().createDraft.name}
           namePrefix=""
@@ -288,14 +386,28 @@ export function PromptBank(props: PromptBankProps): JSX.Element {
           submitLabel="Create a new saved prompt"
         />
         <SaveButton
+          busy={state().saving}
           class="rounded-xl bg-cyan-300 px-5 py-3 font-semibold text-slate-950 disabled:opacity-60"
-          disabled={state().saving}
+          disabled={busy()}
           idleLabel="Save prompt"
           savingLabel="Saving prompt…"
         />
       </PromptForm>
       <RetryNotice error={state().error} onRetry={retry} />
-      <PromptList {...props} />
+      <PromptList
+        {...props}
+        busy={busy()}
+        confirmInsert={confirmInsert() === state().selectedId}
+        onCancelInsert={() => {
+          setConfirmInsert(undefined);
+        }}
+        onConfirmInsert={() => {
+          insert(true);
+        }}
+        onInsertRequest={() => {
+          insert(false);
+        }}
+      />
     </section>
   );
 }

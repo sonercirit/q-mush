@@ -2,10 +2,12 @@ import type { Accessor } from "solid-js";
 import type { Prompt, PromptInput } from "../shared/prompt-model.ts";
 
 export interface PromptViewState {
+  readonly confirmDeleteId: string | undefined;
   readonly createDraft: PromptInput;
   readonly editDraft: PromptInput;
   readonly editingId: string | undefined;
   readonly error: string | undefined;
+  readonly loading: boolean;
   readonly prompts: readonly Prompt[] | undefined;
   readonly removingId: string | undefined;
   readonly saving: boolean;
@@ -16,10 +18,12 @@ export function createPromptViewState(
   prompts: readonly Prompt[] | undefined,
 ): PromptViewState {
   return {
+    confirmDeleteId: undefined,
     createDraft: { body: "", name: "" },
     editDraft: { body: "", name: "" },
     editingId: undefined,
     error: undefined,
+    loading: false,
     prompts,
     removingId: undefined,
     saving: false,
@@ -30,11 +34,13 @@ export function createPromptViewState(
 export interface PromptBankController {
   readonly view: Accessor<PromptViewState>;
   beginEdit(promptId: string): void;
+  cancelDelete(): void;
   cancelEdit(): void;
   create(): Promise<void>;
-  insertSelected(insert: (body: string) => void): void;
+  insertSelected(insert: (body: string) => boolean): boolean;
   load(): Promise<void>;
   remove(promptId: string): Promise<void>;
+  requestDelete(promptId: string): void;
   saveEdit(): Promise<void>;
   select(promptId: string): void;
   setCreateField(name: keyof PromptInput, value: string): void;

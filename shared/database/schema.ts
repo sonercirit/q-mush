@@ -67,6 +67,7 @@ export const prompts = sqliteTable(
     name: text("name").notNull(),
     normalizedName: text("normalized_name").notNull(),
     body: text("body").notNull(),
+    revision: integer("revision").notNull().default(1),
   },
   (table) => [
     index("prompts_user_deletion_update_index").on(

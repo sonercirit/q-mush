@@ -18,12 +18,7 @@ test("renders prompt creation, selection, editing, and deletion controls", () =>
   };
   const controller = new PromptController(createReactiveState(state));
   const html = renderSolidToString(() => (
-    <PromptBank
-      controller={controller}
-      onInsert={() => {
-        // Rendering does not insert a prompt.
-      }}
-    />
+    <PromptBank controller={controller} onInsert={() => true} />
   ));
 
   expect(html).toContain('data-prompt-bank="true"');
@@ -35,6 +30,7 @@ test("renders prompt creation, selection, editing, and deletion controls", () =>
   expect(html).toContain('name="editBody"');
   expect(html).toContain(">Save changes</button>");
   expect(html).toContain(">Delete</button>");
+  expect(html).toContain('data-delete-prompt="true"');
   expect(html).toContain(">Insert into task</button>");
   expect(html).toContain("Editable body");
 });
@@ -48,9 +44,7 @@ test("renders loading, empty, and duplicate-name error states", () => {
     error: "A prompt with that name already exists.",
   };
   const emptyController = new PromptController(createReactiveState(emptyState));
-  const ignoreInsert = (): void => {
-    // The server-rendered test does not activate controls.
-  };
+  const ignoreInsert = (): boolean => true;
   const loadingHtml = renderSolidToString(() => (
     <PromptBank controller={loadingController} onInsert={ignoreInsert} />
   ));

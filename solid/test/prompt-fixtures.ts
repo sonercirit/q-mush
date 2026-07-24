@@ -5,5 +5,6 @@ export const TEST_PROMPT: Prompt = {
   createdAt: 1_700_000_000_000,
   id: "prompt-1",
   name: "Safe implementation",
+  revision: 1,
   updatedAt: 1_700_000_000_001,
 };

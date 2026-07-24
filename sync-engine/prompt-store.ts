@@ -1,13 +1,14 @@
-import { and, asc, eq, type SQL } from "drizzle-orm";
-import {
-  createdAuditFields,
-  softDeletedAuditFields,
-  updatedAuditFields,
-} from "../shared/audit.ts";
+import { and, asc, eq, sql, type SQL } from "drizzle-orm";
+import { softDeletedAuditFields, updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { prompts } from "../shared/database/schema.ts";
 import { createUuidV7, type IdGenerator } from "../shared/ids.ts";
-import type { Prompt, PromptInput } from "../shared/prompt-model.ts";
+import {
+  PROMPT_MAXIMUM_COUNT,
+  promptNameKey,
+  type Prompt,
+  type PromptInput,
+} from "../shared/prompt-model.ts";
 
 export class DuplicatePromptNameError extends Error {
   constructor() {
@@ -16,8 +17,18 @@ export class DuplicatePromptNameError extends Error {
   }
 }
 
-function normalizedPromptName(name: string): string {
-  return name.normalize("NFKC").toLocaleLowerCase("en-US");
+export class PromptChangedError extends Error {
+  constructor() {
+    super("The prompt changed after it was read");
+    this.name = "PromptChangedError";
+  }
+}
+
+export class PromptLimitError extends Error {
+  constructor() {
+    super("The active prompt limit has been reached");
+    this.name = "PromptLimitError";
+  }
 }
 
 function activePromptCondition(
@@ -31,12 +42,35 @@ function activePromptCondition(
   );
 }
 
+function currentPromptCondition(
+  userId: string,
+  promptId: string,
+  revision: number,
+): SQL | undefined {
+  return and(
+    activePromptCondition(userId, promptId),
+    eq(prompts.revision, revision),
+  );
+}
+
+function changedOwnedPrompt(
+  userId: string,
+  promptId: string,
+  revision: number,
+) {
+  return {
+    condition: currentPromptCondition(userId, promptId, revision),
+    revision: sql`${prompts.revision} + 1`,
+  };
+}
+
 function promptSelection() {
   return {
     body: prompts.body,
     createdAt: prompts.createdAt,
     id: prompts.id,
     name: prompts.name,
+    revision: prompts.revision,
     updatedAt: prompts.updatedAt,
   };
 }
@@ -47,6 +81,7 @@ function promptColumns() {
     createdAt: true,
     id: true,
     name: true,
+    revision: true,
     updatedAt: true,
   } as const;
 }
@@ -56,7 +91,9 @@ type StoredPrompt =
     ? {
         readonly [Key in keyof Selection]: Key extends "createdAt" | "updatedAt"
           ? Date
-          : string;
+          : Key extends "revision"
+            ? number
+            : string;
       }
     : never;
 
@@ -66,6 +103,7 @@ function presentPrompt(stored: StoredPrompt): Prompt {
     createdAt: stored.createdAt.getTime(),
     id: stored.id,
     name: stored.name,
+    revision: stored.revision,
     updatedAt: stored.updatedAt.getTime(),
   };
 }
@@ -84,10 +122,15 @@ export class PromptStore {
   readonly #resources: {
     readonly database: AppDatabase;
     readonly generateId: IdGenerator;
+    readonly maximumCount: number;
   };
 
-  constructor(database: AppDatabase, generateId: IdGenerator = createUuidV7) {
-    this.#resources = { database, generateId };
+  constructor(
+    database: AppDatabase,
+    generateId: IdGenerator = createUuidV7,
+    maximumCount = PROMPT_MAXIMUM_COUNT,
+  ) {
+    this.#resources = { database, generateId, maximumCount };
   }
 
   get #database(): AppDatabase {
@@ -100,19 +143,36 @@ export class PromptStore {
 
   create(userId: string, input: PromptInput, now: number): Prompt {
     try {
-      const stored = this.#database
-        .insert(prompts)
-        .values({
-          ...createdAuditFields(userId, now),
-          body: input.body,
-          id: this.#newPromptId(now),
-          name: input.name,
-          normalizedName: normalizedPromptName(input.name),
-          userId,
-        })
-        .returning(promptSelection())
-        .get();
-      return presentPrompt(stored);
+      return this.#database.transaction((transaction) => {
+        const storedCount = transaction
+          .select({ count: sql<number>`count(*)` })
+          .from(prompts)
+          .where(activePromptCondition(userId))
+          .get();
+        if ((storedCount?.count ?? 0) >= this.#resources.maximumCount) {
+          throw new PromptLimitError();
+        }
+        const id = this.#newPromptId(now);
+        const timestamp = new Date(now);
+        const inserted = transaction
+          .insert(prompts)
+          .values({
+            body: input.body,
+            createdAt: timestamp,
+            createdById: userId,
+            id,
+            isDeleted: false,
+            name: input.name,
+            normalizedName: promptNameKey(input.name),
+            revision: 1,
+            updatedAt: timestamp,
+            updatedById: userId,
+            userId,
+          })
+          .returning(promptSelection())
+          .get();
+        return presentPrompt(inserted);
+      });
     } catch (error) {
       return rethrowPromptWriteError(error);
     }
@@ -138,15 +198,27 @@ export class PromptStore {
       .map(presentPrompt);
   }
 
-  remove(userId: string, promptId: string, now: number): boolean {
-    return (
-      this.#database
-        .update(prompts)
-        .set(softDeletedAuditFields(userId, now))
-        .where(activePromptCondition(userId, promptId))
-        .returning({ id: prompts.id })
-        .all().length > 0
-    );
+  remove(
+    userId: string,
+    promptId: string,
+    now: number,
+    revision: number,
+  ): boolean {
+    const changed = changedOwnedPrompt(userId, promptId, revision);
+    const removed = this.#database
+      .update(prompts)
+      .set({
+        ...softDeletedAuditFields(userId, now),
+        revision: changed.revision,
+      })
+      .where(changed.condition)
+      .returning({ id: prompts.id })
+      .all();
+    if (removed.length > 0) {
+      return true;
+    }
+    this.#throwIfChanged(userId, promptId, revision);
+    return false;
   }
 
   update(
@@ -154,22 +226,39 @@ export class PromptStore {
     promptId: string,
     input: PromptInput,
     now: number,
+    revision: number,
   ): Prompt | undefined {
     try {
+      const changed = changedOwnedPrompt(userId, promptId, revision);
       const [stored] = this.#database
         .update(prompts)
         .set({
           ...updatedAuditFields(userId, now),
           body: input.body,
           name: input.name,
-          normalizedName: normalizedPromptName(input.name),
+          revision: changed.revision,
+          normalizedName: promptNameKey(input.name),
         })
-        .where(activePromptCondition(userId, promptId))
+        .where(changed.condition)
         .returning(promptSelection())
         .all();
+      if (stored === undefined) {
+        this.#throwIfChanged(userId, promptId, revision);
+      }
       return stored === undefined ? undefined : presentPrompt(stored);
     } catch (error) {
       return rethrowPromptWriteError(error);
+    }
+  }
+
+  #throwIfChanged(userId: string, promptId: string, revision: number): void {
+    const stored = this.#database
+      .select({ revision: prompts.revision })
+      .from(prompts)
+      .where(activePromptCondition(userId, promptId))
+      .get();
+    if (stored !== undefined && stored.revision !== revision) {
+      throw new PromptChangedError();
     }
   }
 }

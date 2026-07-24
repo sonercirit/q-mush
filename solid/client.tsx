@@ -313,9 +313,9 @@ function Workspace(props: {
       />
       <PromptBank
         controller={props.prompts}
-        onInsert={(body) => {
-          props.agentSessions.insertPrompt(body);
-        }}
+        onInsert={(body, replace) =>
+          props.agentSessions.insertPrompt(body, replace)
+        }
       />
       <RunnerPanel controller={props.runners} />
       <aside

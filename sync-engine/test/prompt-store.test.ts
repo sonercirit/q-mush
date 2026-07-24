@@ -3,6 +3,8 @@ import { describe, expect, test } from "vitest";
 import { prompts } from "../../shared/database/schema.ts";
 import {
   DuplicatePromptNameError,
+  PromptChangedError,
+  PromptLimitError,
   PromptStore,
 } from "../../sync-engine/prompt-store.ts";
 import {
@@ -70,6 +72,7 @@ describe("prompt store", () => {
       createdAt: TEST_NOW,
       id: FIRST_PROMPT_ID,
       name: "Review",
+      revision: 1,
       updatedAt: TEST_NOW,
     });
     expect(store.list(TEST_USER_ID)).toEqual([created, second]);
@@ -78,11 +81,13 @@ describe("prompt store", () => {
       SECOND_PROMPT_ID,
       { body: "Write only focused tests.", name: "Focused tests" },
       TEST_NOW + 2,
+      second.revision,
     );
     expect(updated).toEqual({
       ...second,
       body: "Write only focused tests.",
       name: "Focused tests",
+      revision: 2,
       updatedAt: TEST_NOW + 2,
     });
     expect(storedPrompt(database, SECOND_PROMPT_ID)).toMatchObject({
@@ -139,9 +144,10 @@ describe("prompt store", () => {
         OTHER_PROMPT_ID,
         { body: "Stolen", name: "Stolen" },
         TEST_NOW + 4,
+        1,
       ),
     ).toBeUndefined();
-    expect(store.remove(TEST_USER_ID, OTHER_PROMPT_ID, TEST_NOW + 5)).toBe(
+    expect(store.remove(TEST_USER_ID, OTHER_PROMPT_ID, TEST_NOW + 5, 1)).toBe(
       false,
     );
     expect(() =>
@@ -150,10 +156,11 @@ describe("prompt store", () => {
         SECOND_PROMPT_ID,
         { body: "Duplicate", name: "release checklist" },
         TEST_NOW + 6,
+        1,
       ),
     ).toThrow(DuplicatePromptNameError);
 
-    expect(store.remove(TEST_USER_ID, FIRST_PROMPT_ID, TEST_NOW + 7)).toBe(
+    expect(store.remove(TEST_USER_ID, FIRST_PROMPT_ID, TEST_NOW + 7, 1)).toBe(
       true,
     );
     expect(store.get(TEST_USER_ID, FIRST_PROMPT_ID)).toBeUndefined();
@@ -174,6 +181,54 @@ describe("prompt store", () => {
     );
     expect(reused.id).toBe(REUSED_PROMPT_ID);
     expect(database.select().from(prompts).all()).toHaveLength(4);
+    expect(store.get(TEST_USER_ID, REUSED_PROMPT_ID)?.revision).toBe(1);
+    database.$client.close();
+  });
+
+  test("rejects stale writes and caps each user's active prompt count", () => {
+    const { database, store } = createStore();
+    const first = store.create(
+      TEST_USER_ID,
+      { body: "Original body", name: "First" },
+      TEST_NOW,
+    );
+    const updated = store.update(
+      TEST_USER_ID,
+      first.id,
+      { body: "Current body", name: "First" },
+      TEST_NOW + 1,
+      first.revision,
+    );
+
+    expect(updated?.revision).toBe(2);
+    expect(() =>
+      store.update(
+        TEST_USER_ID,
+        first.id,
+        { body: "Stale body", name: "First" },
+        TEST_NOW + 2,
+        first.revision,
+      ),
+    ).toThrow(PromptChangedError);
+    expect(() =>
+      store.remove(TEST_USER_ID, first.id, TEST_NOW + 3, first.revision),
+    ).toThrow(PromptChangedError);
+    expect(store.get(TEST_USER_ID, first.id)?.body).toBe("Current body");
+
+    const limitedStore = new PromptStore(database, () => SECOND_PROMPT_ID, 1);
+    expect(() =>
+      limitedStore.create(
+        TEST_USER_ID,
+        { body: "Over the limit", name: "Second" },
+        TEST_NOW + 4,
+      ),
+    ).toThrow(PromptLimitError);
+    const other = limitedStore.create(
+      OTHER_USER_ID,
+      { body: "Independent quota", name: "Second" },
+      TEST_NOW + 5,
+    );
+    expect(other.id).toBe(SECOND_PROMPT_ID);
     database.$client.close();
   });
 });

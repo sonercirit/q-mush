@@ -7,6 +7,7 @@ import { createDatabase, type AppDatabase } from "../../shared/database.ts";
 import {
   agentMessages,
   agentSessions,
+  prompts,
   providerCredentials,
   sessions,
   users,
@@ -35,6 +36,12 @@ const AGENT_SESSION_MIGRATIONS = [
   },
   { file: "0012_damp_khan.sql", timestamp: 1_784_773_990_609 },
   { file: "0013_session-tools.sql", timestamp: 1_784_776_192_396 },
+] as const;
+const PROMPT_MIGRATIONS = [
+  ...AGENT_SESSION_MIGRATIONS,
+  { file: "0014_mushy_jean_grey.sql", timestamp: 1_784_825_553_938 },
+  { file: "0015_agent-message-errors.sql", timestamp: 1_784_832_440_988 },
+  { file: "0016_nosy_thena.sql", timestamp: 1_784_842_926_447 },
 ] as const;
 const SESSION_LIFETIME_MILLISECONDS = 7 * 24 * 60 * 60 * 1000;
 const UUID_V7_PATTERN =
@@ -139,6 +146,10 @@ async function migrateLegacyDatabase(
   database.close();
   await runMigrationCommand(path);
   return createDatabase(path);
+}
+
+function expectForeignKeysValid(database: AppDatabase): void {
+  expect(database.$client.query("PRAGMA foreign_key_check").all()).toEqual([]);
 }
 
 test("database migration command applies pending migrations", async () => {
@@ -306,12 +317,110 @@ test("session migration preserves transcripts with foreign keys", async () => {
       role: "error",
     },
   ]);
-  expect(
-    upgradedDatabase.$client.query("PRAGMA foreign_key_check").all(),
-  ).toEqual([]);
+  expectForeignKeysValid(upgradedDatabase);
   expect(upgradedDatabase.$client.query("PRAGMA foreign_keys").get()).toEqual({
     foreign_keys: 1,
   });
+  upgradedDatabase.$client.close();
+});
+
+test("prompt revision migration preserves rows, indexes, and ownership", async () => {
+  const { database: legacyDatabase, path } = await createLegacyDatabase(
+    "q-mush-prompt-upgrade-test-",
+    "prompts.sqlite",
+    PROMPT_MIGRATIONS,
+  );
+  const timestamp = 1_700_000_000_000;
+  const userId = "018bcfe5-6800-7000-8000-000000000091";
+  const promptId = "018bcfe5-6800-7000-8000-000000000092";
+  legacyDatabase.run(
+    `INSERT INTO users (
+      id, google_subject, email, name, created_at, created_by_id,
+      updated_at, updated_by_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      userId,
+      "prompt-migration-google-subject",
+      "prompt-migration@example.com",
+      "Prompt Migration",
+      timestamp,
+      SYSTEM_ID,
+      timestamp,
+      SYSTEM_ID,
+    ],
+  );
+  legacyDatabase.run(
+    `INSERT INTO prompts (
+      id, user_id, created_at, created_by_id, updated_at, updated_by_id,
+      name, normalized_name, body
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      promptId,
+      userId,
+      timestamp,
+      userId,
+      timestamp,
+      userId,
+      "Existing prompt",
+      "existing prompt",
+      " Preserve this body. ",
+    ],
+  );
+
+  const upgradedDatabase = await migrateLegacyDatabase(legacyDatabase, path);
+  const migratedPrompts = upgradedDatabase
+    .select({
+      body: prompts.body,
+      id: prompts.id,
+      name: prompts.name,
+      normalizedName: prompts.normalizedName,
+      revision: prompts.revision,
+      userId: prompts.userId,
+    })
+    .from(prompts)
+    .all();
+  expect(migratedPrompts).toEqual([
+    {
+      body: " Preserve this body. ",
+      id: promptId,
+      name: "Existing prompt",
+      normalizedName: "existing prompt",
+      revision: 1,
+      userId,
+    },
+  ]);
+  expect(
+    upgradedDatabase.$client
+      .query<{ readonly name: string }, []>(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'prompts' ORDER BY name",
+      )
+      .all()
+      .map(({ name }) => name),
+  ).toEqual([
+    "prompts_user_deletion_update_index",
+    "prompts_user_normalized_name_active_unique",
+    "sqlite_autoindex_prompts_1",
+  ]);
+  expectForeignKeysValid(upgradedDatabase);
+  expect(() =>
+    upgradedDatabase.$client.run(
+      `INSERT INTO prompts (
+        id, user_id, created_at, created_by_id, updated_at, updated_by_id,
+        name, normalized_name, body
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        "018bcfe5-6800-7000-8000-000000000093",
+        userId,
+        timestamp,
+        userId,
+        timestamp,
+        userId,
+        "Duplicate",
+        "existing prompt",
+        "Another body",
+      ],
+    ),
+  ).toThrow("UNIQUE constraint failed");
   upgradedDatabase.$client.close();
 });
 

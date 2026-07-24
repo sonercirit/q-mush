@@ -4,6 +4,7 @@ import { createUuidV7, type IdGenerator } from "../shared/ids.ts";
 import {
   PROMPT_BODY_MAXIMUM_LENGTH,
   PROMPT_NAME_MAXIMUM_LENGTH,
+  normalizePromptInput,
   type Prompt,
   type PromptInput,
 } from "../shared/prompt-model.ts";
@@ -14,12 +15,17 @@ import {
   createJsonResponse,
   createMethodNotAllowedResponse,
   createNoContentResponse,
-  parseJsonRequest,
 } from "./http.ts";
-import { DuplicatePromptNameError, PromptStore } from "./prompt-store.ts";
+import {
+  DuplicatePromptNameError,
+  PromptChangedError,
+  PromptLimitError,
+  PromptStore,
+} from "./prompt-store.ts";
 
 interface PromptDependencies {
   readonly database?: AppDatabase;
+  readonly maximumCount?: number;
   readonly now?: () => number;
   readonly randomId?: IdGenerator;
 }
@@ -27,6 +33,79 @@ interface PromptDependencies {
 export interface PromptIntegration {
   collection(request: Request): Promise<Response> | Response;
   item(request: Request, promptId: string): Promise<Response> | Response;
+}
+
+const PROMPT_REQUEST_MAXIMUM_BYTES =
+  (PROMPT_BODY_MAXIMUM_LENGTH + PROMPT_NAME_MAXIMUM_LENGTH) * 6 + 1_024;
+const PROMPT_CONTENT_TYPE = "application/json";
+const POSITIVE_INTEGER_PATTERN = /^[1-9]\d*$/u;
+
+function hasJsonContentType(request: Request): boolean {
+  const contentType = request.headers.get("content-type");
+  return (
+    contentType !== null &&
+    contentType.toLowerCase().split(";", 1)[0]?.trim() === PROMPT_CONTENT_TYPE
+  );
+}
+
+function readPromptRevision(request: Request): number | undefined {
+  const match = /^"([1-9]\d*)"$/u.exec(request.headers.get("if-match") ?? "");
+  if (match === null) {
+    return undefined;
+  }
+  const revision = Number(match[1]);
+  return Number.isSafeInteger(revision) ? revision : undefined;
+}
+
+function preconditionResponse(request: Request): number | Response {
+  const revision = readPromptRevision(request);
+  return revision ?? createApiError("precondition_required", 428);
+}
+
+function requestMayFit(request: Request): boolean {
+  const declaredLength = request.headers.get("content-length");
+  return (
+    declaredLength === null ||
+    declaredLength === "0" ||
+    (POSITIVE_INTEGER_PATTERN.test(declaredLength) &&
+      Number(declaredLength) <= PROMPT_REQUEST_MAXIMUM_BYTES)
+  );
+}
+
+interface ParsedPromptRequest {
+  readonly tooLarge: boolean;
+  readonly value?: unknown;
+}
+
+async function readPromptRequest(
+  request: Request,
+): Promise<ParsedPromptRequest> {
+  if (!hasJsonContentType(request) || !requestMayFit(request)) {
+    return { tooLarge: !requestMayFit(request) };
+  }
+  const reader = request.body?.getReader();
+  if (reader === undefined) {
+    return { tooLarge: false };
+  }
+  const decoder = new TextDecoder();
+  let body = "";
+  let bytesRead = 0;
+  let chunk = await reader.read();
+  while (!chunk.done) {
+    bytesRead += chunk.value.byteLength;
+    if (bytesRead > PROMPT_REQUEST_MAXIMUM_BYTES) {
+      await reader.cancel();
+      return { tooLarge: true };
+    }
+    body += decoder.decode(chunk.value, { stream: true });
+    chunk = await reader.read();
+  }
+  body += decoder.decode();
+  try {
+    return { tooLarge: false, value: JSON.parse(body) };
+  } catch {
+    return { tooLarge: false };
+  }
 }
 
 function readPromptInput(value: unknown): PromptInput | undefined {
@@ -45,9 +124,7 @@ function readPromptInput(value: unknown): PromptInput | undefined {
     return undefined;
   }
 
-  const body = rawBody.trim();
-  const name = rawName.trim();
-  return body.length === 0 || name.length === 0 ? undefined : { body, name };
+  return normalizePromptInput({ body: rawBody, name: rawName });
 }
 
 class DrizzlePromptIntegration implements PromptIntegration {
@@ -62,6 +139,7 @@ class DrizzlePromptIntegration implements PromptIntegration {
     this.#store = new PromptStore(
       database,
       dependencies.randomId ?? createUuidV7,
+      dependencies.maximumCount,
     );
   }
 
@@ -94,13 +172,31 @@ class DrizzlePromptIntegration implements PromptIntegration {
         return this.#promptResponse(this.#store.get(userId, promptId));
       }
       if (request.method === "PUT") {
-        return this.#write(request, userId, promptId);
+        const revision = preconditionResponse(request);
+        return revision instanceof Response
+          ? revision
+          : this.#write(request, userId, promptId, revision);
       }
       if (request.method === "DELETE") {
-        const removed = this.#store.remove(userId, promptId, this.#now());
-        return removed
-          ? createNoContentResponse()
-          : createApiError("not_found", 404);
+        const revision = preconditionResponse(request);
+        if (revision instanceof Response) {
+          return revision;
+        }
+        try {
+          const removed = this.#store.remove(
+            userId,
+            promptId,
+            this.#now(),
+            revision,
+          );
+          return removed
+            ? createNoContentResponse()
+            : createApiError("not_found", 404);
+        } catch (error) {
+          return error instanceof PromptChangedError
+            ? createApiError("prompt_changed", 412)
+            : createApiError("storage_unavailable", 500);
+        }
       }
       return createMethodNotAllowedResponse("GET, PUT, DELETE");
     };
@@ -111,8 +207,13 @@ class DrizzlePromptIntegration implements PromptIntegration {
     request: Request,
     userId: string,
     promptId?: string,
+    revision = 1,
   ): Promise<Response> {
-    const input = await parseJsonRequest(request, readPromptInput);
+    const parsed = await readPromptRequest(request);
+    if (parsed.tooLarge) {
+      return createApiError("request_too_large", 413);
+    }
+    const input = readPromptInput(parsed.value);
     if (input === undefined) {
       return createApiError("invalid_request", 400);
     }
@@ -125,11 +226,17 @@ class DrizzlePromptIntegration implements PromptIntegration {
         );
       }
       return this.#promptResponse(
-        this.#store.update(userId, promptId, input, this.#now()),
+        this.#store.update(userId, promptId, input, this.#now(), revision),
       );
     } catch (error) {
       if (error instanceof DuplicatePromptNameError) {
         return createApiError("duplicate_name", 409);
+      }
+      if (error instanceof PromptChangedError) {
+        return createApiError("prompt_changed", 412);
+      }
+      if (error instanceof PromptLimitError) {
+        return createApiError("prompt_limit_reached", 409);
       }
       return createApiError("storage_unavailable", 500);
     }

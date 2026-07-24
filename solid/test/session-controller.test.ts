@@ -377,6 +377,21 @@ test("replaces a streaming transcript with a compacted snapshot", async () => {
   }
 });
 
+test("inserting a prompt preserves all other session draft fields", () => {
+  const controller = new SessionController();
+  controller.setDraftField("workingDirectory", "/workspace");
+  controller.setDraftField("prompt", "Existing task");
+  expect(controller.insertPrompt("Replacement")).toBe(false);
+  expect(controller.state.draft.prompt).toBe("Existing task");
+  expect(controller.insertPrompt("First line\nSecond line", true)).toBe(true);
+
+  expect(controller.state.draft).toMatchObject({
+    prompt: "First line\nSecond line",
+    workingDirectory: "/workspace",
+  });
+  expect(controller.state.creating).toBe(false);
+});
+
 test("an unchanged session refresh does not notify the view", async () => {
   await expectRealtimeToRemainSilent(
     () => new SessionController(),

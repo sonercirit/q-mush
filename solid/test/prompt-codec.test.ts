@@ -8,6 +8,7 @@ const PROMPT = {
   body: "Inspect the repository before editing.",
   id: "018bcfe5-6800-7000-8000-000000000081",
   name: "Inspect first",
+  revision: 1,
 };
 
 test("reads prompt collection and item payloads", () => {
@@ -22,6 +23,7 @@ test("rejects malformed prompt payloads", () => {
     { ...PROMPT, createdAt: Number.NaN },
     { ...PROMPT, id: undefined },
     { ...PROMPT, name: undefined },
+    { ...PROMPT, revision: 0 },
     { ...PROMPT, updatedAt: "now" },
   ]) {
     expect(() => readPrompt(value)).toThrow("invalid prompt");
@@ -30,4 +32,7 @@ test("rejects malformed prompt payloads", () => {
     "invalid prompt",
   );
   expect(() => readPromptList([])).toThrow("invalid prompt list");
+  expect(() =>
+    readPromptList({ prompts: Array.from({ length: 101 }, () => PROMPT) }),
+  ).toThrow("invalid prompt list");
 });

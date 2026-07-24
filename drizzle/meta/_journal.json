@@ -120,6 +120,13 @@
       "when": 1784842926447,
       "tag": "0016_nosy_thena",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1784852168589,
+      "tag": "0017_icy_chronomancer",
+      "breakpoints": true
     }
   ]
 }

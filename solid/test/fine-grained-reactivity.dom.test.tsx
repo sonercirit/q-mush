@@ -339,9 +339,9 @@ test("inserts a saved prompt as an independently editable session draft", () => 
       />
       <PromptBank
         controller={promptController}
-        onInsert={(body) => {
-          sessionController.insertPrompt(body);
-        }}
+        onInsert={(body, replace) =>
+          sessionController.insertPrompt(body, replace)
+        }
       />
     </>
   ));

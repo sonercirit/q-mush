@@ -1,15 +1,29 @@
 export class HttpResponseError extends Error {
+  readonly code: string | undefined;
   readonly status: number;
 
-  constructor(status: number) {
+  constructor(status: number, code?: string) {
     super(`The HTTP request failed with status ${String(status)}`);
+    this.code = code;
     this.name = "HttpResponseError";
     this.status = status;
   }
 }
 
+export function hasHttpError(
+  error: unknown,
+  status: number,
+  code?: string,
+): boolean {
+  return (
+    error instanceof HttpResponseError &&
+    error.status === status &&
+    (code === undefined || error.code === code)
+  );
+}
+
 export function hasHttpStatus(error: unknown, status: number): boolean {
-  return error instanceof HttpResponseError && error.status === status;
+  return hasHttpError(error, status);
 }
 
 export async function request(
@@ -25,7 +39,20 @@ export async function request(
   const response = await fetch(input, { ...init, headers });
 
   if (!response.ok) {
-    throw new HttpResponseError(response.status);
+    let code: string | undefined;
+    try {
+      const value: unknown = await response.clone().json();
+      code =
+        typeof value === "object" &&
+        value !== null &&
+        "error" in value &&
+        typeof value.error === "string"
+          ? value.error
+          : undefined;
+    } catch {
+      // Not every failed response has a JSON API body.
+    }
+    throw new HttpResponseError(response.status, code);
   }
 
   return response;
