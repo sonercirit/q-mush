@@ -9,6 +9,7 @@ interface StatusAction {
 interface StatusNotice {
   readonly action?: StatusAction;
   readonly body: string;
+  readonly dismiss?: () => void;
   readonly heading?: string;
   readonly tone: "amber" | "cyan" | "emerald";
 }
@@ -17,7 +18,11 @@ export interface PwaStatusProps {
   readonly installed: boolean;
   readonly installAvailable: boolean;
   readonly iosInstallAvailable: boolean;
+  readonly loading: boolean;
   readonly offline: boolean;
+  readonly onDismissInstall: () => void;
+  readonly onDismissIosInstall: () => void;
+  readonly onDismissUpdate: () => void;
   readonly onInstall: () => void;
   readonly onReload: () => void;
   readonly updateAvailable: boolean;
@@ -49,16 +54,31 @@ function StatusNoticeView(props: {
         </Show>
         {props.notice.body}
       </p>
-      <Show when={props.notice.action}>
-        {(action) => (
-          <button
-            class={actionClasses(action())}
-            onClick={action().run}
-            type="button"
-          >
-            {action().label}
-          </button>
-        )}
+      <Show when={props.notice.action !== undefined || props.notice.dismiss}>
+        <div class="flex shrink-0 flex-wrap items-center gap-3">
+          <Show when={props.notice.action}>
+            {(action) => (
+              <button
+                class={actionClasses(action())}
+                onClick={action().run}
+                type="button"
+              >
+                {action().label}
+              </button>
+            )}
+          </Show>
+          <Show when={props.notice.dismiss}>
+            {(dismiss) => (
+              <button
+                class="self-start rounded-full px-3 py-2 text-sm font-semibold underline decoration-current/50 underline-offset-4 transition hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-current"
+                onClick={dismiss()}
+                type="button"
+              >
+                Dismiss
+              </button>
+            )}
+          </Show>
+        </div>
       </Show>
     </section>
   );
@@ -78,20 +98,23 @@ function statusNotices(props: PwaStatusProps): readonly StatusNotice[] {
     notices.push({
       action: { label: "Reload", primary: true, run: props.onReload },
       body: "Reload when you’re ready to use the latest Q Mush shell.",
+      dismiss: props.onDismissUpdate,
       heading: "Update available.",
       tone: "cyan",
     });
   }
-  if (!props.installed && props.installAvailable) {
+  if (!props.loading && !props.installed && props.installAvailable) {
     notices.push({
       action: { label: "Install app", run: props.onInstall },
       body: "Install Q Mush for a standalone app and offline startup.",
+      dismiss: props.onDismissInstall,
       tone: "emerald",
     });
   }
-  if (!props.installed && props.iosInstallAvailable) {
+  if (!props.loading && !props.installed && props.iosInstallAvailable) {
     notices.push({
       body: "To install Q Mush, open the Share menu and choose Add to Home Screen.",
+      dismiss: props.onDismissIosInstall,
       tone: "emerald",
     });
   }

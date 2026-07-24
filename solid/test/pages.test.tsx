@@ -21,7 +21,9 @@ test("renders every server page through Solid with PWA metadata", () => {
   const app = renderAppPage();
 
   expect(home).toContain(">Q Mush</h1>");
-  expect(app).toContain('<main id="app"');
+  expect(app).toContain('<main class="min-h-screen" id="app">');
+  expect(app).toContain("Connection required");
+  expect(app).toContain("Private workspace data is never");
   expect(home).not.toContain("data-hk=");
   expect(app).not.toContain("data-hk=");
   expectPwaHead(home);

@@ -12,7 +12,14 @@ export interface BeforeInstallPromptEvent extends Event {
 interface ServiceWorkerRegistrationLike {
   addEventListener(type: "updatefound", listener: () => void): void;
   readonly installing?: ServiceWorkerLike | null;
+  removeEventListener(type: "updatefound", listener: () => void): void;
   readonly waiting?: ServiceWorkerLike | null;
+}
+
+interface ServiceWorkerContainerLike {
+  addEventListener(type: "controllerchange", listener: () => void): void;
+  readonly controller: ServiceWorkerLike | null;
+  removeEventListener(type: "controllerchange", listener: () => void): void;
 }
 
 export function isServiceWorkerRegistrationLike(
@@ -22,7 +29,9 @@ export function isServiceWorkerRegistrationLike(
     typeof value === "object" &&
     value !== null &&
     "addEventListener" in value &&
-    typeof value.addEventListener === "function"
+    typeof value.addEventListener === "function" &&
+    "removeEventListener" in value &&
+    typeof value.removeEventListener === "function"
   );
 }
 
@@ -31,24 +40,29 @@ interface ServiceWorkerLike extends EventTarget {
 }
 
 export interface ServiceWorkerRegistrationResult {
+  cancel(): void;
   readonly registration: Promise<ServiceWorkerRegistrationLike | undefined>;
 }
 
 interface RegistrationOptions {
-  readonly addWindowListener: (type: "load", listener: () => void) => void;
+  readonly addWindowListener: (
+    type: "load",
+    listener: () => void,
+  ) => () => void;
   readonly enabled: boolean;
+  readonly loaded: boolean;
   readonly register: (
     path: string,
     options: { readonly scope: string; readonly updateViaCache: "none" },
   ) => Promise<ServiceWorkerRegistrationLike>;
 }
 
-export function createPwaViewState(): PwaViewState {
+export function createPwaViewState(offline = false): PwaViewState {
   return {
     installPrompt: undefined,
     installed: false,
     iosInstallAvailable: false,
-    offline: false,
+    offline,
     updateAvailable: false,
   };
 }
@@ -92,52 +106,116 @@ export function registerQmushServiceWorker(
   options: RegistrationOptions,
 ): ServiceWorkerRegistrationResult {
   if (!options.enabled) {
-    return { registration: Promise.resolve(undefined) };
+    return {
+      cancel: () => undefined,
+      registration: Promise.resolve(undefined),
+    };
   }
 
-  let resolveRegistration:
-    | ((registration: ServiceWorkerRegistrationLike | undefined) => void)
-    | undefined;
-  const registration = new Promise<ServiceWorkerRegistrationLike | undefined>(
-    (resolve) => {
-      resolveRegistration = resolve;
-    },
-  );
-  const settleRegistration = (
-    value: ServiceWorkerRegistrationLike | undefined,
-  ): void => {
-    resolveRegistration?.(value);
+  const register = (): Promise<ServiceWorkerRegistrationLike | undefined> => {
+    try {
+      return options
+        .register(SERVICE_WORKER_PATH, { scope: "/", updateViaCache: "none" })
+        .catch(() => undefined);
+    } catch {
+      return Promise.resolve(undefined);
+    }
   };
-
-  options.addWindowListener("load", () => {
-    void options
-      .register(SERVICE_WORKER_PATH, { scope: "/", updateViaCache: "none" })
-      .then(settleRegistration, () => {
-        settleRegistration(undefined);
+  let active = true;
+  let removeLoadListener = (): void => undefined;
+  let resolvePending:
+    ((value: ServiceWorkerRegistrationLike | undefined) => void) | undefined;
+  const registration = options.loaded
+    ? register().then((value) => (active ? value : undefined))
+    : new Promise<ServiceWorkerRegistrationLike | undefined>((resolve) => {
+        resolvePending = resolve;
+        removeLoadListener = options.addWindowListener("load", () => {
+          if (!active) {
+            return;
+          }
+          void register().then((value) => {
+            resolve(active ? value : undefined);
+          });
+        });
       });
-  });
 
-  return { registration };
+  return {
+    cancel() {
+      active = false;
+      removeLoadListener();
+      resolvePending?.(undefined);
+    },
+    registration,
+  };
 }
 
 export function watchForServiceWorkerUpdate(
   registration: ServiceWorkerRegistrationLike,
-  hasController: () => boolean,
+  serviceWorkers: ServiceWorkerContainerLike,
   onUpdate: () => void,
-): void {
-  const notifyWhenInstalled = (): void => {
-    const worker = registration.installing;
-    worker?.addEventListener("statechange", () => {
-      if (worker.state === "installed" && hasController()) {
-        onUpdate();
+  initialController = serviceWorkers.controller,
+): () => void {
+  const observedWorkers = new Map<ServiceWorkerLike, () => void>();
+  const notifiedWorkers = new Set<ServiceWorkerLike>();
+  let active = true;
+  let previousController = initialController;
+  const notify = (worker: ServiceWorkerLike): void => {
+    if (active && !notifiedWorkers.has(worker)) {
+      notifiedWorkers.add(worker);
+      onUpdate();
+    }
+  };
+  const observe = (worker: ServiceWorkerLike | null | undefined): void => {
+    if (
+      worker === null ||
+      worker === undefined ||
+      observedWorkers.has(worker)
+    ) {
+      return;
+    }
+    const handleStateChange = (): void => {
+      if (worker.state === "installed" && serviceWorkers.controller !== null) {
+        notify(worker);
       }
-    });
+    };
+    observedWorkers.set(worker, handleStateChange);
+    worker.addEventListener("statechange", handleStateChange);
+    handleStateChange();
+  };
+  const handleUpdateFound = (): void => {
+    observe(registration.installing);
+  };
+  const handleControllerChange = (): void => {
+    const controller = serviceWorkers.controller;
+    if (
+      controller !== null &&
+      previousController !== null &&
+      controller !== previousController
+    ) {
+      notify(controller);
+    }
+    previousController = controller;
   };
 
   if (registration.waiting !== null && registration.waiting !== undefined) {
-    onUpdate();
+    notify(registration.waiting);
   }
-  registration.addEventListener("updatefound", notifyWhenInstalled);
+  observe(registration.installing);
+  registration.addEventListener("updatefound", handleUpdateFound);
+  serviceWorkers.addEventListener("controllerchange", handleControllerChange);
+  handleControllerChange();
+
+  return () => {
+    active = false;
+    registration.removeEventListener("updatefound", handleUpdateFound);
+    serviceWorkers.removeEventListener(
+      "controllerchange",
+      handleControllerChange,
+    );
+    for (const [worker, listener] of observedWorkers) {
+      worker.removeEventListener("statechange", listener);
+    }
+  };
 }
 
 export function isBeforeInstallPromptEvent(

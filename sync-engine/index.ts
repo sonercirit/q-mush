@@ -18,20 +18,15 @@ import {
 } from "./realtime.ts";
 import { buildRunnerExecutableProvider } from "./runner-executable.ts";
 import { createRunnerIntegration } from "./runners.ts";
-import {
-  buildClientJavaScript,
-  buildClientStylesheet,
-  createRequestHandler,
-} from "./server.ts";
+import { buildClientAssets, createRequestHandler } from "./server.ts";
 import { createSessionIntegration } from "./sessions.ts";
 
 const database = createDatabase(readDatabasePath(Bun.env));
-const [clientJavaScript, pages, runnerExecutables, stylesheet] =
+const [{ javaScript: clientJavaScript, stylesheet }, pages, runnerExecutables] =
   await Promise.all([
-    buildClientJavaScript(),
+    buildClientAssets(),
     renderPages(),
     buildRunnerExecutableProvider(),
-    buildClientStylesheet(),
   ]);
 const googleAuth = createGoogleAuthFromEnvironment(Bun.env, { database });
 const braveSearch = createBraveSearchSkillFromEnvironment(Bun.env, googleAuth, {

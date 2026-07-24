@@ -14,7 +14,6 @@ describe("PWA cache policy", () => {
       APP_PATH,
       "/app.js",
       "/styles.css",
-      "/manifest.webmanifest",
       "/icons/q-mush-192.png",
       "/icons/q-mush-512.png",
       "/icons/q-mush-maskable-512.png",
@@ -22,9 +21,18 @@ describe("PWA cache policy", () => {
       expect(worker).toContain(JSON.stringify(path));
     }
     expect(worker).toContain('request.method !== "GET"');
+    expect(worker).toContain('request.cache === "no-store"');
+    expect(worker).toContain('redirect: "error"');
+    expect(worker).toContain('credentials: "omit"');
+    expect(worker).toContain("response.redirected");
+    expect(worker).toContain('response.type !== "basic"');
+    expect(worker).toContain("response.url !== expectedUrl");
+    expect(worker).toContain("cache.put(path, response)");
+    expect(worker).not.toContain("cache.addAll");
     expect(worker).toContain("url.origin === self.location.origin");
-    expect(worker).toContain('url.search === ""');
+    expect(worker).toContain("url.href === url.origin + url.pathname");
     expect(worker).toContain("CACHEABLE_PATHS.has(url.pathname)");
+    expect(worker).not.toContain('"/manifest.webmanifest"');
   });
 
   test("does not name authenticated or arbitrary resources", () => {
@@ -39,7 +47,6 @@ describe("PWA cache policy", () => {
       "runner/executable",
       "transcript",
       "remote",
-      "cache.put",
     ];
 
     for (const fragment of deniedFragments) {

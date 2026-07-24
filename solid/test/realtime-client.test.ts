@@ -37,6 +37,7 @@ const LOCATION = {
   href: "https://qmush.example/app",
   protocol: "https:",
 };
+const REFRESH_MESSAGE = '{"type":"refresh"}';
 
 function socketFactory(sockets: BrowserSocket[]) {
   return (url: string): BrowserSocket => {
@@ -54,6 +55,13 @@ function connectionOptions(sockets: BrowserSocket[]) {
   };
 }
 
+function connect(sockets: BrowserSocket[]): RealtimeConnection {
+  return new RealtimeConnection(() => undefined, {
+    ...connectionOptions(sockets),
+    setTimeout: () => 1,
+  });
+}
+
 test("connects to the same-origin realtime WebSocket and decodes events", () => {
   const sockets: BrowserSocket[] = [];
   const events: unknown[] = [];
@@ -67,11 +75,27 @@ test("connects to the same-origin realtime WebSocket and decodes events", () => 
   sockets[0]?.receive('{"sessions":[],"type":"sessions"}');
 
   expect(sockets[0]?.url).toBe("wss://qmush.example/api/realtime");
-  expect(sockets[0]?.sent).toEqual(['{"type":"refresh"}']);
+  expect(sockets[0]?.sent).toEqual([REFRESH_MESSAGE]);
   expect(events).toEqual([{ sessions: [], type: "sessions" }]);
   connection.stop();
 });
 
+test("refreshes an existing open socket without creating a duplicate", () => {
+  const sockets: BrowserSocket[] = [];
+  const connection = connect(sockets);
+
+  connection.start();
+  const socket = sockets[0];
+  socket?.dispatchEvent(new Event("open"));
+  if (socket !== undefined) {
+    Object.defineProperty(socket, "readyState", { value: WebSocket.OPEN });
+  }
+  connection.refresh();
+
+  expect(sockets).toHaveLength(1);
+  expect(socket?.sent).toEqual([REFRESH_MESSAGE, REFRESH_MESSAGE]);
+  connection.stop();
+});
 test("reconnects after a close and stops retrying after stop", () => {
   const sockets: BrowserSocket[] = [];
   const timers: (() => void)[] = [];

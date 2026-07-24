@@ -19,6 +19,7 @@ import {
   HOME_PATH,
 } from "../shared/routes.ts";
 import { request, requestJson } from "./browser-http.ts";
+import { mountClientApp } from "./client-mount.ts";
 import { providerNotice } from "./client-notices.ts";
 import {
   BRAVE_SEARCH_PANEL,
@@ -358,9 +359,21 @@ function Workspace(props: {
   );
 }
 
+function workspaceSessionMatches(
+  left: AuthSession | undefined,
+  right: AuthSession,
+): boolean {
+  return (
+    left?.googleLoginAvailable === right.googleLoginAvailable &&
+    left.user?.id === right.user?.id
+  );
+}
+
 function App(): JSX.Element {
-  const [loadFailed, setLoadFailed] = createSignal(false);
-  const [offline, setOffline] = createSignal(false);
+  const startsOffline =
+    typeof navigator === "undefined" ? false : !navigator.onLine;
+  const [loadFailed, setLoadFailed] = createSignal(startsOffline);
+  const [offline, setOffline] = createSignal(startsOffline);
   const [logoutPending, setLogoutPending] = createSignal(false);
   const [session, setSession] = createSignal<AuthSession>();
   const notices = readNotices();
@@ -397,13 +410,28 @@ function App(): JSX.Element {
     }
   };
 
-  const loadSession = async (): Promise<void> => {
+  const loadSession = async (preserveWorkspace = false): Promise<boolean> => {
     setLoadFailed(false);
-    setSession(undefined);
-    resetWorkspaceConnections();
+    const currentSession = session();
+    let resetOnFailure = !preserveWorkspace;
 
     try {
       const loaded = readAuthSession(await requestJson(AUTH_SESSION_PATH));
+      if (
+        preserveWorkspace &&
+        workspaceSessionMatches(currentSession, loaded)
+      ) {
+        setSession(loaded);
+        if (loaded.user !== null) {
+          realtime.refresh();
+        }
+        setLoadFailed(false);
+        return true;
+      }
+
+      resetOnFailure = true;
+      setSession(undefined);
+      resetWorkspaceConnections();
       setSession(loaded);
       if (loaded.user !== null) {
         await Promise.all([
@@ -413,8 +441,15 @@ function App(): JSX.Element {
         ]);
         realtime.start();
       }
+      setLoadFailed(false);
+      return true;
     } catch {
+      if (resetOnFailure) {
+        resetWorkspaceConnections();
+        setSession(undefined);
+      }
       setLoadFailed(true);
+      return false;
     }
   };
 
@@ -439,7 +474,9 @@ function App(): JSX.Element {
   };
 
   onMount(() => {
-    void loadSession();
+    if (navigator.onLine) {
+      void loadSession();
+    }
   });
   onCleanup(resetWorkspaceConnections);
 
@@ -462,7 +499,7 @@ function App(): JSX.Element {
           <Header debug={debug} user={session()?.user} />
           <PwaController
             onOfflineChange={setOffline}
-            onOnline={() => void loadSession()}
+            onOnline={() => loadSession(true)}
           />
           <main class="py-12 sm:py-16">
             <p class="text-sm font-semibold tracking-[0.2em] text-emerald-300 uppercase">
@@ -545,4 +582,4 @@ if (root === null) {
   throw new Error("The app root was not found");
 }
 
-render(() => <App />, root);
+mountClientApp(root, (element) => render(() => <App />, element));

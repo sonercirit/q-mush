@@ -43,8 +43,7 @@ import { renderPages } from "../../sync-engine/pages.ts";
 import type { RunnerExecutableProvider } from "../../sync-engine/runner-executable.ts";
 import { createRunnerIntegration } from "../../sync-engine/runners.ts";
 import {
-  buildClientJavaScript,
-  buildClientStylesheet,
+  buildClientAssets,
   createRequestHandler,
 } from "../../sync-engine/server.ts";
 import { createSessionIntegration } from "../../sync-engine/sessions.ts";
@@ -122,6 +121,11 @@ function expectCompressionHeaders(
 
 function expectStylesheetLink(body: string): void {
   expect(body).toContain('href="/styles.css" rel="stylesheet"');
+}
+
+function expectRevalidated(response: Response): void {
+  expect(response.headers.get("cache-control")).toBe("no-cache");
+  expect(response.headers.get("x-content-type-options")).toBe("nosniff");
 }
 
 async function expectUnencodedResponse(
@@ -215,10 +219,10 @@ describe("routes", () => {
 
 describe("page server", () => {
   test("server renders the home page", async () => {
-    const { body, response } = await request("/");
+    const { body, response: homeResponse } = await request("/");
 
-    expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toBe(
+    expect(homeResponse.status).toBe(200);
+    expect(homeResponse.headers.get("content-type")).toBe(
       "text/html; charset=utf-8",
     );
     expect(body.startsWith("<!doctype html>")).toBe(true);
@@ -233,10 +237,13 @@ describe("page server", () => {
     const { body, response } = await request("/app?source=test");
 
     expect(response.status).toBe(200);
-    expect(body).toContain('<main id="app"');
+    expect(body).toContain('<main class="min-h-screen" id="app">');
     expect(body).toContain('<script src="/app.js" type="module"></script>');
+    expect(body).toContain("Connection required");
+    expect(body).toContain("Private workspace data is never");
     expectStylesheetLink(body);
-    expect(body).not.toContain("<h1>Q Mush App</h1>");
+    expect(body).toContain(">Q Mush App</h1>");
+    expect(body).not.toContain("Signed in as");
   });
 
   test("serves the browser bundle", async () => {
@@ -264,13 +271,12 @@ describe("page server", () => {
       sendRequest(PWA_ICON_512_PATH),
       sendRequest(PWA_ICON_512_MASKABLE_PATH),
     ]);
+    const scriptResponse = await sendRequest("/app.js");
+    const stylesheetResponse = await sendRequest("/styles.css");
     const manifest: unknown = await manifestResponse.json();
 
-    expect(manifestResponse.headers.get("content-type")).toBe(
-      "application/manifest+json; charset=utf-8",
-    );
-    expect(manifestResponse.headers.get("cache-control")).toBe(
-      "public, max-age=3600",
+    expect(manifestResponse.headers.get("x-content-type-options")).toBe(
+      "nosniff",
     );
     expect(manifest).toMatchObject({
       display: "standalone",
@@ -278,23 +284,20 @@ describe("page server", () => {
       scope: "/",
       start_url: "/app",
     });
-    expect(serviceWorkerResponse.headers.get("content-type")).toBe(
-      "text/javascript; charset=utf-8",
+    expect(serviceWorkerResponse.headers.get("cache-control")).toContain(
+      "no-store",
     );
-    expect(serviceWorkerResponse.headers.get("cache-control")).toBe(
-      "no-cache, no-store, must-revalidate",
-    );
-    expect(serviceWorkerResponse.headers.get("service-worker-allowed")).toMatch(
-      /^\/$/u,
+    expect(serviceWorkerResponse.headers.get("service-worker-allowed")).toBe(
+      "/",
     );
     expect(await serviceWorkerResponse.text()).toContain("q-mush-shell-");
+    for (const response of [scriptResponse, stylesheetResponse]) {
+      expectRevalidated(response);
+    }
     for (const response of iconResponses) {
-      expect(response.status).toBeLessThan(300);
-      expect(response.headers.get("content-type")).toMatch(/^image\/png$/u);
-      expect(response.headers.get("cache-control")).toBe(
-        "public, max-age=31536000, immutable",
-      );
-      expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(100);
+      expect(response.status).toBeLessThan(400);
+      expect(response.headers.get("content-type")).toBe("image/png");
+      expectRevalidated(response);
     }
   });
 
@@ -303,8 +306,19 @@ describe("page server", () => {
     const appResponse = await sendRequest("/app");
     const apiResponse = await sendRequest(AUTH_SESSION_PATH);
 
+    for (const path of ["/app", "/app.js", "/styles.css"]) {
+      const response = await sendRequest(path);
+      expectRevalidated(response);
+    }
     expect(homeResponse.headers.get("cache-control")).toBe("no-cache");
-    expect(appResponse.headers.get("cache-control")).toBe("no-cache");
+    expect(appResponse.headers.get("content-security-policy")).toContain(
+      "frame-ancestors 'none'",
+    );
+    expect(appResponse.headers.get("content-security-policy")).toContain(
+      "worker-src 'self'",
+    );
+    expect(appResponse.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(appResponse.headers.get("x-content-type-options")).toBe("nosniff");
     expect(apiResponse.headers.get("cache-control")).toBe("no-store");
   });
 
@@ -316,6 +330,19 @@ describe("page server", () => {
     expect(apiResponse.status).toBe(404);
     expect(await missingResponse.text()).toBe("Not found");
     expect(await apiResponse.text()).toBe("Not found");
+  });
+
+  test("does not serve shell assets to non-GET requests", async () => {
+    const responses = await Promise.all([
+      sendRequest("/app", undefined, "POST"),
+      sendRequest("/app.js", undefined, "POST"),
+      sendRequest(MANIFEST_PATH, undefined, "POST"),
+      sendRequest(SERVICE_WORKER_PATH, undefined, "POST"),
+      sendRequest(PWA_ICON_192_PATH, undefined, "POST"),
+      sendRequest("/styles.css", undefined, "POST"),
+    ]);
+
+    expectAllStatuses(responses, 404);
   });
 
   test("serves the standalone runner executable", async () => {
@@ -508,7 +535,7 @@ describe("response compression", () => {
 
 describe("browser build", () => {
   test("builds the login, session, and provider credential controls", async () => {
-    const javaScript = await buildClientJavaScript();
+    const { javaScript } = await buildClientAssets();
 
     expect(javaScript).toContain("Continue with Google");
     expect(javaScript).toContain("Connect OpenAI account");
@@ -531,7 +558,7 @@ describe("browser build", () => {
 
 describe("stylesheet build", () => {
   test("builds the Tailwind stylesheet in memory", async () => {
-    const css = await buildClientStylesheet();
+    const { stylesheet: css } = await buildClientAssets();
 
     expect(css).toContain("tailwindcss");
     expect(css).toContain(".min-h-screen");

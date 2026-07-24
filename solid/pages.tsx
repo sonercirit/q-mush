@@ -139,12 +139,42 @@ export function renderHomePage(): string {
 
 export function renderAppPage(): string {
   return renderDocument("Q Mush App", [
-    <main id="app" class="min-h-screen"></main>,
+    <main class="min-h-screen" id="app">
+      <section
+        aria-labelledby="app-title"
+        class="min-h-screen bg-slate-950 px-6 py-12 text-slate-100 sm:px-10"
+      >
+        <div class="mx-auto max-w-3xl">
+          <p class="text-sm font-semibold tracking-[0.2em] text-emerald-300 uppercase">
+            Local control center
+          </p>
+          <h1
+            class="mt-4 text-4xl font-semibold tracking-tight text-white sm:text-6xl"
+            id="app-title"
+          >
+            Q Mush App
+          </h1>
+          <p class="mt-5 max-w-2xl text-lg leading-8 text-slate-400">
+            Reconnect to verify your session. Private workspace data is never
+            included in the offline shell.
+          </p>
+          <div
+            class="mt-8 rounded-2xl border border-amber-300/30 bg-amber-300/10 p-4 text-amber-100"
+            role="status"
+          >
+            <p class="font-semibold">Connection required</p>
+            <p class="mt-2 text-sm leading-6 text-amber-100/80">
+              Start or reconnect to the Q Mush server, then reload this page.
+            </p>
+          </div>
+        </div>
+      </section>
+    </main>,
     <script src={APP_SCRIPT_PATH} type="module"></script>,
     <noscript>
       <p class="m-6 rounded-2xl border border-amber-300/30 bg-amber-300/10 p-4 text-amber-100">
-        The Q Mush app needs JavaScript because this page is rendered in the
-        browser.
+        The Q Mush app needs JavaScript. Reconnect to the server, enable
+        JavaScript, and reload.
       </p>
     </noscript>,
   ]);

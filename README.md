@@ -87,8 +87,8 @@ memory at startup and prepares versioned standalone runner builds, then exposes
 two pages and their assets:
 
 - `/` renders the homepage to HTML on the server.
-- `/app` serves an empty application shell, then `/app.js` renders the app in
-  the browser.
+- `/app` serves a neutral reconnect-only application shell, then `/app.js`
+  replaces it with the browser app.
 - `/styles.css` serves the stylesheet shared by both pages.
 - `/manifest.webmanifest`, `/service-worker.js`, and `/icons/*` provide the
   installable production PWA shell.
@@ -257,9 +257,9 @@ platform executable in server memory.
 
 Production builds register Q Mush as an installable PWA on secure origins. The
 service worker precaches only the fixed public app shell (`/app`, its local
-JavaScript/CSS, manifest, and generated icons), versions that cache with the
-application build, removes older Q Mush shell caches, and falls back only for an
-exact `/app` navigation. It deliberately does not handle API, WebSocket, OAuth,
+JavaScript/CSS and generated icons), versions that cache with the application
+build, removes older Q Mush shell caches, and falls back only for an exact
+`/app` navigation. It deliberately does not handle API, WebSocket, OAuth,
 provider, runner-installer, transcript, POST, query-bearing, cross-origin, or
 arbitrary requests. A cold offline launch therefore renders only the neutral
 shell and asks the user to reconnect before Q Mush verifies a session; it never

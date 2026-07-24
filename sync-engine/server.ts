@@ -34,7 +34,7 @@ import {
 import type { GoogleAuth } from "./auth.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
 import {
-  clientBuildConfiguration,
+  createClientBuildConfiguration,
   createClientPlugins,
 } from "./client-build.ts";
 import type { OpenAiIntegration } from "./openai.ts";
@@ -47,25 +47,49 @@ import type { RunnerIntegration } from "./runners.ts";
 import { createServiceWorkerJavaScript } from "./service-worker.ts";
 import type { SessionIntegration } from "./sessions.ts";
 
-const CSS_HEADERS = { "content-type": "text/css; charset=utf-8" };
+const CSS_HEADERS = {
+  "cache-control": "no-cache",
+  "content-type": "text/css; charset=utf-8",
+  "x-content-type-options": "nosniff",
+};
 const HTML_HEADERS = {
   "cache-control": "no-cache",
+  "content-security-policy": [
+    "default-src 'none'",
+    "base-uri 'none'",
+    "connect-src 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+    "img-src 'self' data: https:",
+    "manifest-src 'self'",
+    "script-src 'self'",
+    "style-src 'self'",
+    "worker-src 'self'",
+  ].join("; "),
   "content-type": "text/html; charset=utf-8",
+  "referrer-policy": "no-referrer",
+  "x-content-type-options": "nosniff",
 };
-const IMMUTABLE_ASSET_HEADERS = {
-  "cache-control": "public, max-age=31536000, immutable",
+const ICON_HEADERS = {
+  "cache-control": "no-cache",
+  "content-type": "image/png",
+  "x-content-type-options": "nosniff",
 };
 const JAVASCRIPT_HEADERS = {
+  "cache-control": "no-cache",
   "content-type": "text/javascript; charset=utf-8",
+  "x-content-type-options": "nosniff",
 };
 const MANIFEST_HEADERS = {
-  "cache-control": "public, max-age=3600",
+  "cache-control": "no-cache",
   "content-type": "application/manifest+json; charset=utf-8",
+  "x-content-type-options": "nosniff",
 };
 const SERVICE_WORKER_HEADERS = {
   "cache-control": "no-cache, no-store, must-revalidate",
   "content-type": "text/javascript; charset=utf-8",
   "service-worker-allowed": "/",
+  "x-content-type-options": "nosniff",
 };
 
 type ContentEncoding = "br" | "deflate" | "gzip" | "zstd";
@@ -268,8 +292,11 @@ export function createRequestHandler(
   const manifestJson = JSON.stringify(PWA_MANIFEST);
   const manifest = prepareBody(manifestJson);
   const notFound = prepareBody("Not found");
+  const icon192 = createPwaIcon(192);
+  const icon512 = createPwaIcon(512);
+  const maskableIcon512 = createPwaIcon(512, true);
   const shellVersion = createHash("sha256")
-    .update("q-mush-pwa-v1\0")
+    .update("q-mush-pwa-v2\0")
     .update(clientJavaScript)
     .update("\0")
     .update(stylesheet)
@@ -277,15 +304,21 @@ export function createRequestHandler(
     .update(pages.app)
     .update("\0")
     .update(manifestJson)
+    .update("\0")
+    .update(icon192)
+    .update("\0")
+    .update(icon512)
+    .update("\0")
+    .update(maskableIcon512)
     .digest("hex");
   const serviceWorker = prepareBody(
     createServiceWorkerJavaScript(shellVersion),
   );
   const styles = prepareBody(stylesheet);
   const icons = new Map<string, Uint8Array>([
-    [PWA_ICON_192_PATH, createPwaIcon(192)],
-    [PWA_ICON_512_PATH, createPwaIcon(512)],
-    [PWA_ICON_512_MASKABLE_PATH, createPwaIcon(512, true)],
+    [PWA_ICON_192_PATH, icon192],
+    [PWA_ICON_512_PATH, icon512],
+    [PWA_ICON_512_MASKABLE_PATH, maskableIcon512],
   ]);
 
   return async (request) => {
@@ -410,35 +443,29 @@ export function createRequestHandler(
       }
     }
 
-    if (pathname === HOME_PATH) {
+    if (pathname === HOME_PATH && request.method === "GET") {
       return createTextResponse(request, homePage, HTML_HEADERS);
     }
 
-    if (pathname === APP_PATH) {
+    if (pathname === APP_PATH && request.method === "GET") {
       return createTextResponse(request, appPage, HTML_HEADERS);
     }
 
-    if (pathname === APP_SCRIPT_PATH) {
+    if (pathname === APP_SCRIPT_PATH && request.method === "GET") {
       return createTextResponse(request, browserBundle, JAVASCRIPT_HEADERS);
     }
 
-    if (pathname === MANIFEST_PATH) {
+    if (pathname === MANIFEST_PATH && request.method === "GET") {
       return createTextResponse(request, manifest, MANIFEST_HEADERS);
     }
 
-    if (pathname === SERVICE_WORKER_PATH) {
+    if (pathname === SERVICE_WORKER_PATH && request.method === "GET") {
       return createTextResponse(request, serviceWorker, SERVICE_WORKER_HEADERS);
     }
 
-    const icon = icons.get(pathname);
+    const icon = request.method === "GET" ? icons.get(pathname) : undefined;
     if (icon !== undefined) {
-      return new Response(toArrayBuffer(icon), {
-        headers: {
-          ...IMMUTABLE_ASSET_HEADERS,
-          "content-type": "image/png",
-          "x-content-type-options": "nosniff",
-        },
-      });
+      return new Response(toArrayBuffer(icon), { headers: ICON_HEADERS });
     }
 
     if (pathname === RUNNER_INSTALLER_PATH) {
@@ -449,7 +476,7 @@ export function createRequestHandler(
       return runnerExecutables.serve(request);
     }
 
-    if (pathname === STYLESHEET_PATH) {
+    if (pathname === STYLESHEET_PATH && request.method === "GET") {
       return createTextResponse(request, styles, CSS_HEADERS);
     }
 
@@ -512,25 +539,25 @@ function readViteClientAssets(
   return { javaScript, stylesheet };
 }
 
-let clientAssets: Promise<ViteClientAssets> | undefined;
+const clientAssets = new Map<string | undefined, Promise<ViteClientAssets>>();
 
-function buildClientAssets(): Promise<ViteClientAssets> {
-  clientAssets ??= build({
+export async function buildClientAssets(
+  nodeEnvironment = process.env.NODE_ENV,
+): Promise<ViteClientAssets> {
+  const existing = clientAssets.get(nodeEnvironment);
+  if (existing !== undefined) {
+    return existing;
+  }
+
+  const assets = build({
     build: {
-      ...clientBuildConfiguration,
+      ...createClientBuildConfiguration(nodeEnvironment),
       write: false,
     },
     configFile: false,
     logLevel: "silent",
-    plugins: createClientPlugins(),
+    plugins: createClientPlugins(nodeEnvironment),
   }).then(readViteClientAssets);
-  return clientAssets;
-}
-
-export async function buildClientStylesheet(): Promise<string> {
-  return (await buildClientAssets()).stylesheet;
-}
-
-export async function buildClientJavaScript(): Promise<string> {
-  return (await buildClientAssets()).javaScript;
+  clientAssets.set(nodeEnvironment, assets);
+  return assets;
 }

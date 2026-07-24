@@ -66,6 +66,27 @@ export class RealtimeConnection {
     this.#setTimeout = options.setTimeout ?? window.setTimeout;
   }
 
+  refresh(): void {
+    if (this.#stopped) {
+      return;
+    }
+
+    const socket = this.#socket;
+    if (socket?.readyState === WebSocket.OPEN) {
+      try {
+        socket.send(JSON.stringify({ type: "refresh" }));
+        return;
+      } catch {
+        socket.close();
+        return;
+      }
+    }
+
+    if (socket === undefined && this.#reconnectTimer === undefined) {
+      this.#connect();
+    }
+  }
+
   start(): void {
     if (!this.#stopped) {
       return;

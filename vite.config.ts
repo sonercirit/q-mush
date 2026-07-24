@@ -1,10 +1,10 @@
 import { defineConfig } from "vite";
 import {
-  clientBuildConfiguration,
+  createClientBuildConfiguration,
   createClientPlugins,
 } from "./sync-engine/client-build.ts";
 
 export default defineConfig({
-  build: clientBuildConfiguration,
+  build: createClientBuildConfiguration(),
   plugins: createClientPlugins(),
 });
