@@ -74,6 +74,7 @@ export function sessionContextClasses(
 export function CompactionControls(props: {
   readonly autoCompact: boolean;
   readonly compacting: boolean;
+  readonly disabled?: boolean;
   readonly onCompact: () => void;
   readonly onToggleAutoCompact: (enabled: boolean) => void;
 }): JSX.Element {
@@ -82,7 +83,7 @@ export function CompactionControls(props: {
       <label class="flex items-center gap-2 text-sm text-slate-300">
         <input
           checked={props.autoCompact}
-          disabled={props.compacting}
+          disabled={props.disabled ?? props.compacting}
           onChange={(event) => {
             props.onToggleAutoCompact(event.currentTarget.checked);
           }}
@@ -92,7 +93,7 @@ export function CompactionControls(props: {
       </label>
       <button
         class="rounded-xl border border-amber-300/30 bg-amber-300/10 px-4 py-2 text-sm font-semibold text-amber-200 disabled:opacity-50"
-        disabled={props.compacting}
+        disabled={props.disabled ?? props.compacting}
         onClick={props.onCompact}
         type="button"
       >
