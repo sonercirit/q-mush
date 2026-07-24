@@ -225,6 +225,54 @@ describe("ask questions store", () => {
     database.$client.close();
   });
 
+  test("serializes duplicate answer attempts without duplicate tool output", async () => {
+    const { database, store } = setup();
+    store.create(
+      TEST_USER_ID,
+      SESSION_ID,
+      "call-question",
+      input,
+      TEST_NOW + 2,
+    );
+
+    const attempts = await Promise.all([
+      Promise.resolve().then(() =>
+        store.answer(
+          TEST_USER_ID,
+          SESSION_ID,
+          REQUEST_ID,
+          answers,
+          TEST_NOW + 3,
+        ),
+      ),
+      Promise.resolve().then(() =>
+        store.answer(
+          TEST_USER_ID,
+          SESSION_ID,
+          REQUEST_ID,
+          answers,
+          TEST_NOW + 4,
+        ),
+      ),
+    ]);
+
+    expect(
+      attempts
+        .map((attempt) =>
+          typeof attempt === "string" ? attempt : attempt.status,
+        )
+        .sort(),
+    ).toEqual(["already_answered", "answered"]);
+    expect(
+      database
+        .select()
+        .from(agentMessages)
+        .all()
+        .filter(({ role }) => role === "tool"),
+    ).toHaveLength(1);
+    database.$client.close();
+  });
+
   test("rejects invalid answers and preserves the pending transaction", () => {
     const { database, sessions, store } = setup();
     store.create(
