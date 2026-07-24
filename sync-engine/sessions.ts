@@ -52,10 +52,12 @@ import {
   type PromptInput,
 } from "./session-input.ts";
 import { sessionModelRuntime } from "./session-model-runtime.ts";
+import { reassignSessionRequest } from "./session-reassignment-request.ts";
 import {
   SessionRequestHelpers,
   readIdentifier,
 } from "./session-request-helpers.ts";
+import { handleRemovedSessionRunner } from "./session-runner-removal.ts";
 import { SessionRuntimes } from "./session-runtime.ts";
 import { SessionStore } from "./session-store.ts";
 
@@ -73,6 +75,8 @@ interface SessionDependencies {
 interface RuntimeSelection extends SessionCredentialSelection {
   readonly runnerId: string;
 }
+
+export type { SessionCredentialReaders };
 
 export interface SessionIntegration {
   collection(request: Request): Response | Promise<Response>;
@@ -99,7 +103,9 @@ export interface SessionIntegration {
   message(request: Request, sessionId: string): Promise<Response>;
   models(request: Request): Promise<Response>;
   onChange(listener: (userId: string, sessionId: string) => void): void;
+  reassign(request: Request, sessionId: string): Promise<Response>;
   runnerConnected(): void;
+  runnerRemoved(userId: string, runnerId: string): Promise<void>;
   stop(request: Request, sessionId: string): Promise<Response>;
 }
 
@@ -159,7 +165,14 @@ class DrizzleSessionIntegration implements SessionIntegration {
       dependencies.randomId ?? createUuidV7,
     );
     this.#actions = this.#createActions(database);
+    this.#runners.onRemoved((userId, runnerId) =>
+      this.runnerRemoved(userId, runnerId),
+    );
     this.#actions.reportAll(this.#store.failInterrupted(this.#now()));
+  }
+
+  #runnerIsAvailable(userId: string, runnerId: string): boolean {
+    return this.#runners.runnerIsAvailable(userId, runnerId);
   }
 
   #createActions(database: AppDatabase): SessionAgentActions {
@@ -169,6 +182,8 @@ class DrizzleSessionIntegration implements SessionIntegration {
         this.#runtimes.abort(sessionId);
       },
       broker: this.#broker,
+      browseDirectories: (userId, runnerId, path) =>
+        this.#requests.browseDirectories(userId, runnerId, path),
       database,
       discoverModels: this.#discoverModels,
       draining: () => this.#runtimes.draining,
@@ -189,6 +204,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
       },
       launchSession: (credential, detail, userId) =>
         this.#launch(detail, credential, userId),
+      listOnlineRunners: (userId) => this.#runners.onlineForUser(userId),
       listRunnerOptions: (userId, offset, limit, search) =>
         this.#runners.listOnlineForUser(userId, {
           limit,
@@ -200,7 +216,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
       readCredential: (userId, selection) =>
         this.#readCredential(userId, selection),
       runnerIsAvailable: (userId, runnerId) =>
-        this.#runners.runnerIsAvailable(userId, runnerId),
+        this.#runnerIsAvailable(userId, runnerId),
       store: this.#store,
       withCredential: (userId, selection, action) =>
         this.#withCredentialAccess(userId, selection, action),
@@ -302,9 +318,36 @@ class DrizzleSessionIntegration implements SessionIntegration {
     this.#onChange.add(listener);
   }
 
+  async reassign(request: Request, sessionId: string): Promise<Response> {
+    return reassignSessionRequest(
+      {
+        authenticate: this.#requests.authenticate,
+        notify: this.#notify,
+        now: this.#now,
+        runnerIsAvailable: this.#runnerIsAvailable.bind(this),
+        store: this.#store,
+      },
+      request,
+      sessionId,
+    );
+  }
+
   runnerConnected(): void {
     this.#actions.reportAll(this.#store.pendingSpawnedSessions());
   }
+
+  async runnerRemoved(userId: string, runnerId: string): Promise<void> {
+    await handleRemovedSessionRunner({
+      broker: this.#broker,
+      now: this.#now,
+      notify: this.#notify,
+      runnerId,
+      runtimes: this.#runtimes,
+      store: this.#store,
+      userId,
+    });
+  }
+
   async stop(request: Request, sessionId: string): Promise<Response> {
     return this.#requests.postForUser(request, (user) =>
       this.#withStoredSession(user, sessionId, (existing) => {
@@ -357,11 +400,9 @@ class DrizzleSessionIntegration implements SessionIntegration {
     selection: RuntimeSelection,
     action: SessionCredentialAction,
   ): Promise<Response> {
-    if (!this.#runners.runnerIsAvailable(userId, selection.runnerId)) {
-      return createApiError("runner_unavailable", 409);
-    }
-
-    return this.#withCredentialAccess(userId, selection, action);
+    return this.#runners.runnerIsAvailable(userId, selection.runnerId)
+      ? this.#withCredentialAccess(userId, selection, action)
+      : createApiError("runner_unavailable", 409);
   }
 
   #detailResponse(userId: string, sessionId: string): Response {
@@ -562,7 +603,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
 
   #finish(detail: AgentSessionDetail, userId: string, error?: unknown): void {
     const current = this.#store.get(userId, detail.id);
-    if (current?.status === "stopped") {
+    if (current?.runnerRequired === true || current?.status === "stopped") {
       this.#notifyFinished(detail, userId);
       return;
     }

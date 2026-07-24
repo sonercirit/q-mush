@@ -118,8 +118,11 @@ two pages and their assets:
   discover models for an owned credential at `/api/sessions/models`, inspect
   `/api/sessions/:id`, send follow-ups to `/api/sessions/:id/messages`, compact
   history through `/api/sessions/:id/compact`, toggle automatic compaction at
-  `/api/sessions/:id/compaction`, and stop work through
-  `/api/sessions/:id/stop`.
+  `/api/sessions/:id/compaction`, reassign a session after runner removal with
+  `POST /api/sessions/:id/reassign`, and stop work through
+  `/api/sessions/:id/stop`. Reassignment requires an owned online runner and an
+  explicit working directory on that computer; it changes the assignment but
+  never starts the session automatically.
 
 After signing in, use **Set up a runner** in the control center. Run the shown
 one-liner on a macOS or Linux computer, or download and run the installer. The
@@ -140,10 +143,13 @@ WebSocket; the control center receives live presence without exposing its token.
 The runner checks for a versioned update at startup and every five minutes. The
 WebSocket handshake advertises the current version, so a runner checks
 immediately after contacting a restarted server. It verifies the executable's
-SHA-256 digest, atomically replaces itself, and restarts. Removing a runner
-revokes its server-side registration, but it does not delete files from that
-computer. Rerun the installer once to migrate a legacy `q-mush-runner.js`
-installation to the self-updating executable.
+SHA-256 digest, atomically replaces itself, and restarts. An offline runner
+retains its session assignments. Removing a runner revokes its server-side
+registration, marks its non-stopped sessions as requiring replacement, but does
+not delete files from that computer. Rerun the installer once to migrate a
+legacy `q-mush-runner.js` installation to the self-updating executable. A
+removed registration is not reused: reinstalling that computer creates a new
+runner ID, and affected sessions must be reassigned explicitly.
 
 The browser control center is responsive from phone through wide desktop
 viewports. Session detail includes an app focus mode (separate from browser
@@ -183,22 +189,30 @@ saved keys in order when a key is rejected, rate limited, or temporarily
 unavailable. Transcripts show system instructions, complete tool definitions,
 reasoning summaries, tool calls, and tool results. Transcript prose renders as
 Markdown, fenced code is syntax-colored, and structured tool arguments/results
-are pretty-printed with colorized JSON. Context use includes a percentage, turns
-yellow at 80%, and red at 90%. The session list and transcript header also show
-cumulative active runtime across all runs plus cumulative model cost.
-OpenRouter's provider-reported charge is shown as **Cost**; otherwise Q Mush
-shows **Estimated cost** from detailed token usage and the model pricing
-captured at session creation (or its built-in OpenAI per-token rate table). When
-supported pricing or usage is unavailable, cost is shown as unavailable rather
-than zero. OpenAI connected-account estimates are API-equivalent reference
-prices; subscription billing can differ. Automatic compaction is enabled per
-session by default and replaces completed history with a model-generated handoff
-summary before the next request after usage reaches 95%; automatic and manual
-compaction model calls are included in cumulative cost. It can be turned off,
-and a ready session can be compacted manually. Session transcripts and status
-survive page reloads; a ready, stopped, or failed session accepts follow-up
-instructions. **Stop session** aborts the model request and cancels an active
-runner command.
+are pretty-printed with colorized JSON. The session-tool group lets an agent
+list only its owner's online runners, inspect `runnerRequired` in session lists,
+browse canonical runner directories from `~`, and explicitly reassign another
+recoverable session. These tools never return runner tokens or other secrets,
+and reassignment does not continue or launch the target session. Context use
+includes a percentage, turns yellow at 80%, and red at 90%. The session list and
+transcript header also show cumulative active runtime across all runs plus
+cumulative model cost. OpenRouter's provider-reported charge is shown as
+**Cost**; otherwise Q Mush shows **Estimated cost** from detailed token usage
+and the model pricing captured at session creation (or its built-in OpenAI
+per-token rate table). When supported pricing or usage is unavailable, cost is
+shown as unavailable rather than zero. OpenAI connected-account estimates are
+API-equivalent reference prices; subscription billing can differ. Automatic
+compaction is enabled per session by default and replaces completed history with
+a model-generated handoff summary before the next request after usage reaches
+95%; automatic and manual compaction model calls are included in cumulative
+cost. It can be turned off, and a ready session can be compacted manually.
+Session transcripts and status survive page reloads; a ready, stopped, or failed
+session accepts follow-up instructions. When an assigned runner is removed, the
+session shows **Choose runner** instead of **Failed**, preserves its transcript
+and configuration, and disables follow-up, continue, image, and compaction
+controls until an online replacement and a confirmed working directory are
+selected. Reassignment itself does not resume work. **Stop session** aborts the
+model request and cancels an active runner command.
 
 The runner executes tools with the runner process's local account permissions.
 File tools reject paths outside the selected workspace, while shell commands are

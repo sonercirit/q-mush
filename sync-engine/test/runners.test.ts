@@ -36,7 +36,9 @@ interface Setup {
   readonly setNow: (value: number) => void;
 }
 
-function createSetup(): Setup {
+function createSetup(
+  onRemoved?: (userId: string, runnerId: string) => void,
+): Setup {
   const ids = [FIRST_RUNNER_ID, SECOND_RUNNER_ID, THIRD_RUNNER_ID];
   const tokens = [
     "first-setup-token",
@@ -50,6 +52,7 @@ function createSetup(): Setup {
     {
       database,
       now: () => now,
+      ...(onRemoved === undefined ? {} : { onRemoved }),
       randomId: () => takeValue(ids, "The test ran out of runner IDs"),
       randomToken: () => takeValue(tokens, "The test ran out of runner tokens"),
     },
@@ -126,6 +129,21 @@ function runnerOptionQuery(
 function connectFirstRunner(setup: Setup): void {
   createRunner(setup);
   connect(setup, FIRST_TOKEN, "machine-fingerprint-one");
+}
+
+async function removeFirstRunner(setup: Setup): Promise<Response> {
+  return setup.integration.remove(
+    createAuthenticatedRequest(
+      `${RUNNERS_PATH}/${FIRST_RUNNER_ID}`,
+      undefined,
+      "DELETE",
+    ),
+    FIRST_RUNNER_ID,
+  );
+}
+
+async function removeFirstRunnerAndExpect(setup: Setup): Promise<void> {
+  expect((await removeFirstRunner(setup)).status).toBe(204);
 }
 
 function expectRevoked(setup: Setup, token: string): void {
@@ -407,19 +425,24 @@ describe("runner connections", () => {
     setup.database.$client.close();
   });
 
-  test("soft deletes a runner and rejects its token", () => {
+  test("notifies the session domain after transactional removal", async () => {
+    const removed: string[] = [];
+    const setup = createSetup((userId, runnerId) => {
+      removed.push(`${userId}:${runnerId}`);
+    });
+    connectFirstRunner(setup);
+
+    await removeFirstRunnerAndExpect(setup);
+
+    expect(removed).toEqual([`${TEST_USER_ID}:${FIRST_RUNNER_ID}`]);
+    setup.database.$client.close();
+  });
+
+  test("soft deletes a runner and rejects its token", async () => {
     const setup = createSetup();
     connectFirstRunner(setup);
 
-    const response = setup.integration.remove(
-      createAuthenticatedRequest(
-        `${RUNNERS_PATH}/${FIRST_RUNNER_ID}`,
-        undefined,
-        "DELETE",
-      ),
-      FIRST_RUNNER_ID,
-    );
-    expect(response.status).toBe(204);
+    await removeFirstRunnerAndExpect(setup);
     expectRevoked(setup, FIRST_TOKEN);
     expect(
       setup.database

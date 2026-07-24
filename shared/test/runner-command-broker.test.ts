@@ -76,6 +76,21 @@ test("pushes cancellation for an in-flight WebSocket command", async () => {
 });
 
 describe("runner command broker", () => {
+  test("fences results from a removed runner", async () => {
+    const broker = new RunnerCommandBroker({
+      commandId: () => "removed-command",
+      deliver: () => true,
+    });
+    const result = broker.dispatch(runnerCommand());
+
+    const removed = broker.runnerRemoved(RUNNER_ID);
+    expect(removed).toHaveLength(1);
+    expect(removed[0]?.command.id).toBe("removed-command");
+    expectAbortError(removed[0]?.error);
+    expectAbortError(await captureBrokerRejection(result));
+    expect(broker.complete(RUNNER_ID, "removed-command", "late")).toBe(false);
+  });
+
   test("does not deliver when the signal aborts while subscribing", async () => {
     const controller = new AbortController();
     const delivered: unknown[] = [];

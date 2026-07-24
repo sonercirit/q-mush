@@ -50,6 +50,15 @@ test("reads persisted session error messages", () => {
   ]);
 });
 
+test("requires runner reassignment metadata in session responses", () => {
+  expect(
+    readSessionDetail({ ...DETAIL, runnerRequired: true }).runnerRequired,
+  ).toBe(true);
+  expect(() =>
+    readSessionDetail({ ...DETAIL, runnerRequired: undefined }),
+  ).toThrow("invalid agent session");
+});
+
 test("reads a session's tool and skill selection", () => {
   expect(readSessionDetail(DETAIL).tools).toEqual(DETAIL.tools);
   expect(() =>

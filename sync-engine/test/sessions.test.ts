@@ -28,9 +28,12 @@ import {
 import {
   completeAgentFileLookup,
   completeRunnerCommand,
+  directoryListing,
+  expectedRunnerCommand,
   expectRunnerCommand,
   hasSessionStatus,
   sessionDetail,
+  startSessionAndExpectRunnerCommand,
   waitForSessionValue,
 } from "./session-integration-helpers.ts";
 
@@ -237,12 +240,7 @@ describe("agent sessions", () => {
       "The runner did not receive a directory command",
     );
 
-    const listing = {
-      directories: [{ name: "q-mush", path: "/home/mush/projects/q-mush" }],
-      parent: "/home/mush",
-      path: "/home/mush/projects",
-      truncated: false,
-    };
+    const listing = directoryListing();
     const resultResponse = completeRunnerCommand(
       setup,
       JSON.stringify(listing),
@@ -469,21 +467,15 @@ describe("agent sessions", () => {
     ]);
     const setup = connectedSessionSetup(model);
     const { sessions } = setup;
-    const created = await sessions.collection(createSessionRequest());
-    expect(created.status).toBe(201);
-    await completeAgentFileLookup(setup);
-    await expectRunnerCommand(
+    await startSessionAndExpectRunnerCommand(
       setup,
-      {
+      expectedRunnerCommand({
         arguments: {
           command: "bun run dev:restart",
           timeout: 30,
         },
-        id: RUNNER_COMMAND_ID,
-        sessionId: SESSION_ID,
         tool: "bash",
-        workingDirectory: "/work/project",
-      },
+      }),
       "The runner did not receive the restart command",
     );
 

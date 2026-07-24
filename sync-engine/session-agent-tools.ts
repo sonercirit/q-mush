@@ -17,7 +17,11 @@ import {
   hasOnlySessionToolArguments,
   readSessionToolInput,
 } from "./session-agent-tool-input.ts";
-import { readIdentifier, readStringField } from "./session-request-helpers.ts";
+import {
+  readIdentifier,
+  readStringField,
+  readWorkingDirectory,
+} from "./session-request-helpers.ts";
 
 const MAXIMUM_SESSION_MESSAGE_LENGTH = 32_768;
 
@@ -36,12 +40,22 @@ export interface SpawnSessionToolInput extends Pick<
 }
 
 export interface SessionAgentToolActions {
+  readonly browseRunnerDirectories: (
+    runnerId: string,
+    path: string,
+  ) => Promise<string>;
   readonly continueSession: (sessionId: string) => Promise<string>;
   readonly getSessionOptions: (
     input: GetSessionOptionsToolInput,
   ) => Promise<string>;
+  readonly listRunners: () => string;
   readonly listSessions: () => string;
   readonly readSession: (input: ReadSessionToolInput) => string;
+  readonly reassignSession: (
+    sessionId: string,
+    runnerId: string,
+    workingDirectory: string,
+  ) => string;
   readonly sendToSession: (
     sessionId: string,
     message: string,
@@ -56,6 +70,34 @@ function sessionId(arguments_: Readonly<Record<string, unknown>>): string {
     throw new Error("Tool argument sessionId is invalid");
   }
   return id;
+}
+
+function readRunnerPath(
+  arguments_: Readonly<Record<string, unknown>>,
+): string | undefined {
+  return readWorkingDirectory(arguments_);
+}
+
+function reassignmentInput(arguments_: Readonly<Record<string, unknown>>): {
+  readonly runnerId: string;
+  readonly sessionId: string;
+  readonly workingDirectory: string;
+} {
+  const runnerId = readIdentifier(arguments_["runnerId"]);
+  const selectedSessionId = sessionId(arguments_);
+  const workingDirectory = readRunnerPath(arguments_);
+  if (
+    !hasOnlySessionToolArguments(arguments_, [
+      "sessionId",
+      "runnerId",
+      "workingDirectory",
+    ]) ||
+    runnerId === undefined ||
+    workingDirectory === undefined
+  ) {
+    throw new Error("The reassign_session arguments are invalid");
+  }
+  return { runnerId, sessionId: selectedSessionId, workingDirectory };
 }
 
 function spawnInput(
@@ -74,12 +116,7 @@ function spawnInput(
   const reasoningEffort = arguments_["reasoningEffort"];
   const runnerId = readIdentifier(arguments_["runnerId"]);
   const tools = readAgentSessionToolNames(arguments_["tools"]);
-  const workingDirectory = readStringField(
-    arguments_,
-    "workingDirectory",
-    MAXIMUM_RUNNER_PATH_LENGTH,
-    { trim: true },
-  );
+  const workingDirectory = readRunnerPath(arguments_);
 
   if (
     !hasOnlySessionToolArguments(arguments_, [
@@ -100,8 +137,7 @@ function spawnInput(
       !isAgentReasoningEffort(reasoningEffort)) ||
     runnerId === undefined ||
     tools === undefined ||
-    workingDirectory === undefined ||
-    workingDirectory.includes("\0")
+    workingDirectory === undefined
   ) {
     throw new Error("The spawn_session arguments are invalid");
   }
@@ -150,6 +186,27 @@ export function executeSessionAgentTool(
   try {
     let output: Promise<string>;
     switch (name) {
+      case "browse_runner_directories": {
+        const runnerId = readIdentifier(arguments_["runnerId"]);
+        const path = readStringField(
+          arguments_,
+          "path",
+          MAXIMUM_RUNNER_PATH_LENGTH,
+          { trim: true },
+        );
+        if (
+          !hasOnlySessionToolArguments(arguments_, ["runnerId", "path"]) ||
+          runnerId === undefined ||
+          path === undefined ||
+          path.includes("\0")
+        ) {
+          throw new Error(
+            "The browse_runner_directories arguments are invalid",
+          );
+        }
+        output = actions.browseRunnerDirectories(runnerId, path);
+        break;
+      }
       case "continue_session":
         if (!hasOnlySessionToolArguments(arguments_, ["sessionId"])) {
           throw new Error("continue_session received invalid arguments");
@@ -160,6 +217,12 @@ export function executeSessionAgentTool(
         output = actions.getSessionOptions(
           getSessionOptionsToolInput(arguments_),
         );
+        break;
+      case "list_runners":
+        if (Object.keys(arguments_).length > 0) {
+          throw new Error("list_runners does not accept arguments");
+        }
+        output = Promise.resolve(actions.listRunners());
         break;
       case "list_sessions":
         if (Object.keys(arguments_).length > 0) {
@@ -172,6 +235,17 @@ export function executeSessionAgentTool(
           actions.readSession(readSessionToolInput(arguments_)),
         );
         break;
+      case "reassign_session": {
+        const input = reassignmentInput(arguments_);
+        output = Promise.resolve(
+          actions.reassignSession(
+            input.sessionId,
+            input.runnerId,
+            input.workingDirectory,
+          ),
+        );
+        break;
+      }
       case "send_to_session":
         output = actions.sendToSession(
           sessionId(arguments_),

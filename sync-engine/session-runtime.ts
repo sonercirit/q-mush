@@ -21,6 +21,10 @@ export class SessionRuntimes {
     this.#active.get(sessionId)?.controller.abort();
   }
 
+  settled(sessionId: string): Promise<void> {
+    return this.#active.get(sessionId)?.settled ?? Promise.resolve();
+  }
+
   async drain(): Promise<void> {
     this.#draining = true;
     await Promise.allSettled(

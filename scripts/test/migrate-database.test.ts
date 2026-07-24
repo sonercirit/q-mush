@@ -36,6 +36,11 @@ const AGENT_SESSION_MIGRATIONS = [
   { file: "0012_damp_khan.sql", timestamp: 1_784_773_990_609 },
   { file: "0013_session-tools.sql", timestamp: 1_784_776_192_396 },
 ] as const;
+const CURRENT_AGENT_SESSION_TOOLS =
+  '["read","bash","edit","write","parallel","brave_search","spawn_session","browse_runner_directories","list_runners","list_sessions","read_session","reassign_session","send_to_session","continue_session","stop_session"]';
+const PREVIOUS_AGENT_SESSION_TOOLS =
+  '["read","bash","edit","write","parallel","brave_search","spawn_session","list_sessions","read_session","send_to_session","continue_session","stop_session"]';
+
 const SESSION_LIFETIME_MILLISECONDS = 7 * 24 * 60 * 60 * 1000;
 const UUID_V7_PATTERN =
   /^[\da-f]{8}-[\da-f]{4}-7[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/u;
@@ -245,6 +250,10 @@ test("session migration preserves transcripts with foreign keys", async () => {
       "idle",
     ],
   );
+  legacyDatabase.run("UPDATE agent_sessions SET tools = ? WHERE id = ?", [
+    PREVIOUS_AGENT_SESSION_TOOLS,
+    sessionId,
+  ]);
   legacyDatabase.run(
     `INSERT INTO agent_messages (
       id, user_id, created_at, created_by_id, updated_at, updated_by_id,
@@ -285,10 +294,19 @@ test("session migration preserves transcripts with foreign keys", async () => {
       .select({
         id: agentSessions.id,
         parentSessionId: agentSessions.parentSessionId,
+        runnerRequired: agentSessions.runnerRequired,
+        tools: agentSessions.tools,
       })
       .from(agentSessions)
       .all(),
-  ).toEqual([{ id: sessionId, parentSessionId: null }]);
+  ).toEqual([
+    {
+      id: sessionId,
+      parentSessionId: null,
+      runnerRequired: false,
+      tools: CURRENT_AGENT_SESSION_TOOLS,
+    },
+  ]);
   expect(
     upgradedDatabase
       .select({

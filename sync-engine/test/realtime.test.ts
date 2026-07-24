@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import type { AuthenticatedUser } from "../../shared/auth-model.ts";
 import { RUNNER_REALTIME_PATH } from "../../shared/routes.ts";
+import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import type { GoogleAuth } from "../../sync-engine/auth.ts";
 import { RealtimeHub } from "../../sync-engine/realtime-hub.ts";
 import {
@@ -9,6 +10,7 @@ import {
 } from "../../sync-engine/realtime.ts";
 import type { RunnerIntegration } from "../../sync-engine/runners.ts";
 import type { SessionIntegration } from "../../sync-engine/sessions.ts";
+import { REALTIME_TEST_SESSION_DETAIL } from "./realtime-session-fixture.ts";
 
 const USER: AuthenticatedUser = {
   email: "mush@example.com",
@@ -54,7 +56,9 @@ function runners(
     installer: () => new Response(),
     listForUser: () => [],
     listOnlineForUser: () => ({ items: [], totalItems: 0 }),
-    remove: () => new Response(),
+    onRemoved: () => undefined,
+    onlineForUser: () => [],
+    remove: () => Promise.resolve(new Response()),
     runnerIsAvailable: () => false,
     runnerToken: () => token,
     seen: () => undefined,
@@ -63,8 +67,15 @@ function runners(
   };
 }
 
+type SessionIntegrationOverrides = Partial<
+  Pick<
+    SessionIntegration,
+    "detailForUser" | "listForUser" | "onChange" | "runnerConnected"
+  >
+>;
+
 function sessions(
-  overrides: Partial<Pick<SessionIntegration, "runnerConnected">> = {},
+  overrides: SessionIntegrationOverrides = {},
 ): SessionIntegration {
   return {
     collection: () => Promise.resolve(new Response()),
@@ -81,7 +92,9 @@ function sessions(
     message: () => Promise.resolve(new Response()),
     models: () => Promise.resolve(new Response()),
     onChange: () => undefined,
+    reassign: () => Promise.resolve(new Response()),
     runnerConnected: () => undefined,
+    runnerRemoved: () => Promise.resolve(),
     stop: () => Promise.resolve(new Response()),
     ...overrides,
   };
@@ -91,7 +104,7 @@ function integration(
   user: AuthenticatedUser | null,
   token?: string,
   runnerOverrides?: RunnerIntegrationOverrides,
-  sessionOverrides?: Partial<Pick<SessionIntegration, "runnerConnected">>,
+  sessionOverrides?: SessionIntegrationOverrides,
 ) {
   return createRealtimeIntegration({
     auth: auth(user),
@@ -221,6 +234,83 @@ test("recovers and wakes completed child callbacks when a runner connects", () =
 
   expect(connectedUsers).toEqual([USER.id]);
 });
+test("publishes runner-required and reassigned session snapshots", () => {
+  const hub = new RealtimeHub();
+  const sent: string[] = [];
+  let listener: ((userId: string, sessionId: string) => void) | undefined;
+  let detail: AgentSessionDetail = {
+    ...REALTIME_TEST_SESSION_DETAIL,
+    id: "session-1",
+    runnerId: "removed-runner",
+    runnerRequired: true,
+    status: "idle",
+  };
+  const realtime = createRealtimeIntegration({
+    auth: auth(USER),
+    hub,
+    runnerVersion: "runner-version",
+    runners: runners(undefined),
+    sessions: sessions({
+      detailForUser: () => detail,
+      listForUser: () => [detail],
+      onChange: (nextListener) => {
+        listener = nextListener;
+      },
+    }),
+  });
+  const server = new UpgradeServer();
+  expect(upgrade(realtime, "/api/realtime", server)).toBeUndefined();
+  const socket = {
+    ...testSocket(server.data),
+    send(message: string): number {
+      sent.push(message);
+      return 1;
+    },
+  };
+  const open: unknown = Reflect.get(realtime.websocket, "open");
+  if (typeof open !== "function") {
+    throw new TypeError("The realtime open handler is unavailable");
+  }
+  Reflect.apply(open, undefined, [socket]);
+  sent.length = 0;
+
+  listener?.(USER.id, detail.id);
+  detail = {
+    ...detail,
+    runnerId: "replacement-runner",
+    runnerRequired: false,
+    workingDirectory: "/replacement/project",
+  };
+  listener?.(USER.id, detail.id);
+
+  const events: unknown[] = sent.map((message) => {
+    const event: unknown = JSON.parse(message);
+    return event;
+  });
+  expect(events).toEqual([
+    {
+      session: {
+        ...REALTIME_TEST_SESSION_DETAIL,
+        runnerId: "removed-runner",
+        runnerRequired: true,
+      },
+      type: "session",
+    },
+    {
+      sessions: [
+        {
+          ...REALTIME_TEST_SESSION_DETAIL,
+          runnerId: "removed-runner",
+          runnerRequired: true,
+        },
+      ],
+      type: "sessions",
+    },
+    { session: detail, type: "session" },
+    { sessions: [detail], type: "sessions" },
+  ]);
+});
+
 test("upgrades a token-authenticated runner realtime request", () => {
   expectUpgrade(integration(null, "qmr_runner-token"), RUNNER_REALTIME_PATH, {
     kind: "runner",

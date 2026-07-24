@@ -6,6 +6,7 @@ import {
 } from "../shared/agent-tools.ts";
 import { ProviderCredentialStore } from "../shared/provider-credential-store.ts";
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
+import type { RunnerSummary } from "../shared/runner-model.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { safeAgentModelDiscoveryError } from "./agent-model-discovery.ts";
 import { createJsonResponse } from "./http.ts";
@@ -31,6 +32,7 @@ import {
   type SpawnSessionToolInput,
 } from "./session-agent-tools.ts";
 import { unavailableSessionResponse } from "./session-availability.ts";
+import type { RunnerDirectoryBrowseResult } from "./session-request-helpers.ts";
 import { readSessionSnapshot } from "./session-store-agent-read.ts";
 import type { PendingSpawnedSession } from "./session-store-spawns.ts";
 
@@ -41,6 +43,12 @@ interface SessionAgentActionsDependencies extends SessionAgentActionDependencies
   readonly abortSession: (sessionId: string) => void;
   readonly activeSession: (sessionId: string) => boolean;
   readonly broker: Pick<RunnerCommandBroker, "cancelSession">;
+  readonly browseDirectories: (
+    userId: string,
+    runnerId: string,
+    path: string,
+  ) => Promise<RunnerDirectoryBrowseResult>;
+  readonly listOnlineRunners: (userId: string) => readonly RunnerSummary[];
   readonly listRunnerOptions: (
     userId: string,
     offset: number,
@@ -50,6 +58,16 @@ interface SessionAgentActionsDependencies extends SessionAgentActionDependencies
     readonly items: SessionOptionsSource["runners"];
     readonly totalItems: number;
   };
+}
+
+function sessionCanResume(
+  session: Pick<AgentSessionDetail, "runnerRequired" | "status">,
+): boolean {
+  return (
+    !session.runnerRequired &&
+    session.status !== "queued" &&
+    session.status !== "running"
+  );
 }
 
 export class SessionAgentActions {
@@ -71,10 +89,22 @@ export class SessionAgentActions {
     return {
       continueSession: (sessionId) =>
         this.#queue(userId, anotherSession(sessionId)),
+      browseRunnerDirectories: (runnerId, path) =>
+        this.#browseDirectories(userId, runnerId, path),
       getSessionOptions: (input) => this.#options(userId, input),
+      listRunners: () =>
+        sessionToolOutput(this.#dependencies.listOnlineRunners(userId)),
       listSessions: () =>
         sessionToolOutput(this.#dependencies.store.list(userId)),
       readSession: (input) => this.#read(userId, input),
+      reassignSession: (sessionId, runnerId, workingDirectory) =>
+        this.#reassign(
+          parentSessionId,
+          userId,
+          sessionId,
+          runnerId,
+          workingDirectory,
+        ),
       sendToSession: (sessionId, message) =>
         this.#queue(userId, anotherSession(sessionId), message),
       spawnSession: (input) => this.#spawn(parentSessionId, userId, input),
@@ -109,13 +139,48 @@ export class SessionAgentActions {
 
   finished(detail: AgentSessionDetail, userId: string): void {
     const current = this.#dependencies.store.get(userId, detail.id);
-    if (
-      current !== undefined &&
-      current.status !== "queued" &&
-      current.status !== "running"
-    ) {
+    if (current !== undefined && sessionCanResume(current)) {
       this.reportOne(current, userId);
     }
+  }
+
+  #onlineRunnerExists(userId: string, runnerId: string): boolean {
+    return this.#dependencies
+      .listOnlineRunners(userId)
+      .some((runner) => runner.id === runnerId);
+  }
+
+  #requireOnlineRunner(userId: string, runnerId: string): string | undefined {
+    return this.#onlineRunnerExists(userId, runnerId)
+      ? undefined
+      : this.#runnerUnavailableOutput();
+  }
+
+  async #browseDirectories(
+    userId: string,
+    runnerId: string,
+    path: string,
+  ): Promise<string> {
+    const online = this.#onlineRunnerExists(userId, runnerId);
+    if (!online) {
+      return this.#runnerUnavailableOutput();
+    }
+    try {
+      const result = await this.#dependencies.browseDirectories(
+        userId,
+        runnerId,
+        path,
+      );
+      return sessionToolOutput(
+        result.status === "listed" ? result.listing : { error: result.status },
+      );
+    } catch {
+      return sessionToolOutput({ error: "directory_unavailable" });
+    }
+  }
+
+  #runnerUnavailableOutput(): string {
+    return sessionToolOutput({ error: "runner_unavailable" });
   }
 
   #parentSessionId(
@@ -160,8 +225,7 @@ export class SessionAgentActions {
     const parent = this.#dependencies.store.get(userId, parentSessionId);
     if (
       parent !== undefined &&
-      parent.status !== "queued" &&
-      parent.status !== "running" &&
+      sessionCanResume(parent) &&
       !this.#dependencies.activeSession(parent.id) &&
       this.#dependencies.runnerIsAvailable(userId, parent.runnerId)
     ) {
@@ -298,7 +362,7 @@ export class SessionAgentActions {
       return responseToolOutput(unavailable);
     }
     if (!this.#dependencies.runnerIsAvailable(userId, target.runnerId)) {
-      return sessionToolOutput({ error: "runner_unavailable" });
+      return this.#runnerUnavailableOutput();
     }
     const response = await this.#dependencies.withCredential(
       userId,
@@ -323,6 +387,41 @@ export class SessionAgentActions {
       },
     );
     return responseToolOutput(response);
+  }
+
+  #reassign(
+    parentSessionId: string,
+    userId: string,
+    sessionId: string,
+    runnerId: string,
+    workingDirectory: string,
+  ): string {
+    if (sessionId === parentSessionId) {
+      throw new Error(
+        "Choose another session; this session is already running",
+      );
+    }
+    const unavailable = this.#requireOnlineRunner(userId, runnerId);
+    if (unavailable !== undefined) {
+      return unavailable;
+    }
+    const result = this.#dependencies.store.reassign(
+      userId,
+      sessionId,
+      runnerId,
+      workingDirectory,
+      this.#dependencies.now(),
+    );
+    if (result.status !== "reassigned") {
+      return sessionToolOutput({ error: `session_${result.status}` });
+    }
+    this.#dependencies.notify(userId, sessionId);
+    return sessionToolOutput({
+      runnerId,
+      sessionId,
+      status: "reassigned",
+      workingDirectory,
+    });
   }
 
   #spawn(

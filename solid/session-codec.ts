@@ -179,6 +179,7 @@ function readSummary(value: unknown): AgentSessionSummary {
   const provider = readProvider(value["provider"]);
   const reasoningEffort = readNullableString(value["reasoningEffort"]);
   const runnerId = value["runnerId"];
+  const runnerRequired = value["runnerRequired"];
   const status = readStatus(value["status"]);
   const title = value["title"];
   const tools = readAgentSessionToolNames(value["tools"]);
@@ -214,6 +215,7 @@ function readSummary(value: unknown): AgentSessionSummary {
     reasoningEffort === undefined ||
     (reasoningEffort !== null && !isAgentReasoningEffort(reasoningEffort)) ||
     typeof runnerId !== "string" ||
+    typeof runnerRequired !== "boolean" ||
     status === undefined ||
     typeof title !== "string" ||
     tools === undefined ||
@@ -239,6 +241,7 @@ function readSummary(value: unknown): AgentSessionSummary {
     providerPricing,
     reasoningEffort,
     runnerId,
+    runnerRequired,
     status,
     title,
     tools,
@@ -341,6 +344,7 @@ export function summaryFromDetail(
     providerPricing: detail.providerPricing,
     reasoningEffort: detail.reasoningEffort,
     runnerId: detail.runnerId,
+    runnerRequired: detail.runnerRequired,
     status: detail.status,
     title: detail.title,
     tools: detail.tools,

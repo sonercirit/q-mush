@@ -30,6 +30,7 @@ import {
   runnerDirectoriesPath,
   RUNNERS_PATH,
   SESSION_MODELS_PATH,
+  sessionReassignPath,
   SESSIONS_PATH,
 } from "../../shared/routes.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
@@ -203,6 +204,9 @@ describe("routes", () => {
     expect(REALTIME_PATH).toBe("/api/realtime");
     expect(RUNNER_VERSION_HEADER).toBe("x-q-mush-runner-version");
     expect(SESSIONS_PATH).toBe("/api/sessions");
+    expect(sessionReassignPath("session/id")).toBe(
+      "/api/sessions/session%2Fid/reassign",
+    );
     expect(RUNNER_INSTALLER_PATH).toBe("/runner/install.sh");
     expect(RUNNER_EXECUTABLE_PATH).toBe("/runner/executable");
   });
@@ -390,6 +394,7 @@ describe("page server", () => {
       sendRequest(`${SESSIONS_PATH}/session-id/compaction`, undefined, "POST"),
       sendRequest(`${SESSIONS_PATH}/session-id/continue`, undefined, "POST"),
       sendRequest(`${SESSIONS_PATH}/session-id/messages`, undefined, "POST"),
+      sendRequest(`${SESSIONS_PATH}/session-id/reassign`, undefined, "POST"),
       sendRequest(`${SESSIONS_PATH}/session-id/stop`, undefined, "POST"),
       sendRequest(runnerDirectoriesPath("runner-id"), undefined, "POST"),
     ]);

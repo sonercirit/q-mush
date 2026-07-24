@@ -404,6 +404,8 @@ export function createRequestHandler(
                 return sessions.continue(request, sessionId);
               case "messages":
                 return sessions.message(request, sessionId);
+              case "reassign":
+                return sessions.reassign(request, sessionId);
               case "stop":
                 return sessions.stop(request, sessionId);
               case undefined:

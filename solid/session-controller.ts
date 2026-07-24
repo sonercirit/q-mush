@@ -12,13 +12,22 @@ import { createReactiveState, type ReactiveState } from "./reactive-state.ts";
 import { RevisionState } from "./revision-state.ts";
 import type { SessionViewState } from "./session-client.tsx";
 import { readSessionDetail, readSessionList } from "./session-codec.ts";
+import { sessionDetailState } from "./session-controller-detail.ts";
 import {
-  replaceSessionSummary,
-  retainUnchangedSessionData,
+  selectedDetailHasStatus,
+  selectedMutation,
+  sessionCanResume,
+  sessionIsActive,
+} from "./session-controller-guards.ts";
+import {
   selectedSessionCredential,
   sessionDataMatches,
   SessionRealtimeState,
 } from "./session-controller-state.ts";
+import {
+  browserTranscriptFilterStorage,
+  initialTranscriptFilters,
+} from "./session-controller-transcript.ts";
 
 import { selectedDraftOption } from "./session-form.ts";
 import { appendAgentImageFiles } from "./session-image-input.ts";
@@ -28,62 +37,28 @@ import {
   compactSessionMutation,
   continueSessionMutation,
   executeSessionMutation,
+  reassignSessionMutation,
   sessionMutationError,
   stopSessionMutation,
   type SessionMutation,
 } from "./session-mutations.ts";
 import {
+  sessionDetailMutationPending,
+  sessionMutationPending,
+} from "./session-pending.ts";
+import {
+  emptySessionReassignmentDraft,
+  hasTrimmedText,
+} from "./session-reassignment-client.ts";
+import {
   initialSessionViewState,
   mostRecentSessionDirectory,
 } from "./session-state.ts";
 import {
-  readSessionTranscriptFilters,
   writeSessionTranscriptFilters,
   type SessionTranscriptFilterName,
   type SessionTranscriptFilterStorage,
 } from "./session-transcript-filters.ts";
-
-function detailMutationPending(state: SessionViewState): boolean {
-  return state.compacting || state.sending || state.stopping;
-}
-
-function selectedDetailHasStatus(
-  state: SessionViewState,
-  allowed: (status: AgentSessionStatus) => boolean,
-): boolean {
-  return (
-    state.selectedId !== undefined &&
-    state.detail?.id === state.selectedId &&
-    allowed(state.detail.status)
-  );
-}
-
-function sessionIsActive(status: AgentSessionStatus): boolean {
-  return status === "queued" || status === "running";
-}
-
-function sessionCanResume(status: AgentSessionStatus): boolean {
-  return status === "idle" || status === "failed" || status === "stopped";
-}
-
-function browserTranscriptFilterStorage():
-  SessionTranscriptFilterStorage | undefined {
-  if (typeof window === "undefined") {
-    return undefined;
-  }
-  try {
-    return window.localStorage;
-  } catch {
-    return undefined;
-  }
-}
-
-function selectedMutation(
-  sessionId: string | undefined,
-  create: (sessionId: string) => SessionMutation,
-): SessionMutation | undefined {
-  return sessionId === undefined ? undefined : create(sessionId);
-}
 
 export class SessionController {
   readonly #directoryPicker: DirectoryPickerController;
@@ -103,11 +78,12 @@ export class SessionController {
   ) {
     this.#reactiveView = reactiveView;
     this.#view = new RevisionState(reactiveView.state, reactiveView.setState);
-    const transcriptFilters =
-      transcriptFilterStorage === null || transcriptFilterStorage === undefined
-        ? reactiveView.state().transcriptFilters
-        : readSessionTranscriptFilters(transcriptFilterStorage);
-    this.#view.patch({ transcriptFilters });
+    this.#view.patch({
+      transcriptFilters: initialTranscriptFilters(
+        reactiveView.state(),
+        transcriptFilterStorage,
+      ),
+    });
     this.#realtime = new SessionRealtimeState(this.#view);
     this.#models = new SessionModelController(this.#view);
     this.#directoryPicker = directoryPicker;
@@ -115,7 +91,7 @@ export class SessionController {
   }
 
   applyDetail(detail: AgentSessionDetail): void {
-    if (this.#view.value.creating || detailMutationPending(this.#view.value)) {
+    if (sessionMutationPending(this.#view.value)) {
       return;
     }
     this.#realtime.applyDetail(detail);
@@ -152,7 +128,11 @@ export class SessionController {
     const workingDirectory = this.#directoryPicker.choose();
 
     if (workingDirectory !== undefined) {
-      this.setDraftField("workingDirectory", workingDirectory);
+      if (this.#view.value.detail?.runnerRequired === true) {
+        this.#patchReassignment({ workingDirectory });
+      } else {
+        this.setDraftField("workingDirectory", workingDirectory);
+      }
     }
   }
 
@@ -173,6 +153,19 @@ export class SessionController {
     if (name === "credential") {
       this.#models.ensure(value);
     }
+  }
+
+  chooseReassignmentRunner(
+    runnerId: string,
+    availableValues: readonly string[],
+  ): void {
+    if (!availableValues.includes(runnerId)) {
+      return;
+    }
+    this.#view.patch({
+      openSelect: undefined,
+      reassignment: { runnerId, workingDirectory: "" },
+    });
   }
 
   compact(): Promise<void> {
@@ -218,14 +211,21 @@ export class SessionController {
   }
 
   openDirectoryPicker(): void {
-    const draft = this.#view.value.draft;
+    const required = this.#view.value.detail?.runnerRequired === true;
+    const selection = required
+      ? this.#view.value.reassignment
+      : this.#view.value.draft;
 
-    if (draft.runnerId.length > 0) {
+    if (selection.runnerId.length > 0) {
       void this.#directoryPicker.open(
-        draft.runnerId,
-        draft.workingDirectory.trim() || "~",
+        selection.runnerId,
+        selection.workingDirectory.trim() || "~",
       );
     }
+  }
+
+  reassign(onlineRunnerIds: readonly string[]): Promise<void> {
+    return this.#reassign(onlineRunnerIds);
   }
 
   removeImage(index: number, target: "draft" | "followUp"): void {
@@ -244,6 +244,12 @@ export class SessionController {
     return this.#send();
   }
 
+  #patchReassignment(values: Partial<SessionViewState["reassignment"]>): void {
+    this.#view.patch({
+      reassignment: { ...this.#view.value.reassignment, ...values },
+    });
+  }
+
   #patchDraft(values: Partial<SessionViewState["draft"]>): void {
     this.#view.patch({ draft: { ...this.#view.value.draft, ...values } });
   }
@@ -254,6 +260,10 @@ export class SessionController {
 
   setFollowUp(value: string): void {
     this.#view.patch({ followUp: value });
+  }
+
+  setReassignmentDirectory(value: string): void {
+    this.#patchReassignment({ workingDirectory: value });
   }
 
   setTools(tools: readonly AgentSessionToolName[]): void {
@@ -283,12 +293,20 @@ export class SessionController {
     );
   }
 
-  toggleSelect(
-    name: "credential" | "model" | "reasoningEffort" | "runnerId",
-  ): void {
+  toggleReassignmentRunner(): void {
+    this.#toggleOpenSelect("reassignmentRunnerId");
+  }
+
+  #toggleOpenSelect(name: NonNullable<SessionViewState["openSelect"]>): void {
     this.#view.patch({
       openSelect: this.#view.value.openSelect === name ? undefined : name,
     });
+  }
+
+  toggleSelect(
+    name: "credential" | "model" | "reasoningEffort" | "runnerId",
+  ): void {
+    this.#toggleOpenSelect(name);
   }
 
   async load(): Promise<void> {
@@ -303,7 +321,8 @@ export class SessionController {
   }
 
   reset(): void {
-    const transcriptFilters = readSessionTranscriptFilters(
+    const transcriptFilters = initialTranscriptFilters(
+      this.#view.value,
       this.#transcriptFilterStorage,
     );
     this.#directoryPicker.reset();
@@ -406,7 +425,7 @@ export class SessionController {
 
       this.#view.patchCurrent(
         revision,
-        this.#detailState(detail, {
+        sessionDetailState(this.#view.value, detail, {
           creating: false,
           draft: {
             ...this.#view.value.draft,
@@ -438,7 +457,7 @@ export class SessionController {
       );
 
       if (this.#view.value.selectedId === sessionId) {
-        const detailState = this.#detailState(detail, {
+        const detailState = sessionDetailState(this.#view.value, detail, {
           loadingDetail: false,
         });
 
@@ -488,6 +507,34 @@ export class SessionController {
     }
   }
 
+  async #reassign(onlineRunnerIds: readonly string[]): Promise<void> {
+    const detail = this.#view.value.detail;
+    const sessionId = this.#view.value.selectedId;
+    const input = this.#view.value.reassignment;
+    if (
+      sessionId === undefined ||
+      detail?.id !== sessionId ||
+      !detail.runnerRequired ||
+      sessionDetailMutationPending(this.#view.value) ||
+      !onlineRunnerIds.includes(input.runnerId) ||
+      !hasTrimmedText(input.workingDirectory)
+    ) {
+      this.#view.patch({
+        error:
+          "Choose an online replacement runner and confirm a working directory on it.",
+      });
+      return;
+    }
+    await this.#mutateDetail({
+      ...reassignSessionMutation(
+        sessionId,
+        input.runnerId,
+        input.workingDirectory.trim(),
+      ),
+      success: { reassignment: emptySessionReassignmentDraft() },
+    });
+  }
+
   #removeImage(index: number, target: "draft" | "followUp"): void {
     const images =
       target === "draft"
@@ -522,6 +569,7 @@ export class SessionController {
       followUp: "",
       followUpImages: [],
       loadingDetail: true,
+      reassignment: emptySessionReassignmentDraft(),
       selectedId: sessionId,
     });
     await this.#readDetail(sessionId, revision, true);
@@ -537,6 +585,7 @@ export class SessionController {
       detail?.id !== sessionId ||
       detail.status === "queued" ||
       detail.status === "running" ||
+      detail.runnerRequired ||
       this.#detailMutationPending() ||
       (prompt.length === 0 && this.#view.value.followUpImages.length === 0)
     ) {
@@ -576,14 +625,23 @@ export class SessionController {
     }
   }
 
+  async #mutateRecoverable(
+    mutation: (sessionId: string) => SessionMutation,
+  ): Promise<void> {
+    if (this.#view.value.detail?.runnerRequired !== true) {
+      await this.#mutateWhen(sessionCanResume, mutation);
+    }
+  }
+
   async #compact(): Promise<void> {
-    await this.#mutateWhen(sessionCanResume, compactSessionMutation);
+    await this.#mutateRecoverable(compactSessionMutation);
   }
 
   async #toggleAutoCompact(autoCompact: boolean): Promise<void> {
     const sessionId = this.#view.value.selectedId;
     if (
       sessionId === undefined ||
+      this.#view.value.detail?.runnerRequired === true ||
       this.#detailMutationPending() ||
       !selectedDetailHasStatus(this.#view.value, sessionCanResume)
     ) {
@@ -594,7 +652,7 @@ export class SessionController {
   }
 
   async #continue(): Promise<void> {
-    await this.#mutateWhen(sessionCanResume, continueSessionMutation);
+    await this.#mutateRecoverable(continueSessionMutation);
   }
 
   async #stop(): Promise<void> {
@@ -602,7 +660,7 @@ export class SessionController {
   }
 
   #detailMutationPending(): boolean {
-    return detailMutationPending(this.#view.value);
+    return sessionDetailMutationPending(this.#view.value);
   }
 
   async #mutateSelected(
@@ -637,24 +695,6 @@ export class SessionController {
     } catch (error) {
       this.#patchMutationError(revision, error, options.action, settled);
     }
-  }
-
-  #detailState(
-    detail: AgentSessionDetail,
-    extra: Partial<SessionViewState>,
-  ): Partial<SessionViewState> {
-    const visibleDetail = retainUnchangedSessionData(
-      this.#view.value.detail,
-      detail,
-    );
-    return {
-      detail: visibleDetail,
-      sessions: replaceSessionSummary(
-        this.#view.value.sessions ?? [],
-        visibleDetail,
-      ),
-      ...extra,
-    };
   }
 
   #patchMutationError(

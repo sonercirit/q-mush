@@ -44,9 +44,12 @@ test("lets parallel call every tool and skill except itself by default", () => {
 test("defines the session tools as one selectable group", () => {
   expect(SESSION_AGENT_TOOL_NAMES).toEqual([
     "spawn_session",
+    "browse_runner_directories",
+    "list_runners",
     "list_sessions",
     "get_session_options",
     "read_session",
+    "reassign_session",
     "send_to_session",
     "continue_session",
     "stop_session",

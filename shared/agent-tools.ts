@@ -186,7 +186,30 @@ const SESSION_AGENT_TOOLS = [
   }),
   toolDefinition({
     description:
-      "List your agent sessions, including their IDs, titles, statuses, and configurations.",
+      "Browse directories on an owned online runner. Use the returned canonical path as workingDirectory for reassign_session; start at ~ and navigate explicitly rather than guessing a path.",
+    name: "browse_runner_directories",
+    properties: {
+      path: {
+        description: "Directory to browse, such as ~ or a returned child path",
+        ...STRING_PARAMETER,
+      },
+      runnerId: {
+        description: "Owned online runner ID from list_runners",
+        ...STRING_PARAMETER,
+      },
+    },
+    required: ["runnerId", "path"],
+  }),
+  toolDefinition({
+    description:
+      "List only your currently online runners. Use an ID from this result when creating or reassigning a session.",
+    name: "list_runners",
+    properties: {},
+    required: [],
+  }),
+  toolDefinition({
+    description:
+      "List your agent sessions, including whether a removed runner requires explicit reassignment.",
     name: "list_sessions",
     properties: {},
     required: [],
@@ -254,6 +277,24 @@ const SESSION_AGENT_TOOLS = [
       },
     },
     required: ["sessionId"],
+  }),
+  toolDefinition({
+    description:
+      "Reassign an owned session whose runner was removed. First use list_runners, then supply an explicit working directory confirmed on that runner. This does not start the session.",
+    name: "reassign_session",
+    properties: {
+      ...SESSION_ID_PARAMETER,
+      runnerId: {
+        description: "ID of an owned online replacement runner",
+        ...STRING_PARAMETER,
+      },
+      workingDirectory: {
+        description:
+          "Explicit working directory selected or confirmed on the replacement runner",
+        ...STRING_PARAMETER,
+      },
+    },
+    required: ["sessionId", "runnerId", "workingDirectory"],
   }),
   toolDefinition({
     description:
@@ -375,13 +416,16 @@ export const AGENT_SESSION_TOOL_NAMES: readonly AgentSessionToolName[] =
 const AGENT_TOOL_LABELS: Readonly<Record<AgentSessionToolName, string>> = {
   bash: "Shell",
   brave_search: "Brave Search",
+  browse_runner_directories: "Browse runner directories",
   continue_session: "Continue session",
   edit: "Edit files",
   get_session_options: "Get session options",
+  list_runners: "List runners",
   list_sessions: "List sessions",
   parallel: "Parallel calls",
   read: "Read files",
   read_session: "Read session",
+  reassign_session: "Reassign session",
   send_to_session: "Send to session",
   spawn_session: "Spawn session",
   stop_session: "Stop session",
