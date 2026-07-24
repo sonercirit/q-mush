@@ -72,7 +72,9 @@ Living project memory; update durable information.
   persist seven-day sessions in `shared/database/schema.ts`.
 - Prompt bank: `sync-engine/prompt-store.ts` owns user prompts at
   `/api/prompts`; names are NFKC-normalized and active-unique per user, and
-  deletion is soft. The UI copies bodies into unlinked session drafts.
+  deletion is soft. Prompt writes use revisions, each user can keep up to 100
+  active prompts, and the UI copies bodies into unlinked session drafts without
+  silently replacing non-empty drafts.
 - Application primary keys are UUIDv7 values; Google subjects and session cookie
   tokens are separate unique fields. Every application table has creation/update
   timestamps, actor IDs, and an `isDeleted` soft-delete flag.
