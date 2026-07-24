@@ -12,10 +12,15 @@ interface TranscriptFilterOption {
 
 const TRANSCRIPT_FILTER_OPTIONS: readonly TranscriptFilterOption[] = [
   {
-    description:
-      "The effective base prompt together with any loaded AGENTS.md or CLAUDE.md instructions.",
-    label: "Effective system prompt",
+    description: "The Q Mush base instructions used for every session.",
+    label: "Base instructions",
     name: "systemPrompt",
+  },
+  {
+    description:
+      "The stored AGENTS.md or CLAUDE.md instructions loaded for this session.",
+    label: "Stored agent instructions",
+    name: "agentInstructions",
   },
   {
     description:
@@ -53,6 +58,7 @@ const TRANSCRIPT_FILTER_OPTIONS: readonly TranscriptFilterOption[] = [
 ];
 
 export function SessionTranscriptFilterControls(props: {
+  readonly counts: Readonly<Record<SessionTranscriptFilterName, number>>;
   readonly filters: SessionTranscriptFilters;
   readonly onChange: (
     name: SessionTranscriptFilterName,
@@ -63,6 +69,12 @@ export function SessionTranscriptFilterControls(props: {
     <details class="mt-4 rounded-xl border border-white/10 bg-slate-950/50 px-3 py-2">
       <summary class="cursor-pointer select-none text-sm font-semibold text-slate-200 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300">
         Transcript visibility
+        <span class="ml-2 font-normal text-slate-500">
+          {`${String(
+            TRANSCRIPT_FILTER_OPTIONS.filter(({ name }) => props.filters[name])
+              .length,
+          )}/${String(TRANSCRIPT_FILTER_OPTIONS.length)} shown`}
+        </span>
       </summary>
       <fieldset
         aria-label="Transcript visibility"
@@ -83,7 +95,7 @@ export function SessionTranscriptFilterControls(props: {
               />
               <span class="min-w-0">
                 <span class="block font-medium text-slate-200">
-                  {option.label}
+                  {`${option.label} (${String(props.counts[option.name])})`}
                 </span>
                 <span class="mt-0.5 block text-xs leading-5 text-slate-500">
                   {option.description}

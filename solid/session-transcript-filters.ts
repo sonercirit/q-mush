@@ -1,6 +1,7 @@
 import { isRecord } from "../shared/auth-model.ts";
 
 export interface SessionTranscriptFilters {
+  readonly agentInstructions: boolean;
   readonly assistantMessages: boolean;
   readonly notices: boolean;
   readonly systemPrompt: boolean;
@@ -20,21 +21,28 @@ export interface SessionTranscriptFilterStorage {
 const SESSION_TRANSCRIPT_FILTER_STORAGE_KEY =
   "q-mush.session-transcript-filters.v1";
 
-export const DEFAULT_SESSION_TRANSCRIPT_FILTERS: SessionTranscriptFilters = {
-  assistantMessages: true,
-  notices: true,
-  systemPrompt: true,
-  thinking: true,
-  toolActivity: true,
-  toolDefinitions: true,
-  userMessages: true,
-};
+export const DEFAULT_SESSION_TRANSCRIPT_FILTERS: SessionTranscriptFilters =
+  transcriptFilterDefaults();
+
+function transcriptFilterDefaults(): SessionTranscriptFilters {
+  return {
+    agentInstructions: true,
+    assistantMessages: true,
+    notices: true,
+    systemPrompt: false,
+    thinking: false,
+    toolActivity: true,
+    toolDefinitions: false,
+    userMessages: true,
+  };
+}
 
 function parsedFilters(value: unknown): SessionTranscriptFilters | undefined {
   if (!isRecord(value)) {
     return undefined;
   }
 
+  const agentInstructions = value["agentInstructions"];
   const assistantMessages = value["assistantMessages"];
   const notices = value["notices"];
   const systemPrompt = value["systemPrompt"];
@@ -43,6 +51,7 @@ function parsedFilters(value: unknown): SessionTranscriptFilters | undefined {
   const toolDefinitions = value["toolDefinitions"];
   const userMessages = value["userMessages"];
   if (
+    typeof agentInstructions !== "boolean" ||
     typeof assistantMessages !== "boolean" ||
     typeof notices !== "boolean" ||
     typeof systemPrompt !== "boolean" ||
@@ -55,6 +64,7 @@ function parsedFilters(value: unknown): SessionTranscriptFilters | undefined {
   }
 
   return {
+    agentInstructions,
     assistantMessages,
     notices,
     systemPrompt,

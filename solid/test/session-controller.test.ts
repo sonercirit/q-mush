@@ -16,6 +16,7 @@ import {
   requestUrl,
 } from "./controller-test-helpers.ts";
 import { MemoryStorage } from "./memory-storage.ts";
+import { createResponseFetch } from "./session-dom-test-helpers.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 import {
   sessionDetailWithStatus,
@@ -169,11 +170,7 @@ function installFetch(
 }
 
 function jsonFetch(response: unknown): typeof globalThis.fetch {
-  const originalFetch = globalThis.fetch;
-  return Object.assign(
-    (): Promise<Response> => Promise.resolve(Response.json(response)),
-    { preconnect: originalFetch.preconnect },
-  );
+  return createResponseFetch(response);
 }
 
 function selectedController(
@@ -408,9 +405,13 @@ test("loads persisted transcript filters into the controller and keeps them on r
   expect(controller.state.transcriptFilters.toolDefinitions).toBe(false);
 });
 
-test.each(["send", "continueSession", "stop"] as const)(
-  "guards invalid or duplicate %s mutations in the controller",
-  async (action) => {
+test.each([
+  { action: "send", busy: { compacting: true } },
+  { action: "continueSession", busy: { stopping: true } },
+  { action: "stop", busy: { sending: true } },
+] as const)(
+  "guards invalid or duplicate $action mutations in the controller",
+  async ({ action, busy }) => {
     const active = action === "stop";
     const detail = {
       ...TEST_SESSION_DETAIL,
@@ -418,10 +419,10 @@ test.each(["send", "continueSession", "stop"] as const)(
     };
     const reactive = createReactiveState<SessionViewState>({
       ...initialSessionViewState(),
+      ...busy,
       detail,
       followUp: "Do not submit",
       selectedId: detail.id,
-      sending: action === "stop",
     });
     const controller = new SessionController(reactive);
     const fetch = vi.spyOn(globalThis, "fetch");
@@ -433,6 +434,26 @@ test.each(["send", "continueSession", "stop"] as const)(
   },
 );
 
+test.each(["compact", "continueSession", "stop", "toggleAutoCompact"] as const)(
+  "rejects %s when the detail does not match the selected session",
+  async (action) => {
+    const reactive = createReactiveState<SessionViewState>({
+      ...initialSessionViewState(),
+      detail: { ...TEST_SESSION_DETAIL, id: "stale-detail" },
+      selectedId: TEST_SESSION_DETAIL.id,
+    });
+    const controller = new SessionController(reactive, undefined, null);
+    const fetch = vi.spyOn(globalThis, "fetch");
+
+    if (action === "toggleAutoCompact") {
+      await controller.toggleAutoCompact(false);
+    } else {
+      await controller[action]();
+    }
+
+    expect(fetch).not.toHaveBeenCalled();
+  },
+);
 test("an unchanged session refresh does not notify the view", async () => {
   await expectRealtimeToRemainSilent(
     () => new SessionController(),

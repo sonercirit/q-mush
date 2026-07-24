@@ -37,8 +37,8 @@ Living project memory; update durable information.
 - Check dead code/dependencies: `bun run knip`; duplicates: `bun run cpd`
 - Lint/fix: `bun run lint` / `bun run lint:fix`; all static checks:
   `bun run check`
-- CI runs tests/static checks on push via `.github/workflows/checks.yml` with Bun
-  1.3.14 and a frozen lockfile.
+- CI runs tests/static checks on push via `.github/workflows/checks.yml` with
+  Bun 1.3.14 and a frozen lockfile.
 
 ## Architecture and Conventions
 
@@ -115,8 +115,8 @@ Living project memory; update durable information.
   compact manually. The existing-session composer stays mounted across status
   changes and explains why actions are unavailable. Versioned browser-local
   preferences filter transcript categories without changing message data.
-  Compaction soft-deletes prior active messages and inserts a replayable handoff.
-  Provider secrets never enter browser or runner work payloads. The
+  Compaction soft-deletes prior active messages and inserts a replayable
+  handoff. Provider secrets never enter browser or runner work payloads. The
   working-directory field opens the interactive browser in
   `solid/directory-picker-client.tsx`; its controller posts to
   `/api/runners/:id/directories` for canonical directory metadata. Before each

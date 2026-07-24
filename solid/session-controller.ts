@@ -47,17 +47,35 @@ function detailMutationPending(state: SessionViewState): boolean {
   return state.compacting || state.sending || state.stopping;
 }
 
-function sessionIsActive(status: AgentSessionStatus | undefined): boolean {
+function selectedDetailHasStatus(
+  state: SessionViewState,
+  allowed: (status: AgentSessionStatus) => boolean,
+): boolean {
+  return (
+    state.selectedId !== undefined &&
+    state.detail?.id === state.selectedId &&
+    allowed(state.detail.status)
+  );
+}
+
+function sessionIsActive(status: AgentSessionStatus): boolean {
   return status === "queued" || status === "running";
 }
 
-function sessionCanResume(status: AgentSessionStatus | undefined): boolean {
+function sessionCanResume(status: AgentSessionStatus): boolean {
   return status === "idle" || status === "failed" || status === "stopped";
 }
 
 function browserTranscriptFilterStorage():
   SessionTranscriptFilterStorage | undefined {
-  return typeof localStorage === "undefined" ? undefined : localStorage;
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
 }
 
 function selectedMutation(
@@ -78,18 +96,22 @@ export class SessionController {
   constructor(
     reactiveView = createReactiveState(initialSessionViewState()),
     directoryPicker = new DirectoryPickerController(),
-    transcriptFilterStorage = browserTranscriptFilterStorage(),
+    transcriptFilterStorage:
+      | SessionTranscriptFilterStorage
+      | null
+      | undefined = browserTranscriptFilterStorage(),
   ) {
     this.#reactiveView = reactiveView;
     this.#view = new RevisionState(reactiveView.state, reactiveView.setState);
-    const transcriptFilters = readSessionTranscriptFilters(
-      transcriptFilterStorage,
-    );
+    const transcriptFilters =
+      transcriptFilterStorage === null || transcriptFilterStorage === undefined
+        ? reactiveView.state().transcriptFilters
+        : readSessionTranscriptFilters(transcriptFilterStorage);
     this.#view.patch({ transcriptFilters });
     this.#realtime = new SessionRealtimeState(this.#view);
     this.#models = new SessionModelController(this.#view);
     this.#directoryPicker = directoryPicker;
-    this.#transcriptFilterStorage = transcriptFilterStorage;
+    this.#transcriptFilterStorage = transcriptFilterStorage ?? undefined;
   }
 
   applyDetail(detail: AgentSessionDetail): void {
@@ -543,12 +565,12 @@ export class SessionController {
   }
 
   async #mutateWhen(
-    allowed: (status: AgentSessionStatus | undefined) => boolean,
+    allowed: (status: AgentSessionStatus) => boolean,
     mutation: (sessionId: string) => SessionMutation,
   ): Promise<void> {
     if (
       !this.#detailMutationPending() &&
-      allowed(this.#view.value.detail?.status)
+      selectedDetailHasStatus(this.#view.value, allowed)
     ) {
       await this.#mutateSelected(mutation);
     }
@@ -560,11 +582,10 @@ export class SessionController {
 
   async #toggleAutoCompact(autoCompact: boolean): Promise<void> {
     const sessionId = this.#view.value.selectedId;
-    const status = this.#view.value.detail?.status;
     if (
       sessionId === undefined ||
       this.#detailMutationPending() ||
-      !sessionCanResume(status)
+      !selectedDetailHasStatus(this.#view.value, sessionCanResume)
     ) {
       return;
     }

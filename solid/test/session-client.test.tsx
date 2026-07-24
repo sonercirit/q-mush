@@ -180,7 +180,7 @@ test("renders the session list as a scrollable region", () => {
   expect(html).not.toContain("data-scroll-key");
 });
 
-test("renders the system prompt and model thinking in a transcript", () => {
+test("renders independently filtered session instructions and activity", () => {
   const state: SessionViewState = {
     ...SESSION_STATE,
     detail: {
@@ -243,12 +243,20 @@ test("renders the system prompt and model thinking in a transcript", () => {
       workingDirectory: ".",
     },
     selectedId: "session-1",
+    transcriptFilters: {
+      ...SESSION_STATE.transcriptFilters,
+      agentInstructions: true,
+      systemPrompt: true,
+      thinking: true,
+      toolDefinitions: true,
+    },
   };
   const html = renderPanel(state);
 
   expect(html).toContain('aria-label="Transcript visibility"');
   for (const category of [
-    "Effective system prompt",
+    "Base instructions",
+    "Stored agent instructions",
     "Selected tool definitions",
     "Tool calls and responses",
     "User messages",
@@ -266,7 +274,7 @@ test("renders the system prompt and model thinking in a transcript", () => {
     "You are Q Mush, a careful coding agent operating in a user-selected workspace.",
   );
   expect(html).toContain("Always run Bun tests.");
-  expect(html).toContain('&lt;project_instructions path="AGENTS.md">');
+  expect(html).not.toContain('&lt;project_instructions path="AGENTS.md">');
   expect(html).not.toContain('<em class="text-slate-100 italic">instructions');
   expect(html).toContain("Agent file: AGENTS.md");
   expect(html).toContain("Context: Not reported / 200K");
@@ -292,7 +300,7 @@ test("renders the system prompt and model thinking in a transcript", () => {
     "{&quot;path&quot;:&quot;README.md&quot;,&quot;offset&quot;:1}",
   );
   expect(html).toContain("# Q Mush");
-  expect(html).toContain(">Continue</button>");
+  expect(html).toContain(">Continue without message</button>");
 });
 
 test("renders image pickers, previews, and transcript images", () => {

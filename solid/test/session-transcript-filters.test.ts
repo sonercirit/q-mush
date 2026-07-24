@@ -7,14 +7,20 @@ import {
 } from "../session-transcript-filters.ts";
 import { MemoryStorage } from "./memory-storage.ts";
 
-test("transcript filters default every current category to visible", () => {
+test("transcript filters use conservative defaults for verbose context", () => {
   expect(readSessionTranscriptFilters(undefined)).toEqual(
     DEFAULT_SESSION_TRANSCRIPT_FILTERS,
   );
-  expect(Object.keys(DEFAULT_SESSION_TRANSCRIPT_FILTERS)).toHaveLength(7);
-  expect(Object.values(DEFAULT_SESSION_TRANSCRIPT_FILTERS).every(Boolean)).toBe(
-    true,
-  );
+  expect(DEFAULT_SESSION_TRANSCRIPT_FILTERS).toMatchObject({
+    agentInstructions: true,
+    assistantMessages: true,
+    systemPrompt: false,
+    thinking: false,
+    toolDefinitions: false,
+    userMessages: true,
+  });
+  expect(DEFAULT_SESSION_TRANSCRIPT_FILTERS.notices).toBe(true);
+  expect(DEFAULT_SESSION_TRANSCRIPT_FILTERS.toolActivity).toBe(true);
 });
 
 test("transcript filters round trip through browser storage", () => {
@@ -39,6 +45,10 @@ test.each([
   "[]",
   JSON.stringify({ ...DEFAULT_SESSION_TRANSCRIPT_FILTERS, thinking: "yes" }),
   JSON.stringify({ assistantMessages: true }),
+  JSON.stringify({
+    ...DEFAULT_SESSION_TRANSCRIPT_FILTERS,
+    agentInstructions: undefined,
+  }),
 ])("invalid stored transcript filters fall back safely: %s", (stored) => {
   const storage = new MemoryStorage();
   storage.setItem("q-mush.session-transcript-filters.v1", stored);
