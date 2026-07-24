@@ -1,9 +1,13 @@
 import { describe, expect, test } from "vitest";
 import type {
-  AgentConversationCompactor,
+  AgentConversationCompaction,
   CompactedConversation,
 } from "../../sync-engine/agent-compaction.ts";
 import { runCompactingAgentLoop } from "../../sync-engine/session-agent-loop.ts";
+import {
+  emptyTestCompaction,
+  TEST_COMPACTION_REQUEST,
+} from "./compaction-loop-test-helpers.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 
 const TOOL_CALL = {
@@ -29,13 +33,12 @@ function compacted(
 function recordingCompactor(
   conversations: unknown[],
   result: (count: number) => CompactedConversation,
-): () => AgentConversationCompactor {
-  return () => ({
-    compact: (messages) => {
+): () => AgentConversationCompaction {
+  return () =>
+    emptyTestCompaction((messages) => {
       conversations.push(messages);
       return Promise.resolve(result(conversations.length));
-    },
-  });
+    });
 }
 
 function highTurn(content: string, contextTokens = 95_000) {
@@ -50,7 +53,7 @@ function runTestLoop(
     agentCost: () => null,
     autoCompact: true,
     executeTool: () => Promise.reject(new Error("No tool expected")),
-    initialMessages: [{ content: "Finish", role: "user" }],
+    initialMessages: TEST_COMPACTION_REQUEST,
     maxContextTokens: 100_000,
     recordCompaction: () => undefined,
     recordMessage: () => undefined,
@@ -75,8 +78,8 @@ describe("compacting agent session loop", () => {
       },
     ]);
     const compactorRequests: unknown[] = [];
-    const createCompactor = (): AgentConversationCompactor => ({
-      compact: (messages) => {
+    const createCompactor = (): AgentConversationCompaction =>
+      emptyTestCompaction((messages) => {
         compactorRequests.push(messages);
         return Promise.resolve({
           costUsd: 0.1,
@@ -84,8 +87,7 @@ describe("compacting agent session loop", () => {
           summary: "Compacted handoff",
           tokenUsage: null,
         });
-      },
-    });
+      });
     const summaries: string[] = [];
     const costs: (number | null)[] = [];
 
@@ -160,7 +162,7 @@ describe("compacting agent session loop", () => {
       toolCalls: [],
     });
     expect(model.requests).toEqual([
-      [{ content: "Finish", role: "user" }],
+      TEST_COMPACTION_REQUEST,
       [{ content: "Final handoff", role: "user" }],
     ]);
     expect(summaries).toEqual(["Final handoff"]);
@@ -187,12 +189,11 @@ describe("compacting agent session loop", () => {
     let compactions = 0;
 
     await runTestLoop({
-      createCompactor: () => ({
-        compact: () => {
+      createCompactor: () =>
+        emptyTestCompaction(() => {
           compactions += 1;
           return Promise.resolve(compacted("Handoff"));
-        },
-      }),
+        }),
       model,
       recordCompaction: () => undefined,
       recordUsage: () => undefined,
@@ -250,12 +251,11 @@ describe("compacting agent session loop", () => {
 
     await expect(
       runTestLoop({
-        createCompactor: () => ({
-          compact: () => {
+        createCompactor: () =>
+          emptyTestCompaction(() => {
             controller.abort();
             return Promise.resolve(compacted("Aborted handoff"));
-          },
-        }),
+          }),
         model,
         recordCompaction: () => {
           persisted = true;
@@ -274,9 +274,10 @@ describe("compacting agent session loop", () => {
 
     await expect(
       runTestLoop({
-        createCompactor: () => ({
-          compact: () => Promise.resolve(compacted("Unstored handoff", 0.25)),
-        }),
+        createCompactor: () =>
+          emptyTestCompaction(() =>
+            Promise.resolve(compacted("Unstored handoff", 0.25)),
+          ),
         model,
         recordCompaction: () => {
           throw new Error("Handoff storage failed");
@@ -305,12 +306,11 @@ describe("compacting agent session loop", () => {
     await runCompactingAgentLoop({
       agentCost: () => null,
       autoCompact: false,
-      createCompactor: () => ({
-        compact: () => {
+      createCompactor: () =>
+        emptyTestCompaction(() => {
           compacted = true;
           throw new Error("Compaction should be disabled");
-        },
-      }),
+        }),
       executeTool: () => Promise.resolve("# Project"),
       initialMessages: [
         { content: "Stay in manual compaction mode", role: "user" },

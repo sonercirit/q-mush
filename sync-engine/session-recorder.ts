@@ -6,10 +6,10 @@ export class SessionRecorder {
   readonly #notify: () => void;
   readonly #now: () => number;
   readonly #sessionId: string;
-  readonly #store: SessionStore;
+  readonly #store: Pick<SessionStore, "appendAgentMessage" | "updateUsage">;
 
   constructor(
-    store: SessionStore,
+    store: Pick<SessionStore, "appendAgentMessage" | "updateUsage">,
     sessionId: string,
     now: () => number,
     notify: () => void,

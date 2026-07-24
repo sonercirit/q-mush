@@ -1,5 +1,6 @@
 import { type Accessor } from "solid-js";
 import type { AgentSessionToolName } from "../shared/agent-tools.ts";
+import type { SessionCompactionRealtimeEvent } from "../shared/compaction-realtime.ts";
 import { SESSIONS_PATH } from "../shared/routes.ts";
 import type {
   AgentSessionDetail,
@@ -20,6 +21,7 @@ import {
   SessionRealtimeState,
 } from "./session-controller-state.ts";
 
+import { SessionCompactionPreviewState } from "./session-compaction-state.ts";
 import { selectedDraftOption } from "./session-form.ts";
 import { appendAgentImageFiles } from "./session-image-input.ts";
 import { SessionModelController } from "./session-model-controller.ts";
@@ -92,6 +94,7 @@ export class SessionController {
   readonly #transcriptFilterStorage: SessionTranscriptFilterStorage | undefined;
   readonly #view: RevisionState<SessionViewState>;
   readonly #reactiveView: ReactiveState<SessionViewState>;
+  readonly #compaction = new SessionCompactionPreviewState();
 
   constructor(
     reactiveView = createReactiveState(initialSessionViewState()),
@@ -112,6 +115,18 @@ export class SessionController {
     this.#models = new SessionModelController(this.#view);
     this.#directoryPicker = directoryPicker;
     this.#transcriptFilterStorage = transcriptFilterStorage ?? undefined;
+  }
+
+  applyCompaction(event: SessionCompactionRealtimeEvent): void {
+    const current = this.#view.value.compactionPreview;
+    const next = this.#compaction.apply(
+      current,
+      event,
+      this.#view.value.selectedId,
+    );
+    if (next !== current) {
+      this.#view.patch({ compactionPreview: next });
+    }
   }
 
   applyDetail(detail: AgentSessionDetail): void {
@@ -172,6 +187,12 @@ export class SessionController {
 
     if (name === "credential") {
       this.#models.ensure(value);
+    }
+  }
+
+  clearCompactionPreview(): void {
+    if (this.#view.value.compactionPreview !== undefined) {
+      this.#view.patch({ compactionPreview: undefined });
     }
   }
 
@@ -309,6 +330,7 @@ export class SessionController {
     this.#directoryPicker.reset();
     this.#models.reset();
     this.#realtime.reset();
+    this.#compaction.reset();
     this.#view.reset({ ...initialSessionViewState(), transcriptFilters });
   }
 
@@ -517,6 +539,7 @@ export class SessionController {
     }
 
     const revision = this.#view.begin({
+      compactionPreview: undefined,
       detail: undefined,
       error: undefined,
       followUp: "",

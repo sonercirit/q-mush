@@ -3,19 +3,7 @@ import {
   RealtimeHub,
   type RealtimeSocket,
 } from "../../sync-engine/realtime-hub.ts";
-
-class TestSocket implements RealtimeSocket {
-  readonly messages: string[] = [];
-
-  close(): void {
-    // Test sockets stay open until explicitly removed from the hub.
-  }
-
-  send(message: string): number {
-    this.messages.push(message);
-    return message.length;
-  }
-}
+import { TestRealtimeSocket } from "./realtime-hub-test-helpers.ts";
 
 class FailingSocket implements RealtimeSocket {
   close(): void {
@@ -29,7 +17,7 @@ class FailingSocket implements RealtimeSocket {
 
 test("replaces an existing connection for the same runner", () => {
   const hub = new RealtimeHub();
-  const sockets = [new TestSocket(), new TestSocket()] as const;
+  const sockets = [new TestRealtimeSocket(), new TestRealtimeSocket()] as const;
   const [first, second] = sockets;
 
   expect(hub.setRunner("runner-1", first, true)).toBeUndefined();
@@ -42,7 +30,7 @@ test("replaces an existing connection for the same runner", () => {
 
 test("continues publishing when one user socket is closing", () => {
   const hub = new RealtimeHub();
-  const active = new TestSocket();
+  const active = new TestRealtimeSocket();
   const userId = "closing-user";
   hub.setUser(userId, new FailingSocket(), true);
   hub.setUser(userId, active, true);
@@ -54,9 +42,9 @@ test("continues publishing when one user socket is closing", () => {
 
 test("publishes snapshots only to the authenticated user's sockets", () => {
   const hub = new RealtimeHub();
-  const first = new TestSocket();
-  const second = new TestSocket();
-  const other = new TestSocket();
+  const first = new TestRealtimeSocket();
+  const second = new TestRealtimeSocket();
+  const other = new TestRealtimeSocket();
 
   hub.setUser("user-1", first, true);
   hub.setUser("user-1", second, true);
@@ -77,7 +65,7 @@ test("publishes snapshots only to the authenticated user's sockets", () => {
 
 test("delivers queued commands immediately and cancellation to a runner socket", () => {
   const hub = new RealtimeHub();
-  const runner = new TestSocket();
+  const runner = new TestRealtimeSocket();
   const command = {
     arguments: { path: "README.md" },
     id: "command-1",

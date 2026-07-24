@@ -133,17 +133,18 @@ Living project memory; update durable information.
   tool definitions, Markdown, code/JSON, diffs, and results. The session list
   paginates ten at a time. The control center manages live sessions through
   `solid/realtime-client.ts`, `solid/session-client.tsx`, and
-  `solid/session-controller.ts`. Model deltas are combined per session once per
-  animation frame; snapshots and other events remain immediate. Unchanged
-  snapshots suppress notifications, and keyed messages preserve identity so only
-  the affected message rerenders. The long-lived Solid root preserves focus and
-  scroll. The transcript starts and returns to the bottom when messages or the
-  agent file change. `sync-engine/agent-model-discovery.ts` queries provider
-  model metadata; `shared/agent-configuration.ts` owns catalog types and
-  fallbacks. New sessions default to the online runner and model credential,
-  then the first entry. The working directory uses the latest session; models
-  use the first option and maximum reasoning effort. Model choices show all
-  provider and Q Mush-supported input/output modalities.
+  `solid/session-controller.ts`. `session_compaction` streams a bounded preview
+  beside—not into—the transcript; lifecycle cleanup clears it. Model deltas
+  coalesce per animation frame; snapshots and other events remain immediate.
+  Unchanged snapshots suppress notifications, and keyed messages preserve
+  identity so only the affected message rerenders. The long-lived Solid root
+  preserves focus and scroll. The transcript starts and returns to the bottom
+  when messages or the agent file change. `sync-engine/agent-model-discovery.ts`
+  queries provider model metadata; `shared/agent-configuration.ts` owns catalog
+  types and fallbacks. New sessions default to the online runner and model
+  credential, then the first entry. The working directory uses the latest
+  session; models use the first option and maximum reasoning effort. Model
+  choices show all provider and Q Mush-supported input/output modalities.
   `solid/custom-select.tsx` searches then paginates lists over ten items, ten
   per page. It opens on the selected page, resets/clamps pages, and owns
   accessible keyboard/focus. `shared/agent-prompt.ts` builds the model system

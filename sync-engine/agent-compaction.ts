@@ -11,8 +11,13 @@ const COMPACTION_INSTRUCTION =
   "Compact this conversation now. Return only the handoff summary.";
 const COMPACTION_PREFIX = `The earlier conversation was compacted into this handoff summary. Treat it as prior context and continue from it:\n\n`;
 
-export interface AgentConversationCompactor {
+interface AgentConversationCompactor {
   compact(...parameters: CompactionArguments): Promise<CompactedConversation>;
+}
+
+export interface AgentConversationCompaction extends AgentConversationCompactor {
+  complete(): void;
+  fail(error: unknown, signal?: AbortSignal): void;
 }
 
 type CompactionArguments = readonly [

@@ -1,27 +1,7 @@
 import { expect, test } from "vitest";
 import type { RealtimeServerEvent } from "../../solid/realtime-client-codec.ts";
-import { RealtimeConnection } from "../../solid/realtime-client.ts";
+import { realtimeTestRig } from "./realtime-test-helpers.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
-
-class CoalescingSocket extends EventTarget {
-  get readyState(): number {
-    return WebSocket.OPEN;
-  }
-
-  close(): void {
-    this.dispatchEvent(new Event("close"));
-  }
-
-  send(): void {
-    // No client messages are relevant to delta coalescing.
-  }
-
-  receive(event: unknown): void {
-    const message = new MessageEvent("message");
-    Object.defineProperty(message, "data", { value: JSON.stringify(event) });
-    this.dispatchEvent(message);
-  }
-}
 
 function expectFramesAndLatest(
   events: readonly RealtimeServerEvent[],
@@ -38,20 +18,7 @@ function expectFramesAndLatest(
 }
 
 test("coalesces session deltas into one update per animation frame", () => {
-  const events: RealtimeServerEvent[] = [];
-  const frames: (() => void)[] = [];
-  const socket = new CoalescingSocket();
-  const connection = new RealtimeConnection((event) => events.push(event), {
-    clearTimeout: () => undefined,
-    createSocket: () => socket,
-    location: { href: "https://qmush.example/app", protocol: "https:" },
-    requestFrame: (callback) => {
-      frames.push(callback);
-      return frames.length;
-    },
-    setTimeout: () => 1,
-  });
-  connection.start();
+  const { connection, events, frames, socket } = realtimeTestRig();
 
   for (const event of [
     {
@@ -88,11 +55,13 @@ test("coalesces session deltas into one update per animation frame", () => {
     type: "session_delta",
   });
   frames[0]?.();
-  expect(events.at(-1)).toMatchObject({
-    content: "Replacement response",
-    reset: true,
-    thinking: "Reconsidering from scratch",
-  });
+  expect(events.at(-1)).toMatchObject(
+    Object.fromEntries([
+      ["content", "Replacement response"],
+      ["reset", true],
+      ["thinking", "Reconsidering from scratch"],
+    ]),
+  );
 
   socket.receive({
     content: "!",

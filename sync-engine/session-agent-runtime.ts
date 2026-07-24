@@ -3,13 +3,13 @@ import {
   isSessionAgentToolName,
   type AgentSessionToolName,
 } from "../shared/agent-tools.ts";
+import type { RealtimeUserPublisher } from "../shared/compaction-realtime.ts";
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { estimateAgentTurnCost } from "./agent-cost.ts";
 import { createAgentSkills } from "./agent-skills.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
-import type { RealtimeHub } from "./realtime-hub.ts";
 import { loadSessionAgentFile } from "./session-agent-file.ts";
 import { runCompactingAgentLoop } from "./session-agent-loop.ts";
 import {
@@ -24,6 +24,15 @@ import {
 import { SessionRecorder } from "./session-recorder.ts";
 import type { SessionStore } from "./session-store.ts";
 
+type RuntimeSessionStore = Pick<
+  SessionStore,
+  | "appendAgentMessage"
+  | "compact"
+  | "conversation"
+  | "setAgentFile"
+  | "updateUsage"
+>;
+
 export interface SessionAgentRuntimeDependencies {
   readonly braveSearch: Pick<BraveSearchSkill, "execute">;
   readonly broker: RunnerCommandBroker;
@@ -32,10 +41,11 @@ export interface SessionAgentRuntimeDependencies {
   readonly modelFactory: AgentModelFactory;
   readonly now: () => number;
   readonly notify: () => void;
-  readonly realtime: RealtimeHub | undefined;
+  readonly operationId?: () => string;
+  readonly publishUser?: RealtimeUserPublisher;
   readonly sessionTools: SessionAgentToolActions;
   readonly signal: AbortSignal;
-  readonly store: SessionStore;
+  readonly store: RuntimeSessionStore;
   readonly userId: string;
 }
 
@@ -54,7 +64,13 @@ async function loadModels(
     credential: runtime.credential,
     detail: runtime.detail,
     factory: runtime.modelFactory,
-    realtime: runtime.realtime,
+    ...(runtime.operationId === undefined
+      ? {}
+      : { operationId: runtime.operationId }),
+    realtime:
+      runtime.publishUser === undefined
+        ? undefined
+        : { publishUser: runtime.publishUser },
     userId: runtime.userId,
   });
 }
@@ -66,25 +82,32 @@ export async function compactSessionConversation(
   const models = await loadModels(runtime);
   const conversation = runtime.store.conversation(runtime.detail.id);
   const compactor = models.createCompactor();
-  const compacted = await compactor.compact(conversation, runtime.signal);
-  const costUsd =
-    compacted.costUsd ??
-    estimateAgentTurnCost(runtime.detail, compacted.tokenUsage);
-  const costBasis =
-    costUsd === null
-      ? null
-      : compacted.costUsd === null
-        ? "estimated"
-        : "reported";
-  if (costBasis !== null) {
-    runtime.store.updateUsage(
-      runtime.detail.id,
-      { contextTokens: null, costBasis, costUsd },
-      runtime.now(),
-    );
+  try {
+    const compacted = await compactor.compact(conversation, runtime.signal);
+    const costUsd =
+      compacted.costUsd ??
+      estimateAgentTurnCost(runtime.detail, compacted.tokenUsage);
+    const costBasis =
+      costUsd === null
+        ? null
+        : compacted.costUsd === null
+          ? "estimated"
+          : "reported";
+    if (costBasis !== null) {
+      runtime.store.updateUsage(
+        runtime.detail.id,
+        { contextTokens: null, costBasis, costUsd },
+        runtime.now(),
+      );
+      runtime.notify();
+    }
+    runtime.store.compact(runtime.detail.id, compacted.summary, runtime.now());
     runtime.notify();
+    compactor.complete();
+  } catch (error) {
+    compactor.fail(error, runtime.signal);
+    throw error;
   }
-  runtime.store.compact(runtime.detail.id, compacted.summary, runtime.now());
 }
 
 export async function runSessionAgent(

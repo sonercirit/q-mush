@@ -114,6 +114,10 @@ export interface AgentLoopOptions {
 const INVALID_ARGUMENTS_MESSAGE =
   "Error: the tool arguments were not a JSON object.";
 
+export function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
 export function throwIfAgentAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted === true) {
     throw new DOMException("The agent session was stopped", "AbortError");

@@ -21,6 +21,28 @@ test("reads runner snapshots from realtime messages", () => {
   });
 });
 
+test("reads bounded compaction lifecycle events", () => {
+  const start = {
+    attempt: 0,
+    operationId: "operation-1",
+    phase: "start",
+    sequence: 0,
+    sessionId: "session-1",
+    type: "session_compaction",
+  } as const;
+  const delta = {
+    ...start,
+    phase: "delta",
+    reasoning: "reasoning",
+    sequence: 1,
+    summary: "summary",
+  } as const;
+
+  expect(roundTrip(start)).toEqual(start);
+  expect(roundTrip(delta)).toEqual(delta);
+  expect(() => roundTrip({ ...delta, sequence: -1 })).toThrow("invalid");
+});
+
 test("reads reset model deltas from realtime messages", () => {
   const delta = {
     content: "replacement",

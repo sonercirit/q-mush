@@ -26,6 +26,7 @@ import type {
 import { renderDebugBoundary } from "./render-debug.tsx";
 import type { RunnerViewState } from "./runner-client.tsx";
 import { SessionPromptInput } from "./session-client-forms.tsx";
+import type { CompactionPreview } from "./session-compaction-state.ts";
 import { formatTokenCount } from "./session-context-client.tsx";
 import type { SessionController } from "./session-controller.ts";
 import { SessionDetail, SessionList } from "./session-detail-client.tsx";
@@ -56,6 +57,7 @@ export interface SessionModelDiscoveryState {
 }
 
 export interface SessionViewState {
+  readonly compactionPreview: CompactionPreview | undefined;
   readonly compacting: boolean;
   readonly creating: boolean;
   readonly directoryPicker: DirectoryPickerState;

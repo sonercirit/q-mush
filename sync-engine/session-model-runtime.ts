@@ -35,7 +35,11 @@ export function sessionModelRuntime(
     notify: () => {
       resources.notify(userId, detail.id);
     },
-    realtime: resources.realtime,
+    ...(resources.realtime === undefined
+      ? {}
+      : {
+          publishUser: resources.realtime.publishUser.bind(resources.realtime),
+        }),
     sessionTools: resources.actions.actions(detail.id, userId),
     signal: controller.signal,
     store: resources.store,

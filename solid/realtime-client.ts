@@ -3,6 +3,7 @@ import {
   readRealtimeServerEvent,
   type RealtimeServerEvent,
 } from "./realtime-client-codec.ts";
+import { RealtimeCompactionQueue } from "./realtime-compaction-queue.ts";
 
 interface BrowserWebSocket extends EventTarget {
   readonly readyState: number;
@@ -32,6 +33,8 @@ function realtimeUrl(location: RealtimeLocation): string {
 }
 
 export class RealtimeConnection {
+  readonly #compactionSnapshot: () => void;
+  readonly #compactions: RealtimeCompactionQueue;
   readonly #createSocket: BrowserWebSocketFactory;
   readonly #listener: RealtimeListener;
   readonly #location: RealtimeLocation;
@@ -50,6 +53,7 @@ export class RealtimeConnection {
     listener: RealtimeListener,
     options: {
       readonly clearTimeout?: (id: number) => void;
+      readonly compactionSnapshot?: () => void;
       readonly createSocket?: BrowserWebSocketFactory;
       readonly location?: RealtimeLocation;
       readonly requestFrame?: FrameCallback;
@@ -57,6 +61,7 @@ export class RealtimeConnection {
     } = {},
   ) {
     this.#createSocket = options.createSocket ?? ((url) => new WebSocket(url));
+    this.#compactionSnapshot = options.compactionSnapshot ?? (() => undefined);
     this.#listener = listener;
     this.#location = options.location ?? window.location;
     this.#requestFrame =
@@ -64,6 +69,11 @@ export class RealtimeConnection {
       ((callback) => window.requestAnimationFrame(callback));
     this.#clearTimeout = options.clearTimeout ?? window.clearTimeout;
     this.#setTimeout = options.setTimeout ?? window.setTimeout;
+    this.#compactions = new RealtimeCompactionQueue(
+      this.#listener,
+      this.#requestFrame,
+      this.#compactionSnapshot,
+    );
   }
 
   start(): void {
@@ -88,6 +98,7 @@ export class RealtimeConnection {
     this.#sessionDeltaGeneration += 1;
     this.#sessionDeltaFrame = undefined;
     this.#sessionDeltas.clear();
+    this.#compactions.reset();
     socket?.close();
   }
 
@@ -124,6 +135,7 @@ export class RealtimeConnection {
     socket.addEventListener("close", () => {
       if (this.#socket === socket) {
         this.#socket = undefined;
+        this.#compactions.reset();
         this.#scheduleReconnect();
       }
     });
@@ -181,11 +193,16 @@ export class RealtimeConnection {
   }
 
   #receive(event: RealtimeServerEvent): void {
+    if (event.type === "session_compaction") {
+      this.#compactions.push(event);
+      return;
+    }
     if (event.type === "session_delta") {
       this.#queueSessionDelta(event);
       return;
     }
     if (event.type === "session") {
+      this.#compactions.flushSession(event.session.id);
       const hadQueuedDelta = this.#sessionDeltas.has(event.session.id);
       this.#flushSessionDelta(event.session.id);
       if (hadQueuedDelta) {

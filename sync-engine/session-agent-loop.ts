@@ -9,7 +9,7 @@ import {
 } from "../shared/agent-loop.ts";
 import {
   shouldCompactContext,
-  type AgentConversationCompactor,
+  type AgentConversationCompaction,
 } from "./agent-compaction.ts";
 
 interface CompactingAgentLoopOptions {
@@ -17,7 +17,7 @@ interface CompactingAgentLoopOptions {
     turn: Pick<AgentModelTurn, "costUsd" | "tokenUsage">,
   ) => number | null;
   readonly autoCompact: boolean;
-  readonly createCompactor: () => AgentConversationCompactor;
+  readonly createCompactor: () => AgentConversationCompaction;
   readonly executeTool: Parameters<typeof runAgentLoop>[0]["executeTool"];
   readonly initialMessages: readonly AgentConversationMessage[];
   readonly maxContextTokens: number | null;
@@ -55,24 +55,31 @@ async function compactConversation(
   messages: readonly AgentConversationMessage[],
   signal?: AbortSignal,
 ): Promise<readonly AgentConversationMessage[]> {
-  const compacted = await options.createCompactor().compact(messages, signal);
-  throwIfAgentAborted(signal);
-  const costUsd =
-    compacted.costUsd ??
-    options.agentCost({
-      costUsd: compacted.costUsd,
-      tokenUsage: compacted.tokenUsage,
-    });
-  await options.recordCompaction(compacted.summary);
-  throwIfAgentAborted(signal);
-  if (costUsd !== null) {
-    await options.recordUsage({
-      contextTokens: null,
-      costBasis: compacted.costUsd === null ? "estimated" : "reported",
-      costUsd,
-    });
+  const compaction = options.createCompactor();
+  try {
+    const compacted = await compaction.compact(messages, signal);
+    throwIfAgentAborted(signal);
+    const costUsd =
+      compacted.costUsd ??
+      options.agentCost({
+        costUsd: compacted.costUsd,
+        tokenUsage: compacted.tokenUsage,
+      });
+    await options.recordCompaction(compacted.summary);
+    throwIfAgentAborted(signal);
+    if (costUsd !== null) {
+      await options.recordUsage({
+        contextTokens: null,
+        costBasis: compacted.costUsd === null ? "estimated" : "reported",
+        costUsd,
+      });
+    }
+    compaction.complete();
+    return compacted.messages;
+  } catch (error) {
+    compaction.fail(error, signal);
+    throw error;
   }
-  return compacted.messages;
 }
 
 export async function runCompactingAgentLoop(

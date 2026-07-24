@@ -18,6 +18,7 @@ import { activeSessionDuration } from "../shared/session-timing.ts";
 import { Collection } from "./collection.tsx";
 import { SessionFollowUp } from "./session-client-forms.tsx";
 import type { SessionViewState } from "./session-client.tsx";
+import { CompactionPreviewCard } from "./session-compaction-preview.tsx";
 import {
   CompactionControls,
   sessionContextClasses,
@@ -248,7 +249,7 @@ export function SessionList(props: {
   );
 }
 
-function scrollRevision(detail: AgentSessionDetail): string {
+function scrollRevisionForDetail(detail: AgentSessionDetail): string {
   const agentFileRevision =
     detail.agentFile === null
       ? "none"
@@ -370,8 +371,12 @@ function LoadedSessionDetail(props: {
     }
   };
 
+  const previewSequence = props.state.compactionPreview?.sequence;
+  const scrollRevision = (): string =>
+    `${scrollRevisionForDetail(props.detail)}:${previewSequence === undefined ? "none" : String(previewSequence)}`;
+
   onMount(scrollToEnd);
-  createEffect(on(() => scrollRevision(props.detail), scrollToEnd));
+  createEffect(on(scrollRevision, scrollToEnd));
 
   return (
     <div>
@@ -438,6 +443,9 @@ function LoadedSessionDetail(props: {
           messages={props.detail.messages}
           tools={props.detail.tools}
         />
+        <Show when={props.state.compactionPreview}>
+          {(preview) => <CompactionPreviewCard preview={preview()} />}
+        </Show>
       </ul>
       <div class="mt-5 flex flex-col gap-3">
         <Show when={!active()}>

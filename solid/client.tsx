@@ -357,22 +357,32 @@ function App(): JSX.Element {
   const runners = new RunnerController();
   const agentSessions = new SessionController();
   const providerControllers = [openAi, openRouter, braveSearch] as const;
-  const realtime = new RealtimeConnection((event) => {
-    switch (event.type) {
-      case "runners":
-        runners.applyRealtime(event.runners);
-        break;
-      case "sessions":
-        agentSessions.applyRealtime(event.sessions);
-        break;
-      case "session":
-        agentSessions.applyDetail(event.session);
-        break;
-      case "session_delta":
-        agentSessions.applyDelta(event);
-        break;
-    }
-  });
+  const realtime = new RealtimeConnection(
+    (event) => {
+      switch (event.type) {
+        case "runners":
+          runners.applyRealtime(event.runners);
+          break;
+        case "sessions":
+          agentSessions.applyRealtime(event.sessions);
+          break;
+        case "session":
+          agentSessions.applyDetail(event.session);
+          break;
+        case "session_compaction":
+          agentSessions.applyCompaction(event);
+          break;
+        case "session_delta":
+          agentSessions.applyDelta(event);
+          break;
+      }
+    },
+    {
+      compactionSnapshot: () => {
+        agentSessions.clearCompactionPreview();
+      },
+    },
+  );
 
   const resetWorkspaceConnections = (): void => {
     realtime.stop();

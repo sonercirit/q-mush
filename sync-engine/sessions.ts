@@ -1,3 +1,4 @@
+import { isAbortError } from "../shared/agent-loop.ts";
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
 import { createDatabase, type AppDatabase } from "../shared/database.ts";
 import { createUuidV7, type IdGenerator } from "../shared/ids.ts";
@@ -125,10 +126,6 @@ export interface SessionIntegration {
 function safeErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : "Unknown error";
   return `Session failed: ${message.slice(0, 500)}`;
-}
-
-function isAbort(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "AbortError";
 }
 
 class DrizzleSessionIntegration implements SessionIntegration {
@@ -629,7 +626,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
         : runSessionAgent(runtime));
       this.#finish(detail, userId);
     } catch (error) {
-      if (!controller.signal.aborted && !isAbort(error)) {
+      if (!controller.signal.aborted && !isAbortError(error)) {
         this.#finish(detail, userId, error);
       }
     }

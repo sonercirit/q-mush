@@ -39,6 +39,7 @@ export function sessionModelDiscoveryState(
 
 export function initialSessionViewState(): SessionViewState {
   return {
+    compactionPreview: undefined,
     compacting: false,
     creating: false,
     detail: undefined,

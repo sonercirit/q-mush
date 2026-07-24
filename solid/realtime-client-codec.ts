@@ -1,4 +1,8 @@
 import {
+  readSessionCompactionRealtimeEvent,
+  type SessionCompactionRealtimeEvent,
+} from "../shared/compaction-realtime.ts";
+import {
   parseJsonRecord,
   requiredRecordString,
 } from "../shared/json-record.ts";
@@ -11,6 +15,7 @@ import { readRunners } from "./runner-client.tsx";
 import { readSessionDetail, readSessionList } from "./session-codec.ts";
 
 export type RealtimeServerEvent =
+  | SessionCompactionRealtimeEvent
   | { readonly runners: readonly RunnerSummary[]; readonly type: "runners" }
   | { readonly session: AgentSessionDetail; readonly type: "session" }
   | {
@@ -49,6 +54,8 @@ export function readRealtimeServerEvent(message: string): RealtimeServerEvent {
       return { sessions: readSessionList(value), type: "sessions" };
     case "session":
       return { session: readSessionDetail(value["session"]), type: "session" };
+    case "session_compaction":
+      return readSessionCompactionRealtimeEvent(value);
     case "session_delta": {
       const reset = value["reset"];
       if (reset !== undefined && reset !== true) {
