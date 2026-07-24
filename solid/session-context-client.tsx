@@ -80,7 +80,7 @@ export function CompactionControls(props: {
 }): JSX.Element {
   return (
     <div class="flex flex-wrap items-center gap-3">
-      <label class="flex items-center gap-2 text-sm text-slate-300">
+      <label class="flex min-h-11 items-center gap-2 text-sm text-slate-300">
         <input
           checked={props.autoCompact}
           disabled={props.disabled ?? props.compacting}
@@ -92,7 +92,7 @@ export function CompactionControls(props: {
         Auto compact
       </label>
       <button
-        class="rounded-xl border border-amber-300/30 bg-amber-300/10 px-4 py-2 text-sm font-semibold text-amber-200 disabled:opacity-50"
+        class="min-h-11 rounded-xl border border-amber-300/30 bg-amber-300/10 px-4 py-2 text-sm font-semibold text-amber-200 disabled:opacity-50"
         disabled={props.disabled ?? props.compacting}
         onClick={props.onCompact}
         type="button"

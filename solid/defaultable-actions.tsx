@@ -17,7 +17,7 @@ export function DefaultableActions(
     props.data === undefined ? {} : { data: props.data };
 
   return (
-    <div class="flex shrink-0 items-center gap-2">
+    <div class="flex w-full min-w-0 flex-wrap items-center gap-2 md:w-auto md:shrink-0">
       <DefaultControl
         {...data()}
         idleLabel="Make default"

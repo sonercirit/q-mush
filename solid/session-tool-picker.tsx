@@ -183,7 +183,7 @@ export function SessionToolPicker(props: {
 
   return (
     <fieldset
-      class="lg:col-span-2"
+      class="min-w-0 md:col-span-2"
       ref={(element) => {
         picker = element;
       }}
@@ -196,10 +196,10 @@ export function SessionToolPicker(props: {
         with none selected. Use each info button to inspect its authoritative
         schema.
       </p>
-      <div class="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+      <div class="mt-3 grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-3">
         <For each={otherOptions}>{optionControl}</For>
       </div>
-      <section class="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-3 lg:col-span-3">
+      <section class="mt-4 min-w-0 rounded-2xl border border-white/10 bg-white/[0.03] p-3 md:col-span-2">
         <label class="flex items-center gap-3 text-sm font-semibold text-slate-200">
           <input
             checked={SESSION_AGENT_TOOL_NAMES.every(isSelected)}
@@ -218,7 +218,7 @@ export function SessionToolPicker(props: {
         <p class="mt-1 text-xs leading-5 text-slate-500">
           Toggle all tools for creating and controlling agent sessions.
         </p>
-        <div class="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        <div class="mt-3 grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-3">
           <For each={sessionOptions}>{optionControl}</For>
         </div>
       </section>

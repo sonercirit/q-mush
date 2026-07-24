@@ -34,7 +34,7 @@ const PAGE_SIZE = 10;
 const CONTROL_CLASSES =
   "mt-2 flex min-h-12 w-full min-w-0 items-center justify-between gap-3 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-left text-sm text-white transition hover:border-white/20 focus:border-emerald-300/50 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50";
 const OPTION_CLASSES =
-  "flex min-h-11 w-full items-center rounded-lg px-3 py-2.5 text-left text-sm transition";
+  "flex min-h-11 w-full min-w-0 items-center rounded-lg px-3 py-2.5 text-left text-sm transition";
 const PAGE_BUTTON_CLASSES =
   "min-h-10 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 transition hover:border-emerald-300/30 hover:text-emerald-200 disabled:cursor-not-allowed disabled:opacity-40";
 
@@ -60,11 +60,13 @@ function OptionContent(props: {
 }): JSX.Element {
   return (
     <span class="flex min-w-0 flex-1 flex-col items-start gap-1 sm:flex-row sm:justify-between sm:gap-3">
-      <span class="min-w-0">
-        <span class="block min-w-0 break-words">{props.option.label}</span>
+      <span class="min-w-0 flex-1">
+        <span class="path-wrap block min-w-0 break-words">
+          {props.option.label}
+        </span>
         <Show when={props.option.description}>
           {(description) => (
-            <span class="mt-1 block whitespace-pre-line text-xs leading-5 text-slate-500">
+            <span class="path-wrap mt-1 block whitespace-pre-line text-xs leading-5 text-slate-500">
               {description()}
             </span>
           )}
@@ -72,7 +74,9 @@ function OptionContent(props: {
       </span>
       <Show when={props.option.detail}>
         {(detail) => (
-          <span class="shrink-0 text-xs text-slate-500">{detail()}</span>
+          <span class="path-wrap text-xs text-slate-500 sm:shrink-0 sm:text-right">
+            {detail()}
+          </span>
         )}
       </Show>
     </span>
@@ -523,7 +527,7 @@ export function CustomSelect(props: CustomSelectProps): JSX.Element {
           <ul
             aria-activedescendant={activeOptionId()}
             aria-labelledby={`${props.id}-label`}
-            class="max-h-[min(18rem,50vh)] overflow-y-auto p-1.5 focus:outline-none"
+            class="max-h-[min(18rem,50dvh)] min-w-0 overflow-y-auto overscroll-contain p-1.5 focus:outline-none"
             id={listboxId()}
             onKeyDown={handleListNavigation}
             ref={setListbox}

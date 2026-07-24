@@ -2,8 +2,8 @@ import { afterEach, expect, test } from "vitest";
 import type { AgentSessionDetail } from "../../../shared/session-model.ts";
 import { RenderDebugView } from "../../render-debug.tsx";
 import type { SessionController } from "../../session-controller.ts";
+import { disposeTestViews } from "../dom-test-helpers.ts";
 import {
-  disposeTestViews,
   messageBoundary,
   mountTestTranscript,
   type MountedTestTranscript,

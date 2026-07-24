@@ -24,14 +24,27 @@ export function DirectoryPicker(props: {
     props.controller.close();
   };
   const [dialog, setDialog] = createSignal<HTMLDivElement>();
+  let focusReturnTarget: HTMLElement | undefined;
 
   onMount(() => {
     createEffect(
       on(
         () => state().open,
-        (open) => {
+        (open, wasOpen) => {
           if (open) {
+            focusReturnTarget =
+              document.activeElement instanceof HTMLElement
+                ? document.activeElement
+                : undefined;
             dialog()?.focus();
+          } else if (wasOpen) {
+            const returnTarget = focusReturnTarget;
+            focusReturnTarget = undefined;
+            queueMicrotask(() => {
+              if (returnTarget?.isConnected === true) {
+                returnTarget.focus({ preventScroll: true });
+              }
+            });
           }
         },
       ),
@@ -43,11 +56,12 @@ export function DirectoryPicker(props: {
       <div
         aria-labelledby="directory-picker-title"
         aria-modal="true"
-        class="fixed inset-0 z-50 grid place-items-center bg-slate-950/80 p-4 backdrop-blur-sm"
+        class="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-slate-950/80 p-2 backdrop-blur-sm sm:p-4"
         data-directory-picker="true"
         onKeyDown={(event) => {
           if (event.key === "Escape") {
             event.preventDefault();
+            event.stopPropagation();
             props.controller.close();
           }
         }}
@@ -56,10 +70,10 @@ export function DirectoryPicker(props: {
         tabindex="-1"
       >
         <div
-          class="flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-white/15 bg-slate-900 shadow-2xl shadow-black/60"
+          class="flex max-h-[calc(100dvh-1rem)] w-full max-w-2xl min-w-0 flex-col overflow-hidden rounded-2xl border border-white/15 bg-slate-900 shadow-2xl shadow-black/60 sm:max-h-[calc(100dvh-2rem)] sm:rounded-3xl"
           {...renderDebugBoundary("directory-picker", "Directory picker")}
         >
-          <div class="flex items-start justify-between gap-4 border-b border-white/10 p-5 sm:p-6">
+          <div class="flex min-w-0 items-start justify-between gap-3 border-b border-white/10 p-4 sm:gap-4 sm:p-6">
             <div class="min-w-0">
               <p class="text-xs font-semibold tracking-wider text-emerald-300 uppercase">
                 {props.runnerName}
@@ -81,8 +95,8 @@ export function DirectoryPicker(props: {
             </button>
           </div>
 
-          <div class="flex min-h-0 flex-1 flex-col p-5 sm:p-6">
-            <div class="flex flex-wrap items-center gap-2">
+          <div class="flex min-h-0 min-w-0 flex-1 flex-col p-4 sm:p-6">
+            <div class="grid min-w-0 grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-start">
               <button
                 class="rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 transition hover:border-emerald-300/30 hover:text-emerald-200 disabled:cursor-not-allowed disabled:opacity-40"
                 disabled={state().loading}
@@ -109,7 +123,8 @@ export function DirectoryPicker(props: {
                 Up
               </button>
               <code
-                class="min-w-0 flex-1 truncate rounded-lg bg-slate-950 px-3 py-2 text-xs text-cyan-200"
+                class="path-wrap col-span-2 min-w-0 rounded-lg bg-slate-950 px-3 py-2 text-xs leading-5 text-cyan-200 sm:flex-1"
+                data-current-directory="true"
                 title={state().listing?.path ?? state().requestedPath ?? ""}
               >
                 {state().listing?.path ??
@@ -177,7 +192,7 @@ export function DirectoryPicker(props: {
                               <span aria-hidden="true" class="text-amber-200">
                                 ▸
                               </span>
-                              <span class="min-w-0 truncate">
+                              <span class="path-wrap min-w-0">
                                 {directory.name}
                               </span>
                             </button>
@@ -205,7 +220,7 @@ export function DirectoryPicker(props: {
             </Show>
           </div>
 
-          <div class="flex items-center justify-end gap-3 border-t border-white/10 p-5 sm:px-6">
+          <div class="flex flex-col-reverse items-stretch justify-end gap-2 border-t border-white/10 p-4 sm:flex-row sm:items-center sm:gap-3 sm:px-6 sm:py-5">
             <button
               class="rounded-xl border border-white/10 px-4 py-2.5 text-sm font-semibold text-slate-300 transition hover:border-white/20 hover:text-white"
               onClick={close}

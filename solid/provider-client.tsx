@@ -196,7 +196,7 @@ function CredentialActions(props: CredentialItemProps): JSX.Element {
 function ProviderCredentialItem(props: CredentialItemProps): JSX.Element {
   return (
     <li
-      class="flex flex-col gap-4 rounded-2xl border border-white/10 bg-slate-950/60 p-5 sm:flex-row sm:items-center sm:justify-between"
+      class="flex min-w-0 flex-col gap-4 rounded-2xl border border-white/10 bg-slate-950/60 p-4 sm:p-5 md:flex-row md:items-center md:justify-between"
       {...renderDebugBoundary(
         `provider-credential:${props.configuration.id}:${props.credential.id}`,
         `${props.configuration.name} credential: ${props.credential.label}`,
@@ -204,7 +204,7 @@ function ProviderCredentialItem(props: CredentialItemProps): JSX.Element {
     >
       <div class="min-w-0">
         <div class="flex flex-wrap items-center gap-2">
-          <p class="truncate font-semibold text-white">
+          <p class="path-wrap font-semibold text-white">
             {props.credential.label}
           </p>
           <span class="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-2.5 py-1 text-xs font-medium text-cyan-200">
@@ -213,7 +213,7 @@ function ProviderCredentialItem(props: CredentialItemProps): JSX.Element {
               : "API key"}
           </span>
         </div>
-        <p class="mt-2 truncate text-sm text-slate-400">
+        <p class="path-wrap mt-2 text-sm text-slate-400">
           {props.credential.accountId ??
             props.configuration.accountIdUnavailable}
         </p>
@@ -237,7 +237,7 @@ function ProviderCredentialList({
   return (
     <Collection
       empty={
-        <div class="mt-6 rounded-2xl border border-dashed border-white/15 p-6 text-sm leading-6 text-slate-400">
+        <div class="mt-6 rounded-2xl border border-dashed border-white/15 p-4 text-sm leading-6 text-slate-400 sm:p-6">
           {configuration.emptyMessage}
         </div>
       }
@@ -267,7 +267,7 @@ function credentialInputAttributes(disabled: boolean) {
   return {
     autocomplete: "off",
     class:
-      "mt-2 w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none",
+      "mt-2 min-h-12 w-full min-w-0 rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none",
     disabled,
   } as const;
 }
@@ -281,15 +281,15 @@ export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
   return (
     <section
       aria-labelledby={titleId()}
-      class="rounded-3xl border border-white/10 bg-white/[0.06] p-6 shadow-2xl shadow-emerald-950/30 backdrop-blur-xl sm:p-8"
+      class="min-w-0 rounded-3xl border border-white/10 bg-white/[0.06] p-4 shadow-2xl shadow-emerald-950/30 backdrop-blur-xl sm:p-6 lg:p-8"
       data-provider-panel={props.configuration.id}
       {...renderDebugBoundary(
         `provider-panel:${props.configuration.id}`,
         `${props.configuration.name} panel`,
       )}
     >
-      <div class="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
-        <div>
+      <div class="flex min-w-0 flex-col gap-5 md:flex-row md:items-start md:justify-between">
+        <div class="min-w-0 flex-1">
           <p class="text-sm font-medium text-cyan-300">
             {props.configuration.id === "brave-search"
               ? "Agent skill"
@@ -315,7 +315,7 @@ export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
         >
           {(oauth) => (
             <a
-              class="inline-flex shrink-0 items-center justify-center rounded-2xl bg-cyan-300 px-5 py-3 font-semibold text-slate-950 transition hover:bg-cyan-200 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300"
+              class="inline-flex min-h-11 w-full shrink-0 items-center justify-center rounded-2xl bg-cyan-300 px-5 py-3 text-center font-semibold text-slate-950 transition hover:bg-cyan-200 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300 sm:w-auto"
               href={oauth().path}
             >
               {oauth().label}
@@ -325,7 +325,7 @@ export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
       </div>
 
       <form
-        class={`mt-7 grid gap-3 rounded-2xl border border-white/10 bg-slate-900/70 p-4 ${props.configuration.keyRequiresLabel === true ? "sm:grid-cols-[minmax(0,0.7fr)_minmax(0,1fr)_auto]" : "sm:grid-cols-[minmax(0,1fr)_auto]"}`}
+        class={`mt-7 grid min-w-0 gap-3 rounded-2xl border border-white/10 bg-slate-900/70 p-4 ${props.configuration.keyRequiresLabel === true ? "md:grid-cols-2 xl:grid-cols-[minmax(0,0.7fr)_minmax(0,1fr)_auto]" : "md:grid-cols-[minmax(0,1fr)_auto]"}`}
         onSubmit={(event) => {
           event.preventDefault();
           const data = new FormData(event.currentTarget);
@@ -378,7 +378,7 @@ export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
           />
         </div>
         <button
-          class="self-end rounded-xl border border-emerald-300/30 bg-emerald-300/10 px-5 py-3 font-semibold text-emerald-200 transition hover:bg-emerald-300/20 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
+          class="min-h-11 self-end rounded-xl border border-emerald-300/30 bg-emerald-300/10 px-5 py-3 font-semibold text-emerald-200 transition hover:bg-emerald-300/20 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300 md:justify-self-start xl:justify-self-auto"
           disabled={state().savePending}
           type="submit"
         >

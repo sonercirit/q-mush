@@ -25,7 +25,7 @@ function TranscriptNote(props: {
 }): JSX.Element {
   return (
     <li
-      class={`rounded-xl border p-4 ${props.classes}`}
+      class={`min-w-0 rounded-xl border p-3 sm:p-4 ${props.classes}`}
       {...renderDebugBoundary(props.boundaryKey, props.label)}
     >
       <p
@@ -59,7 +59,7 @@ function ToolDefinitions(props: {
 }): JSX.Element {
   return (
     <li
-      class="rounded-xl border border-cyan-300/20 bg-cyan-300/10 p-4"
+      class="min-w-0 rounded-xl border border-cyan-300/20 bg-cyan-300/10 p-3 sm:p-4"
       {...renderDebugBoundary("tool-definitions", "Tool definitions")}
     >
       <p class="text-xs font-semibold tracking-wide text-cyan-200 uppercase">
@@ -83,7 +83,7 @@ function renderToolHeader(options: {
   readonly name: string;
 }): JSX.Element {
   return (
-    <div class="flex flex-wrap items-center justify-between gap-2">
+    <div class="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
       <p class="text-xs font-semibold tracking-wide text-cyan-300 uppercase">
         {`${options.kind} · ${options.name}`}
       </p>
@@ -152,7 +152,7 @@ function ToolResultTranscriptMessage(
 ): JSX.Element {
   return (
     <li
-      class="rounded-xl border border-white/10 bg-slate-950/80 p-4"
+      class="min-w-0 rounded-xl border border-white/10 bg-slate-950/80 p-3 sm:p-4"
       {...renderDebugBoundary(`message:${props.message.id}`, "Tool result")}
     >
       {renderToolHeader({
@@ -185,7 +185,7 @@ function ConversationTranscriptMessage(props: {
   const showTools = (): boolean => props.showTools ?? true;
   return (
     <li
-      class={`rounded-2xl border p-4 ${user ? "ml-8 border-emerald-300/20 bg-emerald-300/10" : system ? "border-rose-300/20 bg-rose-300/10" : "mr-8 border-white/10 bg-white/[0.04]"}`}
+      class={`min-w-0 rounded-2xl border p-3 sm:p-4 ${user ? "sm:ml-8 border-emerald-300/20 bg-emerald-300/10" : system ? "border-rose-300/20 bg-rose-300/10" : "sm:mr-8 border-white/10 bg-white/[0.04]"}`}
       {...renderDebugBoundary(
         `message:${props.message.id}`,
         `${user ? "User" : system ? "Session" : "Agent"} message`,

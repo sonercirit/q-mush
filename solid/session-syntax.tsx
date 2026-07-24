@@ -33,7 +33,7 @@ const SYNTAX_TOKEN_CLASSES: Readonly<Record<SyntaxTokenKind, string>> = {
 };
 
 const CODE_BLOCK_CLASSES =
-  "max-h-80 overflow-auto rounded-lg border border-white/10 bg-slate-950/90 p-3 font-mono text-xs leading-5 text-slate-300";
+  "max-h-80 max-w-full overflow-auto overscroll-contain rounded-lg border border-white/10 bg-slate-950/90 p-3 font-mono text-xs leading-5 text-slate-300";
 const INLINE_CODE_CLASSES =
   "rounded bg-slate-950/80 px-1.5 py-0.5 font-mono text-[0.8em] text-cyan-200";
 const JAVASCRIPT_LANGUAGES = new Set([

@@ -1,15 +1,14 @@
 import { afterEach, expect, test } from "vitest";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { summaryFromDetail } from "../session-codec.ts";
+import { disposeTestViews, queryTestElement } from "./dom-test-helpers.ts";
 import { MemoryStorage } from "./memory-storage.ts";
 import {
   applyTranscriptDelta,
-  disposeTestViews,
   DOM_TEST_DISPOSALS,
   installResponseFetch,
   messageBoundary,
   mountTestSessionDetail,
-  queryTestElement,
   transcriptTestMessage,
 } from "./session-dom-test-helpers.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
@@ -77,7 +76,7 @@ function transcriptFilter(container: ParentNode): HTMLInputElement {
 }
 
 afterEach(() => {
-  disposeTestViews();
+  disposeTestViews(DOM_TEST_DISPOSALS);
   filterStorage.clear();
 });
 

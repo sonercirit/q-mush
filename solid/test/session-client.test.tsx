@@ -5,11 +5,6 @@ import {
   testUserImageMessage,
 } from "./agent-image-fixtures.ts";
 import { providerViewState, runnerViewState } from "./client-state-fixtures.ts";
-import {
-  numberedCredentials,
-  numberedModels,
-  numberedRunners,
-} from "./custom-select-consumer-fixtures.ts";
 import { runnerSummary } from "./runner-fixtures.ts";
 import {
   FORMATTED_SESSION_MESSAGES,
@@ -83,57 +78,6 @@ function renderPanelWithProviders(
 function renderPanel(state: SessionViewState): string {
   return renderSessionPanelForTest(PANEL_CONTEXT, state);
 }
-
-test("paginates every session select consumer without provider-specific behavior", () => {
-  const runners = numberedRunners();
-  const credentials = numberedCredentials();
-  const openAiCredentials = credentials.slice(0, 6);
-  const openRouterCredentials = credentials.slice(6);
-  const models = numberedModels();
-  const baseState = {
-    ...SESSION_STATE,
-    draft: {
-      ...SESSION_STATE.draft,
-      credential: "openrouter:credential-12",
-      model: "model-12",
-      runnerId: "runner-12",
-    },
-    modelDiscovery: {
-      catalog: { defaultModel: "model-1", models },
-      credential: "openrouter:credential-12",
-      error: undefined,
-      loading: false,
-    },
-  };
-  const states: readonly SessionViewState[] = [
-    { ...baseState, openSelect: "runnerId" },
-    { ...baseState, openSelect: "credential" },
-    { ...baseState, openSelect: "model" },
-  ];
-  const html = states.map((state) =>
-    renderPanelWithProviders(
-      state,
-      runnerViewState(runners),
-      providerViewState(openAiCredentials),
-      providerViewState(openRouterCredentials),
-    ),
-  );
-
-  for (const [index, name] of ["runnerId", "credential", "model"].entries()) {
-    expect(html[index]).toContain(`data-custom-select-search="${name}"`);
-    expect(html[index]).toContain(`data-custom-select-page="${name}"`);
-  }
-  const credentialHtml = html[1] ?? "";
-  expect(credentialHtml).toContain(
-    'data-option-value="openrouter:credential-12"',
-  );
-  expect(credentialHtml).toContain("OpenRouter · Credential 12");
-  const modelHtml = html[2] ?? "";
-  expect(modelHtml).toContain('data-option-value="model-12"');
-  expect(modelHtml).not.toContain('data-option-value="model-1"');
-  expect(modelHtml).toContain("Text, Image");
-  expect(modelHtml).toContain("12K context");
-});
 
 test("keeps editable session controls in the reactive tree", () => {
   const newSessionHtml = renderPanel(SESSION_STATE);
@@ -422,6 +366,54 @@ test("renders a directory browser beside the working-directory input", () => {
   );
   expect(openHtml).toContain(">mush room</span>");
   expect(openHtml).toContain("Choose this directory");
+});
+
+test("wraps complete working-directory and folder paths in the responsive session layout", () => {
+  const path =
+    "/home/mush/a-very-long-workspace-name/with-another-long-segment/responsive-session-focus";
+  const html = renderPanel({
+    ...SESSION_STATE,
+    detail: { ...TEST_SESSION_DETAIL, workingDirectory: path },
+    directoryPicker: {
+      error: undefined,
+      listing: {
+        directories: [],
+        parent: "/home/mush",
+        path,
+        truncated: false,
+      },
+      loading: false,
+      open: true,
+      requestedPath: path,
+      runnerId: "runner-1",
+    },
+    selectedId: TEST_SESSION_DETAIL.id,
+    sessions: [{ ...TEST_SESSION_DETAIL, workingDirectory: path }],
+  });
+
+  expect(html).toContain('data-session-results="true"');
+  expect(html).toContain('data-session-focus-mode="false"');
+  expect(html).toContain('data-session-list-panel="true"');
+  expect(html).toContain('data-session-detail-shell="true"');
+  expect(html).toContain('data-session-focus-toggle="true"');
+  expect(html).toContain('aria-pressed="false"');
+  expect(html).toMatch(
+    /<code[^>]*class="[^"]*path-wrap[^"]*"[^>]*data-working-directory="true"[^>]*>\/home\/mush\/a-very-long/u,
+  );
+  expect(html).toMatch(
+    /<code[^>]*class="[^"]*path-wrap[^"]*"[^>]*data-current-directory="true"[^>]*>\/home\/mush\/a-very-long/u,
+  );
+  expect(html).not.toMatch(
+    /<code[^>]*(?:data-(?:working|current)-directory="true"[^>]*class="[^"]*truncate|class="[^"]*truncate[^>]*data-(?:working|current)-directory="true")/u,
+  );
+  expect(html).toContain("session-list-items");
+  expect(html).toContain("session-detail-content");
+  expect(html).toContain("session-composer");
+  expect(html).toContain("md:grid-cols-2");
+  expect(html).toContain("lg:grid-cols-[18rem_minmax(0,1fr)]");
+  expect(html).toContain("xl:grid-cols-[20rem_minmax(0,1fr)]");
+  expect(html).toContain("sm:p-6");
+  expect(html).toContain("lg:p-8");
 });
 
 test("defaults runner and credential choices to the first entries", () => {

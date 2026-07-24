@@ -1,4 +1,10 @@
-import { createEffect, createMemo, Show, type JSX } from "solid-js";
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  Show,
+  type JSX,
+} from "solid-js";
 import {
   reasoningEffortLabel,
   type AgentModelCatalog,
@@ -28,7 +34,7 @@ import type { RunnerViewState } from "./runner-client.tsx";
 import { SessionPromptInput } from "./session-client-forms.tsx";
 import { formatTokenCount } from "./session-context-client.tsx";
 import type { SessionController } from "./session-controller.ts";
-import { SessionDetail, SessionList } from "./session-detail-client.tsx";
+import { SessionResults } from "./session-focus-client.tsx";
 import type { SessionPanelResources } from "./session-panel-resources.ts";
 import {
   selectedSessionCredentialAvailable,
@@ -158,6 +164,7 @@ function sessionControlAttributes(
 
 function DirectoryInput(props: {
   readonly controller: SessionController;
+  readonly onOpenDirectoryPicker: () => void;
   readonly runnerAvailable: boolean;
   readonly state: SessionViewState;
 }): JSX.Element {
@@ -167,28 +174,38 @@ function DirectoryInput(props: {
     name: "workingDirectory",
   });
 
+  const openDirectoryPicker = (): void => {
+    props.onOpenDirectoryPicker();
+  };
+
   return renderSessionField(
     "session-directory",
     options().label,
-    <div class="flex items-center gap-2">
-      <input
-        {...sessionControlAttributes(options(), true)}
-        onInput={(event) => {
-          props.controller.setDraftField(
-            "workingDirectory",
-            event.currentTarget.value,
-          );
-        }}
-        placeholder="/path/to/project"
-        type="text"
-        value={props.state.draft.workingDirectory}
-      />
+    <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+      <div class="min-w-0 flex-1">
+        <input
+          {...sessionControlAttributes(options(), true)}
+          onInput={(event) => {
+            props.controller.setDraftField(
+              "workingDirectory",
+              event.currentTarget.value,
+            );
+          }}
+          placeholder="/path/to/project"
+          type="text"
+          value={props.state.draft.workingDirectory}
+        />
+        <code
+          class="path-wrap mt-1 block min-w-0 text-xs text-slate-500"
+          data-draft-working-directory="true"
+        >
+          {props.state.draft.workingDirectory}
+        </code>
+      </div>
       <button
-        class="mt-2 shrink-0 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm font-semibold text-slate-200 transition hover:border-emerald-300/30 hover:text-emerald-200 disabled:cursor-not-allowed disabled:opacity-50"
+        class="min-h-11 shrink-0 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm font-semibold text-slate-200 transition hover:border-emerald-300/30 hover:text-emerald-200 disabled:cursor-not-allowed disabled:opacity-50 sm:mt-2 sm:self-start"
         disabled={props.state.creating || !props.runnerAvailable}
-        onClick={() => {
-          props.controller.openDirectoryPicker();
-        }}
+        onClick={openDirectoryPicker}
         type="button"
       >
         Browse
@@ -278,6 +295,7 @@ function NewSessionForm(props: {
   readonly controller: SessionController;
   readonly credentials: readonly CredentialOption[];
   readonly credentialsSettled: boolean;
+  readonly onOpenDirectoryPicker: () => void;
   readonly runners: readonly RunnerSummary[];
   readonly state: SessionViewState;
 }): JSX.Element {
@@ -349,7 +367,7 @@ function NewSessionForm(props: {
 
   return (
     <form
-      class="mt-6 grid gap-4 rounded-2xl border border-white/10 bg-slate-950/60 p-5 lg:grid-cols-2"
+      class="mt-6 grid min-w-0 gap-4 rounded-2xl border border-white/10 bg-slate-950/60 p-4 md:grid-cols-2 sm:p-5"
       onSubmit={(event) => {
         event.preventDefault();
         void props.controller.create();
@@ -395,6 +413,7 @@ function NewSessionForm(props: {
       />
       <DirectoryInput
         controller={props.controller}
+        onOpenDirectoryPicker={props.onOpenDirectoryPicker}
         runnerAvailable={selectedRunnerId().length > 0}
         state={props.state}
       />
@@ -477,7 +496,7 @@ function NewSessionForm(props: {
         }}
         prompt={props.state.draft.prompt}
       />
-      <div class="flex flex-col gap-3 lg:col-span-2 sm:flex-row sm:items-center sm:justify-between">
+      <div class="flex min-w-0 flex-col gap-3 md:col-span-2 sm:flex-row sm:items-center sm:justify-between">
         <p class="text-xs leading-5 text-slate-500">
           The model runs through Q Mush; file and shell tools run only on the
           selected runner.
@@ -491,7 +510,7 @@ function NewSessionForm(props: {
         </button>
       </div>
       <Show when={!resourcesAvailable()}>
-        <p class="text-sm text-amber-200 lg:col-span-2">
+        <p class="text-sm text-amber-200 md:col-span-2">
           Connect an online runner and add a provider credential before starting
           a session.
         </p>
@@ -504,39 +523,6 @@ function NewSessionForm(props: {
   );
 }
 
-interface SessionResultsProps {
-  readonly controller: SessionController;
-  readonly openAi: ProviderViewState;
-  readonly openRouter: ProviderViewState;
-  readonly runners: RunnerViewState;
-}
-
-function SessionResults(props: SessionResultsProps): JSX.Element {
-  const state = props.controller.view;
-  return (
-    <div class="mt-7 grid gap-5 lg:grid-cols-[18rem_minmax(0,1fr)]">
-      <aside aria-label="Agent sessions">
-        <SessionList controller={props.controller} />
-      </aside>
-      <div class="min-w-0 rounded-2xl border border-white/10 bg-slate-900/70 p-5">
-        <SessionDetail
-          controller={props.controller}
-          credentialAvailable={selectedSessionCredentialAvailable(
-            state().detail,
-            props.openAi,
-            props.openRouter,
-          )}
-          runnerAvailable={selectedSessionRunnerAvailable(
-            state().detail,
-            props.runners,
-          )}
-          state={state()}
-        />
-      </div>
-    </div>
-  );
-}
-
 export function SessionPanel(
   props: SessionPanelResources & { readonly controller: SessionController },
 ): JSX.Element {
@@ -546,10 +532,22 @@ export function SessionPanel(
     credentialOptions(props.openAi(), props.openRouter());
   const credentialsSettled = (): boolean =>
     credentialFallbackReady(props.openAi(), props.openRouter());
+  const [focusMode, setFocusMode] = createSignal(false);
   const selectedRunner = (): RunnerSummary | undefined =>
     online().find(
       ({ id }) => id === props.controller.directoryPicker.state.runnerId,
     );
+
+  const openDirectoryPicker = (): void => {
+    setFocusMode(false);
+    props.controller.openDirectoryPicker();
+  };
+
+  createEffect(() => {
+    if (props.controller.directoryPicker.view().open) {
+      setFocusMode(false);
+    }
+  });
 
   createEffect(() => {
     const runners = online();
@@ -568,7 +566,8 @@ export function SessionPanel(
     >
       <section
         aria-labelledby="agent-sessions-title"
-        class="rounded-3xl border border-emerald-300/15 bg-white/[0.06] p-6 shadow-2xl shadow-emerald-950/30 backdrop-blur-xl sm:p-8"
+        class={`rounded-3xl border border-emerald-300/15 bg-white/[0.06] p-4 shadow-2xl shadow-emerald-950/30 backdrop-blur-xl sm:p-6 lg:p-8 ${focusMode() ? "session-panel-focus" : ""}`}
+        data-session-panel-focus={String(focusMode())}
         inert={props.controller.directoryPicker.view().open}
         {...renderDebugBoundary("sessions-panel", "Agent sessions panel")}
       >
@@ -589,6 +588,7 @@ export function SessionPanel(
           controller={props.controller}
           credentials={credentials()}
           credentialsSettled={credentialsSettled()}
+          onOpenDirectoryPicker={openDirectoryPicker}
           runners={online()}
           state={state()}
         />
@@ -600,9 +600,17 @@ export function SessionPanel(
         />
         <SessionResults
           controller={props.controller}
-          openAi={props.openAi()}
-          openRouter={props.openRouter()}
-          runners={props.runners()}
+          credentialAvailable={selectedSessionCredentialAvailable(
+            state().detail,
+            props.openAi(),
+            props.openRouter(),
+          )}
+          focusMode={focusMode}
+          runnerAvailable={selectedSessionRunnerAvailable(
+            state().detail,
+            props.runners(),
+          )}
+          setFocusMode={setFocusMode}
         />
       </section>
       <DirectoryPicker
