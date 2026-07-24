@@ -176,7 +176,7 @@ export function createResponseFetch(
   );
 }
 
-export function restoreFetchAfterTest(
+function restoreFetchAfterTest(
   originalFetch: typeof globalThis.fetch,
   disposals: (() => void)[] = DOM_TEST_DISPOSALS,
 ): void {
