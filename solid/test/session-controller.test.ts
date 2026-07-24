@@ -392,6 +392,94 @@ test("the first realtime snapshot replaces an HTTP-loaded session list", async (
   });
 });
 
+test("a realtime removal clears invalid selected state", async () => {
+  await withRestoredFetch(async () => {
+    const selected = sessionDetail("running", "removed-session", []);
+    const controller = await selectedController(selected);
+
+    controller.applyRealtime([]);
+
+    expect(controller.state).toMatchObject({
+      detail: undefined,
+      loadingDetail: false,
+      selectedId: undefined,
+      sessions: [],
+    });
+  });
+});
+
+test("a summary completion clears stale active detail until its detail event", async () => {
+  await withRestoredFetch(async () => {
+    const selected = sessionDetail("running", "completed-session", []);
+    const controller = await selectedController(selected);
+
+    controller.applyRealtime([
+      { ...summaryFromDetail(selected), status: "idle", updatedAt: 10 },
+    ]);
+
+    expect(controller.state).toMatchObject({
+      detail: undefined,
+      loadingDetail: true,
+      selectedId: selected.id,
+    });
+  });
+});
+
+test("ignores a delayed detail older than an authoritative summary", async () => {
+  await withRestoredFetch(async () => {
+    const current = sessionDetail("running", "ordered-session", []);
+    const controller = await selectedController(current);
+    controller.applyRealtime([
+      { ...summaryFromDetail(current), status: "idle", updatedAt: 10 },
+    ]);
+
+    controller.applyDetail({ ...current, updatedAt: 9 });
+
+    expect(controller.state).toMatchObject({
+      detail: undefined,
+      loadingDetail: true,
+    });
+  });
+});
+
+test("ignores selection requests for stale panel entries", async () => {
+  await withRestoredFetch(async () => {
+    let requests = 0;
+    globalThis.fetch = Object.assign(
+      (): Promise<Response> => {
+        requests += 1;
+        return Promise.resolve(Response.json(TEST_SESSION_DETAIL));
+      },
+      { preconnect: globalThis.fetch.preconnect },
+    );
+    const controller = createRoot(() => new SessionController());
+    controller.applyRealtime([]);
+
+    await controller.select("stale-session");
+
+    expect(requests).toBe(0);
+    expect(controller.state.selectedId).toBeUndefined();
+  });
+});
+
+test("orders same-timestamp session details deterministically", async () => {
+  await withRestoredFetch(async () => {
+    const first = sessionDetail("running", "session-a", []);
+    const controller = await selectedController(first);
+    const laterId = { ...first, id: "session-b" };
+
+    controller.applyRealtime([
+      summaryFromDetail(first),
+      summaryFromDetail(laterId),
+    ]);
+
+    expect(controller.state.sessions?.map(({ id }) => id)).toEqual([
+      "session-b",
+      "session-a",
+    ]);
+  });
+});
+
 test("an unchanged realtime snapshot does not notify the view", async () => {
   await withRestoredFetch(async () => {
     globalThis.fetch = Object.assign(sessionResponse, {

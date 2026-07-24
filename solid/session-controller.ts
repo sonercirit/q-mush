@@ -207,10 +207,16 @@ export class SessionController {
   }
 
   selectAndFocus(sessionId: string): Promise<void> {
-    this.#listElement?.scrollIntoView({ behavior: "smooth", block: "start" });
-    return this.#select(sessionId).finally(() => {
-      focusSessionList(this.#listElement);
-    });
+    if (this.#canSelect(sessionId)) {
+      this.#listElement?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+      return this.#select(sessionId).finally(() => {
+        focusSessionList(this.#listElement);
+      });
+    }
+    return Promise.resolve();
   }
 
   send(): Promise<void> {
@@ -465,7 +471,18 @@ export class SessionController {
     );
   }
 
+  #canSelect(sessionId: string): boolean {
+    return (
+      this.#view.value.sessions === undefined ||
+      this.#view.value.sessions.some(({ id }) => id === sessionId)
+    );
+  }
+
   async #select(sessionId: string): Promise<void> {
+    if (!this.#canSelect(sessionId)) {
+      return;
+    }
+
     if (
       sessionId === this.#view.value.selectedId &&
       this.#view.value.detail !== undefined

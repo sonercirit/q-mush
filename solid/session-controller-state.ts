@@ -3,6 +3,7 @@ import { canonicalAgentSessionMessages } from "../shared/session-message-order.t
 import type {
   AgentSessionDetail,
   AgentSessionMessage,
+  AgentSessionStatus,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
 import type { RealtimeServerEvent } from "./realtime-client-codec.ts";
@@ -11,9 +12,14 @@ import type { SessionViewState } from "./session-client.tsx";
 import { summaryFromDetail } from "./session-codec.ts";
 import { createDisplaySessionMessage } from "./session-message.ts";
 import {
+  compareSessionRecency,
   mergeSessionSummaries,
   sessionSummaryListsMatch,
 } from "./session-summary-state.ts";
+
+function hasPendingSessionMutation(view: SessionViewState): boolean {
+  return view.compacting || view.creating || view.sending || view.stopping;
+}
 
 export function selectedSessionCredential(value: string):
   | {
@@ -42,7 +48,7 @@ export function replaceSessionSummary(
 ): readonly AgentSessionSummary[] {
   const summary = summaryFromDetail(detail);
   return [summary, ...sessions.filter(({ id }) => id !== summary.id)].sort(
-    (left, right) => right.updatedAt - left.updatedAt,
+    compareSessionRecency,
   );
 }
 
@@ -157,8 +163,12 @@ function persistedDetail(detail: AgentSessionDetail): AgentSessionDetail {
   return { ...detail, messages: persistedMessages(detail) };
 }
 
+function statusIsActive(status: AgentSessionStatus): boolean {
+  return status === "queued" || status === "running";
+}
+
 function sessionIsActive(detail: AgentSessionDetail): boolean {
-  return detail.status === "queued" || detail.status === "running";
+  return statusIsActive(detail.status);
 }
 
 function resolveStreamBase(
@@ -279,10 +289,11 @@ function realtimeSessionDataMatches(update: SessionSummaryUpdate): boolean {
 function mergeRealtimeSessions(
   update: SessionSummaryUpdate,
 ): readonly AgentSessionSummary[] {
-  return mergeSessionSummaries({
+  const merged = mergeSessionSummaries({
     ...update,
     matches: sessionDataMatches,
   });
+  return merged.length < 2 ? merged : [...merged].sort(compareSessionRecency);
 }
 
 export class SessionRealtimeState {
@@ -294,6 +305,16 @@ export class SessionRealtimeState {
   }
 
   applyDetail(detail: AgentSessionDetail): void {
+    const currentSummary = this.#view.value.sessions?.find(
+      ({ id }) => id === detail.id,
+    );
+    if (
+      currentSummary !== undefined &&
+      compareSessionRecency(detail, currentSummary) > 0
+    ) {
+      return;
+    }
+
     const persistable = persistedDetail(detail);
     if (!sessionIsActive(persistable)) {
       this.#streamedContent.delete(detail.id);
@@ -402,21 +423,49 @@ export class SessionRealtimeState {
   }
 
   applySessions(sessions: readonly AgentSessionSummary[]): void {
+    if (hasPendingSessionMutation(this.#view.value)) {
+      return;
+    }
+
+    const selectedId = this.#view.value.selectedId;
+    const selectedSummary = sessions.find(({ id }) => id === selectedId);
+    const selectedWasRemoved =
+      selectedId !== undefined && selectedSummary === undefined;
+    const selectedBecameInactive =
+      selectedSummary !== undefined && !statusIsActive(selectedSummary.status);
     if (
-      this.#view.value.compacting ||
-      this.#view.value.creating ||
-      this.#view.value.sending ||
-      this.#view.value.stopping ||
-      (this.#view.value.sessionsSource === "realtime" &&
-        realtimeSessionDataMatches({
-          current: this.#view.value.sessions,
-          incoming: sessions,
-        }))
+      selectedId !== undefined &&
+      (selectedWasRemoved ||
+        (selectedBecameInactive &&
+          this.#view.value.detail !== undefined &&
+          sessionIsActive(this.#view.value.detail)))
+    ) {
+      this.#streamedContent.delete(selectedId);
+    }
+
+    if (
+      this.#view.value.sessionsSource === "realtime" &&
+      realtimeSessionDataMatches({
+        current: this.#view.value.sessions,
+        incoming: sessions,
+      })
     ) {
       return;
     }
 
+    const nextSelectedId = selectedWasRemoved
+      ? sessions[0]?.id
+      : this.#view.value.selectedId;
     this.#view.patch({
+      ...(selectedWasRemoved
+        ? {
+            detail: undefined,
+            loadingDetail: false,
+            selectedId: nextSelectedId,
+          }
+        : selectedBecameInactive && this.#view.value.detail !== undefined
+          ? { detail: undefined, loadingDetail: true }
+          : {}),
       sessions: mergeRealtimeSessions({
         current: this.#view.value.sessions,
         incoming: sessions,

@@ -55,6 +55,20 @@ test("derives explicit running and queued counts with a bounded useful list", ()
   expect(overview.visibleSessions).toHaveLength(4);
 });
 
+test("breaks equal timestamps deterministically by session id", () => {
+  const overview = deriveRunningSessions([
+    sessionSummary("running-a", "running", 10),
+    sessionSummary("running-c", "running", 10),
+    sessionSummary("running-b", "running", 10),
+  ]);
+
+  expect(overview.visibleSessions.map(({ id }) => id)).toEqual([
+    "running-c",
+    "running-b",
+    "running-a",
+  ]);
+});
+
 test("tracks queued, running, finished, failed, stopped, and spawned realtime events", () => {
   const controller = createRoot(() => new RunningSessionsController());
   const queued = sessionSummary("owned-session", "queued", 1);
@@ -93,6 +107,16 @@ test("tracks queued, running, finished, failed, stopped, and spawned realtime ev
   controller.applySession(sessionSummary("owned-session", "idle", 6));
   controller.applySession(sessionSummary("spawned-session", "failed", 7));
   expect(controller.state.sessions).toEqual([]);
+});
+
+test("ignores an out-of-order detail older than the current snapshot", () => {
+  const controller = createRoot(() => new RunningSessionsController());
+  const current = sessionSummary("owned-session", "running", 10);
+  controller.applySnapshot([current]);
+
+  controller.applySession({ ...current, status: "idle", updatedAt: 9 });
+
+  expect(controller.state.sessions).toEqual([current]);
 });
 
 test("marks a disconnected snapshot stale and replaces it exactly on reconnect", () => {

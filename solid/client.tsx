@@ -39,6 +39,7 @@ import { RunnerPanel } from "./runner-client.tsx";
 import { RunnerController } from "./runner-controller.ts";
 import { RunningSessionsController } from "./running-sessions-controller.ts";
 import { RunningSessionsPanel } from "./running-sessions-panel.tsx";
+import { SessionClockProvider } from "./session-active-time.tsx";
 import { SessionPanel } from "./session-client.tsx";
 import { SessionController } from "./session-controller.ts";
 import "./styles.css";
@@ -306,64 +307,75 @@ function Workspace(props: {
       data-workspace-layout="desktop-status-panel"
       {...renderDebugBoundary("workspace", "Authenticated workspace")}
     >
-      <div class="space-y-6">
-        <SessionPanel
-          controller={props.agentSessions}
-          openAi={props.openAi.view}
-          openRouter={props.openRouter.view}
-          runners={props.runners.view}
-        />
-        <RunnerPanel controller={props.runners} />
-        <aside
-          aria-label="Google account"
-          class="flex flex-col gap-5 rounded-3xl border border-white/10 bg-slate-900/80 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8"
-          {...renderDebugBoundary("google-account", "Google account")}
-        >
-          <div class="flex min-w-0 items-center gap-4">
-            <Avatar user={props.user} />
-            <div class="min-w-0">
-              <p class="truncate font-semibold text-white">{props.user.name}</p>
-              <p class="truncate text-sm text-slate-400">{props.user.email}</p>
-            </div>
-          </div>
-          <button
-            class="rounded-2xl border border-white/10 px-5 py-2.5 text-sm font-semibold text-slate-300 transition hover:border-rose-300/30 hover:text-rose-200 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
-            disabled={props.logoutPending}
-            onClick={() => {
-              void props.logout();
-            }}
-            type="button"
+      <SessionClockProvider>
+        <div class="space-y-6">
+          <SessionPanel
+            controller={props.agentSessions}
+            openAi={props.openAi.view}
+            openRouter={props.openRouter.view}
+            runners={props.runners.view}
+          />
+          <RunnerPanel controller={props.runners} />
+          <aside
+            aria-label="Google account"
+            class="flex flex-col gap-5 rounded-3xl border border-white/10 bg-slate-900/80 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8"
+            {...renderDebugBoundary("google-account", "Google account")}
           >
-            {props.logoutPending ? "Signing out…" : "Sign out"}
-          </button>
-        </aside>
-        <ProviderPanel configuration={OPENAI_PANEL} controller={props.openAi} />
-        <ProviderPanel
-          configuration={OPENROUTER_PANEL}
-          controller={props.openRouter}
-        />
-        <ProviderPanel
-          configuration={BRAVE_SEARCH_PANEL}
-          controller={props.braveSearch}
-        />
-      </div>
-      <RunningSessionsPanel
-        controller={props.runningSessions}
-        focusSessionList={() => {
-          props.agentSessions.focusList();
-        }}
-        selectSession={(sessionId) => {
-          void props.agentSessions
-            .selectAndFocus(sessionId)
-            .catch(() => undefined);
-        }}
-        runners={() =>
-          (props.runners.view().runners ?? []).map(({ id, name }) => ({
-            id,
-            name,
-          }))
-        }
-      />
+            <div class="flex min-w-0 items-center gap-4">
+              <Avatar user={props.user} />
+              <div class="min-w-0">
+                <p class="truncate font-semibold text-white">
+                  {props.user.name}
+                </p>
+                <p class="truncate text-sm text-slate-400">
+                  {props.user.email}
+                </p>
+              </div>
+            </div>
+            <button
+              class="rounded-2xl border border-white/10 px-5 py-2.5 text-sm font-semibold text-slate-300 transition hover:border-rose-300/30 hover:text-rose-200 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
+              disabled={props.logoutPending}
+              onClick={() => {
+                void props.logout();
+              }}
+              type="button"
+            >
+              {props.logoutPending ? "Signing out…" : "Sign out"}
+            </button>
+          </aside>
+          <ProviderPanel
+            configuration={OPENAI_PANEL}
+            controller={props.openAi}
+          />
+          <ProviderPanel
+            configuration={OPENROUTER_PANEL}
+            controller={props.openRouter}
+          />
+          <ProviderPanel
+            configuration={BRAVE_SEARCH_PANEL}
+            controller={props.braveSearch}
+          />
+        </div>
+        <div>
+          <RunningSessionsPanel
+            controller={props.runningSessions}
+            focusSessionList={() => {
+              props.agentSessions.focusList();
+            }}
+            selectSession={(sessionId) => {
+              void props.agentSessions
+                .selectAndFocus(sessionId)
+                .catch(() => undefined);
+            }}
+            runners={() =>
+              (props.runners.view().runners ?? []).map(({ id, name }) => ({
+                id,
+                name,
+              }))
+            }
+          />
+        </div>
+      </SessionClockProvider>
     </div>
   );
 }

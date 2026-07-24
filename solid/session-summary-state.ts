@@ -1,6 +1,16 @@
 import type { AgentSessionSummary } from "../shared/session-model.ts";
 import { listsMatchByIdentity, retainById } from "./collection-state.ts";
 
+export function compareSessionRecency(
+  left: Pick<AgentSessionSummary, "id" | "updatedAt">,
+  right: Pick<AgentSessionSummary, "id" | "updatedAt">,
+): number {
+  const updatedAtDifference = right.updatedAt - left.updatedAt;
+  return updatedAtDifference === 0
+    ? right.id.localeCompare(left.id)
+    : updatedAtDifference;
+}
+
 type SummaryMatches = (
   left: AgentSessionSummary,
   right: AgentSessionSummary,

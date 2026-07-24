@@ -121,8 +121,12 @@ function RunningSessionsContent(props: RunningSessionsPanelProps): JSX.Element {
   const runnerNames = createMemo(
     () => new Map(props.runners().map((runner) => [runner.id, runner.name])),
   );
-  const runnerName = (runnerId: string): string =>
-    runnerNames().get(runnerId) ?? "Runner";
+  const runnerName = (runnerId: string): string => {
+    const name = runnerNames().get(runnerId);
+    return name === undefined || name === null || name.trim().length === 0
+      ? "Runner"
+      : name;
+  };
 
   return (
     <>

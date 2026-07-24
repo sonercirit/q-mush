@@ -5,6 +5,7 @@ import { createReactiveState } from "../reactive-state.ts";
 import { RenderDebugProvider, RenderDebugView } from "../render-debug.tsx";
 import { RunningSessionsController } from "../running-sessions-controller.ts";
 import { RunningSessionsPanel } from "../running-sessions-panel.tsx";
+import { SessionClockProvider } from "../session-active-time.tsx";
 import type { SessionViewState } from "../session-client.tsx";
 import { summaryFromDetail } from "../session-codec.ts";
 import { SessionController } from "../session-controller.ts";
@@ -85,14 +86,16 @@ test("model deltas do not rerender or recount the running panel", () => {
   });
   const debug = new RenderDebugView();
   const container = mount(() => (
-    <RenderDebugProvider view={debug}>
-      <RunningSessionsPanel
-        controller={controller}
-        focusSessionList={() => undefined}
-        selectSession={() => undefined}
-        runners={() => []}
-      />
-    </RenderDebugProvider>
+    <SessionClockProvider>
+      <RenderDebugProvider view={debug}>
+        <RunningSessionsPanel
+          controller={controller}
+          focusSessionList={() => undefined}
+          selectSession={() => undefined}
+          runners={() => []}
+        />
+      </RenderDebugProvider>
+    </SessionClockProvider>
   ));
   const panel = container.querySelector("[data-running-sessions-panel='true']");
   const liveRegion = container.querySelector("[aria-live='polite']");
@@ -111,6 +114,40 @@ test("model deltas do not rerender or recount the running panel", () => {
   );
   expect(debug.measurement("running-sessions-panel").count).toBe(1);
   expect(debug.measurement("running-session:session-1").count).toBe(1);
+});
+
+test("uses one shared timer for every running-session time display", () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date(10_000));
+  disposals.push(() => {
+    vi.useRealTimers();
+  });
+  const setInterval = vi.spyOn(window, "setInterval");
+  const controller = new RunningSessionsController({
+    freshness: "live",
+    sessions: [
+      runningSession("session-1", "First task"),
+      runningSession("session-2", "Second task"),
+    ],
+  });
+  const container = mount(() => (
+    <SessionClockProvider>
+      <RunningSessionsPanel
+        controller={controller}
+        focusSessionList={() => undefined}
+        selectSession={() => undefined}
+        runners={() => []}
+      />
+    </SessionClockProvider>
+  ));
+
+  expect(setInterval).toHaveBeenCalledOnce();
+  vi.advanceTimersByTime(2_000);
+  expect(container.textContent.match(/Time: 2s/gu)).toHaveLength(2);
+
+  controller.applySnapshot([]);
+  expect(vi.getTimerCount()).toBe(0);
+  setInterval.mockRestore();
 });
 
 test("selecting a status item opens the session and focuses its full-list entry", async () => {

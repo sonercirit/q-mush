@@ -5,6 +5,7 @@ import type {
 } from "../shared/session-model.ts";
 import { listsMatchByIdentity, retainById } from "./collection-state.ts";
 import { createReactiveState, type ReactiveState } from "./reactive-state.ts";
+import { compareSessionRecency } from "./session-summary-state.ts";
 
 const ACTIVE_SESSION_DISPLAY_LIMIT = 4;
 
@@ -35,9 +36,8 @@ function compareActiveSessions(
   right: AgentSessionSummary,
 ): number {
   const statusDifference = statusOrder(left.status) - statusOrder(right.status);
-  return statusDifference === 0
-    ? right.updatedAt - left.updatedAt
-    : statusDifference;
+  const updatedAtDifference = compareSessionRecency(left, right);
+  return statusDifference === 0 ? updatedAtDifference : statusDifference;
 }
 
 function activeSessions(
@@ -138,6 +138,13 @@ export class RunningSessionsController {
   applySession(session: AgentSessionSummary): void {
     const current = this.state;
     if (current.sessions === undefined) {
+      return;
+    }
+    const currentSession = current.sessions.find(({ id }) => id === session.id);
+    if (
+      currentSession !== undefined &&
+      compareSessionRecency(session, currentSession) > 0
+    ) {
       return;
     }
     const sessions = retainPanelSessions(current.sessions, [
