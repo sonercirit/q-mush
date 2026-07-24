@@ -1,10 +1,13 @@
-import { test } from "vitest";
+import { createRoot } from "solid-js";
+import { expect, test } from "vitest";
 import { OPENAI_PANEL, ProviderPanel } from "../../solid/provider-client.tsx";
 import { ProviderController } from "../../solid/provider-controller.ts";
 import { createReactiveState } from "../../solid/reactive-state.ts";
 import { providerViewState } from "./client-state-fixtures.ts";
 import { expectDefaultControls } from "./default-control-assertions.ts";
 import { renderSolidToString } from "./render-solid.tsx";
+
+const UNRELATED_LIMITS = { status: "unavailable" as const };
 
 const TEST_LIMITS = { status: "unavailable" as const };
 
@@ -26,6 +29,23 @@ const STATE = providerViewState([
     source: "api_key",
   },
 ]);
+
+test("ignores limit updates for credentials owned by another provider", () => {
+  createRoot((dispose) => {
+    const controller = new ProviderController(
+      OPENAI_PANEL,
+      createReactiveState(STATE),
+    );
+    const originalState = controller.state;
+    const originalCredentials = originalState.credentials;
+
+    controller.applyLimits("openrouter-credential", UNRELATED_LIMITS);
+
+    expect(controller.state).toBe(originalState);
+    expect(controller.state.credentials).toBe(originalCredentials);
+    dispose();
+  });
+});
 
 test("renders provider default controls", () => {
   const controller = new ProviderController(

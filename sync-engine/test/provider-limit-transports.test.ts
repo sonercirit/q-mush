@@ -13,6 +13,14 @@ const DONE_RESPONSE_EVENT = {
 
 type ModelOptions = ConstructorParameters<typeof ChatCompletionsAgentModel>[0];
 
+function retryResponse(headers: HeadersInit): Response {
+  return new Response(null, { headers, status: 429 });
+}
+
+function responseSequence(responses: Response[]) {
+  return () => Promise.resolve(responses.shift() ?? Response.json(DONE_CHAT));
+}
+
 function completeWithLimits(
   options: Omit<ModelOptions, "now" | "onLimits">,
   observations: ProviderLimitObservation[],
@@ -34,13 +42,10 @@ function closingSocket() {
 test("captures OpenAI API limit headers from retried 429 and successful HTTP responses", async () => {
   const observations: ProviderLimitObservation[] = [];
   const responses = [
-    new Response(null, {
-      headers: {
-        "retry-after": "2",
-        "x-ratelimit-limit-requests": "100",
-        "x-ratelimit-remaining-requests": "0",
-      },
-      status: 429,
+    retryResponse({
+      "retry-after": "2",
+      "x-ratelimit-limit-requests": "100",
+      "x-ratelimit-remaining-requests": "0",
     }),
     Response.json(DONE_CHAT, {
       headers: {
@@ -53,8 +58,7 @@ test("captures OpenAI API limit headers from retried 429 and successful HTTP res
   await completeWithLimits(
     {
       credential: { accountId: null, secret: "sk-secret", source: "api_key" },
-      fetch: () =>
-        Promise.resolve(responses.shift() ?? Response.json(DONE_CHAT)),
+      fetch: responseSequence(responses),
       model: "gpt-4.1-mini",
       provider: "openai",
       sleep: () => Promise.resolve(),
@@ -75,7 +79,19 @@ test("captures OpenAI API limit headers from retried 429 and successful HTTP res
 });
 
 test("captures OpenRouter platform-limit response headers", async () => {
-  const observations: ProviderLimitObservation[] = [];
+  const context: { observations: ProviderLimitObservation[] } = {
+    observations: [],
+  };
+  const observations = context.observations;
+  const responses = [
+    retryResponse({
+      "retry-after": "0",
+      "x-ratelimit-limit": "20",
+      "x-ratelimit-remaining": "0",
+      "x-ratelimit-reset": "1700000060000",
+    }),
+    Response.json(DONE_CHAT),
+  ];
   await completeWithLimits(
     {
       credential: {
@@ -83,18 +99,10 @@ test("captures OpenRouter platform-limit response headers", async () => {
         secret: "sk-or-secret",
         source: "oauth",
       },
-      fetch: () =>
-        Promise.resolve(
-          Response.json(DONE_CHAT, {
-            headers: {
-              "x-ratelimit-limit": "20",
-              "x-ratelimit-remaining": "0",
-              "x-ratelimit-reset": "1700000060000",
-            },
-          }),
-        ),
+      fetch: responseSequence(responses),
       model: "openai/gpt-4.1-mini",
       provider: "openrouter",
+      sleep: () => Promise.resolve(),
     },
     observations,
   );

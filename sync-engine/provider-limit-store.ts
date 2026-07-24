@@ -127,6 +127,14 @@ function canObserve(
   return credential !== undefined;
 }
 
+function overlappingKeys(
+  current: readonly ProviderLimitDimension[],
+  update: readonly ProviderLimitDimension[],
+): boolean {
+  const currentKeys = new Set(current.map(({ key }) => key));
+  return update.some(({ key }) => currentKeys.has(key));
+}
+
 function writeObservation(
   database: ProviderLimitDatabase,
   generateId: IdGenerator,
@@ -148,17 +156,18 @@ function writeObservation(
     .from(providerLimitObservations)
     .where(eq(providerLimitObservations.credentialId, credentialId))
     .get();
+  const existingDimensions =
+    existing === undefined ? [] : (readDimensions(existing.dimensions) ?? []);
   if (
     existing !== undefined &&
-    existing.observedAt.getTime() > sanitized.observedAt
+    (existing.observedAt.getTime() > sanitized.observedAt ||
+      (existing.observedAt.getTime() === sanitized.observedAt &&
+        overlappingKeys(existingDimensions, sanitized.dimensions)))
   ) {
     return false;
   }
 
-  const dimensions = mergeDimensions(
-    existing === undefined ? [] : (readDimensions(existing.dimensions) ?? []),
-    sanitized.dimensions,
-  );
+  const dimensions = mergeDimensions(existingDimensions, sanitized.dimensions);
   const timestamp = new Date(now);
   const values = {
     dimensions: JSON.stringify(dimensions),

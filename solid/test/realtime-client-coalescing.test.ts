@@ -65,15 +65,15 @@ function connectionTestContext(): ConnectionTestContext {
 test("coalesces provider limits by credential and newest observation", () => {
   const context = connectionTestContext();
   const { connection, events, frames, socket } = context;
-  const limits = (observedAt: number) => ({
+  const limits = (observedAt: number, key = "requests") => ({
     dimensions: [
       {
-        key: "requests",
-        label: "Requests",
+        key,
+        label: key === "requests" ? "Requests" : "Tokens",
         limit: 10,
         remaining: 5,
         resetAt: null,
-        unit: "requests" as const,
+        unit: key === "requests" ? ("requests" as const) : ("tokens" as const),
       },
     ],
     observedAt,
@@ -82,19 +82,29 @@ test("coalesces provider limits by credential and newest observation", () => {
     stale: false,
     status: "available" as const,
   });
+  const receiveLimits = (
+    credentialId: string,
+    observedAt: number,
+    key?: string,
+  ): void => {
+    socket.receive({
+      credentialId,
+      limits: limits(observedAt, key),
+      type: "provider_limits",
+    });
+  };
+  receiveLimits("credential-1", 2);
+  receiveLimits("credential-1", 1);
+  receiveLimits("credential-2", 3);
+  receiveLimits("credential-3", 4);
+  receiveLimits("credential-3", 4, "tokens");
+  receiveLimits("credential-4", 5);
   socket.receive({
-    credentialId: "credential-1",
-    limits: limits(2),
-    type: "provider_limits",
-  });
-  socket.receive({
-    credentialId: "credential-1",
-    limits: limits(1),
-    type: "provider_limits",
-  });
-  socket.receive({
-    credentialId: "credential-2",
-    limits: limits(3),
+    credentialId: "credential-4",
+    limits: {
+      ...limits(5),
+      dimensions: [{ ...limits(5).dimensions[0], remaining: 1 }],
+    },
     type: "provider_limits",
   });
 
@@ -103,6 +113,17 @@ test("coalesces provider limits by credential and newest observation", () => {
   expect(events).toMatchObject([
     { credentialId: "credential-1", limits: { observedAt: 2 } },
     { credentialId: "credential-2", limits: { observedAt: 3 } },
+    {
+      credentialId: "credential-3",
+      limits: {
+        dimensions: [{ key: "requests" }, { key: "tokens" }],
+        observedAt: 4,
+      },
+    },
+    {
+      credentialId: "credential-4",
+      limits: { dimensions: [{ remaining: 5 }], observedAt: 5 },
+    },
   ]);
   connection.stop();
 });

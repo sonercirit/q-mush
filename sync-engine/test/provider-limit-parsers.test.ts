@@ -7,6 +7,20 @@ import {
 
 const OBSERVED_AT = 1_700_000_000_000;
 
+function openRouterHeaders(
+  headers: Headers,
+  status = 429,
+  source: "api_key" | "oauth" = "api_key",
+) {
+  return parseProviderLimitHeaders(
+    "openrouter",
+    source,
+    headers,
+    OBSERVED_AT,
+    status,
+  );
+}
+
 describe("provider limit header adapters", () => {
   test("reads documented OpenRouter key credit and period usage metadata", () => {
     expect(
@@ -162,6 +176,56 @@ describe("provider limit header adapters", () => {
     });
   });
 
+  test("requires usable Codex credit flags and accepts supported booleans and zero usage", () => {
+    const missingFlags = new Headers({
+      "x-codex-credits-balance": "12.50",
+    });
+    expect(
+      parseProviderLimitHeaders("openai", "oauth", missingFlags, OBSERVED_AT),
+    ).toBeNull();
+
+    const unavailableCredits = new Headers({
+      "x-codex-credits-balance": "12.50",
+      "x-codex-credits-has-credits": "false",
+      "x-codex-credits-unlimited": "false",
+    });
+    expect(
+      parseProviderLimitHeaders(
+        "openai",
+        "oauth",
+        unavailableCredits,
+        OBSERVED_AT,
+      ),
+    ).toBeNull();
+
+    const numericFlags = new Headers({
+      "x-codex-credits-balance": "2",
+      "x-codex-credits-has-credits": "1",
+      "x-codex-credits-unlimited": "0",
+    });
+    expect(
+      parseProviderLimitHeaders("openai", "oauth", numericFlags, OBSERVED_AT),
+    ).toMatchObject({
+      dimensions: [{ key: "codex_credits", remaining: 2 }],
+    });
+
+    const zeroUsage = new Headers({
+      "x-codex-primary-used-percent": "0",
+      "x-codex-primary-window-minutes": "300",
+    });
+    expect(
+      parseProviderLimitHeaders("openai", "oauth", zeroUsage, OBSERVED_AT),
+    ).toMatchObject({
+      dimensions: [
+        {
+          key: "codex_primary_5h",
+          limit: 100,
+          remaining: 100,
+        },
+      ],
+    });
+  });
+
   test("reads OpenRouter platform limit errors without assigning an invented unit", () => {
     const headers = new Headers({
       "x-ratelimit-limit": "80",
@@ -169,9 +233,7 @@ describe("provider limit header adapters", () => {
       "x-ratelimit-reset": "1700000060000",
     });
 
-    expect(
-      parseProviderLimitHeaders("openrouter", "oauth", headers, OBSERVED_AT),
-    ).toEqual({
+    expect(openRouterHeaders(headers, 429, "oauth")).toEqual({
       dimensions: [
         {
           key: "provider_limit",
@@ -186,20 +248,13 @@ describe("provider limit header adapters", () => {
       provider: "openrouter",
       source: "http_headers",
     });
+    expect(openRouterHeaders(headers, 200, "oauth")).toBeNull();
   });
 
   test("uses Retry-After as reset-only evidence on a 429", () => {
     const headers = new Headers({ "retry-after": "5" });
 
-    expect(
-      parseProviderLimitHeaders(
-        "openrouter",
-        "api_key",
-        headers,
-        OBSERVED_AT,
-        429,
-      ),
-    ).toMatchObject({
+    expect(openRouterHeaders(headers)).toMatchObject({
       dimensions: [
         {
           key: "provider_limit",
@@ -209,6 +264,14 @@ describe("provider limit header adapters", () => {
         },
       ],
     });
+
+    headers.set("retry-after", new Date(OBSERVED_AT + 10_000).toUTCString());
+    expect(openRouterHeaders(headers)).toMatchObject({
+      dimensions: [{ resetAt: OBSERVED_AT + 10_000 }],
+    });
+
+    headers.set("retry-after", "9007199254740");
+    expect(openRouterHeaders(headers)).toBeNull();
   });
 
   test("ignores malformed, negative, overflowing, and secret headers", () => {
@@ -219,6 +282,7 @@ describe("provider limit header adapters", () => {
       "x-ratelimit-remaining-requests": "-1",
       "x-ratelimit-reset-requests": "tomorrow",
       "x-ratelimit-limit-tokens": "   ",
+      "x-ratelimit-reset-tokens": "1.5ms",
     });
 
     const malformed = parseProviderLimitHeaders(
@@ -264,10 +328,20 @@ describe("Codex Responses event adapter", () => {
     });
   });
 
-  test("ignores unrelated events and impossible percentages", () => {
+  test("ignores unrelated events, unusable credits, and impossible percentages", () => {
     expect(
       parseCodexLimitEvent({ type: "response.created" }, OBSERVED_AT),
     ).toBe(null);
+    expect(
+      parseCodexLimitEvent(
+        {
+          credits: { balance: "3", has_credits: false, unlimited: false },
+          rate_limits: {},
+          type: "codex.rate_limits",
+        },
+        OBSERVED_AT,
+      ),
+    ).toBeNull();
     expect(
       parseCodexLimitEvent(
         {

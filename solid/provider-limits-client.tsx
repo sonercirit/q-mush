@@ -38,13 +38,26 @@ function remainingText(dimension: ProviderLimitDimension): string {
     : `${formatValue(dimension, dimension.remaining)} of ${formatValue(dimension, dimension.limit)} remaining`;
 }
 
+function formatTimestamp(value: number): string | null {
+  try {
+    const formatted = new Date(value).toLocaleString();
+    return formatted === "Invalid Date" ? null : formatted;
+  } catch {
+    return null;
+  }
+}
+
 function resetText(resetAt: number | null, now: number): string | null {
   if (resetAt === null) {
     return null;
   }
+  const timestamp = formatTimestamp(resetAt);
+  if (timestamp === null) {
+    return null;
+  }
   const difference = resetAt - now;
   if (difference <= 0) {
-    return `Reset was ${new Date(resetAt).toLocaleString()}`;
+    return `Reset was ${timestamp}`;
   }
   const minutes = Math.ceil(difference / 60_000);
   const countdown =
@@ -53,7 +66,7 @@ function resetText(resetAt: number | null, now: number): string | null {
       : minutes < 1_440
         ? `${String(Math.ceil(minutes / 60))}h`
         : `${String(Math.ceil(minutes / 1_440))}d`;
-  return `Resets in ${countdown} (${new Date(resetAt).toLocaleString()})`;
+  return `Resets in ${countdown} (${timestamp})`;
 }
 
 function warning(percent: number | null): {
@@ -117,6 +130,21 @@ function LimitDimension(props: {
   );
 }
 
+function observationText(
+  limits: Extract<ProviderLimitState, { readonly status: "available" }>,
+): string {
+  const timestamp = formatTimestamp(limits.observedAt);
+  const source =
+    limits.source === "websocket_event"
+      ? "Provider WebSocket event"
+      : limits.source === "response_event"
+        ? "Provider response event"
+        : limits.source === "credential_metadata"
+          ? "Provider credential metadata"
+          : "Provider response headers";
+  return `${limits.stale ? "Stale observation" : "Last observed"}${timestamp === null ? "" : `: ${timestamp}`}. ${source}.`;
+}
+
 export function RemainingLimits(props: {
   readonly compact?: boolean;
   readonly limits: ProviderLimitState;
@@ -149,7 +177,7 @@ export function RemainingLimits(props: {
               </For>
             </ul>
             <p class="mt-2 text-[0.68rem] text-slate-500">
-              {`${limits().stale ? "Stale observation" : "Last observed"}: ${new Date(limits().observedAt).toLocaleString()}. ${limits().source === "websocket_event" ? "Provider WebSocket event" : limits().source === "response_event" ? "Provider response event" : limits().source === "credential_metadata" ? "Provider credential metadata" : "Provider response headers"}.`}
+              {observationText(limits())}
             </p>
           </>
         )}

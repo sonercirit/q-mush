@@ -100,10 +100,22 @@ export class ProviderController {
     if (credentials === undefined) {
       return;
     }
+    const index = credentials.findIndex(
+      (credential) =>
+        credential.id === credentialId && credential.limits !== limits,
+    );
+    if (index < 0) {
+      return;
+    }
+    const updatedCredential = credentials[index];
+    if (updatedCredential === undefined) {
+      return;
+    }
     this.#patch({
-      credentials: credentials.map((credential) =>
-        credential.id === credentialId ? { ...credential, limits } : credential,
-      ),
+      credentials: credentials.with(index, {
+        ...updatedCredential,
+        limits,
+      }),
     });
   }
 

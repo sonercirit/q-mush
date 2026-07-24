@@ -370,17 +370,31 @@ export class SessionRealtimeState {
   }
 
   applyProviderLimits(credentialId: string, limits: ProviderLimitState): void {
-    const sessions = this.#view.value.sessions?.map((session) =>
-      session.credentialId === credentialId
-        ? { ...session, providerLimits: limits }
-        : session,
+    const currentSessions = this.#view.value.sessions;
+    const matchingSessions = currentSessions?.filter(
+      (session) =>
+        session.credentialId === credentialId &&
+        session.providerLimits !== limits,
     );
+    const sessions =
+      matchingSessions === undefined || matchingSessions.length === 0
+        ? undefined
+        : currentSessions?.map((session) =>
+            session.credentialId === credentialId
+              ? { ...session, providerLimits: limits }
+              : session,
+          );
     const detail = this.#view.value.detail;
+    const updatedDetail =
+      detail?.credentialId === credentialId && detail.providerLimits !== limits
+        ? { ...detail, providerLimits: limits }
+        : undefined;
+    if (sessions === undefined && updatedDetail === undefined) {
+      return;
+    }
     this.#view.patch({
       ...(sessions === undefined ? {} : { sessions }),
-      ...(detail?.credentialId === credentialId
-        ? { detail: { ...detail, providerLimits: limits } }
-        : {}),
+      ...(updatedDetail === undefined ? {} : { detail: updatedDetail }),
     });
   }
 

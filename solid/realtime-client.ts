@@ -206,9 +206,31 @@ export class RealtimeConnection {
       event.limits.status === "available"
         ? event.limits.observedAt
         : Number.NEGATIVE_INFINITY;
-    if (current === undefined || nextAt >= currentAt) {
-      this.#providerLimits.set(event.credentialId, event);
+    if (current !== undefined && nextAt < currentAt) {
+      return;
     }
+    if (
+      current !== undefined &&
+      nextAt === currentAt &&
+      current.limits.status === "available" &&
+      event.limits.status === "available"
+    ) {
+      const keys = new Set(current.limits.dimensions.map(({ key }) => key));
+      if (event.limits.dimensions.some(({ key }) => keys.has(key))) {
+        return;
+      }
+      event = {
+        ...event,
+        limits: {
+          ...event.limits,
+          dimensions: [
+            ...current.limits.dimensions,
+            ...event.limits.dimensions,
+          ],
+        },
+      };
+    }
+    this.#providerLimits.set(event.credentialId, event);
     if (this.#providerLimitFrame !== undefined) {
       return;
     }

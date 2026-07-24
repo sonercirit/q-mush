@@ -268,6 +268,20 @@ test("applies credential limit updates to lists and selected details", async () 
   });
 });
 
+test("ignores credential limit updates for unrelated sessions", async () => {
+  await withSessionController((controller) => {
+    const originalSessions = controller.state.sessions;
+    const originalDetail = controller.state.detail;
+
+    controller.applyProviderLimits("unrelated-credential", {
+      status: "unavailable",
+    });
+
+    expect(controller.state.sessions).toBe(originalSessions);
+    expect(controller.state.detail).toBe(originalDetail);
+  });
+});
+
 test("ignores stale deltas after a finished snapshot and accepts a queued continuation", async () => {
   await withRestoredFetch(async () => {
     const {

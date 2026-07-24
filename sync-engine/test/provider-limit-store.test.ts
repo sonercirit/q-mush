@@ -16,14 +16,24 @@ const CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000083";
 const OPENROUTER_CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000084";
 const NOW = 1_700_000_000_000;
 
+function dimension(
+  key: "requests" | "tokens",
+  remaining: number,
+): ProviderLimitObservation["dimensions"][number] {
+  return {
+    key,
+    label: key === "requests" ? "Requests" : "Tokens",
+    limit: key === "requests" ? 100 : 1_000,
+    remaining,
+    resetAt: null,
+    unit: key,
+  };
+}
+
 function requestDimension(): ProviderLimitObservation["dimensions"][number] {
   return {
-    key: "requests",
-    label: "Requests",
-    limit: 100,
-    remaining: 50,
+    ...dimension("requests", 50),
     resetAt: NOW + 60_000,
-    unit: "requests",
   };
 }
 
@@ -63,6 +73,25 @@ function unavailable(store: ProviderLimitStore, credentialId = CREDENTIAL_ID) {
 
 function finish(database: ReturnType<typeof createDatabase>): void {
   database.$client.close();
+}
+
+function expectObservedAt(
+  store: ProviderLimitStore,
+  now: number,
+  observedAt: number,
+): void {
+  expect(store.read(USER_ID, CREDENTIAL_ID, now)).toMatchObject({ observedAt });
+}
+
+function dimensionsAt(
+  store: ProviderLimitStore,
+  now: number,
+): readonly ProviderLimitObservation["dimensions"][number][] {
+  const state = store.read(USER_ID, CREDENTIAL_ID, now);
+  if (state.status !== "available") {
+    throw new Error("Expected available provider limits");
+  }
+  return state.dimensions;
 }
 
 function expectUnavailable(store: ProviderLimitStore, credentialId?: string) {
@@ -128,6 +157,10 @@ describe("provider limit store", () => {
       stale: false,
       status: "available",
     });
+    expect(store.read(USER_ID, CREDENTIAL_ID, NOW - 1)).toMatchObject({
+      stale: true,
+      status: "available",
+    });
     expect(
       store.read(USER_ID, CREDENTIAL_ID, NOW + 15 * 60_000 + 1),
     ).toMatchObject({ stale: true, status: "available" });
@@ -151,24 +184,7 @@ describe("provider limit store", () => {
     const { database, store } = setup();
     observe(
       store,
-      observation(NOW, [
-        {
-          key: "requests",
-          label: "Requests",
-          limit: 100,
-          remaining: 50,
-          resetAt: null,
-          unit: "requests",
-        },
-        {
-          key: "tokens",
-          label: "Tokens",
-          limit: 1_000,
-          remaining: 800,
-          resetAt: null,
-          unit: "tokens",
-        },
-      ]),
+      observation(NOW, [dimension("requests", 50), dimension("tokens", 800)]),
     );
     observe(
       store,
@@ -186,33 +202,79 @@ describe("provider limit store", () => {
       NOW + 1,
     );
 
-    expect(store.read(USER_ID, CREDENTIAL_ID, NOW + 1)).toMatchObject({
-      dimensions: [
-        {
-          key: "requests",
-          limit: 100,
-          remaining: 50,
-          resetAt: NOW + 10_000,
-        },
-        { key: "tokens", limit: 1_000, remaining: 800 },
-      ],
-    });
+    expect(dimensionsAt(store, NOW + 1)).toMatchObject([
+      {
+        key: "requests",
+        limit: 100,
+        remaining: 50,
+        resetAt: NOW + 10_000,
+      },
+      { key: "tokens", limit: 1_000, remaining: 800 },
+    ]);
     finish(database);
   });
 
-  test("deterministically rejects older concurrent observations", () => {
+  test("rejects equal or older concurrent observations", () => {
+    const { database, store } = setup();
+    const newestAccepted = observe(store, observation(NOW + 2));
+    expect(newestAccepted).toBe(true);
+    expect(observe(store, observation(NOW + 1))).toBe(false);
+    expectObservedAt(store, NOW + 2, NOW + 2);
+    expect(observe(store, observation(NOW + 2), undefined, NOW + 3)).toBe(
+      false,
+    );
+    expectObservedAt(store, NOW + 3, NOW + 2);
+    finish(database);
+  });
+
+  test("merges different same-timestamp dimensions without overwriting either", () => {
+    const setupResult = setup();
+    const store = setupResult.store;
+    expect(observe(store, observation(NOW, [dimension("requests", 90)]))).toBe(
+      true,
+    );
+    expect(
+      observe(
+        store,
+        observation(NOW, [dimension("tokens", 900)]),
+        undefined,
+        NOW + 1,
+      ),
+    ).toBe(true);
+
+    expect(dimensionsAt(store, NOW + 1)).toMatchObject([
+      dimension("requests", 90),
+      dimension("tokens", 900),
+    ]);
+    finish(setupResult.database);
+  });
+
+  test("rejects a stale same-timestamp observation so it cannot overwrite fresh data", () => {
     const setupResult = setup();
     const database = setupResult.database;
     const store = setupResult.store;
-    const newestAccepted = observe(store, observation(NOW + 2));
-    expect(newestAccepted).toBe(true);
-    expect(observe(store, observation(NOW))).toBe(false);
-    expect(store.read(USER_ID, CREDENTIAL_ID, NOW + 2)).toMatchObject({
-      observedAt: NOW + 2,
-    });
-    expect(observe(store, observation(NOW + 2), undefined, NOW + 3)).toBe(true);
-    expect(store.read(USER_ID, CREDENTIAL_ID, NOW + 3)).toMatchObject({
-      observedAt: NOW + 2,
+    expect(
+      observe(
+        store,
+        observation(NOW, [
+          { ...dimension("requests", 90), resetAt: NOW + 60_000 },
+        ]),
+      ),
+    ).toBe(true);
+
+    expect(
+      observe(
+        store,
+        observation(NOW, [
+          { ...dimension("requests", 10), resetAt: NOW + 60_000 },
+        ]),
+        undefined,
+        NOW + 1,
+      ),
+    ).toBe(false);
+    expect(dimensionsAt(store, NOW + 1)[0]).toMatchObject({
+      key: "requests",
+      remaining: 90,
     });
     finish(database);
   });
@@ -261,15 +323,15 @@ describe("provider limit store", () => {
   });
 
   test("treats malformed stored dimensions as unavailable", () => {
-    const { database, store } = setup();
-    expect(observe(store, observation(NOW))).toBe(true);
-    database
+    const setupResult = setup();
+    expect(observe(setupResult.store, observation(NOW))).toBe(true);
+    setupResult.database
       .update(providerLimitObservations)
       .set({ dimensions: '{"rawHeader":"secret"}' })
       .run();
 
-    expectUnavailable(store);
-    finish(database);
+    expectUnavailable(setupResult.store);
+    finish(setupResult.database);
   });
 
   test("soft deletion hides saved limit metadata", () => {

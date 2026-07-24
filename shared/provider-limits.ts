@@ -43,6 +43,7 @@ export function providerLimitState(
   return {
     ...observation,
     stale:
+      now < observation.observedAt ||
       now - observation.observedAt > PROVIDER_LIMIT_STALE_AFTER_MILLISECONDS,
     status: "available",
   };

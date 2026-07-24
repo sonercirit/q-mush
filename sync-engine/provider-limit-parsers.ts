@@ -99,6 +99,14 @@ function durationResetAt(
     : null;
 }
 
+function checkedTimestamp(value: number): number | null {
+  return Number.isSafeInteger(value) &&
+    value >= 0 &&
+    value <= MAXIMUM_TIMESTAMP_MILLISECONDS
+    ? value
+    : null;
+}
+
 function retryAfterResetAt(
   value: string | null,
   observedAt: number,
@@ -109,16 +117,11 @@ function retryAfterResetAt(
 
   const seconds = safeNonnegativeNumber(value);
   if (seconds !== null) {
-    const resetAt = observedAt + seconds * 1_000;
-    return Number.isSafeInteger(resetAt) ? resetAt : null;
+    return checkedTimestamp(observedAt + seconds * 1_000);
   }
 
   const parsed = Date.parse(value);
-  return Number.isFinite(parsed) &&
-    parsed >= 0 &&
-    parsed <= MAXIMUM_TIMESTAMP_MILLISECONDS
-    ? parsed
-    : null;
+  return checkedTimestamp(parsed);
 }
 
 function dimension(options: ProviderLimitDimension): ProviderLimitDimension {
@@ -216,7 +219,11 @@ function codexWindow(
 }
 
 function codexCredits(value: unknown): ProviderLimitDimension | null {
-  if (!isRecord(value) || value["unlimited"] === true) {
+  if (
+    !isRecord(value) ||
+    value["has_credits"] !== true ||
+    value["unlimited"] !== false
+  ) {
     return null;
   }
   const balance = safeNumber(value["balance"]);
@@ -250,6 +257,27 @@ function addCodexWindows(
   }
 }
 
+function readBooleanHeader(headers: Headers, name: string): boolean | null {
+  const value = headers.get(name)?.toLowerCase();
+  return value === "true" || value === "1"
+    ? true
+    : value === "false" || value === "0"
+      ? false
+      : null;
+}
+
+function codexHeaderCredits(headers: Headers): ProviderLimitDimension | null {
+  const hasCredits = readBooleanHeader(headers, "x-codex-credits-has-credits");
+  const unlimited = readBooleanHeader(headers, "x-codex-credits-unlimited");
+  return hasCredits === null || unlimited === null
+    ? null
+    : codexCredits({
+        balance: headers.get("x-codex-credits-balance"),
+        has_credits: hasCredits,
+        unlimited,
+      });
+}
+
 function codexHeaderDimensions(
   headers: Headers,
 ): readonly ProviderLimitDimension[] {
@@ -262,14 +290,7 @@ function codexHeaderDimensions(
       headers.get(`x-codex-${key}-reset-at`),
     ),
   );
-  addDimension(
-    dimensions,
-    codexCredits({
-      balance: headers.get("x-codex-credits-balance"),
-      has_credits: headers.get("x-codex-credits-has-credits") === "true",
-      unlimited: headers.get("x-codex-credits-unlimited") === "true",
-    }),
-  );
+  addDimension(dimensions, codexHeaderCredits(headers));
   return dimensions;
 }
 
@@ -278,13 +299,13 @@ function openRouterDimensions(
   observedAt: number,
   status: number,
 ): readonly ProviderLimitDimension[] {
+  if (status !== 429) {
+    return [];
+  }
   const limit = safeNonnegativeNumber(headers.get("x-ratelimit-limit"));
   const remaining = safeNonnegativeNumber(headers.get("x-ratelimit-remaining"));
   const resetAt = epochMilliseconds(headers.get("x-ratelimit-reset"));
-  const retryAt =
-    status === 429
-      ? retryAfterResetAt(headers.get("retry-after"), observedAt)
-      : null;
+  const retryAt = retryAfterResetAt(headers.get("retry-after"), observedAt);
   return limit === null &&
     remaining === null &&
     resetAt === null &&

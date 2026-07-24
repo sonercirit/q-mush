@@ -113,4 +113,26 @@ describe("remaining limits", () => {
     expect(html).toContain("Warning: running low");
     expect(html).toContain("15% remaining");
   });
+
+  test("renders reset and observation timestamps from extreme safe values", () => {
+    const html = render(
+      availableLimits(
+        [
+          {
+            key: "requests",
+            label: "Requests",
+            limit: 1,
+            remaining: 0,
+            resetAt: Number.MAX_SAFE_INTEGER,
+            unit: "requests",
+          },
+        ],
+        { observedAt: Number.MAX_SAFE_INTEGER },
+      ),
+    );
+
+    expect(html).toContain("Remaining limits");
+    expect(html).toContain("0 of 1 remaining");
+    expect(html).not.toContain("Invalid Date");
+  });
 });
