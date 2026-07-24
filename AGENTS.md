@@ -1,31 +1,28 @@
 # AGENTS.md
 
-Living project memory; update durable information.
+Living project memory.
 
 ## Project Snapshot
 
-- Private strict-TypeScript ESM Bun/SolidJS.
-- Source: `solid/`, `sync-engine/`, `runner/`, `shared/`; server:
+- Private strict-TypeScript ESM Bun/SolidJS with source in `solid/`,
+  `sync-engine/`, `runner/`, and `shared/`; server entry:
   `sync-engine/index.ts`.
-- Tests live in `test/` directories; no `src/`.
+- Tests use Vitest with Bun and live in `test/` directories; there is no `src/`.
 - Homepage `/`; app `/app`.
-- Tests use Vitest with Bun.
 
 ## Working Agreements
 
-- Inspect repository before edits.
+- Inspect the repository and `git status` before edits.
 - Preserve patterns; add dependencies only when needed.
-- Practice TDD: update a failing test, then implement and refactor green.
-- Follow DRY: keep facts and logic authoritative; avoid premature abstractions.
-- Follow KISS: prefer the simplest clear solution that meets requirements.
-- Follow local-first: keep core workflows local; remote services enhance them.
-- Run focused checks after changes, then broader checks when practical.
-- Keep changes focused; do not modify unrelated files.
-- Never commit secrets, generated artifacts, or local env files.
+- Practice TDD, DRY, and KISS: update a failing test first, keep facts and logic
+  authoritative, and prefer the simplest clear solution.
+- Follow local-first: remote services enhance rather than gate core workflows.
+- Run focused checks, then broader checks when practical.
+- Keep changes focused; never commit secrets, generated artifacts, or env files.
 
 ## Setup and Commands
 
-- Install: `bun install`; run: `bun run sync-engine/index.ts`
+- Install/run: `bun install`; `bun run sync-engine/index.ts`
 - Develop: `bun run dev`; restart: `bun run dev:restart`; build: `bun run build`
 - Generate/apply database migrations: `bun run db:generate` /
   `bun run db:migrate`
@@ -42,18 +39,20 @@ Living project memory; update durable information.
 
 ## Architecture and Conventions
 
-- Bun manages dependencies via committed `package.json` and `bun.lock`.
+- Bun manages dependencies via `package.json` and `bun.lock`.
 - Production source has four enforced top-level workspaces. `solid` owns browser
   UI, `sync-engine` the Bun server and integrations, `runner` the standalone
   runner, and `shared` cross-workspace code. The first three may import only
   themselves and `shared`; `shared` cannot import another workspace. Code
   outside `scripts` cannot import from `scripts`.
-- `sync-engine/server.ts` serves the browser JavaScript and Tailwind CSS built
-  in memory by Vite. Browser state, session updates, and runner work use
-  authenticated WebSockets at `/api/realtime` and `/api/runner/realtime`; there
-  is no polling or SSE application transport. Because agents may modify this
-  repository through the running app, `bun run dev` does not restart for source
-  edits. `scripts/dev.ts` watches only the ignored
+- `sync-engine/server.ts` serves browser assets built in memory by Vite. Browser
+  state, every browser session read and mutation, session updates, and runner
+  work use authenticated WebSockets at `/api/realtime` and
+  `/api/runner/realtime`; browser session HTTP routes are not exposed. Session
+  commands use correlated IDs and user-scoped idempotency keys, and completed
+  results replay after reconnect for exactly-once execution. Because agents may
+  modify this repository through the running app, `bun run dev` does not restart
+  for source edits. `scripts/dev.ts` watches only the ignored
   `data/development-server.restart` trigger written by `bun run dev:restart`.
   `sync-engine/runner-executable.ts` fingerprints the runner source and
   compiler, builds in a private temporary directory, caches it in memory, and
@@ -101,8 +100,8 @@ Living project memory; update durable information.
   and machine rotates the existing registration to the new token instead of
   creating a second runner; another user's registration remains protected.
   Runner tokens never appear in list responses.
-- Browser messages sort by time then ID. Live output anchors after the
-  initiating message; snapshots replace it in place.
+- Browser messages sort by time then ID; live output anchors after its
+  initiating message and snapshots replace it in place.
 - `sync-engine/sessions.ts` and `sync-engine/session-store.ts` persist coding
   sessions. User messages support selecting or pasting up to eight 10 MB PNG,
   JPEG, GIF, or WebP images, persisted with the transcript and sent as native
@@ -133,25 +132,28 @@ Living project memory; update durable information.
   tool definitions, Markdown, code/JSON, diffs, and results. The session list
   paginates ten at a time. The control center manages live sessions through
   `solid/realtime-client.ts`, `solid/session-client.tsx`, and
-  `solid/session-controller.ts`. Model deltas are combined per session once per
-  animation frame; snapshots and other events remain immediate. Unchanged
-  snapshots suppress notifications, and keyed messages preserve identity so only
-  the affected message rerenders. The long-lived Solid root preserves focus and
-  scroll. The transcript starts and returns to the bottom when messages or the
-  agent file change. `sync-engine/agent-model-discovery.ts` queries provider
-  model metadata; `shared/agent-configuration.ts` owns catalog types and
-  fallbacks. New sessions default to the online runner and model credential,
-  then the first entry. The working directory uses the latest session; models
-  use the first option and maximum reasoning effort. Model choices show all
-  provider and Q Mush-supported input/output modalities.
-  `solid/custom-select.tsx` searches then paginates lists over ten items, ten
-  per page. It opens on the selected page, resets/clamps pages, and owns
-  accessible keyboard/focus. `shared/agent-prompt.ts` builds the model system
-  prompt and its transcript display. Reasoning summaries persist as `thinking`
-  messages but are excluded from replay. Session and transcript rows live in
-  `agent_sessions` and `agent_messages`; interrupted processes mark active
-  sessions failed so they can be resumed. Rebuilt conversations add error
-  results for interrupted tool calls only on resume.
+  `solid/session-controller.ts`; `solid/session-transport.ts` defines its
+  command boundary. Reconnects preserve unresolved command IDs, wait for pending
+  mutations before rehydrating, and reject stale detail acknowledgements. Model
+  deltas are combined per session once per animation frame; snapshots and other
+  events remain immediate. Unchanged snapshots suppress notifications, and keyed
+  messages preserve identity so only the affected message rerenders. The
+  long-lived Solid root preserves focus and scroll. The transcript starts and
+  returns to the bottom when messages or the agent file change.
+  `sync-engine/agent-model-discovery.ts` queries provider model metadata;
+  `shared/agent-configuration.ts` owns catalog types and fallbacks. New sessions
+  default to the online runner and model credential, then the first entry. The
+  working directory uses the latest session; models use the first option and
+  maximum reasoning effort. Model choices show all provider and Q Mush-supported
+  input/output modalities. `solid/custom-select.tsx` searches then paginates
+  lists over ten items, ten per page. It opens on the selected page,
+  resets/clamps pages, and owns accessible keyboard/focus.
+  `shared/agent-prompt.ts` builds the model system prompt and its transcript
+  display. Reasoning summaries persist as `thinking` messages but are excluded
+  from replay. Session and transcript rows live in `agent_sessions` and
+  `agent_messages`; interrupted processes mark active sessions failed so they
+  can be resumed. Rebuilt conversations add error results for interrupted tool
+  calls only on resume.
 
 - `sync-engine/openai.ts` and `sync-engine/openrouter.ts` implement provider
   connections. Multiple OAuth or manual credentials live in
@@ -210,7 +212,6 @@ Living project memory; update durable information.
 
 ## Decisions and Gotchas
 
-- The package is private ESM (`"type": "module"`).
 - Google login reads `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and the
   optional `GOOGLE_REDIRECT_URI`; both credentials must be present together. The
   default local callback is `http://localhost:3000/api/auth/google/callback`,

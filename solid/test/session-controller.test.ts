@@ -1,4 +1,4 @@
-import { createEffect, createRoot } from "solid-js";
+import { createRoot } from "solid-js";
 import { expect, test } from "vitest";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { SESSION_REALTIME_OPERATIONS } from "../../shared/user-realtime-protocol.ts";
@@ -12,20 +12,23 @@ import {
   writeSessionTranscriptFilters,
 } from "../../solid/session-transcript-filters.ts";
 import type { SessionCommandTransport } from "../../solid/session-transport.ts";
+import {
+  expectRealtimeControllerToRemainSilent,
+  type SilentRealtimeController,
+} from "./controller-test-helpers.ts";
 import { MemoryStorage } from "./memory-storage.ts";
+import {
+  recordingCommand,
+  type SessionCommandCall,
+} from "./session-command-call.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 import {
   sessionDetailWithStatus,
   transcriptMessage,
 } from "./transcript-ordering-fixtures.ts";
 
-interface CommandCall {
-  readonly operation: string;
-  readonly payload: Readonly<Record<string, unknown>>;
-}
-
 class SessionTestTransport implements SessionCommandTransport {
-  readonly calls: CommandCall[] = [];
+  readonly calls: SessionCommandCall[] = [];
   readonly #readDetail: AgentSessionDetail;
   #mutationDetail: AgentSessionDetail;
 
@@ -35,10 +38,14 @@ class SessionTestTransport implements SessionCommandTransport {
   }
 
   command(
-    operation: string,
-    payload: Readonly<Record<string, unknown>>,
+    ...parameters: [string, Readonly<Record<string, unknown>>]
   ): Promise<unknown> {
-    this.calls.push({ operation, payload });
+    const [operation, payload] = parameters;
+    recordingCommand(this.calls, operation, payload);
+    return this.#result(operation);
+  }
+
+  #result(operation: string): Promise<unknown> {
     if (operation === SESSION_REALTIME_OPERATIONS.subscribe) {
       return Promise.resolve({
         sessions: [summaryFromDetail(this.#readDetail)],
@@ -131,6 +138,23 @@ async function selectedTurn(
     transport,
     user,
   };
+}
+
+async function runningTurnValues(
+  sessionId: string,
+): Promise<
+  readonly [
+    SessionController,
+    AgentSessionDetail,
+    AgentSessionDetail["messages"][number],
+  ]
+> {
+  const turn = await selectedRunningTurn(sessionId);
+  return [turn.controller, turn.detail, turn.user];
+}
+
+async function selectedRunningTurn(sessionId: string): Promise<SelectedTurn> {
+  return selectedTurn(sessionId, "running");
 }
 
 async function selectedIdleTurn(sessionId: string): Promise<SelectedIdleTurn> {
@@ -227,11 +251,9 @@ test("renders incremental model deltas in the selected transcript", async () => 
 });
 
 test("ignores stale deltas after a finished snapshot and accepts a queued continuation", async () => {
-  const {
-    controller,
-    detail: running,
-    user,
-  } = await selectedTurn("session-stale-delta", "running");
+  const [controller, running, user] = await runningTurnValues(
+    "session-stale-delta",
+  );
   const sessionId = running.id;
   const assistant = assistantMessage("assistant-1", "Finished response");
   applyDelta(controller, sessionId, "Finished response", "");
@@ -278,11 +300,7 @@ test("anchors a continuation stream after the existing transcript", async () => 
 });
 
 test("reconciles reset streams with persisted messages", async () => {
-  const {
-    controller,
-    detail: running,
-    user,
-  } = await selectedTurn("session-stream", "running");
+  const [controller, running, user] = await runningTurnValues("session-stream");
   const sessionId = running.id;
 
   applyDelta(controller, sessionId, "Discarded", "Old thinking");
@@ -404,12 +422,7 @@ test.each([
       selectedId: detail.id,
     });
     const transport = new SessionTestTransport(detail);
-    const controller = new SessionController(
-      reactive,
-      undefined,
-      null,
-      transport,
-    );
+    const controller = controllerWithTransport(transport, reactive);
 
     await controller[action]();
 
@@ -445,25 +458,11 @@ test.each(["compact", "continueSession", "stop", "toggleAutoCompact"] as const)(
 );
 
 test("an unchanged session refresh does not notify the view", async () => {
-  await createRoot(async (dispose) => {
-    let changes = 0;
-    const transport = new SessionTestTransport(TEST_SESSION_DETAIL);
-    const controller = new SessionController(
-      undefined,
-      undefined,
-      null,
-      transport,
-    );
-    createEffect(() => {
-      controller.view();
-      changes += 1;
-    });
-
-    await controller.load();
-    const changesAfterLoad = changes;
-    controller.applyRealtime([summaryFromDetail(TEST_SESSION_DETAIL)]);
-
-    expect(changes).toBe(changesAfterLoad);
-    dispose();
-  });
+  const transport = new SessionTestTransport(TEST_SESSION_DETAIL);
+  await expectRealtimeControllerToRemainSilent(
+    (): SilentRealtimeController<
+      readonly ReturnType<typeof summaryFromDetail>[]
+    > => new SessionController(undefined, undefined, null, transport),
+    [summaryFromDetail(TEST_SESSION_DETAIL)],
+  );
 });

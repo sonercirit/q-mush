@@ -114,12 +114,12 @@ two pages and their assets:
   authenticated `/api/runner/realtime` WebSocket. The browser receives runner
   and session snapshots plus streaming model output through the authenticated
   `/api/realtime` WebSocket.
-- Authenticated users create and list agent sessions at `/api/sessions`,
-  discover models for an owned credential at `/api/sessions/models`, inspect
-  `/api/sessions/:id`, send follow-ups to `/api/sessions/:id/messages`, compact
-  history through `/api/sessions/:id/compact`, toggle automatic compaction at
-  `/api/sessions/:id/compaction`, and stop work through
-  `/api/sessions/:id/stop`.
+- The authenticated `/api/realtime` WebSocket is the browser's only session
+  transport. Correlated commands list and select sessions, discover models,
+  create image-capable sessions, send follow-ups, continue, compact, change
+  automatic compaction, and stop work. The same socket publishes session
+  summaries, selected detail snapshots, and streaming model output; session HTTP
+  routes are intentionally not exposed.
 
 After signing in, use **Set up a runner** in the control center. Run the shown
 one-liner on a macOS or Linux computer, or download and run the installer. The

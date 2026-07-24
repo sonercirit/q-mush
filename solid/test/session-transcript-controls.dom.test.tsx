@@ -1,12 +1,12 @@
 import { afterEach, expect, test } from "vitest";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
+import { SESSION_REALTIME_OPERATIONS } from "../../shared/user-realtime-protocol.ts";
 import { summaryFromDetail } from "../session-codec.ts";
 import { MemoryStorage } from "./memory-storage.ts";
 import {
   applyTranscriptDelta,
   disposeTestViews,
   DOM_TEST_DISPOSALS,
-  installResponseFetch,
   messageBoundary,
   mountTestSessionDetail,
   queryTestElement,
@@ -147,10 +147,20 @@ test("transcript filters persist, apply across sessions, and keep visible order"
     ),
   ];
   const detail = { ...TEST_SESSION_DETAIL, messages };
+  const selected: { detail: AgentSessionDetail | undefined } = {
+    detail: undefined,
+  };
+  const transport = {
+    command: (operation: string): Promise<unknown> =>
+      operation === SESSION_REALTIME_OPERATIONS.read
+        ? Promise.resolve({ session: selected.detail })
+        : Promise.reject(new Error("Unexpected session command")),
+  };
   const { container, controller } = mountTestSessionDetail(
     detail,
     DOM_TEST_DISPOSALS,
     filterStorage,
+    transport,
   );
   controller.setTranscriptFilter("thinking", true);
   const thinking = transcriptFilter(container);
@@ -177,7 +187,7 @@ test("transcript filters persist, apply across sessions, and keep visible order"
     ],
     title: "Second session",
   };
-  installResponseFetch(second);
+  selected.detail = second;
   controller.applyRealtime([summaryFromDetail(second)]);
   const selection = controller.select(second.id);
   controller.applyDetail(second);

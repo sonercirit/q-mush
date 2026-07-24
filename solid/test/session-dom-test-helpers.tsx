@@ -9,6 +9,7 @@ import { summaryFromDetail } from "../session-codec.ts";
 import { SessionController } from "../session-controller.ts";
 import { SessionDetail } from "../session-detail-client.tsx";
 import type { SessionTranscriptFilterStorage } from "../session-transcript-filters.ts";
+import type { SessionCommandTransport } from "../session-transport.ts";
 import { sessionDetailState } from "./session-detail-test-state.ts";
 import { runningSessionDetail } from "./transcript-ordering-fixtures.ts";
 
@@ -75,12 +76,14 @@ export function mountTestSessionDetail(
   detail: AgentSessionDetail,
   disposals: (() => void)[] = DOM_TEST_DISPOSALS,
   transcriptFilterStorage: SessionTranscriptFilterStorage | null = null,
+  transport?: SessionCommandTransport,
 ): MountedTestSession {
   const reactive = sessionDetailState(detail);
   const controller = new SessionController(
     reactive,
     undefined,
     transcriptFilterStorage,
+    transport,
   );
   const container = mountTestView(
     () => renderTestSessionDetail(controller, reactive.state),
@@ -109,34 +112,6 @@ export function mountTestTranscript(
     disposals,
   );
   return { container, controller, detail };
-}
-
-export function createResponseFetch(
-  response: unknown,
-): typeof globalThis.fetch {
-  const originalFetch = globalThis.fetch;
-  return Object.assign(
-    (): Promise<Response> => Promise.resolve(Response.json(response)),
-    { preconnect: originalFetch.preconnect },
-  );
-}
-
-export function restoreFetchAfterTest(
-  originalFetch: typeof globalThis.fetch,
-  disposals: (() => void)[] = DOM_TEST_DISPOSALS,
-): void {
-  disposals.push(() => {
-    globalThis.fetch = originalFetch;
-  });
-}
-
-export function installResponseFetch(
-  response: unknown,
-  disposals: (() => void)[] = DOM_TEST_DISPOSALS,
-): void {
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = createResponseFetch(response);
-  restoreFetchAfterTest(originalFetch, disposals);
 }
 
 export function transcriptTestMessage(

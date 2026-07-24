@@ -1,26 +1,20 @@
 import { type Accessor } from "solid-js";
 import type { AgentSessionToolName } from "../shared/agent-tools.ts";
-import { isRecord } from "../shared/auth-model.ts";
-import type {
-  AgentSessionDetail,
-  AgentSessionStatus,
-  AgentSessionSummary,
-} from "../shared/session-model.ts";
+import type { AgentSessionStatus } from "../shared/session-model.ts";
 import { SESSION_REALTIME_OPERATIONS } from "../shared/user-realtime-protocol.ts";
 import { DirectoryPickerController } from "./directory-picker-controller.ts";
 import { createReactiveState, type ReactiveState } from "./reactive-state.ts";
 import { RevisionState } from "./revision-state.ts";
 import type { SessionViewState } from "./session-client.tsx";
-import { readSessionDetail, readSessionList } from "./session-codec.ts";
+import { readSessionDetail } from "./session-codec.ts";
 import {
-  replaceSessionSummary,
-  retainUnchangedSessionData,
   selectedSessionCredential,
-  sessionDataMatches,
   SessionRealtimeState,
 } from "./session-controller-state.ts";
+import { sessionDetailState } from "./session-detail-state.ts";
 
 import { selectedDraftOption } from "./session-form.ts";
+import { SessionHydrationController } from "./session-hydration-controller.ts";
 import { appendAgentImageFiles } from "./session-image-input.ts";
 import { SessionModelController } from "./session-model-controller.ts";
 import {
@@ -32,10 +26,7 @@ import {
   stopSessionMutation,
   type SessionMutation,
 } from "./session-mutations.ts";
-import {
-  initialSessionViewState,
-  mostRecentSessionDirectory,
-} from "./session-state.ts";
+import { initialSessionViewState } from "./session-state.ts";
 import {
   readSessionTranscriptFilters,
   writeSessionTranscriptFilters,
@@ -92,13 +83,12 @@ function selectedMutation(
 
 export class SessionController {
   readonly #directoryPicker: DirectoryPickerController;
+  readonly #hydration: SessionHydrationController;
   readonly #models: SessionModelController;
   readonly #realtime: SessionRealtimeState;
   readonly #transcriptFilterStorage: SessionTranscriptFilterStorage | undefined;
   readonly #view: RevisionState<SessionViewState>;
   readonly #reactiveView: ReactiveState<SessionViewState>;
-  #initialLoadPending = false;
-  #rehydratePending = false;
   readonly #transport: SessionCommandTransport;
 
   constructor(
@@ -120,15 +110,20 @@ export class SessionController {
     this.#view.patch({ transcriptFilters });
     this.#realtime = new SessionRealtimeState(this.#view);
     this.#models = new SessionModelController(this.#view, transport);
-    transport.onReconnect?.(() => {
-      this.#rehydratePending = true;
-      this.#continueRehydrate();
-    });
+    this.#hydration = new SessionHydrationController(
+      this.#view,
+      this.#realtime,
+      transport,
+      () => this.#sessionMutationPending(),
+    );
+    this.#hydration.listenForReconnect();
     this.#directoryPicker = directoryPicker;
     this.#transcriptFilterStorage = transcriptFilterStorage ?? undefined;
   }
 
-  applyDetail(detail: AgentSessionDetail): void {
+  applyDetail(
+    detail: Parameters<SessionRealtimeState["applyDetail"]>[0],
+  ): void {
     if (this.#view.value.creating || detailMutationPending(this.#view.value)) {
       return;
     }
@@ -139,35 +134,18 @@ export class SessionController {
     this.#realtime.applyDelta(event);
   }
 
-  #applyInitialSessions(
-    sessions: readonly AgentSessionSummary[],
-  ): string | undefined {
-    this.#patchDraft({
-      workingDirectory: mostRecentSessionDirectory(sessions),
-    });
-    const selectedId = sessions[0]?.id;
-    this.#view.patch({ selectedId, sessions });
-    return selectedId;
-  }
-
-  async #readSelectedDetail(
-    sessionId: string | undefined,
-    revision: number,
-  ): Promise<void> {
-    if (sessionId !== undefined) {
-      await this.#readDetail(sessionId, revision, true);
-    }
-  }
-
-  applyRealtime(sessions: readonly AgentSessionSummary[]): void {
+  applyRealtime(
+    sessions: Parameters<SessionRealtimeState["applySessions"]>[0],
+  ): void {
     const initial =
-      this.#view.value.sessions === undefined && !this.#initialLoadPending;
+      this.#view.value.sessions === undefined &&
+      !this.#hydration.initialLoadPending;
     this.#realtime.applySessions(sessions);
     if (!initial) {
       return;
     }
-    const selectedId = this.#applyInitialSessions(sessions);
-    void this.#readSelectedDetail(selectedId, this.#view.begin());
+    const selectedId = this.#hydration.applyInitialSessions(sessions);
+    void this.#hydration.readSelectedDetail(selectedId, this.#view.begin());
   }
 
   get directoryPicker(): DirectoryPickerController {
@@ -286,7 +264,13 @@ export class SessionController {
   }
 
   #patchDraft(values: Partial<SessionViewState["draft"]>): void {
-    this.#view.patch({ draft: { ...this.#view.value.draft, ...values } });
+    this.#view.patch({ draft: this.#draftWith(values) });
+  }
+
+  #draftWith(
+    values: Partial<SessionViewState["draft"]>,
+  ): SessionViewState["draft"] {
+    return { ...this.#view.value.draft, ...values };
   }
 
   setDraftField(name: "prompt" | "workingDirectory", value: string): void {
@@ -332,64 +316,15 @@ export class SessionController {
     });
   }
 
-  async #subscribe(): Promise<readonly AgentSessionSummary[]> {
-    return readSessionList(
-      await this.#transport.command(SESSION_REALTIME_OPERATIONS.subscribe, {}),
-    );
-  }
-
-  async #applySubscription(options: {
-    readonly apply: (
-      sessions: readonly AgentSessionSummary[],
-    ) => Promise<void> | void;
-    readonly error: string;
-    readonly failurePatch: Partial<SessionViewState>;
-    readonly revision: number;
-  }): Promise<void> {
-    try {
-      const sessions = await this.#subscribe();
-      if (this.#view.isCurrent(options.revision)) {
-        await options.apply(sessions);
-      }
-    } catch {
-      this.#view.patchCurrent(options.revision, {
-        error: options.error,
-        ...options.failurePatch,
-      });
-    }
-  }
-
-  async load(): Promise<void> {
-    const revision = this.#view.begin({
-      detail: undefined,
-      error: undefined,
-      loadingDetail: false,
-      selectedId: undefined,
-      sessions: undefined,
-    });
-    this.#initialLoadPending = true;
-    try {
-      await this.#applySubscription({
-        apply: async (sessions) => {
-          const selectedId = this.#applyInitialSessions(sessions);
-          await this.#readSelectedDetail(selectedId, revision);
-        },
-        error: "We could not load your agent sessions. Please try again.",
-        failurePatch: { sessions: [] },
-        revision,
-      });
-    } finally {
-      this.#initialLoadPending = false;
-      this.#continueRehydrate();
-    }
+  load(): Promise<void> {
+    return this.#hydration.load();
   }
 
   reset(): void {
     const transcriptFilters = readSessionTranscriptFilters(
       this.#transcriptFilterStorage,
     );
-    this.#initialLoadPending = false;
-    this.#rehydratePending = false;
+    this.#hydration.reset();
     this.#directoryPicker.reset();
     this.#models.reset();
     this.#realtime.reset();
@@ -398,39 +333,6 @@ export class SessionController {
 
   #sessionMutationPending(): boolean {
     return this.#view.value.creating || detailMutationPending(this.#view.value);
-  }
-
-  #continueRehydrate(): void {
-    if (
-      !this.#rehydratePending ||
-      this.#initialLoadPending ||
-      this.#sessionMutationPending()
-    ) {
-      return;
-    }
-    this.#rehydratePending = false;
-    void this.#rehydrate();
-  }
-
-  async #rehydrate(): Promise<void> {
-    const revision = this.#view.begin({ loadingDetail: true });
-    await this.#applySubscription({
-      apply: async (sessions) => {
-        this.#realtime.applySessions(sessions);
-        const selectedId = this.#view.value.selectedId;
-        if (selectedId === undefined) {
-          this.#view.patchCurrent(revision, {
-            detail: undefined,
-            loadingDetail: false,
-          });
-          return;
-        }
-        await this.#readSelectedDetail(selectedId, revision);
-      },
-      error: "The realtime connection could not restore this session.",
-      failurePatch: { loadingDetail: false },
-      revision,
-    });
   }
 
   async #create(): Promise<void> {
@@ -475,7 +377,7 @@ export class SessionController {
 
       this.#view.patchCurrent(
         revision,
-        this.#detailState(detail, {
+        sessionDetailState(this.#view.value, detail, {
           creating: false,
           draft: {
             ...this.#view.value.draft,
@@ -490,53 +392,7 @@ export class SessionController {
         creating: false,
       });
     } finally {
-      this.#continueRehydrate();
-    }
-  }
-
-  async #readDetail(
-    sessionId: string,
-    revision: number,
-    showLoading: boolean,
-  ): Promise<void> {
-    if (showLoading) {
-      this.#view.patch({ detail: undefined, loadingDetail: true });
-    }
-
-    try {
-      const value = await this.#transport.command(
-        SESSION_REALTIME_OPERATIONS.read,
-        { sessionId },
-      );
-      if (!isRecord(value) || !("session" in value)) {
-        throw new Error("The session detail acknowledgement was invalid");
-      }
-      const detail = readSessionDetail(value["session"]);
-
-      if (this.#view.value.selectedId === sessionId) {
-        const detailState = this.#detailState(detail, {
-          loadingDetail: false,
-        });
-
-        if (
-          !showLoading &&
-          !this.#view.value.loadingDetail &&
-          sessionDataMatches(this.#view.value.detail, detail) &&
-          sessionDataMatches(this.#view.value.sessions, detailState.sessions)
-        ) {
-          return;
-        }
-
-        this.#view.patchCurrent(revision, detailState);
-        this.#realtime.applyDetail(detail);
-      }
-    } catch {
-      if (showLoading) {
-        this.#view.patchCurrent(revision, {
-          error: "We could not load that session transcript.",
-          loadingDetail: false,
-        });
-      }
+      this.#hydration.continueRehydrate();
     }
   }
 
@@ -600,7 +456,7 @@ export class SessionController {
       loadingDetail: true,
       selectedId: sessionId,
     });
-    await this.#readDetail(sessionId, revision, true);
+    await this.#hydration.readDetail(sessionId, revision, true);
   }
 
   async #send(): Promise<void> {
@@ -707,26 +563,8 @@ export class SessionController {
     } catch (error) {
       this.#patchMutationError(revision, error, options.action, settled);
     } finally {
-      this.#continueRehydrate();
+      this.#hydration.continueRehydrate();
     }
-  }
-
-  #detailState(
-    detail: AgentSessionDetail,
-    extra: Partial<SessionViewState>,
-  ): Partial<SessionViewState> {
-    const visibleDetail = retainUnchangedSessionData(
-      this.#view.value.detail,
-      detail,
-    );
-    return {
-      detail: visibleDetail,
-      sessions: replaceSessionSummary(
-        this.#view.value.sessions ?? [],
-        visibleDetail,
-      ),
-      ...extra,
-    };
   }
 
   #patchMutationError(

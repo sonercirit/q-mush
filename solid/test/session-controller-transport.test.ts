@@ -6,17 +6,13 @@ import { summaryFromDetail } from "../../solid/session-codec.ts";
 import { SessionController } from "../../solid/session-controller.ts";
 import { initialSessionViewState } from "../../solid/session-state.ts";
 import type { SessionCommandTransport } from "../../solid/session-transport.ts";
+import type { SessionCommandCall } from "./session-command-call.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
-
-interface CommandCall {
-  readonly operation: string;
-  readonly payload: Readonly<Record<string, unknown>>;
-}
 
 function createRecordedTransport(
   results: Readonly<Record<string, unknown>>,
-): SessionCommandTransport & { readonly calls: CommandCall[] } {
-  const calls: CommandCall[] = [];
+): SessionCommandTransport & { readonly calls: SessionCommandCall[] } {
+  const calls: SessionCommandCall[] = [];
   return {
     calls,
     command: (operation, payload) => {
@@ -40,14 +36,14 @@ function selectedSessionState(): SessionViewState {
   });
 }
 
-function sessionReadCall(sessionId: string): CommandCall {
+function sessionReadCall(sessionId: string): SessionCommandCall {
   return {
     operation: SESSION_REALTIME_OPERATIONS.read,
     payload: { sessionId },
   };
 }
 
-function subscriptionCall(): CommandCall {
+function subscriptionCall(): SessionCommandCall {
   return { operation: SESSION_REALTIME_OPERATIONS.subscribe, payload: {} };
 }
 
@@ -78,7 +74,7 @@ async function finishDetailRead(
   });
 }
 
-function sessionMutationCall(operation: string): CommandCall {
+function sessionMutationCall(operation: string): SessionCommandCall {
   return { operation, payload: { sessionId: TEST_SESSION_DETAIL.id } };
 }
 
@@ -102,7 +98,7 @@ function controlledController(
 }
 
 class ControlledTransport implements SessionCommandTransport {
-  readonly calls: CommandCall[] = [];
+  readonly calls: SessionCommandCall[] = [];
   readonly #resolvers: ((value: unknown) => void)[] = [];
 
   command(operation: string, payload: Readonly<Record<string, unknown>>) {
