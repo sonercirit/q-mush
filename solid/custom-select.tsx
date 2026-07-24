@@ -7,6 +7,7 @@ import {
   Show,
   type JSX,
 } from "solid-js";
+import { normalizeSearchText } from "../shared/search.ts";
 
 export interface CustomSelectOption {
   readonly description?: string;
@@ -45,14 +46,6 @@ function indexForValue(
   value: string | undefined,
 ): number {
   return options.findIndex((option) => option.value === value);
-}
-
-function normalizedSearch(value: string): string {
-  return value
-    .trim()
-    .normalize("NFKD")
-    .replaceAll(/\p{M}/gu, "")
-    .toLocaleLowerCase();
 }
 
 function selectedPage(props: CustomSelectProps): number {
@@ -164,14 +157,14 @@ export function CustomSelect(props: CustomSelectProps): JSX.Element {
   const [searchInput, setSearchInput] = createSignal<HTMLInputElement>();
   const [listbox, setListbox] = createSignal<HTMLUListElement>();
   const filteredOptions = createMemo(() => {
-    const search = searchable() ? normalizedSearch(query()) : "";
+    const search = searchable() ? normalizeSearchText(query()) : "";
     if (search.length === 0) {
       return props.options;
     }
     return props.options.filter((option) =>
       [option.label, option.value, option.description, option.detail].some(
         (value) =>
-          value !== undefined && normalizedSearch(value).includes(search),
+          value !== undefined && normalizeSearchText(value).includes(search),
       ),
     );
   });
@@ -583,7 +576,7 @@ export function CustomSelect(props: CustomSelectProps): JSX.Element {
             onChange={changePage}
             pageCount={pageCount()}
             paginationId={paginationId()}
-            searching={normalizedSearch(query()).length > 0}
+            searching={normalizeSearchText(query()).length > 0}
           />
         </div>
       </Show>

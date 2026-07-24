@@ -10,6 +10,7 @@ import type {
   ProviderId,
 } from "../../shared/provider-credential-store.ts";
 import type { ProviderModelPricing } from "../../shared/provider-model-pricing.ts";
+import { utf8ByteLength } from "../../shared/utf8.ts";
 import {
   discoverAgentModels,
   type AgentModelDiscoveryFetch,
@@ -90,6 +91,17 @@ async function capturedDiscovery(
   }
 
   return { catalog: discovered, request: capture.request };
+}
+
+function rejectedDiscovery(body: BodyInit): Promise<AgentModelCatalog> {
+  return discoverAgentModels(
+    "openai",
+    credential("api_key", "sk-openai-secret"),
+    () =>
+      Promise.resolve(
+        new Response(body, { headers: { "content-type": "application/json" } }),
+      ),
+  );
 }
 
 function expectBearer(request: Request, token: string): void {
@@ -214,6 +226,100 @@ describe("agent model discovery", () => {
     );
     expect(request.url).toBe("https://openrouter.ai/api/v1/models/user");
     expectBearer(request, "sk-or-secret");
+  });
+
+  test("aborts an oversized streamed catalog before fully buffering it", async () => {
+    const maximumBytes = 5 * 1024 * 1024;
+    let pulls = 0;
+    let canceled = false;
+    const body = new ReadableStream<Uint8Array>({
+      cancel: () => {
+        canceled = true;
+      },
+      pull: (controller) => {
+        pulls += 1;
+        controller.enqueue(new Uint8Array(1024 * 1024));
+      },
+    });
+
+    await expect(rejectedDiscovery(body)).rejects.toThrow(
+      "provider model catalog was too large",
+    );
+    expect(pulls).toBeLessThanOrEqual(maximumBytes / (1024 * 1024) + 2);
+    expect(canceled).toBe(true);
+  });
+
+  test("rejects malformed UTF-8 model catalogs", async () => {
+    await expect(
+      rejectedDiscovery(new Uint8Array([0x7b, 0xff, 0x7d])),
+    ).rejects.toThrow("invalid model catalog");
+  });
+
+  test("rejects a catalog with too many model options", async () => {
+    await expect(
+      capturedDiscovery("openai", credential("api_key", "sk-openai-secret"), {
+        data: Array.from({ length: 10_001 }, (_, index) => ({
+          id: `gpt-catalog-${String(index)}`,
+        })),
+      }),
+    ).rejects.toThrow("provider model catalog has too many options");
+  });
+
+  test("bounds long multibyte model strings and nested metadata", async () => {
+    const multibyte = "É😀".repeat(500);
+    const { catalog: discovered } = await capturedDiscovery(
+      "openrouter",
+      credential("api_key", "sk-or-secret"),
+      {
+        data: [
+          {
+            architecture: {
+              input_modalities: Array.from(
+                { length: 200 },
+                (_, index) => `${String(index).padStart(3, "0")}-${multibyte}`,
+              ),
+              output_modalities: [multibyte],
+            },
+            id: "vendor/bounded-model",
+            name: multibyte,
+            pricing: { prompt: multibyte },
+            supported_parameters: ["tools"],
+          },
+        ],
+      },
+    );
+    const [bounded] = discovered.models;
+
+    expect(bounded).toBeDefined();
+    expect(utf8ByteLength(bounded?.label ?? "")).toBeLessThanOrEqual(300);
+    expect(bounded?.inputModalities).toHaveLength(20);
+    expect(
+      bounded?.inputModalities?.every(
+        (value) => utf8ByteLength(value) <= 100 && !value.includes("�"),
+      ),
+    ).toBe(true);
+    expect(
+      utf8ByteLength(String(bounded?.pricing?.input ?? "")),
+    ).toBeLessThanOrEqual(100);
+    expect(JSON.stringify(discovered)).not.toContain("�");
+  });
+
+  test("reports safe provider status failures without credential contents", async () => {
+    const secret = "sk-never-return-this-secret";
+    let message = "";
+    try {
+      await discoverAgentModels(
+        "openrouter",
+        credential("api_key", secret),
+        () => Promise.resolve(new Response("denied", { status: 429 })),
+      );
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+
+    expect(message).toContain("status 429");
+    expect(message).not.toContain(secret);
+    expect(utf8ByteLength(message)).toBeLessThanOrEqual(300);
   });
 
   test("discovers compatible models available to an OpenAI API key", async () => {

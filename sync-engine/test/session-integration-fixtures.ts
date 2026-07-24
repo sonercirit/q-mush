@@ -12,14 +12,17 @@ import {
   type RunnerToolCommand,
 } from "../../shared/runner-command-broker.ts";
 import type { RunnerSummary } from "../../shared/runner-model.ts";
+import { normalizeSearchText } from "../../shared/search.ts";
 import type { AgentModelDiscoverer } from "../../sync-engine/agent-model-discovery.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
 import { createRunnerIntegration } from "../../sync-engine/runners.ts";
 import { createSessionIntegration } from "../../sync-engine/sessions.ts";
 import {
   addTestProviderCredential,
+  addTestUser,
   createAuthenticatedRequest,
   createAuthenticatedTestDatabase,
+  TEST_FOREIGN_USER_ID,
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
@@ -31,16 +34,18 @@ export const CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000063";
 const RUNNER_TOKEN = "qmr_session-runner-token";
 export const RUNNER_COMMAND_ID = "agent-command-1";
 
+type FixtureCredentials = Readonly<
+  Partial<Record<"openai" | "openrouter", readonly ProviderCredentialAccess[]>>
+>;
+
 export function connectedSessionSetup(
   model: AgentModel,
   credentialSource: ProviderCredentialAccess["source"] = "api_key",
   discoverModels?: AgentModelDiscoverer,
   options: {
-    readonly credentials?: Readonly<
-      Partial<
-        Record<"openai" | "openrouter", readonly ProviderCredentialAccess[]>
-      >
-    >;
+    readonly credentials?: FixtureCredentials;
+    readonly deletedCredentials?: FixtureCredentials;
+    readonly foreignCredentials?: FixtureCredentials;
     readonly runners?: readonly RunnerSummary[];
   } = {},
 ) {
@@ -81,14 +86,39 @@ export function connectedSessionSetup(
     openrouter: options.credentials?.openrouter ?? [],
   };
   const insertedCredentialIds = new Set([CREDENTIAL_ID]);
+  const foreignCredentials = options.foreignCredentials;
+  if (
+    foreignCredentials?.openai !== undefined ||
+    foreignCredentials?.openrouter !== undefined
+  ) {
+    addTestUser(database);
+  }
+  const configuredCredential = (
+    configured: ProviderCredentialAccess,
+    isDeleted: boolean,
+    userId: string,
+  ) => ({ configured, isDeleted, userId });
   for (const provider of ["openai", "openrouter"] as const) {
-    for (const configured of configuredCredentials[provider]) {
+    const storedCredentials = [
+      ...configuredCredentials[provider].map((configured) =>
+        configuredCredential(configured, false, TEST_USER_ID),
+      ),
+      ...(options.deletedCredentials?.[provider] ?? []).map((configured) =>
+        configuredCredential(configured, true, TEST_USER_ID),
+      ),
+      ...(foreignCredentials?.[provider] ?? []).map((configured) =>
+        configuredCredential(configured, false, TEST_FOREIGN_USER_ID),
+      ),
+    ];
+    for (const { configured, isDeleted, userId } of storedCredentials) {
       if (!insertedCredentialIds.has(configured.id)) {
         addTestProviderCredential(database, configured.id, provider, {
           accountId: configured.accountId,
           isDefault: configured.isDefault,
+          isDeleted,
           label: configured.label,
           source: configured.source,
+          userId,
         });
         insertedCredentialIds.add(configured.id);
       }
@@ -120,6 +150,7 @@ export function connectedSessionSetup(
       return true;
     },
   });
+  let listRunnerCalls = 0;
   const runnerIntegration: typeof runners = {
     collection: (request) => runners.collection(request),
     connect: (token, metadata) => runners.connect(token, metadata),
@@ -127,7 +158,32 @@ export function connectedSessionSetup(
       runners.disconnected(runner);
     },
     installer: (request) => runners.installer(request),
-    listForUser: (userId) => options.runners ?? runners.listForUser(userId),
+    listForUser: (userId) => {
+      listRunnerCalls += 1;
+      return options.runners ?? runners.listForUser(userId);
+    },
+    listOnlineForUser: (userId, queryOptions) => {
+      listRunnerCalls += 1;
+      const { limit, offset, search } = queryOptions;
+      if (options.runners === undefined) {
+        return runners.listOnlineForUser(userId, queryOptions);
+      }
+      const query =
+        search === undefined ? undefined : normalizeSearchText(search);
+      const matching = options.runners.filter(
+        (runner) =>
+          runner.status === "online" &&
+          (query === undefined ||
+            [runner.id, runner.name, runner.platform, runner.architecture].some(
+              (value) =>
+                value !== null && normalizeSearchText(value).includes(query),
+            )),
+      );
+      return {
+        items: matching.slice(offset, offset + limit),
+        totalItems: matching.length,
+      };
+    },
     remove: (request, runnerId) => runners.remove(request, runnerId),
     runnerIsAvailable: (userId, runnerId) =>
       runners.runnerIsAvailable(userId, runnerId),
@@ -175,6 +231,7 @@ export function connectedSessionSetup(
   return {
     database,
     latestRunnerCommand: () => latestRunnerCommand,
+    listRunnerCalls: () => listRunnerCalls,
     runnerCommands,
     selectedModels,
     selectedPricing,

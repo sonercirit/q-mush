@@ -1,5 +1,22 @@
 import { describe, expect, test } from "vitest";
-import type { ProviderCredentialAccess } from "../../shared/provider-credential-store.ts";
+import {
+  agentMessages,
+  agentSessions,
+  providerCredentials,
+  users,
+} from "../../shared/database/schema.ts";
+import { SYSTEM_ID } from "../../shared/ids.ts";
+import {
+  ProviderCredentialStore,
+  type ProviderCredentialAccess,
+} from "../../shared/provider-credential-store.ts";
+import {
+  addTestProviderCredential,
+  createAuthenticatedTestDatabase,
+  TEST_USER_ID,
+  testAuditFields,
+} from "./authenticated-integration-test-helpers.ts";
+import { testModelOption } from "./session-agent-option-fixtures.ts";
 import {
   jsonRecord,
   parseTestJson,
@@ -34,15 +51,37 @@ function credential(
 }
 
 function modelOption(id: string) {
-  return {
+  return testModelOption(id, {
     contextWindow: 100_000,
-    id,
-    inputModalities: ["text"],
-    label: `Model ${id}`,
-    outputModalities: ["text"],
-    pricing: null,
     reasoningEfforts: ["low" as const, "high" as const],
-  };
+  });
+}
+
+function singleReadModel(id: string, categories?: readonly string[]) {
+  return scriptedModel([
+    {
+      content: "Read selected session context.",
+      toolCalls: [
+        toolCall(
+          "read_session",
+          {
+            ...(categories === undefined ? {} : { categories }),
+            sessionId: SESSION_ID,
+          },
+          id,
+        ),
+      ],
+    },
+    { content: "Done.", toolCalls: [] },
+  ]);
+}
+
+function readToolOutput(
+  setup: Awaited<ReturnType<typeof startToolSession>>,
+): Promise<string | undefined> {
+  return completedParentDetail(setup, "idle").then(
+    (detail) => findToolResultContents(detail, "read_session")[0],
+  );
 }
 
 function parsedToolOutput(value: unknown, name: string): unknown {
@@ -75,7 +114,11 @@ describe("session agent introspection tools", () => {
       agentFile: { content: agentFileContent, name: "AGENTS.md" },
     });
     const detail = await completedParentDetail(setup, "idle");
-    const read = testRecord(parsedToolOutput(detail, "read_session"));
+    const rawRead = findToolResultContents(detail, "read_session")[0];
+    if (rawRead?.startsWith("Error:") === true) {
+      throw new Error(rawRead);
+    }
+    const read = testRecord(parseTestJson(rawRead ?? "null"));
     const content = testRecord(read["content"]);
     const serialized = JSON.stringify(read);
 
@@ -105,7 +148,67 @@ describe("session agent introspection tools", () => {
     );
     expect(serialized).not.toContain("hidden reasoning");
     expect(serialized).not.toContain("call-list_sessions");
-    expect(serialized.length).toBeLessThanOrEqual(32_768);
+    expect(Buffer.byteLength(serialized, "utf8")).toBeLessThanOrEqual(32_768);
+    setup.database.$client.close();
+  });
+
+  test("excludes deleted and mismatched-owner transcript records", async () => {
+    const model = singleReadModel("bounded-read");
+    const setup = await startToolSession(model);
+    setup.database
+      .insert(users)
+      .values({
+        ...testAuditFields(SYSTEM_ID),
+        email: "other@example.test",
+        googleSubject: "other-google-subject",
+        id: "other-user",
+        name: "Other User",
+      })
+      .run();
+    const common = {
+      ...testAuditFields(),
+      content: "must-not-appear",
+      role: "user" as const,
+      sessionId: SESSION_ID,
+    };
+    setup.database
+      .insert(agentMessages)
+      .values([
+        {
+          ...common,
+          id: "deleted-message",
+          isDeleted: true,
+          userId: TEST_USER_ID,
+        },
+        {
+          ...common,
+          createdById: "other-user",
+          id: "wrong-owner-message",
+          updatedById: "other-user",
+          userId: "other-user",
+        },
+      ])
+      .run();
+    const firstReadOutput = await readToolOutput(setup);
+
+    expect(firstReadOutput).not.toContain("must-not-appear");
+    expect(firstReadOutput).not.toContain("deleted-message");
+    expect(firstReadOutput).not.toContain("wrong-owner-message");
+    setup.database.$client.close();
+  });
+
+  test("does not load stored agent-file content unless system is requested", async () => {
+    const model = singleReadModel("user-read", ["user"]);
+    const setup = await startToolSession(model, {
+      agentFile: { content: "agent-file-secret", name: "AGENTS.md" },
+    });
+    setup.database
+      .update(agentSessions)
+      .set({ agentFileContent: "agent-file-secret" })
+      .run();
+    const outputWithoutSystem = await readToolOutput(setup);
+
+    expect(outputWithoutSystem).not.toContain("agent-file-secret");
     setup.database.$client.close();
   });
 
@@ -137,6 +240,9 @@ describe("session agent introspection tools", () => {
       model,
       "read_session",
     );
+    if (outputs[0]?.startsWith("Error:") === true) {
+      throw new Error(outputs[0]);
+    }
     const defaults = testRecord(parseTestJson(outputs[0] ?? "null"));
 
     expect(defaults["metadata"]).toMatchObject({
@@ -293,7 +399,73 @@ describe("session agent introspection tools", () => {
       "get_session_options",
       "get_session_options",
     ]);
+    expect(setup.listRunnerCalls()).toBe(1);
     setup.database.$client.close();
+  });
+
+  test("limits option-source queries and excludes deleted or non-model credentials", () => {
+    const database = createAuthenticatedTestDatabase();
+    for (let index = 0; index < 21; index += 1) {
+      const id = String(index).padStart(2, "0");
+      addTestProviderCredential(database, `credential-${id}`, "openai", {
+        label: `Key ${String(index)}`,
+      });
+    }
+    addTestProviderCredential(database, "deleted-model-credential", "openai", {
+      isDeleted: true,
+      label: "Deleted secret",
+    });
+    database
+      .insert(providerCredentials)
+      .values({
+        ...testAuditFields(),
+        credentialFingerprint: "brave-fingerprint",
+        encryptedCredential: "never-return-this-secret",
+        id: "brave-credential",
+        label: "Needle Brave key",
+        provider: "brave_search",
+        source: "api_key",
+        userId: TEST_USER_ID,
+      })
+      .run();
+
+    const page = ProviderCredentialStore.listModelCredentials(
+      database,
+      TEST_USER_ID,
+      10,
+      10,
+    );
+    for (let index = 21; index < 100; index += 1) {
+      const credentialId = `credential-${String(index).padStart(2, "0")}`;
+      addTestProviderCredential(database, credentialId, "openrouter", {
+        label: `Other ${String(index)}`,
+      });
+    }
+    const searchable = ProviderCredentialStore.listModelCredentials(
+      database,
+      TEST_USER_ID,
+      0,
+      10,
+      "Key 1",
+    );
+    const literalWildcard = ProviderCredentialStore.listModelCredentials(
+      database,
+      TEST_USER_ID,
+      0,
+      10,
+      "%_",
+    );
+    const serialized = JSON.stringify(page);
+
+    expect(page).toMatchObject({ totalItems: 21 });
+    expect(page.items).toHaveLength(10);
+    expect(searchable.totalItems).toBe(11);
+    expect(searchable.items).toHaveLength(10);
+    expect(literalWildcard).toMatchObject({ items: [], totalItems: 0 });
+    expect(serialized).not.toContain("Deleted secret");
+    expect(serialized).not.toContain("Needle Brave key");
+    expect(serialized).not.toContain("never-return-this-secret");
+    database.$client.close();
   });
 
   test("validates option category, provider, credential, page, and search", async () => {

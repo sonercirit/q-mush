@@ -32,6 +32,8 @@ export interface AgentModelCatalog {
   readonly models: readonly AgentModelOption[];
 }
 
+export const MAXIMUM_AGENT_MODEL_OPTIONS = 10_000;
+
 const MODEL_PATTERN = /^[A-Za-z\d][A-Za-z\d._:/-]{0,199}$/u;
 
 export function defaultAgentModel(

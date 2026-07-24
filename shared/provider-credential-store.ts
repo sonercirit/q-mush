@@ -1,13 +1,15 @@
-import { and, asc, eq, not, type SQL } from "drizzle-orm";
+import { and, asc, count, eq, inArray, not, or, type SQL } from "drizzle-orm";
 import { softDeletedAuditFields, updatedAuditFields } from "./audit.ts";
 import {
   fingerprintCredential,
   type CredentialCipher,
 } from "./credential-cipher.ts";
+import { escapedLikePattern, lowerLike } from "./database-search.ts";
 import type { AppDatabase } from "./database.ts";
 import { providerCredentials } from "./database/schema.ts";
 import { defaultValues } from "./default-store.ts";
 import { createUuidV7, SYSTEM_ID, type IdGenerator } from "./ids.ts";
+import { validPageWindow } from "./pagination.ts";
 
 export type ProviderCredentialSource = "api_key" | "oauth";
 const PROVIDER_IDS = ["openai", "openrouter"] as const;
@@ -99,6 +101,46 @@ function fingerprintCondition(
   );
 }
 
+function activeCredentialId(
+  database: AppDatabase,
+  condition: SQL | undefined,
+): string | undefined {
+  return database
+    .select({ id: providerCredentials.id })
+    .from(providerCredentials)
+    .where(condition)
+    .get()?.id;
+}
+
+function modelCredentialCondition(userId: string, search?: string) {
+  const base = and(
+    eq(providerCredentials.userId, userId),
+    eq(providerCredentials.isDeleted, false),
+    inArray(providerCredentials.provider, ["openai", "openrouter"]),
+  );
+  if (search === undefined) {
+    return base;
+  }
+  const pattern = escapedLikePattern(search);
+  return and(
+    base,
+    or(
+      lowerLike(providerCredentials.id, pattern),
+      lowerLike(providerCredentials.providerAccountId, pattern),
+      lowerLike(providerCredentials.label, pattern),
+      lowerLike(providerCredentials.provider, pattern),
+      lowerLike(providerCredentials.source, pattern),
+    ),
+  );
+}
+
+export interface ProviderCredentialPage {
+  readonly items: readonly (ProviderCredentialSummary & {
+    readonly provider: ProviderId;
+  })[];
+  readonly totalItems: number;
+}
+
 export class ProviderCredentialStore {
   readonly #cipher: CredentialCipher;
   readonly #database: AppDatabase;
@@ -188,31 +230,57 @@ export class ProviderCredentialStore {
       .all();
   }
 
+  static hasActiveModelCredential(
+    database: AppDatabase,
+    userId: string,
+    provider: ProviderId,
+    credentialId: string,
+  ): boolean {
+    return (
+      activeCredentialId(
+        database,
+        activeCredentialCondition(provider, userId, credentialId),
+      ) !== undefined
+    );
+  }
+
   static listModelCredentials(
     database: AppDatabase,
     userId: string,
-  ): readonly (ProviderCredentialSummary & {
-    readonly provider: ProviderId;
-  })[] {
-    return database
+    offset: number,
+    limit: number,
+    search?: string,
+  ): ProviderCredentialPage {
+    if (!validPageWindow(offset, limit)) {
+      throw new Error("The model credential page is invalid");
+    }
+    const condition = modelCredentialCondition(userId, search);
+    const totalItems =
+      database
+        .select({ value: count() })
+        .from(providerCredentials)
+        .where(condition)
+        .get()?.value ?? 0;
+    const items = database
       .select({
         ...credentialSummarySelection(),
         provider: providerCredentials.provider,
       })
       .from(providerCredentials)
-      .where(
-        and(
-          eq(providerCredentials.userId, userId),
-          eq(providerCredentials.isDeleted, false),
-        ),
-      )
+      .where(condition)
       .orderBy(...credentialOrder())
+      .limit(limit)
+      .offset(offset)
       .all()
       .flatMap((credential) =>
         isProviderId(credential.provider)
           ? [{ ...credential, provider: credential.provider }]
           : [],
       );
+    return {
+      items,
+      totalItems,
+    };
   }
 
   #readStored(userId: string, credentialId: string) {
@@ -320,11 +388,7 @@ export class ProviderCredentialStore {
       userId,
       credentialId,
     );
-    const stored = this.#database
-      .select({ id: providerCredentials.id })
-      .from(providerCredentials)
-      .where(condition)
-      .get();
+    const stored = activeCredentialId(this.#database, condition);
 
     if (stored === undefined) {
       return false;

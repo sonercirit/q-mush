@@ -189,7 +189,12 @@ class DrizzleSessionIntegration implements SessionIntegration {
       },
       launchSession: (credential, detail, userId) =>
         this.#launch(detail, credential, userId),
-      listRunners: (userId) => this.#runners.listForUser(userId),
+      listRunnerOptions: (userId, offset, limit, search) =>
+        this.#runners.listOnlineForUser(userId, {
+          limit,
+          offset,
+          ...(search === undefined ? {} : { search }),
+        }),
       notify: this.#notify,
       now: this.#now,
       readCredential: (userId, selection) =>

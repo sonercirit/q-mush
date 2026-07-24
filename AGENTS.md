@@ -103,6 +103,8 @@ Living project memory; update durable information.
   Runner tokens never appear in list responses.
 - Browser messages sort by time then ID. Live output anchors after the
   initiating message; snapshots replace it in place.
+- `session-agent-read.ts` byte-bounds introspection output; its store helper
+  projects only capped user/assistant content.
 - `sync-engine/sessions.ts` and `sync-engine/session-store.ts` persist coding
   sessions. User messages support selecting or pasting up to eight 10 MB PNG,
   JPEG, GIF, or WebP images, persisted with the transcript and sent as native
@@ -129,12 +131,12 @@ Living project memory; update durable information.
   reasoning/tool history; `get_session_options` safely pages provider-generic
   spawn choices. Grouped session tools spawn non-blocking child sessions, manage
   owned sessions, report each child's final message to its parent, and resume an
-  idle parent when the report arrives. `parallel` accepts 2+ tools or skills, has
-  no count cap, and uses four ordered workers with bounded output. Picker details
-  come from canonical schemas. `solid/session-transcript.tsx` renders prompts,
-  tool definitions, raw details, Markdown, code/JSON, diffs, and contextual tool
-  results while preserving user line breaks. The session list paginates ten at a
-  time. The control center manages live sessions through
+  idle parent when the report arrives. `parallel` accepts 2+ tools or skills,
+  has no count cap, and uses four ordered workers with bounded output. Picker
+  details come from canonical schemas. `solid/session-transcript.tsx` renders
+  prompts, tool definitions, raw details, Markdown, code/JSON, diffs, and
+  contextual tool results while preserving user line breaks. The session list
+  paginates ten at a time. The control center manages live sessions through
   `solid/realtime-client.ts`, `solid/session-client.tsx`, and
   `solid/session-controller.ts`. Model deltas are combined per session once per
   animation frame; snapshots and other events remain immediate. Unchanged
@@ -205,11 +207,6 @@ Living project memory; update durable information.
   migration tree), JavaScript/TypeScript test files outside a directory named
   `test`, and `.htm`/`.html`/`.xhtml` application files outside directories
   named `test` or `fixtures`.
-- Prettier wraps Markdown prose at its print width and uses
-  `prettier-plugin-organize-imports` to sort, combine, and remove unused
-  imports; generated/dependency output ignores come from `.gitignore`, while
-  `bun.lock` is ignored separately. Drizzle migrations and metadata are included
-  in formatting, which is enforced by `bun run check`.
 
 ## Decisions and Gotchas
 

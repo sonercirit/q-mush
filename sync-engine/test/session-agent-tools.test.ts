@@ -9,6 +9,7 @@ import {
 import { findToolResultContent } from "./session-agent-tool-helpers.ts";
 import {
   completedParentDetail,
+  completedParentToolOutputs,
   scriptedModel,
   startToolSession,
   toolCall,
@@ -93,25 +94,14 @@ async function completedToolOutput(
   model: AgentModel,
   name: string,
 ): Promise<CompletedToolOutput> {
-  const setup = await startToolSession(model);
-  const detail = await completedParentDetail(setup, "idle");
-  return { output: findToolResultContent(detail, name), setup };
+  const { outputs, setup } = await completedParentToolOutputs(model, name);
+  return { output: outputs[0], setup };
 }
 
 async function runRejectedSpawn(
   model: AgentModel,
 ): Promise<CompletedToolOutput> {
   return completedToolOutput(model, "spawn_session");
-}
-
-async function waitForParentContent(
-  setup: Awaited<ReturnType<typeof startToolSession>>,
-  content: string,
-): Promise<unknown> {
-  return waitForSessionValue(
-    () => sessionDetail(setup.sessions),
-    (value) => JSON.stringify(value).includes(content),
-  );
 }
 
 async function waitForRunnerSession(

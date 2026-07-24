@@ -153,6 +153,7 @@ const SESSION_AGENT_TOOLS = [
       },
       provider: {
         description: "Model provider",
+        enum: ["openai", "openrouter"],
         type: "string",
       },
       reasoningEffort: {
