@@ -113,6 +113,8 @@ export async function startManualSessionCompaction(
       user.id,
       sessionId,
       dependencies.now(),
+      undefined,
+      false,
     );
     if (queued.status !== "queued") {
       return createApiError("session_busy", 409);

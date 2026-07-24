@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { AgentImage } from "../../shared/agent-images.ts";
+import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import {
   TEST_NOW,
@@ -13,6 +14,45 @@ import {
 
 // cpd-ignore-start -- Store tests intentionally repeat complete queue payloads to verify each invariant.
 describe("pending session input store", () => {
+  test("does not replace an active runtime with a duplicate launch", async () => {
+    const runtimes = new SessionRuntimes();
+    let finishFirst: (() => void) | undefined;
+    let runs = 0;
+
+    expect(
+      runtimes.launch(SESSION_ID, () => {
+        runs += 1;
+        return new Promise<void>((resolve) => {
+          finishFirst = resolve;
+        });
+      }),
+    ).toBe(true);
+    expect(
+      runtimes.launch(SESSION_ID, () => {
+        runs += 1;
+        return Promise.resolve();
+      }),
+    ).toBe(false);
+    expect(
+      runtimes.schedule(SESSION_ID, () => {
+        runs += 1;
+        return Promise.resolve();
+      }),
+    ).toBe(true);
+    expect(
+      runtimes.schedule(SESSION_ID, () => {
+        runs += 1;
+        return Promise.resolve();
+      }),
+    ).toBe(false);
+    await Promise.resolve();
+    expect(runs).toBe(1);
+
+    finishFirst?.();
+    await Bun.sleep(0);
+    expect(runs).toBe(2);
+  });
+
   test("persists bounded FIFO follow-ups with images and idempotency", () => {
     const { database, store } = runningStore();
     const queue = (
@@ -48,6 +88,34 @@ describe("pending session input store", () => {
       );
     }
     expect(queue("follow-9", "Overflow").status).toBe("full");
+    database.$client.close();
+  });
+
+  test("orders equal-timestamp pending inputs by their durable sequence", () => {
+    const { database, store } = runningStore();
+    const requestIds = ["request-z", "request-a", "request-m"];
+
+    for (const clientRequestId of requestIds) {
+      expect(
+        store.enqueuePendingInput(
+          TEST_USER_ID,
+          SESSION_ID,
+          {
+            clientRequestId,
+            content: clientRequestId,
+            images: [],
+            kind: "follow_up",
+          },
+          TEST_NOW + 2,
+        ).status,
+      ).toBe("accepted");
+    }
+
+    expect(
+      store
+        .get(TEST_USER_ID, SESSION_ID)
+        ?.pendingInputs.map(({ content }) => content),
+    ).toEqual(requestIds);
     database.$client.close();
   });
 
@@ -258,8 +326,71 @@ describe("pending session input store", () => {
     database.$client.close();
   });
 
-  test("retains pending inputs through stop, failure, and interruption", () => {
-    for (const finish of ["stop", "fail", "interrupt"] as const) {
+  test("recovers a leading follow-up as queued work after interruption", () => {
+    const { database, store } = runningStore();
+    expect(
+      store.enqueuePendingInput(
+        TEST_USER_ID,
+        SESSION_ID,
+        {
+          clientRequestId: "restart-follow-up",
+          content: "Run this after restart",
+          images: [],
+          kind: "follow_up",
+        },
+        TEST_NOW + 2,
+      ).status,
+    ).toBe("accepted");
+
+    store.recoverInterrupted(TEST_NOW + 3);
+
+    expect(store.get(TEST_USER_ID, SESSION_ID)).toMatchObject({
+      messages: [
+        { role: "user" },
+        { role: "error" },
+        { content: "Run this after restart", role: "user" },
+      ],
+      pendingInputs: [],
+      status: "queued",
+    });
+    expect(store.conversation(SESSION_ID).at(-1)).toEqual({
+      content: "Run this after restart",
+      role: "user",
+    });
+    expect(store.queuedSessionOwnerIds()).toEqual([TEST_USER_ID]);
+    database.$client.close();
+  });
+
+  test("fails interrupted steering so it is resumed explicitly at a safe boundary", () => {
+    const { database, store } = runningStore();
+    expect(
+      store.enqueuePendingInput(
+        TEST_USER_ID,
+        SESSION_ID,
+        {
+          clientRequestId: "restart-steer",
+          content: "Apply this only when resumed",
+          images: [],
+          kind: "steer",
+        },
+        TEST_NOW + 2,
+      ).status,
+    ).toBe("accepted");
+
+    store.recoverInterrupted(TEST_NOW + 3);
+
+    expect(store.get(TEST_USER_ID, SESSION_ID)).toMatchObject({
+      pendingInputs: [
+        { content: "Apply this only when resumed", kind: "steer" },
+      ],
+      status: "failed",
+    });
+    expect(store.queuedSessionOwnerIds()).toEqual([]);
+    database.$client.close();
+  });
+
+  test("retains pending inputs through stop and failure", () => {
+    for (const finish of ["stop", "fail"] as const) {
       const { database, store } = runningStore();
       expect(
         store.enqueuePendingInput(
@@ -277,10 +408,8 @@ describe("pending session input store", () => {
 
       if (finish === "stop") {
         expect(store.stop(TEST_USER_ID, SESSION_ID, TEST_NOW + 3)).toBe(true);
-      } else if (finish === "fail") {
-        expect(store.mark(SESSION_ID, "failed", TEST_NOW + 3)).toBe(true);
       } else {
-        store.failInterrupted(TEST_NOW + 3);
+        expect(store.mark(SESSION_ID, "failed", TEST_NOW + 3)).toBe(true);
       }
 
       expect(store.get(TEST_USER_ID, SESSION_ID)?.pendingInputs).toMatchObject([

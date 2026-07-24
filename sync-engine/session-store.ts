@@ -1,5 +1,5 @@
 import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
-import { readAgentFile, type AgentFile } from "../shared/agent-file.ts";
+import { type AgentFile } from "../shared/agent-file.ts";
 import type { AgentImage } from "../shared/agent-images.ts";
 import type {
   AgentConversationMessage,
@@ -16,21 +16,32 @@ import { createUuidV7, SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 import type {
   AgentSessionCostBasis,
   AgentSessionDetail,
-  AgentSessionStatus,
   AgentSessionSummary,
   AgentSessionUsageUpdate,
 } from "../shared/session-model.ts";
 import { activeSessionDuration } from "../shared/session-timing.ts";
 import { compactStoredConversation } from "./session-compaction.ts";
 import {
+  consumeLeadingFollowUp,
   enqueuePendingInput,
+  pendingInputHeadKind,
   settleNormalSessionBoundary,
   storedPendingInputs,
   takeSteeringInputs,
   type EnqueuePendingInputResult,
   type EnqueuePendingSessionInput,
 } from "./session-pending-inputs.ts";
-import { queuedSessionDetails } from "./session-queued.ts";
+import {
+  queuedSessionDetails,
+  queuedSessionOwnerIds,
+} from "./session-queued.ts";
+import {
+  finishActiveSession,
+  readStoredAgentFile,
+  startActiveSession,
+  systemTransition,
+  userTransition,
+} from "./session-store-lifecycle.ts";
 import {
   conversationFromMessages,
   parseProviderPricing,
@@ -81,7 +92,8 @@ export interface CreateAgentSession extends Pick<
 export type QueueSessionResult =
   | { readonly detail: AgentSessionDetail; readonly status: "queued" }
   | { readonly status: "busy" }
-  | { readonly status: "not_found" };
+  | { readonly status: "not_found" }
+  | { readonly status: "pending_input" };
 
 function requireStoredSession<Value>(stored: Value | undefined): Value {
   if (stored === undefined) {
@@ -95,10 +107,6 @@ const SESSION_TIMING_SELECTION = {
   activeDurationMs: agentSessions.activeDurationMs,
   activeStartedAt: agentSessions.activeStartedAt,
 };
-
-function didUpdate(rows: readonly unknown[]): boolean {
-  return rows.length > 0;
-}
 
 type StoredSessionSummary = Pick<
   typeof agentSessions.$inferSelect,
@@ -242,7 +250,7 @@ export class SessionStore {
 
     return {
       ...summarizeSession(stored),
-      agentFile: this.#agentFile(sessionId),
+      agentFile: readStoredAgentFile(this.#database, sessionId),
       messages: withInterruptedToolResults(
         storedSessionMessages(this.#database, sessionId),
         stored.status !== "queued" && stored.status !== "running",
@@ -457,6 +465,10 @@ export class SessionStore {
     );
   }
 
+  queuedSessionOwnerIds(): readonly string[] {
+    return queuedSessionOwnerIds(this.#database);
+  }
+
   queuedSessions(userId: string): readonly AgentSessionDetail[] {
     return queuedSessionDetails(this.#database, userId, (ownerId, sessionId) =>
       this.get(ownerId, sessionId),
@@ -471,29 +483,56 @@ export class SessionStore {
     switch (status) {
       case "failed":
         return (
-          this.#finishActiveSession(sessionId, "failed", now) ||
-          this.#systemTransition(sessionId, ["queued"], status, now)
+          finishActiveSession({
+            actorId: SYSTEM_ID,
+            database: this.#database,
+            now,
+            sessionId,
+            status: "failed",
+          }) ||
+          systemTransition({
+            database: this.#database,
+            from: ["queued"],
+            now,
+            sessionId,
+            to: status,
+          })
         );
       case "idle":
-        return this.#finishActiveSession(sessionId, "idle", now);
+        return finishActiveSession({
+          actorId: SYSTEM_ID,
+          database: this.#database,
+          now,
+          sessionId,
+          status: "idle",
+        });
       case "running":
-        return this.#startActiveSession(sessionId, now);
+        return startActiveSession(this.#database, sessionId, now);
     }
   }
 
   stop(userId: string, sessionId: string, now: number): boolean {
-    if (this.#finishActiveSession(sessionId, "stopped", now, userId, userId)) {
+    if (
+      finishActiveSession({
+        actorId: userId,
+        database: this.#database,
+        now,
+        sessionId,
+        status: "stopped",
+        userId,
+      })
+    ) {
       return true;
     }
 
-    return this.#transition(
-      sessionId,
-      ["queued", "running", "idle", "failed"],
-      "stopped",
-      userId,
+    return userTransition({
+      database: this.#database,
+      from: ["queued", "running", "idle", "failed"],
       now,
+      sessionId,
+      to: "stopped",
       userId,
-    );
+    });
   }
 
   queue(
@@ -504,6 +543,7 @@ export class SessionStore {
       readonly content: string;
       readonly images: readonly AgentImage[];
     },
+    consumePendingFollowUp = true,
   ): QueueSessionResult {
     const messageId = prompt === undefined ? undefined : this.#generateId(now);
     const status = this.#database.transaction((transaction) => {
@@ -523,6 +563,17 @@ export class SessionStore {
         stored.status !== "stopped"
       ) {
         return "busy" as const;
+      }
+
+      const pendingKind = pendingInputHeadKind(transaction, sessionId);
+      if (
+        pendingKind !== undefined &&
+        (prompt !== undefined || !consumePendingFollowUp)
+      ) {
+        return "pending_input" as const;
+      }
+      if (pendingKind === "follow_up") {
+        consumeLeadingFollowUp(transaction, sessionId, userId, now);
       }
 
       if (prompt !== undefined && messageId !== undefined) {
@@ -565,11 +616,12 @@ export class SessionStore {
     return { detail, status };
   }
 
-  failInterrupted(now: number): readonly PendingSpawnedSession[] {
+  recoverInterrupted(now: number): readonly PendingSpawnedSession[] {
     const interrupted = this.#database
       .select({
         ...SESSION_TIMING_SELECTION,
         id: agentSessions.id,
+        status: agentSessions.status,
         userId: agentSessions.userId,
       })
       .from(agentSessions)
@@ -582,6 +634,9 @@ export class SessionStore {
       .all();
 
     for (const session of interrupted) {
+      if (session.status === "queued") {
+        continue;
+      }
       const duration = activeSessionDuration(session, now);
       this.#database.transaction((transaction) => {
         insertStoredMessage(transaction, interruptedSessionErrorValues(), {
@@ -591,12 +646,18 @@ export class SessionStore {
           sessionId: session.id,
           userId: session.userId,
         });
+        const recoverQueued = consumeLeadingFollowUp(
+          transaction,
+          session.id,
+          session.userId,
+          now + 1,
+        );
         transaction
           .update(agentSessions)
           .set({
             activeDurationMs: duration,
             activeStartedAt: null,
-            status: "failed",
+            status: recoverQueued ? "queued" : "failed",
             ...updatedAuditFields(SYSTEM_ID, now),
           })
           .where(eq(agentSessions.id, session.id))
@@ -634,104 +695,5 @@ export class SessionStore {
         .where(eq(agentSessions.id, sessionId))
         .run();
     });
-  }
-
-  #agentFile(sessionId: string): AgentFile | null {
-    const condition = activeSessionCondition({ id: sessionId });
-    const stored = requireStoredSession(
-      this.#database
-        .select({
-          content: agentSessions.agentFileContent,
-          name: agentSessions.agentFileName,
-        })
-        .from(agentSessions)
-        .where(condition)
-        .get(),
-    );
-
-    return readAgentFile(
-      stored.content === null && stored.name === null ? null : stored,
-    );
-  }
-
-  #startActiveSession(sessionId: string, now: number): boolean {
-    return didUpdate(
-      this.#database
-        .update(agentSessions)
-        .set({
-          activeStartedAt: new Date(now),
-          status: "running",
-          ...updatedAuditFields(SYSTEM_ID, now),
-        })
-        .where(activeSessionCondition({ id: sessionId, status: "queued" }))
-        .returning()
-        .all(),
-    );
-  }
-
-  #finishActiveSession(
-    sessionId: string,
-    status: "failed" | "idle" | "stopped",
-    now: number,
-    actorId: string = SYSTEM_ID,
-    userId?: string,
-  ): boolean {
-    const session = this.#database
-      .select(SESSION_TIMING_SELECTION)
-      .from(agentSessions)
-      .where(runningCondition(sessionId, userId))
-      .get();
-    if (session?.activeStartedAt === null || session === undefined) {
-      return false;
-    }
-
-    return didUpdate(
-      this.#database
-        .update(agentSessions)
-        .set({
-          activeDurationMs: activeSessionDuration(session, now),
-          activeStartedAt: null,
-          status,
-          ...updatedAuditFields(actorId, now),
-        })
-        .where(runningCondition(sessionId, userId))
-        .returning({ status: agentSessions.status })
-        .all(),
-    );
-  }
-
-  #systemTransition(
-    sessionId: string,
-    from: readonly AgentSessionStatus[],
-    to: AgentSessionStatus,
-    now: number,
-  ): boolean {
-    return this.#transition(sessionId, from, to, SYSTEM_ID, now);
-  }
-
-  #transition(
-    sessionId: string,
-    from: readonly AgentSessionStatus[],
-    to: AgentSessionStatus,
-    actorId: string,
-    now: number,
-    userId?: string,
-  ): boolean {
-    return didUpdate(
-      this.#database
-        .update(agentSessions)
-        .set({ status: to, ...updatedAuditFields(actorId, now) })
-        .where(
-          and(
-            activeSessionCondition({
-              id: sessionId,
-              ...(userId === undefined ? {} : { userId }),
-            }),
-            inArray(agentSessions.status, from),
-          ),
-        )
-        .returning({ updatedAt: agentSessions.updatedAt })
-        .all(),
-    );
   }
 }

@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { readAgentImages, type AgentImage } from "../shared/agent-images.ts";
 import type { AgentConversationMessage } from "../shared/agent-loop.ts";
 import { createdAuditFields, softDeletedAuditFields } from "../shared/audit.ts";
@@ -39,6 +39,7 @@ interface StoredPendingInput {
   readonly id: string;
   readonly images: string | null;
   readonly kind: AgentSessionPendingInputKind;
+  readonly sequence: number;
   readonly sessionId: string;
 }
 
@@ -76,6 +77,7 @@ function pendingSelection() {
     id: agentPendingInputs.id,
     images: agentPendingInputs.images,
     kind: agentPendingInputs.kind,
+    sequence: agentPendingInputs.sequence,
     sessionId: agentPendingInputs.sessionId,
   };
 }
@@ -104,6 +106,42 @@ function pendingCondition(sessionId: string) {
   );
 }
 
+function pendingOrder() {
+  return [asc(agentPendingInputs.sequence)] as const;
+}
+
+// cpd-ignore-start -- Queue readers deliberately share the authoritative pending selection and ordering.
+export function pendingInputHeadKind(
+  database: Pick<AppDatabase, "select">,
+  sessionId: string,
+): AgentSessionPendingInputKind | undefined {
+  return database
+    .select({ kind: agentPendingInputs.kind })
+    .from(agentPendingInputs)
+    .where(pendingCondition(sessionId))
+    .orderBy(...pendingOrder())
+    .get()?.kind;
+}
+
+export function consumeLeadingFollowUp(
+  database: Pick<AppDatabase, "insert" | "select" | "update">,
+  sessionId: string,
+  userId: string,
+  now: number,
+): boolean {
+  const input = database
+    .select(pendingSelection())
+    .from(agentPendingInputs)
+    .where(pendingCondition(sessionId))
+    .orderBy(...pendingOrder())
+    .get();
+  if (input?.kind !== "follow_up") {
+    return false;
+  }
+  insertAndConsume(database, sessionId, input, userId, now);
+  return true;
+}
+
 export function storedPendingInputs(
   database: AppDatabase,
   sessionId: string,
@@ -112,10 +150,11 @@ export function storedPendingInputs(
     .select(pendingSelection())
     .from(agentPendingInputs)
     .where(pendingCondition(sessionId))
-    .orderBy(asc(agentPendingInputs.createdAt), asc(agentPendingInputs.id))
+    .orderBy(...pendingOrder())
     .all()
     .map(storedPendingInput);
 }
+// cpd-ignore-end
 
 // cpd-ignore-start -- Transactional SQLite selection and updates intentionally mirror adjacent store operations.
 export function enqueuePendingInput(options: {
@@ -169,11 +208,19 @@ export function enqueuePendingInput(options: {
       .select({ id: agentPendingInputs.id })
       .from(agentPendingInputs)
       .where(pendingCondition(options.sessionId))
+      .limit(MAXIMUM_PENDING_SESSION_INPUTS)
       .all();
     if (pending.length >= MAXIMUM_PENDING_SESSION_INPUTS) {
       return { status: "full" };
     }
 
+    const previous = transaction
+      .select({ sequence: agentPendingInputs.sequence })
+      .from(agentPendingInputs)
+      .where(eq(agentPendingInputs.sessionId, options.sessionId))
+      .orderBy(desc(agentPendingInputs.sequence))
+      .get();
+    const sequence = (previous?.sequence ?? 0) + 1;
     const id = options.generateId(options.now);
     transaction
       .insert(agentPendingInputs)
@@ -184,6 +231,7 @@ export function enqueuePendingInput(options: {
         id,
         images: serializedImages(options.input.images),
         kind: options.input.kind,
+        sequence,
         sessionId: options.sessionId,
         userId: options.userId,
       })
@@ -259,7 +307,7 @@ export function takeSteeringInputs(options: {
       .select(pendingSelection())
       .from(agentPendingInputs)
       .where(pendingCondition(options.sessionId))
-      .orderBy(asc(agentPendingInputs.createdAt), asc(agentPendingInputs.id))
+      .orderBy(...pendingOrder())
       .all()) {
       if (input.kind !== "steer") {
         break;
@@ -324,7 +372,7 @@ export function settleNormalSessionBoundary(options: {
       .select(pendingSelection())
       .from(agentPendingInputs)
       .where(pendingCondition(options.sessionId))
-      .orderBy(asc(agentPendingInputs.createdAt), asc(agentPendingInputs.id))
+      .orderBy(...pendingOrder())
       .get();
     if (pending?.kind === "steer") {
       return { status: "running", userId: session.userId };

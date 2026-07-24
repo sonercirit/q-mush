@@ -18,13 +18,22 @@ import { activeSessionDuration } from "../shared/session-timing.ts";
 import { Collection } from "./collection.tsx";
 import { SessionFollowUp } from "./session-client-forms.tsx";
 import type { SessionViewState } from "./session-client.tsx";
+import { sessionComposerUnavailableReason } from "./session-composer-availability.ts";
 import {
   CompactionControls,
   sessionContextClasses,
   sessionContextLabel,
 } from "./session-context-client.tsx";
 import type { SessionController } from "./session-controller.ts";
-import { SessionTranscript } from "./session-transcript.tsx";
+import {
+  createSessionShortcuts,
+  SessionPendingInputs,
+} from "./session-pending-client.tsx";
+import { SessionTranscriptFilterControls } from "./session-transcript-filter-controls.tsx";
+import {
+  SessionTranscript,
+  sessionTranscriptFilterCounts,
+} from "./session-transcript.tsx";
 
 const STATUS_PRESENTATION: Readonly<
   Record<
@@ -142,6 +151,8 @@ function SessionMetrics(props: {
 
 interface SessionViewProps {
   readonly controller: SessionController;
+  readonly credentialAvailable?: boolean | undefined;
+  readonly runnerAvailable?: boolean | undefined;
   readonly state: SessionViewState;
 }
 
@@ -259,58 +270,39 @@ function isAtScrollEnd(element: HTMLElement): boolean {
   );
 }
 
-function PendingSessionInputs(props: {
-  readonly inputs: AgentSessionDetail["pendingInputs"];
-}): JSX.Element {
-  return (
-    <Show when={props.inputs.length > 0}>
-      <section
-        aria-label="Queued session input"
-        class="mt-5 rounded-2xl border border-amber-300/20 bg-amber-300/5 p-4"
-      >
-        <h4 class="text-sm font-semibold text-amber-200">Queued input</h4>
-        <ul class="mt-3 space-y-2">
-          {props.inputs.map((input) => (
-            <li class="rounded-xl border border-white/10 bg-slate-950/70 p-3">
-              <p class="text-xs font-semibold tracking-wide text-amber-200 uppercase">
-                {input.kind === "steer" ? "Queued steer" : "Queued follow up"}
-              </p>
-              <Show when={input.content.length > 0}>
-                <p class="mt-2 whitespace-pre-wrap text-sm text-slate-300">
-                  {input.content}
-                </p>
-              </Show>
-              <Show when={input.images.length > 0}>
-                <p class="mt-2 text-xs text-slate-500">
-                  {`${String(input.images.length)} attached image${input.images.length === 1 ? "" : "s"}`}
-                </p>
-              </Show>
-            </li>
-          ))}
-        </ul>
-      </section>
-    </Show>
-  );
-}
-
-function primaryShortcutLabel(platform: string): string {
-  return /Mac|iPhone|iPad|iPod/u.test(platform) ? "⌘+Enter" : "Ctrl+Enter";
-}
-
 function LoadedSessionDetail(props: {
   readonly controller: SessionController;
+  readonly credentialAvailable: boolean | undefined;
   readonly detail: AgentSessionDetail;
+  readonly runnerAvailable: boolean | undefined;
   readonly state: SessionViewState;
 }): JSX.Element {
   const running = (): boolean => props.detail.status === "running";
   const queued = (): boolean => props.detail.status === "queued";
   const active = (): boolean => queued() || running();
-  const [primaryShortcut, setPrimaryShortcut] = createSignal<{
-    readonly keys: string;
-    readonly label: string;
-  }>({ keys: "Control+Enter", label: "Ctrl+Enter" });
+  const [shortcuts, setShortcutPlatform] = createSessionShortcuts();
+  const composerReason = (): string | undefined =>
+    sessionComposerUnavailableReason(
+      props.detail,
+      props.state,
+      props.runnerAvailable,
+      props.credentialAvailable,
+    );
+  const composerDisabled = (): boolean => composerReason() !== undefined;
+  const compactionDisabled = (): boolean =>
+    active() ||
+    props.state.compacting ||
+    props.state.sending ||
+    props.state.stopping;
   const [scrollLockEnabled, setScrollLockEnabled] = createSignal(true);
   const [transcript, setTranscript] = createSignal<HTMLUListElement>();
+  const filterCounts = createMemo(() =>
+    sessionTranscriptFilterCounts(
+      props.detail.agentFile,
+      props.detail.messages,
+      props.detail.tools,
+    ),
+  );
   const scrollToEnd = (): void => {
     const element = transcript();
     if (scrollLockEnabled() && element !== undefined) {
@@ -329,11 +321,7 @@ function LoadedSessionDetail(props: {
   };
 
   onMount(() => {
-    const label = primaryShortcutLabel(navigator.platform);
-    setPrimaryShortcut({
-      keys: label === "⌘+Enter" ? "Meta+Enter" : "Control+Enter",
-      label,
-    });
+    setShortcutPlatform(navigator.platform);
     scrollToEnd();
   });
   createEffect(on(() => scrollRevision(props.detail), scrollToEnd));
@@ -381,6 +369,13 @@ function LoadedSessionDetail(props: {
           </Show>
         </div>
       </div>
+      <SessionTranscriptFilterControls
+        counts={filterCounts()}
+        filters={props.state.transcriptFilters}
+        onChange={(name, visible) => {
+          props.controller.setTranscriptFilter(name, visible);
+        }}
+      />
       <ul
         aria-live="polite"
         class="mt-5 max-h-[36rem] space-y-3 overflow-y-auto pr-1"
@@ -392,16 +387,18 @@ function LoadedSessionDetail(props: {
       >
         <SessionTranscript
           agentFile={props.detail.agentFile}
+          filters={props.state.transcriptFilters}
           messages={props.detail.messages}
           tools={props.detail.tools}
         />
       </ul>
-      <PendingSessionInputs inputs={props.detail.pendingInputs} />
+      <SessionPendingInputs inputs={props.detail.pendingInputs} />
       <div class="mt-5 flex flex-col gap-3">
         <Show when={!active()}>
           <CompactionControls
             autoCompact={props.detail.autoCompact}
             compacting={props.state.compacting}
+            disabled={compactionDisabled()}
             onCompact={() => {
               void props.controller.compact();
             }}
@@ -410,65 +407,96 @@ function LoadedSessionDetail(props: {
             }}
           />
         </Show>
-        {/* cpd-ignore-start -- Each action keeps its explicit controller operation and shortcut. */}
-        <div class="flex gap-3">
+        <div class="flex flex-col gap-3 sm:flex-row">
           <SessionFollowUp
             actions={
+              // cpd-ignore-start -- Each action intentionally guards its distinct controller mutation.
               active()
                 ? [
-                    // cpd-ignore-start -- Action objects intentionally keep explicit controller operations.
                     {
                       label: "Follow up",
                       onClick: () => {
-                        void props.controller.followUp();
+                        if (!composerDisabled()) {
+                          void props.controller.followUp();
+                        }
                       },
-                      shortcut: primaryShortcut().label,
-                      shortcutKeys: primaryShortcut().keys,
+                      shortcut: shortcuts().followUpLabel,
+                      shortcutKeys: shortcuts().followUpKeys,
                     },
                     {
                       disabled: queued(),
                       label: "Steer",
                       onClick: () => {
-                        void props.controller.steer();
+                        if (!composerDisabled() && running()) {
+                          void props.controller.steer();
+                        }
                       },
-                      shortcut: "Shift+Enter",
-                      shortcutKeys: "Shift+Enter",
+                      shortcut: shortcuts().steerLabel,
+                      shortcutKeys: shortcuts().steerKeys,
                     },
                   ]
                 : [
                     {
                       label: "Send",
                       onClick: () => {
-                        void props.controller.send();
+                        if (!composerDisabled()) {
+                          void props.controller.send();
+                        }
                       },
-                      shortcut: primaryShortcut().label,
-                      shortcutKeys: primaryShortcut().keys,
+                      shortcut: shortcuts().followUpLabel,
+                      shortcutKeys: shortcuts().followUpKeys,
                     },
-                    // cpd-ignore-end
                   ]
+              // cpd-ignore-end
             }
+            availabilityDescriptionId="session-composer-state"
+            availabilityLabel={
+              composerReason() ??
+              (running()
+                ? "Running. Follow up starts the next turn; Steer changes direction at the next safe model boundary."
+                : queued()
+                  ? "Queued. Follow up starts after the queued work; steering is available only while running."
+                  : "Ready for another instruction.")
+            }
+            disabled={composerDisabled()}
             images={props.state.followUpImages}
             onAddImages={(files) => {
-              void props.controller.addImages(files, true);
+              if (!composerDisabled()) {
+                void props.controller.addImages(files, true);
+              }
             }}
             onInput={(value) => {
-              props.controller.setFollowUp(value);
+              if (!composerDisabled()) {
+                props.controller.setFollowUp(value);
+              }
             }}
             onKeyDown={(event) => {
-              if (event.isComposing || event.key !== "Enter") {
+              if (
+                composerDisabled() ||
+                event.isComposing ||
+                event.key !== "Enter" ||
+                (!event.ctrlKey && !event.metaKey)
+              ) {
                 return;
               }
+              event.preventDefault();
               if (event.shiftKey) {
-                if (!queued()) {
-                  event.preventDefault();
-                  if (running()) {
-                    void props.controller.steer();
-                  } else {
-                    void props.controller.continueSession();
-                  }
+                if (running()) {
+                  void props.controller.steer();
                 }
-              } else if (event.ctrlKey || event.metaKey) {
-                event.preventDefault();
+              } else if (active()) {
+                void props.controller.followUp();
+              } else {
+                event.currentTarget.form?.requestSubmit();
+              }
+            }}
+            onRemoveImage={(index) => {
+              if (!composerDisabled()) {
+                props.controller.removeImage(index, "followUp");
+              }
+            }}
+            onSubmit={() => {
+              if (!composerDisabled()) {
                 if (active()) {
                   void props.controller.followUp();
                 } else {
@@ -476,28 +504,26 @@ function LoadedSessionDetail(props: {
                 }
               }
             }}
-            onRemoveImage={(index) => {
-              props.controller.removeImage(index, "followUp");
-            }}
             prompt={props.state.followUp}
             sending={props.state.sending}
           />
           <Show when={!active()}>
             <button
-              aria-keyshortcuts="Shift+Enter"
-              class="self-end rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950"
-              disabled={props.state.sending}
+              aria-describedby="session-composer-state"
+              aria-label="Continue without another instruction"
+              class="self-end rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={composerDisabled()}
               onClick={() => {
-                void props.controller.continueSession();
+                if (!composerDisabled()) {
+                  void props.controller.continueSession();
+                }
               }}
               type="button"
             >
-              Continue
-              <kbd class="ml-2 text-xs font-normal opacity-70">Shift+Enter</kbd>
+              Continue without message
             </button>
           </Show>
         </div>
-        {/* cpd-ignore-end */}
       </div>
     </div>
   );
@@ -520,7 +546,9 @@ export function SessionDetail(props: SessionViewProps): JSX.Element {
         {(detail) => (
           <LoadedSessionDetail
             controller={props.controller}
+            credentialAvailable={props.credentialAvailable}
             detail={detail()}
+            runnerAvailable={props.runnerAvailable}
             state={props.state}
           />
         )}

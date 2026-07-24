@@ -357,6 +357,7 @@ describe("session store", () => {
   });
 
   test("continues without appending a user message", () => {
+    // cpd-ignore-start -- Adjacent lifecycle cases intentionally share a complete store setup.
     const setup = runningStore();
     expect(setup.store.mark(SESSION_ID, "idle", TEST_NOW + 2)).toBe(true);
     const before = setup.store.conversation(SESSION_ID);
@@ -369,10 +370,27 @@ describe("session store", () => {
     setup.database.$client.close();
   });
 
+  test("leaves an interrupted queued session queued without an error", () => {
+    const { database, store } = createStore();
+    createTestSession(store);
+
+    store.recoverInterrupted(TEST_NOW + 2);
+
+    expect(store.get(TEST_USER_ID, SESSION_ID)).toMatchObject({
+      activeDurationMs: 0,
+      activeStartedAt: null,
+      messages: [{ role: "user" }],
+      status: "queued",
+    });
+    expect(store.queuedSessionOwnerIds()).toEqual([TEST_USER_ID]);
+    database.$client.close();
+    // cpd-ignore-end
+  });
+
   test("records an error when an active session is interrupted", () => {
     const { database, store } = runningStore();
 
-    store.failInterrupted(TEST_NOW + 2);
+    store.recoverInterrupted(TEST_NOW + 2);
 
     expect(store.get(TEST_USER_ID, SESSION_ID)).toMatchObject({
       activeDurationMs: 1,

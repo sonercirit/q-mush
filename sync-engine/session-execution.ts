@@ -22,7 +22,6 @@ export interface SessionExecutionDependencies {
   readonly actions: SessionAgentActions;
   readonly braveSearch: Pick<BraveSearchSkill, "execute">;
   readonly broker: RunnerCommandBroker;
-  readonly launch: SessionFinishDependencies["launch"];
   readonly modelFactory: AgentModelFactory;
   readonly notify: SessionFinishDependencies["notify"];
   readonly now: () => number;
@@ -46,7 +45,6 @@ function finishDependencies(
     actionsFinished: (finished, ownerId) => {
       dependencies.actions.finished(finished, ownerId);
     },
-    launch: dependencies.launch,
     notify: dependencies.notify,
     now: dependencies.now,
     rerun: (current) =>
@@ -57,6 +55,7 @@ function finishDependencies(
         userId,
         controller,
         false,
+        current.status === "running" ? "running_continuation" : "queued",
       ),
     runners: dependencies.runners,
     runtimes: dependencies.runtimes,
@@ -72,12 +71,15 @@ export async function runStoredSession(
   userId: string,
   controller: AbortController,
   compact: boolean,
+  start: "queued" | "running_continuation" = "queued",
 ): Promise<void> {
-  if (!dependencies.store.mark(detail.id, "running", dependencies.now())) {
-    const current = dependencies.store.get(userId, detail.id);
-    if (current?.status !== "running") {
-      return;
-    }
+  const started =
+    start === "queued"
+      ? dependencies.store.mark(detail.id, "running", dependencies.now())
+      : !controller.signal.aborted &&
+        dependencies.store.get(userId, detail.id)?.status === "running";
+  if (!started) {
+    return;
   }
   dependencies.notify(userId, detail.id);
 
@@ -85,7 +87,6 @@ export async function runStoredSession(
     finishSession(
       finishDependencies(dependencies, credential, userId, controller),
       detail,
-      credential,
       userId,
       error,
     );

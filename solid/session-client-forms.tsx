@@ -19,17 +19,23 @@ interface SessionPromptInputProps extends PromptEventProps, SessionImagesProps {
   readonly prompt: string;
 }
 
+interface SessionFollowUpAction {
+  readonly disabled?: boolean;
+  readonly label: string;
+  readonly onClick: () => void;
+  readonly shortcut: string;
+  readonly shortcutKeys: string;
+}
+
 interface SessionFollowUpProps extends PromptEventProps, SessionImagesProps {
-  readonly actions: readonly {
-    readonly disabled?: boolean;
-    readonly label: string;
-    readonly onClick: () => void;
-    readonly shortcut: string;
-    readonly shortcutKeys: string;
-  }[];
+  readonly actions: readonly SessionFollowUpAction[];
+  readonly availabilityDescriptionId: string;
+  readonly availabilityLabel: string;
+  readonly disabled: boolean;
   readonly onKeyDown: (
     event: KeyboardEvent & { readonly currentTarget: HTMLTextAreaElement },
   ) => void;
+  readonly onSubmit: () => void;
   readonly prompt: string;
   readonly sending: boolean;
 }
@@ -94,27 +100,41 @@ export function SessionPromptInput(
 
 export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
   return (
-    <div class="flex min-w-0 flex-1 flex-col gap-3">
+    <form
+      aria-label="Send another instruction"
+      class="flex min-w-0 flex-1 flex-col gap-3"
+      data-session-composer="true"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!props.disabled) {
+          props.onSubmit();
+        }
+      }}
+    >
       <textarea
-        class="min-h-20 w-full resize-y rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none"
-        disabled={props.sending}
+        aria-describedby={props.availabilityDescriptionId}
+        aria-disabled={props.disabled}
+        aria-label="Follow-up instruction"
+        class="min-h-20 w-full resize-y rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
         name="prompt"
         onKeyDown={props.onKeyDown}
         placeholder="Give this session another instruction…"
+        readOnly={props.disabled ? true : undefined}
         value={props.prompt}
         {...promptEvents(props)}
       />
       {renderSessionImages({
-        disabled: props.sending,
-        id: "follow-up-images",
         ...props,
+        disabled: props.disabled,
+        id: "follow-up-images",
       })}
-      <div class="flex justify-end gap-2">
+      <div class="flex flex-wrap justify-end gap-2">
         {props.actions.map((action) => (
           <button
+            aria-describedby={props.availabilityDescriptionId}
             aria-keyshortcuts={action.shortcutKeys}
-            class="rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:opacity-50"
-            disabled={props.sending || action.disabled === true}
+            class="rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={props.disabled || action.disabled === true}
             onClick={action.onClick}
             type="button"
           >
@@ -125,6 +145,14 @@ export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
           </button>
         ))}
       </div>
-    </div>
+      <p
+        aria-live="polite"
+        class="text-xs leading-5 text-slate-500"
+        id={props.availabilityDescriptionId}
+        role="status"
+      >
+        {props.availabilityLabel}
+      </p>
+    </form>
   );
 }

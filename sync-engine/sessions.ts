@@ -167,7 +167,33 @@ class DrizzleSessionIntegration implements SessionIntegration {
       dependencies.randomId ?? createUuidV7,
     );
     this.#actions = this.#createActions();
-    this.#actions.reportAll(this.#store.failInterrupted(this.#now()));
+    const recovered = this.#store.recoverInterrupted(this.#now());
+    this.#actions.reportAll(recovered);
+    this.#launchRecoveredSessions();
+  }
+
+  #launchRecoveredSessions(): void {
+    for (const userId of this.#store.queuedSessionOwnerIds()) {
+      this.#launchQueuedSessions(userId);
+    }
+  }
+
+  #launchQueuedSessions(userId: string): void {
+    void launchQueuedSessions(
+      {
+        draining: () => this.#runtimes.draining,
+        launch: (detail, credential, ownerId) =>
+          this.#launch(detail, credential, ownerId),
+        notify: this.#notify,
+        readCredential: (ownerId, detail, action) =>
+          this.#withCredentialAccess(ownerId, detail, action),
+        runnerIsAvailable: (ownerId, runnerId) =>
+          this.#runners.runnerIsAvailable(ownerId, runnerId),
+        runtimes: this.#runtimes,
+        store: this.#store,
+      },
+      userId,
+    );
   }
 
   #createActions(): SessionAgentActions {
@@ -316,21 +342,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
 
   runnerConnected(userId: string): void {
     this.#actions.reportAll(this.#store.pendingSpawnedSessions());
-    void launchQueuedSessions(
-      {
-        draining: () => this.#runtimes.draining,
-        launch: (detail, credential, ownerId) =>
-          this.#launch(detail, credential, ownerId),
-        notify: this.#notify,
-        readCredential: (ownerId, detail, action) =>
-          this.#withCredentialAccess(ownerId, detail, action),
-        runnerIsAvailable: (ownerId, runnerId) =>
-          this.#runners.runnerIsAvailable(ownerId, runnerId),
-        runtimes: this.#runtimes,
-        store: this.#store,
-      },
-      userId,
-    );
+    this.#launchQueuedSessions(userId);
   }
 
   async stop(request: Request, sessionId: string): Promise<Response> {
@@ -538,7 +550,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
     userId: string,
     compact = false,
   ): boolean {
-    return this.#runtimes.launch(detail.id, (controller) =>
+    return this.#runtimes.schedule(detail.id, (controller) =>
       this.#run(detail, credential, userId, controller, compact),
     );
   }
@@ -578,8 +590,12 @@ class DrizzleSessionIntegration implements SessionIntegration {
 
       if (queued.status !== "queued") {
         return createApiError(
-          queued.status === "busy" ? "session_busy" : "not_found",
-          queued.status === "busy" ? 409 : 404,
+          queued.status === "not_found"
+            ? "not_found"
+            : queued.status === "pending_input"
+              ? "pending_session_input"
+              : "session_busy",
+          queued.status === "not_found" ? 404 : 409,
         );
       }
 
@@ -601,8 +617,6 @@ class DrizzleSessionIntegration implements SessionIntegration {
         actions: this.#actions,
         braveSearch: this.#braveSearch,
         broker: this.#broker,
-        launch: (queued, selectedCredential, ownerId) =>
-          this.#launch(queued, selectedCredential, ownerId),
         modelFactory: this.#modelFactory,
         notify: this.#notify,
         now: this.#now,

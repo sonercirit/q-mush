@@ -3,9 +3,10 @@ import type { AgentSessionToolName } from "../shared/agent-tools.ts";
 import { SESSIONS_PATH } from "../shared/routes.ts";
 import type {
   AgentSessionDetail,
+  AgentSessionStatus,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
-import { HttpResponseError, request, requestJson } from "./browser-http.ts";
+import { requestJson } from "./browser-http.ts";
 import { DirectoryPickerController } from "./directory-picker-controller.ts";
 import { createReactiveState, type ReactiveState } from "./reactive-state.ts";
 import { RevisionState } from "./revision-state.ts";
@@ -19,6 +20,10 @@ import {
   SessionRealtimeState,
 } from "./session-controller-state.ts";
 
+import {
+  createSessionFromDraft,
+  sendSessionMessage,
+} from "./session-controller-requests.ts";
 import { selectedDraftOption } from "./session-form.ts";
 import { appendAgentImageFiles } from "./session-image-input.ts";
 import { SessionModelController } from "./session-model-controller.ts";
@@ -32,9 +37,56 @@ import {
   type SessionMutation,
 } from "./session-mutations.ts";
 import {
+  requestPendingInput,
+  samePendingInputAttempt,
+  sessionCanQueuePendingInput,
+  type PendingInputAttempt,
+} from "./session-pending-input.ts";
+import {
   initialSessionViewState,
   mostRecentSessionDirectory,
 } from "./session-state.ts";
+import {
+  readSessionTranscriptFilters,
+  writeSessionTranscriptFilters,
+  type SessionTranscriptFilterName,
+  type SessionTranscriptFilterStorage,
+} from "./session-transcript-filters.ts";
+
+function detailMutationPending(state: SessionViewState): boolean {
+  return state.compacting || state.sending || state.stopping;
+}
+
+function selectedDetailHasStatus(
+  state: SessionViewState,
+  allowed: (status: AgentSessionStatus) => boolean,
+): boolean {
+  return (
+    state.selectedId !== undefined &&
+    state.detail?.id === state.selectedId &&
+    allowed(state.detail.status)
+  );
+}
+
+function sessionIsActive(status: AgentSessionStatus): boolean {
+  return status === "queued" || status === "running";
+}
+
+function sessionCanResume(status: AgentSessionStatus): boolean {
+  return status === "idle" || status === "failed" || status === "stopped";
+}
+
+function browserTranscriptFilterStorage():
+  SessionTranscriptFilterStorage | undefined {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
 
 function selectedMutation(
   sessionId: string | undefined,
@@ -43,30 +95,11 @@ function selectedMutation(
   return sessionId === undefined ? undefined : create(sessionId);
 }
 
-interface PendingInputAttempt {
-  readonly clientRequestId: string;
-  readonly images: SessionViewState["followUpImages"];
-  readonly kind: "follow_up" | "steer";
-  readonly prompt: string;
-  readonly sessionId: string;
-}
-
-function samePendingInputAttempt(
-  attempt: PendingInputAttempt,
-  requested: Omit<PendingInputAttempt, "clientRequestId">,
-): boolean {
-  return (
-    attempt.sessionId === requested.sessionId &&
-    attempt.kind === requested.kind &&
-    attempt.prompt === requested.prompt &&
-    JSON.stringify(attempt.images) === JSON.stringify(requested.images)
-  );
-}
-
 export class SessionController {
   readonly #directoryPicker: DirectoryPickerController;
   readonly #models: SessionModelController;
   readonly #realtime: SessionRealtimeState;
+  readonly #transcriptFilterStorage: SessionTranscriptFilterStorage | undefined;
   readonly #view: RevisionState<SessionViewState>;
   readonly #reactiveView: ReactiveState<SessionViewState>;
   #pendingInputAttempt: PendingInputAttempt | undefined;
@@ -74,21 +107,26 @@ export class SessionController {
   constructor(
     reactiveView = createReactiveState(initialSessionViewState()),
     directoryPicker = new DirectoryPickerController(),
+    transcriptFilterStorage:
+      | SessionTranscriptFilterStorage
+      | null
+      | undefined = browserTranscriptFilterStorage(),
   ) {
     this.#reactiveView = reactiveView;
     this.#view = new RevisionState(reactiveView.state, reactiveView.setState);
+    const transcriptFilters =
+      transcriptFilterStorage === null || transcriptFilterStorage === undefined
+        ? reactiveView.state().transcriptFilters
+        : readSessionTranscriptFilters(transcriptFilterStorage);
+    this.#view.patch({ transcriptFilters });
     this.#realtime = new SessionRealtimeState(this.#view);
     this.#models = new SessionModelController(this.#view);
     this.#directoryPicker = directoryPicker;
+    this.#transcriptFilterStorage = transcriptFilterStorage ?? undefined;
   }
 
   applyDetail(detail: AgentSessionDetail): void {
-    if (
-      this.#view.value.creating ||
-      this.#view.value.compacting ||
-      this.#view.value.sending ||
-      this.#view.value.stopping
-    ) {
+    if (this.#view.value.creating || detailMutationPending(this.#view.value)) {
       return;
     }
     this.#realtime.applyDetail(detail);
@@ -249,6 +287,21 @@ export class SessionController {
     return this.#toggleAutoCompact(autoCompact);
   }
 
+  setTranscriptFilter(
+    name: SessionTranscriptFilterName,
+    visible: boolean,
+  ): void {
+    const transcriptFilters = {
+      ...this.#view.value.transcriptFilters,
+      [name]: visible,
+    };
+    this.#view.patch({ transcriptFilters });
+    writeSessionTranscriptFilters(
+      this.#transcriptFilterStorage,
+      transcriptFilters,
+    );
+  }
+
   toggleSelect(
     name: "credential" | "model" | "reasoningEffort" | "runnerId",
   ): void {
@@ -269,11 +322,14 @@ export class SessionController {
   }
 
   reset(): void {
+    const transcriptFilters = readSessionTranscriptFilters(
+      this.#transcriptFilterStorage,
+    );
     this.#directoryPicker.reset();
     this.#models.reset();
     this.#pendingInputAttempt = undefined;
     this.#realtime.reset();
-    this.#view.reset(initialSessionViewState());
+    this.#view.reset({ ...initialSessionViewState(), transcriptFilters });
   }
 
   async #loadSessions(revision: number, initial: boolean): Promise<void> {
@@ -343,29 +399,9 @@ export class SessionController {
     const revision = this.#view.begin({ creating: true, error: undefined });
 
     try {
-      const detail = readSessionDetail(
-        await requestJson(SESSIONS_PATH, {
-          body: JSON.stringify({
-            ...(this.#view.value.draft.images.length === 0
-              ? {}
-              : { images: this.#view.value.draft.images }),
-            ...credential,
-            ...(this.#view.value.draft.model.trim().length === 0
-              ? {}
-              : { model: this.#view.value.draft.model.trim() }),
-            prompt: this.#view.value.draft.prompt.trim(),
-            ...(this.#view.value.draft.reasoningEffort.length === 0
-              ? {}
-              : {
-                  reasoningEffort: this.#view.value.draft.reasoningEffort,
-                }),
-            runnerId: this.#view.value.draft.runnerId,
-            tools: this.#view.value.draft.tools,
-            workingDirectory: this.#view.value.draft.workingDirectory.trim(),
-          }),
-          headers: { "content-type": "application/json" },
-          method: "POST",
-        }),
+      const detail = await createSessionFromDraft(
+        this.#view.value.draft,
+        credential,
       );
 
       this.#view.patchCurrent(
@@ -491,17 +527,18 @@ export class SessionController {
     await this.#readDetail(sessionId, revision, true);
   }
 
-  // cpd-ignore-start -- Pending input intentionally mirrors the established follow-up mutation.
   async #pendingInput(kind: "follow_up" | "steer"): Promise<void> {
-    if (this.#view.value.sending) {
-      return;
-    }
-    // cpd-ignore-start -- Pending input intentionally mirrors the established follow-up mutation.
-    const sessionId = this.#view.value.selectedId;
-    const prompt = this.#view.value.followUp.trim();
-    const images = this.#view.value.followUpImages;
+    // cpd-ignore-start -- Pending and ordinary sends share intentional composer guards.
+    const state = this.#view.value;
+    const sessionId = state.selectedId;
+    const detail = state.detail;
+    const prompt = state.followUp.trim();
+    const images = state.followUpImages;
     if (
       sessionId === undefined ||
+      detail?.id !== sessionId ||
+      this.#detailMutationPending() ||
+      !sessionCanQueuePendingInput(detail.status, kind) ||
       (prompt.length === 0 && images.length === 0)
     ) {
       return;
@@ -521,78 +558,59 @@ export class SessionController {
     await this.#mutateDetail({
       action: kind === "steer" ? "steer that session" : "queue that follow-up",
       pending: "sending",
-      request: async () => {
-        try {
-          const response = await request(
-            `${SESSIONS_PATH}/${encodeURIComponent(attempt.sessionId)}/pending-inputs`,
-            {
-              body: JSON.stringify({
-                clientRequestId: attempt.clientRequestId,
-                ...(attempt.images.length === 0
-                  ? {}
-                  : { images: attempt.images }),
-                kind: attempt.kind,
-                prompt: attempt.prompt,
-              }),
-              headers: { "content-type": "application/json" },
-              method: "POST",
-            },
-          );
-          settleAttempt();
-          const value: unknown = await response.json();
-          return value;
-        } catch (error) {
-          if (error instanceof HttpResponseError) {
-            settleAttempt();
-          }
-          throw error;
-        }
-      },
+      request: () => requestPendingInput(attempt, settleAttempt),
       success: { followUp: "", followUpImages: [] },
     });
     // cpd-ignore-end
   }
-  // cpd-ignore-end
 
   async #send(): Promise<void> {
+    // cpd-ignore-start -- Pending and ordinary sends share intentional composer guards.
     const sessionId = this.#view.value.selectedId;
+    const detail = this.#view.value.detail;
     const prompt = this.#view.value.followUp.trim();
 
     if (
       sessionId === undefined ||
+      detail?.id !== sessionId ||
+      detail.status === "queued" ||
+      detail.status === "running" ||
+      this.#detailMutationPending() ||
       (prompt.length === 0 && this.#view.value.followUpImages.length === 0)
     ) {
       return;
     }
 
     await this.#mutateDetail({
-      action: "send that instruction",
-      pending: "sending",
-      request: () =>
-        requestJson(
-          `${SESSIONS_PATH}/${encodeURIComponent(sessionId)}/messages`,
-          {
-            body: JSON.stringify({
-              ...(this.#view.value.followUpImages.length === 0
-                ? {}
-                : { images: this.#view.value.followUpImages }),
-              prompt,
-            }),
-            headers: { "content-type": "application/json" },
-            method: "POST",
-          },
-        ),
+      ...sendSessionMessage(sessionId, prompt, this.#view.value.followUpImages),
       success: { followUp: "", followUpImages: [] },
     });
+    // cpd-ignore-end
+  }
+
+  async #mutateWhen(
+    allowed: (status: AgentSessionStatus) => boolean,
+    mutation: (sessionId: string) => SessionMutation,
+  ): Promise<void> {
+    if (
+      !this.#detailMutationPending() &&
+      selectedDetailHasStatus(this.#view.value, allowed)
+    ) {
+      await this.#mutateSelected(mutation);
+    }
   }
 
   async #compact(): Promise<void> {
-    await this.#mutateSelected(compactSessionMutation);
+    await this.#mutateWhen(sessionCanResume, compactSessionMutation);
   }
 
   async #toggleAutoCompact(autoCompact: boolean): Promise<void> {
     const sessionId = this.#view.value.selectedId;
-    if (sessionId === undefined) {
+    if (
+      sessionId === undefined ||
+      this.#detailMutationPending() ||
+      !selectedDetailHasStatus(this.#view.value, sessionCanResume)
+    ) {
       return;
     }
 
@@ -600,11 +618,15 @@ export class SessionController {
   }
 
   async #continue(): Promise<void> {
-    await this.#mutateSelected(continueSessionMutation);
+    await this.#mutateWhen(sessionCanResume, continueSessionMutation);
   }
 
   async #stop(): Promise<void> {
-    await this.#mutateSelected(stopSessionMutation);
+    await this.#mutateWhen(sessionIsActive, stopSessionMutation);
+  }
+
+  #detailMutationPending(): boolean {
+    return detailMutationPending(this.#view.value);
   }
 
   async #mutateSelected(

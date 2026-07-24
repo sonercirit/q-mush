@@ -11,9 +11,11 @@ CREATE TABLE `agent_pending_inputs` (
 	`kind` text NOT NULL,
 	`content` text NOT NULL,
 	`images` text,
+	`sequence` integer NOT NULL,
 	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE restrict,
 	FOREIGN KEY (`session_id`) REFERENCES `agent_sessions`(`id`) ON UPDATE no action ON DELETE restrict
 );
 --> statement-breakpoint
-CREATE INDEX `agent_pending_inputs_session_deletion_creation_index` ON `agent_pending_inputs` (`session_id`,`is_deleted`,`created_at`);--> statement-breakpoint
+CREATE INDEX `agent_pending_inputs_session_deletion_sequence_index` ON `agent_pending_inputs` (`session_id`,`is_deleted`,`sequence`);--> statement-breakpoint
+CREATE UNIQUE INDEX `agent_pending_inputs_session_sequence_unique` ON `agent_pending_inputs` (`session_id`,`sequence`);--> statement-breakpoint
 CREATE UNIQUE INDEX `agent_pending_inputs_user_request_unique` ON `agent_pending_inputs` (`user_id`,`client_request_id`);

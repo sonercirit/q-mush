@@ -189,12 +189,17 @@ export const agentPendingInputs = sqliteTable(
     kind: text("kind", { enum: ["follow_up", "steer"] }).notNull(),
     content: text("content").notNull(),
     images: text("images"),
+    sequence: integer("sequence").notNull(),
   },
   (table) => [
-    index("agent_pending_inputs_session_deletion_creation_index").on(
+    index("agent_pending_inputs_session_deletion_sequence_index").on(
       table.sessionId,
       table.isDeleted,
-      table.createdAt,
+      table.sequence,
+    ),
+    uniqueIndex("agent_pending_inputs_session_sequence_unique").on(
+      table.sessionId,
+      table.sequence,
     ),
     uniqueIndex("agent_pending_inputs_user_request_unique").on(
       table.userId,

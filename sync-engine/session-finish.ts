@@ -1,4 +1,3 @@
-import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import type { RunnerIntegration } from "./runners.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
@@ -10,11 +9,6 @@ export interface SessionFinishDependencies {
     detail: AgentSessionDetail,
     userId: string,
   ) => void;
-  readonly launch: (
-    detail: AgentSessionDetail,
-    credential: ProviderCredentialAccess,
-    userId: string,
-  ) => boolean;
   readonly notify: (userId: string, sessionId: string) => void;
   readonly now: () => number;
   readonly rerun: (detail: AgentSessionDetail) => Promise<void>;
@@ -41,7 +35,6 @@ function notifyFinished(
 export async function finishSession(
   dependencies: SessionFinishDependencies,
   detail: AgentSessionDetail,
-  credential: ProviderCredentialAccess,
   userId: string,
   error?: unknown,
 ): Promise<void> {
@@ -75,10 +68,9 @@ export async function finishSession(
     const queued = dependencies.store.get(userId, detail.id);
     if (
       queued !== undefined &&
-      dependencies.runners.runnerIsAvailable(userId, queued.runnerId) &&
-      dependencies.launch(queued, credential, userId)
+      dependencies.runners.runnerIsAvailable(userId, queued.runnerId)
     ) {
-      dependencies.notify(userId, detail.id);
+      await dependencies.rerun(queued);
       return;
     }
   }

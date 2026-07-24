@@ -1,9 +1,13 @@
 import { describe, expect, test } from "vitest";
+import { users } from "../../shared/database/schema.ts";
 import { SESSIONS_PATH } from "../../shared/routes.ts";
+import { DrizzleAuthStore } from "../../sync-engine/auth-store.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import {
   createAuthenticatedRequest,
+  TEST_NOW,
   TEST_USER_ID,
+  testAuditFields,
 } from "./authenticated-integration-test-helpers.ts";
 import { ControlledModel } from "./controlled-agent-model.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
@@ -141,6 +145,131 @@ describe("pending session input integration", () => {
     setup.database.$client.close();
   });
 
+  test("resumes a retained follow-up before the first new completion", async () => {
+    const model = new ControlledModel();
+    const setup = connectedSessionSetup(model);
+    const created = await setup.sessions.collection(createSessionRequest());
+    expect(created.status).toBe(201);
+    await completeAgentFileLookup(setup);
+    await waitForSessionValue(
+      () => model.requests.length,
+      (value) => value === 1,
+    );
+
+    const followUp = await setup.sessions.pendingInput(
+      createAuthenticatedRequest(
+        `${SESSIONS_PATH}/${SESSION_ID}/pending-inputs`,
+        {
+          clientRequestId: "retained-follow-up",
+          kind: "follow_up",
+          prompt: "Run this after resuming",
+        },
+        "POST",
+      ),
+      SESSION_ID,
+    );
+    expect(followUp.status).toBe(202);
+    const stopped = await setup.sessions.stop(
+      createAuthenticatedRequest(
+        `${SESSIONS_PATH}/${SESSION_ID}/stop`,
+        undefined,
+        "POST",
+      ),
+      SESSION_ID,
+    );
+    expect(stopped.status).toBe(200);
+    model.resolve({ content: "Canceled completion" });
+    await Bun.sleep(1);
+
+    const resumed = await setup.sessions.continue(
+      createAuthenticatedRequest(
+        `${SESSIONS_PATH}/${SESSION_ID}/continue`,
+        undefined,
+        "POST",
+      ),
+      SESSION_ID,
+    );
+    expect(resumed.status).toBe(202);
+    expect(await resumed.json()).toMatchObject({ pendingInputs: [] });
+    await completeAgentFileLookup(setup);
+    await waitForSessionValue(
+      () => model.requests.length,
+      (value) => value === 2,
+    );
+    expect(model.requests[1]?.at(-1)).toEqual({
+      content: "Run this after resuming",
+      role: "user",
+    });
+    model.resolve({ content: "Resumed completion" });
+    await waitForSessionValue(
+      () => sessionDetail(setup.sessions),
+      hasSessionStatus("idle"),
+    );
+    setup.database.$client.close();
+  });
+
+  test("rejects a new message while retained pending input owns FIFO", async () => {
+    const model = new ControlledModel();
+    const setup = connectedSessionSetup(model);
+    const created = await setup.sessions.collection(createSessionRequest());
+    expect(created.status).toBe(201);
+    await completeAgentFileLookup(setup);
+    await waitForSessionValue(
+      () => model.requests.length,
+      (value) => value === 1,
+    );
+
+    expect(
+      (
+        await setup.sessions.pendingInput(
+          createAuthenticatedRequest(
+            `${SESSIONS_PATH}/${SESSION_ID}/pending-inputs`,
+            {
+              clientRequestId: "retained-before-new-message",
+              kind: "follow_up",
+              prompt: "Older pending work",
+            },
+            "POST",
+          ),
+          SESSION_ID,
+        )
+      ).status,
+    ).toBe(202);
+    expect(
+      (
+        await setup.sessions.stop(
+          createAuthenticatedRequest(
+            `${SESSIONS_PATH}/${SESSION_ID}/stop`,
+            undefined,
+            "POST",
+          ),
+          SESSION_ID,
+        )
+      ).status,
+    ).toBe(200);
+    model.resolve({ content: "Canceled completion" });
+    await Bun.sleep(1);
+
+    const message = await setup.sessions.message(
+      createAuthenticatedRequest(
+        `${SESSIONS_PATH}/${SESSION_ID}/messages`,
+        { prompt: "New work must not leapfrog" },
+        "POST",
+      ),
+      SESSION_ID,
+    );
+
+    await expectJsonResponse(message, 409, {
+      error: "pending_session_input",
+    });
+    expect(await sessionDetail(setup.sessions)).toMatchObject({
+      messages: [{ content: "Inspect README.md", role: "user" }],
+      pendingInputs: [{ content: "Older pending work", kind: "follow_up" }],
+      status: "stopped",
+    });
+    setup.database.$client.close();
+  });
+
   test("resumes with retained steering before the first new completion", async () => {
     const model = new ControlledModel();
     const setup = connectedSessionSetup(model);
@@ -196,6 +325,80 @@ describe("pending session input integration", () => {
       role: "user",
     });
     model.resolve({ content: "Resumed completion" });
+    await waitForSessionValue(
+      () => sessionDetail(setup.sessions),
+      hasSessionStatus("idle"),
+    );
+    setup.database.$client.close();
+  });
+
+  test("retained mixed input stays in FIFO across stop and continue", async () => {
+    const model = new ControlledModel();
+    const setup = connectedSessionSetup(model);
+    const created = await setup.sessions.collection(createSessionRequest());
+    expect(created.status).toBe(201);
+    await completeAgentFileLookup(setup);
+    await waitForSessionValue(
+      () => model.requests.length,
+      (value) => value === 1,
+    );
+
+    const enqueue = (
+      kind: "follow_up" | "steer",
+      clientRequestId: string,
+      prompt: string,
+    ) =>
+      setup.sessions.pendingInput(
+        createAuthenticatedRequest(
+          `${SESSIONS_PATH}/${SESSION_ID}/pending-inputs`,
+          { clientRequestId, kind, prompt },
+          "POST",
+        ),
+        SESSION_ID,
+      );
+    expect(
+      (await enqueue("follow_up", "mixed-follow", "Next turn")).status,
+    ).toBe(202);
+    expect((await enqueue("steer", "mixed-steer", "Then steer")).status).toBe(
+      202,
+    );
+    expect(
+      (
+        await setup.sessions.stop(
+          createAuthenticatedRequest(
+            `${SESSIONS_PATH}/${SESSION_ID}/stop`,
+            undefined,
+            "POST",
+          ),
+          SESSION_ID,
+        )
+      ).status,
+    ).toBe(200);
+    model.resolve({ content: "Canceled completion" });
+    await Bun.sleep(1);
+
+    expect(
+      (
+        await setup.sessions.continue(
+          createAuthenticatedRequest(
+            `${SESSIONS_PATH}/${SESSION_ID}/continue`,
+            undefined,
+            "POST",
+          ),
+          SESSION_ID,
+        )
+      ).status,
+    ).toBe(202);
+    await completeAgentFileLookup(setup);
+    await waitForSessionValue(
+      () => model.requests.length,
+      (value) => value === 2,
+    );
+    expect(model.requests[1]?.slice(-2)).toEqual([
+      { content: "Next turn", role: "user" },
+      { content: "Then steer", role: "user" },
+    ]);
+    model.resolve({ content: "Mixed work complete" });
     await waitForSessionValue(
       () => sessionDetail(setup.sessions),
       hasSessionStatus("idle"),
@@ -326,6 +529,74 @@ describe("pending session input integration", () => {
       { content: "Use the test file instead", role: "user" },
     ]);
     model.resolve({ content: "Done" });
+    await waitForSessionValue(
+      () => sessionDetail(setup.sessions),
+      hasSessionStatus("idle"),
+    );
+    setup.database.$client.close();
+  });
+
+  test("rejects a real cross-user pending-input mutation without revealing the session", async () => {
+    const model = new ControlledModel();
+    const setup = connectedSessionSetup(model);
+    const created = await setup.sessions.collection(createSessionRequest());
+    expect(created.status).toBe(201);
+    await completeAgentFileLookup(setup);
+    await waitForSessionValue(
+      () => model.requests.length,
+      (value) => value === 1,
+    );
+
+    const otherUserId = "018bcfe5-6800-7000-8000-000000000099";
+    const otherToken = "other-authenticated-session";
+    setup.database
+      .insert(users)
+      .values({
+        ...testAuditFields(otherUserId),
+        email: "other@example.com",
+        googleSubject: "other-google-user",
+        id: otherUserId,
+        name: "Other User",
+      })
+      .run();
+    const authStore = new DrizzleAuthStore(
+      setup.database,
+      () => "018bcfe5-6800-7000-8000-000000000098",
+    );
+    authStore.createSession(
+      otherToken,
+      {
+        email: "other@example.com",
+        googleSubject: "other-google-user",
+        name: "Other User",
+      },
+      TEST_NOW + 60_000,
+      TEST_NOW,
+    );
+    const request = new Request(
+      `http://localhost:3000${SESSIONS_PATH}/${SESSION_ID}/pending-inputs`,
+      {
+        body: JSON.stringify({
+          clientRequestId: "cross-user-request",
+          kind: "follow_up",
+          prompt: "Do not allow this",
+        }),
+        headers: {
+          "content-type": "application/json",
+          cookie: `q_mush_session=${otherToken}`,
+        },
+        method: "POST",
+      },
+    );
+
+    const response = await setup.sessions.pendingInput(request, SESSION_ID);
+
+    await expectJsonResponse(response, 404, { error: "not_found" });
+    expect(await sessionDetail(setup.sessions)).toMatchObject({
+      pendingInputs: [],
+      status: "running",
+    });
+    model.resolve({ content: "Owner work complete" });
     await waitForSessionValue(
       () => sessionDetail(setup.sessions),
       hasSessionStatus("idle"),

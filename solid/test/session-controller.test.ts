@@ -1,5 +1,5 @@
 import { createRoot } from "solid-js";
-import { expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { isRecord } from "../../shared/auth-model.ts";
 import {
   parseJsonRecord,
@@ -7,17 +7,30 @@ import {
 } from "../../shared/json-record.ts";
 import { SESSIONS_PATH } from "../../shared/routes.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
+import { createReactiveState } from "../../solid/reactive-state.ts";
+import type { SessionViewState } from "../../solid/session-client.tsx";
 import { summaryFromDetail } from "../../solid/session-codec.ts";
 import { SessionController } from "../../solid/session-controller.ts";
+import { initialSessionViewState } from "../../solid/session-state.ts";
+import {
+  DEFAULT_SESSION_TRANSCRIPT_FILTERS,
+  writeSessionTranscriptFilters,
+} from "../../solid/session-transcript-filters.ts";
 import {
   expectRealtimeToRemainSilent,
   requestUrl,
 } from "./controller-test-helpers.ts";
+import { MemoryStorage } from "./memory-storage.ts";
+import { createResponseFetch } from "./session-dom-test-helpers.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 import {
   sessionDetailWithStatus,
   transcriptMessage,
 } from "./transcript-ordering-fixtures.ts";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function requestBody(init: RequestInit | undefined): Record<string, unknown> {
   if (typeof init?.body !== "string") {
@@ -177,11 +190,7 @@ function installFetch(
 }
 
 function jsonFetch(response: unknown): typeof globalThis.fetch {
-  const originalFetch = globalThis.fetch;
-  return Object.assign(
-    (): Promise<Response> => Promise.resolve(Response.json(response)),
-    { preconnect: originalFetch.preconnect },
-  );
+  return createResponseFetch(response);
 }
 
 function selectedController(
@@ -192,30 +201,23 @@ function selectedController(
   return controller.select(selected.id).then(() => controller);
 }
 
-// cpd-ignore-start -- These focused controller cases intentionally repeat complete fetch lifecycles.
-test("pending-input mutation sends a stable id once while submitting", async () => {
-  const controller = createRoot(() => new SessionController());
-  const originalFetch = globalThis.fetch;
-  const requests: { body: unknown; url: string }[] = [];
-  let resolveRequest: ((response: Response) => void) | undefined;
-  globalThis.fetch = Object.assign(
-    (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+// cpd-ignore-start -- These controller cases intentionally exercise full idempotent request lifecycles.
+test("pending-input mutation sends one stable request while submitting", async () => {
+  await withRestoredFetch(async () => {
+    const controller = createRoot(() => new SessionController());
+    const requests: { body: unknown; url: string }[] = [];
+    let resolveRequest: ((response: Response) => void) | undefined;
+    installFetch((input, init) => {
       const url = requestUrl(input);
       if (url.endsWith("/pending-inputs")) {
-        requests.push({
-          body: requestBody(init),
-          url,
-        });
+        requests.push({ body: requestBody(init), url });
         return new Promise((resolve) => {
           resolveRequest = resolve;
         });
       }
       return sessionResponse(input);
-    },
-    { preconnect: originalFetch.preconnect },
-  );
+    });
 
-  try {
     await controller.load();
     controller.applyDetail({ ...TEST_SESSION_DETAIL, status: "running" });
     controller.setFollowUp("Please steer");
@@ -225,14 +227,7 @@ test("pending-input mutation sends a stable id once while submitting", async () 
     expect(requests).toHaveLength(1);
     const body = requests[0]?.body;
     expect(isRecord(body)).toBe(true);
-    if (!isRecord(body)) {
-      throw new TypeError("The pending-input request body is invalid");
-    }
-    expect(typeof body["clientRequestId"]).toBe("string");
-    expect(body).toMatchObject({
-      kind: "steer",
-      prompt: "Please steer",
-    });
+    expect(body).toMatchObject({ kind: "steer", prompt: "Please steer" });
     resolveRequest?.(
       Response.json({
         ...TEST_SESSION_DETAIL,
@@ -250,81 +245,100 @@ test("pending-input mutation sends a stable id once while submitting", async () 
     );
     await Promise.all([first, second]);
     expect(controller.state.followUp).toBe("");
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+  });
 });
 
 test("pending-input retries reuse the request ID after an unknown failure", async () => {
-  const controller = createRoot(() => new SessionController());
-  const originalFetch = globalThis.fetch;
-  const requestIds: string[] = [];
-  let pendingAttempts = 0;
-  globalThis.fetch = Object.assign(
-    (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-      const url = requestUrl(input);
-      if (url.endsWith("/pending-inputs")) {
-        pendingAttempts += 1;
+  await withRestoredFetch(async () => {
+    const controller = createRoot(() => new SessionController());
+    const requestIds: string[] = [];
+    let attempts = 0;
+    installFetch((input, init) => {
+      if (requestUrl(input).endsWith("/pending-inputs")) {
+        attempts += 1;
         requestIds.push(requestId(init));
-        return pendingAttempts === 1
+        return attempts === 1
           ? Promise.reject(new TypeError("Connection lost"))
-          : Promise.resolve(Response.json(TEST_SESSION_DETAIL));
+          : Promise.resolve(
+              Response.json({ ...TEST_SESSION_DETAIL, status: "running" }),
+            );
       }
       return sessionResponse(input);
-    },
-    { preconnect: originalFetch.preconnect },
-  );
+    });
 
-  try {
     await controller.load();
     controller.applyDetail({ ...TEST_SESSION_DETAIL, status: "running" });
     controller.setFollowUp("Retry this input");
-
     await controller.followUp();
     await controller.followUp();
 
     expect(requestIds).toHaveLength(2);
     expect(requestIds[0]).toBe(requestIds[1]);
     expect(controller.state.followUp).toBe("");
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+  });
 });
 
-test("a definitive pending-input rejection gets a new request ID", async () => {
-  const controller = createRoot(() => new SessionController());
-  const originalFetch = globalThis.fetch;
-  const requestIds: string[] = [];
-  let pendingAttempts = 0;
-  globalThis.fetch = Object.assign(
-    (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-      const url = requestUrl(input);
-      if (url.endsWith("/pending-inputs")) {
-        pendingAttempts += 1;
+test("pending-input uses a new request ID after a definitive rejection", async () => {
+  await withRestoredFetch(async () => {
+    const controller = createRoot(() => new SessionController());
+    const requestIds: string[] = [];
+    let attempts = 0;
+    installFetch((input, init) => {
+      if (requestUrl(input).endsWith("/pending-inputs")) {
+        attempts += 1;
         requestIds.push(requestId(init));
         return Promise.resolve(
-          pendingAttempts === 1
-            ? Response.json({ error: "invalid_session_state" }, { status: 409 })
-            : Response.json(TEST_SESSION_DETAIL),
+          attempts === 1
+            ? Response.json(
+                { error: "pending_input_queue_full" },
+                { status: 409 },
+              )
+            : Response.json({ ...TEST_SESSION_DETAIL, status: "running" }),
         );
       }
       return sessionResponse(input);
-    },
-    { preconnect: originalFetch.preconnect },
-  );
+    });
 
-  try {
     await controller.load();
     controller.applyDetail({ ...TEST_SESSION_DETAIL, status: "running" });
     controller.setFollowUp("Retry after rejection");
-
     await controller.followUp();
     await controller.followUp();
 
     expect(requestIds).toHaveLength(2);
     expect(requestIds[0]).not.toBe(requestIds[1]);
-  } finally {
-    globalThis.fetch = originalFetch;
+    expect(controller.state.followUp).toBe("");
+  });
+});
+
+test("pending-input guards stale details, states, and other mutations", async () => {
+  const scenarios: readonly {
+    readonly action: "followUp" | "steer";
+    readonly extra?: Partial<SessionViewState>;
+    readonly selectedId?: string;
+    readonly status: AgentSessionDetail["status"];
+  }[] = [
+    { action: "followUp", status: "idle" },
+    { action: "steer", status: "queued" },
+    { action: "followUp", extra: { compacting: true }, status: "running" },
+    { action: "steer", selectedId: "another-session", status: "running" },
+  ];
+  for (const scenario of scenarios) {
+    const detail = { ...TEST_SESSION_DETAIL, status: scenario.status };
+    const reactive = createReactiveState<SessionViewState>({
+      ...initialSessionViewState(),
+      ...scenario.extra,
+      detail,
+      followUp: "Do not submit",
+      selectedId: scenario.selectedId ?? detail.id,
+    });
+    const controller = new SessionController(reactive, undefined, null);
+    const fetch = vi.spyOn(globalThis, "fetch");
+
+    await controller[scenario.action]();
+
+    expect(fetch).not.toHaveBeenCalled();
+    fetch.mockRestore();
   }
 });
 // cpd-ignore-end
@@ -536,6 +550,72 @@ test("replaces a streaming transcript with a compacted snapshot", async () => {
   }
 });
 
+test("loads persisted transcript filters into the controller and keeps them on reset", () => {
+  const storage = new MemoryStorage();
+  writeSessionTranscriptFilters(storage, {
+    ...DEFAULT_SESSION_TRANSCRIPT_FILTERS,
+    toolDefinitions: false,
+  });
+  const controller = new SessionController(
+    createReactiveState(initialSessionViewState()),
+    undefined,
+    storage,
+  );
+
+  expect(controller.state.transcriptFilters.toolDefinitions).toBe(false);
+  controller.reset();
+  expect(controller.state.transcriptFilters.toolDefinitions).toBe(false);
+});
+
+test.each([
+  { action: "send", busy: { compacting: true } },
+  { action: "continueSession", busy: { stopping: true } },
+  { action: "stop", busy: { sending: true } },
+] as const)(
+  "guards invalid or duplicate $action mutations in the controller",
+  async ({ action, busy }) => {
+    const active = action === "stop";
+    const detail = {
+      ...TEST_SESSION_DETAIL,
+      status: active ? ("idle" as const) : ("running" as const),
+    };
+    const reactive = createReactiveState<SessionViewState>({
+      ...initialSessionViewState(),
+      ...busy,
+      detail,
+      followUp: "Do not submit",
+      selectedId: detail.id,
+    });
+    const controller = new SessionController(reactive);
+    const fetch = vi.spyOn(globalThis, "fetch");
+
+    await controller[action]();
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(controller.state.followUp).toBe("Do not submit");
+  },
+);
+
+test.each(["compact", "continueSession", "stop", "toggleAutoCompact"] as const)(
+  "rejects %s when the detail does not match the selected session",
+  async (action) => {
+    const reactive = createReactiveState<SessionViewState>({
+      ...initialSessionViewState(),
+      detail: { ...TEST_SESSION_DETAIL, id: "stale-detail" },
+      selectedId: TEST_SESSION_DETAIL.id,
+    });
+    const controller = new SessionController(reactive, undefined, null);
+    const fetch = vi.spyOn(globalThis, "fetch");
+
+    if (action === "toggleAutoCompact") {
+      await controller.toggleAutoCompact(false);
+    } else {
+      await controller[action]();
+    }
+
+    expect(fetch).not.toHaveBeenCalled();
+  },
+);
 test("an unchanged session refresh does not notify the view", async () => {
   await expectRealtimeToRemainSilent(
     () => new SessionController(),
