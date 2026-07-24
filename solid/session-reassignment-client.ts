@@ -1,7 +1,6 @@
 import type { RunnerSummary } from "../shared/runner-model.ts";
 import type { CustomSelectOption } from "./custom-select.tsx";
-import type { SessionViewState } from "./session-client.tsx";
-import type { SessionController } from "./session-controller.ts";
+import type { SessionRunnerViewProps } from "./session-runner-view-props.ts";
 
 export interface SessionReassignmentDraft {
   readonly runnerId: string;
@@ -16,12 +15,7 @@ export function hasTrimmedText(value: string): boolean {
   return value.trim().length > 0;
 }
 
-export interface SessionReassignmentViewProps {
-  readonly controller: SessionController;
-  readonly onOpenDirectoryPicker: () => void;
-  readonly runners: readonly RunnerSummary[];
-  readonly state: SessionViewState;
-}
+export type SessionReassignmentViewProps = SessionRunnerViewProps;
 
 export function runnerIds(
   runners: readonly RunnerSummary[],

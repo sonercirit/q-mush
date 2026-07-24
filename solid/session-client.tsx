@@ -43,6 +43,7 @@ import {
   type SessionReassignmentDraft,
 } from "./session-reassignment-client.ts";
 import { selectedSessionCredentialAvailable } from "./session-resource-availability.ts";
+import type { SessionRunnerViewProps } from "./session-runner-view-props.ts";
 import { SessionToolPicker } from "./session-tool-picker.tsx";
 import type { SessionTranscriptFilters } from "./session-transcript-filters.ts";
 
@@ -289,14 +290,12 @@ function ModelDiscoveryError(props: {
   );
 }
 
-function NewSessionForm(props: {
-  readonly controller: SessionController;
-  readonly credentials: readonly CredentialOption[];
-  readonly credentialsSettled: boolean;
-  readonly onOpenDirectoryPicker: () => void;
-  readonly runners: readonly RunnerSummary[];
-  readonly state: SessionViewState;
-}): JSX.Element {
+function NewSessionForm(
+  props: SessionRunnerViewProps & {
+    readonly credentials: readonly CredentialOption[];
+    readonly credentialsSettled: boolean;
+  },
+): JSX.Element {
   const runners = createMemo(() => props.runners);
   const credentials = createMemo(() => props.credentials);
   const runnerOptions = createMemo(() => runnerSelectOptions(runners()));

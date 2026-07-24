@@ -117,10 +117,14 @@ async function runRejectedSpawn(
 async function waitForRunnerSession(
   setup: Awaited<ReturnType<typeof startToolSession>>,
   sessionId: string,
+  tool?: string,
 ): Promise<void> {
   await waitForSessionValue(
     () => setup.runnerCommands.shift(),
-    (value) => isRecord(value) && value["sessionId"] === sessionId,
+    (value) =>
+      isRecord(value) &&
+      value["sessionId"] === sessionId &&
+      (tool === undefined || value["tool"] === tool),
   );
 }
 
@@ -383,7 +387,10 @@ describe("session agent tools", () => {
 
   test("does not report a runner-required spawned child as completed", async () => {
     const model = scriptedModel([
-      { content: "Delegating work.", toolCalls: [spawnCall("Keep working")] },
+      {
+        content: "Delegating work.",
+        toolCalls: [spawnCall("Keep working", undefined, ["bash"])],
+      },
       { content: "Parent waiting.", toolCalls: [] },
       {
         content: "Child began runner work.",
@@ -392,15 +399,7 @@ describe("session agent tools", () => {
     ]);
     const { childId, setup } = await startedChild(model);
     completeChildAgentFile(setup);
-    await waitForSessionValue(
-      () =>
-        setup.sessions
-          .detailForUser(TEST_USER_ID, childId)
-          ?.messages.some(({ toolCalls }) =>
-            toolCalls.some(({ name }) => name === "bash"),
-          ),
-      (value) => value === true,
-    );
+    await waitForRunnerSession(setup, childId, "bash");
 
     await setup.runners.remove(
       createAuthenticatedRequest(

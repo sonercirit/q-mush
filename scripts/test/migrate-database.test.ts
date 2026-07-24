@@ -37,7 +37,7 @@ const AGENT_SESSION_MIGRATIONS = [
   { file: "0013_session-tools.sql", timestamp: 1_784_776_192_396 },
 ] as const;
 const CURRENT_AGENT_SESSION_TOOLS =
-  '["read","bash","edit","write","parallel","brave_search","spawn_session","browse_runner_directories","list_runners","list_sessions","read_session","reassign_session","send_to_session","continue_session","stop_session"]';
+  '["read","bash","edit","write","parallel","brave_search","spawn_session","browse_runner_directories","list_runners","list_sessions","get_session_options","read_session","reassign_session","send_to_session","continue_session","stop_session"]';
 const PREVIOUS_AGENT_SESSION_TOOLS =
   '["read","bash","edit","write","parallel","brave_search","spawn_session","list_sessions","read_session","send_to_session","continue_session","stop_session"]';
 
