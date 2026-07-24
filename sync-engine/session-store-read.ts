@@ -5,14 +5,20 @@ import {
   type AgentConversationMessage,
   type AgentToolCall,
 } from "../shared/agent-loop.ts";
+import { updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
-import { agentMessages } from "../shared/database/schema.ts";
+import { agentMessages, agentSessions } from "../shared/database/schema.ts";
+import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 import { readProviderModelPricing } from "../shared/provider-model-pricing.ts";
 import { compareAgentSessionMessages } from "../shared/session-message-order.ts";
 import type {
   AgentSessionMessage,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
+import {
+  insertStoredMessage,
+  interruptedRunnerToolValues,
+} from "./session-store-values.ts";
 
 function parseToolCalls(value: string | null): readonly AgentToolCall[] {
   if (value === null) {
@@ -86,6 +92,74 @@ function interruptedToolResult(
   };
 }
 
+function trackedToolCalls(
+  messages: readonly AgentSessionMessage[],
+): ReadonlyMap<string, AgentToolCall> {
+  const pending = new Map<string, AgentToolCall>();
+  for (const message of messages) {
+    if (message.role === "tool" && message.toolCallId !== null) {
+      pending.delete(message.toolCallId);
+      continue;
+    }
+    if (message.role !== "assistant") {
+      continue;
+    }
+    for (const call of message.toolCalls) {
+      pending.set(call.id, call);
+    }
+  }
+  return pending;
+}
+
+function firstUnresolvedToolCall(
+  messages: readonly AgentSessionMessage[],
+): AgentToolCall | undefined {
+  return trackedToolCalls(messages).values().next().value;
+}
+
+export type InterruptedRunnerToolOptions = Readonly<{
+  database: AppDatabase;
+  generateId: IdGenerator;
+  now: number;
+  sessionId: string;
+}>;
+
+export function appendInterruptedRunnerToolResult(
+  options: InterruptedRunnerToolOptions,
+): void {
+  options.database.transaction((transaction) => {
+    const messages = readStoredSessionMessages(transaction, options.sessionId);
+    const call = firstUnresolvedToolCall(messages);
+    if (call === undefined) {
+      return;
+    }
+    const session = transaction
+      .select({ userId: agentSessions.userId })
+      .from(agentSessions)
+      .where(eq(agentSessions.id, options.sessionId))
+      .get();
+    if (session === undefined) {
+      throw new Error("The agent session no longer exists");
+    }
+    insertStoredMessage(
+      transaction,
+      interruptedRunnerToolValues(call.id, call.name),
+      {
+        actorId: SYSTEM_ID,
+        id: options.generateId(options.now),
+        now: options.now,
+        sessionId: options.sessionId,
+        userId: session.userId,
+      },
+    );
+    transaction
+      .update(agentSessions)
+      .set(updatedAuditFields(SYSTEM_ID, options.now))
+      .where(eq(agentSessions.id, options.sessionId))
+      .run();
+  });
+}
+
 export function withInterruptedToolResults(
   messages: readonly AgentSessionMessage[],
   finishTrailingCalls: boolean,
@@ -129,8 +203,8 @@ export function withInterruptedToolResults(
   return complete;
 }
 
-export function storedSessionMessages(
-  database: AppDatabase,
+export function readStoredSessionMessages(
+  database: Pick<AppDatabase, "select">,
   sessionId: string,
 ): readonly AgentSessionMessage[] {
   return database

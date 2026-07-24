@@ -150,12 +150,6 @@ export class SessionAgentActions {
       .some((runner) => runner.id === runnerId);
   }
 
-  #requireOnlineRunner(userId: string, runnerId: string): string | undefined {
-    return this.#onlineRunnerExists(userId, runnerId)
-      ? undefined
-      : this.#runnerUnavailableOutput();
-  }
-
   async #browseDirectories(
     userId: string,
     runnerId: string,
@@ -401,10 +395,6 @@ export class SessionAgentActions {
         "Choose another session; this session is already running",
       );
     }
-    const unavailable = this.#requireOnlineRunner(userId, runnerId);
-    if (unavailable !== undefined) {
-      return unavailable;
-    }
     const result = this.#dependencies.store.reassign(
       userId,
       sessionId,
@@ -413,7 +403,9 @@ export class SessionAgentActions {
       this.#dependencies.now(),
     );
     if (result.status !== "reassigned") {
-      return sessionToolOutput({ error: `session_${result.status}` });
+      return result.status === "runner_unavailable"
+        ? this.#runnerUnavailableOutput()
+        : sessionToolOutput({ error: `session_${result.status}` });
     }
     this.#dependencies.notify(userId, sessionId);
     return sessionToolOutput({

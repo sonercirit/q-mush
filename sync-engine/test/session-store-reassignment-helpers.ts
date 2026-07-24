@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { expect } from "vitest";
 import type { AppDatabase } from "../../shared/database.ts";
-import { runners } from "../../shared/database/schema.ts";
+import { runners, users } from "../../shared/database/schema.ts";
 import { RunnerStore } from "../../sync-engine/runner-store.ts";
 import { SessionStore } from "../../sync-engine/session-store.ts";
 import {
@@ -16,24 +16,44 @@ export interface SessionStoreTestSetup {
   readonly store: SessionStore;
 }
 
-export function addReplacementRunner(
+const FOREIGN_USER_ID = "018bcfe5-6800-7000-8000-000000000098";
+
+export function addForeignReplacementRunner(
   database: AppDatabase,
   replacementId: string,
 ): void {
   database
+    .insert(users)
+    .values({
+      ...testAuditFields(FOREIGN_USER_ID),
+      email: "foreign-runner@example.com",
+      googleSubject: "foreign-runner-user",
+      id: FOREIGN_USER_ID,
+      name: "Foreign Runner User",
+    })
+    .run();
+  addReplacementRunner(database, replacementId, FOREIGN_USER_ID);
+}
+
+export function addReplacementRunner(
+  database: AppDatabase,
+  replacementId: string,
+  userId = TEST_USER_ID,
+): void {
+  database
     .insert(runners)
     .values({
-      ...testAuditFields(),
+      ...testAuditFields(userId),
       architecture: "arm64",
       id: replacementId,
       lastSeenAt: new Date(TEST_NOW + 3),
-      machineFingerprint: "replacement-machine",
+      machineFingerprint: `replacement-machine-${replacementId}`,
       name: "replacement",
       platform: "linux",
       tokenHash: createHash("sha256")
-        .update("replacement-token")
+        .update(`replacement-token-${replacementId}`)
         .digest("base64url"),
-      userId: TEST_USER_ID,
+      userId,
     })
     .run();
 }

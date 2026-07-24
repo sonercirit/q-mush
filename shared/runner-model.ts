@@ -1,3 +1,5 @@
+export const RUNNER_ONLINE_WINDOW_MILLISECONDS = 45_000;
+
 export type RunnerStatus = "offline" | "online" | "pending";
 
 export interface RunnerSummary {

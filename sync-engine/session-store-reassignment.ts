@@ -1,8 +1,9 @@
-import { and, eq, inArray, type SQL } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, type SQL } from "drizzle-orm";
 import { updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
-import { agentSessions } from "../shared/database/schema.ts";
+import { agentSessions, runners } from "../shared/database/schema.ts";
 import { SYSTEM_ID } from "../shared/ids.ts";
+import { RUNNER_ONLINE_WINDOW_MILLISECONDS } from "../shared/runner-model.ts";
 import type {
   AgentSessionDetail,
   AgentSessionStatus,
@@ -90,7 +91,25 @@ export function didUpdate(rows: readonly unknown[]): boolean {
 
 export type ReassignSessionResult =
   | { readonly detail: AgentSessionDetail; readonly status: "reassigned" }
-  | { readonly status: "busy" | "not_found" | "not_required" };
+  | {
+      readonly status:
+        "busy" | "not_found" | "not_required" | "runner_unavailable";
+    };
+
+function availableRunnerCondition(
+  userId: string,
+  runnerId: string,
+  now: number,
+): SQL | undefined {
+  return and(
+    eq(runners.id, runnerId),
+    eq(runners.userId, userId),
+    eq(runners.isDeleted, false),
+    isNotNull(runners.machineFingerprint),
+    isNotNull(runners.lastSeenAt),
+    gte(runners.lastSeenAt, new Date(now - RUNNER_ONLINE_WINDOW_MILLISECONDS)),
+  );
+}
 
 export function reassignStoredSession(options: {
   readonly database: AppDatabase;
@@ -127,6 +146,17 @@ export function reassignStoredSession(options: {
     }
     if (!stored.runnerRequired) {
       return "not_required" as const;
+    }
+
+    const runner = transaction
+      .select({ id: runners.id })
+      .from(runners)
+      .where(
+        availableRunnerCondition(options.userId, options.runnerId, options.now),
+      )
+      .get();
+    if (runner === undefined) {
+      return "runner_unavailable" as const;
     }
 
     transaction

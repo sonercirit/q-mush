@@ -13,12 +13,11 @@ import { createUuidV7, type IdGenerator } from "../shared/ids.ts";
 import { validPageWindow } from "../shared/pagination.ts";
 import {
   createPendingRunnerSummary,
+  RUNNER_ONLINE_WINDOW_MILLISECONDS,
   type RunnerStatus,
   type RunnerSummary,
 } from "../shared/runner-model.ts";
 import { requireRunnerReassignment } from "./runner-reassignment-store.ts";
-
-const RUNNER_ONLINE_WINDOW_MILLISECONDS = 45_000;
 
 export interface RunnerPage {
   readonly items: readonly RunnerSummary[];
@@ -204,8 +203,22 @@ export class RunnerStore {
     return createPendingRunnerSummary(id);
   }
 
+  #activeRunnerExists(filter: ActiveRunnerFilter): boolean {
+    return (
+      this.#database
+        .select({ id: runners.id })
+        .from(runners)
+        .where(activeRunnerCondition(filter))
+        .get() !== undefined
+    );
+  }
+
   hasActiveToken(token: string): boolean {
     return this.#activeRunnerForToken(token) !== undefined;
+  }
+
+  exists(userId: string, runnerId: string): boolean {
+    return this.#activeRunnerExists({ id: runnerId, userId });
   }
 
   authenticate(token: string): RunnerConnection | undefined {

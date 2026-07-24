@@ -147,6 +147,7 @@ describe("runner reassignment", () => {
           message["content"] ===
             "Error: the runner was removed before this tool call returned a result." &&
           message["role"] === "tool" &&
+          message["toolCallId"] === "call-bash" &&
           message["toolName"] === "bash",
       ),
     ).toBe(true);
