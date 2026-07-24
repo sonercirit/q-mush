@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { runnerToolCommand } from "../../shared/test/runner-command-fixtures.ts";
 import {
   RealtimeHub,
   type RealtimeSocket,
@@ -78,13 +79,7 @@ test("publishes snapshots only to the authenticated user's sockets", () => {
 test("delivers queued commands immediately and cancellation to a runner socket", () => {
   const hub = new RealtimeHub();
   const runner = new TestSocket();
-  const command = {
-    arguments: { path: "README.md" },
-    id: "command-1",
-    sessionId: "session-1",
-    tool: "read",
-    workingDirectory: "/work/project",
-  };
+  const command = runnerToolCommand({ arguments: { path: "README.md" } });
 
   expect(hub.publishRunnerCommand("runner-1", command)).toBe(false);
   hub.setRunner("runner-1", runner, true);

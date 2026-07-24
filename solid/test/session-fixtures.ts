@@ -11,6 +11,7 @@ export const TEST_SESSION_DETAIL: AgentSessionDetail = {
   createdAt: 1,
   credentialId: "credential-1",
   currentContextTokens: 1_250,
+  executionEnvironment: "bare_metal",
   id: "session-1",
   maxContextTokens: 200_000,
   messages: [],

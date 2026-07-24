@@ -3,6 +3,7 @@ import { RUNNER_AGENT_FILE_COMMAND } from "../../shared/agent-file.ts";
 import { isRecord } from "../../shared/auth-model.ts";
 import { SESSIONS_PATH } from "../../shared/routes.ts";
 import type { RunnerToolCommand } from "../../shared/runner-command-broker.ts";
+import { runnerCleanupCommand } from "../../shared/test/runner-command-fixtures.ts";
 import type { createSessionIntegration } from "../../sync-engine/sessions.ts";
 import { createAuthenticatedRequest } from "./authenticated-integration-test-helpers.ts";
 import {
@@ -13,10 +14,10 @@ import {
 
 type ConnectedSessionSetup = Awaited<ReturnType<typeof connectedSessionSetup>>;
 
-export async function waitForSessionValue(
-  readValue: () => unknown,
-  predicate: (value: unknown) => boolean,
-): Promise<unknown> {
+export async function waitForSessionValue<Value>(
+  readValue: () => Promise<Value> | Value,
+  predicate: (value: Value) => boolean,
+): Promise<Value> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     const value = await Promise.resolve(readValue());
 
@@ -36,15 +37,35 @@ export function hasSessionStatus(
   return (value) => isRecord(value) && value["status"] === expected;
 }
 
+export async function waitForSessionDetail(
+  setup: ConnectedSessionSetup,
+  predicate: (value: unknown) => boolean,
+): Promise<unknown> {
+  return waitForSessionValue(() => sessionDetail(setup.sessions), predicate);
+}
+
+export async function waitForSessionStatus(
+  setup: ConnectedSessionSetup,
+  status: string,
+): Promise<unknown> {
+  return waitForSessionDetail(setup, hasSessionStatus(status));
+}
+
+export function waitForRunnerCommand(
+  setup: ConnectedSessionSetup,
+): Promise<RunnerToolCommand | undefined> {
+  return waitForSessionValue(
+    () => setup.runnerCommands.shift(),
+    (value) => value !== undefined,
+  );
+}
+
 export async function expectRunnerCommand(
   setup: ConnectedSessionSetup,
   expected: RunnerToolCommand,
   missingMessage: string,
 ): Promise<void> {
-  const command = await waitForSessionValue(
-    () => setup.runnerCommands.shift(),
-    (value) => value !== undefined,
-  );
+  const command = await waitForRunnerCommand(setup);
 
   if (command === undefined) {
     throw new Error(missingMessage);
@@ -68,18 +89,33 @@ export function completeRunnerCommand(
   });
 }
 
-export async function completeAgentFileLookup(
+export async function expectSessionRunnerCommand(
   setup: ConnectedSessionSetup,
-  agentFile: unknown = null,
+  command: Omit<RunnerToolCommand, "id" | "sessionId" | "workingDirectory">,
+  missingMessage: string,
 ): Promise<void> {
   await expectRunnerCommand(
     setup,
     {
-      arguments: {},
+      ...command,
       id: RUNNER_COMMAND_ID,
       sessionId: SESSION_ID,
-      tool: RUNNER_AGENT_FILE_COMMAND,
       workingDirectory: "/work/project",
+    },
+    missingMessage,
+  );
+}
+
+export async function completeAgentFileLookup(
+  setup: ConnectedSessionSetup,
+  agentFile: unknown = null,
+  executionEnvironment: RunnerToolCommand["executionEnvironment"] = "bare_metal",
+): Promise<void> {
+  await expectSessionRunnerCommand(
+    setup,
+    {
+      ...runnerCleanupCommand(executionEnvironment),
+      tool: RUNNER_AGENT_FILE_COMMAND,
     },
     "The runner did not receive the agent-file command",
   );

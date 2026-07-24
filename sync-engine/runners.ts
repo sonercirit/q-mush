@@ -41,6 +41,7 @@ export interface RunnerIntegration {
   disconnected(runner: RunnerConnection): void;
   installer(request: Request): Response;
   listForUser(userId: string): readonly RunnerSummary[];
+  onDisconnect(listener: (runner: RunnerConnection) => void): void;
   remove(request: Request, runnerId: string): Response;
   runnerIsAvailable(userId: string, runnerId: string): boolean;
   runnerToken(request: Request): string | undefined;
@@ -107,6 +108,7 @@ export function readRunnerMetadata(value: unknown): RunnerMetadata | undefined {
 
 class DrizzleRunnerIntegration implements RunnerIntegration {
   readonly #auth: GoogleAuth;
+  readonly #disconnectListeners = new Set<(runner: RunnerConnection) => void>();
   readonly #now: () => number;
   readonly #randomToken: () => string;
   readonly #store: RunnerStore;
@@ -147,6 +149,13 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
 
   disconnected(runner: RunnerConnection): void {
     this.#setOnline(runner, false);
+    for (const listener of this.#disconnectListeners) {
+      listener(runner);
+    }
+  }
+
+  onDisconnect(listener: (runner: RunnerConnection) => void): void {
+    this.#disconnectListeners.add(listener);
   }
 
   listForUser(userId: string): readonly RunnerSummary[] {

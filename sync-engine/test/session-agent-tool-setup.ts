@@ -7,8 +7,7 @@ import {
 } from "./session-integration-fixtures.ts";
 import {
   completeAgentFileLookup,
-  hasSessionStatus,
-  sessionDetail,
+  waitForSessionStatus,
 } from "./session-integration-helpers.ts";
 
 export function toolCall(name: string, arguments_: unknown) {
@@ -23,13 +22,7 @@ export async function completedParentDetail(
   setup: Awaited<ReturnType<typeof connectedSessionSetup>>,
   status: string,
 ): Promise<unknown> {
-  for (;;) {
-    const value = await sessionDetail(setup.sessions);
-    if (hasSessionStatus(status)(value)) {
-      return value;
-    }
-    await Bun.sleep(1);
-  }
+  return waitForSessionStatus(setup, status);
 }
 
 export async function startToolSession(model: AgentModel) {

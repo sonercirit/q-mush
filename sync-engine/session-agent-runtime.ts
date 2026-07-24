@@ -99,6 +99,7 @@ export async function runSessionAgent(
     runtime.broker.dispatch(
       {
         arguments: toolArguments,
+        executionEnvironment: runtime.detail.executionEnvironment,
         runnerId: runtime.detail.runnerId,
         sessionId: runtime.detail.id,
         tool: name,

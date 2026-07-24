@@ -142,6 +142,9 @@ test("keeps editable session controls in the reactive tree", () => {
   );
 
   expect(newSessionHtml).toContain('id="session-directory"');
+  expect(newSessionHtml).toContain('id="session-execution-environment"');
+  expect(newSessionHtml).toContain("Bare Metal");
+  expect(newSessionHtml).toContain('name="executionEnvironment"');
   expect(newSessionHtml).toContain('id="session-prompt"');
   expect(newSessionHtml).toContain("Tools &amp; skills");
   expect(newSessionHtml).toContain('name="tools"');
@@ -151,19 +154,45 @@ test("keeps editable session controls in the reactive tree", () => {
   expect(followUpHtml).not.toContain("data-focus-key");
 });
 
-test("shows session time and cost in the list and detail", () => {
-  const session = {
-    ...TEST_SESSION_DETAIL,
-    activeDurationMs: 65_000,
-    activeStartedAt: null,
-    costBasis: "estimated" as const,
-    costUsd: 0.0042,
-  };
-  const html = renderPanel({
+function selectedSessionState(
+  session: typeof TEST_SESSION_DETAIL,
+): SessionViewState {
+  return {
     ...SESSION_STATE,
     detail: session,
     selectedId: session.id,
     sessions: [session],
+  };
+}
+
+function renderSelectedSession(session: typeof TEST_SESSION_DETAIL): string {
+  return renderPanel(selectedSessionState(session));
+}
+
+test("shows the execution environment in session list, detail, and prompt", () => {
+  const session = {
+    ...TEST_SESSION_DETAIL,
+    executionEnvironment: "container" as const,
+  };
+  const html = renderPanel({
+    ...selectedSessionState(session),
+    transcriptFilters: {
+      ...SESSION_STATE.transcriptFilters,
+      systemPrompt: true,
+    },
+  });
+
+  expect(html.match(/Container/gu)?.length).toBeGreaterThanOrEqual(2);
+  expect(html).toContain("mounted there at /workspace");
+});
+
+test("shows session time and cost in the list and detail", () => {
+  const html = renderSelectedSession({
+    ...TEST_SESSION_DETAIL,
+    activeDurationMs: 65_000,
+    activeStartedAt: null,
+    costBasis: "estimated",
+    costUsd: 0.0042,
   });
 
   expect(html.match(/Time: 1m 5s/gu)).toHaveLength(2);

@@ -69,6 +69,12 @@ function statusBadge(status: AgentSessionStatus): JSX.Element {
   );
 }
 
+function executionEnvironmentLabel(
+  environment: AgentSessionSummary["executionEnvironment"],
+): string {
+  return environment === "container" ? "Container" : "Bare Metal";
+}
+
 function sessionModelLabel(
   session: Pick<AgentSessionSummary, "model" | "provider" | "reasoningEffort">,
 ): string {
@@ -200,7 +206,7 @@ export function SessionList(props: {
                     {session.title}
                   </span>
                   <span class="mt-1 block truncate text-xs text-slate-500">
-                    {sessionModelLabel(session)}
+                    {`${sessionModelLabel(session)} · ${executionEnvironmentLabel(session.executionEnvironment)}`}
                   </span>
                   <span class="mt-2 block">
                     <SessionMetrics session={session} />
@@ -386,7 +392,7 @@ function LoadedSessionDetail(props: {
           <p
             class={`mt-2 truncate text-xs ${sessionContextClasses(props.detail)}`}
           >
-            {`${sessionModelLabel(props.detail)} · ${sessionContextLabel(props.detail)} · ${props.detail.workingDirectory} · Agent file: ${props.detail.agentFile?.name ?? "None"}`}
+            {`${sessionModelLabel(props.detail)} · ${executionEnvironmentLabel(props.detail.executionEnvironment)} · ${sessionContextLabel(props.detail)} · ${props.detail.workingDirectory} · Agent file: ${props.detail.agentFile?.name ?? "None"}`}
           </p>
           <span class="mt-2 block">
             <SessionMetrics session={props.detail} />
@@ -434,6 +440,7 @@ function LoadedSessionDetail(props: {
       >
         <SessionTranscript
           agentFile={props.detail.agentFile}
+          executionEnvironment={props.detail.executionEnvironment}
           filters={props.state.transcriptFilters}
           messages={props.detail.messages}
           tools={props.detail.tools}

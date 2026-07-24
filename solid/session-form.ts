@@ -1,5 +1,6 @@
 import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
-import type { SessionDraft, SessionViewState } from "./session-client.tsx";
+import type { SessionViewState } from "./session-client.tsx";
+import type { SessionDraft } from "./session-draft.ts";
 import {
   applySessionModelCatalog,
   chooseSessionOption,

@@ -3,6 +3,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach } from "vitest";
 
+export interface FakeRunnerProcessCall {
+  readonly arguments: readonly string[];
+  readonly executable: string;
+}
+
+export function recordRunnerProcessCall(
+  calls: FakeRunnerProcessCall[],
+  executable: string,
+  arguments_: readonly string[],
+): void {
+  calls.push({ arguments: arguments_, executable });
+}
+
 export function useTemporaryDirectories(prefix: string): () => Promise<string> {
   const paths: string[] = [];
 

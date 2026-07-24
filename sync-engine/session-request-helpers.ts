@@ -138,6 +138,7 @@ export class SessionRequestHelpers {
       const output = await this.#broker.dispatch(
         {
           arguments: {},
+          executionEnvironment: "bare_metal",
           runnerId,
           sessionId: `directory-picker:${user.id}`,
           tool: RUNNER_DIRECTORY_COMMAND,

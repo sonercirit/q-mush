@@ -151,6 +151,11 @@ export const agentSessions = sqliteTable(
     reasoningEffort: text("reasoning_effort", {
       enum: AGENT_REASONING_EFFORTS,
     }),
+    executionEnvironment: text("execution_environment", {
+      enum: ["bare_metal", "container"],
+    })
+      .notNull()
+      .default("bare_metal"),
     workingDirectory: text("working_directory").notNull(),
     title: text("title").notNull(),
     tools: text("tools")

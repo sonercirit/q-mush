@@ -35,6 +35,7 @@ const AGENT_SESSION_MIGRATIONS = [
   },
   { file: "0012_damp_khan.sql", timestamp: 1_784_773_990_609 },
   { file: "0013_session-tools.sql", timestamp: 1_784_776_192_396 },
+  { file: "0014_mushy_jean_grey.sql", timestamp: 1_784_825_553_938 },
 ] as const;
 const SESSION_LIFETIME_MILLISECONDS = 7 * 24 * 60 * 60 * 1000;
 const UUID_V7_PATTERN =
@@ -283,12 +284,19 @@ test("session migration preserves transcripts with foreign keys", async () => {
   expect(
     upgradedDatabase
       .select({
+        executionEnvironment: agentSessions.executionEnvironment,
         id: agentSessions.id,
         parentSessionId: agentSessions.parentSessionId,
       })
       .from(agentSessions)
       .all(),
-  ).toEqual([{ id: sessionId, parentSessionId: null }]);
+  ).toEqual([
+    {
+      executionEnvironment: "bare_metal",
+      id: sessionId,
+      parentSessionId: null,
+    },
+  ]);
   expect(
     upgradedDatabase
       .select({

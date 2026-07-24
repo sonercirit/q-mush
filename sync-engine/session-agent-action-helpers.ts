@@ -1,10 +1,10 @@
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { createJsonResponse } from "./http.ts";
+import type { SpawnSessionToolInput } from "./session-agent-tool-model.ts";
 import {
   lastSessionMessage,
   sessionToolOutput,
-  type SpawnSessionToolInput,
 } from "./session-agent-tools.ts";
 import type { SessionStore } from "./session-store.ts";
 

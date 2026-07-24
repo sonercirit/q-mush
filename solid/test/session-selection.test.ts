@@ -3,8 +3,7 @@ import {
   maximumAgentReasoningEffort,
   type AgentModelCatalog,
 } from "../../shared/agent-configuration.ts";
-import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
-import type { SessionDraft } from "../../solid/session-client.tsx";
+import type { SessionDraft } from "../../solid/session-draft.ts";
 import {
   applySessionModelCatalog,
   chooseSessionOption,
@@ -35,16 +34,16 @@ const CATALOG: AgentModelCatalog = {
   ],
 };
 
-const DRAFT: SessionDraft = {
-  credential: "",
-  images: [],
-  model: "",
-  prompt: "Inspect the workspace",
-  reasoningEffort: "",
-  runnerId: "runner-1",
-  tools: AGENT_SESSION_TOOL_NAMES,
-  workingDirectory: ".",
-};
+function sessionDraft(overrides: Partial<SessionDraft> = {}): SessionDraft {
+  return {
+    ...initialSessionViewState().draft,
+    prompt: "Inspect the workspace",
+    runnerId: "runner-1",
+    ...overrides,
+  };
+}
+
+const DRAFT = sessionDraft();
 
 const SELECTED_DRAFT: SessionDraft = {
   ...DRAFT,
@@ -56,6 +55,19 @@ const SELECTED_DRAFT: SessionDraft = {
 test("identifies the maximum supported reasoning effort", () => {
   expect(maximumAgentReasoningEffort(["max", "low", "xhigh"])).toBe("max");
   expect(maximumAgentReasoningEffort([])).toBeUndefined();
+});
+
+test("selects an execution environment", () => {
+  const state = { ...initialSessionViewState(), draft: DRAFT };
+
+  expect(
+    chooseSessionOption(
+      state,
+      { availableValues: ["bare_metal", "container"], models: CATALOG },
+      "executionEnvironment",
+      "container",
+    ),
+  ).toEqual({ ...DRAFT, executionEnvironment: "container" });
 });
 
 test("defaults a discovered catalog to its first model and maximum reasoning", () => {

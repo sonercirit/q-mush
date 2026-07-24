@@ -151,11 +151,13 @@ export function createSessionRequest(
   reasoningEffort = "high",
   model = "gpt-4.1-mini",
   images: readonly AgentImage[] = [],
+  executionEnvironment: "bare_metal" | "container" = "bare_metal",
 ): Request {
   return createAuthenticatedRequest(
     SESSIONS_PATH,
     {
       credentialId: CREDENTIAL_ID,
+      executionEnvironment,
       ...(images.length === 0 ? {} : { images }),
       ...(includeModel ? { model } : {}),
       prompt: "Inspect README.md",

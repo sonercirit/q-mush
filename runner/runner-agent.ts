@@ -7,7 +7,8 @@ import { parseJsonRecord } from "../shared/json-record.ts";
 import { RUNNER_REALTIME_PATH } from "../shared/routes.ts";
 import type { RunnerToolCommand } from "../shared/runner-command-broker.ts";
 import { createServerWebSocket } from "../shared/server-websocket.ts";
-import { executeRunnerCommand, readRunnerCommand } from "./runner-command.ts";
+import { RunnerCommandExecutor, readRunnerCommand } from "./runner-command.ts";
+import { RunnerContainerManager } from "./runner-container.ts";
 import { RunnerUpdateTrigger } from "./runner-update-trigger.ts";
 import { updateRunnerIfAvailable } from "./runner-update.ts";
 
@@ -19,6 +20,20 @@ const RETRY_INTERVAL_MILLISECONDS = 5_000;
 const UPDATE_INTERVAL_MILLISECONDS = 5 * 60_000;
 const TOKEN_PATTERN = /^qmr_[A-Za-z\d_-]{8,200}$/u;
 const runnerUpdateTrigger = new RunnerUpdateTrigger(Q_MUSH_RUNNER_VERSION);
+
+interface RunnerExecution {
+  readonly commands: RunnerCommandExecutor;
+  readonly containers: RunnerContainerManager;
+}
+
+let runnerExecution: RunnerExecution | undefined;
+
+function activeRunnerExecution(): RunnerExecution {
+  if (runnerExecution === undefined) {
+    throw new Error("The runner execution services are not initialized");
+  }
+  return runnerExecution;
+}
 
 class RunnerConnectionError extends Error {
   constructor(message: string) {
@@ -188,7 +203,8 @@ function executeCommand(
   }
 
   const controller = new AbortController();
-  void executeRunnerCommand(command, controller.signal)
+  void activeRunnerExecution()
+    .commands.execute(command, controller.signal)
     .then((output) => {
       if (!controller.signal.aborted && socket.readyState === WebSocket.OPEN) {
         socket.send(
@@ -310,6 +326,7 @@ async function maintainConnection(
         command.controller.abort();
       }
       active.clear();
+      void activeRunnerExecution().containers.cleanupAll();
     });
   };
   bindSocket(socket);
@@ -344,6 +361,13 @@ async function run(): Promise<void> {
 
   const configurationPath = readConfigurationPath();
   const configuration = readConfiguration(configurationPath);
+  const containers = new RunnerContainerManager({
+    trackingPath: join(dirname(configurationPath), "owned-containers.json"),
+  });
+  runnerExecution = {
+    commands: new RunnerCommandExecutor(containers),
+    containers,
+  };
   writeFileSync(
     join(dirname(configurationPath), "runner.pid"),
     `${String(process.pid)}\n`,
@@ -356,6 +380,7 @@ async function run(): Promise<void> {
     return;
   }
 
+  await containers.recoverTracked();
   await maintainConnection(configuration, configurationPath);
 }
 

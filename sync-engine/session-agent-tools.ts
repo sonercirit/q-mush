@@ -1,30 +1,18 @@
 import {
   isAgentModelId,
   isAgentReasoningEffort,
-  type AgentReasoningEffort,
 } from "../shared/agent-configuration.ts";
-import type { AgentImage } from "../shared/agent-images.ts";
 import {
   readAgentSessionToolNames,
   type SessionAgentToolName,
 } from "../shared/agent-tools.ts";
+import { readRunnerExecutionEnvironment } from "../shared/runner-command-broker.ts";
 import { MAXIMUM_RUNNER_PATH_LENGTH } from "../shared/runner-directory-model.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
+import type { SpawnSessionToolInput } from "./session-agent-tool-model.ts";
 import { readIdentifier, readStringField } from "./session-request-helpers.ts";
 
 const MAXIMUM_SESSION_MESSAGE_LENGTH = 32_768;
-
-export interface SpawnSessionToolInput {
-  readonly tools: NonNullable<ReturnType<typeof readAgentSessionToolNames>>;
-  readonly images: readonly AgentImage[];
-  readonly reasoningEffort: AgentReasoningEffort | null;
-  readonly provider: "openai" | "openrouter";
-  readonly workingDirectory: string;
-  readonly credentialId: string;
-  readonly runnerId: string;
-  readonly prompt: string;
-  readonly model: string;
-}
 
 export interface SessionAgentToolActions {
   readonly continueSession: (sessionId: string) => Promise<string>;
@@ -50,6 +38,9 @@ function spawnInput(
   arguments_: Readonly<Record<string, unknown>>,
 ): SpawnSessionToolInput {
   const credentialId = readIdentifier(arguments_["credentialId"]);
+  const executionEnvironment = readRunnerExecutionEnvironment(
+    arguments_["executionEnvironment"],
+  );
   const modelValue = arguments_["model"];
   const model = isAgentModelId(modelValue) ? modelValue : undefined;
   const prompt = readStringField(
@@ -71,6 +62,7 @@ function spawnInput(
 
   if (
     credentialId === undefined ||
+    executionEnvironment === undefined ||
     model === undefined ||
     prompt === undefined ||
     (provider !== "openai" && provider !== "openrouter") ||
@@ -86,6 +78,7 @@ function spawnInput(
 
   return {
     credentialId,
+    executionEnvironment,
     images: [],
     model,
     prompt,

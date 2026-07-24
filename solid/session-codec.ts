@@ -173,6 +173,7 @@ function readSummary(value: unknown): AgentSessionSummary {
   const createdAt = readFiniteNumber(value["createdAt"]);
   const credentialId = value["credentialId"];
   const currentContextTokens = readFiniteNumber(value["currentContextTokens"]);
+  const executionEnvironment = value["executionEnvironment"];
   const id = value["id"];
   const maxContextTokens = value["maxContextTokens"];
   const model = value["model"];
@@ -203,6 +204,8 @@ function readSummary(value: unknown): AgentSessionSummary {
     currentContextTokens === undefined ||
     currentContextTokens < 0 ||
     !Number.isSafeInteger(currentContextTokens) ||
+    (executionEnvironment !== "bare_metal" &&
+      executionEnvironment !== "container") ||
     typeof id !== "string" ||
     (maxContextTokens !== null &&
       (typeof maxContextTokens !== "number" ||
@@ -232,6 +235,7 @@ function readSummary(value: unknown): AgentSessionSummary {
     createdAt,
     credentialId,
     currentContextTokens,
+    executionEnvironment,
     id,
     maxContextTokens,
     model,
@@ -334,6 +338,7 @@ export function summaryFromDetail(
     createdAt: detail.createdAt,
     credentialId: detail.credentialId,
     currentContextTokens: detail.currentContextTokens,
+    executionEnvironment: detail.executionEnvironment,
     id: detail.id,
     maxContextTokens: detail.maxContextTokens,
     model: detail.model,

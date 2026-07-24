@@ -10,6 +10,7 @@ import {
 } from "../shared/agent-tools.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
+import { readRunnerExecutionEnvironment } from "../shared/runner-command-broker.ts";
 import { MAXIMUM_RUNNER_PATH_LENGTH } from "../shared/runner-directory-model.ts";
 import { readIdentifier, readStringField } from "./session-request-helpers.ts";
 import type { CreateAgentSession } from "./session-store.ts";
@@ -45,6 +46,9 @@ export function readCreateSession(
   }
 
   const credentialId = readIdentifier(value["credentialId"]);
+  const executionEnvironment = readRunnerExecutionEnvironment(
+    value["executionEnvironment"],
+  );
   const message = promptInput(value);
   const provider = readProvider(value["provider"]);
   const runnerId = readIdentifier(value["runnerId"]);
@@ -64,6 +68,7 @@ export function readCreateSession(
 
   if (
     credentialId === undefined ||
+    executionEnvironment === undefined ||
     message === undefined ||
     provider === undefined ||
     runnerId === undefined ||
@@ -79,6 +84,7 @@ export function readCreateSession(
 
   return {
     credentialId,
+    executionEnvironment,
     ...message,
     model: typeof modelValue === "string" ? modelValue : "",
     provider,

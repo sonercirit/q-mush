@@ -1,9 +1,14 @@
-import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { createdAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
+import {
+  readStoredSessionDetails,
+  sessionRowsWithStatus,
+  type StoredSessionReader,
+} from "./session-store-runners.ts";
 
 export interface PendingSpawnedSession {
   readonly detail: AgentSessionDetail;
@@ -20,23 +25,17 @@ function ownedSessionCondition(userId: string, sessionId: string) {
 
 export function pendingSpawnedSessions(
   database: AppDatabase,
-  read: (userId: string, sessionId: string) => AgentSessionDetail | undefined,
+  read: StoredSessionReader,
 ): readonly PendingSpawnedSession[] {
-  return database
-    .select({ id: agentSessions.id, userId: agentSessions.userId })
-    .from(agentSessions)
-    .where(
-      and(
-        isNotNull(agentSessions.parentSessionId),
-        eq(agentSessions.isDeleted, false),
-        inArray(agentSessions.status, ["idle", "stopped", "failed"]),
-      ),
-    )
-    .all()
-    .flatMap(({ id, userId }) => {
-      const detail = read(userId, id);
-      return detail === undefined ? [] : [{ detail, userId }];
-    });
+  const rows = sessionRowsWithStatus(
+    database,
+    ["idle", "stopped", "failed"],
+    isNotNull(agentSessions.parentSessionId),
+  );
+  return readStoredSessionDetails(rows, read).map(({ detail, userId }) => ({
+    detail,
+    userId,
+  }));
 }
 
 export function parentSessionId(

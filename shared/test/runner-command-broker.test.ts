@@ -4,6 +4,7 @@ import {
   type DispatchRunnerToolCommand,
 } from "../../shared/runner-command-broker.ts";
 import { captureBrokerRejection } from "./promise-test-helpers.ts";
+import { runnerToolCommand } from "./runner-command-fixtures.ts";
 
 const RUNNER_ID = "runner-1";
 const SESSION_ID = "session-1";
@@ -13,6 +14,7 @@ function runnerCommand(
 ): DispatchRunnerToolCommand {
   return {
     arguments: {},
+    executionEnvironment: "bare_metal",
     runnerId: RUNNER_ID,
     sessionId: SESSION_ID,
     tool: "bash",
@@ -56,6 +58,7 @@ test("delivers a command immediately when a runner socket is connected", async (
     {
       command: {
         arguments: {},
+        executionEnvironment: "bare_metal",
         id: "websocket-command",
         sessionId: SESSION_ID,
         tool: "bash",
@@ -109,16 +112,23 @@ describe("runner command broker", () => {
     const broker = new RunnerCommandBroker({
       commandId: () => "command-1",
     });
-    const command = {
+    const command = runnerToolCommand({
       arguments: { path: "README.md" },
+      id: "command-1",
       sessionId: SESSION_ID,
-      tool: "read",
-      workingDirectory: "/work/project",
-    };
-    const result = broker.dispatch(runnerCommand(command));
+    });
+    const result = broker.dispatch(
+      runnerCommand({
+        arguments: command.arguments,
+        executionEnvironment: command.executionEnvironment,
+        sessionId: command.sessionId,
+        tool: command.tool,
+        workingDirectory: command.workingDirectory,
+      }),
+    );
 
     expect(broker.take("another-runner")).toBeUndefined();
-    expect(broker.take(RUNNER_ID)).toEqual({ ...command, id: "command-1" });
+    expect(broker.take(RUNNER_ID)).toEqual(command);
     expect(broker.isActive(RUNNER_ID, "command-1")).toBe(true);
     expect(broker.complete("another-runner", "command-1", "wrong")).toBe(false);
     expect(broker.complete(RUNNER_ID, "command-1", "# Q Mush")).toBe(true);

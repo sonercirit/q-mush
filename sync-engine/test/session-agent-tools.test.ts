@@ -1,6 +1,11 @@
 import { describe, expect, test } from "vitest";
 import type { AgentModel, AgentModelTurn } from "../../shared/agent-loop.ts";
 import { isRecord } from "../../shared/auth-model.ts";
+import type {
+  RunnerExecutionEnvironment,
+  RunnerToolCommand,
+} from "../../shared/runner-command-broker.ts";
+import { runnerCleanupCommand } from "../../shared/test/runner-command-fixtures.ts";
 import { findToolResultContent } from "./session-agent-tool-helpers.ts";
 import {
   completedParentDetail,
@@ -17,17 +22,23 @@ import {
 import {
   hasSessionStatus,
   sessionDetail,
+  waitForRunnerCommand,
+  waitForSessionDetail,
   waitForSessionValue,
 } from "./session-integration-helpers.ts";
+
+const TEST_USER_ID = "018bcfe5-6800-7000-8000-000000000021";
 
 function spawnCall(
   prompt: string,
   reasoningEffort?: string,
   tools: readonly string[] = [],
   credentialId = CREDENTIAL_ID,
+  executionEnvironment: RunnerExecutionEnvironment = "bare_metal",
 ) {
   return toolCall("spawn_session", {
     credentialId,
+    executionEnvironment,
     model: "gpt-4.1-mini",
     prompt,
     provider: "openai",
@@ -40,6 +51,7 @@ function spawnCall(
 
 class SelfStoppingChildModel implements AgentModel {
   childSessionId: string | undefined;
+  executionEnvironment: RunnerExecutionEnvironment = "bare_metal";
   #turn = 0;
 
   complete(): Promise<AgentModelTurn> {
@@ -50,9 +62,13 @@ class SelfStoppingChildModel implements AgentModel {
         ? {
             content: "Delegating stoppable work.",
             toolCalls: [
-              spawnCall("Stop this delegated task", undefined, [
-                "stop_session",
-              ]),
+              spawnCall(
+                "Stop this delegated task",
+                undefined,
+                ["stop_session"],
+                CREDENTIAL_ID,
+                this.executionEnvironment,
+              ),
             ],
           }
         : this.#turn === 2
@@ -102,20 +118,20 @@ async function waitForParentContent(
   setup: Awaited<ReturnType<typeof startToolSession>>,
   content: string,
 ): Promise<unknown> {
-  return waitForSessionValue(
-    () => sessionDetail(setup.sessions),
-    (value) => JSON.stringify(value).includes(content),
+  return waitForSessionDetail(setup, (value) =>
+    JSON.stringify(value).includes(content),
   );
 }
 
 async function waitForRunnerSession(
   setup: Awaited<ReturnType<typeof startToolSession>>,
   sessionId: string,
-): Promise<void> {
-  await waitForSessionValue(
-    () => setup.runnerCommands.shift(),
-    (value) => isRecord(value) && value["sessionId"] === sessionId,
-  );
+): Promise<RunnerToolCommand> {
+  const command = await waitForRunnerCommand(setup);
+  if (command?.sessionId !== sessionId) {
+    throw new Error("The runner session command disappeared");
+  }
+  return command;
 }
 
 async function childSessionId(
@@ -138,6 +154,32 @@ function completeChildAgentFile(
   expect(
     setup.sessions.completeRunnerCommand(RUNNER_ID, RUNNER_COMMAND_ID, "null"),
   ).toBe(true);
+}
+
+function spawnModel(
+  content: string,
+  call: ReturnType<typeof spawnCall>,
+  childContent?: string,
+) {
+  return scriptedModel([
+    { content, toolCalls: [call] },
+    { content: "Parent done.", toolCalls: [] },
+    ...(childContent === undefined
+      ? []
+      : [{ content: childContent, toolCalls: [] }]),
+  ]);
+}
+
+async function selfStoppingSetup(
+  executionEnvironment: RunnerExecutionEnvironment = "bare_metal",
+) {
+  const model = new SelfStoppingChildModel();
+  model.executionEnvironment = executionEnvironment;
+  const setup = await startToolSession(model);
+  const childId = await childSessionId(setup);
+  model.childSessionId = childId;
+  completeChildAgentFile(setup);
+  return { childId, setup };
 }
 
 describe("session agent tools", () => {
@@ -275,20 +317,15 @@ describe("session agent tools", () => {
     const { output, setup } = await runRejectedSpawn(model);
 
     expect(output).toContain("credential_unavailable");
-    expect(
-      setup.sessions.listForUser("018bcfe5-6800-7000-8000-000000000021"),
-    ).toHaveLength(1);
+    expect(setup.sessions.listForUser(TEST_USER_ID)).toHaveLength(1);
     setup.database.$client.close();
   });
 
   test("rejects a spawn that races with server draining", async () => {
-    const model = scriptedModel([
-      {
-        content: "Delegating during restart.",
-        toolCalls: [spawnCall("This should not launch")],
-      },
-      { content: "Restart race handled.", toolCalls: [] },
-    ]);
+    const model = spawnModel(
+      "Delegating during restart.",
+      spawnCall("This should not launch"),
+    );
     const setup = await startToolSession(model);
     const draining = setup.sessions.drain();
     const detail = await completedParentDetail(setup, "idle");
@@ -297,6 +334,26 @@ describe("session agent tools", () => {
     expect(output).toContain("server_restarting");
     await draining;
     setup.database.$client.close();
+  });
+
+  test("persists the spawned session execution environment", async () => {
+    const model = spawnModel(
+      "Delegating isolated work.",
+      spawnCall(
+        "Run the isolated task",
+        undefined,
+        [],
+        CREDENTIAL_ID,
+        "container",
+      ),
+      "Child done.",
+    );
+    const setup = await startToolSession(model);
+    const childId = await childSessionId(setup);
+
+    const child = setup.sessions.detailForUser(TEST_USER_ID, childId);
+    setup.database.$client.close();
+    expect(child?.executionEnvironment).toBe("container");
   });
 
   test("spawns without blocking and reports the child final message later", async () => {
@@ -319,11 +376,7 @@ describe("session agent tools", () => {
     expect(typeof childId).toBe("string");
     completeChildAgentFile(spawnSetup);
     await waitForSessionValue(
-      () =>
-        spawnSetup.sessions.detailForUser(
-          "018bcfe5-6800-7000-8000-000000000021",
-          childId,
-        ),
+      () => spawnSetup.sessions.detailForUser(TEST_USER_ID, childId),
       hasSessionStatus("idle"),
     );
     const updatedParent = await waitForSessionValue(
@@ -384,11 +437,7 @@ describe("session agent tools", () => {
   });
 
   test("reports when a spawned child stops itself", async () => {
-    const model = new SelfStoppingChildModel();
-    const setup = await startToolSession(model);
-    const childId = await childSessionId(setup);
-    model.childSessionId = childId;
-    completeChildAgentFile(setup);
+    const { setup } = await selfStoppingSetup();
 
     const updatedParent = await waitForParentContent(
       setup,
@@ -397,6 +446,22 @@ describe("session agent tools", () => {
     expect(JSON.stringify(updatedParent)).toContain(
       "interrupted before it returned",
     );
+    setup.database.$client.close();
+  });
+
+  test("cleans a container after a spawned child stops itself", async () => {
+    const { childId, setup } = await selfStoppingSetup("container");
+
+    const cleanup = await waitForRunnerSession(setup, childId);
+    expect(cleanup).toMatchObject(runnerCleanupCommand());
+    expect(
+      setup.sessions.completeRunnerCommand(
+        RUNNER_ID,
+        cleanup.id,
+        "Container removed.",
+      ),
+    ).toBe(true);
+    await waitForParentContent(setup, '\\"status\\": \\"stopped\\"');
     setup.database.$client.close();
   });
 });

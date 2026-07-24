@@ -52,6 +52,7 @@ function testSessionInput() {
   return {
     credentialId: CREDENTIAL_ID,
     autoCompact: true,
+    executionEnvironment: "container" as const,
     images: [TEST_AGENT_IMAGE],
     maxContextTokens: 200_000,
     model: "gpt-4.1-mini",
@@ -172,6 +173,7 @@ describe("session store", () => {
     expect(created.costBasis).toBe("none");
     expect(created.costUsd).toBe(0);
     expect(created.currentContextTokens).toBe(0);
+    expect(created.executionEnvironment).toBe("container");
     expect(created.autoCompact).toBe(true);
     expect(created.maxContextTokens).toBe(200_000);
     expect(created.reasoningEffort).toBe("high");

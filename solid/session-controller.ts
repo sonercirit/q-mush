@@ -284,7 +284,12 @@ export class SessionController {
   }
 
   toggleSelect(
-    name: "credential" | "model" | "reasoningEffort" | "runnerId",
+    name:
+      | "credential"
+      | "executionEnvironment"
+      | "model"
+      | "reasoningEffort"
+      | "runnerId",
   ): void {
     this.#view.patch({
       openSelect: this.#view.value.openSelect === name ? undefined : name,
@@ -386,6 +391,7 @@ export class SessionController {
               ? {}
               : { images: this.#view.value.draft.images }),
             ...credential,
+            executionEnvironment: this.#view.value.draft.executionEnvironment,
             ...(this.#view.value.draft.model.trim().length === 0
               ? {}
               : { model: this.#view.value.draft.model.trim() }),

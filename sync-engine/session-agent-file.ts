@@ -14,6 +14,7 @@ export async function loadSessionAgentFile(
   const output = await broker.dispatch(
     {
       arguments: {},
+      executionEnvironment: session.executionEnvironment,
       runnerId: session.runnerId,
       sessionId: session.id,
       tool: RUNNER_AGENT_FILE_COMMAND,

@@ -3,10 +3,10 @@ import { AGENT_SESSION_TOOL_NAMES } from "../shared/agent-tools.ts";
 import type { AgentSessionSummary } from "../shared/session-model.ts";
 import { initialDirectoryPickerState } from "./directory-picker-controller.ts";
 import type {
-  SessionDraft,
   SessionModelDiscoveryState,
   SessionViewState,
 } from "./session-client.tsx";
+import type { SessionDraft } from "./session-draft.ts";
 import { DEFAULT_SESSION_TRANSCRIPT_FILTERS } from "./session-transcript-filters.ts";
 
 export function mostRecentSessionDirectory(
@@ -18,6 +18,7 @@ export function mostRecentSessionDirectory(
 function initialSessionDraft(): SessionDraft {
   return {
     credential: "",
+    executionEnvironment: "bare_metal",
     images: [],
     model: "",
     prompt: "",

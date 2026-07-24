@@ -1,7 +1,24 @@
 import { randomUUID } from "node:crypto";
 
+export type RunnerExecutionEnvironment = "bare_metal" | "container";
+
+export const RUNNER_EXECUTION_CLEANUP_COMMAND = "cleanup_execution_environment";
+
+export function readRunnerExecutionEnvironment(
+  value: unknown,
+): RunnerExecutionEnvironment | undefined {
+  if (value === undefined || value === "bare_metal") {
+    return "bare_metal";
+  }
+  if (value === "container") {
+    return value;
+  }
+  return undefined;
+}
+
 export interface RunnerToolCommand {
   readonly arguments: Readonly<Record<string, unknown>>;
+  readonly executionEnvironment: RunnerExecutionEnvironment;
   readonly id: string;
   readonly sessionId: string;
   readonly tool: string;
@@ -67,6 +84,7 @@ export class RunnerCommandBroker {
 
     const command: RunnerToolCommand = {
       arguments: input.arguments,
+      executionEnvironment: input.executionEnvironment,
       id,
       sessionId: input.sessionId,
       tool: input.tool,

@@ -5,6 +5,7 @@ import type { AgentToolCall } from "./agent-loop.ts";
 import type { AgentSessionToolName } from "./agent-tools.ts";
 import type { ProviderId } from "./provider-credential-store.ts";
 import type { ProviderModelPricing } from "./provider-model-pricing.ts";
+import type { RunnerExecutionEnvironment } from "./runner-command-broker.ts";
 
 export type AgentSessionStatus =
   "queued" | "running" | "idle" | "stopped" | "failed";
@@ -40,6 +41,7 @@ export interface AgentSessionSummary {
   readonly createdAt: number;
   readonly credentialId: string;
   readonly currentContextTokens: number;
+  readonly executionEnvironment: RunnerExecutionEnvironment;
   readonly id: string;
   readonly maxContextTokens: number | null;
   readonly model: string;

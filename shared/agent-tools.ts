@@ -142,6 +142,11 @@ const SESSION_AGENT_TOOLS = [
         description: "Model credential ID",
         ...STRING_PARAMETER,
       },
+      executionEnvironment: {
+        description: "Execution environment for file and shell tools",
+        enum: ["bare_metal", "container"],
+        type: "string",
+      },
       model: {
         description: "Provider model ID",
         ...STRING_PARAMETER,
@@ -175,6 +180,7 @@ const SESSION_AGENT_TOOLS = [
     },
     required: [
       "credentialId",
+      "executionEnvironment",
       "model",
       "prompt",
       "provider",

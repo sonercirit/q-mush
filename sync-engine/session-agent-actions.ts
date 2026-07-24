@@ -7,18 +7,19 @@ import {
   spawnedSessionReport,
   type SessionAgentActionDependencies,
 } from "./session-agent-action-helpers.ts";
+import type { SpawnSessionToolInput } from "./session-agent-tool-model.ts";
 import {
   sessionToolOutput,
   type SessionAgentToolActions,
-  type SpawnSessionToolInput,
 } from "./session-agent-tools.ts";
 import { unavailableSessionResponse } from "./session-availability.ts";
 import type { PendingSpawnedSession } from "./session-store-spawns.ts";
 
 interface SessionAgentActionsDependencies extends SessionAgentActionDependencies {
   readonly abortSession: (sessionId: string) => void;
-  readonly broker: Pick<RunnerCommandBroker, "cancelSession">;
   readonly activeSession: (sessionId: string) => boolean;
+  readonly broker: Pick<RunnerCommandBroker, "cancelSession">;
+  readonly cleanupSession: (detail: AgentSessionDetail) => void;
 }
 
 export class SessionAgentActions {
@@ -218,10 +219,17 @@ export class SessionAgentActions {
       this.#dependencies.abortSession(sessionId);
       this.#dependencies.broker.cancelSession(sessionId);
     };
+    const cleanup = () => {
+      this.#dependencies.cleanupSession(target);
+    };
     if (sessionId === parentSessionId) {
-      queueMicrotask(cancel);
+      queueMicrotask(() => {
+        cancel();
+        cleanup();
+      });
     } else {
       cancel();
+      cleanup();
     }
     this.#dependencies.notify(userId, sessionId);
     this.finished(target, userId);

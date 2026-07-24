@@ -123,35 +123,29 @@ Living project memory; update durable information.
   run, `read_agent_file` loads exact-root `AGENTS.md`, falling back to
   `CLAUDE.md`; only `AGENTS.md` is used when both exist.
 
-  `runner/runner-workspace.ts` shares canonical workspace resolution and
-  containment with the file tools. Tool and skill selections persist per
-  session. Grouped session tools spawn non-blocking child sessions, manage owned
-  sessions, report each child's final message to its parent, and resume an idle
-  parent when its report arrives. `parallel` accepts 2+ tools or skills, has no
+- Each session persists Bare Metal or Container execution; legacy data defaults
+  to Bare Metal. Container sessions reuse one tracked Docker/Podman container,
+  mount only `/workspace`, disable networking, drop capabilities, and set
+  no-new-privileges. `Q_MUSH_CONTAINER_RUNTIME` and `Q_MUSH_CONTAINER_IMAGE`
+  configure it. Terminal paths and disconnect/recovery remove only tracked owned
+  IDs; never prune. `runner/runner-workspace.ts` provides canonical containment.
+  Grouped tools spawn child sessions, report final messages, and resume idle
+  parents. `parallel` accepts 2+ enabled tools or skills except itself, has no
   count cap, and uses four ordered workers with bounded output. Picker details
-  come from canonical schemas. `solid/session-transcript.tsx` renders prompts,
-  tool definitions, Markdown, code/JSON, diffs, and results. The session list
-  paginates ten at a time. The control center manages live sessions through
-  `solid/realtime-client.ts`, `solid/session-client.tsx`, and
-  `solid/session-controller.ts`. Model deltas are combined per session once per
-  animation frame; snapshots and other events remain immediate. Unchanged
-  snapshots suppress notifications, and keyed messages preserve identity so only
-  the affected message rerenders. The long-lived Solid root preserves focus and
-  scroll. The transcript starts and returns to the bottom when messages or the
-  agent file change. `sync-engine/agent-model-discovery.ts` queries provider
-  model metadata; `shared/agent-configuration.ts` owns catalog types and
-  fallbacks. New sessions default to the online runner and model credential,
-  then the first entry. The working directory uses the latest session; models
-  use the first option and maximum reasoning effort. Model choices show all
-  provider and Q Mush-supported input/output modalities.
-  `solid/custom-select.tsx` searches then paginates lists over ten items, ten
-  per page. It opens on the selected page, resets/clamps pages, and owns
-  accessible keyboard/focus. `shared/agent-prompt.ts` builds the model system
-  prompt and its transcript display. Reasoning summaries persist as `thinking`
-  messages but are excluded from replay. Session and transcript rows live in
-  `agent_sessions` and `agent_messages`; interrupted processes mark active
-  sessions failed so they can be resumed. Rebuilt conversations add error
-  results for interrupted tool calls only on resume.
+  come from canonical schemas. Transcripts render prompts, tool definitions,
+  Markdown, code/JSON, diffs, and results; session lists paginate ten at a time.
+  Clients batch model deltas per animation frame, retain keyed message identity,
+  suppress unchanged snapshots, and preserve focus, scroll, and bottom-follow.
+  `sync-engine/agent-model-discovery.ts` queries provider metadata;
+  `shared/agent-configuration.ts` owns catalogs and fallbacks. New sessions use
+  the online runner/default credential, latest directory, first model, and
+  maximum effort. Model options show supported modalities and context limits;
+  model, effort, and tools persist. `solid/custom-select.tsx` searches and
+  paginates lists over ten items, opens on the selected page, clamps/resets
+  pages, and owns keyboard/focus behavior. `shared/agent-prompt.ts` owns the
+  system prompt and transcript display. Thinking is not replayed. Interrupted
+  sessions fail resumably; rebuilt conversations add missing tool errors only on
+  resume.
 
 - `sync-engine/openai.ts` and `sync-engine/openrouter.ts` implement provider
   connections. Multiple OAuth or manual credentials live in
@@ -287,9 +281,11 @@ Living project memory; update durable information.
   attempts use HTTP. Failures persist as non-replayed `error` messages.
 - Shell commands require a positive timeout. On macOS/Linux each has a POSIX
   session; stop/timeout signals only its group, including descendants retaining
-  pipes. Agent launches and runner commands otherwise have no application-owned
-  turn, queue, or elapsed-time limits. Outside explicit or 95%-threshold
-  compaction, providers replay the full conversation without a timeout.
+  pipes. Container mode requires a Docker-compatible CLI (Docker or Podman) and
+  an image containing `/bin/sh`; its default image is `debian:bookworm-slim`.
+  Agent launches and runner commands otherwise have no application-owned turn,
+  queue, or elapsed-time limits. Outside explicit or 95%-threshold compaction,
+  providers replay the full conversation without a timeout.
 - Add each new runtime source root and executable entry to
   `knip.production.config.ts`. Add standalone non-TypeScript build entries, such
   as `solid/styles.css`, to both Knip configs; keep test files and test-support

@@ -3,7 +3,8 @@ import {
   type AgentModelCatalog,
   type AgentModelOption,
 } from "../shared/agent-configuration.ts";
-import type { SessionDraft, SessionViewState } from "./session-client.tsx";
+import type { SessionViewState } from "./session-client.tsx";
+import type { SessionDraft } from "./session-draft.ts";
 
 function selectedModel(
   catalog: AgentModelCatalog | undefined,
@@ -23,6 +24,16 @@ export function chooseSessionOption(
   name: string,
   value: string,
 ): SessionDraft | undefined {
+  if (name === "executionEnvironment") {
+    return selection.availableValues.includes(value)
+      ? {
+          ...state.draft,
+          executionEnvironment:
+            value === "container" ? "container" : "bare_metal",
+        }
+      : undefined;
+  }
+
   if (name === "runnerId") {
     return selection.availableValues.includes(value)
       ? { ...state.draft, runnerId: value }

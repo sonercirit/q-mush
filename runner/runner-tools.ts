@@ -12,6 +12,10 @@ import {
   mapWithParallelConcurrency,
 } from "../shared/parallel.ts";
 import {
+  formatRunnerProcessResult,
+  runRunnerProcess,
+} from "./runner-process.ts";
+import {
   resolveRunnerWorkspace,
   runnerPathIsWithin,
 } from "./runner-workspace.ts";
@@ -19,23 +23,20 @@ import {
 const MAX_FILE_BYTES = 1024 * 1024;
 const MAX_READ_OUTPUT_BYTES = 50 * 1024;
 const MAX_READ_LINES = 2_000;
-const MAX_COMMAND_OUTPUT_BYTES = 256 * 1024;
 const MAXIMUM_EDITS = 100;
-const COMMAND_GROUP_WRAPPER = `
-terminate_command_group() {
-  trap - TERM
-  kill -TERM 0
-}
-trap terminate_command_group TERM
-/bin/sh -lc "$1" &
-command_pid=$!
-wait "$command_pid"
-exit $?
-`;
-
-type CommandTermination = "stopped" | "timed-out";
-
 type ToolArguments = Readonly<Record<string, unknown>>;
+
+type RunnerShellExecutor = (
+  root: string,
+  command: string,
+  timeoutSeconds: number,
+  signal?: AbortSignal,
+) => Promise<string>;
+
+export interface RunnerToolExecutionOptions {
+  readonly mapAbsolutePath?: (path: string) => string;
+  readonly shell?: RunnerShellExecutor;
+}
 
 function requiredString(
   arguments_: ToolArguments,
@@ -150,10 +151,12 @@ async function pathArgument(
   root: string,
   arguments_: ToolArguments,
   mayNotExist = false,
+  mapAbsolutePath?: (path: string) => string,
 ): Promise<string> {
+  const requested = requiredString(arguments_, "path", 4_096);
   return securePath(
     root,
-    requiredString(arguments_, "path", 4_096),
+    mapAbsolutePath === undefined ? requested : mapAbsolutePath(requested),
     mayNotExist,
   );
 }
@@ -180,14 +183,6 @@ async function readTextFile(
   return readFile(path, "utf8");
 }
 
-async function readPathContent(
-  root: string,
-  arguments_: ToolArguments,
-): Promise<{ readonly content: string; readonly path: string }> {
-  const path = await pathArgument(root, arguments_);
-  return { content: await readTextFile(path, MAX_FILE_BYTES), path };
-}
-
 function truncateReadLines(lines: readonly string[]): readonly string[] {
   const output: string[] = [];
   let bytes = 0;
@@ -207,11 +202,51 @@ function truncateReadLines(lines: readonly string[]): readonly string[] {
   return output;
 }
 
-async function readTool(
+function toolAbsolutePathMapper(
+  options: RunnerToolExecutionOptions | undefined,
+): ((path: string) => string) | undefined {
+  return options?.mapAbsolutePath;
+}
+
+function readToolPath(
   root: string,
   arguments_: ToolArguments,
+  options: RunnerToolExecutionOptions | undefined,
+  mayNotExist = false,
 ): Promise<string> {
-  const { content } = await readPathContent(root, arguments_);
+  return pathArgument(
+    root,
+    arguments_,
+    mayNotExist,
+    toolAbsolutePathMapper(options),
+  );
+}
+
+interface FileToolContext {
+  readonly arguments: ToolArguments;
+  readonly options: RunnerToolExecutionOptions | undefined;
+  readonly root: string;
+}
+
+async function fileToolInput(
+  context: FileToolContext,
+  mayNotExist = false,
+): Promise<{ readonly content: string; readonly path: string }> {
+  const path = await readToolPath(
+    context.root,
+    context.arguments,
+    context.options,
+    mayNotExist,
+  );
+  return {
+    content: mayNotExist ? "" : await readTextFile(path, MAX_FILE_BYTES),
+    path,
+  };
+}
+
+async function readTool(context: RunnerToolContext): Promise<string> {
+  const { arguments: arguments_ } = context;
+  const { content } = await fileToolInput(context);
   const offset = optionalInteger(arguments_, "offset", 1, 1, 1_000_000_000);
   const limit = optionalInteger(
     arguments_,
@@ -243,12 +278,28 @@ async function readTool(
     : output;
 }
 
-async function writeTool(
-  root: string,
-  arguments_: ToolArguments,
-): Promise<string> {
+async function fileToolContents(
+  context: RunnerToolContext,
+  mayNotExist = false,
+): Promise<{
+  readonly arguments: ToolArguments;
+  readonly content: string;
+  readonly path: string;
+  readonly root: string;
+}> {
+  return {
+    ...context,
+    ...(await fileToolInput(context, mayNotExist)),
+  };
+}
+
+async function writeTool(context: RunnerToolContext): Promise<string> {
+  const {
+    arguments: arguments_,
+    path,
+    root,
+  } = await fileToolContents(context, true);
   const content = requiredString(arguments_, "content", MAX_FILE_BYTES, true);
-  const path = await pathArgument(root, arguments_, true);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, content, "utf8");
   return `Wrote ${String(Buffer.byteLength(content))} bytes to ${displayPath(root, path)}.`;
@@ -329,12 +380,14 @@ function locateEdits(
   return located;
 }
 
-async function editTool(
-  root: string,
-  arguments_: ToolArguments,
-): Promise<string> {
+async function editTool(context: RunnerToolContext): Promise<string> {
+  const {
+    arguments: arguments_,
+    content,
+    path,
+    root,
+  } = await fileToolContents(context);
   const replacements = editReplacements(arguments_);
-  const { content, path } = await readPathContent(root, arguments_);
   const edits = locateEdits(content, replacements);
   let updated = content;
 
@@ -346,104 +399,21 @@ async function editTool(
   return `Successfully replaced ${String(edits.length)} block(s) in ${displayPath(root, path)}.`;
 }
 
-async function readLimitedStream(
-  stream: ReadableStream<Uint8Array>,
-  maximumBytes: number,
-): Promise<string> {
-  const reader = stream.getReader();
-  const chunks: Uint8Array[] = [];
-  let byteLength = 0;
-  let truncated = false;
-
-  for (;;) {
-    const part = await reader.read();
-
-    if (part.done) {
-      break;
-    }
-
-    const remaining = maximumBytes - byteLength;
-
-    if (part.value.byteLength > remaining) {
-      chunks.push(part.value.slice(0, Math.max(remaining, 0)));
-      truncated = true;
-      await reader.cancel();
-      break;
-    }
-
-    chunks.push(part.value);
-    byteLength += part.value.byteLength;
-  }
-
-  const output = Buffer.concat(chunks).toString("utf8");
-  return truncated ? `${output}\n[output truncated]` : output;
-}
-
-async function bashTool(
-  root: string,
-  arguments_: ToolArguments,
-  signal: AbortSignal | undefined,
-): Promise<string> {
+async function bashTool(context: RunnerToolContext): Promise<string> {
+  const { arguments: arguments_, options, root, signal } = context;
   const command = requiredString(arguments_, "command", 32_768);
   const timeoutSeconds = requiredInteger(arguments_, "timeout", 1);
-  const state: {
-    settled: boolean;
-    termination: CommandTermination | undefined;
-  } = { settled: false, termination: undefined };
-  const child = Bun.spawn(
-    ["/bin/sh", "-c", COMMAND_GROUP_WRAPPER, "q-mush-command", command],
-    {
-      cwd: root,
-      detached: true,
-      onExit: () => {
-        state.settled = true;
-      },
-      stderr: "pipe",
-      stdout: "pipe",
-    },
-  );
-  const terminate = (reason: CommandTermination): void => {
-    if (state.settled || state.termination !== undefined) {
-      return;
-    }
-
-    state.termination = reason;
-    child.kill("SIGTERM");
-  };
-  const stop = () => {
-    terminate("stopped");
-  };
-  const timer = setTimeout(() => {
-    terminate("timed-out");
-  }, timeoutSeconds * 1_000);
-  signal?.addEventListener("abort", stop, { once: true });
-
-  if (signal?.aborted === true) {
-    stop();
+  if (options?.shell !== undefined) {
+    return options.shell(root, command, timeoutSeconds, signal);
   }
-
-  try {
-    const [exitCode, standardError, standardOutput] = await Promise.all([
-      child.exited,
-      readLimitedStream(child.stderr, MAX_COMMAND_OUTPUT_BYTES / 2),
-      readLimitedStream(child.stdout, MAX_COMMAND_OUTPUT_BYTES / 2),
-    ]);
-    if (state.termination === "stopped") {
-      throw new Error("The runner command was stopped");
-    }
-
-    const sections = [
-      standardOutput.length === 0 ? undefined : `stdout:\n${standardOutput}`,
-      standardError.length === 0 ? undefined : `stderr:\n${standardError}`,
-      state.termination === "timed-out"
-        ? `Timed out after ${String(timeoutSeconds)} seconds.`
-        : `Exit code: ${String(exitCode)}`,
-    ].filter((section) => section !== undefined);
-    return sections.join("\n");
-  } finally {
-    clearTimeout(timer);
-    signal?.removeEventListener("abort", stop);
-  }
+  const result = await runRunnerProcess({
+    arguments: ["-lc", command],
+    cwd: root,
+    executable: "/bin/sh",
+    ...(signal === undefined ? {} : { signal }),
+    timeoutSeconds,
+  });
+  return formatRunnerProcessResult(result, timeoutSeconds);
 }
 
 interface ParallelToolUse {
@@ -475,53 +445,67 @@ function parallelToolUses(
   });
 }
 
-type RunnerTool = (
-  root: string,
-  arguments_: ToolArguments,
-  signal?: AbortSignal,
-) => Promise<string>;
+interface RunnerToolContext {
+  readonly arguments: ToolArguments;
+  readonly options: RunnerToolExecutionOptions | undefined;
+  readonly root: string;
+  readonly signal: AbortSignal | undefined;
+}
 
-const RUNNER_TOOLS: Readonly<Record<BaseAgentToolName, RunnerTool>> = {
+type RunnerTool = (context: RunnerToolContext) => Promise<string>;
+
+const runnerTools: Readonly<Record<BaseAgentToolName, RunnerTool>> = {
   bash: bashTool,
   edit: editTool,
   read: readTool,
   write: writeTool,
 };
 
+function runnerToolContext(
+  root: string,
+  arguments_: ToolArguments,
+  signal: AbortSignal | undefined,
+  options: RunnerToolExecutionOptions | undefined,
+): RunnerToolContext {
+  return { arguments: arguments_, options, root, signal };
+}
+
 export interface RunnerParallelExecutionOptions {
   readonly execute: (
     root: string,
-    toolUse: {
-      readonly parameters: ToolArguments;
-      readonly recipientName: BaseAgentToolName;
-    },
+    toolUse: ParallelToolUse,
     signal?: AbortSignal,
   ) => Promise<string>;
 }
 
-const DEFAULT_PARALLEL_EXECUTION: RunnerParallelExecutionOptions = {
-  execute: (root, toolUse, signal) =>
-    RUNNER_TOOLS[toolUse.recipientName](root, toolUse.parameters, signal),
-};
+function defaultParallelExecution(
+  context: RunnerToolContext,
+): RunnerParallelExecutionOptions {
+  return {
+    execute: (_root, toolUse) =>
+      runnerTools[toolUse.recipientName]({
+        ...context,
+        arguments: toolUse.parameters,
+      }),
+  };
+}
 
-const parallelTool = async (
-  root: string,
-  arguments_: ToolArguments,
-  signal?: AbortSignal,
-  execution: RunnerParallelExecutionOptions = DEFAULT_PARALLEL_EXECUTION,
-): Promise<string> => {
+async function parallelTool(
+  context: RunnerToolContext,
+  execution: RunnerParallelExecutionOptions = defaultParallelExecution(context),
+): Promise<string> {
   const results = await mapWithParallelConcurrency(
-    parallelToolUses(arguments_),
+    parallelToolUses(context.arguments),
     (toolUse) =>
       executeParallelCall(
         toolUse.recipientName,
-        () => execution.execute(root, toolUse, signal),
-        signal,
+        () => execution.execute(context.root, toolUse, context.signal),
+        context.signal,
       ),
-    signal,
+    context.signal,
   );
   return boundedParallelOutput(results);
-};
+}
 
 export async function executeRunnerTool(
   workingDirectory: string,
@@ -529,6 +513,7 @@ export async function executeRunnerTool(
   arguments_: ToolArguments,
   signal?: AbortSignal,
   parallelExecution?: RunnerParallelExecutionOptions,
+  options?: RunnerToolExecutionOptions,
 ): Promise<string> {
   if (signal?.aborted === true) {
     throw new Error("The runner command was stopped");
@@ -539,7 +524,8 @@ export async function executeRunnerTool(
   }
 
   const root = await resolveRunnerWorkspace(workingDirectory);
+  const context = runnerToolContext(root, arguments_, signal, options);
   return name === "parallel"
-    ? parallelTool(root, arguments_, signal, parallelExecution)
-    : RUNNER_TOOLS[name](root, arguments_, signal);
+    ? parallelTool(context, parallelExecution)
+    : runnerTools[name](context);
 }

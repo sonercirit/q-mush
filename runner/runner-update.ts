@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
-import { chmodSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync } from "node:fs";
 import {
   RUNNER_EXECUTABLE_PATH,
   RUNNER_EXECUTABLE_SHA256_HEADER,
 } from "../shared/routes.ts";
+import { replacePrivateFile } from "./runner-private-file.ts";
 
 const REQUEST_TIMEOUT_MILLISECONDS = 120_000;
 const MAX_EXECUTABLE_BYTES = 512 * 1024 * 1024;
@@ -94,16 +95,12 @@ async function readVerifiedExecutable(
 }
 
 function replaceExecutable(path: string, executable: Uint8Array): void {
-  const suffix = randomBytes(12).toString("hex");
-  const temporaryPath = `${path}.update-${suffix}`;
-
-  try {
-    writeFileSync(temporaryPath, executable, { flag: "wx", mode: 0o700 });
-    chmodSync(temporaryPath, 0o755);
-    renameSync(temporaryPath, path);
-  } finally {
-    rmSync(temporaryPath, { force: true });
-  }
+  replacePrivateFile(path, executable, {
+    mode: 0o700,
+    prepare: (temporaryPath) => {
+      chmodSync(temporaryPath, 0o755);
+    },
+  });
 }
 
 export async function updateRunnerIfAvailable(

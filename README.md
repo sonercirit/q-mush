@@ -146,62 +146,76 @@ computer. Rerun the installer once to migrate a legacy `q-mush-runner.js`
 installation to the self-updating executable.
 
 After a runner and provider credential are ready, use **New agent session** in
-the control center. Select an online computer and credential; Q Mush discovers
-that credential's available agent models and model-specific reasoning efforts.
-Reasoning effort defaults to the model maximum. Then select the model, working
-directory, and task. Tasks and follow-up messages can select or paste up to
-eight PNG, JPEG, GIF, or WebP images of 10 MB each; attachments are persisted in
-the transcript and sent directly to the selected model provider. The
-working-directory field accepts a path directly or opens an interactive browser
-with Home, Up, and child-directory navigation; choosing a location writes its
-canonical path back to the form. Q Mush implements its own model/tool loop
-without an external agent framework. Before each initial or follow-up agent run,
-the runner loads `AGENTS.md` from the selected working directory, falling back
-to `CLAUDE.md`; when both exist, only `AGENTS.md` is used, and when neither
-exists, no project instructions are added. The selected file is persisted with
-the session, included in the model's system prompt, and shown in the transcript.
-Agent launches, queued runner commands, and brokered command execution have no
-application-owned count or elapsed-time limits. Every shell command must choose
-a positive timeout; Q Mush supplies no default or configured maximum. It exposes
-Pi's four base tool interfaces—`read`, `bash`, `edit`, and `write`—plus a
-`parallel` wrapper for at least two independent calls and the server-side
-`brave_search` skill for current web results, with batched exact edits and
-bounded file and command output. `parallel` has no application-defined call
-count maximum: a small worker pool bounds simultaneous execution while every
-accepted call runs and results retain input order. Each selectable tool and
-skill has an accessible info control showing its authoritative description,
-classification, and parameter schema. Brave Search tries the signed-in user's
-saved keys in order when a key is rejected, rate limited, or temporarily
-unavailable. Transcripts show system instructions, complete tool definitions,
-reasoning summaries, tool calls, and tool results. Transcript prose renders as
-Markdown, fenced code is syntax-colored, and structured tool arguments/results
-are pretty-printed with colorized JSON. Context use includes a percentage, turns
-yellow at 80%, and red at 90%. The session list and transcript header also show
-cumulative active runtime across all runs plus cumulative model cost.
-OpenRouter's provider-reported charge is shown as **Cost**; otherwise Q Mush
-shows **Estimated cost** from detailed token usage and the model pricing
-captured at session creation (or its built-in OpenAI per-token rate table). When
-supported pricing or usage is unavailable, cost is shown as unavailable rather
-than zero. OpenAI connected-account estimates are API-equivalent reference
-prices; subscription billing can differ. Automatic compaction is enabled per
-session by default and replaces completed history with a model-generated handoff
-summary before the next request after usage reaches 95%; automatic and manual
-compaction model calls are included in cumulative cost. It can be turned off,
-and a ready session can be compacted manually. Session transcripts and status
-survive page reloads; a ready, stopped, or failed session accepts follow-up
-instructions. **Stop session** aborts the model request and cancels an active
-runner command.
+the control center. Select an online computer, execution environment, and
+credential; Q Mush discovers that credential's available agent models and
+model-specific reasoning efforts. **Bare Metal** preserves direct runner
+execution. **Container** starts one ephemeral session-scoped Docker/Podman
+container, reuses it across commands so installed packages and other container
+state persist for the session, and removes only that uniquely tracked container
+when the session finishes, fails, stops, is canceled, is interrupted, or the
+runner disconnects. The canonical workspace is the only host path mounted and
+appears as `/workspace`; networking is disabled, Linux capabilities are dropped,
+and no-new-privileges is enabled. Configure the runner host with
+`Q_MUSH_CONTAINER_RUNTIME` (default `docker`, for example `podman`) and
+`Q_MUSH_CONTAINER_IMAGE` (default `debian:bookworm-slim`). A missing runtime or
+image produces an explicit unavailable tool error; Q Mush never runs broad
+container cleanup or prune operations. Reasoning effort defaults to the model
+maximum. Then select the model, working directory, and task. Tasks and follow-up
+messages can select or paste up to eight PNG, JPEG, GIF, or WebP images of 10 MB
+each; attachments are persisted in the transcript and sent directly to the
+selected model provider. The working-directory field accepts a path directly or
+opens an interactive browser with Home, Up, and child-directory navigation;
+choosing a location writes its canonical path back to the form. Q Mush
+implements its own model/tool loop without an external agent framework. Before
+each initial or follow-up agent run, the runner loads `AGENTS.md` from the
+selected working directory, falling back to `CLAUDE.md`; when both exist, only
+`AGENTS.md` is used, and when neither exists, no project instructions are added.
+The selected file is persisted with the session, included in the model's system
+prompt, and shown in the transcript. Agent launches, queued runner commands, and
+brokered command execution have no application-owned count or elapsed-time
+limits. Every shell command must choose a positive timeout; Q Mush supplies no
+default or configured maximum. It exposes Pi's four base tool interfaces—`read`,
+`bash`, `edit`, and `write`—plus a `parallel` wrapper for at least two
+independent calls and the server-side `brave_search` skill for current web
+results, with batched exact edits and bounded file and command output.
+`parallel` has no application-defined call count maximum: a small worker pool
+bounds simultaneous execution while every accepted call runs and results retain
+input order. Each selectable tool and skill has an accessible info control
+showing its authoritative description, classification, and parameter schema.
+Brave Search tries the signed-in user's saved keys in order when a key is
+rejected, rate limited, or temporarily unavailable. Transcripts show system
+instructions, complete tool definitions, reasoning summaries, tool calls, and
+tool results. Transcript prose renders as Markdown, fenced code is
+syntax-colored, and structured tool arguments/results are pretty-printed with
+colorized JSON. Context use includes a percentage, turns yellow at 80%, and red
+at 90%. The session list and transcript header also show cumulative active
+runtime across all runs plus cumulative model cost. OpenRouter's
+provider-reported charge is shown as **Cost**; otherwise Q Mush shows
+**Estimated cost** from detailed token usage and the model pricing captured at
+session creation (or its built-in OpenAI per-token rate table). When supported
+pricing or usage is unavailable, cost is shown as unavailable rather than zero.
+OpenAI connected-account estimates are API-equivalent reference prices;
+subscription billing can differ. Automatic compaction is enabled per session by
+default and replaces completed history with a model-generated handoff summary
+before the next request after usage reaches 95%; automatic and manual compaction
+model calls are included in cumulative cost. It can be turned off, and a ready
+session can be compacted manually. Session transcripts and status survive page
+reloads; a ready, stopped, or failed session accepts follow-up instructions.
+**Stop session** aborts the model request and cancels an active runner command.
 
-The runner executes tools with the runner process's local account permissions.
-File tools reject paths outside the selected workspace, while shell commands are
-intentionally full shell commands rooted in that directory and can access
-anything that account can access. Before a workspace is selected, the
-authenticated directory browser can inspect directories readable by that same
-runner account; each response contains only the canonical location, parent, and
-at most 500 child directories. Only use runners and model credentials you trust
-with the selected project. The selected agent file is sent to the model provider
-as project instructions. Provider secrets remain on the Q Mush server: the
-browser and runner work protocol never receive them.
+The runner executes bare-metal tools with the runner process's local account
+permissions. File tools reject paths outside the selected workspace, while
+bare-metal shell commands are intentionally full shell commands rooted in that
+directory and can access anything that account can access. Container sessions
+instead run shell commands in the hardened session container and map absolute
+workspace paths to `/workspace`; file tools continue enforcing the same
+canonical workspace boundary. Before a workspace is selected, the authenticated
+directory browser can inspect directories readable by that same runner account;
+each response contains only the canonical location, parent, and at most 500
+child directories. Only use runners and model credentials you trust with the
+selected project. The selected agent file is sent to the model provider as
+project instructions. Provider secrets remain on the Q Mush server: the browser
+and runner work protocol never receive them.
 
 OpenAI API keys and connected accounts prefer the streaming Responses WebSocket
 and fall back to HTTP streaming when that transport is unavailable. OpenRouter

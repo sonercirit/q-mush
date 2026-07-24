@@ -5,10 +5,6 @@ import type {
   AgentConversationMessage,
   AgentRecordedMessage,
 } from "../shared/agent-loop.ts";
-import {
-  readAgentSessionToolNames,
-  type AgentSessionToolName,
-} from "../shared/agent-tools.ts";
 import { createdAuditFields, updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
@@ -24,10 +20,15 @@ import { activeSessionDuration } from "../shared/session-timing.ts";
 import { compactStoredConversation } from "./session-compaction.ts";
 import {
   conversationFromMessages,
-  parseProviderPricing,
+  sessionSelection,
   storedSessionMessages,
+  summarizeSession,
   withInterruptedToolResults,
 } from "./session-store-read.ts";
+import {
+  activeRunnerSessions,
+  interruptedSessionRows,
+} from "./session-store-runners.ts";
 import {
   appendSpawnedSessionReport,
   parentSessionId,
@@ -47,6 +48,7 @@ import {
 export interface CreateAgentSession extends Pick<
   AgentSessionSummary,
   | "autoCompact"
+  | "executionEnvironment"
   | "maxContextTokens"
   | "model"
   | "provider"
@@ -112,77 +114,6 @@ function didUpdate(rows: readonly unknown[]): boolean {
   return rows.length > 0;
 }
 
-function sessionSelection() {
-  return {
-    activeDurationMs: agentSessions.activeDurationMs,
-    activeStartedAt: agentSessions.activeStartedAt,
-    autoCompact: agentSessions.autoCompact,
-    costBasis: agentSessions.costBasis,
-    costUsd: agentSessions.costUsd,
-    createdAt: agentSessions.createdAt,
-    credentialId: agentSessions.providerCredentialId,
-    currentContextTokens: agentSessions.currentContextTokens,
-    id: agentSessions.id,
-    maxContextTokens: agentSessions.maxContextTokens,
-    model: agentSessions.model,
-    provider: agentSessions.provider,
-    providerPricing: agentSessions.providerPricing,
-    reasoningEffort: agentSessions.reasoningEffort,
-    runnerId: agentSessions.runnerId,
-    status: agentSessions.status,
-    title: agentSessions.title,
-    tools: agentSessions.tools,
-    updatedAt: agentSessions.updatedAt,
-    workingDirectory: agentSessions.workingDirectory,
-  };
-}
-
-type StoredSessionSummary = Pick<
-  typeof agentSessions.$inferSelect,
-  | "activeDurationMs"
-  | "activeStartedAt"
-  | "autoCompact"
-  | "costBasis"
-  | "costUsd"
-  | "createdAt"
-  | "currentContextTokens"
-  | "id"
-  | "maxContextTokens"
-  | "model"
-  | "provider"
-  | "providerPricing"
-  | "reasoningEffort"
-  | "runnerId"
-  | "status"
-  | "title"
-  | "tools"
-  | "updatedAt"
-  | "workingDirectory"
-> & { readonly credentialId: string };
-
-function parseStoredTools(value: string): readonly AgentSessionToolName[] {
-  try {
-    const tools = readAgentSessionToolNames(JSON.parse(value));
-    if (tools !== undefined) {
-      return tools;
-    }
-  } catch {
-    // The common error below identifies corrupt local data.
-  }
-  throw new Error("Stored agent session tools are invalid");
-}
-
-function summarizeSession(stored: StoredSessionSummary): AgentSessionSummary {
-  return {
-    ...stored,
-    activeStartedAt: stored.activeStartedAt?.getTime() ?? null,
-    createdAt: stored.createdAt.getTime(),
-    providerPricing: parseProviderPricing(stored.providerPricing),
-    tools: parseStoredTools(stored.tools),
-    updatedAt: stored.updatedAt.getTime(),
-  };
-}
-
 function titleFromPrompt(prompt: string): string {
   const firstLine = prompt
     .split(/\r?\n/u)
@@ -224,6 +155,7 @@ export class SessionStore {
         .values({
           ...createdAuditFields(input.userId, now),
           autoCompact: input.autoCompact,
+          executionEnvironment: input.executionEnvironment,
           id: sessionId,
           maxContextTokens: input.maxContextTokens,
           model: input.model,
@@ -289,6 +221,12 @@ export class SessionStore {
       .orderBy(desc(agentSessions.updatedAt), desc(agentSessions.id))
       .all()
       .map(summarizeSession);
+  }
+
+  activeForRunner(runnerId: string): readonly PendingSpawnedSession[] {
+    return activeRunnerSessions(this.#database, runnerId, (userId, sessionId) =>
+      this.get(userId, sessionId),
+    );
   }
 
   conversation(sessionId: string): readonly AgentConversationMessage[] {
@@ -561,20 +499,7 @@ export class SessionStore {
   }
 
   failInterrupted(now: number): readonly PendingSpawnedSession[] {
-    const interrupted = this.#database
-      .select({
-        ...SESSION_TIMING_SELECTION,
-        id: agentSessions.id,
-        userId: agentSessions.userId,
-      })
-      .from(agentSessions)
-      .where(
-        and(
-          eq(agentSessions.isDeleted, false),
-          inArray(agentSessions.status, ["queued", "running"]),
-        ),
-      )
-      .all();
+    const interrupted = interruptedSessionRows(this.#database);
 
     for (const session of interrupted) {
       const duration = activeSessionDuration(session, now);

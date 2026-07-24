@@ -53,6 +53,7 @@ function runners(
     disconnected: () => undefined,
     installer: () => new Response(),
     listForUser: () => [],
+    onDisconnect: () => undefined,
     remove: () => new Response(),
     runnerIsAvailable: () => false,
     runnerToken: () => token,
@@ -81,6 +82,7 @@ function sessions(
     models: () => Promise.resolve(new Response()),
     onChange: () => undefined,
     runnerConnected: () => undefined,
+    runnerDisconnected: () => undefined,
     stop: () => Promise.resolve(new Response()),
     ...overrides,
   };

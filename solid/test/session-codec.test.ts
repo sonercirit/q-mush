@@ -50,6 +50,17 @@ test("reads persisted session error messages", () => {
   ]);
 });
 
+test("reads a session's execution environment", () => {
+  expect(readSessionDetail(DETAIL).executionEnvironment).toBe("bare_metal");
+  expect(
+    readSessionDetail({ ...DETAIL, executionEnvironment: "container" })
+      .executionEnvironment,
+  ).toBe("container");
+  expect(() =>
+    readSessionDetail({ ...DETAIL, executionEnvironment: "unknown" }),
+  ).toThrow("invalid agent session");
+});
+
 test("reads a session's tool and skill selection", () => {
   expect(readSessionDetail(DETAIL).tools).toEqual(DETAIL.tools);
   expect(() =>

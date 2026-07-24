@@ -10,6 +10,7 @@ import {
   SESSION_MODELS_PATH,
   SESSIONS_PATH,
 } from "../../shared/routes.ts";
+import { runnerCleanupCommand } from "../../shared/test/runner-command-fixtures.ts";
 import type { AgentModelDiscoverer } from "../../sync-engine/agent-model-discovery.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import {
@@ -29,8 +30,10 @@ import {
   completeAgentFileLookup,
   completeRunnerCommand,
   expectRunnerCommand,
+  expectSessionRunnerCommand,
   hasSessionStatus,
   sessionDetail,
+  waitForSessionStatus,
   waitForSessionValue,
 } from "./session-integration-helpers.ts";
 
@@ -75,6 +78,15 @@ async function expectJsonResponse(
   expect(response.status).toBe(status);
 }
 
+async function createSession(
+  setup: Awaited<ReturnType<typeof connectedSessionSetup>>,
+  request: Request = createSessionRequest(),
+): Promise<Response> {
+  const response = await setup.sessions.collection(request);
+  expect(response.status).toBe(201);
+  return response;
+}
+
 async function expectSessionReaches(
   setup: Awaited<ReturnType<typeof connectedSessionSetup>>,
   response: Response,
@@ -82,10 +94,7 @@ async function expectSessionReaches(
 ) {
   expect(response.status).toBe(201);
   await completeAgentFileLookup(setup);
-  await waitForSessionValue(
-    () => sessionDetail(setup.sessions),
-    hasSessionStatus(status),
-  );
+  await waitForSessionStatus(setup, status);
   return sessionDetail(setup.sessions);
 }
 
@@ -94,16 +103,10 @@ async function startSessionWithAgentFile(
   agentFile: unknown,
 ): Promise<Awaited<ReturnType<typeof connectedSessionSetup>>> {
   const setup = connectedSessionSetup(model);
-  const createResponse = await setup.sessions.collection(
-    createSessionRequest(),
-  );
+  await createSession(setup);
 
-  expect(createResponse.status).toBe(201);
   await completeAgentFileLookup(setup, agentFile);
-  await waitForSessionValue(
-    () => sessionDetail(setup.sessions),
-    hasSessionStatus("idle"),
-  );
+  await waitForSessionStatus(setup, "idle");
   return setup;
 }
 
@@ -130,6 +133,73 @@ function completingSessionSetup(content: string) {
   return { model, ...connectedSessionSetup(model) };
 }
 
+function containerSessionSetup(content = "Isolated work complete.") {
+  return completingSessionSetup(content);
+}
+
+function containerRequest(): Request {
+  return createSessionRequest(true, "high", "gpt-4.1-mini", [], "container");
+}
+
+async function waitForBlockingModel(model: BlockingModel): Promise<void> {
+  await waitForSessionValue(() => model.started, Boolean);
+}
+
+async function startContainerSession(
+  setup: Awaited<ReturnType<typeof connectedSessionSetup>>,
+): Promise<void> {
+  await createSession(setup, containerRequest());
+  await completeAgentFileLookup(setup, null, "container");
+}
+
+interface ContainerSessionSetup {
+  readonly model: BlockingModel;
+  readonly setup: Awaited<ReturnType<typeof connectedSessionSetup>>;
+}
+
+async function startBlockingContainerSession(): Promise<ContainerSessionSetup> {
+  const model = new BlockingModel();
+  const setup = connectedSessionSetup(model);
+  await startContainerSession(setup);
+  await waitForBlockingModel(model);
+  return { model, setup };
+}
+
+async function completeContainerCleanup(
+  setup: Awaited<ReturnType<typeof connectedSessionSetup>>,
+  missingMessage: string,
+): Promise<void> {
+  await expectSessionRunnerCommand(
+    setup,
+    runnerCleanupCommand(),
+    missingMessage,
+  );
+  expect(completeRunnerCommand(setup, "Container removed.").status).toBe(204);
+}
+
+async function stopSession(
+  setup: Awaited<ReturnType<typeof connectedSessionSetup>>,
+): Promise<Response> {
+  return setup.sessions.stop(
+    createAuthenticatedRequest(
+      `${SESSIONS_PATH}/${SESSION_ID}/stop`,
+      undefined,
+      "POST",
+    ),
+    SESSION_ID,
+  );
+}
+
+async function stopBlockingSession(
+  setup: Awaited<ReturnType<typeof connectedSessionSetup>>,
+  model: BlockingModel,
+): Promise<Response> {
+  const stopped = await stopSession(setup);
+  expect(stopped.status).toBe(200);
+  await waitForSessionValue(() => model.aborted, Boolean);
+  return stopped;
+}
+
 async function unauthenticatedSessionStatus(): Promise<number> {
   const setup = emptySessionSetup();
   const response = await setup.sessions.collection(
@@ -152,6 +222,56 @@ describe("agent sessions", () => {
         ],
       },
     );
+    setup.database.$client.close();
+  });
+
+  test("creates a container session through the API", async () => {
+    const setup = containerSessionSetup();
+    const requestValue: unknown = await createSessionRequest().json();
+    if (!isObject(requestValue)) {
+      throw new Error("The session request fixture is invalid");
+    }
+    const response = await createSession(
+      setup,
+      createAuthenticatedRequest(
+        SESSIONS_PATH,
+        { ...requestValue, executionEnvironment: "container" },
+        "POST",
+      ),
+    );
+
+    const created: unknown = await response.json();
+    expect(created).toMatchObject({ executionEnvironment: "container" });
+    setup.database.$client.close();
+  });
+
+  test("cleans a container session after it completes", async () => {
+    const setup = containerSessionSetup();
+    await startContainerSession(setup);
+    await completeContainerCleanup(
+      setup,
+      "Container cleanup was not dispatched",
+    );
+    await waitForSessionStatus(setup, "idle");
+    setup.database.$client.close();
+  });
+
+  test("dispatches container cleanup when a running session is stopped", async () => {
+    const { model, setup } = await startBlockingContainerSession();
+    await stopBlockingSession(setup, model);
+
+    await completeContainerCleanup(setup, "Stopping did not dispatch cleanup");
+    await setup.sessions.drain();
+    setup.database.$client.close();
+  });
+
+  test("does not queue remote cleanup after a runner disconnect", async () => {
+    const { model, setup } = await startBlockingContainerSession();
+    setup.sessions.runnerDisconnected(RUNNER_ID);
+    await waitForSessionValue(() => model.aborted, Boolean);
+
+    expect(setup.runnerCommands).toEqual([]);
+    await waitForSessionStatus(setup, "failed");
     setup.database.$client.close();
   });
 
@@ -229,6 +349,7 @@ describe("agent sessions", () => {
       setup,
       {
         arguments: {},
+        executionEnvironment: "bare_metal",
         id: RUNNER_COMMAND_ID,
         sessionId: `directory-picker:${TEST_USER_ID}`,
         tool: "list_directories",
@@ -469,8 +590,7 @@ describe("agent sessions", () => {
     ]);
     const setup = connectedSessionSetup(model);
     const { sessions } = setup;
-    const created = await sessions.collection(createSessionRequest());
-    expect(created.status).toBe(201);
+    await createSession(setup);
     await completeAgentFileLookup(setup);
     await expectRunnerCommand(
       setup,
@@ -479,6 +599,7 @@ describe("agent sessions", () => {
           command: "bun run dev:restart",
           timeout: 30,
         },
+        executionEnvironment: "bare_metal",
         id: RUNNER_COMMAND_ID,
         sessionId: SESSION_ID,
         tool: "bash",
@@ -513,21 +634,9 @@ describe("agent sessions", () => {
     const created = await sessions.collection(createSessionRequest());
     await expectSessionReaches(setup, created, "running");
 
-    const stopped = await sessions.stop(
-      createAuthenticatedRequest(
-        `${SESSIONS_PATH}/${SESSION_ID}/stop`,
-        undefined,
-        "POST",
-      ),
-      SESSION_ID,
-    );
+    const stopped = await stopBlockingSession(setup, model);
 
-    expect(stopped.status).toBe(200);
     expect(await stopped.json()).toMatchObject({ status: "stopped" });
-    await waitForSessionValue(
-      () => model.aborted,
-      (value) => value === true,
-    );
     expect(model.started).toBe(true);
     database.$client.close();
   });

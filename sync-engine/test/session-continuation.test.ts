@@ -60,6 +60,7 @@ describe("session continuation", () => {
       setup,
       {
         arguments: { path: "README.md" },
+        executionEnvironment: "bare_metal",
         id: RUNNER_COMMAND_ID,
         sessionId: SESSION_ID,
         tool: "read",

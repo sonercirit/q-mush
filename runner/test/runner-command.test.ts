@@ -2,11 +2,21 @@ import { writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { describe, expect, test } from "vitest";
 import {
-  executeRunnerCommand,
   readRunnerCommand,
+  RunnerCommandExecutor,
 } from "../../runner/runner-command.ts";
 import { RUNNER_AGENT_FILE_COMMAND } from "../../shared/agent-file.ts";
+import { runnerToolCommand } from "../../shared/test/runner-command-fixtures.ts";
 import { useTemporaryDirectories } from "./temporary-directories.ts";
+
+const commandExecutor = new RunnerCommandExecutor();
+
+function executeRunnerCommand(
+  command: Parameters<RunnerCommandExecutor["execute"]>[0],
+  signal?: AbortSignal,
+): Promise<string> {
+  return commandExecutor.execute(command, signal);
+}
 
 const temporaryDirectory = useTemporaryDirectories("q-mush-command-test-");
 
@@ -19,6 +29,7 @@ function shellCommand(
   return executeRunnerCommand(
     {
       arguments: { command, timeout },
+      executionEnvironment: "bare_metal",
       id: "shell-command",
       sessionId: "session-1",
       tool: "bash",
@@ -78,13 +89,10 @@ const TIMEOUT_SECONDS = 1;
 
 describe("runner WebSocket protocol", () => {
   test("validates commands before executing them", async () => {
-    const expected = {
+    const expected = runnerToolCommand({
       arguments: { path: "missing.txt" },
-      id: "command-1",
-      sessionId: "session-1",
-      tool: "read",
       workingDirectory: "/missing-workspace",
-    };
+    });
     const command = readRunnerCommand({ command: expected });
 
     expect(command).toEqual(expected);
@@ -100,6 +108,7 @@ describe("runner WebSocket protocol", () => {
 
     const output = await executeRunnerCommand({
       arguments: {},
+      executionEnvironment: "bare_metal",
       id: "agent-file-command",
       sessionId: "session-1",
       tool: RUNNER_AGENT_FILE_COMMAND,
@@ -115,6 +124,7 @@ describe("runner WebSocket protocol", () => {
   test("executes directory-browser commands outside an agent workspace", async () => {
     const output = await executeRunnerCommand({
       arguments: {},
+      executionEnvironment: "bare_metal",
       id: "directory-command",
       sessionId: "directory-picker",
       tool: "list_directories",
@@ -175,6 +185,7 @@ describe("runner WebSocket protocol", () => {
           command: `printf started > ${JSON.stringify(marker)}`,
           timeout: 60,
         },
+        executionEnvironment: "bare_metal",
         id: "already-stopped-command",
         sessionId: "session-1",
         tool: "bash",

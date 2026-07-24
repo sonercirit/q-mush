@@ -4,7 +4,6 @@ import {
   type AgentModelCatalog,
 } from "../shared/agent-configuration.ts";
 import type { AgentImage } from "../shared/agent-images.ts";
-import type { AgentSessionToolName } from "../shared/agent-tools.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
 import type { RunnerSummary } from "../shared/runner-model.ts";
 import type {
@@ -29,6 +28,8 @@ import { SessionPromptInput } from "./session-client-forms.tsx";
 import { formatTokenCount } from "./session-context-client.tsx";
 import type { SessionController } from "./session-controller.ts";
 import { SessionDetail, SessionList } from "./session-detail-client.tsx";
+import type { SessionDraft } from "./session-draft.ts";
+import { SessionExecutionEnvironmentSelect } from "./session-execution-environment.tsx";
 import type { SessionPanelResources } from "./session-panel-resources.ts";
 import {
   selectedSessionCredentialAvailable,
@@ -36,17 +37,6 @@ import {
 } from "./session-resource-availability.ts";
 import { SessionToolPicker } from "./session-tool-picker.tsx";
 import type { SessionTranscriptFilters } from "./session-transcript-filters.ts";
-
-export interface SessionDraft {
-  readonly credential: string;
-  readonly images: readonly AgentImage[];
-  readonly model: string;
-  readonly prompt: string;
-  readonly reasoningEffort: string;
-  readonly runnerId: string;
-  readonly tools: readonly AgentSessionToolName[];
-  readonly workingDirectory: string;
-}
 
 export interface SessionModelDiscoveryState {
   readonly catalog: AgentModelCatalog | undefined;
@@ -67,7 +57,12 @@ export interface SessionViewState {
   readonly loadingDetail: boolean;
   readonly modelDiscovery: SessionModelDiscoveryState;
   readonly openSelect:
-    "credential" | "model" | "reasoningEffort" | "runnerId" | undefined;
+    | "credential"
+    | "executionEnvironment"
+    | "model"
+    | "reasoningEffort"
+    | "runnerId"
+    | undefined;
   readonly selectedId: string | undefined;
   readonly sending: boolean;
   readonly sessions: readonly AgentSessionSummary[] | undefined;
@@ -335,14 +330,24 @@ function NewSessionForm(props: {
     options: readonly CustomSelectOption[],
   ): readonly string[] => options.map(({ value }) => value);
   const select = (
-    name: "credential" | "model" | "reasoningEffort" | "runnerId",
+    name:
+      | "credential"
+      | "executionEnvironment"
+      | "model"
+      | "reasoningEffort"
+      | "runnerId",
     value: string,
     values: readonly string[],
   ): void => {
     props.controller.chooseOption(name, value, values);
   };
   const toggleSelect = (
-    name: "credential" | "model" | "reasoningEffort" | "runnerId",
+    name:
+      | "credential"
+      | "executionEnvironment"
+      | "model"
+      | "reasoningEffort"
+      | "runnerId",
   ): void => {
     props.controller.toggleSelect(name);
   };
@@ -396,6 +401,10 @@ function NewSessionForm(props: {
       <DirectoryInput
         controller={props.controller}
         runnerAvailable={selectedRunnerId().length > 0}
+        state={props.state}
+      />
+      <SessionExecutionEnvironmentSelect
+        controller={props.controller}
         state={props.state}
       />
       <CustomSelect

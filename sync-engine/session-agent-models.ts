@@ -74,7 +74,10 @@ export function createSessionAgentModels(options: {
       modelOptions(
         options.detail,
         options.credential,
-        createAgentSystemPrompt(options.agentFile),
+        createAgentSystemPrompt(
+          options.agentFile,
+          options.detail.executionEnvironment,
+        ),
         onDelta,
       ),
     ),

@@ -5,8 +5,12 @@ import {
   type AgentConversationMessage,
   type AgentToolCall,
 } from "../shared/agent-loop.ts";
+import {
+  readAgentSessionToolNames,
+  type AgentSessionToolName,
+} from "../shared/agent-tools.ts";
 import type { AppDatabase } from "../shared/database.ts";
-import { agentMessages } from "../shared/database/schema.ts";
+import { agentMessages, agentSessions } from "../shared/database/schema.ts";
 import { readProviderModelPricing } from "../shared/provider-model-pricing.ts";
 import { compareAgentSessionMessages } from "../shared/session-message-order.ts";
 import type {
@@ -129,6 +133,81 @@ export function withInterruptedToolResults(
   return complete;
 }
 
+export function sessionSelection() {
+  return {
+    activeDurationMs: agentSessions.activeDurationMs,
+    activeStartedAt: agentSessions.activeStartedAt,
+    autoCompact: agentSessions.autoCompact,
+    costBasis: agentSessions.costBasis,
+    costUsd: agentSessions.costUsd,
+    createdAt: agentSessions.createdAt,
+    credentialId: agentSessions.providerCredentialId,
+    currentContextTokens: agentSessions.currentContextTokens,
+    executionEnvironment: agentSessions.executionEnvironment,
+    id: agentSessions.id,
+    maxContextTokens: agentSessions.maxContextTokens,
+    model: agentSessions.model,
+    provider: agentSessions.provider,
+    providerPricing: agentSessions.providerPricing,
+    reasoningEffort: agentSessions.reasoningEffort,
+    runnerId: agentSessions.runnerId,
+    status: agentSessions.status,
+    title: agentSessions.title,
+    tools: agentSessions.tools,
+    updatedAt: agentSessions.updatedAt,
+    workingDirectory: agentSessions.workingDirectory,
+  };
+}
+
+type StoredSessionSummary = Pick<
+  typeof agentSessions.$inferSelect,
+  | "activeDurationMs"
+  | "activeStartedAt"
+  | "autoCompact"
+  | "costBasis"
+  | "costUsd"
+  | "createdAt"
+  | "currentContextTokens"
+  | "executionEnvironment"
+  | "id"
+  | "maxContextTokens"
+  | "model"
+  | "provider"
+  | "providerPricing"
+  | "reasoningEffort"
+  | "runnerId"
+  | "status"
+  | "title"
+  | "tools"
+  | "updatedAt"
+  | "workingDirectory"
+> & { readonly credentialId: string };
+
+function parseStoredTools(value: string): readonly AgentSessionToolName[] {
+  try {
+    const tools = readAgentSessionToolNames(JSON.parse(value));
+    if (tools !== undefined) {
+      return tools;
+    }
+  } catch {
+    // The common error below identifies corrupt local data.
+  }
+  throw new Error("Stored agent session tools are invalid");
+}
+
+export function summarizeSession(
+  stored: StoredSessionSummary,
+): AgentSessionSummary {
+  return {
+    ...stored,
+    activeStartedAt: stored.activeStartedAt?.getTime() ?? null,
+    createdAt: stored.createdAt.getTime(),
+    providerPricing: parseProviderPricing(stored.providerPricing),
+    tools: parseStoredTools(stored.tools),
+    updatedAt: stored.updatedAt.getTime(),
+  };
+}
+
 export function storedSessionMessages(
   database: AppDatabase,
   sessionId: string,
@@ -197,7 +276,7 @@ export function conversationFromMessages(
   return conversation;
 }
 
-export function parseProviderPricing(
+function parseProviderPricing(
   value: string | null,
 ): AgentSessionSummary["providerPricing"] {
   if (value === null) {

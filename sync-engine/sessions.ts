@@ -1,10 +1,7 @@
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
-import { createDatabase, type AppDatabase } from "../shared/database.ts";
-import { createUuidV7, type IdGenerator } from "../shared/ids.ts";
-import type {
-  ProviderCredentialAccess,
-  ProviderId,
-} from "../shared/provider-credential-store.ts";
+import { createDatabase } from "../shared/database.ts";
+import { createUuidV7 } from "../shared/ids.ts";
+import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import {
   RunnerCommandBroker,
   type RunnerToolCommand,
@@ -39,6 +36,7 @@ import {
   startManualSessionCompaction,
   updateSessionCompactionMode,
 } from "./session-compaction-actions.ts";
+import { SessionExecutionCleanup } from "./session-execution-cleanup.ts";
 import {
   readCreateSession,
   readPrompt,
@@ -47,6 +45,11 @@ import {
   type CreateSessionInput,
   type PromptInput,
 } from "./session-input.ts";
+import type {
+  SessionCredentialReaders,
+  SessionDependencies,
+  SessionIntegration,
+} from "./session-integration.ts";
 import { sessionModelRuntime } from "./session-model-runtime.ts";
 import {
   SessionRequestHelpers,
@@ -54,72 +57,22 @@ import {
 } from "./session-request-helpers.ts";
 import { SessionRuntimes } from "./session-runtime.ts";
 import { SessionStore } from "./session-store.ts";
-
-interface SessionCredentialReader {
-  readCredential(
-    userId: string,
-    credentialId: string,
-  ):
-    | Promise<ProviderCredentialAccess | undefined>
-    | ProviderCredentialAccess
-    | undefined;
-}
-
-export type SessionCredentialReaders = Readonly<
-  Record<ProviderId, SessionCredentialReader>
->;
+export type {
+  SessionCredentialReaders,
+  SessionIntegration,
+} from "./session-integration.ts";
 
 type SessionAction = (
   credential: ProviderCredentialAccess,
 ) => Promise<Response> | Response;
 
-interface SessionDependencies {
-  readonly broker?: RunnerCommandBroker;
-  readonly braveSearch: Pick<BraveSearchSkill, "execute">;
-  readonly database?: AppDatabase;
-  readonly discoverModels?: AgentModelDiscoverer;
-  readonly modelFactory?: AgentModelFactory;
-  readonly now?: () => number;
-  readonly randomId?: IdGenerator;
-  readonly realtime?: RealtimeHub;
-}
-
 interface CredentialSelection {
   readonly credentialId: string;
-  readonly provider: ProviderId;
+  readonly provider: AgentSessionDetail["provider"];
 }
 
 interface RuntimeSelection extends CredentialSelection {
   readonly runnerId: string;
-}
-
-export interface SessionIntegration {
-  collection(request: Request): Response | Promise<Response>;
-  compact(request: Request, sessionId: string): Promise<Response>;
-  compaction(request: Request, sessionId: string): Promise<Response>;
-  completeRunnerCommand(
-    runnerId: string,
-    commandId: string,
-    output: string,
-  ): boolean;
-  continue(request: Request, sessionId: string): Promise<Response>;
-  deliverRunnerCommands(
-    runnerId: string,
-    deliver: (command: RunnerToolCommand) => boolean,
-  ): void;
-  detailForUser(
-    userId: string,
-    sessionId: string,
-  ): AgentSessionDetail | undefined;
-  directories(request: Request, runnerId: string): Promise<Response>;
-  drain(): Promise<void>;
-  item(request: Request, sessionId: string): Response;
-  listForUser(userId: string): readonly AgentSessionSummary[];
-  message(request: Request, sessionId: string): Promise<Response>;
-  models(request: Request): Promise<Response>;
-  onChange(listener: (userId: string, sessionId: string) => void): void;
-  runnerConnected(): void;
-  stop(request: Request, sessionId: string): Promise<Response>;
 }
 
 function safeErrorMessage(error: unknown): string {
@@ -146,6 +99,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
   readonly #runtimes = new SessionRuntimes();
   readonly #store: SessionStore;
   readonly #actions: SessionAgentActions;
+  readonly #executionCleanup: SessionExecutionCleanup;
 
   constructor(
     auth: GoogleAuth,
@@ -176,8 +130,12 @@ class DrizzleSessionIntegration implements SessionIntegration {
       dependencies.database ?? createDatabase(":memory:"),
       dependencies.randomId ?? createUuidV7,
     );
+    this.#executionCleanup = new SessionExecutionCleanup(this.#broker);
     this.#actions = this.#createActions();
     this.#actions.reportAll(this.#store.failInterrupted(this.#now()));
+    this.#runners.onDisconnect((runner) => {
+      this.runnerDisconnected(runner.id);
+    });
   }
 
   #createActions(): SessionAgentActions {
@@ -185,6 +143,9 @@ class DrizzleSessionIntegration implements SessionIntegration {
       activeSession: (sessionId) => this.#runtimes.active(sessionId),
       abortSession: (sessionId) => {
         this.#runtimes.abort(sessionId);
+      },
+      cleanupSession: (detail) => {
+        void this.#executionCleanup.cleanup(detail);
       },
       broker: this.#broker,
       draining: () => this.#runtimes.draining,
@@ -263,8 +224,9 @@ class DrizzleSessionIntegration implements SessionIntegration {
     this.#broker.deliverQueued(runnerId, deliver);
   }
 
-  drain(): Promise<void> {
-    return this.#runtimes.drain();
+  async drain(): Promise<void> {
+    await this.#runtimes.drain();
+    await Promise.allSettled(this.#executionCleanup.pending);
   }
 
   async directories(request: Request, runnerId: string): Promise<Response> {
@@ -313,6 +275,22 @@ class DrizzleSessionIntegration implements SessionIntegration {
   runnerConnected(): void {
     this.#actions.reportAll(this.#store.pendingSpawnedSessions());
   }
+
+  runnerDisconnected(runnerId: string): void {
+    for (const { detail, userId } of this.#store.activeForRunner(runnerId)) {
+      this.#executionCleanup.markOffline(detail.id);
+      this.#store.appendErrorMessage(
+        detail.id,
+        "Session failed: the runner disconnected",
+        this.#now(),
+      );
+      this.#store.mark(detail.id, "failed", this.#now());
+      this.#runtimes.abort(detail.id);
+      this.#broker.cancelSession(detail.id);
+      this.#notifyFinished(detail, userId);
+    }
+  }
+
   async stop(request: Request, sessionId: string): Promise<Response> {
     return this.#requests.postForUser(request, (user) =>
       this.#withStoredSession(user, sessionId, (existing) => {
@@ -322,6 +300,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
 
         this.#runtimes.abort(sessionId);
         this.#broker.cancelSession(sessionId);
+        void this.#executionCleanup.cleanup(existing);
         this.#notify(user.id, sessionId);
         return this.#detailResponse(user.id, sessionId);
       }),
@@ -518,9 +497,12 @@ class DrizzleSessionIntegration implements SessionIntegration {
     userId: string,
     compact = false,
   ): boolean {
-    return this.#runtimes.launch(detail.id, (controller) =>
-      this.#run(detail, credential, userId, controller, compact),
-    );
+    const previousCleanup = this.#executionCleanup.waitFor(detail.id);
+    this.#executionCleanup.clearOffline(detail.id);
+    return this.#runtimes.launch(detail.id, async (controller) => {
+      await previousCleanup;
+      await this.#run(detail, credential, userId, controller, compact);
+    });
   }
 
   #resume(request: Request, sessionId: string): Promise<Response> | Response {
@@ -574,9 +556,14 @@ class DrizzleSessionIntegration implements SessionIntegration {
     this.#actions.finished(detail, userId);
   }
 
-  #finish(detail: AgentSessionDetail, userId: string, error?: unknown): void {
+  async #finish(
+    detail: AgentSessionDetail,
+    userId: string,
+    error?: unknown,
+  ): Promise<void> {
     const current = this.#store.get(userId, detail.id);
     if (current?.status === "stopped") {
+      await this.#executionCleanup.cleanup(detail);
       this.#notifyFinished(detail, userId);
       return;
     }
@@ -587,6 +574,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
         this.#now(),
       );
     }
+    await this.#executionCleanup.cleanup(detail);
     this.#store.mark(
       detail.id,
       error === undefined ? "idle" : "failed",
@@ -627,10 +615,12 @@ class DrizzleSessionIntegration implements SessionIntegration {
       await (compact
         ? compactSessionConversation(runtime)
         : runSessionAgent(runtime));
-      this.#finish(detail, userId);
+      await this.#finish(detail, userId);
     } catch (error) {
       if (!controller.signal.aborted && !isAbort(error)) {
-        this.#finish(detail, userId, error);
+        await this.#finish(detail, userId, error);
+      } else {
+        await this.#executionCleanup.cleanup(detail);
       }
     }
   }

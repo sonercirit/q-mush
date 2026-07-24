@@ -1,11 +1,14 @@
 import { createMemo, For, Show, type Accessor, type JSX } from "solid-js";
 import type { AgentFile } from "../shared/agent-file.ts";
-import { AGENT_SYSTEM_PROMPT } from "../shared/agent-prompt.ts";
+import { createAgentSystemPrompt } from "../shared/agent-prompt.ts";
 import {
   selectedAgentTools,
   type AgentSessionToolName,
 } from "../shared/agent-tools.ts";
-import type { AgentSessionMessage } from "../shared/session-model.ts";
+import type {
+  AgentSessionDetail,
+  AgentSessionMessage,
+} from "../shared/session-model.ts";
 import { renderDebugBoundary } from "./render-debug.tsx";
 import { SessionImagePreviews } from "./session-image-client.tsx";
 import { renderMarkdown } from "./session-markdown.tsx";
@@ -52,6 +55,16 @@ function renderTranscriptInstruction(options: {
       labelClasses="text-amber-200"
     />
   );
+}
+
+function SessionSystemPrompt(props: {
+  readonly executionEnvironment: AgentSessionDetail["executionEnvironment"];
+}): JSX.Element {
+  return renderTranscriptInstruction({
+    boundaryKey: "system-prompt",
+    content: createAgentSystemPrompt(null, props.executionEnvironment),
+    label: "System prompt",
+  });
 }
 
 function ToolDefinitions(props: {
@@ -347,6 +360,7 @@ function TranscriptMessage(
 
 export function SessionTranscript(props: {
   readonly agentFile: AgentFile | null;
+  readonly executionEnvironment: AgentSessionDetail["executionEnvironment"];
   readonly filters: SessionTranscriptFilters;
   readonly messages: readonly AgentSessionMessage[];
   readonly tools: readonly AgentSessionToolName[];
@@ -374,11 +388,9 @@ export function SessionTranscript(props: {
   return (
     <>
       <Show when={props.filters.systemPrompt}>
-        {renderTranscriptInstruction({
-          boundaryKey: "system-prompt",
-          content: AGENT_SYSTEM_PROMPT,
-          label: "System prompt",
-        })}
+        <SessionSystemPrompt
+          executionEnvironment={props.executionEnvironment}
+        />
       </Show>
       <Show when={props.filters.agentInstructions && props.agentFile !== null}>
         {renderTranscriptInstruction({

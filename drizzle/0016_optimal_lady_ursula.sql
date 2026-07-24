@@ -1,0 +1,1 @@
+ALTER TABLE `agent_sessions` ADD `execution_environment` text DEFAULT 'bare_metal' NOT NULL;
