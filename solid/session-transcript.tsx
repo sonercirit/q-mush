@@ -1,6 +1,6 @@
 import { createMemo, For, Show, type Accessor, type JSX } from "solid-js";
 import type { AgentFile } from "../shared/agent-file.ts";
-import { createAgentSystemPrompt } from "../shared/agent-prompt.ts";
+import { AGENT_SYSTEM_PROMPT } from "../shared/agent-prompt.ts";
 import {
   selectedAgentTools,
   type AgentSessionToolName,
@@ -11,7 +11,10 @@ import { SessionImagePreviews } from "./session-image-client.tsx";
 import { renderMarkdown } from "./session-markdown.tsx";
 import { renderStructuredCode } from "./session-syntax.tsx";
 import { renderToolResult } from "./session-tool-result.tsx";
-import type { SessionTranscriptFilters } from "./session-transcript-filters.ts";
+import type {
+  SessionTranscriptFilterName,
+  SessionTranscriptFilters,
+} from "./session-transcript-filters.ts";
 
 function TranscriptNote(props: {
   readonly boundaryKey: string;
@@ -32,6 +35,22 @@ function TranscriptNote(props: {
       </p>
       <div class="mt-2">{renderMarkdown(props.content)}</div>
     </li>
+  );
+}
+
+function renderTranscriptInstruction(options: {
+  readonly boundaryKey: string;
+  readonly content: string;
+  readonly label: string;
+}): JSX.Element {
+  return (
+    <TranscriptNote
+      boundaryKey={options.boundaryKey}
+      classes="border-amber-300/20 bg-amber-300/10"
+      content={options.content}
+      label={options.label}
+      labelClasses="text-amber-200"
+    />
   );
 }
 
@@ -157,9 +176,13 @@ function ToolResultTranscriptMessage(
 
 function ConversationTranscriptMessage(props: {
   readonly message: AgentSessionMessage;
+  readonly showContent?: boolean;
+  readonly showTools?: boolean;
 }): JSX.Element {
   const user = props.message.role === "user";
   const system = props.message.role === "system";
+  const showContent = (): boolean => props.showContent ?? true;
+  const showTools = (): boolean => props.showTools ?? true;
   return (
     <li
       class={`rounded-2xl border p-4 ${user ? "ml-8 border-emerald-300/20 bg-emerald-300/10" : system ? "border-rose-300/20 bg-rose-300/10" : "mr-8 border-white/10 bg-white/[0.04]"}`}
@@ -171,7 +194,7 @@ function ConversationTranscriptMessage(props: {
       <p class="text-xs font-semibold tracking-wide text-slate-400 uppercase">
         {user ? "You" : system ? "Session" : "Agent"}
       </p>
-      {props.message.content.length > 0 ? (
+      {showContent() && props.message.content.length > 0 ? (
         user ? (
           <p class="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-200">
             {props.message.content}
@@ -180,12 +203,12 @@ function ConversationTranscriptMessage(props: {
           <div class="mt-2">{renderMarkdown(props.message.content)}</div>
         )
       ) : null}
-      {props.message.images.length > 0 ? (
+      {showContent() && props.message.images.length > 0 ? (
         <div class="mt-3">
           <SessionImagePreviews images={props.message.images} />
         </div>
       ) : null}
-      {props.message.toolCalls.length > 0 ? (
+      {showTools() && props.message.toolCalls.length > 0 ? (
         <ul class="mt-3 space-y-2">
           {props.message.toolCalls.map((call) => (
             <li
@@ -224,15 +247,86 @@ function messageIsVisible(
     case "user":
       return filters.userMessages;
     case "assistant":
-      return message.toolCalls.length > 0
-        ? filters.toolActivity
-        : filters.assistantMessages;
+      return (
+        (filters.assistantMessages &&
+          (message.content.length > 0 || message.images.length > 0)) ||
+        (filters.toolActivity && message.toolCalls.length > 0)
+      );
   }
 }
 
-function TranscriptMessage(props: TranscriptMessageProps): JSX.Element {
+const SESSION_TRANSCRIPT_FILTER_NAMES: readonly SessionTranscriptFilterName[] =
+  [
+    "agentInstructions",
+    "assistantMessages",
+    "notices",
+    "systemPrompt",
+    "thinking",
+    "toolActivity",
+    "toolDefinitions",
+    "userMessages",
+  ];
+
+export function sessionTranscriptFilterCounts(
+  agentFile: AgentFile | null,
+  messages: readonly AgentSessionMessage[],
+  tools: readonly AgentSessionToolName[],
+): Readonly<Record<SessionTranscriptFilterName, number>> {
+  const counts: Record<SessionTranscriptFilterName, number> = {
+    agentInstructions: agentFile === null ? 0 : 1,
+    assistantMessages: 0,
+    notices: 0,
+    systemPrompt: 1,
+    thinking: 0,
+    toolActivity: 0,
+    toolDefinitions: tools.length,
+    userMessages: 0,
+  };
+  for (const message of messages) {
+    switch (message.role) {
+      case "error":
+      case "system":
+        counts.notices += 1;
+        break;
+      case "thinking":
+        counts.thinking += 1;
+        break;
+      case "tool":
+        counts.toolActivity += 1;
+        break;
+      case "user":
+        counts.userMessages += 1;
+        break;
+      case "assistant":
+        if (message.toolCalls.length > 0) {
+          counts.toolActivity += message.toolCalls.length;
+        }
+        if (message.content.length > 0 || message.images.length > 0) {
+          counts.assistantMessages += 1;
+        }
+        break;
+    }
+  }
+  return counts;
+}
+
+function TranscriptMessage(
+  props: TranscriptMessageProps & {
+    readonly filters: SessionTranscriptFilters;
+  },
+): JSX.Element {
   const message = props.message;
   const callArguments = props.callArguments;
+  if (message.role === "assistant") {
+    return (
+      <ConversationTranscriptMessage
+        message={message}
+        showContent={props.filters.assistantMessages}
+        showTools={props.filters.toolActivity}
+      />
+    );
+  }
+
   switch (message.role) {
     case "error":
       return <NoteTranscriptMessage kind="error" message={message} />;
@@ -245,7 +339,6 @@ function TranscriptMessage(props: TranscriptMessageProps): JSX.Element {
           message={message}
         />
       );
-    case "assistant":
     case "system":
     case "user":
       return <ConversationTranscriptMessage message={message} />;
@@ -267,25 +360,50 @@ export function SessionTranscript(props: {
       messageIsVisible(message, props.filters),
     ),
   );
+  const visibleItemCount = createMemo(() => {
+    const counts = sessionTranscriptFilterCounts(
+      props.agentFile,
+      props.messages,
+      props.tools,
+    );
+    return SESSION_TRANSCRIPT_FILTER_NAMES.reduce(
+      (total, name) => total + (props.filters[name] ? counts[name] : 0),
+      0,
+    );
+  });
   return (
     <>
       <Show when={props.filters.systemPrompt}>
-        <TranscriptNote
-          boundaryKey="system-prompt"
-          classes="border-amber-300/20 bg-amber-300/10"
-          content={createAgentSystemPrompt(props.agentFile)}
-          label="System prompt"
-          labelClasses="text-amber-200"
-        />
+        {renderTranscriptInstruction({
+          boundaryKey: "system-prompt",
+          content: AGENT_SYSTEM_PROMPT,
+          label: "System prompt",
+        })}
       </Show>
-      <Show when={props.filters.toolDefinitions}>
+      <Show when={props.filters.agentInstructions && props.agentFile !== null}>
+        {renderTranscriptInstruction({
+          boundaryKey: "agent-instructions",
+          content: props.agentFile?.content ?? "",
+          label: props.agentFile?.name ?? "Agent instructions",
+        })}
+      </Show>
+      <Show when={props.filters.toolDefinitions && props.tools.length > 0}>
         <ToolDefinitions serializedTools={serializedTools()} />
       </Show>
       <For each={visibleMessages()}>
         {(message) => (
-          <TranscriptMessage callArguments={callArguments} message={message} />
+          <TranscriptMessage
+            callArguments={callArguments}
+            filters={props.filters}
+            message={message}
+          />
         )}
       </For>
+      <Show when={visibleItemCount() === 0}>
+        <li class="rounded-xl border border-dashed border-white/15 p-5 text-sm leading-6 text-slate-400">
+          No transcript items match the current visibility filters.
+        </li>
+      </Show>
     </>
   );
 }

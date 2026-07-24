@@ -1,17 +1,72 @@
 import { afterEach, expect, test } from "vitest";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { summaryFromDetail } from "../session-codec.ts";
+import { MemoryStorage } from "./memory-storage.ts";
 import {
   applyTranscriptDelta,
-  DomTestHarness,
+  disposeTestViews,
+  DOM_TEST_DISPOSALS,
+  installResponseFetch,
+  messageBoundary,
+  mountTestSessionDetail,
+  queryTestElement,
   transcriptTestMessage,
-} from "./session-dom-test-harness.tsx";
+} from "./session-dom-test-helpers.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
-const harness = new DomTestHarness();
+const filterStorage = new MemoryStorage();
+const FOLLOW_UP_DRAFT = "Keep focus and selection";
+const MIXED_ASSISTANT_TEXT = "Assistant text with a tool";
+const MIXED_TOOL_TEXT = "Tool call · read";
+
+function expectComposerPreserved(
+  container: ParentNode,
+  composer: Element,
+  prompt: HTMLTextAreaElement,
+): void {
+  expect(queryTestElement(container, "[data-session-composer='true']")).toBe(
+    composer,
+  );
+  expect(queryTestElement(composer, "textarea[name='prompt']")).toBe(prompt);
+  expect(prompt.value).toBe(FOLLOW_UP_DRAFT);
+}
+
+function expectPromptAvailability(
+  prompt: HTMLTextAreaElement,
+  available: boolean,
+): void {
+  expect(prompt.getAttribute("aria-disabled")).toBe(String(!available));
+  expect(prompt.disabled).toBe(false);
+  expect(prompt.readOnly).toBe(!available);
+}
+
+function expectPromptFocusAndSelection(prompt: HTMLTextAreaElement): void {
+  expect(document.activeElement).toBe(prompt);
+  expect(prompt.selectionStart).toBe(4);
+  expect(prompt.selectionEnd).toBe(9);
+}
+
+function expectMixedAssistantVisibility(
+  container: ParentNode,
+  assistantVisible: boolean,
+  toolVisible: boolean,
+): void {
+  const text = container.textContent ?? "";
+  expect(text.includes(MIXED_ASSISTANT_TEXT)).toBe(assistantVisible);
+  expect(text.includes(MIXED_TOOL_TEXT)).toBe(toolVisible);
+}
+
+function expectThinkingHidden(
+  container: ParentNode,
+  thinking: HTMLInputElement,
+  content: string,
+): void {
+  expect(thinking.checked).toBe(false);
+  expect(container.textContent).not.toContain(content);
+}
 
 function transcriptFilter(container: ParentNode): HTMLInputElement {
-  const control = harness.query(
+  const control = queryTestElement(
     container,
     "input[data-transcript-filter='thinking']",
   );
@@ -22,43 +77,62 @@ function transcriptFilter(container: ParentNode): HTMLInputElement {
 }
 
 afterEach(() => {
-  harness.dispose();
-  localStorage.clear();
+  disposeTestViews();
+  filterStorage.clear();
 });
 
-test("the running composer stays mounted and retains its draft when ready again", () => {
-  const running: AgentSessionDetail = {
+test("the composer stays mounted and retains focus through a busy transition", () => {
+  const idle: AgentSessionDetail = {
     ...TEST_SESSION_DETAIL,
     messages: [],
-    status: "running",
   };
-  const { container, controller } = harness.mountSession(running);
-  const composer = harness.query(container, "[data-session-composer='true']");
-  const prompt = harness.query(composer, "textarea[name='prompt']");
+  const { container, controller } = mountTestSessionDetail(idle);
+  const composer = queryTestElement(
+    container,
+    "[data-session-composer='true']",
+  );
+  const prompt = queryTestElement(composer, "textarea[name='prompt']");
   if (!(prompt instanceof HTMLTextAreaElement)) {
     throw new TypeError("The follow-up prompt is not a textarea");
   }
 
-  expect(prompt.disabled).toBe(true);
+  expectPromptAvailability(prompt, true);
+  controller.setFollowUp(FOLLOW_UP_DRAFT);
+  prompt.focus();
+  prompt.setSelectionRange(4, 9);
+
+  const running: AgentSessionDetail = {
+    ...idle,
+    status: "running",
+    updatedAt: idle.updatedAt + 1,
+  };
+  controller.applyDetail(running);
+
+  expectComposerPreserved(container, composer, prompt);
+  expectPromptFocusAndSelection(prompt);
+  expectPromptAvailability(prompt, false);
   expect(container.textContent).toContain(
     "Session is running. You can send when it is ready.",
   );
 
-  controller.setFollowUp("Keep this unsent draft");
+  controller.applyDelta({
+    content: "Live output",
+    sessionId: running.id,
+    thinking: "",
+    type: "session_delta",
+  });
+  expectPromptFocusAndSelection(prompt);
+
   controller.applyDetail({
-    ...running,
+    ...idle,
     status: "idle",
     updatedAt: running.updatedAt + 1,
   });
 
-  expect(harness.query(container, "[data-session-composer='true']")).toBe(
-    composer,
-  );
-  expect(harness.query(composer, "textarea[name='prompt']")).toBe(prompt);
-  expect(prompt.value).toBe("Keep this unsent draft");
-  expect(prompt.disabled).toBe(false);
+  expectComposerPreserved(container, composer, prompt);
+  expectPromptAvailability(prompt, true);
   expect(container.textContent).toContain("Ready for another instruction.");
-  expect(container.textContent).toContain("Continue");
+  expect(container.textContent).toContain("Continue without message");
 });
 
 test("transcript filters persist, apply across sessions, and keep visible order", () => {
@@ -73,14 +147,18 @@ test("transcript filters persist, apply across sessions, and keep visible order"
     ),
   ];
   const detail = { ...TEST_SESSION_DETAIL, messages };
-  const { container, controller } = harness.mountSession(detail);
+  const { container, controller } = mountTestSessionDetail(
+    detail,
+    DOM_TEST_DISPOSALS,
+    filterStorage,
+  );
+  controller.setTranscriptFilter("thinking", true);
   const thinking = transcriptFilter(container);
 
   expect(container.textContent).toContain("Thinking hidden");
   thinking.click();
 
-  expect(thinking.checked).toBe(false);
-  expect(container.textContent).not.toContain("Thinking hidden");
+  expectThinkingHidden(container, thinking, "Thinking hidden");
   expect(container.textContent.indexOf("User first")).toBeLessThan(
     container.textContent.indexOf("Assistant second"),
   );
@@ -99,14 +177,7 @@ test("transcript filters persist, apply across sessions, and keep visible order"
     ],
     title: "Second session",
   };
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = Object.assign(
-    (): Promise<Response> => Promise.resolve(Response.json(second)),
-    { preconnect: originalFetch.preconnect },
-  );
-  harness.disposals.push(() => {
-    globalThis.fetch = originalFetch;
-  });
+  installResponseFetch(second);
   controller.applyRealtime([summaryFromDetail(second)]);
   const selection = controller.select(second.id);
   controller.applyDetail(second);
@@ -115,11 +186,45 @@ test("transcript filters persist, apply across sessions, and keep visible order"
   expect(container.textContent).not.toContain("Second session thinking");
   expect(container.textContent).toContain("Second session answer");
   expect(
-    harness.query(container, "input[data-transcript-filter='thinking']"),
+    queryTestElement(container, "input[data-transcript-filter='thinking']"),
   ).not.toBe(thinking);
   expect(
-    localStorage.getItem("q-mush.session-transcript-filters.v1"),
+    filterStorage.getItem("q-mush.session-transcript-filters.v1"),
   ).toContain('"thinking":false');
+});
+
+test("assistant text and tool calls react to independent filters", () => {
+  const assistant: AgentSessionDetail["messages"][number] = {
+    ...transcriptTestMessage(
+      "assistant-mixed",
+      MIXED_ASSISTANT_TEXT,
+      "assistant",
+      2,
+    ),
+    toolCalls: [
+      {
+        arguments: '{"path":"README.md"}',
+        id: "read-mixed",
+        name: "read",
+      },
+    ],
+  };
+  const { container, controller } = mountTestSessionDetail({
+    ...TEST_SESSION_DETAIL,
+    messages: [assistant],
+  });
+
+  expectMixedAssistantVisibility(container, true, true);
+
+  controller.setTranscriptFilter("assistantMessages", false);
+  expectMixedAssistantVisibility(container, false, true);
+
+  controller.setTranscriptFilter("assistantMessages", true);
+  controller.setTranscriptFilter("toolActivity", false);
+  expectMixedAssistantVisibility(container, true, false);
+
+  controller.setTranscriptFilter("assistantMessages", false);
+  expectMixedAssistantVisibility(container, false, false);
 });
 
 test("filtering streamed categories preserves placeholders and canonical order", () => {
@@ -130,7 +235,7 @@ test("filtering streamed categories preserves placeholders and canonical order",
     ],
     status: "running",
   };
-  const { container, controller } = harness.mountSession(detail);
+  const { container, controller } = mountTestSessionDetail(detail);
   applyTranscriptDelta(
     controller,
     detail.id,
@@ -138,15 +243,14 @@ test("filtering streamed categories preserves placeholders and canonical order",
     "Hidden thought",
   );
   const streamId = `stream:${detail.id}:assistant`;
-  const streamedAnswer = harness.messageBoundary(container, streamId);
+  const streamedAnswer = messageBoundary(container, streamId);
   const thinking = transcriptFilter(container);
 
   thinking.click();
+  expectThinkingHidden(container, thinking, "Hidden thought");
   applyTranscriptDelta(controller, detail.id, " continues", " continues");
-
-  expect(container.textContent).not.toContain("Hidden thought");
   expect(container.textContent).toContain("Visible answer continues");
-  expect(harness.messageBoundary(container, streamId)).not.toBe(streamedAnswer);
+  expect(messageBoundary(container, streamId)).not.toBe(streamedAnswer);
   expect(container.textContent.indexOf("Prompt before stream")).toBeLessThan(
     container.textContent.indexOf("Visible answer continues"),
   );

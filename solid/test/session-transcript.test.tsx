@@ -71,10 +71,21 @@ function userMessage(content: string): AgentSessionMessage {
   };
 }
 
+const ALL_SESSION_TRANSCRIPT_FILTERS: SessionTranscriptFilters = {
+  agentInstructions: true,
+  assistantMessages: true,
+  notices: true,
+  systemPrompt: true,
+  thinking: true,
+  toolActivity: true,
+  toolDefinitions: true,
+  userMessages: true,
+};
+
 function renderMessages(
   messages: readonly AgentSessionMessage[],
   tools = AGENT_SESSION_TOOL_NAMES,
-  filters: SessionTranscriptFilters = DEFAULT_SESSION_TRANSCRIPT_FILTERS,
+  filters: SessionTranscriptFilters = ALL_SESSION_TRANSCRIPT_FILTERS,
   agentFile: AgentFile | null = null,
 ): string {
   return renderSolidToString(() => (
@@ -105,6 +116,7 @@ function filtersWith(
   category: keyof SessionTranscriptFilters,
 ): SessionTranscriptFilters {
   return {
+    agentInstructions: false,
     assistantMessages: false,
     notices: false,
     systemPrompt: false,
@@ -117,7 +129,8 @@ function filtersWith(
 }
 
 test.each([
-  ["systemPrompt", "System prompt", "Project rule"],
+  ["systemPrompt", "System prompt", "You are Q Mush"],
+  ["agentInstructions", "AGENTS.md", "Project rule"],
   ["toolDefinitions", "Tool definitions", '"read"'],
   ["userMessages", "User category", "User category"],
   ["thinking", "Thinking category", "Thinking category"],
@@ -180,6 +193,56 @@ test("keeps tool calls and matching responses in one filter category", () => {
   expect(visible).toContain("Tool category result");
   expect(hidden).not.toContain("Tool call · read");
   expect(hidden).not.toContain("Tool result · read");
+  expect(hidden).not.toContain(
+    'data-render-boundary="message:assistant-read-category"',
+  );
+  expect(hidden).toContain(
+    "No transcript items match the current visibility filters.",
+  );
+});
+
+test("filters assistant text independently from tool calls on the same message", () => {
+  const call = {
+    ...assistantToolCall({
+      arguments: '{"path":"README.md"}',
+      id: "read-category",
+      name: "read",
+    }),
+    content: "Assistant text with tool",
+  };
+  const toolOnly = renderMessages(
+    [call],
+    ["read"],
+    filtersWith("toolActivity"),
+  );
+  const assistantOnly = renderMessages(
+    [call],
+    ["read"],
+    filtersWith("assistantMessages"),
+  );
+
+  expect(toolOnly).toContain("Tool call · read");
+  expect(toolOnly).not.toContain("Assistant text with tool");
+  expect(assistantOnly).toContain("Assistant text with tool");
+  expect(assistantOnly).not.toContain("Tool call · read");
+});
+
+test("shows a clear state when every visible category is empty", () => {
+  const emptyAgentInstructions = renderMessages([], [], {
+    ...filtersWith("agentInstructions"),
+  });
+  const emptyToolDefinitions = renderMessages(
+    [],
+    [],
+    filtersWith("toolDefinitions"),
+  );
+
+  for (const html of [emptyAgentInstructions, emptyToolDefinitions]) {
+    expect(html).toContain(
+      "No transcript items match the current visibility filters.",
+    );
+  }
+  expect(emptyToolDefinitions).not.toContain("Show selected tool schemas");
 });
 
 test("preserves canonical order among visible transcript categories", () => {

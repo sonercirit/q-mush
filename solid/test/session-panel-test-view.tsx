@@ -13,6 +13,7 @@ export function sessionPanelTestView(
     new DirectoryPickerController(
       createReactiveState(options.state.directoryPicker),
     ),
+    null,
   );
   return (
     <SessionPanel

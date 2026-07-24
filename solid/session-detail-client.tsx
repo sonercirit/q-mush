@@ -25,7 +25,10 @@ import {
 } from "./session-context-client.tsx";
 import type { SessionController } from "./session-controller.ts";
 import { SessionTranscriptFilterControls } from "./session-transcript-filter-controls.tsx";
-import { SessionTranscript } from "./session-transcript.tsx";
+import {
+  SessionTranscript,
+  sessionTranscriptFilterCounts,
+} from "./session-transcript.tsx";
 
 const STATUS_PRESENTATION: Readonly<
   Record<
@@ -286,10 +289,34 @@ function composerUnavailableReason(
   if (detail.status === "running") {
     return "Session is running. You can send when it is ready.";
   }
-  if (runnerAvailable === false) {
+  if (runnerAvailable === undefined) {
+    return "Checking whether the session runner is available…";
+  }
+  if (credentialAvailable === undefined) {
+    return "Checking whether the session credential is available…";
+  }
+  if (detail.status === "failed") {
+    if (!runnerAvailable) {
+      return "The failed session cannot resume because its runner is offline or unavailable.";
+    }
+    if (!credentialAvailable) {
+      return "The failed session cannot resume because its credential is unavailable.";
+    }
+    return undefined;
+  }
+  if (detail.status === "stopped") {
+    if (!runnerAvailable) {
+      return "The stopped session cannot resume because its runner is offline or unavailable.";
+    }
+    if (!credentialAvailable) {
+      return "The stopped session cannot resume because its credential is unavailable.";
+    }
+    return undefined;
+  }
+  if (!runnerAvailable) {
     return "The session runner is offline or unavailable.";
   }
-  if (credentialAvailable === false) {
+  if (!credentialAvailable) {
     return "The session credential is unavailable.";
   }
   return undefined;
@@ -319,6 +346,13 @@ function LoadedSessionDetail(props: {
     props.state.stopping;
   const [scrollLockEnabled, setScrollLockEnabled] = createSignal(true);
   const [transcript, setTranscript] = createSignal<HTMLUListElement>();
+  const filterCounts = createMemo(() =>
+    sessionTranscriptFilterCounts(
+      props.detail.agentFile,
+      props.detail.messages,
+      props.detail.tools,
+    ),
+  );
   const scrollToEnd = (): void => {
     const element = transcript();
     if (scrollLockEnabled() && element !== undefined) {
@@ -383,6 +417,7 @@ function LoadedSessionDetail(props: {
         </div>
       </div>
       <SessionTranscriptFilterControls
+        counts={filterCounts()}
         filters={props.state.transcriptFilters}
         onChange={(name, visible) => {
           props.controller.setTranscriptFilter(name, visible);
@@ -432,7 +467,9 @@ function LoadedSessionDetail(props: {
               }
             }}
             onInput={(value) => {
-              props.controller.setFollowUp(value);
+              if (!composerDisabled()) {
+                props.controller.setFollowUp(value);
+              }
             }}
             onKeyDown={(event) => {
               if (
@@ -460,6 +497,7 @@ function LoadedSessionDetail(props: {
           <Show when={!active()}>
             <button
               aria-describedby="session-composer-state"
+              aria-label="Continue without another instruction"
               class="self-end rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
               disabled={composerDisabled()}
               onClick={() => {
@@ -469,7 +507,7 @@ function LoadedSessionDetail(props: {
               }}
               type="button"
             >
-              Continue
+              Continue without message
             </button>
           </Show>
         </div>

@@ -104,12 +104,13 @@ export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
     >
       <textarea
         aria-describedby={props.availabilityDescriptionId}
+        aria-disabled={props.disabled}
         aria-label="Follow-up instruction"
-        class="min-h-20 w-full resize-y rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
-        disabled={props.disabled}
+        class="min-h-20 w-full resize-y rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
         name="prompt"
         onKeyDown={props.onKeyDown}
         placeholder="Give this session another instruction…"
+        readOnly={props.disabled ? true : undefined}
         value={props.prompt}
         {...promptEvents(props)}
       />

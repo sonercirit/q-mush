@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { SessionViewState } from "../../solid/session-client.tsx";
-import { runnerViewState } from "./client-state-fixtures.ts";
+import { providerViewState, runnerViewState } from "./client-state-fixtures.ts";
 import { runnerSummary } from "./runner-fixtures.ts";
 import { sessionStateWithMessages } from "./session-client-fixtures.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
@@ -29,6 +29,10 @@ function renderPanelWithProviders(
   );
 }
 
+function offlineRunnerState() {
+  return runnerViewState([{ ...runnerSummary(1), status: "offline" }]);
+}
+
 function renderPanel(state: SessionViewState): string {
   return renderSessionPanelForTest(SESSION_PANEL_TEST_CONTEXT, state);
 }
@@ -38,6 +42,17 @@ function expectComposer(html: string, reason?: string): void {
   if (reason !== undefined) {
     expect(html).toContain(reason);
   }
+}
+
+function expectUnavailableComposer(html: string, reason: string): void {
+  expectComposer(html, reason);
+  expect(html).toMatch(/<textarea[^>]*aria-disabled="true"/u);
+}
+
+function expectContinueDisabled(html: string): void {
+  expect(html).toMatch(
+    /<button[^>]*disabled[^>]*>Continue without message<\/button>/u,
+  );
 }
 
 function panelState(
@@ -74,11 +89,11 @@ test.each([
     expect(html).toContain('name="prompt"');
     expect(html).toContain("Keep this draft");
     expect(html).toMatch(
-      /<textarea[^>]*aria-describedby="session-composer-state"[^>]*disabled/u,
+      /<textarea[^>]*aria-disabled="true"[^>]*aria-describedby="session-composer-state"|<textarea[^>]*aria-describedby="session-composer-state"[^>]*aria-disabled="true"/u,
     );
     expect(html).toMatch(/<button[^>]*disabled[^>]*>Send<\/button>/u);
     expect(html).toContain(">Stop session</button>");
-    expect(html).not.toContain(">Continue</button>");
+    expect(html).not.toContain(">Continue without message</button>");
   },
 );
 
@@ -87,40 +102,108 @@ test.each([
   { compacting: false, status: "failed" },
   { compacting: false, status: "stopped" },
 ] as const)(
-  "keeps send and Continue available for a $status session",
+  "keeps send and continue-without-message available for a $status session",
   ({ status }) => {
     const html = renderPanel(panelState({ ...TEST_SESSION_DETAIL, status }));
 
     expectComposer(html);
     expect(html).toMatch(/<textarea[^>]*name="prompt"(?![^>]*disabled)/u);
+    expect(html).not.toMatch(/<textarea[^>]*\sreadonly(?:=|\s|>)/iu);
     expect(html).toMatch(/<button[^>]*>Send<\/button>/u);
-    expect(html).toContain(">Continue</button>");
+    expect(html).toContain(">Continue without message</button>");
     expect(html).not.toContain(">Stop session</button>");
   },
 );
 
-test("disables an eligible composer when its runner or credential is unavailable", () => {
+test("waits only for the selected provider when checking credentials", () => {
+  const loadingProvider = providerViewState(undefined);
   const state = sessionStateWithMessages(SESSION_STATE, []);
-  const offlineHtml = renderPanelWithProviders(
-    state,
-    runnerViewState([{ ...runnerSummary(1), status: "offline" }]),
-  );
-  const missingCredentialHtml = renderPanelWithProviders(
+  const availableHtml = renderSessionPanelWithResources(
+    PANEL_CONTEXT,
     state,
     RUNNER_STATE,
+    OPENAI_STATE,
+    loadingProvider,
+  );
+  const loadingSelectedProviderHtml = renderSessionPanelWithResources(
+    PANEL_CONTEXT,
+    state,
+    RUNNER_STATE,
+    loadingProvider,
     EMPTY_PROVIDER_STATE,
   );
 
-  expect(offlineHtml).toContain(
-    "The session runner is offline or unavailable.",
+  expect(availableHtml).toContain("Ready for another instruction.");
+  expect(availableHtml).toMatch(/<textarea[^>]*aria-disabled="false"/u);
+  expect(loadingSelectedProviderHtml).toContain(
+    "Checking whether the session credential is available…",
   );
-  expect(offlineHtml).toMatch(/<textarea[^>]*disabled/u);
-  expect(missingCredentialHtml).toContain(
-    "The session credential is unavailable.",
+  expectUnavailableComposer(
+    loadingSelectedProviderHtml,
+    "Checking whether the session credential is available…",
   );
-  expect(missingCredentialHtml).toMatch(/<textarea[^>]*disabled/u);
 });
 
+test("disables an eligible composer when its runner or credential is unavailable", () => {
+  const state = sessionStateWithMessages(SESSION_STATE, []);
+  const unavailable = [
+    [
+      renderPanelWithProviders(state, offlineRunnerState()),
+      "The session runner is offline or unavailable.",
+    ],
+    [
+      renderPanelWithProviders(state, RUNNER_STATE, EMPTY_PROVIDER_STATE),
+      "The session credential is unavailable.",
+    ],
+    [
+      renderPanelWithProviders(state, {
+        ...RUNNER_STATE,
+        error: "Runner list failed",
+        runners: undefined,
+      }),
+      "The session runner is offline or unavailable.",
+    ],
+    [
+      renderPanelWithProviders(state, RUNNER_STATE, {
+        ...OPENAI_STATE,
+        credentials: undefined,
+        error: "Credential list failed",
+      }),
+      "The session credential is unavailable.",
+    ],
+  ] as const;
+
+  for (const [html, reason] of unavailable) {
+    expectUnavailableComposer(html, reason);
+  }
+});
+
+test.each([
+  {
+    reason:
+      "The failed session cannot resume because its runner is offline or unavailable.",
+    resource: "runner",
+    status: "failed",
+  },
+  {
+    reason:
+      "The stopped session cannot resume because its credential is unavailable.",
+    resource: "credential",
+    status: "stopped",
+  },
+] as const)(
+  "explains why a $status session cannot resume without its $resource",
+  ({ reason, resource, status }) => {
+    const state = panelState({ ...TEST_SESSION_DETAIL, status });
+    const html =
+      resource === "runner"
+        ? renderPanelWithProviders(state, offlineRunnerState())
+        : renderPanelWithProviders(state, RUNNER_STATE, EMPTY_PROVIDER_STATE);
+
+    expectUnavailableComposer(html, reason);
+    expectContinueDisabled(html);
+  },
+);
 test.each([
   { mutation: { sending: true }, operation: "sending", reason: "Sending…" },
   {
@@ -138,8 +221,7 @@ test.each([
   ({ mutation, reason }) => {
     const html = renderPanel(panelState(TEST_SESSION_DETAIL, { ...mutation }));
 
-    expectComposer(html, reason);
-    expect(html).toMatch(/<textarea[^>]*disabled/u);
-    expect(html).toMatch(/<button[^>]*disabled[^>]*>Continue<\/button>/u);
+    expectUnavailableComposer(html, reason);
+    expectContinueDisabled(html);
   },
 );
