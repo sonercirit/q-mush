@@ -1,7 +1,7 @@
 import type { JSX } from "solid-js";
 import { afterEach, expect, test, vi } from "vitest";
-import type { AgentModelCatalog } from "../../shared/agent-configuration.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
+import { SESSION_REALTIME_OPERATIONS } from "../../shared/user-realtime-protocol.ts";
 import {
   OPENAI_PANEL,
   ProviderPanel,
@@ -22,13 +22,13 @@ import { summaryFromDetail } from "../session-codec.ts";
 import { SessionController } from "../session-controller.ts";
 import { SessionList } from "../session-detail-client.tsx";
 import { initialSessionViewState } from "../session-state.ts";
+import type { SessionCommandTransport } from "../session-transport.ts";
 import { runnerSummary } from "./runner-fixtures.ts";
 import {
   disposeTestViews,
   mountTestSessionDetail,
   mountTestView,
   queryTestElement,
-  restoreFetchAfterTest,
 } from "./session-dom-test-helpers.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 import {
@@ -92,25 +92,6 @@ function credential(id: string, label: string): ProviderCredential {
     label,
     source: "api_key",
   };
-}
-
-function stubSessionRequests(catalog: AgentModelCatalog): void {
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = Object.assign(
-    (input: RequestInfo | URL): Promise<Response> => {
-      const url =
-        typeof input === "string"
-          ? input
-          : input instanceof URL
-            ? input.href
-            : input.url;
-      return Promise.resolve(
-        Response.json(url.includes("/models?") ? catalog : TEST_SESSION_DETAIL),
-      );
-    },
-    { preconnect: originalFetch.preconnect },
-  );
-  restoreFetchAfterTest(originalFetch, disposals);
 }
 
 afterEach(() => {
@@ -334,23 +315,35 @@ test("session resources, drafts, realtime lists, and selected details update in 
   const openRouterState = createReactiveState<ProviderViewState>(
     createProviderViewState(undefined),
   );
-  const controller = new SessionController(sessionState, undefined, undefined);
   const modelLabel = "Reactive model";
+  const sessionTransport: SessionCommandTransport = {
+    command: (operation) =>
+      Promise.resolve(
+        operation === SESSION_REALTIME_OPERATIONS.models
+          ? {
+              defaultModel: "model-1",
+              models: [
+                {
+                  contextWindow: 128_000,
+                  id: "model-1",
+                  inputModalities: ["text"],
+                  label: modelLabel,
+                  outputModalities: ["text"],
+                  pricing: null,
+                  reasoningEfforts: ["high"],
+                },
+              ],
+            }
+          : { session: TEST_SESSION_DETAIL },
+      ),
+  };
+  const controller = new SessionController(
+    sessionState,
+    undefined,
+    null,
+    sessionTransport,
+  );
   const primaryCredentialLabel = "Primary";
-  stubSessionRequests({
-    defaultModel: "model-1",
-    models: [
-      {
-        contextWindow: 128_000,
-        id: "model-1",
-        inputModalities: ["text"],
-        label: modelLabel,
-        outputModalities: ["text"],
-        pricing: null,
-        reasoningEfforts: ["high"],
-      },
-    ],
-  });
   const container = mount(() => (
     <SessionPanel
       controller={controller}

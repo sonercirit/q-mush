@@ -1,4 +1,5 @@
 import { createdAuditFields } from "../../shared/audit.ts";
+import type { AuthenticatedUser } from "../../shared/auth-model.ts";
 import { createDatabase, type AppDatabase } from "../../shared/database.ts";
 import {
   providerCredentials,
@@ -13,6 +14,11 @@ import {
 
 export const TEST_NOW = 1_700_000_000_000;
 export const TEST_USER_ID = "018bcfe5-6800-7000-8000-000000000021";
+export const TEST_USER: AuthenticatedUser = {
+  email: "mushroom@example.com",
+  id: TEST_USER_ID,
+  name: "Mush Room",
+};
 const SESSION_ID = "018bcfe5-6800-7000-8000-000000000022";
 const SESSION_TOKEN = "authenticated-session";
 

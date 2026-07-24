@@ -1,36 +1,42 @@
-import { SESSIONS_PATH } from "../shared/routes.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
-import { HttpResponseError, requestJson } from "./browser-http.ts";
+import { SESSION_REALTIME_OPERATIONS } from "../shared/user-realtime-protocol.ts";
 import { readSessionDetail } from "./session-codec.ts";
+import type { SessionCommandTransport } from "./session-transport.ts";
 
 type SessionPendingAction = "compacting" | "sending" | "stopping";
 
 export interface SessionMutation {
   readonly action: string;
+  readonly operation: string;
+  readonly payload: Readonly<Record<string, unknown>>;
   readonly pending: SessionPendingAction;
-  readonly request: () => Promise<unknown>;
 }
 
 export function compactSessionMutation(sessionId: string): SessionMutation {
-  return postMutation(
+  return mutation(
+    SESSION_REALTIME_OPERATIONS.compact,
     sessionId,
-    "compact",
     "compact that session",
     "compacting",
   );
 }
 
 export function continueSessionMutation(sessionId: string): SessionMutation {
-  return postMutation(
+  return mutation(
+    SESSION_REALTIME_OPERATIONS.continue,
     sessionId,
-    "continue",
     "continue that session",
     "sending",
   );
 }
 
 export function stopSessionMutation(sessionId: string): SessionMutation {
-  return postMutation(sessionId, "stop", "stop that session", "stopping");
+  return mutation(
+    SESSION_REALTIME_OPERATIONS.stop,
+    sessionId,
+    "stop that session",
+    "stopping",
+  );
 }
 
 export function compactionModeMutation(
@@ -39,46 +45,49 @@ export function compactionModeMutation(
 ): SessionMutation {
   return {
     action: "change compaction mode",
+    operation: SESSION_REALTIME_OPERATIONS.setAutoCompaction,
+    payload: { autoCompact, sessionId },
     pending: "compacting",
-    request: () =>
-      requestJson(
-        `${SESSIONS_PATH}/${encodeURIComponent(sessionId)}/compaction`,
-        {
-          body: JSON.stringify({ autoCompact }),
-          headers: { "content-type": "application/json" },
-          method: "POST",
-        },
-      ),
   };
 }
 
-function postMutation(
+function mutation(
+  operation: string,
   sessionId: string,
-  endpoint: "compact" | "continue" | "stop",
   action: string,
   pending: SessionPendingAction,
 ): SessionMutation {
-  return {
-    action,
-    pending,
-    request: () =>
-      requestJson(
-        `${SESSIONS_PATH}/${encodeURIComponent(sessionId)}/${endpoint}`,
-        { method: "POST" },
-      ),
-  };
+  return { action, operation, payload: { sessionId }, pending };
 }
 
 export async function executeSessionMutation(
+  transport: SessionCommandTransport,
   mutation: SessionMutation,
 ): Promise<AgentSessionDetail> {
-  return readSessionDetail(await mutation.request());
+  const value = await transport.command(mutation.operation, mutation.payload);
+  if (typeof value !== "object" || value === null) {
+    throw new Error("The session mutation acknowledgement was invalid");
+  }
+  return readSessionDetail(value);
 }
 
 export function sessionMutationError(error: unknown, action: string): string {
-  if (error instanceof HttpResponseError && error.status === 409) {
+  const code =
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof error.code === "string"
+      ? error.code
+      : undefined;
+  if (
+    code === "runner_unavailable" ||
+    code === "credential_unavailable" ||
+    code === "session_busy"
+  ) {
     return "The selected runner or credential is unavailable, or the session is busy.";
   }
-
+  if (code === "connection_stopped") {
+    return "The realtime connection is unavailable. Reconnect and try again.";
+  }
   return `We could not ${action}. Please try again.`;
 }

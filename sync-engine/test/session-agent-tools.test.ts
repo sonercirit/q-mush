@@ -276,7 +276,7 @@ describe("session agent tools", () => {
 
     expect(output).toContain("credential_unavailable");
     expect(
-      setup.sessions.listForUser("018bcfe5-6800-7000-8000-000000000021"),
+      setup.sessions.summariesForUser("018bcfe5-6800-7000-8000-000000000021"),
     ).toHaveLength(1);
     setup.database.$client.close();
   });
@@ -320,7 +320,7 @@ describe("session agent tools", () => {
     completeChildAgentFile(spawnSetup);
     await waitForSessionValue(
       () =>
-        spawnSetup.sessions.detailForUser(
+        spawnSetup.sessions.readForUser(
           "018bcfe5-6800-7000-8000-000000000021",
           childId,
         ),

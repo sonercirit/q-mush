@@ -355,7 +355,9 @@ function App(): JSX.Element {
   const openAi = new ProviderController(OPENAI_PANEL);
   const openRouter = new ProviderController(OPENROUTER_PANEL);
   const runners = new RunnerController();
-  const agentSessions = new SessionController();
+  const sessionEvents: { controller: SessionController | undefined } = {
+    controller: undefined,
+  };
   const providerControllers = [openAi, openRouter, braveSearch] as const;
   const realtime = new RealtimeConnection((event) => {
     switch (event.type) {
@@ -363,16 +365,23 @@ function App(): JSX.Element {
         runners.applyRealtime(event.runners);
         break;
       case "sessions":
-        agentSessions.applyRealtime(event.sessions);
+        sessionEvents.controller?.applyRealtime(event.sessions);
         break;
       case "session":
-        agentSessions.applyDetail(event.session);
+        sessionEvents.controller?.applyDetail(event.session);
         break;
       case "session_delta":
-        agentSessions.applyDelta(event);
+        sessionEvents.controller?.applyDelta(event);
         break;
     }
   });
+  const agentSessions = new SessionController(
+    undefined,
+    undefined,
+    undefined,
+    realtime,
+  );
+  sessionEvents.controller = agentSessions;
 
   const resetWorkspaceConnections = (): void => {
     realtime.stop();
@@ -392,12 +401,12 @@ function App(): JSX.Element {
       const loaded = readAuthSession(await requestJson(AUTH_SESSION_PATH));
       setSession(loaded);
       if (loaded.user !== null) {
+        realtime.start();
         await Promise.all([
           agentSessions.load(),
           runners.load(),
           ...providerControllers.map((controller) => controller.load()),
         ]);
-        realtime.start();
       }
     } catch {
       setLoadFailed(true);

@@ -1,11 +1,10 @@
 import { describe, expect, test } from "vitest";
-import { SESSIONS_PATH } from "../../shared/routes.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
-import { createAuthenticatedRequest } from "./authenticated-integration-test-helpers.ts";
+import { TEST_USER } from "./authenticated-integration-test-helpers.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
   connectedSessionSetup,
-  createSessionRequest,
+  createSessionInput,
   RUNNER_COMMAND_ID,
   SESSION_ID,
 } from "./session-integration-fixtures.ts";
@@ -43,12 +42,14 @@ describe("session continuation", () => {
     ]);
     const setup = connectedSessionSetup(model);
     const { database, selectedReasoningEfforts, sessions } = setup;
-    const createResponse = await sessions.collection(createSessionRequest());
+    const created = await sessions.createForUser(
+      TEST_USER,
+      createSessionInput(),
+    );
 
-    expect(createResponse.status).toBe(201);
-    expect(await createResponse.json()).toMatchObject({
-      currentContextTokens: 0,
+    expect(created).toMatchObject({
       autoCompact: true,
+      currentContextTokens: 0,
       id: SESSION_ID,
       maxContextTokens: null,
       reasoningEffort: "high",
@@ -68,8 +69,7 @@ describe("session continuation", () => {
       "The runner did not receive an agent command",
     );
 
-    const resultResponse = completeRunnerCommand(setup, "# Q Mush");
-    expect(resultResponse.status).toBe(204);
+    expect(completeRunnerCommand(setup, "# Q Mush").status).toBe(204);
     const idle = await waitForSessionValue(
       () => sessionDetail(sessions),
       hasSessionStatus("idle"),
@@ -81,15 +81,11 @@ describe("session continuation", () => {
     expect(JSON.stringify(idle)).toContain("# Q Mush");
     expect(idle).toMatchObject({ currentContextTokens: 13_000 });
 
-    const followUp = await sessions.message(
-      createAuthenticatedRequest(
-        `${SESSIONS_PATH}/${SESSION_ID}/messages`,
-        { images: [TEST_AGENT_IMAGE], prompt: "Now summarize it" },
-        "POST",
-      ),
-      SESSION_ID,
-    );
-    expect(followUp.status).toBe(202);
+    const followUp = await sessions.messageForUser(TEST_USER, SESSION_ID, {
+      images: [TEST_AGENT_IMAGE],
+      prompt: "Now summarize it",
+    });
+    expect(followUp.status).toBe("queued");
     await completeAgentFileLookup(setup);
     const continued = await waitForSessionValue(
       () => sessionDetail(sessions),
@@ -110,15 +106,8 @@ describe("session continuation", () => {
       role: "user",
     });
 
-    const resumed = await sessions.continue(
-      createAuthenticatedRequest(
-        `${SESSIONS_PATH}/${SESSION_ID}/continue`,
-        undefined,
-        "POST",
-      ),
-      SESSION_ID,
-    );
-    expect(resumed.status).toBe(202);
+    const resumed = await sessions.continueForUser(TEST_USER, SESSION_ID);
+    expect(resumed.status).toBe("queued");
     await completeAgentFileLookup(setup);
     const continuationRequest = await waitForSessionValue(
       () => model.requests[3],

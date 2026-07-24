@@ -1,10 +1,9 @@
 import { expect } from "vitest";
 import { RUNNER_AGENT_FILE_COMMAND } from "../../shared/agent-file.ts";
 import { isRecord } from "../../shared/auth-model.ts";
-import { SESSIONS_PATH } from "../../shared/routes.ts";
 import type { RunnerToolCommand } from "../../shared/runner-command-broker.ts";
 import type { createSessionIntegration } from "../../sync-engine/sessions.ts";
-import { createAuthenticatedRequest } from "./authenticated-integration-test-helpers.ts";
+import { TEST_USER_ID } from "./authenticated-integration-test-helpers.ts";
 import {
   RUNNER_COMMAND_ID,
   SESSION_ID,
@@ -88,12 +87,8 @@ export async function completeAgentFileLookup(
   );
 }
 
-export async function sessionDetail(
+export function sessionDetail(
   sessions: ReturnType<typeof createSessionIntegration>,
-): Promise<unknown> {
-  const response = sessions.item(
-    createAuthenticatedRequest(`${SESSIONS_PATH}/${SESSION_ID}`),
-    SESSION_ID,
-  );
-  return response.json();
+): unknown {
+  return sessions.readForUser(TEST_USER_ID, SESSION_ID);
 }

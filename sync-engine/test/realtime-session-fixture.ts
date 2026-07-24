@@ -1,0 +1,26 @@
+import type { AgentSessionDetail } from "../../shared/session-model.ts";
+
+export const TEST_REALTIME_SESSION_DETAIL: AgentSessionDetail = {
+  activeDurationMs: 10,
+  activeStartedAt: 2,
+  agentFile: { content: "test", name: "AGENTS.md" },
+  autoCompact: false,
+  costBasis: "reported",
+  costUsd: 1,
+  createdAt: 3,
+  credentialId: "server-credential",
+  currentContextTokens: 4,
+  id: "server-session",
+  maxContextTokens: 5,
+  messages: [],
+  model: "server-model",
+  provider: "openrouter",
+  providerPricing: null,
+  reasoningEffort: "medium",
+  runnerId: "server-runner",
+  status: "stopped",
+  title: "Server test",
+  tools: ["read"],
+  updatedAt: 6,
+  workingDirectory: "/server/test",
+};

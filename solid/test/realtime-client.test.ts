@@ -12,7 +12,7 @@ class BrowserSocket extends EventTarget {
   }
 
   get readyState(): number {
-    return this.closed ? WebSocket.CLOSED : WebSocket.CONNECTING;
+    return this.closed ? WebSocket.CLOSED : WebSocket.OPEN;
   }
 
   close(): void {
@@ -67,7 +67,7 @@ test("connects to the same-origin realtime WebSocket and decodes events", () => 
   sockets[0]?.receive('{"sessions":[],"type":"sessions"}');
 
   expect(sockets[0]?.url).toBe("wss://qmush.example/api/realtime");
-  expect(sockets[0]?.sent).toEqual(['{"type":"refresh"}']);
+  expect(sockets[0]?.sent).toEqual([]);
   expect(events).toEqual([{ sessions: [], type: "sessions" }]);
   connection.stop();
 });

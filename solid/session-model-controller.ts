@@ -1,20 +1,25 @@
 import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
-import { SESSION_MODELS_PATH } from "../shared/routes.ts";
-import { requestJson } from "./browser-http.ts";
+import { SESSION_REALTIME_OPERATIONS } from "../shared/user-realtime-protocol.ts";
 import type { RevisionState } from "./revision-state.ts";
 import type { SessionViewState } from "./session-client.tsx";
 import { readAgentModelCatalog } from "./session-codec.ts";
 import { selectedSessionCredential } from "./session-controller-state.ts";
 import { draftWithModelCatalog } from "./session-form.ts";
 import { sessionModelDiscoveryState } from "./session-state.ts";
+import type { SessionCommandTransport } from "./session-transport.ts";
 
 export class SessionModelController {
   readonly #catalogs = new Map<string, AgentModelCatalog>();
   #request = 0;
   readonly #state: RevisionState<SessionViewState>;
+  readonly #transport: SessionCommandTransport;
 
-  constructor(state: RevisionState<SessionViewState>) {
+  constructor(
+    state: RevisionState<SessionViewState>,
+    transport: SessionCommandTransport,
+  ) {
     this.#state = state;
+    this.#transport = transport;
   }
 
   reset(): void {
@@ -65,9 +70,11 @@ export class SessionModelController {
     });
 
     try {
-      const search = new URLSearchParams(credential);
       const catalog = readAgentModelCatalog(
-        await requestJson(`${SESSION_MODELS_PATH}?${search.toString()}`),
+        await this.#transport.command(
+          SESSION_REALTIME_OPERATIONS.models,
+          credential,
+        ),
       );
       if (
         request !== this.#request ||

@@ -1,6 +1,7 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import type { AuthenticatedUser } from "../../shared/auth-model.ts";
 import { RUNNER_REALTIME_PATH } from "../../shared/routes.ts";
+import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import type { GoogleAuth } from "../../sync-engine/auth.ts";
 import { RealtimeHub } from "../../sync-engine/realtime-hub.ts";
 import {
@@ -9,6 +10,7 @@ import {
 } from "../../sync-engine/realtime.ts";
 import type { RunnerIntegration } from "../../sync-engine/runners.ts";
 import type { SessionIntegration } from "../../sync-engine/sessions.ts";
+import { TEST_REALTIME_SESSION_DETAIL } from "./realtime-session-fixture.ts";
 
 const USER: AuthenticatedUser = {
   email: "mush@example.com",
@@ -62,26 +64,29 @@ function runners(
   };
 }
 
-function sessions(
-  overrides: Partial<Pick<SessionIntegration, "runnerConnected">> = {},
-): SessionIntegration {
+type SessionOverrides = Partial<SessionIntegration>;
+
+function sessions(overrides: SessionOverrides = {}): SessionIntegration {
   return {
-    collection: () => Promise.resolve(new Response()),
-    compact: () => Promise.resolve(new Response()),
-    compaction: () => Promise.resolve(new Response()),
+    compactForUser: () => Promise.reject(new Error("unused")),
     completeRunnerCommand: () => false,
-    continue: () => Promise.resolve(new Response()),
+    continueForUser: () => Promise.reject(new Error("unused")),
+    createForUser: () => Promise.reject(new Error("unused")),
     deliverRunnerCommands: () => undefined,
-    detailForUser: () => undefined,
+    readForUser: () => undefined,
     directories: () => Promise.resolve(new Response()),
     drain: () => Promise.resolve(),
-    item: () => new Response(),
-    listForUser: () => [],
-    message: () => Promise.resolve(new Response()),
-    models: () => Promise.resolve(new Response()),
+    summariesForUser: () => [],
+    messageForUser: () => Promise.reject(new Error("unused")),
+    modelsForUser: () => Promise.resolve({ defaultModel: null, models: [] }),
     onChange: () => undefined,
     runnerConnected: () => undefined,
-    stop: () => Promise.resolve(new Response()),
+    setAutoCompactionForUser: () => {
+      throw new Error("unused");
+    },
+    stopForUser: () => {
+      throw new Error("unused");
+    },
     ...overrides,
   };
 }
@@ -90,7 +95,7 @@ function integration(
   user: AuthenticatedUser | null,
   token?: string,
   runnerOverrides?: RunnerIntegrationOverrides,
-  sessionOverrides?: Partial<Pick<SessionIntegration, "runnerConnected">>,
+  sessionOverrides?: SessionOverrides,
 ) {
   return createRealtimeIntegration({
     auth: auth(user),
@@ -117,14 +122,19 @@ function upgrade(
 
 interface TestSocket {
   readonly data: QmushWebSocketData;
-  close(): void;
+  close(code?: number, reason?: string): void;
   publish(): number;
-  send(): number;
+  send(message: string): number;
   subscribe(): void;
   unsubscribe(): void;
 }
 
-function testSocket(data: QmushWebSocketData | undefined): TestSocket {
+type SocketOverrides = Partial<Pick<TestSocket, "close" | "send">>;
+
+function testSocket(
+  data: QmushWebSocketData | undefined,
+  overrides: SocketOverrides = {},
+): TestSocket {
   if (data === undefined) {
     throw new Error("The test WebSocket did not upgrade");
   }
@@ -135,6 +145,7 @@ function testSocket(data: QmushWebSocketData | undefined): TestSocket {
     send: () => 1,
     subscribe: () => undefined,
     unsubscribe: () => undefined,
+    ...overrides,
   };
 }
 
@@ -150,6 +161,43 @@ function websocketMessage(
   return Reflect.apply(method, undefined, [socket, message]);
 }
 
+function userSocket(
+  realtime: ReturnType<typeof createRealtimeIntegration>,
+  overrides: SocketOverrides = {},
+): TestSocket {
+  const server = new UpgradeServer();
+  expect(upgrade(realtime, "/api/realtime", server)).toBeUndefined();
+  return testSocket(server.data, overrides);
+}
+
+function commandMessage(
+  commandId: string,
+  idempotencyKey: string,
+  operation = "sessions.subscribe",
+  payload: Readonly<Record<string, unknown>> = {},
+): string {
+  return JSON.stringify({
+    commandId,
+    idempotencyKey,
+    operation,
+    payload,
+    type: "command",
+  });
+}
+
+function nextTask(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+async function sendUserMessage(
+  realtime: ReturnType<typeof createRealtimeIntegration>,
+  socket: TestSocket,
+  message: string,
+): Promise<void> {
+  websocketMessage(realtime.websocket, socket, message);
+  await nextTask();
+}
+
 function expectUpgrade(
   realtime: ReturnType<typeof createRealtimeIntegration>,
   path: string,
@@ -161,7 +209,9 @@ function expectUpgrade(
 }
 
 test("upgrades an authenticated browser realtime request", () => {
-  expectUpgrade(integration(USER), "/api/realtime", {
+  const realtime = integration(USER);
+  expect(realtime.websocket.maxPayloadLength).toBe(128 * 1024 * 1024 + 1);
+  expectUpgrade(realtime, "/api/realtime", {
     kind: "user",
     user: USER,
   });
@@ -179,6 +229,99 @@ test("rejects unauthorized and non-WebSocket realtime requests", () => {
 
   expect(unauthorized?.status).toBe(401);
   expect(missingUpgrade?.status).toBe(426);
+});
+
+test("acknowledges malformed correlated commands and rejects uncorrelated messages", async () => {
+  const realtime = integration(USER);
+  const sent: string[] = [];
+  const closes: [number | undefined, string | undefined][] = [];
+  const socket = userSocket(realtime, {
+    close: (code, reason) => {
+      closes.push([code, reason]);
+    },
+    send: (message) => {
+      sent.push(message);
+      return 1;
+    },
+  });
+
+  await sendUserMessage(
+    realtime,
+    socket,
+    commandMessage("command-invalid", "mutation-invalid", "bad operation"),
+  );
+  await sendUserMessage(realtime, socket, JSON.stringify({ type: "refresh" }));
+
+  expect(JSON.parse(sent[0] ?? "null")).toEqual({
+    commandId: "command-invalid",
+    error: "invalid_command",
+    type: "command_error",
+  });
+  expect(closes).toContainEqual([1008, "Invalid command"]);
+});
+
+test("replays a completed command after its socket disconnects", async () => {
+  let complete: ((value: AgentSessionDetail) => void) | undefined;
+  const createForUser = vi.fn(
+    () =>
+      new Promise<AgentSessionDetail>((resolve) => {
+        complete = resolve;
+      }),
+  );
+  const realtime = integration(USER, undefined, undefined, { createForUser });
+  const firstSocket = userSocket(realtime, {
+    send: () => {
+      throw new Error("The socket disconnected");
+    },
+  });
+  const message = commandMessage(
+    "command-create",
+    "mutation-create",
+    "sessions.create",
+    {
+      credentialId: "credential-1",
+      model: "gpt-test",
+      prompt: "Do the work",
+      provider: "openai",
+      runnerId: "runner-1",
+      tools: [],
+      workingDirectory: "/work",
+    },
+  );
+  websocketMessage(realtime.websocket, firstSocket, message);
+  await vi.waitFor(() => {
+    expect(createForUser).toHaveBeenCalledOnce();
+  });
+  const replayDetail: AgentSessionDetail = {
+    ...TEST_REALTIME_SESSION_DETAIL,
+    credentialId: "credential-1",
+    id: "session-1",
+    model: "gpt-test",
+    provider: "openai",
+    runnerId: "runner-1",
+    status: "queued",
+    title: "Do the work",
+    tools: [],
+    workingDirectory: "/work",
+  };
+  complete?.(replayDetail);
+  await nextTask();
+
+  const sent: string[] = [];
+  const replaySocket = userSocket(realtime, {
+    send: (acknowledgement) => {
+      sent.push(acknowledgement);
+      return 1;
+    },
+  });
+  await sendUserMessage(realtime, replaySocket, message);
+
+  expect(createForUser).toHaveBeenCalledOnce();
+  expect(JSON.parse(sent.at(-1) ?? "null")).toMatchObject({
+    commandId: "command-create",
+    result: { id: "session-1", status: "queued" },
+    type: "command_success",
+  });
 });
 
 test("recovers and wakes completed child callbacks when a runner connects", () => {

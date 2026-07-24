@@ -3,7 +3,7 @@ import type { AgentModel } from "../../shared/agent-loop.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
   connectedSessionSetup,
-  createSessionRequest,
+  createSessionInput,
 } from "./session-integration-fixtures.ts";
 import {
   completeAgentFileLookup,
@@ -34,8 +34,15 @@ export async function completedParentDetail(
 
 export async function startToolSession(model: AgentModel) {
   const setup = connectedSessionSetup(model);
-  const response = await setup.sessions.collection(createSessionRequest());
-  expect(response.status).toBe(201);
+  const detail = await setup.sessions.createForUser(
+    {
+      email: "mushroom@example.com",
+      id: "018bcfe5-6800-7000-8000-000000000021",
+      name: "Mush Room",
+    },
+    createSessionInput(),
+  );
+  expect(detail.status).toBe("queued");
   await completeAgentFileLookup(setup);
   return setup;
 }

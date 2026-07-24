@@ -1,4 +1,5 @@
 import { expect } from "vitest";
+import type { AgentReasoningEffort } from "../../shared/agent-configuration.ts";
 import type { AgentImage } from "../../shared/agent-images.ts";
 import type { AgentModel } from "../../shared/agent-loop.ts";
 import {
@@ -7,7 +8,6 @@ import {
 } from "../../shared/agent-tools.ts";
 import type { ProviderCredentialAccess } from "../../shared/provider-credential-store.ts";
 import type { ProviderModelPricing } from "../../shared/provider-model-pricing.ts";
-import { SESSIONS_PATH } from "../../shared/routes.ts";
 import {
   RunnerCommandBroker,
   type RunnerToolCommand,
@@ -15,6 +15,7 @@ import {
 import type { AgentModelDiscoverer } from "../../sync-engine/agent-model-discovery.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
 import { createRunnerIntegration } from "../../sync-engine/runners.ts";
+import type { CreateSessionInput } from "../../sync-engine/session-input.ts";
 import { createSessionIntegration } from "../../sync-engine/sessions.ts";
 import {
   addTestProviderCredential,
@@ -146,25 +147,21 @@ export function connectedSessionSetup(
   };
 }
 
-export function createSessionRequest(
+export function createSessionInput(
   includeModel = true,
-  reasoningEffort = "high",
+  reasoningEffort: AgentReasoningEffort = "high",
   model = "gpt-4.1-mini",
   images: readonly AgentImage[] = [],
-): Request {
-  return createAuthenticatedRequest(
-    SESSIONS_PATH,
-    {
-      credentialId: CREDENTIAL_ID,
-      ...(images.length === 0 ? {} : { images }),
-      ...(includeModel ? { model } : {}),
-      prompt: "Inspect README.md",
-      provider: "openai",
-      reasoningEffort,
-      runnerId: RUNNER_ID,
-      tools: AGENT_SESSION_TOOL_NAMES,
-      workingDirectory: "/work/project",
-    },
-    "POST",
-  );
+): CreateSessionInput {
+  return {
+    credentialId: CREDENTIAL_ID,
+    images,
+    model: includeModel ? model : "",
+    prompt: "Inspect README.md",
+    provider: "openai",
+    reasoningEffort,
+    runnerId: RUNNER_ID,
+    tools: AGENT_SESSION_TOOL_NAMES,
+    workingDirectory: "/work/project",
+  };
 }

@@ -20,8 +20,6 @@ import {
   RUNNER_EXECUTABLE_PATH,
   RUNNER_INSTALLER_PATH,
   RUNNERS_PATH,
-  SESSION_MODELS_PATH,
-  SESSIONS_PATH,
   STYLESHEET_PATH,
 } from "../shared/routes.ts";
 import type { GoogleAuth } from "./auth.ts";
@@ -287,10 +285,6 @@ export function createRequestHandler(
         return sessions.directories(request, runnerId);
       }
 
-      if (pathname === SESSIONS_PATH) {
-        return sessions.collection(request);
-      }
-
       if (pathname === BRAVE_SEARCH_KEYS_PATH) {
         return braveSearch.keys(request);
       }
@@ -302,41 +296,6 @@ export function createRequestHandler(
 
         if (keyId.length > 0 && !keyId.includes("/")) {
           return braveSearch.remove(request, keyId);
-        }
-      }
-
-      if (pathname === SESSION_MODELS_PATH) {
-        return sessions.models(request);
-      }
-
-      const sessionPathPrefix = `${SESSIONS_PATH}/`;
-
-      if (pathname.startsWith(sessionPathPrefix)) {
-        const segments = pathname.slice(sessionPathPrefix.length).split("/");
-        const sessionId = segments[0];
-
-        if (sessionId !== undefined && sessionId.length > 0) {
-          if (segments.length === 1) {
-            return sessions.item(request, sessionId);
-          }
-
-          if (segments.length === 2) {
-            switch (segments[1]) {
-              case "compact":
-                return sessions.compact(request, sessionId);
-              case "compaction":
-                return sessions.compaction(request, sessionId);
-              case "continue":
-                return sessions.continue(request, sessionId);
-              case "messages":
-                return sessions.message(request, sessionId);
-              case "stop":
-                return sessions.stop(request, sessionId);
-              case undefined:
-              default:
-                break;
-            }
-          }
         }
       }
 

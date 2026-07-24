@@ -1,9 +1,5 @@
 import { parseJsonRecord } from "../shared/json-record.ts";
 
-export interface QmushClientMessage {
-  readonly type: "refresh";
-}
-
 export type RunnerClientMessage =
   | {
       readonly commandId: string;
@@ -21,17 +17,10 @@ export interface RunnerConnectMessage {
 }
 
 function parseRecord(message: string): Readonly<Record<string, unknown>> {
-  return parseJsonRecord(message, "The WebSocket message was invalid");
-}
-
-export function readQmushClientMessage(message: string): QmushClientMessage {
-  const value = parseRecord(message);
-
-  if (value["type"] !== "refresh") {
-    throw new Error("The Q Mush WebSocket message was invalid");
+  if (message.length > 16 * 1024 * 1024) {
+    throw new Error("The WebSocket message was too large");
   }
-
-  return { type: "refresh" };
+  return parseJsonRecord(message, "The WebSocket message was invalid");
 }
 
 export function readRunnerConnectMessage(

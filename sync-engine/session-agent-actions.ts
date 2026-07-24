@@ -1,8 +1,6 @@
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
-import { createJsonResponse } from "./http.ts";
 import {
-  responseToolOutput,
   spawnAgentSession,
   spawnedSessionReport,
   type SessionAgentActionDependencies,
@@ -12,13 +10,17 @@ import {
   type SessionAgentToolActions,
   type SpawnSessionToolInput,
 } from "./session-agent-tools.ts";
-import { unavailableSessionResponse } from "./session-availability.ts";
+import { unavailableSessionError } from "./session-availability.ts";
 import type { PendingSpawnedSession } from "./session-store-spawns.ts";
+
+function errorToolOutput(error: string): string {
+  return sessionToolOutput({ error });
+}
 
 interface SessionAgentActionsDependencies extends SessionAgentActionDependencies {
   readonly abortSession: (sessionId: string) => void;
-  readonly broker: Pick<RunnerCommandBroker, "cancelSession">;
   readonly activeSession: (sessionId: string) => boolean;
+  readonly broker: Pick<RunnerCommandBroker, "cancelSession">;
 }
 
 export class SessionAgentActions {
@@ -152,9 +154,9 @@ export class SessionAgentActions {
     message?: string,
   ): Promise<string> {
     const target = this.#detail(userId, sessionId);
-    const unavailable = unavailableSessionResponse(target);
+    const unavailable = unavailableSessionError(target);
     if (unavailable !== undefined) {
-      return responseToolOutput(unavailable);
+      return errorToolOutput(unavailable);
     }
     if (!this.#dependencies.runnerIsAvailable(userId, target.runnerId)) {
       return sessionToolOutput({ error: "runner_unavailable" });
@@ -170,18 +172,18 @@ export class SessionAgentActions {
           message === undefined ? undefined : { content: message, images: [] },
         );
         if (queued.status !== "queued") {
-          return createJsonResponse({ error: queued.status });
+          return errorToolOutput(queued.status);
         }
         if (
           !this.#dependencies.launchSession(credential, queued.detail, userId)
         ) {
-          return createJsonResponse({ error: "server_restarting" }, 503);
+          return errorToolOutput("server_restarting");
         }
         this.#dependencies.notify(userId, sessionId);
-        return createJsonResponse({ sessionId, status: "queued" });
+        return sessionToolOutput({ sessionId, status: "queued" });
       },
     );
-    return responseToolOutput(response);
+    return response;
   }
 
   #spawn(

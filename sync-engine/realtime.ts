@@ -1,15 +1,24 @@
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
 import { REALTIME_PATH, RUNNER_REALTIME_PATH } from "../shared/routes.ts";
 import type { RunnerToolCommand } from "../shared/runner-command-broker.ts";
+import {
+  readUserRealtimeCommand,
+  USER_REALTIME_MAX_PAYLOAD_LENGTH,
+  UserRealtimeProtocolError,
+} from "../shared/user-realtime-protocol.ts";
 import type { GoogleAuth } from "./auth.ts";
+import {
+  RealtimeCommandLedger,
+  type RealtimeCommandAcknowledgement,
+} from "./realtime-command-ledger.ts";
 import type { RealtimeHub, RealtimeSocket } from "./realtime-hub.ts";
 import {
-  readQmushClientMessage,
   readRunnerClientMessage,
   readRunnerConnectMessage,
 } from "./realtime-protocol.ts";
 import type { RunnerConnection, RunnerMetadata } from "./runner-store.ts";
 import { readRunnerMetadata, type RunnerIntegration } from "./runners.ts";
+import { executeSessionRealtimeCommand } from "./session-realtime-commands.ts";
 import type { SessionIntegration } from "./sessions.ts";
 
 interface UserSocketData {
@@ -27,6 +36,7 @@ export type QmushWebSocketData = RunnerSocketData | UserSocketData;
 
 interface RealtimeIntegrationOptions {
   readonly auth: GoogleAuth;
+  readonly commandLedger?: RealtimeCommandLedger;
   readonly hub: RealtimeHub;
   readonly runnerVersion: string;
   readonly runners: RunnerIntegration;
@@ -86,9 +96,10 @@ function sendCommand(
 export function createRealtimeIntegration(
   options: RealtimeIntegrationOptions,
 ): RealtimeIntegration {
+  const commandLedger = options.commandLedger ?? new RealtimeCommandLedger();
   const publishSessions = (userId: string): void => {
     options.hub.publishUser(userId, {
-      sessions: options.sessions.listForUser(userId),
+      sessions: options.sessions.summariesForUser(userId),
       type: "sessions",
     });
   };
@@ -103,13 +114,56 @@ export function createRealtimeIntegration(
     publishSessions(userId);
   };
   options.sessions.onChange((userId, sessionId) => {
-    const session = options.sessions.detailForUser(userId, sessionId);
+    const session = options.sessions.readForUser(userId, sessionId);
 
     if (session !== undefined) {
       options.hub.publishUser(userId, { session, type: "session" });
     }
     publishSessions(userId);
   });
+
+  const sendAcknowledgement = (
+    socket: RealtimeSocket,
+    acknowledgement: RealtimeCommandAcknowledgement,
+  ): void => {
+    socket.send(JSON.stringify(acknowledgement));
+  };
+  const handleUserCommand = async (
+    socket: RealtimeSocket,
+    data: UserSocketData,
+    message: string,
+  ): Promise<void> => {
+    let command;
+    try {
+      command = readUserRealtimeCommand(message);
+    } catch (error) {
+      const commandId =
+        error instanceof UserRealtimeProtocolError
+          ? error.commandId
+          : undefined;
+      if (commandId !== undefined) {
+        sendAcknowledgement(socket, {
+          commandId,
+          error: "invalid_command",
+          type: "command_error",
+        });
+        return;
+      }
+      socket.close(1008, "Invalid command");
+      return;
+    }
+
+    const acknowledgement = await commandLedger.execute(
+      data.user.id,
+      command,
+      () => executeSessionRealtimeCommand(options.sessions, data.user, command),
+    );
+    try {
+      sendAcknowledgement(socket, acknowledgement);
+    } catch {
+      // Completed results stay in the ledger for replay after reconnect.
+    }
+  };
 
   const websocket: Bun.WebSocketHandler<QmushWebSocketData> = {
     close(socket) {
@@ -127,6 +181,7 @@ export function createRealtimeIntegration(
       }
     },
     idleTimeout: 0,
+    maxPayloadLength: USER_REALTIME_MAX_PAYLOAD_LENGTH,
     message(socket, rawMessage) {
       try {
         const message = textMessage(rawMessage);
@@ -185,8 +240,13 @@ export function createRealtimeIntegration(
           return;
         }
 
-        readQmushClientMessage(message);
-        publishUserSnapshots(socket.data.user.id);
+        void handleUserCommand(socket, socket.data, message).catch(() => {
+          try {
+            socket.close(1011, "Command handling failed");
+          } catch {
+            // The peer may already have closed the socket.
+          }
+        });
       } catch {
         try {
           socket.close(1008, "Invalid message");

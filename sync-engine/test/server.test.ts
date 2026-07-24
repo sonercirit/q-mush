@@ -27,8 +27,6 @@ import {
   runnerDefaultPath,
   runnerDirectoriesPath,
   RUNNERS_PATH,
-  SESSION_MODELS_PATH,
-  SESSIONS_PATH,
 } from "../../shared/routes.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
 import type { BraveSearchSkill } from "../../sync-engine/brave-search.ts";
@@ -197,7 +195,6 @@ describe("routes", () => {
     expect(RUNNER_REALTIME_PATH).toBe("/api/runner/realtime");
     expect(REALTIME_PATH).toBe("/api/realtime");
     expect(RUNNER_VERSION_HEADER).toBe("x-q-mush-runner-version");
-    expect(SESSIONS_PATH).toBe("/api/sessions");
     expect(RUNNER_INSTALLER_PATH).toBe("/runner/install.sh");
     expect(RUNNER_EXECUTABLE_PATH).toBe("/runner/executable");
   });
@@ -290,23 +287,25 @@ describe("page server", () => {
     expectAllStatuses(responses, 401);
   });
 
-  test("protects agent session routes", async () => {
-    const responses = await Promise.all([
-      sendRequest(SESSIONS_PATH),
-      sendRequest(SESSIONS_PATH, undefined, "POST"),
-      sendRequest(
-        `${SESSION_MODELS_PATH}?provider=openai&credentialId=credential-id`,
-      ),
-      sendRequest(`${SESSIONS_PATH}/session-id`),
-      sendRequest(`${SESSIONS_PATH}/session-id/compact`, undefined, "POST"),
-      sendRequest(`${SESSIONS_PATH}/session-id/compaction`, undefined, "POST"),
-      sendRequest(`${SESSIONS_PATH}/session-id/continue`, undefined, "POST"),
-      sendRequest(`${SESSIONS_PATH}/session-id/messages`, undefined, "POST"),
-      sendRequest(`${SESSIONS_PATH}/session-id/stop`, undefined, "POST"),
-      sendRequest(runnerDirectoriesPath("runner-id"), undefined, "POST"),
-    ]);
+  test("does not expose browser session HTTP routes", async () => {
+    const sessionPaths = [
+      "/api/sessions",
+      "/api/sessions/models?provider=openai&credentialId=credential-id",
+      "/api/sessions/session-id",
+      "/api/sessions/session-id/compact",
+      "/api/sessions/session-id/compaction",
+      "/api/sessions/session-id/continue",
+      "/api/sessions/session-id/messages",
+      "/api/sessions/session-id/stop",
+    ];
+    const responses = await Promise.all(
+      sessionPaths.flatMap((path) => [
+        sendRequest(path),
+        sendRequest(path, undefined, "POST"),
+      ]),
+    );
 
-    expectAllStatuses(responses, 401);
+    expectAllStatuses(responses, 404);
   });
 
   test("serves the authentication session endpoint", async () => {
@@ -452,7 +451,7 @@ describe("browser build", () => {
     expect(javaScript).toContain("OPENROUTER_CREDENTIALS_PATH");
     expect(javaScript).toContain("BRAVE_SEARCH_KEYS_PATH");
     expect(javaScript).toContain("RUNNERS_PATH");
-    expect(javaScript).toContain("SESSIONS_PATH");
+    expect(javaScript).not.toContain("SESSIONS_PATH");
   });
 });
 

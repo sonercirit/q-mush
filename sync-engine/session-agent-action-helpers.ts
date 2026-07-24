@@ -1,6 +1,5 @@
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
-import { createJsonResponse } from "./http.ts";
 import {
   lastSessionMessage,
   sessionToolOutput,
@@ -20,19 +19,9 @@ interface ParentSessionReport {
 
 type SessionAgentCredentialAction = (
   credential: ProviderCredentialAccess,
-) => Promise<Response> | Response;
+) => Promise<string> | string;
 
 export interface SessionAgentActionDependencies {
-  readonly store: SessionStore;
-  readonly draining: () => boolean;
-  readonly now: () => number;
-  readonly notify: (userId: string, sessionId: string) => void;
-  readonly runnerIsAvailable: (userId: string, runnerId: string) => boolean;
-  readonly launchSession: (
-    credential: ProviderCredentialAccess,
-    session: AgentSessionDetail,
-    ownerId: string,
-  ) => boolean;
   readonly discoverSessionMetadata: (
     input: SpawnSessionToolInput,
     credential: ProviderCredentialAccess,
@@ -40,16 +29,21 @@ export interface SessionAgentActionDependencies {
     readonly maxContextTokens: number | null;
     readonly providerPricing: AgentSessionDetail["providerPricing"];
   }>;
+  readonly draining: () => boolean;
+  readonly launchSession: (
+    credential: ProviderCredentialAccess,
+    session: AgentSessionDetail,
+    ownerId: string,
+  ) => boolean;
+  readonly now: () => number;
+  readonly notify: (userId: string, sessionId: string) => void;
+  readonly runnerIsAvailable: (userId: string, runnerId: string) => boolean;
+  readonly store: SessionStore;
   readonly withCredential: (
     userId: string,
     selection: SessionAgentCredentialSelection,
     action: SessionAgentCredentialAction,
-  ) => Promise<Response>;
-}
-
-export async function responseToolOutput(response: Response): Promise<string> {
-  const value: unknown = await response.json();
-  return sessionToolOutput(value);
+  ) => Promise<string>;
 }
 
 export function spawnedSessionReport(options: {
@@ -87,16 +81,16 @@ export async function spawnAgentSession(options: {
   readonly parentSessionId: string;
   readonly userId: string;
 }): Promise<string> {
-  async function enqueue(
+  const enqueue = async (
     input: SpawnSessionToolInput,
     credential: ProviderCredentialAccess,
-  ): Promise<Response> {
+  ): Promise<string> => {
     const metadata = await options.dependencies.discoverSessionMetadata(
       input,
       credential,
     );
     if (options.dependencies.draining()) {
-      return createJsonResponse({ error: "server_restarting" }, 503);
+      return sessionToolOutput({ error: "server_restarting" });
     }
     const child = options.dependencies.store.create(
       {
@@ -124,12 +118,11 @@ export async function spawnAgentSession(options: {
       throw new Error("The child session could not be launched");
     }
     options.dependencies.notify(options.userId, child.id);
-    return createJsonResponse({ sessionId: child.id, status: "spawned" });
-  }
-  const response = await options.dependencies.withCredential(
+    return sessionToolOutput({ sessionId: child.id, status: "spawned" });
+  };
+  return options.dependencies.withCredential(
     options.userId,
     options.input,
     (credential) => enqueue(options.input, credential),
   );
-  return responseToolOutput(response);
 }
