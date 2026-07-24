@@ -44,10 +44,10 @@ const PERMANENT_ERROR_CODES = new Set([
   "unsupported_parameter",
 ]);
 
-type ProviderErrorCode = number | string | undefined;
+type ProviderErrorCode = number | string;
 
 interface ProviderErrorDetails {
-  readonly code: ProviderErrorCode;
+  readonly codes: readonly ProviderErrorCode[];
   readonly detail: string;
   readonly retryAfterMilliseconds: number | undefined;
   readonly status: number | undefined;
@@ -125,22 +125,46 @@ function providerErrorContext(
     .join(": ");
 }
 
-function numericCode(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isSafeInteger(value)
-    ? value
+function providerMetadataErrorType(
+  error: Readonly<Record<string, unknown>>,
+): string | undefined {
+  const metadata = error["metadata"];
+  return isRecord(metadata)
+    ? requiredTrimmedString(metadata["error_type"])
     : undefined;
+}
+
+function numericCode(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isSafeInteger(value)) {
+    return value;
+  }
+  if (typeof value !== "string" || !/^\d+$/u.test(value.trim())) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
+}
+
+function providerErrorCodes(
+  error: Readonly<Record<string, unknown>>,
+): readonly ProviderErrorCode[] {
+  return [error["code"], error["type"], providerMetadataErrorType(error)]
+    .map(
+      (value): ProviderErrorCode | undefined =>
+        numericCode(value) ?? requiredTrimmedString(value),
+    )
+    .filter((value): value is number | string => value !== undefined);
 }
 
 function providerErrorDetails(
   event: Readonly<Record<string, unknown>>,
 ): ProviderErrorDetails {
   const { error, response } = providerErrorSources(event);
-  const codeValue = error["code"] ?? error["type"];
-  const code = numericCode(codeValue) ?? requiredTrimmedString(codeValue);
+  const codes = providerErrorCodes(error);
   const retryAfter = retryAfterMilliseconds(error);
   const statusValue = event["status"] ?? error["status"];
   return {
-    code,
+    codes,
     detail: providerErrorContext(event, response, error),
     retryAfterMilliseconds:
       retryAfter === undefined
@@ -154,18 +178,12 @@ function codeIsTransient(code: ProviderErrorCode): boolean {
   if (typeof code === "number") {
     return code === 408 || code === 409 || code === 429 || code >= 500;
   }
-  if (code === undefined) {
-    return false;
-  }
   return TRANSIENT_ERROR_CODES.has(code.toLowerCase());
 }
 
 function codeIsPermanent(code: ProviderErrorCode): boolean {
   if (typeof code === "number") {
     return code >= 400 && code < 500 && !codeIsTransient(code);
-  }
-  if (code === undefined) {
-    return false;
   }
   return PERMANENT_ERROR_CODES.has(code.toLowerCase());
 }
@@ -190,11 +208,11 @@ function sanitize(value: string): string {
 }
 
 function providerErrorMessage(details: ProviderErrorDetails): string {
-  const code =
-    details.code === undefined ? "" : ` (code ${String(details.code)})`;
+  const code = details.codes[0];
+  const label = code === undefined ? "" : ` (code ${String(code)})`;
   const detail = details.detail.length === 0 ? "" : `: ${details.detail}`;
   return sanitize(
-    `The provider failed to complete the request${code}${detail}`,
+    `The provider failed to complete the request${label}${detail}`,
   );
 }
 
@@ -203,14 +221,14 @@ export function readProviderStreamError(
 ): ProviderStreamError {
   const details = providerErrorDetails(event);
   const transient =
-    codeIsTransient(details.code) ||
+    details.codes.some(codeIsTransient) ||
     (details.status !== undefined && codeIsTransient(details.status));
   const permanent =
-    codeIsPermanent(details.code) ||
+    details.codes.some(codeIsPermanent) ||
     (details.status !== undefined && codeIsPermanent(details.status));
   return new ProviderStreamError(
     providerErrorMessage(details),
-    transient && !permanent,
+    !permanent && (transient || isProviderStreamErrorEvent(event)),
     details.retryAfterMilliseconds,
   );
 }
