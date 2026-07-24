@@ -319,6 +319,107 @@ describe("first-party agent loop", () => {
     ]);
   });
 
+  // cpd-ignore-start -- These assertions intentionally retain complete model requests.
+  test("applies steering before the first model completion", async () => {
+    const model = new ScriptedAgentModel([
+      { content: "Steering applied.", toolCalls: [] },
+    ]);
+
+    await runAgentLoop({
+      executeTool: () => Promise.reject(new Error("No tool expected")),
+      initialMessages: [{ content: "Start", role: "user" }],
+      model,
+      recordMessage: () => undefined,
+      takeInitialSteeringMessages: () => [
+        { content: "Change direction first", role: "user" },
+      ],
+    });
+
+    expect(model.requests[0]).toEqual([
+      { content: "Start", role: "user" },
+      { content: "Change direction first", role: "user" },
+    ]);
+  });
+  // cpd-ignore-end
+
+  // cpd-ignore-start -- These loop scenarios intentionally spell out complete turn histories.
+  test("inserts steering at a safe boundary after all tool results", async () => {
+    const calls = [
+      { arguments: "{}", id: "call-1", name: "read" },
+      { arguments: "{}", id: "call-2", name: "bash" },
+    ];
+    const model = new ScriptedAgentModel([
+      { content: "Using tools.", toolCalls: calls },
+      { content: "Steering applied.", toolCalls: [] },
+    ]);
+    const executed: string[] = [];
+    let steered = false;
+
+    await runAgentLoop({
+      executeTool: (call) => {
+        executed.push(call.id);
+        return Promise.resolve(`result:${call.id}`);
+      },
+      initialMessages: [{ content: "Start", role: "user" }],
+      model,
+      recordMessage: () => undefined,
+      takeSteeringMessages: () => {
+        if (!steered && model.requests.length === 1 && executed.length === 2) {
+          steered = true;
+          return [{ content: "Change direction", role: "user" }];
+        }
+        return [];
+      },
+    });
+
+    expect(executed).toEqual(["call-1", "call-2"]);
+    expect(model.requests[1]).toEqual([
+      { content: "Start", role: "user" },
+      { content: "Using tools.", role: "assistant", toolCalls: calls },
+      {
+        content: "result:call-1",
+        role: "tool",
+        toolCallId: "call-1",
+        toolName: "read",
+      },
+      {
+        content: "result:call-2",
+        role: "tool",
+        toolCallId: "call-2",
+        toolName: "bash",
+      },
+      { content: "Change direction", role: "user" },
+    ]);
+  });
+
+  test("steering after a tool-free completion starts another model turn", async () => {
+    const model = new ScriptedAgentModel([
+      { content: "Initial answer.", toolCalls: [] },
+      { content: "Revised answer.", toolCalls: [] },
+    ]);
+    let steered = false;
+
+    await runAgentLoop({
+      executeTool: () => Promise.reject(new Error("No tool expected")),
+      initialMessages: [{ content: "Start", role: "user" }],
+      model,
+      recordMessage: () => undefined,
+      takeSteeringMessages: () => {
+        if (!steered && model.requests.length === 1) {
+          steered = true;
+          return [{ content: "Revise it", role: "user" }];
+        }
+        return [];
+      },
+    });
+
+    expect(model.requests[1]?.slice(-2)).toEqual([
+      { content: "Initial answer.", role: "assistant", toolCalls: [] },
+      { content: "Revise it", role: "user" },
+    ]);
+  });
+  // cpd-ignore-end
+
   test("accepts more than eight mixed calls with bounded concurrency and input ordering", async () => {
     let active = 0;
     let maximumActive = 0;

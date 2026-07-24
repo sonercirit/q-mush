@@ -127,7 +127,18 @@ export async function runSessionAgent(
     runtime.notify,
   );
 
+  const initialMessages = runtime.store.conversation(runtime.detail.id);
   const selectedTools = new Set<AgentSessionToolName>(runtime.detail.tools);
+  const takeSteeringMessages = () => {
+    const messages = runtime.store.takeSteeringInputs(
+      runtime.detail.id,
+      runtime.now(),
+    );
+    if (messages.length > 0) {
+      runtime.notify();
+    }
+    return messages;
+  };
   await runCompactingAgentLoop({
     agentCost: (turn) => estimateAgentTurnCost(runtime.detail, turn.tokenUsage),
     autoCompact: runtime.detail.autoCompact,
@@ -148,7 +159,7 @@ export async function runSessionAgent(
       }
       return dispatchTool(call.name, call.arguments);
     },
-    initialMessages: runtime.store.conversation(runtime.detail.id),
+    initialMessages,
     maxContextTokens: runtime.detail.maxContextTokens,
     model: models.agent,
     recordCompaction: (summary) => {
@@ -161,6 +172,8 @@ export async function runSessionAgent(
     recordUsage: (usage) => {
       recorder.usage(usage);
     },
+    takeInitialSteeringMessages: takeSteeringMessages,
+    takeSteeringMessages,
     signal: runtime.signal,
   });
 }

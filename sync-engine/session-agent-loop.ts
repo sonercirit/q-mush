@@ -27,6 +27,8 @@ interface CompactingAgentLoopOptions {
     message: AgentRecordedMessage,
   ) => Promise<void> | void;
   readonly signal?: AbortSignal;
+  readonly takeInitialSteeringMessages?: AgentLoopOptions["takeInitialSteeringMessages"];
+  readonly takeSteeringMessages?: AgentLoopOptions["takeSteeringMessages"];
 }
 
 function shouldCompactFinalTurn(
@@ -117,6 +119,12 @@ export async function runCompactingAgentLoop(
     },
     recordMessage: options.recordMessage,
     ...(options.signal === undefined ? {} : { signal: options.signal }),
+    ...(options.takeInitialSteeringMessages === undefined
+      ? {}
+      : { takeInitialSteeringMessages: options.takeInitialSteeringMessages }),
+    ...(options.takeSteeringMessages === undefined
+      ? {}
+      : { takeSteeringMessages: options.takeSteeringMessages }),
   });
 
   if (compaction.pending) {

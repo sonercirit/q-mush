@@ -5,7 +5,7 @@ import type {
   AgentSessionDetail,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
-import { requestJson } from "./browser-http.ts";
+import { HttpResponseError, request, requestJson } from "./browser-http.ts";
 import { DirectoryPickerController } from "./directory-picker-controller.ts";
 import { createReactiveState, type ReactiveState } from "./reactive-state.ts";
 import { RevisionState } from "./revision-state.ts";
@@ -43,12 +43,33 @@ function selectedMutation(
   return sessionId === undefined ? undefined : create(sessionId);
 }
 
+interface PendingInputAttempt {
+  readonly clientRequestId: string;
+  readonly images: SessionViewState["followUpImages"];
+  readonly kind: "follow_up" | "steer";
+  readonly prompt: string;
+  readonly sessionId: string;
+}
+
+function samePendingInputAttempt(
+  attempt: PendingInputAttempt,
+  requested: Omit<PendingInputAttempt, "clientRequestId">,
+): boolean {
+  return (
+    attempt.sessionId === requested.sessionId &&
+    attempt.kind === requested.kind &&
+    attempt.prompt === requested.prompt &&
+    JSON.stringify(attempt.images) === JSON.stringify(requested.images)
+  );
+}
+
 export class SessionController {
   readonly #directoryPicker: DirectoryPickerController;
   readonly #models: SessionModelController;
   readonly #realtime: SessionRealtimeState;
   readonly #view: RevisionState<SessionViewState>;
   readonly #reactiveView: ReactiveState<SessionViewState>;
+  #pendingInputAttempt: PendingInputAttempt | undefined;
 
   constructor(
     reactiveView = createReactiveState(initialSessionViewState()),
@@ -192,6 +213,10 @@ export class SessionController {
     return this.#select(sessionId);
   }
 
+  followUp(): Promise<void> {
+    return this.#pendingInput("follow_up");
+  }
+
   send(): Promise<void> {
     return this.#send();
   }
@@ -210,6 +235,10 @@ export class SessionController {
 
   setTools(tools: readonly AgentSessionToolName[]): void {
     this.#patchDraft({ tools: [...tools] });
+  }
+
+  steer(): Promise<void> {
+    return this.#pendingInput("steer");
   }
 
   stop(): Promise<void> {
@@ -242,6 +271,7 @@ export class SessionController {
   reset(): void {
     this.#directoryPicker.reset();
     this.#models.reset();
+    this.#pendingInputAttempt = undefined;
     this.#realtime.reset();
     this.#view.reset(initialSessionViewState());
   }
@@ -460,6 +490,69 @@ export class SessionController {
     });
     await this.#readDetail(sessionId, revision, true);
   }
+
+  // cpd-ignore-start -- Pending input intentionally mirrors the established follow-up mutation.
+  async #pendingInput(kind: "follow_up" | "steer"): Promise<void> {
+    if (this.#view.value.sending) {
+      return;
+    }
+    // cpd-ignore-start -- Pending input intentionally mirrors the established follow-up mutation.
+    const sessionId = this.#view.value.selectedId;
+    const prompt = this.#view.value.followUp.trim();
+    const images = this.#view.value.followUpImages;
+    if (
+      sessionId === undefined ||
+      (prompt.length === 0 && images.length === 0)
+    ) {
+      return;
+    }
+    const requested = { images, kind, prompt, sessionId };
+    const attempt =
+      this.#pendingInputAttempt !== undefined &&
+      samePendingInputAttempt(this.#pendingInputAttempt, requested)
+        ? this.#pendingInputAttempt
+        : { ...requested, clientRequestId: crypto.randomUUID() };
+    this.#pendingInputAttempt = attempt;
+    const settleAttempt = (): void => {
+      if (this.#pendingInputAttempt === attempt) {
+        this.#pendingInputAttempt = undefined;
+      }
+    };
+    await this.#mutateDetail({
+      action: kind === "steer" ? "steer that session" : "queue that follow-up",
+      pending: "sending",
+      request: async () => {
+        try {
+          const response = await request(
+            `${SESSIONS_PATH}/${encodeURIComponent(attempt.sessionId)}/pending-inputs`,
+            {
+              body: JSON.stringify({
+                clientRequestId: attempt.clientRequestId,
+                ...(attempt.images.length === 0
+                  ? {}
+                  : { images: attempt.images }),
+                kind: attempt.kind,
+                prompt: attempt.prompt,
+              }),
+              headers: { "content-type": "application/json" },
+              method: "POST",
+            },
+          );
+          settleAttempt();
+          const value: unknown = await response.json();
+          return value;
+        } catch (error) {
+          if (error instanceof HttpResponseError) {
+            settleAttempt();
+          }
+          throw error;
+        }
+      },
+      success: { followUp: "", followUpImages: [] },
+    });
+    // cpd-ignore-end
+  }
+  // cpd-ignore-end
 
   async #send(): Promise<void> {
     const sessionId = this.#view.value.selectedId;

@@ -1,5 +1,10 @@
 import { createRoot } from "solid-js";
 import { expect, test } from "vitest";
+import { isRecord } from "../../shared/auth-model.ts";
+import {
+  parseJsonRecord,
+  requiredRecordString,
+} from "../../shared/json-record.ts";
 import { SESSIONS_PATH } from "../../shared/routes.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { summaryFromDetail } from "../../solid/session-codec.ts";
@@ -13,6 +18,21 @@ import {
   sessionDetailWithStatus,
   transcriptMessage,
 } from "./transcript-ordering-fixtures.ts";
+
+function requestBody(init: RequestInit | undefined): Record<string, unknown> {
+  if (typeof init?.body !== "string") {
+    throw new TypeError("The request body is not JSON text");
+  }
+  return parseJsonRecord(init.body, "The request body is not a JSON object");
+}
+
+function requestId(init: RequestInit | undefined): string {
+  return requiredRecordString(
+    requestBody(init),
+    "clientRequestId",
+    "The request ID is invalid",
+  );
+}
 
 function assistantMessage(id = "assistant-1", content = "Response") {
   return transcriptMessage(id, content, "assistant", 2);
@@ -171,6 +191,143 @@ function selectedController(
   const controller = createRoot(() => new SessionController());
   return controller.select(selected.id).then(() => controller);
 }
+
+// cpd-ignore-start -- These focused controller cases intentionally repeat complete fetch lifecycles.
+test("pending-input mutation sends a stable id once while submitting", async () => {
+  const controller = createRoot(() => new SessionController());
+  const originalFetch = globalThis.fetch;
+  const requests: { body: unknown; url: string }[] = [];
+  let resolveRequest: ((response: Response) => void) | undefined;
+  globalThis.fetch = Object.assign(
+    (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = requestUrl(input);
+      if (url.endsWith("/pending-inputs")) {
+        requests.push({
+          body: requestBody(init),
+          url,
+        });
+        return new Promise((resolve) => {
+          resolveRequest = resolve;
+        });
+      }
+      return sessionResponse(input);
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+
+  try {
+    await controller.load();
+    controller.applyDetail({ ...TEST_SESSION_DETAIL, status: "running" });
+    controller.setFollowUp("Please steer");
+    const first = controller.steer();
+    const second = controller.steer();
+
+    expect(requests).toHaveLength(1);
+    const body = requests[0]?.body;
+    expect(isRecord(body)).toBe(true);
+    if (!isRecord(body)) {
+      throw new TypeError("The pending-input request body is invalid");
+    }
+    expect(typeof body["clientRequestId"]).toBe("string");
+    expect(body).toMatchObject({
+      kind: "steer",
+      prompt: "Please steer",
+    });
+    resolveRequest?.(
+      Response.json({
+        ...TEST_SESSION_DETAIL,
+        pendingInputs: [
+          {
+            content: "Please steer",
+            createdAt: 3,
+            id: "pending-steer",
+            images: [],
+            kind: "steer",
+          },
+        ],
+        status: "running",
+      }),
+    );
+    await Promise.all([first, second]);
+    expect(controller.state.followUp).toBe("");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("pending-input retries reuse the request ID after an unknown failure", async () => {
+  const controller = createRoot(() => new SessionController());
+  const originalFetch = globalThis.fetch;
+  const requestIds: string[] = [];
+  let pendingAttempts = 0;
+  globalThis.fetch = Object.assign(
+    (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = requestUrl(input);
+      if (url.endsWith("/pending-inputs")) {
+        pendingAttempts += 1;
+        requestIds.push(requestId(init));
+        return pendingAttempts === 1
+          ? Promise.reject(new TypeError("Connection lost"))
+          : Promise.resolve(Response.json(TEST_SESSION_DETAIL));
+      }
+      return sessionResponse(input);
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+
+  try {
+    await controller.load();
+    controller.applyDetail({ ...TEST_SESSION_DETAIL, status: "running" });
+    controller.setFollowUp("Retry this input");
+
+    await controller.followUp();
+    await controller.followUp();
+
+    expect(requestIds).toHaveLength(2);
+    expect(requestIds[0]).toBe(requestIds[1]);
+    expect(controller.state.followUp).toBe("");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("a definitive pending-input rejection gets a new request ID", async () => {
+  const controller = createRoot(() => new SessionController());
+  const originalFetch = globalThis.fetch;
+  const requestIds: string[] = [];
+  let pendingAttempts = 0;
+  globalThis.fetch = Object.assign(
+    (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = requestUrl(input);
+      if (url.endsWith("/pending-inputs")) {
+        pendingAttempts += 1;
+        requestIds.push(requestId(init));
+        return Promise.resolve(
+          pendingAttempts === 1
+            ? Response.json({ error: "invalid_session_state" }, { status: 409 })
+            : Response.json(TEST_SESSION_DETAIL),
+        );
+      }
+      return sessionResponse(input);
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+
+  try {
+    await controller.load();
+    controller.applyDetail({ ...TEST_SESSION_DETAIL, status: "running" });
+    controller.setFollowUp("Retry after rejection");
+
+    await controller.followUp();
+    await controller.followUp();
+
+    expect(requestIds).toHaveLength(2);
+    expect(requestIds[0]).not.toBe(requestIds[1]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+// cpd-ignore-end
 
 test("renders incremental model deltas in the selected transcript", async () => {
   const controller = createRoot(() => new SessionController());

@@ -20,6 +20,18 @@ export interface AgentSessionUsageUpdate {
 type AgentSessionMessageRole =
   "user" | "assistant" | "tool" | "thinking" | "system" | "error";
 
+export type AgentSessionPendingInputKind = "follow_up" | "steer";
+
+// cpd-ignore-start -- Pending inputs and transcript messages intentionally share display fields.
+export interface AgentSessionPendingInput {
+  readonly content: string;
+  readonly createdAt: number;
+  readonly id: string;
+  readonly images: readonly AgentImage[];
+  readonly kind: AgentSessionPendingInputKind;
+}
+// cpd-ignore-end
+
 export interface AgentSessionMessage {
   readonly content: string;
   readonly createdAt: number;
@@ -57,4 +69,5 @@ export interface AgentSessionSummary {
 export interface AgentSessionDetail extends AgentSessionSummary {
   readonly agentFile: AgentFile | null;
   readonly messages: readonly AgentSessionMessage[];
+  readonly pendingInputs: readonly AgentSessionPendingInput[];
 }

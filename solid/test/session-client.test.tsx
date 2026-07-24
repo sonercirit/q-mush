@@ -302,8 +302,72 @@ test("renders the system prompt and model thinking in a transcript", () => {
     "{&quot;path&quot;:&quot;README.md&quot;,&quot;offset&quot;:1}",
   );
   expect(html).toContain("# Q Mush");
-  expect(html).toContain(">Continue</button>");
+  expect(html).toContain(">Continue<kbd");
 });
+
+// cpd-ignore-start -- SSR assertions deliberately repeat visible labels for each composer state.
+test("renders running queue actions, pending input types, and shortcut hints", () => {
+  const html = renderPanel({
+    ...SESSION_STATE,
+    detail: {
+      ...TEST_SESSION_DETAIL,
+      pendingInputs: [
+        {
+          content: "Wait for the current task",
+          createdAt: 3,
+          id: "pending-follow",
+          images: [TEST_AGENT_IMAGE],
+          kind: "follow_up",
+        },
+        {
+          content: "Use a smaller change",
+          createdAt: 4,
+          id: "pending-steer",
+          images: [],
+          kind: "steer",
+        },
+      ],
+      status: "running",
+    },
+    selectedId: TEST_SESSION_DETAIL.id,
+  });
+
+  expect(html).toContain("Follow up");
+  expect(html).toContain("Steer");
+  expect(html).toContain("Ctrl+Enter");
+  expect(html).toContain("Shift+Enter");
+  expect(html).not.toContain(">Send</button>");
+  expect(html).not.toContain(">Continue</button>");
+  expect(html).toContain("Queued follow up");
+  expect(html).toContain("Queued steer");
+  expect(html).toContain("Wait for the current task");
+  expect(html).toContain("Use a smaller change");
+});
+
+test("shows follow-up mode while queued and disables steering", () => {
+  const html = renderPanel({
+    ...SESSION_STATE,
+    detail: { ...TEST_SESSION_DETAIL, status: "queued" },
+    selectedId: TEST_SESSION_DETAIL.id,
+  });
+
+  expect(html).toContain("Follow up");
+  expect(html).toMatch(/<button[^>]*disabled[^>]*>[\s\S]*?Steer/u);
+  expect(html).not.toContain(">Send</span>");
+  expect(html).not.toContain(">Continue<kbd");
+});
+
+test("shows Shift+Enter on Continue while idle", () => {
+  const html = renderPanel({
+    ...SESSION_STATE,
+    detail: TEST_SESSION_DETAIL,
+    selectedId: TEST_SESSION_DETAIL.id,
+  });
+
+  expect(html).toContain("Continue");
+  expect(html).toContain("Shift+Enter");
+});
+// cpd-ignore-end
 
 test("renders image pickers, previews, and transcript images", () => {
   const state = sessionStateWithMessages(SESSION_STATE, [

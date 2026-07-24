@@ -100,9 +100,16 @@ export function retainUnchangedSessionData(
     ? current.agentFile
     : detail.agentFile;
   const messages = retainUnchangedMessages(current, orderedMessages);
+  const pendingInputs = serializedDataMatches(
+    current.pendingInputs,
+    detail.pendingInputs,
+  )
+    ? current.pendingInputs
+    : detail.pendingInputs;
   return agentFile !== detail.agentFile ||
+    pendingInputs !== detail.pendingInputs ||
     messages.some((message, index) => message !== detail.messages[index])
-    ? { ...detail, agentFile, messages }
+    ? { ...detail, agentFile, messages, pendingInputs }
     : detail;
 }
 

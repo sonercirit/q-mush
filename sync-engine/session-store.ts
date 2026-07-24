@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { readAgentFile, type AgentFile } from "../shared/agent-file.ts";
 import type { AgentImage } from "../shared/agent-images.ts";
 import type {
@@ -23,11 +23,26 @@ import type {
 import { activeSessionDuration } from "../shared/session-timing.ts";
 import { compactStoredConversation } from "./session-compaction.ts";
 import {
+  enqueuePendingInput,
+  settleNormalSessionBoundary,
+  storedPendingInputs,
+  takeSteeringInputs,
+  type EnqueuePendingInputResult,
+  type EnqueuePendingSessionInput,
+} from "./session-pending-inputs.ts";
+import { queuedSessionDetails } from "./session-queued.ts";
+import {
   conversationFromMessages,
   parseProviderPricing,
   storedSessionMessages,
   withInterruptedToolResults,
 } from "./session-store-read.ts";
+import {
+  activeSessionCondition,
+  orderedSessions,
+  runningCondition,
+  selectSessions,
+} from "./session-store-selection.ts";
 import {
   appendSpawnedSessionReport,
   parentSessionId,
@@ -68,33 +83,6 @@ export type QueueSessionResult =
   | { readonly status: "busy" }
   | { readonly status: "not_found" };
 
-interface SessionFilter {
-  readonly id?: string;
-  readonly status?: AgentSessionStatus;
-  readonly userId?: string;
-}
-
-function activeSessionCondition(filter: SessionFilter): SQL | undefined {
-  return and(
-    eq(agentSessions.isDeleted, false),
-    filter.id === undefined ? undefined : eq(agentSessions.id, filter.id),
-    filter.status === undefined
-      ? undefined
-      : eq(agentSessions.status, filter.status),
-    filter.userId === undefined
-      ? undefined
-      : eq(agentSessions.userId, filter.userId),
-  );
-}
-
-function runningCondition(sessionId: string, userId?: string): SQL | undefined {
-  return activeSessionCondition({
-    id: sessionId,
-    status: "running",
-    ...(userId === undefined ? {} : { userId }),
-  });
-}
-
 function requireStoredSession<Value>(stored: Value | undefined): Value {
   if (stored === undefined) {
     throw new Error("The agent session no longer exists");
@@ -110,31 +98,6 @@ const SESSION_TIMING_SELECTION = {
 
 function didUpdate(rows: readonly unknown[]): boolean {
   return rows.length > 0;
-}
-
-function sessionSelection() {
-  return {
-    activeDurationMs: agentSessions.activeDurationMs,
-    activeStartedAt: agentSessions.activeStartedAt,
-    autoCompact: agentSessions.autoCompact,
-    costBasis: agentSessions.costBasis,
-    costUsd: agentSessions.costUsd,
-    createdAt: agentSessions.createdAt,
-    credentialId: agentSessions.providerCredentialId,
-    currentContextTokens: agentSessions.currentContextTokens,
-    id: agentSessions.id,
-    maxContextTokens: agentSessions.maxContextTokens,
-    model: agentSessions.model,
-    provider: agentSessions.provider,
-    providerPricing: agentSessions.providerPricing,
-    reasoningEffort: agentSessions.reasoningEffort,
-    runnerId: agentSessions.runnerId,
-    status: agentSessions.status,
-    title: agentSessions.title,
-    tools: agentSessions.tools,
-    updatedAt: agentSessions.updatedAt,
-    workingDirectory: agentSessions.workingDirectory,
-  };
 }
 
 type StoredSessionSummary = Pick<
@@ -268,7 +231,10 @@ export class SessionStore {
   }
 
   get(userId: string, sessionId: string): AgentSessionDetail | undefined {
-    const stored = this.#selectSessions({ id: sessionId, userId }).get();
+    const stored = selectSessions(this.#database, {
+      id: sessionId,
+      userId,
+    }).get();
 
     if (stored === undefined) {
       return undefined;
@@ -281,14 +247,12 @@ export class SessionStore {
         storedSessionMessages(this.#database, sessionId),
         stored.status !== "queued" && stored.status !== "running",
       ),
+      pendingInputs: storedPendingInputs(this.#database, sessionId),
     };
   }
 
   list(userId: string): readonly AgentSessionSummary[] {
-    return this.#selectSessions({ userId })
-      .orderBy(desc(agentSessions.updatedAt), desc(agentSessions.id))
-      .all()
-      .map(summarizeSession);
+    return orderedSessions(this.#database, userId).all().map(summarizeSession);
   }
 
   conversation(sessionId: string): readonly AgentConversationMessage[] {
@@ -430,6 +394,41 @@ export class SessionStore {
     });
   }
 
+  enqueuePendingInput(
+    userId: string,
+    sessionId: string,
+    input: EnqueuePendingSessionInput,
+    now: number,
+  ): EnqueuePendingInputResult {
+    return enqueuePendingInput({
+      database: this.#database,
+      generateId: this.#resources[1],
+      input,
+      now,
+      sessionId,
+      userId,
+    });
+  }
+
+  takeSteeringInputs(
+    sessionId: string,
+    now: number,
+  ): readonly Extract<AgentConversationMessage, { readonly role: "user" }>[] {
+    return takeSteeringInputs({
+      database: this.#database,
+      now,
+      sessionId,
+    });
+  }
+
+  settleNormalBoundary(sessionId: string, now: number) {
+    return settleNormalSessionBoundary({
+      database: this.#database,
+      now,
+      sessionId,
+    });
+  }
+
   appendSpawnedSessionReport(
     userId: string,
     childId: string,
@@ -455,6 +454,12 @@ export class SessionStore {
   pendingSpawnedSessions(): readonly PendingSpawnedSession[] {
     return pendingSpawnedSessions(this.#database, (userId, sessionId) =>
       this.get(userId, sessionId),
+    );
+  }
+
+  queuedSessions(userId: string): readonly AgentSessionDetail[] {
+    return queuedSessionDetails(this.#database, userId, (ownerId, sessionId) =>
+      this.get(ownerId, sessionId),
     );
   }
 
@@ -629,13 +634,6 @@ export class SessionStore {
         .where(eq(agentSessions.id, sessionId))
         .run();
     });
-  }
-
-  #selectSessions(filter: SessionFilter) {
-    return this.#database
-      .select(sessionSelection())
-      .from(agentSessions)
-      .where(activeSessionCondition(filter));
   }
 
   #agentFile(sessionId: string): AgentFile | null {

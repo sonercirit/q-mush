@@ -4,29 +4,25 @@ Living project memory. Update it with durable information.
 
 ## Project Snapshot
 
-- Private strict-TypeScript ESM Bun/SolidJS project.
-- Source is split across `solid/`, `sync-engine/`, `runner/`, and `shared/`;
-  `sync-engine/index.ts` is the server entry point.
-- Tests live in `test/` directories; no `src/`.
-- Homepage `/`; app `/app`.
-- Tests use Vitest with Bun.
+- Private strict-TypeScript ESM Bun/SolidJS project; source is split across
+  `solid/`, `sync-engine/`, `runner/`, and `shared/`; `sync-engine/index.ts` is
+  the server entry point.
+- Tests live in `test/`; no `src`. Homepage `/`; app `/app`. Tests use Vitest
+  with Bun.
 
 ## Working Agreements
 
-- Inspect repository before edits.
-- Preserve existing patterns; add tools or dependencies only when needed.
+- Inspect before edits.
+- Preserve patterns; add tools or dependencies only when needed.
 - Practice TDD for behavior: first update a failing test, then implement and
   refactor while green.
-- Follow DRY (Don't Repeat Yourself): keep each piece of knowledge or logic in
-  one authoritative place, while avoiding premature abstractions.
-- Follow KISS (Keep It Simple, Stupid): prefer the simplest clear solution that
-  meets the requirements and avoid unnecessary complexity.
+- Follow DRY and KISS: keep logic authoritative, simple, and clear without
+  premature abstractions.
 - Follow local-first: keep data and core workflows on the user's machine by
   default, with remote services enhancing rather than gating functionality.
-- Run the narrowest relevant checks after each change, then broader checks when
-  practical.
-- Keep changes focused; do not modify unrelated files.
-- Never commit secrets, credentials, generated artifacts, or local env files.
+- Run narrow relevant checks after changes, then broader checks when practical.
+- Keep changes focused; avoid unrelated files.
+- Never commit secrets, credentials, generated artifacts, or env files.
 
 ## Setup and Commands
 
@@ -108,12 +104,16 @@ Living project memory. Update it with durable information.
   Runner tokens never appear in list responses.
 - Browser messages sort by time then ID. Live output anchors after the
   initiating message; snapshots replace it in place.
-- `sync-engine/sessions.ts` and `sync-engine/session-store.ts` persist coding
-  sessions. User messages support selecting or pasting up to eight 10 MB PNG,
-  JPEG, GIF, or WebP images, persisted with the transcript and sent as native
-  multimodal input. Sessions record cumulative active time, model cost
-  (including compaction), token usage, and the context limit. OpenRouter charges
-  are authoritative; others use captured/OpenAI estimates, with unknown prices
+- `sync-engine/sessions.ts` and `sync-engine/session-store.ts` persist sessions.
+  Pending input is an eight-item FIFO: follow-up while queued/running, steer
+  only while running. Exact retries replay; changed idempotency payloads
+  conflict. Steering enters on resume or after tool results; follow-up starts
+  the next turn. Inputs survive interruption; offline runners wait.
+  Ctrl/Command+Enter sends/follows up; Shift+Enter continues/steers. User
+  messages support up to eight 10 MB PNG, JPEG, GIF, or WebP images, persisted
+  and sent as native multimodal input. Sessions record active time, model cost
+  (including compaction), token usage, and context limit. OpenRouter charges are
+  authoritative; others use captured/OpenAI estimates, with unknown prices
   unavailable. OAuth figures are API equivalents, not subscription charges.
   Usage is yellow at 80% and red at 90%. Auto-compaction defaults on and
   summarizes completed history before the next request at 95%; idle sessions can
@@ -194,10 +194,9 @@ Living project memory. Update it with durable information.
   `knip.production.config.ts` limits the production graph to runtime source.
   `bun run knip` runs both production and comprehensive test/tooling passes, so
   tests cannot keep production code alive while unused test helpers still fail.
-- `.jscpd.json` maps all supported JavaScript and TypeScript extensions to the
-  TSX format for cross-extension detection; import declarations are ignored,
-  while other clones of at least 20 tokens and one line fail the zero-percent
-  threshold.
+- `.jscpd.json` maps JavaScript/TypeScript extensions to TSX for cross-extension
+  detection; imports and explicit `cpd-ignore` regions are ignored; other
+  20-token clones fail the zero-percent threshold.
 - `scripts/repository-check.ts` lists existing tracked and unignored files and
   calls the focused policy APIs under `scripts/`. It rejects files reaching
   20,000 Unicode code points (excluding `bun.lock` and the generated `drizzle/`

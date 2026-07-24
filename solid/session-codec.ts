@@ -300,8 +300,37 @@ function readMessage(value: unknown): AgentSessionMessage {
   };
 }
 
+// cpd-ignore-start -- Both wire records validate the same shared display fields.
+function readPendingInput(
+  value: unknown,
+): AgentSessionDetail["pendingInputs"][number] {
+  if (!isRecord(value)) {
+    throw new Error("The server returned an invalid pending session input");
+  }
+  const content = value["content"];
+  const createdAt = readFiniteNumber(value["createdAt"]);
+  const id = value["id"];
+  const images = readAgentImages(value["images"]);
+  const kind = value["kind"];
+  if (
+    typeof content !== "string" ||
+    createdAt === undefined ||
+    typeof id !== "string" ||
+    images === undefined ||
+    (kind !== "follow_up" && kind !== "steer")
+  ) {
+    throw new Error("The server returned an invalid pending session input");
+  }
+  return { content, createdAt, id, images, kind };
+}
+// cpd-ignore-end
+
 export function readSessionDetail(value: unknown): AgentSessionDetail {
-  if (!isRecord(value) || !Array.isArray(value["messages"])) {
+  if (
+    !isRecord(value) ||
+    !Array.isArray(value["messages"]) ||
+    !Array.isArray(value["pendingInputs"])
+  ) {
     throw new Error("The server returned invalid agent session details");
   }
 
@@ -309,6 +338,7 @@ export function readSessionDetail(value: unknown): AgentSessionDetail {
     ...readSummary(value),
     agentFile: readAgentFile(value["agentFile"]),
     messages: value["messages"].map(readMessage),
+    pendingInputs: value["pendingInputs"].map(readPendingInput),
   };
 }
 

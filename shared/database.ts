@@ -6,6 +6,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   agentMessages,
+  agentPendingInputs,
   agentSessions,
   providerCredentials,
   runners,
@@ -18,6 +19,7 @@ const MIGRATIONS_DIRECTORY = fileURLToPath(
 );
 const databaseSchema = {
   agentMessages,
+  agentPendingInputs,
   agentSessions,
   providerCredentials,
   runners,

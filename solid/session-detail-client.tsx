@@ -259,13 +259,56 @@ function isAtScrollEnd(element: HTMLElement): boolean {
   );
 }
 
+function PendingSessionInputs(props: {
+  readonly inputs: AgentSessionDetail["pendingInputs"];
+}): JSX.Element {
+  return (
+    <Show when={props.inputs.length > 0}>
+      <section
+        aria-label="Queued session input"
+        class="mt-5 rounded-2xl border border-amber-300/20 bg-amber-300/5 p-4"
+      >
+        <h4 class="text-sm font-semibold text-amber-200">Queued input</h4>
+        <ul class="mt-3 space-y-2">
+          {props.inputs.map((input) => (
+            <li class="rounded-xl border border-white/10 bg-slate-950/70 p-3">
+              <p class="text-xs font-semibold tracking-wide text-amber-200 uppercase">
+                {input.kind === "steer" ? "Queued steer" : "Queued follow up"}
+              </p>
+              <Show when={input.content.length > 0}>
+                <p class="mt-2 whitespace-pre-wrap text-sm text-slate-300">
+                  {input.content}
+                </p>
+              </Show>
+              <Show when={input.images.length > 0}>
+                <p class="mt-2 text-xs text-slate-500">
+                  {`${String(input.images.length)} attached image${input.images.length === 1 ? "" : "s"}`}
+                </p>
+              </Show>
+            </li>
+          ))}
+        </ul>
+      </section>
+    </Show>
+  );
+}
+
+function primaryShortcutLabel(platform: string): string {
+  return /Mac|iPhone|iPad|iPod/u.test(platform) ? "⌘+Enter" : "Ctrl+Enter";
+}
+
 function LoadedSessionDetail(props: {
   readonly controller: SessionController;
   readonly detail: AgentSessionDetail;
   readonly state: SessionViewState;
 }): JSX.Element {
-  const active = (): boolean =>
-    props.detail.status === "queued" || props.detail.status === "running";
+  const running = (): boolean => props.detail.status === "running";
+  const queued = (): boolean => props.detail.status === "queued";
+  const active = (): boolean => queued() || running();
+  const [primaryShortcut, setPrimaryShortcut] = createSignal<{
+    readonly keys: string;
+    readonly label: string;
+  }>({ keys: "Control+Enter", label: "Ctrl+Enter" });
   const [scrollLockEnabled, setScrollLockEnabled] = createSignal(true);
   const [transcript, setTranscript] = createSignal<HTMLUListElement>();
   const scrollToEnd = (): void => {
@@ -285,7 +328,14 @@ function LoadedSessionDetail(props: {
     }
   };
 
-  onMount(scrollToEnd);
+  onMount(() => {
+    const label = primaryShortcutLabel(navigator.platform);
+    setPrimaryShortcut({
+      keys: label === "⌘+Enter" ? "Meta+Enter" : "Control+Enter",
+      label,
+    });
+    scrollToEnd();
+  });
   createEffect(on(() => scrollRevision(props.detail), scrollToEnd));
 
   return (
@@ -346,8 +396,9 @@ function LoadedSessionDetail(props: {
           tools={props.detail.tools}
         />
       </ul>
-      <Show when={!active()}>
-        <div class="mt-5 flex flex-col gap-3">
+      <PendingSessionInputs inputs={props.detail.pendingInputs} />
+      <div class="mt-5 flex flex-col gap-3">
+        <Show when={!active()}>
           <CompactionControls
             autoCompact={props.detail.autoCompact}
             compacting={props.state.compacting}
@@ -358,31 +409,82 @@ function LoadedSessionDetail(props: {
               void props.controller.toggleAutoCompact(enabled);
             }}
           />
-          <div class="flex gap-3">
-            <SessionFollowUp
-              images={props.state.followUpImages}
-              onAddImages={(files) => {
-                void props.controller.addImages(files, true);
-              }}
-              onInput={(value) => {
-                props.controller.setFollowUp(value);
-              }}
-              onKeyDown={(event) => {
-                if (event.ctrlKey && event.key === "Enter") {
+        </Show>
+        {/* cpd-ignore-start -- Each action keeps its explicit controller operation and shortcut. */}
+        <div class="flex gap-3">
+          <SessionFollowUp
+            actions={
+              active()
+                ? [
+                    // cpd-ignore-start -- Action objects intentionally keep explicit controller operations.
+                    {
+                      label: "Follow up",
+                      onClick: () => {
+                        void props.controller.followUp();
+                      },
+                      shortcut: primaryShortcut().label,
+                      shortcutKeys: primaryShortcut().keys,
+                    },
+                    {
+                      disabled: queued(),
+                      label: "Steer",
+                      onClick: () => {
+                        void props.controller.steer();
+                      },
+                      shortcut: "Shift+Enter",
+                      shortcutKeys: "Shift+Enter",
+                    },
+                  ]
+                : [
+                    {
+                      label: "Send",
+                      onClick: () => {
+                        void props.controller.send();
+                      },
+                      shortcut: primaryShortcut().label,
+                      shortcutKeys: primaryShortcut().keys,
+                    },
+                    // cpd-ignore-end
+                  ]
+            }
+            images={props.state.followUpImages}
+            onAddImages={(files) => {
+              void props.controller.addImages(files, true);
+            }}
+            onInput={(value) => {
+              props.controller.setFollowUp(value);
+            }}
+            onKeyDown={(event) => {
+              if (event.isComposing || event.key !== "Enter") {
+                return;
+              }
+              if (event.shiftKey) {
+                if (!queued()) {
                   event.preventDefault();
-                  event.currentTarget.form?.requestSubmit();
+                  if (running()) {
+                    void props.controller.steer();
+                  } else {
+                    void props.controller.continueSession();
+                  }
                 }
-              }}
-              onRemoveImage={(index) => {
-                props.controller.removeImage(index, "followUp");
-              }}
-              onSubmit={() => {
-                void props.controller.send();
-              }}
-              prompt={props.state.followUp}
-              sending={props.state.sending}
-            />
+              } else if (event.ctrlKey || event.metaKey) {
+                event.preventDefault();
+                if (active()) {
+                  void props.controller.followUp();
+                } else {
+                  void props.controller.send();
+                }
+              }
+            }}
+            onRemoveImage={(index) => {
+              props.controller.removeImage(index, "followUp");
+            }}
+            prompt={props.state.followUp}
+            sending={props.state.sending}
+          />
+          <Show when={!active()}>
             <button
+              aria-keyshortcuts="Shift+Enter"
               class="self-end rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950"
               disabled={props.state.sending}
               onClick={() => {
@@ -391,10 +493,12 @@ function LoadedSessionDetail(props: {
               type="button"
             >
               Continue
+              <kbd class="ml-2 text-xs font-normal opacity-70">Shift+Enter</kbd>
             </button>
-          </div>
+          </Show>
         </div>
-      </Show>
+        {/* cpd-ignore-end */}
+      </div>
     </div>
   );
 }

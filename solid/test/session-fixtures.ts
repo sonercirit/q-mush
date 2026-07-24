@@ -14,6 +14,7 @@ export const TEST_SESSION_DETAIL: AgentSessionDetail = {
   id: "session-1",
   maxContextTokens: 200_000,
   messages: [],
+  pendingInputs: [],
   model: "gpt-5-codex",
   provider: "openai",
   providerPricing: null,

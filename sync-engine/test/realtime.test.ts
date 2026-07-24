@@ -80,6 +80,7 @@ function sessions(
     message: () => Promise.resolve(new Response()),
     models: () => Promise.resolve(new Response()),
     onChange: () => undefined,
+    pendingInput: () => Promise.resolve(new Response()),
     runnerConnected: () => undefined,
     stop: () => Promise.resolve(new Response()),
     ...overrides,
@@ -197,8 +198,8 @@ test("recovers and wakes completed child callbacks when a runner connects", () =
       }),
     },
     {
-      runnerConnected: () => {
-        connectedUsers.push(USER.id);
+      runnerConnected: (userId) => {
+        connectedUsers.push(userId);
       },
     },
   );

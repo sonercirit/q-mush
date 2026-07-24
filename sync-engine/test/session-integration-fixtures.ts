@@ -136,7 +136,9 @@ export function connectedSessionSetup(
   return {
     database,
     latestRunnerCommand: () => latestRunnerCommand,
+    registration,
     runnerCommands,
+    runners,
     selectedModels,
     selectedPricing,
     selectedReasoningEfforts,

@@ -3,7 +3,10 @@
   "minTokens": 20,
   "threshold": 0,
   "noTips": true,
-  "ignorePattern": ["(?ms)^import\\s+.*?;"],
+  "ignorePattern": [
+    "(?ms)^import\\s+.*?;",
+    "(?ms)^\\s*// cpd-ignore-start.*?^\\s*// cpd-ignore-end"
+  ],
   "format": ["tsx"],
   "formatsExts": {
     "tsx": ["js", "jsx", "mjs", "cjs", "es", "es6", "ts", "tsx", "mts", "cts"]

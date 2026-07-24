@@ -94,6 +94,7 @@ export interface AgentLoopOptions {
   readonly executeTool: (call: ParsedAgentToolCall) => Promise<string>;
   readonly initialMessages: readonly AgentConversationMessage[];
   readonly model: AgentModel;
+  readonly takeInitialSteeringMessages?: AgentLoopOptions["takeSteeringMessages"];
   readonly prepareMessages?: (
     messages: readonly AgentConversationMessage[],
     signal?: AbortSignal,
@@ -108,6 +109,11 @@ export interface AgentLoopOptions {
     readonly costBasis: "estimated" | "reported" | null;
     readonly costUsd: number | null;
   }) => Promise<void> | void;
+  readonly takeSteeringMessages?: () =>
+    | Promise<
+        readonly Extract<AgentConversationMessage, { readonly role: "user" }>[]
+      >
+    | readonly Extract<AgentConversationMessage, { readonly role: "user" }>[];
   readonly signal?: AbortSignal;
 }
 
@@ -130,6 +136,11 @@ export async function runAgentLoop(
   options: AgentLoopOptions,
 ): Promise<readonly AgentConversationMessage[]> {
   let messages = [...options.initialMessages];
+  const initialSteering = await options.takeInitialSteeringMessages?.();
+  throwIfAborted(options.signal);
+  if (initialSteering !== undefined && initialSteering.length > 0) {
+    messages.push(...initialSteering);
+  }
 
   for (;;) {
     throwIfAborted(options.signal);
@@ -168,30 +179,39 @@ export async function runAgentLoop(
     }
     messages.push(assistantMessage);
 
-    if (turn.toolCalls.length === 0) {
-      return messages;
+    if (turn.toolCalls.length > 0) {
+      for (const call of turn.toolCalls) {
+        throwIfAborted(options.signal);
+        const arguments_ = parseArguments(call.arguments);
+        const output =
+          arguments_ === undefined
+            ? INVALID_ARGUMENTS_MESSAGE
+            : await options.executeTool({
+                arguments: arguments_,
+                id: call.id,
+                name: call.name,
+              });
+        throwIfAborted(options.signal);
+        const toolMessage: AgentConversationMessage = {
+          content: output,
+          role: "tool",
+          toolCallId: call.id,
+          toolName: call.name,
+        };
+        await options.recordMessage(toolMessage);
+        messages.push(toolMessage);
+      }
     }
 
-    for (const call of turn.toolCalls) {
-      throwIfAborted(options.signal);
-      const arguments_ = parseArguments(call.arguments);
-      const output =
-        arguments_ === undefined
-          ? INVALID_ARGUMENTS_MESSAGE
-          : await options.executeTool({
-              arguments: arguments_,
-              id: call.id,
-              name: call.name,
-            });
-      throwIfAborted(options.signal);
-      const toolMessage: AgentConversationMessage = {
-        content: output,
-        role: "tool",
-        toolCallId: call.id,
-        toolName: call.name,
-      };
-      await options.recordMessage(toolMessage);
-      messages.push(toolMessage);
+    const steering = await options.takeSteeringMessages?.();
+    throwIfAborted(options.signal);
+    if (steering !== undefined && steering.length > 0) {
+      messages.push(...steering);
+      continue;
+    }
+
+    if (turn.toolCalls.length === 0) {
+      return messages;
     }
   }
 }

@@ -30,15 +30,12 @@ import type { RealtimeHub } from "./realtime-hub.ts";
 import type { RunnerIntegration } from "./runners.ts";
 import { SessionAgentActions } from "./session-agent-actions.ts";
 import type { AgentModelFactory } from "./session-agent-models.ts";
-import {
-  compactSessionConversation,
-  runSessionAgent,
-} from "./session-agent-runtime.ts";
 import { unavailableSessionResponse } from "./session-availability.ts";
 import {
   startManualSessionCompaction,
   updateSessionCompactionMode,
 } from "./session-compaction-actions.ts";
+import { runStoredSession } from "./session-execution.ts";
 import {
   readCreateSession,
   readPrompt,
@@ -47,7 +44,8 @@ import {
   type CreateSessionInput,
   type PromptInput,
 } from "./session-input.ts";
-import { sessionModelRuntime } from "./session-model-runtime.ts";
+import { handlePendingInputRequest } from "./session-pending-input-request.ts";
+import { launchQueuedSessions } from "./session-queued-launcher.ts";
 import {
   SessionRequestHelpers,
   readIdentifier,
@@ -118,17 +116,9 @@ export interface SessionIntegration {
   message(request: Request, sessionId: string): Promise<Response>;
   models(request: Request): Promise<Response>;
   onChange(listener: (userId: string, sessionId: string) => void): void;
-  runnerConnected(): void;
+  pendingInput(request: Request, sessionId: string): Promise<Response>;
+  runnerConnected(userId: string): void;
   stop(request: Request, sessionId: string): Promise<Response>;
-}
-
-function safeErrorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : "Unknown error";
-  return `Session failed: ${message.slice(0, 500)}`;
-}
-
-function isAbort(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "AbortError";
 }
 
 class DrizzleSessionIntegration implements SessionIntegration {
@@ -310,9 +300,39 @@ class DrizzleSessionIntegration implements SessionIntegration {
     this.#onChange.add(listener);
   }
 
-  runnerConnected(): void {
-    this.#actions.reportAll(this.#store.pendingSpawnedSessions());
+  pendingInput(request: Request, sessionId: string): Promise<Response> {
+    return handlePendingInputRequest(
+      {
+        authenticate: (input, method, action) =>
+          this.#requests.authenticate(input, method, action),
+        notify: this.#notify,
+        now: this.#now,
+        store: this.#store,
+      },
+      request,
+      sessionId,
+    );
   }
+
+  runnerConnected(userId: string): void {
+    this.#actions.reportAll(this.#store.pendingSpawnedSessions());
+    void launchQueuedSessions(
+      {
+        draining: () => this.#runtimes.draining,
+        launch: (detail, credential, ownerId) =>
+          this.#launch(detail, credential, ownerId),
+        notify: this.#notify,
+        readCredential: (ownerId, detail, action) =>
+          this.#withCredentialAccess(ownerId, detail, action),
+        runnerIsAvailable: (ownerId, runnerId) =>
+          this.#runners.runnerIsAvailable(ownerId, runnerId),
+        runtimes: this.#runtimes,
+        store: this.#store,
+      },
+      userId,
+    );
+  }
+
   async stop(request: Request, sessionId: string): Promise<Response> {
     return this.#requests.postForUser(request, (user) =>
       this.#withStoredSession(user, sessionId, (existing) => {
@@ -569,32 +589,6 @@ class DrizzleSessionIntegration implements SessionIntegration {
     });
   }
 
-  #notifyFinished(detail: AgentSessionDetail, userId: string): void {
-    this.#notify(userId, detail.id);
-    this.#actions.finished(detail, userId);
-  }
-
-  #finish(detail: AgentSessionDetail, userId: string, error?: unknown): void {
-    const current = this.#store.get(userId, detail.id);
-    if (current?.status === "stopped") {
-      this.#notifyFinished(detail, userId);
-      return;
-    }
-    if (error !== undefined) {
-      this.#store.appendErrorMessage(
-        detail.id,
-        safeErrorMessage(error),
-        this.#now(),
-      );
-    }
-    this.#store.mark(
-      detail.id,
-      error === undefined ? "idle" : "failed",
-      this.#now(),
-    );
-    this.#notifyFinished(detail, userId);
-  }
-
   async #run(
     detail: AgentSessionDetail,
     credential: ProviderCredentialAccess,
@@ -602,37 +596,27 @@ class DrizzleSessionIntegration implements SessionIntegration {
     controller: AbortController,
     compact: boolean,
   ): Promise<void> {
-    if (!this.#store.mark(detail.id, "running", this.#now())) {
-      return;
-    }
-    this.#notify(userId, detail.id);
-
-    try {
-      const runtime = sessionModelRuntime(
-        {
-          actions: this.#actions,
-          braveSearch: this.#braveSearch,
-          broker: this.#broker,
-          modelFactory: this.#modelFactory,
-          now: this.#now,
-          notify: this.#notify,
-          realtime: this.#realtime,
-          store: this.#store,
-        },
-        detail,
-        credential,
-        userId,
-        controller,
-      );
-      await (compact
-        ? compactSessionConversation(runtime)
-        : runSessionAgent(runtime));
-      this.#finish(detail, userId);
-    } catch (error) {
-      if (!controller.signal.aborted && !isAbort(error)) {
-        this.#finish(detail, userId, error);
-      }
-    }
+    await runStoredSession(
+      {
+        actions: this.#actions,
+        braveSearch: this.#braveSearch,
+        broker: this.#broker,
+        launch: (queued, selectedCredential, ownerId) =>
+          this.#launch(queued, selectedCredential, ownerId),
+        modelFactory: this.#modelFactory,
+        notify: this.#notify,
+        now: this.#now,
+        realtime: this.#realtime,
+        runners: this.#runners,
+        runtimes: this.#runtimes,
+        store: this.#store,
+      },
+      detail,
+      credential,
+      userId,
+      controller,
+      compact,
+    );
   }
 }
 

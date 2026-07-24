@@ -11,6 +11,7 @@ import {
 import { isRecord } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
 import { MAXIMUM_RUNNER_PATH_LENGTH } from "../shared/runner-directory-model.ts";
+import type { AgentSessionPendingInputKind } from "../shared/session-model.ts";
 import { readIdentifier, readStringField } from "./session-request-helpers.ts";
 import type { CreateAgentSession } from "./session-store.ts";
 
@@ -94,6 +95,32 @@ export function readCreateSession(
 export interface PromptInput {
   readonly images: NonNullable<ReturnType<typeof readAgentImages>>;
   readonly prompt: string;
+}
+
+export function readPendingInput(value: unknown):
+  | {
+      readonly clientRequestId: string;
+      readonly content: string;
+      readonly images: PromptInput["images"];
+      readonly kind: AgentSessionPendingInputKind;
+    }
+  | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const clientRequestId = readIdentifier(value["clientRequestId"]);
+  const kind = value["kind"];
+  const message = promptInput(value);
+  return clientRequestId === undefined ||
+    (kind !== "follow_up" && kind !== "steer") ||
+    message === undefined
+    ? undefined
+    : {
+        clientRequestId,
+        content: message.prompt,
+        images: message.images,
+        kind,
+      };
 }
 
 export function readPrompt(value: unknown): PromptInput | undefined {

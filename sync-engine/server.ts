@@ -330,6 +330,8 @@ export function createRequestHandler(
                 return sessions.continue(request, sessionId);
               case "messages":
                 return sessions.message(request, sessionId);
+              case "pending-inputs":
+                return sessions.pendingInput(request, sessionId);
               case "stop":
                 return sessions.stop(request, sessionId);
               case undefined:

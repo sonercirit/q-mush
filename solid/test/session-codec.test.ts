@@ -33,6 +33,35 @@ test("reads message image metadata from the server", () => {
   ).toThrow("invalid session message");
 });
 
+test("reads pending follow-up and steering inputs", () => {
+  const pendingInputs = [
+    {
+      content: "Wait until idle",
+      createdAt: 4,
+      id: "pending-1",
+      images: [TEST_AGENT_IMAGE],
+      kind: "follow_up",
+    },
+    {
+      content: "Adjust now",
+      createdAt: 5,
+      id: "pending-2",
+      images: [],
+      kind: "steer",
+    },
+  ] as const;
+
+  expect(readSessionDetail({ ...DETAIL, pendingInputs }).pendingInputs).toEqual(
+    pendingInputs,
+  );
+  expect(() =>
+    readSessionDetail({
+      ...DETAIL,
+      pendingInputs: [{ ...pendingInputs[0], kind: "later" }],
+    }),
+  ).toThrow("invalid pending session input");
+});
+
 test("reads persisted session error messages", () => {
   const error = {
     content: "The provider connection failed",

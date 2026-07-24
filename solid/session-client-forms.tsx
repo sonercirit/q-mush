@@ -20,10 +20,16 @@ interface SessionPromptInputProps extends PromptEventProps, SessionImagesProps {
 }
 
 interface SessionFollowUpProps extends PromptEventProps, SessionImagesProps {
+  readonly actions: readonly {
+    readonly disabled?: boolean;
+    readonly label: string;
+    readonly onClick: () => void;
+    readonly shortcut: string;
+    readonly shortcutKeys: string;
+  }[];
   readonly onKeyDown: (
     event: KeyboardEvent & { readonly currentTarget: HTMLTextAreaElement },
   ) => void;
-  readonly onSubmit: () => void;
   readonly prompt: string;
   readonly sending: boolean;
 }
@@ -88,13 +94,7 @@ export function SessionPromptInput(
 
 export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
   return (
-    <form
-      class="flex min-w-0 flex-1 flex-col gap-3"
-      onSubmit={(event) => {
-        event.preventDefault();
-        props.onSubmit();
-      }}
-    >
+    <div class="flex min-w-0 flex-1 flex-col gap-3">
       <textarea
         class="min-h-20 w-full resize-y rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none"
         disabled={props.sending}
@@ -109,13 +109,22 @@ export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
         id: "follow-up-images",
         ...props,
       })}
-      <button
-        class="self-end rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:opacity-50"
-        disabled={props.sending}
-        type="submit"
-      >
-        {props.sending ? "Sending…" : "Send"}
-      </button>
-    </form>
+      <div class="flex justify-end gap-2">
+        {props.actions.map((action) => (
+          <button
+            aria-keyshortcuts={action.shortcutKeys}
+            class="rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:opacity-50"
+            disabled={props.sending || action.disabled === true}
+            onClick={action.onClick}
+            type="button"
+          >
+            <span>{props.sending ? "Sending…" : action.label}</span>
+            <kbd class="ml-2 text-xs font-normal opacity-70">
+              {action.shortcut}
+            </kbd>
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }

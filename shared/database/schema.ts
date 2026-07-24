@@ -173,13 +173,42 @@ export const agentSessions = sqliteTable(
   ],
 );
 
+function sessionReferenceColumn() {
+  return text("session_id")
+    .notNull()
+    .references(() => agentSessions.id, { onDelete: "restrict" });
+}
+
+// cpd-ignore-start -- The pending-input and transcript schemas deliberately share durable message fields.
+export const agentPendingInputs = sqliteTable(
+  "agent_pending_inputs",
+  {
+    ...ownedAuditColumns(),
+    sessionId: sessionReferenceColumn(),
+    clientRequestId: text("client_request_id").notNull(),
+    kind: text("kind", { enum: ["follow_up", "steer"] }).notNull(),
+    content: text("content").notNull(),
+    images: text("images"),
+  },
+  (table) => [
+    index("agent_pending_inputs_session_deletion_creation_index").on(
+      table.sessionId,
+      table.isDeleted,
+      table.createdAt,
+    ),
+    uniqueIndex("agent_pending_inputs_user_request_unique").on(
+      table.userId,
+      table.clientRequestId,
+    ),
+  ],
+);
+// cpd-ignore-end
+
 export const agentMessages = sqliteTable(
   "agent_messages",
   {
     ...ownedAuditColumns(),
-    sessionId: text("session_id")
-      .notNull()
-      .references(() => agentSessions.id, { onDelete: "restrict" }),
+    sessionId: sessionReferenceColumn(),
     role: text("role", {
       enum: ["user", "assistant", "tool", "thinking", "system", "error"],
     }).notNull(),
