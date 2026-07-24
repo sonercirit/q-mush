@@ -1,4 +1,5 @@
-import { describe, expect, test } from "vitest";
+import { eq } from "drizzle-orm";
+import { describe, expect, test, vi } from "vitest";
 import {
   createdAuditFields,
   softDeletedAuditFields,
@@ -155,6 +156,45 @@ function setup(): {
   };
 }
 
+function setupWithSourceSessions(...ids: string[]): {
+  readonly database: AppDatabase;
+  readonly store: SessionCredentialReassignmentStore;
+} {
+  const scenario = setup();
+  insertSourceSessions(scenario.database, ...ids);
+  return scenario;
+}
+
+function createTrigger(
+  database: AppDatabase,
+  name: string,
+  body: string,
+): void {
+  database.$client.run(`
+    CREATE TRIGGER ${name}
+    BEFORE UPDATE OF provider_credential_id ON agent_sessions
+    BEGIN
+      ${body}
+    END
+  `);
+}
+
+function reassignOpenAi(
+  store: SessionCredentialReassignmentStore,
+  now = MIGRATED_AT,
+) {
+  return store.reassign(USER_ID, "openai", OPENAI_TARGET, now);
+}
+
+function expectMigratedCount(
+  store: SessionCredentialReassignmentStore,
+  count: number,
+): void {
+  expect(reassignOpenAi(store)).toEqual({
+    migratedSessionCount: count,
+  });
+}
+
 function storedSessions(database: AppDatabase) {
   return database.select().from(agentSessions).all();
 }
@@ -271,9 +311,7 @@ describe("session credential reassignment store", () => {
     const before = findSession(storedSessions(database), "preserved-session");
     const defaultsBefore = credentialDefaults(database);
 
-    expect(
-      scenario.store.reassign(USER_ID, "openai", OPENAI_TARGET, MIGRATED_AT),
-    ).toEqual({ migratedSessionCount: 1 });
+    expectMigratedCount(scenario.store, 1);
     const after = findSession(storedSessions(database), "preserved-session");
 
     expect(after).toEqual({
@@ -302,10 +340,12 @@ describe("session credential reassignment store", () => {
       migratedSessionCount: 0,
     });
     expect(migrate(OPENAI_SOURCE, MIGRATED_AT + 2)).toEqual(changed);
-    expect(findSession(storedSessions(database), "session")).toMatchObject({
-      providerCredentialId: OPENAI_SOURCE,
-      updatedAt: new Date(MIGRATED_AT + 2),
-    });
+    expect(findSession(storedSessions(database), "session")).toEqual(
+      expect.objectContaining({
+        providerCredentialId: OPENAI_SOURCE,
+        updatedAt: new Date(MIGRATED_AT + 2),
+      }),
+    );
     database.$client.close();
   });
 
@@ -333,22 +373,54 @@ describe("session credential reassignment store", () => {
     database.$client.close();
   });
 
+  test("serializes validation with credential deletion", () => {
+    const scenario = setupWithSourceSessions("rollback-session");
+    createTrigger(
+      scenario.database,
+      "delete_target_during_reassignment",
+      `DELETE FROM provider_credentials WHERE id = '${OPENAI_TARGET}';`,
+    );
+
+    expect(() => reassignOpenAi(scenario.store)).toThrow(
+      "FOREIGN KEY constraint failed",
+    );
+    const restored = findSession(
+      storedSessions(scenario.database),
+      "rollback-session",
+    );
+    expect(restored?.providerCredentialId).toBe(OPENAI_SOURCE);
+    expect(restored?.updatedAt).toEqual(new Date(NOW));
+    expect(
+      scenario.database
+        .select({ isDeleted: providerCredentials.isDeleted })
+        .from(providerCredentials)
+        .where(eq(providerCredentials.id, OPENAI_TARGET))
+        .get(),
+    ).toEqual({ isDeleted: false });
+    scenario.database.$client.close();
+  });
+
+  test("starts an immediate transaction before target validation", () => {
+    const { database, store } = setupWithSourceSessions("immediate-session");
+    const transaction = vi.spyOn(database, "transaction");
+
+    expectMigratedCount(store, 1);
+    expect(transaction).toHaveBeenCalledOnce();
+    expect(transaction.mock.calls[0]?.[1]).toEqual({ behavior: "immediate" });
+    database.$client.close();
+  });
+
   test("rolls back the set-based update when SQLite rejects a row", () => {
-    const { database, store } = setup();
-    insertSourceSessions(database, "first", "second");
-    database.$client.run(`
-      CREATE TRIGGER fail_session_reassignment
-      BEFORE UPDATE OF provider_credential_id ON agent_sessions
-      WHEN OLD.id = 'second'
-      BEGIN
-        SELECT RAISE(ABORT, 'induced failure');
-      END
-    `);
+    const { database, store } = setupWithSourceSessions(
+      "first",
+      "trigger-second",
+    );
+    const failedTrigger =
+      "SELECT CASE WHEN OLD.id = 'trigger-second' THEN RAISE(ABORT, 'induced failure') END;";
+    createTrigger(database, "fail_session_reassignment", failedTrigger);
     const before = storedSessions(database);
 
-    expect(() =>
-      store.reassign(USER_ID, "openai", OPENAI_TARGET, MIGRATED_AT),
-    ).toThrow("induced failure");
+    expect(() => reassignOpenAi(store)).toThrow("induced failure");
     expect(storedSessions(database)).toEqual(before);
     database.$client.close();
   });

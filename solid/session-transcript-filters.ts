@@ -18,6 +18,18 @@ export interface SessionTranscriptFilterStorage {
   setItem(key: string, value: string): void;
 }
 
+export function browserTranscriptFilterStorage():
+  SessionTranscriptFilterStorage | undefined {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
 const SESSION_TRANSCRIPT_FILTER_STORAGE_KEY =
   "q-mush.session-transcript-filters.v1";
 

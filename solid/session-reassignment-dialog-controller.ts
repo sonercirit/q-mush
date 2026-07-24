@@ -9,19 +9,13 @@ export interface SessionReassignmentDialogState {
 
 export class SessionReassignmentDialogController {
   readonly #readState: Accessor<SessionReassignmentDialogState | undefined>;
-  readonly #setState: (
-    state: SessionReassignmentDialogState | undefined,
-  ) => void;
   readonly #writeState: Setter<SessionReassignmentDialogState | undefined>;
 
-  constructor(
-    setState: (state: SessionReassignmentDialogState | undefined) => void,
-  ) {
+  constructor() {
     const [readState, writeState] = createSignal<
       SessionReassignmentDialogState | undefined
     >();
     this.#readState = readState;
-    this.#setState = setState;
     this.#writeState = writeState;
   }
 
@@ -30,7 +24,9 @@ export class SessionReassignmentDialogController {
   }
 
   open(credential: ProviderCredential): void {
-    this.#replace({ credential, error: undefined, pending: false });
+    if (this.state?.pending !== true) {
+      this.#replace({ credential, error: undefined, pending: false });
+    }
   }
 
   close(): void {
@@ -66,8 +62,11 @@ export class SessionReassignmentDialogController {
     this.#replace(undefined);
   }
 
+  reset(): void {
+    this.#replace(undefined);
+  }
+
   #replace(state: SessionReassignmentDialogState | undefined): void {
     this.#writeState(() => state);
-    this.#setState(state);
   }
 }

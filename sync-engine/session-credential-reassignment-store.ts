@@ -21,41 +21,48 @@ export class SessionCredentialReassignmentStore {
     credentialId: string,
     now: number,
   ): SessionCredentialReassignmentResult | undefined {
-    return this.#database.transaction((transaction) => {
-      const target = transaction.query.providerCredentials
-        .findFirst({
-          columns: { id: true },
-          where: and(
-            eq(providerCredentials.id, credentialId),
-            eq(providerCredentials.userId, userId),
-            eq(providerCredentials.provider, provider),
-            eq(providerCredentials.isDeleted, false),
-          ),
-        })
-        .sync();
+    return this.#database.transaction(
+      (transaction) => {
+        const target = transaction.query.providerCredentials
+          .findFirst({
+            columns: { id: true },
+            where: and(
+              eq(providerCredentials.id, credentialId),
+              eq(providerCredentials.userId, userId),
+              eq(providerCredentials.provider, provider),
+              eq(providerCredentials.isDeleted, false),
+            ),
+          })
+          .sync();
 
-      if (target === undefined) {
-        return undefined;
-      }
+        if (target === undefined) {
+          return undefined;
+        }
 
-      const migrated = transaction
-        .update(agentSessions)
-        .set({
-          providerCredentialId: credentialId,
-          ...updatedAuditFields(userId, now),
-        })
-        .where(
-          and(
-            eq(agentSessions.userId, userId),
-            eq(agentSessions.provider, provider),
-            eq(agentSessions.isDeleted, false),
-            ne(agentSessions.providerCredentialId, credentialId),
-          ),
-        )
-        .returning({ migratedId: agentSessions.id })
-        .all();
-
-      return { migratedSessionCount: migrated.length };
-    });
+        transaction
+          .update(agentSessions)
+          .set({
+            providerCredentialId: credentialId,
+            ...updatedAuditFields(userId, now),
+          })
+          .where(
+            and(
+              eq(agentSessions.userId, userId),
+              eq(agentSessions.provider, provider),
+              eq(agentSessions.isDeleted, false),
+              ne(agentSessions.providerCredentialId, credentialId),
+            ),
+          )
+          .run();
+        const migratedSessionCount = this.#database.$client
+          .query<{ changes: number }, []>("SELECT changes() AS changes")
+          .get()?.changes;
+        if (migratedSessionCount === undefined) {
+          throw new Error("SQLite did not return the reassignment count");
+        }
+        return { migratedSessionCount };
+      },
+      { behavior: "immediate" },
+    );
   }
 }

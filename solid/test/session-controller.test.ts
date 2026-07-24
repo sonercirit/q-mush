@@ -104,11 +104,15 @@ async function withRestoredFetch(action: () => Promise<void>): Promise<void> {
   }
 }
 
+function requestPath(input: RequestInfo | URL): string {
+  return new URL(requestUrl(input), "http://localhost").pathname;
+}
+
 function detailResponse(
   detail: AgentSessionDetail,
   input: RequestInfo | URL,
 ): Response {
-  const path = new URL(requestUrl(input), "http://localhost").pathname;
+  const path = requestPath(input);
   return Response.json(
     path === SESSIONS_PATH ? { sessions: [summaryFromDetail(detail)] } : detail,
   );
@@ -339,7 +343,7 @@ test("keeps per-session streams isolated across rapid selection changes", async 
   const pending = new Map<string, (response: Response) => void>();
   const originalFetch = globalThis.fetch;
   installFetch((input) => {
-    const path = new URL(requestUrl(input), "http://localhost").pathname;
+    const path = requestPath(input);
     const sessionId = path.slice(path.lastIndexOf("/") + 1);
     return new Promise((resolve) => {
       pending.set(sessionId, resolve);
@@ -458,6 +462,14 @@ test.each(["compact", "continueSession", "stop", "toggleAutoCompact"] as const)(
   },
 );
 
+function resolvedResponse(value: unknown): Promise<Response> {
+  return Promise.resolve(Response.json(value));
+}
+
+function createSessionController(): SessionController {
+  return createRoot(() => new SessionController());
+}
+
 function changedSessionDetail(credentialId: string) {
   return {
     ...TEST_SESSION_DETAIL,
@@ -466,25 +478,72 @@ function changedSessionDetail(credentialId: string) {
   };
 }
 
-test("refreshes the list and selected detail after an aggregate credential change", async () => {
+function migratedDetail() {
+  return changedSessionDetail("credential-target");
+}
+
+test("refreshes one list and one selected detail after an aggregate credential change", async () => {
+  const migrated = migratedDetail();
   await withRestoredFetch(async () => {
-    const migrated = changedSessionDetail("credential-target");
     let requests = 0;
     installFetch((input) => {
       requests += 1;
       return Promise.resolve(detailResponse(migrated, input));
     });
-    const controller = createRoot(() => new SessionController());
-    await controller.select(TEST_SESSION_DETAIL.id);
+    const controller = createSessionController();
+    const selected = controller.select(TEST_SESSION_DETAIL.id);
+    await selected;
     requests = 0;
 
     await controller.refresh();
 
     expect(requests).toBe(2);
-    expect(controller.state.sessions?.[0]?.credentialId).toBe(
-      "credential-target",
-    );
-    expect(controller.state.detail?.credentialId).toBe("credential-target");
+    expect([
+      controller.state.detail?.credentialId,
+      controller.state.sessions?.[0]?.credentialId,
+    ]).toEqual(["credential-target", "credential-target"]);
+  });
+});
+
+test("keeps a live detail newer than a concurrent aggregate refresh", async () => {
+  const migrated = migratedDetail();
+  const live = {
+    ...migratedDetail(),
+    messages: [
+      transcriptMessage("live-message", "Live output", "assistant", 3),
+    ],
+    updatedAt: migrated.updatedAt + 1,
+  };
+  await withRestoredFetch(async () => {
+    let resolveList: ((response: Response) => void) | undefined;
+    const list = new Promise<Response>((resolve) => {
+      resolveList = resolve;
+    });
+    let resolveDetail: ((response: Response) => void) | undefined;
+    const detail = new Promise<Response>((resolve) => {
+      resolveDetail = resolve;
+    });
+    let detailRequests = 0;
+    installFetch((input) => {
+      if (requestPath(input) === SESSIONS_PATH) {
+        return list;
+      }
+      detailRequests += 1;
+      return detailRequests === 1
+        ? resolvedResponse(TEST_SESSION_DETAIL)
+        : detail;
+    });
+    const controller = createSessionController();
+    await controller.select(TEST_SESSION_DETAIL.id);
+    const refresh = controller.refresh();
+    controller.applyDetail(live);
+    resolveList?.(Response.json({ sessions: [summaryFromDetail(migrated)] }));
+    resolveDetail?.(Response.json(migrated));
+    await refresh;
+
+    expect(detailRequests).toBe(2);
+    expect(controller.state.detail).toEqual(live);
+    expect(controller.state.sessions?.[0]).toEqual(summaryFromDetail(live));
   });
 });
 

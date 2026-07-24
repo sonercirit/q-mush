@@ -70,10 +70,12 @@ function dialog(container: ParentNode): HTMLElement {
   return found;
 }
 
-function deferredResponse(): {
+interface DeferredResponse {
   readonly promise: Promise<Response>;
   readonly resolve: (response: Response) => void;
-} {
+}
+
+function deferredResponse(): DeferredResponse {
   let resolve: ((response: Response) => void) | undefined;
   const promise = new Promise<Response>((available) => {
     resolve = available;
@@ -82,6 +84,10 @@ function deferredResponse(): {
     throw new Error("The response promise was not initialized");
   }
   return { promise, resolve };
+}
+
+function installDeferredFetch(request: DeferredResponse): void {
+  vi.spyOn(globalThis, "fetch").mockImplementation(() => request.promise);
 }
 
 function clearMountedViews(): void {
@@ -180,9 +186,8 @@ function expectRecoverableDialog(container: ParentNode): void {
 
 test("posts once to the dedicated endpoint, validates the result, and reports counts", async () => {
   const request = deferredResponse();
-  const fetch = vi
-    .spyOn(globalThis, "fetch")
-    .mockImplementation(() => request.promise);
+  installDeferredFetch(request);
+  const fetch = vi.mocked(globalThis.fetch);
   const { container } = mount();
   openReassignment(container);
   confirmReassignment(container);
@@ -209,6 +214,35 @@ test("posts once to the dedicated endpoint, validates the result, and reports co
   request.resolve(Response.json({ migratedSessionCount: 2 }));
   await expectText(container, "2 sessions switched to this account.");
   expect(container.querySelector("[role='dialog']")).toBeNull();
+});
+
+test("does not restore reassignment state after a workspace reset", async () => {
+  const request = deferredResponse();
+  installDeferredFetch(request);
+  const { container, controller } = mount();
+  const confirm = controller.confirmSessionReassignment.bind(controller);
+  let reassignment: Promise<void> | undefined;
+  vi.spyOn(controller, "confirmSessionReassignment").mockImplementation(
+    async (dialog) => {
+      reassignment = confirm(dialog);
+      await reassignment;
+    },
+  );
+  openReassignment(container);
+  confirmReassignment(container);
+  if (reassignment === undefined) {
+    throw new Error("The reassignment request was not started");
+  }
+
+  controller.reset();
+  expect(container.querySelector("[role='dialog']")).toBeNull();
+  request.resolve(Response.json({ migratedSessionCount: 3 }));
+  await reassignment;
+
+  expect(controller.state).toEqual(createProviderViewState(undefined));
+  expect(container.textContent).not.toContain(
+    "3 sessions switched to this account.",
+  );
 });
 
 test("reports zero honestly and keeps invalid or failed responses recoverable", async () => {

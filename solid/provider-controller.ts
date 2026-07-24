@@ -24,6 +24,12 @@ function initialProviderState(): ProviderViewState {
 export class ProviderController {
   readonly #configuration: ProviderPanelConfiguration;
   readonly #view: ReactiveState<ProviderViewState>;
+  #pendingSessionReassignment:
+    | {
+        readonly dialog: SessionReassignmentDialogController;
+        readonly revision: number;
+      }
+    | undefined;
   #revision = 0;
 
   constructor(
@@ -67,6 +73,8 @@ export class ProviderController {
       return;
     }
 
+    const revision = this.#revision;
+    this.#pendingSessionReassignment = { dialog, revision };
     dialog.pending();
     try {
       const result = readSessionCredentialReassignmentResult(
@@ -84,16 +92,29 @@ export class ProviderController {
       );
       const count = result.migratedSessionCount;
       dialog.succeeded();
-      this.#patch({
-        sessionReassignmentNotice:
-          count === 0
-            ? "No sessions needed switching; they already use this account."
-            : `${String(count)} ${count === 1 ? "session" : "sessions"} switched to this account.`,
-      });
+      if (revision === this.#revision) {
+        this.#patch({
+          sessionReassignmentNotice:
+            count === 0
+              ? "No sessions needed switching; they already use this account."
+              : `${String(count)} ${count === 1 ? "session" : "sessions"} switched to this account.`,
+        });
+      }
     } catch {
-      dialog.failed(
-        `We could not switch your ${this.#configuration.name} sessions. Please try again.`,
-      );
+      if (revision === this.#revision) {
+        dialog.failed(
+          `We could not switch your ${this.#configuration.name} sessions. Please try again.`,
+        );
+      } else {
+        dialog.succeeded();
+      }
+    } finally {
+      if (
+        revision === this.#revision &&
+        this.#pendingSessionReassignment.revision === revision
+      ) {
+        this.#pendingSessionReassignment = undefined;
+      }
     }
   }
 
@@ -134,13 +155,9 @@ export class ProviderController {
 
   reset(): void {
     this.#revision += 1;
+    this.#pendingSessionReassignment?.dialog.reset();
+    this.#pendingSessionReassignment = undefined;
     this.#replace(initialProviderState());
-  }
-
-  setSessionReassignment(
-    sessionReassignment: ProviderViewState["sessionReassignment"],
-  ): void {
-    this.#patch({ sessionReassignment });
   }
 
   setDefault(credentialId: string): Promise<void> {

@@ -11,10 +11,7 @@ import { RemovalButton } from "./client-controls.tsx";
 import { Collection } from "./collection.tsx";
 import { DefaultableActions } from "./defaultable-actions.tsx";
 import { renderDebugBoundary } from "./render-debug.tsx";
-import {
-  SessionReassignmentDialogController,
-  type SessionReassignmentDialogState,
-} from "./session-reassignment-dialog-controller.ts";
+import { SessionReassignmentDialogController } from "./session-reassignment-dialog-controller.ts";
 import { SessionReassignmentDialog } from "./session-reassignment-dialog.tsx";
 
 type BrowserProviderId = "brave-search" | "openai" | "openrouter";
@@ -32,7 +29,6 @@ interface ProviderViewStateBase {
   readonly error: string | undefined;
   readonly removingId: string | undefined;
   readonly savePending: boolean;
-  readonly sessionReassignment: SessionReassignmentDialogState | undefined;
   readonly sessionReassignmentNotice: string | undefined;
   readonly settingDefaultId: string | undefined;
 }
@@ -45,7 +41,6 @@ export function createProviderViewState(
     error: undefined,
     removingId: undefined,
     savePending: false,
-    sessionReassignment: undefined,
     sessionReassignmentNotice: undefined,
     settingDefaultId: undefined,
   };
@@ -310,11 +305,7 @@ export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
   const [form, setForm] = createSignal<HTMLFormElement>();
   const [reassignmentTrigger, setReassignmentTrigger] =
     createSignal<HTMLElement>();
-  const reassignmentDialog = new SessionReassignmentDialogController(
-    (value) => {
-      props.controller.setSessionReassignment(value);
-    },
-  );
+  const reassignmentDialog = new SessionReassignmentDialogController();
 
   return (
     <section
@@ -470,7 +461,4 @@ interface ProviderPanelController {
   ): Promise<void>;
   remove(credentialId: string): Promise<void>;
   setDefault(credentialId: string): Promise<void>;
-  setSessionReassignment(
-    state: SessionReassignmentDialogState | undefined,
-  ): void;
 }

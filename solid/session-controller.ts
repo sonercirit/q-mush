@@ -13,6 +13,7 @@ import { RevisionState } from "./revision-state.ts";
 import type { SessionViewState } from "./session-client.tsx";
 import { readSessionDetail, readSessionList } from "./session-codec.ts";
 import {
+  mergeNewerSelectedSessionSummary,
   replaceSessionSummary,
   retainUnchangedSessionData,
   selectedSessionCredential,
@@ -37,6 +38,7 @@ import {
   mostRecentSessionDirectory,
 } from "./session-state.ts";
 import {
+  browserTranscriptFilterStorage,
   readSessionTranscriptFilters,
   writeSessionTranscriptFilters,
   type SessionTranscriptFilterName,
@@ -64,18 +66,6 @@ function sessionIsActive(status: AgentSessionStatus): boolean {
 
 function sessionCanResume(status: AgentSessionStatus): boolean {
   return status === "idle" || status === "failed" || status === "stopped";
-}
-
-function browserTranscriptFilterStorage():
-  SessionTranscriptFilterStorage | undefined {
-  if (typeof window === "undefined") {
-    return undefined;
-  }
-  try {
-    return window.localStorage;
-  } catch {
-    return undefined;
-  }
 }
 
 function selectedMutation(
@@ -303,7 +293,29 @@ export class SessionController {
   }
 
   async refresh(): Promise<void> {
-    await this.#loadSessions(this.#view.revision, false);
+    const revision = this.#view.revision;
+    const selectedId = this.#view.value.selectedId;
+    const detailRequest =
+      selectedId === undefined
+        ? undefined
+        : this.#readDetailValue(selectedId, revision);
+    await this.#loadSessions(revision, false);
+    if (
+      detailRequest === undefined ||
+      !this.#view.isCurrent(revision) ||
+      this.#view.value.selectedId !== selectedId
+    ) {
+      return;
+    }
+    const refreshed = await detailRequest;
+    if (
+      refreshed !== undefined &&
+      this.#view.isCurrent(revision) &&
+      this.#view.value.selectedId === selectedId &&
+      (this.#view.value.detail?.updatedAt ?? -1) <= refreshed.updatedAt
+    ) {
+      this.#applyReadDetail(refreshed, false);
+    }
   }
 
   reset(): void {
@@ -329,17 +341,22 @@ export class SessionController {
         previousId !== undefined && sessions.some(({ id }) => id === previousId)
           ? previousId
           : sessions[0]?.id;
+      const visibleSessions = mergeNewerSelectedSessionSummary(
+        sessions,
+        selectedId,
+        this.#view.value.detail,
+      );
 
       if (
         selectedId !== this.#view.value.selectedId ||
-        !sessionDataMatches(this.#view.value.sessions, sessions)
+        !sessionDataMatches(this.#view.value.sessions, visibleSessions)
       ) {
         this.#patchDraft({
-          workingDirectory: mostRecentSessionDirectory(sessions),
+          workingDirectory: mostRecentSessionDirectory(visibleSessions),
         });
         this.#view.patch({
           selectedId,
-          sessions,
+          sessions: visibleSessions,
         });
       }
 
@@ -347,8 +364,8 @@ export class SessionController {
         if (this.#view.value.detail !== undefined) {
           this.#view.patch({ detail: undefined });
         }
-      } else {
-        await this.#readDetail(selectedId, revision, initial);
+      } else if (initial) {
+        await this.#readDetail(selectedId, revision, true);
       }
     } catch {
       if (initial) {
@@ -427,6 +444,41 @@ export class SessionController {
     }
   }
 
+  async #readDetailValue(
+    sessionId: string,
+    revision: number,
+  ): Promise<AgentSessionDetail | undefined> {
+    try {
+      const detail = readSessionDetail(
+        await requestJson(`${SESSIONS_PATH}/${encodeURIComponent(sessionId)}`),
+      );
+      return this.#view.isCurrent(revision) &&
+        this.#view.value.selectedId === sessionId
+        ? detail
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  #applyReadDetail(detail: AgentSessionDetail, showLoading: boolean): void {
+    const detailState = this.#detailState(detail, {
+      loadingDetail: false,
+    });
+
+    if (
+      !showLoading &&
+      !this.#view.value.loadingDetail &&
+      sessionDataMatches(this.#view.value.detail, detail) &&
+      sessionDataMatches(this.#view.value.sessions, detailState.sessions)
+    ) {
+      return;
+    }
+
+    this.#view.patch(detailState);
+    this.#realtime.applyDetail(detail);
+  }
+
   async #readDetail(
     sessionId: string,
     revision: number,
@@ -436,35 +488,14 @@ export class SessionController {
       this.#view.patch({ detail: undefined, loadingDetail: true });
     }
 
-    try {
-      const detail = readSessionDetail(
-        await requestJson(`${SESSIONS_PATH}/${encodeURIComponent(sessionId)}`),
-      );
-
-      if (this.#view.value.selectedId === sessionId) {
-        const detailState = this.#detailState(detail, {
-          loadingDetail: false,
-        });
-
-        if (
-          !showLoading &&
-          !this.#view.value.loadingDetail &&
-          sessionDataMatches(this.#view.value.detail, detail) &&
-          sessionDataMatches(this.#view.value.sessions, detailState.sessions)
-        ) {
-          return;
-        }
-
-        this.#view.patchCurrent(revision, detailState);
-        this.#realtime.applyDetail(detail);
-      }
-    } catch {
-      if (showLoading) {
-        this.#view.patchCurrent(revision, {
-          error: "We could not load that session transcript.",
-          loadingDetail: false,
-        });
-      }
+    const detail = await this.#readDetailValue(sessionId, revision);
+    if (detail !== undefined) {
+      this.#applyReadDetail(detail, showLoading);
+    } else if (showLoading && this.#view.isCurrent(revision)) {
+      this.#view.patch({
+        error: "We could not load that session transcript.",
+        loadingDetail: false,
+      });
     }
   }
 

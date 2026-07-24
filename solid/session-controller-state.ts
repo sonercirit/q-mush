@@ -42,6 +42,20 @@ export function replaceSessionSummary(
   );
 }
 
+export function mergeNewerSelectedSessionSummary(
+  sessions: readonly AgentSessionSummary[],
+  selectedId: string | undefined,
+  detail: AgentSessionDetail | undefined,
+): readonly AgentSessionSummary[] {
+  const selectedDetail = detail?.id === selectedId ? detail : undefined;
+  const fetched = sessions.find(({ id }) => id === selectedId);
+  return selectedDetail !== undefined &&
+    fetched !== undefined &&
+    selectedDetail.updatedAt > fetched.updatedAt
+    ? replaceSessionSummary(sessions, selectedDetail)
+    : sessions;
+}
+
 function serializedDataMatches(left: unknown, right: unknown): boolean {
   return left === right || JSON.stringify(left) === JSON.stringify(right);
 }
