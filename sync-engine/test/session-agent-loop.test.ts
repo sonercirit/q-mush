@@ -69,7 +69,7 @@ describe("compacting agent session loop", () => {
       },
       {
         content: "Done after compaction.",
-        contextTokens: 2_000,
+        contextTokens: 96_000,
         costUsd: 0.25,
         toolCalls: [],
       },
@@ -209,11 +209,10 @@ describe("compacting agent session loop", () => {
       highTurn("First phase done."),
       {
         content: "Progress after the handoff.",
-        contextTokens: 2_000,
+        contextTokens: 96_000,
         toolCalls: [firstToolCall],
       },
       highTurn("Second phase done."),
-      { content: "All done.", contextTokens: 1_000, toolCalls: [] },
     ]);
     const summaries: string[] = [];
     const compactedConversations: unknown[] = [];
@@ -238,7 +237,7 @@ describe("compacting agent session loop", () => {
       toolCallId: "call-2",
       toolName: "read",
     });
-    expect(model.requests[3]).toEqual([
+    expect(model.requests[2]).toEqual([
       { content: secondSummary, role: "user" },
     ]);
     expect(summaries).toEqual([firstSummary, secondSummary]);
