@@ -30,12 +30,44 @@ function expectParallelRecipients(
   });
 }
 
+test("defines page_fetch as a selectable browser-rendered page tool", () => {
+  const definition = AGENT_TOOLS.find(
+    ({ function: tool }) => tool.name === "page_fetch",
+  );
+  const option = AGENT_SESSION_TOOL_OPTIONS.find(
+    ({ name }) => name === "page_fetch",
+  );
+
+  expect(definition).toMatchObject({
+    function: {
+      name: "page_fetch",
+      parameters: {
+        additionalProperties: false,
+        properties: {
+          timeout: { maximum: 120, minimum: 1, type: "integer" },
+          url: { type: "string" },
+        },
+        required: ["url"],
+        type: "object",
+      },
+    },
+    type: "function",
+  });
+  expect(definition?.function.description).toContain("JavaScript");
+  expect(option).toMatchObject({
+    classification: "runner_tool",
+    label: "Fetch page",
+    name: "page_fetch",
+  });
+});
+
 test("lets parallel call every tool and skill except itself by default", () => {
   expectParallelRecipients(AGENT_TOOLS, [
     "read",
     "bash",
     "edit",
     "write",
+    "page_fetch",
     "brave_search",
     ...SESSION_AGENT_TOOL_NAMES,
   ]);
@@ -100,12 +132,18 @@ test("derives picker metadata and classifications from every tool definition", (
 });
 
 test("limits parallel calls to enabled tools and skills", () => {
-  const tools = selectedAgentTools(["read", "parallel", "brave_search"]);
+  const tools = selectedAgentTools([
+    "read",
+    "parallel",
+    "page_fetch",
+    "brave_search",
+  ]);
 
   expect(tools.map(({ function: definition }) => definition.name)).toEqual([
     "read",
+    "page_fetch",
     "parallel",
     "brave_search",
   ]);
-  expectParallelRecipients(tools, ["read", "brave_search"]);
+  expectParallelRecipients(tools, ["read", "page_fetch", "brave_search"]);
 });

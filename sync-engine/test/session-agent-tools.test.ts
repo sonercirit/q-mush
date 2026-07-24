@@ -108,13 +108,30 @@ async function waitForParentContent(
   );
 }
 
+async function takeRunnerCommand(
+  setup: Awaited<ReturnType<typeof startToolSession>>,
+  predicate: (command: Record<string, unknown>) => boolean,
+): Promise<unknown> {
+  return waitForSessionValue(
+    () => setup.runnerCommands.shift(),
+    (value) => (isRecord(value) ? predicate(value) : false),
+  );
+}
+
+async function waitForRunnerTool(
+  setup: Awaited<ReturnType<typeof startToolSession>>,
+  tool: string,
+): Promise<unknown> {
+  return takeRunnerCommand(setup, (command) => command["tool"] === tool);
+}
+
 async function waitForRunnerSession(
   setup: Awaited<ReturnType<typeof startToolSession>>,
   sessionId: string,
 ): Promise<void> {
-  await waitForSessionValue(
-    () => setup.runnerCommands.shift(),
-    (value) => isRecord(value) && value["sessionId"] === sessionId,
+  await takeRunnerCommand(
+    setup,
+    (command) => command["sessionId"] === sessionId,
   );
 }
 
@@ -136,7 +153,11 @@ function completeChildAgentFile(
   setup: Awaited<ReturnType<typeof startToolSession>>,
 ): void {
   expect(
-    setup.sessions.completeRunnerCommand(RUNNER_ID, RUNNER_COMMAND_ID, "null"),
+    setup.sessions.completeRunnerCommand(
+      RUNNER_ID,
+      setup.latestRunnerCommand()?.id ?? RUNNER_COMMAND_ID,
+      "null",
+    ),
   ).toBe(true);
 }
 
@@ -222,6 +243,84 @@ describe("session agent tools", () => {
     expect(output).toContain("Inspect README.md");
     expect(parallelSetup.runnerCommands).toEqual([]);
     parallelSetup.database.$client.close();
+  });
+
+  test("dispatches page_fetch directly and safely through parallel", async () => {
+    const model = scriptedModel([
+      {
+        content: "Fetching rendered pages.",
+        toolCalls: [toolCall("page_fetch", { url: "https://example.com" })],
+      },
+      {
+        content: "Fetching more pages.",
+        toolCalls: [
+          toolCall("parallel", {
+            tool_uses: [
+              {
+                parameters: { url: "https://example.com/one" },
+                recipient_name: "page_fetch",
+              },
+              {
+                parameters: { url: "https://example.com/two" },
+                recipient_name: "page_fetch",
+              },
+            ],
+          }),
+        ],
+      },
+      { content: "Page fetches complete.", toolCalls: [] },
+    ]);
+    expect(model.requests).toEqual([]);
+    const setup = await startToolSession(model);
+    const direct = await waitForRunnerTool(setup, "page_fetch");
+    expect(direct).toMatchObject({
+      arguments: { url: "https://example.com" },
+      tool: "page_fetch",
+    });
+    expect(
+      setup.sessions.completeRunnerCommand(
+        RUNNER_ID,
+        `${RUNNER_COMMAND_ID}-2`,
+        '{"title":"Example"}',
+      ),
+    ).toBe(true);
+
+    const parallelCommands = await waitForSessionValue(
+      () => {
+        const commands = setup.runnerCommands.splice(0);
+        return commands.length === 2 ? commands : undefined;
+      },
+      (value) =>
+        Array.isArray(value) &&
+        value.length === 2 &&
+        value.every(
+          (command) => isRecord(command) && command["tool"] === "page_fetch",
+        ),
+    );
+    expect(parallelCommands).toMatchObject([
+      { tool: "page_fetch" },
+      { tool: "page_fetch" },
+    ]);
+    expect(
+      setup.sessions.completeRunnerCommand(
+        RUNNER_ID,
+        `${RUNNER_COMMAND_ID}-3`,
+        '{"title":"One"}',
+      ),
+    ).toBe(true);
+    expect(
+      setup.sessions.completeRunnerCommand(
+        RUNNER_ID,
+        `${RUNNER_COMMAND_ID}-4`,
+        '{"title":"Two"}',
+      ),
+    ).toBe(true);
+
+    const detail = await completedParentDetail(setup, "idle");
+    expect(findToolResultContent(detail, "page_fetch")).toContain("Example");
+    expect(findToolResultContent(detail, "parallel")).toContain("One");
+    expect(findToolResultContent(detail, "parallel")).toContain("Two");
+    setup.database.$client.close();
   });
 
   test("sends to, continues, and stops owned sessions", async () => {

@@ -11,6 +11,7 @@ import {
   executeParallelCall,
   mapWithParallelConcurrency,
 } from "../shared/parallel.ts";
+import { fetchRenderedPage } from "./page-fetch.ts";
 import {
   resolveRunnerWorkspace,
   runnerPathIsWithin,
@@ -481,9 +482,13 @@ type RunnerTool = (
   signal?: AbortSignal,
 ) => Promise<string>;
 
+const pageFetchTool: RunnerTool = (_root, arguments_, signal) =>
+  fetchRenderedPage(arguments_, signal);
+
 const RUNNER_TOOLS: Readonly<Record<BaseAgentToolName, RunnerTool>> = {
   bash: bashTool,
   edit: editTool,
+  page_fetch: pageFetchTool,
   read: readTool,
   write: writeTool,
 };

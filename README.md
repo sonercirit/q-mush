@@ -166,31 +166,34 @@ a positive timeout; Q Mush supplies no default or configured maximum. It exposes
 Pi's four base tool interfaces—`read`, `bash`, `edit`, and `write`—plus a
 `parallel` wrapper for at least two independent calls and the server-side
 `brave_search` skill for current web results, with batched exact edits and
-bounded file and command output. `parallel` has no application-defined call
-count maximum: a small worker pool bounds simultaneous execution while every
-accepted call runs and results retain input order. Each selectable tool and
-skill has an accessible info control showing its authoritative description,
-classification, and parameter schema. Brave Search tries the signed-in user's
-saved keys in order when a key is rejected, rate limited, or temporarily
-unavailable. Transcripts show system instructions, complete tool definitions,
-reasoning summaries, tool calls, and tool results. Transcript prose renders as
-Markdown, fenced code is syntax-colored, and structured tool arguments/results
-are pretty-printed with colorized JSON. Context use includes a percentage, turns
-yellow at 80%, and red at 90%. The session list and transcript header also show
-cumulative active runtime across all runs plus cumulative model cost.
-OpenRouter's provider-reported charge is shown as **Cost**; otherwise Q Mush
-shows **Estimated cost** from detailed token usage and the model pricing
-captured at session creation (or its built-in OpenAI per-token rate table). When
-supported pricing or usage is unavailable, cost is shown as unavailable rather
-than zero. OpenAI connected-account estimates are API-equivalent reference
-prices; subscription billing can differ. Automatic compaction is enabled per
-session by default and replaces completed history with a model-generated handoff
-summary before the next request after usage reaches 95%; automatic and manual
-compaction model calls are included in cumulative cost. It can be turned off,
-and a ready session can be compacted manually. Session transcripts and status
-survive page reloads; a ready, stopped, or failed session accepts follow-up
-instructions. **Stop session** aborts the model request and cancels an active
-runner command.
+bounded file and command output. `page_fetch` opens one HTTP(S) page in a fresh,
+credential-free Chromium profile, waits for JavaScript rendering, and returns
+bounded metadata, readable text, and resolved links; install Chromium/Chrome on
+the runner or set `Q_MUSH_CHROMIUM_EXECUTABLE` to its executable path.
+`parallel` has no application-defined call count maximum: a small worker pool
+bounds simultaneous execution while every accepted call runs and results retain
+input order. Each selectable tool and skill has an accessible info control
+showing its authoritative description, classification, and parameter schema.
+Brave Search tries the signed-in user's saved keys in order when a key is
+rejected, rate limited, or temporarily unavailable. Transcripts show system
+instructions, complete tool definitions, reasoning summaries, tool calls, and
+tool results. Transcript prose renders as Markdown, fenced code is
+syntax-colored, and structured tool arguments/results are pretty-printed with
+colorized JSON. Context use includes a percentage, turns yellow at 80%, and red
+at 90%. The session list and transcript header also show cumulative active
+runtime across all runs plus cumulative model cost. OpenRouter's
+provider-reported charge is shown as **Cost**; otherwise Q Mush shows
+**Estimated cost** from detailed token usage and the model pricing captured at
+session creation (or its built-in OpenAI per-token rate table). When supported
+pricing or usage is unavailable, cost is shown as unavailable rather than zero.
+OpenAI connected-account estimates are API-equivalent reference prices;
+subscription billing can differ. Automatic compaction is enabled per session by
+default and replaces completed history with a model-generated handoff summary
+before the next request after usage reaches 95%; automatic and manual compaction
+model calls are included in cumulative cost. It can be turned off, and a ready
+session can be compacted manually. Session transcripts and status survive page
+reloads; a ready, stopped, or failed session accepts follow-up instructions.
+**Stop session** aborts the model request and cancels an active runner command.
 
 The runner executes tools with the runner process's local account permissions.
 File tools reject paths outside the selected workspace, while shell commands are

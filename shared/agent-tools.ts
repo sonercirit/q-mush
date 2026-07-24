@@ -123,6 +123,25 @@ const BASE_AGENT_TOOLS = [
     },
     required: ["path", "content"],
   }),
+  toolDefinition({
+    description:
+      "Fetch one credential-free HTTP/HTTPS page in a fresh Chromium profile after JavaScript rendering. Returns final URL, status, title, metadata, readable rendered text, resolved links, and truncation metadata.",
+    name: "page_fetch",
+    properties: {
+      timeout: {
+        description: "Timeout in seconds (1-120; defaults to 30)",
+        maximum: 120,
+        minimum: 1,
+        type: "integer",
+      },
+      url: {
+        description:
+          "Absolute HTTP or HTTPS page URL without credentials or a fragment",
+        ...STRING_PARAMETER,
+      },
+    },
+    required: ["url"],
+  }),
 ] as const;
 
 const SESSION_ID_PARAMETER = {
@@ -319,6 +338,7 @@ const AGENT_TOOL_LABELS: Readonly<Record<AgentSessionToolName, string>> = {
   continue_session: "Continue session",
   edit: "Edit files",
   list_sessions: "List sessions",
+  page_fetch: "Fetch page",
   parallel: "Parallel calls",
   read: "Read files",
   read_session: "Read session",

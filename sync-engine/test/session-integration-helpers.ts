@@ -50,7 +50,10 @@ export async function expectRunnerCommand(
     throw new Error(missingMessage);
   }
 
-  expect(command).toEqual(expected);
+  expect(command).toEqual({
+    ...expected,
+    id: setup.latestRunnerCommand()?.id ?? expected.id,
+  });
 }
 
 export function completeRunnerCommand(
@@ -76,7 +79,7 @@ export async function completeAgentFileLookup(
     setup,
     {
       arguments: {},
-      id: RUNNER_COMMAND_ID,
+      id: setup.latestRunnerCommand()?.id ?? RUNNER_COMMAND_ID,
       sessionId: SESSION_ID,
       tool: RUNNER_AGENT_FILE_COMMAND,
       workingDirectory: "/work/project",

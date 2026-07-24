@@ -128,30 +128,31 @@ Living project memory; update durable information.
   session. Grouped session tools spawn non-blocking child sessions, manage owned
   sessions, report each child's final message to its parent, and resume an idle
   parent when its report arrives. `parallel` accepts 2+ tools or skills, has no
-  count cap, and uses four ordered workers with bounded output. Picker details
-  come from canonical schemas. `solid/session-transcript.tsx` renders prompts,
-  tool definitions, Markdown, code/JSON, diffs, and results. The session list
-  paginates ten at a time. The control center manages live sessions through
-  `solid/realtime-client.ts`, `solid/session-client.tsx`, and
-  `solid/session-controller.ts`. Model deltas are combined per session once per
-  animation frame; snapshots and other events remain immediate. Unchanged
-  snapshots suppress notifications, and keyed messages preserve identity so only
-  the affected message rerenders. The long-lived Solid root preserves focus and
-  scroll. The transcript starts and returns to the bottom when messages or the
-  agent file change. `sync-engine/agent-model-discovery.ts` queries provider
-  model metadata; `shared/agent-configuration.ts` owns catalog types and
-  fallbacks. New sessions default to the online runner and model credential,
-  then the first entry. The working directory uses the latest session; models
-  use the first option and maximum reasoning effort. Model choices show all
-  provider and Q Mush-supported input/output modalities.
-  `solid/custom-select.tsx` searches then paginates lists over ten items, ten
-  per page. It opens on the selected page, resets/clamps pages, and owns
-  accessible keyboard/focus. `shared/agent-prompt.ts` builds the model system
-  prompt and its transcript display. Reasoning summaries persist as `thinking`
-  messages but are excluded from replay. Session and transcript rows live in
-  `agent_sessions` and `agent_messages`; interrupted processes mark active
-  sessions failed so they can be resumed. Rebuilt conversations add error
-  results for interrupted tool calls only on resume.
+  count cap, and uses four ordered workers with bounded output. `page_fetch`
+  renders a Chromium page. Picker details come from canonical schemas.
+  `solid/session-transcript.tsx` renders prompts, tool definitions, Markdown,
+  code/JSON, diffs, and results. The session list paginates ten at a time. The
+  control center manages live sessions through `solid/realtime-client.ts`,
+  `solid/session-client.tsx`, and `solid/session-controller.ts`. Model deltas
+  are combined per session once per animation frame; snapshots and other events
+  remain immediate. Unchanged snapshots suppress notifications, and keyed
+  messages preserve identity so only the affected message rerenders. The
+  long-lived Solid root preserves focus and scroll. The transcript starts and
+  returns to the bottom when messages or the agent file change.
+  `sync-engine/agent-model-discovery.ts` queries provider model metadata;
+  `shared/agent-configuration.ts` owns catalog types and fallbacks. New sessions
+  default to the online runner and model credential, then the first entry. The
+  working directory uses the latest session; models use the first option and
+  maximum reasoning effort. Model choices show all provider and Q Mush-supported
+  input/output modalities. `solid/custom-select.tsx` searches then paginates
+  lists over ten items, ten per page. It opens on the selected page,
+  resets/clamps pages, and owns accessible keyboard/focus.
+  `shared/agent-prompt.ts` builds the model system prompt and its transcript
+  display. Reasoning summaries persist as `thinking` messages but are excluded
+  from replay. Session and transcript rows live in `agent_sessions` and
+  `agent_messages`; interrupted processes mark active sessions failed so they
+  can be resumed. Rebuilt conversations add error results for interrupted tool
+  calls only on resume.
 
 - `sync-engine/openai.ts` and `sync-engine/openrouter.ts` implement provider
   connections. Multiple OAuth or manual credentials live in

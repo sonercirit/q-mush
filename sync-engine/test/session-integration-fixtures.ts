@@ -93,8 +93,12 @@ export function connectedSessionSetup(
   const selectedTools: (readonly AgentSessionToolName[])[] = [];
   const runnerCommands: RunnerToolCommand[] = [];
   let latestRunnerCommand: RunnerToolCommand | undefined;
+  let commandSequence = 0;
   const broker = new RunnerCommandBroker({
-    commandId: () => RUNNER_COMMAND_ID,
+    commandId: () => {
+      commandSequence += 1;
+      return `${RUNNER_COMMAND_ID}-${String(commandSequence)}`;
+    },
     deliver: (_runnerId, command) => {
       latestRunnerCommand = command;
       runnerCommands.push(command);
