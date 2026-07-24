@@ -10,7 +10,6 @@ import type { SessionStore } from "./session-store.ts";
 export interface SessionReassignmentDependencies {
   readonly store: Pick<SessionStore, "reassign">;
   readonly authenticate: SessionRequestAuthenticator;
-  readonly runnerIsAvailable: (userId: string, runnerId: string) => boolean;
   readonly notify: (userId: string, sessionId: string) => void;
   readonly now: () => number;
 }
@@ -26,9 +25,6 @@ export async function reassignSessionRequest(
       if (input === undefined) {
         return createApiError("invalid_request", 400);
       }
-      if (!dependencies.runnerIsAvailable(user.id, input.runnerId)) {
-        return createApiError("runner_unavailable", 409);
-      }
       const result = dependencies.store.reassign(
         user.id,
         sessionId,
@@ -39,7 +35,11 @@ export async function reassignSessionRequest(
       if (result.status !== "reassigned") {
         const notFound = result.status === "not_found";
         return createApiError(
-          notFound ? "not_found" : `session_${result.status}`,
+          notFound
+            ? "not_found"
+            : result.status === "runner_unavailable"
+              ? "runner_unavailable"
+              : `session_${result.status}`,
           notFound ? 404 : 409,
         );
       }

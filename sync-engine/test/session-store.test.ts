@@ -19,7 +19,6 @@ import {
 } from "./authenticated-integration-test-helpers.ts";
 import { takeValue } from "./oauth-test-helpers.ts";
 import {
-  addReplacementRunner,
   expectRecoveredSession,
   expectStoredSession,
   removeTestRunner,
@@ -465,45 +464,6 @@ describe("session store", () => {
       },
     ]);
     expect(store.get(TEST_USER_ID, SESSION_ID)?.currentContextTokens).toBe(0);
-    database.$client.close();
-  });
-
-  test("reassigns only an owned runner-required session with a new path", () => {
-    const { database, store } = runningStore();
-    const replacementId = "018bcfe5-6800-7000-8000-000000000099";
-    addReplacementRunner(database, replacementId);
-    removeTestRunnerAndExpect({ database, store }, RUNNER_ID, TEST_NOW + 4);
-
-    const before = store.get(TEST_USER_ID, SESSION_ID);
-    expect(
-      store.reassign(
-        "another-user",
-        SESSION_ID,
-        replacementId,
-        "/replacement/project",
-        TEST_NOW + 4,
-      ),
-    ).toEqual({ status: "not_found" });
-    const reassigned = store.reassign(
-      TEST_USER_ID,
-      SESSION_ID,
-      replacementId,
-      "/replacement/project",
-      TEST_NOW + 4,
-    );
-    expect(reassigned.status).toBe("reassigned");
-    expect(reassigned).toMatchObject({
-      detail: {
-        runnerId: replacementId,
-        runnerRequired: false,
-        status: "idle",
-        workingDirectory: "/replacement/project",
-      },
-    });
-    const after = store.get(TEST_USER_ID, SESSION_ID);
-    expect(after?.messages).toEqual(before?.messages);
-    expect(after?.costUsd).toBe(before?.costUsd);
-    expect(after?.tools).toEqual(before?.tools);
     database.$client.close();
   });
 

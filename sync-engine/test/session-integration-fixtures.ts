@@ -194,6 +194,12 @@ export function connectedSessionSetup(
     onRemoved: (listener) => {
       runners.onRemoved(listener);
     },
+    onRemovalFailed: (listener) => {
+      runners.onRemovalFailed(listener);
+    },
+    onRemoving: (listener) => {
+      runners.onRemoving(listener);
+    },
     onlineForUser: (userId) =>
       (options.runners ?? runners.onlineForUser(userId)).filter(
         ({ status }) => status === "online",

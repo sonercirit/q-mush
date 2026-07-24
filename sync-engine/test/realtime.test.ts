@@ -57,6 +57,8 @@ function runners(
     listForUser: () => [],
     listOnlineForUser: () => ({ items: [], totalItems: 0 }),
     onRemoved: () => undefined,
+    onRemovalFailed: () => undefined,
+    onRemoving: () => undefined,
     onlineForUser: () => [],
     remove: () => Promise.resolve(new Response()),
     runnerIsAvailable: () => false,

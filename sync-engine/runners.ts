@@ -31,6 +31,8 @@ type RunnerRemovedListener = (
   runnerId: string,
 ) => Promise<void> | void;
 
+type RunnerRemovingListener = (userId: string, runnerId: string) => void;
+
 interface RunnerDependencies extends Pick<
   OAuthDependencies,
   "database" | "now" | "randomId" | "randomToken"
@@ -57,6 +59,8 @@ export interface RunnerIntegration {
   listForUser(userId: string): readonly RunnerSummary[];
   listOnlineForUser(userId: string, query: RunnerOptionQuery): RunnerPage;
   onRemoved(listener: RunnerRemovedListener): void;
+  onRemovalFailed(listener: RunnerRemovingListener): void;
+  onRemoving(listener: RunnerRemovingListener): void;
   onlineForUser(userId: string): readonly RunnerSummary[];
   remove(request: Request, runnerId: string): Promise<Response>;
   runnerIsAvailable(userId: string, runnerId: string): boolean;
@@ -126,6 +130,8 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
   readonly #auth: GoogleAuth;
   readonly #now: () => number;
   readonly #onRemoved = new Set<RunnerRemovedListener>();
+  readonly #onRemovalFailed = new Set<RunnerRemovingListener>();
+  readonly #onRemoving = new Set<RunnerRemovingListener>();
   readonly #randomToken: () => string;
   readonly #store: RunnerStore;
 
@@ -192,6 +198,14 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
     this.#onRemoved.add(listener);
   }
 
+  onRemovalFailed(listener: RunnerRemovingListener): void {
+    this.#onRemovalFailed.add(listener);
+  }
+
+  onRemoving(listener: RunnerRemovingListener): void {
+    this.#onRemoving.add(listener);
+  }
+
   onlineForUser(userId: string): readonly RunnerSummary[] {
     return this.#list(userId).filter(({ status }) => status === "online");
   }
@@ -208,15 +222,39 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
     }
     return await Promise.resolve(
       withAuthenticatedUser(this.#auth, request, async (user) => {
-        if (!this.#store.remove(user.id, runnerId, this.#now())) {
+        if (!this.#store.exists(user.id, runnerId)) {
           return createApiError("not_found", 404);
         }
-        await Promise.all(
-          [...this.#onRemoved].map(async (listener) => {
-            await listener(user.id, runnerId);
-          }),
-        );
-        return createNoContentResponse();
+        for (const listener of this.#onRemoving) {
+          listener(user.id, runnerId);
+        }
+        let removed = false;
+        try {
+          removed = this.#store.remove(user.id, runnerId, this.#now());
+          if (!removed) {
+            return createApiError("not_found", 404);
+          }
+          await this.#notifyRemoved(this.#onRemoved, user.id, runnerId);
+          return createNoContentResponse();
+        } finally {
+          if (!removed) {
+            for (const listener of this.#onRemovalFailed) {
+              listener(user.id, runnerId);
+            }
+          }
+        }
+      }),
+    );
+  }
+
+  async #notifyRemoved(
+    listeners: ReadonlySet<RunnerRemovedListener>,
+    userId: string,
+    runnerId: string,
+  ): Promise<void> {
+    await Promise.all(
+      [...listeners].map(async (listener) => {
+        await listener(userId, runnerId);
       }),
     );
   }

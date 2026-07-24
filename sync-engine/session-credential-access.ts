@@ -27,6 +27,10 @@ export interface SessionCredentialSelection {
   readonly provider: ProviderId;
 }
 
+export interface SessionRuntimeSelection extends SessionCredentialSelection {
+  readonly runnerId: string;
+}
+
 export function readSessionCredential(
   providers: SessionCredentialReaders,
   userId: string,

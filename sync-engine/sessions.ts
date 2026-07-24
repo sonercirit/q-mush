@@ -42,6 +42,7 @@ import {
   type SessionCredentialAction,
   type SessionCredentialReaders,
   type SessionCredentialSelection,
+  type SessionRuntimeSelection,
 } from "./session-credential-access.ts";
 import {
   readCreateSession,
@@ -51,15 +52,19 @@ import {
   type CreateSessionInput,
   type PromptInput,
 } from "./session-input.ts";
+import type { SessionIntegration } from "./session-integration.ts";
 import { sessionModelRuntime } from "./session-model-runtime.ts";
 import { reassignSessionRequest } from "./session-reassignment-request.ts";
 import {
   SessionRequestHelpers,
   readIdentifier,
 } from "./session-request-helpers.ts";
-import { handleRemovedSessionRunner } from "./session-runner-removal.ts";
+import { RunnerRemovalCoordinator } from "./session-runner-removal.ts";
 import { SessionRuntimes } from "./session-runtime.ts";
 import { SessionStore } from "./session-store.ts";
+
+export type { SessionCredentialReaders } from "./session-credential-access.ts";
+export type { SessionIntegration } from "./session-integration.ts";
 
 interface SessionDependencies {
   readonly broker?: RunnerCommandBroker;
@@ -70,43 +75,6 @@ interface SessionDependencies {
   readonly now?: () => number;
   readonly randomId?: IdGenerator;
   readonly realtime?: RealtimeHub;
-}
-
-interface RuntimeSelection extends SessionCredentialSelection {
-  readonly runnerId: string;
-}
-
-export type { SessionCredentialReaders };
-
-export interface SessionIntegration {
-  collection(request: Request): Response | Promise<Response>;
-  compact(request: Request, sessionId: string): Promise<Response>;
-  compaction(request: Request, sessionId: string): Promise<Response>;
-  completeRunnerCommand(
-    runnerId: string,
-    commandId: string,
-    output: string,
-  ): boolean;
-  continue(request: Request, sessionId: string): Promise<Response>;
-  deliverRunnerCommands(
-    runnerId: string,
-    deliver: (command: RunnerToolCommand) => boolean,
-  ): void;
-  detailForUser(
-    userId: string,
-    sessionId: string,
-  ): AgentSessionDetail | undefined;
-  directories(request: Request, runnerId: string): Promise<Response>;
-  drain(): Promise<void>;
-  item(request: Request, sessionId: string): Response;
-  listForUser(userId: string): readonly AgentSessionSummary[];
-  message(request: Request, sessionId: string): Promise<Response>;
-  models(request: Request): Promise<Response>;
-  onChange(listener: (userId: string, sessionId: string) => void): void;
-  reassign(request: Request, sessionId: string): Promise<Response>;
-  runnerConnected(): void;
-  runnerRemoved(userId: string, runnerId: string): Promise<void>;
-  stop(request: Request, sessionId: string): Promise<Response>;
 }
 
 function safeErrorMessage(error: unknown): string {
@@ -131,6 +99,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
   readonly #requests: SessionRequestHelpers;
   readonly #runners: RunnerIntegration;
   readonly #runtimes = new SessionRuntimes();
+  readonly #runnerRemoval: RunnerRemovalCoordinator;
   readonly #store: SessionStore;
   readonly #actions: SessionAgentActions;
 
@@ -164,9 +133,22 @@ class DrizzleSessionIntegration implements SessionIntegration {
       database,
       dependencies.randomId ?? createUuidV7,
     );
+    this.#runnerRemoval = new RunnerRemovalCoordinator({
+      broker: this.#broker,
+      now: this.#now,
+      notify: this.#notify,
+      runtimes: this.#runtimes,
+      store: this.#store,
+    });
     this.#actions = this.#createActions(database);
+    this.#runners.onRemovalFailed((userId, runnerId) => {
+      this.#runnerRemoval.failed(userId, runnerId);
+    });
+    this.#runners.onRemoving((userId, runnerId) => {
+      this.#runnerRemoval.removing(userId, runnerId);
+    });
     this.#runners.onRemoved((userId, runnerId) =>
-      this.runnerRemoved(userId, runnerId),
+      this.#runnerRemoval.removed(userId, runnerId),
     );
     this.#actions.reportAll(this.#store.failInterrupted(this.#now()));
   }
@@ -324,7 +306,6 @@ class DrizzleSessionIntegration implements SessionIntegration {
         authenticate: this.#requests.authenticate,
         notify: this.#notify,
         now: this.#now,
-        runnerIsAvailable: this.#runnerIsAvailable.bind(this),
         store: this.#store,
       },
       request,
@@ -337,15 +318,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
   }
 
   async runnerRemoved(userId: string, runnerId: string): Promise<void> {
-    await handleRemovedSessionRunner({
-      broker: this.#broker,
-      now: this.#now,
-      notify: this.#notify,
-      runnerId,
-      runtimes: this.#runtimes,
-      store: this.#store,
-      userId,
-    });
+    await this.#runnerRemoval.removed(userId, runnerId);
   }
 
   async stop(request: Request, sessionId: string): Promise<Response> {
@@ -397,7 +370,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
 
   async #withRuntimeAccess(
     userId: string,
-    selection: RuntimeSelection,
+    selection: SessionRuntimeSelection,
     action: SessionCredentialAction,
   ): Promise<Response> {
     return this.#runners.runnerIsAvailable(userId, selection.runnerId)

@@ -24,9 +24,10 @@ import { activeSessionDuration } from "../shared/session-timing.ts";
 import { compactStoredConversation } from "./session-compaction.ts";
 import { storedSessionAgentFile } from "./session-store-agent-file.ts";
 import {
+  appendInterruptedRunnerToolResult,
   conversationFromMessages,
   parseProviderPricing,
-  storedSessionMessages,
+  readStoredSessionMessages,
   withInterruptedToolResults,
 } from "./session-store-read.ts";
 import {
@@ -52,7 +53,6 @@ import {
   appendSessionUserMessage,
   errorMessageValues,
   insertStoredMessage,
-  interruptedRunnerToolValues,
   interruptedSessionErrorValues,
   recordedMessageValues,
   userMessageValues,
@@ -259,7 +259,7 @@ export class SessionStore {
       ...summarizeSession(stored),
       agentFile: storedSessionAgentFile(this.#database, sessionId),
       messages: withInterruptedToolResults(
-        storedSessionMessages(this.#database, sessionId),
+        readStoredSessionMessages(this.#database, sessionId),
         stored.status !== "queued" && stored.status !== "running",
       ),
     };
@@ -275,7 +275,7 @@ export class SessionStore {
   conversation(sessionId: string): readonly AgentConversationMessage[] {
     return conversationFromMessages(
       withInterruptedToolResults(
-        storedSessionMessages(this.#database, sessionId),
+        readStoredSessionMessages(this.#database, sessionId),
         true,
       ),
     );
@@ -414,18 +414,13 @@ export class SessionStore {
     this.#appendMessage(sessionId, errorMessageValues(content), SYSTEM_ID, now);
   }
 
-  appendInterruptedRunnerTool(
-    sessionId: string,
-    toolCallId: string,
-    toolName: string,
-    now: number,
-  ): void {
-    this.#appendMessage(
-      sessionId,
-      interruptedRunnerToolValues(toolCallId, toolName),
-      SYSTEM_ID,
+  appendInterruptedRunnerTool(sessionId: string, now: number): void {
+    appendInterruptedRunnerToolResult({
+      database: this.#database,
+      generateId: this.#resources[1],
       now,
-    );
+      sessionId,
+    });
   }
 
   appendUserMessage(
@@ -619,17 +614,22 @@ export class SessionStore {
   ): void {
     this.#database.transaction((transaction) => {
       const session = requireStoredSession(
-        transaction.query.agentSessions
-          .findFirst({
-            columns: { userId: true },
-            where: (table, operations) =>
-              operations.and(
-                operations.eq(table.id, sessionId),
-                operations.eq(table.isDeleted, false),
-              ),
+        transaction
+          .select({
+            runnerRequired: agentSessions.runnerRequired,
+            userId: agentSessions.userId,
           })
-          .sync(),
+          .from(agentSessions)
+          .where(activeSessionCondition({ id: sessionId }))
+          .get(),
       );
+      if (
+        actorId === SYSTEM_ID &&
+        message.role !== "tool" &&
+        session.runnerRequired
+      ) {
+        throw new DOMException("The agent session was stopped", "AbortError");
+      }
 
       insertStoredMessage(transaction, message, {
         actorId,
