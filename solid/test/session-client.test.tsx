@@ -165,18 +165,20 @@ function renderPanel(state: SessionViewState): string {
 test("paginates every session select consumer without provider-specific behavior", () => {
   const runners = numberedRunners();
   const credentials = numberedCredentials();
+  const openAiCredentials = credentials.slice(0, 6);
+  const openRouterCredentials = credentials.slice(6);
   const models = numberedModels();
   const baseState = {
     ...SESSION_STATE,
     draft: {
       ...SESSION_STATE.draft,
-      credential: "openai:credential-12",
+      credential: "openrouter:credential-12",
       model: "model-12",
       runnerId: "runner-12",
     },
     modelDiscovery: {
       catalog: { defaultModel: "model-1", models },
-      credential: "openai:credential-12",
+      credential: "openrouter:credential-12",
       error: undefined,
       loading: false,
     },
@@ -190,7 +192,8 @@ test("paginates every session select consumer without provider-specific behavior
     renderPanelWithProviders(
       state,
       runnerViewState(runners),
-      providerViewState(credentials),
+      providerViewState(openAiCredentials),
+      providerViewState(openRouterCredentials),
     ),
   );
 
@@ -198,6 +201,11 @@ test("paginates every session select consumer without provider-specific behavior
     expect(html[index]).toContain(`data-custom-select-search="${name}"`);
     expect(html[index]).toContain(`data-custom-select-page="${name}"`);
   }
+  const credentialHtml = html[1] ?? "";
+  expect(credentialHtml).toContain(
+    'data-option-value="openrouter:credential-12"',
+  );
+  expect(credentialHtml).toContain("OpenRouter · Credential 12");
   const modelHtml = html[2] ?? "";
   expect(modelHtml).toContain('data-option-value="model-12"');
   expect(modelHtml).not.toContain('data-option-value="model-1"');
