@@ -9,6 +9,7 @@ import {
   createMethodNotAllowedResponse,
   parseJsonRequest,
 } from "./http.ts";
+import { queueFailureResponse } from "./session-availability.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
 import type { SessionStore } from "./session-store.ts";
 
@@ -118,7 +119,7 @@ export async function startManualSessionCompaction(
       dependencies.now(),
     );
     if (queued.status !== "queued") {
-      return createApiError("session_busy", 409);
+      return queueFailureResponse(queued);
     }
 
     dependencies.launch(queued.detail, credential, user.id);

@@ -55,10 +55,14 @@ export function createSessionAgentModels(options: {
   readonly credential: ProviderCredentialAccess;
   readonly detail: AgentSessionDetail;
   readonly factory: AgentModelFactory;
+  readonly isCurrent: () => boolean;
   readonly realtime: RealtimeHub | undefined;
   readonly userId: string;
 }): SessionAgentModels {
   const onDelta: AgentModelFactoryOptions["onDelta"] = (delta) => {
+    if (!options.isCurrent()) {
+      return;
+    }
     try {
       options.realtime?.publishUser(options.userId, {
         ...delta,

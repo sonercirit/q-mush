@@ -12,6 +12,7 @@ export interface DispatchRunnerToolCommand extends Omit<
   RunnerToolCommand,
   "id"
 > {
+  readonly authorize?: () => boolean;
   readonly runnerId: string;
 }
 
@@ -54,6 +55,9 @@ export class RunnerCommandBroker {
     signal?: AbortSignal,
   ): Promise<string> {
     if (signal?.aborted) {
+      return Promise.reject(abortError("The agent session was stopped"));
+    }
+    if (input.authorize?.() === false) {
       return Promise.reject(abortError("The agent session was stopped"));
     }
 

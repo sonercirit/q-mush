@@ -29,17 +29,6 @@ export class RunnerRemovalCoordinator {
     this.#dependencies = dependencies;
   }
 
-  failed(userId: string, runnerId: string): void {
-    const staged = this.#staged.get(runnerId);
-    if (staged?.userId !== userId) {
-      return;
-    }
-    this.#staged.delete(runnerId);
-    for (const sessionId of staged.interruptedSessionIds) {
-      this.#dependencies.runtimes.abort(sessionId);
-    }
-  }
-
   removing(userId: string, runnerId: string): void {
     if (this.#staged.has(runnerId)) {
       throw new Error("The runner is already being removed");

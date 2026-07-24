@@ -1,7 +1,5 @@
-import { createHash } from "node:crypto";
 import { expect } from "vitest";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
-import { runners } from "../../shared/database/schema.ts";
 import { SessionStore } from "../../sync-engine/session-store.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import {
@@ -9,8 +7,8 @@ import {
   createAuthenticatedTestDatabase,
   TEST_NOW,
   TEST_USER_ID,
-  testAuditFields,
 } from "./authenticated-integration-test-helpers.ts";
+import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
 
 const RUNNER_ID = "018bcfe5-6800-7000-8000-000000000041";
 const CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000042";
@@ -22,13 +20,7 @@ const INTERRUPTED_ID = "018bcfe5-6800-7000-8000-000000000047";
 
 function storeWithRunner() {
   const database = createAuthenticatedTestDatabase();
-  const runner = {
-    ...testAuditFields(),
-    id: RUNNER_ID,
-    tokenHash: createHash("sha256").update("runner-token").digest("hex"),
-    userId: TEST_USER_ID,
-  };
-  database.insert(runners).values(runner).run();
+  addSessionTestRunner(database, "session-store-hardening-machine", RUNNER_ID);
   addTestProviderCredential(database, CREDENTIAL_ID);
   const credentialIds = [
     SESSION_ID,
@@ -52,7 +44,7 @@ function storeWithRunner() {
 
 export function createSessionStoreTestSetup() {
   const setup = storeWithRunner();
-  setup.store.create(
+  const created = setup.store.create(
     {
       autoCompact: true,
       credentialId: CREDENTIAL_ID,
@@ -70,6 +62,7 @@ export function createSessionStoreTestSetup() {
     },
     TEST_NOW,
   );
+  expect(created.status).toBe("created");
   expect(setup.store.mark(SESSION_ID, "running", TEST_NOW + 1)).toBe(true);
   return setup;
 }

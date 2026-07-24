@@ -30,6 +30,7 @@ import {
   directoryListing,
   waitForSessionValue,
 } from "./session-integration-helpers.ts";
+import { requireCreatedSession } from "./session-store-result-helpers.ts";
 
 const FOREIGN_RUNNER_ID = "018bcfe5-6800-7000-8000-000000000082";
 const RECOVERABLE_SESSION_ID = "018bcfe5-6800-7000-8000-000000000084";
@@ -125,7 +126,7 @@ function createRecoverableSession(setup: SessionToolSetup): void {
     }
     return id;
   });
-  const recoverable = store.create(
+  const created = store.create(
     {
       autoCompact: true,
       credentialId: CREDENTIAL_ID,
@@ -143,6 +144,7 @@ function createRecoverableSession(setup: SessionToolSetup): void {
     },
     TEST_NOW,
   );
+  const recoverable = requireCreatedSession(created);
   expect(store.mark(recoverable.id, "running", TEST_NOW + 1)).toBe(true);
   expect(store.mark(recoverable.id, "idle", TEST_NOW + 2)).toBe(true);
 }

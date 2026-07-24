@@ -31,7 +31,10 @@ import {
   compactSessionConversation,
   runSessionAgent,
 } from "./session-agent-runtime.ts";
-import { unavailableSessionResponse } from "./session-availability.ts";
+import {
+  queueFailureResponse,
+  unavailableSessionResponse,
+} from "./session-availability.ts";
 import {
   startManualSessionCompaction,
   updateSessionCompactionMode,
@@ -145,9 +148,6 @@ class DrizzleSessionIntegration implements SessionIntegration {
       store: this.#store,
     });
     this.#actions = this.#createActions(database);
-    this.#runners.onRemovalFailed((userId, runnerId) => {
-      this.#runnerRemoval.failed(userId, runnerId);
-    });
     this.#runners.onRemoving((userId, runnerId) => {
       this.#runnerRemoval.removing(userId, runnerId);
     });
@@ -168,8 +168,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
         this.#runtimes.abort(sessionId);
       },
       broker: this.#broker,
-      browseDirectories: (userId, runnerId, path) =>
-        this.#requests.browseDirectories(userId, runnerId, path),
+      browseDirectories: (request) => this.#requests.browseDirectories(request),
       database,
       discoverModels: this.#discoverModels,
       draining: () => this.#runtimes.draining,
@@ -446,7 +445,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
         return createApiError("server_restarting", 503);
       }
 
-      const detail = this.#store.create(
+      const created = this.#store.create(
         {
           ...input,
           autoCompact: true,
@@ -457,6 +456,10 @@ class DrizzleSessionIntegration implements SessionIntegration {
         },
         this.#now(),
       );
+      if (created.status === "runner_unavailable") {
+        return createApiError("runner_unavailable", 409);
+      }
+      const { detail } = created;
       this.#launch(detail, credential, user.id);
       this.#notify(user.id, detail.id);
       return createJsonResponse(detail, 201);
@@ -543,10 +546,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
       );
 
       if (queued.status !== "queued") {
-        return createApiError(
-          queued.status === "busy" ? "session_busy" : "not_found",
-          queued.status === "busy" ? 409 : 404,
-        );
+        return queueFailureResponse(queued);
       }
 
       this.#launch(queued.detail, credential, user.id);
@@ -571,12 +571,14 @@ class DrizzleSessionIntegration implements SessionIntegration {
         detail.id,
         safeErrorMessage(error),
         this.#now(),
+        detail.generation,
       );
     }
     this.#store.mark(
       detail.id,
       error === undefined ? "idle" : "failed",
       this.#now(),
+      detail.generation,
     );
     this.#notifyFinished(detail, userId);
   }
@@ -588,7 +590,9 @@ class DrizzleSessionIntegration implements SessionIntegration {
     controller: AbortController,
     compact: boolean,
   ): Promise<void> {
-    if (!this.#store.mark(detail.id, "running", this.#now())) {
+    if (
+      !this.#store.mark(detail.id, "running", this.#now(), detail.generation)
+    ) {
       return;
     }
     this.#notify(userId, detail.id);

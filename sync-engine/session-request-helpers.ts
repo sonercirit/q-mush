@@ -16,6 +16,7 @@ import {
   parseJsonRequest,
 } from "./http.ts";
 import type { RunnerIntegration } from "./runners.ts";
+import type { RunnerDirectoryRequest } from "./session-runner-directory-request.ts";
 
 export function readIdentifier(value: unknown): string | undefined {
   return typeof value === "string" && /^[A-Za-z\d._:-]{1,200}$/u.test(value)
@@ -90,12 +91,13 @@ export class SessionRequestHelpers {
   };
 
   async browseDirectories(
-    userId: string,
-    runnerId: string,
-    path: string,
+    request: RunnerDirectoryRequest,
     signal: AbortSignal = AbortSignal.timeout(15_000),
   ): Promise<RunnerDirectoryBrowseResult> {
-    if (!this.#runners.runnerIsAvailable(userId, runnerId)) {
+    if (
+      !this.#runners.runnerIsAvailable(request.userId, request.runnerId) ||
+      request.authorize?.() === false
+    ) {
       return { status: "runner_unavailable" };
     }
 
@@ -103,10 +105,13 @@ export class SessionRequestHelpers {
       const output = await this.#broker.dispatch(
         {
           arguments: {},
-          runnerId,
-          sessionId: `directory-picker:${userId}`,
+          ...(request.authorize === undefined
+            ? {}
+            : { authorize: request.authorize }),
+          runnerId: request.runnerId,
+          sessionId: `directory-picker:${request.userId}`,
           tool: RUNNER_DIRECTORY_COMMAND,
-          workingDirectory: path,
+          workingDirectory: request.path,
         },
         signal,
       );
@@ -187,9 +192,7 @@ export class SessionRequestHelpers {
     }
 
     const result = await this.browseDirectories(
-      user.id,
-      runnerId,
-      path,
+      { path, runnerId, userId: user.id },
       AbortSignal.any([request.signal, AbortSignal.timeout(15_000)]),
     );
     switch (result.status) {

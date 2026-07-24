@@ -3,6 +3,7 @@ import { createdAuditFields, updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
+import { runningCondition } from "./session-store-reassignment.ts";
 
 const COMPACTION_MESSAGE_PREFIX = "Conversation compacted:\n\n";
 
@@ -10,6 +11,7 @@ export function compactStoredConversation(options: {
   readonly database: AppDatabase;
   readonly generateId: IdGenerator;
   readonly now: number;
+  readonly generation?: number;
   readonly sessionId: string;
   readonly summary: string;
 }): void {
@@ -20,20 +22,17 @@ export function compactStoredConversation(options: {
         currentContextTokens: 0,
         ...updatedAuditFields(SYSTEM_ID, options.now),
       })
-      .where(eq(agentSessions.id, options.sessionId));
+      .where(
+        runningCondition(options.sessionId, undefined, options.generation),
+      );
     const session = transaction
       .select({ status: agentSessions.status, userId: agentSessions.userId })
       .from(agentSessions)
-      .where(
-        and(
-          eq(agentSessions.id, options.sessionId),
-          eq(agentSessions.isDeleted, false),
-        ),
-      )
+      .where(runningCondition(options.sessionId, undefined, options.generation))
       .get();
 
     if (session?.status !== "running") {
-      throw new Error("The running agent session no longer exists");
+      throw new DOMException("The agent session was stopped", "AbortError");
     }
 
     transaction

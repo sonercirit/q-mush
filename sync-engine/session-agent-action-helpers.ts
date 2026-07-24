@@ -109,7 +109,7 @@ export async function spawnAgentSession(options: {
     if (options.dependencies.draining()) {
       return createJsonResponse({ error: "server_restarting" }, 503);
     }
-    const child = options.dependencies.store.create(
+    const created = options.dependencies.store.create(
       {
         ...input,
         ...metadata,
@@ -119,6 +119,10 @@ export async function spawnAgentSession(options: {
       },
       options.dependencies.now(),
     );
+    if (created.status === "runner_unavailable") {
+      return createJsonResponse({ error: "runner_unavailable" }, 409);
+    }
+    const { detail: child } = created;
     if (
       !options.dependencies.launchSession(credential, child, options.userId)
     ) {
@@ -126,11 +130,13 @@ export async function spawnAgentSession(options: {
         child.id,
         "Session failed: the child session could not be launched",
         options.dependencies.now(),
+        child.generation,
       );
       options.dependencies.store.mark(
         child.id,
         "failed",
         options.dependencies.now(),
+        child.generation,
       );
       throw new Error("The child session could not be launched");
     }

@@ -1,10 +1,9 @@
-import { createHash } from "node:crypto";
 import { describe, expect, test } from "vitest";
 import {
   AGENT_SESSION_TOOL_NAMES,
   type AgentSessionToolName,
 } from "../../shared/agent-tools.ts";
-import { agentMessages, runners } from "../../shared/database/schema.ts";
+import { agentMessages } from "../../shared/database/schema.ts";
 import { SYSTEM_ID } from "../../shared/ids.ts";
 import type { AgentSessionMessage } from "../../shared/session-model.ts";
 import { RunnerStore } from "../../sync-engine/runner-store.ts";
@@ -21,9 +20,11 @@ import { takeValue } from "./oauth-test-helpers.ts";
 import {
   expectRecoveredSession,
   expectStoredSession,
-  removeTestRunner,
+  removeAndReadSession,
   removeTestRunnerAndExpect,
 } from "./session-store-reassignment-helpers.ts";
+import { requireCreatedSession } from "./session-store-result-helpers.ts";
+import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
 
 const RUNNER_ID = "018bcfe5-6800-7000-8000-000000000041";
 const CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000042";
@@ -74,16 +75,15 @@ function testSessionInput() {
 }
 
 function createTestSession(store: SessionStore) {
-  return store.create(testSessionInput(), TEST_NOW);
+  return requireCreatedSession(store.create(testSessionInput(), TEST_NOW));
 }
 
 function completedChildWithParent(
   store: SessionStore,
   parentSessionId: string,
 ) {
-  const child = store.create(
-    { ...testSessionInput(), parentSessionId },
-    TEST_NOW + 1,
+  const child = requireCreatedSession(
+    store.create({ ...testSessionInput(), parentSessionId }, TEST_NOW + 1),
   );
   expect(store.mark(child.id, "running", TEST_NOW + 2)).toBe(true);
   expect(store.mark(child.id, "idle", TEST_NOW + 3)).toBe(true);
@@ -159,23 +159,7 @@ function initialConversation() {
 
 function createStore() {
   const database = createAuthenticatedTestDatabase();
-  const timestamp = new Date(TEST_NOW);
-  database
-    .insert(runners)
-    .values({
-      ...testAuditFields(),
-      architecture: "x64",
-      id: RUNNER_ID,
-      lastSeenAt: timestamp,
-      machineFingerprint: "session-store-machine",
-      name: "workstation",
-      platform: "linux",
-      tokenHash: createHash("sha256")
-        .update("runner-token")
-        .digest("base64url"),
-      userId: TEST_USER_ID,
-    })
-    .run();
+  addSessionTestRunner(database, "session-store-machine", RUNNER_ID);
   addTestProviderCredential(database, CREDENTIAL_ID);
   const ids = [
     SESSION_ID,
@@ -367,7 +351,9 @@ describe("session store", () => {
     const { database, store } = createStore();
     const tools: readonly AgentSessionToolName[] = ["read", "brave_search"];
 
-    const detail = store.create({ ...testSessionInput(), tools }, TEST_NOW);
+    const detail = requireCreatedSession(
+      store.create({ ...testSessionInput(), tools }, TEST_NOW),
+    );
 
     expect(detail.tools).toEqual(tools);
     expect(store.list(TEST_USER_ID)[0]?.tools).toEqual(tools);
@@ -425,7 +411,7 @@ describe("session store", () => {
 
   test("uses a fallback title for an image-only task", () => {
     const { database, store } = createStore();
-    const detail = store.create(
+    const created = store.create(
       {
         ...testSessionInput(),
         maxContextTokens: null,
@@ -434,6 +420,7 @@ describe("session store", () => {
       },
       TEST_NOW,
     );
+    const detail = requireCreatedSession(created);
 
     expect(detail.title).toBe("Image task");
     database.$client.close();
@@ -511,14 +498,14 @@ describe("session store", () => {
     database.$client.close();
   });
 
-  test("stopping a runner-required session clears reassignment", () => {
+  test("stopping a runner-required session preserves reassignment", () => {
     const { database, store } = runningStore();
     removeTestRunnerAndExpect({ database, store }, RUNNER_ID);
 
     expect(store.stop(TEST_USER_ID, SESSION_ID, TEST_NOW + 3)).toBe(true);
 
     expectStoredSession(store, SESSION_ID, {
-      runnerRequired: false,
+      runnerRequired: true,
       status: "stopped",
     });
     database.$client.close();
@@ -541,8 +528,11 @@ describe("session store", () => {
 
   test("recovers runner-required sessions without rewriting them on restart", () => {
     const { database, store } = runningStore();
-    removeTestRunner({ database, store }, RUNNER_ID);
-    const before = store.get(TEST_USER_ID, SESSION_ID);
+    const before = removeAndReadSession(
+      { database, store },
+      RUNNER_ID,
+      SESSION_ID,
+    );
 
     expectRecoveredSession(database, before, SESSION_ID);
     database.$client.close();

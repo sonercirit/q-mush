@@ -1,5 +1,21 @@
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { createApiError } from "./http.ts";
+import type { QueueSessionResult } from "./session-store-queue.ts";
+
+export function queueFailureResponse(
+  result: Exclude<QueueSessionResult, { readonly status: "queued" }>,
+): Response {
+  switch (result.status) {
+    case "busy":
+      return createApiError("session_busy", 409);
+    case "not_found":
+      return createApiError("not_found", 404);
+    case "runner_required":
+      return createApiError("runner_required", 409);
+    case "runner_unavailable":
+      return createApiError("runner_unavailable", 409);
+  }
+}
 
 export function unavailableSessionResponse(
   detail: AgentSessionDetail | undefined,

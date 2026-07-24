@@ -4,18 +4,11 @@ import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
+import { ownedActiveSessionCondition } from "./session-store-condition.ts";
 
 export interface PendingSpawnedSession {
   readonly detail: AgentSessionDetail;
   readonly userId: string;
-}
-
-function ownedSessionCondition(userId: string, sessionId: string) {
-  return and(
-    eq(agentSessions.id, sessionId),
-    eq(agentSessions.userId, userId),
-    eq(agentSessions.isDeleted, false),
-  );
 }
 
 export function pendingSpawnedSessions(
@@ -49,7 +42,7 @@ export function parentSessionId(
     database
       .select({ parentSessionId: agentSessions.parentSessionId })
       .from(agentSessions)
-      .where(ownedSessionCondition(userId, sessionId))
+      .where(ownedActiveSessionCondition(userId, sessionId))
       .get()?.parentSessionId ?? undefined
   );
 }
@@ -64,7 +57,7 @@ export function appendSpawnedSessionReport(options: {
   readonly userId: string;
 }): boolean {
   return options.database.transaction((transaction) => {
-    const parentCondition = ownedSessionCondition(
+    const parentCondition = ownedActiveSessionCondition(
       options.userId,
       options.parentId,
     );
@@ -81,7 +74,7 @@ export function appendSpawnedSessionReport(options: {
       .set({ parentSessionId: null })
       .where(
         and(
-          ownedSessionCondition(options.userId, options.childId),
+          ownedActiveSessionCondition(options.userId, options.childId),
           eq(agentSessions.parentSessionId, options.parentId),
         ),
       )

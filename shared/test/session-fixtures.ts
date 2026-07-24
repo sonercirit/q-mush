@@ -10,6 +10,7 @@ export const TEST_SESSION_DETAIL: AgentSessionDetail = {
   costUsd: 0,
   createdAt: 1,
   credentialId: "credential-1",
+  generation: 0,
   currentContextTokens: 1_250,
   id: "session-1",
   maxContextTokens: 200_000,
