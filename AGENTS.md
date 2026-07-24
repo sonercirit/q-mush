@@ -62,6 +62,8 @@ Living project memory; update durable information.
   session can safely request its own restart. Textual response bodies are
   precompressed once per handler, with `zstd`, Brotli, gzip, or deflate
   negotiated in that server-preference order.
+- `/favicon.svg` uses ETag revalidation and remains separate from future PWA
+  manifest icons.
 - `solid/pages.tsx` renders both server page shells through Solid's SSR runtime;
   `sync-engine/pages.ts` loads it with Vite's SSR runner for Bun. The browser
   app mounts from `solid/client.tsx`; routes live in `shared/routes.ts`.
