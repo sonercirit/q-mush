@@ -41,6 +41,9 @@ export async function startManualSessionCompaction(
 
   let result: AgentSessionDetail | undefined;
   await dependencies.credential(user.id, existing, (credential) => {
+    if (dependencies.runtimes.draining) {
+      throw new RealtimeCommandFailure("server_restarting");
+    }
     const queued = dependencies.store.queue(
       user.id,
       sessionId,

@@ -64,6 +64,7 @@ test("connects to the same-origin realtime WebSocket and decodes events", () => 
 
   connection.start();
   sockets[0]?.dispatchEvent(new Event("open"));
+  sockets[0]?.receive('{"instanceId":"server-instance-1","type":"ready"}');
   sockets[0]?.receive('{"sessions":[],"type":"sessions"}');
 
   expect(sockets[0]?.url).toBe("wss://qmush.example/api/realtime");

@@ -86,8 +86,10 @@ export function sessionMutationError(error: unknown, action: string): string {
   ) {
     return "The selected runner or credential is unavailable, or the session is busy.";
   }
-  if (code === "connection_stopped") {
-    return "The realtime connection is unavailable. Reconnect and try again.";
+  if (code === "connection_stopped" || code === "outcome_unknown") {
+    return code === "outcome_unknown"
+      ? `The server restarted before it could confirm whether it completed the request to ${action}. Check the restored session before trying again.`
+      : "The realtime connection is unavailable. Reconnect and try again.";
   }
   return `We could not ${action}. Please try again.`;
 }

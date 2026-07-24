@@ -53,6 +53,29 @@ function summaryResult(): {
   return { sessions: [summaryFromDetail(TEST_SESSION_DETAIL)] };
 }
 
+function sessionSubscriptions(calls: readonly SessionCommandCall[]): number {
+  return calls.filter(
+    ({ operation }) => operation === SESSION_REALTIME_OPERATIONS.subscribe,
+  ).length;
+}
+
+function reconnectAndExpectSubscriptions(
+  transport: ControlledTransport,
+  expected: number,
+): void {
+  transport.reconnect();
+  expect(sessionSubscriptions(transport.calls)).toBe(expected);
+}
+
+async function expectSubscriptionCount(
+  transport: ControlledTransport,
+  count: number,
+): Promise<void> {
+  await vi.waitFor(() => {
+    expect(sessionSubscriptions(transport.calls)).toBe(count);
+  });
+}
+
 async function expectReadCall(
   transport: ControlledTransport,
   sessionId = TEST_SESSION_DETAIL.id,
@@ -68,10 +91,44 @@ async function finishDetailRead(
   index: number,
   detail = TEST_SESSION_DETAIL,
 ): Promise<void> {
-  transport.resolve(index, { session: detail });
+  resolveDetailRead(transport, index, detail);
   await vi.waitFor(() => {
     expect(controller.state.loadingDetail).toBe(false);
   });
+}
+
+async function startRehydration(transport: ControlledTransport): Promise<void> {
+  transport.reconnect();
+  transport.resolve(0, summaryResult());
+  await expectReadCall(transport);
+}
+
+function resolveDetailRead(
+  transport: ControlledTransport,
+  index: number,
+  detail = TEST_SESSION_DETAIL,
+): void {
+  transport.resolve(index, { session: detail });
+}
+
+async function startControlledRehydration(): Promise<
+  readonly [ControlledTransport, SessionController]
+> {
+  const [transport, controller] = controlledController();
+  await startRehydration(transport);
+  return [transport, controller];
+}
+
+async function settleRehydration(
+  transport: ControlledTransport,
+  controller: SessionController,
+  summaryIndex: number,
+  detailIndex: number,
+  detail = TEST_SESSION_DETAIL,
+): Promise<void> {
+  transport.resolve(summaryIndex, summaryResult());
+  await expectReadCall(transport);
+  await finishDetailRead(transport, controller, detailIndex, detail);
 }
 
 function sessionMutationCall(operation: string): SessionCommandCall {
@@ -267,39 +324,35 @@ test("defers reconnect rehydration until an outstanding mutation settles", async
     }),
   ]);
 
-  transport.reconnect();
-  expect(
-    transport.calls.filter(
-      ({ operation }) => operation === SESSION_REALTIME_OPERATIONS.subscribe,
-    ),
-  ).toHaveLength(0);
+  reconnectAndExpectSubscriptions(transport, 0);
 
-  transport.resolve(0, { ...TEST_SESSION_DETAIL, status: "queued" });
+  const queued = { ...TEST_SESSION_DETAIL, status: "queued" as const };
+  transport.resolve(0, queued);
   await sending;
   await vi.waitFor(() => {
     expect(transport.calls).toContainEqual(subscriptionCall());
   });
   expect(controller.state.sending).toBe(false);
 
-  transport.resolve(1, summaryResult());
-  await expectReadCall(transport);
-  await finishDetailRead(transport, controller, 2);
+  await settleRehydration(transport, controller, 1, 2);
 });
 
 test("reconnect rehydrates the selected detail without applying stale work", async () => {
-  const [transport, controller] = controlledController();
-  transport.reconnect();
-  expect([controller.state.loadingDetail, transport.calls]).toEqual([
-    true,
-    [subscriptionCall()],
-  ]);
-  transport.resolve(0, summaryResult());
-  await expectReadCall(transport);
-  await finishDetailRead(transport, controller, 1, {
-    ...TEST_SESSION_DETAIL,
-    title: "Rehydrated",
-  });
+  const [transport, controller] = await startControlledRehydration();
+  const rehydrated = { ...TEST_SESSION_DETAIL, title: "Rehydrated" };
+  await finishDetailRead(transport, controller, 1, rehydrated);
   expect(controller.state.detail?.title).toBe("Rehydrated");
+});
+
+test("coalesces reconnects that arrive during an active rehydration", async () => {
+  const [transport, controller] = await startControlledRehydration();
+
+  reconnectAndExpectSubscriptions(transport, 1);
+
+  resolveDetailRead(transport, 1);
+  await expectSubscriptionCount(transport, 2);
+
+  await settleRehydration(transport, controller, 2, 3);
 });
 
 test("rapid session switching never applies a stale detail acknowledgement", async () => {

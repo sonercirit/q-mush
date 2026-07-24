@@ -52,6 +52,7 @@ interface GoogleAuthConfiguration {
 
 export interface GoogleAuth extends OAuthEndpoints {
   authenticatedUser(request: Request): AuthenticatedUser | null;
+  revalidateUser(request: Request, userId: string): AuthenticatedUser | null;
   logout(request: Request): Response;
   session(request: Request): Response;
 }
@@ -147,6 +148,11 @@ class GoogleAuthentication implements GoogleAuth {
     }
 
     return this.#store.readSessionUser(sessionToken, now);
+  }
+
+  revalidateUser(request: Request, userId: string): AuthenticatedUser | null {
+    const user = this.authenticatedUser(request);
+    return user?.id === userId ? user : null;
   }
 
   begin(request: Request): Response {

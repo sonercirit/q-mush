@@ -454,6 +454,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
     }
 
     return this.#withCredentialAccess(user.id, existing, (credential) => {
+      this.#ensureAcceptingCommands();
       const queued = this.#store.queue(
         user.id,
         existing.id,

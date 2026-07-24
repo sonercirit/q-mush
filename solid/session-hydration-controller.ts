@@ -14,6 +14,7 @@ import type { SessionCommandTransport } from "./session-transport.ts";
 
 export class SessionHydrationController {
   #initialLoadPending = false;
+  #rehydrating = false;
   #rehydratePending = false;
   readonly #realtime: SessionRealtimeState;
   readonly #sessionMutationPending: () => boolean;
@@ -96,6 +97,7 @@ export class SessionHydrationController {
 
   reset(): void {
     this.#initialLoadPending = false;
+    this.#rehydrating = false;
     this.#rehydratePending = false;
   }
 
@@ -103,12 +105,17 @@ export class SessionHydrationController {
     if (
       !this.#rehydratePending ||
       this.#initialLoadPending ||
+      this.#rehydrating ||
       this.#sessionMutationPending()
     ) {
       return;
     }
     this.#rehydratePending = false;
-    void this.#rehydrate();
+    this.#rehydrating = true;
+    void this.#rehydrate().finally(() => {
+      this.#rehydrating = false;
+      this.continueRehydrate();
+    });
   }
 
   async readDetail(

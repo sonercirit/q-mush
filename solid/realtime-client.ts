@@ -1,5 +1,8 @@
 import { REALTIME_PATH } from "../shared/routes.ts";
-import type { UserRealtimeCommand } from "../shared/user-realtime-protocol.ts";
+import {
+  RealtimeCommandError,
+  type UserRealtimeCommand,
+} from "../shared/user-realtime-protocol.ts";
 import {
   readRealtimeServerEvent,
   type RealtimeServerEvent,
@@ -20,13 +23,11 @@ type SessionDelta = Extract<
   { readonly type: "session_delta" }
 >;
 
-interface RealtimeCommandError {
-  readonly code: string;
-}
+const MAXIMUM_PENDING_COMMANDS = 1_000;
 
 interface PendingCommand {
-  readonly command: UserRealtimeCommand;
-  readonly reject: (error: RealtimeCommandError) => void;
+  readonly message: string;
+  readonly reject: (error: Error) => void;
   readonly resolve: (result: unknown) => void;
 }
 
@@ -55,6 +56,30 @@ function commandIdentifier(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${commandSequence.toString(36)}`;
 }
 
+function serializedCommand(command: UserRealtimeCommand): string {
+  const message = JSON.stringify(command);
+  if (typeof message !== "string") {
+    throw new Error("The realtime command could not be serialized");
+  }
+  return message;
+}
+
+function readServerReady(message: string): string | undefined {
+  const value: unknown = JSON.parse(message);
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "type" in value &&
+    value.type === "ready" &&
+    "instanceId" in value &&
+    typeof value.instanceId === "string" &&
+    value.instanceId.length > 0
+  ) {
+    return value.instanceId;
+  }
+  return undefined;
+}
+
 export class RealtimeConnection implements SessionCommandTransport {
   readonly #clearTimeout: (id: number) => void;
   readonly #createSocket: BrowserWebSocketFactory;
@@ -67,9 +92,11 @@ export class RealtimeConnection implements SessionCommandTransport {
   #reconnectAttempt = 0;
   #reconnectTimer: number | undefined;
   #hasOpened = false;
+  #instanceId: string | undefined;
   #sessionDeltaGeneration = 0;
   #sessionDeltas = new Map<string, SessionDelta>();
   #sessionDeltaFrame: number | undefined;
+  #serverInstanceId: string | undefined;
   #socket: BrowserWebSocket | undefined;
   #stopped = true;
 
@@ -105,12 +132,25 @@ export class RealtimeConnection implements SessionCommandTransport {
       payload,
       type: "command",
     };
-    return new Promise(
-      (resolve, reject: (error: RealtimeCommandError) => void) => {
-        this.#pending.set(command.commandId, { command, reject, resolve });
-        this.#send(command);
-      },
-    );
+    let message: string;
+    try {
+      message = serializedCommand(command);
+    } catch {
+      return Promise.reject(new RealtimeCommandError("invalid_command"));
+    }
+    if (this.#pending.size >= MAXIMUM_PENDING_COMMANDS) {
+      return Promise.reject(
+        new RealtimeCommandError("command_capacity_exceeded"),
+      );
+    }
+    return new Promise((resolve, reject) => {
+      this.#pending.set(command.commandId, {
+        message,
+        reject,
+        resolve,
+      });
+      this.#send(message);
+    });
   }
 
   onReconnect(listener: () => void): () => void {
@@ -136,13 +176,13 @@ export class RealtimeConnection implements SessionCommandTransport {
     }
     const socket = this.#socket;
     this.#socket = undefined;
+    this.#hasOpened = false;
+    this.#instanceId = undefined;
+    this.#serverInstanceId = undefined;
     this.#sessionDeltaGeneration += 1;
     this.#sessionDeltaFrame = undefined;
     this.#sessionDeltas.clear();
-    for (const pending of this.#pending.values()) {
-      pending.reject({ code: "connection_stopped" });
-    }
-    this.#pending.clear();
+    this.#rejectPending("connection_stopped");
     socket?.close();
   }
 
@@ -159,19 +199,15 @@ export class RealtimeConnection implements SessionCommandTransport {
     }
     this.#socket = socket;
     socket.addEventListener("open", () => {
-      if (this.#socket !== socket || this.#stopped) {
+      if (
+        this.#socket !== socket ||
+        this.#stopped ||
+        socket.readyState !== WebSocket.OPEN
+      ) {
         socket.close();
         return;
       }
       this.#reconnectAttempt = 0;
-      const reconnecting = this.#hasOpened;
-      this.#hasOpened = true;
-      for (const pending of this.#pending.values()) {
-        this.#send(pending.command, socket);
-      }
-      if (reconnecting) {
-        notifyListeners(this.#reconnectListeners);
-      }
     });
     socket.addEventListener("message", (event) => {
       if (this.#socket !== socket || this.#stopped) {
@@ -182,6 +218,17 @@ export class RealtimeConnection implements SessionCommandTransport {
         return;
       }
       try {
+        const instanceId = readServerReady(event.data);
+        if (instanceId !== undefined) {
+          if (this.#instanceId !== undefined) {
+            throw new Error("The realtime server sent a duplicate handshake");
+          }
+          this.#ready(socket, instanceId);
+          return;
+        }
+        if (this.#instanceId === undefined) {
+          throw new Error("The realtime server was not ready");
+        }
         const acknowledgement = this.#readAcknowledgement(event.data);
         if (acknowledgement) {
           return;
@@ -194,12 +241,39 @@ export class RealtimeConnection implements SessionCommandTransport {
     socket.addEventListener("close", () => {
       if (this.#socket === socket) {
         this.#socket = undefined;
+        this.#instanceId = undefined;
         this.#scheduleReconnect();
       }
     });
     socket.addEventListener("error", () => {
       socket.close();
     });
+  }
+
+  #rejectPending(code: string): void {
+    for (const pending of this.#pending.values()) {
+      pending.reject(new RealtimeCommandError(code));
+    }
+    this.#pending.clear();
+  }
+
+  #ready(socket: BrowserWebSocket, instanceId: string): void {
+    const reconnecting = this.#hasOpened;
+    const priorInstanceId = this.#serverInstanceId;
+    this.#hasOpened = true;
+    this.#instanceId = instanceId;
+    this.#serverInstanceId = instanceId;
+
+    if (priorInstanceId !== undefined && priorInstanceId !== instanceId) {
+      this.#rejectPending("outcome_unknown");
+    } else {
+      for (const pending of this.#pending.values()) {
+        this.#send(pending.message, socket);
+      }
+    }
+    if (reconnecting) {
+      notifyListeners(this.#reconnectListeners);
+    }
   }
 
   #readAcknowledgement(message: string): boolean {
@@ -225,7 +299,7 @@ export class RealtimeConnection implements SessionCommandTransport {
         );
       }
       this.#settlePending(value.commandId, () => {
-        pending.reject({ code: error });
+        pending.reject(new RealtimeCommandError(error));
       });
       return true;
     }
@@ -245,12 +319,15 @@ export class RealtimeConnection implements SessionCommandTransport {
     settle();
   }
 
-  #send(command: UserRealtimeCommand, socket = this.#socket): void {
-    if (socket?.readyState !== WebSocket.OPEN) {
+  #send(message: string, socket = this.#socket): void {
+    if (
+      socket?.readyState !== WebSocket.OPEN ||
+      (socket === this.#socket && this.#instanceId === undefined)
+    ) {
       return;
     }
     try {
-      socket.send(JSON.stringify(command));
+      socket.send(message);
     } catch {
       socket.close();
     }

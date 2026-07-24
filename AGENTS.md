@@ -4,10 +4,9 @@ Living project memory.
 
 ## Project Snapshot
 
-- Private strict-TypeScript ESM Bun/SolidJS with source in `solid/`,
-  `sync-engine/`, `runner/`, and `shared/`; server entry:
-  `sync-engine/index.ts`.
-- Tests use Vitest with Bun and live in `test/` directories; there is no `src/`.
+- Private strict-TypeScript ESM Bun/SolidJS; source: `solid/`, `sync-engine/`,
+  `runner/`, and `shared/`; server entry: `sync-engine/index.ts`.
+- Tests use Vitest/Bun in `test/` directories; no `src/`.
 - Homepage `/`; app `/app`.
 
 ## Working Agreements
@@ -49,18 +48,18 @@ Living project memory.
   state, every browser session read and mutation, session updates, and runner
   work use authenticated WebSockets at `/api/realtime` and
   `/api/runner/realtime`; browser session HTTP routes are not exposed. Session
-  commands use correlated IDs and user-scoped idempotency keys, and completed
-  results replay after reconnect for exactly-once execution. Because agents may
-  modify this repository through the running app, `bun run dev` does not restart
-  for source edits. `scripts/dev.ts` watches only the ignored
-  `data/development-server.restart` trigger written by `bun run dev:restart`.
-  `sync-engine/runner-executable.ts` fingerprints the runner source and
-  compiler, builds in a private temporary directory, caches it in memory, and
-  serves it from `/runner/executable`. Triggered development restarts reject new
-  agent work, let active sessions finish, then replace the server process, so a
-  session can safely request its own restart. Textual response bodies are
-  precompressed once per handler, with `zstd`, Brotli, gzip, or deflate
-  negotiated in that server-preference order.
+  commands use correlated IDs and user-scoped idempotency keys. Its in-process
+  ledger replays until restart; unresolved commands then fail as outcome-unknown
+  rather than execute twice. Because agents may modify this repository through
+  the app, `bun run dev` does not restart for source edits. `scripts/dev.ts`
+  watches only the ignored `data/development-server.restart` trigger written by
+  `bun run dev:restart`. `sync-engine/runner-executable.ts` fingerprints the
+  runner source and compiler, builds in a private temporary directory, caches it
+  in memory, and serves it from `/runner/executable`. Triggered development
+  restarts reject new agent work, let active sessions finish, then replace the
+  server process, so a session can safely request its own restart. Textual
+  response bodies are precompressed once per handler, with `zstd`, Brotli, gzip,
+  or deflate negotiated in that server-preference order.
 - `solid/pages.tsx` renders both server page shells through Solid's SSR runtime;
   `sync-engine/pages.ts` loads it with Vite's SSR runner for Bun. The browser
   app mounts from `solid/client.tsx`; routes live in `shared/routes.ts`.

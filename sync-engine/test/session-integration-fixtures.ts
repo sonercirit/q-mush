@@ -29,14 +29,40 @@ import { takeValue } from "./oauth-test-helpers.ts";
 export const RUNNER_ID = "018bcfe5-6800-7000-8000-000000000061";
 export const SESSION_ID = "018bcfe5-6800-7000-8000-000000000062";
 export const CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000063";
+export const TEST_PROVIDER_CREDENTIAL: ProviderCredentialAccess = {
+  accountId: "provider-account",
+  id: CREDENTIAL_ID,
+  isDefault: false,
+  label: "Agent key",
+  secret: "provider-secret",
+  source: "api_key",
+};
 const RUNNER_TOKEN = "qmr_session-runner-token";
 export const RUNNER_COMMAND_ID = "agent-command-1";
 
+interface ConnectedSessionOptions {
+  readonly credentialSource?: ProviderCredentialAccess["source"];
+  readonly discoverModels?: AgentModelDiscoverer;
+  readonly readCredential?: (
+    userId: string,
+    credentialId: string,
+  ) => Promise<ProviderCredentialAccess | undefined>;
+}
+
 export function connectedSessionSetup(
   model: AgentModel,
-  credentialSource: ProviderCredentialAccess["source"] = "api_key",
+  credentialSourceOrOptions:
+    ConnectedSessionOptions | ProviderCredentialAccess["source"] = "api_key",
   discoverModels?: AgentModelDiscoverer,
 ) {
+  const options: ConnectedSessionOptions =
+    typeof credentialSourceOrOptions === "string"
+      ? {
+          credentialSource: credentialSourceOrOptions,
+          ...(discoverModels === undefined ? {} : { discoverModels }),
+        }
+      : credentialSourceOrOptions;
+  const credentialSource = options.credentialSource ?? "api_key";
   const database = createAuthenticatedTestDatabase();
   const authOptions = { database, now: () => TEST_NOW };
   const auth = createGoogleAuthFromEnvironment({}, authOptions);
@@ -62,18 +88,18 @@ export function connectedSessionSetup(
 
   addTestProviderCredential(database, CREDENTIAL_ID);
   const credential: ProviderCredentialAccess = {
-    accountId: "provider-account",
-    id: CREDENTIAL_ID,
-    isDefault: false,
-    label: "Agent key",
-    secret: "provider-secret",
+    ...TEST_PROVIDER_CREDENTIAL,
     source: credentialSource,
   };
   const reader = {
-    readCredential: (userId: string, credentialId: string) =>
-      userId === TEST_USER_ID && credentialId === CREDENTIAL_ID
-        ? credential
-        : undefined,
+    readCredential:
+      options.readCredential ??
+      ((userId: string, credentialId: string) =>
+        Promise.resolve(
+          userId === TEST_USER_ID && credentialId === CREDENTIAL_ID
+            ? credential
+            : undefined,
+        )),
   };
   const ids = [
     SESSION_ID,
@@ -113,7 +139,9 @@ export function connectedSessionSetup(
       },
       broker,
       database,
-      ...(discoverModels === undefined ? {} : { discoverModels }),
+      ...(options.discoverModels === undefined
+        ? {}
+        : { discoverModels: options.discoverModels }),
       modelFactory: ({
         credential: selectedCredential,
         model: selectedModel,

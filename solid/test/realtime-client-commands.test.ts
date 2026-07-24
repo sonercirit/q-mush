@@ -2,6 +2,8 @@ import { expect, test } from "vitest";
 import { isRecord } from "../../shared/auth-model.ts";
 import { RealtimeConnection } from "../../solid/realtime-client.ts";
 
+const INSTANCE_ID = "server-instance-1";
+
 class CommandSocket extends EventTarget {
   readonly sent = new Array<string>();
   readyState: number = WebSocket.OPEN;
@@ -11,10 +13,18 @@ class CommandSocket extends EventTarget {
     this.dispatchEvent(new CustomEvent("close"));
   }
 
-  close = this.shutdown.bind(this);
+  closeSilently(): void {
+    this.readyState = WebSocket.CLOSED;
+  }
+
+  close = this.closeSilently.bind(this);
 
   send(data: string): void {
     this.sent[this.sent.length] = data;
+  }
+
+  ready(instanceId = INSTANCE_ID): void {
+    this.receive(JSON.stringify({ instanceId, type: "ready" }));
   }
 
   receive(data: string): void {
@@ -61,18 +71,36 @@ function commandConnection(): {
     setTimeout: rememberTimer,
   });
   connection.start();
-  sockets.at(0)?.dispatchEvent(new Event("open"));
+  const firstSocket = sockets.at(0);
+  if (firstSocket !== undefined) {
+    firstSocket.readyState = WebSocket.OPEN;
+    firstSocket.dispatchEvent(new Event("open"));
+    firstSocket.ready();
+  }
   return { connection, sockets, timers };
+}
+
+function closeCurrentAndReconnect(
+  harness: ReturnType<typeof commandConnection>,
+): void {
+  harness.sockets.at(0)?.shutdown();
+  harness.timers.shift()?.();
 }
 
 function reconnect(
   harness: ReturnType<typeof commandConnection>,
+  instanceId = INSTANCE_ID,
 ): CommandSocket | undefined {
-  harness.sockets.at(0)?.shutdown();
-  harness.timers.shift()?.();
+  closeCurrentAndReconnect(harness);
   const socket = harness.sockets.at(1);
-  socket?.dispatchEvent(new Event("open"));
-  return socket;
+  if (socket === undefined) {
+    return undefined;
+  }
+  if (socket.readyState === WebSocket.OPEN) {
+    socket.dispatchEvent(new Event("open"));
+    socket.ready(instanceId);
+  }
+  return harness.sockets.at(-1);
 }
 
 function acknowledge(
@@ -131,15 +159,88 @@ test("retries an outstanding command with the same idempotency key after reconne
   harness.connection.stop();
 });
 
-test("ignores stale acknowledgements from a replaced socket", async () => {
-  const { harness, pending, sent } = commandHarness("sessions.stop", {
+test("does not resend an unresolved command after the server restarts", async () => {
+  const { harness, pending } = commandHarness("sessions.send", {
+    prompt: "Only once",
     sessionId: "session-1",
   });
 
-  const reconnected = reconnect(harness);
-  acknowledge(harness.sockets.at(0), sent.commandId, { status: "stale" });
-  await settle(pending, reconnected, sent.commandId, { status: "stopped" });
+  const reconnected = reconnect(harness, "server-instance-2");
+
+  expect(reconnected?.sent).toEqual([]);
+  await expect(pending).rejects.toMatchObject({ code: "outcome_unknown" });
   harness.connection.stop();
+});
+
+test("does not treat a pre-open socket failure as a reconnect", () => {
+  const harness = commandConnection();
+  let reconnects = 0;
+  harness.connection.onReconnect(() => {
+    reconnects += 1;
+  });
+
+  closeCurrentAndReconnect(harness);
+  const replacement = harness.sockets.at(1);
+  if (replacement !== undefined) {
+    replacement.shutdown();
+  }
+  harness.timers.shift()?.();
+  const opened = harness.sockets.at(2);
+  if (opened !== undefined) {
+    opened.readyState = WebSocket.OPEN;
+    opened.dispatchEvent(new Event("open"));
+    opened.ready();
+  }
+
+  expect(reconnects).toBe(1);
+  harness.connection.stop();
+});
+
+test("ignores stale command acknowledgements from a replaced socket", async () => {
+  const staleAcknowledgements = [
+    { result: { status: "stale" }, type: "command_success" },
+    { error: "command_capacity_exceeded", type: "command_error" },
+  ] as const;
+
+  for (const stale of staleAcknowledgements) {
+    const { harness, pending, sent } = commandHarness("sessions.stop", {
+      sessionId: "session-1",
+    });
+    const reconnected = reconnect(harness);
+    harness.sockets
+      .at(0)
+      ?.receive(JSON.stringify({ commandId: sent.commandId, ...stale }));
+    await settle(pending, reconnected, sent.commandId, { status: "stopped" });
+    harness.connection.stop();
+  }
+});
+
+test("rejects unserializable commands without retaining pending work", async () => {
+  const harness = commandConnection();
+  const payload: Record<string, unknown> = {};
+  payload["self"] = payload;
+
+  await expect(
+    harness.connection.command("sessions.send", payload),
+  ).rejects.toMatchObject({ code: "invalid_command" });
+  expect(harness.sockets.at(0)?.sent).toEqual([]);
+  harness.connection.stop();
+});
+
+test("bounds commands queued while disconnected", async () => {
+  const harness = commandConnection();
+  harness.sockets.at(0)?.shutdown();
+  const queued = Array.from({ length: 1_000 }, (_, index) =>
+    harness.connection.command("sessions.read", {
+      sessionId: `session-${String(index)}`,
+    }),
+  );
+
+  await expect(
+    harness.connection.command("sessions.read", { sessionId: "overflow" }),
+  ).rejects.toMatchObject({ code: "command_capacity_exceeded" });
+  harness.connection.stop();
+  await Promise.allSettled(queued);
 });
 
 test("resolves a replayed acknowledgement once and rejects pending work on stop", async () => {
@@ -149,16 +250,13 @@ test("resolves a replayed acknowledgement once and rejects pending work on stop"
     {},
     "subscription-1",
   );
-  acknowledge(
-    harness.sockets.at(0),
-    sentCommand(harness.sockets.at(0)).commandId,
-    { sessions: [] },
-  );
+  const firstCommandId = sentCommand(harness.sockets.at(0)).commandId;
+  acknowledge(harness.sockets.at(0), firstCommandId, { sessions: [] });
   await expect(first).resolves.toEqual({ sessions: [] });
 
   const pending = harness.connection.command("sessions.read", {
     sessionId: "session-1",
   });
   harness.connection.stop();
-  await expect(pending).rejects.toEqual({ code: "connection_stopped" });
+  await expect(pending).rejects.toMatchObject({ code: "connection_stopped" });
 });

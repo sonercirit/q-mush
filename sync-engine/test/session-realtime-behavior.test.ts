@@ -1,10 +1,11 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import type { AgentModelCatalog } from "../../shared/agent-configuration.ts";
 import type {
   AgentConversationMessage,
   AgentModel,
   AgentModelTurn,
 } from "../../shared/agent-loop.ts";
+import type { ProviderCredentialAccess } from "../../shared/provider-credential-store.ts";
 import { SESSION_REALTIME_OPERATIONS } from "../../shared/user-realtime-protocol.ts";
 import type { AgentModelDiscoverer } from "../../sync-engine/agent-model-discovery.ts";
 import { executeSessionRealtimeCommand } from "../../sync-engine/session-realtime-commands.ts";
@@ -17,6 +18,7 @@ import {
   createSessionInput,
   CREDENTIAL_ID,
   SESSION_ID,
+  TEST_PROVIDER_CREDENTIAL,
 } from "./session-integration-fixtures.ts";
 import {
   completeAgentFileLookup,
@@ -89,6 +91,19 @@ function unavailableCreateInput(
   value: string,
 ): Readonly<Record<string, unknown>> {
   return { ...createSessionInput(), [field]: value };
+}
+
+function deferredCredential(): {
+  readonly promise: Promise<ProviderCredentialAccess | undefined>;
+  readonly resolve: (credential: ProviderCredentialAccess) => void;
+} {
+  const deferred = Promise.withResolvers<
+    ProviderCredentialAccess | undefined
+  >();
+  return {
+    promise: deferred.promise,
+    resolve: deferred.resolve,
+  };
 }
 
 describe("session realtime integration", () => {
@@ -253,6 +268,50 @@ describe("session realtime integration", () => {
       currentContextTokens: 0,
     });
     setup.database.$client.close();
+  });
+
+  test("does not queue work when credential access races with draining", async () => {
+    for (const [operation, payload] of [
+      [
+        SESSION_REALTIME_OPERATIONS.send,
+        { prompt: "Do not queue this", sessionId: SESSION_ID },
+      ],
+      [SESSION_REALTIME_OPERATIONS.compact, { sessionId: SESSION_ID }],
+    ] as const) {
+      const blocked = deferredCredential();
+      const credential = TEST_PROVIDER_CREDENTIAL;
+      let credentialReads = 0;
+      const setup = connectedSessionSetup(
+        new ScriptedAgentModel([
+          { content: "Initial work complete.", toolCalls: [] },
+        ]),
+        {
+          readCredential: () => {
+            credentialReads += 1;
+            return credentialReads === 1
+              ? Promise.resolve(credential)
+              : blocked.promise;
+          },
+        },
+      );
+      await startAndComplete(setup);
+
+      const command = execute(setup, operation, payload);
+      await vi.waitFor(() => {
+        expect(credentialReads).toBe(2);
+      });
+      await setup.sessions.drain();
+      blocked.resolve(credential);
+
+      await expect(command).rejects.toMatchObject({
+        code: "server_restarting",
+      });
+      expect(sessionDetail(setup.sessions)).toMatchObject({ status: "idle" });
+      expect(JSON.stringify(sessionDetail(setup.sessions))).not.toContain(
+        "Do not queue this",
+      );
+      setup.database.$client.close();
+    }
   });
 
   test("stops a running model request", async () => {

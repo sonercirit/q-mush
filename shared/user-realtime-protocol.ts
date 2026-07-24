@@ -19,6 +19,16 @@ export const SESSION_REALTIME_OPERATIONS = {
   subscribe: "sessions.subscribe",
 } as const;
 
+export class RealtimeCommandError extends Error {
+  readonly code: string;
+
+  constructor(code: string) {
+    super(code);
+    this.name = "RealtimeCommandError";
+    this.code = code;
+  }
+}
+
 export type UserRealtimeCommand = Readonly<{
   commandId: string;
   idempotencyKey: string;

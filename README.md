@@ -119,7 +119,10 @@ two pages and their assets:
   create image-capable sessions, send follow-ups, continue, compact, change
   automatic compaction, and stop work. The same socket publishes session
   summaries, selected detail snapshots, and streaming model output; session HTTP
-  routes are intentionally not exposed.
+  routes are intentionally not exposed. Commands are replay-safe across ordinary
+  reconnects while the same server process remains alive. If the process changes
+  before acknowledging a command, the browser reports its outcome as unknown and
+  restores session state rather than risking a duplicate mutation.
 
 After signing in, use **Set up a runner** in the control center. Run the shown
 one-liner on a macOS or Linux computer, or download and run the installer. The

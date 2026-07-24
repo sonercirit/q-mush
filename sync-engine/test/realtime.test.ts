@@ -37,6 +37,7 @@ function auth(user: AuthenticatedUser | null): GoogleAuth {
     begin: () => new Response(),
     complete: () => Promise.resolve(new Response()),
     logout: () => new Response(),
+    revalidateUser: () => user,
     session: () => new Response(),
   };
 }
@@ -91,18 +92,31 @@ function sessions(overrides: SessionOverrides = {}): SessionIntegration {
   };
 }
 
+function realtimeOptions(
+  user: AuthenticatedUser | null,
+  runnerOverrides?: RunnerIntegrationOverrides,
+  sessionOverrides?: SessionOverrides,
+) {
+  return {
+    auth: auth(user),
+    hub: new RealtimeHub(),
+    instanceId: "server-instance-1",
+    runnerVersion: "runner-version",
+    runners: runners(undefined, runnerOverrides),
+    sessions: sessions(sessionOverrides),
+  };
+}
+
 function integration(
   user: AuthenticatedUser | null,
   token?: string,
   runnerOverrides?: RunnerIntegrationOverrides,
   sessionOverrides?: SessionOverrides,
 ) {
+  const options = realtimeOptions(user, runnerOverrides, sessionOverrides);
   return createRealtimeIntegration({
-    auth: auth(user),
-    hub: new RealtimeHub(),
-    runnerVersion: "runner-version",
+    ...options,
     runners: runners(token, runnerOverrides),
-    sessions: sessions(sessionOverrides),
   });
 }
 
@@ -149,6 +163,17 @@ function testSocket(
   };
 }
 
+function websocketOpen(
+  handler: Bun.WebSocketHandler<QmushWebSocketData>,
+  socket: TestSocket,
+): unknown {
+  const method: unknown = Reflect.get(handler, "open");
+  if (typeof method !== "function") {
+    return undefined;
+  }
+  return Reflect.apply(method, undefined, [socket]);
+}
+
 function websocketMessage(
   handler: Bun.WebSocketHandler<QmushWebSocketData>,
   socket: TestSocket,
@@ -161,13 +186,22 @@ function websocketMessage(
   return Reflect.apply(method, undefined, [socket, message]);
 }
 
+function upgradedData(
+  realtime: ReturnType<typeof createRealtimeIntegration>,
+  path: string,
+): QmushWebSocketData | undefined {
+  const server = new UpgradeServer();
+  expect(upgrade(realtime, path, server)).toBeUndefined();
+  return server.data;
+}
+
 function userSocket(
   realtime: ReturnType<typeof createRealtimeIntegration>,
   overrides: SocketOverrides = {},
 ): TestSocket {
-  const server = new UpgradeServer();
-  expect(upgrade(realtime, "/api/realtime", server)).toBeUndefined();
-  return testSocket(server.data, overrides);
+  const socket = testSocket(upgradedData(realtime, "/api/realtime"), overrides);
+  websocketOpen(realtime.websocket, socket);
+  return socket;
 }
 
 function commandMessage(
@@ -198,20 +232,63 @@ async function sendUserMessage(
   await nextTask();
 }
 
+function captureMessages(): {
+  readonly messages: string[];
+  readonly send: (message: string) => number;
+} {
+  const messages: string[] = [];
+  return {
+    messages,
+    send: (message) => {
+      messages.push(message);
+      return 1;
+    },
+  };
+}
+
+function recordCloses(): {
+  readonly closes: [number | undefined, string | undefined][];
+  readonly close: (code?: number, reason?: string) => void;
+} {
+  const closes: [number | undefined, string | undefined][] = [];
+  return {
+    close: (code, reason) => {
+      closes.push([code, reason]);
+    },
+    closes,
+  };
+}
+
+function closeRecordingSocket(
+  realtime: ReturnType<typeof createRealtimeIntegration>,
+  send?: (message: string) => number,
+): {
+  readonly closes: [number | undefined, string | undefined][];
+  readonly socket: TestSocket;
+} {
+  const { close, closes } = recordCloses();
+  return {
+    closes,
+    socket: userSocket(
+      realtime,
+      send === undefined ? { close } : { close, send },
+    ),
+  };
+}
+
 function expectUpgrade(
   realtime: ReturnType<typeof createRealtimeIntegration>,
   path: string,
   expected: QmushWebSocketData,
 ): void {
-  const server = new UpgradeServer();
-  expect(upgrade(realtime, path, server)).toBeUndefined();
-  expect(server.data).toEqual(expected);
+  const actual = upgradedData(realtime, path);
+  expect(actual).toEqual(expected);
 }
 
 test("upgrades an authenticated browser realtime request", () => {
   const realtime = integration(USER);
   expect(realtime.websocket.maxPayloadLength).toBe(128 * 1024 * 1024 + 1);
-  expectUpgrade(realtime, "/api/realtime", {
+  expect(upgradedData(realtime, "/api/realtime")).toMatchObject({
     kind: "user",
     user: USER,
   });
@@ -233,31 +310,61 @@ test("rejects unauthorized and non-WebSocket realtime requests", () => {
 
 test("acknowledges malformed correlated commands and rejects uncorrelated messages", async () => {
   const realtime = integration(USER);
-  const sent: string[] = [];
-  const closes: [number | undefined, string | undefined][] = [];
-  const socket = userSocket(realtime, {
-    close: (code, reason) => {
-      closes.push([code, reason]);
-    },
-    send: (message) => {
-      sent.push(message);
-      return 1;
-    },
-  });
+  const { messages: sent, send } = captureMessages();
+  const { closes, socket } = closeRecordingSocket(realtime, send);
 
   await sendUserMessage(
     realtime,
     socket,
     commandMessage("command-invalid", "mutation-invalid", "bad operation"),
   );
-  await sendUserMessage(realtime, socket, JSON.stringify({ type: "refresh" }));
+  await sendUserMessage(realtime, socket, '{"type":"refresh"}');
 
-  expect(JSON.parse(sent[0] ?? "null")).toEqual({
+  expect(JSON.parse(sent.pop() ?? "null")).toEqual({
     commandId: "command-invalid",
     error: "invalid_command",
     type: "command_error",
   });
   expect(closes).toContainEqual([1008, "Invalid command"]);
+});
+
+test("closes the socket when an acknowledgement is dropped", async () => {
+  const realtime = integration(USER);
+  const { closes, socket } = closeRecordingSocket(realtime, (message) =>
+    message.includes("command_success") ? 0 : 1,
+  );
+
+  await sendUserMessage(
+    realtime,
+    socket,
+    commandMessage("command-subscribe", "subscription-1"),
+  );
+
+  expect(closes).toContainEqual([1011, "Acknowledgement delivery failed"]);
+});
+
+test("revalidates authentication before executing each command", async () => {
+  let authenticated: AuthenticatedUser | null = USER;
+  const summariesForUser = vi.fn(() => []);
+  const realtime = createRealtimeIntegration({
+    ...realtimeOptions(USER, undefined, { summariesForUser }),
+    auth: {
+      ...auth(USER),
+      revalidateUser: () => authenticated,
+    },
+  });
+  const { closes, socket } = closeRecordingSocket(realtime);
+  summariesForUser.mockClear();
+  authenticated = null;
+
+  await sendUserMessage(
+    realtime,
+    socket,
+    commandMessage("command-subscribe", "subscription-1"),
+  );
+
+  expect(summariesForUser).not.toHaveBeenCalled();
+  expect(closes).toContainEqual([1008, "Authentication expired"]);
 });
 
 test("replays a completed command after its socket disconnects", async () => {
@@ -269,8 +376,13 @@ test("replays a completed command after its socket disconnects", async () => {
       }),
   );
   const realtime = integration(USER, undefined, undefined, { createForUser });
+  let firstSend = true;
   const firstSocket = userSocket(realtime, {
     send: () => {
+      if (firstSend) {
+        firstSend = false;
+        return 1;
+      }
       throw new Error("The socket disconnected");
     },
   });
@@ -307,17 +419,12 @@ test("replays a completed command after its socket disconnects", async () => {
   complete?.(replayDetail);
   await nextTask();
 
-  const sent: string[] = [];
-  const replaySocket = userSocket(realtime, {
-    send: (acknowledgement) => {
-      sent.push(acknowledgement);
-      return 1;
-    },
-  });
+  const { messages: sent, send } = captureMessages();
+  const replaySocket = userSocket(realtime, { send });
   await sendUserMessage(realtime, replaySocket, message);
 
   expect(createForUser).toHaveBeenCalledOnce();
-  expect(JSON.parse(sent.at(-1) ?? "null")).toMatchObject({
+  expect(JSON.parse(sent.pop() ?? "null")).toMatchObject({
     commandId: "command-create",
     result: { id: "session-1", status: "queued" },
     type: "command_success",

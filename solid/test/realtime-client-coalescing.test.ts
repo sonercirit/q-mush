@@ -52,6 +52,7 @@ test("coalesces session deltas into one update per animation frame", () => {
     setTimeout: () => 1,
   });
   connection.start();
+  socket.receive({ instanceId: "server-instance-1", type: "ready" });
 
   for (const event of [
     {
