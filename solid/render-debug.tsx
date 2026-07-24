@@ -366,7 +366,7 @@ export class RenderDebugInstrumentation {
     if (!this.enabled || this.#highlightLayer === undefined) {
       return;
     }
-    const updates = [...this.#pending];
+    const updates = [...this.#pending].slice(-MAXIMUM_HIGHLIGHTS);
     this.#pending.clear();
     const visibleUpdates: [Element, MutationSummary][] = [];
     for (const [element, summary] of updates) {
@@ -377,9 +377,7 @@ export class RenderDebugInstrumentation {
         }
       }
     }
-    for (const [element, summary] of visibleUpdates.slice(
-      -MAXIMUM_HIGHLIGHTS,
-    )) {
+    for (const [element, summary] of visibleUpdates) {
       this.#showHighlight(element, summary);
     }
     this.#positionHighlights();

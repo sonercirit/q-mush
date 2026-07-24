@@ -218,7 +218,8 @@ test("starts safely when MutationObserver is unavailable", () => {
   expect(document.querySelector("#render-debug-overlay")).toBeNull();
   expect(frames.pending()).toBe(0);
 });
-test("bounds initial and streaming highlights", () => {
+test("bounds initial and streaming highlight work", () => {
+  const bounds = vi.spyOn(Element.prototype, "getBoundingClientRect");
   const root = appRoot();
   for (let index = 0; index < 1_200; index += 1) {
     const parent = appendElement(root, "div", `static-${String(index)}`);
@@ -243,5 +244,6 @@ test("bounds initial and streaming highlights", () => {
   harness.observer.records(mutations);
   harness.frames.flush(16);
   expect(highlights().length).toBeLessThanOrEqual(100);
+  expect(bounds.mock.calls.length).toBeLessThanOrEqual(600);
 });
 /* cpd-ignore-end -- deterministic MutationObserver DOM harness */
