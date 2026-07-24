@@ -407,7 +407,13 @@ export class ChatCompletionsAgentModel implements AgentModel {
         if (delay === undefined) {
           return undefined;
         }
-        await this.#waitForRetry(delay, signal);
+        await this.#waitForRetry(
+          error instanceof ProviderWebSocketError &&
+            error.retryAfterMilliseconds !== undefined
+            ? error.retryAfterMilliseconds
+            : delay,
+          signal,
+        );
       }
     }
   }

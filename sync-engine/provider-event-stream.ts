@@ -35,6 +35,7 @@ export async function readProviderEventStream(
 
   const decoder = new TextDecoder();
   let buffered = "";
+  const streamState = { done: false };
   const processBlocks = (final: boolean): void => {
     buffered = buffered.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
     const blocks = buffered.split("\n\n");
@@ -42,7 +43,9 @@ export async function readProviderEventStream(
 
     for (const block of blocks) {
       const data = eventData(block);
-      if (data.length > 0 && data !== "[DONE]") {
+      if (data === "[DONE]") {
+        streamState.done = true;
+      } else if (data.length > 0) {
         accumulator.push(parseEventData(data));
       }
     }
@@ -58,5 +61,11 @@ export async function readProviderEventStream(
   }
   processBlocks(true);
 
+  if (!accumulator.receivedEvent) {
+    throw new Error("The provider response ended before completion");
+  }
+  if (protocol === "chat_completions" && !streamState.done) {
+    throw new Error("The provider response ended before completion");
+  }
   return accumulator.finish();
 }

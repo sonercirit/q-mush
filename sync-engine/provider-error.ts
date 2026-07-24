@@ -1,0 +1,225 @@
+import { isRecord } from "../shared/auth-model.ts";
+
+const ERROR_DETAIL_MAXIMUM_LENGTH = 500;
+const RETRY_AFTER_MAX_MILLISECONDS = 60_000;
+const SECRET_PATTERN = /\b(?:sk|sess|Bearer)[-_A-Za-z0-9.]{8,}\b/giu;
+const TRANSIENT_ERROR_CODES = new Set([
+  "api_connection_error",
+  "conflict",
+  "engine_overloaded",
+  "gateway_timeout",
+  "internal_error",
+  "internal_server_error",
+  "overloaded",
+  "provider_unavailable",
+  "rate_limit_error",
+  "rate_limit_exceeded",
+  "request_timeout",
+  "server_error",
+  "server_is_overloaded",
+  "service_unavailable",
+  "slow_down",
+  "temporarily_unavailable",
+  "timeout",
+  "upstream_error",
+]);
+const PERMANENT_ERROR_CODES = new Set([
+  "authentication_error",
+  "bad_request",
+  "bio_policy",
+  "context_length_exceeded",
+  "cyber_policy",
+  "insufficient_quota",
+  "invalid_api_key",
+  "invalid_prompt",
+  "invalid_request",
+  "invalid_request_error",
+  "moderation_blocked",
+  "model_not_found",
+  "not_found_error",
+  "permission_error",
+  "permission_denied",
+  "policy_violation",
+  "usage_not_included",
+  "unsupported_parameter",
+]);
+
+type ProviderErrorCode = number | string | undefined;
+
+interface ProviderErrorDetails {
+  readonly code: ProviderErrorCode;
+  readonly detail: string;
+  readonly retryAfterMilliseconds: number | undefined;
+  readonly status: number | undefined;
+}
+
+export class ProviderStreamError extends Error {
+  readonly retryAfterMilliseconds: number | undefined;
+  readonly transient: boolean;
+
+  constructor(
+    message: string,
+    transient: boolean,
+    retryAfterMilliseconds?: number,
+  ) {
+    super(message);
+    this.name = "ProviderStreamError";
+    this.retryAfterMilliseconds = retryAfterMilliseconds;
+    this.transient = transient;
+  }
+}
+
+function requiredTrimmedString(value: unknown): string | undefined {
+  const string = typeof value === "string" ? value.trim() : "";
+  return string || undefined;
+}
+
+interface ProviderErrorSources {
+  readonly error: Readonly<Record<string, unknown>>;
+  readonly response: Readonly<Record<string, unknown>> | undefined;
+}
+
+function providerErrorSources(
+  event: Readonly<Record<string, unknown>>,
+): ProviderErrorSources {
+  const responseValue = event["response"];
+  const response = isRecord(responseValue) ? responseValue : undefined;
+  const candidates: unknown[] = [event["error"], response?.["error"], event];
+  return { error: candidates.find(isRecord) ?? event, response };
+}
+
+function retryAfterMilliseconds(
+  error: Readonly<Record<string, unknown>>,
+): number | undefined {
+  for (const [key, multiplier] of [
+    ["retry_after_ms", 1],
+    ["retry_after_milliseconds", 1],
+    ["retry_after", 1_000],
+  ] as const) {
+    const value = error[key];
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+      return value * multiplier;
+    }
+  }
+  return undefined;
+}
+
+function providerErrorContext(
+  event: Readonly<Record<string, unknown>>,
+  response: Readonly<Record<string, unknown>> | undefined,
+  error: Readonly<Record<string, unknown>>,
+): string {
+  const message = requiredTrimmedString(error["message"] ?? event["message"]);
+  const requestId = requiredTrimmedString(
+    event["request_id"] ??
+      event["requestId"] ??
+      event["id"] ??
+      event["event_id"] ??
+      response?.["request_id"] ??
+      response?.["requestId"] ??
+      response?.["id"],
+  );
+  const request = requestId === undefined ? "" : `request ID ${requestId}`;
+  return [request, message ?? ""]
+    .filter((value) => value.length > 0)
+    .join(": ");
+}
+
+function numericCode(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value)
+    ? value
+    : undefined;
+}
+
+function providerErrorDetails(
+  event: Readonly<Record<string, unknown>>,
+): ProviderErrorDetails {
+  const { error, response } = providerErrorSources(event);
+  const codeValue = error["code"] ?? error["type"];
+  const code = numericCode(codeValue) ?? requiredTrimmedString(codeValue);
+  const retryAfter = retryAfterMilliseconds(error);
+  const statusValue = event["status"] ?? error["status"];
+  return {
+    code,
+    detail: providerErrorContext(event, response, error),
+    retryAfterMilliseconds:
+      retryAfter === undefined
+        ? undefined
+        : Math.min(retryAfter, RETRY_AFTER_MAX_MILLISECONDS),
+    status: numericCode(statusValue),
+  };
+}
+
+function codeIsTransient(code: ProviderErrorCode): boolean {
+  if (typeof code === "number") {
+    return code === 408 || code === 409 || code === 429 || code >= 500;
+  }
+  if (code === undefined) {
+    return false;
+  }
+  return TRANSIENT_ERROR_CODES.has(code.toLowerCase());
+}
+
+function codeIsPermanent(code: ProviderErrorCode): boolean {
+  if (typeof code === "number") {
+    return code >= 400 && code < 500 && !codeIsTransient(code);
+  }
+  if (code === undefined) {
+    return false;
+  }
+  return PERMANENT_ERROR_CODES.has(code.toLowerCase());
+}
+
+function removeControlCharacters(value: string): string {
+  let result = "";
+  for (const character of value) {
+    const codePoint = character.codePointAt(0) ?? 0;
+    if (codePoint >= 32 && codePoint !== 127) {
+      result += character;
+    }
+  }
+  return result;
+}
+
+function sanitize(value: string): string {
+  return removeControlCharacters(value)
+    .replaceAll(SECRET_PATTERN, "[redacted]")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, ERROR_DETAIL_MAXIMUM_LENGTH);
+}
+
+function providerErrorMessage(details: ProviderErrorDetails): string {
+  const code =
+    details.code === undefined ? "" : ` (code ${String(details.code)})`;
+  const detail = details.detail.length === 0 ? "" : `: ${details.detail}`;
+  return sanitize(
+    `The provider failed to complete the request${code}${detail}`,
+  );
+}
+
+export function readProviderStreamError(
+  event: Readonly<Record<string, unknown>>,
+): ProviderStreamError {
+  const details = providerErrorDetails(event);
+  const transient =
+    codeIsTransient(details.code) ||
+    (details.status !== undefined && codeIsTransient(details.status));
+  const permanent =
+    codeIsPermanent(details.code) ||
+    (details.status !== undefined && codeIsPermanent(details.status));
+  return new ProviderStreamError(
+    providerErrorMessage(details),
+    transient && !permanent,
+    details.retryAfterMilliseconds,
+  );
+}
+
+export function isProviderStreamErrorEvent(
+  event: Readonly<Record<string, unknown>>,
+): boolean {
+  if (event["type"] === "response.failed" || event["type"] === "error") {
+    return true;
+  }
+  return isRecord(event["error"]);
+}
