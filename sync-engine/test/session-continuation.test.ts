@@ -1,4 +1,8 @@
 import { describe, expect, test } from "vitest";
+import type {
+  AgentModelCatalog,
+  AgentModelOption,
+} from "../../shared/agent-configuration.ts";
 import { SESSIONS_PATH } from "../../shared/routes.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import { createAuthenticatedRequest } from "./authenticated-integration-test-helpers.ts";
@@ -19,6 +23,78 @@ import {
 } from "./session-integration-helpers.ts";
 
 describe("session continuation", () => {
+  test("continues automatically after final-turn compaction", async () => {
+    const model = new ScriptedAgentModel([
+      {
+        content: "Work complete before compaction.",
+        contextTokens: 95_000,
+        toolCalls: [],
+      },
+      { content: "Compacted handoff.", costUsd: 0.1, toolCalls: [] },
+      {
+        content: "Work complete after compaction.",
+        contextTokens: 96_000,
+        toolCalls: [],
+      },
+    ]);
+    const compactingModel: AgentModelOption = {
+      contextWindow: 100_000,
+      id: "gpt-4.1-mini",
+      inputModalities: null,
+      label: "Compaction test model",
+      outputModalities: null,
+      pricing: null,
+      reasoningEfforts: ["high"],
+    };
+    const catalog: AgentModelCatalog = {
+      defaultModel: compactingModel.id,
+      models: [compactingModel],
+    };
+    const setup = connectedSessionSetup(model, "api_key", () =>
+      Promise.resolve(catalog),
+    );
+    const createResponse = await setup.sessions.collection(
+      new Request(createSessionRequest()),
+    );
+
+    if (createResponse.status !== 201) {
+      throw new Error("The compaction test session could not be created");
+    }
+    await Promise.resolve();
+    await completeAgentFileLookup(setup);
+    const continued = await waitForSessionValue(
+      () => sessionDetail(setup.sessions),
+      (value) =>
+        hasSessionStatus("idle")(value) &&
+        JSON.stringify(value).includes("Work complete after compaction."),
+    );
+
+    expect(model.requests).toHaveLength(3);
+    expect(model.requests[1]).toContainEqual({
+      content: "Work complete before compaction.",
+      role: "assistant",
+      toolCalls: [],
+    });
+    expect(model.requests[2]?.[0]?.content).toContain("Compacted handoff.");
+    expect(JSON.stringify(continued)).not.toContain(
+      "Work complete before compaction.",
+    );
+    expect(continued).toMatchObject({
+      costUsd: 0.1,
+      currentContextTokens: 96_000,
+      messages: [
+        { role: "user" },
+        {
+          content: "Work complete after compaction.",
+          role: "assistant",
+        },
+      ],
+      status: "idle",
+    });
+    expect(JSON.stringify(continued)).toContain("Compacted handoff.");
+    setup.database.$client.close();
+  });
+
   test("spawns a session, executes tools on its runner, and accepts follow-ups", async () => {
     const model = new ScriptedAgentModel([
       {

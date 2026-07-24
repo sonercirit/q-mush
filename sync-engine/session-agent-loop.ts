@@ -1,5 +1,6 @@
 import {
   runAgentLoop,
+  throwIfAgentAborted,
   type AgentConversationMessage,
   type AgentLoopOptions,
   type AgentModel,
@@ -42,6 +43,7 @@ function shouldCompactFinalTurn(
 
 interface CompactionState {
   pending: boolean;
+  progressSinceCompaction: boolean;
 }
 
 async function compactConversation(
@@ -53,12 +55,14 @@ async function compactConversation(
   signal?: AbortSignal,
 ): Promise<readonly AgentConversationMessage[]> {
   const compacted = await options.createCompactor().compact(messages, signal);
+  throwIfAgentAborted(signal);
   const costUsd =
     compacted.costUsd ??
     options.agentCost({
       costUsd: compacted.costUsd,
       tokenUsage: compacted.tokenUsage,
     });
+  await options.recordCompaction(compacted.summary);
   if (costUsd !== null) {
     await options.recordUsage({
       contextTokens: null,
@@ -66,60 +70,79 @@ async function compactConversation(
       costUsd,
     });
   }
-  await options.recordCompaction(compacted.summary);
   return compacted.messages;
 }
 
 export async function runCompactingAgentLoop(
   options: CompactingAgentLoopOptions,
 ): Promise<void> {
-  const compaction: CompactionState = { pending: false };
+  let messages: readonly AgentConversationMessage[] = options.initialMessages;
+  let allowCompaction = true;
 
-  const finalMessages = await runAgentLoop({
-    executeTool: options.executeTool,
-    initialMessages: options.initialMessages,
-    model: {
-      complete: async (conversation, signal) => {
-        const turn = await options.model.complete(conversation, signal);
-        const costUsd = turn.costUsd ?? options.agentCost(turn);
-        if (turn.contextTokens !== null || costUsd !== null) {
-          const costBasis =
-            costUsd === null
-              ? null
-              : turn.costUsd === null
-                ? "estimated"
-                : "reported";
-          await options.recordUsage({
-            contextTokens: turn.contextTokens,
-            costBasis,
-            costUsd,
-          });
-        }
-        compaction.pending = shouldCompactFinalTurn(
-          options,
-          turn.contextTokens,
-        );
-        return turn;
+  for (;;) {
+    const compaction: CompactionState = {
+      pending: false,
+      progressSinceCompaction: false,
+    };
+
+    const finalMessages = await runAgentLoop({
+      executeTool: options.executeTool,
+      initialMessages: messages,
+      model: {
+        complete: async (conversation, signal) => {
+          const turn = await options.model.complete(conversation, signal);
+          const costUsd = turn.costUsd ?? options.agentCost(turn);
+          if (turn.contextTokens !== null || costUsd !== null) {
+            const costBasis =
+              costUsd === null
+                ? null
+                : turn.costUsd === null
+                  ? "estimated"
+                  : "reported";
+            await options.recordUsage({
+              contextTokens: turn.contextTokens,
+              costBasis,
+              costUsd,
+            });
+          }
+          compaction.pending =
+            (allowCompaction || compaction.progressSinceCompaction) &&
+            shouldCompactFinalTurn(options, turn.contextTokens);
+          return turn;
+        },
       },
-    },
-    prepareMessages: async (messages, signal) => {
-      if (!compaction.pending) {
-        return messages;
-      }
+      prepareMessages: async (preparedMessages, signal) => {
+        if (!compaction.pending) {
+          return preparedMessages;
+        }
 
-      const compactedMessages = await compactConversation(
-        options,
-        messages,
-        signal,
-      );
-      compaction.pending = false;
-      return compactedMessages;
-    },
-    recordMessage: options.recordMessage,
-    ...(options.signal === undefined ? {} : { signal: options.signal }),
-  });
+        const compactedMessages = await compactConversation(
+          options,
+          preparedMessages,
+          signal,
+        );
+        compaction.pending = false;
+        allowCompaction = false;
+        return compactedMessages;
+      },
+      recordMessage: async (message) => {
+        await options.recordMessage(message);
+        if (message.role === "tool") {
+          compaction.progressSinceCompaction = true;
+        }
+      },
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+    });
 
-  if (compaction.pending) {
-    await compactConversation(options, finalMessages, options.signal);
+    if (!compaction.pending) {
+      return;
+    }
+
+    messages = await compactConversation(
+      options,
+      finalMessages,
+      options.signal,
+    );
+    allowCompaction = false;
   }
 }
