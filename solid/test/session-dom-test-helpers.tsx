@@ -1,5 +1,4 @@
 import type { JSX } from "solid-js";
-import { render } from "solid-js/web";
 import type {
   AgentSessionDetail,
   AgentSessionMessage,
@@ -9,43 +8,14 @@ import { summaryFromDetail } from "../session-codec.ts";
 import { SessionController } from "../session-controller.ts";
 import { SessionDetail } from "../session-detail-client.tsx";
 import type { SessionTranscriptFilterStorage } from "../session-transcript-filters.ts";
+import { mountTestView, queryTestElement } from "./dom-test-helpers.ts";
 import { sessionDetailState } from "./session-detail-test-state.ts";
 import { runningSessionDetail } from "./transcript-ordering-fixtures.ts";
 
 export const DOM_TEST_DISPOSALS: (() => void)[] = [];
 
-export function mountTestView(
-  renderView: () => JSX.Element,
-  disposals: (() => void)[] = DOM_TEST_DISPOSALS,
-): HTMLDivElement {
-  const container = document.createElement("div");
-  document.body.append(container);
-  disposals.push(render(renderView, container));
-  return container;
-}
-
-export function queryTestElement(
-  container: ParentNode,
-  selector: string,
-): Element {
-  const element = container.querySelector(selector);
-  if (element === null) {
-    throw new Error(`The test element ${selector} was not rendered`);
-  }
-  return element;
-}
-
 export function messageBoundary(container: ParentNode, id: string): Element {
   return queryTestElement(container, `[data-render-boundary='message:${id}']`);
-}
-
-export function disposeTestViews(
-  disposals: (() => void)[] = DOM_TEST_DISPOSALS,
-): void {
-  for (const dispose of disposals.splice(0).reverse()) {
-    dispose();
-  }
-  document.body.replaceChildren();
 }
 
 export interface MountedTestSession {

@@ -455,7 +455,7 @@ function renderMarkdownBlock(block: MarkdownBlock): JSX.Element {
 
 export function renderMarkdown(content: string): JSX.Element {
   return (
-    <div class="space-y-3 text-sm leading-6 text-slate-200">
+    <div class="min-w-0 space-y-3 text-sm leading-6 text-slate-200 [overflow-wrap:anywhere]">
       {parseMarkdownBlocks(content).map(renderMarkdownBlock)}
     </div>
   );

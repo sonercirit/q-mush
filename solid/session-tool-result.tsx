@@ -157,7 +157,7 @@ function renderShellStream(options: {
           {options.kind}
         </span>
       </p>
-      <pre class="max-h-80 overflow-auto p-3 font-mono text-xs leading-5 text-slate-300">
+      <pre class="max-h-80 max-w-full overflow-auto overscroll-contain p-3 font-mono text-xs leading-5 text-slate-300">
         {options.content.length > 0 ? options.content : "(empty)"}
       </pre>
     </section>
@@ -299,11 +299,11 @@ function renderEditOutput(options: ToolOutputOptions): JSX.Element | undefined {
         aria-label={`Diff for ${call.path}`}
         class="overflow-hidden rounded-lg border border-white/10 bg-slate-950/90"
       >
-        <p class="border-b border-white/10 px-3 py-2 font-mono text-[0.65rem] text-slate-400">
+        <p class="path-wrap border-b border-white/10 px-3 py-2 font-mono text-[0.65rem] text-slate-400">
           {call.path}
         </p>
         <pre
-          class="max-h-80 overflow-auto py-2 font-mono text-xs leading-5"
+          class="max-h-80 max-w-full overflow-auto overscroll-contain py-2 font-mono text-xs leading-5"
           data-language="diff"
         >
           <code>
@@ -384,12 +384,12 @@ function renderParallelOutput(
 
   const calls = parallelCallContexts(options.arguments);
   return (
-    <ol class="space-y-3">
+    <ol class="min-w-0 space-y-3">
       {results.map((result, index) => {
         const call = calls[index];
         const output = result.output;
         return (
-          <li class="rounded-lg border border-white/10 bg-black/20 p-3">
+          <li class="min-w-0 rounded-lg border border-white/10 bg-black/20 p-3">
             <p class="mb-2 text-[0.65rem] font-semibold tracking-wide text-slate-400 uppercase">
               {`Result ${String(index + 1)} · ${result.recipientName}`}
             </p>

@@ -1,7 +1,7 @@
 import { Show, type JSX } from "solid-js";
 
 const REMOVE_BUTTON_CLASSES =
-  "shrink-0 rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-rose-300/30 hover:text-rose-200 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300";
+  "min-h-11 rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-rose-300/30 hover:text-rose-200 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300";
 
 interface ItemActionProps {
   readonly data?: Readonly<Record<string, number | string>>;
@@ -35,12 +35,12 @@ export function DefaultControl(
       fallback={
         <ItemAction
           {...props}
-          class="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-emerald-300/30 hover:text-emerald-200 disabled:cursor-wait disabled:opacity-60"
+          class="min-h-11 rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-emerald-300/30 hover:text-emerald-200 disabled:cursor-wait disabled:opacity-60"
         />
       }
       when={props.isDefault}
     >
-      <span class="rounded-full border border-emerald-300/20 bg-emerald-300/10 px-3 py-2 text-xs font-semibold text-emerald-200">
+      <span class="inline-flex min-h-11 items-center rounded-full border border-emerald-300/20 bg-emerald-300/10 px-3 py-2 text-xs font-semibold text-emerald-200">
         Default
       </span>
     </Show>

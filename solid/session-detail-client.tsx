@@ -155,6 +155,7 @@ const SESSION_PAGE_SIZE = 10;
 
 export function SessionList(props: {
   readonly controller: SessionController;
+  readonly onSelect?: () => void;
 }): JSX.Element {
   const state = props.controller.view;
   const [page, setPage] = createSignal(1);
@@ -181,25 +182,29 @@ export function SessionList(props: {
           </p>
         }
         items={sessions()}
-        listClass="max-h-144 space-y-2 overflow-y-auto"
+        listClass="session-list-items max-h-144 space-y-2 overflow-y-auto overscroll-contain pr-0.5"
         loading={<p class="text-sm text-slate-400">Loading sessions…</p>}
       >
         {(session) => (
           <li>
             <button
-              class={`w-full rounded-2xl border p-4 text-left transition ${state().selectedId === session.id ? "border-emerald-300/30 bg-emerald-300/10" : "border-white/10 bg-slate-950/60 hover:border-white/20"}`}
+              aria-current={
+                state().selectedId === session.id ? "true" : undefined
+              }
+              class={`session-list-item min-h-11 w-full rounded-2xl border p-3 text-left transition sm:p-4 ${state().selectedId === session.id ? "border-emerald-300/30 bg-emerald-300/10" : "border-white/10 bg-slate-950/60 hover:border-white/20"}`}
               data-session-id={session.id}
               onClick={() => {
+                props.onSelect?.();
                 void props.controller.select(session.id);
               }}
               type="button"
             >
               <span class="flex items-start justify-between gap-3">
-                <span class="min-w-0">
-                  <span class="block truncate font-semibold text-white">
+                <span class="min-w-0 flex-1">
+                  <span class="session-list-title block min-w-0 break-words font-semibold text-white">
                     {session.title}
                   </span>
-                  <span class="mt-1 block truncate text-xs text-slate-500">
+                  <span class="session-list-meta mt-1 block min-w-0 break-words text-xs leading-5 text-slate-500">
                     {sessionModelLabel(session)}
                   </span>
                   <span class="mt-2 block">
@@ -215,7 +220,7 @@ export function SessionList(props: {
       <Show when={(state().sessions?.length ?? 0) > SESSION_PAGE_SIZE}>
         <nav
           aria-label="Session list pagination"
-          class="mt-3 flex items-center justify-between gap-3"
+          class="session-list-pagination mt-3 flex flex-wrap items-center justify-between gap-2"
         >
           <button
             aria-label="Previous session page"
@@ -374,20 +379,29 @@ function LoadedSessionDetail(props: {
   createEffect(on(() => scrollRevision(props.detail), scrollToEnd));
 
   return (
-    <div>
+    <div class="session-detail-view min-w-0" data-session-detail-view="true">
       <div class="flex flex-col gap-4 border-b border-white/10 pb-5 sm:flex-row sm:items-start sm:justify-between">
-        <div class="min-w-0">
+        <div class="min-w-0 flex-1">
           <div class="flex flex-wrap items-center gap-2">
             <h3 class="text-xl font-semibold text-white">
               {props.detail.title}
             </h3>
             {statusBadge(props.detail.status)}
           </div>
-          <p
-            class={`mt-2 truncate text-xs ${sessionContextClasses(props.detail)}`}
-          >
-            {`${sessionModelLabel(props.detail)} · ${sessionContextLabel(props.detail)} · ${props.detail.workingDirectory} · Agent file: ${props.detail.agentFile?.name ?? "None"}`}
-          </p>
+          <div class="mt-2 flex min-w-0 flex-wrap items-baseline gap-x-1 gap-y-1 text-xs">
+            <span class={sessionContextClasses(props.detail)}>
+              {`${sessionModelLabel(props.detail)} · ${sessionContextLabel(props.detail)} ·`}
+            </span>
+            <code
+              class="path-wrap min-w-0 text-cyan-200"
+              data-working-directory="true"
+            >
+              {props.detail.workingDirectory}
+            </code>
+            <span class={sessionContextClasses(props.detail)}>
+              {`· Agent file: ${props.detail.agentFile?.name ?? "None"}`}
+            </span>
+          </div>
           <span class="mt-2 block">
             <SessionMetrics session={props.detail} />
           </span>
@@ -425,7 +439,7 @@ function LoadedSessionDetail(props: {
       />
       <ul
         aria-live="polite"
-        class="mt-5 max-h-[36rem] space-y-3 overflow-y-auto pr-1"
+        class="session-transcript mt-5 max-h-[36rem] min-w-0 space-y-3 overflow-y-auto overscroll-contain pr-1"
         data-session-transcript="true"
         onScroll={(event) => {
           handleTranscriptScroll(event.currentTarget);
@@ -439,7 +453,7 @@ function LoadedSessionDetail(props: {
           tools={props.detail.tools}
         />
       </ul>
-      <div class="mt-5 flex flex-col gap-3">
+      <div class="session-composer mt-5 flex min-w-0 flex-col gap-3">
         <Show when={!active()}>
           <CompactionControls
             autoCompact={props.detail.autoCompact}
@@ -453,7 +467,7 @@ function LoadedSessionDetail(props: {
             }}
           />
         </Show>
-        <div class="flex flex-col gap-3 sm:flex-row">
+        <div class="flex min-w-0 flex-col gap-3 sm:flex-row">
           <SessionFollowUp
             availabilityDescriptionId="session-composer-state"
             availabilityLabel={
@@ -498,7 +512,7 @@ function LoadedSessionDetail(props: {
             <button
               aria-describedby="session-composer-state"
               aria-label="Continue without another instruction"
-              class="self-end rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+              class="min-h-11 w-full self-stretch rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:self-end"
               disabled={composerDisabled()}
               onClick={() => {
                 if (!composerDisabled()) {

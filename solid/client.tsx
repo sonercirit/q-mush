@@ -144,7 +144,7 @@ function Header(props: {
 }): JSX.Element {
   return (
     <header
-      class="flex flex-col gap-4 border-b border-white/10 pb-6 sm:flex-row sm:items-center sm:justify-between"
+      class="flex min-w-0 flex-col gap-4 border-b border-white/10 pb-5 sm:pb-6 md:flex-row md:items-center md:justify-between"
       {...renderDebugBoundary("header", "Header")}
     >
       <a
@@ -159,9 +159,9 @@ function Header(props: {
         </span>
         Q Mush
       </a>
-      <div class="flex flex-wrap items-center gap-2">
+      <div class="flex min-w-0 flex-wrap items-center gap-2">
         <RenderDebugToggle view={props.debug} />
-        <span class="inline-flex min-w-0 items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-300/10 px-3 py-1 text-sm text-emerald-200">
+        <span class="inline-flex min-w-0 max-w-full items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-300/10 px-3 py-1 text-sm text-emerald-200">
           <span
             aria-hidden="true"
             class="size-2 shrink-0 rounded-full bg-emerald-300"
@@ -180,7 +180,7 @@ function Header(props: {
 function LoadingCard(): JSX.Element {
   return (
     <div
-      class="mt-12 rounded-3xl border border-white/10 bg-white/[0.06] p-8 shadow-2xl shadow-emerald-950/30 backdrop-blur-xl"
+      class="mt-8 rounded-3xl border border-white/10 bg-white/[0.06] p-5 shadow-2xl shadow-emerald-950/30 backdrop-blur-xl sm:mt-12 sm:p-8"
       role="status"
     >
       <div class="flex items-center gap-4">
@@ -197,7 +197,7 @@ function LoadingCard(): JSX.Element {
 function SessionError(props: { readonly onRetry: () => void }): JSX.Element {
   return (
     <div
-      class="mt-12 rounded-3xl border border-rose-300/20 bg-rose-300/10 p-8"
+      class="mt-8 rounded-3xl border border-rose-300/20 bg-rose-300/10 p-5 sm:mt-12 sm:p-8"
       role="alert"
     >
       <p class="text-sm font-medium text-rose-200">Connection problem</p>
@@ -222,14 +222,14 @@ function SignIn(props: {
   readonly googleLoginAvailable: boolean;
 }): JSX.Element {
   return (
-    <div class="mt-12 grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+    <div class="mt-8 grid min-w-0 gap-6 sm:mt-12 lg:grid-cols-[minmax(0,1fr)_22rem]">
       <section
         aria-labelledby="sign-in-title"
-        class="rounded-3xl border border-white/10 bg-white/[0.06] p-7 shadow-2xl shadow-emerald-950/30 backdrop-blur-xl sm:p-10"
+        class="min-w-0 rounded-3xl border border-white/10 bg-white/[0.06] p-5 shadow-2xl shadow-emerald-950/30 backdrop-blur-xl sm:p-8 lg:p-10"
       >
         <p class="text-sm font-medium text-emerald-300">Secure access</p>
         <h2
-          class="mt-3 text-3xl font-semibold tracking-tight text-white"
+          class="mt-3 text-2xl font-semibold tracking-tight break-words text-white sm:text-3xl"
           id="sign-in-title"
         >
           Sign in to your control center
@@ -266,7 +266,7 @@ function SignIn(props: {
       </section>
       <aside
         aria-label="Login details"
-        class="rounded-3xl border border-white/10 bg-slate-900/80 p-7 sm:p-8"
+        class="min-w-0 rounded-3xl border border-white/10 bg-slate-900/80 p-5 sm:p-8"
       >
         <span
           aria-hidden="true"
@@ -299,7 +299,7 @@ function Workspace(props: {
 }): JSX.Element {
   return (
     <div
-      class="mt-12 space-y-6"
+      class="mt-8 min-w-0 space-y-5 sm:mt-10 sm:space-y-6 lg:mt-12"
       {...renderDebugBoundary("workspace", "Authenticated workspace")}
     >
       <SessionPanel
@@ -311,14 +311,16 @@ function Workspace(props: {
       <RunnerPanel controller={props.runners} />
       <aside
         aria-label="Google account"
-        class="flex flex-col gap-5 rounded-3xl border border-white/10 bg-slate-900/80 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8"
+        class="flex min-w-0 flex-col gap-5 rounded-3xl border border-white/10 bg-slate-900/80 p-4 sm:p-6 md:flex-row md:items-center md:justify-between lg:p-8"
         {...renderDebugBoundary("google-account", "Google account")}
       >
         <div class="flex min-w-0 items-center gap-4">
           <Avatar user={props.user} />
           <div class="min-w-0">
-            <p class="truncate font-semibold text-white">{props.user.name}</p>
-            <p class="truncate text-sm text-slate-400">{props.user.email}</p>
+            <p class="break-words font-semibold text-white">
+              {props.user.name}
+            </p>
+            <p class="break-all text-sm text-slate-400">{props.user.email}</p>
           </div>
         </div>
         <button
@@ -433,7 +435,7 @@ function App(): JSX.Element {
     <RenderDebugProvider view={debug}>
       <section
         aria-labelledby="app-title"
-        class="relative min-h-screen overflow-hidden bg-slate-950 px-6 py-8 text-slate-100 sm:px-10 lg:px-12"
+        class="relative min-h-screen overflow-x-clip bg-slate-950 px-3 py-5 text-slate-100 sm:px-6 sm:py-8 md:px-8 lg:px-10 xl:px-12"
         {...renderDebugBoundary("app", "App")}
       >
         <div
@@ -444,14 +446,14 @@ function App(): JSX.Element {
           aria-hidden="true"
           class="absolute -bottom-48 left-1/4 size-96 rounded-full bg-emerald-500/15 blur-3xl"
         />
-        <div class="relative mx-auto max-w-6xl">
+        <div class="relative mx-auto min-w-0 max-w-[96rem]">
           <Header debug={debug} user={session()?.user} />
-          <main class="py-12 sm:py-16">
+          <main class="min-w-0 py-8 sm:py-12 lg:py-16">
             <p class="text-sm font-semibold tracking-[0.2em] text-emerald-300 uppercase">
               Local control center
             </p>
             <h1
-              class="mt-4 text-4xl font-semibold tracking-tight text-white sm:text-6xl"
+              class="mt-4 text-3xl font-semibold tracking-tight break-words text-white sm:text-5xl lg:text-6xl"
               id="app-title"
             >
               Q Mush App

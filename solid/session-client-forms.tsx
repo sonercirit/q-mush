@@ -66,7 +66,7 @@ export function SessionPromptInput(
   props: SessionPromptInputProps,
 ): JSX.Element {
   return (
-    <div class="lg:col-span-2">
+    <div class="md:col-span-2">
       <label class="text-sm font-medium text-slate-200" for="session-prompt">
         Task
       </label>
@@ -121,7 +121,7 @@ export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
       })}
       <button
         aria-describedby={props.availabilityDescriptionId}
-        class="self-end rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+        class="min-h-11 w-full self-stretch rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:self-end"
         disabled={props.disabled}
         type="submit"
       >

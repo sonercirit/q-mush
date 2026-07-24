@@ -22,12 +22,16 @@ import { summaryFromDetail } from "../session-codec.ts";
 import { SessionController } from "../session-controller.ts";
 import { SessionList } from "../session-detail-client.tsx";
 import { initialSessionViewState } from "../session-state.ts";
-import { runnerSummary } from "./runner-fixtures.ts";
 import {
+  clickTestButton,
   disposeTestViews,
-  mountTestSessionDetail,
   mountTestView,
   queryTestElement,
+  queryTestTranscript,
+} from "./dom-test-helpers.ts";
+import { runnerSummary } from "./runner-fixtures.ts";
+import {
+  mountTestSessionDetail,
   restoreFetchAfterTest,
 } from "./session-dom-test-helpers.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
@@ -44,14 +48,6 @@ function mount(renderView: () => JSX.Element): HTMLDivElement {
 
 function query(container: ParentNode, selector: string): Element {
   return queryTestElement(container, selector);
-}
-
-function transcript(container: ParentNode): HTMLUListElement {
-  const element = query(container, "[data-session-transcript='true']");
-  if (!(element instanceof HTMLUListElement)) {
-    throw new TypeError("The session transcript is not a list");
-  }
-  return element;
 }
 
 function sessionTimeText(container: ParentNode): string {
@@ -74,14 +70,6 @@ function setScrollableDimensions(
     clientHeight: { configurable: true, value: clientHeight },
     scrollHeight: { configurable: true, value: scrollHeight },
   });
-}
-
-function click(container: ParentNode, selector: string): void {
-  const control = query(container, selector);
-  if (!(control instanceof HTMLButtonElement)) {
-    throw new TypeError(`The test control ${selector} is not a button`);
-  }
-  control.click();
 }
 
 function credential(id: string, label: string): ProviderCredential {
@@ -137,7 +125,7 @@ test("provider loading, error, retry, and list updates preserve the panel", asyn
   expect(reactive.state().error).toBe("OpenAI is unavailable");
   expect(container.textContent).toContain("OpenAI is unavailable");
   const retry = vi.spyOn(controller, "load").mockResolvedValue();
-  click(container, "[role='alert'] button");
+  clickTestButton(container, "[role='alert'] button");
   expect(retry).toHaveBeenCalledOnce();
 
   const primary = credential("credential-1", "Primary");
@@ -232,7 +220,7 @@ test("scrolling away from and back to the transcript end updates scroll lock", (
     transcriptMessage("user-1", "Initial task", "user", 2),
   ]);
   const { container, controller } = mountSessionDetail(detail);
-  const element = transcript(container);
+  const element = queryTestTranscript(container);
   const toggle = query(container, "[data-scroll-lock-toggle='true']");
   setScrollableDimensions(element, 100, 500);
 
@@ -393,7 +381,7 @@ test("session resources, drafts, realtime lists, and selected details update in 
   controller.applyRealtime([summaryFromDetail(TEST_SESSION_DETAIL)]);
   expect(container.textContent).toContain("Fix the app");
   controller.setTranscriptFilter("systemPrompt", true);
-  click(container, `[data-session-id='${TEST_SESSION_DETAIL.id}']`);
+  clickTestButton(container, `[data-session-id='${TEST_SESSION_DETAIL.id}']`);
   const sessionPromptLabel = "System prompt";
   await vi.waitFor(() => {
     expect(container.textContent).toContain(sessionPromptLabel);

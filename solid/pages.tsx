@@ -9,9 +9,11 @@ import {
 
 function renderSummaryItem(term: string, description: string): JSX.Element {
   return (
-    <div class="flex items-center justify-between py-4">
+    <div class="flex min-w-0 flex-col gap-2 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
       <dt class="text-sm text-slate-400">{term}</dt>
-      <dd class="text-sm font-medium text-slate-200">{description}</dd>
+      <dd class="path-wrap text-sm font-medium text-slate-200 sm:text-right">
+        {description}
+      </dd>
     </div>
   );
 }
@@ -38,7 +40,7 @@ function renderDocument(title: string, body: JSX.Element[]): string {
 
 export function renderHomePage(): string {
   return renderDocument("Q Mush", [
-    <main class="relative isolate flex min-h-screen items-center overflow-hidden px-6 py-16 sm:px-10 lg:px-16">
+    <main class="relative isolate flex min-h-screen min-w-0 items-center overflow-x-clip px-4 py-10 sm:px-8 sm:py-14 lg:px-12 xl:px-16">
       <div
         aria-hidden="true"
         class="absolute -left-40 top-1/4 -z-10 size-96 rounded-full bg-emerald-500/20 blur-3xl"
@@ -47,7 +49,7 @@ export function renderHomePage(): string {
         aria-hidden="true"
         class="absolute -right-32 bottom-0 -z-10 size-96 rounded-full bg-cyan-500/15 blur-3xl"
       ></div>
-      <div class="mx-auto grid w-full max-w-6xl items-center gap-14 lg:grid-cols-[minmax(0,1.15fr)_minmax(18rem,0.85fr)]">
+      <div class="mx-auto grid w-full min-w-0 max-w-6xl items-center gap-10 md:gap-14 lg:grid-cols-[minmax(0,1.15fr)_minmax(18rem,0.85fr)]">
         <section aria-labelledby="home-title">
           <p class="mb-6 inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-300/10 px-3 py-1 text-sm font-medium text-emerald-200">
             <span
@@ -58,7 +60,7 @@ export function renderHomePage(): string {
           </p>
           <h1
             id="home-title"
-            class="max-w-3xl bg-gradient-to-br from-white via-emerald-100 to-cyan-300 bg-clip-text text-6xl font-semibold tracking-tight text-balance text-transparent sm:text-7xl lg:text-8xl"
+            class="max-w-3xl bg-gradient-to-br from-white via-emerald-100 to-cyan-300 bg-clip-text text-5xl font-semibold tracking-tight break-words text-balance text-transparent sm:text-7xl lg:text-8xl"
           >
             Q Mush
           </h1>
@@ -90,7 +92,7 @@ export function renderHomePage(): string {
 
         <aside
           aria-label="System summary"
-          class="rounded-3xl border border-white/10 bg-white/[0.06] p-6 shadow-2xl shadow-emerald-950/40 backdrop-blur-xl sm:p-8"
+          class="min-w-0 rounded-3xl border border-white/10 bg-white/[0.06] p-5 shadow-2xl shadow-emerald-950/40 backdrop-blur-xl sm:p-8"
         >
           <div class="flex items-center gap-4">
             <span

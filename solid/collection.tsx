@@ -26,9 +26,9 @@ export function RetryNotice(props: RetryNoticeProps): JSX.Element {
           class="mt-5 flex flex-col gap-3 rounded-2xl border border-rose-300/20 bg-rose-300/10 p-4 text-sm text-rose-100 sm:flex-row sm:items-center sm:justify-between"
           role="alert"
         >
-          <p>{error()}</p>
+          <p class="path-wrap min-w-0 flex-1">{error()}</p>
           <button
-            class="shrink-0 font-semibold underline underline-offset-4"
+            class="min-h-11 shrink-0 font-semibold underline underline-offset-4"
             type="button"
             onClick={props.onRetry}
           >

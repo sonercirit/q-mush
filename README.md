@@ -145,6 +145,14 @@ revokes its server-side registration, but it does not delete files from that
 computer. Rerun the installer once to migrate a legacy `q-mush-runner.js`
 installation to the self-updating executable.
 
+The browser control center is responsive from phone through wide desktop
+viewports. Session detail includes an app focus mode (separate from browser
+Fullscreen) that fills the app viewport while retaining a compact session rail;
+hover or keyboard focus expands the rail on desktop, while touch-sized layouts
+use the **Sessions** drawer. Selecting a session collapses it, and Escape closes
+the drawer before leaving focus mode. Focus mode keeps the mounted transcript,
+draft inputs, and scroll-lock state intact.
+
 After a runner and provider credential are ready, use **New agent session** in
 the control center. Select an online computer and credential; Q Mush discovers
 that credential's available agent models and model-specific reasoning efforts.

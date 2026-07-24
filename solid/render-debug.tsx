@@ -150,7 +150,7 @@ export function RenderDebugLegend(props: {
     <Show when={props.view.enabledView()}>
       <aside
         aria-label="Render debug legend"
-        class="fixed right-4 bottom-4 z-[100] w-64 rounded-2xl border border-white/15 bg-slate-950/95 p-4 shadow-2xl shadow-black/60 backdrop-blur sm:right-6 sm:bottom-6"
+        class="fixed right-2 bottom-2 z-[100] w-[calc(100vw-1rem)] max-w-64 rounded-2xl border border-white/15 bg-slate-950/95 p-4 shadow-2xl shadow-black/60 backdrop-blur sm:right-6 sm:bottom-6"
       >
         <div class="flex items-center justify-between gap-3">
           <p class="text-sm font-semibold text-white">Render debug</p>

@@ -77,7 +77,7 @@ export function renderModelModalities(
 
   return (
     <div
-      class="grid gap-3 lg:col-span-2 sm:grid-cols-2"
+      class="grid min-w-0 gap-3 md:col-span-2 sm:grid-cols-2"
       data-model-modalities="true"
     >
       {renderModalityGroup("input", model.inputModalities)}

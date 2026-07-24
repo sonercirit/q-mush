@@ -20,13 +20,13 @@ export function SessionImagePreviews(props: {
       <ul class="flex flex-wrap gap-3" data-session-images="true">
         <For each={props.images}>
           {(image, index) => (
-            <li class="relative w-28 rounded-xl border border-white/10 bg-slate-950/80 p-2">
+            <li class="relative min-w-0 w-24 rounded-xl border border-white/10 bg-slate-950/80 p-2 sm:w-28">
               <img
                 alt={image.name}
                 class="h-20 w-full rounded-lg object-cover"
                 src={agentImageDataUrl(image)}
               />
-              <p class="mt-1 truncate text-xs text-slate-400">{image.name}</p>
+              <p class="path-wrap mt-1 text-xs text-slate-400">{image.name}</p>
               <Show when={props.onRemove} keyed>
                 {(onRemove) => (
                   <button

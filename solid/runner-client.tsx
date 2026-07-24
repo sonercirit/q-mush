@@ -183,7 +183,7 @@ function RunnerItem(props: RunnerItemProps): JSX.Element {
 
   return (
     <li
-      class="flex flex-col gap-4 rounded-2xl border border-white/10 bg-slate-950/60 p-5 sm:flex-row sm:items-center sm:justify-between"
+      class="flex min-w-0 flex-col gap-4 rounded-2xl border border-white/10 bg-slate-950/60 p-4 sm:p-5 md:flex-row md:items-center md:justify-between"
       {...renderDebugBoundary(
         `runner:${props.runner.id}`,
         `Runner: ${props.runner.name ?? "New runner"}`,
@@ -198,7 +198,7 @@ function RunnerItem(props: RunnerItemProps): JSX.Element {
         </span>
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-2">
-            <p class="truncate font-semibold text-white">
+            <p class="path-wrap font-semibold text-white">
               {props.runner.name ?? "New runner"}
             </p>
             <span
@@ -207,10 +207,10 @@ function RunnerItem(props: RunnerItemProps): JSX.Element {
               {presentation().label}
             </span>
           </div>
-          <p class="mt-2 text-sm text-slate-400">
+          <p class="path-wrap mt-2 text-sm text-slate-400">
             {runnerDetails(props.runner)}
           </p>
-          <p class="mt-1 text-xs text-slate-500">
+          <p class="path-wrap mt-1 text-xs text-slate-500">
             {runnerActivity(props.runner)}
           </p>
         </div>
@@ -229,7 +229,7 @@ function RunnerSetup(props: RunnerPanelProps): JSX.Element {
   return (
     <Show when={props.state.setup}>
       {(setup) => (
-        <div class="mt-7 rounded-2xl border border-emerald-300/20 bg-emerald-300/[0.08] p-5 sm:p-6">
+        <div class="mt-7 rounded-2xl border border-emerald-300/20 bg-emerald-300/[0.08] p-4 sm:p-6">
           <p class="text-sm font-medium text-emerald-200">
             Install on one computer
           </p>
@@ -238,8 +238,8 @@ function RunnerSetup(props: RunnerPanelProps): JSX.Element {
             runner, starts it in the background, and connects it to your
             account.
           </p>
-          <div class="mt-4 flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950 p-3">
-            <code class="min-w-0 flex-1 overflow-x-auto whitespace-nowrap text-sm text-emerald-200">
+          <div class="mt-4 flex min-w-0 flex-col gap-3 rounded-xl border border-white/10 bg-slate-950 p-3 sm:flex-row sm:items-center">
+            <code class="path-wrap min-w-0 flex-1 text-sm text-emerald-200">
               {setup().command}
             </code>
             <button
@@ -282,7 +282,7 @@ function RunnerList(props: RunnerControllerProps): JSX.Element {
     </p>
   );
   const empty = (): JSX.Element => (
-    <div class="mt-7 rounded-2xl border border-dashed border-white/15 p-6 text-sm leading-6 text-slate-400">
+    <div class="mt-7 rounded-2xl border border-dashed border-white/15 p-4 text-sm leading-6 text-slate-400 sm:p-6">
       No runners yet. Set up one on every computer where you want Q Mush to run
       agents.
     </div>
@@ -315,12 +315,12 @@ export function RunnerPanel(props: RunnerControllerProps): JSX.Element {
   return (
     <section
       aria-labelledby="runners-title"
-      class="rounded-3xl border border-white/10 bg-white/[0.06] p-6 shadow-2xl shadow-emerald-950/30 backdrop-blur-xl sm:p-8"
+      class="min-w-0 rounded-3xl border border-white/10 bg-white/[0.06] p-4 shadow-2xl shadow-emerald-950/30 backdrop-blur-xl sm:p-6 lg:p-8"
       data-runner-panel="true"
       {...renderDebugBoundary("runners-panel", "Runners panel")}
     >
-      <div class="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
-        <div>
+      <header class="flex min-w-0 flex-col gap-5 md:flex-row md:items-start md:justify-between">
+        <div class="min-w-0 flex-1">
           <p class="text-sm font-medium text-emerald-300">
             Distributed runtime
           </p>
@@ -333,7 +333,7 @@ export function RunnerPanel(props: RunnerControllerProps): JSX.Element {
           </p>
         </div>
         <button
-          class="inline-flex shrink-0 items-center justify-center rounded-2xl bg-emerald-300 px-5 py-3 font-semibold text-slate-950 transition hover:bg-emerald-200 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
+          class="inline-flex min-h-11 w-full shrink-0 items-center justify-center rounded-2xl bg-emerald-300 px-5 py-3 text-center font-semibold text-slate-950 transition hover:bg-emerald-200 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300 sm:w-auto"
           disabled={state().creating}
           onClick={() => {
             void props.controller.create();
@@ -342,7 +342,7 @@ export function RunnerPanel(props: RunnerControllerProps): JSX.Element {
         >
           {state().creating ? "Preparing…" : "Set up a runner"}
         </button>
-      </div>
+      </header>
 
       <RunnerSetup controller={props.controller} state={state()} />
       <RunnerList controller={props.controller} />

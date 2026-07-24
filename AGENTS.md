@@ -1,27 +1,26 @@
 # AGENTS.md
 
-Living project memory; update durable information.
+Living project memory.
 
 ## Project Snapshot
 
-- Private strict-TypeScript ESM Bun/SolidJS.
-- Source: `solid/`, `sync-engine/`, `runner/`, `shared/`; server:
-  `sync-engine/index.ts`.
-- Tests live in `test/` directories; no `src/`.
-- Homepage `/`; app `/app`.
-- Tests use Vitest with Bun.
+- Private strict-TypeScript ESM Bun/SolidJS project.
+- Source is split across `solid/`, `sync-engine/`, `runner/`, and `shared/`;
+  `sync-engine/index.ts` is the server entry point.
+- Tests are under `test/`; no `src`.
+- `/` is the homepage; `/app` the app; Vitest uses Bun.
 
 ## Working Agreements
 
-- Inspect repository before edits.
-- Preserve patterns; add dependencies only when needed.
+- Inspect repository and status first.
+- Preserve patterns; add tools or dependencies only when needed.
 - Practice TDD: update a failing test, then implement and refactor green.
-- Follow DRY: keep facts and logic authoritative; avoid premature abstractions.
+- Follow DRY: keep logic authoritative without premature abstractions.
 - Follow KISS: prefer the simplest clear solution that meets requirements.
-- Follow local-first: keep core workflows local; remote services enhance them.
-- Run focused checks after changes, then broader checks when practical.
-- Keep changes focused; do not modify unrelated files.
-- Never commit secrets, generated artifacts, or local env files.
+- Keep workflows local-first; remote services enhance them.
+- Run narrow checks after each change, then broader checks when practical.
+- Keep changes focused.
+- Never commit secrets, credentials, generated artifacts, or local env files.
 
 ## Setup and Commands
 
@@ -29,20 +28,19 @@ Living project memory; update durable information.
 - Develop: `bun run dev`; restart: `bun run dev:restart`; build: `bun run build`
 - Generate/apply database migrations: `bun run db:generate` /
   `bun run db:migrate`
-- Run tests: `bun run test`; watch: `bun run test:watch`
-- Check repository constraints: `bun run repository-check`
-- Check formatting: `bun run format:check`
-- Format files: `bun run format`
+- Test/watch: `bun run test` / `bun run test:watch`
+- Repository constraints: `bun run repository-check`
+- Format/check: `bun run format` / `bun run format:check`
 - Type-check: `bun run typecheck`
 - Check dead code/dependencies: `bun run knip`; duplicates: `bun run cpd`
 - Lint/fix: `bun run lint` / `bun run lint:fix`; all static checks:
   `bun run check`
-- CI runs tests/static checks on push via `.github/workflows/checks.yml` with
-  Bun 1.3.14 and a frozen lockfile.
+- CI runs tests and static checks on every push through
+  `.github/workflows/checks.yml` using Bun 1.3.14 and a frozen lockfile.
 
 ## Architecture and Conventions
 
-- Bun manages dependencies via committed `package.json` and `bun.lock`.
+- Bun manages dependencies through the committed `package.json` and `bun.lock`.
 - Production source has four enforced top-level workspaces. `solid` owns browser
   UI, `sync-engine` the Bun server and integrations, `runner` the standalone
   runner, and `shared` cross-workspace code. The first three may import only
@@ -62,8 +60,7 @@ Living project memory; update durable information.
   session can safely request its own restart. Textual response bodies are
   precompressed once per handler, with `zstd`, Brotli, gzip, or deflate
   negotiated in that server-preference order.
-- `/favicon.svg` uses ETag revalidation and remains separate from future PWA
-  manifest icons.
+- `/favicon.svg` uses ETag revalidation and stays separate from PWA icons.
 - `solid/pages.tsx` renders both server page shells through Solid's SSR runtime;
   `sync-engine/pages.ts` loads it with Vite's SSR runner for Bun. The browser
   app mounts from `solid/client.tsx`; routes live in `shared/routes.ts`.
@@ -116,30 +113,27 @@ Living project memory; update durable information.
   unavailable. OAuth figures are API equivalents, not subscription charges.
   Usage is yellow at 80% and red at 90%. Auto-compaction defaults on and
   summarizes completed history before the next request at 95%; idle sessions can
-  compact manually. The existing-session composer stays mounted across status
-  changes and explains why actions are unavailable. Versioned browser-local
-  preferences filter transcript categories without changing message data.
-  Compaction soft-deletes prior active messages and inserts a replayable
-  handoff. Provider secrets never enter browser or runner work payloads. The
-  working-directory field opens the interactive browser in
-  `solid/directory-picker-client.tsx`; its controller posts to
+  compact manually. The composer stays mounted across statuses, explains
+  unavailable actions, and preserves drafts. Local preferences filter transcript
+  categories without changing messages. Compaction soft-deletes prior messages
+  and inserts a replayable handoff. Provider secrets stay out of browser and
+  runner work payloads. The working-directory field opens the interactive
+  browser in `solid/directory-picker-client.tsx`; its controller posts to
   `/api/runners/:id/directories` for canonical directory metadata. Before each
   run, `read_agent_file` loads exact-root `AGENTS.md`, falling back to
   `CLAUDE.md`; only `AGENTS.md` is used when both exist.
 
   `runner/runner-workspace.ts` shares canonical workspace resolution and
-  containment with the file tools. Tool and skill selections persist per
-  session. Agent-facing `read_session` inspection is bounded and excludes
-  reasoning/tool history; `get_session_options` safely pages provider-generic
-  spawn choices. Grouped session tools spawn non-blocking child sessions, manage
-  owned sessions, report each child's final message to its parent, and resume an
-  idle parent when the report arrives. `parallel` accepts 2+ tools or skills,
-  has no count cap, and uses four ordered workers with bounded output. Picker
-  details come from canonical schemas. `solid/session-transcript.tsx` renders
-  prompts, tool definitions, raw details, Markdown, code/JSON, diffs, and
-  contextual tool results while preserving user line breaks. The session list
-  paginates ten at a time. The control center manages live sessions through
-  `solid/realtime-client.ts`, `solid/session-client.tsx`, and
+  containment with file tools. Tool and skill choices persist per session.
+  Agent-facing `read_session` inspection is bounded and excludes reasoning/tool
+  history; `get_session_options` safely pages provider-generic spawn choices.
+  Grouped tools manage non-blocking owned children, report final messages, and
+  resume idle parents. `parallel` accepts 2+ calls, uses four ordered workers,
+  bounds output, and propagates cancellation to tools and skills. Picker details
+  use canonical schemas. `solid/session-transcript.tsx` renders prompts, tool
+  definitions, raw details, Markdown, code/JSON, diffs, and contextual results
+  while preserving user line breaks. Session lists paginate by ten. Live
+  sessions use `solid/realtime-client.ts`, `solid/session-client.tsx`, and
   `solid/session-controller.ts`. Model deltas are combined per session once per
   animation frame; snapshots and other events remain immediate. Unchanged
   snapshots suppress notifications, and keyed messages preserve identity so only
@@ -151,14 +145,18 @@ Living project memory; update durable information.
   then the first entry. The working directory uses the latest session; models
   use the first option and maximum reasoning effort. Model choices show all
   provider and Q Mush-supported input/output modalities.
-  `solid/custom-select.tsx` searches then paginates lists over ten items, ten
-  per page. It opens on the selected page, resets/clamps pages, and owns
-  accessible keyboard/focus. `shared/agent-prompt.ts` builds the model system
-  prompt and its transcript display. Reasoning summaries persist as `thinking`
-  messages but are excluded from replay. Session and transcript rows live in
-  `agent_sessions` and `agent_messages`; interrupted processes mark active
-  sessions failed so they can be resumed. Rebuilt conversations add error
-  results for interrupted tool calls only on resume.
+  `solid/custom-select.tsx` uses shared search normalization and paginates lists
+  over ten items, opens on the selected page, clamps or resets pages, and owns
+  accessible keyboard/focus. Focus mode fills the app viewport (not browser
+  Fullscreen), preserving drafts and scroll. Its desktop rail expands as an
+  overlay; small screens use a drawer. Selection collapses it and Escape closes
+  it before exit. Full paths wrap. Model and effort selections persist with the
+  session. `shared/agent-prompt.ts` builds the model system prompt and
+  transcript display. Reasoning summaries persist as `thinking` messages but are
+  excluded from replay. Session and transcript rows live in `agent_sessions` and
+  `agent_messages`; interrupted processes mark active sessions failed so they
+  can be resumed. Rebuilt conversations add error results for interrupted tool
+  calls only on resume.
 
 - `sync-engine/openai.ts` and `sync-engine/openrouter.ts` implement provider
   connections. Multiple OAuth or manual credentials live in
