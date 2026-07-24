@@ -44,6 +44,7 @@ function shouldCompactFinalTurn(
 interface CompactionState {
   pending: boolean;
   progressSinceCompaction: boolean;
+  turnExceedsThreshold: boolean;
 }
 
 async function compactConversation(
@@ -63,6 +64,7 @@ async function compactConversation(
       tokenUsage: compacted.tokenUsage,
     });
   await options.recordCompaction(compacted.summary);
+  throwIfAgentAborted(signal);
   if (costUsd !== null) {
     await options.recordUsage({
       contextTokens: null,
@@ -83,6 +85,7 @@ export async function runCompactingAgentLoop(
     const compaction: CompactionState = {
       pending: false,
       progressSinceCompaction: false,
+      turnExceedsThreshold: false,
     };
 
     const finalMessages = await runAgentLoop({
@@ -105,9 +108,13 @@ export async function runCompactingAgentLoop(
               costUsd,
             });
           }
+          compaction.turnExceedsThreshold = shouldCompactFinalTurn(
+            options,
+            turn.contextTokens,
+          );
           compaction.pending =
             (allowCompaction || compaction.progressSinceCompaction) &&
-            shouldCompactFinalTurn(options, turn.contextTokens);
+            compaction.turnExceedsThreshold;
           return turn;
         },
       },
@@ -122,6 +129,8 @@ export async function runCompactingAgentLoop(
           signal,
         );
         compaction.pending = false;
+        compaction.progressSinceCompaction = false;
+        compaction.turnExceedsThreshold = false;
         allowCompaction = false;
         return compactedMessages;
       },
@@ -129,6 +138,9 @@ export async function runCompactingAgentLoop(
         await options.recordMessage(message);
         if (message.role === "tool") {
           compaction.progressSinceCompaction = true;
+          if (compaction.turnExceedsThreshold) {
+            compaction.pending = true;
+          }
         }
       },
       ...(options.signal === undefined ? {} : { signal: options.signal }),
