@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { brotliCompressSync, deflateSync } from "node:zlib";
 import { build } from "vite";
 import {
@@ -32,6 +33,7 @@ import {
   createClientPlugins,
   readFavicon,
 } from "./client-build.ts";
+import { createMethodNotAllowedResponse } from "./http.ts";
 import type { OpenAiIntegration } from "./openai.ts";
 import type { OpenRouterIntegration } from "./openrouter.ts";
 import type { RenderedPages } from "./pages.ts";
@@ -42,7 +44,7 @@ import type { SessionIntegration } from "./sessions.ts";
 
 const CSS_HEADERS = { "content-type": "text/css; charset=utf-8" };
 const FAVICON_HEADERS = {
-  "cache-control": "public, max-age=86400",
+  "cache-control": "public, max-age=86400, must-revalidate",
   "content-type": "image/svg+xml; charset=utf-8",
   "x-content-type-options": "nosniff",
 };
@@ -57,6 +59,7 @@ type ResponseEncoding = ContentEncoding | "identity";
 interface PreparedBody {
   readonly compressed: Readonly<Record<ContentEncoding, ArrayBuffer>>;
   readonly identity: string;
+  readonly identityByteLength: number;
 }
 
 const CONTENT_ENCODINGS: readonly ContentEncoding[] = [
@@ -144,7 +147,35 @@ function prepareBody(identity: string): PreparedBody {
       zstd: toArrayBuffer(Bun.zstdCompressSync(body)),
     },
     identity,
+    identityByteLength: body.byteLength,
   };
+}
+
+function preparedBodyByteLength(
+  body: PreparedBody,
+  encoding: ResponseEncoding,
+): number {
+  return encoding === "identity"
+    ? body.identityByteLength
+    : body.compressed[encoding].byteLength;
+}
+
+function acceptsEntityTag(request: Request, tag: string): boolean {
+  const header = request.headers.get("if-none-match");
+  const weakTag = tag.replace(/^W\//u, "");
+
+  if (header === null) {
+    return false;
+  }
+
+  for (const candidate of header.split(",")) {
+    const value = candidate.trim();
+    if (value === "*" || value.replace(/^W\//u, "") === weakTag) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function createTextResponse(
@@ -163,6 +194,17 @@ function createTextResponse(
     return new Response(null, { headers: responseHeaders, status: 406 });
   }
 
+  if (request.method === "HEAD") {
+    responseHeaders.set(
+      "content-length",
+      String(preparedBodyByteLength(body, encoding)),
+    );
+    if (encoding !== "identity") {
+      responseHeaders.set("content-encoding", encoding);
+    }
+    return new Response(null, { headers: responseHeaders, status });
+  }
+
   if (encoding === "identity") {
     return new Response(body.identity, { headers: responseHeaders, status });
   }
@@ -172,6 +214,28 @@ function createTextResponse(
     headers: responseHeaders,
     status,
   });
+}
+
+function createFaviconResponse(
+  request: Request,
+  body: PreparedBody,
+  entityTag: string,
+): Response {
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    const response = createMethodNotAllowedResponse("GET, HEAD");
+    response.headers.set("cache-control", "no-store");
+    return response;
+  }
+
+  const headers = new Headers(FAVICON_HEADERS);
+  headers.set("etag", entityTag);
+
+  if (acceptsEntityTag(request, entityTag)) {
+    headers.set("vary", "Accept-Encoding");
+    return new Response(null, { headers, status: 304 });
+  }
+
+  return createTextResponse(request, body, headers);
 }
 
 interface ProviderRoutes {
@@ -247,7 +311,9 @@ export function createRequestHandler(
 ): (request: Request) => Promise<Response> {
   const appPage = prepareBody(pages.app);
   const browserBundle = prepareBody(clientJavaScript);
-  const favicon = prepareBody(readFavicon());
+  const faviconSource = readFavicon();
+  const favicon = prepareBody(faviconSource);
+  const faviconEntityTag = `W/"${createHash("sha256").update(faviconSource).digest("hex")}"`;
   const homePage = prepareBody(pages.home);
   const notFound = prepareBody("Not found");
   const styles = prepareBody(stylesheet);
@@ -375,7 +441,7 @@ export function createRequestHandler(
     }
 
     if (pathname === FAVICON_PATH) {
-      return createTextResponse(request, favicon, FAVICON_HEADERS);
+      return createFaviconResponse(request, favicon, faviconEntityTag);
     }
 
     if (pathname === HOME_PATH) {

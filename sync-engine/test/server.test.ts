@@ -1,12 +1,10 @@
-import { existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 import {
   brotliDecompressSync,
   gunzipSync,
   inflateSync,
   zstdDecompressSync,
 } from "node:zlib";
-import { build } from "vite";
 import { describe, expect, test } from "vitest";
 import {
   API_BASE_PATH,
@@ -36,11 +34,7 @@ import {
 } from "../../shared/routes.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
 import type { BraveSearchSkill } from "../../sync-engine/brave-search.ts";
-import {
-  clientBuildConfiguration,
-  createClientPlugins,
-  readFavicon,
-} from "../../sync-engine/client-build.ts";
+import { readFavicon } from "../../sync-engine/client-build.ts";
 import { createOpenAiIntegrationFromEnvironment } from "../../sync-engine/openai.ts";
 import { createOpenRouterIntegrationFromEnvironment } from "../../sync-engine/openrouter.ts";
 import { renderPages } from "../../sync-engine/pages.ts";
@@ -142,8 +136,9 @@ async function sendRequest(
   path: string,
   acceptEncoding?: string,
   method = "GET",
+  requestHeaders?: HeadersInit,
 ): Promise<Response> {
-  const headers = new Headers();
+  const headers = new Headers(requestHeaders);
 
   if (acceptEncoding !== undefined) {
     headers.set("accept-encoding", acceptEncoding);
@@ -256,26 +251,87 @@ describe("page server", () => {
     expectCompressionHeaders(response, null);
   });
 
-  test("serves the favicon as a public cacheable SVG", async () => {
-    const source = readFavicon();
-    const response = await expectAsset(
-      FAVICON_PATH,
-      "image/svg+xml; charset=utf-8",
-      source,
+  test("serves the exact public favicon with safe response headers", async () => {
+    const source = Bun.file(
+      new URL("../../solid/favicon.svg", import.meta.url),
     );
+    const expectedBody = new Uint8Array(await source.arrayBuffer());
+    const response = await sendRequest(FAVICON_PATH);
+    const body = new Uint8Array(await response.arrayBuffer());
+    const expectedTag = `W/"${createHash("sha256").update(expectedBody).digest("hex")}"`;
+    const contentType = response.headers.get("content-type");
 
-    expect(source).toContain('viewBox="0 0 64 64"');
-    expect(source).not.toContain("<script");
-    expect(response.headers.get("cache-control")).toBe("public, max-age=86400");
+    expect(response.status).toBe(200);
+    expect(contentType).toMatch(/^image\/svg\+xml(?:;|$)/u);
+    expect(contentType).not.toMatch(/^text\/html(?:;|$)/u);
+    expect(body).toEqual(expectedBody);
+    expect(response.headers.get("cache-control")).toBe(
+      "public, max-age=86400, must-revalidate",
+    );
+    expect(response.headers.get("etag")).toBe(expectedTag);
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("set-cookie")).toBeNull();
     expectCompressionHeaders(response, null);
   });
 
-  test("does not disguise HTML or SVG as a legacy icon", async () => {
-    const response = await sendRequest("/favicon.ico");
+  test("supports compressed, conditional, and HEAD favicon requests", async () => {
+    const source = readFavicon();
+    const compressed = await sendRequest(FAVICON_PATH, "br");
+    const compressedBody = new Uint8Array(await compressed.arrayBuffer());
+    const tag = compressed.headers.get("etag");
+    const head = await sendRequest(FAVICON_PATH, "br", "HEAD");
+    const notModified = await sendRequest(
+      FAVICON_PATH,
+      "br",
+      "GET",
+      tag === null
+        ? undefined
+        : { "if-none-match": `"other", ${tag.replace(/^W\//u, "")}` },
+    );
 
-    await expectUnencodedResponse(response, 404, "Not found");
-    expect(response.headers.get("content-type")).toBeNull();
+    expect(compressed.status).toBe(200);
+    expectCompressionHeaders(compressed, "br");
+    expect(new TextDecoder().decode(brotliDecompressSync(compressedBody))).toBe(
+      source,
+    );
+    expect(head.status).toBe(200);
+    expect(head.headers.get("content-type")).toBe(
+      "image/svg+xml; charset=utf-8",
+    );
+    expect(head.headers.get("content-encoding")).toBe("br");
+    expect(head.headers.get("content-length")).toBe(
+      String(compressedBody.byteLength),
+    );
+    expect(head.headers.get("etag")).toBe(tag);
+    expectCompressionHeaders(head, "br");
+    expect(await head.text()).toBe("");
+    expect(notModified.status).toBe(304);
+    expect(notModified.headers.get("cache-control")).toBe(
+      "public, max-age=86400, must-revalidate",
+    );
+    expect(notModified.headers.get("etag")).toBe(tag);
+    expect(notModified.headers.get("content-encoding")).toBeNull();
+    expect(notModified.headers.get("vary")).toBe("Accept-Encoding");
+    expect(await notModified.text()).toBe("");
+  });
+
+  test("rejects unsupported favicon methods and keeps the legacy URL absent", async () => {
+    const methodResponse = await sendRequest(FAVICON_PATH, undefined, "POST");
+    const legacyResponse = await sendRequest("/favicon.ico");
+    const legacyHeadResponse = await sendRequest(
+      "/favicon.ico",
+      undefined,
+      "HEAD",
+    );
+
+    expect(methodResponse.status).toBe(405);
+    expect(methodResponse.headers.get("allow")).toBe("GET, HEAD");
+    expect(methodResponse.headers.get("cache-control")).toBe("no-store");
+    expect(await methodResponse.text()).toBe("Method not allowed");
+    await expectUnencodedResponse(legacyResponse, 404, "Not found");
+    expect(legacyResponse.headers.get("content-type")).toBeNull();
+    expect(legacyHeadResponse.status).toBe(404);
+    expect(await legacyHeadResponse.text()).toBe("");
   });
 
   test("serves the standalone runner executable", async () => {
@@ -466,22 +522,6 @@ describe("response compression", () => {
 });
 
 describe("browser build", () => {
-  test("emits the favicon with the production browser assets", async () => {
-    const faviconPath = fileURLToPath(
-      new URL("../../dist/favicon.svg", import.meta.url),
-    );
-
-    await build({
-      build: clientBuildConfiguration,
-      configFile: false,
-      logLevel: "silent",
-      plugins: createClientPlugins(),
-    });
-
-    expect(existsSync(faviconPath)).toBe(true);
-    expect(await Bun.file(faviconPath).text()).toContain("Q Mush");
-  });
-
   test("builds the login, session, and provider credential controls", async () => {
     const javaScript = await buildClientJavaScript();
 
