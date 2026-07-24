@@ -1,132 +1,46 @@
 import { createSignal, type Accessor, type JSX, type Setter } from "solid-js";
-
-type RenderDebugMutationKind =
-  "attribute" | "initial" | "insert" | "remove" | "text";
-
-interface MutationSummary {
-  readonly attributeNames: Set<string>;
-  readonly counts: Map<RenderDebugMutationKind, number>;
-}
-
-interface RenderDebugOverlay {
-  readonly highlights: HTMLDivElement;
-  readonly root: HTMLDivElement;
-}
-
-const MUTATION_KINDS: readonly RenderDebugMutationKind[] = [
-  "initial",
-  "insert",
-  "remove",
-  "text",
-  "attribute",
-];
-
-function createMutationSummary(): MutationSummary {
-  return { attributeNames: new Set(), counts: new Map() };
-}
-
-function clipped(value: string, maximumLength: number): string {
-  return value.length <= maximumLength
-    ? value
-    : `${value.slice(0, maximumLength - 1)}…`;
-}
-
-function elementLabel(element: Element): string {
-  const id = element.id.length === 0 ? "" : `#${clipped(element.id, 32)}`;
-  if (id.length > 0) {
-    return `${element.localName}${id}`;
-  }
-
-  const accessibleLabel = element.getAttribute("aria-label")?.trim();
-  return accessibleLabel === undefined || accessibleLabel.length === 0
-    ? element.localName
-    : `${element.localName} “${clipped(accessibleLabel, 36)}”`;
-}
-
-function mutationDescription(summary: MutationSummary): string {
-  return MUTATION_KINDS.flatMap((kind) => {
-    const count = summary.counts.get(kind) ?? 0;
-    if (count === 0) {
-      return [];
-    }
-
-    const amount = count === 1 ? "" : ` ×${String(count)}`;
-    if (kind !== "attribute" || summary.attributeNames.size === 0) {
-      return [`${kind}${amount}`];
-    }
-
-    const names = clipped([...summary.attributeNames].join(", "), 44);
-    return [`${kind}${amount} (${names})`];
-  }).join(" · ");
-}
-
-function appendLegendRow(
-  document: Document,
-  legend: HTMLElement,
-  kind: Exclude<RenderDebugMutationKind, "initial">,
-): void {
-  const row = document.createElement("span");
-  const swatch = document.createElement("span");
-  swatch.className = `render-debug-legend__swatch render-debug-legend__swatch--${kind}`;
-  row.append(swatch, kind);
-  legend.append(row);
-}
-
-function createOverlay(document: Document): RenderDebugOverlay {
-  const root = document.createElement("div");
-  root.id = "render-debug-overlay";
-  root.className = "render-debug-overlay";
-  root.setAttribute("aria-hidden", "true");
-
-  const highlights = document.createElement("div");
-  highlights.className = "render-debug-highlights";
-
-  const legend = document.createElement("aside");
-  legend.className = "render-debug-legend";
-  const title = document.createElement("strong");
-  title.textContent = "DOM updates";
-  const description = document.createElement("span");
-  description.textContent = "Every element is instrumented automatically";
-  legend.append(title, description);
-  appendLegendRow(document, legend, "insert");
-  appendLegendRow(document, legend, "remove");
-  appendLegendRow(document, legend, "text");
-  appendLegendRow(document, legend, "attribute");
-
-  root.append(highlights, legend);
-  return { highlights, root };
-}
-
-function nearestElement(node: Node): Element | null {
-  return node instanceof Element ? node : node.parentElement;
-}
+import {
+  createMutationSummary,
+  createOverlay,
+  elementLabel,
+  MAXIMUM_DETAIL_ROWS,
+  MAXIMUM_HIGHLIGHTS,
+  MAXIMUM_SUMMARIES,
+  MUTATION_KINDS,
+  mutationDescription,
+  mutationObserverFor,
+  nearestElement,
+  observeMutations,
+  SENSITIVE_ATTRIBUTES,
+  type MutationSummary,
+  type RenderDebugMutationKind,
+} from "./render-debug-support.ts";
 
 export class RenderDebugInstrumentation {
   readonly #enabled: Accessor<boolean>;
   readonly #highlights = new Map<Element, HTMLDivElement>();
+  readonly #summaries = new Map<Element, MutationSummary>();
   readonly #pending = new Map<Element, MutationSummary>();
   readonly #setEnabled: Setter<boolean>;
   #animationFrame: number | undefined;
   #browserWindow: Window | undefined;
+  #details: HTMLDivElement | undefined;
+  #filter = "";
   #highlightLayer: HTMLDivElement | undefined;
   #observer: MutationObserver | undefined;
   #overlay: HTMLDivElement | undefined;
   #root: Element | undefined;
-
   constructor() {
     const [enabled, setEnabled] = createSignal(false);
     this.#enabled = enabled;
     this.#setEnabled = setEnabled;
   }
-
   get enabled(): boolean {
     return this.#enabled();
   }
-
   get enabledView(): Accessor<boolean> {
     return this.#enabled;
   }
-
   attach(root: Element): void {
     if (this.#root === root) {
       if (this.enabled) {
@@ -134,19 +48,16 @@ export class RenderDebugInstrumentation {
       }
       return;
     }
-
     this.#stop();
     this.#root = root;
     if (this.enabled) {
       this.#start();
     }
   }
-
   detach(): void {
     this.#stop();
     this.#root = undefined;
   }
-
   toggle(): void {
     const enabled = !this.enabled;
     this.#setEnabled(enabled);
@@ -156,11 +67,28 @@ export class RenderDebugInstrumentation {
       this.#stop();
     }
   }
-
   readonly #viewportChanged = (): void => {
     this.#scheduleFrame();
   };
-
+  #setFilter(selector: string): void {
+    this.#filter = selector;
+    this.#pending.clear();
+    for (const [element, highlight] of this.#highlights) {
+      highlight.remove();
+      this.#highlights.delete(element);
+    }
+    this.#renderDetails();
+  }
+  #matchesFilter(element: Element): boolean {
+    if (this.#filter.length === 0) return true;
+    try {
+      return (
+        element.matches(this.#filter) || element.closest(this.#filter) !== null
+      );
+    } catch {
+      return false;
+    }
+  }
   #start(): void {
     const root = this.#root;
     if (
@@ -170,41 +98,46 @@ export class RenderDebugInstrumentation {
     ) {
       return;
     }
-
     const browserWindow = root.ownerDocument.defaultView;
     if (browserWindow === null) {
       return;
     }
-
+    const Observer = mutationObserverFor(browserWindow);
+    const body = root.ownerDocument.body;
+    if (Observer === undefined) {
+      return;
+    }
     const overlay = createOverlay(root.ownerDocument);
-    root.ownerDocument.body.append(overlay.root);
-    const Observer = browserWindow.MutationObserver;
+    this.#details = overlay.details;
+    this.#filter = overlay.filter.value;
+    this.#highlightLayer = overlay.highlights;
+    this.#overlay = overlay.root;
+    overlay.filter.addEventListener("input", () => {
+      this.#setFilter(overlay.filter.value);
+    });
+    body.append(overlay.root);
     const observer = new Observer((mutations) => {
       this.#recordMutations(mutations);
     });
-    observer.observe(root, {
-      attributes: true,
-      characterData: true,
-      childList: true,
-      subtree: true,
-    });
+    observeMutations(observer, body);
     root.ownerDocument.addEventListener("scroll", this.#viewportChanged, true);
     browserWindow.addEventListener("resize", this.#viewportChanged);
-
     this.#browserWindow = browserWindow;
-    this.#highlightLayer = overlay.highlights;
     this.#observer = observer;
-    this.#overlay = overlay.root;
-
     this.#record(root, "initial");
-    for (const element of root.querySelectorAll("*")) {
-      if (this.#includes(element)) {
+    const initialElements = body.querySelectorAll("*");
+    for (let index = 0; index < initialElements.length; index += 1) {
+      const element = initialElements.item(index);
+      if (element !== root && this.#includes(element)) {
         this.#record(element, "initial");
       }
     }
   }
-
   #stop(): void {
+    const records = this.#observer?.takeRecords() ?? [];
+    if (records.length > 0) {
+      this.#recordMutations(records);
+    }
     this.#observer?.disconnect();
     this.#root?.ownerDocument.removeEventListener(
       "scroll",
@@ -218,27 +151,26 @@ export class RenderDebugInstrumentation {
     ) {
       this.#browserWindow.cancelAnimationFrame(this.#animationFrame);
     }
-
     this.#overlay?.remove();
     this.#highlights.clear();
+    this.#summaries.clear();
     this.#pending.clear();
     this.#animationFrame = undefined;
     this.#browserWindow = undefined;
+    this.#details = undefined;
+    this.#filter = "";
     this.#highlightLayer = undefined;
     this.#observer = undefined;
     this.#overlay = undefined;
   }
-
   #recordMutations(mutations: readonly MutationRecord[]): void {
     if (!this.enabled || this.#overlay === undefined) {
       return;
     }
-
     for (const mutation of mutations) {
       if (this.#isOverlayNode(mutation.target)) {
         continue;
       }
-
       switch (mutation.type) {
         case "attributes": {
           this.#recordElementMutation(
@@ -259,67 +191,92 @@ export class RenderDebugInstrumentation {
       }
     }
   }
-
   #recordElementMutation(
     mutation: MutationRecord,
     kind: "attribute" | "text",
     attributeName?: string,
   ): void {
+    if (
+      kind === "attribute" &&
+      attributeName !== undefined &&
+      SENSITIVE_ATTRIBUTES.has(attributeName.toLowerCase())
+    ) {
+      return;
+    }
     const target = this.#observedElement(mutation.target);
     if (target !== null) {
       this.#record(target, kind, 1, attributeName);
     }
   }
-
   #recordChildListMutation(mutation: MutationRecord): void {
     const parent = this.#observedElement(mutation.target);
     if (parent === null) {
       return;
     }
-
-    if (mutation.addedNodes.length > 0) {
-      this.#record(parent, "insert", mutation.addedNodes.length);
-      for (const added of mutation.addedNodes) {
-        this.#recordInsertedElements(added);
-      }
+    this.#recordNodeChanges(parent, mutation.addedNodes, "insert");
+    this.#recordNodeChanges(parent, mutation.removedNodes, "remove");
+    for (const added of mutation.addedNodes) {
+      this.#recordInsertedElements(added);
     }
-
-    if (mutation.removedNodes.length > 0) {
-      this.#record(parent, "remove", mutation.removedNodes.length);
-      for (const removed of mutation.removedNodes) {
-        this.#forgetRemovedElements(removed);
-      }
+    for (const removed of mutation.removedNodes) {
+      this.#forgetRemovedElements(removed);
     }
   }
-
+  #recordNodeChanges(
+    parent: Element,
+    nodes: NodeList,
+    kind: "insert" | "remove",
+  ): void {
+    const textCount = this.#textNodeCount(nodes);
+    if (textCount > 0) {
+      this.#record(parent, "text", textCount);
+    }
+    const elementCount = nodes.length - textCount;
+    if (elementCount > 0) {
+      this.#record(parent, kind, elementCount);
+    }
+  }
+  #textNodeCount(nodes: NodeList): number {
+    let count = 0;
+    for (let index = 0; index < nodes.length; index += 1) {
+      const node = nodes.item(index);
+      if (node !== null && node.nodeType === Node.TEXT_NODE) {
+        count += 1;
+      }
+    }
+    return count;
+  }
   #recordInsertedElements(node: Node): void {
-    if (node instanceof Element) {
-      this.#recordInsertedElement(node);
-      for (const descendant of node.querySelectorAll("*")) {
-        this.#recordInsertedElement(descendant);
-      }
+    if (!(node instanceof Element)) return;
+    this.#recordInsertedElement(node);
+    const descendants = node.querySelectorAll("*");
+    for (let index = 0; index < descendants.length; index += 1) {
+      this.#recordInsertedElement(descendants.item(index));
     }
   }
-
   #recordInsertedElement(element: Element): void {
     if (this.#includes(element)) {
       this.#record(element, "insert");
     }
   }
-
   #forgetRemovedElements(node: Node): void {
     if (!(node instanceof Element)) {
       return;
     }
-
     this.#removeContainedHighlights(node);
-    for (const element of this.#pending.keys()) {
+    this.#removeContainedKeys(this.#summaries, node);
+    this.#removeContainedKeys(this.#pending, node);
+  }
+  #removeContainedKeys(
+    values: Map<Element, MutationSummary>,
+    node: Element,
+  ): void {
+    for (const element of values.keys()) {
       if (element === node || node.contains(element)) {
-        this.#pending.delete(element);
+        values.delete(element);
       }
     }
   }
-
   #removeContainedHighlights(node: Element): void {
     for (const [element, highlight] of this.#highlights) {
       if (element === node || node.contains(element)) {
@@ -328,27 +285,25 @@ export class RenderDebugInstrumentation {
       }
     }
   }
-
   #observedElement(node: Node): Element | null {
     const element = nearestElement(node);
     return element !== null && this.#includes(element) ? element : null;
   }
-
   #includes(element: Element): boolean {
     const root = this.#root;
-    if (root === undefined || this.#isOverlayNode(element)) {
-      return false;
-    }
-    return element === root || root.contains(element);
+    return (
+      root !== undefined &&
+      !this.#isOverlayNode(element) &&
+      element.isConnected &&
+      element.ownerDocument === root.ownerDocument
+    );
   }
-
   #isOverlayNode(node: Node): boolean {
     const overlay = this.#overlay;
     return (
       overlay !== undefined && (node === overlay || overlay.contains(node))
     );
   }
-
   #record(
     element: Element,
     kind: RenderDebugMutationKind,
@@ -360,13 +315,40 @@ export class RenderDebugInstrumentation {
       summary = createMutationSummary();
       this.#pending.set(element, summary);
     }
-    summary.counts.set(kind, (summary.counts.get(kind) ?? 0) + count);
-    if (attributeName !== undefined) {
-      summary.attributeNames.add(attributeName);
-    }
+    this.#incrementSummary(summary, kind, count, attributeName);
+    this.#addSummary(element, kind, count, attributeName);
     this.#scheduleFrame();
   }
-
+  #addSummary(
+    element: Element,
+    kind: RenderDebugMutationKind,
+    count: number,
+    attributeName?: string,
+  ): void {
+    const summary = this.#summaryFor(element);
+    this.#incrementSummary(summary, kind, count, attributeName);
+  }
+  #summaryFor(element: Element): MutationSummary {
+    let summary = this.#summaries.get(element);
+    if (summary === undefined) {
+      if (this.#summaries.size >= MAXIMUM_SUMMARIES) {
+        const oldest = this.#summaries.keys().next().value;
+        if (oldest !== undefined) this.#summaries.delete(oldest);
+      }
+      summary = createMutationSummary();
+      this.#summaries.set(element, summary);
+    }
+    return summary;
+  }
+  #incrementSummary(
+    summary: MutationSummary,
+    kind: RenderDebugMutationKind,
+    count: number,
+    attributeName?: string,
+  ): void {
+    summary.counts.set(kind, (summary.counts.get(kind) ?? 0) + count);
+    if (attributeName !== undefined) summary.attributeNames.add(attributeName);
+  }
   #scheduleFrame(): void {
     if (
       this.#animationFrame !== undefined ||
@@ -375,72 +357,121 @@ export class RenderDebugInstrumentation {
     ) {
       return;
     }
-
-    this.#animationFrame = this.#browserWindow.requestAnimationFrame(
-      (timestamp) => {
-        this.#flush(timestamp);
-      },
-    );
+    this.#animationFrame = this.#browserWindow.requestAnimationFrame(() => {
+      this.#flush();
+    });
   }
-
-  #flush(timestamp: DOMHighResTimeStamp): void {
+  #flush(): void {
     this.#animationFrame = undefined;
     if (!this.enabled || this.#highlightLayer === undefined) {
       return;
     }
-
     const updates = [...this.#pending];
     this.#pending.clear();
+    const visibleUpdates: [Element, MutationSummary][] = [];
     for (const [element, summary] of updates) {
-      if (this.#includes(element)) {
-        this.#showHighlight(element, summary, timestamp);
+      if (this.#includes(element) && this.#matchesFilter(element)) {
+        const bounds = element.getBoundingClientRect();
+        if (this.#isVisible(bounds)) {
+          visibleUpdates.push([element, summary]);
+        }
       }
     }
-
+    for (const [element, summary] of visibleUpdates.slice(
+      -MAXIMUM_HIGHLIGHTS,
+    )) {
+      this.#showHighlight(element, summary);
+    }
     this.#positionHighlights();
+    this.#renderDetails();
   }
-
+  #renderDetails(): void {
+    const details = this.#details;
+    if (details === undefined) {
+      return;
+    }
+    const rows = [...this.#summaries]
+      .filter(
+        ([element]) => this.#includes(element) && this.#matchesFilter(element),
+      )
+      .sort(
+        (first, second) =>
+          this.#summaryCount(second[1]) - this.#summaryCount(first[1]),
+      )
+      .slice(0, MAXIMUM_DETAIL_ROWS);
+    details.replaceChildren();
+    for (const [element, summary] of rows) {
+      const row = element.ownerDocument.createElement("span");
+      const count = this.#summaryCount(summary);
+      row.textContent = `${elementLabel(element)} · ${String(count)} ${count === 1 ? "mutation" : "mutations"}`;
+      details.append(row);
+    }
+  }
+  #summaryCount(summary: MutationSummary): number {
+    let count = 0;
+    for (const amount of summary.counts.values()) {
+      count += amount;
+    }
+    return count;
+  }
+  #isVisible(bounds: DOMRect): boolean {
+    const browserWindow = this.#browserWindow;
+    return (
+      browserWindow !== undefined &&
+      bounds.bottom >= 0 &&
+      bounds.right >= 0 &&
+      bounds.top <= browserWindow.innerHeight &&
+      bounds.left <= browserWindow.innerWidth
+    );
+  }
   #positionHighlights(): void {
     for (const [element, highlight] of this.#highlights) {
       const included = this.#includes(element);
-      if (included) {
-        this.#positionHighlight(element, highlight);
+      const bounds = included ? element.getBoundingClientRect() : undefined;
+      if (bounds !== undefined && this.#isVisible(bounds)) {
+        this.#positionHighlight(bounds, highlight);
       } else {
         highlight.remove();
         this.#highlights.delete(element);
       }
     }
   }
-
-  #showHighlight(
-    element: Element,
-    summary: MutationSummary,
-    timestamp: DOMHighResTimeStamp,
-  ): void {
+  #showHighlight(element: Element, summary: MutationSummary): void {
     const document = element.ownerDocument;
     const highlight = document.createElement("div");
     const kinds = MUTATION_KINDS.filter(
       (kind) => (summary.counts.get(kind) ?? 0) > 0,
     );
-    const sequence = String(Math.round(timestamp / 16) % 6);
+    const insertedCount = [...summary.counts.entries()].reduce(
+      (count, [kind, amount]) =>
+        kind === "initial" || kind === "insert" ? count + amount : count,
+      0,
+    );
+    const sequence = String(insertedCount % 6);
+    const bounds = element.getBoundingClientRect();
     highlight.style.setProperty("--render-debug-sequence", sequence);
     highlight.classList.add(
       "render-debug-highlight",
       ...kinds.map((kind) => `render-debug-highlight--${kind}`),
     );
-    if (kinds.length > 1) {
+    if (kinds.length > 1)
       highlight.classList.add("render-debug-highlight--mixed");
-    }
-
     const label = document.createElement("span");
     label.className = "render-debug-highlight__label";
     label.textContent = `${elementLabel(element)} · ${mutationDescription(summary)}`;
     highlight.append(label);
-
     const previous = this.#highlights.get(element);
     previous?.remove();
+    if (previous === undefined && this.#highlights.size >= MAXIMUM_HIGHLIGHTS) {
+      const oldest = this.#highlights.entries().next().value;
+      if (oldest !== undefined) {
+        oldest[1].remove();
+        this.#highlights.delete(oldest[0]);
+      }
+    }
     this.#highlights.set(element, highlight);
     this.#highlightLayer?.append(highlight);
+    this.#positionHighlight(bounds, highlight);
     highlight.addEventListener(
       "animationend",
       () => {
@@ -452,15 +483,12 @@ export class RenderDebugInstrumentation {
       { once: true },
     );
   }
-
-  #positionHighlight(element: Element, highlight: HTMLElement): void {
-    const bounds = element.getBoundingClientRect();
+  #positionHighlight(bounds: DOMRect, highlight: HTMLElement): void {
     highlight.style.height = `${String(Math.max(bounds.height, 1))}px`;
     highlight.style.transform = `translate3d(${String(bounds.left)}px, ${String(bounds.top)}px, 0)`;
     highlight.style.width = `${String(Math.max(bounds.width, 1))}px`;
   }
 }
-
 export function RenderDebugToggle(props: {
   readonly instrumentation: RenderDebugInstrumentation;
 }): JSX.Element {

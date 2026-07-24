@@ -129,14 +129,14 @@ Living project memory. Update it with durable information.
   containment with the file tools. Tool and skill selections persist per
   session. Grouped session tools spawn non-blocking child sessions, manage owned
   sessions, report each child's final message to its parent, and resume an idle
-  parent when the report arrives. `parallel` can mix every enabled tool or
-  server-side skill except itself. `solid/session-transcript.tsx` renders
-  prompts, tool definitions, raw details, Markdown, code/JSON, diffs, and
-  contextual tool results while preserving user line breaks. The session list
-  paginates summaries ten at a time in the browser. The control center manages
-  live sessions through `solid/realtime-client.ts`, `solid/session-client.tsx`,
-  and `solid/session-controller.ts`. Model deltas are combined per session once
-  per animation frame; snapshots and other events remain immediate. Unchanged
+  parent when its report arrives. `parallel` accepts 2+ tools or skills, has no
+  count cap, and uses four ordered workers with bounded output. Picker details
+  come from canonical schemas. `solid/session-transcript.tsx` renders prompts,
+  tool definitions, Markdown, code/JSON, diffs, and results. The session list
+  paginates ten at a time. The control center manages live sessions through
+  `solid/realtime-client.ts`, `solid/session-client.tsx`, and
+  `solid/session-controller.ts`. Model deltas are combined per session once per
+  animation frame; snapshots and other events remain immediate. Unchanged
   snapshots suppress notifications, and keyed messages preserve identity so only
   the affected message rerenders. The long-lived Solid root preserves focus and
   scroll. The transcript starts and returns to the bottom when messages or the
@@ -194,9 +194,9 @@ Living project memory. Update it with durable information.
   `bun run knip` runs both production and comprehensive test/tooling passes, so
   tests cannot keep production code alive while unused test helpers still fail.
 - `.jscpd.json` maps all supported JavaScript and TypeScript extensions to the
-  TSX format for cross-extension detection; import declarations are ignored,
-  while other clones of at least 20 tokens and one line fail the zero-percent
-  threshold.
+  TSX format for cross-extension detection; import declarations and explicitly
+  marked deterministic DOM harnesses are ignored, while other clones of at least
+  20 tokens and one line fail the zero-percent threshold.
 - `scripts/repository-check.ts` lists existing tracked and unignored files and
   calls the focused policy APIs under `scripts/`. It rejects files reaching
   20,000 Unicode code points (excluding `bun.lock` and the generated `drizzle/`

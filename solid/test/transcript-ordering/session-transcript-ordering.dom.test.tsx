@@ -24,31 +24,52 @@ function clonedBaseMessages(
   return [...messages.map((message) => ({ ...message })), ...appended];
 }
 
-function messageItem(container: ParentNode, id: string): Element {
-  return queryTestElement(container, `[data-session-message-id='${id}']`);
+function transcriptItems(container: ParentNode): readonly Element[] {
+  const transcript = queryTestElement(container, "[data-session-transcript]");
+  return [...transcript.children].slice(2);
+}
+
+function itemHasLabel(item: Element, label: string): boolean {
+  return item.firstElementChild?.textContent.trim() === label;
+}
+
+function messageItem(
+  container: ParentNode,
+  content: string,
+  label: "Agent" | "Thinking" | "You" = "You",
+): Element {
+  const message = transcriptItems(container).find(
+    (item) => itemHasLabel(item, label) && item.textContent.includes(content),
+  );
+  if (message === undefined) {
+    throw new Error(`The transcript message ${content} was not rendered`);
+  }
+  return message;
 }
 
 function transientMessage(
   container: ParentNode,
-  sessionId: string,
   role: "assistant" | "thinking",
 ): Element | null {
-  return container.querySelector(
-    `[data-session-message-id='stream:${sessionId}:${role}']`,
+  const label = role === "assistant" ? "Agent" : "Thinking";
+  return (
+    transcriptItems(container).find((item) => itemHasLabel(item, label)) ?? null
   );
 }
 
 function transcriptMessageOrder(container: ParentNode): readonly string[] {
-  return [...container.querySelectorAll("[data-session-message-id]")]
-    .map((element) => element.getAttribute("data-session-message-id"))
-    .filter((id): id is string => id !== null);
+  return transcriptItems(container).map((item) => item.textContent);
 }
 
 function expectTranscriptOrder(
   container: ParentNode,
-  messageIds: readonly string[],
+  messageContents: readonly string[],
 ): void {
-  expect(transcriptMessageOrder(container)).toEqual(messageIds);
+  const order = transcriptMessageOrder(container);
+  expect(order).toHaveLength(messageContents.length);
+  for (const [index, content] of messageContents.entries()) {
+    expect(order[index]).toContain(content);
+  }
 }
 
 function expectStableStreamBase(
@@ -56,25 +77,20 @@ function expectStableStreamBase(
   stableUser: Element,
   stableAssistant: Element,
 ): void {
-  expect(messageItem(container, "user-stable")).toBe(stableUser);
-  expect(messageItem(container, "assistant-stable")).toBe(stableAssistant);
+  expect(messageItem(container, "Keep this message stable")).toBe(stableUser);
+  expect(messageItem(container, "This one is also complete", "Agent")).toBe(
+    stableAssistant,
+  );
 }
 
 function expectStreamReplaced(
   container: ParentNode,
-  detail: AgentSessionDetail,
   stableUser: Element,
   stableAssistant: Element,
-  role: "assistant" | "thinking",
-  previous?: Element,
+  previous: Element,
 ): void {
   expectStableStreamBase(container, stableUser, stableAssistant);
-  const message = transientMessage(container, detail.id, role);
-  if (previous === undefined) {
-    expect(message).toBeNull();
-  } else {
-    expect(message).not.toBe(previous);
-  }
+  expect(transcriptItems(container)).not.toContain(previous);
 }
 
 function applyStreamSnapshot(
@@ -100,8 +116,8 @@ test("keeps persisted and streamed turns in canonical DOM order", () => {
   ];
   const { container, controller, detail } = mountedTranscript(messages);
   controller.applyDetail(detail);
-  const stableUser = messageItem(container, "user-earlier");
-  const stableAssistant = messageItem(container, "assistant-earlier");
+  const stableUser = messageItem(container, "Earlier request");
+  const stableAssistant = messageItem(container, "Earlier answer", "Agent");
 
   controller.applyDelta({
     content: "Live answer",
@@ -111,11 +127,11 @@ test("keeps persisted and streamed turns in canonical DOM order", () => {
   });
 
   expectTranscriptOrder(container, [
-    "user-earlier",
-    "assistant-earlier",
-    "user-current",
-    `stream:${detail.id}:thinking`,
-    `stream:${detail.id}:assistant`,
+    "Earlier request",
+    "Earlier answer",
+    "Current request",
+    "Live reasoning",
+    "Live answer",
   ]);
 
   controller.applyDetail({
@@ -133,14 +149,16 @@ test("keeps persisted and streamed turns in canonical DOM order", () => {
 
   const expectCurrentTranscript = (): void => {
     expectTranscriptOrder(container, [
-      "user-earlier",
-      "assistant-earlier",
-      "user-current",
-      "thinking-current",
-      "assistant-current",
+      "Earlier request",
+      "Earlier answer",
+      "Current request",
+      "Live reasoning",
+      "Live answer",
     ]);
-    expect(messageItem(container, "user-earlier")).toBe(stableUser);
-    expect(messageItem(container, "assistant-earlier")).toBe(stableAssistant);
+    expect(messageItem(container, "Earlier request")).toBe(stableUser);
+    expect(messageItem(container, "Earlier answer", "Agent")).toBe(
+      stableAssistant,
+    );
   };
   expectCurrentTranscript();
 
@@ -160,8 +178,12 @@ test("reconciles a persisted thinking snapshot before its assistant", () => {
     ),
   ];
   const { container, controller, detail } = mountedTranscript(messages);
-  const stableUser = messageItem(container, "user-stable");
-  const stableAssistant = messageItem(container, "assistant-stable");
+  const stableUser = messageItem(container, "Keep this message stable");
+  const stableAssistant = messageItem(
+    container,
+    "This one is also complete",
+    "Agent",
+  );
 
   controller.applyDelta({
     content: "Streaming",
@@ -177,10 +199,11 @@ test("reconciles a persisted thinking snapshot before its assistant", () => {
   });
 
   expectStableStreamBase(container, stableUser, stableAssistant);
-  const streamedMessage = messageItem(
-    container,
-    `stream:${detail.id}:assistant`,
-  );
+  const streamedThinking = transientMessage(container, "thinking");
+  if (streamedThinking === null) {
+    throw new Error("The streamed thinking message was not rendered");
+  }
+  const streamedMessage = messageItem(container, "Streaming response", "Agent");
   const persistedThinking = transcriptMessage(
     "thinking-persisted",
     "Streaming thought",
@@ -197,17 +220,16 @@ test("reconciles a persisted thinking snapshot before its assistant", () => {
   applyStreamSnapshot(controller, detail, messages, persistedThinking);
 
   expectTranscriptOrder(container, [
-    "user-stable",
-    "assistant-stable",
-    "thinking-persisted",
-    `stream:${detail.id}:assistant`,
+    "Keep this message stable",
+    "This one is also complete",
+    "Streaming thought",
+    "Streaming response",
   ]);
   expectStreamReplaced(
     container,
-    detail,
     stableUser,
     stableAssistant,
-    "thinking",
+    streamedThinking,
   );
 
   applyStreamSnapshot(
@@ -218,19 +240,12 @@ test("reconciles a persisted thinking snapshot before its assistant", () => {
     persistedAssistant,
   );
 
-  expectStreamReplaced(
-    container,
-    detail,
-    stableUser,
-    stableAssistant,
-    "assistant",
-    streamedMessage,
-  );
+  expectStreamReplaced(container, stableUser, stableAssistant, streamedMessage);
   expectTranscriptOrder(container, [
-    "user-stable",
-    "assistant-stable",
-    "thinking-persisted",
-    "assistant-persisted",
+    "Keep this message stable",
+    "This one is also complete",
+    "Streaming thought",
+    "Streaming response",
   ]);
   expect(container.textContent).toContain("Streaming response");
 });

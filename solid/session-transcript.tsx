@@ -16,13 +16,9 @@ function renderTranscriptNote(options: {
   readonly content: string;
   readonly label: string;
   readonly labelClasses: string;
-  readonly messageId?: string;
 }): JSX.Element {
   return (
-    <li
-      class={`rounded-xl border p-4 ${options.classes}`}
-      data-session-message-id={options.messageId}
-    >
+    <li class={`rounded-xl border p-4 ${options.classes}`}>
       <p
         class={`text-xs font-semibold tracking-wide uppercase ${options.labelClasses}`}
       >
@@ -86,16 +82,12 @@ function TranscriptMessage(props: {
       content: props.message.content,
       label: thinking ? "Thinking" : "Error message",
       labelClasses: thinking ? "text-violet-200" : "text-rose-200",
-      messageId: props.message.id,
     });
   }
 
   if (props.message.role === "tool") {
     return (
-      <li
-        class="rounded-xl border border-white/10 bg-slate-950/80 p-4"
-        data-session-message-id={props.message.id}
-      >
+      <li class="rounded-xl border border-white/10 bg-slate-950/80 p-4">
         {renderToolHeader({
           id: props.message.toolCallId,
           kind: "Tool result",
@@ -120,7 +112,6 @@ function TranscriptMessage(props: {
   return (
     <li
       class={`rounded-2xl border p-4 ${user ? "ml-8 border-emerald-300/20 bg-emerald-300/10" : system ? "border-rose-300/20 bg-rose-300/10" : "mr-8 border-white/10 bg-white/[0.04]"}`}
-      data-session-message-id={props.message.id}
     >
       <p class="text-xs font-semibold tracking-wide text-slate-400 uppercase">
         {user ? "You" : system ? "Session" : "Agent"}
