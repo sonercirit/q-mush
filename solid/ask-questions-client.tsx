@@ -63,6 +63,7 @@ function ChoiceLabel(props: {
   readonly group: string;
   readonly label: string;
   readonly multiple: boolean;
+  readonly disabled: boolean;
   readonly onChange: (checked: boolean) => void;
   readonly value: string;
 }): JSX.Element {
@@ -71,6 +72,7 @@ function ChoiceLabel(props: {
       <input
         checked={props.checked}
         class="accent-violet-300"
+        disabled={props.disabled}
         name={props.multiple ? undefined : props.group}
         onChange={(event) => {
           props.onChange(event.currentTarget.checked);
@@ -118,7 +120,7 @@ export function AskQuestionsForm(props: {
       data-question-request-id={props.pending.id}
       onSubmit={(event) => {
         event.preventDefault();
-        if (valid()) {
+        if (valid() && !props.submitting) {
           props.onSubmit({ answers: answers() });
         }
       }}
@@ -142,6 +144,7 @@ export function AskQuestionsForm(props: {
                         class="mt-2 min-h-24 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white focus:border-violet-300/50 focus:outline-none"
                         maxlength={freeText().maxLength}
                         minlength={freeText().minLength ?? 0}
+                        disabled={props.submitting}
                         onInput={(event) => {
                           replaceAnswer({
                             questionId: question.id,
@@ -167,9 +170,23 @@ export function AskQuestionsForm(props: {
                             multiple
                               ? includesSelection(answer(), option.value)
                               : answer().value === option.value;
+                          const multipleChoice =
+                            question.type === "multi_choice"
+                              ? question
+                              : undefined;
+                          const maximumSelections =
+                            multipleChoice?.maxSelections ??
+                            multipleChoice?.options.length ??
+                            1;
+                          const selectionDisabled = (): boolean =>
+                            props.submitting ||
+                            (multiple &&
+                              !checked() &&
+                              selections(answer()).length >= maximumSelections);
                           return (
                             <ChoiceLabel
                               checked={checked()}
+                              disabled={selectionDisabled()}
                               group={question.id}
                               label={option.label}
                               multiple={multiple}

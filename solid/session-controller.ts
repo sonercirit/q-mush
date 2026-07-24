@@ -143,7 +143,11 @@ export class SessionController {
       return;
     }
     const detail = this.#view.value.detail;
-    if (detail?.id !== event.sessionId) {
+    if (
+      detail?.id !== event.sessionId ||
+      (event.pending === null && detail.status === "waiting") ||
+      (event.pending !== null && detail.status !== "waiting")
+    ) {
       return;
     }
     const updated = retainUnchangedSessionData(detail, {

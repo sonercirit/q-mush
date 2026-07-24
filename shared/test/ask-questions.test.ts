@@ -71,10 +71,38 @@ describe("ask_questions parsing", () => {
     );
   });
 
-  test("rejects unbounded text, duplicate identities, and invalid selection bounds", () => {
+  test("rejects unbounded text, duplicate identities, unknown fields, and invalid selection bounds", () => {
     expect(
       readAskQuestionsInput({
         questions: [{ id: "text", prompt: "Unbounded", type: "free_text" }],
+      }),
+    ).toBeUndefined();
+    expect(
+      readAskQuestionsInput({
+        questions: [
+          {
+            id: "text",
+            maxLength: 10,
+            prompt: "Unexpected field",
+            type: "free_text",
+            unexpected: true,
+          },
+        ],
+      }),
+    ).toBeUndefined();
+    expect(
+      readAskQuestionsInput({
+        questions: [
+          {
+            id: "choice",
+            options: [
+              { label: "One", unexpected: true, value: "one" },
+              { label: "Two", value: "two" },
+            ],
+            prompt: "Unexpected option field",
+            type: "single_choice",
+          },
+        ],
       }),
     ).toBeUndefined();
     expect(

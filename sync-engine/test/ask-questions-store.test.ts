@@ -124,7 +124,24 @@ describe("ask questions store", () => {
 
     expect(repeated).toEqual(created);
     expect(store.pending(TEST_USER_ID, SESSION_ID)).toEqual(created);
+    expect(store.pending(TEST_USER_ID, "another-session")).toBeNull();
+    expect(store.input(TEST_USER_ID, "another-session", REQUEST_ID)).toBe(
+      undefined,
+    );
+    expect(store.input(TEST_USER_ID, SESSION_ID, REQUEST_ID)).toEqual(input);
+    expect(
+      store.answer(
+        TEST_USER_ID,
+        "another-session",
+        REQUEST_ID,
+        answers,
+        TEST_NOW + 3,
+      ),
+    ).toBe("not_found");
     expect(sessions.get(TEST_USER_ID, SESSION_ID)?.status).toBe("waiting");
+    expect(database.$client.query("PRAGMA foreign_key_check").all()).toEqual(
+      [],
+    );
     expect(database.select().from(agentQuestionRequests).get()).toMatchObject({
       answeredAt: null,
       createdById: TEST_USER_ID,
@@ -134,6 +151,24 @@ describe("ask questions store", () => {
       toolCallId: "call-question",
       userId: TEST_USER_ID,
     });
+    database.$client.close();
+  });
+
+  test("does not create a pending request if pausing the session fails", () => {
+    const { database, sessions, store } = setup();
+    expect(sessions.mark(SESSION_ID, "idle", TEST_NOW + 2)).toBe(true);
+
+    expect(() =>
+      store.create(
+        TEST_USER_ID,
+        SESSION_ID,
+        "call-question",
+        input,
+        TEST_NOW + 3,
+      ),
+    ).toThrow("not running");
+    expect(database.select().from(agentQuestionRequests).all()).toEqual([]);
+    expect(sessions.get(TEST_USER_ID, SESSION_ID)?.status).toBe("idle");
     database.$client.close();
   });
 
@@ -161,6 +196,7 @@ describe("ask questions store", () => {
     expect(
       store.answer(TEST_USER_ID, SESSION_ID, REQUEST_ID, answers, TEST_NOW + 4),
     ).toEqual({ result: canonicalResult, status: "answered" });
+    expect(store.input(TEST_USER_ID, SESSION_ID, REQUEST_ID)).toEqual(input);
     expect(
       store.answer(TEST_USER_ID, SESSION_ID, REQUEST_ID, answers, TEST_NOW + 5),
     ).toEqual({ result: canonicalResult, status: "already_answered" });
@@ -185,6 +221,37 @@ describe("ask questions store", () => {
       { id: SESSION_ID, userId: TEST_USER_ID },
     ]);
     expect(sessions.get(TEST_USER_ID, SESSION_ID)?.status).toBe("queued");
+    database.$client.close();
+  });
+
+  test("rejects invalid answers and preserves the pending transaction", () => {
+    const { database, sessions, store } = setup();
+    store.create(
+      TEST_USER_ID,
+      SESSION_ID,
+      "call-question",
+      input,
+      TEST_NOW + 2,
+    );
+
+    expect(() =>
+      store.answer(
+        TEST_USER_ID,
+        SESSION_ID,
+        REQUEST_ID,
+        { answers: [{ questionId: "decision", value: "forged" }] },
+        TEST_NOW + 3,
+      ),
+    ).toThrow("invalid");
+    expect(store.pending(TEST_USER_ID, SESSION_ID)).not.toBeNull();
+    expect(sessions.get(TEST_USER_ID, SESSION_ID)?.status).toBe("waiting");
+    expect(
+      database
+        .select()
+        .from(agentMessages)
+        .all()
+        .filter(({ role }) => role === "tool"),
+    ).toHaveLength(0);
     database.$client.close();
   });
 

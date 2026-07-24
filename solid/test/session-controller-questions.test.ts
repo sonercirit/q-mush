@@ -35,7 +35,55 @@ function waitingSessionDetail(): AgentSessionDetail {
   /* jscpd:ignore-end */
 }
 
+test("ignores stale pending question notifications", async () => {
+  /* jscpd:ignore-start */
+  const waiting = waitingSessionDetail();
+  const resumed: AgentSessionDetail = {
+    ...waiting,
+    pendingQuestions: null,
+    status: "running",
+    updatedAt: 4,
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = Object.assign(
+    (input: RequestInfo | URL) => {
+      const path = new URL(requestUrl(input), "http://localhost").pathname;
+      return Promise.resolve(
+        path === SESSIONS_PATH
+          ? Response.json({ sessions: [summaryFromDetail(resumed)] })
+          : Response.json(resumed),
+      );
+    },
+    { preconnect: originalFetch.preconnect },
+  );
+
+  try {
+    const controller = createRoot(() => new SessionController());
+    await controller.load();
+    controller.applyQuestions({
+      pending: waiting.pendingQuestions,
+      sessionId: waiting.id,
+      type: "session_questions",
+    });
+    expect(controller.state.detail?.pendingQuestions).toBeNull();
+
+    controller.applyDetail(waiting);
+    controller.applyQuestions({
+      pending: null,
+      sessionId: waiting.id,
+      type: "session_questions",
+    });
+    expect(controller.state.detail?.pendingQuestions).toEqual(
+      waiting.pendingQuestions,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  /* jscpd:ignore-end */
+});
+
 test("posts pending answers while ignoring realtime replacement events", async () => {
+  /* jscpd:ignore-start */
   const waiting = waitingSessionDetail();
   const resumed: AgentSessionDetail = {
     ...waiting,
@@ -49,7 +97,6 @@ test("posts pending answers while ignoring realtime replacement events", async (
     releaseAnswer = resolve;
   });
   const originalFetch = globalThis.fetch;
-  /* jscpd:ignore-start */
   globalThis.fetch = Object.assign(
     (input: RequestInfo | URL, init?: RequestInit) => {
       const request = new Request(
@@ -70,7 +117,6 @@ test("posts pending answers while ignoring realtime replacement events", async (
     },
     { preconnect: originalFetch.preconnect },
   );
-  /* jscpd:ignore-end */
 
   try {
     const controller = createRoot(() => new SessionController());
@@ -106,4 +152,5 @@ test("posts pending answers while ignoring realtime replacement events", async (
   } finally {
     globalThis.fetch = originalFetch;
   }
+  /* jscpd:ignore-end */
 });

@@ -14,6 +14,67 @@ test("reads complete session snapshots from realtime messages", () => {
   });
 });
 
+test("rejects inconsistent pending question session snapshots", () => {
+  /* jscpd:ignore-start */
+  expect(() =>
+    roundTrip({
+      session: {
+        ...TEST_SESSION_DETAIL,
+        pendingQuestions: {
+          createdAt: 1,
+          id: "request-1",
+          questions: [
+            {
+              id: "decision",
+              options: [
+                { label: "Yes", value: "yes" },
+                { label: "No", value: "no" },
+              ],
+              prompt: "Continue?",
+              type: "single_choice",
+            },
+          ],
+          toolCallId: "call-1",
+        },
+      },
+      type: "session",
+    }),
+  ).toThrow("invalid agent session");
+  expect(() =>
+    roundTrip({
+      session: { ...TEST_SESSION_DETAIL, status: "waiting" },
+      type: "session",
+    }),
+  ).toThrow("invalid agent session");
+  expect(() =>
+    roundTrip({
+      session: {
+        ...TEST_SESSION_DETAIL,
+        activeStartedAt: 2,
+        pendingQuestions: {
+          createdAt: 1,
+          id: "request-1",
+          questions: [
+            {
+              id: "decision",
+              options: [
+                { label: "Yes", value: "yes" },
+                { label: "No", value: "no" },
+              ],
+              prompt: "Continue?",
+              type: "single_choice",
+            },
+          ],
+          toolCallId: "call-1",
+        },
+        status: "waiting",
+      },
+      type: "session",
+    }),
+  ).toThrow("invalid agent session");
+  /* jscpd:ignore-end */
+});
+
 test("reads runner snapshots from realtime messages", () => {
   expect(roundTrip({ runners: [runnerSummary(1)], type: "runners" })).toEqual({
     runners: [runnerSummary(1)],

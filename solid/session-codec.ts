@@ -264,6 +264,14 @@ function readSummary(value: unknown): AgentSessionSummary {
     throw new Error("The server returned an invalid agent session");
   }
 
+  if (
+    value["pendingQuestions"] === undefined ||
+    (status === "waiting") !== (pendingQuestions !== null) ||
+    (status === "waiting" && activeStartedAt !== null)
+  ) {
+    throw new Error("The server returned an invalid agent session");
+  }
+
   return {
     activeDurationMs,
     activeStartedAt,

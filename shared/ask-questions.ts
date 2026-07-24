@@ -87,6 +87,13 @@ function nonnegativeInteger(
     : undefined;
 }
 
+function hasOnlyKeys(
+  value: Readonly<Record<string, unknown>>,
+  keys: readonly string[],
+): boolean {
+  return Object.keys(value).every((key) => keys.includes(key));
+}
+
 function readOptions(value: unknown): readonly AskQuestionOption[] | undefined {
   if (
     !Array.isArray(value) ||
@@ -104,6 +111,7 @@ function readOptions(value: unknown): readonly AskQuestionOption[] | undefined {
     const label = boundedString(candidate["label"], 200);
     const optionValue = boundedString(candidate["value"], 200);
     if (
+      !hasOnlyKeys(candidate, ["label", "value"]) ||
       label === undefined ||
       optionValue === undefined ||
       options.some(({ value: existing }) => existing === optionValue)
@@ -139,6 +147,13 @@ function readQuestion(value: unknown): AskQuestion | undefined {
               MAXIMUM_QUESTION_TEXT_LENGTH,
             );
       return maxLength === undefined ||
+        !hasOnlyKeys(value, [
+          "id",
+          "maxLength",
+          "minLength",
+          "prompt",
+          "type",
+        ]) ||
         (minLength === undefined && value["minLength"] !== undefined) ||
         (minLength ?? 0) > maxLength
         ? undefined
@@ -152,7 +167,8 @@ function readQuestion(value: unknown): AskQuestion | undefined {
     }
     case "single_choice": {
       const options = readOptions(value["options"]);
-      return options === undefined
+      return options === undefined ||
+        !hasOnlyKeys(value, ["id", "options", "prompt", "type"])
         ? undefined
         : { id, options, prompt, type: "single_choice" };
     }
@@ -171,6 +187,14 @@ function readQuestion(value: unknown): AskQuestion | undefined {
           ? undefined
           : nonnegativeInteger(value["minSelections"], maximum);
       if (
+        !hasOnlyKeys(value, [
+          "id",
+          "maxSelections",
+          "minSelections",
+          "options",
+          "prompt",
+          "type",
+        ]) ||
         (value["maxSelections"] !== undefined && maxSelections === undefined) ||
         (value["minSelections"] !== undefined && minSelections === undefined) ||
         (minSelections ?? 0) > (maxSelections ?? maximum)
