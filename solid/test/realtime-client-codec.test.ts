@@ -21,6 +21,41 @@ test("reads runner snapshots from realtime messages", () => {
   });
 });
 
+test("reads pending question notifications", () => {
+  const event = {
+    pending: {
+      createdAt: 1,
+      id: "request-1",
+      questions: [
+        {
+          id: "decision",
+          options: [
+            { label: "Yes", value: "yes" },
+            { label: "No", value: "no" },
+          ],
+          prompt: "Continue?",
+          type: "single_choice",
+        },
+      ],
+      toolCallId: "call-1",
+    },
+    sessionId: "session-1",
+    type: "session_questions",
+  } as const;
+  expect(roundTrip(event)).toEqual(event);
+  expect(
+    roundTrip({
+      pending: null,
+      sessionId: "session-1",
+      type: "session_questions",
+    }),
+  ).toEqual({
+    pending: null,
+    sessionId: "session-1",
+    type: "session_questions",
+  });
+});
+
 test("reads reset model deltas from realtime messages", () => {
   const delta = {
     content: "replacement",

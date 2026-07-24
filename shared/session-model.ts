@@ -3,11 +3,12 @@ import type { AgentFile } from "./agent-file.ts";
 import type { AgentImage } from "./agent-images.ts";
 import type { AgentToolCall } from "./agent-loop.ts";
 import type { AgentSessionToolName } from "./agent-tools.ts";
+import type { PendingAskQuestions } from "./ask-questions.ts";
 import type { ProviderId } from "./provider-credential-store.ts";
 import type { ProviderModelPricing } from "./provider-model-pricing.ts";
 
 export type AgentSessionStatus =
-  "queued" | "running" | "idle" | "stopped" | "failed";
+  "queued" | "running" | "waiting" | "idle" | "stopped" | "failed";
 
 export type AgentSessionCostBasis = "estimated" | "none" | "reported";
 
@@ -47,6 +48,7 @@ export interface AgentSessionSummary {
   readonly providerPricing: ProviderModelPricing | null;
   readonly reasoningEffort: AgentReasoningEffort | null;
   readonly runnerId: string;
+  readonly pendingQuestions: PendingAskQuestions | null;
   readonly status: AgentSessionStatus;
   readonly title: string;
   readonly tools: readonly AgentSessionToolName[];

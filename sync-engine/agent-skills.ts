@@ -82,9 +82,17 @@ function executeParallelSkills(
             ? Promise.resolve(
                 `Error: ${recipientName} is not enabled for this session.`,
               )
-            : recipientName === BRAVE_SEARCH_TOOL_NAME
-              ? options.braveSearch.execute(options.userId, parameters, signal)
-              : options.executeTool(recipientName, parameters, signal),
+            : recipientName === "ask_questions"
+              ? Promise.resolve(
+                  "Error: ask_questions cannot run inside parallel.",
+                )
+              : recipientName === BRAVE_SEARCH_TOOL_NAME
+                ? options.braveSearch.execute(
+                    options.userId,
+                    parameters,
+                    signal,
+                  )
+                : options.executeTool(recipientName, parameters, signal),
         signal,
       ),
     signal,

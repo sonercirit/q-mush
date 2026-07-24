@@ -39,5 +39,12 @@ export const RUNNER_INSTALLER_PATH = "/runner/install.sh";
 export const RUNNER_EXECUTABLE_PATH = "/runner/executable";
 export const RUNNER_EXECUTABLE_SHA256_HEADER = "x-q-mush-runner-sha256";
 export const SESSIONS_PATH = `${API_BASE_PATH}/sessions`;
+export const SESSION_QUESTIONS_SEGMENT = "questions";
+export function sessionQuestionAnswerPath(
+  sessionId: string,
+  questionRequestId: string,
+): string {
+  return `${SESSIONS_PATH}/${encodeURIComponent(sessionId)}/${SESSION_QUESTIONS_SEGMENT}/${encodeURIComponent(questionRequestId)}/answer`;
+}
 export const SESSION_MODELS_PATH = `${SESSIONS_PATH}/models`;
 export const STYLESHEET_PATH = "/styles.css";

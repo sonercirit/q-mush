@@ -30,6 +30,7 @@ export const SESSION_ID = "018bcfe5-6800-7000-8000-000000000062";
 export const CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000063";
 const RUNNER_TOKEN = "qmr_session-runner-token";
 export const RUNNER_COMMAND_ID = "agent-command-1";
+export const QUESTION_REQUEST_ID = "018bcfe5-6800-7000-8000-000000000066";
 
 export function connectedSessionSetup(
   model: AgentModel,
@@ -83,6 +84,7 @@ export function connectedSessionSetup(
     "018bcfe5-6800-7000-8000-000000000068",
     "018bcfe5-6800-7000-8000-000000000069",
     "018bcfe5-6800-7000-8000-000000000070",
+    "018bcfe5-6800-7000-8000-000000000066",
     "018bcfe5-6800-7000-8000-000000000071",
     "018bcfe5-6800-7000-8000-000000000072",
   ];

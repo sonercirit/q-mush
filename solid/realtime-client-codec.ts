@@ -1,3 +1,4 @@
+import type { PendingAskQuestions } from "../shared/ask-questions.ts";
 import {
   parseJsonRecord,
   requiredRecordString,
@@ -8,11 +9,20 @@ import type {
   AgentSessionSummary,
 } from "../shared/session-model.ts";
 import { readRunners } from "./runner-client.tsx";
-import { readSessionDetail, readSessionList } from "./session-codec.ts";
+import {
+  readSessionDetail,
+  readSessionList,
+  readSessionPendingQuestions,
+} from "./session-codec.ts";
 
 export type RealtimeServerEvent =
   | { readonly runners: readonly RunnerSummary[]; readonly type: "runners" }
   | { readonly session: AgentSessionDetail; readonly type: "session" }
+  | {
+      readonly pending: PendingAskQuestions | null;
+      readonly sessionId: string;
+      readonly type: "session_questions";
+    }
   | {
       readonly sessions: readonly AgentSessionSummary[];
       readonly type: "sessions";
@@ -49,6 +59,12 @@ export function readRealtimeServerEvent(message: string): RealtimeServerEvent {
       return { sessions: readSessionList(value), type: "sessions" };
     case "session":
       return { session: readSessionDetail(value["session"]), type: "session" };
+    case "session_questions":
+      return {
+        pending: readSessionPendingQuestions(value["pending"]),
+        sessionId: requiredString(value, "sessionId"),
+        type: "session_questions",
+      };
     case "session_delta": {
       const reset = value["reset"];
       if (reset !== undefined && reset !== true) {

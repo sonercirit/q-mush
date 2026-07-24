@@ -104,7 +104,11 @@ export async function startManualSessionCompaction(
   if (existing === undefined) {
     return createApiError("not_found", 404);
   }
-  if (existing.status === "queued" || existing.status === "running") {
+  if (
+    existing.status === "queued" ||
+    existing.status === "running" ||
+    existing.status === "waiting"
+  ) {
     return createApiError("session_busy", 409);
   }
 

@@ -3,7 +3,8 @@ import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { HttpResponseError, requestJson } from "./browser-http.ts";
 import { readSessionDetail } from "./session-codec.ts";
 
-type SessionPendingAction = "compacting" | "sending" | "stopping";
+type SessionPendingAction =
+  "answeringQuestions" | "compacting" | "sending" | "stopping";
 
 export interface SessionMutation {
   readonly action: string;

@@ -112,27 +112,28 @@ Living project memory; update durable information.
   unavailable. OAuth figures are API equivalents, not subscription charges.
   Usage is yellow at 80% and red at 90%. Auto-compaction defaults on and
   summarizes completed history before the next request at 95%; idle sessions can
-  compact manually. The existing-session composer stays mounted across status
-  changes and explains why actions are unavailable. Versioned browser-local
-  preferences filter transcript categories without changing message data.
-  Compaction soft-deletes prior active messages and inserts a replayable
-  handoff. Provider secrets never enter browser or runner work payloads. The
-  working-directory field opens the interactive browser in
-  `solid/directory-picker-client.tsx`; its controller posts to
-  `/api/runners/:id/directories` for canonical directory metadata. Before each
-  run, `read_agent_file` loads exact-root `AGENTS.md`, falling back to
-  `CLAUDE.md`; only `AGENTS.md` is used when both exist.
+  compact manually. The composer stays mounted across statuses and explains
+  unavailable actions. Browser-local preferences filter transcript categories.
+  `ask_questions` persists owned, audited requests, pauses only its session, and
+  resumes or recovers with canonical JSON. Authenticated bounded answers are
+  idempotent unless conflicting; stop soft-deletes pending requests. Compaction
+  soft-deletes prior active messages and inserts a replayable handoff. Provider
+  secrets never enter browser or runner work payloads. The working-directory
+  field opens the interactive browser in `solid/directory-picker-client.tsx`;
+  its controller posts to `/api/runners/:id/directories` for canonical directory
+  metadata. Before each run, `read_agent_file` loads exact-root `AGENTS.md`,
+  falling back to `CLAUDE.md`; only `AGENTS.md` is used when both exist.
 
   `runner/runner-workspace.ts` shares canonical workspace resolution and
   containment with the file tools. Tool and skill selections persist per
   session. Grouped session tools spawn non-blocking child sessions, manage owned
   sessions, report each child's final message to its parent, and resume an idle
-  parent when its report arrives. `parallel` accepts 2+ tools or skills, has no
-  count cap, and uses four ordered workers with bounded output. Picker details
-  come from canonical schemas. `solid/session-transcript.tsx` renders prompts,
-  tool definitions, Markdown, code/JSON, diffs, and results. The session list
-  paginates ten at a time. The control center manages live sessions through
-  `solid/realtime-client.ts`, `solid/session-client.tsx`, and
+  parent when its report arrives. `parallel` has no count cap, uses four ordered
+  workers with bounded output, and excludes blocking `ask_questions`. Picker
+  details come from canonical schemas. `solid/session-transcript.tsx` renders
+  prompts, tool definitions, Markdown, code/JSON, diffs, and results. The
+  session list paginates ten at a time. The control center manages live sessions
+  through `solid/realtime-client.ts`, `solid/session-client.tsx`, and
   `solid/session-controller.ts`. Model deltas are combined per session once per
   animation frame; snapshots and other events remain immediate. Unchanged
   snapshots suppress notifications, and keyed messages preserve identity so only

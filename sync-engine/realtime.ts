@@ -92,6 +92,13 @@ export function createRealtimeIntegration(
       type: "sessions",
     });
   };
+  const publishQuestions = (userId: string, sessionId: string): void => {
+    options.hub.publishUser(userId, {
+      pending: options.sessions.pendingQuestionForUser(userId, sessionId),
+      sessionId,
+      type: "session_questions",
+    });
+  };
   const publishRunners = (userId: string): void => {
     options.hub.publishUser(userId, {
       runners: options.runners.listForUser(userId),
@@ -108,6 +115,7 @@ export function createRealtimeIntegration(
     if (session !== undefined) {
       options.hub.publishUser(userId, { session, type: "session" });
     }
+    publishQuestions(userId, sessionId);
     publishSessions(userId);
   });
 

@@ -19,6 +19,7 @@ interface SessionAgentActionsDependencies extends SessionAgentActionDependencies
   readonly abortSession: (sessionId: string) => void;
   readonly broker: Pick<RunnerCommandBroker, "cancelSession">;
   readonly activeSession: (sessionId: string) => boolean;
+  readonly cancelQuestions: (userId: string, sessionId: string) => void;
 }
 
 export class SessionAgentActions {
@@ -81,7 +82,8 @@ export class SessionAgentActions {
     if (
       current !== undefined &&
       current.status !== "queued" &&
-      current.status !== "running"
+      current.status !== "running" &&
+      current.status !== "waiting"
     ) {
       this.reportOne(current, userId);
     }
@@ -131,6 +133,7 @@ export class SessionAgentActions {
       parent !== undefined &&
       parent.status !== "queued" &&
       parent.status !== "running" &&
+      parent.status !== "waiting" &&
       !this.#dependencies.activeSession(parent.id) &&
       this.#dependencies.runnerIsAvailable(userId, parent.runnerId)
     ) {
@@ -223,6 +226,7 @@ export class SessionAgentActions {
     } else {
       cancel();
     }
+    this.#dependencies.cancelQuestions(userId, sessionId);
     this.#dependencies.notify(userId, sessionId);
     this.finished(target, userId);
     return sessionToolOutput({ sessionId, status: "stopped" });

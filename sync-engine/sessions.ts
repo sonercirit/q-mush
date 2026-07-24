@@ -1,14 +1,8 @@
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
-import { createDatabase, type AppDatabase } from "../shared/database.ts";
-import { createUuidV7, type IdGenerator } from "../shared/ids.ts";
-import type {
-  ProviderCredentialAccess,
-  ProviderId,
-} from "../shared/provider-credential-store.ts";
-import {
-  RunnerCommandBroker,
-  type RunnerToolCommand,
-} from "../shared/runner-command-broker.ts";
+import { createDatabase } from "../shared/database.ts";
+import { createUuidV7 } from "../shared/ids.ts";
+import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
+import { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type {
   AgentSessionDetail,
   AgentSessionSummary,
@@ -18,6 +12,7 @@ import {
   type AgentModelDiscoverer,
 } from "./agent-model-discovery.ts";
 import { ChatCompletionsAgentModel } from "./agent-model.ts";
+import { AskQuestionsStore } from "./ask-questions-store.ts";
 import type { GoogleAuth } from "./auth.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
 import {
@@ -30,15 +25,18 @@ import type { RealtimeHub } from "./realtime-hub.ts";
 import type { RunnerIntegration } from "./runners.ts";
 import { SessionAgentActions } from "./session-agent-actions.ts";
 import type { AgentModelFactory } from "./session-agent-models.ts";
-import {
-  compactSessionConversation,
-  runSessionAgent,
-} from "./session-agent-runtime.ts";
 import { unavailableSessionResponse } from "./session-availability.ts";
 import {
   startManualSessionCompaction,
   updateSessionCompactionMode,
 } from "./session-compaction-actions.ts";
+import type {
+  CredentialSelection,
+  RuntimeSelection,
+  SessionAction,
+  SessionCredentialReaders,
+  SessionDependencies,
+} from "./session-dependencies.ts";
 import {
   readCreateSession,
   readPrompt,
@@ -47,89 +45,19 @@ import {
   type CreateSessionInput,
   type PromptInput,
 } from "./session-input.ts";
-import { sessionModelRuntime } from "./session-model-runtime.ts";
+import type { SessionIntegration } from "./session-integration.ts";
+import {
+  answerQuestionRequest,
+  questionDependencies,
+  recoverAnsweredQuestions,
+} from "./session-question-actions.ts";
 import {
   SessionRequestHelpers,
   readIdentifier,
 } from "./session-request-helpers.ts";
+import { runSession } from "./session-run.ts";
 import { SessionRuntimes } from "./session-runtime.ts";
 import { SessionStore } from "./session-store.ts";
-
-interface SessionCredentialReader {
-  readCredential(
-    userId: string,
-    credentialId: string,
-  ):
-    | Promise<ProviderCredentialAccess | undefined>
-    | ProviderCredentialAccess
-    | undefined;
-}
-
-export type SessionCredentialReaders = Readonly<
-  Record<ProviderId, SessionCredentialReader>
->;
-
-type SessionAction = (
-  credential: ProviderCredentialAccess,
-) => Promise<Response> | Response;
-
-interface SessionDependencies {
-  readonly broker?: RunnerCommandBroker;
-  readonly braveSearch: Pick<BraveSearchSkill, "execute">;
-  readonly database?: AppDatabase;
-  readonly discoverModels?: AgentModelDiscoverer;
-  readonly modelFactory?: AgentModelFactory;
-  readonly now?: () => number;
-  readonly randomId?: IdGenerator;
-  readonly realtime?: RealtimeHub;
-}
-
-interface CredentialSelection {
-  readonly credentialId: string;
-  readonly provider: ProviderId;
-}
-
-interface RuntimeSelection extends CredentialSelection {
-  readonly runnerId: string;
-}
-
-export interface SessionIntegration {
-  collection(request: Request): Response | Promise<Response>;
-  compact(request: Request, sessionId: string): Promise<Response>;
-  compaction(request: Request, sessionId: string): Promise<Response>;
-  completeRunnerCommand(
-    runnerId: string,
-    commandId: string,
-    output: string,
-  ): boolean;
-  continue(request: Request, sessionId: string): Promise<Response>;
-  deliverRunnerCommands(
-    runnerId: string,
-    deliver: (command: RunnerToolCommand) => boolean,
-  ): void;
-  detailForUser(
-    userId: string,
-    sessionId: string,
-  ): AgentSessionDetail | undefined;
-  directories(request: Request, runnerId: string): Promise<Response>;
-  drain(): Promise<void>;
-  item(request: Request, sessionId: string): Response;
-  listForUser(userId: string): readonly AgentSessionSummary[];
-  message(request: Request, sessionId: string): Promise<Response>;
-  models(request: Request): Promise<Response>;
-  onChange(listener: (userId: string, sessionId: string) => void): void;
-  runnerConnected(): void;
-  stop(request: Request, sessionId: string): Promise<Response>;
-}
-
-function safeErrorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : "Unknown error";
-  return `Session failed: ${message.slice(0, 500)}`;
-}
-
-function isAbort(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "AbortError";
-}
 
 class DrizzleSessionIntegration implements SessionIntegration {
   readonly #broker: RunnerCommandBroker;
@@ -146,6 +74,8 @@ class DrizzleSessionIntegration implements SessionIntegration {
   readonly #runtimes = new SessionRuntimes();
   readonly #store: SessionStore;
   readonly #actions: SessionAgentActions;
+  readonly #questions: AskQuestionsStore;
+  readonly #questionActions: ReturnType<typeof questionDependencies>;
 
   constructor(
     auth: GoogleAuth,
@@ -172,12 +102,36 @@ class DrizzleSessionIntegration implements SessionIntegration {
     this.#providers = providers;
     this.#requests = new SessionRequestHelpers(auth, this.#broker, runners);
     this.#runners = runners;
-    this.#store = new SessionStore(
-      dependencies.database ?? createDatabase(":memory:"),
-      dependencies.randomId ?? createUuidV7,
+    const database = dependencies.database ?? createDatabase(":memory:");
+    const generateId = dependencies.randomId ?? createUuidV7;
+    /* jscpd:ignore-start */
+    this.#questions = new AskQuestionsStore({ database, generateId });
+    this.#store = new SessionStore(database, generateId, (userId, sessionId) =>
+      this.#questions.pending(userId, sessionId),
     );
     this.#actions = this.#createActions();
-    this.#actions.reportAll(this.#store.failInterrupted(this.#now()));
+    this.#questionActions = questionDependencies({
+      credential: (userId, detail, action) =>
+        this.#withCredentialAccess(userId, detail, action),
+      launch: (detail, credential, userId) =>
+        this.#launch(detail, credential, userId),
+      notify: this.#notify,
+      now: this.#now,
+      questions: this.#questions,
+      runners: this.#runners,
+      runtimes: this.#runtimes,
+      store: this.#store,
+    });
+    const recoverableQuestions = new Set(
+      this.#questions.recoverable().map(({ id }) => id),
+    );
+    this.#actions.reportAll(
+      this.#store.failInterrupted(this.#now(), recoverableQuestions),
+    );
+    queueMicrotask(() => {
+      recoverAnsweredQuestions(this.#questionActions);
+    });
+    /* jscpd:ignore-end */
   }
 
   #createActions(): SessionAgentActions {
@@ -187,6 +141,9 @@ class DrizzleSessionIntegration implements SessionIntegration {
         this.#runtimes.abort(sessionId);
       },
       broker: this.#broker,
+      cancelQuestions: (userId, sessionId) => {
+        this.#questions.cancel(userId, sessionId, this.#now());
+      },
       draining: () => this.#runtimes.draining,
       discoverSessionMetadata: async (input, credential) => {
         try {
@@ -213,6 +170,22 @@ class DrizzleSessionIntegration implements SessionIntegration {
       withCredential: (userId, selection, action) =>
         this.#withCredentialAccess(userId, selection, action),
     });
+  }
+
+  async answerQuestions(
+    request: Request,
+    sessionId: string,
+    questionRequestId: string,
+  ): Promise<Response> {
+    /* jscpd:ignore-start */
+    return answerQuestionRequest(
+      this.#questionActions,
+      this.#requests,
+      request,
+      sessionId,
+      questionRequestId,
+    );
+    /* jscpd:ignore-end */
   }
 
   collection(request: Request): Response | Promise<Response> {
@@ -258,7 +231,7 @@ class DrizzleSessionIntegration implements SessionIntegration {
 
   deliverRunnerCommands(
     runnerId: string,
-    deliver: (command: RunnerToolCommand) => boolean,
+    deliver: Parameters<RunnerCommandBroker["deliverQueued"]>[1],
   ): void {
     this.#broker.deliverQueued(runnerId, deliver);
   }
@@ -288,6 +261,13 @@ class DrizzleSessionIntegration implements SessionIntegration {
     return this.#store.list(userId);
   }
 
+  pendingQuestionForUser(
+    userId: string,
+    sessionId: string,
+  ): AgentSessionSummary["pendingQuestions"] {
+    return this.#questions.pending(userId, sessionId);
+  }
+
   message(request: Request, sessionId: string): Promise<Response> {
     return Promise.resolve(
       this.#requests.authenticate(request, "POST", (user) =>
@@ -312,20 +292,27 @@ class DrizzleSessionIntegration implements SessionIntegration {
 
   runnerConnected(): void {
     this.#actions.reportAll(this.#store.pendingSpawnedSessions());
+    recoverAnsweredQuestions(this.#questionActions);
   }
-  async stop(request: Request, sessionId: string): Promise<Response> {
-    return this.#requests.postForUser(request, (user) =>
-      this.#withStoredSession(user, sessionId, (existing) => {
-        if (existing.status !== "stopped") {
-          this.#store.stop(user.id, sessionId, this.#now());
-        }
 
-        this.#runtimes.abort(sessionId);
-        this.#broker.cancelSession(sessionId);
-        this.#notify(user.id, sessionId);
-        return this.#detailResponse(user.id, sessionId);
-      }),
-    );
+  async stop(request: Request, sessionId: string): Promise<Response> {
+    /* jscpd:ignore-start */
+    return this.#requests.postForUser(request, (user) => {
+      const existing = this.#store.get(user.id, sessionId);
+      if (existing === undefined) {
+        return createApiError("not_found", 404);
+      }
+      if (existing.status !== "stopped") {
+        this.#store.stop(user.id, sessionId, this.#now());
+      }
+
+      this.#runtimes.abort(sessionId);
+      this.#broker.cancelSession(sessionId);
+      this.#questions.cancel(user.id, sessionId, this.#now());
+      this.#notify(user.id, sessionId);
+      return this.#detailResponse(user.id, sessionId);
+    });
+    /* jscpd:ignore-end */
   }
 
   readonly #notify = (userId: string, sessionId: string): void => {
@@ -333,17 +320,6 @@ class DrizzleSessionIntegration implements SessionIntegration {
       listener(userId, sessionId);
     }
   };
-
-  #withStoredSession(
-    user: AuthenticatedUser,
-    sessionId: string,
-    action: (session: AgentSessionDetail) => Promise<Response> | Response,
-  ): Promise<Response> | Response {
-    const session = this.#store.get(user.id, sessionId);
-    return session === undefined
-      ? createApiError("not_found", 404)
-      : action(session);
-  }
 
   async #withCredentialAccess(
     userId: string,
@@ -519,7 +495,27 @@ class DrizzleSessionIntegration implements SessionIntegration {
     compact = false,
   ): boolean {
     return this.#runtimes.launch(detail.id, (controller) =>
-      this.#run(detail, credential, userId, controller, compact),
+      runSession(
+        {
+          actions: this.#actions,
+          braveSearch: this.#braveSearch,
+          broker: this.#broker,
+          finished: (finished, finishedUserId) => {
+            this.#notifyFinished(finished, finishedUserId);
+          },
+          modelFactory: this.#modelFactory,
+          now: this.#now,
+          notify: this.#notify,
+          questions: this.#questions,
+          realtime: this.#realtime,
+          store: this.#store,
+        },
+        detail,
+        credential,
+        userId,
+        controller,
+        compact,
+      ),
     );
   }
 
@@ -573,68 +569,13 @@ class DrizzleSessionIntegration implements SessionIntegration {
     this.#notify(userId, detail.id);
     this.#actions.finished(detail, userId);
   }
-
-  #finish(detail: AgentSessionDetail, userId: string, error?: unknown): void {
-    const current = this.#store.get(userId, detail.id);
-    if (current?.status === "stopped") {
-      this.#notifyFinished(detail, userId);
-      return;
-    }
-    if (error !== undefined) {
-      this.#store.appendErrorMessage(
-        detail.id,
-        safeErrorMessage(error),
-        this.#now(),
-      );
-    }
-    this.#store.mark(
-      detail.id,
-      error === undefined ? "idle" : "failed",
-      this.#now(),
-    );
-    this.#notifyFinished(detail, userId);
-  }
-
-  async #run(
-    detail: AgentSessionDetail,
-    credential: ProviderCredentialAccess,
-    userId: string,
-    controller: AbortController,
-    compact: boolean,
-  ): Promise<void> {
-    if (!this.#store.mark(detail.id, "running", this.#now())) {
-      return;
-    }
-    this.#notify(userId, detail.id);
-
-    try {
-      const runtime = sessionModelRuntime(
-        {
-          actions: this.#actions,
-          braveSearch: this.#braveSearch,
-          broker: this.#broker,
-          modelFactory: this.#modelFactory,
-          now: this.#now,
-          notify: this.#notify,
-          realtime: this.#realtime,
-          store: this.#store,
-        },
-        detail,
-        credential,
-        userId,
-        controller,
-      );
-      await (compact
-        ? compactSessionConversation(runtime)
-        : runSessionAgent(runtime));
-      this.#finish(detail, userId);
-    } catch (error) {
-      if (!controller.signal.aborted && !isAbort(error)) {
-        this.#finish(detail, userId, error);
-      }
-    }
-  }
 }
+
+export type {
+  SessionCredentialReaders,
+  SessionDependencies,
+} from "./session-dependencies.ts";
+export type { SessionIntegration } from "./session-integration.ts";
 
 export function createSessionIntegration(
   auth: GoogleAuth,

@@ -1,6 +1,6 @@
 interface ActiveSessionRuntime {
   readonly controller: AbortController;
-  readonly settled: Promise<void>;
+  settled: Promise<void>;
 }
 
 type SessionRuntime = (controller: AbortController) => Promise<void>;
@@ -21,6 +21,11 @@ export class SessionRuntimes {
     this.#active.get(sessionId)?.controller.abort();
   }
 
+  wait(sessionId: string): Promise<void> {
+    const runtime = this.#active.get(sessionId);
+    return runtime === undefined ? Promise.resolve() : runtime.settled;
+  }
+
   async drain(): Promise<void> {
     this.#draining = true;
     await Promise.allSettled(
@@ -29,19 +34,24 @@ export class SessionRuntimes {
   }
 
   launch(sessionId: string, run: SessionRuntime): boolean {
-    if (this.#draining) {
+    if (this.#draining || this.#active.has(sessionId)) {
       return false;
     }
     const controller = new AbortController();
-    const settled = Promise.resolve().then(() => run(controller));
-    const runtime = { controller, settled };
+    const runtime: ActiveSessionRuntime = {
+      controller,
+      settled: Promise.resolve(),
+    };
     const clear = () => {
       if (this.#active.get(sessionId) === runtime) {
         this.#active.delete(sessionId);
       }
     };
+    const settled = Promise.resolve()
+      .then(() => run(controller))
+      .then(clear, clear);
+    runtime.settled = settled;
     this.#active.set(sessionId, runtime);
-    void settled.then(clear, clear);
     return true;
   }
 }

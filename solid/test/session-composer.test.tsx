@@ -75,6 +75,10 @@ test.each([
     reason: "Session is running. You can send when it is ready.",
     status: "running",
   },
+  {
+    reason: "Session is waiting for your answers.",
+    status: "waiting",
+  },
 ] as const)(
   "keeps the composer visible but unavailable while a session is $status",
   ({ status, reason }) => {

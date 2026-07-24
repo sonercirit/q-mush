@@ -1,6 +1,11 @@
 import { describe, expect, test } from "vitest";
 import type { AgentModel, AgentModelTurn } from "../../shared/agent-loop.ts";
 import { isRecord } from "../../shared/auth-model.ts";
+import {
+  agentQuestionRequests,
+  agentSessions,
+} from "../../shared/database/schema.ts";
+import { TEST_USER_ID } from "./authenticated-integration-test-helpers.ts";
 import { findToolResultContent } from "./session-agent-tool-helpers.ts";
 import {
   completedParentDetail,
@@ -10,6 +15,7 @@ import {
 } from "./session-agent-tool-setup.ts";
 import {
   CREDENTIAL_ID,
+  QUESTION_REQUEST_ID,
   RUNNER_COMMAND_ID,
   RUNNER_ID,
   SESSION_ID,
@@ -260,6 +266,80 @@ describe("session agent tools", () => {
       "interrupted before it returned",
     );
     controlSetup.database.$client.close();
+  });
+
+  test("a session tool stop soft-cancels another session's pending questions", async () => {
+    /* jscpd:ignore-start */
+    const model = scriptedModel([
+      {
+        content: "Stopping the waiting child.",
+        toolCalls: [
+          toolCall("stop_session", { sessionId: QUESTION_REQUEST_ID }),
+        ],
+      },
+      { content: "Waiting child stopped.", toolCalls: [] },
+    ]);
+    const setup = await startToolSession(model);
+    const timestamp = new Date(1_700_000_000_000);
+    setup.database
+      .insert(agentSessions)
+      .values({
+        activeDurationMs: 0,
+        autoCompact: true,
+        costBasis: "none",
+        costUsd: 0,
+        createdAt: timestamp,
+        createdById: TEST_USER_ID,
+        currentContextTokens: 0,
+        id: QUESTION_REQUEST_ID,
+        isDeleted: false,
+        model: "gpt-test",
+        provider: "openai",
+        providerCredentialId: CREDENTIAL_ID,
+        runnerId: RUNNER_ID,
+        status: "waiting",
+        title: "Waiting child",
+        tools: "[]",
+        updatedAt: timestamp,
+        updatedById: TEST_USER_ID,
+        userId: TEST_USER_ID,
+        workingDirectory: "/work/project",
+      })
+      .run();
+    setup.database
+      .insert(agentQuestionRequests)
+      .values({
+        createdAt: timestamp,
+        createdById: TEST_USER_ID,
+        id: "018bcfe5-6800-7000-8000-000000000099",
+        isDeleted: false,
+        questions: JSON.stringify({
+          questions: [
+            {
+              id: "note",
+              maxLength: 20,
+              prompt: "Add a note",
+              type: "free_text",
+            },
+          ],
+        }),
+        sessionId: QUESTION_REQUEST_ID,
+        toolCallId: "waiting-call",
+        updatedAt: timestamp,
+        updatedById: TEST_USER_ID,
+        userId: TEST_USER_ID,
+      })
+      .run();
+
+    const detail = await completedParentDetail(setup, "idle");
+    expect(findToolResultContent(detail, "stop_session")).toContain(
+      '"status": "stopped"',
+    );
+    expect(
+      setup.database.select().from(agentQuestionRequests).get(),
+    ).toMatchObject({ isDeleted: true });
+    setup.database.$client.close();
+    /* jscpd:ignore-end */
   });
 
   test("rejects a spawn without access to its credential", async () => {

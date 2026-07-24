@@ -38,7 +38,9 @@ export function sessionContextLabel(
 ): string {
   const current =
     session.currentContextTokens === 0
-      ? session.status === "queued" || session.status === "running"
+      ? session.status === "queued" ||
+        session.status === "running" ||
+        session.status === "waiting"
         ? "Pending"
         : "Not reported"
       : formatTokenCount(session.currentContextTokens);

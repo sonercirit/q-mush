@@ -56,6 +56,7 @@ export interface SessionModelDiscoveryState {
 }
 
 export interface SessionViewState {
+  readonly answeringQuestions: boolean;
   readonly compacting: boolean;
   readonly creating: boolean;
   readonly directoryPicker: DirectoryPickerState;

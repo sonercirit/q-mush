@@ -16,6 +16,7 @@ import {
 import { ToolParameterDetails } from "./tool-parameter-details.tsx";
 
 const CLASSIFICATION_LABELS = {
+  interactive_tool: "Interactive tool",
   runner_tool: "Runner tool",
   session_tool: "Session tool",
   skill: "Skill",

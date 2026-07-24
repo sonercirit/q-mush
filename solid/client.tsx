@@ -368,6 +368,9 @@ function App(): JSX.Element {
       case "session":
         agentSessions.applyDetail(event.session);
         break;
+      case "session_questions":
+        agentSessions.applyQuestions(event);
+        break;
       case "session_delta":
         agentSessions.applyDelta(event);
         break;

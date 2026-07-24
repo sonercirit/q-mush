@@ -157,7 +157,7 @@ export const agentSessions = sqliteTable(
       .notNull()
       .default(JSON.stringify(AGENT_SESSION_TOOL_NAMES)),
     status: text("status", {
-      enum: ["queued", "running", "idle", "stopped", "failed"],
+      enum: ["queued", "running", "waiting", "idle", "stopped", "failed"],
     }).notNull(),
   },
   (table) => [
@@ -172,6 +172,39 @@ export const agentSessions = sqliteTable(
     ),
   ],
 );
+
+/* jscpd:ignore-start */
+export const agentQuestionRequests = sqliteTable(
+  "agent_question_requests",
+  {
+    ...ownedAuditColumns(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => agentSessions.id, { onDelete: "restrict" }),
+    toolCallId: text("tool_call_id").notNull(),
+    questions: text("questions").notNull(),
+    answers: text("answers"),
+    answeredAt: integer("answered_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    index("agent_question_requests_session_deletion_index").on(
+      table.sessionId,
+      table.isDeleted,
+    ),
+    index("agent_question_requests_user_deletion_index").on(
+      table.userId,
+      table.isDeleted,
+    ),
+    uniqueIndex("agent_question_requests_session_tool_call_unique").on(
+      table.sessionId,
+      table.toolCallId,
+    ),
+    uniqueIndex("agent_question_requests_active_session_unique")
+      .on(table.sessionId)
+      .where(sql`${table.answeredAt} IS NULL AND NOT ${table.isDeleted}`),
+  ],
+);
+/* jscpd:ignore-end */
 
 export const agentMessages = sqliteTable(
   "agent_messages",

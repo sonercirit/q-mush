@@ -146,7 +146,11 @@ function persistedDetail(detail: AgentSessionDetail): AgentSessionDetail {
 }
 
 function sessionIsActive(detail: AgentSessionDetail): boolean {
-  return detail.status === "queued" || detail.status === "running";
+  return (
+    detail.status === "queued" ||
+    detail.status === "running" ||
+    detail.status === "waiting"
+  );
 }
 
 function resolveStreamBase(
@@ -371,6 +375,7 @@ export class SessionRealtimeState {
   applySessions(sessions: readonly AgentSessionSummary[]): void {
     if (
       this.#view.value.sessions === undefined ||
+      this.#view.value.answeringQuestions ||
       this.#view.value.compacting ||
       this.#view.value.creating ||
       this.#view.value.sending ||

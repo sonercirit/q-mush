@@ -3,11 +3,14 @@ import {
   isSessionAgentToolName,
   type AgentSessionToolName,
 } from "../shared/agent-tools.ts";
+import { readAskQuestionsInput } from "../shared/ask-questions.ts";
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { estimateAgentTurnCost } from "./agent-cost.ts";
 import { createAgentSkills } from "./agent-skills.ts";
+import { AskQuestionsPause } from "./ask-questions-pause.ts";
+import type { AskQuestionsStore } from "./ask-questions-store.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
 import { loadSessionAgentFile } from "./session-agent-file.ts";
@@ -32,6 +35,7 @@ export interface SessionAgentRuntimeDependencies {
   readonly modelFactory: AgentModelFactory;
   readonly now: () => number;
   readonly notify: () => void;
+  readonly questions: AskQuestionsStore;
   readonly realtime: RealtimeHub | undefined;
   readonly sessionTools: SessionAgentToolActions;
   readonly signal: AbortSignal;
@@ -137,6 +141,23 @@ export async function runSessionAgent(
         return Promise.resolve(
           `Error: ${call.name} is not enabled for this session.`,
         );
+      }
+      if (call.name === "ask_questions") {
+        const input = readAskQuestionsInput(call.arguments);
+        if (input === undefined) {
+          return Promise.resolve(
+            "Error: the ask_questions arguments are invalid.",
+          );
+        }
+        runtime.questions.create(
+          runtime.userId,
+          runtime.detail.id,
+          call.id,
+          input,
+          runtime.now(),
+        );
+        runtime.notify();
+        throw new AskQuestionsPause();
       }
       const skillOutput = skills.execute(
         call.name,

@@ -39,6 +39,7 @@ export function sessionModelDiscoveryState(
 
 export function initialSessionViewState(): SessionViewState {
   return {
+    answeringQuestions: false,
     compacting: false,
     creating: false,
     detail: undefined,

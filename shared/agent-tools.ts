@@ -29,6 +29,107 @@ function toolDefinition<
   } as const;
 }
 
+const ASK_QUESTION_OPTION_PARAMETER = {
+  /* jscpd:ignore-start */
+  additionalProperties: false,
+  properties: {
+    label: {
+      description: "Human-readable choice label",
+      type: "string",
+    },
+    value: {
+      description: "Stable value returned for this choice",
+      type: "string",
+    },
+  },
+  required: ["label", "value"],
+  type: "object",
+} as const;
+
+const ASK_QUESTION_PARAMETER = {
+  oneOf: [
+    {
+      additionalProperties: false,
+      properties: {
+        id: STRING_PARAMETER,
+        maxLength: {
+          maximum: 4000,
+          minimum: 1,
+          type: "integer",
+        },
+        minLength: {
+          maximum: 4000,
+          minimum: 0,
+          type: "integer",
+        },
+        prompt: STRING_PARAMETER,
+        type: { const: "free_text", type: "string" },
+      },
+      required: ["id", "prompt", "type", "maxLength"],
+      type: "object",
+    },
+    {
+      additionalProperties: false,
+      properties: {
+        id: STRING_PARAMETER,
+        options: {
+          items: ASK_QUESTION_OPTION_PARAMETER,
+          maxItems: 12,
+          minItems: 2,
+          type: "array",
+        },
+        prompt: STRING_PARAMETER,
+        type: { const: "single_choice", type: "string" },
+      },
+      required: ["id", "prompt", "type", "options"],
+      type: "object",
+    },
+    {
+      additionalProperties: false,
+      properties: {
+        id: STRING_PARAMETER,
+        maxSelections: {
+          maximum: 12,
+          minimum: 1,
+          type: "integer",
+        },
+        minSelections: {
+          maximum: 12,
+          minimum: 0,
+          type: "integer",
+        },
+        options: {
+          items: ASK_QUESTION_OPTION_PARAMETER,
+          maxItems: 12,
+          minItems: 2,
+          type: "array",
+        },
+        prompt: STRING_PARAMETER,
+        type: { const: "multi_choice", type: "string" },
+      },
+      required: ["id", "prompt", "type", "options"],
+      type: "object",
+    },
+  ],
+} as const;
+
+const ASK_QUESTIONS_TOOL = toolDefinition({
+  description:
+    "Ask the user one to eight bounded free-text, single-choice, or multi-choice questions. The session pauses until the authenticated user answers. Do not call this through parallel because it blocks for interactive input.",
+  name: "ask_questions",
+  properties: {
+    questions: {
+      description: "Questions to present together",
+      items: ASK_QUESTION_PARAMETER,
+      maxItems: 8,
+      minItems: 1,
+      type: "array",
+    },
+  },
+  required: ["questions"],
+});
+/* jscpd:ignore-end */
+
 const EDIT_REPLACEMENT_PARAMETER = {
   additionalProperties: false,
   properties: {
@@ -283,6 +384,7 @@ export const AGENT_TOOLS = [
   ...BASE_AGENT_TOOLS,
   PARALLEL_TOOL,
   BRAVE_SEARCH_TOOL,
+  ASK_QUESTIONS_TOOL,
   ...SESSION_AGENT_TOOLS,
 ] as const;
 
@@ -314,6 +416,7 @@ export const AGENT_SESSION_TOOL_NAMES: readonly AgentSessionToolName[] =
   AGENT_TOOLS.map(({ function: definition }) => definition.name);
 
 const AGENT_TOOL_LABELS: Readonly<Record<AgentSessionToolName, string>> = {
+  ask_questions: "Ask questions",
   bash: "Shell",
   brave_search: "Brave Search",
   continue_session: "Continue session",
@@ -328,7 +431,8 @@ const AGENT_TOOL_LABELS: Readonly<Record<AgentSessionToolName, string>> = {
   write: "Write files",
 };
 
-type AgentToolClassification = "runner_tool" | "session_tool" | "skill";
+type AgentToolClassification =
+  "interactive_tool" | "runner_tool" | "session_tool" | "skill";
 
 export interface AgentSessionToolOption {
   readonly classification: AgentToolClassification;
@@ -343,9 +447,11 @@ function agentToolClassification(
 ): AgentToolClassification {
   return name === BRAVE_SEARCH_TOOL_NAME
     ? "skill"
-    : SESSION_AGENT_TOOL_NAMES.some((sessionName) => sessionName === name)
-      ? "session_tool"
-      : "runner_tool";
+    : name === ASK_QUESTIONS_TOOL.function.name
+      ? "interactive_tool"
+      : SESSION_AGENT_TOOL_NAMES.some((sessionName) => sessionName === name)
+        ? "session_tool"
+        : "runner_tool";
 }
 
 export const AGENT_SESSION_TOOL_OPTIONS: readonly AgentSessionToolOption[] =
@@ -403,7 +509,11 @@ function selectedParallelTool(
                     .items.properties.recipient_name,
                   enum: selectedTools
                     .map(({ function: definition }) => definition.name)
-                    .filter((name) => name !== PARALLEL_TOOL.function.name),
+                    .filter(
+                      (name) =>
+                        name !== PARALLEL_TOOL.function.name &&
+                        name !== ASK_QUESTIONS_TOOL.function.name,
+                    ),
                 },
               },
             },

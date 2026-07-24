@@ -15,6 +15,7 @@ import type {
   AgentSessionSummary,
 } from "../shared/session-model.ts";
 import { activeSessionDuration } from "../shared/session-timing.ts";
+import { AskQuestionsForm } from "./ask-questions-client.tsx";
 import { Collection } from "./collection.tsx";
 import { SessionFollowUp } from "./session-client-forms.tsx";
 import type { SessionViewState } from "./session-client.tsx";
@@ -51,6 +52,10 @@ const STATUS_PRESENTATION: Readonly<
   running: {
     classes: "border-emerald-300/20 bg-emerald-300/10 text-emerald-200",
     label: "Running",
+  },
+  waiting: {
+    classes: "border-violet-300/20 bg-violet-300/10 text-violet-200",
+    label: "Waiting for answers",
   },
   stopped: {
     classes: "border-slate-400/20 bg-slate-400/10 text-slate-300",
@@ -289,6 +294,9 @@ function composerUnavailableReason(
   if (detail.status === "running") {
     return "Session is running. You can send when it is ready.";
   }
+  if (detail.status === "waiting") {
+    return "Session is waiting for your answers.";
+  }
   if (runnerAvailable === undefined) {
     return "Checking whether the session runner is available…";
   }
@@ -330,7 +338,9 @@ function LoadedSessionDetail(props: {
   readonly state: SessionViewState;
 }): JSX.Element {
   const active = (): boolean =>
-    props.detail.status === "queued" || props.detail.status === "running";
+    props.detail.status === "queued" ||
+    props.detail.status === "running" ||
+    props.detail.status === "waiting";
   const composerReason = (): string | undefined =>
     composerUnavailableReason(
       props.detail,
@@ -439,6 +449,19 @@ function LoadedSessionDetail(props: {
           tools={props.detail.tools}
         />
       </ul>
+      <Show when={props.detail.pendingQuestions}>
+        {(pending) => (
+          <div class="mt-5">
+            <AskQuestionsForm
+              onSubmit={(answers) => {
+                void props.controller.answerQuestions(answers);
+              }}
+              pending={pending()}
+              submitting={props.state.answeringQuestions}
+            />
+          </div>
+        )}
+      </Show>
       <div class="mt-5 flex flex-col gap-3">
         <Show when={!active()}>
           <CompactionControls

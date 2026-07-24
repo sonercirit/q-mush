@@ -1,5 +1,6 @@
 import { type Accessor } from "solid-js";
 import type { AgentSessionToolName } from "../shared/agent-tools.ts";
+import type { AskQuestionAnswers } from "../shared/ask-questions.ts";
 import { SESSIONS_PATH } from "../shared/routes.ts";
 import type {
   AgentSessionDetail,
@@ -9,6 +10,7 @@ import type {
 import { requestJson } from "./browser-http.ts";
 import { DirectoryPickerController } from "./directory-picker-controller.ts";
 import { createReactiveState, type ReactiveState } from "./reactive-state.ts";
+import type { RealtimeServerEvent } from "./realtime-client-codec.ts";
 import { RevisionState } from "./revision-state.ts";
 import type { SessionViewState } from "./session-client.tsx";
 import { readSessionDetail, readSessionList } from "./session-codec.ts";
@@ -33,6 +35,10 @@ import {
   type SessionMutation,
 } from "./session-mutations.ts";
 import {
+  answerSessionQuestionsRequest,
+  sendSessionMessageRequest,
+} from "./session-request.ts";
+import {
   initialSessionViewState,
   mostRecentSessionDirectory,
 } from "./session-state.ts";
@@ -44,7 +50,12 @@ import {
 } from "./session-transcript-filters.ts";
 
 function detailMutationPending(state: SessionViewState): boolean {
-  return state.compacting || state.sending || state.stopping;
+  return (
+    state.answeringQuestions ||
+    state.compacting ||
+    state.sending ||
+    state.stopping
+  );
 }
 
 function selectedDetailHasStatus(
@@ -59,7 +70,7 @@ function selectedDetailHasStatus(
 }
 
 function sessionIsActive(status: AgentSessionStatus): boolean {
-  return status === "queued" || status === "running";
+  return status === "queued" || status === "running" || status === "waiting";
 }
 
 function sessionCanResume(status: AgentSessionStatus): boolean {
@@ -125,6 +136,26 @@ export class SessionController {
     this.#realtime.applyDelta(event);
   }
 
+  applyQuestions(
+    event: Extract<RealtimeServerEvent, { type: "session_questions" }>,
+  ): void {
+    if (this.#view.value.answeringQuestions) {
+      return;
+    }
+    const detail = this.#view.value.detail;
+    if (detail?.id !== event.sessionId) {
+      return;
+    }
+    const updated = retainUnchangedSessionData(detail, {
+      ...detail,
+      pendingQuestions: event.pending,
+    });
+    this.#view.patch({
+      detail: updated,
+      sessions: replaceSessionSummary(this.#view.value.sessions ?? [], updated),
+    });
+  }
+
   applyRealtime(sessions: readonly AgentSessionSummary[]): void {
     this.#realtime.applySessions(sessions);
   }
@@ -146,6 +177,10 @@ export class SessionController {
 
   addImages(files: readonly File[], follow: boolean): Promise<void> {
     return this.#addImages(files, follow);
+  }
+
+  answerQuestions(answers: AskQuestionAnswers): Promise<void> {
+    return this.#answerQuestions(answers);
   }
 
   chooseDirectory(): void {
@@ -527,6 +562,26 @@ export class SessionController {
     await this.#readDetail(sessionId, revision, true);
   }
 
+  async #answerQuestions(answers: AskQuestionAnswers): Promise<void> {
+    const detail = this.#view.value.detail;
+    const pending = detail?.pendingQuestions;
+    if (
+      detail === undefined ||
+      pending === null ||
+      pending === undefined ||
+      this.#detailMutationPending()
+    ) {
+      return;
+    }
+
+    await this.#mutateDetail({
+      action: "submit those answers",
+      pending: "answeringQuestions",
+      request: () =>
+        answerSessionQuestionsRequest(detail.id, pending.id, answers),
+    });
+  }
+
   async #send(): Promise<void> {
     const sessionId = this.#view.value.selectedId;
     const detail = this.#view.value.detail;
@@ -537,6 +592,7 @@ export class SessionController {
       detail?.id !== sessionId ||
       detail.status === "queued" ||
       detail.status === "running" ||
+      detail.status === "waiting" ||
       this.#detailMutationPending() ||
       (prompt.length === 0 && this.#view.value.followUpImages.length === 0)
     ) {
@@ -547,18 +603,10 @@ export class SessionController {
       action: "send that instruction",
       pending: "sending",
       request: () =>
-        requestJson(
-          `${SESSIONS_PATH}/${encodeURIComponent(sessionId)}/messages`,
-          {
-            body: JSON.stringify({
-              ...(this.#view.value.followUpImages.length === 0
-                ? {}
-                : { images: this.#view.value.followUpImages }),
-              prompt,
-            }),
-            headers: { "content-type": "application/json" },
-            method: "POST",
-          },
+        sendSessionMessageRequest(
+          sessionId,
+          prompt,
+          this.#view.value.followUpImages,
         ),
       success: { followUp: "", followUpImages: [] },
     });

@@ -66,6 +66,7 @@ function sessions(
   overrides: Partial<Pick<SessionIntegration, "runnerConnected">> = {},
 ): SessionIntegration {
   return {
+    answerQuestions: () => Promise.resolve(new Response()),
     collection: () => Promise.resolve(new Response()),
     compact: () => Promise.resolve(new Response()),
     compaction: () => Promise.resolve(new Response()),
@@ -77,6 +78,7 @@ function sessions(
     drain: () => Promise.resolve(),
     item: () => new Response(),
     listForUser: () => [],
+    pendingQuestionForUser: () => null,
     message: () => Promise.resolve(new Response()),
     models: () => Promise.resolve(new Response()),
     onChange: () => undefined,

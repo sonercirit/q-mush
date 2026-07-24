@@ -5,10 +5,6 @@ import type {
   AgentConversationMessage,
   AgentRecordedMessage,
 } from "../shared/agent-loop.ts";
-import {
-  readAgentSessionToolNames,
-  type AgentSessionToolName,
-} from "../shared/agent-tools.ts";
 import { createdAuditFields, updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
@@ -24,7 +20,6 @@ import { activeSessionDuration } from "../shared/session-timing.ts";
 import { compactStoredConversation } from "./session-compaction.ts";
 import {
   conversationFromMessages,
-  parseProviderPricing,
   storedSessionMessages,
   withInterruptedToolResults,
 } from "./session-store-read.ts";
@@ -34,6 +29,11 @@ import {
   pendingSpawnedSessions,
   type PendingSpawnedSession,
 } from "./session-store-spawns.ts";
+import { summarizeSession, titleFromPrompt } from "./session-store-summary.ts";
+import {
+  type CreateAgentSession,
+  type QueueSessionResult,
+} from "./session-store-types.ts";
 import {
   appendSessionUserMessage,
   errorMessageValues,
@@ -43,30 +43,6 @@ import {
   userMessageValues,
   type StoredMessageValues,
 } from "./session-store-values.ts";
-
-export interface CreateAgentSession extends Pick<
-  AgentSessionSummary,
-  | "autoCompact"
-  | "maxContextTokens"
-  | "model"
-  | "provider"
-  | "providerPricing"
-  | "reasoningEffort"
-  | "runnerId"
-  | "tools"
-  | "workingDirectory"
-> {
-  readonly credentialId: string;
-  readonly images: readonly AgentImage[];
-  readonly parentSessionId?: string;
-  readonly prompt: string;
-  readonly userId: string;
-}
-
-export type QueueSessionResult =
-  | { readonly detail: AgentSessionDetail; readonly status: "queued" }
-  | { readonly status: "busy" }
-  | { readonly status: "not_found" };
 
 interface SessionFilter {
   readonly id?: string;
@@ -137,66 +113,30 @@ function sessionSelection() {
   };
 }
 
-type StoredSessionSummary = Pick<
-  typeof agentSessions.$inferSelect,
-  | "activeDurationMs"
-  | "activeStartedAt"
-  | "autoCompact"
-  | "costBasis"
-  | "costUsd"
-  | "createdAt"
-  | "currentContextTokens"
-  | "id"
-  | "maxContextTokens"
-  | "model"
-  | "provider"
-  | "providerPricing"
-  | "reasoningEffort"
-  | "runnerId"
-  | "status"
-  | "title"
-  | "tools"
-  | "updatedAt"
-  | "workingDirectory"
-> & { readonly credentialId: string };
-
-function parseStoredTools(value: string): readonly AgentSessionToolName[] {
-  try {
-    const tools = readAgentSessionToolNames(JSON.parse(value));
-    if (tools !== undefined) {
-      return tools;
-    }
-  } catch {
-    // The common error below identifies corrupt local data.
-  }
-  throw new Error("Stored agent session tools are invalid");
-}
-
-function summarizeSession(stored: StoredSessionSummary): AgentSessionSummary {
-  return {
-    ...stored,
-    activeStartedAt: stored.activeStartedAt?.getTime() ?? null,
-    createdAt: stored.createdAt.getTime(),
-    providerPricing: parseProviderPricing(stored.providerPricing),
-    tools: parseStoredTools(stored.tools),
-    updatedAt: stored.updatedAt.getTime(),
-  };
-}
-
-function titleFromPrompt(prompt: string): string {
-  const firstLine = prompt
-    .split(/\r?\n/u)
-    .map((line) => line.trim())
-    .find((line) => line.length > 0);
-  return (firstLine ?? "Image task").slice(0, 80);
-}
+export type {
+  CreateAgentSession,
+  QueueSessionResult,
+} from "./session-store-types.ts";
 
 export class SessionStore {
   readonly #resources: readonly [AppDatabase, IdGenerator];
 
-  constructor(database: AppDatabase, generateId: IdGenerator = createUuidV7) {
+  constructor(
+    database: AppDatabase,
+    generateId: IdGenerator = createUuidV7,
+    pendingQuestions: (
+      userId: string,
+      sessionId: string,
+    ) => AgentSessionSummary["pendingQuestions"] = () => null,
+  ) {
     this.#resources = [database, generateId];
+    this.#pendingQuestions = pendingQuestions;
   }
+
+  readonly #pendingQuestions: (
+    userId: string,
+    sessionId: string,
+  ) => AgentSessionSummary["pendingQuestions"];
 
   get #database(): AppDatabase {
     return this.#resources[0];
@@ -276,10 +216,13 @@ export class SessionStore {
 
     return {
       ...summarizeSession(stored),
+      pendingQuestions: this.#pendingQuestions(userId, sessionId),
       agentFile: this.#agentFile(sessionId),
       messages: withInterruptedToolResults(
         storedSessionMessages(this.#database, sessionId),
-        stored.status !== "queued" && stored.status !== "running",
+        stored.status !== "queued" &&
+          stored.status !== "running" &&
+          stored.status !== "waiting",
       ),
     };
   }
@@ -288,7 +231,10 @@ export class SessionStore {
     return this.#selectSessions({ userId })
       .orderBy(desc(agentSessions.updatedAt), desc(agentSessions.id))
       .all()
-      .map(summarizeSession);
+      .map((stored) => ({
+        ...summarizeSession(stored),
+        pendingQuestions: this.#pendingQuestions(userId, stored.id),
+      }));
   }
 
   conversation(sessionId: string): readonly AgentConversationMessage[] {
@@ -483,7 +429,7 @@ export class SessionStore {
 
     return this.#transition(
       sessionId,
-      ["queued", "running", "idle", "failed"],
+      ["queued", "running", "waiting", "idle", "failed"],
       "stopped",
       userId,
       now,
@@ -560,7 +506,10 @@ export class SessionStore {
     return { detail, status };
   }
 
-  failInterrupted(now: number): readonly PendingSpawnedSession[] {
+  failInterrupted(
+    now: number,
+    recoverableSessionIds: ReadonlySet<string> = new Set(),
+  ): readonly PendingSpawnedSession[] {
     const interrupted = this.#database
       .select({
         ...SESSION_TIMING_SELECTION,
@@ -577,6 +526,9 @@ export class SessionStore {
       .all();
 
     for (const session of interrupted) {
+      if (recoverableSessionIds.has(session.id)) {
+        continue;
+      }
       const duration = activeSessionDuration(session, now);
       this.#database.transaction((transaction) => {
         insertStoredMessage(transaction, interruptedSessionErrorValues(), {

@@ -21,6 +21,7 @@ import {
   RUNNER_INSTALLER_PATH,
   RUNNERS_PATH,
   SESSION_MODELS_PATH,
+  SESSION_QUESTIONS_SEGMENT,
   SESSIONS_PATH,
   STYLESHEET_PATH,
 } from "../shared/routes.ts";
@@ -318,6 +319,16 @@ export function createRequestHandler(
         if (sessionId !== undefined && sessionId.length > 0) {
           if (segments.length === 1) {
             return sessions.item(request, sessionId);
+          }
+
+          if (
+            segments.length === 4 &&
+            segments[1] === SESSION_QUESTIONS_SEGMENT &&
+            segments[2] !== undefined &&
+            segments[2].length > 0 &&
+            segments[3] === "answer"
+          ) {
+            return sessions.answerQuestions(request, sessionId, segments[2]);
           }
 
           if (segments.length === 2) {

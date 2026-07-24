@@ -30,6 +30,12 @@ function expectParallelRecipients(
   });
 }
 
+function toolNames(
+  tools: ReturnType<typeof selectedAgentTools>,
+): readonly string[] {
+  return tools.map(({ function: definition }) => definition.name);
+}
+
 test("lets parallel call every tool and skill except itself by default", () => {
   expectParallelRecipients(AGENT_TOOLS, [
     "read",
@@ -90,22 +96,27 @@ test("derives picker metadata and classifications from every tool definition", (
       classification:
         definition.name === "brave_search"
           ? "skill"
-          : SESSION_AGENT_TOOL_NAMES.includes(definition.name)
-            ? "session_tool"
-            : "runner_tool",
+          : definition.name === "ask_questions"
+            ? "interactive_tool"
+            : SESSION_AGENT_TOOL_NAMES.includes(definition.name)
+              ? "session_tool"
+              : "runner_tool",
       definitionName: definition.name,
       name: definition.name,
     })),
   );
 });
 
+test("keeps blocking ask_questions out of parallel recipients", () => {
+  const tools = selectedAgentTools(["parallel", "ask_questions"]);
+
+  expect(toolNames(tools)).toEqual(["parallel", "ask_questions"]);
+  expectParallelRecipients(tools, []);
+});
+
 test("limits parallel calls to enabled tools and skills", () => {
   const tools = selectedAgentTools(["read", "parallel", "brave_search"]);
 
-  expect(tools.map(({ function: definition }) => definition.name)).toEqual([
-    "read",
-    "parallel",
-    "brave_search",
-  ]);
+  expect(toolNames(tools)).toEqual(["read", "parallel", "brave_search"]);
   expectParallelRecipients(tools, ["read", "brave_search"]);
 });

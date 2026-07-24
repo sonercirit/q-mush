@@ -14,6 +14,7 @@ export interface SessionModelRuntimeResources {
   readonly modelFactory: AgentModelFactory;
   readonly now: typeof Date.now;
   readonly notify: (userId: string, sessionId: string) => void;
+  readonly questions: SessionAgentRuntimeDependencies["questions"];
   readonly realtime: RealtimeHub | undefined;
   readonly store: SessionStore;
 }
@@ -35,6 +36,7 @@ export function sessionModelRuntime(
     notify: () => {
       resources.notify(userId, detail.id);
     },
+    questions: resources.questions,
     realtime: resources.realtime,
     sessionTools: resources.actions.actions(detail.id, userId),
     signal: controller.signal,

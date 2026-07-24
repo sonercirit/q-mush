@@ -9,6 +9,10 @@ import { readAgentFile } from "../shared/agent-file.ts";
 import { readAgentImages } from "../shared/agent-images.ts";
 import { readAgentToolCalls } from "../shared/agent-loop.ts";
 import { readAgentSessionToolNames } from "../shared/agent-tools.ts";
+import {
+  readAskQuestionsInput,
+  type PendingAskQuestions,
+} from "../shared/ask-questions.ts";
 import { isRecord, readNullableString } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
 import {
@@ -127,6 +131,7 @@ function readStatus(value: unknown): AgentSessionStatus | undefined {
     case "idle":
     case "queued":
     case "running":
+    case "waiting":
     case "stopped":
       return value;
     default:
@@ -149,6 +154,40 @@ function readFiniteNumber(value: unknown): number | undefined {
     ? value
     : undefined;
 }
+
+/* jscpd:ignore-start */
+function readPendingAskQuestions(
+  value: unknown,
+): PendingAskQuestions | null | undefined {
+  if (value === null) {
+    return null;
+  }
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const createdAt = readFiniteNumber(value["createdAt"]);
+  const id = value["id"];
+  const toolCallId = value["toolCallId"];
+  const input = readAskQuestionsInput({ questions: value["questions"] });
+  return createdAt === undefined ||
+    !Number.isSafeInteger(createdAt) ||
+    typeof id !== "string" ||
+    typeof toolCallId !== "string" ||
+    input === undefined
+    ? undefined
+    : { ...input, createdAt, id, toolCallId };
+}
+
+export function readSessionPendingQuestions(
+  value: unknown,
+): PendingAskQuestions | null {
+  const pending = readPendingAskQuestions(value);
+  if (pending === undefined) {
+    throw new Error("The server returned invalid pending questions");
+  }
+  return pending;
+}
+/* jscpd:ignore-end */
 
 function readSummary(value: unknown): AgentSessionSummary {
   if (!isRecord(value)) {
@@ -176,6 +215,7 @@ function readSummary(value: unknown): AgentSessionSummary {
   const id = value["id"];
   const maxContextTokens = value["maxContextTokens"];
   const model = value["model"];
+  const pendingQuestions = readPendingAskQuestions(value["pendingQuestions"]);
   const provider = readProvider(value["provider"]);
   const reasoningEffort = readNullableString(value["reasoningEffort"]);
   const runnerId = value["runnerId"];
@@ -209,6 +249,7 @@ function readSummary(value: unknown): AgentSessionSummary {
         !Number.isSafeInteger(maxContextTokens) ||
         maxContextTokens <= 0)) ||
     typeof model !== "string" ||
+    pendingQuestions === undefined ||
     provider === undefined ||
     value["providerPricing"] === undefined ||
     reasoningEffort === undefined ||
@@ -235,6 +276,7 @@ function readSummary(value: unknown): AgentSessionSummary {
     id,
     maxContextTokens,
     model,
+    pendingQuestions,
     provider,
     providerPricing,
     reasoningEffort,
@@ -337,6 +379,7 @@ export function summaryFromDetail(
     id: detail.id,
     maxContextTokens: detail.maxContextTokens,
     model: detail.model,
+    pendingQuestions: detail.pendingQuestions,
     provider: detail.provider,
     providerPricing: detail.providerPricing,
     reasoningEffort: detail.reasoningEffort,

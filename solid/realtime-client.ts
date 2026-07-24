@@ -194,6 +194,9 @@ export class RealtimeConnection {
         this.#rescheduleSessionDeltaFrame();
       }
     }
+    if (event.type === "session_questions") {
+      this.#flushSessionDelta(event.sessionId);
+    }
     this.#listener(event);
   }
 
