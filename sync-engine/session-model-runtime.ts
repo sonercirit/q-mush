@@ -31,11 +31,13 @@ export function sessionModelRuntime(
     credential,
     detail,
     isCurrent: () =>
-      resources.store.executionIsCurrent(detail.id, detail.generation),
+      resources.store.executionIsCurrent(userId, detail.id, detail.generation),
     modelFactory: resources.modelFactory,
     now: resources.now,
     notify: () => {
-      if (resources.store.executionIsCurrent(detail.id, detail.generation)) {
+      if (
+        resources.store.executionIsCurrent(userId, detail.id, detail.generation)
+      ) {
         resources.notify(userId, detail.id);
       }
     },
@@ -44,6 +46,7 @@ export function sessionModelRuntime(
       detail.id,
       userId,
       detail.generation,
+      controller.signal,
     ),
     signal: controller.signal,
     store: resources.store,

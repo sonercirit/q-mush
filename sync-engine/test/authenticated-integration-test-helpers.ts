@@ -6,6 +6,7 @@ import {
   users,
 } from "../../shared/database/schema.ts";
 import { SYSTEM_ID } from "../../shared/ids.ts";
+import type { ProviderCredentialAccess } from "../../shared/provider-credential-store.ts";
 import {
   createGoogleAuthFromEnvironment,
   type GoogleAuth,
@@ -74,6 +75,23 @@ export function addTestUser(
       name: "Test User",
     })
     .run();
+}
+
+export function createTestProviderCredential(
+  id: string,
+  source: ProviderCredentialAccess["source"] = "api_key",
+): ProviderCredentialAccess {
+  const identity = {
+    accountId: "provider-account",
+    id,
+    isDefault: false,
+  };
+  return {
+    ...identity,
+    label: "Agent key",
+    secret: "provider-secret",
+    source,
+  };
 }
 
 export function addTestProviderCredential(

@@ -1,10 +1,11 @@
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, type SQL } from "drizzle-orm";
 import type { AgentImage } from "../shared/agent-images.ts";
 import type { AgentRecordedMessage } from "../shared/agent-loop.ts";
-import { createdAuditFields } from "../shared/audit.ts";
+import { createdAuditFields, updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
+import { storedSessionExists } from "./session-store-state.ts";
 
 const INTERRUPTED_SESSION_ERROR =
   "Session failed: the server stopped before the session completed";
@@ -15,7 +16,8 @@ const INTERRUPTED_RUNNER_TOOL_OUTPUT =
 export interface StoredMessageValues {
   readonly content: string;
   readonly images: string | null;
-  readonly role: "assistant" | "error" | "system" | "thinking" | "tool";
+  readonly role:
+    "assistant" | "error" | "system" | "thinking" | "tool" | "user";
   readonly toolCallId: string | null;
   readonly toolCalls: string | null;
   readonly toolName: string | null;
@@ -37,6 +39,10 @@ function emptyToolMetadata() {
 
 export function errorMessageValues(content: string): StoredMessageValues {
   return { ...emptyToolMetadata(), content, role: "error" };
+}
+
+export function storedUserMessageValues(content: string): StoredMessageValues {
+  return { ...emptyToolMetadata(), content, role: "user" };
 }
 
 export function interruptedRunnerToolValues(
@@ -112,6 +118,21 @@ export interface StoredMessageInsertOptions {
   readonly userId: string;
 }
 
+function systemMessageInsertOptions(
+  generateId: IdGenerator,
+  now: number,
+  sessionId: string,
+  userId: string,
+): StoredMessageInsertOptions {
+  return {
+    actorId: SYSTEM_ID,
+    id: generateId(now),
+    now,
+    sessionId,
+    userId,
+  };
+}
+
 export function insertStoredMessage(
   database: Pick<AppDatabase, "insert">,
   message: StoredMessageValues,
@@ -126,6 +147,44 @@ export function insertStoredMessage(
       sessionId: options.sessionId,
       userId: options.userId,
     })
+    .run();
+}
+
+interface SystemStoredMessageOptions {
+  readonly database: Pick<AppDatabase, "insert">;
+  readonly generateId: IdGenerator;
+  readonly message: StoredMessageValues;
+  readonly now: number;
+  readonly sessionId: string;
+  readonly userId: string;
+}
+
+export function appendSystemStoredMessage(
+  options: SystemStoredMessageOptions,
+): void {
+  insertStoredMessage(
+    options.database,
+    options.message,
+    systemMessageInsertOptions(
+      options.generateId,
+      options.now,
+      options.sessionId,
+      options.userId,
+    ),
+  );
+}
+
+export function appendSystemMessageAndTouchSession(
+  options: SystemStoredMessageOptions & {
+    readonly condition: SQL | undefined;
+    readonly database: Pick<AppDatabase, "insert" | "update">;
+  },
+): void {
+  appendSystemStoredMessage(options);
+  options.database
+    .update(agentSessions)
+    .set(updatedAuditFields(SYSTEM_ID, options.now))
+    .where(options.condition)
     .run();
 }
 
@@ -146,14 +205,12 @@ export function appendSessionUserMessage(options: {
   const { content, now, resources, sessionId, userId } = options;
   const sessionIdentifier = sessionId;
   return resources.database.transaction((transaction) => {
-    const exists = transaction
-      .select({ id: agentSessions.id })
-      .from(agentSessions)
-      .where(
+    if (
+      !storedSessionExists(
+        transaction,
         sql`${agentSessions.id} = ${sessionIdentifier} AND ${agentSessions.userId} = ${userId} AND ${agentSessions.isDeleted} = false`,
       )
-      .get();
-    if (exists === undefined) {
+    ) {
       return false;
     }
     insertAgentMessage(

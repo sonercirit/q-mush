@@ -8,6 +8,7 @@ import {
   sessionToolOutput,
   type SpawnSessionToolInput,
 } from "./session-agent-tools.ts";
+import type { SessionExecutionAuthority } from "./session-execution-authority.ts";
 import type { SessionStore } from "./session-store.ts";
 
 interface SessionAgentCredentialSelection {
@@ -93,9 +94,9 @@ export function spawnedSessionReport(options: {
 }
 
 export async function spawnAgentSession(options: {
+  readonly authority: SessionExecutionAuthority;
   readonly dependencies: SessionAgentActionDependencies;
   readonly input: SpawnSessionToolInput;
-  readonly parentSessionId: string;
   readonly userId: string;
 }): Promise<string> {
   async function enqueue(
@@ -114,25 +115,26 @@ export async function spawnAgentSession(options: {
         ...input,
         ...metadata,
         autoCompact: true,
-        parentSessionId: options.parentSessionId,
+        parentGeneration: options.authority.generation,
+        parentSessionId: options.authority.sessionId,
         userId: options.userId,
       },
       options.dependencies.now(),
     );
-    if (created.status === "runner_unavailable") {
-      return createJsonResponse({ error: "runner_unavailable" }, 409);
+    if (created.status !== "created") {
+      return createJsonResponse({ error: created.status }, 409);
     }
     const { detail: child } = created;
     if (
       !options.dependencies.launchSession(credential, child, options.userId)
     ) {
-      options.dependencies.store.appendErrorMessage(
+      options.dependencies.store.appendRuntimeErrorMessage(
         child.id,
         "Session failed: the child session could not be launched",
         options.dependencies.now(),
         child.generation,
       );
-      options.dependencies.store.mark(
+      options.dependencies.store.transitionRuntime(
         child.id,
         "failed",
         options.dependencies.now(),

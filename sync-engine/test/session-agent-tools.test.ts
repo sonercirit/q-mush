@@ -415,9 +415,10 @@ describe("session agent tools", () => {
     await expectTranscriptExcludes(setup, "Spawned session completed");
     const restartedStore = new SessionStore(setup.database);
     expect(restartedStore.pendingSpawnedSessions()).toEqual([]);
-    expect(restartedStore.parentSessionId(TEST_USER_ID, childId)).toBe(
-      SESSION_ID,
-    );
+    expect(restartedStore.spawnedSessionLink(TEST_USER_ID, childId)).toEqual({
+      parentGeneration: 0,
+      parentId: SESSION_ID,
+    });
     setup.database.$client.close();
   });
 

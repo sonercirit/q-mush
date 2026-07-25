@@ -15,8 +15,6 @@ import {
   createNoContentResponse,
   parseJsonRequest,
 } from "./http.ts";
-import type { RunnerIntegration } from "./runners.ts";
-import type { RunnerDirectoryRequest } from "./session-runner-directory-request.ts";
 
 export function readIdentifier(value: unknown): string | undefined {
   return typeof value === "string" && /^[A-Za-z\d._:-]{1,200}$/u.test(value)
@@ -52,6 +50,14 @@ export type SessionRequestAuthenticator = <
   action: (user: AuthenticatedUser) => Result,
 ) => Response | Result;
 
+export interface RunnerDirectoryRequest {
+  readonly authorize?: () => boolean;
+  readonly path: string;
+  readonly runnerId: string;
+  readonly sessionId: string;
+  readonly userId: string;
+}
+
 export type RunnerDirectoryBrowseResult =
   | { readonly listing: RunnerDirectoryListing; readonly status: "listed" }
   | { readonly status: "directory_unavailable" | "runner_unavailable" };
@@ -68,15 +74,19 @@ export function readWorkingDirectory(value: unknown): string | undefined {
     : undefined;
 }
 
+interface RunnerAvailability {
+  runnerIsAvailable(userId: string, runnerId: string): boolean;
+}
+
 export class SessionRequestHelpers {
   readonly #auth: GoogleAuth;
   readonly #broker: RunnerCommandBroker;
-  readonly #runners: RunnerIntegration;
+  readonly #runners: RunnerAvailability;
 
   constructor(
     auth: GoogleAuth,
     broker: RunnerCommandBroker,
-    runners: RunnerIntegration,
+    runners: RunnerAvailability,
   ) {
     this.#auth = auth;
     this.#broker = broker;
@@ -109,7 +119,7 @@ export class SessionRequestHelpers {
             ? {}
             : { authorize: request.authorize }),
           runnerId: request.runnerId,
-          sessionId: `directory-picker:${request.userId}`,
+          sessionId: request.sessionId,
           tool: RUNNER_DIRECTORY_COMMAND,
           workingDirectory: request.path,
         },
@@ -192,7 +202,12 @@ export class SessionRequestHelpers {
     }
 
     const result = await this.browseDirectories(
-      { path, runnerId, userId: user.id },
+      {
+        path,
+        runnerId,
+        sessionId: `directory-picker:${user.id}`,
+        userId: user.id,
+      },
       AbortSignal.any([request.signal, AbortSignal.timeout(15_000)]),
     );
     switch (result.status) {

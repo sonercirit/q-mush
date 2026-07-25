@@ -5,18 +5,18 @@ import {
   type AgentConversationMessage,
   type AgentToolCall,
 } from "../shared/agent-loop.ts";
-import { updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
-import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
+import type { IdGenerator } from "../shared/ids.ts";
 import { readProviderModelPricing } from "../shared/provider-model-pricing.ts";
 import { compareAgentSessionMessages } from "../shared/session-message-order.ts";
 import type {
   AgentSessionMessage,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
+import { readStoredSessionUserId } from "./session-store-state.ts";
 import {
-  insertStoredMessage,
+  appendSystemMessageAndTouchSession,
   interruptedRunnerToolValues,
 } from "./session-store-values.ts";
 
@@ -133,30 +133,22 @@ export function appendInterruptedRunnerToolResult(
     if (call === undefined) {
       return;
     }
-    const session = transaction
-      .select({ userId: agentSessions.userId })
-      .from(agentSessions)
-      .where(eq(agentSessions.id, options.sessionId))
-      .get();
-    if (session === undefined) {
+    const userId = readStoredSessionUserId(
+      transaction,
+      eq(agentSessions.id, options.sessionId),
+    );
+    if (userId === undefined) {
       throw new Error("The agent session no longer exists");
     }
-    insertStoredMessage(
-      transaction,
-      interruptedRunnerToolValues(call.id, call.name),
-      {
-        actorId: SYSTEM_ID,
-        id: options.generateId(options.now),
-        now: options.now,
-        sessionId: options.sessionId,
-        userId: session.userId,
-      },
-    );
-    transaction
-      .update(agentSessions)
-      .set(updatedAuditFields(SYSTEM_ID, options.now))
-      .where(eq(agentSessions.id, options.sessionId))
-      .run();
+    appendSystemMessageAndTouchSession({
+      condition: eq(agentSessions.id, options.sessionId),
+      database: transaction,
+      generateId: options.generateId,
+      message: interruptedRunnerToolValues(call.id, call.name),
+      now: options.now,
+      sessionId: options.sessionId,
+      userId,
+    });
   });
 }
 

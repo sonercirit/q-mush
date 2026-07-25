@@ -168,7 +168,8 @@ class DrizzleSessionIntegration implements SessionIntegration {
         this.#runtimes.abort(sessionId);
       },
       broker: this.#broker,
-      browseDirectories: (request) => this.#requests.browseDirectories(request),
+      browseDirectories: (request, signal) =>
+        this.#requests.browseDirectories(request, signal),
       database,
       discoverModels: this.#discoverModels,
       draining: () => this.#runtimes.draining,
@@ -456,8 +457,8 @@ class DrizzleSessionIntegration implements SessionIntegration {
         },
         this.#now(),
       );
-      if (created.status === "runner_unavailable") {
-        return createApiError("runner_unavailable", 409);
+      if (created.status !== "created") {
+        return createApiError(created.status, 409);
       }
       const { detail } = created;
       this.#launch(detail, credential, user.id);
@@ -567,14 +568,14 @@ class DrizzleSessionIntegration implements SessionIntegration {
       return;
     }
     if (error !== undefined) {
-      this.#store.appendErrorMessage(
+      this.#store.appendRuntimeErrorMessage(
         detail.id,
         safeErrorMessage(error),
         this.#now(),
         detail.generation,
       );
     }
-    this.#store.mark(
+    this.#store.transitionRuntime(
       detail.id,
       error === undefined ? "idle" : "failed",
       this.#now(),
@@ -591,7 +592,12 @@ class DrizzleSessionIntegration implements SessionIntegration {
     compact: boolean,
   ): Promise<void> {
     if (
-      !this.#store.mark(detail.id, "running", this.#now(), detail.generation)
+      !this.#store.transitionRuntime(
+        detail.id,
+        "running",
+        this.#now(),
+        detail.generation,
+      )
     ) {
       return;
     }

@@ -56,7 +56,12 @@ function recordCompaction(
   summary: string,
 ): void {
   writeRuntime(runtime, (sessionId, now, generation) => {
-    runtime.store.compact(sessionId, summary, now, generation);
+    runtime.store.compactRuntimeConversation(
+      sessionId,
+      summary,
+      now,
+      generation,
+    );
   });
 }
 
@@ -67,9 +72,10 @@ async function loadModels(
     runtime.broker,
     runtime.detail,
     runtime.signal,
+    runtime.isCurrent,
   );
   writeRuntime(runtime, (sessionId, now, generation) => {
-    runtime.store.setAgentFile(sessionId, agentFile, now, generation);
+    runtime.store.setRuntimeAgentFile(sessionId, agentFile, now, generation);
   });
   return createSessionAgentModels({
     agentFile,
@@ -106,7 +112,7 @@ export async function compactSessionConversation(
       costUsd,
     };
     writeRuntime(runtime, (sessionId, now, generation) => {
-      runtime.store.updateUsage(sessionId, usage, now, generation);
+      runtime.store.updateRuntimeUsage(sessionId, usage, now, generation);
     });
   }
   recordCompaction(runtime, compacted.summary);
@@ -152,6 +158,7 @@ export async function runSessionAgent(
     runtime.now,
     runtime.notify,
     runtime.detail.generation,
+    runtime.userId,
   );
 
   const selectedTools = new Set<AgentSessionToolName>(runtime.detail.tools);

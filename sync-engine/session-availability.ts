@@ -10,6 +10,8 @@ export function queueFailureResponse(
       return createApiError("session_busy", 409);
     case "not_found":
       return createApiError("not_found", 404);
+    case "parent_stale":
+      return createApiError("parent_stale", 409);
     case "runner_required":
       return createApiError("runner_required", 409);
     case "runner_unavailable":

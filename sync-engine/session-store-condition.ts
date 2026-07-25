@@ -1,13 +1,17 @@
-import { and, eq, type SQL } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { agentSessions } from "../shared/database/schema.ts";
 
-export function ownedActiveSessionCondition(
-  userId: string,
-  sessionId: string,
-): SQL | undefined {
+export function ownedActiveSessionCondition(userId: string, sessionId: string) {
+  return activeSessionOwnerCondition({ sessionId, userId });
+}
+
+export function activeSessionOwnerCondition(options: {
+  readonly sessionId: string;
+  readonly userId: string;
+}) {
   return and(
-    eq(agentSessions.id, sessionId),
-    eq(agentSessions.userId, userId),
+    eq(agentSessions.id, options.sessionId),
+    eq(agentSessions.userId, options.userId),
     eq(agentSessions.isDeleted, false),
   );
 }

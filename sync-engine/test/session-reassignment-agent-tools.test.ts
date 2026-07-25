@@ -145,8 +145,12 @@ function createRecoverableSession(setup: SessionToolSetup): void {
     TEST_NOW,
   );
   const recoverable = requireCreatedSession(created);
-  expect(store.mark(recoverable.id, "running", TEST_NOW + 1)).toBe(true);
-  expect(store.mark(recoverable.id, "idle", TEST_NOW + 2)).toBe(true);
+  expect(store.transitionCurrent(recoverable.id, "running", TEST_NOW + 1)).toBe(
+    true,
+  );
+  expect(store.transitionCurrent(recoverable.id, "idle", TEST_NOW + 2)).toBe(
+    true,
+  );
 }
 
 async function startAgent(setup: SessionToolSetup): Promise<void> {

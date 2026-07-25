@@ -7,28 +7,27 @@ import { agentMessages } from "../../shared/database/schema.ts";
 import { SYSTEM_ID } from "../../shared/ids.ts";
 import type { AgentSessionMessage } from "../../shared/session-model.ts";
 import { RunnerStore } from "../../sync-engine/runner-store.ts";
-import { SessionStore } from "../../sync-engine/session-store.ts";
+import type { SessionStore } from "../../sync-engine/session-store.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import {
-  addTestProviderCredential,
-  createAuthenticatedTestDatabase,
   TEST_NOW,
   TEST_USER_ID,
   testAuditFields,
 } from "./authenticated-integration-test-helpers.ts";
-import { takeValue } from "./oauth-test-helpers.ts";
 import {
   expectRecoveredSession,
   expectStoredSession,
   removeAndReadSession,
   removeTestRunnerAndExpect,
 } from "./session-store-reassignment-helpers.ts";
-import { requireCreatedSession } from "./session-store-result-helpers.ts";
-import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
-
-const RUNNER_ID = "018bcfe5-6800-7000-8000-000000000041";
-const CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000042";
-const SESSION_ID = "018bcfe5-6800-7000-8000-000000000043";
+import {
+  createStore,
+  createTestSession,
+  STORE_RUNNER_ID,
+  STORE_SESSION_ID,
+} from "./session-store-test-fixtures.ts";
+const RUNNER_ID = STORE_RUNNER_ID;
+const SESSION_ID = STORE_SESSION_ID;
 const USER_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000044";
 const THINKING_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000045";
 const ASSISTANT_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000046";
@@ -56,72 +55,13 @@ function testUserImageMessage(
   };
 }
 
-function testSessionInput() {
-  return {
-    credentialId: CREDENTIAL_ID,
-    autoCompact: true,
-    images: [TEST_AGENT_IMAGE],
-    maxContextTokens: 200_000,
-    model: "gpt-4.1-mini",
-    prompt: "Inspect the repository\nand make it shine",
-    provider: "openai" as const,
-    providerPricing: null,
-    reasoningEffort: "high" as const,
-    runnerId: RUNNER_ID,
-    tools: AGENT_SESSION_TOOL_NAMES,
-    userId: TEST_USER_ID,
-    workingDirectory: "/work/project",
-  };
-}
-
-function createTestSession(store: SessionStore) {
-  return requireCreatedSession(store.create(testSessionInput(), TEST_NOW));
-}
-
-function completedChildWithParent(
-  store: SessionStore,
-  parentSessionId: string,
-) {
-  const child = requireCreatedSession(
-    store.create({ ...testSessionInput(), parentSessionId }, TEST_NOW + 1),
-  );
-  expect(store.mark(child.id, "running", TEST_NOW + 2)).toBe(true);
-  expect(store.mark(child.id, "idle", TEST_NOW + 3)).toBe(true);
-  return child;
-}
-
 function markTestSessionRunning(store: SessionStore): void {
-  expect(store.mark(SESSION_ID, "running", TEST_NOW + 1)).toBe(true);
+  expect(store.transitionCurrent(SESSION_ID, "running", TEST_NOW + 1)).toBe(
+    true,
+  );
 }
 
 type StoreSetup = ReturnType<typeof createStore>;
-
-function spawnedChildSetup(parentId?: string): StoreSetup & {
-  readonly childId: string;
-  readonly parentId: string;
-} {
-  const setup = createStore();
-  const parent = createTestSession(setup.store);
-  const selectedParentId = parentId ?? parent.id;
-  const child = completedChildWithParent(setup.store, selectedParentId);
-  return { ...setup, childId: child.id, parentId: selectedParentId };
-}
-
-interface SpawnedChildReference extends StoreSetup {
-  readonly childId: string;
-  readonly parentId: string;
-}
-
-function expectParentId(setup: SpawnedChildReference): void {
-  expect(setup.store.parentSessionId(TEST_USER_ID, setup.childId)).toBe(
-    setup.parentId,
-  );
-}
-
-function expectPendingParent(setup: SpawnedChildReference): void {
-  expect(setup.store.pendingSpawnedSessions()).toEqual([]);
-  expectParentId(setup);
-}
 
 function runningStore(): StoreSetup {
   const setup = createStore();
@@ -157,28 +97,6 @@ function initialConversation() {
   ];
 }
 
-function createStore() {
-  const database = createAuthenticatedTestDatabase();
-  addSessionTestRunner(database, "session-store-machine", RUNNER_ID);
-  addTestProviderCredential(database, CREDENTIAL_ID);
-  const ids = [
-    SESSION_ID,
-    USER_MESSAGE_ID,
-    THINKING_MESSAGE_ID,
-    ASSISTANT_MESSAGE_ID,
-    TOOL_MESSAGE_ID,
-    "018bcfe5-6800-7000-8000-000000000048",
-    "018bcfe5-6800-7000-8000-000000000049",
-    "018bcfe5-6800-7000-8000-000000000050",
-  ];
-  return {
-    database,
-    store: new SessionStore(database, () =>
-      takeValue(ids, "The test ran out of session IDs"),
-    ),
-  };
-}
-
 describe("session store", () => {
   test("persists a session transcript and lifecycle", () => {
     const { database, store } = createStore();
@@ -207,7 +125,7 @@ describe("session store", () => {
       },
     ]);
     markTestSessionRunning(store);
-    store.setAgentFile(
+    store.setCurrentAgentFile(
       SESSION_ID,
       { content: "Use Bun for tests.", name: "AGENTS.md" },
       TEST_NOW + 2,
@@ -234,20 +152,22 @@ describe("session store", () => {
       toolCallId: "call-1",
       toolName: "bash",
     };
-    store.appendAgentMessage(SESSION_ID, thinkingMessage, TEST_NOW + 3);
-    store.appendAgentMessage(SESSION_ID, assistantMessage, TEST_NOW + 4);
-    store.appendAgentMessage(SESSION_ID, toolMessage, TEST_NOW + 5);
-    store.updateUsage(
+    store.appendCurrentAgentMessage(SESSION_ID, thinkingMessage, TEST_NOW + 3);
+    store.appendCurrentAgentMessage(SESSION_ID, assistantMessage, TEST_NOW + 4);
+    store.appendCurrentAgentMessage(SESSION_ID, toolMessage, TEST_NOW + 5);
+    store.updateCurrentUsage(
       SESSION_ID,
       { contextTokens: 1_000, costBasis: "reported", costUsd: 0.1 },
       TEST_NOW + 5,
     );
-    store.updateUsage(
+    store.updateCurrentUsage(
       SESSION_ID,
       { contextTokens: null, costBasis: "estimated", costUsd: 0.05 },
       TEST_NOW + 5,
     );
-    expect(store.mark(SESSION_ID, "idle", TEST_NOW + 6)).toBe(true);
+    expect(store.transitionCurrent(SESSION_ID, "idle", TEST_NOW + 6)).toBe(
+      true,
+    );
 
     const detail = store.get(TEST_USER_ID, SESSION_ID);
     expect(detail?.agentFile).toEqual({
@@ -322,18 +242,18 @@ describe("session store", () => {
   test("keeps an estimated cost basis after a provider-reported charge", () => {
     const { database, store } = runningStore();
 
-    store.updateUsage(
+    store.updateCurrentUsage(
       SESSION_ID,
       { contextTokens: null, costBasis: "estimated", costUsd: 0.02 },
       TEST_NOW + 2,
     );
-    store.updateUsage(
+    store.updateCurrentUsage(
       SESSION_ID,
       { contextTokens: null, costBasis: "reported", costUsd: 0.03 },
       TEST_NOW + 3,
     );
     expect(() => {
-      store.updateUsage(
+      store.updateCurrentUsage(
         SESSION_ID,
         { contextTokens: null, costBasis: null, costUsd: 0.01 },
         TEST_NOW + 4,
@@ -351,76 +271,20 @@ describe("session store", () => {
     const { database, store } = createStore();
     const tools: readonly AgentSessionToolName[] = ["read", "brave_search"];
 
-    const detail = requireCreatedSession(
-      store.create({ ...testSessionInput(), tools }, TEST_NOW),
-    );
+    const detail = createTestSession(store, TEST_NOW, { tools });
 
     expect(detail.tools).toEqual(tools);
     expect(store.list(TEST_USER_ID)[0]?.tools).toEqual(tools);
     database.$client.close();
   });
 
-  test("persists and claims a spawned session's parent callback", () => {
-    const { childId, database, parentId, store } = spawnedChildSetup();
-
-    expect(store.pendingSpawnedSessions()).toEqual([
-      { detail: store.get(TEST_USER_ID, childId), userId: TEST_USER_ID },
-    ]);
-    expect(store.parentSessionId(TEST_USER_ID, childId)).toBe(parentId);
-    expect(
-      store.appendSpawnedSessionReport(
-        TEST_USER_ID,
-        childId,
-        parentId,
-        "Child complete",
-        TEST_NOW + 4,
-      ),
-    ).toBe(true);
-    expect(store.parentSessionId(TEST_USER_ID, childId)).toBeUndefined();
-    expect(store.pendingSpawnedSessions()).toEqual([]);
-    expect(store.get(TEST_USER_ID, parentId)?.messages.at(-1)?.content).toBe(
-      "Child complete",
-    );
-    database.$client.close();
-  });
-
-  test("keeps a runner-required spawned child awaiting recovery", () => {
-    const setup = spawnedChildSetup();
-
-    removeTestRunnerAndExpect(setup, RUNNER_ID, TEST_NOW + 4);
-
-    expectPendingParent(setup);
-    setup.database.$client.close();
-  });
-
-  test("retains a child callback for an absent parent", () => {
-    const setup = spawnedChildSetup("missing-parent");
-
-    expect(
-      setup.store.appendSpawnedSessionReport(
-        TEST_USER_ID,
-        setup.childId,
-        setup.parentId,
-        "Child complete",
-        TEST_NOW + 3,
-      ),
-    ).toBe(false);
-    expectParentId(setup);
-    setup.database.$client.close();
-  });
-
   test("uses a fallback title for an image-only task", () => {
     const { database, store } = createStore();
-    const created = store.create(
-      {
-        ...testSessionInput(),
-        maxContextTokens: null,
-        prompt: "",
-        reasoningEffort: null,
-      },
-      TEST_NOW,
-    );
-    const detail = requireCreatedSession(created);
+    const detail = createTestSession(store, TEST_NOW, {
+      maxContextTokens: null,
+      prompt: "",
+      reasoningEffort: null,
+    });
 
     expect(detail.title).toBe("Image task");
     database.$client.close();
@@ -431,13 +295,13 @@ describe("session store", () => {
     const session = createTestSession(store);
     expect(session.status).toBe("queued");
     markTestSessionRunning(store);
-    store.appendAgentMessage(
+    store.appendCurrentAgentMessage(
       SESSION_ID,
       { content: "Work in progress.", role: "assistant", toolCalls: [] },
       TEST_NOW + 2,
     );
 
-    store.compact(
+    store.compactCurrentConversation(
       SESSION_ID,
       "Keep the completed work and run tests.",
       TEST_NOW + 3,
@@ -456,7 +320,9 @@ describe("session store", () => {
 
   test("continues without appending a user message", () => {
     const setup = runningStore();
-    expect(setup.store.mark(SESSION_ID, "idle", TEST_NOW + 2)).toBe(true);
+    expect(
+      setup.store.transitionCurrent(SESSION_ID, "idle", TEST_NOW + 2),
+    ).toBe(true);
     const before = setup.store.conversation(SESSION_ID);
 
     const queued = setup.store.queue(TEST_USER_ID, SESSION_ID, TEST_NOW + 3);
@@ -469,7 +335,7 @@ describe("session store", () => {
 
   test("requires explicit reassignment when an assigned runner is removed", () => {
     const { database, store } = runningStore();
-    store.appendAgentMessage(
+    store.appendCurrentAgentMessage(
       SESSION_ID,
       {
         content: "I will inspect the workspace.",
@@ -495,6 +361,30 @@ describe("session store", () => {
         role: "assistant",
       }),
     ]);
+    database.$client.close();
+  });
+
+  test("rejects a runtime message after an ordinary stop", () => {
+    const { database, store } = runningStore();
+    const generation = store.get(TEST_USER_ID, SESSION_ID)?.generation;
+    if (generation === undefined) {
+      throw new Error("The running session is unavailable");
+    }
+    expect(store.stop(TEST_USER_ID, SESSION_ID, TEST_NOW + 2)).toBe(true);
+
+    expect(() => {
+      store.appendRuntimeAgentMessage(
+        SESSION_ID,
+        { content: "Late stopped output", role: "assistant", toolCalls: [] },
+        TEST_NOW + 3,
+        generation,
+      );
+    }).toThrow("agent session was stopped");
+    expect(
+      store
+        .get(TEST_USER_ID, SESSION_ID)
+        ?.messages.some(({ content }) => content === "Late stopped output"),
+    ).toBe(false);
     database.$client.close();
   });
 
@@ -571,10 +461,12 @@ describe("session store", () => {
       role: "assistant" as const,
       toolCalls: [interruptedCall],
     };
-    store.appendAgentMessage(SESSION_ID, assistantMessage, TEST_NOW + 2);
+    store.appendCurrentAgentMessage(SESSION_ID, assistantMessage, TEST_NOW + 2);
     expect(testSessionMessageRoles(store)).toEqual(["user", "assistant"]);
-    store.appendErrorMessage(SESSION_ID, "Session failed", TEST_NOW + 3);
-    expect(store.mark(SESSION_ID, "failed", TEST_NOW + 4)).toBe(true);
+    store.appendCurrentErrorMessage(SESSION_ID, "Session failed", TEST_NOW + 3);
+    expect(store.transitionCurrent(SESSION_ID, "failed", TEST_NOW + 4)).toBe(
+      true,
+    );
     expectStoredSession(store, SESSION_ID, {
       activeDurationMs: 3,
       activeStartedAt: null,

@@ -127,6 +127,13 @@
       "when": 1784917618203,
       "tag": "0017_plain_silver_samurai",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1784993749108,
+      "tag": "0018_tranquil_mephisto",
+      "breakpoints": true
     }
   ]
 }
