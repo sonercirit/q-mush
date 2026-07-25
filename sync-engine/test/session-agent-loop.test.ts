@@ -54,9 +54,43 @@ function runTestLoop(
     maxContextTokens: 100_000,
     recordCompaction: () => undefined,
     recordMessage: () => undefined,
-    recordUsage: () => undefined,
     ...options,
   });
+}
+
+function triggeredModel() {
+  return new ScriptedAgentModel([highTurn("Trigger compaction.")]);
+}
+
+async function expectCompactionFailure(options: {
+  readonly compactor: AgentConversationCompactor;
+  readonly expected: string | { readonly name: string };
+  readonly recordCompaction: LoopOptions["recordCompaction"];
+  readonly signal?: AbortSignal;
+}): Promise<void> {
+  const model = triggeredModel();
+  const failure = expect(
+    runTestLoop(
+      options.signal === undefined
+        ? {
+            createCompactor: () => options.compactor,
+            model,
+            recordCompaction: options.recordCompaction,
+          }
+        : {
+            createCompactor: () => options.compactor,
+            model,
+            recordCompaction: options.recordCompaction,
+            signal: options.signal,
+          },
+    ),
+  ).rejects;
+  if (typeof options.expected === "string") {
+    await failure.toThrow(options.expected);
+  } else {
+    await failure.toMatchObject(options.expected);
+  }
+  expect(model.requests).toHaveLength(1);
 }
 
 describe("compacting agent session loop", () => {
@@ -88,6 +122,7 @@ describe("compacting agent session loop", () => {
     });
     const summaries: string[] = [];
     const costs: (number | null)[] = [];
+    const modelCosts: (number | null)[] = [];
 
     await runCompactingAgentLoop({
       agentCost: () => null,
@@ -97,14 +132,18 @@ describe("compacting agent session loop", () => {
       initialMessages: [{ content: "Inspect the project", role: "user" }],
       maxContextTokens: 100_000,
       model,
-      recordCompaction: (summary) => {
+      recordCompaction: (summary, usage) => {
+        expect(usage.costBasis).toBe(
+          usage.costUsd === null ? null : "reported",
+        );
+        costs.push(usage.costUsd);
         summaries.push(summary);
       },
-      recordUsage: ({ costBasis, costUsd }) => {
-        expect(costBasis).toBe(costUsd === null ? null : "reported");
-        costs.push(costUsd);
+      recordMessage: (_message, usage) => {
+        if (usage !== undefined) {
+          modelCosts.push(usage.costUsd);
+        }
       },
-      recordMessage: () => undefined,
     });
 
     expect(compactorRequests).toHaveLength(1);
@@ -122,7 +161,8 @@ describe("compacting agent session loop", () => {
       { content: "Compacted handoff", role: "user" },
     ]);
     expect(summaries).toContain("Compacted handoff");
-    expect(costs).toEqual([null, 0.1, 0.25]);
+    expect(costs).toEqual([0.1]);
+    expect(modelCosts).toEqual([null, 0.25]);
   });
 
   test("compacts and continues a final turn that reaches 95%", async () => {
@@ -139,17 +179,12 @@ describe("compacting agent session loop", () => {
         compacted("Final handoff", 0.15),
       ),
       model,
-      recordCompaction: (compactedSummary) => {
+      recordCompaction: (compactedSummary, usage) => {
         summaries.push(compactedSummary);
+        compactionCost += usage.costUsd ?? 0;
       },
-      recordUsage: ({ contextTokens, costUsd }) => {
-        if (contextTokens !== null) {
-          expect(Number.isSafeInteger(contextTokens)).toBe(true);
-        }
-        compactionCost += costUsd ?? 0;
-      },
-      recordMessage: (message) => {
-        recordedMessages.push(message);
+      recordMessage: (messages) => {
+        recordedMessages.push(...messages);
       },
     });
 
@@ -195,7 +230,6 @@ describe("compacting agent session loop", () => {
       }),
       model,
       recordCompaction: () => undefined,
-      recordUsage: () => undefined,
       recordMessage: () => undefined,
     });
 
@@ -243,52 +277,111 @@ describe("compacting agent session loop", () => {
     expect(summaries).toEqual([firstSummary, secondSummary]);
   });
 
+  test("does not persist a rejected compaction", async () => {
+    const compactions: unknown[] = [];
+    await expectCompactionFailure({
+      compactor: {
+        compact: () => Promise.reject(new Error("Compactor unavailable")),
+      },
+      expected: "Compactor unavailable",
+      recordCompaction: (...input) => {
+        compactions.push(input);
+      },
+    });
+
+    expect(compactions).toEqual([]);
+  });
+
   test("does not persist or continue an aborted compaction", async () => {
     const controller = new AbortController();
-    const model = new ScriptedAgentModel([highTurn("Trigger compaction.")]);
     let persisted = false;
-
-    await expect(
-      runTestLoop({
-        createCompactor: () => ({
-          compact: () => {
-            controller.abort();
-            return Promise.resolve(compacted("Aborted handoff"));
-          },
-        }),
-        model,
-        recordCompaction: () => {
-          persisted = true;
+    await expectCompactionFailure({
+      compactor: {
+        compact: () => {
+          controller.abort();
+          return Promise.resolve(compacted("Aborted handoff"));
         },
-        signal: controller.signal,
-      }),
-    ).rejects.toMatchObject({ name: "AbortError" });
+      },
+      expected: { name: "AbortError" },
+      recordCompaction: () => {
+        persisted = true;
+      },
+      signal: controller.signal,
+    });
 
-    expect(model.requests).toHaveLength(1);
     expect(persisted).toBe(false);
   });
 
-  test("does not record compaction usage before the handoff", async () => {
-    const model = new ScriptedAgentModel([highTurn("Trigger compaction.")]);
-    const usage: (number | null)[] = [];
+  test("persists compaction usage through the handoff callback", async () => {
+    const model = triggeredModel();
+    const compactions: unknown[] = [];
+    const messageUsage: unknown[] = [];
 
     await expect(
       runTestLoop({
         createCompactor: () => ({
-          compact: () => Promise.resolve(compacted("Unstored handoff", 0.25)),
+          compact: () => Promise.resolve(compacted("Stored handoff", 0.25)),
         }),
         model,
-        recordCompaction: () => {
-          throw new Error("Handoff storage failed");
+        recordCompaction: (summary, compactionUsage) => {
+          compactions.push({ summary, usage: compactionUsage });
+          throw new Error("Stop after atomic persistence");
         },
-        recordUsage: ({ costUsd }) => {
-          usage.push(costUsd);
+        recordMessage: (_messages, input) => {
+          if (input !== undefined) {
+            messageUsage.push(input);
+          }
         },
       }),
-    ).rejects.toThrow("Handoff storage failed");
+    ).rejects.toThrow("Stop after atomic persistence");
 
     expect(model.requests).toHaveLength(1);
-    expect(usage).toEqual([null]);
+    expect(compactions).toEqual([
+      {
+        summary: "Stored handoff",
+        usage: {
+          contextTokens: null,
+          costBasis: "reported",
+          costUsd: 0.25,
+        },
+      },
+    ]);
+    expect(messageUsage).toEqual([
+      { contextTokens: 95_000, costBasis: null, costUsd: null },
+    ]);
+  });
+
+  test("passes model usage with the persisted message", async () => {
+    const events: unknown[] = [];
+
+    await runTestLoop({
+      createCompactor: () => ({
+        compact: () => Promise.reject(new Error("No compaction expected")),
+      }),
+      maxContextTokens: null,
+      model: new ScriptedAgentModel([
+        {
+          content: "Persist this provider turn.",
+          contextTokens: 10,
+          costUsd: 0.5,
+          toolCalls: [],
+        },
+      ]),
+      recordMessage: (_messages, usage) => {
+        events.push({ type: "message", usage });
+      },
+    });
+
+    expect(events).toEqual([
+      {
+        type: "message",
+        usage: {
+          contextTokens: 10,
+          costBasis: "reported",
+          costUsd: 0.5,
+        },
+      },
+    ]);
   });
 
   test("does not compact a full context when automatic compaction is off", async () => {
@@ -320,10 +413,14 @@ describe("compacting agent session loop", () => {
       recordCompaction: (summary) => {
         throw new Error(`Unexpected summary: ${summary}`);
       },
-      recordUsage: ({ contextTokens }) => {
-        expect(contextTokens).toBeGreaterThanOrEqual(0);
+      recordMessage: (messages, usage) => {
+        if (
+          messages.some((message) => message.role === "assistant") &&
+          usage !== undefined
+        ) {
+          expect(usage.contextTokens).toBeGreaterThanOrEqual(0);
+        }
       },
-      recordMessage: () => undefined,
     });
 
     expect(compacted).toBe(false);

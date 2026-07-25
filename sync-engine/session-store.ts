@@ -20,6 +20,7 @@ import type {
   AgentSessionUsageUpdate,
 } from "../shared/session-model.ts";
 import { activeSessionDuration } from "../shared/session-timing.ts";
+import type { CompactionUsage } from "./session-compaction-usage.ts";
 import {
   sessionExecutionIsCurrent,
   type SessionQueueAuthorization,
@@ -56,7 +57,7 @@ import {
   type SessionFilter,
 } from "./session-store-reassignment.ts";
 import {
-  appendRuntimeAgentMessage,
+  appendRuntimeAgentMessages,
   appendRuntimeErrorMessage,
   compactRuntimeConversation,
   setRuntimeAgentFile,
@@ -246,6 +247,7 @@ export class SessionStore {
   compactRuntimeConversation(
     sessionId: string,
     summary: string,
+    usage: CompactionUsage,
     now: number,
     generation: number,
   ): void {
@@ -255,6 +257,7 @@ export class SessionStore {
       resources: this.#writeResources(),
       sessionId,
       summary,
+      usage,
     });
   }
 
@@ -273,18 +276,20 @@ export class SessionStore {
     });
   }
 
-  appendRuntimeAgentMessage(
+  appendRuntimeAgentMessages(
     sessionId: string,
-    message: AgentRecordedMessage,
+    messages: readonly AgentRecordedMessage[],
     now: number,
     generation: number,
+    usage?: AgentSessionUsageUpdate,
   ): void {
-    appendRuntimeAgentMessage({
+    appendRuntimeAgentMessages({
       generation,
-      message,
+      messages,
       now,
       resources: this.#writeResources(),
       sessionId,
+      ...(usage === undefined ? {} : { usage }),
     });
   }
 
@@ -451,9 +456,9 @@ export class SessionStore {
     message: AgentRecordedMessage,
     now: number,
   ): void {
-    this.appendRuntimeAgentMessage(
+    this.appendRuntimeAgentMessages(
       sessionId,
-      message,
+      [message],
       now,
       this.#currentGeneration(sessionId),
     );
@@ -475,11 +480,13 @@ export class SessionStore {
   compactCurrentConversation(
     sessionId: string,
     summary: string,
+    usage: CompactionUsage,
     now: number,
   ): void {
     this.compactRuntimeConversation(
       sessionId,
       summary,
+      usage,
       now,
       this.#currentGeneration(sessionId),
     );

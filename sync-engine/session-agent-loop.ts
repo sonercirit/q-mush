@@ -2,15 +2,19 @@ import {
   runAgentLoop,
   throwIfAgentAborted,
   type AgentConversationMessage,
-  type AgentLoopOptions,
+  type AgentMessageRecorder,
   type AgentModel,
   type AgentModelTurn,
-  type AgentRecordedMessage,
 } from "../shared/agent-loop.ts";
 import {
   shouldCompactContext,
   type AgentConversationCompactor,
 } from "./agent-compaction.ts";
+import {
+  agentTurnUsage,
+  compactionUsage,
+  type CompactionUsage,
+} from "./session-compaction-usage.ts";
 
 interface CompactingAgentLoopOptions {
   readonly agentCost: (
@@ -22,11 +26,11 @@ interface CompactingAgentLoopOptions {
   readonly initialMessages: readonly AgentConversationMessage[];
   readonly maxContextTokens: number | null;
   readonly model: AgentModel;
-  readonly recordCompaction: (summary: string) => Promise<void> | void;
-  readonly recordUsage: NonNullable<AgentLoopOptions["recordUsage"]>;
-  readonly recordMessage: (
-    message: AgentRecordedMessage,
+  readonly recordCompaction: (
+    summary: string,
+    usage: CompactionUsage,
   ) => Promise<void> | void;
+  readonly recordMessage: AgentMessageRecorder;
   readonly signal?: AbortSignal;
 }
 
@@ -42,6 +46,7 @@ function shouldCompactFinalTurn(
 }
 
 interface CompactionState {
+  latestTurn: AgentModelTurn | undefined;
   pending: boolean;
   progressSinceCompaction: boolean;
   turnExceedsThreshold: boolean;
@@ -50,28 +55,16 @@ interface CompactionState {
 async function compactConversation(
   options: Pick<
     CompactingAgentLoopOptions,
-    "agentCost" | "createCompactor" | "recordCompaction" | "recordUsage"
+    "agentCost" | "createCompactor" | "recordCompaction"
   >,
   messages: readonly AgentConversationMessage[],
   signal?: AbortSignal,
 ): Promise<readonly AgentConversationMessage[]> {
   const compacted = await options.createCompactor().compact(messages, signal);
   throwIfAgentAborted(signal);
-  const costUsd =
-    compacted.costUsd ??
-    options.agentCost({
-      costUsd: compacted.costUsd,
-      tokenUsage: compacted.tokenUsage,
-    });
-  await options.recordCompaction(compacted.summary);
+  const usage = compactionUsage(compacted, options.agentCost);
+  await options.recordCompaction(compacted.summary, usage);
   throwIfAgentAborted(signal);
-  if (costUsd !== null) {
-    await options.recordUsage({
-      contextTokens: null,
-      costBasis: compacted.costUsd === null ? "estimated" : "reported",
-      costUsd,
-    });
-  }
   return compacted.messages;
 }
 
@@ -83,6 +76,7 @@ export async function runCompactingAgentLoop(
 
   for (;;) {
     const compaction: CompactionState = {
+      latestTurn: undefined,
       pending: false,
       progressSinceCompaction: false,
       turnExceedsThreshold: false,
@@ -94,20 +88,7 @@ export async function runCompactingAgentLoop(
       model: {
         complete: async (conversation, signal) => {
           const turn = await options.model.complete(conversation, signal);
-          const costUsd = turn.costUsd ?? options.agentCost(turn);
-          if (turn.contextTokens !== null || costUsd !== null) {
-            const costBasis =
-              costUsd === null
-                ? null
-                : turn.costUsd === null
-                  ? "estimated"
-                  : "reported";
-            await options.recordUsage({
-              contextTokens: turn.contextTokens,
-              costBasis,
-              costUsd,
-            });
-          }
+          compaction.latestTurn = turn;
           compaction.turnExceedsThreshold = shouldCompactFinalTurn(
             options,
             turn.contextTokens,
@@ -134,9 +115,20 @@ export async function runCompactingAgentLoop(
         allowCompaction = false;
         return compactedMessages;
       },
-      recordMessage: async (message) => {
-        await options.recordMessage(message);
-        if (message.role === "tool") {
+      recordMessage: async (recordedMessages) => {
+        const turn = compaction.latestTurn;
+        const assistant = recordedMessages.some(
+          (message) => message.role === "assistant",
+        );
+        const usage =
+          assistant && turn !== undefined
+            ? agentTurnUsage(turn, options.agentCost)
+            : undefined;
+        await options.recordMessage(recordedMessages, usage);
+        if (assistant) {
+          compaction.latestTurn = undefined;
+        }
+        if (recordedMessages.some((message) => message.role === "tool")) {
           compaction.progressSinceCompaction = true;
           if (compaction.turnExceedsThreshold) {
             compaction.pending = true;

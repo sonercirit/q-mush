@@ -1,4 +1,4 @@
-import { sql, type SQL } from "drizzle-orm";
+import { type SQL } from "drizzle-orm";
 import type { AgentFile } from "../shared/agent-file.ts";
 import type { AgentRecordedMessage } from "../shared/agent-loop.ts";
 import { updatedAuditFields } from "../shared/audit.ts";
@@ -9,15 +9,17 @@ import type {
   AgentSessionCostBasis,
   AgentSessionUsageUpdate,
 } from "../shared/session-model.ts";
+import type { CompactionUsage } from "./session-compaction-usage.ts";
 import { compactStoredConversation } from "./session-compaction.ts";
 import { runningCondition } from "./session-store-reassignment.ts";
 import { requireRunningSessionUserId } from "./session-store-state.ts";
 import {
-  appendSystemMessageAndTouchSession,
+  appendSystemStoredMessage,
   errorMessageValues,
   recordedMessageValues,
   type StoredMessageValues,
 } from "./session-store-values.ts";
+import { runtimeUsageValues } from "./session-usage-values.ts";
 
 interface SessionRuntimeWriteResources {
   readonly database: AppDatabase;
@@ -73,91 +75,108 @@ export function setRuntimeAgentFile(
 }
 
 export function compactRuntimeConversation(
-  options: RuntimeWriteTarget & { readonly summary: string },
+  options: RuntimeWriteTarget & {
+    readonly summary: string;
+    readonly usage: CompactionUsage;
+  },
 ): void {
   compactStoredConversation({
     ...runtimeWriteTarget(options),
     summary: options.summary,
+    usage: options.usage,
   });
 }
 
 export function updateRuntimeUsage(
   options: RuntimeWriteTarget & { readonly input: AgentSessionUsageUpdate },
 ): void {
-  const invalidCost =
-    (options.input.costUsd === null) !== (options.input.costBasis === null) ||
-    (options.input.costUsd !== null &&
-      (!Number.isFinite(options.input.costUsd) || options.input.costUsd < 0));
-  if (
-    (options.input.contextTokens !== null &&
-      (!Number.isSafeInteger(options.input.contextTokens) ||
-        options.input.contextTokens < 0)) ||
-    invalidCost
-  ) {
-    throw new Error("The agent session usage is invalid");
-  }
-
-  updateRunningSession(options, {
-    ...(options.input.contextTokens === null
-      ? {}
-      : { currentContextTokens: options.input.contextTokens }),
-    ...(options.input.costUsd === null
-      ? {}
-      : {
-          costBasis:
-            options.input.costBasis === "estimated"
-              ? "estimated"
-              : sql`CASE WHEN ${agentSessions.costBasis} = 'none' THEN 'reported' ELSE ${agentSessions.costBasis} END`,
-          costUsd: sql`${agentSessions.costUsd} + ${options.input.costUsd}`,
-        }),
-  });
+  updateRunningSession(options, runtimeUsageValues(options.input));
 }
 
-function touchSessionWithMessage(options: {
+function messageValues(
+  messages: readonly AgentRecordedMessage[],
+): readonly StoredMessageValues[] {
+  return messages.map(recordedMessageValues);
+}
+
+function touchSessionWithMessages(options: {
   readonly condition: SQL | undefined;
-  readonly message: StoredMessageValues;
+  readonly messages: readonly StoredMessageValues[];
   readonly target: RuntimeWriteTarget;
 }): void {
   options.target.resources.database.transaction((transaction) => {
     const userId = requireRunningSessionUserId(transaction, options.condition);
 
-    appendSystemMessageAndTouchSession({
-      condition: options.condition,
-      database: transaction,
-      generateId: options.target.resources.generateId,
-      message: options.message,
-      now: options.target.now,
-      sessionId: options.target.sessionId,
-      userId,
-    });
+    for (const message of options.messages) {
+      appendSystemStoredMessage({
+        database: transaction,
+        generateId: options.target.resources.generateId,
+        message,
+        now: options.target.now,
+        sessionId: options.target.sessionId,
+        userId,
+      });
+    }
+    transaction
+      .update(agentSessions)
+      .set(updatedAuditFields(SYSTEM_ID, options.target.now))
+      .where(options.condition)
+      .run();
   });
 }
 
-function appendRuntimeMessage(
-  options: RuntimeWriteTarget & { readonly message: StoredMessageValues },
+function appendRuntimeMessages(
+  options: RuntimeWriteTarget & {
+    readonly messages: readonly StoredMessageValues[];
+  },
 ): void {
   const condition = runningSessionCondition(options);
-  touchSessionWithMessage({
+  touchSessionWithMessages({
     condition,
-    message: options.message,
+    messages: options.messages,
     target: options,
   });
 }
 
-export function appendRuntimeAgentMessage(
-  options: RuntimeWriteTarget & { readonly message: AgentRecordedMessage },
+export function appendRuntimeAgentMessages(
+  options: RuntimeWriteTarget & {
+    readonly messages: readonly AgentRecordedMessage[];
+    readonly usage?: AgentSessionUsageUpdate;
+  },
 ): void {
-  appendRuntimeMessage({
-    ...options,
-    message: recordedMessageValues(options.message),
+  const storedMessages = messageValues(options.messages);
+  if (options.usage === undefined) {
+    appendRuntimeMessages({ ...options, messages: storedMessages });
+    return;
+  }
+
+  const condition = runningSessionCondition(options);
+  const usageValues = runtimeUsageValues(options.usage);
+  options.resources.database.transaction((transaction) => {
+    const userId = requireRunningSessionUserId(transaction, condition);
+    for (const message of storedMessages) {
+      appendSystemStoredMessage({
+        database: transaction,
+        generateId: options.resources.generateId,
+        message,
+        now: options.now,
+        sessionId: options.sessionId,
+        userId,
+      });
+    }
+    transaction
+      .update(agentSessions)
+      .set({ ...usageValues, ...updatedAuditFields(SYSTEM_ID, options.now) })
+      .where(condition)
+      .run();
   });
 }
 
 export function appendRuntimeErrorMessage(
   options: RuntimeWriteTarget & { readonly content: string },
 ): void {
-  appendRuntimeMessage({
+  appendRuntimeMessages({
     ...options,
-    message: errorMessageValues(options.content),
+    messages: [errorMessageValues(options.content)],
   });
 }

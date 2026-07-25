@@ -27,6 +27,28 @@ export interface CompactedConversation {
   readonly tokenUsage: AgentModelTurn["tokenUsage"];
 }
 
+interface InvalidCompactionUsage {
+  readonly contextTokens: null;
+  readonly costBasis: null;
+  readonly costUsd: null;
+  readonly tokenUsage: null;
+}
+
+class InvalidCompactionSummaryError extends Error {
+  readonly usage: InvalidCompactionUsage;
+
+  constructor() {
+    super("The model returned an invalid compaction summary");
+    this.name = "InvalidCompactionSummaryError";
+    this.usage = {
+      contextTokens: null,
+      costBasis: null,
+      costUsd: null,
+      tokenUsage: null,
+    };
+  }
+}
+
 function toolCallsAreComplete(
   messages: readonly AgentConversationMessage[],
 ): boolean {
@@ -85,7 +107,7 @@ export class ModelConversationCompactor implements AgentConversationCompactor {
     );
 
     if (turn.toolCalls.length > 0 || turn.content.trim().length === 0) {
-      throw new Error("The model returned an invalid compaction summary");
+      throw new InvalidCompactionSummaryError();
     }
 
     const summary = turn.content.trim();

@@ -131,14 +131,21 @@ export async function startSession(
   return setup.sessions.collection(createSessionRequest());
 }
 
+export async function startSessionAndCompleteAgentFile(
+  setup: ReturnType<typeof connectedSessionSetup>,
+): Promise<Response> {
+  const created = await startSession(setup);
+  expect(created.status).toBe(201);
+  await completeAgentFileLookup(setup);
+  return created;
+}
+
 export async function startSessionAndExpectRunnerCommand(
   setup: ReturnType<typeof connectedSessionSetup>,
   command: ReturnType<typeof expectedRunnerCommand>,
   missingMessage: string,
 ): Promise<void> {
-  const created = await startSession(setup);
-  expect(created.status).toBe(201);
-  await completeAgentFileLookup(setup);
+  await startSessionAndCompleteAgentFile(setup);
   await expectRunnerCommand(setup, command, missingMessage);
 }
 

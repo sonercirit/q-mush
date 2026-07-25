@@ -1,12 +1,21 @@
 import { describe, expect, test } from "vitest";
-import type {
-  AgentModelCatalog,
-  AgentModelOption,
-} from "../../shared/agent-configuration.ts";
+import { isRecord } from "../../shared/auth-model.ts";
 import { SESSIONS_PATH } from "../../shared/routes.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import { createAuthenticatedRequest } from "./authenticated-integration-test-helpers.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import {
+  closeContinuationSetup,
+  compactionTurn,
+  continuationSetup,
+  drainAndRead,
+  expectContinuationRequests,
+  expectTranscriptContent,
+  removeContinuationRunner,
+  startAndAwaitContinuation,
+  startCompactingSession,
+  stopContinuationSession,
+} from "./session-continuation-test-helpers.ts";
 import {
   connectedSessionSetup,
   createSessionRequest,
@@ -22,62 +31,50 @@ import {
   waitForSessionValue,
 } from "./session-integration-helpers.ts";
 
+function expectFencedCompaction(options: {
+  readonly after: unknown;
+  readonly before: string;
+  readonly model: ScriptedAgentModel;
+  readonly status: "idle" | "stopped";
+  readonly stale: string;
+}): void {
+  expect(options.model.requests).toHaveLength(2);
+  expectTranscriptContent(options.after, options.before, true);
+  expectTranscriptContent(options.after, options.stale, false);
+  expectTranscriptContent(options.after, "Session failed:", false);
+  expect(options.after).toMatchObject({
+    costUsd: 0.2,
+    currentContextTokens: 95_000,
+    status: options.status,
+  });
+}
+
 describe("session continuation", () => {
   test("continues automatically after final-turn compaction", async () => {
-    const model = new ScriptedAgentModel([
-      {
-        content: "Work complete before compaction.",
-        contextTokens: 95_000,
-        toolCalls: [],
-      },
-      { content: "Compacted handoff.", costUsd: 0.1, toolCalls: [] },
-      {
-        content: "Work complete after compaction.",
-        contextTokens: 96_000,
-        toolCalls: [],
-      },
-    ]);
-    const compactingModel: AgentModelOption = {
-      contextWindow: 100_000,
-      id: "gpt-4.1-mini",
-      inputModalities: null,
-      label: "Compaction test model",
-      outputModalities: null,
-      pricing: null,
-      reasoningEfforts: ["high"],
-    };
-    const catalog: AgentModelCatalog = {
-      defaultModel: compactingModel.id,
-      models: [compactingModel],
-    };
-    const setup = connectedSessionSetup(model, "api_key", () =>
-      Promise.resolve(catalog),
+    const continuation = continuationSetup(
+      [
+        compactionTurn("Work complete before compaction.", {
+          contextTokens: 95_000,
+        }),
+        compactionTurn("Compacted handoff.", { costUsd: 0.1 }),
+        compactionTurn("Work complete after compaction.", {
+          contextTokens: 96_000,
+        }),
+      ],
+      { label: "Compaction test model", notifyRequest: 3 },
     );
-    const createResponse = await setup.sessions.collection(
-      new Request(createSessionRequest()),
-    );
+    const continued = await startAndAwaitContinuation(continuation);
 
-    if (createResponse.status !== 201) {
-      throw new Error("The compaction test session could not be created");
-    }
-    await Promise.resolve();
-    await completeAgentFileLookup(setup);
-    const continued = await waitForSessionValue(
-      () => sessionDetail(setup.sessions),
-      (value) =>
-        hasSessionStatus("idle")(value) &&
-        JSON.stringify(value).includes("Work complete after compaction."),
-    );
-
-    expect(model.requests).toHaveLength(3);
-    expect(model.requests[1]).toContainEqual({
+    expectContinuationRequests(continuation, "Compacted handoff.");
+    expect(continuation.model.requests[1]).toContainEqual({
       content: "Work complete before compaction.",
       role: "assistant",
       toolCalls: [],
     });
-    expect(model.requests[2]?.[0]?.content).toContain("Compacted handoff.");
-    expect(JSON.stringify(continued)).not.toContain(
+    expectTranscriptContent(
+      continued,
       "Work complete before compaction.",
+      false,
     );
     expect(continued).toMatchObject({
       costUsd: 0.1,
@@ -91,8 +88,101 @@ describe("session continuation", () => {
       ],
       status: "idle",
     });
-    expect(JSON.stringify(continued)).toContain("Compacted handoff.");
-    setup.database.$client.close();
+    expectTranscriptContent(continued, "Compacted handoff.", true);
+    closeContinuationSetup(continuation.setup);
+  });
+
+  test("persists continuation failure after the atomic handoff", async () => {
+    const continuation = continuationSetup(
+      [
+        compactionTurn("Work before failed continuation.", {
+          contextTokens: 95_000,
+          costUsd: 0.2,
+        }),
+        compactionTurn("Durable handoff.", { costUsd: 0.1 }),
+      ],
+      { label: "Continuation failure model", notifyRequest: 3 },
+    );
+    const failed = await startAndAwaitContinuation(continuation);
+
+    expectContinuationRequests(continuation, "Durable handoff.");
+    expectTranscriptContent(failed, "Work before failed continuation.", false);
+    expect(failed).toMatchObject({
+      costBasis: "reported",
+      currentContextTokens: 0,
+      messages: [
+        { role: "user" },
+        {
+          content: "Session failed: The scripted model ran out of turns",
+          role: "error",
+        },
+      ],
+      status: "failed",
+    });
+    if (!isRecord(failed) || typeof failed["costUsd"] !== "number") {
+      throw new Error("The failed session cost is unavailable");
+    }
+    expect(failed["costUsd"]).toBeCloseTo(0.3);
+    closeContinuationSetup(continuation.setup);
+  });
+
+  test("fences an automatic compaction and continuation after a stop", async () => {
+    const continuation = continuationSetup(
+      [
+        compactionTurn("Work complete before stale compaction.", {
+          contextTokens: 95_000,
+          costUsd: 0.2,
+        }),
+        compactionTurn("Stale compacted handoff.", { costUsd: 0.1 }),
+      ],
+      { blockRequest: 2, label: "Compaction authority model" },
+    );
+    await startCompactingSession(continuation);
+    await continuation.entered;
+
+    const before = await stopContinuationSession(continuation);
+    continuation.blocked.resolve(undefined);
+    const after = await drainAndRead(continuation.setup);
+
+    expect(after).toEqual(before);
+    expectFencedCompaction({
+      after,
+      before: "Work complete before stale compaction.",
+      model: continuation.model,
+      stale: "Stale compacted handoff.",
+      status: "stopped",
+    });
+    closeContinuationSetup(continuation.setup);
+  });
+
+  test("fences an automatic compaction after runner removal", async () => {
+    const continuation = continuationSetup(
+      [
+        compactionTurn("Work before runner removal.", {
+          contextTokens: 95_000,
+          costUsd: 0.2,
+        }),
+        compactionTurn("Runner-removed stale handoff.", { costUsd: 0.1 }),
+      ],
+      { blockRequest: 2, label: "Runner removal compaction model" },
+    );
+    await startCompactingSession(continuation);
+    await continuation.entered;
+
+    const removal = removeContinuationRunner(continuation.setup);
+    continuation.blocked.resolve(undefined);
+    await removal;
+    const after = await sessionDetail(continuation.setup.sessions);
+
+    expectFencedCompaction({
+      after,
+      before: "Work before runner removal.",
+      model: continuation.model,
+      stale: "Runner-removed stale handoff.",
+      status: "idle",
+    });
+    expect(after).toMatchObject({ runnerRequired: true });
+    closeContinuationSetup(continuation.setup);
   });
 
   test("spawns a session, executes tools on its runner, and accepts follow-ups", async () => {
@@ -150,11 +240,13 @@ describe("session continuation", () => {
       () => sessionDetail(sessions),
       hasSessionStatus("idle"),
     );
-    expect(JSON.stringify(idle)).toContain("README inspected.");
-    expect(JSON.stringify(idle)).toContain(
+    expectTranscriptContent(idle, "README inspected.", true);
+    expectTranscriptContent(
+      idle,
       "I need to inspect README before answering.",
+      true,
     );
-    expect(JSON.stringify(idle)).toContain("# Q Mush");
+    expectTranscriptContent(idle, "# Q Mush", true);
     expect(idle).toMatchObject({ currentContextTokens: 13_000 });
 
     const followUp = await sessions.message(
@@ -179,7 +271,7 @@ describe("session continuation", () => {
     );
     const followUpRequest = model.requests[2];
     expect(followUpRequest).toBeDefined();
-    expect(JSON.stringify(continued)).toContain("Now summarize it");
+    expectTranscriptContent(continued, "Now summarize it", true);
     expect(followUpRequest).toContainEqual({
       content: "Now summarize it",
       images: [TEST_AGENT_IMAGE],
