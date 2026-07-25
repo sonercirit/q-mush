@@ -14,11 +14,18 @@ type ScriptedTurn = Omit<
   readonly tokenUsage?: AgentModelTurn["tokenUsage"];
 };
 
+interface ScriptedModelOptions {
+  readonly onComplete?: (requestCount: number) => Promise<void> | void;
+}
+
 export class ScriptedAgentModel implements AgentModel {
   readonly requests: AgentConversationMessage[][] = [];
+  readonly #onComplete:
+    ((requestCount: number) => Promise<void> | void) | undefined;
   readonly #turns: AgentModelTurn[];
 
-  constructor(turns: ScriptedTurn[]) {
+  constructor(turns: ScriptedTurn[], options: ScriptedModelOptions = {}) {
+    this.#onComplete = options.onComplete;
     this.#turns = turns.map((turn) => ({
       ...turn,
       contextTokens:
@@ -29,16 +36,17 @@ export class ScriptedAgentModel implements AgentModel {
     }));
   }
 
-  complete(
+  async complete(
     messages: readonly AgentConversationMessage[],
   ): Promise<AgentModelTurn> {
     this.requests.push([...messages]);
+    await this.#onComplete?.(this.requests.length);
     const turn = this.#turns.shift();
 
     if (turn === undefined) {
       throw new Error("The scripted model ran out of turns");
     }
 
-    return Promise.resolve(turn);
+    return turn;
   }
 }

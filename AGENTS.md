@@ -114,12 +114,12 @@ Living project memory.
   Usage is yellow at 80% and red at 90%. Auto-compaction defaults on; at 95% it
   summarizes completed history and transparently continues the active run from
   the handoff. Idle sessions can compact manually without continuing. The
-  composer stays mounted across statuses, explains
-  unavailable actions, and preserves drafts. Local preferences filter transcript
-  categories without changing messages. Compaction soft-deletes prior messages
-  and inserts a replayable handoff. Provider secrets stay out of browser and
-  runner work payloads. The working-directory field opens the interactive
-  browser in `solid/directory-picker-client.tsx`; its controller posts to
+  composer stays mounted across statuses, explains unavailable actions, and
+  preserves drafts. Local preferences filter transcript categories without
+  changing messages. Compaction soft-deletes prior messages and inserts a
+  replayable handoff. Provider secrets stay out of browser and runner work
+  payloads. The working-directory field opens the interactive browser in
+  `solid/directory-picker-client.tsx`; its controller posts to
   `/api/runners/:id/directories` for canonical directory metadata. Before each
   run, `read_agent_file` loads exact-root `AGENTS.md`, falling back to
   `CLAUDE.md`; only `AGENTS.md` is used when both exist.

@@ -96,9 +96,9 @@ export function expectAgentMessageRejected(
     if (generation === undefined) {
       store.appendCurrentAgentMessage(sessionId, message, TEST_NOW + 4);
     } else {
-      store.appendRuntimeAgentMessage(
+      store.appendRuntimeAgentMessages(
         sessionId,
-        message,
+        [message],
         TEST_NOW + 4,
         generation,
       );

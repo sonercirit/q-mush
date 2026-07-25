@@ -1,6 +1,7 @@
 import type { AgentImage } from "./agent-images.ts";
 import { isRecord } from "./auth-model.ts";
 import { parseOptionalJsonRecord } from "./json-record.ts";
+import type { AgentSessionUsageUpdate } from "./session-model.ts";
 
 interface AgentToolRequest<Arguments> {
   readonly arguments: Arguments;
@@ -90,6 +91,11 @@ export interface AgentModel {
 
 type ParsedAgentToolCall = AgentToolRequest<Readonly<Record<string, unknown>>>;
 
+export type AgentMessageRecorder = (
+  messages: readonly AgentRecordedMessage[],
+  usage?: AgentSessionUsageUpdate,
+) => Promise<void> | void;
+
 export interface AgentLoopOptions {
   readonly executeTool: (call: ParsedAgentToolCall) => Promise<string>;
   readonly initialMessages: readonly AgentConversationMessage[];
@@ -100,14 +106,7 @@ export interface AgentLoopOptions {
   ) =>
     | Promise<readonly AgentConversationMessage[]>
     | readonly AgentConversationMessage[];
-  readonly recordMessage: (
-    message: AgentRecordedMessage,
-  ) => Promise<void> | void;
-  readonly recordUsage?: (input: {
-    readonly contextTokens: number | null;
-    readonly costBasis: "estimated" | "reported" | null;
-    readonly costUsd: number | null;
-  }) => Promise<void> | void;
+  readonly recordMessage: AgentMessageRecorder;
   readonly signal?: AbortSignal;
 }
 
@@ -139,8 +138,9 @@ export async function runAgentLoop(
     }
     const turn = await options.model.complete(messages, options.signal);
     throwIfAgentAborted(options.signal);
+    const recordedMessages: AgentRecordedMessage[] = [];
     if (turn.thinking.length > 0) {
-      await options.recordMessage({
+      recordedMessages.push({
         content: turn.thinking,
         role: "thinking",
       });
@@ -158,14 +158,13 @@ export async function runAgentLoop(
       role: "assistant",
       toolCalls: turn.toolCalls,
     };
-    await options.recordMessage(assistantMessage);
-    if (turn.contextTokens !== null || turn.costUsd !== null) {
-      await options.recordUsage?.({
-        contextTokens: turn.contextTokens,
-        costBasis: turn.costUsd === null ? null : "reported",
-        costUsd: turn.costUsd,
-      });
-    }
+    recordedMessages.push(assistantMessage);
+    await options.recordMessage(recordedMessages, {
+      contextTokens: turn.contextTokens,
+      costBasis: turn.costUsd === null ? null : "reported",
+      costUsd: turn.costUsd,
+    });
+    throwIfAgentAborted(options.signal);
     messages.push(assistantMessage);
 
     if (turn.toolCalls.length === 0) {
@@ -190,7 +189,8 @@ export async function runAgentLoop(
         toolCallId: call.id,
         toolName: call.name,
       };
-      await options.recordMessage(toolMessage);
+      await options.recordMessage([toolMessage]);
+      throwIfAgentAborted(options.signal);
       messages.push(toolMessage);
     }
   }

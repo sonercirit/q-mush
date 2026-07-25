@@ -63,23 +63,24 @@ export async function postSessionAction(
         SESSION_ID,
       );
     case "stop":
-      return setup.sessions.stop(
-        createAuthenticatedRequest(path, undefined, "POST"),
-        SESSION_ID,
-      );
+      return stopSessionRequest(setup);
     default:
       throw new Error("The session test action is invalid");
   }
 }
 
-export async function expectRemovedRunner(
-  setup: ReassignmentSessionSetup,
-): Promise<void> {
-  expect((await removeAssignedRunner(setup)).status).toBe(204);
+export function stopSessionRequest(
+  setup: Pick<ReassignmentSessionSetup, "sessions">,
+): Promise<Response> {
+  const path = `${SESSIONS_PATH}/${SESSION_ID}/stop`;
+  return setup.sessions.stop(
+    createAuthenticatedRequest(path, undefined, "POST"),
+    SESSION_ID,
+  );
 }
 
-export async function removeAssignedRunner(
-  setup: ReassignmentSessionSetup,
+export function assignedRunnerRemoval(
+  setup: Pick<ReassignmentSessionSetup, "runners">,
 ): Promise<Response> {
   return setup.runners.remove(
     createAuthenticatedRequest(
@@ -89,4 +90,16 @@ export async function removeAssignedRunner(
     ),
     RUNNER_ID,
   );
+}
+
+export async function expectRemovedRunner(
+  setup: ReassignmentSessionSetup,
+): Promise<void> {
+  expect((await assignedRunnerRemoval(setup)).status).toBe(204);
+}
+
+export async function removeAssignedRunner(
+  setup: ReassignmentSessionSetup,
+): Promise<Response> {
+  return assignedRunnerRemoval(setup);
 }

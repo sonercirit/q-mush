@@ -41,19 +41,17 @@ export class SessionRecorder {
     this.#notify();
   }
 
-  usage(input: AgentSessionUsageUpdate): void {
+  messages(
+    messages: readonly AgentRecordedMessage[],
+    usage?: AgentSessionUsageUpdate,
+  ): void {
     this.#record((now, generation) => {
-      this.#store.updateRuntimeUsage(this.#sessionId, input, now, generation);
-    });
-  }
-
-  message(message: AgentRecordedMessage): void {
-    this.#record((now, generation) => {
-      this.#store.appendRuntimeAgentMessage(
+      this.#store.appendRuntimeAgentMessages(
         this.#sessionId,
-        message,
+        messages,
         now,
         generation,
+        usage,
       );
     });
   }

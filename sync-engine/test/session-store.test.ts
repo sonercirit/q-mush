@@ -267,6 +267,42 @@ describe("session store", () => {
     database.$client.close();
   });
 
+  test("rolls back every model message when usage persistence fails", () => {
+    const { database, store } = runningStore();
+    const before = store.get(TEST_USER_ID, SESSION_ID);
+    database.$client.run(`
+      CREATE TRIGGER reject_model_usage
+      BEFORE UPDATE OF cost_usd ON agent_sessions
+      WHEN NEW.cost_usd > OLD.cost_usd
+      BEGIN
+        SELECT RAISE(ABORT, 'model usage persistence failed');
+      END
+    `);
+
+    expect(() => {
+      store.appendRuntimeAgentMessages(
+        SESSION_ID,
+        [
+          {
+            content: "Usage-failing model reasoning",
+            role: "thinking",
+          },
+          {
+            content: "Usage-failing model turn",
+            role: "assistant",
+            toolCalls: [],
+          },
+        ],
+        TEST_NOW + 4,
+        0,
+        { contextTokens: 1_000, costBasis: "reported", costUsd: 0.1 },
+      );
+    }).toThrow("model usage persistence failed");
+
+    expect(store.get(TEST_USER_ID, SESSION_ID)).toEqual(before);
+    database.$client.close();
+  });
+
   test("persists a session's selected tools", () => {
     const { database, store } = createStore();
     const tools: readonly AgentSessionToolName[] = ["read", "brave_search"];
@@ -304,6 +340,7 @@ describe("session store", () => {
     store.compactCurrentConversation(
       SESSION_ID,
       "Keep the completed work and run tests.",
+      { contextTokens: null, costBasis: null, costUsd: null },
       TEST_NOW + 3,
     );
 
@@ -373,9 +410,9 @@ describe("session store", () => {
     expect(store.stop(TEST_USER_ID, SESSION_ID, TEST_NOW + 2)).toBe(true);
 
     expect(() => {
-      store.appendRuntimeAgentMessage(
+      store.appendRuntimeAgentMessages(
         SESSION_ID,
-        { content: "Late stopped output", role: "assistant", toolCalls: [] },
+        [{ content: "Late stopped output", role: "assistant", toolCalls: [] }],
         TEST_NOW + 3,
         generation,
       );

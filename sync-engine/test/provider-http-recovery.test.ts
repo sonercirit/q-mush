@@ -154,8 +154,8 @@ describe("provider HTTP turn recovery", () => {
     const recorded: AgentRecordedMessage[] = [];
     const executed: string[] = [];
 
-    const record = (message: AgentRecordedMessage): void => {
-      recorded.push(message);
+    const record = (messages: readonly AgentRecordedMessage[]): void => {
+      recorded.push(...messages);
     };
     await runAgentLoop({
       executeTool: async (call) => {

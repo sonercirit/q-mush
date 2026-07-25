@@ -1,3 +1,4 @@
+import { throwIfAgentAborted } from "../shared/agent-loop.ts";
 import {
   isAgentSessionToolName,
   isSessionAgentToolName,
@@ -5,10 +6,7 @@ import {
 } from "../shared/agent-tools.ts";
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
-import type {
-  AgentSessionDetail,
-  AgentSessionUsageUpdate,
-} from "../shared/session-model.ts";
+import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { estimateAgentTurnCost } from "./agent-cost.ts";
 import { createAgentSkills } from "./agent-skills.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
@@ -24,6 +22,10 @@ import {
   executeSessionAgentTool,
   type SessionAgentToolActions,
 } from "./session-agent-tools.ts";
+import {
+  compactionUsage,
+  type CompactionUsage,
+} from "./session-compaction-usage.ts";
 import { SessionRecorder } from "./session-recorder.ts";
 import type { SessionStore } from "./session-store.ts";
 
@@ -54,11 +56,13 @@ function writeRuntime(
 function recordCompaction(
   runtime: SessionAgentRuntimeDependencies,
   summary: string,
+  usage: CompactionUsage,
 ): void {
   writeRuntime(runtime, (sessionId, now, generation) => {
     runtime.store.compactRuntimeConversation(
       sessionId,
       summary,
+      usage,
       now,
       generation,
     );
@@ -95,27 +99,12 @@ export async function compactSessionConversation(
   const models = await loadModels(runtime);
   const conversation = runtime.store.conversation(runtime.detail.id);
   const compactor = models.createCompactor();
+  const estimateCost = (turn: Parameters<typeof compactionUsage>[0]) =>
+    estimateAgentTurnCost(runtime.detail, turn.tokenUsage);
   const compacted = await compactor.compact(conversation, runtime.signal);
-  const costUsd =
-    compacted.costUsd ??
-    estimateAgentTurnCost(runtime.detail, compacted.tokenUsage);
-  const costBasis =
-    costUsd === null
-      ? null
-      : compacted.costUsd === null
-        ? "estimated"
-        : "reported";
-  if (costBasis !== null) {
-    const usage: AgentSessionUsageUpdate = {
-      contextTokens: null,
-      costBasis,
-      costUsd,
-    };
-    writeRuntime(runtime, (sessionId, now, generation) => {
-      runtime.store.updateRuntimeUsage(sessionId, usage, now, generation);
-    });
-  }
-  recordCompaction(runtime, compacted.summary);
+  throwIfAgentAborted(runtime.signal);
+  const usage = compactionUsage(compacted, estimateCost);
+  recordCompaction(runtime, compacted.summary, usage);
 }
 
 export async function runSessionAgent(
@@ -185,14 +174,11 @@ export async function runSessionAgent(
     initialMessages: runtime.store.conversation(runtime.detail.id),
     maxContextTokens: runtime.detail.maxContextTokens,
     model: models.agent,
-    recordCompaction: (summary) => {
-      recordCompaction(runtime, summary);
+    recordCompaction: (summary, usage) => {
+      recordCompaction(runtime, summary, usage);
     },
-    recordMessage: (message) => {
-      recorder.message(message);
-    },
-    recordUsage: (usage) => {
-      recorder.usage(usage);
+    recordMessage: (messages, usage) => {
+      recorder.messages(messages, usage);
     },
     signal: runtime.signal,
   });
