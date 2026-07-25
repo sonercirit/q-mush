@@ -1,10 +1,19 @@
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
-import { createdAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
-import { agentMessages, agentSessions } from "../shared/database/schema.ts";
+import { agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { ownedActiveSessionCondition } from "./session-store-condition.ts";
+import { storedSessionExists } from "./session-store-state.ts";
+import {
+  appendSystemStoredMessage,
+  storedUserMessageValues,
+} from "./session-store-values.ts";
+
+export interface SpawnedSessionLink {
+  readonly parentGeneration: number;
+  readonly parentId: string;
+}
 
 export interface PendingSpawnedSession {
   readonly detail: AgentSessionDetail;
@@ -21,6 +30,7 @@ export function pendingSpawnedSessions(
     .where(
       and(
         isNotNull(agentSessions.parentSessionId),
+        isNotNull(agentSessions.parentExecutionGeneration),
         eq(agentSessions.isDeleted, false),
         eq(agentSessions.runnerRequired, false),
         inArray(agentSessions.status, ["idle", "stopped", "failed"]),
@@ -33,49 +43,61 @@ export function pendingSpawnedSessions(
     });
 }
 
-export function parentSessionId(
+export function spawnedSessionLink(
   database: AppDatabase,
   userId: string,
   sessionId: string,
-): string | undefined {
-  return (
-    database
-      .select({ parentSessionId: agentSessions.parentSessionId })
-      .from(agentSessions)
-      .where(ownedActiveSessionCondition(userId, sessionId))
-      .get()?.parentSessionId ?? undefined
-  );
+): SpawnedSessionLink | undefined {
+  const stored = database
+    .select({
+      parentGeneration: agentSessions.parentExecutionGeneration,
+      parentId: agentSessions.parentSessionId,
+    })
+    .from(agentSessions)
+    .where(ownedActiveSessionCondition(userId, sessionId))
+    .get();
+  if (stored?.parentId == null || stored.parentGeneration === null) {
+    return undefined;
+  }
+  return {
+    parentGeneration: stored.parentGeneration,
+    parentId: stored.parentId,
+  };
 }
 
 export function appendSpawnedSessionReport(options: {
+  readonly childGeneration: number;
   readonly childId: string;
   readonly content: string;
   readonly database: AppDatabase;
   readonly generateId: IdGenerator;
   readonly now: number;
+  readonly parentGeneration: number;
   readonly parentId: string;
   readonly userId: string;
 }): boolean {
   return options.database.transaction((transaction) => {
-    const parentCondition = ownedActiveSessionCondition(
-      options.userId,
-      options.parentId,
+    const parentCondition = and(
+      ownedActiveSessionCondition(options.userId, options.parentId),
+      eq(agentSessions.executionGeneration, options.parentGeneration),
+      eq(agentSessions.runnerRequired, false),
+      inArray(agentSessions.status, ["running", "idle"]),
     );
-    const parentRows = transaction
-      .select()
-      .from(agentSessions)
-      .where(parentCondition)
-      .all();
-    if (parentRows.length === 0) {
+    if (!storedSessionExists(transaction, parentCondition)) {
       return false;
     }
     const claimed = transaction
       .update(agentSessions)
-      .set({ parentSessionId: null })
+      .set({
+        parentExecutionGeneration: null,
+        parentSessionId: null,
+      })
       .where(
         and(
           ownedActiveSessionCondition(options.userId, options.childId),
+          eq(agentSessions.executionGeneration, options.childGeneration),
           eq(agentSessions.parentSessionId, options.parentId),
+          eq(agentSessions.parentExecutionGeneration, options.parentGeneration),
         ),
       )
       .returning({ id: agentSessions.id })
@@ -83,23 +105,20 @@ export function appendSpawnedSessionReport(options: {
     if (claimed.length === 0) {
       return false;
     }
-    const reportValues = {
-      ...createdAuditFields(SYSTEM_ID, options.now),
-      content: options.content,
-      id: options.generateId(options.now),
-      role: "user" as const,
+    appendSystemStoredMessage({
+      database: transaction,
+      generateId: options.generateId,
+      message: storedUserMessageValues(options.content),
+      now: options.now,
       sessionId: options.parentId,
       userId: options.userId,
-    };
-    const insertReport = transaction.insert(agentMessages);
-    insertReport.values(reportValues).run();
-    const parentUpdated = {
-      updatedAt: new Date(options.now),
-      updatedById: SYSTEM_ID,
-    };
+    });
     transaction
       .update(agentSessions)
-      .set(parentUpdated)
+      .set({
+        updatedAt: new Date(options.now),
+        updatedById: SYSTEM_ID,
+      })
       .where(parentCondition)
       .run();
     return true;

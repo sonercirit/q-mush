@@ -38,8 +38,12 @@ export function createIdleStoredSession(setup: ReassignmentSessionSetup): void {
     1_700_000_000_000,
   );
   expect(created.status).toBe("created");
-  expect(store.mark(SESSION_ID, "running", 1_700_000_000_001)).toBe(true);
-  expect(store.mark(SESSION_ID, "idle", 1_700_000_000_002)).toBe(true);
+  expect(
+    store.transitionCurrent(SESSION_ID, "running", 1_700_000_000_001),
+  ).toBe(true);
+  expect(store.transitionCurrent(SESSION_ID, "idle", 1_700_000_000_002)).toBe(
+    true,
+  );
 }
 
 export async function postSessionAction(

@@ -63,6 +63,8 @@ export function createSessionStoreTestSetup() {
     TEST_NOW,
   );
   expect(created.status).toBe("created");
-  expect(setup.store.mark(SESSION_ID, "running", TEST_NOW + 1)).toBe(true);
+  expect(
+    setup.store.transitionCurrent(SESSION_ID, "running", TEST_NOW + 1),
+  ).toBe(true);
   return setup;
 }

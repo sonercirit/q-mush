@@ -32,8 +32,11 @@ import {
   type SpawnSessionToolInput,
 } from "./session-agent-tools.ts";
 import { unavailableSessionResponse } from "./session-availability.ts";
-import type { RunnerDirectoryBrowseResult } from "./session-request-helpers.ts";
-import type { RunnerDirectoryRequest } from "./session-runner-directory-request.ts";
+import type { SessionExecutionAuthority } from "./session-execution-authority.ts";
+import type {
+  RunnerDirectoryBrowseResult,
+  RunnerDirectoryRequest,
+} from "./session-request-helpers.ts";
 import { readSessionSnapshot } from "./session-store-agent-read.ts";
 import type { PendingSpawnedSession } from "./session-store-spawns.ts";
 
@@ -50,6 +53,7 @@ interface SessionAgentActionsDependencies extends SessionAgentActionDependencies
   readonly broker: Pick<RunnerCommandBroker, "cancelSession">;
   readonly browseDirectories: (
     request: RunnerDirectoryRequest,
+    signal: AbortSignal,
   ) => Promise<RunnerDirectoryBrowseResult>;
   readonly listOnlineRunners: (userId: string) => readonly RunnerSummary[];
   readonly listRunnerOptions: (
@@ -83,11 +87,16 @@ export class SessionAgentActions {
   actions(
     parentSessionId: string,
     userId: string,
-    parentGeneration?: number,
+    parentGeneration: number,
+    signal: AbortSignal,
   ): SessionAgentToolActions {
+    const authority: SessionExecutionAuthority = {
+      generation: parentGeneration,
+      sessionId: parentSessionId,
+    };
     const currentParent = (): boolean =>
-      parentGeneration === undefined ||
       this.#dependencies.store.executionIsCurrent(
+        userId,
         parentSessionId,
         parentGeneration,
       );
@@ -111,10 +120,17 @@ export class SessionAgentActions {
     };
     return {
       continueSession: guardParent((sessionId) =>
-        this.#queue(userId, anotherSession(sessionId)),
+        this.#queue(userId, anotherSession(sessionId), authority),
       ),
       browseRunnerDirectories: (runnerId, path) =>
-        this.#browseDirectories(userId, runnerId, path, currentParent),
+        this.#browseDirectories(
+          userId,
+          runnerId,
+          path,
+          authority,
+          currentParent,
+          signal,
+        ),
       getSessionOptions: (input) => this.#options(userId, input),
       listRunners: () =>
         sessionToolOutput(this.#dependencies.listOnlineRunners(userId)),
@@ -131,10 +147,10 @@ export class SessionAgentActions {
         ),
       ),
       sendToSession: guardParent((sessionId, message) =>
-        this.#queue(userId, anotherSession(sessionId), message),
+        this.#queue(userId, anotherSession(sessionId), authority, message),
       ),
       spawnSession: guardParent((input) =>
-        this.#spawn(parentSessionId, userId, input),
+        this.#spawn(authority, userId, input),
       ),
       stopSession: guardParent((sessionId) =>
         this.#stop(parentSessionId, userId, sessionId),
@@ -142,16 +158,26 @@ export class SessionAgentActions {
     };
   }
 
+  #reportAndNotify(
+    detail: AgentSessionDetail,
+    userId: string,
+  ): string | undefined {
+    const parentId = this.#report(detail, userId);
+    if (parentId !== undefined) {
+      this.#dependencies.notify(userId, parentId);
+    }
+    return parentId;
+  }
+
   reportAll(pending: readonly PendingSpawnedSession[]): void {
     const parentsByUser = new Map<string, string[]>();
     for (const { detail, userId } of pending) {
-      const parentId = this.#parentSessionId(detail, userId);
+      const parentId = this.#reportAndNotify(detail, userId);
       if (parentId !== undefined) {
         const parents = parentsByUser.get(userId) ?? [];
         parents.push(parentId);
         parentsByUser.set(userId, parents);
       }
-      this.#report(detail, userId);
     }
     for (const [userId, parents] of parentsByUser) {
       this.#wakeParents(userId, parents);
@@ -159,8 +185,10 @@ export class SessionAgentActions {
   }
 
   reportOne(detail: AgentSessionDetail, userId: string): void {
-    const parentId = this.#parentSessionId(detail, userId);
-    this.#report(detail, userId);
+    this.#wakeReportedParent(this.#reportAndNotify(detail, userId), userId);
+  }
+
+  #wakeReportedParent(parentId: string | undefined, userId: string): void {
     if (parentId !== undefined) {
       this.#wake(parentId, userId);
     }
@@ -183,19 +211,25 @@ export class SessionAgentActions {
     userId: string,
     runnerId: string,
     path: string,
-    authorize?: () => boolean,
+    authority: SessionExecutionAuthority,
+    authorize: () => boolean,
+    signal: AbortSignal,
   ): Promise<string> {
     const online = this.#onlineRunnerExists(userId, runnerId);
-    if (!online || authorize?.() === false) {
+    if (!online || !authorize()) {
       return runnerUnavailableOutput();
     }
     try {
-      const result = await this.#dependencies.browseDirectories({
-        ...(authorize === undefined ? {} : { authorize }),
-        path,
-        runnerId,
-        userId,
-      });
+      const result = await this.#dependencies.browseDirectories(
+        {
+          authorize,
+          path,
+          runnerId,
+          sessionId: authority.sessionId,
+          userId,
+        },
+        signal,
+      );
       return sessionToolOutput(
         result.status === "listed" ? result.listing : { error: result.status },
       );
@@ -204,22 +238,15 @@ export class SessionAgentActions {
     }
   }
 
-  #parentSessionId(
-    child: Pick<AgentSessionDetail, "id">,
-    userId: string,
-  ): string | undefined {
-    return this.#dependencies.store.parentSessionId(userId, child.id);
-  }
-
-  #report(detail: AgentSessionDetail, userId: string): void {
-    const parentSessionId = this.#parentSessionId(detail, userId);
-    if (parentSessionId === undefined) {
-      return;
+  #report(detail: AgentSessionDetail, userId: string): string | undefined {
+    const link = this.#dependencies.store.spawnedSessionLink(userId, detail.id);
+    if (link === undefined) {
+      return undefined;
     }
     const report = spawnedSessionReport({
       childId: detail.id,
       dependencies: this.#dependencies,
-      parentId: parentSessionId,
+      parentId: link.parentId,
       userId,
     });
     if (
@@ -227,13 +254,16 @@ export class SessionAgentActions {
       this.#dependencies.store.appendSpawnedSessionReport(
         userId,
         detail.id,
+        detail.generation,
         report.parentId,
+        link.parentGeneration,
         report.content,
         this.#dependencies.now(),
       )
     ) {
-      this.#dependencies.notify(userId, report.parentId);
+      return report.parentId;
     }
+    return undefined;
   }
 
   #wakeParents(userId: string, parentIds: readonly string[]): void {
@@ -375,6 +405,7 @@ export class SessionAgentActions {
   async #queue(
     userId: string,
     sessionId: string,
+    authority?: SessionExecutionAuthority,
     message?: string,
   ): Promise<string> {
     const target = this.#detail(userId, sessionId);
@@ -394,6 +425,10 @@ export class SessionAgentActions {
           sessionId,
           this.#dependencies.now(),
           message === undefined ? undefined : { content: message, images: [] },
+          {
+            ...(authority === undefined ? {} : { parent: authority }),
+            targetGeneration: target.generation,
+          },
         );
         if (queued.status !== "queued") {
           return createJsonResponse({ error: queued.status }, 409);
@@ -444,7 +479,7 @@ export class SessionAgentActions {
   }
 
   #spawn(
-    parentSessionId: string,
+    authority: SessionExecutionAuthority,
     userId: string,
     input: SpawnSessionToolInput,
   ): Promise<string> {
@@ -457,9 +492,9 @@ export class SessionAgentActions {
       );
     }
     return spawnAgentSession({
+      authority,
       dependencies: this.#dependencies,
       input,
-      parentSessionId,
       userId,
     });
   }

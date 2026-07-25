@@ -3,6 +3,10 @@ import type { AgentImage } from "../shared/agent-images.ts";
 import { updatedAuditFields } from "../shared/audit.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
+import {
+  sessionExecutionIsCurrent,
+  type SessionQueueAuthorization,
+} from "./session-execution-authority.ts";
 import { storedSessionRunnerIsAvailable } from "./session-runner-availability-store.ts";
 import { activeSessionCondition } from "./session-store-reassignment.ts";
 import type { SessionStoreWriteResources } from "./session-store-resources.ts";
@@ -14,10 +18,15 @@ export type QueueSessionResult =
   | { readonly detail: AgentSessionDetail; readonly status: "queued" }
   | {
       readonly status:
-        "busy" | "not_found" | "runner_required" | "runner_unavailable";
+        | "busy"
+        | "not_found"
+        | "parent_stale"
+        | "runner_required"
+        | "runner_unavailable";
     };
 
 export function queueStoredSession(options: {
+  readonly authorization?: SessionQueueAuthorization;
   readonly now: number;
   readonly prompt?: {
     readonly content: string;
@@ -27,10 +36,16 @@ export function queueStoredSession(options: {
   readonly sessionId: string;
   readonly userId: string;
 }): QueueSessionResult {
-  const { now, prompt, resources, sessionId, userId } = options;
+  const { authorization, now, prompt, resources, sessionId, userId } = options;
   const messageId =
     prompt === undefined ? undefined : resources.generateId(now);
   const status = resources.database.transaction((transaction) => {
+    if (
+      authorization?.parent !== undefined &&
+      !sessionExecutionIsCurrent(transaction, authorization.parent, userId)
+    ) {
+      return "parent_stale" as const;
+    }
     const stored = readStoredSessionState(
       transaction,
       activeSessionCondition({ id: sessionId, userId }),
@@ -38,6 +53,12 @@ export function queueStoredSession(options: {
 
     if (stored === undefined) {
       return "not_found" as const;
+    }
+    if (
+      authorization?.targetGeneration !== undefined &&
+      authorization.targetGeneration !== stored.executionGeneration
+    ) {
+      return "busy" as const;
     }
     if (!["idle", "failed", "stopped"].includes(stored.status)) {
       return "busy" as const;

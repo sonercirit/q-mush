@@ -146,8 +146,8 @@ describe("session store runner reassignment", () => {
         { arguments: "{}", id: "call-parallel", name: "parallel" },
       ],
     };
-    setup.store.appendAgentMessage(SESSION_ID, assistant, TEST_NOW + 2);
-    setup.store.appendAgentMessage(
+    setup.store.appendCurrentAgentMessage(SESSION_ID, assistant, TEST_NOW + 2);
+    setup.store.appendCurrentAgentMessage(
       SESSION_ID,
       {
         content: "done",
@@ -194,11 +194,16 @@ describe("session store runner reassignment", () => {
   });
 
   test("atomically rejects a spawn after its runner is removed", () => {
-    const { database, store } = removedHardeningStore(RUNNER_ID);
+    const { database, store } = runningStore();
+    const removedChildRunnerId = "018bcfe5-6800-7000-8000-000000000095";
+    addReplacementRunner(database, removedChildRunnerId);
+    expect(
+      removeTestRunner({ database, store }, removedChildRunnerId, TEST_NOW + 3),
+    ).toBe(true);
 
     assertUnavailableCreation(
       store,
-      RUNNER_ID,
+      removedChildRunnerId,
       "Do not create this spawned child",
       SESSION_ID,
     );

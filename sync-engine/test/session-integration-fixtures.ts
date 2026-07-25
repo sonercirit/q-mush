@@ -22,6 +22,7 @@ import {
   addTestUser,
   createAuthenticatedRequest,
   createAuthenticatedTestDatabase,
+  createTestProviderCredential,
   TEST_FOREIGN_USER_ID,
   TEST_NOW,
   TEST_USER_ID,
@@ -46,7 +47,12 @@ interface ConnectedSessionOptions {
   readonly credentialGate?: Promise<void>;
   readonly deletedCredentials?: FixtureCredentials;
   readonly foreignCredentials?: FixtureCredentials;
+  readonly modelDiscovery?: AgentModelDiscoverer;
+  readonly onChange?: (userId: string, sessionId: string) => void;
   readonly onCredentialRead?: () => void;
+  readonly readCredential?: (
+    read: () => ProviderCredentialAccess | undefined,
+  ) => Promise<ProviderCredentialAccess | undefined>;
   readonly runners?: readonly RunnerSummary[];
 }
 
@@ -83,14 +89,10 @@ export function connectedSessionSetup(
   }
 
   addTestProviderCredential(database, CREDENTIAL_ID);
-  const credential: ProviderCredentialAccess = {
-    accountId: "provider-account",
-    id: CREDENTIAL_ID,
-    isDefault: false,
-    label: "Agent key",
-    secret: "provider-secret",
-    source: credentialSource,
-  };
+  const credential = createTestProviderCredential(
+    CREDENTIAL_ID,
+    credentialSource,
+  );
   const configuredCredentials = {
     openai: options.credentials?.openai ?? [credential],
     openrouter: options.credentials?.openrouter ?? [],
@@ -138,9 +140,15 @@ export function connectedSessionSetup(
     readCredential: async (userId: string, credentialId: string) => {
       options.onCredentialRead?.();
       await (options.credentialGate ?? Promise.resolve());
-      return userId === TEST_USER_ID
-        ? configuredCredentials[provider].find(({ id }) => id === credentialId)
-        : undefined;
+      const read = () =>
+        userId === TEST_USER_ID
+          ? configuredCredentials[provider].find(
+              ({ id }) => id === credentialId,
+            )
+          : undefined;
+      return options.readCredential === undefined
+        ? read()
+        : options.readCredential(read);
     },
   });
   const ids = Array.from({ length: 100 }, (_, index) =>
@@ -153,6 +161,10 @@ export function connectedSessionSetup(
   const selectedReasoningEfforts: (string | null)[] = [];
   const selectedSystemPrompts: string[] = [];
   const selectedTools: (readonly AgentSessionToolName[])[] = [];
+  const notifications: {
+    readonly sessionId: string;
+    readonly userId: string;
+  }[] = [];
   const runnerCommands: RunnerToolCommand[] = [];
   let latestRunnerCommand: RunnerToolCommand | undefined;
   const broker =
@@ -218,6 +230,7 @@ export function connectedSessionSetup(
     },
     setDefault: (request, runnerId) => runners.setDefault(request, runnerId),
   };
+  const configuredDiscoverModels = options.modelDiscovery ?? discoverModels;
   const sessions = createSessionIntegration(
     auth,
     runnerIntegration,
@@ -229,7 +242,9 @@ export function connectedSessionSetup(
       },
       broker,
       database,
-      ...(discoverModels === undefined ? {} : { discoverModels }),
+      ...(configuredDiscoverModels === undefined
+        ? {}
+        : { discoverModels: configuredDiscoverModels }),
       modelFactory: (factoryOptions) => {
         const {
           credential: selectedCredential,
@@ -253,10 +268,15 @@ export function connectedSessionSetup(
       randomId: () => takeValue(ids, "The session test ran out of IDs"),
     },
   );
+  sessions.onChange((userId, sessionId) => {
+    notifications.push({ sessionId, userId });
+    options.onChange?.(userId, sessionId);
+  });
   return {
     database,
     latestRunnerCommand: () => latestRunnerCommand,
     listRunnerCalls: () => listRunnerCalls,
+    notifications,
     runnerCommands,
     runners,
     selectedModels,

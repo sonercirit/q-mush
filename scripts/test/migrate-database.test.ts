@@ -293,6 +293,7 @@ test("session migration preserves transcripts with foreign keys", async () => {
     upgradedDatabase
       .select({
         id: agentSessions.id,
+        parentExecutionGeneration: agentSessions.parentExecutionGeneration,
         parentSessionId: agentSessions.parentSessionId,
         runnerRequired: agentSessions.runnerRequired,
         tools: agentSessions.tools,
@@ -302,6 +303,7 @@ test("session migration preserves transcripts with foreign keys", async () => {
   ).toEqual([
     {
       id: sessionId,
+      parentExecutionGeneration: null,
       parentSessionId: null,
       runnerRequired: false,
       tools: CURRENT_AGENT_SESSION_TOOLS,

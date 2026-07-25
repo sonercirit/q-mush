@@ -6,6 +6,7 @@ import type {
   AgentSessionSummary,
 } from "../shared/session-model.ts";
 import { runnerIsAvailable } from "./runner-availability-store.ts";
+import { sessionExecutionIsCurrent } from "./session-execution-authority.ts";
 import type { SessionStoreWriteResources } from "./session-store-resources.ts";
 import { readStoredSessionResult } from "./session-store-result.ts";
 import { userMessageValues } from "./session-store-values.ts";
@@ -24,6 +25,7 @@ export interface CreateAgentSession extends Pick<
 > {
   readonly credentialId: string;
   readonly images: readonly AgentImage[];
+  readonly parentGeneration?: number;
   readonly parentSessionId?: string;
   readonly prompt: string;
   readonly userId: string;
@@ -31,7 +33,7 @@ export interface CreateAgentSession extends Pick<
 
 export type CreateSessionResult =
   | { readonly detail: AgentSessionDetail; readonly status: "created" }
-  | { readonly status: "runner_unavailable" };
+  | { readonly status: "parent_stale" | "runner_unavailable" };
 
 function titleFromPrompt(prompt: string): string {
   const firstLine = prompt
@@ -58,6 +60,22 @@ export function createStoredSession(
   const generatedIds = [sessionId, resources.generateId(now)] as const;
   const messageId = generatedIds[1];
   const status = resources.database.transaction((transaction) => {
+    const parentSessionId = input.parentSessionId;
+    const parentGeneration = input.parentGeneration;
+    if ((parentSessionId === undefined) !== (parentGeneration === undefined)) {
+      return "parent_stale" as const;
+    }
+    if (
+      parentSessionId !== undefined &&
+      parentGeneration !== undefined &&
+      !sessionExecutionIsCurrent(
+        transaction,
+        { generation: parentGeneration, sessionId: parentSessionId },
+        input.userId,
+      )
+    ) {
+      return "parent_stale" as const;
+    }
     if (!runnerIsAvailable(transaction, input.userId, input.runnerId, now)) {
       return "runner_unavailable" as const;
     }
@@ -69,6 +87,7 @@ export function createStoredSession(
         id: sessionId,
         maxContextTokens: input.maxContextTokens,
         model: input.model,
+        parentExecutionGeneration: input.parentGeneration ?? null,
         parentSessionId: input.parentSessionId ?? null,
         provider: input.provider,
         providerCredentialId: input.credentialId,
@@ -101,7 +120,7 @@ export function createStoredSession(
     return "created" as const;
   });
 
-  if (status === "runner_unavailable") {
+  if (status !== "created") {
     return { status };
   }
   return readStoredSessionResult(

@@ -5,37 +5,60 @@ import {
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
 
-function unavailableSessionInput(
-  runnerId: string,
-  prompt: string,
-  parentSessionId?: string,
-): CreateAgentSession {
+export function createSessionInput(options: {
+  readonly credentialId: string;
+  readonly prompt: string;
+  readonly runnerId: string;
+  readonly workingDirectory?: string;
+}): CreateAgentSession {
   return {
     autoCompact: true,
-    credentialId: "018bcfe5-6800-7000-8000-000000000042",
+    credentialId: options.credentialId,
     images: [],
     maxContextTokens: null,
     model: "gpt-4.1-mini",
-    ...(parentSessionId === undefined ? {} : { parentSessionId }),
-    prompt,
+    prompt: options.prompt,
     provider: "openai",
     providerPricing: null,
     reasoningEffort: null,
-    runnerId,
+    runnerId: options.runnerId,
     tools: [],
     userId: TEST_USER_ID,
-    workingDirectory: "/work/project",
+    workingDirectory: options.workingDirectory ?? "/work/project",
   };
+}
+
+function unavailableSessionInput(options: {
+  readonly parent?: { readonly generation: number; readonly id: string };
+  readonly prompt: string;
+  readonly runnerId: string;
+}): CreateAgentSession {
+  const input = createSessionInput({
+    credentialId: "018bcfe5-6800-7000-8000-000000000042",
+    prompt: options.prompt,
+    runnerId: options.runnerId,
+  });
+  return options.parent === undefined
+    ? input
+    : {
+        ...input,
+        parentGeneration: options.parent.generation,
+        parentSessionId: options.parent.id,
+      };
 }
 
 export function createUnavailableSession(
   store: SessionStore,
   runnerId: string,
   prompt: string,
-  parentSessionId?: string,
+  parent?: { readonly generation: number; readonly id: string },
 ) {
   return store.create(
-    unavailableSessionInput(runnerId, prompt, parentSessionId),
+    unavailableSessionInput({
+      ...(parent === undefined ? {} : { parent }),
+      prompt,
+      runnerId,
+    }),
     TEST_NOW + 3,
   );
 }

@@ -1,4 +1,4 @@
-import { desc, sql, type SQL } from "drizzle-orm";
+import { desc } from "drizzle-orm";
 import type { AgentFile } from "../shared/agent-file.ts";
 import type { AgentImage } from "../shared/agent-images.ts";
 import type {
@@ -14,14 +14,16 @@ import type { AppDatabase } from "../shared/database.ts";
 import { agentSessions } from "../shared/database/schema.ts";
 import { createUuidV7, SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 import type {
-  AgentSessionCostBasis,
   AgentSessionDetail,
   AgentSessionStatus,
   AgentSessionSummary,
   AgentSessionUsageUpdate,
 } from "../shared/session-model.ts";
 import { activeSessionDuration } from "../shared/session-timing.ts";
-import { compactStoredConversation } from "./session-compaction.ts";
+import {
+  sessionExecutionIsCurrent,
+  type SessionQueueAuthorization,
+} from "./session-execution-authority.ts";
 import { storedSessionAgentFile } from "./session-store-agent-file.ts";
 import {
   createStoredSession,
@@ -54,26 +56,25 @@ import {
   type SessionFilter,
 } from "./session-store-reassignment.ts";
 import {
+  appendRuntimeAgentMessage,
+  appendRuntimeErrorMessage,
+  compactRuntimeConversation,
+  setRuntimeAgentFile,
+  updateRuntimeUsage,
+} from "./session-store-runtime-writes.ts";
+import {
   appendSpawnedSessionReport,
-  parentSessionId,
   pendingSpawnedSessions,
+  spawnedSessionLink,
   type PendingSpawnedSession,
+  type SpawnedSessionLink,
 } from "./session-store-spawns.ts";
+
 import {
   appendSessionUserMessage,
-  errorMessageValues,
   insertStoredMessage,
   interruptedSessionErrorValues,
-  recordedMessageValues,
-  type StoredMessageValues,
 } from "./session-store-values.ts";
-
-function requireStoredSession<Value>(stored: Value | undefined): Value {
-  if (stored === undefined) {
-    throw new DOMException("The agent session was stopped", "AbortError");
-  }
-  return stored;
-}
 
 function sessionSelection() {
   return {
@@ -163,6 +164,13 @@ export class SessionStore {
     return this.#resources[0];
   }
 
+  #writeResources() {
+    return {
+      database: this.#database,
+      generateId: this.#resources[1],
+    };
+  }
+
   #generateId(now: number): string {
     return this.#resources[1](now);
   }
@@ -178,18 +186,15 @@ export class SessionStore {
       now,
     );
   }
-  executionIsCurrent(sessionId: string, generation: number): boolean {
-    return (
-      this.#database
-        .select({ id: agentSessions.id })
-        .from(agentSessions)
-        .where(
-          sessionGenerationCondition(
-            { id: sessionId, status: "running" },
-            generation,
-          ),
-        )
-        .get() !== undefined
+  executionIsCurrent(
+    userId: string,
+    sessionId: string,
+    generation: number,
+  ): boolean {
+    return sessionExecutionIsCurrent(
+      this.#database,
+      { generation, sessionId },
+      userId,
     );
   }
 
@@ -223,56 +228,78 @@ export class SessionStore {
       ),
     );
   }
-  #updateRunningSession(
-    sessionId: string,
-    values: Omit<
-      Partial<typeof agentSessions.$inferInsert>,
-      "costBasis" | "costUsd"
-    > & {
-      readonly costBasis?: AgentSessionCostBasis | SQL;
-      readonly costUsd?: number | SQL;
-      readonly executionGeneration?: number | SQL;
-    },
-    now: number,
-    generation?: number,
-  ): void {
-    this.#database
-      .update(agentSessions)
-      .set({ ...values, ...updatedAuditFields(SYSTEM_ID, now) })
-      .where(runningCondition(sessionId, undefined, generation))
-      .run();
-  }
-
-  setAgentFile(
+  setRuntimeAgentFile(
     sessionId: string,
     agentFile: AgentFile | null,
     now: number,
-    generation?: number,
+    generation: number,
   ): void {
-    this.#updateRunningSession(
-      sessionId,
-      {
-        agentFileContent: agentFile?.content ?? null,
-        agentFileName: agentFile?.name ?? null,
-      },
-      now,
+    setRuntimeAgentFile({
+      agentFile,
       generation,
-    );
+      now,
+      resources: this.#writeResources(),
+      sessionId,
+    });
   }
 
-  compact(
+  compactRuntimeConversation(
     sessionId: string,
     summary: string,
     now: number,
-    generation?: number,
+    generation: number,
   ): void {
-    compactStoredConversation({
-      database: this.#database,
-      generateId: (timestamp) => this.#generateId(timestamp),
-      ...(generation === undefined ? {} : { generation }),
+    compactRuntimeConversation({
+      generation,
       now,
+      resources: this.#writeResources(),
       sessionId,
       summary,
+    });
+  }
+
+  updateRuntimeUsage(
+    sessionId: string,
+    input: AgentSessionUsageUpdate,
+    now: number,
+    generation: number,
+  ): void {
+    updateRuntimeUsage({
+      generation,
+      input,
+      now,
+      resources: this.#writeResources(),
+      sessionId,
+    });
+  }
+
+  appendRuntimeAgentMessage(
+    sessionId: string,
+    message: AgentRecordedMessage,
+    now: number,
+    generation: number,
+  ): void {
+    appendRuntimeAgentMessage({
+      generation,
+      message,
+      now,
+      resources: this.#writeResources(),
+      sessionId,
+    });
+  }
+
+  appendRuntimeErrorMessage(
+    sessionId: string,
+    content: string,
+    now: number,
+    generation: number,
+  ): void {
+    appendRuntimeErrorMessage({
+      content,
+      generation,
+      now,
+      resources: this.#writeResources(),
+      sessionId,
     });
   }
 
@@ -311,66 +338,6 @@ export class SessionStore {
       : this.get(userId, updated[0].id);
   }
 
-  updateUsage(
-    sessionId: string,
-    input: AgentSessionUsageUpdate,
-    now: number,
-    generation?: number,
-  ): void {
-    const invalidCost =
-      (input.costUsd === null) !== (input.costBasis === null) ||
-      (input.costUsd !== null &&
-        (!Number.isFinite(input.costUsd) || input.costUsd < 0));
-    if (
-      (input.contextTokens !== null &&
-        (!Number.isSafeInteger(input.contextTokens) ||
-          input.contextTokens < 0)) ||
-      invalidCost
-    ) {
-      throw new Error("The agent session usage is invalid");
-    }
-
-    this.#updateRunningSession(
-      sessionId,
-      {
-        ...(input.contextTokens === null
-          ? {}
-          : { currentContextTokens: input.contextTokens }),
-        ...(input.costUsd === null
-          ? {}
-          : {
-              costBasis:
-                input.costBasis === "estimated"
-                  ? "estimated"
-                  : sql`CASE WHEN ${agentSessions.costBasis} = 'none' THEN 'reported' ELSE ${agentSessions.costBasis} END`,
-              costUsd: sql`${agentSessions.costUsd} + ${input.costUsd}`,
-            }),
-      },
-      now,
-      generation,
-    );
-  }
-
-  appendAgentMessage(
-    sessionId: string,
-    message: AgentRecordedMessage,
-    now: number,
-    generation?: number,
-  ): void {
-    const stored = recordedMessageValues(message);
-    this.#appendSystemMessage(sessionId, stored, now, generation);
-  }
-
-  appendErrorMessage(
-    sessionId: string,
-    content: string,
-    now: number,
-    generation?: number,
-  ): void {
-    const error = errorMessageValues(content);
-    this.#appendSystemMessage(sessionId, error, now, generation);
-  }
-
   appendInterruptedRunnerTool(sessionId: string, now: number): void {
     appendInterruptedRunnerToolResult({
       database: this.#database,
@@ -398,23 +365,30 @@ export class SessionStore {
   appendSpawnedSessionReport(
     userId: string,
     childId: string,
+    childGeneration: number,
     parentId: string,
+    parentGeneration: number,
     content: string,
     now: number,
   ): boolean {
     return appendSpawnedSessionReport({
+      childGeneration,
       childId,
       content,
       database: this.#database,
       generateId: this.#resources[1],
       now,
+      parentGeneration,
       parentId,
       userId,
     });
   }
 
-  parentSessionId(userId: string, sessionId: string): string | undefined {
-    return parentSessionId(this.#database, userId, sessionId);
+  spawnedSessionLink(
+    userId: string,
+    sessionId: string,
+  ): SpawnedSessionLink | undefined {
+    return spawnedSessionLink(this.#database, userId, sessionId);
   }
 
   pendingSpawnedSessions(): readonly PendingSpawnedSession[] {
@@ -423,11 +397,11 @@ export class SessionStore {
     );
   }
 
-  mark(
+  transitionRuntime(
     sessionId: string,
     status: "failed" | "idle" | "running",
     now: number,
-    generation?: number,
+    generation: number,
   ): boolean {
     switch (status) {
       case "failed":
@@ -453,6 +427,104 @@ export class SessionStore {
         );
       case "running":
         return this.#startActiveSession(sessionId, now, generation);
+    }
+  }
+
+  /**
+   * Administrative/test helper that intentionally targets the current generation.
+   * Runtime code must use the generation-required methods above.
+   */
+  #currentGeneration(sessionId: string): number {
+    const current = this.#database
+      .select({ generation: agentSessions.executionGeneration })
+      .from(agentSessions)
+      .where(activeSessionCondition({ id: sessionId }))
+      .get();
+    if (current === undefined) {
+      throw new DOMException("The agent session was stopped", "AbortError");
+    }
+    return current.generation;
+  }
+
+  appendCurrentAgentMessage(
+    sessionId: string,
+    message: AgentRecordedMessage,
+    now: number,
+  ): void {
+    this.appendRuntimeAgentMessage(
+      sessionId,
+      message,
+      now,
+      this.#currentGeneration(sessionId),
+    );
+  }
+
+  appendCurrentErrorMessage(
+    sessionId: string,
+    content: string,
+    now: number,
+  ): void {
+    this.appendRuntimeErrorMessage(
+      sessionId,
+      content,
+      now,
+      this.#currentGeneration(sessionId),
+    );
+  }
+
+  compactCurrentConversation(
+    sessionId: string,
+    summary: string,
+    now: number,
+  ): void {
+    this.compactRuntimeConversation(
+      sessionId,
+      summary,
+      now,
+      this.#currentGeneration(sessionId),
+    );
+  }
+
+  setCurrentAgentFile(
+    sessionId: string,
+    agentFile: AgentFile | null,
+    now: number,
+  ): void {
+    this.setRuntimeAgentFile(
+      sessionId,
+      agentFile,
+      now,
+      this.#currentGeneration(sessionId),
+    );
+  }
+
+  updateCurrentUsage(
+    sessionId: string,
+    input: AgentSessionUsageUpdate,
+    now: number,
+  ): void {
+    this.updateRuntimeUsage(
+      sessionId,
+      input,
+      now,
+      this.#currentGeneration(sessionId),
+    );
+  }
+
+  transitionCurrent(
+    sessionId: string,
+    status: "failed" | "idle" | "running",
+    now: number,
+  ): boolean {
+    try {
+      return this.transitionRuntime(
+        sessionId,
+        status,
+        now,
+        this.#currentGeneration(sessionId),
+      );
+    } catch {
+      return false;
     }
   }
 
@@ -485,8 +557,10 @@ export class SessionStore {
       readonly content: string;
       readonly images: readonly AgentImage[];
     },
+    authorization?: SessionQueueAuthorization,
   ): QueueSessionResult {
     return queueStoredSession({
+      ...(authorization === undefined ? {} : { authorization }),
       now,
       ...(prompt === undefined ? {} : { prompt }),
       resources: {
@@ -521,52 +595,6 @@ export class SessionStore {
       });
     }
     return this.pendingSpawnedSessions();
-  }
-
-  #appendSystemMessage(
-    sessionId: string,
-    message: StoredMessageValues,
-    now: number,
-    generation?: number,
-  ): void {
-    this.#appendMessage(sessionId, message, SYSTEM_ID, now, generation);
-  }
-
-  #appendMessage(
-    sessionId: string,
-    message: StoredMessageValues,
-    actorId: string,
-    now: number,
-    generation?: number,
-  ): void {
-    this.#database.transaction((transaction) => {
-      const session = requireStoredSession(
-        transaction
-          .select({
-            runnerRequired: agentSessions.runnerRequired,
-            userId: agentSessions.userId,
-          })
-          .from(agentSessions)
-          .where(sessionGenerationCondition({ id: sessionId }, generation))
-          .get(),
-      );
-      if (actorId === SYSTEM_ID && session.runnerRequired) {
-        throw new DOMException("The agent session was stopped", "AbortError");
-      }
-
-      insertStoredMessage(transaction, message, {
-        actorId,
-        id: this.#generateId(now),
-        now,
-        sessionId,
-        userId: session.userId,
-      });
-      transaction
-        .update(agentSessions)
-        .set(updatedAuditFields(actorId, now))
-        .where(sessionGenerationCondition({ id: sessionId }, generation))
-        .run();
-    });
   }
 
   #selectSessions(filter: SessionFilter) {

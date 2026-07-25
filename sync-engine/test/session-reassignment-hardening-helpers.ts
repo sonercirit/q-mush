@@ -93,7 +93,16 @@ export function expectAgentMessageRejected(
   generation?: number,
 ): void {
   expect(() => {
-    store.appendAgentMessage(sessionId, message, TEST_NOW + 4, generation);
+    if (generation === undefined) {
+      store.appendCurrentAgentMessage(sessionId, message, TEST_NOW + 4);
+    } else {
+      store.appendRuntimeAgentMessage(
+        sessionId,
+        message,
+        TEST_NOW + 4,
+        generation,
+      );
+    }
   }).toThrow("agent session was stopped");
 }
 
@@ -103,11 +112,20 @@ export function assertUnavailableCreation(
   prompt: string,
   parentSessionId?: string,
 ): void {
+  const parent =
+    parentSessionId === undefined
+      ? undefined
+      : store.get(TEST_USER_ID, parentSessionId);
+  if (parentSessionId !== undefined && parent === undefined) {
+    throw new Error("The spawn parent session is unavailable");
+  }
   const result = createUnavailableSession(
     store,
     runnerId,
     prompt,
-    parentSessionId,
+    parent === undefined
+      ? undefined
+      : { generation: parent.generation, id: parent.id },
   );
   expect(result).toEqual({ status: "runner_unavailable" });
   expectOneSession(store);
@@ -126,7 +144,7 @@ function expectOneSession(store: SessionStore): void {
 }
 
 function idleTestSession(store: SessionStore, sessionId: string): void {
-  expect(store.mark(sessionId, "idle", TEST_NOW + 2)).toBe(true);
+  expect(store.transitionCurrent(sessionId, "idle", TEST_NOW + 2)).toBe(true);
 }
 
 export function queueStoppedTestSession(

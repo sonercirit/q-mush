@@ -10,10 +10,12 @@ export async function loadSessionAgentFile(
   broker: RunnerCommandBroker,
   session: AgentSessionDetail,
   signal: AbortSignal,
+  authorize: () => boolean,
 ): Promise<AgentFile | null> {
   const output = await broker.dispatch(
     {
       arguments: {},
+      authorize,
       runnerId: session.runnerId,
       sessionId: session.id,
       tool: RUNNER_AGENT_FILE_COMMAND,

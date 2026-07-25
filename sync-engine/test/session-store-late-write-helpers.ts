@@ -45,12 +45,12 @@ function performLateModelWrites(store: SessionStore): void {
     role: "assistant",
     toolCalls: [],
   });
-  store.updateUsage(
+  store.updateCurrentUsage(
     SESSION_ID,
     { contextTokens: 10, costBasis: "reported", costUsd: 1 },
     TEST_NOW + 3,
   );
-  store.setAgentFile(SESSION_ID, null, TEST_NOW + 3);
+  store.setCurrentAgentFile(SESSION_ID, null, TEST_NOW + 3);
 }
 
 export function withRejectedWriteSetup(
