@@ -95,6 +95,14 @@ test.each([
     expect(html).toMatch(/<textarea[^>]*aria-disabled="false"/u);
     expect(html).toMatch(new RegExp(`<button[^>]*>${label}</button>`, "u"));
     expect(html).toContain(">Stop session</button>");
+    if (status === "running") {
+      expect(html).toContain('data-session-steer="true"');
+      expect(html).toMatch(
+        /<button[^>]*data-session-steer="true"[^>]*>Steer<\/button>/u,
+      );
+    } else {
+      expect(html).not.toContain('data-session-steer="true"');
+    }
     expect(html).not.toContain(">Continue without message</button>");
   },
 );
@@ -113,6 +121,8 @@ test.each([
     expect(html).not.toMatch(/<textarea[^>]*\sreadonly(?:=|\s|>)/iu);
     expect(html).toMatch(/<button[^>]*>Send<\/button>/u);
     expect(html).toContain(">Continue without message</button>");
+    expect(html).toContain('data-session-composer-actions="true"');
+    expect(html).not.toContain("sm:self-end");
     expect(html).not.toContain(">Stop session</button>");
   },
 );

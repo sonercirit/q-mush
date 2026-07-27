@@ -1,4 +1,11 @@
-import { type JSX } from "solid-js";
+import {
+  createEffect,
+  createSignal,
+  on,
+  onCleanup,
+  Show,
+  type JSX,
+} from "solid-js";
 import type { AgentImage } from "../shared/agent-images.ts";
 import { SessionImageInput } from "./session-image-client.tsx";
 import { readPastedAgentImageFiles } from "./session-image-input.ts";
@@ -23,14 +30,21 @@ interface SessionFollowUpProps extends PromptEventProps, SessionImagesProps {
   readonly availabilityDescriptionId: string;
   readonly availabilityLabel: string;
   readonly disabled: boolean;
+  readonly onContinue: (() => void) | undefined;
   readonly onKeyDown: (
     event: KeyboardEvent & { readonly currentTarget: HTMLTextAreaElement },
   ) => void;
+  readonly onSteer: (() => void) | undefined;
   readonly onSubmit: () => void;
   readonly prompt: string;
   readonly sending: boolean;
+  readonly sessionId: string;
   readonly submitLabel?: string;
 }
+
+const FOLLOW_UP_SYNC_DELAY_MS = 150;
+const COMPOSER_BUTTON_CLASSES =
+  "min-h-11 w-full rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto";
 
 function promptEvents(props: PromptEventProps) {
   return {
@@ -91,6 +105,78 @@ export function SessionPromptInput(
 }
 
 export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
+  const [localPrompt, setLocalPrompt] = createSignal(props.prompt);
+  const [textarea, setTextarea] = createSignal<HTMLTextAreaElement>();
+  let syncTimer: ReturnType<typeof setTimeout> | undefined;
+  const clearSyncTimer = (): void => {
+    if (syncTimer !== undefined) {
+      clearTimeout(syncTimer);
+      syncTimer = undefined;
+    }
+  };
+  const syncPrompt = (): void => {
+    clearSyncTimer();
+    if (localPrompt() !== props.prompt) props.onInput(localPrompt());
+  };
+  const schedulePromptSync = (): void => {
+    clearSyncTimer();
+    syncTimer = setTimeout(syncPrompt, FOLLOW_UP_SYNC_DELAY_MS);
+  };
+  const handleInput = (
+    event: InputEvent & { readonly currentTarget: HTMLTextAreaElement },
+  ): void => {
+    setLocalPrompt(event.currentTarget.value);
+    schedulePromptSync();
+  };
+  const handleKeyDown = (
+    event: KeyboardEvent & { readonly currentTarget: HTMLTextAreaElement },
+  ): void => {
+    if (
+      !props.disabled &&
+      !event.isComposing &&
+      event.key === "Enter" &&
+      (event.ctrlKey || event.metaKey)
+    ) {
+      syncPrompt();
+    }
+    props.onKeyDown(event);
+  };
+  const submit = (): void => {
+    syncPrompt();
+    props.onSubmit();
+  };
+  const promptValue = (): string => {
+    return props.sessionId.length > 0 ? localPrompt() : "";
+  };
+  createEffect(
+    on(
+      () => props.prompt,
+      (prompt, previousPrompt) => {
+        if (
+          prompt !== previousPrompt &&
+          (syncTimer === undefined || textarea() !== document.activeElement)
+        ) {
+          setLocalPrompt(prompt);
+        }
+      },
+    ),
+  );
+  createEffect(
+    on(
+      () => props.sessionId,
+      (sessionId, previousSessionId) => {
+        if (
+          previousSessionId !== undefined &&
+          sessionId !== previousSessionId
+        ) {
+          clearSyncTimer();
+          setLocalPrompt(props.prompt);
+        }
+      },
+    ),
+  );
+  onCleanup(clearSyncTimer);
+
   return (
     <form
       aria-label="Send another instruction"
@@ -99,7 +185,7 @@ export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
       onSubmit={(event) => {
         event.preventDefault();
         if (!props.disabled) {
-          props.onSubmit();
+          submit();
         }
       }}
     >
@@ -109,25 +195,62 @@ export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
         aria-label="Follow-up instruction"
         class="min-h-20 w-full resize-y rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
         name="prompt"
-        onKeyDown={props.onKeyDown}
+        onInput={handleInput}
+        onKeyDown={handleKeyDown}
+        onPaste={promptEvents(props).onPaste}
         placeholder="Give this session another instruction…"
-        readOnly={props.disabled ? true : undefined}
-        value={props.prompt}
-        {...promptEvents(props)}
+        {...(props.disabled ? { readOnly: true } : {})}
+        ref={setTextarea}
+        value={promptValue()}
       />
       {renderSessionImages({
         ...props,
         disabled: props.disabled,
         id: "follow-up-images",
       })}
-      <button
-        aria-describedby={props.availabilityDescriptionId}
-        class="min-h-11 w-full self-stretch rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:self-end"
-        disabled={props.disabled}
-        type="submit"
+      <div
+        class="flex w-full flex-col gap-3 sm:flex-row sm:items-start sm:justify-end"
+        data-session-composer-actions="true"
       >
-        {props.sending ? "Sending…" : (props.submitLabel ?? "Send")}
-      </button>
+        <button
+          aria-describedby={props.availabilityDescriptionId}
+          class={COMPOSER_BUTTON_CLASSES}
+          disabled={props.disabled}
+          type="submit"
+        >
+          {props.sending ? "Sending…" : (props.submitLabel ?? "Send")}
+        </button>
+        <Show when={props.onSteer !== undefined}>
+          <button
+            aria-describedby={props.availabilityDescriptionId}
+            class={COMPOSER_BUTTON_CLASSES}
+            data-session-steer="true"
+            disabled={props.disabled || props.onSteer === undefined}
+            onClick={() => {
+              syncPrompt();
+              props.onSteer?.();
+            }}
+            type="button"
+          >
+            Steer
+          </button>
+        </Show>
+        <Show when={props.onContinue !== undefined}>
+          <button
+            aria-describedby={props.availabilityDescriptionId}
+            aria-label="Continue without another instruction"
+            class={COMPOSER_BUTTON_CLASSES}
+            disabled={props.disabled || props.onContinue === undefined}
+            onClick={() => {
+              syncPrompt();
+              props.onContinue?.();
+            }}
+            type="button"
+          >
+            Continue without message
+          </button>
+        </Show>
+      </div>
       <p
         aria-live="polite"
         class="text-xs leading-5 text-slate-500"

@@ -90,14 +90,18 @@ export function createSessionAgentModels(options: {
       if (delta.toolCall !== undefined) {
         options.toolStream?.provider(delta.toolCall);
       }
-      options.realtime?.publishUser(options.userId, {
-        content: delta.content,
-        ...(delta.reset === true ? { reset: true } : {}),
-        sessionId: options.detail.id,
-        streamId,
-        thinking: delta.thinking,
-        type: "session_delta",
-      });
+      options.realtime?.publishUser(
+        options.userId,
+        {
+          content: delta.content,
+          ...(delta.reset === true ? { reset: true } : {}),
+          sessionId: options.detail.id,
+          streamId,
+          thinking: delta.thinking,
+          type: "session_delta",
+        },
+        options.detail.workspaceId,
+      );
     } catch {
       // Live delivery must never interrupt the persisted model turn.
     }
