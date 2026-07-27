@@ -3,13 +3,34 @@ import type { AgentFile } from "./agent-file.ts";
 import type { AgentImage } from "./agent-images.ts";
 import type { AgentToolCall } from "./agent-loop.ts";
 import type { AgentSessionToolName } from "./agent-tools.ts";
+import type { PendingAskQuestions } from "./ask-questions.ts";
 import type { ProviderId } from "./provider-credential-store.ts";
 import type { ProviderModelPricing } from "./provider-model-pricing.ts";
+import type { RunnerExecutionEnvironment } from "./runner-command-broker.ts";
+import type { SessionPendingInputContent } from "./session-pending-input.ts";
 
 export type AgentSessionStatus =
-  "queued" | "running" | "idle" | "stopped" | "failed";
+  "queued" | "running" | "paused" | "idle" | "stopped" | "failed";
+
+export type RestartHandoffRequester = "runner" | "server";
+export type RestartHandoffOperation = "agent" | "compact";
+
+export interface RestartHandoff {
+  readonly executionGeneration: number;
+  readonly operation: RestartHandoffOperation;
+  readonly pendingInput: readonly [];
+  readonly requestedBy: RestartHandoffRequester;
+  readonly restartId: string;
+}
 
 export type AgentSessionCostBasis = "estimated" | "none" | "reported";
+
+export type AgentSessionPendingInputKind = "follow_up" | "steer";
+
+export interface AgentSessionPendingInput extends SessionPendingInputContent {
+  readonly createdAt: number;
+  readonly id: string;
+}
 
 export interface AgentSessionUsageUpdate {
   readonly contextTokens: number | null;
@@ -40,13 +61,18 @@ export interface AgentSessionSummary {
   readonly createdAt: number;
   readonly credentialId: string;
   readonly currentContextTokens: number;
+  readonly executionEnvironment: RunnerExecutionEnvironment;
   readonly generation: number;
+  readonly hasOlderSegments: boolean;
   readonly id: string;
   readonly maxContextTokens: number | null;
   readonly model: string;
+  readonly openRouterProviderTag: string | null;
   readonly provider: ProviderId;
   readonly providerPricing: ProviderModelPricing | null;
+  readonly pendingQuestions: PendingAskQuestions | null;
   readonly reasoningEffort: AgentReasoningEffort | null;
+  readonly restartHandoff: RestartHandoff | null;
   readonly runnerId: string;
   readonly runnerRequired: boolean;
   readonly status: AgentSessionStatus;
@@ -54,9 +80,11 @@ export interface AgentSessionSummary {
   readonly tools: readonly AgentSessionToolName[];
   readonly updatedAt: number;
   readonly workingDirectory: string;
+  readonly workspaceId: string;
 }
 
 export interface AgentSessionDetail extends AgentSessionSummary {
   readonly agentFile: AgentFile | null;
   readonly messages: readonly AgentSessionMessage[];
+  readonly pendingInputs: readonly AgentSessionPendingInput[];
 }

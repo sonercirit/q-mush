@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentSessions } from "../shared/database/schema.ts";
 import { runnerIsAvailable } from "./runner-availability-store.ts";
-import { activeSessionCondition } from "./session-store-reassignment.ts";
+import { activeSessionCondition } from "./session-store-persistence.ts";
 
 export function storedSessionRunnerIsAvailable(
   database: Pick<AppDatabase, "select">,

@@ -58,6 +58,10 @@ export function addReplacementRunner(
     .run();
 }
 
+export function closeSessionStoreTestSetup(setup: SessionStoreTestSetup): void {
+  setup.database.$client.close();
+}
+
 export function removeTestRunner(
   setup: SessionStoreTestSetup,
   runnerId: string,

@@ -23,6 +23,16 @@ export function chooseSessionOption(
   name: string,
   value: string,
 ): SessionDraft | undefined {
+  if (name === "executionEnvironment") {
+    return selection.availableValues.includes(value)
+      ? {
+          ...state.draft,
+          executionEnvironment:
+            value === "container" ? "container" : "bare_metal",
+        }
+      : undefined;
+  }
+
   if (name === "runnerId") {
     return selection.availableValues.includes(value)
       ? { ...state.draft, runnerId: value }
@@ -35,6 +45,7 @@ export function chooseSessionOption(
           ...state.draft,
           credential: value,
           model: "",
+          openRouterProviderTag: "",
           reasoningEffort: "",
         }
       : undefined;
@@ -47,9 +58,16 @@ export function chooseSessionOption(
       : {
           ...state.draft,
           model: model.id,
+          openRouterProviderTag: "",
           reasoningEffort:
             maximumAgentReasoningEffort(model.reasoningEfforts) ?? "",
         };
+  }
+
+  if (name === "openRouterProviderTag") {
+    return selection.availableValues.includes(value)
+      ? { ...state.draft, openRouterProviderTag: value }
+      : undefined;
   }
 
   if (name !== "reasoningEffort") {
@@ -81,5 +99,11 @@ export function applySessionModelCatalog(
     efforts?.some((effort) => effort === current.reasoningEffort) === true
       ? current.reasoningEffort
       : (maximumAgentReasoningEffort(efforts ?? []) ?? "");
-  return { ...current, credential, model, reasoningEffort };
+  return {
+    ...current,
+    credential,
+    model,
+    openRouterProviderTag: sameCredential ? current.openRouterProviderTag : "",
+    reasoningEffort,
+  };
 }

@@ -68,16 +68,20 @@ function panelState(
 
 test.each([
   {
-    reason: "Session is queued. You can send when it is ready.",
+    label: "Follow up",
+    reason:
+      "Queued. Follow up starts after the queued work; steering is available only while running.",
     status: "queued",
   },
   {
-    reason: "Session is running. You can send when it is ready.",
+    label: "Follow up",
+    reason:
+      "Running. Follow up starts the next turn; Steer changes direction at the next safe model or tool boundary.",
     status: "running",
   },
 ] as const)(
-  "keeps the composer visible but unavailable while a session is $status",
-  ({ status, reason }) => {
+  "keeps the composer available for durable input while a session is $status",
+  ({ status, reason, label }) => {
     const html = renderPanel(
       panelState(
         { ...TEST_SESSION_DETAIL, status },
@@ -88,10 +92,8 @@ test.each([
     expectComposer(html, reason);
     expect(html).toContain('name="prompt"');
     expect(html).toContain("Keep this draft");
-    expect(html).toMatch(
-      /<textarea[^>]*aria-disabled="true"[^>]*aria-describedby="session-composer-state"|<textarea[^>]*aria-describedby="session-composer-state"[^>]*aria-disabled="true"/u,
-    );
-    expect(html).toMatch(/<button[^>]*disabled[^>]*>Send<\/button>/u);
+    expect(html).toMatch(/<textarea[^>]*aria-disabled="false"/u);
+    expect(html).toMatch(new RegExp(`<button[^>]*>${label}</button>`, "u"));
     expect(html).toContain(">Stop session</button>");
     expect(html).not.toContain(">Continue without message</button>");
   },

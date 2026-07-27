@@ -7,6 +7,8 @@ import type {
   SessionModelDiscoveryState,
   SessionViewState,
 } from "./session-client.tsx";
+import { initialSessionHistoryState } from "./session-history-state.ts";
+import type { SessionProviderDiscoveryState } from "./session-provider-select.tsx";
 import { emptySessionReassignmentDraft } from "./session-reassignment-client.ts";
 import { DEFAULT_SESSION_TRANSCRIPT_FILTERS } from "./session-transcript-filters.ts";
 
@@ -17,13 +19,17 @@ export function mostRecentSessionDirectory(
 }
 
 function initialSessionDraft(): SessionDraft {
+  const emptySelection = "";
   return {
-    credential: "",
+    autoCompact: true,
+    credential: emptySelection,
+    executionEnvironment: "bare_metal",
     images: [],
-    model: "",
-    prompt: "",
-    reasoningEffort: "",
-    runnerId: "",
+    model: emptySelection,
+    openRouterProviderTag: emptySelection,
+    prompt: emptySelection,
+    reasoningEffort: emptySelection,
+    runnerId: emptySelection,
     tools: AGENT_SESSION_TOOL_NAMES,
     workingDirectory: ".",
   };
@@ -38,8 +44,18 @@ export function sessionModelDiscoveryState(
   return { catalog, credential, error, loading };
 }
 
+export function sessionProviderDiscoveryState(
+  key: string | undefined,
+  loading: boolean,
+  catalog?: SessionProviderDiscoveryState["catalog"],
+  error?: string,
+): SessionProviderDiscoveryState {
+  return { catalog, error, key, loading };
+}
+
 export function initialSessionViewState(): SessionViewState {
   return {
+    answeringQuestions: false,
     compacting: false,
     creating: false,
     detail: undefined,
@@ -48,8 +64,10 @@ export function initialSessionViewState(): SessionViewState {
     error: undefined,
     followUp: "",
     followUpImages: [],
+    history: initialSessionHistoryState(),
     loadingDetail: false,
     modelDiscovery: sessionModelDiscoveryState(undefined, false),
+    providerDiscovery: sessionProviderDiscoveryState(undefined, false),
     openSelect: undefined,
     reassigning: false,
     reassignment: emptySessionReassignmentDraft(),
@@ -57,6 +75,9 @@ export function initialSessionViewState(): SessionViewState {
     sending: false,
     sessions: undefined,
     stopping: false,
+    toolStreams: [],
+    updatingTools: false,
+    toolUpdateWarning: null,
     transcriptFilters: { ...DEFAULT_SESSION_TRANSCRIPT_FILTERS },
   };
 }

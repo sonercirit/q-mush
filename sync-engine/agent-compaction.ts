@@ -3,6 +3,7 @@ import type {
   AgentModel,
   AgentModelTurn,
 } from "../shared/agent-loop.ts";
+import { forEachAssistantToolCall } from "./agent-conversation.ts";
 
 const AUTO_COMPACTION_THRESHOLD = 0.95;
 export const AGENT_COMPACTION_SYSTEM_PROMPT = `You compact coding-agent conversations into concise handoff summaries. Preserve the user's goals, important decisions, constraints, relevant file paths, changes already made, command and test results, unresolved errors, and concrete next steps. Do not call tools. Return only the summary.`;
@@ -54,12 +55,11 @@ function toolCallsAreComplete(
 ): boolean {
   const pending = new Set<string>();
 
+  forEachAssistantToolCall(messages, (call) => {
+    pending.add(call.id);
+  });
   for (const message of messages) {
-    if (message.role === "assistant") {
-      for (const call of message.toolCalls) {
-        pending.add(call.id);
-      }
-    } else if (message.role === "tool") {
+    if (message.role === "tool") {
       pending.delete(message.toolCallId);
     }
   }

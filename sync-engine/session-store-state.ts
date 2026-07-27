@@ -2,28 +2,33 @@ import type { SQL } from "drizzle-orm";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentSessions } from "../shared/database/schema.ts";
 
+import { selectedRowExists, selectedString } from "./database-count.ts";
+
+const SESSION_ID_SELECTION = {
+  column: agentSessions.id,
+  table: agentSessions,
+} as const;
+const SESSION_USER_ID_SELECTION = {
+  column: agentSessions.userId,
+  table: agentSessions,
+} as const;
+
 export function storedSessionExists(
   database: Pick<AppDatabase, "select">,
   condition: SQL | undefined,
 ): boolean {
-  return (
-    database
-      .select({ id: agentSessions.id })
-      .from(agentSessions)
-      .where(condition)
-      .get() !== undefined
-  );
+  return selectedRowExists({
+    condition,
+    database,
+    selected: SESSION_ID_SELECTION,
+  });
 }
 
 export function readStoredSessionUserId(
   database: Pick<AppDatabase, "select">,
   condition: SQL | undefined,
 ): string | undefined {
-  return database
-    .select({ userId: agentSessions.userId })
-    .from(agentSessions)
-    .where(condition)
-    .get()?.userId;
+  return selectedString(database, SESSION_USER_ID_SELECTION, condition);
 }
 
 export function requireRunningSessionUserId(
@@ -38,6 +43,7 @@ export function requireRunningSessionUserId(
 }
 
 const STORED_SESSION_STATE_SELECTION = {
+  currentSegment: agentSessions.currentSegment,
   executionGeneration: agentSessions.executionGeneration,
   runnerRequired: agentSessions.runnerRequired,
   status: agentSessions.status,

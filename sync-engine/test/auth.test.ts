@@ -1,15 +1,15 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { describe, expect, test } from "vitest";
 import { createDatabase, type AppDatabase } from "../../shared/database.ts";
 import { sessions, users } from "../../shared/database/schema.ts";
 import { SYSTEM_ID } from "../../shared/ids.ts";
+import { useSynchronousTemporaryDirectories } from "../../shared/test/temporary-directories.ts";
 import {
   createGoogleAuthFromEnvironment,
   type GoogleAuth,
 } from "../../sync-engine/auth.ts";
+import { ensureWaveOneColumns } from "./authenticated-integration-test-helpers.ts";
 import {
   expectPkceParameters,
   expectRedirect,
@@ -29,6 +29,7 @@ const NOW = 1_700_000_000_000;
 const LOGOUT_NOW = NOW + 1000;
 const SESSION_EXPIRES_AT = NOW + 7 * 24 * 60 * 60 * 1000;
 const USER_ID = "018bcfe5-6800-7000-8000-000000000001";
+const WORKSPACE_ID = "018bcfe5-6800-7000-8000-000000000003";
 const SESSION_ID = "018bcfe5-6800-7000-8000-000000000002";
 const EXPECTED_USER = {
   email: "mushroom@example.com",
@@ -56,18 +57,11 @@ const EXPECTED_ACTIVE_SESSION = {
   updatedById: USER_ID,
   userId: USER_ID,
 };
-const temporaryDirectories: string[] = [];
-
-afterEach(() => {
-  for (const directory of temporaryDirectories.splice(0)) {
-    rmSync(directory, { force: true, recursive: true });
-  }
-});
+const createTemporaryDirectory =
+  useSynchronousTemporaryDirectories("q-mush-auth-test-");
 
 function createTemporaryDatabasePath(): string {
-  const directory = mkdtempSync(join(tmpdir(), "q-mush-auth-test-"));
-  temporaryDirectories.push(directory);
-  return join(directory, "auth.sqlite");
+  return join(createTemporaryDirectory(), "auth.sqlite");
 }
 
 function readSetCookie(response: Response, name: string): string {
@@ -98,7 +92,7 @@ function createTokenGenerator(): () => string {
 }
 
 function createIdGenerator(): (timestamp: number) => string {
-  const ids = [USER_ID, SESSION_ID];
+  const ids = [USER_ID, WORKSPACE_ID, SESSION_ID];
 
   return (timestamp) => {
     if (timestamp !== NOW) {
@@ -241,6 +235,7 @@ describe("Google authentication", () => {
     };
     const databasePath = createTemporaryDatabasePath();
     const database = createDatabase(databasePath);
+    ensureWaveOneColumns(database);
     const auth = createTestAuth(providerFetch, database);
     const { cookies: flowCookies } = startFlow(auth);
     const callbackResponse = await auth.complete(

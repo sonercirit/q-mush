@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentSessions } from "../shared/database/schema.ts";
@@ -7,109 +7,29 @@ import type {
   AgentSessionDetail,
   AgentSessionStatus,
 } from "../shared/session-model.ts";
-import { activeSessionDuration } from "../shared/session-timing.ts";
 import { runnerIsAvailable } from "./runner-availability-store.ts";
+import {
+  activePendingInput,
+  settleNormalSessionBoundary,
+} from "./session-pending-inputs.ts";
+import { parseRestartHandoff } from "./session-restart-store.ts";
+import {
+  activeSessionCondition,
+  readStoredSessionSnapshots,
+  storedSessionCondition,
+  storedSessionSnapshotCondition,
+  terminalSessionValues,
+  updateStoredSessions,
+  type StoredSessionSnapshot,
+} from "./session-store-persistence.ts";
 import { readStoredSessionState } from "./session-store-state.ts";
-
-export const SESSION_TIMING_SELECTION = {
-  activeDurationMs: agentSessions.activeDurationMs,
-  activeStartedAt: agentSessions.activeStartedAt,
-};
-
-export interface StoredSessionTiming {
-  readonly activeDurationMs: number;
-  readonly activeStartedAt: Date | null;
-  readonly status?: AgentSessionStatus;
-}
-
-export function sessionTimingUpdate(
-  session: StoredSessionTiming,
-  now: number,
-): { readonly activeDurationMs: number; readonly activeStartedAt: null } {
-  return {
-    activeDurationMs: activeSessionDuration(session, now),
-    activeStartedAt: null,
-  };
-}
-
-export function updateStoredSession(
-  database: Pick<AppDatabase, "update">,
-  sessionId: string,
-  values: Omit<
-    Partial<typeof agentSessions.$inferInsert>,
-    "executionGeneration"
-  > & { readonly executionGeneration?: number | SQL },
-): void {
-  database
-    .update(agentSessions)
-    .set(values)
-    .where(eq(agentSessions.id, sessionId))
-    .run();
-}
-
-export function transitionSessionRunner(
-  database: Pick<AppDatabase, "update">,
-  session: StoredSessionTiming & { readonly id: string },
-  now: number,
-): void {
-  updateStoredSession(database, session.id, {
-    ...sessionTimingUpdate(session, now),
-    ...updatedAuditFields(SYSTEM_ID, now),
-    executionGeneration: sql`${agentSessions.executionGeneration} + 1`,
-    runnerRequired: true,
-    status: session.status === "stopped" ? "stopped" : "idle",
-  });
-}
-
-export interface SessionFilter {
-  readonly id?: string;
-  readonly status?: AgentSessionStatus;
-  readonly userId?: string;
-}
-
-export function activeSessionCondition(filter: SessionFilter): SQL | undefined {
-  return and(
-    eq(agentSessions.isDeleted, false),
-    filter.id === undefined ? undefined : eq(agentSessions.id, filter.id),
-    filter.status === undefined
-      ? undefined
-      : eq(agentSessions.status, filter.status),
-    filter.userId === undefined
-      ? undefined
-      : eq(agentSessions.userId, filter.userId),
-  );
-}
-
-export function sessionGenerationCondition(
-  filter: SessionFilter,
-  generation?: number,
-): SQL | undefined {
-  return and(
-    activeSessionCondition(filter),
-    generation === undefined
-      ? undefined
-      : eq(agentSessions.executionGeneration, generation),
-  );
-}
-
-export function runningCondition(
-  sessionId: string,
-  userId?: string,
-  generation?: number,
-): SQL | undefined {
-  return sessionGenerationCondition(
-    {
-      id: sessionId,
-      status: "running",
-      ...(userId === undefined ? {} : { userId }),
-    },
-    generation,
-  );
-}
-
-export function didUpdate(rows: readonly unknown[]): boolean {
-  return rows.length > 0;
-}
+import {
+  insertStoredMessage,
+  interruptedSessionErrorValues,
+} from "./session-store-values.ts";
+import { recoverStoredTerminal } from "./session-terminal-store.ts";
+import type { SessionTransitionInput } from "./session-transition-types.ts";
+import { optionalRestartHandoff } from "./session-transition-values.ts";
 
 export type ReassignSessionResult =
   | { readonly detail: AgentSessionDetail; readonly status: "reassigned" }
@@ -140,7 +60,11 @@ export function reassignStoredSession(options: {
     if (stored === undefined) {
       return "not_found" as const;
     }
-    if (stored.status === "queued" || stored.status === "running") {
+    if (
+      stored.status === "queued" ||
+      stored.status === "running" ||
+      stored.status === "paused"
+    ) {
       return "busy" as const;
     }
     if (!stored.runnerRequired) {
@@ -158,17 +82,17 @@ export function reassignStoredSession(options: {
       return "runner_unavailable" as const;
     }
 
-    transaction
-      .update(agentSessions)
-      .set({
+    if (
+      !updateStoredSessions(transaction, ownedSession, {
         runnerId: options.runnerId,
         runnerRequired: false,
         executionGeneration: sql`${agentSessions.executionGeneration} + 1`,
         workingDirectory: options.workingDirectory,
         ...updatedAuditFields(options.userId, options.now),
       })
-      .where(ownedSession)
-      .run();
+    ) {
+      throw new Error("The agent session changed during reassignment");
+    }
     return "reassigned" as const;
   });
 
@@ -182,58 +106,95 @@ export function reassignStoredSession(options: {
   return { detail, status };
 }
 
-export function interruptedStoredSessions(database: AppDatabase): readonly {
-  readonly activeDurationMs: number;
-  readonly activeStartedAt: Date | null;
-  readonly id: string;
-  readonly userId: string;
-}[] {
-  return database
-    .select({
-      ...SESSION_TIMING_SELECTION,
-      id: agentSessions.id,
-      userId: agentSessions.userId,
-    })
-    .from(agentSessions)
-    .where(
-      and(
-        eq(agentSessions.isDeleted, false),
-        inArray(agentSessions.status, ["queued", "running"]),
-      ),
-    )
-    .all();
+export interface InterruptedStoredSession extends StoredSessionSnapshot {
+  readonly status: Extract<AgentSessionStatus, "queued" | "running">;
 }
 
-export function transitionStoredSession(options: {
-  readonly actorId: string;
-  readonly database: AppDatabase;
-  readonly from: readonly AgentSessionStatus[];
-  readonly generation?: number;
-  readonly now: number;
-  readonly sessionId: string;
-  readonly to: AgentSessionStatus;
-  readonly userId?: string;
-}): boolean {
-  return didUpdate(
-    options.database
-      .update(agentSessions)
-      .set({
-        status: options.to,
-        ...updatedAuditFields(options.actorId, options.now),
-      })
-      .where(
-        and(
-          activeSessionCondition({
-            id: options.sessionId,
-            ...(options.userId === undefined ? {} : { userId: options.userId }),
-          }),
-          inArray(agentSessions.status, options.from),
-          options.generation === undefined
-            ? undefined
-            : eq(agentSessions.executionGeneration, options.generation),
-        ),
-      )
-      .returning({ updatedAt: agentSessions.updatedAt })
-      .all(),
+export function interruptedStoredSessions(
+  database: AppDatabase,
+  now: number,
+): readonly InterruptedStoredSession[] {
+  const stored = readStoredSessionSnapshots(
+    database,
+    storedSessionCondition({ status: ["queued", "running"] as const }),
+  );
+  const sessions: InterruptedStoredSession[] = [];
+  for (const session of stored) {
+    const { status } = session;
+    if (status !== "queued" && status !== "running") {
+      throw new Error("An interrupted stored session has an invalid status");
+    }
+    const interrupted = { ...session, status };
+    if (parseRestartHandoff(session.restartHandoff) !== null) {
+      sessions.push(interrupted);
+      continue;
+    }
+    if (recoverStoredTerminal(database, session, now)) {
+      continue;
+    }
+    if (
+      session.status === "running" &&
+      activePendingInput(database, session.id) !== undefined &&
+      settleNormalSessionBoundary({
+        database,
+        generation: session.executionGeneration,
+        now,
+        sessionId: session.id,
+      }).status === "queued"
+    ) {
+      continue;
+    }
+    sessions.push(interrupted);
+  }
+  return sessions;
+}
+
+export function failInterruptedStoredSession(
+  database: AppDatabase,
+  session: InterruptedStoredSession,
+  messageId: string,
+  now: number,
+): boolean {
+  return database.transaction((transaction) => {
+    const updated = updateStoredSessions(
+      transaction,
+      storedSessionSnapshotCondition(session),
+      terminalSessionValues(session, "failed", now),
+    );
+    if (!updated) {
+      return false;
+    }
+    insertStoredMessage(transaction, interruptedSessionErrorValues(), {
+      actorId: SYSTEM_ID,
+      id: messageId,
+      now,
+      sessionId: session.id,
+      userId: session.userId,
+    });
+    return true;
+  });
+}
+
+export function transitionStoredSession(
+  options: SessionTransitionInput & {
+    readonly actorId: string;
+    readonly database: AppDatabase;
+    readonly from: readonly AgentSessionStatus[];
+    readonly to: AgentSessionStatus;
+  },
+): boolean {
+  return updateStoredSessions(
+    options.database,
+    storedSessionCondition({
+      generation: options.generation,
+      id: options.sessionId,
+      status: options.from,
+      userId: options.userId,
+    }),
+    {
+      status: options.to,
+      ...updatedAuditFields(options.actorId, options.now),
+      ...optionalRestartHandoff(options.clearRestartHandoff),
+    },
   );
 }

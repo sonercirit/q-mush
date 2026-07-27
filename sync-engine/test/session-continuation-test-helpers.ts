@@ -4,8 +4,10 @@ import type { AgentModelTurn } from "../../shared/agent-loop.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 import { connectedSessionSetup } from "./session-integration-fixtures.ts";
 import {
+  hasSessionStatus,
   sessionDetail,
   startSessionAndCompleteAgentFile,
+  waitForSessionValue,
 } from "./session-integration-helpers.ts";
 import {
   assignedRunnerRemoval,
@@ -16,13 +18,16 @@ const MODEL_ID = "gpt-4.1-mini";
 
 export type ContinuationSetup = ReturnType<typeof connectedSessionSetup>;
 
-function compactionCatalog(label: string): AgentModelCatalog {
+export function testModelCatalog(
+  modelId: string,
+  label: string,
+): AgentModelCatalog {
   return {
-    defaultModel: MODEL_ID,
+    defaultModel: modelId,
     models: [
       {
         contextWindow: 100_000,
-        id: MODEL_ID,
+        id: modelId,
         inputModalities: null,
         label,
         outputModalities: null,
@@ -31,6 +36,10 @@ function compactionCatalog(label: string): AgentModelCatalog {
       },
     ],
   };
+}
+
+function compactionCatalog(label: string): AgentModelCatalog {
+  return testModelCatalog(MODEL_ID, label);
 }
 
 export function compactionTurn(
@@ -103,10 +112,14 @@ export async function drainAndRead(setup: ContinuationSetup): Promise<unknown> {
 
 export async function startAndAwaitContinuation(
   continuation: ReturnType<typeof continuationSetup>,
+  status: "failed" | "idle",
 ): Promise<unknown> {
   await startCompactingSession(continuation);
   await continuation.notified;
-  return drainAndRead(continuation.setup);
+  return waitForSessionValue(
+    () => sessionDetail(continuation.setup.sessions),
+    hasSessionStatus(status),
+  );
 }
 
 export async function stopContinuationSession(

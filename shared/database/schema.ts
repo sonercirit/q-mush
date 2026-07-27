@@ -1,5 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
+  type AnySQLiteColumn,
+  check,
   index,
   integer,
   real,
@@ -32,10 +34,52 @@ export const users = sqliteTable("users", {
   ...auditColumns(),
 });
 
+function ownedForeignKey(name: string, reference: () => AnySQLiteColumn) {
+  return text(name).notNull().references(reference, { onDelete: "restrict" });
+}
+
 function userIdColumn() {
-  return text("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "restrict" });
+  return ownedForeignKey("user_id", () => users.id);
+}
+
+function activeDefaultIndex(name: string) {
+  return (table: {
+    readonly isDefault: AnySQLiteColumn;
+    readonly isDeleted: AnySQLiteColumn;
+    readonly userId: AnySQLiteColumn;
+  }) =>
+    uniqueIndex(name)
+      .on(table.userId)
+      .where(sql`NOT ${table.isDeleted} AND ${table.isDefault}`);
+}
+
+const workspaceDefaultIndex = activeDefaultIndex(
+  "workspaces_user_default_unique",
+);
+const runnerDefaultIndex = activeDefaultIndex("runners_user_default_unique");
+
+export const workspaces = sqliteTable(
+  "workspaces",
+  {
+    id: text("id").primaryKey(),
+    userId: userIdColumn(),
+    name: text("name").notNull(),
+    isDefault: integer("is_default", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    ...auditColumns(),
+  },
+  (table) => [
+    index("workspaces_user_deletion_index").on(table.userId, table.isDeleted),
+    uniqueIndex("workspaces_user_active_name_unique")
+      .on(table.userId, table.name)
+      .where(sql`NOT ${table.isDeleted}`),
+    workspaceDefaultIndex(table),
+  ],
+);
+
+function workspaceIdColumn() {
+  return ownedForeignKey("workspace_id", () => workspaces.id);
 }
 
 function ownedAuditColumns() {
@@ -50,6 +94,13 @@ function defaultBooleanColumn() {
   return integer("is_default", { mode: "boolean" }).notNull().default(false);
 }
 
+function connectionColumns() {
+  return {
+    isDefault: defaultBooleanColumn(),
+    isGlobal: integer("is_global", { mode: "boolean" }).notNull().default(true),
+  };
+}
+
 function providerColumn() {
   return text("provider", { enum: ["openai", "openrouter"] }).notNull();
 }
@@ -59,6 +110,28 @@ function credentialProviderColumn() {
     enum: ["openai", "openrouter", "brave_search"],
   }).notNull();
 }
+
+export const prompts = sqliteTable(
+  "prompts",
+  {
+    ...ownedAuditColumns(),
+    name: text("name").notNull(),
+    normalizedName: text("normalized_name").notNull(),
+    body: text("body").notNull(),
+    revision: integer("revision").notNull().default(1),
+  },
+  (table) => [
+    index("prompts_user_deletion_update_index").on(
+      table.userId,
+      table.isDeleted,
+      table.updatedAt,
+    ),
+    uniqueIndex("prompts_user_normalized_name_active_unique")
+      .on(table.userId, table.normalizedName)
+      .where(sql`NOT ${table.isDeleted}`),
+    check("prompts_revision_positive_check", sql`${table.revision} > 0`),
+  ],
+);
 
 export const providerCredentials = sqliteTable(
   "provider_credentials",
@@ -70,7 +143,7 @@ export const providerCredentials = sqliteTable(
     source: text("source", { enum: ["oauth", "api_key"] }).notNull(),
     encryptedCredential: text("encrypted_credential").notNull(),
     credentialFingerprint: text("credential_fingerprint").notNull(),
-    isDefault: defaultBooleanColumn(),
+    ...connectionColumns(),
   },
   (table) => [
     index("provider_credentials_user_provider_deletion_index").on(
@@ -91,6 +164,41 @@ export const providerCredentials = sqliteTable(
   ],
 );
 
+function activeConnectionIndex(
+  name: string,
+  ownerId: AnySQLiteColumn,
+  workspaceId: AnySQLiteColumn,
+  isDeleted: AnySQLiteColumn,
+) {
+  return uniqueIndex(name)
+    .on(ownerId, workspaceId)
+    .where(sql`NOT ${isDeleted}`);
+}
+
+export const providerCredentialWorkspaces = sqliteTable(
+  "provider_credential_workspaces",
+  {
+    ...ownedAuditColumns(),
+    providerCredentialId: ownedForeignKey(
+      "provider_credential_id",
+      () => providerCredentials.id,
+    ),
+    workspaceId: workspaceIdColumn(),
+  },
+  (table) => [
+    index("provider_credential_workspaces_user_deletion_index").on(
+      table.userId,
+      table.isDeleted,
+    ),
+    activeConnectionIndex(
+      "provider_credential_workspaces_active_unique",
+      table.providerCredentialId,
+      table.workspaceId,
+      table.isDeleted,
+    ),
+  ],
+);
+
 export const runners = sqliteTable(
   "runners",
   {
@@ -100,20 +208,102 @@ export const runners = sqliteTable(
     platform: text("platform"),
     architecture: text("architecture"),
     tokenHash: text("token_hash").notNull(),
+    tokenDigest: text("token_digest").notNull().default(""),
+    activationGeneration: integer("activation_generation").notNull().default(0),
+    activationId: text("activation_id"),
+    activationPhase: text("activation_phase", {
+      enum: ["prepared", "finalized"],
+    }),
+    activationRestartId: text("activation_restart_id"),
+    activationLifecycle: text("activation_lifecycle", {
+      enum: ["ordinary", "restart"],
+    }),
+    activationLifecycleSettled: integer("activation_lifecycle_settled", {
+      mode: "boolean",
+    })
+      .notNull()
+      .default(false),
+    activationSourceId: text("activation_source_id"),
+    activationTargetId: text("activation_target_id"),
+    activationTargetGeneration: integer("activation_target_generation"),
+    activationReservationId: text("activation_reservation_id"),
+    activationReservationGeneration: integer(
+      "activation_reservation_generation",
+    ),
+    activationReservationSourceId: text("activation_reservation_source_id"),
+    activationMachineFingerprint: text("activation_machine_fingerprint"),
+    activationPlatform: text("activation_platform"),
+    activationArchitecture: text("activation_architecture"),
+    activationName: text("activation_name"),
     lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" }),
-    isDefault: defaultBooleanColumn(),
+    ...connectionColumns(),
   },
   (table) => [
     index("runners_user_deletion_index").on(table.userId, table.isDeleted),
     uniqueIndex("runners_active_machine_unique")
       .on(table.machineFingerprint)
       .where(sql`${table.isDeleted} = false`),
+    uniqueIndex("runners_active_token_digest_unique")
+      .on(table.tokenDigest)
+      .where(sql`${table.isDeleted} = false AND ${table.tokenDigest} <> ''`),
+    uniqueIndex("runners_active_activation_id_unique")
+      .on(table.activationId)
+      .where(
+        sql`${table.isDeleted} = false AND ${table.activationId} IS NOT NULL`,
+      ),
     uniqueIndex("runners_active_token_unique")
       .on(table.tokenHash)
       .where(sql`${table.isDeleted} = false`),
-    uniqueIndex("runners_user_default_unique")
-      .on(table.userId)
-      .where(sql`NOT ${table.isDeleted} AND ${table.isDefault}`),
+    runnerDefaultIndex(table),
+    check(
+      "runners_activation_generation_nonnegative_check",
+      sql`${table.activationGeneration} >= 0`,
+    ),
+    check(
+      "runners_activation_phase_identity_check",
+      sql`(${table.activationPhase} IS NULL AND ${table.activationId} IS NULL AND ${table.activationLifecycle} IS NULL) OR (${table.activationPhase} IN ('prepared', 'finalized') AND ${table.activationId} IS NOT NULL AND ${table.activationLifecycle} IN ('ordinary', 'restart'))`,
+    ),
+    check(
+      "runners_activation_settlement_identity_check",
+      sql`${table.activationPhase} IS NOT NULL OR NOT ${table.activationLifecycleSettled}`,
+    ),
+    check(
+      "runners_activation_lifecycle_restart_check",
+      sql`(${table.activationLifecycle} IS NULL AND ${table.activationRestartId} IS NULL) OR (${table.activationLifecycle} = 'ordinary' AND ${table.activationRestartId} IS NULL) OR (${table.activationLifecycle} = 'restart' AND ${table.activationRestartId} IS NOT NULL)`,
+    ),
+    check(
+      "runners_activation_scope_check",
+      sql`(${table.activationPhase} IS NULL AND ${table.activationSourceId} IS NULL AND ${table.activationTargetId} IS NULL AND ${table.activationTargetGeneration} IS NULL AND ${table.activationMachineFingerprint} IS NULL AND ${table.activationPlatform} IS NULL AND ${table.activationArchitecture} IS NULL AND ${table.activationName} IS NULL) OR (${table.activationPhase} IS NOT NULL AND ${table.activationSourceId} IS NOT NULL AND ${table.activationTargetId} IS NOT NULL AND ${table.activationTargetGeneration} IS NOT NULL AND ${table.activationTargetGeneration} >= 0 AND ${table.activationMachineFingerprint} IS NOT NULL AND ${table.activationPlatform} IS NOT NULL AND ${table.activationArchitecture} IS NOT NULL AND ${table.activationName} IS NOT NULL)`,
+    ),
+    check(
+      "runners_activation_reservation_check",
+      sql`(${table.activationReservationId} IS NULL AND ${table.activationReservationGeneration} IS NULL AND ${table.activationReservationSourceId} IS NULL) OR (${table.activationReservationId} IS NOT NULL AND ${table.activationReservationGeneration} IS NOT NULL AND ${table.activationReservationGeneration} >= 0 AND ${table.activationReservationSourceId} IS NOT NULL)`,
+    ),
+    check(
+      "runners_activation_settled_finalized_check",
+      sql`NOT ${table.activationLifecycleSettled} OR ${table.activationPhase} = 'finalized'`,
+    ),
+  ],
+);
+
+export const runnerWorkspaces = sqliteTable(
+  "runner_workspaces",
+  {
+    ...ownedAuditColumns(),
+    runnerId: ownedForeignKey("runner_id", () => runners.id),
+    workspaceId: workspaceIdColumn(),
+  },
+  (table) => [
+    index("runner_workspaces_user_deletion_index").on(
+      table.userId,
+      table.isDeleted,
+    ),
+    activeConnectionIndex(
+      "runner_workspaces_active_unique",
+      table.runnerId,
+      table.workspaceId,
+      table.isDeleted,
+    ),
   ],
 );
 
@@ -121,6 +311,7 @@ export const agentSessions = sqliteTable(
   "agent_sessions",
   {
     ...ownedAuditColumns(),
+    workspaceId: workspaceIdColumn(),
     parentSessionId: text("parent_session_id"),
     parentExecutionGeneration: integer("parent_execution_generation"),
     runnerId: text("runner_id")
@@ -130,11 +321,14 @@ export const agentSessions = sqliteTable(
       .notNull()
       .default(false),
     executionGeneration: integer("execution_generation").notNull().default(0),
+    currentSegment: integer("current_segment").notNull().default(0),
+    restartHandoff: text("restart_handoff"),
     providerCredentialId: text("provider_credential_id")
       .notNull()
       .references(() => providerCredentials.id, { onDelete: "restrict" }),
     provider: providerColumn(),
     providerPricing: text("provider_pricing"),
+    openRouterProviderTag: text("openrouter_provider_tag"),
     model: text("model").notNull(),
     autoCompact: integer("auto_compact", { mode: "boolean" })
       .notNull()
@@ -156,18 +350,28 @@ export const agentSessions = sqliteTable(
     reasoningEffort: text("reasoning_effort", {
       enum: AGENT_REASONING_EFFORTS,
     }),
+    executionEnvironment: text("execution_environment", {
+      enum: ["bare_metal", "container"],
+    })
+      .notNull()
+      .default("bare_metal"),
     workingDirectory: text("working_directory").notNull(),
     title: text("title").notNull(),
     tools: text("tools")
       .notNull()
       .default(JSON.stringify(AGENT_SESSION_TOOL_NAMES)),
     status: text("status", {
-      enum: ["queued", "running", "idle", "stopped", "failed"],
+      enum: ["queued", "running", "paused", "idle", "stopped", "failed"],
     }).notNull(),
   },
   (table) => [
-    index("agent_sessions_user_deletion_update_index").on(
+    check(
+      "agent_sessions_current_segment_nonnegative_check",
+      sql`${table.currentSegment} >= 0`,
+    ),
+    index("agent_sessions_user_workspace_deletion_update_index").on(
       table.userId,
+      table.workspaceId,
       table.isDeleted,
       table.updatedAt,
     ),
@@ -178,13 +382,80 @@ export const agentSessions = sqliteTable(
   ],
 );
 
+function agentSessionIdColumn() {
+  return text("session_id")
+    .notNull()
+    .references(() => agentSessions.id, { onDelete: "restrict" });
+}
+
+export const agentPendingInputs = sqliteTable(
+  "agent_pending_inputs",
+  {
+    ...ownedAuditColumns(),
+    sessionId: agentSessionIdColumn(),
+    clientRequestId: text("client_request_id").notNull(),
+    kind: text("kind", { enum: ["follow_up", "steer"] }).notNull(),
+    content: text("content").notNull(),
+    images: text("images"),
+    sequence: integer("sequence").notNull(),
+  },
+  (table) => [
+    index("agent_pending_inputs_session_deletion_sequence_index").on(
+      table.sessionId,
+      table.isDeleted,
+      table.sequence,
+    ),
+    uniqueIndex("agent_pending_inputs_session_sequence_unique").on(
+      table.sessionId,
+      table.sequence,
+    ),
+    uniqueIndex("agent_pending_inputs_user_request_unique").on(
+      table.userId,
+      table.clientRequestId,
+    ),
+  ],
+);
+
+export const agentQuestionRequests = sqliteTable(
+  "agent_question_requests",
+  {
+    ...ownedAuditColumns(),
+    sessionId: agentSessionIdColumn(),
+    toolCallId: text("tool_call_id").notNull(),
+    executionGeneration: integer("execution_generation").notNull(),
+    questions: text("questions").notNull(),
+    answers: text("answers"),
+    answeredAt: integer("answered_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    index("agent_question_requests_session_deletion_index").on(
+      table.sessionId,
+      table.isDeleted,
+    ),
+    index("agent_question_requests_user_deletion_index").on(
+      table.userId,
+      table.isDeleted,
+    ),
+    uniqueIndex("agent_question_requests_session_tool_call_unique").on(
+      table.sessionId,
+      table.toolCallId,
+    ),
+    uniqueIndex("agent_question_requests_active_session_unique")
+      .on(table.sessionId)
+      .where(sql`${table.answeredAt} IS NULL AND NOT ${table.isDeleted}`),
+    check(
+      "agent_question_requests_generation_nonnegative_check",
+      sql`${table.executionGeneration} >= 0`,
+    ),
+  ],
+);
+
 export const agentMessages = sqliteTable(
   "agent_messages",
   {
     ...ownedAuditColumns(),
-    sessionId: text("session_id")
-      .notNull()
-      .references(() => agentSessions.id, { onDelete: "restrict" }),
+    sessionId: agentSessionIdColumn(),
+    segment: integer("segment").notNull().default(0),
     role: text("role", {
       enum: ["user", "assistant", "tool", "thinking", "system", "error"],
     }).notNull(),
@@ -200,9 +471,18 @@ export const agentMessages = sqliteTable(
       table.isDeleted,
       table.createdAt,
     ),
+    index("agent_messages_session_segment_creation_index").on(
+      table.sessionId,
+      table.segment,
+      table.createdAt,
+    ),
     index("agent_messages_user_deletion_index").on(
       table.userId,
       table.isDeleted,
+    ),
+    check(
+      "agent_messages_segment_nonnegative_check",
+      sql`${table.segment} >= 0`,
     ),
   ],
 );

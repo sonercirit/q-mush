@@ -1,5 +1,6 @@
 import type { JSX } from "solid-js";
 import { render } from "solid-js/web";
+import { expect, vi } from "vitest";
 
 export function mountTestView(
   renderView: () => JSX.Element,
@@ -9,6 +10,18 @@ export function mountTestView(
   document.body.append(container);
   disposals.push(render(renderView, container));
   return container;
+}
+
+export function queryTestElementAs<ElementType extends Element>(
+  container: ParentNode,
+  selector: string,
+  constructor: abstract new (...arguments_: never[]) => ElementType,
+): ElementType {
+  const element = container.querySelector(selector);
+  if (!(element instanceof constructor)) {
+    throw new TypeError(`Missing test element: ${selector}`);
+  }
+  return element;
 }
 
 export function queryTestElement(
@@ -39,6 +52,23 @@ export function queryTestTranscript(container: ParentNode): HTMLUListElement {
     throw new TypeError("The session transcript is not a list");
   }
   return element;
+}
+
+export function setTestInputValue(
+  element: HTMLInputElement | HTMLTextAreaElement,
+  value: string,
+): void {
+  element.value = value;
+  element.dispatchEvent(new InputEvent("input", { bubbles: true }));
+}
+
+export async function expectTestText(
+  container: Node,
+  text: string,
+): Promise<void> {
+  await vi.waitFor(() => {
+    expect(container.textContent).toContain(text);
+  });
 }
 
 export function disposeTestViews(disposals: (() => void)[]): void {

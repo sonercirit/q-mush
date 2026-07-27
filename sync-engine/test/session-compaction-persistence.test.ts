@@ -6,6 +6,7 @@ import {
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import {
+  appendCompactionAssistantMessage,
   requireCompactionSession,
   runningCompactionStore,
   type CompactionStoreSetup,
@@ -20,11 +21,7 @@ const COMPACTION_USAGE: CompactionUsage = {
 
 function compactionStoreWithUsage(): CompactionStoreSetup {
   const setup = runningCompactionStore();
-  setup.store.appendCurrentAgentMessage(
-    STORE_SESSION_ID,
-    { content: "Work before compaction.", role: "assistant", toolCalls: [] },
-    TEST_NOW + 2,
-  );
+  appendCompactionAssistantMessage(setup, "Work before compaction.");
   setup.store.updateCurrentUsage(
     STORE_SESSION_ID,
     { contextTokens: 95_000, costBasis: "reported", costUsd: 0.2 },

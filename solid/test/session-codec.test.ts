@@ -7,12 +7,27 @@ import {
   TEST_AGENT_IMAGE,
   testUserImageMessage,
 } from "./agent-image-fixtures.ts";
+import { singleChoicePendingQuestions } from "./ask-questions-fixtures.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
+
+const INVALID_SESSION_ERROR = "invalid agent session";
+
+function expectInvalidSession(value: unknown): void {
+  expect(() => readSessionDetail(value)).toThrow(INVALID_SESSION_ERROR);
+}
 
 const DETAIL = {
   ...TEST_SESSION_DETAIL,
   agentFile: { content: "Project instructions", name: "CLAUDE.md" },
 };
+
+const RESTART_HANDOFF = {
+  executionGeneration: DETAIL.generation,
+  operation: "agent",
+  pendingInput: [],
+  requestedBy: "server",
+  restartId: "restart-1",
+} as const;
 
 test("reads message image metadata from the server", () => {
   const detail = {
@@ -31,6 +46,27 @@ test("reads message image metadata from the server", () => {
       ],
     }),
   ).toThrow("invalid session message");
+});
+
+test("reads durable pending-input request identities", () => {
+  const pending = {
+    clientRequestId: "request-1",
+    content: "Continue",
+    createdAt: 3,
+    id: "pending-1",
+    images: [],
+    kind: "follow_up",
+  } as const;
+
+  expect(
+    readSessionDetail({ ...DETAIL, pendingInputs: [pending] }).pendingInputs,
+  ).toEqual([pending]);
+  expect(() =>
+    readSessionDetail({
+      ...DETAIL,
+      pendingInputs: [{ ...pending, clientRequestId: undefined }],
+    }),
+  ).toThrow("invalid pending session input");
 });
 
 test("reads persisted session error messages", () => {
@@ -57,6 +93,87 @@ test("requires runner reassignment metadata in session responses", () => {
   expect(() =>
     readSessionDetail({ ...DETAIL, runnerRequired: undefined }),
   ).toThrow("invalid agent session");
+});
+
+test("strictly validates question pauses and lifecycle status coupling", () => {
+  const pendingQuestions = singleChoicePendingQuestions(
+    "request-1",
+    DETAIL.generation,
+    3,
+  );
+
+  expect(
+    readSessionDetail({
+      ...DETAIL,
+      pendingQuestions,
+      status: "paused",
+    }).pendingQuestions,
+  ).toEqual(pendingQuestions);
+  for (const invalid of [
+    { ...DETAIL, pendingQuestions },
+    {
+      ...DETAIL,
+      pendingQuestions: {
+        ...pendingQuestions,
+        executionGeneration: DETAIL.generation + 1,
+      },
+      status: "paused",
+    },
+    {
+      ...DETAIL,
+      pendingQuestions,
+      restartHandoff: RESTART_HANDOFF,
+      status: "paused",
+    },
+  ]) {
+    expectInvalidSession(invalid);
+  }
+});
+
+test("strictly validates restart handoffs and lifecycle status coupling", () => {
+  const handoff = RESTART_HANDOFF;
+
+  expect(
+    readSessionDetail({
+      ...DETAIL,
+      restartHandoff: handoff,
+      status: "paused",
+    }).restartHandoff,
+  ).toEqual(handoff);
+  for (const status of ["queued", "running"] as const) {
+    expect(
+      readSessionDetail({ ...DETAIL, restartHandoff: handoff, status }),
+    ).toMatchObject({ restartHandoff: handoff, status });
+  }
+  for (const invalid of [
+    { ...DETAIL, restartHandoff: handoff, status: "idle" },
+    { ...DETAIL, restartHandoff: null, status: "paused" },
+    {
+      ...DETAIL,
+      restartHandoff: { ...handoff, unexpected: true },
+      status: "paused",
+    },
+    {
+      ...DETAIL,
+      restartHandoff: { ...handoff, pendingInput: ["message"] },
+      status: "paused",
+    },
+    {
+      ...DETAIL,
+      restartHandoff: { ...handoff, restartId: "x".repeat(201) },
+      status: "paused",
+    },
+    {
+      ...DETAIL,
+      restartHandoff: {
+        ...handoff,
+        executionGeneration: DETAIL.generation + 1,
+      },
+      status: "paused",
+    },
+  ]) {
+    expect(() => readSessionDetail(invalid)).toThrow("invalid agent session");
+  }
 });
 
 test("reads a session's tool and skill selection", () => {
@@ -118,7 +235,7 @@ test("requires explicit context, cost, and compaction metadata from session resp
     { ...DETAIL, costBasis: "none", costUsd: 1 },
     { ...DETAIL, maxContextTokens: undefined },
   ]) {
-    expect(() => readSessionDetail(invalid)).toThrow("invalid agent session");
+    expectInvalidSession(invalid);
   }
   expect(() =>
     readAgentModelCatalog({

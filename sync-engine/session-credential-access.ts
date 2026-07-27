@@ -8,6 +8,7 @@ interface SessionCredentialReader {
   readCredential(
     userId: string,
     credentialId: string,
+    workspaceId?: string,
   ):
     | Promise<ProviderCredentialAccess | undefined>
     | ProviderCredentialAccess
@@ -25,6 +26,7 @@ export type SessionCredentialAction = (
 export interface SessionCredentialSelection {
   readonly credentialId: string;
   readonly provider: ProviderId;
+  readonly workspaceId?: string;
 }
 
 export interface SessionRuntimeSelection extends SessionCredentialSelection {
@@ -40,6 +42,7 @@ export function readSessionCredential(
     providers[selection.provider].readCredential(
       userId,
       selection.credentialId,
+      selection.workspaceId,
     ),
   );
 }

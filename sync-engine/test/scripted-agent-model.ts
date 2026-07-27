@@ -18,6 +18,20 @@ interface ScriptedModelOptions {
   readonly onComplete?: (requestCount: number) => Promise<void> | void;
 }
 
+export function recordAgentModelRequest<T>(
+  requests: T[][],
+  messages: readonly T[],
+): AgentModelRequest<T> {
+  const request = [...messages];
+  requests.push(request);
+  return { request, requestCount: requests.length };
+}
+
+interface AgentModelRequest<T> {
+  readonly request: T[];
+  readonly requestCount: number;
+}
+
 export class ScriptedAgentModel implements AgentModel {
   readonly requests: AgentConversationMessage[][] = [];
   readonly #onComplete:
@@ -39,8 +53,8 @@ export class ScriptedAgentModel implements AgentModel {
   async complete(
     messages: readonly AgentConversationMessage[],
   ): Promise<AgentModelTurn> {
-    this.requests.push([...messages]);
-    await this.#onComplete?.(this.requests.length);
+    const { requestCount } = recordAgentModelRequest(this.requests, messages);
+    await this.#onComplete?.(requestCount);
     const turn = this.#turns.shift();
 
     if (turn === undefined) {

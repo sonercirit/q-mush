@@ -17,6 +17,7 @@ import {
   toolCall,
 } from "./session-agent-tool-setup.ts";
 import { CREDENTIAL_ID } from "./session-integration-fixtures.ts";
+import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
 
 function modelOption(index: number) {
   const matching = index % 2 === 0;
@@ -99,7 +100,7 @@ describe("agent model option discovery", () => {
     expect(pages.flatMap(modelOptionIds)).toHaveLength(
       new Set(pages.flatMap(modelOptionIds)).size,
     );
-    setup.database.$client.close();
+    closeSessionTestDatabase(setup.database);
   });
 
   test("searches before paging and rejects invalid model pages", async () => {
@@ -142,7 +143,7 @@ describe("agent model option discovery", () => {
     });
     expect(testString(outputs[4]?.["error"])).toContain("out of range");
     expect(testString(outputs[5]?.["error"])).toContain("out of range");
-    setup.database.$client.close();
+    closeSessionTestDatabase(setup.database);
   });
 
   test("returns provider status failures without leaking response bodies", async () => {
@@ -170,7 +171,7 @@ describe("agent model option discovery", () => {
 
     expect(output).toContain("status 429");
     expect(output).not.toContain("provider-secret");
-    setup.database.$client.close();
+    closeSessionTestDatabase(setup.database);
   });
 
   test("keeps discovered catalogs isolated by credential", async () => {
@@ -214,7 +215,7 @@ describe("agent model option discovery", () => {
     expect(containsAny(serialized, ["provider-secret", secondary.secret])).toBe(
       false,
     );
-    setup.database.$client.close();
+    closeSessionTestDatabase(setup.database);
   });
 
   test("rejects inaccessible credentials and sanitizes arbitrary failures", async () => {
@@ -270,6 +271,6 @@ describe("agent model option discovery", () => {
         "gpt-4.1-mini",
       ]),
     ).toBe(false);
-    setup.database.$client.close();
+    closeSessionTestDatabase(setup.database);
   });
 });

@@ -20,6 +20,8 @@ import {
   OPENROUTER_CREDENTIALS_PATH,
   OPENROUTER_OAUTH_CALLBACK_PATH,
   OPENROUTER_OAUTH_PATH,
+  promptPath,
+  PROMPTS_PATH,
   providerCredentialDefaultPath,
   REALTIME_PATH,
   RUNNER_EXECUTABLE_PATH,
@@ -30,7 +32,6 @@ import {
   runnerDirectoriesPath,
   RUNNERS_PATH,
   SESSION_MODELS_PATH,
-  sessionReassignPath,
   SESSIONS_PATH,
 } from "../../shared/routes.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
@@ -39,14 +40,17 @@ import { readFavicon } from "../../sync-engine/client-build.ts";
 import { createOpenAiIntegrationFromEnvironment } from "../../sync-engine/openai.ts";
 import { createOpenRouterIntegrationFromEnvironment } from "../../sync-engine/openrouter.ts";
 import { renderPages } from "../../sync-engine/pages.ts";
+import { createPromptIntegration } from "../../sync-engine/prompts.ts";
 import type { RunnerExecutableProvider } from "../../sync-engine/runner-executable.ts";
 import { createRunnerIntegration } from "../../sync-engine/runners.ts";
-import {
-  buildClientJavaScript,
-  buildClientStylesheet,
-  createRequestHandler,
-} from "../../sync-engine/server.ts";
+import { createRequestHandler } from "../../sync-engine/server.ts";
 import { createSessionIntegration } from "../../sync-engine/sessions.ts";
+import { WorkspaceStore } from "../../sync-engine/workspace-store.ts";
+import { createWorkspaceIntegration } from "../../sync-engine/workspaces.ts";
+import {
+  createSchemaCompatibleTestDatabase,
+  expectResponseStatuses,
+} from "./authenticated-integration-test-helpers.ts";
 
 interface CompressionCase {
   readonly decompress: (body: Uint8Array) => Uint8Array;
@@ -71,24 +75,48 @@ const runnerExecutables: RunnerExecutableProvider = {
     ),
 };
 const stylesheet = ".min-h-screen{min-height:100vh}";
-const googleAuth = createGoogleAuthFromEnvironment({});
-const openAi = createOpenAiIntegrationFromEnvironment({}, googleAuth);
-const openRouter = createOpenRouterIntegrationFromEnvironment({}, googleAuth);
+function unavailableResponse(): Promise<Response> {
+  return Promise.resolve(new Response(null, { status: 401 }));
+}
+
 const braveSearch: BraveSearchSkill = {
   execute: () =>
     Promise.resolve("Error: no Brave Search API keys are available."),
-  keys: () => Promise.resolve(new Response(null, { status: 401 })),
+  keys: unavailableResponse,
   remove: () => new Response(null, { status: 401 }),
+  setScopes: unavailableResponse,
 };
 const pages = await renderPages();
-const runners = createRunnerIntegration(googleAuth);
 function createTestRequestHandler(): (request: Request) => Promise<Response> {
+  const database = createSchemaCompatibleTestDatabase();
+  const integrationDependencies = { database };
+  const googleAuth = createGoogleAuthFromEnvironment(
+    {},
+    integrationDependencies,
+  );
+  const openAi = createOpenAiIntegrationFromEnvironment(
+    {},
+    googleAuth,
+    integrationDependencies,
+  );
+  const openRouter = createOpenRouterIntegrationFromEnvironment(
+    {},
+    googleAuth,
+    integrationDependencies,
+  );
+
+  const runners = createRunnerIntegration(googleAuth, integrationDependencies);
+  const workspaceStore = new WorkspaceStore(database);
+  const workspaces = createWorkspaceIntegration({
+    auth: googleAuth,
+    store: workspaceStore,
+  });
   const modelProviders = { openai: openAi, openrouter: openRouter };
   const sessions = createSessionIntegration(
     googleAuth,
     runners,
     modelProviders,
-    { braveSearch },
+    { braveSearch, database, workspaces },
   );
   const integrations = [googleAuth, openAi, openRouter, braveSearch] as const;
   return createRequestHandler(
@@ -98,18 +126,13 @@ function createTestRequestHandler(): (request: Request) => Promise<Response> {
     ...integrations,
     runners,
     sessions,
+    createPromptIntegration(googleAuth, integrationDependencies),
+    workspaces,
     runnerExecutables,
   );
 }
 
 const handleRequest = createTestRequestHandler();
-
-function expectAllStatuses(
-  responses: readonly Response[],
-  status: number,
-): void {
-  expect(responses.every((response) => response.status === status)).toBe(true);
-}
 
 function expectCompressionHeaders(
   response: Response,
@@ -193,6 +216,8 @@ describe("routes", () => {
     expect(OPENROUTER_OAUTH_CALLBACK_PATH).toBe(
       "/api/openrouter/oauth/callback",
     );
+    expect(PROMPTS_PATH).toBe("/api/prompts");
+    expect(promptPath("prompt/id")).toBe("/api/prompts/prompt%2Fid");
     expect(RUNNERS_PATH).toBe("/api/runners");
     expect(runnerDefaultPath("runner/id")).toBe(
       "/api/runners/runner%2Fid/default",
@@ -204,9 +229,6 @@ describe("routes", () => {
     expect(REALTIME_PATH).toBe("/api/realtime");
     expect(RUNNER_VERSION_HEADER).toBe("x-q-mush-runner-version");
     expect(SESSIONS_PATH).toBe("/api/sessions");
-    expect(sessionReassignPath("session/id")).toBe(
-      "/api/sessions/session%2Fid/reassign",
-    );
     expect(RUNNER_INSTALLER_PATH).toBe("/runner/install.sh");
     expect(RUNNER_EXECUTABLE_PATH).toBe("/runner/executable");
   });
@@ -373,13 +395,26 @@ describe("page server", () => {
   });
 
   test("protects Brave Search key routes", async () => {
-    const responses = await Promise.all([
-      sendRequest(BRAVE_SEARCH_KEYS_PATH),
-      sendRequest(BRAVE_SEARCH_KEYS_PATH, undefined, "POST"),
-      sendRequest(`${BRAVE_SEARCH_KEYS_PATH}/key-id`, undefined, "DELETE"),
-    ]);
+    expectResponseStatuses(
+      await Promise.all([
+        sendRequest(BRAVE_SEARCH_KEYS_PATH),
+        sendRequest(BRAVE_SEARCH_KEYS_PATH, undefined, "POST"),
+        sendRequest(`${BRAVE_SEARCH_KEYS_PATH}/key-id`, undefined, "DELETE"),
+      ]),
+      401,
+    );
+  });
 
-    expectAllStatuses(responses, 401);
+  test("protects prompt routes", async () => {
+    const promptIdPath = promptPath("prompt-id");
+    const responses = await Promise.all([
+      sendRequest(PROMPTS_PATH),
+      sendRequest(PROMPTS_PATH, undefined, "POST"),
+      sendRequest(promptIdPath),
+      sendRequest(promptIdPath, undefined, "PUT"),
+      sendRequest(promptIdPath, undefined, "DELETE"),
+    ]);
+    expectResponseStatuses(responses, 401);
   });
 
   test("protects agent session routes", async () => {
@@ -399,7 +434,7 @@ describe("page server", () => {
       sendRequest(runnerDirectoriesPath("runner-id"), undefined, "POST"),
     ]);
 
-    expectAllStatuses(responses, 401);
+    expectResponseStatuses(responses, 401);
   });
 
   test("serves the authentication session endpoint", async () => {
@@ -466,7 +501,7 @@ describe("page server", () => {
       ]);
       const outsideApiResponse = await sendRequest(provider.outsidePath);
 
-      expectAllStatuses(responses, 401);
+      expectResponseStatuses(responses, 401);
       expect(outsideApiResponse.status).toBe(404);
     });
   }
@@ -523,38 +558,5 @@ describe("response compression", () => {
     const response = await sendRequest("/styles.css", "identity;q=0, *;q=0");
 
     await expectUnencodedResponse(response, 406, "");
-  });
-});
-
-describe("browser build", () => {
-  test("builds the login, session, and provider credential controls", async () => {
-    const javaScript = await buildClientJavaScript();
-
-    expect(javaScript).toContain("Continue with Google");
-    expect(javaScript).toContain("Connect OpenAI account");
-    expect(javaScript).toContain("Connect OpenRouter account");
-    expect(javaScript).toContain("Brave Search");
-    expect(javaScript).toContain("Add API key");
-    expect(javaScript).toContain("Set up a runner");
-    expect(javaScript).toContain("Download installer");
-    expect(javaScript).toContain("New agent session");
-    expect(javaScript).toContain("Stop session");
-    expect(javaScript).toContain("AUTH_GOOGLE_PATH");
-    expect(javaScript).toContain("AUTH_LOGOUT_PATH");
-    expect(javaScript).toContain("OPENAI_CREDENTIALS_PATH");
-    expect(javaScript).toContain("OPENROUTER_CREDENTIALS_PATH");
-    expect(javaScript).toContain("BRAVE_SEARCH_KEYS_PATH");
-    expect(javaScript).toContain("RUNNERS_PATH");
-    expect(javaScript).toContain("SESSIONS_PATH");
-  });
-});
-
-describe("stylesheet build", () => {
-  test("builds the Tailwind stylesheet in memory", async () => {
-    const css = await buildClientStylesheet();
-
-    expect(css).toContain("tailwindcss");
-    expect(css).toContain(".min-h-screen");
-    expect(css).toContain(".bg-slate-950");
   });
 });

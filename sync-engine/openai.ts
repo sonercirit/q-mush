@@ -353,6 +353,7 @@ function createOpenAiIntegration(
       flowCookies: OPENAI_FLOW_COOKIES,
       resultParameter: "openai",
       userCookie: "q_mush_openai_user",
+      workspaceCookie: "q_mush_openai_workspace",
     }),
     dependencies: context.dependencies,
     prepareCredential: (runtime, credential) =>

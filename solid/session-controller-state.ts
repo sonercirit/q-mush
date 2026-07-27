@@ -5,12 +5,14 @@ import type {
   AgentSessionMessage,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
+import { applyToolStreamDelta } from "../shared/tool-stream.ts";
 import type { RealtimeServerEvent } from "./realtime-client-codec.ts";
 import type { RevisionState } from "./revision-state.ts";
 import type { SessionViewState } from "./session-client.tsx";
 import { summaryFromDetail } from "./session-codec.ts";
 import { createDisplaySessionMessage } from "./session-message.ts";
 import { sessionMutationPending } from "./session-pending.ts";
+import { toolStreamKey } from "./tool-stream-client.ts";
 
 export function selectedSessionCredential(value: string):
   | {
@@ -41,6 +43,20 @@ export function replaceSessionSummary(
   return [summary, ...sessions.filter(({ id }) => id !== summary.id)].sort(
     (left, right) => right.updatedAt - left.updatedAt,
   );
+}
+
+export function mergeNewerSelectedSessionSummary(
+  sessions: readonly AgentSessionSummary[],
+  selectedId: string | undefined,
+  detail: AgentSessionDetail | undefined,
+): readonly AgentSessionSummary[] {
+  const selectedDetail = detail?.id === selectedId ? detail : undefined;
+  const fetched = sessions.find(({ id }) => id === selectedId);
+  return selectedDetail !== undefined &&
+    fetched !== undefined &&
+    selectedDetail.updatedAt > fetched.updatedAt
+    ? replaceSessionSummary(sessions, selectedDetail)
+    : sessions;
 }
 
 function serializedDataMatches(left: unknown, right: unknown): boolean {
@@ -112,6 +128,7 @@ type StreamRole = "assistant" | "thinking";
 interface StreamedSessionContent {
   readonly baseMessageId: string | null | undefined;
   readonly content: string;
+  readonly streamId: string | undefined;
   readonly thinking: string;
 }
 
@@ -147,7 +164,11 @@ function persistedDetail(detail: AgentSessionDetail): AgentSessionDetail {
 }
 
 function sessionIsActive(detail: AgentSessionDetail): boolean {
-  return detail.status === "queued" || detail.status === "running";
+  return (
+    detail.status === "queued" ||
+    detail.status === "running" ||
+    detail.status === "paused"
+  );
 }
 
 function resolveStreamBase(
@@ -330,21 +351,16 @@ export class SessionRealtimeState {
     const initialBase = active
       ? (selectedDetail.messages.at(-1)?.id ?? null)
       : undefined;
-    const current = event.reset
-      ? {
-          baseMessageId: initialBase,
-          content: "",
-          thinking: "",
-        }
-      : (this.#streamedContent.get(event.sessionId) ?? {
-          baseMessageId: initialBase,
-          content: "",
-          thinking: "",
-        });
+    const current =
+      !event.reset &&
+      this.#streamedContent.get(event.sessionId)?.streamId === event.streamId
+        ? this.#streamedContent.get(event.sessionId)
+        : undefined;
     const next: StreamedSessionContent = {
-      baseMessageId: current.baseMessageId,
-      content: current.content + event.content,
-      thinking: current.thinking + event.thinking,
+      baseMessageId: current?.baseMessageId ?? initialBase,
+      content: (current?.content ?? "") + event.content,
+      streamId: event.streamId,
+      thinking: (current?.thinking ?? "") + event.thinking,
     };
     this.#streamedContent.set(event.sessionId, next);
 
@@ -369,6 +385,59 @@ export class SessionRealtimeState {
     }
   }
 
+  #selectedForToolStream(sessionId: string, requireDetail: boolean): boolean {
+    return (
+      this.#view.value.selectedId === sessionId &&
+      (!requireDetail || this.#view.value.detail !== undefined)
+    );
+  }
+
+  applyToolDelta(
+    event: Extract<RealtimeServerEvent, { type: "tool_stream" }>,
+  ): void {
+    if (!this.#selectedForToolStream(event.sessionId, true)) {
+      return;
+    }
+    const current = this.#view.value.toolStreams.find(
+      (entry) => toolStreamKey(entry) === toolStreamKey(event),
+    );
+    const result = applyToolStreamDelta(current, event);
+    if (!result.accepted) {
+      return;
+    }
+    const retained = this.#view.value.toolStreams.filter(
+      (entry) => toolStreamKey(entry) !== toolStreamKey(event),
+    );
+    this.#view.patch({
+      toolStreams: result.terminal
+        ? retained
+        : [...retained, result.entry].sort(
+            (left, right) => left.index - right.index,
+          ),
+    });
+  }
+
+  applyToolSnapshot(
+    event: Extract<RealtimeServerEvent, { type: "tool_stream_snapshot" }>,
+  ): void {
+    if (!this.#selectedForToolStream(event.sessionId, false)) {
+      return;
+    }
+    const current = new Map(
+      this.#view.value.toolStreams.map((entry) => [
+        toolStreamKey(entry),
+        entry,
+      ]),
+    );
+    const streams = event.streams.map((entry) => {
+      const local = current.get(toolStreamKey(entry));
+      return local !== undefined && local.sequence > entry.sequence
+        ? local
+        : entry;
+    });
+    this.#view.patch({ toolStreams: streams });
+  }
+
   applySessions(sessions: readonly AgentSessionSummary[]): void {
     if (
       this.#view.value.sessions === undefined ||
@@ -383,5 +452,8 @@ export class SessionRealtimeState {
 
   reset(): void {
     this.#streamedContent.clear();
+    if (this.#view.value.toolStreams.length > 0) {
+      this.#view.patch({ toolStreams: [] });
+    }
   }
 }

@@ -1,5 +1,8 @@
-import type { AgentRecordedMessage } from "../shared/agent-loop.ts";
-import type { AgentSessionUsageUpdate } from "../shared/session-model.ts";
+import type {
+  SessionRecordedOutput,
+  SessionTerminalOutput,
+} from "./session-recorder-types.ts";
+import { invokeRuntimeWrite } from "./session-runtime-write.ts";
 import type { SessionStore } from "./session-store.ts";
 
 export class SessionRecorder {
@@ -37,20 +40,29 @@ export class SessionRecorder {
   }
 
   #record(action: (now: number, generation: number) => void): void {
-    action(this.#now(), this.#generation);
-    this.#notify();
+    invokeRuntimeWrite(this.#now, this.#generation, action, this.#notify);
   }
 
-  messages(
-    messages: readonly AgentRecordedMessage[],
-    usage?: AgentSessionUsageUpdate,
-  ): void {
+  messages(...[messages, usage]: SessionRecordedOutput): void {
     this.#record((now, generation) => {
       this.#store.appendRuntimeAgentMessages(
         this.#sessionId,
         messages,
         now,
         generation,
+        usage,
+      );
+    });
+  }
+
+  terminal(...[messages, restartHandoff, usage]: SessionTerminalOutput): void {
+    this.#record((now, generation) => {
+      this.#store.commitRuntimeTerminal(
+        this.#sessionId,
+        messages,
+        now,
+        generation,
+        restartHandoff,
         usage,
       );
     });

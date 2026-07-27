@@ -36,9 +36,12 @@ const CATALOG: AgentModelCatalog = {
 };
 
 const DRAFT: SessionDraft = {
+  autoCompact: true,
   credential: "",
+  executionEnvironment: "bare_metal",
   images: [],
   model: "",
+  openRouterProviderTag: "",
   prompt: "Inspect the workspace",
   reasoningEffort: "",
   runnerId: "runner-1",

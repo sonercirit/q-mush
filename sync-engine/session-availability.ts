@@ -12,6 +12,8 @@ export function queueFailureResponse(
       return createApiError("not_found", 404);
     case "parent_stale":
       return createApiError("parent_stale", 409);
+    case "pending_input_conflict":
+      return createApiError("pending_input_conflict", 409);
     case "runner_required":
       return createApiError("runner_required", 409);
     case "runner_unavailable":
@@ -28,7 +30,9 @@ export function unavailableSessionResponse(
   if (detail.runnerRequired) {
     return createApiError("runner_required", 409);
   }
-  return detail.status === "queued" || detail.status === "running"
+  return detail.status === "paused" ||
+    detail.status === "queued" ||
+    detail.status === "running"
     ? createApiError("session_busy", 409)
     : undefined;
 }

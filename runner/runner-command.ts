@@ -1,10 +1,24 @@
+import { isAbsolute, relative, resolve } from "node:path";
 import { RUNNER_AGENT_FILE_COMMAND } from "../shared/agent-file.ts";
 import { isRecord } from "../shared/auth-model.ts";
-import type { RunnerToolCommand } from "../shared/runner-command-broker.ts";
+import {
+  failedRunnerCommandResult,
+  readRunnerExecutionEnvironment,
+  RUNNER_EXECUTION_CLEANUP_COMMAND,
+  type RunnerCommandResult,
+  type RunnerToolCommand,
+} from "../shared/runner-command-broker.ts";
 import { RUNNER_DIRECTORY_COMMAND } from "../shared/runner-directory-model.ts";
+import { readBoundedString } from "../shared/validation.ts";
 import { loadRunnerAgentFile } from "./runner-agent-file.ts";
+import { RunnerContainerManager } from "./runner-container.ts";
 import { listRunnerDirectories } from "./runner-directories.ts";
-import { executeRunnerTool } from "./runner-tools.ts";
+import { runnerCommandResultFromOutput } from "./runner-process.ts";
+import {
+  executeRunnerToolResult,
+  type RunnerToolExecutionOptions,
+} from "./runner-tools.ts";
+import { resolveRunnerWorkspace } from "./runner-workspace.ts";
 
 const MAXIMUM_IDENTIFIER_LENGTH = 200;
 const MAXIMUM_PATH_LENGTH = 4_096;
@@ -16,11 +30,7 @@ function requiredString(
   maximumLength: number,
 ): string | undefined {
   const value = record[key];
-  return typeof value === "string" &&
-    value.length > 0 &&
-    value.length <= maximumLength
-    ? value
-    : undefined;
+  return readBoundedString(value, maximumLength);
 }
 
 export function readRunnerCommand(value: unknown): RunnerToolCommand {
@@ -30,6 +40,9 @@ export function readRunnerCommand(value: unknown): RunnerToolCommand {
 
   const command = value["command"];
   const arguments_ = command["arguments"];
+  const executionEnvironment = readRunnerExecutionEnvironment(
+    command["executionEnvironment"],
+  );
   const id = requiredString(command, "id", MAXIMUM_IDENTIFIER_LENGTH);
   const sessionId = requiredString(
     command,
@@ -45,6 +58,7 @@ export function readRunnerCommand(value: unknown): RunnerToolCommand {
 
   if (
     !isRecord(arguments_) ||
+    executionEnvironment === undefined ||
     id === undefined ||
     sessionId === undefined ||
     tool === undefined ||
@@ -56,6 +70,7 @@ export function readRunnerCommand(value: unknown): RunnerToolCommand {
 
   return {
     arguments: arguments_,
+    executionEnvironment,
     id,
     sessionId,
     tool,
@@ -63,34 +78,125 @@ export function readRunnerCommand(value: unknown): RunnerToolCommand {
   };
 }
 
+type RunnerContainerCommands = Pick<
+  RunnerContainerManager,
+  "cleanupSession" | "executeShell" | "prepare"
+>;
+
+function mapContainerPath(root: string, path: string): string {
+  if (path === "/workspace") {
+    return root;
+  }
+  return isAbsolute(path) && path.startsWith("/workspace/")
+    ? resolve(root, relative("/workspace", path))
+    : path;
+}
+
+function agentFileResult(
+  workingDirectory: string,
+): Promise<RunnerCommandResult> {
+  return loadRunnerAgentFile(workingDirectory).then((agentFile) => ({
+    output: JSON.stringify(agentFile),
+    state: "completed",
+  }));
+}
+
+/** @public Backwards-compatible runner command helper. */
 export async function executeRunnerCommand(
   command: RunnerToolCommand,
   signal?: AbortSignal,
 ): Promise<string> {
-  try {
-    if (command.tool === RUNNER_DIRECTORY_COMMAND) {
-      return JSON.stringify(
-        await listRunnerDirectories(command.workingDirectory),
+  return new RunnerCommandExecutor().execute(command, signal);
+}
+
+export class RunnerCommandExecutor {
+  readonly #containers: RunnerContainerCommands;
+
+  constructor(containers?: RunnerContainerCommands) {
+    this.#containers = containers ?? new RunnerContainerManager();
+  }
+
+  async executeResult(
+    command: RunnerToolCommand,
+    signal?: AbortSignal,
+    stream?: NonNullable<RunnerToolExecutionOptions["stream"]>,
+  ): Promise<RunnerCommandResult> {
+    try {
+      if (command.tool === RUNNER_DIRECTORY_COMMAND) {
+        return {
+          output: JSON.stringify(
+            await listRunnerDirectories(command.workingDirectory),
+          ),
+          state: "completed",
+        };
+      }
+
+      if (command.tool === RUNNER_EXECUTION_CLEANUP_COMMAND) {
+        await this.#containers.cleanupSession(command.sessionId);
+        return {
+          output: "Container execution environment removed.",
+          state: "completed",
+        };
+      }
+
+      if (command.executionEnvironment === "container") {
+        const root = await resolveRunnerWorkspace(command.workingDirectory);
+        await this.#containers.prepare(command.sessionId, root, signal);
+        if (command.tool === RUNNER_AGENT_FILE_COMMAND) {
+          return await agentFileResult(root);
+        }
+        const shell = async (
+          _workspace: string,
+          shellCommand: string,
+          timeoutSeconds: number,
+          shellSignal?: AbortSignal,
+          shellStream?: NonNullable<RunnerToolExecutionOptions["stream"]>,
+        ): Promise<RunnerCommandResult> => {
+          const output = await this.#containers.executeShell(
+            command.sessionId,
+            root,
+            shellCommand,
+            timeoutSeconds,
+            shellSignal,
+            shellStream,
+          );
+          return runnerCommandResultFromOutput(output);
+        };
+        return await executeRunnerToolResult(
+          root,
+          command.tool,
+          command.arguments,
+          signal,
+          undefined,
+          {
+            mapAbsolutePath: (path) => mapContainerPath(root, path),
+            shell,
+            ...(stream === undefined ? {} : { stream }),
+          },
+        );
+      }
+
+      if (command.tool === RUNNER_AGENT_FILE_COMMAND) {
+        return await agentFileResult(command.workingDirectory);
+      }
+
+      return await executeRunnerToolResult(
+        command.workingDirectory,
+        command.tool,
+        command.arguments,
+        signal,
+        undefined,
+        stream === undefined ? undefined : { stream },
       );
+    } catch (error) {
+      return failedRunnerCommandResult(error, 1_000);
     }
+  }
 
-    if (command.tool === RUNNER_AGENT_FILE_COMMAND) {
-      return JSON.stringify(
-        await loadRunnerAgentFile(command.workingDirectory),
-      );
-    }
-
-    return await executeRunnerTool(
-      command.workingDirectory,
-      command.tool,
-      command.arguments,
-      signal,
-    );
-  } catch (error) {
-    if (error instanceof Error) {
-      return `Error: ${error.message.slice(0, 1_000)}`;
-    }
-
-    return `Error: ${String(error).slice(0, 1_000)}`;
+  async execute(
+    command: RunnerToolCommand,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    return (await this.executeResult(command, signal)).output;
   }
 }

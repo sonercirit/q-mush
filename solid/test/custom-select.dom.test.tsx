@@ -3,20 +3,13 @@ import { render } from "solid-js/web";
 import { afterEach, expect, test, vi } from "vitest";
 import { CustomSelect, type CustomSelectOption } from "../custom-select.tsx";
 import { customSelectOptions } from "./custom-select-fixtures.ts";
+import {
+  disposeTestViews,
+  queryTestElementAs,
+  setTestInputValue,
+} from "./dom-test-helpers.ts";
 
 const disposals: (() => void)[] = [];
-
-function query<ElementType extends Element>(
-  container: ParentNode,
-  selector: string,
-  constructor: abstract new (...arguments_: never[]) => ElementType,
-): ElementType {
-  const element = container.querySelector(selector);
-  if (!(element instanceof constructor)) {
-    throw new TypeError(`Missing test element: ${selector}`);
-  }
-  return element;
-}
 
 function mountSelect(
   initialOptions = customSelectOptions(25),
@@ -64,8 +57,7 @@ function keydown(element: Element, key: string): void {
 }
 
 function input(element: HTMLInputElement, value: string): void {
-  element.value = value;
-  element.dispatchEvent(new InputEvent("input", { bubbles: true }));
+  setTestInputValue(element, value);
 }
 
 function optionValues(container: ParentNode): readonly string[] {
@@ -82,7 +74,7 @@ function expectedOptionValues(start: number, end: number): readonly string[] {
 }
 
 function search(container: ParentNode): HTMLInputElement {
-  return query(
+  return queryTestElementAs(
     container,
     "[data-custom-select-search='testChoice']",
     HTMLInputElement,
@@ -111,7 +103,7 @@ function pageButton(
   container: ParentNode,
   direction: "next" | "previous",
 ): HTMLButtonElement {
-  return query(
+  return queryTestElementAs(
     container,
     `[data-custom-select-${direction}='testChoice']`,
     HTMLButtonElement,
@@ -126,14 +118,19 @@ function expectFirstPage(container: ParentNode): void {
 }
 
 function triggerText(container: ParentNode): string | null {
-  return query(container, "#test-select", HTMLButtonElement).textContent;
+  return queryTestElementAs(container, "#test-select", HTMLButtonElement)
+    .textContent;
 }
 
 function closeSelect(
   container: ParentNode,
   setOpen: (open: boolean) => void,
 ): HTMLButtonElement {
-  const trigger = query(container, "#test-select", HTMLButtonElement);
+  const trigger = queryTestElementAs(
+    container,
+    "#test-select",
+    HTMLButtonElement,
+  );
   setOpen(false);
   trigger.focus();
   return trigger;
@@ -149,13 +146,7 @@ function expectActiveDescendant(
 }
 
 afterEach(() => {
-  disposals
-    .splice(0)
-    .reverse()
-    .forEach((dispose) => {
-      dispose();
-    });
-  document.body.textContent = "";
+  disposeTestViews(disposals);
 });
 
 test("search is case-insensitive and no-results navigation is inert", () => {
@@ -274,7 +265,7 @@ test("external option and selected-value changes reset to the selected page", ()
 
 test("keeps selected values valid while filtering other pages", () => {
   const { container } = mountSelect(customSelectOptions(25), "option-24");
-  const hiddenInput = query(
+  const hiddenInput = queryTestElementAs(
     container,
     "input[name='testChoice']",
     HTMLInputElement,
@@ -295,7 +286,11 @@ test("supports trigger and listbox keyboard navigation with focus restoration", 
   const trigger = closeSelect(container, setOpen);
   keydown(trigger, "ArrowDown");
   await Promise.resolve();
-  const listbox = query(container, "#test-select-options", HTMLUListElement);
+  const listbox = queryTestElementAs(
+    container,
+    "#test-select-options",
+    HTMLUListElement,
+  );
   expect(document.activeElement).toBe(listbox);
   expectActiveDescendant(trigger, "option-1");
 
@@ -310,7 +305,7 @@ test("supports trigger and listbox keyboard navigation with focus restoration", 
 
   trigger.click();
   await Promise.resolve();
-  const reopenedListbox = query(
+  const reopenedListbox = queryTestElementAs(
     container,
     "#test-select-options",
     HTMLUListElement,
@@ -328,7 +323,8 @@ test("keeps search and the listbox reachable in sequential focus order", () => {
 
   expect(search(container).tabIndex).toBe(0);
   expect(
-    query(container, "#test-select-options", HTMLUListElement).tabIndex,
+    queryTestElementAs(container, "#test-select-options", HTMLUListElement)
+      .tabIndex,
   ).toBe(0);
 });
 

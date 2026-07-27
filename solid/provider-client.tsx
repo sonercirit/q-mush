@@ -1,5 +1,6 @@
 import { createSignal, Show, type Accessor, type JSX } from "solid-js";
 import { isRecord } from "../shared/auth-model.ts";
+import type { ScopedConnectionSummary } from "../shared/connection-model.ts";
 import {
   BRAVE_SEARCH_KEYS_PATH,
   OPENAI_CREDENTIALS_PATH,
@@ -7,17 +8,23 @@ import {
   OPENROUTER_CREDENTIALS_PATH,
   OPENROUTER_OAUTH_PATH,
 } from "../shared/routes.ts";
+import type { WorkspaceList } from "../shared/workspace-model.ts";
 import { RemovalButton } from "./client-controls.tsx";
 import { Collection } from "./collection.tsx";
+import {
+  optionalWorkspaces,
+  workspaceIdsAreValid,
+} from "./connection-client.ts";
 import { DefaultableActions } from "./defaultable-actions.tsx";
 import { renderDebugBoundary } from "./render-debug.tsx";
+import { ScopedConnectionEditor } from "./scoped-connection-editor.tsx";
+import { SessionReassignmentDialogController } from "./session-reassignment-dialog-controller.ts";
+import { SessionReassignmentDialog } from "./session-reassignment-dialog.tsx";
 
 type BrowserProviderId = "brave-search" | "openai" | "openrouter";
 
-export interface ProviderCredential {
+export interface ProviderCredential extends ScopedConnectionSummary {
   readonly accountId: string | null;
-  readonly id: string;
-  readonly isDefault: boolean;
   readonly label: string;
   readonly source: "api_key" | "oauth";
 }
@@ -27,6 +34,7 @@ interface ProviderViewStateBase {
   readonly error: string | undefined;
   readonly removingId: string | undefined;
   readonly savePending: boolean;
+  readonly sessionReassignmentNotice: string | undefined;
   readonly settingDefaultId: string | undefined;
 }
 
@@ -38,6 +46,7 @@ export function createProviderViewState(
     error: undefined,
     removingId: undefined,
     savePending: false,
+    sessionReassignmentNotice: undefined,
     settingDefaultId: undefined,
   };
 }
@@ -119,21 +128,33 @@ function readCredential(
   const id = value["id"];
   const label = value["label"];
   const isDefault = value["isDefault"];
+  const isGlobal = value["isGlobal"];
   const source = value["source"];
+  const workspaceIds = value["workspaceIds"];
 
   if (
     (accountId !== null && typeof accountId !== "string") ||
     typeof id !== "string" ||
     typeof isDefault !== "boolean" ||
+    (isGlobal !== undefined && typeof isGlobal !== "boolean") ||
     typeof label !== "string" ||
-    (source !== "api_key" && source !== "oauth")
+    (source !== "api_key" && source !== "oauth") ||
+    !workspaceIdsAreValid(workspaceIds)
   ) {
     throw new Error(
       `The server returned an invalid ${providerName} credential`,
     );
   }
 
-  return { accountId, id, isDefault, label, source };
+  return {
+    accountId,
+    id,
+    isDefault,
+    ...(isGlobal === undefined ? {} : { isGlobal }),
+    label,
+    source,
+    ...(workspaceIds === undefined ? {} : { workspaceIds }),
+  };
 }
 
 export function readProviderCredentials(
@@ -154,13 +175,20 @@ export function readProviderCredentials(
 interface ProviderPanelProps {
   readonly configuration: ProviderPanelConfiguration;
   readonly controller: ProviderPanelController;
+  readonly selectedWorkspaceId?: string;
+  readonly workspaces?: Accessor<WorkspaceList | undefined>;
 }
 
 interface CredentialItemProps {
   readonly configuration: ProviderPanelConfiguration;
   readonly controller: ProviderPanelController;
   readonly credential: ProviderCredential;
+  readonly onOpenSessionReassignment: (
+    credential: ProviderCredential,
+    trigger: HTMLElement,
+  ) => void;
   readonly state: ProviderViewState;
+  readonly workspaces?: Accessor<WorkspaceList | undefined>;
 }
 
 function CredentialActions(props: CredentialItemProps): JSX.Element {
@@ -175,16 +203,31 @@ function CredentialActions(props: CredentialItemProps): JSX.Element {
   return (
     <Show
       fallback={
-        <DefaultableActions
-          data={{ "data-credential-id": props.credential.id }}
-          isDefault={props.credential.isDefault}
-          onRemove={remove}
-          onSetDefault={() => {
-            void props.controller.setDefault(props.credential.id);
-          }}
-          removing={removing()}
-          settingDefault={settingDefault()}
-        />
+        <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <button
+            class="min-h-11 rounded-xl border border-cyan-300/20 px-4 py-2 text-sm font-semibold text-cyan-200 transition hover:border-cyan-300/40 hover:bg-cyan-300/10 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300"
+            data-credential-id={props.credential.id}
+            onClick={(event) => {
+              props.onOpenSessionReassignment(
+                props.credential,
+                event.currentTarget,
+              );
+            }}
+            type="button"
+          >
+            Switch sessions to this account
+          </button>
+          <DefaultableActions
+            data={{ "data-credential-id": props.credential.id }}
+            isDefault={props.credential.isDefault}
+            onRemove={remove}
+            onSetDefault={() => {
+              void props.controller.setDefault(props.credential.id);
+            }}
+            removing={removing()}
+            settingDefault={settingDefault()}
+          />
+        </div>
       }
       when={props.configuration.id === "brave-search"}
     >
@@ -218,15 +261,29 @@ function ProviderCredentialItem(props: CredentialItemProps): JSX.Element {
             props.configuration.accountIdUnavailable}
         </p>
       </div>
+      <div class="min-w-0">
+        <p class="text-xs text-slate-500">
+          {props.credential.isGlobal === true
+            ? "Scope: Global"
+            : `Scope: ${String(props.credential.workspaceIds?.length ?? 0)} workspace(s)`}
+        </p>
+      </div>
+      <ScopedConnectionEditor
+        connection={props.credential}
+        controller={props.controller}
+        workspaces={props.workspaces}
+      />
       <CredentialActions {...props} />
     </li>
   );
 }
 
-function ProviderCredentialList({
-  configuration,
-  controller,
-}: ProviderPanelProps): JSX.Element {
+function ProviderCredentialList(
+  props: ProviderPanelProps & {
+    readonly onOpenSessionReassignment: CredentialItemProps["onOpenSessionReassignment"];
+  },
+): JSX.Element {
+  const { configuration, controller } = props;
   const state = controller.view;
   const retry = {
     get error(): string | undefined {
@@ -255,7 +312,9 @@ function ProviderCredentialList({
           configuration,
           controller,
           credential,
+          onOpenSessionReassignment: props.onOpenSessionReassignment,
           state: state(),
+          ...optionalWorkspaces(props.workspaces),
         };
         return <ProviderCredentialItem {...item} />;
       }}
@@ -277,6 +336,9 @@ export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
   const titleId = (): string => `${props.configuration.id}-title`;
   const inputId = (): string => `${props.configuration.id}-api-key`;
   const [form, setForm] = createSignal<HTMLFormElement>();
+  const [reassignmentTrigger, setReassignmentTrigger] =
+    createSignal<HTMLElement>();
+  const reassignmentDialog = new SessionReassignmentDialogController();
 
   return (
     <section
@@ -316,7 +378,7 @@ export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
           {(oauth) => (
             <a
               class="inline-flex min-h-11 w-full shrink-0 items-center justify-center rounded-2xl bg-cyan-300 px-5 py-3 text-center font-semibold text-slate-950 transition hover:bg-cyan-200 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300 sm:w-auto"
-              href={oauth().path}
+              href={`${oauth().path}?workspaceId=${encodeURIComponent(props.selectedWorkspaceId ?? "global")}`}
             >
               {oauth().label}
             </a>
@@ -386,13 +448,40 @@ export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
         </button>
       </form>
 
+      <Show when={state().sessionReassignmentNotice}>
+        {(notice) => (
+          <p
+            class="mt-5 rounded-2xl border border-emerald-300/20 bg-emerald-300/10 p-4 text-sm text-emerald-100"
+            role="status"
+          >
+            {notice()}
+          </p>
+        )}
+      </Show>
       <ProviderCredentialList
         configuration={props.configuration}
         controller={props.controller}
+        onOpenSessionReassignment={(credential, trigger) => {
+          setReassignmentTrigger(trigger);
+          reassignmentDialog.open(credential);
+        }}
+        {...optionalWorkspaces(props.workspaces)}
       />
       <p class="mt-5 text-xs leading-5 text-slate-500">
         {props.configuration.removalHelp}
       </p>
+      <Show when={props.configuration.id !== "brave-search"}>
+        <SessionReassignmentDialog
+          configuration={props.configuration}
+          controller={reassignmentDialog}
+          onConfirm={() => {
+            void props.controller.confirmSessionReassignment(
+              reassignmentDialog,
+            );
+          }}
+          trigger={reassignmentTrigger()}
+        />
+      </Show>
     </section>
   );
 }
@@ -401,6 +490,13 @@ interface ProviderPanelController {
   readonly view: Accessor<ProviderViewState>;
   add(apiKey: string, label?: string): Promise<void>;
   load(): Promise<void>;
+  confirmSessionReassignment(
+    dialog: SessionReassignmentDialogController,
+  ): Promise<void>;
   remove(credentialId: string): Promise<void>;
   setDefault(credentialId: string): Promise<void>;
+  setScopes(
+    credentialId: string,
+    workspaceIds: readonly string[],
+  ): Promise<void>;
 }

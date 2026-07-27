@@ -3,6 +3,7 @@ import type {
   AgentModelOption,
 } from "../../shared/agent-configuration.ts";
 import type { ProviderCredentialAccess } from "../../shared/provider-credential-store.ts";
+import { testAgentModelOption } from "../../shared/test/agent-model-fixtures.ts";
 import type {
   GetSessionOptionsToolInput,
   SessionOptionsSource,
@@ -36,16 +37,12 @@ export function testModelOption(
   id: string,
   overrides: Partial<AgentModelOption> = {},
 ): AgentModelOption {
-  return {
+  return testAgentModelOption({
     contextWindow: null,
     id,
-    inputModalities: ["text"],
     label: `Model ${id}`,
-    outputModalities: ["text"],
-    pricing: null,
-    reasoningEfforts: [],
     ...overrides,
-  };
+  });
 }
 
 export function testSessionOptionsSource(

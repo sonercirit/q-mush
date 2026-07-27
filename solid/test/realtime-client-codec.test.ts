@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import type { PendingAskQuestions } from "../../shared/ask-questions.ts";
 import { readRealtimeServerEvent } from "../../solid/realtime-client-codec.ts";
 import { runnerSummary } from "./runner-fixtures.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
@@ -12,6 +13,47 @@ test("reads complete session snapshots from realtime messages", () => {
     session: TEST_SESSION_DETAIL,
     type: "session",
   });
+});
+
+test("reads pending question notifications", () => {
+  const pending: PendingAskQuestions = {
+    createdAt: 1,
+    executionGeneration: 0,
+    id: "request-1",
+    questions: [
+      {
+        id: "decision",
+        options: [
+          { label: "Yes", value: "yes" },
+          { label: "No", value: "no" },
+        ],
+        prompt: "Continue?",
+        type: "single_choice",
+      },
+    ],
+    toolCallId: "call-1",
+  };
+  expect(
+    roundTrip({ pending, sessionId: "session-1", type: "session_questions" }),
+  ).toEqual({ pending, sessionId: "session-1", type: "session_questions" });
+  expect(
+    roundTrip({
+      pending: null,
+      sessionId: "session-1",
+      type: "session_questions",
+    }),
+  ).toEqual({
+    pending: null,
+    sessionId: "session-1",
+    type: "session_questions",
+  });
+  expect(() =>
+    roundTrip({
+      pending: { ...pending, executionGeneration: -1 },
+      sessionId: "session-1",
+      type: "session_questions",
+    }),
+  ).toThrow("invalid pending questions");
 });
 
 test("reads runner snapshots from realtime messages", () => {

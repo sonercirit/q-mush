@@ -6,11 +6,17 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   agentMessages,
+  agentPendingInputs,
+  agentQuestionRequests,
   agentSessions,
+  prompts,
   providerCredentials,
+  providerCredentialWorkspaces,
   runners,
+  runnerWorkspaces,
   sessions,
   users,
+  workspaces,
 } from "./database/schema.ts";
 
 const MIGRATIONS_DIRECTORY = fileURLToPath(
@@ -18,11 +24,17 @@ const MIGRATIONS_DIRECTORY = fileURLToPath(
 );
 const databaseSchema = {
   agentMessages,
+  agentPendingInputs,
+  agentQuestionRequests,
   agentSessions,
+  prompts,
   providerCredentials,
+  providerCredentialWorkspaces,
   runners,
+  runnerWorkspaces,
   sessions,
   users,
+  workspaces,
 };
 export type AppDatabase = BunSQLiteDatabase<typeof databaseSchema> & {
   readonly $client: Database;

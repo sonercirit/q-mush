@@ -6,8 +6,9 @@ import {
   addTestProviderCredential,
   createAuthenticatedTestDatabase,
   TEST_NOW,
-  TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
+import { takeValue } from "./oauth-test-helpers.ts";
+import { createSessionInput } from "./session-store-create-hardening-helpers.ts";
 import { requireCreatedSession } from "./session-store-result-helpers.ts";
 import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
 
@@ -23,23 +24,31 @@ const GENERATED_IDS = [
   "018bcfe5-6800-7000-8000-000000000048",
   "018bcfe5-6800-7000-8000-000000000049",
   "018bcfe5-6800-7000-8000-000000000050",
+  "018bcfe5-6800-7000-8000-000000000051",
+  "018bcfe5-6800-7000-8000-000000000052",
+  "018bcfe5-6800-7000-8000-000000000053",
+  "018bcfe5-6800-7000-8000-000000000054",
+  "018bcfe5-6800-7000-8000-000000000055",
+  "018bcfe5-6800-7000-8000-000000000056",
+  "018bcfe5-6800-7000-8000-000000000057",
+  "018bcfe5-6800-7000-8000-000000000058",
 ] as const;
 
-function testSessionInput() {
-  return {
+export function testSessionInput(
+  overrides: Partial<CreateAgentSession> = {},
+): CreateAgentSession {
+  const base = createSessionInput({
     credentialId: STORE_CREDENTIAL_ID,
-    autoCompact: true,
+    prompt: "Inspect the repository\nand make it shine",
+    runnerId: STORE_RUNNER_ID,
+  });
+  return {
+    ...base,
     images: [TEST_AGENT_IMAGE],
     maxContextTokens: 200_000,
-    model: "gpt-4.1-mini",
-    prompt: "Inspect the repository\nand make it shine",
-    provider: "openai" as const,
-    providerPricing: null,
-    reasoningEffort: "high" as const,
-    runnerId: STORE_RUNNER_ID,
+    reasoningEffort: "high",
     tools: AGENT_SESSION_TOOL_NAMES,
-    userId: TEST_USER_ID,
-    workingDirectory: "/work/project",
+    ...overrides,
   };
 }
 
@@ -50,13 +59,9 @@ export function createStore() {
   const ids = [...GENERATED_IDS];
   return {
     database,
-    store: new SessionStore(database, () => {
-      const id = ids.shift();
-      if (id === undefined) {
-        throw new Error("The test ran out of session IDs");
-      }
-      return id;
-    }),
+    store: new SessionStore(database, () =>
+      takeValue(ids, "The test ran out of session IDs"),
+    ),
   };
 }
 

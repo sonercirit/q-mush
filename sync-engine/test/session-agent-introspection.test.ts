@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { AGENT_TOOLS } from "../../shared/agent-tools.ts";
 import {
   agentMessages,
   agentSessions,
@@ -142,10 +143,14 @@ describe("session agent introspection tools", () => {
     );
     expect(content["toolDefinitions"]).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ name: "read_session" }),
+        expect.objectContaining({ name: "read" }),
         expect.objectContaining({ name: "get_session_options" }),
       ]),
     );
+    expect(read["metadata"]).toMatchObject({
+      toolDefinitions: { matched: AGENT_TOOLS.length },
+      truncation: { toolDefinitions: true },
+    });
     expect(serialized).not.toContain("hidden reasoning");
     expect(serialized).not.toContain("call-list_sessions");
     expect(Buffer.byteLength(serialized, "utf8")).toBeLessThanOrEqual(32_768);

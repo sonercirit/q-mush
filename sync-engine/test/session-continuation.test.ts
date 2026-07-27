@@ -63,7 +63,7 @@ describe("session continuation", () => {
       ],
       { label: "Compaction test model", notifyRequest: 3 },
     );
-    const continued = await startAndAwaitContinuation(continuation);
+    const continued = await startAndAwaitContinuation(continuation, "idle");
 
     expectContinuationRequests(continuation, "Compacted handoff.");
     expect(continuation.model.requests[1]).toContainEqual({
@@ -103,7 +103,7 @@ describe("session continuation", () => {
       ],
       { label: "Continuation failure model", notifyRequest: 3 },
     );
-    const failed = await startAndAwaitContinuation(continuation);
+    const failed = await startAndAwaitContinuation(continuation, "failed");
 
     expectContinuationRequests(continuation, "Durable handoff.");
     expectTranscriptContent(failed, "Work before failed continuation.", false);
@@ -226,6 +226,7 @@ describe("session continuation", () => {
       setup,
       {
         arguments: { path: "README.md" },
+        executionEnvironment: "bare_metal",
         id: RUNNER_COMMAND_ID,
         sessionId: SESSION_ID,
         tool: "read",

@@ -1,6 +1,7 @@
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
 import type { ProviderCredentialDetails } from "../shared/provider-credential-store.ts";
 import { APP_PATH } from "../shared/routes.ts";
+import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 import {
   createCookie,
   createMethodNotAllowedResponse,
@@ -20,6 +21,7 @@ import {
   type OAuthRuntime,
 } from "./oauth.ts";
 import type { ProviderCredentialEndpoints } from "./provider-credentials.ts";
+import { workspaceScopeIsValid } from "./workspace-scope.ts";
 
 export interface AuthorizationRequest {
   readonly callbackUri: string;
@@ -48,6 +50,7 @@ export interface ConnectedAccountOAuthConfiguration {
   readonly redirectUri?: string;
   readonly resultParameter: string;
   readonly userCookie: string;
+  readonly workspaceCookie: string;
 }
 
 export class ConnectedAccountOAuth {
@@ -75,6 +78,15 @@ export class ConnectedAccountOAuth {
     return createMethodNotAllowedResponse("GET");
   }
 
+  #validWorkspaceScope(
+    workspaceId: string | undefined,
+    userId: string,
+  ): workspaceId is string {
+    return workspaceScopeIsValid(workspaceId, userId, (ownerId, workspaceIds) =>
+      this.#credentials.validateScopes(ownerId, workspaceIds),
+    );
+  }
+
   #beginAuthorized(request: Request, user: AuthenticatedUser): Response {
     const redirectUri = this.#redirectUri(request);
     const { challenge, cookies, secure, state } = startPkceFlowForRedirect(
@@ -94,7 +106,25 @@ export class ConnectedAccountOAuth {
       secure,
     );
 
-    return createRedirect(authorizationUrl, [...cookies, userCookie]);
+    const requestedWorkspaceId = new URL(request.url).searchParams.get(
+      "workspaceId",
+    );
+    const workspaceId = requestedWorkspaceId ?? GLOBAL_WORKSPACE_ID;
+    if (!this.#validWorkspaceScope(workspaceId, user.id)) {
+      return new Response("Invalid workspace scope", { status: 409 });
+    }
+    const workspaceCookie = createFlowCookie(
+      this.#configuration.workspaceCookie,
+      workspaceId,
+      this.#configuration.flowCookies.path,
+      secure,
+    );
+
+    return createRedirect(authorizationUrl, [
+      ...cookies,
+      userCookie,
+      workspaceCookie,
+    ]);
   }
 
   async complete(request: Request): Promise<Response> {
@@ -122,6 +152,13 @@ export class ConnectedAccountOAuth {
         this.#configuration.flowCookies.path,
         secure,
       ),
+      createCookie(
+        this.#configuration.workspaceCookie,
+        "",
+        0,
+        this.#configuration.flowCookies.path,
+        secure,
+      ),
     ];
     const callback = readOAuthCallback(
       request,
@@ -137,10 +174,19 @@ export class ConnectedAccountOAuth {
         return this.#appRedirect(request, callback.status, clearedCookies);
     }
 
+    const invalidState = (): Response =>
+      this.#appRedirect(request, "invalid_state", clearedCookies);
     const flowUserId = readCookie(request, this.#configuration.userCookie);
-
-    if (flowUserId === undefined || !valuesMatch(flowUserId, user.id)) {
-      return this.#appRedirect(request, "invalid_state", clearedCookies);
+    const workspaceId = readCookie(
+      request,
+      this.#configuration.workspaceCookie,
+    );
+    if (
+      flowUserId === undefined ||
+      !valuesMatch(flowUserId, user.id) ||
+      !this.#validWorkspaceScope(workspaceId, user.id)
+    ) {
+      return invalidState();
     }
 
     try {
@@ -153,6 +199,7 @@ export class ConnectedAccountOAuth {
         user,
         credential.secret,
         credential.details,
+        [workspaceId],
       );
       return this.#appRedirect(request, "connected", clearedCookies);
     } catch {

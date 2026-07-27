@@ -8,8 +8,14 @@ import {
   type SessionAgentToolName,
 } from "../shared/agent-tools.ts";
 import { isProviderId } from "../shared/provider-credential-store.ts";
+import {
+  failedRunnerCommandResult,
+  readRunnerExecutionEnvironment,
+  type RunnerCommandResult,
+} from "../shared/runner-command-broker.ts";
 import { MAXIMUM_RUNNER_PATH_LENGTH } from "../shared/runner-directory-model.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
+import { completedRunnerCommandResult } from "./runner-command-result.ts";
 import type { GetSessionOptionsToolInput } from "./session-agent-options.ts";
 import type { ReadSessionToolInput } from "./session-agent-read.ts";
 import {
@@ -27,8 +33,11 @@ const MAXIMUM_SESSION_MESSAGE_LENGTH = 32_768;
 
 export interface SpawnSessionToolInput extends Pick<
   AgentSessionDetail,
+  | "autoCompact"
   | "credentialId"
+  | "executionEnvironment"
   | "model"
+  | "openRouterProviderTag"
   | "provider"
   | "reasoningEffort"
   | "runnerId"
@@ -104,6 +113,10 @@ function spawnInput(
   arguments_: Readonly<Record<string, unknown>>,
 ): SpawnSessionToolInput {
   const credentialId = readIdentifier(arguments_["credentialId"]);
+  const autoCompact = arguments_["autoCompact"];
+  const executionEnvironment = readRunnerExecutionEnvironment(
+    arguments_["executionEnvironment"],
+  );
   const modelValue = arguments_["model"];
   const model = isAgentModelId(modelValue) ? modelValue : undefined;
   const prompt = readStringField(
@@ -120,7 +133,9 @@ function spawnInput(
 
   if (
     !hasOnlySessionToolArguments(arguments_, [
+      "autoCompact",
       "credentialId",
+      "executionEnvironment",
       "model",
       "prompt",
       "provider",
@@ -129,7 +144,9 @@ function spawnInput(
       "tools",
       "workingDirectory",
     ]) ||
+    (autoCompact !== undefined && typeof autoCompact !== "boolean") ||
     credentialId === undefined ||
+    executionEnvironment === undefined ||
     model === undefined ||
     prompt === undefined ||
     !isProviderId(provider) ||
@@ -143,9 +160,12 @@ function spawnInput(
   }
 
   return {
+    autoCompact: typeof autoCompact === "boolean" ? autoCompact : true,
     credentialId,
+    executionEnvironment,
     images: [],
     model,
+    openRouterProviderTag: null,
     prompt,
     provider,
     reasoningEffort: isAgentReasoningEffort(reasoningEffort)
@@ -173,16 +193,15 @@ function message(arguments_: Readonly<Record<string, unknown>>): string {
   return value;
 }
 
-function safeToolError(error: unknown): string {
-  const detail = error instanceof Error ? error.message : String(error);
-  return `Error: ${detail.slice(0, 500)}`;
+function failedToolOutput(error: unknown): RunnerCommandResult {
+  return failedRunnerCommandResult(error, 500);
 }
 
 export function executeSessionAgentTool(
   actions: SessionAgentToolActions,
   name: SessionAgentToolName,
   arguments_: Readonly<Record<string, unknown>>,
-): Promise<string> {
+): Promise<RunnerCommandResult> {
   try {
     let output: Promise<string>;
     switch (name) {
@@ -262,9 +281,9 @@ export function executeSessionAgentTool(
         output = Promise.resolve(actions.stopSession(sessionId(arguments_)));
         break;
     }
-    return output.catch((error: unknown) => safeToolError(error));
+    return output.then(completedRunnerCommandResult, failedToolOutput);
   } catch (error) {
-    return Promise.resolve(safeToolError(error));
+    return Promise.resolve(failedToolOutput(error));
   }
 }
 

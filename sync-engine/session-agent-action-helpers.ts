@@ -1,29 +1,35 @@
 import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
-import type { AgentSessionDetail } from "../shared/session-model.ts";
+import type {
+  AgentSessionDetail,
+  RestartHandoffOperation,
+} from "../shared/session-model.ts";
 import { createJsonResponse } from "./http.ts";
 import {
   lastSessionMessage,
   sessionToolOutput,
   type SpawnSessionToolInput,
 } from "./session-agent-tools.ts";
+import type { SessionCredentialAction } from "./session-credential-access.ts";
 import type { SessionExecutionAuthority } from "./session-execution-authority.ts";
+import type { RestartRequest } from "./session-runtime.ts";
 import type { SessionStore } from "./session-store.ts";
 
-interface SessionAgentCredentialSelection {
-  readonly credentialId: string;
-  readonly provider: "openai" | "openrouter";
-}
+type SessionAgentCredentialSelection = Pick<
+  AgentSessionDetail,
+  "credentialId" | "provider" | "workspaceId"
+>;
 
 interface ParentSessionReport {
   readonly content: string;
   readonly parentId: string;
 }
 
-type SessionAgentCredentialAction = (
-  credential: ProviderCredentialAccess,
-) => Promise<Response> | Response;
+interface SessionAgentMetadata {
+  readonly maxContextTokens: number | null;
+  readonly providerPricing: AgentSessionDetail["providerPricing"];
+}
 
 export interface SessionAgentActionDependencies {
   readonly database: AppDatabase;
@@ -34,6 +40,7 @@ export interface SessionAgentActionDependencies {
   readonly store: SessionStore;
   readonly now: () => number;
   readonly draining: () => boolean;
+  readonly pendingRestart: (runnerId: string) => RestartRequest | undefined;
   readonly launchSession: (
     credential: ProviderCredentialAccess,
     session: AgentSessionDetail,
@@ -42,21 +49,74 @@ export interface SessionAgentActionDependencies {
   readonly discoverSessionMetadata: (
     input: SpawnSessionToolInput,
     credential: ProviderCredentialAccess,
-  ) => Promise<{
-    readonly maxContextTokens: number | null;
-    readonly providerPricing: AgentSessionDetail["providerPricing"];
-  }>;
+    userId: string,
+  ) => Promise<SessionAgentMetadata>;
   readonly readCredential: (
     userId: string,
     selection: SessionAgentCredentialSelection,
   ) => Promise<ProviderCredentialAccess | undefined>;
   readonly notify: (userId: string, sessionId: string) => void;
-  readonly runnerIsAvailable: (userId: string, runnerId: string) => boolean;
-  readonly withCredential: (
+  readonly runnerIsAvailable: (
+    userId: string,
+    runnerId: string,
+    workspaceId: string,
+  ) => boolean;
+  withCredential(
     userId: string,
     selection: SessionAgentCredentialSelection,
-    action: SessionAgentCredentialAction,
-  ) => Promise<Response>;
+    action: SessionCredentialAction,
+  ): Promise<Response>;
+}
+
+export interface QueuedRestartHandoffStore {
+  pauseQueuedForRestart(
+    identity: { readonly generation: number; readonly sessionId: string },
+    requestedBy: "runner" | "server",
+    restartId: string,
+    operation: RestartHandoffOperation,
+    now: number,
+  ): boolean;
+}
+
+export function persistQueuedRestartHandoff(
+  store: QueuedRestartHandoffStore,
+  detail: AgentSessionDetail,
+  restart: RestartRequest,
+  operation: RestartHandoffOperation,
+  now: number,
+): boolean {
+  return store.pauseQueuedForRestart(
+    { generation: detail.generation, sessionId: detail.id },
+    restart.requestedBy,
+    restart.restartId,
+    operation,
+    now,
+  );
+}
+
+export function pauseQueuedSessionForRestart(
+  dependencies: Pick<
+    SessionAgentActionDependencies,
+    "now" | "notify" | "pendingRestart" | "store"
+  >,
+  detail: AgentSessionDetail,
+  userId: string,
+): boolean {
+  const restart = dependencies.pendingRestart(detail.runnerId);
+  if (restart === undefined) {
+    return false;
+  }
+  const paused = persistQueuedRestartHandoff(
+    dependencies.store,
+    detail,
+    restart,
+    "agent",
+    dependencies.now(),
+  );
+  if (paused) {
+    dependencies.notify(userId, detail.id);
+  }
+  return paused;
 }
 
 export async function responseToolOutput(response: Response): Promise<string> {
@@ -99,13 +159,23 @@ export async function spawnAgentSession(options: {
   readonly input: SpawnSessionToolInput;
   readonly userId: string;
 }): Promise<string> {
+  const parent = options.dependencies.store.get(
+    options.userId,
+    options.authority.sessionId,
+  );
+  if (parent === undefined) {
+    return sessionToolOutput({ error: "parent_session_unavailable" });
+  }
+
   async function enqueue(
     input: SpawnSessionToolInput,
     credential: ProviderCredentialAccess,
+    workspaceId: string,
   ): Promise<Response> {
     const metadata = await options.dependencies.discoverSessionMetadata(
       input,
       credential,
+      options.userId,
     );
     if (options.dependencies.draining()) {
       return createJsonResponse({ error: "server_restarting" }, 503);
@@ -114,10 +184,10 @@ export async function spawnAgentSession(options: {
       {
         ...input,
         ...metadata,
-        autoCompact: true,
         parentGeneration: options.authority.generation,
         parentSessionId: options.authority.sessionId,
         userId: options.userId,
+        workspaceId,
       },
       options.dependencies.now(),
     );
@@ -128,6 +198,15 @@ export async function spawnAgentSession(options: {
     if (
       !options.dependencies.launchSession(credential, child, options.userId)
     ) {
+      if (
+        pauseQueuedSessionForRestart(
+          options.dependencies,
+          child,
+          options.userId,
+        )
+      ) {
+        return createJsonResponse({ error: "server_restarting" }, 503);
+      }
       options.dependencies.store.appendRuntimeErrorMessage(
         child.id,
         "Session failed: the child session could not be launched",
@@ -145,10 +224,11 @@ export async function spawnAgentSession(options: {
     options.dependencies.notify(options.userId, child.id);
     return createJsonResponse({ sessionId: child.id, status: "spawned" });
   }
+  const selection = { ...options.input, workspaceId: parent.workspaceId };
   const response = await options.dependencies.withCredential(
     options.userId,
-    options.input,
-    (credential) => enqueue(options.input, credential),
+    selection,
+    (credential) => enqueue(options.input, credential, parent.workspaceId),
   );
   return responseToolOutput(response);
 }

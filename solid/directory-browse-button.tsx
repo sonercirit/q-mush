@@ -5,13 +5,12 @@ export function DirectoryBrowseButton(props: {
   readonly disabled: boolean;
   readonly onClick: () => void;
 }): JSX.Element {
+  const body = { class: props.class, disabled: props.disabled };
+  const onClick = (): void => {
+    props.onClick();
+  };
   return (
-    <button
-      class={props.class}
-      disabled={props.disabled}
-      onClick={props.onClick}
-      type="button"
-    >
+    <button {...body} onClick={onClick} type="button">
       Browse
     </button>
   );

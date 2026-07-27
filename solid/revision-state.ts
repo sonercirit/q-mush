@@ -1,12 +1,24 @@
 import { type Accessor } from "solid-js";
+import type { ReactiveState } from "./reactive-state.ts";
+
+export function reactiveRevisionState<State extends object>(
+  reactive: ReactiveState<State>,
+): RevisionState<State> {
+  return new RevisionState(reactive.state, reactive.setState);
+}
 
 export class RevisionState<State extends object> {
   #revision = 0;
   readonly #setValue: (value: State) => void;
   readonly #value: Accessor<State>;
 
-  constructor(value: Accessor<State>, setValue: (value: State) => void) {
-    this.#setValue = setValue;
+  constructor(
+    value: Accessor<State>,
+    setValue: ReactiveState<State>["setState"],
+  ) {
+    this.#setValue = (next) => {
+      setValue(() => next);
+    };
     this.#value = value;
   }
 
@@ -14,8 +26,16 @@ export class RevisionState<State extends object> {
     return this.#value();
   }
 
-  begin(patch?: Partial<State>): number {
+  get accessor(): Accessor<State> {
+    return this.#value;
+  }
+
+  advance(): void {
     this.#revision += 1;
+  }
+
+  begin(patch?: Partial<State>): number {
+    this.advance();
 
     if (patch !== undefined) {
       this.patch(patch);
@@ -33,11 +53,15 @@ export class RevisionState<State extends object> {
   }
 
   patchCurrent(revision: number, patch: Partial<State>): boolean {
+    return this.patchCurrentWith(revision, () => patch);
+  }
+
+  patchCurrentWith(revision: number, patch: () => Partial<State>): boolean {
     if (!this.isCurrent(revision)) {
       return false;
     }
 
-    this.patch(patch);
+    this.patch(patch());
     return true;
   }
 
@@ -46,7 +70,7 @@ export class RevisionState<State extends object> {
   }
 
   reset(value: State): void {
-    this.#revision += 1;
+    this.advance();
     this.#setValue(value);
   }
 }

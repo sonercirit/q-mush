@@ -115,6 +115,7 @@ export function completeProviderWebSocket(options: {
         failUnknown(error);
       }
     });
+
     socket.addEventListener("message", (event) => {
       if (settled) {
         return;

@@ -1,8 +1,14 @@
 import { type Accessor } from "solid-js";
-import { RUNNERS_PATH, runnerDefaultPath } from "../shared/routes.ts";
+import {
+  connectionScopesPath,
+  runnerDefaultPath,
+  RUNNERS_PATH,
+} from "../shared/routes.ts";
 import type { RunnerSummary } from "../shared/runner-model.ts";
+import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 import { HttpResponseError, request, requestJson } from "./browser-http.ts";
-import { createReactiveState, type ReactiveState } from "./reactive-state.ts";
+import { ControllerState, jsonRequestInit } from "./controller-mutation.ts";
+import { createReactiveState } from "./reactive-state.ts";
 import {
   createRunnerViewState,
   readCreatedRunner,
@@ -49,9 +55,14 @@ function runnerPresentationMatches(
     left.architecture === right.architecture &&
     left.id === right.id &&
     left.isDefault === right.isDefault &&
+    left.isGlobal === right.isGlobal &&
     left.name === right.name &&
     left.platform === right.platform &&
     left.status === right.status &&
+    left.workspaceIds?.length === right.workspaceIds?.length &&
+    left.workspaceIds?.every(
+      (workspaceId, index) => workspaceId === right.workspaceIds?.[index],
+    ) !== false &&
     (left.status === "online" || left.lastSeenAt === right.lastSeenAt)
   );
 }
@@ -73,19 +84,19 @@ function runnerListsMatch(
 }
 
 export class RunnerController {
-  readonly #view: ReactiveState<RunnerViewState>;
-  #revision = 0;
+  readonly #state: ControllerState<RunnerViewState>;
+  #workspaceId = GLOBAL_WORKSPACE_ID;
 
   constructor(view = createReactiveState(initialRunnerState())) {
-    this.#view = view;
+    this.#state = new ControllerState(view);
   }
 
   get state(): RunnerViewState {
-    return this.#view.state();
+    return this.#state.value;
   }
 
   get view(): Accessor<RunnerViewState> {
-    return this.#view.state;
+    return this.#state.accessor;
   }
 
   applyRealtime(runners: readonly RunnerSummary[]): void {
@@ -116,9 +127,25 @@ export class RunnerController {
     return this.#mutate("remove", runnerId);
   }
 
+  setWorkspace(workspaceId: string): void {
+    this.#workspaceId = workspaceId;
+    this.#state.reset(initialRunnerState());
+  }
+
   reset(): void {
-    this.#revision += 1;
-    this.#view.setState(initialRunnerState());
+    this.setWorkspace(GLOBAL_WORKSPACE_ID);
+  }
+
+  setScopes(runnerId: string, workspaceIds: readonly string[]): Promise<void> {
+    return this.#state.mutation(
+      connectionScopesPath(RUNNERS_PATH, runnerId),
+      jsonRequestInit({ workspaceIds }, "PUT"),
+      request,
+      () => ({ error: "We could not update that runner scope." }),
+      { error: undefined },
+      {},
+      () => this.#readList(false),
+    );
   }
 
   setDefault(runnerId: string): Promise<void> {
@@ -132,7 +159,7 @@ export class RunnerController {
       runnerListsMatch(this.state.runners, runners) &&
       this.state.setup === setup
     ) {
-      this.#view.setState({ ...this.state, runners });
+      this.#state.replace({ ...this.state, runners });
       return;
     }
 
@@ -167,7 +194,10 @@ export class RunnerController {
 
     try {
       const created = readCreatedRunner(
-        await requestJson(RUNNERS_PATH, { method: "POST" }),
+        await requestJson(
+          `${RUNNERS_PATH}?workspaceId=${encodeURIComponent(this.#workspaceId)}`,
+          { method: "POST" },
+        ),
       );
 
       if (this.#isCurrent(revision)) {
@@ -193,22 +223,26 @@ export class RunnerController {
   }
 
   #begin(patch: Partial<RunnerViewState>): number {
-    const revision = ++this.#revision;
+    const revision = this.#state.revision.begin();
     this.#patch(patch);
     return revision;
   }
 
   #isCurrent(revision: number): boolean {
-    return revision === this.#revision;
+    return this.#state.revision.isCurrent(revision);
   }
 
   async #readList(showLoading: boolean): Promise<void> {
     const revision = showLoading
       ? this.#begin({ error: undefined, runners: undefined })
-      : ++this.#revision;
+      : this.#state.revision.begin();
 
     try {
-      const runners = readRunners(await requestJson(RUNNERS_PATH));
+      const runners = readRunners(
+        await requestJson(
+          `${RUNNERS_PATH}?workspaceId=${encodeURIComponent(this.#workspaceId)}`,
+        ),
+      );
 
       if (this.#isCurrent(revision)) {
         this.#applyList(runners);
@@ -274,6 +308,6 @@ export class RunnerController {
   }
 
   #patch(patch: Partial<RunnerViewState>): void {
-    this.#view.setState({ ...this.state, ...patch });
+    this.#state.patch(patch);
   }
 }

@@ -1,0 +1,216 @@
+import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
+import type {
+  AgentSessionDetail,
+  RestartHandoffOperation,
+} from "../shared/session-model.ts";
+import { isAskQuestionsPause } from "./ask-questions-pause.ts";
+import {
+  compactSessionConversation,
+  isRestartHandoffError,
+  runSessionAgent,
+} from "./session-agent-runtime.ts";
+import type { SessionNotification } from "./session-creation.ts";
+import { currentStoredSession } from "./session-current.ts";
+import type { FinishSession } from "./session-launcher.ts";
+import {
+  sessionModelRuntime,
+  type SessionModelRuntimeResources,
+} from "./session-model-runtime.ts";
+import type { SessionRestartRequester } from "./session-restart-requester.ts";
+import type {
+  RestartHandoffIdentity,
+  RestartHandoffRequester,
+} from "./session-restart-store.ts";
+import type { RestartRequest } from "./session-runtime.ts";
+import { sessionHasStatus } from "./session-status.ts";
+import type { SessionStore } from "./session-store.ts";
+
+interface RunPersistedSessionOptions extends SessionRestartRequester {
+  readonly controller: AbortController;
+  readonly credential: ProviderCredentialAccess;
+  readonly detail: AgentSessionDetail;
+  readonly finish: FinishSession;
+  readonly notify: SessionNotification;
+  readonly now: typeof Date.now;
+  readonly operation: RestartHandoffOperation;
+  readonly resources: SessionModelRuntimeResources;
+  readonly store: SessionStore;
+  readonly userId: string;
+}
+
+function isAbort(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function identity(
+  detail: AgentSessionDetail,
+): RestartHandoffIdentity | undefined {
+  const handoff = detail.restartHandoff;
+  return handoff === null
+    ? undefined
+    : {
+        generation: handoff.executionGeneration,
+        restartId: handoff.restartId,
+        sessionId: detail.id,
+      };
+}
+
+function pauseForRestart(
+  options: RunPersistedSessionOptions,
+  handoff: {
+    readonly requestedBy: RestartHandoffRequester;
+    readonly restartId: string;
+  },
+): boolean {
+  return options.store.pauseRunningForRestart(
+    { generation: options.detail.generation, sessionId: options.detail.id },
+    handoff.requestedBy,
+    handoff.restartId,
+    options.operation,
+    options.now(),
+  );
+}
+
+type HandoffPersistence =
+  | { readonly status: "already_persisted" | "persisted" }
+  | { readonly error: Error; readonly status: "failed" };
+
+function failedHandoffPersistence(
+  request: RestartRequest | undefined,
+): HandoffPersistence {
+  return {
+    error:
+      request === undefined
+        ? new Error("The restart handoff request was lost")
+        : new Error("The restart handoff could not be persisted"),
+    status: "failed",
+  };
+}
+
+function persistRestartHandoff(
+  options: RunPersistedSessionOptions,
+  acceptExistingHandoff: boolean,
+): HandoffPersistence {
+  const request = options.restartRequest();
+  if (request === undefined && !acceptExistingHandoff) {
+    return failedHandoffPersistence(request);
+  }
+  if (request !== undefined && pauseForRestart(options, request)) {
+    return { status: "persisted" };
+  }
+  const current = currentStoredSession(
+    options.store,
+    options.userId,
+    options.detail,
+  );
+  if (
+    sessionHasStatus(current, "stopped") ||
+    (acceptExistingHandoff &&
+      current?.status === "paused" &&
+      current.restartHandoff !== null)
+  ) {
+    return { status: "already_persisted" };
+  }
+  return failedHandoffPersistence(request);
+}
+
+function currentSessionIsIdle(
+  options: RunPersistedSessionOptions,
+): AgentSessionDetail | undefined {
+  const current = currentStoredSession(
+    options.store,
+    options.userId,
+    options.detail,
+  );
+  return current?.status === "idle" && current.restartHandoff === null
+    ? current
+    : undefined;
+}
+
+function finishRecoveredSession(
+  options: RunPersistedSessionOptions,
+  claimedIdentity: RestartHandoffIdentity | undefined,
+): void {
+  const current = currentSessionIsIdle(options);
+  if (current !== undefined) {
+    options.finish(current, options.userId);
+    return;
+  }
+  options.finish(options.detail, options.userId, undefined, claimedIdentity);
+}
+
+function finishFailedSession(
+  options: RunPersistedSessionOptions,
+  error: unknown,
+  claimedIdentity: RestartHandoffIdentity | undefined,
+): void {
+  options.finish(options.detail, options.userId, error, claimedIdentity);
+}
+
+export async function runPersistedSession(
+  options: RunPersistedSessionOptions,
+): Promise<void> {
+  if (
+    !options.store.transitionRuntime(
+      options.detail.id,
+      "running",
+      options.now(),
+      options.detail.generation,
+    )
+  ) {
+    return;
+  }
+  const claimedIdentity = identity(options.detail);
+  options.restartRequest();
+  options.notify(options.userId, options.detail.id);
+
+  try {
+    const runtime = sessionModelRuntime(
+      options.resources,
+      options.detail,
+      options.credential,
+      options.userId,
+      options.controller,
+      () => options.restartRequest() !== undefined,
+    );
+    const outcome = await (options.operation === "compact"
+      ? compactSessionConversation(runtime)
+      : runSessionAgent(runtime));
+    if (options.operation === "compact" && outcome === "complete") {
+      finishRecoveredSession(options, claimedIdentity);
+      return;
+    }
+    if (outcome === "handoff") {
+      const persistence = persistRestartHandoff(options, false);
+      if (persistence.status === "failed") {
+        throw persistence.error;
+      }
+      options.notify(options.userId, options.detail.id);
+      return;
+    }
+    finishRecoveredSession(options, claimedIdentity);
+  } catch (error) {
+    const terminal = currentSessionIsIdle(options);
+    if (terminal !== undefined) {
+      options.finish(terminal, options.userId);
+      return;
+    }
+    if (isRestartHandoffError(error)) {
+      const persistence = persistRestartHandoff(options, true);
+      if (persistence.status === "persisted") {
+        options.notify(options.userId, options.detail.id);
+      } else if (persistence.status === "failed") {
+        finishFailedSession(options, persistence.error, claimedIdentity);
+      }
+      return;
+    }
+    if (isAskQuestionsPause(error)) {
+      finishFailedSession(options, error, claimedIdentity);
+      return;
+    }
+
+    if (!options.controller.signal.aborted && !isAbort(error)) {
+      finishFailedSession(options, error, claimedIdentity);
+    }
+  }
+}

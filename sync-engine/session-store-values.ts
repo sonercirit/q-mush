@@ -5,13 +5,17 @@ import { createdAuditFields, updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
-import { storedSessionExists } from "./session-store-state.ts";
+import { currentSessionSegment } from "./session-segment.ts";
+import type {
+  StoredMessageInsertOptions,
+  StoredUserMessageInput,
+  SystemStoredMessageInput,
+} from "./session-store-types.ts";
+import { touchStoredSession } from "./session-touch.ts";
+import { serializeStoredImages } from "./stored-agent-images.ts";
 
 const INTERRUPTED_SESSION_ERROR =
   "Session failed: the server stopped before the session completed";
-
-const INTERRUPTED_RUNNER_TOOL_OUTPUT =
-  "Error: the runner was removed before this tool call returned a result.";
 
 export interface StoredMessageValues {
   readonly content: string;
@@ -43,20 +47,6 @@ export function errorMessageValues(content: string): StoredMessageValues {
 
 export function storedUserMessageValues(content: string): StoredMessageValues {
   return { ...emptyToolMetadata(), content, role: "user" };
-}
-
-export function interruptedRunnerToolValues(
-  toolCallId: string,
-  toolName: string,
-): StoredMessageValues {
-  return {
-    content: INTERRUPTED_RUNNER_TOOL_OUTPUT,
-    images: null,
-    role: "tool",
-    toolCallId,
-    toolCalls: null,
-    toolName,
-  };
 }
 
 export function interruptedSessionErrorValues(): StoredMessageValues {
@@ -91,31 +81,22 @@ export function recordedMessageValues(
   };
 }
 
-export function userMessageValues(options: {
-  readonly content: string;
-  readonly id: string;
-  readonly images: readonly AgentImage[];
-  readonly now: number;
-  readonly sessionId: string;
-  readonly userId: string;
-}) {
+export function userMessageValues(
+  options: StoredUserMessageInput & {
+    readonly id: string;
+    readonly images: readonly AgentImage[];
+  },
+) {
   return {
     ...createdAuditFields(options.userId, options.now),
     content: options.content,
     id: options.id,
-    images: options.images.length === 0 ? null : JSON.stringify(options.images),
+    images: serializeStoredImages(options.images),
     role: "user" as const,
+    segment: options.segment ?? 0,
     sessionId: options.sessionId,
     userId: options.userId,
   };
-}
-
-export interface StoredMessageInsertOptions {
-  readonly actorId: string;
-  readonly id: string;
-  readonly now: number;
-  readonly sessionId: string;
-  readonly userId: string;
 }
 
 function systemMessageInsertOptions(
@@ -134,50 +115,53 @@ function systemMessageInsertOptions(
 }
 
 export function insertStoredMessage(
-  database: Pick<AppDatabase, "insert">,
+  database: Pick<AppDatabase, "insert" | "select">,
   message: StoredMessageValues,
   options: StoredMessageInsertOptions,
 ): void {
+  const segment =
+    options.segment ?? currentSessionSegment(database, options.sessionId);
+
+  if (segment === undefined) {
+    throw new Error("The agent session no longer exists");
+  }
   database
     .insert(agentMessages)
     .values({
       ...createdAuditFields(options.actorId, options.now),
       ...message,
       id: options.id,
+      segment,
       sessionId: options.sessionId,
       userId: options.userId,
     })
     .run();
 }
 
-interface SystemStoredMessageOptions {
-  readonly database: Pick<AppDatabase, "insert">;
+interface SystemStoredMessageOptions extends SystemStoredMessageInput {
+  readonly database: Pick<AppDatabase, "insert" | "select">;
   readonly generateId: IdGenerator;
   readonly message: StoredMessageValues;
-  readonly now: number;
-  readonly sessionId: string;
-  readonly userId: string;
 }
 
 export function appendSystemStoredMessage(
   options: SystemStoredMessageOptions,
 ): void {
-  insertStoredMessage(
-    options.database,
-    options.message,
-    systemMessageInsertOptions(
+  insertStoredMessage(options.database, options.message, {
+    ...systemMessageInsertOptions(
       options.generateId,
       options.now,
       options.sessionId,
       options.userId,
     ),
-  );
+    ...(options.segment === undefined ? {} : { segment: options.segment }),
+  });
 }
 
 export function appendSystemMessageAndTouchSession(
   options: SystemStoredMessageOptions & {
     readonly condition: SQL | undefined;
-    readonly database: Pick<AppDatabase, "insert" | "update">;
+    readonly database: Pick<AppDatabase, "insert" | "select" | "update">;
   },
 ): void {
   appendSystemStoredMessage(options);
@@ -205,12 +189,14 @@ export function appendSessionUserMessage(options: {
   const { content, now, resources, sessionId, userId } = options;
   const sessionIdentifier = sessionId;
   return resources.database.transaction((transaction) => {
-    if (
-      !storedSessionExists(
-        transaction,
+    const stored = transaction
+      .select({ segment: agentSessions.currentSegment })
+      .from(agentSessions)
+      .where(
         sql`${agentSessions.id} = ${sessionIdentifier} AND ${agentSessions.userId} = ${userId} AND ${agentSessions.isDeleted} = false`,
       )
-    ) {
+      .get();
+    if (stored === undefined) {
       return false;
     }
     insertAgentMessage(
@@ -220,15 +206,17 @@ export function appendSessionUserMessage(options: {
         id: resources.generateId(now),
         images: [],
         now,
+        segment: stored.segment,
         sessionId: sessionIdentifier,
         userId,
       }),
     );
-    transaction
-      .update(agentSessions)
-      .set({ updatedAt: new Date(now), updatedById: SYSTEM_ID })
-      .where(eq(agentSessions.id, sessionIdentifier))
-      .run();
+    touchStoredSession(
+      transaction,
+      eq(agentSessions.id, sessionIdentifier),
+      SYSTEM_ID,
+      now,
+    );
     return true;
   });
 }

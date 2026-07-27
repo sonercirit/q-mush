@@ -23,6 +23,7 @@ import {
   toolCall,
   waitForSessionContent,
 } from "./session-agent-tool-setup.ts";
+import { completeNullRunnerCommand } from "./session-compaction-test-helpers.ts";
 import {
   CREDENTIAL_ID,
   RUNNER_COMMAND_ID,
@@ -36,6 +37,7 @@ import {
   sessionDetail,
   waitForSessionValue,
 } from "./session-integration-helpers.ts";
+import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
 
 function spawnCall(
   prompt: string,
@@ -154,9 +156,7 @@ async function startedChild(model: AgentModel): Promise<{
 function completeChildAgentFile(
   setup: Awaited<ReturnType<typeof startToolSession>>,
 ): void {
-  expect(
-    setup.sessions.completeRunnerCommand(RUNNER_ID, RUNNER_COMMAND_ID, "null"),
-  ).toBe(true);
+  completeNullRunnerCommand(setup.sessions, RUNNER_ID, RUNNER_COMMAND_ID);
 }
 
 describe("session agent tools", () => {
@@ -185,7 +185,7 @@ describe("session agent tools", () => {
         expect.objectContaining({ content: "Inspect README.md", role: "user" }),
       ]),
     );
-    readSetup.database.$client.close();
+    closeSessionTestDatabase(readSetup.database);
   });
 
   test("routes more than eight mixed session and runner recipients through parallel", async () => {
@@ -215,7 +215,7 @@ describe("session agent tools", () => {
       recipient_name: "read_session",
     });
     expect(setup.runnerCommands).toEqual([]);
-    setup.database.$client.close();
+    closeSessionTestDatabase(setup.database);
   });
 
   test("routes session recipients in parallel without sending them to the runner", async () => {
@@ -283,7 +283,7 @@ describe("session agent tools", () => {
     expect(findToolResultContent(detail, "stop_session")).toContain(
       "interrupted before it returned",
     );
-    controlSetup.database.$client.close();
+    closeSessionTestDatabase(controlSetup.database);
   });
 
   test("rejects a spawn without access to its credential", async () => {
@@ -302,10 +302,10 @@ describe("session agent tools", () => {
     expect(
       setup.sessions.listForUser("018bcfe5-6800-7000-8000-000000000021"),
     ).toHaveLength(1);
-    setup.database.$client.close();
+    closeSessionTestDatabase(setup.database);
   });
 
-  test("rejects a spawn that races with server draining", async () => {
+  test("hands off a parent that races with server draining", async () => {
     const model = scriptedModel([
       {
         content: "Delegate during restart; it must not launch.",
@@ -315,12 +315,21 @@ describe("session agent tools", () => {
     ]);
     const setup = await startToolSession(model);
     const draining = setup.sessions.drain();
-    const detail = await waitForSessionContent(setup, "server_restarting");
-    const output = findToolResultContent(detail, "spawn_session");
+    const detail = await waitForSessionValue(
+      () => setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID),
+      (session) =>
+        typeof session === "object" &&
+        session !== null &&
+        "status" in session &&
+        session.status === "paused",
+    );
 
-    expect(output).toContain("server_restarting");
+    expect(detail).toMatchObject({
+      restartHandoff: { requestedBy: "server" },
+      status: "paused",
+    });
     await draining;
-    setup.database.$client.close();
+    closeSessionTestDatabase(setup.database);
   });
 
   test("spawns without blocking and reports the child final message later", async () => {
@@ -358,7 +367,7 @@ describe("session agent tools", () => {
     expect(JSON.stringify(updatedParent)).toContain(
       '\\"status\\": \\"completed\\"',
     );
-    spawnSetup.database.$client.close();
+    closeSessionTestDatabase(spawnSetup.database);
   });
 
   test("runs a parent again when its spawned child completes", async () => {
@@ -382,7 +391,7 @@ describe("session agent tools", () => {
       "I received the child report.",
     );
     expect(JSON.stringify(parent)).toContain("Child work is complete.");
-    setup.database.$client.close();
+    closeSessionTestDatabase(setup.database);
   });
 
   test("does not report a runner-required spawned child as completed", async () => {
@@ -419,7 +428,7 @@ describe("session agent tools", () => {
       parentGeneration: 0,
       parentId: SESSION_ID,
     });
-    setup.database.$client.close();
+    closeSessionTestDatabase(setup.database);
   });
 
   test("reports a spawned child failure to its parent", async () => {
@@ -441,7 +450,7 @@ describe("session agent tools", () => {
     expect(JSON.stringify(updatedParent)).toContain(
       "The scripted model ran out of turns",
     );
-    failureSetup.database.$client.close();
+    closeSessionTestDatabase(failureSetup.database);
   });
 
   test("reports when a spawned child stops itself", async () => {
@@ -458,6 +467,6 @@ describe("session agent tools", () => {
     expect(JSON.stringify(updatedParent)).toContain(
       "interrupted before it returned",
     );
-    setup.database.$client.close();
+    closeSessionTestDatabase(setup.database);
   });
 });

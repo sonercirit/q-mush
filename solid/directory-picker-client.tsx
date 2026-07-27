@@ -1,13 +1,6 @@
-import {
-  createEffect,
-  createSignal,
-  For,
-  on,
-  onMount,
-  Show,
-  type JSX,
-} from "solid-js";
+import { createSignal, For, Show, type JSX } from "solid-js";
 import { MAXIMUM_RUNNER_DIRECTORY_ENTRIES } from "../shared/runner-directory-model.ts";
+import { restoreDialogFocus } from "./dialog-focus.ts";
 import type { DirectoryPickerController } from "./directory-picker-controller.ts";
 import { renderDebugBoundary } from "./render-debug.tsx";
 
@@ -26,30 +19,21 @@ export function DirectoryPicker(props: {
   const [dialog, setDialog] = createSignal<HTMLDivElement>();
   let focusReturnTarget: HTMLElement | undefined;
 
-  onMount(() => {
-    createEffect(
-      on(
-        () => state().open,
-        (open, wasOpen) => {
-          if (open) {
-            focusReturnTarget =
-              document.activeElement instanceof HTMLElement
-                ? document.activeElement
-                : undefined;
-            dialog()?.focus();
-          } else if (wasOpen) {
-            const returnTarget = focusReturnTarget;
-            focusReturnTarget = undefined;
-            queueMicrotask(() => {
-              if (returnTarget?.isConnected === true) {
-                returnTarget.focus({ preventScroll: true });
-              }
-            });
-          }
-        },
-      ),
-    );
-  });
+  restoreDialogFocus(
+    () => state().open,
+    () => {
+      focusReturnTarget =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : undefined;
+      dialog()?.focus();
+    },
+    () => {
+      const target = focusReturnTarget;
+      focusReturnTarget = undefined;
+      return target;
+    },
+  );
 
   return (
     <Show when={state().open} keyed>

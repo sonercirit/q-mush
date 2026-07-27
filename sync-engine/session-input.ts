@@ -2,6 +2,7 @@ import {
   defaultAgentModel,
   isAgentModelId,
   isAgentReasoningEffort,
+  isOpenRouterProviderTag,
 } from "../shared/agent-configuration.ts";
 import { readAgentImages } from "../shared/agent-images.ts";
 import {
@@ -10,6 +11,7 @@ import {
 } from "../shared/agent-tools.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
+import { readRunnerExecutionEnvironment } from "../shared/runner-command-broker.ts";
 import {
   readIdentifier,
   readStringField,
@@ -21,8 +23,8 @@ const MAXIMUM_PROMPT_LENGTH = 32_768;
 
 export type CreateSessionInput = Omit<
   CreateAgentSession,
-  "autoCompact" | "maxContextTokens" | "providerPricing" | "userId"
->;
+  "maxContextTokens" | "providerPricing" | "userId" | "workspaceId"
+> & { readonly workspaceId?: string };
 
 export function readProvider(value: unknown): ProviderId | undefined {
   return value === "openai" || value === "openrouter" ? value : undefined;
@@ -48,11 +50,16 @@ export function readCreateSession(
   }
 
   const credentialId = readIdentifier(value["credentialId"]);
+  const autoCompactValue = value["autoCompact"];
+  const executionEnvironment = readRunnerExecutionEnvironment(
+    value["executionEnvironment"],
+  );
   const message = promptInput(value);
   const provider = readProvider(value["provider"]);
   const runnerId = readIdentifier(value["runnerId"]);
   const workingDirectory = readWorkingDirectory(value);
   const modelValue = value["model"];
+  const openRouterProviderTagValue = value["openRouterProviderTag"];
   const reasoningEffortValue = value["reasoningEffort"];
   const toolsValue = value["tools"];
   const tools =
@@ -61,12 +68,17 @@ export function readCreateSession(
       : readAgentSessionToolNames(toolsValue);
 
   if (
+    (autoCompactValue !== undefined && typeof autoCompactValue !== "boolean") ||
     credentialId === undefined ||
+    executionEnvironment === undefined ||
     message === undefined ||
     provider === undefined ||
     runnerId === undefined ||
     workingDirectory === undefined ||
     (modelValue !== undefined && !isAgentModelId(modelValue)) ||
+    (openRouterProviderTagValue !== undefined &&
+      !isOpenRouterProviderTag(openRouterProviderTagValue)) ||
+    (provider !== "openrouter" && openRouterProviderTagValue !== undefined) ||
     (reasoningEffortValue !== undefined &&
       !isAgentReasoningEffort(reasoningEffortValue)) ||
     tools === undefined
@@ -75,9 +87,15 @@ export function readCreateSession(
   }
 
   return {
+    autoCompact:
+      typeof autoCompactValue === "boolean" ? autoCompactValue : true,
     credentialId,
+    executionEnvironment,
     ...message,
     model: typeof modelValue === "string" ? modelValue : "",
+    openRouterProviderTag: isOpenRouterProviderTag(openRouterProviderTagValue)
+      ? openRouterProviderTagValue
+      : null,
     provider,
     reasoningEffort: isAgentReasoningEffort(reasoningEffortValue)
       ? reasoningEffortValue

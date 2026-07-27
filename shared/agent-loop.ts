@@ -2,6 +2,10 @@ import type { AgentImage } from "./agent-images.ts";
 import { isRecord } from "./auth-model.ts";
 import { parseOptionalJsonRecord } from "./json-record.ts";
 import type { AgentSessionUsageUpdate } from "./session-model.ts";
+import type {
+  RunnerCommandResult,
+  ToolStreamTerminalState,
+} from "./tool-stream.ts";
 
 interface AgentToolRequest<Arguments> {
   readonly arguments: Arguments;
@@ -87,6 +91,7 @@ export interface AgentModel {
     messages: readonly AgentConversationMessage[],
     signal?: AbortSignal,
   ) => Promise<AgentModelTurn>;
+  readonly startTurn?: () => void;
 }
 
 type ParsedAgentToolCall = AgentToolRequest<Readonly<Record<string, unknown>>>;
@@ -96,10 +101,27 @@ export type AgentMessageRecorder = (
   usage?: AgentSessionUsageUpdate,
 ) => Promise<void> | void;
 
+export interface AgentLoopResult {
+  readonly messages: readonly AgentConversationMessage[];
+  readonly status: "complete" | "handoff";
+}
+
 export interface AgentLoopOptions {
-  readonly executeTool: (call: ParsedAgentToolCall) => Promise<string>;
+  readonly executeTool: (
+    call: ParsedAgentToolCall,
+  ) => Promise<RunnerCommandResult | string>;
+  readonly handoffRequested?: () => boolean;
   readonly initialMessages: readonly AgentConversationMessage[];
   readonly model: AgentModel;
+  readonly onToolCall?: (call: AgentToolCall) => Promise<void> | void;
+  readonly onToolResult?: (
+    call: AgentToolCall,
+    outcome: {
+      readonly error?: unknown;
+      readonly output?: string;
+      readonly state?: ToolStreamTerminalState;
+    },
+  ) => Promise<void> | void;
   readonly prepareMessages?: (
     messages: readonly AgentConversationMessage[],
     signal?: AbortSignal,
@@ -108,6 +130,11 @@ export interface AgentLoopOptions {
     | readonly AgentConversationMessage[];
   readonly recordMessage: AgentMessageRecorder;
   readonly signal?: AbortSignal;
+  readonly takeSteeringMessages?: () =>
+    | Promise<
+        readonly Extract<AgentConversationMessage, { readonly role: "user" }>[]
+      >
+    | readonly Extract<AgentConversationMessage, { readonly role: "user" }>[];
 }
 
 const INVALID_ARGUMENTS_MESSAGE =
@@ -125,17 +152,67 @@ function parseArguments(
   return parseOptionalJsonRecord(value);
 }
 
-export async function runAgentLoop(
+function handoffResult(
+  messages: readonly AgentConversationMessage[],
+): AgentLoopResult {
+  return { messages, status: "handoff" };
+}
+
+function handoffIfRequested(
+  options: AgentLoopOptions,
+  messages: readonly AgentConversationMessage[],
+): AgentLoopResult | undefined {
+  throwIfAgentAborted(options.signal);
+  return options.handoffRequested?.() === true
+    ? handoffResult(messages)
+    : undefined;
+}
+
+function normalizedToolResult(
+  result: RunnerCommandResult | string,
+): RunnerCommandResult {
+  return typeof result === "string"
+    ? { output: result, state: "completed" }
+    : result;
+}
+
+async function takeSteeringMessages(
   options: AgentLoopOptions,
 ): Promise<readonly AgentConversationMessage[]> {
+  const steering = await options.takeSteeringMessages?.();
+  throwIfAgentAborted(options.signal);
+  return steering ?? [];
+}
+
+function storeMessages(
+  messages: AgentConversationMessage[],
+  steering: readonly AgentConversationMessage[],
+): boolean {
+  if (steering.length === 0) {
+    return false;
+  }
+  messages.push(...steering);
+  return true;
+}
+
+export async function runAgentLoop(
+  options: AgentLoopOptions,
+): Promise<AgentLoopResult> {
   let messages = [...options.initialMessages];
 
   for (;;) {
-    throwIfAgentAborted(options.signal);
+    const initialHandoff = handoffIfRequested(options, messages);
+    if (initialHandoff !== undefined) {
+      return initialHandoff;
+    }
     if (options.prepareMessages !== undefined) {
       messages = [...(await options.prepareMessages(messages, options.signal))];
-      throwIfAgentAborted(options.signal);
+      const preparedHandoff = handoffIfRequested(options, messages);
+      if (preparedHandoff !== undefined) {
+        return preparedHandoff;
+      }
     }
+    options.model.startTurn?.();
     const turn = await options.model.complete(messages, options.signal);
     throwIfAgentAborted(options.signal);
     const recordedMessages: AgentRecordedMessage[] = [];
@@ -168,23 +245,36 @@ export async function runAgentLoop(
     messages.push(assistantMessage);
 
     if (turn.toolCalls.length === 0) {
-      return messages;
+      const steering = await takeSteeringMessages(options);
+      if (storeMessages(messages, steering)) {
+        continue;
+      }
+      return { messages, status: "complete" };
     }
 
     for (const call of turn.toolCalls) {
       throwIfAgentAborted(options.signal);
+      await options.onToolCall?.(call);
       const arguments_ = parseArguments(call.arguments);
-      const output =
-        arguments_ === undefined
-          ? INVALID_ARGUMENTS_MESSAGE
-          : await options.executeTool({
-              arguments: arguments_,
-              id: call.id,
-              name: call.name,
-            });
+      let result: RunnerCommandResult;
+      try {
+        result =
+          arguments_ === undefined
+            ? { output: INVALID_ARGUMENTS_MESSAGE, state: "failed" }
+            : normalizedToolResult(
+                await options.executeTool({
+                  arguments: arguments_,
+                  id: call.id,
+                  name: call.name,
+                }),
+              );
+      } catch (error) {
+        await options.onToolResult?.(call, { error });
+        throw error;
+      }
       throwIfAgentAborted(options.signal);
       const toolMessage: AgentConversationMessage = {
-        content: output,
+        content: result.output,
         role: "tool",
         toolCallId: call.id,
         toolName: call.name,
@@ -192,6 +282,10 @@ export async function runAgentLoop(
       await options.recordMessage([toolMessage]);
       throwIfAgentAborted(options.signal);
       messages.push(toolMessage);
+      await options.onToolResult?.(call, result);
     }
+
+    const steering = await takeSteeringMessages(options);
+    storeMessages(messages, steering);
   }
 }

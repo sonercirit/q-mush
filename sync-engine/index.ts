@@ -2,6 +2,7 @@ import { createDatabase } from "../shared/database.ts";
 import { readDatabasePath } from "../shared/database/config.ts";
 import { createGoogleAuthFromEnvironment } from "./auth.ts";
 import { createBraveSearchSkillFromEnvironment } from "./brave-search.ts";
+import { createCoreIntegrationResources } from "./core-integration-resources.ts";
 import {
   createOpenAiIntegrationFromEnvironment,
   createOpenAiLoopbackCallbackHandler,
@@ -10,7 +11,7 @@ import {
 } from "./openai.ts";
 import { createOpenRouterIntegrationFromEnvironment } from "./openrouter.ts";
 import { renderPages } from "./pages.ts";
-import { RealtimeHub } from "./realtime-hub.ts";
+import { createPromptIntegration } from "./prompts.ts";
 import {
   createRealtimeIntegration,
   isRealtimePath,
@@ -23,6 +24,7 @@ import {
   buildClientStylesheet,
   createRequestHandler,
 } from "./server.ts";
+import { createSessionsChangedPublisher } from "./session-credential-reassignment-realtime.ts";
 import { createSessionIntegration } from "./sessions.ts";
 
 const database = createDatabase(readDatabasePath(Bun.env));
@@ -34,24 +36,32 @@ const [clientJavaScript, pages, runnerExecutables, stylesheet] =
     buildClientStylesheet(),
   ]);
 const googleAuth = createGoogleAuthFromEnvironment(Bun.env, { database });
+const { realtimeHub, workspaceStore, workspaces } =
+  createCoreIntegrationResources(googleAuth, database);
+const providerDependencies = {
+  database,
+  onSessionsChanged: createSessionsChangedPublisher(realtimeHub),
+};
 const braveSearch = createBraveSearchSkillFromEnvironment(Bun.env, googleAuth, {
   database,
 });
-const openAi = createOpenAiIntegrationFromEnvironment(Bun.env, googleAuth, {
-  database,
-});
+const openAi = createOpenAiIntegrationFromEnvironment(
+  Bun.env,
+  googleAuth,
+  providerDependencies,
+);
 const openRouter = createOpenRouterIntegrationFromEnvironment(
   Bun.env,
   googleAuth,
-  { database },
+  providerDependencies,
 );
 const runners = createRunnerIntegration(googleAuth, { database });
-const realtimeHub = new RealtimeHub();
+const prompts = createPromptIntegration(googleAuth, { database });
 const sessions = createSessionIntegration(
   googleAuth,
   runners,
   { openai: openAi, openrouter: openRouter },
-  { braveSearch, database, realtime: realtimeHub },
+  { braveSearch, database, realtime: realtimeHub, workspaces },
 );
 const realtime = createRealtimeIntegration({
   auth: googleAuth,
@@ -59,6 +69,8 @@ const realtime = createRealtimeIntegration({
   runnerVersion: runnerExecutables.version,
   runners,
   sessions,
+  workspaceExists: (userId, workspaceId) =>
+    workspaceStore.exists(userId, workspaceId),
 });
 const handleRequest = createRequestHandler(
   clientJavaScript,
@@ -70,6 +82,8 @@ const handleRequest = createRequestHandler(
   braveSearch,
   runners,
   sessions,
+  prompts,
+  workspaces,
   runnerExecutables,
 );
 let callbackServer: Bun.Server<undefined> | undefined;

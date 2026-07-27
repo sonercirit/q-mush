@@ -1,14 +1,12 @@
-import { expect } from "vitest";
-import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import { SessionStore } from "../../sync-engine/session-store.ts";
-import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import {
   addTestProviderCredential,
   createAuthenticatedTestDatabase,
-  TEST_NOW,
-  TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
+import { takeValue } from "./oauth-test-helpers.ts";
+import { createRunningTestSession } from "./session-store-create-hardening-helpers.ts";
 import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
+import { testSessionInput } from "./session-store-test-fixtures.ts";
 
 const RUNNER_ID = "018bcfe5-6800-7000-8000-000000000041";
 const CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000042";
@@ -29,13 +27,8 @@ function storeWithRunner() {
     TOOL_ID,
     INTERRUPTED_ID,
   ];
-  const generateId = () => {
-    const id = credentialIds.shift();
-    if (id === undefined) {
-      throw new Error("The hardening test ran out of IDs");
-    }
-    return id;
-  };
+  const generateId = () =>
+    takeValue(credentialIds, "The hardening test ran out of IDs");
   return {
     database,
     store: new SessionStore(database, generateId),
@@ -44,27 +37,15 @@ function storeWithRunner() {
 
 export function createSessionStoreTestSetup() {
   const setup = storeWithRunner();
-  const created = setup.store.create(
-    {
-      autoCompact: true,
+
+  createRunningTestSession(
+    setup.store,
+    testSessionInput({
       credentialId: CREDENTIAL_ID,
-      images: [TEST_AGENT_IMAGE],
-      maxContextTokens: 200_000,
-      model: "gpt-4.1-mini",
       prompt: "Inspect the repository",
-      provider: "openai",
-      providerPricing: null,
-      reasoningEffort: "high",
       runnerId: RUNNER_ID,
-      tools: AGENT_SESSION_TOOL_NAMES,
-      userId: TEST_USER_ID,
-      workingDirectory: "/work/project",
-    },
-    TEST_NOW,
+    }),
+    SESSION_ID,
   );
-  expect(created.status).toBe("created");
-  expect(
-    setup.store.transitionCurrent(SESSION_ID, "running", TEST_NOW + 1),
-  ).toBe(true);
   return setup;
 }

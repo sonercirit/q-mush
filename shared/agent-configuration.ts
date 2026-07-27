@@ -32,9 +32,21 @@ export interface AgentModelCatalog {
   readonly models: readonly AgentModelOption[];
 }
 
+export interface OpenRouterProviderOption {
+  readonly contextWindow: number | null;
+  readonly name: string;
+  readonly pricing: ProviderModelPricing | null;
+  readonly tag: string;
+}
+
+export interface OpenRouterProviderCatalog {
+  readonly providers: readonly OpenRouterProviderOption[];
+}
+
 export const MAXIMUM_AGENT_MODEL_OPTIONS = 10_000;
 
 const MODEL_PATTERN = /^[A-Za-z\d][A-Za-z\d._:/-]{0,199}$/u;
+const OPENROUTER_PROVIDER_TAG_PATTERN = /^[A-Za-z\d][A-Za-z\d._:/-]{0,99}$/u;
 
 export function defaultAgentModel(
   provider: ProviderId,
@@ -49,6 +61,12 @@ export function defaultAgentModel(
 
 export function isAgentModelId(value: unknown): value is string {
   return typeof value === "string" && MODEL_PATTERN.test(value);
+}
+
+export function isOpenRouterProviderTag(value: unknown): value is string {
+  return (
+    typeof value === "string" && OPENROUTER_PROVIDER_TAG_PATTERN.test(value)
+  );
 }
 
 export function isAgentReasoningEffort(

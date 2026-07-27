@@ -7,6 +7,7 @@ import type {
 } from "../shared/session-model.ts";
 import { runnerIsAvailable } from "./runner-availability-store.ts";
 import { sessionExecutionIsCurrent } from "./session-execution-authority.ts";
+import { serializeProviderPricing } from "./session-store-read.ts";
 import type { SessionStoreWriteResources } from "./session-store-resources.ts";
 import { readStoredSessionResult } from "./session-store-result.ts";
 import { userMessageValues } from "./session-store-values.ts";
@@ -14,14 +15,17 @@ import { userMessageValues } from "./session-store-values.ts";
 export interface CreateAgentSession extends Pick<
   AgentSessionSummary,
   | "autoCompact"
+  | "executionEnvironment"
   | "maxContextTokens"
   | "model"
+  | "openRouterProviderTag"
   | "provider"
   | "providerPricing"
   | "reasoningEffort"
   | "runnerId"
   | "tools"
   | "workingDirectory"
+  | "workspaceId"
 > {
   readonly credentialId: string;
   readonly images: readonly AgentImage[];
@@ -56,6 +60,10 @@ export function createStoredSession(
     throw new Error("The agent session context limit is invalid");
   }
 
+  if (input.openRouterProviderTag !== null && input.provider !== "openrouter") {
+    throw new Error("The agent session serving provider is invalid");
+  }
+
   const sessionId = resources.generateId(now);
   const generatedIds = [sessionId, resources.generateId(now)] as const;
   const messageId = generatedIds[1];
@@ -84,17 +92,16 @@ export function createStoredSession(
       .values({
         ...createdAuditFields(input.userId, now),
         autoCompact: input.autoCompact,
+        executionEnvironment: input.executionEnvironment,
         id: sessionId,
         maxContextTokens: input.maxContextTokens,
         model: input.model,
+        openRouterProviderTag: input.openRouterProviderTag,
         parentExecutionGeneration: input.parentGeneration ?? null,
         parentSessionId: input.parentSessionId ?? null,
         provider: input.provider,
         providerCredentialId: input.credentialId,
-        providerPricing:
-          input.providerPricing === null
-            ? null
-            : JSON.stringify(input.providerPricing),
+        providerPricing: serializeProviderPricing(input.providerPricing),
         reasoningEffort: input.reasoningEffort,
         runnerId: input.runnerId,
         status: "queued",
@@ -102,6 +109,7 @@ export function createStoredSession(
         tools: JSON.stringify(input.tools),
         userId: input.userId,
         workingDirectory: input.workingDirectory,
+        workspaceId: input.workspaceId,
       })
       .run();
     transaction
@@ -112,6 +120,7 @@ export function createStoredSession(
           id: messageId,
           images: input.images,
           now,
+          segment: 0,
           sessionId,
           userId: input.userId,
         }),

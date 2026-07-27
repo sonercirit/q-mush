@@ -18,12 +18,17 @@ import {
   type OAuthDependencies,
   type OAuthRuntime,
 } from "./oauth.ts";
+import {
+  discoverOpenRouterProviders,
+  type OpenRouterProviderDiscoverer,
+} from "./openrouter-provider-discovery.ts";
 import { createApiKeyMetadataReader } from "./provider-credentials.ts";
 import {
   createProviderIntegration,
   readProviderIntegrationConfiguration,
   type ProviderIntegration,
 } from "./provider-integration.ts";
+import { prepareOpenRouterSessionCredentialProviderState } from "./session-provider-selection.ts";
 
 const OPENROUTER_AUTHORIZATION_URL = "https://openrouter.ai/auth";
 const OPENROUTER_KEY_METADATA_URL = "https://openrouter.ai/api/v1/key";
@@ -109,10 +114,14 @@ const readCredentialDetails = async (
   };
 };
 
+interface OpenRouterDependencies extends OAuthDependencies {
+  readonly discoverOpenRouterProviders?: OpenRouterProviderDiscoverer;
+}
+
 export function createOpenRouterIntegrationFromEnvironment(
   environment: Readonly<Record<string, string | undefined>>,
   auth: GoogleAuth,
-  dependencies: OAuthDependencies = {},
+  dependencies: OpenRouterDependencies = {},
 ): OpenRouterIntegration {
   const configuration = readProviderIntegrationConfiguration(environment, {
     callbackPath: OPENROUTER_OAUTH_CALLBACK_PATH,
@@ -131,8 +140,18 @@ export function createOpenRouterIntegrationFromEnvironment(
       flowCookies: OPENROUTER_FLOW_COOKIES,
       resultParameter: "openrouter",
       userCookie: "q_mush_openrouter_user",
+      workspaceCookie: "q_mush_openrouter_workspace",
     }),
     dependencies,
+    prepareSessionCredentialProviderState: (context) =>
+      prepareOpenRouterSessionCredentialProviderState({
+        credential: context.credential,
+        discover:
+          dependencies.discoverOpenRouterProviders ??
+          discoverOpenRouterProviders,
+        ownerId: context.userId,
+        snapshot: context.snapshot,
+      }),
     provider: "openrouter",
     readCredentialDetails,
   });

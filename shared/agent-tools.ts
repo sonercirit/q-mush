@@ -1,3 +1,9 @@
+import {
+  ASK_QUESTIONS_TOOL_DEFINITION,
+  ASK_QUESTIONS_TOOL_NAME,
+} from "./ask-questions-tool.ts";
+import { PAGE_FETCH_TOOL_DEFINITION } from "./page-fetch.ts";
+
 const NUMBER_PARAMETER = { type: "number" } as const;
 const STRING_PARAMETER = { type: "string" } as const;
 const STRING_ARRAY_PARAMETER = {
@@ -139,9 +145,18 @@ const SESSION_AGENT_TOOLS = [
       "Spawn another agent session and return immediately. Configure it with the same fields available in the new-session pane. When it finishes or fails, its last message is sent back to this session.",
     name: "spawn_session",
     properties: {
+      autoCompact: {
+        description: "Automatically compact near the context limit",
+        type: "boolean",
+      },
       credentialId: {
         description: "Model credential ID",
         ...STRING_PARAMETER,
+      },
+      executionEnvironment: {
+        description: "Execution environment for file and shell tools",
+        enum: ["bare_metal", "container"],
+        type: "string",
       },
       model: {
         description: "Provider model ID",
@@ -176,6 +191,7 @@ const SESSION_AGENT_TOOLS = [
     },
     required: [
       "credentialId",
+      "executionEnvironment",
       "model",
       "prompt",
       "provider",
@@ -380,9 +396,11 @@ const BRAVE_SEARCH_TOOL = toolDefinition({
 });
 
 export const AGENT_TOOLS = [
+  PAGE_FETCH_TOOL_DEFINITION,
   ...BASE_AGENT_TOOLS,
   PARALLEL_TOOL,
   BRAVE_SEARCH_TOOL,
+  { function: ASK_QUESTIONS_TOOL_DEFINITION, type: "function" },
   ...SESSION_AGENT_TOOLS,
 ] as const;
 
@@ -396,7 +414,9 @@ export interface AgentToolDefinition {
 }
 export type AgentSessionToolName =
   (typeof AGENT_TOOLS)[number]["function"]["name"];
-type BaseAgentToolName = (typeof BASE_AGENT_TOOLS)[number]["function"]["name"];
+type BaseAgentToolName =
+  | (typeof BASE_AGENT_TOOLS)[number]["function"]["name"]
+  | typeof PAGE_FETCH_TOOL_DEFINITION.function.name;
 
 export const SESSION_AGENT_TOOL_NAMES: readonly AgentSessionToolName[] =
   SESSION_AGENT_TOOLS.map(({ function: definition }) => definition.name);
@@ -414,6 +434,7 @@ export const AGENT_SESSION_TOOL_NAMES: readonly AgentSessionToolName[] =
   AGENT_TOOLS.map(({ function: definition }) => definition.name);
 
 const AGENT_TOOL_LABELS: Readonly<Record<AgentSessionToolName, string>> = {
+  ask_questions: "Ask questions",
   bash: "Shell",
   brave_search: "Brave Search",
   browse_runner_directories: "Browse runner directories",
@@ -422,6 +443,7 @@ const AGENT_TOOL_LABELS: Readonly<Record<AgentSessionToolName, string>> = {
   get_session_options: "Get session options",
   list_runners: "List runners",
   list_sessions: "List sessions",
+  page_fetch: "Fetch page",
   parallel: "Parallel calls",
   read: "Read files",
   read_session: "Read session",
@@ -445,7 +467,7 @@ export interface AgentSessionToolOption {
 function agentToolClassification(
   name: AgentSessionToolName,
 ): AgentToolClassification {
-  return name === BRAVE_SEARCH_TOOL_NAME
+  return name === BRAVE_SEARCH_TOOL_NAME || name === ASK_QUESTIONS_TOOL_NAME
     ? "skill"
     : SESSION_AGENT_TOOL_NAMES.some((sessionName) => sessionName === name)
       ? "session_tool"
@@ -507,7 +529,11 @@ function selectedParallelTool(
                     .items.properties.recipient_name,
                   enum: selectedTools
                     .map(({ function: definition }) => definition.name)
-                    .filter((name) => name !== PARALLEL_TOOL.function.name),
+                    .filter(
+                      (name) =>
+                        name !== PARALLEL_TOOL.function.name &&
+                        name !== ASK_QUESTIONS_TOOL_NAME,
+                    ),
                 },
               },
             },
@@ -536,10 +562,13 @@ export function selectedAgentTools(
 export { type BaseAgentToolName };
 
 type RunnerAgentToolName =
-  BaseAgentToolName | typeof PARALLEL_TOOL.function.name;
+  | BaseAgentToolName
+  | typeof PAGE_FETCH_TOOL_DEFINITION.function.name
+  | typeof PARALLEL_TOOL.function.name;
 
 const RUNNER_AGENT_TOOL_NAMES: readonly RunnerAgentToolName[] = [
   ...BASE_AGENT_TOOLS.map((tool) => tool.function.name),
+  PAGE_FETCH_TOOL_DEFINITION.function.name,
   PARALLEL_TOOL.function.name,
 ];
 
@@ -550,5 +579,8 @@ export function isRunnerAgentToolName(
 }
 
 export function isBaseAgentToolName(name: string): name is BaseAgentToolName {
-  return BASE_AGENT_TOOLS.some((tool) => tool.function.name === name);
+  return (
+    name === PAGE_FETCH_TOOL_DEFINITION.function.name ||
+    BASE_AGENT_TOOLS.some((tool) => tool.function.name === name)
+  );
 }

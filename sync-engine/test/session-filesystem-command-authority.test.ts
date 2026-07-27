@@ -46,6 +46,16 @@ function testSession(): AgentSessionDetail {
 }
 
 class CurrentSessionStore extends SessionStore {
+  override get(
+    userId: string,
+    sessionId: string,
+  ): AgentSessionDetail | undefined {
+    const session = testSession();
+    return userId === TEST_USER_ID && sessionId === session.id
+      ? session
+      : undefined;
+  }
+
   override executionIsCurrent(
     userId: string,
     sessionId: string,

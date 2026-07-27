@@ -1,11 +1,18 @@
 import { createMemo, For, Show, type Accessor, type JSX } from "solid-js";
 import type { AgentFile } from "../shared/agent-file.ts";
-import { AGENT_SYSTEM_PROMPT } from "../shared/agent-prompt.ts";
+import { createAgentSystemPrompt } from "../shared/agent-prompt.ts";
 import {
   selectedAgentTools,
   type AgentSessionToolName,
 } from "../shared/agent-tools.ts";
-import type { AgentSessionMessage } from "../shared/session-model.ts";
+import type {
+  AgentSessionDetail,
+  AgentSessionMessage,
+} from "../shared/session-model.ts";
+import type {
+  ToolStreamEntry,
+  ToolStreamState,
+} from "../shared/tool-stream.ts";
 import { renderDebugBoundary } from "./render-debug.tsx";
 import { SessionImagePreviews } from "./session-image-client.tsx";
 import { renderMarkdown } from "./session-markdown.tsx";
@@ -345,10 +352,78 @@ function TranscriptMessage(
   }
 }
 
+function toolStateLabel(state: ToolStreamState): string {
+  switch (state) {
+    case "preparing":
+      return "Preparing";
+    case "running":
+      return "Running";
+    case "completed":
+      return "Completed";
+    case "failed":
+      return "Failed";
+    case "canceled":
+      return "Canceled";
+    case "timed-out":
+      return "Timed out";
+  }
+}
+
+function liveToolOutput(
+  stream: ToolStreamEntry,
+  channel: "stderr" | "stdout",
+  name: string,
+): JSX.Element {
+  const content = stream[channel];
+  return (
+    <Show when={content.length > 0}>
+      <div class="mt-3">
+        {renderToolResult({
+          arguments: stream.arguments,
+          content: `${channel}:\n${content}`,
+          name,
+        })}
+      </div>
+    </Show>
+  );
+}
+
+function LiveToolStream(props: {
+  readonly stream: ToolStreamEntry;
+}): JSX.Element {
+  const name = (): string => props.stream.name || "Preparing tool";
+  return (
+    <li
+      class="min-w-0 rounded-xl border border-cyan-300/20 bg-cyan-300/10 p-3 sm:p-4"
+      data-tool-stream-state={props.stream.state}
+      {...renderDebugBoundary(
+        `tool-stream:${props.stream.streamId}:${props.stream.callId}`,
+        `Live tool: ${name()}`,
+      )}
+    >
+      {renderToolHeader({
+        id: props.stream.callId,
+        kind: "Tool call",
+        name: name(),
+      })}
+      <p class="mt-2 text-xs font-semibold text-amber-200">
+        {toolStateLabel(props.stream.state)}
+      </p>
+      <Show when={props.stream.arguments.length > 0}>
+        <div class="mt-2">{renderStructuredCode(props.stream.arguments)}</div>
+      </Show>
+      {liveToolOutput(props.stream, "stdout", name())}
+      {liveToolOutput(props.stream, "stderr", name())}
+    </li>
+  );
+}
+
 export function SessionTranscript(props: {
   readonly agentFile: AgentFile | null;
+  readonly executionEnvironment: AgentSessionDetail["executionEnvironment"];
   readonly filters: SessionTranscriptFilters;
   readonly messages: readonly AgentSessionMessage[];
+  readonly toolStreams?: readonly ToolStreamEntry[];
   readonly tools: readonly AgentSessionToolName[];
 }): JSX.Element {
   const callArguments = createMemo(() => toolCallArguments(props.messages));
@@ -376,7 +451,7 @@ export function SessionTranscript(props: {
       <Show when={props.filters.systemPrompt}>
         {renderTranscriptInstruction({
           boundaryKey: "system-prompt",
-          content: AGENT_SYSTEM_PROMPT,
+          content: createAgentSystemPrompt(null, props.executionEnvironment),
           label: "System prompt",
         })}
       </Show>
@@ -399,6 +474,11 @@ export function SessionTranscript(props: {
           />
         )}
       </For>
+      <Show when={props.filters.toolActivity}>
+        <For each={props.toolStreams ?? []}>
+          {(stream) => <LiveToolStream stream={stream} />}
+        </For>
+      </Show>
       <Show when={visibleItemCount() === 0}>
         <li class="rounded-xl border border-dashed border-white/15 p-5 text-sm leading-6 text-slate-400">
           No transcript items match the current visibility filters.

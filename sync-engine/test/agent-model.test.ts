@@ -104,6 +104,13 @@ function capturedModel(
   return respondingModel(options, doneResponse(), capture);
 }
 
+function openRouterModelWithTools(
+  capture: RequestCapture,
+  tools: readonly (typeof AGENT_SESSION_TOOL_NAMES)[number][],
+): ChatCompletionsAgentModel {
+  return capturedModel(capture, { ...OPENROUTER_IMAGE_OPTIONS, tools });
+}
+
 function respondingModel(
   options: Omit<ModelOptions, "fetch">,
   responseBody: unknown,
@@ -242,6 +249,20 @@ describe("chat completions agent model", () => {
     expect(serializedBody).not.toContain("list_files");
   });
 
+  test("forces a selected OpenRouter serving provider", async () => {
+    const capture = new RequestCapture();
+    const model = capturedModel(capture, {
+      ...OPENROUTER_IMAGE_OPTIONS,
+      openRouterProviderTag: "google-vertex/us",
+    });
+
+    await completeHello(model);
+
+    expect(await capturedBody(capture)).toMatchObject({
+      provider: { only: ["google-vertex/us"] },
+    });
+  });
+
   test("sends the unbounded schema through OpenAI Responses", async () => {
     const capture = new RequestCapture();
     const output = [DONE_CODEX_OUTPUT];
@@ -254,24 +275,19 @@ describe("chat completions agent model", () => {
 
   test("filters definitions to the selected tools and skills", async () => {
     const capture = new RequestCapture();
-    const modelOptions = {
-      ...OPENROUTER_IMAGE_OPTIONS,
-      tools: ["read", "brave_search"] as const,
-    };
-    const model = capturedModel(capture, modelOptions);
+    const selectedTools = ["read", "brave_search"] as const;
+    const model = openRouterModelWithTools(capture, selectedTools);
 
     await completeHello(model);
 
-    const selectedBody = await capturedBody(capture);
-    expect(capturedToolNames(selectedBody)).toEqual(["read", "brave_search"]);
+    expect(capturedToolNames(await capturedBody(capture))).toEqual(
+      selectedTools,
+    );
   });
 
   test("omits the tool protocol when none are selected", async () => {
     const capture = new RequestCapture();
-    const model = capturedModel(capture, {
-      ...OPENROUTER_IMAGE_OPTIONS,
-      tools: [],
-    });
+    const model = openRouterModelWithTools(capture, []);
 
     await completeHello(model);
 

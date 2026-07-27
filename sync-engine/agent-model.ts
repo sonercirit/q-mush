@@ -8,16 +8,14 @@ import type {
 } from "../shared/agent-loop.ts";
 import { AGENT_SYSTEM_PROMPT } from "../shared/agent-prompt.ts";
 import {
+  AGENT_SESSION_TOOL_NAMES,
   AGENT_TOOLS,
   selectedAgentTools,
   type AgentSessionToolName,
   type AgentToolDefinition,
 } from "../shared/agent-tools.ts";
 import { isRecord } from "../shared/auth-model.ts";
-import type {
-  ProviderCredentialSource,
-  ProviderId,
-} from "../shared/provider-credential-store.ts";
+import type { ProviderId } from "../shared/provider-credential-store.ts";
 import { createServerWebSocket } from "../shared/server-websocket.ts";
 import {
   completionMessages,
@@ -25,6 +23,10 @@ import {
   type CompletionArguments,
   type OptionalTurn,
 } from "./agent-completion.ts";
+import type {
+  AgentModelRequestOptions,
+  AgentProviderCredential,
+} from "./agent-model-options.ts";
 import type { ModelRequestSleep } from "./agent-model-retry.ts";
 import { readOpenAiOAuthCredential } from "./openai-credential.ts";
 import { completeProviderHttp } from "./provider-http.ts";
@@ -34,6 +36,8 @@ import {
   ProviderWebSocketError,
   type ProviderWebSocketFactory,
 } from "./provider-websocket.ts";
+
+export type { AgentProviderCredential } from "./agent-model-options.ts";
 
 const OPENAI_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions";
 const OPENAI_RESPONSES_WEBSOCKET_URL = "wss://api.openai.com/v1/responses";
@@ -46,24 +50,11 @@ const PROVIDER_WEBSOCKET_RETRY_DELAYS_MILLISECONDS = [
 ] as const;
 const OPENROUTER_COMPLETIONS_URL =
   "https://openrouter.ai/api/v1/chat/completions";
-export interface AgentProviderCredential {
-  readonly accountId: string | null;
-  readonly secret: string;
-  readonly source: ProviderCredentialSource;
-}
-
 export type AgentModelFetch = (request: Request) => Promise<Response>;
 
-interface ChatCompletionsAgentModelOptions {
-  readonly credential: AgentProviderCredential;
+export interface ChatCompletionsAgentModelOptions extends AgentModelRequestOptions {
   readonly fetch?: AgentModelFetch;
-  readonly model: string;
-  readonly onDelta?: (delta: ProviderTextDelta) => void;
-  readonly provider: ProviderId;
-  readonly reasoningEffort?: AgentReasoningEffort | null;
   readonly sleep?: ModelRequestSleep;
-  readonly systemPrompt?: string;
-  readonly tools?: readonly AgentSessionToolName[];
   readonly webSocket?: ProviderWebSocketFactory;
 }
 
@@ -252,13 +243,23 @@ function reasoningConfiguration(
 
 function toolConfiguration(
   tools: readonly AgentToolDefinition[],
+  selectedTools: readonly AgentSessionToolName[],
   responsesProtocol: boolean,
+  dynamicToolCache: boolean,
 ): Readonly<Record<string, unknown>> {
-  if (tools.length === 0) {
+  if (tools.length === 0 || selectedTools.length === 0) {
     return {};
   }
+  const toolChoice =
+    dynamicToolCache && responsesProtocol
+      ? {
+          mode: "auto",
+          tools: selectedTools.map((name) => ({ name, type: "function" })),
+          type: "allowed_tools",
+        }
+      : "auto";
   return {
-    tool_choice: "auto",
+    tool_choice: toolChoice,
     tools: responsesProtocol
       ? tools.map(({ function: definition }) => ({
           ...definition,
@@ -272,10 +273,13 @@ function requestBody(
   messages: readonly AgentConversationMessage[],
   model: string,
   provider: ProviderId,
+  openRouterProviderTag: string | undefined,
   responsesProtocol: boolean,
   reasoningEffort: AgentReasoningEffort | undefined,
   systemPrompt: string,
   tools: readonly AgentToolDefinition[],
+  selectedTools: readonly AgentSessionToolName[],
+  dynamicToolCache: boolean,
   stream = false,
 ): unknown {
   const reasoning = reasoningConfiguration(
@@ -291,11 +295,14 @@ function requestBody(
         ...messages.map(modelMessage),
       ],
       model,
+      ...(provider === "openrouter" && openRouterProviderTag !== undefined
+        ? { provider: { only: [openRouterProviderTag] } }
+        : {}),
       ...reasoning,
       ...(stream
         ? { stream: true, stream_options: { include_usage: true } }
         : {}),
-      ...toolConfiguration(tools, false),
+      ...toolConfiguration(tools, selectedTools, false, dynamicToolCache),
     };
   }
 
@@ -308,7 +315,7 @@ function requestBody(
     ...reasoning,
     store: false,
     ...(stream ? { stream: true } : {}),
-    ...toolConfiguration(tools, true),
+    ...toolConfiguration(tools, selectedTools, true, dynamicToolCache),
   };
 }
 
@@ -337,31 +344,42 @@ function defaultWebSocket(
 
 export class ChatCompletionsAgentModel implements AgentModel {
   readonly #credential: AgentProviderCredential;
+  readonly #dynamicToolCache: boolean;
   readonly #fetch: AgentModelFetch;
   readonly #model: string;
   readonly #onDelta: ((delta: ProviderTextDelta) => void) | undefined;
+  readonly #onTurnStart: () => void;
+  readonly #openRouterProviderTag: string | undefined;
   readonly #provider: ProviderId;
   readonly #reasoningEffort: AgentReasoningEffort | undefined;
   readonly #sleep: ModelRequestSleep | undefined;
   readonly #systemPrompt: string;
+  readonly #selectedTools: readonly AgentSessionToolName[];
   readonly #tools: readonly AgentToolDefinition[];
   readonly #webSocket: ProviderWebSocketFactory;
 
   constructor(options: ChatCompletionsAgentModelOptions) {
     this.#credential = options.credential;
+    this.#dynamicToolCache = options.dynamicToolCache === true;
     this.#fetch = options.fetch ?? ((request) => globalThis.fetch(request));
     this.#model = options.model;
     this.#onDelta = options.onDelta;
+    this.#onTurnStart = options.onTurnStart ?? (() => undefined);
+    this.#openRouterProviderTag = options.openRouterProviderTag;
     this.#provider = options.provider;
     this.#reasoningEffort = options.reasoningEffort ?? undefined;
     this.#sleep = options.sleep;
     this.#systemPrompt = options.systemPrompt ?? AGENT_SYSTEM_PROMPT;
-    this.#tools =
-      options.tools === undefined
-        ? AGENT_TOOLS
-        : selectedAgentTools(options.tools);
+    this.#selectedTools = options.tools ?? AGENT_SESSION_TOOL_NAMES;
+    this.#tools = this.#dynamicToolCache
+      ? AGENT_TOOLS
+      : selectedAgentTools(this.#selectedTools);
     this.#webSocket = options.webSocket ?? defaultWebSocket;
   }
+
+  readonly startTurn = (): void => {
+    this.#onTurnStart();
+  };
 
   async complete(...parameters: CompletionArguments): Promise<AgentModelTurn> {
     if (this.#provider !== "openai") {
@@ -436,10 +454,13 @@ export class ChatCompletionsAgentModel implements AgentModel {
       messages,
       this.#model,
       this.#provider,
+      this.#openRouterProviderTag,
       responsesProtocol,
       this.#reasoningEffort,
       this.#systemPrompt,
       this.#tools,
+      this.#selectedTools,
+      this.#dynamicToolCache,
       stream,
     );
   }

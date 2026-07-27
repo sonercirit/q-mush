@@ -15,6 +15,7 @@ import type {
 } from "../shared/provider-credential-store.ts";
 import type { ProviderModelPricing } from "../shared/provider-model-pricing.ts";
 import { utf8Prefix } from "../shared/utf8.ts";
+import { readPositiveSafeInteger } from "../shared/validation.ts";
 import {
   agentProviderRequestHeaders,
   type AgentProviderCredential,
@@ -148,12 +149,6 @@ function nestedValue(
   return isRecord(parent) ? parent[key] : undefined;
 }
 
-function positiveSafeInteger(value: unknown): number | null {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
-    ? value
-    : null;
-}
-
 type ContextWindowRecord = Readonly<Record<string, unknown>>;
 
 function modelContextWindow(
@@ -161,7 +156,7 @@ function modelContextWindow(
   keys: readonly string[],
 ): number | null {
   for (const key of keys) {
-    const contextWindow = positiveSafeInteger(
+    const contextWindow = readPositiveSafeInteger(
       nestedValue(value, key, "capabilities"),
     );
 

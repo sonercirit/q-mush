@@ -1,15 +1,16 @@
 import { expect } from "vitest";
 import { RUNNERS_PATH, SESSIONS_PATH } from "../../shared/routes.ts";
 import { SessionStore } from "../../sync-engine/session-store.ts";
-import {
-  createAuthenticatedRequest,
-  TEST_USER_ID,
-} from "./authenticated-integration-test-helpers.ts";
+import { createAuthenticatedRequest } from "./authenticated-integration-test-helpers.ts";
 import {
   RUNNER_ID,
   SESSION_ID,
   type connectedSessionSetup,
 } from "./session-integration-fixtures.ts";
+import {
+  createRunningTestSession,
+  createSessionInput,
+} from "./session-store-create-hardening-helpers.ts";
 
 export type ReassignmentSessionSetup = ReturnType<typeof connectedSessionSetup>;
 
@@ -19,28 +20,15 @@ export function createIdleStoredSession(setup: ReassignmentSessionSetup): void {
     setup.database,
     () => ids.shift() ?? "unexpected-race-id",
   );
-  const created = store.create(
-    {
-      autoCompact: true,
+  createRunningTestSession(
+    store,
+    createSessionInput({
       credentialId: "018bcfe5-6800-7000-8000-000000000063",
-      images: [],
-      maxContextTokens: null,
-      model: "gpt-4.1-mini",
       prompt: "Existing session",
-      provider: "openai",
-      providerPricing: null,
-      reasoningEffort: null,
       runnerId: RUNNER_ID,
-      tools: [],
-      userId: TEST_USER_ID,
-      workingDirectory: "/work/project",
-    },
-    1_700_000_000_000,
+    }),
+    SESSION_ID,
   );
-  expect(created.status).toBe("created");
-  expect(
-    store.transitionCurrent(SESSION_ID, "running", 1_700_000_000_001),
-  ).toBe(true);
   expect(store.transitionCurrent(SESSION_ID, "idle", 1_700_000_000_002)).toBe(
     true,
   );

@@ -11,11 +11,10 @@ import {
   SESSION_ID,
 } from "./session-integration-fixtures.ts";
 import {
-  completeAgentFileLookup,
   expectedRunnerCommand,
   expectRunnerRequired,
+  expectSessionReaches,
   expectTranscriptExcludes,
-  hasSessionStatus,
   sessionDetail,
   startSession,
   startSessionAndExpectRunnerCommand,
@@ -57,19 +56,6 @@ function completingSessionSetup() {
     new ScriptedAgentModel([
       { content: "Initial work complete.", toolCalls: [] },
     ]),
-  );
-}
-
-async function expectSessionReaches(
-  setup: ReturnType<typeof connectedSessionSetup>,
-  response: Response,
-  status: string,
-): Promise<unknown> {
-  expect(response.status).toBe(201);
-  await completeAgentFileLookup(setup);
-  return waitForSessionValue(
-    () => sessionDetail(setup.sessions),
-    hasSessionStatus(status),
   );
 }
 
@@ -211,11 +197,10 @@ describe("runner reassignment", () => {
       ),
     ).toBe(true);
     expect(
-      setup.sessions.completeRunnerCommand(
-        RUNNER_ID,
-        RUNNER_COMMAND_ID,
-        "late output",
-      ),
+      setup.sessions.completeRunnerCommand(RUNNER_ID, RUNNER_COMMAND_ID, {
+        output: "late output",
+        state: "completed",
+      }),
     ).toBe(false);
     await expectTranscriptExcludes(setup, "late output");
     setup.database.$client.close();

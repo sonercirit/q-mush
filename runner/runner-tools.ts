@@ -7,10 +7,26 @@ import {
 } from "../shared/agent-tools.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import {
+  aggregateParallelToolResults,
   boundedParallelOutput,
   executeParallelCall,
+  executeParallelResultCall,
   mapWithParallelConcurrency,
 } from "../shared/parallel.ts";
+import type {
+  RunnerCommandOutputDelta,
+  RunnerCommandResult,
+} from "../shared/runner-command-broker.ts";
+
+import {
+  createPageFetchRunnerTool,
+  PAGE_FETCH_TOOL_NAME,
+} from "./page-fetch.ts";
+import {
+  formatRunnerProcessResult,
+  runnerCommandResultFromOutput,
+  runRunnerProcess,
+} from "./runner-process.ts";
 import {
   resolveRunnerWorkspace,
   runnerPathIsWithin,
@@ -19,23 +35,27 @@ import {
 const MAX_FILE_BYTES = 1024 * 1024;
 const MAX_READ_OUTPUT_BYTES = 50 * 1024;
 const MAX_READ_LINES = 2_000;
-const MAX_COMMAND_OUTPUT_BYTES = 256 * 1024;
 const MAXIMUM_EDITS = 100;
-const COMMAND_GROUP_WRAPPER = `
-terminate_command_group() {
-  trap - TERM
-  kill -TERM 0
-}
-trap terminate_command_group TERM
-/bin/sh -lc "$1" &
-command_pid=$!
-wait "$command_pid"
-exit $?
-`;
-
-type CommandTermination = "stopped" | "timed-out";
 
 type ToolArguments = Readonly<Record<string, unknown>>;
+
+type RunnerToolStream = (
+  delta: Omit<RunnerCommandOutputDelta, "sequence">,
+) => void;
+
+type RunnerShellExecutor = (
+  root: string,
+  command: string,
+  timeoutSeconds: number,
+  signal?: AbortSignal,
+  stream?: RunnerToolStream,
+) => Promise<RunnerCommandResult | string>;
+
+export interface RunnerToolExecutionOptions {
+  readonly mapAbsolutePath?: (path: string) => string;
+  readonly shell?: RunnerShellExecutor;
+  readonly stream?: RunnerToolStream;
+}
 
 function requiredString(
   arguments_: ToolArguments,
@@ -150,10 +170,12 @@ async function pathArgument(
   root: string,
   arguments_: ToolArguments,
   mayNotExist = false,
+  mapAbsolutePath?: (path: string) => string,
 ): Promise<string> {
+  const requested = requiredString(arguments_, "path", 4_096);
   return securePath(
     root,
-    requiredString(arguments_, "path", 4_096),
+    mapAbsolutePath === undefined ? requested : mapAbsolutePath(requested),
     mayNotExist,
   );
 }
@@ -183,8 +205,9 @@ async function readTextFile(
 async function readPathContent(
   root: string,
   arguments_: ToolArguments,
+  mapAbsolutePath?: (path: string) => string,
 ): Promise<{ readonly content: string; readonly path: string }> {
-  const path = await pathArgument(root, arguments_);
+  const path = await pathArgument(root, arguments_, false, mapAbsolutePath);
   return { content: await readTextFile(path, MAX_FILE_BYTES), path };
 }
 
@@ -207,11 +230,48 @@ function truncateReadLines(lines: readonly string[]): readonly string[] {
   return output;
 }
 
-async function readTool(
+type RunnerFileTool = (
   root: string,
   arguments_: ToolArguments,
+  signal?: AbortSignal,
+  options?: RunnerToolExecutionOptions,
+) => Promise<string>;
+
+interface RunnerFileToolArguments {
+  readonly arguments_: ToolArguments;
+  readonly options: RunnerToolExecutionOptions | undefined;
+  readonly root: string;
+}
+
+function runnerFileToolArguments(
+  parameters: Parameters<RunnerFileTool>,
+): RunnerFileToolArguments {
+  const [root, arguments_, , options] = parameters;
+  return { arguments_, options, root };
+}
+
+function writableFileToolArguments(
+  parameters: Parameters<RunnerFileTool>,
+  mayNotExist = false,
+): Promise<RunnerFileToolArguments & { readonly path: string }> {
+  const context = runnerFileToolArguments(parameters);
+  return pathArgument(
+    context.root,
+    context.arguments_,
+    mayNotExist,
+    context.options?.mapAbsolutePath,
+  ).then((path) => ({ ...context, path }));
+}
+
+async function readTool(
+  ...parameters: Parameters<RunnerFileTool>
 ): Promise<string> {
-  const { content } = await readPathContent(root, arguments_);
+  const { arguments_, options, root } = runnerFileToolArguments(parameters);
+  const { content } = await readPathContent(
+    root,
+    arguments_,
+    options?.mapAbsolutePath,
+  );
   const offset = optionalInteger(arguments_, "offset", 1, 1, 1_000_000_000);
   const limit = optionalInteger(
     arguments_,
@@ -244,14 +304,18 @@ async function readTool(
 }
 
 async function writeTool(
-  root: string,
-  arguments_: ToolArguments,
+  ...parameters: Parameters<RunnerFileTool>
 ): Promise<string> {
-  const content = requiredString(arguments_, "content", MAX_FILE_BYTES, true);
-  const path = await pathArgument(root, arguments_, true);
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, content, "utf8");
-  return `Wrote ${String(Buffer.byteLength(content))} bytes to ${displayPath(root, path)}.`;
+  const context = await writableFileToolArguments(parameters, true);
+  const content = requiredString(
+    context.arguments_,
+    "content",
+    MAX_FILE_BYTES,
+    true,
+  );
+  await mkdir(dirname(context.path), { recursive: true });
+  await writeFile(context.path, content, "utf8");
+  return `Wrote ${String(Buffer.byteLength(content))} bytes to ${displayPath(context.root, context.path)}.`;
 }
 
 interface EditReplacement {
@@ -330,11 +394,12 @@ function locateEdits(
 }
 
 async function editTool(
-  root: string,
-  arguments_: ToolArguments,
+  ...parameters: Parameters<RunnerFileTool>
 ): Promise<string> {
-  const replacements = editReplacements(arguments_);
-  const { content, path } = await readPathContent(root, arguments_);
+  const editParameters: Parameters<RunnerFileTool> = parameters;
+  const context = await writableFileToolArguments(editParameters, false);
+  const replacements = editReplacements(context.arguments_);
+  const content = await readTextFile(context.path, MAX_FILE_BYTES);
   const edits = locateEdits(content, replacements);
   let updated = content;
 
@@ -342,108 +407,37 @@ async function editTool(
     updated = `${updated.slice(0, edit.start)}${edit.newText}${updated.slice(edit.end)}`;
   }
 
-  await writeFile(path, updated, "utf8");
-  return `Successfully replaced ${String(edits.length)} block(s) in ${displayPath(root, path)}.`;
-}
-
-async function readLimitedStream(
-  stream: ReadableStream<Uint8Array>,
-  maximumBytes: number,
-): Promise<string> {
-  const reader = stream.getReader();
-  const chunks: Uint8Array[] = [];
-  let byteLength = 0;
-  let truncated = false;
-
-  for (;;) {
-    const part = await reader.read();
-
-    if (part.done) {
-      break;
-    }
-
-    const remaining = maximumBytes - byteLength;
-
-    if (part.value.byteLength > remaining) {
-      chunks.push(part.value.slice(0, Math.max(remaining, 0)));
-      truncated = true;
-      await reader.cancel();
-      break;
-    }
-
-    chunks.push(part.value);
-    byteLength += part.value.byteLength;
-  }
-
-  const output = Buffer.concat(chunks).toString("utf8");
-  return truncated ? `${output}\n[output truncated]` : output;
+  await writeFile(context.path, updated, "utf8");
+  return `Successfully replaced ${String(edits.length)} block(s) in ${displayPath(context.root, context.path)}.`;
 }
 
 async function bashTool(
   root: string,
   arguments_: ToolArguments,
   signal: AbortSignal | undefined,
+  options?: RunnerToolExecutionOptions,
 ): Promise<string> {
   const command = requiredString(arguments_, "command", 32_768);
   const timeoutSeconds = requiredInteger(arguments_, "timeout", 1);
-  const state: {
-    settled: boolean;
-    termination: CommandTermination | undefined;
-  } = { settled: false, termination: undefined };
-  const child = Bun.spawn(
-    ["/bin/sh", "-c", COMMAND_GROUP_WRAPPER, "q-mush-command", command],
-    {
-      cwd: root,
-      detached: true,
-      onExit: () => {
-        state.settled = true;
-      },
-      stderr: "pipe",
-      stdout: "pipe",
-    },
-  );
-  const terminate = (reason: CommandTermination): void => {
-    if (state.settled || state.termination !== undefined) {
-      return;
-    }
-
-    state.termination = reason;
-    child.kill("SIGTERM");
-  };
-  const stop = () => {
-    terminate("stopped");
-  };
-  const timer = setTimeout(() => {
-    terminate("timed-out");
-  }, timeoutSeconds * 1_000);
-  signal?.addEventListener("abort", stop, { once: true });
-
-  if (signal?.aborted === true) {
-    stop();
+  if (options?.shell !== undefined) {
+    const result = await options.shell(
+      root,
+      command,
+      timeoutSeconds,
+      signal,
+      options.stream,
+    );
+    return typeof result === "string" ? result : result.output;
   }
-
-  try {
-    const [exitCode, standardError, standardOutput] = await Promise.all([
-      child.exited,
-      readLimitedStream(child.stderr, MAX_COMMAND_OUTPUT_BYTES / 2),
-      readLimitedStream(child.stdout, MAX_COMMAND_OUTPUT_BYTES / 2),
-    ]);
-    if (state.termination === "stopped") {
-      throw new Error("The runner command was stopped");
-    }
-
-    const sections = [
-      standardOutput.length === 0 ? undefined : `stdout:\n${standardOutput}`,
-      standardError.length === 0 ? undefined : `stderr:\n${standardError}`,
-      state.termination === "timed-out"
-        ? `Timed out after ${String(timeoutSeconds)} seconds.`
-        : `Exit code: ${String(exitCode)}`,
-    ].filter((section) => section !== undefined);
-    return sections.join("\n");
-  } finally {
-    clearTimeout(timer);
-    signal?.removeEventListener("abort", stop);
-  }
+  const result = await runRunnerProcess({
+    arguments: ["-lc", command],
+    cwd: root,
+    executable: "/bin/sh",
+    ...(options?.stream === undefined ? {} : { onOutput: options.stream }),
+    ...(signal === undefined ? {} : { signal }),
+    timeoutSeconds,
+  });
+  return formatRunnerProcessResult(result, timeoutSeconds);
 }
 
 interface ParallelToolUse {
@@ -475,20 +469,19 @@ function parallelToolUses(
   });
 }
 
-type RunnerTool = (
-  root: string,
-  arguments_: ToolArguments,
-  signal?: AbortSignal,
-) => Promise<string>;
+type RunnerTool = RunnerFileTool;
+
+const PAGE_FETCH_RUNNER_TOOL = createPageFetchRunnerTool();
 
 const RUNNER_TOOLS: Readonly<Record<BaseAgentToolName, RunnerTool>> = {
   bash: bashTool,
   edit: editTool,
+  [PAGE_FETCH_TOOL_NAME]: PAGE_FETCH_RUNNER_TOOL,
   read: readTool,
   write: writeTool,
 };
 
-export interface RunnerParallelExecutionOptions {
+interface RunnerParallelExecutionOptions {
   readonly execute: (
     root: string,
     toolUse: {
@@ -499,47 +492,183 @@ export interface RunnerParallelExecutionOptions {
   ) => Promise<string>;
 }
 
-const DEFAULT_PARALLEL_EXECUTION: RunnerParallelExecutionOptions = {
-  execute: (root, toolUse, signal) =>
-    RUNNER_TOOLS[toolUse.recipientName](root, toolUse.parameters, signal),
-};
-
-const parallelTool = async (
+type ParallelToolArguments = readonly [
   root: string,
   arguments_: ToolArguments,
-  signal?: AbortSignal,
-  execution: RunnerParallelExecutionOptions = DEFAULT_PARALLEL_EXECUTION,
+  signal: AbortSignal | undefined,
+  execution: RunnerParallelExecutionOptions | undefined,
+  options: RunnerToolExecutionOptions | undefined,
+];
+
+interface ParallelToolContext {
+  readonly arguments_: ToolArguments;
+  readonly execution: RunnerParallelExecutionOptions | undefined;
+  readonly options: RunnerToolExecutionOptions | undefined;
+  readonly root: string;
+  readonly signal: AbortSignal | undefined;
+}
+
+function parallelToolContext(
+  parameters: ParallelToolArguments,
+): ParallelToolContext {
+  const [root, arguments_, signal, execution, options] = parameters;
+  return { arguments_, execution, options, root, signal };
+}
+
+const parallelTool = async (
+  ...parameters: ParallelToolArguments
 ): Promise<string> => {
+  const context = parallelToolContext(parameters);
+  const selectedExecution: RunnerParallelExecutionOptions =
+    context.execution ?? {
+      execute: (parallelRoot, toolUse, parallelSignal) =>
+        RUNNER_TOOLS[toolUse.recipientName](
+          parallelRoot,
+          toolUse.parameters,
+          parallelSignal,
+          context.options,
+        ),
+    };
   const results = await mapWithParallelConcurrency(
-    parallelToolUses(arguments_),
+    parallelToolUses(context.arguments_),
     (toolUse) =>
       executeParallelCall(
         toolUse.recipientName,
-        () => execution.execute(root, toolUse, signal),
-        signal,
+        () => selectedExecution.execute(context.root, toolUse, context.signal),
+        context.signal,
       ),
-    signal,
+    context.signal,
   );
   return boundedParallelOutput(results);
 };
 
-export async function executeRunnerTool(
+async function parallelToolResult(
+  ...parameters: ParallelToolArguments
+): Promise<RunnerCommandResult> {
+  const { arguments_, execution, options, root, signal } =
+    parallelToolContext(parameters);
+  const results = await mapWithParallelConcurrency(
+    parallelToolUses(arguments_),
+    (toolUse) =>
+      executeParallelResultCall(
+        toolUse.recipientName,
+        () =>
+          execution === undefined
+            ? executeRunnerToolResult(
+                root,
+                toolUse.recipientName,
+                toolUse.parameters,
+                signal,
+                undefined,
+                options,
+              )
+            : execution
+                .execute(root, toolUse, signal)
+                .then((output) => ({ output, state: "completed" })),
+        signal,
+      ),
+    signal,
+  );
+  return aggregateParallelToolResults(results);
+}
+
+interface ResolvedRunnerTool {
+  readonly arguments_: ToolArguments;
+  readonly name: string;
+  readonly options: RunnerToolExecutionOptions | undefined;
+  readonly parallelExecution: RunnerParallelExecutionOptions | undefined;
+  readonly root: string;
+  readonly signal: AbortSignal | undefined;
+}
+
+function parallelArguments(
+  resolved: ResolvedRunnerTool,
+): ParallelToolArguments {
+  return [
+    resolved.root,
+    resolved.arguments_,
+    resolved.signal,
+    resolved.parallelExecution,
+    resolved.options,
+  ];
+}
+
+function parallelResultFromResolved(
+  resolved: ResolvedRunnerTool,
+): Promise<RunnerCommandResult> {
+  return parallelToolResult(...parallelArguments(resolved));
+}
+
+async function executeResolvedRunnerTool(
+  resolved: ResolvedRunnerTool,
+): Promise<string> {
+  if (resolved.name === "parallel") {
+    return parallelTool(...parallelArguments(resolved));
+  }
+  if (!isBaseAgentToolName(resolved.name)) {
+    throw new Error(`Unknown runner tool: ${resolved.name}`);
+  }
+  return RUNNER_TOOLS[resolved.name](
+    resolved.root,
+    resolved.arguments_,
+    resolved.signal,
+    resolved.options,
+  );
+}
+
+type ExecuteRunnerToolArguments = readonly [
   workingDirectory: string,
   name: string,
   arguments_: ToolArguments,
   signal?: AbortSignal,
   parallelExecution?: RunnerParallelExecutionOptions,
-): Promise<string> {
-  if (signal?.aborted === true) {
-    throw new Error("The runner command was stopped");
-  }
+  options?: RunnerToolExecutionOptions,
+];
 
+async function resolvedRunnerTool(
+  parameters: ExecuteRunnerToolArguments,
+): Promise<ResolvedRunnerTool> {
+  const [
+    workingDirectory,
+    name,
+    arguments_,
+    signal,
+    parallelExecution,
+    options,
+  ] = parameters;
   if (!isRunnerAgentToolName(name)) {
     throw new Error(`Unknown runner tool: ${name}`);
   }
+  return {
+    arguments_,
+    name,
+    options,
+    parallelExecution,
+    root: await resolveRunnerWorkspace(workingDirectory),
+    signal,
+  };
+}
 
-  const root = await resolveRunnerWorkspace(workingDirectory);
-  return name === "parallel"
-    ? parallelTool(root, arguments_, signal, parallelExecution)
-    : RUNNER_TOOLS[name](root, arguments_, signal);
+/** @public Direct runner-tool helper retained for runner integrations. */
+export async function executeRunnerTool(
+  ...parameters: ExecuteRunnerToolArguments
+): Promise<string> {
+  const resolved = await resolvedRunnerTool(parameters);
+  if (resolved.signal?.aborted === true) {
+    throw new Error("The runner command was stopped");
+  }
+  return executeResolvedRunnerTool(resolved);
+}
+
+export async function executeRunnerToolResult(
+  ...parameters: ExecuteRunnerToolArguments
+): Promise<RunnerCommandResult> {
+  const resolved = await resolvedRunnerTool(parameters);
+  if (resolved.name === "parallel") {
+    return parallelResultFromResolved(resolved);
+  }
+  const output = await executeResolvedRunnerTool(resolved);
+  return resolved.name === "bash"
+    ? runnerCommandResultFromOutput(output)
+    : { output, state: "completed" };
 }

@@ -1,7 +1,8 @@
 import { describe, expect, test, vi } from "vitest";
+import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import type { AppDatabase } from "../../shared/database.ts";
+import { RunnerStore } from "../../sync-engine/runner-store.ts";
 import { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
-import { transitionSessionRunner } from "../../sync-engine/session-store-reassignment.ts";
 import { SessionStore } from "../../sync-engine/session-store.ts";
 import {
   addTestProviderCredential,
@@ -40,11 +41,14 @@ interface AuthoritySetup {
 }
 
 function sessionInput(id: string, runnerId: string) {
-  return createSessionInput({
-    credentialId: CREDENTIAL_ID,
-    prompt: `Session ${id}`,
-    runnerId,
-  });
+  return {
+    ...createSessionInput({
+      credentialId: CREDENTIAL_ID,
+      prompt: `Session ${id}`,
+      runnerId,
+    }),
+    tools: AGENT_SESSION_TOOL_NAMES,
+  };
 }
 
 function createStoredSession(
@@ -77,6 +81,7 @@ function commonActionDependencies() {
     activeSession: () => false,
     browseDirectories: () =>
       Promise.resolve({ status: "runner_unavailable" as const }),
+    cleanupSession: () => undefined,
     listOnlineRunners: () => [],
   };
 }
@@ -121,6 +126,7 @@ function authoritySetup(options: {
   const credentialGate = promiseGate();
   const metadataGate = promiseGate();
   const credential = createTestProviderCredential(CREDENTIAL_ID);
+
   const launch = vi.fn(() => true);
   const notify = vi.fn();
   const actions = new SessionAgentActions({
@@ -166,30 +172,23 @@ function authoritySetup(options: {
 }
 
 function fenceParent(setup: AuthoritySetup): void {
-  const parent = setup.store.get(TEST_USER_ID, SESSION_ID);
-  if (parent === undefined) {
-    throw new Error("The parent session is unavailable");
-  }
-  transitionSessionRunner(
-    setup.database,
-    {
-      activeDurationMs: parent.activeDurationMs,
-      activeStartedAt:
-        parent.activeStartedAt === null
-          ? null
-          : new Date(parent.activeStartedAt),
-      id: parent.id,
-      status: parent.status,
-    },
-    TEST_NOW + 3,
-  );
+  expect(
+    new RunnerStore(setup.database).remove(
+      TEST_USER_ID,
+      RUNNER_ID,
+      TEST_NOW + 3,
+    ),
+  ).toBe(true);
 }
 
 function spawnInput() {
   return {
+    autoCompact: true,
     credentialId: CREDENTIAL_ID,
+    executionEnvironment: "bare_metal" as const,
     images: [],
     model: "gpt-4.1-mini",
+    openRouterProviderTag: null,
     prompt: "Stale child must not be created",
     provider: "openai" as const,
     reasoningEffort: null,

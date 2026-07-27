@@ -56,6 +56,7 @@ export interface RunnerDirectoryRequest {
   readonly runnerId: string;
   readonly sessionId: string;
   readonly userId: string;
+  readonly workspaceId?: string;
 }
 
 export type RunnerDirectoryBrowseResult =
@@ -75,7 +76,11 @@ export function readWorkingDirectory(value: unknown): string | undefined {
 }
 
 interface RunnerAvailability {
-  runnerIsAvailable(userId: string, runnerId: string): boolean;
+  runnerIsAvailable(
+    userId: string,
+    runnerId: string,
+    workspaceId?: string,
+  ): boolean;
 }
 
 export class SessionRequestHelpers {
@@ -105,16 +110,21 @@ export class SessionRequestHelpers {
     signal: AbortSignal = AbortSignal.timeout(15_000),
   ): Promise<RunnerDirectoryBrowseResult> {
     if (
-      !this.#runners.runnerIsAvailable(request.userId, request.runnerId) ||
+      !this.#runners.runnerIsAvailable(
+        request.userId,
+        request.runnerId,
+        request.workspaceId,
+      ) ||
       request.authorize?.() === false
     ) {
       return { status: "runner_unavailable" };
     }
 
     try {
-      const output = await this.#broker.dispatch(
+      const result = await this.#broker.dispatch(
         {
           arguments: {},
+          executionEnvironment: "bare_metal",
           ...(request.authorize === undefined
             ? {}
             : { authorize: request.authorize }),
@@ -125,7 +135,7 @@ export class SessionRequestHelpers {
         },
         signal,
       );
-      const value: unknown = JSON.parse(output);
+      const value: unknown = JSON.parse(result.output);
       return {
         listing: readRunnerDirectoryListing(value),
         status: "listed",
@@ -135,10 +145,14 @@ export class SessionRequestHelpers {
     }
   }
 
-  directories(request: Request, runnerId: string): Promise<Response> {
+  directories(
+    request: Request,
+    runnerId: string,
+    workspaceId?: string,
+  ): Promise<Response> {
     return Promise.resolve(
       this.authenticate(request, "POST", (user) =>
-        this.#directoriesForUser(request, user, runnerId),
+        this.#directoriesForUser(request, user, runnerId, workspaceId),
       ),
     );
   }
@@ -154,7 +168,10 @@ export class SessionRequestHelpers {
     request: Request,
     action: (user: AuthenticatedUser) => Promise<Response> | Response,
   ): Promise<Response> | Response {
-    return this.authenticate(request, "POST", action);
+    if (request.method !== "POST") {
+      return createMethodNotAllowedResponse("POST");
+    }
+    return this.forUser(request, action);
   }
 
   async recordWorkResult(
@@ -171,7 +188,10 @@ export class SessionRequestHelpers {
       return createApiError("invalid_request", 400);
     }
 
-    return this.#broker.complete(runnerId, commandId, output)
+    return this.#broker.complete(runnerId, commandId, {
+      output,
+      state: "completed",
+    })
       ? createNoContentResponse()
       : createApiError("not_found", 404);
   }
@@ -180,6 +200,7 @@ export class SessionRequestHelpers {
     request: Request,
     user: AuthenticatedUser,
     runnerId: string,
+    workspaceId?: string,
   ): Promise<Response> {
     const path = await parseJsonRequest(request, (value) => {
       const parsed = readStringField(
@@ -194,7 +215,7 @@ export class SessionRequestHelpers {
     if (
       path === undefined ||
       readIdentifier(runnerId) === undefined ||
-      !this.#runners.runnerIsAvailable(user.id, runnerId)
+      !this.#runners.runnerIsAvailable(user.id, runnerId, workspaceId)
     ) {
       return path === undefined
         ? createApiError("invalid_request", 400)

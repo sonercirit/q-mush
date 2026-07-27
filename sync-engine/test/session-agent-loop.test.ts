@@ -5,92 +5,42 @@ import type {
 } from "../../sync-engine/agent-compaction.ts";
 import { runCompactingAgentLoop } from "../../sync-engine/session-agent-loop.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import {
+  abortedSignal,
+  compacted,
+  countedCompactor,
+  deferredHandoff,
+  expectAborted,
+  expectCompactionFailure,
+  expectCompletedHandoff,
+  expectLoopCounts,
+  highTurn,
+  type LoopOptions,
+  recordingCompactor,
+  recordingMessages,
+  recordingToolPersistence,
+  runTestLoop,
+  terminalPersistence,
+  TOOL_CALL,
+  toolMessage,
+  triggeredModel,
+} from "./session-agent-loop-test-helpers.ts";
+import { promiseGate } from "./session-race-test-helpers.ts";
 
-const TOOL_CALL = {
-  arguments: '{"path":"README.md"}',
-  id: "call-1",
-  name: "read",
-};
-
-type LoopOptions = Parameters<typeof runCompactingAgentLoop>[0];
-
-function compacted(
-  summary: string,
-  costUsd: number | null = null,
-): CompactedConversation {
-  return {
-    costUsd,
-    messages: [{ content: summary, role: "user" }],
-    summary,
-    tokenUsage: null,
-  };
+function recoveredModel(content = "Must wait for explicit recovery.") {
+  return new ScriptedAgentModel([{ content, toolCalls: [] }]);
 }
 
-function recordingCompactor(
-  conversations: unknown[],
-  result: (count: number) => CompactedConversation,
-): () => AgentConversationCompactor {
-  return () => ({
-    compact: (messages) => {
-      conversations.push(messages);
-      return Promise.resolve(result(conversations.length));
-    },
-  });
+function recordedToolTurn(toolCalls: readonly unknown[]) {
+  return { content: "Finish these tools.", role: "assistant", toolCalls };
 }
 
-function highTurn(content: string, contextTokens = 95_000) {
-  return { content, contextTokens, toolCalls: [] };
-}
-
-function runTestLoop(
-  options: Pick<LoopOptions, "createCompactor" | "model"> &
-    Partial<Omit<LoopOptions, "createCompactor" | "model">>,
-): Promise<void> {
-  return runCompactingAgentLoop({
-    agentCost: () => null,
-    autoCompact: true,
-    executeTool: () => Promise.reject(new Error("No tool expected")),
-    initialMessages: [{ content: "Finish", role: "user" }],
-    maxContextTokens: 100_000,
-    recordCompaction: () => undefined,
-    recordMessage: () => undefined,
-    ...options,
-  });
-}
-
-function triggeredModel() {
-  return new ScriptedAgentModel([highTurn("Trigger compaction.")]);
-}
-
-async function expectCompactionFailure(options: {
-  readonly compactor: AgentConversationCompactor;
-  readonly expected: string | { readonly name: string };
-  readonly recordCompaction: LoopOptions["recordCompaction"];
-  readonly signal?: AbortSignal;
-}): Promise<void> {
-  const model = triggeredModel();
-  const failure = expect(
-    runTestLoop(
-      options.signal === undefined
-        ? {
-            createCompactor: () => options.compactor,
-            model,
-            recordCompaction: options.recordCompaction,
-          }
-        : {
-            createCompactor: () => options.compactor,
-            model,
-            recordCompaction: options.recordCompaction,
-            signal: options.signal,
-          },
-    ),
-  ).rejects;
-  if (typeof options.expected === "string") {
-    await failure.toThrow(options.expected);
-  } else {
-    await failure.toMatchObject(options.expected);
-  }
-  expect(model.requests).toHaveLength(1);
+function expectNoCompaction(
+  compactorRequests: number,
+  model: ScriptedAgentModel,
+): void {
+  expect(compactorRequests).toBe(0);
+  expect(model.requests).toHaveLength(0);
 }
 
 describe("compacting agent session loop", () => {
@@ -183,9 +133,7 @@ describe("compacting agent session loop", () => {
         summaries.push(compactedSummary);
         compactionCost += usage.costUsd ?? 0;
       },
-      recordMessage: (messages) => {
-        recordedMessages.push(...messages);
-      },
+      recordMessage: recordingMessages(recordedMessages),
     });
 
     expect(compactedConversations).toHaveLength(1);
@@ -222,12 +170,9 @@ describe("compacting agent session loop", () => {
     let compactions = 0;
 
     await runTestLoop({
-      createCompactor: () => ({
-        compact: () => {
-          compactions += 1;
-          return Promise.resolve(compacted("Handoff"));
-        },
-      }),
+      createCompactor: countedCompactor(() => {
+        compactions += 1;
+      }, "Handoff"),
       model,
       recordCompaction: () => undefined,
       recordMessage: () => undefined,
@@ -275,6 +220,235 @@ describe("compacting agent session loop", () => {
       { content: secondSummary, role: "user" },
     ]);
     expect(summaries).toEqual([firstSummary, secondSummary]);
+  });
+
+  test("compacts durable recovered context before the first model request", async () => {
+    const initialMessages: LoopOptions["initialMessages"] = [
+      { content: "Work", role: "user" },
+      {
+        content: "Reading before restart.",
+        role: "assistant",
+        toolCalls: [TOOL_CALL],
+      },
+      toolMessage(TOOL_CALL.id, "Durable tool result"),
+    ];
+    const model = new ScriptedAgentModel([
+      { content: "Recovered after compaction.", toolCalls: [] },
+    ]);
+    const compactedConversations: unknown[] = [];
+
+    await expect(
+      runTestLoop({
+        createCompactor: recordingCompactor(compactedConversations, () =>
+          compacted("Recovered durable handoff"),
+        ),
+        initialContextTokens: 95_000,
+        initialMessages,
+        model,
+      }),
+    ).resolves.toBe("complete");
+
+    expect(compactedConversations).toEqual([initialMessages]);
+    expect(model.requests).toHaveLength(1);
+    expect(model.requests[0]?.[0]?.content).toContain(
+      "Recovered durable handoff",
+    );
+  });
+
+  test("hands off before durable recovered pre-request compaction", async () => {
+    const model = recoveredModel();
+    let compactorRequests = 0;
+
+    await expect(
+      runTestLoop({
+        createCompactor: countedCompactor(() => {
+          compactorRequests += 1;
+        }),
+        handoffRequested: () => true,
+        initialContextTokens: 95_000,
+        model,
+      }),
+    ).resolves.toBe("handoff");
+
+    expectNoCompaction(compactorRequests, model);
+  });
+
+  test("completes when restart becomes pending during durable pre-request compaction", async () => {
+    const persistence = promiseGate();
+
+    const model = recoveredModel();
+    const handoff = deferredHandoff();
+    const compactionRequestCount = { value: 0 };
+    const loop = runTestLoop({
+      createCompactor: countedCompactor(() => {
+        compactionRequestCount.value += 1;
+      }, "Durable recovered handoff"),
+      handoffRequested: handoff.isRequested,
+      initialContextTokens: 95_000,
+      model,
+      recordCompaction: async () => {
+        await persistence.wait();
+      },
+    });
+
+    await expectCompletedHandoff(persistence, handoff, loop);
+    expectLoopCounts(compactionRequestCount.value, model, 1, 0);
+  });
+
+  test("does not pre-compact recovered context below the threshold", async () => {
+    const model = new ScriptedAgentModel([
+      { content: "Recovered normally.", toolCalls: [] },
+    ]);
+    let compactorRequests = 0;
+
+    await runTestLoop({
+      createCompactor: countedCompactor(() => {
+        compactorRequests += 1;
+      }),
+      initialContextTokens: 94_999,
+      model,
+    });
+
+    expectLoopCounts(compactorRequests, model, 0, 1);
+  });
+
+  test("an abort outranks a simultaneously requested handoff", async () => {
+    const compactor: AgentConversationCompactor = {
+      compact: () => Promise.reject(new Error("Compaction was unexpected")),
+    };
+
+    await expectAborted(
+      runTestLoop({
+        createCompactor: () => compactor,
+        handoffRequested: () => true,
+        model: new ScriptedAgentModel([]),
+        signal: abortedSignal(),
+      }),
+    );
+  });
+
+  test("hands off a tool turn before pending compaction or another model request", async () => {
+    const toolCalls = [TOOL_CALL, { ...TOOL_CALL, id: "call-2" }];
+    const model = new ScriptedAgentModel([
+      {
+        content: "Finish these tools.",
+        contextTokens: 95_000,
+        toolCalls,
+      },
+      highTurn("Must wait for restart recovery."),
+    ]);
+    const toolPersistence = promiseGate();
+    const recordedMessages: unknown[] = [];
+    let compactorRequests = 0;
+
+    const handoff = deferredHandoff();
+    const loop = runTestLoop({
+      createCompactor: countedCompactor(() => {
+        compactorRequests += 1;
+      }, "Unexpected compaction"),
+      executeTool: (call) => Promise.resolve(`${call.id} complete`),
+      handoffRequested: handoff.isRequested,
+      model,
+      recordMessage: recordingToolPersistence(
+        toolPersistence,
+        recordedMessages,
+      ),
+    });
+
+    await toolPersistence.entered;
+    expect(recordedMessages).toEqual([recordedToolTurn(toolCalls)]);
+    handoff.request();
+    toolPersistence.release(undefined);
+
+    await expect(loop).resolves.toBe("handoff");
+    expect(recordedMessages).toEqual([
+      recordedToolTurn(toolCalls),
+      toolMessage("call-1"),
+      toolMessage("call-2"),
+    ]);
+
+    expectLoopCounts(compactorRequests, model, 0, 1);
+  });
+
+  test("completes when restart becomes pending during durable terminal persistence", async () => {
+    const persistence = promiseGate();
+    const model = new ScriptedAgentModel([
+      highTurn("Persisted terminal response."),
+      highTurn("Must not run after restart."),
+    ]);
+    const compactedConversations: unknown[] = [];
+    const recordedMessages: unknown[] = [];
+    const handoff = deferredHandoff();
+    const loop = runTestLoop({
+      createCompactor: recordingCompactor(compactedConversations, () =>
+        compacted("Persisted terminal handoff"),
+      ),
+      handoffRequested: handoff.isRequested,
+      model,
+      recordMessage: terminalPersistence(persistence, recordedMessages),
+    });
+
+    expect(recordedMessages).toEqual([]);
+    await expectCompletedHandoff(persistence, handoff, loop);
+    expect(recordedMessages).toEqual([
+      {
+        content: "Persisted terminal response.",
+        role: "assistant",
+        toolCalls: [],
+      },
+    ]);
+    expect(compactedConversations).toHaveLength(1);
+    expect(model.requests).toHaveLength(1);
+  });
+
+  test("completes when restart becomes pending during terminal compaction", async () => {
+    const compactor = promiseGate<CompactedConversation>();
+    const compactionPersistence = promiseGate();
+    const model = new ScriptedAgentModel([
+      highTurn("Durable terminal response."),
+      highTurn("Must not run after restart."),
+    ]);
+    const recordedMessages: unknown[] = [];
+    const recordedCompactions: string[] = [];
+    let handoffRequested = false;
+    let compactorRequests = 0;
+    const loop = runTestLoop({
+      createCompactor: () => ({
+        compact: () => {
+          compactorRequests += 1;
+          return compactor.wait();
+        },
+      }),
+      handoffRequested: () => handoffRequested,
+      model,
+      recordCompaction: async (summary) => {
+        await compactionPersistence.wait();
+
+        recordedCompactions.push(summary);
+      },
+      recordMessage: recordingMessages(recordedMessages),
+    });
+
+    await compactor.entered;
+    expect(recordedMessages).toEqual([
+      {
+        content: "Durable terminal response.",
+        role: "assistant",
+        toolCalls: [],
+      },
+    ]);
+    compactor.release(compacted("Durable restart handoff"));
+    await compactionPersistence.entered;
+    expect(recordedCompactions).toEqual([]);
+    handoffRequested = true;
+
+    compactionPersistence.release(undefined);
+
+    await expect(loop).resolves.toBe("complete");
+
+    expect(recordedCompactions).toEqual(["Durable restart handoff"]);
+
+    expectLoopCounts(compactorRequests, model, 1, 1);
   });
 
   test("does not persist a rejected compaction", async () => {

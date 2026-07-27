@@ -1,5 +1,5 @@
-import { and, count, desc, eq, inArray, sql } from "drizzle-orm";
-import { readAgentFile, type AgentFile } from "../shared/agent-file.ts";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import type { AgentFile } from "../shared/agent-file.ts";
 import { readAgentSessionToolNames } from "../shared/agent-tools.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
@@ -8,8 +8,12 @@ import type {
   AgentSessionStatus,
 } from "../shared/session-model.ts";
 
+import { countSelectedRows } from "./database-count.ts";
+import { storedAgentFile } from "./stored-agent-file.ts";
+
 export interface ReadSessionSnapshot {
   readonly agentFile: AgentFile | null;
+  readonly executionEnvironment: (typeof agentSessions.$inferSelect)["executionEnvironment"];
   readonly id: string;
   readonly status: AgentSessionStatus;
   readonly title: string;
@@ -60,6 +64,10 @@ function ownedMessageCondition(
   return and(
     eq(agentMessages.userId, userId),
     eq(agentMessages.isDeleted, false),
+    eq(
+      agentMessages.segment,
+      sql<number>`(SELECT ${agentSessions.currentSegment} FROM ${agentSessions} WHERE ${agentSessions.id} = ${agentMessages.sessionId})`,
+    ),
     inArray(agentMessages.role, roles),
   );
 }
@@ -68,6 +76,7 @@ interface ReadSessionLookup {
   readonly roles: readonly TranscriptRole[];
   readonly sessionId: string;
   readonly userId: string;
+  readonly workspaceId?: string;
 }
 
 function sessionMessageCondition(lookup: ReadSessionLookup) {
@@ -91,23 +100,10 @@ function matchedTranscriptRecords(
   if (rows.length < limit) {
     return rows.filter(({ messageId }) => messageId !== null).length;
   }
-  return (
-    database
-      .select({ value: count() })
-      .from(agentMessages)
-      .where(sessionMessageCondition({ roles, sessionId, userId }))
-      .get()?.value ?? 0
-  );
-}
-
-function storedAgentFile(stored: {
-  readonly agentFileContent: string | null;
-  readonly agentFileName: "AGENTS.md" | "CLAUDE.md" | null;
-}): AgentFile | null {
-  return readAgentFile(
-    stored.agentFileContent === null && stored.agentFileName === null
-      ? null
-      : { content: stored.agentFileContent, name: stored.agentFileName },
+  return countSelectedRows(
+    database,
+    agentMessages,
+    sessionMessageCondition({ roles, sessionId, userId }),
   );
 }
 
@@ -134,6 +130,7 @@ export function readSessionSnapshot(
         : sql<null>`null`,
       content: sql<string | null>`substr(${agentMessages.content}, 1, 8001)`,
       createdAt: agentMessages.createdAt,
+      executionEnvironment: agentSessions.executionEnvironment,
       id: agentSessions.id,
       messageId: agentMessages.id,
       role: agentMessages.role,
@@ -156,6 +153,9 @@ export function readSessionSnapshot(
         eq(agentSessions.isDeleted, false),
         eq(agentSessions.userId, userId),
         eq(agentSessions.id, sessionId),
+        input.workspaceId === undefined
+          ? undefined
+          : eq(agentSessions.workspaceId, input.workspaceId),
       ),
     )
     .orderBy(desc(agentMessages.createdAt), desc(agentMessages.id))
@@ -171,6 +171,7 @@ export function readSessionSnapshot(
   }
   return {
     agentFile: storedAgentFile(stored),
+    executionEnvironment: stored.executionEnvironment,
     id: stored.id,
     status: stored.status,
     title: stored.title,

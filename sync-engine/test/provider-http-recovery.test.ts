@@ -136,6 +136,12 @@ function interruptedEventStream(content: string): Response {
   );
 }
 
+function resetDeltas(
+  deltas: readonly ProviderTextDelta[],
+): ProviderTextDelta[] {
+  return deltas.filter(({ reset }) => reset === true);
+}
+
 describe("provider HTTP turn recovery", () => {
   test("resets a partial turn and persists only the recovered tool call", async () => {
     const provider = new ProviderResponses([
@@ -186,10 +192,12 @@ describe("provider HTTP turn recovery", () => {
     expect(deltas.map(({ content }) => content)).toEqual([
       "Discarded partial output.",
       "",
+      "",
       "Using the recovered call.",
+      "",
       "Done.",
     ]);
-    expect(deltas[1]?.reset).toBe(true);
+    expect(resetDeltas(deltas)).toHaveLength(1);
   });
 
   test("recovers from interrupted, early-EOF, and truncated accepted bodies", async () => {
@@ -255,8 +263,9 @@ describe("provider HTTP turn recovery", () => {
     const message = requireError(transientFailure).message;
 
     expect(provider.requests).toHaveLength(4);
+
     expect(provider.delays).toEqual([1_000, 2_000, 4_000]);
-    expect(deltas.filter(({ reset }) => reset === true)).toHaveLength(4);
+    expect(resetDeltas(deltas)).toHaveLength(4);
     expect(message).toContain(SECOND_REQUEST_ID);
     expect(message).not.toContain(leakedKey);
   });

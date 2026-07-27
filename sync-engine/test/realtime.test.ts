@@ -2,167 +2,134 @@ import { expect, test } from "vitest";
 import type { AuthenticatedUser } from "../../shared/auth-model.ts";
 import { RUNNER_REALTIME_PATH } from "../../shared/routes.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
+import { SESSION_REALTIME_OPERATIONS } from "../../shared/user-realtime-protocol.ts";
+import { GLOBAL_WORKSPACE_ID } from "../../shared/workspace-model.ts";
 import type { GoogleAuth } from "../../sync-engine/auth.ts";
 import { RealtimeHub } from "../../sync-engine/realtime-hub.ts";
-import {
+import type {
   createRealtimeIntegration,
-  type QmushWebSocketData,
+  QmushWebSocketData,
 } from "../../sync-engine/realtime.ts";
-import type { RunnerIntegration } from "../../sync-engine/runners.ts";
-import type { SessionIntegration } from "../../sync-engine/sessions.ts";
+import { TEST_PENDING_QUESTIONS } from "./ask-questions-test-fixtures.ts";
+import {
+  createRecordedRunnerEffects,
+  expectOperationalRegistration,
+} from "./realtime-hardening-helpers.ts";
 import { REALTIME_TEST_SESSION_DETAIL } from "./realtime-session-fixture.ts";
+import {
+  configuredRealtimeTestIntegration,
+  connectedRunnerRealtimeTestIntegration,
+  createRealtimeTestIntegration,
+  REALTIME_TEST_USER,
+  realtimeRunnerConnection,
+  realtimeTestAuth,
+  realtimeTestSessions,
+  RealtimeUpgradeServer,
+  type RealtimeRunnerOverrides,
+  type RealtimeSessionOverrides,
+} from "./realtime-test-helpers.ts";
+import {
+  assertRealtimeUpgrade,
+  beginRunnerRestart,
+  closeRealtimeSocket,
+  connectedRecordedRunnerRealtimeTestSocket,
+  openRealtimeSocket,
+  openUserRealtimeTestSocket,
+  parseRealtimeMessages,
+  realtimeTestSocket,
+  realtimeTestUpgrade,
+  reconnectRunnerRealtimeTestSocket,
+  recordedRealtimeTestSocket,
+  runnerRestartReadyMessage,
+  sendRealtimeMessage,
+  sendUserRealtimeCommand,
+  waitForRealtimeEvent,
+  type RealtimeTestSocket,
+} from "./realtime-test-socket-helpers.ts";
 
-const USER: AuthenticatedUser = {
-  email: "mush@example.com",
-  id: "user-1",
-  name: "Mush",
-  picture: "https://example.test/avatar.png",
-};
+const USER = REALTIME_TEST_USER;
 
-class UpgradeServer {
-  data: QmushWebSocketData | undefined;
-
-  upgrade(
-    _request: Request,
-    options: { readonly data: QmushWebSocketData },
-  ): boolean {
-    this.data = options.data;
-    return true;
-  }
+function authSequence(...users: (AuthenticatedUser | null)[]): GoogleAuth {
+  let index = 0;
+  const revalidateUser: GoogleAuth["revalidateUser"] = (
+    _request,
+    expectedUserId,
+  ) => {
+    const selectedIndex = Math.min(index, users.length - 1);
+    index += 1;
+    const user = users[selectedIndex] ?? null;
+    if (user?.id !== expectedUserId) {
+      return null;
+    }
+    return user;
+  };
+  return { ...realtimeTestAuth(users[0] ?? null), revalidateUser };
 }
 
-function auth(user: AuthenticatedUser | null): GoogleAuth {
-  return {
-    authenticatedUser: () => user,
-    begin: () => new Response(),
-    complete: () => Promise.resolve(new Response()),
-    logout: () => new Response(),
-    session: () => new Response(),
-  };
-}
-
-type RunnerIntegrationOverrides = Partial<
-  Pick<RunnerIntegration, "connect" | "runnerToken" | "seen">
->;
-
-function runners(
-  token: string | undefined,
-  overrides: RunnerIntegrationOverrides = {},
-): RunnerIntegration {
-  return {
-    collection: () => new Response(),
-    connect: () => undefined,
-    disconnected: () => undefined,
-    installer: () => new Response(),
-    listForUser: () => [],
-    listOnlineForUser: () => ({ items: [], totalItems: 0 }),
-    onRemoved: () => undefined,
-    onRemoving: () => undefined,
-    onlineForUser: () => [],
-    remove: () => Promise.resolve(new Response()),
-    runnerIsAvailable: () => false,
-    runnerToken: () => token,
-    seen: () => undefined,
-    setDefault: () => new Response(),
-    ...overrides,
-  };
-}
-
-type SessionIntegrationOverrides = Partial<
-  Pick<
-    SessionIntegration,
-    "detailForUser" | "listForUser" | "onChange" | "runnerConnected"
-  >
->;
-
-function sessions(
-  overrides: SessionIntegrationOverrides = {},
-): SessionIntegration {
-  return {
-    collection: () => Promise.resolve(new Response()),
-    compact: () => Promise.resolve(new Response()),
-    compaction: () => Promise.resolve(new Response()),
-    completeRunnerCommand: () => false,
-    continue: () => Promise.resolve(new Response()),
-    deliverRunnerCommands: () => undefined,
-    detailForUser: () => undefined,
-    directories: () => Promise.resolve(new Response()),
-    drain: () => Promise.resolve(),
-    item: () => new Response(),
-    listForUser: () => [],
-    message: () => Promise.resolve(new Response()),
-    models: () => Promise.resolve(new Response()),
-    onChange: () => undefined,
-    reassign: () => Promise.resolve(new Response()),
-    runnerConnected: () => undefined,
-    runnerRemoved: () => Promise.resolve(),
-    stop: () => Promise.resolve(new Response()),
-    ...overrides,
-  };
+function integrationWithAuth(
+  selectedAuth: GoogleAuth,
+  token?: string,
+  runnerOverrides?: RealtimeRunnerOverrides,
+  sessionOverrides?: RealtimeSessionOverrides,
+) {
+  return createRealtimeTestIntegration(selectedAuth, {
+    ...(runnerOverrides === undefined ? {} : { runnerOverrides }),
+    ...(sessionOverrides === undefined ? {} : { sessionOverrides }),
+    ...(token === undefined ? {} : { token }),
+  });
 }
 
 function integration(
   user: AuthenticatedUser | null,
   token?: string,
-  runnerOverrides?: RunnerIntegrationOverrides,
-  sessionOverrides?: SessionIntegrationOverrides,
+  runnerOverrides?: RealtimeRunnerOverrides,
+  sessionOverrides?: RealtimeSessionOverrides,
 ) {
-  return createRealtimeIntegration({
-    auth: auth(user),
-    hub: new RealtimeHub(),
-    runnerVersion: "runner-version",
-    runners: runners(token, runnerOverrides),
-    sessions: sessions(sessionOverrides),
-  });
-}
-
-function upgrade(
-  realtime: ReturnType<typeof createRealtimeIntegration>,
-  path: string,
-  server: UpgradeServer,
-  websocket = true,
-): Response | undefined {
-  return realtime.upgrade(
-    new Request(`http://localhost${path}`, {
-      ...(websocket ? { headers: { upgrade: "websocket" } } : {}),
-    }),
-    server,
+  return integrationWithAuth(
+    realtimeTestAuth(user),
+    token,
+    runnerOverrides,
+    sessionOverrides,
   );
 }
 
-interface TestSocket {
-  readonly data: QmushWebSocketData;
-  close(): void;
-  publish(): number;
-  send(): number;
-  subscribe(): void;
-  unsubscribe(): void;
+function userCommandConnection(selectedAuth: GoogleAuth) {
+  const realtime = integrationWithAuth(selectedAuth);
+  return { connection: openUserRealtimeTestSocket(realtime), realtime };
 }
 
-function testSocket(data: QmushWebSocketData | undefined): TestSocket {
-  if (data === undefined) {
-    throw new Error("The test WebSocket did not upgrade");
-  }
+function openedSessionPublisher(
+  detail: () => AgentSessionDetail,
+  sessionOverrides: RealtimeSessionOverrides = {},
+) {
+  let listener: ((userId: string, sessionId: string) => void) | undefined;
+  const realtime = configuredRealtimeTestIntegration({
+    auth: realtimeTestAuth(USER),
+    hub: new RealtimeHub(),
+    sessions: realtimeTestSessions({
+      detailForUser: detail,
+      listForUser: () => [detail()],
+      onChange: (nextListener) => {
+        listener = nextListener;
+      },
+      ...sessionOverrides,
+    }),
+  });
   return {
-    close: () => undefined,
-    data,
-    publish: () => 1,
-    send: () => 1,
-    subscribe: () => undefined,
-    unsubscribe: () => undefined,
+    connection: openUserRealtimeTestSocket(realtime),
+    publish: () => {
+      const selected = detail();
+      listener?.(USER.id, selected.id);
+    },
   };
 }
 
-function websocketMessage(
-  handler: Bun.WebSocketHandler<QmushWebSocketData>,
-  socket: TestSocket,
-  message: string,
-): unknown {
-  const method: unknown = Reflect.get(handler, "message");
-  if (typeof method !== "function") {
-    throw new TypeError("The realtime message handler is unavailable");
-  }
-  return Reflect.apply(method, undefined, [socket, message]);
+function sessionPublicationEvents(detail: AgentSessionDetail) {
+  return [
+    { session: detail, type: "session" },
+    { pending: null, sessionId: detail.id, type: "session_questions" },
+    { sessions: [detail], type: "sessions" },
+  ];
 }
 
 function expectUpgrade(
@@ -170,22 +137,69 @@ function expectUpgrade(
   path: string,
   expected: QmushWebSocketData,
 ): void {
-  const server = new UpgradeServer();
-  expect(upgrade(realtime, path, server)).toBeUndefined();
-  expect(server.data).toEqual(expected);
+  expect(assertRealtimeUpgrade(realtime, path)).toEqual(expected);
 }
 
-test("upgrades an authenticated browser realtime request", () => {
-  expectUpgrade(integration(USER), "/api/realtime", {
-    kind: "user",
-    user: USER,
-  });
+test("upgrades an authenticated browser request", () => {
+  const server = new RealtimeUpgradeServer();
+  expect(
+    realtimeTestUpgrade(integration(USER), "/api/realtime", server),
+  ).toBeUndefined();
+  expect(server.data).toMatchObject({ kind: "user", user: USER });
+  expect(server.data).toHaveProperty("request");
 });
 
-test("rejects unauthorized and non-WebSocket realtime requests", () => {
-  const server = new UpgradeServer();
-  const unauthorized = upgrade(integration(null), "/api/realtime", server);
-  const missingUpgrade = upgrade(
+test("rejects invalid browser scopes", () => {
+  const realtime = configuredRealtimeTestIntegration({
+    auth: realtimeTestAuth(USER),
+    workspaceExists: (_userId, workspaceId) =>
+      workspaceId !== GLOBAL_WORKSPACE_ID && workspaceId === "workspace-1",
+  });
+
+  const server = new RealtimeUpgradeServer();
+
+  for (const path of [
+    "/api/realtime?",
+    `/api/realtime?workspaceId=${GLOBAL_WORKSPACE_ID}`,
+  ]) {
+    expect(realtimeTestUpgrade(realtime, path, server)?.status).toBe(401);
+  }
+
+  expect(
+    realtimeTestUpgrade(
+      realtime,
+      "/api/realtime?workspaceId=workspace-1",
+      server,
+    ),
+  ).toBeUndefined();
+});
+
+test("requires a same-origin browser request", () => {
+  const realtime = integration(USER);
+  const server = new RealtimeUpgradeServer();
+  const request = (origin?: string) =>
+    new Request("http://localhost/api/realtime?workspaceId=workspace-1", {
+      headers: {
+        ...(origin === undefined ? {} : { origin }),
+        upgrade: "websocket",
+      },
+    });
+
+  expect(realtime.upgrade(request(), server)?.status).toBe(403);
+  expect(
+    realtime.upgrade(request("https://other.example"), server)?.status,
+  ).toBe(403);
+  expect(realtime.upgrade(request("http://localhost"), server)).toBeUndefined();
+});
+
+test("rejects invalid realtime requests", () => {
+  const server = new RealtimeUpgradeServer();
+  const unauthorized = realtimeTestUpgrade(
+    integration(null),
+    "/api/realtime",
+    server,
+  );
+  const missingUpgrade = realtimeTestUpgrade(
     integration(USER),
     "/api/realtime",
     server,
@@ -196,49 +210,224 @@ test("rejects unauthorized and non-WebSocket realtime requests", () => {
   expect(missingUpgrade?.status).toBe(426);
 });
 
-test("recovers and wakes completed child callbacks when a runner connects", () => {
-  const connectedUsers: string[] = [];
-  const realtime = integration(
-    null,
-    "qmr_runner-token",
+test.each(["zero", "throw"] as const)(
+  "closes when browser snapshot delivery returns %s",
+  (failure) => {
+    const realtime = integration(USER);
+    const server = new RealtimeUpgradeServer();
+    expect(
+      realtimeTestUpgrade(realtime, "/api/realtime", server),
+    ).toBeUndefined();
+    const connection = recordedRealtimeTestSocket(server.data, {
+      failure,
+      successfulSendsBeforeFailure: 1,
+    });
+
+    openRealtimeSocket(realtime.websocket, connection.socket);
+
+    expect(connection.record.closed).toEqual([
+      1011,
+      "Realtime snapshot failed",
+    ]);
+  },
+);
+
+const invalidCommand = Object.freeze({
+  commandId: "command-invalid",
+  idempotencyKey: "invalid-1",
+  operation: "bad operation",
+  payload: {},
+  type: "command",
+});
+
+test("acknowledges malformed browser commands", () => {
+  const realtime = integration(USER);
+  const socket = realtimeTestSocket(
+    assertRealtimeUpgrade(realtime, "/api/realtime"),
+  );
+
+  sendRealtimeMessage(realtime.websocket, socket, invalidCommand);
+
+  expect(parseRealtimeMessages(socket.sent)).toContainEqual({
+    commandId: "command-invalid",
+    error: "invalid_command",
+    type: "command_error",
+  });
+});
+
+function expectExpiredRealtimeConnection(
+  connection: ReturnType<typeof openUserRealtimeTestSocket>,
+): void {
+  expect(connection.record.sent).toEqual([]);
+  expect(connection.record.closed).toEqual([1008, "Authentication expired"]);
+}
+
+test("revalidates authentication for malformed commands", () => {
+  const realtime = integrationWithAuth(authSequence(USER, null));
+  const connection = openUserRealtimeTestSocket(realtime);
+
+  sendRealtimeMessage(realtime.websocket, connection.socket, invalidCommand);
+
+  expectExpiredRealtimeConnection(connection);
+});
+
+test("rejects commands after authentication expires", async () => {
+  const { connection: expired, realtime } = userCommandConnection(
+    authSequence(USER, USER, null),
+  );
+
+  sendUserRealtimeCommand(realtime.websocket, expired.socket, [
+    SESSION_REALTIME_OPERATIONS.read,
+    { sessionId: "session-1" },
+    { commandId: "command-expired", idempotencyKey: "expired-1" },
+  ]);
+  await waitForRealtimeEvent(expired.record.sent, "command_error");
+
+  expect(parseRealtimeMessages(expired.record.sent)).toContainEqual({
+    commandId: "command-expired",
+    error: "authentication_expired",
+    type: "command_error",
+  });
+});
+
+test("executes authenticated browser commands", async () => {
+  const { connection, realtime } = userCommandConnection(
+    realtimeTestAuth(USER),
+  );
+
+  sendUserRealtimeCommand(realtime.websocket, connection.socket, [
+    SESSION_REALTIME_OPERATIONS.read,
+    { sessionId: "session-1" },
+    { commandId: "command-1", idempotencyKey: "read-1" },
+  ]);
+  await waitForRealtimeEvent(connection.record.sent, "command_success");
+
+  expect(parseRealtimeMessages(connection.record.sent)).toContainEqual({
+    commandId: "command-1",
+    result: REALTIME_TEST_SESSION_DETAIL,
+    type: "command_success",
+  });
+});
+
+test("restores owned active tool streams", () => {
+  const hub = new RealtimeHub();
+  const reads: unknown[] = [];
+  hub.publishToolStream(
+    USER.id,
     {
-      connect: () => ({
-        connection: {
-          id: "runner-1",
-          tokenHash: "hash",
-          userId: USER.id,
+      callId: "call-reconnect",
+      index: 0,
+      sequence: 0,
+      sessionId: "session-1",
+      state: "preparing",
+      streamId: "stream-reconnect",
+      type: "tool_stream",
+    },
+    "workspace-1",
+  );
+  const realtime = configuredRealtimeTestIntegration({
+    auth: realtimeTestAuth(USER),
+    hub,
+    sessions: realtimeTestSessions({
+      detailForUser: (userId, sessionId, workspaceId) => {
+        reads.push({ sessionId, userId, workspaceId });
+        return REALTIME_TEST_SESSION_DETAIL;
+      },
+    }),
+  });
+
+  const connection = openUserRealtimeTestSocket(realtime);
+  const syncRequest = {
+    sessionId: "session-1",
+    streamId: "stream-reconnect",
+    type: "sync_tools" as const,
+  };
+  sendRealtimeMessage(realtime.websocket, connection.socket, syncRequest);
+
+  expect(reads).toEqual([
+    {
+      sessionId: "session-1",
+      userId: USER.id,
+      workspaceId: "workspace-1",
+    },
+  ]);
+  expect(parseRealtimeMessages(connection.record.sent)).toEqual([
+    {
+      sessionId: "session-1",
+      streamId: "stream-reconnect",
+      streams: [
+        {
+          arguments: "",
+          callId: "call-reconnect",
+          index: 0,
+          name: "",
+          sequence: 0,
+          sessionId: "session-1",
+          state: "preparing",
+          stderr: "",
+          stdout: "",
+          streamId: "stream-reconnect",
         },
-        userId: USER.id,
-      }),
+      ],
+      type: "tool_stream_snapshot",
+    },
+  ]);
+});
+
+test("wakes completed child callbacks on connect", () => {
+  const connectedUsers: string[] = [];
+  const realtime = connectedRunnerRealtimeTestIntegration(
+    {
+      runnerConnected: (runnerId) => {
+        connectedUsers.push(`${USER.id}:${runnerId}`);
+      },
     },
     {
-      runnerConnected: () => {
-        connectedUsers.push(USER.id);
+      connect: () => {
+        const connected = realtimeRunnerConnection();
+        return {
+          ...connected,
+          connection: { ...connected.connection, tokenHash: "hash" },
+        };
       },
     },
   );
-  const server = new UpgradeServer();
-  expect(upgrade(realtime, RUNNER_REALTIME_PATH, server)).toBeUndefined();
-  const socket = testSocket(server.data);
+  connectedRecordedRunnerRealtimeTestSocket(realtime, "machine-1");
 
-  void websocketMessage(
-    realtime.websocket,
-    socket,
-    JSON.stringify({
-      architecture: "x64",
-      machineId: "machine-1",
-      name: "runner",
-      platform: "linux",
-      type: "connect",
-    }),
-  );
-
-  expect(connectedUsers).toEqual([USER.id]);
+  expect(connectedUsers).toEqual([`${USER.id}:runner-1`]);
 });
-test("publishes runner-required and reassigned session snapshots", () => {
-  const hub = new RealtimeHub();
-  const sent: string[] = [];
-  let listener: ((userId: string, sessionId: string) => void) | undefined;
+
+test("publishes and clears pending questions", () => {
+  const pending = TEST_PENDING_QUESTIONS;
+  let current: typeof pending | null = pending;
+  const detail: AgentSessionDetail = {
+    ...REALTIME_TEST_SESSION_DETAIL,
+    pendingQuestions: pending,
+    status: "paused",
+  };
+
+  const { connection, publish } = openedSessionPublisher(() => detail, {
+    pendingQuestionForUser: () => current,
+  });
+
+  publish();
+  current = null;
+  publish();
+
+  expect(
+    parseRealtimeMessages(connection.record.sent).filter(
+      (event) =>
+        typeof event === "object" &&
+        event !== null &&
+        Reflect.get(event, "type") === "session_questions",
+    ),
+  ).toEqual([
+    { pending, sessionId: detail.id, type: "session_questions" },
+    { pending: null, sessionId: detail.id, type: "session_questions" },
+  ]);
+});
+
+test("publishes reassigned session snapshots", () => {
   let detail: AgentSessionDetail = {
     ...REALTIME_TEST_SESSION_DETAIL,
     id: "session-1",
@@ -246,76 +435,108 @@ test("publishes runner-required and reassigned session snapshots", () => {
     runnerRequired: true,
     status: "idle",
   };
-  const realtime = createRealtimeIntegration({
-    auth: auth(USER),
-    hub,
-    runnerVersion: "runner-version",
-    runners: runners(undefined),
-    sessions: sessions({
-      detailForUser: () => detail,
-      listForUser: () => [detail],
-      onChange: (nextListener) => {
-        listener = nextListener;
-      },
-    }),
-  });
-  const server = new UpgradeServer();
-  expect(upgrade(realtime, "/api/realtime", server)).toBeUndefined();
-  const socket = {
-    ...testSocket(server.data),
-    send(message: string): number {
-      sent.push(message);
-      return 1;
-    },
-  };
-  const open: unknown = Reflect.get(realtime.websocket, "open");
-  if (typeof open !== "function") {
-    throw new TypeError("The realtime open handler is unavailable");
-  }
-  Reflect.apply(open, undefined, [socket]);
-  sent.length = 0;
 
-  listener?.(USER.id, detail.id);
+  const initial = detail;
+  const { connection, publish } = openedSessionPublisher(() => detail);
+
+  publish();
   detail = {
     ...detail,
     runnerId: "replacement-runner",
     runnerRequired: false,
     workingDirectory: "/replacement/project",
   };
-  listener?.(USER.id, detail.id);
 
-  const events: unknown[] = sent.map((message) => {
-    const event: unknown = JSON.parse(message);
-    return event;
-  });
-  expect(events).toEqual([
-    {
-      session: {
-        ...REALTIME_TEST_SESSION_DETAIL,
-        runnerId: "removed-runner",
-        runnerRequired: true,
-      },
-      type: "session",
-    },
-    {
-      sessions: [
-        {
-          ...REALTIME_TEST_SESSION_DETAIL,
-          runnerId: "removed-runner",
-          runnerRequired: true,
-        },
-      ],
-      type: "sessions",
-    },
-    { session: detail, type: "session" },
-    { sessions: [detail], type: "sessions" },
+  publish();
+
+  expect(parseRealtimeMessages(connection.record.sent)).toEqual([
+    ...sessionPublicationEvents(initial),
+    ...sessionPublicationEvents(detail),
   ]);
 });
 
-test("upgrades a token-authenticated runner realtime request", () => {
+test("retains restart state until confirmation", async () => {
+  let drainCalls = 0;
+  let finishDrain: (() => void) | undefined;
+
+  const effects = createRecordedRunnerEffects();
+  const usableAtResume: boolean[] = [];
+  const replacementState: {
+    socket?: RealtimeTestSocket;
+  } = {};
+  const finalizedReceipts = new Set<string>();
+  const realtime = connectedRunnerRealtimeTestIntegration(
+    {
+      drainRunner: () => {
+        drainCalls += 1;
+        return new Promise<void>((resolve) => {
+          finishDrain = resolve;
+        });
+      },
+      runnerConnected: (runnerId) => {
+        effects.connected.push(runnerId);
+      },
+      runnerDisconnected: (runnerId) => {
+        effects.disconnected.push(runnerId);
+      },
+      runnerRestartReady: (runnerId, restartId) => {
+        const replacement = replacementState.socket;
+        effects.resumed.push(`${runnerId}:${restartId}`);
+        usableAtResume.push(
+          replacement?.data.kind === "runner" && replacement.data.usable,
+        );
+      },
+    },
+    { connect: () => realtimeRunnerConnection("runner-1", USER.id) },
+    finalizedReceipts,
+  );
+  const first = beginRunnerRestart(
+    realtime,
+    "machine-1",
+    "restart-reconnect",
+    (socket) => {
+      socket.sent.length = 0;
+    },
+  );
+
+  finishDrain?.();
+  await Promise.resolve();
+  expect(first.sent).toEqual([runnerRestartReadyMessage("restart-reconnect")]);
+  expect(effects.resumed).toEqual([]);
+
+  closeRealtimeSocket(realtime.websocket, first);
+  finalizedReceipts.clear();
+  const replacement = reconnectRunnerRealtimeTestSocket(realtime, "machine-1", {
+    beforeConnect: (socket) => {
+      replacementState.socket = socket;
+    },
+    restartId: "restart-reconnect",
+  });
+
+  expect({
+    connected: effects.connected,
+    disconnected: effects.disconnected,
+    drainCalls,
+    resumed: effects.resumed,
+    usableAtResume,
+  }).toEqual({
+    connected: ["runner-1"],
+    disconnected: ["runner-1"],
+    drainCalls: 1,
+    resumed: ["runner-1:restart-reconnect"],
+    usableAtResume: [false],
+  });
+  expectOperationalRegistration(replacement.sent);
+});
+
+test("upgrades a token-authenticated runner request", () => {
   expectUpgrade(integration(null, "qmr_runner-token"), RUNNER_REALTIME_PATH, {
+    committed: undefined,
+    fenced: false,
     kind: "runner",
+    registration: undefined,
     runner: undefined,
     token: "qmr_runner-token",
+    usable: false,
   });
 });

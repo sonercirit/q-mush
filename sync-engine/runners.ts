@@ -4,8 +4,11 @@ import { createDatabase } from "../shared/database.ts";
 import { createUuidV7 } from "../shared/ids.ts";
 import { RUNNER_INSTALLER_PATH } from "../shared/routes.ts";
 import type { RunnerSummary } from "../shared/runner-model.ts";
+import { readBoundedTrimmedString } from "../shared/validation.ts";
+import { isWorkspaceId } from "../shared/workspace-model.ts";
 import type { GoogleAuth } from "./auth.ts";
 import { withAuthenticatedUser } from "./authenticated-request.ts";
+import { scopedCollectionForUser } from "./authenticated-scoped-collection.ts";
 import {
   createApiError,
   createJsonResponse,
@@ -14,13 +17,30 @@ import {
 } from "./http.ts";
 import type { OAuthDependencies } from "./oauth.ts";
 import { setOwnedDefault } from "./owned-default.ts";
+import { requestWorkspaceId } from "./request-workspace.ts";
+import type {
+  FinalizedRunnerActivationOperations,
+  RunnerActivationLifecycleOperations,
+} from "./runner-activation-operations.ts";
 import { quoteShellValue, renderRunnerInstaller } from "./runner-installer.ts";
+import { settleActivationLifecycleParameters } from "./runner-registration-finalization.ts";
+import type {
+  FinalizedRunnerActivationParameters,
+  RunnerLifecycleParameters,
+} from "./runner-registration-parameters.ts";
 import {
   RunnerStore,
   type RunnerConnection,
   type RunnerMetadata,
   type RunnerPage,
+  type RunnerRegistrationFence,
+  type RunnerRegistrationPrepareOptions,
 } from "./runner-store.ts";
+import { updateAuthenticatedConnectionScopes } from "./scoped-collection.ts";
+import {
+  runnerAvailabilityAt,
+  type SessionRunnerAvailability,
+} from "./session-runner-availability.ts";
 
 const RUNNER_TOKEN_PATTERN = /^qmr_[A-Za-z\d_-]{8,200}$/u;
 const MACHINE_FINGERPRINT_PATTERN = /^[A-Za-z\d._:-]{8,200}$/u;
@@ -42,6 +62,7 @@ interface RunnerDependencies extends Pick<
   OAuthDependencies,
   "database" | "now" | "randomId" | "randomToken"
 > {
+  readonly generateActivationId?: () => string;
   readonly onRemoved?: RunnerRemovedListener;
   readonly store?: RunnerStore;
 }
@@ -51,27 +72,79 @@ interface ConnectedRunner {
   readonly userId: string;
 }
 
+export interface RunnerRegistrationProposal {
+  readonly activationId: string;
+  finalize(receipt: string): RunnerRegistrationActivation;
+  prepare(restartId?: string): RunnerRegistrationCommit;
+  readonly runnerId: string;
+}
+
+export interface RunnerActivationReceiptValidation {
+  readonly activationId: string;
+  readonly connection: RunnerConnection;
+  readonly lifecycle: "ordinary" | "restart";
+  readonly lifecycleSettled: boolean;
+  readonly phase: "finalized" | "prepared";
+  readonly restartId: string | undefined;
+}
+
+type RunnerRegistrationActivation =
+  | {
+      readonly connected: ConnectedRunner;
+      readonly status: "activated";
+    }
+  | { readonly status: "registration_changed" };
+
+type RunnerRegistrationCommit =
+  | {
+      readonly activationReceipt: string;
+      readonly connected: ConnectedRunner;
+      readonly status: "registered";
+    }
+  | { readonly status: "registration_changed" };
+
 interface RunnerOptionQuery {
   readonly limit: number;
   readonly offset: number;
   readonly search?: string;
 }
 
-export interface RunnerIntegration {
+export interface RunnerIntegration
+  extends
+    RunnerActivationLifecycleOperations,
+    FinalizedRunnerActivationOperations<
+      ConnectedRunner | undefined,
+      readonly []
+    > {
   collection(request: Request): Response;
   connect(token: string, metadata: RunnerMetadata): ConnectedRunner | undefined;
   disconnected(runner: RunnerConnection): void;
   installer(request: Request): Response;
-  listForUser(userId: string): readonly RunnerSummary[];
-  listOnlineForUser(userId: string, query: RunnerOptionQuery): RunnerPage;
+  listForUser(userId: string, workspaceId?: string): readonly RunnerSummary[];
+  listOnlineForUser(
+    userId: string,
+    query: RunnerOptionQuery,
+    workspaceId?: string,
+  ): RunnerPage;
   onRemoved(listener: RunnerRemovedListener): void;
   onRemoving(listener: RunnerRemovingListener): void;
-  onlineForUser(userId: string): readonly RunnerSummary[];
+  onlineForUser(userId: string, workspaceId?: string): readonly RunnerSummary[];
+  preflightRegistration(
+    token: string,
+    metadata: RunnerMetadata,
+    activationId?: string,
+  ): RunnerRegistrationProposal | undefined;
+  receiptState(
+    token: string,
+    metadata: RunnerMetadata,
+    receipt: string,
+  ): RunnerActivationReceiptValidation | undefined;
   remove(request: Request, runnerId: string): Promise<Response>;
-  runnerIsAvailable(userId: string, runnerId: string): boolean;
+  runnerIsAvailable: SessionRunnerAvailability;
   runnerToken(request: Request): string | undefined;
   seen(runner: RunnerConnection): void;
   setDefault(request: Request, runnerId: string): Response;
+  setScopes(request: Request, runnerId: string): Promise<Response>;
 }
 
 function defaultRandomToken(): string {
@@ -100,12 +173,10 @@ function readBearerToken(request: Request): string | undefined {
 }
 
 function normalizeMachineValue(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-
-  const normalized = value.trim();
-  return MACHINE_VALUE_PATTERN.test(normalized) ? normalized : undefined;
+  const normalized = readBoundedTrimmedString(value, 100);
+  return normalized !== undefined && MACHINE_VALUE_PATTERN.test(normalized)
+    ? normalized
+    : undefined;
 }
 
 export function readRunnerMetadata(value: unknown): RunnerMetadata | undefined {
@@ -136,6 +207,7 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
   readonly #now: () => number;
   readonly #removalListeners = new Set<RunnerRemovalListeners>();
   readonly #randomToken: () => string;
+  readonly #runnerIsAvailable: SessionRunnerAvailability;
   readonly #store: RunnerStore;
 
   constructor(auth: GoogleAuth, dependencies: RunnerDependencies) {
@@ -153,7 +225,9 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
       new RunnerStore(
         dependencies.database ?? createDatabase(":memory:"),
         dependencies.randomId ?? createUuidV7,
+        dependencies.generateActivationId ?? createUuidV7,
       );
+    this.#runnerIsAvailable = runnerAvailabilityAt(this.#store, this.#now);
   }
 
   collection(request: Request): Response {
@@ -166,14 +240,28 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
     token: string,
     metadata: RunnerMetadata,
   ): ConnectedRunner | undefined {
-    const result = this.#store.register(token, metadata, this.#now());
-    const connection =
-      result.status === "registered"
-        ? this.#store.authenticate(token)
-        : undefined;
-    return connection === undefined
-      ? undefined
-      : { connection, userId: connection.userId };
+    const proposal = this.preflightRegistration(
+      token,
+      metadata,
+      createUuidV7(),
+    );
+    if (proposal === undefined) {
+      return undefined;
+    }
+    const committed = proposal.prepare();
+    if (committed.status !== "registered") {
+      return undefined;
+    }
+    const activated = proposal.finalize(committed.activationReceipt);
+    if (activated.status !== "activated") {
+      return undefined;
+    }
+    return this.#store.registration.settleActivationLifecycle(
+      proposal.activationId,
+      "ordinary",
+    )
+      ? activated.connected
+      : undefined;
   }
 
   #setOnline(runner: RunnerConnection, online: boolean): void {
@@ -184,21 +272,26 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
     this.#setOnline(runner, false);
   }
 
-  #list(userId: string): readonly RunnerSummary[] {
-    return this.#store.list(userId, this.#now());
+  #list(userId: string, workspaceId?: string): readonly RunnerSummary[] {
+    return this.#store.list(userId, this.#now(), workspaceId);
   }
 
-  listForUser(userId: string): readonly RunnerSummary[] {
-    return this.#list(userId);
+  listForUser(userId: string, workspaceId?: string): readonly RunnerSummary[] {
+    return this.#list(userId, workspaceId);
   }
 
-  listOnlineForUser(userId: string, query: RunnerOptionQuery): RunnerPage {
+  listOnlineForUser(
+    userId: string,
+    query: RunnerOptionQuery,
+    workspaceId?: string,
+  ): RunnerPage {
     return this.#store.listOnline(
       userId,
       this.#now(),
       query.offset,
       query.limit,
       query.search,
+      workspaceId,
     );
   }
 
@@ -216,8 +309,97 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
     });
   }
 
-  onlineForUser(userId: string): readonly RunnerSummary[] {
-    return this.#list(userId).filter(({ status }) => status === "online");
+  onlineForUser(
+    userId: string,
+    workspaceId?: string,
+  ): readonly RunnerSummary[] {
+    return this.#list(userId, workspaceId).filter(
+      ({ status }) => status === "online",
+    );
+  }
+
+  preflightRegistration(
+    token: string,
+    metadata: RunnerMetadata,
+    activationId = createUuidV7(),
+  ): RunnerRegistrationProposal | undefined {
+    const result = this.#store.registration.preflight(
+      token,
+      metadata,
+      activationId,
+    );
+    if (result.status !== "ready") {
+      return undefined;
+    }
+    const registration = result.registration;
+    let activated: RunnerRegistrationActivation | undefined;
+    let committed: RunnerRegistrationCommit | undefined;
+    let fence: RunnerRegistrationFence | undefined;
+    return {
+      activationId: registration.activationId,
+      prepare: (restartId) => {
+        const lifecycle = restartId === undefined ? "ordinary" : "restart";
+        if (
+          committed?.status === "registered" &&
+          fence !== undefined &&
+          this.#store.registration.fenceIsCurrent(fence)
+        ) {
+          return committed;
+        }
+        if (activated?.status === "activated") {
+          return committed ?? { status: "registration_changed" as const };
+        }
+        committed = (() => {
+          const preparation: RunnerRegistrationPrepareOptions = {
+            lifecycle,
+            now: this.#now(),
+            ...(restartId === undefined ? {} : { restartId }),
+          };
+          const result = this.#store.registration.commit(
+            registration,
+            preparation,
+          );
+          if (result.status !== "registered") {
+            fence = undefined;
+            return result;
+          }
+          const connection = result.registration.connection;
+          fence = result.registration.fence;
+          activated = undefined;
+          return {
+            activationReceipt: this.#store.registration.receipt(fence),
+            connected: { connection, userId: connection.userId },
+            status: "registered" as const,
+          };
+        })();
+        return committed;
+      },
+      finalize: (receipt) => {
+        if (activated?.status === "activated") {
+          return activated;
+        }
+        if (fence === undefined) {
+          return { status: "registration_changed" as const };
+        }
+        const applied = this.#store.registration.finalizeRegistration(fence, {
+          now: this.#now(),
+          receipt,
+        });
+        activated =
+          applied.status === "activated"
+            ? {
+                connected: {
+                  connection: applied.connection,
+                  userId: applied.connection.userId,
+                },
+                status: "activated" as const,
+              }
+            : applied;
+        fence = undefined;
+        return activated;
+      },
+      runnerId: registration.target.id,
+    };
   }
 
   installer(request: Request): Response {
@@ -256,9 +438,42 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
     );
   }
 
-  runnerIsAvailable(userId: string, runnerId: string): boolean {
-    return this.#store.isAvailable(userId, runnerId, this.#now());
+  receiptState(
+    token: string,
+    metadata: RunnerMetadata,
+    receipt: string,
+  ): RunnerActivationReceiptValidation | undefined {
+    return this.#store.registration.receiptState(token, metadata, receipt);
   }
+
+  settleActivationLifecycle(...parameters: RunnerLifecycleParameters): boolean {
+    return settleActivationLifecycleParameters(
+      this.#store.registration.settleActivationLifecycle.bind(
+        this.#store.registration,
+      ),
+      parameters,
+    );
+  }
+
+  touchFinalizedActivation(
+    ...[token, metadata, receipt]: FinalizedRunnerActivationParameters
+  ): ConnectedRunner | undefined {
+    const connection = this.#store.registration.touchFinalizedActivation(
+      token,
+      metadata,
+      receipt,
+      this.#now(),
+    );
+    return connection === undefined
+      ? undefined
+      : { connection, userId: connection.userId };
+  }
+
+  runnerIsAvailable: SessionRunnerAvailability = (
+    userId,
+    runnerId,
+    workspaceId,
+  ) => this.#runnerIsAvailable(userId, runnerId, workspaceId);
 
   runnerToken(request: Request): string | undefined {
     const token = readBearerToken(request);
@@ -277,16 +492,26 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
     });
   }
 
-  #collectionForUser(request: Request, user: AuthenticatedUser): Response {
-    if (request.method === "GET") {
-      return createJsonResponse({
-        runners: this.#store.list(user.id, this.#now()),
-      });
-    }
+  async setScopes(request: Request, runnerId: string): Promise<Response> {
+    return updateAuthenticatedConnectionScopes(
+      request,
+      (action) => withAuthenticatedUser(this.#auth, request, action),
+      (userId, workspaceIds) =>
+        this.#store.setScopes(userId, runnerId, workspaceIds, this.#now()),
+    );
+  }
 
-    return request.method === "POST"
-      ? this.#createSetup(request, user)
-      : createMethodNotAllowedResponse("GET, POST");
+  #collectionForUser(request: Request, user: AuthenticatedUser): Response {
+    return scopedCollectionForUser({
+      create: () => this.#createSetup(request, user),
+      key: "runners",
+      read: (userId, workspaceId) =>
+        this.#store.list(userId, this.#now(), workspaceId),
+      request,
+      user,
+      validate: (userId, workspaceId) =>
+        this.#store.workspaceScopesAreValid(userId, [workspaceId]),
+    });
   }
 
   #serveInstaller(request: Request): Response {
@@ -319,8 +544,22 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
   }
 
   #createSetup(request: Request, user: AuthenticatedUser): Response {
+    const workspaceId = requestWorkspaceId(request);
+    const workspaceIds = workspaceId === null ? undefined : [workspaceId];
+    if (
+      workspaceIds !== undefined &&
+      (!isWorkspaceId(workspaceId) ||
+        !this.#store.workspaceScopesAreValid(user.id, workspaceIds))
+    ) {
+      return createApiError("invalid_scope", 409);
+    }
     const token = createRunnerToken(this.#randomToken);
-    const runner = this.#store.create(user.id, token, this.#now());
+    const runner = this.#store.create(
+      user.id,
+      token,
+      this.#now(),
+      workspaceIds,
+    );
     const installerUrl = new URL(RUNNER_INSTALLER_PATH, request.url);
     installerUrl.searchParams.set("token", token);
     const downloadUrl = new URL(installerUrl);

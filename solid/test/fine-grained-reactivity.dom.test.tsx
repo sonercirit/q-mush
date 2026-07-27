@@ -4,7 +4,6 @@ import type { AgentModelCatalog } from "../../shared/agent-configuration.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import {
   OPENAI_PANEL,
-  ProviderPanel,
   createProviderViewState,
   type ProviderCredential,
   type ProviderViewState,
@@ -25,10 +24,12 @@ import { initialSessionViewState } from "../session-state.ts";
 import {
   clickTestButton,
   disposeTestViews,
+  expectTestText,
   mountTestView,
   queryTestElement,
   queryTestTranscript,
 } from "./dom-test-helpers.ts";
+import { openAiProviderPanel } from "./provider-panel-fixtures.tsx";
 import { runnerSummary } from "./runner-fixtures.ts";
 import {
   mountTestSessionDetail,
@@ -110,9 +111,7 @@ test("provider loading, error, retry, and list updates preserve the panel", asyn
     createProviderViewState(undefined),
   );
   const controller = new ProviderController(OPENAI_PANEL, reactive);
-  const view = (): JSX.Element => (
-    <ProviderPanel configuration={OPENAI_PANEL} controller={controller} />
-  );
+  const view = (): JSX.Element => openAiProviderPanel(controller);
   const container = mount(view);
   const panel = query(container, "[data-provider-panel='openai']");
 
@@ -130,9 +129,7 @@ test("provider loading, error, retry, and list updates preserve the panel", asyn
 
   const primary = credential("credential-1", "Primary");
   reactive.setState(createProviderViewState([primary]));
-  await vi.waitFor(() => {
-    expect(container.textContent).toContain(primary.label);
-  });
+  await expectTestText(container, primary.label);
   expect(container.querySelector("[data-provider-panel='openai']")).toBe(panel);
 
   reactive.setState(createProviderViewState([]));

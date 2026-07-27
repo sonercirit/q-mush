@@ -10,6 +10,7 @@ import {
   createAuthenticatedTestContext,
   TEST_NOW,
   TEST_USER_ID,
+  TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { takeValue } from "./oauth-test-helpers.ts";
 
@@ -94,15 +95,19 @@ describe("Brave Search skill", () => {
           accountId: null,
           id: FIRST_KEY_ID,
           isDefault: false,
+          isGlobal: true,
           label: "Primary",
           source: "api_key",
+          workspaceIds: [],
         },
         {
           accountId: null,
           id: SECOND_KEY_ID,
           isDefault: false,
+          isGlobal: true,
           label: "Backup",
           source: "api_key",
+          workspaceIds: [],
         },
       ],
     });
@@ -114,7 +119,7 @@ describe("Brave Search skill", () => {
     expect(encryptedCredentials).not.toContain(FIRST_KEY);
     expect(encryptedCredentials).not.toContain(SECOND_KEY);
 
-    const output = await setup.skill.execute(TEST_USER_ID, {
+    const output = await setup.skill.execute(TEST_USER_ID, TEST_WORKSPACE_ID, {
       count: 2,
       query: "bun typescript",
     });
@@ -191,6 +196,7 @@ describe("Brave Search skill", () => {
 
     const running = skill.execute(
       TEST_USER_ID,
+      TEST_WORKSPACE_ID,
       { query: "cancel me" },
       controller.signal,
     );
@@ -236,9 +242,11 @@ describe("Brave Search skill", () => {
         )
       ).status,
     ).toBe(503);
-    expect(await unconfigured.execute(TEST_USER_ID, { query: "test" })).toBe(
-      "Error: Brave Search credential storage is not configured.",
-    );
+    expect(
+      await unconfigured.execute(TEST_USER_ID, TEST_WORKSPACE_ID, {
+        query: "test",
+      }),
+    ).toBe("Error: Brave Search credential storage is not configured.");
     database.$client.close();
   });
 });

@@ -55,6 +55,12 @@ type SessionOption =
   | { readonly effort: AgentReasoningEffort }
   | SessionToolOption;
 
+export function sessionOptionsPageFilter(
+  input: GetSessionOptionsToolInput,
+): Readonly<{ search?: string }> {
+  return input.search === undefined ? {} : { search: input.search };
+}
+
 export interface SessionOptionsSource {
   readonly credentials: readonly SessionCredentialOption[];
   readonly models: readonly AgentModelOption[];

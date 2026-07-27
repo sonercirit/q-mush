@@ -15,6 +15,7 @@ import {
   testAuditFields,
 } from "./authenticated-integration-test-helpers.ts";
 import {
+  closeSessionStoreTestSetup,
   expectRecoveredSession,
   expectStoredSession,
   removeAndReadSession,
@@ -206,6 +207,7 @@ describe("session store", () => {
         toolCalls: [],
       },
     ]);
+
     expect(store.list(TEST_USER_ID)).toHaveLength(1);
     database.$client.close();
   });
@@ -422,7 +424,7 @@ describe("session store", () => {
         .get(TEST_USER_ID, SESSION_ID)
         ?.messages.some(({ content }) => content === "Late stopped output"),
     ).toBe(false);
-    database.$client.close();
+    closeSessionStoreTestSetup({ database, store });
   });
 
   test("stopping a runner-required session preserves reassignment", () => {

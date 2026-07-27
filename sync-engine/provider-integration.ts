@@ -21,17 +21,20 @@ import {
   type OAuthEndpoints,
   type OAuthRuntime,
 } from "./oauth.ts";
+import type {
+  ProviderCredentialRead,
+  ProviderCredentialReader,
+} from "./provider-credential-reader.ts";
 import { ProviderCredentialEndpoints } from "./provider-credentials.ts";
+import { SessionCredentialReassignmentStore } from "./session-credential-reassignment-store.ts";
+import {
+  SessionCredentialReassignmentEndpoints,
+  type SessionCredentialProviderPreparationContext,
+  type SessionCredentialProviderPreparationResult,
+} from "./session-credential-reassignment.ts";
 
-export interface ProviderIntegration extends OAuthEndpoints {
-  credentials(request: Request): Promise<Response>;
-  readCredential(
-    userId: string,
-    credentialId: string,
-  ): Promise<ProviderCredentialAccess | undefined>;
-  setDefault(request: Request, credentialId: string): Response;
-  remove(request: Request, credentialId: string): Response;
-}
+export interface ProviderIntegration
+  extends OAuthEndpoints, ProviderCredentialReader {}
 
 export interface ProviderIntegrationConfiguration {
   readonly cipher: CredentialCipher;
@@ -98,6 +101,11 @@ export function createProviderIntegration(options: {
     runtime: OAuthRuntime,
     credential: ProviderCredentialAccess,
   ) => Promise<string | undefined>;
+  readonly prepareSessionCredentialProviderState?: (
+    context: SessionCredentialProviderPreparationContext & {
+      readonly credential: ProviderCredentialAccess;
+    },
+  ) => Promise<SessionCredentialProviderPreparationResult>;
   readonly provider: ProviderId;
   readonly readCredentialDetails: CredentialDetailsReader;
 }): ProviderIntegration {
@@ -118,6 +126,54 @@ export function createProviderIntegration(options: {
       options.readCredentialDetails(runtime, apiKey),
     store,
   });
+  const sessionStore =
+    options.configuration === undefined
+      ? undefined
+      : new SessionCredentialReassignmentStore(runtime.database);
+  const reassignment = new SessionCredentialReassignmentEndpoints({
+    auth: options.auth,
+    now: runtime.now,
+    ...(options.dependencies.onSessionsChanged === undefined
+      ? {}
+      : { onChanged: options.dependencies.onSessionsChanged }),
+    ...(options.prepareSessionCredentialProviderState === undefined
+      ? {}
+      : {
+          prepareProviderState: async (
+            context: SessionCredentialProviderPreparationContext,
+          ) => {
+            const credential = await readCredential(
+              context.userId,
+              context.credentialId,
+              context.scope?.workspaceId,
+            );
+            return credential === undefined
+              ? { error: "provider_unavailable" as const }
+              : (options.prepareSessionCredentialProviderState?.({
+                  ...context,
+                  credential,
+                }) ?? { error: "validation_failed" as const });
+          },
+        }),
+    provider: options.provider,
+    ...(options.configuration === undefined
+      ? {}
+      : {
+          scope: (request: Request, userId: string) => {
+            const workspaceId = new URL(request.url).searchParams.get(
+              "workspaceId",
+            );
+            if (
+              workspaceId === null ||
+              !credentials.validateScopes(userId, [workspaceId])
+            ) {
+              return undefined;
+            }
+            return { workspaceId };
+          },
+        }),
+    store: sessionStore,
+  });
   const baseOAuthConfiguration = options.createOAuthConfiguration(runtime);
   const connectedAccount = new ConnectedAccountOAuth(
     {
@@ -130,11 +186,16 @@ export function createProviderIntegration(options: {
     runtime,
   );
 
-  const readCredential = async (
-    userId: string,
-    credentialId: string,
-  ): Promise<ProviderCredentialAccess | undefined> => {
-    const credential = credentials.readCredential(userId, credentialId);
+  const readCredential: ProviderCredentialRead = async (
+    userId,
+    credentialId,
+    workspaceId,
+  ) => {
+    const credential = credentials.readCredential(
+      userId,
+      credentialId,
+      workspaceId,
+    );
 
     if (credential === undefined || options.prepareCredential === undefined) {
       return credential;
@@ -160,8 +221,12 @@ export function createProviderIntegration(options: {
     complete: (request) => connectedAccount.complete(request),
     credentials: (request) => credentials.credentials(request),
     readCredential,
+    reassignSessions: (request, credentialId) =>
+      reassignment.reassign(request, credentialId),
     setDefault: (request, credentialId) =>
       credentials.setDefault(request, credentialId),
+    setScopes: (request, credentialId) =>
+      credentials.setScopes(request, credentialId),
     remove: (request, credentialId) =>
       credentials.remove(request, credentialId),
   };
