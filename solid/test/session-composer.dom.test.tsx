@@ -1,4 +1,5 @@
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
+import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
 import { createReactiveState } from "../reactive-state.ts";
 import type { SessionViewState } from "../session-client.tsx";
@@ -16,7 +17,12 @@ import {
   sessionCanQueuePendingInput,
 } from "../session-pending-input.ts";
 import { initialSessionViewState } from "../session-state.ts";
-import { disposeTestViews, mountTestView } from "./dom-test-helpers.ts";
+import {
+  disposeTestViews,
+  mountTestView,
+  queryTestElement,
+} from "./dom-test-helpers.ts";
+import { mountTestSessionDetail } from "./session-dom-test-helpers.tsx";
 import { pendingInputFixture } from "./session-pending-fixtures.ts";
 
 const disposals: (() => void)[] = [];
@@ -163,6 +169,74 @@ test("reuses request identity after an unknown browser outcome", async () => {
   expect(calls[1]).toEqual(calls[0]);
   expect(controller.state).toMatchObject({ followUp: "", sending: false });
   expect(controller.state.detail?.pendingInputs).toHaveLength(1);
+});
+
+function mountedRunningComposer(): {
+  readonly container: HTMLDivElement;
+  readonly controller: SessionController;
+  readonly detail: AgentSessionDetail;
+  readonly prompt: HTMLTextAreaElement;
+} {
+  const detail = { ...TEST_SESSION_DETAIL, status: "running" as const };
+  const { container, controller } = mountTestSessionDetail(detail, disposals);
+  const prompt = queryTestElement(
+    container,
+    "[data-session-composer='true'] textarea[name='prompt']",
+  );
+  if (!(prompt instanceof HTMLTextAreaElement)) {
+    throw new TypeError("The running follow-up prompt is unavailable");
+  }
+  return { container, controller, detail, prompt };
+}
+
+test("follow-up typing updates locally before the shared session view", () => {
+  vi.useFakeTimers({ shouldClearNativeTimers: true });
+  disposals.push(vi.useRealTimers);
+  const { controller, detail, prompt } = mountedRunningComposer();
+
+  prompt.value = "Change direction immediately";
+  prompt.dispatchEvent(new InputEvent("input", { bubbles: true }));
+  controller.applyDetail({
+    ...detail,
+    updatedAt: detail.updatedAt + 1,
+  });
+
+  expect(prompt.value).toBe("Change direction immediately");
+  expect(controller.state.followUp).toBe("");
+
+  vi.runAllTimers();
+
+  expect(controller.state.followUp).toBe("Change direction immediately");
+});
+
+test("the visible steer action flushes the draft and keeps its shortcut", () => {
+  const { container, controller, prompt } = mountedRunningComposer();
+  const steer = vi.spyOn(controller, "steer").mockResolvedValue();
+  const steerButton = queryTestElement(
+    container,
+    "[data-session-steer='true']",
+  );
+  if (!(steerButton instanceof HTMLButtonElement)) {
+    throw new TypeError("The visible steer action is unavailable");
+  }
+
+  prompt.value = "Use a smaller change";
+  prompt.dispatchEvent(new InputEvent("input", { bubbles: true }));
+  steerButton.click();
+
+  expect(steer).toHaveBeenCalledOnce();
+  expect(controller.state.followUp).toBe("Use a smaller change");
+
+  prompt.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      bubbles: true,
+      ctrlKey: true,
+      key: "Enter",
+      shiftKey: true,
+    }),
+  );
+
+  expect(steer).toHaveBeenCalledTimes(2);
 });
 
 test("renders pending instructions in FIFO order", () => {

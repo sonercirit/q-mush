@@ -220,71 +220,71 @@ export function SessionDetailBody(props: {
             }
           />
         </Show>
-        <div class="flex min-w-0 flex-col gap-3 sm:flex-row">
-          <SessionFollowUp
-            availabilityDescriptionId="session-composer-state"
-            availabilityLabel={
-              composerReason() ??
-              (running()
-                ? "Running. Follow up starts the next turn; Steer changes direction at the next safe model or tool boundary."
-                : queued()
-                  ? "Queued. Follow up starts after the queued work; steering is available only while running."
-                  : "Ready for another instruction.")
+        <SessionFollowUp
+          availabilityDescriptionId="session-composer-state"
+          availabilityLabel={
+            composerReason() ??
+            (running()
+              ? "Running. Follow up starts the next turn; Steer changes direction at the next safe model or tool boundary."
+              : queued()
+                ? "Queued. Follow up starts after the queued work; steering is available only while running."
+                : "Ready for another instruction.")
+          }
+          disabled={composerDisabled()}
+          images={view.state.followUpImages}
+          onAddImages={(files) => {
+            if (!composerDisabled())
+              void view.controller.addImages(files, true);
+          }}
+          onContinue={
+            active()
+              ? undefined
+              : () => {
+                  if (!composerDisabled())
+                    void view.controller.continueSession();
+                }
+          }
+          onInput={(value) => {
+            if (!composerDisabled()) view.controller.setFollowUp(value);
+          }}
+          onKeyDown={(event) => {
+            if (
+              composerDisabled() ||
+              event.isComposing ||
+              event.key !== "Enter" ||
+              (!event.ctrlKey && !event.metaKey)
+            )
+              return;
+            event.preventDefault();
+            if (event.shiftKey) {
+              if (running()) void view.controller.steer();
+            } else if (running() || queued()) {
+              void view.controller.followUp();
+            } else {
+              event.currentTarget.form?.requestSubmit();
             }
-            disabled={composerDisabled()}
-            images={view.state.followUpImages}
-            onAddImages={(files) => {
-              if (!composerDisabled())
-                void view.controller.addImages(files, true);
-            }}
-            onInput={(value) => {
-              if (!composerDisabled()) view.controller.setFollowUp(value);
-            }}
-            onKeyDown={(event) => {
-              if (
-                composerDisabled() ||
-                event.isComposing ||
-                event.key !== "Enter" ||
-                (!event.ctrlKey && !event.metaKey)
-              )
-                return;
-              event.preventDefault();
-              if (event.shiftKey) {
-                if (running()) void view.controller.steer();
-              } else if (running() || queued()) {
-                void view.controller.followUp();
-              } else {
-                event.currentTarget.form?.requestSubmit();
-              }
-            }}
-            onRemoveImage={(index) => {
-              if (!composerDisabled())
-                view.controller.removeImage(index, "followUp");
-            }}
-            onSubmit={() => {
-              if (composerDisabled()) return;
-              if (running() || queued()) void view.controller.followUp();
-              else void view.controller.send();
-            }}
-            prompt={view.state.followUp}
-            sending={view.state.sending}
-            submitLabel={running() || queued() ? "Follow up" : "Send"}
-          />
-          <Show when={!active()}>
-            <button
-              aria-describedby="session-composer-state"
-              aria-label="Continue without another instruction"
-              class="min-h-11 w-full self-stretch rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:self-end"
-              disabled={composerDisabled()}
-              onClick={() => {
-                if (!composerDisabled()) void view.controller.continueSession();
-              }}
-              type="button"
-            >
-              Continue without message
-            </button>
-          </Show>
-        </div>
+          }}
+          onRemoveImage={(index) => {
+            if (!composerDisabled())
+              view.controller.removeImage(index, "followUp");
+          }}
+          onSteer={
+            running()
+              ? () => {
+                  if (!composerDisabled()) void view.controller.steer();
+                }
+              : undefined
+          }
+          onSubmit={() => {
+            if (composerDisabled()) return;
+            if (running() || queued()) void view.controller.followUp();
+            else void view.controller.send();
+          }}
+          prompt={view.state.followUp}
+          sending={view.state.sending}
+          sessionId={view.detail.id}
+          submitLabel={running() || queued() ? "Follow up" : "Send"}
+        />
       </div>
     </div>
   );
