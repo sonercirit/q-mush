@@ -7,16 +7,16 @@ import {
 } from "../session-transcript-filters.ts";
 import { MemoryStorage } from "./memory-storage.ts";
 
-test("transcript filters use conservative defaults for verbose context", () => {
+test("transcript filters show every category by default", () => {
   expect(readSessionTranscriptFilters(undefined)).toEqual(
     DEFAULT_SESSION_TRANSCRIPT_FILTERS,
   );
   expect(DEFAULT_SESSION_TRANSCRIPT_FILTERS).toMatchObject({
     agentInstructions: true,
     assistantMessages: true,
-    systemPrompt: false,
-    thinking: false,
-    toolDefinitions: false,
+    systemPrompt: true,
+    thinking: true,
+    toolDefinitions: true,
     userMessages: true,
   });
   expect(DEFAULT_SESSION_TRANSCRIPT_FILTERS.notices).toBe(true);
@@ -29,6 +29,7 @@ test("transcript filters round trip through browser storage", () => {
     ...DEFAULT_SESSION_TRANSCRIPT_FILTERS,
     systemPrompt: false,
     thinking: false,
+    toolDefinitions: false,
   };
 
   writeSessionTranscriptFilters(storage, filters);

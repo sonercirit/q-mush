@@ -71,21 +71,10 @@ function userMessage(content: string): AgentSessionMessage {
   };
 }
 
-const ALL_SESSION_TRANSCRIPT_FILTERS: SessionTranscriptFilters = {
-  agentInstructions: true,
-  assistantMessages: true,
-  notices: true,
-  systemPrompt: true,
-  thinking: true,
-  toolActivity: true,
-  toolDefinitions: true,
-  userMessages: true,
-};
-
 function renderMessages(
   messages: readonly AgentSessionMessage[],
   tools = AGENT_SESSION_TOOL_NAMES,
-  filters: SessionTranscriptFilters = ALL_SESSION_TRANSCRIPT_FILTERS,
+  filters: SessionTranscriptFilters = DEFAULT_SESSION_TRANSCRIPT_FILTERS,
   agentFile: AgentFile | null = null,
 ): string {
   return renderSolidToString(() => (

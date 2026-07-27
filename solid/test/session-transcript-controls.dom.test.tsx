@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { summaryFromDetail } from "../session-codec.ts";
 import { disposeTestViews, queryTestElement } from "./dom-test-helpers.ts";
@@ -78,6 +78,50 @@ function transcriptFilter(container: ParentNode): HTMLInputElement {
 afterEach(() => {
   disposeTestViews(DOM_TEST_DISPOSALS);
   filterStorage.clear();
+  vi.restoreAllMocks();
+});
+
+test("copies session information and transcript from the detail header", async () => {
+  const detail: AgentSessionDetail = {
+    ...TEST_SESSION_DETAIL,
+    messages: [
+      transcriptTestMessage("user-copy", "Please fix the app", "user", 2),
+      transcriptTestMessage(
+        "assistant-copy",
+        "The app is fixed.",
+        "assistant",
+        3,
+      ),
+    ],
+  };
+  const writeText = vi
+    .spyOn(navigator.clipboard, "writeText")
+    .mockResolvedValue();
+  const { container } = mountTestSessionDetail(detail);
+  const copy = queryTestElement(container, "[data-copy-session='true']");
+  if (!(copy instanceof HTMLButtonElement)) {
+    throw new TypeError("The session copy control is not a button");
+  }
+
+  expect(copy.textContent).toBe("Copy session");
+  copy.click();
+
+  await vi.waitFor(() => {
+    expect(writeText).toHaveBeenCalledWith(
+      [
+        "Fix the app",
+        "Session ID: session-1",
+        "Status: idle",
+        "Model: openai · gpt-5-codex",
+        "Working directory: .",
+        "",
+        "Transcript",
+        "user: Please fix the app",
+        "assistant: The app is fixed.",
+      ].join("\n"),
+    );
+    expect(copy.textContent).toBe("Copied!");
+  });
 });
 
 test("the composer stays mounted and retains focus through a busy transition", () => {
