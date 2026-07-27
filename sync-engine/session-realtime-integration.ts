@@ -1,0 +1,493 @@
+import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
+import type { AuthenticatedUser } from "../shared/auth-model.ts";
+import type { ProviderId } from "../shared/provider-credential-store.ts";
+import type { AgentSessionDetail } from "../shared/session-model.ts";
+import type {
+  SessionToolUpdateInput,
+  SessionToolUpdatePreview,
+  SessionToolUpdatePreviewInput,
+} from "../shared/session-tool-update.ts";
+import { RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
+import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
+import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
+import type { SessionAgentActions } from "./session-agent-actions.ts";
+import type {
+  AuthenticatedSessionAction,
+  SessionDetailLookup,
+} from "./session-command-types.ts";
+import { startManualSessionCompaction } from "./session-compaction-actions.ts";
+import {
+  createValidatedSession,
+  type SessionLaunchBoundary,
+} from "./session-creation.ts";
+import {
+  readSessionCredential,
+  type SessionCredentialReaders,
+} from "./session-credential-access.ts";
+import type { SessionCredentialOperation } from "./session-credential-operation.ts";
+import { requiredSessionDetail } from "./session-detail.ts";
+import { readAuthorizedSessionHistory } from "./session-history.ts";
+import type { PromptInput } from "./session-input.ts";
+import type { SessionPendingInputCommand } from "./session-pending-input-request.ts";
+import {
+  answerSessionQuestionsCommand,
+  QuestionActionFailure,
+  type SessionQuestionActionDependencies,
+} from "./session-question-actions.ts";
+import {
+  queueSessionForUser,
+  type SessionQueueDependencies,
+} from "./session-queue.ts";
+import type {
+  SessionAutoCompactionAction,
+  SessionCreateAction,
+  SessionHistoryAction,
+  SessionQuestionAnswerAction,
+  SessionRealtimeCommands,
+  SessionReassignmentAction,
+} from "./session-realtime-commands.ts";
+import {
+  reassignSession,
+  sessionReassignmentError,
+} from "./session-reassignment-request.ts";
+import type { SessionReassignmentInput } from "./session-reassignment.ts";
+import type { SessionStore } from "./session-store.ts";
+import {
+  applySessionToolUpdate,
+  previewSessionToolUpdate,
+  SessionToolUpdateError,
+  type SessionToolUpdateDependencies,
+} from "./session-tool-update.ts";
+
+export type RealtimeSessionCommandDependencies = SessionLaunchBoundary &
+  Pick<SessionQueueDependencies, "runnerIsAvailable"> &
+  Omit<RealtimeSessionCommandsOptions, "availability" | "lifecycle">;
+
+export interface RealtimeSessionCommandsOptions {
+  readonly actions: SessionAgentActions;
+  readonly database: SessionToolUpdateDependencies["store"]["database"];
+  readonly discoverModels: AgentModelDiscoverer;
+  readonly discoverOpenRouterProviders: OpenRouterProviderDiscoverer;
+  readonly lifecycle: SessionLaunchBoundary;
+  readonly providers: SessionCredentialReaders;
+  readonly questions: SessionQuestionActionDependencies;
+  readonly toolUpdates: Omit<
+    SessionToolUpdateDependencies,
+    "readCredentialSource" | "store"
+  >;
+  readonly availability: Pick<SessionQueueDependencies, "runnerIsAvailable">;
+  readonly store: SessionStore;
+}
+
+async function responseValue(response: Response): Promise<unknown> {
+  let value: unknown;
+  try {
+    value = await response.json();
+  } catch {
+    throw new RealtimeCommandError("command_failed");
+  }
+  if (!response.ok) {
+    let code = "command_failed";
+    if (typeof value === "object" && value !== null && "error" in value) {
+      const candidate: unknown = value.error;
+      if (typeof candidate === "string") {
+        code = candidate;
+      }
+    }
+    throw new RealtimeCommandError(code);
+  }
+  return value;
+}
+
+export class RealtimeSessionCommands implements SessionRealtimeCommands {
+  readonly #dependencies: RealtimeSessionCommandDependencies;
+
+  constructor(options: RealtimeSessionCommandsOptions) {
+    this.#dependencies = {
+      ...options,
+      ...options.availability,
+      ...options.lifecycle,
+    };
+  }
+
+  async #credential(
+    userId: string,
+    selection: {
+      readonly credentialId: string;
+      readonly provider: ProviderId;
+      readonly workspaceId?: string;
+    },
+  ) {
+    try {
+      const credential = await readSessionCredential(
+        this.#dependencies.providers,
+        userId,
+        selection,
+      );
+      if (credential === undefined) {
+        throw new RealtimeCommandError("credential_unavailable");
+      }
+      return credential;
+    } catch (error) {
+      if (error instanceof RealtimeCommandError) {
+        throw error;
+      }
+      throw new RealtimeCommandError("credential_refresh_failed");
+    }
+  }
+
+  answerQuestionsForUser: SessionQuestionAnswerAction = async (
+    user,
+    payload,
+  ) => {
+    try {
+      return await answerSessionQuestionsCommand(
+        this.#dependencies.questions,
+        user,
+        payload,
+      );
+    } catch (error) {
+      if (error instanceof QuestionActionFailure) {
+        throw new RealtimeCommandError(error.code);
+      }
+      throw error;
+    }
+  };
+
+  compactForUser: AuthenticatedSessionAction = (user, sessionId, workspaceId) =>
+    this.#withOwnedDetail(user, sessionId, workspaceId, async () => {
+      const response = await startManualSessionCompaction(
+        {
+          credential: this.#credentialAction(),
+          launch: (detail, credential, userId) =>
+            this.#dependencies.launch(detail, credential, userId, "compact"),
+          notify: this.#dependencies.notify,
+          now: this.#dependencies.now,
+          runtimes: this.#dependencies.runtimes,
+          store: this.#dependencies.store,
+        },
+        user,
+        sessionId,
+      );
+      return this.#detailFromResponse(user.id, sessionId, response);
+    });
+
+  continueForUser(
+    user: AuthenticatedUser,
+    sessionId: string,
+    workspaceId?: string,
+  ): Promise<AgentSessionDetail> {
+    return this.#queueOwned({
+      sessionId,
+      user,
+      ...(workspaceId === undefined ? {} : { workspaceId }),
+    });
+  }
+
+  createForUser: SessionCreateAction = async (user, input, workspaceId) => {
+    const scopedInput = { ...input, workspaceId };
+    if (
+      !this.#dependencies.runnerIsAvailable(
+        user.id,
+        scopedInput.runnerId,
+        workspaceId,
+      )
+    ) {
+      throw new RealtimeCommandError("runner_unavailable");
+    }
+    const credential = await this.#credential(user.id, scopedInput);
+    const created: { detail?: AgentSessionDetail } = {};
+    const response = await createValidatedSession(
+      {
+        ...this.#dependencies,
+        onCreated: (detail) => {
+          created.detail = detail;
+        },
+      },
+      user,
+      scopedInput,
+      credential,
+    );
+    await responseValue(response);
+    if (created.detail === undefined) {
+      throw new RealtimeCommandError("command_failed");
+    }
+    return created.detail;
+  };
+
+  async messageForUser(
+    user: AuthenticatedUser,
+    sessionId: string,
+    input: PromptInput,
+    workspaceId: string,
+  ): Promise<AgentSessionDetail> {
+    return this.#queueOwned({ input, sessionId, user, workspaceId });
+  }
+
+  pendingInputForUser(
+    user: AuthenticatedUser,
+    input: SessionPendingInputCommand,
+    workspaceId: string,
+  ): AgentSessionDetail {
+    const owned = this.#dependencies.store.get(
+      user.id,
+      input.sessionId,
+      workspaceId,
+    );
+    if (owned === undefined) {
+      throw new RealtimeCommandError("not_found");
+    }
+    const result = this.#dependencies.store.enqueuePendingInput(
+      user.id,
+      input.sessionId,
+      {
+        clientRequestId: input.clientRequestId,
+        content: input.prompt,
+        images: input.images,
+        kind: input.kind,
+      },
+      this.#dependencies.now(),
+    );
+    switch (result.status) {
+      case "accepted":
+        this.#dependencies.notify(user.id, input.sessionId);
+        return this.#detail(user.id, input.sessionId, workspaceId);
+      case "duplicate":
+        return this.#detail(user.id, input.sessionId, workspaceId);
+      case "conflict":
+        throw new RealtimeCommandError("pending_input_id_conflict");
+      case "full":
+        throw new RealtimeCommandError("pending_input_queue_full");
+      case "invalid_state":
+        throw new RealtimeCommandError("invalid_session_state");
+      case "not_found":
+        throw new RealtimeCommandError("not_found");
+    }
+  }
+
+  async modelsForUser(selection: {
+    readonly credentialId: string;
+    readonly provider: ProviderId;
+    readonly user: AuthenticatedUser;
+    readonly workspaceId: string;
+  }): Promise<AgentModelCatalog> {
+    const credential = await this.#credential(selection.user.id, selection);
+    try {
+      return await this.#dependencies.discoverModels(
+        selection.provider,
+        credential,
+      );
+    } catch {
+      throw new RealtimeCommandError("provider_unavailable");
+    }
+  }
+
+  async previewToolUpdateForUser(
+    user: AuthenticatedUser,
+    input: SessionToolUpdatePreviewInput,
+  ): Promise<SessionToolUpdatePreview> {
+    return this.#runToolUpdate(() =>
+      previewSessionToolUpdate(this.#toolUpdateDependencies(), user.id, input),
+    );
+  }
+
+  detailForUser: SessionDetailLookup = (...parameters) =>
+    this.#dependencies.store.get(...parameters);
+
+  readForUser: SessionDetailLookup = (...parameters) =>
+    this.detailForUser(...parameters);
+
+  historyForUser: SessionHistoryAction = (
+    user,
+    sessionId,
+    cursor,
+    workspaceId,
+  ) => {
+    return readAuthorizedSessionHistory(this.#dependencies.store, user, {
+      cursor,
+      sessionId,
+      workspaceId,
+    });
+  };
+
+  reassignForUser: SessionReassignmentAction = (
+    user,
+    sessionId,
+    runnerId,
+    workingDirectory,
+    workspaceId,
+  ) => {
+    const change = () => {
+      const input: SessionReassignmentInput = { runnerId, workingDirectory };
+      const result = reassignSession(
+        this.#dependencies,
+        user.id,
+        sessionId,
+        input,
+      );
+      if (result.status !== "reassigned") {
+        throw new RealtimeCommandError(sessionReassignmentError(result));
+      }
+      this.#dependencies.notify(user.id, sessionId);
+      return result.detail;
+    };
+    return this.#withOwnedDetail(user, sessionId, workspaceId, change);
+  };
+
+  setAutoCompactionForUser: SessionAutoCompactionAction = (
+    user,
+    sessionId,
+    autoCompact,
+    workspaceId,
+  ) =>
+    this.#withOwnedDetail(user, sessionId, workspaceId, () => {
+      const detail = this.#dependencies.store.setAutoCompact(
+        user.id,
+        sessionId,
+        autoCompact,
+        this.#dependencies.now(),
+        workspaceId,
+      );
+      if (detail === undefined) {
+        throw new RealtimeCommandError("not_found");
+      }
+      this.#dependencies.notify(user.id, sessionId);
+      return detail;
+    });
+
+  stopForUser(
+    user: AuthenticatedUser,
+    sessionId: string,
+    workspaceId: string,
+  ): AgentSessionDetail {
+    const existing = this.#dependencies.store.get(
+      user.id,
+      sessionId,
+      workspaceId,
+    );
+    if (existing === undefined) {
+      throw new RealtimeCommandError("not_found");
+    }
+    if (existing.status !== "stopped") {
+      this.#dependencies.store.stop(
+        user.id,
+        sessionId,
+        this.#dependencies.now(),
+      );
+    }
+    this.#dependencies.actions.stopSession(sessionId, existing);
+    this.#dependencies.notify(user.id, sessionId);
+    return this.#detail(user.id, sessionId);
+  }
+
+  summariesForUser(userId: string, workspaceId: string) {
+    return this.#dependencies.store.list(userId, workspaceId);
+  }
+
+  async updateToolsForUser(
+    user: AuthenticatedUser,
+    input: SessionToolUpdateInput,
+  ): Promise<AgentSessionDetail> {
+    const detail = await this.#runToolUpdate(() =>
+      applySessionToolUpdate(this.#toolUpdateDependencies(), user.id, input),
+    );
+    this.#dependencies.notify(user.id, input.sessionId);
+    return detail;
+  }
+
+  #withOwnedDetail<Value>(
+    user: AuthenticatedUser,
+    sessionId: string,
+    workspaceId: string | undefined,
+    action: (detail: AgentSessionDetail) => Value,
+  ): Value {
+    return action(this.#detail(user.id, sessionId, workspaceId));
+  }
+
+  async #runToolUpdate<Value>(action: () => Promise<Value>): Promise<Value> {
+    try {
+      return await action();
+    } catch (error) {
+      throw this.#toolUpdateError(error);
+    }
+  }
+
+  #toolUpdateDependencies(): SessionToolUpdateDependencies {
+    return {
+      ...this.#dependencies.toolUpdates,
+      readCredentialSource: async (userId, detail) =>
+        (await this.#credential(userId, detail)).source,
+      store: {
+        database: this.#dependencies.database,
+        read: (userId, sessionId, workspaceId) =>
+          this.#dependencies.store.get(userId, sessionId, workspaceId),
+      },
+    };
+  }
+
+  #toolUpdateError(error: unknown): RealtimeCommandError {
+    return new RealtimeCommandError(
+      error instanceof SessionToolUpdateError ? error.code : "command_failed",
+    );
+  }
+
+  async #queueOwned(options: {
+    readonly input?: PromptInput;
+    readonly sessionId: string;
+    readonly user: AuthenticatedUser;
+    readonly workspaceId?: string;
+  }): Promise<AgentSessionDetail> {
+    this.#detail(options.user.id, options.sessionId, options.workspaceId);
+    return this.#queue(
+      options.user,
+      options.sessionId,
+      options.input,
+      options.workspaceId,
+    );
+  }
+
+  async #queue(
+    user: AuthenticatedUser,
+    sessionId: string,
+    prompt?: PromptInput,
+    workspaceId?: string,
+  ): Promise<AgentSessionDetail> {
+    const response = await queueSessionForUser(
+      {
+        ...this.#dependencies,
+        credential: this.#credentialAction(),
+        ...(workspaceId === undefined ? {} : { workspaceId }),
+      },
+      user.id,
+      sessionId,
+      prompt,
+    );
+    return this.#detailFromResponse(user.id, sessionId, response);
+  }
+
+  #credentialAction(): SessionCredentialOperation {
+    return async (userId, detail, action) =>
+      action(await this.#credential(userId, detail));
+  }
+
+  async #detailFromResponse(
+    userId: string,
+    sessionId: string,
+    response: Response,
+  ): Promise<AgentSessionDetail> {
+    await responseValue(response);
+    return this.#detail(userId, sessionId);
+  }
+
+  #detail(
+    userId: string,
+    sessionId: string,
+    workspaceId?: string,
+  ): AgentSessionDetail {
+    return requiredSessionDetail(
+      this.#dependencies.store.get.bind(this.#dependencies.store),
+      [userId, sessionId, workspaceId],
+      () => new RealtimeCommandError("not_found"),
+    );
+  }
+}

@@ -1,5 +1,5 @@
 import { createEffect, createRoot } from "solid-js";
-import { expect } from "vitest";
+import { afterEach, expect } from "vitest";
 
 interface RealtimeController<Value> {
   applyRealtime(value: Value): void;
@@ -28,6 +28,56 @@ export function installFetch(
   return originalFetch;
 }
 
+function restoreFetch(originalFetch: typeof globalThis.fetch): void {
+  globalThis.fetch = originalFetch;
+}
+
+export interface RecordedRequest {
+  body: unknown;
+  method: string;
+  url: string;
+}
+
+function recordedRequest(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): RecordedRequest {
+  return {
+    body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
+    method: init?.method ?? "GET",
+    url: requestUrl(input),
+  };
+}
+
+function originalFetchRestorer(): () => void {
+  const originalFetch = globalThis.fetch;
+  return () => {
+    restoreFetch(originalFetch);
+  };
+}
+
+export function restoreFetchAfterEach(): void {
+  afterEach(originalFetchRestorer());
+}
+
+export function installRecordedRequestFetch(
+  requests: RecordedRequest[],
+  response: (request: RecordedRequest, init?: RequestInit) => Response,
+): void {
+  installFetch((input, init) => {
+    const request = recordedRequest(input, init);
+    requests.push(request);
+    return Promise.resolve(response(request, init));
+  });
+}
+
+export function installRecordedFetch(
+  requests: RecordedRequest[],
+  response: (init?: RequestInit) => Response,
+): void {
+  installRecordedRequestFetch(requests, (_request, init) => response(init));
+}
+
 export async function expectRealtimeToRemainSilent<Value>(
   createController: () => RealtimeController<Value> & {
     readonly view: () => unknown;
@@ -54,6 +104,6 @@ export async function expectRealtimeToRemainSilent<Value>(
       dispose();
     });
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreFetch(originalFetch);
   }
 }

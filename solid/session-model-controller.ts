@@ -1,32 +1,42 @@
 import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
 import { SESSION_MODELS_PATH } from "../shared/routes.ts";
+import { SESSION_REALTIME_OPERATIONS } from "../shared/user-realtime-protocol.ts";
 import { requestJson } from "./browser-http.ts";
+import { DiscoveryCache } from "./discovery-cache.ts";
+import { shouldDiscover } from "./discovery-state.ts";
 import type { RevisionState } from "./revision-state.ts";
 import type { SessionViewState } from "./session-client.tsx";
 import { readAgentModelCatalog } from "./session-codec.ts";
 import { selectedSessionCredential } from "./session-controller-state.ts";
 import { draftWithModelCatalog } from "./session-form.ts";
 import { sessionModelDiscoveryState } from "./session-state.ts";
+import type { SessionCommandTransport } from "./session-transport.ts";
 
 export class SessionModelController {
-  readonly #catalogs = new Map<string, AgentModelCatalog>();
-  #request = 0;
+  readonly #catalogs = new DiscoveryCache<AgentModelCatalog>();
   readonly #state: RevisionState<SessionViewState>;
+  readonly #transport: SessionCommandTransport | undefined;
 
-  constructor(state: RevisionState<SessionViewState>) {
+  constructor(
+    state: RevisionState<SessionViewState>,
+    transport?: SessionCommandTransport,
+  ) {
     this.#state = state;
+    this.#transport = transport;
   }
 
   reset(): void {
     this.#catalogs.clear();
-    this.#request += 1;
   }
 
   ensure(credentialValue: string, force = false): void {
-    void this.#ensure(credentialValue, force);
+    this.#ensure(credentialValue, force);
   }
 
-  async #ensure(credentialValue: string, force: boolean): Promise<void> {
+  #ensure(credentialValue: string, force: boolean): void {
+    const applyCached = (key: string, catalog: AgentModelCatalog): void => {
+      this.#apply(key, catalog);
+    };
     const credential = selectedSessionCredential(credentialValue);
     if (credential === undefined) {
       return;
@@ -39,6 +49,7 @@ export class SessionModelController {
           ...this.#state.value.draft,
           credential: credentialValue,
           model: "",
+          openRouterProviderTag: "",
           reasoningEffort: "",
         },
       });
@@ -46,52 +57,63 @@ export class SessionModelController {
 
     const discovery = this.#state.value.modelDiscovery;
     if (
-      !force &&
-      discovery.credential === credentialValue &&
-      (discovery.loading || discovery.catalog !== undefined)
+      !shouldDiscover({
+        currentKey: discovery.credential,
+        expectedKey: credentialValue,
+        force,
+        state: discovery,
+      })
     ) {
       return;
     }
 
-    const cached = force ? undefined : this.#catalogs.get(credentialValue);
-    if (cached !== undefined) {
-      this.#apply(credentialValue, cached);
-      return;
-    }
-
-    const request = (this.#request += 1);
-    this.#state.patch({
-      modelDiscovery: sessionModelDiscoveryState(credentialValue, true),
+    this.#catalogs.begin(credentialValue, force, applyCached, (request) => {
+      this.#state.patch({
+        modelDiscovery: sessionModelDiscoveryState(credentialValue, true),
+      });
+      void this.#load(request, credentialValue, credential, applyCached);
     });
+  }
 
+  async #load(
+    request: number,
+    credentialValue: string,
+    credential: NonNullable<ReturnType<typeof selectedSessionCredential>>,
+    applyCached: (key: string, catalog: AgentModelCatalog) => void,
+  ): Promise<void> {
     try {
-      const search = new URLSearchParams(credential);
       const catalog = readAgentModelCatalog(
-        await requestJson(`${SESSION_MODELS_PATH}?${search.toString()}`),
+        this.#transport === undefined
+          ? await requestJson(
+              `${SESSION_MODELS_PATH}?${new URLSearchParams(credential).toString()}`,
+            )
+          : await this.#transport.command(
+              SESSION_REALTIME_OPERATIONS.models,
+              credential,
+            ),
       );
-      if (
-        request !== this.#request ||
-        this.#state.value.draft.credential !== credentialValue
-      ) {
-        return;
-      }
-
-      this.#catalogs.set(credentialValue, catalog);
-      this.#apply(credentialValue, catalog);
+      this.#catalogs.resolve(
+        request,
+        credentialValue,
+        catalog,
+        () => this.#state.value.draft.credential === credentialValue,
+        applyCached,
+      );
     } catch {
-      if (
-        request === this.#request &&
-        this.#state.value.draft.credential === credentialValue
-      ) {
-        this.#state.patch({
-          modelDiscovery: sessionModelDiscoveryState(
-            credentialValue,
-            false,
-            undefined,
-            "Model discovery failed",
-          ),
-        });
-      }
+      this.#catalogs.handleFailure(
+        request,
+        () => this.#state.value.draft.credential === credentialValue,
+        () => {
+          this.#state.patch({
+            modelDiscovery: sessionModelDiscoveryState(
+              credentialValue,
+              false,
+              undefined,
+              "Model discovery failed",
+            ),
+          });
+        },
+      );
     }
   }
 

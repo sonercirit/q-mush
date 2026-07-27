@@ -3,15 +3,56 @@ import {
   createJsonResponse,
   parseJsonRequest,
 } from "./http.ts";
-import { readSessionReassignment } from "./session-reassignment.ts";
+import {
+  readSessionReassignment,
+  type SessionReassignmentInput,
+} from "./session-reassignment.ts";
 import type { SessionRequestAuthenticator } from "./session-request-helpers.ts";
+import type { ReassignSessionResult } from "./session-store-reassignment.ts";
 import type { SessionStore } from "./session-store.ts";
+import {
+  requestSessionWorkspaceId,
+  type SessionWorkspaceReader,
+} from "./session-workspace.ts";
+
+export function sessionReassignmentError(
+  result: Exclude<ReassignSessionResult, { readonly status: "reassigned" }>,
+): string {
+  return result.status === "not_found"
+    ? "not_found"
+    : result.status === "runner_unavailable"
+      ? "runner_unavailable"
+      : `session_${result.status}`;
+}
 
 export interface SessionReassignmentDependencies {
-  readonly store: Pick<SessionStore, "reassign">;
   readonly authenticate: SessionRequestAuthenticator;
   readonly notify: (userId: string, sessionId: string) => void;
   readonly now: () => number;
+  readonly store: Pick<SessionStore, "get" | "reassign">;
+  readonly workspaces?: SessionWorkspaceReader;
+}
+
+export function reassignSession(
+  dependencies: Pick<SessionReassignmentDependencies, "now" | "store">,
+  userId: string,
+  sessionId: string,
+  input: SessionReassignmentInput,
+  workspaceId?: string,
+): ReassignSessionResult {
+  if (
+    workspaceId !== undefined &&
+    dependencies.store.get(userId, sessionId, workspaceId) === undefined
+  ) {
+    return { status: "not_found" };
+  }
+  return dependencies.store.reassign(
+    userId,
+    sessionId,
+    input.runnerId,
+    input.workingDirectory,
+    dependencies.now(),
+  );
 }
 
 export async function reassignSessionRequest(
@@ -25,23 +66,27 @@ export async function reassignSessionRequest(
       if (input === undefined) {
         return createApiError("invalid_request", 400);
       }
-      const result = dependencies.store.reassign(
+      const workspaceId =
+        dependencies.workspaces === undefined
+          ? undefined
+          : requestSessionWorkspaceId(
+              request,
+              user.id,
+              dependencies.workspaces,
+            );
+      if (dependencies.workspaces !== undefined && workspaceId === undefined) {
+        return createApiError("workspace_unavailable", 409);
+      }
+      const result = reassignSession(
+        dependencies,
         user.id,
         sessionId,
-        input.runnerId,
-        input.workingDirectory,
-        dependencies.now(),
+        input,
+        workspaceId,
       );
       if (result.status !== "reassigned") {
-        const notFound = result.status === "not_found";
-        return createApiError(
-          notFound
-            ? "not_found"
-            : result.status === "runner_unavailable"
-              ? "runner_unavailable"
-              : `session_${result.status}`,
-          notFound ? 404 : 409,
-        );
+        const code = sessionReassignmentError(result);
+        return createApiError(code, code === "not_found" ? 404 : 409);
       }
       dependencies.notify(user.id, sessionId);
       return createJsonResponse(result.detail);

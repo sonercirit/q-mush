@@ -1,5 +1,8 @@
+import { eq } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
+import { agentSessions } from "../../shared/database/schema.ts";
 import { RunnerStore } from "../../sync-engine/runner-store.ts";
+import type { SessionStore } from "../../sync-engine/session-store.ts";
 import {
   TEST_NOW,
   TEST_USER_ID,
@@ -46,6 +49,38 @@ function runningStore() {
   return createSessionStoreTestSetup();
 }
 
+function reassignSession(
+  store: SessionStore,
+  runnerId: string,
+  workingDirectory: string,
+  options: { readonly now?: number; readonly userId?: string } = {},
+) {
+  return store.reassign(
+    options.userId ?? TEST_USER_ID,
+    SESSION_ID,
+    runnerId,
+    workingDirectory,
+    options.now ?? TEST_NOW + 4,
+  );
+}
+
+function pauseRunningSessionForRestart(store: SessionStore): void {
+  const running = requireSession(store, SESSION_ID);
+  const runningExecution = {
+    generation: running.generation,
+    sessionId: running.id,
+  };
+  expect(
+    store.pauseRunningForRestart(
+      runningExecution,
+      "server",
+      "restart-reassign",
+      "agent",
+      TEST_NOW + 2,
+    ),
+  ).toBe(true);
+}
+
 describe("session store runner reassignment", () => {
   test("reassigns only an owned runner-required session with a new path", () => {
     const { database, store } = runningStore();
@@ -57,20 +92,14 @@ describe("session store runner reassignment", () => {
 
     const before = store.get(TEST_USER_ID, SESSION_ID);
     expect(
-      store.reassign(
-        "another-user",
-        SESSION_ID,
-        replacementId,
-        "/replacement/project",
-        TEST_NOW + 4,
-      ),
+      reassignSession(store, replacementId, "/replacement/project", {
+        userId: "another-user",
+      }),
     ).toEqual({ status: "not_found" });
-    const reassigned = store.reassign(
-      TEST_USER_ID,
-      SESSION_ID,
+    const reassigned = reassignSession(
+      store,
       replacementId,
       "/replacement/project",
-      TEST_NOW + 4,
     );
     expect(reassigned.status).toBe("reassigned");
     expect(reassigned).toMatchObject({
@@ -88,6 +117,28 @@ describe("session store runner reassignment", () => {
     closeHardeningDatabase({ database, store });
   });
 
+  test("rejects reassignment while a restart handoff is paused", () => {
+    const { database, store } = runningStore();
+    pauseRunningSessionForRestart(store);
+    database
+      .update(agentSessions)
+      .set({ runnerRequired: true })
+      .where(eq(agentSessions.id, SESSION_ID))
+      .run();
+    const replacementId = "018bcfe5-6800-7000-8000-000000000099";
+    addReplacementRunner(database, replacementId);
+    const paused = requireSession(store, SESSION_ID);
+    const before = { ...paused };
+
+    expect(
+      reassignSession(store, replacementId, "/replacement/project", {
+        now: TEST_NOW + 3,
+      }),
+    ).toEqual({ status: "busy" });
+    expect(store.get(TEST_USER_ID, SESSION_ID)).toEqual(before);
+    closeHardeningDatabase({ database, store });
+  });
+
   test("rejects a foreign or offline replacement inside the store transaction", () => {
     const { database, store } = runningStore();
     const foreignId = "018bcfe5-6800-7000-8000-000000000097";
@@ -99,15 +150,9 @@ describe("session store runner reassignment", () => {
     );
     expect(removed).toBe(true);
 
-    expect(
-      store.reassign(
-        TEST_USER_ID,
-        SESSION_ID,
-        foreignId,
-        "/foreign/project",
-        TEST_NOW + 4,
-      ),
-    ).toEqual({ status: "runner_unavailable" });
+    expect(reassignSession(store, foreignId, "/foreign/project")).toEqual({
+      status: "runner_unavailable",
+    });
     expectStoredSession(store, SESSION_ID, {
       runnerId: RUNNER_ID,
       runnerRequired: true,
@@ -121,12 +166,11 @@ describe("session store runner reassignment", () => {
       TEST_NOW + 5,
       false,
     );
-    const offlineReassignment = store.reassign(
-      TEST_USER_ID,
-      SESSION_ID,
+    const offlineReassignment = reassignSession(
+      store,
       offlineId,
       "/offline/project",
-      TEST_NOW + 5,
+      { now: TEST_NOW + 5 },
     );
     expect(offlineReassignment).toEqual({ status: "runner_unavailable" });
     expect(store.get(TEST_USER_ID, SESSION_ID)).toMatchObject({

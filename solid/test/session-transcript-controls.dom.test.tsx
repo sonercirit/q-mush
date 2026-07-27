@@ -109,9 +109,9 @@ test("the composer stays mounted and retains focus through a busy transition", (
 
   expectComposerPreserved(container, composer, prompt);
   expectPromptFocusAndSelection(prompt);
-  expectPromptAvailability(prompt, false);
+  expectPromptAvailability(prompt, true);
   expect(container.textContent).toContain(
-    "Session is running. You can send when it is ready.",
+    "Running. Follow up starts the next turn; Steer changes direction at the next safe model or tool boundary.",
   );
 
   controller.applyDelta({

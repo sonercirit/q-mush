@@ -29,6 +29,7 @@ interface SessionFollowUpProps extends PromptEventProps, SessionImagesProps {
   readonly onSubmit: () => void;
   readonly prompt: string;
   readonly sending: boolean;
+  readonly submitLabel?: string;
 }
 
 function promptEvents(props: PromptEventProps) {
@@ -125,7 +126,7 @@ export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
         disabled={props.disabled}
         type="submit"
       >
-        {props.sending ? "Sending…" : "Send"}
+        {props.sending ? "Sending…" : (props.submitLabel ?? "Send")}
       </button>
       <p
         aria-live="polite"

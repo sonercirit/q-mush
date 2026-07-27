@@ -26,6 +26,7 @@ export interface OAuthDependencies {
   readonly database?: AppDatabase;
   readonly fetch?: ProviderFetch;
   readonly now?: () => number;
+  readonly onSessionsChanged?: (userId: string) => void;
   readonly randomId?: IdGenerator;
   readonly randomToken?: () => string;
 }

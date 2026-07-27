@@ -1,6 +1,9 @@
 import type { SessionViewState } from "./session-client.tsx";
 import {
   readSessionTranscriptFilters,
+  writeSessionTranscriptFilters,
+  type SessionTranscriptFilterName,
+  type SessionTranscriptFilters,
   type SessionTranscriptFilterStorage,
 } from "./session-transcript-filters.ts";
 
@@ -14,6 +17,17 @@ export function browserTranscriptFilterStorage():
   } catch {
     return undefined;
   }
+}
+
+export function updatedTranscriptFilters(
+  filters: SessionTranscriptFilters,
+  name: SessionTranscriptFilterName,
+  visible: boolean,
+  storage: SessionTranscriptFilterStorage | undefined,
+): SessionTranscriptFilters {
+  const updated = { ...filters, [name]: visible };
+  writeSessionTranscriptFilters(storage, updated);
+  return updated;
 }
 
 export function initialTranscriptFilters(

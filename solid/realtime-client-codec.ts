@@ -1,3 +1,4 @@
+import type { PendingAskQuestions } from "../shared/ask-questions.ts";
 import {
   parseJsonRecord,
   requiredRecordString,
@@ -7,12 +8,41 @@ import type {
   AgentSessionDetail,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
+import {
+  isToolStreamDeltaFrame,
+  isToolStreamSnapshotFrame,
+  type ToolStreamDeltaFrame,
+  type ToolStreamSnapshotFrame,
+} from "../shared/tool-stream.ts";
 import { readRunners } from "./runner-client.tsx";
-import { readSessionDetail, readSessionList } from "./session-codec.ts";
+import {
+  readSessionDetail,
+  readSessionList,
+  readSessionPendingQuestions,
+} from "./session-codec.ts";
 
 export type RealtimeServerEvent =
+  | {
+      readonly commandId: string;
+      readonly error: string;
+      readonly type: "command_error";
+    }
+  | {
+      readonly commandId: string;
+      readonly result: unknown;
+      readonly type: "command_success";
+    }
+  | { readonly instanceId: string; readonly type: "ready" }
+  | ToolStreamDeltaFrame
+  | ToolStreamSnapshotFrame
   | { readonly runners: readonly RunnerSummary[]; readonly type: "runners" }
   | { readonly session: AgentSessionDetail; readonly type: "session" }
+  | {
+      readonly pending: PendingAskQuestions | null;
+      readonly sessionId: string;
+      readonly type: "session_questions";
+    }
+  | { readonly type: "sessions_changed" }
   | {
       readonly sessions: readonly AgentSessionSummary[];
       readonly type: "sessions";
@@ -21,6 +51,7 @@ export type RealtimeServerEvent =
       readonly content: string;
       readonly reset?: true;
       readonly sessionId: string;
+      readonly streamId?: string;
       readonly thinking: string;
       readonly type: "session_delta";
     };
@@ -43,12 +74,44 @@ export function readRealtimeServerEvent(message: string): RealtimeServerEvent {
   );
 
   switch (value["type"]) {
+    case "ready":
+      return { instanceId: requiredString(value, "instanceId"), type: "ready" };
+    case "command_success":
+      return {
+        commandId: requiredString(value, "commandId"),
+        result: value["result"],
+        type: "command_success",
+      };
+    case "command_error":
+      return {
+        commandId: requiredString(value, "commandId"),
+        error: requiredString(value, "error"),
+        type: "command_error",
+      };
+    case "tool_stream":
+      if (!isToolStreamDeltaFrame(value)) {
+        throw new Error("The realtime server event was invalid");
+      }
+      return value;
+    case "tool_stream_snapshot":
+      if (!isToolStreamSnapshotFrame(value)) {
+        throw new Error("The realtime server event was invalid");
+      }
+      return value;
     case "runners":
       return { runners: readRunners(value), type: "runners" };
     case "sessions":
       return { sessions: readSessionList(value), type: "sessions" };
     case "session":
       return { session: readSessionDetail(value["session"]), type: "session" };
+    case "session_questions":
+      return {
+        pending: readSessionPendingQuestions(value["pending"]),
+        sessionId: requiredString(value, "sessionId"),
+        type: "session_questions",
+      };
+    case "sessions_changed":
+      return { type: "sessions_changed" };
     case "session_delta": {
       const reset = value["reset"];
       if (reset !== undefined && reset !== true) {
@@ -58,6 +121,9 @@ export function readRealtimeServerEvent(message: string): RealtimeServerEvent {
         content: requiredString(value, "content"),
         ...(reset === true ? { reset } : {}),
         sessionId: requiredString(value, "sessionId"),
+        ...(typeof value["streamId"] === "string"
+          ? { streamId: value["streamId"] }
+          : {}),
         thinking: requiredString(value, "thinking"),
         type: "session_delta",
       };

@@ -393,6 +393,7 @@ test("OpenAI migration preserves existing OpenRouter credentials", async () => {
       id: credentialId,
       isDefault: false,
       isDeleted: false,
+      isGlobal: true,
       label: "Migrated key",
       provider: "openrouter",
       providerAccountId: "openrouter-account",

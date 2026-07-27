@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
-import { chmodSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync } from "node:fs";
 import {
   RUNNER_EXECUTABLE_PATH,
   RUNNER_EXECUTABLE_SHA256_HEADER,
 } from "../shared/routes.ts";
+import { replacePrivateFile } from "./runner-private-file.ts";
 
 const REQUEST_TIMEOUT_MILLISECONDS = 120_000;
 const MAX_EXECUTABLE_BYTES = 512 * 1024 * 1024;
@@ -18,16 +19,140 @@ type LaunchRunner = (
 ) => void;
 
 export interface RunnerUpdateContext {
+  readonly activationReceipt?: string;
+  readonly activationReceiptPhase?: "finalized" | "prepared";
   readonly configurationPath: string;
   readonly executablePath: string;
+  readonly restartId?: string;
   readonly serverOrigin: string;
   readonly target: string;
   readonly version: string;
 }
 
 interface RunnerUpdateDependencies {
+  readonly beforeRestart?: () => Promise<string | undefined>;
   readonly fetch?: UpdateFetch;
   readonly launch?: LaunchRunner;
+}
+
+export type RunnerStartupConnection = Readonly<{
+  readonly canOperate: (activationReceipt: string) => boolean;
+  readonly finalizeActivation: (activationReceipt: string) => boolean;
+  readonly operational: (activationReceipt: string) => boolean;
+  readonly prepareActivation: (activationReceipt: string) => boolean;
+  readonly activationReceipt?: string;
+  readonly activationReceiptPhase?: "finalized" | "prepared";
+  readonly restartId?: string;
+}>;
+
+export class RunnerStartupRestart {
+  #activated = false;
+  #activationReceipt: string | undefined;
+  #activationReceiptPhase: "finalized" | "prepared" | undefined;
+  #restartId: string | undefined;
+
+  constructor(restartId?: string) {
+    if (
+      restartId !== undefined &&
+      (restartId.length === 0 || restartId.length > 200)
+    ) {
+      throw new Error("The runner restart ID is invalid");
+    }
+    this.#restartId = restartId;
+  }
+
+  get activationReceipt(): string | undefined {
+    return this.#activated ? undefined : this.#activationReceipt;
+  }
+
+  get activationReceiptPhase(): "finalized" | "prepared" | undefined {
+    return this.#activated ? undefined : this.#activationReceiptPhase;
+  }
+
+  get retainedActivationReceipt(): string | undefined {
+    return this.activationReceipt;
+  }
+
+  get restartId(): string | undefined {
+    return this.#activated ? undefined : this.#restartId;
+  }
+
+  connection(): RunnerStartupConnection {
+    let activationReceipt = this.activationReceipt;
+    let activationReceiptPhase = this.activationReceiptPhase;
+    const restartId = this.restartId;
+    let operational = false;
+    const ownsState = (): boolean =>
+      !operational &&
+      !this.#activated &&
+      this.#restartId === restartId &&
+      this.#activationReceipt === activationReceipt &&
+      this.#activationReceiptPhase === activationReceiptPhase;
+    const retainActivation = (
+      receipt: string,
+      phase: "finalized" | "prepared",
+    ): boolean => {
+      if (!ownsState() || receipt.length === 0 || receipt.length > 200) {
+        return false;
+      }
+      activationReceipt = receipt;
+      activationReceiptPhase = phase;
+      this.#activationReceipt = receipt;
+      this.#activationReceiptPhase = phase;
+      return true;
+    };
+    const canOperate = (receipt: string): boolean =>
+      ownsState() &&
+      activationReceipt === receipt &&
+      activationReceiptPhase === "finalized";
+    return {
+      canOperate,
+      finalizeActivation: (receipt) => retainActivation(receipt, "finalized"),
+      operational: (receipt) => {
+        if (!canOperate(receipt)) {
+          return false;
+        }
+        operational = true;
+        this.#activated = true;
+        this.#activationReceipt = undefined;
+        this.#activationReceiptPhase = undefined;
+        this.#restartId = undefined;
+        return true;
+      },
+      prepareActivation: (receipt) => retainActivation(receipt, "prepared"),
+      ...(activationReceipt === undefined ? {} : { activationReceipt }),
+      ...(activationReceiptPhase === undefined
+        ? {}
+        : { activationReceiptPhase }),
+      ...(restartId === undefined ? {} : { restartId }),
+    };
+  }
+
+  #setActivation(receipt: string, phase: "finalized" | "prepared"): void {
+    if (receipt.length > 0 && receipt.length <= 200) {
+      this.#activationReceipt = receipt;
+      this.#activationReceiptPhase = phase;
+    }
+  }
+
+  finalizeActivation(receipt: string): void {
+    this.#setActivation(receipt, "finalized");
+  }
+
+  prepareActivation(receipt: string): void {
+    this.#setActivation(receipt, "prepared");
+  }
+
+  restoreActivation(
+    receipt: string,
+    phase: "finalized" | "prepared" = "finalized",
+  ): void {
+    if (phase === "prepared") {
+      this.prepareActivation(receipt);
+    } else {
+      this.finalizeActivation(receipt);
+    }
+  }
 }
 
 function launchRunner(
@@ -65,10 +190,16 @@ function validateUpdateResponse(response: Response): string {
     throw new Error("The runner update has no valid version");
   }
 
-  const contentLength = Number(response.headers.get("content-length"));
-
-  if (Number.isFinite(contentLength) && contentLength > MAX_EXECUTABLE_BYTES) {
-    throw new Error("The runner update is too large");
+  const contentLengthHeader = response.headers.get("content-length");
+  if (contentLengthHeader !== null) {
+    const contentLength = Number(contentLengthHeader);
+    if (
+      !Number.isSafeInteger(contentLength) ||
+      contentLength < 0 ||
+      contentLength > MAX_EXECUTABLE_BYTES
+    ) {
+      throw new Error("The runner update has an invalid size");
+    }
   }
 
   return digest;
@@ -94,16 +225,12 @@ async function readVerifiedExecutable(
 }
 
 function replaceExecutable(path: string, executable: Uint8Array): void {
-  const suffix = randomBytes(12).toString("hex");
-  const temporaryPath = `${path}.update-${suffix}`;
-
-  try {
-    writeFileSync(temporaryPath, executable, { flag: "wx", mode: 0o700 });
-    chmodSync(temporaryPath, 0o755);
-    renameSync(temporaryPath, path);
-  } finally {
-    rmSync(temporaryPath, { force: true });
-  }
+  replacePrivateFile(path, executable, {
+    mode: 0o700,
+    prepare: (temporaryPath) => {
+      chmodSync(temporaryPath, 0o755);
+    },
+  });
 }
 
 export async function updateRunnerIfAvailable(
@@ -125,10 +252,21 @@ export async function updateRunnerIfAvailable(
 
   const expectedDigest = validateUpdateResponse(response);
   const executable = await readVerifiedExecutable(response, expectedDigest);
+  let restartId = context.restartId;
+  restartId ??= await dependencies.beforeRestart?.();
   replaceExecutable(context.executablePath, executable);
   (dependencies.launch ?? launchRunner)(context.executablePath, [
     "--config",
     context.configurationPath,
+    ...(restartId === undefined ? [] : ["--restart-id", restartId]),
+    ...(context.activationReceipt === undefined
+      ? []
+      : [
+          "--activation-receipt",
+          context.activationReceipt,
+          "--activation-receipt-phase",
+          context.activationReceiptPhase ?? "finalized",
+        ]),
   ]);
   return true;
 }

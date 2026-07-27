@@ -18,13 +18,14 @@ import {
   AUTH_SESSION_PATH,
   HOME_PATH,
 } from "../shared/routes.ts";
+import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 import { requestJson } from "./browser-http.ts";
 import { providerNotice } from "./client-notices.ts";
+import { PromptController } from "./prompt-controller.ts";
 import {
   BRAVE_SEARCH_PANEL,
   OPENAI_PANEL,
   OPENROUTER_PANEL,
-  ProviderPanel,
 } from "./provider-client.tsx";
 import { ProviderController } from "./provider-controller.ts";
 import { RealtimeConnection } from "./realtime-client.ts";
@@ -35,38 +36,38 @@ import {
   RenderDebugToggle,
   RenderDebugView,
 } from "./render-debug.tsx";
-import { RunnerPanel } from "./runner-client.tsx";
 import { RunnerController } from "./runner-controller.ts";
-import { SessionPanel } from "./session-client.tsx";
 import { SessionController } from "./session-controller.ts";
 import "./styles.css";
+import { WorkspaceController } from "./workspace-controller.ts";
+import { Workspace } from "./workspace-view.tsx";
 
 function readAuthenticatedUser(value: unknown): AuthenticatedUser | null {
   if (value === null) {
     return null;
   }
 
-  if (!isRecord(value)) {
-    throw new Error("The session contained an invalid user");
+  if (isRecord(value)) {
+    const email = value["email"];
+    const id = value["id"];
+    const name = value["name"];
+    const picture = value["picture"];
+
+    if (
+      typeof email !== "string" ||
+      typeof id !== "string" ||
+      typeof name !== "string" ||
+      (picture !== undefined && typeof picture !== "string")
+    ) {
+      throw new Error("The session contained an invalid Google profile");
+    }
+
+    return picture === undefined
+      ? { email, id, name }
+      : { email, id, name, picture };
   }
 
-  const email = value["email"];
-  const id = value["id"];
-  const name = value["name"];
-  const picture = value["picture"];
-
-  if (
-    typeof email !== "string" ||
-    typeof id !== "string" ||
-    typeof name !== "string" ||
-    (picture !== undefined && typeof picture !== "string")
-  ) {
-    throw new Error("The session contained an invalid Google profile");
-  }
-
-  return picture === undefined
-    ? { email, id, name }
-    : { email, id, name, picture };
+  throw new Error("The session contained an invalid user");
 }
 
 function readAuthSession(value: unknown): AuthSession {
@@ -113,29 +114,6 @@ function readNotices(): readonly string[] {
   }
 
   return notices;
-}
-
-function Avatar(props: { readonly user: AuthenticatedUser }): JSX.Element {
-  return (
-    <Show
-      fallback={
-        <img
-          alt=""
-          class="size-12 rounded-2xl bg-slate-800 object-cover ring-1 ring-white/10"
-          referrerPolicy="no-referrer"
-          src={props.user.picture}
-        />
-      }
-      when={props.user.picture === undefined}
-    >
-      <span
-        aria-hidden="true"
-        class="grid size-12 place-items-center rounded-2xl bg-gradient-to-br from-emerald-300 to-cyan-400 text-lg font-bold text-slate-950"
-      >
-        {props.user.name.charAt(0).toUpperCase()}
-      </span>
-    </Show>
-  );
 }
 
 function Header(props: {
@@ -287,66 +265,6 @@ function SignIn(props: {
   );
 }
 
-function Workspace(props: {
-  readonly agentSessions: SessionController;
-  readonly braveSearch: ProviderController;
-  readonly logout: () => Promise<void>;
-  readonly logoutPending: boolean;
-  readonly openAi: ProviderController;
-  readonly openRouter: ProviderController;
-  readonly runners: RunnerController;
-  readonly user: AuthenticatedUser;
-}): JSX.Element {
-  return (
-    <div
-      class="mt-8 min-w-0 space-y-5 sm:mt-10 sm:space-y-6 lg:mt-12"
-      {...renderDebugBoundary("workspace", "Authenticated workspace")}
-    >
-      <SessionPanel
-        controller={props.agentSessions}
-        openAi={props.openAi.view}
-        openRouter={props.openRouter.view}
-        runners={props.runners.view}
-      />
-      <RunnerPanel controller={props.runners} />
-      <aside
-        aria-label="Google account"
-        class="flex min-w-0 flex-col gap-5 rounded-3xl border border-white/10 bg-slate-900/80 p-4 sm:p-6 md:flex-row md:items-center md:justify-between lg:p-8"
-        {...renderDebugBoundary("google-account", "Google account")}
-      >
-        <div class="flex min-w-0 items-center gap-4">
-          <Avatar user={props.user} />
-          <div class="min-w-0">
-            <p class="break-words font-semibold text-white">
-              {props.user.name}
-            </p>
-            <p class="break-all text-sm text-slate-400">{props.user.email}</p>
-          </div>
-        </div>
-        <button
-          class="rounded-2xl border border-white/10 px-5 py-2.5 text-sm font-semibold text-slate-300 transition hover:border-rose-300/30 hover:text-rose-200 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
-          disabled={props.logoutPending}
-          onClick={() => {
-            void props.logout();
-          }}
-          type="button"
-        >
-          {props.logoutPending ? "Signing out…" : "Sign out"}
-        </button>
-      </aside>
-      <ProviderPanel configuration={OPENAI_PANEL} controller={props.openAi} />
-      <ProviderPanel
-        configuration={OPENROUTER_PANEL}
-        controller={props.openRouter}
-      />
-      <ProviderPanel
-        configuration={BRAVE_SEARCH_PANEL}
-        controller={props.braveSearch}
-      />
-    </div>
-  );
-}
-
 function App(): JSX.Element {
   const [loadFailed, setLoadFailed] = createSignal(false);
   const [logoutPending, setLogoutPending] = createSignal(false);
@@ -356,9 +274,8 @@ function App(): JSX.Element {
   const braveSearch = new ProviderController(BRAVE_SEARCH_PANEL);
   const openAi = new ProviderController(OPENAI_PANEL);
   const openRouter = new ProviderController(OPENROUTER_PANEL);
+  const prompts = new PromptController();
   const runners = new RunnerController();
-  const agentSessions = new SessionController();
-  const providerControllers = [openAi, openRouter, braveSearch] as const;
   const realtime = new RealtimeConnection((event) => {
     switch (event.type) {
       case "runners":
@@ -370,15 +287,63 @@ function App(): JSX.Element {
       case "session":
         agentSessions.applyDetail(event.session);
         break;
+      case "session_questions":
+        agentSessions.applyQuestions(event);
+        break;
+      case "sessions_changed":
+        void agentSessions.refresh();
+        break;
       case "session_delta":
         agentSessions.applyDelta(event);
         break;
+      case "tool_stream":
+        agentSessions.applyToolDelta(event);
+        break;
+      case "tool_stream_snapshot":
+        agentSessions.applyToolSnapshot(event);
+        break;
+      case "command_error":
+      case "command_success":
+      case "ready":
+        break;
     }
   });
+  const agentSessions = new SessionController(undefined, undefined, undefined, {
+    command: (operation, payload, idempotencyKey) =>
+      realtime.command(operation, payload, idempotencyKey),
+    onReconnect: (listener) => realtime.onReconnect(listener),
+  });
+  const providerControllers = [openAi, openRouter, braveSearch] as const;
+  let scopedLoadRevision = 0;
+  const reloadScopedData = (workspaceId: string): void => {
+    const revision = ++scopedLoadRevision;
+    realtime.stop();
+    agentSessions.setWorkspace(workspaceId);
+    runners.setWorkspace(workspaceId);
+    for (const controller of providerControllers) {
+      controller.setWorkspace(workspaceId);
+    }
+    void Promise.all([
+      ...(workspaceId === GLOBAL_WORKSPACE_ID ? [] : [agentSessions.load()]),
+      runners.load(),
+      ...providerControllers.map((controller) => controller.load()),
+    ]).then(() => {
+      if (
+        revision === scopedLoadRevision &&
+        workspaceId !== GLOBAL_WORKSPACE_ID
+      ) {
+        realtime.start(workspaceId);
+      }
+    });
+  };
+  const workspaces = new WorkspaceController(reloadScopedData);
 
   const resetWorkspaceConnections = (): void => {
+    scopedLoadRevision += 1;
     realtime.stop();
     agentSessions.reset();
+    workspaces.reset();
+    prompts.reset();
     runners.reset();
     for (const controller of providerControllers) {
       controller.reset();
@@ -394,14 +359,10 @@ function App(): JSX.Element {
       const loaded = readAuthSession(await requestJson(AUTH_SESSION_PATH));
       setSession(loaded);
       if (loaded.user !== null) {
-        await Promise.all([
-          agentSessions.load(),
-          runners.load(),
-          ...providerControllers.map((controller) => controller.load()),
-        ]);
-        realtime.start();
+        await Promise.all([prompts.load(), workspaces.load()]);
       }
     } catch {
+      resetWorkspaceConnections();
       setLoadFailed(true);
     }
   };
@@ -499,8 +460,10 @@ function App(): JSX.Element {
                           logoutPending={logoutPending()}
                           openAi={openAi}
                           openRouter={openRouter}
+                          prompts={prompts}
                           runners={runners}
                           user={user()}
+                          workspaces={workspaces}
                         />
                       )}
                     </Show>

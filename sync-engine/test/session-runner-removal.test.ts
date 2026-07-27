@@ -16,11 +16,11 @@ function testSession(): AgentSessionDetail {
     provider: "openai" as const,
     status: "idle" as const,
   };
-  const runningCalls = [
-    { arguments: "{}", id: "completed-call", name: "read" },
-    { arguments: "{}", id: "call-1", name: "read" },
-    { arguments: "{}", id: "call-2", name: "read" },
-  ];
+  const runningCalls = ["completed-call", "call-1", "call-2"].map((id) => ({
+    arguments: "{}",
+    id,
+    name: "read",
+  }));
   const runningMessage = {
     content: "Running tools.",
     createdAt: 1,
@@ -39,7 +39,9 @@ function testSession(): AgentSessionDetail {
     createdAt: 1,
     credentialId: "credential-1",
     currentContextTokens: 0,
+    executionEnvironment: "bare_metal",
     generation: 0,
+    hasOlderSegments: false,
     id: SESSION_ID,
     maxContextTokens: null,
     messages: [
@@ -56,9 +58,13 @@ function testSession(): AgentSessionDetail {
       },
     ],
     model: "model-1",
+    openRouterProviderTag: null,
+    pendingInputs: [],
+    pendingQuestions: null,
     provider: base.provider,
     providerPricing: null,
     reasoningEffort: null,
+    restartHandoff: null,
     runnerId: REMOVED_RUNNER_ID,
     runnerRequired: true,
     status: base.status,
@@ -66,15 +72,14 @@ function testSession(): AgentSessionDetail {
     tools: ["read"],
     updatedAt: 2,
     workingDirectory: "/work",
+    workspaceId: "workspace-1",
   };
 }
 
-function dispatch(
-  broker: RunnerCommandBroker,
-  runnerId: string,
-): Promise<string> {
+function dispatch(broker: RunnerCommandBroker, runnerId: string) {
   return broker.dispatch({
     arguments: {},
+    executionEnvironment: "bare_metal",
     runnerId,
     sessionId: SESSION_ID,
     tool: "read",
@@ -82,7 +87,9 @@ function dispatch(
   });
 }
 
-async function expectAborted(command: Promise<string>): Promise<void> {
+async function expectAborted(
+  command: ReturnType<typeof dispatch>,
+): Promise<void> {
   expect(await captureBrokerRejection(command)).toMatchObject({
     name: "AbortError",
   });
@@ -118,6 +125,7 @@ describe("removed session runners", () => {
     const command = broker.dispatch({
       arguments: {},
       authorize: () => authorized,
+      executionEnvironment: "bare_metal",
       runnerId: REMOVED_RUNNER_ID,
       sessionId: SESSION_ID,
       tool: "read",
@@ -148,9 +156,12 @@ describe("removed session runners", () => {
     await expectAborted(removedRunnerCommand);
     await expectAborted(otherRunnerCommand);
     expect(appended).toEqual([{ toolCallId: "call-1", toolName: "read" }]);
-    expect(broker.complete(OTHER_RUNNER_ID, "runner-command-2", "late")).toBe(
-      false,
-    );
+    expect(
+      broker.complete(OTHER_RUNNER_ID, "runner-command-2", {
+        output: "late",
+        state: "completed",
+      }),
+    ).toBe(false);
   });
 
   test("fences commands before waiting for the database removal callback", async () => {
@@ -169,9 +180,12 @@ describe("removed session runners", () => {
     removal.removing("user-1", REMOVED_RUNNER_ID);
     const removed = removal.removed("user-1", REMOVED_RUNNER_ID);
 
-    expect(broker.complete(REMOVED_RUNNER_ID, "call-1", "late result")).toBe(
-      false,
-    );
+    expect(
+      broker.complete(REMOVED_RUNNER_ID, "call-1", {
+        output: "late result",
+        state: "completed",
+      }),
+    ).toBe(false);
     await expectAborted(command);
     blocked.resolve(undefined);
     await removed;

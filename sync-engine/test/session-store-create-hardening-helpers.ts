@@ -1,9 +1,23 @@
+import { expect } from "vitest";
 import type { CreateAgentSession } from "../../sync-engine/session-store-create.ts";
 import type { SessionStore } from "../../sync-engine/session-store.ts";
 import {
   TEST_NOW,
   TEST_USER_ID,
+  TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
+
+export function createRunningTestSession(
+  store: SessionStore,
+  input: ReturnType<typeof createSessionInput>,
+  sessionId: string,
+  now = TEST_NOW,
+) {
+  const created = store.create(input, now);
+  expect(created.status).toBe("created");
+  expect(store.transitionCurrent(sessionId, "running", now + 1)).toBe(true);
+  return created;
+}
 
 export function createSessionInput(options: {
   readonly credentialId: string;
@@ -14,9 +28,11 @@ export function createSessionInput(options: {
   return {
     autoCompact: true,
     credentialId: options.credentialId,
+    executionEnvironment: "bare_metal",
     images: [],
     maxContextTokens: null,
     model: "gpt-4.1-mini",
+    openRouterProviderTag: null,
     prompt: options.prompt,
     provider: "openai",
     providerPricing: null,
@@ -25,6 +41,7 @@ export function createSessionInput(options: {
     tools: [],
     userId: TEST_USER_ID,
     workingDirectory: options.workingDirectory ?? "/work/project",
+    workspaceId: TEST_WORKSPACE_ID,
   };
 }
 

@@ -89,6 +89,13 @@ test("keeps editable session controls in the reactive tree", () => {
   expect(newSessionHtml).toContain('id="session-prompt"');
   expect(newSessionHtml).toContain("Tools &amp; skills");
   expect(newSessionHtml).toContain('name="tools"');
+  expect(newSessionHtml).toContain('id="session-auto-compact"');
+  expect(newSessionHtml).toMatch(
+    /<input[^>]*checked[^>]*id="session-auto-compact"[^>]*name="autoCompact"[^>]*type="checkbox"/u,
+  );
+  expect(newSessionHtml).toContain(
+    "Compact automatically near the context limit",
+  );
   expect(newSessionHtml).toContain("Brave Search");
   expect(followUpHtml).toContain('name="prompt"');
   expect(newSessionHtml).not.toContain("data-focus-key");
@@ -385,6 +392,7 @@ test("renders a directory browser beside the working-directory input", () => {
       open: true,
       requestedPath: ".",
       runnerId: "runner-1",
+      workspaceId: undefined,
     },
   });
 
@@ -419,6 +427,7 @@ test("wraps complete working-directory and folder paths in the responsive sessio
       open: true,
       requestedPath: path,
       runnerId: "runner-1",
+      workspaceId: undefined,
     },
     selectedId: TEST_SESSION_DETAIL.id,
     sessions: [{ ...TEST_SESSION_DETAIL, workingDirectory: path }],

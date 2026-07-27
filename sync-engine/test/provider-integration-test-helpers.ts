@@ -291,9 +291,18 @@ export function expectRemovedProviderCredential(
 }
 
 export function credentialSummaries<T>(credentials: readonly T[]): {
-  readonly credentials: readonly T[];
+  readonly credentials: readonly (T & {
+    readonly isGlobal: boolean;
+    readonly workspaceIds: readonly string[];
+  })[];
 } {
-  return { credentials };
+  return {
+    credentials: credentials.map((credential) => ({
+      ...credential,
+      isGlobal: true,
+      workspaceIds: [],
+    })),
+  };
 }
 
 export function expectProviderCredentialSummaries(

@@ -9,19 +9,13 @@ import {
   reasoningEffortLabel,
   type AgentModelCatalog,
 } from "../shared/agent-configuration.ts";
-import type { AgentImage } from "../shared/agent-images.ts";
-import type { AgentSessionToolName } from "../shared/agent-tools.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
 import type { RunnerSummary } from "../shared/runner-model.ts";
-import type {
-  AgentSessionDetail,
-  AgentSessionSummary,
-} from "../shared/session-model.ts";
 import { RetryNotice } from "./collection.tsx";
+import { ControllerRetryNotice } from "./controller-retry.tsx";
 import { CustomSelect, type CustomSelectOption } from "./custom-select.tsx";
 import { DirectoryBrowseButton } from "./directory-browse-button.tsx";
 import { DirectoryPicker } from "./directory-picker-client.tsx";
-import type { DirectoryPickerState } from "./directory-picker-controller.ts";
 import { findById } from "./id-selection.ts";
 import {
   modelModalitiesLabel,
@@ -33,64 +27,25 @@ import type {
 } from "./provider-client.tsx";
 import { renderDebugBoundary } from "./render-debug.tsx";
 import type { RunnerViewState } from "./runner-client.tsx";
+import { SessionAutoCompactToggle } from "./session-autocompact-toggle.tsx";
 import { SessionPromptInput } from "./session-client-forms.tsx";
 import { formatTokenCount } from "./session-context-client.tsx";
 import type { SessionController } from "./session-controller.ts";
+import { SessionExecutionEnvironmentSelect } from "./session-execution-environment.tsx";
 import { SessionResults } from "./session-focus-client.tsx";
 import type { SessionPanelResources } from "./session-panel-resources.ts";
-import {
-  runnerSelectOptions,
-  type SessionReassignmentDraft,
-} from "./session-reassignment-client.ts";
+import { OpenRouterProviderSelect } from "./session-provider-select.tsx";
+import { runnerSelectOptions } from "./session-reassignment-client.ts";
 import { selectedSessionCredentialAvailable } from "./session-resource-availability.ts";
 import type { SessionRunnerViewProps } from "./session-runner-view-props.ts";
 import { SessionToolPicker } from "./session-tool-picker.tsx";
-import type { SessionTranscriptFilters } from "./session-transcript-filters.ts";
+import type { SessionViewState } from "./session-view-state.ts";
 
-export interface SessionDraft {
-  readonly credential: string;
-  readonly images: readonly AgentImage[];
-  readonly model: string;
-  readonly prompt: string;
-  readonly reasoningEffort: string;
-  readonly runnerId: string;
-  readonly tools: readonly AgentSessionToolName[];
-  readonly workingDirectory: string;
-}
-
-export interface SessionModelDiscoveryState {
-  readonly catalog: AgentModelCatalog | undefined;
-  readonly credential: string | undefined;
-  readonly error: string | undefined;
-  readonly loading: boolean;
-}
-
-export interface SessionViewState {
-  readonly compacting: boolean;
-  readonly creating: boolean;
-  readonly directoryPicker: DirectoryPickerState;
-  readonly detail: AgentSessionDetail | undefined;
-  readonly draft: SessionDraft;
-  readonly error: string | undefined;
-  readonly followUp: string;
-  readonly followUpImages: readonly AgentImage[];
-  readonly loadingDetail: boolean;
-  readonly modelDiscovery: SessionModelDiscoveryState;
-  readonly openSelect:
-    | "credential"
-    | "model"
-    | "reasoningEffort"
-    | "reassignmentRunnerId"
-    | "runnerId"
-    | undefined;
-  readonly reassigning: boolean;
-  readonly reassignment: SessionReassignmentDraft;
-  readonly selectedId: string | undefined;
-  readonly sending: boolean;
-  readonly sessions: readonly AgentSessionSummary[] | undefined;
-  readonly stopping: boolean;
-  readonly transcriptFilters: SessionTranscriptFilters;
-}
+export type {
+  SessionDraft,
+  SessionModelDiscoveryState,
+  SessionViewState,
+} from "./session-view-state.ts";
 
 interface CredentialOption {
   readonly credential: ProviderCredential;
@@ -333,6 +288,19 @@ function NewSessionForm(
       : (models()[0]?.id ?? ""),
   );
   const model = createMemo(() => findById(models(), modelValue()));
+  const providerDiscoveryKey = createMemo(() =>
+    credential()?.provider === "openrouter" && modelValue().length > 0
+      ? `${selectedCredentialValue()}\n${modelValue()}`
+      : undefined,
+  );
+  const providerDiscovery = createMemo(() =>
+    props.state.providerDiscovery.key === providerDiscoveryKey()
+      ? props.state.providerDiscovery
+      : undefined,
+  );
+  createEffect(() => {
+    props.controller.ensureProviders(selectedCredentialValue(), modelValue());
+  });
   const resourcesAvailable = createMemo(
     () => runners().length > 0 && credentials().length > 0,
   );
@@ -348,14 +316,26 @@ function NewSessionForm(
     options: readonly CustomSelectOption[],
   ): readonly string[] => options.map(({ value }) => value);
   const select = (
-    name: "credential" | "model" | "reasoningEffort" | "runnerId",
+    name:
+      | "credential"
+      | "executionEnvironment"
+      | "model"
+      | "openRouterProviderTag"
+      | "reasoningEffort"
+      | "runnerId",
     value: string,
     values: readonly string[],
   ): void => {
     props.controller.chooseOption(name, value, values);
   };
   const toggleSelect = (
-    name: "credential" | "model" | "reasoningEffort" | "runnerId",
+    name:
+      | "credential"
+      | "executionEnvironment"
+      | "model"
+      | "openRouterProviderTag"
+      | "reasoningEffort"
+      | "runnerId",
   ): void => {
     props.controller.toggleSelect(name);
   };
@@ -412,6 +392,10 @@ function NewSessionForm(
         runnerAvailable={selectedRunnerId().length > 0}
         state={props.state}
       />
+      <SessionExecutionEnvironmentSelect
+        controller={props.controller}
+        state={props.state}
+      />
       <CustomSelect
         {...modelAvailabilityAttributes(props.state.creating, models())}
         emptyLabel={
@@ -440,6 +424,19 @@ function NewSessionForm(
         required
         selectedValue={modelValue()}
       />
+      <Show
+        when={
+          credential()?.provider === "openrouter" && modelValue().length > 0
+        }
+      >
+        <OpenRouterProviderSelect
+          controller={props.controller}
+          creating={props.state.creating}
+          discovery={providerDiscovery()}
+          open={props.state.openSelect === "openRouterProviderTag"}
+          selectedValue={props.state.draft.openRouterProviderTag}
+        />
+      </Show>
       <CustomSelect
         disabled={
           modelAvailabilityAttributes(props.state.creating, models())
@@ -470,6 +467,13 @@ function NewSessionForm(
         selectedValue={props.state.draft.reasoningEffort}
       />
       {renderModelModalities(model())}
+      <SessionAutoCompactToggle
+        checked={props.state.draft.autoCompact}
+        disabled={props.state.creating}
+        onChange={(autoCompact) => {
+          props.controller.setDraftAutoCompact(autoCompact);
+        }}
+      />
       <SessionToolPicker
         disabled={props.state.creating}
         onChange={(tools) => {
@@ -587,11 +591,9 @@ export function SessionPanel(
           runners={online()}
           state={state()}
         />
-        <RetryNotice
+        <ControllerRetryNotice
           error={state().error}
-          onRetry={() => {
-            void props.controller.load();
-          }}
+          load={props.controller.load.bind(props.controller)}
         />
         <SessionResults
           controller={props.controller}

@@ -1,16 +1,18 @@
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
-import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import type { GoogleAuth } from "./auth.ts";
 import { withAuthenticatedUser } from "./authenticated-request.ts";
 import {
   createApiError,
   createJsonResponse,
-  createMethodNotAllowedResponse,
   parseJsonRequest,
 } from "./http.ts";
-import { queueFailureResponse } from "./session-availability.ts";
-import type { SessionRuntimes } from "./session-runtime.ts";
+import {
+  pauseSessionForRestart,
+  type SessionLaunchBoundary,
+} from "./session-creation.ts";
+import type { SessionCredentialOperation } from "./session-credential-operation.ts";
+import { queueSessionDetail } from "./session-queue.ts";
 import type { SessionStore } from "./session-store.ts";
 
 function readCompactionMode(value: unknown): boolean | undefined {
@@ -38,18 +40,16 @@ interface SessionCompactionSettingsDependencies {
   readonly auth: GoogleAuth;
   readonly now: () => number;
   readonly onChanged: (detail: AgentSessionDetail, userId: string) => void;
+  readonly requiredWorkspaceId?: string;
   readonly store: SessionStore;
 }
 
-export async function updateSessionCompactionMode(
+export function updateSessionCompactionMode(
   dependencies: SessionCompactionSettingsDependencies,
   request: Request,
   sessionId: string,
 ): Promise<Response> {
-  if (request.method !== "POST") {
-    return createMethodNotAllowedResponse("POST");
-  }
-  return await Promise.resolve(
+  return Promise.resolve(
     withAuthenticatedUser(dependencies.auth, request, async (user) => {
       const autoCompact = await parseJsonRequest(request, readCompactionMode);
       if (autoCompact === undefined) {
@@ -60,6 +60,7 @@ export async function updateSessionCompactionMode(
         sessionId,
         autoCompact,
         dependencies.now(),
+        dependencies.requiredWorkspaceId,
       );
       if (detail !== undefined) {
         dependencies.onChanged(detail, user.id);
@@ -71,23 +72,11 @@ export async function updateSessionCompactionMode(
   );
 }
 
-interface ManualCompactionDependencies {
-  readonly credential: (
-    userId: string,
-    detail: AgentSessionDetail,
-    action: (
-      credential: ProviderCredentialAccess,
-    ) => Promise<Response> | Response,
-  ) => Promise<Response>;
-  readonly launch: (
-    detail: AgentSessionDetail,
-    credential: ProviderCredentialAccess,
-    userId: string,
-  ) => void;
-  readonly now: () => number;
-  readonly runtimes: SessionRuntimes;
-  readonly store: SessionStore;
-  readonly notify: (userId: string, sessionId: string) => void;
+type ManualCompactionCredential = SessionCredentialOperation;
+
+interface ManualCompactionDependencies extends SessionLaunchBoundary {
+  readonly credential: ManualCompactionCredential;
+  readonly workspaceId?: string;
 }
 
 export async function startManualSessionCompaction(
@@ -101,34 +90,52 @@ export async function startManualSessionCompaction(
       status: 503,
     });
   }
-  const existing = dependencies.store.get(user.id, sessionId);
+  const existing = dependencies.store.get(
+    user.id,
+    sessionId,
+    dependencies.workspaceId,
+  );
   if (existing === undefined) {
     return createApiError("not_found", 404);
   }
   if (existing.runnerRequired) {
     return createApiError("runner_required", 409);
   }
-  if (existing.status === "queued" || existing.status === "running") {
+  if (
+    existing.status === "paused" ||
+    existing.status === "queued" ||
+    existing.status === "running"
+  ) {
     return createApiError("session_busy", 409);
   }
 
   return dependencies.credential(user.id, existing, (credential) => {
-    const queued = dependencies.store.queue(
+    const queued = queueSessionDetail(dependencies, [
       user.id,
       sessionId,
-      dependencies.now(),
-    );
-    if (queued.status !== "queued") {
-      return queueFailureResponse(queued);
+      undefined,
+      dependencies.workspaceId,
+    ]);
+    if (queued instanceof Response) {
+      return queued;
     }
 
-    dependencies.launch(queued.detail, credential, user.id);
-    const notify = withUserNotification(
-      dependencies,
-      user.id,
-      queued.detail.id,
-    );
+    if (!dependencies.launch(queued, credential, user.id)) {
+      if (pauseSessionForRestart(dependencies, queued, "compact")) {
+        dependencies.notify(user.id, queued.id);
+        return createApiError("server_restarting", 503);
+      }
+      dependencies.store.transitionRuntime(
+        queued.id,
+        "failed",
+        dependencies.now(),
+        queued.generation,
+      );
+      dependencies.notify(user.id, queued.id);
+      return createApiError("session_launch_failed", 500);
+    }
+    const notify = withUserNotification(dependencies, user.id, queued.id);
     queueMicrotask(notify);
-    return createJsonResponse(queued.detail, 202);
+    return createJsonResponse(queued, 202);
   });
 }

@@ -3,13 +3,30 @@ import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { arch, hostname, networkInterfaces, platform } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout } from "node:timers/promises";
-import { parseJsonRecord } from "../shared/json-record.ts";
 import { RUNNER_REALTIME_PATH } from "../shared/routes.ts";
 import type { RunnerToolCommand } from "../shared/runner-command-broker.ts";
+import {
+  encodeRunnerActivationReceipt,
+  runnerConnectMessage,
+} from "../shared/runner-realtime-protocol.ts";
 import { createServerWebSocket } from "../shared/server-websocket.ts";
-import { executeRunnerCommand, readRunnerCommand } from "./runner-command.ts";
+import { readRunnerCommand, RunnerCommandExecutor } from "./runner-command.ts";
+import {
+  createRunnerConnectionSettlement,
+  RunnerConnectionError,
+} from "./runner-connection.ts";
+import { RunnerContainerManager } from "./runner-container.ts";
+import { completeRunnerRegistration } from "./runner-registration.ts";
+import { RunnerRestartCoordinator } from "./runner-restart.ts";
+import {
+  addRunnerSocketFailureListeners,
+  parseSocketJsonRecord,
+} from "./runner-socket.ts";
 import { RunnerUpdateTrigger } from "./runner-update-trigger.ts";
-import { updateRunnerIfAvailable } from "./runner-update.ts";
+import {
+  RunnerStartupRestart,
+  updateRunnerIfAvailable,
+} from "./runner-update.ts";
 
 declare const Q_MUSH_RUNNER_TARGET: string;
 declare const Q_MUSH_RUNNER_VERSION: string;
@@ -19,12 +36,22 @@ const RETRY_INTERVAL_MILLISECONDS = 5_000;
 const UPDATE_INTERVAL_MILLISECONDS = 5 * 60_000;
 const TOKEN_PATTERN = /^qmr_[A-Za-z\d_-]{8,200}$/u;
 const runnerUpdateTrigger = new RunnerUpdateTrigger(Q_MUSH_RUNNER_VERSION);
+const runnerRestart = new RunnerRestartCoordinator({
+  restartId: () => randomBytes(32).toString("base64url"),
+});
 
-class RunnerConnectionError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "RunnerConnectionError";
+interface RunnerExecution {
+  readonly commands: RunnerCommandExecutor;
+  readonly containers: RunnerContainerManager;
+}
+
+let runnerExecution: RunnerExecution | undefined;
+
+function activeRunnerExecution(): RunnerExecution {
+  if (runnerExecution === undefined) {
+    throw new Error("The runner execution services are not initialized");
   }
+  return runnerExecution;
 }
 
 interface RunnerConfiguration {
@@ -32,11 +59,75 @@ interface RunnerConfiguration {
   readonly token: string;
 }
 
-function readConfigurationPath(): string {
-  const argumentIndex = process.argv.indexOf("--config");
-  const path = process.argv[argumentIndex + 1];
+function readArgument(
+  name:
+    | "--activation-receipt"
+    | "--activation-receipt-phase"
+    | "--config"
+    | "--restart-id",
+): string | undefined {
+  const indexes = process.argv.flatMap((argument, index) =>
+    argument === name ? [index] : [],
+  );
+  if (indexes.length > 1) {
+    throw new Error(
+      `The Q Mush runner ${name.slice(2)} argument is duplicated`,
+    );
+  }
+  const index = indexes[0];
+  return index === undefined ? undefined : process.argv[index + 1];
+}
 
-  if (argumentIndex < 0 || path === undefined || path.length === 0) {
+function isArgumentName(value: string): boolean {
+  return (
+    value === "--activation-receipt" ||
+    value === "--activation-receipt-phase" ||
+    value === "--config" ||
+    value === "--restart-id"
+  );
+}
+
+function readRestartId(): string | undefined {
+  const restartId = readArgument("--restart-id");
+  if (restartId === undefined) {
+    return undefined;
+  }
+  if (
+    isArgumentName(restartId) ||
+    restartId.length === 0 ||
+    restartId.length > 200
+  ) {
+    throw new Error("The Q Mush runner restart ID is invalid");
+  }
+  return restartId;
+}
+
+function readActivationReceipt(): string | undefined {
+  const receipt = readArgument("--activation-receipt");
+  if (
+    receipt !== undefined &&
+    (isArgumentName(receipt) || receipt.length === 0 || receipt.length > 200)
+  ) {
+    throw new Error("The Q Mush runner activation receipt is invalid");
+  }
+  return receipt;
+}
+
+function readActivationReceiptPhase(): "finalized" | "prepared" | undefined {
+  const phase = readArgument("--activation-receipt-phase");
+  if (phase === undefined) {
+    return undefined;
+  }
+  if (phase !== "finalized" && phase !== "prepared") {
+    throw new Error("The Q Mush runner activation receipt phase is invalid");
+  }
+  return phase;
+}
+
+function readConfigurationPath(): string {
+  const path = readArgument("--config");
+
+  if (path === undefined || isArgumentName(path) || path.length === 0) {
     throw new Error("Start the Q Mush runner with --config <path>");
   }
 
@@ -133,26 +224,9 @@ interface ActiveCommand {
   readonly controller: AbortController;
 }
 
-function parseServerMessage(
-  message: string,
-): Readonly<Record<string, unknown>> {
-  return parseJsonRecord(message, "The server returned an invalid message");
-}
-
 function waitForSocket(socket: WebSocket): Promise<void> {
   return new Promise((resolve, reject) => {
-    let settled = false;
-    const settle = (error?: RunnerConnectionError): void => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      if (error === undefined) {
-        resolve();
-      } else {
-        reject(error);
-      }
-    };
+    const { settle } = createRunnerConnectionSettlement(resolve, reject);
     socket.addEventListener(
       "open",
       () => {
@@ -160,21 +234,38 @@ function waitForSocket(socket: WebSocket): Promise<void> {
       },
       { once: true },
     );
-    socket.addEventListener(
-      "error",
-      () => {
-        settle(new RunnerConnectionError("The WebSocket connection failed"));
-      },
-      { once: true },
-    );
-    socket.addEventListener(
-      "close",
-      () => {
-        settle(new RunnerConnectionError("The WebSocket connection closed"));
-      },
-      { once: true },
-    );
+    addRunnerSocketFailureListeners(socket, settle, {
+      close: "The WebSocket connection closed",
+      error: "The WebSocket connection failed",
+    });
   });
+}
+
+function sendSocketMessage(socket: WebSocket, message: string): boolean {
+  try {
+    socket.send(message);
+    return true;
+  } catch {
+    socket.close();
+    return false;
+  }
+}
+
+function sendCommandMessage(
+  socket: WebSocket,
+  command: RunnerToolCommand,
+  message: Readonly<Record<string, unknown>>,
+): void {
+  sendOpenSocketMessage(socket, { ...message, commandId: command.id });
+}
+
+function sendOpenSocketMessage(
+  socket: WebSocket,
+  message: Readonly<Record<string, unknown>>,
+): void {
+  if (socket.readyState === WebSocket.OPEN) {
+    sendSocketMessage(socket, JSON.stringify(message));
+  }
 }
 
 function executeCommand(
@@ -188,13 +279,19 @@ function executeCommand(
   }
 
   const controller = new AbortController();
-  void executeRunnerCommand(command, controller.signal)
-    .then((output) => {
-      if (!controller.signal.aborted && socket.readyState === WebSocket.OPEN) {
-        socket.send(
-          JSON.stringify({ commandId: command.id, output, type: "result" }),
-        );
-      }
+  let sequence = 0;
+  const publish = (message: Readonly<Record<string, unknown>>): void => {
+    if (!controller.signal.aborted) {
+      sendCommandMessage(socket, command, message);
+    }
+  };
+  void activeRunnerExecution()
+    .commands.executeResult(command, controller.signal, (delta) => {
+      publish({ ...delta, sequence, type: "output" });
+      sequence += 1;
+    })
+    .then((result) => {
+      publish({ ...result, type: "result" });
     })
     .finally(() => {
       active.delete(command.id);
@@ -202,9 +299,51 @@ function executeCommand(
   active.set(command.id, { controller });
 }
 
+function bindOperationalSocket(
+  connected: WebSocket,
+  active: Map<string, ActiveCommand>,
+): void {
+  connected.addEventListener("message", (event) => {
+    if (typeof event.data !== "string") {
+      connected.close(1003, "Text messages required");
+      return;
+    }
+
+    const message = parseSocketJsonRecord(event.data);
+    if (message === undefined) {
+      connected.close(1003, "Invalid server message");
+      return;
+    }
+
+    if (message["type"] === "command") {
+      executeCommand(
+        connected,
+        readRunnerCommand({ command: message["command"] }),
+        active,
+      );
+    } else if (
+      message["type"] === "cancel" &&
+      typeof message["commandId"] === "string"
+    ) {
+      active.get(message["commandId"])?.controller.abort();
+    } else if (message["type"] !== "restart_ready") {
+      connected.close(1003, "Invalid server message");
+    }
+  });
+  connected.addEventListener("close", () => {
+    for (const command of active.values()) {
+      command.controller.abort();
+    }
+    active.clear();
+    void activeRunnerExecution().containers.cleanupAll();
+  });
+}
+
 async function connectRunner(
   configuration: RunnerConfiguration,
   configurationPath: string,
+  startupRestart: RunnerStartupRestart,
+  installOperationalHandlers: (socket: WebSocket) => void,
 ): Promise<WebSocket> {
   const metadata = {
     architecture: arch(),
@@ -215,10 +354,46 @@ async function connectRunner(
 
   for (;;) {
     const socket = runnerWebSocket(configuration);
+    const startupConnection = startupRestart.connection();
 
     try {
       await waitForSocket(socket);
-      socket.send(JSON.stringify({ ...metadata, type: "connect" }));
+      try {
+        socket.send(
+          runnerConnectMessage(metadata, {
+            ...(startupConnection.activationReceipt === undefined
+              ? {}
+              : {
+                  activationReceipt: encodeRunnerActivationReceipt({
+                    value: startupConnection.activationReceipt,
+                  }),
+                }),
+            ...(startupConnection.restartId === undefined
+              ? {}
+              : { restartId: startupConnection.restartId }),
+          }),
+        );
+      } catch {
+        throw new RunnerConnectionError(
+          "The WebSocket connection message could not be sent",
+        );
+      }
+      await completeRunnerRegistration(
+        socket,
+        startupConnection,
+        () => {
+          installOperationalHandlers(socket);
+        },
+        (version) => {
+          if (version !== Q_MUSH_RUNNER_VERSION) {
+            runnerUpdateTrigger.observe(
+              new Response(null, {
+                headers: { "x-q-mush-runner-version": version },
+              }),
+            );
+          }
+        },
+      );
       console.log(`Q Mush runner connected as ${metadata.name}.`);
       return socket;
     } catch {
@@ -229,18 +404,65 @@ async function connectRunner(
   }
 }
 
-async function installUpdateIfAvailable(
+type RunnerUpdateArguments = readonly [
   configuration: RunnerConfiguration,
   configurationPath: string,
+  restartId?: string,
+  activationReceipt?: string,
+  activationReceiptPhase?: "finalized" | "prepared",
+];
+
+function runnerUpdateContext(
+  ...[
+    configuration,
+    configurationPath,
+    restartId,
+    activationReceipt,
+    activationReceiptPhase,
+  ]: RunnerUpdateArguments
+) {
+  return {
+    ...(activationReceipt === undefined
+      ? {}
+      : {
+          activationReceipt,
+          activationReceiptPhase: activationReceiptPhase ?? "finalized",
+        }),
+    configurationPath,
+    executablePath: realpathSync(process.execPath),
+    ...(restartId === undefined ? {} : { restartId }),
+    serverOrigin: configuration.serverOrigin,
+    target: Q_MUSH_RUNNER_TARGET,
+    version: Q_MUSH_RUNNER_VERSION,
+  };
+}
+
+async function installUpdateIfAvailable(
+  ...[
+    configuration,
+    configurationPath,
+    restartId,
+    activationReceipt,
+    activationReceiptPhase,
+    beforeRestart,
+  ]: readonly [
+    ...RunnerUpdateArguments,
+    beforeRestart?: () => Promise<string | undefined>,
+  ]
 ): Promise<boolean> {
   try {
-    const updated = await updateRunnerIfAvailable({
-      configurationPath,
-      executablePath: realpathSync(process.execPath),
-      serverOrigin: configuration.serverOrigin,
-      target: Q_MUSH_RUNNER_TARGET,
-      version: Q_MUSH_RUNNER_VERSION,
-    });
+    const updated = await updateRunnerIfAvailable(
+      runnerUpdateContext(
+        configuration,
+        configurationPath,
+        restartId,
+        activationReceipt,
+        activationReceiptPhase,
+      ),
+      beforeRestart === undefined || restartId !== undefined
+        ? {}
+        : { beforeRestart },
+    );
 
     if (updated) {
       console.log("Q Mush runner updated; starting the new version.");
@@ -253,70 +475,51 @@ async function installUpdateIfAvailable(
   }
 }
 
-function parseRunnerServerMessage(
-  message: string,
-): Readonly<Record<string, unknown>> | undefined {
-  try {
-    return parseServerMessage(message);
-  } catch {
-    return undefined;
-  }
-}
-
 async function maintainConnection(
   configuration: RunnerConfiguration,
   configurationPath: string,
+  startupRestart: RunnerStartupRestart,
 ): Promise<void> {
-  let socket = await connectRunner(configuration, configurationPath);
   const active = new Map<string, ActiveCommand>();
-  let nextUpdateAt = Date.now() + UPDATE_INTERVAL_MILLISECONDS;
-  const bindSocket = (connected: WebSocket): void => {
-    connected.addEventListener("message", (event) => {
-      if (typeof event.data !== "string") {
-        connected.close(1003, "Text messages required");
-        return;
-      }
-
-      const message = parseRunnerServerMessage(event.data);
-      if (message === undefined) {
-        connected.close(1003, "Invalid server message");
-        return;
-      }
-
-      if (message["type"] === "ready") {
-        const version = message["version"];
-        if (typeof version === "string" && version !== Q_MUSH_RUNNER_VERSION) {
-          runnerUpdateTrigger.observe(
-            new Response(null, {
-              headers: { "x-q-mush-runner-version": version },
-            }),
-          );
-        }
-      } else if (message["type"] === "command") {
-        executeCommand(
-          connected,
-          readRunnerCommand({ command: message["command"] }),
-          active,
-        );
-      } else if (
-        message["type"] === "cancel" &&
-        typeof message["commandId"] === "string"
-      ) {
-        active.get(message["commandId"])?.controller.abort();
-      }
-    });
-    connected.addEventListener("close", () => {
-      for (const command of active.values()) {
-        command.controller.abort();
-      }
-      active.clear();
-    });
+  const installOperationalHandlers = (connected: WebSocket): void => {
+    bindOperationalSocket(connected, active);
   };
-  bindSocket(socket);
+  let socket = await connectRunner(
+    configuration,
+    configurationPath,
+    startupRestart,
+    installOperationalHandlers,
+  );
+  let initialUpdatePending = true;
+  let nextUpdateAt = Date.now() + UPDATE_INTERVAL_MILLISECONDS;
 
   for (;;) {
-    if (runnerUpdateTrigger.take() || Date.now() >= nextUpdateAt) {
-      if (await installUpdateIfAvailable(configuration, configurationPath)) {
+    if (socket.readyState !== WebSocket.OPEN) {
+      socket = await connectRunner(
+        configuration,
+        configurationPath,
+        startupRestart,
+        installOperationalHandlers,
+      );
+    }
+
+    if (
+      initialUpdatePending ||
+      runnerRestart.pending ||
+      runnerUpdateTrigger.take() ||
+      Date.now() >= nextUpdateAt
+    ) {
+      initialUpdatePending = false;
+      if (
+        await installUpdateIfAvailable(
+          configuration,
+          configurationPath,
+          startupRestart.restartId,
+          startupRestart.retainedActivationReceipt,
+          startupRestart.activationReceiptPhase,
+          () => runnerRestart.request(socket),
+        )
+      ) {
         socket.close(1000, "Updating");
         return;
       }
@@ -324,14 +527,7 @@ async function maintainConnection(
       nextUpdateAt = Date.now() + UPDATE_INTERVAL_MILLISECONDS;
     }
 
-    if (socket.readyState !== WebSocket.OPEN) {
-      socket = await connectRunner(configuration, configurationPath);
-      bindSocket(socket);
-    }
-
-    if (socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: "heartbeat" }));
-    }
+    sendOpenSocketMessage(socket, { type: "heartbeat" });
     await setTimeout(HEARTBEAT_INTERVAL_MILLISECONDS);
   }
 }
@@ -343,7 +539,28 @@ async function run(): Promise<void> {
   }
 
   const configurationPath = readConfigurationPath();
+  const startupRestart = new RunnerStartupRestart(readRestartId());
+  const activationReceipt = readActivationReceipt();
+  const activationReceiptPhase = readActivationReceiptPhase();
+  if (activationReceipt === undefined && activationReceiptPhase !== undefined) {
+    throw new Error(
+      "The Q Mush runner activation receipt phase has no receipt",
+    );
+  }
+  if (activationReceipt !== undefined) {
+    startupRestart.restoreActivation(
+      activationReceipt,
+      activationReceiptPhase ?? "finalized",
+    );
+  }
   const configuration = readConfiguration(configurationPath);
+  const containers = new RunnerContainerManager({
+    trackingPath: join(dirname(configurationPath), "owned-containers.json"),
+  });
+  runnerExecution = {
+    commands: new RunnerCommandExecutor(containers),
+    containers,
+  };
   writeFileSync(
     join(dirname(configurationPath), "runner.pid"),
     `${String(process.pid)}\n`,
@@ -352,11 +569,8 @@ async function run(): Promise<void> {
     },
   );
 
-  if (await installUpdateIfAvailable(configuration, configurationPath)) {
-    return;
-  }
-
-  await maintainConnection(configuration, configurationPath);
+  await containers.recoverTracked();
+  await maintainConnection(configuration, configurationPath, startupRestart);
 }
 
 function reportFatalError(error: unknown): void {

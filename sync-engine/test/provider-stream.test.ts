@@ -7,6 +7,46 @@ const TOOL_CALL = {
   type: "function",
 };
 
+function recordedAccumulator(format: "chat_completions" | "responses") {
+  const deltas: unknown[] = [];
+  return {
+    accumulator: createProviderStreamAccumulator(format, (delta) =>
+      deltas.push(delta),
+    ),
+    deltas,
+  };
+}
+
+function chatToolCallDelta(
+  toolCall: Readonly<{
+    function: Readonly<{ arguments: string; name?: string }>;
+    id?: string;
+    index: number;
+  }>,
+) {
+  return { choices: [{ delta: { tool_calls: [toolCall] } }] };
+}
+
+function toolDelta(
+  argumentsValue: string,
+  id: string,
+  index: number,
+  name: string,
+) {
+  return {
+    content: "",
+    thinking: "",
+    toolCall: { arguments: argumentsValue, id, index, name },
+  };
+}
+
+function expectToolCalls(
+  accumulator: ReturnType<typeof createProviderStreamAccumulator>,
+  expected: readonly unknown[],
+): void {
+  expect(accumulator.finish().toolCalls).toEqual(expected);
+}
+
 test("accumulates OpenAI-compatible chat completion chunks", () => {
   const accumulator = createProviderStreamAccumulator("chat_completions");
 
@@ -53,6 +93,73 @@ test("accumulates OpenAI-compatible chat completion chunks", () => {
       },
     ],
   });
+});
+
+test("emits every chat-completions tool-call fragment", () => {
+  const { accumulator, deltas } = recordedAccumulator("chat_completions");
+
+  accumulator.push(
+    chatToolCallDelta({
+      function: { arguments: '{"path":', name: "re" },
+      id: "call-",
+      index: 0,
+    }),
+  );
+
+  accumulator.push(
+    chatToolCallDelta({
+      function: { arguments: '"README.md"}', name: "ad" },
+      id: "1",
+      index: 0,
+    }),
+  );
+
+  expect(deltas).toEqual([
+    toolDelta('{"path":', "call-", 0, "re"),
+    toolDelta('"README.md"}', "1", 0, "ad"),
+  ]);
+  expectToolCalls(accumulator, [
+    {
+      arguments: '{"path":"README.md"}',
+      id: "call-1",
+      name: "read",
+    },
+  ]);
+});
+
+test("emits Responses function-call metadata and argument fragments", () => {
+  const { accumulator, deltas } = recordedAccumulator("responses");
+
+  accumulator.push({
+    item: {
+      arguments: "",
+      call_id: "call-response",
+      name: "bash",
+      type: "function_call",
+    },
+    output_index: 2,
+    type: "response.output_item.added",
+  });
+  accumulator.push({
+    delta: '{"command":"pwd"}',
+    output_index: 2,
+    type: "response.function_call_arguments.delta",
+  });
+
+  accumulator.push({ response: { output: [] }, type: "response.completed" });
+
+  expect(deltas).toEqual([
+    toolDelta("", "call-response", 2, "bash"),
+    toolDelta('{"command":"pwd"}', "", 2, ""),
+  ]);
+
+  expectToolCalls(accumulator, [
+    {
+      arguments: '{"command":"pwd"}',
+      id: "call-response",
+      name: "bash",
+    },
+  ]);
 });
 
 test("accumulates provider-reported cost and detailed token usage", () => {
@@ -190,10 +297,12 @@ test("emits every provider text delta before completion", () => {
   expect(deltas).toEqual(["Hello", " world"]);
   expect(accumulator.finish()).toEqual({
     content: "Hello world",
-    contextTokens: 45,
-    costUsd: null,
-    thinking: "",
-    tokenUsage: null,
-    toolCalls: [],
+    ...{
+      contextTokens: 45,
+      costUsd: null,
+      thinking: "",
+      tokenUsage: null,
+      toolCalls: [],
+    },
   });
 });

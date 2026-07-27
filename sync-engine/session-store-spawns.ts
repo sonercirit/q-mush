@@ -4,6 +4,10 @@ import { agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { ownedActiveSessionCondition } from "./session-store-condition.ts";
+import {
+  storedSessionCondition,
+  updateStoredSessions,
+} from "./session-store-persistence.ts";
 import { storedSessionExists } from "./session-store-state.ts";
 import {
   appendSystemStoredMessage,
@@ -77,32 +81,37 @@ export function appendSpawnedSessionReport(options: {
   readonly userId: string;
 }): boolean {
   return options.database.transaction((transaction) => {
-    const parentCondition = and(
-      ownedActiveSessionCondition(options.userId, options.parentId),
-      eq(agentSessions.executionGeneration, options.parentGeneration),
+    const parentCondition = storedSessionCondition({
+      generation: options.parentGeneration,
+      id: options.parentId,
+      status: ["running", "idle"],
+      userId: options.userId,
+    });
+    const eligibleParent = and(
+      parentCondition,
       eq(agentSessions.runnerRequired, false),
-      inArray(agentSessions.status, ["running", "idle"]),
     );
-    if (!storedSessionExists(transaction, parentCondition)) {
+    if (!storedSessionExists(transaction, eligibleParent)) {
       return false;
     }
-    const claimed = transaction
-      .update(agentSessions)
-      .set({
-        parentExecutionGeneration: null,
-        parentSessionId: null,
-      })
-      .where(
+    if (
+      !updateStoredSessions(
+        transaction,
         and(
-          ownedActiveSessionCondition(options.userId, options.childId),
-          eq(agentSessions.executionGeneration, options.childGeneration),
+          storedSessionCondition({
+            generation: options.childGeneration,
+            id: options.childId,
+            userId: options.userId,
+          }),
           eq(agentSessions.parentSessionId, options.parentId),
           eq(agentSessions.parentExecutionGeneration, options.parentGeneration),
         ),
+        {
+          parentExecutionGeneration: null,
+          parentSessionId: null,
+        },
       )
-      .returning({ id: agentSessions.id })
-      .all();
-    if (claimed.length === 0) {
+    ) {
       return false;
     }
     appendSystemStoredMessage({
@@ -113,13 +122,14 @@ export function appendSpawnedSessionReport(options: {
       sessionId: options.parentId,
       userId: options.userId,
     });
+
     transaction
       .update(agentSessions)
       .set({
         updatedAt: new Date(options.now),
         updatedById: SYSTEM_ID,
       })
-      .where(parentCondition)
+      .where(eligibleParent)
       .run();
     return true;
   });

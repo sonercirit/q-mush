@@ -91,6 +91,7 @@ function renderMessages(
   return renderSolidToString(() => (
     <SessionTranscript
       agentFile={agentFile}
+      executionEnvironment="bare_metal"
       filters={filters}
       messages={messages}
       tools={tools}

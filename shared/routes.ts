@@ -19,19 +19,58 @@ const OPENROUTER_BASE_PATH = `${API_BASE_PATH}/openrouter`;
 export const OPENROUTER_CREDENTIALS_PATH = `${OPENROUTER_BASE_PATH}/credentials`;
 export const OPENROUTER_OAUTH_PATH = `${OPENROUTER_BASE_PATH}/oauth`;
 export const OPENROUTER_OAUTH_CALLBACK_PATH = `${OPENROUTER_OAUTH_PATH}/callback`;
-export function providerCredentialDefaultPath(
+export const PROMPTS_PATH = `${API_BASE_PATH}/prompts`;
+export function promptPath(promptId: string): string {
+  return `${PROMPTS_PATH}/${encodeURIComponent(promptId)}`;
+}
+function providerCredentialActionPath(
+  action: "default" | "session-reassignment",
   credentialsPath: string,
   credentialId: string,
 ): string {
-  return `${credentialsPath}/${encodeURIComponent(credentialId)}/default`;
+  return `${credentialsPath}/${encodeURIComponent(credentialId)}/${action}`;
 }
+
+export const providerCredentialDefaultPath = (
+  credentialsPath: string,
+  credentialId: string,
+): string =>
+  providerCredentialActionPath("default", credentialsPath, credentialId);
+
+export const providerCredentialSessionReassignmentPath = (
+  credentialsPath: string,
+  credentialId: string,
+): string =>
+  providerCredentialActionPath(
+    "session-reassignment",
+    credentialsPath,
+    credentialId,
+  );
 export const RUNNERS_PATH = `${API_BASE_PATH}/runners`;
+export const WORKSPACES_PATH = `${API_BASE_PATH}/workspaces`;
+export function connectionScopesPath(
+  collectionPath: string,
+  connectionId: string,
+): string {
+  return `${collectionPath}/${encodeURIComponent(connectionId)}/scopes`;
+}
+
+export function workspaceDefaultPath(workspaceId: string): string {
+  return `${WORKSPACES_PATH}/${encodeURIComponent(workspaceId)}/default`;
+}
+
 export function runnerDefaultPath(runnerId: string): string {
   return `${RUNNERS_PATH}/${encodeURIComponent(runnerId)}/default`;
 }
 export const RUNNER_DIRECTORIES_SEGMENT = "directories";
-export function runnerDirectoriesPath(runnerId: string): string {
-  return `${RUNNERS_PATH}/${encodeURIComponent(runnerId)}/${RUNNER_DIRECTORIES_SEGMENT}`;
+export function runnerDirectoriesPath(
+  runnerId: string,
+  workspaceId?: string,
+): string {
+  const path = `${RUNNERS_PATH}/${encodeURIComponent(runnerId)}/${RUNNER_DIRECTORIES_SEGMENT}`;
+  return workspaceId === undefined
+    ? path
+    : `${path}?workspaceId=${encodeURIComponent(workspaceId)}`;
 }
 const RUNNER_BASE_PATH = `${API_BASE_PATH}/runner`;
 export const RUNNER_REALTIME_PATH = `${RUNNER_BASE_PATH}/realtime`;
@@ -40,8 +79,6 @@ export const RUNNER_INSTALLER_PATH = "/runner/install.sh";
 export const RUNNER_EXECUTABLE_PATH = "/runner/executable";
 export const RUNNER_EXECUTABLE_SHA256_HEADER = "x-q-mush-runner-sha256";
 export const SESSIONS_PATH = `${API_BASE_PATH}/sessions`;
-export function sessionReassignPath(sessionId: string): string {
-  return `${SESSIONS_PATH}/${encodeURIComponent(sessionId)}/reassign`;
-}
 export const SESSION_MODELS_PATH = `${SESSIONS_PATH}/models`;
+export const SESSION_OPENROUTER_PROVIDERS_PATH = `${SESSIONS_PATH}/openrouter-providers`;
 export const STYLESHEET_PATH = "/styles.css";

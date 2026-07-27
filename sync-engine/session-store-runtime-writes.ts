@@ -8,17 +8,23 @@ import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 import type {
   AgentSessionCostBasis,
   AgentSessionUsageUpdate,
+  RestartHandoff,
 } from "../shared/session-model.ts";
 import type { CompactionUsage } from "./session-compaction-usage.ts";
 import { compactStoredConversation } from "./session-compaction.ts";
-import { runningCondition } from "./session-store-reassignment.ts";
+import { storedRecordedMessages } from "./session-message-values.ts";
+import { runningCondition } from "./session-store-persistence.ts";
 import { requireRunningSessionUserId } from "./session-store-state.ts";
+import type { SessionRuntimeTarget } from "./session-store-types.ts";
 import {
   appendSystemStoredMessage,
   errorMessageValues,
-  recordedMessageValues,
   type StoredMessageValues,
 } from "./session-store-values.ts";
+import {
+  settleTerminalRuntime,
+  terminalRuntimeCondition,
+} from "./session-terminal-store.ts";
 import { runtimeUsageValues } from "./session-usage-values.ts";
 
 interface SessionRuntimeWriteResources {
@@ -26,12 +32,7 @@ interface SessionRuntimeWriteResources {
   readonly generateId: IdGenerator;
 }
 
-interface RuntimeWriteTarget {
-  readonly generation: number;
-  readonly now: number;
-  readonly resources: SessionRuntimeWriteResources;
-  readonly sessionId: string;
-}
+type RuntimeWriteTarget = SessionRuntimeTarget<SessionRuntimeWriteResources>;
 
 function runtimeWriteTarget(options: RuntimeWriteTarget) {
   return {
@@ -74,17 +75,35 @@ export function setRuntimeAgentFile(
   });
 }
 
-export function compactRuntimeConversation(
+function compactRuntime(
   options: RuntimeWriteTarget & {
+    readonly restartHandoff?: RestartHandoff | null;
     readonly summary: string;
     readonly usage: CompactionUsage;
   },
+  settle: boolean,
 ): void {
   compactStoredConversation({
     ...runtimeWriteTarget(options),
+    ...(options.restartHandoff === undefined
+      ? {}
+      : { restartHandoff: options.restartHandoff }),
+    ...(settle ? { settle: true } : {}),
     summary: options.summary,
     usage: options.usage,
   });
+}
+
+export function compactRuntimeTerminal(
+  options: Parameters<typeof compactRuntime>[0],
+): void {
+  compactRuntime(options, true);
+}
+
+export function compactRuntimeConversation(
+  options: Omit<Parameters<typeof compactRuntime>[0], "restartHandoff">,
+): void {
+  compactRuntime(options, false);
 }
 
 export function updateRuntimeUsage(
@@ -93,10 +112,24 @@ export function updateRuntimeUsage(
   updateRunningSession(options, runtimeUsageValues(options.input));
 }
 
-function messageValues(
-  messages: readonly AgentRecordedMessage[],
-): readonly StoredMessageValues[] {
-  return messages.map(recordedMessageValues);
+function appendStoredMessages(
+  transaction: Pick<AppDatabase, "insert" | "select">,
+  options: RuntimeWriteTarget,
+  condition: SQL | undefined,
+  messages: readonly StoredMessageValues[],
+): string {
+  const userId = requireRunningSessionUserId(transaction, condition);
+  for (const message of messages) {
+    appendSystemStoredMessage({
+      database: transaction,
+      generateId: options.resources.generateId,
+      message,
+      now: options.now,
+      sessionId: options.sessionId,
+      userId,
+    });
+  }
+  return userId;
 }
 
 function touchSessionWithMessages(options: {
@@ -105,18 +138,12 @@ function touchSessionWithMessages(options: {
   readonly target: RuntimeWriteTarget;
 }): void {
   options.target.resources.database.transaction((transaction) => {
-    const userId = requireRunningSessionUserId(transaction, options.condition);
-
-    for (const message of options.messages) {
-      appendSystemStoredMessage({
-        database: transaction,
-        generateId: options.target.resources.generateId,
-        message,
-        now: options.target.now,
-        sessionId: options.target.sessionId,
-        userId,
-      });
-    }
+    appendStoredMessages(
+      transaction,
+      options.target,
+      options.condition,
+      options.messages,
+    );
     transaction
       .update(agentSessions)
       .set(updatedAuditFields(SYSTEM_ID, options.target.now))
@@ -138,37 +165,79 @@ function appendRuntimeMessages(
   });
 }
 
+function updateSessionWithUsage(
+  database: Pick<AppDatabase, "update">,
+  condition: SQL | undefined,
+  values: ReturnType<typeof runtimeUsageValues>,
+): void {
+  database.update(agentSessions).set(values).where(condition).run();
+}
+
+function writeStoredMessages(
+  options: RuntimeWriteTarget,
+  condition: SQL | undefined,
+  storedMessages: readonly StoredMessageValues[],
+  after: (
+    transaction: Pick<AppDatabase, "insert" | "select" | "update">,
+  ) => void,
+): void {
+  options.resources.database.transaction((transaction) => {
+    appendStoredMessages(transaction, options, condition, storedMessages);
+    after(transaction);
+  });
+}
+
+export function commitRuntimeTerminal(
+  options: RuntimeWriteTarget & {
+    readonly messages: readonly AgentRecordedMessage[];
+    readonly restartHandoff: RestartHandoff | null;
+    readonly usage?: AgentSessionUsageUpdate;
+  },
+): void {
+  const condition = terminalRuntimeCondition({
+    generation: options.generation,
+    restartHandoff: options.restartHandoff,
+    sessionId: options.sessionId,
+  });
+  const storedMessages = storedRecordedMessages(options.messages);
+  writeStoredMessages(options, condition, storedMessages, (transaction) => {
+    if (options.usage !== undefined) {
+      updateSessionWithUsage(
+        transaction,
+        condition,
+        runtimeUsageValues(options.usage),
+      );
+    }
+    settleTerminalRuntime(
+      transaction,
+      condition,
+      "idle",
+      options.now,
+      options.sessionId,
+    );
+  });
+}
+
 export function appendRuntimeAgentMessages(
   options: RuntimeWriteTarget & {
     readonly messages: readonly AgentRecordedMessage[];
     readonly usage?: AgentSessionUsageUpdate;
   },
 ): void {
-  const storedMessages = messageValues(options.messages);
+  const storedMessages = storedRecordedMessages(options.messages);
   if (options.usage === undefined) {
     appendRuntimeMessages({ ...options, messages: storedMessages });
     return;
   }
 
   const condition = runningSessionCondition(options);
+
   const usageValues = runtimeUsageValues(options.usage);
-  options.resources.database.transaction((transaction) => {
-    const userId = requireRunningSessionUserId(transaction, condition);
-    for (const message of storedMessages) {
-      appendSystemStoredMessage({
-        database: transaction,
-        generateId: options.resources.generateId,
-        message,
-        now: options.now,
-        sessionId: options.sessionId,
-        userId,
-      });
-    }
-    transaction
-      .update(agentSessions)
-      .set({ ...usageValues, ...updatedAuditFields(SYSTEM_ID, options.now) })
-      .where(condition)
-      .run();
+  writeStoredMessages(options, condition, storedMessages, (transaction) => {
+    updateSessionWithUsage(transaction, condition, {
+      ...usageValues,
+      ...updatedAuditFields(SYSTEM_ID, options.now),
+    });
   });
 }
 

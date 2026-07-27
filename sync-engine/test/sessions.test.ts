@@ -1,27 +1,22 @@
 import { describe, expect, test } from "vitest";
-import type { AgentModelCatalog } from "../../shared/agent-configuration.ts";
 import type {
   AgentConversationMessage,
   AgentModel,
   AgentModelTurn,
 } from "../../shared/agent-loop.ts";
-import {
-  runnerDirectoriesPath,
-  SESSION_MODELS_PATH,
-  SESSIONS_PATH,
-} from "../../shared/routes.ts";
-import type { AgentModelDiscoverer } from "../../sync-engine/agent-model-discovery.ts";
+import { runnerDirectoriesPath, SESSIONS_PATH } from "../../shared/routes.ts";
+import { WorkspaceStore } from "../../sync-engine/workspace-store.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import {
   createAuthenticatedRequest,
+  TEST_NOW,
   TEST_USER_ID,
+  TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
   connectedSessionSetup,
   createSessionRequest,
-  CREDENTIAL_ID,
-  RUNNER_COMMAND_ID,
   RUNNER_ID,
   SESSION_ID,
 } from "./session-integration-fixtures.ts";
@@ -31,12 +26,18 @@ import {
   directoryListing,
   expectedRunnerCommand,
   expectRunnerCommand,
+  expectSessionReaches,
   hasSessionStatus,
   sessionDetail,
+  startSession,
+  startSessionAndCompleteAgentFile,
   startSessionAndExpectRunnerCommand,
+  waitForSessionStatus,
   waitForSessionValue,
 } from "./session-integration-helpers.ts";
+import { expectJsonResponse } from "./session-launch-race-helpers.ts";
 
+const SECOND_WORKSPACE_ID = "018bcfe5-6800-7000-8000-000000000081";
 class FailingModel implements AgentModel {
   complete(): Promise<AgentModelTurn> {
     return Promise.reject(new Error("Provider unavailable"));
@@ -68,60 +69,39 @@ class BlockingModel implements AgentModel {
   }
 }
 
-async function expectJsonResponse(
-  response: Response,
-  status: number,
-  expected: unknown,
-): Promise<void> {
-  const body: unknown = await response.json();
-  expect(body).toEqual(expected);
-  expect(response.status).toBe(status);
-}
-
-async function expectSessionReaches(
-  setup: Awaited<ReturnType<typeof connectedSessionSetup>>,
-  response: Response,
-  status: string,
-) {
-  expect(response.status).toBe(201);
-  await completeAgentFileLookup(setup);
-  await waitForSessionValue(
-    () => sessionDetail(setup.sessions),
-    hasSessionStatus(status),
-  );
-  return sessionDetail(setup.sessions);
-}
-
 async function startSessionWithAgentFile(
   model: AgentModel,
   agentFile: unknown,
 ): Promise<Awaited<ReturnType<typeof connectedSessionSetup>>> {
   const setup = connectedSessionSetup(model);
-  const createResponse = await setup.sessions.collection(
-    createSessionRequest(),
-  );
-
-  expect(createResponse.status).toBe(201);
-  await completeAgentFileLookup(setup, agentFile);
-  await waitForSessionValue(
-    () => sessionDetail(setup.sessions),
-    hasSessionStatus("idle"),
-  );
+  await startSessionAndCompleteAgentFile(setup, agentFile);
+  await waitForSessionStatus(setup, "idle");
   return setup;
 }
 
-function isObject(value: unknown): value is object {
+function isObject(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null;
+}
+
+async function sessionRequestInput(): Promise<
+  Readonly<Record<string, unknown>>
+> {
+  const input: unknown = await createSessionRequest().json();
+  if (!isObject(input)) {
+    throw new Error("The session request fixture is invalid");
+  }
+  return input;
 }
 
 async function sessionRequestWithTools(
   tools: readonly string[],
 ): Promise<Request> {
-  const input: unknown = await createSessionRequest().json();
-  if (!isObject(input)) {
-    throw new Error("The session request fixture is invalid");
-  }
-  return createAuthenticatedRequest(SESSIONS_PATH, { ...input, tools }, "POST");
+  const input = await sessionRequestInput();
+  return createAuthenticatedRequest(
+    `${SESSIONS_PATH}?workspaceId=${encodeURIComponent(TEST_WORKSPACE_ID)}`,
+    { ...input, tools },
+    "POST",
+  );
 }
 
 function emptySessionSetup() {
@@ -131,6 +111,15 @@ function emptySessionSetup() {
 function completingSessionSetup(content: string) {
   const model = new ScriptedAgentModel([{ content, toolCalls: [] }]);
   return { model, ...connectedSessionSetup(model) };
+}
+
+async function expectInvalidSessionRequest(
+  setup: ReturnType<typeof emptySessionSetup>,
+  request: Request,
+): Promise<void> {
+  const response = await setup.sessions.collection(request);
+  await expectJsonResponse(response, 400, { error: "invalid_request" });
+  setup.database.$client.close();
 }
 
 async function unauthenticatedSessionStatus(): Promise<number> {
@@ -143,6 +132,81 @@ async function unauthenticatedSessionStatus(): Promise<number> {
 }
 
 describe("agent sessions", () => {
+  test("requires an owned workspace for creation and every HTTP session item action", async () => {
+    const setup = completingSessionSetup("Workspace isolation ready.");
+
+    const input = await sessionRequestInput();
+    const unavailableCreation = await setup.sessions.collection(
+      createAuthenticatedRequest(
+        `${SESSIONS_PATH}?workspaceId=unavailable-workspace`,
+        input,
+        "POST",
+      ),
+    );
+    await expectJsonResponse(unavailableCreation, 409, {
+      error: "workspace_unavailable",
+    });
+
+    new WorkspaceStore(setup.database, () => SECOND_WORKSPACE_ID).create(
+      TEST_USER_ID,
+      "Second",
+      TEST_NOW,
+    );
+
+    const created = await startSession(setup);
+    await expectSessionReaches(setup, created, "idle");
+    const path = `${SESSIONS_PATH}/${SESSION_ID}`;
+    const scopedPath = (suffix = "") =>
+      `${path}${suffix}?workspaceId=${encodeURIComponent(SECOND_WORKSPACE_ID)}`;
+    const responses = await Promise.all([
+      Promise.resolve(
+        setup.sessions.item(
+          createAuthenticatedRequest(scopedPath()),
+          SESSION_ID,
+        ),
+      ),
+      setup.sessions.message(
+        createAuthenticatedRequest(
+          scopedPath("/messages"),
+          { prompt: "Do not cross scopes" },
+          "POST",
+        ),
+        SESSION_ID,
+      ),
+      setup.sessions.compact(
+        createAuthenticatedRequest(scopedPath("/compact"), undefined, "POST"),
+        SESSION_ID,
+      ),
+      setup.sessions.compaction(
+        createAuthenticatedRequest(
+          scopedPath("/compaction"),
+          { autoCompact: false },
+          "POST",
+        ),
+        SESSION_ID,
+      ),
+      setup.sessions.continue(
+        createAuthenticatedRequest(scopedPath("/continue"), undefined, "POST"),
+        SESSION_ID,
+      ),
+      setup.sessions.reassign(
+        createAuthenticatedRequest(
+          scopedPath("/reassign"),
+          { runnerId: RUNNER_ID, workingDirectory: "/tmp" },
+          "POST",
+        ),
+        SESSION_ID,
+      ),
+      setup.sessions.stop(
+        createAuthenticatedRequest(scopedPath("/stop"), undefined, "POST"),
+        SESSION_ID,
+      ),
+    ]);
+
+    expect(responses.every(({ status }) => status === 404)).toBe(true);
+    setup.database.$client.close();
+  });
+
   test("stores session failures as error messages", async () => {
     const setup = connectedSessionSetup(new FailingModel());
     const response = await setup.sessions.collection(createSessionRequest());
@@ -158,11 +222,38 @@ describe("agent sessions", () => {
     setup.database.$client.close();
   });
 
+  test("persists disabled auto-compaction from HTTP creation", async () => {
+    const setup = completingSessionSetup("Auto-compaction stayed disabled.");
+    const response = await setup.sessions.collection(
+      createSessionRequest(true, "high", "gpt-4.1-mini", [], false),
+    );
+
+    expect(await response.clone().json()).toMatchObject({ autoCompact: false });
+    expect(await expectSessionReaches(setup, response, "idle")).toMatchObject({
+      autoCompact: false,
+    });
+    setup.database.$client.close();
+  });
+
+  test("rejects a non-boolean creation auto-compaction value", async () => {
+    const setup = emptySessionSetup();
+    const input = await sessionRequestInput();
+    await expectInvalidSessionRequest(
+      setup,
+      createAuthenticatedRequest(
+        `${SESSIONS_PATH}?workspaceId=${encodeURIComponent(TEST_WORKSPACE_ID)}`,
+        { ...input, autoCompact: "false" },
+        "POST",
+      ),
+    );
+  });
+
   test("persists image inputs and sends them to the model", async () => {
     const setup = completingSessionSetup("Screenshot implemented.");
-    const response = await setup.sessions.collection(
-      createSessionRequest(true, "high", "gpt-4.1-mini", [TEST_AGENT_IMAGE]),
-    );
+    const imageRequest = createSessionRequest(true, "high", "gpt-4.1-mini", [
+      TEST_AGENT_IMAGE,
+    ]);
+    const response = await setup.sessions.collection(imageRequest);
 
     expect(await expectSessionReaches(setup, response, "idle")).toMatchObject({
       messages: [
@@ -178,6 +269,7 @@ describe("agent sessions", () => {
       images: [TEST_AGENT_IMAGE],
       role: "user",
     });
+
     setup.database.$client.close();
   });
 
@@ -228,15 +320,15 @@ describe("agent sessions", () => {
       ),
       RUNNER_ID,
     );
+
     await expectRunnerCommand(
       setup,
-      {
+      expectedRunnerCommand({
         arguments: {},
-        id: RUNNER_COMMAND_ID,
         sessionId: `directory-picker:${TEST_USER_ID}`,
         tool: "list_directories",
         workingDirectory: "~/projects",
-      },
+      }),
       "The runner did not receive a directory command",
     );
 
@@ -248,152 +340,6 @@ describe("agent sessions", () => {
 
     expect(resultResponse.status).toBe(204);
     await expectJsonResponse(await browseResponse, 200, listing);
-    setup.database.$client.close();
-  });
-
-  test("discovers models through an owned provider credential", async () => {
-    const catalog: AgentModelCatalog = {
-      defaultModel: "gpt-discovered",
-      models: [
-        {
-          contextWindow: 200_000,
-          id: "gpt-discovered",
-          inputModalities: null,
-          label: "GPT Discovered",
-          outputModalities: null,
-          pricing: {
-            cachedInput: "0.0000001",
-            input: "0.0000004",
-            output: "0.0000016",
-          },
-          reasoningEfforts: ["low", "high"],
-        },
-      ],
-    };
-    const discoverModels: AgentModelDiscoverer = (provider, credential) => {
-      expect(provider).toBe("openai");
-      expect(credential.secret).toBe("provider-secret");
-      return Promise.resolve(catalog);
-    };
-    const setup = connectedSessionSetup(
-      new ScriptedAgentModel([
-        { content: "Discovered model complete.", toolCalls: [] },
-      ]),
-      "api_key",
-      discoverModels,
-    );
-    const { database, sessions } = setup;
-    const response = await sessions.models(
-      createAuthenticatedRequest(
-        `${SESSION_MODELS_PATH}?provider=openai&credentialId=${CREDENTIAL_ID}`,
-      ),
-    );
-
-    await expectJsonResponse(response, 200, catalog);
-
-    const createResponse = await sessions.collection(
-      createSessionRequest(true, "high", "gpt-discovered"),
-    );
-    expect(await createResponse.json()).toMatchObject({
-      autoCompact: true,
-      maxContextTokens: 200_000,
-      providerPricing: catalog.models[0]?.pricing,
-    });
-    await expectSessionReaches(setup, createResponse, "idle");
-    expect(setup.selectedPricing).toEqual([catalog.models[0]?.pricing]);
-    database.$client.close();
-  });
-
-  test("updates compaction mode and manually compacts an idle session", async () => {
-    const model = new ScriptedAgentModel([
-      {
-        content: "Initial work complete.",
-        contextTokens: 90_000,
-        toolCalls: [],
-      },
-      {
-        content: "Concise handoff.",
-        tokenUsage: {
-          cacheWriteInputTokens: 0,
-          cachedInputTokens: 1_000,
-          inputTokens: 2_000,
-          outputTokens: 500,
-        },
-        toolCalls: [],
-      },
-    ]);
-    const setup = connectedSessionSetup(model, "api_key", () =>
-      Promise.resolve({
-        defaultModel: "gpt-4.1-mini",
-        models: [
-          {
-            contextWindow: null,
-            id: "gpt-4.1-mini",
-            inputModalities: null,
-            label: "GPT",
-            outputModalities: null,
-            pricing: null,
-            reasoningEfforts: [],
-          },
-        ],
-      }),
-    );
-    const created = await setup.sessions.collection(createSessionRequest());
-    await expectSessionReaches(setup, created, "idle");
-
-    const modeResponse = await setup.sessions.compaction(
-      createAuthenticatedRequest(
-        `${SESSIONS_PATH}/${SESSION_ID}/compaction`,
-        { autoCompact: "false" },
-        "POST",
-      ),
-      SESSION_ID,
-    );
-    expect(modeResponse.status).toBe(400);
-    const validModeResponse = await setup.sessions.compaction(
-      new Request(
-        `http://localhost:3000${SESSIONS_PATH}/${SESSION_ID}/compaction`,
-        {
-          body: JSON.stringify({ autoCompact: false }),
-          headers: {
-            "content-type": "application/json",
-            cookie: "q_mush_session=authenticated-session",
-          },
-          method: "POST",
-        },
-      ),
-      SESSION_ID,
-    );
-    expect(validModeResponse.status).toBe(200);
-    expect(await validModeResponse.json()).toMatchObject({
-      autoCompact: false,
-    });
-
-    const compactResponse = await setup.sessions.compact(
-      createAuthenticatedRequest(
-        `${SESSIONS_PATH}/${SESSION_ID}/compact`,
-        undefined,
-        "POST",
-      ),
-      SESSION_ID,
-    );
-    expect(compactResponse.status).toBe(202);
-    await completeAgentFileLookup(setup);
-    const compacted = await waitForSessionValue(
-      () => sessionDetail(setup.sessions),
-      (value) => {
-        if (!hasSessionStatus("idle")(value)) {
-          return false;
-        }
-        return JSON.stringify(value).includes("Concise handoff.");
-      },
-    );
-    expect(JSON.stringify(compacted)).not.toContain("Initial work complete.");
-    expect(compacted).toMatchObject({
-      costBasis: "estimated",
-      costUsd: 0.0013,
-      currentContextTokens: 0,
-    });
     setup.database.$client.close();
   });
 
@@ -411,14 +357,11 @@ describe("agent sessions", () => {
   });
 
   test("rejects an unsupported reasoning effort", async () => {
-    const model = new ScriptedAgentModel([]);
-    const { database, sessions } = connectedSessionSetup(model);
-    const response = await sessions.collection(
+    const setup = emptySessionSetup();
+    await expectInvalidSessionRequest(
+      setup,
       createSessionRequest(true, "maximum"),
     );
-
-    await expectJsonResponse(response, 400, { error: "invalid_request" });
-    database.$client.close();
   });
 
   test("runs a session with only its selected tools and skills", async () => {
@@ -443,16 +386,14 @@ describe("agent sessions", () => {
       ["read", "unknown_tool"],
     ]) {
       const setup = emptySessionSetup();
-      const response = await setup.sessions.collection(
+      await expectInvalidSessionRequest(
+        setup,
         await sessionRequestWithTools(tools),
       );
-
-      await expectJsonResponse(response, 400, { error: "invalid_request" });
-      setup.database.$client.close();
     }
   });
 
-  test("drains a running session before a graceful restart", async () => {
+  test("hands off a durable tool turn and resumes only after explicit recovery", async () => {
     const restartCall = {
       arguments: '{"command":"bun run dev:restart","timeout":30}',
       id: "restart-call",
@@ -493,8 +434,43 @@ describe("agent sessions", () => {
 
     expect(completeRunnerCommand(setup, "Restart requested.").status).toBe(204);
     await drain;
-    expect(await sessionDetail(sessions)).toMatchObject({ status: "idle" });
+    expect(model.requests).toHaveLength(1);
+    expect(await sessionDetail(sessions)).toMatchObject({
+      messages: [
+        { role: "user" },
+        { role: "assistant", toolCalls: [restartCall] },
+        { content: "Restart requested.", role: "tool" },
+      ],
+      restartHandoff: {
+        operation: "agent",
+        requestedBy: "server",
+      },
+      status: "paused",
+    });
+
+    const recovered = connectedSessionSetup(model, "api_key", undefined, {
+      database: setup.database,
+    });
+    recovered.sessions.runnerConnected(RUNNER_ID);
+    await completeAgentFileLookup(recovered);
+    await waitForSessionValue(
+      () => sessionDetail(recovered.sessions),
+      hasSessionStatus("idle"),
+    );
     expect(model.requests).toHaveLength(2);
+    expect(model.requests[1]).toContainEqual({
+      content: "Restart requested.",
+      role: "tool",
+      toolCallId: restartCall.id,
+      toolName: restartCall.name,
+    });
+    const recoveredDetail = await sessionDetail(recovered.sessions);
+    expect(recoveredDetail).toMatchObject({
+      restartHandoff: null,
+      status: "idle",
+    });
+    expect(JSON.stringify(recoveredDetail)).toContain("Restart completed.");
+    expect(JSON.stringify(recoveredDetail)).toContain("Restart requested.");
     setup.database.$client.close();
   });
 

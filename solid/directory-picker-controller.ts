@@ -14,6 +14,7 @@ export interface DirectoryPickerState {
   readonly open: boolean;
   readonly requestedPath: string | undefined;
   readonly runnerId: string | undefined;
+  readonly workspaceId: string | undefined;
 }
 
 export function initialDirectoryPickerState(): DirectoryPickerState {
@@ -24,6 +25,7 @@ export function initialDirectoryPickerState(): DirectoryPickerState {
     open: false,
     requestedPath: undefined,
     runnerId: undefined,
+    workspaceId: undefined,
   };
 }
 
@@ -71,8 +73,8 @@ export class DirectoryPickerController {
     this.#reset();
   }
 
-  open(runnerId: string, path: string): Promise<void> {
-    return this.#load(runnerId, path, true);
+  open(runnerId: string, path: string, workspaceId?: string): Promise<void> {
+    return this.#load(runnerId, path, true, workspaceId);
   }
 
   reset(): void {
@@ -99,6 +101,7 @@ export class DirectoryPickerController {
     runnerId: string,
     path: string,
     clearListing: boolean,
+    workspaceId = this.state.workspaceId,
   ): Promise<void> {
     this.#cancel();
     const request = this.#request;
@@ -111,11 +114,12 @@ export class DirectoryPickerController {
       open: true,
       requestedPath: path,
       runnerId,
+      workspaceId,
     });
 
     try {
       const listing = readRunnerDirectoryListing(
-        await requestJson(runnerDirectoriesPath(runnerId), {
+        await requestJson(runnerDirectoriesPath(runnerId, workspaceId), {
           body: JSON.stringify({ path }),
           headers: { "content-type": "application/json" },
           method: "POST",

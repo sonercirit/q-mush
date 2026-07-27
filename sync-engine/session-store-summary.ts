@@ -1,0 +1,104 @@
+import {
+  readAgentSessionToolNames,
+  type AgentSessionToolName,
+} from "../shared/agent-tools.ts";
+import { agentSessions } from "../shared/database/schema.ts";
+import type { AgentSessionSummary } from "../shared/session-model.ts";
+import { parseRestartHandoff } from "./session-restart-store.ts";
+import { parseProviderPricing } from "./session-store-read.ts";
+
+export function storedSessionSelection() {
+  return {
+    activeDurationMs: agentSessions.activeDurationMs,
+    activeStartedAt: agentSessions.activeStartedAt,
+    autoCompact: agentSessions.autoCompact,
+    costBasis: agentSessions.costBasis,
+    costUsd: agentSessions.costUsd,
+    createdAt: agentSessions.createdAt,
+    credentialId: agentSessions.providerCredentialId,
+    currentContextTokens: agentSessions.currentContextTokens,
+    currentSegment: agentSessions.currentSegment,
+    executionEnvironment: agentSessions.executionEnvironment,
+    executionGeneration: agentSessions.executionGeneration,
+    id: agentSessions.id,
+    maxContextTokens: agentSessions.maxContextTokens,
+    model: agentSessions.model,
+    openRouterProviderTag: agentSessions.openRouterProviderTag,
+    provider: agentSessions.provider,
+    providerPricing: agentSessions.providerPricing,
+    reasoningEffort: agentSessions.reasoningEffort,
+    restartHandoff: agentSessions.restartHandoff,
+    runnerId: agentSessions.runnerId,
+    runnerRequired: agentSessions.runnerRequired,
+    status: agentSessions.status,
+    title: agentSessions.title,
+    tools: agentSessions.tools,
+    updatedAt: agentSessions.updatedAt,
+    workingDirectory: agentSessions.workingDirectory,
+    workspaceId: agentSessions.workspaceId,
+  };
+}
+
+type StoredSessionSummary = Pick<
+  typeof agentSessions.$inferSelect,
+  | "activeDurationMs"
+  | "activeStartedAt"
+  | "autoCompact"
+  | "costBasis"
+  | "costUsd"
+  | "createdAt"
+  | "currentContextTokens"
+  | "currentSegment"
+  | "executionEnvironment"
+  | "executionGeneration"
+  | "id"
+  | "maxContextTokens"
+  | "model"
+  | "openRouterProviderTag"
+  | "provider"
+  | "providerPricing"
+  | "reasoningEffort"
+  | "restartHandoff"
+  | "runnerId"
+  | "runnerRequired"
+  | "status"
+  | "title"
+  | "tools"
+  | "updatedAt"
+  | "workingDirectory"
+  | "workspaceId"
+> & { readonly credentialId: string };
+
+function parseStoredTools(value: string): readonly AgentSessionToolName[] {
+  try {
+    const tools = readAgentSessionToolNames(JSON.parse(value));
+    if (tools !== undefined) {
+      return tools;
+    }
+  } catch {
+    // The common error below identifies corrupt local data.
+  }
+  throw new Error("Stored agent session tools are invalid");
+}
+
+export function summarizeStoredSession(
+  stored: StoredSessionSummary,
+): AgentSessionSummary {
+  const {
+    currentSegment,
+    executionGeneration: generation,
+    ...summary
+  } = stored;
+  return {
+    ...summary,
+    generation,
+    hasOlderSegments: currentSegment > 0,
+    activeStartedAt: stored.activeStartedAt?.getTime() ?? null,
+    createdAt: stored.createdAt.getTime(),
+    providerPricing: parseProviderPricing(stored.providerPricing),
+    pendingQuestions: null,
+    restartHandoff: parseRestartHandoff(stored.restartHandoff),
+    tools: parseStoredTools(stored.tools),
+    updatedAt: stored.updatedAt.getTime(),
+  };
+}

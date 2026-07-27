@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import type { AgentModel, AgentModelTurn } from "../../shared/agent-loop.ts";
 import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
@@ -14,9 +14,12 @@ import {
 } from "./authenticated-integration-test-helpers.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
+  completeNullRunnerCommand,
+  expectCompactedIdleSession,
   requireCompactionSession,
   runningCompactionStore,
 } from "./session-compaction-test-helpers.ts";
+import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
 import { promiseGate } from "./session-race-test-helpers.ts";
 import { STORE_SESSION_ID } from "./session-store-test-fixtures.ts";
 
@@ -71,6 +74,7 @@ function runtimeDependencies(options: {
     now: () => (now += 1),
     notify: () => undefined,
     realtime: undefined,
+    restartHandoffRequested: () => false,
     sessionTools: {
       browseRunnerDirectories: () => Promise.resolve("unused directories"),
       continueSession: () => Promise.resolve("unused continuation"),
@@ -106,14 +110,16 @@ function completeAgentFile(runtime: SessionAgentRuntimeDependencies): void {
   if (command === undefined) {
     throw new Error("The agent-file command was not queued");
   }
-  expect(
-    runtime.broker.complete(runtime.detail.runnerId, command.id, "null"),
-  ).toBe(true);
+  completeNullRunnerCommand(
+    runtime.broker,
+    runtime.detail.runnerId,
+    command.id,
+  );
 }
 
 async function startManualCompaction(
   runtime: SessionAgentRuntimeDependencies,
-): Promise<void> {
+): Promise<"complete" | "handoff"> {
   const compaction = compactSessionConversation(runtime);
   await Promise.resolve();
   completeAgentFile(runtime);
@@ -147,7 +153,7 @@ function compactorTurn(content: string): AgentModelTurn {
 
 async function expectFailureWithoutCompaction(
   setup: ManualRuntimeSetup,
-  compaction: Promise<void>,
+  compaction: Promise<"complete" | "handoff">,
   expected: string | { readonly name: string },
 ): Promise<void> {
   const before = compactionState(setup);
@@ -158,7 +164,7 @@ async function expectFailureWithoutCompaction(
     await rejection.toMatchObject(expected);
   }
   expect(compactionState(setup)).toEqual(before);
-  setup.database.$client.close();
+  closeSessionTestDatabase(setup.database);
 }
 
 async function runGatedManualCompaction(options: {
@@ -227,7 +233,7 @@ describe("manual session compaction", () => {
     expect(after.messages).toEqual(before.messages);
     expect(after.costBasis).toBe("none");
     expect(after.costUsd).toBe(0);
-    setup.database.$client.close();
+    closeSessionTestDatabase(setup.database);
   });
 
   test("surfaces invalid summary usage as explicitly unbillable", async () => {
@@ -247,6 +253,43 @@ describe("manual session compaction", () => {
         tokenUsage: null,
       },
     });
+  });
+
+  test("returns complete when restart becomes pending after durable compaction", async () => {
+    const running = runningManualStore();
+    let restartRequested = false;
+    const persisted = running.store.compactRuntimeTerminal.bind(running.store);
+    const record = vi
+      .spyOn(running.store, "compactRuntimeTerminal")
+      .mockImplementation((...arguments_) => {
+        persisted(...arguments_);
+        restartRequested = true;
+      });
+    const runtime: SessionAgentRuntimeDependencies = {
+      ...runtimeDependencies({
+        ...running,
+        controller: new AbortController(),
+        model: new ScriptedAgentModel([
+          {
+            content: "Durable restart-race handoff",
+            costUsd: 0.4,
+            toolCalls: [],
+          },
+        ]),
+      }),
+      restartHandoffRequested: () => restartRequested,
+    };
+
+    await expect(startManualCompaction(runtime)).resolves.toBe("complete");
+    expect(record).toHaveBeenCalledOnce();
+    const settled = expectCompactedIdleSession(
+      running.store,
+      "Durable restart-race handoff",
+      { contextTokens: 0 },
+    );
+    expect(settled.restartHandoff).toBeNull();
+    record.mockRestore();
+    closeSessionTestDatabase(running.database);
   });
 
   test("persists reported compaction usage exactly once with the handoff", async () => {
@@ -269,6 +312,6 @@ describe("manual session compaction", () => {
         },
       ],
     });
-    setup.database.$client.close();
+    closeSessionTestDatabase(setup.database);
   });
 });

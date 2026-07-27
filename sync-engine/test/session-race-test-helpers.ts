@@ -3,9 +3,11 @@ import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 export function sessionAgentActionDefaults() {
   return {
     broker: new RunnerCommandBroker(),
+    cleanupSession: () => undefined,
     discoverModels: () => Promise.resolve({ defaultModel: null, models: [] }),
     draining: () => false,
     listRunnerOptions: () => ({ items: [], totalItems: 0 }),
+    pendingRestart: () => undefined,
     runnerIsAvailable: () => true,
   };
 }

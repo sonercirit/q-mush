@@ -1,3 +1,5 @@
+import { isRecord, readNullableString } from "./validation.ts";
+
 export interface AuthenticatedUser {
   readonly email: string;
   readonly id: string;
@@ -8,10 +10,6 @@ export interface AuthenticatedUser {
 export interface AuthSession {
   readonly googleLoginAvailable: boolean;
   readonly user: AuthenticatedUser | null;
-}
-
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export function readRequiredArray(
@@ -28,6 +26,4 @@ export function readRequiredArray(
   return items;
 }
 
-export function readNullableString(value: unknown): string | null | undefined {
-  return value === null || typeof value === "string" ? value : undefined;
-}
+export { isRecord, readNullableString };

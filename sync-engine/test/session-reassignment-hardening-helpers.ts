@@ -9,6 +9,7 @@ import {
 import { createUnavailableSession } from "./session-store-create-hardening-helpers.ts";
 import {
   addReplacementRunner,
+  closeSessionStoreTestSetup,
   removeTestRunnerAndExpect,
   type SessionStoreTestSetup,
 } from "./session-store-reassignment-helpers.ts";
@@ -54,7 +55,7 @@ export function closeStoppedSessionCycle(
 ): void {
   expectRecoverableStoppedSession(setup.store, sessionId);
   reassignTestSession(setup, sessionId);
-  closeHardeningDatabase(setup);
+  closeSessionStoreTestSetup(setup);
 }
 
 export function reassignTestSession(
@@ -75,7 +76,7 @@ export function reassignTestSession(
 }
 
 export function closeHardeningDatabase(setup: SessionStoreTestSetup): void {
-  setup.database.$client.close();
+  closeSessionStoreTestSetup(setup);
 }
 
 export function fenceTestSession(

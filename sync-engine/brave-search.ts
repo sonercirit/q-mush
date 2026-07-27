@@ -3,6 +3,7 @@ import { createCredentialCipher } from "../shared/credential-cipher.ts";
 import { createDatabase, type AppDatabase } from "../shared/database.ts";
 import { createUuidV7, type IdGenerator } from "../shared/ids.ts";
 import { ProviderCredentialStore } from "../shared/provider-credential-store.ts";
+import { isWorkspaceId } from "../shared/workspace-model.ts";
 import type { GoogleAuth } from "./auth.ts";
 import {
   normalizeOptionalValue,
@@ -28,14 +29,19 @@ interface BraveSearchDependencies {
 
 type BraveSearchArguments = JsonRecord;
 
-export interface BraveSearchSkill {
+export interface BraveSearchExecutor {
   execute(
     userId: string,
+    workspaceId: string,
     arguments_: BraveSearchArguments,
     signal?: AbortSignal,
   ): Promise<string>;
+}
+
+export interface BraveSearchSkill extends BraveSearchExecutor {
   keys(request: Request): Promise<Response>;
   remove(request: Request, keyId: string): Response;
+  setScopes(request: Request, keyId: string): Promise<Response>;
 }
 
 function optionalCount(value: unknown): number | undefined {
@@ -182,7 +188,19 @@ class BraveSearchSkillIntegration implements BraveSearchSkill {
     return this.#credentials.remove(request, keyId);
   }
 
-  execute: BraveSearchExecute = async (userId, arguments_, signal) => {
+  setScopes(request: Request, keyId: string): Promise<Response> {
+    return this.#credentials.setScopes(request, keyId);
+  }
+
+  execute: BraveSearchExecute = async (
+    userId,
+    workspaceId,
+    arguments_,
+    signal,
+  ) => {
+    if (!isWorkspaceId(workspaceId)) {
+      return "Error: the Brave Search workspace is invalid.";
+    }
     if (this.#store === undefined) {
       return "Error: Brave Search credential storage is not configured.";
     }
@@ -193,7 +211,7 @@ class BraveSearchSkillIntegration implements BraveSearchSkill {
       return "Error: query must be a non-empty string and count must be an integer from 1 to 20.";
     }
 
-    const credentials = this.#store.list(userId);
+    const credentials = this.#store.list(userId, workspaceId);
 
     if (credentials.length === 0) {
       return "Error: no Brave Search API keys are available.";
@@ -201,7 +219,11 @@ class BraveSearchSkillIntegration implements BraveSearchSkill {
 
     for (const credential of credentials) {
       try {
-        const secret = this.#store.readSecret(userId, credential.id);
+        const secret = this.#store.readSecret(
+          userId,
+          credential.id,
+          workspaceId,
+        );
 
         if (secret === undefined) {
           continue;

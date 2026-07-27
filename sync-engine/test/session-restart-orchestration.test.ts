@@ -1,0 +1,629 @@
+import { expect, test, vi, type MockInstance } from "vitest";
+import type {
+  AgentConversationMessage,
+  AgentModel,
+  AgentModelTurn,
+} from "../../shared/agent-loop.ts";
+import { agentMessages, agentSessions } from "../../shared/database/schema.ts";
+import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import type { AgentSessionDetail } from "../../shared/session-model.ts";
+import { AGENT_COMPACTION_SYSTEM_PROMPT } from "../../sync-engine/agent-compaction.ts";
+import type { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
+import type { AgentModelFactory } from "../../sync-engine/session-agent-models.ts";
+import type { SessionAgentRuntimeDependencies } from "../../sync-engine/session-agent-runtime.ts";
+import { SessionFinisher } from "../../sync-engine/session-finisher.ts";
+import type { SessionLauncher } from "../../sync-engine/session-launcher.ts";
+import { recoverSessionRestartHandoffs } from "../../sync-engine/session-restart-recovery.ts";
+import type {
+  RestartHandoffIdentity,
+  RestartHandoffSettlement,
+} from "../../sync-engine/session-restart-store.ts";
+import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
+import type { SessionStore } from "../../sync-engine/session-store.ts";
+import {
+  TEST_NOW,
+  TEST_USER_ID,
+} from "./authenticated-integration-test-helpers.ts";
+import { expectDoneTurn, providerTurn } from "./provider-turn-fixtures.ts";
+import {
+  closeCompactionStore,
+  expectCompactedIdleSession,
+  pauseRestartStore,
+  requireCompactionSession,
+  runningRestartStore,
+  type RestartStoreSetup,
+} from "./session-compaction-test-helpers.ts";
+import { createSessionLauncher } from "./session-launcher-fixtures.ts";
+import { settleRestartRecovery } from "./session-restart-cpd-helpers.ts";
+import {
+  CREDENTIAL,
+  orchestrationActions,
+} from "./session-restart-orchestration-test-helpers.ts";
+import {
+  createStore,
+  createTestSession,
+} from "./session-store-test-fixtures.ts";
+
+interface RecoveredRunSetup {
+  readonly actionsFinished: MockInstance<SessionAgentActions["finished"]>;
+  readonly broker: RunnerCommandBroker;
+  readonly detail: AgentSessionDetail;
+  readonly identity: RestartHandoffIdentity;
+  readonly launcher: SessionLauncher;
+  readonly modelFactories: MockInstance<
+    SessionAgentRuntimeDependencies["modelFactory"]
+  >;
+  readonly notifications: string[];
+  readonly notify: MockInstance<(userId: string, sessionId: string) => void>;
+  readonly runtimes: SessionRuntimes;
+  readonly settle: MockInstance<SessionStore["settleRestartHandoff"]>;
+  readonly storeSetup: RestartStoreSetup;
+}
+
+function modelTurn(
+  content: string,
+  overrides: Partial<AgentModelTurn> = {},
+): AgentModelTurn {
+  const turn = providerTurn(content, overrides);
+  if (content === "Done.") {
+    expectDoneTurn(turn);
+  }
+  return turn;
+}
+
+function recoveredRunSetup(model: AgentModel): RecoveredRunSetup {
+  const storeSetup = runningRestartStore();
+  const identity = pauseRestartStore(
+    storeSetup,
+    "restart-orchestration",
+    "agent",
+  );
+  const detail = storeSetup.restart.claim(TEST_USER_ID, identity, TEST_NOW + 3);
+  if (detail === undefined) {
+    throw new Error("The recovered orchestration handoff was not claimable");
+  }
+  const notifications: string[] = [];
+  const notify = vi.fn((userId: string, sessionId: string): void => {
+    notifications.push(`${userId}:${sessionId}`);
+  });
+  const actions = orchestrationActions(storeSetup.database, storeSetup.store);
+  const actionsFinished = vi.spyOn(actions, "finished");
+  const store = storeSetup.store;
+  const finisher = new SessionFinisher({
+    actions,
+    notify,
+    now: () => TEST_NOW + 5,
+    store,
+  });
+  const broker = new RunnerCommandBroker({
+    commandId: () => "restart-agent-file-command",
+  });
+  const runtimes = new SessionRuntimes();
+  const modelFactories = vi.fn(() => model);
+  const launcher = createSessionLauncher({
+    actions,
+    broker,
+    finish: (finishedDetail, userId, error, recovered) => {
+      finisher.finish(finishedDetail, userId, error, recovered);
+    },
+    modelFactory: modelFactories,
+    notify,
+    now: (() => {
+      let now = TEST_NOW + 3;
+      return () => (now += 1);
+    })(),
+    runtimes,
+    store,
+  });
+  return {
+    actionsFinished,
+    broker,
+    detail,
+    identity,
+    launcher,
+    modelFactories,
+    notifications,
+    notify,
+    runtimes,
+    settle: vi.spyOn(store, "settleRestartHandoff"),
+    storeSetup,
+  };
+}
+
+interface ManualCompactionSetup {
+  readonly broker: RunnerCommandBroker;
+  readonly compactionWrite:
+    MockInstance<SessionStore["compactRuntimeTerminal"]> | undefined;
+  readonly compactorRequests: AgentConversationMessage[][];
+  readonly detail: AgentSessionDetail;
+  readonly finishes: MockInstance<SessionFinisher["finish"]>;
+  readonly launcher: SessionLauncher;
+  readonly modelFactories: MockInstance<
+    SessionAgentRuntimeDependencies["modelFactory"]
+  >;
+  readonly runtimes: SessionRuntimes;
+  readonly storeSetup: ReturnType<typeof createStore>;
+}
+
+function manualCompactionSetup(
+  onCompactionPersisted?: () => void,
+): ManualCompactionSetup {
+  const storeSetup = createStore();
+  const detail = createTestSession(storeSetup.store);
+  const actions = orchestrationActions(storeSetup.database, storeSetup.store);
+  const broker = new RunnerCommandBroker({
+    commandId: () => "manual-compaction-agent-file",
+  });
+  const runtimes = new SessionRuntimes();
+  const compactorRequests: AgentConversationMessage[][] = [];
+  const modelFactories = vi.fn<AgentModelFactory>((options) => ({
+    complete: (messages: readonly AgentConversationMessage[]) => {
+      if (options.systemPrompt !== AGENT_COMPACTION_SYSTEM_PROMPT) {
+        return Promise.reject(new Error("The agent model was unexpected"));
+      }
+      compactorRequests.push([...messages]);
+      return Promise.resolve(modelTurn("Durable manual restart summary."));
+    },
+  }));
+  const finisher = new SessionFinisher({
+    actions,
+    notify: () => undefined,
+    now: () => TEST_NOW + 5,
+    store: storeSetup.store,
+  });
+  const finish = vi.fn<SessionFinisher["finish"]>((...arguments_) => {
+    finisher.finish(...arguments_);
+  });
+
+  const launcher = createSessionLauncher({
+    actions,
+    broker,
+    finish,
+    modelFactory: modelFactories,
+    notify: () => undefined,
+    now: () => TEST_NOW + 4,
+    runtimes,
+    store: storeSetup.store,
+  });
+  const persistCompaction = storeSetup.store.compactRuntimeTerminal.bind(
+    storeSetup.store,
+  );
+  const compactionWrite =
+    onCompactionPersisted === undefined
+      ? undefined
+      : vi
+          .spyOn(storeSetup.store, "compactRuntimeTerminal")
+          .mockImplementation((...arguments_) => {
+            persistCompaction(...arguments_);
+            onCompactionPersisted();
+          });
+  return {
+    broker,
+    compactionWrite,
+    compactorRequests,
+    detail,
+    finishes: finish,
+    launcher,
+    modelFactories,
+    runtimes,
+    storeSetup,
+  };
+}
+
+function launchManualCompaction(
+  setup: ManualCompactionSetup,
+  detail = setup.detail,
+): void {
+  expect(
+    setup.launcher.launch(detail, CREDENTIAL, TEST_USER_ID, "compact"),
+  ).toBe(true);
+}
+
+function expectPendingRestartHandoffs(
+  setup: ManualCompactionSetup,
+  expected: readonly unknown[],
+): void {
+  expect(setup.storeSetup.store.pendingRestartHandoffs()).toEqual(expected);
+}
+
+function expectNoCompactionWork(setup: ManualCompactionSetup): void {
+  expect(setup.compactorRequests).toHaveLength(0);
+  expect(setup.modelFactories).toHaveBeenCalledTimes(0);
+  expect(setup.finishes).not.toHaveBeenCalled();
+}
+
+function expectPendingRestartHandoffCount(
+  setup: ManualCompactionSetup,
+  count: number,
+): void {
+  expect(setup.storeSetup.store.pendingRestartHandoffs()).toHaveLength(count);
+}
+
+function expectRestartHandoffState(
+  setup: ManualCompactionSetup,
+  status: "paused" | "queued",
+): void {
+  expect(requireCompactionSession(setup.storeSetup.store)).toMatchObject({
+    restartHandoff: {
+      operation: "compact",
+      restartId: "restart-before-manual-compactor",
+    },
+    status,
+  });
+}
+
+function expectCompactionFinished(setup: ManualCompactionSetup): void {
+  expect(setup.compactorRequests).toHaveLength(1);
+  expect(setup.finishes).toHaveBeenCalledOnce();
+}
+
+async function settleManualCompaction(
+  setup: ManualCompactionSetup,
+): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  completeAgentFileCommand(setup.broker, setup.detail);
+  await setup.runtimes.settled(setup.detail.id);
+}
+
+function closeManualCompaction(setup: ManualCompactionSetup): void {
+  setup.compactionWrite?.mockRestore();
+  closeCompactionStore(setup.storeSetup);
+}
+
+function recoverManualCompaction(setup: ManualCompactionSetup): {
+  readonly launches: AgentSessionDetail[];
+  readonly recovery: ReturnType<typeof recoverSessionRestartHandoffs>;
+} {
+  const launches: AgentSessionDetail[] = [];
+  const recovery = recoverSessionRestartHandoffs({
+    credential: () => Promise.resolve(CREDENTIAL),
+    launch: (detail) => {
+      launches.push(detail);
+      return true;
+    },
+    notify: () => undefined,
+    now: () => TEST_NOW + 6,
+    runnerIsAvailable: () => true,
+    store: setup.storeSetup.store,
+  });
+  return { launches, recovery };
+}
+
+function recoverAndSettleManualCompaction(
+  setup: ManualCompactionSetup,
+): Promise<AgentSessionDetail[]> {
+  const { launches, recovery } = recoverManualCompaction(setup);
+  return recovery.then(() => launches);
+}
+
+async function drainManualCompaction(
+  setup: ManualCompactionSetup,
+  restartId: string,
+): Promise<void> {
+  await setup.runtimes.drain({ kind: "server" }, restartId);
+}
+
+function highContextRecoveredRunSetup(
+  model: AgentModel,
+  messages: readonly AgentConversationMessage[],
+): RecoveredRunSetup {
+  const setup = recoveredRunSetup(model);
+  setup.storeSetup.database
+    .update(agentSessions)
+    .set({ currentContextTokens: 195_000 })
+    .run();
+  let createdAt = TEST_NOW + 10;
+  for (const message of messages) {
+    setup.storeSetup.database
+      .insert(agentMessages)
+      .values({
+        content: message.content,
+        createdAt: new Date((createdAt += 1)),
+        createdById: TEST_USER_ID,
+        id: `restart-message-${String(createdAt)}`,
+        isDeleted: false,
+        role: message.role,
+        sessionId: setup.detail.id,
+        ...(message.role === "assistant"
+          ? { toolCalls: JSON.stringify(message.toolCalls) }
+          : {}),
+        ...(message.role === "tool"
+          ? {
+              toolCallId: message.toolCallId,
+              toolName: message.toolName,
+            }
+          : {}),
+        updatedAt: new Date(createdAt),
+        updatedById: TEST_USER_ID,
+        userId: TEST_USER_ID,
+      })
+      .run();
+  }
+  const detail = requireCompactionSession(setup.storeSetup.store);
+  return { ...setup, detail };
+}
+
+function completeAgentFile(setup: RecoveredRunSetup): void {
+  completeAgentFileCommand(setup.broker, setup.detail);
+}
+
+function completeAgentFileCommand(
+  broker: RunnerCommandBroker,
+  detail: AgentSessionDetail,
+): void {
+  const command = broker.take(detail.runnerId);
+  if (command === undefined) {
+    throw new Error("The recovered run did not request its agent file");
+  }
+  expect(
+    broker.complete(detail.runnerId, command.id, {
+      output: "null",
+      state: "completed",
+    }),
+  ).toBe(true);
+}
+
+async function runRecovered(setup: RecoveredRunSetup): Promise<void> {
+  expect(
+    setup.launcher.launch(setup.detail, CREDENTIAL, TEST_USER_ID, "agent"),
+  ).toBe(true);
+  await Promise.resolve();
+  completeAgentFile(setup);
+  await setup.runtimes.settled(setup.detail.id);
+}
+
+function invocationOrder(
+  mock: MockInstance,
+  position: "first" | "last",
+): number {
+  const calls = mock.mock.invocationCallOrder;
+  const order = position === "first" ? calls[0] : calls.at(-1);
+  if (order === undefined) {
+    throw new Error(`The ${position} expected orchestration call is missing`);
+  }
+  return order;
+}
+
+function expectTerminalReporting(
+  setup: RecoveredRunSetup,
+  expectedNotifications: number,
+): void {
+  expect(setup.notifications).toEqual(
+    Array.from(
+      { length: expectedNotifications },
+      () => `${TEST_USER_ID}:${setup.detail.id}`,
+    ),
+  );
+  expect(setup.actionsFinished).toHaveBeenCalledOnce();
+  expect(setup.actionsFinished).toHaveBeenCalledWith(
+    setup.detail,
+    TEST_USER_ID,
+  );
+  expect(invocationOrder(setup.settle, "first")).toBeLessThan(
+    invocationOrder(setup.notify, "last"),
+  );
+  expect(invocationOrder(setup.notify, "last")).toBeLessThan(
+    invocationOrder(setup.actionsFinished, "first"),
+  );
+  expect(setup.runtimes.active(setup.detail.id)).toBe(false);
+}
+
+function expectAtomicSettlement(
+  setup: RecoveredRunSetup,
+  settlement: RestartHandoffSettlement,
+): void {
+  expect(setup.settle).toHaveBeenCalledOnce();
+  expect(setup.settle).toHaveBeenCalledWith(
+    TEST_USER_ID,
+    setup.identity,
+    settlement,
+    TEST_NOW + 5,
+  );
+}
+
+function persisted(setup: RecoveredRunSetup): AgentSessionDetail {
+  return requireCompactionSession(setup.storeSetup.store);
+}
+
+function closeRecoveredRun(setup: RecoveredRunSetup): void {
+  setup.actionsFinished.mockRestore();
+  setup.settle.mockRestore();
+  closeCompactionStore(setup.storeSetup);
+}
+
+type TerminalSettlement = Parameters<typeof expectAtomicSettlement>[1];
+
+interface TerminalExpectation {
+  readonly notifications: number;
+  readonly settlement: TerminalSettlement;
+  readonly transcript: readonly Readonly<Record<string, unknown>>[];
+}
+
+async function expectRecoveredTerminal(
+  model: AgentModel,
+  expectation: TerminalExpectation,
+): Promise<void> {
+  const setup = recoveredRunSetup(model);
+
+  await runRecovered(setup);
+
+  expectAtomicSettlement(setup, expectation.settlement);
+  expect(persisted(setup)).toMatchObject({
+    messages: expectation.transcript,
+    restartHandoff: null,
+    status: expectation.settlement.status,
+  });
+  expectTerminalReporting(setup, expectation.notifications);
+  closeRecoveredRun(setup);
+}
+
+test("launcher settles recovered success before terminal reporting", async () => {
+  await expectRecoveredTerminal(
+    {
+      complete: () => Promise.resolve(modelTurn("Recovered successfully.")),
+    },
+    {
+      notifications: 4,
+      settlement: { status: "idle" },
+      transcript: [
+        { role: "user" },
+        { content: "Recovered successfully.", role: "assistant" },
+      ],
+    },
+  );
+});
+
+test("launcher settles recovered error before terminal reporting", async () => {
+  const error = "Session failed: recovered provider failed";
+  await expectRecoveredTerminal(
+    {
+      complete: () => Promise.reject(new Error("recovered provider failed")),
+    },
+    {
+      notifications: 3,
+      settlement: { error, status: "failed" },
+      transcript: [{ role: "user" }, { content: error, role: "error" }],
+    },
+  );
+});
+
+test("compaction settles when restart follows its durable write", async () => {
+  const setups: ManualCompactionSetup[] = [];
+  const setup = manualCompactionSetup(() => {
+    const current = setups[0];
+    if (current === undefined) {
+      throw new Error("The manual compaction fixture was not initialized");
+    }
+    void current.runtimes.drain(
+      { kind: "server" },
+      "restart-after-manual-compaction",
+    );
+  });
+  setups.push(setup);
+
+  launchManualCompaction(setup);
+  await settleManualCompaction(setup);
+
+  expectCompactionFinished(setup);
+
+  expectCompactedIdleSession(
+    setup.storeSetup.store,
+    "Durable manual restart summary.",
+    { contextTokens: 0 },
+  );
+  expectPendingRestartHandoffs(setup, []);
+
+  const recoveryLaunches = await recoverAndSettleManualCompaction(setup);
+  expect(recoveryLaunches).toEqual([]);
+  closeManualCompaction(setup);
+});
+
+test("restart before compaction replays one handoff", async () => {
+  const setup = manualCompactionSetup();
+
+  launchManualCompaction(setup);
+  await drainManualCompaction(setup, "restart-before-manual-compactor");
+
+  expectNoCompactionWork(setup);
+  expectRestartHandoffState(setup, "paused");
+
+  expectPendingRestartHandoffCount(setup, 1);
+
+  const recoveryLaunches = await recoverAndSettleManualCompaction(setup);
+  expect(recoveryLaunches).toMatchObject([
+    {
+      restartHandoff: {
+        operation: "compact",
+        restartId: "restart-before-manual-compactor",
+      },
+    },
+  ]);
+
+  expectPendingRestartHandoffs(setup, []);
+
+  expectRestartHandoffState(setup, "queued");
+
+  const recovered = recoveryLaunches[0];
+  if (recovered === undefined) {
+    throw new Error("The compact restart handoff was not recovered");
+  }
+  setup.runtimes.start();
+  await settleRestartRecovery();
+  launchManualCompaction(setup, recovered);
+
+  await settleManualCompaction(setup);
+  expectCompactionFinished(setup);
+  expect(requireCompactionSession(setup.storeSetup.store)).toMatchObject({
+    restartHandoff: null,
+    status: "idle",
+  });
+
+  expectPendingRestartHandoffs(setup, []);
+  closeManualCompaction(setup);
+});
+
+test("recovered tool handoff compacts before its first request", async () => {
+  const durableTool: AgentConversationMessage = {
+    content: "Durable tool output.",
+    role: "tool",
+    toolCallId: "durable-tool-call",
+    toolName: "read",
+  };
+  const durableAssistant: AgentConversationMessage = {
+    content: "Reading before restart.",
+    role: "assistant",
+    toolCalls: [
+      {
+        arguments: "{}",
+        id: durableTool.toolCallId,
+        name: durableTool.toolName,
+      },
+    ],
+  };
+  const turns = [
+    modelTurn("Recovered compacted summary."),
+    modelTurn("Recovered after compaction.", { contextTokens: 1_000 }),
+  ];
+  const requests: AgentConversationMessage[][] = [];
+  const model: AgentModel = {
+    complete: (messages) => {
+      requests.push([...messages]);
+      const turn = turns.shift();
+      return turn === undefined
+        ? Promise.reject(new Error("Unexpected extra provider request"))
+        : Promise.resolve(turn);
+    },
+  };
+  const setup = highContextRecoveredRunSetup(model, [
+    durableAssistant,
+    durableTool,
+  ]);
+
+  await runRecovered(setup);
+
+  expect(requests).toHaveLength(2);
+  expect(requests[0]).toContainEqual(durableTool);
+  expect(requests[0]?.at(-1)?.content).toContain("Compact this conversation");
+  expect(requests[1]?.[0]?.content).toContain("Recovered compacted summary.");
+  expect(requests[1]?.some((message) => message === durableTool)).toBe(false);
+  expect(setup.modelFactories).toHaveBeenCalledTimes(2);
+  const detail = persisted(setup);
+  expect(detail).toMatchObject({
+    currentContextTokens: 1_000,
+    messages: [{ role: "user" }, { content: "Recovered after compaction." }],
+    restartHandoff: null,
+    status: "idle",
+  });
+  expect(detail.messages[0]?.content).toContain("Recovered compacted summary.");
+  expect(
+    setup.storeSetup.database
+      .select({
+        content: agentMessages.content,
+        isDeleted: agentMessages.isDeleted,
+      })
+      .from(agentMessages)
+      .all(),
+  ).toContainEqual({ content: durableTool.content, isDeleted: true });
+  closeRecoveredRun(setup);
+});

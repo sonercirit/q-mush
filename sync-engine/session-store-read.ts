@@ -1,5 +1,4 @@
 import { and, asc, eq } from "drizzle-orm";
-import { readAgentImages, type AgentImage } from "../shared/agent-images.ts";
 import {
   readAgentToolCalls,
   type AgentConversationMessage,
@@ -8,17 +7,20 @@ import {
 import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
 import type { IdGenerator } from "../shared/ids.ts";
-import { readProviderModelPricing } from "../shared/provider-model-pricing.ts";
+import {
+  readProviderModelPricing,
+  type ProviderModelPricing,
+} from "../shared/provider-model-pricing.ts";
 import { compareAgentSessionMessages } from "../shared/session-message-order.ts";
 import type {
   AgentSessionMessage,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
+import { STORED_SESSION_MESSAGE_SELECTION } from "./session-message-selection.ts";
+import { sessionSegmentQuery } from "./session-segment.ts";
 import { readStoredSessionUserId } from "./session-store-state.ts";
-import {
-  appendSystemMessageAndTouchSession,
-  interruptedRunnerToolValues,
-} from "./session-store-values.ts";
+import { appendSystemMessageAndTouchSession } from "./session-store-values.ts";
+import { parseStoredImages } from "./stored-agent-images.ts";
 
 function parseToolCalls(value: string | null): readonly AgentToolCall[] {
   if (value === null) {
@@ -44,26 +46,13 @@ type StoredMessage = Omit<
   readonly toolCalls: string | null;
 };
 
-function parseImages(value: string | null): readonly AgentImage[] {
-  if (value === null) {
-    return [];
-  }
-  try {
-    const images = readAgentImages(JSON.parse(value));
-    if (images !== undefined) {
-      return images;
-    }
-  } catch {
-    // The common error below identifies corrupt local data.
-  }
-  throw new Error("Stored agent images are invalid");
-}
-
-function summarizeMessage(stored: StoredMessage): AgentSessionMessage {
+export function summarizeStoredMessage(
+  stored: StoredMessage,
+): AgentSessionMessage {
   return {
     ...stored,
     createdAt: stored.createdAt.getTime(),
-    images: parseImages(stored.images),
+    images: parseStoredImages(stored.images, "Stored agent images are invalid"),
     toolCalls: parseToolCalls(stored.toolCalls),
   };
 }
@@ -111,44 +100,73 @@ function trackedToolCalls(
   return pending;
 }
 
-function firstUnresolvedToolCall(
-  messages: readonly AgentSessionMessage[],
-): AgentToolCall | undefined {
-  return trackedToolCalls(messages).values().next().value;
-}
-
 export type InterruptedRunnerToolOptions = Readonly<{
-  database: AppDatabase;
+  database: Pick<AppDatabase, "insert" | "select" | "update">;
   generateId: IdGenerator;
   now: number;
   sessionId: string;
 }>;
 
-export function appendInterruptedRunnerToolResult(
+function appendInterruptedToolResults(
   options: InterruptedRunnerToolOptions,
+  output: string,
 ): void {
-  options.database.transaction((transaction) => {
-    const messages = readStoredSessionMessages(transaction, options.sessionId);
-    const call = firstUnresolvedToolCall(messages);
-    if (call === undefined) {
+  const append = (
+    database: Pick<AppDatabase, "insert" | "select" | "update">,
+  ): void => {
+    const messages = readStoredSessionMessages(database, options.sessionId);
+    const calls = [...trackedToolCalls(messages).values()];
+    if (calls.length === 0) {
       return;
     }
     const userId = readStoredSessionUserId(
-      transaction,
+      database,
       eq(agentSessions.id, options.sessionId),
     );
     if (userId === undefined) {
       throw new Error("The agent session no longer exists");
     }
-    appendSystemMessageAndTouchSession({
-      condition: eq(agentSessions.id, options.sessionId),
-      database: transaction,
-      generateId: options.generateId,
-      message: interruptedRunnerToolValues(call.id, call.name),
-      now: options.now,
-      sessionId: options.sessionId,
-      userId,
-    });
+    for (const call of calls) {
+      appendSystemMessageAndTouchSession({
+        condition: eq(agentSessions.id, options.sessionId),
+        database,
+        generateId: options.generateId,
+        message: {
+          content: output,
+          images: null,
+          role: "tool",
+          toolCallId: call.id,
+          toolCalls: null,
+          toolName: call.name,
+        },
+        now: options.now,
+        sessionId: options.sessionId,
+        userId,
+      });
+    }
+  };
+  append(options.database);
+}
+
+const UNKNOWN_RESTART_TOOL_OUTPUT =
+  "Error: this tool call was interrupted by a restart after dispatch; its external outcome is unknown. Inspect the target state before deciding whether it is safe to retry.";
+
+export function appendUnknownRestartToolResults(
+  options: InterruptedRunnerToolOptions,
+): void {
+  appendInterruptedToolResults(options, UNKNOWN_RESTART_TOOL_OUTPUT);
+}
+
+export function appendInterruptedRunnerToolResult(
+  options: Omit<InterruptedRunnerToolOptions, "database"> & {
+    readonly database: AppDatabase;
+  },
+): void {
+  options.database.transaction((transaction) => {
+    appendInterruptedToolResults(
+      { ...options, database: transaction },
+      "Error: the runner was removed before this tool call returned a result.",
+    );
   });
 }
 
@@ -200,26 +218,21 @@ export function readStoredSessionMessages(
   sessionId: string,
 ): readonly AgentSessionMessage[] {
   return database
-    .select({
-      content: agentMessages.content,
-      createdAt: agentMessages.createdAt,
-      id: agentMessages.id,
-      images: agentMessages.images,
-      role: agentMessages.role,
-      toolCallId: agentMessages.toolCallId,
-      toolCalls: agentMessages.toolCalls,
-      toolName: agentMessages.toolName,
-    })
+    .select(STORED_SESSION_MESSAGE_SELECTION)
     .from(agentMessages)
     .where(
       and(
         eq(agentMessages.isDeleted, false),
         eq(agentMessages.sessionId, sessionId),
+        eq(
+          agentMessages.segment,
+          sessionSegmentQuery(database, eq(agentSessions.id, sessionId)),
+        ),
       ),
     )
     .orderBy(asc(agentMessages.createdAt), asc(agentMessages.id))
     .all()
-    .map(summarizeMessage)
+    .map(summarizeStoredMessage)
     .sort(compareAgentSessionMessages);
 }
 
@@ -261,6 +274,12 @@ export function conversationFromMessages(
     }
   }
   return conversation;
+}
+
+export function serializeProviderPricing(
+  pricing: ProviderModelPricing | null,
+): string | null {
+  return pricing === null ? null : JSON.stringify(pricing);
 }
 
 export function parseProviderPricing(

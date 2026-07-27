@@ -1,3 +1,4 @@
+import type { AgentReasoningEffort } from "../../shared/agent-configuration.ts";
 import type { AgentImage } from "../../shared/agent-images.ts";
 import type { AgentModel } from "../../shared/agent-loop.ts";
 import {
@@ -13,10 +14,13 @@ import {
 } from "../../shared/runner-command-broker.ts";
 import type { RunnerSummary } from "../../shared/runner-model.ts";
 import { normalizeSearchText } from "../../shared/search.ts";
+import { GLOBAL_WORKSPACE_ID } from "../../shared/workspace-model.ts";
 import type { AgentModelDiscoverer } from "../../sync-engine/agent-model-discovery.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
+import type { OpenRouterProviderDiscoverer } from "../../sync-engine/openrouter-provider-discovery.ts";
 import { createRunnerIntegration } from "../../sync-engine/runners.ts";
 import { createSessionIntegration } from "../../sync-engine/sessions.ts";
+import { WorkspaceStore } from "../../sync-engine/workspace-store.ts";
 import {
   addTestProviderCredential,
   addTestUser,
@@ -26,6 +30,7 @@ import {
   TEST_FOREIGN_USER_ID,
   TEST_NOW,
   TEST_USER_ID,
+  TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { takeValue } from "./oauth-test-helpers.ts";
 
@@ -45,9 +50,11 @@ interface ConnectedSessionOptions {
   readonly commandId?: () => string;
   readonly credentials?: FixtureCredentials;
   readonly credentialGate?: Promise<void>;
+  readonly database?: ReturnType<typeof createAuthenticatedTestDatabase>;
   readonly deletedCredentials?: FixtureCredentials;
   readonly foreignCredentials?: FixtureCredentials;
   readonly modelDiscovery?: AgentModelDiscoverer;
+  readonly providerDiscovery?: OpenRouterProviderDiscoverer;
   readonly onChange?: (userId: string, sessionId: string) => void;
   readonly onCredentialRead?: () => void;
   readonly readCredential?: (
@@ -62,33 +69,36 @@ export function connectedSessionSetup(
   discoverModels?: AgentModelDiscoverer,
   options: ConnectedSessionOptions = {},
 ) {
-  const database = createAuthenticatedTestDatabase();
+  const database = options.database ?? createAuthenticatedTestDatabase();
   const authOptions = { database, now: () => TEST_NOW };
   const auth = createGoogleAuthFromEnvironment({}, authOptions);
   const runnerIds = [RUNNER_ID, REPLACEMENT_RUNNER_ID];
   const runnerTokens = ["session-runner-token", "replacement-runner-token"];
-  const runners = createRunnerIntegration(auth, {
+  const storedRunners = createRunnerIntegration(auth, {
     database,
     now: () => TEST_NOW,
     randomId: () => takeValue(runnerIds, "The test ran out of runner IDs"),
     randomToken: () =>
       takeValue(runnerTokens, "The test ran out of runner tokens"),
   });
-  runners.collection(
-    createAuthenticatedRequest("/api/runners", undefined, "POST"),
-  );
-  const registration = runners.connect(RUNNER_TOKEN, {
-    architecture: "x64",
-    machineFingerprint: "session-test-machine",
-    name: "workstation",
-    platform: "linux",
-  });
-
-  if (registration === undefined) {
-    throw new Error("The session test runner did not register");
+  if (options.database === undefined) {
+    storedRunners.collection(
+      createAuthenticatedRequest("/api/runners", undefined, "POST"),
+    );
+    const registration = storedRunners.connect(RUNNER_TOKEN, {
+      architecture: "x64",
+      machineFingerprint: "session-test-machine",
+      name: "workstation",
+      platform: "linux",
+    });
+    if (registration === undefined) {
+      throw new Error("The session test runner did not register");
+    }
   }
 
-  addTestProviderCredential(database, CREDENTIAL_ID);
+  if (options.database === undefined) {
+    addTestProviderCredential(database, CREDENTIAL_ID);
+  }
   const credential = createTestProviderCredential(
     CREDENTIAL_ID,
     credentialSource,
@@ -137,15 +147,32 @@ export function connectedSessionSetup(
     }
   }
   const reader = (provider: "openai" | "openrouter") => ({
-    readCredential: async (userId: string, credentialId: string) => {
+    readCredential: async (
+      userId: string,
+      credentialId: string,
+      workspaceId?: string,
+    ) => {
       options.onCredentialRead?.();
       await (options.credentialGate ?? Promise.resolve());
-      const read = () =>
-        userId === TEST_USER_ID
-          ? configuredCredentials[provider].find(
-              ({ id }) => id === credentialId,
-            )
+      const read = () => {
+        const selected =
+          userId === TEST_USER_ID
+            ? configuredCredentials[provider].find(
+                ({ id }) => id === credentialId,
+              )
+            : undefined;
+        if (selected === undefined || workspaceId === undefined) {
+          return selected;
+        }
+        const isGlobal = selected.isGlobal !== false;
+        return (
+          workspaceId === GLOBAL_WORKSPACE_ID
+            ? isGlobal
+            : isGlobal || selected.workspaceIds?.includes(workspaceId) === true
+        )
+          ? selected
           : undefined;
+      };
       return options.readCredential === undefined
         ? read()
         : options.readCredential(read);
@@ -157,10 +184,12 @@ export function connectedSessionSetup(
       : `018bcfe5-6800-7000-8000-${String(index + 63).padStart(12, "0")}`,
   );
   const selectedModels: string[] = [];
+  const selectedOpenRouterProviderTags: (string | undefined)[] = [];
   const selectedPricing: (ProviderModelPricing | null)[] = [];
-  const selectedReasoningEfforts: (string | null)[] = [];
-  const selectedSystemPrompts: string[] = [];
-  const selectedTools: (readonly AgentSessionToolName[])[] = [];
+  const selectedReasoningEfforts: (AgentReasoningEffort | null | undefined)[] =
+    [];
+  const selectedSystemPrompts: (string | undefined)[] = [];
+  const selectedTools: (readonly AgentSessionToolName[] | undefined)[] = [];
   const notifications: {
     readonly sessionId: string;
     readonly userId: string;
@@ -178,22 +207,22 @@ export function connectedSessionSetup(
       },
     });
   let listRunnerCalls = 0;
-  const runnerIntegration: typeof runners = {
-    collection: (request) => runners.collection(request),
-    connect: (token, metadata) => runners.connect(token, metadata),
+  const runnerIntegration: typeof storedRunners = {
+    collection: (request) => storedRunners.collection(request),
+    connect: (token, metadata) => storedRunners.connect(token, metadata),
     disconnected: (runner) => {
-      runners.disconnected(runner);
+      storedRunners.disconnected(runner);
     },
-    installer: (request) => runners.installer(request),
+    installer: (request) => storedRunners.installer(request),
     listForUser: (userId) => {
       listRunnerCalls += 1;
-      return options.runners ?? runners.listForUser(userId);
+      return options.runners ?? storedRunners.listForUser(userId);
     },
     listOnlineForUser: (userId, queryOptions) => {
       listRunnerCalls += 1;
       const { limit, offset, search } = queryOptions;
       if (options.runners === undefined) {
-        return runners.listOnlineForUser(userId, queryOptions);
+        return storedRunners.listOnlineForUser(userId, queryOptions);
       }
       const query =
         search === undefined ? undefined : normalizeSearchText(search);
@@ -212,23 +241,38 @@ export function connectedSessionSetup(
       };
     },
     onRemoved: (listener) => {
-      runners.onRemoved(listener);
+      storedRunners.onRemoved(listener);
     },
     onRemoving: (listener) => {
-      runners.onRemoving(listener);
+      storedRunners.onRemoving(listener);
     },
     onlineForUser: (userId) =>
-      (options.runners ?? runners.onlineForUser(userId)).filter(
+      (options.runners ?? storedRunners.onlineForUser(userId)).filter(
         ({ status }) => status === "online",
       ),
-    remove: (request, runnerId) => runners.remove(request, runnerId),
+    preflightRegistration: (token, metadata, activationId) =>
+      storedRunners.preflightRegistration(token, metadata, activationId),
+    receiptState: (token, metadata, receipt) =>
+      storedRunners.receiptState(token, metadata, receipt),
+    remove: (request, runnerId) => storedRunners.remove(request, runnerId),
     runnerIsAvailable: (userId, runnerId) =>
-      runners.runnerIsAvailable(userId, runnerId),
-    runnerToken: (request) => runners.runnerToken(request),
+      storedRunners.runnerIsAvailable(userId, runnerId),
+    runnerToken: (request) => storedRunners.runnerToken(request),
     seen: (runner) => {
-      runners.seen(runner);
+      storedRunners.seen(runner);
     },
-    setDefault: (request, runnerId) => runners.setDefault(request, runnerId),
+    settleActivationLifecycle: (activationId, lifecycle, restartId) =>
+      storedRunners.settleActivationLifecycle(
+        activationId,
+        lifecycle,
+        restartId,
+      ),
+    touchFinalizedActivation: (token, metadata, receipt) =>
+      storedRunners.touchFinalizedActivation(token, metadata, receipt),
+    setDefault: (request, runnerId) =>
+      storedRunners.setDefault(request, runnerId),
+    setScopes: (request, runnerId) =>
+      storedRunners.setScopes(request, runnerId),
   };
   const configuredDiscoverModels = options.modelDiscovery ?? discoverModels;
   const sessions = createSessionIntegration(
@@ -245,10 +289,14 @@ export function connectedSessionSetup(
       ...(configuredDiscoverModels === undefined
         ? {}
         : { discoverModels: configuredDiscoverModels }),
+      ...(options.providerDiscovery === undefined
+        ? {}
+        : { discoverOpenRouterProviders: options.providerDiscovery }),
       modelFactory: (factoryOptions) => {
         const {
           credential: selectedCredential,
           model: selectedModel,
+          openRouterProviderTag,
           providerPricing,
           reasoningEffort,
           systemPrompt,
@@ -258,6 +306,7 @@ export function connectedSessionSetup(
           throw new Error("Unexpected test credential");
         }
         selectedModels.push(selectedModel);
+        selectedOpenRouterProviderTags.push(openRouterProviderTag);
         selectedPricing.push(providerPricing);
         selectedReasoningEfforts.push(reasoningEffort);
         selectedSystemPrompts.push(systemPrompt);
@@ -266,6 +315,7 @@ export function connectedSessionSetup(
       },
       now: () => TEST_NOW,
       randomId: () => takeValue(ids, "The session test ran out of IDs"),
+      workspaces: new WorkspaceStore(database),
     },
   );
   sessions.onChange((userId, sessionId) => {
@@ -278,8 +328,9 @@ export function connectedSessionSetup(
     listRunnerCalls: () => listRunnerCalls,
     notifications,
     runnerCommands,
-    runners,
+    runners: storedRunners,
     selectedModels,
+    selectedOpenRouterProviderTags,
     selectedPricing,
     selectedReasoningEfforts,
     selectedSystemPrompts,
@@ -293,13 +344,20 @@ export function createSessionRequest(
   reasoningEffort = "high",
   model = "gpt-4.1-mini",
   images: readonly AgentImage[] = [],
+  autoCompact?: boolean,
+  selectedProviderTag?: string,
 ): Request {
   return createAuthenticatedRequest(
-    SESSIONS_PATH,
+    `${SESSIONS_PATH}?workspaceId=${encodeURIComponent(TEST_WORKSPACE_ID)}`,
     {
       credentialId: CREDENTIAL_ID,
+      ...(autoCompact === undefined ? {} : { autoCompact }),
+      executionEnvironment: "bare_metal",
       ...(images.length === 0 ? {} : { images }),
       ...(includeModel ? { model } : {}),
+      ...(selectedProviderTag === undefined
+        ? {}
+        : { openRouterProviderTag: selectedProviderTag }),
       prompt: "Inspect README.md",
       provider: "openai",
       reasoningEffort,

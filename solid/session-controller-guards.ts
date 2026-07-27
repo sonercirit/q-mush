@@ -14,7 +14,7 @@ export function selectedDetailHasStatus(
 }
 
 export function sessionIsActive(status: AgentSessionStatus): boolean {
-  return status === "queued" || status === "running";
+  return status === "queued" || status === "running" || status === "paused";
 }
 
 export function sessionCanResume(status: AgentSessionStatus): boolean {

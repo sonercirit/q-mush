@@ -7,20 +7,41 @@ import {
   sessionExecutionIsCurrent,
   type SessionQueueAuthorization,
 } from "./session-execution-authority.ts";
+import {
+  activePendingInput,
+  promotePendingInput,
+} from "./session-pending-inputs.ts";
 import { storedSessionRunnerIsAvailable } from "./session-runner-availability-store.ts";
-import { activeSessionCondition } from "./session-store-reassignment.ts";
+import {
+  activeSessionCondition,
+  type SessionFilter,
+} from "./session-store-persistence.ts";
 import type { SessionStoreWriteResources } from "./session-store-resources.ts";
 import { readStoredSessionResult } from "./session-store-result.ts";
 import { readStoredSessionState } from "./session-store-state.ts";
 import { userMessageValues } from "./session-store-values.ts";
 
+function queueSessionFilter(
+  sessionId: string,
+  userId: string,
+  workspaceId?: string,
+): SessionFilter {
+  return workspaceId === undefined
+    ? { id: sessionId, userId }
+    : { id: sessionId, userId, workspaceId };
+}
+
 export type QueueSessionResult =
-  | { readonly detail: AgentSessionDetail; readonly status: "queued" }
+  | {
+      readonly detail: AgentSessionDetail;
+      readonly status: "queued";
+    }
   | {
       readonly status:
         | "busy"
         | "not_found"
         | "parent_stale"
+        | "pending_input_conflict"
         | "runner_required"
         | "runner_unavailable";
     };
@@ -35,8 +56,17 @@ export function queueStoredSession(options: {
   readonly resources: SessionStoreWriteResources;
   readonly sessionId: string;
   readonly userId: string;
+  readonly workspaceId?: string;
 }): QueueSessionResult {
-  const { authorization, now, prompt, resources, sessionId, userId } = options;
+  const {
+    authorization,
+    now,
+    prompt,
+    resources,
+    sessionId,
+    userId,
+    workspaceId,
+  } = options;
   const messageId =
     prompt === undefined ? undefined : resources.generateId(now);
   const status = resources.database.transaction((transaction) => {
@@ -48,7 +78,9 @@ export function queueStoredSession(options: {
     }
     const stored = readStoredSessionState(
       transaction,
-      activeSessionCondition({ id: sessionId, userId }),
+      activeSessionCondition(
+        queueSessionFilter(sessionId, userId, workspaceId),
+      ),
     );
 
     if (stored === undefined) {
@@ -70,6 +102,11 @@ export function queueStoredSession(options: {
       return "runner_unavailable" as const;
     }
 
+    const pending = activePendingInput(transaction, sessionId);
+    if (pending !== undefined && prompt !== undefined) {
+      return "pending_input_conflict" as const;
+    }
+
     if (prompt !== undefined && messageId !== undefined) {
       transaction
         .insert(agentMessages)
@@ -79,11 +116,21 @@ export function queueStoredSession(options: {
             id: messageId,
             images: prompt.images,
             now,
+            segment: stored.currentSegment,
             sessionId,
             userId,
           }),
         )
         .run();
+    }
+    if (pending !== undefined) {
+      promotePendingInput(
+        transaction,
+        pending,
+        userId,
+        now,
+        stored.currentSegment,
+      );
     }
     transaction
       .update(agentSessions)
@@ -105,7 +152,7 @@ export function queueStoredSession(options: {
     resources,
     userId,
     sessionId,
-    status,
+    "queued",
     "The queued agent session could not be read",
   );
 }

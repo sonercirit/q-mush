@@ -1,4 +1,8 @@
 import type { RunnerToolCommand } from "../shared/runner-command-broker.ts";
+import {
+  ToolStreamHubState,
+  type ToolStreamDeltaFrame,
+} from "../shared/tool-stream.ts";
 
 export interface RealtimeSocket {
   close(code?: number, reason?: string): void;
@@ -55,6 +59,7 @@ export class RealtimeHub {
     runner: new Map(),
     user: new Map(),
   };
+  readonly #toolStreams = new ToolStreamHubState();
 
   #update(
     kind: "runner" | "user",
@@ -76,11 +81,29 @@ export class RealtimeHub {
   }
 
   #sockets(kind: "runner" | "user", id: string) {
-    return this.#connections[kind].get(`${kind}:${id}`);
+    const key = kind === "runner" ? `runner:${id}` : id;
+    return this.#connections[kind].get(key);
   }
 
-  #updateUser(userId: string, socket: RealtimeSocket, add: boolean): void {
-    this.#update("user", `user:${userId}`, socket, add);
+  #userKey(userId: string, workspaceId?: string): string {
+    return `user:${userId}:${workspaceId ?? "*"}`;
+  }
+
+  #updateUser(
+    userId: string,
+    workspaceId: string | undefined,
+    socket: RealtimeSocket,
+    add: boolean,
+  ): void {
+    this.#update("user", this.#userKey(userId, workspaceId), socket, add);
+  }
+
+  currentRunner(runnerId: string): RealtimeSocket | undefined {
+    return [...(this.#sockets("runner", runnerId) ?? [])].at(-1);
+  }
+
+  runnerIsCurrent(runnerId: string, socket: RealtimeSocket): boolean {
+    return this.#sockets("runner", runnerId)?.has(socket) === true;
   }
 
   setRunner(
@@ -107,11 +130,24 @@ export class RealtimeHub {
     return undefined;
   }
 
-  setUser(userId: string, socket: RealtimeSocket, connected: boolean): void {
+  setUser(
+    userId: string,
+    socket: RealtimeSocket,
+    connected: boolean,
+    workspaceId?: string,
+  ): void {
     if (connected) {
       this.#removeSocket(socket);
     }
-    this.#updateUser(userId, socket, connected);
+    this.#updateUser(userId, workspaceId, socket, connected);
+  }
+
+  userWorkspaces(userId: string): readonly string[] {
+    const prefix = `user:${userId}:`;
+    return [...this.#connections.user.keys()]
+      .filter((key) => key.startsWith(prefix))
+      .map((key) => key.slice(prefix.length))
+      .filter((workspaceId) => workspaceId !== "*");
   }
 
   publishRunnerCancellation(runnerId: string, commandId: string): void {
@@ -125,7 +161,39 @@ export class RealtimeHub {
     });
   }
 
-  publishUser(userId: string, payload: RealtimePayload): void {
-    publish(this.#sockets("user", userId), payload);
+  publishToolStream(
+    userId: string,
+    frame: ToolStreamDeltaFrame,
+    workspaceId?: string,
+  ): void {
+    if (workspaceId === undefined || !this.#toolStreams.apply(userId, frame)) {
+      return;
+    }
+    publish(this.#sockets("user", this.#userKey(userId, workspaceId)), {
+      ...frame,
+    });
+  }
+
+  syncToolStreams(
+    userId: string,
+    sessionId: string,
+    streamId: string,
+    socket: RealtimeSocket,
+  ): void {
+    publish(new Set([socket]), {
+      ...this.#toolStreams.snapshot(userId, sessionId, streamId),
+    });
+  }
+
+  clearToolStreams(userId: string, sessionId: string): void {
+    this.#toolStreams.clearSession(userId, sessionId);
+  }
+
+  publishUser(
+    userId: string,
+    payload: RealtimePayload,
+    workspaceId?: string,
+  ): void {
+    publish(this.#sockets("user", this.#userKey(userId, workspaceId)), payload);
   }
 }

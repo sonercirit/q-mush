@@ -1,4 +1,5 @@
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
+import type { SessionLifecycleDependencies } from "./session-lifecycle-types.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
 import type { SessionStore } from "./session-store.ts";
 
@@ -7,13 +8,11 @@ interface StagedRunnerRemoval {
   readonly userId: string;
 }
 
-export interface RunnerRemovalCoordinatorDependencies {
+export interface RunnerRemovalCoordinatorDependencies extends SessionLifecycleDependencies {
   readonly broker: Pick<
     RunnerCommandBroker,
     "cancelSessionCommands" | "runnerRemoved"
   >;
-  readonly now: () => number;
-  readonly notify: (userId: string, sessionId: string) => void;
   readonly runtimes: Pick<SessionRuntimes, "abort" | "settled">;
   readonly store: Pick<
     SessionStore,

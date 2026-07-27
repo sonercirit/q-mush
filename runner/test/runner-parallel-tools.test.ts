@@ -1,8 +1,5 @@
 import { expect, test } from "vitest";
-import {
-  executeRunnerTool,
-  type RunnerParallelExecutionOptions,
-} from "../../runner/runner-tools.ts";
+import { executeRunnerTool } from "../../runner/runner-tools.ts";
 import { createParallelToolUses } from "../../shared/test/parallel-fixtures.ts";
 import { observeRunnerRejection } from "./promise-test-helpers.ts";
 import { useTemporaryDirectories } from "./temporary-directories.ts";
@@ -17,7 +14,7 @@ function executeParallelWrites(
   root: string,
   count: number,
   signal?: AbortSignal,
-  execution?: RunnerParallelExecutionOptions,
+  execution?: Parameters<typeof executeRunnerTool>[4],
 ): Promise<string> {
   return executeRunnerTool(
     root,

@@ -57,13 +57,20 @@ export async function finishRemovalRace(
   return request;
 }
 
+export async function expectErrorResponse(
+  response: Response,
+  status: number,
+  error: string,
+): Promise<void> {
+  expect([response.status, await response.json()]).toEqual([status, { error }]);
+}
+
 export async function expectRaceRejection(
   setup: RaceSessionSetup,
   response: Response,
   error: "runner_required" | "runner_unavailable",
 ): Promise<void> {
-  expect(response.status).toBe(409);
-  expect(await response.json()).toEqual({ error });
+  await expectErrorResponse(response, 409, error);
   expect(setup.runnerCommands).toEqual([]);
 }
 

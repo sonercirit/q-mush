@@ -1,20 +1,22 @@
 import { expect, test } from "vitest";
-import { createDatabase } from "../../shared/database.ts";
 import { sessions, users } from "../../shared/database/schema.ts";
 import { SYSTEM_ID } from "../../shared/ids.ts";
 import { DrizzleAuthStore } from "../../sync-engine/auth-store.ts";
+import { createSchemaCompatibleTestDatabase } from "./authenticated-integration-test-helpers.ts";
 
 const CREATED_AT = 1_700_000_000_000;
 const PROFILE_UPDATED_AT = CREATED_AT + 50;
 const FIRST_SESSION_EXPIRES_AT = CREATED_AT + 100;
 const SECOND_SESSION_EXPIRES_AT = CREATED_AT + 1000;
 const USER_ID = "018bcfe5-6800-7000-8000-000000000011";
+const WORKSPACE_ID = "018bcfe5-6800-7000-8000-000000000014";
 const FIRST_SESSION_ID = "018bcfe5-6800-7000-8000-000000000012";
 const SECOND_SESSION_ID = "018bcfe5-6832-7000-8000-000000000013";
 
 function createIdGenerator(): (timestamp: number) => string {
   const expectedIds = [
     { id: USER_ID, timestamp: CREATED_AT },
+    { id: WORKSPACE_ID, timestamp: CREATED_AT },
     { id: FIRST_SESSION_ID, timestamp: CREATED_AT },
     { id: SECOND_SESSION_ID, timestamp: PROFILE_UPDATED_AT },
   ];
@@ -31,7 +33,7 @@ function createIdGenerator(): (timestamp: number) => string {
 }
 
 test("audits profile updates and soft-deletes expired sessions", () => {
-  const database = createDatabase(":memory:");
+  const database = createSchemaCompatibleTestDatabase();
   const store = new DrizzleAuthStore(database, createIdGenerator());
 
   store.createSession(

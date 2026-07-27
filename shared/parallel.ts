@@ -1,5 +1,8 @@
 import { Buffer } from "node:buffer";
+import type { RunnerCommandResult } from "./runner-command-broker.ts";
+import { aggregateToolStreamState } from "./tool-stream.ts";
 import { utf8Prefix } from "./utf8.ts";
+import { abortSignalError } from "./validation.ts";
 
 const PARALLEL_CALL_CONCURRENCY = 4;
 const MAXIMUM_PARALLEL_CHILD_OUTPUT_BYTES = 50 * 1_024;
@@ -9,6 +12,20 @@ const PARALLEL_TRUNCATION_MARKER = "[parallel output truncated]";
 export type ParallelCallResult =
   | { readonly error: string; readonly recipient_name: string }
   | { readonly output: string; readonly recipient_name: string };
+
+export interface ParallelToolResult {
+  readonly canonical: ParallelCallResult;
+  readonly state: RunnerCommandResult["state"];
+}
+
+export function aggregateParallelToolResults(
+  entries: readonly ParallelToolResult[],
+): RunnerCommandResult {
+  return {
+    output: boundedParallelOutput(entries.map(({ canonical }) => canonical)),
+    state: aggregateToolStreamState(new Set(entries.map(({ state }) => state))),
+  };
+}
 
 interface ParallelExecutor<Input, Output> {
   readonly execute: (item: Input, index: number) => Promise<Output>;
@@ -41,18 +58,11 @@ function parallelError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
-function parallelAbortError(signal: AbortSignal): Error {
-  const reason: unknown = signal.reason;
-  return reason instanceof Error
-    ? reason
-    : new DOMException("The operation was stopped", "AbortError");
-}
-
 function ensureParallelActive(signal: AbortSignal | undefined): void {
   if (signal?.aborted !== true) {
     return;
   }
-  throw parallelAbortError(signal);
+  throw abortSignalError(signal, "The operation was stopped");
 }
 
 function parallelStopped(state: ParallelExecutionState, error: unknown): void {
@@ -147,7 +157,7 @@ function waitForParallelExecution<Input, Output>(
     const onAbort = (): void => {
       state.stopped = true;
       if (options.signal !== undefined) {
-        finish(parallelAbortError(options.signal));
+        finish(abortSignalError(options.signal, "The operation was stopped"));
       }
     };
     const completeWorker = (): void => {
@@ -355,6 +365,27 @@ export async function executeParallelCall(
     }
     return Promise.reject(parallelError(error));
   }
+}
+
+export async function executeParallelResultCall(
+  recipientName: string,
+  execute: () => Promise<RunnerCommandResult>,
+  signal?: AbortSignal,
+): Promise<ParallelToolResult> {
+  let state: RunnerCommandResult["state"] = "completed";
+  const canonical = await executeParallelCall(
+    recipientName,
+    async () => {
+      const result = await execute();
+      state = result.state;
+      return result.output;
+    },
+    signal,
+  );
+  return {
+    canonical,
+    state: "error" in canonical ? "failed" : state,
+  };
 }
 
 function parallelCallFailure(

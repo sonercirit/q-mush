@@ -41,6 +41,25 @@ test("lets parallel call every tool and skill except itself by default", () => {
   ]);
 });
 
+test("defines optional auto-compaction for spawned sessions", () => {
+  const spawnSession = AGENT_TOOLS.find(
+    ({ function: definition }) => definition.name === "spawn_session",
+  );
+  if (spawnSession?.function.name !== "spawn_session") {
+    throw new Error("The spawn-session tool definition is unavailable");
+  }
+  expect(spawnSession.function.parameters.required).not.toContain(
+    "autoCompact",
+  );
+  expect(spawnSession).toMatchObject({
+    function: {
+      parameters: {
+        properties: { autoCompact: { type: "boolean" } },
+      },
+    },
+  });
+});
+
 test("defines the session tools as one selectable group", () => {
   expect(SESSION_AGENT_TOOL_NAMES).toEqual([
     "spawn_session",
@@ -92,7 +111,8 @@ test("derives picker metadata and classifications from every tool definition", (
   ).toEqual(
     AGENT_TOOLS.map(({ function: definition }) => ({
       classification:
-        definition.name === "brave_search"
+        definition.name === "brave_search" ||
+        definition.name === "ask_questions"
           ? "skill"
           : SESSION_AGENT_TOOL_NAMES.includes(definition.name)
             ? "session_tool"

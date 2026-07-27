@@ -1,36 +1,48 @@
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
+import { createUuidV7 } from "../shared/ids.ts";
 import { REALTIME_PATH, RUNNER_REALTIME_PATH } from "../shared/routes.ts";
 import type { RunnerToolCommand } from "../shared/runner-command-broker.ts";
-import type { GoogleAuth } from "./auth.ts";
-import type { RealtimeHub, RealtimeSocket } from "./realtime-hub.ts";
 import {
-  readQmushClientMessage,
-  readRunnerClientMessage,
-  readRunnerConnectMessage,
-} from "./realtime-protocol.ts";
-import type { RunnerConnection, RunnerMetadata } from "./runner-store.ts";
-import { readRunnerMetadata, type RunnerIntegration } from "./runners.ts";
-import type { SessionIntegration } from "./sessions.ts";
+  readUserRealtimeCommand,
+  RealtimeCommandError,
+  USER_REALTIME_MAX_PAYLOAD_LENGTH,
+  UserRealtimeProtocolError,
+} from "../shared/user-realtime-protocol.ts";
+import { RealtimeCommandLedger } from "./realtime-command-ledger.ts";
+import type { RealtimeSocket } from "./realtime-hub.ts";
+import { readRunnerClientMessage } from "./realtime-protocol.ts";
+import { handleRunnerRegistrationAcknowledgement } from "./realtime-runner-acknowledgement.ts";
+import { createRunnerRegistrationCoordinator } from "./realtime-runner-registration.ts";
+import {
+  closeServerError,
+  safeSend,
+  type RunnerRestartState,
+  type RunnerSocketData,
+} from "./realtime-runner-runtime.ts";
+import type { RealtimeRegistrationDependencies } from "./realtime-runner-types.ts";
+import {
+  handleToolStreamSync,
+  sendCommandError,
+} from "./realtime-tool-sync.ts";
+import { createWorkspaceSnapshotPublisher } from "./realtime-workspace-publisher.ts";
+import type { RunnerConnection } from "./runner-store.ts";
+import { executeSessionRealtimeCommand } from "./session-realtime-commands.ts";
 
 interface UserSocketData {
   readonly kind: "user";
+  readonly request: Request;
   readonly user: AuthenticatedUser;
-}
-
-interface RunnerSocketData {
-  readonly kind: "runner";
-  runner: RunnerConnection | undefined;
-  readonly token: string;
+  readonly workspaceId: string;
 }
 
 export type QmushWebSocketData = RunnerSocketData | UserSocketData;
 
-interface RealtimeIntegrationOptions {
-  readonly auth: GoogleAuth;
-  readonly hub: RealtimeHub;
-  readonly runnerVersion: string;
-  readonly runners: RunnerIntegration;
-  readonly sessions: SessionIntegration;
+export interface RealtimeIntegrationOptions extends Omit<
+  RealtimeRegistrationDependencies,
+  "sendCommand"
+> {
+  readonly ledger?: RealtimeCommandLedger;
+  readonly workspaceExists?: (userId: string, workspaceId: string) => boolean;
 }
 
 interface RealtimeUpgradeServer {
@@ -53,6 +65,18 @@ export function isRealtimePath(request: Request): boolean {
   return pathname === REALTIME_PATH || pathname === RUNNER_REALTIME_PATH;
 }
 
+function sameOrigin(request: Request): boolean {
+  const origin = request.headers.get("origin");
+  if (origin === null) {
+    return false;
+  }
+  try {
+    return new URL(origin).origin === new URL(request.url).origin;
+  } catch {
+    return false;
+  }
+}
+
 function upgradeRequired(): Response {
   return new Response("WebSocket upgrade required", {
     headers: { upgrade: "websocket" },
@@ -64,6 +88,9 @@ function invalidUpgrade(): Response {
   return new Response("WebSocket upgrade failed", { status: 400 });
 }
 
+const RUNNER_REALTIME_MAX_PAYLOAD_LENGTH = 128 * 1024 * 1024 + 1;
+const DEFAULT_AUTH_REVALIDATION_INTERVAL_MS = 60_000;
+
 function textMessage(message: string | Buffer): string {
   if (typeof message !== "string") {
     throw new Error("Binary WebSocket messages are not supported");
@@ -72,121 +99,372 @@ function textMessage(message: string | Buffer): string {
   return message;
 }
 
-function sendCommand(
+function isRunnerSocketData(value: unknown): value is RunnerSocketData {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "kind" in value &&
+    value.kind === "runner" &&
+    "runner" in value &&
+    "usable" in value
+  );
+}
+
+function sendRunnerCommand(
+  options: RealtimeIntegrationOptions,
   socket: RealtimeSocket,
   command: RunnerToolCommand,
 ): boolean {
-  try {
-    return socket.send(JSON.stringify({ command, type: "command" })) !== 0;
-  } catch {
+  const runnerData: unknown = Reflect.get(socket, "data");
+  if (!isRunnerSocketData(runnerData)) {
     return false;
+  }
+  return runnerData.runner !== undefined &&
+    runnerData.usable &&
+    options.hub.runnerIsCurrent(runnerData.runner.id, socket) &&
+    options.hub.currentRunner(runnerData.runner.id) === socket
+    ? safeSend(socket, JSON.stringify({ command, type: "command" }))
+    : false;
+}
+
+function revalidateSocketUser(
+  options: RealtimeIntegrationOptions,
+  socket: RealtimeSocket,
+  userData: UserSocketData,
+): AuthenticatedUser | undefined {
+  const user = options.auth.revalidateUser(userData.request, userData.user.id);
+  if (user === null) {
+    socket.close(1008, "Authentication expired");
+    return undefined;
+  }
+  return user;
+}
+
+function stopRegisteredRunner(
+  options: RealtimeIntegrationOptions,
+  socket: RealtimeSocket,
+  runner: RunnerConnection,
+  publishRunners: (userId: string) => void,
+): boolean {
+  const removed = options.hub.setRunner(runner.id, socket, false);
+  if (removed === undefined) {
+    return false;
+  }
+  options.sessions.runnerDisconnected(runner.id);
+  options.runners.disconnected(runner);
+  publishRunners(runner.userId);
+  return true;
+}
+
+function sendRunnerRestartReady(
+  options: RealtimeIntegrationOptions,
+  runnerRestarts: Map<string, RunnerRestartState>,
+  socket: RealtimeSocket,
+  runnerId: string,
+  restart: RunnerRestartState,
+): void {
+  if (
+    !restart.settled ||
+    runnerRestarts.get(runnerId) !== restart ||
+    !options.hub.runnerIsCurrent(runnerId, socket) ||
+    options.hub.currentRunner(runnerId) !== socket
+  ) {
+    return;
+  }
+  if (
+    !safeSend(
+      socket,
+      JSON.stringify({
+        restartId: restart.restartId,
+        type: "restart_ready",
+      }),
+    )
+  ) {
+    closeServerError(socket, "Runner restart acknowledgement failed");
   }
 }
 
 export function createRealtimeIntegration(
   options: RealtimeIntegrationOptions,
 ): RealtimeIntegration {
-  const publishSessions = (userId: string): void => {
-    options.hub.publishUser(userId, {
-      sessions: options.sessions.listForUser(userId),
-      type: "sessions",
-    });
+  const instanceId = options.instanceId ?? createUuidV7();
+  const ledger = options.ledger ?? new RealtimeCommandLedger();
+  const authRevalidationIntervalMs =
+    options.authRevalidationIntervalMs ?? DEFAULT_AUTH_REVALIDATION_INTERVAL_MS;
+  const clearIntervalTimer = options.clearInterval ?? clearInterval;
+  const setIntervalTimer = options.setInterval ?? setInterval;
+  const userAuthTimers = new WeakMap<RealtimeSocket, number>();
+  const runnerRestarts = new Map<string, RunnerRestartState>();
+  const publishSessions = createWorkspaceSnapshotPublisher(
+    options.hub,
+    "sessions",
+    (userId, workspaceId) => options.sessions.listForUser(userId, workspaceId),
+  );
+  const publishRunners = createWorkspaceSnapshotPublisher(
+    options.hub,
+    "runners",
+    (userId, workspaceId) => options.runners.listForUser(userId, workspaceId),
+  );
+  const publishRunnerActivity = (userId: string): void => {
+    for (const workspaceId of options.hub.userWorkspaces(userId)) {
+      publishRunners(userId, workspaceId);
+    }
   };
-  const publishRunners = (userId: string): void => {
-    options.hub.publishUser(userId, {
-      runners: options.runners.listForUser(userId),
-      type: "runners",
-    });
-  };
-  const publishUserSnapshots = (userId: string): void => {
-    publishRunners(userId);
-    publishSessions(userId);
+  const sendUserSnapshots = (
+    socket: RealtimeSocket,
+    userId: string,
+    workspaceId: string,
+  ): boolean => {
+    try {
+      return (
+        safeSend(
+          socket,
+          JSON.stringify({
+            runners: options.runners.listForUser(userId, workspaceId),
+            type: "runners",
+          }),
+        ) &&
+        safeSend(
+          socket,
+          JSON.stringify({
+            sessions: options.sessions.listForUser(userId, workspaceId),
+            type: "sessions",
+          }),
+        )
+      );
+    } catch {
+      return false;
+    }
   };
   options.sessions.onChange((userId, sessionId) => {
-    const session = options.sessions.detailForUser(userId, sessionId);
-
-    if (session !== undefined) {
-      options.hub.publishUser(userId, { session, type: "session" });
+    for (const workspaceId of options.hub.userWorkspaces(userId)) {
+      const session = options.sessions.detailForUser(
+        userId,
+        sessionId,
+        workspaceId,
+      );
+      if (session === undefined) {
+        continue;
+      }
+      options.hub.publishUser(
+        userId,
+        { session, type: "session" },
+        workspaceId,
+      );
+      options.hub.publishUser(
+        userId,
+        {
+          pending: options.sessions.pendingQuestionForUser(userId, sessionId),
+          sessionId,
+          type: "session_questions",
+        },
+        workspaceId,
+      );
+      publishSessions(userId, workspaceId);
+      break;
     }
-    publishSessions(userId);
+  });
+
+  const registrationOptions = {
+    ...options,
+    sendCommand: (socket: RealtimeSocket, command: RunnerToolCommand) =>
+      sendRunnerCommand(options, socket, command),
+  };
+  const registration = createRunnerRegistrationCoordinator({
+    options: registrationOptions,
+    publishRunners: publishRunnerActivity,
+    runnerRestarts,
   });
 
   const websocket: Bun.WebSocketHandler<QmushWebSocketData> = {
     close(socket) {
       if (socket.data.kind === "runner") {
-        if (socket.data.runner !== undefined) {
+        registration.closed(socket, socket.data);
+        if (socket.data.runner !== undefined && socket.data.usable) {
           const runner = socket.data.runner;
-          const disconnected = options.hub.setRunner(runner.id, socket, false);
-          if (disconnected !== undefined) {
-            options.runners.disconnected(runner);
-            publishRunners(runner.userId);
-          }
+          stopRegisteredRunner(options, socket, runner, publishRunnerActivity);
+        } else if (socket.data.runner !== undefined) {
+          options.hub.setRunner(socket.data.runner.id, socket, false);
+          socket.data.runner = undefined;
         }
       } else {
-        options.hub.setUser(socket.data.user.id, socket, false);
+        const timer = userAuthTimers.get(socket);
+        if (timer !== undefined) {
+          clearIntervalTimer(timer);
+          userAuthTimers.delete(socket);
+        }
+        options.hub.setUser(
+          socket.data.user.id,
+          socket,
+          false,
+          socket.data.workspaceId,
+        );
       }
     },
     idleTimeout: 0,
+    maxPayloadLength: USER_REALTIME_MAX_PAYLOAD_LENGTH,
     message(socket, rawMessage) {
       try {
         const message = textMessage(rawMessage);
 
         if (socket.data.kind === "runner") {
-          if (socket.data.runner === undefined) {
-            const connect = readRunnerConnectMessage(message);
-            const metadata: RunnerMetadata | undefined = readRunnerMetadata({
-              architecture: connect.architecture,
-              machineId: connect.machineId,
-              name: connect.name,
-              platform: connect.platform,
-            });
-            const connected =
-              metadata === undefined
-                ? undefined
-                : options.runners.connect(socket.data.token, metadata);
-
-            if (connected === undefined) {
-              socket.close(1008, "Registration rejected");
+          if (
+            Buffer.byteLength(message, "utf8") >=
+            RUNNER_REALTIME_MAX_PAYLOAD_LENGTH
+          ) {
+            socket.close(1009, "Runner message too large");
+            return;
+          }
+          if (socket.data.runner === undefined || !socket.data.usable) {
+            if (socket.data.fenced) {
+              socket.close(1008, "Runner connection was replaced");
               return;
             }
-
-            const runner = connected.connection;
-            socket.data.runner = runner;
-            options.runners.seen(runner);
-            const replaced = options.hub.setRunner(runner.id, socket, true);
-            replaced?.close(1000, "Replaced by a newer runner connection");
-            socket.send(
-              JSON.stringify({
-                runnerId: runner.id,
-                type: "ready",
-                version: options.runnerVersion,
-              }),
-            );
-            options.sessions.deliverRunnerCommands(runner.id, (command) =>
-              sendCommand(socket, command),
-            );
-            options.sessions.runnerConnected();
-            publishRunners(connected.userId);
+            if (socket.data.registration === undefined) {
+              if (socket.data.runner !== undefined) {
+                socket.close(1008, "Registration acknowledgement rejected");
+                return;
+              }
+              registration.begin(socket, socket.data, message);
+            } else {
+              handleRunnerRegistrationAcknowledgement(
+                registration,
+                socket,
+                socket.data,
+                message,
+              );
+            }
             return;
           }
 
-          const event = readRunnerClientMessage(message);
           const connectedRunner = socket.data.runner;
+          if (
+            !options.hub.runnerIsCurrent(connectedRunner.id, socket) ||
+            options.hub.currentRunner(connectedRunner.id) !== socket
+          ) {
+            socket.close(1008, "Runner connection was replaced");
+            return;
+          }
+          const event = readRunnerClientMessage(message);
           options.runners.seen(connectedRunner);
-          publishRunners(connectedRunner.userId);
+          publishRunnerActivity(connectedRunner.userId);
 
           if (event.type === "result") {
             options.sessions.completeRunnerCommand(
               connectedRunner.id,
               event.commandId,
-              event.output,
+              { output: event.output, state: event.state },
+            );
+          } else if (event.type === "output") {
+            options.sessions.streamRunnerCommand(
+              connectedRunner.id,
+              event.commandId,
+              event,
+            );
+          } else if (event.type === "restart") {
+            const current = runnerRestarts.get(connectedRunner.id);
+            if (
+              current?.restartId !== undefined &&
+              current.restartId !== event.restartId
+            ) {
+              socket.close(1008, "Conflicting runner restart ID");
+              return;
+            }
+            const restart =
+              current ??
+              (() => {
+                const promise = options.sessions.drainRunner(
+                  connectedRunner.id,
+                  event.restartId,
+                );
+                const created = {
+                  promise,
+                  restartId: event.restartId,
+                  settled: false,
+                };
+                runnerRestarts.set(connectedRunner.id, created);
+                return created;
+              })();
+            void restart.promise.then(
+              () => {
+                restart.settled = true;
+                const activeSocket = options.hub.currentRunner(
+                  connectedRunner.id,
+                );
+                if (activeSocket !== undefined) {
+                  sendRunnerRestartReady(
+                    options,
+                    runnerRestarts,
+                    activeSocket,
+                    connectedRunner.id,
+                    restart,
+                  );
+                }
+              },
+              () => {
+                if (runnerRestarts.get(connectedRunner.id) === restart) {
+                  runnerRestarts.delete(connectedRunner.id);
+                  closeServerError(socket, "Runner restart handoff failed");
+                }
+              },
             );
           }
           return;
         }
 
-        readQmushClientMessage(message);
-        publishUserSnapshots(socket.data.user.id);
+        const userData = socket.data;
+        const user = revalidateSocketUser(options, socket, userData);
+        if (user === undefined) {
+          return;
+        }
+        let command;
+        try {
+          command = readUserRealtimeCommand(message);
+        } catch (error) {
+          if (
+            error instanceof UserRealtimeProtocolError &&
+            handleToolStreamSync({
+              commandError: error,
+              hub: options.hub,
+              message,
+              sessions: options.sessions,
+              socket,
+              userId: user.id,
+              workspaceId: userData.workspaceId,
+            })
+          ) {
+            return;
+          }
+          if (
+            error instanceof UserRealtimeProtocolError &&
+            error.commandId !== undefined
+          ) {
+            sendCommandError(socket, error.commandId, "invalid_command");
+            return;
+          }
+          throw error;
+        }
+        void ledger
+          .execute(user.id, command, () => {
+            const current = options.auth.revalidateUser(
+              userData.request,
+              user.id,
+            );
+            if (current === null) {
+              throw new RealtimeCommandError("authentication_expired");
+            }
+            return executeSessionRealtimeCommand(
+              options.sessions.realtimeCommands,
+              current,
+              command,
+              userData.workspaceId,
+            );
+          })
+          .then((acknowledgement) => {
+            if (!safeSend(socket, acknowledgement.serialized)) {
+              closeServerError(socket, "Realtime acknowledgement failed");
+            }
+          });
       } catch {
         try {
           socket.close(1008, "Invalid message");
@@ -199,8 +477,35 @@ export function createRealtimeIntegration(
       if (socket.data.kind === "runner") {
         // Runner registration starts with a metadata message after the upgrade.
       } else {
-        options.hub.setUser(socket.data.user.id, socket, true);
-        publishUserSnapshots(socket.data.user.id);
+        const user = revalidateSocketUser(options, socket, socket.data);
+        if (user === undefined) {
+          return;
+        }
+        if (!safeSend(socket, JSON.stringify({ instanceId, type: "ready" }))) {
+          closeServerError(socket, "Realtime ready message failed");
+          return;
+        }
+        if (!sendUserSnapshots(socket, user.id, socket.data.workspaceId)) {
+          closeServerError(socket, "Realtime snapshot failed");
+          return;
+        }
+        options.hub.setUser(user.id, socket, true, socket.data.workspaceId);
+        const workspaceId = socket.data.workspaceId;
+        const request = socket.data.request;
+        const timer = setIntervalTimer(() => {
+          const current = options.auth.revalidateUser(request, user.id);
+          if (current === null) {
+            clearIntervalTimer(timer);
+            userAuthTimers.delete(socket);
+            options.hub.setUser(user.id, socket, false, workspaceId);
+            try {
+              socket.close(1008, "Authentication expired");
+            } catch {
+              // The peer may already have closed the socket.
+            }
+          }
+        }, authRevalidationIntervalMs);
+        userAuthTimers.set(socket, timer);
       }
     },
     perMessageDeflate: true,
@@ -208,7 +513,8 @@ export function createRealtimeIntegration(
 
   return {
     upgrade(request, server) {
-      const pathname = new URL(request.url).pathname;
+      const requestUrl = new URL(request.url);
+      const pathname = requestUrl.pathname;
 
       if (pathname !== REALTIME_PATH && pathname !== RUNNER_REALTIME_PATH) {
         return undefined;
@@ -218,19 +524,35 @@ export function createRealtimeIntegration(
         return upgradeRequired();
       }
 
+      if (pathname === REALTIME_PATH && !sameOrigin(request)) {
+        return new Response("Forbidden", { status: 403 });
+      }
+
       const data: QmushWebSocketData | undefined =
         pathname === REALTIME_PATH
           ? (() => {
               const user = options.auth.authenticatedUser(request);
-              return user === null
+              const workspaceId = requestUrl.searchParams.get("workspaceId");
+              return user === null ||
+                workspaceId === null ||
+                workspaceId.length === 0 ||
+                options.workspaceExists?.(user.id, workspaceId) === false
                 ? undefined
-                : { kind: "user" as const, user };
+                : { kind: "user" as const, request, user, workspaceId };
             })()
           : (() => {
               const token = options.runners.runnerToken(request);
               return token === undefined
                 ? undefined
-                : { kind: "runner" as const, runner: undefined, token };
+                : {
+                    committed: undefined,
+                    fenced: false,
+                    kind: "runner" as const,
+                    registration: undefined,
+                    runner: undefined,
+                    token,
+                    usable: false,
+                  };
             })();
 
       if (data === undefined) {

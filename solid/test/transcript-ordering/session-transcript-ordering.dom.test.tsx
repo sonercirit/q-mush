@@ -90,11 +90,11 @@ function applyStreamSnapshot(
   });
 }
 
-function expectTranscriptBoundariesToRenderOnce(
+function expectMessageBoundariesToRenderOnce(
   debug: RenderDebugView,
   messageIds: readonly string[],
 ): void {
-  for (const key of ["system-prompt", "tool-definitions", ...messageIds]) {
+  for (const key of messageIds) {
     expect(debug.measurement(key).count).toBe(1);
   }
 }
@@ -191,7 +191,7 @@ test("reconciles a persisted thinking snapshot before its assistant", () => {
   });
 
   expectStableStreamBase(container, stableUser, stableAssistant);
-  expectTranscriptBoundariesToRenderOnce(debug, [
+  expectMessageBoundariesToRenderOnce(debug, [
     "message:user-stable",
     "message:assistant-stable",
   ]);
@@ -247,7 +247,7 @@ test("reconciles a persisted thinking snapshot before its assistant", () => {
     "assistant",
     streamedMessage,
   );
-  expectTranscriptBoundariesToRenderOnce(debug, [
+  expectMessageBoundariesToRenderOnce(debug, [
     "message:user-stable",
     "message:assistant-stable",
     "message:thinking-persisted",

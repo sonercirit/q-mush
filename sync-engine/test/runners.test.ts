@@ -1,29 +1,37 @@
 import { eq } from "drizzle-orm";
+import { rmSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import { isRecord } from "../../shared/auth-model.ts";
+import { createDatabase } from "../../shared/database.ts";
 import { runners } from "../../shared/database/schema.ts";
-import {
-  RUNNER_INSTALLER_PATH,
-  RUNNER_REALTIME_PATH,
-  RUNNERS_PATH,
-} from "../../shared/routes.ts";
+import { RUNNER_INSTALLER_PATH, RUNNERS_PATH } from "../../shared/routes.ts";
 import {
   createPendingRunnerSummary,
   type RunnerSummary,
 } from "../../shared/runner-model.ts";
-import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
 import { readJsonRecord } from "../../sync-engine/oauth.ts";
 import { RunnerStore } from "../../sync-engine/runner-store.ts";
-import { createRunnerIntegration } from "../../sync-engine/runners.ts";
 import {
+  createRunnerIntegration,
+  type RunnerIntegration,
+} from "../../sync-engine/runners.ts";
+import {
+  addTestUser,
   createAuthenticatedRequest,
   createAuthenticatedTestContext,
   createAuthenticatedTestDatabase,
-  createRunnerRequest,
+  ensureWaveOneColumns,
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { takeValue } from "./oauth-test-helpers.ts";
+import {
+  closeRunnerIntegrationTestSetup,
+  createQueuedTestRunnerIntegration,
+  createTestRunnerIntegration,
+  expectRunnerToken,
+  runnerMetadata,
+} from "./runner-integration-test-helpers.ts";
 
 const FIRST_RUNNER_ID = "018bcfe5-6800-7000-8000-000000000031";
 const SECOND_RUNNER_ID = "018bcfe5-6800-7000-8000-000000000032";
@@ -44,7 +52,7 @@ class FailingRemovalRunnerStore extends RunnerStore {
 
 interface Setup {
   readonly database: ReturnType<typeof createAuthenticatedTestDatabase>;
-  readonly integration: ReturnType<typeof createRunnerIntegration>;
+  readonly integration: RunnerIntegration;
   readonly setNow: (value: number) => void;
 }
 
@@ -59,16 +67,11 @@ function createSetup(
   ];
   const database = createAuthenticatedTestDatabase();
   let now = TEST_NOW;
-  const integration = createRunnerIntegration(
-    createGoogleAuthFromEnvironment({}, { database, now: () => TEST_NOW }),
-    {
-      database,
-      now: () => now,
-      ...(onRemoved === undefined ? {} : { onRemoved }),
-      randomId: () => takeValue(ids, "The test ran out of runner IDs"),
-      randomToken: () => takeValue(tokens, "The test ran out of runner tokens"),
-    },
-  );
+
+  const integration = createQueuedTestRunnerIntegration(database, ids, tokens, {
+    now: () => now,
+    ...(onRemoved === undefined ? {} : { onRemoved }),
+  });
 
   return {
     database,
@@ -85,6 +88,18 @@ function createRunner(setup: Setup): Response {
   );
 }
 
+function createRunners(setup: Setup, count: number): void {
+  for (let index = 0; index < count; index += 1) {
+    createRunner(setup);
+  }
+}
+
+function setupWithRunners(count: number): Setup {
+  const setup = createSetup();
+  createRunners(setup, count);
+  return setup;
+}
+
 function defaultRunnerRequest(runnerId: string): Request {
   return createAuthenticatedRequest(
     `${RUNNERS_PATH}/${runnerId}/default`,
@@ -94,12 +109,7 @@ function defaultRunnerRequest(runnerId: string): Request {
 }
 
 function metadata(machineId: string, name = "workstation") {
-  return {
-    architecture: "x64",
-    machineFingerprint: machineId,
-    name,
-    platform: "linux",
-  };
+  return runnerMetadata(machineId, name);
 }
 
 function connect(
@@ -111,15 +121,21 @@ function connect(
   return setup.integration.connect(token, metadata(machineId, name));
 }
 
+function expectedPendingRunner(id: string): RunnerSummary {
+  return createPendingRunnerSummary(id, { isGlobal: true, workspaceIds: [] });
+}
+
 function connectedRunner(id: string, name: string): RunnerSummary {
   return {
     architecture: "x64",
     id,
     isDefault: false,
+    isGlobal: true,
     lastSeenAt: TEST_NOW,
     name,
     platform: "linux",
     status: "online",
+    workspaceIds: [],
   };
 }
 
@@ -158,14 +174,6 @@ async function removeFirstRunner(
 
 async function removeFirstRunnerAndExpect(setup: Setup): Promise<void> {
   expect((await removeFirstRunner(setup)).status).toBe(204);
-}
-
-function expectRevoked(setup: Setup, token: string): void {
-  expect(
-    setup.integration.runnerToken(
-      createRunnerRequest(RUNNER_REALTIME_PATH, token),
-    ),
-  ).toBeUndefined();
 }
 
 function installerRequest(token: string, download = false): Request {
@@ -230,7 +238,7 @@ describe("runner setup", () => {
 
     expect(firstResponse.status).toBe(201);
     expect(await firstResponse.json()).toEqual({
-      runner: createPendingRunnerSummary(FIRST_RUNNER_ID),
+      runner: expectedPendingRunner(FIRST_RUNNER_ID),
       setup: {
         command: `curl -fsSL 'http://localhost:3000${RUNNER_INSTALLER_PATH}?token=${FIRST_TOKEN}' | sh`,
         downloadUrl: `${RUNNER_INSTALLER_PATH}?token=${FIRST_TOKEN}&download=1`,
@@ -239,16 +247,67 @@ describe("runner setup", () => {
     expect(secondResponse.status).toBe(201);
 
     await expectRunnerListAndClose(setup, [
-      createPendingRunnerSummary(FIRST_RUNNER_ID),
-      createPendingRunnerSummary(SECOND_RUNNER_ID),
+      expectedPendingRunner(FIRST_RUNNER_ID),
+      expectedPendingRunner(SECOND_RUNNER_ID),
     ]);
   });
 
-  test("sets one owned runner as the user's default", async () => {
-    const setup = createSetup();
-    for (let runner = 0; runner < 2; runner += 1) {
-      createRunner(setup);
+  test("rejects duplicate plaintext setup tokens before returning an installer", () => {
+    const database = createAuthenticatedTestDatabase();
+    const integration = createTestRunnerIntegration(database, {
+      randomId: (() => {
+        const ids = [FIRST_RUNNER_ID, SECOND_RUNNER_ID];
+        return () => takeValue(ids, "The test ran out of runner IDs");
+      })(),
+      randomToken: () => "duplicate-setup-token",
+    });
+    const request = createAuthenticatedRequest(RUNNERS_PATH, undefined, "POST");
+
+    expect(integration.collection(request).status).toBe(201);
+    expect(() => integration.collection(request)).toThrow(
+      "runner token is already active",
+    );
+    const runnerCount = integration.listForUser(TEST_USER_ID).length;
+    database.$client.close();
+    expect(runnerCount).toBe(1);
+  });
+
+  test("rejects a duplicate plaintext token across database connections", () => {
+    const path = `/tmp/q-mush-runner-token-${crypto.randomUUID()}.sqlite`;
+    const firstDatabase = createDatabase(path);
+    const secondDatabase = createDatabase(path);
+    ensureWaveOneColumns(firstDatabase);
+    ensureWaveOneColumns(secondDatabase);
+    addTestUser(firstDatabase, TEST_USER_ID);
+    const first = new RunnerStore(firstDatabase, () => FIRST_RUNNER_ID);
+    const second = new RunnerStore(secondDatabase, () => SECOND_RUNNER_ID);
+
+    const results = [first, second].map((store) => {
+      try {
+        store.create(TEST_USER_ID, FIRST_TOKEN, TEST_NOW);
+        return "created" as const;
+      } catch {
+        return "duplicate" as const;
+      }
+    });
+
+    expect(results.sort()).toEqual(["created", "duplicate"]);
+    expect(
+      firstDatabase
+        .select({ id: runners.id })
+        .from(runners)
+        .where(eq(runners.isDeleted, false))
+        .all(),
+    ).toHaveLength(1);
+    firstDatabase.$client.close();
+    secondDatabase.$client.close();
+    for (const suffix of ["", "-shm", "-wal"]) {
+      rmSync(`${path}${suffix}`, { force: true });
     }
+  });
+
+  test("sets one owned runner as the user's default", async () => {
+    const setup = setupWithRunners(2);
 
     const responses = [
       setup.integration.setDefault(
@@ -264,8 +323,8 @@ describe("runner setup", () => {
 
     expect(responses.map(({ status }) => status)).toEqual([204, 204, 404]);
     await expectRunnerListAndClose(setup, [
-      createPendingRunnerSummary(FIRST_RUNNER_ID),
-      { ...createPendingRunnerSummary(SECOND_RUNNER_ID), isDefault: true },
+      expectedPendingRunner(FIRST_RUNNER_ID),
+      { ...expectedPendingRunner(SECOND_RUNNER_ID), isDefault: true },
     ]);
   });
 
@@ -294,15 +353,21 @@ describe("runner setup", () => {
     expect(
       setup.integration.installer(installerRequest("qmr_unknown")).status,
     ).toBe(404);
+
     setup.database.$client.close();
   });
 });
 
 describe("runner connections", () => {
+  function prepareRegistration(setup: Setup, token: string, machineId: string) {
+    return setup.integration.preflightRegistration(
+      token,
+      metadata(machineId, "first"),
+    );
+  }
+
   test("connects each setup to one computer and each computer to one runner", async () => {
-    const setup = createSetup();
-    createRunner(setup);
-    createRunner(setup);
+    const setup = setupWithRunners(2);
 
     const firstRegistration = connect(
       setup,
@@ -320,12 +385,9 @@ describe("runner connections", () => {
       "machine-fingerprint-one",
     );
     expect(reinstalledComputer?.connection.id).toBe(FIRST_RUNNER_ID);
-    expectRevoked(setup, FIRST_TOKEN);
-    expect(
-      setup.integration.runnerToken(
-        createRunnerRequest(RUNNER_REALTIME_PATH, SECOND_TOKEN),
-      ),
-    ).toBe(SECOND_TOKEN);
+
+    expectRunnerToken(setup.integration, FIRST_TOKEN, undefined);
+    expectRunnerToken(setup.integration, SECOND_TOKEN, SECOND_TOKEN);
     expect(
       setup.integration.runnerIsAvailable(TEST_USER_ID, FIRST_RUNNER_ID),
     ).toBe(true);
@@ -350,6 +412,62 @@ describe("runner connections", () => {
       connectedRunner(FIRST_RUNNER_ID, "workstation"),
       connectedRunner(THIRD_RUNNER_ID, "laptop"),
     ]);
+  });
+
+  test("preflights without rotating a same-machine token", () => {
+    const setup = createSetup();
+    createRunners(setup, 2);
+    expect(
+      connect(setup, FIRST_TOKEN, "machine-fingerprint-one")?.connection.id,
+    ).toBe(FIRST_RUNNER_ID);
+
+    const proposal = setup.integration.preflightRegistration(
+      SECOND_TOKEN,
+      metadata("machine-fingerprint-one", "reinstalled"),
+    );
+
+    expect(proposal).toMatchObject({
+      runnerId: FIRST_RUNNER_ID,
+    });
+
+    expectRunnerToken(setup.integration, FIRST_TOKEN, FIRST_TOKEN);
+    expect(setup.integration.listForUser(TEST_USER_ID)).toEqual([
+      connectedRunner(FIRST_RUNNER_ID, "workstation"),
+      expectedPendingRunner(SECOND_RUNNER_ID),
+    ]);
+    expectRunnerToken(setup.integration, SECOND_TOKEN, SECOND_TOKEN);
+    setup.database.$client.close();
+  });
+
+  test("fails a stale registration proposal closed", () => {
+    const setup = createSetup();
+    createRunner(setup);
+    const first = prepareRegistration(
+      setup,
+      FIRST_TOKEN,
+      "machine-fingerprint-one",
+    );
+    const second = prepareRegistration(
+      setup,
+      FIRST_TOKEN,
+      "machine-fingerprint-one",
+    );
+
+    expect(first?.prepare().status).toBe("registered");
+    expect(second?.prepare()).toEqual({ status: "registration_changed" });
+
+    const retried = prepareRegistration(
+      setup,
+      FIRST_TOKEN,
+      "machine-fingerprint-one",
+    );
+    expect(retried?.prepare().status).toBe("registered");
+    const pendingRunners = setup.integration.listForUser(TEST_USER_ID);
+    expect(pendingRunners).toMatchObject([
+      { id: FIRST_RUNNER_ID, name: null, status: "pending" },
+    ]);
+
+    closeRunnerIntegrationTestSetup(setup);
   });
 
   test("paginates and searches only online runners", () => {
@@ -480,14 +598,15 @@ describe("runner connections", () => {
     connectFirstRunner(setup);
 
     await removeFirstRunnerAndExpect(setup);
-    expectRevoked(setup, FIRST_TOKEN);
-    expect(
-      setup.database
-        .select({ isDeleted: runners.isDeleted })
-        .from(runners)
-        .where(eq(runners.id, FIRST_RUNNER_ID))
-        .get()?.isDeleted,
-    ).toBe(true);
-    setup.database.$client.close();
+    expectRunnerToken(setup.integration, FIRST_TOKEN, undefined);
+    const storedRunner = setup.database.query.runners
+      .findFirst({
+        columns: { isDeleted: true },
+        where: eq(runners.id, FIRST_RUNNER_ID),
+      })
+      .sync();
+    expect(storedRunner?.isDeleted).toBe(true);
+
+    closeRunnerIntegrationTestSetup(setup);
   });
 });

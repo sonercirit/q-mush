@@ -1,15 +1,21 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
+import type { RestartHandoff } from "../shared/session-model.ts";
 import type { CompactionUsage } from "./session-compaction-usage.ts";
-import { runningCondition } from "./session-store-reassignment.ts";
+import { sessionSegment } from "./session-segment.ts";
+import { runningCondition } from "./session-store-persistence.ts";
 import { requireRunningSessionUserId } from "./session-store-state.ts";
 import {
   appendSystemStoredMessage,
   storedUserMessageValues,
 } from "./session-store-values.ts";
+import {
+  settleTerminalRuntime,
+  terminalRuntimeCondition,
+} from "./session-terminal-store.ts";
 import { runtimeUsageValues } from "./session-usage-values.ts";
 
 const COMPACTION_MESSAGE_PREFIX = "Conversation compacted:\n\n";
@@ -23,27 +29,42 @@ export function compactStoredConversation(options: {
   readonly generateId: IdGenerator;
   readonly now: number;
   readonly generation: number;
+  readonly restartHandoff?: RestartHandoff | null;
+  readonly settle?: boolean;
   readonly sessionId: string;
   readonly summary: string;
   readonly usage: CompactionUsage;
 }): void {
   options.database.transaction((transaction) => {
-    const condition = runningCondition(
-      options.sessionId,
-      undefined,
-      options.generation,
-    );
-    const setSession = transaction
+    const condition =
+      options.settle === true
+        ? terminalRuntimeCondition({
+            generation: options.generation,
+            restartHandoff: options.restartHandoff ?? null,
+            sessionId: options.sessionId,
+          })
+        : runningCondition(options.sessionId, undefined, options.generation);
+    const currentSegment = sessionSegment(transaction, condition);
+    const userId = requireRunningSessionUserId(transaction, condition);
+    if (currentSegment === undefined) {
+      throw new DOMException("The agent session was stopped", "AbortError");
+    }
+    const nextSegment = currentSegment + 1;
+
+    const advanced = transaction
       .update(agentSessions)
       .set({
         currentContextTokens: 0,
+        currentSegment: sql`${agentSessions.currentSegment} + 1`,
         ...runtimeUsageValues(options.usage),
         ...updatedAuditFields(SYSTEM_ID, options.now),
       })
-      .where(condition);
-    const userId = requireRunningSessionUserId(transaction, condition);
-
-    setSession.run();
+      .where(and(condition, eq(agentSessions.currentSegment, currentSegment)))
+      .returning({ segment: agentSessions.currentSegment })
+      .get();
+    if (advanced.segment !== nextSegment) {
+      throw new DOMException("The agent session was stopped", "AbortError");
+    }
     transaction
       .update(agentMessages)
       .set({
@@ -53,6 +74,7 @@ export function compactStoredConversation(options: {
       .where(
         and(
           eq(agentMessages.sessionId, options.sessionId),
+          eq(agentMessages.segment, currentSegment),
           eq(agentMessages.isDeleted, false),
         ),
       )
@@ -62,9 +84,19 @@ export function compactStoredConversation(options: {
       generateId: options.generateId,
       message: storedUserMessageValues(compactionMessage(options.summary)),
       now: options.now,
+      segment: nextSegment,
       sessionId: options.sessionId,
       userId,
     };
     appendSystemStoredMessage(handoff);
+    if (options.settle === true) {
+      settleTerminalRuntime(
+        transaction,
+        condition,
+        "idle",
+        options.now,
+        options.sessionId,
+      );
+    }
   });
 }

@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { describe, expect, test } from "vitest";
-import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import { createdAuditFields } from "../../shared/audit.ts";
 import { isRecord } from "../../shared/auth-model.ts";
 import { runners, users } from "../../shared/database/schema.ts";
@@ -10,6 +9,7 @@ import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
+import { takeValue } from "./oauth-test-helpers.ts";
 import {
   closeToolSession,
   findToolResultContent,
@@ -31,6 +31,7 @@ import {
   waitForSessionValue,
 } from "./session-integration-helpers.ts";
 import { requireCreatedSession } from "./session-store-result-helpers.ts";
+import { testSessionInput } from "./session-store-test-fixtures.ts";
 
 const FOREIGN_RUNNER_ID = "018bcfe5-6800-7000-8000-000000000082";
 const RECOVERABLE_SESSION_ID = "018bcfe5-6800-7000-8000-000000000084";
@@ -119,29 +120,18 @@ function createRecoverableSession(setup: SessionToolSetup): void {
     userId: TEST_USER_ID,
   });
   const generatedIds = [RECOVERABLE_SESSION_ID, RECOVERABLE_MESSAGE_ID];
-  const store = new SessionStore(setup.database, () => {
-    const id = generatedIds.shift();
-    if (id === undefined) {
-      throw new Error("The test ran out of recoverable session IDs");
-    }
-    return id;
-  });
+  const store = new SessionStore(setup.database, () =>
+    takeValue(generatedIds, "The test ran out of recoverable session IDs"),
+  );
   const created = store.create(
-    {
-      autoCompact: true,
+    testSessionInput({
       credentialId: CREDENTIAL_ID,
       images: [],
       maxContextTokens: null,
-      model: "gpt-4.1-mini",
       prompt: "Recover this session",
-      provider: "openai",
-      providerPricing: null,
-      reasoningEffort: "high",
       runnerId: REMOVED_RUNNER_ID,
-      tools: AGENT_SESSION_TOOL_NAMES,
-      userId: TEST_USER_ID,
       workingDirectory: "/old/project",
-    },
+    }),
     TEST_NOW,
   );
   const recoverable = requireCreatedSession(created);
@@ -266,7 +256,10 @@ describe("runner reassignment agent tools", () => {
       setup.sessions.completeRunnerCommand(
         REPLACEMENT_RUNNER_ID,
         directoryCommand["id"],
-        JSON.stringify(directoryListing()),
+        {
+          output: JSON.stringify(directoryListing()),
+          state: "completed",
+        },
       ),
     ).toBe(true);
 

@@ -18,13 +18,16 @@ import {
   OPENROUTER_CREDENTIALS_PATH,
   OPENROUTER_OAUTH_CALLBACK_PATH,
   OPENROUTER_OAUTH_PATH,
+  PROMPTS_PATH,
   RUNNER_DIRECTORIES_SEGMENT,
   RUNNER_EXECUTABLE_PATH,
   RUNNER_INSTALLER_PATH,
   RUNNERS_PATH,
   SESSION_MODELS_PATH,
+  SESSION_OPENROUTER_PROVIDERS_PATH,
   SESSIONS_PATH,
   STYLESHEET_PATH,
+  WORKSPACES_PATH,
 } from "../shared/routes.ts";
 import type { GoogleAuth } from "./auth.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
@@ -37,10 +40,12 @@ import { createMethodNotAllowedResponse } from "./http.ts";
 import type { OpenAiIntegration } from "./openai.ts";
 import type { OpenRouterIntegration } from "./openrouter.ts";
 import type { RenderedPages } from "./pages.ts";
+import type { PromptIntegration } from "./prompts.ts";
 import type { ProviderIntegration } from "./provider-integration.ts";
 import type { RunnerExecutableProvider } from "./runner-executable.ts";
 import type { RunnerIntegration } from "./runners.ts";
 import type { SessionIntegration } from "./sessions.ts";
+import type { WorkspaceIntegration } from "./workspaces.ts";
 
 const CSS_HEADERS = { "content-type": "text/css; charset=utf-8" };
 const FAVICON_HEADERS = {
@@ -253,6 +258,8 @@ function pathSegments(pathname: string, prefix: string): readonly string[] {
 interface ItemRouteActions {
   readonly default?: (id: string) => Promise<Response> | Response;
   readonly item: (id: string) => Promise<Response> | Response;
+  readonly scopes?: (id: string) => Promise<Response> | Response;
+  readonly sessionReassignment?: (id: string) => Promise<Response> | Response;
 }
 
 function routeItemSegments(
@@ -268,9 +275,21 @@ function routeItemSegments(
     return actions.item(id);
   }
 
-  return segments.length === 2 && segments[1] === "default"
-    ? actions.default?.(id)
-    : undefined;
+  if (segments.length !== 2) {
+    return undefined;
+  }
+
+  switch (segments[1]) {
+    case "default":
+      return actions.default?.(id);
+    case "session-reassignment":
+      return actions.sessionReassignment?.(id);
+    case "scopes":
+      return actions.scopes?.(id);
+    case undefined:
+    default:
+      return undefined;
+  }
 }
 
 function routeProviderRequest(
@@ -294,6 +313,9 @@ function routeProviderRequest(
   return routeItemSegments(pathSegments(pathname, `${routes.credentials}/`), {
     default: (credentialId) => integration.setDefault(request, credentialId),
     item: (credentialId) => integration.remove(request, credentialId),
+    scopes: (credentialId) => integration.setScopes(request, credentialId),
+    sessionReassignment: (credentialId) =>
+      integration.reassignSessions(request, credentialId),
   });
 }
 
@@ -307,6 +329,8 @@ export function createRequestHandler(
   braveSearch: BraveSearchSkill,
   runners: RunnerIntegration,
   sessions: SessionIntegration,
+  prompts: PromptIntegration,
+  workspaces: WorkspaceIntegration,
   runnerExecutables: RunnerExecutableProvider,
 ): (request: Request) => Promise<Response> {
   const appPage = prepareBody(pages.app);
@@ -346,6 +370,7 @@ export function createRequestHandler(
       const runnerResponse = routeItemSegments(runnerSegments, {
         default: (runnerId) => runners.setDefault(request, runnerId),
         item: (runnerId) => runners.remove(request, runnerId),
+        scopes: (runnerId) => runners.setScopes(request, runnerId),
       });
 
       if (runnerResponse !== undefined) {
@@ -365,22 +390,55 @@ export function createRequestHandler(
         return sessions.collection(request);
       }
 
+      if (pathname === PROMPTS_PATH) {
+        return prompts.collection(request);
+      }
+
+      if (pathname === WORKSPACES_PATH) {
+        return workspaces.collection(request);
+      }
+
+      const workspaceResponse = routeItemSegments(
+        pathSegments(pathname, `${WORKSPACES_PATH}/`),
+        {
+          default: (workspaceId) => workspaces.setDefault(request, workspaceId),
+          item: (workspaceId) => workspaces.item(request, workspaceId),
+        },
+      );
+      if (workspaceResponse !== undefined) {
+        return workspaceResponse;
+      }
+
+      const promptResponse = routeItemSegments(
+        pathSegments(pathname, `${PROMPTS_PATH}/`),
+        { item: (promptId) => prompts.item(request, promptId) },
+      );
+
+      if (promptResponse !== undefined) {
+        return promptResponse;
+      }
+
       if (pathname === BRAVE_SEARCH_KEYS_PATH) {
         return braveSearch.keys(request);
       }
 
-      const braveSearchKeyPrefix = `${BRAVE_SEARCH_KEYS_PATH}/`;
-
-      if (pathname.startsWith(braveSearchKeyPrefix)) {
-        const keyId = pathname.slice(braveSearchKeyPrefix.length);
-
-        if (keyId.length > 0 && !keyId.includes("/")) {
-          return braveSearch.remove(request, keyId);
-        }
+      const braveSearchKeyResponse = routeItemSegments(
+        pathSegments(pathname, `${BRAVE_SEARCH_KEYS_PATH}/`),
+        {
+          item: (keyId) => braveSearch.remove(request, keyId),
+          scopes: (keyId) => braveSearch.setScopes(request, keyId),
+        },
+      );
+      if (braveSearchKeyResponse !== undefined) {
+        return braveSearchKeyResponse;
       }
 
       if (pathname === SESSION_MODELS_PATH) {
         return sessions.models(request);
+      }
+
+      if (pathname === SESSION_OPENROUTER_PROVIDERS_PATH) {
+        return sessions.openRouterProviders(request);
       }
 
       const sessionPathPrefix = `${SESSIONS_PATH}/`;

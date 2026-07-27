@@ -31,6 +31,10 @@ export function readAgentFile(value: unknown): AgentFile | null {
 }
 
 export function readRunnerAgentFileOutput(output: string): AgentFile | null {
+  if (output.startsWith("Error: ")) {
+    throw new Error(output.slice("Error: ".length));
+  }
+
   let value: unknown;
 
   try {

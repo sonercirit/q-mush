@@ -1,14 +1,19 @@
 import {
   isAgentModelId,
   isAgentReasoningEffort,
+  isOpenRouterProviderTag,
   type AgentModelCatalog,
   type AgentModelOption,
   type AgentReasoningEffort,
+  type OpenRouterProviderCatalog,
 } from "../shared/agent-configuration.ts";
 import { readAgentFile } from "../shared/agent-file.ts";
-import { readAgentImages } from "../shared/agent-images.ts";
 import { readAgentToolCalls } from "../shared/agent-loop.ts";
 import { readAgentSessionToolNames } from "../shared/agent-tools.ts";
+import {
+  readPendingAskQuestions,
+  type PendingAskQuestions,
+} from "../shared/ask-questions.ts";
 import { isRecord, readNullableString } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
 import {
@@ -21,6 +26,9 @@ import type {
   AgentSessionStatus,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
+import { readFiniteNumber, stringArray } from "../shared/validation.ts";
+import { readSessionContentFields } from "./session-message-codec.ts";
+import { decodedSessionMessage } from "./session-message-decoder.ts";
 
 function readModelReasoningEfforts(
   value: unknown,
@@ -37,15 +45,12 @@ function readModelModalities(value: unknown): readonly string[] | null {
     return null;
   }
 
-  if (
-    !Array.isArray(value) ||
-    !value.every((item) => typeof item === "string" && item.length > 0)
-  ) {
+  const items = stringArray(value);
+  if (items === undefined || items.some((item) => item.length === 0)) {
     throw new Error("The server returned invalid model modalities");
   }
 
-  const items: readonly unknown[] = value;
-  return items.map((item) => String(item));
+  return items;
 }
 
 function readPositiveSafeInteger(value: unknown): number | null {
@@ -121,10 +126,50 @@ export function readAgentModelCatalog(value: unknown): AgentModelCatalog {
   return { defaultModel, models };
 }
 
+export function readOpenRouterProviderCatalog(
+  value: unknown,
+): OpenRouterProviderCatalog {
+  if (
+    !isRecord(value) ||
+    !Array.isArray(value["providers"]) ||
+    value["providers"].length > 200
+  ) {
+    throw new Error("The server returned invalid OpenRouter providers");
+  }
+  const tags = new Set<string>();
+  const providers = value["providers"].map((provider) => {
+    if (!isRecord(provider)) {
+      throw new Error("The server returned an invalid OpenRouter provider");
+    }
+    const contextWindow = readPositiveSafeInteger(provider["contextWindow"]);
+    const name = provider["name"];
+    const tag = provider["tag"];
+    if (
+      (provider["contextWindow"] !== null && contextWindow === null) ||
+      typeof name !== "string" ||
+      name.length === 0 ||
+      name.length > 120 ||
+      !isOpenRouterProviderTag(tag) ||
+      tags.has(tag)
+    ) {
+      throw new Error("The server returned an invalid OpenRouter provider");
+    }
+    tags.add(tag);
+    return {
+      contextWindow,
+      name,
+      pricing: readModelPricing(provider["pricing"]),
+      tag,
+    };
+  });
+  return { providers };
+}
+
 function readStatus(value: unknown): AgentSessionStatus | undefined {
   switch (value) {
     case "failed":
     case "idle":
+    case "paused":
     case "queued":
     case "running":
     case "stopped":
@@ -144,9 +189,56 @@ function readProvider(value: unknown): ProviderId | undefined {
   }
 }
 
-function readFiniteNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value)
-    ? value
+const RESTART_HANDOFF_KEYS = new Set([
+  "executionGeneration",
+  "operation",
+  "pendingInput",
+  "requestedBy",
+  "restartId",
+]);
+
+function hasRestartHandoffShape(
+  value: Readonly<Record<string, unknown>>,
+): boolean {
+  const keys = Object.keys(value);
+  return (
+    keys.length === RESTART_HANDOFF_KEYS.size &&
+    keys.every((key) => RESTART_HANDOFF_KEYS.has(key))
+  );
+}
+
+function readRestartHandoff(
+  value: unknown,
+): AgentSessionSummary["restartHandoff"] | undefined {
+  if (value === null) {
+    return null;
+  }
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const executionGeneration = readFiniteNumber(value["executionGeneration"]);
+  const operation = value["operation"];
+  const pendingInput = value["pendingInput"];
+  const requestedBy = value["requestedBy"];
+  const restartId = value["restartId"];
+  return executionGeneration !== undefined &&
+    executionGeneration >= 0 &&
+    Number.isSafeInteger(executionGeneration) &&
+    (operation === "agent" || operation === "compact") &&
+    Array.isArray(pendingInput) &&
+    pendingInput.length === 0 &&
+    (requestedBy === "runner" || requestedBy === "server") &&
+    typeof restartId === "string" &&
+    restartId.length > 0 &&
+    restartId.length <= 200 &&
+    hasRestartHandoffShape(value)
+    ? {
+        executionGeneration,
+        operation,
+        pendingInput: [],
+        requestedBy,
+        restartId,
+      }
     : undefined;
 }
 
@@ -173,12 +265,27 @@ function readSummary(value: unknown): AgentSessionSummary {
   const createdAt = readFiniteNumber(value["createdAt"]);
   const credentialId = value["credentialId"];
   const currentContextTokens = readFiniteNumber(value["currentContextTokens"]);
+  const executionEnvironment = value["executionEnvironment"];
   const generation = readFiniteNumber(value["generation"]);
+  const hasOlderSegments = value["hasOlderSegments"];
   const id = value["id"];
   const maxContextTokens = value["maxContextTokens"];
   const model = value["model"];
+  const pendingQuestions =
+    value["pendingQuestions"] === undefined ||
+    value["pendingQuestions"] === null
+      ? null
+      : readPendingAskQuestions(value["pendingQuestions"]);
   const provider = readProvider(value["provider"]);
+  const openRouterProviderTagValue = value["openRouterProviderTag"];
+  const openRouterProviderTag =
+    provider === "openrouter"
+      ? readNullableString(openRouterProviderTagValue)
+      : openRouterProviderTagValue === null
+        ? null
+        : undefined;
   const reasoningEffort = readNullableString(value["reasoningEffort"]);
+  const restartHandoff = readRestartHandoff(value["restartHandoff"]);
   const runnerId = value["runnerId"];
   const runnerRequired = value["runnerRequired"];
   const status = readStatus(value["status"]);
@@ -186,6 +293,7 @@ function readSummary(value: unknown): AgentSessionSummary {
   const tools = readAgentSessionToolNames(value["tools"]);
   const updatedAt = readFiniteNumber(value["updatedAt"]);
   const workingDirectory = value["workingDirectory"];
+  const workspaceId = value["workspaceId"];
 
   if (
     activeDurationMs === undefined ||
@@ -205,26 +313,47 @@ function readSummary(value: unknown): AgentSessionSummary {
     currentContextTokens === undefined ||
     currentContextTokens < 0 ||
     !Number.isSafeInteger(currentContextTokens) ||
+    (executionEnvironment !== "bare_metal" &&
+      executionEnvironment !== "container") ||
     generation === undefined ||
     generation < 0 ||
     !Number.isSafeInteger(generation) ||
+    typeof hasOlderSegments !== "boolean" ||
     typeof id !== "string" ||
     (maxContextTokens !== null &&
       (typeof maxContextTokens !== "number" ||
         !Number.isSafeInteger(maxContextTokens) ||
         maxContextTokens <= 0)) ||
     typeof model !== "string" ||
+    pendingQuestions === undefined ||
+    (pendingQuestions !== null &&
+      pendingQuestions.executionGeneration !== generation) ||
     provider === undefined ||
+    openRouterProviderTag === undefined ||
+    (openRouterProviderTag !== null &&
+      !isOpenRouterProviderTag(openRouterProviderTag)) ||
     value["providerPricing"] === undefined ||
     reasoningEffort === undefined ||
     (reasoningEffort !== null && !isAgentReasoningEffort(reasoningEffort)) ||
+    restartHandoff === undefined ||
+    (restartHandoff !== null &&
+      restartHandoff.executionGeneration !== generation) ||
+    (status === "paused" &&
+      (restartHandoff === null) === (pendingQuestions === null)) ||
+    (pendingQuestions !== null && status !== "paused") ||
+    (restartHandoff !== null && pendingQuestions !== null) ||
+    (restartHandoff !== null &&
+      status !== "paused" &&
+      status !== "queued" &&
+      status !== "running") ||
     typeof runnerId !== "string" ||
     typeof runnerRequired !== "boolean" ||
     status === undefined ||
     typeof title !== "string" ||
     tools === undefined ||
     updatedAt === undefined ||
-    typeof workingDirectory !== "string"
+    typeof workingDirectory !== "string" ||
+    typeof workspaceId !== "string"
   ) {
     throw new Error("The server returned an invalid agent session");
   }
@@ -238,13 +367,18 @@ function readSummary(value: unknown): AgentSessionSummary {
     createdAt,
     credentialId,
     currentContextTokens,
+    executionEnvironment,
     generation,
+    hasOlderSegments,
     id,
     maxContextTokens,
     model,
+    openRouterProviderTag,
     provider,
     providerPricing,
+    pendingQuestions,
     reasoningEffort,
+    restartHandoff,
     runnerId,
     runnerRequired,
     status,
@@ -252,6 +386,7 @@ function readSummary(value: unknown): AgentSessionSummary {
     tools,
     updatedAt,
     workingDirectory,
+    workspaceId,
   };
 }
 
@@ -267,49 +402,54 @@ function readToolCalls(value: unknown) {
 }
 
 function readMessage(value: unknown): AgentSessionMessage {
-  if (!isRecord(value)) {
-    throw new Error("The server returned an invalid session message");
-  }
-
-  const content = value["content"];
-  const createdAt = readFiniteNumber(value["createdAt"]);
-  const id = value["id"];
-  const images = readAgentImages(value["images"]);
-  const role = value["role"];
-  const toolCallId = readNullableString(value["toolCallId"]);
-  const toolName = readNullableString(value["toolName"]);
-
-  if (
-    typeof content !== "string" ||
-    createdAt === undefined ||
-    typeof id !== "string" ||
-    images === undefined ||
-    (role !== "user" &&
-      role !== "assistant" &&
-      role !== "tool" &&
-      role !== "thinking" &&
-      role !== "system" &&
-      role !== "error") ||
-    toolCallId === undefined ||
-    toolName === undefined
-  ) {
-    throw new Error("The server returned an invalid session message");
-  }
+  const invalidMessage = "The server returned an invalid session message";
+  const { fields, record, role } = decodedSessionMessage(value, invalidMessage);
 
   return {
-    content,
-    createdAt,
-    id,
-    images,
+    ...fields,
     role,
-    toolCallId,
-    toolCalls: readToolCalls(value["toolCalls"]),
-    toolName,
+    toolCalls: readToolCalls(record["toolCalls"]),
   };
 }
 
+function readPendingInput(
+  value: unknown,
+): AgentSessionDetail["pendingInputs"][number] {
+  if (!isRecord(value)) {
+    throw new Error("The server returned an invalid pending session input");
+  }
+  const clientRequestId = value["clientRequestId"];
+  const fields = readSessionContentFields(value);
+  const kind = value["kind"];
+  if (
+    typeof clientRequestId !== "string" ||
+    fields === undefined ||
+    (kind !== "follow_up" && kind !== "steer")
+  ) {
+    throw new Error("The server returned an invalid pending session input");
+  }
+  return { ...fields, clientRequestId, kind };
+}
+
+export function readSessionPendingQuestions(
+  value: unknown,
+): PendingAskQuestions | null {
+  if (value === null) {
+    return null;
+  }
+  const pending = readPendingAskQuestions(value);
+  if (pending === undefined) {
+    throw new Error("The server returned invalid pending questions");
+  }
+  return pending;
+}
+
 export function readSessionDetail(value: unknown): AgentSessionDetail {
-  if (!isRecord(value) || !Array.isArray(value["messages"])) {
+  if (
+    !isRecord(value) ||
+    !Array.isArray(value["messages"]) ||
+    !Array.isArray(value["pendingInputs"])
+  ) {
     throw new Error("The server returned invalid agent session details");
   }
 
@@ -317,6 +457,7 @@ export function readSessionDetail(value: unknown): AgentSessionDetail {
     ...readSummary(value),
     agentFile: readAgentFile(value["agentFile"]),
     messages: value["messages"].map(readMessage),
+    pendingInputs: value["pendingInputs"].map(readPendingInput),
   };
 }
 
@@ -342,13 +483,18 @@ export function summaryFromDetail(
     createdAt: detail.createdAt,
     credentialId: detail.credentialId,
     currentContextTokens: detail.currentContextTokens,
+    executionEnvironment: detail.executionEnvironment,
     generation: detail.generation,
+    hasOlderSegments: detail.hasOlderSegments,
     id: detail.id,
     maxContextTokens: detail.maxContextTokens,
     model: detail.model,
+    openRouterProviderTag: detail.openRouterProviderTag,
     provider: detail.provider,
     providerPricing: detail.providerPricing,
+    pendingQuestions: detail.pendingQuestions,
     reasoningEffort: detail.reasoningEffort,
+    restartHandoff: detail.restartHandoff,
     runnerId: detail.runnerId,
     runnerRequired: detail.runnerRequired,
     status: detail.status,
@@ -356,5 +502,6 @@ export function summaryFromDetail(
     tools: detail.tools,
     updatedAt: detail.updatedAt,
     workingDirectory: detail.workingDirectory,
+    workspaceId: detail.workspaceId,
   };
 }

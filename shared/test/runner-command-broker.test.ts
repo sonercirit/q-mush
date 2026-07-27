@@ -1,73 +1,62 @@
 import { describe, expect, test, vi } from "vitest";
 import {
   RunnerCommandBroker,
-  type DispatchRunnerToolCommand,
+  RunnerDisconnectedError,
+  type RunnerCommandResult,
   type RunnerToolCommand,
 } from "../../shared/runner-command-broker.ts";
 import { captureBrokerRejection } from "./promise-test-helpers.ts";
+import {
+  brokerRunnerCommand,
+  completedRunnerCommand,
+  deliveredBroker,
+  deliveredDispatch,
+  deliverQueuedRunnerCommands,
+  expectBrokerInactive,
+  expectCommandComplete,
+  expectRunnerCommandAbort,
+  expectUnauthorizedRunnerCommand,
+  failingCleanupController,
+  failListenerCleanup,
+  revocableRunnerDispatch,
+  streamedDispatch,
+  TEST_RUNNER_ID,
+  TEST_SESSION_ID,
+  type StreamedDispatch,
+} from "./runner-command-broker-fixtures.ts";
 
-const RUNNER_ID = "runner-1";
-const SESSION_ID = "session-1";
+const RUNNER_ID = TEST_RUNNER_ID;
+const SESSION_ID = TEST_SESSION_ID;
 
-function runnerCommand(
-  overrides: Partial<DispatchRunnerToolCommand> = {},
-): DispatchRunnerToolCommand {
-  return {
-    arguments: {},
-    runnerId: RUNNER_ID,
-    sessionId: SESSION_ID,
-    tool: "bash",
-    workingDirectory: "/work/project",
-    ...overrides,
-  };
-}
-
-function expectAbortError(value: unknown): void {
-  expect(value).toMatchObject({ name: "AbortError" });
-}
-
-async function expectUnauthorizedResult(
-  result: Promise<string>,
-): Promise<void> {
-  expectAbortError(await captureBrokerRejection(result));
-}
-
-interface RevocableDispatch {
-  readonly broker: RunnerCommandBroker;
-  readonly result: Promise<string>;
-  readonly revoke: () => void;
-}
-
-function revocableDispatch(
-  commandId: string,
-  options: {
-    readonly cancel?: (runnerId: string, commandId: string) => void;
-    readonly deliver?: () => boolean;
-  } = {},
-): RevocableDispatch {
-  let authorized = true;
-  const broker = new RunnerCommandBroker({
-    ...options,
-    commandId: () => commandId,
-  });
-  return {
-    broker,
-    result: broker.dispatch(runnerCommand({ authorize: () => authorized })),
-    revoke: () => {
-      authorized = false;
-    },
-  };
-}
-
-function deliverQueued(
+async function cancelAndExpectUnauthorized(
   broker: RunnerCommandBroker,
-  delivered: RunnerToolCommand[],
-  accepted: boolean,
+  result: Promise<RunnerCommandResult>,
+): Promise<void> {
+  broker.cancelSession(SESSION_ID);
+  await expectUnauthorizedRunnerCommand(result);
+}
+
+function expectRejectedCompletion(
+  broker: RunnerCommandBroker,
+  commandId: string,
 ): void {
-  broker.deliverQueued(RUNNER_ID, (command) => {
-    delivered.push(command);
-    return accepted;
-  });
+  expect(
+    broker.complete(RUNNER_ID, commandId, completedRunnerCommand("late")),
+  ).toBe(false);
+}
+
+async function expectCompletedResult(
+  broker: RunnerCommandBroker,
+  result: Promise<RunnerCommandResult>,
+  commandId: string,
+  output: string,
+): Promise<void> {
+  expectCommandComplete(broker, commandId, output);
+  await expect(result).resolves.toEqual(completedRunnerCommand(output));
+}
+
+function cleanupStreamedDispatch(commandId: string): StreamedDispatch {
+  return streamedDispatch(commandId, failingCleanupController().signal);
 }
 
 async function revokedReconnectDelivery(
@@ -75,15 +64,24 @@ async function revokedReconnectDelivery(
   requeue: boolean,
 ): Promise<readonly string[]> {
   const delivered: RunnerToolCommand[] = [];
-  const dispatch = revocableDispatch(commandId);
+  const dispatch = revocableRunnerDispatch(commandId);
   if (requeue) {
-    deliverQueued(dispatch.broker, delivered, false);
+    deliverQueuedRunnerCommands(dispatch.broker, delivered, false);
   }
   dispatch.revoke();
-  deliverQueued(dispatch.broker, delivered, true);
-  await expectUnauthorizedResult(dispatch.result);
+  deliverQueuedRunnerCommands(dispatch.broker, delivered, true);
+  await expectUnauthorizedRunnerCommand(dispatch.result);
   expect(dispatch.broker.take(RUNNER_ID)).toBeUndefined();
   return delivered.map(({ id }) => id);
+}
+
+async function dispatchedCancellation(
+  broker: RunnerCommandBroker,
+): Promise<void> {
+  await cancelAndExpectUnauthorized(
+    broker,
+    broker.dispatch(brokerRunnerCommand()),
+  );
 }
 
 async function expectCanceledCommand(
@@ -91,16 +89,41 @@ async function expectCanceledCommand(
   commandId: string,
 ): Promise<readonly string[]> {
   const canceled: string[] = [];
-  const broker = new RunnerCommandBroker({
-    cancel: (_runnerId, canceledId) => canceled.push(canceledId),
-    commandId: () => commandId,
-    deliver: () => delivered,
-  });
-  const result = broker.dispatch(runnerCommand());
-  broker.cancelSession(SESSION_ID);
-  expectAbortError(await captureBrokerRejection(result));
+  const broker = delivered
+    ? deliveredBroker(commandId, {
+        cancel: (_runnerId, canceledId) => canceled.push(canceledId),
+      })
+    : new RunnerCommandBroker({
+        cancel: (_runnerId, canceledId) => canceled.push(canceledId),
+        commandId: () => commandId,
+      });
+  await dispatchedCancellation(broker);
   return canceled;
 }
+
+test("cancels only commands from a revoked execution generation", async () => {
+  const canceled: string[] = [];
+  let id = 0;
+  const broker = new RunnerCommandBroker({
+    cancel: (_runnerId, commandId) => canceled.push(commandId),
+    commandId: () => `generation-${String(++id)}`,
+    deliver: () => true,
+  });
+  const old = broker.dispatch(brokerRunnerCommand({ generation: 3 }));
+  const current = broker.dispatch(brokerRunnerCommand({ generation: 4 }));
+
+  expect(broker.cancelSessionGeneration(SESSION_ID, 3)).toHaveLength(1);
+  expectRunnerCommandAbort(await captureBrokerRejection(old));
+  expect(canceled).toEqual(["generation-1"]);
+  expect(
+    broker.complete(
+      RUNNER_ID,
+      "generation-2",
+      completedRunnerCommand("current"),
+    ),
+  ).toBe(true);
+  expect(await current).toEqual(completedRunnerCommand("current"));
+});
 
 test("delivers a command immediately when a runner socket is connected", async () => {
   const delivered: unknown[] = [];
@@ -111,12 +134,13 @@ test("delivers a command immediately when a runner socket is connected", async (
       return true;
     },
   });
-  const result = broker.dispatch(runnerCommand());
+  const result = broker.dispatch(brokerRunnerCommand());
 
   expect(delivered).toEqual([
     {
       command: {
         arguments: {},
+        executionEnvironment: "bare_metal",
         id: "websocket-command",
         sessionId: SESSION_ID,
         tool: "bash",
@@ -126,8 +150,14 @@ test("delivers a command immediately when a runner socket is connected", async (
     },
   ]);
   expect(broker.take(RUNNER_ID)).toBeUndefined();
-  expect(broker.complete(RUNNER_ID, "websocket-command", "done")).toBe(true);
-  expect(await result).toBe("done");
+  expect(
+    broker.complete(
+      RUNNER_ID,
+      "websocket-command",
+      completedRunnerCommand("done"),
+    ),
+  ).toBe(true);
+  expect(await result).toEqual(completedRunnerCommand("done"));
 });
 
 test("pushes cancellation for an in-flight WebSocket command", async () => {
@@ -138,15 +168,13 @@ test("pushes cancellation for an in-flight WebSocket command", async () => {
 
 describe("runner command broker", () => {
   test("rejects a queued command when authorization is revoked before take", async () => {
-    const dispatch = revocableDispatch("revoked-take");
+    const dispatch = revocableRunnerDispatch("revoked-take");
 
     dispatch.revoke();
 
     expect(dispatch.broker.take(RUNNER_ID)).toBeUndefined();
-    await expectUnauthorizedResult(dispatch.result);
-    expect(dispatch.broker.complete(RUNNER_ID, "revoked-take", "late")).toBe(
-      false,
-    );
+    await expectUnauthorizedRunnerCommand(dispatch.result);
+    expectRejectedCompletion(dispatch.broker, "revoked-take");
   });
 
   test("rejects a queued command when authorization is revoked before reconnect delivery", async () => {
@@ -172,7 +200,7 @@ describe("runner command broker", () => {
       },
     });
     const result = broker.dispatch(
-      runnerCommand({
+      brokerRunnerCommand({
         authorize: () => {
           authorizationChecks += 1;
           return authorizationChecks < 3;
@@ -182,12 +210,12 @@ describe("runner command broker", () => {
 
     expect(delivered).toEqual([]);
     expect(authorizationChecks).toBe(3);
-    await expectUnauthorizedResult(result);
+    await expectUnauthorizedRunnerCommand(result);
   });
 
   test("cancels a revoked in-flight command and rejects its completion", async () => {
     const canceled: string[] = [];
-    const dispatch = revocableDispatch("revoked-in-flight", {
+    const dispatch = revocableRunnerDispatch("revoked-in-flight", {
       cancel: (_runnerId, commandId) => canceled.push(commandId),
       deliver: () => true,
     });
@@ -195,30 +223,137 @@ describe("runner command broker", () => {
     dispatch.revoke();
 
     expect(
-      dispatch.broker.complete(RUNNER_ID, "revoked-in-flight", "late"),
+      dispatch.broker.complete(
+        RUNNER_ID,
+        "revoked-in-flight",
+        completedRunnerCommand("late"),
+      ),
     ).toBe(false);
     expect(canceled).toEqual(["revoked-in-flight"]);
-    await expectUnauthorizedResult(dispatch.result);
+    await expectUnauthorizedRunnerCommand(dispatch.result);
     expect(dispatch.broker.isActive(RUNNER_ID, "revoked-in-flight")).toBe(
       false,
     );
   });
 
-  test("fences results from a removed runner", async () => {
+  test("rejects in-flight commands and fences late results when the authoritative runner disconnects", async () => {
+    const { broker, result } = deliveredDispatch("disconnected-command");
+
+    broker.disconnectRunner(RUNNER_ID);
+
+    await expect(result).rejects.toBeInstanceOf(RunnerDisconnectedError);
+    expectRejectedCompletion(broker, "disconnected-command");
+  });
+
+  test("leaves queued commands for an authoritative reconnect", async () => {
     const broker = new RunnerCommandBroker({
-      commandId: () => "removed-command",
-      deliver: () => true,
+      commandId: () => "queued-through-disconnect",
     });
-    const result = broker.dispatch(runnerCommand());
+    const result = broker.dispatch(brokerRunnerCommand());
+
+    broker.disconnectRunner(RUNNER_ID);
+
+    expect(broker.take(RUNNER_ID)?.id).toBe("queued-through-disconnect");
+    await expectCompletedResult(
+      broker,
+      result,
+      "queued-through-disconnect",
+      "reconnected",
+    );
+  });
+
+  test("fences results from a removed runner", async () => {
+    const { broker, result } = deliveredDispatch("removed-command");
 
     const removed = broker.runnerRemoved(RUNNER_ID);
     expect(removed).toHaveLength(1);
     expect(removed[0]?.command.id).toBe("removed-command");
-    expectAbortError(removed[0]?.error);
+    expectRunnerCommandAbort(removed[0]?.error);
     const rejection = await captureBrokerRejection(result);
-    expectAbortError(rejection);
+    expectRunnerCommandAbort(rejection);
     expect(rejection).toBe(removed[0]?.error);
-    expect(broker.complete(RUNNER_ID, "removed-command", "late")).toBe(false);
+    expectRejectedCompletion(broker, "removed-command");
+  });
+
+  test("streams only contiguous in-flight output and isolates callback errors", async () => {
+    const { broker, result, streamed } = streamedDispatch(
+      "streamed-command",
+      undefined,
+      (delta) => {
+        if (delta.sequence === 1) {
+          throw new Error("observational callback failed");
+        }
+      },
+    );
+
+    expect(
+      broker.stream(RUNNER_ID, "streamed-command", {
+        channel: "stdout",
+        content: "one",
+        sequence: 0,
+      }),
+    ).toBe(true);
+    expect(
+      broker.stream(RUNNER_ID, "streamed-command", {
+        channel: "stderr",
+        content: "gap",
+        sequence: 2,
+      }),
+    ).toBe(false);
+    expect(
+      broker.stream(RUNNER_ID, "streamed-command", {
+        channel: "stderr",
+        content: "two",
+        sequence: 1,
+      }),
+    ).toBe(true);
+    expectCommandComplete(broker, "streamed-command", "canonical output");
+    expect(
+      broker.stream(RUNNER_ID, "streamed-command", {
+        channel: "stdout",
+        content: "late",
+        sequence: 2,
+      }),
+    ).toBe(false);
+
+    expect(streamed).toEqual([
+      { channel: "stdout", content: "one", sequence: 0 },
+      { channel: "stderr", content: "two", sequence: 1 },
+    ]);
+    await expect(result).resolves.toEqual(
+      completedRunnerCommand("canonical output"),
+    );
+  });
+
+  test("does not accept output while a command remains queued", async () => {
+    const broker = new RunnerCommandBroker({
+      commandId: () => "queued-stream-command",
+    });
+    const result = broker.dispatch(brokerRunnerCommand(), undefined, () => {
+      throw new Error("queued output must not be observed");
+    });
+
+    expect(
+      broker.stream(RUNNER_ID, "queued-stream-command", {
+        channel: "stdout",
+        content: "early",
+        sequence: 0,
+      }),
+    ).toBe(false);
+    expect(
+      broker.complete(
+        RUNNER_ID,
+        "queued-stream-command",
+        completedRunnerCommand("early"),
+      ),
+    ).toBe(false);
+    expect(broker.take(RUNNER_ID)?.id).toBe("queued-stream-command");
+    await expectCompletedResult(
+      broker,
+      result,
+      "queued-stream-command",
+      "finished",
+    );
   });
 
   test("does not deliver when the signal aborts while subscribing", async () => {
@@ -240,10 +375,88 @@ describe("runner command broker", () => {
       deliver: () => Boolean(delivered.push("delivered")),
     });
 
-    const result = broker.dispatch(runnerCommand(), controller.signal);
+    const result = broker.dispatch(brokerRunnerCommand(), controller.signal);
 
     expect(delivered).toEqual([]);
-    expectAbortError(await captureBrokerRejection(result));
+    expectRunnerCommandAbort(await captureBrokerRejection(result));
+  });
+
+  test("settles and rejects when abort-listener registration throws and cleanup also throws", async () => {
+    const controller = failingCleanupController();
+    controller.signal.addEventListener = () => {
+      throw new Error("listener registration failed");
+    };
+
+    failListenerCleanup(controller);
+    const broker = new RunnerCommandBroker({
+      commandId: () => "listener-registration-throw",
+    });
+
+    await expect(
+      broker.dispatch(brokerRunnerCommand(), controller.signal),
+    ).rejects.toThrow("listener registration failed");
+    expectBrokerInactive(broker, "listener-registration-throw");
+  });
+
+  test("rejects and releases a command when immediate delivery throws", async () => {
+    const broker = new RunnerCommandBroker({
+      commandId: () => "delivery-throw",
+      deliver: () => {
+        throw new Error("delivery failed");
+      },
+    });
+
+    await expect(broker.dispatch(brokerRunnerCommand())).rejects.toThrow(
+      "delivery failed",
+    );
+
+    expectBrokerInactive(broker, "delivery-throw");
+  });
+
+  test("rejects and releases a queued command when reconnect delivery throws", async () => {
+    const broker = new RunnerCommandBroker({
+      commandId: () => "reconnect-delivery-throw",
+    });
+    const result = broker.dispatch(brokerRunnerCommand());
+
+    broker.deliverQueued(RUNNER_ID, () => {
+      throw new Error("reconnect delivery failed");
+    });
+
+    await expect(result).rejects.toThrow("reconnect delivery failed");
+    expectBrokerInactive(broker, "reconnect-delivery-throw");
+  });
+
+  test("rejects even when in-flight cancellation throws", async () => {
+    const broker = new RunnerCommandBroker({
+      cancel: () => {
+        throw new Error("cancellation cleanup failed");
+      },
+      commandId: () => "cancellation-cleanup-throw",
+      deliver: () => true,
+    });
+
+    await dispatchedCancellation(broker);
+    expectRejectedCompletion(broker, "cancellation-cleanup-throw");
+  });
+
+  test("rejects even when abort-listener cleanup throws", async () => {
+    const { broker, result } = cleanupStreamedDispatch(
+      "listener-cleanup-throw",
+    );
+
+    await cancelAndExpectUnauthorized(broker, result);
+    expectRejectedCompletion(broker, "listener-cleanup-throw");
+  });
+
+  test("completes and removes a command even when listener cleanup throws", async () => {
+    const { broker, result } = cleanupStreamedDispatch(
+      "completion-cleanup-throw",
+    );
+
+    expectCommandComplete(broker, "completion-cleanup-throw", "done");
+    await expect(result).resolves.toEqual(completedRunnerCommand("done"));
+    expect(broker.isActive(RUNNER_ID, "completion-cleanup-throw")).toBe(false);
   });
 
   test("does not push cancellation for a queued command", async () => {
@@ -256,19 +469,32 @@ describe("runner command broker", () => {
     });
     const command = {
       arguments: { path: "README.md" },
+      executionEnvironment: "bare_metal" as const,
       sessionId: SESSION_ID,
       tool: "read",
       workingDirectory: "/work/project",
     };
-    const result = broker.dispatch(runnerCommand(command));
+    const result = broker.dispatch(brokerRunnerCommand(command));
 
     expect(broker.take("another-runner")).toBeUndefined();
     expect(broker.take(RUNNER_ID)).toEqual({ ...command, id: "command-1" });
     expect(broker.isActive(RUNNER_ID, "command-1")).toBe(true);
-    expect(broker.complete("another-runner", "command-1", "wrong")).toBe(false);
-    expect(broker.complete(RUNNER_ID, "command-1", "# Q Mush")).toBe(true);
+    expect(
+      broker.complete(
+        "another-runner",
+        "command-1",
+        completedRunnerCommand("wrong"),
+      ),
+    ).toBe(false);
+    expect(
+      broker.complete(
+        RUNNER_ID,
+        "command-1",
+        completedRunnerCommand("# Q Mush"),
+      ),
+    ).toBe(true);
     expect(broker.isActive(RUNNER_ID, "command-1")).toBe(false);
-    expect(await result).toBe("# Q Mush");
+    expect(await result).toEqual(completedRunnerCommand("# Q Mush"));
   });
 
   test("keeps pending commands active until completion or cancellation", async () => {
@@ -279,21 +505,21 @@ describe("runner command broker", () => {
         commandId: () => "command-without-deadline",
       });
       const result = broker.dispatch(
-        runnerCommand({ arguments: { command: "long-running-command" } }),
+        brokerRunnerCommand({ arguments: { command: "long-running-command" } }),
       );
       void result.catch(() => undefined);
 
       vi.advanceTimersByTime(24 * 60 * 60_000);
       const command = broker.take(RUNNER_ID);
-      const completed = broker.complete(
+      const wasCompleted = broker.complete(
         RUNNER_ID,
         "command-without-deadline",
-        "finished",
+        completedRunnerCommand("finished"),
       );
 
       expect(command?.id).toBe("command-without-deadline");
-      expect(completed).toBe(true);
-      expect(await result).toBe("finished");
+      expect(wasCompleted).toBe(true);
+      expect(await result).toEqual(completedRunnerCommand("finished"));
     } finally {
       vi.useRealTimers();
     }
@@ -306,7 +532,7 @@ describe("runner command broker", () => {
     });
     const results = Array.from({ length: 101 }, (_, index) =>
       broker.dispatch(
-        runnerCommand({
+        brokerRunnerCommand({
           arguments: { index },
           sessionId: `session-${String(index)}`,
           tool: "read",
@@ -318,7 +544,11 @@ describe("runner command broker", () => {
 
     for (const command of commands) {
       if (command !== undefined) {
-        broker.complete(RUNNER_ID, command.id, command.id);
+        broker.complete(
+          RUNNER_ID,
+          command.id,
+          completedRunnerCommand(command.id),
+        );
       }
     }
 
@@ -332,7 +562,7 @@ describe("runner command broker", () => {
       commandId: () => "command-2",
     });
     const result = broker.dispatch(
-      runnerCommand({ arguments: { command: "sleep 10" } }),
+      brokerRunnerCommand({ arguments: { command: "sleep 10" } }),
     );
     broker.cancelSession(SESSION_ID);
 

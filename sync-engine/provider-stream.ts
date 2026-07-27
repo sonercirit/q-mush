@@ -5,6 +5,7 @@ import type {
 } from "../shared/agent-loop.ts";
 import { isRecord, readRequiredArray } from "../shared/auth-model.ts";
 import { requiredRecordString } from "../shared/json-record.ts";
+import type { ProviderToolCallDelta } from "../shared/tool-stream.ts";
 import {
   isProviderStreamErrorEvent,
   readProviderStreamError,
@@ -26,6 +27,14 @@ export interface ProviderTextDelta {
   readonly content: string;
   readonly reset?: true;
   readonly thinking: string;
+  readonly toolCall?: ProviderToolCallDelta;
+}
+
+function emitToolCallDelta(
+  onDelta: ((delta: ProviderTextDelta) => void) | undefined,
+  toolCall: ProviderToolCallDelta,
+): void {
+  onDelta?.({ content: "", thinking: "", toolCall });
 }
 
 interface ProviderStreamAccumulatorBase {
@@ -393,7 +402,10 @@ class ResponsesAccumulator
       const item = value["item"];
 
       if (isRecord(item) && item["type"] === "function_call") {
-        this.#toolCalls.set(outputIndex(value), readResponsesToolCall(item));
+        const call = readResponsesToolCall(item);
+        const index = outputIndex(value);
+        this.#toolCalls.set(index, call);
+        emitToolCallDelta(this.buffers.onDelta, { ...call, index });
       }
       return;
     }
@@ -408,9 +420,16 @@ class ResponsesAccumulator
         );
       }
 
+      const argumentsDelta = stringDelta(value, "tool-call");
       this.#toolCalls.set(index, {
         ...call,
-        arguments: call.arguments + stringDelta(value, "tool-call"),
+        arguments: call.arguments + argumentsDelta,
+      });
+      emitToolCallDelta(this.buffers.onDelta, {
+        arguments: argumentsDelta,
+        id: "",
+        index,
+        name: "",
       });
       return;
     }
@@ -476,8 +495,10 @@ function readChatDelta(value: unknown): Readonly<Record<string, unknown>> {
 }
 
 function optionalDeltaString(
-  value: Readonly<Record<string, unknown>>,
-  keys: readonly string[],
+  ...[value, keys]: readonly [
+    value: Readonly<Record<string, unknown>>,
+    keys: readonly string[],
+  ]
 ): string {
   for (const key of keys) {
     const provided = value[key];
@@ -575,6 +596,18 @@ class ChatCompletionsAccumulator
         id: existing.id + idDelta,
         name: existing.name + nameDelta,
       });
+      if (
+        argumentsDelta.length > 0 ||
+        idDelta.length > 0 ||
+        nameDelta.length > 0
+      ) {
+        emitToolCallDelta(this.buffers.onDelta, {
+          arguments: argumentsDelta,
+          id: idDelta,
+          index,
+          name: nameDelta,
+        });
+      }
     }
 
     const contextTokens = readContextTokens(value, "usage");

@@ -1,5 +1,6 @@
 import { expect, vi } from "vitest";
 import type { AgentConversationMessage } from "../../shared/agent-loop.ts";
+import { RecordingTestSocket } from "../../shared/test/websocket-fixtures.ts";
 import type { ModelRequestSleep } from "../../sync-engine/agent-model-retry.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
@@ -20,13 +21,12 @@ export const COMPLETED_EVENT = {
 
 const USER_MESSAGE = [{ content: "Hello", role: "user" as const }];
 
-export class FakeProviderSocket extends EventTarget {
-  readonly sent: string[] = [];
-  readyState: number = WebSocket.CONNECTING;
-
-  close(): void {
-    this.readyState = WebSocket.CLOSED;
-    this.dispatchEvent(new CloseEvent("close", { code: 1000 }));
+export class FakeProviderSocket extends RecordingTestSocket {
+  constructor() {
+    super({
+      closeEvent: () => new CloseEvent("close", { code: 1000 }),
+      readyState: WebSocket.CONNECTING,
+    });
   }
 
   fail(): void {
@@ -36,16 +36,6 @@ export class FakeProviderSocket extends EventTarget {
   open(): void {
     this.readyState = WebSocket.OPEN;
     this.dispatchEvent(new Event("open"));
-  }
-
-  receive(value: unknown): void {
-    this.dispatchEvent(
-      new MessageEvent("message", { data: JSON.stringify(value) }),
-    );
-  }
-
-  send(data: string): void {
-    this.sent.push(data);
   }
 }
 

@@ -24,16 +24,19 @@ export function sessionModelRuntime(
   credential: ProviderCredentialAccess,
   userId: string,
   controller: AbortController,
+  restartHandoffRequested: () => boolean = () => false,
 ): SessionAgentRuntimeDependencies {
   return {
     braveSearch: resources.braveSearch,
     broker: resources.broker,
     credential,
     detail,
+    currentTools: () => resources.store.get(userId, detail.id)?.tools,
     isCurrent: () =>
       resources.store.executionIsCurrent(userId, detail.id, detail.generation),
     modelFactory: resources.modelFactory,
     now: resources.now,
+    restartHandoffRequested,
     notify: () => {
       if (
         resources.store.executionIsCurrent(userId, detail.id, detail.generation)

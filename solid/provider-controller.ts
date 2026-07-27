@@ -1,13 +1,21 @@
 import { type Accessor } from "solid-js";
-import { providerCredentialDefaultPath } from "../shared/routes.ts";
+import {
+  connectionScopesPath,
+  providerCredentialDefaultPath,
+  providerCredentialSessionReassignmentPath,
+} from "../shared/routes.ts";
+import { readSessionCredentialReassignmentResult } from "../shared/session-credential-reassignment.ts";
+import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 import { HttpResponseError, request, requestJson } from "./browser-http.ts";
+import { ControllerState, jsonRequestInit } from "./controller-mutation.ts";
 import {
   createProviderViewState,
   readProviderCredentials,
   type ProviderPanelConfiguration,
   type ProviderViewState,
 } from "./provider-client.tsx";
-import { createReactiveState, type ReactiveState } from "./reactive-state.ts";
+import { createReactiveState } from "./reactive-state.ts";
+import type { SessionReassignmentDialogController } from "./session-reassignment-dialog-controller.ts";
 
 type ErrorMessage = (status: number) => string;
 type StatePatch = Partial<ProviderViewState>;
@@ -18,65 +26,124 @@ function initialProviderState(): ProviderViewState {
 
 export class ProviderController {
   readonly #configuration: ProviderPanelConfiguration;
-  readonly #view: ReactiveState<ProviderViewState>;
-  #revision = 0;
+  readonly #state: ControllerState<ProviderViewState>;
+  #pendingSessionReassignment:
+    | {
+        readonly dialog: SessionReassignmentDialogController;
+        readonly revision: number;
+      }
+    | undefined;
+  #workspaceId = GLOBAL_WORKSPACE_ID;
 
   constructor(
     configuration: ProviderPanelConfiguration,
     view = createReactiveState(initialProviderState()),
   ) {
     this.#configuration = configuration;
-    this.#view = view;
+    this.#state = new ControllerState(view);
   }
 
   get state(): ProviderViewState {
-    return this.#view.state();
+    return this.#state.value;
   }
 
   get view(): Accessor<ProviderViewState> {
-    return this.#view.state;
+    return this.#state.accessor;
   }
 
   async add(apiKey: string, label?: string): Promise<void> {
     await this.#mutate(
       this.#configuration.credentialsPath,
-      {
-        body: JSON.stringify({
+      jsonRequestInit(
+        {
           apiKey,
           ...(this.#configuration.keyRequiresLabel === true ? { label } : {}),
-        }),
-        headers: { "content-type": "application/json" },
-        method: "POST",
-      },
+          workspaceIds: [this.#workspaceId],
+        },
+        "POST",
+      ),
       { savePending: true },
       { savePending: false },
       (status) => this.#saveError(status),
     );
   }
 
-  async load(): Promise<void> {
-    const revision = ++this.#revision;
-    this.#patch({ credentials: undefined, error: undefined });
+  async confirmSessionReassignment(
+    dialog: SessionReassignmentDialogController,
+  ): Promise<void> {
+    const state = dialog.state;
+    if (state === undefined || state.pending) {
+      return;
+    }
 
+    const revision = this.#state.revision.value;
+    const pending = { dialog, revision };
+    this.#pendingSessionReassignment = pending;
+    dialog.pending();
     try {
-      const credentials = readProviderCredentials(
-        await requestJson(this.#configuration.credentialsPath),
-        this.#configuration.name,
+      const result = readSessionCredentialReassignmentResult(
+        await requestJson(
+          `${providerCredentialSessionReassignmentPath(
+            this.#configuration.credentialsPath,
+            state.credential.id,
+          )}?workspaceId=${encodeURIComponent(this.#workspaceId)}`,
+          {
+            body: JSON.stringify(
+              this.#workspaceId === GLOBAL_WORKSPACE_ID
+                ? {}
+                : { workspaceId: this.#workspaceId },
+            ),
+            headers: { "content-type": "application/json" },
+            method: "POST",
+          },
+        ),
       );
-
-      if (revision === this.#revision) {
-        this.#patch({ credentials, error: undefined });
-      }
-    } catch (error) {
-      if (revision === this.#revision) {
-        this.#patch({
-          error:
-            error instanceof HttpResponseError
-              ? this.#loadError(error.status)
-              : this.#loadError(0),
+      const count = result.migratedSessionCount;
+      dialog.succeeded();
+      if (this.#state.revision.isCurrent(revision)) {
+        this.#state.patch({
+          sessionReassignmentNotice:
+            count === 0
+              ? "No sessions needed switching; they already use this account."
+              : `${String(count)} ${count === 1 ? "session" : "sessions"} switched to this account.`,
         });
       }
+    } catch {
+      if (this.#state.revision.isCurrent(revision)) {
+        dialog.failed(
+          `We could not switch your ${this.#configuration.name} sessions. Please try again.`,
+        );
+      } else {
+        dialog.succeeded();
+      }
+    } finally {
+      if (
+        this.#state.revision.isCurrent(revision) &&
+        this.#pendingSessionReassignment === pending
+      ) {
+        this.#pendingSessionReassignment = undefined;
+      }
     }
+  }
+
+  async load(): Promise<void> {
+    await this.#state.load({
+      failure: (error) => ({
+        error:
+          error instanceof HttpResponseError
+            ? this.#loadError(error.status)
+            : this.#loadError(0),
+      }),
+      pending: { credentials: undefined, error: undefined },
+      request: () =>
+        requestJson(
+          `${this.#configuration.credentialsPath}?workspaceId=${encodeURIComponent(this.#workspaceId)}`,
+        ),
+      success: (value) => ({
+        credentials: readProviderCredentials(value, this.#configuration.name),
+        error: undefined,
+      }),
+    });
   }
 
   remove(credentialId: string): Promise<void> {
@@ -90,7 +157,31 @@ export class ProviderController {
   }
 
   reset(): void {
-    this.#revision += 1;
+    this.setWorkspace(GLOBAL_WORKSPACE_ID);
+  }
+
+  setScopes(
+    credentialId: string,
+    workspaceIds: readonly string[],
+  ): Promise<void> {
+    return this.#mutate(
+      connectionScopesPath(this.#configuration.credentialsPath, credentialId),
+      jsonRequestInit({ workspaceIds }, "PUT"),
+      {},
+      {},
+      () => `We could not update that ${this.#configuration.name} scope.`,
+    );
+  }
+
+  setWorkspace(workspaceId: string): void {
+    this.#resetForWorkspace(workspaceId);
+  }
+
+  #resetForWorkspace(workspaceId: string): void {
+    this.#state.revision.advance();
+    this.#pendingSessionReassignment?.dialog.reset();
+    this.#pendingSessionReassignment = undefined;
+    this.#workspaceId = workspaceId;
     this.#replace(initialProviderState());
   }
 
@@ -129,30 +220,23 @@ export class ProviderController {
     settled: StatePatch,
     errorMessage: ErrorMessage,
   ): Promise<void> {
-    const revision = this.#revision;
-    this.#patch({ ...pending, error: undefined });
-
-    try {
-      await request(input, init);
-
-      if (revision === this.#revision) {
-        this.#patch(settled);
-        await this.load();
-      }
-    } catch (error) {
-      if (revision === this.#revision) {
+    const reload = () => this.load();
+    await this.#state.mutation(
+      input,
+      init,
+      request,
+      (error) => {
         const status = error instanceof HttpResponseError ? error.status : 0;
-        this.#patch({ ...settled, error: errorMessage(status) });
-      }
-    }
-  }
-
-  #patch(patch: StatePatch): void {
-    this.#replace({ ...this.state, ...patch });
+        return { ...settled, error: errorMessage(status) };
+      },
+      { ...pending, error: undefined },
+      settled,
+      reload,
+    );
   }
 
   #replace(state: ProviderViewState): void {
-    this.#view.setState(state);
+    this.#state.replace(state);
   }
 
   #saveError(status: number): string {

@@ -1,9 +1,10 @@
 import { test } from "vitest";
-import { OPENAI_PANEL, ProviderPanel } from "../../solid/provider-client.tsx";
+import { OPENAI_PANEL } from "../../solid/provider-client.tsx";
 import { ProviderController } from "../../solid/provider-controller.ts";
 import { createReactiveState } from "../../solid/reactive-state.ts";
 import { providerViewState } from "./client-state-fixtures.ts";
 import { expectDefaultControls } from "./default-control-assertions.ts";
+import { openAiProviderPanel } from "./provider-panel-fixtures.tsx";
 import { renderSolidToString } from "./render-solid.tsx";
 
 const STATE = providerViewState([
@@ -28,9 +29,7 @@ test("renders provider default controls", () => {
     OPENAI_PANEL,
     createReactiveState(STATE),
   );
-  const html = renderSolidToString(() => (
-    <ProviderPanel configuration={OPENAI_PANEL} controller={controller} />
-  ));
+  const html = renderSolidToString(() => openAiProviderPanel(controller));
 
   expectDefaultControls(
     html,

@@ -3,6 +3,8 @@ import type { AppDatabase } from "../shared/database.ts";
 import { runners } from "../shared/database/schema.ts";
 import { RUNNER_ONLINE_WINDOW_MILLISECONDS } from "../shared/runner-model.ts";
 
+type RunnerAvailabilityDatabase = Pick<AppDatabase, "select">;
+
 function availableRunnerCondition(
   userId: string,
   runnerId: string,
@@ -19,16 +21,16 @@ function availableRunnerCondition(
 }
 
 export function runnerIsAvailable(
-  database: Pick<AppDatabase, "select">,
+  database: RunnerAvailabilityDatabase,
   userId: string,
   runnerId: string,
   now: number,
 ): boolean {
   return (
     database
-      .select({ id: runners.id })
+      .select({ lastSeenAt: runners.lastSeenAt })
       .from(runners)
       .where(availableRunnerCondition(userId, runnerId, now))
-      .get() !== undefined
+      .get()?.lastSeenAt !== undefined
   );
 }

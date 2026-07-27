@@ -5,7 +5,9 @@ import {
 } from "../../shared/agent-prompt.ts";
 
 test("adds a selected workspace agent file to the system prompt", () => {
-  expect(createAgentSystemPrompt(null)).toBe(AGENT_SYSTEM_PROMPT);
+  expect(createAgentSystemPrompt(null)).toBe(
+    `${AGENT_SYSTEM_PROMPT}\nFile and shell tools execute directly on the selected runner.`,
+  );
 
   const prompt = createAgentSystemPrompt({
     content: "Run the focused tests before finishing.",
