@@ -1,9 +1,12 @@
+const UTF8_DECODER = new TextDecoder("utf-8", { ignoreBOM: true });
+const UTF8_ENCODER = new TextEncoder();
+
 export function utf8ByteLength(value: string): number {
-  return Buffer.byteLength(value, "utf8");
+  return UTF8_ENCODER.encode(value).byteLength;
 }
 
 export function utf8Prefix(value: string, maximumBytes: number): string {
-  const bytes = Buffer.from(value, "utf8");
+  const bytes = UTF8_ENCODER.encode(value);
   if (bytes.byteLength <= maximumBytes) {
     return value;
   }
@@ -11,5 +14,5 @@ export function utf8Prefix(value: string, maximumBytes: number): string {
   while (end > 0 && (bytes[end] ?? 0) >> 6 === 2) {
     end -= 1;
   }
-  return bytes.subarray(0, end).toString("utf8");
+  return UTF8_DECODER.decode(bytes.subarray(0, end));
 }

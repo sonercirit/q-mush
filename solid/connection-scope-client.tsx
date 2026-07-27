@@ -18,6 +18,26 @@ interface ScopedConnection {
   readonly workspaceIds?: readonly string[];
 }
 
+function selectExclusiveScope(
+  event: Event & { readonly currentTarget: HTMLInputElement },
+): void {
+  const selected = event.currentTarget;
+  if (!selected.checked) {
+    return;
+  }
+  const selectedGlobal = selected.value === GLOBAL_WORKSPACE_ID;
+  for (const checkbox of selected.form?.querySelectorAll<HTMLInputElement>(
+    'input[name="workspaceIds"]',
+  ) ?? []) {
+    if (
+      checkbox !== selected &&
+      (selectedGlobal || checkbox.value === GLOBAL_WORKSPACE_ID)
+    ) {
+      checkbox.checked = false;
+    }
+  }
+}
+
 export function ConnectionScopeEditor(props: {
   readonly connection: ScopedConnection;
   readonly controller: ConnectionScopeController;
@@ -53,6 +73,7 @@ export function ConnectionScopeEditor(props: {
           <input
             checked={selected(GLOBAL_WORKSPACE_ID)}
             name="workspaceIds"
+            onChange={selectExclusiveScope}
             type="checkbox"
             value={GLOBAL_WORKSPACE_ID}
           />
@@ -64,6 +85,7 @@ export function ConnectionScopeEditor(props: {
               <input
                 checked={selected(workspace.id)}
                 name="workspaceIds"
+                onChange={selectExclusiveScope}
                 type="checkbox"
                 value={workspace.id}
               />

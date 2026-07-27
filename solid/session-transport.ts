@@ -7,9 +7,10 @@ export type SessionCommandTransport = Pick<RealtimeConnection, "command"> & {
 /** @public Starts realtime before an initial load and rolls back on failure. */
 export function startRealtimeSessionLoad(
   realtime: Pick<RealtimeConnection, "start" | "stop">,
+  workspaceId: string,
   load: () => Promise<unknown>,
 ): Promise<unknown> {
-  realtime.start();
+  realtime.start(workspaceId);
   return load().catch((error: unknown) => {
     realtime.stop();
     throw error;
