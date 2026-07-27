@@ -1,5 +1,5 @@
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
-import type { AgentSessionDetail } from "../shared/session-model.ts";
+import type { RestartCredentialSelection } from "./session-restart-recovery.ts";
 import {
   isValidRestartId,
   type RestartRequest,
@@ -94,6 +94,7 @@ interface SessionRestartCredentialReader {
   readonly readCredential: (
     userId: string,
     credentialId: string,
+    workspaceId?: string,
   ) =>
     | Promise<ProviderCredentialAccess | undefined>
     | ProviderCredentialAccess
@@ -107,11 +108,15 @@ export type SessionRestartCredentialReaders = Readonly<
 export async function readSessionRestartCredential(
   readers: SessionRestartCredentialReaders,
   userId: string,
-  selection: Pick<AgentSessionDetail, "credentialId" | "provider">,
+  selection: RestartCredentialSelection,
 ): Promise<ProviderCredentialAccess | undefined> {
   const reader = readers[selection.provider];
   try {
-    return await reader.readCredential(userId, selection.credentialId);
+    return await reader.readCredential(
+      userId,
+      selection.credentialId,
+      selection.workspaceId,
+    );
   } catch {
     return undefined;
   }

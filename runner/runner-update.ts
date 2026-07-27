@@ -46,9 +46,10 @@ export type RunnerStartupConnection = Readonly<{
 }>;
 
 export class RunnerStartupRestart {
-  #activated = false;
   #activationReceipt: string | undefined;
   #activationReceiptPhase: "finalized" | "prepared" | undefined;
+  #connectionGeneration = 0;
+  #operationalActivationReceipt: string | undefined;
   #restartId: string | undefined;
 
   constructor(restartId?: string) {
@@ -62,11 +63,11 @@ export class RunnerStartupRestart {
   }
 
   get activationReceipt(): string | undefined {
-    return this.#activated ? undefined : this.#activationReceipt;
+    return this.#activationReceipt;
   }
 
   get activationReceiptPhase(): "finalized" | "prepared" | undefined {
-    return this.#activated ? undefined : this.#activationReceiptPhase;
+    return this.#activationReceiptPhase;
   }
 
   get retainedActivationReceipt(): string | undefined {
@@ -74,17 +75,18 @@ export class RunnerStartupRestart {
   }
 
   get restartId(): string | undefined {
-    return this.#activated ? undefined : this.#restartId;
+    return this.#restartId;
   }
 
-  connection(): RunnerStartupConnection {
+  #snapshot(): RunnerStartupConnection {
     let activationReceipt = this.activationReceipt;
     let activationReceiptPhase = this.activationReceiptPhase;
+    const generation = this.#connectionGeneration;
     const restartId = this.restartId;
     let operational = false;
     const ownsState = (): boolean =>
       !operational &&
-      !this.#activated &&
+      this.#connectionGeneration === generation &&
       this.#restartId === restartId &&
       this.#activationReceipt === activationReceipt &&
       this.#activationReceiptPhase === activationReceiptPhase;
@@ -113,7 +115,8 @@ export class RunnerStartupRestart {
           return false;
         }
         operational = true;
-        this.#activated = true;
+        this.#operationalActivationReceipt =
+          restartId === undefined ? receipt : undefined;
         this.#activationReceipt = undefined;
         this.#activationReceiptPhase = undefined;
         this.#restartId = undefined;
@@ -128,8 +131,21 @@ export class RunnerStartupRestart {
     };
   }
 
+  connection(): RunnerStartupConnection {
+    this.#connectionGeneration += 1;
+    if (
+      this.#activationReceipt === undefined &&
+      this.#operationalActivationReceipt !== undefined
+    ) {
+      this.#activationReceipt = this.#operationalActivationReceipt;
+      this.#activationReceiptPhase = "finalized";
+    }
+    return this.#snapshot();
+  }
+
   #setActivation(receipt: string, phase: "finalized" | "prepared"): void {
     if (receipt.length > 0 && receipt.length <= 200) {
+      this.#connectionGeneration += 1;
       this.#activationReceipt = receipt;
       this.#activationReceiptPhase = phase;
     }

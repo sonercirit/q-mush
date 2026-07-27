@@ -248,9 +248,13 @@ export class RunnerRegistrationStore implements RunnerRegistrationOperations {
     }
     const existingFence = durableRegistrationFence(preflight.source);
     if (existingFence !== undefined) {
-      return existingFence.activationId === preflight.activationId &&
-        existingFence.lifecycle === options.lifecycle &&
-        existingFence.restartId === options.restartId &&
+      const replaysSettledFinalization =
+        existingFence.phase === "finalized" &&
+        preflight.source.activationLifecycleSettled;
+      return (replaysSettledFinalization ||
+        (existingFence.lifecycle === options.lifecycle &&
+          existingFence.restartId === options.restartId)) &&
+        existingFence.activationId === preflight.activationId &&
         this.fenceIsCurrent(existingFence)
         ? {
             registration: {

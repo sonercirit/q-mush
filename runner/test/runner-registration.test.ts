@@ -17,23 +17,35 @@ interface RegistrationSetup {
   readonly startup: RunnerStartupRestart;
 }
 
-function registration(
-  restartId: string | null = "restart-client",
+function registrationForStartup(
+  startup: RunnerStartupRestart,
+  installed: string[],
+  installation: string,
   onVersion?: (version: string) => void,
 ): RegistrationSetup {
   const socket = new RegistrationSocket();
-  const startup = new RunnerStartupRestart(restartId ?? undefined);
   const connection = startup.connection();
-  const installed: string[] = [];
   const promise = completeRunnerRegistration(
     socket,
     connection,
     () => {
-      installed.push("operational");
+      installed.push(installation);
     },
     onVersion,
   );
   return { connection, installed, promise, socket, startup };
+}
+
+function registration(
+  restartId: string | null = "restart-client",
+  onVersion?: (version: string) => void,
+): RegistrationSetup {
+  return registrationForStartup(
+    new RunnerStartupRestart(restartId ?? undefined),
+    [],
+    "operational",
+    onVersion,
+  );
 }
 
 function ready(registrationId: string) {
@@ -219,6 +231,33 @@ test("installs command handling before operational acknowledgement and resolutio
   );
   expect(setup.startup.restartId).toBeUndefined();
   expect(setup.startup.activationReceipt).toBeUndefined();
+});
+
+test("a completed registration can reconnect with its retained receipt", async () => {
+  const first = registration(null);
+  receiveThroughFinalized(first, "registration-first", "receipt-reconnect");
+  first.socket.receive(operational("registration-first"));
+  await expect(first.promise).resolves.toBeUndefined();
+
+  const reconnect = registrationForStartup(first.startup, [], "reconnected");
+
+  expect(reconnect.connection).toMatchObject({
+    activationReceipt: "receipt-reconnect",
+    activationReceiptPhase: "finalized",
+  });
+  reconnect.socket.receive(ready("registration-reconnect"));
+  reconnect.socket.receive(committed("registration-reconnect"));
+  reconnect.socket.receive(
+    active("registration-reconnect", "receipt-reconnect"),
+  );
+  reconnect.socket.receive(
+    finalized("registration-reconnect", "receipt-reconnect"),
+  );
+  reconnect.socket.receive(operational("registration-reconnect"));
+
+  await expect(reconnect.promise).resolves.toBeUndefined();
+  expect(reconnect.installed).toEqual(["reconnected"]);
+  expect(first.connection.operational("receipt-reconnect")).toBe(false);
 });
 
 test("retains finalized restart state when operational acknowledgement throws", async () => {

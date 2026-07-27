@@ -76,6 +76,7 @@ export interface RunnerRegistrationProposal {
   readonly activationId: string;
   finalize(receipt: string): RunnerRegistrationActivation;
   prepare(restartId?: string): RunnerRegistrationCommit;
+  readonly replaysSettledFinalization?: boolean;
   readonly runnerId: string;
 }
 
@@ -398,6 +399,9 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
         fence = undefined;
         return activated;
       },
+      replaysSettledFinalization:
+        registration.source.activationPhase === "finalized" &&
+        registration.source.activationLifecycleSettled,
       runnerId: registration.target.id,
     };
   }
