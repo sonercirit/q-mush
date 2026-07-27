@@ -38,6 +38,7 @@ import {
 } from "./render-debug.tsx";
 import { RunnerController } from "./runner-controller.ts";
 import { SessionController } from "./session-controller.ts";
+import { startRealtimeSessionLoad } from "./session-transport.ts";
 import "./styles.css";
 import { WorkspaceController } from "./workspace-controller.ts";
 import { Workspace } from "./workspace-view.tsx";
@@ -323,18 +324,30 @@ function App(): JSX.Element {
     for (const controller of providerControllers) {
       controller.setWorkspace(workspaceId);
     }
-    void Promise.all([
-      ...(workspaceId === GLOBAL_WORKSPACE_ID ? [] : [agentSessions.load()]),
-      runners.load(),
-      ...providerControllers.map((controller) => controller.load()),
-    ]).then(() => {
-      if (
-        revision === scopedLoadRevision &&
-        workspaceId !== GLOBAL_WORKSPACE_ID
-      ) {
-        realtime.start(workspaceId);
-      }
-    });
+    const load = () =>
+      Promise.all([
+        ...(workspaceId === GLOBAL_WORKSPACE_ID ? [] : [agentSessions.load()]),
+        runners.load(),
+        ...providerControllers.map((controller) => controller.load()),
+      ]);
+    if (workspaceId === GLOBAL_WORKSPACE_ID) {
+      void load();
+      return;
+    }
+    void startRealtimeSessionLoad(
+      {
+        start: (selectedWorkspaceId) => {
+          realtime.start(selectedWorkspaceId);
+        },
+        stop: () => {
+          if (revision === scopedLoadRevision) {
+            realtime.stop();
+          }
+        },
+      },
+      workspaceId,
+      load,
+    ).catch(() => undefined);
   };
   const workspaces = new WorkspaceController(reloadScopedData);
 
