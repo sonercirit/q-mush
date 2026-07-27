@@ -14,6 +14,7 @@ import {
 } from "./realtime-test-helpers.ts";
 import {
   acknowledgeFinalizedRunnerRegistration,
+  acknowledgeOperationalRunnerRegistration,
   finishPendingRunnerRegistration,
   proposedRunnerRealtimeTestSocket,
   reconnectFinalizedRunnerPair,
@@ -214,6 +215,45 @@ test("contains lifecycle settlement failures and retries finalized settlement", 
     callbackAttempts: 2,
     settlementAttempts: 2,
   });
+});
+
+test("a settled finalized activation reconnects without a retained receipt", () => {
+  const callbacks: string[] = [];
+  const connection = realtimeRunnerConnection();
+  const realtime = connectedRunnerRealtimeTestIntegration(
+    { runnerConnected: recordRunner(callbacks) },
+    {
+      preflightRegistration: () => ({
+        activationId: "test-activation-id",
+        finalize: () => ({ connected: connection, status: "activated" }),
+        prepare: () => ({
+          activationReceipt: "test-activation-receipt",
+          connected: connection,
+          status: "registered",
+        }),
+        replaysSettledFinalization: true,
+        runnerId: connection.connection.id,
+      }),
+      receiptState: () =>
+        realtimeRunnerReceiptState({ lifecycleSettled: true }),
+    },
+  );
+
+  const reconnect = proposedRunnerRealtimeTestSocket(
+    realtime,
+    "machine-settled-finalized-reconnect",
+  );
+  finishPendingRunnerRegistration(realtime, reconnect);
+  acknowledgeFinalizedRunnerRegistration(realtime.websocket, reconnect.socket);
+  acknowledgeOperationalRunnerRegistration(
+    realtime.websocket,
+    reconnect.socket,
+  );
+
+  expect(reconnect.record.closed).toBeUndefined();
+  expect(reconnect.record.sent).toHaveLength(5);
+  expect(reconnect.socket.data).toMatchObject({ usable: true });
+  expect(callbacks).toEqual(["runner-1"]);
 });
 
 test("contains false lifecycle settlement and retries finalized settlement", () => {

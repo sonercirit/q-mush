@@ -32,6 +32,7 @@ function lifecycleActivationId(
 function finalizedReceiptMatches(
   current: RunnerActivationReceiptValidation,
   pending: PendingRunnerRegistration,
+  exactLifecycle: boolean,
 ): boolean {
   const runner = pending.committed;
   const activationId = lifecycleActivationId(pending);
@@ -43,9 +44,16 @@ function finalizedReceiptMatches(
     current.activationId === activationId &&
     current.connection.id === runner.id &&
     current.connection.userId === runner.userId &&
-    current.lifecycle === pending.gate.lifecycle &&
-    current.restartId === pending.gate.expectedRestartId
+    (!exactLifecycle ||
+      (current.lifecycle === pending.gate.lifecycle &&
+        current.restartId === pending.gate.expectedRestartId))
   );
+}
+
+function shouldReplaySettledFinalization(
+  pending: PendingRunnerRegistration,
+): boolean {
+  return pending.proposal?.replaysSettledFinalization === true;
 }
 
 function acceptedFinalizedReceipt(
@@ -63,9 +71,9 @@ function acceptedFinalizedReceipt(
     pending.metadata,
     receipt,
   );
-  return current !== undefined &&
-    !current.lifecycleSettled &&
-    finalizedReceiptMatches(current, pending) &&
+  const replayingSettledFinalization = shouldReplaySettledFinalization(pending);
+  return current?.lifecycleSettled === replayingSettledFinalization &&
+    finalizedReceiptMatches(current, pending, !replayingSettledFinalization) &&
     current.connection.id === connected.connection.id &&
     current.connection.userId === connected.connection.userId
     ? { ...current, receipt }
@@ -183,6 +191,11 @@ export function finalizeLifecycle(
   gate: RegistrationGate,
 ): RealtimeReceiptState | undefined {
   if (pending.receiptState?.lifecycleSettled === true) {
+    if (shouldReplaySettledFinalization(pending)) {
+      return executeLifecycleCallback(options, pending, gate)
+        ? pending.receiptState
+        : undefined;
+    }
     return pending.receiptState;
   }
   const activationId = lifecycleActivationId(pending);

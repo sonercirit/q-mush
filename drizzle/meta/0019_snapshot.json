@@ -1545,7 +1545,7 @@
         },
         "runners_activation_phase_identity_check": {
           "name": "runners_activation_phase_identity_check",
-          "value": "(\"runners\".\"activation_phase\" IS NULL AND \"runners\".\"activation_id\" IS NULL AND \"runners\".\"activation_lifecycle\" IS NULL) OR (\"runners\".\"activation_phase\" IN ('prepared', 'finalized') AND \"runners\".\"activation_id\" IS NOT NULL AND \"runners\".\"activation_lifecycle\" IN ('ordinary', 'restart'))"
+          "value": "(\"runners\".\"activation_phase\" IS NULL AND \"runners\".\"activation_id\" IS NULL AND \"runners\".\"activation_lifecycle\" IS NULL) OR (\"runners\".\"activation_phase\" IS NOT NULL AND \"runners\".\"activation_phase\" IN ('prepared', 'finalized') AND \"runners\".\"activation_id\" IS NOT NULL AND \"runners\".\"activation_lifecycle\" IS NOT NULL AND \"runners\".\"activation_lifecycle\" IN ('ordinary', 'restart'))"
         },
         "runners_activation_settlement_identity_check": {
           "name": "runners_activation_settlement_identity_check",
@@ -1553,7 +1553,7 @@
         },
         "runners_activation_lifecycle_restart_check": {
           "name": "runners_activation_lifecycle_restart_check",
-          "value": "(\"runners\".\"activation_lifecycle\" IS NULL AND \"runners\".\"activation_restart_id\" IS NULL) OR (\"runners\".\"activation_lifecycle\" = 'ordinary' AND \"runners\".\"activation_restart_id\" IS NULL) OR (\"runners\".\"activation_lifecycle\" = 'restart' AND \"runners\".\"activation_restart_id\" IS NOT NULL)"
+          "value": "(\"runners\".\"activation_lifecycle\" IS NULL AND \"runners\".\"activation_restart_id\" IS NULL) OR (\"runners\".\"activation_lifecycle\" IS NOT NULL AND \"runners\".\"activation_lifecycle\" = 'ordinary' AND \"runners\".\"activation_restart_id\" IS NULL) OR (\"runners\".\"activation_lifecycle\" IS NOT NULL AND \"runners\".\"activation_lifecycle\" = 'restart' AND \"runners\".\"activation_restart_id\" IS NOT NULL)"
         },
         "runners_activation_scope_check": {
           "name": "runners_activation_scope_check",

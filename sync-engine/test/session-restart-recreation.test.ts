@@ -1,6 +1,11 @@
+import { eq } from "drizzle-orm";
 import { expect, test } from "vitest";
-import { agentSessions } from "../../shared/database/schema.ts";
-import type { ProviderCredentialAccess } from "../../shared/provider-credential-store.ts";
+import { CredentialCipher } from "../../shared/credential-cipher.ts";
+import {
+  agentSessions,
+  providerCredentials,
+} from "../../shared/database/schema.ts";
+import { ProviderCredentialStore } from "../../shared/provider-credential-store.ts";
 import {
   createSessionRestartControl,
   type SessionRestartControl,
@@ -26,6 +31,9 @@ import { STORE_RUNNER_ID } from "./session-store-test-fixtures.ts";
 type RestartCoordinatorLaunch = ConstructorParameters<
   typeof SessionRestartCoordinator
 >[0]["launch"];
+type RestartCoordinatorCredentialRead = ConstructorParameters<
+  typeof SessionRestartCoordinator
+>[0]["providers"]["openai"]["readCredential"];
 
 interface RestartCoordinatorFixture {
   readonly coordinator: SessionRestartCoordinator;
@@ -38,7 +46,7 @@ function restartCoordinatorFixture(
   setup: ReturnType<typeof pausedRunnerRestartStore>["setup"],
   launch: RestartCoordinatorLaunch,
   now: number,
-  readCredential: () => ProviderCredentialAccess | undefined = () => CREDENTIAL,
+  readCredential: RestartCoordinatorCredentialRead = () => CREDENTIAL,
 ): RestartCoordinatorFixture {
   const restart = createSessionRestartControl(
     new SessionRuntimes(),
@@ -168,6 +176,71 @@ test("recreated runtimes recover a durable runner handoff only through its exact
   await recoverRunner(coordinator, "restart-after-recreation");
   expectLaunches(attempts, expectedLaunches);
   expectRestartState(requireCompactionSession(setup.store), identity, "queued");
+  closeCompactionStore(setup);
+});
+
+test("restart recovery enforces the pending session workspace credential scope", async () => {
+  const { identity, setup } = pausedRunnerRestartStore("restart-scope");
+  const running = requireCompactionSession(setup.store);
+  const cipher = new CredentialCipher(
+    Uint8Array.from({ length: 32 }, () => 0),
+    (size) => new Uint8Array(size),
+  );
+  setup.database
+    .update(providerCredentials)
+    .set({
+      encryptedCredential: cipher.seal(
+        CREDENTIAL.secret,
+        `${TEST_USER_ID}:${running.credentialId}`,
+      ),
+      isGlobal: false,
+    })
+    .where(eq(providerCredentials.id, running.credentialId))
+    .run();
+  const credentialStore = new ProviderCredentialStore(
+    setup.database,
+    cipher,
+    "openai",
+  );
+  expect(
+    credentialStore.read(TEST_USER_ID, running.credentialId),
+  ).toBeDefined();
+  expect(
+    credentialStore.read(
+      TEST_USER_ID,
+      running.credentialId,
+      running.workspaceId,
+    ),
+  ).toBeUndefined();
+  const reads: {
+    readonly credentialId: string;
+    readonly userId: string;
+    readonly workspaceId: string | undefined;
+  }[] = [];
+  const scopeLaunches = new Set<string>();
+  const fixture = restartCoordinatorFixture(
+    setup,
+    (detail) => (scopeLaunches.add(detail.id), true),
+    TEST_NOW + 3,
+    (userId, credentialId, workspaceId) => {
+      reads.push({ credentialId, userId, workspaceId });
+      return credentialStore.read(userId, credentialId, workspaceId);
+    },
+  );
+  fixture.coordinator.restoreDurableRunnerGates();
+
+  await recoverRunner(fixture.coordinator, identity.restartId);
+
+  expect(reads).toEqual([
+    {
+      credentialId: running.credentialId,
+      userId: TEST_USER_ID,
+      workspaceId: running.workspaceId,
+    },
+  ]);
+  expectLaunches([...scopeLaunches], []);
+  expectRestartState(requireCompactionSession(setup.store), identity, "paused");
+  expect(fixture.retryDelays).toEqual([1_000]);
   closeCompactionStore(setup);
 });
 

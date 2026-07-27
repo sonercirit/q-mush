@@ -261,7 +261,7 @@ export const runners = sqliteTable(
     ),
     check(
       "runners_activation_phase_identity_check",
-      sql`(${table.activationPhase} IS NULL AND ${table.activationId} IS NULL AND ${table.activationLifecycle} IS NULL) OR (${table.activationPhase} IN ('prepared', 'finalized') AND ${table.activationId} IS NOT NULL AND ${table.activationLifecycle} IN ('ordinary', 'restart'))`,
+      sql`(${table.activationPhase} IS NULL AND ${table.activationId} IS NULL AND ${table.activationLifecycle} IS NULL) OR (${table.activationPhase} IS NOT NULL AND ${table.activationPhase} IN ('prepared', 'finalized') AND ${table.activationId} IS NOT NULL AND ${table.activationLifecycle} IS NOT NULL AND ${table.activationLifecycle} IN ('ordinary', 'restart'))`,
     ),
     check(
       "runners_activation_settlement_identity_check",
@@ -269,7 +269,7 @@ export const runners = sqliteTable(
     ),
     check(
       "runners_activation_lifecycle_restart_check",
-      sql`(${table.activationLifecycle} IS NULL AND ${table.activationRestartId} IS NULL) OR (${table.activationLifecycle} = 'ordinary' AND ${table.activationRestartId} IS NULL) OR (${table.activationLifecycle} = 'restart' AND ${table.activationRestartId} IS NOT NULL)`,
+      sql`(${table.activationLifecycle} IS NULL AND ${table.activationRestartId} IS NULL) OR (${table.activationLifecycle} IS NOT NULL AND ${table.activationLifecycle} = 'ordinary' AND ${table.activationRestartId} IS NULL) OR (${table.activationLifecycle} IS NOT NULL AND ${table.activationLifecycle} = 'restart' AND ${table.activationRestartId} IS NOT NULL)`,
     ),
     check(
       "runners_activation_scope_check",

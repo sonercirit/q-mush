@@ -36,6 +36,14 @@ const AGENT_SESSION_MIGRATIONS = [
   { file: "0012_damp_khan.sql", timestamp: 1_784_773_990_609 },
   { file: "0013_session-tools.sql", timestamp: 1_784_776_192_396 },
 ] as const;
+const WORKSPACE_MIGRATIONS = [
+  ...AGENT_SESSION_MIGRATIONS,
+  { file: "0014_mushy_jean_grey.sql", timestamp: 1_784_825_553_938 },
+  { file: "0015_agent-message-errors.sql", timestamp: 1_784_832_440_988 },
+  { file: "0016_thankful_silver_sable.sql", timestamp: 1_784_845_867_828 },
+  { file: "0017_plain_silver_samurai.sql", timestamp: 1_784_917_618_203 },
+  { file: "0018_tranquil_mephisto.sql", timestamp: 1_784_993_749_108 },
+] as const;
 const CURRENT_AGENT_SESSION_TOOLS =
   '["read","bash","edit","write","parallel","brave_search","spawn_session","browse_runner_directories","list_runners","list_sessions","get_session_options","read_session","reassign_session","send_to_session","continue_session","stop_session"]';
 const PREVIOUS_AGENT_SESSION_TOOLS =
@@ -44,6 +52,14 @@ const PREVIOUS_AGENT_SESSION_TOOLS =
 const SESSION_LIFETIME_MILLISECONDS = 7 * 24 * 60 * 60 * 1000;
 const UUID_V7_PATTERN =
   /^[\da-f]{8}-[\da-f]{4}-7[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/u;
+
+type LegacySessionFixture = Readonly<{
+  credentialId: string;
+  runnerId: string;
+  sessionId: string;
+  timestamp: number;
+  userId: string;
+}>;
 
 interface Migration {
   readonly file: string;
@@ -137,6 +153,85 @@ async function createLegacyDatabase(
   return { database, path };
 }
 
+function insertLegacySessionFixture(
+  database: Database,
+  fixture: LegacySessionFixture,
+): void {
+  const { credentialId, runnerId, sessionId, timestamp, userId } = fixture;
+  database.run(
+    `INSERT INTO users (
+      id, google_subject, email, name, created_at, created_by_id,
+      updated_at, updated_by_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      userId,
+      "session-migration-google-subject",
+      "session-migration@example.com",
+      "Session Migration",
+      timestamp,
+      SYSTEM_ID,
+      timestamp,
+      SYSTEM_ID,
+    ],
+  );
+  database.run(
+    `INSERT INTO provider_credentials (
+      id, user_id, created_at, created_by_id, updated_at, updated_by_id,
+      provider, label, source, encrypted_credential, credential_fingerprint
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      credentialId,
+      userId,
+      timestamp,
+      userId,
+      timestamp,
+      userId,
+      "openrouter",
+      "Session migration key",
+      "api_key",
+      "encrypted-session-migration-key",
+      "session-migration-key-fingerprint",
+    ],
+  );
+  database.run(
+    `INSERT INTO runners (
+      id, user_id, created_at, created_by_id, updated_at, updated_by_id,
+      token_hash
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      runnerId,
+      userId,
+      timestamp,
+      userId,
+      timestamp,
+      userId,
+      "session-migration-runner-token-hash",
+    ],
+  );
+  database.run(
+    `INSERT INTO agent_sessions (
+      id, user_id, created_at, created_by_id, updated_at, updated_by_id,
+      runner_id, provider_credential_id, provider, model, working_directory,
+      title, status
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      sessionId,
+      userId,
+      timestamp,
+      userId,
+      timestamp,
+      userId,
+      runnerId,
+      credentialId,
+      "openrouter",
+      "openai/gpt-4.1-mini",
+      "/workspace",
+      "Existing session",
+      "idle",
+    ],
+  );
+}
+
 async function migrateLegacyDatabase(
   database: Database,
   path: string,
@@ -178,78 +273,13 @@ test("session migration preserves transcripts with foreign keys", async () => {
   const sessionId = "018bcfe5-6800-7000-8000-000000000084";
   const messageId = "018bcfe5-6800-7000-8000-000000000085";
   const errorMessageId = "018bcfe5-6800-7000-8000-000000000086";
-  legacyDatabase.run(
-    `INSERT INTO users (
-      id, google_subject, email, name, created_at, created_by_id,
-      updated_at, updated_by_id
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      userId,
-      "session-migration-google-subject",
-      "session-migration@example.com",
-      "Session Migration",
-      timestamp,
-      SYSTEM_ID,
-      timestamp,
-      SYSTEM_ID,
-    ],
-  );
-  legacyDatabase.run(
-    `INSERT INTO provider_credentials (
-      id, user_id, created_at, created_by_id, updated_at, updated_by_id,
-      provider, label, source, encrypted_credential, credential_fingerprint
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      credentialId,
-      userId,
-      timestamp,
-      userId,
-      timestamp,
-      userId,
-      "openrouter",
-      "Session migration key",
-      "api_key",
-      "encrypted-session-migration-key",
-      "session-migration-key-fingerprint",
-    ],
-  );
-  legacyDatabase.run(
-    `INSERT INTO runners (
-      id, user_id, created_at, created_by_id, updated_at, updated_by_id,
-      token_hash
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [
-      runnerId,
-      userId,
-      timestamp,
-      userId,
-      timestamp,
-      userId,
-      "session-migration-runner-token-hash",
-    ],
-  );
-  legacyDatabase.run(
-    `INSERT INTO agent_sessions (
-      id, user_id, created_at, created_by_id, updated_at, updated_by_id,
-      runner_id, provider_credential_id, provider, model, working_directory,
-      title, status
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      sessionId,
-      userId,
-      timestamp,
-      userId,
-      timestamp,
-      userId,
-      runnerId,
-      credentialId,
-      "openrouter",
-      "openai/gpt-4.1-mini",
-      "/workspace",
-      "Existing session",
-      "idle",
-    ],
-  );
+  insertLegacySessionFixture(legacyDatabase, {
+    credentialId,
+    runnerId,
+    sessionId,
+    timestamp,
+    userId,
+  });
   legacyDatabase.run("UPDATE agent_sessions SET tools = ? WHERE id = ?", [
     PREVIOUS_AGENT_SESSION_TOOLS,
     sessionId,
@@ -333,6 +363,131 @@ test("session migration preserves transcripts with foreign keys", async () => {
     foreign_keys: 1,
   });
   upgradedDatabase.$client.close();
+});
+
+test("0019 migrates workspace and runner data", async () => {
+  const { database: legacyDatabase, path } = await createLegacyDatabase(
+    "q-mush-0019-",
+    "db.sqlite",
+    WORKSPACE_MIGRATIONS,
+  );
+  const fixtures = {
+    credentialId: "018bcfe5-6800-7000-8000-000000000092",
+    runnerId: "018bcfe5-6800-7000-8000-000000000093",
+    sessionId: "018bcfe5-6800-7000-8000-000000000094",
+    timestamp: 1_700_000_000_000,
+    userId: "018bcfe5-6800-7000-8000-000000000091",
+  };
+  insertLegacySessionFixture(legacyDatabase, fixtures);
+  legacyDatabase.close();
+  await runMigrationCommand(path);
+
+  const migratedDatabase = new Database(path, { readonly: true });
+  const workspaces = migratedDatabase
+    .query<
+      {
+        readonly id: string;
+        readonly isDefault: number;
+        readonly userId: string;
+      },
+      []
+    >("SELECT id, is_default AS isDefault, user_id AS userId FROM workspaces")
+    .all();
+  expect(workspaces).toEqual([
+    { id: fixtures.userId, isDefault: 1, userId: fixtures.userId },
+  ]);
+  expect(
+    migratedDatabase
+      .query<{ readonly workspaceId: string }, []>(
+        "SELECT workspace_id AS workspaceId FROM agent_sessions",
+      )
+      .get(),
+  ).toEqual({ workspaceId: fixtures.userId });
+  expect(
+    migratedDatabase
+      .query<
+        {
+          readonly activationGeneration: number;
+          readonly activationId: null;
+          readonly activationLifecycle: null;
+          readonly activationPhase: null;
+          readonly isGlobal: number;
+          readonly tokenDigest: string;
+        },
+        []
+      >(
+        `SELECT activation_generation AS activationGeneration,
+        activation_id AS activationId, activation_lifecycle AS activationLifecycle,
+        activation_phase AS activationPhase, is_global AS isGlobal,
+        token_digest AS tokenDigest FROM runners`,
+      )
+      .get(),
+  ).toEqual({
+    activationGeneration: 0,
+    activationId: null,
+    activationLifecycle: null,
+    activationPhase: null,
+    isGlobal: 1,
+    tokenDigest: "",
+  });
+
+  const constraintsDatabase = Database.deserialize(
+    migratedDatabase.serialize(),
+  );
+  migratedDatabase.close();
+  expect(() => {
+    constraintsDatabase
+      .query(
+        "UPDATE runners SET activation_id = 'a', activation_lifecycle = 'ordinary' WHERE id = ?",
+      )
+      .run(fixtures.runnerId);
+  }).toThrow("runners_activation_phase_identity_check");
+  expect(() =>
+    constraintsDatabase.run(
+      "UPDATE runners SET activation_restart_id = 'restart' WHERE id = ?",
+      [fixtures.runnerId],
+    ),
+  ).toThrow("runners_activation_lifecycle_restart_check");
+  expect(() => {
+    constraintsDatabase.run(
+      `UPDATE runners SET activation_phase = 'prepared', activation_id = 'a',
+        activation_source_id = 'source', activation_target_id = 'target',
+        activation_target_generation = 0, activation_machine_fingerprint = 'machine',
+        activation_platform = 'linux', activation_architecture = 'x64',
+        activation_name = 'Runner' WHERE runners.id = ?`,
+      [fixtures.runnerId],
+    );
+  }).toThrow("runners_activation_phase_identity_check");
+  expect(() =>
+    constraintsDatabase.run(
+      `UPDATE runners SET activation_phase = 'prepared', activation_id = 'valid',
+        activation_lifecycle = 'restart', activation_restart_id = 'restart',
+        activation_source_id = 'activation-source',
+        activation_target_id = 'activation-target', activation_target_generation = 1,
+        activation_machine_fingerprint = 'fingerprint', activation_platform = 'darwin',
+        activation_architecture = 'arm64', activation_name = 'Activated Runner'
+        WHERE id = ?`,
+      [fixtures.runnerId],
+    ),
+  ).not.toThrow();
+  const otherRunnerId = "018bcfe5-6800-7000-8000-000000000095";
+  constraintsDatabase.run(
+    `INSERT INTO runners (id, user_id, created_at, created_by_id, updated_at,
+      updated_by_id, token_hash) SELECT ?, user_id, created_at, created_by_id,
+      updated_at, updated_by_id, 'other-token-hash' FROM runners WHERE id = ?`,
+    [otherRunnerId, fixtures.runnerId],
+  );
+  constraintsDatabase.run(
+    "UPDATE runners SET token_digest = 'digest' WHERE id = ?",
+    [fixtures.runnerId],
+  );
+  expect(() =>
+    constraintsDatabase.run(
+      "UPDATE runners SET token_digest = 'digest' WHERE id = ?",
+      [otherRunnerId],
+    ),
+  ).toThrow("UNIQUE constraint failed: runners.token_digest");
+  constraintsDatabase.close();
 });
 
 test("OpenAI migration preserves existing OpenRouter credentials", async () => {

@@ -16,9 +16,10 @@ import {
   type SessionRunnerAvailability,
 } from "./session-runner-availability.ts";
 
-interface RestartCredentialSelection {
+export interface RestartCredentialSelection {
   readonly credentialId: string;
   readonly provider: "openai" | "openrouter";
+  readonly workspaceId: string;
 }
 
 interface SessionRestartRecoveryStore {
@@ -104,7 +105,11 @@ async function recoverOne(
   }
   let credential: ProviderCredentialAccess | undefined;
   try {
-    credential = await dependencies.credential(pending.userId, pending.detail);
+    credential = await dependencies.credential(pending.userId, {
+      credentialId: pending.detail.credentialId,
+      provider: pending.detail.provider,
+      workspaceId: pending.detail.workspaceId,
+    });
   } catch {
     return { pendingCredentials: true, pendingLaunches: false };
   }

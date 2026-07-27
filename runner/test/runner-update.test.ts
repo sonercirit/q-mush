@@ -377,6 +377,31 @@ test("an exact connection consumes only its own finalized receipt", () => {
   expectOperationalCallback(startupRestart);
 });
 
+test("a later connection replays finalized state while fencing the prior lease", () => {
+  const startupRestart = new RunnerStartupRestart();
+  const first = startupRestart.connection();
+
+  expect(first.prepareActivation("receipt-reconnect")).toBe(true);
+  expect(first.finalizeActivation("receipt-reconnect")).toBe(true);
+  expect(first.operational("receipt-reconnect")).toBe(true);
+  expect(startupRestart.retainedActivationReceipt).toBeUndefined();
+  expect(startupRestart.restartId).toBeUndefined();
+
+  const reconnect = startupRestart.connection();
+  expect(reconnect).toMatchObject({
+    activationReceipt: "receipt-reconnect",
+    activationReceiptPhase: "finalized",
+  });
+  expect(reconnect.restartId).toBeUndefined();
+  expect(first.prepareActivation("receipt-stale")).toBe(false);
+  expect(first.finalizeActivation("receipt-stale")).toBe(false);
+  expect(first.operational("receipt-reconnect")).toBe(false);
+
+  expect(reconnect.prepareActivation("receipt-reconnect")).toBe(true);
+  expect(reconnect.finalizeActivation("receipt-reconnect")).toBe(true);
+  expect(reconnect.operational("receipt-reconnect")).toBe(true);
+});
+
 test("stale or pre-finalized operational acknowledgements cannot consume activation state", () => {
   const startupRestart = new RunnerStartupRestart("restart-operational-fence");
   const connection = startupRestart.connection();
@@ -385,13 +410,14 @@ test("stale or pre-finalized operational acknowledgements cannot consume activat
   expect(connection.operational("prepared-receipt")).toBe(false);
   expect(connection.finalizeActivation("finalized-receipt")).toBe(true);
   expect(connection.operational("other-receipt")).toBe(false);
-  expect(startupRestart.connection()).toMatchObject({
+  const retained = startupRestart.connection();
+  expect(retained).toMatchObject({
     activationReceipt: "finalized-receipt",
     activationReceiptPhase: "finalized",
     restartId: "restart-operational-fence",
   });
-
-  expect(connection.operational("finalized-receipt")).toBe(true);
+  expect(connection.operational("finalized-receipt")).toBe(false);
+  expect(retained.operational("finalized-receipt")).toBe(true);
   expect(startupRestart.restartId).toBeUndefined();
 });
 

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   createSessionRestartControl,
   readSessionRestartCredential,
@@ -221,19 +221,30 @@ describe("session restart control", () => {
   });
 
   test("treats credential refresh failures as temporarily unavailable", async () => {
+    const readOpenai = vi.fn(() => Promise.reject(new Error("refresh failed")));
+    const readOpenrouter = vi.fn(() => OPENROUTER_CREDENTIAL);
     const readers = {
-      openai: {
-        readCredential: () => Promise.reject(new Error("refresh failed")),
-      },
-      openrouter: { readCredential: () => OPENROUTER_CREDENTIAL },
+      openai: { readCredential: readOpenai },
+      openrouter: { readCredential: readOpenrouter },
     };
 
     const read = (provider: "openai" | "openrouter") =>
       readSessionRestartCredential(readers, "user", {
         credentialId: `${provider}-credential`,
         provider,
+        workspaceId: "workspace-1",
       });
     await expect(read("openai")).resolves.toBeUndefined();
     await expect(read("openrouter")).resolves.toBe(OPENROUTER_CREDENTIAL);
+    expect(readOpenai).toHaveBeenCalledWith(
+      "user",
+      "openai-credential",
+      "workspace-1",
+    );
+    expect(readOpenrouter).toHaveBeenCalledWith(
+      "user",
+      "openrouter-credential",
+      "workspace-1",
+    );
   });
 });
