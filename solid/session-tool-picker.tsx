@@ -56,6 +56,7 @@ export function SessionToolPicker(props: {
   readonly onChange: (tools: readonly AgentSessionToolName[]) => void;
   readonly tools: readonly AgentSessionToolName[];
 }): JSX.Element {
+  const [expanded, setExpanded] = createSignal(true);
   const [openDetails, setOpenDetails] = createSignal<
     AgentSessionToolName | undefined
   >();
@@ -189,39 +190,55 @@ export function SessionToolPicker(props: {
       }}
     >
       <legend class="text-sm font-medium text-slate-200">
-        Tools &amp; skills
+        <span>Tools &amp; skills</span>
+        <button
+          aria-expanded={expanded()}
+          class="ml-3 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
+          data-tool-picker-toggle="true"
+          onClick={() => {
+            if (expanded()) closeDetails();
+            setExpanded((current) => !current);
+          }}
+          type="button"
+        >
+          {expanded() ? "Collapse tools" : "Expand tools"}
+        </button>
       </legend>
-      <p class="mt-1 text-xs leading-5 text-slate-500">
-        Choose what the agent may use in this session. You can run a session
-        with none selected. Use each info button to inspect its authoritative
-        schema.
-      </p>
-      <div class="mt-3 grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-3">
-        <For each={otherOptions}>{optionControl}</For>
-      </div>
-      <section class="mt-4 min-w-0 rounded-2xl border border-white/10 bg-white/[0.03] p-3 md:col-span-2">
-        <label class="flex items-center gap-3 text-sm font-semibold text-slate-200">
-          <input
-            checked={SESSION_AGENT_TOOL_NAMES.every(isSelected)}
-            disabled={props.disabled}
-            name="session-tools"
-            onChange={(event) => {
-              toggleGroup(
-                SESSION_AGENT_TOOL_NAMES,
-                event.currentTarget.checked,
-              );
-            }}
-            type="checkbox"
-          />
-          Session tools
-        </label>
-        <p class="mt-1 text-xs leading-5 text-slate-500">
-          Toggle all tools for creating and controlling agent sessions.
-        </p>
-        <div class="mt-3 grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-3">
-          <For each={sessionOptions}>{optionControl}</For>
+      <Show when={expanded()}>
+        <div data-tool-picker-controls="true">
+          <p class="mt-1 text-xs leading-5 text-slate-500">
+            Choose what the agent may use in this session. You can run a session
+            with none selected. Use each info button to inspect its
+            authoritative schema.
+          </p>
+          <div class="mt-3 grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            <For each={otherOptions}>{optionControl}</For>
+          </div>
+          <section class="mt-4 min-w-0 rounded-2xl border border-white/10 bg-white/[0.03] p-3 md:col-span-2">
+            <label class="flex items-center gap-3 text-sm font-semibold text-slate-200">
+              <input
+                checked={SESSION_AGENT_TOOL_NAMES.every(isSelected)}
+                disabled={props.disabled}
+                name="session-tools"
+                onChange={(event) => {
+                  toggleGroup(
+                    SESSION_AGENT_TOOL_NAMES,
+                    event.currentTarget.checked,
+                  );
+                }}
+                type="checkbox"
+              />
+              Session tools
+            </label>
+            <p class="mt-1 text-xs leading-5 text-slate-500">
+              Toggle all tools for creating and controlling agent sessions.
+            </p>
+            <div class="mt-3 grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              <For each={sessionOptions}>{optionControl}</For>
+            </div>
+          </section>
         </div>
-      </section>
+      </Show>
     </fieldset>
   );
 }

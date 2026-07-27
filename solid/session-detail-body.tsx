@@ -3,6 +3,7 @@ import {
   createMemo,
   createSignal,
   on,
+  onCleanup,
   onMount,
   Show,
   type JSX,
@@ -31,6 +32,34 @@ import {
 } from "./session-transcript.tsx";
 
 const SCROLL_END_TOLERANCE = 1;
+const COPY_FEEDBACK_DURATION_MS = 2_000;
+
+type SessionCopyState = "copied" | "failed" | "idle";
+
+function sessionCopyText(detail: AgentSessionDetail): string {
+  const transcript = detail.messages
+    .filter(({ content }) => content.length > 0)
+    .map(({ content, role }) => `${role}: ${content}`);
+  return [
+    detail.title,
+    `Session ID: ${detail.id}`,
+    `Status: ${detail.status}`,
+    `Model: ${detail.provider} · ${detail.model}`,
+    `Working directory: ${detail.workingDirectory}`,
+    ...(transcript.length === 0 ? [] : ["", "Transcript", ...transcript]),
+  ].join("\n");
+}
+
+function copyButtonLabel(state: SessionCopyState): string {
+  switch (state) {
+    case "copied":
+      return "Copied!";
+    case "failed":
+      return "Copy failed";
+    case "idle":
+      return "Copy session";
+  }
+}
 
 function scrollRevision(
   detail: AgentSessionDetail,
@@ -81,8 +110,30 @@ export function SessionDetailBody(props: {
     view.state.stopping;
   const visibleMessages = (): AgentSessionDetail["messages"] =>
     view.state.history.page?.messages ?? view.detail.messages;
+  const [copyState, setCopyState] = createSignal<SessionCopyState>("idle");
   const [scrollLockEnabled, setScrollLockEnabled] = createSignal(true);
   const [transcript, setTranscript] = createSignal<HTMLUListElement>();
+  let copyFeedbackTimer: number | undefined;
+  const copySession = async (): Promise<void> => {
+    if (copyFeedbackTimer !== undefined) {
+      window.clearTimeout(copyFeedbackTimer);
+    }
+    try {
+      await navigator.clipboard.writeText(sessionCopyText(view.detail));
+      setCopyState("copied");
+    } catch {
+      setCopyState("failed");
+    }
+    copyFeedbackTimer = window.setTimeout(() => {
+      setCopyState("idle");
+      copyFeedbackTimer = undefined;
+    }, COPY_FEEDBACK_DURATION_MS);
+  };
+  onCleanup(() => {
+    if (copyFeedbackTimer !== undefined) {
+      window.clearTimeout(copyFeedbackTimer);
+    }
+  });
   const filterCounts = createMemo(() =>
     sessionTranscriptFilterCounts(
       view.detail.agentFile,
@@ -131,6 +182,15 @@ export function SessionDetailBody(props: {
           <span class="mt-2 block">{props.sessionMetrics}</span>
         </div>
         <div class="flex shrink-0 flex-wrap items-center gap-2">
+          <button
+            aria-live="polite"
+            class="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-emerald-300/30 hover:text-emerald-200 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
+            data-copy-session="true"
+            onClick={() => void copySession()}
+            type="button"
+          >
+            {copyButtonLabel(copyState())}
+          </button>
           <button
             aria-pressed={scrollLockEnabled()}
             class={`rounded-full border px-3 py-1.5 text-xs font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300 ${scrollLockEnabled() ? "border-emerald-300/30 bg-emerald-300/10 text-emerald-200" : "border-white/10 bg-white/[0.04] text-slate-400 hover:border-white/20 hover:text-slate-200"}`}

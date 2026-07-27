@@ -78,6 +78,35 @@ afterEach(() => {
   }
 });
 
+function toolInputCount(container: HTMLElement): number {
+  return container.querySelectorAll("input[name='tools']").length;
+}
+
+test("collapses to the toggle and restores the complete tool controls", () => {
+  const { container } = mountPicker();
+  const toggle = container.querySelector("[data-tool-picker-toggle='true']");
+  if (!(toggle instanceof HTMLButtonElement)) {
+    throw new TypeError("The tool-picker collapse toggle was not rendered");
+  }
+
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(toggle.textContent).toContain("Collapse tools");
+  expect(toolInputCount(container)).toBe(AGENT_SESSION_TOOL_NAMES.length);
+
+  toggle.click();
+
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  expect(toggle.textContent).toContain("Expand tools");
+  expect(toolInputCount(container)).toBe(0);
+  expect(container.querySelector("input[name='session-tools']")).toBeNull();
+
+  toggle.click();
+
+  expect(
+    container.querySelector("[data-tool-picker-controls='true']"),
+  ).toBeInstanceOf(HTMLDivElement);
+});
+
 test("renders an accessible info button for every canonical picker row", () => {
   const { container } = mountPicker();
   const buttons = container.querySelectorAll("button[data-tool-details]");

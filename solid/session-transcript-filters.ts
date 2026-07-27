@@ -29,10 +29,10 @@ function transcriptFilterDefaults(): SessionTranscriptFilters {
     agentInstructions: true,
     assistantMessages: true,
     notices: true,
-    systemPrompt: false,
-    thinking: false,
+    systemPrompt: true,
+    thinking: true,
     toolActivity: true,
-    toolDefinitions: false,
+    toolDefinitions: true,
     userMessages: true,
   };
 }

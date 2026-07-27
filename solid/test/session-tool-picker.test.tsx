@@ -16,6 +16,14 @@ function renderPicker(): string {
   ));
 }
 
+test("renders an expanded tool-list toggle", () => {
+  const html = renderPicker();
+
+  expect(html).toContain('data-tool-picker-toggle="true"');
+  expect(html).toContain('aria-expanded="true"');
+  expect(html).toContain("Collapse tools");
+});
+
 test("renders one details affordance for every canonical selectable tool", () => {
   const html = renderPicker();
 
