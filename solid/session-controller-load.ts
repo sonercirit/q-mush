@@ -57,6 +57,32 @@ export type SessionCreationReconciliation =
     }
   | { readonly status: "ambiguous" };
 
+type SessionCreationKind = "create" | "fork";
+
+function forkCandidateMatches(
+  candidate: AgentSessionSummary,
+  source: AgentSessionDetail | undefined,
+): boolean {
+  return (
+    source !== undefined &&
+    candidate.parentSessionId === null &&
+    candidate.title === `Fork of ${source.title}`.slice(0, 80) &&
+    candidate.workspaceId === source.workspaceId
+  );
+}
+
+function createdSessionsForKind(
+  kind: SessionCreationKind,
+  sessions: readonly AgentSessionSummary[],
+  previousIds: ReadonlySet<string>,
+  source: AgentSessionDetail | undefined,
+): readonly AgentSessionSummary[] {
+  const created = sessions.filter(({ id }) => !previousIds.has(id));
+  return kind === "fork"
+    ? created.filter((candidate) => forkCandidateMatches(candidate, source))
+    : created;
+}
+
 export class SessionLoadController {
   #generation = 0;
   #hydrating = false;
@@ -143,7 +169,10 @@ export class SessionLoadController {
 
   async reconcileSessions(
     previousIds: ReadonlySet<string>,
+    kind: SessionCreationKind = "create",
   ): Promise<SessionCreationReconciliation | undefined> {
+    const pending = kind === "create" ? "creating" : "forking";
+    const source = kind === "fork" ? this.#view.value.detail : undefined;
     const reconciliationGeneration = this.#generation;
     const sessions = await this.#loadRealtimeSummaries();
     if (
@@ -153,11 +182,16 @@ export class SessionLoadController {
       return undefined;
     }
     try {
-      const createdSessions = sessions.filter(({ id }) => !previousIds.has(id));
+      const createdSessions = createdSessionsForKind(
+        kind,
+        sessions,
+        previousIds,
+        source,
+      );
       if (createdSessions.length > 1) {
         return { status: "ambiguous" };
       }
-      if (!this.#view.value.creating) {
+      if (!this.#view.value[pending]) {
         return undefined;
       }
       const created = createdSessions[0];

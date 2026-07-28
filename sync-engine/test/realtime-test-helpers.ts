@@ -218,6 +218,10 @@ class RealtimeTestSessionCommands implements SessionRealtimeCommands {
     return Promise.resolve(REALTIME_TEST_SESSION_DETAIL);
   }
 
+  forkForUser() {
+    return Promise.resolve(REALTIME_TEST_SESSION_DETAIL);
+  }
+
   historyForUser() {
     return realtimeTestHistoryPage();
   }

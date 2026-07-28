@@ -39,6 +39,7 @@ export function realtimeTestSessionCommands(
     compactForUser: () => Promise.resolve(REALTIME_TEST_SESSION_DETAIL),
     continueForUser: () => Promise.resolve(REALTIME_TEST_SESSION_DETAIL),
     createForUser: () => Promise.resolve(REALTIME_TEST_SESSION_DETAIL),
+    forkForUser: () => Promise.resolve(REALTIME_TEST_SESSION_DETAIL),
     historyForUser: () => undefined,
     messageForUser: () => Promise.resolve(REALTIME_TEST_SESSION_DETAIL),
     modelsForUser: emptyTestModelCatalog,

@@ -60,6 +60,7 @@ export function SessionProviderUpdateEditor(
   const [providers, setProviders] =
     createSignal<Awaited<ReturnType<typeof props.onDiscoverProviders>>>();
   const [open, setOpen] = createSignal<"credential" | "model" | "provider">();
+  const [expanded, setExpanded] = createSignal(false);
   const [confirming, setConfirming] = createSignal(false);
   const [pending, setPending] = createSignal(false);
   const [error, setError] = createSignal<string>();
@@ -84,7 +85,12 @@ export function SessionProviderUpdateEditor(
     const model = catalog.models.some(({ id }) => id === next.model)
       ? next.model
       : (catalog.models[0]?.id ?? "");
-    const selected = { ...next, model, openRouterProviderTag: null };
+    const selected = {
+      ...next,
+      model,
+      openRouterProviderTag:
+        model === next.model ? next.openRouterProviderTag : null,
+    };
     setDraft(selected);
     if (selected.provider === "openrouter" && model.length > 0) {
       setProviders(
@@ -106,6 +112,13 @@ export function SessionProviderUpdateEditor(
   const chooseCredential = (value: string): void => {
     const credential = parseCredential(value);
     if (credential === undefined) return;
+    if (
+      credential.credentialId === draft().credentialId &&
+      credential.provider === draft().provider
+    ) {
+      setOpen(undefined);
+      return;
+    }
     setError(undefined);
     setOpen(undefined);
     void discoverModels({
@@ -116,6 +129,10 @@ export function SessionProviderUpdateEditor(
     });
   };
   const chooseModel = (model: string): void => {
+    if (model === draft().model) {
+      setOpen(undefined);
+      return;
+    }
     const next = { ...draft(), model, openRouterProviderTag: null };
     setDraft(next);
     setOpen(undefined);
@@ -142,89 +159,105 @@ export function SessionProviderUpdateEditor(
 
   return (
     <section class="mt-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-      <h4 class="text-sm font-semibold text-slate-200">Session provider</h4>
-      <p class="mt-1 text-xs leading-5 text-slate-500">
-        Change the model account, provider, model, or OpenRouter serving
-        provider for future turns.
-      </p>
-      <div class="mt-4 grid gap-4 sm:grid-cols-2">
-        <CustomSelect
-          disabled={
-            props.disabled || pending() || props.credentials.length === 0
-          }
-          emptyLabel="No scoped model credentials"
-          id="session-provider-credential"
-          label="Model credential"
-          name="sessionProviderCredential"
-          onChoose={chooseCredential}
-          onToggle={() =>
-            setOpen(open() === "credential" ? undefined : "credential")
-          }
-          open={open() === "credential"}
-          options={credentialOptions(props.credentials)}
-          required
-          selectedValue={providerCredentialValue(draft())}
-        />
-        <CustomSelect
-          disabled={
-            props.disabled || pending() || modelOptions(models()).length === 0
-          }
-          emptyLabel="Models unavailable"
-          id="session-provider-model"
-          label="Model"
-          name="sessionProviderModel"
-          onChoose={chooseModel}
-          onToggle={() => setOpen(open() === "model" ? undefined : "model")}
-          open={open() === "model"}
-          options={modelOptions(models())}
-          required
-          selectedValue={draft().model}
-        />
-        <Show
-          when={draft().provider === "openrouter" && draft().model.length > 0}
+      <h4 class="text-sm font-semibold text-slate-200">
+        <span>Session provider</span>
+        <button
+          aria-expanded={expanded()}
+          class="ml-3 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
+          data-session-provider-toggle="true"
+          onClick={() => setExpanded((current) => !current)}
+          type="button"
         >
-          <OpenRouterProviderSelect
-            controller={{
-              chooseOption: (_name, value) => {
-                setDraft({ ...draft(), openRouterProviderTag: value || null });
-                setOpen(undefined);
-              },
-              retryProviders: () => {
-                void props
-                  .onDiscoverProviders(draft().credentialId, draft().model)
-                  .then(setProviders);
-              },
-              toggleSelect: () =>
-                setOpen(open() === "provider" ? undefined : "provider"),
-            }}
-            creating={props.disabled || pending()}
-            discovery={{
-              catalog: providers(),
-              error: providers() === undefined ? "unavailable" : undefined,
-              key: "provider-update",
-              loading: providers() === undefined,
-            }}
-            open={open() === "provider"}
-            selectedValue={draft().openRouterProviderTag ?? ""}
+          {expanded() ? "Collapse" : "Expand"}
+        </button>
+      </h4>
+      <Show when={expanded()}>
+        <p class="mt-1 text-xs leading-5 text-slate-500">
+          Change the model account, provider, model, or OpenRouter serving
+          provider for future turns.
+        </p>
+        <div class="mt-4 grid gap-4 sm:grid-cols-2">
+          <CustomSelect
+            disabled={
+              props.disabled || pending() || props.credentials.length === 0
+            }
+            emptyLabel="No scoped model credentials"
+            id="session-provider-credential"
+            label="Model credential"
+            name="sessionProviderCredential"
+            onChoose={chooseCredential}
+            onToggle={() =>
+              setOpen(open() === "credential" ? undefined : "credential")
+            }
+            open={open() === "credential"}
+            options={credentialOptions(props.credentials)}
+            required
+            selectedValue={providerCredentialValue(draft())}
           />
+          <CustomSelect
+            disabled={
+              props.disabled || pending() || modelOptions(models()).length === 0
+            }
+            emptyLabel="Models unavailable"
+            id="session-provider-model"
+            label="Model"
+            name="sessionProviderModel"
+            onChoose={chooseModel}
+            onToggle={() => setOpen(open() === "model" ? undefined : "model")}
+            open={open() === "model"}
+            options={modelOptions(models())}
+            required
+            selectedValue={draft().model}
+          />
+          <Show
+            when={draft().provider === "openrouter" && draft().model.length > 0}
+          >
+            <OpenRouterProviderSelect
+              controller={{
+                chooseOption: (_name, value) => {
+                  setDraft({
+                    ...draft(),
+                    openRouterProviderTag: value || null,
+                  });
+                  setOpen(undefined);
+                },
+                retryProviders: () => {
+                  void props
+                    .onDiscoverProviders(draft().credentialId, draft().model)
+                    .then(setProviders);
+                },
+                toggleSelect: () =>
+                  setOpen(open() === "provider" ? undefined : "provider"),
+              }}
+              creating={props.disabled || pending()}
+              discovery={{
+                catalog: providers(),
+                error: providers() === undefined ? "unavailable" : undefined,
+                key: "provider-update",
+                loading: providers() === undefined,
+              }}
+              open={open() === "provider"}
+              selectedValue={draft().openRouterProviderTag ?? ""}
+            />
+          </Show>
+        </div>
+        <Show when={error()}>
+          {(message) => (
+            <p class="mt-4 text-sm text-rose-200" role="alert">
+              {message()}
+            </p>
+          )}
         </Show>
-      </div>
-      <Show when={error()}>
-        {(message) => (
-          <p class="mt-4 text-sm text-rose-200" role="alert">
-            {message()}
-          </p>
-        )}
+        <button
+          class="mt-4 rounded-xl border border-cyan-300/30 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-100 disabled:opacity-50"
+          data-session-provider-update-submit="true"
+          disabled={disabled()}
+          onClick={() => setConfirming(true)}
+          type="button"
+        >
+          Change provider
+        </button>
       </Show>
-      <button
-        class="mt-4 rounded-xl border border-cyan-300/30 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-100 disabled:opacity-50"
-        data-session-provider-update-submit="true"
-        disabled={disabled()}
-        onClick={() => setConfirming(true)}
-        type="button"
-      >
-        Change provider
-      </button>
       <Show when={confirming()}>
         <div
           aria-modal="true"

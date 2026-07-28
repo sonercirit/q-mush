@@ -18,6 +18,7 @@ import {
   removeSessionControllerImage,
 } from "./session-controller-actions.ts";
 import { createSessionFromView } from "./session-controller-create.ts";
+import { forkSessionFromView } from "./session-controller-fork.ts";
 import {
   selectedDetailHasStatus,
   selectedMutation,
@@ -29,7 +30,10 @@ import {
   showNewestSessionHistory,
 } from "./session-controller-history.ts";
 import { SessionLoadController } from "./session-controller-load.ts";
-import type { SessionToolUpdateResult } from "./session-controller-options.ts";
+import type {
+  SessionCreationViewOptions,
+  SessionToolUpdateResult,
+} from "./session-controller-options.ts";
 import { SessionPendingInputController } from "./session-controller-pending-input.ts";
 import { answerSessionQuestions } from "./session-controller-questions.ts";
 import {
@@ -43,9 +47,8 @@ import {
   initialTranscriptFilters,
   updatedTranscriptFilters,
 } from "./session-controller-transcript.ts";
-import { loadSessionHistoryPage } from "./session-history-controller.ts";
-
 import { selectedDraftOption } from "./session-form.ts";
+import { loadSessionHistoryPage } from "./session-history-controller.ts";
 import { SessionModelController } from "./session-model-controller.ts";
 import {
   compactionModeMutation,
@@ -271,13 +274,16 @@ export class SessionController {
   continueSession(): Promise<void> {
     return this.#continue();
   }
-  create(): Promise<void> {
-    return createSessionFromView({
+  #createOptions(): SessionCreationViewOptions {
+    return {
       loader: this.#loader,
       reconciliation: this.#reconciliation,
       transport: this.#transport,
       view: this.#view,
-    });
+    };
+  }
+  create(): Promise<void> {
+    return createSessionFromView(this.#createOptions());
   }
   initializeDefaults(
     runnerId: string,
@@ -285,13 +291,11 @@ export class SessionController {
     credentialSettled: boolean,
   ): void {
     const draft = this.#view.value.draft;
-    const defaultedCredential = credentialSettled
-      ? credential
-      : draft.credential;
+    const credentialId = credentialSettled ? credential : draft.credential;
     const next = {
       ...draft,
-      credential: defaultedCredential,
-      ...(defaultedCredential === draft.credential
+      credential: credentialId,
+      ...(credentialId === draft.credential
         ? {}
         : { model: "", openRouterProviderTag: "", reasoningEffort: "" }),
       runnerId,
@@ -427,6 +431,12 @@ export class SessionController {
   }
   followUp(): Promise<void> {
     return this.#pendingInputs.submit("follow_up");
+  }
+  fork(messageId: string): Promise<void> {
+    return forkSessionFromView({
+      ...this.#createOptions(),
+      forkPointMessageId: messageId,
+    });
   }
   send(): Promise<void> {
     return this.#send();

@@ -1,6 +1,7 @@
 import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
+import type { SessionForkInput } from "../shared/session-fork.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import type { SessionProviderUpdateInput } from "../shared/session-provider-update.ts";
 import type {
@@ -223,6 +224,29 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
       throw new RealtimeCommandError("command_failed");
     }
     return created.detail;
+  };
+
+  forkForUser = (
+    user: AuthenticatedUser,
+    input: SessionForkInput,
+    workspaceId: string,
+  ): Promise<AgentSessionDetail> => {
+    if (input.workspaceId !== workspaceId) {
+      throw new RealtimeCommandError("not_found");
+    }
+    this.#detail(user.id, input.sourceSessionId, workspaceId);
+    const result = this.#dependencies.store.fork(
+      user.id,
+      input.sourceSessionId,
+      input.forkPointMessageId,
+      workspaceId,
+      this.#dependencies.now(),
+    );
+    if (result.status !== "forked") {
+      throw new RealtimeCommandError(result.status);
+    }
+    this.#dependencies.notify(user.id, result.detail.id);
+    return Promise.resolve(result.detail);
   };
 
   async messageForUser(

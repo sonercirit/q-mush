@@ -205,6 +205,33 @@ describe("session realtime command dispatch", () => {
     );
   });
 
+  test("dispatches a session fork in the authenticated workspace", async () => {
+    const integration = realtimeTestSessionCommands();
+    const forkForUser = vi.spyOn(integration, "forkForUser");
+    const payload = {
+      forkPointMessageId: "message-1",
+      sourceSessionId: "session-1",
+      workspaceId: TEST_WORKSPACE_ID,
+    };
+
+    await expect(
+      execute(integration, SESSION_REALTIME_OPERATIONS.fork, payload),
+    ).resolves.toEqual(REALTIME_TEST_SESSION_DETAIL);
+    expect(forkForUser).toHaveBeenCalledWith(
+      TEST_USER,
+      payload,
+      TEST_WORKSPACE_ID,
+    );
+
+    await expect(
+      execute(integration, SESSION_REALTIME_OPERATIONS.fork, {
+        ...payload,
+        workspaceId: "other-workspace",
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect(forkForUser).toHaveBeenCalledTimes(1);
+  });
+
   test("dispatches a confirmed provider update in the authenticated workspace", async () => {
     const updateProviderForUser = vi.fn(() =>
       Promise.resolve(REALTIME_TEST_SESSION_DETAIL),

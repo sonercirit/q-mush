@@ -38,8 +38,9 @@ export interface SessionViewState {
   readonly answeringQuestions: boolean;
   readonly compacting: boolean;
   readonly creating: boolean;
-  readonly directoryPicker: DirectoryPickerState;
   readonly detail: AgentSessionDetail | undefined;
+  readonly directoryPicker: DirectoryPickerState;
+  readonly forking: boolean;
   readonly draft: SessionDraft;
   readonly error: string | undefined;
   readonly followUp: string;

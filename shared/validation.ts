@@ -30,6 +30,12 @@ export function stringArray(value: unknown): readonly string[] | undefined {
     : undefined;
 }
 
+export function readIdentifier(value: unknown): string | undefined {
+  return typeof value === "string" && /^[A-Za-z\d._:-]{1,200}$/u.test(value)
+    ? value
+    : undefined;
+}
+
 export function readBoundedString(
   value: unknown,
   maximumLength: number,

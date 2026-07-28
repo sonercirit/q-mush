@@ -6,10 +6,11 @@ import type { RevisionState } from "./revision-state.ts";
 import type { SessionViewState } from "./session-client.tsx";
 import type { SessionCreationDescriptor } from "./session-controller-create.ts";
 import { sessionDetailState } from "./session-controller-detail.ts";
-import {
-  type SessionCreationReconciliation,
-  type SessionLoadController,
+import type {
+  SessionCreationReconciliation,
+  SessionLoadController,
 } from "./session-controller-load.ts";
+import { newestSessionHistoryState } from "./session-history-state.ts";
 import type { SessionMutationAcknowledgement } from "./session-mutation-acknowledgement.ts";
 import {
   acknowledgeSessionMutation,
@@ -34,6 +35,13 @@ interface UnknownCreationReconciliation {
   readonly revision: number;
 }
 
+interface UnknownForkReconciliation {
+  readonly baseline: SessionCreationBaseline;
+  readonly error: unknown;
+  readonly kind: "fork";
+  readonly revision: number;
+}
+
 interface UnknownDetailReconciliation {
   readonly baseline: AgentSessionDetail;
   readonly error: unknown;
@@ -43,7 +51,9 @@ interface UnknownDetailReconciliation {
 }
 
 type UnknownMutationReconciliation =
-  UnknownCreationReconciliation | UnknownDetailReconciliation;
+  | UnknownCreationReconciliation
+  | UnknownDetailReconciliation
+  | UnknownForkReconciliation;
 
 /** @public Monotonic detail comparison used by reconciliation tests. */
 export function sessionDetailIsAtLeast(
@@ -188,6 +198,20 @@ function creationErrorState(
   };
 }
 
+function forkErrorState(error: unknown): Partial<SessionViewState> {
+  return { error: sessionMutationError(error, "fork that session") };
+}
+
+function mutationOutcome(
+  outcome: SessionCreationReconciliation | undefined,
+  reconciliation: UnknownCreationReconciliation | UnknownForkReconciliation,
+): Exclude<SessionCreationReconciliation, { status: "ambiguous" }> | undefined {
+  return reconciliation.baseline.bounded &&
+    (outcome?.status === "created" || outcome?.status === "not_created")
+    ? outcome
+    : undefined;
+}
+
 function creationState(
   state: SessionViewState,
   reconciliation: UnknownCreationReconciliation,
@@ -232,6 +256,33 @@ function creationState(
       };
 }
 
+function forkState(
+  state: SessionViewState,
+  outcome: SessionCreationReconciliation | undefined,
+  reconciliation: UnknownForkReconciliation,
+): Partial<SessionViewState> {
+  const settled = mutationOutcome(outcome, reconciliation);
+  if (settled === undefined) return forkErrorState(reconciliation.error);
+  const sessions = reconciledSessions(state, settled.sessions);
+  if (settled.status === "created") {
+    return sessionDetailState({ ...state, sessions }, settled.detail, {
+      error: undefined,
+      followUp: "",
+      followUpImages: [],
+      forking: false,
+      history: newestSessionHistoryState(settled.detail.hasOlderSegments),
+      loadingDetail: false,
+      selectedId: settled.detail.id,
+      toolStreams: [],
+    });
+  }
+  return {
+    ...forkErrorState(reconciliation.error),
+    forking: false,
+    sessions,
+  };
+}
+
 function detailState(
   state: SessionViewState,
   reconciliation: UnknownDetailReconciliation,
@@ -258,7 +309,9 @@ function reconciliationSettled(
 ): boolean {
   return reconciliation.kind === "creation"
     ? patch.creating === false
-    : patch[reconciliation.options.pending] === false;
+    : reconciliation.kind === "fork"
+      ? patch.forking === false
+      : patch[reconciliation.options.pending] === false;
 }
 
 export class SessionReconciliationController {
@@ -290,6 +343,19 @@ export class SessionReconciliationController {
       descriptor,
       error,
       kind: "creation",
+      revision,
+    });
+  }
+
+  async fork(
+    revision: number,
+    error: unknown,
+    baseline: ReadonlySet<string>,
+  ): Promise<void> {
+    await this.#start({
+      baseline: cappedSessionCreationIds(baseline),
+      error,
+      kind: "fork",
       revision,
     });
   }
@@ -352,6 +418,17 @@ export class SessionReconciliationController {
           reconnectGeneration,
           reconciliation,
           creationState(this.#view.value, reconciliation, outcome),
+        );
+      } else if (reconciliation.kind === "fork") {
+        const outcome = await this.#loader.reconcileSessions(
+          reconciliation.baseline.ids,
+          "fork",
+        );
+        this.#settleCurrent(
+          generation,
+          reconnectGeneration,
+          reconciliation,
+          forkState(this.#view.value, outcome, reconciliation),
         );
       } else {
         const sessionId = reconciliation.options.payload["sessionId"];

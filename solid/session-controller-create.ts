@@ -7,9 +7,10 @@ import { requestJson } from "./browser-http.ts";
 import type { SessionViewState } from "./session-client.tsx";
 import { readSessionDetail } from "./session-codec.ts";
 import { sessionDetailState } from "./session-controller-detail.ts";
-import type { SessionLoadController } from "./session-controller-load.ts";
-import type { SessionCommandViewOptions } from "./session-controller-options.ts";
-import type { SessionReconciliationController } from "./session-controller-reconciliation.ts";
+import type {
+  SessionCommandViewOptions,
+  SessionCreationViewOptions,
+} from "./session-controller-options.ts";
 import { selectedSessionCredential } from "./session-controller-state.ts";
 import { reconcileUnknownSessionMutation } from "./session-mutation-reconciliation.ts";
 import { sessionMutationError } from "./session-mutations.ts";
@@ -78,10 +79,7 @@ function sessionCreatePayload(
 }
 
 export async function createSessionFromView(
-  options: SessionCommandViewOptions & {
-    readonly loader: SessionLoadController;
-    readonly reconciliation: SessionReconciliationController;
-  },
+  options: SessionCreationViewOptions,
 ): Promise<void> {
   if (
     options.view.value.creating ||
