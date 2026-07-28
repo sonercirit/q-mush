@@ -175,6 +175,7 @@ function sessionDetailMutationPending(state: SessionViewState): boolean {
   return (
     state.answeringQuestions ||
     state.compacting ||
+    state.forking ||
     state.reassigning ||
     state.sending ||
     state.stopping ||

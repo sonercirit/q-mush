@@ -45,8 +45,16 @@ export function errorMessageValues(content: string): StoredMessageValues {
   return { ...emptyToolMetadata(), content, role: "error" };
 }
 
-export function storedUserMessageValues(content: string): StoredMessageValues {
-  return { ...emptyToolMetadata(), content, role: "user" };
+export function storedUserMessageValues(
+  content: string,
+  images: readonly AgentImage[] = [],
+): StoredMessageValues {
+  return {
+    ...emptyToolMetadata(),
+    content,
+    images: serializeStoredImages(images),
+    role: "user",
+  };
 }
 
 export function interruptedSessionErrorValues(): StoredMessageValues {

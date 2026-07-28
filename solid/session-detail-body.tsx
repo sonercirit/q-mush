@@ -275,6 +275,11 @@ export function SessionDetailBody(props: {
           executionEnvironment={view.detail.executionEnvironment}
           filters={view.state.transcriptFilters}
           messages={visibleMessages()}
+          onFork={
+            view.state.history.page === undefined
+              ? (messageId) => void view.controller.fork(messageId)
+              : undefined
+          }
           toolStreams={
             view.state.history.page === undefined ? view.state.toolStreams : []
           }

@@ -76,6 +76,7 @@ function renderMessages(
   tools = AGENT_SESSION_TOOL_NAMES,
   filters: SessionTranscriptFilters = DEFAULT_SESSION_TRANSCRIPT_FILTERS,
   agentFile: AgentFile | null = null,
+  onFork?: (messageId: string) => void,
 ): string {
   return renderSolidToString(() => (
     <SessionTranscript
@@ -83,6 +84,7 @@ function renderMessages(
       executionEnvironment="bare_metal"
       filters={filters}
       messages={messages}
+      {...(onFork === undefined ? {} : { onFork })}
       tools={tools}
     />
   ));
@@ -268,6 +270,43 @@ test("shows only the session's selected tool definitions", () => {
   expect(html).toContain('"brave_search"');
   expect(html).not.toContain('"bash"');
   expect(html).not.toContain('"parallel"');
+});
+
+function renderForkMessages(messages: readonly AgentSessionMessage[]): string {
+  return renderMessages(
+    messages,
+    [],
+    DEFAULT_SESSION_TRANSCRIPT_FILTERS,
+    null,
+    () => undefined,
+  );
+}
+
+test("renders fork controls only for natural conversation fork points", () => {
+  const html = renderForkMessages([
+    message("user-fork", "Request", "user"),
+    message("thinking-fork", "Reasoning", "thinking"),
+    message("assistant-fork", "Response", "assistant"),
+    message("tool-fork", "Result", "tool"),
+    message("system-fork", "Notice", "system"),
+  ]);
+
+  expect(html).toContain('data-fork-from-here="user-fork"');
+  expect(html).toContain('data-fork-from-here="assistant-fork"');
+  expect(html.match(/Fork from here<\/button>/gu)).toHaveLength(2);
+  for (const id of ["thinking-fork", "tool-fork", "system-fork"]) {
+    expect(html).not.toContain(`data-fork-from-here="${id}"`);
+  }
+});
+
+test("does not offer fork controls for streamed messages", () => {
+  const streamedId = "stream:session-1:assistant";
+  const html = renderForkMessages([
+    message(streamedId, "Partial response", "assistant"),
+  ]);
+
+  expect(html).not.toContain(`data-fork-from-here="${streamedId}"`);
+  expect(html).not.toContain("Fork from here");
 });
 
 test("preserves consecutive user message line breaks", () => {

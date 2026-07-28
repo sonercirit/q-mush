@@ -60,6 +60,7 @@ export function initialSessionViewState(): SessionViewState {
     creating: false,
     detail: undefined,
     directoryPicker: initialDirectoryPickerState(),
+    forking: false,
     draft: initialSessionDraft(),
     error: undefined,
     followUp: "",

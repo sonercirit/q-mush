@@ -1,0 +1,109 @@
+import { expect, test, vi } from "vitest";
+import { SESSION_REALTIME_OPERATIONS } from "../../shared/user-realtime-protocol.ts";
+import { createReactiveState } from "../reactive-state.ts";
+import type { SessionViewState } from "../session-client.tsx";
+import { SessionController } from "../session-controller.ts";
+import { initialSessionViewState } from "../session-state.ts";
+import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
+
+type ForkCommand = NonNullable<
+  ConstructorParameters<typeof SessionController>[3]
+>["command"];
+
+function forkedSession() {
+  return {
+    ...TEST_SESSION_DETAIL,
+    id: "session-forked",
+    title: "Fork of Fix the app",
+  };
+}
+
+function forkController(command: ForkCommand): SessionController {
+  const state = initialSessionViewState();
+  return new SessionController(
+    createReactiveState<SessionViewState>({
+      ...state,
+      detail: TEST_SESSION_DETAIL,
+      selectedId: TEST_SESSION_DETAIL.id,
+      sessions: [TEST_SESSION_DETAIL],
+    }),
+    undefined,
+    null,
+    { command },
+  );
+}
+
+function expectForkSelection(
+  controller: SessionController,
+  forked: ReturnType<typeof forkedSession>,
+): void {
+  expect(controller.state).toMatchObject({
+    detail: forked,
+    error: undefined,
+    forking: false,
+    selectedId: forked.id,
+  });
+}
+
+test("forks from a transcript message and selects the returned session", async () => {
+  const forkPoint = "message-1";
+  const forked = forkedSession();
+  const command = vi.fn<ForkCommand>();
+  const completed = Promise.resolve(forked);
+  command.mockImplementation(() => completed);
+  const controller = forkController(command);
+
+  await controller.fork(forkPoint);
+
+  expect(command).toHaveBeenCalledWith(SESSION_REALTIME_OPERATIONS.fork, {
+    forkPointMessageId: forkPoint,
+    sourceSessionId: TEST_SESSION_DETAIL.id,
+    workspaceId: TEST_SESSION_DETAIL.workspaceId,
+  });
+  expectForkSelection(controller, forked);
+  expect(controller.state.sessions?.map(({ id }) => id)).toContain(forked.id);
+});
+
+test("blocks a second fork while the first fork is pending", async () => {
+  let resolveFork: ((value: unknown) => void) | undefined;
+  const pendingFork = new Promise<unknown>((resolve) => {
+    resolveFork = resolve;
+  });
+  const command = vi.fn<ForkCommand>(() => pendingFork);
+  const controller = forkController(command);
+
+  const first = controller.fork("message-1");
+  const second = controller.fork("message-1");
+
+  expect(controller.state.forking).toBe(true);
+  expect(command).toHaveBeenCalledOnce();
+  resolveFork?.({ ...TEST_SESSION_DETAIL, id: "session-forked" });
+  await Promise.all([first, second]);
+  expect(controller.state.forking).toBe(false);
+});
+
+test("reconciles an unknown fork outcome to the newly listed session", async () => {
+  const unknown = Object.assign(new Error("outcome_unknown"), {
+    code: "outcome_unknown",
+  });
+  const forked = forkedSession();
+  const command = vi.fn<ForkCommand>(() => Promise.resolve());
+  command.mockRejectedValueOnce(unknown);
+  command.mockImplementationOnce(() =>
+    Promise.resolve({ sessions: [TEST_SESSION_DETAIL, forked] }),
+  );
+  command.mockResolvedValueOnce(forked);
+  const controller = forkController(command);
+  const uncertainFork = controller.fork("message-1");
+
+  await uncertainFork;
+
+  const operations = command.mock.calls.map((call) => call[0]);
+  expect(operations).toEqual([
+    SESSION_REALTIME_OPERATIONS.fork,
+    SESSION_REALTIME_OPERATIONS.subscribe,
+    SESSION_REALTIME_OPERATIONS.read,
+  ]);
+  expectForkSelection(controller, forked);
+  expect(controller.state.history.page).toBeUndefined();
+});

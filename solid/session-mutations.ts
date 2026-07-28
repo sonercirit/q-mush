@@ -15,6 +15,7 @@ type SessionMutationOperation = Exclude<
   (typeof SESSION_REALTIME_OPERATIONS)[keyof typeof SESSION_REALTIME_OPERATIONS],
   | typeof SESSION_REALTIME_OPERATIONS.answerQuestions
   | typeof SESSION_REALTIME_OPERATIONS.create
+  | typeof SESSION_REALTIME_OPERATIONS.fork
   | typeof SESSION_REALTIME_OPERATIONS.history
   | typeof SESSION_REALTIME_OPERATIONS.models
   | typeof SESSION_REALTIME_OPERATIONS.previewToolUpdate

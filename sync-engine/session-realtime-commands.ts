@@ -2,6 +2,10 @@ import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
 import {
+  readSessionForkInput,
+  type SessionForkInput,
+} from "../shared/session-fork.ts";
+import {
   readSessionHistoryRequest,
   type SessionHistoryPage,
 } from "../shared/session-history.ts";
@@ -85,6 +89,11 @@ export interface SessionRealtimeCommands extends SessionDetailReader {
   compactForUser: AuthenticatedSessionAction;
   continueForUser: AuthenticatedSessionAction;
   readonly createForUser: SessionCreateAction;
+  readonly forkForUser: (
+    user: AuthenticatedUser,
+    input: SessionForkInput,
+    workspaceId: string,
+  ) => Promise<AgentSessionDetail>;
   readonly historyForUser: SessionHistoryAction;
   readonly messageForUser: (
     user: AuthenticatedUser,
@@ -228,6 +237,13 @@ export async function executeSessionRealtimeCommand(
         requiredRealtimeInput(readSessionPendingInputCommand(payload)),
         workspaceId,
       );
+    case SESSION_REALTIME_OPERATIONS.fork: {
+      const input = workspaceSessionInput(
+        readSessionForkInput(payload),
+        workspaceId,
+      );
+      return sessions.forkForUser(user, input, workspaceId);
+    }
     case SESSION_REALTIME_OPERATIONS.history: {
       const request = readSessionHistoryRequest(payload);
       if (

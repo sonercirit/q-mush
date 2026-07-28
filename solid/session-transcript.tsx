@@ -154,6 +154,10 @@ interface TranscriptMessageProps {
   readonly message: AgentSessionMessage;
 }
 
+function isStreamedMessage(message: AgentSessionMessage): boolean {
+  return message.id.startsWith("stream:");
+}
+
 function ToolResultTranscriptMessage(
   props: TranscriptMessageProps,
 ): JSX.Element {
@@ -183,6 +187,7 @@ function ToolResultTranscriptMessage(
 
 function ConversationTranscriptMessage(props: {
   readonly message: AgentSessionMessage;
+  readonly onFork?: ((messageId: string) => void) | undefined;
   readonly showContent?: boolean;
   readonly showTools?: boolean;
 }): JSX.Element {
@@ -198,9 +203,23 @@ function ConversationTranscriptMessage(props: {
         `${user ? "User" : system ? "Session" : "Agent"} message`,
       )}
     >
-      <p class="text-xs font-semibold tracking-wide text-slate-400 uppercase">
-        {user ? "You" : system ? "Session" : "Agent"}
-      </p>
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <p class="text-xs font-semibold tracking-wide text-slate-400 uppercase">
+          {user ? "You" : system ? "Session" : "Agent"}
+        </p>
+        {!system &&
+        props.onFork !== undefined &&
+        !isStreamedMessage(props.message) ? (
+          <button
+            class="rounded-full border border-white/10 px-2.5 py-1 text-[0.65rem] font-semibold text-slate-400 transition hover:border-emerald-300/30 hover:text-emerald-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300"
+            data-fork-from-here={props.message.id}
+            onClick={() => props.onFork?.(props.message.id)}
+            type="button"
+          >
+            Fork from here
+          </button>
+        ) : null}
+      </div>
       {showContent() && props.message.content.length > 0 ? (
         user ? (
           <p class="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-200">
@@ -320,6 +339,7 @@ export function sessionTranscriptFilterCounts(
 function TranscriptMessage(
   props: TranscriptMessageProps & {
     readonly filters: SessionTranscriptFilters;
+    readonly onFork?: ((messageId: string) => void) | undefined;
   },
 ): JSX.Element {
   const message = props.message;
@@ -328,6 +348,7 @@ function TranscriptMessage(
     return (
       <ConversationTranscriptMessage
         message={message}
+        onFork={props.onFork}
         showContent={props.filters.assistantMessages}
         showTools={props.filters.toolActivity}
       />
@@ -347,8 +368,14 @@ function TranscriptMessage(
         />
       );
     case "system":
-    case "user":
       return <ConversationTranscriptMessage message={message} />;
+    case "user":
+      return (
+        <ConversationTranscriptMessage
+          message={message}
+          onFork={props.onFork}
+        />
+      );
   }
 }
 
@@ -423,6 +450,7 @@ export function SessionTranscript(props: {
   readonly executionEnvironment: AgentSessionDetail["executionEnvironment"];
   readonly filters: SessionTranscriptFilters;
   readonly messages: readonly AgentSessionMessage[];
+  readonly onFork?: ((messageId: string) => void) | undefined;
   readonly toolStreams?: readonly ToolStreamEntry[];
   readonly tools: readonly AgentSessionToolName[];
 }): JSX.Element {
@@ -471,6 +499,7 @@ export function SessionTranscript(props: {
             callArguments={callArguments}
             filters={props.filters}
             message={message}
+            onFork={props.onFork}
           />
         )}
       </For>

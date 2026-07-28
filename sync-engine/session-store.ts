@@ -50,6 +50,11 @@ import {
   type CreateSessionResult,
 } from "./session-store-create.ts";
 import {
+  forkStoredSessionFromSource,
+  type SessionStoreForkParameters,
+  type SessionStoreForkResult,
+} from "./session-store-fork.ts";
+import {
   activeSessionCondition,
   storedSessionCondition,
   updateStoredSessions,
@@ -135,10 +140,12 @@ export class SessionStore {
     return this.#resources[0];
   }
 
-  #writeResources() {
+  #writeResources(workspaceId?: string) {
     return {
       database: this.#database,
       generateId: this.#resources[1],
+      read: (userId: string, sessionId: string) =>
+        this.get(userId, sessionId, workspaceId),
     };
   }
 
@@ -147,14 +154,12 @@ export class SessionStore {
   }
 
   create(input: CreateAgentSession, now: number): CreateSessionResult {
-    return createStoredSession(
-      {
-        database: this.#database,
-        generateId: this.#resources[1],
-        read: (userId, sessionId) => this.get(userId, sessionId),
-      },
-      input,
-      now,
+    return createStoredSession(this.#writeResources(), input, now);
+  }
+  fork(...parameters: SessionStoreForkParameters): SessionStoreForkResult {
+    return forkStoredSessionFromSource(
+      this.#writeResources(parameters[3]),
+      ...parameters,
     );
   }
   questions(): AskQuestionsStore {

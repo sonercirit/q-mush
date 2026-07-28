@@ -6,6 +6,7 @@ import {
   RUNNER_DIRECTORY_COMMAND,
   type RunnerDirectoryListing,
 } from "../shared/runner-directory-model.ts";
+import { readIdentifier } from "../shared/validation.ts";
 import type { GoogleAuth } from "./auth.ts";
 import { withAuthenticatedUser } from "./authenticated-request.ts";
 import {
@@ -16,11 +17,7 @@ import {
   parseJsonRequest,
 } from "./http.ts";
 
-export function readIdentifier(value: unknown): string | undefined {
-  return typeof value === "string" && /^[A-Za-z\d._:-]{1,200}$/u.test(value)
-    ? value
-    : undefined;
-}
+export { readIdentifier };
 
 export function readStringField(
   value: unknown,

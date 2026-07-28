@@ -14,6 +14,7 @@ export const SESSION_REALTIME_OPERATIONS = {
   compact: "sessions.compact",
   continue: "sessions.continue",
   create: "sessions.create",
+  fork: "sessions.fork",
   history: "sessions.history",
   models: "sessions.models",
   previewToolUpdate: "sessions.preview_tool_update",
