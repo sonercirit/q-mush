@@ -347,10 +347,15 @@ export async function runSessionAgent(
     toolArguments,
     signal,
     callId,
-  ) =>
-    isAgentSessionToolName(name) && isSessionAgentToolName(name)
-      ? executeSessionAgentTool(runtime.sessionTools, name, toolArguments)
-      : dispatchRunnerTool(name, toolArguments, signal, callId);
+  ) => {
+    if (isAgentSessionToolName(name) && isSessionAgentToolName(name)) {
+      if (callId !== undefined) {
+        toolStream.running(callId, name, JSON.stringify(toolArguments));
+      }
+      return executeSessionAgentTool(runtime.sessionTools, name, toolArguments);
+    }
+    return dispatchRunnerTool(name, toolArguments, signal, callId);
+  };
   const skills = createAgentSkills({
     braveSearch: runtime.braveSearch,
     currentTools: runtime.currentTools,
@@ -427,7 +432,12 @@ export async function runSessionAgent(
         }
 
         forEachAssistantToolCall(messages, (call) => {
-          toolStream.running(call.id, call.name);
+          if (
+            !isAgentSessionToolName(call.name) ||
+            !isSessionAgentToolName(call.name)
+          ) {
+            toolStream.running(call.id, call.name, call.arguments);
+          }
         });
       },
       signal: runtime.signal,

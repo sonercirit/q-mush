@@ -2,12 +2,27 @@ import {
   readAgentSessionToolNames,
   type AgentSessionToolName,
 } from "../shared/agent-tools.ts";
+import type { AppDatabase } from "../shared/database.ts";
 import { agentSessions } from "../shared/database/schema.ts";
 import type { AgentSessionSummary } from "../shared/session-model.ts";
 import { parseRestartHandoff } from "./session-restart-store.ts";
+import {
+  storedSessionCondition,
+  type SessionFilter,
+} from "./session-store-persistence.ts";
 import { parseProviderPricing } from "./session-store-read.ts";
 
-export function storedSessionSelection() {
+export function selectStoredSessions(
+  database: Pick<AppDatabase, "select">,
+  filter: SessionFilter,
+) {
+  return database
+    .select(storedSessionSelection())
+    .from(agentSessions)
+    .where(storedSessionCondition(filter));
+}
+
+function storedSessionSelection() {
   return {
     activeDurationMs: agentSessions.activeDurationMs,
     activeStartedAt: agentSessions.activeStartedAt,

@@ -93,7 +93,9 @@ export function mountTestTranscript(
       debug === undefined ? (
         session()
       ) : (
-        <RenderDebugProvider view={debug}>{session()}</RenderDebugProvider>
+        <RenderDebugProvider staticView={debug}>
+          {session()}
+        </RenderDebugProvider>
       ),
     disposals,
   );

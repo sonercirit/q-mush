@@ -17,6 +17,7 @@ import {
   sessionCanQueuePendingInput,
 } from "../session-pending-input.ts";
 import { initialSessionViewState } from "../session-state.ts";
+import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import {
   disposeTestViews,
   mountTestView,
@@ -25,9 +26,9 @@ import {
 import { mountTestSessionDetail } from "./session-dom-test-helpers.tsx";
 import { pendingInputFixture } from "./session-pending-fixtures.ts";
 
-const disposals: (() => void)[] = [];
+const disposals = new Array<() => void>();
 
-afterEach(() => {
+afterEach(function disposeComposerViews() {
   disposeTestViews(disposals);
 });
 
@@ -264,6 +265,79 @@ test("pending instructions react to realtime detail updates", () => {
   expect(container.querySelector(pendingSelector)).toBeNull();
 });
 
+test("cancel returns a pending instruction to the composer", async () => {
+  const detail = {
+    ...TEST_SESSION_DETAIL,
+    pendingInputs: [
+      pendingInputFixture("Edit this instruction", {
+        id: "pending-1",
+        images: [TEST_AGENT_IMAGE],
+      }),
+    ],
+    status: "running" as const,
+  };
+  const calls: unknown[][] = [];
+  const reactive = createReactiveState<SessionViewState>(
+    Object.assign(initialSessionViewState(), {
+      detail,
+      selectedId: detail.id,
+      sessions: [summaryFromDetail(detail)],
+    }),
+  );
+  const cancellationCommand = (...parameters: readonly unknown[]) => {
+    const [operation, payload, idempotencyKey] = parameters;
+    calls.push([operation, payload, idempotencyKey]);
+    return Promise.resolve(
+      Object.fromEntries([
+        ["detail", { ...detail, pendingInputs: [] }],
+        ["input", detail.pendingInputs[0]],
+      ]),
+    );
+  };
+  const controller = new SessionController(reactive, undefined, null, {
+    command: cancellationCommand,
+  });
+
+  await controller.cancelPendingInput("pending-1");
+
+  expect(calls).toEqual([
+    [
+      "sessions.cancel_pending_input",
+      { inputId: "pending-1", sessionId: detail.id },
+      expect.any(String),
+    ],
+  ]);
+  expect(controller.state).toMatchObject({
+    followUp: "Edit this instruction",
+    followUpImages: [TEST_AGENT_IMAGE],
+  });
+  expect(controller.state.detail?.pendingInputs).toEqual([]);
+});
+
+test("pending cancellation button invokes its callback", () => {
+  const onCancel = vi.fn();
+  const container = mountTestView(
+    () => (
+      <SessionPendingInputs
+        inputs={[pendingInputFixture("Editable", { id: "pending-1" })]}
+        onCancel={onCancel}
+      />
+    ),
+    disposals,
+  );
+
+  const cancel = queryTestElement(
+    container,
+    "button[aria-label='Cancel queued follow up']",
+  );
+  if (!(cancel instanceof HTMLButtonElement)) {
+    throw new TypeError("The pending cancel action is unavailable");
+  }
+  cancel.click();
+
+  expect(onCancel).toHaveBeenCalledWith("pending-1");
+});
+
 test("renders pending instructions in FIFO order", () => {
   const container = mountTestView(
     () => (
@@ -272,6 +346,7 @@ test("renders pending instructions in FIFO order", () => {
           pendingInputFixture("First", { id: "pending-1" }),
           pendingInputFixture("Second", { id: "pending-2", kind: "steer" }),
         ]}
+        onCancel={() => undefined}
       />
     ),
     disposals,
@@ -283,8 +358,8 @@ test("renders pending instructions in FIFO order", () => {
   expect(
     [...container.querySelectorAll("li")].map(({ textContent }) => textContent),
   ).toEqual([
-    expect.stringContaining("Queued follow upFirst"),
-    expect.stringContaining("Queued steerSecond"),
+    expect.stringMatching(/Queued follow up.*First/u),
+    expect.stringMatching(/Queued steer.*Second/u),
   ]);
 });
 

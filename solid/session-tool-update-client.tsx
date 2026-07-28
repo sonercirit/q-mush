@@ -1,4 +1,4 @@
-import { createEffect, createSignal, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, Show, untrack, type JSX } from "solid-js";
 import type { AgentSessionToolName } from "../shared/agent-tools.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { SessionToolPicker } from "./session-tool-picker.tsx";
@@ -12,7 +12,7 @@ export function SessionToolUpdateEditor(props: {
   ) => Promise<{ readonly warning: string | null; readonly updated: boolean }>;
 }): JSX.Element {
   const [tools, setTools] = createSignal<readonly AgentSessionToolName[]>(
-    props.detail.tools,
+    untrack(() => props.detail.tools),
   );
   const [warning, setWarning] = createSignal<string | null>(null);
   const [applying, setApplying] = createSignal(false);

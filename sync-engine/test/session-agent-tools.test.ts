@@ -444,6 +444,7 @@ describe("session agent tools", () => {
     expect(parent?.status).toBe("running");
     expect(parent?.pendingInputs).toHaveLength(1);
     expect(parent?.pendingInputs[0]?.content).toContain("Child final result.");
+    expect(parent?.pendingInputs[0]?.kind).toBe("steer");
     closeSessionTestDatabase(setup.database);
   });
 

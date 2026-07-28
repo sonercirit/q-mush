@@ -4,7 +4,7 @@ import type { AgentSessionDetail } from "../shared/session-model.ts";
 import type { SessionProviderUpdateSelection } from "../shared/session-provider-update.ts";
 import type { SessionProviderDiscoveryState } from "./session-provider-select.tsx";
 
-export interface SessionProviderUpdateCredential {
+interface SessionProviderUpdateCredential {
   readonly id: string;
   readonly isGlobal?: boolean;
   readonly label: string;

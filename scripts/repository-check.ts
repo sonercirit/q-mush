@@ -4,6 +4,10 @@ import {
   formatFileLengthViolations,
 } from "./check-file-length.ts";
 import {
+  findJscpdIgnoreMarkers,
+  formatJscpdIgnoreMarkers,
+} from "./jscpd-ignore-markers.ts";
+import {
   findRawHtmlFileViolations,
   formatRawHtmlFileViolations,
 } from "./raw-html-files.ts";
@@ -55,12 +59,17 @@ async function run(): Promise<void> {
     rootDirectory,
     paths,
   );
+  const jscpdIgnoreMarkers = await findJscpdIgnoreMarkers(rootDirectory, paths);
   const rawHtmlFileViolations = findRawHtmlFileViolations(paths);
   const testLocationViolations = findTestLocationViolations(paths);
   const messages: string[] = [];
 
   if (fileLengthViolations.length > 0) {
     messages.push(formatFileLengthViolations(fileLengthViolations));
+  }
+
+  if (jscpdIgnoreMarkers.length > 0) {
+    messages.push(formatJscpdIgnoreMarkers(jscpdIgnoreMarkers));
   }
 
   if (rawHtmlFileViolations.length > 0) {

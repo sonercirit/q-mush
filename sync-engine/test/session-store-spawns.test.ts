@@ -10,6 +10,11 @@ import {
   spawnedChildSetup,
   type SpawnedChildReference,
 } from "./session-store-spawn-test-helpers.ts";
+import {
+  createStore,
+  createTestSession,
+  testSessionInput,
+} from "./session-store-test-fixtures.ts";
 
 function report(setup: SpawnedChildReference, now = TEST_NOW + 5): boolean {
   return setup.store.appendSpawnedSessionReport(
@@ -79,6 +84,14 @@ function closeAfterParentAssertion(
   closeSetup(setup);
 }
 
+function expectedPendingReport(setup: SpawnedChildReference) {
+  return {
+    clientRequestId: `spawn:${setup.childId}:${String(setup.childGeneration)}`,
+    content: "Child complete",
+    kind: "steer",
+  } as const;
+}
+
 function childSummary(setup: SpawnedChildReference) {
   return setup.store.list(TEST_USER_ID).find((session) => {
     return session.id === setup.childId;
@@ -90,6 +103,27 @@ function expectNoPendingReports(setup: SpawnedChildReference): void {
 }
 
 describe("spawned session report generation fencing", () => {
+  test("allows a user-initiated child from an idle current parent", () => {
+    const setup = createStore();
+    const parent = createTestSession(setup.store);
+    const child = setup.store.create(
+      testSessionInput({
+        parentGeneration: parent.generation,
+        parentSessionId: parent.id,
+        parentUserInitiated: true,
+        prompt: "User-selected child tools",
+        tools: ["read"],
+      }),
+      TEST_NOW + 1,
+    );
+
+    expect(child.status).toBe("created");
+    expect(child.status === "created" ? child.detail.tools : []).toEqual([
+      "read",
+    ]);
+    setup.database.$client.close();
+  });
+
   test("persists and claims the current parent callback", () => {
     const setup = spawnedChildSetup();
     const childDetail = setup.store.get(TEST_USER_ID, setup.childId);
@@ -98,6 +132,10 @@ describe("spawned session report generation fencing", () => {
       { detail: childDetail, userId: TEST_USER_ID },
     ]);
     expectReportClaimed(setup);
+    expect(setup.store.get(TEST_USER_ID, setup.parentId)).toMatchObject({
+      pendingInputs: [expectedPendingReport(setup)],
+      status: "running",
+    });
     expect(childSummary(setup)?.parentSessionId).toBe(setup.parentId);
     expectNoPendingReports(setup);
     expect(
@@ -111,6 +149,17 @@ describe("spawned session report generation fencing", () => {
     closeAfterParentAssertion(setup, (parent) => {
       expect(parent?.messages.at(-1)?.content).toBe("Child complete");
     });
+  });
+
+  test("does not enqueue a duplicate callback", () => {
+    const setup = spawnedChildSetup();
+
+    expectReportClaimed(setup);
+    expect(report(setup, TEST_NOW + 6)).toBe(false);
+    expect(
+      setup.store.get(TEST_USER_ID, setup.parentId)?.pendingInputs,
+    ).toMatchObject([expectedPendingReport(setup)]);
+    closeSetup(setup);
   });
 
   test.each(["parent", "child"] as const)(
@@ -142,7 +191,7 @@ describe("spawned session report generation fencing", () => {
       expect(
         parent?.messages.some(({ content }) => content === "Child complete"),
       ).toBe(true);
-      expect(parent?.status).toBe("stopped");
+      expect(parent).toMatchObject({ pendingInputs: [], status: "stopped" });
     });
   });
 

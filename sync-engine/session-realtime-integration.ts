@@ -29,8 +29,9 @@ import {
 import type { SessionCredentialOperation } from "./session-credential-operation.ts";
 import { requiredSessionDetail } from "./session-detail.ts";
 import { readAuthorizedSessionHistory } from "./session-history.ts";
-import type { PromptInput } from "./session-input.ts";
+import type { CreateSessionInput, PromptInput } from "./session-input.ts";
 import type { SessionPendingInputCommand } from "./session-pending-input-request.ts";
+import { type CancelPendingInputResult } from "./session-pending-inputs.ts";
 import {
   applySessionProviderUpdate,
   type SessionProviderUpdateDependencies,
@@ -46,6 +47,7 @@ import {
 } from "./session-queue.ts";
 import type {
   SessionAutoCompactionAction,
+  SessionCancelPendingInputAction,
   SessionCreateAction,
   SessionHistoryAction,
   SessionQuestionAnswerAction,
@@ -110,6 +112,17 @@ async function responseValue(response: Response): Promise<unknown> {
   return value;
 }
 
+function cancellationError(
+  status: "consumed" | "invalid_state" | "not_found",
+): RealtimeCommandError {
+  const code = {
+    consumed: "pending_input_consumed",
+    invalid_state: "invalid_session_state",
+    not_found: "not_found",
+  } as const;
+  return new RealtimeCommandError(code[status]);
+}
+
 export class RealtimeSessionCommands implements SessionRealtimeCommands {
   readonly #dependencies: RealtimeSessionCommandDependencies;
 
@@ -165,6 +178,34 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
     }
   };
 
+  cancelPendingInputForUser: SessionCancelPendingInputAction = (
+    user,
+    sessionId,
+    inputId,
+    workspaceId,
+  ) => {
+    const existing = this.#detail(user.id, sessionId, workspaceId);
+    const result: CancelPendingInputResult =
+      this.#dependencies.store.cancelPendingInput({
+        inputId,
+        now: this.#dependencies.now(),
+        sessionId,
+        userId: user.id,
+      });
+    switch (result.status) {
+      case "already_cancelled":
+      case "cancelled": {
+        const detail = this.#detail(user.id, existing.id, workspaceId);
+        this.#dependencies.notify(user.id, sessionId);
+        return { detail, input: result.input };
+      }
+      case "consumed":
+      case "invalid_state":
+      case "not_found":
+        throw cancellationError(result.status);
+    }
+  };
+
   compactForUser: AuthenticatedSessionAction = (user, sessionId, workspaceId) =>
     this.#withOwnedDetail(user, sessionId, workspaceId, async () => {
       const response = await startManualSessionCompaction(
@@ -195,7 +236,11 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
     });
   }
 
-  createForUser: SessionCreateAction = async (user, input, workspaceId) => {
+  async #createSession(
+    user: AuthenticatedUser,
+    input: CreateSessionInput & { readonly parentUserInitiated?: boolean },
+    workspaceId: string,
+  ): Promise<AgentSessionDetail> {
     const scopedInput = { ...input, workspaceId };
     if (
       !this.#dependencies.runnerIsAvailable(
@@ -224,6 +269,32 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
       throw new RealtimeCommandError("command_failed");
     }
     return created.detail;
+  }
+
+  createForUser: SessionCreateAction = (user, input, workspaceId) =>
+    this.#createSession(user, input, workspaceId);
+
+  spawnForUser: SessionRealtimeCommands["spawnForUser"] = async (
+    user,
+    input,
+    workspaceId,
+  ) => {
+    const parent = this.#dependencies.store.get(
+      user.id,
+      input.parentSessionId,
+      workspaceId,
+    );
+    if (
+      parent?.generation !== input.parentGeneration ||
+      parent.runnerRequired
+    ) {
+      throw new RealtimeCommandError("parent_stale");
+    }
+    return this.#createSession(
+      user,
+      { ...input, parentUserInitiated: true },
+      workspaceId,
+    );
   };
 
   forkForUser = (

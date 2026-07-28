@@ -23,7 +23,11 @@ const MAXIMUM_PROMPT_LENGTH = 32_768;
 
 export type CreateSessionInput = Omit<
   CreateAgentSession,
-  "maxContextTokens" | "providerPricing" | "userId" | "workspaceId"
+  | "maxContextTokens"
+  | "parentUserInitiated"
+  | "providerPricing"
+  | "userId"
+  | "workspaceId"
 > & { readonly workspaceId?: string };
 
 export function readProvider(value: unknown): ProviderId | undefined {
@@ -104,6 +108,37 @@ export function readCreateSession(
     tools,
     workingDirectory,
   };
+}
+
+export interface UserSpawnSessionInput extends CreateSessionInput {
+  readonly parentGeneration: number;
+  readonly parentSessionId: string;
+}
+
+export function readUserSpawnSession(
+  value: unknown,
+): UserSpawnSessionInput | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const spawnValue = { ...value };
+  delete spawnValue["parentGeneration"];
+  delete spawnValue["parentSessionId"];
+  const parentGeneration = value["parentGeneration"];
+  const parentSessionId = readIdentifier(value["parentSessionId"]);
+  const tools = readAgentSessionToolNames(value["tools"]);
+  const session = readCreateSession(spawnValue);
+  if (
+    !Number.isSafeInteger(parentGeneration) ||
+    typeof parentGeneration !== "number" ||
+    parentGeneration < 0 ||
+    parentSessionId === undefined ||
+    tools === undefined ||
+    session === undefined
+  ) {
+    return undefined;
+  }
+  return { ...session, parentGeneration, parentSessionId, tools };
 }
 
 export interface PromptInput {

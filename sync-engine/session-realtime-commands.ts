@@ -11,6 +11,7 @@ import {
 } from "../shared/session-history.ts";
 import type {
   AgentSessionDetail,
+  AgentSessionPendingInput,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
 import {
@@ -38,6 +39,7 @@ import {
   readCreateSession,
   readPrompt,
   readProvider,
+  readUserSpawnSession,
   type CreateSessionInput,
   type PromptInput,
 } from "./session-input.ts";
@@ -52,6 +54,15 @@ export type SessionQuestionAnswerAction = (
   user: AuthenticatedUser,
   payload: Readonly<Record<string, unknown>>,
 ) => Promise<unknown>;
+export type SessionCancelPendingInputAction = (
+  user: AuthenticatedUser,
+  sessionId: string,
+  inputId: string,
+  workspaceId: string,
+) => {
+  readonly detail: AgentSessionDetail;
+  readonly input: AgentSessionPendingInput;
+};
 export type SessionCreateAction = (
   user: AuthenticatedUser,
   input: CreateSessionInput,
@@ -86,9 +97,18 @@ export type SessionStopAction = (
 
 export interface SessionRealtimeCommands extends SessionDetailReader {
   readonly answerQuestionsForUser: SessionQuestionAnswerAction;
+  readonly cancelPendingInputForUser: SessionCancelPendingInputAction;
   compactForUser: AuthenticatedSessionAction;
   continueForUser: AuthenticatedSessionAction;
   readonly createForUser: SessionCreateAction;
+  readonly spawnForUser: (
+    user: AuthenticatedUser,
+    input: CreateSessionInput & {
+      readonly parentGeneration: number;
+      readonly parentSessionId: string;
+    },
+    workspaceId: string,
+  ) => Promise<AgentSessionDetail>;
   readonly forkForUser: (
     user: AuthenticatedUser,
     input: SessionForkInput,
@@ -137,6 +157,12 @@ export interface SessionRealtimeCommands extends SessionDetailReader {
 
 function readSessionId(payload: Readonly<Record<string, unknown>>): string {
   return requiredRealtimeInput(readIdentifier(payload["sessionId"]));
+}
+
+function readPendingInputId(
+  payload: Readonly<Record<string, unknown>>,
+): string {
+  return requiredRealtimeInput(readIdentifier(payload["inputId"]));
 }
 
 function readReassignment(payload: Readonly<Record<string, unknown>>) {
@@ -216,6 +242,13 @@ export async function executeSessionRealtimeCommand(
         ...payload,
         workspaceId,
       });
+    case SESSION_REALTIME_OPERATIONS.cancelPendingInput:
+      return sessions.cancelPendingInputForUser(
+        user,
+        readSessionId(payload),
+        readPendingInputId(payload),
+        workspaceId,
+      );
     case SESSION_REALTIME_OPERATIONS.compact:
       return sessions.compactForUser(user, readSessionId(payload), workspaceId);
     case SESSION_REALTIME_OPERATIONS.continue:
@@ -228,6 +261,12 @@ export async function executeSessionRealtimeCommand(
       return sessions.createForUser(
         user,
         requiredRealtimeInput(readCreateSession(payload)),
+        workspaceId,
+      );
+    case SESSION_REALTIME_OPERATIONS.spawn:
+      return sessions.spawnForUser(
+        user,
+        requiredRealtimeInput(readUserSpawnSession(payload)),
         workspaceId,
       );
     case SESSION_REALTIME_OPERATIONS.followUp:

@@ -13,6 +13,12 @@ export interface SessionFilter {
   readonly workspaceId?: string;
 }
 
+export interface WorkspaceSessionIdentity {
+  readonly sessionId: string;
+  readonly userId: string;
+  readonly workspaceId: string;
+}
+
 interface StoredSessionFilter {
   readonly generation?: number | undefined;
   readonly id?: string | undefined;
@@ -49,6 +55,29 @@ export function storedSessionCondition(
 
 export function activeSessionCondition(filter: SessionFilter): SQL | undefined {
   return storedSessionCondition(filter);
+}
+
+export function workspaceSessionCondition(
+  identity: WorkspaceSessionIdentity,
+  generation?: number,
+): SQL | undefined {
+  return sessionGenerationCondition(
+    {
+      id: identity.sessionId,
+      userId: identity.userId,
+      workspaceId: identity.workspaceId,
+    },
+    generation,
+  );
+}
+
+export function runnerReadySessionCondition(
+  filter: SessionFilter,
+): SQL | undefined {
+  return and(
+    activeSessionCondition(filter),
+    eq(agentSessions.runnerRequired, false),
+  );
 }
 
 export function sessionGenerationCondition(

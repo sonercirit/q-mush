@@ -9,6 +9,7 @@ import type {
 } from "../shared/session-model.ts";
 import { runnerIsAvailable } from "./runner-availability-store.ts";
 import { sessionExecutionIsCurrent } from "./session-execution-authority.ts";
+import { runnerReadySessionCondition } from "./session-store-persistence.ts";
 import { serializeProviderPricing } from "./session-store-read.ts";
 import type { SessionStoreWriteResources } from "./session-store-resources.ts";
 import { readStoredSessionResult } from "./session-store-result.ts";
@@ -38,6 +39,7 @@ export interface CreateAgentSession extends Pick<
   readonly images: readonly AgentImage[];
   readonly parentGeneration?: number;
   readonly parentSessionId?: string;
+  readonly parentUserInitiated?: boolean;
   readonly prompt: string;
   readonly userId: string;
 }
@@ -165,11 +167,32 @@ export function createStoredSession(
     if (
       parentSessionId !== undefined &&
       parentGeneration !== undefined &&
+      input.parentUserInitiated === true
+    ) {
+      const parent = transaction
+        .select({ generation: agentSessions.executionGeneration })
+        .from(agentSessions)
+        .where(
+          runnerReadySessionCondition({
+            id: parentSessionId,
+            userId: input.userId,
+            workspaceId: input.workspaceId,
+          }),
+        )
+        .get();
+      if (parent?.generation !== parentGeneration) {
+        return "parent_stale" as const;
+      }
+    }
+    if (
+      parentSessionId !== undefined &&
+      parentGeneration !== undefined &&
       !sessionExecutionIsCurrent(
         transaction,
         { generation: parentGeneration, sessionId: parentSessionId },
         input.userId,
-      )
+      ) &&
+      input.parentUserInitiated !== true
     ) {
       return "parent_stale" as const;
     }

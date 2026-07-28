@@ -198,16 +198,10 @@ function matchingStreamMessageIndex(
   messages: AgentSessionDetail["messages"],
   startIndex: number,
   role: StreamRole,
-  content: string,
 ): number {
-  return content.length === 0
-    ? -1
-    : messages.findIndex(
-        (message, index) =>
-          index >= startIndex &&
-          message.role === role &&
-          message.content === content,
-      );
+  return messages.findIndex(
+    (message, index) => index >= startIndex && message.role === role,
+  );
 }
 
 function transientMessage(
@@ -233,13 +227,11 @@ function reconcileStream(
     messages,
     startIndex,
     "thinking",
-    streamed.thinking,
   );
   const assistantIndex = matchingStreamMessageIndex(
     messages,
     startIndex,
     "assistant",
-    streamed.content,
   );
   const thinkingPersisted =
     streamed.thinking.length === 0 || thinkingIndex >= 0;

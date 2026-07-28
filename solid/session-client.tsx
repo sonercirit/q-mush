@@ -13,6 +13,7 @@ import {
 import type { RunnerSummary } from "../shared/runner-model.ts";
 import { RetryNotice } from "./collection.tsx";
 import { ControllerRetryNotice } from "./controller-retry.tsx";
+import { controllerView } from "./controller-view.ts";
 import { CustomSelect, type CustomSelectOption } from "./custom-select.tsx";
 import { DirectoryBrowseButton } from "./directory-browse-button.tsx";
 import { DirectoryPicker } from "./directory-picker-client.tsx";
@@ -28,7 +29,11 @@ import { SessionAutoCompactToggle } from "./session-autocompact-toggle.tsx";
 import { SessionPromptInput } from "./session-client-forms.tsx";
 import { formatTokenCount } from "./session-context-client.tsx";
 import type { SessionController } from "./session-controller.ts";
-import type { SessionCredentialOption } from "./session-credential-option.ts";
+import {
+  sessionCredentialSelectOptions,
+  sessionCredentialValue,
+  type SessionCredentialOption,
+} from "./session-credential-option.ts";
 import { SessionExecutionEnvironmentSelect } from "./session-execution-environment.tsx";
 import { SessionResults } from "./session-focus-client.tsx";
 import type { SessionPanelResources } from "./session-panel-resources.ts";
@@ -79,7 +84,7 @@ function credentialOptions(
 }
 
 function optionValue(option: CredentialOption): string {
-  return `${option.provider}:${option.credential.id}`;
+  return sessionCredentialValue(option);
 }
 
 function selectedCredential(
@@ -141,7 +146,7 @@ function DirectoryInput(props: {
 
   return renderSessionField(
     "session-directory",
-    options().label,
+    <>{options().label}</>,
     <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
       <div class="min-w-0 flex-1">
         <input
@@ -175,10 +180,7 @@ function DirectoryInput(props: {
 function credentialSelectOptionsFor(
   credentials: readonly CredentialOption[],
 ): readonly CustomSelectOption[] {
-  return credentials.map((option) => ({
-    label: `${option.provider === "openai" ? "OpenAI" : "OpenRouter"} · ${option.credential.label}`,
-    value: optionValue(option),
-  }));
+  return sessionCredentialSelectOptions(credentials);
 }
 
 function selectValue(
@@ -520,11 +522,11 @@ function NewSessionForm(
 export function SessionPanel(
   props: SessionPanelResources & { readonly controller: SessionController },
 ): JSX.Element {
-  const state = props.controller.view;
-  const online = (): readonly RunnerSummary[] => onlineRunners(props.runners());
-  const credentials = (): readonly CredentialOption[] =>
+  const state = controllerView(props);
+  const online = () => onlineRunners(props.runners());
+  const credentials = () =>
     credentialOptions(props.openAi(), props.openRouter());
-  const credentialsSettled = (): boolean =>
+  const credentialsSettled = () =>
     credentialFallbackReady(props.openAi(), props.openRouter());
   const [focusMode, setFocusMode] = createSignal(false);
   const selectedRunner = (): RunnerSummary | undefined =>

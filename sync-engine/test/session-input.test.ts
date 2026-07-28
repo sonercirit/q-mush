@@ -3,6 +3,7 @@ import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import {
   readCreateSession,
   readPrompt,
+  readUserSpawnSession,
 } from "../../sync-engine/session-input.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 
@@ -18,6 +19,15 @@ const SESSION_INPUT = {
   workspaceId: "workspace-1",
 };
 
+function expectInvalidTools(
+  read: (input: Readonly<Record<string, unknown>>) => unknown,
+  input: Readonly<Record<string, unknown>>,
+): void {
+  for (const tools of [["read", "read"], ["unknown"]]) {
+    expect(read({ ...input, tools })).toBeUndefined();
+  }
+}
+
 test("validates session tool and skill selections", () => {
   const input = { ...SESSION_INPUT, tools: ["read", "brave_search"] };
 
@@ -26,10 +36,27 @@ test("validates session tool and skill selections", () => {
     AGENT_SESSION_TOOL_NAMES,
   );
   expect(readCreateSession({ ...input, tools: [] })?.tools).toEqual([]);
+  expectInvalidTools(readCreateSession, input);
+});
+
+test("validates a user-spawned child tool subset and parent identity", () => {
+  const input = {
+    ...SESSION_INPUT,
+    parentGeneration: 3,
+    parentSessionId: "parent-session",
+    tools: ["read", "brave_search"],
+  };
+
+  expect(readUserSpawnSession(input)).toMatchObject({
+    parentGeneration: 3,
+    parentSessionId: "parent-session",
+    tools: ["read", "brave_search"],
+  });
+  expectInvalidTools(readUserSpawnSession, input);
+  expect(readUserSpawnSession({ ...input, tools: undefined })).toBeUndefined();
   expect(
-    readCreateSession({ ...input, tools: ["read", "read"] }),
+    readUserSpawnSession({ ...input, parentGeneration: -1 }),
   ).toBeUndefined();
-  expect(readCreateSession({ ...input, tools: ["unknown"] })).toBeUndefined();
 });
 
 test("defaults auto-compaction on and strictly accepts a boolean override", () => {

@@ -1,34 +1,32 @@
-import { createEffect, createSignal, For, Show, type JSX } from "solid-js";
+import {
+  createEffect,
+  createSignal,
+  For,
+  Show,
+  untrack,
+  type JSX,
+} from "solid-js";
 import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { SESSION_PROVIDER_CACHE_WARNING } from "../shared/session-provider-update.ts";
-import { CustomSelect, type CustomSelectOption } from "./custom-select.tsx";
+import { CustomSelect } from "./custom-select.tsx";
+import {
+  createSessionEditorRequestState,
+  SessionEditorError,
+  SessionEditorSection,
+} from "./session-editor-client.tsx";
+import {
+  modelCatalogOptions,
+  modelCredentialOptions,
+  parseModelCredentialValue,
+} from "./session-model-options.ts";
 import { OpenRouterProviderSelect } from "./session-provider-select.tsx";
 import {
   providerCredentialValue,
   sessionProviderUpdateDraft,
-  type SessionProviderUpdateCredential,
   type SessionProviderUpdateDraft,
   type SessionProviderUpdateView,
 } from "./session-provider-update-model.ts";
-
-function credentialOptions(
-  credentials: readonly SessionProviderUpdateCredential[],
-): readonly CustomSelectOption[] {
-  return credentials.map((credential) => ({
-    label: `${credential.provider === "openai" ? "OpenAI" : "OpenRouter"} · ${credential.label}`,
-    value: providerCredentialValue({
-      credentialId: credential.id,
-      provider: credential.provider,
-    }),
-  }));
-}
-
-function modelOptions(
-  catalog: AgentModelCatalog | undefined,
-): readonly CustomSelectOption[] {
-  return catalog?.models.map(({ id, label }) => ({ label, value: id })) ?? [];
-}
 
 export function SessionProviderUpdateEditor(
   props: SessionProviderUpdateView & {
@@ -36,47 +34,30 @@ export function SessionProviderUpdateEditor(
     readonly disabled: boolean;
   },
 ): JSX.Element {
-  const parseCredential = (
-    value: string,
-  ):
-    | Pick<SessionProviderUpdateDraft, "credentialId" | "provider">
-    | undefined => {
-    const [provider, ...identityParts] = value.split(":");
-    const credentialId = identityParts.join(":");
-    if (credentialId.length === 0) return undefined;
-    switch (provider) {
-      case "openai":
-      case "openrouter":
-        return { credentialId, provider };
-      case undefined:
-      default:
-        return undefined;
-    }
-  };
+  const parseCredential = parseModelCredentialValue;
   const [draft, setDraft] = createSignal(
-    sessionProviderUpdateDraft(props.detail),
+    sessionProviderUpdateDraft(untrack(() => props.detail)),
   );
   const [models, setModels] = createSignal<AgentModelCatalog>();
   const [providers, setProviders] =
     createSignal<Awaited<ReturnType<typeof props.onDiscoverProviders>>>();
   const [open, setOpen] = createSignal<"credential" | "model" | "provider">();
-  const [expanded, setExpanded] = createSignal(false);
   const [confirming, setConfirming] = createSignal(false);
-  const [pending, setPending] = createSignal(false);
-  const [error, setError] = createSignal<string>();
-  let discovery = 0;
+  const request = createSessionEditorRequestState();
+  const { error, latest: discovery, pending, setError, setPending } = request;
+  let discoveredSelection: SessionProviderUpdateDraft | undefined;
 
   const discoverModels = async (
     next: SessionProviderUpdateDraft,
   ): Promise<void> => {
-    const current = (discovery += 1);
+    const current = discovery.begin();
     setModels(undefined);
     setProviders(undefined);
     const catalog = await props.onDiscoverModels(
       next.provider,
       next.credentialId,
     );
-    if (current !== discovery) return;
+    if (!discovery.isLatest(current)) return;
     setModels(catalog);
     if (catalog === undefined) {
       setError("Models are unavailable for that credential.");
@@ -101,6 +82,14 @@ export function SessionProviderUpdateEditor(
 
   createEffect(() => {
     const initial = sessionProviderUpdateDraft(props.detail);
+    if (
+      initial.credentialId === discoveredSelection?.credentialId &&
+      initial.model === discoveredSelection.model &&
+      initial.provider === discoveredSelection.provider
+    ) {
+      return;
+    }
+    discoveredSelection = initial;
     setDraft(initial);
     setModels(undefined);
     setProviders(undefined);
@@ -158,24 +147,17 @@ export function SessionProviderUpdateEditor(
     props.disabled || pending() || draft().model.length === 0;
 
   return (
-    <section class="mt-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-      <h4 class="text-sm font-semibold text-slate-200">
-        <span>Session provider</span>
-        <button
-          aria-expanded={expanded()}
-          class="ml-3 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
-          data-session-provider-toggle="true"
-          onClick={() => setExpanded((current) => !current)}
-          type="button"
-        >
-          {expanded() ? "Collapse" : "Expand"}
-        </button>
-      </h4>
-      <Show when={expanded()}>
-        <p class="mt-1 text-xs leading-5 text-slate-500">
-          Change the model account, provider, model, or OpenRouter serving
-          provider for future turns.
-        </p>
+    <>
+      <SessionEditorSection
+        description={
+          <>
+            Change the model account, provider, model, or OpenRouter serving
+            provider for future turns.
+          </>
+        }
+        kind="provider"
+        title="Session provider"
+      >
         <div class="mt-4 grid gap-4 sm:grid-cols-2">
           <CustomSelect
             disabled={
@@ -190,13 +172,21 @@ export function SessionProviderUpdateEditor(
               setOpen(open() === "credential" ? undefined : "credential")
             }
             open={open() === "credential"}
-            options={credentialOptions(props.credentials)}
+            options={modelCredentialOptions(
+              props.credentials.map(({ id, label, provider }) => ({
+                credentialId: id,
+                label,
+                provider,
+              })),
+            )}
             required
             selectedValue={providerCredentialValue(draft())}
           />
           <CustomSelect
             disabled={
-              props.disabled || pending() || modelOptions(models()).length === 0
+              props.disabled ||
+              pending() ||
+              modelCatalogOptions(models()).length === 0
             }
             emptyLabel="Models unavailable"
             id="session-provider-model"
@@ -205,7 +195,7 @@ export function SessionProviderUpdateEditor(
             onChoose={chooseModel}
             onToggle={() => setOpen(open() === "model" ? undefined : "model")}
             open={open() === "model"}
-            options={modelOptions(models())}
+            options={modelCatalogOptions(models())}
             required
             selectedValue={draft().model}
           />
@@ -241,13 +231,7 @@ export function SessionProviderUpdateEditor(
             />
           </Show>
         </div>
-        <Show when={error()}>
-          {(message) => (
-            <p class="mt-4 text-sm text-rose-200" role="alert">
-              {message()}
-            </p>
-          )}
-        </Show>
+        <SessionEditorError message={error()} />
         <button
           class="mt-4 rounded-xl border border-cyan-300/30 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-100 disabled:opacity-50"
           data-session-provider-update-submit="true"
@@ -257,7 +241,7 @@ export function SessionProviderUpdateEditor(
         >
           Change provider
         </button>
-      </Show>
+      </SessionEditorSection>
       <Show when={confirming()}>
         <div
           aria-modal="true"
@@ -297,6 +281,6 @@ export function SessionProviderUpdateEditor(
           </div>
         </div>
       </Show>
-    </section>
+    </>
   );
 }

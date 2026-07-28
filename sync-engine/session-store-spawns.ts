@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
@@ -71,11 +71,12 @@ export function pendingSpawnedSessions(
     .from(agentSessions)
     .where(
       and(
+        storedSessionCondition({
+          status: ["idle", "stopped", "failed"],
+        }),
         isNotNull(agentSessions.parentSessionId),
         isNotNull(agentSessions.parentExecutionGeneration),
-        eq(agentSessions.isDeleted, false),
         eq(agentSessions.runnerRequired, false),
-        inArray(agentSessions.status, ["idle", "stopped", "failed"]),
       ),
     )
     .all()
@@ -172,6 +173,7 @@ export function appendSpawnedSessionReport(options: {
         ...reportMessageOptions(options, transaction),
         clientRequestId: `spawn:${options.childId}:${String(options.childGeneration)}`,
         content: options.content,
+        kind: "steer",
       })
     ) {
       return false;

@@ -3,13 +3,13 @@ import {
   createMemo,
   createSignal,
   on,
-  onCleanup,
   onMount,
   Show,
   type JSX,
 } from "solid-js";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { AskQuestionsForm } from "./ask-questions-client.tsx";
+import { clipboardCopyLabel, createClipboardCopy } from "./clipboard-copy.ts";
 import { findById } from "./id-selection.ts";
 import { SessionFollowUp } from "./session-client-forms.tsx";
 import { sessionComposerUnavailableReason } from "./session-composer-availability.ts";
@@ -26,6 +26,7 @@ import {
 import { SessionProviderUpdateEditor } from "./session-provider-update-client.tsx";
 import type { SessionProviderUpdateView } from "./session-provider-update-model.ts";
 import { RunnerReassignment } from "./session-reassignment-view.tsx";
+import { SessionSpawnEditor } from "./session-spawn-client.tsx";
 import { SessionToolUpdateEditor } from "./session-tool-update-client.tsx";
 import { SessionTranscriptFilterControls } from "./session-transcript-filter-controls.tsx";
 import {
@@ -34,9 +35,6 @@ import {
 } from "./session-transcript.tsx";
 
 const SCROLL_END_TOLERANCE = 1;
-const COPY_FEEDBACK_DURATION_MS = 2_000;
-
-type SessionCopyState = "copied" | "failed" | "idle";
 
 function sessionCopyText(detail: AgentSessionDetail): string {
   const transcript = detail.messages
@@ -50,17 +48,6 @@ function sessionCopyText(detail: AgentSessionDetail): string {
     `Working directory: ${detail.workingDirectory}`,
     ...(transcript.length === 0 ? [] : ["", "Transcript", ...transcript]),
   ].join("\n");
-}
-
-function copyButtonLabel(state: SessionCopyState): string {
-  switch (state) {
-    case "copied":
-      return "Copied!";
-    case "failed":
-      return "Copy failed";
-    case "idle":
-      return "Copy session";
-  }
 }
 
 function scrollRevision(
@@ -90,72 +77,51 @@ export function SessionDetailBody(props: {
   readonly sessionMetrics: JSX.Element;
   readonly view: LoadedSessionDetailViewProps;
 }): JSX.Element {
-  const { view } = props;
-  const running = (): boolean => view.detail.status === "running";
-  const queued = (): boolean => view.detail.status === "queued";
+  const view = (): LoadedSessionDetailViewProps => props.view;
+  const running = (): boolean => view().detail.status === "running";
+  const queued = (): boolean => view().detail.status === "queued";
   const active = (): boolean =>
-    queued() || running() || view.detail.status === "paused";
+    queued() || running() || view().detail.status === "paused";
   const [, setShortcutPlatform] = createSessionShortcuts();
   const composerReason = (): string | undefined =>
     sessionComposerUnavailableReason(
-      view.detail,
-      view.state,
-      findById(view.runners, view.detail.runnerId) !== undefined,
-      view.credentialAvailable,
+      view().detail,
+      view().state,
+      findById(view().runners, view().detail.runnerId) !== undefined,
+      view().credentialAvailable,
     );
   const composerDisabled = (): boolean => composerReason() !== undefined;
   const compactionDisabled = (): boolean =>
     active() ||
-    view.detail.runnerRequired ||
-    view.state.compacting ||
-    view.state.reassigning ||
-    view.state.sending ||
-    view.state.stopping;
+    view().detail.runnerRequired ||
+    view().state.compacting ||
+    view().state.reassigning ||
+    view().state.sending ||
+    view().state.stopping;
   const hasChildren = (): boolean =>
-    view.state.sessions?.some(
-      ({ parentSessionId }) => parentSessionId === view.detail.id,
+    view().state.sessions?.some(
+      ({ parentSessionId }) => parentSessionId === view().detail.id,
     ) === true;
   const stopSession = (): void => {
     if (!hasChildren()) {
-      void view.controller.stop();
+      void view().controller.stop();
       return;
     }
     const graceful = window.confirm(
       "This session has child sessions. Choose OK to wait for their final messages before stopping, or Cancel to stop immediately.",
     );
-    void view.controller.stop(graceful);
+    void view().controller.stop(graceful);
   };
   const visibleMessages = (): AgentSessionDetail["messages"] =>
-    view.state.history.page?.messages ?? view.detail.messages;
-  const [copyState, setCopyState] = createSignal<SessionCopyState>("idle");
+    view().state.history.page?.messages ?? view().detail.messages;
+  const sessionCopy = createClipboardCopy(() => sessionCopyText(view().detail));
   const [scrollLockEnabled, setScrollLockEnabled] = createSignal(true);
   const [transcript, setTranscript] = createSignal<HTMLUListElement>();
-  let copyFeedbackTimer: number | undefined;
-  const copySession = async (): Promise<void> => {
-    if (copyFeedbackTimer !== undefined) {
-      window.clearTimeout(copyFeedbackTimer);
-    }
-    try {
-      await navigator.clipboard.writeText(sessionCopyText(view.detail));
-      setCopyState("copied");
-    } catch {
-      setCopyState("failed");
-    }
-    copyFeedbackTimer = window.setTimeout(() => {
-      setCopyState("idle");
-      copyFeedbackTimer = undefined;
-    }, COPY_FEEDBACK_DURATION_MS);
-  };
-  onCleanup(() => {
-    if (copyFeedbackTimer !== undefined) {
-      window.clearTimeout(copyFeedbackTimer);
-    }
-  });
   const filterCounts = createMemo(() =>
     sessionTranscriptFilterCounts(
-      view.detail.agentFile,
+      view().detail.agentFile,
       visibleMessages(),
-      view.detail.tools,
+      view().detail.tools,
     ),
   );
   const scrollToEnd = (): void => {
@@ -169,7 +135,7 @@ export function SessionDetailBody(props: {
     setShortcutPlatform(navigator.platform);
   });
   createEffect(
-    on(() => scrollRevision(view.detail, visibleMessages()), scrollToEnd),
+    on(() => scrollRevision(view().detail, visibleMessages()), scrollToEnd),
   );
 
   return (
@@ -178,22 +144,22 @@ export function SessionDetailBody(props: {
         <div class="min-w-0 flex-1">
           <div class="flex flex-wrap items-center gap-2">
             <h3 class="text-xl font-semibold text-white">
-              {view.detail.title}
+              {view().detail.title}
             </h3>
             {props.presentation}
           </div>
           <div class="mt-2 flex min-w-0 flex-wrap items-baseline gap-x-1 gap-y-1 text-xs">
-            <span class={sessionContextClasses(view.detail)}>
+            <span class={sessionContextClasses(view().detail)}>
               {`${props.modelLabel} · ${props.environmentLabel} · ${props.contextLabel} ·`}
             </span>
             <code
               class="path-wrap min-w-0 text-cyan-200"
               data-working-directory="true"
             >
-              {view.detail.workingDirectory}
+              {view().detail.workingDirectory}
             </code>
-            <span class={sessionContextClasses(view.detail)}>
-              {`· Agent file: ${view.detail.agentFile?.name ?? "None"}`}
+            <span class={sessionContextClasses(view().detail)}>
+              {`· Agent file: ${view().detail.agentFile?.name ?? "None"}`}
             </span>
           </div>
           <span class="mt-2 block">{props.sessionMetrics}</span>
@@ -203,10 +169,10 @@ export function SessionDetailBody(props: {
             aria-live="polite"
             class="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-emerald-300/30 hover:text-emerald-200 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
             data-copy-session="true"
-            onClick={() => void copySession()}
+            onClick={() => void sessionCopy.copy()}
             type="button"
           >
-            {copyButtonLabel(copyState())}
+            {clipboardCopyLabel(sessionCopy.state(), "Copy session")}
           </button>
           <button
             aria-pressed={scrollLockEnabled()}
@@ -224,41 +190,48 @@ export function SessionDetailBody(props: {
           <Show when={active()}>
             <button
               class="rounded-xl border border-rose-300/30 bg-rose-300/10 px-4 py-2 text-sm font-semibold text-rose-200 disabled:opacity-50"
-              disabled={view.state.stopping}
+              disabled={view().state.stopping}
               onClick={stopSession}
               type="button"
             >
-              {view.state.stopping ? "Stopping…" : "Stop session"}
+              {view().state.stopping ? "Stopping…" : "Stop session"}
             </button>
           </Show>
         </div>
       </div>
-      <Show when={view.detail.runnerRequired}>
-        <RunnerReassignment {...view} />
+      <Show when={view().detail.runnerRequired}>
+        <RunnerReassignment {...view()} />
       </Show>
       <SessionProviderUpdateEditor
         credentials={props.providerUpdate.credentials}
-        detail={view.detail}
+        detail={view().detail}
         disabled={
-          active() || view.state.reassigning || view.state.updatingTools
+          active() || view().state.reassigning || view().state.updatingTools
         }
         onApply={props.providerUpdate.onApply}
         onDiscoverModels={props.providerUpdate.onDiscoverModels}
         onDiscoverProviders={props.providerUpdate.onDiscoverProviders}
       />
       <SessionToolUpdateEditor
-        detail={view.detail}
-        disabled={view.state.updatingTools}
+        detail={view().detail}
+        disabled={view().state.updatingTools}
         onApply={(tools, confirmedCacheDrop) => {
-          return view.controller.updateTools(tools, confirmedCacheDrop);
+          return view().controller.updateTools(tools, confirmedCacheDrop);
         }}
       />
-      <SessionHistoryControls controller={view.controller} />
+      <SessionSpawnEditor
+        credentials={view().credentials}
+        detail={view().detail}
+        onDiscoverModels={props.providerUpdate.onDiscoverModels}
+        onSpawn={(selection) => view().controller.spawn(selection)}
+        runners={view().runners}
+      />
+      <SessionHistoryControls controller={view().controller} />
       <SessionTranscriptFilterControls
         counts={filterCounts()}
-        filters={view.state.transcriptFilters}
+        filters={view().state.transcriptFilters}
         onChange={(name, visible) => {
-          view.controller.setTranscriptFilter(name, visible);
+          view().controller.setTranscriptFilter(name, visible);
         }}
       />
       <ul
@@ -271,36 +244,41 @@ export function SessionDetailBody(props: {
         ref={setTranscript}
       >
         <SessionTranscript
-          agentFile={view.detail.agentFile}
-          executionEnvironment={view.detail.executionEnvironment}
-          filters={view.state.transcriptFilters}
+          agentFile={view().detail.agentFile}
+          executionEnvironment={view().detail.executionEnvironment}
+          filters={view().state.transcriptFilters}
           messages={visibleMessages()}
           onFork={
-            view.state.history.page === undefined
-              ? (messageId) => void view.controller.fork(messageId)
+            view().state.history.page === undefined
+              ? (messageId) => void view().controller.fork(messageId)
               : undefined
           }
           toolStreams={
-            view.state.history.page === undefined ? view.state.toolStreams : []
+            view().state.history.page === undefined
+              ? view().state.toolStreams
+              : []
           }
-          tools={view.detail.tools}
+          tools={view().detail.tools}
         />
       </ul>
       <SessionPendingInputs
         inputs={
-          view.controller.view().detail?.pendingInputs ??
-          view.detail.pendingInputs
+          view().controller.view().detail?.pendingInputs ??
+          view().detail.pendingInputs
         }
+        onCancel={(inputId) => {
+          void view().controller.cancelPendingInput(inputId);
+        }}
       />
-      <Show when={view.detail.pendingQuestions}>
+      <Show when={view().detail.pendingQuestions}>
         {(pending) => (
           <div class="mt-5">
             <AskQuestionsForm
               onSubmit={(answers) =>
-                void view.controller.answerQuestions(answers)
+                void view().controller.answerQuestions(answers)
               }
               pending={pending()}
-              submitting={view.state.answeringQuestions}
+              submitting={view().state.answeringQuestions}
             />
           </div>
         )}
@@ -308,12 +286,12 @@ export function SessionDetailBody(props: {
       <div class="session-composer mt-5 flex min-w-0 flex-col gap-3">
         <Show when={!active()}>
           <CompactionControls
-            autoCompact={view.detail.autoCompact}
-            compacting={view.state.compacting}
+            autoCompact={view().detail.autoCompact}
+            compacting={view().state.compacting}
             disabled={compactionDisabled()}
-            onCompact={() => void view.controller.compact()}
+            onCompact={() => void view().controller.compact()}
             onToggleAutoCompact={(enabled) =>
-              void view.controller.toggleAutoCompact(enabled)
+              void view().controller.toggleAutoCompact(enabled)
             }
           />
         </Show>
@@ -328,21 +306,21 @@ export function SessionDetailBody(props: {
                 : "Ready for another instruction.")
           }
           disabled={composerDisabled()}
-          images={view.state.followUpImages}
+          images={view().state.followUpImages}
           onAddImages={(files) => {
             if (!composerDisabled())
-              void view.controller.addImages(files, true);
+              void view().controller.addImages(files, true);
           }}
           onContinue={
             active()
               ? undefined
               : () => {
                   if (!composerDisabled())
-                    void view.controller.continueSession();
+                    void view().controller.continueSession();
                 }
           }
           onInput={(value) => {
-            if (!composerDisabled()) view.controller.setFollowUp(value);
+            if (!composerDisabled()) view().controller.setFollowUp(value);
           }}
           onKeyDown={(event) => {
             if (
@@ -354,32 +332,32 @@ export function SessionDetailBody(props: {
               return;
             event.preventDefault();
             if (event.shiftKey) {
-              if (running()) void view.controller.steer();
+              if (running()) void view().controller.steer();
             } else if (running() || queued()) {
-              void view.controller.followUp();
+              void view().controller.followUp();
             } else {
               event.currentTarget.form?.requestSubmit();
             }
           }}
           onRemoveImage={(index) => {
             if (!composerDisabled())
-              view.controller.removeImage(index, "followUp");
+              view().controller.removeImage(index, "followUp");
           }}
           onSteer={
             running()
               ? () => {
-                  if (!composerDisabled()) void view.controller.steer();
+                  if (!composerDisabled()) void view().controller.steer();
                 }
               : undefined
           }
           onSubmit={() => {
             if (composerDisabled()) return;
-            if (running() || queued()) void view.controller.followUp();
-            else void view.controller.send();
+            if (running() || queued()) void view().controller.followUp();
+            else void view().controller.send();
           }}
-          prompt={view.state.followUp}
-          sending={view.state.sending}
-          sessionId={view.detail.id}
+          prompt={view().state.followUp}
+          sending={view().state.sending}
+          sessionId={view().detail.id}
           submitLabel={running() || queued() ? "Follow up" : "Send"}
         />
       </div>

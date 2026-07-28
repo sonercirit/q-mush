@@ -8,6 +8,7 @@ import { createTestProviderCredential } from "./authenticated-integration-test-h
 import { userRealtimeCommand } from "./realtime-command-fixtures.ts";
 import {
   REALTIME_TEST_SESSION_DETAIL,
+  realtimeTestPendingInput,
   realtimeTestSessionCommands,
 } from "./realtime-session-fixture.ts";
 
@@ -76,6 +77,33 @@ describe("pending-input realtime integration", () => {
         prompt: "Continue safely",
         sessionId: "session-1",
       },
+      REALTIME_TEST_SESSION_DETAIL.workspaceId,
+    );
+  });
+
+  test("dispatches cancellation over authenticated realtime", async () => {
+    const cancelPendingInputForUser = vi.fn(() => ({
+      detail: REALTIME_TEST_SESSION_DETAIL,
+      input: realtimeTestPendingInput("Continue safely"),
+    }));
+    const integration = realtimeTestSessionCommands({
+      cancelPendingInputForUser,
+    });
+
+    await executeSessionRealtimeCommand(
+      integration,
+      USER,
+      userRealtimeCommand(SESSION_REALTIME_OPERATIONS.cancelPendingInput, {
+        inputId: "pending-1",
+        sessionId: "session-1",
+      }),
+      REALTIME_TEST_SESSION_DETAIL.workspaceId,
+    );
+
+    expect(cancelPendingInputForUser).toHaveBeenCalledWith(
+      USER,
+      "session-1",
+      "pending-1",
       REALTIME_TEST_SESSION_DETAIL.workspaceId,
     );
   });

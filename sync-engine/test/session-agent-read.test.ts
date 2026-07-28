@@ -145,8 +145,39 @@ describe("bounded session reads", () => {
 
     const assistant = output({ categories: ["assistant"] });
     const assistantRecords = records(content(assistant)["records"]);
-    expect(assistantRecords).toHaveLength(1);
-    expect(assistantRecords[0]).not.toHaveProperty("toolCalls");
+    expect(assistantRecords).toEqual([
+      expect.objectContaining({
+        content: "first assistant",
+        role: "assistant",
+        toolCalls: [
+          {
+            arguments: '{"secret":"tool-history"}',
+            id: "call-1",
+            name: "bash",
+          },
+        ],
+      }),
+    ]);
+
+    const thinking = output({ categories: ["thinking"] });
+    expect(records(content(thinking)["records"])).toEqual([
+      expect.objectContaining({
+        content: "private reasoning",
+        id: "message-2",
+        role: "thinking",
+      }),
+    ]);
+
+    const tool = output({ categories: ["tool"] });
+    expect(records(content(tool)["records"])).toEqual([
+      expect.objectContaining({
+        content: "tool-history result",
+        id: "message-4",
+        role: "tool",
+        toolCallId: "call-1",
+        toolName: "bash",
+      }),
+    ]);
 
     const tools = output({ categories: ["tools"] });
     expect(content(tools)["toolDefinitions"]).toEqual([TOOL_DEFINITION]);
@@ -155,25 +186,23 @@ describe("bounded session reads", () => {
 
   test("combines sections and applies last-X after role filtering", () => {
     const read = output({
-      categories: ["system", "user", "assistant", "tools"],
+      categories: ["system", "user", "assistant", "thinking", "tool", "tools"],
       limit: 2,
     });
     const transcript = records(content(read)["records"]);
 
     expect(transcript.map((record) => record["content"])).toEqual([
-      "first assistant",
+      "tool-history result",
       "last user",
     ]);
     expect(metadata(read)).toMatchObject({
-      matchedRecords: 3,
+      matchedRecords: 5,
       returnedRecords: 2,
       truncated: true,
       truncation: { limit: true },
     });
-    const serializedRead = JSON.stringify(read);
-    expect(serializedRead).not.toContain("private reasoning");
-    expect(serializedRead).not.toContain("tool-history result");
-    expect(serializedRead).not.toContain("tool-history");
+    expect(JSON.stringify(read)).toContain("tool-history result");
+    expect(JSON.stringify(read)).not.toContain("private reasoning");
   });
 
   test("counts limit truncation even when the store prelimits records", () => {

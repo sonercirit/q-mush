@@ -11,10 +11,12 @@ const OPERATION_PATTERN = /^[a-z][a-z\d_]*(?:\.[a-z][a-z\d_]*){1,7}$/u;
 
 export const SESSION_REALTIME_OPERATIONS = {
   answerQuestions: ANSWER_QUESTIONS_REALTIME_OPERATION,
+  cancelPendingInput: "sessions.cancel_pending_input",
   compact: "sessions.compact",
   continue: "sessions.continue",
   create: "sessions.create",
   fork: "sessions.fork",
+  spawn: "sessions.spawn",
   history: "sessions.history",
   models: "sessions.models",
   previewToolUpdate: "sessions.preview_tool_update",

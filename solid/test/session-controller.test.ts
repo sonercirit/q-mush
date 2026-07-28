@@ -369,7 +369,7 @@ test("anchors a continuation stream after the existing transcript", async () => 
   });
 });
 
-test("reconciles reset streams with persisted messages", async () => {
+test("reconciles reset streams with differently finalized persisted messages", async () => {
   const originalFetch = globalThis.fetch;
   const {
     controller,
@@ -380,13 +380,16 @@ test("reconciles reset streams with persisted messages", async () => {
 
   try {
     applyDelta(controller, sessionId, "Discarded", "Old thinking");
-    applyDelta(controller, sessionId, "Replacement", "New thinking", true);
+    applyDelta(controller, sessionId, "Replacement ", "New thinking", true);
+    expectStreamAfter(controller, [user.id], sessionId, true);
 
-    finishSession(controller, running, [
-      user,
-      transcriptMessage("thinking-1", "New thinking", "thinking", 2),
-      transcriptMessage("assistant-1", "Replacement", "assistant", 3),
-    ]);
+    controller.applyDetail(
+      queuedDetail(running, [
+        user,
+        transcriptMessage("thinking-1", "New thinking", "thinking", 2),
+        transcriptMessage("assistant-1", "Replacement", "assistant", 3),
+      ]),
+    );
 
     expect(messageIds(controller)).toEqual([
       "user-1",

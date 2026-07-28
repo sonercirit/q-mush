@@ -96,7 +96,9 @@ export function CompactionControls(props: {
       <button
         class="min-h-11 rounded-xl border border-amber-300/30 bg-amber-300/10 px-4 py-2 text-sm font-semibold text-amber-200 disabled:opacity-50"
         disabled={props.disabled ?? props.compacting}
-        onClick={props.onCompact}
+        onClick={() => {
+          props.onCompact();
+        }}
         type="button"
       >
         {props.compacting ? "Compacting…" : "Compact now"}

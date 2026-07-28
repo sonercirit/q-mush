@@ -56,7 +56,7 @@ const EDIT_REPLACEMENT_PARAMETER = {
 const BASE_AGENT_TOOLS = [
   toolDefinition({
     description:
-      "Read the contents of a UTF-8 text file in the workspace. Output is truncated to 2000 lines or 50KB, whichever is hit first. Use offset and limit for large files, continuing with offset when the full file is needed.",
+      "Read the contents of a UTF-8 text file in the workspace. Read output shares a 50KB session-wide budget; output beyond it is saved to an OS temporary file for follow-up reads. Use offset and limit for large files.",
     name: "read",
     properties: {
       limit: {
@@ -270,14 +270,15 @@ const SESSION_AGENT_TOOLS = [
   }),
   toolDefinition({
     description:
-      "Read bounded sections of an owned session. Defaults to the last 20 user/assistant records. Tool history and reasoning are always excluded; tools returns effective definitions, not calls.",
+      "Read bounded sections of an owned session. Defaults to the last 20 user/assistant records. Select thinking for reasoning, tool for tool results, tools for effective definitions, and assistant for content plus tool calls.",
     name: "read_session",
     properties: {
       ...SESSION_ID_PARAMETER,
       categories: {
-        description: "Nonempty selection of system, user, assistant, and tools",
+        description:
+          "Nonempty selection of system, user, assistant, thinking, tool, and tools",
         items: {
-          enum: ["system", "user", "assistant", "tools"],
+          enum: ["system", "user", "assistant", "thinking", "tool", "tools"],
           type: "string",
         },
         minItems: 1,
@@ -286,7 +287,7 @@ const SESSION_AGENT_TOOLS = [
       },
       limit: {
         description:
-          "Last matching user/assistant transcript records (defaults to 20, maximum 100)",
+          "Last matching transcript records (defaults to 20, maximum 100)",
         maximum: 100,
         minimum: 1,
         ...NUMBER_PARAMETER,

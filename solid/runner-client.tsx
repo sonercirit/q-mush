@@ -8,6 +8,7 @@ import {
   optionalWorkspaces,
   workspaceIdsAreValid,
 } from "./connection-client.ts";
+import { controllerView } from "./controller-view.ts";
 import { DefaultableActions } from "./defaultable-actions.tsx";
 import { renderDebugBoundary } from "./render-debug.tsx";
 import { ScopedConnectionEditor } from "./scoped-connection-editor.tsx";
@@ -298,7 +299,7 @@ interface RunnerControllerProps {
 }
 
 function RunnerList(props: RunnerControllerProps): JSX.Element {
-  const state = props.controller.view;
+  const state = controllerView(props);
   const loading = (): JSX.Element => (
     <p class="mt-7 text-sm text-slate-400" role="status">
       Loading runners…
@@ -336,7 +337,7 @@ function RunnerList(props: RunnerControllerProps): JSX.Element {
 }
 
 export function RunnerPanel(props: RunnerControllerProps): JSX.Element {
-  const state = props.controller.view;
+  const state = controllerView(props);
   return (
     <section
       aria-labelledby="runners-title"

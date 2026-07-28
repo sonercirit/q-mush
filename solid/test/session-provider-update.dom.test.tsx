@@ -1,3 +1,4 @@
+import { createSignal } from "solid-js";
 import { afterEach, expect, test, vi } from "vitest";
 import type {
   AgentModelCatalog,
@@ -212,6 +213,43 @@ test("preserves the session OpenRouter serving provider after discovery", async 
   expect(servingProvider.textContent).not.toContain(
     "OpenRouter automatic routing",
   );
+});
+
+test("rediscovers providers only when the session provider selection changes", async () => {
+  const catalog = {
+    ...MODEL_CATALOG,
+    models: [
+      ...MODEL_CATALOG.models,
+      ...testAgentModelCatalog({ id: "model-3", label: "Model 3" }).models,
+    ],
+  };
+  const [detail, setDetail] = createSignal(OPENROUTER_DETAIL);
+  const discoverModels = vi.fn<() => Promise<AgentModelCatalog>>();
+  discoverModels.mockResolvedValue(catalog);
+  const discoverProviders = vi.fn<() => Promise<OpenRouterProviderCatalog>>();
+  discoverProviders.mockResolvedValue(OPENROUTER_PROVIDER_CATALOG);
+  mount(() => (
+    <ProviderEditorTestView
+      detail={detail()}
+      discoverModels={discoverModels}
+      discoverProviders={discoverProviders}
+    />
+  ));
+  await vi.waitFor(() => {
+    expect(discoverProviders).toHaveBeenCalledTimes(1);
+  });
+
+  setDetail({ ...OPENROUTER_DETAIL, updatedAt: 3 });
+  await Promise.resolve();
+
+  expect(discoverModels).toHaveBeenCalledTimes(1);
+  expect(discoverProviders).toHaveBeenCalledTimes(1);
+
+  setDetail({ ...OPENROUTER_DETAIL, model: "model-3", updatedAt: 4 });
+  await vi.waitFor(() => {
+    expect(discoverProviders).toHaveBeenCalledTimes(2);
+  });
+  expect(discoverProviders).toHaveBeenLastCalledWith("credential-1", "model-3");
 });
 
 test("reselecting the current model preserves its serving provider", async () => {

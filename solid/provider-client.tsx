@@ -15,6 +15,7 @@ import {
   optionalWorkspaces,
   workspaceIdsAreValid,
 } from "./connection-client.ts";
+import { controllerView } from "./controller-view.ts";
 import { DefaultableActions } from "./defaultable-actions.tsx";
 import { renderDebugBoundary } from "./render-debug.tsx";
 import { ScopedConnectionEditor } from "./scoped-connection-editor.tsx";
@@ -283,34 +284,33 @@ function ProviderCredentialList(
     readonly onOpenSessionReassignment: CredentialItemProps["onOpenSessionReassignment"];
   },
 ): JSX.Element {
-  const { configuration, controller } = props;
-  const state = controller.view;
+  const state = controllerView(props);
   const retry = {
     get error(): string | undefined {
       return state().error;
     },
-    onRetry: (): void => void controller.load(),
+    onRetry: (): void => void props.controller.load(),
   };
   return (
     <Collection
       empty={
         <div class="mt-6 rounded-2xl border border-dashed border-white/15 p-4 text-sm leading-6 text-slate-400 sm:p-6">
-          {configuration.emptyMessage}
+          {props.configuration.emptyMessage}
         </div>
       }
       items={state().credentials}
       listClass="mt-6 space-y-3"
       loading={
         <p class="mt-6 text-sm text-slate-400" role="status">
-          {`Loading ${configuration.name} ${configuration.id === "brave-search" ? "keys" : "connections"}…`}
+          {`Loading ${props.configuration.name} ${props.configuration.id === "brave-search" ? "keys" : "connections"}…`}
         </p>
       }
       retry={retry}
     >
       {(credential) => {
         const item: CredentialItemProps = {
-          configuration,
-          controller,
+          configuration: props.configuration,
+          controller: props.controller,
           credential,
           onOpenSessionReassignment: props.onOpenSessionReassignment,
           state: state(),
@@ -332,13 +332,20 @@ function credentialInputAttributes(disabled: boolean) {
 }
 
 export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
-  const state = props.controller.view;
+  const state = controllerView(props);
   const titleId = (): string => `${props.configuration.id}-title`;
   const inputId = (): string => `${props.configuration.id}-api-key`;
   const [form, setForm] = createSignal<HTMLFormElement>();
   const [reassignmentTrigger, setReassignmentTrigger] =
     createSignal<HTMLElement>();
   const reassignmentDialog = new SessionReassignmentDialogController();
+  const addCredential = async (
+    apiKey: string,
+    label: string | undefined,
+  ): Promise<void> => {
+    await props.controller.add(apiKey, label);
+    form()?.reset();
+  };
 
   return (
     <section
@@ -394,11 +401,10 @@ export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
           const apiKey = data.get("apiKey");
           const label = data.get("label");
           if (typeof apiKey === "string") {
-            void props.controller
-              .add(apiKey, typeof label === "string" ? label : undefined)
-              .then(() => {
-                form()?.reset();
-              });
+            void addCredential(
+              apiKey,
+              typeof label === "string" ? label : undefined,
+            );
           }
         }}
         ref={setForm}

@@ -103,6 +103,14 @@ function expectContract(value: boolean, expected: boolean): void {
   expect(value).toBe(expected);
 }
 
+function expectRunningSessionTool(
+  publisher: ToolStreamPublisher,
+  callId: string,
+  arguments_: string,
+): void {
+  expect(publisher.running(callId, "spawn_session", arguments_)).toBe(true);
+}
+
 function beginProviderReconciliation(streamId: string) {
   const setup = createPublisher(streamId);
   expectProviderAccepted(setup.publisher, {
@@ -248,6 +256,61 @@ test("accumulates fragmented provider call IDs while reconciling placeholders", 
     arguments: "{}",
     callId: "call-1",
     name: "read",
+  });
+});
+
+test("reconciles server-side metadata when the provider omitted it", () => {
+  const { publisher, transport } = createPublisher("turn-session-tool");
+
+  expectRunningSessionTool(
+    publisher,
+    "call-session",
+    '{"prompt":"Delegate this"}',
+  );
+
+  expectPublishedFrames(transport, [
+    { callId: "call-session", sequence: 0, state: "preparing" },
+    { channel: "name", content: "spawn_session", sequence: 1 },
+    {
+      channel: "arguments",
+      content: '{"prompt":"Delegate this"}',
+      sequence: 2,
+    },
+    { sequence: 3, state: "running" },
+  ]);
+  expect(
+    transport.store.snapshot(USER_ID, SESSION_ID, "turn-session-tool")
+      .streams[0],
+  ).toMatchObject({
+    arguments: '{"prompt":"Delegate this"}',
+    callId: "call-session",
+    name: "spawn_session",
+    state: "running",
+  });
+});
+
+test("preserves provider metadata when execution supplies the fallback", () => {
+  const { publisher, transport } = createPublisher("turn-provider-metadata");
+  expectProviderAccepted(publisher, {
+    arguments: '{"prompt":"Already streamed"}',
+    id: "call-provider",
+    index: 0,
+    name: "spawn_session",
+  });
+
+  expectRunningSessionTool(
+    publisher,
+    "call-provider",
+    '{"prompt":"Already streamed"}',
+  );
+
+  expect(
+    transport.store.snapshot(USER_ID, SESSION_ID, "turn-provider-metadata")
+      .streams[0],
+  ).toMatchObject({
+    arguments: '{"prompt":"Already streamed"}',
+    name: "spawn_session",
+    state: "running",
   });
 });
 

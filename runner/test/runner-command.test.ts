@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { describe, expect, test } from "vitest";
 import {
@@ -7,6 +7,11 @@ import {
   readRunnerCommand,
 } from "../../runner/runner-command.ts";
 import { RUNNER_AGENT_FILE_COMMAND } from "../../shared/agent-file.ts";
+import {
+  RUNNER_EXECUTION_CLEANUP_COMMAND,
+  RUNNER_TERMINAL_CLEANUP_ARGUMENT,
+  type RunnerToolCommand,
+} from "../../shared/runner-command-broker.ts";
 import { testRunnerCommand } from "../../shared/test/runner-command-fixtures.ts";
 import { useTemporaryDirectories } from "./temporary-directories.ts";
 
@@ -79,6 +84,70 @@ const DESCENDANT_COMMAND =
 const QUICK_TERMINATION_MILLISECONDS = 750;
 const TIMEOUT_SECONDS = 1;
 
+interface SessionExecutor {
+  readonly executor: RunnerCommandExecutor;
+  readonly root: string;
+  readonly sessionId: string;
+}
+
+function sessionCommand(options: {
+  readonly arguments: Readonly<Record<string, unknown>>;
+  readonly session: SessionExecutor;
+  readonly tool: string;
+}): RunnerToolCommand {
+  return {
+    arguments: options.arguments,
+    executionEnvironment: "bare_metal",
+    id: `${options.session.sessionId}-${options.tool}`,
+    sessionId: options.session.sessionId,
+    tool: options.tool,
+    workingDirectory: options.session.root,
+  };
+}
+
+async function readSession(
+  sessionId: string,
+  path: string,
+  content: string,
+): Promise<SessionExecutor> {
+  const root = await temporaryDirectory();
+  await writeFile(join(root, path), content, "utf8");
+  return { executor: new RunnerCommandExecutor(), root, sessionId };
+}
+
+function executeSession(
+  session: SessionExecutor,
+  tool: string,
+  arguments_: Readonly<Record<string, unknown>>,
+): Promise<string> {
+  return session.executor.execute(
+    sessionCommand({ arguments: arguments_, session, tool }),
+  );
+}
+
+function cleanupSession(session: SessionExecutor): Promise<void> {
+  return executeSession(session, RUNNER_EXECUTION_CLEANUP_COMMAND, {
+    [RUNNER_TERMINAL_CLEANUP_ARGUMENT]: true,
+  }).then(() => undefined);
+}
+
+function spillPath(output: string): string {
+  const path = /saved to (.+)\. Read that file/u.exec(output)?.[1];
+  if (path === undefined) {
+    throw new Error("The read output did not include a spill path");
+  }
+  return path;
+}
+
+async function readSpill(
+  session: SessionExecutor,
+  arguments_: Readonly<Record<string, unknown>>,
+): Promise<{ readonly content: string; readonly path: string }> {
+  const output = await executeSession(session, "read", arguments_);
+  const path = spillPath(output);
+  return { content: await readFile(path, "utf8"), path };
+}
+
 describe("runner WebSocket protocol", () => {
   test("validates commands before executing them", async () => {
     const expected = testRunnerCommand({
@@ -91,6 +160,115 @@ describe("runner WebSocket protocol", () => {
     const output = await executeRunnerCommand(command);
 
     expect(output.startsWith("Error:")).toBe(true);
+  });
+
+  test("keeps a session read budget and spills across agent runtime loads", async () => {
+    const source = ["a".repeat(30_000), "b".repeat(30_000)].join("\n");
+    const session = await readSession(
+      "session-read-budget",
+      "large.txt",
+      source,
+    );
+    const read = (offset: number) =>
+      executeSession(session, "read", {
+        limit: 1,
+        offset,
+        path: "large.txt",
+      });
+    const loadAgentFile = () =>
+      executeSession(session, RUNNER_AGENT_FILE_COMMAND, {});
+
+    const first = await read(1);
+    expect(first).toContain("a".repeat(30_000));
+    expect(first).toContain("Use offset=2 to continue");
+    await loadAgentFile();
+    const overflow = await read(2);
+    const path = spillPath(overflow);
+
+    expect(overflow).toContain("b".repeat(20_000));
+    expect(overflow).toContain("global read limit (51200 bytes)");
+    await loadAgentFile();
+    expect(await executeSession(session, "read", { path })).toBe(
+      "b".repeat(30_000),
+    );
+    const existsBeforeCleanup = await Bun.file(path).exists();
+    expect(existsBeforeCleanup).toBe(true);
+
+    await cleanupSession(session);
+    const existsAfterCleanup = await Bun.file(path).exists();
+    expect(existsAfterCleanup).toBe(false);
+  });
+
+  test("spills the continuation instruction for reads over 2,000 lines", async () => {
+    const lines = Array.from(
+      { length: 2_001 },
+      (_, index) => `${String(index + 1).padStart(4, "0")}-${"x".repeat(30)}`,
+    );
+    const session = await readSession(
+      "session-many-lines",
+      "many-lines.txt",
+      lines.join("\n"),
+    );
+
+    const spilled = await readSpill(session, {
+      limit: 2_000,
+      path: "many-lines.txt",
+    });
+    await cleanupSession(session);
+
+    expect(spilled.content).toContain(lines[1_999]);
+    expect(spilled.content).not.toContain(lines[2_000]);
+    expect(spilled.content).toContain(
+      "[Showing lines 1-2000 of 2001. Use offset=2001 to continue.]",
+    );
+  });
+
+  test("reads back a spill larger than the source file limit", async () => {
+    const lineCount = 2_000;
+    const maximumFileBytes = 1_024 * 1_024;
+    const contentBytes = maximumFileBytes - lineCount;
+    const lineLength = Math.floor(contentBytes / lineCount);
+    const longerLines = contentBytes % lineCount;
+    const source = `${Array.from({ length: lineCount }, (_, index) =>
+      "x".repeat(lineLength + (index < longerLines ? 1 : 0)),
+    ).join("\n")}\n`;
+    const session = await readSession(
+      "session-maximum-file",
+      "maximum.txt",
+      source,
+    );
+
+    const spilled = await readSpill(session, { path: "maximum.txt" });
+    const spillTail = await executeSession(session, "read", {
+      offset: lineCount + 1,
+      path: spilled.path,
+    });
+    await cleanupSession(session);
+
+    expect(Buffer.byteLength(source)).toBe(maximumFileBytes);
+    expect(Buffer.byteLength(spilled.content)).toBeGreaterThan(
+      maximumFileBytes,
+    );
+    expect(spillTail).toContain("Use offset=2001 to continue.");
+  });
+
+  test("preserves and exposes a single oversized line through its spill", async () => {
+    const oversizedLine = "oversized-content-".repeat(4_000);
+    const session = await readSession(
+      "session-oversized-line",
+      "oversized.txt",
+      oversizedLine,
+    );
+
+    const spilled = await readSpill(session, { path: "oversized.txt" });
+    const continued = await executeSession(session, "read", {
+      limit: 1,
+      path: spilled.path,
+    });
+    await cleanupSession(session);
+
+    expect(spilled.content).toBe(oversizedLine);
+    expect(continued).toBe(oversizedLine);
   });
 
   test("loads the preferred workspace agent file for the server", async () => {

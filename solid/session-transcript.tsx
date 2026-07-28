@@ -1,4 +1,11 @@
-import { createMemo, For, Show, type Accessor, type JSX } from "solid-js";
+import {
+  createMemo,
+  For,
+  Show,
+  untrack,
+  type Accessor,
+  type JSX,
+} from "solid-js";
 import type { AgentFile } from "../shared/agent-file.ts";
 import { createAgentSystemPrompt } from "../shared/agent-prompt.ts";
 import {
@@ -13,6 +20,7 @@ import type {
   ToolStreamEntry,
   ToolStreamState,
 } from "../shared/tool-stream.ts";
+import { clipboardCopyLabel, createClipboardCopy } from "./clipboard-copy.ts";
 import { renderDebugBoundary } from "./render-debug.tsx";
 import { SessionImagePreviews } from "./session-image-client.tsx";
 import { renderMarkdown } from "./session-markdown.tsx";
@@ -134,15 +142,19 @@ function NoteTranscriptMessage(props: {
   readonly kind: "error" | "thinking";
   readonly message: AgentSessionMessage;
 }): JSX.Element {
-  const error = props.kind === "error";
-  return transcriptMessageNote({
-    classes: error
-      ? "border-rose-300/20 bg-rose-300/10"
-      : "border-violet-300/20 bg-violet-300/10",
-    label: error ? "Error message" : "Thinking",
-    labelClasses: error ? "text-rose-200" : "text-violet-200",
-    message: props.message,
-  });
+  const error = (): boolean => props.kind === "error";
+  return (
+    <>
+      {transcriptMessageNote({
+        classes: error()
+          ? "border-rose-300/20 bg-rose-300/10"
+          : "border-violet-300/20 bg-violet-300/10",
+        label: error() ? "Error message" : "Thinking",
+        labelClasses: error() ? "text-rose-200" : "text-violet-200",
+        message: props.message,
+      })}
+    </>
+  );
 }
 
 function messageToolName(message: AgentSessionMessage): string {
@@ -185,43 +197,69 @@ function ToolResultTranscriptMessage(
   );
 }
 
+function MessageCopyButton(props: {
+  readonly content: string;
+  readonly messageId: string;
+}): JSX.Element {
+  const clipboard = createClipboardCopy(() => props.content);
+  return (
+    <button
+      aria-live="polite"
+      class="rounded-full border border-white/10 px-2.5 py-1 text-[0.65rem] font-semibold text-slate-400 transition hover:border-emerald-300/30 hover:text-emerald-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300"
+      data-copy-message={props.messageId}
+      onClick={() => void clipboard.copy()}
+      type="button"
+    >
+      {clipboardCopyLabel(clipboard.state(), "Copy")}
+    </button>
+  );
+}
+
 function ConversationTranscriptMessage(props: {
   readonly message: AgentSessionMessage;
   readonly onFork?: ((messageId: string) => void) | undefined;
   readonly showContent?: boolean;
   readonly showTools?: boolean;
 }): JSX.Element {
-  const user = props.message.role === "user";
-  const system = props.message.role === "system";
+  const user = (): boolean => props.message.role === "user";
+  const system = (): boolean => props.message.role === "system";
   const showContent = (): boolean => props.showContent ?? true;
   const showTools = (): boolean => props.showTools ?? true;
   return (
     <li
-      class={`min-w-0 rounded-2xl border p-3 sm:p-4 ${user ? "sm:ml-8 border-emerald-300/20 bg-emerald-300/10" : system ? "border-rose-300/20 bg-rose-300/10" : "sm:mr-8 border-white/10 bg-white/[0.04]"}`}
+      class={`min-w-0 rounded-2xl border p-3 sm:p-4 ${user() ? "sm:ml-8 border-emerald-300/20 bg-emerald-300/10" : system() ? "border-rose-300/20 bg-rose-300/10" : "sm:mr-8 border-white/10 bg-white/[0.04]"}`}
       {...renderDebugBoundary(
         `message:${props.message.id}`,
-        `${user ? "User" : system ? "Session" : "Agent"} message`,
+        `${user() ? "User" : system() ? "Session" : "Agent"} message`,
       )}
     >
       <div class="flex flex-wrap items-center justify-between gap-2">
         <p class="text-xs font-semibold tracking-wide text-slate-400 uppercase">
-          {user ? "You" : system ? "Session" : "Agent"}
+          {user() ? "You" : system() ? "Session" : "Agent"}
         </p>
-        {!system &&
-        props.onFork !== undefined &&
-        !isStreamedMessage(props.message) ? (
-          <button
-            class="rounded-full border border-white/10 px-2.5 py-1 text-[0.65rem] font-semibold text-slate-400 transition hover:border-emerald-300/30 hover:text-emerald-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300"
-            data-fork-from-here={props.message.id}
-            onClick={() => props.onFork?.(props.message.id)}
-            type="button"
-          >
-            Fork from here
-          </button>
-        ) : null}
+        <div class="flex flex-wrap items-center gap-2">
+          {!system() && showContent() && props.message.content.length > 0 ? (
+            <MessageCopyButton
+              content={props.message.content}
+              messageId={props.message.id}
+            />
+          ) : null}
+          {!system() &&
+          props.onFork !== undefined &&
+          !isStreamedMessage(props.message) ? (
+            <button
+              class="rounded-full border border-white/10 px-2.5 py-1 text-[0.65rem] font-semibold text-slate-400 transition hover:border-emerald-300/30 hover:text-emerald-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300"
+              data-fork-from-here={props.message.id}
+              onClick={() => props.onFork?.(props.message.id)}
+              type="button"
+            >
+              Fork from here
+            </button>
+          ) : null}
+        </div>
       </div>
       {showContent() && props.message.content.length > 0 ? (
-        user ? (
+        user() ? (
           <p class="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-200">
             {props.message.content}
           </p>
@@ -236,22 +274,24 @@ function ConversationTranscriptMessage(props: {
       ) : null}
       {showTools() && props.message.toolCalls.length > 0 ? (
         <ul class="mt-3 space-y-2">
-          {props.message.toolCalls.map((call) => (
-            <li
-              class="rounded-lg border border-cyan-300/20 bg-cyan-300/10 p-3"
-              {...renderDebugBoundary(
-                `tool-call:${call.id}`,
-                `Tool call: ${call.name}`,
-              )}
-            >
-              {renderToolHeader({
-                id: call.id,
-                kind: "Tool call",
-                name: call.name,
-              })}
-              <div class="mt-2">{renderStructuredCode(call.arguments)}</div>
-            </li>
-          ))}
+          <For each={props.message.toolCalls}>
+            {(call) => (
+              <li
+                class="rounded-lg border border-cyan-300/20 bg-cyan-300/10 p-3"
+                {...renderDebugBoundary(
+                  `tool-call:${call.id}`,
+                  `Tool call: ${call.name}`,
+                )}
+              >
+                {renderToolHeader({
+                  id: call.id,
+                  kind: "Tool call",
+                  name: call.name,
+                })}
+                <div class="mt-2">{renderStructuredCode(call.arguments)}</div>
+              </li>
+            )}
+          </For>
         </ul>
       ) : null}
     </li>
@@ -336,47 +376,51 @@ export function sessionTranscriptFilterCounts(
   return counts;
 }
 
-function TranscriptMessage(
-  props: TranscriptMessageProps & {
-    readonly filters: SessionTranscriptFilters;
-    readonly onFork?: ((messageId: string) => void) | undefined;
-  },
-): JSX.Element {
-  const message = props.message;
-  const callArguments = props.callArguments;
-  if (message.role === "assistant") {
-    return (
-      <ConversationTranscriptMessage
-        message={message}
-        onFork={props.onFork}
-        showContent={props.filters.assistantMessages}
-        showTools={props.filters.toolActivity}
-      />
-    );
-  }
+interface TranscriptRenderableMessageProps extends TranscriptMessageProps {
+  readonly filters: SessionTranscriptFilters;
+  readonly onFork?: ((messageId: string) => void) | undefined;
+}
 
-  switch (message.role) {
+function renderTranscriptMessage(
+  props: TranscriptRenderableMessageProps,
+): JSX.Element {
+  switch (untrack(() => props.message.role)) {
+    case "assistant":
+      return (
+        <ConversationTranscriptMessage
+          message={props.message}
+          onFork={props.onFork}
+          showContent={props.filters.assistantMessages}
+          showTools={props.filters.toolActivity}
+        />
+      );
     case "error":
-      return <NoteTranscriptMessage kind="error" message={message} />;
+      return <NoteTranscriptMessage kind="error" message={props.message} />;
     case "thinking":
-      return <NoteTranscriptMessage kind="thinking" message={message} />;
+      return <NoteTranscriptMessage kind="thinking" message={props.message} />;
     case "tool":
       return (
         <ToolResultTranscriptMessage
-          callArguments={callArguments}
-          message={message}
+          callArguments={props.callArguments}
+          message={props.message}
         />
       );
     case "system":
-      return <ConversationTranscriptMessage message={message} />;
+      return <ConversationTranscriptMessage message={props.message} />;
     case "user":
       return (
         <ConversationTranscriptMessage
-          message={message}
+          message={props.message}
           onFork={props.onFork}
         />
       );
   }
+}
+
+function TranscriptMessage(
+  props: TranscriptRenderableMessageProps,
+): JSX.Element {
+  return <>{renderTranscriptMessage(props)}</>;
 }
 
 function toolStateLabel(state: ToolStreamState): string {
@@ -469,10 +513,13 @@ export function SessionTranscript(props: {
       props.messages,
       props.tools,
     );
-    return SESSION_TRANSCRIPT_FILTER_NAMES.reduce(
-      (total, name) => total + (props.filters[name] ? counts[name] : 0),
-      0,
-    );
+    let total = 0;
+    for (const name of SESSION_TRANSCRIPT_FILTER_NAMES) {
+      if (props.filters[name]) {
+        total += counts[name];
+      }
+    }
+    return total;
   });
   return (
     <>

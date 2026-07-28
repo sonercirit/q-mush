@@ -26,7 +26,9 @@ export function SessionReassignmentDialog(props: {
   const titleId = () => `${props.configuration.id}-session-reassignment-title`;
   const descriptionId = () =>
     `${props.configuration.id}-session-reassignment-description`;
-  const close = props.controller.close.bind(props.controller);
+  const close = (): void => {
+    props.controller.close();
+  };
 
   const onKeyDown = (event: KeyboardEvent): void => {
     const current = props.controller.state;

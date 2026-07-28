@@ -1,4 +1,4 @@
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, expect, test, vi, type MockInstance } from "vitest";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { summaryFromDetail } from "../session-codec.ts";
 import { disposeTestViews, queryTestElement } from "./dom-test-helpers.ts";
@@ -75,14 +75,8 @@ function transcriptFilter(container: ParentNode): HTMLInputElement {
   return control;
 }
 
-afterEach(() => {
-  disposeTestViews(DOM_TEST_DISPOSALS);
-  filterStorage.clear();
-  vi.restoreAllMocks();
-});
-
-test("copies session information and transcript from the detail header", async () => {
-  const detail: AgentSessionDetail = {
+function copyTestDetail(): AgentSessionDetail {
+  return {
     ...TEST_SESSION_DETAIL,
     messages: [
       transcriptTestMessage("user-copy", "Please fix the app", "user", 2),
@@ -94,34 +88,88 @@ test("copies session information and transcript from the detail header", async (
       ),
     ],
   };
-  const writeText = vi
-    .spyOn(navigator.clipboard, "writeText")
-    .mockResolvedValue();
-  const { container } = mountTestSessionDetail(detail);
+}
+
+function mockClipboardWrite(): MockInstance<Clipboard["writeText"]> {
+  return vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+}
+
+async function expectClipboardCopy(
+  button: HTMLButtonElement,
+  writeText: MockInstance<Clipboard["writeText"]>,
+  expected: string,
+): Promise<void> {
+  button.click();
+  await vi.waitFor(() => {
+    expect(writeText).toHaveBeenLastCalledWith(expected);
+    expect(button.textContent).toBe("Copied!");
+  });
+}
+
+afterEach(() => {
+  disposeTestViews(DOM_TEST_DISPOSALS);
+  filterStorage.clear();
+  vi.restoreAllMocks();
+});
+
+test("copies session information and transcript from the detail header", async () => {
+  const writeText = mockClipboardWrite();
+  const { container } = mountTestSessionDetail(copyTestDetail());
   const copy = queryTestElement(container, "[data-copy-session='true']");
   if (!(copy instanceof HTMLButtonElement)) {
     throw new TypeError("The session copy control is not a button");
   }
 
   expect(copy.textContent).toBe("Copy session");
-  copy.click();
+  await expectClipboardCopy(
+    copy,
+    writeText,
+    [
+      "Fix the app",
+      "Session ID: session-1",
+      "Status: idle",
+      "Model: openai · gpt-5-codex",
+      "Working directory: .",
+      "",
+      "Transcript",
+      "user: Please fix the app",
+      "assistant: The app is fixed.",
+    ].join("\n"),
+  );
+});
 
-  await vi.waitFor(() => {
-    expect(writeText).toHaveBeenCalledWith(
-      [
-        "Fix the app",
-        "Session ID: session-1",
-        "Status: idle",
-        "Model: openai · gpt-5-codex",
-        "Working directory: .",
-        "",
-        "Transcript",
-        "user: Please fix the app",
-        "assistant: The app is fixed.",
-      ].join("\n"),
-    );
-    expect(copy.textContent).toBe("Copied!");
+test("copies individual conversation messages from their headers", async () => {
+  const detail = copyTestDetail();
+  const thinking = transcriptTestMessage(
+    "thinking-copy",
+    "Internal thought",
+    "thinking",
+    4,
+  );
+  const writeText = mockClipboardWrite();
+  const { container } = mountTestSessionDetail({
+    ...detail,
+    messages: [...detail.messages, thinking],
   });
+  const userCopy = queryTestElement(
+    container,
+    "[data-copy-message='user-copy']",
+  );
+  const assistantCopy = queryTestElement(
+    container,
+    "[data-copy-message='assistant-copy']",
+  );
+  if (
+    !(userCopy instanceof HTMLButtonElement) ||
+    !(assistantCopy instanceof HTMLButtonElement)
+  ) {
+    throw new TypeError("The message copy controls are not buttons");
+  }
+
+  expect(container.querySelectorAll("[data-copy-message]")).toHaveLength(2);
+  expect(userCopy.textContent).toBe("Copy");
+  await expectClipboardCopy(userCopy, writeText, "Please fix the app");
+  await expectClipboardCopy(assistantCopy, writeText, "The app is fixed.");
 });
 
 test("the composer stays mounted and retains focus through a busy transition", () => {

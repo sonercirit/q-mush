@@ -9,6 +9,7 @@ import type { ProviderCredentialAccess } from "../../shared/provider-credential-
 import type { ProviderModelPricing } from "../../shared/provider-model-pricing.ts";
 import { SESSIONS_PATH } from "../../shared/routes.ts";
 import {
+  RUNNER_EXECUTION_CLEANUP_COMMAND,
   RunnerCommandBroker,
   type RunnerToolCommand,
 } from "../../shared/runner-command-broker.ts";
@@ -200,7 +201,16 @@ export function connectedSessionSetup(
     options.broker ??
     new RunnerCommandBroker({
       commandId: options.commandId ?? (() => RUNNER_COMMAND_ID),
-      deliver: (_runnerId, command) => {
+      deliver: (runnerId, command) => {
+        if (command.tool === RUNNER_EXECUTION_CLEANUP_COMMAND) {
+          queueMicrotask(() => {
+            broker.complete(runnerId, command.id, {
+              output: "cleaned",
+              state: "completed",
+            });
+          });
+          return true;
+        }
         latestRunnerCommand = command;
         runnerCommands.push(command);
         return true;

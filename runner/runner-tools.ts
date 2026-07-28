@@ -27,14 +27,14 @@ import {
   runnerCommandResultFromOutput,
   runRunnerProcess,
 } from "./runner-process.ts";
+import type { RunnerReadBudget } from "./runner-read-budget.ts";
 import {
   resolveRunnerWorkspace,
   runnerPathIsWithin,
 } from "./runner-workspace.ts";
 
 const MAX_FILE_BYTES = 1024 * 1024;
-const MAX_READ_OUTPUT_BYTES = 50 * 1024;
-const MAX_READ_LINES = 2_000;
+const DEFAULT_READ_LINES = 2_000;
 const MAXIMUM_EDITS = 100;
 
 type ToolArguments = Readonly<Record<string, unknown>>;
@@ -53,6 +53,7 @@ type RunnerShellExecutor = (
 
 export interface RunnerToolExecutionOptions {
   readonly mapAbsolutePath?: (path: string) => string;
+  readonly readBudget?: RunnerReadBudget;
   readonly shell?: RunnerShellExecutor;
   readonly stream?: RunnerToolStream;
 }
@@ -169,15 +170,21 @@ async function securePath(
 async function pathArgument(
   root: string,
   arguments_: ToolArguments,
-  mayNotExist = false,
-  mapAbsolutePath?: (path: string) => string,
+  options: {
+    readonly allowedExternalPath?: (path: string) => boolean;
+    readonly mapAbsolutePath?: (path: string) => string;
+    readonly mayNotExist?: boolean;
+  } = {},
 ): Promise<string> {
   const requested = requiredString(arguments_, "path", 4_096);
-  return securePath(
-    root,
-    mapAbsolutePath === undefined ? requested : mapAbsolutePath(requested),
-    mayNotExist,
-  );
+  const mapped = options.mapAbsolutePath?.(requested) ?? requested;
+  if (options.allowedExternalPath?.(resolve(root, mapped)) === true) {
+    const canonical = await realpath(mapped);
+    if (options.allowedExternalPath(canonical)) {
+      return canonical;
+    }
+  }
+  return securePath(root, mapped, options.mayNotExist);
 }
 
 function displayPath(root: string, path: string): string {
@@ -187,7 +194,7 @@ function displayPath(root: string, path: string): string {
 
 async function readTextFile(
   path: string,
-  maximumBytes: number,
+  maximumBytes?: number,
 ): Promise<string> {
   const details = await stat(path);
 
@@ -195,7 +202,7 @@ async function readTextFile(
     throw new Error("The requested path is not a file");
   }
 
-  if (details.size > maximumBytes) {
+  if (maximumBytes !== undefined && details.size > maximumBytes) {
     throw new Error(`The requested file exceeds ${String(maximumBytes)} bytes`);
   }
 
@@ -206,28 +213,39 @@ async function readPathContent(
   root: string,
   arguments_: ToolArguments,
   mapAbsolutePath?: (path: string) => string,
+  ownedSpillPath?: (path: string) => boolean,
 ): Promise<{ readonly content: string; readonly path: string }> {
-  const path = await pathArgument(root, arguments_, false, mapAbsolutePath);
-  return { content: await readTextFile(path, MAX_FILE_BYTES), path };
+  const path = await pathArgument(root, arguments_, {
+    ...(ownedSpillPath === undefined
+      ? {}
+      : { allowedExternalPath: ownedSpillPath }),
+    ...(mapAbsolutePath === undefined ? {} : { mapAbsolutePath }),
+  });
+  const maximumBytes =
+    ownedSpillPath?.(path) === true ? undefined : MAX_FILE_BYTES;
+  return { content: await readTextFile(path, maximumBytes), path };
 }
 
-function truncateReadLines(lines: readonly string[]): readonly string[] {
-  const output: string[] = [];
-  let bytes = 0;
-
-  for (const line of lines.slice(0, MAX_READ_LINES)) {
-    const lineBytes =
-      Buffer.byteLength(line, "utf8") + (output.length > 0 ? 1 : 0);
-
-    if (bytes + lineBytes > MAX_READ_OUTPUT_BYTES) {
-      break;
-    }
-
-    output.push(line);
-    bytes += lineBytes;
+function readContinuation(
+  content: string,
+  offset: number,
+  limit: number,
+): string {
+  const lines = content.split("\n");
+  const start = offset - 1;
+  if (start >= lines.length) {
+    throw new Error(
+      `Offset ${String(offset)} is beyond end of file (${String(lines.length)} lines total)`,
+    );
   }
-
-  return output;
+  const selected = lines.slice(start, start + limit);
+  const requested = selected.join("\n");
+  const nextOffset = start + selected.length + 1;
+  return nextOffset <= lines.length
+    ? `${requested}\n\n[Showing lines ${String(offset)}-${String(nextOffset - 1)} of ${String(lines.length)}. Use offset=${String(nextOffset)} to continue.]`
+    : limit >= lines.length && offset === 1
+      ? content
+      : requested;
 }
 
 type RunnerFileTool = (
@@ -255,52 +273,39 @@ function writableFileToolArguments(
   mayNotExist = false,
 ): Promise<RunnerFileToolArguments & { readonly path: string }> {
   const context = runnerFileToolArguments(parameters);
-  return pathArgument(
-    context.root,
-    context.arguments_,
+  return pathArgument(context.root, context.arguments_, {
+    ...(context.options?.mapAbsolutePath === undefined
+      ? {}
+      : { mapAbsolutePath: context.options.mapAbsolutePath }),
     mayNotExist,
-    context.options?.mapAbsolutePath,
-  ).then((path) => ({ ...context, path }));
+  }).then((path) => ({ ...context, path }));
 }
 
 async function readTool(
   ...parameters: Parameters<RunnerFileTool>
 ): Promise<string> {
   const { arguments_, options, root } = runnerFileToolArguments(parameters);
-  const { content } = await readPathContent(
+  const { content, path } = await readPathContent(
     root,
     arguments_,
     options?.mapAbsolutePath,
+    (candidate) => options?.readBudget?.ownsPath(candidate) === true,
   );
   const offset = optionalInteger(arguments_, "offset", 1, 1, 1_000_000_000);
   const limit = optionalInteger(
     arguments_,
     "limit",
-    MAX_READ_LINES,
+    DEFAULT_READ_LINES,
     1,
     1_000_000_000,
   );
-  const lines = content.split("\n");
-  const start = offset - 1;
-
-  if (start >= lines.length) {
-    throw new Error(
-      `Offset ${String(offset)} is beyond end of file (${String(lines.length)} lines total)`,
-    );
+  const output = readContinuation(content, offset, limit);
+  if (options?.readBudget === undefined) {
+    return output;
   }
-
-  const requested = lines.slice(start, start + limit);
-  const shown = truncateReadLines(requested);
-
-  if (shown.length === 0 && requested.length > 0) {
-    return `[Line ${String(offset)} exceeds the ${String(MAX_READ_OUTPUT_BYTES / 1_024)}KB read limit. Use bash to read a bounded segment.]`;
-  }
-
-  const output = shown.join("\n");
-  const nextOffset = start + shown.length + 1;
-  return nextOffset <= lines.length
-    ? `${output}\n\n[Showing lines ${String(offset)}-${String(nextOffset - 1)} of ${String(lines.length)}. Use offset=${String(nextOffset)} to continue.]`
-    : output;
+  return options.readBudget.isSpillPath(path)
+    ? output
+    : options.readBudget.apply(output);
 }
 
 async function writeTool(

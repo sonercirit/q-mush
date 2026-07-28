@@ -89,10 +89,10 @@ const RenderDebugContext = createContext<RenderDebugView>();
 
 export function RenderDebugProvider(props: {
   readonly children: JSX.Element;
-  readonly view: RenderDebugView;
+  readonly staticView: RenderDebugView;
 }): JSX.Element {
   return (
-    <RenderDebugContext.Provider value={props.view}>
+    <RenderDebugContext.Provider value={props.staticView}>
       {props.children}
     </RenderDebugContext.Provider>
   );

@@ -49,16 +49,24 @@ function mount(renderView: () => JSX.Element): HTMLDivElement {
   return mountTestView(renderView, disposals);
 }
 
+interface MountedSessionList {
+  readonly container: HTMLDivElement;
+  readonly controller: SessionController;
+}
+
 function mountedSessionList(
   sessions: readonly ReturnType<typeof summaryFromDetail>[],
-): HTMLDivElement {
+): MountedSessionList {
   const controller = new SessionController(
     createReactiveState<SessionViewState>({
       ...initialSessionViewState(),
       sessions,
     }),
   );
-  return mount(() => <SessionList controller={controller} />);
+  return {
+    container: mount(() => <SessionList controller={controller} />),
+    controller,
+  };
 }
 
 interface MountedSessionBody {
@@ -338,7 +346,7 @@ test("nests spawned sessions under a collapsible parent", () => {
     parentSessionId: "missing-parent",
     title: "Detached task",
   };
-  const container = mountedSessionList([child, detached, parent]);
+  const { container } = mountedSessionList([child, detached, parent]);
   const parentToggle = query(
     container,
     "button[aria-label='Collapse child sessions for Parent task']",
@@ -371,57 +379,52 @@ test("nests spawned sessions under a collapsible parent", () => {
   ).toBeNull();
 });
 
-test("paginates the session list ten sessions at a time", () => {
+test("loads more sessions on scroll and resets for a new root", () => {
   const sessions = Array.from({ length: 12 }, (_, index) => ({
     ...summaryFromDetail(TEST_SESSION_DETAIL),
     id: `session-${String(index + 1)}`,
     title: `Task ${String(index + 1)}`,
     updatedAt: 100 - index,
   }));
-  const container = mountedSessionList(sessions);
+  const { container, controller } = mountedSessionList(sessions);
   const sessionButtons = (): NodeListOf<HTMLButtonElement> =>
     container.querySelectorAll("button[data-session-id]");
-  const previous = query(
-    container,
-    "button[aria-label='Previous session page']",
-  );
-  const next = query(container, "button[aria-label='Next session page']");
-
-  if (
-    !(previous instanceof HTMLButtonElement) ||
-    !(next instanceof HTMLButtonElement)
-  ) {
-    throw new TypeError("The session pagination controls are not buttons");
+  const list = query(container, ".session-list-items");
+  if (!(list instanceof HTMLUListElement)) {
+    throw new TypeError("The session list is not a list");
   }
-
-  expect([
-    sessionButtons().length,
-    container.textContent.includes("Page 1 of 2"),
-    previous.disabled,
-    next.disabled,
-  ]).toEqual([10, true, true, false]);
-  expect(
-    container.querySelector("[data-session-id='session-1']"),
-  ).not.toBeNull();
-  expect(container.querySelector("[data-session-id='session-11']")).toBeNull();
-
-  next.click();
-
-  expect([
-    sessionButtons().length,
-    container.textContent.includes("Page 2 of 2"),
-    previous.disabled,
-    next.disabled,
-  ]).toEqual([2, true, false, true]);
-  expect(container.querySelector("[data-session-id='session-1']")).toBeNull();
-  expect(
-    container.querySelector("[data-session-id='session-11']"),
-  ).not.toBeNull();
-
-  previous.click();
+  setScrollableDimensions(list, 100, 500);
 
   expect(sessionButtons()).toHaveLength(10);
-  expect(container.textContent).toContain("Page 1 of 2");
+  expect(container.querySelector(".session-list-pagination")).toBeNull();
+  expect(container.querySelector("[data-session-id='session-11']")).toBeNull();
+
+  for (const scrollTop of [300, 350]) {
+    list.scrollTop = scrollTop;
+    list.dispatchEvent(new Event("scroll"));
+    expect(sessionButtons()).toHaveLength(scrollTop === 300 ? 10 : 12);
+  }
+  expect(
+    container.querySelector("[data-load-more-sessions='true']"),
+  ).toBeNull();
+
+  const firstSession = sessions[0];
+  if (firstSession === undefined) {
+    throw new TypeError("Missing first session");
+  }
+  const added = {
+    ...firstSession,
+    id: "session-13",
+    title: "Task 13",
+  };
+  controller.applyRealtime([...sessions, added]);
+
+  expect(sessionButtons()).toHaveLength(10);
+  clickTestButton(container, "[data-load-more-sessions='true']");
+  expect(sessionButtons()).toHaveLength(13);
+  expect(
+    container.querySelector("[data-load-more-sessions='true']"),
+  ).toBeNull();
 });
 
 test("keeps a running tool visible while a stop request is pending", () => {

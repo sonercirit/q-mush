@@ -168,6 +168,7 @@ function SessionMetrics(props: {
 }
 
 const SESSION_PAGE_SIZE = 10;
+const SESSION_SCROLL_LOAD_THRESHOLD = 64;
 
 interface SessionHierarchy {
   readonly children: ReadonlyMap<string, readonly AgentSessionSummary[]>;
@@ -239,24 +240,46 @@ export function SessionList(props: {
   readonly controller: SessionController;
   readonly onSelect?: () => void;
 }): JSX.Element {
-  const state = props.controller.view;
-  const [page, setPage] = createSignal(1);
+  const state = createMemo(() => props.controller.view());
+  const [visibleCount, setVisibleCount] = createSignal(SESSION_PAGE_SIZE);
   const [collapsed, setCollapsed] = createSignal<ReadonlySet<string>>(
     new Set(),
   );
   const hierarchy = createMemo(() => sessionHierarchy(state().sessions ?? []));
-  const pageCount = createMemo(() =>
-    Math.max(1, Math.ceil(hierarchy().roots.length / SESSION_PAGE_SIZE)),
+  const hasMoreSessions = createMemo(
+    () => visibleCount() < hierarchy().roots.length,
+  );
+  const rootRevision = createMemo(() =>
+    hierarchy()
+      .roots.map(({ id }) => id)
+      .toSorted()
+      .join("\n"),
   );
   const sessions = createMemo(() => {
-    const start = (page() - 1) * SESSION_PAGE_SIZE;
     const tree = hierarchy();
     return visibleSessionRows(
       tree,
-      tree.roots.slice(start, start + SESSION_PAGE_SIZE),
+      tree.roots.slice(0, visibleCount()),
       collapsed(),
     );
   });
+  const loadMore = (): void => {
+    setVisibleCount((current) =>
+      Math.min(hierarchy().roots.length, current + SESSION_PAGE_SIZE),
+    );
+  };
+  const loadMoreOnScroll: JSX.EventHandler<HTMLUListElement, Event> = (
+    event,
+  ) => {
+    const list = event.currentTarget;
+    if (
+      hasMoreSessions() &&
+      list.scrollHeight - list.clientHeight - list.scrollTop <=
+        SESSION_SCROLL_LOAD_THRESHOLD
+    ) {
+      loadMore();
+    }
+  };
   const toggleChildren = (sessionId: string): void => {
     setCollapsed((current) => {
       const next = new Set(current);
@@ -266,10 +289,15 @@ export function SessionList(props: {
     });
   };
 
-  createEffect(() => {
-    if (page() > pageCount()) {
-      setPage(pageCount());
+  createEffect((previousRootRevision: string | undefined) => {
+    const currentRootRevision = rootRevision();
+    if (
+      previousRootRevision !== undefined &&
+      previousRootRevision !== currentRootRevision
+    ) {
+      setVisibleCount(SESSION_PAGE_SIZE);
     }
+    return currentRootRevision;
   });
 
   return (
@@ -282,7 +310,22 @@ export function SessionList(props: {
         }
         items={sessions()}
         listClass="session-list-items max-h-144 space-y-2 overflow-y-auto overscroll-contain pr-0.5"
+        listProps={{ onScroll: loadMoreOnScroll }}
         loading={<p class="text-sm text-slate-400">Loading sessions…</p>}
+        trailing={
+          <Show when={hasMoreSessions()}>
+            <li class="flex justify-center pt-1">
+              <button
+                class="rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 transition hover:border-emerald-300/30 hover:text-emerald-200"
+                data-load-more-sessions="true"
+                onClick={loadMore}
+                type="button"
+              >
+                Load more
+              </button>
+            </li>
+          </Show>
+        }
       >
         {(row) => {
           const session = row.session;
@@ -342,38 +385,6 @@ export function SessionList(props: {
           );
         }}
       </Collection>
-      <Show when={hierarchy().roots.length > SESSION_PAGE_SIZE}>
-        <nav
-          aria-label="Session list pagination"
-          class="session-list-pagination mt-3 flex flex-wrap items-center justify-between gap-2"
-        >
-          <button
-            aria-label="Previous session page"
-            class="rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 transition hover:border-emerald-300/30 hover:text-emerald-200 disabled:cursor-not-allowed disabled:opacity-40"
-            disabled={page() === 1}
-            onClick={() => {
-              setPage((current) => Math.max(1, current - 1));
-            }}
-            type="button"
-          >
-            Previous
-          </button>
-          <span class="text-xs text-slate-500">
-            {`Page ${String(page())} of ${String(pageCount())}`}
-          </span>
-          <button
-            aria-label="Next session page"
-            class="rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 transition hover:border-emerald-300/30 hover:text-emerald-200 disabled:cursor-not-allowed disabled:opacity-40"
-            disabled={page() === pageCount()}
-            onClick={() => {
-              setPage((current) => Math.min(pageCount(), current + 1));
-            }}
-            type="button"
-          >
-            Next
-          </button>
-        </nav>
-      </Show>
     </>
   );
 }

@@ -1,4 +1,4 @@
-import { Show, type Accessor, type JSX } from "solid-js";
+import { For, Show, type Accessor, type JSX } from "solid-js";
 import { isRecord } from "../shared/auth-model.ts";
 import type { PendingViewState } from "../shared/connection-model.ts";
 import {
@@ -8,6 +8,7 @@ import {
   type WorkspaceSummary,
 } from "../shared/workspace-model.ts";
 import { Collection } from "./collection.tsx";
+import { controllerView } from "./controller-view.ts";
 import { DefaultableActions } from "./defaultable-actions.tsx";
 import { submitFormName } from "./form-handler.ts";
 import { renderDebugBoundary } from "./render-debug.tsx";
@@ -15,6 +16,10 @@ import { renderDebugBoundary } from "./render-debug.tsx";
 export interface WorkspaceViewState extends PendingViewState {
   readonly renamingId: string | undefined;
   readonly workspaces: WorkspaceList | undefined;
+}
+
+interface WorkspaceControllerProps {
+  readonly controller: WorkspacePanelController;
 }
 
 export function createWorkspaceViewState(
@@ -61,16 +66,15 @@ export function readWorkspaces(value: unknown): WorkspaceList {
 }
 
 function workspaceState(
-  controller: WorkspacePanelController,
+  props: WorkspaceControllerProps,
 ): Accessor<WorkspaceViewState> {
-  return controller.view;
+  return controllerView(props);
 }
 
-export function WorkspaceSwitcher(props: {
-  readonly controller: WorkspacePanelController;
-}): JSX.Element {
-  const { controller } = props;
-  const state = workspaceState(controller);
+export function WorkspaceSwitcher(
+  props: WorkspaceControllerProps,
+): JSX.Element {
+  const state = workspaceState(props);
   const options = (): readonly WorkspaceSummary[] => [
     {
       id: GLOBAL_WORKSPACE_ID,
@@ -85,22 +89,22 @@ export function WorkspaceSwitcher(props: {
       <select
         class="rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-white"
         onChange={(event) => {
-          controller.select(event.currentTarget.value);
+          props.controller.select(event.currentTarget.value);
         }}
-        value={controller.selectedIdView()}
+        value={props.controller.selectedIdView()}
       >
-        {options().map((workspace) => (
-          <option value={workspace.id}>{workspace.name}</option>
-        ))}
+        <For each={options()}>
+          {(workspace) => (
+            <option value={workspace.id}>{workspace.name}</option>
+          )}
+        </For>
       </select>
     </label>
   );
 }
 
-export function WorkspacePanel(props: {
-  readonly controller: WorkspacePanelController;
-}): JSX.Element {
-  const state = workspaceState(props.controller);
+export function WorkspacePanel(props: WorkspaceControllerProps): JSX.Element {
+  const state = workspaceState(props);
   return (
     <section
       aria-labelledby="workspaces-title"
@@ -207,7 +211,7 @@ export function WorkspacePanel(props: {
   );
 }
 
-export interface WorkspacePanelController {
+interface WorkspacePanelController {
   readonly selectedIdView: Accessor<string>;
   readonly view: Accessor<WorkspaceViewState>;
   create(name: string): Promise<void>;

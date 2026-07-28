@@ -20,6 +20,6 @@ export function ScopedConnectionEditor(props: {
         workspaces={workspaces}
       />
     ),
-    props.workspaces,
+    () => props.workspaces,
   );
 }

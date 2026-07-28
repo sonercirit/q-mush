@@ -143,6 +143,13 @@ export class ToolStreamPublisher {
     this.#callsById.set(call.callId, call);
   }
 
+  #insertPreparingCall(callId: string, index: number): ActiveToolStream {
+    const call = this.#createCall(callId, index);
+    this.#insert(call);
+    this.#state(call, "preparing");
+    return call;
+  }
+
   #rename(call: ActiveToolStream, callId: string): boolean {
     const existing = this.#callsById.get(callId);
     if (
@@ -178,10 +185,8 @@ export class ToolStreamPublisher {
       if (this.#callsById.has(callId)) {
         return false;
       }
-      call = this.#createCall(callId, delta.index);
+      call = this.#insertPreparingCall(callId, delta.index);
       this.#nextIndex = Math.max(this.#nextIndex, delta.index + 1);
-      this.#insert(call);
-      this.#state(call, "preparing");
     }
 
     if (call.state !== "preparing") {
@@ -202,7 +207,7 @@ export class ToolStreamPublisher {
     return true;
   }
 
-  running(callId: string, name: string): boolean {
+  running(callId: string, name: string, arguments_?: string): boolean {
     if (
       this.#closed ||
       callId.length === 0 ||
@@ -221,11 +226,14 @@ export class ToolStreamPublisher {
       }
     }
     if (call === undefined) {
-      call = this.#createCall(callId, this.#nextIndex);
+      call = this.#insertPreparingCall(callId, this.#nextIndex);
       this.#nextIndex += 1;
-      this.#insert(call);
-      this.#state(call, "preparing");
+    }
+    if (call.name.length === 0) {
       call.name += this.#content(call, "name", name);
+    }
+    if (call.argumentBytes === 0 && arguments_ !== undefined) {
+      this.#content(call, "arguments", arguments_);
     }
     return this.#state(call, "running");
   }

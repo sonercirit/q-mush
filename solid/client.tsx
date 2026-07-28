@@ -188,7 +188,9 @@ function SessionError(props: { readonly onRetry: () => void }): JSX.Element {
       </p>
       <button
         class="mt-7 rounded-full border border-white/15 px-5 py-2.5 font-semibold text-white transition hover:border-emerald-300/40 hover:text-emerald-200 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"
-        onClick={props.onRetry}
+        onClick={() => {
+          props.onRetry();
+        }}
         type="button"
       >
         Retry
@@ -406,7 +408,7 @@ function App(): JSX.Element {
   onCleanup(resetWorkspaceConnections);
 
   return (
-    <RenderDebugProvider view={debug}>
+    <RenderDebugProvider staticView={debug}>
       <section
         aria-labelledby="app-title"
         class="relative min-h-screen overflow-x-clip bg-slate-950 px-3 py-5 text-slate-100 sm:px-6 sm:py-8 md:px-8 lg:px-10 xl:px-12"
