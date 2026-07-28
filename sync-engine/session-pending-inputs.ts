@@ -91,6 +91,13 @@ function matchesDuplicate(
   );
 }
 
+function insertPendingInput(
+  database: Pick<AppDatabase, "insert">,
+  values: typeof agentPendingInputs.$inferInsert,
+): void {
+  database.insert(agentPendingInputs).values(values).run();
+}
+
 function pendingCondition(sessionId: string) {
   return and(
     eq(agentPendingInputs.sessionId, sessionId),
@@ -152,6 +159,44 @@ function validInputState(
       ? (["running"] as const)
       : (["queued", "running"] as const);
   return acceptedStatuses.some((accepted) => status === accepted);
+}
+
+export function appendSystemFollowUp(options: {
+  readonly clientRequestId: string;
+  readonly content: string;
+  readonly database: Pick<AppDatabase, "insert" | "select" | "update">;
+  readonly generateId: IdGenerator;
+  readonly now: number;
+  readonly sessionId: string;
+  readonly userId: string;
+}): boolean {
+  const session = storedSessionForUser({
+    database: options.database,
+    sessionId: options.sessionId,
+    userId: options.userId,
+  });
+  if (session?.status !== "running") {
+    return false;
+  }
+  const id = options.generateId(options.now);
+  insertPendingInput(options.database, {
+    ...createdAuditFields(SYSTEM_ID, options.now),
+    clientRequestId: options.clientRequestId,
+    content: options.content,
+    id,
+    images: null,
+    kind: "follow_up",
+    sequence: nextSequence(options.database, options.sessionId),
+    sessionId: options.sessionId,
+    userId: options.userId,
+  });
+  touchStoredSession(
+    options.database,
+    eq(agentSessions.id, options.sessionId),
+    SYSTEM_ID,
+    options.now,
+  );
+  return true;
 }
 
 function nextSequence(
@@ -251,7 +296,7 @@ function enqueuePendingInputInTransaction(
     sessionId: options.sessionId,
     userId: options.userId,
   };
-  transaction.insert(agentPendingInputs).values(values).run();
+  insertPendingInput(transaction, values);
   touchStoredSession(
     transaction,
     eq(agentSessions.id, options.sessionId),

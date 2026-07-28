@@ -239,6 +239,31 @@ test("the visible steer action flushes the draft and keeps its shortcut", () => 
   expect(steer).toHaveBeenCalledTimes(2);
 });
 
+test("pending instructions react to realtime detail updates", () => {
+  const { container, controller, detail } = mountedRunningComposer();
+  const pendingSelector = "section[aria-label='Queued session inputs']";
+
+  expect(container.querySelector(pendingSelector)).toBeNull();
+
+  controller.applyDetail({
+    ...detail,
+    pendingInputs: [pendingInputFixture("New instruction")],
+    updatedAt: detail.updatedAt + 1,
+  });
+
+  expect(container.querySelector(pendingSelector)?.textContent).toContain(
+    "New instruction",
+  );
+
+  controller.applyDetail({
+    ...detail,
+    pendingInputs: [],
+    updatedAt: detail.updatedAt + 2,
+  });
+
+  expect(container.querySelector(pendingSelector)).toBeNull();
+});
+
 test("renders pending instructions in FIFO order", () => {
   const container = mountTestView(
     () => (

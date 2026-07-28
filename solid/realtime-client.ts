@@ -466,7 +466,6 @@ export class RealtimeConnection {
     }
     if (event.type === "session") {
       const key = `session:${event.session.id}`;
-      const hadQueuedDelta = this.#sessionDeltas.has(key);
       this.#flushSessionDelta(key);
       this.#flushToolDeltas(event.session.id);
       if (
@@ -476,11 +475,6 @@ export class RealtimeConnection {
         this.#toolSnapshotRequests.delete(event.session.id);
       } else {
         this.syncTools(event.session.id);
-      }
-      if (hadQueuedDelta) {
-        this.#sessionDeltaGeneration += 1;
-        this.#sessionDeltaFrame = undefined;
-        this.#rescheduleSessionDeltaFrame();
       }
     }
     this.#listener(event);
@@ -506,19 +500,6 @@ export class RealtimeConnection {
     for (const key of [...this.#sessionDeltas.keys()]) {
       if (key.startsWith(`tool:${sessionId}:`)) {
         this.#flushSessionDelta(key);
-      }
-    }
-  }
-
-  #rescheduleSessionDeltaFrame(): void {
-    if (this.#sessionDeltas.size === 0) {
-      return;
-    }
-    const queued = this.#sessionDeltas;
-    this.#sessionDeltas = new Map();
-    for (const deltas of queued.values()) {
-      for (const delta of deltas) {
-        this.#queueSessionDelta(delta);
       }
     }
   }

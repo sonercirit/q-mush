@@ -44,7 +44,3 @@ function selectedStringValue(
     .get();
   return typeof row?.value === "string" ? row.value : undefined;
 }
-
-export function selectedRowExists(options: SelectedStringOptions): boolean {
-  return selectedStringValue(options) !== undefined;
-}

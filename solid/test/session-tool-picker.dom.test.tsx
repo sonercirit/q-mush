@@ -25,6 +25,11 @@ function clickGroupToggle(
     ),
     container,
   );
+  const expand = container.querySelector("[data-tool-picker-toggle='true']");
+  if (!(expand instanceof HTMLButtonElement)) {
+    throw new TypeError("The session-tool picker toggle was not rendered");
+  }
+  expand.click();
   const control = container.querySelector("input[name='session-tools']");
   if (!(control instanceof HTMLInputElement)) {
     throw new TypeError("The session-tool group toggle was not rendered");

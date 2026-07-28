@@ -3,7 +3,6 @@ import type { OpenRouterProviderCatalog } from "../shared/agent-configuration.ts
 import { RetryNotice } from "./collection.tsx";
 import { CustomSelect, type CustomSelectOption } from "./custom-select.tsx";
 import { formatTokenCount } from "./session-context-client.tsx";
-import type { SessionController } from "./session-controller.ts";
 
 export interface SessionProviderDiscoveryState {
   readonly catalog: OpenRouterProviderCatalog | undefined;
@@ -39,8 +38,18 @@ function status(discovery: SessionProviderDiscoveryState | undefined): string {
     : "Restrict this session to one current OpenRouter endpoint, or keep automatic routing.";
 }
 
+interface OpenRouterProviderSelectController {
+  chooseOption(
+    name: "openRouterProviderTag",
+    value: string,
+    availableValues: readonly string[],
+  ): void;
+  retryProviders(): void;
+  toggleSelect(name: "openRouterProviderTag"): void;
+}
+
 export function OpenRouterProviderSelect(props: {
-  readonly controller: SessionController;
+  readonly controller: OpenRouterProviderSelectController;
   readonly creating: boolean;
   readonly discovery: SessionProviderDiscoveryState | undefined;
   readonly open: boolean;

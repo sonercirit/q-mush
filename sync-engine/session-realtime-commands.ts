@@ -10,6 +10,10 @@ import type {
   AgentSessionSummary,
 } from "../shared/session-model.ts";
 import {
+  readSessionProviderUpdateInput,
+  type SessionProviderUpdateInput,
+} from "../shared/session-provider-update.ts";
+import {
   readSessionToolUpdateInput,
   readSessionToolUpdatePreviewInput,
   type SessionToolUpdateInput,
@@ -69,6 +73,13 @@ export type SessionAutoCompactionAction = (
   workspaceId: string,
 ) => AgentSessionDetail;
 
+export type SessionStopAction = (
+  user: AuthenticatedUser,
+  sessionId: string,
+  graceful: boolean,
+  workspaceId: string,
+) => Promise<AgentSessionDetail> | AgentSessionDetail;
+
 export interface SessionRealtimeCommands extends SessionDetailReader {
   readonly answerQuestionsForUser: SessionQuestionAnswerAction;
   compactForUser: AuthenticatedSessionAction;
@@ -82,6 +93,10 @@ export interface SessionRealtimeCommands extends SessionDetailReader {
     workspaceId: string,
   ) => Promise<AgentSessionDetail>;
   readonly reassignForUser: SessionReassignmentAction;
+  updateProviderForUser(
+    user: AuthenticatedUser,
+    input: SessionProviderUpdateInput,
+  ): Promise<AgentSessionDetail>;
   previewToolUpdateForUser(
     user: AuthenticatedUser,
     input: SessionToolUpdatePreviewInput,
@@ -100,11 +115,7 @@ export interface SessionRealtimeCommands extends SessionDetailReader {
     workspaceId: string,
   ): AgentSessionDetail;
   readonly setAutoCompactionForUser: SessionAutoCompactionAction;
-  stopForUser(
-    user: AuthenticatedUser,
-    sessionId: string,
-    workspaceId: string,
-  ): AgentSessionDetail;
+  stopForUser: SessionStopAction;
   summariesForUser(
     userId: string,
     workspaceId: string,
@@ -133,6 +144,14 @@ function readAutoCompaction(
   return autoCompact;
 }
 
+function readGracefulStop(payload: Readonly<Record<string, unknown>>): boolean {
+  const graceful = payload["graceful"];
+  if (graceful !== undefined && typeof graceful !== "boolean") {
+    throw new RealtimeCommandFailure("invalid_request");
+  }
+  return graceful === true;
+}
+
 function readModelSelection(payload: Readonly<Record<string, unknown>>): {
   readonly credentialId: string;
   readonly provider: ProviderId;
@@ -145,7 +164,7 @@ function readModelSelection(payload: Readonly<Record<string, unknown>>): {
   return { credentialId, provider };
 }
 
-function workspaceToolUpdateInput<Value extends SessionToolUpdatePreviewInput>(
+function workspaceSessionInput<Value extends { readonly workspaceId: string }>(
   input: Value | undefined,
   workspaceId: string,
 ): Value {
@@ -154,6 +173,13 @@ function workspaceToolUpdateInput<Value extends SessionToolUpdatePreviewInput>(
     throw new RealtimeCommandFailure("not_found");
   }
   return required;
+}
+
+function workspaceToolUpdateInput<Value extends SessionToolUpdatePreviewInput>(
+  input: Value | undefined,
+  workspaceId: string,
+): Value {
+  return workspaceSessionInput(input, workspaceId);
 }
 
 /**
@@ -269,9 +295,21 @@ export async function executeSessionRealtimeCommand(
         workspaceId,
       );
     case SESSION_REALTIME_OPERATIONS.stop:
-      return sessions.stopForUser(user, readSessionId(payload), workspaceId);
+      return sessions.stopForUser(
+        user,
+        readSessionId(payload),
+        readGracefulStop(payload),
+        workspaceId,
+      );
     case SESSION_REALTIME_OPERATIONS.subscribe:
       return { sessions: sessions.summariesForUser(user.id, workspaceId) };
+    case SESSION_REALTIME_OPERATIONS.updateProvider: {
+      const input = workspaceSessionInput(
+        readSessionProviderUpdateInput(payload),
+        workspaceId,
+      );
+      return sessions.updateProviderForUser(user, input);
+    }
     case SESSION_REALTIME_OPERATIONS.updateTools: {
       const input = workspaceToolUpdateInput(
         readSessionToolUpdateInput(payload),

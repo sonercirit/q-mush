@@ -1,0 +1,84 @@
+import { and, eq, sql } from "drizzle-orm";
+import { updatedAuditFields } from "../shared/audit.ts";
+import type { AppDatabase } from "../shared/database.ts";
+import { agentSessions } from "../shared/database/schema.ts";
+import type { ProviderModelPricing } from "../shared/provider-model-pricing.ts";
+import type { AgentSessionDetail } from "../shared/session-model.ts";
+import {
+  sessionProviderSelectionMatches,
+  type SessionProviderUpdateInput,
+} from "../shared/session-provider-update.ts";
+import { activeSessionDuration } from "../shared/session-timing.ts";
+import { serializeProviderPricing } from "./session-store-read.ts";
+
+export type SessionProviderUpdateStoreResult = Readonly<{
+  detail?: AgentSessionDetail;
+  status: "conflict" | "not_found" | "unchanged" | "updated";
+}>;
+
+type ReadProviderUpdateSession = (
+  identity: readonly [userId: string, sessionId: string, workspaceId: string],
+) => AgentSessionDetail | undefined;
+
+export function updateStoredSessionProvider(
+  database: AppDatabase,
+  read: ReadProviderUpdateSession,
+  input: SessionProviderUpdateInput & {
+    readonly maxContextTokens: number | null;
+    readonly now: number;
+    readonly providerPricing: ProviderModelPricing | null;
+    readonly userId: string;
+  },
+): SessionProviderUpdateStoreResult {
+  const identity = [input.userId, input.sessionId, input.workspaceId] as const;
+  const existing = read(identity);
+  if (existing === undefined) return { status: "not_found" };
+  if (sessionProviderSelectionMatches(existing, input)) {
+    return { detail: existing, status: "unchanged" };
+  }
+  if (existing.generation !== input.expectedGeneration) {
+    return { status: "conflict" };
+  }
+
+  const active = ["queued", "running", "paused"].includes(existing.status);
+  const values = {
+    currentContextTokens: 0,
+    currentSegment: sql`${agentSessions.currentSegment} + 1`,
+    executionGeneration: sql`${agentSessions.executionGeneration} + 1`,
+    maxContextTokens: input.maxContextTokens,
+    model: input.model,
+    provider: input.provider,
+    providerCredentialId: input.credentialId,
+    openRouterProviderTag: input.openRouterProviderTag,
+    providerPricing: serializeProviderPricing(input.providerPricing),
+    restartHandoff: null,
+    ...updatedAuditFields(input.userId, input.now),
+  };
+  const timing = active
+    ? {
+        status: "idle" as const,
+        activeDurationMs: activeSessionDuration(existing, input.now),
+        activeStartedAt: null,
+      }
+    : {};
+  const condition = and(
+    eq(agentSessions.id, input.sessionId),
+    eq(agentSessions.userId, input.userId),
+    eq(agentSessions.workspaceId, input.workspaceId),
+    eq(agentSessions.isDeleted, false),
+    eq(agentSessions.executionGeneration, input.expectedGeneration),
+  );
+  const changed = database
+    .update(agentSessions)
+    .set({ ...values, ...timing })
+    .where(condition)
+    .returning({ updatedSessionId: agentSessions.id })
+    .all().length;
+  if (changed !== 1) return { status: "conflict" };
+
+  const detail = read(identity);
+  if (detail === undefined) {
+    throw new Error("Provider update committed but the session disappeared");
+  }
+  return { detail, status: "updated" };
+}

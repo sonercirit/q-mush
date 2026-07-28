@@ -23,6 +23,8 @@ import {
   createSessionShortcuts,
   SessionPendingInputs,
 } from "./session-pending-client.tsx";
+import { SessionProviderUpdateEditor } from "./session-provider-update-client.tsx";
+import type { SessionProviderUpdateView } from "./session-provider-update-model.ts";
 import { RunnerReassignment } from "./session-reassignment-view.tsx";
 import { SessionToolUpdateEditor } from "./session-tool-update-client.tsx";
 import { SessionTranscriptFilterControls } from "./session-transcript-filter-controls.tsx";
@@ -84,6 +86,7 @@ export function SessionDetailBody(props: {
   readonly environmentLabel: string;
   readonly modelLabel: string;
   readonly presentation: JSX.Element;
+  readonly providerUpdate: SessionProviderUpdateView;
   readonly sessionMetrics: JSX.Element;
   readonly view: LoadedSessionDetailViewProps;
 }): JSX.Element {
@@ -108,6 +111,20 @@ export function SessionDetailBody(props: {
     view.state.reassigning ||
     view.state.sending ||
     view.state.stopping;
+  const hasChildren = (): boolean =>
+    view.state.sessions?.some(
+      ({ parentSessionId }) => parentSessionId === view.detail.id,
+    ) === true;
+  const stopSession = (): void => {
+    if (!hasChildren()) {
+      void view.controller.stop();
+      return;
+    }
+    const graceful = window.confirm(
+      "This session has child sessions. Choose OK to wait for their final messages before stopping, or Cancel to stop immediately.",
+    );
+    void view.controller.stop(graceful);
+  };
   const visibleMessages = (): AgentSessionDetail["messages"] =>
     view.state.history.page?.messages ?? view.detail.messages;
   const [copyState, setCopyState] = createSignal<SessionCopyState>("idle");
@@ -208,7 +225,7 @@ export function SessionDetailBody(props: {
             <button
               class="rounded-xl border border-rose-300/30 bg-rose-300/10 px-4 py-2 text-sm font-semibold text-rose-200 disabled:opacity-50"
               disabled={view.state.stopping}
-              onClick={() => void view.controller.stop()}
+              onClick={stopSession}
               type="button"
             >
               {view.state.stopping ? "Stopping…" : "Stop session"}
@@ -219,6 +236,16 @@ export function SessionDetailBody(props: {
       <Show when={view.detail.runnerRequired}>
         <RunnerReassignment {...view} />
       </Show>
+      <SessionProviderUpdateEditor
+        credentials={props.providerUpdate.credentials}
+        detail={view.detail}
+        disabled={
+          active() || view.state.reassigning || view.state.updatingTools
+        }
+        onApply={props.providerUpdate.onApply}
+        onDiscoverModels={props.providerUpdate.onDiscoverModels}
+        onDiscoverProviders={props.providerUpdate.onDiscoverProviders}
+      />
       <SessionToolUpdateEditor
         detail={view.detail}
         disabled={view.state.updatingTools}
@@ -254,7 +281,12 @@ export function SessionDetailBody(props: {
           tools={view.detail.tools}
         />
       </ul>
-      <SessionPendingInputs inputs={view.detail.pendingInputs} />
+      <SessionPendingInputs
+        inputs={
+          view.controller.view().detail?.pendingInputs ??
+          view.detail.pendingInputs
+        }
+      />
       <Show when={view.detail.pendingQuestions}>
         {(pending) => (
           <div class="mt-5">

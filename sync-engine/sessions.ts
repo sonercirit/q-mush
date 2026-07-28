@@ -223,14 +223,11 @@ class DrizzleSessionIntegration
       database,
       discoverModels: this.#discoverModels,
       discoverOpenRouterProviders: this.#discoverOpenRouterProviders,
+      providerUpdates: this.#sessionMutationControl(),
       providers: this.#providers,
       questions: this.#questionActions,
       runnerIsAvailable: this.#runnerIsAvailable,
-      toolUpdates: {
-        broker: this.#broker,
-        now: this.#now,
-        runtimes: this.#runtimes,
-      },
+      toolUpdates: this.#sessionMutationControl(),
       ...this.#launchBoundary(),
     });
     this.#restartCoordinator = new SessionRestartCoordinator({
@@ -318,6 +315,14 @@ class DrizzleSessionIntegration
   ): boolean =>
     this.#restart.accepts(runnerId) &&
     this.#runners.runnerIsAvailable(userId, runnerId, workspaceId);
+
+  #sessionMutationControl() {
+    return {
+      broker: this.#broker,
+      now: this.#now,
+      runtimes: this.#runtimes,
+    };
+  }
 
   #sessionState(): {
     readonly notify: SessionNotification;

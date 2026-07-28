@@ -19,6 +19,7 @@ export const SESSION_REALTIME_OPERATIONS = {
   previewToolUpdate: "sessions.preview_tool_update",
   read: "sessions.read",
   reassign: "sessions.reassign",
+  updateProvider: "sessions.update_provider",
   followUp: "sessions.follow_up",
   send: "sessions.send",
   setAutoCompaction: "sessions.set_auto_compaction",

@@ -284,6 +284,12 @@ function readSummary(value: unknown): AgentSessionSummary {
       : openRouterProviderTagValue === null
         ? null
         : undefined;
+  const parentExecutionGenerationValue = value["parentExecutionGeneration"];
+  const parentExecutionGeneration =
+    parentExecutionGenerationValue === null
+      ? null
+      : readFiniteNumber(parentExecutionGenerationValue);
+  const parentSessionId = readNullableString(value["parentSessionId"]);
   const reasoningEffort = readNullableString(value["reasoningEffort"]);
   const restartHandoff = readRestartHandoff(value["restartHandoff"]);
   const runnerId = value["runnerId"];
@@ -332,6 +338,12 @@ function readSummary(value: unknown): AgentSessionSummary {
     openRouterProviderTag === undefined ||
     (openRouterProviderTag !== null &&
       !isOpenRouterProviderTag(openRouterProviderTag)) ||
+    parentExecutionGeneration === undefined ||
+    (parentExecutionGeneration !== null &&
+      (!Number.isSafeInteger(parentExecutionGeneration) ||
+        parentExecutionGeneration < 0)) ||
+    parentSessionId === undefined ||
+    (parentExecutionGeneration !== null && parentSessionId === null) ||
     value["providerPricing"] === undefined ||
     reasoningEffort === undefined ||
     (reasoningEffort !== null && !isAgentReasoningEffort(reasoningEffort)) ||
@@ -374,6 +386,8 @@ function readSummary(value: unknown): AgentSessionSummary {
     maxContextTokens,
     model,
     openRouterProviderTag,
+    parentExecutionGeneration,
+    parentSessionId,
     provider,
     providerPricing,
     pendingQuestions,
@@ -490,6 +504,8 @@ export function summaryFromDetail(
     maxContextTokens: detail.maxContextTokens,
     model: detail.model,
     openRouterProviderTag: detail.openRouterProviderTag,
+    parentExecutionGeneration: detail.parentExecutionGeneration,
+    parentSessionId: detail.parentSessionId,
     provider: detail.provider,
     providerPricing: detail.providerPricing,
     pendingQuestions: detail.pendingQuestions,

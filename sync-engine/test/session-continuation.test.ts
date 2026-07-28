@@ -140,8 +140,9 @@ describe("session continuation", () => {
     await startCompactingSession(continuation);
     await continuation.entered;
 
-    const before = await stopContinuationSession(continuation);
+    const stopping = stopContinuationSession(continuation);
     continuation.blocked.resolve(undefined);
+    const before = await stopping;
     const after = await drainAndRead(continuation.setup);
 
     expect(after).toEqual(before);

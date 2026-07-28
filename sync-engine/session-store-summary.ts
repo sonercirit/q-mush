@@ -24,6 +24,8 @@ export function storedSessionSelection() {
     maxContextTokens: agentSessions.maxContextTokens,
     model: agentSessions.model,
     openRouterProviderTag: agentSessions.openRouterProviderTag,
+    parentExecutionGeneration: agentSessions.parentExecutionGeneration,
+    parentSessionId: agentSessions.parentSessionId,
     provider: agentSessions.provider,
     providerPricing: agentSessions.providerPricing,
     reasoningEffort: agentSessions.reasoningEffort,
@@ -55,6 +57,8 @@ type StoredSessionSummary = Pick<
   | "maxContextTokens"
   | "model"
   | "openRouterProviderTag"
+  | "parentExecutionGeneration"
+  | "parentSessionId"
   | "provider"
   | "providerPricing"
   | "reasoningEffort"

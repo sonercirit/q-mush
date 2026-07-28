@@ -263,6 +263,10 @@ class RealtimeTestSessionCommands implements SessionRealtimeCommands {
     return [REALTIME_TEST_SESSION_DETAIL];
   }
 
+  updateProviderForUser() {
+    return Promise.resolve(REALTIME_TEST_SESSION_DETAIL);
+  }
+
   updateToolsForUser() {
     return Promise.resolve(REALTIME_TEST_SESSION_DETAIL);
   }

@@ -3,20 +3,58 @@ import type { AppDatabase } from "../shared/database.ts";
 import { agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
+import { appendSystemFollowUp } from "./session-pending-inputs.ts";
 import { ownedActiveSessionCondition } from "./session-store-condition.ts";
 import {
   storedSessionCondition,
   updateStoredSessions,
 } from "./session-store-persistence.ts";
-import { storedSessionExists } from "./session-store-state.ts";
 import {
   appendSystemStoredMessage,
   storedUserMessageValues,
 } from "./session-store-values.ts";
 
+const REPORTABLE_PARENT_STATUSES = [
+  "failed",
+  "idle",
+  "paused",
+  "queued",
+  "running",
+  "stopped",
+] as const;
+
 export interface SpawnedSessionLink {
   readonly parentGeneration: number;
   readonly parentId: string;
+}
+
+export function spawnedSessionChildren(
+  database: Pick<AppDatabase, "select">,
+  userId: string,
+  parentId: string,
+): readonly string[] {
+  const ownerCondition = and(
+    eq(agentSessions.userId, userId),
+    eq(agentSessions.isDeleted, false),
+  );
+  const sessions = database
+    .select({ id: agentSessions.id, parent: agentSessions.parentSessionId })
+    .from(agentSessions)
+    .where(ownerCondition)
+    .all();
+  const descendants: string[] = [];
+  const parents = new Set([parentId]);
+  for (;;) {
+    const children = sessions.filter(
+      ({ id, parent }) =>
+        parent !== null && parents.has(parent) && !parents.has(id),
+    );
+    if (children.length === 0) return descendants;
+    for (const { id } of children) {
+      parents.add(id);
+      descendants.push(id);
+    }
+  }
 }
 
 export interface PendingSpawnedSession {
@@ -69,6 +107,19 @@ export function spawnedSessionLink(
   };
 }
 
+function reportMessageOptions(
+  options: Parameters<typeof appendSpawnedSessionReport>[0],
+  database: Pick<AppDatabase, "insert" | "select" | "update">,
+) {
+  return {
+    database,
+    generateId: options.generateId,
+    now: options.now,
+    sessionId: options.parentId,
+    userId: options.userId,
+  };
+}
+
 export function appendSpawnedSessionReport(options: {
   readonly childGeneration: number;
   readonly childId: string;
@@ -84,44 +135,53 @@ export function appendSpawnedSessionReport(options: {
     const parentCondition = storedSessionCondition({
       generation: options.parentGeneration,
       id: options.parentId,
-      status: ["running", "idle"],
+      status: REPORTABLE_PARENT_STATUSES,
       userId: options.userId,
     });
     const eligibleParent = and(
       parentCondition,
       eq(agentSessions.runnerRequired, false),
     );
-    if (!storedSessionExists(transaction, eligibleParent)) {
+    const parent = transaction
+      .select({ status: agentSessions.status })
+      .from(agentSessions)
+      .where(eligibleParent)
+      .get();
+    if (parent === undefined) {
       return false;
     }
+    const childCondition = and(
+      storedSessionCondition({
+        generation: options.childGeneration,
+        id: options.childId,
+        userId: options.userId,
+      }),
+      eq(agentSessions.parentSessionId, options.parentId),
+      eq(agentSessions.parentExecutionGeneration, options.parentGeneration),
+    );
     if (
-      !updateStoredSessions(
-        transaction,
-        and(
-          storedSessionCondition({
-            generation: options.childGeneration,
-            id: options.childId,
-            userId: options.userId,
-          }),
-          eq(agentSessions.parentSessionId, options.parentId),
-          eq(agentSessions.parentExecutionGeneration, options.parentGeneration),
-        ),
-        {
-          parentExecutionGeneration: null,
-          parentSessionId: null,
-        },
-      )
+      !updateStoredSessions(transaction, childCondition, {
+        parentExecutionGeneration: null,
+      })
     ) {
       return false;
     }
-    appendSystemStoredMessage({
-      database: transaction,
-      generateId: options.generateId,
-      message: storedUserMessageValues(options.content),
-      now: options.now,
-      sessionId: options.parentId,
-      userId: options.userId,
-    });
+    if (
+      parent.status === "running" &&
+      !appendSystemFollowUp({
+        ...reportMessageOptions(options, transaction),
+        clientRequestId: `spawn:${options.childId}:${String(options.childGeneration)}`,
+        content: options.content,
+      })
+    ) {
+      return false;
+    }
+    if (parent.status !== "running") {
+      appendSystemStoredMessage({
+        ...reportMessageOptions(options, transaction),
+        message: storedUserMessageValues(options.content),
+      });
+    }
 
     transaction
       .update(agentSessions)

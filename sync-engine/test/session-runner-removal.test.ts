@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { captureBrokerRejection } from "../../shared/test/promise-test-helpers.ts";
+import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
 import { RunnerRemovalCoordinator } from "../../sync-engine/session-runner-removal.ts";
 
 const REMOVED_RUNNER_ID = "runner-removed";
@@ -73,6 +74,8 @@ function testSession(): AgentSessionDetail {
     updatedAt: 2,
     workingDirectory: "/work",
     workspaceId: "workspace-1",
+    parentExecutionGeneration: TEST_SESSION_DETAIL.parentExecutionGeneration,
+    parentSessionId: TEST_SESSION_DETAIL.parentSessionId,
   };
 }
 

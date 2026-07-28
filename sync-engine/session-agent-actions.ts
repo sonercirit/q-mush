@@ -350,6 +350,7 @@ export class SessionAgentActions {
     const parent = this.#dependencies.store.get(userId, parentSessionId);
     if (
       parent !== undefined &&
+      parent.status !== "stopped" &&
       sessionCanResume(parent) &&
       !this.#dependencies.activeSession(parent.id) &&
       this.#dependencies.runnerIsAvailable(

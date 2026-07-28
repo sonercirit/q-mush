@@ -3,6 +3,7 @@ import {
   normalizedSessionMutationError,
   sessionMutationError,
   sessionMutationOutcomeIsUnknown,
+  stopSessionMutation,
 } from "../../solid/session-mutations.ts";
 
 test.each([
@@ -17,6 +18,16 @@ test.each([
   expect(normalizedSessionMutationError(error)).toMatchObject({
     code: "outcome_unknown",
     message: "outcome_unknown",
+  });
+});
+
+test("includes the graceful tree-stop choice only when selected", () => {
+  expect(stopSessionMutation("session-1").payload).toEqual({
+    sessionId: "session-1",
+  });
+  expect(stopSessionMutation("session-1", true).payload).toEqual({
+    graceful: true,
+    sessionId: "session-1",
   });
 });
 

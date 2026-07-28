@@ -19,6 +19,8 @@ export const TEST_SESSION_DETAIL: AgentSessionDetail = {
   messages: [],
   model: "gpt-5-codex",
   openRouterProviderTag: null,
+  parentExecutionGeneration: null,
+  parentSessionId: null,
   pendingInputs: [],
   pendingQuestions: null,
   provider: "openai",

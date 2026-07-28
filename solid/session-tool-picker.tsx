@@ -56,7 +56,7 @@ export function SessionToolPicker(props: {
   readonly onChange: (tools: readonly AgentSessionToolName[]) => void;
   readonly tools: readonly AgentSessionToolName[];
 }): JSX.Element {
-  const [expanded, setExpanded] = createSignal(true);
+  const [expanded, setExpanded] = createSignal(false);
   const [openDetails, setOpenDetails] = createSignal<
     AgentSessionToolName | undefined
   >();
