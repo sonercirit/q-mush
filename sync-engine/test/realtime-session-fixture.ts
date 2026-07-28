@@ -55,6 +55,7 @@ export function realtimeTestSessionCommands(
     setAutoCompactionForUser: () => REALTIME_TEST_SESSION_DETAIL,
     stopForUser: () => REALTIME_TEST_SESSION_DETAIL,
     summariesForUser: () => [REALTIME_TEST_SESSION_DETAIL],
+    updateProviderForUser: () => Promise.resolve(REALTIME_TEST_SESSION_DETAIL),
     updateToolsForUser: () => Promise.resolve(REALTIME_TEST_SESSION_DETAIL),
     ...overrides,
   };

@@ -205,6 +205,30 @@ describe("session realtime command dispatch", () => {
     );
   });
 
+  test("dispatches a confirmed provider update in the authenticated workspace", async () => {
+    const updateProviderForUser = vi.fn(() =>
+      Promise.resolve(REALTIME_TEST_SESSION_DETAIL),
+    );
+    const payload = {
+      confirmedCacheDrop: true,
+      credentialId: "credential-2",
+      expectedGeneration: 0,
+      model: "model-2",
+      openRouterProviderTag: null,
+      provider: "openai" as const,
+      sessionId: "session-1",
+      workspaceId: TEST_WORKSPACE_ID,
+    };
+
+    await execute(
+      realtimeTestSessionCommands({ updateProviderForUser }),
+      SESSION_REALTIME_OPERATIONS.updateProvider,
+      payload,
+    );
+
+    expect(updateProviderForUser).toHaveBeenCalledWith(TEST_USER, payload);
+  });
+
   test("dispatches all authenticated session mutations", async () => {
     const compactForUser = vi.fn(() =>
       Promise.resolve(REALTIME_TEST_SESSION_DETAIL),
@@ -230,6 +254,7 @@ describe("session realtime command dispatch", () => {
       sessionId: "session-1",
     });
     await execute(integration, SESSION_REALTIME_OPERATIONS.stop, {
+      graceful: true,
       sessionId: "session-1",
     });
     await execute(integration, SESSION_REALTIME_OPERATIONS.reassign, {
@@ -255,6 +280,7 @@ describe("session realtime command dispatch", () => {
     expect(stopForUser).toHaveBeenCalledWith(
       TEST_USER,
       "session-1",
+      true,
       TEST_WORKSPACE_ID,
     );
     expect(reassignForUser).toHaveBeenCalledWith(

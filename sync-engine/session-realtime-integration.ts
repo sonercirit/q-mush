@@ -2,6 +2,7 @@ import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
+import type { SessionProviderUpdateInput } from "../shared/session-provider-update.ts";
 import type {
   SessionToolUpdateInput,
   SessionToolUpdatePreview,
@@ -30,6 +31,10 @@ import { readAuthorizedSessionHistory } from "./session-history.ts";
 import type { PromptInput } from "./session-input.ts";
 import type { SessionPendingInputCommand } from "./session-pending-input-request.ts";
 import {
+  applySessionProviderUpdate,
+  type SessionProviderUpdateDependencies,
+} from "./session-provider-update.ts";
+import {
   answerSessionQuestionsCommand,
   QuestionActionFailure,
   type SessionQuestionActionDependencies,
@@ -45,6 +50,7 @@ import type {
   SessionQuestionAnswerAction,
   SessionRealtimeCommands,
   SessionReassignmentAction,
+  SessionStopAction,
 } from "./session-realtime-commands.ts";
 import {
   reassignSession,
@@ -70,6 +76,10 @@ export interface RealtimeSessionCommandsOptions {
   readonly discoverOpenRouterProviders: OpenRouterProviderDiscoverer;
   readonly lifecycle: SessionLaunchBoundary;
   readonly providers: SessionCredentialReaders;
+  readonly providerUpdates: Omit<
+    SessionProviderUpdateDependencies,
+    "discoverModels" | "discoverOpenRouterProviders" | "providers" | "store"
+  >;
   readonly questions: SessionQuestionActionDependencies;
   readonly toolUpdates: Omit<
     SessionToolUpdateDependencies,
@@ -355,11 +365,12 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
       return detail;
     });
 
-  stopForUser(
-    user: AuthenticatedUser,
-    sessionId: string,
-    workspaceId: string,
-  ): AgentSessionDetail {
+  stopForUser: SessionStopAction = async (
+    user,
+    sessionId,
+    graceful,
+    workspaceId,
+  ) => {
     const existing = this.#dependencies.store.get(
       user.id,
       sessionId,
@@ -368,30 +379,82 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
     if (existing === undefined) {
       throw new RealtimeCommandError("not_found");
     }
-    if (existing.status !== "stopped") {
+    const children = this.#dependencies.store.spawnedSessionChildren(
+      user.id,
+      sessionId,
+    );
+    if (graceful && children.length > 0) {
+      await Promise.all(
+        children.map((childId) => this.#dependencies.runtimes.cleared(childId)),
+      );
+      const completed = this.#detail(user.id, sessionId, workspaceId);
+      if (completed.status === "queued" || completed.status === "running") {
+        await this.#dependencies.runtimes.cleared(sessionId);
+      }
+    }
+    const current = this.#detail(user.id, sessionId, workspaceId);
+    if (current.status !== "stopped") {
+      this.#dependencies.actions.stopSession(sessionId, current);
+      await this.#dependencies.runtimes.cleared(sessionId);
       this.#dependencies.store.stop(
         user.id,
         sessionId,
         this.#dependencies.now(),
       );
     }
-    this.#dependencies.actions.stopSession(sessionId, existing);
+    const stopped = this.#detail(user.id, sessionId, workspaceId);
+    this.#dependencies.actions.finished(stopped, user.id);
     this.#dependencies.notify(user.id, sessionId);
-    return this.#detail(user.id, sessionId);
-  }
+    return stopped;
+  };
 
   summariesForUser(userId: string, workspaceId: string) {
     return this.#dependencies.store.list(userId, workspaceId);
+  }
+
+  #providerUpdateStoreAccess() {
+    return {
+      database: this.#dependencies.database,
+      read: (identity: readonly [string, string, string]) =>
+        this.#dependencies.store.get(...identity),
+    };
+  }
+
+  async updateProviderForUser(
+    user: AuthenticatedUser,
+    input: SessionProviderUpdateInput,
+  ): Promise<AgentSessionDetail> {
+    const outcome = await applySessionProviderUpdate(
+      {
+        ...this.#dependencies.providerUpdates,
+        discoverModels: this.#dependencies.discoverModels,
+        discoverOpenRouterProviders:
+          this.#dependencies.discoverOpenRouterProviders,
+        providers: this.#dependencies.providers,
+        store: this.#providerUpdateStoreAccess(),
+      },
+      user.id,
+      input,
+    );
+    return this.#notifyUpdatedSession(user.id, input.sessionId, outcome);
   }
 
   async updateToolsForUser(
     user: AuthenticatedUser,
     input: SessionToolUpdateInput,
   ): Promise<AgentSessionDetail> {
-    const detail = await this.#runToolUpdate(() =>
+    const applied = await this.#runToolUpdate(() =>
       applySessionToolUpdate(this.#toolUpdateDependencies(), user.id, input),
     );
-    this.#dependencies.notify(user.id, input.sessionId);
+    return this.#notifyUpdatedSession(user.id, input.sessionId, applied);
+  }
+
+  #notifyUpdatedSession(
+    userId: string,
+    sessionId: string,
+    detail: AgentSessionDetail,
+  ): AgentSessionDetail {
+    this.#dependencies.notify(userId, sessionId);
     return detail;
   }
 

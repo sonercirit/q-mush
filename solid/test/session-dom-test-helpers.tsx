@@ -36,6 +36,7 @@ function renderTestSessionDetail(
     <SessionDetail
       controller={controller}
       credentialAvailable
+      credentials={[]}
       onOpenDirectoryPicker={() => {
         controller.openDirectoryPicker();
       }}

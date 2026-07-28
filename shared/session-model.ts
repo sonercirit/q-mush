@@ -68,6 +68,8 @@ export interface AgentSessionSummary {
   readonly maxContextTokens: number | null;
   readonly model: string;
   readonly openRouterProviderTag: string | null;
+  readonly parentExecutionGeneration: number | null;
+  readonly parentSessionId: string | null;
   readonly provider: ProviderId;
   readonly providerPricing: ProviderModelPricing | null;
   readonly pendingQuestions: PendingAskQuestions | null;

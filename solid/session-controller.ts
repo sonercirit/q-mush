@@ -212,6 +212,9 @@ export class SessionController {
   get view(): Accessor<SessionViewState> {
     return this.#reactiveView.state;
   }
+  get transport(): SessionCommandTransport | undefined {
+    return this.#transport;
+  }
   addImages(files: readonly File[], follow: boolean): Promise<void> {
     return addSessionImages({ files, follow, view: this.#view });
   }
@@ -474,8 +477,8 @@ export class SessionController {
   setWorkspace(workspaceId: string): void {
     this.#providers.setWorkspace(workspaceId);
   }
-  stop(): Promise<void> {
-    return this.#stop();
+  stop(graceful = false): Promise<void> {
+    return this.#stop(graceful);
   }
   steer(): Promise<void> {
     return this.#pendingInputs.submit("steer");
@@ -604,8 +607,10 @@ export class SessionController {
   async #continue(): Promise<void> {
     await this.#mutateRecoverable(continueSessionMutation);
   }
-  async #stop(): Promise<void> {
-    await this.#mutateWhen(sessionIsActive, stopSessionMutation);
+  async #stop(graceful: boolean): Promise<void> {
+    await this.#mutateWhen(sessionIsActive, (sessionId) =>
+      stopSessionMutation(sessionId, graceful),
+    );
   }
   async #mutateSelected(
     create: (sessionId: string) => SessionMutation,

@@ -37,12 +37,28 @@ function updateGeneration(
     .run();
 }
 
+function expectReportDisposition(
+  setup: SpawnedChildReference,
+  claimed: boolean,
+  now = TEST_NOW + 5,
+): void {
+  expect(report(setup, now)).toBe(claimed);
+  if (claimed) expect(spawnedLink(setup)).toBeUndefined();
+  else expectParentId(setup);
+}
+
+function expectReportClaimed(
+  setup: SpawnedChildReference,
+  now = TEST_NOW + 5,
+): void {
+  expectReportDisposition(setup, true, now);
+}
+
 function expectRetainedReport(
   setup: SpawnedChildReference,
   now = TEST_NOW + 5,
 ): void {
-  expect(report(setup, now)).toBe(false);
-  expectParentId(setup);
+  expectReportDisposition(setup, false, now);
 }
 
 function spawnedLink(setup: SpawnedChildReference) {
@@ -63,6 +79,12 @@ function closeAfterParentAssertion(
   closeSetup(setup);
 }
 
+function childSummary(setup: SpawnedChildReference) {
+  return setup.store.list(TEST_USER_ID).find((session) => {
+    return session.id === setup.childId;
+  });
+}
+
 function expectNoPendingReports(setup: SpawnedChildReference): void {
   expect(setup.store.pendingSpawnedSessions()).toEqual([]);
 }
@@ -75,9 +97,17 @@ describe("spawned session report generation fencing", () => {
     expect(setup.store.pendingSpawnedSessions()).toEqual([
       { detail: childDetail, userId: TEST_USER_ID },
     ]);
-    expect(report(setup)).toBe(true);
-    expect(spawnedLink(setup)).toBeUndefined();
+    expectReportClaimed(setup);
+    expect(childSummary(setup)?.parentSessionId).toBe(setup.parentId);
     expectNoPendingReports(setup);
+    expect(
+      setup.store.settleNormalBoundary(
+        setup.parentId,
+        TEST_NOW + 6,
+        setup.parentGeneration,
+      ),
+    ).toEqual({ status: "queued", userId: TEST_USER_ID });
+    expect(childSummary(setup)?.parentExecutionGeneration).toBeNull();
     closeAfterParentAssertion(setup, (parent) => {
       expect(parent?.messages.at(-1)?.content).toBe("Child complete");
     });
@@ -101,16 +131,33 @@ describe("spawned session report generation fencing", () => {
     },
   );
 
-  test("retains the callback for a stopped parent", () => {
+  test("delivers the callback to a stopped parent", () => {
     const setup = spawnedChildSetup();
     expect(setup.store.stop(TEST_USER_ID, setup.parentId, TEST_NOW + 5)).toBe(
       true,
     );
 
-    expectRetainedReport(setup, TEST_NOW + 6);
+    expectReportClaimed(setup, TEST_NOW + 6);
     closeAfterParentAssertion(setup, (parent) => {
+      expect(
+        parent?.messages.some(({ content }) => content === "Child complete"),
+      ).toBe(true);
       expect(parent?.status).toBe("stopped");
     });
+  });
+
+  test("keeps completed hierarchy links without scheduling another callback", () => {
+    const setup = spawnedChildSetup();
+
+    expectReportClaimed(setup);
+    expect(
+      setup.store.spawnedSessionChildren(TEST_USER_ID, setup.parentId),
+    ).toEqual([setup.childId]);
+    expect(childSummary(setup)).toMatchObject({
+      parentExecutionGeneration: null,
+      parentSessionId: setup.parentId,
+    });
+    closeSetup(setup);
   });
 
   test("does not expose historical links without a generation", () => {

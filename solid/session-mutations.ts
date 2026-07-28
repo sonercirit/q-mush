@@ -101,13 +101,19 @@ export function reassignSessionMutation(
   };
 }
 
-export function stopSessionMutation(sessionId: string): SessionMutation {
-  return sessionMutation(
+export function stopSessionMutation(
+  sessionId: string,
+  graceful = false,
+): SessionMutation {
+  const mutation = sessionMutation(
     sessionId,
     SESSION_REALTIME_OPERATIONS.stop,
     "stop that session",
     "stopping",
   );
+  return graceful
+    ? { ...mutation, payload: { graceful: true, sessionId } }
+    : mutation;
 }
 
 export function compactionModeMutation(
@@ -136,8 +142,13 @@ function validSessionMutationPayload(mutation: SessionMutation): boolean {
   switch (mutation.operation) {
     case SESSION_REALTIME_OPERATIONS.compact:
     case SESSION_REALTIME_OPERATIONS.continue:
-    case SESSION_REALTIME_OPERATIONS.stop:
       return Object.keys(payload).length === 1;
+    case SESSION_REALTIME_OPERATIONS.stop:
+      return (
+        Object.keys(payload).length ===
+          (payload["graceful"] === true ? 2 : 1) &&
+        (payload["graceful"] === undefined || payload["graceful"] === true)
+      );
     case SESSION_REALTIME_OPERATIONS.followUp:
     case SESSION_REALTIME_OPERATIONS.steer:
       return (
@@ -162,6 +173,8 @@ function validSessionMutationPayload(mutation: SessionMutation): boolean {
         Object.keys(payload).length === 2 &&
         typeof payload["autoCompact"] === "boolean"
       );
+    case SESSION_REALTIME_OPERATIONS.updateProvider:
+      return false;
     default:
       return false;
   }
@@ -252,6 +265,8 @@ function mutationIsReconciled(
       return detail.autoCompact === mutation.payload["autoCompact"];
     case SESSION_REALTIME_OPERATIONS.stop:
       return detail.status === "stopped";
+    case SESSION_REALTIME_OPERATIONS.updateProvider:
+      return false;
     default:
       return false;
   }

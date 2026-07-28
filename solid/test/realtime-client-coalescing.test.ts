@@ -109,13 +109,17 @@ test("coalesces session deltas into one update per animation frame", () => {
     type: "session_delta",
   });
   expect(frames).toHaveLength(2);
+  const queueBeforeSnapshot = frames.length;
   socket.receive({ session: TEST_SESSION_DETAIL, type: "session" });
   expect(events.at(-2)).toMatchObject({ content: "!", thinking: "" });
   expect(events.at(-1)).toEqual({
     session: TEST_SESSION_DETAIL,
     type: "session",
   });
-  expectFramesAndLatest(events, frames, 3, 2, 5, {
+  expect(frames).toHaveLength(queueBeforeSnapshot);
+  frames[queueBeforeSnapshot - 1]?.();
+  expect(events).toHaveLength(5);
+  expect(events.at(-1)).toMatchObject({
     content: "other",
     sessionId: "session-other",
   });
@@ -126,8 +130,7 @@ test("coalesces session deltas into one update per animation frame", () => {
     thinking: "",
     type: "session_delta",
   });
-  frames[1]?.();
-  expectFramesAndLatest(events, frames, 4, 3, 6, {
+  expectFramesAndLatest(events, frames, 3, 2, 6, {
     content: "fresh",
     thinking: "",
   });
@@ -138,8 +141,8 @@ test("coalesces session deltas into one update per animation frame", () => {
     thinking: "",
     type: "session_delta",
   });
-  expect(frames).toHaveLength(5);
+  expect(frames).toHaveLength(4);
   connection.stop();
-  frames[4]?.();
+  frames[3]?.();
   expect(events).toHaveLength(6);
 });

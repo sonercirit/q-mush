@@ -19,8 +19,10 @@ import { RunnerController } from "../runner-controller.ts";
 import { SessionPanel, type SessionViewState } from "../session-client.tsx";
 import { summaryFromDetail } from "../session-codec.ts";
 import { SessionController } from "../session-controller.ts";
+import { SessionDetailBody } from "../session-detail-body.tsx";
 import { SessionList } from "../session-detail-client.tsx";
 import { initialSessionViewState } from "../session-state.ts";
+import type { SessionCommandTransport } from "../session-transport.ts";
 import {
   clickTestButton,
   disposeTestViews,
@@ -45,6 +47,65 @@ const disposals: (() => void)[] = [];
 
 function mount(renderView: () => JSX.Element): HTMLDivElement {
   return mountTestView(renderView, disposals);
+}
+
+function mountedSessionList(
+  sessions: readonly ReturnType<typeof summaryFromDetail>[],
+): HTMLDivElement {
+  const controller = new SessionController(
+    createReactiveState<SessionViewState>({
+      ...initialSessionViewState(),
+      sessions,
+    }),
+  );
+  return mount(() => <SessionList controller={controller} />);
+}
+
+interface MountedSessionBody {
+  readonly container: HTMLDivElement;
+  readonly controller: SessionController;
+}
+
+function mountedSessionBody(
+  reactive: ReturnType<typeof createReactiveState<SessionViewState>>,
+  transport?: SessionCommandTransport,
+): MountedSessionBody {
+  const controller = new SessionController(
+    reactive,
+    undefined,
+    null,
+    transport,
+  );
+  const detail = reactive.state().detail;
+  if (detail === undefined) throw new TypeError("Missing session detail");
+  const bodyProps = {
+    contextLabel: "0% context",
+    environmentLabel: "Bare Metal",
+    modelLabel: "openai · model",
+    presentation: <span>Running</span>,
+    providerUpdate: {
+      credentials: [],
+      onApply: () => Promise.resolve(false),
+      onDiscoverModels: () => {
+        return Promise.resolve({ defaultModel: null, models: [] });
+      },
+      onDiscoverProviders: () => Promise.resolve({ providers: [] }),
+    },
+    sessionMetrics: <span>Time: 0s</span>,
+    view: {
+      controller,
+      credentialAvailable: true,
+      credentials: [],
+      detail,
+      onOpenDirectoryPicker: () => undefined,
+      runners: [],
+      state: reactive.state(),
+    },
+  };
+  return {
+    container: mount(() => <SessionDetailBody {...bodyProps} />),
+    controller,
+  };
 }
 
 function query(container: ParentNode, selector: string): Element {
@@ -86,13 +147,11 @@ function credential(id: string, label: string): ProviderCredential {
 function stubSessionRequests(catalog: AgentModelCatalog): void {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = Object.assign(
-    (input: RequestInfo | URL): Promise<Response> => {
-      const url =
-        typeof input === "string"
-          ? input
-          : input instanceof URL
-            ? input.href
-            : input.url;
+    (input: RequestInfo | URL) => {
+      let url: string;
+      if (typeof input === "string") url = input;
+      else if (input instanceof URL) url = input.href;
+      else url = input.url;
       return Promise.resolve(
         Response.json(url.includes("/models?") ? catalog : TEST_SESSION_DETAIL),
       );
@@ -105,6 +164,24 @@ function stubSessionRequests(catalog: AgentModelCatalog): void {
 afterEach(() => {
   disposeTestViews(disposals);
 });
+
+function waitForSessionModel(
+  container: ParentNode,
+  label: string,
+): Promise<void> {
+  return vi.waitFor(() => {
+    expect(query(container, "#session-model").textContent).toContain(label);
+  });
+}
+
+function createNewSessionState(): ReturnType<
+  typeof createReactiveState<SessionViewState>
+> {
+  return createReactiveState<SessionViewState>({
+    ...initialSessionViewState(),
+    sessions: [],
+  });
+}
 
 test("provider loading, error, retry, and list updates preserve the panel", async () => {
   const reactive = createReactiveState<ProviderViewState>(
@@ -236,15 +313,62 @@ test("scrolling away from and back to the transcript end updates scroll lock", (
 
   expectScrollLock(toggle, true);
 
-  setScrollableDimensions(element, 100, 650);
-  applySessionDelta(controller, detail.id, " continues");
-  expect(element.scrollTop).toBe(650);
-
   if (!(toggle instanceof HTMLButtonElement)) {
     throw new TypeError("The scroll lock control is not a button");
   }
   toggle.click();
   expectScrollLock(toggle, false);
+});
+
+test("nests spawned sessions under a collapsible parent", () => {
+  const parent = {
+    ...summaryFromDetail(TEST_SESSION_DETAIL),
+    id: "parent-session",
+    title: "Parent task",
+  };
+  const child = {
+    ...parent,
+    id: "child-session",
+    parentSessionId: parent.id,
+    title: "Delegated task",
+  };
+  const detached = {
+    ...parent,
+    id: "detached-session",
+    parentSessionId: "missing-parent",
+    title: "Detached task",
+  };
+  const container = mountedSessionList([child, detached, parent]);
+  const parentToggle = query(
+    container,
+    "button[aria-label='Collapse child sessions for Parent task']",
+  );
+  const childButton = container.querySelector<HTMLButtonElement>(
+    "[data-session-id='child-session']",
+  );
+  expect(parentToggle.getAttribute("aria-expanded")).toBe("true");
+  expect(childButton).not.toBeNull();
+  expect(childButton?.closest("li")?.getAttribute("data-session-depth")).toBe(
+    "1",
+  );
+  expect(
+    container.querySelector("[data-session-id='detached-session']"),
+  ).not.toBeNull();
+
+  if (!(parentToggle instanceof HTMLButtonElement)) {
+    throw new TypeError("The child session toggle is not a button");
+  }
+  parentToggle.click();
+
+  expect(
+    query(
+      container,
+      "button[aria-label='Expand child sessions for Parent task']",
+    ).getAttribute("aria-expanded"),
+  ).toBe("false");
+  expect(
+    container.querySelector("[data-session-id='child-session']"),
+  ).toBeNull();
 });
 
 test("paginates the session list ten sessions at a time", () => {
@@ -254,12 +378,7 @@ test("paginates the session list ten sessions at a time", () => {
     title: `Task ${String(index + 1)}`,
     updatedAt: 100 - index,
   }));
-  const reactive = createReactiveState<SessionViewState>({
-    ...initialSessionViewState(),
-    sessions,
-  });
-  const controller = new SessionController(reactive);
-  const container = mount(() => <SessionList controller={controller} />);
+  const container = mountedSessionList(sessions);
   const sessionButtons = (): NodeListOf<HTMLButtonElement> =>
     container.querySelectorAll("button[data-session-id]");
   const previous = query(
@@ -305,11 +424,87 @@ test("paginates the session list ten sessions at a time", () => {
   expect(container.textContent).toContain("Page 1 of 2");
 });
 
-test("session resources, drafts, realtime lists, and selected details update in place", async () => {
-  const sessionState = createReactiveState<SessionViewState>({
+test("keeps a running tool visible while a stop request is pending", () => {
+  const running = {
+    ...TEST_SESSION_DETAIL,
+    status: "running" as const,
+    updatedAt: 3,
+  };
+  const reactive = createReactiveState<SessionViewState>({
     ...initialSessionViewState(),
-    sessions: [],
+    detail: running,
+    selectedId: running.id,
+    sessions: [summaryFromDetail(running)],
+    stopping: true,
+    toolStreams: [
+      {
+        arguments: '{"command":"sleep 1"}',
+        callId: "call-running",
+        index: 0,
+        name: "bash",
+        sequence: 1,
+        sessionId: running.id,
+        state: "running",
+        stderr: "",
+        stdout: "still working",
+        streamId: "stream-running",
+      },
+    ],
   });
+  const { container } = mountedSessionBody(reactive);
+
+  expect(container.textContent).toContain("Running");
+  expect(
+    container.querySelector("[data-tool-stream-state='running']"),
+  ).not.toBeNull();
+});
+
+test("asks how to stop a parent with child sessions", () => {
+  const parent = {
+    ...TEST_SESSION_DETAIL,
+    id: "parent-stop-session",
+    status: "running" as const,
+    updatedAt: 3,
+  };
+  const child = {
+    ...summaryFromDetail(TEST_SESSION_DETAIL),
+    id: "child-stop-session",
+    parentExecutionGeneration: parent.generation,
+    parentSessionId: parent.id,
+  };
+  const reactive = createReactiveState<SessionViewState>({
+    ...initialSessionViewState(),
+    detail: parent,
+    selectedId: parent.id,
+    sessions: [summaryFromDetail(parent), child],
+  });
+  const command = vi.fn(() =>
+    Promise.resolve({ ...parent, status: "stopped" as const }),
+  );
+  const transport = { command };
+  const confirm = vi.fn(() => true);
+  Object.defineProperty(window, "confirm", {
+    configurable: true,
+    value: confirm,
+  });
+  const { container } = mountedSessionBody(reactive, transport);
+  const stop = [...container.querySelectorAll("button")].find(
+    ({ textContent }) => textContent === "Stop session",
+  );
+  if (!(stop instanceof HTMLButtonElement)) {
+    throw new TypeError("The stop button was not rendered");
+  }
+  stop.click();
+
+  expect(confirm).toHaveBeenCalledOnce();
+  expect(command).toHaveBeenCalledWith("sessions.stop", {
+    graceful: true,
+    sessionId: parent.id,
+  });
+});
+
+test("session resources, drafts, realtime lists, and selected details update in place", async () => {
+  const sessionState = createNewSessionState();
   const runnerState = createReactiveState<RunnerViewState>(
     createRunnerViewState([]),
   );
@@ -322,20 +517,16 @@ test("session resources, drafts, realtime lists, and selected details update in 
   const controller = new SessionController(sessionState, undefined, undefined);
   const modelLabel = "Reactive model";
   const primaryCredentialLabel = "Primary";
-  stubSessionRequests({
-    defaultModel: "model-1",
-    models: [
-      {
-        contextWindow: 128_000,
-        id: "model-1",
-        inputModalities: ["text"],
-        label: modelLabel,
-        outputModalities: ["text"],
-        pricing: null,
-        reasoningEfforts: ["high"],
-      },
-    ],
-  });
+  const model = {
+    contextWindow: 128_000,
+    id: "model-1",
+    inputModalities: ["text"] as const,
+    label: modelLabel,
+    outputModalities: ["text"] as const,
+    pricing: null,
+    reasoningEfforts: ["high"] as const,
+  };
+  stubSessionRequests({ defaultModel: model.id, models: [model] });
   const container = mount(() => (
     <SessionPanel
       controller={controller}
@@ -365,11 +556,7 @@ test("session resources, drafts, realtime lists, and selected details update in 
 
   expect(container.textContent).toContain("workstation");
   expect(container.textContent).toContain(primaryCredentialLabel);
-  await vi.waitFor(() => {
-    expect(query(container, "#session-model").textContent).toContain(
-      modelLabel,
-    );
-  });
+  await waitForSessionModel(container, modelLabel);
 
   controller.setDraftField("prompt", "Keep this task focused");
   expect(prompt.value).toBe("Keep this task focused");

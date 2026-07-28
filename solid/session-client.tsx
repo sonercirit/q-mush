@@ -3,13 +3,13 @@ import {
   createMemo,
   createSignal,
   Show,
+  untrack,
   type JSX,
 } from "solid-js";
 import {
   reasoningEffortLabel,
   type AgentModelCatalog,
 } from "../shared/agent-configuration.ts";
-import type { ProviderId } from "../shared/provider-credential-store.ts";
 import type { RunnerSummary } from "../shared/runner-model.ts";
 import { RetryNotice } from "./collection.tsx";
 import { ControllerRetryNotice } from "./controller-retry.tsx";
@@ -21,16 +21,14 @@ import {
   modelModalitiesLabel,
   renderModelModalities,
 } from "./model-modalities-client.tsx";
-import type {
-  ProviderCredential,
-  ProviderViewState,
-} from "./provider-client.tsx";
+import type { ProviderViewState } from "./provider-client.tsx";
 import { renderDebugBoundary } from "./render-debug.tsx";
 import type { RunnerViewState } from "./runner-client.tsx";
 import { SessionAutoCompactToggle } from "./session-autocompact-toggle.tsx";
 import { SessionPromptInput } from "./session-client-forms.tsx";
 import { formatTokenCount } from "./session-context-client.tsx";
 import type { SessionController } from "./session-controller.ts";
+import type { SessionCredentialOption } from "./session-credential-option.ts";
 import { SessionExecutionEnvironmentSelect } from "./session-execution-environment.tsx";
 import { SessionResults } from "./session-focus-client.tsx";
 import type { SessionPanelResources } from "./session-panel-resources.ts";
@@ -47,10 +45,7 @@ export type {
   SessionViewState,
 } from "./session-view-state.ts";
 
-interface CredentialOption {
-  readonly credential: ProviderCredential;
-  readonly provider: ProviderId;
-}
+type CredentialOption = SessionCredentialOption;
 
 function onlineRunners(state: RunnerViewState): readonly RunnerSummary[] {
   return state.runners?.filter(({ status }) => status === "online") ?? [];
@@ -549,13 +544,12 @@ export function SessionPanel(
   });
 
   createEffect(() => {
-    const runners = online();
-    const options = credentials();
-    props.controller.initializeDefaults(
-      defaultRunnerId(runners),
-      defaultCredentialValue(options),
-      credentialsSettled(),
-    );
+    const runnerId = defaultRunnerId(online());
+    const credential = defaultCredentialValue(credentials());
+    const settled = credentialsSettled();
+    untrack(() => {
+      props.controller.initializeDefaults(runnerId, credential, settled);
+    });
   });
 
   return (
@@ -602,6 +596,7 @@ export function SessionPanel(
             props.openAi(),
             props.openRouter(),
           )}
+          credentials={credentials()}
           focusMode={focusMode}
           onOpenDirectoryPicker={openDirectoryPicker}
           runners={online()}

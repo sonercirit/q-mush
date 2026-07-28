@@ -1,0 +1,220 @@
+import { eq } from "drizzle-orm";
+import { describe, expect, test, vi } from "vitest";
+import { agentMessages, agentSessions } from "../../shared/database/schema.ts";
+import { applySessionProviderUpdate } from "../session-provider-update.ts";
+import { SessionStore } from "../session-store.ts";
+import {
+  addTestProviderCredential,
+  createAuthenticatedTestDatabase,
+  TEST_NOW,
+  TEST_USER_ID,
+  TEST_WORKSPACE_ID,
+} from "./authenticated-integration-test-helpers.ts";
+import { testModelCatalog } from "./session-continuation-test-helpers.ts";
+import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
+
+function createProviderUpdateSession(store: SessionStore) {
+  const values = {
+    autoCompact: true,
+    credentialId: "openai-source",
+    executionEnvironment: "bare_metal" as const,
+    images: [],
+    maxContextTokens: 128_000,
+    model: "gpt-4.1-mini",
+    openRouterProviderTag: null,
+    prompt: "Initial context",
+    provider: "openai" as const,
+    providerPricing: null,
+    reasoningEffort: null,
+    runnerId: "runner-1",
+    tools: [],
+    userId: TEST_USER_ID,
+    workingDirectory: "/tmp",
+    workspaceId: TEST_WORKSPACE_ID,
+  };
+  return store.create(values, TEST_NOW);
+}
+
+function setup() {
+  const database = createAuthenticatedTestDatabase();
+  addSessionTestRunner(database, "provider-update-machine", "runner-1");
+  addTestProviderCredential(database, "openai-source");
+  addTestProviderCredential(database, "openrouter-target", "openrouter");
+  const store = new SessionStore(database);
+  const created = createProviderUpdateSession(store);
+  if (created.status !== "created") throw new Error("Fixture failed");
+  const cancelSessionGeneration = vi.fn<
+    (_sessionId: string, _generation: number) => readonly []
+  >(() => []);
+  const abortForGeneration = vi.fn<
+    (_sessionId: string, _generation: number) => boolean
+  >(() => true);
+  const readCredential = vi.fn(
+    (_userId: string, credentialId: string, workspaceId?: string) =>
+      workspaceId === TEST_WORKSPACE_ID && credentialId === "openrouter-target"
+        ? {
+            accountId: null,
+            id: credentialId,
+            isDefault: false,
+            label: "OpenRouter",
+            secret: "secret",
+            source: "api_key" as const,
+          }
+        : undefined,
+  );
+  const dependencies = {
+    broker: { cancelSessionGeneration },
+    discoverModels: () =>
+      Promise.resolve(testModelCatalog("vendor/model", "Model")),
+    discoverOpenRouterProviders: () =>
+      Promise.resolve({
+        providers: [
+          {
+            contextWindow: 64_000,
+            name: "Together",
+            pricing: { input: "0.1", output: "0.2" },
+            tag: "together",
+          },
+        ],
+      }),
+    now: () => TEST_NOW + 1,
+    providers: {
+      openai: { readCredential: () => undefined },
+      openrouter: { readCredential },
+    },
+    runtimes: { abortForGeneration },
+    store: {
+      database,
+      read: (identity: readonly [string, string, string]) =>
+        store.get(...identity),
+    },
+  };
+  const input = {
+    confirmedCacheDrop: true,
+    credentialId: "openrouter-target",
+    expectedGeneration: created.detail.generation,
+    model: "vendor/model",
+    openRouterProviderTag: "together",
+    provider: "openrouter" as const,
+    sessionId: created.detail.id,
+    workspaceId: TEST_WORKSPACE_ID,
+  };
+  return { created, database, dependencies, input, store };
+}
+
+function sessionRow(setupValue: ReturnType<typeof setup>) {
+  return setupValue.database
+    .select({
+      contextTokens: agentSessions.currentContextTokens,
+      credentialId: agentSessions.providerCredentialId,
+      generation: agentSessions.executionGeneration,
+      maxContextTokens: agentSessions.maxContextTokens,
+      model: agentSessions.model,
+      pricing: agentSessions.providerPricing,
+      provider: agentSessions.provider,
+      segment: agentSessions.currentSegment,
+      tag: agentSessions.openRouterProviderTag,
+    })
+    .from(agentSessions)
+    .where(eq(agentSessions.id, setupValue.created.detail.id))
+    .get();
+}
+
+describe("session provider update", () => {
+  test("updates provider metadata and drops the current cache segment once", async () => {
+    const setupValue = setup();
+
+    const updated = await applySessionProviderUpdate(
+      setupValue.dependencies,
+      TEST_USER_ID,
+      setupValue.input,
+    );
+
+    expect(updated).toMatchObject({
+      credentialId: "openrouter-target",
+      currentContextTokens: 0,
+      generation: 1,
+      hasOlderSegments: true,
+      maxContextTokens: 64_000,
+      model: "vendor/model",
+      openRouterProviderTag: "together",
+      provider: "openrouter",
+      providerPricing: { input: "0.1", output: "0.2" },
+    });
+    expect(sessionRow(setupValue)).toMatchObject({
+      contextTokens: 0,
+      credentialId: "openrouter-target",
+      generation: 1,
+      maxContextTokens: 64_000,
+      model: "vendor/model",
+      provider: "openrouter",
+      segment: 1,
+      tag: "together",
+    });
+    expect(
+      setupValue.database
+        .select({ segment: agentMessages.segment })
+        .from(agentMessages)
+        .all(),
+    ).toEqual([{ segment: 0 }]);
+    expect(setupValue.store.get(TEST_USER_ID, updated.id)?.messages).toEqual(
+      [],
+    );
+    const abortCalls = setupValue.dependencies.runtimes.abortForGeneration;
+    expect(abortCalls).toHaveBeenCalledWith(updated.id, 0);
+
+    const repeated = await applySessionProviderUpdate(
+      setupValue.dependencies,
+      TEST_USER_ID,
+      { ...setupValue.input, confirmedCacheDrop: false },
+    );
+    expect(repeated.generation).toBe(1);
+    expect(sessionRow(setupValue)?.segment).toBe(1);
+    expect(abortCalls).toHaveBeenCalledTimes(1);
+  });
+
+  const applyUpdate = (
+    setupValue: ReturnType<typeof setup>,
+    confirmedCacheDrop: boolean,
+  ) =>
+    applySessionProviderUpdate(setupValue.dependencies, TEST_USER_ID, {
+      ...setupValue.input,
+      confirmedCacheDrop,
+    });
+
+  const expectRejectedUpdate = async (
+    setupValue: ReturnType<typeof setup>,
+    confirmedCacheDrop: boolean,
+    code: string,
+  ): Promise<void> => {
+    try {
+      await applyUpdate(setupValue, confirmedCacheDrop);
+      throw new Error("The provider update unexpectedly succeeded");
+    } catch (error) {
+      expect(error).toMatchObject({ code });
+    }
+  };
+
+  test("requires confirmation before changing the provider", async () => {
+    const setupValue = setup();
+
+    await expectRejectedUpdate(setupValue, false, "cache_warning_required");
+    expect(sessionRow(setupValue)).toMatchObject({ provider: "openai" });
+  });
+
+  test("enforces workspace credential scope before discovery or mutation", async () => {
+    const setupValue = setup();
+    const scopedReader = vi.fn(() => undefined);
+    setupValue.dependencies.providers.openrouter.readCredential = scopedReader;
+
+    await expectRejectedUpdate(setupValue, true, "credential_unavailable");
+    expect(scopedReader).toHaveBeenCalledWith(
+      TEST_USER_ID,
+      "openrouter-target",
+      TEST_WORKSPACE_ID,
+    );
+    expect(sessionRow(setupValue)).toEqual(
+      expect.objectContaining({ provider: "openai" }),
+    );
+  });
+});

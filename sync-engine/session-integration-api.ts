@@ -432,7 +432,10 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
             user,
             sessionId,
             workspaceId,
-            (existing) => {
+            async (existing) => {
+              this.resources.runtimes.abort(sessionId);
+              this.resources.broker.cancelSession(sessionId);
+              await this.resources.runtimes.cleared(sessionId);
               if (existing.status !== "stopped") {
                 this.resources.store.stop(
                   user.id,
@@ -440,9 +443,7 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
                   this.resources.now(),
                 );
               }
-              this.resources.runtimes.abort(sessionId);
-              this.resources.broker.cancelSession(sessionId);
-              void this.resources.executionCleanup.cleanup(existing);
+              await this.resources.executionCleanup.cleanup(existing);
               this.resources.notify(user.id, sessionId);
               return storedSessionResponse(
                 this.resources.store,

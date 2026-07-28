@@ -48,6 +48,21 @@ function mountPicker(): MountedPicker {
   return result;
 }
 
+function expandPicker(container: HTMLElement): HTMLButtonElement {
+  const toggle = container.querySelector("[data-tool-picker-toggle='true']");
+  if (!(toggle instanceof HTMLButtonElement)) {
+    throw new TypeError("The tool-picker expand toggle was not rendered");
+  }
+  toggle.click();
+  return toggle;
+}
+
+function mountExpandedPicker(): MountedPicker {
+  const picker = mountPicker();
+  expandPicker(picker.container);
+  return picker;
+}
+
 function infoButton(
   container: HTMLElement,
   name: AgentSessionToolName,
@@ -82,16 +97,16 @@ function toolInputCount(container: HTMLElement): number {
   return container.querySelectorAll("input[name='tools']").length;
 }
 
-test("collapses to the toggle and restores the complete tool controls", () => {
+test("expands from the toggle and collapses the complete tool controls", () => {
   const { container } = mountPicker();
-  const toggle = container.querySelector("[data-tool-picker-toggle='true']");
-  if (!(toggle instanceof HTMLButtonElement)) {
-    throw new TypeError("The tool-picker collapse toggle was not rendered");
-  }
+  const toggle = expandPicker(container);
 
   expect(toggle.getAttribute("aria-expanded")).toBe("true");
   expect(toggle.textContent).toContain("Collapse tools");
   expect(toolInputCount(container)).toBe(AGENT_SESSION_TOOL_NAMES.length);
+  expect(
+    container.querySelector("[data-tool-picker-controls='true']"),
+  ).toBeInstanceOf(HTMLDivElement);
 
   toggle.click();
 
@@ -99,16 +114,10 @@ test("collapses to the toggle and restores the complete tool controls", () => {
   expect(toggle.textContent).toContain("Expand tools");
   expect(toolInputCount(container)).toBe(0);
   expect(container.querySelector("input[name='session-tools']")).toBeNull();
-
-  toggle.click();
-
-  expect(
-    container.querySelector("[data-tool-picker-controls='true']"),
-  ).toBeInstanceOf(HTMLDivElement);
 });
 
 test("renders an accessible info button for every canonical picker row", () => {
-  const { container } = mountPicker();
+  const { container } = mountExpandedPicker();
   const buttons = container.querySelectorAll("button[data-tool-details]");
 
   expect(buttons).toHaveLength(AGENT_SESSION_TOOL_OPTIONS.length);
@@ -127,7 +136,7 @@ test("renders an accessible info button for every canonical picker row", () => {
 });
 
 test("shows authoritative descriptions, classifications, and nested schema details", () => {
-  const { container } = mountPicker();
+  const { container } = mountExpandedPicker();
   const bash = openPanel(container, "bash");
 
   expect(bash.textContent).toContain("bash");
@@ -165,7 +174,7 @@ test("shows authoritative descriptions, classifications, and nested schema detai
 });
 
 test("separates info clicks from checkbox selection and keeps one panel open", () => {
-  const { changes, container } = mountPicker();
+  const { changes, container } = mountExpandedPicker();
   const changeCount = changes.length;
   const readButton = infoButton(container, "read");
   const bashButton = infoButton(container, "bash");
@@ -185,7 +194,7 @@ test("separates info clicks from checkbox selection and keeps one panel open", (
 });
 
 test("closes on Escape and outside pointer interaction while restoring focus", async () => {
-  const { container } = mountPicker();
+  const { container } = mountExpandedPicker();
   const button = infoButton(container, "edit");
   openPanel(container, "edit");
   window.dispatchEvent(
@@ -202,7 +211,7 @@ test("closes on Escape and outside pointer interaction while restoring focus", a
 });
 
 test("does not close for interaction inside the responsive detail panel", () => {
-  const { container } = mountPicker();
+  const { container } = mountExpandedPicker();
   const panel = openPanel(container, "write");
   panel.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
 

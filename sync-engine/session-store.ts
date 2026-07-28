@@ -84,6 +84,7 @@ import {
 import {
   appendSpawnedSessionReport,
   pendingSpawnedSessions,
+  spawnedSessionChildren,
   spawnedSessionLink,
   type PendingSpawnedSession,
   type SpawnedSessionLink,
@@ -556,6 +557,10 @@ export class SessionStore {
       parentId,
       userId,
     });
+  }
+
+  spawnedSessionChildren(userId: string, sessionId: string): readonly string[] {
+    return spawnedSessionChildren(this.#database, userId, sessionId);
   }
 
   spawnedSessionLink(

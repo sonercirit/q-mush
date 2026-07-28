@@ -95,6 +95,23 @@ test("requires runner reassignment metadata in session responses", () => {
   ).toThrow("invalid agent session");
 });
 
+test("reads active and completed spawned-session hierarchy metadata", () => {
+  const active = {
+    ...DETAIL,
+    parentExecutionGeneration: 2,
+    parentSessionId: "parent-session",
+  };
+  const completed = { ...active, parentExecutionGeneration: null };
+
+  expect(readSessionDetail(active)).toMatchObject(active);
+  expect(readSessionDetail(completed)).toMatchObject(completed);
+  expectInvalidSession({
+    ...DETAIL,
+    parentExecutionGeneration: 2,
+    parentSessionId: null,
+  });
+});
+
 test("strictly validates question pauses and lifecycle status coupling", () => {
   const pendingQuestions = singleChoicePendingQuestions(
     "request-1",

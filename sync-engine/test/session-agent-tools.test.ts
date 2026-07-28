@@ -4,8 +4,11 @@ import { isRecord } from "../../shared/auth-model.ts";
 import { SessionStore } from "../../sync-engine/session-store.ts";
 import {
   createAuthenticatedRequest,
+  TEST_AUTHENTICATED_USER,
   TEST_USER_ID,
+  TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
+import { providerTurn } from "./provider-turn-fixtures.ts";
 import {
   jsonRecord,
   records,
@@ -55,6 +58,41 @@ function spawnCall(
     tools,
     workingDirectory: "/work/project",
   });
+}
+
+class PausedParentChildModel implements AgentModel {
+  #requestCount = 0;
+  #releaseParent: (() => void) | undefined;
+  readonly #resumeParent = Promise.withResolvers<undefined>();
+  readonly parentPaused = new Promise<void>((resolve) => {
+    this.#releaseParent = resolve;
+  });
+
+  resumeParent(): void {
+    this.#resumeParent.resolve(undefined);
+  }
+
+  async complete(): Promise<AgentModelTurn> {
+    this.#requestCount += 1;
+    let content: string;
+    let toolCalls: ReturnType<typeof spawnCall>[];
+    if (this.#requestCount === 1) {
+      content = "Delegating while I keep running.";
+      toolCalls = [spawnCall("Complete while the parent is paused")];
+    } else if (this.#requestCount === 2) {
+      this.#releaseParent?.();
+      await this.#resumeParent.promise;
+      content = "Parent reached its safe stop boundary.";
+      toolCalls = [];
+    } else if (this.#requestCount === 3) {
+      content = "Child final result.";
+      toolCalls = [];
+    } else {
+      content = "Parent received the child result.";
+      toolCalls = [];
+    }
+    return providerTurn(content, { toolCalls });
+  }
 }
 
 class SelfStoppingChildModel implements AgentModel {
@@ -151,6 +189,35 @@ async function startedChild(model: AgentModel): Promise<{
   const setup = await startToolSession(model);
   const childId = await childSessionId(setup);
   return { childId, setup };
+}
+
+async function pausedChildSetup(): Promise<{
+  readonly childId: string;
+  readonly model: PausedParentChildModel;
+  readonly setup: Awaited<ReturnType<typeof startToolSession>>;
+}> {
+  const model = new PausedParentChildModel();
+  const setup = await startToolSession(model);
+  await model.parentPaused;
+  const child = setup.sessions
+    .listForUser(TEST_USER_ID)
+    .find(({ parentSessionId }) => parentSessionId === SESSION_ID);
+  if (child === undefined) {
+    throw new Error("The paused parent child session is unavailable");
+  }
+  return { childId: child.id, model, setup };
+}
+
+async function completePausedChild(
+  setup: Awaited<ReturnType<typeof startToolSession>>,
+  childId: string,
+): Promise<void> {
+  await waitForRunnerSession(setup, childId);
+  completeChildAgentFile(setup);
+  await waitForSessionValue(
+    () => setup.sessions.detailForUser(TEST_USER_ID, childId),
+    hasSessionStatus("idle"),
+  );
 }
 
 function completeChildAgentFile(
@@ -368,6 +435,46 @@ describe("session agent tools", () => {
       '\\"status\\": \\"completed\\"',
     );
     closeSessionTestDatabase(spawnSetup.database);
+  });
+
+  test("delivers a child result that arrives while the parent model is still running", async () => {
+    const { childId, setup } = await pausedChildSetup();
+    await completePausedChild(setup, childId);
+    const parent = setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID);
+    expect(parent?.status).toBe("running");
+    expect(parent?.pendingInputs).toHaveLength(1);
+    expect(parent?.pendingInputs[0]?.content).toContain("Child final result.");
+    closeSessionTestDatabase(setup.database);
+  });
+
+  test("gracefully stops a parent after its child result is delivered", async () => {
+    const { childId, model, setup } = await pausedChildSetup();
+    const stopping = setup.sessions.realtimeCommands.stopForUser(
+      TEST_AUTHENTICATED_USER,
+      SESSION_ID,
+      true,
+      TEST_WORKSPACE_ID,
+    );
+    let settled = false;
+    void Promise.resolve(stopping).then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID)?.status).toBe(
+      "running",
+    );
+
+    await completePausedChild(setup, childId);
+    model.resumeParent();
+
+    await expect(stopping).resolves.toMatchObject({ status: "stopped" });
+    const parent = setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID);
+    const delivered = parent?.messages.find(({ content }) => {
+      return content.includes("Child final result.");
+    });
+    expect(delivered).toBeDefined();
+    closeSessionTestDatabase(setup.database);
   });
 
   test("runs a parent again when its spawned child completes", async () => {
