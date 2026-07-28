@@ -443,7 +443,7 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
                   this.resources.now(),
                 );
               }
-              await this.resources.executionCleanup.cleanup(existing);
+              await this.resources.executionCleanup.cleanupTerminal(existing);
               this.resources.notify(user.id, sessionId);
               return storedSessionResponse(
                 this.resources.store,

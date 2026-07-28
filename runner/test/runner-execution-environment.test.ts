@@ -4,9 +4,10 @@ import {
   RunnerCommandExecutor,
 } from "../../runner/runner-command.ts";
 import type { RunnerContainerManager } from "../../runner/runner-container.ts";
-import type {
-  RunnerExecutionEnvironment,
-  RunnerToolCommand,
+import {
+  RUNNER_TERMINAL_CLEANUP_ARGUMENT,
+  type RunnerExecutionEnvironment,
+  type RunnerToolCommand,
 } from "../../shared/runner-command-broker.ts";
 import { useTemporaryDirectories } from "./temporary-directories.ts";
 
@@ -147,6 +148,38 @@ describe("container runner commands", () => {
     ).toBe("Container execution environment removed.");
 
     expect(containers.cleaned).toEqual(["session-1"]);
+  });
+
+  test("preserves the read budget during nonterminal container cleanup", async () => {
+    const root = await workspace();
+    const containers = new FakeContainers();
+    const executor = new RunnerCommandExecutor(containers);
+    await Bun.write(`${root}/large.txt`, "x".repeat(60_000));
+    const read = {
+      ...command("read", "container", root),
+      arguments: { path: "/workspace/large.txt" },
+    };
+
+    const output = await executor.execute(read);
+    expect(output).toContain("global read limit");
+    const path = /saved to (.+)\. Read that file/u.exec(output)?.[1] ?? "";
+    const cleanup = command("cleanup_execution_environment", "container", root);
+    const stillExists = Bun.file(path).exists();
+    await executor.execute(cleanup);
+    expect(await stillExists).toBe(true);
+
+    const terminal = {
+      ...cleanup,
+      arguments: { [RUNNER_TERMINAL_CLEANUP_ARGUMENT]: true },
+      id: "terminal-cleanup",
+    };
+    expect(await executor.execute(terminal)).toBe(
+      "Session execution resources removed.",
+    );
+    expect(
+      await Bun.file(path).exists(),
+      "terminal cleanup should remove the spill",
+    ).toBe(false);
   });
 
   test("keeps bare-metal behavior available", async () => {

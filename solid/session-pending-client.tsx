@@ -3,7 +3,7 @@ import { createSignal, For, Show, type JSX } from "solid-js";
 interface DisplayPendingInput {
   readonly content: string;
   readonly createdAt?: number;
-  readonly id?: string;
+  readonly id: string;
   readonly images: readonly unknown[];
   readonly kind: "follow_up" | "steer";
 }
@@ -52,9 +52,14 @@ function pendingInputLabel(kind: DisplayPendingInput["kind"]): string {
   return kind === "steer" ? "Queued steer" : "Queued follow up";
 }
 
-export function SessionPendingInputs(props: {
+interface SessionPendingInputsProps {
   readonly inputs: readonly DisplayPendingInput[];
-}): JSX.Element {
+  readonly onCancel: (inputId: string) => void;
+}
+
+export function SessionPendingInputs(
+  props: SessionPendingInputsProps,
+): JSX.Element {
   return (
     <Show when={props.inputs.length > 0}>
       <section
@@ -68,9 +73,21 @@ export function SessionPendingInputs(props: {
           <For each={props.inputs}>
             {(input) => (
               <li class="rounded-xl border border-white/10 bg-slate-950/70 p-3">
-                <p class="text-xs font-semibold tracking-wide text-amber-200 uppercase">
-                  {pendingInputLabel(input.kind)}
-                </p>
+                <div class="flex items-start justify-between gap-3">
+                  <p class="text-xs font-semibold tracking-wide text-amber-200 uppercase">
+                    {pendingInputLabel(input.kind)}
+                  </p>
+                  <button
+                    aria-label={`Cancel ${pendingInputLabel(input.kind).toLowerCase()}`}
+                    class="rounded-lg border border-white/10 px-2 py-1 text-xs font-semibold text-slate-400 transition hover:border-rose-300/30 hover:text-rose-200"
+                    onClick={() => {
+                      props.onCancel(input.id);
+                    }}
+                    type="button"
+                  >
+                    Cancel
+                  </button>
+                </div>
                 <Show when={input.content.length > 0}>
                   <p class="mt-2 whitespace-pre-wrap text-sm text-slate-300">
                     {input.content}

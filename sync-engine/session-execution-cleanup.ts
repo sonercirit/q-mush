@@ -1,5 +1,6 @@
 import {
   RUNNER_EXECUTION_CLEANUP_COMMAND,
+  RUNNER_TERMINAL_CLEANUP_ARGUMENT,
   type RunnerCommandBroker,
 } from "../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
@@ -7,14 +8,17 @@ import type { AgentSessionDetail } from "../shared/session-model.ts";
 export class SessionExecutionCleanup {
   readonly #broker: RunnerCommandBroker;
   readonly #offline = new Set<string>();
-  readonly #pending = new Map<string, Promise<void>>();
+  readonly #pending = new Map<
+    string,
+    { readonly promise: Promise<void>; readonly terminal: boolean }
+  >();
 
   constructor(broker: RunnerCommandBroker) {
     this.#broker = broker;
   }
 
   get pending(): Iterable<Promise<void>> {
-    return this.#pending.values();
+    return [...this.#pending.values()].map(({ promise }) => promise);
   }
 
   clearOffline(sessionId: string): void {
@@ -26,30 +30,44 @@ export class SessionExecutionCleanup {
   }
 
   cleanup(detail: AgentSessionDetail): Promise<void> {
-    if (
-      detail.executionEnvironment !== "container" ||
-      this.#offline.delete(detail.id)
-    ) {
+    if (detail.executionEnvironment !== "container") {
+      return Promise.resolve();
+    }
+    return this.#dispatch(detail, false);
+  }
+
+  cleanupTerminal(detail: AgentSessionDetail): Promise<void> {
+    return this.#dispatch(detail, true);
+  }
+
+  #dispatch(detail: AgentSessionDetail, terminal: boolean): Promise<void> {
+    if (this.#offline.delete(detail.id)) {
       return Promise.resolve();
     }
     const existing = this.#pending.get(detail.id);
-    if (existing !== undefined) {
-      return existing;
+    if (existing !== undefined && (!terminal || existing.terminal)) {
+      return existing.promise;
     }
-    const cleanup = this.#broker
-      .dispatch({
-        arguments: {},
-        executionEnvironment: detail.executionEnvironment,
-        runnerId: detail.runnerId,
-        sessionId: detail.id,
-        tool: RUNNER_EXECUTION_CLEANUP_COMMAND,
-        workingDirectory: detail.workingDirectory,
-      })
-      .then(() => undefined)
-      .catch(() => undefined);
-    this.#pending.set(detail.id, cleanup);
+    const dispatch = () =>
+      this.#broker
+        .dispatch({
+          arguments: terminal
+            ? { [RUNNER_TERMINAL_CLEANUP_ARGUMENT]: true }
+            : {},
+          executionEnvironment: detail.executionEnvironment,
+          runnerId: detail.runnerId,
+          sessionId: detail.id,
+          tool: RUNNER_EXECUTION_CLEANUP_COMMAND,
+          workingDirectory: detail.workingDirectory,
+        })
+        .then(() => undefined)
+        .catch(() => undefined);
+    const cleanup =
+      existing === undefined ? dispatch() : existing.promise.then(dispatch);
+    const pending = { promise: cleanup, terminal };
+    this.#pending.set(detail.id, pending);
     void cleanup.then(() => {
-      if (this.#pending.get(detail.id) === cleanup) {
+      if (this.#pending.get(detail.id) === pending) {
         this.#pending.delete(detail.id);
       }
     });
@@ -57,6 +75,6 @@ export class SessionExecutionCleanup {
   }
 
   waitFor(sessionId: string): Promise<void> | undefined {
-    return this.#pending.get(sessionId);
+    return this.#pending.get(sessionId)?.promise;
   }
 }

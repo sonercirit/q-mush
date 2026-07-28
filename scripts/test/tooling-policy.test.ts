@@ -14,6 +14,9 @@ const ESLINT_IMPORT_POLICY_PROBE = sourceProbePath(
 const ESLINT_VALID_IMPORT_POLICY_PROBE = sourceProbePath(
   "eslint-valid-import-policy-probe.ts",
 );
+const ESLINT_SOLID_POLICY_PROBE = sourceProbePath(
+  "eslint-solid-policy-probe.tsx",
+);
 const ESLINT_TSX_POLICY_PROBE = sourceProbePath("eslint-tsx-policy-probe.tsx");
 const ESLINT_UNSAFE_TSX_POLICY_PROBE = sourceProbePath(
   "eslint-unsafe-tsx-policy-probe.tsx",
@@ -74,6 +77,7 @@ async function removeProbes(): Promise<void> {
     rm(ESLINT_POLICY_PROBE, { force: true }),
     rm(ESLINT_IMPORT_POLICY_PROBE, { force: true }),
     rm(ESLINT_VALID_IMPORT_POLICY_PROBE, { force: true }),
+    rm(ESLINT_SOLID_POLICY_PROBE, { force: true }),
     rm(ESLINT_TSX_POLICY_PROBE, { force: true }),
     rm(ESLINT_UNSAFE_TSX_POLICY_PROBE, { force: true }),
     rm(IGNORED_DIRECTORY_PROBE, { force: true, recursive: true }),
@@ -157,6 +161,38 @@ console.log(<main>{htmlExample}</main>);
       relative(ROOT_DIRECTORY, ESLINT_TSX_POLICY_PROBE),
     ]);
     expect(tsxResult.exitCode).toBe(0);
+  });
+
+  test("ESLint rejects Solid reactivity snapshots", async () => {
+    await writeFile(
+      ESLINT_SOLID_POLICY_PROBE,
+      [
+        'import type { JSX } from "solid-js";',
+        "",
+        "function Label(props: { readonly text: string }): JSX.Element {",
+        "  return <span>{props.text}</span>;",
+        "}",
+        "",
+        "function BrokenLabel(props: { readonly text: string }): JSX.Element {",
+        "  const snapshot = { ...props };",
+        "  const text = props.text;",
+        "  return <Label {...snapshot} text={text} />;",
+        "}",
+        "",
+        "console.log(BrokenLabel);",
+        "",
+      ].join("\n"),
+    );
+
+    const result = await runCommand(
+      ["node", "node_modules/eslint/bin/eslint.js", "--format", "json"].concat(
+        relative(ROOT_DIRECTORY, ESLINT_SOLID_POLICY_PROBE),
+      ),
+    );
+
+    const output = expectCommandFailure(result);
+    expect(output).toContain("q-mush/no-props-object-spread");
+    expect(output).toContain("solid/reactivity");
   });
 
   test("ESLint enforces canonical named imports", async () => {

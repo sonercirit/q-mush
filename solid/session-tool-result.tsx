@@ -1,4 +1,4 @@
-import { type JSX } from "solid-js";
+import { For, type JSX } from "solid-js";
 import { isRecord } from "../shared/auth-model.ts";
 import { parseOptionalJsonRecord } from "../shared/json-record.ts";
 import {
@@ -385,30 +385,32 @@ function renderParallelOutput(
   const calls = parallelCallContexts(options.arguments);
   return (
     <ol class="min-w-0 space-y-3">
-      {results.map((result, index) => {
-        const call = calls[index];
-        const output = result.output;
-        return (
-          <li class="min-w-0 rounded-lg border border-white/10 bg-black/20 p-3">
-            <p class="mb-2 text-[0.65rem] font-semibold tracking-wide text-slate-400 uppercase">
-              {`Result ${String(index + 1)} · ${result.recipientName}`}
-            </p>
-            {output === undefined ? (
-              <p class="rounded-lg border border-rose-300/20 bg-rose-300/10 px-3 py-2 font-mono text-xs leading-5 whitespace-pre-wrap text-rose-200">
-                {result.error ?? "Unknown tool error"}
+      <For each={results}>
+        {(result, index) => {
+          const call = (): ToolCallContext | undefined => calls[index()];
+          const output = result.output;
+          return (
+            <li class="min-w-0 rounded-lg border border-white/10 bg-black/20 p-3">
+              <p class="mb-2 text-[0.65rem] font-semibold tracking-wide text-slate-400 uppercase">
+                {`Result ${String(index() + 1)} · ${result.recipientName}`}
               </p>
-            ) : (
-              renderToolOutput(
-                result.recipientName,
-                output,
-                call?.name === result.recipientName
-                  ? call.arguments
-                  : undefined,
-              )
-            )}
-          </li>
-        );
-      })}
+              {output === undefined ? (
+                <p class="rounded-lg border border-rose-300/20 bg-rose-300/10 px-3 py-2 font-mono text-xs leading-5 whitespace-pre-wrap text-rose-200">
+                  {result.error ?? "Unknown tool error"}
+                </p>
+              ) : (
+                renderToolOutput(
+                  result.recipientName,
+                  output,
+                  call()?.name === result.recipientName
+                    ? call()?.arguments
+                    : undefined,
+                )
+              )}
+            </li>
+          );
+        }}
+      </For>
     </ol>
   );
 }

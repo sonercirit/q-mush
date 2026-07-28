@@ -12,6 +12,7 @@ import {
   emptyTestModelCatalog,
   REALTIME_TEST_SESSION_DETAIL,
   realtimeTestHistoryPage,
+  realtimeTestPendingInput,
 } from "./realtime-session-fixture.ts";
 
 export const REALTIME_TEST_USER: AuthenticatedUser = {
@@ -206,6 +207,13 @@ class RealtimeTestSessionCommands implements SessionRealtimeCommands {
     return Promise.resolve(REALTIME_TEST_SESSION_DETAIL);
   }
 
+  cancelPendingInputForUser() {
+    return {
+      detail: REALTIME_TEST_SESSION_DETAIL,
+      input: realtimeTestPendingInput(),
+    };
+  }
+
   compactForUser() {
     return Promise.resolve(REALTIME_TEST_SESSION_DETAIL);
   }
@@ -219,6 +227,10 @@ class RealtimeTestSessionCommands implements SessionRealtimeCommands {
   }
 
   forkForUser() {
+    return Promise.resolve(REALTIME_TEST_SESSION_DETAIL);
+  }
+
+  spawnForUser() {
     return Promise.resolve(REALTIME_TEST_SESSION_DETAIL);
   }
 

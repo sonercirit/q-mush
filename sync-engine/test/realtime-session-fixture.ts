@@ -31,15 +31,31 @@ export function realtimeTestHistoryPage(
   };
 }
 
+export function realtimeTestPendingInput(content = "Continue") {
+  return {
+    clientRequestId: "request-1",
+    content,
+    createdAt: 1,
+    id: "pending-1",
+    images: [],
+    kind: "follow_up" as const,
+  };
+}
+
 export function realtimeTestSessionCommands(
   overrides: Partial<SessionRealtimeCommands> = {},
 ): SessionRealtimeCommands {
   return {
     answerQuestionsForUser: () => Promise.resolve(undefined),
+    cancelPendingInputForUser: () => ({
+      detail: REALTIME_TEST_SESSION_DETAIL,
+      input: realtimeTestPendingInput(),
+    }),
     compactForUser: () => Promise.resolve(REALTIME_TEST_SESSION_DETAIL),
     continueForUser: () => Promise.resolve(REALTIME_TEST_SESSION_DETAIL),
     createForUser: () => Promise.resolve(REALTIME_TEST_SESSION_DETAIL),
     forkForUser: () => Promise.resolve(REALTIME_TEST_SESSION_DETAIL),
+    spawnForUser: () => Promise.resolve(REALTIME_TEST_SESSION_DETAIL),
     historyForUser: () => undefined,
     messageForUser: () => Promise.resolve(REALTIME_TEST_SESSION_DETAIL),
     modelsForUser: emptyTestModelCatalog,

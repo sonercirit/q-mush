@@ -5,6 +5,7 @@ import {
   For,
   on,
   Show,
+  untrack,
   type JSX,
 } from "solid-js";
 import { normalizeSearchText } from "../shared/search.ts";
@@ -48,10 +49,13 @@ function indexForValue(
   return options.findIndex((option) => option.value === value);
 }
 
-function selectedPage(props: CustomSelectProps): number {
+function selectedPage(
+  options: readonly CustomSelectOption[],
+  selectedValue: string,
+): number {
   return Math.max(
     0,
-    Math.floor(indexForValue(props.options, props.selectedValue) / PAGE_SIZE),
+    Math.floor(indexForValue(options, selectedValue) / PAGE_SIZE),
   );
 }
 
@@ -153,9 +157,11 @@ export function CustomSelect(props: CustomSelectProps): JSX.Element {
     props.options.find((option) => option.value === props.selectedValue);
   const searchable = (): boolean => props.options.length > PAGE_SIZE;
   const [query, setQuery] = createSignal("");
-  const [page, setPage] = createSignal(selectedPage(props));
+  const [page, setPage] = createSignal(
+    untrack(() => selectedPage(props.options, props.selectedValue)),
+  );
   const [activeValue, setActiveValue] = createSignal(
-    selected()?.value ?? props.options[0]?.value,
+    untrack(() => selected()?.value ?? props.options[0]?.value),
   );
   const [trigger, setTrigger] = createSignal<HTMLButtonElement>();
   const [searchInput, setSearchInput] = createSignal<HTMLInputElement>();

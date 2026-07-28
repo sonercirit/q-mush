@@ -102,8 +102,15 @@ describe("session agent introspection tools", () => {
         content: "Reading bounded context.",
         toolCalls: [
           toolCall("read_session", {
-            categories: ["system", "user", "assistant", "tools"],
-            limit: 2,
+            categories: [
+              "system",
+              "user",
+              "assistant",
+              "thinking",
+              "tool",
+              "tools",
+            ],
+            limit: 10,
             sessionId: SESSION_ID,
           }),
         ],
@@ -129,14 +136,21 @@ describe("session agent introspection tools", () => {
       title: "Inspect README.md",
     });
     expect(read["metadata"]).toMatchObject({
-      matchedRecords: 3,
-      requestedLimit: 2,
-      returnedRecords: 2,
-      selectedCategories: ["system", "user", "assistant", "tools"],
+      matchedRecords: 5,
+      requestedLimit: 10,
+      returnedRecords: 5,
+      selectedCategories: [
+        "system",
+        "user",
+        "assistant",
+        "thinking",
+        "tool",
+        "tools",
+      ],
       truncated: true,
     });
     expect(records(content["records"]).map((record) => record["role"])).toEqual(
-      ["assistant", "assistant"],
+      ["user", "thinking", "assistant", "tool", "assistant"],
     );
     expect(content["systemPrompt"]).toEqual(
       expect.stringContaining(agentFileContent),
@@ -151,8 +165,8 @@ describe("session agent introspection tools", () => {
       toolDefinitions: { matched: AGENT_TOOLS.length },
       truncation: { toolDefinitions: true },
     });
-    expect(serialized).not.toContain("hidden reasoning");
-    expect(serialized).not.toContain("call-list_sessions");
+    expect(serialized).toContain("hidden reasoning");
+    expect(serialized).toContain("call-list_sessions");
     expect(Buffer.byteLength(serialized, "utf8")).toBeLessThanOrEqual(32_768);
     setup.database.$client.close();
   });

@@ -1,5 +1,7 @@
 import eslint from "@eslint/js";
-import type { Rule } from "eslint";
+import type { ESLint, Rule } from "eslint";
+import solidPlugin from "eslint-plugin-solid";
+import solidRecommended from "eslint-plugin-solid/configs/recommended";
 import { defineConfig, includeIgnoreFile } from "eslint/config";
 import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,9 +18,15 @@ const APPLICATION_WORKSPACES = new Set([
 const DEFAULT_ONLY_DEPENDENCIES = new Set([
   "@eslint/js",
   "@tailwindcss/vite",
+  "eslint-plugin-solid",
+  "eslint-plugin-solid/configs/recommended",
   "vite-plugin-solid",
 ]);
 const TSX_MIGRATION_MESSAGE = "Render and mount TSX instead.";
+const INLINE_CONFIGURATION_MESSAGE =
+  "Inline ESLint configuration is forbidden; fix the violation instead.";
+const ESLINT_DIRECTIVE_PATTERN =
+  /^\s*eslint-(?:disable|enable)(?:-line|-next-line)?(?:\s|$)/u;
 
 function workspaceForPath(path: string): string | undefined {
   const [workspace] = relative(ROOT_DIRECTORY, path).split(sep);
@@ -76,6 +84,30 @@ function reportImportSource(
   }
 }
 
+const inlineConfigurationRule: Rule.RuleModule = {
+  meta: {
+    type: "problem",
+    docs: {
+      description: "Forbid inline ESLint configuration directives",
+    },
+    messages: {
+      forbidden: INLINE_CONFIGURATION_MESSAGE,
+    },
+    schema: [],
+  },
+  create(context) {
+    return {
+      Program() {
+        for (const comment of context.sourceCode.getAllComments()) {
+          if (ESLINT_DIRECTIVE_PATTERN.test(comment.value)) {
+            context.report({ messageId: "forbidden", node: comment });
+          }
+        }
+      },
+    };
+  },
+};
+
 const importBoundariesRule: Rule.RuleModule = {
   meta: {
     type: "problem",
@@ -101,6 +133,51 @@ const importBoundariesRule: Rule.RuleModule = {
       },
     };
   },
+};
+
+const propsObjectSpreadRule: Rule.RuleModule = {
+  meta: {
+    type: "problem",
+    docs: {
+      description: "Disallow snapshotting Solid component props with spread",
+    },
+    messages: {
+      snapshot:
+        "Spreading component props into an object snapshots reactive values; pass props or reactive accessors directly.",
+    },
+    schema: [],
+  },
+  create(context) {
+    return {
+      ObjectExpression(node) {
+        for (const property of node.properties) {
+          if (
+            property.type === "SpreadElement" &&
+            property.argument.type === "Identifier" &&
+            property.argument.name === "props"
+          ) {
+            context.report({ messageId: "snapshot", node: property });
+          }
+        }
+      },
+    };
+  },
+};
+
+function eslintPluginIsCompatible(plugin: unknown): plugin is ESLint.Plugin {
+  return typeof plugin === "object" && plugin !== null && "rules" in plugin;
+}
+
+if (!eslintPluginIsCompatible(solidPlugin)) {
+  throw new TypeError("eslint-plugin-solid did not export an ESLint plugin");
+}
+
+// The package supports TypeScript 6 and works under ESLint 10, but its published
+// peer range and rule types currently stop at ESLint 9. Narrow the runtime
+// export before composing its recommended flat config with ESLint 10's types.
+const solidConfig = {
+  ...solidRecommended,
+  plugins: { solid: solidPlugin },
 };
 
 const canonicalImportsRule: Rule.RuleModule = {
@@ -183,20 +260,35 @@ export default defineConfig(
       },
     },
     linterOptions: {
+      noInlineConfig: true,
       reportUnusedDisableDirectives: "error",
       reportUnusedInlineConfigs: "error",
     },
-  },
-  {
-    files: ["**/*.{cts,mts,ts,tsx}"],
     plugins: {
       "q-mush": {
         rules: {
           "canonical-imports": canonicalImportsRule,
           "import-boundaries": importBoundariesRule,
+          "no-inline-configuration": inlineConfigurationRule,
+          "no-props-object-spread": propsObjectSpreadRule,
         },
       },
     },
+    rules: {
+      "@typescript-eslint/ban-ts-comment": [
+        "error",
+        {
+          "ts-check": false,
+          "ts-expect-error": true,
+          "ts-ignore": true,
+          "ts-nocheck": true,
+        },
+      ],
+      "q-mush/no-inline-configuration": "error",
+    },
+  },
+  {
+    files: ["**/*.{cts,mts,ts,tsx}"],
     rules: {
       "@typescript-eslint/consistent-type-assertions": [
         "error",
@@ -210,6 +302,37 @@ export default defineConfig(
       "no-duplicate-imports": ["error", { allowSeparateTypeImports: false }],
       "q-mush/canonical-imports": "error",
       "q-mush/import-boundaries": "error",
+    },
+  },
+  {
+    files: ["solid/**/*.tsx"],
+    ...solidConfig,
+    rules: {
+      ...solidConfig.rules,
+      // Recommended marks some runtime-safety rules as advisory; this project
+      // treats every finding as an error so CI cannot admit reactivity bugs.
+      "solid/components-return-once": "error",
+      "solid/event-handlers": "error",
+      "solid/imports": "error",
+      "solid/no-react-deps": "error",
+      "solid/no-react-specific-props": "error",
+      "solid/reactivity": [
+        "error",
+        {
+          customReactiveFunctions: [
+            "checkedInputHandler",
+            "choiceInputHandler",
+            "insertSelected",
+            "queueMicrotask",
+            "renderWithWorkspaces",
+            "restoreDialogFocus",
+            "submitFormName",
+          ],
+        },
+      ],
+      "solid/self-closing-comp": "error",
+      "solid/style-prop": "error",
+      "q-mush/no-props-object-spread": "error",
     },
   },
   {

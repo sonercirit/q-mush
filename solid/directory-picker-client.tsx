@@ -1,5 +1,6 @@
 import { createSignal, For, Show, type JSX } from "solid-js";
 import { MAXIMUM_RUNNER_DIRECTORY_ENTRIES } from "../shared/runner-directory-model.ts";
+import { controllerView } from "./controller-view.ts";
 import { restoreDialogFocus } from "./dialog-focus.ts";
 import type { DirectoryPickerController } from "./directory-picker-controller.ts";
 import { renderDebugBoundary } from "./render-debug.tsx";
@@ -9,12 +10,13 @@ export function DirectoryPicker(props: {
   readonly onChoose: () => void;
   readonly runnerName: string;
 }): JSX.Element {
-  const state = props.controller.view;
+  const state = controllerView(props);
   const browse = (path: string): void => {
     void props.controller.browse(path);
   };
   const close = (): void => {
     props.controller.close();
+    dialog()?.focus({ preventScroll: true });
   };
   const [dialog, setDialog] = createSignal<HTMLDivElement>();
   let focusReturnTarget: HTMLElement | undefined;
@@ -215,7 +217,9 @@ export function DirectoryPicker(props: {
             <button
               class="rounded-xl bg-emerald-300 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-40"
               disabled={state().listing === undefined || state().loading}
-              onClick={props.onChoose}
+              onClick={() => {
+                props.onChoose();
+              }}
               type="button"
             >
               Choose this directory

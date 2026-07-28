@@ -44,18 +44,18 @@ export function renderHomePage(): string {
       <div
         aria-hidden="true"
         class="absolute -left-40 top-1/4 -z-10 size-96 rounded-full bg-emerald-500/20 blur-3xl"
-      ></div>
+      />
       <div
         aria-hidden="true"
         class="absolute -right-32 bottom-0 -z-10 size-96 rounded-full bg-cyan-500/15 blur-3xl"
-      ></div>
+      />
       <div class="mx-auto grid w-full min-w-0 max-w-6xl items-center gap-10 md:gap-14 lg:grid-cols-[minmax(0,1.15fr)_minmax(18rem,0.85fr)]">
         <section aria-labelledby="home-title">
           <p class="mb-6 inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-300/10 px-3 py-1 text-sm font-medium text-emerald-200">
             <span
               aria-hidden="true"
               class="size-2 rounded-full bg-emerald-300 shadow-[0_0_16px_rgba(110,231,183,0.9)]"
-            ></span>
+            />
             Local agents, ready
           </p>
           <h1
@@ -107,7 +107,7 @@ export function renderHomePage(): string {
                 <span
                   aria-hidden="true"
                   class="size-2 rounded-full bg-emerald-300"
-                ></span>
+                />
                 Ready on this machine
               </p>
             </div>
@@ -129,8 +129,8 @@ export function renderHomePage(): string {
 
 export function renderAppPage(): string {
   return renderDocument("Q Mush App", [
-    <main id="app" class="min-h-screen"></main>,
-    <script src={APP_SCRIPT_PATH} type="module"></script>,
+    <main id="app" class="min-h-screen" />,
+    <script src={APP_SCRIPT_PATH} type="module" />,
     <noscript>
       <p class="m-6 rounded-2xl border border-amber-300/30 bg-amber-300/10 p-4 text-amber-100">
         The Q Mush app needs JavaScript because this page is rendered in the

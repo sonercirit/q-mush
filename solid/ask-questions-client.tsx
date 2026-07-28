@@ -1,4 +1,4 @@
-import { createSignal, For, Show, type JSX } from "solid-js";
+import { createSignal, For, Show, untrack, type JSX } from "solid-js";
 import {
   askQuestionAnswerValue,
   type AskQuestion,
@@ -34,6 +34,8 @@ function questionIsValid(
   return askQuestionAnswerValue(answer.value, question) !== undefined;
 }
 
+const choiceInputHandler = checkedInputHandler;
+
 function ChoiceLabel(props: {
   readonly checked: boolean;
   readonly disabled: boolean;
@@ -43,6 +45,11 @@ function ChoiceLabel(props: {
   readonly onChange: (checked: boolean) => void;
   readonly value: string;
 }): JSX.Element {
+  const onChange: JSX.EventHandler<HTMLInputElement, Event> = (event): void => {
+    choiceInputHandler((checked) => {
+      props.onChange(checked);
+    })(event);
+  };
   return (
     <label class="flex cursor-pointer items-center gap-3 rounded-lg border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-slate-200 has-checked:border-violet-300/40 has-checked:bg-violet-300/10">
       <input
@@ -50,7 +57,7 @@ function ChoiceLabel(props: {
         class="accent-violet-300"
         disabled={props.disabled}
         name={props.multiple ? undefined : props.group}
-        onChange={checkedInputHandler(props.onChange)}
+        onChange={onChange}
         type={props.multiple ? "checkbox" : "radio"}
         value={props.value}
       />
@@ -65,7 +72,7 @@ export function AskQuestionsForm(props: {
   readonly submitting: boolean;
 }): JSX.Element {
   const [answers, setAnswers] = createSignal(
-    props.pending.questions.map(initialAnswer),
+    untrack(() => props.pending.questions.map(initialAnswer)),
   );
   const answerFor = (questionId: string): AskQuestionAnswer =>
     answers().find(({ questionId: id }) => id === questionId) ?? {

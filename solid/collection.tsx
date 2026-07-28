@@ -5,7 +5,10 @@ interface CollectionProps<Item> {
   readonly empty: JSX.Element;
   readonly items: readonly Item[] | undefined;
   readonly listClass: string;
+  readonly listProps?:
+    Pick<JSX.HTMLAttributes<HTMLUListElement>, "onScroll" | "ref"> | undefined;
   readonly loading: JSX.Element;
+  readonly trailing?: JSX.Element | undefined;
   readonly retry?: {
     readonly error: string | undefined;
     readonly onRetry: () => void;
@@ -43,15 +46,16 @@ export function RetryNotice(props: RetryNoticeProps): JSX.Element {
 function CollectionContent<Item>(
   props: Pick<
     CollectionProps<Item>,
-    "children" | "empty" | "items" | "listClass"
+    "children" | "empty" | "items" | "listClass" | "listProps" | "trailing"
   >,
 ): JSX.Element {
   return (
     <Show when={props.items}>
       {(availableItems) => (
         <Show fallback={props.empty} when={availableItems().length > 0}>
-          <ul class={props.listClass}>
+          <ul class={props.listClass} {...props.listProps}>
             <For each={availableItems()}>{props.children}</For>
+            {props.trailing}
           </ul>
         </Show>
       )}
@@ -81,6 +85,8 @@ export function Collection<Item>(props: CollectionProps<Item>): JSX.Element {
         empty={props.empty}
         items={props.items}
         listClass={props.listClass}
+        listProps={props.listProps}
+        trailing={props.trailing}
       >
         {props.children}
       </CollectionContent>

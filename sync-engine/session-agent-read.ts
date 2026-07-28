@@ -1,3 +1,4 @@
+import type { AgentToolCall } from "../shared/agent-loop.ts";
 import type { AgentSessionMessage } from "../shared/session-model.ts";
 import { utf8ByteLength, utf8Prefix } from "../shared/utf8.ts";
 
@@ -5,6 +6,8 @@ export const READ_SESSION_CATEGORIES = [
   "system",
   "user",
   "assistant",
+  "thinking",
+  "tool",
   "tools",
 ] as const;
 export type ReadSessionCategory = (typeof READ_SESSION_CATEGORIES)[number];
@@ -32,7 +35,10 @@ interface ReadSessionRecord {
   readonly content: string;
   readonly createdAt: number;
   readonly id: string;
-  readonly role: "assistant" | "user";
+  readonly role: "assistant" | "thinking" | "tool" | "user";
+  readonly toolCallId?: string;
+  readonly toolCalls?: readonly AgentToolCall[];
+  readonly toolName?: string;
 }
 
 interface ReadSessionToolDefinition {
@@ -79,6 +85,95 @@ function truncateText(
     )}${TRUNCATION_MARKER}`,
     truncated: true,
   };
+}
+
+function boundedToolCalls(toolCalls: readonly AgentToolCall[]): {
+  readonly toolCalls: readonly AgentToolCall[];
+  readonly truncated: boolean;
+} {
+  const selected: AgentToolCall[] = [];
+  let truncated = false;
+  for (const toolCall of toolCalls) {
+    const arguments_ = truncateText(
+      toolCall.arguments,
+      MAXIMUM_READ_SESSION_RECORD_BYTES / 2,
+    );
+    const candidate = {
+      arguments: arguments_.text,
+      id: toolCall.id,
+      name: toolCall.name,
+    };
+    if (
+      utf8ByteLength(JSON.stringify([...selected, candidate])) >
+      MAXIMUM_READ_SESSION_RECORD_BYTES
+    ) {
+      truncated = true;
+      continue;
+    }
+    selected.push(candidate);
+    truncated ||= arguments_.truncated;
+  }
+  return { toolCalls: selected, truncated };
+}
+
+type ReadSessionMessage = AgentSessionMessage & {
+  readonly role: "assistant" | "thinking" | "tool" | "user";
+};
+
+function commonRecord(message: ReadSessionMessage, content: string) {
+  return {
+    content,
+    createdAt: message.createdAt,
+    id: message.id,
+    role: message.role,
+  };
+}
+
+function messageRecord(message: ReadSessionMessage): {
+  readonly record: ReadSessionRecord;
+  readonly truncated: boolean;
+} {
+  const content = truncateText(
+    message.content,
+    MAXIMUM_READ_SESSION_RECORD_BYTES,
+  );
+  if (message.role === "assistant") {
+    const toolCalls = boundedToolCalls(message.toolCalls);
+    return {
+      record: {
+        ...commonRecord(message, content.text),
+        toolCalls: toolCalls.toolCalls,
+      },
+      truncated: content.truncated || toolCalls.truncated,
+    };
+  }
+  if (message.role === "tool") {
+    return {
+      record: {
+        ...commonRecord(message, content.text),
+        ...(message.toolCallId === null
+          ? {}
+          : { toolCallId: message.toolCallId }),
+        ...(message.toolName === null ? {} : { toolName: message.toolName }),
+      },
+      truncated: content.truncated,
+    };
+  }
+  return {
+    record: commonRecord(message, content.text),
+    truncated: content.truncated,
+  };
+}
+
+function isReadSessionMessage(
+  message: AgentSessionMessage,
+): message is ReadSessionMessage {
+  return (
+    message.role === "assistant" ||
+    message.role === "thinking" ||
+    message.role === "tool" ||
+    message.role === "user"
+  );
 }
 
 function toolSection(definitions: readonly ReadSessionToolDefinition[]): {
@@ -216,27 +311,12 @@ export function readSessionOutput(options: {
   let recordContentTruncated = false;
   const matches = options.messages.flatMap(
     (message): readonly ReadSessionRecord[] => {
-      if (
-        (message.role !== "user" && message.role !== "assistant") ||
-        !selected.has(message.role)
-      ) {
+      if (!isReadSessionMessage(message) || !selected.has(message.role)) {
         return [];
       }
-      const content = truncateText(
-        message.content,
-        MAXIMUM_READ_SESSION_RECORD_BYTES,
-      );
-      if (content.truncated) {
-        recordContentTruncated = true;
-      }
-      return [
-        {
-          content: content.text,
-          createdAt: message.createdAt,
-          id: message.id,
-          role: message.role,
-        },
-      ];
+      const { record, truncated } = messageRecord(message);
+      recordContentTruncated ||= truncated;
+      return [record];
     },
   );
   const boundedSystemPrompt = selected.has("system")

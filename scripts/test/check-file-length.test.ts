@@ -1,27 +1,15 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import {
   findFileLengthViolations,
   formatFileLengthViolations,
 } from "../check-file-length.ts";
-
-async function withTemporaryDirectory(
-  run: (directory: string) => Promise<void>,
-): Promise<void> {
-  const directory = await mkdtemp(join(tmpdir(), "q-mush-file-length-"));
-
-  try {
-    await run(directory);
-  } finally {
-    await rm(directory, { force: true, recursive: true });
-  }
-}
+import { withTemporaryDirectory } from "./temporary-directory.ts";
 
 describe("file length check", () => {
   test("flags a file when it reaches 20,000 characters", async () => {
-    await withTemporaryDirectory(async (directory) => {
+    await withTemporaryDirectory("q-mush-file-length-", async (directory) => {
       await Promise.all([
         writeFile(join(directory, "under-limit.txt"), "😀".repeat(19_999)),
         writeFile(join(directory, "at-limit.txt"), "😀".repeat(20_000)),
@@ -42,7 +30,7 @@ describe("file length check", () => {
   });
 
   test("excludes bun.lock and the Drizzle migrations directory", async () => {
-    await withTemporaryDirectory(async (directory) => {
+    await withTemporaryDirectory("q-mush-file-length-", async (directory) => {
       await mkdir(join(directory, "drizzle", "meta"), { recursive: true });
       const excludedPaths = [
         "bun.lock",

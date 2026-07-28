@@ -426,7 +426,7 @@ function readMessage(value: unknown): AgentSessionMessage {
   };
 }
 
-function readPendingInput(
+export function readSessionPendingInput(
   value: unknown,
 ): AgentSessionDetail["pendingInputs"][number] {
   if (!isRecord(value)) {
@@ -471,7 +471,7 @@ export function readSessionDetail(value: unknown): AgentSessionDetail {
     ...readSummary(value),
     agentFile: readAgentFile(value["agentFile"]),
     messages: value["messages"].map(readMessage),
-    pendingInputs: value["pendingInputs"].map(readPendingInput),
+    pendingInputs: value["pendingInputs"].map(readSessionPendingInput),
   };
 }
 

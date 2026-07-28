@@ -19,7 +19,9 @@ function ItemAction(
       class={props.class}
       {...props.data}
       disabled={props.pending}
-      onClick={props.onClick}
+      onClick={() => {
+        props.onClick();
+      }}
       type="button"
     >
       {props.pending ? props.pendingLabel : props.idleLabel}

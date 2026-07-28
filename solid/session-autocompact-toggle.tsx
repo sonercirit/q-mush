@@ -1,5 +1,4 @@
 import type { JSX } from "solid-js";
-import { checkedInputHandler } from "./input-handler.ts";
 
 export function SessionAutoCompactToggle(props: {
   readonly checked: boolean;
@@ -13,7 +12,10 @@ export function SessionAutoCompactToggle(props: {
         disabled={props.disabled}
         id="session-auto-compact"
         name="autoCompact"
-        onChange={checkedInputHandler(props.onChange)}
+        onChange={(event) => {
+          const selected = event.currentTarget.checked;
+          props.onChange(selected);
+        }}
         type="checkbox"
       />
       Compact automatically near the context limit

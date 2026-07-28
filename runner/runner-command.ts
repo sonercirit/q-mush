@@ -5,6 +5,7 @@ import {
   failedRunnerCommandResult,
   readRunnerExecutionEnvironment,
   RUNNER_EXECUTION_CLEANUP_COMMAND,
+  RUNNER_TERMINAL_CLEANUP_ARGUMENT,
   type RunnerCommandResult,
   type RunnerToolCommand,
 } from "../shared/runner-command-broker.ts";
@@ -14,6 +15,7 @@ import { loadRunnerAgentFile } from "./runner-agent-file.ts";
 import { RunnerContainerManager } from "./runner-container.ts";
 import { listRunnerDirectories } from "./runner-directories.ts";
 import { runnerCommandResultFromOutput } from "./runner-process.ts";
+import { RunnerReadBudget } from "./runner-read-budget.ts";
 import {
   executeRunnerToolResult,
   type RunnerToolExecutionOptions,
@@ -111,9 +113,26 @@ export async function executeRunnerCommand(
 
 export class RunnerCommandExecutor {
   readonly #containers: RunnerContainerCommands;
+  readonly #readBudgets = new Map<string, RunnerReadBudget>();
 
   constructor(containers?: RunnerContainerCommands) {
     this.#containers = containers ?? new RunnerContainerManager();
+  }
+
+  #readBudget(sessionId: string): RunnerReadBudget {
+    const existing = this.#readBudgets.get(sessionId);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const created = new RunnerReadBudget();
+    this.#readBudgets.set(sessionId, created);
+    return created;
+  }
+
+  async #cleanupReadBudget(sessionId: string): Promise<void> {
+    const budget = this.#readBudgets.get(sessionId);
+    this.#readBudgets.delete(sessionId);
+    await budget?.cleanup();
   }
 
   async executeResult(
@@ -132,9 +151,20 @@ export class RunnerCommandExecutor {
       }
 
       if (command.tool === RUNNER_EXECUTION_CLEANUP_COMMAND) {
-        await this.#containers.cleanupSession(command.sessionId);
+        const terminalCleanup =
+          command.arguments[RUNNER_TERMINAL_CLEANUP_ARGUMENT] === true;
+        const cleanupReadBudget = terminalCleanup
+          ? this.#cleanupReadBudget(command.sessionId)
+          : Promise.resolve();
+        const cleanupContainer =
+          command.executionEnvironment === "container"
+            ? this.#containers.cleanupSession(command.sessionId)
+            : Promise.resolve();
+        await Promise.all([cleanupContainer, cleanupReadBudget]);
         return {
-          output: "Container execution environment removed.",
+          output: terminalCleanup
+            ? "Session execution resources removed."
+            : "Container execution environment removed.",
           state: "completed",
         };
       }
@@ -170,6 +200,7 @@ export class RunnerCommandExecutor {
           undefined,
           {
             mapAbsolutePath: (path) => mapContainerPath(root, path),
+            readBudget: this.#readBudget(command.sessionId),
             shell,
             ...(stream === undefined ? {} : { stream }),
           },
@@ -186,7 +217,9 @@ export class RunnerCommandExecutor {
         command.arguments,
         signal,
         undefined,
-        stream === undefined ? undefined : { stream },
+        stream === undefined
+          ? { readBudget: this.#readBudget(command.sessionId) }
+          : { readBudget: this.#readBudget(command.sessionId), stream },
       );
     } catch (error) {
       return failedRunnerCommandResult(error, 1_000);

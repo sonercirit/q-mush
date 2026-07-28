@@ -23,6 +23,7 @@ export function failedRunnerCommandResult(
 export type RunnerExecutionEnvironment = "bare_metal" | "container";
 
 export const RUNNER_EXECUTION_CLEANUP_COMMAND = "cleanup_execution_environment";
+export const RUNNER_TERMINAL_CLEANUP_ARGUMENT = "terminal";
 
 export function readRunnerExecutionEnvironment(
   value: unknown,

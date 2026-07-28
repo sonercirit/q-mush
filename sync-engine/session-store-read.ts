@@ -22,7 +22,9 @@ import { readStoredSessionUserId } from "./session-store-state.ts";
 import { appendSystemMessageAndTouchSession } from "./session-store-values.ts";
 import { parseStoredImages } from "./stored-agent-images.ts";
 
-function parseToolCalls(value: string | null): readonly AgentToolCall[] {
+export function readStoredToolCalls(
+  value: string | null,
+): readonly AgentToolCall[] {
   if (value === null) {
     return [];
   }
@@ -53,7 +55,7 @@ export function summarizeStoredMessage(
     ...stored,
     createdAt: stored.createdAt.getTime(),
     images: parseStoredImages(stored.images, "Stored agent images are invalid"),
-    toolCalls: parseToolCalls(stored.toolCalls),
+    toolCalls: readStoredToolCalls(stored.toolCalls),
   };
 }
 

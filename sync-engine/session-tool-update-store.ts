@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import type { AgentSessionToolName } from "../shared/agent-tools.ts";
 import { updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
@@ -6,7 +6,7 @@ import { agentSessions } from "../shared/database/schema.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { activeSessionDuration } from "../shared/session-timing.ts";
 import { sqliteChangeCount } from "./database-changes.ts";
-import { activeSessionCondition } from "./session-store-persistence.ts";
+import { workspaceSessionCondition } from "./session-store-persistence.ts";
 
 export type SessionToolUpdateStoreResult =
   | { readonly detail: AgentSessionDetail; readonly status: "updated" }
@@ -61,16 +61,7 @@ export function updateStoredSessionTools(
       tools: JSON.stringify(input.tools),
       ...updatedAuditFields(input.userId, input.now),
     })
-    .where(
-      and(
-        activeSessionCondition({
-          id: input.sessionId,
-          userId: input.userId,
-          workspaceId: input.workspaceId,
-        }),
-        eq(agentSessions.executionGeneration, input.expectedGeneration),
-      ),
-    )
+    .where(workspaceSessionCondition(input, input.expectedGeneration))
     .run();
 
   const changes = sqliteChangeCount(

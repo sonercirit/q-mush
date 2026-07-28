@@ -23,6 +23,10 @@ const TEST_USER: AuthenticatedUser = {
 };
 const TEST_WORKSPACE_ID = REALTIME_TEST_SESSION_DETAIL.workspaceId;
 
+function resolvedSessionDetail() {
+  return Promise.resolve(REALTIME_TEST_SESSION_DETAIL);
+}
+
 function execute(
   integration: SessionRealtimeCommands,
   operation: string,
@@ -205,6 +209,33 @@ describe("session realtime command dispatch", () => {
     );
   });
 
+  test("dispatches a user spawn with its validated tool subset", async () => {
+    const spawnForUser = vi.fn(resolvedSessionDetail);
+    const payload = {
+      ...createPayload(),
+      parentGeneration: 4,
+      parentSessionId: "parent-session",
+      tools: ["read", "brave_search"],
+    } as const;
+
+    await expect(
+      execute(
+        realtimeTestSessionCommands({ spawnForUser }),
+        SESSION_REALTIME_OPERATIONS.spawn,
+        payload,
+      ),
+    ).resolves.toEqual(REALTIME_TEST_SESSION_DETAIL);
+    expect(spawnForUser).toHaveBeenCalledWith(
+      TEST_USER,
+      expect.objectContaining({
+        parentGeneration: 4,
+        parentSessionId: "parent-session",
+        tools: ["read", "brave_search"],
+      }),
+      TEST_WORKSPACE_ID,
+    );
+  });
+
   test("dispatches a session fork in the authenticated workspace", async () => {
     const integration = realtimeTestSessionCommands();
     const forkForUser = vi.spyOn(integration, "forkForUser");
@@ -233,9 +264,7 @@ describe("session realtime command dispatch", () => {
   });
 
   test("dispatches a confirmed provider update in the authenticated workspace", async () => {
-    const updateProviderForUser = vi.fn(() =>
-      Promise.resolve(REALTIME_TEST_SESSION_DETAIL),
-    );
+    const updateProviderForUser = vi.fn(resolvedSessionDetail);
     const payload = {
       confirmedCacheDrop: true,
       credentialId: "credential-2",

@@ -53,7 +53,7 @@ export function Workspace(props: {
   readonly user: AuthenticatedUser;
   readonly workspaces: WorkspaceController;
 }): JSX.Element {
-  const selectedWorkspaceId = props.workspaces.selectedIdView;
+  const selectedWorkspaceId = (): string => props.workspaces.selectedIdView();
   const providerPanel = (
     configuration: typeof OPENAI_PANEL,
     controller: ProviderController,

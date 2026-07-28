@@ -102,8 +102,8 @@ Living project memory.
   Runner tokens never appear in list responses.
 - Browser messages sort by time then ID. Live output anchors after the
   initiating message; snapshots replace it in place.
-- `session-agent-read.ts` byte-bounds introspection output; its store helper
-  projects only capped user/assistant content.
+- `session-agent-read.ts` byte-bounds transcript messages, assistant calls, the
+  system prompt, and tool definitions.
 - `sync-engine/sessions.ts` and `sync-engine/session-store.ts` persist coding
   sessions. User messages support selecting or pasting up to eight 10 MB PNG,
   JPEG, GIF, or WebP images, persisted with the transcript and sent as native
@@ -126,15 +126,15 @@ Living project memory.
 
   `runner/runner-workspace.ts` shares canonical workspace resolution and
   containment with file tools. Tool and skill choices persist per session.
-  Agent-facing `read_session` inspection is bounded and excludes reasoning/tool
-  history; `get_session_options` safely pages provider-generic spawn choices.
-  Grouped tools manage non-blocking owned children, report final messages, and
-  resume idle parents. `parallel` accepts 2+ calls, uses four ordered workers,
-  bounds output, and propagates cancellation to tools and skills. Picker details
-  use canonical schemas. `solid/session-transcript.tsx` renders prompts, tool
-  definitions, raw details, Markdown, code/JSON, diffs, and contextual results
-  while preserving user line breaks. Session lists paginate by ten. Live
-  sessions use `solid/realtime-client.ts`, `solid/session-client.tsx`, and
+  Agent-facing `read_session` is bounded across transcript categories and
+  definitions; `get_session_options` pages spawn choices. Grouped tools manage
+  non-blocking owned children, report final messages, and resume idle parents.
+  `parallel` accepts 2+ calls, uses four ordered workers, bounds output, and
+  propagates cancellation to tools and skills. Picker details use canonical
+  schemas. `solid/session-transcript.tsx` renders prompts, tool definitions, raw
+  details, Markdown, code/JSON, diffs, and contextual results while preserving
+  user line breaks. Session lists paginate by ten. Live sessions use
+  `solid/realtime-client.ts`, `solid/session-client.tsx`, and
   `solid/session-controller.ts`. Model deltas are combined per session once per
   animation frame; snapshots and other events remain immediate. Unchanged
   snapshots suppress notifications, and keyed messages preserve identity so only
@@ -259,35 +259,35 @@ Living project memory.
   Cross-target compilation may first download the matching Bun executable into
   Bun's user cache, while subsequent runner downloads use the in-process binary
   cache.
-- Agent file tools are confined to the selected runner workspace, including
-  symlink resolution, but `bash` intentionally has the runner account's full
-  shell permissions and is only rooted at that directory. The authenticated
-  directory picker intentionally browses outside a session workspace with the
-  selected runner account's filesystem permissions; it returns directory
-  metadata only, bounds each listing, and times out stalled requests. Stopping a
-  session aborts its model request and pushes runner-command cancellation over
-  WebSocket so an active shell command terminates. OpenAI API-key and OAuth
-  requests prefer Responses WebSocket mode and fall back to HTTP streaming;
-  OpenRouter uses its supported streaming chat-completions transport. OpenAI
-  OAuth refreshes its encrypted token bundle shortly before expiry. Provider
-  defaults are `gpt-4.1-mini`, `openai/gpt-4.1-mini`, and `gpt-5-codex` for
-  OpenAI keys, OpenRouter, and OpenAI OAuth respectively; they are API fallbacks
-  and catalog metadata, not browser selection defaults or catalog sources.
-  Browser catalogs come from OpenAI `/v1/models`, OpenRouter
-  `/api/v1/models/user`, or the ChatGPT Codex `/models` endpoint. Codex response
-  parsing retains streamed output-text and function-call argument deltas because
-  a completed event may omit its `output` items. OpenAI's standard model list
-  has no reasoning capabilities, while OpenRouter and Codex return
-  model-specific efforts. Session drafts use each model's maximum discovered
-  effort. Optional reasoning uses `reasoning_effort` for OpenAI chat completions
-  and `reasoning.effort` for OpenRouter and Codex Responses. Streamed reasoning
-  deltas are grouped by `output_index` and `summary_index`; separate summary
-  parts with paragraphs because completed responses may omit their output.
-  OpenAI Responses WebSockets and accepted HTTP streams retry transient
-  interruptions or provider error events only before a model turn is persisted;
-  partial UI deltas reset before replay, and exhausted WebSockets fall back to
-  HTTP. Permanent provider errors and aborts do not retry, and terminal failures
-  persist as non-replayed `error` messages.
+- Agent file tools are confined to the runner workspace, including symlink
+  resolution; session-owned `read` spill files are the only exception. `bash`
+  intentionally has the runner account's full shell permissions and is only
+  rooted at that directory. The authenticated directory picker intentionally
+  browses outside a session workspace with the selected runner account's
+  filesystem permissions; it returns directory metadata only, bounds each
+  listing, and times out stalled requests. Stopping a session aborts its model
+  request and pushes runner-command cancellation over WebSocket so an active
+  shell command terminates. OpenAI API-key and OAuth requests prefer Responses
+  WebSocket mode and fall back to HTTP streaming; OpenRouter uses its supported
+  streaming chat-completions transport. OpenAI OAuth refreshes its encrypted
+  token bundle shortly before expiry. Provider defaults are `gpt-4.1-mini`,
+  `openai/gpt-4.1-mini`, and `gpt-5-codex` for OpenAI keys, OpenRouter, and
+  OpenAI OAuth respectively; they are API fallbacks and catalog metadata, not
+  browser selection defaults or catalog sources. Browser catalogs come from
+  OpenAI `/v1/models`, OpenRouter `/api/v1/models/user`, or the ChatGPT Codex
+  `/models` endpoint. Codex response parsing retains streamed output-text and
+  function-call argument deltas because a completed event may omit its `output`
+  items. OpenAI's standard model list has no reasoning capabilities, while
+  OpenRouter and Codex return model-specific efforts. Session drafts use each
+  model's maximum discovered effort. Optional reasoning uses `reasoning_effort`
+  for OpenAI chat completions and `reasoning.effort` for OpenRouter and Codex
+  Responses. Streamed reasoning deltas are grouped by `output_index` and
+  `summary_index`; separate summary parts with paragraphs because completed
+  responses may omit their output. OpenAI Responses WebSockets and accepted HTTP
+  streams retry transient interruptions or provider error events only before a
+  model turn is persisted; partial UI deltas reset before replay, and exhausted
+  WebSockets fall back to HTTP. Permanent provider errors and aborts do not
+  retry, and terminal failures persist as non-replayed `error` messages.
 - Shell commands require a positive timeout. On macOS/Linux each has a POSIX
   session; stop/timeout signals only its group, including descendants retaining
   pipes. Agent launches and runner commands otherwise have no application-owned

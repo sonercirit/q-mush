@@ -35,11 +35,16 @@ import type {
   SessionToolUpdateResult,
 } from "./session-controller-options.ts";
 import { SessionPendingInputController } from "./session-controller-pending-input.ts";
+import { updatedSessionQuestions } from "./session-controller-question-event.ts";
 import { answerSessionQuestions } from "./session-controller-questions.ts";
 import {
   SessionReconciliationController,
   type DetailMutationOptions,
 } from "./session-controller-reconciliation.ts";
+import {
+  spawnSessionFromView,
+  type UserSpawnSessionSelection,
+} from "./session-controller-spawn.ts";
 import { SessionRealtimeState } from "./session-controller-state.ts";
 import { updateSessionTools } from "./session-controller-tool-update.ts";
 import {
@@ -63,7 +68,6 @@ import {
   sessionMutationPending,
 } from "./session-pending.ts";
 import { SessionProviderController } from "./session-provider-controller.ts";
-import { reconcilePendingQuestions } from "./session-request.ts";
 import { initialSessionViewState } from "./session-state.ts";
 import type {
   SessionTranscriptFilterName,
@@ -149,26 +153,10 @@ export class SessionController {
     event: Extract<RealtimeServerEvent, { type: "session_questions" }>,
   ): void {
     this.#applySnapshot(() => {
-      const detail = this.#view.value.detail;
-      if (
-        detail?.id !== event.sessionId ||
-        (event.pending?.executionGeneration !== undefined &&
-          event.pending.executionGeneration !== detail.generation) ||
-        (event.pending !== null && detail.status !== "paused")
-      ) {
-        return;
+      const detail = updatedSessionQuestions(this.#view.value.detail, event);
+      if (detail !== undefined) {
+        this.#realtime.applyDetail(detail);
       }
-      const pendingQuestions = reconcilePendingQuestions(
-        detail.pendingQuestions,
-        event.pending,
-      );
-      if (pendingQuestions === detail.pendingQuestions) {
-        return;
-      }
-      this.#realtime.applyDetail({
-        ...detail,
-        pendingQuestions,
-      });
     });
   }
   #applyToolEvent<Event>(apply: (event: Event) => void, event: Event): void {
@@ -270,6 +258,9 @@ export class SessionController {
   }
   compact(): Promise<void> {
     return this.#compact();
+  }
+  cancelPendingInput(inputId: string): Promise<void> {
+    return this.#pendingInputs.cancel(inputId);
   }
   continueSession(): Promise<void> {
     return this.#continue();
@@ -436,6 +427,13 @@ export class SessionController {
     return forkSessionFromView({
       ...this.#createOptions(),
       forkPointMessageId: messageId,
+    });
+  }
+  spawn(selection: UserSpawnSessionSelection): Promise<void> {
+    return spawnSessionFromView({
+      selection,
+      transport: this.#transport,
+      view: this.#view,
     });
   }
   send(): Promise<void> {

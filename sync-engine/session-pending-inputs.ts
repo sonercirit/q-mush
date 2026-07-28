@@ -78,6 +78,11 @@ const PENDING_SELECTION = {
   sessionId: agentPendingInputs.sessionId,
 };
 
+const CANCELLABLE_PENDING_SELECTION = {
+  ...PENDING_SELECTION,
+  isDeleted: agentPendingInputs.isDeleted,
+};
+
 function matchesDuplicate(
   stored: StoredPendingInput,
   sessionId: string,
@@ -166,6 +171,7 @@ export function appendSystemFollowUp(options: {
   readonly content: string;
   readonly database: Pick<AppDatabase, "insert" | "select" | "update">;
   readonly generateId: IdGenerator;
+  readonly kind: AgentSessionPendingInputKind;
   readonly now: number;
   readonly sessionId: string;
   readonly userId: string;
@@ -185,7 +191,7 @@ export function appendSystemFollowUp(options: {
     content: options.content,
     id,
     images: null,
-    kind: "follow_up",
+    kind: options.kind,
     sequence: nextSequence(options.database, options.sessionId),
     sessionId: options.sessionId,
     userId: options.userId,
@@ -233,7 +239,12 @@ function storedSessionForUser({
   return storedActiveSessionState(database, sessionId, userId);
 }
 
-interface EnqueuePendingInputOptions {
+interface PendingInputOwnerOptions {
+  readonly sessionId: string;
+  readonly userId: string;
+}
+
+interface EnqueuePendingInputOptions extends PendingInputOwnerOptions {
   readonly database: AppDatabase;
   readonly generateId: IdGenerator;
   readonly input: EnqueuePendingSessionInput;
@@ -246,19 +257,37 @@ type PendingInputTransaction = Parameters<
   Parameters<AppDatabase["transaction"]>[0]
 >[0];
 
+function pendingInputSession(
+  database: Pick<AppDatabase, "select">,
+  options: PendingInputOwnerOptions,
+) {
+  return storedSessionForUser({
+    database,
+    sessionId: options.sessionId,
+    userId: options.userId,
+  });
+}
+
+function touchPendingSession(
+  database: Pick<AppDatabase, "update">,
+  options: Pick<EnqueuePendingInputOptions, "now" | "sessionId" | "userId">,
+): void {
+  touchStoredSession(
+    database,
+    eq(agentSessions.id, options.sessionId),
+    options.userId,
+    options.now,
+  );
+}
+
 function enqueuePendingInputInTransaction(
   transaction: PendingInputTransaction,
   options: EnqueuePendingInputOptions,
 ): EnqueuePendingInputResult {
-  const session = storedSessionForUser({
-    database: transaction,
-    sessionId: options.sessionId,
-    userId: options.userId,
-  });
+  const session = pendingInputSession(transaction, options);
   if (session === undefined) {
     return { status: "not_found" };
   }
-
   const duplicate = transaction
     .select(PENDING_SELECTION)
     .from(agentPendingInputs)
@@ -297,12 +326,7 @@ function enqueuePendingInputInTransaction(
     userId: options.userId,
   };
   insertPendingInput(transaction, values);
-  touchStoredSession(
-    transaction,
-    eq(agentSessions.id, options.sessionId),
-    options.userId,
-    options.now,
-  );
+  touchPendingSession(transaction, options);
   return {
     input: {
       clientRequestId: options.input.clientRequestId,
@@ -322,6 +346,89 @@ export function enqueuePendingInput(
   return options.database.transaction((transaction) =>
     enqueuePendingInputInTransaction(transaction, options),
   );
+}
+
+export type CancelPendingInputResult =
+  | {
+      readonly input: AgentSessionPendingInput;
+      readonly status: "already_cancelled" | "cancelled";
+    }
+  | { readonly status: "consumed" | "invalid_state" | "not_found" };
+
+function pendingInputCondition(
+  inputId: string,
+  sessionId?: string,
+  userId?: string,
+) {
+  return and(
+    eq(agentPendingInputs.id, inputId),
+    sessionId === undefined
+      ? undefined
+      : eq(agentPendingInputs.sessionId, sessionId),
+    userId === undefined ? undefined : eq(agentPendingInputs.userId, userId),
+  );
+}
+
+export function cancelPendingInput(options: {
+  readonly database: AppDatabase;
+  readonly inputId: string;
+  readonly now: number;
+  readonly sessionId: string;
+  readonly userId: string;
+}): CancelPendingInputResult {
+  const result: CancelPendingInputResult = options.database.transaction(
+    (database): CancelPendingInputResult => {
+      const session = pendingInputSession(database, options);
+      if (session === undefined) return { status: "not_found" };
+      const stored = database
+        .select(CANCELLABLE_PENDING_SELECTION)
+        .from(agentPendingInputs)
+        .where(
+          pendingInputCondition(
+            options.inputId,
+            options.sessionId,
+            options.userId,
+          ),
+        )
+        .get();
+      if (stored === undefined) {
+        return { status: "not_found" };
+      }
+      if (stored.isDeleted) {
+        const consumed = database
+          .select({ id: agentMessages.id })
+          .from(agentMessages)
+          .where(
+            and(
+              eq(agentMessages.id, options.inputId),
+              eq(agentMessages.sessionId, options.sessionId),
+              eq(agentMessages.isDeleted, false),
+            ),
+          )
+          .get();
+        return consumed === undefined
+          ? { input: storedPendingInput(stored), status: "already_cancelled" }
+          : { status: "consumed" };
+      }
+      if (session.status !== "queued" && session.status !== "running") {
+        return { status: "invalid_state" };
+      }
+      const input = storedPendingInput(stored);
+      database
+        .update(agentPendingInputs)
+        .set(softDeletedAuditFields(options.userId, options.now))
+        .where(
+          and(
+            pendingInputCondition(options.inputId),
+            eq(agentPendingInputs.isDeleted, false),
+          ),
+        )
+        .run();
+      touchPendingSession(database, options);
+      return { input, status: "cancelled" };
+    },
+  );
+  return result;
 }
 
 export function promotePendingInput(

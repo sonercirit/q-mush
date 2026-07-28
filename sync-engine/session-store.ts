@@ -28,6 +28,7 @@ import {
 import { userSessionFilter } from "./session-filter.ts";
 import { readStoredSessionHistory } from "./session-history-store.ts";
 import {
+  cancelPendingInput,
   enqueuePendingInput,
   settleNormalSessionBoundary,
   storedPendingInputs,
@@ -56,9 +57,7 @@ import {
 } from "./session-store-fork.ts";
 import {
   activeSessionCondition,
-  storedSessionCondition,
   updateStoredSessions,
-  type SessionFilter,
 } from "./session-store-persistence.ts";
 import {
   queueStoredSession,
@@ -96,7 +95,7 @@ import {
 } from "./session-store-spawns.ts";
 
 import {
-  storedSessionSelection,
+  selectStoredSessions,
   summarizeStoredSession,
 } from "./session-store-summary.ts";
 
@@ -195,7 +194,8 @@ export class SessionStore {
     sessionId: string,
     workspaceId?: string,
   ): AgentSessionDetail | undefined {
-    const stored = this.#selectSessions(
+    const stored = selectStoredSessions(
+      this.#database,
       userSessionFilter(userId, sessionId, workspaceId),
     ).get();
     if (stored === undefined) {
@@ -216,7 +216,8 @@ export class SessionStore {
     };
   }
   list(userId: string, workspaceId?: string): readonly AgentSessionSummary[] {
-    return this.#selectSessions(
+    return selectStoredSessions(
+      this.#database,
       userSessionFilter(userId, undefined, workspaceId),
     )
       .orderBy(desc(agentSessions.updatedAt), desc(agentSessions.id))
@@ -495,6 +496,12 @@ export class SessionStore {
     });
   }
 
+  cancelPendingInput(
+    options: Omit<Parameters<typeof cancelPendingInput>[0], "database">,
+  ) {
+    return cancelPendingInput({ ...options, database: this.#database });
+  }
+
   enqueuePendingInput(
     userId: string,
     sessionId: string,
@@ -765,12 +772,5 @@ export class SessionStore {
       );
     }
     return this.pendingSpawnedSessions();
-  }
-
-  #selectSessions(filter: SessionFilter) {
-    return this.#database
-      .select(storedSessionSelection())
-      .from(agentSessions)
-      .where(storedSessionCondition(filter));
   }
 }

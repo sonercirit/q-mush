@@ -1,8 +1,7 @@
-import { and, eq } from "drizzle-orm";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentSessions } from "../shared/database/schema.ts";
 import { runnerIsAvailable } from "./runner-availability-store.ts";
-import { activeSessionCondition } from "./session-store-persistence.ts";
+import { runnerReadySessionCondition } from "./session-store-persistence.ts";
 
 export function storedSessionRunnerIsAvailable(
   database: Pick<AppDatabase, "select">,
@@ -13,12 +12,7 @@ export function storedSessionRunnerIsAvailable(
   const stored = database
     .select({ runnerId: agentSessions.runnerId })
     .from(agentSessions)
-    .where(
-      and(
-        activeSessionCondition({ id: sessionId, userId }),
-        eq(agentSessions.runnerRequired, false),
-      ),
-    )
+    .where(runnerReadySessionCondition({ id: sessionId, userId }))
     .get();
   return (
     stored !== undefined &&

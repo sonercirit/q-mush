@@ -1,8 +1,11 @@
 import { and, eq } from "drizzle-orm";
 import { describe, expect, test, vi } from "vitest";
+import type { AgentImage } from "../../shared/agent-images.ts";
 import { agentPendingInputs } from "../../shared/database/schema.ts";
 import { SessionFinisher } from "../session-finisher.ts";
+import { cancelPendingInput } from "../session-pending-inputs.ts";
 import { SessionRuntimes } from "../session-runtime.ts";
+import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import {
   TEST_NOW,
   TEST_USER_ID,
@@ -32,8 +35,9 @@ function pendingInput(
   clientRequestId: string,
   content: string,
   kind: "follow_up" | "steer" = "follow_up",
+  images: readonly AgentImage[] = [],
 ) {
-  return { clientRequestId, content, images: [], kind };
+  return { clientRequestId, content, images, kind };
 }
 
 function enqueueForUser(
@@ -67,6 +71,21 @@ function enqueueInput(
     now,
     kind,
   );
+}
+
+function cancelInput(
+  setup: ReturnType<typeof runningStore>,
+  userId: string,
+  inputId: string,
+  now: number,
+) {
+  return cancelPendingInput({
+    database: setup.database,
+    inputId,
+    now,
+    sessionId: setup.detail.id,
+    userId,
+  });
 }
 
 function closeRunningStore(setup: ReturnType<typeof runningStore>): void {
@@ -162,6 +181,62 @@ describe("durable pending session inputs", () => {
         .map(({ sequence }) => sequence),
     ).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     closeRunningStore(setup);
+  });
+
+  test("cancels an unconsumed input idempotently and returns its draft", () => {
+    const setup = runningStore();
+    const accepted = setup.store.enqueuePendingInput(
+      TEST_USER_ID,
+      setup.detail.id,
+      pendingInput("cancel-request", "Edit this next", "follow_up", [
+        TEST_AGENT_IMAGE,
+      ]),
+      TEST_NOW + 2,
+    );
+    expect(accepted).toMatchObject({ status: "accepted" });
+    if (!("input" in accepted)) {
+      throw new Error("Cancellation setup failed");
+    }
+
+    expect(
+      cancelInput(setup, TEST_USER_ID, accepted.input.id, TEST_NOW + 3),
+    ).toEqual({ input: accepted.input, status: "cancelled" });
+    expectSessionDetail(setup, { pendingInputs: [] });
+    expect(
+      cancelInput(setup, TEST_USER_ID, accepted.input.id, TEST_NOW + 4),
+    ).toEqual({ input: accepted.input, status: "already_cancelled" });
+    closeRunningStore(setup);
+  });
+
+  test("guards cancellation by owner, state, and consumption", () => {
+    const owned = runningStore();
+    const accepted = enqueueInput(owned, "guarded-cancel", "Keep guarded");
+    if (!("input" in accepted)) {
+      throw new Error("The pending input was not accepted");
+    }
+    expect(
+      cancelInput(owned, OTHER_USER_ID, accepted.input.id, TEST_NOW + 3),
+    ).toEqual({ status: "not_found" });
+    failRunningStore(owned);
+    expect(
+      cancelInput(owned, TEST_USER_ID, accepted.input.id, TEST_NOW + 4),
+    ).toEqual({ status: "invalid_state" });
+    closeRunningStore(owned);
+
+    const consumed = runningStore();
+    const promoted = enqueueInput(
+      consumed,
+      "consumed-cancel",
+      "Already promoted",
+    );
+    if (!("input" in promoted)) {
+      throw new Error("The pending input was not accepted");
+    }
+    expectQueuedBoundary(consumed, TEST_NOW + 3);
+    expect(
+      cancelInput(consumed, TEST_USER_ID, promoted.input.id, TEST_NOW + 4),
+    ).toEqual({ status: "consumed" });
+    closeRunningStore(consumed);
   });
 
   test("does not enumerate another owner's session", () => {

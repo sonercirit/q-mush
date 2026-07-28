@@ -1,5 +1,6 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { AgentFile } from "../shared/agent-file.ts";
+import type { AgentToolCall } from "../shared/agent-loop.ts";
 import { readAgentSessionToolNames } from "../shared/agent-tools.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
@@ -9,6 +10,7 @@ import type {
 } from "../shared/session-model.ts";
 
 import { countSelectedRows } from "./database-count.ts";
+import { readStoredToolCalls } from "./session-store-read.ts";
 import { storedAgentFile } from "./stored-agent-file.ts";
 
 export interface ReadSessionSnapshot {
@@ -24,22 +26,42 @@ export interface ReadSessionSnapshot {
   };
 }
 
-type TranscriptRole = "assistant" | "user";
+type TranscriptRole = "assistant" | "thinking" | "tool" | "user";
+
+function storedToolCalls(value: string | null): readonly AgentToolCall[] {
+  return readStoredToolCalls(value);
+}
+
+function isTranscriptRole(
+  role: AgentSessionMessage["role"] | null,
+): role is TranscriptRole {
+  return (
+    role === "assistant" ||
+    role === "thinking" ||
+    role === "tool" ||
+    role === "user"
+  );
+}
+
+interface StoredReadSessionRow {
+  readonly content: string | null;
+  readonly createdAt: Date | null;
+  readonly messageId: string | null;
+  readonly toolCalls: string | null;
+  readonly role: AgentSessionMessage["role"] | null;
+  readonly toolName: string | null;
+  readonly toolCallId: string | null;
+}
 
 function transcriptMessages(
-  rows: readonly {
-    readonly content: string | null;
-    readonly createdAt: Date | null;
-    readonly messageId: string | null;
-    readonly role: AgentSessionMessage["role"] | null;
-  }[],
+  rows: readonly StoredReadSessionRow[],
 ): readonly AgentSessionMessage[] {
   return [...rows]
     .reverse()
     .flatMap((message): readonly AgentSessionMessage[] =>
       message.messageId !== null &&
       message.createdAt !== null &&
-      (message.role === "assistant" || message.role === "user") &&
+      isTranscriptRole(message.role) &&
       message.content !== null
         ? [
             {
@@ -48,9 +70,9 @@ function transcriptMessages(
               id: message.messageId,
               images: [],
               role: message.role,
-              toolCallId: null,
-              toolCalls: [],
-              toolName: null,
+              toolCallId: message.toolCallId,
+              toolCalls: storedToolCalls(message.toolCalls),
+              toolName: message.toolName,
             },
           ]
         : [],
@@ -136,6 +158,9 @@ export function readSessionSnapshot(
       role: agentMessages.role,
       status: agentSessions.status,
       title: agentSessions.title,
+      toolCallId: agentMessages.toolCallId,
+      toolCalls: agentMessages.toolCalls,
+      toolName: agentMessages.toolName,
       tools: agentSessions.tools,
     })
     .from(agentSessions)

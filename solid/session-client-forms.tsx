@@ -4,6 +4,7 @@ import {
   on,
   onCleanup,
   Show,
+  untrack,
   type JSX,
 } from "solid-js";
 import type { AgentImage } from "../shared/agent-images.ts";
@@ -61,15 +62,13 @@ function promptEvents(props: PromptEventProps) {
 }
 
 function renderSessionImages(
-  props: SessionImagesProps & {
-    readonly disabled: boolean;
-    readonly id: string;
-  },
+  props: SessionImagesProps & { readonly disabled: boolean },
+  id: string,
 ): JSX.Element {
   return (
     <SessionImageInput
       disabled={props.disabled}
-      id={props.id}
+      id={id}
       images={props.images}
       onAdd={props.onAddImages}
       onRemove={props.onRemoveImage}
@@ -94,18 +93,15 @@ export function SessionPromptInput(
         value={props.prompt}
         {...promptEvents(props)}
       />
-      <div class="mt-3">
-        {renderSessionImages({
-          ...props,
-          id: "session-images",
-        })}
-      </div>
+      <div class="mt-3">{renderSessionImages(props, "session-images")}</div>
     </div>
   );
 }
 
 export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
-  const [localPrompt, setLocalPrompt] = createSignal(props.prompt);
+  const [localPrompt, setLocalPrompt] = createSignal(
+    untrack(() => props.prompt),
+  );
   const [textarea, setTextarea] = createSignal<HTMLTextAreaElement>();
   let syncTimer: ReturnType<typeof setTimeout> | undefined;
   const clearSyncTimer = (): void => {
@@ -203,11 +199,7 @@ export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
         ref={setTextarea}
         value={promptValue()}
       />
-      {renderSessionImages({
-        ...props,
-        disabled: props.disabled,
-        id: "follow-up-images",
-      })}
+      {renderSessionImages(props, "follow-up-images")}
       <div
         class="flex w-full flex-col gap-3 sm:flex-row sm:items-start sm:justify-end"
         data-session-composer-actions="true"

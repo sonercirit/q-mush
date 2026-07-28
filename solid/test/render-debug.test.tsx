@@ -42,7 +42,7 @@ test("renders reactive boundary attributes through context", () => {
   view.toggle();
 
   const rendered = renderSolidToString(() => (
-    <RenderDebugProvider view={view}>
+    <RenderDebugProvider staticView={view}>
       <TestBoundary />
     </RenderDebugProvider>
   ));

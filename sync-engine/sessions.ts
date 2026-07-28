@@ -394,7 +394,7 @@ class DrizzleSessionIntegration
       discoverModels: this.#discoverModels,
       draining: () => this.#runtimes.draining,
       cleanupSession: (detail) => {
-        void this.#executionCleanup.cleanup(detail);
+        void this.#executionCleanup.cleanupTerminal(detail);
       },
       pendingRestart: (runnerId) => this.#runtimes.pendingRestart(runnerId),
       discoverSessionMetadata: (input, credential, userId) =>

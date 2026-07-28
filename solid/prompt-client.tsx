@@ -6,6 +6,7 @@ import {
   type PromptInput,
 } from "../shared/prompt-model.ts";
 import { ControllerRetryNotice } from "./controller-retry.tsx";
+import { controllerView } from "./controller-view.ts";
 import type { PromptBankController } from "./prompt-state.ts";
 import { renderDebugBoundary } from "./render-debug.tsx";
 
@@ -111,7 +112,7 @@ function promptBusy(state: ReturnType<PromptBankController["view"]>): boolean {
 }
 
 function EditPrompt(props: PromptBankProps): JSX.Element {
-  const state = props.controller.view;
+  const state = controllerView(props);
   return (
     <PromptForm
       class="mt-4 grid gap-4 rounded-xl border border-cyan-300/20 bg-cyan-300/[0.05] p-4"
@@ -153,7 +154,7 @@ function EditPrompt(props: PromptBankProps): JSX.Element {
 function PromptItem(
   props: PromptBankProps & { readonly prompt: Prompt },
 ): JSX.Element {
-  const state = props.controller.view;
+  const state = controllerView(props);
   const selected = (): boolean => state().selectedId === props.prompt.id;
   const editing = (): boolean => state().editingId === props.prompt.id;
   const actionsDisabled = (): boolean => promptBusy(state());
@@ -255,7 +256,7 @@ function PromptList(
     readonly onInsertRequest: () => void;
   },
 ): JSX.Element {
-  const state = props.controller.view;
+  const state = controllerView(props);
   return (
     <Show
       fallback={
@@ -325,7 +326,7 @@ function PromptList(
 }
 
 export function PromptBank(props: PromptBankProps): JSX.Element {
-  const state = props.controller.view;
+  const state = controllerView(props);
   const busy = (): boolean => promptBusy(state());
   const [confirmInsert, setConfirmInsert] = createSignal<string>();
   const insert = (replace: boolean): void => {

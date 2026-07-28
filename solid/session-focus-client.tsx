@@ -7,6 +7,7 @@ import {
   type JSX,
 } from "solid-js";
 import type { RunnerSummary } from "../shared/runner-model.ts";
+import { controllerView } from "./controller-view.ts";
 import type { SessionController } from "./session-controller.ts";
 import type { SessionCredentialOption } from "./session-credential-option.ts";
 import { SessionDetail, SessionList } from "./session-detail-client.tsx";
@@ -22,7 +23,7 @@ interface SessionResultsProps {
 }
 
 export function SessionResults(props: SessionResultsProps): JSX.Element {
-  const state = props.controller.view;
+  const state = controllerView(props);
   const [listOpen, setListOpen] = createSignal(false);
   const [listPanel, setListPanel] = createSignal<HTMLElement>();
   const [detailShell, setDetailShell] = createSignal<HTMLDivElement>();

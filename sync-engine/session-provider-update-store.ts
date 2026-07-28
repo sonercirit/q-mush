@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentSessions } from "../shared/database/schema.ts";
@@ -9,8 +9,8 @@ import {
   type SessionProviderUpdateInput,
 } from "../shared/session-provider-update.ts";
 import { activeSessionDuration } from "../shared/session-timing.ts";
+import { workspaceSessionCondition } from "./session-store-persistence.ts";
 import { serializeProviderPricing } from "./session-store-read.ts";
-
 export type SessionProviderUpdateStoreResult = Readonly<{
   detail?: AgentSessionDetail;
   status: "conflict" | "not_found" | "unchanged" | "updated";
@@ -61,13 +61,7 @@ export function updateStoredSessionProvider(
         activeStartedAt: null,
       }
     : {};
-  const condition = and(
-    eq(agentSessions.id, input.sessionId),
-    eq(agentSessions.userId, input.userId),
-    eq(agentSessions.workspaceId, input.workspaceId),
-    eq(agentSessions.isDeleted, false),
-    eq(agentSessions.executionGeneration, input.expectedGeneration),
-  );
+  const condition = workspaceSessionCondition(input, input.expectedGeneration);
   const changed = database
     .update(agentSessions)
     .set({ ...values, ...timing })
