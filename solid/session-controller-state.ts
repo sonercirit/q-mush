@@ -63,9 +63,54 @@ function serializedDataMatches(left: unknown, right: unknown): boolean {
   return left === right || JSON.stringify(left) === JSON.stringify(right);
 }
 
+function sessionMessageMatches(
+  left: AgentSessionMessage | undefined,
+  right: AgentSessionMessage | undefined,
+): boolean {
+  if (left === right) return true;
+  if (left === undefined) return false;
+  if (right === undefined) return false;
+  return (
+    left.content === right.content &&
+    left.createdAt === right.createdAt &&
+    left.id === right.id &&
+    left.role === right.role &&
+    left.toolCallId === right.toolCallId &&
+    left.toolName === right.toolName &&
+    serializedDataMatches(left.attachments, right.attachments) &&
+    serializedDataMatches(left.images, right.images) &&
+    serializedDataMatches(left.toolCalls, right.toolCalls)
+  );
+}
+
+function sessionDetailMatches(
+  left: AgentSessionDetail | undefined,
+  right: AgentSessionDetail | undefined,
+): boolean {
+  if (left === right) return true;
+  if (right === undefined) return false;
+  if (left === undefined) return false;
+  const { messages: leftMessages, ...leftMetadata } = left;
+  const { messages: rightMessages, ...rightMetadata } = right;
+  return (
+    leftMessages.length === rightMessages.length &&
+    leftMessages.every((message, index) =>
+      sessionMessageMatches(message, rightMessages[index]),
+    ) &&
+    serializedDataMatches(leftMetadata, rightMetadata)
+  );
+}
+
 export function sessionDataMatches(
-  left: AgentSessionDetail | readonly AgentSessionSummary[] | undefined,
-  right: AgentSessionDetail | readonly AgentSessionSummary[] | undefined,
+  left: AgentSessionDetail | undefined,
+  right: AgentSessionDetail | undefined,
+): boolean {
+  return sessionDetailMatches(left, right);
+}
+
+export function sessionSummariesMatch(
+  left: readonly AgentSessionSummary[] | undefined,
+  right: readonly AgentSessionSummary[] | undefined,
 ): boolean {
   return serializedDataMatches(left, right);
 }
@@ -85,8 +130,7 @@ function retainUnchangedMessages(
   );
   return messages.map((message) => {
     const existing = currentById.get(message.id);
-    return existing === message ||
-      (existing !== undefined && serializedDataMatches(existing, message))
+    return sessionMessageMatches(existing, message) && existing !== undefined
       ? existing
       : message;
   });
@@ -95,11 +139,24 @@ function retainUnchangedMessages(
 function sortedMessages(
   detail: AgentSessionDetail,
 ): AgentSessionDetail["messages"] {
-  return detail.messages.some((message) =>
-    isStreamedMessage(detail.id, message),
-  )
-    ? detail.messages
-    : canonicalSessionMessages(detail.messages);
+  if (
+    detail.messages.some((message) => isStreamedMessage(detail.id, message))
+  ) {
+    return detail.messages;
+  }
+  for (let index = 1; index < detail.messages.length; index += 1) {
+    const previous = detail.messages[index - 1];
+    const current = detail.messages[index];
+    if (
+      previous !== undefined &&
+      current !== undefined &&
+      (previous.createdAt > current.createdAt ||
+        (previous.createdAt === current.createdAt && previous.id > current.id))
+    ) {
+      return canonicalSessionMessages(detail.messages);
+    }
+  }
+  return detail.messages;
 }
 
 export function retainUnchangedSessionData(
@@ -154,9 +211,12 @@ function isStreamedMessage(
 function persistedMessages(
   detail: AgentSessionDetail,
 ): AgentSessionDetail["messages"] {
-  return canonicalSessionMessages(
-    detail.messages.filter((message) => !isStreamedMessage(detail.id, message)),
+  const messages = detail.messages.filter(
+    (message) => !isStreamedMessage(detail.id, message),
   );
+  return messages.length === detail.messages.length
+    ? sortedMessages(detail)
+    : messages;
 }
 
 function persistedDetail(detail: AgentSessionDetail): AgentSessionDetail {
@@ -434,7 +494,7 @@ export class SessionRealtimeState {
     if (
       this.#view.value.sessions === undefined ||
       sessionMutationPending(this.#view.value) ||
-      sessionDataMatches(this.#view.value.sessions, sessions)
+      sessionSummariesMatch(this.#view.value.sessions, sessions)
     ) {
       return;
     }

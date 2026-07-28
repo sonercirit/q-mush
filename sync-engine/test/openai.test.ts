@@ -14,6 +14,7 @@ import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
+import { oauthTokenResponse } from "./oauth-test-fixtures.ts";
 import { expectPkceParameters, expectRedirect } from "./oauth-test-helpers.ts";
 import {
   addProviderApiKeys,
@@ -28,7 +29,7 @@ import {
   expectRemovedProviderCredential,
   readBearerApiKey,
   readStoredProviderCredentials,
-  recordProviderRequest,
+  recordOpenAiProviderRequest,
 } from "./provider-integration-test-helpers.ts";
 
 const FIRST_OAUTH_ID = "018bcfe5-6800-7000-8000-000000000031";
@@ -148,9 +149,13 @@ const createProviderFetch = (
   requests: Request[],
 ): ((input: RequestInfo | URL, init?: RequestInit) => Promise<Response>) =>
   async function openAiProviderFetch(input, init) {
-    const request = recordProviderRequest(requests, input, init, true);
+    const { request, token } = recordOpenAiProviderRequest(
+      requests,
+      input,
+      init,
+    );
 
-    if (request.url === "https://auth.openai.com/oauth/token") {
+    if (token) {
       const body = new URLSearchParams(await request.text());
 
       if (body.get("grant_type") === "authorization_code") {
@@ -159,11 +164,10 @@ const createProviderFetch = (
         );
         return account === undefined
           ? Response.json({ error: "invalid_grant" }, { status: 400 })
-          : Response.json({
-              access_token: account.accessToken,
-              id_token: account.idToken,
-              expires_in: 3600,
-              refresh_token: account.refreshToken,
+          : oauthTokenResponse({
+              accessToken: account.accessToken,
+              idToken: account.idToken,
+              refreshToken: account.refreshToken,
             });
       }
 

@@ -5,6 +5,7 @@ import { createDatabase } from "../../shared/database.ts";
 import { users } from "../../shared/database/schema.ts";
 import { SYSTEM_ID } from "../../shared/ids.ts";
 import { ProviderCredentialStore } from "../../shared/provider-credential-store.ts";
+import { hasTestDatabaseTable } from "./database-fixtures.ts";
 
 const CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000051";
 const TEST_NOW = 1_700_000_000_000;
@@ -17,11 +18,7 @@ function ensureCredentialScopeSchema(
   database: ReturnType<typeof createDatabase>,
 ): void {
   const client = database.$client;
-  const tableExists = (name: string): boolean =>
-    client
-      .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
-      .get(name) !== null;
-  if (!tableExists("workspaces")) {
+  if (!hasTestDatabaseTable(database, "workspaces")) {
     client.run(`
       CREATE TABLE workspaces (
         id text PRIMARY KEY NOT NULL,
@@ -49,7 +46,7 @@ function ensureCredentialScopeSchema(
       "ALTER TABLE provider_credentials ADD COLUMN is_global integer NOT NULL DEFAULT true",
     );
   }
-  if (!tableExists("provider_credential_workspaces")) {
+  if (!hasTestDatabaseTable(database, "provider_credential_workspaces")) {
     client.run(`
       CREATE TABLE provider_credential_workspaces (
         id text PRIMARY KEY NOT NULL,

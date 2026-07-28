@@ -56,7 +56,7 @@ const EDIT_REPLACEMENT_PARAMETER = {
 const BASE_AGENT_TOOLS = [
   toolDefinition({
     description:
-      "Read the contents of a UTF-8 text file in the workspace. Read output shares a 50KB session-wide budget; output beyond it is saved to an OS temporary file for follow-up reads. Use offset and limit for large files.",
+      "Read up to 2,000 lines or 50KB from a UTF-8 text file in the workspace per call, including q-mush-attachment links supplied in messages. Use offset and limit to continue reading the same file.",
     name: "read",
     properties: {
       limit: {
@@ -140,6 +140,20 @@ const SESSION_ID_PARAMETER = {
 } as const;
 
 const SESSION_AGENT_TOOLS = [
+  toolDefinition({
+    description:
+      "Pause this session for a positive bounded duration in milliseconds. Pending steering wakes it early; the result reports actual and expected duration.",
+    name: "sleep",
+    properties: {
+      durationMs: {
+        description: "Duration to sleep in milliseconds (1-3,600,000)",
+        maximum: 3_600_000,
+        minimum: 1,
+        type: "integer",
+      },
+    },
+    required: ["durationMs"],
+  }),
   toolDefinition({
     description:
       "Spawn another agent session and return immediately. Configure it with the same fields available in the new-session pane. When it finishes or fails, its last message is sent back to this session.",
@@ -362,7 +376,9 @@ const PARALLEL_TOOL = toolDefinition({
             enum: [
               ...BASE_AGENT_TOOLS.map((tool) => tool.function.name),
               BRAVE_SEARCH_TOOL_NAME,
-              ...SESSION_AGENT_TOOLS.map((tool) => tool.function.name),
+              ...SESSION_AGENT_TOOLS.map((tool) => tool.function.name).filter(
+                (name) => name !== "sleep",
+              ),
             ],
             type: "string",
           },
@@ -450,6 +466,7 @@ const AGENT_TOOL_LABELS: Readonly<Record<AgentSessionToolName, string>> = {
   read_session: "Read session",
   reassign_session: "Reassign session",
   send_to_session: "Send to session",
+  sleep: "Sleep",
   spawn_session: "Spawn session",
   stop_session: "Stop session",
   write: "Write files",
@@ -533,7 +550,8 @@ function selectedParallelTool(
                     .filter(
                       (name) =>
                         name !== PARALLEL_TOOL.function.name &&
-                        name !== ASK_QUESTIONS_TOOL_NAME,
+                        name !== ASK_QUESTIONS_TOOL_NAME &&
+                        name !== "sleep",
                     ),
                 },
               },

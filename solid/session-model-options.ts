@@ -1,4 +1,7 @@
-import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
+import type {
+  AgentModelCatalog,
+  AgentReasoningEffort,
+} from "../shared/agent-configuration.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
 import type { CustomSelectOption } from "./custom-select.tsx";
 
@@ -11,16 +14,20 @@ export interface ModelCredentialOption extends ModelCredentialIdentity {
   readonly label: string;
 }
 
+const MODEL_CREDENTIAL_DELIMITER = ":";
+
 export function modelCredentialValue(
   credential: ModelCredentialIdentity,
 ): string {
-  return `${credential.provider}:${credential.credentialId}`;
+  return [credential.provider, credential.credentialId].join(
+    MODEL_CREDENTIAL_DELIMITER,
+  );
 }
 
 export function parseModelCredentialValue(
   value: string,
 ): ModelCredentialIdentity | undefined {
-  const [provider, ...identityParts] = value.split(":");
+  const [provider, ...identityParts] = value.split(MODEL_CREDENTIAL_DELIMITER);
   const credentialId = identityParts.join(":");
   if (credentialId.length === 0) return undefined;
   switch (provider) {
@@ -40,6 +47,18 @@ export function modelCredentialOptions(
     label: `${credential.provider === "openai" ? "OpenAI" : "OpenRouter"} · ${credential.label}`,
     value: modelCredentialValue(credential),
   }));
+}
+
+export function reasoningModelOptions(
+  catalog: AgentModelCatalog | undefined,
+  model: string,
+): readonly CustomSelectOption[] {
+  const efforts: readonly AgentReasoningEffort[] =
+    catalog?.models.find(({ id }) => id === model)?.reasoningEfforts ?? [];
+  return [
+    { label: "Model default", value: "" },
+    ...efforts.map((effort) => ({ label: effort, value: effort })),
+  ];
 }
 
 export function modelCatalogOptions(

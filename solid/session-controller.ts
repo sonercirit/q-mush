@@ -17,6 +17,10 @@ import {
   reassignSessionFromView,
   removeSessionControllerImage,
 } from "./session-controller-actions.ts";
+import {
+  compactSessionFromView,
+  toggleSessionAutoCompaction,
+} from "./session-controller-compaction.ts";
 import { createSessionFromView } from "./session-controller-create.ts";
 import { forkSessionFromView } from "./session-controller-fork.ts";
 import {
@@ -56,8 +60,6 @@ import { selectedDraftOption } from "./session-form.ts";
 import { loadSessionHistoryPage } from "./session-history-controller.ts";
 import { SessionModelController } from "./session-model-controller.ts";
 import {
-  compactionModeMutation,
-  compactSessionMutation,
   continueSessionMutation,
   sendSessionMutation,
   stopSessionMutation,
@@ -206,10 +208,10 @@ export class SessionController {
   get transport(): SessionCommandTransport | undefined {
     return this.#transport;
   }
-  addImages(files: readonly File[], follow: boolean): Promise<void> {
+  addImages(files: readonly File[], follow: boolean) {
     return addSessionImages({ files, follow, view: this.#view });
   }
-  answerQuestions(answers: AskQuestionAnswers): Promise<void> {
+  answerQuestions(answers: AskQuestionAnswers) {
     return answerSessionQuestions({
       answers,
       transport: this.#transport,
@@ -256,13 +258,16 @@ export class SessionController {
       reassignment: { runnerId, workingDirectory: "" },
     });
   }
-  compact(): Promise<void> {
-    return this.#compact();
+  compact(continueAfter = false) {
+    return compactSessionFromView(
+      (mutation, allowed) => this.#mutateRecoverable(mutation, allowed),
+      continueAfter,
+    );
   }
-  cancelPendingInput(inputId: string): Promise<void> {
+  cancelPendingInput(inputId: string) {
     return this.#pendingInputs.cancel(inputId);
   }
-  continueSession(): Promise<void> {
+  continueSession() {
     return this.#continue();
   }
   #createOptions(): SessionCreationViewOptions {
@@ -273,7 +278,7 @@ export class SessionController {
       view: this.#view,
     };
   }
-  create(): Promise<void> {
+  create() {
     return createSessionFromView(this.#createOptions());
   }
   initializeDefaults(
@@ -420,14 +425,19 @@ export class SessionController {
       }
     }
   }
-  followUp(): Promise<void> {
+  followUp() {
     return this.#pendingInputs.submit("follow_up");
   }
-  fork(messageId: string): Promise<void> {
-    return forkSessionFromView({
-      ...this.#createOptions(),
-      forkPointMessageId: messageId,
-    });
+  fork(
+    messageId: string,
+    selection?: Parameters<typeof forkSessionFromView>[0]["selection"],
+  ) {
+    return forkSessionFromView(
+      Object.assign(this.#createOptions(), {
+        forkPointMessageId: messageId,
+        selection,
+      }),
+    );
   }
   spawn(selection: UserSpawnSessionSelection): Promise<void> {
     return spawnSessionFromView({
@@ -492,7 +502,11 @@ export class SessionController {
     return this.#pendingInputs.submit("steer");
   }
   toggleAutoCompact(autoCompact: boolean): Promise<void> {
-    return this.#toggleAutoCompact(autoCompact);
+    return toggleSessionAutoCompaction({
+      autoCompact,
+      mutate: (mutation) => this.#mutateDetail(mutation),
+      view: this.#view,
+    });
   }
   setTranscriptFilter(
     name: SessionTranscriptFilterName,
@@ -592,25 +606,11 @@ export class SessionController {
   }
   async #mutateRecoverable(
     mutation: (sessionId: string) => SessionMutation,
+    allowed = sessionCanResume,
   ): Promise<void> {
     if (this.#view.value.detail?.runnerRequired !== true) {
-      await this.#mutateWhen(sessionCanResume, mutation);
+      await this.#mutateWhen(allowed, mutation);
     }
-  }
-  async #compact(): Promise<void> {
-    await this.#mutateRecoverable(compactSessionMutation);
-  }
-  async #toggleAutoCompact(autoCompact: boolean): Promise<void> {
-    const sessionId = this.#view.value.selectedId;
-    if (
-      sessionId === undefined ||
-      this.#view.value.detail?.runnerRequired === true ||
-      sessionMutationPending(this.#view.value) ||
-      !selectedDetailHasStatus(this.#view.value, sessionCanResume)
-    ) {
-      return;
-    }
-    await this.#mutateDetail(compactionModeMutation(sessionId, autoCompact));
   }
   async #continue(): Promise<void> {
     await this.#mutateRecoverable(continueSessionMutation);

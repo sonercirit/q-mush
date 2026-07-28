@@ -94,7 +94,7 @@ test("projects paused handoffs without synthetic interrupted tool results", () =
 
 test("stopping a paused session clears its exact restart handoff", () => {
   const setup = runningRestartStore();
-  const identity = pause(setup, "restart-stop", "compact");
+  const identity = pause(setup, "restart-stop", "compact_and_continue");
 
   expect(setup.store.stop(TEST_USER_ID, STORE_SESSION_ID, TEST_NOW + 3)).toBe(
     true,

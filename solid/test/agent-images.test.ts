@@ -1,9 +1,9 @@
 import { describe, expect, test } from "vitest";
 import {
-  agentImageDataUrl,
-  MAXIMUM_AGENT_IMAGES,
-  readAgentImages,
-} from "../../shared/agent-images.ts";
+  agentAttachmentDataUrl,
+  MAXIMUM_AGENT_ATTACHMENTS,
+  readAgentAttachments,
+} from "../../shared/agent-attachments.ts";
 import {
   appendAgentImageFiles,
   readPastedAgentImageFiles,
@@ -46,43 +46,55 @@ function clipboardEvent(options: {
 
 describe("agent images", () => {
   test("reads supported base64-encoded images", () => {
-    expect(readAgentImages(undefined)).toEqual([]);
-    expect(readAgentImages([TEST_AGENT_IMAGE])).toEqual([TEST_AGENT_IMAGE]);
-    expect(agentImageDataUrl(TEST_AGENT_IMAGE)).toBe(
+    expect(readAgentAttachments(undefined)).toEqual([]);
+    expect(readAgentAttachments([TEST_AGENT_IMAGE])).toEqual([
+      TEST_AGENT_IMAGE,
+    ]);
+    expect(agentAttachmentDataUrl(TEST_AGENT_IMAGE)).toBe(
       `data:image/png;base64,${TEST_AGENT_IMAGE.data}`,
     );
   });
 
   test("rejects malformed, unsafe, and excessive image inputs", () => {
     expect(
-      readAgentImages([{ ...TEST_AGENT_IMAGE, mediaType: "image/svg+xml" }]),
+      readAgentAttachments([
+        { ...TEST_AGENT_IMAGE, mediaType: "image/svg+xml" },
+      ]),
     ).toBeUndefined();
     expect(
-      readAgentImages([{ ...TEST_AGENT_IMAGE, data: "not base64" }]),
+      readAgentAttachments([{ ...TEST_AGENT_IMAGE, data: "not base64" }]),
     ).toBeUndefined();
     expect(
-      readAgentImages(
+      readAgentAttachments(
         Array.from(
-          { length: MAXIMUM_AGENT_IMAGES + 1 },
+          { length: MAXIMUM_AGENT_ATTACHMENTS + 1 },
           () => TEST_AGENT_IMAGE,
         ),
       ),
     ).toBeUndefined();
   });
 
-  test("encodes selected browser files and appends them to the draft", async () => {
+  test("encodes supported selected files and appends them to the draft", async () => {
     const file = testImageFile();
+    const pdf = new File(["pdf"], "brief.pdf", { type: "application/pdf" });
 
     expect(await appendAgentImageFiles([], [file])).toEqual([TEST_AGENT_IMAGE]);
+    expect(await appendAgentImageFiles([], [pdf])).toEqual([
+      {
+        data: "cGRm",
+        mediaType: "application/pdf",
+        name: "brief.pdf",
+      },
+    ]);
     await expect(
       appendAgentImageFiles(
         [],
         [new File(["unsafe"], "vector.svg", { type: "image/svg+xml" })],
       ),
-    ).rejects.toThrow("PNG, JPEG, GIF, or WebP");
+    ).rejects.toThrow("supported image, video, audio, PDF");
   });
 
-  test("reads image files pasted from the clipboard", async () => {
+  test("reads supported files pasted from the clipboard", async () => {
     const image = testImageFile("");
     const text = new File(["notes"], "notes.txt", { type: "text/plain" });
     let prevented = false;
@@ -113,7 +125,7 @@ describe("agent images", () => {
     const textFiles = readPastedAgentImageFiles(
       clipboardEvent({ itemFiles: [text], onPreventDefault: preventDefault }),
     );
-    expect(textFiles).toEqual([]);
-    expect(prevented).toBe(false);
+    expect(textFiles).toEqual([text]);
+    expect(prevented).toBe(true);
   });
 });

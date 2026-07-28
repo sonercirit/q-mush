@@ -3,6 +3,7 @@ import {
   createMemo,
   createSignal,
   on,
+  onCleanup,
   onMount,
   Show,
   type JSX,
@@ -11,6 +12,7 @@ import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { AskQuestionsForm } from "./ask-questions-client.tsx";
 import { clipboardCopyLabel, createClipboardCopy } from "./clipboard-copy.ts";
 import { findById } from "./id-selection.ts";
+import { SessionAutoCompactToggle } from "./session-autocompact-toggle.tsx";
 import { SessionFollowUp } from "./session-client-forms.tsx";
 import { sessionComposerUnavailableReason } from "./session-composer-availability.ts";
 import {
@@ -18,11 +20,13 @@ import {
   sessionContextClasses,
 } from "./session-context-client.tsx";
 import type { LoadedSessionDetailViewProps } from "./session-detail-view-props.ts";
+import { SessionForkEditor } from "./session-fork-client.tsx";
 import { SessionHistoryControls } from "./session-history-client.tsx";
 import {
   createSessionShortcuts,
   SessionPendingInputs,
 } from "./session-pending-client.tsx";
+import { sessionMutationPending } from "./session-pending.ts";
 import { SessionProviderUpdateEditor } from "./session-provider-update-client.tsx";
 import type { SessionProviderUpdateView } from "./session-provider-update-model.ts";
 import { RunnerReassignment } from "./session-reassignment-view.tsx";
@@ -91,13 +95,10 @@ export function SessionDetailBody(props: {
       view().credentialAvailable,
     );
   const composerDisabled = (): boolean => composerReason() !== undefined;
+  const autoCompactionDisabled = (): boolean =>
+    view().detail.runnerRequired || sessionMutationPending(view().state);
   const compactionDisabled = (): boolean =>
-    active() ||
-    view().detail.runnerRequired ||
-    view().state.compacting ||
-    view().state.reassigning ||
-    view().state.sending ||
-    view().state.stopping;
+    active() || autoCompactionDisabled();
   const hasChildren = (): boolean =>
     view().state.sessions?.some(
       ({ parentSessionId }) => parentSessionId === view().detail.id,
@@ -115,8 +116,11 @@ export function SessionDetailBody(props: {
   const visibleMessages = (): AgentSessionDetail["messages"] =>
     view().state.history.page?.messages ?? view().detail.messages;
   const sessionCopy = createClipboardCopy(() => sessionCopyText(view().detail));
+  const [forkPointMessageId, setForkPointMessageId] = createSignal<string>();
   const [scrollLockEnabled, setScrollLockEnabled] = createSignal(true);
   const [transcript, setTranscript] = createSignal<HTMLUListElement>();
+  let pendingScrollFrame: number | undefined;
+  let shouldScrollToEnd = true;
   const filterCounts = createMemo(() =>
     sessionTranscriptFilterCounts(
       view().detail.agentFile,
@@ -125,11 +129,24 @@ export function SessionDetailBody(props: {
     ),
   );
   const scrollToEnd = (): void => {
+    shouldScrollToEnd = scrollLockEnabled();
     const element = transcript();
-    if (scrollLockEnabled() && element !== undefined) {
-      element.scrollTop = element.scrollHeight;
+    if (!shouldScrollToEnd || element === undefined) return;
+    if (pendingScrollFrame !== undefined) {
+      window.cancelAnimationFrame(pendingScrollFrame);
     }
+    pendingScrollFrame = window.requestAnimationFrame(() => {
+      pendingScrollFrame = undefined;
+      if (shouldScrollToEnd) {
+        element.scrollTop = element.scrollHeight;
+      }
+    });
   };
+  onCleanup(() => {
+    if (pendingScrollFrame !== undefined) {
+      window.cancelAnimationFrame(pendingScrollFrame);
+    }
+  });
   onMount(() => {
     scrollToEnd();
     setShortcutPlatform(navigator.platform);
@@ -238,9 +255,11 @@ export function SessionDetailBody(props: {
         aria-live="polite"
         class="session-transcript mt-5 max-h-[36rem] min-w-0 space-y-3 overflow-y-auto overscroll-contain pr-1"
         data-session-transcript="true"
-        onScroll={(event) =>
-          setScrollLockEnabled(isAtScrollEnd(event.currentTarget))
-        }
+        onScroll={(event) => {
+          const locked = isAtScrollEnd(event.currentTarget);
+          shouldScrollToEnd = locked;
+          setScrollLockEnabled(locked);
+        }}
         ref={setTranscript}
       >
         <SessionTranscript
@@ -248,9 +267,14 @@ export function SessionDetailBody(props: {
           executionEnvironment={view().detail.executionEnvironment}
           filters={view().state.transcriptFilters}
           messages={visibleMessages()}
+          status={
+            view().state.history.page === undefined
+              ? view().detail.status
+              : "idle"
+          }
           onFork={
             view().state.history.page === undefined
-              ? (messageId) => void view().controller.fork(messageId)
+              ? setForkPointMessageId
               : undefined
           }
           toolStreams={
@@ -261,6 +285,22 @@ export function SessionDetailBody(props: {
           tools={view().detail.tools}
         />
       </ul>
+      <Show when={forkPointMessageId()}>
+        {(messageId) => (
+          <SessionForkEditor
+            credentials={view().credentials}
+            detail={view().detail}
+            messageId={messageId()}
+            onCancel={() => {
+              setForkPointMessageId(undefined);
+            }}
+            onDiscoverModels={props.providerUpdate.onDiscoverModels}
+            onFork={(forkMessageId, selection) =>
+              view().controller.fork(forkMessageId, selection)
+            }
+          />
+        )}
+      </Show>
       <SessionPendingInputs
         inputs={
           view().controller.view().detail?.pendingInputs ??
@@ -284,17 +324,25 @@ export function SessionDetailBody(props: {
         )}
       </Show>
       <div class="session-composer mt-5 flex min-w-0 flex-col gap-3">
-        <Show when={!active()}>
-          <CompactionControls
-            autoCompact={view().detail.autoCompact}
-            compacting={view().state.compacting}
-            disabled={compactionDisabled()}
-            onCompact={() => void view().controller.compact()}
-            onToggleAutoCompact={(enabled) =>
+        <div class="flex flex-wrap items-center gap-3">
+          <SessionAutoCompactToggle
+            checked={view().detail.autoCompact}
+            disabled={autoCompactionDisabled()}
+            onChange={(enabled) =>
               void view().controller.toggleAutoCompact(enabled)
             }
           />
-        </Show>
+          <Show when={!active()}>
+            <CompactionControls
+              compacting={view().state.compacting}
+              continueAvailable={view().detail.status === "idle"}
+              disabled={compactionDisabled()}
+              onCompact={(continueAfter) =>
+                void view().controller.compact(continueAfter)
+              }
+            />
+          </Show>
+        </div>
         <SessionFollowUp
           availabilityDescriptionId="session-composer-state"
           availabilityLabel={
@@ -332,11 +380,9 @@ export function SessionDetailBody(props: {
               return;
             event.preventDefault();
             if (event.shiftKey) {
-              if (running()) void view().controller.steer();
-            } else if (running() || queued()) {
-              void view().controller.followUp();
-            } else {
               event.currentTarget.form?.requestSubmit();
+            } else if (running()) {
+              void view().controller.steer();
             }
           }}
           onRemoveImage={(index) => {

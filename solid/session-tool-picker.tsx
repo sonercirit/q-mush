@@ -54,6 +54,7 @@ function ToolDetailsPanel(props: {
 export function SessionToolPicker(props: {
   readonly disabled: boolean;
   readonly onChange: (tools: readonly AgentSessionToolName[]) => void;
+  readonly onExpandedChange?: (expanded: boolean) => void;
   readonly tools: readonly AgentSessionToolName[];
 }): JSX.Element {
   const [expanded, setExpanded] = createSignal(false);
@@ -77,6 +78,12 @@ export function SessionToolPicker(props: {
         detailsButton(previous)?.focus();
       });
     }
+  };
+  const toggleExpanded = (): void => {
+    const nextExpanded = !expanded();
+    if (!nextExpanded) closeDetails();
+    setExpanded(nextExpanded);
+    props.onExpandedChange?.(nextExpanded);
   };
   const onDocumentKeyDown = (event: KeyboardEvent): void => {
     if (event.key === "Escape" && openDetails() !== undefined) {
@@ -195,14 +202,13 @@ export function SessionToolPicker(props: {
           aria-expanded={expanded()}
           class="ml-3 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
           data-tool-picker-toggle="true"
-          onClick={() => {
-            if (expanded()) closeDetails();
-            setExpanded((current) => !current);
-          }}
+          onClick={toggleExpanded}
+          data-tool-picker-action="toggle"
           type="button"
         >
-          {expanded() ? "Collapse tools" : "Expand tools"}
+          {expanded() ? "Collapse" : "Expand"}
         </button>
+        <span class="sr-only">Tools and skills controls</span>
       </legend>
       <Show when={expanded()}>
         <div data-tool-picker-controls="true">

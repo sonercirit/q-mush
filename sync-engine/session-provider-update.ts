@@ -11,7 +11,10 @@ import {
   readSessionCredential,
   type SessionCredentialReaders,
 } from "./session-credential-access.ts";
-import { sessionMetadata } from "./session-provider-selection.ts";
+import {
+  requireSessionMetadata,
+  sessionMetadataFromDependencies,
+} from "./session-provider-selection.ts";
 import { updateStoredSessionProvider } from "./session-provider-update-store.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
 
@@ -52,21 +55,14 @@ async function targetMetadata(
   if (credential === undefined) {
     throw new RealtimeCommandError("credential_unavailable");
   }
-  const metadata = await sessionMetadata({
-    discoverModels: dependencies.discoverModels,
-    input,
-    credential,
-    ownerId: userId,
-    discoverProviders: dependencies.discoverOpenRouterProviders,
-  });
-  if ("error" in metadata) {
-    throw new RealtimeCommandError(
-      metadata.error === "provider_unavailable"
-        ? "openrouter_provider_unavailable"
-        : "openrouter_provider_validation_failed",
-    );
-  }
-  return metadata;
+  return requireSessionMetadata(
+    await sessionMetadataFromDependencies({
+      credential,
+      dependencies,
+      input,
+      ownerId: userId,
+    }),
+  );
 }
 
 export async function applySessionProviderUpdate(

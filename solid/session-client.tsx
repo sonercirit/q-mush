@@ -25,17 +25,24 @@ import {
 import type { ProviderViewState } from "./provider-client.tsx";
 import { renderDebugBoundary } from "./render-debug.tsx";
 import type { RunnerViewState } from "./runner-client.tsx";
+import { SessionAttachmentFallbacks } from "./session-attachment-fallbacks.tsx";
 import { SessionAutoCompactToggle } from "./session-autocompact-toggle.tsx";
 import { SessionPromptInput } from "./session-client-forms.tsx";
 import { formatTokenCount } from "./session-context-client.tsx";
 import type { SessionController } from "./session-controller.ts";
 import {
   sessionCredentialSelectOptions,
-  sessionCredentialValue,
   type SessionCredentialOption,
 } from "./session-credential-option.ts";
 import { SessionExecutionEnvironmentSelect } from "./session-execution-environment.tsx";
 import { SessionResults } from "./session-focus-client.tsx";
+import {
+  defaultModelCredentialValue,
+  defaultOnlineRunnerId,
+  selectedOptionValue,
+  selectedSessionCredentialOption,
+  sessionCredentialOptionValue,
+} from "./session-new-selection.ts";
 import type { SessionPanelResources } from "./session-panel-resources.ts";
 import { OpenRouterProviderSelect } from "./session-provider-select.tsx";
 import { runnerSelectOptions } from "./session-reassignment-client.ts";
@@ -84,14 +91,14 @@ function credentialOptions(
 }
 
 function optionValue(option: CredentialOption): string {
-  return sessionCredentialValue(option);
+  return sessionCredentialOptionValue(option);
 }
 
 function selectedCredential(
   credentials: readonly CredentialOption[],
   value: string,
 ): CredentialOption | undefined {
-  return credentials.find((option) => optionValue(option) === value);
+  return selectedSessionCredentialOption(credentials, value);
 }
 
 function renderSessionField(
@@ -177,33 +184,9 @@ function DirectoryInput(props: {
   );
 }
 
-function credentialSelectOptionsFor(
-  credentials: readonly CredentialOption[],
-): readonly CustomSelectOption[] {
-  return sessionCredentialSelectOptions(credentials);
-}
-
-function selectValue(
-  options: readonly CustomSelectOption[],
-  requested: string,
-  fallback: string,
-): string {
-  return options.some((option) => option.value === requested)
-    ? requested
-    : fallback;
-}
-
-function defaultRunnerId(runners: readonly RunnerSummary[]): string {
-  return runners.find(({ isDefault }) => isDefault)?.id ?? runners[0]?.id ?? "";
-}
-
-function defaultCredentialValue(
-  credentials: readonly CredentialOption[],
-): string {
-  const credential =
-    credentials.find((option) => option.credential.isDefault) ?? credentials[0];
-  return credential === undefined ? "" : optionValue(credential);
-}
+const selectValue = selectedOptionValue;
+const defaultRunnerId = defaultOnlineRunnerId;
+const defaultCredentialValue = defaultModelCredentialValue;
 
 function modelSelectOptions(
   models: AgentModelCatalog["models"],
@@ -259,7 +242,7 @@ function NewSessionForm(
     ),
   );
   const credentialSelectOptions = createMemo(() =>
-    credentialSelectOptionsFor(credentials()),
+    sessionCredentialSelectOptions(credentials()),
   );
   const selectedCredentialValue = createMemo(() =>
     selectValue(
@@ -478,6 +461,7 @@ function NewSessionForm(
         }}
         tools={props.state.draft.tools}
       />
+      <SessionAttachmentFallbacks credentials={credentials()} />
       <SessionPromptInput
         disabled={props.state.creating}
         images={props.state.draft.images}

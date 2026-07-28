@@ -16,6 +16,7 @@ import type {
 import { activeSessionDuration } from "../shared/session-timing.ts";
 import { storedActiveSessionState } from "./session-active-query.ts";
 import { currentSessionSegment } from "./session-segment.ts";
+import { notifySessionSteeringInput } from "./session-steering-wakeup.ts";
 import type { StoredUserMessageInput } from "./session-store-types.ts";
 import { userMessageValues } from "./session-store-values.ts";
 import { touchStoredSession } from "./session-touch.ts";
@@ -23,8 +24,6 @@ import {
   parseStoredImages,
   serializeStoredImages,
 } from "./stored-agent-images.ts";
-
-const MAXIMUM_PENDING_SESSION_INPUTS = 8;
 
 export interface EnqueuePendingSessionInput {
   readonly clientRequestId: string;
@@ -36,9 +35,7 @@ export interface EnqueuePendingSessionInput {
 export type EnqueuePendingInputResult =
   | { readonly input: AgentSessionPendingInput; readonly status: "accepted" }
   | { readonly input: AgentSessionPendingInput; readonly status: "duplicate" }
-  | {
-      readonly status: "conflict" | "full" | "invalid_state" | "not_found";
-    };
+  | { readonly status: "conflict" | "invalid_state" | "not_found" };
 
 interface StoredPendingInput {
   readonly clientRequestId: string;
@@ -54,15 +51,16 @@ interface StoredPendingInput {
 function storedPendingInput(
   stored: StoredPendingInput,
 ): AgentSessionPendingInput {
+  const attachments = parseStoredImages(
+    stored.images,
+    "Stored pending session attachments are invalid",
+  );
   return {
     clientRequestId: stored.clientRequestId,
     content: stored.content,
     createdAt: stored.createdAt.getTime(),
     id: stored.id,
-    images: parseStoredImages(
-      stored.images,
-      "Stored pending session images are invalid",
-    ),
+    images: attachments,
     kind: stored.kind,
   };
 }
@@ -148,6 +146,12 @@ export function activePendingInput(
       };
 }
 
+export function hasPendingSteeringInput(
+  inputs: readonly AgentSessionPendingInput[],
+): boolean {
+  return inputs.some(({ kind }) => kind === "steer");
+}
+
 export function storedPendingInputs(
   database: Pick<AppDatabase, "select">,
   sessionId: string,
@@ -202,6 +206,9 @@ export function appendSystemFollowUp(options: {
     SYSTEM_ID,
     options.now,
   );
+  if (options.kind === "steer") {
+    notifySessionSteeringInput(options.sessionId);
+  }
   return true;
 }
 
@@ -306,12 +313,6 @@ function enqueuePendingInputInTransaction(
   if (!validInputState(session.status, options.input.kind)) {
     return { status: "invalid_state" };
   }
-  if (
-    activeInputs(transaction, options.sessionId).length >=
-    MAXIMUM_PENDING_SESSION_INPUTS
-  ) {
-    return { status: "full" };
-  }
 
   const id = options.generateId(options.now);
   const values: typeof agentPendingInputs.$inferInsert = {
@@ -343,9 +344,13 @@ function enqueuePendingInputInTransaction(
 export function enqueuePendingInput(
   options: EnqueuePendingInputOptions,
 ): EnqueuePendingInputResult {
-  return options.database.transaction((transaction) =>
+  const result = options.database.transaction((transaction) =>
     enqueuePendingInputInTransaction(transaction, options),
   );
+  if (result.status === "accepted" && result.input.kind === "steer") {
+    notifySessionSteeringInput(options.sessionId);
+  }
+  return result;
 }
 
 export type CancelPendingInputResult =
@@ -513,13 +518,13 @@ export function takeSteeringInputs(options: {
       consumed.push(input);
     }
     return consumed.map((input) => {
-      const images = parseStoredImages(
+      const attachments = parseStoredImages(
         input.images,
-        "Stored pending session images are invalid",
+        "Stored pending session attachments are invalid",
       );
       return {
         content: input.content,
-        ...(images.length === 0 ? {} : { images }),
+        ...(attachments.length === 0 ? {} : { attachments }),
         role: "user" as const,
       };
     });

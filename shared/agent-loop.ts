@@ -1,4 +1,4 @@
-import type { AgentImage } from "./agent-images.ts";
+import type { AgentAttachment } from "./agent-attachments.ts";
 import { isRecord } from "./auth-model.ts";
 import { parseOptionalJsonRecord } from "./json-record.ts";
 import type { AgentSessionUsageUpdate } from "./session-model.ts";
@@ -48,7 +48,8 @@ export function readAgentToolCalls(
 export type AgentConversationMessage =
   | {
       readonly content: string;
-      readonly images?: readonly AgentImage[];
+      readonly attachments?: readonly AgentAttachment[];
+      readonly images?: readonly AgentAttachment[];
       readonly role: "user";
     }
   | {

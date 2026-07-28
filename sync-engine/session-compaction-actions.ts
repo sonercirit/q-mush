@@ -1,5 +1,8 @@
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
-import type { AgentSessionDetail } from "../shared/session-model.ts";
+import type {
+  AgentSessionDetail,
+  RestartHandoffOperation,
+} from "../shared/session-model.ts";
 import type { GoogleAuth } from "./auth.ts";
 import { withAuthenticatedUser } from "./authenticated-request.ts";
 import {
@@ -76,6 +79,10 @@ type ManualCompactionCredential = SessionCredentialOperation;
 
 interface ManualCompactionDependencies extends SessionLaunchBoundary {
   readonly credential: ManualCompactionCredential;
+  readonly operation: Extract<
+    RestartHandoffOperation,
+    "compact" | "compact_and_continue"
+  >;
   readonly workspaceId?: string;
 }
 
@@ -97,6 +104,12 @@ export async function startManualSessionCompaction(
   );
   if (existing === undefined) {
     return createApiError("not_found", 404);
+  }
+  if (
+    dependencies.operation === "compact_and_continue" &&
+    existing.status !== "idle"
+  ) {
+    return createApiError("session_busy", 409);
   }
   if (existing.runnerRequired) {
     return createApiError("runner_required", 409);
@@ -120,8 +133,12 @@ export async function startManualSessionCompaction(
       return queued;
     }
 
-    if (!dependencies.launch(queued, credential, user.id)) {
-      if (pauseSessionForRestart(dependencies, queued, "compact")) {
+    if (
+      !dependencies.launch(queued, credential, user.id, dependencies.operation)
+    ) {
+      if (
+        pauseSessionForRestart(dependencies, queued, dependencies.operation)
+      ) {
         dependencies.notify(user.id, queued.id);
         return createApiError("server_restarting", 503);
       }

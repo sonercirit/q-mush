@@ -14,6 +14,7 @@ import { completedRunnerCommandResult } from "./runner-command-result.ts";
 
 const BRAVE_SEARCH_TOOL_NAME = "brave_search";
 const PARALLEL_TOOL_NAME = "parallel";
+const SLEEP_TOOL_NAME = "sleep";
 
 type AgentSkillParameters = readonly [
   name: string,
@@ -146,19 +147,25 @@ function executeParallelSkills(
                   `Error: ${recipientName} is not enabled for this session.`,
                 ),
               )
-            : isAskQuestionsToolName(recipientName)
+            : recipientName === SLEEP_TOOL_NAME
               ? Promise.resolve(
                   completedRunnerCommandResult(
-                    "Error: ask_questions cannot run inside parallel or another tool.",
+                    "Error: sleep cannot run inside parallel.",
                   ),
                 )
-              : recipientName === BRAVE_SEARCH_TOOL_NAME
-                ? executeBraveSearch(options, parameters, signal).then(
-                    completedRunnerCommandResult,
+              : isAskQuestionsToolName(recipientName)
+                ? Promise.resolve(
+                    completedRunnerCommandResult(
+                      "Error: ask_questions cannot run inside parallel or another tool.",
+                    ),
                   )
-                : options
-                    .executeTool(recipientName, parameters, signal, callId)
-                    .then(normalizedResult),
+                : recipientName === BRAVE_SEARCH_TOOL_NAME
+                  ? executeBraveSearch(options, parameters, signal).then(
+                      completedRunnerCommandResult,
+                    )
+                  : options
+                      .executeTool(recipientName, parameters, signal, callId)
+                      .then(normalizedResult),
         signal,
       ),
     signal,

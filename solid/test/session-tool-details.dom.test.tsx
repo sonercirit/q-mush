@@ -102,7 +102,7 @@ test("expands from the toggle and collapses the complete tool controls", () => {
   const toggle = expandPicker(container);
 
   expect(toggle.getAttribute("aria-expanded")).toBe("true");
-  expect(toggle.textContent).toContain("Collapse tools");
+  expect(toggle.textContent).toContain("Collapse");
   expect(toolInputCount(container)).toBe(AGENT_SESSION_TOOL_NAMES.length);
   expect(
     container.querySelector("[data-tool-picker-controls='true']"),
@@ -111,7 +111,7 @@ test("expands from the toggle and collapses the complete tool controls", () => {
   toggle.click();
 
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
-  expect(toggle.textContent).toContain("Expand tools");
+  expect(toggle.textContent).toContain("Expand");
   expect(toolInputCount(container)).toBe(0);
   expect(container.querySelector("input[name='session-tools']")).toBeNull();
 });

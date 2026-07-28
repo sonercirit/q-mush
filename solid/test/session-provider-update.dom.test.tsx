@@ -19,6 +19,7 @@ import {
   mountTestView,
   queryTestElementAs,
 } from "./dom-test-helpers.ts";
+import { testSessionCredentialOption } from "./session-credential-fixtures.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
 const MODEL_CATALOG = testAgentModelCatalog({
@@ -312,30 +313,17 @@ test("warns and requires explicit confirmation before changing providers", async
       controller={controller}
       credentialAvailable
       credentials={[
-        {
-          credential: {
-            accountId: null,
-            id: "credential-1",
-            isDefault: true,
-            isGlobal: true,
-            label: "OpenAI",
-            source: "api_key",
-            workspaceIds: [],
-          },
+        testSessionCredentialOption({
+          id: "credential-1",
+          isDefault: true,
+          label: "OpenAI",
           provider: "openai",
-        },
-        {
-          credential: {
-            accountId: null,
-            id: "credential-2",
-            isDefault: false,
-            isGlobal: true,
-            label: "OpenRouter",
-            source: "api_key",
-            workspaceIds: [],
-          },
+        }),
+        testSessionCredentialOption({
+          id: "credential-2",
+          label: "OpenRouter",
           provider: "openrouter",
-        },
+        }),
       ]}
       onOpenDirectoryPicker={() => undefined}
       runners={[]}

@@ -89,7 +89,10 @@ test("keeps editable session controls in the reactive tree", () => {
   expect(newSessionHtml).toContain('id="session-prompt"');
   expect(newSessionHtml).toContain("Tools &amp; skills");
   expect(newSessionHtml).toContain('data-tool-picker-toggle="true"');
-  expect(newSessionHtml).toContain("Expand tools");
+  expect(newSessionHtml).toContain(
+    'data-tool-picker-action="toggle" type="button">Expand</button>',
+  );
+  expect(newSessionHtml).not.toContain("Expand tools");
   expect(newSessionHtml).toContain('id="session-auto-compact"');
   expect(newSessionHtml).toMatch(
     /<input[^>]*checked[^>]*id="session-auto-compact"[^>]*name="autoCompact"[^>]*type="checkbox"/u,
@@ -262,7 +265,8 @@ test("renders independently filtered session instructions and activity", () => {
   expect(html).not.toContain('<em class="text-slate-100 italic">instructions');
   expect(html).toContain("Agent file: AGENTS.md");
   expect(html).toContain("Context: Not reported / 200K");
-  expect(html).toContain("Auto compact");
+  expect(html).toContain('id="session-auto-compact"');
+  expect(html).toContain("Compact automatically near the context limit");
   expect(html).toContain("Tool definitions");
   for (const toolName of ["read", "bash", "edit", "write", "parallel"]) {
     expect(html).toContain(
@@ -297,7 +301,7 @@ test("renders image pickers, previews, and transcript images", () => {
     followUpImages: [TEST_AGENT_IMAGE],
   });
 
-  expect(html).toContain('accept="image/png,image/jpeg,image/gif,image/webp"');
+  expect(html).toContain('accept="image/png,image/jpeg,image/gif,image/webp,');
   expect(html).toContain(
     `src="data:image/png;base64,${TEST_AGENT_IMAGE.data}"`,
   );

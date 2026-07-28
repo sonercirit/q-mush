@@ -17,8 +17,20 @@ export function sessionIsActive(status: AgentSessionStatus): boolean {
   return status === "queued" || status === "running" || status === "paused";
 }
 
+export function sessionCanCompactAndContinue(
+  status: AgentSessionStatus,
+): boolean {
+  return status === "idle";
+}
+
 export function sessionCanResume(status: AgentSessionStatus): boolean {
   return status === "idle" || status === "failed" || status === "stopped";
+}
+
+export function sessionCanUpdateAutoCompaction(
+  status: AgentSessionStatus,
+): boolean {
+  return sessionCanResume(status) || sessionIsActive(status);
 }
 
 export function selectedMutation(

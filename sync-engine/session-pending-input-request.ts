@@ -1,4 +1,4 @@
-import { readAgentImages } from "../shared/agent-images.ts";
+import { readAgentAttachments } from "../shared/agent-attachments.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import type { SessionPendingInputRequest } from "../shared/session-pending-input.ts";
 import { readIdentifier } from "./session-request-helpers.ts";
@@ -18,13 +18,15 @@ export function readSessionPendingInputCommand(
   }
 
   const clientRequestId = readIdentifier(value["clientRequestId"]);
-  const images = readAgentImages(value["images"]);
+  const attachments = readAgentAttachments(
+    value["attachments"] ?? value["images"],
+  );
   const kind = value["kind"];
   const prompt = value["prompt"];
   const sessionId = readIdentifier(value["sessionId"]);
   if (
     clientRequestId === undefined ||
-    images === undefined ||
+    attachments === undefined ||
     (kind !== "follow_up" && kind !== "steer") ||
     typeof prompt !== "string" ||
     prompt.length > MAXIMUM_PROMPT_LENGTH ||
@@ -33,7 +35,14 @@ export function readSessionPendingInputCommand(
     return undefined;
   }
   const content = prompt.trim();
-  return content.length === 0 && images.length === 0
+  return content.length === 0 && attachments.length === 0
     ? undefined
-    : { clientRequestId, images, kind, prompt: content, sessionId };
+    : {
+        attachments,
+        clientRequestId,
+        images: attachments,
+        kind,
+        prompt: content,
+        sessionId,
+      };
 }

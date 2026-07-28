@@ -1,9 +1,10 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import type { ProviderCredentialAccess } from "../../shared/provider-credential-store.ts";
 import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 import type {
   AgentSessionDetail,
+  AgentSessionStatus,
   RestartHandoffOperation,
 } from "../../shared/session-model.ts";
 import { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
@@ -67,7 +68,12 @@ interface LaunchRaceExpectation {
 }
 
 interface ExistingLaunchPath {
-  readonly label: "ordinary send" | "ordinary continue" | "manual compaction";
+  readonly initialStatus: "failed" | "idle";
+  readonly label:
+    | "ordinary send"
+    | "ordinary continue"
+    | "manual compaction"
+    | "manual compact and continue";
   readonly operation: RestartHandoffOperation;
   readonly run: (setup: FailedLaunchRaceSetup) => Promise<Response>;
 }
@@ -128,14 +134,7 @@ function failCreatedSession(
   detail: AgentSessionDetail,
   now: () => number,
 ): void {
-  expect(
-    setup.store.transitionRuntime(
-      detail.id,
-      "failed",
-      now(),
-      detail.generation,
-    ),
-  ).toBe(true);
+  transitionTestSession(setup, detail, "failed", now);
 }
 
 function launchRace(
@@ -236,11 +235,54 @@ function credentialAction(
   return (_userId, _detail, action) => Promise.resolve(action(credential));
 }
 
-function failedSessionSetup(): FailedLaunchTestSetup {
+function transitionTestSession(
+  setup: SessionStoreTestSetup,
+  detail: AgentSessionDetail,
+  status: "failed" | "idle" | "running",
+  now: () => number,
+): void {
+  expect(
+    setup.store.transitionRuntime(detail.id, status, now(), detail.generation),
+  ).toBe(true);
+}
+
+function launchableSessionSetup(
+  status: AgentSessionStatus,
+): FailedLaunchTestSetup {
   const setup = createStore();
   const now = testClock();
-  const detail = createTestSession(setup.store);
-  failCreatedSession(setup, detail, now);
+  const created = createTestSession(setup.store);
+  switch (status) {
+    case "failed":
+      failCreatedSession(setup, created, now);
+      break;
+    case "idle":
+      transitionTestSession(setup, created, "running", now);
+      transitionTestSession(setup, created, "idle", now);
+      break;
+    case "paused":
+      expect(
+        setup.store.pauseQueuedForRestart(
+          { generation: created.generation, sessionId: created.id },
+          "server",
+          RESTART_ID,
+          "compact",
+          now(),
+        ),
+      ).toBe(true);
+      break;
+    case "queued":
+      break;
+    case "running":
+      transitionTestSession(setup, created, "running", now);
+      break;
+    case "stopped":
+      expect(setup.store.stop(TEST_USER_ID, created.id, now())).toBe(true);
+      break;
+  }
+  const detail = expectStoredSession(setup, TEST_USER_ID, created.id, {
+    status,
+  });
   return {
     ...setup,
     credential: createTestProviderCredential(detail.credentialId),
@@ -249,8 +291,11 @@ function failedSessionSetup(): FailedLaunchTestSetup {
   };
 }
 
-function failedLaunchRaceSetup(race: LaunchRace): FailedLaunchRaceSetup {
-  const setup = failedSessionSetup();
+function failedLaunchRaceSetup(
+  race: LaunchRace,
+  status: "failed" | "idle" = "failed",
+): FailedLaunchRaceSetup {
+  const setup = launchableSessionSetup(status);
   const launch = launchRace(setup, race, setup.now);
   return { ...setup, launch, runtimes: launch.runtimes };
 }
@@ -375,31 +420,49 @@ function queueLaunchCase(
   );
 }
 
+function manualCompactionLaunchPath(
+  initialStatus: "failed" | "idle",
+  operation: Extract<
+    RestartHandoffOperation,
+    "compact" | "compact_and_continue"
+  >,
+): ExistingLaunchPath {
+  return {
+    initialStatus,
+    label:
+      operation === "compact"
+        ? "manual compaction"
+        : "manual compact and continue",
+    operation,
+    run: (setup) =>
+      startManualSessionCompaction(
+        {
+          ...launchBoundary(setup),
+          credential: credentialAction(setup.credential),
+          operation,
+        },
+        TEST_AUTHENTICATED_USER,
+        setup.detail.id,
+      ),
+  };
+}
+
 const EXISTING_LAUNCH_PATHS: readonly ExistingLaunchPath[] = [
   {
+    initialStatus: "failed",
     label: "ordinary send",
     operation: "agent",
     run: (setup) =>
       queueLaunchCase(setup, { images: [], prompt: "Queued follow-up" }),
   },
   {
+    initialStatus: "failed",
     label: "ordinary continue",
     operation: "agent",
     run: (setup) => queueLaunchCase(setup),
   },
-  {
-    label: "manual compaction",
-    operation: "compact",
-    run: (setup) =>
-      startManualSessionCompaction(
-        {
-          ...launchBoundary(setup),
-          credential: credentialAction(setup.credential),
-        },
-        TEST_AUTHENTICATED_USER,
-        setup.detail.id,
-      ),
-  },
+  manualCompactionLaunchPath("failed", "compact"),
+  manualCompactionLaunchPath("idle", "compact_and_continue"),
 ];
 
 function launchRaceTests(expected: LaunchRaceExpectation): void {
@@ -441,7 +504,7 @@ function launchRaceTests(expected: LaunchRaceExpectation): void {
 
   for (const path of EXISTING_LAUNCH_PATHS) {
     test(`${path.label} handles ${expected.label} at its launch call`, async () => {
-      const setup = failedLaunchRaceSetup(expected.race);
+      const setup = failedLaunchRaceSetup(expected.race, path.initialStatus);
       const response = await path.run(setup);
 
       await expectLaunchResponse(response, expected);
@@ -541,6 +604,33 @@ test("validates and persists spawn auto-compaction", async () => {
   expect(spawnedSessionAutoCompact(disabledSetup)).toBe(false);
   closeSessionTestDatabase(disabledSetup.database);
 });
+
+test.each(["failed", "paused", "queued", "running", "stopped"] as const)(
+  "rejects compact and continue for a $status session before credential access",
+  async (status) => {
+    const setup = launchableSessionSetup(status);
+    const credential = vi.fn(credentialAction(setup.credential));
+
+    const response = await startManualSessionCompaction(
+      {
+        credential,
+        launch: () => true,
+        notify: () => undefined,
+        now: setup.now,
+        operation: "compact_and_continue",
+        runtimes: new SessionRuntimes(),
+        store: setup.store,
+      },
+      TEST_AUTHENTICATED_USER,
+      setup.detail.id,
+    );
+
+    await expectJsonResponse(response, 409, { error: "session_busy" });
+    expect(credential).not.toHaveBeenCalled();
+    expectStoredSession(setup, TEST_USER_ID, setup.detail.id, { status });
+    closeSessionTestDatabase(setup.database);
+  },
+);
 
 describe.each(LAUNCH_RACES)("$label", (expected) => {
   launchRaceTests(expected);

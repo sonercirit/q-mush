@@ -1,20 +1,22 @@
-import { createEffect, createSignal, untrack, type JSX } from "solid-js";
-import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
+import { createEffect, untrack, type JSX } from "solid-js";
+
 import type { RunnerSummary } from "../shared/runner-model.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { CustomSelect, type CustomSelectOption } from "./custom-select.tsx";
 import type { UserSpawnSessionSelection } from "./session-controller-spawn.ts";
 import {
+  selectedSessionCredentialOption,
   sessionCredentialSelectOptions,
-  sessionCredentialValue,
-  type SessionCredentialOption,
 } from "./session-credential-option.ts";
 import {
-  createSessionEditorRequestState,
   SessionEditorError,
   SessionEditorSection,
 } from "./session-editor-client.tsx";
-import { modelCatalogOptions } from "./session-model-options.ts";
+import {
+  createSessionModelPickerState,
+  SessionModelPickerFields,
+  type SessionModelPickerSelectionProps,
+} from "./session-model-picker.tsx";
 import { SessionToolPicker } from "./session-tool-picker.tsx";
 import type { SessionDraft } from "./session-view-state.ts";
 
@@ -22,10 +24,6 @@ type SpawnDraft = Omit<SessionDraft, "images" | "openRouterProviderTag">;
 
 type SpawnSelect =
   "credential" | "environment" | "model" | "reasoning" | "runner";
-
-function credentialValue(option: SessionCredentialOption): string {
-  return sessionCredentialValue(option);
-}
 
 function initialDraft(detail: AgentSessionDetail): SpawnDraft {
   return {
@@ -45,25 +43,8 @@ function options(values: readonly (readonly [string, string])[]) {
   return values.map(([value, label]) => ({ label, value }));
 }
 
-function reasoningOptions(
-  catalog: AgentModelCatalog | undefined,
-  model: string,
-): readonly CustomSelectOption[] {
-  const efforts =
-    catalog?.models.find(({ id }) => id === model)?.reasoningEfforts ?? [];
-  return [
-    { label: "Model default", value: "" },
-    ...efforts.map((effort) => ({ label: effort, value: effort })),
-  ];
-}
-
-interface SpawnEditorProps {
-  readonly credentials: readonly SessionCredentialOption[];
+interface SpawnEditorProps extends SessionModelPickerSelectionProps {
   readonly detail: AgentSessionDetail;
-  readonly onDiscoverModels: (
-    provider: "openai" | "openrouter",
-    credentialId: string,
-  ) => Promise<AgentModelCatalog | undefined>;
   readonly onSpawn: (selection: UserSpawnSessionSelection) => Promise<void>;
   readonly runners: readonly RunnerSummary[];
 }
@@ -84,8 +65,9 @@ function spawnSelection(
   props: SpawnEditorProps,
   draft: SpawnDraft,
 ): UserSpawnSessionSelection | undefined {
-  const selected = props.credentials.find(
-    (option) => credentialValue(option) === draft.credential,
+  const selected = selectedSessionCredentialOption(
+    props.credentials,
+    draft.credential,
   );
   if (
     selected === undefined ||
@@ -115,50 +97,29 @@ function spawnSelection(
 }
 
 export function SessionSpawnEditor(props: SpawnEditorProps): JSX.Element {
-  const [draft, setDraft] = createSignal(
-    untrack(() => initialDraft(props.detail)),
+  const initial = untrack(() => initialDraft(props.detail));
+  const modelState = createSessionModelPickerState<SpawnDraft, SpawnSelect>(
+    initial,
+    props,
   );
-  const [catalog, setCatalog] = createSignal<AgentModelCatalog>();
-  const [open, setOpen] = createSignal<SpawnSelect>();
-  const request = createSessionEditorRequestState();
+  const { draft, editor, open, request, setDraft, setOpen } = modelState;
   const error = request.error;
-  const discovery = request.latest;
   const pending = request.pending;
   const setError = request.setError;
   const setPending = request.setPending;
   let discoveredSelection: SpawnDraft | undefined;
-  const patch = (values: Partial<SpawnDraft>): void => {
-    setDraft((current) => ({ ...current, ...values }));
-  };
   const available = selectOptions(props);
-  const models = (): readonly CustomSelectOption[] =>
-    modelCatalogOptions(catalog());
-  const selectedModel = () =>
-    catalog()?.models.find(({ id }) => id === draft().model);
+  const discover = editor.discover;
   const toggle = (name: SpawnSelect): void => {
     setOpen(open() === name ? undefined : name);
   };
-  const discover = async (credential: string): Promise<void> => {
-    const selected = props.credentials.find(
-      (option) => credentialValue(option) === credential,
-    );
-    if (selected === undefined) return;
-    const current = discovery.begin();
-    setCatalog(undefined);
-    const discovered = await props.onDiscoverModels(
-      selected.provider,
-      selected.credential.id,
-    );
-    if (!discovery.isLatest(current)) return;
-    setCatalog(discovered);
-    if (discovered === undefined) {
-      setError("Models are unavailable for that credential.");
-      return;
-    }
-    const model = discovered.models.some(({ id }) => id === draft().model)
-      ? draft().model
-      : (discovered.models[0]?.id ?? "");
-    patch({ model });
+  const modelPickerOpen = () => {
+    const selected = open();
+    return selected === "credential" ||
+      selected === "model" ||
+      selected === "reasoning"
+      ? selected
+      : undefined;
   };
   createEffect(() => {
     const initial = initialDraft(props.detail);
@@ -173,11 +134,10 @@ export function SessionSpawnEditor(props: SpawnEditorProps): JSX.Element {
     setError(undefined);
     void discover(initial.credential);
   });
-  const chooseCredential = (credential: string): void => {
-    setOpen(undefined);
-    patch({ credential, model: "", reasoningEffort: "" });
-    void discover(credential);
+  const patch = (values: Partial<SpawnDraft>): void => {
+    setDraft((current) => ({ ...current, ...values }));
   };
+  const chooseCredential = editor.actions.choose.credential;
   const submit = async (): Promise<void> => {
     const selection = spawnSelection(props, draft());
     if (selection === undefined) {
@@ -228,20 +188,21 @@ export function SessionSpawnEditor(props: SpawnEditorProps): JSX.Element {
           required
           selectedValue={draft().runnerId}
         />
-        <CustomSelect
+        <SessionModelPickerFields
+          catalog={editor.catalog()}
+          credentialEmptyLabel="No model credentials"
+          credentialOptions={available.credentials()}
           disabled={pending()}
-          emptyLabel="No model credentials"
-          id="spawn-credential"
-          label="Model credential"
-          name="spawnCredential"
-          onChoose={chooseCredential}
-          onToggle={() => {
-            toggle("credential");
+          idPrefix="spawn"
+          namePrefix="spawn"
+          onChooseCredential={chooseCredential}
+          onChooseModel={editor.actions.choose.model}
+          onChooseReasoning={editor.actions.choose.reasoning}
+          onToggle={(name) => {
+            toggle(name);
           }}
-          open={open() === "credential"}
-          options={available.credentials()}
-          required
-          selectedValue={draft().credential}
+          open={modelPickerOpen()}
+          selection={draft()}
         />
         <div>
           <label
@@ -288,44 +249,6 @@ export function SessionSpawnEditor(props: SpawnEditorProps): JSX.Element {
           ])}
           required
           selectedValue={draft().executionEnvironment}
-        />
-        <CustomSelect
-          disabled={pending() || models().length === 0}
-          emptyLabel="Models unavailable"
-          id="spawn-model"
-          label="Model"
-          name="spawnModel"
-          onChoose={(model) => {
-            patch({ model, reasoningEffort: "" });
-            setOpen(undefined);
-          }}
-          onToggle={() => {
-            toggle("model");
-          }}
-          open={open() === "model"}
-          options={models()}
-          required
-          selectedValue={draft().model}
-        />
-        <CustomSelect
-          disabled={
-            pending() || (selectedModel()?.reasoningEfforts.length ?? 0) === 0
-          }
-          emptyLabel="Model default"
-          id="spawn-reasoning"
-          label="Reasoning effort"
-          name="spawnReasoningEffort"
-          onChoose={(reasoningEffort) => {
-            patch({ reasoningEffort });
-            setOpen(undefined);
-          }}
-          onToggle={() => {
-            toggle("reasoning");
-          }}
-          open={open() === "reasoning"}
-          options={reasoningOptions(catalog(), draft().model)}
-          required={false}
-          selectedValue={draft().reasoningEffort}
         />
         <label class="flex items-center gap-2 text-sm text-slate-300 sm:col-span-2">
           <input

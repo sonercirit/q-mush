@@ -28,6 +28,10 @@ import {
   readProviderIntegrationConfiguration,
   type ProviderIntegration,
 } from "./provider-integration.ts";
+import {
+  createOpenRouterQuotaReader,
+  unsupportedQuotaReset,
+} from "./provider-quota.ts";
 import { prepareOpenRouterSessionCredentialProviderState } from "./session-provider-selection.ts";
 
 const OPENROUTER_AUTHORIZATION_URL = "https://openrouter.ai/auth";
@@ -152,6 +156,8 @@ export function createOpenRouterIntegrationFromEnvironment(
         ownerId: context.userId,
         snapshot: context.snapshot,
       }),
+    createQuotaReader: createOpenRouterQuotaReader,
+    createQuotaResetter: () => unsupportedQuotaReset,
     provider: "openrouter",
     readCredentialDetails,
   });

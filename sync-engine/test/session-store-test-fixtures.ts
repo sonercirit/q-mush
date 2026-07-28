@@ -32,6 +32,12 @@ const GENERATED_IDS = [
   "018bcfe5-6800-7000-8000-000000000056",
   "018bcfe5-6800-7000-8000-000000000057",
   "018bcfe5-6800-7000-8000-000000000058",
+  "018bcfe5-6800-7000-8000-000000000059",
+  "018bcfe5-6800-7000-8000-000000000060",
+  "018bcfe5-6800-7000-8000-000000000061",
+  "018bcfe5-6800-7000-8000-000000000062",
+  "018bcfe5-6800-7000-8000-000000000063",
+  "018bcfe5-6800-7000-8000-000000000064",
 ] as const;
 
 export function testSessionInput(
@@ -57,11 +63,11 @@ export function createStore() {
   addSessionTestRunner(database, "session-store-machine", STORE_RUNNER_ID);
   addTestProviderCredential(database, STORE_CREDENTIAL_ID);
   const ids = [...GENERATED_IDS];
+  const generateId = () => takeValue(ids, "The test ran out of session IDs");
   return {
     database,
-    store: new SessionStore(database, () =>
-      takeValue(ids, "The test ran out of session IDs"),
-    ),
+    generateId,
+    store: new SessionStore(database, generateId),
   };
 }
 

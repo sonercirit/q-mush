@@ -11,6 +11,7 @@ import type { SessionRealtimeCommands } from "./session-realtime-commands.ts";
 import type { DurableRunnerRestartGate } from "./session-restart-coordinator.ts";
 
 export interface SessionIntegration extends SessionDetailReader {
+  attachmentFallbacks?(request: Request): Promise<Response> | Response;
   collection(request: Request): Response | Promise<Response>;
   compact(request: Request, sessionId: string): Promise<Response>;
   compaction(request: Request, sessionId: string): Promise<Response>;

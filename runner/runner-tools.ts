@@ -21,20 +21,26 @@ import type {
 import {
   createPageFetchRunnerTool,
   PAGE_FETCH_TOOL_NAME,
+  type PageFetchRunnerTool,
 } from "./page-fetch.ts";
+import { attachmentPathFromReference } from "./runner-attachments.ts";
+import {
+  MAXIMUM_TOOL_OUTPUT_LINES,
+  readContinuation,
+  type RunnerOutputSpills,
+} from "./runner-output-spills.ts";
 import {
   formatRunnerProcessResult,
   runnerCommandResultFromOutput,
   runRunnerProcess,
 } from "./runner-process.ts";
-import type { RunnerReadBudget } from "./runner-read-budget.ts";
 import {
   resolveRunnerWorkspace,
-  runnerPathIsWithin,
+  secureRunnerPath,
 } from "./runner-workspace.ts";
 
 const MAX_FILE_BYTES = 1024 * 1024;
-const DEFAULT_READ_LINES = 2_000;
+const DEFAULT_READ_LINES = MAXIMUM_TOOL_OUTPUT_LINES;
 const MAXIMUM_EDITS = 100;
 
 type ToolArguments = Readonly<Record<string, unknown>>;
@@ -53,7 +59,8 @@ type RunnerShellExecutor = (
 
 export interface RunnerToolExecutionOptions {
   readonly mapAbsolutePath?: (path: string) => string;
-  readonly readBudget?: RunnerReadBudget;
+  readonly outputSpills?: RunnerOutputSpills;
+  readonly pageFetch?: PageFetchRunnerTool;
   readonly shell?: RunnerShellExecutor;
   readonly stream?: RunnerToolStream;
 }
@@ -125,48 +132,6 @@ function requiredInteger(
   return value;
 }
 
-function assertWithin(root: string, candidate: string): void {
-  if (!runnerPathIsWithin(root, candidate)) {
-    throw new Error("The requested path is outside the session workspace");
-  }
-}
-
-async function existingAncestor(path: string): Promise<string> {
-  let candidate = path;
-
-  for (;;) {
-    try {
-      return await realpath(candidate);
-    } catch {
-      const parent = dirname(candidate);
-
-      if (parent === candidate) {
-        throw new Error("The requested path has no accessible parent");
-      }
-
-      candidate = parent;
-    }
-  }
-}
-
-async function securePath(
-  root: string,
-  path: string,
-  mayNotExist = false,
-): Promise<string> {
-  const candidate = resolve(root, path);
-  assertWithin(root, candidate);
-
-  if (mayNotExist) {
-    assertWithin(root, await existingAncestor(candidate));
-    return candidate;
-  }
-
-  const canonical = await realpath(candidate);
-  assertWithin(root, canonical);
-  return canonical;
-}
-
 async function pathArgument(
   root: string,
   arguments_: ToolArguments,
@@ -178,13 +143,17 @@ async function pathArgument(
 ): Promise<string> {
   const requested = requiredString(arguments_, "path", 4_096);
   const mapped = options.mapAbsolutePath?.(requested) ?? requested;
+  const attachmentPath = await attachmentPathFromReference(root, mapped);
+  if (attachmentPath !== undefined) {
+    return attachmentPath;
+  }
   if (options.allowedExternalPath?.(resolve(root, mapped)) === true) {
     const canonical = await realpath(mapped);
     if (options.allowedExternalPath(canonical)) {
       return canonical;
     }
   }
-  return securePath(root, mapped, options.mayNotExist);
+  return secureRunnerPath(root, mapped, options.mayNotExist);
 }
 
 function displayPath(root: string, path: string): string {
@@ -226,28 +195,6 @@ async function readPathContent(
   return { content: await readTextFile(path, maximumBytes), path };
 }
 
-function readContinuation(
-  content: string,
-  offset: number,
-  limit: number,
-): string {
-  const lines = content.split("\n");
-  const start = offset - 1;
-  if (start >= lines.length) {
-    throw new Error(
-      `Offset ${String(offset)} is beyond end of file (${String(lines.length)} lines total)`,
-    );
-  }
-  const selected = lines.slice(start, start + limit);
-  const requested = selected.join("\n");
-  const nextOffset = start + selected.length + 1;
-  return nextOffset <= lines.length
-    ? `${requested}\n\n[Showing lines ${String(offset)}-${String(nextOffset - 1)} of ${String(lines.length)}. Use offset=${String(nextOffset)} to continue.]`
-    : limit >= lines.length && offset === 1
-      ? content
-      : requested;
-}
-
 type RunnerFileTool = (
   root: string,
   arguments_: ToolArguments,
@@ -285,11 +232,11 @@ async function readTool(
   ...parameters: Parameters<RunnerFileTool>
 ): Promise<string> {
   const { arguments_, options, root } = runnerFileToolArguments(parameters);
-  const { content, path } = await readPathContent(
+  const { content } = await readPathContent(
     root,
     arguments_,
     options?.mapAbsolutePath,
-    (candidate) => options?.readBudget?.ownsPath(candidate) === true,
+    (candidate) => options?.outputSpills?.ownsPath(candidate) === true,
   );
   const offset = optionalInteger(arguments_, "offset", 1, 1, 1_000_000_000);
   const limit = optionalInteger(
@@ -299,13 +246,7 @@ async function readTool(
     1,
     1_000_000_000,
   );
-  const output = readContinuation(content, offset, limit);
-  if (options?.readBudget === undefined) {
-    return output;
-  }
-  return options.readBudget.isSpillPath(path)
-    ? output
-    : options.readBudget.apply(output);
+  return readContinuation(content, offset, limit);
 }
 
 async function writeTool(
@@ -574,7 +515,17 @@ async function parallelToolResult(
       ),
     signal,
   );
-  return aggregateParallelToolResults(results);
+  const aggregate = aggregateParallelToolResults(results);
+  return options?.outputSpills === undefined
+    ? aggregate
+    : {
+        ...aggregate,
+        output: JSON.stringify(
+          results.map(({ canonical }) => canonical),
+          null,
+          2,
+        ),
+      };
 }
 
 interface ResolvedRunnerTool {
@@ -609,6 +560,10 @@ async function executeResolvedRunnerTool(
 ): Promise<string> {
   if (resolved.name === "parallel") {
     return parallelTool(...parallelArguments(resolved));
+  }
+  const pageFetch = resolved.options?.pageFetch;
+  if (resolved.name === PAGE_FETCH_TOOL_NAME && pageFetch !== undefined) {
+    return pageFetch(resolved.root, resolved.arguments_, resolved.signal);
   }
   if (!isBaseAgentToolName(resolved.name)) {
     throw new Error(`Unknown runner tool: ${resolved.name}`);
@@ -669,11 +624,20 @@ export async function executeRunnerToolResult(
   ...parameters: ExecuteRunnerToolArguments
 ): Promise<RunnerCommandResult> {
   const resolved = await resolvedRunnerTool(parameters);
+  const spills = resolved.options?.outputSpills;
   if (resolved.name === "parallel") {
-    return parallelResultFromResolved(resolved);
+    const result = await parallelResultFromResolved(resolved);
+    if (spills !== undefined) {
+      return { ...result, output: await spills.apply(result.output) };
+    }
+    return result;
   }
   const output = await executeResolvedRunnerTool(resolved);
-  return resolved.name === "bash"
-    ? runnerCommandResultFromOutput(output)
-    : { output, state: "completed" };
+  const result =
+    resolved.name === "bash"
+      ? runnerCommandResultFromOutput(output)
+      : { output, state: "completed" as const };
+  return spills !== undefined && resolved.name !== "read"
+    ? { ...result, output: await spills.apply(result.output) }
+    : result;
 }

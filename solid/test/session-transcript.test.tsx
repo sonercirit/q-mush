@@ -219,6 +219,25 @@ test("filters assistant text independently from tool calls on the same message",
   expect(assistantOnly).not.toContain("Tool call · read");
 });
 
+test("shows completed turn duration and start and end timestamps", () => {
+  const startedAt = Date.UTC(2026, 6, 27, 12, 0, 0);
+  const endedAt = startedAt + 83_000;
+  const html = renderMessages([
+    { ...message("user-timed", "Timed request", "user"), createdAt: startedAt },
+    {
+      ...message("assistant-timed", "Timed response", "assistant"),
+      createdAt: endedAt,
+    },
+  ]);
+
+  expect(html).toContain('data-turn-timing="completed"');
+  expect(html).toContain("Duration: 1m 23s");
+  expect(html).toContain("Started:");
+  expect(html).toContain(`datetime="${new Date(startedAt).toISOString()}"`);
+  expect(html).toContain("Ended:");
+  expect(html).toContain(`datetime="${new Date(endedAt).toISOString()}"`);
+});
+
 test("shows a clear state when every visible category is empty", () => {
   const emptyAgentInstructions = renderMessages([], [], {
     ...filtersWith("agentInstructions"),

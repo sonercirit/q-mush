@@ -25,6 +25,10 @@ import {
   type ProviderIntegration,
   type ProviderIntegrationConfiguration,
 } from "./provider-integration.ts";
+import {
+  createCodexQuotaResetter,
+  createOpenAiQuotaReader,
+} from "./provider-quota.ts";
 
 const OPENAI_AUTHORIZATION_URL = "https://auth.openai.com/oauth/authorize";
 const OPENAI_KEY_METADATA_URL = "https://api.openai.com/v1/me";
@@ -358,6 +362,8 @@ function createOpenAiIntegration(
     dependencies: context.dependencies,
     prepareCredential: (runtime, credential) =>
       prepareCredential(runtime, clientId, credential),
+    createQuotaReader: createOpenAiQuotaReader,
+    createQuotaResetter: createCodexQuotaResetter,
     provider: "openai",
     readCredentialDetails,
   });

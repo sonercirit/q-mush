@@ -1,6 +1,6 @@
+import type { AgentAttachment } from "./agent-attachments.ts";
 import type { AgentReasoningEffort } from "./agent-configuration.ts";
 import type { AgentFile } from "./agent-file.ts";
-import type { AgentImage } from "./agent-images.ts";
 import type { AgentToolCall } from "./agent-loop.ts";
 import type { AgentSessionToolName } from "./agent-tools.ts";
 import type { PendingAskQuestions } from "./ask-questions.ts";
@@ -13,7 +13,8 @@ export type AgentSessionStatus =
   "queued" | "running" | "paused" | "idle" | "stopped" | "failed";
 
 export type RestartHandoffRequester = "runner" | "server";
-export type RestartHandoffOperation = "agent" | "compact";
+export type RestartHandoffOperation =
+  "agent" | "compact" | "compact_and_continue";
 
 export interface RestartHandoff {
   readonly executionGeneration: number;
@@ -28,6 +29,7 @@ export type AgentSessionCostBasis = "estimated" | "none" | "reported";
 export type AgentSessionPendingInputKind = "follow_up" | "steer";
 
 export interface AgentSessionPendingInput extends SessionPendingInputContent {
+  readonly attachments?: SessionPendingInputContent["images"];
   readonly createdAt: number;
   readonly id: string;
 }
@@ -41,11 +43,15 @@ export interface AgentSessionUsageUpdate {
 type AgentSessionMessageRole =
   "user" | "assistant" | "tool" | "thinking" | "system" | "error";
 
-export interface AgentSessionMessage {
+export interface AttachmentContentFields {
+  readonly attachments?: readonly AgentAttachment[];
+  readonly images: readonly AgentAttachment[];
+}
+
+export interface AgentSessionMessage extends AttachmentContentFields {
   readonly content: string;
   readonly createdAt: number;
   readonly id: string;
-  readonly images: readonly AgentImage[];
   readonly role: AgentSessionMessageRole;
   readonly toolCallId: string | null;
   readonly toolCalls: readonly AgentToolCall[];

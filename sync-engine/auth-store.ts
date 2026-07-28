@@ -3,8 +3,11 @@ import type { AuthenticatedUser } from "../shared/auth-model.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { sessions, users, workspaces } from "../shared/database/schema.ts";
 import { createUuidV7, SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
+import {
+  createStoreResources,
+  type StoreResources,
+} from "../shared/store-resources.ts";
 import { DEFAULT_WORKSPACE_NAME } from "../shared/workspace-model.ts";
-import { StoreResources } from "./store-resources.ts";
 
 export interface GoogleUserProfile {
   readonly email: string;
@@ -44,7 +47,7 @@ export class DrizzleAuthStore {
   readonly #resources: StoreResources;
 
   constructor(database: AppDatabase, generateId: IdGenerator = createUuidV7) {
-    this.#resources = new StoreResources(database, generateId);
+    this.#resources = createStoreResources(database, generateId);
   }
 
   get #database(): AppDatabase {

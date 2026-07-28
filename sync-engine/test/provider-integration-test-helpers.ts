@@ -107,6 +107,46 @@ export function readStoredProviderCredentials(
     .all();
 }
 
+export function withOpenAiProviderRequest<Value>(options: {
+  readonly input: RequestInfo | URL;
+  readonly init: RequestInit | undefined;
+  readonly onRequest: (request: Request, token: boolean) => Value;
+  readonly requests: Request[];
+}): Value {
+  const { request, token } = recordOpenAiProviderRequest(
+    options.requests,
+    options.input,
+    options.init,
+  );
+  return options.onRequest(request, token);
+}
+
+export function recordOpenAiProviderRequest(
+  requests: Request[],
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): { readonly request: Request; readonly token: boolean } {
+  const request = recordProviderRequest(requests, input, init, true);
+  return { request, token: isOpenAiTokenRequest(request) };
+}
+
+function isOpenAiTokenRequest(request: Request): boolean {
+  return request.url === "https://auth.openai.com/oauth/token";
+}
+
+export function providerKeyDetailsResponse(
+  details: { readonly accountId: string; readonly label: string } | undefined,
+): Response {
+  return details === undefined
+    ? Response.json({ error: "invalid key" }, { status: 401 })
+    : Response.json({
+        data: {
+          creator_user_id: details.accountId,
+          label: details.label,
+        },
+      });
+}
+
 export function recordProviderRequest(
   requests: Request[],
   input: RequestInfo | URL,

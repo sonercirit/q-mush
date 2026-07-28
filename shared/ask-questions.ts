@@ -10,7 +10,7 @@ export const ANSWER_QUESTIONS_REALTIME_OPERATION =
 const MAXIMUM_ASK_QUESTIONS = 8;
 const MAXIMUM_QUESTION_OPTIONS = 12;
 const MAXIMUM_QUESTION_PROMPT_LENGTH = 1_000;
-const MAXIMUM_QUESTION_TEXT_LENGTH = 4_000;
+export const MAXIMUM_QUESTION_TEXT_LENGTH = 4_000;
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
 const COMMAND_ID_PATTERN = /^[A-Za-z\d._:-]{1,200}$/u;
@@ -268,12 +268,11 @@ export function askQuestionAnswerValue(
         : normalized;
     }
     case "single_choice":
-      return typeof value === "string" &&
-        question.options.some(({ value: option }) => option === value)
-        ? value
-        : undefined;
+      return readBoundedTrimmedString(value, MAXIMUM_QUESTION_TEXT_LENGTH);
     case "multi_choice":
-      return selectedValues(value, question);
+      return typeof value === "string"
+        ? readBoundedTrimmedString(value, MAXIMUM_QUESTION_TEXT_LENGTH)
+        : selectedValues(value, question);
   }
 }
 

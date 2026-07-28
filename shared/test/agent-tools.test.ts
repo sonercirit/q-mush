@@ -3,6 +3,7 @@ import {
   AGENT_SESSION_TOOL_OPTIONS,
   AGENT_TOOLS,
   SESSION_AGENT_TOOL_NAMES,
+  isBaseAgentToolName,
   selectedAgentTools,
 } from "../../shared/agent-tools.ts";
 import { isRecord } from "../../shared/auth-model.ts";
@@ -30,15 +31,25 @@ function expectParallelRecipients(
   });
 }
 
-test("lets parallel call every tool and skill except itself by default", () => {
+test("lets parallel call every eligible tool and skill by default", () => {
   expectParallelRecipients(AGENT_TOOLS, [
     "read",
     "bash",
     "edit",
     "write",
     "brave_search",
-    ...SESSION_AGENT_TOOL_NAMES,
+    ...SESSION_AGENT_TOOL_NAMES.filter((name) => name !== "sleep"),
   ]);
+});
+
+test("keeps sleep session-local and unavailable to parallel", () => {
+  const sleep = AGENT_SESSION_TOOL_OPTIONS.find(({ name }) => name === "sleep");
+  const parallel = selectedAgentTools(["sleep", "parallel"]);
+
+  expect(sleep).toMatchObject({ classification: "session_tool" });
+  expect(isBaseAgentToolName("sleep")).toBe(false);
+  expect(parallel).toHaveLength(2);
+  expectParallelRecipients(parallel, []);
 });
 
 test("defines optional auto-compaction for spawned sessions", () => {
@@ -62,6 +73,7 @@ test("defines optional auto-compaction for spawned sessions", () => {
 
 test("defines the session tools as one selectable group", () => {
   expect(SESSION_AGENT_TOOL_NAMES).toEqual([
+    "sleep",
     "spawn_session",
     "browse_runner_directories",
     "list_runners",

@@ -1,13 +1,12 @@
-import { readAgentImages } from "../shared/agent-images.ts";
+import { readAgentAttachments } from "../shared/agent-attachments.ts";
 import { readNullableString } from "../shared/auth-model.ts";
-import type { AgentSessionMessage } from "../shared/session-model.ts";
+import type { AttachmentContentFields } from "../shared/session-model.ts";
 import { readFiniteNumber } from "../shared/validation.ts";
 
-export interface SessionContentFields {
+export interface SessionContentFields extends AttachmentContentFields {
   readonly content: string;
   readonly createdAt: number;
   readonly id: string;
-  readonly images: AgentSessionMessage["images"];
 }
 
 export interface SessionMessageFields extends SessionContentFields {
@@ -21,12 +20,20 @@ export function readSessionContentFields(
   const content = value["content"];
   const createdAt = readFiniteNumber(value["createdAt"]);
   const id = value["id"];
-  const images = readAgentImages(value["images"]);
+  const attachments = readAgentAttachments(
+    value["attachments"] ?? value["images"],
+  );
   return typeof content === "string" &&
     createdAt !== undefined &&
     typeof id === "string" &&
-    images !== undefined
-    ? { content, createdAt, id, images }
+    attachments !== undefined
+    ? {
+        ...(value["attachments"] === undefined ? {} : { attachments }),
+        content,
+        createdAt,
+        id,
+        images: attachments,
+      }
     : undefined;
 }
 

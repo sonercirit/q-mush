@@ -28,6 +28,7 @@ describe("pending-input realtime integration", () => {
         sessionId: "session-1",
       }),
     ).toEqual({
+      attachments: [],
       clientRequestId: "request-1",
       images: [],
       kind: "follow_up",
@@ -59,6 +60,7 @@ describe("pending-input realtime integration", () => {
       1,
       USER,
       {
+        attachments: [],
         clientRequestId: "follow_up-request",
         images: [],
         kind: "follow_up",
@@ -71,6 +73,7 @@ describe("pending-input realtime integration", () => {
       2,
       USER,
       {
+        attachments: [],
         clientRequestId: "steer-request",
         images: [],
         kind: "steer",

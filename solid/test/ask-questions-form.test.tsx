@@ -31,6 +31,10 @@ test("renders an accessible form for all pending question kinds", () => {
   expect(html).toContain('type="radio"');
   expect(html.match(/name="direction"/gu)).toHaveLength(2);
   expect(html).toContain('type="checkbox"');
+  expect(html.match(/<textarea/gu)).toHaveLength(3);
+  expect(html.match(/placeholder="Or type your own answer…"/gu)).toHaveLength(
+    2,
+  );
   expect(html).toContain("Submit answers");
   expect(html).toContain("&lt;img src=x onerror=alert(1)>");
   expect(html).not.toContain("<img src=x onerror=alert(1)>");

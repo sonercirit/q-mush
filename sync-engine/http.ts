@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 import { timingSafeEqual } from "node:crypto";
+import { isRecord } from "../shared/auth-model.ts";
 
 export function appendCookies(
   headers: Headers,
@@ -63,12 +64,33 @@ async function readJsonRequest(request: Request): Promise<JsonRequestResult> {
   }
 }
 
+export function parseRecordJsonForMethod<Value>(
+  request: Request,
+  method: string,
+  parse: (record: Readonly<Record<string, unknown>>) => Value | undefined,
+): Promise<Response | Value | undefined> {
+  const methodError = requireRequestMethod(request, method);
+  if (methodError !== undefined) return Promise.resolve(methodError);
+  return parseJsonRequest(request, (value) =>
+    isRecord(value) ? parse(value) : undefined,
+  );
+}
+
 export async function parseJsonRequest<Value>(
   request: Request,
   parse: (value: unknown) => Value | undefined,
 ): Promise<Value | undefined> {
   const json = await readJsonRequest(request);
   return json.ok ? parse(json.value) : undefined;
+}
+
+export function requireRequestMethod(
+  request: Request,
+  allowedMethod: string,
+): Response | undefined {
+  return request.method === allowedMethod
+    ? undefined
+    : createMethodNotAllowedResponse(allowedMethod);
 }
 
 export function createMethodNotAllowedResponse(

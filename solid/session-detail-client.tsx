@@ -2,7 +2,6 @@ import {
   createEffect,
   createMemo,
   createSignal,
-  onCleanup,
   Show,
   type JSX,
 } from "solid-js";
@@ -11,8 +10,12 @@ import type {
   AgentSessionStatus,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
-import { activeSessionDuration } from "../shared/session-timing.ts";
+import {
+  activeSessionDuration,
+  formatSessionTime,
+} from "../shared/session-timing.ts";
 import { Collection } from "./collection.tsx";
+import { createLiveNow } from "./live-now.ts";
 import { sessionContextLabel } from "./session-context-client.tsx";
 import type { SessionController } from "./session-controller.ts";
 import { SessionDetailBody } from "./session-detail-body.tsx";
@@ -101,20 +104,6 @@ function sessionModelLabel(
     : `${model} · ${reasoningEffortLabel(session.reasoningEffort)} reasoning`;
 }
 
-function formatSessionTime(milliseconds: number): string {
-  const seconds = Math.floor(milliseconds / 1_000);
-  const hours = Math.floor(seconds / 3_600);
-  const minutes = Math.floor((seconds % 3_600) / 60);
-  const remainingSeconds = seconds % 60;
-
-  if (hours > 0) {
-    return `${String(hours)}h ${String(minutes)}m`;
-  }
-  return minutes > 0
-    ? `${String(minutes)}m ${String(remainingSeconds)}s`
-    : `${String(remainingSeconds)}s`;
-}
-
 function formatSessionCost(costUsd: number): string {
   if (costUsd === 0) {
     return "$0.00";
@@ -141,21 +130,7 @@ function SessionMetrics(props: {
     "activeDurationMs" | "activeStartedAt" | "costBasis" | "costUsd"
   >;
 }): JSX.Element {
-  const [now, setNow] = createSignal(Date.now());
-  createEffect(() => {
-    if (props.session.activeStartedAt === null) {
-      setNow(Date.now());
-      return;
-    }
-
-    setNow(Date.now());
-    const timer = window.setInterval(() => {
-      setNow(Date.now());
-    }, 1_000);
-    onCleanup(() => {
-      window.clearInterval(timer);
-    });
-  });
+  const now = createLiveNow(() => props.session.activeStartedAt !== null);
 
   return (
     <span class="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">

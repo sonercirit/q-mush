@@ -11,6 +11,7 @@ import {
   readBoundedTrimmedString,
   readFiniteNumber,
   readNonNegativeSafeInteger,
+  requireRecord,
 } from "../shared/validation.ts";
 import { agentProviderRequestHeaders } from "./agent-model.ts";
 
@@ -137,10 +138,11 @@ function providerOption(value: unknown): OpenRouterProviderOption | undefined {
 }
 
 function parseCatalog(value: unknown): OpenRouterProviderCatalog {
-  if (!isRecord(value) || !isRecord(value["data"])) {
-    throw new Error("OpenRouter returned an invalid serving-provider response");
-  }
-  const endpoints = value["data"]["endpoints"];
+  const data = requireRecord(
+    isRecord(value) ? value["data"] : undefined,
+    "OpenRouter returned an invalid serving-provider response",
+  );
+  const endpoints = data["endpoints"];
   if (!Array.isArray(endpoints)) {
     throw new Error("OpenRouter returned an invalid serving-provider response");
   }

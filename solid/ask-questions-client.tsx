@@ -1,6 +1,7 @@
 import { createSignal, For, Show, untrack, type JSX } from "solid-js";
 import {
   askQuestionAnswerValue,
+  MAXIMUM_QUESTION_TEXT_LENGTH,
   type AskQuestion,
   type AskQuestionAnswer,
   type AskQuestionAnswers,
@@ -33,6 +34,9 @@ function questionIsValid(
 ): boolean {
   return askQuestionAnswerValue(answer.value, question) !== undefined;
 }
+
+const textareaClass =
+  "mt-2 min-h-24 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white focus:border-violet-300/50 focus:outline-none";
 
 const choiceInputHandler = checkedInputHandler;
 
@@ -90,6 +94,23 @@ export function AskQuestionsForm(props: {
     const value = answerFor(questionId).value;
     return typeof value === "string" ? value : "";
   };
+  const customAnswer = (question: AskQuestion): string => {
+    const value = textAnswer(question.id);
+    return question.type === "single_choice" &&
+      question.options.some(({ value: option }) => option === value)
+      ? ""
+      : value;
+  };
+  const replaceTextAnswer = (
+    questionId: string,
+  ): JSX.EventHandler<HTMLTextAreaElement, InputEvent> => {
+    return (event): void => {
+      replaceAnswer({
+        questionId,
+        value: event.currentTarget.value,
+      });
+    };
+  };
   const valid = (): boolean =>
     props.pending.questions.every((question) =>
       questionIsValid(question, answerFor(question.id)),
@@ -122,16 +143,11 @@ export function AskQuestionsForm(props: {
                   {(freeText) => (
                     <>
                       <textarea
-                        class="mt-2 min-h-24 w-full rounded-xl border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white focus:border-violet-300/50 focus:outline-none"
+                        class={textareaClass}
                         disabled={props.submitting}
                         maxlength={freeText().maxLength}
                         minlength={freeText().minLength ?? 0}
-                        onInput={(event) => {
-                          replaceAnswer({
-                            questionId: question.id,
-                            value: event.currentTarget.value,
-                          });
-                        }}
+                        onInput={replaceTextAnswer(question.id)}
                         required={(freeText().minLength ?? 0) > 0}
                         value={textAnswer(question.id)}
                       />
@@ -143,49 +159,61 @@ export function AskQuestionsForm(props: {
                 </Show>
                 <Show when={question.type !== "free_text" && question}>
                   {(choice) => (
-                    <div class="mt-2 grid gap-2 sm:grid-cols-2">
-                      <For each={choice().options}>
-                        {(option) => {
-                          const multiple = choice().type === "multi_choice";
-                          const checked = (): boolean =>
-                            multiple
-                              ? selections(answer()).includes(option.value)
-                              : answer().value === option.value;
-                          const maximumSelections =
-                            question.type === "multi_choice"
-                              ? (question.maxSelections ??
-                                question.options.length)
-                              : 1;
-                          const disabled = (): boolean =>
-                            props.submitting ||
-                            (multiple &&
-                              !checked() &&
-                              selections(answer()).length >= maximumSelections);
-                          return (
-                            <ChoiceLabel
-                              checked={checked()}
-                              disabled={disabled()}
-                              group={question.id}
-                              label={option.label}
-                              multiple={multiple}
-                              onChange={(selected) => {
-                                const current = selections(answer());
-                                replaceAnswer({
-                                  questionId: question.id,
-                                  value: multiple
-                                    ? selected
-                                      ? [...current, option.value]
-                                      : current.filter(
-                                          (value) => value !== option.value,
-                                        )
-                                    : option.value,
-                                });
-                              }}
-                              value={option.value}
-                            />
-                          );
-                        }}
-                      </For>
+                    <div class="mt-2">
+                      <div class="grid gap-2 sm:grid-cols-2">
+                        <For each={choice().options}>
+                          {(option) => {
+                            const multiple = choice().type === "multi_choice";
+                            const checked = (): boolean =>
+                              multiple
+                                ? selections(answer()).includes(option.value)
+                                : answer().value === option.value;
+                            const maximumSelections =
+                              question.type === "multi_choice"
+                                ? (question.maxSelections ??
+                                  question.options.length)
+                                : 1;
+                            const disabled = (): boolean =>
+                              props.submitting ||
+                              (multiple &&
+                                !checked() &&
+                                selections(answer()).length >=
+                                  maximumSelections);
+                            return (
+                              <ChoiceLabel
+                                checked={checked()}
+                                disabled={disabled()}
+                                group={question.id}
+                                label={option.label}
+                                multiple={multiple}
+                                onChange={(selected) => {
+                                  const current = selections(answer());
+                                  replaceAnswer({
+                                    questionId: question.id,
+                                    value: multiple
+                                      ? selected
+                                        ? [...current, option.value]
+                                        : current.filter(
+                                            (value) => value !== option.value,
+                                          )
+                                      : option.value,
+                                  });
+                                }}
+                                value={option.value}
+                              />
+                            );
+                          }}
+                        </For>
+                      </div>
+                      <textarea
+                        aria-label={`Custom answer for ${question.prompt}`}
+                        placeholder="Or type your own answer…"
+                        onInput={replaceTextAnswer(question.id)}
+                        maxlength={MAXIMUM_QUESTION_TEXT_LENGTH}
+                        disabled={props.submitting}
+                        class={textareaClass}
+                        value={customAnswer(question)}
+                      />
                     </div>
                   )}
                 </Show>

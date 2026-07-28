@@ -29,6 +29,27 @@ export interface SessionAgentModels {
   readonly createCompactor: () => ModelConversationCompactor;
 }
 
+export function createFallbackModel(
+  factory: AgentModelFactory,
+  selection: {
+    readonly credential: ProviderCredentialAccess;
+    readonly model: string;
+    readonly prompt: string | null;
+    readonly provider: "openai" | "openrouter";
+  },
+): AgentModel {
+  return factory({
+    credential: selection.credential,
+    model: selection.model,
+    provider: selection.provider,
+    providerPricing: null,
+    systemPrompt:
+      selection.prompt ??
+      "Describe the supplied attachment faithfully for another text-only model. Return only the useful textual result.",
+    tools: [],
+  });
+}
+
 function modelOptions(
   detail: AgentSessionDetail,
   credential: ProviderCredentialAccess,

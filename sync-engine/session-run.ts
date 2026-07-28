@@ -147,6 +147,14 @@ function finishFailedSession(
   options.finish(options.detail, options.userId, error, claimedIdentity);
 }
 
+function persistHandoffOutcome(options: RunPersistedSessionOptions): void {
+  const persistence = persistRestartHandoff(options, false);
+  if (persistence.status === "failed") {
+    throw persistence.error;
+  }
+  options.notify(options.userId, options.detail.id);
+}
+
 export async function runPersistedSession(
   options: RunPersistedSessionOptions,
 ): Promise<void> {
@@ -173,19 +181,31 @@ export async function runPersistedSession(
       options.controller,
       () => options.restartRequest() !== undefined,
     );
-    const outcome = await (options.operation === "compact"
-      ? compactSessionConversation(runtime)
+    const manualCompaction = options.operation !== "agent";
+    const outcome = await (manualCompaction
+      ? compactSessionConversation(
+          runtime,
+          options.operation === "compact_and_continue",
+        )
       : runSessionAgent(runtime));
+    if (
+      options.operation === "compact_and_continue" &&
+      outcome === "complete"
+    ) {
+      const continued = await runSessionAgent(runtime);
+      if (continued === "handoff") {
+        persistHandoffOutcome(options);
+        return;
+      }
+      finishRecoveredSession(options, claimedIdentity);
+      return;
+    }
     if (options.operation === "compact" && outcome === "complete") {
       finishRecoveredSession(options, claimedIdentity);
       return;
     }
     if (outcome === "handoff") {
-      const persistence = persistRestartHandoff(options, false);
-      if (persistence.status === "failed") {
-        throw persistence.error;
-      }
-      options.notify(options.userId, options.detail.id);
+      persistHandoffOutcome(options);
       return;
     }
     finishRecoveredSession(options, claimedIdentity);

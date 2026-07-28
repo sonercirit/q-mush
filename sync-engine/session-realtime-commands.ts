@@ -99,6 +99,7 @@ export interface SessionRealtimeCommands extends SessionDetailReader {
   readonly answerQuestionsForUser: SessionQuestionAnswerAction;
   readonly cancelPendingInputForUser: SessionCancelPendingInputAction;
   compactForUser: AuthenticatedSessionAction;
+  compactAndContinueForUser: AuthenticatedSessionAction;
   continueForUser: AuthenticatedSessionAction;
   readonly createForUser: SessionCreateAction;
   readonly spawnForUser: (
@@ -251,6 +252,12 @@ export async function executeSessionRealtimeCommand(
       );
     case SESSION_REALTIME_OPERATIONS.compact:
       return sessions.compactForUser(user, readSessionId(payload), workspaceId);
+    case SESSION_REALTIME_OPERATIONS.compactAndContinue:
+      return sessions.compactAndContinueForUser(
+        user,
+        readSessionId(payload),
+        workspaceId,
+      );
     case SESSION_REALTIME_OPERATIONS.continue:
       return sessions.continueForUser(
         user,

@@ -71,13 +71,17 @@ function requireForked(
   return result.detail;
 }
 
-function forkAtToolMessage(store: ReturnType<typeof createStore>["store"]) {
+function forkAtToolMessage(
+  store: ReturnType<typeof createStore>["store"],
+  selection?: Parameters<ReturnType<typeof createStore>["store"]["fork"]>[5],
+) {
   return store.fork(
     TEST_USER_ID,
     STORE_SESSION_ID,
     TOOL_MESSAGE_ID,
     TEST_WORKSPACE_ID,
     TEST_NOW + 7,
+    selection,
   );
 }
 
@@ -134,6 +138,32 @@ describe("session store forks", () => {
     }
     expect(fork.messages[0]?.images).toEqual(source.messages[0]?.images);
     expect(store.list(TEST_USER_ID)).toHaveLength(2);
+    database.$client.close();
+  });
+
+  test("creates a fork with a chosen provider and model", () => {
+    const { database, source, store } = prepareForkSource();
+
+    const result = forkAtToolMessage(store, {
+      credentialId: source.credentialId,
+      maxContextTokens: 256_000,
+      model: "replacement/model",
+      openRouterProviderTag: null,
+      provider: "openrouter",
+      providerPricing: null,
+      reasoningEffort: "high",
+    });
+
+    expect(requireForked(result)).toMatchObject({
+      credentialId: source.credentialId,
+      executionEnvironment: source.executionEnvironment,
+      maxContextTokens: 256_000,
+      model: "replacement/model",
+      provider: "openrouter",
+      reasoningEffort: "high",
+      runnerId: source.runnerId,
+      workingDirectory: source.workingDirectory,
+    });
     database.$client.close();
   });
 

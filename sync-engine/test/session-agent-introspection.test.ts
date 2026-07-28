@@ -158,7 +158,8 @@ describe("session agent introspection tools", () => {
     expect(content["toolDefinitions"]).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: "read" }),
-        expect.objectContaining({ name: "get_session_options" }),
+        expect.objectContaining({ name: "sleep" }),
+        expect.objectContaining({ name: "spawn_session" }),
       ]),
     );
     expect(read["metadata"]).toMatchObject({

@@ -8,6 +8,7 @@ import {
   readFlowCookies,
 } from "./authenticated-integration-test-helpers.ts";
 import { expectPkceParameters, expectRedirect } from "./oauth-test-helpers.ts";
+import { unavailableProviderResponse } from "./provider-fetch-fixtures.ts";
 import {
   addProviderApiKeys,
   createProviderAccountConnector,
@@ -19,6 +20,7 @@ import {
   expectProtectedInvalidApiKey,
   expectProviderCredentialSummaries,
   expectRemovedProviderCredential,
+  providerKeyDetailsResponse,
   readBearerApiKey,
   readProviderCredentialSummaries,
   readStoredProviderCredentials,
@@ -95,19 +97,10 @@ function createProviderFetch(
     if (request.url === "https://openrouter.ai/api/v1/key") {
       const details = detailsByKey[readBearerApiKey(request)];
 
-      return Promise.resolve(
-        details === undefined
-          ? Response.json({ error: "invalid key" }, { status: 401 })
-          : Response.json({
-              data: {
-                creator_user_id: details.accountId,
-                label: details.label,
-              },
-            }),
-      );
+      return Promise.resolve(providerKeyDetailsResponse(details));
     }
 
-    return Promise.resolve(new Response(null, { status: 500 }));
+    return unavailableProviderResponse();
   };
 }
 

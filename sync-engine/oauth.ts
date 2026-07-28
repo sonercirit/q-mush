@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
-import { isRecord } from "../shared/auth-model.ts";
 import { createDatabase, type AppDatabase } from "../shared/database.ts";
 import { createUuidV7, type IdGenerator } from "../shared/ids.ts";
+import { requireRecord } from "../shared/validation.ts";
 import {
   createCookie,
   createRedirect,
@@ -160,13 +160,7 @@ export async function readJsonRecord(
     throw new Error(errorMessage);
   }
 
-  const value: unknown = await response.json();
-
-  if (!isRecord(value)) {
-    throw new Error(errorMessage);
-  }
-
-  return value;
+  return requireRecord(await response.json(), errorMessage);
 }
 
 export function readOAuthCallback(

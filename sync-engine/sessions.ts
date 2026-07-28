@@ -1,6 +1,6 @@
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
 import { createDatabase, type AppDatabase } from "../shared/database.ts";
-import { createUuidV7, type IdGenerator } from "../shared/ids.ts";
+import { createUuidV7 } from "../shared/ids.ts";
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type {
@@ -12,6 +12,7 @@ import {
   type AgentModelDiscoverer,
 } from "./agent-model-discovery.ts";
 import { ChatCompletionsAgentModel } from "./agent-model.ts";
+import { createAttachmentFallbackIntegration } from "./attachment-fallback-integration.ts";
 import type { GoogleAuth } from "./auth.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
 import {
@@ -42,6 +43,10 @@ import {
   type SessionCredentialSelection,
   type SessionRuntimeSelection,
 } from "./session-credential-access.ts";
+import {
+  permissiveWorkspaceReader,
+  type SessionDependencies,
+} from "./session-dependencies.ts";
 import { SessionExecutionCleanup } from "./session-execution-cleanup.ts";
 import { SessionFinisher } from "./session-finisher.ts";
 import {
@@ -54,6 +59,7 @@ import {
   SessionIntegrationApi,
   type SessionIntegrationApiResources,
 } from "./session-integration-api.ts";
+import type { SessionIntegrationFactory } from "./session-integration-factory.ts";
 import type { SessionIntegration } from "./session-integration.ts";
 import { SessionLauncher } from "./session-launcher.ts";
 import { sessionMetadata } from "./session-provider-selection.ts";
@@ -78,26 +84,7 @@ import {
   type SessionWorkspaceReader,
 } from "./session-workspace.ts";
 
-export type { SessionCredentialReaders } from "./session-credential-access.ts";
 export type { SessionIntegration } from "./session-integration.ts";
-
-interface SessionDependencies {
-  readonly broker?: RunnerCommandBroker;
-  readonly braveSearch: Pick<BraveSearchSkill, "execute">;
-  readonly database?: AppDatabase;
-  readonly discoverModels?: AgentModelDiscoverer;
-  readonly discoverOpenRouterProviders?: OpenRouterProviderDiscoverer;
-  readonly modelFactory?: AgentModelFactory;
-  readonly now?: () => number;
-  readonly randomId?: IdGenerator;
-  readonly realtime?: RealtimeHub;
-  readonly workspaces?: SessionWorkspaceReader;
-}
-
-const permissiveWorkspaceReader = {
-  defaultForUser: () => undefined,
-  exists: () => true,
-} satisfies SessionWorkspaceReader;
 
 class DrizzleSessionIntegration
   extends SessionIntegrationApi
@@ -127,6 +114,9 @@ class DrizzleSessionIntegration
   readonly #store: SessionStore;
   readonly #workspaces: SessionWorkspaceReader;
   readonly #actions: SessionAgentActions;
+  readonly #attachmentFallbacks: ReturnType<
+    typeof createAttachmentFallbackIntegration
+  >;
 
   constructor(
     auth: GoogleAuth,
@@ -162,6 +152,14 @@ class DrizzleSessionIntegration
       database,
       dependencies.randomId ?? createUuidV7,
     );
+    this.#attachmentFallbacks = createAttachmentFallbackIntegration({
+      database,
+      discoverModels: this.#discoverModels,
+      generateId: dependencies.randomId ?? createUuidV7,
+      now: this.#now,
+      providers: this.#providers,
+      requests: this.#requests,
+    });
     this.#executionCleanup = new SessionExecutionCleanup(this.#broker);
     this.#runnerRemoval = new RunnerRemovalCoordinator({
       broker: this.#broker,
@@ -204,16 +202,20 @@ class DrizzleSessionIntegration
     };
     const launcher = new SessionLauncher({
       actions: this.#actions,
+      attachmentFallbacks: (userId) =>
+        this.#attachmentFallbacks.store.list(userId),
       beforeLaunch: async (detail) => {
         this.#executionCleanup.clearOffline(detail.id);
         await this.#executionCleanup.waitFor(detail.id);
       },
       braveSearch: this.#braveSearch,
       broker: this.#broker,
+      discoverModels: this.#discoverModels,
       finish: (detail, userId, error, recovered) => {
         this.#finisher.finish(detail, userId, error, recovered);
       },
       modelFactory: this.#modelFactory,
+      readCredential: this.#readCredential,
       realtime: this.#realtime,
       ...this.#sessionRuntimeState(),
     });
@@ -341,13 +343,15 @@ class DrizzleSessionIntegration
   }
 
   #authorizedLaunchBoundary(
-    operation: RestartHandoffOperation,
+    operation: Extract<
+      RestartHandoffOperation,
+      "compact" | "compact_and_continue"
+    >,
   ): Parameters<typeof startManualSessionCompaction>[0] {
     return {
       ...this.#launchBoundary(),
       credential: this.#withCredentialAccess,
-      launch: (detail, credential, userId) =>
-        this.#launch(detail, credential, userId, operation),
+      operation,
     };
   }
 
@@ -420,6 +424,10 @@ class DrizzleSessionIntegration
       store: this.#store,
       withCredential: this.#withCredentialAccess,
     });
+  }
+
+  attachmentFallbacks(request: Request): Promise<Response> | Response {
+    return this.#attachmentFallbacks.api.collection(request);
   }
 
   onChange(listener: (userId: string, sessionId: string) => void): void {
@@ -549,7 +557,8 @@ class DrizzleSessionIntegration
   ): Promise<Response> {
     return queueSessionForUser(
       {
-        ...this.#authorizedLaunchBoundary("agent"),
+        ...this.#launchBoundary(),
+        credential: this.#withCredentialAccess,
         runnerIsAvailable: this.#runnerIsAvailable,
         workspaceId,
       },
@@ -560,11 +569,9 @@ class DrizzleSessionIntegration
   }
 }
 
-export function createSessionIntegration(
-  auth: GoogleAuth,
-  runners: RunnerIntegration,
-  providers: SessionCredentialReaders,
-  dependencies: SessionDependencies,
-): SessionIntegration {
-  return new DrizzleSessionIntegration(auth, runners, providers, dependencies);
-}
+export const createSessionIntegration: SessionIntegrationFactory = (
+  auth,
+  runners,
+  providers,
+  dependencies,
+) => new DrizzleSessionIntegration(auth, runners, providers, dependencies);

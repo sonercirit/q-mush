@@ -1,4 +1,4 @@
-import { type JSX } from "solid-js";
+import { Show, type JSX } from "solid-js";
 import type { AgentSessionSummary } from "../shared/session-model.ts";
 
 export function formatTokenCount(tokens: number): string {
@@ -74,35 +74,30 @@ export function sessionContextClasses(
 }
 
 export function CompactionControls(props: {
-  readonly autoCompact: boolean;
   readonly compacting: boolean;
+  readonly continueAvailable: boolean;
   readonly disabled?: boolean;
-  readonly onCompact: () => void;
-  readonly onToggleAutoCompact: (enabled: boolean) => void;
+  readonly onCompact: (continueAfter?: boolean) => void;
 }): JSX.Element {
+  const disabled = (): boolean => props.disabled ?? props.compacting;
+  const button = (label: string, continueAfter = false) => (
+    <button
+      class="min-h-11 rounded-xl border border-amber-300/30 bg-amber-300/10 px-4 py-2 text-sm font-semibold text-amber-200 disabled:opacity-50"
+      disabled={disabled()}
+      onClick={() => {
+        props.onCompact(continueAfter);
+      }}
+      type="button"
+    >
+      {props.compacting ? "Compacting…" : label}
+    </button>
+  );
   return (
-    <div class="flex flex-wrap items-center gap-3">
-      <label class="flex min-h-11 items-center gap-2 text-sm text-slate-300">
-        <input
-          checked={props.autoCompact}
-          disabled={props.disabled ?? props.compacting}
-          onChange={(event) => {
-            props.onToggleAutoCompact(event.currentTarget.checked);
-          }}
-          type="checkbox"
-        />
-        Auto compact
-      </label>
-      <button
-        class="min-h-11 rounded-xl border border-amber-300/30 bg-amber-300/10 px-4 py-2 text-sm font-semibold text-amber-200 disabled:opacity-50"
-        disabled={props.disabled ?? props.compacting}
-        onClick={() => {
-          props.onCompact();
-        }}
-        type="button"
-      >
-        {props.compacting ? "Compacting…" : "Compact now"}
-      </button>
-    </div>
+    <>
+      {button("Compact now")}
+      <Show when={props.continueAvailable}>
+        {button("Compact and continue", true)}
+      </Show>
+    </>
   );
 }

@@ -1,14 +1,11 @@
-import { isRecord } from "../shared/auth-model.ts";
 import type { AgentSessionMessage } from "../shared/session-model.ts";
+import { requireRecord } from "../shared/validation.ts";
 
 export function readMessageRecord(
   value: unknown,
   message: string,
 ): Readonly<Record<string, unknown>> {
-  if (!isRecord(value)) {
-    throw new Error(message);
-  }
-  return value;
+  return requireRecord(value, message);
 }
 
 export function sessionMessageRole(

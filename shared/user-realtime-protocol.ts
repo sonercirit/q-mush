@@ -13,6 +13,7 @@ export const SESSION_REALTIME_OPERATIONS = {
   answerQuestions: ANSWER_QUESTIONS_REALTIME_OPERATION,
   cancelPendingInput: "sessions.cancel_pending_input",
   compact: "sessions.compact",
+  compactAndContinue: "sessions.compact_and_continue",
   continue: "sessions.continue",
   create: "sessions.create",
   fork: "sessions.fork",

@@ -189,6 +189,9 @@ function boundedModel(
   return {
     option: {
       contextWindow: validContextWindow ? option.contextWindow : null,
+      ...(option.fallbackPrompt === undefined
+        ? {}
+        : { fallbackPrompt: option.fallbackPrompt }),
       id: named.id.option,
       inputModalities: boundedStrings(option.inputModalities),
       label: named.label.option,
