@@ -1,0 +1,27 @@
+import type { AppDatabase } from "../shared/database.ts";
+import type { IdGenerator } from "../shared/ids.ts";
+import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
+import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
+import type { BraveSearchSkill } from "./brave-search.ts";
+import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
+import type { RealtimeHub } from "./realtime-hub.ts";
+import type { AgentModelFactory } from "./session-agent-models.ts";
+import type { SessionWorkspaceReader } from "./session-workspace.ts";
+
+export interface SessionDependencies {
+  readonly broker?: RunnerCommandBroker;
+  readonly braveSearch: Pick<BraveSearchSkill, "execute">;
+  readonly database?: AppDatabase;
+  readonly discoverModels?: AgentModelDiscoverer;
+  readonly discoverOpenRouterProviders?: OpenRouterProviderDiscoverer;
+  readonly modelFactory?: AgentModelFactory;
+  readonly now?: () => number;
+  readonly randomId?: IdGenerator;
+  readonly realtime?: RealtimeHub;
+  readonly workspaces?: SessionWorkspaceReader;
+}
+
+export const permissiveWorkspaceReader = {
+  defaultForUser: () => undefined,
+  exists: () => true,
+} satisfies SessionWorkspaceReader;

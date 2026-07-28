@@ -8,7 +8,7 @@ function qMushSupports(
   return modality === "text" || (direction === "input" && modality === "image");
 }
 
-function modalityLabel(modality: string): string {
+export function modalityLabel(modality: string): string {
   return modality.length === 0
     ? modality
     : `${modality.charAt(0).toUpperCase()}${modality.slice(1)}`;

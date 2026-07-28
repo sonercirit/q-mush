@@ -1,8 +1,20 @@
+import type { SessionForkSelection } from "../shared/session-fork.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import type { SessionCredentialOption } from "./session-credential-option.ts";
 import type { SessionRunnerViewProps } from "./session-runner-view-props.ts";
 
-export interface SessionDetailViewProps extends SessionRunnerViewProps {
+interface SessionForkController {
+  fork(messageId: string, selection?: SessionForkSelection): Promise<void>;
+}
+
+type SessionDetailForkController = SessionRunnerViewProps["controller"] &
+  SessionForkController;
+
+export interface SessionDetailViewProps extends Omit<
+  SessionRunnerViewProps,
+  "controller"
+> {
+  readonly controller: SessionDetailForkController;
   readonly credentialAvailable?: boolean | undefined;
   readonly credentials: readonly SessionCredentialOption[];
 }

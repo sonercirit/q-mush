@@ -32,7 +32,10 @@ function queueSession(
     dependencies.now(),
     prompt === undefined
       ? undefined
-      : { content: prompt.prompt, images: prompt.images },
+      : {
+          content: prompt.prompt,
+          images: prompt.attachments ?? prompt.images,
+        },
     undefined,
     workspaceId,
   );

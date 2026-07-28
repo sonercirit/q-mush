@@ -1,6 +1,5 @@
 import { setTimeout } from "node:timers/promises";
 import type { AgentReasoningEffort } from "../shared/agent-configuration.ts";
-import { agentImageDataUrl } from "../shared/agent-images.ts";
 import type {
   AgentConversationMessage,
   AgentModel,
@@ -29,6 +28,10 @@ import type {
 } from "./agent-model-options.ts";
 import type { ModelRequestSleep } from "./agent-model-retry.ts";
 import { readOpenAiOAuthCredential } from "./openai-credential.ts";
+import {
+  providerChatMessage,
+  providerResponsesInput,
+} from "./provider-attachment-input.ts";
 import { completeProviderHttp } from "./provider-http.ts";
 import type { ProviderTextDelta } from "./provider-stream.ts";
 import {
@@ -87,6 +90,15 @@ function accessToken(
     : credential.secret;
 }
 
+export function setChatGptAccountHeader(
+  headers: Headers,
+  accountId: string | null,
+): void {
+  if (accountId !== null) {
+    headers.set("chatgpt-account-id", accountId);
+  }
+}
+
 export function agentProviderRequestHeaders(
   provider: ProviderId,
   credential: AgentProviderCredential,
@@ -116,106 +128,10 @@ export function agentProviderRequestHeaders(
 
     headers.set("originator", "q_mush");
 
-    if (credential.accountId !== null) {
-      headers.set("chatgpt-account-id", credential.accountId);
-    }
+    setChatGptAccountHeader(headers, credential.accountId);
   }
 
   return headers;
-}
-
-function textInputItems(
-  content: string,
-  type: "input_text" | "text",
-): readonly unknown[] {
-  return content.length === 0 ? [] : [{ text: content, type }];
-}
-
-function modelMessage(message: AgentConversationMessage): unknown {
-  switch (message.role) {
-    case "user":
-      return {
-        content:
-          message.images === undefined || message.images.length === 0
-            ? message.content
-            : [
-                ...textInputItems(message.content, "text"),
-                ...message.images.map((image) => ({
-                  image_url: { url: agentImageDataUrl(image) },
-                  type: "image_url",
-                })),
-              ],
-        role: "user",
-      };
-    case "assistant":
-      return {
-        content: message.content.length === 0 ? null : message.content,
-        role: "assistant",
-        ...(message.toolCalls.length === 0
-          ? {}
-          : {
-              tool_calls: message.toolCalls.map((call) => ({
-                function: { arguments: call.arguments, name: call.name },
-                id: call.id,
-                type: "function",
-              })),
-            }),
-      };
-    case "tool":
-      return {
-        content: message.content,
-        role: "tool",
-        tool_call_id: message.toolCallId,
-      };
-  }
-}
-
-function responsesInput(message: AgentConversationMessage): readonly unknown[] {
-  switch (message.role) {
-    case "user":
-      return [
-        {
-          content: [
-            ...textInputItems(message.content, "input_text"),
-            ...(message.images ?? []).map((image) => ({
-              image_url: agentImageDataUrl(image),
-              type: "input_image",
-            })),
-          ],
-          role: "user",
-          type: "message",
-        },
-      ];
-    case "assistant": {
-      const textItems =
-        message.content.length === 0
-          ? []
-          : [
-              {
-                content: [{ text: message.content, type: "output_text" }],
-                role: "assistant",
-                type: "message",
-              },
-            ];
-      return [
-        ...textItems,
-        ...message.toolCalls.map((call) => ({
-          arguments: call.arguments,
-          call_id: call.id,
-          name: call.name,
-          type: "function_call",
-        })),
-      ];
-    }
-    case "tool":
-      return [
-        {
-          call_id: message.toolCallId,
-          output: message.content,
-          type: "function_call_output",
-        },
-      ];
-  }
 }
 
 function reasoningConfiguration(
@@ -292,7 +208,7 @@ function requestBody(
     return {
       messages: [
         { content: systemPrompt, role: "system" },
-        ...messages.map(modelMessage),
+        ...messages.map(providerChatMessage),
       ],
       model,
       ...(provider === "openrouter" && openRouterProviderTag !== undefined
@@ -308,7 +224,7 @@ function requestBody(
 
   return {
     include: ["reasoning.encrypted_content"],
-    input: messages.flatMap(responsesInput),
+    input: messages.flatMap(providerResponsesInput),
     instructions: systemPrompt,
     model,
     parallel_tool_calls: false,

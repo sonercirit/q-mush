@@ -2,7 +2,10 @@ import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
 import type { SessionForkInput } from "../shared/session-fork.ts";
-import type { AgentSessionDetail } from "../shared/session-model.ts";
+import type {
+  AgentSessionDetail,
+  RestartHandoffOperation,
+} from "../shared/session-model.ts";
 import type { SessionProviderUpdateInput } from "../shared/session-provider-update.ts";
 import type {
   SessionToolUpdateInput,
@@ -55,6 +58,7 @@ import type {
   SessionReassignmentAction,
   SessionStopAction,
 } from "./session-realtime-commands.ts";
+import { forkSessionForUser } from "./session-realtime-fork.ts";
 import {
   reassignSession,
   sessionReassignmentError,
@@ -206,15 +210,23 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
     }
   };
 
-  compactForUser: AuthenticatedSessionAction = (user, sessionId, workspaceId) =>
-    this.#withOwnedDetail(user, sessionId, workspaceId, async () => {
+  compactForUser(
+    user: AuthenticatedUser,
+    sessionId: string,
+    workspaceId: string,
+    operation: Extract<
+      RestartHandoffOperation,
+      "compact" | "compact_and_continue"
+    > = "compact",
+  ): Promise<AgentSessionDetail> {
+    return this.#withOwnedDetail(user, sessionId, workspaceId, async () => {
       const response = await startManualSessionCompaction(
         {
           credential: this.#credentialAction(),
-          launch: (detail, credential, userId) =>
-            this.#dependencies.launch(detail, credential, userId, "compact"),
+          launch: this.#dependencies.launch,
           notify: this.#dependencies.notify,
           now: this.#dependencies.now,
+          operation,
           runtimes: this.#dependencies.runtimes,
           store: this.#dependencies.store,
         },
@@ -223,6 +235,10 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
       );
       return this.#detailFromResponse(user.id, sessionId, response);
     });
+  }
+
+  compactAndContinueForUser: AuthenticatedSessionAction = (...arguments_) =>
+    this.compactForUser(...arguments_, "compact_and_continue");
 
   continueForUser(
     user: AuthenticatedUser,
@@ -297,7 +313,7 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
     );
   };
 
-  forkForUser = (
+  forkForUser = async (
     user: AuthenticatedUser,
     input: SessionForkInput,
     workspaceId: string,
@@ -305,19 +321,22 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
     if (input.workspaceId !== workspaceId) {
       throw new RealtimeCommandError("not_found");
     }
-    this.#detail(user.id, input.sourceSessionId, workspaceId);
-    const result = this.#dependencies.store.fork(
-      user.id,
-      input.sourceSessionId,
-      input.forkPointMessageId,
-      workspaceId,
-      this.#dependencies.now(),
-    );
-    if (result.status !== "forked") {
-      throw new RealtimeCommandError(result.status);
-    }
-    this.#dependencies.notify(user.id, result.detail.id);
-    return Promise.resolve(result.detail);
+    const source = this.#detail(user.id, input.sourceSessionId, workspaceId);
+    return forkSessionForUser({
+      compact: (sessionId) => this.compactForUser(user, sessionId, workspaceId),
+      dependencies: {
+        credential: (userId, selection) => this.#credential(userId, selection),
+        discoverModels: this.#dependencies.discoverModels,
+        discoverOpenRouterProviders:
+          this.#dependencies.discoverOpenRouterProviders,
+        notify: this.#dependencies.notify,
+        now: this.#dependencies.now,
+        store: this.#dependencies.store,
+      },
+      input,
+      source,
+      user,
+    });
   };
 
   async messageForUser(
@@ -342,13 +361,14 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
     if (owned === undefined) {
       throw new RealtimeCommandError("not_found");
     }
+    const attachments = input.attachments ?? input.images;
     const result = this.#dependencies.store.enqueuePendingInput(
       user.id,
       input.sessionId,
       {
         clientRequestId: input.clientRequestId,
         content: input.prompt,
-        images: input.images,
+        images: attachments,
         kind: input.kind,
       },
       this.#dependencies.now(),
@@ -361,8 +381,6 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
         return this.#detail(user.id, input.sessionId, workspaceId);
       case "conflict":
         throw new RealtimeCommandError("pending_input_id_conflict");
-      case "full":
-        throw new RealtimeCommandError("pending_input_queue_full");
       case "invalid_state":
         throw new RealtimeCommandError("invalid_session_state");
       case "not_found":

@@ -1,4 +1,4 @@
-import { throwIfAgentAborted } from "../shared/agent-loop.ts";
+import { throwIfAgentAborted, type AgentModel } from "../shared/agent-loop.ts";
 import {
   isAgentSessionToolName,
   isSessionAgentToolName,
@@ -22,11 +22,13 @@ import {
   isAskQuestionsToolName,
   pauseForAskQuestions,
 } from "./ask-questions-pause.ts";
+import { AttachmentFallbackAgentModel } from "./attachment-fallback-model.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
 import { loadSessionAgentFile } from "./session-agent-file.ts";
 import { runCompactingAgentLoop } from "./session-agent-loop.ts";
 import {
+  createFallbackModel,
   createSessionAgentModels,
   type AgentModelFactory,
   type SessionAgentModels,
@@ -35,21 +37,26 @@ import {
   executeSessionAgentTool,
   type SessionAgentToolActions,
 } from "./session-agent-tools.ts";
+import { storeSessionAttachment } from "./session-attachment-store.ts";
 import {
   compactionUsage,
   type CompactionUsage,
 } from "./session-compaction-usage.ts";
+import type { AttachmentFallbackRuntimeResources } from "./session-model-resources.ts";
 import { SessionRecorder } from "./session-recorder.ts";
+import { executeSessionSleepTool } from "./session-sleep-tool.ts";
+import { waitForSessionSteeringInput } from "./session-steering-wakeup.ts";
 import type { SessionStore } from "./session-store.ts";
 import { ToolStreamPublisher } from "./tool-stream-publisher.ts";
 
-export interface SessionAgentRuntimeDependencies {
+export interface SessionAgentRuntimeDependencies extends AttachmentFallbackRuntimeResources {
   readonly braveSearch: Pick<BraveSearchSkill, "execute">;
   readonly broker: RunnerCommandBroker;
   readonly credential: ProviderCredentialAccess;
-  readonly detail: AgentSessionDetail;
-  readonly isCurrent: () => boolean;
   readonly currentTools?: () => readonly AgentSessionToolName[] | undefined;
+  readonly detail: AgentSessionDetail;
+  readonly hasPendingSteeringInput: () => boolean;
+  readonly isCurrent: () => boolean;
   readonly modelFactory: AgentModelFactory;
   readonly now: () => number;
   readonly restartHandoffRequested: () => boolean;
@@ -144,6 +151,73 @@ function sessionConversation(
   );
 }
 
+async function fallbackAgentModel(
+  runtime: SessionAgentRuntimeDependencies,
+  model: AgentModel,
+): Promise<AgentModel> {
+  const selections = runtime.attachmentFallbacks?.() ?? [];
+  if (
+    selections.length === 0 ||
+    runtime.discoverModels === undefined ||
+    runtime.readCredential === undefined
+  ) {
+    return model;
+  }
+  const discoverModels = runtime.discoverModels;
+  const readCredential = runtime.readCredential;
+  const currentCatalog = await discoverModels(
+    runtime.detail.provider,
+    runtime.credential,
+  );
+  const currentModel = currentCatalog.models.find(
+    ({ id }) => id === runtime.detail.model,
+  );
+  if (currentModel === undefined) return model;
+  return new AttachmentFallbackAgentModel({
+    convert: async ({ attachment, selection }, signal) => {
+      const credential = await readCredential(runtime.userId, {
+        ...selection,
+        workspaceId: runtime.detail.workspaceId,
+      });
+      if (credential === undefined) {
+        throw new Error(
+          `The ${selection.modality} fallback credential is unavailable`,
+        );
+      }
+      const catalog = await discoverModels(selection.provider, credential);
+      const selectedModel = catalog.models.find(
+        ({ id }) => id === selection.model,
+      );
+      if (selectedModel === undefined) {
+        throw new Error(
+          `The ${selection.modality} fallback model is unavailable`,
+        );
+      }
+      const fallback = createFallbackModel(runtime.modelFactory, {
+        credential,
+        model: selection.model,
+        prompt: selection.prompt ?? selectedModel.fallbackPrompt ?? null,
+        provider: selection.provider,
+      });
+      const turn = await fallback.complete(
+        [{ attachments: [attachment], content: "", role: "user" }],
+        signal,
+      );
+      const reference = await storeSessionAttachment({
+        attachment,
+        broker: runtime.broker,
+        description: turn.content,
+        session: runtime.detail,
+        signal: signal ?? runtime.signal,
+      });
+      return { reference, text: turn.content };
+    },
+    currentModel,
+    model,
+    selections,
+  });
+}
+
 async function loadModels(
   runtime: SessionAgentRuntimeDependencies,
   options: {
@@ -162,7 +236,7 @@ async function loadModels(
   writeRuntime(runtime, (sessionId, now, generation) => {
     runtime.store.setRuntimeAgentFile(sessionId, agentFile, now, generation);
   });
-  return createSessionAgentModels({
+  const models = createSessionAgentModels({
     agentFile,
     credential: runtime.credential,
     detail: runtime.detail,
@@ -175,10 +249,15 @@ async function loadModels(
       : { toolStream: options.toolStream }),
     userId: runtime.userId,
   });
+  return {
+    ...models,
+    agent: await fallbackAgentModel(runtime, models.agent),
+  };
 }
 
 export async function compactSessionConversation(
   runtime: SessionAgentRuntimeDependencies,
+  continueAfterCompaction = false,
 ): Promise<"complete" | "handoff"> {
   await Promise.resolve();
   if (runtime.restartHandoffRequested()) {
@@ -195,7 +274,7 @@ export async function compactSessionConversation(
   const final = await compactor.compact(conversation, runtime.signal);
   throwIfAgentAborted(runtime.signal);
   const usage = compactionUsage(final, estimateCost);
-  recordCompaction(runtime, final.summary, usage, true);
+  recordCompaction(runtime, final.summary, usage, !continueAfterCompaction);
   return "complete";
 }
 
@@ -345,12 +424,22 @@ export async function runSessionAgent(
   const dispatchTool: AgentToolDispatcher = (
     name,
     toolArguments,
-    signal,
+    signal = toolSignal,
     callId,
   ) => {
     if (isAgentSessionToolName(name) && isSessionAgentToolName(name)) {
       if (callId !== undefined) {
         toolStream.running(callId, name, JSON.stringify(toolArguments));
+      }
+      if (name === "sleep") {
+        return executeSessionSleepTool(
+          toolArguments,
+          signal,
+          () => runtime.hasPendingSteeringInput(),
+          (sleepSignal) =>
+            waitForSessionSteeringInput(runtime.detail.id, sleepSignal),
+          runtime.now,
+        ).then((output) => ({ output, state: "completed" }));
       }
       return executeSessionAgentTool(runtime.sessionTools, name, toolArguments);
     }

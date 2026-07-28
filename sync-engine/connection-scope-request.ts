@@ -3,9 +3,9 @@ import { isWorkspaceId } from "../shared/workspace-model.ts";
 import type { AuthenticatedUserAction } from "./authenticated-get.ts";
 import {
   createApiError,
-  createMethodNotAllowedResponse,
   createNoContentResponse,
   parseJsonRequest,
+  requireRequestMethod,
 } from "./http.ts";
 import { requestWorkspaceId } from "./request-workspace.ts";
 
@@ -30,9 +30,8 @@ export async function updateConnectionScopes(
     update: (userId: string, workspaceIds: readonly string[]) => boolean;
   }>,
 ): Promise<Response> {
-  if (request.method !== "PUT") {
-    return createMethodNotAllowedResponse("PUT");
-  }
+  const methodError = requireRequestMethod(request, "PUT");
+  if (methodError !== undefined) return methodError;
   return Promise.resolve(
     options.authenticate(async (user) => {
       const workspaceIds = await parseJsonRequest(request, (value) => {

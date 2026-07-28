@@ -1,6 +1,10 @@
 import { createSignal, Show, type Accessor, type JSX } from "solid-js";
 import { isRecord } from "../shared/auth-model.ts";
 import type { ScopedConnectionSummary } from "../shared/connection-model.ts";
+import type {
+  ProviderQuotaResetOutcome,
+  ProviderQuotaSnapshot,
+} from "../shared/provider-quota.ts";
 import {
   BRAVE_SEARCH_KEYS_PATH,
   OPENAI_CREDENTIALS_PATH,
@@ -17,6 +21,7 @@ import {
 } from "./connection-client.ts";
 import { controllerView } from "./controller-view.ts";
 import { DefaultableActions } from "./defaultable-actions.tsx";
+import { ProviderQuota } from "./provider-quota-client.tsx";
 import { renderDebugBoundary } from "./render-debug.tsx";
 import { ScopedConnectionEditor } from "./scoped-connection-editor.tsx";
 import { SessionReassignmentDialogController } from "./session-reassignment-dialog-controller.ts";
@@ -33,6 +38,16 @@ export interface ProviderCredential extends ScopedConnectionSummary {
 interface ProviderViewStateBase {
   readonly credentials: readonly ProviderCredential[] | undefined;
   readonly error: string | undefined;
+  readonly quotaLoadingIds: readonly string[];
+  readonly quotaNotice:
+    | {
+        readonly credentialId: string;
+        readonly outcome: ProviderQuotaResetOutcome;
+      }
+    | undefined;
+  readonly quotaPendingId: string | undefined;
+  readonly quotas: Readonly<Record<string, ProviderQuotaSnapshot>>;
+  readonly quotaThresholdPendingId: string | undefined;
   readonly removingId: string | undefined;
   readonly savePending: boolean;
   readonly sessionReassignmentNotice: string | undefined;
@@ -45,6 +60,11 @@ export function createProviderViewState(
   return {
     credentials,
     error: undefined,
+    quotaLoadingIds: [],
+    quotaNotice: undefined,
+    quotaPendingId: undefined,
+    quotas: {},
+    quotaThresholdPendingId: undefined,
     removingId: undefined,
     savePending: false,
     sessionReassignmentNotice: undefined,
@@ -274,6 +294,12 @@ function ProviderCredentialItem(props: CredentialItemProps): JSX.Element {
         controller={props.controller}
         workspaces={props.workspaces}
       />
+      <Show when={props.configuration.id !== "brave-search"}>
+        <ProviderQuota
+          controller={props.controller}
+          credential={props.credential}
+        />
+      </Show>
       <CredentialActions {...props} />
     </li>
   );
@@ -492,10 +518,15 @@ export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
   );
 }
 
-interface ProviderPanelController {
+export interface ProviderPanelController {
   readonly view: Accessor<ProviderViewState>;
   add(apiKey: string, label?: string): Promise<void>;
   load(): Promise<void>;
+  loadQuota(credentialId: string): Promise<void>;
+  consumeQuotaReset(
+    credentialId: string,
+  ): Promise<ProviderQuotaResetOutcome | undefined>;
+  setQuotaThreshold(credentialId: string, threshold: number): Promise<void>;
   confirmSessionReassignment(
     dialog: SessionReassignmentDialogController,
   ): Promise<void>;

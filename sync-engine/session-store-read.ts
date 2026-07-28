@@ -51,10 +51,14 @@ type StoredMessage = Omit<
 export function summarizeStoredMessage(
   stored: StoredMessage,
 ): AgentSessionMessage {
+  const parsedAttachments = parseStoredImages(
+    stored.images,
+    "Stored agent attachments are invalid",
+  );
   return {
     ...stored,
     createdAt: stored.createdAt.getTime(),
-    images: parseStoredImages(stored.images, "Stored agent images are invalid"),
+    images: parsedAttachments,
     toolCalls: readStoredToolCalls(stored.toolCalls),
   };
 }
@@ -262,13 +266,15 @@ export function conversationFromMessages(
           toolName: message.toolName,
         });
         break;
-      case "user":
+      case "user": {
+        const attachments = message.attachments ?? message.images;
         conversation.push({
           content: message.content,
-          ...(message.images.length === 0 ? {} : { images: message.images }),
+          ...(attachments.length === 0 ? {} : { images: attachments }),
           role: "user",
         });
         break;
+      }
       case "error":
       case "system":
       case "thinking":

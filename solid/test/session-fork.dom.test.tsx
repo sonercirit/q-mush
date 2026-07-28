@@ -8,6 +8,7 @@ import { initialSessionViewState } from "../session-state.ts";
 import { DEFAULT_SESSION_TRANSCRIPT_FILTERS } from "../session-transcript-filters.ts";
 import { SessionTranscript } from "../session-transcript.tsx";
 import { mountTestView } from "./dom-test-helpers.ts";
+import { testSessionCredentialOption } from "./session-credential-fixtures.ts";
 import { transcriptTestMessage } from "./session-dom-test-helpers.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
@@ -21,6 +22,19 @@ function disposeForkTest(disposals: readonly (() => void)[]): void {
   for (const dispose of disposals) {
     dispose();
   }
+}
+
+function selectedForkState(
+  detail: typeof TEST_SESSION_DETAIL,
+  values: Partial<SessionViewState> = {},
+) {
+  return createReactiveState<SessionViewState>({
+    ...initialSessionViewState(),
+    ...values,
+    detail,
+    selectedId: detail.id,
+    sessions: [summaryFromDetail(detail)],
+  });
 }
 
 test("fork transcript controls report the selected message", () => {
@@ -55,6 +69,98 @@ test("fork transcript controls report the selected message", () => {
   disposeForkTest(disposals);
 });
 
+test("fork editor warns only after choosing a different provider or model", async () => {
+  const detail = {
+    ...TEST_SESSION_DETAIL,
+    messages: [
+      transcriptTestMessage("message-1", "Fork point", "assistant", 1),
+    ],
+  };
+  const reactive = selectedForkState(detail);
+  const controller = new SessionController(reactive, undefined, null, {
+    command: (operation) =>
+      Promise.resolve(
+        operation === "sessions.models"
+          ? {
+              defaultModel: detail.model,
+              models: [
+                {
+                  contextWindow: 128_000,
+                  id: detail.model,
+                  inputModalities: ["text"],
+                  label: "Source model",
+                  outputModalities: ["text"],
+                  pricing: null,
+                  reasoningEfforts: [],
+                },
+                {
+                  contextWindow: 128_000,
+                  id: "different-model",
+                  inputModalities: ["text"],
+                  label: "Different model",
+                  outputModalities: ["text"],
+                  pricing: null,
+                  reasoningEfforts: ["high"],
+                },
+              ],
+            }
+          : detail,
+      ),
+  });
+  const fork = vi.spyOn(controller, "fork").mockResolvedValue();
+  const disposals = forkDisposals();
+  const container = mountTestView(
+    () => (
+      <ForkDetail
+        controller={controller}
+        credentialAvailable
+        credentials={[
+          testSessionCredentialOption({
+            id: detail.credentialId,
+            isDefault: true,
+            label: "Source credential",
+            provider: detail.provider,
+          }),
+        ]}
+        onOpenDirectoryPicker={vi.fn()}
+        runners={[]}
+        state={reactive.state()}
+      />
+    ),
+    disposals,
+  );
+
+  container
+    .querySelector<HTMLButtonElement>('[data-fork-from-here="message-1"]')
+    ?.click();
+  await vi.waitFor(() => {
+    expect(container.textContent).toContain("Fork session");
+  });
+  expect(container.textContent).not.toContain("compacted");
+  await vi.waitFor(() => {
+    container.querySelector<HTMLButtonElement>("#session-fork-model")?.click();
+    expect(
+      container.querySelector('[data-option-value="different-model"]'),
+    ).not.toBeNull();
+  });
+
+  container
+    .querySelector<HTMLButtonElement>('[data-option-value="different-model"]')
+    ?.click();
+
+  expect(container.textContent).toContain("compacted");
+  container
+    .querySelector<HTMLButtonElement>('[data-session-fork-submit="true"]')
+    ?.click();
+  await vi.waitFor(() => {
+    expect(fork).toHaveBeenCalledWith(
+      "message-1",
+      expect.objectContaining({ model: "different-model" }),
+    );
+  });
+  disposeForkTest(disposals);
+});
+
 test("historical transcript pages do not offer fork controls", () => {
   const onFork = vi.fn();
   const disposals = forkDisposals();
@@ -67,10 +173,7 @@ test("historical transcript pages do not offer fork controls", () => {
     1,
   );
   const detail = { ...TEST_SESSION_DETAIL, messages: [current] };
-  const initial = initialSessionViewState();
-  const reactive = createReactiveState<SessionViewState>({
-    ...initial,
-    detail,
+  const reactive = selectedForkState(detail, {
     history: {
       canGoOlder: false,
       error: undefined,
@@ -84,8 +187,6 @@ test("historical transcript pages do not offer fork controls", () => {
         sessionId: detail.id,
       },
     },
-    selectedId: detail.id,
-    sessions: [summaryFromDetail(detail)],
   });
   const controller = new SessionController(reactive, undefined, null);
   vi.spyOn(controller, "fork").mockImplementation((messageId) => {

@@ -205,6 +205,8 @@ export function executeSessionAgentTool(
   try {
     let output: Promise<string>;
     switch (name) {
+      case "sleep":
+        throw new Error("sleep requires the active session runtime");
       case "browse_runner_directories": {
         const runnerId = readIdentifier(arguments_["runnerId"]);
         const path = readStringField(

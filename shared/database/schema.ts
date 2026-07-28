@@ -9,6 +9,7 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+import { AGENT_ATTACHMENT_MODALITIES } from "../agent-attachments.ts";
 import { AGENT_REASONING_EFFORTS } from "../agent-configuration.ts";
 import { AGENT_FILE_NAMES } from "../agent-file.ts";
 import { AGENT_SESSION_TOOL_NAMES } from "../agent-tools.ts";
@@ -164,6 +165,71 @@ export const providerCredentials = sqliteTable(
   ],
 );
 
+function providerCredentialIdColumn() {
+  return ownedForeignKey(
+    "provider_credential_id",
+    () => providerCredentials.id,
+  );
+}
+
+function quotaSettingActiveIndex(table: {
+  readonly isDeleted: AnySQLiteColumn;
+  readonly providerCredentialId: AnySQLiteColumn;
+}) {
+  return uniqueIndex("provider_quota_settings_active_credential_unique")
+    .on(table.providerCredentialId)
+    .where(sql`NOT ${table.isDeleted}`);
+}
+
+function quotaThresholdColumn() {
+  return real("auto_reset_threshold_percent").notNull().default(1);
+}
+
+export const providerQuotaSettings = sqliteTable(
+  "provider_quota_settings",
+  {
+    ...ownedAuditColumns(),
+    providerCredentialId: providerCredentialIdColumn(),
+    autoResetThresholdPercent: quotaThresholdColumn(),
+  },
+  (table) => [
+    index("provider_quota_settings_user_deletion_index").on(
+      table.userId,
+      table.isDeleted,
+    ),
+    quotaSettingActiveIndex(table),
+    check(
+      "provider_quota_settings_threshold_range_check",
+      sql`${table.autoResetThresholdPercent} >= 0 AND ${table.autoResetThresholdPercent} <= 100`,
+    ),
+  ],
+);
+
+export const providerQuotaResetReceipts = sqliteTable(
+  "provider_quota_reset_receipts",
+  {
+    ...ownedAuditColumns(),
+    providerCredentialId: providerCredentialIdColumn(),
+    clientRequestId: text("client_request_id").notNull(),
+    outcome: text("outcome", {
+      enum: ["already_redeemed", "no_credit", "nothing_to_reset", "reset"],
+    }),
+    completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    index("provider_quota_reset_receipts_user_deletion_index").on(
+      table.userId,
+      table.isDeleted,
+    ),
+    uniqueIndex("provider_quota_reset_receipts_active_request_unique")
+      .on(table.userId, table.providerCredentialId, table.clientRequestId)
+      .where(sql`NOT ${table.isDeleted}`),
+    uniqueIndex("provider_quota_reset_receipts_pending_credential_unique")
+      .on(table.providerCredentialId)
+      .where(sql`NOT ${table.isDeleted} AND ${table.outcome} IS NULL`),
+  ],
+);
+
 function activeConnectionIndex(
   name: string,
   ownerId: AnySQLiteColumn,
@@ -179,10 +245,7 @@ export const providerCredentialWorkspaces = sqliteTable(
   "provider_credential_workspaces",
   {
     ...ownedAuditColumns(),
-    providerCredentialId: ownedForeignKey(
-      "provider_credential_id",
-      () => providerCredentials.id,
-    ),
+    providerCredentialId: providerCredentialIdColumn(),
     workspaceId: workspaceIdColumn(),
   },
   (table) => [
@@ -196,6 +259,27 @@ export const providerCredentialWorkspaces = sqliteTable(
       table.workspaceId,
       table.isDeleted,
     ),
+  ],
+);
+
+export const attachmentFallbacks = sqliteTable(
+  "attachment_fallbacks",
+  {
+    ...ownedAuditColumns(),
+    modality: text("modality", { enum: AGENT_ATTACHMENT_MODALITIES }).notNull(),
+    providerCredentialId: providerCredentialIdColumn(),
+    provider: providerColumn(),
+    model: text("model").notNull(),
+    prompt: text("prompt"),
+  },
+  (table) => [
+    index("attachment_fallbacks_user_deletion_index").on(
+      table.userId,
+      table.isDeleted,
+    ),
+    uniqueIndex("attachment_fallbacks_user_modality_active_unique")
+      .on(table.userId, table.modality)
+      .where(sql`NOT ${table.isDeleted}`),
   ],
 );
 

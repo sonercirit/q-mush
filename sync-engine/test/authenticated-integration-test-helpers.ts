@@ -185,6 +185,43 @@ export function ensureWaveOneColumns(database: AppDatabase): void {
     .all();
   addGlobalColumn(database, "runners");
   database.$client.run(`
+    CREATE TABLE IF NOT EXISTS provider_quota_settings (
+      id text PRIMARY KEY NOT NULL,
+      user_id text NOT NULL REFERENCES users(id) ON DELETE restrict,
+      provider_credential_id text NOT NULL REFERENCES provider_credentials(id) ON DELETE restrict,
+      auto_reset_threshold_percent real NOT NULL DEFAULT 1,
+      created_at integer NOT NULL,
+      created_by_id text NOT NULL,
+      updated_at integer NOT NULL,
+      updated_by_id text NOT NULL,
+      is_deleted integer NOT NULL DEFAULT false
+    )
+  `);
+  database.$client.run(
+    "CREATE UNIQUE INDEX IF NOT EXISTS provider_quota_settings_active_credential_unique ON provider_quota_settings(provider_credential_id) WHERE NOT is_deleted",
+  );
+  database.$client.run(`
+    CREATE TABLE IF NOT EXISTS provider_quota_reset_receipts (
+      id text PRIMARY KEY NOT NULL,
+      user_id text NOT NULL REFERENCES users(id) ON DELETE restrict,
+      provider_credential_id text NOT NULL REFERENCES provider_credentials(id) ON DELETE restrict,
+      client_request_id text NOT NULL,
+      outcome text,
+      completed_at integer,
+      created_at integer NOT NULL,
+      created_by_id text NOT NULL,
+      updated_at integer NOT NULL,
+      updated_by_id text NOT NULL,
+      is_deleted integer NOT NULL DEFAULT false
+    )
+  `);
+  database.$client.run(
+    "CREATE UNIQUE INDEX IF NOT EXISTS provider_quota_reset_receipts_active_request_unique ON provider_quota_reset_receipts(user_id, provider_credential_id, client_request_id) WHERE NOT is_deleted",
+  );
+  database.$client.run(
+    "CREATE UNIQUE INDEX IF NOT EXISTS provider_quota_reset_receipts_pending_credential_unique ON provider_quota_reset_receipts(provider_credential_id) WHERE NOT is_deleted AND outcome IS NULL",
+  );
+  database.$client.run(`
     CREATE TABLE IF NOT EXISTS provider_credential_workspaces (
       id text PRIMARY KEY NOT NULL,
       user_id text NOT NULL REFERENCES users(id) ON DELETE restrict,

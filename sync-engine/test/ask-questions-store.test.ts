@@ -380,12 +380,25 @@ describe("ask questions store", () => {
     ).toEqual({ status: "conflict" });
   });
 
+  test("delivers a custom answer in the tool result", () => {
+    const { persistence, store } = setupWithQuestion();
+
+    expect(
+      answerQuestion(store, NOW + 30, {
+        answers: [{ questionId: "decision", value: "wait for approval" }],
+      }),
+    ).toMatchObject({ status: "answered" });
+    expect(persistence.state.toolResults[0]?.content).toContain(
+      '"value": "wait for approval"',
+    );
+  });
+
   test("rejects invalid answers without changing pending state", () => {
     const { persistence, store } = setupWithQuestion();
 
     expect(() =>
       answerQuestion(store, NOW + 30, {
-        answers: [{ questionId: "decision", value: "forged" }],
+        answers: [{ questionId: "decision", value: "   " }],
       }),
     ).toThrow("invalid");
     expect(pendingQuestionStatus(store)).not.toBeNull();

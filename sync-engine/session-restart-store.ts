@@ -111,7 +111,9 @@ function isRestartHandoff(value: unknown): value is RestartHandoff {
     typeof value.executionGeneration === "number" &&
     readNonNegativeSafeInteger(value.executionGeneration) !== undefined &&
     "operation" in value &&
-    (value.operation === "agent" || value.operation === "compact") &&
+    (value.operation === "agent" ||
+      value.operation === "compact" ||
+      value.operation === "compact_and_continue") &&
     "pendingInput" in value &&
     Array.isArray(value.pendingInput) &&
     value.pendingInput.length === 0 &&

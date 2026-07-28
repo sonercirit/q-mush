@@ -16,6 +16,7 @@ import {
   expectRealtimeToRemainSilent,
   installFetch,
   requestUrl,
+  withRestoredFetch,
 } from "./controller-test-helpers.ts";
 import { MemoryStorage } from "./memory-storage.ts";
 import { createResponseFetch } from "./session-dom-test-helpers.tsx";
@@ -111,15 +112,6 @@ async function selectedTurn(
 
 async function selectedIdleTurn(sessionId: string): Promise<SelectedIdleTurn> {
   return selectedTurn(sessionId, "idle");
-}
-
-async function withRestoredFetch(action: () => Promise<void>): Promise<void> {
-  const originalFetch = globalThis.fetch;
-  try {
-    await action();
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
 }
 
 function sessionResponse(input: RequestInfo | URL): Promise<Response> {
@@ -617,4 +609,35 @@ test("an unchanged session refresh does not notify the view", async () => {
     sessionResponse,
     [summaryFromDetail(TEST_SESSION_DETAIL)],
   );
+});
+
+test("matching session snapshots skip serializing retained message content", () => {
+  const content = "x".repeat(100_000);
+  const message = transcriptMessage("assistant-large", content, "assistant", 2);
+  const detail = {
+    ...TEST_SESSION_DETAIL,
+    messages: [message],
+    status: "running" as const,
+  };
+  const reactive = createReactiveState<SessionViewState>(
+    selectedSessionState({
+      ...initialSessionViewState(),
+      detail,
+      sessions: [summaryFromDetail(detail)],
+    }),
+  );
+  const controller = new SessionController(reactive);
+  const toJSON = vi.fn(() => {
+    throw new Error("message content was serialized");
+  });
+  const refreshedMessage = { ...message };
+
+  Object.defineProperty(message, "toJSON", { value: toJSON });
+  Object.defineProperty(refreshedMessage, "toJSON", { value: toJSON });
+
+  expect(() => {
+    controller.applyDetail({ ...detail, messages: [refreshedMessage] });
+  }).not.toThrow();
+  expect(controller.state.detail?.messages[0]).toBe(message);
+  expect(toJSON).not.toHaveBeenCalled();
 });

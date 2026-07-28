@@ -15,21 +15,60 @@ import {
 import type {
   AgentSessionDetail,
   AgentSessionMessage,
+  AgentSessionStatus,
 } from "../shared/session-model.ts";
+import {
+  activeSessionDuration,
+  formatSessionTime,
+} from "../shared/session-timing.ts";
+import {
+  activeTurnStartedAt,
+  sessionTurnStartedAtByMessage,
+} from "../shared/session-turn-timing.ts";
 import type {
   ToolStreamEntry,
   ToolStreamState,
 } from "../shared/tool-stream.ts";
 import { clipboardCopyLabel, createClipboardCopy } from "./clipboard-copy.ts";
+import { createLiveNow } from "./live-now.ts";
 import { renderDebugBoundary } from "./render-debug.tsx";
 import { SessionImagePreviews } from "./session-image-client.tsx";
 import { renderMarkdown } from "./session-markdown.tsx";
+import { renderStructuredText } from "./session-structured-text.tsx";
 import { renderStructuredCode } from "./session-syntax.tsx";
 import { renderToolResult } from "./session-tool-result.tsx";
 import type {
   SessionTranscriptFilterName,
   SessionTranscriptFilters,
 } from "./session-transcript-filters.ts";
+
+function TurnTiming(props: {
+  readonly endedAt: number | null;
+  readonly startedAt: number;
+}): JSX.Element {
+  const now = createLiveNow(() => props.endedAt === null);
+  const duration = (): number =>
+    activeSessionDuration(
+      { activeDurationMs: 0, activeStartedAt: props.startedAt },
+      props.endedAt ?? now(),
+    );
+  const time = (value: number): JSX.Element => {
+    const date = new Date(value);
+    return <time dateTime={date.toISOString()}>{date.toLocaleString()}</time>;
+  };
+  return (
+    <p
+      class="flex flex-wrap gap-x-3 gap-y-1 px-1 text-xs text-slate-500"
+      data-turn-timing={props.endedAt === null ? "active" : "completed"}
+    >
+      <span>{`Duration: ${formatSessionTime(duration())}`}</span>
+      <span>Started: {time(props.startedAt)}</span>
+      <Show when={props.endedAt}>
+        {(endedAt) => <span>Ended: {time(endedAt())}</span>}
+      </Show>
+    </p>
+  );
+}
 
 function TranscriptNote(props: {
   readonly boundaryKey: string;
@@ -260,9 +299,11 @@ function ConversationTranscriptMessage(props: {
       </div>
       {showContent() && props.message.content.length > 0 ? (
         user() ? (
-          <p class="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-200">
-            {props.message.content}
-          </p>
+          renderStructuredText(props.message.content, (text) => (
+            <p class="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-200">
+              {text}
+            </p>
+          ))
         ) : (
           <div class="mt-2">{renderMarkdown(props.message.content)}</div>
         )
@@ -495,6 +536,7 @@ export function SessionTranscript(props: {
   readonly filters: SessionTranscriptFilters;
   readonly messages: readonly AgentSessionMessage[];
   readonly onFork?: ((messageId: string) => void) | undefined;
+  readonly status?: AgentSessionStatus | undefined;
   readonly toolStreams?: readonly ToolStreamEntry[];
   readonly tools: readonly AgentSessionToolName[];
 }): JSX.Element {
@@ -502,10 +544,11 @@ export function SessionTranscript(props: {
   const serializedTools = createMemo(() =>
     JSON.stringify(selectedAgentTools(props.tools), null, 2),
   );
-  const visibleMessages = createMemo(() =>
-    props.messages.filter((message) =>
-      messageIsVisible(message, props.filters),
-    ),
+  const activeStartedAt = createMemo(() =>
+    activeTurnStartedAt(props.messages, props.status ?? "idle"),
+  );
+  const completedTurnStarts = createMemo(() =>
+    sessionTurnStartedAtByMessage(props.messages, props.status ?? "idle"),
   );
   const visibleItemCount = createMemo(() => {
     const counts = sessionTranscriptFilterCounts(
@@ -540,16 +583,31 @@ export function SessionTranscript(props: {
       <Show when={props.filters.toolDefinitions && props.tools.length > 0}>
         <ToolDefinitions serializedTools={serializedTools()} />
       </Show>
-      <For each={visibleMessages()}>
+      <For each={props.messages}>
         {(message) => (
-          <TranscriptMessage
-            callArguments={callArguments}
-            filters={props.filters}
-            message={message}
-            onFork={props.onFork}
-          />
+          <>
+            <Show when={messageIsVisible(message, props.filters)}>
+              <TranscriptMessage
+                callArguments={callArguments}
+                filters={props.filters}
+                message={message}
+                onFork={props.onFork}
+              />
+            </Show>
+            <Show when={completedTurnStarts().get(message.id)}>
+              {(startedAt) => (
+                <TurnTiming
+                  endedAt={message.createdAt}
+                  startedAt={startedAt()}
+                />
+              )}
+            </Show>
+          </>
         )}
       </For>
+      <Show when={activeStartedAt()}>
+        {(startedAt) => <TurnTiming endedAt={null} startedAt={startedAt()} />}
+      </Show>
       <Show when={props.filters.toolActivity}>
         <For each={props.toolStreams ?? []}>
           {(stream) => <LiveToolStream stream={stream} />}

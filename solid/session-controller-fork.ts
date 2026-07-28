@@ -1,3 +1,4 @@
+import type { SessionForkSelection } from "../shared/session-fork.ts";
 import { SESSION_REALTIME_OPERATIONS } from "../shared/user-realtime-protocol.ts";
 import type { RevisionState } from "./revision-state.ts";
 import type { SessionViewState } from "./session-client.tsx";
@@ -59,6 +60,7 @@ function rejectFork(
 export async function forkSessionFromView(
   options: SessionCreationViewOptions & {
     readonly forkPointMessageId: string;
+    readonly selection?: SessionForkSelection | undefined;
   },
 ): Promise<void> {
   if (sessionMutationPending(options.view.value)) {
@@ -80,6 +82,7 @@ export async function forkSessionFromView(
     const forked = readSessionDetail(
       await transport.command(SESSION_REALTIME_OPERATIONS.fork, {
         forkPointMessageId: options.forkPointMessageId,
+        ...options.selection,
         sourceSessionId: detail.id,
         workspaceId: detail.workspaceId,
       }),

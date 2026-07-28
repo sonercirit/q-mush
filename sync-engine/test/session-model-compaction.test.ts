@@ -4,9 +4,11 @@ import { SESSION_MODELS_PATH, SESSIONS_PATH } from "../../shared/routes.ts";
 import type { AgentModelDiscoverer } from "../../sync-engine/agent-model-discovery.ts";
 import {
   createAuthenticatedRequest,
+  TEST_AUTHENTICATED_USER,
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { testModelCatalog } from "./session-continuation-test-helpers.ts";
 import {
   connectedSessionSetup,
   createSessionRequest,
@@ -18,9 +20,36 @@ import {
   expectSessionReaches,
   hasSessionStatus,
   sessionDetail,
-  waitForSessionValue,
+  startSessionAndCompleteAgentFile,
+  waitForSessionStatus,
 } from "./session-integration-helpers.ts";
-import { expectJsonResponse } from "./session-launch-race-helpers.ts";
+import {
+  closeSessionTestDatabase,
+  expectJsonResponse,
+} from "./session-launch-race-helpers.ts";
+
+function compactionSetup(model: ScriptedAgentModel, label: string) {
+  return connectedSessionSetup(model, "api_key", () =>
+    Promise.resolve(testModelCatalog("gpt-4.1-mini", label)),
+  );
+}
+
+async function waitForIdleContent(
+  setup: ReturnType<typeof connectedSessionSetup>,
+  content: string,
+): Promise<unknown> {
+  let current: unknown;
+  while (
+    !hasSessionStatus("idle")(current) ||
+    !JSON.stringify(current).includes(content)
+  ) {
+    current = await sessionDetail(setup.sessions);
+    if (!hasSessionStatus("idle")(current)) {
+      await Bun.sleep(1);
+    }
+  }
+  return current;
+}
 
 describe("session models and compaction", () => {
   test("discovers models through an owned provider credential", async () => {
@@ -94,24 +123,9 @@ describe("session models and compaction", () => {
         toolCalls: [],
       },
     ]);
-    const setup = connectedSessionSetup(model, "api_key", () =>
-      Promise.resolve({
-        defaultModel: "gpt-4.1-mini",
-        models: [
-          {
-            contextWindow: null,
-            id: "gpt-4.1-mini",
-            inputModalities: null,
-            label: "GPT",
-            outputModalities: null,
-            pricing: null,
-            reasoningEfforts: [],
-          },
-        ],
-      }),
-    );
-    const created = await setup.sessions.collection(createSessionRequest());
-    await expectSessionReaches(setup, created, "idle");
+    const setup = compactionSetup(model, "GPT");
+    await startSessionAndCompleteAgentFile(setup);
+    await waitForSessionStatus(setup, "idle");
 
     const modeResponse = await setup.sessions.compaction(
       createAuthenticatedRequest(
@@ -151,12 +165,7 @@ describe("session models and compaction", () => {
     );
     expect(compactResponse.status).toBe(202);
     await completeAgentFileLookup(setup);
-    const compacted = await waitForSessionValue(
-      () => sessionDetail(setup.sessions),
-      (value) =>
-        hasSessionStatus("idle")(value) &&
-        JSON.stringify(value).includes("Concise handoff."),
-    );
+    const compacted = await waitForIdleContent(setup, "Concise handoff.");
     expect(JSON.stringify(compacted)).not.toContain("Initial work complete.");
     expect(compacted).toMatchObject({
       costBasis: "estimated",
@@ -164,6 +173,52 @@ describe("session models and compaction", () => {
       currentContextTokens: 0,
     });
 
-    setup.database.$client.close();
+    closeSessionTestDatabase(setup.database);
+  });
+
+  test("compacts and continues without appending a user message", async () => {
+    const model = new ScriptedAgentModel([
+      { content: "Initial work complete.", toolCalls: [] },
+      { content: "Compact continuation handoff.", toolCalls: [] },
+      { content: "Continued work complete.", toolCalls: [] },
+    ]);
+    const setup = compactionSetup(model, "Compact continuation");
+    await startSessionAndCompleteAgentFile(setup);
+    await waitForSessionStatus(setup, "idle");
+    const before = await sessionDetail(setup.sessions);
+
+    const queued =
+      await setup.sessions.realtimeCommands.compactAndContinueForUser(
+        TEST_AUTHENTICATED_USER,
+        SESSION_ID,
+        TEST_WORKSPACE_ID,
+      );
+    expect(["queued", "running"]).toContain(queued.status);
+    await expect(
+      setup.sessions.realtimeCommands.compactAndContinueForUser(
+        TEST_AUTHENTICATED_USER,
+        SESSION_ID,
+        TEST_WORKSPACE_ID,
+      ),
+    ).rejects.toMatchObject({ code: "session_busy" });
+    await completeAgentFileLookup(setup);
+    await completeAgentFileLookup(setup);
+    const continued = await waitForIdleContent(
+      setup,
+      "Continued work complete.",
+    );
+
+    expect(model.requests).toHaveLength(3);
+    expect(model.requests.at(-1)?.at(0)?.content).toContain(
+      "Compact continuation handoff.",
+    );
+    const continuedText = JSON.stringify(continued);
+    expect(continuedText).toContain("Compact continuation handoff.");
+    expect(continuedText).not.toContain("Initial work complete.");
+    const userRole = '"role":"user"';
+    expect(continuedText.split(userRole)).toHaveLength(
+      JSON.stringify(before).split(userRole).length,
+    );
+    closeSessionTestDatabase(setup.database);
   });
 });

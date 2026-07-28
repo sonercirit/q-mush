@@ -51,6 +51,7 @@ import {
   createSchemaCompatibleTestDatabase,
   expectResponseStatuses,
 } from "./authenticated-integration-test-helpers.ts";
+import { unavailableProviderResponse } from "./provider-fetch-fixtures.ts";
 
 interface CompressionCase {
   readonly decompress: (body: Uint8Array) => Uint8Array;
@@ -76,7 +77,7 @@ const runnerExecutables: RunnerExecutableProvider = {
 };
 const stylesheet = ".min-h-screen{min-height:100vh}";
 function unavailableResponse(): Promise<Response> {
-  return Promise.resolve(new Response(null, { status: 401 }));
+  return unavailableProviderResponse(401);
 }
 
 const braveSearch: BraveSearchSkill = {

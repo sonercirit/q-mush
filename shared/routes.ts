@@ -24,7 +24,12 @@ export function promptPath(promptId: string): string {
   return `${PROMPTS_PATH}/${encodeURIComponent(promptId)}`;
 }
 function providerCredentialActionPath(
-  action: "default" | "session-reassignment",
+  action:
+    | "default"
+    | "quota"
+    | "quota/reset"
+    | "quota/threshold"
+    | "session-reassignment",
   credentialsPath: string,
   credentialId: string,
 ): string {
@@ -46,6 +51,35 @@ export const providerCredentialSessionReassignmentPath = (
     credentialsPath,
     credentialId,
   );
+
+export function providerCredentialQuotaPath(
+  credentialsPath: string,
+  credentialId: string,
+): string {
+  return providerCredentialActionPath("quota", credentialsPath, credentialId);
+}
+
+export function providerCredentialQuotaResetPath(
+  credentialsPath: string,
+  credentialId: string,
+): string {
+  return providerCredentialActionPath(
+    "quota/reset",
+    credentialsPath,
+    credentialId,
+  );
+}
+
+export function providerCredentialQuotaThresholdPath(
+  credentialsPath: string,
+  credentialId: string,
+): string {
+  return providerCredentialActionPath(
+    "quota/threshold",
+    credentialsPath,
+    credentialId,
+  );
+}
 export const RUNNERS_PATH = `${API_BASE_PATH}/runners`;
 export const WORKSPACES_PATH = `${API_BASE_PATH}/workspaces`;
 export function connectionScopesPath(
@@ -79,6 +113,7 @@ export const RUNNER_INSTALLER_PATH = "/runner/install.sh";
 export const RUNNER_EXECUTABLE_PATH = "/runner/executable";
 export const RUNNER_EXECUTABLE_SHA256_HEADER = "x-q-mush-runner-sha256";
 export const SESSIONS_PATH = `${API_BASE_PATH}/sessions`;
+export const SESSION_ATTACHMENT_FALLBACKS_PATH = `${SESSIONS_PATH}/attachment-fallbacks`;
 export const SESSION_MODELS_PATH = `${SESSIONS_PATH}/models`;
 export const SESSION_OPENROUTER_PROVIDERS_PATH = `${SESSIONS_PATH}/openrouter-providers`;
 export const STYLESHEET_PATH = "/styles.css";

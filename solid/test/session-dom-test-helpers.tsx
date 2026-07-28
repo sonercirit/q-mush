@@ -3,11 +3,15 @@ import type {
   AgentSessionDetail,
   AgentSessionMessage,
 } from "../../shared/session-model.ts";
+import type { ReactiveState } from "../reactive-state.ts";
 import { RenderDebugProvider, type RenderDebugView } from "../render-debug.tsx";
+import type { SessionViewState } from "../session-client.tsx";
 import { summaryFromDetail } from "../session-codec.ts";
 import { SessionController } from "../session-controller.ts";
+import { SessionDetailBody } from "../session-detail-body.tsx";
 import { SessionDetail } from "../session-detail-client.tsx";
 import type { SessionTranscriptFilterStorage } from "../session-transcript-filters.ts";
+import type { SessionCommandTransport } from "../session-transport.ts";
 import { mountTestView, queryTestElement } from "./dom-test-helpers.ts";
 import { sessionDetailState } from "./session-detail-test-state.ts";
 import { runningSessionDetail } from "./transcript-ordering-fixtures.ts";
@@ -25,6 +29,60 @@ export interface MountedTestSession {
 
 export interface MountedTestTranscript extends MountedTestSession {
   readonly detail: AgentSessionDetail;
+}
+
+export function mountSessionDetailBody(
+  reactive: ReactiveState<SessionViewState>,
+  disposals: (() => void)[],
+  transport?: SessionCommandTransport,
+  render?: (
+    props: Parameters<typeof SessionDetailBody>[0],
+    controller: SessionController,
+  ) => JSX.Element,
+): MountedTestSession {
+  const controller = new SessionController(
+    reactive,
+    undefined,
+    null,
+    transport,
+  );
+  const detail = reactive.state().detail;
+  if (detail === undefined) throw new TypeError("Missing session detail");
+  const bodyProps: Parameters<typeof SessionDetailBody>[0] = {
+    contextLabel: "0% context",
+    environmentLabel: "Bare Metal",
+    modelLabel: "openai · model",
+    presentation: <span>Running</span>,
+    providerUpdate: {
+      credentials: [],
+      onApply: () => Promise.resolve(false),
+      onDiscoverModels: () =>
+        new Promise((resolve) => {
+          resolve({ defaultModel: null, models: [] });
+        }),
+      onDiscoverProviders: () => Promise.resolve({ providers: [] }),
+    },
+    sessionMetrics: <span>Time: 0s</span>,
+    view: {
+      controller,
+      credentialAvailable: true,
+      credentials: [],
+      detail,
+      onOpenDirectoryPicker: () => undefined,
+      runners: [],
+      state: reactive.state(),
+    },
+  };
+  const container = mountTestView(
+    () =>
+      render === undefined ? (
+        <SessionDetailBody {...bodyProps} />
+      ) : (
+        render(bodyProps, controller)
+      ),
+    disposals,
+  );
+  return { container, controller };
 }
 
 function renderTestSessionDetail(

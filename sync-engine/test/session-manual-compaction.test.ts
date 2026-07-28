@@ -64,6 +64,7 @@ function runtimeDependencies(options: {
       source: "api_key",
     },
     detail: options.detail,
+    hasPendingSteeringInput: () => false,
     isCurrent: () =>
       options.store.executionIsCurrent(
         TEST_USER_ID,

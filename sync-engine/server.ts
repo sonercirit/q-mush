@@ -23,6 +23,7 @@ import {
   RUNNER_EXECUTABLE_PATH,
   RUNNER_INSTALLER_PATH,
   RUNNERS_PATH,
+  SESSION_ATTACHMENT_FALLBACKS_PATH,
   SESSION_MODELS_PATH,
   SESSION_OPENROUTER_PROVIDERS_PATH,
   SESSIONS_PATH,
@@ -255,6 +256,72 @@ function pathSegments(pathname: string, prefix: string): readonly string[] {
     : [];
 }
 
+function routeItemId(segments: readonly string[]): string | undefined {
+  const id = segments[0];
+  return id === undefined || id.length === 0 ? undefined : id;
+}
+
+type SessionItemAction = (
+  request: Request,
+  id: string,
+) => Promise<Response> | Response;
+
+interface SessionItemRoutes {
+  readonly compact: SessionItemAction;
+  readonly compaction: SessionItemAction;
+  readonly continue: SessionItemAction;
+  readonly item: SessionItemAction;
+  readonly message: SessionItemAction;
+  readonly reassign: SessionItemAction;
+  readonly stop: SessionItemAction;
+}
+
+function routeItemFallback(segments: readonly string[]): undefined {
+  void segments;
+  return undefined;
+}
+
+function routeItemRequest(
+  segments: readonly string[],
+  item: (id: string) => Promise<Response> | Response,
+  nested: (id: string) => Promise<Response> | Response | undefined,
+): Promise<Response> | Response | undefined {
+  const id = routeItemId(segments);
+  if (id === undefined) {
+    routeItemFallback(segments);
+    return undefined;
+  }
+  return segments.length === 1 ? item(id) : nested(id);
+}
+
+function routeSessionItem(
+  segments: readonly string[],
+  request: Request,
+  sessions: SessionItemRoutes,
+): Promise<Response> | Response | undefined {
+  return routeItemRequest(
+    segments,
+    (id) => sessions.item(request, id),
+    (id) => {
+      if (segments.length !== 2) return undefined;
+      const route = segments[1];
+      switch (route) {
+        case "compact":
+        case "compaction":
+        case "continue":
+        case "reassign":
+        case "stop":
+          return sessions[route](request, id);
+        case "messages":
+          return sessions.message(request, id);
+        case undefined:
+        default:
+          return undefined;
+      }
+    },
+  );
+}
+
 interface ItemRouteActions {
   readonly default?: (id: string) => Promise<Response> | Response;
   readonly item: (id: string) => Promise<Response> | Response;
@@ -266,30 +333,22 @@ function routeItemSegments(
   segments: readonly string[],
   actions: ItemRouteActions,
 ): Promise<Response> | Response | undefined {
-  const id = segments[0];
-  if (id === undefined || id.length === 0) {
+  return routeItemRequest(segments, actions.item, (id) => {
+    if (segments.length === 2) {
+      switch (segments[1]) {
+        case "default":
+          return actions.default?.(id);
+        case "session-reassignment":
+          return actions.sessionReassignment?.(id);
+        case "scopes":
+          return actions.scopes?.(id);
+        case undefined:
+        default:
+          return undefined;
+      }
+    }
     return undefined;
-  }
-
-  if (segments.length === 1) {
-    return actions.item(id);
-  }
-
-  if (segments.length !== 2) {
-    return undefined;
-  }
-
-  switch (segments[1]) {
-    case "default":
-      return actions.default?.(id);
-    case "session-reassignment":
-      return actions.sessionReassignment?.(id);
-    case "scopes":
-      return actions.scopes?.(id);
-    case undefined:
-    default:
-      return undefined;
-  }
+  });
 }
 
 function routeProviderRequest(
@@ -310,7 +369,22 @@ function routeProviderRequest(
     return integration.credentials(request);
   }
 
-  return routeItemSegments(pathSegments(pathname, `${routes.credentials}/`), {
+  const credentialSegments = pathSegments(pathname, `${routes.credentials}/`);
+  const credentialId = credentialSegments[0];
+  if (credentialId !== undefined && credentialSegments[1] === "quota") {
+    if (credentialSegments.length === 2) {
+      return integration.quota(request, credentialId);
+    }
+    if (credentialSegments.length === 3) {
+      return credentialSegments[2] === "reset"
+        ? integration.resetQuota(request, credentialId)
+        : credentialSegments[2] === "threshold"
+          ? integration.setQuotaThreshold(request, credentialId)
+          : undefined;
+    }
+  }
+
+  return routeItemSegments(credentialSegments, {
     default: (credentialId) => integration.setDefault(request, credentialId),
     item: (credentialId) => integration.remove(request, credentialId),
     scopes: (credentialId) => integration.setScopes(request, credentialId),
@@ -433,6 +507,13 @@ export function createRequestHandler(
         return braveSearchKeyResponse;
       }
 
+      if (
+        pathname === SESSION_ATTACHMENT_FALLBACKS_PATH &&
+        sessions.attachmentFallbacks !== undefined
+      ) {
+        return sessions.attachmentFallbacks(request);
+      }
+
       if (pathname === SESSION_MODELS_PATH) {
         return sessions.models(request);
       }
@@ -445,33 +526,8 @@ export function createRequestHandler(
 
       if (pathname.startsWith(sessionPathPrefix)) {
         const segments = pathname.slice(sessionPathPrefix.length).split("/");
-        const sessionId = segments[0];
-
-        if (sessionId !== undefined && sessionId.length > 0) {
-          if (segments.length === 1) {
-            return sessions.item(request, sessionId);
-          }
-
-          if (segments.length === 2) {
-            switch (segments[1]) {
-              case "compact":
-                return sessions.compact(request, sessionId);
-              case "compaction":
-                return sessions.compaction(request, sessionId);
-              case "continue":
-                return sessions.continue(request, sessionId);
-              case "messages":
-                return sessions.message(request, sessionId);
-              case "reassign":
-                return sessions.reassign(request, sessionId);
-              case "stop":
-                return sessions.stop(request, sessionId);
-              case undefined:
-              default:
-                break;
-            }
-          }
-        }
+        const response = routeSessionItem(segments, request, sessions);
+        if (response !== undefined) return response;
       }
 
       const openAiResponse = routeProviderRequest(pathname, request, openAi, {

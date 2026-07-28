@@ -1,4 +1,8 @@
 import { createSignal, For, Show, type JSX } from "solid-js";
+import {
+  renderPlainText,
+  renderStructuredText,
+} from "./session-structured-text.tsx";
 
 interface DisplayPendingInput {
   readonly content: string;
@@ -16,20 +20,20 @@ export interface SessionShortcut {
 }
 
 const CONTROL_SHORTCUTS: SessionShortcut = {
-  followUpKeys: "Control+Enter",
-  followUpLabel: "Ctrl+Enter",
-  steerKeys: "Control+Shift+Enter",
-  steerLabel: "Ctrl+Shift+Enter",
+  followUpKeys: "Control+Shift+Enter",
+  followUpLabel: "Ctrl+Shift+Enter",
+  steerKeys: "Control+Enter",
+  steerLabel: "Ctrl+Enter",
 };
 
 /** @public Resolves platform-specific session composer shortcuts. */
 export function platformSessionShortcuts(platform: string): SessionShortcut {
   return /Mac|iPhone|iPad|iPod/u.test(platform)
     ? {
-        followUpKeys: "Meta+Enter",
-        followUpLabel: "⌘+Enter",
-        steerKeys: "Meta+Shift+Enter",
-        steerLabel: "⌘+Shift+Enter",
+        followUpKeys: "Meta+Shift+Enter",
+        followUpLabel: "⌘+Shift+Enter",
+        steerKeys: "Meta+Enter",
+        steerLabel: "⌘+Enter",
       }
     : CONTROL_SHORTCUTS;
 }
@@ -89,13 +93,13 @@ export function SessionPendingInputs(
                   </button>
                 </div>
                 <Show when={input.content.length > 0}>
-                  <p class="mt-2 whitespace-pre-wrap text-sm text-slate-300">
-                    {input.content}
-                  </p>
+                  <div class="mt-2 text-sm text-slate-300">
+                    {renderStructuredText(input.content, renderPlainText)}
+                  </div>
                 </Show>
                 <Show when={input.images.length > 0}>
                   <p class="mt-2 text-xs text-slate-500">
-                    {`${String(input.images.length)} attached image${input.images.length === 1 ? "" : "s"}`}
+                    {`${String(input.images.length)} attached file${input.images.length === 1 ? "" : "s"}`}
                   </p>
                 </Show>
               </li>

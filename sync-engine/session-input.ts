@@ -1,10 +1,10 @@
+import { readAgentAttachments } from "../shared/agent-attachments.ts";
 import {
   defaultAgentModel,
   isAgentModelId,
   isAgentReasoningEffort,
   isOpenRouterProviderTag,
 } from "../shared/agent-configuration.ts";
-import { readAgentImages } from "../shared/agent-images.ts";
 import {
   AGENT_SESSION_TOOL_NAMES,
   readAgentSessionToolNames,
@@ -37,13 +37,16 @@ export function readProvider(value: unknown): ProviderId | undefined {
 function promptInput(
   value: Readonly<Record<string, unknown>>,
 ): PromptInput | undefined {
-  const images = readAgentImages(value["images"]);
+  const attachments = readAgentAttachments(
+    value["attachments"] ?? value["images"],
+  );
   const prompt = readStringField(value, "prompt", MAXIMUM_PROMPT_LENGTH, {
     trim: true,
   });
-  return images === undefined || (prompt === undefined && images.length === 0)
+  return attachments === undefined ||
+    (prompt === undefined && attachments.length === 0)
     ? undefined
-    : { images, prompt: prompt ?? "" };
+    : { images: attachments, prompt: prompt ?? "" };
 }
 
 export function readCreateSession(
@@ -142,7 +145,8 @@ export function readUserSpawnSession(
 }
 
 export interface PromptInput {
-  readonly images: NonNullable<ReturnType<typeof readAgentImages>>;
+  readonly attachments?: NonNullable<ReturnType<typeof readAgentAttachments>>;
+  readonly images: NonNullable<ReturnType<typeof readAgentAttachments>>;
   readonly prompt: string;
 }
 

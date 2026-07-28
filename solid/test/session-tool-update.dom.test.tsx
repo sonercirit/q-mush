@@ -1,0 +1,113 @@
+import { createSignal } from "solid-js";
+import { afterEach, expect, test, vi } from "vitest";
+import { SessionToolUpdateEditor } from "../session-tool-update-client.tsx";
+import {
+  disposeTestViews,
+  mountTestView,
+  queryTestElementAs,
+} from "./dom-test-helpers.ts";
+import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
+
+const DISPOSALS: (() => void)[] = [];
+
+function clearMountedEditor(): void {
+  disposeTestViews(DISPOSALS);
+}
+
+afterEach(clearMountedEditor);
+
+test("shows update access only while the tool picker is expanded", () => {
+  const container = mountTestView(
+    () => (
+      <SessionToolUpdateEditor
+        detail={TEST_SESSION_DETAIL}
+        disabled={false}
+        onApply={() => Promise.resolve({ updated: true, warning: null })}
+      />
+    ),
+    DISPOSALS,
+  );
+  const toolToggle = queryTestElementAs(
+    container,
+    "[data-tool-picker-toggle='true']",
+    HTMLButtonElement,
+  );
+  const findUpdateButton = (): HTMLButtonElement | undefined =>
+    [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Update tool access",
+    );
+
+  expect(toolToggle.textContent).toBe("Expand");
+  expect(toolToggle.getAttribute("aria-expanded")).toBe("false");
+  expect(
+    container.querySelector("[data-tool-picker-controls='true']"),
+  ).toBeNull();
+  expect(findUpdateButton()).toBeUndefined();
+
+  toolToggle.click();
+
+  expect(toolToggle.textContent).toBe("Collapse");
+  expect(toolToggle.getAttribute("aria-expanded")).toBe("true");
+  expect(
+    container.querySelector("[data-tool-picker-controls='true']"),
+  ).toBeInstanceOf(HTMLDivElement);
+  expect(findUpdateButton()).toBeInstanceOf(HTMLButtonElement);
+
+  toolToggle.click();
+
+  expect(findUpdateButton()).toBeUndefined();
+});
+
+test("keeps the tool draft stable across unrelated realtime detail updates", async () => {
+  const [detail, setDetail] = createSignal(TEST_SESSION_DETAIL);
+  const onApply = vi.fn(() =>
+    Promise.resolve({ updated: false, warning: "Confirm the tool change" }),
+  );
+  const container = mountTestView(
+    () => (
+      <SessionToolUpdateEditor
+        detail={detail()}
+        disabled={false}
+        onApply={onApply}
+      />
+    ),
+    DISPOSALS,
+  );
+  await Promise.resolve();
+
+  const toolToggle = queryTestElementAs(
+    container,
+    "[data-tool-picker-toggle='true']",
+    HTMLButtonElement,
+  );
+  toolToggle.click();
+  const selectedTool = container.querySelector<HTMLInputElement>(
+    "input[value='bash']",
+  );
+  if (selectedTool === null) {
+    throw new Error("The bash tool checkbox was not rendered");
+  }
+  selectedTool.click();
+  selectedTool.focus();
+
+  const updateDetail = (): void => {
+    setDetail((current) =>
+      Object.assign({}, current, { updatedAt: current.updatedAt + 1 }),
+    );
+  };
+  updateDetail();
+  await Promise.resolve();
+
+  expect(
+    queryTestElementAs(container, "input[value='bash']", HTMLInputElement),
+  ).toBe(selectedTool);
+  expect(selectedTool).toMatchObject({ checked: false });
+  expect(selectedTool.matches(":focus")).toBe(true);
+  expect(
+    queryTestElementAs(
+      container,
+      "[data-tool-picker-toggle='true']",
+      HTMLButtonElement,
+    ).getAttribute("aria-expanded"),
+  ).toBe("true");
+});

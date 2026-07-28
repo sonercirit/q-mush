@@ -1,7 +1,10 @@
-import { readAgentImages, type AgentImage } from "../shared/agent-images.ts";
+import {
+  readAgentAttachments,
+  type AgentAttachment,
+} from "../shared/agent-attachments.ts";
 
 export function serializeStoredImages(
-  images: readonly AgentImage[],
+  images: readonly AgentAttachment[],
 ): string | null {
   return images.length === 0 ? null : JSON.stringify(images);
 }
@@ -9,13 +12,13 @@ export function serializeStoredImages(
 export function parseStoredImages(
   value: string | null,
   errorMessage: string,
-): readonly AgentImage[] {
+): readonly AgentAttachment[] {
   if (value === null) {
     return [];
   }
 
   try {
-    const images = readAgentImages(JSON.parse(value));
+    const images = readAgentAttachments(JSON.parse(value));
     if (images !== undefined) {
       return images;
     }

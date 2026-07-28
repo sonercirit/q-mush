@@ -1,5 +1,5 @@
+import type { AgentAttachment } from "../shared/agent-attachments.ts";
 import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
-import type { AgentImage } from "../shared/agent-images.ts";
 import type { AgentSessionToolName } from "../shared/agent-tools.ts";
 import type { RunnerExecutionEnvironment } from "../shared/runner-command-broker.ts";
 import type {
@@ -17,7 +17,7 @@ export interface SessionDraft {
   readonly autoCompact: boolean;
   readonly credential: string;
   readonly executionEnvironment: RunnerExecutionEnvironment;
-  readonly images: readonly AgentImage[];
+  readonly images: readonly AgentAttachment[];
   readonly model: string;
   readonly openRouterProviderTag: string;
   readonly prompt: string;
@@ -44,7 +44,7 @@ export interface SessionViewState {
   readonly draft: SessionDraft;
   readonly error: string | undefined;
   readonly followUp: string;
-  readonly followUpImages: readonly AgentImage[];
+  readonly followUpImages: readonly AgentAttachment[];
   readonly history: SessionHistoryState;
   readonly loadingDetail: boolean;
   readonly modelDiscovery: SessionModelDiscoveryState;

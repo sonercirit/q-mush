@@ -19,6 +19,13 @@ export function sessionCredentialValue(
   });
 }
 
+export function selectedSessionCredentialOption(
+  credentials: readonly SessionCredentialOption[],
+  value: string,
+): SessionCredentialOption | undefined {
+  return credentials.find((option) => sessionCredentialValue(option) === value);
+}
+
 export function sessionCredentialSelectOptions(
   credentials: readonly SessionCredentialOption[],
 ) {

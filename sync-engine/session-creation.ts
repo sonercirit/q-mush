@@ -12,7 +12,7 @@ import {
   selectedSessionModel,
   type CreateSessionInput,
 } from "./session-input.ts";
-import { sessionMetadata } from "./session-provider-selection.ts";
+import { sessionMetadataFromDependencies } from "./session-provider-selection.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
 import type { CreateAgentSession } from "./session-store-create.ts";
 import type { SessionStore } from "./session-store.ts";
@@ -200,10 +200,9 @@ export async function createValidatedSession(
   credential: ProviderCredentialAccess,
 ): Promise<Response> {
   const selectedModel = selectedSessionModel(input, credential.source);
-  const metadata = await sessionMetadata({
+  const metadata = await sessionMetadataFromDependencies({
     credential,
-    discoverModels: dependencies.discoverModels,
-    discoverProviders: dependencies.discoverOpenRouterProviders,
+    dependencies,
     input: { ...input, model: selectedModel },
     ownerId: user.id,
   });

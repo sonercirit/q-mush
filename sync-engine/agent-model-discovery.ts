@@ -27,6 +27,7 @@ const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models/user";
 const MODEL_CLIENT_VERSION = "1.0.0";
 const MAXIMUM_RESPONSE_LENGTH = 5 * 1024 * 1024;
 const MAXIMUM_MODEL_LABEL_BYTES = 300;
+const MAXIMUM_MODEL_FALLBACK_PROMPT_BYTES = 4_000;
 const MAXIMUM_MODEL_METADATA_ITEMS = 20;
 const MAXIMUM_MODEL_METADATA_INPUT_ITEMS = 100;
 const MAXIMUM_MODEL_METADATA_TEXT_BYTES = 100;
@@ -226,6 +227,15 @@ function modelOption(
 
   return {
     contextWindow: modelContextWindow(value, contextKeys),
+    ...(typeof value["fallback_prompt"] === "string"
+      ? {
+          fallbackPrompt:
+            utf8Prefix(
+              value["fallback_prompt"].trim(),
+              MAXIMUM_MODEL_FALLBACK_PROMPT_BYTES,
+            ) || null,
+        }
+      : {}),
     id,
     inputModalities: uniqueStrings(
       nestedValue(value, "input_modalities", "architecture"),

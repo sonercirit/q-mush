@@ -204,14 +204,6 @@ export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
         class="flex w-full flex-col gap-3 sm:flex-row sm:items-start sm:justify-end"
         data-session-composer-actions="true"
       >
-        <button
-          aria-describedby={props.availabilityDescriptionId}
-          class={COMPOSER_BUTTON_CLASSES}
-          disabled={props.disabled}
-          type="submit"
-        >
-          {props.sending ? "Sending…" : (props.submitLabel ?? "Send")}
-        </button>
         <Show when={props.onSteer !== undefined}>
           <button
             aria-describedby={props.availabilityDescriptionId}
@@ -227,6 +219,14 @@ export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
             Steer
           </button>
         </Show>
+        <button
+          aria-describedby={props.availabilityDescriptionId}
+          class={COMPOSER_BUTTON_CLASSES}
+          disabled={props.disabled}
+          type="submit"
+        >
+          {props.sending ? "Sending…" : (props.submitLabel ?? "Send")}
+        </button>
         <Show when={props.onContinue !== undefined}>
           <button
             aria-describedby={props.availabilityDescriptionId}

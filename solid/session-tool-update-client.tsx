@@ -1,4 +1,12 @@
-import { createEffect, createSignal, Show, untrack, type JSX } from "solid-js";
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  on,
+  Show,
+  untrack,
+  type JSX,
+} from "solid-js";
 import type { AgentSessionToolName } from "../shared/agent-tools.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { SessionToolPicker } from "./session-tool-picker.tsx";
@@ -16,10 +24,14 @@ export function SessionToolUpdateEditor(props: {
   );
   const [warning, setWarning] = createSignal<string | null>(null);
   const [applying, setApplying] = createSignal(false);
-  createEffect(() => {
-    setTools(props.detail.tools);
-    setWarning(null);
-  });
+  const [expanded, setExpanded] = createSignal(false);
+  const toolRevision = createMemo(() => props.detail.tools.join("\n"));
+  createEffect(
+    on(toolRevision, () => {
+      setTools(props.detail.tools);
+      setWarning(null);
+    }),
+  );
   const apply = async (confirmedCacheDrop: boolean): Promise<void> => {
     setApplying(true);
     try {
@@ -41,6 +53,7 @@ export function SessionToolUpdateEditor(props: {
         <SessionToolPicker
           disabled={props.disabled || applying()}
           onChange={setTools}
+          onExpandedChange={setExpanded}
           tools={tools()}
         />
       </div>
@@ -62,14 +75,16 @@ export function SessionToolUpdateEditor(props: {
           </div>
         )}
       </Show>
-      <button
-        class="mt-4 rounded-xl border border-cyan-300/30 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-100 disabled:opacity-50"
-        disabled={props.disabled || applying()}
-        onClick={() => void apply(false)}
-        type="button"
-      >
-        {applying() ? "Applying…" : "Update tool access"}
-      </button>
+      <Show when={expanded()}>
+        <button
+          class="mt-4 rounded-xl border border-cyan-300/30 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-100 disabled:opacity-50"
+          disabled={props.disabled || applying()}
+          onClick={() => void apply(false)}
+          type="button"
+        >
+          {applying() ? "Applying…" : "Update tool access"}
+        </button>
+      </Show>
     </section>
   );
 }

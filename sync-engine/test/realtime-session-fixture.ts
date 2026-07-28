@@ -52,6 +52,8 @@ export function realtimeTestSessionCommands(
       input: realtimeTestPendingInput(),
     }),
     compactForUser: () => Promise.resolve(REALTIME_TEST_SESSION_DETAIL),
+    compactAndContinueForUser: () =>
+      Promise.resolve(REALTIME_TEST_SESSION_DETAIL),
     continueForUser: () => Promise.resolve(REALTIME_TEST_SESSION_DETAIL),
     createForUser: () => Promise.resolve(REALTIME_TEST_SESSION_DETAIL),
     forkForUser: () => Promise.resolve(REALTIME_TEST_SESSION_DETAIL),

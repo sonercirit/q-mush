@@ -5,6 +5,7 @@ import type {
   ProviderId,
 } from "../shared/provider-credential-store.ts";
 import type { AgentSessionSummary } from "../shared/session-model.ts";
+import { RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
 import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
 import { createApiError, createJsonResponse } from "./http.ts";
 import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
@@ -136,6 +137,37 @@ export type SessionMetadataResult =
  * a session whose explicit tag is non-null. That keeps provider tags valid
  * under same-provider credential and workspace-scope changes.
  */
+export function requireSessionMetadata(
+  metadata: SessionMetadataResult,
+): Exclude<SessionMetadataResult, { readonly error: string }> {
+  if ("error" in metadata) {
+    throw new RealtimeCommandError(
+      metadata.error === "provider_unavailable"
+        ? "openrouter_provider_unavailable"
+        : "openrouter_provider_validation_failed",
+    );
+  }
+  return metadata;
+}
+
+export function sessionMetadataFromDependencies(options: {
+  readonly credential: ProviderCredentialAccess;
+  readonly dependencies: {
+    readonly discoverModels: AgentModelDiscoverer;
+    readonly discoverOpenRouterProviders: OpenRouterProviderDiscoverer;
+  };
+  readonly input: Parameters<typeof sessionMetadata>[0]["input"];
+  readonly ownerId: string;
+}): Promise<SessionMetadataResult> {
+  return sessionMetadata({
+    credential: options.credential,
+    discoverModels: options.dependencies.discoverModels,
+    discoverProviders: options.dependencies.discoverOpenRouterProviders,
+    input: options.input,
+    ownerId: options.ownerId,
+  });
+}
+
 export async function sessionMetadata(options: {
   readonly credential: ProviderCredentialAccess;
   readonly discoverModels: AgentModelDiscoverer;

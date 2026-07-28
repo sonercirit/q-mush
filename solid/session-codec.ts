@@ -79,6 +79,7 @@ function readModelOption(value: unknown): AgentModelOption {
       ? value["context_window"]
       : value["contextWindow"];
   const contextWindow = readPositiveSafeInteger(contextWindowValue);
+  const fallbackPromptValue = value["fallbackPrompt"];
   const id = value["id"];
   const inputModalitiesValue = value["inputModalities"];
   const label = value["label"];
@@ -87,6 +88,9 @@ function readModelOption(value: unknown): AgentModelOption {
 
   if (
     !isAgentModelId(id) ||
+    (fallbackPromptValue !== undefined &&
+      fallbackPromptValue !== null &&
+      typeof fallbackPromptValue !== "string") ||
     inputModalitiesValue === undefined ||
     typeof label !== "string" ||
     outputModalitiesValue === undefined ||
@@ -98,6 +102,8 @@ function readModelOption(value: unknown): AgentModelOption {
 
   return {
     contextWindow,
+    fallbackPrompt:
+      typeof fallbackPromptValue === "string" ? fallbackPromptValue : null,
     id,
     inputModalities: readModelModalities(inputModalitiesValue),
     label,
@@ -224,7 +230,9 @@ function readRestartHandoff(
   return executionGeneration !== undefined &&
     executionGeneration >= 0 &&
     Number.isSafeInteger(executionGeneration) &&
-    (operation === "agent" || operation === "compact") &&
+    (operation === "agent" ||
+      operation === "compact" ||
+      operation === "compact_and_continue") &&
     Array.isArray(pendingInput) &&
     pendingInput.length === 0 &&
     (requestedBy === "runner" || requestedBy === "server") &&

@@ -240,7 +240,11 @@ describe("session realtime command dispatch", () => {
     const integration = realtimeTestSessionCommands();
     const forkForUser = vi.spyOn(integration, "forkForUser");
     const payload = {
+      credentialId: "credential-2",
       forkPointMessageId: "message-1",
+      model: "openai/gpt-5",
+      provider: "openrouter" as const,
+      reasoningEffort: "high" as const,
       sourceSessionId: "session-1",
       workspaceId: TEST_WORKSPACE_ID,
     };
@@ -286,6 +290,9 @@ describe("session realtime command dispatch", () => {
   });
 
   test("dispatches all authenticated session mutations", async () => {
+    const compactAndContinueForUser = vi.fn(() =>
+      Promise.resolve(REALTIME_TEST_SESSION_DETAIL),
+    );
     const compactForUser = vi.fn(() =>
       Promise.resolve(REALTIME_TEST_SESSION_DETAIL),
     );
@@ -296,6 +303,7 @@ describe("session realtime command dispatch", () => {
     const setAutoCompactionForUser = vi.fn(() => REALTIME_TEST_SESSION_DETAIL);
     const stopForUser = vi.fn(() => REALTIME_TEST_SESSION_DETAIL);
     const integration = realtimeTestSessionCommands({
+      compactAndContinueForUser,
       compactForUser,
       continueForUser,
       reassignForUser,
@@ -304,6 +312,9 @@ describe("session realtime command dispatch", () => {
     });
 
     await execute(integration, SESSION_REALTIME_OPERATIONS.compact, {
+      sessionId: "session-1",
+    });
+    await execute(integration, SESSION_REALTIME_OPERATIONS.compactAndContinue, {
       sessionId: "session-1",
     });
     await execute(integration, SESSION_REALTIME_OPERATIONS.continue, {
@@ -324,6 +335,11 @@ describe("session realtime command dispatch", () => {
     });
 
     expect(compactForUser).toHaveBeenCalledWith(
+      TEST_USER,
+      "session-1",
+      TEST_WORKSPACE_ID,
+    );
+    expect(compactAndContinueForUser).toHaveBeenCalledWith(
       TEST_USER,
       "session-1",
       TEST_WORKSPACE_ID,
@@ -367,6 +383,7 @@ describe("session realtime command dispatch", () => {
 
     for (const [operation, payload] of [
       [SESSION_REALTIME_OPERATIONS.read, {}],
+      [SESSION_REALTIME_OPERATIONS.compactAndContinue, {}],
       [SESSION_REALTIME_OPERATIONS.models, { provider: "openai" }],
       [SESSION_REALTIME_OPERATIONS.create, { ...createPayload(), prompt: 1 }],
       [

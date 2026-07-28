@@ -1,4 +1,5 @@
 import { expect, test, vi } from "vitest";
+import { TEST_SESSION_FORK_SELECTION } from "../../shared/test/session-fork-fixtures.ts";
 import { SESSION_REALTIME_OPERATIONS } from "../../shared/user-realtime-protocol.ts";
 import { createReactiveState } from "../reactive-state.ts";
 import type { SessionViewState } from "../session-client.tsx";
@@ -62,6 +63,19 @@ test("forks from a transcript message and selects the returned session", async (
   });
   expectForkSelection(controller, forked);
   expect(controller.state.sessions?.map(({ id }) => id)).toContain(forked.id);
+});
+
+test("sends an optional provider selection with the fork", async () => {
+  const command = vi.fn<ForkCommand>(() => Promise.resolve(forkedSession()));
+  const controller = forkController(command);
+  const selection = TEST_SESSION_FORK_SELECTION;
+
+  await controller.fork("message-1", selection);
+
+  expect(command).toHaveBeenCalledWith(
+    SESSION_REALTIME_OPERATIONS.fork,
+    expect.objectContaining(selection),
+  );
 });
 
 test("blocks a second fork while the first fork is pending", async () => {

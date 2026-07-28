@@ -18,7 +18,8 @@ test("renders a collapsed tool-list toggle", () => {
 
   expect(html).toContain('data-tool-picker-toggle="true"');
   expect(html).toContain('aria-expanded="false"');
-  expect(html).toContain("Expand tools");
+  expect(html).toContain("Expand");
+  expect(html).not.toContain("Expand tools");
   expect(html).not.toContain('data-tool-picker-controls="true"');
 });
 

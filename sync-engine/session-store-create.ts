@@ -52,6 +52,16 @@ export interface ForkAgentSession extends Pick<
   CreateAgentSession,
   "autoCompact" | "userId" | "workspaceId"
 > {
+  readonly configuration?: Pick<
+    CreateAgentSession,
+    | "credentialId"
+    | "maxContextTokens"
+    | "model"
+    | "openRouterProviderTag"
+    | "provider"
+    | "providerPricing"
+    | "reasoningEffort"
+  >;
   readonly messages: readonly AgentSessionMessage[];
   readonly source: AgentSessionSummary;
 }
@@ -270,14 +280,15 @@ export function forkStoredSession(
   input: ForkAgentSession,
   now: number,
 ): ForkSessionResult {
-  validateSessionConfiguration(input.source);
   const sessionId = resources.generateId(now);
   const session = {
     ...input.source,
+    ...input.configuration,
     autoCompact: input.autoCompact,
     userId: input.userId,
     workspaceId: input.workspaceId,
   };
+  validateSessionConfiguration(session);
   resources.database.transaction((transaction) => {
     insertSession(
       transaction,

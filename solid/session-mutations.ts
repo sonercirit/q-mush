@@ -56,10 +56,15 @@ export interface SessionMutation {
   readonly pending: SessionPendingAction;
 }
 
-export function compactSessionMutation(sessionId: string): SessionMutation {
+export function compactSessionMutation(
+  sessionId: string,
+  continueAfter = false,
+): SessionMutation {
   return sessionMutation(
     sessionId,
-    SESSION_REALTIME_OPERATIONS.compact,
+    continueAfter
+      ? SESSION_REALTIME_OPERATIONS.compactAndContinue
+      : SESSION_REALTIME_OPERATIONS.compact,
     "compact that session",
     "compacting",
   );
@@ -140,12 +145,27 @@ function sessionMutation(
   return { action, operation, payload: { sessionId }, pending };
 }
 
+type SessionLaunchMutationOperation =
+  | typeof SESSION_REALTIME_OPERATIONS.compact
+  | typeof SESSION_REALTIME_OPERATIONS.compactAndContinue
+  | typeof SESSION_REALTIME_OPERATIONS.continue;
+
+function launchMutation(
+  operation: SessionMutation["operation"],
+): operation is SessionLaunchMutationOperation {
+  return (
+    operation === SESSION_REALTIME_OPERATIONS.compact ||
+    operation === SESSION_REALTIME_OPERATIONS.compactAndContinue ||
+    operation === SESSION_REALTIME_OPERATIONS.continue
+  );
+}
+
 function validSessionMutationPayload(mutation: SessionMutation): boolean {
   const payload = mutation.payload;
+  if (launchMutation(mutation.operation)) {
+    return Object.keys(payload).length === 1;
+  }
   switch (mutation.operation) {
-    case SESSION_REALTIME_OPERATIONS.compact:
-    case SESSION_REALTIME_OPERATIONS.continue:
-      return Object.keys(payload).length === 1;
     case SESSION_REALTIME_OPERATIONS.stop:
       return (
         Object.keys(payload).length ===
@@ -230,10 +250,10 @@ function mutationIsReconciled(
     return false;
   }
   const generationAdvanced = detail.generation > baseline.generation;
+  if (launchMutation(mutation.operation)) {
+    return generationAdvanced;
+  }
   switch (mutation.operation) {
-    case SESSION_REALTIME_OPERATIONS.compact:
-    case SESSION_REALTIME_OPERATIONS.continue:
-      return generationAdvanced;
     case SESSION_REALTIME_OPERATIONS.followUp:
     case SESSION_REALTIME_OPERATIONS.steer:
       return detail.pendingInputs.some(

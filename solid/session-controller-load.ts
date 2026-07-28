@@ -12,6 +12,7 @@ import { sessionDetailState } from "./session-controller-detail.ts";
 import {
   mergeNewerSelectedSessionSummary,
   sessionDataMatches,
+  sessionSummariesMatch,
   type SessionRealtimeState,
 } from "./session-controller-state.ts";
 import {
@@ -394,7 +395,7 @@ export class SessionLoadController {
       );
       if (
         selectedId !== this.#view.value.selectedId ||
-        !sessionDataMatches(this.#view.value.sessions, visibleSessions)
+        !sessionSummariesMatch(this.#view.value.sessions, visibleSessions)
       ) {
         this.#applySessions(visibleSessions, selectedId);
       }
@@ -427,7 +428,7 @@ export class SessionLoadController {
       !showLoading &&
       !this.#view.value.loadingDetail &&
       sessionDataMatches(this.#view.value.detail, detail) &&
-      sessionDataMatches(this.#view.value.sessions, detailState.sessions)
+      sessionSummariesMatch(this.#view.value.sessions, detailState.sessions)
     ) {
       return;
     }

@@ -1,6 +1,7 @@
 import { compareAgentSessionMessages } from "../shared/session-message-order.ts";
 import {
   forkStoredSession,
+  type ForkAgentSession,
   type ForkSessionResult,
 } from "./session-store-create.ts";
 import { readStoredSessionMessages } from "./session-store-read.ts";
@@ -12,6 +13,7 @@ export type SessionStoreForkParameters = readonly [
   forkPointMessageId: string,
   workspaceId: string,
   now: number,
+  configuration?: ForkAgentSession["configuration"],
 ];
 
 export type SessionStoreForkResult =
@@ -25,6 +27,7 @@ export function forkStoredSessionFromSource(
     forkPointMessageId,
     workspaceId,
     now,
+    configuration,
   ]: SessionStoreForkParameters
 ): SessionStoreForkResult {
   const source = resources.read(userId, sourceSessionId, workspaceId);
@@ -47,6 +50,7 @@ export function forkStoredSessionFromSource(
     resources,
     {
       autoCompact: source.autoCompact,
+      ...(configuration === undefined ? {} : { configuration }),
       messages: copied,
       source,
       userId,

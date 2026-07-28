@@ -10,6 +10,17 @@ type FetchImplementation = (
   ...parameters: Parameters<typeof globalThis.fetch>
 ) => ReturnType<typeof globalThis.fetch>;
 
+export async function withRestoredFetch(
+  action: () => Promise<void>,
+): Promise<void> {
+  const originalFetch = globalThis.fetch;
+  try {
+    await action();
+  } finally {
+    restoreFetch(originalFetch);
+  }
+}
+
 export function requestUrl(input: RequestInfo | URL): string {
   return typeof input === "string"
     ? input

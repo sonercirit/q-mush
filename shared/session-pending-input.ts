@@ -1,9 +1,10 @@
-import type { AgentImage } from "./agent-images.ts";
-import type { AgentSessionPendingInputKind } from "./session-model.ts";
+import type {
+  AgentSessionPendingInputKind,
+  AttachmentContentFields,
+} from "./session-model.ts";
 
-export interface SessionPendingInputRequest {
+export interface SessionPendingInputRequest extends AttachmentContentFields {
   readonly clientRequestId: string;
-  readonly images: readonly AgentImage[];
   readonly kind: AgentSessionPendingInputKind;
 }
 

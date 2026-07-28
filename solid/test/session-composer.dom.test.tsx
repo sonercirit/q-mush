@@ -210,7 +210,32 @@ test("follow-up typing updates locally before the shared session view", () => {
   expect(controller.state.followUp).toBe("Change direction immediately");
 });
 
-test("the visible steer action flushes the draft and keeps its shortcut", () => {
+function pressComposerShortcut(
+  prompt: HTMLTextAreaElement,
+  shiftKey = false,
+): void {
+  prompt.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      bubbles: true,
+      ctrlKey: true,
+      key: "Enter",
+      shiftKey,
+    }),
+  );
+}
+
+test("orders Steer before Follow up in the running composer", () => {
+  const { container } = mountedRunningComposer();
+  const labels = [
+    ...container.querySelectorAll<HTMLButtonElement>(
+      "[data-session-composer-actions='true'] button",
+    ),
+  ].map(({ textContent }) => textContent);
+
+  expect(labels).toEqual(["Steer", "Follow up"]);
+});
+
+test("the visible steer action flushes the draft and uses Ctrl+Enter", () => {
   const { container, controller, prompt } = mountedRunningComposer();
   const steer = vi.spyOn(controller, "steer").mockResolvedValue();
   const steerButton = queryTestElement(
@@ -228,15 +253,14 @@ test("the visible steer action flushes the draft and keeps its shortcut", () => 
   expect(steer).toHaveBeenCalledOnce();
   expect(controller.state.followUp).toBe("Use a smaller change");
 
-  prompt.dispatchEvent(
-    new KeyboardEvent("keydown", {
-      bubbles: true,
-      ctrlKey: true,
-      key: "Enter",
-      shiftKey: true,
-    }),
-  );
+  pressComposerShortcut(prompt);
 
+  expect(steer).toHaveBeenCalledTimes(2);
+
+  const followUp = vi.spyOn(controller, "followUp").mockResolvedValue();
+  pressComposerShortcut(prompt, true);
+
+  expect(followUp).toHaveBeenCalledOnce();
   expect(steer).toHaveBeenCalledTimes(2);
 });
 
@@ -365,15 +389,15 @@ test("renders pending instructions in FIFO order", () => {
 
 test("exposes platform-specific shortcuts", () => {
   expect(platformSessionShortcuts("Linux x86_64")).toEqual({
-    followUpKeys: "Control+Enter",
-    followUpLabel: "Ctrl+Enter",
-    steerKeys: "Control+Shift+Enter",
-    steerLabel: "Ctrl+Shift+Enter",
+    followUpKeys: "Control+Shift+Enter",
+    followUpLabel: "Ctrl+Shift+Enter",
+    steerKeys: "Control+Enter",
+    steerLabel: "Ctrl+Enter",
   });
   expect(platformSessionShortcuts("MacIntel")).toEqual({
-    followUpKeys: "Meta+Enter",
-    followUpLabel: "⌘+Enter",
-    steerKeys: "Meta+Shift+Enter",
-    steerLabel: "⌘+Shift+Enter",
+    followUpKeys: "Meta+Shift+Enter",
+    followUpLabel: "⌘+Shift+Enter",
+    steerKeys: "Meta+Enter",
+    steerLabel: "⌘+Enter",
   });
 });

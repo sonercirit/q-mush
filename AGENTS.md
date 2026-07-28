@@ -259,35 +259,35 @@ Living project memory.
   Cross-target compilation may first download the matching Bun executable into
   Bun's user cache, while subsequent runner downloads use the in-process binary
   cache.
-- Agent file tools are confined to the runner workspace, including symlink
-  resolution; session-owned `read` spill files are the only exception. `bash`
-  intentionally has the runner account's full shell permissions and is only
-  rooted at that directory. The authenticated directory picker intentionally
-  browses outside a session workspace with the selected runner account's
-  filesystem permissions; it returns directory metadata only, bounds each
-  listing, and times out stalled requests. Stopping a session aborts its model
-  request and pushes runner-command cancellation over WebSocket so an active
-  shell command terminates. OpenAI API-key and OAuth requests prefer Responses
-  WebSocket mode and fall back to HTTP streaming; OpenRouter uses its supported
-  streaming chat-completions transport. OpenAI OAuth refreshes its encrypted
-  token bundle shortly before expiry. Provider defaults are `gpt-4.1-mini`,
-  `openai/gpt-4.1-mini`, and `gpt-5-codex` for OpenAI keys, OpenRouter, and
-  OpenAI OAuth respectively; they are API fallbacks and catalog metadata, not
-  browser selection defaults or catalog sources. Browser catalogs come from
-  OpenAI `/v1/models`, OpenRouter `/api/v1/models/user`, or the ChatGPT Codex
-  `/models` endpoint. Codex response parsing retains streamed output-text and
-  function-call argument deltas because a completed event may omit its `output`
-  items. OpenAI's standard model list has no reasoning capabilities, while
-  OpenRouter and Codex return model-specific efforts. Session drafts use each
-  model's maximum discovered effort. Optional reasoning uses `reasoning_effort`
-  for OpenAI chat completions and `reasoning.effort` for OpenRouter and Codex
-  Responses. Streamed reasoning deltas are grouped by `output_index` and
-  `summary_index`; separate summary parts with paragraphs because completed
-  responses may omit their output. OpenAI Responses WebSockets and accepted HTTP
-  streams retry transient interruptions or provider error events only before a
-  model turn is persisted; partial UI deltas reset before replay, and exhausted
-  WebSockets fall back to HTTP. Permanent provider errors and aborts do not
-  retry, and terminal failures persist as non-replayed `error` messages.
+- File tools stay in the runner workspace after symlink resolution. Only
+  session-owned non-read output spills may leave it; `read` pages its source.
+  `bash` has full runner-account shell permissions and is rooted there. The
+  directory picker browses outside a session workspace with the selected runner
+  account's filesystem permissions; it returns directory metadata only, bounds
+  each listing, and times out stalled requests. Stopping a session aborts its
+  model request and pushes runner-command cancellation over WebSocket so an
+  active shell command terminates. OpenAI API-key and OAuth requests prefer
+  Responses WebSocket mode and fall back to HTTP streaming; OpenRouter uses its
+  supported streaming chat-completions transport. OpenAI OAuth refreshes its
+  encrypted token bundle shortly before expiry. Provider defaults are
+  `gpt-4.1-mini`, `openai/gpt-4.1-mini`, and `gpt-5-codex` for OpenAI keys,
+  OpenRouter, and OpenAI OAuth respectively; they are API fallbacks and catalog
+  metadata, not browser selection defaults or catalog sources. Browser catalogs
+  come from OpenAI `/v1/models`, OpenRouter `/api/v1/models/user`, or the
+  ChatGPT Codex `/models` endpoint. Codex response parsing retains streamed
+  output-text and function-call argument deltas because a completed event may
+  omit its `output` items. OpenAI's standard model list has no reasoning
+  capabilities, while OpenRouter and Codex return model-specific efforts.
+  Session drafts use each model's maximum discovered effort. Optional reasoning
+  uses `reasoning_effort` for OpenAI chat completions and `reasoning.effort` for
+  OpenRouter and Codex Responses. Streamed reasoning deltas are grouped by
+  `output_index` and `summary_index`; separate summary parts with paragraphs
+  because completed responses may omit their output. OpenAI Responses WebSockets
+  and accepted HTTP streams retry transient interruptions or provider error
+  events only before a model turn is persisted; partial UI deltas reset before
+  replay, and exhausted WebSockets fall back to HTTP. Permanent provider errors
+  and aborts do not retry, and terminal failures persist as non-replayed `error`
+  messages.
 - Shell commands require a positive timeout. On macOS/Linux each has a POSIX
   session; stop/timeout signals only its group, including descendants retaining
   pipes. Agent launches and runner commands otherwise have no application-owned

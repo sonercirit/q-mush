@@ -20,6 +20,7 @@ class FakeContainers {
     readonly sessionId: string;
     readonly signal: AbortSignal | undefined;
   }[] = [];
+  shellOutput = "container shell output";
   readonly shells: {
     readonly command: string;
     readonly root: string;
@@ -47,7 +48,7 @@ class FakeContainers {
     timeout: number,
   ): Promise<string> {
     this.shells.push({ command, root, sessionId, timeout });
-    return Promise.resolve("container shell output");
+    return Promise.resolve(this.shellOutput);
   }
 }
 
@@ -150,23 +151,18 @@ describe("container runner commands", () => {
     expect(containers.cleaned).toEqual(["session-1"]);
   });
 
-  test("preserves the read budget during nonterminal container cleanup", async () => {
+  test("preserves tool spills during nonterminal container cleanup", async () => {
     const root = await workspace();
     const containers = new FakeContainers();
+    containers.shellOutput = "x".repeat(60_000);
     const executor = new RunnerCommandExecutor(containers);
-    await Bun.write(`${root}/large.txt`, "x".repeat(60_000));
-    const read = {
-      ...command("read", "container", root),
-      arguments: { path: "/workspace/large.txt" },
-    };
+    const output = await executor.execute(command("bash", "container", root));
 
-    const output = await executor.execute(read);
-    expect(output).toContain("global read limit");
-    const path = /saved to (.+)\. Read that file/u.exec(output)?.[1] ?? "";
+    expect(output).toContain("per-call limit");
+    const path = /saved to (.+)\. Use the read tool/u.exec(output)?.[1] ?? "";
     const cleanup = command("cleanup_execution_environment", "container", root);
-    const stillExists = Bun.file(path).exists();
     await executor.execute(cleanup);
-    expect(await stillExists).toBe(true);
+    expect(await Bun.file(path).exists()).toBe(true);
 
     const terminal = {
       ...cleanup,

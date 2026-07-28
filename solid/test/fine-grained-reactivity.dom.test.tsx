@@ -19,14 +19,13 @@ import { RunnerController } from "../runner-controller.ts";
 import { SessionPanel, type SessionViewState } from "../session-client.tsx";
 import { summaryFromDetail } from "../session-codec.ts";
 import { SessionController } from "../session-controller.ts";
-import { SessionDetailBody } from "../session-detail-body.tsx";
 import { SessionList } from "../session-detail-client.tsx";
 import { initialSessionViewState } from "../session-state.ts";
-import type { SessionCommandTransport } from "../session-transport.ts";
 import {
   clickTestButton,
   disposeTestViews,
   expectTestText,
+  findTestButton,
   mountTestView,
   queryTestElement,
   queryTestTranscript,
@@ -34,6 +33,7 @@ import {
 import { openAiProviderPanel } from "./provider-panel-fixtures.tsx";
 import { runnerSummary } from "./runner-fixtures.ts";
 import {
+  mountSessionDetailBody,
   mountTestSessionDetail,
   restoreFetchAfterTest,
 } from "./session-dom-test-helpers.tsx";
@@ -65,53 +65,6 @@ function mountedSessionList(
   );
   return {
     container: mount(() => <SessionList controller={controller} />),
-    controller,
-  };
-}
-
-interface MountedSessionBody {
-  readonly container: HTMLDivElement;
-  readonly controller: SessionController;
-}
-
-function mountedSessionBody(
-  reactive: ReturnType<typeof createReactiveState<SessionViewState>>,
-  transport?: SessionCommandTransport,
-): MountedSessionBody {
-  const controller = new SessionController(
-    reactive,
-    undefined,
-    null,
-    transport,
-  );
-  const detail = reactive.state().detail;
-  if (detail === undefined) throw new TypeError("Missing session detail");
-  const bodyProps = {
-    contextLabel: "0% context",
-    environmentLabel: "Bare Metal",
-    modelLabel: "openai · model",
-    presentation: <span>Running</span>,
-    providerUpdate: {
-      credentials: [],
-      onApply: () => Promise.resolve(false),
-      onDiscoverModels: () => {
-        return Promise.resolve({ defaultModel: null, models: [] });
-      },
-      onDiscoverProviders: () => Promise.resolve({ providers: [] }),
-    },
-    sessionMetrics: <span>Time: 0s</span>,
-    view: {
-      controller,
-      credentialAvailable: true,
-      credentials: [],
-      detail,
-      onOpenDirectoryPicker: () => undefined,
-      runners: [],
-      state: reactive.state(),
-    },
-  };
-  return {
-    container: mount(() => <SessionDetailBody {...bodyProps} />),
     controller,
   };
 }
@@ -454,7 +407,7 @@ test("keeps a running tool visible while a stop request is pending", () => {
       },
     ],
   });
-  const { container } = mountedSessionBody(reactive);
+  const { container } = mountSessionDetailBody(reactive, disposals);
 
   expect(container.textContent).toContain("Running");
   expect(
@@ -490,10 +443,8 @@ test("asks how to stop a parent with child sessions", () => {
     configurable: true,
     value: confirm,
   });
-  const { container } = mountedSessionBody(reactive, transport);
-  const stop = [...container.querySelectorAll("button")].find(
-    ({ textContent }) => textContent === "Stop session",
-  );
+  const { container } = mountSessionDetailBody(reactive, disposals, transport);
+  const stop = findTestButton(container, "Stop session");
   if (!(stop instanceof HTMLButtonElement)) {
     throw new TypeError("The stop button was not rendered");
   }

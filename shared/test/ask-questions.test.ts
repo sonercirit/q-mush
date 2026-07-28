@@ -180,11 +180,25 @@ describe("ask_questions parsing", () => {
     ).toBeUndefined();
   });
 
+  test("accepts custom text answers for either choice kind", () => {
+    const questions = readAskQuestionsInput(MIXED_QUESTIONS)?.questions ?? [];
+    expect(
+      readAskQuestionAnswers(
+        answerInput("  run security scan  ", "  surprise me  "),
+        questions,
+      ),
+    ).toEqual(answerInput("run security scan", "surprise me"));
+    expect(
+      readAskQuestionAnswers(answerInput("   "), questions),
+    ).toBeUndefined();
+    expect(readAskQuestionAnswers(answerInput(42), questions)).toBeUndefined();
+  });
+
   test("requires exactly one valid answer for every question", () => {
     const questions = readAskQuestionsInput(MIXED_QUESTIONS)?.questions ?? [];
     for (const invalid of [
       { answers: [] },
-      answerInput(["tests"], "html"),
+      answerInput(["tests"], "   "),
       answerInput([]),
       answerInput(["tests", "tests"]),
     ]) {

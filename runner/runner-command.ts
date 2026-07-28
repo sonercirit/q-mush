@@ -12,10 +12,11 @@ import {
 import { RUNNER_DIRECTORY_COMMAND } from "../shared/runner-directory-model.ts";
 import { readBoundedString } from "../shared/validation.ts";
 import { loadRunnerAgentFile } from "./runner-agent-file.ts";
+import { executeAttachmentCommand } from "./runner-attachments.ts";
 import { RunnerContainerManager } from "./runner-container.ts";
 import { listRunnerDirectories } from "./runner-directories.ts";
+import { RunnerOutputSpills } from "./runner-output-spills.ts";
 import { runnerCommandResultFromOutput } from "./runner-process.ts";
-import { RunnerReadBudget } from "./runner-read-budget.ts";
 import {
   executeRunnerToolResult,
   type RunnerToolExecutionOptions,
@@ -113,26 +114,26 @@ export async function executeRunnerCommand(
 
 export class RunnerCommandExecutor {
   readonly #containers: RunnerContainerCommands;
-  readonly #readBudgets = new Map<string, RunnerReadBudget>();
+  readonly #outputSpills = new Map<string, RunnerOutputSpills>();
 
   constructor(containers?: RunnerContainerCommands) {
     this.#containers = containers ?? new RunnerContainerManager();
   }
 
-  #readBudget(sessionId: string): RunnerReadBudget {
-    const existing = this.#readBudgets.get(sessionId);
+  #outputSpill(sessionId: string): RunnerOutputSpills {
+    const existing = this.#outputSpills.get(sessionId);
     if (existing !== undefined) {
       return existing;
     }
-    const created = new RunnerReadBudget();
-    this.#readBudgets.set(sessionId, created);
+    const created = new RunnerOutputSpills();
+    this.#outputSpills.set(sessionId, created);
     return created;
   }
 
-  async #cleanupReadBudget(sessionId: string): Promise<void> {
-    const budget = this.#readBudgets.get(sessionId);
-    this.#readBudgets.delete(sessionId);
-    await budget?.cleanup();
+  async #cleanupOutputSpill(sessionId: string): Promise<void> {
+    const spill = this.#outputSpills.get(sessionId);
+    this.#outputSpills.delete(sessionId);
+    await spill?.cleanup();
   }
 
   async executeResult(
@@ -153,20 +154,29 @@ export class RunnerCommandExecutor {
       if (command.tool === RUNNER_EXECUTION_CLEANUP_COMMAND) {
         const terminalCleanup =
           command.arguments[RUNNER_TERMINAL_CLEANUP_ARGUMENT] === true;
-        const cleanupReadBudget = terminalCleanup
-          ? this.#cleanupReadBudget(command.sessionId)
+        const cleanupOutputSpill = terminalCleanup
+          ? this.#cleanupOutputSpill(command.sessionId)
           : Promise.resolve();
         const cleanupContainer =
           command.executionEnvironment === "container"
             ? this.#containers.cleanupSession(command.sessionId)
             : Promise.resolve();
-        await Promise.all([cleanupContainer, cleanupReadBudget]);
+        await Promise.all([cleanupContainer, cleanupOutputSpill]);
         return {
           output: terminalCleanup
             ? "Session execution resources removed."
             : "Container execution environment removed.",
           state: "completed",
         };
+      }
+
+      const attachmentResult = await executeAttachmentCommand(
+        command.workingDirectory,
+        command.tool,
+        command.arguments,
+      );
+      if (attachmentResult !== undefined) {
+        return { output: attachmentResult, state: "completed" };
       }
 
       if (command.executionEnvironment === "container") {
@@ -200,7 +210,7 @@ export class RunnerCommandExecutor {
           undefined,
           {
             mapAbsolutePath: (path) => mapContainerPath(root, path),
-            readBudget: this.#readBudget(command.sessionId),
+            outputSpills: this.#outputSpill(command.sessionId),
             shell,
             ...(stream === undefined ? {} : { stream }),
           },
@@ -218,8 +228,8 @@ export class RunnerCommandExecutor {
         signal,
         undefined,
         stream === undefined
-          ? { readBudget: this.#readBudget(command.sessionId) }
-          : { readBudget: this.#readBudget(command.sessionId), stream },
+          ? { outputSpills: this.#outputSpill(command.sessionId) }
+          : { outputSpills: this.#outputSpill(command.sessionId), stream },
       );
     } catch (error) {
       return failedRunnerCommandResult(error, 1_000);

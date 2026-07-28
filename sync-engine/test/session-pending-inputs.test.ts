@@ -3,8 +3,13 @@ import { describe, expect, test, vi } from "vitest";
 import type { AgentImage } from "../../shared/agent-images.ts";
 import { agentPendingInputs } from "../../shared/database/schema.ts";
 import { SessionFinisher } from "../session-finisher.ts";
-import { cancelPendingInput } from "../session-pending-inputs.ts";
+import {
+  cancelPendingInput,
+  enqueuePendingInput,
+  hasPendingSteeringInput,
+} from "../session-pending-inputs.ts";
 import { SessionRuntimes } from "../session-runtime.ts";
+import { waitForSessionSteeringInput } from "../session-steering-wakeup.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import {
   TEST_NOW,
@@ -48,12 +53,14 @@ function enqueueForUser(
   now: number,
   kind: "follow_up" | "steer" = "follow_up",
 ) {
-  return setup.store.enqueuePendingInput(
-    userId,
-    setup.detail.id,
-    pendingInput(clientRequestId, content, kind),
+  return enqueuePendingInput({
+    database: setup.database,
+    generateId: setup.generateId,
+    input: pendingInput(clientRequestId, content, kind),
     now,
-  );
+    sessionId: setup.detail.id,
+    userId,
+  });
 }
 
 function enqueueInput(
@@ -86,6 +93,20 @@ function cancelInput(
     sessionId: setup.detail.id,
     userId,
   });
+}
+
+function steeringIsPending(setup: ReturnType<typeof runningStore>): boolean {
+  return hasPendingSteeringInput(pendingInputs(setup) ?? []);
+}
+
+function pendingInputs(setup: ReturnType<typeof runningStore>) {
+  return setup.store.get(TEST_USER_ID, setup.detail.id)?.pendingInputs;
+}
+
+function expectSteeringTaken(setup: ReturnType<typeof runningStore>): void {
+  expect(setup.store.takeSteeringInputs(setup.detail.id, TEST_NOW + 3)).toEqual(
+    [{ content: "Change direction", role: "user" }],
+  );
 }
 
 function closeRunningStore(setup: ReturnType<typeof runningStore>): void {
@@ -131,35 +152,28 @@ function expectQueuedBoundary(
 }
 
 describe("durable pending session inputs", () => {
-  test("persists bounded FIFO inputs with owner-scoped idempotency", () => {
+  test("persists more than eight FIFO inputs with owner-scoped idempotency", () => {
     const setup = runningStore();
-    for (let index = 0; index < 8; index += 1) {
-      expect(
-        enqueueInput(
-          setup,
-          `request-${String(index)}`,
-          `Follow ${String(index)}`,
-          "follow_up",
-          TEST_NOW + 2 + index,
-        ),
-      ).toMatchObject({ status: "accepted" });
-    }
-    expect(
-      enqueueForUser(
+    const inputCount = 20;
+    const statuses = Array.from({ length: inputCount }, (_, index) =>
+      enqueueInput(
         setup,
-        TEST_USER_ID,
-        "request-8",
-        "Too many",
-        TEST_NOW + 20,
+        `request-${String(index)}`,
+        `Follow ${String(index)}`,
+        index % 2 === 0 ? "follow_up" : "steer",
+        TEST_NOW + 2 + index,
       ),
-    ).toEqual({ status: "full" });
+    ).map(({ status }) => status);
+    expect(statuses).toEqual(
+      Array.from({ length: inputCount }, () => "accepted"),
+    );
     expect(
       enqueueForUser(
         setup,
         TEST_USER_ID,
         "request-0",
         "Follow 0",
-        TEST_NOW + 21,
+        TEST_NOW + 30,
       ),
     ).toMatchObject({ status: "duplicate" });
 
@@ -169,7 +183,7 @@ describe("durable pending session inputs", () => {
         TEST_USER_ID,
         "request-0",
         "Changed",
-        TEST_NOW + 22,
+        TEST_NOW + 31,
       ),
     ).toEqual({ status: "conflict" });
     expect(
@@ -179,7 +193,7 @@ describe("durable pending session inputs", () => {
         .where(eq(agentPendingInputs.sessionId, setup.detail.id))
         .all()
         .map(({ sequence }) => sequence),
-    ).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    ).toEqual(Array.from({ length: inputCount }, (_, index) => index + 1));
     closeRunningStore(setup);
   });
 
@@ -239,6 +253,31 @@ describe("durable pending session inputs", () => {
     closeRunningStore(consumed);
   });
 
+  test("keeps follow-up and steering state gates", () => {
+    const setup = runningStore();
+    failRunningStore(setup);
+
+    expect(
+      enqueueInput(
+        setup,
+        "failed-follow-up",
+        "Do not follow up",
+        "follow_up",
+        TEST_NOW + 4,
+      ),
+    ).toEqual({ status: "invalid_state" });
+    expect(
+      enqueueInput(
+        setup,
+        "failed-steer",
+        "Do not steer",
+        "steer",
+        TEST_NOW + 5,
+      ),
+    ).toEqual({ status: "invalid_state" });
+    closeRunningStore(setup);
+  });
+
   test("does not enumerate another owner's session", () => {
     const setup = runningStore();
     expect(
@@ -253,6 +292,48 @@ describe("durable pending session inputs", () => {
     closeRunningStore(setup);
   });
 
+  test("signals newly enqueued steering without consuming it", async () => {
+    const setup = runningStore();
+    const waiting = waitForSessionSteeringInput(
+      setup.detail.id,
+      new AbortController().signal,
+    );
+
+    enqueueInput(setup, "new-steer", "Wake up", "steer");
+
+    await expect(waiting).resolves.toBeUndefined();
+    expect(steeringIsPending(setup)).toBe(true);
+    closeRunningStore(setup);
+  });
+
+  test("peeks at steering behind follow-up without consuming either input", () => {
+    const setup = runningStore();
+    enqueueInput(setup, "follow", "Do this next", "follow_up");
+    enqueueInput(setup, "steer", "Change direction", "steer", TEST_NOW + 3);
+
+    expect(steeringIsPending(setup)).toBe(true);
+    const pending = pendingInputs(setup);
+    expect(pending).toMatchObject([
+      { content: "Do this next", kind: "follow_up" },
+      { content: "Change direction", kind: "steer" },
+    ]);
+
+    closeRunningStore(setup);
+  });
+
+  test("peeks at steering without consuming it", () => {
+    const setup = runningStore();
+    enqueueInput(setup, "steer", "Change direction", "steer");
+
+    expect(steeringIsPending(setup)).toBe(true);
+    expect(pendingInputs(setup)?.[0]?.kind).toBe("steer");
+    expectSteeringTaken(setup);
+    expect(steeringIsPending(setup)).toBe(false);
+    expect(pendingInputs(setup)).toEqual([]);
+
+    closeRunningStore(setup);
+  });
+
   test("consumes steering at a safe boundary and promotes one follow-up terminally", () => {
     const setup = runningStore();
     for (const [clientRequestId, content, kind] of [
@@ -264,9 +345,7 @@ describe("durable pending session inputs", () => {
         { status: "accepted" },
       );
     }
-    expect(
-      setup.store.takeSteeringInputs(setup.detail.id, TEST_NOW + 3),
-    ).toEqual([{ content: "Change direction", role: "user" }]);
+    expectSteeringTaken(setup);
     expectQueuedBoundary(setup, TEST_NOW + 4);
     const stored = setup.database
       .select({ isDeleted: agentPendingInputs.isDeleted })
@@ -407,9 +486,7 @@ describe("durable pending session inputs", () => {
     const setup = runningStore();
     enqueueInput(setup, "retained", "Keep this");
     failRunningStore(setup);
-    expect(
-      setup.store.get(TEST_USER_ID, setup.detail.id)?.pendingInputs,
-    ).toMatchObject([{ content: "Keep this" }]);
+    expect(pendingInputs(setup)).toMatchObject([{ content: "Keep this" }]);
     closeRunningStore(setup);
   });
 });

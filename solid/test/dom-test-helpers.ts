@@ -35,6 +35,15 @@ export function queryTestElement(
   return element;
 }
 
+export function findTestButton(
+  container: ParentNode,
+  text: string,
+): HTMLButtonElement | undefined {
+  return [...container.querySelectorAll("button")].find(
+    ({ textContent }) => textContent === text,
+  );
+}
+
 export function clickTestButton(container: ParentNode, selector: string): void {
   const control = queryTestElement(container, selector);
   if (!(control instanceof HTMLButtonElement)) {

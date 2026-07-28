@@ -157,6 +157,13 @@ test("strictly validates restart handoffs and lifecycle status coupling", () => 
       status: "paused",
     }).restartHandoff,
   ).toEqual(handoff);
+  expect(
+    readSessionDetail({
+      ...DETAIL,
+      restartHandoff: { ...handoff, operation: "compact_and_continue" },
+      status: "paused",
+    }).restartHandoff,
+  ).toMatchObject({ operation: "compact_and_continue" });
   for (const status of ["queued", "running"] as const) {
     expect(
       readSessionDetail({ ...DETAIL, restartHandoff: handoff, status }),

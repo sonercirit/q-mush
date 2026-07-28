@@ -12,8 +12,9 @@ import {
 } from "../shared/workspace-model.ts";
 import type { GoogleAuth } from "./auth.ts";
 import {
-  withAuthenticatedUser,
-  type AuthenticatedAction,
+  createConfiguredAuthenticator,
+  type Authenticate,
+  type Authenticator,
 } from "./authenticated-request.ts";
 import { scopedCollectionForUser } from "./authenticated-scoped-collection.ts";
 import {
@@ -78,6 +79,7 @@ export type ReadCredentialDetails = (
 
 export class ProviderCredentialEndpoints {
   readonly #auth: GoogleAuth;
+  readonly #authenticate: Authenticator;
   readonly #labelRequired: boolean;
   readonly #now: () => number;
   readonly #readCredentialDetails: (
@@ -100,6 +102,10 @@ export class ProviderCredentialEndpoints {
     readonly validateApiKey?: (apiKey: string) => boolean;
   }) {
     this.#auth = options.auth;
+    this.#authenticate = createConfiguredAuthenticator(
+      options.auth,
+      () => this.#store !== undefined,
+    );
     this.#labelRequired = options.labelRequired ?? false;
     this.#now = options.now;
     const readLabeledDetails = options.readLabeledCredentialDetails;
@@ -119,16 +125,8 @@ export class ProviderCredentialEndpoints {
     this.#validateApiKey = options.validateApiKey ?? (() => true);
   }
 
-  authorize<T extends Promise<Response> | Response>(
-    request: Request,
-    action: AuthenticatedAction<T>,
-  ): Response | T {
-    return withAuthenticatedUser(this.#auth, request, (user) =>
-      this.#store === undefined
-        ? createApiError("not_configured", 503)
-        : action(user),
-    );
-  }
+  authorize: Authenticate = (request, action) =>
+    this.#authenticate.authenticate(request, action);
 
   credentials(request: Request): Promise<Response> {
     return Promise.resolve(

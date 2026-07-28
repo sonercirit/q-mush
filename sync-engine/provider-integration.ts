@@ -8,6 +8,7 @@ import {
   type ProviderCredentialDetails,
   type ProviderId,
 } from "../shared/provider-credential-store.ts";
+import { ProviderQuotaStore } from "../shared/provider-quota-store.ts";
 import type { GoogleAuth } from "./auth.ts";
 import {
   ConnectedAccountOAuth,
@@ -26,6 +27,11 @@ import type {
   ProviderCredentialReader,
 } from "./provider-credential-reader.ts";
 import { ProviderCredentialEndpoints } from "./provider-credentials.ts";
+import { ProviderQuotaEndpoints } from "./provider-quota-endpoints.ts";
+import type {
+  ProviderQuotaReader,
+  ProviderQuotaResetter,
+} from "./provider-quota.ts";
 import { SessionCredentialReassignmentStore } from "./session-credential-reassignment-store.ts";
 import {
   SessionCredentialReassignmentEndpoints,
@@ -34,7 +40,11 @@ import {
 } from "./session-credential-reassignment.ts";
 
 export interface ProviderIntegration
-  extends OAuthEndpoints, ProviderCredentialReader {}
+  extends OAuthEndpoints, ProviderCredentialReader {
+  quota(request: Request, credentialId: string): Promise<Response> | Response;
+  resetQuota(request: Request, credentialId: string): Promise<Response>;
+  setQuotaThreshold(request: Request, credentialId: string): Promise<Response>;
+}
 
 export interface ProviderIntegrationConfiguration {
   readonly cipher: CredentialCipher;
@@ -108,6 +118,10 @@ export function createProviderIntegration(options: {
   ) => Promise<SessionCredentialProviderPreparationResult>;
   readonly provider: ProviderId;
   readonly readCredentialDetails: CredentialDetailsReader;
+  readonly createQuotaReader: (runtime: OAuthRuntime) => ProviderQuotaReader;
+  readonly createQuotaResetter: (
+    runtime: OAuthRuntime,
+  ) => ProviderQuotaResetter;
 }): ProviderIntegration {
   const runtime = createOAuthRuntime(options.dependencies);
   const store =
@@ -126,6 +140,10 @@ export function createProviderIntegration(options: {
       options.readCredentialDetails(runtime, apiKey),
     store,
   });
+  const quotaStore =
+    options.configuration === undefined
+      ? undefined
+      : new ProviderQuotaStore(runtime.database, runtime.generateId);
   const sessionStore =
     options.configuration === undefined
       ? undefined
@@ -215,11 +233,19 @@ export function createProviderIntegration(options: {
     );
     return { ...credential, secret: preparedSecret };
   };
+  const quota = new ProviderQuotaEndpoints(options.auth, {
+    now: runtime.now,
+    quotaStore,
+    readCredential,
+    readQuota: options.createQuotaReader(runtime),
+    resetQuota: options.createQuotaResetter(runtime),
+  });
 
   return {
     begin: (request) => connectedAccount.begin(request),
     complete: (request) => connectedAccount.complete(request),
     credentials: (request) => credentials.credentials(request),
+    quota: (request, credentialId) => quota.read(request, credentialId),
     readCredential,
     reassignSessions: (request, credentialId) =>
       reassignment.reassign(request, credentialId),
@@ -229,5 +255,8 @@ export function createProviderIntegration(options: {
       credentials.setScopes(request, credentialId),
     remove: (request, credentialId) =>
       credentials.remove(request, credentialId),
+    resetQuota: (request, credentialId) => quota.consume(request, credentialId),
+    setQuotaThreshold: (request, credentialId) =>
+      quota.setThreshold(request, credentialId),
   };
 }
