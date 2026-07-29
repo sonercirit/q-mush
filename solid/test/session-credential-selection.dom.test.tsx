@@ -13,8 +13,10 @@ import {
   disposeTestViews,
   mountTestView,
   queryTestElement,
+  queryTestElementAs,
 } from "./dom-test-helpers.ts";
 import { runnerSummary } from "./runner-fixtures.ts";
+import { sessionClientTestState } from "./session-client-test-state.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
 const disposals: (() => void)[] = [];
@@ -64,6 +66,55 @@ function selectedAccountModel(payload: Record<string, unknown>) {
 afterEach(() => {
   vi.restoreAllMocks();
   disposeTestViews(disposals);
+});
+
+test("new-session Ctrl/Cmd+Enter submits and shows the platform shortcut", () => {
+  vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
+  const reactive = createReactiveState<SessionViewState>(
+    sessionClientTestState(),
+  );
+  const controller = new SessionController(reactive, undefined, null);
+  const create = vi.spyOn(controller, "create").mockResolvedValue();
+  controller.setDraftField("prompt", "Test the shortcut");
+  const panelProps = {
+    controller,
+    openAi: () =>
+      createProviderViewState([
+        credential("credential-1", "OpenAI account", true),
+      ]),
+    openRouter: () => createProviderViewState([]),
+    runners: () => createRunnerViewState([runnerSummary(1)]),
+  };
+  const container = mountTestView(() => SessionPanel(panelProps), disposals);
+  const prompt = queryTestElementAs(
+    container,
+    "textarea#session-prompt",
+    HTMLTextAreaElement,
+  );
+  const submit = queryTestElementAs(
+    container,
+    "button[type='submit']",
+    HTMLButtonElement,
+  );
+
+  const pressShortcut = (modifier: "control" | "meta"): void => {
+    const modifiers =
+      modifier === "control" ? { ctrlKey: true } : { metaKey: true };
+    prompt.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        ...modifiers,
+        bubbles: true,
+        key: "Enter",
+      }),
+    );
+  };
+  pressShortcut("control");
+  pressShortcut("meta");
+
+  expect(create).toHaveBeenCalledTimes(2);
+  expect(submit.textContent).toBe("Start session⌘+Enter");
+  expect(submit.getAttribute("aria-keyshortcuts")).toBe("Meta+Enter");
+  expect(submit.title).toBe("Start session (⌘+Enter)");
 });
 
 test("changing the new-session account drives model loading and creation", async () => {

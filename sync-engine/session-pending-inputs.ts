@@ -481,12 +481,14 @@ function promoteInput(
   input: StoredPendingInput,
   userId: string,
   now: number,
+  successorTurnId?: string,
 ): void {
   const segment = currentSessionSegment(database, input.sessionId);
   if (segment === undefined) {
     throw new Error("The agent session no longer exists");
   }
-  const turnId = activeSessionTurnId(database, input.sessionId);
+  const turnId =
+    successorTurnId ?? activeSessionTurnId(database, input.sessionId);
   if (turnId === null) {
     throw new Error("The running session has no active turn");
   }
@@ -567,10 +569,31 @@ export function settleNormalSessionBoundary(options: {
     }
 
     const pending = activeInputs(transaction, options.sessionId)[0];
-    if (pending?.kind === "steer" || pending?.kind === "follow_up") {
-      promoteInput(transaction, pending, session.userId, options.now);
-    }
     const queued = pending !== undefined;
+    const successorTurnId = queued
+      ? rotateSessionTurn({
+          database: transaction,
+          executionGeneration: options.generation,
+          generateId: () => `${options.sessionId}:${String(options.now)}`,
+          now: options.now,
+          previousExecutionGeneration: options.generation,
+          segment: session.currentSegment,
+          sessionId: options.sessionId,
+          userId: session.userId,
+        })
+      : undefined;
+    if (
+      successorTurnId !== undefined &&
+      (pending?.kind === "steer" || pending?.kind === "follow_up")
+    ) {
+      promoteInput(
+        transaction,
+        pending,
+        session.userId,
+        options.now,
+        successorTurnId,
+      );
+    }
     const changed = transaction
       .update(agentSessions)
       .set({
@@ -592,18 +615,7 @@ export function settleNormalSessionBoundary(options: {
     if (changed.length === 0) {
       throw new Error("The running session changed at its terminal boundary");
     }
-    if (queued) {
-      rotateSessionTurn({
-        database: transaction,
-        executionGeneration: options.generation,
-        generateId: () => `${options.sessionId}:${String(options.now)}`,
-        now: options.now,
-        previousExecutionGeneration: options.generation,
-        segment: session.currentSegment,
-        sessionId: options.sessionId,
-        userId: session.userId,
-      });
-    } else {
+    if (!queued) {
       endGenerationSessionTurn(
         transaction,
         options.sessionId,

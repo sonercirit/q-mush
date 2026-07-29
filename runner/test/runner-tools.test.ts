@@ -1,6 +1,8 @@
 import {
   mkdir,
+  open,
   readFile,
+  realpath,
   rename,
   symlink,
   unlink,
@@ -41,6 +43,33 @@ async function captureToolError(
   return requireRunnerError(
     await observeRunnerRejection(executeRunnerTool(...parameters)),
   );
+}
+
+interface SwappedPathFixture {
+  readonly liveDirectory: string;
+  readonly outsideDirectory: string;
+  readonly retainedDirectory: string;
+  readonly root: string;
+}
+
+async function swappedPathFixture(): Promise<SwappedPathFixture> {
+  const root = await workspace();
+  const liveDirectory = join(root, "live");
+  const retainedDirectory = join(root, "retained");
+  const outsideDirectory = await workspace();
+  await mkdir(liveDirectory);
+  await writeFile(join(liveDirectory, "diagram.png"), "contained");
+  await writeFile(join(outsideDirectory, "diagram.png"), "outside");
+  return { liveDirectory, outsideDirectory, retainedDirectory, root };
+}
+
+async function swapPath(
+  liveDirectory: string,
+  retainedDirectory: string,
+  outsideDirectory: string,
+): Promise<void> {
+  await rename(liveDirectory, retainedDirectory);
+  await symlink(outsideDirectory, liveDirectory);
 }
 
 async function explainWorkspace(): Promise<string> {
@@ -94,21 +123,53 @@ describe("runner tools", () => {
     expect(error.message).toContain("outside the session workspace");
   });
 
+  test("binds Darwin containment validation to the opened descriptor", async () => {
+    const fixture = await swappedPathFixture();
+    const { liveDirectory, outsideDirectory, retainedDirectory, root } =
+      fixture;
+
+    let openCount = 0;
+    let openedFileDescriptor: number | undefined;
+    let validatedFileDescriptor: number | undefined;
+    let openedPath: string | undefined;
+    const error = requireRunnerError(
+      await observeRunnerRejection(
+        openSecureRunnerPath(root, "live/diagram.png", {
+          darwinPathFromHandle: (handle) => {
+            validatedFileDescriptor = handle.fd;
+            return realpath(`/proc/self/fd/${String(handle.fd)}`);
+          },
+          openPath: async (...parameters) => {
+            openCount += 1;
+            openedPath = parameters[0].toString();
+            await swapPath(liveDirectory, retainedDirectory, outsideDirectory);
+            const handle = await open(...parameters);
+            openedFileDescriptor = handle.fd;
+            return handle;
+          },
+          platform: "darwin",
+        }),
+      ),
+    );
+
+    expect(openCount).toBe(1);
+    expect(openedFileDescriptor).toBe(validatedFileDescriptor);
+    expect(openedPath).toBe(join(liveDirectory, "diagram.png"));
+    expect(error.message).toContain("outside the session workspace");
+  });
+
   test("keeps reads on the opened contained object during a path swap", async () => {
-    const root = await workspace();
-    const liveDirectory = join(root, "live");
-    const retainedDirectory = join(root, "retained");
-    const outsideDirectory = await workspace();
-    await mkdir(liveDirectory);
-    await writeFile(join(liveDirectory, "diagram.png"), "contained");
-    await writeFile(join(outsideDirectory, "diagram.png"), "outside");
+    const fixture = await swappedPathFixture();
 
     const { handle, stats } = await openSecureRunnerPath(
-      root,
+      fixture.root,
       "live/diagram.png",
     );
-    await rename(liveDirectory, retainedDirectory);
-    await symlink(outsideDirectory, liveDirectory);
+    await swapPath(
+      fixture.liveDirectory,
+      fixture.retainedDirectory,
+      fixture.outsideDirectory,
+    );
 
     try {
       expect(stats.isFile()).toBe(true);

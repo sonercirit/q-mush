@@ -1,6 +1,10 @@
 import { eq } from "drizzle-orm";
 import { describe, expect, test, vi } from "vitest";
-import { agentMessages, agentSessions } from "../../shared/database/schema.ts";
+import {
+  agentMessages,
+  agentSessions,
+  agentSessionTurns,
+} from "../../shared/database/schema.ts";
 import { applySessionProviderUpdate } from "../session-provider-update.ts";
 import { SessionStore } from "../session-store.ts";
 import {
@@ -141,6 +145,13 @@ describe("session provider update", () => {
       provider: "openrouter",
       providerPricing: { input: "0.1", output: "0.2" },
     });
+    expect(updated.turns).toHaveLength(0);
+    const storedTurns = setupValue.database
+      .select({ endedAt: agentSessionTurns.endedAt })
+      .from(agentSessionTurns)
+      .all();
+    expect(storedTurns).toHaveLength(1);
+    expect(storedTurns[0]?.endedAt).toBeInstanceOf(Date);
     expect(sessionRow(setupValue)).toMatchObject({
       contextTokens: 0,
       credentialId: "openrouter-target",
@@ -171,6 +182,9 @@ describe("session provider update", () => {
     expect(repeated.generation).toBe(1);
     expect(sessionRow(setupValue)?.segment).toBe(1);
     expect(abortCalls).toHaveBeenCalledTimes(1);
+    expect(
+      setupValue.store.queue(TEST_USER_ID, updated.id, TEST_NOW + 2).status,
+    ).toBe("queued");
   });
 
   const applyUpdate = (

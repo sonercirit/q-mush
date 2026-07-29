@@ -1,5 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { agentMessages } from "../../shared/database/schema.ts";
+import {
+  agentMessages,
+  agentSessionTurns,
+} from "../../shared/database/schema.ts";
 import type { CompactionUsage } from "../../sync-engine/session-compaction-usage.ts";
 import {
   TEST_NOW,
@@ -73,6 +76,17 @@ function rejectCompactionWrite(options: {
   setup.database.$client.close();
 }
 
+function expectCurrentCompactionTurn(
+  setup: CompactionStoreSetup,
+  ended: boolean,
+): void {
+  const detail = requireCompactionSession(setup.store);
+  expect(detail.turns).toHaveLength(1);
+  const turn = detail.turns?.[0];
+  expect(turn?.endedAt === null).toBe(!ended);
+  expect(detail.messages).toMatchObject([{ turnId: turn?.id }]);
+}
+
 describe("session compaction persistence", () => {
   test("persists the handoff, context reset, and compaction usage together", () => {
     const setup = compactionStoreWithUsage();
@@ -90,6 +104,33 @@ describe("session compaction persistence", () => {
       ],
     });
     expect(compactedSession?.costUsd).toBeCloseTo(0.3);
+    expectCurrentCompactionTurn(setup, false);
+    setup.database.$client.close();
+  });
+
+  test("persists and ends the successor turn for terminal compaction", () => {
+    const setup = compactionStoreWithUsage();
+    const running = requireCompactionSession(setup.store);
+
+    setup.store.compactRuntimeTerminal(
+      running.id,
+      "Stop at this handoff.",
+      COMPACTION_USAGE,
+      TEST_NOW + 4,
+      running.generation,
+      null,
+    );
+
+    expect(requireCompactionSession(setup.store).status).toBe("idle");
+    expectCurrentCompactionTurn(setup, true);
+    expect(
+      setup.database
+        .select({ id: agentSessionTurns.id })
+        .from(agentSessionTurns)
+        .all(),
+    ).toHaveLength(2);
+    const requeued = setup.store.queue(TEST_USER_ID, running.id, TEST_NOW + 5);
+    expect(requeued).toMatchObject({ status: "queued" });
     setup.database.$client.close();
   });
 

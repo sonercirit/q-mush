@@ -75,6 +75,27 @@ test("commits a terminal follow-up before relaunching after runtime deregistrati
     () => model.requests.length,
     (requests) => requests === 2,
   );
+  const continued = setup.sessions.detailForUser(
+    TEST_USER_ID,
+    SESSION_ID,
+    TEST_WORKSPACE_ID,
+  );
+  const turns = continued?.turns ?? [];
+  const firstAnswer = continued?.messages.find(
+    ({ content }) => content === "First durable answer.",
+  );
+  const promotedFollowUp = continued?.messages.find(
+    ({ content }) => content === "Continue after the first answer",
+  );
+  const closingTurn = turns.find(({ id }) => id === firstAnswer?.turnId);
+  const successorTurn = turns.find(({ id }) => id === promotedFollowUp?.turnId);
+  const closingBoundary = continued?.messages.find(
+    ({ id }) => id === closingTurn?.boundaryMessageId,
+  );
+  expect(successorTurn).toBeDefined();
+  expect(promotedFollowUp?.turnId).not.toBe(closingTurn?.id);
+  expect(closingBoundary?.turnId).toBe(closingTurn?.id);
+  expect(closingBoundary?.id).not.toBe(promotedFollowUp?.id);
   setup.database.$client.close();
   const followUp = model.requests[1];
   expect(followUp).toContainEqual({

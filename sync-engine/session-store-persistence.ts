@@ -179,8 +179,11 @@ export function sessionTimingUpdate(
 
 type StoredSessionUpdate = Omit<
   Partial<typeof agentSessions.$inferInsert>,
-  "executionGeneration"
-> & { readonly executionGeneration?: number | SQL };
+  "currentSegment" | "executionGeneration"
+> & {
+  readonly currentSegment?: number | SQL;
+  readonly executionGeneration?: number | SQL;
+};
 
 export function terminalSessionValues<Status extends "failed" | "idle">(
   session: StoredSessionTiming,

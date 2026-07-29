@@ -11,6 +11,7 @@ import {
 import { activeSessionDuration } from "../shared/session-timing.ts";
 import { workspaceSessionCondition } from "./session-store-persistence.ts";
 import { serializeProviderPricing } from "./session-store-read.ts";
+import { updateSessionAndEndGenerationTurn } from "./session-turn-store.ts";
 export type SessionProviderUpdateStoreResult = Readonly<{
   detail?: AgentSessionDetail;
   status: "conflict" | "not_found" | "unchanged" | "updated";
@@ -43,7 +44,7 @@ export function updateStoredSessionProvider(
   const active = ["queued", "running", "paused"].includes(existing.status);
   const values = {
     currentContextTokens: 0,
-    currentSegment: sql`${agentSessions.currentSegment} + 1`,
+    currentSegment: sql<number>`${agentSessions.currentSegment} + 1`,
     executionGeneration: sql`${agentSessions.executionGeneration} + 1`,
     maxContextTokens: input.maxContextTokens,
     model: input.model,
@@ -62,13 +63,18 @@ export function updateStoredSessionProvider(
       }
     : {};
   const condition = workspaceSessionCondition(input, input.expectedGeneration);
-  const changed = database
-    .update(agentSessions)
-    .set({ ...values, ...timing })
-    .where(condition)
-    .returning({ updatedSessionId: agentSessions.id })
-    .all().length;
-  if (changed !== 1) return { status: "conflict" };
+  const generation = input.expectedGeneration;
+  const changed = database.transaction((transaction) =>
+    updateSessionAndEndGenerationTurn({
+      condition,
+      database: transaction,
+      generation,
+      now: input.now,
+      sessionId: input.sessionId,
+      values: { ...values, ...timing },
+    }),
+  );
+  if (!changed) return { status: "conflict" };
 
   const detail = read(identity);
   if (detail === undefined) {

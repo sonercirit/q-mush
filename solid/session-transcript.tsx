@@ -591,11 +591,11 @@ export function SessionTranscript(props: {
                 onFork={props.onFork}
               />
             </Show>
-            <Show when={turnTiming().completedStarts.get(message.id)}>
-              {(startedAt) => (
+            <Show when={turnTiming().completedTimings.get(message.id)}>
+              {(timing) => (
                 <TurnTiming
-                  endedAt={message.createdAt}
-                  startedAt={startedAt()}
+                  endedAt={timing().endedAt ?? message.createdAt}
+                  startedAt={timing().startedAt}
                 />
               )}
             </Show>

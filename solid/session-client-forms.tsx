@@ -28,8 +28,13 @@ interface PromptEventProps {
   readonly onInput: (value: string) => void;
 }
 
+type SessionPromptKeyEvent = KeyboardEvent & {
+  readonly currentTarget: HTMLTextAreaElement;
+};
+
 interface SessionPromptInputProps extends PromptEventProps, SessionImagesProps {
   readonly disabled: boolean;
+  readonly onKeyDown: (event: SessionPromptKeyEvent) => void;
   readonly prompt: string;
 }
 
@@ -38,9 +43,7 @@ interface SessionFollowUpProps extends PromptEventProps, SessionImagesProps {
   readonly availabilityLabel: string;
   readonly disabled: boolean;
   readonly onContinue: (() => void) | undefined;
-  readonly onKeyDown: (
-    event: KeyboardEvent & { readonly currentTarget: HTMLTextAreaElement },
-  ) => void;
+  readonly onKeyDown: (event: SessionPromptKeyEvent) => void;
   readonly onSteer: (() => void) | undefined;
   readonly onSubmit: () => void;
   readonly prompt: string;
@@ -97,6 +100,9 @@ export function SessionPromptInput(
         disabled={props.disabled}
         id="session-prompt"
         name="prompt"
+        onKeyDown={(event) => {
+          props.onKeyDown(event);
+        }}
         placeholder="Describe the change you want the agent to make…"
         value={props.prompt}
         {...promptEvents(props)}

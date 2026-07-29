@@ -24,7 +24,10 @@ import {
 import type { InterruptedStoredSession } from "./session-store-reassignment.ts";
 import type { SessionStoreWriteResources } from "./session-store-resources.ts";
 import { errorMessageValues } from "./session-store-values.ts";
-import { rotateSessionTurn } from "./session-turn-store.ts";
+import {
+  rotateSessionTurn,
+  updateSessionAndEndGenerationTurn,
+} from "./session-turn-store.ts";
 
 export type {
   RestartHandoff,
@@ -475,11 +478,21 @@ export class RestartHandoffStore {
         (transaction, exact) => {
           const condition = exactHandoffCondition(exact, "running", userId);
 
+          const timing = readActiveSessionTiming(transaction, condition);
           if (
-            !this.#updateTimedSession(transaction, condition, now, {
-              restartHandoff: null,
-              status: settlement.status,
-              ...updatedAuditFields(SYSTEM_ID, now),
+            timing === undefined ||
+            !updateSessionAndEndGenerationTurn({
+              condition,
+              database: transaction,
+              generation: identity.generation,
+              now,
+              sessionId: identity.sessionId,
+              values: {
+                ...sessionTimingUpdate(timing, now),
+                restartHandoff: null,
+                status: settlement.status,
+                ...updatedAuditFields(SYSTEM_ID, now),
+              },
             })
           ) {
             return false;

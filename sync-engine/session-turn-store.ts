@@ -8,6 +8,11 @@ import {
 } from "../shared/database/schema.ts";
 import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 import type { AgentSessionTurn } from "../shared/session-model.ts";
+import {
+  storedSessionSnapshotCondition,
+  updateStoredSessions,
+  type StoredSessionSnapshot,
+} from "./session-store-persistence.ts";
 
 function activeTurnCondition(sessionId: string) {
   return and(
@@ -96,21 +101,29 @@ export function endGenerationSessionTurn(
   now: number,
 ): void {
   const activeTurn = database
-    .select({ id: agentSessionTurns.id, segment: agentSessionTurns.segment })
+    .select({
+      id: agentSessionTurns.id,
+      segment: agentSessionTurns.segment,
+      startedAt: agentSessionTurns.startedAt,
+    })
     .from(agentSessionTurns)
     .where(currentTurnCondition(sessionId, generation))
     .get();
   if (activeTurn === undefined) {
     return;
   }
-  const messageSession = eq(agentMessages.sessionId, sessionId);
-  const activeMessage = eq(agentMessages.isDeleted, false);
-  const messages = database.select({ id: agentMessages.id });
-  const orderedMessages = messages
-    .from(agentMessages)
-    .where(and(messageSession, activeMessage))
-    .orderBy(desc(agentMessages.createdAt), desc(agentMessages.id));
-  const boundaryMessageId = orderedMessages.get()?.id ?? null;
+  const activeTurnMessages = and(
+    eq(agentMessages.turnId, activeTurn.id),
+    eq(agentMessages.isDeleted, false),
+    eq(agentMessages.sessionId, sessionId),
+  );
+  const boundaryMessageId =
+    database
+      .select({ boundary: agentMessages.id })
+      .from(agentMessages)
+      .where(activeTurnMessages)
+      .orderBy(desc(agentMessages.createdAt), desc(agentMessages.id))
+      .get()?.boundary ?? null;
   const condition = and(
     currentTurnCondition(sessionId, generation, activeTurn.segment),
     eq(agentSessionTurns.id, activeTurn.id),
@@ -119,7 +132,55 @@ export function endGenerationSessionTurn(
     .update(agentSessionTurns)
     .set({ boundaryMessageId });
   turnUpdate.where(condition).run();
-  endSessionTurn(database, condition, now);
+  endSessionTurn(
+    database,
+    condition,
+    Math.max(now, activeTurn.startedAt.getTime()),
+  );
+}
+
+export interface SessionGenerationSettlement {
+  readonly condition: SQL | undefined;
+  readonly database: Pick<AppDatabase, "select" | "update">;
+  readonly generation: number;
+  readonly now: number;
+  readonly sessionId: string;
+  readonly values: Parameters<typeof updateStoredSessions>[2];
+}
+
+export function updateSessionAndEndGenerationTurn(
+  options: SessionGenerationSettlement,
+): boolean {
+  if (
+    !updateStoredSessions(options.database, options.condition, options.values)
+  ) {
+    return false;
+  }
+  endGenerationSessionTurn(
+    options.database,
+    options.sessionId,
+    options.generation,
+    options.now,
+  );
+  return true;
+}
+
+export function updateStoredSnapshotAndEndGenerationTurn(
+  ...[database, session, now, values]: readonly [
+    database: Pick<AppDatabase, "select" | "update">,
+    session: StoredSessionSnapshot,
+    now: number,
+    values: Parameters<typeof updateStoredSessions>[2],
+  ]
+): boolean {
+  return updateSessionAndEndGenerationTurn({
+    condition: storedSessionSnapshotCondition(session),
+    database,
+    generation: session.executionGeneration,
+    now,
+    sessionId: session.id,
+    values,
+  });
 }
 
 type SessionTurnRotationOptions = Omit<SessionTurnInsertOptions, "database"> & {
