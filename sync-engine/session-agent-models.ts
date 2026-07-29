@@ -3,6 +3,7 @@ import type { AgentModel } from "../shared/agent-loop.ts";
 import { createAgentSystemPrompt } from "../shared/agent-prompt.ts";
 import { createUuidV7 } from "../shared/ids.ts";
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
+import type { ProviderModelPricing } from "../shared/provider-model-pricing.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import {
   AGENT_COMPACTION_SYSTEM_PROMPT,
@@ -37,6 +38,7 @@ export function createFallbackModel(
     readonly openRouterProviderTag?: string | null;
     readonly prompt: string | null;
     readonly provider: "openai" | "openrouter";
+    readonly providerPricing: ProviderModelPricing | null;
   },
 ): AgentModel {
   return factory({
@@ -47,7 +49,7 @@ export function createFallbackModel(
       ? {}
       : { openRouterProviderTag: selection.openRouterProviderTag }),
     provider: selection.provider,
-    providerPricing: null,
+    providerPricing: selection.providerPricing,
     systemPrompt:
       selection.prompt ??
       "Describe the supplied attachment faithfully for another text-only model. Return only the useful textual result.",

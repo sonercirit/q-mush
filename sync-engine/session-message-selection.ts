@@ -9,4 +9,5 @@ export const STORED_SESSION_MESSAGE_SELECTION = {
   toolCallId: agentMessages.toolCallId,
   toolCalls: agentMessages.toolCalls,
   toolName: agentMessages.toolName,
+  turnId: agentMessages.turnId,
 };

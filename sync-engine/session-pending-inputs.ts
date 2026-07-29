@@ -21,6 +21,11 @@ import type { StoredUserMessageInput } from "./session-store-types.ts";
 import { userMessageValues } from "./session-store-values.ts";
 import { touchStoredSession } from "./session-touch.ts";
 import {
+  activeSessionTurnId,
+  endGenerationSessionTurn,
+  rotateSessionTurn,
+} from "./session-turn-store.ts";
+import {
   parseStoredImages,
   serializeStoredImages,
 } from "./stored-agent-images.ts";
@@ -442,6 +447,7 @@ export function promotePendingInput(
   userId: string,
   now: number,
   segment: number,
+  turnId?: string,
 ): void {
   database
     .insert(agentMessages)
@@ -453,6 +459,7 @@ export function promotePendingInput(
         now,
         segment,
         sessionId: input.sessionId,
+        turnId: turnId ?? null,
         userId,
       }),
     )
@@ -479,6 +486,10 @@ function promoteInput(
   if (segment === undefined) {
     throw new Error("The agent session no longer exists");
   }
+  const turnId = activeSessionTurnId(database, input.sessionId);
+  if (turnId === null) {
+    throw new Error("The running session has no active turn");
+  }
   promotePendingInput(
     database,
     {
@@ -493,6 +504,7 @@ function promoteInput(
     userId,
     now,
     segment,
+    turnId,
   );
 }
 
@@ -579,6 +591,25 @@ export function settleNormalSessionBoundary(options: {
       .all();
     if (changed.length === 0) {
       throw new Error("The running session changed at its terminal boundary");
+    }
+    if (queued) {
+      rotateSessionTurn({
+        database: transaction,
+        executionGeneration: options.generation,
+        generateId: () => `${options.sessionId}:${String(options.now)}`,
+        now: options.now,
+        previousExecutionGeneration: options.generation,
+        segment: session.currentSegment,
+        sessionId: options.sessionId,
+        userId: session.userId,
+      });
+    } else {
+      endGenerationSessionTurn(
+        transaction,
+        options.sessionId,
+        options.generation,
+        options.now,
+      );
     }
     return queued
       ? { status: "queued", userId: session.userId }

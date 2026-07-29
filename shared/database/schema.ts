@@ -13,18 +13,19 @@ import { AGENT_ATTACHMENT_MODALITIES } from "../agent-attachments.ts";
 import { AGENT_REASONING_EFFORTS } from "../agent-configuration.ts";
 import { AGENT_FILE_NAMES } from "../agent-file.ts";
 import { AGENT_SESSION_TOOL_NAMES } from "../agent-tools.ts";
+import { auditColumns } from "./audit-columns.ts";
+import {
+  connectionColumns,
+  credentialProviderColumn,
+  providerColumn,
+} from "./provider-columns.ts";
+import {
+  activeDefaultIndex,
+  ownedAuditColumns,
+  ownedForeignKey,
+} from "./schema-columns.ts";
 
-function auditColumns() {
-  return {
-    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-    createdById: text("created_by_id").notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
-    updatedById: text("updated_by_id").notNull(),
-    isDeleted: integer("is_deleted", { mode: "boolean" })
-      .notNull()
-      .default(false),
-  };
-}
+export { auditColumns } from "./audit-columns.ts";
 
 export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
@@ -35,24 +36,11 @@ export const users = sqliteTable("users", {
   ...auditColumns(),
 });
 
-function ownedForeignKey(name: string, reference: () => AnySQLiteColumn) {
-  return text(name).notNull().references(reference, { onDelete: "restrict" });
-}
-
 function userIdColumn() {
   return ownedForeignKey("user_id", () => users.id);
 }
 
-function activeDefaultIndex(name: string) {
-  return (table: {
-    readonly isDefault: AnySQLiteColumn;
-    readonly isDeleted: AnySQLiteColumn;
-    readonly userId: AnySQLiteColumn;
-  }) =>
-    uniqueIndex(name)
-      .on(table.userId)
-      .where(sql`NOT ${table.isDeleted} AND ${table.isDefault}`);
-}
+const userOwnedAuditColumns = () => ownedAuditColumns(() => users.id);
 
 const workspaceDefaultIndex = activeDefaultIndex(
   "workspaces_user_default_unique",
@@ -67,7 +55,7 @@ export const workspaces = sqliteTable(
     name: text("name").notNull(),
     isDefault: integer("is_default", { mode: "boolean" })
       .notNull()
-      .default(false),
+      .default(Boolean()),
     ...auditColumns(),
   },
   (table) => [
@@ -83,39 +71,10 @@ function workspaceIdColumn() {
   return ownedForeignKey("workspace_id", () => workspaces.id);
 }
 
-function ownedAuditColumns() {
-  return {
-    id: text("id").primaryKey(),
-    userId: userIdColumn(),
-    ...auditColumns(),
-  };
-}
-
-function defaultBooleanColumn() {
-  return integer("is_default", { mode: "boolean" }).notNull().default(false);
-}
-
-function connectionColumns() {
-  return {
-    isDefault: defaultBooleanColumn(),
-    isGlobal: integer("is_global", { mode: "boolean" }).notNull().default(true),
-  };
-}
-
-function providerColumn() {
-  return text("provider", { enum: ["openai", "openrouter"] }).notNull();
-}
-
-function credentialProviderColumn() {
-  return text("provider", {
-    enum: ["openai", "openrouter", "brave_search"],
-  }).notNull();
-}
-
 export const prompts = sqliteTable(
   "prompts",
   {
-    ...ownedAuditColumns(),
+    ...userOwnedAuditColumns(),
     name: text("name").notNull(),
     normalizedName: text("normalized_name").notNull(),
     body: text("body").notNull(),
@@ -137,7 +96,7 @@ export const prompts = sqliteTable(
 export const providerCredentials = sqliteTable(
   "provider_credentials",
   {
-    ...ownedAuditColumns(),
+    ...userOwnedAuditColumns(),
     provider: credentialProviderColumn(),
     providerAccountId: text("provider_account_id"),
     label: text("label").notNull(),
@@ -188,7 +147,7 @@ function quotaThresholdColumn() {
 export const providerQuotaSettings = sqliteTable(
   "provider_quota_settings",
   {
-    ...ownedAuditColumns(),
+    ...userOwnedAuditColumns(),
     providerCredentialId: providerCredentialIdColumn(),
     autoResetThresholdPercent: quotaThresholdColumn(),
   },
@@ -208,7 +167,7 @@ export const providerQuotaSettings = sqliteTable(
 export const providerQuotaResetReceipts = sqliteTable(
   "provider_quota_reset_receipts",
   {
-    ...ownedAuditColumns(),
+    ...userOwnedAuditColumns(),
     providerCredentialId: providerCredentialIdColumn(),
     clientRequestId: text("client_request_id").notNull(),
     outcome: text("outcome", {
@@ -244,7 +203,7 @@ function activeConnectionIndex(
 export const providerCredentialWorkspaces = sqliteTable(
   "provider_credential_workspaces",
   {
-    ...ownedAuditColumns(),
+    ...userOwnedAuditColumns(),
     providerCredentialId: providerCredentialIdColumn(),
     workspaceId: workspaceIdColumn(),
   },
@@ -265,7 +224,7 @@ export const providerCredentialWorkspaces = sqliteTable(
 export const attachmentFallbacks = sqliteTable(
   "attachment_fallbacks",
   {
-    ...ownedAuditColumns(),
+    ...userOwnedAuditColumns(),
     modality: text("modality", { enum: AGENT_ATTACHMENT_MODALITIES }).notNull(),
     providerCredentialId: providerCredentialIdColumn(),
     provider: providerColumn(),
@@ -286,7 +245,7 @@ export const attachmentFallbacks = sqliteTable(
 export const runners = sqliteTable(
   "runners",
   {
-    ...ownedAuditColumns(),
+    ...userOwnedAuditColumns(),
     name: text("name"),
     machineFingerprint: text("machine_fingerprint"),
     platform: text("platform"),
@@ -373,7 +332,7 @@ export const runners = sqliteTable(
 export const runnerWorkspaces = sqliteTable(
   "runner_workspaces",
   {
-    ...ownedAuditColumns(),
+    ...userOwnedAuditColumns(),
     runnerId: ownedForeignKey("runner_id", () => runners.id),
     workspaceId: workspaceIdColumn(),
   },
@@ -394,7 +353,7 @@ export const runnerWorkspaces = sqliteTable(
 export const agentSessions = sqliteTable(
   "agent_sessions",
   {
-    ...ownedAuditColumns(),
+    ...userOwnedAuditColumns(),
     workspaceId: workspaceIdColumn(),
     parentSessionId: text("parent_session_id"),
     parentExecutionGeneration: integer("parent_execution_generation"),
@@ -467,15 +426,49 @@ export const agentSessions = sqliteTable(
 );
 
 function agentSessionIdColumn() {
-  return text("session_id")
-    .notNull()
-    .references(() => agentSessions.id, { onDelete: "restrict" });
+  const column = text("session_id").notNull();
+  return column.references(() => agentSessions.id, { onDelete: "restrict" });
 }
+
+export const agentSessionTurns = sqliteTable(
+  "agent_session_turns",
+  {
+    ...userOwnedAuditColumns(),
+    sessionId: agentSessionIdColumn(),
+    executionGeneration: integer("execution_generation").notNull(),
+    boundaryMessageId: text("boundary_message_id"),
+    segment: integer("segment").notNull().default(0),
+    startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
+    endedAt: integer("ended_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    index("agent_session_turns_session_segment_start_index").on(
+      table.sessionId,
+      table.segment,
+      table.startedAt,
+    ),
+    uniqueIndex("agent_session_turns_active_session_unique")
+      .on(table.sessionId)
+      .where(sql`${table.endedAt} IS NULL AND NOT ${table.isDeleted}`),
+    check(
+      "agent_session_turns_segment_nonnegative_check",
+      sql`${table.segment} >= 0`,
+    ),
+    check(
+      "agent_session_turns_generation_nonnegative_check",
+      sql`${table.executionGeneration} >= 0`,
+    ),
+    check(
+      "agent_session_turns_end_check",
+      sql`${table.endedAt} IS NULL OR ${table.endedAt} >= ${table.startedAt}`,
+    ),
+  ],
+);
 
 export const agentPendingInputs = sqliteTable(
   "agent_pending_inputs",
   {
-    ...ownedAuditColumns(),
+    ...userOwnedAuditColumns(),
     sessionId: agentSessionIdColumn(),
     clientRequestId: text("client_request_id").notNull(),
     kind: text("kind", { enum: ["follow_up", "steer"] }).notNull(),
@@ -503,7 +496,7 @@ export const agentPendingInputs = sqliteTable(
 export const agentQuestionRequests = sqliteTable(
   "agent_question_requests",
   {
-    ...ownedAuditColumns(),
+    ...userOwnedAuditColumns(),
     sessionId: agentSessionIdColumn(),
     toolCallId: text("tool_call_id").notNull(),
     executionGeneration: integer("execution_generation").notNull(),
@@ -537,8 +530,11 @@ export const agentQuestionRequests = sqliteTable(
 export const agentMessages = sqliteTable(
   "agent_messages",
   {
-    ...ownedAuditColumns(),
+    ...userOwnedAuditColumns(),
     sessionId: agentSessionIdColumn(),
+    turnId: text("turn_id").references(() => agentSessionTurns.id, {
+      onDelete: "restrict",
+    }),
     segment: integer("segment").notNull().default(0),
     role: text("role", {
       enum: ["user", "assistant", "tool", "thinking", "system", "error"],
@@ -560,6 +556,7 @@ export const agentMessages = sqliteTable(
       table.segment,
       table.createdAt,
     ),
+    index("agent_messages_turn_index").on(table.turnId),
     index("agent_messages_user_deletion_index").on(
       table.userId,
       table.isDeleted,

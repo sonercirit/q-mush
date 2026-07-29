@@ -114,6 +114,8 @@ export function SessionDetailBody(props: {
     );
     void view().controller.stop(graceful);
   };
+  const currentTranscript = (): boolean =>
+    view().state.history.page === undefined;
   const visibleMessages = (): AgentSessionDetail["messages"] =>
     view().state.history.page?.messages ?? view().detail.messages;
   const sessionCopy = createClipboardCopy(() => sessionCopyText(view().detail));
@@ -268,11 +270,7 @@ export function SessionDetailBody(props: {
           executionEnvironment={view().detail.executionEnvironment}
           filters={view().state.transcriptFilters}
           messages={visibleMessages()}
-          status={
-            view().state.history.page === undefined
-              ? view().detail.status
-              : "idle"
-          }
+          status={currentTranscript() ? view().detail.status : "idle"}
           onFork={
             view().state.history.page === undefined
               ? setForkPointMessageId
@@ -284,6 +282,7 @@ export function SessionDetailBody(props: {
               : []
           }
           tools={view().detail.tools}
+          turns={currentTranscript() ? view().detail.turns : undefined}
         />
       </ul>
       <Show when={forkPointMessageId()}>

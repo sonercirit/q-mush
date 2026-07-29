@@ -129,6 +129,22 @@ function sessionInput(
   };
 }
 
+function expectLaunchTurnRotation(detail: AgentSessionDetail): void {
+  const turns = detail.turns ?? [];
+  const activeTurns = turns.filter(({ endedAt }) => endedAt === null);
+  expect(activeTurns).toHaveLength(1);
+  const active = activeTurns[0];
+  if (active === undefined) {
+    throw new Error("The launched session has no active turn");
+  }
+  const previous = turns.at(-2);
+  if (previous !== undefined) {
+    expect(previous.endedAt).not.toBeNull();
+    expect(active.startedAt).toBeGreaterThan(previous.startedAt);
+    expect(previous.endedAt).toBeLessThanOrEqual(active.startedAt);
+  }
+}
+
 function failCreatedSession(
   setup: SessionStoreTestSetup,
   detail: AgentSessionDetail,
@@ -146,10 +162,14 @@ function launchRace(
   let launched: AgentSessionDetail | undefined;
   const fail = (detail: AgentSessionDetail): boolean => {
     launched = detail;
+    expectLaunchTurnRotation(detail);
     if (race === "stale") {
       failCreatedSession(setup, detail, now);
       const requeued = setup.store.queue(TEST_USER_ID, detail.id, now());
       expect(requeued.status).toBe("queued");
+      if (requeued.status === "queued") {
+        expectLaunchTurnRotation(requeued.detail);
+      }
     }
     if (race !== "none") {
       void runtimes.drain(
@@ -188,7 +208,7 @@ function assertLaunchRaceState(
 
   expect(restart).toEqual({ requestedBy: "runner", restartId: RESTART_ID });
   const nextGeneration = launched.generation + 1;
-  return expectStoredSession(setup, TEST_USER_ID, launched.id, {
+  const authoritative = expectStoredSession(setup, TEST_USER_ID, launched.id, {
     generation: nextGeneration,
     restartHandoff:
       race === "restart"
@@ -196,6 +216,8 @@ function assertLaunchRaceState(
         : null,
     status: race === "restart" ? "paused" : "queued",
   });
+  expectLaunchTurnRotation(authoritative);
+  return authoritative;
 }
 
 function assertLaunchResponse(

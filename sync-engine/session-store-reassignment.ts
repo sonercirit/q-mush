@@ -28,8 +28,6 @@ import {
   interruptedSessionErrorValues,
 } from "./session-store-values.ts";
 import { recoverStoredTerminal } from "./session-terminal-store.ts";
-import type { SessionTransitionInput } from "./session-transition-types.ts";
-import { optionalRestartHandoff } from "./session-transition-values.ts";
 
 export type ReassignSessionResult =
   | { readonly detail: AgentSessionDetail; readonly status: "reassigned" }
@@ -173,28 +171,4 @@ export function failInterruptedStoredSession(
     });
     return true;
   });
-}
-
-export function transitionStoredSession(
-  options: SessionTransitionInput & {
-    readonly actorId: string;
-    readonly database: AppDatabase;
-    readonly from: readonly AgentSessionStatus[];
-    readonly to: AgentSessionStatus;
-  },
-): boolean {
-  return updateStoredSessions(
-    options.database,
-    storedSessionCondition({
-      generation: options.generation,
-      id: options.sessionId,
-      status: options.from,
-      userId: options.userId,
-    }),
-    {
-      status: options.to,
-      ...updatedAuditFields(options.actorId, options.now),
-      ...optionalRestartHandoff(options.clearRestartHandoff),
-    },
-  );
 }

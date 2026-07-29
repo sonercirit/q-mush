@@ -129,6 +129,23 @@ export function ensureWaveOneColumns(database: AppDatabase): void {
       "ALTER TABLE agent_sessions ADD COLUMN current_segment integer NOT NULL DEFAULT 0",
     );
   }
+  database.$client.run(`
+    CREATE TABLE IF NOT EXISTS agent_session_turns (
+      id text PRIMARY KEY NOT NULL,
+      user_id text NOT NULL REFERENCES users(id) ON DELETE restrict,
+      session_id text NOT NULL REFERENCES agent_sessions(id) ON DELETE restrict,
+      segment integer NOT NULL DEFAULT 0,
+      execution_generation integer NOT NULL,
+      boundary_message_id text,
+      started_at integer NOT NULL,
+      ended_at integer,
+      created_at integer NOT NULL,
+      created_by_id text NOT NULL,
+      updated_at integer NOT NULL,
+      updated_by_id text NOT NULL,
+      is_deleted integer NOT NULL DEFAULT false
+    )
+  `);
   const messageColumns = database.$client
     .query<{ readonly name: string }, []>("PRAGMA table_info(agent_messages)")
     .all();
@@ -136,6 +153,9 @@ export function ensureWaveOneColumns(database: AppDatabase): void {
     database.$client.run(
       "ALTER TABLE agent_messages ADD COLUMN segment integer NOT NULL DEFAULT 0",
     );
+  }
+  if (!messageColumns.some(({ name }) => name === "turn_id")) {
+    database.$client.run("ALTER TABLE agent_messages ADD COLUMN turn_id text");
   }
   database.$client.run(`
     CREATE TABLE IF NOT EXISTS agent_question_requests (

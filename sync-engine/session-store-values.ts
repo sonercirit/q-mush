@@ -12,6 +12,7 @@ import type {
   SystemStoredMessageInput,
 } from "./session-store-types.ts";
 import { touchStoredSession } from "./session-touch.ts";
+import { activeSessionTurnId } from "./session-turn-store.ts";
 import { serializeStoredImages } from "./stored-agent-images.ts";
 
 const INTERRUPTED_SESSION_ERROR =
@@ -25,6 +26,7 @@ export interface StoredMessageValues {
   readonly toolCallId: string | null;
   readonly toolCalls: string | null;
   readonly toolName: string | null;
+  readonly turnId?: string | null;
 }
 
 export interface SessionWriteResources {
@@ -103,6 +105,7 @@ export function userMessageValues(
     role: "user" as const,
     segment: options.segment ?? 0,
     sessionId: options.sessionId,
+    turnId: options.turnId ?? null,
     userId: options.userId,
   };
 }
@@ -141,6 +144,8 @@ export function insertStoredMessage(
       id: options.id,
       segment,
       sessionId: options.sessionId,
+      turnId:
+        message.turnId ?? activeSessionTurnId(database, options.sessionId),
       userId: options.userId,
     })
     .run();

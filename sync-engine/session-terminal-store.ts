@@ -17,6 +17,11 @@ import {
   updateStoredSessions,
   type StoredSessionSnapshot,
 } from "./session-store-persistence.ts";
+import {
+  activeSessionTurnId,
+  endGenerationSessionTurn,
+  rotateSessionTurn,
+} from "./session-turn-store.ts";
 
 export interface RuntimeTerminalTarget {
   readonly generation: number;
@@ -50,6 +55,7 @@ export function settleTerminalRuntime(
       activeDurationMs: agentSessions.activeDurationMs,
       activeStartedAt: agentSessions.activeStartedAt,
       currentSegment: agentSessions.currentSegment,
+      executionGeneration: agentSessions.executionGeneration,
       userId: agentSessions.userId,
     })
     .from(agentSessions)
@@ -62,13 +68,21 @@ export function settleTerminalRuntime(
     status === "idle" && sessionId !== undefined
       ? activePendingInput(database, sessionId)
       : undefined;
-  if (pending !== undefined) {
+  if (pending !== undefined && sessionId !== undefined) {
+    const turnId = activeSessionTurnId(database, sessionId);
+    if (turnId === null) {
+      throw new DOMException(
+        "The agent session has no active turn",
+        "AbortError",
+      );
+    }
     promotePendingInput(
       database,
       pending,
       session.userId,
       now,
       session.currentSegment,
+      turnId,
     );
   }
   const settledStatus = pending === undefined ? status : "queued";
@@ -83,6 +97,27 @@ export function settleTerminalRuntime(
       : terminalSessionValues(session, status, now);
   if (!updateStoredSessions(database, condition, values)) {
     throw new DOMException("The agent session was stopped", "AbortError");
+  }
+  if (sessionId !== undefined) {
+    if (settledStatus === "queued") {
+      rotateSessionTurn({
+        database,
+        executionGeneration: session.executionGeneration,
+        generateId: () => `${sessionId}:${String(now)}`,
+        now,
+        previousExecutionGeneration: session.executionGeneration,
+        segment: session.currentSegment,
+        sessionId,
+        userId: session.userId,
+      });
+    } else {
+      endGenerationSessionTurn(
+        database,
+        sessionId,
+        session.executionGeneration,
+        now,
+      );
+    }
   }
   return settledStatus;
 }

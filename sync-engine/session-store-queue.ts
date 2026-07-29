@@ -20,6 +20,7 @@ import type { SessionStoreWriteResources } from "./session-store-resources.ts";
 import { readStoredSessionResult } from "./session-store-result.ts";
 import { readStoredSessionState } from "./session-store-state.ts";
 import { userMessageValues } from "./session-store-values.ts";
+import { rotateSessionTurn } from "./session-turn-store.ts";
 
 function queueSessionFilter(
   sessionId: string,
@@ -107,6 +108,19 @@ export function queueStoredSession(options: {
       return "pending_input_conflict" as const;
     }
 
+    const turnId = rotateSessionTurn({
+      database: transaction,
+      executionGeneration: stored.executionGeneration + 1,
+      generateId:
+        prompt !== undefined && messageId !== undefined
+          ? () => messageId
+          : resources.generateId,
+      now,
+      previousExecutionGeneration: stored.executionGeneration,
+      segment: stored.currentSegment,
+      sessionId,
+      userId,
+    });
     if (prompt !== undefined && messageId !== undefined) {
       transaction
         .insert(agentMessages)
@@ -118,6 +132,7 @@ export function queueStoredSession(options: {
             now,
             segment: stored.currentSegment,
             sessionId,
+            turnId,
             userId,
           }),
         )
@@ -130,6 +145,7 @@ export function queueStoredSession(options: {
         userId,
         now,
         stored.currentSegment,
+        turnId,
       );
     }
     transaction

@@ -19,6 +19,10 @@ import {
   storedUserMessageValues,
   userMessageValues,
 } from "./session-store-values.ts";
+import {
+  activeSessionTurnId,
+  insertSessionTurn,
+} from "./session-turn-store.ts";
 
 export interface CreateAgentSession extends Pick<
   AgentSessionSummary,
@@ -168,6 +172,7 @@ export function createStoredSession(
   const sessionId = resources.generateId(now);
   const generatedIds = [sessionId, resources.generateId(now)] as const;
   const messageId = generatedIds[1];
+  const turnId = messageId;
   const status = resources.database.transaction((transaction) => {
     const parentSessionId = input.parentSessionId;
     const parentGeneration = input.parentGeneration;
@@ -218,6 +223,20 @@ export function createStoredSession(
         title: titleFromPrompt(input.prompt),
       }),
     );
+    insertSessionTurn({
+      database: transaction,
+      executionGeneration: 0,
+      generateId: resources.generateId,
+      id: turnId,
+      now,
+      segment: 0,
+      sessionId,
+      userId: input.userId,
+    });
+    const activeTurnId = activeSessionTurnId(transaction, sessionId);
+    if (activeTurnId === null) {
+      throw new Error("The new session has no active turn");
+    }
     transaction
       .insert(agentMessages)
       .values(
@@ -228,6 +247,7 @@ export function createStoredSession(
           now,
           segment: 0,
           sessionId,
+          turnId: activeTurnId,
           userId: input.userId,
         }),
       )

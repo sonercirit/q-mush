@@ -10,6 +10,7 @@ export interface StoredUserMessageInput {
   readonly now: number;
   readonly segment?: number;
   readonly sessionId: string;
+  readonly turnId?: string | null;
   readonly userId: string;
 }
 

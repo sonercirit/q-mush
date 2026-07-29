@@ -48,6 +48,7 @@ function options(inputModalities: readonly string[], selections = [FALLBACK]) {
       }),
       currentModelId: "current-model",
       currentProvider: "openai" as const,
+      currentProviderPricing: null,
       currentProviderTag: null,
       factory,
       prompt: "Extract requirements",
@@ -72,12 +73,17 @@ describe("explain attachment", () => {
   test("uses the per-call prompt and configured fallback for unreadable files", async () => {
     const setup = options(["text"]);
 
-    await expect(explainAttachment(setup.value)).resolves.toBe("explained");
+    await expect(explainAttachment(setup.value)).resolves.toMatchObject({
+      content: "explained",
+      model: "pdf-model",
+      provider: "openai",
+    });
 
     expect(setup.factory).toHaveBeenCalledWith(
       expect.objectContaining({
         credential: FALLBACK_CREDENTIAL,
         model: "pdf-model",
+        providerPricing: null,
         systemPrompt: "Extract requirements",
       }),
     );

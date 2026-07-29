@@ -1,7 +1,10 @@
 import { createSignal } from "solid-js";
 import { afterEach, expect, test, vi } from "vitest";
-import type { AgentSessionMessage } from "../../shared/session-model.ts";
-import { sessionTurnStartedAtByMessage } from "../../shared/session-turn-timing.ts";
+import type {
+  AgentSessionMessage,
+  AgentSessionTurn,
+} from "../../shared/session-model.ts";
+import { sessionTurnTiming } from "../../shared/session-turn-timing.ts";
 import { createDisplaySessionMessage } from "../session-message.ts";
 import { disposeTestViews } from "./dom-test-helpers.ts";
 import {
@@ -39,7 +42,7 @@ test("derives completed turn timings in one transcript traversal", () => {
     });
   }
 
-  const starts = sessionTurnStartedAtByMessage(messages, "idle");
+  const starts = sessionTurnTiming(messages, "idle", undefined).completedStarts;
 
   expect([...starts]).toEqual([["timing-message-100", 0]]);
   expect(roleReads).toBeLessThan(messages.length * 4);
@@ -48,19 +51,76 @@ test("derives completed turn timings in one transcript traversal", () => {
 test("does not complete the active final turn", () => {
   const messages = [timingMessage("user", 1), timingMessage("assistant", 2)];
 
-  expect(sessionTurnStartedAtByMessage(messages, "running").size).toBe(0);
-  expect([...sessionTurnStartedAtByMessage(messages, "idle")]).toEqual([
-    ["timing-message-2", 1],
-  ]);
+  expect(
+    sessionTurnTiming(messages, "running", undefined).completedStarts.size,
+  ).toBe(0);
+  expect([
+    ...sessionTurnTiming(messages, "idle", undefined).completedStarts,
+  ]).toEqual([["timing-message-2", 1]]);
 });
 
 test("completes a final user-only turn when the session is idle", () => {
   const message = timingMessage("user", 1);
 
-  expect([...sessionTurnStartedAtByMessage([message], "idle")]).toEqual([
-    [message.id, message.createdAt],
+  expect([
+    ...sessionTurnTiming([message], "idle", undefined).completedStarts,
+  ]).toEqual([[message.id, message.createdAt]]);
+  expect(
+    sessionTurnTiming([message], "running", undefined).completedStarts.size,
+  ).toBe(0);
+});
+
+test("keeps completed and user-less continuation turns distinct", () => {
+  const firstUser = timingMessage("user", 1);
+  const firstAssistant = timingMessage("assistant", 2);
+  const continuation = timingMessage("assistant", 101);
+  const turns: readonly AgentSessionTurn[] = [
+    {
+      boundaryMessageId: firstAssistant.id,
+      endedAt: 3,
+      executionGeneration: 0,
+      id: "turn-0",
+      startedAt: 1,
+    },
+    {
+      boundaryMessageId: null,
+      endedAt: null,
+      executionGeneration: 1,
+      id: "turn-1",
+      startedAt: 100,
+    },
+  ];
+
+  const active = sessionTurnTiming(
+    [firstUser, firstAssistant],
+    "running",
+    turns,
+  );
+  expect([...active.completedStarts]).toEqual([[firstAssistant.id, 1]]);
+  expect(active.activeStartedAt).toBe(100);
+
+  const firstTurn = turns[0];
+  const continuationTurn = turns[1];
+  if (firstTurn === undefined || continuationTurn === undefined) {
+    throw new Error("Missing test turns");
+  }
+  const completed = sessionTurnTiming(
+    [firstUser, firstAssistant, continuation],
+    "idle",
+    [
+      firstTurn,
+      {
+        ...continuationTurn,
+        boundaryMessageId: continuation.id,
+        endedAt: 103,
+      },
+    ],
+  );
+  expect([...completed.completedStarts]).toEqual([
+    [firstAssistant.id, 1],
+    [continuation.id, 100],
   ]);
-  expect(sessionTurnStartedAtByMessage([message], "running").size).toBe(0);
+  expect(completed.activeStartedAt).toBeUndefined();
 });
 
 const disposals: (() => void)[] = [];
