@@ -1,15 +1,19 @@
 import { describe, expect, test } from "vitest";
-import type { AttachmentFallbackSelection } from "../../shared/attachment-fallback.ts";
+import {
+  readAttachmentFallbackSelection,
+  type AttachmentFallbackSelection,
+} from "../../shared/attachment-fallback.ts";
 import { createDatabase } from "../../shared/database.ts";
 import { providerCredentials, users } from "../../shared/database/schema.ts";
 import { hasTestDatabaseTable } from "../../shared/test/database-fixtures.ts";
 import { AttachmentFallbackStore } from "../attachment-fallback-store.ts";
+import { testDatabaseColumns } from "./test-database-columns.ts";
 
 const SELECTION: AttachmentFallbackSelection = {
   credentialId: "credential-1",
   modality: "image",
   model: "vision/model",
-  prompt: "Describe the interface",
+  openRouterProviderTag: null,
   provider: "openai",
 };
 
@@ -58,7 +62,7 @@ function setup() {
         provider_credential_id text NOT NULL REFERENCES provider_credentials(id),
         provider text NOT NULL,
         model text NOT NULL,
-        prompt text,
+        openrouter_provider_tag text,
         created_at integer NOT NULL,
         created_by_id text NOT NULL,
         updated_at integer NOT NULL,
@@ -66,6 +70,13 @@ function setup() {
         is_deleted integer NOT NULL DEFAULT false
       )
     `);
+  } else {
+    const columns = testDatabaseColumns(database, "attachment_fallbacks");
+    if (columns.every(({ name }) => name !== "openrouter_provider_tag")) {
+      database.$client.run(
+        "ALTER TABLE attachment_fallbacks ADD COLUMN openrouter_provider_tag text",
+      );
+    }
   }
   return {
     database,
@@ -74,7 +85,20 @@ function setup() {
 }
 
 describe("attachment fallback store", () => {
-  test("persists one user-configurable fallback model and prompt per modality", () => {
+  test("accepts serving-provider selection without a global prompt", () => {
+    expect(
+      readAttachmentFallbackSelection({
+        ...SELECTION,
+        openRouterProviderTag: "together",
+        provider: "openrouter",
+      }),
+    ).toMatchObject({ openRouterProviderTag: "together" });
+    expect(
+      readAttachmentFallbackSelection({ ...SELECTION, prompt: "legacy" }),
+    ).toBeUndefined();
+  });
+
+  test("persists one user-configurable fallback model per modality", () => {
     const { database, store } = setup();
     store.set("user-1", SELECTION, 2);
 

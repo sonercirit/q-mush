@@ -1,4 +1,8 @@
-import { throwIfAgentAborted, type AgentModel } from "../shared/agent-loop.ts";
+import {
+  readAgentAttachments,
+  type AgentAttachment,
+} from "../shared/agent-attachments.ts";
+import { throwIfAgentAborted } from "../shared/agent-loop.ts";
 import {
   isAgentSessionToolName,
   isSessionAgentToolName,
@@ -22,13 +26,12 @@ import {
   isAskQuestionsToolName,
   pauseForAskQuestions,
 } from "./ask-questions-pause.ts";
-import { AttachmentFallbackAgentModel } from "./attachment-fallback-model.ts";
+import { explainAttachment } from "./attachment-fallback-model.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
 import { loadSessionAgentFile } from "./session-agent-file.ts";
 import { runCompactingAgentLoop } from "./session-agent-loop.ts";
 import {
-  createFallbackModel,
   createSessionAgentModels,
   type AgentModelFactory,
   type SessionAgentModels,
@@ -37,7 +40,6 @@ import {
   executeSessionAgentTool,
   type SessionAgentToolActions,
 } from "./session-agent-tools.ts";
-import { storeSessionAttachment } from "./session-attachment-store.ts";
 import {
   compactionUsage,
   type CompactionUsage,
@@ -151,73 +153,6 @@ function sessionConversation(
   );
 }
 
-async function fallbackAgentModel(
-  runtime: SessionAgentRuntimeDependencies,
-  model: AgentModel,
-): Promise<AgentModel> {
-  const selections = runtime.attachmentFallbacks?.() ?? [];
-  if (
-    selections.length === 0 ||
-    runtime.discoverModels === undefined ||
-    runtime.readCredential === undefined
-  ) {
-    return model;
-  }
-  const discoverModels = runtime.discoverModels;
-  const readCredential = runtime.readCredential;
-  const currentCatalog = await discoverModels(
-    runtime.detail.provider,
-    runtime.credential,
-  );
-  const currentModel = currentCatalog.models.find(
-    ({ id }) => id === runtime.detail.model,
-  );
-  if (currentModel === undefined) return model;
-  return new AttachmentFallbackAgentModel({
-    convert: async ({ attachment, selection }, signal) => {
-      const credential = await readCredential(runtime.userId, {
-        ...selection,
-        workspaceId: runtime.detail.workspaceId,
-      });
-      if (credential === undefined) {
-        throw new Error(
-          `The ${selection.modality} fallback credential is unavailable`,
-        );
-      }
-      const catalog = await discoverModels(selection.provider, credential);
-      const selectedModel = catalog.models.find(
-        ({ id }) => id === selection.model,
-      );
-      if (selectedModel === undefined) {
-        throw new Error(
-          `The ${selection.modality} fallback model is unavailable`,
-        );
-      }
-      const fallback = createFallbackModel(runtime.modelFactory, {
-        credential,
-        model: selection.model,
-        prompt: selection.prompt ?? selectedModel.fallbackPrompt ?? null,
-        provider: selection.provider,
-      });
-      const turn = await fallback.complete(
-        [{ attachments: [attachment], content: "", role: "user" }],
-        signal,
-      );
-      const reference = await storeSessionAttachment({
-        attachment,
-        broker: runtime.broker,
-        description: turn.content,
-        session: runtime.detail,
-        signal: signal ?? runtime.signal,
-      });
-      return { reference, text: turn.content };
-    },
-    currentModel,
-    model,
-    selections,
-  });
-}
-
 async function loadModels(
   runtime: SessionAgentRuntimeDependencies,
   options: {
@@ -249,10 +184,7 @@ async function loadModels(
       : { toolStream: options.toolStream }),
     userId: runtime.userId,
   });
-  return {
-    ...models,
-    agent: await fallbackAgentModel(runtime, models.agent),
-  };
+  return models;
 }
 
 export async function compactSessionConversation(
@@ -383,13 +315,13 @@ export async function runSessionAgent(
     runtime.signal,
     handoffController.signal,
   ]);
-  const dispatchRunnerTool = (
+  const dispatchRunnerTool = async (
     name: string,
     toolArguments: Readonly<Record<string, unknown>>,
     signal: AbortSignal = toolSignal,
     callId?: string,
-  ): Promise<RunnerCommandResult> =>
-    executeForSession(
+  ): Promise<RunnerCommandResult> => {
+    const result = await executeForSession(
       runtime,
       () =>
         runtime.broker.dispatch(
@@ -421,6 +353,57 @@ export async function runSessionAgent(
         handoffController.abort(error);
       },
     );
+    if (name !== "explain_file" || result.state !== "completed") {
+      return result;
+    }
+    const promptValue = toolArguments["prompt"];
+    if (
+      promptValue !== undefined &&
+      (typeof promptValue !== "string" || promptValue.length > 4_000)
+    ) {
+      throw new Error(
+        "Tool argument prompt must be a string of at most 4000 characters",
+      );
+    }
+    let attachment: AgentAttachment | undefined;
+    try {
+      attachment = readAgentAttachments([JSON.parse(result.output)])?.[0];
+    } catch {
+      attachment = undefined;
+    }
+    if (attachment === undefined) {
+      throw new Error("The runner returned invalid file attachment data");
+    }
+    const catalog = await runtime.discoverModels?.(
+      runtime.detail.provider,
+      runtime.credential,
+    );
+    const currentModel = catalog?.models.find(
+      ({ id }) => id === runtime.detail.model,
+    );
+    if (currentModel === undefined) {
+      throw new Error("The session model is unavailable for file explanation");
+    }
+    return {
+      output: await explainAttachment(
+        {
+          attachment,
+          currentCredential: runtime.credential,
+          currentModel,
+          currentModelId: runtime.detail.model,
+          currentProvider: runtime.detail.provider,
+          currentProviderTag: runtime.detail.openRouterProviderTag,
+          factory: runtime.modelFactory,
+          prompt: typeof promptValue === "string" ? promptValue : null,
+          resources: runtime,
+          userId: runtime.userId,
+          workspaceId: runtime.detail.workspaceId,
+        },
+        signal,
+      ),
+      state: "completed",
+    };
+  };
   const dispatchTool: AgentToolDispatcher = (
     name,
     toolArguments,

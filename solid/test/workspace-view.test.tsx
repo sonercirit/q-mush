@@ -68,5 +68,9 @@ test("keeps the prompt bank in the shared workspace composition", () => {
   ));
 
   expect(html).toContain("Global connections");
+  expect(html).toContain("Global attachment fallback settings");
+  expect(html).toContain('data-attachment-fallback-settings="global"');
+  expect(html).toContain('data-custom-select="attachmentFallbackModel"');
+  expect(html).not.toContain("Optional model prompt");
   expect(html).toContain('data-prompt-bank="true"');
 });

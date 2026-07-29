@@ -155,6 +155,7 @@ class DrizzleSessionIntegration
     this.#attachmentFallbacks = createAttachmentFallbackIntegration({
       database,
       discoverModels: this.#discoverModels,
+      discoverOpenRouterProviders: this.#discoverOpenRouterProviders,
       generateId: dependencies.randomId ?? createUuidV7,
       now: this.#now,
       providers: this.#providers,

@@ -148,6 +148,13 @@
       "when": 1785257089690,
       "tag": "0020_abnormal_bruce_banner",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1785342056600,
+      "tag": "0021_free_crystal",
+      "breakpoints": true
     }
   ]
 }

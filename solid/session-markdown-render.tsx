@@ -1,4 +1,4 @@
-import { type JSX } from "solid-js";
+import { For, type JSX } from "solid-js";
 import {
   inlineCodeClasses,
   renderHighlightedCodeWith,
@@ -29,6 +29,15 @@ interface MarkdownListItem {
   readonly checked: boolean | undefined;
   readonly text: string;
 }
+
+interface MarkdownTableBlock {
+  readonly alignments: readonly MarkdownTableAlignment[];
+  readonly header: readonly string[];
+  readonly rows: readonly (readonly string[])[];
+  readonly type: "table";
+}
+
+type MarkdownTableAlignment = "center" | "left" | "right";
 
 interface MarkdownParagraphBlock {
   readonly text: string;
@@ -63,7 +72,8 @@ type MarkdownBlock =
   | MarkdownPreservedBlock
   | MarkdownQuoteBlock
   | MarkdownRawBlock
-  | MarkdownRuleBlock;
+  | MarkdownRuleBlock
+  | MarkdownTableBlock;
 
 interface ParsedBlock {
   readonly block: MarkdownBlock;
@@ -204,6 +214,105 @@ function renderInline(text: string): JSX.Element[] {
 
   flush();
   return nodes;
+}
+
+function splitTableRow(line: string): readonly string[] | undefined {
+  let content = line.trim();
+  let hasPipe = false;
+
+  if (content.startsWith("|")) {
+    content = content.slice(1);
+    hasPipe = true;
+  }
+  if (/(?<!\\)(?:\\\\)*\|$/u.test(content)) {
+    content = content.slice(0, -1);
+    hasPipe = true;
+  }
+
+  const cells: string[] = [];
+  let cell = "";
+
+  for (let index = 0; index < content.length; index += 1) {
+    const character = content[index] ?? "";
+
+    if (character === "\\" && content[index + 1] === "|") {
+      cell += "|";
+      index += 1;
+    } else if (character === "|") {
+      cells.push(cell.trim());
+      cell = "";
+      hasPipe = true;
+    } else {
+      cell += character;
+    }
+  }
+
+  cells.push(cell.trim());
+  return hasPipe ? cells : undefined;
+}
+
+function tableAlignment(cell: string): MarkdownTableAlignment | undefined {
+  const match = /^(:?)(-+)(:?)$/u.exec(cell);
+  if (
+    match === null ||
+    ((match[1] === "" || match[3] === "") && (match[2]?.length ?? 0) < 3)
+  ) {
+    return undefined;
+  }
+  if (match[1] === ":") {
+    return match[3] === ":" ? "center" : "left";
+  }
+  return match[3] === ":" ? "right" : "left";
+}
+
+function markdownTable(
+  lines: readonly string[],
+  startIndex: number,
+): ParsedBlock | undefined {
+  const header = splitTableRow(lines[startIndex] ?? "");
+  const separator = splitTableRow(lines[startIndex + 1] ?? "");
+
+  if (
+    header === undefined ||
+    separator === undefined ||
+    header.length < 2 ||
+    separator.length !== header.length
+  ) {
+    return undefined;
+  }
+
+  const alignments: MarkdownTableAlignment[] = [];
+  for (const cell of separator) {
+    const alignment = tableAlignment(cell);
+    if (alignment === undefined) {
+      return undefined;
+    }
+    alignments.push(alignment);
+  }
+
+  const rows: string[][] = [];
+  let nextIndex = startIndex + 2;
+  for (; nextIndex < lines.length; nextIndex += 1) {
+    const line = lines[nextIndex] ?? "";
+    if (line.trim().length === 0) {
+      break;
+    }
+    const row = splitTableRow(line);
+    if (row === undefined) {
+      break;
+    }
+    rows.push([...row]);
+  }
+
+  return {
+    block: {
+      alignments,
+      header,
+      rows,
+      type: "table",
+    },
+    nextIndex,
+  };
 }
 
 function paragraphText(lines: readonly string[]): string {
@@ -349,6 +458,14 @@ function parseMarkdownBlocks(
       continue;
     }
 
+    const table = markdownTable(lines, index);
+
+    if (table !== undefined) {
+      blocks.push(table.block);
+      index = table.nextIndex;
+      continue;
+    }
+
     const special = parseSpecialBlock(lines, index, line);
 
     if (special !== undefined) {
@@ -439,6 +556,67 @@ function renderMarkdownList(block: MarkdownListBlock): JSX.Element {
   );
 }
 
+function tableCellClasses(
+  alignment: MarkdownTableAlignment,
+  header: boolean,
+): string {
+  const textAlignment =
+    alignment === "center"
+      ? "text-center"
+      : alignment === "right"
+        ? "text-right"
+        : "text-left";
+  return header
+    ? `px-3 py-2 ${textAlignment} font-semibold text-slate-100`
+    : `border-t border-white/10 px-3 py-2 ${textAlignment} align-top`;
+}
+
+function renderMarkdownTable(block: MarkdownTableBlock): JSX.Element {
+  return (
+    <div class="overflow-x-auto rounded-lg border border-white/10">
+      <table class="w-full border-collapse text-sm">
+        <thead class="bg-white/5">
+          <tr>
+            <For each={block.header}>
+              {(cell, index) => (
+                <th
+                  class={tableCellClasses(
+                    block.alignments[index()] ?? "left",
+                    true,
+                  )}
+                  scope="col"
+                >
+                  {renderInline(cell)}
+                </th>
+              )}
+            </For>
+          </tr>
+        </thead>
+        <tbody>
+          <For each={block.rows}>
+            {(row) => (
+              <tr>
+                <For each={block.header}>
+                  {(_, index) => (
+                    <td
+                      class={tableCellClasses(
+                        block.alignments[index()] ?? "left",
+                        false,
+                      )}
+                    >
+                      {renderInline(row[index()] ?? "")}
+                    </td>
+                  )}
+                </For>
+              </tr>
+            )}
+          </For>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function renderMarkdownBlock(block: MarkdownBlock): JSX.Element {
   switch (block.type) {
     case "code":
@@ -475,6 +653,8 @@ function renderMarkdownBlock(block: MarkdownBlock): JSX.Element {
       );
     case "rule":
       return <hr class="border-white/10" />;
+    case "table":
+      return renderMarkdownTable(block);
   }
 }
 

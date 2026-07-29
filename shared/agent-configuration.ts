@@ -64,6 +64,13 @@ export function isAgentModelId(value: unknown): value is string {
   return typeof value === "string" && MODEL_PATTERN.test(value);
 }
 
+export function readOpenRouterProviderTag(
+  value: unknown,
+): string | null | undefined {
+  if (value === null) return null;
+  return isOpenRouterProviderTag(value) ? value : undefined;
+}
+
 export function isOpenRouterProviderTag(value: unknown): value is string {
   return (
     typeof value === "string" && OPENROUTER_PROVIDER_TAG_PATTERN.test(value)

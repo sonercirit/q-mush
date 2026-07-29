@@ -29,7 +29,6 @@ export function sessionTurnStartedAtByMessage(
   for (const [index, message] of messages.entries()) {
     if (message.role === "user") {
       startedAt = message.createdAt;
-      continue;
     }
     const finalMessage = index === messages.length - 1;
     if (

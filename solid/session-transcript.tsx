@@ -21,10 +21,6 @@ import {
   activeSessionDuration,
   formatSessionTime,
 } from "../shared/session-timing.ts";
-import {
-  activeTurnStartedAt,
-  sessionTurnStartedAtByMessage,
-} from "../shared/session-turn-timing.ts";
 import type {
   ToolStreamEntry,
   ToolStreamState,
@@ -41,6 +37,7 @@ import type {
   SessionTranscriptFilterName,
   SessionTranscriptFilters,
 } from "./session-transcript-filters.ts";
+import { createSessionTurnTiming } from "./session-turn-timing.ts";
 
 function TurnTiming(props: {
   readonly endedAt: number | null;
@@ -544,11 +541,9 @@ export function SessionTranscript(props: {
   const serializedTools = createMemo(() =>
     JSON.stringify(selectedAgentTools(props.tools), null, 2),
   );
-  const activeStartedAt = createMemo(() =>
-    activeTurnStartedAt(props.messages, props.status ?? "idle"),
-  );
-  const completedTurnStarts = createMemo(() =>
-    sessionTurnStartedAtByMessage(props.messages, props.status ?? "idle"),
+  const turnTiming = createSessionTurnTiming(
+    () => props.messages,
+    () => props.status ?? "idle",
   );
   const visibleItemCount = createMemo(() => {
     const counts = sessionTranscriptFilterCounts(
@@ -594,7 +589,7 @@ export function SessionTranscript(props: {
                 onFork={props.onFork}
               />
             </Show>
-            <Show when={completedTurnStarts().get(message.id)}>
+            <Show when={turnTiming().completedStarts.get(message.id)}>
               {(startedAt) => (
                 <TurnTiming
                   endedAt={message.createdAt}
@@ -605,7 +600,7 @@ export function SessionTranscript(props: {
           </>
         )}
       </For>
-      <Show when={activeStartedAt()}>
+      <Show when={turnTiming().activeStartedAt}>
         {(startedAt) => <TurnTiming endedAt={null} startedAt={startedAt()} />}
       </Show>
       <Show when={props.filters.toolActivity}>

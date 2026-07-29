@@ -13,8 +13,11 @@ import type { ProviderController } from "./provider-controller.ts";
 import { renderDebugBoundary } from "./render-debug.tsx";
 import { RunnerPanel } from "./runner-client.tsx";
 import type { RunnerController } from "./runner-controller.ts";
+import { AttachmentFallbackSettings } from "./session-attachment-fallbacks.tsx";
 import { SessionPanel } from "./session-client.tsx";
 import type { SessionController } from "./session-controller.ts";
+import { credentialOptions } from "./session-credential-list.ts";
+import { discoverProviderUpdateModels } from "./session-provider-update-controller.ts";
 import { WorkspacePanel, WorkspaceSwitcher } from "./workspace-client.tsx";
 import type { WorkspaceController } from "./workspace-controller.ts";
 
@@ -92,6 +95,19 @@ export function Workspace(props: {
           runners={props.runners.view}
         />
       </Show>
+      <AttachmentFallbackSettings
+        credentials={credentialOptions(
+          props.openAi.view(),
+          props.openRouter.view(),
+        ).filter(({ credential }) => credential.isGlobal === true)}
+        onDiscoverModels={(provider, credentialId) =>
+          discoverProviderUpdateModels(
+            props.agentSessions.transport,
+            provider,
+            credentialId,
+          )
+        }
+      />
       <WorkspacePanel controller={props.workspaces} />
       <PromptBank
         controller={props.prompts}

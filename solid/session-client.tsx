@@ -25,11 +25,11 @@ import {
 import type { ProviderViewState } from "./provider-client.tsx";
 import { renderDebugBoundary } from "./render-debug.tsx";
 import type { RunnerViewState } from "./runner-client.tsx";
-import { SessionAttachmentFallbacks } from "./session-attachment-fallbacks.tsx";
 import { SessionAutoCompactToggle } from "./session-autocompact-toggle.tsx";
 import { SessionPromptInput } from "./session-client-forms.tsx";
 import { formatTokenCount } from "./session-context-client.tsx";
 import type { SessionController } from "./session-controller.ts";
+import { credentialOptions } from "./session-credential-list.ts";
 import {
   sessionCredentialSelectOptions,
   type SessionCredentialOption,
@@ -72,22 +72,6 @@ function credentialFallbackReady(
   openRouter: ProviderViewState,
 ): boolean {
   return !providerIsLoading(openAi) && !providerIsLoading(openRouter);
-}
-
-function credentialOptions(
-  openAi: ProviderViewState,
-  openRouter: ProviderViewState,
-): readonly CredentialOption[] {
-  return [
-    ...(openAi.credentials ?? []).map((credential) => ({
-      credential,
-      provider: "openai" as const,
-    })),
-    ...(openRouter.credentials ?? []).map((credential) => ({
-      credential,
-      provider: "openrouter" as const,
-    })),
-  ];
 }
 
 function optionValue(option: CredentialOption): string {
@@ -461,7 +445,6 @@ function NewSessionForm(
         }}
         tools={props.state.draft.tools}
       />
-      <SessionAttachmentFallbacks credentials={credentials()} />
       <SessionPromptInput
         disabled={props.state.creating}
         images={props.state.draft.images}

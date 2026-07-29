@@ -10,6 +10,12 @@ import {
 import type { AgentImage } from "../shared/agent-images.ts";
 import { SessionImageInput } from "./session-image-client.tsx";
 import { readPastedAgentImageFiles } from "./session-image-input.ts";
+import {
+  sessionComposerShortcut,
+  SessionShortcutHint,
+  type SessionComposerShortcut,
+  type SessionShortcut,
+} from "./session-pending-client.tsx";
 
 interface SessionImagesProps {
   readonly images: readonly AgentImage[];
@@ -40,7 +46,9 @@ interface SessionFollowUpProps extends PromptEventProps, SessionImagesProps {
   readonly prompt: string;
   readonly sending: boolean;
   readonly sessionId: string;
+  readonly shortcuts: SessionShortcut;
   readonly submitLabel?: string;
+  readonly submitShortcut: SessionComposerShortcut;
 }
 
 const FOLLOW_UP_SYNC_DELAY_MS = 150;
@@ -127,12 +135,7 @@ export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
   const handleKeyDown = (
     event: KeyboardEvent & { readonly currentTarget: HTMLTextAreaElement },
   ): void => {
-    if (
-      !props.disabled &&
-      !event.isComposing &&
-      event.key === "Enter" &&
-      (event.ctrlKey || event.metaKey)
-    ) {
+    if (!props.disabled && sessionComposerShortcut(event) !== undefined) {
       syncPrompt();
     }
     props.onKeyDown(event);
@@ -141,6 +144,19 @@ export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
     syncPrompt();
     props.onSubmit();
   };
+  const submitShortcut = (): {
+    readonly keys: string;
+    readonly label: string;
+  } =>
+    props.submitShortcut === "follow_up"
+      ? {
+          keys: props.shortcuts.followUpKeys,
+          label: props.shortcuts.followUpLabel,
+        }
+      : {
+          keys: props.shortcuts.steerKeys,
+          label: props.shortcuts.steerLabel,
+        };
   const promptValue = (): string => {
     return props.sessionId.length > 0 ? localPrompt() : "";
   };
@@ -207,6 +223,7 @@ export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
         <Show when={props.onSteer !== undefined}>
           <button
             aria-describedby={props.availabilityDescriptionId}
+            aria-keyshortcuts={props.shortcuts.steerKeys}
             class={COMPOSER_BUTTON_CLASSES}
             data-session-steer="true"
             disabled={props.disabled || props.onSteer === undefined}
@@ -214,18 +231,25 @@ export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
               syncPrompt();
               props.onSteer?.();
             }}
+            title={`Steer (${props.shortcuts.steerLabel})`}
             type="button"
           >
-            Steer
+            <span>Steer</span>
+            <SessionShortcutHint label={props.shortcuts.steerLabel} />
           </button>
         </Show>
         <button
           aria-describedby={props.availabilityDescriptionId}
+          aria-keyshortcuts={submitShortcut().keys}
           class={COMPOSER_BUTTON_CLASSES}
           disabled={props.disabled}
+          title={`${props.submitLabel ?? "Send"} (${submitShortcut().label})`}
           type="submit"
         >
-          {props.sending ? "Sending…" : (props.submitLabel ?? "Send")}
+          <span>
+            {props.sending ? "Sending…" : (props.submitLabel ?? "Send")}
+          </span>
+          <SessionShortcutHint label={submitShortcut().label} />
         </button>
         <Show when={props.onContinue !== undefined}>
           <button

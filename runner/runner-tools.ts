@@ -1,5 +1,9 @@
 import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
-import { dirname, relative, resolve } from "node:path";
+import { basename, dirname, relative, resolve } from "node:path";
+import {
+  agentAttachmentMediaTypeFromName,
+  MAXIMUM_AGENT_ATTACHMENT_BYTES,
+} from "../shared/agent-attachments.ts";
 import {
   isBaseAgentToolName,
   isRunnerAgentToolName,
@@ -215,7 +219,7 @@ function runnerFileToolArguments(
   return { arguments_, options, root };
 }
 
-function writableFileToolArguments(
+function resolvedFileToolArguments(
   parameters: Parameters<RunnerFileTool>,
   mayNotExist = false,
 ): Promise<RunnerFileToolArguments & { readonly path: string }> {
@@ -249,10 +253,30 @@ async function readTool(
   return readContinuation(content, offset, limit);
 }
 
+async function explainFileTool(
+  ...parameters: Parameters<RunnerFileTool>
+): Promise<string> {
+  const { path } = await resolvedFileToolArguments(parameters);
+  const details = await stat(path);
+  if (details.isDirectory()) {
+    throw new Error("Directories cannot be explained as files");
+  }
+  if (details.size > MAXIMUM_AGENT_ATTACHMENT_BYTES) {
+    throw new Error(
+      `The requested file exceeds ${String(MAXIMUM_AGENT_ATTACHMENT_BYTES)} bytes`,
+    );
+  }
+  return JSON.stringify({
+    data: (await readFile(path)).toString("base64"),
+    mediaType: agentAttachmentMediaTypeFromName(path),
+    name: basename(path),
+  });
+}
+
 async function writeTool(
   ...parameters: Parameters<RunnerFileTool>
 ): Promise<string> {
-  const context = await writableFileToolArguments(parameters, true);
+  const context = await resolvedFileToolArguments(parameters, true);
   const content = requiredString(
     context.arguments_,
     "content",
@@ -343,7 +367,7 @@ async function editTool(
   ...parameters: Parameters<RunnerFileTool>
 ): Promise<string> {
   const editParameters: Parameters<RunnerFileTool> = parameters;
-  const context = await writableFileToolArguments(editParameters, false);
+  const context = await resolvedFileToolArguments(editParameters, false);
   const replacements = editReplacements(context.arguments_);
   const content = await readTextFile(context.path, MAX_FILE_BYTES);
   const edits = locateEdits(content, replacements);
@@ -422,6 +446,7 @@ const PAGE_FETCH_RUNNER_TOOL = createPageFetchRunnerTool();
 const RUNNER_TOOLS: Readonly<Record<BaseAgentToolName, RunnerTool>> = {
   bash: bashTool,
   edit: editTool,
+  explain_file: explainFileTool,
   [PAGE_FETCH_TOOL_NAME]: PAGE_FETCH_RUNNER_TOOL,
   read: readTool,
   write: writeTool,
@@ -637,7 +662,9 @@ export async function executeRunnerToolResult(
     resolved.name === "bash"
       ? runnerCommandResultFromOutput(output)
       : { output, state: "completed" as const };
-  return spills !== undefined && resolved.name !== "read"
+  return spills !== undefined &&
+    resolved.name !== "read" &&
+    resolved.name !== "explain_file"
     ? { ...result, output: await spills.apply(result.output) }
     : result;
 }

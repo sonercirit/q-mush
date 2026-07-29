@@ -53,6 +53,11 @@ const EDIT_REPLACEMENT_PARAMETER = {
   type: "object",
 } as const;
 
+const FILE_PATH_PARAMETER = {
+  description: "Workspace-relative or contained absolute file path",
+  type: "string",
+} as const;
+
 const BASE_AGENT_TOOLS = [
   toolDefinition({
     description:
@@ -67,9 +72,19 @@ const BASE_AGENT_TOOLS = [
         description: "Line number to start reading from (1-indexed)",
         type: "number",
       },
-      path: {
-        description:
-          "Path to the file to read, relative to the workspace or absolute within it",
+      path: FILE_PATH_PARAMETER,
+    },
+    required: ["path"],
+  }),
+  toolDefinition({
+    description:
+      "Read a workspace file and ask the session model, or its configured global modality fallback, to explain its content. An optional per-call prompt controls what to explain.",
+    name: "explain_file",
+    properties: {
+      path: FILE_PATH_PARAMETER,
+      prompt: {
+        description: "Optional instructions for this explanation",
+        maxLength: 4_000,
         type: "string",
       },
     },
@@ -131,6 +146,10 @@ const BASE_AGENT_TOOLS = [
     required: ["path", "content"],
   }),
 ] as const;
+
+const BASE_AGENT_TOOL_NAMES = BASE_AGENT_TOOLS.map(
+  (tool) => tool.function.name,
+);
 
 const SESSION_ID_PARAMETER = {
   sessionId: {
@@ -231,15 +250,14 @@ const SESSION_AGENT_TOOLS = [
     required: ["runnerId", "path"],
   }),
   toolDefinition({
-    description:
-      "List only your currently online runners. Use an ID from this result when creating or reassigning a session.",
+    description: "List only your currently online runners.",
     name: "list_runners",
     properties: {},
     required: [],
   }),
   toolDefinition({
     description:
-      "List your agent sessions, including whether a removed runner requires explicit reassignment.",
+      "List owned agent sessions and report which ones need runner reassignment.",
     name: "list_sessions",
     properties: {},
     required: [],
@@ -374,7 +392,7 @@ const PARALLEL_TOOL = toolDefinition({
           recipient_name: {
             description: "Tool or skill to call",
             enum: [
-              ...BASE_AGENT_TOOLS.map((tool) => tool.function.name),
+              ...BASE_AGENT_TOOL_NAMES,
               BRAVE_SEARCH_TOOL_NAME,
               ...SESSION_AGENT_TOOLS.map((tool) => tool.function.name).filter(
                 (name) => name !== "sleep",
@@ -457,6 +475,7 @@ const AGENT_TOOL_LABELS: Readonly<Record<AgentSessionToolName, string>> = {
   browse_runner_directories: "Browse runner directories",
   continue_session: "Continue session",
   edit: "Edit files",
+  explain_file: "Explain files",
   get_session_options: "Get session options",
   list_runners: "List runners",
   list_sessions: "List sessions",
@@ -586,7 +605,7 @@ type RunnerAgentToolName =
   | typeof PARALLEL_TOOL.function.name;
 
 const RUNNER_AGENT_TOOL_NAMES: readonly RunnerAgentToolName[] = [
-  ...BASE_AGENT_TOOLS.map((tool) => tool.function.name),
+  ...BASE_AGENT_TOOL_NAMES,
   PAGE_FETCH_TOOL_DEFINITION.function.name,
   PARALLEL_TOOL.function.name,
 ];

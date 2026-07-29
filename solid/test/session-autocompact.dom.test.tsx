@@ -18,7 +18,7 @@ afterEach(() => {
 
 function compactButton(
   container: ParentNode,
-  label: "Compact and continue" | "Compact now",
+  label: "Compact and continue" | "Compact",
 ): HTMLButtonElement | undefined {
   return findTestButton(container, label);
 }
@@ -102,7 +102,7 @@ test.each(["queued", "running", "paused"] as const)(
     const { autoCompact, container } = mountCompactionControls(status);
 
     expect(autoCompact.disabled).toBe(false);
-    expect(compactButton(container, "Compact now")).toBeUndefined();
+    expect(compactButton(container, "Compact")).toBeUndefined();
     expectNoCompactAndContinue(container);
   },
 );
@@ -113,11 +113,11 @@ test("persists auto-compaction changes while a session is running", async () => 
 });
 
 test.each(["failed", "stopped"] as const)(
-  "shows only Compact now for a $status session",
+  "shows only Compact for a $status session",
   async (status) => {
     const { command, container, controller } = mountCompactionControls(status);
 
-    expect(compactButton(container, "Compact now")?.disabled).toBe(false);
+    expect(compactButton(container, "Compact")?.disabled).toBe(false);
     expectNoCompactAndContinue(container);
     await controller.compact(true);
     expect(command).not.toHaveBeenCalled();
@@ -128,7 +128,7 @@ test("keeps idle auto-compaction behavior and manual compaction access", async (
   const mounted = mountCompactionControls("idle");
 
   expect(mounted.autoCompact.disabled).toBe(false);
-  expect(compactButton(mounted.container, "Compact now")?.disabled).toBe(false);
+  expect(compactButton(mounted.container, "Compact")?.disabled).toBe(false);
   expect(
     compactButton(mounted.container, "Compact and continue")?.disabled,
   ).toBe(false);
@@ -137,7 +137,7 @@ test("keeps idle auto-compaction behavior and manual compaction access", async (
 });
 
 test.each([
-  ["Compact now", SESSION_REALTIME_OPERATIONS.compact],
+  ["Compact", SESSION_REALTIME_OPERATIONS.compact],
   ["Compact and continue", SESSION_REALTIME_OPERATIONS.compactAndContinue],
 ] as const)("sends %s without a user message", async (label, operation) => {
   const mounted = mountCompactionControls("idle");

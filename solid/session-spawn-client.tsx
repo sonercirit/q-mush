@@ -1,4 +1,4 @@
-import { createEffect, untrack, type JSX } from "solid-js";
+import { createEffect, onMount, untrack, type JSX } from "solid-js";
 
 import type { RunnerSummary } from "../shared/runner-model.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
@@ -17,6 +17,11 @@ import {
   SessionModelPickerFields,
   type SessionModelPickerSelectionProps,
 } from "./session-model-picker.tsx";
+import {
+  createSessionShortcuts,
+  sessionComposerShortcut,
+  SessionShortcutHint,
+} from "./session-pending-client.tsx";
 import { SessionToolPicker } from "./session-tool-picker.tsx";
 import type { SessionDraft } from "./session-view-state.ts";
 
@@ -102,6 +107,7 @@ export function SessionSpawnEditor(props: SpawnEditorProps): JSX.Element {
     initial,
     props,
   );
+  const [shortcuts, setShortcutPlatform] = createSessionShortcuts();
   const { draft, editor, open, request, setDraft, setOpen } = modelState;
   const error = request.error;
   const pending = request.pending;
@@ -158,6 +164,16 @@ export function SessionSpawnEditor(props: SpawnEditorProps): JSX.Element {
     }
   };
 
+  const submitFromShortcut = (event: KeyboardEvent): void => {
+    if (!pending() && sessionComposerShortcut(event) === "steer") {
+      event.preventDefault();
+      void submit();
+    }
+  };
+  onMount(() => {
+    setShortcutPlatform(navigator.platform);
+  });
+
   return (
     <SessionEditorSection
       description={
@@ -169,7 +185,10 @@ export function SessionSpawnEditor(props: SpawnEditorProps): JSX.Element {
       kind="spawn"
       title="Spawn child session"
     >
-      <div class="mt-4 grid gap-4 sm:grid-cols-2">
+      <div
+        class="mt-4 grid gap-4 sm:grid-cols-2"
+        onKeyDown={submitFromShortcut}
+      >
         <CustomSelect
           disabled={pending()}
           emptyLabel="No online runners"
@@ -286,13 +305,16 @@ export function SessionSpawnEditor(props: SpawnEditorProps): JSX.Element {
       </div>
       <SessionEditorError message={error()} />
       <button
+        aria-keyshortcuts={shortcuts().steerKeys}
         class="mt-4 rounded-xl bg-cyan-300 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-50"
         data-session-spawn-submit="true"
         disabled={pending()}
         onClick={() => void submit()}
+        title={`Spawn child (${shortcuts().steerLabel})`}
         type="button"
       >
-        {pending() ? "Spawning…" : "Spawn child"}
+        <span>{pending() ? "Spawning…" : "Spawn child"}</span>
+        <SessionShortcutHint label={shortcuts().steerLabel} />
       </button>
     </SessionEditorSection>
   );

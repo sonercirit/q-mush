@@ -12,8 +12,8 @@ import {
 import type { SessionRequestHelpers } from "./session-request-helpers.ts";
 
 export class AttachmentFallbackApi {
-  readonly #requests: SessionRequestHelpers;
-  readonly #store: AttachmentFallbackStore;
+  readonly #requests: Pick<SessionRequestHelpers, "authenticate" | "forUser">;
+  readonly #store: Pick<AttachmentFallbackStore, "list" | "set">;
   readonly #now: () => number;
   readonly #validate: (
     user: AuthenticatedUser,
@@ -22,8 +22,8 @@ export class AttachmentFallbackApi {
 
   constructor(options: {
     readonly now: () => number;
-    readonly requests: SessionRequestHelpers;
-    readonly store: AttachmentFallbackStore;
+    readonly requests: Pick<SessionRequestHelpers, "authenticate" | "forUser">;
+    readonly store: Pick<AttachmentFallbackStore, "list" | "set">;
     readonly validate: (
       user: AuthenticatedUser,
       selection: AttachmentFallbackSelection,

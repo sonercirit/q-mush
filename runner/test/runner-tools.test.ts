@@ -19,12 +19,25 @@ function executeBash(
   return executeRunnerTool(root, "bash", { command, timeout });
 }
 
+async function explainOutput(root: string): Promise<unknown> {
+  const output = await executeRunnerTool(root, "explain_file", {
+    path: "diagram.png",
+  });
+  return JSON.parse(output);
+}
+
 async function captureToolError(
   ...parameters: Parameters<typeof executeRunnerTool>
 ): Promise<Error> {
   return requireRunnerError(
     await observeRunnerRejection(executeRunnerTool(...parameters)),
   );
+}
+
+async function explainWorkspace(): Promise<string> {
+  const root = await workspace();
+  await writeFile(join(root, "diagram.png"), Uint8Array.from([1, 2, 3]));
+  return root;
 }
 
 describe("runner tools", () => {
@@ -54,6 +67,22 @@ describe("runner tools", () => {
     expect(await readFile(join(root, "notes/message.txt"), "utf8")).toBe(
       "hello swarm\nnext line\n",
     );
+  });
+
+  test("loads explainable files only from the contained workspace", async () => {
+    const root = await explainWorkspace();
+
+    const output = await explainOutput(root);
+    const error = await captureToolError(root, "explain_file", {
+      path: "../secret.png",
+    });
+
+    expect(output).toEqual({
+      data: Uint8Array.from([1, 2, 3]).toBase64(),
+      mediaType: "image/png",
+      name: "diagram.png",
+    });
+    expect(error.message).toContain("outside the session workspace");
   });
 
   test("rejects unsafe or incomplete tool calls", async () => {

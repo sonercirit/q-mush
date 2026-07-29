@@ -94,7 +94,7 @@ export function CompactionControls(props: {
   );
   return (
     <>
-      {button("Compact now")}
+      {button("Compact")}
       <Show when={props.continueAvailable}>
         {button("Compact and continue", true)}
       </Show>
