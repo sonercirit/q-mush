@@ -18,38 +18,30 @@ import type {
   SessionTransitionInput,
 } from "./session-transition-types.ts";
 import { optionalRestartHandoff } from "./session-transition-values.ts";
-import { endGenerationSessionTurn } from "./session-turn-store.ts";
+import {
+  type SessionGenerationSettlement,
+  updateSessionAndEndGenerationTurn,
+} from "./session-turn-store.ts";
 
 interface SessionRuntimeTransitionResources {
   readonly database: AppDatabase;
 }
 
-function transitionAndEndTurn(options: {
-  readonly condition: SQL | undefined;
-  readonly database: AppDatabase;
-  readonly now: number;
-  readonly sessionId: string;
-  readonly values: Parameters<typeof updateStoredSessions>[2];
-}): boolean {
+function transitionAndEndTurn(
+  options: Omit<SessionGenerationSettlement, "generation"> & {
+    readonly database: AppDatabase;
+  },
+): boolean {
   return options.database.transaction((transaction) => {
     const session = readStoredSessionState(transaction, options.condition);
-    if (session === undefined) {
-      return false;
-    }
-    const updated = updateStoredSessions(
-      transaction,
-      options.condition,
-      options.values,
+    return (
+      session !== undefined &&
+      updateSessionAndEndGenerationTurn({
+        ...options,
+        database: transaction,
+        generation: session.executionGeneration,
+      })
     );
-    if (updated) {
-      endGenerationSessionTurn(
-        transaction,
-        options.sessionId,
-        session.executionGeneration,
-        options.now,
-      );
-    }
-    return updated;
   });
 }
 

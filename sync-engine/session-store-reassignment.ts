@@ -17,9 +17,7 @@ import {
   activeSessionCondition,
   readStoredSessionSnapshots,
   storedSessionCondition,
-  storedSessionSnapshotCondition,
   terminalSessionValues,
-  updateStoredSessions,
   type StoredSessionSnapshot,
 } from "./session-store-persistence.ts";
 import { readStoredSessionState } from "./session-store-state.ts";
@@ -28,6 +26,10 @@ import {
   interruptedSessionErrorValues,
 } from "./session-store-values.ts";
 import { recoverStoredTerminal } from "./session-terminal-store.ts";
+import {
+  updateSessionAndEndGenerationTurn,
+  updateStoredSnapshotAndEndGenerationTurn,
+} from "./session-turn-store.ts";
 
 export type ReassignSessionResult =
   | { readonly detail: AgentSessionDetail; readonly status: "reassigned" }
@@ -81,12 +83,19 @@ export function reassignStoredSession(options: {
     }
 
     if (
-      !updateStoredSessions(transaction, ownedSession, {
-        runnerId: options.runnerId,
-        runnerRequired: false,
-        executionGeneration: sql`${agentSessions.executionGeneration} + 1`,
-        workingDirectory: options.workingDirectory,
-        ...updatedAuditFields(options.userId, options.now),
+      !updateSessionAndEndGenerationTurn({
+        condition: ownedSession,
+        database: transaction,
+        generation: stored.executionGeneration,
+        now: options.now,
+        sessionId: options.sessionId,
+        values: {
+          runnerId: options.runnerId,
+          runnerRequired: false,
+          executionGeneration: sql`${agentSessions.executionGeneration} + 1`,
+          workingDirectory: options.workingDirectory,
+          ...updatedAuditFields(options.userId, options.now),
+        },
       })
     ) {
       throw new Error("The agent session changed during reassignment");
@@ -154,9 +163,10 @@ export function failInterruptedStoredSession(
   now: number,
 ): boolean {
   return database.transaction((transaction) => {
-    const updated = updateStoredSessions(
+    const updated = updateStoredSnapshotAndEndGenerationTurn(
       transaction,
-      storedSessionSnapshotCondition(session),
+      session,
+      now,
       terminalSessionValues(session, "failed", now),
     );
     if (!updated) {

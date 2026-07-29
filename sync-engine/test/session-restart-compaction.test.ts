@@ -211,11 +211,16 @@ describe("restart handoff generation fencing", () => {
     );
 
     settleClaimedRestart(setup, identity, { status: "idle" });
-    expect(requireCompactionSession(setup.store)).toMatchObject({
+    const settled = requireCompactionSession(setup.store);
+    expect(settled).toMatchObject({
       activeStartedAt: null,
       restartHandoff: null,
       status: "idle",
     });
+    expect(settled.turns?.at(-1)?.endedAt).not.toBeNull();
+    expect(
+      setup.store.queue(TEST_USER_ID, settled.id, TEST_NOW + 6).status,
+    ).toBe("queued");
     closeCompactionStore(setup);
   });
 

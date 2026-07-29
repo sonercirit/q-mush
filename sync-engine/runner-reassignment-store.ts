@@ -8,9 +8,9 @@ import {
   sessionTimingUpdate,
   storedSessionCondition,
   storedSessionSnapshotCondition,
-  updateStoredSessions,
   type StoredSessionSnapshot,
 } from "./session-store-persistence.ts";
+import { updateSessionAndEndGenerationTurn } from "./session-turn-store.ts";
 
 type RunnerReassignmentDatabase = Pick<AppDatabase, "select" | "update">;
 
@@ -32,7 +32,7 @@ function affectedRunnerSessions(
 }
 
 function fenceAssignedSession(
-  database: Pick<AppDatabase, "update">,
+  database: RunnerReassignmentDatabase,
   session: StoredSessionSnapshot,
   userId: string,
   runnerId: string,
@@ -41,13 +41,16 @@ function fenceAssignedSession(
   if (session.userId !== userId) {
     throw new Error("An assigned session has the wrong owner");
   }
-  return updateStoredSessions(
-    database,
-    and(
+  return updateSessionAndEndGenerationTurn({
+    condition: and(
       storedSessionSnapshotCondition(session),
       eq(agentSessions.runnerId, runnerId),
     ),
-    {
+    database,
+    generation: session.executionGeneration,
+    now,
+    sessionId: session.id,
+    values: {
       ...sessionTimingUpdate(session, now),
       executionGeneration: sql`${agentSessions.executionGeneration} + 1`,
       restartHandoff: null,
@@ -55,7 +58,7 @@ function fenceAssignedSession(
       status: session.status === "stopped" ? "stopped" : "idle",
       ...updatedAuditFields(SYSTEM_ID, now),
     },
-  );
+  });
 }
 
 export function requireRunnerReassignment(

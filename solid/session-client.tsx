@@ -2,6 +2,7 @@ import {
   createEffect,
   createMemo,
   createSignal,
+  onMount,
   Show,
   untrack,
   type JSX,
@@ -44,6 +45,11 @@ import {
   sessionCredentialOptionValue,
 } from "./session-new-selection.ts";
 import type { SessionPanelResources } from "./session-panel-resources.ts";
+import {
+  createSessionShortcuts,
+  sessionComposerShortcut,
+  SessionShortcutHint,
+} from "./session-pending-client.tsx";
 import { OpenRouterProviderSelect } from "./session-provider-select.tsx";
 import { runnerSelectOptions } from "./session-reassignment-client.ts";
 import { selectedSessionCredentialAvailable } from "./session-resource-availability.ts";
@@ -275,6 +281,10 @@ function NewSessionForm(
       credential() !== undefined &&
       models().length > 0,
   );
+  const [shortcuts, setShortcutPlatform] = createSessionShortcuts();
+  onMount(() => {
+    setShortcutPlatform(navigator.platform);
+  });
 
   const optionValues = (
     options: readonly CustomSelectOption[],
@@ -454,6 +464,16 @@ function NewSessionForm(
         onInput={(value) => {
           props.controller.setDraftField("prompt", value);
         }}
+        onKeyDown={(event) => {
+          if (
+            !props.state.creating &&
+            available() &&
+            sessionComposerShortcut(event) === "steer"
+          ) {
+            event.preventDefault();
+            event.currentTarget.form?.requestSubmit();
+          }
+        }}
         onRemoveImage={(index) => {
           props.controller.removeImage(index, "draft");
         }}
@@ -465,11 +485,14 @@ function NewSessionForm(
           selected runner.
         </p>
         <button
+          aria-keyshortcuts={shortcuts().steerKeys}
           class="shrink-0 rounded-xl bg-emerald-300 px-5 py-3 font-semibold text-slate-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-50"
           disabled={props.state.creating || !available()}
+          title={`Start session (${shortcuts().steerLabel})`}
           type="submit"
         >
-          {props.state.creating ? "Starting…" : "Start session"}
+          <span>{props.state.creating ? "Starting…" : "Start session"}</span>
+          <SessionShortcutHint label={shortcuts().steerLabel} />
         </button>
       </div>
       <Show when={!resourcesAvailable()}>

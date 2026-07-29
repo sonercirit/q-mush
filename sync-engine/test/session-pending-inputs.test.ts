@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { describe, expect, test, vi } from "vitest";
 import type { AgentImage } from "../../shared/agent-images.ts";
 import { agentPendingInputs } from "../../shared/database/schema.ts";
+import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { SessionFinisher } from "../session-finisher.ts";
 import {
   cancelPendingInput,
@@ -136,6 +137,18 @@ function expectSessionDetail(
   expect(setup.store.get(TEST_USER_ID, setup.detail.id)).toMatchObject(
     expected,
   );
+}
+
+function expectSuccessorInitiatingMessage(
+  detail: AgentSessionDetail | undefined,
+  boundaryIndex: number,
+  successorIndex: number,
+): void {
+  const [closingTurn, successorTurn] = detail?.turns ?? [];
+  const boundaryMessage = detail?.messages[boundaryIndex];
+  const successorMessage = detail?.messages[successorIndex];
+  expect(closingTurn?.boundaryMessageId).toBe(boundaryMessage?.id);
+  expect(successorMessage?.turnId).toBe(successorTurn?.id);
 }
 
 function expectQueuedBoundary(
@@ -373,6 +386,10 @@ describe("durable pending session inputs", () => {
       pendingInputs: [{ content: "Later turn", kind: "follow_up" }],
       status: "queued",
     });
+    const steeringMessage = detail?.messages[1];
+    expectSuccessorInitiatingMessage(detail, 1, 2);
+    expect(steeringMessage?.turnId).toBe(detail?.turns?.[0]?.id);
+    expect(detail?.turns?.[1]?.boundaryMessageId).toBeNull();
 
     closeRunningStore(setup);
   });
@@ -390,6 +407,11 @@ describe("durable pending session inputs", () => {
       pendingInputs: [],
       status: "queued",
     });
+    expectSuccessorInitiatingMessage(
+      setup.store.get(TEST_USER_ID, setup.detail.id),
+      0,
+      1,
+    );
 
     closeRunningStore(setup);
   });

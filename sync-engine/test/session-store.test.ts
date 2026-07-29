@@ -578,7 +578,8 @@ describe("session store", () => {
 
     store.failInterrupted(TEST_NOW + 2);
 
-    expect(store.get(TEST_USER_ID, SESSION_ID)).toMatchObject({
+    const interrupted = store.get(TEST_USER_ID, SESSION_ID);
+    expect(interrupted).toMatchObject({
       activeDurationMs: 1,
       activeStartedAt: null,
       messages: [
@@ -591,6 +592,11 @@ describe("session store", () => {
       ],
       status: "failed",
     });
+    expect(interrupted?.turns).toHaveLength(1);
+    expect(interrupted?.turns?.[0]?.endedAt).not.toBeNull();
+    expect(store.queue(TEST_USER_ID, SESSION_ID, TEST_NOW + 3).status).toBe(
+      "queued",
+    );
     database.$client.close();
   });
 

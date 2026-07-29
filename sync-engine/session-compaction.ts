@@ -16,6 +16,7 @@ import {
   settleTerminalRuntime,
   terminalRuntimeCondition,
 } from "./session-terminal-store.ts";
+import { rotateSessionTurn } from "./session-turn-store.ts";
 import { runtimeUsageValues } from "./session-usage-values.ts";
 
 const COMPACTION_MESSAGE_PREFIX = "Conversation compacted:\n\n";
@@ -65,6 +66,16 @@ export function compactStoredConversation(options: {
     if (advanced.segment !== nextSegment) {
       throw new DOMException("The agent session was stopped", "AbortError");
     }
+    const nextTurnId = rotateSessionTurn({
+      database: transaction,
+      executionGeneration: options.generation,
+      generateId: options.generateId,
+      now: options.now,
+      previousExecutionGeneration: options.generation,
+      segment: nextSegment,
+      sessionId: options.sessionId,
+      userId,
+    });
     transaction
       .update(agentMessages)
       .set({
@@ -82,7 +93,10 @@ export function compactStoredConversation(options: {
     const handoff = {
       database: transaction,
       generateId: options.generateId,
-      message: storedUserMessageValues(compactionMessage(options.summary)),
+      message: {
+        ...storedUserMessageValues(compactionMessage(options.summary)),
+        turnId: nextTurnId,
+      },
       now: options.now,
       segment: nextSegment,
       sessionId: options.sessionId,

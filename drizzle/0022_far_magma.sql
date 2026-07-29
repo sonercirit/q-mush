@@ -21,5 +21,5 @@ CREATE TABLE `agent_session_turns` (
 --> statement-breakpoint
 CREATE INDEX `agent_session_turns_session_segment_start_index` ON `agent_session_turns` (`session_id`,`segment`,`started_at`);--> statement-breakpoint
 CREATE UNIQUE INDEX `agent_session_turns_active_session_unique` ON `agent_session_turns` (`session_id`) WHERE "agent_session_turns"."ended_at" IS NULL AND NOT "agent_session_turns"."is_deleted";--> statement-breakpoint
-ALTER TABLE `agent_messages` ADD `turn_id` text REFERENCES agent_session_turns(id);--> statement-breakpoint
+ALTER TABLE `agent_messages` ADD `turn_id` text REFERENCES agent_session_turns(id) ON DELETE restrict;--> statement-breakpoint
 CREATE INDEX `agent_messages_turn_index` ON `agent_messages` (`turn_id`);

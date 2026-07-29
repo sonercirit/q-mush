@@ -119,6 +119,8 @@ describe("session tool update", () => {
       updated.id,
       setupValue.created.detail.generation,
     );
+    expect(updated.turns).toHaveLength(1);
+    expect(updated.turns?.[0]?.endedAt).not.toBeNull();
     expect(
       setupValue.database
         .select({
@@ -129,6 +131,9 @@ describe("session tool update", () => {
         .where(eq(agentSessions.id, updated.id))
         .get(),
     ).toMatchObject({ generation: updated.generation, tools: '["read"]' });
+    expect(setupValue.store.queue(TEST_USER_ID, updated.id, 3).status).toBe(
+      "queued",
+    );
   });
 
   test("rejects stale generation without mutation and survives rehydration", async () => {

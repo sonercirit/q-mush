@@ -1,7 +1,10 @@
 import { expect, test } from "vitest";
 import type { AgentFile } from "../../shared/agent-file.ts";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
-import type { AgentSessionMessage } from "../../shared/session-model.ts";
+import type {
+  AgentSessionMessage,
+  AgentSessionTurn,
+} from "../../shared/session-model.ts";
 import {
   DEFAULT_SESSION_TRANSCRIPT_FILTERS,
   type SessionTranscriptFilters,
@@ -77,6 +80,7 @@ function renderMessages(
   filters: SessionTranscriptFilters = DEFAULT_SESSION_TRANSCRIPT_FILTERS,
   agentFile: AgentFile | null = null,
   onFork?: (messageId: string) => void,
+  turns?: readonly AgentSessionTurn[],
 ): string {
   return renderSolidToString(() => (
     <SessionTranscript
@@ -86,6 +90,7 @@ function renderMessages(
       messages={messages}
       {...(onFork === undefined ? {} : { onFork })}
       tools={tools}
+      turns={turns}
     />
   ));
 }
@@ -253,6 +258,63 @@ test("shows timing for every completed turn", () => {
   for (const timestamp of [firstStartedAt, secondStartedAt]) {
     expect(html).toContain(`datetime="${new Date(timestamp).toISOString()}"`);
   }
+});
+
+test("renders durable settlement time and mixed legacy timing", () => {
+  const legacyStartedAt = Date.UTC(2026, 6, 27, 12, 0, 0);
+  const legacyEndedAt = legacyStartedAt + 5_000;
+  const durableStartedAt = legacyEndedAt + 5_000;
+  const durableMessageAt = durableStartedAt + 2_000;
+  const durableEndedAt = durableStartedAt + 3_000;
+  const durableTurnId = "durable-turn";
+  const messages = [
+    {
+      ...message("legacy-user", "Legacy request", "user"),
+      createdAt: legacyStartedAt,
+      turnId: null,
+    },
+    {
+      ...message("legacy-assistant", "Legacy response", "assistant"),
+      createdAt: legacyEndedAt,
+      turnId: null,
+    },
+    {
+      ...message("durable-user", "Durable request", "user"),
+      createdAt: durableStartedAt,
+      turnId: durableTurnId,
+    },
+    {
+      ...message("durable-assistant", "Durable response", "assistant"),
+      createdAt: durableMessageAt,
+      turnId: durableTurnId,
+    },
+  ];
+  const html = renderMessages(
+    messages,
+    AGENT_SESSION_TOOL_NAMES,
+    DEFAULT_SESSION_TRANSCRIPT_FILTERS,
+    null,
+    undefined,
+    [
+      {
+        boundaryMessageId: "durable-assistant",
+        endedAt: durableEndedAt,
+        executionGeneration: 1,
+        id: durableTurnId,
+        startedAt: durableStartedAt,
+      },
+    ],
+  );
+
+  const completedTimingCount = html.match(
+    /data-turn-timing="completed"/gu,
+  )?.length;
+  expect(completedTimingCount).toBe(2);
+  for (const duration of ["Duration: 5s", "Duration: 3s"]) {
+    expect(html).toContain(duration);
+  }
+  const settlementDateTime = new Date(durableEndedAt).toISOString();
+  expect(html).toContain(`datetime="${settlementDateTime}"`);
 });
 
 test("shows completed turn duration and start and end timestamps", () => {

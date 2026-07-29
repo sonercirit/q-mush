@@ -24,6 +24,13 @@ function timingMessage(
   });
 }
 
+function expectCompletedTiming(
+  actual: ReturnType<typeof sessionTurnTiming>,
+  expected: readonly (readonly [string, object])[],
+): void {
+  expect([...actual.completedTimings]).toEqual(expected);
+}
+
 test("derives completed turn timings in one transcript traversal", () => {
   let roleReads = 0;
   const messages = [
@@ -42,9 +49,15 @@ test("derives completed turn timings in one transcript traversal", () => {
     });
   }
 
-  const starts = sessionTurnTiming(messages, "idle", undefined).completedStarts;
+  const timings = sessionTurnTiming(
+    messages,
+    "idle",
+    undefined,
+  ).completedTimings;
 
-  expect([...starts]).toEqual([["timing-message-100", 0]]);
+  expect([...timings]).toEqual([
+    ["timing-message-100", { endedAt: null, startedAt: 0 }],
+  ]);
   expect(roleReads).toBeLessThan(messages.length * 4);
 });
 
@@ -52,28 +65,34 @@ test("does not complete the active final turn", () => {
   const messages = [timingMessage("user", 1), timingMessage("assistant", 2)];
 
   expect(
-    sessionTurnTiming(messages, "running", undefined).completedStarts.size,
+    sessionTurnTiming(messages, "running", undefined).completedTimings.size,
   ).toBe(0);
   expect([
-    ...sessionTurnTiming(messages, "idle", undefined).completedStarts,
-  ]).toEqual([["timing-message-2", 1]]);
+    ...sessionTurnTiming(messages, "idle", undefined).completedTimings,
+  ]).toEqual([["timing-message-2", { endedAt: null, startedAt: 1 }]]);
 });
 
 test("completes a final user-only turn when the session is idle", () => {
   const message = timingMessage("user", 1);
 
   expect([
-    ...sessionTurnTiming([message], "idle", undefined).completedStarts,
-  ]).toEqual([[message.id, message.createdAt]]);
+    ...sessionTurnTiming([message], "idle", undefined).completedTimings,
+  ]).toEqual([[message.id, { endedAt: null, startedAt: message.createdAt }]]);
   expect(
-    sessionTurnTiming([message], "running", undefined).completedStarts.size,
+    sessionTurnTiming([message], "running", undefined).completedTimings.size,
   ).toBe(0);
 });
 
 test("keeps completed and user-less continuation turns distinct", () => {
-  const firstUser = timingMessage("user", 1);
-  const firstAssistant = timingMessage("assistant", 2);
-  const continuation = timingMessage("assistant", 101);
+  const firstUser = { ...timingMessage("user", 1), turnId: "turn-0" };
+  const firstAssistant = {
+    ...timingMessage("assistant", 2),
+    turnId: "turn-0",
+  };
+  const continuation = {
+    ...timingMessage("assistant", 101),
+    turnId: "turn-1",
+  };
   const turns: readonly AgentSessionTurn[] = [
     {
       boundaryMessageId: firstAssistant.id,
@@ -96,7 +115,9 @@ test("keeps completed and user-less continuation turns distinct", () => {
     "running",
     turns,
   );
-  expect([...active.completedStarts]).toEqual([[firstAssistant.id, 1]]);
+  expectCompletedTiming(active, [
+    [firstAssistant.id, { endedAt: 3, startedAt: 1 }],
+  ]);
   expect(active.activeStartedAt).toBe(100);
 
   const firstTurn = turns[0];
@@ -116,9 +137,9 @@ test("keeps completed and user-less continuation turns distinct", () => {
       },
     ],
   );
-  expect([...completed.completedStarts]).toEqual([
-    [firstAssistant.id, 1],
-    [continuation.id, 100],
+  expectCompletedTiming(completed, [
+    [firstAssistant.id, { endedAt: 3, startedAt: 1 }],
+    [continuation.id, { endedAt: 103, startedAt: 100 }],
   ]);
   expect(completed.activeStartedAt).toBeUndefined();
 });

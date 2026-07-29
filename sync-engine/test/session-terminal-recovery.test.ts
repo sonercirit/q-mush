@@ -54,12 +54,18 @@ test("recreation recognizes a terminal assistant append without replaying it", (
     TERMINAL_USAGE,
   );
   const recreated = recreateCommitted(setup, running.id);
-  expect(requireCompactionSession(recreated)).toMatchObject({
+  const settled = requireCompactionSession(recreated);
+  expect(settled).toMatchObject({
     costUsd: 1.25,
     currentContextTokens: 432,
     restartHandoff: null,
     status: "idle",
   });
+  expect(settled.turns).toHaveLength(1);
+  expect(settled.turns?.[0]?.endedAt).not.toBeNull();
+  expect(recreated.queue(TEST_USER_ID, running.id, TEST_NOW + 4).status).toBe(
+    "queued",
+  );
   expect(
     setup.database
       .select({ content: agentMessages.content, role: agentMessages.role })

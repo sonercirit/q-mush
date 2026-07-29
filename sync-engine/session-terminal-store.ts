@@ -12,15 +12,14 @@ import { canonicalRestartHandoff } from "./session-restart-store.ts";
 import {
   runningCondition,
   sessionTimingUpdate,
-  storedSessionSnapshotCondition,
   terminalSessionValues,
   updateStoredSessions,
   type StoredSessionSnapshot,
 } from "./session-store-persistence.ts";
 import {
-  activeSessionTurnId,
   endGenerationSessionTurn,
   rotateSessionTurn,
+  updateStoredSnapshotAndEndGenerationTurn,
 } from "./session-turn-store.ts";
 
 export interface RuntimeTerminalTarget {
@@ -68,21 +67,31 @@ export function settleTerminalRuntime(
     status === "idle" && sessionId !== undefined
       ? activePendingInput(database, sessionId)
       : undefined;
-  if (pending !== undefined && sessionId !== undefined) {
-    const turnId = activeSessionTurnId(database, sessionId);
-    if (turnId === null) {
-      throw new DOMException(
-        "The agent session has no active turn",
-        "AbortError",
-      );
-    }
+  const successorTurnId =
+    pending !== undefined && sessionId !== undefined
+      ? rotateSessionTurn({
+          database,
+          executionGeneration: session.executionGeneration,
+          generateId: () => `${sessionId}:${String(now)}`,
+          now,
+          previousExecutionGeneration: session.executionGeneration,
+          segment: session.currentSegment,
+          sessionId,
+          userId: session.userId,
+        })
+      : undefined;
+  if (
+    pending !== undefined &&
+    sessionId !== undefined &&
+    successorTurnId !== undefined
+  ) {
     promotePendingInput(
       database,
       pending,
       session.userId,
       now,
       session.currentSegment,
-      turnId,
+      successorTurnId,
     );
   }
   const settledStatus = pending === undefined ? status : "queued";
@@ -99,18 +108,7 @@ export function settleTerminalRuntime(
     throw new DOMException("The agent session was stopped", "AbortError");
   }
   if (sessionId !== undefined) {
-    if (settledStatus === "queued") {
-      rotateSessionTurn({
-        database,
-        executionGeneration: session.executionGeneration,
-        generateId: () => `${sessionId}:${String(now)}`,
-        now,
-        previousExecutionGeneration: session.executionGeneration,
-        segment: session.currentSegment,
-        sessionId,
-        userId: session.userId,
-      });
-    } else {
+    if (settledStatus !== "queued") {
       endGenerationSessionTurn(
         database,
         sessionId,
@@ -160,12 +158,14 @@ export function recoverStoredTerminal(
   session: StoredSessionSnapshot,
   now: number,
 ): boolean {
-  return (
-    storedTerminalExists(database, session.id) &&
-    updateStoredSessions(
-      database,
-      storedSessionSnapshotCondition(session),
-      terminalSessionValues(session, "idle", now),
-    )
+  return database.transaction(
+    (transaction) =>
+      storedTerminalExists(transaction, session.id) &&
+      updateStoredSnapshotAndEndGenerationTurn(
+        transaction,
+        session,
+        now,
+        terminalSessionValues(session, "idle", now),
+      ),
   );
 }

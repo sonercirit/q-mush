@@ -91,6 +91,8 @@ describe("session store runner reassignment", () => {
     );
 
     const before = store.get(TEST_USER_ID, SESSION_ID);
+    expect(before?.turns).toHaveLength(1);
+    expect(before?.turns?.[0]?.endedAt).not.toBeNull();
     expect(
       reassignSession(store, replacementId, "/replacement/project", {
         userId: "another-user",
@@ -114,6 +116,9 @@ describe("session store runner reassignment", () => {
     expect(after?.messages).toEqual(before?.messages);
     expect(after?.costUsd).toBe(before?.costUsd);
     expect(after?.tools).toEqual(before?.tools);
+    expect(store.queue(TEST_USER_ID, SESSION_ID, TEST_NOW + 5).status).toBe(
+      "queued",
+    );
     closeHardeningDatabase({ database, store });
   });
 
