@@ -1,16 +1,13 @@
-import { createSignal, type JSX } from "solid-js";
-import { render } from "solid-js/web";
+import { createSignal } from "solid-js";
 import { afterEach, expect, test, vi } from "vitest";
-import type {
-  AgentSessionMessage,
-  AgentSessionStatus,
-} from "../../shared/session-model.ts";
+import type { AgentSessionMessage } from "../../shared/session-model.ts";
 import { sessionTurnStartedAtByMessage } from "../../shared/session-turn-timing.ts";
 import { createDisplaySessionMessage } from "../session-message.ts";
-import { DEFAULT_SESSION_TRANSCRIPT_FILTERS } from "../session-transcript-filters.ts";
-import { SessionTranscript } from "../session-transcript.tsx";
 import { disposeTestViews } from "./dom-test-helpers.ts";
-import { transcriptTestMessage } from "./session-dom-test-helpers.tsx";
+import {
+  mountTestTranscriptView,
+  transcriptTestMessage,
+} from "./session-dom-test-helpers.tsx";
 
 function timingMessage(
   role: AgentSessionMessage["role"],
@@ -57,33 +54,26 @@ test("does not complete the active final turn", () => {
   ]);
 });
 
-const disposals: (() => void)[] = [];
+test("completes a final user-only turn when the session is idle", () => {
+  const message = timingMessage("user", 1);
 
-function renderTranscriptView(
-  messages: readonly AgentSessionMessage[],
-  status: AgentSessionStatus,
-): JSX.Element {
-  return (
-    <SessionTranscript
-      agentFile={null}
-      executionEnvironment="bare_metal"
-      filters={DEFAULT_SESSION_TRANSCRIPT_FILTERS}
-      messages={messages}
-      status={status}
-      tools={[]}
-    />
-  );
-}
+  expect([...sessionTurnStartedAtByMessage([message], "idle")]).toEqual([
+    [message.id, message.createdAt],
+  ]);
+  expect(sessionTurnStartedAtByMessage([message], "running").size).toBe(0);
+});
+
+const disposals: (() => void)[] = [];
 
 function turnTiming(container: ParentNode): Element | null {
   return container.querySelector("[data-turn-timing]");
 }
 
-function activeTranscript(startedAt: number, id: string): JSX.Element {
-  return renderTranscriptView(
-    [transcriptTestMessage(id, "Active", "user", startedAt)],
-    "running",
-  );
+function activeTranscript(startedAt: number, id: string) {
+  return mountTestTranscriptView({
+    messages: () => [transcriptTestMessage(id, "Active", "user", startedAt)],
+    status: () => "running",
+  });
 }
 
 afterEach(() => {
@@ -94,25 +84,16 @@ afterEach(() => {
 test("active clocks share one interval and release it after the final dispose", () => {
   vi.useFakeTimers({ now: Date.UTC(2026, 6, 27, 11, 0, 0) });
   const startedAt = Date.now();
-  const first = document.createElement("ul");
-  const second = document.createElement("ul");
-  document.body.append(first, second);
   const setInterval = vi.spyOn(window, "setInterval");
   const clearInterval = vi.spyOn(window, "clearInterval");
 
-  const disposeFirst = render(
-    () => activeTranscript(startedAt, "first-active"),
-    first,
-  );
-  const disposeSecond = render(
-    () => activeTranscript(startedAt, "second-active"),
-    second,
-  );
+  const first = activeTranscript(startedAt, "first-active");
+  const second = activeTranscript(startedAt, "second-active");
 
   expect(setInterval).toHaveBeenCalledTimes(1);
-  disposeFirst();
+  first.dispose();
   expect(clearInterval).not.toHaveBeenCalled();
-  disposeSecond();
+  second.dispose();
   expect(clearInterval).toHaveBeenCalledTimes(1);
   setInterval.mockRestore();
   clearInterval.mockRestore();
@@ -125,27 +106,13 @@ test("active turn timer updates live, stops on completion, and is cleaned up", (
   const [messages, setMessages] = createSignal<readonly AgentSessionMessage[]>([
     transcriptTestMessage("user-active", "Active request", "user", startedAt),
   ]);
-  const container = document.createElement("ul");
-  document.body.append(container);
   const clearInterval = vi.spyOn(window, "clearInterval");
-  const renderTranscript = (
-    transcriptContainer: HTMLElement,
-    transcriptMessages: () => readonly AgentSessionMessage[],
-    transcriptStatus: () => AgentSessionStatus,
-  ): ReturnType<typeof render> => {
-    const view = (): JSX.Element =>
-      renderTranscriptView(transcriptMessages(), transcriptStatus());
-    return render(view, transcriptContainer);
-  };
-  const activeView = (): JSX.Element => {
-    const currentMessages = messages();
-    return renderTranscriptView(
-      currentMessages,
-      currentMessages.length === 1 ? "running" : "idle",
-    );
-  };
-  const dispose = render(() => <>{activeView()}</>, container);
-  disposals.push(dispose);
+  const view = mountTestTranscriptView({
+    messages,
+    status: () => (messages().length === 1 ? "running" : "idle"),
+  });
+  const { container } = view;
+  disposals.push(view.dispose);
   const timingText = (): string | null | undefined =>
     turnTiming(container)?.textContent;
   const expectDuration = (seconds: number): void => {
@@ -154,6 +121,9 @@ test("active turn timer updates live, stops on completion, and is cleaned up", (
 
   expect(turnTiming(container)?.getAttribute("data-turn-timing")).toBe(
     "active",
+  );
+  expect(turnTiming(container)?.querySelector("time")?.dateTime).toBe(
+    new Date(startedAt).toISOString(),
   );
   expectDuration(0);
   vi.advanceTimersByTime(2_000);
@@ -182,14 +152,13 @@ test("active turn timer updates live, stops on completion, and is cleaned up", (
   disposals.pop()?.();
   expect(clearInterval).not.toHaveBeenCalled();
 
-  const unmountContainer = document.createElement("ul");
-  document.body.append(unmountContainer);
-  const disposeUnmounted = renderTranscript(
-    unmountContainer,
-    () => [transcriptTestMessage("user-unmount", "Unmount", "user", startedAt)],
-    () => "running",
-  );
-  disposeUnmounted();
+  const unmounted = mountTestTranscriptView({
+    messages: () => [
+      transcriptTestMessage("user-unmount", "Unmount", "user", startedAt),
+    ],
+    status: () => "running",
+  });
+  unmounted.dispose();
   expect(clearInterval).toHaveBeenCalledTimes(1);
   clearInterval.mockRestore();
 });

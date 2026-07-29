@@ -219,6 +219,42 @@ test("filters assistant text independently from tool calls on the same message",
   expect(assistantOnly).not.toContain("Tool call · read");
 });
 
+test("shows timing for every completed turn", () => {
+  const firstStartedAt = Date.UTC(2026, 6, 27, 12, 0, 0);
+  const firstEndedAt = firstStartedAt + 83_000;
+  const secondStartedAt = firstEndedAt + 17_000;
+  const secondEndedAt = secondStartedAt + 5_000;
+  const html = renderMessages([
+    {
+      ...message("user-timed-first", "First timed request", "user"),
+      createdAt: firstStartedAt,
+    },
+    {
+      ...message("assistant-timed-first", "First timed response", "assistant"),
+      createdAt: firstEndedAt,
+    },
+    {
+      ...message("user-timed-second", "Second timed request", "user"),
+      createdAt: secondStartedAt,
+    },
+    {
+      ...message(
+        "assistant-timed-second",
+        "Second timed response",
+        "assistant",
+      ),
+      createdAt: secondEndedAt,
+    },
+  ]);
+
+  expect(html.match(/data-turn-timing="completed"/gu)).toHaveLength(2);
+  expect(html).toContain("Duration: 1m 23s");
+  expect(html).toContain("Duration: 5s");
+  for (const timestamp of [firstStartedAt, secondStartedAt]) {
+    expect(html).toContain(`datetime="${new Date(timestamp).toISOString()}"`);
+  }
+});
+
 test("shows completed turn duration and start and end timestamps", () => {
   const startedAt = Date.UTC(2026, 6, 27, 12, 0, 0);
   const endedAt = startedAt + 83_000;

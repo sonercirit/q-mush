@@ -34,6 +34,7 @@ export function createFallbackModel(
   selection: {
     readonly credential: ProviderCredentialAccess;
     readonly model: string;
+    readonly openRouterProviderTag?: string | null;
     readonly prompt: string | null;
     readonly provider: "openai" | "openrouter";
   },
@@ -41,6 +42,10 @@ export function createFallbackModel(
   return factory({
     credential: selection.credential,
     model: selection.model,
+    ...(selection.openRouterProviderTag === undefined ||
+    selection.openRouterProviderTag === null
+      ? {}
+      : { openRouterProviderTag: selection.openRouterProviderTag }),
     provider: selection.provider,
     providerPricing: null,
     systemPrompt:

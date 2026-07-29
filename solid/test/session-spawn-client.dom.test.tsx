@@ -2,6 +2,7 @@ import { createSignal } from "solid-js";
 import { afterEach, expect, test, vi } from "vitest";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import { testAgentModelCatalog } from "../../shared/test/agent-model-fixtures.ts";
+import type { UserSpawnSessionSelection } from "../session-controller-spawn.ts";
 import { SessionSpawnEditor } from "../session-spawn-client.tsx";
 import {
   clickTestButton,
@@ -14,13 +15,52 @@ import { runnerSummary } from "./runner-fixtures.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
 const DISPOSALS: (() => void)[] = [];
+type SpawnEditorProps = Parameters<typeof SessionSpawnEditor>[0];
+
+function mountSpawnEditor(options: {
+  readonly detail: () => SpawnEditorProps["detail"];
+  readonly onDiscoverModels: SpawnEditorProps["onDiscoverModels"];
+  readonly onSpawn: SpawnEditorProps["onSpawn"];
+}): HTMLDivElement {
+  return mountTestView(() => {
+    const detail = options.detail();
+    return (
+      <SessionSpawnEditor
+        credentials={[
+          {
+            credential: {
+              accountId: null,
+              id: detail.credentialId,
+              isDefault: true,
+              label: "OpenAI account",
+              source: "api_key",
+            },
+            provider: "openai",
+          },
+        ]}
+        detail={detail}
+        onDiscoverModels={options.onDiscoverModels}
+        onSpawn={options.onSpawn}
+        runners={[runnerSummary(1)]}
+      />
+    );
+  }, DISPOSALS);
+}
+
+function resolvedSpawn(): Promise<void> {
+  return Promise.resolve();
+}
+
+function settledSpawnCall(onSpawn: ReturnType<typeof vi.fn>): Promise<boolean> {
+  return vi.waitUntil(() => onSpawn.mock.calls.length === 1);
+}
 
 afterEach(() => {
   disposeTestViews(DISPOSALS);
 });
 
 test("preserves a spawned child draft across unrelated parent updates", async () => {
-  const onSpawn = vi.fn(() => Promise.resolve());
+  const onSpawn = vi.fn(resolvedSpawn);
   const parent = {
     ...TEST_SESSION_DETAIL,
     status: "running" as const,
@@ -30,29 +70,11 @@ test("preserves a spawned child draft across unrelated parent updates", async ()
   const discoverModels = vi.fn(() =>
     Promise.resolve(testAgentModelCatalog({ id: parent.model })),
   );
-  const container = mountTestView(
-    () => (
-      <SessionSpawnEditor
-        credentials={[
-          {
-            credential: {
-              accountId: null,
-              id: parent.credentialId,
-              isDefault: true,
-              label: "OpenAI account",
-              source: "api_key",
-            },
-            provider: "openai",
-          },
-        ]}
-        detail={detail()}
-        onDiscoverModels={discoverModels}
-        onSpawn={onSpawn}
-        runners={[runnerSummary(1)]}
-      />
-    ),
-    DISPOSALS,
-  );
+  const container = mountSpawnEditor({
+    detail,
+    onDiscoverModels: discoverModels,
+    onSpawn,
+  });
   await vi.waitFor(() => {
     expect(discoverModels).toHaveBeenCalledOnce();
   });
@@ -84,9 +106,7 @@ test("preserves a spawned child draft across unrelated parent updates", async ()
 
   clickTestButton(container, "[data-session-spawn-submit='true']");
 
-  await vi.waitFor(() => {
-    expect(onSpawn).toHaveBeenCalledOnce();
-  });
+  await settledSpawnCall(onSpawn);
   expect(onSpawn).toHaveBeenCalledWith(
     expect.objectContaining({
       parentGeneration: parent.generation,
@@ -95,4 +115,45 @@ test("preserves a spawned child draft across unrelated parent updates", async ()
       tools: AGENT_SESSION_TOOL_NAMES.filter((name) => name !== "bash"),
     }),
   );
+});
+
+test("Ctrl+Enter submits the spawn editor and its button shows a hint", async () => {
+  const parent = {
+    ...TEST_SESSION_DETAIL,
+    tools: [...AGENT_SESSION_TOOL_NAMES],
+  };
+  const spawned: UserSpawnSessionSelection[] = [];
+  const onSpawn = (selection: UserSpawnSessionSelection): Promise<void> => {
+    spawned.push(selection);
+    return Promise.resolve();
+  };
+  const container = mountSpawnEditor({
+    detail: () => parent,
+    onDiscoverModels: () =>
+      Promise.resolve(testAgentModelCatalog({ id: parent.model })),
+    onSpawn,
+  });
+  clickTestButton(container, "[data-session-spawn-toggle='true']");
+  const prompt = queryTestElementAs(
+    container,
+    "textarea[name='spawnPrompt']",
+    HTMLTextAreaElement,
+  );
+  setTestInputValue(prompt, "Review keyboard support");
+  prompt.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      bubbles: true,
+      ctrlKey: true,
+      key: "Enter",
+    }),
+  );
+
+  await vi.waitUntil(() => spawned.length === 1);
+  const submitButton = queryTestElementAs(
+    container,
+    "[data-session-spawn-submit='true']",
+    HTMLButtonElement,
+  );
+  expect(submitButton.textContent).toBe("Spawn childCtrl+Enter");
+  expect(submitButton.getAttribute("aria-keyshortcuts")).toBe("Control+Enter");
 });

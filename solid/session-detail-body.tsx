@@ -24,6 +24,7 @@ import { SessionForkEditor } from "./session-fork-client.tsx";
 import { SessionHistoryControls } from "./session-history-client.tsx";
 import {
   createSessionShortcuts,
+  sessionComposerShortcut,
   SessionPendingInputs,
 } from "./session-pending-client.tsx";
 import { sessionMutationPending } from "./session-pending.ts";
@@ -38,7 +39,7 @@ import {
   sessionTranscriptFilterCounts,
 } from "./session-transcript.tsx";
 
-const SCROLL_END_TOLERANCE = 1;
+const SCROLL_END_TOLERANCE = 64;
 
 function sessionCopyText(detail: AgentSessionDetail): string {
   const transcript = detail.messages
@@ -86,7 +87,7 @@ export function SessionDetailBody(props: {
   const queued = (): boolean => view().detail.status === "queued";
   const active = (): boolean =>
     queued() || running() || view().detail.status === "paused";
-  const [, setShortcutPlatform] = createSessionShortcuts();
+  const [shortcuts, setShortcutPlatform] = createSessionShortcuts();
   const composerReason = (): string | undefined =>
     sessionComposerUnavailableReason(
       view().detail,
@@ -371,17 +372,16 @@ export function SessionDetailBody(props: {
             if (!composerDisabled()) view().controller.setFollowUp(value);
           }}
           onKeyDown={(event) => {
+            if (composerDisabled()) return;
+            const shortcut = sessionComposerShortcut(event);
             if (
-              composerDisabled() ||
-              event.isComposing ||
-              event.key !== "Enter" ||
-              (!event.ctrlKey && !event.metaKey)
-            )
-              return;
-            event.preventDefault();
-            if (event.shiftKey) {
+              shortcut !== undefined &&
+              (shortcut === "follow_up" ? active() : !active())
+            ) {
+              event.preventDefault();
               event.currentTarget.form?.requestSubmit();
-            } else if (running()) {
+            } else if (shortcut === "steer" && running()) {
+              event.preventDefault();
               void view().controller.steer();
             }
           }}
@@ -404,7 +404,9 @@ export function SessionDetailBody(props: {
           prompt={view().state.followUp}
           sending={view().state.sending}
           sessionId={view().detail.id}
+          shortcuts={shortcuts()}
           submitLabel={running() || queued() ? "Follow up" : "Send"}
+          submitShortcut={active() ? "follow_up" : "steer"}
         />
       </div>
     </div>

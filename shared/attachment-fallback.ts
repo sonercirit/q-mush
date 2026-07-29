@@ -2,18 +2,19 @@ import {
   AGENT_ATTACHMENT_MODALITIES,
   type AgentAttachmentModality,
 } from "./agent-attachments.ts";
-import { isAgentModelId } from "./agent-configuration.ts";
+import {
+  isAgentModelId,
+  readOpenRouterProviderTag,
+} from "./agent-configuration.ts";
 import { isRecord } from "./auth-model.ts";
 import { isProviderId, type ProviderId } from "./provider-credential-store.ts";
 import { readIdentifier } from "./validation.ts";
-
-const MAXIMUM_ATTACHMENT_FALLBACK_PROMPT_LENGTH = 4_000;
 
 export interface AttachmentFallbackSelection {
   readonly credentialId: string;
   readonly modality: AgentAttachmentModality;
   readonly model: string;
-  readonly prompt: string | null;
+  readonly openRouterProviderTag: string | null;
   readonly provider: ProviderId;
 }
 
@@ -27,20 +28,35 @@ export function readAttachmentFallbackSelection(
   value: unknown,
 ): AttachmentFallbackSelection | undefined {
   if (!isRecord(value)) return undefined;
-  const credentialId = readIdentifier(value["credentialId"]);
-  const modality = value["modality"];
-  const model = value["model"];
-  const promptValue = value["prompt"];
+  const keys = Object.keys(value);
+  if (
+    keys.length !== 5 ||
+    !keys.every((key) =>
+      [
+        "credentialId",
+        "modality",
+        "model",
+        "openRouterProviderTag",
+        "provider",
+      ].includes(key),
+    )
+  ) {
+    return undefined;
+  }
   const provider = value["provider"];
-  const prompt = promptValue === undefined ? null : promptValue;
+  const model = value["model"];
+  const modality = value["modality"];
+  const credentialId = readIdentifier(value["credentialId"]);
+  const openRouterProviderTag = readOpenRouterProviderTag(
+    value["openRouterProviderTag"],
+  );
   return credentialId !== undefined &&
     isAgentAttachmentModality(modality) &&
     isAgentModelId(model) &&
-    (prompt === null ||
-      (typeof prompt === "string" &&
-        prompt.length <= MAXIMUM_ATTACHMENT_FALLBACK_PROMPT_LENGTH)) &&
-    isProviderId(provider)
-    ? { credentialId, modality, model, prompt, provider }
+    openRouterProviderTag !== undefined &&
+    isProviderId(provider) &&
+    (provider === "openrouter" || openRouterProviderTag === null)
+    ? { credentialId, modality, model, openRouterProviderTag, provider }
     : undefined;
 }
 

@@ -34,6 +34,7 @@ function expectParallelRecipients(
 test("lets parallel call every eligible tool and skill by default", () => {
   expectParallelRecipients(AGENT_TOOLS, [
     "read",
+    "explain_file",
     "bash",
     "edit",
     "write",

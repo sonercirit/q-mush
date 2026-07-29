@@ -19,6 +19,8 @@ export interface SessionShortcut {
   readonly steerLabel: string;
 }
 
+export type SessionComposerShortcut = "follow_up" | "steer";
+
 const CONTROL_SHORTCUTS: SessionShortcut = {
   followUpKeys: "Control+Shift+Enter",
   followUpLabel: "Ctrl+Shift+Enter",
@@ -50,6 +52,33 @@ export function createSessionShortcuts(): readonly [
       setShortcuts(platformSessionShortcuts(platform));
     },
   ];
+}
+
+/** @public Resolves a composer key event to its platform-independent action. */
+export function sessionComposerShortcut(
+  event: Pick<
+    KeyboardEvent,
+    "ctrlKey" | "isComposing" | "key" | "metaKey" | "shiftKey"
+  >,
+): SessionComposerShortcut | undefined {
+  if (
+    event.isComposing ||
+    event.key !== "Enter" ||
+    (!event.ctrlKey && !event.metaKey)
+  ) {
+    return undefined;
+  }
+  return event.shiftKey ? "follow_up" : "steer";
+}
+
+export function SessionShortcutHint(props: {
+  readonly label: string;
+}): JSX.Element {
+  return (
+    <span aria-hidden="true" class="ml-2 text-xs opacity-60">
+      {props.label}
+    </span>
+  );
 }
 
 function pendingInputLabel(kind: DisplayPendingInput["kind"]): string {

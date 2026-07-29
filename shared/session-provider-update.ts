@@ -1,6 +1,6 @@
 import {
   isAgentModelId,
-  isOpenRouterProviderTag,
+  readOpenRouterProviderTag,
 } from "./agent-configuration.ts";
 import { isRecord } from "./auth-model.ts";
 import { isProviderId, type ProviderId } from "./provider-credential-store.ts";
@@ -35,16 +35,12 @@ export function readSessionProviderUpdateInput(
     value["expectedGeneration"],
   );
   const model = value["model"];
-  const openRouterProviderTagValue = value["openRouterProviderTag"];
+  const openRouterProviderTag = readOpenRouterProviderTag(
+    value["openRouterProviderTag"],
+  );
   const provider = value["provider"];
   const sessionId = readBoundedString(value["sessionId"], 200);
   const workspaceId = readBoundedString(value["workspaceId"], 200);
-  const openRouterProviderTag =
-    openRouterProviderTagValue === null
-      ? null
-      : isOpenRouterProviderTag(openRouterProviderTagValue)
-        ? openRouterProviderTagValue
-        : undefined;
   if (
     typeof confirmedCacheDrop !== "boolean" ||
     credentialId === undefined ||

@@ -1,57 +1,87 @@
-import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
+import {
+  createEffect,
+  createSignal,
+  For,
+  Show,
+  untrack,
+  type JSX,
+} from "solid-js";
 import {
   AGENT_ATTACHMENT_MODALITIES,
   type AgentAttachmentModality,
 } from "../shared/agent-attachments.ts";
 import type { AttachmentFallbackSelection } from "../shared/attachment-fallback.ts";
 import { SESSION_ATTACHMENT_FALLBACKS_PATH } from "../shared/routes.ts";
+import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 import { requestJson } from "./browser-http.ts";
 import { modalityLabel } from "./model-modalities-client.tsx";
 import type { SessionCredentialOption } from "./session-credential-option.ts";
+import { parseModelCredentialValue } from "./session-model-options.ts";
+import {
+  createSessionModelPickerState,
+  SessionModelPickerFields,
+} from "./session-model-picker.tsx";
+import { OpenRouterProviderSelect } from "./session-provider-select.tsx";
+import { discoverProviderUpdateProviders } from "./session-provider-update-controller.ts";
 
-export function SessionAttachmentFallbacks(props: {
+export function AttachmentFallbackSettings(props: {
   readonly credentials: readonly SessionCredentialOption[];
+  readonly onDiscoverModels: Parameters<
+    typeof createSessionModelPickerState
+  >[1]["onDiscoverModels"];
 }): JSX.Element {
-  const [credential, setCredential] = createSignal(0);
   const [error, setError] = createSignal<string>();
-  const [model, setModel] = createSignal("");
   const [modality, setModality] =
     createSignal<AgentAttachmentModality>("image");
-  const [prompt, setPrompt] = createSignal("");
+  const [providerCatalog, setProviderCatalog] =
+    createSignal<Awaited<ReturnType<typeof discoverProviderUpdateProviders>>>();
+  const [providerTag, setProviderTag] = createSignal("");
   const [saved, setSaved] = createSignal(false);
   const [saving, setSaving] = createSignal(false);
-  const selectionButton = (
-    selected: boolean,
-    choose: () => void,
-    label: string,
-  ): JSX.Element => (
-    <button
-      aria-pressed={selected}
-      class="rounded-lg border border-white/10 px-2 py-1 text-xs text-slate-300"
-      onClick={choose}
-      type="button"
-    >
-      {label}
-    </button>
+  const picker = createSessionModelPickerState(
+    { credential: "", model: "", reasoningEffort: "" },
+    props,
   );
-  const chooseCredential =
-    (index: () => number): ((event: MouseEvent) => void) =>
-    () => {
-      setCredential(index());
-    };
-  const modalityButtons = createMemo(() =>
-    AGENT_ATTACHMENT_MODALITIES.map((value) =>
-      selectionButton(
-        modality() === value,
-        () => setModality(value),
-        modalityLabel(value).replace("Pdf", "PDF"),
+  const [openProvider, setOpenProvider] = createSignal(false);
+  let initialized = false;
+
+  createEffect(() => {
+    const first = props.credentials[0];
+    if (initialized || first === undefined) return;
+    initialized = true;
+    const credential = `${first.provider}:${first.credential.id}`;
+    untrack(() => {
+      picker.editor.actions.choose.credential(credential);
+    });
+  });
+
+  const selectedCredential = () =>
+    parseModelCredentialValue(picker.draft().credential);
+  const discoverProviders = async (model: string): Promise<void> => {
+    const credential = selectedCredential();
+    setProviderTag("");
+    setProviderCatalog(undefined);
+    if (credential?.provider !== "openrouter" || model.length === 0) return;
+    setProviderCatalog(
+      await discoverProviderUpdateProviders(
+        credential.credentialId,
+        model,
+        GLOBAL_WORKSPACE_ID,
       ),
-    ),
-  );
+    );
+  };
+  const selectModality = (value: string): void => {
+    for (const candidate of AGENT_ATTACHMENT_MODALITIES) {
+      if (candidate === value) {
+        setModality(candidate);
+        return;
+      }
+    }
+  };
   const save = async (): Promise<void> => {
-    const selected = props.credentials[credential()];
-    if (selected === undefined || model().trim().length === 0) {
-      setError("Choose a credential and enter a fallback model.");
+    const credential = selectedCredential();
+    if (credential === undefined || picker.draft().model.length === 0) {
+      setError("Choose a global credential and fallback model.");
       return;
     }
     setError(undefined);
@@ -60,84 +90,121 @@ export function SessionAttachmentFallbacks(props: {
     try {
       await requestJson(SESSION_ATTACHMENT_FALLBACKS_PATH, {
         body: JSON.stringify({
-          credentialId: selected.credential.id,
+          ...credential,
           modality: modality(),
-          model: model().trim(),
-          prompt: prompt().trim() || null,
-          provider: selected.provider,
+          model: picker.draft().model,
+          openRouterProviderTag:
+            credential.provider === "openrouter" && providerTag().length > 0
+              ? providerTag()
+              : null,
         } satisfies AttachmentFallbackSelection),
         headers: { "content-type": "application/json" },
         method: "PUT",
       });
       setSaved(true);
     } catch {
-      setError("That fallback model is unavailable for this modality.");
+      setError("That fallback model or serving provider is unavailable.");
     } finally {
       setSaving(false);
     }
   };
+
   return (
-    <fieldset class="grid gap-3 rounded-xl border border-white/10 p-3 md:col-span-2">
-      <legend class="px-1 text-sm font-medium text-slate-200">
-        Attachment fallback model
-      </legend>
-      <p class="text-xs text-slate-500">
-        Used when the current model cannot read an attachment natively.
+    <section
+      aria-labelledby="attachment-fallback-settings-title"
+      class="rounded-3xl border border-white/10 bg-slate-900/80 p-4 sm:p-6 lg:p-8"
+      data-attachment-fallback-settings="global"
+    >
+      <h2
+        class="text-2xl font-semibold text-white"
+        id="attachment-fallback-settings-title"
+      >
+        Global attachment fallback settings
+      </h2>
+      <p class="mt-3 max-w-3xl text-sm leading-6 text-slate-400">
+        These fallback models apply to every session when its selected model
+        cannot read a file modality. Use explain_file to request an explanation
+        with optional instructions for that call.
       </p>
-      <div class="grid gap-3 sm:grid-cols-3">
-        <label class="text-xs text-slate-400">
+      <div class="mt-5 grid gap-4 sm:grid-cols-2">
+        <label class="text-sm font-medium text-slate-200">
           Modality
-          <div class="mt-1 flex flex-wrap gap-1">{modalityButtons()}</div>
-        </label>
-        <label class="text-xs text-slate-400">
-          Credential
-          <div class="mt-1 flex flex-wrap gap-1">
-            <For each={props.credentials}>
-              {(option, index) => (
-                <button
-                  aria-pressed={credential() === index()}
-                  class="rounded-lg border border-white/10 px-2 py-1 text-xs text-slate-300"
-                  onClick={(event) => {
-                    chooseCredential(index)(event);
-                  }}
-                  type="button"
-                >
-                  {`${option.provider === "openai" ? "OpenAI" : "OpenRouter"} · ${option.credential.label}`}
-                </button>
+          <select
+            class="mt-2 w-full rounded-xl border border-white/10 bg-slate-950 p-3 text-sm text-white"
+            onChange={(event) => {
+              selectModality(event.currentTarget.value);
+            }}
+            value={modality()}
+          >
+            <For each={AGENT_ATTACHMENT_MODALITIES}>
+              {(value) => (
+                <option value={value}>
+                  {modalityLabel(value).replace("Pdf", "PDF")}
+                </option>
               )}
             </For>
-          </div>
+          </select>
         </label>
-        <label class="text-xs text-slate-400">
-          Model
-          <input
-            class="mt-1 w-full rounded-lg bg-slate-900 p-2 text-sm text-white"
-            onInput={(event) => setModel(event.currentTarget.value)}
-            placeholder="provider/model"
-            value={model()}
-          />
-        </label>
-      </div>
-      <label class="text-xs text-slate-400">
-        Optional model prompt
-        <textarea
-          class="mt-1 min-h-16 w-full rounded-lg bg-slate-900 p-2 text-sm text-white"
-          maxlength={4000}
-          onInput={(event) => setPrompt(event.currentTarget.value)}
-          placeholder="Describe what the fallback model should extract."
-          value={prompt()}
+        <SessionModelPickerFields
+          catalog={picker.editor.catalog()}
+          credentialEmptyLabel="No global model credentials"
+          credentialOptions={props.credentials.map(
+            ({ credential, provider }) => ({
+              label: `${provider === "openai" ? "OpenAI" : "OpenRouter"} · ${credential.label}`,
+              value: `${provider}:${credential.id}`,
+            }),
+          )}
+          disabled={saving()}
+          hideReasoning
+          idPrefix="attachment-fallback"
+          namePrefix="attachmentFallback"
+          onChooseCredential={(value) => {
+            picker.editor.actions.choose.credential(value);
+            void discoverProviders("");
+          }}
+          onChooseModel={(value) => {
+            picker.editor.actions.choose.model(value);
+            void discoverProviders(value);
+          }}
+          onChooseReasoning={picker.editor.actions.choose.reasoning}
+          onToggle={(name) =>
+            picker.setOpen(picker.open() === name ? undefined : name)
+          }
+          open={picker.open()}
+          selection={picker.draft()}
         />
-      </label>
-      <div class="flex items-center gap-3">
+        <Show when={selectedCredential()?.provider === "openrouter"}>
+          <OpenRouterProviderSelect
+            controller={{
+              chooseOption: (_name, value) => {
+                setProviderTag(value);
+                setOpenProvider(false);
+              },
+              retryProviders: () => {
+                void discoverProviders(picker.draft().model);
+              },
+              toggleSelect: () => setOpenProvider(!openProvider()),
+            }}
+            creating={saving()}
+            discovery={{
+              catalog: providerCatalog(),
+              error: undefined,
+              key: "global-attachment-fallback",
+              loading: false,
+            }}
+            open={openProvider()}
+            selectedValue={providerTag()}
+          />
+        </Show>
+      </div>
+      <div class="mt-5 flex items-center gap-3">
         <button
-          class="rounded-lg border border-cyan-300/30 px-3 py-2 text-xs font-semibold text-cyan-200 disabled:opacity-50"
+          class="rounded-xl border border-cyan-300/30 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-100 disabled:opacity-50"
           disabled={saving() || props.credentials.length === 0}
           onClick={() => void save()}
           type="button"
         >
-          {saving()
-            ? "Saving…"
-            : `Save ${modalityLabel(modality()).replace("Pdf", "PDF")} fallback`}
+          {saving() ? "Saving…" : "Save global fallback"}
         </button>
         <Show when={saved()}>
           <span class="text-xs text-emerald-300">Saved</span>
@@ -146,6 +213,6 @@ export function SessionAttachmentFallbacks(props: {
           {(message) => <span class="text-xs text-rose-300">{message()}</span>}
         </Show>
       </div>
-    </fieldset>
+    </section>
   );
 }

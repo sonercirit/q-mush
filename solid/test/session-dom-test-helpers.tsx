@@ -1,7 +1,9 @@
-import type { JSX } from "solid-js";
+import type { Accessor, JSX } from "solid-js";
+import { render } from "solid-js/web";
 import type {
   AgentSessionDetail,
   AgentSessionMessage,
+  AgentSessionStatus,
 } from "../../shared/session-model.ts";
 import type { ReactiveState } from "../reactive-state.ts";
 import { RenderDebugProvider, type RenderDebugView } from "../render-debug.tsx";
@@ -10,7 +12,11 @@ import { summaryFromDetail } from "../session-codec.ts";
 import { SessionController } from "../session-controller.ts";
 import { SessionDetailBody } from "../session-detail-body.tsx";
 import { SessionDetail } from "../session-detail-client.tsx";
-import type { SessionTranscriptFilterStorage } from "../session-transcript-filters.ts";
+import {
+  DEFAULT_SESSION_TRANSCRIPT_FILTERS,
+  type SessionTranscriptFilterStorage,
+} from "../session-transcript-filters.ts";
+import { SessionTranscript } from "../session-transcript.tsx";
 import type { SessionCommandTransport } from "../session-transport.ts";
 import { mountTestView, queryTestElement } from "./dom-test-helpers.ts";
 import { sessionDetailState } from "./session-detail-test-state.ts";
@@ -27,8 +33,39 @@ export interface MountedTestSession {
   readonly controller: SessionController;
 }
 
+export interface MountedTestTranscriptView {
+  readonly container: HTMLUListElement;
+  readonly dispose: () => void;
+}
+
 export interface MountedTestTranscript extends MountedTestSession {
   readonly detail: AgentSessionDetail;
+}
+
+export interface MountedTestTranscriptViewOptions {
+  readonly messages: Accessor<readonly AgentSessionMessage[]>;
+  readonly status: Accessor<AgentSessionStatus>;
+}
+
+export function mountTestTranscriptView({
+  messages,
+  status,
+}: MountedTestTranscriptViewOptions): MountedTestTranscriptView {
+  const container = document.body.appendChild(document.createElement("ul"));
+  const dispose = render(
+    () => (
+      <SessionTranscript
+        status={status()}
+        messages={messages()}
+        tools={[]}
+        filters={DEFAULT_SESSION_TRANSCRIPT_FILTERS}
+        executionEnvironment="bare_metal"
+        agentFile={null}
+      />
+    ),
+    container,
+  );
+  return { container, dispose };
 }
 
 export function mountSessionDetailBody(

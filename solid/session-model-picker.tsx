@@ -1,4 +1,4 @@
-import { createSignal } from "solid-js";
+import { createSignal, Show } from "solid-js";
 import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
 import type { AgentSessionSummary } from "../shared/session-model.ts";
 import { CustomSelect, type CustomSelectOption } from "./custom-select.tsx";
@@ -27,6 +27,7 @@ interface SessionModelPickerFieldsProps {
   readonly credentialEmptyLabel: string;
   readonly credentialOptions: readonly CustomSelectOption[];
   readonly disabled: boolean;
+  readonly hideReasoning?: boolean;
   readonly idPrefix: string;
   readonly namePrefix: string;
   readonly onChooseCredential: (value: string) => void;
@@ -276,24 +277,26 @@ export function SessionModelPickerFields(props: SessionModelPickerFieldsProps) {
         required
         selectedValue={props.selection.model}
       />
-      <CustomSelect
-        disabled={
-          props.disabled ||
-          (selectedModel()?.reasoningEfforts.length ?? 0) === 0
-        }
-        emptyLabel="Model default"
-        id={`${props.idPrefix}-reasoning`}
-        label="Reasoning effort"
-        name={`${props.namePrefix}ReasoningEffort`}
-        onChoose={props.onChooseReasoning}
-        onToggle={() => {
-          props.onToggle("reasoning");
-        }}
-        open={props.open === "reasoning"}
-        options={reasoningModelOptions(props.catalog, props.selection.model)}
-        required={false}
-        selectedValue={props.selection.reasoningEffort}
-      />
+      <Show when={props.hideReasoning !== true}>
+        <CustomSelect
+          disabled={
+            props.disabled ||
+            (selectedModel()?.reasoningEfforts.length ?? 0) === 0
+          }
+          emptyLabel="Model default"
+          id={`${props.idPrefix}-reasoning`}
+          label="Reasoning effort"
+          name={`${props.namePrefix}ReasoningEffort`}
+          onChoose={props.onChooseReasoning}
+          onToggle={() => {
+            props.onToggle("reasoning");
+          }}
+          open={props.open === "reasoning"}
+          options={reasoningModelOptions(props.catalog, props.selection.model)}
+          required={false}
+          selectedValue={props.selection.reasoningEffort}
+        />
+      </Show>
     </>
   );
 }

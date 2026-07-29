@@ -1,6 +1,5 @@
 import { createSignal, untrack } from "solid-js";
 import { afterEach, expect, test, vi } from "vitest";
-import type { SessionViewState } from "../session-client.tsx";
 import { summaryFromDetail } from "../session-codec.ts";
 import { SessionDetailBody } from "../session-detail-body.tsx";
 import type { LoadedSessionDetailViewProps } from "../session-detail-view-props.ts";
@@ -18,10 +17,13 @@ afterEach(() => {
   disposeTestViews(DOM_TEST_DISPOSALS);
 });
 
-test("scroll lock waits for realtime transcript layout before scrolling", () => {
+function scrollingTranscript() {
   const detail = {
     ...TEST_SESSION_DETAIL,
-    messages: [transcriptMessage("user-frame", "Initial task", "user", 2)],
+    messages: [
+      transcriptMessage("user-stream", "Initial task", "user", 2),
+      transcriptMessage("assistant-stream", "Live", "assistant", 3),
+    ],
     status: "running" as const,
   };
   const reactive = sessionDetailState(detail, [summaryFromDetail(detail)]);
@@ -31,6 +33,8 @@ test("scroll lock waits for realtime transcript layout before scrolling", () => 
     (callback: FrameRequestCallback): number => frames.push(callback),
   );
   vi.stubGlobal("cancelAnimationFrame", () => undefined);
+  let updateTranscript:
+    ((content: string, appendMessage?: boolean) => void) | undefined;
   const mounted = mountSessionDetailBody(
     reactive,
     DOM_TEST_DISPOSALS,
@@ -39,53 +43,118 @@ test("scroll lock waits for realtime transcript layout before scrolling", () => 
       const [view, setView] = createSignal<LoadedSessionDetailViewProps>(
         untrack(() => props.view),
       );
-      const nextDetail = {
-        ...detail,
-        messages: [
-          ...detail.messages,
-          transcriptMessage("assistant-frame", "Live output", "assistant", 3),
-        ],
+      updateTranscript = (content, appendMessage = false) => {
+        setView((current) => {
+          const messages = appendMessage
+            ? [
+                ...current.detail.messages,
+                transcriptMessage(
+                  `assistant-${String(current.detail.messages.length)}`,
+                  content,
+                  "assistant",
+                  current.detail.messages.length + 2,
+                ),
+              ]
+            : current.detail.messages.map((message, index) =>
+                index === current.detail.messages.length - 1
+                  ? { ...message, content }
+                  : message,
+              );
+          const nextDetail = { ...current.detail, messages };
+          return {
+            ...current,
+            detail: nextDetail,
+            state: { ...current.state, detail: nextDetail },
+          };
+        });
       };
-      const update = (): void => {
-        const nextState: SessionViewState = {
-          ...reactive.state(),
-          detail: nextDetail,
-        };
-        setView((current) => ({
-          ...current,
-          detail: nextDetail,
-          state: nextState,
-        }));
-      };
-      return (
-        <>
-          <button
-            data-update-transcript="true"
-            onClick={update}
-            type="button"
-          />
-          <SessionDetailBody {...props} view={view()} />
-        </>
-      );
+      return <SessionDetailBody {...props} view={view()} />;
     },
   );
   const transcript = queryTestTranscript(mounted.container);
+  const toggle = mounted.container.querySelector<HTMLButtonElement>(
+    "[data-scroll-lock-toggle='true']",
+  );
+  if (toggle === null || updateTranscript === undefined) {
+    throw new TypeError("Missing scroll test controls");
+  }
   let scrollHeight = 500;
   Object.defineProperties(transcript, {
     clientHeight: { configurable: true, value: 100 },
     scrollHeight: { configurable: true, get: () => scrollHeight },
   });
   frames.length = 0;
+  return {
+    expectFrames: (count: number) => {
+      expect(frames).toHaveLength(count);
+    },
+    expectLocked: (enabled: boolean) => {
+      expect(toggle.getAttribute("aria-pressed")).toBe(String(enabled));
+    },
+    expectTop: (position: number) => {
+      expect(transcript.scrollTop).toBe(position);
+    },
+    paintAfterLayout: (height: number) => {
+      scrollHeight = height;
+      frames.shift()?.(0);
+    },
+    scrollTo: (position: number) => {
+      transcript.scrollTop = position;
+      transcript.dispatchEvent(new Event("scroll"));
+    },
+    stream: updateTranscript,
+  };
+}
 
-  mounted.container
-    .querySelector<HTMLButtonElement>("[data-update-transcript='true']")
-    ?.click();
+test("stays locked to the bottom while assistant content streams", () => {
+  const view = scrollingTranscript();
+  view.scrollTo(360);
+  view.stream("Live output grows");
+  view.expectFrames(1);
+  view.paintAfterLayout(650);
+  view.expectTop(650);
 
-  expect(transcript.scrollTop).toBe(0);
-  expect(frames).toHaveLength(1);
+  view.stream("Live output grows again");
+  view.paintAfterLayout(800);
+  view.expectTop(800);
+  view.expectLocked(true);
+});
 
-  scrollHeight = 900;
-  frames.shift()?.(0);
+test("scrolling up releases the lock before a queued scroll can snap back", () => {
+  const view = scrollingTranscript();
+  view.scrollTo(400);
+  view.stream("A queued update");
+  view.expectFrames(1);
 
-  expect(transcript.scrollTop).toBe(900);
+  view.scrollTo(200);
+  view.paintAfterLayout(650);
+  view.expectTop(200);
+  view.expectLocked(false);
+
+  view.stream("More output while reading above");
+  view.expectFrames(0);
+  view.expectTop(200);
+});
+
+test("scrolling back to the bottom restores streaming scroll lock", () => {
+  const view = scrollingTranscript();
+  view.scrollTo(200);
+  view.stream("Output ignored while unlocked");
+  view.expectFrames(0);
+
+  view.scrollTo(400);
+  view.expectLocked(true);
+  view.stream("Output followed after relocking");
+  view.paintAfterLayout(700);
+  view.expectTop(700);
+});
+
+test("scroll lock waits for transcript layout before using its new height", () => {
+  const view = scrollingTranscript();
+  view.stream("A newly rendered message", true);
+
+  view.expectTop(0);
+  view.expectFrames(1);
+  view.paintAfterLayout(900);
+  view.expectTop(900);
 });

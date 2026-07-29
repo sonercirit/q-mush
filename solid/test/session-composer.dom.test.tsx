@@ -172,13 +172,13 @@ test("reuses request identity after an unknown browser outcome", async () => {
   expect(controller.state.detail?.pendingInputs).toHaveLength(1);
 });
 
-function mountedRunningComposer(): {
+function mountedComposer(status: AgentSessionDetail["status"] = "running"): {
   readonly container: HTMLDivElement;
   readonly controller: SessionController;
   readonly detail: AgentSessionDetail;
   readonly prompt: HTMLTextAreaElement;
 } {
-  const detail = { ...TEST_SESSION_DETAIL, status: "running" as const };
+  const detail = { ...TEST_SESSION_DETAIL, status };
   const { container, controller } = mountTestSessionDetail(detail, disposals);
   const prompt = queryTestElement(
     container,
@@ -193,7 +193,7 @@ function mountedRunningComposer(): {
 test("follow-up typing updates locally before the shared session view", () => {
   vi.useFakeTimers({ shouldClearNativeTimers: true });
   disposals.push(vi.useRealTimers);
-  const { controller, detail, prompt } = mountedRunningComposer();
+  const { controller, detail, prompt } = mountedComposer();
 
   prompt.value = "Change direction immediately";
   prompt.dispatchEvent(new InputEvent("input", { bubbles: true }));
@@ -212,31 +212,38 @@ test("follow-up typing updates locally before the shared session view", () => {
 
 function pressComposerShortcut(
   prompt: HTMLTextAreaElement,
-  shiftKey = false,
+  options: { readonly metaKey?: boolean; readonly shiftKey?: boolean } = {},
 ): void {
   prompt.dispatchEvent(
     new KeyboardEvent("keydown", {
       bubbles: true,
-      ctrlKey: true,
+      ctrlKey: options.metaKey !== true,
       key: "Enter",
-      shiftKey,
+      metaKey: options.metaKey ?? false,
+      shiftKey: options.shiftKey ?? false,
     }),
   );
 }
 
-test("orders Steer before Follow up in the running composer", () => {
-  const { container } = mountedRunningComposer();
-  const labels = [
+test("shows Steer before Follow up with their shortcut hints", () => {
+  const { container } = mountedComposer();
+  const buttons = [
     ...container.querySelectorAll<HTMLButtonElement>(
       "[data-session-composer-actions='true'] button",
     ),
-  ].map(({ textContent }) => textContent);
+  ];
 
-  expect(labels).toEqual(["Steer", "Follow up"]);
+  expect(buttons.map(({ textContent }) => textContent)).toEqual([
+    "SteerCtrl+Enter",
+    "Follow upCtrl+Shift+Enter",
+  ]);
+  expect(
+    buttons.map((button) => button.getAttribute("aria-keyshortcuts")),
+  ).toEqual(["Control+Enter", "Control+Shift+Enter"]);
 });
 
 test("the visible steer action flushes the draft and uses Ctrl+Enter", () => {
-  const { container, controller, prompt } = mountedRunningComposer();
+  const { container, controller, prompt } = mountedComposer();
   const steer = vi.spyOn(controller, "steer").mockResolvedValue();
   const steerButton = queryTestElement(
     container,
@@ -258,14 +265,30 @@ test("the visible steer action flushes the draft and uses Ctrl+Enter", () => {
   expect(steer).toHaveBeenCalledTimes(2);
 
   const followUp = vi.spyOn(controller, "followUp").mockResolvedValue();
-  pressComposerShortcut(prompt, true);
+  pressComposerShortcut(prompt, { shiftKey: true });
 
   expect(followUp).toHaveBeenCalledOnce();
   expect(steer).toHaveBeenCalledTimes(2);
 });
 
+test("Ctrl+Enter and Meta+Enter send from an idle composer", () => {
+  const { container, controller, prompt } = mountedComposer("idle");
+  const send = vi.spyOn(controller, "send").mockResolvedValue();
+  const sendButton = queryTestElement(
+    container,
+    "[data-session-composer-actions='true'] button[type='submit']",
+  );
+
+  pressComposerShortcut(prompt);
+  pressComposerShortcut(prompt, { metaKey: true });
+
+  expect(send).toHaveBeenCalledTimes(2);
+  expect(sendButton.textContent).toBe("SendCtrl+Enter");
+  expect(sendButton.getAttribute("aria-keyshortcuts")).toBe("Control+Enter");
+});
+
 test("pending instructions react to realtime detail updates", () => {
-  const { container, controller, detail } = mountedRunningComposer();
+  const { container, controller, detail } = mountedComposer();
   const pendingSelector = "section[aria-label='Queued session inputs']";
 
   expect(container.querySelector(pendingSelector)).toBeNull();

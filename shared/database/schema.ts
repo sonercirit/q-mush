@@ -270,7 +270,7 @@ export const attachmentFallbacks = sqliteTable(
     providerCredentialId: providerCredentialIdColumn(),
     provider: providerColumn(),
     model: text("model").notNull(),
-    prompt: text("prompt"),
+    openRouterProviderTag: text("openrouter_provider_tag"),
   },
   (table) => [
     index("attachment_fallbacks_user_deletion_index").on(

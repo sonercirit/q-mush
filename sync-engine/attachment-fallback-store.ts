@@ -24,7 +24,7 @@ export class AttachmentFallbackStore {
           credentialId: attachmentFallbacks.providerCredentialId,
           modality: attachmentFallbacks.modality,
           model: attachmentFallbacks.model,
-          prompt: attachmentFallbacks.prompt,
+          openRouterProviderTag: attachmentFallbacks.openRouterProviderTag,
           provider: attachmentFallbacks.provider,
         })
         .from(attachmentFallbacks)
@@ -68,7 +68,7 @@ export class AttachmentFallbackStore {
           id: this.#resources.generateId(now),
           modality: selection.modality,
           model: selection.model,
-          prompt: selection.prompt,
+          openRouterProviderTag: selection.openRouterProviderTag,
           provider: selection.provider,
           providerCredentialId: selection.credentialId,
           userId,

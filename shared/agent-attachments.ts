@@ -63,6 +63,57 @@ export interface AgentAttachment {
   readonly name: string;
 }
 
+export function agentAttachmentMediaTypeFromName(
+  name: string,
+): AgentAttachmentMediaType {
+  const extension = name.toLowerCase().split(".").at(-1);
+  switch (extension) {
+    case "png":
+      return "image/png";
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "gif":
+      return "image/gif";
+    case "webp":
+      return "image/webp";
+    case "mp4":
+      return "video/mp4";
+    case "webm":
+      return "video/webm";
+    case "mov":
+      return "video/quicktime";
+    case "mp3":
+      return "audio/mpeg";
+    case "m4a":
+      return "audio/mp4";
+    case "ogg":
+      return "audio/ogg";
+    case "wav":
+      return "audio/wav";
+    case "pdf":
+      return "application/pdf";
+    case "csv":
+      return "text/csv";
+    case "json":
+      return "application/json";
+    case "md":
+      return "text/markdown";
+    case "txt":
+      return "text/plain";
+    case "xml":
+      return "application/xml";
+    case "yaml":
+    case "yml":
+      return "application/yaml";
+    case "zip":
+      return "application/zip";
+    case undefined:
+    default:
+      return "application/octet-stream";
+  }
+}
+
 export function isAgentAttachmentMediaType(
   value: unknown,
 ): value is AgentAttachmentMediaType {
