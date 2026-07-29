@@ -2,16 +2,11 @@ import { createMemo, type Accessor } from "solid-js";
 import type {
   AgentSessionMessage,
   AgentSessionStatus,
+  AgentSessionTurn,
 } from "../shared/session-model.ts";
-import {
-  activeTurnStartedAt,
-  sessionTurnStartedAtByMessage,
-} from "../shared/session-turn-timing.ts";
+import { sessionTurnTiming } from "../shared/session-turn-timing.ts";
 
-interface SessionTurnTiming {
-  readonly activeStartedAt: number | undefined;
-  readonly completedStarts: ReadonlyMap<string, number>;
-}
+type SessionTurnTiming = ReturnType<typeof sessionTurnTiming>;
 
 function isStreamedMessage(message: AgentSessionMessage | undefined): boolean {
   return message?.id.startsWith("stream:") ?? false;
@@ -42,7 +37,8 @@ function streamedSuffixTimingUnchanged(
       currentMessage === undefined ||
       priorMessage?.id !== currentMessage.id ||
       priorMessage.role !== currentMessage.role ||
-      priorMessage.createdAt !== currentMessage.createdAt
+      priorMessage.createdAt !== currentMessage.createdAt ||
+      priorMessage.turnId !== currentMessage.turnId
     ) {
       return false;
     }
@@ -53,29 +49,28 @@ function streamedSuffixTimingUnchanged(
 export function createSessionTurnTiming(
   messages: Accessor<readonly AgentSessionMessage[]>,
   status: Accessor<AgentSessionStatus>,
+  turns: Accessor<readonly AgentSessionTurn[] | undefined>,
 ): Accessor<SessionTurnTiming> {
   let previousMessages: readonly AgentSessionMessage[] | undefined;
   let previousStatus: AgentSessionStatus | undefined;
+  let previousTurns: readonly AgentSessionTurn[] | undefined;
 
   return createMemo((previous: SessionTurnTiming | undefined) => {
     const currentMessages = messages();
     const currentStatus = status();
+    const currentTurns = turns();
     const reusable =
       previous !== undefined &&
       previousMessages !== undefined &&
       previousStatus === currentStatus &&
+      previousTurns === currentTurns &&
       streamedSuffixTimingUnchanged(previousMessages, currentMessages);
 
     previousMessages = currentMessages;
     previousStatus = currentStatus;
+    previousTurns = currentTurns;
     return reusable
       ? previous
-      : {
-          activeStartedAt: activeTurnStartedAt(currentMessages, currentStatus),
-          completedStarts: sessionTurnStartedAtByMessage(
-            currentMessages,
-            currentStatus,
-          ),
-        };
+      : sessionTurnTiming(currentMessages, currentStatus, currentTurns);
   });
 }

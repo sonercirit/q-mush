@@ -41,6 +41,7 @@ import {
   type SessionAgentToolActions,
 } from "./session-agent-tools.ts";
 import {
+  agentTurnUsage,
   compactionUsage,
   type CompactionUsage,
 } from "./session-compaction-usage.ts";
@@ -384,25 +385,41 @@ export async function runSessionAgent(
     if (currentModel === undefined) {
       throw new Error("The session model is unavailable for file explanation");
     }
-    return {
-      output: await explainAttachment(
-        {
-          attachment,
-          currentCredential: runtime.credential,
-          currentModel,
-          currentModelId: runtime.detail.model,
-          currentProvider: runtime.detail.provider,
-          currentProviderTag: runtime.detail.openRouterProviderTag,
-          factory: runtime.modelFactory,
-          prompt: typeof promptValue === "string" ? promptValue : null,
-          resources: runtime,
-          userId: runtime.userId,
-          workspaceId: runtime.detail.workspaceId,
-        },
-        signal,
-      ),
-      state: "completed",
-    };
+    const explanation = await explainAttachment(
+      {
+        attachment,
+        currentCredential: runtime.credential,
+        currentModel,
+        currentModelId: runtime.detail.model,
+        currentProvider: runtime.detail.provider,
+        currentProviderPricing: runtime.detail.providerPricing,
+        currentProviderTag: runtime.detail.openRouterProviderTag,
+        factory: runtime.modelFactory,
+        prompt: typeof promptValue === "string" ? promptValue : null,
+        resources: runtime,
+        userId: runtime.userId,
+        workspaceId: runtime.detail.workspaceId,
+      },
+      signal,
+    );
+    const usage = agentTurnUsage(
+      { contextTokens: null, ...explanation.usage },
+      (turn) =>
+        estimateAgentTurnCost(
+          {
+            model: explanation.model,
+            provider: explanation.provider,
+            providerPricing: explanation.providerPricing,
+          },
+          turn.tokenUsage,
+        ),
+    );
+    if (usage !== undefined) {
+      writeRuntime(runtime, (sessionId, now, generation) => {
+        runtime.store.updateRuntimeUsage(sessionId, usage, now, generation);
+      });
+    }
+    return { output: explanation.content, state: "completed" };
   };
   const dispatchTool: AgentToolDispatcher = (
     name,

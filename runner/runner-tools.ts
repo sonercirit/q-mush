@@ -39,6 +39,7 @@ import {
   runRunnerProcess,
 } from "./runner-process.ts";
 import {
+  openSecureRunnerPath,
   resolveRunnerWorkspace,
   secureRunnerPath,
 } from "./runner-workspace.ts";
@@ -256,21 +257,52 @@ async function readTool(
 async function explainFileTool(
   ...parameters: Parameters<RunnerFileTool>
 ): Promise<string> {
-  const { path } = await resolvedFileToolArguments(parameters);
-  const details = await stat(path);
-  if (details.isDirectory()) {
-    throw new Error("Directories cannot be explained as files");
-  }
-  if (details.size > MAXIMUM_AGENT_ATTACHMENT_BYTES) {
+  const { arguments_, path, root } =
+    await resolvedFileToolArguments(parameters);
+  const prompt = arguments_["prompt"];
+  if (
+    prompt !== undefined &&
+    (typeof prompt !== "string" || prompt.length > 4_000)
+  ) {
     throw new Error(
-      `The requested file exceeds ${String(MAXIMUM_AGENT_ATTACHMENT_BYTES)} bytes`,
+      "Tool argument prompt must be a string of at most 4000 characters",
     );
   }
-  return JSON.stringify({
-    data: (await readFile(path)).toString("base64"),
-    mediaType: agentAttachmentMediaTypeFromName(path),
-    name: basename(path),
-  });
+  const { handle, stats } = await openSecureRunnerPath(root, path);
+  try {
+    if (!stats.isFile()) {
+      throw new Error("The requested path is not a file");
+    }
+    if (stats.size > MAXIMUM_AGENT_ATTACHMENT_BYTES) {
+      throw new Error(
+        `The requested file exceeds ${String(MAXIMUM_AGENT_ATTACHMENT_BYTES)} bytes`,
+      );
+    }
+    const data = Buffer.allocUnsafe(MAXIMUM_AGENT_ATTACHMENT_BYTES + 1);
+    let bytesRead = 0;
+    while (bytesRead < data.byteLength) {
+      const result = await handle.read(
+        data,
+        bytesRead,
+        data.byteLength - bytesRead,
+        null,
+      );
+      if (result.bytesRead === 0) break;
+      bytesRead += result.bytesRead;
+    }
+    if (bytesRead > MAXIMUM_AGENT_ATTACHMENT_BYTES) {
+      throw new Error(
+        `The requested file exceeds ${String(MAXIMUM_AGENT_ATTACHMENT_BYTES)} bytes`,
+      );
+    }
+    return JSON.stringify({
+      data: data.subarray(0, bytesRead).toString("base64"),
+      mediaType: agentAttachmentMediaTypeFromName(path),
+      name: basename(path),
+    });
+  } finally {
+    await handle.close();
+  }
 }
 
 async function writeTool(

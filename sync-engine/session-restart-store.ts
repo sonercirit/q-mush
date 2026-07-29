@@ -24,6 +24,7 @@ import {
 import type { InterruptedStoredSession } from "./session-store-reassignment.ts";
 import type { SessionStoreWriteResources } from "./session-store-resources.ts";
 import { errorMessageValues } from "./session-store-values.ts";
+import { rotateSessionTurn } from "./session-turn-store.ts";
 
 export type {
   RestartHandoff,
@@ -264,6 +265,34 @@ export class RestartHandoffStore {
     );
   }
 
+  #rotateTurn(
+    transaction: Pick<AppDatabase, "insert" | "select" | "update">,
+    options: PauseRestartHandoff,
+    handoffGeneration: number,
+  ): void {
+    const session = transaction
+      .select({
+        segment: agentSessions.currentSegment,
+        userId: agentSessions.userId,
+      })
+      .from(agentSessions)
+      .where(eq(agentSessions.id, options.authority.sessionId))
+      .get();
+    if (session === undefined) {
+      throw new Error("The restart handoff session no longer exists");
+    }
+    rotateSessionTurn({
+      database: transaction,
+      executionGeneration: handoffGeneration,
+      generateId: this.#options.generateId,
+      now: options.now,
+      previousExecutionGeneration: options.authority.generation,
+      segment: session.segment,
+      sessionId: options.authority.sessionId,
+      userId: session.userId,
+    });
+  }
+
   #pause(options: PauseRestartHandoff, from: "queued" | "running"): boolean {
     const handoffGeneration = options.authority.generation + 1;
     if (readNonNegativeSafeInteger(handoffGeneration) === undefined) {
@@ -274,29 +303,31 @@ export class RestartHandoffStore {
       sessionId: options.authority.sessionId,
       status: from,
     });
-    if (from === "queued") {
-      return updateStoredSessions(
-        this.#options.database,
-        condition,
-        this.#pauseValues(options, handoffGeneration),
-      );
-    }
     return this.#options.database.transaction((transaction) => {
-      if (
-        !this.#updateTimedSession(
-          transaction,
-          condition,
-          options.now,
-          this.#pauseValues(options, handoffGeneration),
-        )
-      ) {
+      const updated =
+        from === "queued"
+          ? updateStoredSessions(
+              transaction,
+              condition,
+              this.#pauseValues(options, handoffGeneration),
+            )
+          : this.#updateTimedSession(
+              transaction,
+              condition,
+              options.now,
+              this.#pauseValues(options, handoffGeneration),
+            );
+      if (!updated) {
         return false;
       }
-      this.#options.interruptUnknownTools?.(
-        transaction,
-        options.authority.sessionId,
-        options.now,
-      );
+      this.#rotateTurn(transaction, options, handoffGeneration);
+      if (from === "running") {
+        this.#options.interruptUnknownTools?.(
+          transaction,
+          options.authority.sessionId,
+          options.now,
+        );
+      }
       return true;
     });
   }

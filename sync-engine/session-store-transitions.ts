@@ -1,31 +1,91 @@
+import { and, eq, type SQL } from "drizzle-orm";
 import { updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
+import { agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID } from "../shared/ids.ts";
+import type { AgentSessionStatus } from "../shared/session-model.ts";
 import {
   readActiveSessionTiming,
   runningCondition,
   sessionGenerationCondition,
   sessionTimingUpdate,
+  storedSessionCondition,
   updateStoredSessions,
 } from "./session-store-persistence.ts";
-import { transitionStoredSession } from "./session-store-reassignment.ts";
+import { readStoredSessionState } from "./session-store-state.ts";
 import type {
   SessionStatusTransition,
   SessionTransitionInput,
 } from "./session-transition-types.ts";
 import { optionalRestartHandoff } from "./session-transition-values.ts";
+import { endGenerationSessionTurn } from "./session-turn-store.ts";
 
 interface SessionRuntimeTransitionResources {
   readonly database: AppDatabase;
 }
 
-function finishActiveSession(
-  options: SessionTransitionInput & {
-    readonly actorId?: string;
-    readonly resources: SessionRuntimeTransitionResources;
-    readonly status: "failed" | "idle" | "stopped";
-  },
-): boolean {
+function transitionAndEndTurn(options: {
+  readonly condition: SQL | undefined;
+  readonly database: AppDatabase;
+  readonly now: number;
+  readonly sessionId: string;
+  readonly values: Parameters<typeof updateStoredSessions>[2];
+}): boolean {
+  return options.database.transaction((transaction) => {
+    const session = readStoredSessionState(transaction, options.condition);
+    if (session === undefined) {
+      return false;
+    }
+    const updated = updateStoredSessions(
+      transaction,
+      options.condition,
+      options.values,
+    );
+    if (updated) {
+      endGenerationSessionTurn(
+        transaction,
+        options.sessionId,
+        session.executionGeneration,
+        options.now,
+      );
+    }
+    return updated;
+  });
+}
+
+type RuntimeStatusTransitionOptions = SessionTransitionInput & {
+  readonly actorId?: string;
+  readonly resources: SessionRuntimeTransitionResources;
+  readonly status: AgentSessionStatus;
+};
+
+function transitionOptions(
+  options: RuntimeStatusTransitionOptions,
+  condition: SQL | undefined,
+  values: Parameters<typeof updateStoredSessions>[2],
+) {
+  return {
+    condition,
+    database: options.resources.database,
+    now: options.now,
+    sessionId: options.sessionId,
+    values,
+  };
+}
+
+function transitionValues(
+  options: RuntimeStatusTransitionOptions,
+  additional: Parameters<typeof updateStoredSessions>[2] = {},
+) {
+  return {
+    ...additional,
+    status: options.status,
+    ...updatedAuditFields(options.actorId ?? SYSTEM_ID, options.now),
+    ...optionalRestartHandoff(options.clearRestartHandoff),
+  };
+}
+
+function finishActiveSession(options: RuntimeStatusTransitionOptions): boolean {
   const condition = runningCondition(
     options.sessionId,
     options.userId,
@@ -35,15 +95,16 @@ function finishActiveSession(
     options.resources.database,
     condition,
   );
-  if (session === undefined) {
+  if (session === undefined || options.generation === undefined) {
     return false;
   }
-  return updateStoredSessions(options.resources.database, condition, {
-    ...sessionTimingUpdate(session, options.now),
-    ...optionalRestartHandoff(options.clearRestartHandoff),
-    status: options.status,
-    ...updatedAuditFields(options.actorId ?? SYSTEM_ID, options.now),
-  });
+  return transitionAndEndTurn(
+    transitionOptions(
+      options,
+      condition,
+      transitionValues(options, sessionTimingUpdate(session, options.now)),
+    ),
+  );
 }
 
 export function transitionSessionRuntime(options: {
@@ -81,21 +142,24 @@ export function transitionSessionRuntime(options: {
 }
 
 function systemTransition(
-  options: SessionStatusTransition & {
-    readonly resources: SessionRuntimeTransitionResources;
-  },
+  options: RuntimeStatusTransitionOptions & SessionStatusTransition,
 ): boolean {
-  return transitionStoredSession({
-    actorId: SYSTEM_ID,
-    database: options.resources.database,
-    from: options.from,
-    ...(options.generation === undefined
-      ? {}
-      : { generation: options.generation }),
-    now: options.now,
-    sessionId: options.sessionId,
-    to: options.status,
+  const identity = storedSessionCondition({
+    id: options.sessionId,
+    status: options.from,
   });
+  const condition: SQL | undefined = and(
+    identity,
+    options.generation === undefined
+      ? undefined
+      : eq(agentSessions.executionGeneration, options.generation),
+    options.userId === undefined
+      ? undefined
+      : eq(agentSessions.userId, options.userId),
+  );
+  return transitionAndEndTurn(
+    transitionOptions(options, condition, transitionValues(options)),
+  );
 }
 
 export function stopStoredSession(options: {
@@ -111,15 +175,12 @@ export function stopStoredSession(options: {
       ...options,
       status: "stopped",
     }) ||
-    transitionStoredSession({
+    systemTransition({
       actorId: options.userId,
       clearRestartHandoff: true,
-      database: options.resources.database,
+      ...options,
       from: ["queued", "running", "paused", "idle", "failed"],
-      now: options.now,
-      sessionId: options.sessionId,
-      to: "stopped",
-      userId: options.userId,
+      status: "stopped",
     })
   );
 }

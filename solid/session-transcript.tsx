@@ -536,6 +536,7 @@ export function SessionTranscript(props: {
   readonly status?: AgentSessionStatus | undefined;
   readonly toolStreams?: readonly ToolStreamEntry[];
   readonly tools: readonly AgentSessionToolName[];
+  readonly turns?: AgentSessionDetail["turns"];
 }): JSX.Element {
   const callArguments = createMemo(() => toolCallArguments(props.messages));
   const serializedTools = createMemo(() =>
@@ -544,6 +545,7 @@ export function SessionTranscript(props: {
   const turnTiming = createSessionTurnTiming(
     () => props.messages,
     () => props.status ?? "idle",
+    () => props.turns,
   );
   const visibleItemCount = createMemo(() => {
     const counts = sessionTranscriptFilterCounts(

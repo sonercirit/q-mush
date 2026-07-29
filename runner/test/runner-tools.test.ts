@@ -1,7 +1,16 @@
-import { readFile, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  readFile,
+  rename,
+  symlink,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { executeRunnerTool } from "../../runner/runner-tools.ts";
+import { openSecureRunnerPath } from "../../runner/runner-workspace.ts";
+import { MAXIMUM_AGENT_ATTACHMENT_BYTES } from "../../shared/agent-attachments.ts";
 import { AGENT_TOOLS } from "../../shared/agent-tools.ts";
 import {
   observeRunnerRejection,
@@ -83,6 +92,66 @@ describe("runner tools", () => {
       name: "diagram.png",
     });
     expect(error.message).toContain("outside the session workspace");
+  });
+
+  test("keeps reads on the opened contained object during a path swap", async () => {
+    const root = await workspace();
+    const liveDirectory = join(root, "live");
+    const retainedDirectory = join(root, "retained");
+    const outsideDirectory = await workspace();
+    await mkdir(liveDirectory);
+    await writeFile(join(liveDirectory, "diagram.png"), "contained");
+    await writeFile(join(outsideDirectory, "diagram.png"), "outside");
+
+    const { handle, stats } = await openSecureRunnerPath(
+      root,
+      "live/diagram.png",
+    );
+    await rename(liveDirectory, retainedDirectory);
+    await symlink(outsideDirectory, liveDirectory);
+
+    try {
+      expect(stats.isFile()).toBe(true);
+      expect((await handle.readFile()).toString()).toBe("contained");
+    } finally {
+      await handle.close();
+    }
+  });
+
+  test("rejects non-regular and oversized explain-file inputs", async () => {
+    const root = await workspace();
+    const fifo = join(root, "pipe.png");
+    const oversized = join(root, "oversized.png");
+    await executeBash(root, `mkfifo ${JSON.stringify(fifo)}`, 5);
+    await writeFile(
+      oversized,
+      Buffer.alloc(MAXIMUM_AGENT_ATTACHMENT_BYTES + 1),
+    );
+
+    const [fifoError, oversizedError] = await Promise.all([
+      captureToolError(root, "explain_file", { path: fifo }),
+      captureToolError(root, "explain_file", { path: oversized }),
+    ]);
+
+    expect(fifoError.message).toContain("not a file");
+    expect(oversizedError.message).toContain("exceeds");
+    await unlink(fifo);
+  });
+
+  test("validates optional explain-file prompts in the runner", async () => {
+    const root = await explainWorkspace();
+
+    const wrongType = await captureToolError(root, "explain_file", {
+      path: "diagram.png",
+      prompt: 123,
+    });
+    const tooLong = await captureToolError(root, "explain_file", {
+      path: "diagram.png",
+      prompt: "x".repeat(4_001),
+    });
+
+    expect(wrongType.message).toContain("prompt must be a string");
+    expect(tooLong.message).toContain("prompt must be a string");
   });
 
   test("rejects unsafe or incomplete tool calls", async () => {

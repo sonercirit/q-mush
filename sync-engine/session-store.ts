@@ -1,4 +1,3 @@
-import { desc } from "drizzle-orm";
 import type { AgentFile } from "../shared/agent-file.ts";
 import type { AgentImage } from "../shared/agent-images.ts";
 import type {
@@ -31,7 +30,6 @@ import {
   cancelPendingInput,
   enqueuePendingInput,
   settleNormalSessionBoundary,
-  storedPendingInputs,
   takeSteeringInputs,
   type EnqueuePendingInputResult,
   type EnqueuePendingSessionInput,
@@ -44,7 +42,6 @@ import {
   RestartHandoffStore,
   type RestartHandoffIdentity,
 } from "./session-restart-store.ts";
-import { storedSessionAgentFile } from "./session-store-agent-file.ts";
 import {
   createStoredSession,
   type CreateAgentSession,
@@ -95,11 +92,6 @@ import {
 } from "./session-store-spawns.ts";
 
 import {
-  selectStoredSessions,
-  summarizeStoredSession,
-} from "./session-store-summary.ts";
-
-import {
   runtimeUsageOption,
   type RuntimeAppendMessageParameters,
   type RuntimeCompactionParameters,
@@ -107,6 +99,10 @@ import {
   type RuntimeMessageWriteOptions,
   type RuntimeTerminalMessageParameters,
 } from "./session-runtime-write-options.ts";
+import {
+  listStoredSessions,
+  readStoredSessionDetail,
+} from "./session-store-queries.ts";
 import {
   stopStoredSession,
   transitionSessionRuntime,
@@ -165,11 +161,15 @@ export class SessionStore {
     return this.#questions;
   }
 
+  #readPendingQuestions(userId: string, sessionId: string) {
+    return this.#questions.pending(userId, sessionId);
+  }
+
   pendingQuestions(
     userId: string,
     sessionId: string,
   ): PendingAskQuestions | null {
-    return this.#questions.pending(userId, sessionId);
+    return this.#readPendingQuestions(userId, sessionId);
   }
 
   executionIsCurrent(
@@ -194,41 +194,21 @@ export class SessionStore {
     sessionId: string,
     workspaceId?: string,
   ): AgentSessionDetail | undefined {
-    const stored = selectStoredSessions(
+    return readStoredSessionDetail(
       this.#database,
-      userSessionFilter(userId, sessionId, workspaceId),
-    ).get();
-    if (stored === undefined) {
-      return undefined;
-    }
-
-    return {
-      ...summarizeStoredSession(stored),
-      pendingQuestions: this.#questions.pending(userId, sessionId),
-      agentFile: storedSessionAgentFile(this.#database, sessionId),
-      messages: withInterruptedToolResults(
-        readStoredSessionMessages(this.#database, sessionId),
-        stored.status !== "queued" &&
-          stored.status !== "running" &&
-          stored.status !== "paused",
-      ),
-      pendingInputs: storedPendingInputs(this.#database, sessionId),
-    };
+      this.#readPendingQuestions.bind(this),
+      userId,
+      sessionId,
+      workspaceId,
+    );
   }
   list(userId: string, workspaceId?: string): readonly AgentSessionSummary[] {
-    return selectStoredSessions(
+    return listStoredSessions(
       this.#database,
-      userSessionFilter(userId, undefined, workspaceId),
-    )
-      .orderBy(desc(agentSessions.updatedAt), desc(agentSessions.id))
-      .all()
-      .map((stored) => {
-        const summary = summarizeStoredSession(stored);
-        return {
-          ...summary,
-          pendingQuestions: this.#questions.pending(userId, summary.id),
-        };
-      });
+      this.#readPendingQuestions.bind(this),
+      userId,
+      workspaceId,
+    );
   }
 
   history(

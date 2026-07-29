@@ -25,8 +25,13 @@ import type {
   AgentSessionMessage,
   AgentSessionStatus,
   AgentSessionSummary,
+  AgentSessionTurn,
 } from "../shared/session-model.ts";
-import { readFiniteNumber, stringArray } from "../shared/validation.ts";
+import {
+  readFiniteNumber,
+  readNonNegativeSafeInteger,
+  stringArray,
+} from "../shared/validation.ts";
 import { readSessionContentFields } from "./session-message-codec.ts";
 import { decodedSessionMessage } from "./session-message-decoder.ts";
 
@@ -423,6 +428,43 @@ function readToolCalls(value: unknown) {
   );
 }
 
+function readTurn(value: unknown): AgentSessionTurn {
+  if (!isRecord(value)) {
+    throw new Error("The server returned an invalid agent session turn");
+  }
+  const boundaryMessageId =
+    value["boundaryMessageId"] === null
+      ? null
+      : typeof value["boundaryMessageId"] === "string"
+        ? value["boundaryMessageId"]
+        : undefined;
+  const endedAt =
+    value["endedAt"] === null ? null : readFiniteNumber(value["endedAt"]);
+  const executionGeneration = readNonNegativeSafeInteger(
+    value["executionGeneration"],
+  );
+  const startedAt = readFiniteNumber(value["startedAt"]);
+  if (
+    boundaryMessageId === undefined ||
+    endedAt === undefined ||
+    executionGeneration === undefined ||
+    typeof value["id"] !== "string" ||
+    startedAt === undefined ||
+    !Number.isSafeInteger(startedAt) ||
+    (endedAt !== null &&
+      (!Number.isSafeInteger(endedAt) || endedAt < startedAt))
+  ) {
+    throw new Error("The server returned an invalid agent session turn");
+  }
+  return {
+    boundaryMessageId,
+    endedAt,
+    executionGeneration,
+    id: value["id"],
+    startedAt,
+  };
+}
+
 function readMessage(value: unknown): AgentSessionMessage {
   const invalidMessage = "The server returned an invalid session message";
   const { fields, record, role } = decodedSessionMessage(value, invalidMessage);
@@ -470,7 +512,8 @@ export function readSessionDetail(value: unknown): AgentSessionDetail {
   if (
     !isRecord(value) ||
     !Array.isArray(value["messages"]) ||
-    !Array.isArray(value["pendingInputs"])
+    !Array.isArray(value["pendingInputs"]) ||
+    (value["turns"] !== undefined && !Array.isArray(value["turns"]))
   ) {
     throw new Error("The server returned invalid agent session details");
   }
@@ -480,6 +523,9 @@ export function readSessionDetail(value: unknown): AgentSessionDetail {
     agentFile: readAgentFile(value["agentFile"]),
     messages: value["messages"].map(readMessage),
     pendingInputs: value["pendingInputs"].map(readSessionPendingInput),
+    ...(Array.isArray(value["turns"])
+      ? { turns: value["turns"].map(readTurn) }
+      : {}),
   };
 }
 

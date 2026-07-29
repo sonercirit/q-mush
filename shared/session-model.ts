@@ -56,6 +56,7 @@ export interface AgentSessionMessage extends AttachmentContentFields {
   readonly toolCallId: string | null;
   readonly toolCalls: readonly AgentToolCall[];
   readonly toolName: string | null;
+  readonly turnId?: string | null;
 }
 
 export interface AgentSessionSummary {
@@ -91,8 +92,17 @@ export interface AgentSessionSummary {
   readonly workspaceId: string;
 }
 
+export interface AgentSessionTurn {
+  readonly boundaryMessageId: string | null;
+  readonly endedAt: number | null;
+  readonly executionGeneration: number;
+  readonly id: string;
+  readonly startedAt: number;
+}
+
 export interface AgentSessionDetail extends AgentSessionSummary {
   readonly agentFile: AgentFile | null;
   readonly messages: readonly AgentSessionMessage[];
   readonly pendingInputs: readonly AgentSessionPendingInput[];
+  readonly turns?: readonly AgentSessionTurn[];
 }

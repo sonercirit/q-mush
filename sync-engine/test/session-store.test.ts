@@ -5,9 +5,13 @@ import {
 } from "../../shared/agent-tools.ts";
 import { agentMessages } from "../../shared/database/schema.ts";
 import { SYSTEM_ID } from "../../shared/ids.ts";
-import type { AgentSessionMessage } from "../../shared/session-model.ts";
+import type {
+  AgentSessionDetail,
+  AgentSessionMessage,
+} from "../../shared/session-model.ts";
 import { RunnerStore } from "../../sync-engine/runner-store.ts";
 import type { SessionStore } from "../../sync-engine/session-store.ts";
+import { endGenerationSessionTurn } from "../../sync-engine/session-turn-store.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import {
   TEST_NOW,
@@ -75,6 +79,24 @@ function testSessionMessageRoles(store: SessionStore) {
   return store.get(TEST_USER_ID, SESSION_ID)?.messages.map(({ role }) => role);
 }
 
+function expectPersistedTurns(
+  actual: AgentSessionDetail["turns"],
+  firstBoundaryMessageId: string | undefined,
+  last: Readonly<{
+    readonly endedAt: number | null;
+    readonly startedAt: number;
+  }>,
+): void {
+  expect(actual).toEqual([
+    expect.objectContaining({
+      boundaryMessageId: firstBoundaryMessageId,
+      endedAt: TEST_NOW + 3,
+      startedAt: TEST_NOW,
+    }),
+    expect.objectContaining(last),
+  ]);
+}
+
 function expectedTranscriptRoles(
   includeError: boolean,
   includeFollowUp = false,
@@ -123,6 +145,7 @@ describe("session store", () => {
           "Inspect the repository\nand make it shine",
         ),
         createdAt: TEST_NOW,
+        turnId: USER_MESSAGE_ID,
       },
     ]);
     markTestSessionRunning(store);
@@ -181,6 +204,15 @@ describe("session store", () => {
     expect(detail?.costBasis).toBe("estimated");
     expect(detail?.costUsd).toBeCloseTo(0.15);
     expect(detail?.currentContextTokens).toBe(1_000);
+    expect(detail?.turns).toEqual([
+      {
+        boundaryMessageId: TOOL_MESSAGE_ID,
+        endedAt: TEST_NOW + 6,
+        executionGeneration: 0,
+        id: USER_MESSAGE_ID,
+        startedAt: TEST_NOW,
+      },
+    ]);
     expect(detail?.messages.slice(1)).toEqual([
       {
         ...thinkingMessage,
@@ -190,6 +222,7 @@ describe("session store", () => {
         toolCallId: null,
         toolCalls: [],
         toolName: null,
+        turnId: USER_MESSAGE_ID,
       },
       {
         ...assistantMessage,
@@ -198,6 +231,7 @@ describe("session store", () => {
         images: [],
         toolCallId: null,
         toolName: null,
+        turnId: USER_MESSAGE_ID,
       },
       {
         ...toolMessage,
@@ -205,11 +239,29 @@ describe("session store", () => {
         id: TOOL_MESSAGE_ID,
         images: [],
         toolCalls: [],
+        turnId: USER_MESSAGE_ID,
       },
     ]);
 
     expect(store.list(TEST_USER_ID)).toHaveLength(1);
     database.$client.close();
+  });
+
+  test("ending an already-ended turn is a no-op", () => {
+    const setup = runningStore();
+    const settledNow = TEST_NOW + 3;
+    const didSettle = setup.store.transitionCurrent(
+      SESSION_ID,
+      "idle",
+      settledNow,
+    );
+    expect(didSettle).toBe(true);
+    const settled = setup.store.get(TEST_USER_ID, SESSION_ID)?.turns;
+
+    endGenerationSessionTurn(setup.database, SESSION_ID, 0, TEST_NOW + 100);
+
+    expect(setup.store.get(TEST_USER_ID, SESSION_ID)?.turns).toEqual(settled);
+    setup.database.$client.close();
   });
 
   test("orders equal-timestamp transcript records by message id", () => {
@@ -355,6 +407,60 @@ describe("session store", () => {
     ]);
     expect(store.get(TEST_USER_ID, SESSION_ID)?.currentContextTokens).toBe(0);
     database.$client.close();
+  });
+
+  test("persists distinct timing for a user-less continuation", () => {
+    const setup = runningStore();
+    setup.store.appendCurrentAgentMessage(
+      SESSION_ID,
+      { content: "First response", role: "assistant", toolCalls: [] },
+      TEST_NOW + 2,
+    );
+    expect(
+      setup.store.transitionCurrent(SESSION_ID, "idle", TEST_NOW + 3),
+    ).toBe(true);
+    const before = setup.store.get(TEST_USER_ID, SESSION_ID);
+
+    const queued = setup.store.queue(TEST_USER_ID, SESSION_ID, TEST_NOW + 100);
+    expect(queued.status).toBe("queued");
+    if (queued.status !== "queued") throw new Error("Session was not queued");
+    expectPersistedTurns(queued.detail.turns, before?.messages.at(-1)?.id, {
+      endedAt: null,
+      startedAt: TEST_NOW + 100,
+    });
+
+    expect(
+      setup.store.transitionRuntime(
+        SESSION_ID,
+        "running",
+        TEST_NOW + 101,
+        queued.detail.generation,
+      ),
+    ).toBe(true);
+    setup.store.appendRuntimeAgentMessages(
+      SESSION_ID,
+      [{ content: "Continued response", role: "assistant", toolCalls: [] }],
+      TEST_NOW + 102,
+      queued.detail.generation,
+    );
+    expect(
+      setup.store.transitionRuntime(
+        SESSION_ID,
+        "idle",
+        TEST_NOW + 103,
+        queued.detail.generation,
+      ),
+    ).toBe(true);
+    expectPersistedTurns(
+      setup.store.get(TEST_USER_ID, SESSION_ID)?.turns,
+      before?.messages.at(-1)?.id,
+      { endedAt: TEST_NOW + 103, startedAt: TEST_NOW + 100 },
+    );
+    const finalDetail = setup.store.get(TEST_USER_ID, SESSION_ID);
+    expect(finalDetail?.turns?.at(-1)?.boundaryMessageId).toBe(
+      finalDetail?.messages.at(-1)?.id,
+    );
+    setup.database.$client.close();
   });
 
   test("continues without appending a user message", () => {
