@@ -9,7 +9,10 @@ import {
   applySessionModelCatalog,
   chooseSessionOption,
 } from "../../solid/session-selection.ts";
-import { initialSessionViewState } from "../../solid/session-state.ts";
+import {
+  initialSessionViewState,
+  mostRecentSessionDirectory,
+} from "../../solid/session-state.ts";
 
 const CATALOG: AgentModelCatalog = {
   defaultModel: "powerful",
@@ -55,6 +58,15 @@ const SELECTED_DRAFT: SessionDraft = {
   model: "powerful",
   reasoningEffort: "low",
 };
+
+test("prefills a new session with the runner's current directory", () => {
+  expect(initialSessionViewState().draft.workingDirectory).toBe(".");
+  expect(mostRecentSessionDirectory([])).toBe(".");
+  expect(mostRecentSessionDirectory([{ workingDirectory: "" }])).toBe(".");
+  expect(
+    mostRecentSessionDirectory([{ workingDirectory: "/workspace/recent" }]),
+  ).toBe("/workspace/recent");
+});
 
 test("identifies the maximum supported reasoning effort", () => {
   expect(maximumAgentReasoningEffort(["max", "low", "xhigh"])).toBe("max");

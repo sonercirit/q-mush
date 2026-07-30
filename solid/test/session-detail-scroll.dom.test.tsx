@@ -4,6 +4,7 @@ import { summaryFromDetail } from "../session-codec.ts";
 import { SessionDetailBody } from "../session-detail-body.tsx";
 import type { LoadedSessionDetailViewProps } from "../session-detail-view-props.ts";
 import { disposeTestViews, queryTestTranscript } from "./dom-test-helpers.ts";
+import { defineElementSize } from "./element-size-test-helpers.ts";
 import { sessionDetailState } from "./session-detail-test-state.ts";
 import {
   DOM_TEST_DISPOSALS,
@@ -79,10 +80,7 @@ function scrollingTranscript() {
     throw new TypeError("Missing scroll test controls");
   }
   let scrollHeight = 500;
-  Object.defineProperties(transcript, {
-    clientHeight: { configurable: true, value: 100 },
-    scrollHeight: { configurable: true, get: () => scrollHeight },
-  });
+  defineElementSize(transcript, 100, () => scrollHeight);
   frames.length = 0;
   return {
     expectFrames: (count: number) => {
@@ -93,6 +91,12 @@ function scrollingTranscript() {
     },
     expectTop: (position: number) => {
       expect(transcript.scrollTop).toBe(position);
+    },
+    growBeforePaint: (height: number) => {
+      scrollHeight = height;
+    },
+    notifyScroll: () => {
+      transcript.dispatchEvent(new Event("scroll"));
     },
     paintAfterLayout: (height: number) => {
       scrollHeight = height;
@@ -106,28 +110,50 @@ function scrollingTranscript() {
   };
 }
 
+function exerciseScrollGrowth(
+  view: ReturnType<typeof scrollingTranscript>,
+  content: string,
+  height: number,
+): void {
+  view.stream(content);
+  view.paintAfterLayout(height);
+}
+
 test("stays locked to the bottom while assistant content streams", () => {
   const view = scrollingTranscript();
   view.scrollTo(360);
-  view.stream("Live output grows");
-  view.expectFrames(1);
-  view.paintAfterLayout(650);
+  exerciseScrollGrowth(view, "Live output grows", 650);
   view.expectTop(650);
 
-  view.stream("Live output grows again");
-  view.paintAfterLayout(800);
+  exerciseScrollGrowth(view, "Live output grows again", 800);
   view.expectTop(800);
   view.expectLocked(true);
+});
+
+test("stays locked when a delayed scroll event observes newer streamed layout", () => {
+  const view = scrollingTranscript();
+  view.scrollTo(400);
+  view.stream("First streamed frame");
+  view.paintAfterLayout(650);
+
+  view.stream("A larger second streamed frame");
+  view.growBeforePaint(900);
+  view.notifyScroll();
+
+  view.expectLocked(true);
+  view.paintAfterLayout(900);
+  view.expectTop(900);
 });
 
 test("scrolling up releases the lock before a queued scroll can snap back", () => {
   const view = scrollingTranscript();
   view.scrollTo(400);
+  exerciseScrollGrowth(view, "A completed update", 650);
   view.stream("A queued update");
   view.expectFrames(1);
 
   view.scrollTo(200);
-  view.paintAfterLayout(650);
+  view.paintAfterLayout(800);
   view.expectTop(200);
   view.expectLocked(false);
 
@@ -139,6 +165,7 @@ test("scrolling up releases the lock before a queued scroll can snap back", () =
 test("scrolling back to the bottom restores streaming scroll lock", () => {
   const view = scrollingTranscript();
   view.scrollTo(200);
+  view.expectLocked(false);
   view.stream("Output ignored while unlocked");
   view.expectFrames(0);
 

@@ -172,6 +172,7 @@ export function runTestLoop(
     executeTool: () => Promise.reject(new Error("No tool expected")),
     initialMessages: [{ content: "Finish", role: "user" }],
     maxContextTokens: 100_000,
+    now: Date.now,
     recordCompaction: () => undefined,
     recordMessage: () => undefined,
     ...options,

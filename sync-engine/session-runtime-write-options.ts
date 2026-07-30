@@ -18,6 +18,7 @@ export type RuntimeCompactionParameters = readonly [
   usage: CompactionUsage,
   now: number,
   generation: number,
+  startedAt: number,
 ];
 
 export type RuntimeTerminalMessageParameters = readonly [

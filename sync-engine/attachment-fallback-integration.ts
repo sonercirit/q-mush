@@ -1,3 +1,4 @@
+import { readOpenRouterProviderRouting } from "../shared/agent-configuration.ts";
 import { modelSupportsAttachmentModality } from "../shared/attachment-fallback.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import type { IdGenerator } from "../shared/ids.ts";
@@ -51,16 +52,17 @@ export function createAttachmentFallbackIntegration(options: {
         ) {
           return false;
         }
-        if (selection.openRouterProviderTag === null) return true;
+        const routing = readOpenRouterProviderRouting(
+          selection.openRouterProviderTag,
+        );
+        if (routing?.type !== "provider") return routing !== undefined;
         const providers = await options.discoverOpenRouterProviders(
           user.id,
           credential,
           selection.model,
           { force: true },
         );
-        return providers.providers.some(
-          ({ tag }) => tag === selection.openRouterProviderTag,
-        );
+        return providers.providers.some(({ tag }) => tag === routing.tag);
       } catch {
         return false;
       }

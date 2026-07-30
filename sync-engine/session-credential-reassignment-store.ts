@@ -1,4 +1,5 @@
 import { and, asc, eq, ne, type SQL } from "drizzle-orm";
+import { readOpenRouterProviderRouting } from "../shared/agent-configuration.ts";
 import { updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import {
@@ -104,7 +105,11 @@ function metadataUpdatesAreComplete(
 ): boolean {
   const taggedIds = new Set(
     sessions
-      .filter(({ openRouterProviderTag }) => openRouterProviderTag !== null)
+      .filter(
+        ({ openRouterProviderTag }) =>
+          readOpenRouterProviderRouting(openRouterProviderTag)?.type ===
+          "provider",
+      )
       .map(({ id }) => id),
   );
   return (

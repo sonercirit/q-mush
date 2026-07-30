@@ -16,6 +16,14 @@ function clearMountedEditor(): void {
 
 afterEach(clearMountedEditor);
 
+function expectToolEditorCollapsed(
+  findUpdateButton: () => HTMLButtonElement | undefined,
+  findDescription: () => HTMLParagraphElement | undefined,
+): void {
+  expect(findUpdateButton()).toBeUndefined();
+  expect(findDescription()).toBeUndefined();
+}
+
 test("shows update access only while the tool picker is expanded", () => {
   const container = mountTestView(
     () => (
@@ -36,13 +44,18 @@ test("shows update access only while the tool picker is expanded", () => {
     [...container.querySelectorAll<HTMLButtonElement>("button")].find(
       ({ textContent }) => textContent === "Update tool access",
     );
+  const findDescription = (): HTMLParagraphElement | undefined =>
+    [...container.querySelectorAll<HTMLParagraphElement>("p")].find(
+      ({ textContent }) =>
+        textContent.includes("Changes fence the current execution generation"),
+    );
 
   expect(toolToggle.textContent).toBe("Expand");
   expect(toolToggle.getAttribute("aria-expanded")).toBe("false");
   expect(
     container.querySelector("[data-tool-picker-controls='true']"),
   ).toBeNull();
-  expect(findUpdateButton()).toBeUndefined();
+  expectToolEditorCollapsed(findUpdateButton, findDescription);
 
   toolToggle.click();
 
@@ -52,10 +65,11 @@ test("shows update access only while the tool picker is expanded", () => {
     container.querySelector("[data-tool-picker-controls='true']"),
   ).toBeInstanceOf(HTMLDivElement);
   expect(findUpdateButton()).toBeInstanceOf(HTMLButtonElement);
+  expect(findDescription()).toBeInstanceOf(HTMLParagraphElement);
 
   toolToggle.click();
 
-  expect(findUpdateButton()).toBeUndefined();
+  expectToolEditorCollapsed(findUpdateButton, findDescription);
 });
 
 test("keeps the tool draft stable across unrelated realtime detail updates", async () => {

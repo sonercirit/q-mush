@@ -163,8 +163,9 @@ test("renders the session list as a scrollable region", () => {
     sessions: [TEST_SESSION_DETAIL],
   });
 
-  expect(html).toMatch(/<ul class="[^"]*max-h-144[^"]*overflow-y-auto[^"]*"/u);
-  expect(html).not.toContain("data-scroll-key");
+  expect(html).toContain(
+    "session-list-items min-h-0 flex-1 space-y-2 overflow-y-auto",
+  );
 });
 
 test("renders independently filtered session instructions and activity", () => {
@@ -288,7 +289,7 @@ test("renders independently filtered session instructions and activity", () => {
     "{&quot;path&quot;:&quot;README.md&quot;,&quot;offset&quot;:1}",
   );
   expect(html).toContain("# Q Mush");
-  expect(html).toContain(">Continue without message</button>");
+  expect(html).toContain(">Continue without message</span>");
 });
 
 test("renders image pickers, previews, and transcript images", () => {
@@ -356,6 +357,15 @@ test("shows context percentage and warning colors", () => {
   expect(yellow).toContain("text-amber-200");
   expect(red).toContain("Context: 180K / 200K (90%)");
   expect(red).toContain("text-rose-200");
+});
+
+test("renders an optional custom agent-file path input", () => {
+  const html = renderPanel(SESSION_STATE);
+
+  expect(html).toMatch(
+    /<input[^>]*id="session-agent-file-path"[^>]*name="agentFilePath"/u,
+  );
+  expect(html).toContain("Agent file path (optional)");
 });
 
 test("renders a directory browser beside the working-directory input", () => {

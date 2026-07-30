@@ -6,6 +6,17 @@ import {
   type Setter,
 } from "solid-js";
 
+export const SESSION_EDITOR_SECTION_CLASSES =
+  "mt-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4";
+const SESSION_EDITOR_DESCRIPTION_CLASSES =
+  "mt-1 text-xs leading-5 text-slate-500";
+
+export function SessionEditorDescription(props: {
+  readonly children: JSX.Element;
+}): JSX.Element {
+  return <p class={SESSION_EDITOR_DESCRIPTION_CLASSES}>{props.children}</p>;
+}
+
 interface SessionEditorSectionProps {
   readonly children: JSX.Element;
   readonly description: JSX.Element;
@@ -32,7 +43,7 @@ export function SessionEditorSection(
 ): JSX.Element {
   const [expanded, setExpanded] = createSignal(false);
   return (
-    <section class="mt-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+    <section class={SESSION_EDITOR_SECTION_CLASSES}>
       <h4 class="text-sm font-semibold text-slate-200">
         <span>{props.title}</span>
         <button
@@ -51,7 +62,7 @@ export function SessionEditorSection(
         </button>
       </h4>
       <Show when={expanded()}>
-        <p class="mt-1 text-xs leading-5 text-slate-500">{props.description}</p>
+        <SessionEditorDescription>{props.description}</SessionEditorDescription>
         {props.children}
       </Show>
     </section>

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import type { AuthenticatedUser } from "../../shared/auth-model.ts";
 import { SESSION_OPENROUTER_PROVIDERS_PATH } from "../../shared/routes.ts";
 import { testAgentModelCatalog } from "../../shared/test/agent-model-fixtures.ts";
@@ -20,6 +20,36 @@ const SELECTED_INPUT = {
   openRouterProviderTag: "together",
   provider: "openrouter" as const,
 };
+
+type MetadataInput = Parameters<typeof sessionMetadata>[0]["input"];
+type ProviderDiscovery = Parameters<
+  typeof sessionMetadata
+>[0]["discoverProviders"];
+
+async function metadataWithoutProviderDiscovery(
+  input: MetadataInput,
+  discoverProviders: ProviderDiscovery,
+) {
+  return sessionMetadata({
+    credential: openRouterCredential(),
+    discoverModels: () => Promise.resolve(testAgentModelCatalog()),
+    discoverProviders,
+    input,
+    ownerId: "owner-1",
+  });
+}
+
+async function expectSuccessfulMetadata(
+  input: MetadataInput,
+  discoverProviders: ProviderDiscovery,
+): Promise<void> {
+  await expect(
+    metadataWithoutProviderDiscovery(input, discoverProviders),
+  ).resolves.toEqual({
+    maxContextTokens: 128_000,
+    providerPricing: null,
+  });
+}
 
 function metadataOptions(
   overrides: Partial<Parameters<typeof sessionMetadata>[0]> = {},
@@ -151,6 +181,29 @@ describe("OpenRouter session provider validation", () => {
     });
   });
 
+  test("skips routing modes when prevalidating credential reassignment", async () => {
+    const discover = vi.fn(() =>
+      Promise.resolve(TEST_OPENROUTER_PROVIDER_CATALOG),
+    );
+
+    for (const selection of [
+      "q-mush-routing:price",
+      "q-mush-routing:order:together",
+    ]) {
+      await expect(
+        prepareOpenRouterSessionCredentialProviderState({
+          credential: openRouterCredential(),
+          discover,
+          ownerId: "owner-1",
+          snapshot: reassignmentSnapshot(selection),
+        }),
+      ).resolves.toMatchObject({
+        preparedProviderState: { metadataUpdates: [] },
+      });
+    }
+    expect(discover).not.toHaveBeenCalled();
+  });
+
   test("rejects reassignment when a selected tag is unavailable", async () => {
     await expect(
       prepareOpenRouterSessionCredentialProviderState({
@@ -190,19 +243,20 @@ describe("OpenRouter session provider validation", () => {
     ).resolves.toEqual({ error: "validation_failed" });
   });
 
+  test("keeps routing modes independent of endpoint discovery", async () => {
+    await expectSuccessfulMetadata(
+      {
+        ...SELECTED_INPUT,
+        openRouterProviderTag: "q-mush-routing:latency",
+      },
+      () => Promise.reject(new Error("must not run")),
+    );
+  });
+
   test("keeps automatic routing independent of endpoint discovery", async () => {
-    await expect(
-      sessionMetadata({
-        credential: openRouterCredential(),
-        discoverModels: () => Promise.resolve(testAgentModelCatalog()),
-        discoverProviders: () =>
-          Promise.resolve(TEST_OPENROUTER_PROVIDER_CATALOG),
-        input: { ...SELECTED_INPUT, openRouterProviderTag: null },
-        ownerId: "owner-1",
-      }),
-    ).resolves.toEqual({
-      maxContextTokens: 128_000,
-      providerPricing: null,
-    });
+    await expectSuccessfulMetadata(
+      { ...SELECTED_INPUT, openRouterProviderTag: null },
+      () => Promise.resolve(TEST_OPENROUTER_PROVIDER_CATALOG),
+    );
   });
 });

@@ -127,7 +127,7 @@ export function SessionResults(props: SessionResultsProps): JSX.Element {
 
   return (
     <div
-      class="session-results mt-7 grid min-w-0 gap-4 lg:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[20rem_minmax(0,1fr)]"
+      class="session-results mt-7 grid min-w-0 items-stretch gap-4 lg:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[20rem_minmax(0,1fr)]"
       data-session-focus-mode={String(props.focusMode())}
       data-session-results="true"
     >
@@ -141,7 +141,7 @@ export function SessionResults(props: SessionResultsProps): JSX.Element {
       <aside
         aria-hidden={props.focusMode() && !listOpen() ? "true" : undefined}
         aria-label="Agent sessions"
-        class="session-list-panel min-w-0"
+        class="session-list-panel min-h-0 min-w-0 self-stretch"
         data-session-list-open={String(listOpen())}
         data-session-list-panel="true"
         id="session-list-drawer"
@@ -150,7 +150,7 @@ export function SessionResults(props: SessionResultsProps): JSX.Element {
         onMouseLeave={closeOpenListAndFocusDetail}
         ref={setListPanel}
       >
-        <div class="session-list-surface">
+        <div class="session-list-surface flex h-full min-h-0 flex-col">
           <div class="session-list-heading">
             <span>Sessions</span>
             <button

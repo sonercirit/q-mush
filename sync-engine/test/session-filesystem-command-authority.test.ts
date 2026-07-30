@@ -160,6 +160,28 @@ test.each(["agent-file", "directory"] as const)(
   },
 );
 
+test("passes a custom agent file path to the runner", async () => {
+  const broker = queuedBroker();
+  const result = loadSessionAgentFile(
+    broker,
+    { ...testSession(), agentFilePath: "config/instructions.md" },
+    new AbortController().signal,
+    () => true,
+  );
+  const command = broker.take(RUNNER_ID);
+
+  expect(command?.arguments).toEqual({
+    path: "config/instructions.md",
+  });
+  if (command !== undefined) {
+    broker.complete(RUNNER_ID, command.id, {
+      output: JSON.stringify(null),
+      state: "completed",
+    });
+  }
+  await expect(result).resolves.toBeNull();
+});
+
 test("cancellation uses the parent session identity for agent-file and directory commands", async () => {
   const broker = queuedBroker();
   const setup = helpers(broker);

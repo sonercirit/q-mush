@@ -62,6 +62,7 @@ export interface AgentSessionMessage extends AttachmentContentFields {
 export interface AgentSessionSummary {
   readonly activeDurationMs: number;
   readonly activeStartedAt: number | null;
+  readonly agentFilePath: string | null;
   readonly autoCompact: boolean;
   readonly costBasis: AgentSessionCostBasis;
   readonly costUsd: number;

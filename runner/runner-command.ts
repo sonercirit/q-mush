@@ -1,11 +1,16 @@
 import { isAbsolute, relative, resolve } from "node:path";
-import { RUNNER_AGENT_FILE_COMMAND } from "../shared/agent-file.ts";
+import {
+  readAgentFilePath,
+  RUNNER_AGENT_FILE_COMMAND,
+  RUNNER_AGENT_FILE_PATH_ARGUMENT,
+} from "../shared/agent-file.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import {
   failedRunnerCommandResult,
   readRunnerExecutionEnvironment,
   RUNNER_EXECUTION_CLEANUP_COMMAND,
   RUNNER_TERMINAL_CLEANUP_ARGUMENT,
+  type RunnerCommandArguments,
   type RunnerCommandResult,
   type RunnerToolCommand,
 } from "../shared/runner-command-broker.ts";
@@ -97,8 +102,15 @@ function mapContainerPath(root: string, path: string): string {
 
 function agentFileResult(
   workingDirectory: string,
+  arguments_: RunnerCommandArguments,
 ): Promise<RunnerCommandResult> {
-  return loadRunnerAgentFile(workingDirectory).then((agentFile) => ({
+  const pathValue = arguments_[RUNNER_AGENT_FILE_PATH_ARGUMENT];
+  const path =
+    pathValue === undefined ? undefined : readAgentFilePath(pathValue);
+  if (path === null || (pathValue !== undefined && path === undefined)) {
+    return Promise.reject(new Error("The agent file path is invalid"));
+  }
+  return loadRunnerAgentFile(workingDirectory, path).then((agentFile) => ({
     output: JSON.stringify(agentFile),
     state: "completed",
   }));
@@ -183,7 +195,7 @@ export class RunnerCommandExecutor {
         const root = await resolveRunnerWorkspace(command.workingDirectory);
         await this.#containers.prepare(command.sessionId, root, signal);
         if (command.tool === RUNNER_AGENT_FILE_COMMAND) {
-          return await agentFileResult(root);
+          return await agentFileResult(root, command.arguments);
         }
         const shell = async (
           _workspace: string,
@@ -218,7 +230,10 @@ export class RunnerCommandExecutor {
       }
 
       if (command.tool === RUNNER_AGENT_FILE_COMMAND) {
-        return await agentFileResult(command.workingDirectory);
+        return await agentFileResult(
+          command.workingDirectory,
+          command.arguments,
+        );
       }
 
       return await executeRunnerToolResult(

@@ -211,16 +211,20 @@ function isStreamedMessage(
 function persistedMessages(
   detail: AgentSessionDetail,
 ): AgentSessionDetail["messages"] {
-  const messages = detail.messages.filter(
-    (message) => !isStreamedMessage(detail.id, message),
-  );
-  return messages.length === detail.messages.length
+  let streamStart = detail.messages.length;
+  while (streamStart > 0) {
+    const message = detail.messages[streamStart - 1];
+    if (message === undefined || !isStreamedMessage(detail.id, message)) break;
+    streamStart -= 1;
+  }
+  return streamStart === detail.messages.length
     ? sortedMessages(detail)
-    : messages;
+    : detail.messages.slice(0, streamStart);
 }
 
 function persistedDetail(detail: AgentSessionDetail): AgentSessionDetail {
-  return { ...detail, messages: persistedMessages(detail) };
+  const messages = persistedMessages(detail);
+  return messages === detail.messages ? detail : { ...detail, messages };
 }
 
 function sessionIsActive(detail: AgentSessionDetail): boolean {
@@ -326,6 +330,57 @@ function reconcileStream(
   return { messages, persisted: false };
 }
 
+function streamedMessage(
+  detail: AgentSessionDetail,
+  role: StreamRole,
+): AgentSessionMessage | undefined {
+  const message = detail.messages.at(role === "assistant" ? -1 : -2);
+  return message?.id === streamedMessageId(detail.id, role)
+    ? message
+    : undefined;
+}
+
+function streamMessages(
+  detail: AgentSessionDetail,
+  streamed: StreamedSessionContent,
+): ReconciledStream {
+  const thinking = streamedMessage(detail, "thinking");
+  const assistant = streamedMessage(detail, "assistant");
+  const thinkingPersisted = streamed.thinking.length === 0;
+  const assistantPersisted = streamed.content.length === 0;
+  if (thinkingPersisted && assistantPersisted) {
+    return { messages: detail.messages, persisted: true };
+  }
+  if (
+    (thinkingPersisted || thinking?.content === streamed.thinking) &&
+    (assistantPersisted || assistant?.content === streamed.content)
+  ) {
+    return { messages: detail.messages, persisted: false };
+  }
+
+  const messages = persistedMessages(detail);
+  return {
+    messages: [
+      ...messages,
+      ...(thinkingPersisted
+        ? []
+        : [
+            thinking?.content === streamed.thinking
+              ? thinking
+              : transientMessage(detail, "thinking", streamed.thinking),
+          ]),
+      ...(assistantPersisted
+        ? []
+        : [
+            assistant?.content === streamed.content
+              ? assistant
+              : transientMessage(detail, "assistant", streamed.content),
+          ]),
+    ],
+    persisted: false,
+  };
+}
+
 export class SessionRealtimeState {
   readonly #streamedContent = new Map<string, StreamedSessionContent>();
   readonly #view: RevisionState<SessionViewState>;
@@ -390,6 +445,8 @@ export class SessionRealtimeState {
       selected && view.detail?.id === event.sessionId
         ? persistedDetail(view.detail)
         : undefined;
+    const visibleSelectedDetail =
+      selected && view.detail?.id === event.sessionId ? view.detail : undefined;
     const active =
       selectedDetail !== undefined && sessionIsActive(selectedDetail);
 
@@ -420,21 +477,20 @@ export class SessionRealtimeState {
       return;
     }
 
-    const currentMessages = view.detail?.messages ?? [];
-    const visibleMessages = reconcileStream(selectedDetail, next).messages;
-    const visibleDetail = retainUnchangedSessionData(view.detail, {
-      ...selectedDetail,
-      messages: visibleMessages.map((message) => {
-        if (!isStreamedMessage(event.sessionId, message)) {
-          return message;
-        }
-        const existing = currentMessages.find(({ id }) => id === message.id);
-        return existing?.content !== message.content ? message : existing;
-      }),
-    });
-    if (!sessionDataMatches(view.detail, visibleDetail)) {
-      this.#view.patch({ detail: visibleDetail });
+    if (visibleSelectedDetail === undefined) {
+      return;
     }
+    const currentMessages = visibleSelectedDetail.messages;
+    const visibleMessages = streamMessages(
+      visibleSelectedDetail,
+      next,
+    ).messages;
+    if (visibleMessages === currentMessages) {
+      return;
+    }
+    this.#view.patch({
+      detail: { ...visibleSelectedDetail, messages: visibleMessages },
+    });
   }
 
   #selectedForToolStream(sessionId: string, requireDetail: boolean): boolean {

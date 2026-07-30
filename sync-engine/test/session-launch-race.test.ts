@@ -412,11 +412,16 @@ function spawnInput(
   };
 }
 
+function spawnedSession(setup: AgentActionsTestSetup) {
+  return setup.store
+    .list(TEST_USER_ID)
+    .find(({ id }) => id !== setup.parent.id);
+}
+
 function spawnedSessionAutoCompact(
   setup: AgentActionsTestSetup,
 ): boolean | undefined {
-  return setup.store.list(TEST_USER_ID).find(({ id }) => id !== setup.parent.id)
-    ?.autoCompact;
+  return spawnedSession(setup)?.autoCompact;
 }
 
 function parseToolOutput(
@@ -584,6 +589,19 @@ function launchRaceTests(expected: LaunchRaceExpectation): void {
     assertLaunchResponse(setup, setup.launch, expected, "agent");
   });
 }
+
+test("validates and persists a custom agent-file path for spawned sessions", async () => {
+  const setup = agentActionsSetup("none", false);
+  const agentFilePath = "config/instructions.md";
+
+  await executeSessionAgentTool(setup.actions, "spawn_session", {
+    ...spawnInput(setup, "Create with custom instructions"),
+    agentFilePath,
+  });
+
+  expect(spawnedSession(setup)?.agentFilePath).toBe(agentFilePath);
+  closeSessionTestDatabase(setup.database);
+});
 
 test("validates and persists spawn auto-compaction", async () => {
   for (const autoCompact of ["false", 0, null]) {

@@ -111,17 +111,22 @@ describe("session compaction persistence", () => {
   test("persists and ends the successor turn for terminal compaction", () => {
     const setup = compactionStoreWithUsage();
     const running = requireCompactionSession(setup.store);
+    const startedAt = TEST_NOW + 4;
+    const endedAt = startedAt + 12_345;
 
     setup.store.compactRuntimeTerminal(
       running.id,
       "Stop at this handoff.",
       COMPACTION_USAGE,
-      TEST_NOW + 4,
+      endedAt,
       running.generation,
+      startedAt,
       null,
     );
 
-    expect(requireCompactionSession(setup.store).status).toBe("idle");
+    const compacted = requireCompactionSession(setup.store);
+    expect(compacted.status).toBe("idle");
+    expect(compacted.turns).toMatchObject([{ endedAt, startedAt }]);
     expectCurrentCompactionTurn(setup, true);
     expect(
       setup.database
@@ -166,6 +171,7 @@ describe("session compaction persistence", () => {
         COMPACTION_USAGE,
         TEST_NOW + 5,
         current.generation,
+        TEST_NOW + 5,
       );
     }).toThrow("agent session was stopped");
 

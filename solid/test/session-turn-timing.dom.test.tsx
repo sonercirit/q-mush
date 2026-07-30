@@ -5,6 +5,7 @@ import type {
   AgentSessionTurn,
 } from "../../shared/session-model.ts";
 import { sessionTurnTiming } from "../../shared/session-turn-timing.ts";
+import { startedAtUtc } from "../../shared/test/session-fixtures.ts";
 import { createDisplaySessionMessage } from "../session-message.ts";
 import { disposeTestViews } from "./dom-test-helpers.ts";
 import {
@@ -160,6 +161,109 @@ function activeTranscript(startedAt: number, id: string) {
 afterEach(() => {
   disposeTestViews(disposals);
   vi.useRealTimers();
+});
+
+test("places each turn's own duration after its last durable message", () => {
+  const firstStartedAt = startedAtUtc();
+  const secondStartedAt = firstStartedAt + 120_000;
+  const messages = [
+    {
+      ...transcriptTestMessage(
+        "first-assistant",
+        "Calling the first tool",
+        "assistant",
+        firstStartedAt + 1_000,
+      ),
+      turnId: "first-turn",
+    },
+    {
+      ...transcriptTestMessage(
+        "first-tool-result",
+        "First tool output",
+        "tool",
+        firstStartedAt + 2_000,
+      ),
+      turnId: "first-turn",
+    },
+    {
+      ...transcriptTestMessage(
+        "second-assistant",
+        "Calling the second tool",
+        "assistant",
+        secondStartedAt + 1_000,
+      ),
+      turnId: "second-turn",
+    },
+    {
+      ...transcriptTestMessage(
+        "second-tool-result",
+        "Second tool output",
+        "tool",
+        secondStartedAt + 2_000,
+      ),
+      turnId: "second-turn",
+    },
+  ];
+  const view = mountTestTranscriptView({
+    messages: () => messages,
+    status: () => "idle",
+    turns: () => [
+      {
+        boundaryMessageId: messages[0]?.id ?? null,
+        endedAt: firstStartedAt + 83_456,
+        executionGeneration: 0,
+        id: "first-turn",
+        startedAt: firstStartedAt,
+      },
+      {
+        boundaryMessageId: messages[2]?.id ?? null,
+        endedAt: secondStartedAt + 5_987,
+        executionGeneration: 1,
+        id: "second-turn",
+        startedAt: secondStartedAt,
+      },
+    ],
+  });
+  disposals.push(view.dispose);
+
+  const timings = [
+    ...view.container.querySelectorAll("[data-turn-timing='completed']"),
+  ];
+  expect(timings).toHaveLength(2);
+  expect(timings.map(({ textContent }) => textContent)).toEqual([
+    expect.stringContaining("Duration: 1m 23s"),
+    expect.stringContaining("Duration: 5s"),
+  ]);
+  for (const [messageId, timing, nextMessageId] of [
+    ["first-tool-result", timings[0], "second-assistant"],
+    ["second-tool-result", timings[1], undefined],
+  ] as const) {
+    const lastMessage = view.container.querySelector(
+      `[data-render-boundary='message:${messageId}']`,
+    );
+    expect(lastMessage).not.toBeNull();
+    expect(timing).toBeDefined();
+    if (lastMessage === null || timing === undefined) {
+      throw new Error("Missing durable turn transcript elements");
+    }
+    expect(
+      lastMessage.compareDocumentPosition(timing) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+    if (nextMessageId !== undefined) {
+      const nextMessage = view.container.querySelector(
+        `[data-render-boundary='message:${nextMessageId}']`,
+      );
+      expect(nextMessage).not.toBeNull();
+      if (nextMessage === null) {
+        throw new Error("Missing following turn transcript message");
+      }
+      expect(
+        timing.compareDocumentPosition(nextMessage) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).not.toBe(0);
+    }
+  }
 });
 
 test("active clocks share one interval and release it after the final dispose", () => {

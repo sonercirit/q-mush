@@ -51,7 +51,7 @@ function expectUnavailableComposer(html: string, reason: string): void {
 
 function expectContinueDisabled(html: string): void {
   expect(html).toMatch(
-    /<button[^>]*disabled[^>]*>Continue without message<\/button>/u,
+    /<button[^>]*disabled[^>]*>.*Continue without message.*<\/button>/u,
   );
 }
 
@@ -103,7 +103,7 @@ test.each([
     } else {
       expect(html).not.toContain('data-session-steer="true"');
     }
-    expect(html).not.toContain(">Continue without message</button>");
+    expect(html).not.toContain(">Continue without message</span>");
   },
 );
 
@@ -120,7 +120,7 @@ test.each([
     expect(html).toMatch(/<textarea[^>]*name="prompt"(?![^>]*disabled)/u);
     expect(html).not.toMatch(/<textarea[^>]*\sreadonly(?:=|\s|>)/iu);
     expect(html).toMatch(/<button[^>]*>.*Send.*<\/button>/u);
-    expect(html).toContain(">Continue without message</button>");
+    expect(html).toContain(">Continue without message</span>");
     expect(html).toContain('data-session-composer-actions="true"');
     expect(html).not.toContain("sm:self-end");
     expect(html).not.toContain(">Stop session</button>");

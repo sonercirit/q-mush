@@ -1,6 +1,7 @@
 import {
   readRunnerAgentFileOutput,
   RUNNER_AGENT_FILE_COMMAND,
+  RUNNER_AGENT_FILE_PATH_ARGUMENT,
   type AgentFile,
 } from "../shared/agent-file.ts";
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
@@ -14,7 +15,10 @@ export async function loadSessionAgentFile(
 ): Promise<AgentFile | null> {
   const result = await broker.dispatch(
     {
-      arguments: {},
+      arguments:
+        session.agentFilePath === null
+          ? {}
+          : { [RUNNER_AGENT_FILE_PATH_ARGUMENT]: session.agentFilePath },
       authorize,
       executionEnvironment: session.executionEnvironment,
       runnerId: session.runnerId,

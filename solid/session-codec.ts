@@ -1,6 +1,7 @@
 import {
   isAgentModelId,
   isAgentReasoningEffort,
+  isOpenRouterProviderSelection,
   isOpenRouterProviderTag,
   type AgentModelCatalog,
   type AgentModelOption,
@@ -266,6 +267,7 @@ function readSummary(value: unknown): AgentSessionSummary {
     activeStartedAtValue === null
       ? null
       : readFiniteNumber(activeStartedAtValue);
+  const agentFilePath = readNullableString(value["agentFilePath"]);
   let providerPricing: ProviderModelPricing | null;
   try {
     providerPricing = readModelPricing(value["providerPricing"]);
@@ -319,6 +321,7 @@ function readSummary(value: unknown): AgentSessionSummary {
     activeDurationMs < 0 ||
     !Number.isSafeInteger(activeDurationMs) ||
     activeStartedAt === undefined ||
+    agentFilePath === undefined ||
     (activeStartedAt !== null && !Number.isSafeInteger(activeStartedAt)) ||
     typeof autoCompact !== "boolean" ||
     (costBasis !== "none" &&
@@ -350,7 +353,7 @@ function readSummary(value: unknown): AgentSessionSummary {
     provider === undefined ||
     openRouterProviderTag === undefined ||
     (openRouterProviderTag !== null &&
-      !isOpenRouterProviderTag(openRouterProviderTag)) ||
+      !isOpenRouterProviderSelection(openRouterProviderTag)) ||
     parentExecutionGeneration === undefined ||
     (parentExecutionGeneration !== null &&
       (!Number.isSafeInteger(parentExecutionGeneration) ||
@@ -386,6 +389,7 @@ function readSummary(value: unknown): AgentSessionSummary {
   return {
     activeDurationMs,
     activeStartedAt,
+    agentFilePath,
     autoCompact,
     costBasis,
     costUsd,
@@ -545,6 +549,7 @@ export function summaryFromDetail(
   return {
     activeDurationMs: detail.activeDurationMs,
     activeStartedAt: detail.activeStartedAt,
+    agentFilePath: detail.agentFilePath,
     autoCompact: detail.autoCompact,
     costBasis: detail.costBasis,
     costUsd: detail.costUsd,

@@ -461,7 +461,10 @@ export class SessionController {
   setDraftAutoCompact(autoCompact: boolean): void {
     this.#patchDraft({ autoCompact });
   }
-  setDraftField(name: "prompt" | "workingDirectory", value: string): void {
+  setDraftField(
+    name: "agentFilePath" | "prompt" | "workingDirectory",
+    value: string,
+  ): void {
     this.#patchDraft({ [name]: value });
   }
   insertPrompt(value: string, replace = false): boolean {

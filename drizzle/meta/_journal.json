@@ -162,6 +162,13 @@
       "when": 1785357268552,
       "tag": "0022_far_magma",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1785383224053,
+      "tag": "0023_massive_peter_quill",
+      "breakpoints": true
     }
   ]
 }

@@ -9,6 +9,10 @@ import {
 } from "solid-js";
 import type { AgentSessionToolName } from "../shared/agent-tools.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
+import {
+  SESSION_EDITOR_SECTION_CLASSES,
+  SessionEditorDescription,
+} from "./session-editor-client.tsx";
 import { SessionToolPicker } from "./session-tool-picker.tsx";
 
 export function SessionToolUpdateEditor(props: {
@@ -43,12 +47,14 @@ export function SessionToolUpdateEditor(props: {
   };
 
   return (
-    <section class="mt-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+    <section class={SESSION_EDITOR_SECTION_CLASSES}>
       <h4 class="text-sm font-semibold text-slate-200">Session tool access</h4>
-      <p class="mt-1 text-xs leading-5 text-slate-500">
-        Changes fence the current execution generation. Newly enabled tools
-        start on the next turn; removed tools cannot pass the execution gate.
-      </p>
+      <Show when={expanded()}>
+        <SessionEditorDescription>
+          Changes fence the current execution generation. Newly enabled tools
+          start on the next turn; removed tools cannot pass the execution gate.
+        </SessionEditorDescription>
+      </Show>
       <div class="mt-4">
         <SessionToolPicker
           disabled={props.disabled || applying()}

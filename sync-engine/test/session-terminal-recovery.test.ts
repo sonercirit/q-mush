@@ -92,6 +92,7 @@ test("recreation recognizes a committed compaction without repeating it", () => 
     { contextTokens: null, costBasis: "reported", costUsd: 2 },
     TEST_NOW + 2,
     requireCompactionSession(setup.store).generation,
+    TEST_NOW + 2,
   );
 
   const recreated = recreateCommitted(setup, runningSessionId);

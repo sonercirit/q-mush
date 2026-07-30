@@ -225,21 +225,34 @@ function pressComposerShortcut(
   );
 }
 
-test("shows Steer before Follow up with their shortcut hints", () => {
-  const { container } = mountedComposer();
-  const buttons = [
+function composerButtons(container: ParentNode): readonly HTMLButtonElement[] {
+  return [
     ...container.querySelectorAll<HTMLButtonElement>(
       "[data-session-composer-actions='true'] button",
     ),
   ];
+}
 
-  expect(buttons.map(({ textContent }) => textContent)).toEqual([
-    "SteerCtrl+Enter",
-    "Follow upCtrl+Shift+Enter",
-  ]);
+function expectComposerButtonShortcuts(
+  buttons: readonly HTMLButtonElement[],
+  labels: readonly string[],
+  keys: readonly string[],
+): void {
+  expect(buttons.map(({ textContent }) => textContent)).toEqual(labels);
   expect(
     buttons.map((button) => button.getAttribute("aria-keyshortcuts")),
-  ).toEqual(["Control+Enter", "Control+Shift+Enter"]);
+  ).toEqual(keys);
+}
+
+test("shows Steer before Follow up with their shortcut hints", () => {
+  const { container } = mountedComposer();
+  const buttons = composerButtons(container);
+
+  expectComposerButtonShortcuts(
+    buttons,
+    ["SteerCtrl+Enter", "Follow upCtrl+Shift+Enter"],
+    ["Control+Enter", "Control+Shift+Enter"],
+  );
 });
 
 test("the visible steer action flushes the draft and uses Ctrl+Enter", () => {
@@ -285,6 +298,31 @@ test("Ctrl+Enter and Meta+Enter send from an idle composer", () => {
   expect(send).toHaveBeenCalledTimes(2);
   expect(sendButton.textContent).toBe("SendCtrl+Enter");
   expect(sendButton.getAttribute("aria-keyshortcuts")).toBe("Control+Enter");
+});
+
+test("Ctrl/Cmd+Shift+Enter continues with the platform shortcut hint", () => {
+  const platform = vi
+    .spyOn(navigator, "platform", "get")
+    .mockReturnValue("MacIntel");
+  disposals.push(() => {
+    platform.mockRestore();
+  });
+  const { container, controller, prompt } = mountedComposer("idle");
+  const continueSession = vi
+    .spyOn(controller, "continueSession")
+    .mockResolvedValue();
+  const buttons = composerButtons(container);
+
+  pressComposerShortcut(prompt, { shiftKey: true });
+  pressComposerShortcut(prompt, { metaKey: true, shiftKey: true });
+
+  expect(continueSession).toHaveBeenCalledTimes(2);
+  expectComposerButtonShortcuts(
+    buttons,
+    ["Send⌘+Enter", "Continue without message⌘+Shift+Enter"],
+    ["Meta+Enter", "Meta+Shift+Enter"],
+  );
+  expect(buttons[1]?.title).toBe("Continue without message (⌘+Shift+Enter)");
 });
 
 test("pending instructions react to realtime detail updates", () => {

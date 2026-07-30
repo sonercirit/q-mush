@@ -33,6 +33,7 @@ export function compactStoredConversation(options: {
   readonly restartHandoff?: RestartHandoff | null;
   readonly settle?: boolean;
   readonly sessionId: string;
+  readonly startedAt: number;
   readonly summary: string;
   readonly usage: CompactionUsage;
 }): void {
@@ -74,6 +75,7 @@ export function compactStoredConversation(options: {
       previousExecutionGeneration: options.generation,
       segment: nextSegment,
       sessionId: options.sessionId,
+      startedAt: options.startedAt,
       userId,
     });
     transaction

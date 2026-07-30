@@ -178,6 +178,11 @@ const SESSION_AGENT_TOOLS = [
       "Spawn another agent session and return immediately. Configure it with the same fields available in the new-session pane. When it finishes or fails, its last message is sent back to this session.",
     name: "spawn_session",
     properties: {
+      agentFilePath: {
+        description:
+          "Optional agent-file path; relative paths use the working directory, absolute paths may be outside it",
+        ...STRING_PARAMETER,
+      },
       autoCompact: {
         description: "Automatically compact near the context limit",
         type: "boolean",

@@ -200,6 +200,10 @@ describe("provider HTTP turn recovery", () => {
     expect(resetDeltas(deltas)).toHaveLength(1);
   });
 
+  function recoveredResponse(): Response {
+    return Response.json({ choices: [{ message: { content: "Recovered." } }] });
+  }
+
   test("recovers from interrupted, early-EOF, and truncated accepted bodies", async () => {
     const cases: readonly {
       readonly expectedDelay: number;
@@ -222,10 +226,7 @@ describe("provider HTTP turn recovery", () => {
     ];
 
     for (const { expectedDelay, first } of cases) {
-      const provider = new ProviderResponses([
-        first,
-        Response.json({ choices: [{ message: { content: "Recovered." } }] }),
-      ]);
+      const provider = new ProviderResponses([first, recoveredResponse()]);
       const deltas: ProviderTextDelta[] = [];
 
       expect(
@@ -241,6 +242,84 @@ describe("provider HTTP turn recovery", () => {
         });
       }
     }
+  });
+
+  test("repairs malformed replayed tool calls before sending", async () => {
+    const provider = new ProviderResponses([recoveredResponse()]);
+
+    await openRouterModel(provider).complete([
+      ...USER_MESSAGE,
+      {
+        content: "```text\nFix\n```",
+        role: "assistant",
+        toolCalls: [
+          { arguments: "", id: "", name: "" },
+          { arguments: "", id: "repaired-call", name: "read" },
+          { arguments: "{}", id: "dangling-call", name: "read" },
+        ],
+      },
+      {
+        content: "# Q Mush",
+        role: "tool",
+        toolCallId: "repaired-call",
+        toolName: "read",
+      },
+    ]);
+
+    const body: unknown = await provider.requests[0]?.json();
+    expect(body).toMatchObject({
+      messages: [
+        { role: "system" },
+        { content: "Hello", role: "user" },
+        {
+          content: "```text\nFix\n```",
+          role: "assistant",
+          tool_calls: [
+            {
+              function: { arguments: "{}", name: "read" },
+              id: "repaired-call",
+              type: "function",
+            },
+          ],
+        },
+        {
+          content: "# Q Mush",
+          role: "tool",
+          tool_call_id: "repaired-call",
+        },
+      ],
+    });
+    expect(JSON.stringify(body)).not.toContain("dangling-call");
+  });
+
+  test("surfaces OpenRouter's nested provider error detail", async () => {
+    const raw = JSON.stringify({
+      error: {
+        message:
+          "An assistant message with tool_calls must be followed by matching tool results.",
+        type: "invalid_request_error",
+      },
+    });
+    const provider = new ProviderResponses([
+      Response.json(
+        {
+          error: {
+            code: 400,
+            message: "Provider returned error",
+            metadata: { provider_name: "Example", raw },
+          },
+        },
+        { status: 400 },
+      ),
+    ]);
+    const failure = await captureRejection(
+      openRouterModel(provider).complete(USER_MESSAGE),
+    );
+
+    expect(requireError(failure).message).toContain("Provider returned error");
+    expect(requireError(failure).message).toContain(
+      "An assistant message with tool_calls must be followed by matching tool results.",
+    );
   });
 
   test("bounds transient retries and preserves sanitized request detail", async () => {

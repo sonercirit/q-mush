@@ -15,6 +15,7 @@ import {
   type RunnerToolCommand,
 } from "../../shared/runner-command-broker.ts";
 import { testRunnerCommand } from "../../shared/test/runner-command-fixtures.ts";
+import { createTestAgentFileWorkspace } from "./agent-file-test-helpers.ts";
 import { useTemporaryDirectories } from "./temporary-directories.ts";
 
 const temporaryDirectory = useTemporaryDirectories("q-mush-command-test-");
@@ -395,9 +396,10 @@ describe("runner WebSocket protocol", () => {
   });
 
   test("loads the preferred workspace agent file for the server", async () => {
-    const root = await temporaryDirectory();
-    await writeFile(join(root, "AGENTS.md"), "Preferred instructions");
-    await writeFile(join(root, "CLAUDE.md"), "Ignored instructions");
+    const root = await createTestAgentFileWorkspace(temporaryDirectory, {
+      "AGENTS.md": "Preferred instructions",
+      "CLAUDE.md": "Ignored instructions",
+    });
 
     const output = await executeRunnerCommand({
       arguments: {},

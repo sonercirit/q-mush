@@ -343,15 +343,23 @@ export class SessionStore {
           restartHandoff: RestartHandoff | null,
         ],
   ): void {
-    const [sessionId, summary, usage, now, generation, restartHandoff] =
-      parameters;
+    const [
+      sessionId,
+      summary,
+      usage,
+      now,
+      generation,
+      startedAt,
+      restartHandoff,
+    ] = parameters;
     const target = this.#runtimeTarget(sessionId, now, generation);
     if (restartHandoff === undefined) {
-      compactRuntimeConversation({ ...target, summary, usage });
+      compactRuntimeConversation({ ...target, startedAt, summary, usage });
     } else {
       compactRuntimeTerminal({
         ...target,
         restartHandoff,
+        startedAt,
         summary,
         usage,
       });
@@ -359,25 +367,16 @@ export class SessionStore {
   }
 
   compactRuntimeTerminal(
-    ...[sessionId, summary, usage, now, generation, restartHandoff]: readonly [
+    ...parameters: readonly [
       ...RuntimeCompactionParameters,
       restartHandoff: RestartHandoff | null,
     ]
   ): void {
-    this.#compactRuntime([
-      sessionId,
-      summary,
-      usage,
-      now,
-      generation,
-      restartHandoff,
-    ]);
+    this.#compactRuntime(parameters);
   }
 
-  compactRuntimeConversation(
-    ...[sessionId, summary, usage, now, generation]: RuntimeCompactionParameters
-  ): void {
-    this.#compactRuntime([sessionId, summary, usage, now, generation]);
+  compactRuntimeConversation(...parameters: RuntimeCompactionParameters): void {
+    this.#compactRuntime(parameters);
   }
 
   updateRuntimeUsage(
@@ -653,6 +652,7 @@ export class SessionStore {
       usage,
       now,
       this.#currentGeneration(sessionId),
+      now,
     );
   }
 

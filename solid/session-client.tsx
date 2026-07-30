@@ -16,7 +16,6 @@ import { RetryNotice } from "./collection.tsx";
 import { ControllerRetryNotice } from "./controller-retry.tsx";
 import { controllerView } from "./controller-view.ts";
 import { CustomSelect, type CustomSelectOption } from "./custom-select.tsx";
-import { DirectoryBrowseButton } from "./directory-browse-button.tsx";
 import { DirectoryPicker } from "./directory-picker-client.tsx";
 import { findById } from "./id-selection.ts";
 import {
@@ -35,6 +34,10 @@ import {
   sessionCredentialSelectOptions,
   type SessionCredentialOption,
 } from "./session-credential-option.ts";
+import {
+  renderSessionField,
+  SessionDirectoryInput,
+} from "./session-directory-input.tsx";
 import { SessionExecutionEnvironmentSelect } from "./session-execution-environment.tsx";
 import { SessionResults } from "./session-focus-client.tsx";
 import {
@@ -55,7 +58,6 @@ import { runnerSelectOptions } from "./session-reassignment-client.ts";
 import { selectedSessionCredentialAvailable } from "./session-resource-availability.ts";
 import type { SessionRunnerViewProps } from "./session-runner-view-props.ts";
 import { SessionToolPicker } from "./session-tool-picker.tsx";
-import type { SessionViewState } from "./session-view-state.ts";
 
 export type {
   SessionDraft,
@@ -89,89 +91,6 @@ function selectedCredential(
   value: string,
 ): CredentialOption | undefined {
   return selectedSessionCredentialOption(credentials, value);
-}
-
-function renderSessionField(
-  id: string,
-  label: JSX.Element,
-  control: JSX.Element,
-): JSX.Element {
-  return (
-    <div>
-      <label class="text-sm font-medium text-slate-200" for={id}>
-        {label}
-      </label>
-      {control}
-    </div>
-  );
-}
-
-interface SessionControlOptions {
-  readonly disabled: boolean;
-  readonly name: string;
-}
-
-function sessionControlAttributes(
-  options: SessionControlOptions,
-  required: boolean,
-) {
-  return {
-    className:
-      "mt-2 min-w-0 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none",
-    disabled: options.disabled,
-    id: "session-directory",
-    name: options.name,
-    required,
-  };
-}
-
-function DirectoryInput(props: {
-  readonly controller: SessionController;
-  readonly onOpenDirectoryPicker: () => void;
-  readonly runnerAvailable: boolean;
-  readonly state: SessionViewState;
-}): JSX.Element {
-  const options = () => ({
-    disabled: props.state.creating,
-    label: "Working directory on runner",
-    name: "workingDirectory",
-  });
-
-  const openDirectoryPicker = (): void => {
-    props.onOpenDirectoryPicker();
-  };
-
-  return renderSessionField(
-    "session-directory",
-    <>{options().label}</>,
-    <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
-      <div class="min-w-0 flex-1">
-        <input
-          {...sessionControlAttributes(options(), true)}
-          onInput={(event) => {
-            props.controller.setDraftField(
-              "workingDirectory",
-              event.currentTarget.value,
-            );
-          }}
-          placeholder="/path/to/project"
-          type="text"
-          value={props.state.draft.workingDirectory}
-        />
-        <code
-          class="path-wrap mt-1 block min-w-0 text-xs text-slate-500"
-          data-draft-working-directory="true"
-        >
-          {props.state.draft.workingDirectory}
-        </code>
-      </div>
-      <DirectoryBrowseButton
-        class="min-h-11 shrink-0 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm font-semibold text-slate-200 transition hover:border-emerald-300/30 hover:text-emerald-200 disabled:cursor-not-allowed disabled:opacity-50 sm:mt-2 sm:self-start"
-        disabled={props.state.creating || !props.runnerAvailable}
-        onClick={openDirectoryPicker}
-      />
-    </div>,
-  );
 }
 
 const selectValue = selectedOptionValue;
@@ -360,12 +279,31 @@ function NewSessionForm(
         required
         selectedValue={selectedCredentialValue()}
       />
-      <DirectoryInput
+      <SessionDirectoryInput
         controller={props.controller}
         onOpenDirectoryPicker={props.onOpenDirectoryPicker}
         runnerAvailable={selectedRunnerId().length > 0}
         state={props.state}
       />
+      {renderSessionField(
+        "session-agent-file-path",
+        <>Agent file path (optional)</>,
+        <input
+          class="mt-2 min-w-0 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none"
+          disabled={props.state.creating}
+          id="session-agent-file-path"
+          name="agentFilePath"
+          onInput={(event) => {
+            props.controller.setDraftField(
+              "agentFilePath",
+              event.currentTarget.value,
+            );
+          }}
+          placeholder="AGENTS.md, config/instructions.md, or /absolute/path"
+          type="text"
+          value={props.state.draft.agentFilePath ?? ""}
+        />,
+      )}
       <SessionExecutionEnvironmentSelect
         controller={props.controller}
         state={props.state}

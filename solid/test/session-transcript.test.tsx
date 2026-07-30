@@ -5,6 +5,7 @@ import type {
   AgentSessionMessage,
   AgentSessionTurn,
 } from "../../shared/session-model.ts";
+import { startedAtUtc } from "../../shared/test/session-fixtures.ts";
 import {
   DEFAULT_SESSION_TRANSCRIPT_FILTERS,
   type SessionTranscriptFilters,
@@ -225,7 +226,7 @@ test("filters assistant text independently from tool calls on the same message",
 });
 
 test("shows timing for every completed turn", () => {
-  const firstStartedAt = Date.UTC(2026, 6, 27, 12, 0, 0);
+  const firstStartedAt = startedAtUtc();
   const firstEndedAt = firstStartedAt + 83_000;
   const secondStartedAt = firstEndedAt + 17_000;
   const secondEndedAt = secondStartedAt + 5_000;

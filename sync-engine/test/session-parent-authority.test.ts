@@ -183,6 +183,7 @@ function fenceParent(setup: AuthoritySetup): void {
 
 function spawnInput() {
   return {
+    agentFilePath: null,
     autoCompact: true,
     credentialId: CREDENTIAL_ID,
     executionEnvironment: "bare_metal" as const,

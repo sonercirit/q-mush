@@ -12,10 +12,15 @@ import type { SessionProviderDiscoveryState } from "./session-provider-select.ts
 import { emptySessionReassignmentDraft } from "./session-reassignment-client.ts";
 import { DEFAULT_SESSION_TRANSCRIPT_FILTERS } from "./session-transcript-filters.ts";
 
+const CURRENT_RUNNER_DIRECTORY = ".";
+
 export function mostRecentSessionDirectory(
   sessions: readonly Pick<AgentSessionSummary, "workingDirectory">[],
 ): string {
-  return sessions[0]?.workingDirectory ?? ".";
+  const recentDirectory = sessions[0]?.workingDirectory;
+  return recentDirectory === undefined || recentDirectory.length === 0
+    ? CURRENT_RUNNER_DIRECTORY
+    : recentDirectory;
 }
 
 function initialSessionDraft(): SessionDraft {
@@ -31,7 +36,7 @@ function initialSessionDraft(): SessionDraft {
     reasoningEffort: emptySelection,
     runnerId: emptySelection,
     tools: AGENT_SESSION_TOOL_NAMES,
-    workingDirectory: ".",
+    workingDirectory: CURRENT_RUNNER_DIRECTORY,
   };
 }
 

@@ -36,6 +36,7 @@ import {
   type AgentModelFactory,
   type SessionAgentModels,
 } from "./session-agent-models.ts";
+import { currentExecutionTools } from "./session-agent-tool-authority.ts";
 import {
   executeSessionAgentTool,
   type SessionAgentToolActions,
@@ -83,6 +84,7 @@ function recordCompaction(
   runtime: SessionAgentRuntimeDependencies,
   summary: string,
   usage: CompactionUsage,
+  startedAt: number,
   terminal = false,
 ): void {
   writeRuntime(runtime, (sessionId, now, generation) => {
@@ -93,6 +95,7 @@ function recordCompaction(
         usage,
         now,
         generation,
+        startedAt,
         runtime.detail.restartHandoff,
       );
       return;
@@ -103,6 +106,7 @@ function recordCompaction(
       usage,
       now,
       generation,
+      startedAt,
     );
   });
 }
@@ -202,12 +206,19 @@ export async function compactSessionConversation(
   }
   const conversation = sessionConversation(runtime);
   const compactor = models.createCompactor();
+  const startedAt = runtime.now();
   const estimateCost = (turn: Parameters<typeof compactionUsage>[0]) =>
     estimateAgentTurnCost(runtime.detail, turn.tokenUsage);
   const final = await compactor.compact(conversation, runtime.signal);
   throwIfAgentAborted(runtime.signal);
   const usage = compactionUsage(final, estimateCost);
-  recordCompaction(runtime, final.summary, usage, !continueAfterCompaction);
+  recordCompaction(
+    runtime,
+    final.summary,
+    usage,
+    startedAt,
+    !continueAfterCompaction,
+  );
   return "complete";
 }
 
@@ -316,6 +327,17 @@ export async function runSessionAgent(
     runtime.signal,
     handoffController.signal,
   ]);
+  const turnTools = new Set<AgentSessionToolName>(runtime.detail.tools);
+  const currentToolNames = (): readonly AgentSessionToolName[] | undefined =>
+    currentExecutionTools({
+      current: runtime.currentTools?.(),
+      isCurrent: runtime.isCurrent,
+      persisted: runtime.detail.tools,
+    });
+  const currentTools = (): ReadonlySet<AgentSessionToolName> | undefined => {
+    const tools = readAgentSessionToolNames(currentToolNames());
+    return tools === undefined ? undefined : new Set(tools);
+  };
   const dispatchRunnerTool = async (
     name: string,
     toolArguments: Readonly<Record<string, unknown>>,
@@ -328,14 +350,9 @@ export async function runSessionAgent(
         runtime.broker.dispatch(
           {
             arguments: toolArguments,
-            authorize: () => {
-              const current = runtime.currentTools?.();
-              return (
-                runtime.isCurrent() &&
-                (current === undefined ||
-                  current.some((candidate) => candidate === name))
-              );
-            },
+            authorize: () =>
+              currentToolNames()?.some((candidate) => candidate === name) ===
+              true,
             executionEnvironment: runtime.detail.executionEnvironment,
             generation: runtime.detail.generation,
             runnerId: runtime.detail.runnerId,
@@ -447,7 +464,7 @@ export async function runSessionAgent(
   };
   const skills = createAgentSkills({
     braveSearch: runtime.braveSearch,
-    currentTools: runtime.currentTools,
+    currentTools: currentToolNames,
     executeTool: dispatchTool,
     tools: runtime.detail.tools,
     userId: runtime.userId,
@@ -462,14 +479,6 @@ export async function runSessionAgent(
     runtime.userId,
   );
 
-  const turnTools = new Set<AgentSessionToolName>(runtime.detail.tools);
-  const currentTools = (): ReadonlySet<AgentSessionToolName> | undefined => {
-    const names =
-      runtime.currentTools?.() ??
-      (runtime.isCurrent() ? runtime.detail.tools : undefined);
-    const tools = readAgentSessionToolNames(names);
-    return tools === undefined ? undefined : new Set(tools);
-  };
   const takeSteeringMessages = () => {
     const messages = runtime.store.takeSteeringInputs(
       runtime.detail.id,
@@ -503,6 +512,7 @@ export async function runSessionAgent(
       handoffRequested: runtime.restartHandoffRequested,
       maxContextTokens: runtime.detail.maxContextTokens,
       model: models.agent,
+      now: runtime.now,
       onToolResult: (call, outcome) => {
         if (outcome.error !== undefined) {
           toolStream.failed(call.id, outcome.error);
@@ -510,8 +520,8 @@ export async function runSessionAgent(
           toolStream.finish(call.id, outcome.state ?? "completed");
         }
       },
-      recordCompaction: (summary, usage) => {
-        recordCompaction(runtime, summary, usage);
+      recordCompaction: (summary, usage, startedAt) => {
+        recordCompaction(runtime, summary, usage, startedAt);
       },
       recordMessage: (messages, usage, terminal) => {
         if (terminal && runtime.detail.restartHandoff === null) {

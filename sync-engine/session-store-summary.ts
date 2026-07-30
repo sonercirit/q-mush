@@ -26,6 +26,7 @@ function storedSessionSelection() {
   return {
     activeDurationMs: agentSessions.activeDurationMs,
     activeStartedAt: agentSessions.activeStartedAt,
+    agentFilePath: agentSessions.agentFilePath,
     autoCompact: agentSessions.autoCompact,
     costBasis: agentSessions.costBasis,
     costUsd: agentSessions.costUsd,
@@ -60,6 +61,7 @@ type StoredSessionSummary = Pick<
   typeof agentSessions.$inferSelect,
   | "activeDurationMs"
   | "activeStartedAt"
+  | "agentFilePath"
   | "autoCompact"
   | "costBasis"
   | "costUsd"

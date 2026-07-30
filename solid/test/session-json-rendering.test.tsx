@@ -10,6 +10,7 @@ import {
 import { DEFAULT_SESSION_TRANSCRIPT_FILTERS } from "../../solid/session-transcript-filters.ts";
 import { SessionTranscript } from "../../solid/session-transcript.tsx";
 import { renderSolidToString } from "./render-solid.tsx";
+import { testToolStream } from "./session-tool-stream-fixtures.ts";
 
 const RICH_JSON_VALUE =
   "first line  \nsecond line\n\n## Heading\n- item\n\n**bold**";
@@ -47,19 +48,26 @@ function message(options: {
       };
 }
 
-function toolStream(argumentsContent: string): ToolStreamEntry {
-  return {
-    arguments: argumentsContent,
-    callId: "live-call",
-    index: 0,
-    name: "bash",
-    sequence: 1,
-    sessionId: "session-1",
-    state: "running",
-    stderr: "",
+function renderTestTranscript(
+  messages: readonly AgentSessionMessage[],
+  toolStreams: readonly ToolStreamEntry[],
+): string {
+  return renderSolidToString(() => (
+    <SessionTranscript
+      agentFile={null}
+      executionEnvironment="bare_metal"
+      filters={DEFAULT_SESSION_TRANSCRIPT_FILTERS}
+      messages={messages}
+      toolStreams={toolStreams}
+      tools={[]}
+    />
+  ));
+}
+
+function toolStream(argumentsContent: string) {
+  return testToolStream("live-call", argumentsContent, "bash", {
     stdout: "",
-    streamId: "stream-1",
-  };
+  });
 }
 
 function expectRichJsonValue(html: string): void {
@@ -139,6 +147,10 @@ test("pretty-prints and colorizes a streaming JSON prefix", () => {
   expect(partialNumber).toContain('<span class="text-amber-300">-12.3e</span>');
 });
 
+function expectSpawnedSessionText(html: string): void {
+  expect(html).toContain("Spawned session completed:");
+}
+
 test("preserves surrounding text while formatting embedded JSON", () => {
   const html = renderSyntax(() =>
     renderStructuredCode(
@@ -146,7 +158,7 @@ test("preserves surrounding text while formatting embedded JSON", () => {
     ),
   );
 
-  expect(html).toContain("Spawned session completed:");
+  expectSpawnedSessionText(html);
   expect(html).toContain("Continue.");
   expect(html).toContain(
     '<span class="text-cyan-300">"status"</span>: <span class="text-emerald-300">"done"</span>',
@@ -184,7 +196,7 @@ test("colorizes embedded JSON in queued instructions", () => {
   ));
 
   expect(html).toContain("Queued steer");
-  expect(html).toContain("Spawned session completed:");
+  expectSpawnedSessionText(html);
   expect(html).toContain('data-language="json"');
   expect(html).toContain(
     '<span class="text-cyan-300">"result"</span>: <span class="text-emerald-300">"ok"</span>',
@@ -192,30 +204,24 @@ test("colorizes embedded JSON in queued instructions", () => {
 });
 
 test("colorizes mixed messages and partial settled and live tool arguments", () => {
-  const html = renderSolidToString(() => (
-    <SessionTranscript
-      agentFile={null}
-      executionEnvironment="bare_metal"
-      filters={DEFAULT_SESSION_TRANSCRIPT_FILTERS}
-      messages={[
-        message({
-          content: 'Spawned session completed:\n{"answer":42}',
-          id: "assistant-1",
-          role: "assistant",
-        }),
-        message({
-          content: "",
-          id: "assistant-2",
-          role: "assistant",
-          toolArguments: '{"settled":"still streaming',
-        }),
-      ]}
-      toolStreams={[toolStream('{"live":fal')]}
-      tools={[]}
-    />
-  ));
+  const html = renderTestTranscript(
+    [
+      message({
+        content: 'Spawned session completed:\n{"answer":42}',
+        id: "assistant-1",
+        role: "assistant",
+      }),
+      message({
+        content: "",
+        id: "assistant-2",
+        role: "assistant",
+        toolArguments: '{"settled":"still streaming',
+      }),
+    ],
+    [toolStream('{"live":fal')],
+  );
 
-  expect(html).toContain("Spawned session completed:");
+  expectSpawnedSessionText(html);
   expect(html).toContain(
     '<span class="text-cyan-300">"answer"</span>: <span class="text-amber-300">42</span>',
   );

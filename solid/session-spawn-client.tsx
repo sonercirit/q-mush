@@ -32,6 +32,7 @@ type SpawnSelect =
 
 function initialDraft(detail: AgentSessionDetail): SpawnDraft {
   return {
+    agentFilePath: "",
     autoCompact: detail.autoCompact,
     credential: `${detail.provider}:${detail.credentialId}`,
     executionEnvironment: detail.executionEnvironment,
@@ -84,6 +85,7 @@ function spawnSelection(
     return undefined;
   }
   return {
+    agentFilePath: draft.agentFilePath?.trim() ?? "",
     autoCompact: draft.autoCompact,
     credentialId: selected.credential.id,
     executionEnvironment: draft.executionEnvironment,
@@ -241,6 +243,26 @@ export function SessionSpawnEditor(props: SpawnEditorProps): JSX.Element {
             required
             type="text"
             value={draft().workingDirectory}
+          />
+        </div>
+        <div>
+          <label
+            class="text-sm font-medium text-slate-200"
+            for="spawn-agent-file-path"
+          >
+            Agent file path (optional)
+          </label>
+          <input
+            class="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white placeholder:text-slate-600"
+            disabled={pending()}
+            id="spawn-agent-file-path"
+            name="spawnAgentFilePath"
+            onInput={(event) => {
+              patch({ agentFilePath: event.currentTarget.value });
+            }}
+            placeholder="Relative to workspace or absolute"
+            type="text"
+            value={draft().agentFilePath ?? ""}
           />
         </div>
         <CustomSelect

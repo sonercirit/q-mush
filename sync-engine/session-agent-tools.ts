@@ -2,6 +2,7 @@ import {
   isAgentModelId,
   isAgentReasoningEffort,
 } from "../shared/agent-configuration.ts";
+import { readOptionalAgentFilePath } from "../shared/agent-file.ts";
 import type { AgentImage } from "../shared/agent-images.ts";
 import {
   readAgentSessionToolNames,
@@ -11,6 +12,7 @@ import { isProviderId } from "../shared/provider-credential-store.ts";
 import {
   failedRunnerCommandResult,
   readRunnerExecutionEnvironment,
+  type RunnerCommandArguments,
   type RunnerCommandResult,
 } from "../shared/runner-command-broker.ts";
 import { MAXIMUM_RUNNER_PATH_LENGTH } from "../shared/runner-directory-model.ts";
@@ -33,6 +35,7 @@ const MAXIMUM_SESSION_MESSAGE_LENGTH = 32_768;
 
 export interface SpawnSessionToolInput extends Pick<
   AgentSessionDetail,
+  | "agentFilePath"
   | "autoCompact"
   | "credentialId"
   | "executionEnvironment"
@@ -113,6 +116,7 @@ function spawnInput(
   arguments_: Readonly<Record<string, unknown>>,
 ): SpawnSessionToolInput {
   const credentialId = readIdentifier(arguments_["credentialId"]);
+  const agentFilePath = readOptionalAgentFilePath(arguments_["agentFilePath"]);
   const autoCompact = arguments_["autoCompact"];
   const executionEnvironment = readRunnerExecutionEnvironment(
     arguments_["executionEnvironment"],
@@ -133,6 +137,7 @@ function spawnInput(
 
   if (
     !hasOnlySessionToolArguments(arguments_, [
+      "agentFilePath",
       "autoCompact",
       "credentialId",
       "executionEnvironment",
@@ -145,6 +150,7 @@ function spawnInput(
       "workingDirectory",
     ]) ||
     (autoCompact !== undefined && typeof autoCompact !== "boolean") ||
+    agentFilePath === undefined ||
     credentialId === undefined ||
     executionEnvironment === undefined ||
     model === undefined ||
@@ -160,6 +166,7 @@ function spawnInput(
   }
 
   return {
+    agentFilePath,
     autoCompact: typeof autoCompact === "boolean" ? autoCompact : true,
     credentialId,
     executionEnvironment,
@@ -200,7 +207,7 @@ function failedToolOutput(error: unknown): RunnerCommandResult {
 export function executeSessionAgentTool(
   actions: SessionAgentToolActions,
   name: SessionAgentToolName,
-  arguments_: Readonly<Record<string, unknown>>,
+  arguments_: RunnerCommandArguments,
 ): Promise<RunnerCommandResult> {
   try {
     let output: Promise<string>;

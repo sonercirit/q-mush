@@ -51,9 +51,18 @@ function errorDetail(body: string): string {
   const error = value["error"];
   const errorMessage = isRecord(error) ? error["message"] : error;
   const detail = errorMessage ?? value["message"] ?? value["detail"];
-  return typeof detail === "string" && detail.trim().length > 0
-    ? detail.trim()
-    : fallback;
+  const metadata = isRecord(error) ? error["metadata"] : undefined;
+  const raw = isRecord(metadata) ? metadata["raw"] : undefined;
+  return (
+    [detail, raw]
+      .filter(
+        (part): part is string =>
+          typeof part === "string" && part.trim().length > 0,
+      )
+      .map((part) => part.trim())
+      .filter((part, index, parts) => parts.indexOf(part) === index)
+      .join(": ") || fallback
+  );
 }
 
 async function requestError(
