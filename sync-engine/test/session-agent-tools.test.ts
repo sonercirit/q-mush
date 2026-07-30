@@ -361,23 +361,23 @@ describe("session agent tools", () => {
     closeSessionTestDatabase(controlSetup.database);
   });
 
-  test("rejects absolute model agent-file paths", async () => {
+  test("accepts an absolute model agent-file path", async () => {
+    const agentFilePath = "/outside/child-instructions.md";
     const model = scriptedModel([
       {
-        content: "Trying outside instructions.",
+        content: "Delegate.",
         toolCalls: [
-          spawnCall(
-            "Do not launch",
-            undefined,
-            [],
-            CREDENTIAL_ID,
-            "/etc/passwd",
-          ),
+          spawnCall("Work", undefined, [], CREDENTIAL_ID, agentFilePath),
         ],
       },
-      { content: "Isolation confirmed.", toolCalls: [] },
+      { content: "Spawned.", toolCalls: [] },
     ]);
-    await expectRejectedSpawn(model, "spawn_session arguments are invalid");
+    const { childId, setup } = await startedChild(model);
+
+    expect(
+      setup.sessions.detailForUser(TEST_USER_ID, childId)?.agentFilePath,
+    ).toBe(agentFilePath);
+    closeSessionTestDatabase(setup.database);
   });
 
   test("rejects a spawn without access to its credential", async () => {
