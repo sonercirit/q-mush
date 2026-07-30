@@ -112,6 +112,20 @@ export function SessionPromptInput(
   );
 }
 
+interface ComposerActionProps {
+  readonly descriptionId: string;
+  readonly disabled: boolean;
+  readonly keys: string;
+}
+
+function composerActionProps(
+  descriptionId: string,
+  disabled: boolean,
+  keys: string,
+): ComposerActionProps {
+  return { descriptionId, disabled, keys };
+}
+
 export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
   const [localPrompt, setLocalPrompt] = createSignal(
     untrack(() => props.prompt),
@@ -146,9 +160,12 @@ export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
     }
     props.onKeyDown(event);
   };
-  const submit = (): void => {
+  const runAction = (action: (() => void) | undefined): void => {
     syncPrompt();
-    props.onSubmit();
+    action?.();
+  };
+  const submit = (): void => {
+    runAction(props.onSubmit);
   };
   const submitShortcut = (): {
     readonly keys: string;
@@ -163,6 +180,18 @@ export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
           keys: props.shortcuts.steerKeys,
           label: props.shortcuts.steerLabel,
         };
+  const steerAction = (): ComposerActionProps =>
+    composerActionProps(
+      props.availabilityDescriptionId,
+      props.disabled || props.onSteer === undefined,
+      props.shortcuts.steerKeys,
+    );
+  const continueAction = (): ComposerActionProps =>
+    composerActionProps(
+      props.availabilityDescriptionId,
+      props.disabled || props.onContinue === undefined,
+      props.shortcuts.followUpKeys,
+    );
   const promptValue = (): string => {
     return props.sessionId.length > 0 ? localPrompt() : "";
   };
@@ -228,14 +257,13 @@ export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
       >
         <Show when={props.onSteer !== undefined}>
           <button
-            aria-describedby={props.availabilityDescriptionId}
-            aria-keyshortcuts={props.shortcuts.steerKeys}
+            aria-describedby={steerAction().descriptionId}
+            aria-keyshortcuts={steerAction().keys}
             class={COMPOSER_BUTTON_CLASSES}
             data-session-steer="true"
-            disabled={props.disabled || props.onSteer === undefined}
+            disabled={steerAction().disabled}
             onClick={() => {
-              syncPrompt();
-              props.onSteer?.();
+              runAction(props.onSteer);
             }}
             title={`Steer (${props.shortcuts.steerLabel})`}
             type="button"
@@ -259,17 +287,19 @@ export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
         </button>
         <Show when={props.onContinue !== undefined}>
           <button
-            aria-describedby={props.availabilityDescriptionId}
+            aria-describedby={continueAction().descriptionId}
+            aria-keyshortcuts={continueAction().keys}
             aria-label="Continue without another instruction"
             class={COMPOSER_BUTTON_CLASSES}
-            disabled={props.disabled || props.onContinue === undefined}
+            disabled={continueAction().disabled}
             onClick={() => {
-              syncPrompt();
-              props.onContinue?.();
+              runAction(props.onContinue);
             }}
+            title={`Continue without message (${props.shortcuts.followUpLabel})`}
             type="button"
           >
-            Continue without message
+            <span>Continue without message</span>
+            <SessionShortcutHint label={props.shortcuts.followUpLabel} />
           </button>
         </Show>
       </div>

@@ -11,7 +11,6 @@ import {
 } from "drizzle-orm/sqlite-core";
 import { AGENT_ATTACHMENT_MODALITIES } from "../agent-attachments.ts";
 import { AGENT_REASONING_EFFORTS } from "../agent-configuration.ts";
-import { AGENT_FILE_NAMES } from "../agent-file.ts";
 import { AGENT_SESSION_TOOL_NAMES } from "../agent-tools.ts";
 import { auditColumns } from "./audit-columns.ts";
 import {
@@ -388,7 +387,8 @@ export const agentSessions = sqliteTable(
       .notNull()
       .default(0),
     maxContextTokens: integer("max_context_tokens"),
-    agentFileName: text("agent_file_name", { enum: AGENT_FILE_NAMES }),
+    agentFilePath: text("agent_file_path"),
+    agentFileName: text("agent_file_name"),
     agentFileContent: text("agent_file_content"),
     reasoningEffort: text("reasoning_effort", {
       enum: AGENT_REASONING_EFFORTS,

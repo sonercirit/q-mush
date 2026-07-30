@@ -1,10 +1,15 @@
 import { AGENT_SESSION_TOOL_NAMES } from "../agent-tools.ts";
 import type { AgentSessionDetail } from "../session-model.ts";
 
+export function startedAtUtc(): number {
+  return Date.UTC(2026, 6, 27, 12, 0, 0);
+}
+
 export const TEST_SESSION_DETAIL: AgentSessionDetail = {
   activeDurationMs: 0,
   activeStartedAt: null,
   agentFile: null,
+  agentFilePath: null,
   autoCompact: true,
   costBasis: "none",
   costUsd: 0,

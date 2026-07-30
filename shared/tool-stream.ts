@@ -1,3 +1,4 @@
+import { isValidBoundedString } from "./string-validation.ts";
 import { utf8ByteLength } from "./utf8.ts";
 import { isRecord } from "./validation.ts";
 
@@ -117,9 +118,9 @@ export type ApplyToolStreamDeltaResult =
 
 function isBoundedIdentifier(value: unknown): value is string {
   return (
-    typeof value === "string" &&
-    value.length > 0 &&
-    utf8ByteLength(value) <= MAXIMUM_TOOL_STREAM_IDENTIFIER_LENGTH
+    isValidBoundedString(value, MAXIMUM_TOOL_STREAM_IDENTIFIER_LENGTH, {
+      allowNullCharacter: true,
+    }) && utf8ByteLength(value) <= MAXIMUM_TOOL_STREAM_IDENTIFIER_LENGTH
   );
 }
 

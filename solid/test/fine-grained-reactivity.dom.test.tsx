@@ -30,6 +30,7 @@ import {
   queryTestElement,
   queryTestTranscript,
 } from "./dom-test-helpers.ts";
+import { defineElementSize } from "./element-size-test-helpers.ts";
 import { openAiProviderPanel } from "./provider-panel-fixtures.tsx";
 import { runnerSummary } from "./runner-fixtures.ts";
 import {
@@ -82,17 +83,6 @@ function sessionTimeText(container: ParentNode): string {
     throw new Error("The session time was not rendered");
   }
   return text;
-}
-
-function setScrollableDimensions(
-  element: HTMLElement,
-  clientHeight: number,
-  scrollHeight: number,
-): void {
-  Object.defineProperties(element, {
-    clientHeight: { configurable: true, value: clientHeight },
-    scrollHeight: { configurable: true, value: scrollHeight },
-  });
 }
 
 function credential(id: string, label: string): ProviderCredential {
@@ -257,7 +247,7 @@ test("scrolling away from and back to the transcript end updates scroll lock", (
   const { container, controller } = mountSessionDetail(detail);
   const element = queryTestTranscript(container);
   const toggle = query(container, "[data-scroll-lock-toggle='true']");
-  setScrollableDimensions(element, 100, 500);
+  defineElementSize(element, 100, 500);
 
   expectScrollLock(toggle, true);
 
@@ -346,7 +336,7 @@ test("loads more sessions on scroll and resets for a new root", () => {
   if (!(list instanceof HTMLUListElement)) {
     throw new TypeError("The session list is not a list");
   }
-  setScrollableDimensions(list, 100, 500);
+  defineElementSize(list, 100, 500);
 
   expect(sessionButtons()).toHaveLength(10);
   expect(container.querySelector(".session-list-pagination")).toBeNull();
@@ -378,6 +368,49 @@ test("loads more sessions on scroll and resets for a new root", () => {
   expect(
     container.querySelector("[data-load-more-sessions='true']"),
   ).toBeNull();
+});
+
+test("selected transcript deltas do not rebuild the multi-session hierarchy", () => {
+  const selected = {
+    ...TEST_SESSION_DETAIL,
+    status: "running" as const,
+  };
+  let hierarchyReads = 0;
+  const sessions = Array.from({ length: 50 }, (_, index) => {
+    const summary = {
+      ...summaryFromDetail(selected),
+      id: index === 0 ? selected.id : `background-${String(index)}`,
+    };
+    const parentSessionId = summary.parentSessionId;
+    Object.defineProperty(summary, "parentSessionId", {
+      get: () => {
+        hierarchyReads += 1;
+        return parentSessionId;
+      },
+    });
+    return summary;
+  });
+  const controller = new SessionController(
+    createReactiveState<SessionViewState>({
+      ...initialSessionViewState(),
+      detail: selected,
+      selectedId: selected.id,
+      sessions,
+    }),
+    undefined,
+    null,
+  );
+  const container = mount(() => <SessionList controller={controller} />);
+  const visibleRows = [...container.querySelectorAll("[data-session-id]")];
+  const readsAfterMount = hierarchyReads;
+
+  applySessionDelta(controller, selected.id, "Live output");
+
+  expect(hierarchyReads).toBe(readsAfterMount);
+  expect([...container.querySelectorAll("[data-session-id]")]).toEqual(
+    visibleRows,
+  );
+  expect(controller.state.detail?.messages.at(-1)?.content).toBe("Live output");
 });
 
 test("keeps a running tool visible while a stop request is pending", () => {

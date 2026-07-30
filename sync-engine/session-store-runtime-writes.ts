@@ -78,6 +78,7 @@ export function setRuntimeAgentFile(
 function compactRuntime(
   options: RuntimeWriteTarget & {
     readonly restartHandoff?: RestartHandoff | null;
+    readonly startedAt: number;
     readonly summary: string;
     readonly usage: CompactionUsage;
   },
@@ -89,6 +90,7 @@ function compactRuntime(
       ? {}
       : { restartHandoff: options.restartHandoff }),
     ...(settle ? { settle: true } : {}),
+    startedAt: options.startedAt,
     summary: options.summary,
     usage: options.usage,
   });

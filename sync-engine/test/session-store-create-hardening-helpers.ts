@@ -26,6 +26,7 @@ export function createSessionInput(options: {
   readonly workingDirectory?: string;
 }): CreateAgentSession {
   return {
+    agentFilePath: null,
     autoCompact: true,
     credentialId: options.credentialId,
     executionEnvironment: "bare_metal",

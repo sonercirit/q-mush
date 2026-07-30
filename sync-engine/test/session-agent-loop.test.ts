@@ -82,6 +82,7 @@ describe("compacting agent session loop", () => {
       initialMessages: [{ content: "Inspect the project", role: "user" }],
       maxContextTokens: 100_000,
       model,
+      now: Date.now,
       recordCompaction: (summary, usage) => {
         expect(usage.costBasis).toBe(
           usage.costUsd === null ? null : "reported",
@@ -490,6 +491,7 @@ describe("compacting agent session loop", () => {
     const model = triggeredModel();
     const compactions: unknown[] = [];
     const messageUsage: unknown[] = [];
+    const compactionStartedAt = Date.UTC(2026, 6, 30, 12);
 
     await expect(
       runTestLoop({
@@ -497,8 +499,9 @@ describe("compacting agent session loop", () => {
           compact: () => Promise.resolve(compacted("Stored handoff", 0.25)),
         }),
         model,
-        recordCompaction: (summary, compactionUsage) => {
-          compactions.push({ summary, usage: compactionUsage });
+        now: () => compactionStartedAt,
+        recordCompaction: (summary, compactionUsage, startedAt) => {
+          compactions.push({ startedAt, summary, usage: compactionUsage });
           throw new Error("Stop after atomic persistence");
         },
         recordMessage: (_messages, input) => {
@@ -512,6 +515,7 @@ describe("compacting agent session loop", () => {
     expect(model.requests).toHaveLength(1);
     expect(compactions).toEqual([
       {
+        startedAt: compactionStartedAt,
         summary: "Stored handoff",
         usage: {
           contextTokens: null,
@@ -584,6 +588,7 @@ describe("compacting agent session loop", () => {
       ],
       maxContextTokens: 100_001,
       model,
+      now: Date.now,
       recordCompaction: (summary) => {
         throw new Error(`Unexpected summary: ${summary}`);
       },

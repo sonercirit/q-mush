@@ -220,7 +220,11 @@ export function SessionList(props: {
   const [collapsed, setCollapsed] = createSignal<ReadonlySet<string>>(
     new Set(),
   );
-  const hierarchy = createMemo(() => sessionHierarchy(state().sessions ?? []));
+  const sessionSummaries = createMemo(() => state().sessions);
+  const hierarchy = createMemo(() =>
+    sessionHierarchy(sessionSummaries() ?? []),
+  );
+  const selectedId = createMemo(() => state().selectedId);
   const hasMoreSessions = createMemo(
     () => visibleCount() < hierarchy().roots.length,
   );
@@ -284,7 +288,7 @@ export function SessionList(props: {
           </p>
         }
         items={sessions()}
-        listClass="session-list-items max-h-144 space-y-2 overflow-y-auto overscroll-contain pr-0.5"
+        listClass="session-list-items min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-0.5"
         listProps={{ onScroll: loadMoreOnScroll }}
         loading={<p class="text-sm text-slate-400">Loading sessions…</p>}
         trailing={
@@ -317,9 +321,9 @@ export function SessionList(props: {
               <div class="flex items-stretch gap-1.5">
                 <button
                   aria-current={
-                    state().selectedId === session.id ? "true" : undefined
+                    selectedId() === session.id ? "true" : undefined
                   }
-                  class={`session-list-item min-h-11 min-w-0 flex-1 rounded-2xl border p-3 text-left transition sm:p-4 ${state().selectedId === session.id ? "border-emerald-300/30 bg-emerald-300/10" : "border-white/10 bg-slate-950/60 hover:border-white/20"}`}
+                  class={`session-list-item min-h-11 min-w-0 flex-1 rounded-2xl border p-3 text-left transition sm:p-4 ${selectedId() === session.id ? "border-emerald-300/30 bg-emerald-300/10" : "border-white/10 bg-slate-950/60 hover:border-white/20"}`}
                   data-session-id={session.id}
                   onClick={() => {
                     props.onSelect?.();

@@ -215,10 +215,19 @@ test("reads a session agent file from the server", () => {
     content: "Project instructions",
     name: "CLAUDE.md",
   });
+  expect(
+    readSessionDetail({
+      ...DETAIL,
+      agentFile: { content: "Custom", name: "config/OTHER.md" },
+    }).agentFile,
+  ).toEqual({
+    content: "Custom",
+    name: "config/OTHER.md",
+  });
   expect(() =>
     readSessionDetail({
       ...DETAIL,
-      agentFile: { content: "Ignored", name: "OTHER.md" },
+      agentFile: { content: "Ignored", name: "" },
     }),
   ).toThrow("invalid agent file");
 });

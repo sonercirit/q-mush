@@ -9,7 +9,7 @@ const READ_ONLY_NONBLOCKING_FLAGS =
 const DARWIN_F_GETPATH = 50;
 const DARWIN_MAX_PATH_BYTES = 1_024;
 
-export function runnerPathIsWithin(root: string, candidate: string): boolean {
+function runnerPathIsWithin(root: string, candidate: string): boolean {
   const pathFromRoot = relative(root, candidate);
   return (
     pathFromRoot === "" ||
@@ -110,12 +110,11 @@ async function canonicalOpenPath(
   throw new Error("Secure file opening is unavailable on this platform");
 }
 
-export async function openSecureRunnerPath(
-  root: string,
-  path: string,
-  options: SecureRunnerOpenOptions = {},
+async function openValidatedRunnerPath(
+  canonical: string,
+  validate: (openedPath: string) => void,
+  options: SecureRunnerOpenOptions,
 ): Promise<OpenRunnerPath> {
-  const canonical = await secureRunnerPath(root, path);
   const handle = await (options.openPath ?? open)(
     canonical,
     READ_ONLY_NONBLOCKING_FLAGS,
@@ -123,12 +122,81 @@ export async function openSecureRunnerPath(
 
   try {
     const details = await handle.stat();
-    assertWithin(root, await canonicalOpenPath(handle, options));
+    validate(await canonicalOpenPath(handle, options));
     return { handle, stats: details };
   } catch (error) {
     await handle.close();
     throw error;
   }
+}
+
+function secureCanonicalRunnerPath(
+  resolveCanonical: () => Promise<string>,
+  validate: (openedPath: string, canonical: string) => void,
+  options: SecureRunnerOpenOptions,
+): Promise<OpenRunnerPath> {
+  return resolveCanonical().then((canonical) =>
+    openValidatedRunnerPath(
+      canonical,
+      (openedPath) => {
+        validate(openedPath, canonical);
+      },
+      options,
+    ),
+  );
+}
+
+function validateCanonicalRunnerPath(
+  openedPath: string,
+  canonical: string,
+  root?: string,
+): void {
+  if (root === undefined) {
+    if (openedPath !== canonical) {
+      throw new Error("The opened path changed while it was being validated");
+    }
+  } else {
+    assertWithin(root, openedPath);
+  }
+}
+
+function openSecureRunnerPathWithOptions(
+  resolveCanonical: () => Promise<string>,
+  options: SecureRunnerOpenOptions,
+  root?: string,
+): Promise<OpenRunnerPath> {
+  return secureCanonicalRunnerPath(
+    resolveCanonical,
+    (openedPath, canonical) => {
+      validateCanonicalRunnerPath(openedPath, canonical, root);
+    },
+    options,
+  );
+}
+
+function securePathOptions(
+  path: string,
+  options: SecureRunnerOpenOptions = {},
+  root?: string,
+): Promise<OpenRunnerPath> {
+  const resolver =
+    root === undefined
+      ? () => realpath(path)
+      : () => secureRunnerPath(root, path);
+  return openSecureRunnerPathWithOptions(resolver, options, root);
+}
+
+export const openSecureAbsoluteRunnerPath: (
+  path: string,
+  options?: SecureRunnerOpenOptions,
+) => Promise<OpenRunnerPath> = securePathOptions;
+
+export function openSecureRunnerPath(
+  root: string,
+  path: string,
+  options: SecureRunnerOpenOptions = {},
+): Promise<OpenRunnerPath> {
+  return securePathOptions(path, options, root);
 }
 
 export async function resolveRunnerWorkspace(path: string): Promise<string> {

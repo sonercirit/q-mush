@@ -12,6 +12,20 @@ import {
 } from "./session-controller-reconciliation-fixtures.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
+async function confirmCreationOption(
+  prompt: string,
+  key: "agentFilePath" | "autoCompact",
+  value: string | boolean,
+): Promise<void> {
+  const run = await uncertainCreationScenario(prompt, {
+    draft: { [key]: value },
+  });
+  const created = createdSessionDetail(prompt, { [key]: value });
+  run.expectPayload({ [key]: value });
+  await run.confirmAs(created);
+  run.scenario.expectCreatedSessionSelected(created.id);
+}
+
 registerReconciliationTests({
   "reconciles an already-executed mutation before unblocking it": async () => {
     const reconciliation = await uncertainStopScenario(
@@ -149,17 +163,32 @@ registerReconciliationTests({
 
   "threads disabled auto-compaction through creation reconciliation":
     async () => {
-      const run = await uncertainCreationScenario("Create without compaction", {
-        draft: { autoCompact: false },
-      });
-      const created = createdSessionDetail("Create without compaction", {
-        autoCompact: false,
-      });
+      await confirmCreationOption(
+        "Create without compaction",
+        "autoCompact",
+        false,
+      );
+    },
 
-      run.expectPayload({ autoCompact: false });
-      await run.confirmAs(created);
+  "threads a custom agent-file path through creation reconciliation":
+    async () => {
+      await confirmCreationOption(
+        "Create with instructions",
+        "agentFilePath",
+        "config/instructions.md",
+      );
+    },
 
-      run.scenario.expectCreatedSessionSelected(created.id);
+  "keeps creation blocked when the new detail has another agent-file path":
+    async () => {
+      const run = await uncertainCreationScenario("Correlate instructions", {
+        draft: { agentFilePath: "config/instructions.md" },
+      });
+      await run.confirmAs(createdSessionDetail("Correlate instructions"));
+
+      run.scenario.expectCreationBlocked("Correlate instructions", {
+        agentFilePath: "config/instructions.md",
+      });
     },
 
   "keeps creation blocked when the new detail has another auto-compaction mode":

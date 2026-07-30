@@ -33,6 +33,25 @@ export interface AgentModelCatalog {
   readonly models: readonly AgentModelOption[];
 }
 
+const OPENROUTER_PROVIDER_ROUTING_PREFIX = "q-mush-routing:";
+export const OPENROUTER_PROVIDER_NO_FALLBACKS_VALUE = `${OPENROUTER_PROVIDER_ROUTING_PREFIX}no-fallbacks`;
+const OPENROUTER_PROVIDER_ORDER_PREFIX = `${OPENROUTER_PROVIDER_ROUTING_PREFIX}order:`;
+export const OPENROUTER_PROVIDER_SORTS = [
+  "price",
+  "throughput",
+  "latency",
+  "exacto",
+] as const;
+
+export type OpenRouterProviderSort = (typeof OPENROUTER_PROVIDER_SORTS)[number];
+
+export type OpenRouterProviderRouting =
+  | { readonly type: "automatic" }
+  | { readonly type: "no_fallbacks" }
+  | { readonly tag: string; readonly type: "order" }
+  | { readonly sort: OpenRouterProviderSort; readonly type: "sort" }
+  | { readonly tag: string; readonly type: "provider" };
+
 export interface OpenRouterProviderOption {
   readonly contextWindow: number | null;
   readonly name: string;
@@ -64,11 +83,56 @@ export function isAgentModelId(value: unknown): value is string {
   return typeof value === "string" && MODEL_PATTERN.test(value);
 }
 
+export function openRouterProviderOrderValue(tag: string): string {
+  return `${OPENROUTER_PROVIDER_ORDER_PREFIX}${tag}`;
+}
+
+export function openRouterProviderSortValue(
+  sort: OpenRouterProviderSort,
+): string {
+  return `${OPENROUTER_PROVIDER_ROUTING_PREFIX}${sort}`;
+}
+
+export function readOpenRouterProviderRouting(
+  value: string | null | undefined,
+): OpenRouterProviderRouting | undefined {
+  if (value === null || value === undefined || value.length === 0) {
+    return { type: "automatic" };
+  }
+  if (value === OPENROUTER_PROVIDER_NO_FALLBACKS_VALUE) {
+    return { type: "no_fallbacks" };
+  }
+  if (value.startsWith(OPENROUTER_PROVIDER_ORDER_PREFIX)) {
+    const tag = value.slice(OPENROUTER_PROVIDER_ORDER_PREFIX.length);
+    return isOpenRouterProviderTag(tag) ? { tag, type: "order" } : undefined;
+  }
+  if (value.startsWith(OPENROUTER_PROVIDER_ROUTING_PREFIX)) {
+    const sort = value.slice(OPENROUTER_PROVIDER_ROUTING_PREFIX.length);
+    return isOpenRouterProviderSort(sort) ? { sort, type: "sort" } : undefined;
+  }
+  return isOpenRouterProviderTag(value)
+    ? { tag: value, type: "provider" }
+    : undefined;
+}
+
+function isOpenRouterProviderSort(
+  value: unknown,
+): value is OpenRouterProviderSort {
+  return OPENROUTER_PROVIDER_SORTS.some((sort) => sort === value);
+}
+
+export function isOpenRouterProviderSelection(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    readOpenRouterProviderRouting(value) !== undefined
+  );
+}
+
 export function readOpenRouterProviderTag(
   value: unknown,
 ): string | null | undefined {
   if (value === null) return null;
-  return isOpenRouterProviderTag(value) ? value : undefined;
+  return isOpenRouterProviderSelection(value) ? value : undefined;
 }
 
 export function isOpenRouterProviderTag(value: unknown): value is string {

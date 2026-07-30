@@ -29,11 +29,13 @@ interface CompactingAgentLoopOptions {
   readonly initialMessages: readonly AgentConversationMessage[];
   readonly maxContextTokens: number | null;
   readonly model: AgentModel;
+  readonly now: () => number;
   readonly onToolCall?: Parameters<typeof runAgentLoop>[0]["onToolCall"];
   readonly onToolResult?: Parameters<typeof runAgentLoop>[0]["onToolResult"];
   readonly recordCompaction: (
     summary: string,
     usage: CompactionUsage,
+    startedAt: number,
   ) => Promise<void> | void;
   readonly recordMessage: (
     messages: Parameters<AgentMessageRecorder>[0],
@@ -68,15 +70,16 @@ interface CompactionState {
 async function compactConversation(
   options: Pick<
     CompactingAgentLoopOptions,
-    "agentCost" | "createCompactor" | "recordCompaction"
+    "agentCost" | "createCompactor" | "now" | "recordCompaction"
   >,
   messages: readonly AgentConversationMessage[],
   signal?: AbortSignal,
 ): Promise<readonly AgentConversationMessage[]> {
+  const startedAt = options.now();
   const compacted = await options.createCompactor().compact(messages, signal);
   throwIfAgentAborted(signal);
   const usage = compactionUsage(compacted, options.agentCost);
-  await options.recordCompaction(compacted.summary, usage);
+  await options.recordCompaction(compacted.summary, usage, startedAt);
   throwIfAgentAborted(signal);
   return compacted.messages;
 }

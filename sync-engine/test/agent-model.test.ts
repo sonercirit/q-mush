@@ -249,17 +249,58 @@ describe("chat completions agent model", () => {
     expect(serializedBody).not.toContain("list_files");
   });
 
-  test("forces a selected OpenRouter serving provider", async () => {
-    const capture = new RequestCapture();
-    const model = capturedModel(capture, {
+  async function expectOpenRouterProvider(
+    capture: RequestCapture,
+    model: ReturnType<typeof capturedModel>,
+    provider: unknown,
+  ): Promise<void> {
+    await completeHello(model);
+    expect(await capturedBody(capture)).toMatchObject({ provider });
+  }
+
+  function routedModel(
+    capture: RequestCapture,
+    openRouterProviderRouting: NonNullable<
+      Parameters<typeof capturedModel>[1]["openRouterProviderRouting"]
+    >,
+  ) {
+    return capturedModel(capture, {
       ...OPENROUTER_IMAGE_OPTIONS,
-      openRouterProviderTag: "google-vertex/us",
+      openRouterProviderRouting,
+    });
+  }
+
+  test("maps all OpenRouter routing selections to provider preferences", async () => {
+    const selections = [
+      [{ sort: "price", type: "sort" }, { sort: "price" }],
+      [{ sort: "throughput", type: "sort" }, { sort: "throughput" }],
+      [{ sort: "latency", type: "sort" }, { sort: "latency" }],
+      [{ sort: "exacto", type: "sort" }, { sort: "exacto" }],
+      [{ type: "no_fallbacks" }, { allow_fallbacks: false }],
+      [
+        { tag: "google-vertex/us", type: "order" },
+        { order: ["google-vertex/us"] },
+      ],
+    ] as const;
+
+    for (const [openRouterProviderRouting, provider] of selections) {
+      const capture = new RequestCapture();
+      const model = routedModel(capture, openRouterProviderRouting);
+
+      await expectOpenRouterProvider(capture, model, provider);
+    }
+  });
+
+  test("uses only the ordered selected OpenRouter serving provider", async () => {
+    const capture = new RequestCapture();
+    const model = routedModel(capture, {
+      tag: "google-vertex/us",
+      type: "provider",
     });
 
-    await completeHello(model);
-
-    expect(await capturedBody(capture)).toMatchObject({
-      provider: { only: ["google-vertex/us"] },
+    await expectOpenRouterProvider(capture, model, {
+      allow_fallbacks: false,
+      order: ["google-vertex/us"],
     });
   });
 

@@ -3,6 +3,7 @@ import type { AgentSessionDetail } from "../../../shared/session-model.ts";
 import { RenderDebugView } from "../../render-debug.tsx";
 import type { SessionController } from "../../session-controller.ts";
 import { disposeTestViews } from "../dom-test-helpers.ts";
+import { defineElementSize } from "../element-size-test-helpers.ts";
 import {
   messageBoundary,
   mountTestTranscript,
@@ -90,6 +91,71 @@ function applyStreamSnapshot(
   });
 }
 
+function applyTranscriptDelta(
+  controller: SessionController,
+  detail: AgentSessionDetail,
+  content: string,
+): void {
+  controller.applyDelta({
+    content,
+    sessionId: detail.id,
+    thinking: "",
+    type: "session_delta",
+  });
+}
+
+function codeBlock(container: ParentNode): HTMLElement {
+  const code = container.querySelector<HTMLElement>("pre[data-language='ts']");
+  if (code === null) throw new TypeError("Missing streamed code block");
+  return code;
+}
+
+function startNestedCodeStream(
+  container: ParentNode,
+  controller: SessionController,
+  detail: AgentSessionDetail,
+  scrollTop: number,
+): HTMLElement {
+  applyTranscriptDelta(controller, detail, "```ts\nconst first = 1;");
+  const code = codeBlock(container);
+  defineElementSize(code, 100, 400);
+  code.scrollTop = scrollTop;
+  code.dispatchEvent(new Event("scroll"));
+  return code;
+}
+
+function growNestedCodeStream(
+  container: ParentNode,
+  controller: SessionController,
+  detail: AgentSessionDetail,
+): HTMLElement {
+  applyTranscriptDelta(controller, detail, "\nconst second = 2;");
+  const updatedCode = codeBlock(container);
+  defineElementSize(updatedCode, 100, 500);
+  return updatedCode;
+}
+
+function nestedStreamFixture(
+  id: string,
+  prompt: string,
+): {
+  readonly container: HTMLDivElement;
+  readonly controller: SessionController;
+  readonly detail: AgentSessionDetail;
+} {
+  return mountedTranscript([transcriptMessage(id, prompt, "user", 2)]);
+}
+
+async function settledGrownCodeStream(
+  container: ParentNode,
+  controller: SessionController,
+  detail: AgentSessionDetail,
+): Promise<HTMLElement> {
+  const updatedCode = growNestedCodeStream(container, controller, detail);
+  await Promise.resolve();
+  return updatedCode;
+}
+
 function expectMessageBoundariesToRenderOnce(
   debug: RenderDebugView,
   messageIds: readonly string[],
@@ -101,6 +167,37 @@ function expectMessageBoundariesToRenderOnce(
 
 afterEach(() => {
   disposeTestViews(disposals);
+});
+
+test("keeps a streamed code block at the user's nested scroll position", async () => {
+  const { container, controller, detail } = nestedStreamFixture(
+    "user-scroll",
+    "Show the output",
+  );
+
+  const code = startNestedCodeStream(container, controller, detail, 83);
+  const updatedCode = await settledGrownCodeStream(
+    container,
+    controller,
+    detail,
+  );
+  expect(updatedCode).not.toBe(code);
+  expect(updatedCode.scrollTop).toBe(83);
+});
+
+test("keeps a bottom-pinned nested region following streamed growth", async () => {
+  const { container, controller, detail } = nestedStreamFixture(
+    "user-pinned",
+    "Keep following",
+  );
+  startNestedCodeStream(container, controller, detail, 300);
+  const updatedCode = await settledGrownCodeStream(
+    container,
+    controller,
+    detail,
+  );
+
+  expect(updatedCode.scrollTop).toBe(400);
 });
 
 test("keeps persisted and streamed turns in canonical DOM order", () => {

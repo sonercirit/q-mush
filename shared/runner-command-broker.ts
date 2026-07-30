@@ -34,8 +34,10 @@ export function readRunnerExecutionEnvironment(
   return value === "container" ? value : undefined;
 }
 
+export type RunnerCommandArguments = Readonly<Record<string, unknown>>;
+
 export interface RunnerToolCommand {
-  readonly arguments: Readonly<Record<string, unknown>>;
+  readonly arguments: RunnerCommandArguments;
   readonly executionEnvironment: RunnerExecutionEnvironment;
   readonly id: string;
   readonly sessionId: string;

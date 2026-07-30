@@ -1,4 +1,5 @@
 import { isRecord } from "./auth-model.ts";
+import { isValidBoundedString } from "./string-validation.ts";
 
 export const RUNNER_DIRECTORY_COMMAND = "list_directories";
 export const MAXIMUM_RUNNER_DIRECTORY_ENTRIES = 500;
@@ -18,12 +19,7 @@ export interface RunnerDirectoryListing {
 }
 
 function validString(value: unknown, maximumLength: number): value is string {
-  return (
-    typeof value === "string" &&
-    value.length > 0 &&
-    value.length <= maximumLength &&
-    !value.includes("\0")
-  );
+  return isValidBoundedString(value, maximumLength);
 }
 
 function readDirectoryEntry(value: unknown): RunnerDirectoryEntry {

@@ -1,24 +1,44 @@
 import { isRecord } from "./auth-model.ts";
+import { isValidBoundedString } from "./string-validation.ts";
 
 export const AGENT_FILE_NAMES = ["AGENTS.md", "CLAUDE.md"] as const;
+const MAXIMUM_AGENT_FILE_PATH_LENGTH = 4_096;
 export const RUNNER_AGENT_FILE_COMMAND = "read_agent_file";
-
-export type AgentFileName = (typeof AGENT_FILE_NAMES)[number];
+export const RUNNER_AGENT_FILE_PATH_ARGUMENT = "path";
 
 export interface AgentFile {
   readonly content: string;
-  readonly name: AgentFileName;
+  readonly name: string;
 }
 
-function isAgentFileName(value: unknown): value is AgentFileName {
-  return AGENT_FILE_NAMES.some((name) => name === value);
+function isValidAgentFileName(value: unknown): value is string {
+  return isValidBoundedString(value, MAXIMUM_AGENT_FILE_PATH_LENGTH);
+}
+
+export function readAgentFilePath(value: unknown): string | null | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const path = value.trim();
+  if (path.length === 0) {
+    return null;
+  }
+  return path.length <= MAXIMUM_AGENT_FILE_PATH_LENGTH && !path.includes("\0")
+    ? path
+    : undefined;
+}
+
+export function readOptionalAgentFilePath(
+  value: unknown,
+): string | null | undefined {
+  return value === undefined ? null : readAgentFilePath(value);
 }
 
 export function readAgentFile(value: unknown): AgentFile | null {
   if (value !== null) {
     if (
       !isRecord(value) ||
-      !isAgentFileName(value["name"]) ||
+      !isValidAgentFileName(value["name"]) ||
       typeof value["content"] !== "string"
     ) {
       throw new Error("The runner returned an invalid agent file");

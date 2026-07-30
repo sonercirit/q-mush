@@ -12,6 +12,7 @@ const SESSION_ID = "session-1";
 function testSession(): AgentSessionDetail {
   const base = {
     agentFile: null,
+    agentFilePath: null,
     autoCompact: true,
     costBasis: "none" as const,
     provider: "openai" as const,

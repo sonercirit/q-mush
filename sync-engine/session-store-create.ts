@@ -39,6 +39,7 @@ export interface CreateAgentSession extends Pick<
   | "workingDirectory"
   | "workspaceId"
 > {
+  readonly agentFilePath?: string | null;
   readonly credentialId: string;
   readonly images: readonly AgentImage[];
   readonly parentGeneration?: number;
@@ -97,6 +98,7 @@ function validateSessionConfiguration(
 function storedSessionValues(
   input: Pick<
     CreateAgentSession,
+    | "agentFilePath"
     | "autoCompact"
     | "credentialId"
     | "executionEnvironment"
@@ -124,6 +126,7 @@ function storedSessionValues(
 ) {
   return {
     ...createdAuditFields(input.userId, now),
+    agentFilePath: input.agentFilePath ?? null,
     autoCompact: input.autoCompact,
     executionEnvironment: input.executionEnvironment,
     id,

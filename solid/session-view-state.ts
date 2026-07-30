@@ -14,6 +14,7 @@ import type { SessionReassignmentDraft } from "./session-reassignment-client.ts"
 import type { SessionTranscriptFilters } from "./session-transcript-filters.ts";
 
 export interface SessionDraft {
+  readonly agentFilePath?: string;
   readonly autoCompact: boolean;
   readonly credential: string;
   readonly executionEnvironment: RunnerExecutionEnvironment;

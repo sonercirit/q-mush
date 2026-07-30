@@ -1,6 +1,5 @@
 import {
   createEffect,
-  createMemo,
   createSignal,
   on,
   onCleanup,
@@ -33,11 +32,9 @@ import type { SessionProviderUpdateView } from "./session-provider-update-model.
 import { RunnerReassignment } from "./session-reassignment-view.tsx";
 import { SessionSpawnEditor } from "./session-spawn-client.tsx";
 import { SessionToolUpdateEditor } from "./session-tool-update-client.tsx";
+import { createSessionTranscriptCounts } from "./session-transcript-counts.ts";
 import { SessionTranscriptFilterControls } from "./session-transcript-filter-controls.tsx";
-import {
-  SessionTranscript,
-  sessionTranscriptFilterCounts,
-} from "./session-transcript.tsx";
+import { SessionTranscript } from "./session-transcript.tsx";
 
 const SCROLL_END_TOLERANCE = 64;
 
@@ -123,13 +120,12 @@ export function SessionDetailBody(props: {
   const [scrollLockEnabled, setScrollLockEnabled] = createSignal(true);
   const [transcript, setTranscript] = createSignal<HTMLUListElement>();
   let pendingScrollFrame: number | undefined;
+  let programmaticScrollTop: number | undefined;
   let shouldScrollToEnd = true;
-  const filterCounts = createMemo(() =>
-    sessionTranscriptFilterCounts(
-      view().detail.agentFile,
-      visibleMessages(),
-      view().detail.tools,
-    ),
+  const transcriptCounts = createSessionTranscriptCounts(
+    () => view().detail.agentFile,
+    visibleMessages,
+    () => view().detail.tools,
   );
   const scrollToEnd = (): void => {
     shouldScrollToEnd = scrollLockEnabled();
@@ -142,6 +138,7 @@ export function SessionDetailBody(props: {
       pendingScrollFrame = undefined;
       if (shouldScrollToEnd) {
         element.scrollTop = element.scrollHeight;
+        programmaticScrollTop = element.scrollTop;
       }
     });
   };
@@ -248,7 +245,7 @@ export function SessionDetailBody(props: {
       />
       <SessionHistoryControls controller={view().controller} />
       <SessionTranscriptFilterControls
-        counts={filterCounts()}
+        counts={transcriptCounts().filterCounts}
         filters={view().state.transcriptFilters}
         onChange={(name, visible) => {
           view().controller.setTranscriptFilter(name, visible);
@@ -259,7 +256,14 @@ export function SessionDetailBody(props: {
         class="session-transcript mt-5 max-h-[36rem] min-w-0 space-y-3 overflow-y-auto overscroll-contain pr-1"
         data-session-transcript="true"
         onScroll={(event) => {
-          const locked = isAtScrollEnd(event.currentTarget);
+          const element = event.currentTarget;
+          const programmatic = element.scrollTop === programmaticScrollTop;
+          programmaticScrollTop = undefined;
+          // A scroll from our last write can arrive after streamed layout grows.
+          // Preserve the lock for that event; user scrolling still uses proximity.
+          const locked = programmatic
+            ? scrollLockEnabled()
+            : isAtScrollEnd(element);
           shouldScrollToEnd = locked;
           setScrollLockEnabled(locked);
         }}
@@ -267,6 +271,7 @@ export function SessionDetailBody(props: {
       >
         <SessionTranscript
           agentFile={view().detail.agentFile}
+          counts={transcriptCounts()}
           executionEnvironment={view().detail.executionEnvironment}
           filters={view().state.transcriptFilters}
           messages={visibleMessages()}
@@ -379,6 +384,9 @@ export function SessionDetailBody(props: {
             ) {
               event.preventDefault();
               event.currentTarget.form?.requestSubmit();
+            } else if (shortcut === "follow_up" && !active()) {
+              event.preventDefault();
+              void view().controller.continueSession();
             } else if (shortcut === "steer" && running()) {
               event.preventDefault();
               void view().controller.steer();

@@ -10,7 +10,10 @@ import {
   AGENT_ATTACHMENT_MODALITIES,
   type AgentAttachmentModality,
 } from "../shared/agent-attachments.ts";
-import type { AttachmentFallbackSelection } from "../shared/attachment-fallback.ts";
+import {
+  modelSupportsAttachmentModality,
+  type AttachmentFallbackSelection,
+} from "../shared/attachment-fallback.ts";
 import { SESSION_ATTACHMENT_FALLBACKS_PATH } from "../shared/routes.ts";
 import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 import { requestJson } from "./browser-http.ts";
@@ -38,9 +41,28 @@ export function AttachmentFallbackSettings(props: {
   const [providerTag, setProviderTag] = createSignal("");
   const [saved, setSaved] = createSignal(false);
   const [saving, setSaving] = createSignal(false);
+  const discoverFallbackModels: typeof props.onDiscoverModels = async (
+    provider,
+    credentialId,
+  ) => {
+    const catalog = await props.onDiscoverModels(provider, credentialId);
+    return catalog === undefined
+      ? undefined
+      : {
+          ...catalog,
+          models: catalog.models.filter(({ inputModalities }) =>
+            modelSupportsAttachmentModality(inputModalities, modality()),
+          ),
+        };
+  };
   const picker = createSessionModelPickerState(
     { credential: "", model: "", reasoningEffort: "" },
-    props,
+    {
+      get credentials() {
+        return props.credentials;
+      },
+      onDiscoverModels: discoverFallbackModels,
+    },
   );
   const [openProvider, setOpenProvider] = createSignal(false);
   let initialized = false;
@@ -74,6 +96,9 @@ export function AttachmentFallbackSettings(props: {
     for (const candidate of AGENT_ATTACHMENT_MODALITIES) {
       if (candidate === value) {
         setModality(candidate);
+        if (picker.draft().credential.length > 0) {
+          void picker.editor.discover(picker.draft().credential);
+        }
         return;
       }
     }

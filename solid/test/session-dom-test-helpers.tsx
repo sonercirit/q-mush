@@ -45,11 +45,13 @@ export interface MountedTestTranscript extends MountedTestSession {
 export interface MountedTestTranscriptViewOptions {
   readonly messages: Accessor<readonly AgentSessionMessage[]>;
   readonly status: Accessor<AgentSessionStatus>;
+  readonly turns?: Accessor<AgentSessionDetail["turns"]>;
 }
 
 export function mountTestTranscriptView({
   messages,
   status,
+  turns,
 }: MountedTestTranscriptViewOptions): MountedTestTranscriptView {
   const container = document.body.appendChild(document.createElement("ul"));
   const dispose = render(
@@ -61,6 +63,7 @@ export function mountTestTranscriptView({
         filters={DEFAULT_SESSION_TRANSCRIPT_FILTERS}
         executionEnvironment="bare_metal"
         agentFile={null}
+        {...(turns === undefined ? {} : { turns: turns() })}
       />
     ),
     container,

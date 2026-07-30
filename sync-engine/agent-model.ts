@@ -1,5 +1,8 @@
 import { setTimeout } from "node:timers/promises";
-import type { AgentReasoningEffort } from "../shared/agent-configuration.ts";
+import type {
+  AgentReasoningEffort,
+  OpenRouterProviderRouting,
+} from "../shared/agent-configuration.ts";
 import type {
   AgentConversationMessage,
   AgentModel,
@@ -185,11 +188,26 @@ function toolConfiguration(
   };
 }
 
+function openRouterProviderPreferences(
+  routing: OpenRouterProviderRouting | undefined,
+): Readonly<Record<string, unknown>> | undefined {
+  if (routing?.type === "provider") {
+    return { allow_fallbacks: false, order: [routing.tag] };
+  }
+  if (routing?.type === "order") {
+    return { order: [routing.tag] };
+  }
+  if (routing?.type === "no_fallbacks") {
+    return { allow_fallbacks: false };
+  }
+  return routing?.type === "sort" ? { sort: routing.sort } : undefined;
+}
+
 function requestBody(
   messages: readonly AgentConversationMessage[],
   model: string,
   provider: ProviderId,
-  openRouterProviderTag: string | undefined,
+  openRouterProviderRouting: OpenRouterProviderRouting | undefined,
   responsesProtocol: boolean,
   reasoningEffort: AgentReasoningEffort | undefined,
   systemPrompt: string,
@@ -211,8 +229,8 @@ function requestBody(
         ...messages.map(providerChatMessage),
       ],
       model,
-      ...(provider === "openrouter" && openRouterProviderTag !== undefined
-        ? { provider: { only: [openRouterProviderTag] } }
+      ...(provider === "openrouter" && openRouterProviderRouting !== undefined
+        ? { provider: openRouterProviderPreferences(openRouterProviderRouting) }
         : {}),
       ...reasoning,
       ...(stream
@@ -265,7 +283,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
   readonly #model: string;
   readonly #onDelta: ((delta: ProviderTextDelta) => void) | undefined;
   readonly #onTurnStart: () => void;
-  readonly #openRouterProviderTag: string | undefined;
+  readonly #openRouterProviderRouting: OpenRouterProviderRouting | undefined;
   readonly #provider: ProviderId;
   readonly #reasoningEffort: AgentReasoningEffort | undefined;
   readonly #sleep: ModelRequestSleep | undefined;
@@ -281,7 +299,11 @@ export class ChatCompletionsAgentModel implements AgentModel {
     this.#model = options.model;
     this.#onDelta = options.onDelta;
     this.#onTurnStart = options.onTurnStart ?? (() => undefined);
-    this.#openRouterProviderTag = options.openRouterProviderTag;
+    this.#openRouterProviderRouting =
+      options.openRouterProviderRouting ??
+      (options.openRouterProviderTag === undefined
+        ? undefined
+        : { tag: options.openRouterProviderTag, type: "provider" });
     this.#provider = options.provider;
     this.#reasoningEffort = options.reasoningEffort ?? undefined;
     this.#sleep = options.sleep;
@@ -370,7 +392,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
       messages,
       this.#model,
       this.#provider,
-      this.#openRouterProviderTag,
+      this.#openRouterProviderRouting,
       responsesProtocol,
       this.#reasoningEffort,
       this.#systemPrompt,

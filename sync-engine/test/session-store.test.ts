@@ -19,6 +19,10 @@ import {
   testAuditFields,
 } from "./authenticated-integration-test-helpers.ts";
 import {
+  markTestSessionRunning,
+  runningStore,
+} from "./session-store-lifecycle-test-helpers.ts";
+import {
   closeSessionStoreTestSetup,
   expectRecoveredSession,
   expectStoredSession,
@@ -58,21 +62,6 @@ function testUserImageMessage(
     images: [TEST_AGENT_IMAGE],
     role: "user",
   };
-}
-
-function markTestSessionRunning(store: SessionStore): void {
-  expect(store.transitionCurrent(SESSION_ID, "running", TEST_NOW + 1)).toBe(
-    true,
-  );
-}
-
-type StoreSetup = ReturnType<typeof createStore>;
-
-function runningStore(): StoreSetup {
-  const setup = createStore();
-  createTestSession(setup.store);
-  markTestSessionRunning(setup.store);
-  return setup;
 }
 
 function testSessionMessageRoles(store: SessionStore) {
@@ -123,8 +112,11 @@ function initialConversation() {
 describe("session store", () => {
   test("persists a session transcript and lifecycle", () => {
     const { database, store } = createStore();
-    const created = createTestSession(store);
+    const created = createTestSession(store, TEST_NOW, {
+      agentFilePath: "config/instructions.md",
+    });
 
+    expect(created.agentFilePath).toBe("config/instructions.md");
     expect(created.agentFile).toBeNull();
     expect(created.id).toBe(SESSION_ID);
     expect(created.status).toBe("queued");

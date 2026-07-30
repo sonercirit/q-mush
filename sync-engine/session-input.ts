@@ -3,8 +3,9 @@ import {
   defaultAgentModel,
   isAgentModelId,
   isAgentReasoningEffort,
-  isOpenRouterProviderTag,
+  isOpenRouterProviderSelection,
 } from "../shared/agent-configuration.ts";
+import { readOptionalAgentFilePath } from "../shared/agent-file.ts";
 import {
   AGENT_SESSION_TOOL_NAMES,
   readAgentSessionToolNames,
@@ -57,6 +58,7 @@ export function readCreateSession(
   }
 
   const credentialId = readIdentifier(value["credentialId"]);
+  const agentFilePath = readOptionalAgentFilePath(value["agentFilePath"]);
   const autoCompactValue = value["autoCompact"];
   const executionEnvironment = readRunnerExecutionEnvironment(
     value["executionEnvironment"],
@@ -76,6 +78,7 @@ export function readCreateSession(
 
   if (
     (autoCompactValue !== undefined && typeof autoCompactValue !== "boolean") ||
+    agentFilePath === undefined ||
     credentialId === undefined ||
     executionEnvironment === undefined ||
     message === undefined ||
@@ -84,7 +87,7 @@ export function readCreateSession(
     workingDirectory === undefined ||
     (modelValue !== undefined && !isAgentModelId(modelValue)) ||
     (openRouterProviderTagValue !== undefined &&
-      !isOpenRouterProviderTag(openRouterProviderTagValue)) ||
+      !isOpenRouterProviderSelection(openRouterProviderTagValue)) ||
     (provider !== "openrouter" && openRouterProviderTagValue !== undefined) ||
     (reasoningEffortValue !== undefined &&
       !isAgentReasoningEffort(reasoningEffortValue)) ||
@@ -94,13 +97,16 @@ export function readCreateSession(
   }
 
   return {
+    agentFilePath,
     autoCompact:
       typeof autoCompactValue === "boolean" ? autoCompactValue : true,
     credentialId,
     executionEnvironment,
     ...message,
     model: typeof modelValue === "string" ? modelValue : "",
-    openRouterProviderTag: isOpenRouterProviderTag(openRouterProviderTagValue)
+    openRouterProviderTag: isOpenRouterProviderSelection(
+      openRouterProviderTagValue,
+    )
       ? openRouterProviderTagValue
       : null,
     provider,

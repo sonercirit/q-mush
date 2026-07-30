@@ -5,6 +5,7 @@ import {
   TEST_USER_ID,
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
+import { markTestSessionRunning } from "./session-store-lifecycle-test-helpers.ts";
 import {
   STORE_RUNNER_ID,
   STORE_SESSION_ID,
@@ -27,9 +28,7 @@ function prepareForkSource() {
     tools: ["read"],
     workingDirectory: "/fork/workspace",
   });
-  expect(
-    setup.store.transitionCurrent(STORE_SESSION_ID, "running", TEST_NOW + 1),
-  ).toBe(true);
+  markTestSessionRunning(setup.store);
   setup.store.appendCurrentAgentMessage(
     STORE_SESSION_ID,
     { content: "Private reasoning", role: "thinking" },

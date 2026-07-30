@@ -53,7 +53,7 @@ test("keeps sleep session-local and unavailable to parallel", () => {
   expectParallelRecipients(parallel, []);
 });
 
-test("defines optional auto-compaction for spawned sessions", () => {
+test("defines optional agent-file path and auto-compaction for spawned sessions", () => {
   const spawnSession = AGENT_TOOLS.find(
     ({ function: definition }) => definition.name === "spawn_session",
   );
@@ -61,12 +61,18 @@ test("defines optional auto-compaction for spawned sessions", () => {
     throw new Error("The spawn-session tool definition is unavailable");
   }
   expect(spawnSession.function.parameters.required).not.toContain(
+    "agentFilePath",
+  );
+  expect(spawnSession.function.parameters.required).not.toContain(
     "autoCompact",
   );
   expect(spawnSession).toMatchObject({
     function: {
       parameters: {
-        properties: { autoCompact: { type: "boolean" } },
+        properties: {
+          agentFilePath: { type: "string" },
+          autoCompact: { type: "boolean" },
+        },
       },
     },
   });

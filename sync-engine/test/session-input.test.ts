@@ -59,6 +59,46 @@ test("validates a user-spawned child tool subset and parent identity", () => {
   ).toBeUndefined();
 });
 
+test("accepts an optional custom agent file path", () => {
+  expect(
+    readCreateSession({
+      ...SESSION_INPUT,
+      agentFilePath: "config/instructions.md",
+    })?.agentFilePath,
+  ).toBe("config/instructions.md");
+  expect(
+    readCreateSession({ ...SESSION_INPUT, agentFilePath: "  " })?.agentFilePath,
+  ).toBeNull();
+  for (const agentFilePath of [null, 42, "path\0instructions.md"]) {
+    expect(
+      readCreateSession({ ...SESSION_INPUT, agentFilePath }),
+    ).toBeUndefined();
+  }
+});
+
+test("accepts OpenRouter routing modes and legacy provider tags", () => {
+  const openRouterInput = { ...SESSION_INPUT, provider: "openrouter" };
+
+  expect(
+    readCreateSession({
+      ...openRouterInput,
+      openRouterProviderTag: "q-mush-routing:throughput",
+    })?.openRouterProviderTag,
+  ).toBe("q-mush-routing:throughput");
+  expect(
+    readCreateSession({
+      ...openRouterInput,
+      openRouterProviderTag: "google-vertex/us",
+    })?.openRouterProviderTag,
+  ).toBe("google-vertex/us");
+  expect(
+    readCreateSession({
+      ...openRouterInput,
+      openRouterProviderTag: "q-mush-routing:unknown",
+    }),
+  ).toBeUndefined();
+});
+
 test("defaults auto-compaction on and strictly accepts a boolean override", () => {
   expect(readCreateSession(SESSION_INPUT)?.autoCompact).toBe(true);
   expect(

@@ -1,0 +1,1 @@
+ALTER TABLE `agent_sessions` ADD `agent_file_path` text;

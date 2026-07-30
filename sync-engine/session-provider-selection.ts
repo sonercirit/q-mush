@@ -1,3 +1,7 @@
+import {
+  readOpenRouterProviderRouting,
+  type OpenRouterProviderCatalog,
+} from "../shared/agent-configuration.ts";
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
 import { mapWithParallelConcurrency } from "../shared/parallel.ts";
 import type {
@@ -16,6 +20,21 @@ import type {
 } from "./session-credential-reassignment-store.ts";
 import { readIdentifier } from "./session-request-helpers.ts";
 import { requestSearchSelection } from "./session-search-selection.ts";
+
+function endpointProviderTag(selection: string | null): string | undefined {
+  const routing = readOpenRouterProviderRouting(selection);
+  return routing?.type === "provider" ? routing.tag : undefined;
+}
+
+function selectedProvider(
+  catalog: OpenRouterProviderCatalog,
+  selection: string | null,
+) {
+  const tag = endpointProviderTag(selection);
+  return tag === undefined
+    ? undefined
+    : catalog.providers.find((provider) => provider.tag === tag);
+}
 
 interface CredentialSelection {
   readonly credentialId: string;
@@ -80,9 +99,10 @@ export async function prepareOpenRouterSessionCredentialProviderState(options: {
   readonly ownerId: string;
   readonly snapshot: SessionCredentialReassignmentSnapshot;
 }): Promise<OpenRouterSessionCredentialPreparationResult> {
-  const selected = options.snapshot.sessions.filter(
-    (session) => session.openRouterProviderTag !== null,
-  );
+  const selected = options.snapshot.sessions.flatMap((session) => {
+    const providerTag = endpointProviderTag(session.openRouterProviderTag);
+    return providerTag === undefined ? [] : [{ ...session, providerTag }];
+  });
   const models = [...new Set(selected.map(({ model }) => model))];
   let catalogs: readonly (readonly [
     string,
@@ -105,9 +125,10 @@ export async function prepareOpenRouterSessionCredentialProviderState(options: {
   const providersByModel = new Map(catalogs);
   const metadataUpdates: SessionCredentialMetadataUpdate[] = [];
   for (const session of selected) {
-    const provider = providersByModel
-      .get(session.model)
-      ?.providers.find(({ tag }) => tag === session.openRouterProviderTag);
+    const provider = selectedProvider(
+      providersByModel.get(session.model) ?? { providers: [] },
+      session.providerTag,
+    );
     if (provider === undefined) {
       return { error: "provider_unavailable" };
     }
@@ -180,7 +201,7 @@ export async function sessionMetadata(options: {
   readonly ownerId: string;
 }): Promise<SessionMetadataResult> {
   const { credential, input } = options;
-  if (input.openRouterProviderTag !== null) {
+  if (endpointProviderTag(input.openRouterProviderTag) !== undefined) {
     try {
       const catalog = await options.discoverProviders(
         options.ownerId,
@@ -188,9 +209,7 @@ export async function sessionMetadata(options: {
         input.model,
         { force: true },
       );
-      const selected = catalog.providers.find(
-        ({ tag }) => tag === input.openRouterProviderTag,
-      );
+      const selected = selectedProvider(catalog, input.openRouterProviderTag);
       return selected === undefined
         ? { error: "provider_unavailable" }
         : {

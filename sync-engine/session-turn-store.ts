@@ -46,6 +46,7 @@ interface SessionTurnInsertOptions {
   readonly now: number;
   readonly segment: number;
   readonly sessionId: string;
+  readonly startedAt?: number;
   readonly userId: string;
 }
 
@@ -59,7 +60,9 @@ export function insertSessionTurn(options: SessionTurnInsertOptions): string {
       id,
       segment: options.segment,
       sessionId: options.sessionId,
-      startedAt: new Date(options.now),
+      startedAt: new Date(
+        Math.min(options.startedAt ?? options.now, options.now),
+      ),
       userId: options.userId,
     })
     .run();
@@ -189,13 +192,14 @@ type SessionTurnRotationOptions = Omit<SessionTurnInsertOptions, "database"> & {
 };
 
 export function rotateSessionTurn(options: SessionTurnRotationOptions): string {
+  const startedAt = Math.min(options.startedAt ?? options.now, options.now);
   endGenerationSessionTurn(
     options.database,
     options.sessionId,
     options.previousExecutionGeneration,
-    options.now,
+    startedAt,
   );
-  return insertSessionTurn(options);
+  return insertSessionTurn({ ...options, startedAt });
 }
 
 export function readSessionTurns(

@@ -40,11 +40,10 @@ function persistedTurnTiming(options: {
     }
   }
   for (const turn of options.turns) {
-    const boundaryMessageId =
-      turn.boundaryMessageId ?? finalMessageIds.get(turn.id);
-    if (turn.endedAt !== null && boundaryMessageId !== undefined) {
+    const finalMessageId = finalMessageIds.get(turn.id);
+    if (turn.endedAt !== null && finalMessageId !== undefined) {
       completedTimings.set(
-        boundaryMessageId,
+        finalMessageId,
         completedTiming(turn.startedAt, turn.endedAt),
       );
     }

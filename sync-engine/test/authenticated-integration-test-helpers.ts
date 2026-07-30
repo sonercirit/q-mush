@@ -104,6 +104,11 @@ export function ensureWaveOneColumns(database: AppDatabase): void {
   const sessionColumns = database.$client
     .query<{ readonly name: string }, []>("PRAGMA table_info(agent_sessions)")
     .all();
+  if (!sessionColumns.some(({ name }) => name === "agent_file_path")) {
+    database.$client.run(
+      "ALTER TABLE agent_sessions ADD COLUMN agent_file_path text",
+    );
+  }
   if (!sessionColumns.some(({ name }) => name === "workspace_id")) {
     database.$client.run(
       "ALTER TABLE agent_sessions ADD COLUMN workspace_id text REFERENCES workspaces(id) ON DELETE restrict",

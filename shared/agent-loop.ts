@@ -15,6 +15,24 @@ interface AgentToolRequest<Arguments> {
 
 export type AgentToolCall = AgentToolRequest<string>;
 
+export function normalizeAgentToolCall(
+  call: AgentToolCall,
+): AgentToolCall | undefined {
+  const id = call.id.trim();
+  const name = call.name.trim();
+  if (id.length === 0 || name.length === 0) {
+    return undefined;
+  }
+  return {
+    arguments:
+      parseOptionalJsonRecord(call.arguments) === undefined
+        ? "{}"
+        : call.arguments,
+    id,
+    name,
+  };
+}
+
 function readAgentToolCall(value: unknown): AgentToolCall | undefined {
   if (!isRecord(value)) {
     return undefined;

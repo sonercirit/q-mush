@@ -9,7 +9,10 @@ import {
   AGENT_COMPACTION_SYSTEM_PROMPT,
   ModelConversationCompactor,
 } from "./agent-compaction.ts";
-import type { AgentModelRequestOptions } from "./agent-model-options.ts";
+import {
+  agentModelOpenRouterProviderRouting,
+  type AgentModelRequestOptions,
+} from "./agent-model-options.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
 import { sessionToolCacheCapability } from "./session-tool-capability.ts";
 import type { ToolStreamPublisher } from "./tool-stream-publisher.ts";
@@ -30,6 +33,22 @@ export interface SessionAgentModels {
   readonly createCompactor: () => ModelConversationCompactor;
 }
 
+function agentModelRoutingOptions(
+  selection: string | null | undefined,
+): Pick<
+  AgentModelRequestOptions,
+  "openRouterProviderRouting" | "openRouterProviderTag"
+> {
+  const routing = agentModelOpenRouterProviderRouting(selection);
+  if (routing?.type === "provider") {
+    return {
+      openRouterProviderRouting: routing,
+      openRouterProviderTag: routing.tag,
+    };
+  }
+  return routing === undefined ? {} : { openRouterProviderRouting: routing };
+}
+
 export function createFallbackModel(
   factory: AgentModelFactory,
   selection: {
@@ -44,10 +63,7 @@ export function createFallbackModel(
   return factory({
     credential: selection.credential,
     model: selection.model,
-    ...(selection.openRouterProviderTag === undefined ||
-    selection.openRouterProviderTag === null
-      ? {}
-      : { openRouterProviderTag: selection.openRouterProviderTag }),
+    ...agentModelRoutingOptions(selection.openRouterProviderTag),
     provider: selection.provider,
     providerPricing: selection.providerPricing,
     systemPrompt:
@@ -75,9 +91,7 @@ function modelOptions(
       ? { dynamicToolCache: true }
       : {}),
     model: detail.model,
-    ...(detail.openRouterProviderTag === null
-      ? {}
-      : { openRouterProviderTag: detail.openRouterProviderTag }),
+    ...agentModelRoutingOptions(detail.openRouterProviderTag),
     ...(onDelta === undefined ? {} : { onDelta }),
     ...(onTurnStart === undefined ? {} : { onTurnStart }),
     provider: detail.provider,
@@ -147,15 +161,18 @@ export function createSessionAgentModels(options: {
         startTurn,
       ),
     ),
-    createCompactor: () =>
-      new ModelConversationCompactor(
+    createCompactor: () => {
+      streamId = id();
+      return new ModelConversationCompactor(
         options.factory(
           modelOptions(
             options.detail,
             options.credential,
             AGENT_COMPACTION_SYSTEM_PROMPT,
+            onDelta,
           ),
         ),
-      ),
+      );
+    },
   };
 }

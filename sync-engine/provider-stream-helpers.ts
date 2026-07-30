@@ -1,7 +1,8 @@
-import type {
-  AgentModelTurn,
-  AgentTokenUsage,
-  AgentToolCall,
+import {
+  normalizeAgentToolCall,
+  type AgentModelTurn,
+  type AgentTokenUsage,
+  type AgentToolCall,
 } from "../shared/agent-loop.ts";
 import type { ProviderTextDelta } from "./provider-stream.ts";
 
@@ -13,11 +14,8 @@ export function sortedToolCalls(
 ): readonly AgentToolCall[] {
   return [...toolCalls.entries()]
     .sort(([left], [right]) => left - right)
-    .map(([, call]) => ({
-      arguments: call.arguments,
-      id: call.id,
-      name: call.name,
-    }));
+    .map(([, call]) => normalizeAgentToolCall(call))
+    .filter((call) => call !== undefined);
 }
 
 export function emitProviderDelta(

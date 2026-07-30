@@ -64,7 +64,14 @@ test("renders automatic and explicit OpenRouter serving-provider choices", () =>
   expect(html).toContain('data-custom-select="openRouterProviderTag"');
   expect(html).toContain("Serving provider");
   expect(html).toContain("OpenRouter automatic routing");
+  expect(html).toContain("OpenRouter automatic routing without fallbacks");
+  expect(html).toContain("OpenRouter sort by price");
+  expect(html).toContain("OpenRouter sort by throughput");
+  expect(html).toContain("OpenRouter sort by latency");
+  expect(html).toContain("OpenRouter sort by quality for tool use");
   expect(html).toContain('data-option-value="together"');
+  expect(html).toContain('data-option-value="q-mush-routing:order:together"');
+  expect(html).toContain("Together first, with automatic fallback");
   expect(html).toContain("64K context");
 });
 
@@ -89,6 +96,6 @@ test("keeps automatic routing available when discovery fails", () => {
   );
 
   expect(html).toContain("Serving providers unavailable");
-  expect(html).toContain("Automatic routing is available");
+  expect(html).toContain("Routing modes remain available");
   expect(html).toContain("Retry serving-provider discovery");
 });

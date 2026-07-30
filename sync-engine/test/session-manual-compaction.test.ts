@@ -13,6 +13,8 @@ import {
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { IDLE_RUNTIME_SIGNALS } from "./session-agent-runtime-test-helpers.ts";
+import { unusedSessionToolActions } from "./session-agent-tool-test-helpers.ts";
 import {
   completeNullRunnerCommand,
   expectCompactedIdleSession,
@@ -45,12 +47,25 @@ function runningManualStore() {
   return { ...setup, detail };
 }
 
-function runtimeDependencies(options: {
+interface RuntimeDependencyOptions {
   readonly controller: AbortController;
   readonly detail: AgentSessionDetail;
   readonly model: AgentModel;
+  readonly now?: () => number;
   readonly store: SessionStore;
-}): SessionAgentRuntimeDependencies {
+}
+
+function runtimeIsCurrent(options: RuntimeDependencyOptions): boolean {
+  return options.store.executionIsCurrent(
+    TEST_USER_ID,
+    SESSION_ID,
+    options.detail.generation,
+  );
+}
+
+function runtimeDependencies(
+  options: RuntimeDependencyOptions,
+): SessionAgentRuntimeDependencies {
   let now = TEST_NOW + 2;
   return {
     braveSearch: { execute: () => Promise.resolve("unused search") },
@@ -64,30 +79,11 @@ function runtimeDependencies(options: {
       source: "api_key",
     },
     detail: options.detail,
-    hasPendingSteeringInput: () => false,
-    isCurrent: () =>
-      options.store.executionIsCurrent(
-        TEST_USER_ID,
-        SESSION_ID,
-        options.detail.generation,
-      ),
+    ...IDLE_RUNTIME_SIGNALS,
+    isCurrent: () => runtimeIsCurrent(options),
     modelFactory: () => options.model,
-    now: () => (now += 1),
-    notify: () => undefined,
-    realtime: undefined,
-    restartHandoffRequested: () => false,
-    sessionTools: {
-      browseRunnerDirectories: () => Promise.resolve("unused directories"),
-      continueSession: () => Promise.resolve("unused continuation"),
-      getSessionOptions: () => Promise.resolve("unused options"),
-      listRunners: () => "unused runners",
-      listSessions: () => "unused sessions",
-      readSession: () => "unused session",
-      reassignSession: () => "unused reassignment",
-      sendToSession: () => Promise.resolve("unused message"),
-      spawnSession: () => Promise.resolve("unused spawn"),
-      stopSession: () => "unused stop",
-    },
+    now: options.now ?? (() => (now += 1)),
+    sessionTools: unusedSessionToolActions(),
     signal: options.controller.signal,
     store: options.store,
     userId: TEST_USER_ID,
@@ -188,6 +184,30 @@ async function runGatedManualCompaction(options: {
 }
 
 describe("manual session compaction", () => {
+  test("persists the actual wall-clock compaction duration", async () => {
+    const gate = promiseGate<AgentModelTurn>();
+    const setup = runningManualStore();
+    const controller = new AbortController();
+    let now = TEST_NOW + 10;
+    const startedAt = now;
+    const runtime = runtimeDependencies({
+      ...setup,
+      controller,
+      model: gatedModel(gate),
+      now: () => now,
+    });
+    const compaction = startManualCompaction(runtime);
+    await gate.entered;
+    now += 12_345;
+    gate.release(compactorTurn("Timed manual handoff"));
+
+    await expect(compaction).resolves.toBe("complete");
+    expect(requireCompactionSession(setup.store).turns).toMatchObject([
+      { endedAt: now, startedAt },
+    ]);
+    closeSessionTestDatabase(setup.database);
+  });
+
   test("does not persist an abort-ignoring compactor result", async () => {
     const controller = new AbortController();
     await runGatedManualCompaction({
