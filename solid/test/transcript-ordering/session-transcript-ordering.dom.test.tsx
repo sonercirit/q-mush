@@ -3,7 +3,10 @@ import type { AgentSessionDetail } from "../../../shared/session-model.ts";
 import { RenderDebugView } from "../../render-debug.tsx";
 import type { SessionController } from "../../session-controller.ts";
 import { disposeTestViews } from "../dom-test-helpers.ts";
-import { defineElementSize } from "../element-size-test-helpers.ts";
+import {
+  defineElementSize,
+  defineElementWidth,
+} from "../element-size-test-helpers.ts";
 import {
   messageBoundary,
   mountTestTranscript,
@@ -124,36 +127,86 @@ function startNestedCodeStream(
   return code;
 }
 
-function growNestedCodeStream(
-  container: ParentNode,
-  controller: SessionController,
-  detail: AgentSessionDetail,
-): HTMLElement {
-  applyTranscriptDelta(controller, detail, "\nconst second = 2;");
-  const updatedCode = codeBlock(container);
-  defineElementSize(updatedCode, 100, 500);
-  return updatedCode;
-}
+type NestedStreamKind = "code" | "table";
 
-function nestedStreamFixture(
-  id: string,
-  prompt: string,
-): {
+interface NestedStreamFixture {
   readonly container: HTMLDivElement;
   readonly controller: SessionController;
   readonly detail: AgentSessionDetail;
-} {
-  return mountedTranscript([transcriptMessage(id, prompt, "user", 2)]);
 }
 
-async function settledGrownCodeStream(
+function growNestedStream(
+  { container, controller, detail }: NestedStreamFixture,
+  kind: NestedStreamKind,
+): HTMLElement {
+  if (kind === "code") {
+    applyTranscriptDelta(controller, detail, "\nconst second = 2;");
+    const updatedCode = codeBlock(container);
+    defineElementSize(updatedCode, 100, 500);
+    return updatedCode;
+  }
+
+  applyTranscriptDelta(controller, detail, "\n| another | wider |");
+  const updatedTable = nestedTable(container);
+  defineElementWidth(updatedTable, 100, 500);
+  return updatedTable;
+}
+
+async function settledNestedStream(
+  fixture: NestedStreamFixture,
+  kind: NestedStreamKind,
+): Promise<HTMLElement> {
+  const updatedElement = growNestedStream(fixture, kind);
+  await Promise.resolve();
+  return updatedElement;
+}
+
+function nestedTable(container: ParentNode): HTMLElement {
+  const table = container.querySelector<HTMLElement>(".overflow-x-auto");
+  if (table === null) throw new TypeError("Missing streamed table");
+  return table;
+}
+
+function startNestedTableStream(
   container: ParentNode,
   controller: SessionController,
   detail: AgentSessionDetail,
-): Promise<HTMLElement> {
-  const updatedCode = growNestedCodeStream(container, controller, detail);
-  await Promise.resolve();
-  return updatedCode;
+  scrollLeft: number,
+): HTMLElement {
+  applyTranscriptDelta(
+    controller,
+    detail,
+    "| First | Second |\n| --- | --- |\n| value | wide |",
+  );
+  const table = nestedTable(container);
+  defineElementWidth(table, 100, 400);
+  table.scrollLeft = scrollLeft;
+  table.dispatchEvent(new Event("scroll"));
+  return table;
+}
+
+function nestedStreamFixture(id: string, prompt: string): NestedStreamFixture {
+  return mountedTranscript([transcriptMessage(id, prompt, "user", 2)]);
+}
+
+async function grownCodeStreamFixture(
+  id: string,
+  prompt: string,
+  scrollTop: number,
+): Promise<{
+  readonly initialCode: HTMLElement;
+  readonly updatedCode: HTMLElement;
+}> {
+  const fixture = nestedStreamFixture(id, prompt);
+  const { container, controller, detail } = fixture;
+  const initialCode = startNestedCodeStream(
+    container,
+    controller,
+    detail,
+    scrollTop,
+  );
+  const updatedCode = await settledNestedStream(fixture, "code");
+  return { initialCode, updatedCode };
 }
 
 function expectMessageBoundariesToRenderOnce(
@@ -170,34 +223,45 @@ afterEach(() => {
 });
 
 test("keeps a streamed code block at the user's nested scroll position", async () => {
-  const { container, controller, detail } = nestedStreamFixture(
+  const { initialCode, updatedCode } = await grownCodeStreamFixture(
     "user-scroll",
     "Show the output",
+    83,
   );
 
-  const code = startNestedCodeStream(container, controller, detail, 83);
-  const updatedCode = await settledGrownCodeStream(
-    container,
-    controller,
-    detail,
-  );
-  expect(updatedCode).not.toBe(code);
+  expect(updatedCode).not.toBe(initialCode);
   expect(updatedCode.scrollTop).toBe(83);
 });
 
 test("keeps a bottom-pinned nested region following streamed growth", async () => {
-  const { container, controller, detail } = nestedStreamFixture(
+  const { updatedCode } = await grownCodeStreamFixture(
     "user-pinned",
     "Keep following",
-  );
-  startNestedCodeStream(container, controller, detail, 300);
-  const updatedCode = await settledGrownCodeStream(
-    container,
-    controller,
-    detail,
+    300,
   );
 
   expect(updatedCode.scrollTop).toBe(400);
+});
+
+test.each([
+  { expected: 83, label: "user position", scrollLeft: 83 },
+  { expected: 400, label: "right edge", scrollLeft: 300 },
+])("keeps a streamed table at the $label", async ({ expected, scrollLeft }) => {
+  const fixture = nestedStreamFixture(
+    `table-${String(scrollLeft)}`,
+    "Show the table",
+  );
+  const { container, controller, detail } = fixture;
+  const table = startNestedTableStream(
+    container,
+    controller,
+    detail,
+    scrollLeft,
+  );
+  const updatedTable = await settledNestedStream(fixture, "table");
+
+  expect(updatedTable).not.toBe(table);
+  expect(updatedTable.scrollLeft).toBe(expected);
 });
 
 test("keeps persisted and streamed turns in canonical DOM order", () => {

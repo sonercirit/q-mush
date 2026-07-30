@@ -2,6 +2,8 @@ import { onCleanup } from "solid-js";
 
 interface NestedScrollState {
   readonly fromEnd: number;
+  readonly fromRight: number;
+  readonly left: number;
   readonly top: number;
 }
 
@@ -23,6 +25,8 @@ function nestedScrollElements(element: HTMLElement): readonly HTMLElement[] {
 function nestedScrollState(element: HTMLElement): NestedScrollState {
   return {
     fromEnd: element.scrollHeight - element.clientHeight - element.scrollTop,
+    fromRight: element.scrollWidth - element.clientWidth - element.scrollLeft,
+    left: element.scrollLeft,
     top: element.scrollTop,
   };
 }
@@ -35,6 +39,10 @@ function restoreNestedScroll(
     state.fromEnd <= 2
       ? element.scrollHeight - element.clientHeight
       : state.top;
+  element.scrollLeft =
+    state.fromRight <= 2
+      ? element.scrollWidth - element.clientWidth
+      : state.left;
 }
 
 export function createNestedScrollRef(
