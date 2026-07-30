@@ -23,6 +23,7 @@ import {
   buildClientJavaScript,
   buildClientStylesheet,
   createRequestHandler,
+  readQmushPort,
 } from "./server.ts";
 import { createSessionsChangedPublisher } from "./session-credential-reassignment-realtime.ts";
 import { createSessionIntegration } from "./sessions.ts";
@@ -95,6 +96,7 @@ const server = Bun.serve<QmushWebSocketData>({
 
     return handleRequest(request);
   },
+  port: readQmushPort(Bun.env),
   websocket: realtime.websocket,
 });
 

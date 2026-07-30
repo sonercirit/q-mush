@@ -48,6 +48,17 @@ import type { RunnerIntegration } from "./runners.ts";
 import type { SessionIntegration } from "./sessions.ts";
 import type { WorkspaceIntegration } from "./workspaces.ts";
 
+const DEFAULT_Q_MUSH_PORT = 12_345;
+
+export function readQmushPort(
+  environment: Readonly<Record<string, string | undefined>>,
+): string | number {
+  const configuredPort = environment["PORT"]?.trim();
+  return configuredPort === undefined || configuredPort.length === 0
+    ? DEFAULT_Q_MUSH_PORT
+    : configuredPort;
+}
+
 const CSS_HEADERS = { "content-type": "text/css; charset=utf-8" };
 const FAVICON_HEADERS = {
   "cache-control": "public, max-age=86400, must-revalidate",

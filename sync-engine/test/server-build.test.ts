@@ -2,7 +2,13 @@ import { describe, expect, test } from "vitest";
 import {
   buildClientJavaScript,
   buildClientStylesheet,
+  readQmushPort,
 } from "../../sync-engine/server.ts";
+
+test("uses port 12345 unless PORT overrides it", () => {
+  expect(readQmushPort({})).toBe(12_345);
+  expect(readQmushPort({ PORT: "23456" })).toBe("23456");
+});
 
 describe("browser build", () => {
   test("builds the login, session, and provider credential controls", async () => {

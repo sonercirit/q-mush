@@ -212,9 +212,10 @@ Living project memory.
 ## Decisions and Gotchas
 
 - The package is private ESM (`"type": "module"`).
+- The HTTP server defaults to port 12345; `PORT` overrides it.
 - Google login reads `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and the
   optional `GOOGLE_REDIRECT_URI`; both credentials must be present together. The
-  default local callback is `http://localhost:3000/api/auth/google/callback`,
+  default local callback is `http://localhost:12345/api/auth/google/callback`,
   which must be registered exactly on the Google web OAuth client. Never expose
   the client secret to browser code or tracked files.
 - `DATABASE_PATH` selects SQLite (default `data/q-mush.sqlite`; `data/` is
