@@ -1,3 +1,4 @@
+import { isAbsolute } from "node:path";
 import {
   isAgentModelId,
   isAgentReasoningEffort,
@@ -112,11 +113,16 @@ function reassignmentInput(arguments_: Readonly<Record<string, unknown>>): {
   return { runnerId, sessionId: selectedSessionId, workingDirectory };
 }
 
+function readSpawnAgentFilePath(value: unknown): string | null | undefined {
+  const path = readOptionalAgentFilePath(value);
+  return typeof path === "string" && isAbsolute(path) ? undefined : path;
+}
+
 function spawnInput(
   arguments_: Readonly<Record<string, unknown>>,
 ): SpawnSessionToolInput {
   const credentialId = readIdentifier(arguments_["credentialId"]);
-  const agentFilePath = readOptionalAgentFilePath(arguments_["agentFilePath"]);
+  const agentFilePath = readSpawnAgentFilePath(arguments_["agentFilePath"]);
   const autoCompact = arguments_["autoCompact"];
   const executionEnvironment = readRunnerExecutionEnvironment(
     arguments_["executionEnvironment"],

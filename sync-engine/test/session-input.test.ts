@@ -60,6 +60,13 @@ test("validates a user-spawned child tool subset and parent identity", () => {
 });
 
 test("accepts an optional custom agent file path", () => {
+  const absoluteAgentFilePath = "/home/user/instructions.md";
+  expect(
+    readCreateSession({
+      ...SESSION_INPUT,
+      agentFilePath: absoluteAgentFilePath,
+    })?.agentFilePath,
+  ).toBe(absoluteAgentFilePath);
   expect(
     readCreateSession({
       ...SESSION_INPUT,

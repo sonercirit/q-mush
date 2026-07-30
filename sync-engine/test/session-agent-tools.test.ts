@@ -47,9 +47,11 @@ function spawnCall(
   reasoningEffort?: string,
   tools: readonly string[] = [],
   credentialId = CREDENTIAL_ID,
+  agentFilePath?: string,
 ) {
   return toolCall("spawn_session", {
     credentialId,
+    ...(agentFilePath === undefined ? {} : { agentFilePath }),
     model: "gpt-4.1-mini",
     prompt,
     provider: "openai",
@@ -148,10 +150,16 @@ async function completedToolOutput(
   return { output: outputs[0], setup };
 }
 
-async function runRejectedSpawn(
+async function expectRejectedSpawn(
   model: AgentModel,
-): Promise<CompletedToolOutput> {
-  return completedToolOutput(model, "spawn_session");
+  expectedError: string,
+  userId = TEST_USER_ID,
+): Promise<void> {
+  const { output, setup } = await completedToolOutput(model, "spawn_session");
+
+  expect(output).toContain(expectedError);
+  expect(setup.sessions.listForUser(userId)).toHaveLength(1);
+  closeSessionTestDatabase(setup.database);
 }
 
 async function waitForRunnerSession(
@@ -353,6 +361,25 @@ describe("session agent tools", () => {
     closeSessionTestDatabase(controlSetup.database);
   });
 
+  test("rejects absolute model agent-file paths", async () => {
+    const model = scriptedModel([
+      {
+        content: "Trying outside instructions.",
+        toolCalls: [
+          spawnCall(
+            "Do not launch",
+            undefined,
+            [],
+            CREDENTIAL_ID,
+            "/etc/passwd",
+          ),
+        ],
+      },
+      { content: "Isolation confirmed.", toolCalls: [] },
+    ]);
+    await expectRejectedSpawn(model, "spawn_session arguments are invalid");
+  });
+
   test("rejects a spawn without access to its credential", async () => {
     const model = scriptedModel([
       {
@@ -363,13 +390,11 @@ describe("session agent tools", () => {
       },
       { content: "Credential isolation confirmed.", toolCalls: [] },
     ]);
-    const { output, setup } = await runRejectedSpawn(model);
-
-    expect(output).toContain("credential_unavailable");
-    expect(
-      setup.sessions.listForUser("018bcfe5-6800-7000-8000-000000000021"),
-    ).toHaveLength(1);
-    closeSessionTestDatabase(setup.database);
+    await expectRejectedSpawn(
+      model,
+      "credential_unavailable",
+      "018bcfe5-6800-7000-8000-000000000021",
+    );
   });
 
   test("hands off a parent that races with server draining", async () => {

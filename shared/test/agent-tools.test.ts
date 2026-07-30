@@ -70,7 +70,11 @@ test("defines optional agent-file path and auto-compaction for spawned sessions"
     function: {
       parameters: {
         properties: {
-          agentFilePath: { type: "string" },
+          agentFilePath: {
+            description:
+              "Optional workspace-contained agent-file path; must be relative to the working directory",
+            type: "string",
+          },
           autoCompact: { type: "boolean" },
         },
       },

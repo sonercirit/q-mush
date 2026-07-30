@@ -38,7 +38,17 @@ function addTranscriptMessage(
   counts: MutableSessionTranscriptCounts,
   message: AgentSessionMessage,
 ): void {
-  const { filterCounts, toolCallArguments } = counts;
+  const toolCalls = addTranscriptMessageCounts(counts.filterCounts, message);
+  if (toolCalls === undefined) return;
+  for (const call of toolCalls) {
+    counts.toolCallArguments.set(call.id, call.arguments);
+  }
+}
+
+function addTranscriptMessageCounts(
+  filterCounts: Record<SessionTranscriptFilterName, number>,
+  message: AgentSessionMessage,
+): AgentSessionMessage["toolCalls"] | undefined {
   switch (message.role) {
     case "error":
     case "system":
@@ -55,16 +65,14 @@ function addTranscriptMessage(
       break;
     case "assistant": {
       const toolCalls = message.toolCalls;
-      for (const call of toolCalls) {
-        toolCallArguments.set(call.id, call.arguments);
-      }
       filterCounts.toolActivity += toolCalls.length;
       if (message.content.length > 0 || message.images.length > 0) {
         filterCounts.assistantMessages += 1;
       }
-      break;
+      return toolCalls;
     }
   }
+  return undefined;
 }
 
 export function createSessionTranscriptCounts(
@@ -97,13 +105,25 @@ export function createSessionTranscriptCounts(
     previousAgentFile = currentAgentFile;
     previousStableMessages = currentGroups.stable;
     previousTools = currentTools;
-    const current: MutableSessionTranscriptCounts = {
-      filterCounts: { ...stableCounts.filterCounts },
-      toolCallArguments: new Map(stableCounts.toolCallArguments),
-    };
+    const streamedFilterCounts = { ...stableCounts.filterCounts };
+    let streamedToolCallArguments: Map<string, string> | undefined;
     for (const message of currentGroups.streamed) {
-      addTranscriptMessage(current, message);
+      const toolCalls = addTranscriptMessageCounts(
+        streamedFilterCounts,
+        message,
+      );
+      if (toolCalls === undefined || toolCalls.length === 0) {
+        continue;
+      }
+      streamedToolCallArguments ??= new Map(stableCounts.toolCallArguments);
+      for (const call of toolCalls) {
+        streamedToolCallArguments.set(call.id, call.arguments);
+      }
     }
-    return current;
+    return {
+      filterCounts: streamedFilterCounts,
+      toolCallArguments:
+        streamedToolCallArguments ?? stableCounts.toolCallArguments,
+    };
   });
 }

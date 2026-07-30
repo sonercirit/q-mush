@@ -180,7 +180,7 @@ const SESSION_AGENT_TOOLS = [
     properties: {
       agentFilePath: {
         description:
-          "Optional agent-file path; relative paths use the working directory, absolute paths may be outside it",
+          "Optional workspace-contained agent-file path; must be relative to the working directory",
         ...STRING_PARAMETER,
       },
       autoCompact: {
