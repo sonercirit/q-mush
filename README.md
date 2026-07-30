@@ -19,7 +19,7 @@ cp .env.example .env.local
 Register this exact authorized redirect URI on the Google OAuth client:
 
 ```text
-http://localhost:3000/api/auth/google/callback
+http://localhost:12345/api/auth/google/callback
 ```
 
 Generate separate 32-byte keys for encrypted OpenAI, OpenRouter, and Brave
@@ -56,6 +56,10 @@ To run the supervised development server:
 ```bash
 bun run dev
 ```
+
+Both commands serve Q Mush at `http://localhost:12345` by default. Set `PORT` to
+override the listening port, and update OAuth callback URLs and registrations to
+match.
 
 Source edits intentionally leave the running process untouched so an agent can
 modify Q Mush without interrupting its own session. Once the change is ready,
