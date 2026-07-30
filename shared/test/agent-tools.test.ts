@@ -68,14 +68,21 @@ test("defines optional agent-file path and auto-compaction for spawned sessions"
   );
   expect(spawnSession).toMatchObject({
     function: {
+      description:
+        "Spawn another agent session and return immediately. Configure it with the same fields available in the new-session pane, including any working directory and any agent-file path (relative or absolute, inside or outside the workspace). When it finishes or fails, its last message is sent back to this session.",
       parameters: {
         properties: {
           agentFilePath: {
             description:
-              "Optional workspace-contained agent-file path; must be relative to the working directory",
+              "Optional agent-file path; may be relative or absolute, inside or outside the workspace",
             type: "string",
           },
           autoCompact: { type: "boolean" },
+          workingDirectory: {
+            description:
+              "Any working directory on the selected runner, inside or outside the parent workspace",
+            type: "string",
+          },
         },
       },
     },

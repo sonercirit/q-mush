@@ -175,12 +175,12 @@ const SESSION_AGENT_TOOLS = [
   }),
   toolDefinition({
     description:
-      "Spawn another agent session and return immediately. Configure it with the same fields available in the new-session pane. When it finishes or fails, its last message is sent back to this session.",
+      "Spawn another agent session and return immediately. Configure it with the same fields available in the new-session pane, including any working directory and any agent-file path (relative or absolute, inside or outside the workspace). When it finishes or fails, its last message is sent back to this session.",
     name: "spawn_session",
     properties: {
       agentFilePath: {
         description:
-          "Optional workspace-contained agent-file path; must be relative to the working directory",
+          "Optional agent-file path; may be relative or absolute, inside or outside the workspace",
         ...STRING_PARAMETER,
       },
       autoCompact: {
@@ -223,7 +223,8 @@ const SESSION_AGENT_TOOLS = [
         ...STRING_ARRAY_PARAMETER,
       },
       workingDirectory: {
-        description: "Working directory on the selected runner",
+        description:
+          "Any working directory on the selected runner, inside or outside the parent workspace",
         ...STRING_PARAMETER,
       },
     },

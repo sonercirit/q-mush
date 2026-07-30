@@ -590,17 +590,25 @@ function launchRaceTests(expected: LaunchRaceExpectation): void {
   });
 }
 
-test("validates and persists a custom agent-file path for spawned sessions", async () => {
-  const setup = agentActionsSetup("none", false);
-  const agentFilePath = "config/instructions.md";
+test("persists unrestricted paths", async () => {
+  const scenarios = [
+    {
+      agentFilePath: "config/rules.md",
+      workingDirectory: "/other/work",
+    },
+    { agentFilePath: "/x/rules.md" },
+  ] as const;
+  for (const scenario of scenarios) {
+    const setup = agentActionsSetup("none", false);
 
-  await executeSessionAgentTool(setup.actions, "spawn_session", {
-    ...spawnInput(setup, "Create with custom instructions"),
-    agentFilePath,
-  });
+    await executeSessionAgentTool(setup.actions, "spawn_session", {
+      ...spawnInput(setup, "Create child"),
+      ...scenario,
+    });
 
-  expect(spawnedSession(setup)?.agentFilePath).toBe(agentFilePath);
-  closeSessionTestDatabase(setup.database);
+    expect(spawnedSession(setup)).toMatchObject(scenario);
+    closeSessionTestDatabase(setup.database);
+  }
 });
 
 test("validates and persists spawn auto-compaction", async () => {
