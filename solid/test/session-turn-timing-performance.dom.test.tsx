@@ -27,12 +27,21 @@ test("streaming deltas do not revisit completed turns or markdown", () => {
         return startedAt;
       },
     });
-    const assistant = transcriptTestMessage(
-      `assistant-${String(turn)}`,
-      "Response",
-      "assistant",
-      startedAt + 1,
-    );
+    const assistant: AgentSessionMessage = {
+      ...transcriptTestMessage(
+        `assistant-${String(turn)}`,
+        "Response",
+        "assistant",
+        startedAt + 1,
+      ),
+      toolCalls: [
+        {
+          arguments: `{"turn":${String(turn)}}`,
+          id: `call-${String(turn)}`,
+          name: "read",
+        },
+      ],
+    };
     const role = assistant.role;
     const toolCalls = assistant.toolCalls;
     Object.defineProperties(assistant, {
@@ -86,6 +95,7 @@ test("streaming deltas do not revisit completed turns or markdown", () => {
   );
   const groups = createSessionTranscriptMessageGroups(messages);
   const initialCounts = counts();
+  const initialToolCallArguments = initialCounts.toolCallArguments;
   const initialStableMessages = groups().stable;
   const { container, dispose } = mountTestTranscriptView({
     messages,
@@ -109,8 +119,10 @@ test("streaming deltas do not revisit completed turns or markdown", () => {
         content: `${streamed.content}.`,
       });
     });
+    expect(counts().toolCallArguments).toBe(initialToolCallArguments);
   }
 
+  expect(initialToolCallArguments.get("call-99")).toBe('{"turn":99}');
   expect(historicalMessageReads).toBe(initialHistoricalMessageReads);
   expect(historicalTimestampReads).toBe(initialTimestampReads);
   expect(historicalRoleReads).toBe(initialRoleReads);
