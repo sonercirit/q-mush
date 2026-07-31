@@ -64,8 +64,9 @@ export function modelSupportsAttachmentModality(
   inputModalities: readonly string[] | null,
   modality: AgentAttachmentModality,
 ): boolean {
-  return inputModalities === null
-    ? modality === "image"
-    : inputModalities.includes(modality) ||
-        (modality === "pdf" && inputModalities.includes("file"));
+  return (
+    inputModalities !== null &&
+    (inputModalities.includes(modality) ||
+      (modality === "pdf" && inputModalities.includes("file")))
+  );
 }

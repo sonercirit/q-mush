@@ -60,7 +60,6 @@ async function previewFor(
     detail,
     preview: sessionToolCachePreview(detail, input.tools, {
       credentialSource,
-      model: detail.model,
       provider: detail.provider,
       tools: input.tools,
     }),

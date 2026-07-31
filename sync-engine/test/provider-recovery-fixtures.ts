@@ -130,7 +130,7 @@ export function apiKeyModel(options: {
       source: "api_key",
     },
     fetch: neverFetch,
-    model: "gpt-5.6",
+    model: "api-test-model",
     ...(options.onDelta === undefined ? {} : { onDelta: options.onDelta }),
     provider: "openai",
     ...(options.sleep === undefined ? {} : { sleep: options.sleep }),

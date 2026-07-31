@@ -343,25 +343,13 @@ describe("agent sessions", () => {
     setup.database.$client.close();
   });
 
-  test("uses a Codex model by default for OpenAI OAuth", async () => {
-    const model = new ScriptedAgentModel([
-      { content: "OAuth session complete.", toolCalls: [] },
-    ]);
-    const setup = connectedSessionSetup(model, "oauth");
-    const { database, selectedModels, sessions } = setup;
-    const response = await sessions.collection(createSessionRequest(false));
-
-    await expectSessionReaches(setup, response, "idle");
-    expect(selectedModels).toEqual(["gpt-5-codex"]);
-    database.$client.close();
-  });
-
-  test("rejects an unsupported reasoning effort", async () => {
-    const setup = emptySessionSetup();
-    await expectInvalidSessionRequest(
-      setup,
+  test("rejects a missing model or unsupported reasoning effort", async () => {
+    for (const request of [
+      createSessionRequest(false),
       createSessionRequest(true, "maximum"),
-    );
+    ]) {
+      await expectInvalidSessionRequest(emptySessionSetup(), request);
+    }
   });
 
   test("runs a session with only its selected tools and skills", async () => {

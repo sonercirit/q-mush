@@ -50,7 +50,7 @@ export async function explainAttachment(
         .find((candidate) => candidate.modality === modality);
   if (!native && selection === undefined) {
     throw new Error(
-      `The session model cannot read ${modality} files. Configure the global ${modality} fallback in Attachment fallback settings.`,
+      `The session model does not report ${modality} support. Configure a global ${modality} fallback with reported support in Attachment fallback settings.`,
     );
   }
   const credential =

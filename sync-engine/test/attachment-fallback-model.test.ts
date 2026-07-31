@@ -32,7 +32,10 @@ const FALLBACK_CREDENTIAL = {
   label: "Fallback",
 };
 
-function options(inputModalities: readonly string[], selections = [FALLBACK]) {
+function options(
+  inputModalities: readonly string[] | null,
+  selections = [FALLBACK],
+) {
   const complete = vi.fn(() => Promise.resolve(providerTurn("explained")));
   const factory = vi.fn(() => ({ complete }));
   return {
@@ -69,6 +72,15 @@ function options(inputModalities: readonly string[], selections = [FALLBACK]) {
   };
 }
 
+async function expectFallbackRequired(
+  inputModalities: readonly string[] | null,
+  message: string,
+): Promise<void> {
+  const setup = options(inputModalities, []);
+  await expect(explainAttachment(setup.value)).rejects.toThrow(message);
+  expect(setup.factory).not.toHaveBeenCalled();
+}
+
 describe("explain attachment", () => {
   test("uses the per-call prompt and configured fallback for unreadable files", async () => {
     const setup = options(["text"]);
@@ -103,11 +115,10 @@ describe("explain attachment", () => {
   });
 
   test("reports the global setting when no fallback can read the file", async () => {
-    const setup = options(["text"], []);
+    await expectFallbackRequired(["text"], "Configure a global pdf fallback");
+  });
 
-    await expect(explainAttachment(setup.value)).rejects.toThrow(
-      "Configure the global pdf fallback",
-    );
-    expect(setup.factory).not.toHaveBeenCalled();
+  test("does not claim support when model modalities are unknown", async () => {
+    await expectFallbackRequired(null, "with reported support");
   });
 });

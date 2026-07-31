@@ -9,7 +9,6 @@ import type {
 
 export interface SessionToolCacheCapabilityInput {
   readonly credentialSource: ProviderCredentialSource;
-  readonly model: string;
   readonly provider: ProviderId;
   readonly tools: readonly AgentSessionToolName[];
 }
@@ -37,7 +36,6 @@ export function sessionToolCacheCapability(
   const preserves =
     input.provider === "openai" &&
     input.credentialSource === "oauth" &&
-    input.model.startsWith("gpt-5") &&
     parallelSchemaIsStable;
   return preserves
     ? {

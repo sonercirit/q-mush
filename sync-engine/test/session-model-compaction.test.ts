@@ -29,8 +29,19 @@ import {
 } from "./session-launch-race-helpers.ts";
 
 function compactionSetup(model: ScriptedAgentModel, label: string) {
+  const catalog = testModelCatalog("gpt-4.1-mini", label);
   return connectedSessionSetup(model, "api_key", () =>
-    Promise.resolve(testModelCatalog("gpt-4.1-mini", label)),
+    Promise.resolve({
+      ...catalog,
+      models: catalog.models.map((option) => ({
+        ...option,
+        pricing: {
+          cachedInput: "0.0000001",
+          input: "0.0000004",
+          output: "0.0000016",
+        },
+      })),
+    }),
   );
 }
 

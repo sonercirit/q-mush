@@ -45,7 +45,7 @@ test("prefers the Responses WebSocket for OpenAI API keys", async () => {
   socket?.open();
   expect(JSON.parse(socket?.sent[0] ?? "{}")).toMatchObject({
     input: [{ role: "user", type: "message" }],
-    model: "gpt-5.6",
+    model: "api-test-model",
     store: false,
     type: "response.create",
   });

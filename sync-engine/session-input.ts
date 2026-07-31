@@ -1,6 +1,5 @@
 import { readAgentAttachments } from "../shared/agent-attachments.ts";
 import {
-  defaultAgentModel,
   isAgentModelId,
   isAgentReasoningEffort,
   isOpenRouterProviderSelection,
@@ -85,7 +84,7 @@ export function readCreateSession(
     provider === undefined ||
     runnerId === undefined ||
     workingDirectory === undefined ||
-    (modelValue !== undefined && !isAgentModelId(modelValue)) ||
+    !isAgentModelId(modelValue) ||
     (openRouterProviderTagValue !== undefined &&
       !isOpenRouterProviderSelection(openRouterProviderTagValue)) ||
     (provider !== "openrouter" && openRouterProviderTagValue !== undefined) ||
@@ -103,7 +102,7 @@ export function readCreateSession(
     credentialId,
     executionEnvironment,
     ...message,
-    model: typeof modelValue === "string" ? modelValue : "",
+    model: modelValue,
     openRouterProviderTag: isOpenRouterProviderSelection(
       openRouterProviderTagValue,
     )
@@ -158,13 +157,4 @@ export interface PromptInput {
 
 export function readPrompt(value: unknown): PromptInput | undefined {
   return isRecord(value) ? promptInput(value) : undefined;
-}
-
-export function selectedSessionModel(
-  input: Pick<CreateSessionInput, "model" | "provider">,
-  source: Parameters<typeof defaultAgentModel>[1],
-): string {
-  return input.model.length === 0
-    ? defaultAgentModel(input.provider, source)
-    : input.model;
 }
