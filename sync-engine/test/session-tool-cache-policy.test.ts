@@ -5,7 +5,6 @@ import { sessionToolCacheCapability } from "../session-tool-capability.ts";
 
 const OPENROUTER_CACHE_CONTEXT = {
   credentialSource: "api_key" as const,
-  model: "openai/gpt-5",
   provider: "openrouter" as const,
   tools: ["read"] as const,
 };
@@ -15,7 +14,6 @@ describe("session tool cache policy", () => {
     expect(
       sessionToolCacheCapability({
         credentialSource: "oauth",
-        model: "gpt-5-codex",
         provider: "openai",
         tools: AGENT_SESSION_TOOL_NAMES,
       }),
@@ -26,7 +24,6 @@ describe("session tool cache policy", () => {
     expect(
       sessionToolCacheCapability({
         credentialSource: "api_key",
-        model: "gpt-5",
         provider: "openai",
         tools: ["read"],
       }).preservesDynamicToolCache,

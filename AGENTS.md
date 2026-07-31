@@ -108,21 +108,20 @@ Living project memory.
   sessions. User messages support selecting or pasting up to eight 10 MB PNG,
   JPEG, GIF, or WebP images, persisted with the transcript and sent as native
   multimodal input. Sessions record cumulative active time, model cost
-  (including compaction), token usage, and the context limit. OpenRouter charges
-  are authoritative; others use captured/OpenAI estimates, with unknown prices
-  unavailable. OAuth figures are API equivalents, not subscription charges.
-  Usage is yellow at 80% and red at 90%. Auto-compaction defaults on; at 95% it
-  summarizes completed history and transparently continues the active run from
-  the handoff. Idle sessions can compact manually without continuing. The
-  composer stays mounted across statuses, explains unavailable actions, and
-  preserves drafts. Local preferences filter transcript categories without
-  changing messages. Compaction soft-deletes prior messages and inserts a
-  replayable handoff. Provider secrets stay out of browser and runner work
-  payloads. The working-directory field opens the interactive browser in
-  `solid/directory-picker-client.tsx`; its controller posts to
-  `/api/runners/:id/directories` for canonical directory metadata. Before each
-  run, `read_agent_file` loads exact-root `AGENTS.md`, falling back to
-  `CLAUDE.md`; only `AGENTS.md` is used when both exist.
+  (including compaction), token usage, and the context limit. Reported charges
+  are authoritative; estimates require provider-discovered rates for each used
+  token category, otherwise they remain unavailable. Usage is yellow at 80% and
+  red at 90%. Auto-compaction defaults on; at 95% it summarizes completed
+  history and transparently continues the active run from the handoff. Idle
+  sessions can compact manually without continuing. The composer stays mounted
+  across statuses, explains unavailable actions, and preserves drafts. Local
+  preferences filter transcript categories without changing messages. Compaction
+  soft-deletes prior messages and inserts a replayable handoff. Provider secrets
+  stay out of browser and runner work payloads. The working-directory field
+  opens the interactive browser in `solid/directory-picker-client.tsx`; its
+  controller posts to `/api/runners/:id/directories` for canonical directory
+  metadata. Before each run, `read_agent_file` loads exact-root `AGENTS.md`,
+  falling back to `CLAUDE.md`; only `AGENTS.md` is used when both exist.
 
   `runner/runner-workspace.ts` shares canonical workspace resolution and
   containment with file tools. Tool and skill choices persist per session.
@@ -140,24 +139,23 @@ Living project memory.
   snapshots suppress notifications, and keyed messages preserve identity so only
   the affected message rerenders. The long-lived Solid root preserves focus and
   scroll. The transcript starts and returns to the bottom when messages or the
-  agent file change. `sync-engine/agent-model-discovery.ts` queries provider
-  model metadata; `shared/agent-configuration.ts` owns catalog types and
-  fallbacks. New sessions default to the online runner and model credential,
-  then the first entry. The working directory uses the latest session; models
-  use the first option and maximum reasoning effort. Model choices show all
-  provider and Q Mush-supported input/output modalities.
-  `solid/custom-select.tsx` uses shared search normalization and paginates lists
-  over ten items, opens on the selected page, clamps or resets pages, and owns
-  accessible keyboard/focus. Focus mode fills the app viewport (not browser
-  Fullscreen), preserving drafts and scroll. Its desktop rail expands as an
-  overlay; small screens use a drawer. Selection collapses it and Escape closes
-  it before exit. Full paths wrap. Model and effort selections persist with the
-  session. `shared/agent-prompt.ts` builds the model system prompt and
-  transcript display. Reasoning summaries persist as `thinking` messages but are
-  excluded from replay. Session and transcript rows live in `agent_sessions` and
-  `agent_messages`; interrupted processes mark active sessions failed so they
-  can be resumed. Rebuilt conversations add error results for interrupted tool
-  calls only on resume.
+  agent file change. `sync-engine/agent-model-discovery.ts` queries metadata;
+  `shared/agent-configuration.ts` owns catalog types and validation. New
+  sessions use the default online runner and credential, first discovered model,
+  latest working directory, and maximum reported reasoning effort. Unknown
+  modalities do not imply attachment support. Choices show provider and Q Mush
+  modalities. `solid/custom-select.tsx` uses shared search normalization and
+  paginates lists over ten items, opens on the selected page, clamps or resets
+  pages, and owns accessible keyboard/focus. Focus mode fills the app viewport
+  (not browser Fullscreen), preserving drafts and scroll. Its desktop rail
+  expands as an overlay; small screens use a drawer. Selection collapses it and
+  Escape closes it before exit. Full paths wrap. Model and effort selections
+  persist with the session. `shared/agent-prompt.ts` builds the model system
+  prompt and transcript display. Reasoning summaries persist as `thinking`
+  messages but are excluded from replay. Session and transcript rows live in
+  `agent_sessions` and `agent_messages`; interrupted processes mark active
+  sessions failed so they can be resumed. Rebuilt conversations add error
+  results for interrupted tool calls only on resume.
 
 - `sync-engine/openai.ts` and `sync-engine/openrouter.ts` implement provider
   connections. Multiple OAuth or manual credentials live in
@@ -270,25 +268,22 @@ Living project memory.
   active shell command terminates. OpenAI API-key and OAuth requests prefer
   Responses WebSocket mode and fall back to HTTP streaming; OpenRouter uses its
   supported streaming chat-completions transport. OpenAI OAuth refreshes its
-  encrypted token bundle shortly before expiry. Provider defaults are
-  `gpt-4.1-mini`, `openai/gpt-4.1-mini`, and `gpt-5-codex` for OpenAI keys,
-  OpenRouter, and OpenAI OAuth respectively; they are API fallbacks and catalog
-  metadata, not browser selection defaults or catalog sources. Browser catalogs
+  encrypted token bundle shortly before expiry. Session creation requires an
+  explicit model ID; there are no built-in fallback model IDs. Browser catalogs
   come from OpenAI `/v1/models`, OpenRouter `/api/v1/models/user`, or the
   ChatGPT Codex `/models` endpoint. Codex response parsing retains streamed
   output-text and function-call argument deltas because a completed event may
-  omit its `output` items. OpenAI's standard model list has no reasoning
-  capabilities, while OpenRouter and Codex return model-specific efforts.
-  Session drafts use each model's maximum discovered effort. Optional reasoning
-  uses `reasoning_effort` for OpenAI chat completions and `reasoning.effort` for
-  OpenRouter and Codex Responses. Streamed reasoning deltas are grouped by
-  `output_index` and `summary_index`; separate summary parts with paragraphs
-  because completed responses may omit their output. OpenAI Responses WebSockets
-  and accepted HTTP streams retry transient interruptions or provider error
-  events only before a model turn is persisted; partial UI deltas reset before
-  replay, and exhausted WebSockets fall back to HTTP. Permanent provider errors
-  and aborts do not retry, and terminal failures persist as non-replayed `error`
-  messages.
+  omit its `output` items. OpenAI's standard catalog lacks reasoning metadata;
+  only explicitly listed Codex/OpenRouter efforts are offered. Optional
+  reasoning uses `reasoning_effort` for OpenAI chat completions and
+  `reasoning.effort` for OpenRouter and Codex Responses. Streamed reasoning
+  deltas are grouped by `output_index` and `summary_index`; separate summary
+  parts with paragraphs because completed responses may omit their output.
+  OpenAI Responses WebSockets and accepted HTTP streams retry transient
+  interruptions or provider error events only before a model turn is persisted;
+  partial UI deltas reset before replay, and exhausted WebSockets fall back to
+  HTTP. Permanent provider errors and aborts do not retry, and terminal failures
+  persist as non-replayed `error` messages.
 - Shell commands require a positive timeout. On macOS/Linux each has a POSIX
   session; stop/timeout signals only its group, including descendants retaining
   pipes. Agent launches and runner commands otherwise have no application-owned

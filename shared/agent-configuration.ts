@@ -1,7 +1,3 @@
-import type {
-  ProviderCredentialSource,
-  ProviderId,
-} from "./provider-credential-store.ts";
 import type { ProviderModelPricing } from "./provider-model-pricing.ts";
 
 // `ultra` is Codex client orchestration, not a provider reasoning value.
@@ -67,17 +63,6 @@ export const MAXIMUM_AGENT_MODEL_OPTIONS = 10_000;
 
 const MODEL_PATTERN = /^[A-Za-z\d][A-Za-z\d._:/-]{0,199}$/u;
 const OPENROUTER_PROVIDER_TAG_PATTERN = /^[A-Za-z\d][A-Za-z\d._:/-]{0,99}$/u;
-
-export function defaultAgentModel(
-  provider: ProviderId,
-  source: ProviderCredentialSource,
-): string {
-  if (provider === "openrouter") {
-    return "openai/gpt-4.1-mini";
-  }
-
-  return source === "oauth" ? "gpt-5-codex" : "gpt-4.1-mini";
-}
 
 export function isAgentModelId(value: unknown): value is string {
   return typeof value === "string" && MODEL_PATTERN.test(value);

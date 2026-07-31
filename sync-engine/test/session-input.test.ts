@@ -39,6 +39,13 @@ test("validates session tool and skill selections", () => {
   expectInvalidTools(readCreateSession, input);
 });
 
+test("requires an explicit provider model", () => {
+  expect(
+    readCreateSession({ ...SESSION_INPUT, model: undefined }),
+  ).toBeUndefined();
+  expect(readCreateSession({ ...SESSION_INPUT, model: "" })).toBeUndefined();
+});
+
 test("validates a user-spawned child tool subset and parent identity", () => {
   const input = {
     ...SESSION_INPUT,

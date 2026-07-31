@@ -8,10 +8,7 @@ import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
 import { createApiError } from "./http.ts";
 import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
 import { persistQueuedRestartHandoff } from "./session-agent-action-helpers.ts";
-import {
-  selectedSessionModel,
-  type CreateSessionInput,
-} from "./session-input.ts";
+import type { CreateSessionInput } from "./session-input.ts";
 import { sessionMetadataFromDependencies } from "./session-provider-selection.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
 import type { CreateAgentSession } from "./session-store-create.ts";
@@ -199,11 +196,10 @@ export async function createValidatedSession(
   input: CreateSessionInput & Pick<CreateAgentSession, "workspaceId">,
   credential: ProviderCredentialAccess,
 ): Promise<Response> {
-  const selectedModel = selectedSessionModel(input, credential.source);
   const metadata = await sessionMetadataFromDependencies({
     credential,
     dependencies,
-    input: { ...input, model: selectedModel },
+    input,
     ownerId: user.id,
   });
   if ("error" in metadata) {
@@ -223,7 +219,6 @@ export async function createValidatedSession(
       {
         ...input,
         ...metadata,
-        model: selectedModel,
         userId: user.id,
         workspaceId: input.workspaceId,
       },

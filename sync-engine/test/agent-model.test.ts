@@ -514,7 +514,7 @@ describe("chat completions agent model", () => {
             ].join("\n\n"),
           ),
         ),
-      model: "gpt-5.6-sol",
+      model: "codex-test-model",
       reasoningEffort: "max",
     });
 

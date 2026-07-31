@@ -84,7 +84,6 @@ function modelOptions(
     credential,
     ...(sessionToolCacheCapability({
       credentialSource: credential.source,
-      model: detail.model,
       provider: detail.provider,
       tools: detail.tools,
     }).preservesDynamicToolCache

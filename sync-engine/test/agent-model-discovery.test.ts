@@ -203,6 +203,12 @@ describe("agent model discovery", () => {
             },
             supported_parameters: ["tools", "reasoning"],
           },
+          {
+            id: "vendor/unspecified-efforts",
+            name: "Unspecified Efforts",
+            reasoning: { supported_efforts: null },
+            supported_parameters: ["tools", "reasoning"],
+          },
         ],
       },
     );
@@ -222,6 +228,7 @@ describe("agent model discovery", () => {
             output: "0.0000016",
           },
         ),
+        model("vendor/unspecified-efforts", "Unspecified Efforts", []),
       ]),
     );
     expect(request.url).toBe("https://openrouter.ai/api/v1/models/user");
@@ -327,6 +334,7 @@ describe("agent model discovery", () => {
       { id: "text-embedding-3-small" },
       { context_window: 1_047_576, id: "gpt-live" },
       { id: "gpt-live-audio-preview" },
+      { id: "gpt-4.1-mini" },
     ];
     const result = await capturedDiscovery(
       "openai",
@@ -336,7 +344,10 @@ describe("agent model discovery", () => {
     const { catalog: discovered, request } = result;
 
     expect(discovered).toEqual(
-      catalog("gpt-live", [model("gpt-live", "gpt-live", [], 1_047_576)]),
+      catalog("gpt-live", [
+        model("gpt-live", "gpt-live", [], 1_047_576),
+        model("gpt-4.1-mini", "gpt-4.1-mini", []),
+      ]),
     );
     expect(request.url).toBe("https://api.openai.com/v1/models");
     expectBearer(request, "sk-openai-secret");

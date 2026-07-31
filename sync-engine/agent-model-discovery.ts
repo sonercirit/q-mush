@@ -1,7 +1,6 @@
 import {
   AGENT_REASONING_EFFORTS,
   MAXIMUM_AGENT_MODEL_OPTIONS,
-  defaultAgentModel,
   isAgentModelId,
   isAgentReasoningEffort,
   type AgentModelCatalog,
@@ -263,16 +262,9 @@ function uniqueModels(
   });
 }
 
-function createCatalog(
-  models: readonly AgentModelOption[],
-  preferredDefault?: string,
-): AgentModelCatalog {
+function createCatalog(models: readonly AgentModelOption[]): AgentModelCatalog {
   const unique = uniqueModels(models);
-  const defaultModel =
-    unique.find(({ id }) => id === preferredDefault)?.id ??
-    unique[0]?.id ??
-    null;
-  return { defaultModel, models: unique };
+  return { defaultModel: unique[0]?.id ?? null, models: unique };
 }
 
 function providerModelList(value: unknown, key: string): readonly unknown[] {
@@ -330,32 +322,15 @@ function supportsParameter(value: unknown, parameter: string): boolean {
 
 function openRouterReasoningEfforts(
   value: Readonly<Record<string, unknown>>,
-  supportedParameters: unknown,
 ): readonly AgentReasoningEffort[] {
   const reasoning = value["reasoning"];
-
-  if (isRecord(reasoning)) {
-    const supported = reasoning["supported_efforts"];
-
-    if (supported === null) {
-      return AGENT_REASONING_EFFORTS;
-    }
-
-    if (Array.isArray(supported)) {
-      return reasoningEfforts(supported);
-    }
-  }
-
-  return supportsParameter(supportedParameters, "reasoning") ||
-    supportsParameter(supportedParameters, "reasoning_effort")
-    ? AGENT_REASONING_EFFORTS
-    : [];
+  const supported = isRecord(reasoning)
+    ? reasoning["supported_efforts"]
+    : undefined;
+  return Array.isArray(supported) ? reasoningEfforts(supported) : [];
 }
 
-function readOpenRouterCatalog(
-  value: unknown,
-  credential: ProviderCredentialAccess,
-): AgentModelCatalog {
+function readOpenRouterCatalog(value: unknown): AgentModelCatalog {
   const models: AgentModelOption[] = [];
 
   for (const item of providerModelList(value, "data")) {
@@ -373,7 +348,7 @@ function readOpenRouterCatalog(
       item,
       "id",
       "name",
-      openRouterReasoningEfforts(item, supportedParameters),
+      openRouterReasoningEfforts(item),
       ["context_length"],
     );
 
@@ -382,10 +357,7 @@ function readOpenRouterCatalog(
     }
   }
 
-  return createCatalog(
-    models,
-    defaultAgentModel("openrouter", credential.source),
-  );
+  return createCatalog(models);
 }
 
 // OpenAI's standard model list has no capability metadata, so exclude known
@@ -407,10 +379,7 @@ function supportsOpenAiAgentLoop(modelId: string): boolean {
   );
 }
 
-function readOpenAiCatalog(
-  value: unknown,
-  credential: ProviderCredentialAccess,
-): AgentModelCatalog {
+function readOpenAiCatalog(value: unknown): AgentModelCatalog {
   const models = providerModelList(value, "data")
     .map((item) =>
       modelOption(
@@ -425,7 +394,7 @@ function readOpenAiCatalog(
       (model): model is AgentModelOption =>
         model !== undefined && supportsOpenAiAgentLoop(model.id),
     );
-  return createCatalog(models, defaultAgentModel("openai", credential.source));
+  return createCatalog(models);
 }
 
 async function readProviderResponse(response: Response): Promise<unknown> {
@@ -512,12 +481,12 @@ export async function discoverAgentModels(
     );
 
     if (provider === "openrouter") {
-      return readOpenRouterCatalog(value, credential);
+      return readOpenRouterCatalog(value);
     }
 
     return credential.source === "oauth"
       ? readCodexCatalog(value)
-      : readOpenAiCatalog(value, credential);
+      : readOpenAiCatalog(value);
   } catch (error) {
     throw modelDiscoveryError(safeAgentModelDiscoveryError(error));
   }

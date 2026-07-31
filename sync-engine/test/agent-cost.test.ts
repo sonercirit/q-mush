@@ -3,12 +3,7 @@ import type { AgentTokenUsage } from "../../shared/agent-loop.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { estimateAgentTurnCost } from "../../sync-engine/agent-cost.ts";
 
-const SESSION: Pick<
-  AgentSessionDetail,
-  "model" | "provider" | "providerPricing"
-> = {
-  model: "gpt-4.1-mini",
-  provider: "openai",
+const SESSION: Pick<AgentSessionDetail, "providerPricing"> = {
   providerPricing: null,
 };
 const USAGE: AgentTokenUsage = {
@@ -17,25 +12,22 @@ const USAGE: AgentTokenUsage = {
   inputTokens: 2_000,
   outputTokens: 500,
 };
+const CACHE_WRITE_USAGE: AgentTokenUsage = {
+  ...USAGE,
+  cacheWriteInputTokens: 500,
+  cachedInputTokens: 0,
+  outputTokens: 0,
+};
 
 function providerSession(
   providerPricing: AgentSessionDetail["providerPricing"],
 ): typeof SESSION {
-  return { ...SESSION, provider: "openrouter", providerPricing };
+  return { providerPricing };
 }
 
 describe("agent cost", () => {
-  test("estimates OpenAI cost from detailed token usage", () => {
-    expect(estimateAgentTurnCost(SESSION, USAGE)).toBeCloseTo(0.0013);
-  });
-
-  test("uses base rates for date-versioned OpenAI models", () => {
-    expect(
-      estimateAgentTurnCost(
-        { ...SESSION, model: "gpt-4.1-mini-2025-04-14" },
-        USAGE,
-      ),
-    ).toBeCloseTo(0.0013);
+  test("does not use built-in pricing", () => {
+    expect(estimateAgentTurnCost(SESSION, USAGE)).toBeNull();
   });
 
   test("uses provider prices expressed per token", () => {
@@ -59,20 +51,27 @@ describe("agent cost", () => {
           input: 0.0000004,
           output: 0,
         }),
-        {
-          ...USAGE,
-          cacheWriteInputTokens: 500,
-          cachedInputTokens: 0,
-          outputTokens: 0,
-        },
+        CACHE_WRITE_USAGE,
       ),
     ).toBeCloseTo(0.00085);
   });
 
-  test("returns no estimate without complete pricing or usage", () => {
+  test("does not invent missing cache prices", () => {
     expect(
-      estimateAgentTurnCost({ ...SESSION, model: "unknown-model" }, USAGE),
+      estimateAgentTurnCost(
+        providerSession({ input: 0.0000004, output: 0.0000016 }),
+        USAGE,
+      ),
     ).toBeNull();
+    expect(
+      estimateAgentTurnCost(
+        providerSession({ input: 0.0000004, output: 0 }),
+        CACHE_WRITE_USAGE,
+      ),
+    ).toBeNull();
+  });
+
+  test("returns no estimate without pricing or usage", () => {
     expect(estimateAgentTurnCost(SESSION, null)).toBeNull();
   });
 });

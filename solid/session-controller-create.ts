@@ -68,8 +68,8 @@ function sessionCreatePayload(
     autoCompact: descriptor.autoCompact,
     credentialId: descriptor.credentialId,
     executionEnvironment: descriptor.executionEnvironment,
+    model: descriptor.model,
     provider: descriptor.provider,
-    ...(descriptor.model.length === 0 ? {} : { model: descriptor.model }),
     ...(descriptor.openRouterProviderTag.length === 0
       ? {}
       : { openRouterProviderTag: descriptor.openRouterProviderTag }),

@@ -423,11 +423,7 @@ export async function runSessionAgent(
       { contextTokens: null, ...explanation.usage },
       (turn) =>
         estimateAgentTurnCost(
-          {
-            model: explanation.model,
-            provider: explanation.provider,
-            providerPricing: explanation.providerPricing,
-          },
+          { providerPricing: explanation.providerPricing },
           turn.tokenUsage,
         ),
     );
