@@ -11,6 +11,10 @@ export const SESSION_EDITOR_GROUP_CLASSES =
 const SESSION_EDITOR_SECTION_CLASSES = "px-4";
 const SESSION_EDITOR_DESCRIPTION_CLASSES =
   "mt-1 text-xs leading-5 text-slate-500";
+const SESSION_EDITOR_COLLAPSED_TOGGLE_CLASSES =
+  "shrink-0 rounded px-1 py-0 text-xs leading-5 font-semibold text-slate-300 transition hover:text-cyan-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300";
+const SESSION_EDITOR_EXPANDED_TOGGLE_CLASSES =
+  "shrink-0 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300";
 
 function SessionEditorDescription(props: {
   readonly children: JSX.Element;
@@ -45,14 +49,20 @@ export function SessionEditorSection(
   const [expanded, setExpanded] = createSignal(false);
   return (
     <section
-      class={`${SESSION_EDITOR_SECTION_CLASSES} ${expanded() ? "py-2" : "py-1"}`}
+      class={`${SESSION_EDITOR_SECTION_CLASSES} ${expanded() ? "py-2" : "py-0"}`}
       data-session-editor-kind={props.kind}
     >
-      <h4 class="flex min-w-0 items-center justify-between gap-3 text-sm font-semibold text-slate-200">
+      <h4
+        class={`flex min-w-0 items-center justify-between gap-3 text-sm font-semibold text-slate-200 ${expanded() ? "" : "leading-5"}`}
+      >
         <span>{props.title}</span>
         <button
           aria-expanded={expanded()}
-          class="shrink-0 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-semibold text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
+          class={
+            expanded()
+              ? SESSION_EDITOR_EXPANDED_TOGGLE_CLASSES
+              : SESSION_EDITOR_COLLAPSED_TOGGLE_CLASSES
+          }
           data-session-provider-toggle={
             props.kind === "provider" ? "true" : undefined
           }

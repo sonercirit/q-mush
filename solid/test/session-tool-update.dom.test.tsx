@@ -35,11 +35,21 @@ test("renders only provider and tool access as compact collapsed rows", () => {
     rows.map((row) => row.getAttribute("data-session-editor-kind")),
   ).toEqual(["provider", "tools"]);
   for (const row of rows) {
-    expect(row.classList).toContain("py-1");
+    expect(row.classList).toContain("py-0");
+    expect(row.classList).not.toContain("py-1");
     expect(row.classList).not.toContain("py-2");
     expect(row.children).toHaveLength(1);
-    expect(row.firstElementChild).toBeInstanceOf(HTMLHeadingElement);
-    expect(row.firstElementChild?.classList).toContain("justify-between");
+    const heading = row.firstElementChild;
+    expect(heading).toBeInstanceOf(HTMLHeadingElement);
+    expect(heading?.classList).toContain("justify-between");
+    expect(heading?.classList).toContain("leading-5");
+    const toggle = heading?.lastElementChild;
+    expect(toggle).toBeInstanceOf(HTMLButtonElement);
+    expect(toggle?.classList).toContain("px-1");
+    expect(toggle?.classList).toContain("py-0");
+    expect(toggle?.classList).not.toContain("border");
+    expect(toggle?.classList).toContain("focus-visible:outline-2");
+    expect(toggle?.getAttribute("aria-expanded")).toBe("false");
   }
 });
 
