@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "build": "vite build",
-    "check": "bun run --sequential --no-exit-on-error --filter '*' repository-check format:check typecheck lint knip cpd",
+    "check": "bun run --parallel --no-exit-on-error --filter '*' repository-check format:check typecheck lint knip cpd",
     "cpd": "cpd .",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun run scripts/migrate-database.ts",
@@ -13,7 +13,7 @@
     "dev:restart": "bun run scripts/restart-development-server.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "knip": "bun run --sequential --no-exit-on-error --filter '*' knip:production knip:test",
+    "knip": "bun run --parallel --no-exit-on-error --filter '*' knip:production knip:test",
     "knip:production": "knip --production --config knip.production.config.ts",
     "knip:test": "knip --config knip.config.ts",
     "lint": "eslint . --max-warnings 0",
