@@ -232,6 +232,12 @@ export class SessionLoadController {
     if (sessions === undefined) {
       return;
     }
+    if ((await this.#transport?.yieldToStateApplication?.()) === false) {
+      return;
+    }
+    if (generation !== this.#generation) {
+      return;
+    }
     try {
       if (sessionMutationPending(this.#view.value)) {
         this.#hydrationPending = true;
