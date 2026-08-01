@@ -65,12 +65,23 @@ function catalogProviderOptions(
 
 function options(
   catalog: OpenRouterProviderCatalog | undefined,
+  selectedValue: string,
 ): readonly CustomSelectOption[] {
-  return [
+  const available = [
     ...routingOptions(),
     ...catalogProviderOptions(catalog, false),
     ...catalogProviderOptions(catalog, true),
   ];
+  return selectedValue.length === 0 ||
+    available.some(({ value }) => value === selectedValue)
+    ? available
+    : [
+        {
+          label: `${selectedValue} (temporarily unavailable)`,
+          value: selectedValue,
+        },
+        ...available,
+      ];
 }
 
 function status(discovery: SessionProviderDiscoveryState | undefined): string {
@@ -102,7 +113,9 @@ export function OpenRouterProviderSelect(props: {
   readonly open: boolean;
   readonly selectedValue: string;
 }): JSX.Element {
-  const selectOptions = createMemo(() => options(props.discovery?.catalog));
+  const selectOptions = createMemo(() =>
+    options(props.discovery?.catalog, props.selectedValue),
+  );
   return (
     <>
       <CustomSelect

@@ -4,10 +4,7 @@ import {
   sessionCredentialValue,
   type SessionCredentialOption,
 } from "./session-credential-option.ts";
-export {
-  selectedSessionCredentialOption,
-  sessionCredentialValue as sessionCredentialOptionValue,
-} from "./session-credential-option.ts";
+export { selectedSessionCredentialOption } from "./session-credential-option.ts";
 
 export function selectedOptionValue(
   options: readonly CustomSelectOption[],

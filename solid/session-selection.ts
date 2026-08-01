@@ -87,23 +87,18 @@ export function applySessionModelCatalog(
   catalog: AgentModelCatalog,
 ): SessionDraft {
   const sameCredential = current.credential === credential;
-  const model =
-    sameCredential && catalog.models.some(({ id }) => id === current.model)
-      ? current.model
-      : (catalog.models[0]?.id ?? "");
+  if (sameCredential && current.model.length > 0) {
+    return current;
+  }
+  const model = catalog.models[0]?.id ?? "";
   const efforts = catalog.models.find(
     ({ id }) => id === model,
   )?.reasoningEfforts;
-  const reasoningEffort =
-    sameCredential &&
-    efforts?.some((effort) => effort === current.reasoningEffort) === true
-      ? current.reasoningEffort
-      : (maximumAgentReasoningEffort(efforts ?? []) ?? "");
   return {
     ...current,
     credential,
     model,
-    openRouterProviderTag: sameCredential ? current.openRouterProviderTag : "",
-    reasoningEffort,
+    openRouterProviderTag: "",
+    reasoningEffort: maximumAgentReasoningEffort(efforts ?? []) ?? "",
   };
 }

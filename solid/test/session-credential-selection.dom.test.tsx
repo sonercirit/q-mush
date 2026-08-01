@@ -1,4 +1,6 @@
+import { createSignal } from "solid-js";
 import { afterEach, expect, test, vi } from "vitest";
+import type { AgentModelCatalog } from "../../shared/agent-configuration.ts";
 import {
   createProviderViewState,
   type ProviderCredential,
@@ -48,6 +50,70 @@ function waitForModel(container: ParentNode, label: string): Promise<void> {
       label,
     );
   });
+}
+
+type TestSessionCommand = (
+  operation: string,
+  payload: Record<string, unknown>,
+) => Promise<unknown>;
+
+function modelDiscoveryFetch(input: RequestInfo | URL): Promise<Response> {
+  return Promise.resolve(
+    Response.json(isProviderDiscoveryRequest(input) ? { providers: [] } : {}),
+  );
+}
+
+function mockSessionCommand(command: TestSessionCommand) {
+  return vi.fn(command);
+}
+
+function createSessionTestController(
+  command: TestSessionCommand,
+): SessionController {
+  const reactive = createReactiveState<SessionViewState>({
+    ...initialSessionViewState(),
+    sessions: [],
+  });
+  return new SessionController(reactive, undefined, null, { command });
+}
+
+function chooseOption(
+  container: ParentNode,
+  select: string,
+  value: string,
+): void {
+  clickTestButton(container, select);
+  clickTestButton(container, `[data-option-value='${value}']`);
+}
+
+const PRESERVED_DRAFT = {
+  credential: "openrouter:credential-2",
+  model: "openrouter/selected",
+  openRouterProviderTag: "q-mush-routing:price",
+  reasoningEffort: "low",
+  runnerId: "runner-2",
+} as const;
+
+const OPEN_AI_CREDENTIAL = credential("credential-1", "OpenAI account", true);
+const OPENROUTER_CREDENTIAL = credential(
+  "credential-2",
+  "OpenRouter account",
+  false,
+);
+
+function modelCatalog(models: AgentModelCatalog["models"]) {
+  return Promise.resolve({ defaultModel: null, models });
+}
+
+function installModelDiscoveryFetch(): void {
+  vi.spyOn(globalThis, "fetch").mockImplementation(modelDiscoveryFetch);
+}
+
+function testProviderStates() {
+  return {
+    ai: createProviderViewState([OPEN_AI_CREDENTIAL]),
+    router: createProviderViewState([OPENROUTER_CREDENTIAL]),
+  };
 }
 
 function selectedAccountModel(payload: Record<string, unknown>) {
@@ -118,43 +184,22 @@ test("new-session Ctrl/Cmd+Enter submits and shows the platform shortcut", () =>
 });
 
 test("changing the new-session account drives model loading and creation", async () => {
-  const openAiCredential = credential("credential-1", "OpenAI account", true);
-  const openRouterCredential = credential(
-    "credential-2",
-    "OpenRouter account",
-    false,
+  const command = mockSessionCommand((operation, payload) =>
+    operation === "sessions.models"
+      ? modelCatalog([selectedAccountModel(payload)])
+      : Promise.resolve({
+          ...TEST_SESSION_DETAIL,
+          credentialId: String(payload["credentialId"]),
+          model: String(payload["model"]),
+          provider:
+            payload["provider"] === "openrouter" ? "openrouter" : "openai",
+          status: "queued",
+        }),
   );
-  const command = vi.fn(
-    (operation: string, payload: Record<string, unknown>) =>
-      operation === "sessions.models"
-        ? Promise.resolve({
-            defaultModel: null,
-            models: [selectedAccountModel(payload)],
-          })
-        : Promise.resolve({
-            ...TEST_SESSION_DETAIL,
-            credentialId: String(payload["credentialId"]),
-            model: String(payload["model"]),
-            provider:
-              payload["provider"] === "openrouter" ? "openrouter" : "openai",
-            status: "queued",
-          }),
-  );
-  vi.spyOn(globalThis, "fetch").mockImplementation((input) =>
-    Promise.resolve(
-      Response.json(isProviderDiscoveryRequest(input) ? { providers: [] } : {}),
-    ),
-  );
-  const reactive = createReactiveState<SessionViewState>({
-    ...initialSessionViewState(),
-    sessions: [],
-  });
-  const controller = new SessionController(reactive, undefined, null, {
-    command,
-  });
+  installModelDiscoveryFetch();
+  const controller = createSessionTestController(command);
   const resources = {
-    ai: createProviderViewState([openAiCredential]),
-    router: createProviderViewState([openRouterCredential]),
+    ...testProviderStates(),
     runner: createRunnerViewState([runnerSummary(1)]),
   };
   const panel = (): ReturnType<typeof SessionPanel> =>
@@ -167,8 +212,7 @@ test("changing the new-session account drives model loading and creation", async
   const container = mountTestView(panel, disposals);
 
   await waitForModel(container, "OpenAI model");
-  clickTestButton(container, "#session-credential");
-  clickTestButton(container, "[data-option-value='openrouter:credential-2']");
+  chooseOption(container, "#session-credential", "openrouter:credential-2");
 
   await waitForModel(container, "OpenRouter model");
   controller.setDraftField("prompt", "Use the selected account");
@@ -186,4 +230,85 @@ test("changing the new-session account drives model loading and creation", async
       provider: "openrouter",
     }),
   );
+});
+
+test("preserves the new-session draft across background resource updates", async () => {
+  const routerModels: AgentModelCatalog["models"] = [
+    {
+      ...selectedAccountModel({ provider: "openrouter" }),
+      id: "openrouter/primary",
+      label: "OpenRouter primary",
+      reasoningEfforts: ["medium", "high"],
+    },
+    {
+      ...selectedAccountModel({ provider: "openrouter" }),
+      id: "openrouter/selected",
+      label: "OpenRouter selected",
+      reasoningEfforts: ["low", "high"],
+    },
+  ];
+  let routerDiscoveryCount = 0;
+  const command = mockSessionCommand((operation, payload) => {
+    if (operation !== "sessions.models") return Promise.resolve({});
+    if (payload["provider"] !== "openrouter") {
+      return modelCatalog([selectedAccountModel(payload)]);
+    }
+    routerDiscoveryCount += 1;
+    return modelCatalog(
+      routerDiscoveryCount === 1 ? routerModels : routerModels.slice(0, 1),
+    );
+  });
+  installModelDiscoveryFetch();
+  const controller = createSessionTestController(command);
+  const secondRunner = {
+    ...runnerSummary(2),
+    id: "runner-2",
+    name: "other workstation",
+  };
+  const providers = testProviderStates();
+  const [openAi, setOpenAi] = createSignal(providers.ai);
+  const [openRouter, setOpenRouter] = createSignal(providers.router);
+  const [runners, setRunners] = createSignal(
+    createRunnerViewState([runnerSummary(1), secondRunner]),
+  );
+  const container = mountTestView(
+    () =>
+      SessionPanel({
+        controller,
+        openAi,
+        openRouter,
+        runners,
+      }),
+    disposals,
+  );
+
+  await waitForModel(container, "OpenAI model");
+  chooseOption(container, "#session-runner", "runner-2");
+  chooseOption(container, "#session-credential", "openrouter:credential-2");
+  await waitForModel(container, "OpenRouter primary");
+  chooseOption(container, "#session-model", "openrouter/selected");
+  chooseOption(container, "#session-reasoning-effort", "low");
+  chooseOption(
+    container,
+    "#session-openrouter-provider",
+    "q-mush-routing:price",
+  );
+
+  setOpenAi(createProviderViewState([{ ...OPEN_AI_CREDENTIAL }]));
+  setOpenRouter(createProviderViewState([]));
+  setRunners(createRunnerViewState([{ ...runnerSummary(3) }]));
+  await Promise.resolve();
+
+  expect(controller.state.draft).toMatchObject(PRESERVED_DRAFT);
+
+  controller.retryModels();
+  await vi.waitFor(() => {
+    expect(routerDiscoveryCount).toBe(2);
+  });
+
+  expect(controller.state.draft).toMatchObject(PRESERVED_DRAFT);
+  expect(
+    queryTestElementAs(container, "input[name='model']", HTMLInputElement)
+      .value,
+  ).toBe("openrouter/selected");
 });

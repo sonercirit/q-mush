@@ -115,7 +115,7 @@ test("defaults a newly selected model to its maximum reasoning effort", () => {
   ).toEqual({ ...state.draft, model: "powerful", reasoningEffort: "max" });
 });
 
-test("preserves a supported reasoning effort when a catalog refreshes", () => {
+test("preserves a selected model and reasoning when a catalog refreshes", () => {
   const draft = {
     ...DRAFT,
     credential: "openai:credential-1",
@@ -124,6 +124,9 @@ test("preserves a supported reasoning effort when a catalog refreshes", () => {
   };
 
   expect(
-    applySessionModelCatalog(draft, "openai:credential-1", CATALOG),
-  ).toEqual({ ...draft, credential: "openai:credential-1" });
+    applySessionModelCatalog(draft, "openai:credential-1", {
+      ...CATALOG,
+      models: CATALOG.models.filter(({ id }) => id !== draft.model),
+    }),
+  ).toBe(draft);
 });

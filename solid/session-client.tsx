@@ -29,6 +29,7 @@ import type { RunnerViewState } from "./runner-client.tsx";
 import { SessionAutoCompactToggle } from "./session-autocompact-toggle.tsx";
 import { SessionPromptInput } from "./session-client-forms.tsx";
 import { formatTokenCount } from "./session-context-client.tsx";
+import { selectedSessionCredential } from "./session-controller-state.ts";
 import type { SessionController } from "./session-controller.ts";
 import { credentialOptions } from "./session-credential-list.ts";
 import {
@@ -43,7 +44,6 @@ import {
   defaultOnlineRunnerId,
   selectedOptionValue,
   selectedSessionCredentialOption,
-  sessionCredentialOptionValue,
 } from "./session-new-selection.ts";
 import type { SessionPanelResources } from "./session-panel-resources.ts";
 import {
@@ -85,10 +85,6 @@ function credentialFallbackReady(
   );
 }
 
-function optionValue(option: CredentialOption): string {
-  return sessionCredentialOptionValue(option);
-}
-
 function selectedCredential(
   credentials: readonly CredentialOption[],
   value: string,
@@ -111,6 +107,22 @@ function modelSelectOptions(
     label: model.label,
     value: model.id,
   }));
+}
+
+function retainedSelectionOptions(
+  options: readonly CustomSelectOption[],
+  selectedValue: string,
+): readonly CustomSelectOption[] {
+  return selectedValue.length === 0 ||
+    options.some(({ value }) => value === selectedValue)
+    ? options
+    : [
+        {
+          label: `${selectedValue} (temporarily unavailable)`,
+          value: selectedValue,
+        },
+        ...options,
+      ];
 }
 
 function modelAvailabilityAttributes(
@@ -145,7 +157,15 @@ function NewSessionForm(
 ): JSX.Element {
   const runners = createMemo(() => props.runners);
   const credentials = createMemo(() => props.credentials);
-  const runnerOptions = createMemo(() => runnerSelectOptions(runners()));
+  const availableRunnerOptions = createMemo(() =>
+    runnerSelectOptions(runners()),
+  );
+  const runnerOptions = createMemo(() =>
+    retainedSelectionOptions(
+      availableRunnerOptions(),
+      props.state.draft.runnerId,
+    ),
+  );
   const selectedRunnerId = createMemo(() =>
     selectValue(
       runnerOptions(),
@@ -153,8 +173,14 @@ function NewSessionForm(
       defaultRunnerId(runners()),
     ),
   );
-  const credentialSelectOptions = createMemo(() =>
+  const availableCredentialOptions = createMemo(() =>
     sessionCredentialSelectOptions(credentials()),
+  );
+  const credentialSelectOptions = createMemo(() =>
+    retainedSelectionOptions(
+      availableCredentialOptions(),
+      props.state.draft.credential,
+    ),
   );
   const selectedCredentialValue = createMemo(() =>
     selectValue(
@@ -166,22 +192,42 @@ function NewSessionForm(
   const credential = createMemo(() =>
     selectedCredential(credentials(), selectedCredentialValue()),
   );
+  const credentialSelection = createMemo(() =>
+    selectedSessionCredential(selectedCredentialValue()),
+  );
   const discovery = createMemo(() => {
-    const selected = credential();
-    const value = selected === undefined ? undefined : optionValue(selected);
+    const value =
+      credentialSelection() === undefined
+        ? undefined
+        : selectedCredentialValue();
     return props.state.modelDiscovery.credential === value
       ? props.state.modelDiscovery
       : undefined;
   });
   const models = createMemo(() => discovery()?.catalog?.models ?? []);
   const modelValue = createMemo(() =>
-    models().some(({ id }) => id === props.state.draft.model)
+    props.state.draft.model.length > 0 || models().length === 0
       ? props.state.draft.model
       : (models()[0]?.id ?? ""),
   );
   const model = createMemo(() => findById(models(), modelValue()));
+  const modelOptions = createMemo(() =>
+    retainedSelectionOptions(modelSelectOptions(models()), modelValue()),
+  );
+  const reasoningOptions = createMemo(() =>
+    retainedSelectionOptions(
+      [
+        { label: "Model default", value: "" },
+        ...(model()?.reasoningEfforts ?? []).map((effort) => ({
+          label: reasoningEffortLabel(effort),
+          value: effort,
+        })),
+      ],
+      props.state.draft.reasoningEffort,
+    ),
+  );
   const providerDiscoveryKey = createMemo(() =>
-    credential()?.provider === "openrouter" && modelValue().length > 0
+    credentialSelection()?.provider === "openrouter" && modelValue().length > 0
       ? `${selectedCredentialValue()}\n${modelValue()}`
       : undefined,
   );
@@ -199,9 +245,9 @@ function NewSessionForm(
   const available = createMemo(
     () =>
       resourcesAvailable() &&
-      selectedRunnerId().length > 0 &&
+      runners().some(({ id }) => id === selectedRunnerId()) &&
       credential() !== undefined &&
-      models().length > 0,
+      models().some(({ id }) => id === modelValue()),
   );
   const [shortcuts, setShortcutPlatform] = createSessionShortcuts();
   onMount(() => {
@@ -328,20 +374,21 @@ function NewSessionForm(
           select(
             "model",
             value,
-            modelSelectOptions(models()).map(({ value }) => value),
+            modelOptions().map(({ value }) => value),
           );
         }}
         onToggle={() => {
           toggleSelect("model");
         }}
         open={props.state.openSelect === "model"}
-        options={modelSelectOptions(models())}
+        options={modelOptions()}
         required
         selectedValue={modelValue()}
       />
       <Show
         when={
-          credential()?.provider === "openrouter" && modelValue().length > 0
+          credentialSelection()?.provider === "openrouter" &&
+          modelValue().length > 0
         }
       >
         <OpenRouterProviderSelect
@@ -354,8 +401,9 @@ function NewSessionForm(
       </Show>
       <CustomSelect
         disabled={
-          modelAvailabilityAttributes(props.state.creating, models())
-            .disabled || (model()?.reasoningEfforts.length ?? 0) === 0
+          props.state.creating ||
+          ((model()?.reasoningEfforts.length ?? 0) === 0 &&
+            props.state.draft.reasoningEffort.length === 0)
         }
         emptyLabel="Model default"
         id="session-reasoning-effort"
@@ -371,13 +419,7 @@ function NewSessionForm(
           toggleSelect("reasoningEffort");
         }}
         open={props.state.openSelect === "reasoningEffort"}
-        options={[
-          { label: "Model default", value: "" },
-          ...(model()?.reasoningEfforts ?? []).map((effort) => ({
-            label: reasoningEffortLabel(effort),
-            value: effort,
-          })),
-        ]}
+        options={reasoningOptions()}
         required={false}
         selectedValue={props.state.draft.reasoningEffort}
       />
