@@ -186,6 +186,7 @@ export function connectedSessionSetup(
       ? SESSION_ID
       : `018bcfe5-6800-7000-8000-${String(index + 63).padStart(12, "0")}`,
   );
+  const idBatch = options.database === undefined ? 0 : 100;
   const selectedModels: string[] = [];
   const selectedOpenRouterProviderTags: (string | undefined)[] = [];
   const selectedPricing: (ProviderModelPricing | null)[] = [];
@@ -326,7 +327,11 @@ export function connectedSessionSetup(
         return model;
       },
       now,
-      randomId: () => takeValue(ids, "The session test ran out of IDs"),
+      randomId: () => {
+        const id = takeValue(ids, "The session test ran out of IDs");
+        const suffix = Number.parseInt(id.slice(-12), 10) + idBatch;
+        return `${id.slice(0, -12)}${String(suffix).padStart(12, "0")}`;
+      },
       workspaces: new WorkspaceStore(database),
     },
   );
