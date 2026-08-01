@@ -3,6 +3,7 @@ import {
   createMemo,
   createSignal,
   Show,
+  type Accessor,
   type JSX,
 } from "solid-js";
 import { reasoningEffortLabel } from "../shared/agent-configuration.ts";
@@ -267,6 +268,110 @@ function selectedAncestorIds(
   return ancestors;
 }
 
+function sessionListRowMatches(
+  left: SessionListRow,
+  right: SessionListRow,
+): boolean {
+  const leftSession = left.session;
+  const rightSession = right.session;
+  return (
+    left.childCount === right.childCount &&
+    left.depth === right.depth &&
+    leftSession.activeDurationMs === rightSession.activeDurationMs &&
+    leftSession.activeStartedAt === rightSession.activeStartedAt &&
+    leftSession.costBasis === rightSession.costBasis &&
+    leftSession.costUsd === rightSession.costUsd &&
+    leftSession.executionEnvironment === rightSession.executionEnvironment &&
+    leftSession.id === rightSession.id &&
+    leftSession.model === rightSession.model &&
+    (leftSession.pendingQuestions === null) ===
+      (rightSession.pendingQuestions === null) &&
+    leftSession.provider === rightSession.provider &&
+    leftSession.reasoningEffort === rightSession.reasoningEffort &&
+    leftSession.runnerRequired === rightSession.runnerRequired &&
+    leftSession.status === rightSession.status &&
+    leftSession.title === rightSession.title
+  );
+}
+
+function retainSessionListRows(
+  previous: readonly SessionListRow[] | undefined,
+  current: readonly SessionListRow[],
+): readonly SessionListRow[] {
+  if (previous === undefined) return current;
+  const previousById = new Map(previous.map((row) => [row.session.id, row]));
+  return current.map((row) => {
+    const retained = previousById.get(row.session.id);
+    return retained !== undefined && sessionListRowMatches(retained, row)
+      ? retained
+      : row;
+  });
+}
+
+function SessionListItem(props: {
+  readonly controller: SessionController;
+  readonly expanded: Accessor<ReadonlySet<string>>;
+  readonly onSelect: (() => void) | undefined;
+  readonly onToggleChildren: (sessionId: string) => void;
+  readonly row: SessionListRow;
+  readonly selectedId: Accessor<string | undefined>;
+}): JSX.Element {
+  const session = (): AgentSessionSummary => props.row.session;
+  const selected = (): boolean => props.selectedId() === session().id;
+  return (
+    <li
+      class={
+        props.row.depth === 0
+          ? undefined
+          : "border-l border-emerald-300/20 pl-2"
+      }
+      data-session-depth={props.row.depth}
+      style={{ "margin-left": `${String(props.row.depth * 0.75)}rem` }}
+    >
+      <div class="flex items-stretch gap-1.5">
+        <button
+          aria-current={selected() ? "true" : undefined}
+          class={`session-list-item min-h-11 min-w-0 flex-1 rounded-2xl border p-3 text-left transition sm:p-4 ${selected() ? "border-emerald-300/30 bg-emerald-300/10" : "border-white/10 bg-slate-950/60 hover:border-white/20"}`}
+          data-session-id={session().id}
+          onClick={() => {
+            props.onSelect?.();
+            void props.controller.select(session().id);
+          }}
+          type="button"
+        >
+          <span class="flex items-start justify-between gap-3">
+            <span class="min-w-0 flex-1">
+              <span class="session-list-title block min-w-0 break-words font-semibold text-white">
+                {session().title}
+              </span>
+              <span class="session-list-meta mt-1 block min-w-0 break-words text-xs leading-5 text-slate-500">
+                {`${sessionModelLabel(session())} · ${executionEnvironmentLabel(session().executionEnvironment)}`}
+              </span>
+              <span class="mt-2 block">
+                <SessionMetrics session={session()} />
+              </span>
+            </span>
+            {statusBadge(session())}
+          </span>
+        </button>
+        <Show when={props.row.childCount > 0}>
+          <button
+            aria-expanded={props.expanded().has(session().id)}
+            aria-label={`${props.expanded().has(session().id) ? "Collapse" : "Expand"} child sessions for ${session().title}`}
+            class="shrink-0 rounded-xl border border-white/10 px-2 text-xs font-semibold text-slate-400 transition hover:border-emerald-300/30 hover:text-emerald-200"
+            onClick={() => {
+              props.onToggleChildren(session().id);
+            }}
+            type="button"
+          >
+            {`${props.expanded().has(session().id) ? "Collapse" : "Expand"} (${String(props.row.childCount)})`}
+          </button>
+        </Show>
+      </div>
+    </li>
+  );
+}
+
 export function SessionList(props: {
   readonly controller: SessionController;
   readonly onSelect?: () => void;
@@ -279,10 +384,15 @@ export function SessionList(props: {
     sessionHierarchy(sessionSummaries() ?? []),
   );
   const selectedId = createMemo(() => state().selectedId);
-  const visibleRows = createMemo(() => {
-    const tree = hierarchy();
-    return visibleSessionRows(tree, tree.roots, expanded());
-  });
+  const visibleRows = createMemo(
+    (previous: readonly SessionListRow[] | undefined) => {
+      const tree = hierarchy();
+      return retainSessionListRows(
+        previous,
+        visibleSessionRows(tree, tree.roots, expanded()),
+      );
+    },
+  );
   const hasMoreSessions = createMemo(
     () => visibleCount() < visibleRows().length,
   );
@@ -371,63 +481,16 @@ export function SessionList(props: {
           </Show>
         }
       >
-        {(row) => {
-          const session = row.session;
-          return (
-            <li
-              class={
-                row.depth === 0
-                  ? undefined
-                  : "border-l border-emerald-300/20 pl-2"
-              }
-              data-session-depth={row.depth}
-              style={{ "margin-left": `${String(row.depth * 0.75)}rem` }}
-            >
-              <div class="flex items-stretch gap-1.5">
-                <button
-                  aria-current={
-                    selectedId() === session.id ? "true" : undefined
-                  }
-                  class={`session-list-item min-h-11 min-w-0 flex-1 rounded-2xl border p-3 text-left transition sm:p-4 ${selectedId() === session.id ? "border-emerald-300/30 bg-emerald-300/10" : "border-white/10 bg-slate-950/60 hover:border-white/20"}`}
-                  data-session-id={session.id}
-                  onClick={() => {
-                    props.onSelect?.();
-                    void props.controller.select(session.id);
-                  }}
-                  type="button"
-                >
-                  <span class="flex items-start justify-between gap-3">
-                    <span class="min-w-0 flex-1">
-                      <span class="session-list-title block min-w-0 break-words font-semibold text-white">
-                        {session.title}
-                      </span>
-                      <span class="session-list-meta mt-1 block min-w-0 break-words text-xs leading-5 text-slate-500">
-                        {`${sessionModelLabel(session)} · ${executionEnvironmentLabel(session.executionEnvironment)}`}
-                      </span>
-                      <span class="mt-2 block">
-                        <SessionMetrics session={session} />
-                      </span>
-                    </span>
-                    {statusBadge(session)}
-                  </span>
-                </button>
-                <Show when={row.childCount > 0}>
-                  <button
-                    aria-expanded={expanded().has(session.id)}
-                    aria-label={`${expanded().has(session.id) ? "Collapse" : "Expand"} child sessions for ${session.title}`}
-                    class="shrink-0 rounded-xl border border-white/10 px-2 text-xs font-semibold text-slate-400 transition hover:border-emerald-300/30 hover:text-emerald-200"
-                    onClick={() => {
-                      toggleChildren(session.id);
-                    }}
-                    type="button"
-                  >
-                    {`${expanded().has(session.id) ? "Collapse" : "Expand"} (${String(row.childCount)})`}
-                  </button>
-                </Show>
-              </div>
-            </li>
-          );
-        }}
+        {(row) => (
+          <SessionListItem
+            controller={props.controller}
+            expanded={expanded}
+            onSelect={props.onSelect}
+            onToggleChildren={toggleChildren}
+            row={row}
+            selectedId={selectedId}
+          />
+        )}
       </Collection>
     </>
   );
