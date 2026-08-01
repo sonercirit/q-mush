@@ -26,6 +26,7 @@ import { clipboardCopyLabel, createClipboardCopy } from "./clipboard-copy.ts";
 import { createLiveNow } from "./live-now.ts";
 import { createNestedScrollRef } from "./nested-scroll.ts";
 import { renderDebugBoundary } from "./render-debug.tsx";
+import { ActiveStepAnchor } from "./session-active-step.tsx";
 import { SessionImagePreviews } from "./session-image-client.tsx";
 import {
   LiveToolActivityContent,
@@ -553,9 +554,18 @@ export function SessionTranscript(props: {
         <ToolDefinitions serializedTools={serializedTools()} />
       </Show>
       <For each={messageGroups().stable}>{renderMessage}</For>
-      <For each={messageGroups().streamed}>{renderMessage}</For>
-      <Show when={stepTiming().activeStartedAt}>
-        {(startedAt) => <StepTiming endedAt={null} startedAt={startedAt()} />}
+      <Show
+        fallback={<For each={messageGroups().streamed}>{renderMessage}</For>}
+        when={stepTiming().activeStartedAt}
+        keyed
+      >
+        {(startedAt) => (
+          <ActiveStepAnchor
+            messages={messageGroups().streamed}
+            renderMessage={renderMessage}
+            timing={<StepTiming endedAt={null} startedAt={startedAt} />}
+          />
+        )}
       </Show>
       <Show when={props.filters.toolActivity}>
         <For each={standaloneToolStreams()}>

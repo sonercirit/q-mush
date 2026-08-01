@@ -212,6 +212,49 @@ test("places every step duration after that step's settlement message", () => {
   }
 });
 
+test("anchors an output-free step and preserves its running block", () => {
+  vi.useFakeTimers();
+  const startedAt = startedAtUtc();
+  vi.setSystemTime(startedAt + 4_000);
+  const settledMessages = [
+    message("placeholder-user", "user", startedAt),
+    assistantCall("placeholder-call", startedAt + 2_000, ["tool"]),
+    toolResult("placeholder-result", startedAt + 4_000, "tool"),
+  ];
+  const [messages, setMessages] =
+    createSignal<readonly AgentSessionMessage[]>(settledMessages);
+  const view = mountTestTranscriptView({ messages, status: () => "running" });
+  disposals.push(view.dispose);
+
+  const runningBlock = view.container.querySelector(
+    "[data-active-step='running']",
+  );
+  const activeTiming = runningBlock?.querySelector(
+    "[data-step-timing='active']",
+  );
+  expect(runningBlock?.getAttribute("aria-busy")).toBe("true");
+  expect(runningBlock?.textContent).toContain("AgentRunning");
+  expect(activeTiming?.textContent).toContain("Duration: 0s");
+  expect(activeTiming?.textContent).toContain("Started:");
+  expect(view.container.querySelectorAll("[data-step-timing]")).toHaveLength(2);
+
+  setMessages([
+    ...settledMessages,
+    {
+      ...message("stream:session:assistant", "assistant", startedAt + 5_000),
+      content: "The next step is streaming.",
+    },
+  ]);
+
+  expect(view.container.querySelector("[data-active-step='running']")).toBe(
+    runningBlock,
+  );
+  expect(runningBlock?.textContent).toContain("The next step is streaming.");
+  expect(runningBlock?.querySelector("[data-step-timing='active']")).toBe(
+    activeTiming,
+  );
+});
+
 test("active clocks share one interval and release it after final dispose", () => {
   vi.useFakeTimers({ now: Date.UTC(2026, 6, 27, 11, 0, 0) });
   const startedAt = Date.now();
