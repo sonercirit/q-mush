@@ -86,6 +86,7 @@ function runnerListsMatch(
 export class RunnerController {
   readonly #state: ControllerState<RunnerViewState>;
   #workspaceId = GLOBAL_WORKSPACE_ID;
+  #pendingRemovalRunners: readonly RunnerSummary[] | undefined;
 
   constructor(view = createReactiveState(initialRunnerState())) {
     this.#state = new ControllerState(view);
@@ -100,11 +101,14 @@ export class RunnerController {
   }
 
   applyRealtime(runners: readonly RunnerSummary[]): void {
-    if (
-      this.state.creating ||
-      this.state.removingId !== undefined ||
-      this.state.settingDefaultId !== undefined
-    ) {
+    const removingId = this.state.removingId;
+    if (removingId !== undefined) {
+      if (!runners.some(({ id }) => id === removingId)) {
+        this.#pendingRemovalRunners = runners;
+      }
+      return;
+    }
+    if (this.state.creating || this.state.settingDefaultId !== undefined) {
       return;
     }
 
@@ -129,6 +133,7 @@ export class RunnerController {
 
   setWorkspace(workspaceId: string): void {
     this.#workspaceId = workspaceId;
+    this.#pendingRemovalRunners = undefined;
     this.#state.reset(initialRunnerState());
   }
 
@@ -286,6 +291,9 @@ export class RunnerController {
 
   async #mutate(mutation: RunnerMutation, runnerId: string): Promise<void> {
     const configuration = this.#mutationConfiguration(mutation, runnerId);
+    if (mutation === "remove") {
+      this.#pendingRemovalRunners = undefined;
+    }
     const revision = this.#begin({
       error: undefined,
       [configuration.pending]: runnerId,
@@ -296,6 +304,9 @@ export class RunnerController {
 
       if (this.#isCurrent(revision)) {
         this.#patch(configuration.success(runnerId));
+        if (mutation === "remove") {
+          this.#applyPendingRemovalList();
+        }
       }
     } catch {
       if (this.#isCurrent(revision)) {
@@ -303,7 +314,18 @@ export class RunnerController {
           error: configuration.failure,
           [configuration.pending]: undefined,
         });
+        if (mutation === "remove") {
+          this.#applyPendingRemovalList();
+        }
       }
+    }
+  }
+
+  #applyPendingRemovalList(): void {
+    const realtime = this.#pendingRemovalRunners;
+    this.#pendingRemovalRunners = undefined;
+    if (realtime !== undefined) {
+      this.#applyList(realtime);
     }
   }
 

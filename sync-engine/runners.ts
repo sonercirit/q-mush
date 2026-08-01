@@ -417,7 +417,7 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
       return createMethodNotAllowedResponse("DELETE");
     }
     return await Promise.resolve(
-      withAuthenticatedUser(this.#auth, request, async (user) => {
+      withAuthenticatedUser(this.#auth, request, (user) => {
         if (!this.#store.exists(user.id, runnerId)) {
           return createApiError("not_found", 404);
         }
@@ -428,18 +428,22 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
         for (const { removing } of this.#removalListeners) {
           removing(user.id, runnerId);
         }
-        await this.#notifyRemoved(user.id, runnerId);
+        this.#notifyRemoved(user.id, runnerId);
         return createNoContentResponse();
       }),
     );
   }
 
-  async #notifyRemoved(userId: string, runnerId: string): Promise<void> {
-    await Promise.all(
-      [...this.#removalListeners].map(async ({ removed }) => {
-        await removed(userId, runnerId);
-      }),
-    );
+  #notifyRemoved(userId: string, runnerId: string): void {
+    for (const { removed } of this.#removalListeners) {
+      try {
+        void Promise.resolve(removed(userId, runnerId)).catch(() => {
+          // Removal is committed; asynchronous cleanup must not hold its response.
+        });
+      } catch {
+        // Removal is committed; cleanup failures cannot change its outcome.
+      }
+    }
   }
 
   receiptState(

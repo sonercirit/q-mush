@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { AuthenticatedUser } from "../../shared/auth-model.ts";
-import { RUNNER_REALTIME_PATH } from "../../shared/routes.ts";
+import { RUNNER_REALTIME_PATH, RUNNERS_PATH } from "../../shared/routes.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { SESSION_REALTIME_OPERATIONS } from "../../shared/user-realtime-protocol.ts";
 import { GLOBAL_WORKSPACE_ID } from "../../shared/workspace-model.ts";
@@ -10,7 +10,15 @@ import type {
   createRealtimeIntegration,
   QmushWebSocketData,
 } from "../../sync-engine/realtime.ts";
+import { RunnerStore } from "../../sync-engine/runner-store.ts";
+import { createRunnerIntegration } from "../../sync-engine/runners.ts";
 import { TEST_PENDING_QUESTIONS } from "./ask-questions-test-fixtures.ts";
+import {
+  createAuthenticatedRequest,
+  createAuthenticatedTestContext,
+  TEST_NOW,
+  TEST_USER_ID,
+} from "./authenticated-integration-test-helpers.ts";
 import {
   createRecordedRunnerEffects,
   expectOperationalRegistration,
@@ -46,6 +54,7 @@ import {
   waitForRealtimeEvent,
   type RealtimeTestSocket,
 } from "./realtime-test-socket-helpers.ts";
+import { runnerMetadata } from "./runner-integration-test-helpers.ts";
 
 const USER = REALTIME_TEST_USER;
 
@@ -395,6 +404,76 @@ test("wakes completed child callbacks on connect", () => {
   connectedRecordedRunnerRealtimeTestSocket(realtime, "machine-1");
 
   expect(connectedUsers).toEqual([`${USER.id}:runner-1`]);
+});
+
+test("runner removal closes its socket, publishes the list, and responds before cleanup settles", async () => {
+  const { auth, database } = createAuthenticatedTestContext();
+  const runnerId = "018bcfe5-6800-7000-8000-000000000074";
+  const token = "qmr_runner-removal-token";
+  const runners = createRunnerIntegration(auth, {
+    now: () => TEST_NOW,
+    randomToken: () => "runner-removal-token",
+    store: new RunnerStore(database, () => runnerId),
+  });
+  const created = runners.collection(
+    createAuthenticatedRequest(RUNNERS_PATH, undefined, "POST"),
+  );
+  expect(created.status).toBe(201);
+  const connected = runners.connect(
+    token,
+    runnerMetadata("runner-removal-machine"),
+  );
+  expect(connected).toBeDefined();
+  if (connected === undefined) {
+    throw new Error("The removal test runner did not connect");
+  }
+
+  const hub = new RealtimeHub();
+  const realtime = configuredRealtimeTestIntegration({
+    auth: realtimeTestAuth({ ...USER, id: TEST_USER_ID }),
+    hub,
+    runners,
+  });
+  const browser = openUserRealtimeTestSocket(realtime);
+  const runner = recordedRealtimeTestSocket({
+    committed: undefined,
+    fenced: false,
+    kind: "runner",
+    registration: undefined,
+    runner: connected.connection,
+    token,
+    usable: true,
+  });
+  hub.setRunner(runnerId, runner.socket, true);
+
+  const cleanup = Promise.withResolvers<undefined>();
+  runners.onRemoved(async () => {
+    await cleanup.promise;
+  });
+  const removal = runners.remove(
+    createAuthenticatedRequest(
+      `${RUNNERS_PATH}/${runnerId}`,
+      undefined,
+      "DELETE",
+    ),
+    runnerId,
+  );
+  const promptResponse = await Promise.race([
+    removal,
+    new Promise<undefined>((resolve) => {
+      setTimeout(resolve, 100);
+    }),
+  ]);
+  cleanup.resolve();
+  const response = await removal;
+
+  expect(promptResponse).toBe(response);
+  expect(response.status).toBe(204);
+  expect(runner.record.closed).toEqual([1000, "Runner removed"]);
+  expect(parseRealtimeMessages(browser.record.sent)).toEqual([
+    { runners: [], type: "runners" },
+  ]);
+  database.$client.close();
 });
 
 test("publishes and clears pending questions", () => {
