@@ -45,10 +45,6 @@ import {
   SessionReconciliationController,
   type DetailMutationOptions,
 } from "./session-controller-reconciliation.ts";
-import {
-  spawnSessionFromView,
-  type UserSpawnSessionSelection,
-} from "./session-controller-spawn.ts";
 import { SessionRealtimeState } from "./session-controller-state.ts";
 import { updateSessionTools } from "./session-controller-tool-update.ts";
 import {
@@ -441,13 +437,6 @@ export class SessionController {
         selection,
       }),
     );
-  }
-  spawn(selection: UserSpawnSessionSelection): Promise<void> {
-    return spawnSessionFromView({
-      selection,
-      transport: this.#transport,
-      view: this.#view,
-    });
   }
   send(): Promise<void> {
     return this.#send();
