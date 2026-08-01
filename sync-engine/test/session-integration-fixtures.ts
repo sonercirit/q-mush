@@ -39,7 +39,7 @@ export const RUNNER_ID = "018bcfe5-6800-7000-8000-000000000061";
 export const SESSION_ID = "018bcfe5-6800-7000-8000-000000000062";
 export const CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000063";
 export const REPLACEMENT_RUNNER_ID = "018bcfe5-6800-7000-8000-000000000073";
-const RUNNER_TOKEN = "qmr_session-runner-token";
+export const RUNNER_TOKEN = "qmr_session-runner-token";
 export const RUNNER_COMMAND_ID = "agent-command-1";
 
 type FixtureCredentials = Readonly<

@@ -473,7 +473,22 @@ export function createRunnerRegistrationCoordinator({
         );
         return;
       }
-      const receiptState = finalizeLifecycle(options, pending, gate);
+      const committed = pending.committed;
+      if (committed === undefined) {
+        fenceRunnerRegistration(
+          socket,
+          data,
+          "Runner lifecycle settlement failed",
+        );
+        return;
+      }
+      const receiptState = finalizeLifecycle(
+        options,
+        pending,
+        gate,
+        options.hub.currentRunner(committed.id) === undefined &&
+          pending.receiptState?.lifecycle === "ordinary",
+      );
       if (receiptState === undefined) {
         fenceRunnerRegistration(
           socket,

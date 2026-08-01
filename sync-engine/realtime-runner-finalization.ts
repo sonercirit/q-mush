@@ -189,9 +189,10 @@ export function finalizeLifecycle(
   options: RealtimeRegistrationDependencies,
   pending: PendingRunnerRegistration,
   gate: RegistrationGate,
+  replayConnection: boolean,
 ): RealtimeReceiptState | undefined {
   if (pending.receiptState?.lifecycleSettled === true) {
-    if (shouldReplaySettledFinalization(pending)) {
+    if (shouldReplaySettledFinalization(pending) || replayConnection) {
       return executeLifecycleCallback(options, pending, gate)
         ? pending.receiptState
         : undefined;
