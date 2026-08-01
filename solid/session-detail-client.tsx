@@ -147,6 +147,7 @@ const SESSION_SCROLL_LOAD_THRESHOLD = 64;
 
 interface SessionHierarchy {
   readonly children: ReadonlyMap<string, readonly AgentSessionSummary[]>;
+  readonly parentIds: ReadonlyMap<string, string>;
   readonly roots: readonly AgentSessionSummary[];
 }
 
@@ -161,6 +162,7 @@ function sessionHierarchy(
 ): SessionHierarchy {
   const ids = new Set(sessions.map(({ id }) => id));
   const children = new Map<string, AgentSessionSummary[]>();
+  const parentIds = new Map<string, string>();
   const roots: AgentSessionSummary[] = [];
   for (const session of sessions) {
     const parentId = session.parentSessionId;
@@ -171,6 +173,7 @@ function sessionHierarchy(
     const siblings = children.get(parentId) ?? [];
     siblings.push(session);
     children.set(parentId, siblings);
+    parentIds.set(session.id, parentId);
   }
 
   const reachable = new Set<string>();
@@ -188,13 +191,13 @@ function sessionHierarchy(
       markReachable(session);
     }
   }
-  return { children, roots };
+  return { children, parentIds, roots };
 }
 
 function visibleSessionRows(
   hierarchy: SessionHierarchy,
   roots: readonly AgentSessionSummary[],
-  collapsed: ReadonlySet<string>,
+  expanded: ReadonlySet<string>,
 ): readonly SessionListRow[] {
   const rows: SessionListRow[] = [];
   const visited = new Set<string>();
@@ -203,12 +206,65 @@ function visibleSessionRows(
     visited.add(session.id);
     const children = hierarchy.children.get(session.id) ?? [];
     rows.push({ childCount: children.length, depth, session });
-    if (!collapsed.has(session.id)) {
+    if (expanded.has(session.id)) {
       for (const child of children) append(child, depth + 1);
     }
   };
   for (const root of roots) append(root, 0);
   return rows;
+}
+
+function boundedSessionRows(
+  rows: readonly SessionListRow[],
+  limit: number,
+  selectedId: string | undefined,
+): readonly SessionListRow[] {
+  if (rows.length <= limit) return rows;
+  const selectedIndex = rows.findIndex(
+    ({ session }) => session.id === selectedId,
+  );
+  if (selectedIndex < limit) return rows.slice(0, limit);
+
+  const selectedPath: SessionListRow[] = [];
+  let expectedDepth = rows[selectedIndex]?.depth ?? -1;
+  for (
+    let index = selectedIndex;
+    index >= 0 && expectedDepth >= 0;
+    index -= 1
+  ) {
+    const row = rows[index];
+    if (row?.depth === expectedDepth) {
+      selectedPath.push(row);
+      expectedDepth -= 1;
+    }
+  }
+  const requiredRows = selectedPath.reverse().slice(-limit);
+  const requiredIds = new Set(requiredRows.map(({ session }) => session.id));
+  const leadingRows = rows
+    .slice(0, limit)
+    .filter(({ session }) => !requiredIds.has(session.id))
+    .slice(0, limit - requiredRows.length);
+  const includedIds = new Set(
+    [...leadingRows, ...requiredRows].map(({ session }) => session.id),
+  );
+  return rows.filter(({ session }) => includedIds.has(session.id));
+}
+
+function selectedAncestorIds(
+  hierarchy: SessionHierarchy,
+  selectedId: string | undefined,
+): readonly string[] {
+  const ancestors: string[] = [];
+  const visited = new Set<string>();
+  let sessionId = selectedId;
+  while (sessionId !== undefined && !visited.has(sessionId)) {
+    visited.add(sessionId);
+    const parentId = hierarchy.parentIds.get(sessionId);
+    if (parentId === undefined) break;
+    ancestors.push(parentId);
+    sessionId = parentId;
+  }
+  return ancestors;
 }
 
 export function SessionList(props: {
@@ -217,16 +273,18 @@ export function SessionList(props: {
 }): JSX.Element {
   const state = createMemo(() => props.controller.view());
   const [visibleCount, setVisibleCount] = createSignal(SESSION_PAGE_SIZE);
-  const [collapsed, setCollapsed] = createSignal<ReadonlySet<string>>(
-    new Set(),
-  );
+  const [expanded, setExpanded] = createSignal<ReadonlySet<string>>(new Set());
   const sessionSummaries = createMemo(() => state().sessions);
   const hierarchy = createMemo(() =>
     sessionHierarchy(sessionSummaries() ?? []),
   );
   const selectedId = createMemo(() => state().selectedId);
+  const visibleRows = createMemo(() => {
+    const tree = hierarchy();
+    return visibleSessionRows(tree, tree.roots, expanded());
+  });
   const hasMoreSessions = createMemo(
-    () => visibleCount() < hierarchy().roots.length,
+    () => visibleCount() < visibleRows().length,
   );
   const rootRevision = createMemo(() =>
     hierarchy()
@@ -234,17 +292,12 @@ export function SessionList(props: {
       .toSorted()
       .join("\n"),
   );
-  const sessions = createMemo(() => {
-    const tree = hierarchy();
-    return visibleSessionRows(
-      tree,
-      tree.roots.slice(0, visibleCount()),
-      collapsed(),
-    );
-  });
+  const sessions = createMemo(() =>
+    boundedSessionRows(visibleRows(), visibleCount(), selectedId()),
+  );
   const loadMore = (): void => {
     setVisibleCount((current) =>
-      Math.min(hierarchy().roots.length, current + SESSION_PAGE_SIZE),
+      Math.min(visibleRows().length, current + SESSION_PAGE_SIZE),
     );
   };
   const loadMoreOnScroll: JSX.EventHandler<HTMLUListElement, Event> = (
@@ -260,13 +313,25 @@ export function SessionList(props: {
     }
   };
   const toggleChildren = (sessionId: string): void => {
-    setCollapsed((current) => {
+    setExpanded((current) => {
       const next = new Set(current);
       if (next.has(sessionId)) next.delete(sessionId);
       else next.add(sessionId);
       return next;
     });
   };
+
+  createEffect(() => {
+    const current = expanded();
+    const ancestors = selectedAncestorIds(hierarchy(), selectedId());
+    if (
+      ancestors.length === 0 ||
+      ancestors.every((sessionId) => current.has(sessionId))
+    ) {
+      return;
+    }
+    setExpanded(new Set([...current, ...ancestors]));
+  });
 
   createEffect((previousRootRevision: string | undefined) => {
     const currentRootRevision = rootRevision();
@@ -348,15 +413,15 @@ export function SessionList(props: {
                 </button>
                 <Show when={row.childCount > 0}>
                   <button
-                    aria-expanded={!collapsed().has(session.id)}
-                    aria-label={`${collapsed().has(session.id) ? "Expand" : "Collapse"} child sessions for ${session.title}`}
-                    class="w-8 shrink-0 rounded-xl border border-white/10 text-xs font-semibold text-slate-400 transition hover:border-emerald-300/30 hover:text-emerald-200"
+                    aria-expanded={expanded().has(session.id)}
+                    aria-label={`${expanded().has(session.id) ? "Collapse" : "Expand"} child sessions for ${session.title}`}
+                    class="shrink-0 rounded-xl border border-white/10 px-2 text-xs font-semibold text-slate-400 transition hover:border-emerald-300/30 hover:text-emerald-200"
                     onClick={() => {
                       toggleChildren(session.id);
                     }}
                     type="button"
                   >
-                    {collapsed().has(session.id) ? "+" : "−"}
+                    {`${expanded().has(session.id) ? "Collapse" : "Expand"} (${String(row.childCount)})`}
                   </button>
                 </Show>
               </div>
