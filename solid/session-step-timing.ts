@@ -4,9 +4,9 @@ import type {
   AgentSessionStatus,
   AgentSessionTurn,
 } from "../shared/session-model.ts";
-import { sessionTurnTiming } from "../shared/session-turn-timing.ts";
+import { sessionStepTiming } from "../shared/session-step-timing.ts";
 
-type SessionTurnTiming = ReturnType<typeof sessionTurnTiming>;
+type SessionStepTiming = ReturnType<typeof sessionStepTiming>;
 
 function isStreamedMessage(message: AgentSessionMessage | undefined): boolean {
   return message?.id.startsWith("stream:") ?? false;
@@ -46,16 +46,16 @@ function streamedSuffixTimingUnchanged(
   return true;
 }
 
-export function createSessionTurnTiming(
+export function createSessionStepTiming(
   messages: Accessor<readonly AgentSessionMessage[]>,
   status: Accessor<AgentSessionStatus>,
   turns: Accessor<readonly AgentSessionTurn[] | undefined>,
-): Accessor<SessionTurnTiming> {
+): Accessor<SessionStepTiming> {
   let previousMessages: readonly AgentSessionMessage[] | undefined;
   let previousStatus: AgentSessionStatus | undefined;
   let previousTurns: readonly AgentSessionTurn[] | undefined;
 
-  return createMemo((previous: SessionTurnTiming | undefined) => {
+  return createMemo((previous: SessionStepTiming | undefined) => {
     const currentMessages = messages();
     const currentStatus = status();
     const currentTurns = turns();
@@ -71,6 +71,6 @@ export function createSessionTurnTiming(
     previousTurns = currentTurns;
     return reusable
       ? previous
-      : sessionTurnTiming(currentMessages, currentStatus, currentTurns);
+      : sessionStepTiming(currentMessages, currentStatus, currentTurns);
   });
 }

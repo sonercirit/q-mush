@@ -225,60 +225,60 @@ test("filters assistant text independently from tool calls on the same message",
   expect(assistantOnly).not.toContain("Tool call · read");
 });
 
-test("shows timing for every completed turn", () => {
-  const firstStartedAt = startedAtUtc();
-  const firstEndedAt = firstStartedAt + 83_000;
-  const secondStartedAt = firstEndedAt + 17_000;
-  const secondEndedAt = secondStartedAt + 5_000;
+test("shows per-step timing for a call, tools, and following call", () => {
+  const startedAt = startedAtUtc();
+  const firstAssistantAt = startedAt + 1_000;
+  const toolSettledAt = startedAt + 8_000;
+  const finalAssistantAt = startedAt + 13_000;
+  const call = {
+    ...assistantToolCall({
+      arguments: '{"path":"README.md"}',
+      id: "timed-read",
+      name: "read",
+    }),
+    createdAt: firstAssistantAt,
+  };
+  const result = {
+    ...toolResult({
+      content: "Timed output",
+      id: "timed-read",
+      name: "read",
+    }),
+    createdAt: toolSettledAt,
+  };
   const html = renderMessages([
     {
-      ...message("user-timed-first", "First timed request", "user"),
-      createdAt: firstStartedAt,
+      ...message("user-timed", "Timed request", "user"),
+      createdAt: startedAt,
+    },
+    call,
+    result,
+    {
+      ...message("thinking-timed", "Considering output", "thinking"),
+      createdAt: toolSettledAt + 2_000,
     },
     {
-      ...message("assistant-timed-first", "First timed response", "assistant"),
-      createdAt: firstEndedAt,
-    },
-    {
-      ...message("user-timed-second", "Second timed request", "user"),
-      createdAt: secondStartedAt,
-    },
-    {
-      ...message(
-        "assistant-timed-second",
-        "Second timed response",
-        "assistant",
-      ),
-      createdAt: secondEndedAt,
+      ...message("assistant-timed", "Timed response", "assistant"),
+      createdAt: finalAssistantAt,
     },
   ]);
 
-  expect(html.match(/data-turn-timing="completed"/gu)).toHaveLength(2);
-  expect(html).toContain("Duration: 1m 23s");
-  expect(html).toContain("Duration: 5s");
-  for (const timestamp of [firstStartedAt, secondStartedAt]) {
+  expect(html.match(/data-step-timing="completed"/gu)).toHaveLength(2);
+  expect(html).not.toContain("data-turn-timing");
+  for (const duration of ["Duration: 8s", "Duration: 5s"]) {
+    expect(html).toContain(duration);
+  }
+  for (const timestamp of [startedAt, toolSettledAt, finalAssistantAt]) {
     expect(html).toContain(`datetime="${new Date(timestamp).toISOString()}"`);
   }
 });
 
-test("renders durable settlement time and mixed legacy timing", () => {
-  const legacyStartedAt = Date.UTC(2026, 6, 27, 12, 0, 0);
-  const legacyEndedAt = legacyStartedAt + 5_000;
-  const durableStartedAt = legacyEndedAt + 5_000;
+test("renders durable settlement time for a terminal step", () => {
+  const durableStartedAt = Date.UTC(2026, 6, 27, 12, 0, 0);
   const durableMessageAt = durableStartedAt + 2_000;
   const durableEndedAt = durableStartedAt + 3_000;
   const durableTurnId = "durable-turn";
   const messages = [
-    {
-      ...message("legacy-user", "Legacy request", "user"),
-      createdAt: legacyStartedAt,
-      turnId: null,
-    },
-    {
-      ...message("legacy-assistant", "Legacy response", "assistant"),
-      createdAt: legacyEndedAt,
-      turnId: null,
-    },
     {
       ...message("durable-user", "Durable request", "user"),
       createdAt: durableStartedAt,
@@ -308,33 +308,12 @@ test("renders durable settlement time and mixed legacy timing", () => {
   );
 
   const completedTimingCount = html.match(
-    /data-turn-timing="completed"/gu,
+    /data-step-timing="completed"/gu,
   )?.length;
-  expect(completedTimingCount).toBe(2);
-  for (const duration of ["Duration: 5s", "Duration: 3s"]) {
-    expect(html).toContain(duration);
-  }
+  expect(completedTimingCount).toBe(1);
+  expect(html).toContain("Duration: 3s");
   const settlementDateTime = new Date(durableEndedAt).toISOString();
   expect(html).toContain(`datetime="${settlementDateTime}"`);
-});
-
-test("shows completed turn duration and start and end timestamps", () => {
-  const startedAt = Date.UTC(2026, 6, 27, 12, 0, 0);
-  const endedAt = startedAt + 83_000;
-  const html = renderMessages([
-    { ...message("user-timed", "Timed request", "user"), createdAt: startedAt },
-    {
-      ...message("assistant-timed", "Timed response", "assistant"),
-      createdAt: endedAt,
-    },
-  ]);
-
-  expect(html).toContain('data-turn-timing="completed"');
-  expect(html).toContain("Duration: 1m 23s");
-  expect(html).toContain("Started:");
-  expect(html).toContain(`datetime="${new Date(startedAt).toISOString()}"`);
-  expect(html).toContain("Ended:");
-  expect(html).toContain(`datetime="${new Date(endedAt).toISOString()}"`);
 });
 
 test("shows a clear state when every visible category is empty", () => {
