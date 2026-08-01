@@ -33,7 +33,7 @@ export function createAttachmentFallbackIntegration(options: {
     validate: async (user, selection) => {
       const credential = await options.providers[
         selection.provider
-      ].readCredential(user.id, selection.credentialId, GLOBAL_WORKSPACE_ID);
+      ]?.readCredential(user.id, selection.credentialId, GLOBAL_WORKSPACE_ID);
       if (credential?.id !== selection.credentialId) {
         return false;
       }

@@ -16,7 +16,8 @@ interface SessionCredentialReader {
 }
 
 export type SessionCredentialReaders = Readonly<
-  Record<ProviderId, SessionCredentialReader>
+  Record<"openai" | "openrouter", SessionCredentialReader> &
+    Partial<Record<Extract<ProviderId, "generic">, SessionCredentialReader>>
 >;
 
 export type SessionCredentialAction = (
@@ -38,8 +39,9 @@ export function readSessionCredential(
   userId: string,
   selection: SessionCredentialSelection,
 ): Promise<ProviderCredentialAccess | undefined> {
+  const reader = providers[selection.provider];
   return Promise.resolve(
-    providers[selection.provider].readCredential(
+    reader?.readCredential(
       userId,
       selection.credentialId,
       selection.workspaceId,

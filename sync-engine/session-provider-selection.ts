@@ -196,7 +196,7 @@ export async function sessionMetadata(options: {
   readonly input: {
     readonly model: string;
     readonly openRouterProviderTag: string | null;
-    readonly provider: "openai" | "openrouter";
+    readonly provider: ProviderId;
   };
   readonly ownerId: string;
 }): Promise<SessionMetadataResult> {

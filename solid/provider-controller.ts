@@ -60,12 +60,15 @@ export class ProviderController {
     return this.#state.accessor;
   }
 
-  async add(apiKey: string, label?: string): Promise<void> {
+  async add(apiKey: string, label?: string, baseUrl?: string): Promise<void> {
     await this.#mutate(
       this.#configuration.credentialsPath,
       jsonRequestInit(
         {
           apiKey,
+          ...(this.#configuration.baseUrlPlaceholder === undefined
+            ? {}
+            : { baseUrl }),
           ...(this.#configuration.keyRequiresLabel === true ? { label } : {}),
           workspaceIds: [this.#workspaceId],
         },
@@ -157,13 +160,17 @@ export class ProviderController {
           credentials,
           error: undefined,
           quotaLoadingIds:
-            this.#configuration.id === "brave-search"
+            this.#configuration.id === "brave-search" ||
+            this.#configuration.quotaSupported === false
               ? []
               : credentials.map(({ id }) => id),
         };
       },
     });
-    if (this.#configuration.id !== "brave-search") {
+    if (
+      this.#configuration.id !== "brave-search" &&
+      this.#configuration.quotaSupported !== false
+    ) {
       await Promise.all(
         this.state.quotaLoadingIds.map((credentialId) =>
           this.loadQuota(credentialId),
@@ -362,7 +369,9 @@ export class ProviderController {
 
   #saveError(status: number): string {
     if (status === 400) {
-      return `${this.#configuration.name} rejected that API key. Check it and try again.`;
+      return this.#configuration.id === "generic"
+        ? "The generic provider rejected that API base URL or key. Check both and try again."
+        : `${this.#configuration.name} rejected that API key. Check it and try again.`;
     }
 
     if (status === 409) {

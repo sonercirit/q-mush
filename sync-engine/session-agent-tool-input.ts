@@ -1,7 +1,4 @@
-import {
-  isProviderId,
-  type ProviderId,
-} from "../shared/provider-credential-store.ts";
+import { isProviderId, type ProviderId } from "../shared/provider-id.ts";
 import {
   MAXIMUM_SESSION_OPTIONS_SEARCH_LENGTH,
   SESSION_OPTION_CATEGORIES,

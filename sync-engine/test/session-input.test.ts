@@ -90,6 +90,19 @@ test("accepts an optional custom agent file path", () => {
   }
 });
 
+test("accepts the generic provider without OpenRouter routing", () => {
+  expect(
+    readCreateSession({ ...SESSION_INPUT, provider: "generic" }),
+  ).toMatchObject({ provider: "generic" });
+  expect(
+    readCreateSession({
+      ...SESSION_INPUT,
+      openRouterProviderTag: "openai",
+      provider: "generic",
+    }),
+  ).toBeUndefined();
+});
+
 test("accepts OpenRouter routing modes and legacy provider tags", () => {
   const openRouterInput = { ...SESSION_INPUT, provider: "openrouter" };
 

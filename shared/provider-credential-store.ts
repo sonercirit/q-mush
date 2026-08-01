@@ -23,19 +23,21 @@ import {
 import { defaultValues } from "./default-store.ts";
 import { createUuidV7, SYSTEM_ID, type IdGenerator } from "./ids.ts";
 import { validPageWindow } from "./pagination.ts";
+import {
+  isProviderId,
+  MODEL_PROVIDER_IDS,
+  type ProviderId,
+} from "./provider-id.ts";
 import { GLOBAL_WORKSPACE_ID } from "./workspace-model.ts";
 
-export type ProviderCredentialSource = "api_key" | "oauth";
-const PROVIDER_IDS = ["openai", "openrouter"] as const;
-export type ProviderId = (typeof PROVIDER_IDS)[number];
-export type CredentialProviderId = ProviderId | "brave_search";
+export { isProviderId, type ProviderId };
 
-export function isProviderId(value: unknown): value is ProviderId {
-  return PROVIDER_IDS.some((provider) => provider === value);
-}
+export type ProviderCredentialSource = "api_key" | "oauth";
+export type CredentialProviderId = ProviderId | "brave_search";
 
 export interface ProviderCredentialDetails {
   readonly accountId: string | null;
+  readonly baseUrl?: string;
   readonly label: string;
 }
 
@@ -98,6 +100,7 @@ function credentialOrder() {
 function credentialSummarySelection() {
   return {
     accountId: providerCredentials.providerAccountId,
+    baseUrl: providerCredentials.baseUrl,
     id: providerCredentials.id,
     isDefault: providerCredentials.isDefault,
     isGlobal: providerCredentials.isGlobal,
@@ -160,7 +163,7 @@ function modelCredentialCondition(
   const base = and(
     eq(providerCredentials.userId, userId),
     eq(providerCredentials.isDeleted, false),
-    inArray(providerCredentials.provider, ["openai", "openrouter"]),
+    inArray(providerCredentials.provider, MODEL_PROVIDER_IDS),
     accessibleIds === undefined
       ? undefined
       : inArray(providerCredentials.id, accessibleIds),
@@ -173,6 +176,7 @@ function modelCredentialCondition(
     base,
     or(
       lowerLike(providerCredentials.id, pattern),
+      lowerLike(providerCredentials.baseUrl, pattern),
       lowerLike(providerCredentials.providerAccountId, pattern),
       lowerLike(providerCredentials.label, pattern),
       lowerLike(providerCredentials.provider, pattern),
@@ -186,6 +190,9 @@ function legacyCredentialSummary(
 ): ProviderCredentialSummary {
   return {
     accountId: credential.accountId,
+    ...(credential.baseUrl === undefined
+      ? {}
+      : { baseUrl: credential.baseUrl }),
     id: credential.id,
     isDefault: credential.isDefault,
     label: credential.label,
@@ -240,7 +247,11 @@ export class ProviderCredentialStore {
     now: number,
     workspaceIds: readonly string[] = [GLOBAL_WORKSPACE_ID],
   ): ProviderCredentialSummary {
-    const fingerprint = fingerprintCredential(credential);
+    const fingerprint = fingerprintCredential(
+      details.baseUrl === undefined
+        ? credential
+        : `${details.baseUrl}\n${credential}`,
+    );
     const existing = this.#database
       .select({
         id: providerCredentials.id,
@@ -263,6 +274,7 @@ export class ProviderCredentialStore {
     );
     const timestamp = new Date(now);
     const mutableValues = {
+      baseUrl: details.baseUrl ?? null,
       encryptedCredential,
       isDeleted: false,
       isDefault: false,
@@ -343,8 +355,9 @@ export class ProviderCredentialStore {
       )
       .orderBy(...credentialOrder())
       .all();
-    return stored.map((credential) => ({
+    return stored.map(({ baseUrl, ...credential }) => ({
       ...credential,
+      ...(baseUrl === null ? {} : { baseUrl }),
       workspaceIds: this.#workspaceIds(userId, credential.id),
     }));
   }
@@ -398,7 +411,7 @@ export class ProviderCredentialStore {
     const accessibleIds =
       workspaceId === undefined
         ? undefined
-        : (["openai", "openrouter"] as const).flatMap((provider) =>
+        : MODEL_PROVIDER_IDS.flatMap((provider) =>
             accessibleCredentialIds(database, provider, userId, workspaceId),
           );
     const condition = modelCredentialCondition(userId, search, accessibleIds);
@@ -419,9 +432,15 @@ export class ProviderCredentialStore {
       .limit(limit)
       .offset(offset)
       .all()
-      .flatMap((credential) =>
+      .flatMap(({ baseUrl, ...credential }) =>
         isProviderId(credential.provider)
-          ? [{ ...credential, provider: credential.provider }]
+          ? [
+              {
+                ...credential,
+                ...(baseUrl === null ? {} : { baseUrl }),
+                provider: credential.provider,
+              },
+            ]
           : [],
       );
     return {
@@ -434,6 +453,7 @@ export class ProviderCredentialStore {
     return this.#database.query.providerCredentials
       .findFirst({
         columns: {
+          baseUrl: true,
           encryptedCredential: true,
           id: true,
           label: true,
@@ -470,6 +490,7 @@ export class ProviderCredentialStore {
 
     const summary: ProviderCredentialAccess = {
       accountId: stored.providerAccountId,
+      ...(stored.baseUrl === null ? {} : { baseUrl: stored.baseUrl }),
       id: stored.id,
       isDefault: stored.isDefault,
       isGlobal: stored.isGlobal,

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { AgentModelTurn } from "../../shared/agent-loop.ts";
+import { AGENT_SYSTEM_PROMPT } from "../../shared/agent-prompt.ts";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import { isRecord } from "../../shared/auth-model.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
@@ -109,6 +110,39 @@ function openRouterModelWithTools(
   tools: readonly (typeof AGENT_SESSION_TOOL_NAMES)[number][],
 ): ChatCompletionsAgentModel {
   return capturedModel(capture, { ...OPENROUTER_IMAGE_OPTIONS, tools });
+}
+
+function genericModel(
+  capture: RequestCapture,
+  options: {
+    readonly baseUrl: string;
+    readonly model: string;
+    readonly reasoningEffort?: "high";
+    readonly secret: string;
+  },
+): ChatCompletionsAgentModel {
+  return capturedModel(capture, {
+    credential: {
+      accountId: null,
+      baseUrl: options.baseUrl,
+      secret: options.secret,
+      source: "api_key",
+    },
+    model: options.model,
+    provider: "generic",
+    ...(options.reasoningEffort === undefined
+      ? {}
+      : { reasoningEffort: options.reasoningEffort }),
+    tools: [],
+  });
+}
+
+async function completeGenericModel(
+  options: Parameters<typeof genericModel>[1],
+): Promise<{ readonly body: unknown; readonly capture: RequestCapture }> {
+  const capture = new RequestCapture();
+  await completeHello(genericModel(capture, options));
+  return { body: await capturedBody(capture), capture };
 }
 
 function respondingModel(
@@ -247,6 +281,41 @@ describe("chat completions agent model", () => {
     expect(serializedBody).toContain('"timeout"');
     expect(serializedBody).not.toContain("read_file");
     expect(serializedBody).not.toContain("list_files");
+  });
+
+  test("uses a generic OpenAI-compatible chat-completions endpoint", async () => {
+    const { body, capture } = await completeGenericModel({
+      baseUrl: "https://models.example.test/openai/v1",
+      model: "llama-3.3-70b",
+      reasoningEffort: "high",
+      secret: "generic-secret",
+    });
+
+    expect(capture.request?.url).toBe(
+      "https://models.example.test/openai/v1/chat/completions",
+    );
+    expect(capture.request?.headers.get("authorization")).toBe(
+      "Bearer generic-secret",
+    );
+    expect(isRecord(body) ? body["messages"] : undefined).toEqual([
+      { content: AGENT_SYSTEM_PROMPT, role: "system" },
+      { content: "Hello", role: "user" },
+    ]);
+    expect(body).toMatchObject({
+      model: "llama-3.3-70b",
+      reasoning_effort: "high",
+      stream: true,
+    });
+  });
+
+  test("omits authorization for a keyless generic endpoint", async () => {
+    const completed = await completeGenericModel({
+      baseUrl: "http://localhost:11434/v1",
+      model: "qwen3",
+      secret: "",
+    });
+
+    expect(completed.capture.request?.headers.has("authorization")).toBe(false);
   });
 
   async function expectOpenRouterProvider(

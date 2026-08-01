@@ -1,5 +1,6 @@
 import type { JSX } from "solid-js";
 import { DirectoryBrowseButton } from "./directory-browse-button.tsx";
+import { renderFormField } from "./form-field.tsx";
 import type { SessionController } from "./session-controller.ts";
 import type { SessionViewState } from "./session-view-state.ts";
 
@@ -22,21 +23,6 @@ function sessionControlAttributes(
   };
 }
 
-export function renderSessionField(
-  id: string,
-  label: JSX.Element,
-  control: JSX.Element,
-): JSX.Element {
-  return (
-    <div>
-      <label class="text-sm font-medium text-slate-200" for={id}>
-        {label}
-      </label>
-      {control}
-    </div>
-  );
-}
-
 export function SessionDirectoryInput(props: {
   readonly controller: SessionController;
   readonly onOpenDirectoryPicker: () => void;
@@ -53,7 +39,7 @@ export function SessionDirectoryInput(props: {
     props.onOpenDirectoryPicker();
   };
 
-  return renderSessionField(
+  return renderFormField(
     "session-directory",
     <>{options().label}</>,
     <div class="flex flex-col gap-2 sm:flex-row sm:items-center">

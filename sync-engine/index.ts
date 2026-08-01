@@ -3,6 +3,7 @@ import { readDatabasePath } from "../shared/database/config.ts";
 import { createGoogleAuthFromEnvironment } from "./auth.ts";
 import { createBraveSearchSkillFromEnvironment } from "./brave-search.ts";
 import { createCoreIntegrationResources } from "./core-integration-resources.ts";
+import { createGenericIntegrationFromEnvironment } from "./generic-provider.ts";
 import {
   createOpenAiIntegrationFromEnvironment,
   createOpenAiLoopbackCallbackHandler,
@@ -46,6 +47,11 @@ const providerDependencies = {
 const braveSearch = createBraveSearchSkillFromEnvironment(Bun.env, googleAuth, {
   database,
 });
+const generic = createGenericIntegrationFromEnvironment(
+  Bun.env,
+  googleAuth,
+  providerDependencies,
+);
 const openAi = createOpenAiIntegrationFromEnvironment(
   Bun.env,
   googleAuth,
@@ -61,7 +67,7 @@ const prompts = createPromptIntegration(googleAuth, { database });
 const sessions = createSessionIntegration(
   googleAuth,
   runners,
-  { openai: openAi, openrouter: openRouter },
+  { generic, openai: openAi, openrouter: openRouter },
   { braveSearch, database, realtime: realtimeHub, workspaces },
 );
 const realtime = createRealtimeIntegration({
@@ -86,6 +92,7 @@ const handleRequest = createRequestHandler(
   prompts,
   workspaces,
   runnerExecutables,
+  generic,
 );
 let callbackServer: Bun.Server<undefined> | undefined;
 const server = Bun.serve<QmushWebSocketData>({

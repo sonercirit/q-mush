@@ -157,11 +157,12 @@ Living project memory.
   sessions failed so they can be resumed. Rebuilt conversations add error
   results for interrupted tool calls only on resume.
 
-- `sync-engine/openai.ts` and `sync-engine/openrouter.ts` implement provider
-  connections. Multiple OAuth or manual credentials live in
-  `provider_credentials`, encrypted with per-record AES-256-GCM context; API
-  responses expose only metadata. One OpenAI or OpenRouter credential may be the
-  user's model default across both providers. Shared behavior is in
+- `openai.ts`, `openrouter.ts`, and `generic-provider.ts` implement model
+  connections. Generic providers use a normalized OpenAI-compatible base URL and
+  optional key for `/models` and streamed `/chat/completions`. Credentials live
+  in `provider_credentials`, encrypted with per-record AES-256-GCM context; API
+  responses expose only metadata. One model credential may be the user's default
+  across OpenAI, OpenRouter, and generic providers. Shared behavior is in
   `sync-engine/provider-credentials.ts`,
   `sync-engine/connected-account-oauth.ts`, `solid/provider-client.tsx`, and
   `solid/provider-controller.ts`.
@@ -224,17 +225,17 @@ Living project memory.
   migration transaction nullifies its foreign-key PRAGMAs; `createDatabase`
   disables foreign keys beforehand and reenables them afterward.
 - Credential storage needs stable, private, 32-byte base64url secrets:
-  `OPENAI_CREDENTIAL_KEY`, `OPENROUTER_CREDENTIAL_KEY`, and
-  `BRAVE_SEARCH_CREDENTIAL_KEY`. Provider redirect URIs must end in the matching
-  `/api/<provider>/oauth/callback` path. OpenAI uses the Codex public OAuth
-  client ID by default and starts a localhost-only callback server on its
-  registered `http://localhost:1455/auth/callback`; keep that port free.
-  `OPENAI_CLIENT_ID` overrides the client and disables the default loopback when
-  it differs, so that client must allow the configured or request-origin
-  callback. OpenRouter's OAuth authorization needs no client credentials and
-  exchanges a code for a user-controlled key. Removing any provider credential
-  soft-deletes its audit record and clears its encrypted payload, but cannot
-  revoke provider-side access.
+  `OPENAI_CREDENTIAL_KEY`, `OPENROUTER_CREDENTIAL_KEY`,
+  `GENERIC_CREDENTIAL_KEY`, and `BRAVE_SEARCH_CREDENTIAL_KEY`. Provider redirect
+  URIs must end in the matching `/api/<provider>/oauth/callback` path. OpenAI
+  uses the Codex public OAuth client ID by default and starts a localhost-only
+  callback server on its registered `http://localhost:1455/auth/callback`; keep
+  that port free. `OPENAI_CLIENT_ID` overrides the client and disables the
+  default loopback when it differs, so that client must allow the configured or
+  request-origin callback. OpenRouter's OAuth authorization needs no client
+  credentials and exchanges a code for a user-controlled key. Removing any
+  provider credential soft-deletes its audit record and clears its encrypted
+  payload, but cannot revoke provider-side access.
 - `shared/ids.ts` is the authoritative UUIDv7 generator and defines `SYSTEM` as
   the system audit actor. User actions use the internal user UUID. Never issue
   hard deletes for application records: set `isDeleted`, `updatedAt`, and
@@ -269,21 +270,21 @@ Living project memory.
   Responses WebSocket mode and fall back to HTTP streaming; OpenRouter uses its
   supported streaming chat-completions transport. OpenAI OAuth refreshes its
   encrypted token bundle shortly before expiry. Session creation requires an
-  explicit model ID; there are no built-in fallback model IDs. Browser catalogs
-  come from OpenAI `/v1/models`, OpenRouter `/api/v1/models/user`, or the
-  ChatGPT Codex `/models` endpoint. Codex response parsing retains streamed
+  explicit model ID; there are no built-in fallback model IDs. Catalogs come
+  from OpenAI `/v1/models`, OpenRouter `/api/v1/models/user`, ChatGPT Codex
+  `/models`, or the configured generic `/models`. Codex parsing retains streamed
   output-text and function-call argument deltas because a completed event may
   omit its `output` items. OpenAI's standard catalog lacks reasoning metadata;
-  only explicitly listed Codex/OpenRouter efforts are offered. Optional
-  reasoning uses `reasoning_effort` for OpenAI chat completions and
-  `reasoning.effort` for OpenRouter and Codex Responses. Streamed reasoning
-  deltas are grouped by `output_index` and `summary_index`; separate summary
-  parts with paragraphs because completed responses may omit their output.
-  OpenAI Responses WebSockets and accepted HTTP streams retry transient
-  interruptions or provider error events only before a model turn is persisted;
-  partial UI deltas reset before replay, and exhausted WebSockets fall back to
-  HTTP. Permanent provider errors and aborts do not retry, and terminal failures
-  persist as non-replayed `error` messages.
+  only explicitly listed Codex, OpenRouter, or generic efforts are offered.
+  Optional reasoning uses `reasoning_effort` for OpenAI and generic chat
+  completions and `reasoning.effort` for OpenRouter and Codex Responses.
+  Streamed reasoning deltas are grouped by `output_index` and `summary_index`;
+  separate summary parts with paragraphs because completed responses may omit
+  their output. OpenAI Responses WebSockets and accepted HTTP streams retry
+  transient interruptions or provider error events only before a model turn is
+  persisted; partial UI deltas reset before replay, and exhausted WebSockets
+  fall back to HTTP. Permanent provider errors and aborts do not retry, and
+  terminal failures persist as non-replayed `error` messages.
 - Shell commands require a positive timeout. On macOS/Linux each has a POSIX
   session; stop/timeout signals only its group, including descendants retaining
   pipes. Agent launches and runner commands otherwise have no application-owned

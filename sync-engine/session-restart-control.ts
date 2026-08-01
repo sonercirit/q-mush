@@ -1,4 +1,7 @@
-import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
+import type {
+  ProviderCredentialAccess,
+  ProviderId,
+} from "../shared/provider-credential-store.ts";
 import type { RestartCredentialSelection } from "./session-restart-recovery.ts";
 import {
   isValidRestartId,
@@ -102,7 +105,10 @@ interface SessionRestartCredentialReader {
 }
 
 export type SessionRestartCredentialReaders = Readonly<
-  Record<"openai" | "openrouter", SessionRestartCredentialReader>
+  Record<"openai" | "openrouter", SessionRestartCredentialReader> &
+    Partial<
+      Record<Extract<ProviderId, "generic">, SessionRestartCredentialReader>
+    >
 >;
 
 export async function readSessionRestartCredential(
@@ -112,7 +118,7 @@ export async function readSessionRestartCredential(
 ): Promise<ProviderCredentialAccess | undefined> {
   const reader = readers[selection.provider];
   try {
-    return await reader.readCredential(
+    return await reader?.readCredential(
       userId,
       selection.credentialId,
       selection.workspaceId,

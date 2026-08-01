@@ -5,6 +5,7 @@ import { PromptBank } from "./prompt-client.tsx";
 import type { PromptController } from "./prompt-controller.ts";
 import {
   BRAVE_SEARCH_PANEL,
+  GENERIC_PANEL,
   OPENAI_PANEL,
   OPENROUTER_PANEL,
   ProviderPanel,
@@ -47,6 +48,7 @@ function Avatar(props: { readonly user: AuthenticatedUser }): JSX.Element {
 export function Workspace(props: {
   readonly agentSessions: SessionController;
   readonly braveSearch: ProviderController;
+  readonly generic: ProviderController;
   readonly logout: () => Promise<void>;
   readonly logoutPending: boolean;
   readonly openAi: ProviderController;
@@ -90,6 +92,7 @@ export function Workspace(props: {
       >
         <SessionPanel
           controller={props.agentSessions}
+          generic={props.generic.view}
           openAi={props.openAi.view}
           openRouter={props.openRouter.view}
           runners={props.runners.view}
@@ -99,6 +102,7 @@ export function Workspace(props: {
         credentials={credentialOptions(
           props.openAi.view(),
           props.openRouter.view(),
+          props.generic.view(),
         ).filter(({ credential }) => credential.isGlobal === true)}
         onDiscoverModels={(provider, credentialId) =>
           discoverProviderUpdateModels(
@@ -146,6 +150,7 @@ export function Workspace(props: {
       </aside>
       {providerPanel(OPENAI_PANEL, props.openAi)}
       {providerPanel(OPENROUTER_PANEL, props.openRouter)}
+      {providerPanel(GENERIC_PANEL, props.generic)}
       {providerPanel(BRAVE_SEARCH_PANEL, props.braveSearch)}
     </div>
   );

@@ -1,9 +1,12 @@
 import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
 import type { AttachmentFallbackSelection } from "../shared/attachment-fallback.ts";
-import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
+import type {
+  ProviderCredentialAccess,
+  ProviderId,
+} from "../shared/provider-credential-store.ts";
 
 type SessionModelDiscoverer = (
-  provider: "openai" | "openrouter",
+  provider: ProviderId,
   credential: ProviderCredentialAccess,
 ) => Promise<AgentModelCatalog>;
 

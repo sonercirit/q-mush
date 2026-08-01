@@ -17,6 +17,7 @@ import { ControllerRetryNotice } from "./controller-retry.tsx";
 import { controllerView } from "./controller-view.ts";
 import { CustomSelect, type CustomSelectOption } from "./custom-select.tsx";
 import { DirectoryPicker } from "./directory-picker-client.tsx";
+import { renderFormField } from "./form-field.tsx";
 import { findById } from "./id-selection.ts";
 import {
   modelModalitiesLabel,
@@ -34,10 +35,7 @@ import {
   sessionCredentialSelectOptions,
   type SessionCredentialOption,
 } from "./session-credential-option.ts";
-import {
-  renderSessionField,
-  SessionDirectoryInput,
-} from "./session-directory-input.tsx";
+import { SessionDirectoryInput } from "./session-directory-input.tsx";
 import { SessionExecutionEnvironmentSelect } from "./session-execution-environment.tsx";
 import { SessionResults } from "./session-focus-client.tsx";
 import {
@@ -78,8 +76,13 @@ function providerIsLoading(state: ProviderViewState): boolean {
 function credentialFallbackReady(
   openAi: ProviderViewState,
   openRouter: ProviderViewState,
+  generic?: ProviderViewState,
 ): boolean {
-  return !providerIsLoading(openAi) && !providerIsLoading(openRouter);
+  return (
+    !providerIsLoading(openAi) &&
+    !providerIsLoading(openRouter) &&
+    (generic === undefined || !providerIsLoading(generic))
+  );
 }
 
 function optionValue(option: CredentialOption): string {
@@ -285,7 +288,7 @@ function NewSessionForm(
         runnerAvailable={selectedRunnerId().length > 0}
         state={props.state}
       />
-      {renderSessionField(
+      {renderFormField(
         "session-agent-file-path",
         <>Agent file path (optional)</>,
         <input
@@ -452,10 +455,10 @@ export function SessionPanel(
 ): JSX.Element {
   const state = controllerView(props);
   const online = () => onlineRunners(props.runners());
-  const credentials = () =>
-    credentialOptions(props.openAi(), props.openRouter());
-  const credentialsSettled = () =>
-    credentialFallbackReady(props.openAi(), props.openRouter());
+  const providerStates = () =>
+    [props.openAi(), props.openRouter(), props.generic?.()] as const;
+  const credentials = () => credentialOptions(...providerStates());
+  const credentialsSettled = () => credentialFallbackReady(...providerStates());
   const [focusMode, setFocusMode] = createSignal(false);
   const selectedRunner = (): RunnerSummary | undefined =>
     online().find(
@@ -523,8 +526,7 @@ export function SessionPanel(
           controller={props.controller}
           credentialAvailable={selectedSessionCredentialAvailable(
             state().detail,
-            props.openAi(),
-            props.openRouter(),
+            ...providerStates(),
           )}
           credentials={credentials()}
           focusMode={focusMode}

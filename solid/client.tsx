@@ -24,6 +24,7 @@ import { providerNotice } from "./client-notices.ts";
 import { PromptController } from "./prompt-controller.ts";
 import {
   BRAVE_SEARCH_PANEL,
+  GENERIC_PANEL,
   OPENAI_PANEL,
   OPENROUTER_PANEL,
 } from "./provider-client.tsx";
@@ -275,6 +276,7 @@ function App(): JSX.Element {
   const notices = readNotices();
   const debug = new RenderDebugView();
   const braveSearch = new ProviderController(BRAVE_SEARCH_PANEL);
+  const generic = new ProviderController(GENERIC_PANEL);
   const openAi = new ProviderController(OPENAI_PANEL);
   const openRouter = new ProviderController(OPENROUTER_PANEL);
   const prompts = new PromptController();
@@ -316,7 +318,12 @@ function App(): JSX.Element {
       realtime.command(operation, payload, idempotencyKey),
     onReconnect: (listener) => realtime.onReconnect(listener),
   });
-  const providerControllers = [openAi, openRouter, braveSearch] as const;
+  const providerControllers = [
+    openAi,
+    openRouter,
+    generic,
+    braveSearch,
+  ] as const;
   let scopedLoadRevision = 0;
   const reloadScopedData = (workspaceId: string): void => {
     const revision = ++scopedLoadRevision;
@@ -471,6 +478,7 @@ function App(): JSX.Element {
                         <Workspace
                           agentSessions={agentSessions}
                           braveSearch={braveSearch}
+                          generic={generic}
                           logout={logout}
                           logoutPending={logoutPending()}
                           openAi={openAi}

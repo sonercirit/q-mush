@@ -490,7 +490,7 @@ test("0019 migrates workspace and runner data", async () => {
   constraintsDatabase.close();
 });
 
-test("OpenAI migration preserves existing OpenRouter credentials", async () => {
+test("preserves existing OpenRouter credentials", async () => {
   const { database: legacyDatabase, path } = await createLegacyDatabase(
     "q-mush-provider-upgrade-test-",
     "openrouter.sqlite",
@@ -541,6 +541,7 @@ test("OpenAI migration preserves existing OpenRouter credentials", async () => {
   const migratedDatabase = await migrateLegacyDatabase(legacyDatabase, path);
   expect(migratedDatabase.select().from(providerCredentials).all()).toEqual([
     {
+      baseUrl: null,
       createdAt: new Date(timestamp),
       createdById: userId,
       credentialFingerprint: "openrouter-key-fingerprint",
@@ -561,7 +562,7 @@ test("OpenAI migration preserves existing OpenRouter credentials", async () => {
   migratedDatabase.$client.close();
 });
 
-test("migration preserves records created by the initial schema", async () => {
+test("preserves records from the initial schema", async () => {
   temporaryDirectory = mkdtempSync(join(tmpdir(), "q-mush-upgrade-test-"));
   const databasePath = join(temporaryDirectory, "legacy.sqlite");
   const legacyDatabase = new Database(databasePath, { create: true });

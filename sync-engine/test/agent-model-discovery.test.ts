@@ -26,9 +26,11 @@ function credential(
   source: ProviderCredentialSource,
   secret: string,
   accountId: string | null = null,
+  baseUrl?: string,
 ): ProviderCredentialAccess {
   return {
     accountId,
+    ...(baseUrl === undefined ? {} : { baseUrl }),
     id: "credential-id",
     isDefault: false,
     label: "Provider credential",
@@ -233,6 +235,41 @@ describe("agent model discovery", () => {
     );
     expect(request.url).toBe("https://openrouter.ai/api/v1/models/user");
     expectBearer(request, "sk-or-secret");
+  });
+
+  test("discovers models from a generic OpenAI-compatible API base URL", async () => {
+    const { catalog: discovered, request } = await capturedDiscovery(
+      "generic",
+      credential(
+        "api_key",
+        "generic-secret",
+        null,
+        "https://models.example.test/openai/v1",
+      ),
+      {
+        data: [
+          {
+            context_window: 65_536,
+            id: "llama-3.3-70b",
+            input_modalities: ["text"],
+            name: "Llama 3.3 70B",
+            supported_reasoning_levels: ["low", "high"],
+          },
+          { id: "embedding-model", name: "Unclassified model" },
+        ],
+      },
+    );
+
+    expect(discovered).toEqual(
+      catalog("llama-3.3-70b", [
+        model("llama-3.3-70b", "Llama 3.3 70B", ["low", "high"], 65_536, [
+          "text",
+        ]),
+        model("embedding-model", "Unclassified model", []),
+      ]),
+    );
+    expect(request.url).toBe("https://models.example.test/openai/v1/models");
+    expectBearer(request, "generic-secret");
   });
 
   test("aborts an oversized streamed catalog before fully buffering it", async () => {

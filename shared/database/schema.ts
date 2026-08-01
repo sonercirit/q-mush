@@ -98,6 +98,7 @@ export const providerCredentials = sqliteTable(
     ...userOwnedAuditColumns(),
     provider: credentialProviderColumn(),
     providerAccountId: text("provider_account_id"),
+    baseUrl: text("base_url"),
     label: text("label").notNull(),
     source: text("source", { enum: ["oauth", "api_key"] }).notNull(),
     encryptedCredential: text("encrypted_credential").notNull(),
@@ -118,7 +119,7 @@ export const providerCredentials = sqliteTable(
     uniqueIndex("provider_credentials_user_model_default_unique")
       .on(table.userId)
       .where(
-        sql`${table.provider} IN ('openai', 'openrouter') AND ${table.isDefault} AND NOT ${table.isDeleted}`,
+        sql`${table.provider} IN ('openai', 'openrouter', 'generic') AND ${table.isDefault} AND NOT ${table.isDeleted}`,
       ),
   ],
 );

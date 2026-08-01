@@ -8,6 +8,7 @@ import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
 import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
 import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
+import type { SessionCredentialSelection } from "./session-credential-access.ts";
 import { compactChangedSessionFork } from "./session-fork-compaction.ts";
 import type { SessionLifecycleDependencies } from "./session-lifecycle-types.ts";
 import {
@@ -19,11 +20,7 @@ import type { SessionStore } from "./session-store.ts";
 interface SessionCredentialReader {
   readonly credential: (
     userId: string,
-    selection: {
-      readonly credentialId: string;
-      readonly provider: "openai" | "openrouter";
-      readonly workspaceId: string;
-    },
+    selection: SessionCredentialSelection & { readonly workspaceId: string },
   ) => Promise<ProviderCredentialAccess>;
 }
 
