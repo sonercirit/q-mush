@@ -53,20 +53,25 @@ function mount(renderView: () => JSX.Element): HTMLDivElement {
 interface MountedSessionList {
   readonly container: HTMLDivElement;
   readonly controller: SessionController;
+  readonly select: (sessionId: string) => void;
 }
 
 function mountedSessionList(
   sessions: readonly ReturnType<typeof summaryFromDetail>[],
+  selectedId?: string,
 ): MountedSessionList {
-  const controller = new SessionController(
-    createReactiveState<SessionViewState>({
-      ...initialSessionViewState(),
-      sessions,
-    }),
-  );
+  const state = createReactiveState<SessionViewState>({
+    ...initialSessionViewState(),
+    selectedId,
+    sessions,
+  });
+  const controller = new SessionController(state);
   return {
     container: mount(() => <SessionList controller={controller} />),
     controller,
+    select: (sessionId: string) => {
+      state.setState((current) => ({ ...current, selectedId: sessionId }));
+    },
   };
 }
 
@@ -271,12 +276,16 @@ test("scrolling away from and back to the transcript end updates scroll lock", (
   expectScrollLock(toggle, false);
 });
 
-test("nests spawned sessions under a collapsible parent", () => {
-  const parent = {
+function parentSession() {
+  return {
     ...summaryFromDetail(TEST_SESSION_DETAIL),
     id: "parent-session",
     title: "Parent task",
   };
+}
+
+test("nests spawned sessions under a collapsed parent", () => {
+  const parent = parentSession();
   const child = {
     ...parent,
     id: "child-session",
@@ -292,16 +301,13 @@ test("nests spawned sessions under a collapsible parent", () => {
   const { container } = mountedSessionList([child, detached, parent]);
   const parentToggle = query(
     container,
-    "button[aria-label='Collapse child sessions for Parent task']",
+    "button[aria-label='Expand child sessions for Parent task']",
   );
-  const childButton = container.querySelector<HTMLButtonElement>(
-    "[data-session-id='child-session']",
-  );
-  expect(parentToggle.getAttribute("aria-expanded")).toBe("true");
-  expect(childButton).not.toBeNull();
-  expect(childButton?.closest("li")?.getAttribute("data-session-depth")).toBe(
-    "1",
-  );
+  expect(parentToggle.getAttribute("aria-expanded")).toBe("false");
+  expect(parentToggle.textContent).toContain("Expand (1)");
+  expect(
+    container.querySelector("[data-session-id='child-session']"),
+  ).toBeNull();
   expect(
     container.querySelector("[data-session-id='detached-session']"),
   ).not.toBeNull();
@@ -314,12 +320,45 @@ test("nests spawned sessions under a collapsible parent", () => {
   expect(
     query(
       container,
-      "button[aria-label='Expand child sessions for Parent task']",
-    ).getAttribute("aria-expanded"),
-  ).toBe("false");
+      "button[aria-label='Collapse child sessions for Parent task']",
+    ).textContent,
+  ).toContain("Collapse (1)");
   expect(
-    container.querySelector("[data-session-id='child-session']"),
-  ).toBeNull();
+    query(container, "[data-session-id='child-session']")
+      .closest("li")
+      ?.getAttribute("data-session-depth"),
+  ).toBe("1");
+});
+
+test("bounds expanded children while revealing the selected child", () => {
+  const parent = parentSession();
+  const children = Array.from({ length: 24 }, (_, index) => ({
+    ...parent,
+    id: `child-${String(index + 1)}`,
+    parentSessionId: parent.id,
+    title: `Child ${String(index + 1)}`,
+  }));
+  const selected = children.at(-1);
+  if (selected === undefined) throw new TypeError("Missing selected child");
+  const { container, select } = mountedSessionList([parent, ...children]);
+
+  expect(container.querySelectorAll("[data-session-id]")).toHaveLength(1);
+  select(selected.id);
+  expect(container.querySelectorAll("[data-session-id]")).toHaveLength(10);
+  expect(
+    query(
+      container,
+      "button[aria-label='Collapse child sessions for Parent task']",
+    ).textContent,
+  ).toContain("Collapse (24)");
+  expect(
+    query(container, `[data-session-id='${selected.id}']`).getAttribute(
+      "aria-current",
+    ),
+  ).toBe("true");
+  expect(
+    container.querySelector("[data-load-more-sessions='true']"),
+  ).not.toBeNull();
 });
 
 test("loads more sessions on scroll and resets for a new root", () => {
