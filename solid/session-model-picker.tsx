@@ -126,7 +126,9 @@ function createSessionModelEditorFromProps(
   request: Pick<SessionEditorRequestState, "latest" | "setError">,
 ): SessionModelEditor {
   return createSessionModelEditor({
-    credentials: props.credentials,
+    get credentials() {
+      return props.credentials;
+    },
     current,
     onDiscoverModels: props.onDiscoverModels,
     request,
@@ -151,8 +153,13 @@ function createSessionModelEditor<
     options.setCurrent((current) => ({ ...current, ...values }));
   };
   const discovery = createSessionModelDiscovery({
-    ...options,
+    get credentials() {
+      return options.credentials;
+    },
+    current: options.current,
+    onDiscoverModels: options.onDiscoverModels,
     patch,
+    request: options.request,
   });
   return {
     ...discovery,

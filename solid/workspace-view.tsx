@@ -105,7 +105,12 @@ export function Workspace(props: {
           props.generic.view(),
         ).filter(({ credential }) => credential.isGlobal === true)}
         onDiscoverModels={(provider, credentialId) =>
-          discoverProviderUpdateModels(undefined, provider, credentialId)
+          discoverProviderUpdateModels(
+            undefined,
+            provider,
+            credentialId,
+            GLOBAL_WORKSPACE_ID,
+          )
         }
       />
       <WorkspacePanel controller={props.workspaces} />

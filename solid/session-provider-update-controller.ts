@@ -10,6 +10,7 @@ import {
   type SessionProviderUpdateSelection,
 } from "../shared/session-provider-update.ts";
 import { SESSION_REALTIME_OPERATIONS } from "../shared/user-realtime-protocol.ts";
+import type { WorkspaceSummary } from "../shared/workspace-model.ts";
 import { requestJson } from "./browser-http.ts";
 import {
   readAgentModelCatalog,
@@ -22,6 +23,7 @@ export async function discoverProviderUpdateModels(
   transport: SessionCommandTransport | undefined,
   provider: ProviderId,
   credentialId: string,
+  workspaceId?: WorkspaceSummary["id"],
 ): Promise<AgentModelCatalog | undefined> {
   try {
     return readAgentModelCatalog(
@@ -30,6 +32,7 @@ export async function discoverProviderUpdateModels(
             `${SESSION_MODELS_PATH}?${new URLSearchParams({
               credentialId,
               provider,
+              ...(workspaceId === undefined ? {} : { workspaceId }),
             }).toString()}`,
           )
         : await transport.command(SESSION_REALTIME_OPERATIONS.models, {
