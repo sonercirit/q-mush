@@ -10,6 +10,8 @@ import {
   readRunnerExecutionEnvironment,
   RUNNER_EXECUTION_CLEANUP_COMMAND,
   RUNNER_TERMINAL_CLEANUP_ARGUMENT,
+  RUNNER_TOOL_OUTPUT_SPILL_COMMAND,
+  RUNNER_TOOL_OUTPUT_SPILL_CONTENT_ARGUMENT,
   type RunnerCommandArguments,
   type RunnerCommandResult,
   type RunnerToolCommand,
@@ -178,6 +180,18 @@ export class RunnerCommandExecutor {
           output: terminalCleanup
             ? "Session execution resources removed."
             : "Container execution environment removed.",
+          state: "completed",
+        };
+      }
+
+      if (command.tool === RUNNER_TOOL_OUTPUT_SPILL_COMMAND) {
+        const content =
+          command.arguments[RUNNER_TOOL_OUTPUT_SPILL_CONTENT_ARGUMENT];
+        if (typeof content !== "string") {
+          throw new Error("The tool output spill content is invalid");
+        }
+        return {
+          output: await this.#outputSpill(command.sessionId).spill(content),
           state: "completed",
         };
       }
