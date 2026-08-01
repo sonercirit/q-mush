@@ -1,12 +1,16 @@
 import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
-import { SESSION_OPENROUTER_PROVIDERS_PATH } from "../shared/routes.ts";
+import {
+  SESSION_MODELS_PATH,
+  SESSION_OPENROUTER_PROVIDERS_PATH,
+} from "../shared/routes.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import {
   SESSION_PROVIDER_CACHE_WARNING,
   type SessionProviderUpdateSelection,
 } from "../shared/session-provider-update.ts";
 import { SESSION_REALTIME_OPERATIONS } from "../shared/user-realtime-protocol.ts";
+import { requestJson } from "./browser-http.ts";
 import {
   readAgentModelCatalog,
   readOpenRouterProviderCatalog,
@@ -19,15 +23,19 @@ export async function discoverProviderUpdateModels(
   provider: ProviderId,
   credentialId: string,
 ): Promise<AgentModelCatalog | undefined> {
-  if (transport === undefined) {
-    return undefined;
-  }
   try {
     return readAgentModelCatalog(
-      await transport.command(SESSION_REALTIME_OPERATIONS.models, {
-        credentialId,
-        provider,
-      }),
+      transport === undefined
+        ? await requestJson(
+            `${SESSION_MODELS_PATH}?${new URLSearchParams({
+              credentialId,
+              provider,
+            }).toString()}`,
+          )
+        : await transport.command(SESSION_REALTIME_OPERATIONS.models, {
+            credentialId,
+            provider,
+          }),
     );
   } catch {
     return undefined;

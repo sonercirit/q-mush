@@ -105,11 +105,7 @@ export function Workspace(props: {
           props.generic.view(),
         ).filter(({ credential }) => credential.isGlobal === true)}
         onDiscoverModels={(provider, credentialId) =>
-          discoverProviderUpdateModels(
-            props.agentSessions.transport,
-            provider,
-            credentialId,
-          )
+          discoverProviderUpdateModels(undefined, provider, credentialId)
         }
       />
       <WorkspacePanel controller={props.workspaces} />

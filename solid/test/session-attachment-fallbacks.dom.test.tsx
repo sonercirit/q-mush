@@ -1,7 +1,9 @@
 import { afterEach, expect, test, vi } from "vitest";
 import type { AgentModelCatalog } from "../../shared/agent-configuration.ts";
+import { SESSION_MODELS_PATH } from "../../shared/routes.ts";
 import { testAgentModelOption } from "../../shared/test/agent-model-fixtures.ts";
 import { AttachmentFallbackSettings } from "../session-attachment-fallbacks.tsx";
+import { discoverProviderUpdateModels } from "../session-provider-update-controller.ts";
 import {
   clickTestButton,
   disposeTestViews,
@@ -14,6 +16,7 @@ const DISPOSALS: (() => void)[] = [];
 
 afterEach(() => {
   disposeTestViews(DISPOSALS);
+  vi.restoreAllMocks();
 });
 
 async function expectModelDiscovery(
@@ -80,6 +83,52 @@ async function expectDiscoveredModel(
 function openFallbackSelect(container: ParentNode, name: string): void {
   clickTestButton(container, `[data-custom-select='${name}'] > button`);
 }
+
+test("discovers global fallback models over HTTP without realtime", async () => {
+  const catalog = fallbackCatalog([
+    fallbackModel("openrouter/image-model", ["text", "image"], "Image model"),
+  ]);
+  const fetch = vi
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValue(Response.json(catalog));
+
+  await expect(
+    discoverProviderUpdateModels(undefined, "openrouter", "credential-1"),
+  ).resolves.toMatchObject(catalog);
+  expect(fetch).toHaveBeenCalledOnce();
+  const [url, init] = fetch.mock.calls[0] ?? [];
+  expect(url).toBe(
+    `${SESSION_MODELS_PATH}?credentialId=credential-1&provider=openrouter`,
+  );
+  expect(new Headers(init?.headers).get("accept")).toBe("application/json");
+});
+
+test("shows an explicit fallback model discovery error and retries", async () => {
+  const catalog = fallbackCatalog([
+    fallbackModel("image-model", ["text", "image"], "Image model"),
+  ]);
+  const discoverModels = vi
+    .fn<() => Promise<AgentModelCatalog | undefined>>()
+    .mockResolvedValueOnce(undefined)
+    .mockResolvedValueOnce(catalog);
+  const container = mountFallbackSettings(
+    fallbackCredential("openrouter", "OpenRouter credential"),
+    discoverModels,
+  );
+
+  await expectModelDiscovery(discoverModels, 1);
+  await vi.waitFor(() => {
+    expect(container.querySelector("[role='alert']")?.textContent).toContain(
+      "Models are unavailable for that credential.",
+    );
+  });
+  const retry = findTestButton(container, "Retry model discovery");
+  if (retry === undefined) throw new TypeError("Missing model discovery retry");
+  retry.click();
+
+  await expectDiscoveredModel(discoverModels, container, 2, "image-model");
+  expect(container.querySelector("[role='alert']")).toBeNull();
+});
 
 test("offers routing modes in global fallback settings", async () => {
   const discoverModels = vi.fn(() =>

@@ -222,6 +222,7 @@ function createSessionModelDiscovery(
       );
       if (selected === undefined) return;
       const currentRequest = options.request.latest.begin();
+      options.request.setError(undefined);
       setCatalog(undefined);
       const models = await options.onDiscoverModels(
         selected.provider,
