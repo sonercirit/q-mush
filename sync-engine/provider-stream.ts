@@ -625,10 +625,12 @@ class ChatCompletionsAccumulator
   }
 }
 
-class JsonChatCompletionsAccumulator implements CompletedStreamAccumulator {
+class JsonChatCompletionsAccumulator
+  extends BufferedAccumulator
+  implements CompletedStreamAccumulator
+{
   #step: AgentModelStep | undefined;
   readonly protocol = "chat_completions_json" as const;
-  receivedEvent = false;
 
   get completed(): boolean {
     return this.#step !== undefined;
@@ -644,6 +646,9 @@ class JsonChatCompletionsAccumulator implements CompletedStreamAccumulator {
   push(value: unknown): void {
     this.receivedEvent = true;
     this.#step = readChatStep(value);
+    for (const [index, toolCall] of this.#step.toolCalls.entries()) {
+      emitToolCallDelta(this.buffers.onDelta, { ...toolCall, index });
+    }
   }
 }
 
@@ -652,7 +657,7 @@ export function createProviderStreamAccumulator(
   onDelta?: (delta: ProviderTextDelta) => void,
 ): ProviderStreamAccumulator {
   if (protocol === "chat_completions_json") {
-    return new JsonChatCompletionsAccumulator();
+    return new JsonChatCompletionsAccumulator(onDelta);
   }
   return protocol === "responses"
     ? new ResponsesAccumulator(onDelta)
