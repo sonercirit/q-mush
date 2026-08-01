@@ -299,9 +299,3 @@ export function executeSessionAgentTool(
 export function sessionToolOutput(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
-
-export function lastSessionMessage(
-  detail: AgentSessionDetail,
-): AgentSessionDetail["messages"][number] | undefined {
-  return detail.messages.findLast(({ role }) => role !== "thinking");
-}

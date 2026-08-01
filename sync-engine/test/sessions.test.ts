@@ -4,7 +4,6 @@ import type {
   AgentModel,
   AgentModelStep,
 } from "../../shared/agent-loop.ts";
-import type { AuthenticatedUser } from "../../shared/auth-model.ts";
 import { runnerDirectoriesPath, SESSIONS_PATH } from "../../shared/routes.ts";
 import { WorkspaceStore } from "../../sync-engine/workspace-store.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
@@ -22,6 +21,7 @@ import {
   SESSION_ID,
 } from "./session-integration-fixtures.ts";
 import {
+  completeAgentFileLookup,
   completeRunnerCommand,
   directoryListing,
   expectedRunnerCommand,
@@ -37,11 +37,6 @@ import {
 import { expectJsonResponse } from "./session-launch-race-helpers.ts";
 
 const SECOND_WORKSPACE_ID = "018bcfe5-6800-7000-8000-000000000081";
-const TEST_USER: AuthenticatedUser = {
-  email: "mush@example.com",
-  id: TEST_USER_ID,
-  name: "Mush",
-};
 class FailingModel implements AgentModel {
   complete(): Promise<AgentModelStep> {
     return Promise.reject(new Error("Provider unavailable"));
@@ -448,26 +443,43 @@ describe("agent sessions", () => {
         { role: "assistant", toolCalls: [restartCall] },
         { content: "Restart requested.", role: "tool" },
       ],
+      restartHandoff: {
+        operation: "agent",
+        requestedBy: "server",
+      },
+      status: "paused",
+    });
+    const recovered = connectedSessionSetup(model, "api_key", undefined, {
+      database: setup.database,
+      onChange: () => undefined,
+    });
+    await completeAgentFileLookup(recovered);
+    await waitForSessionValue(
+      () => sessionDetail(recovered.sessions),
+      (detail) => {
+        if (typeof detail !== "object" || detail === null) {
+          return false;
+        }
+        return (
+          JSON.stringify(detail).includes("Restart completed.") &&
+          "status" in detail &&
+          detail.status === "idle"
+        );
+      },
+    );
+    expect(model.requests).toHaveLength(2);
+    expect(model.requests[1]).toContainEqual({
+      content: "Restart requested.",
+      role: "tool",
+      toolCallId: restartCall.id,
+      toolName: restartCall.name,
+    });
+    const recoveredDetail = await sessionDetail(recovered.sessions);
+    expect(recoveredDetail).toMatchObject({
       restartHandoff: null,
       status: "idle",
     });
-    const queuedDuringRestart = await sessions.realtimeCommands.messageForUser(
-      TEST_USER,
-      SESSION_ID,
-      { prompt: "Continue after restart.", attachments: [], images: [] },
-      TEST_WORKSPACE_ID,
-    );
-    expect(queuedDuringRestart.status).toBe("queued");
-
-    const recovered = connectedSessionSetup(model, "api_key", undefined, {
-      database: setup.database,
-    });
-    const recoveredDetail = await sessionDetail(recovered.sessions);
-    expect(recoveredDetail).toMatchObject({ restartHandoff: null });
-    expect(JSON.stringify(recoveredDetail)).toContain(
-      "Continue after restart.",
-    );
-    expect(JSON.stringify(recoveredDetail)).not.toContain("Session failed:");
+    expect(JSON.stringify(recoveredDetail)).toContain("Restart completed.");
     setup.database.$client.close();
   });
 

@@ -364,10 +364,13 @@ describe("session agent tools", () => {
         typeof session === "object" &&
         session !== null &&
         "status" in session &&
-        session.status === "idle",
+        session.status === "paused",
     );
 
-    expect(detail).toMatchObject({ restartHandoff: null, status: "idle" });
+    expect(detail).toMatchObject({
+      restartHandoff: { requestedBy: "server" },
+      status: "paused",
+    });
     expect(model.requests.length).toBeLessThanOrEqual(1);
     await draining;
     closeSessionTestDatabase(setup.database);

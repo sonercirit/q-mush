@@ -10,7 +10,6 @@ import type {
 } from "../shared/session-model.ts";
 import { createJsonResponse } from "./http.ts";
 import {
-  lastSessionMessage,
   sessionToolOutput,
   type SpawnSessionToolInput,
 } from "./session-agent-tools.ts";
@@ -141,7 +140,17 @@ export function spawnedSessionReport(options: {
   if (completed === undefined) {
     return undefined;
   }
+  if (
+    completed.status !== "failed" &&
+    completed.status !== "idle" &&
+    completed.status !== "stopped"
+  ) {
+    return undefined;
+  }
   const failed = completed.status === "failed";
+  const terminalAssistant = completed.messages.findLast(
+    ({ role, toolCalls }) => role === "assistant" && toolCalls.length === 0,
+  );
   const assistant = completed.messages.findLast(
     ({ role }) => role === "assistant",
   );
@@ -157,7 +166,9 @@ export function spawnedSessionReport(options: {
             "Session failed without a recorded failure reason",
           role: "error" as const,
         }
-    : lastSessionMessage(completed);
+    : completed.status === "stopped"
+      ? completed.messages.findLast(({ role }) => role !== "thinking")
+      : terminalAssistant;
   const status = completed.status === "idle" ? "completed" : completed.status;
   const summary = sessionToolOutput({
     lastMessage:

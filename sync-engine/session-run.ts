@@ -156,18 +156,6 @@ function persistHandoffOutcome(options: RunPersistedSessionOptions): void {
   options.notify(options.userId, options.detail.id);
 }
 
-function finishAtRestartBoundary(
-  options: RunPersistedSessionOptions,
-  claimedIdentity: RestartHandoffIdentity | undefined,
-): void {
-  const request = options.restartRequest();
-  if (request?.boundary === "step") {
-    finishRecoveredSession(options, claimedIdentity);
-  } else {
-    persistHandoffOutcome(options);
-  }
-}
-
 export async function runPersistedSession(
   options: RunPersistedSessionOptions,
 ): Promise<void> {
@@ -218,11 +206,7 @@ export async function runPersistedSession(
       return;
     }
     if (outcome === "handoff") {
-      if (options.restartRequest() === undefined) {
-        persistRestartHandoff(options, false);
-        return;
-      }
-      finishAtRestartBoundary(options, claimedIdentity);
+      persistHandoffOutcome(options);
       return;
     }
     finishRecoveredSession(options, claimedIdentity);
