@@ -1,4 +1,5 @@
 import { integer, text } from "drizzle-orm/sqlite-core";
+import { MODEL_PROVIDER_IDS } from "../provider-id.ts";
 
 export function connectionColumns() {
   return {
@@ -10,11 +11,11 @@ export function connectionColumns() {
 }
 
 export function providerColumn() {
-  return text("provider", { enum: ["openai", "openrouter"] }).notNull();
+  return text("provider", { enum: MODEL_PROVIDER_IDS }).notNull();
 }
 
 export function credentialProviderColumn() {
   return text("provider", {
-    enum: ["openai", "openrouter", "brave_search"],
+    enum: [...MODEL_PROVIDER_IDS, "brave_search"],
   }).notNull();
 }

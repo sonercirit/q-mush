@@ -1,9 +1,14 @@
 import { expect, test } from "vitest";
 import {
+  GENERIC_CREDENTIALS_PATH,
   OPENAI_CREDENTIALS_PATH,
   connectionScopesPath,
 } from "../../shared/routes.ts";
-import { OPENAI_PANEL } from "../../solid/provider-client.tsx";
+import {
+  GENERIC_PANEL,
+  OPENAI_PANEL,
+  type ProviderPanelConfiguration,
+} from "../../solid/provider-client.tsx";
 import { ProviderController } from "../../solid/provider-controller.ts";
 import {
   installRecordedFetch,
@@ -12,27 +17,79 @@ import {
 
 restoreFetchAfterEach();
 
-test("uses the selected workspace for provider load, creation, and scope updates", async () => {
-  const requests: Parameters<typeof installRecordedFetch>[0] = [];
-  installRecordedFetch(requests, (init) =>
-    init?.method === "POST"
-      ? Response.json(
-          {
-            accountId: "account-1",
-            id: "credential-1",
-            isDefault: false,
-            isGlobal: false,
-            label: "Work key",
-            source: "api_key",
-            workspaceIds: ["workspace/one"],
-          },
-          { status: 201 },
-        )
-      : init?.method === "PUT"
-        ? new Response(null, { status: 204 })
-        : Response.json({ credentials: [] }),
+type RecordedRequests = Parameters<typeof installRecordedFetch>[0];
+
+function createdCredential(
+  overrides: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  return {
+    accountId: null,
+    id: "credential-1",
+    isDefault: false,
+    isGlobal: true,
+    label: "Credential",
+    source: "api_key",
+    workspaceIds: [],
+    ...overrides,
+  };
+}
+
+function recordedProvider(
+  configuration: ProviderPanelConfiguration,
+  credential: Readonly<Record<string, unknown>>,
+): {
+  readonly controller: ProviderController;
+  readonly requests: RecordedRequests;
+} {
+  const requests: RecordedRequests = [];
+  installRecordedFetch(requests, (init) => {
+    switch (init?.method) {
+      case "POST":
+        return Response.json(credential, { status: 201 });
+      case "PUT":
+        return new Response(null, { status: 204 });
+      case undefined:
+      default:
+        return Response.json({ credentials: [] });
+    }
+  });
+  return { controller: new ProviderController(configuration), requests };
+}
+
+test("submits a generic provider base URL, label, and optional key", async () => {
+  const { controller, requests } = recordedProvider(
+    GENERIC_PANEL,
+    createdCredential({
+      baseUrl: "http://localhost:11434/v1",
+      id: "generic-credential",
+      label: "Local Ollama",
+    }),
   );
-  const controller = new ProviderController(OPENAI_PANEL);
+
+  await controller.add("", "Local Ollama", "http://localhost:11434/v1/");
+
+  expect(requests).toContainEqual({
+    body: {
+      apiKey: "",
+      baseUrl: "http://localhost:11434/v1/",
+      label: "Local Ollama",
+      workspaceIds: ["global"],
+    },
+    method: "POST",
+    url: GENERIC_CREDENTIALS_PATH,
+  });
+});
+
+test("uses the selected workspace for provider load, creation, and scope updates", async () => {
+  const { controller, requests } = recordedProvider(
+    OPENAI_PANEL,
+    createdCredential({
+      accountId: "account-1",
+      isGlobal: false,
+      label: "Work key",
+      workspaceIds: ["workspace/one"],
+    }),
+  );
   controller.setWorkspace("workspace/one");
 
   await controller.load();

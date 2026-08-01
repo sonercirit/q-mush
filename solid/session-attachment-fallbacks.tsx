@@ -19,7 +19,10 @@ import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 import { requestJson } from "./browser-http.ts";
 import { modalityLabel } from "./model-modalities-client.tsx";
 import type { SessionCredentialOption } from "./session-credential-option.ts";
-import { parseModelCredentialValue } from "./session-model-options.ts";
+import {
+  modelProviderLabel,
+  parseModelCredentialValue,
+} from "./session-model-options.ts";
 import {
   createSessionModelPickerState,
   SessionModelPickerFields,
@@ -175,7 +178,7 @@ export function AttachmentFallbackSettings(props: {
           credentialEmptyLabel="No global model credentials"
           credentialOptions={props.credentials.map(
             ({ credential, provider }) => ({
-              label: `${provider === "openai" ? "OpenAI" : "OpenRouter"} · ${credential.label}`,
+              label: `${modelProviderLabel(provider)} · ${credential.label}`,
               value: `${provider}:${credential.id}`,
             }),
           )}

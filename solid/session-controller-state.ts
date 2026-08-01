@@ -1,4 +1,4 @@
-import type { ProviderId } from "../shared/provider-credential-store.ts";
+import { isProviderId, type ProviderId } from "../shared/provider-id.ts";
 import { canonicalAgentSessionMessages } from "../shared/session-message-order.ts";
 import type {
   AgentSessionDetail,
@@ -24,11 +24,7 @@ export function selectedSessionCredential(value: string):
   const provider = value.slice(0, separator);
   const credentialId = value.slice(separator + 1);
 
-  if (
-    separator < 1 ||
-    (provider !== "openai" && provider !== "openrouter") ||
-    credentialId.length === 0
-  ) {
+  if (separator < 1 || !isProviderId(provider) || credentialId.length === 0) {
     return undefined;
   }
 

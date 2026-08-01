@@ -207,18 +207,24 @@ function boundedCredential(
   option: SessionCredentialOption,
 ): BoundedOption<SessionCredentialOption> {
   const accountId = boundedNullableText(option.accountId);
+  const baseUrl =
+    option.baseUrl === undefined
+      ? { option: undefined, truncated: false }
+      : boundedText(option.baseUrl);
   const named = boundedNamedFields(option);
   const validProvider = isProviderId(option.provider);
   return {
     option: {
       ...option,
       accountId: accountId.option,
+      ...(baseUrl.option === undefined ? {} : { baseUrl: baseUrl.option }),
       id: named.id.option,
       label: named.label.option,
       provider: validProvider ? option.provider : "openai",
     },
     truncated:
       accountId.truncated ||
+      baseUrl.truncated ||
       named.id.truncated ||
       named.label.truncated ||
       !validProvider,
@@ -278,6 +284,7 @@ function searchableText(option: SessionOption): string {
   if ("provider" in option) {
     return normalizedValues([
       option.accountId ?? undefined,
+      option.baseUrl,
       option.id,
       option.label,
       option.provider,

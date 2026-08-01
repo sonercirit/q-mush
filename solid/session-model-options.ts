@@ -5,6 +5,11 @@ import type {
 import type { ProviderId } from "../shared/provider-credential-store.ts";
 import type { CustomSelectOption } from "./custom-select.tsx";
 
+export type SessionModelDiscoverer = (
+  provider: ProviderId,
+  credentialId: string,
+) => Promise<AgentModelCatalog | undefined>;
+
 export interface ModelCredentialIdentity {
   readonly credentialId: string;
   readonly provider: ProviderId;
@@ -31,6 +36,7 @@ export function parseModelCredentialValue(
   const credentialId = identityParts.join(":");
   if (credentialId.length === 0) return undefined;
   switch (provider) {
+    case "generic":
     case "openai":
     case "openrouter":
       return { credentialId, provider };
@@ -40,11 +46,22 @@ export function parseModelCredentialValue(
   }
 }
 
+export function modelProviderLabel(provider: ProviderId): string {
+  switch (provider) {
+    case "generic":
+      return "Generic LLM";
+    case "openai":
+      return "OpenAI";
+    case "openrouter":
+      return "OpenRouter";
+  }
+}
+
 export function modelCredentialOptions(
   credentials: readonly ModelCredentialOption[],
 ): readonly CustomSelectOption[] {
   return credentials.map((credential) => ({
-    label: `${credential.provider === "openai" ? "OpenAI" : "OpenRouter"} · ${credential.label}`,
+    label: `${modelProviderLabel(credential.provider)} · ${credential.label}`,
     value: modelCredentialValue(credential),
   }));
 }

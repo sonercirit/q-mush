@@ -11,6 +11,7 @@ import {
   AUTH_SESSION_PATH,
   BRAVE_SEARCH_KEYS_PATH,
   FAVICON_PATH,
+  GENERIC_CREDENTIALS_PATH,
   HOME_PATH,
   OPENAI_CREDENTIALS_PATH,
   OPENAI_OAUTH_CALLBACK_PATH,
@@ -37,6 +38,7 @@ import {
   createClientPlugins,
   readFavicon,
 } from "./client-build.ts";
+import type { GenericProviderIntegration } from "./generic-provider.ts";
 import { createMethodNotAllowedResponse } from "./http.ts";
 import type { OpenAiIntegration } from "./openai.ts";
 import type { OpenRouterIntegration } from "./openrouter.ts";
@@ -257,8 +259,8 @@ function createFaviconResponse(
 
 interface ProviderRoutes {
   readonly credentials: string;
-  readonly oauth: string;
-  readonly oauthCallback: string;
+  readonly oauth?: string;
+  readonly oauthCallback?: string;
 }
 
 function pathSegments(pathname: string, prefix: string): readonly string[] {
@@ -368,11 +370,11 @@ function routeProviderRequest(
   integration: ProviderIntegration,
   routes: ProviderRoutes,
 ): Promise<Response> | Response | undefined {
-  if (pathname === routes.oauth) {
+  if (routes.oauth !== undefined && pathname === routes.oauth) {
     return integration.begin(request);
   }
 
-  if (pathname === routes.oauthCallback) {
+  if (routes.oauthCallback !== undefined && pathname === routes.oauthCallback) {
     return integration.complete(request);
   }
 
@@ -417,6 +419,7 @@ export function createRequestHandler(
   prompts: PromptIntegration,
   workspaces: WorkspaceIntegration,
   runnerExecutables: RunnerExecutableProvider,
+  generic?: GenericProviderIntegration,
 ): (request: Request) => Promise<Response> {
   const appPage = prepareBody(pages.app);
   const browserBundle = prepareBody(clientJavaScript);
@@ -564,6 +567,18 @@ export function createRequestHandler(
 
       if (openRouterResponse !== undefined) {
         return openRouterResponse;
+      }
+
+      if (generic !== undefined) {
+        const genericResponse = routeProviderRequest(
+          pathname,
+          request,
+          generic,
+          { credentials: GENERIC_CREDENTIALS_PATH },
+        );
+        if (genericResponse !== undefined) {
+          return genericResponse;
+        }
       }
     }
 

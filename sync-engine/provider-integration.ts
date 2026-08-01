@@ -26,7 +26,10 @@ import type {
   ProviderCredentialRead,
   ProviderCredentialReader,
 } from "./provider-credential-reader.ts";
-import { ProviderCredentialEndpoints } from "./provider-credentials.ts";
+import {
+  ProviderCredentialEndpoints,
+  type ProviderCredentialInputDetails,
+} from "./provider-credentials.ts";
 import { ProviderQuotaEndpoints } from "./provider-quota-endpoints.ts";
 import type {
   ProviderQuotaReader,
@@ -100,12 +103,18 @@ export function readProviderIntegrationConfiguration(
 type CredentialDetailsReader = (
   runtime: OAuthRuntime,
   apiKey: string,
+  details: ProviderCredentialInputDetails,
 ) => Promise<ProviderCredentialDetails>;
 
 export function createProviderIntegration(options: {
   readonly auth: GoogleAuth;
   readonly configuration: ProviderIntegrationConfiguration | undefined;
-  readonly createOAuthConfiguration: OAuthConfigurationFactory;
+  readonly createOAuthConfiguration?: OAuthConfigurationFactory;
+  readonly credentialOptions?: {
+    readonly apiKeyRequired?: boolean;
+    readonly labelRequired?: boolean;
+    readonly readBaseUrl?: (value: unknown) => string | undefined;
+  };
   readonly dependencies: OAuthDependencies;
   readonly prepareCredential?: (
     runtime: OAuthRuntime,
@@ -134,10 +143,11 @@ export function createProviderIntegration(options: {
           runtime.generateId,
         );
   const credentials = new ProviderCredentialEndpoints({
+    ...options.credentialOptions,
     auth: options.auth,
     now: runtime.now,
-    readCredentialDetails: (apiKey) =>
-      options.readCredentialDetails(runtime, apiKey),
+    readCredentialDetails: (apiKey, details) =>
+      options.readCredentialDetails(runtime, apiKey, details),
     store,
   });
   const quotaStore =
@@ -192,17 +202,20 @@ export function createProviderIntegration(options: {
         }),
     store: sessionStore,
   });
-  const baseOAuthConfiguration = options.createOAuthConfiguration(runtime);
-  const connectedAccount = new ConnectedAccountOAuth(
-    {
-      ...baseOAuthConfiguration,
-      ...(options.configuration?.redirectUri === undefined
-        ? {}
-        : { redirectUri: options.configuration.redirectUri }),
-    },
-    credentials,
-    runtime,
-  );
+  const baseOAuthConfiguration = options.createOAuthConfiguration?.(runtime);
+  const connectedAccount =
+    baseOAuthConfiguration === undefined
+      ? undefined
+      : new ConnectedAccountOAuth(
+          {
+            ...baseOAuthConfiguration,
+            ...(options.configuration?.redirectUri === undefined
+              ? {}
+              : { redirectUri: options.configuration.redirectUri }),
+          },
+          credentials,
+          runtime,
+        );
 
   const readCredential: ProviderCredentialRead = async (
     userId,
@@ -242,8 +255,11 @@ export function createProviderIntegration(options: {
   });
 
   return {
-    begin: (request) => connectedAccount.begin(request),
-    complete: (request) => connectedAccount.complete(request),
+    begin: (request) =>
+      connectedAccount?.begin(request) ?? new Response(null, { status: 404 }),
+    complete: (request) =>
+      connectedAccount?.complete(request) ??
+      Promise.resolve(new Response(null, { status: 404 })),
     credentials: (request) => credentials.credentials(request),
     quota: (request, credentialId) => quota.read(request, credentialId),
     readCredential,

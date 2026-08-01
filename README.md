@@ -22,11 +22,11 @@ Register this exact authorized redirect URI on the Google OAuth client:
 http://localhost:12345/api/auth/google/callback
 ```
 
-Generate separate 32-byte keys for encrypted OpenAI, OpenRouter, and Brave
-Search credential storage, then copy the output into `.env.local`:
+Generate separate 32-byte keys for encrypted OpenAI, OpenRouter, generic LLM,
+and Brave Search credential storage, then copy the output into `.env.local`:
 
 ```bash
-bun -e 'import { randomBytes } from "node:crypto"; for (const name of ["OPENAI_CREDENTIAL_KEY", "OPENROUTER_CREDENTIAL_KEY", "BRAVE_SEARCH_CREDENTIAL_KEY"]) console.log(`${name}=${randomBytes(32).toString("base64url")}`)'
+bun -e 'import { randomBytes } from "node:crypto"; for (const name of ["OPENAI_CREDENTIAL_KEY", "OPENROUTER_CREDENTIAL_KEY", "GENERIC_CREDENTIAL_KEY", "BRAVE_SEARCH_CREDENTIAL_KEY"]) console.log(`${name}=${randomBytes(32).toString("base64url")}`)'
 ```
 
 Keep `.env.local` private; it is ignored by Git. Losing or changing a credential
@@ -108,6 +108,8 @@ two pages and their assets:
 - Authenticated users manage OpenRouter access through
   `/api/openrouter/credentials`. `/api/openrouter/oauth` connects an account and
   `/api/openrouter/oauth/callback` completes the flow.
+- Authenticated users add OpenAI-compatible API base URLs and optional API keys
+  through `/api/generic/credentials`.
 - Authenticated users add and remove Brave Search API keys through
   `/api/skills/brave-search/keys`. These keys power the server-side
   `brave_search` agent skill.
@@ -230,37 +232,42 @@ browser and runner work protocol never receive them.
 
 OpenAI API keys and connected accounts prefer the streaming Responses WebSocket
 and fall back to HTTP streaming when that transport is unavailable. OpenRouter
-credentials use its streaming chat-completions API. OpenAI connected accounts
-use the subscription-backed Codex Responses endpoint; Q Mush refreshes and
-re-encrypts expiring OAuth tokens. Model discovery queries the Codex account
-catalog, OpenAI `/v1/models`, or OpenRouter `/api/v1/models/user` with the
-selected server-side credential. Codex and OpenRouter publish reasoning
-metadata, so their effort select contains only efforts explicitly enumerated for
-the model. OpenAI's standard models endpoint only publishes model availability,
-so API-key models use their provider default reasoning setting. A selected
-effort is sent using each provider's native request shape. Before a model turn
-is persisted or any requested tool runs, Q Mush retries transient network
-failures, retryable HTTP statuses, accepted streams that disconnect or end
-early, and transient provider error events with bounded exponential backoff.
-Partial live output is cleared before replay so it is neither duplicated nor
-persisted; permanent provider errors and stopped sessions do not retry.
-`Retry-After` is honored when available. The first-party loop passes explicit
-function calls to the runner and feeds bounded results back to the selected
-model.
+credentials use its streaming chat-completions API. Generic credentials use the
+configured OpenAI-compatible `/chat/completions` HTTP stream, and model
+discovery uses `/models` beneath the same API base URL. API keys are optional so
+local keyless endpoints work. OpenAI connected accounts use the
+subscription-backed Codex Responses endpoint; Q Mush refreshes and re-encrypts
+expiring OAuth tokens. Model discovery queries the Codex account catalog, OpenAI
+`/v1/models`, OpenRouter `/api/v1/models/user`, or the generic provider's
+configured `/models` endpoint with the selected server-side credential. Codex
+and OpenRouter publish reasoning metadata, so their effort select contains only
+efforts explicitly enumerated for the model. Generic model metadata is used only
+when the endpoint explicitly returns it; missing capabilities remain unknown.
+OpenAI's standard models endpoint only publishes model availability, so API-key
+models use their provider default setting. A selected effort is sent using each
+provider's native request shape. Before a model turn is persisted or any
+requested tool runs, Q Mush retries transient network failures, retryable HTTP
+statuses, accepted streams that disconnect or end early, and transient provider
+error events with bounded exponential backoff. Partial live output is cleared
+before replay so it is neither duplicated nor persisted; permanent provider
+errors and stopped sessions do not retry. `Retry-After` is honored when
+available. The first-party loop passes explicit function calls to the runner and
+feeds bounded results back to the selected model.
 
 The Google login flow uses an authorization code, PKCE, and a short-lived state
 cookie. Only the basic Google profile and email scopes are requested. Google
 tokens are discarded after profile lookup. Once logged in, a user can connect
-multiple OpenAI or OpenRouter accounts through PKCE flows or add multiple
-existing API keys for either provider. OpenAI OAuth represents Codex/ChatGPT
-subscription access, while OpenAI Platform API keys use API billing. OpenAI keys
-are validated with `/v1/me`, and OpenRouter keys are validated with its key
-metadata endpoint. OpenAI OAuth access and refresh tokens, provider API keys,
-and Brave Search API keys are encrypted with AES-256-GCM in the local database;
-the API never returns plaintext credentials to the browser. Removing a
-credential clears its encrypted payload and retains a soft-deleted audit row. It
-does not revoke provider-side access, so revoke the credential with its provider
-when it should no longer exist there.
+multiple OpenAI or OpenRouter accounts through PKCE flows, add multiple existing
+API keys for either provider, and register multiple generic OpenAI-compatible
+endpoints. OpenAI OAuth represents Codex/ChatGPT subscription access, while
+OpenAI Platform API keys use API billing. OpenAI keys are validated with
+`/v1/me`, and OpenRouter keys are validated with its key metadata endpoint.
+OpenAI OAuth access and refresh tokens, provider API keys (including optional
+generic-provider keys), and Brave Search API keys are encrypted with AES-256-GCM
+in the local database; the API never returns plaintext credentials to the
+browser. Removing a credential clears its encrypted payload and retains a
+soft-deleted audit row. It does not revoke provider-side access, so revoke the
+credential with its provider when it should no longer exist there.
 
 Drizzle stores users, seven-day application sessions, provider and skill
 credentials, runner registrations, agent sessions, and agent transcripts in

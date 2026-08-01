@@ -1,17 +1,10 @@
-import { createSignal, Show, type Accessor, type JSX } from "solid-js";
+import { createSignal, For, Show, type Accessor, type JSX } from "solid-js";
 import { isRecord } from "../shared/auth-model.ts";
 import type { ScopedConnectionSummary } from "../shared/connection-model.ts";
 import type {
   ProviderQuotaResetOutcome,
   ProviderQuotaSnapshot,
 } from "../shared/provider-quota.ts";
-import {
-  BRAVE_SEARCH_KEYS_PATH,
-  OPENAI_CREDENTIALS_PATH,
-  OPENAI_OAUTH_PATH,
-  OPENROUTER_CREDENTIALS_PATH,
-  OPENROUTER_OAUTH_PATH,
-} from "../shared/routes.ts";
 import type { WorkspaceList } from "../shared/workspace-model.ts";
 import { RemovalButton } from "./client-controls.tsx";
 import { Collection } from "./collection.tsx";
@@ -21,16 +14,25 @@ import {
 } from "./connection-client.ts";
 import { controllerView } from "./controller-view.ts";
 import { DefaultableActions } from "./defaultable-actions.tsx";
+import { FormField } from "./form-field.tsx";
+import type { ProviderPanelConfiguration } from "./provider-panel-configuration.ts";
 import { ProviderQuota } from "./provider-quota-client.tsx";
 import { renderDebugBoundary } from "./render-debug.tsx";
 import { ScopedConnectionEditor } from "./scoped-connection-editor.tsx";
 import { SessionReassignmentDialogController } from "./session-reassignment-dialog-controller.ts";
 import { SessionReassignmentDialog } from "./session-reassignment-dialog.tsx";
 
-type BrowserProviderId = "brave-search" | "openai" | "openrouter";
+export {
+  BRAVE_SEARCH_PANEL,
+  GENERIC_PANEL,
+  OPENAI_PANEL,
+  OPENROUTER_PANEL,
+  type ProviderPanelConfiguration,
+} from "./provider-panel-configuration.ts";
 
 export interface ProviderCredential extends ScopedConnectionSummary {
   readonly accountId: string | null;
+  readonly baseUrl?: string;
   readonly label: string;
   readonly source: "api_key" | "oauth";
 }
@@ -74,67 +76,6 @@ export function createProviderViewState(
 
 export type ProviderViewState = ProviderViewStateBase;
 
-export interface ProviderPanelConfiguration {
-  readonly accountIdUnavailable: string;
-  readonly connectLabel?: string;
-  readonly credentialsPath: string;
-  readonly description: string;
-  readonly emptyMessage: string;
-  readonly id: BrowserProviderId;
-  readonly keyPlaceholder: string;
-  readonly keyRequiresLabel?: boolean;
-  readonly name: string;
-  readonly oauthPath?: string;
-  readonly removalHelp: string;
-}
-
-export const OPENAI_PANEL: ProviderPanelConfiguration = {
-  accountIdUnavailable: "OpenAI account ID unavailable",
-  connectLabel: "Connect OpenAI account",
-  credentialsPath: OPENAI_CREDENTIALS_PATH,
-  description:
-    "Connect multiple OpenAI accounts with OAuth or save multiple API keys. Credentials stay encrypted in the local database.",
-  emptyMessage:
-    "No OpenAI accounts or keys yet. Connect an account or add as many keys as you need.",
-  id: "openai",
-  keyPlaceholder: "sk-…",
-  name: "OpenAI",
-  oauthPath: OPENAI_OAUTH_PATH,
-  removalHelp:
-    "Removing a credential only removes the local copy. Revoke connected access in OpenAI if you no longer want it to exist there.",
-};
-
-export const OPENROUTER_PANEL: ProviderPanelConfiguration = {
-  accountIdUnavailable: "OpenRouter account ID unavailable",
-  connectLabel: "Connect OpenRouter account",
-  credentialsPath: OPENROUTER_CREDENTIALS_PATH,
-  description:
-    "Connect multiple OpenRouter accounts with OAuth or save multiple API keys. Credentials stay encrypted in the local database.",
-  emptyMessage:
-    "No OpenRouter accounts or keys yet. Connect an account or add as many keys as you need.",
-  id: "openrouter",
-  keyPlaceholder: "sk-or-v1-…",
-  name: "OpenRouter",
-  oauthPath: OPENROUTER_OAUTH_PATH,
-  removalHelp:
-    "Removing a credential only removes the local copy. Revoke OAuth-created keys from OpenRouter if you no longer want them to exist there.",
-};
-
-export const BRAVE_SEARCH_PANEL: ProviderPanelConfiguration = {
-  accountIdUnavailable: "Available to the Brave Search agent skill",
-  credentialsPath: BRAVE_SEARCH_KEYS_PATH,
-  description:
-    "Give agents server-side web search without exposing keys to the browser, model provider, or runner. Keys stay encrypted in the local database.",
-  emptyMessage:
-    "No Brave Search keys yet. Add as many keys as you need; the skill can try another saved key when one is unavailable.",
-  id: "brave-search",
-  keyPlaceholder: "BSA…",
-  keyRequiresLabel: true,
-  name: "Brave Search",
-  removalHelp:
-    "Removing a key clears the encrypted local copy. Revoke it in Brave if it should no longer work outside Q Mush.",
-};
-
 function readCredential(
   value: unknown,
   providerName: string,
@@ -146,6 +87,7 @@ function readCredential(
   }
 
   const accountId = value["accountId"];
+  const baseUrl = value["baseUrl"];
   const id = value["id"];
   const label = value["label"];
   const isDefault = value["isDefault"];
@@ -155,6 +97,7 @@ function readCredential(
 
   if (
     (accountId !== null && typeof accountId !== "string") ||
+    (baseUrl !== undefined && typeof baseUrl !== "string") ||
     typeof id !== "string" ||
     typeof isDefault !== "boolean" ||
     (isGlobal !== undefined && typeof isGlobal !== "boolean") ||
@@ -169,6 +112,7 @@ function readCredential(
 
   return {
     accountId,
+    ...(baseUrl === undefined ? {} : { baseUrl }),
     id,
     isDefault,
     ...(isGlobal === undefined ? {} : { isGlobal }),
@@ -274,11 +218,14 @@ function ProviderCredentialItem(props: CredentialItemProps): JSX.Element {
           <span class="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-2.5 py-1 text-xs font-medium text-cyan-200">
             {props.credential.source === "oauth"
               ? "Connected account"
-              : "API key"}
+              : props.configuration.id === "generic"
+                ? "API endpoint"
+                : "API key"}
           </span>
         </div>
         <p class="path-wrap mt-2 text-sm text-slate-400">
-          {props.credential.accountId ??
+          {props.credential.baseUrl ??
+            props.credential.accountId ??
             props.configuration.accountIdUnavailable}
         </p>
       </div>
@@ -294,7 +241,12 @@ function ProviderCredentialItem(props: CredentialItemProps): JSX.Element {
         controller={props.controller}
         workspaces={props.workspaces}
       />
-      <Show when={props.configuration.id !== "brave-search"}>
+      <Show
+        when={
+          props.configuration.quotaSupported !== false &&
+          props.configuration.id !== "brave-search"
+        }
+      >
         <ProviderQuota
           controller={props.controller}
           credential={props.credential}
@@ -357,6 +309,71 @@ function credentialInputAttributes(disabled: boolean) {
   } as const;
 }
 
+interface CredentialTextInputProps {
+  readonly disabled: boolean;
+  readonly id: string;
+  readonly label: string;
+  readonly maxLength?: number;
+  readonly name: string;
+  readonly placeholder: string;
+  readonly type: "text" | "url";
+}
+
+function CredentialTextInput(props: CredentialTextInputProps): JSX.Element {
+  return (
+    <FormField
+      control={
+        <input
+          {...credentialInputAttributes(props.disabled)}
+          id={props.id}
+          maxLength={props.maxLength}
+          name={props.name}
+          placeholder={props.placeholder}
+          required
+          type={props.type}
+        />
+      }
+      id={props.id}
+      label={props.label}
+    />
+  );
+}
+
+function providerFormLayout(configuration: ProviderPanelConfiguration): string {
+  if (configuration.baseUrlPlaceholder !== undefined) {
+    return "md:grid-cols-2 xl:grid-cols-[minmax(0,0.7fr)_minmax(0,1fr)_minmax(0,1fr)_auto]";
+  }
+  return configuration.keyRequiresLabel === true
+    ? "md:grid-cols-2 xl:grid-cols-[minmax(0,0.7fr)_minmax(0,1fr)_auto]"
+    : "md:grid-cols-[minmax(0,1fr)_auto]";
+}
+
+function credentialTextInputs(
+  configuration: ProviderPanelConfiguration,
+): readonly Omit<CredentialTextInputProps, "disabled">[] {
+  const fields: Omit<CredentialTextInputProps, "disabled">[] = [];
+  if (configuration.keyRequiresLabel === true) {
+    fields.push({
+      id: `${configuration.id}-key-label`,
+      label: "Label",
+      maxLength: 100,
+      name: "label",
+      placeholder: "Primary",
+      type: "text",
+    });
+  }
+  if (configuration.baseUrlPlaceholder !== undefined) {
+    fields.push({
+      id: `${configuration.id}-base-url`,
+      label: "API base URL",
+      name: "baseUrl",
+      placeholder: configuration.baseUrlPlaceholder,
+      type: "url",
+    });
+  }
+  return fields;
+}
+
 export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
   const state = controllerView(props);
   const titleId = (): string => `${props.configuration.id}-title`;
@@ -368,8 +385,9 @@ export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
   const addCredential = async (
     apiKey: string,
     label: string | undefined,
+    baseUrl: string | undefined,
   ): Promise<void> => {
-    await props.controller.add(apiKey, label);
+    await props.controller.add(apiKey, label, baseUrl);
     form()?.reset();
   };
 
@@ -420,16 +438,18 @@ export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
       </div>
 
       <form
-        class={`mt-7 grid min-w-0 gap-3 rounded-2xl border border-white/10 bg-slate-900/70 p-4 ${props.configuration.keyRequiresLabel === true ? "md:grid-cols-2 xl:grid-cols-[minmax(0,0.7fr)_minmax(0,1fr)_auto]" : "md:grid-cols-[minmax(0,1fr)_auto]"}`}
+        class={`mt-7 grid min-w-0 gap-3 rounded-2xl border border-white/10 bg-slate-900/70 p-4 ${providerFormLayout(props.configuration)}`}
         onSubmit={(event) => {
           event.preventDefault();
           const data = new FormData(event.currentTarget);
           const apiKey = data.get("apiKey");
+          const baseUrl = data.get("baseUrl");
           const label = data.get("label");
           if (typeof apiKey === "string") {
             void addCredential(
               apiKey,
               typeof label === "string" ? label : undefined,
+              typeof baseUrl === "string" ? baseUrl : undefined,
             );
           }
         }}
@@ -439,35 +459,21 @@ export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
           `${props.configuration.name} key form`,
         )}
       >
-        <Show when={props.configuration.keyRequiresLabel === true}>
-          <div>
-            <label
-              class="text-sm font-medium text-slate-200"
-              for={`${props.configuration.id}-key-label`}
-            >
-              Label
-            </label>
-            <input
-              {...credentialInputAttributes(state().savePending)}
-              id={`${props.configuration.id}-key-label`}
-              maxLength="100"
-              name="label"
-              placeholder="Primary"
-              required
-              type="text"
-            />
-          </div>
-        </Show>
+        <For each={credentialTextInputs(props.configuration)}>
+          {(field) => (
+            <CredentialTextInput {...field} disabled={state().savePending} />
+          )}
+        </For>
         <div>
           <label class="text-sm font-medium text-slate-200" for={inputId()}>
-            {`${props.configuration.name} API key`}
+            {`${props.configuration.name} API key${props.configuration.keyRequired === false ? " (optional)" : ""}`}
           </label>
           <input
             {...credentialInputAttributes(state().savePending)}
             id={inputId()}
             name="apiKey"
             placeholder={props.configuration.keyPlaceholder}
-            required
+            required={props.configuration.keyRequired !== false}
             type="password"
           />
         </div>
@@ -476,7 +482,11 @@ export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
           disabled={state().savePending}
           type="submit"
         >
-          {state().savePending ? "Adding…" : "Add API key"}
+          {state().savePending
+            ? "Adding…"
+            : props.configuration.id === "generic"
+              ? "Add provider"
+              : "Add API key"}
         </button>
       </form>
 
@@ -520,7 +530,7 @@ export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
 
 export interface ProviderPanelController {
   readonly view: Accessor<ProviderViewState>;
-  add(apiKey: string, label?: string): Promise<void>;
+  add(apiKey: string, label?: string, baseUrl?: string): Promise<void>;
   load(): Promise<void>;
   loadQuota(credentialId: string): Promise<void>;
   consumeQuotaReset(

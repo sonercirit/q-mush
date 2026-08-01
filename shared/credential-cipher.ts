@@ -14,8 +14,8 @@ const BASE64URL_PATTERN = /^[A-Za-z\d_-]+={0,2}$/u;
 
 type NonceGenerator = (size: number) => Uint8Array;
 
-function decodeBase64Url(value: string): Buffer {
-  if (!BASE64URL_PATTERN.test(value)) {
+function decodeBase64Url(value: string, allowEmpty = false): Buffer {
+  if (!(allowEmpty && value.length === 0) && !BASE64URL_PATTERN.test(value)) {
     throw new Error("The encrypted credential is malformed");
   }
 
@@ -50,7 +50,7 @@ export class CredentialCipher {
       parts;
     const nonce = decodeBase64Url(nonceValue);
     const tag = decodeBase64Url(tagValue);
-    const payload = decodeBase64Url(payloadValue);
+    const payload = decodeBase64Url(payloadValue, true);
 
     if (
       version !== CIPHER_VERSION ||

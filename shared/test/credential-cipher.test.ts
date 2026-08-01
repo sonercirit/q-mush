@@ -17,6 +17,8 @@ test("encrypts credentials with authenticated context", () => {
   expect(encrypted.startsWith("v1.")).toBe(true);
   expect(encrypted).not.toContain(API_KEY);
   expect(cipher.open(encrypted, CONTEXT)).toBe(API_KEY);
+  const empty = cipher.seal("", `${CONTEXT}:keyless`);
+  expect(cipher.open(empty, `${CONTEXT}:keyless`)).toBe("");
   expect(() => cipher.open(encrypted, "another-user:credential-id")).toThrow();
   expect(() => cipher.open(`${encrypted}.extra`, CONTEXT)).toThrow("malformed");
 });

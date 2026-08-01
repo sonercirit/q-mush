@@ -31,7 +31,7 @@ import { updateAuthenticatedConnectionScopes } from "./scoped-collection.ts";
 const API_KEY_MAXIMUM_LENGTH = 1024;
 const API_KEY_LABEL_MAXIMUM_LENGTH = 100;
 
-class InvalidProviderApiKeyError extends Error {
+export class InvalidProviderApiKeyError extends Error {
   constructor() {
     super("The provider rejected the API key");
     this.name = "InvalidProviderApiKeyError";
@@ -73,34 +73,38 @@ async function readApiKeyMetadata(
   return readJsonRecord(response, errorMessage);
 }
 
+export interface ProviderCredentialInputDetails {
+  readonly baseUrl?: string;
+  readonly label?: string;
+}
+
 export type ReadCredentialDetails = (
   apiKey: string,
+  details: ProviderCredentialInputDetails,
 ) => Promise<ProviderCredentialDetails>;
 
 export class ProviderCredentialEndpoints {
+  readonly #apiKeyRequired: boolean;
   readonly #auth: GoogleAuth;
   readonly #authenticate: Authenticator;
   readonly #labelRequired: boolean;
   readonly #now: () => number;
-  readonly #readCredentialDetails: (
-    apiKey: string,
-    label: string | undefined,
-  ) => Promise<ProviderCredentialDetails>;
+  readonly #readBaseUrl: ((value: unknown) => string | undefined) | undefined;
+  readonly #readCredentialDetails: ReadCredentialDetails;
   readonly #store: ProviderCredentialStore | undefined;
   readonly #validateApiKey: (apiKey: string) => boolean;
 
   constructor(options: {
+    readonly apiKeyRequired?: boolean;
     readonly auth: GoogleAuth;
     readonly labelRequired?: boolean;
     readonly now: () => number;
+    readonly readBaseUrl?: (value: unknown) => string | undefined;
     readonly readCredentialDetails: ReadCredentialDetails;
-    readonly readLabeledCredentialDetails?: (
-      apiKey: string,
-      label: string,
-    ) => Promise<ProviderCredentialDetails>;
     readonly store: ProviderCredentialStore | undefined;
     readonly validateApiKey?: (apiKey: string) => boolean;
   }) {
+    this.#apiKeyRequired = options.apiKeyRequired ?? true;
     this.#auth = options.auth;
     this.#authenticate = createConfiguredAuthenticator(
       options.auth,
@@ -108,19 +112,8 @@ export class ProviderCredentialEndpoints {
     );
     this.#labelRequired = options.labelRequired ?? false;
     this.#now = options.now;
-    const readLabeledDetails = options.readLabeledCredentialDetails;
-    if (readLabeledDetails !== undefined) {
-      this.#readCredentialDetails = (apiKey, label) => {
-        if (label === undefined) {
-          return Promise.reject(new Error("The credential label is required"));
-        }
-
-        return readLabeledDetails(apiKey, label);
-      };
-    } else {
-      this.#readCredentialDetails = (apiKey) =>
-        options.readCredentialDetails(apiKey);
-    }
+    this.#readBaseUrl = options.readBaseUrl;
+    this.#readCredentialDetails = options.readCredentialDetails;
     this.#store = options.store;
     this.#validateApiKey = options.validateApiKey ?? (() => true);
   }
@@ -161,12 +154,22 @@ export class ProviderCredentialEndpoints {
         return undefined;
       }
 
-      const apiKey = value["apiKey"];
+      const apiKeyValue = value["apiKey"];
+      const apiKey =
+        apiKeyValue === undefined && !this.#apiKeyRequired ? "" : apiKeyValue;
+      const baseUrlValue = value["baseUrl"];
       const label = value["label"];
       const workspaceIds = value["workspaceIds"];
+      const baseUrl =
+        this.#readBaseUrl === undefined
+          ? undefined
+          : this.#readBaseUrl(baseUrlValue);
 
       if (
         typeof apiKey !== "string" ||
+        (this.#readBaseUrl === undefined
+          ? baseUrlValue !== undefined
+          : baseUrl === undefined) ||
         (label !== undefined && typeof label !== "string") ||
         (workspaceIds !== undefined &&
           (!Array.isArray(workspaceIds) ||
@@ -188,6 +191,7 @@ export class ProviderCredentialEndpoints {
 
       return {
         apiKey,
+        ...(baseUrl === undefined ? {} : { baseUrl }),
         label: normalizedLabel,
         workspaceIds:
           workspaceIds === undefined ? undefined : workspaceIds.map(String),
@@ -201,7 +205,7 @@ export class ProviderCredentialEndpoints {
     const apiKey = supplied.apiKey.trim();
 
     if (
-      apiKey.length === 0 ||
+      (this.#apiKeyRequired && apiKey.length === 0) ||
       apiKey.length > API_KEY_MAXIMUM_LENGTH ||
       /\s/u.test(apiKey) ||
       !this.#validateApiKey(apiKey)
@@ -215,7 +219,12 @@ export class ProviderCredentialEndpoints {
     }
 
     try {
-      const details = await this.#readCredentialDetails(apiKey, supplied.label);
+      const details = await this.#readCredentialDetails(apiKey, {
+        ...(supplied.baseUrl === undefined
+          ? {}
+          : { baseUrl: supplied.baseUrl }),
+        ...(supplied.label === undefined ? {} : { label: supplied.label }),
+      });
       const credential = this.#credentialStore().add(
         user.id,
         apiKey,

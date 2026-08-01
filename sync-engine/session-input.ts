@@ -10,7 +10,7 @@ import {
   readAgentSessionToolNames,
 } from "../shared/agent-tools.ts";
 import { isRecord } from "../shared/auth-model.ts";
-import type { ProviderId } from "../shared/provider-credential-store.ts";
+import { isProviderId, type ProviderId } from "../shared/provider-id.ts";
 import { readRunnerExecutionEnvironment } from "../shared/runner-command-broker.ts";
 import {
   readIdentifier,
@@ -31,7 +31,7 @@ export type CreateSessionInput = Omit<
 > & { readonly workspaceId?: string };
 
 export function readProvider(value: unknown): ProviderId | undefined {
-  return value === "openai" || value === "openrouter" ? value : undefined;
+  return isProviderId(value) ? value : undefined;
 }
 
 function promptInput(

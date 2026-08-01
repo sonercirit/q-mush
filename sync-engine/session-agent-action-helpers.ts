@@ -1,6 +1,9 @@
 import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
 import type { AppDatabase } from "../shared/database.ts";
-import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
+import type {
+  ProviderCredentialAccess,
+  ProviderId,
+} from "../shared/provider-credential-store.ts";
 import type {
   AgentSessionDetail,
   RestartHandoffOperation,
@@ -34,7 +37,7 @@ interface SessionAgentMetadata {
 export interface SessionAgentActionDependencies {
   readonly database: AppDatabase;
   readonly discoverModels: (
-    provider: "openai" | "openrouter",
+    provider: ProviderId,
     credential: ProviderCredentialAccess,
   ) => Promise<AgentModelCatalog>;
   readonly store: SessionStore;

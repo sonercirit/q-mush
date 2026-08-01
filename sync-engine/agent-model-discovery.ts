@@ -19,6 +19,7 @@ import {
   agentProviderRequestHeaders,
   type AgentProviderCredential,
 } from "./agent-model.ts";
+import { genericProviderEndpoint } from "./generic-provider-url.ts";
 
 const OPENAI_MODELS_URL = "https://api.openai.com/v1/models";
 const OPENAI_CODEX_MODELS_URL = "https://chatgpt.com/backend-api/codex/models";
@@ -59,15 +60,21 @@ interface PrioritizedModel {
   readonly priority: number;
 }
 
-class AgentModelDiscoveryError extends Error {
-  constructor(message: string) {
+export class AgentModelDiscoveryError extends Error {
+  readonly status: number | undefined;
+
+  constructor(message: string, status?: number) {
     super(message);
     this.name = "AgentModelDiscoveryError";
+    this.status = status;
   }
 }
 
-function modelDiscoveryError(message: string): AgentModelDiscoveryError {
-  return new AgentModelDiscoveryError(message);
+function modelDiscoveryError(
+  message: string,
+  status?: number,
+): AgentModelDiscoveryError {
+  return new AgentModelDiscoveryError(message, status);
 }
 
 export function safeAgentModelDiscoveryError(error: unknown): string {
@@ -379,6 +386,27 @@ function supportsOpenAiAgentLoop(modelId: string): boolean {
   );
 }
 
+function readGenericCatalog(value: unknown): AgentModelCatalog {
+  const models = providerModelList(value, "data").flatMap((item) => {
+    if (!isRecord(item)) {
+      return [];
+    }
+    const reasoning = item["reasoning"];
+    const efforts = reasoningEfforts(
+      item["supported_reasoning_levels"] ??
+        item["supported_reasoning_efforts"] ??
+        (isRecord(reasoning) ? reasoning["supported_efforts"] : undefined),
+    );
+    const option = modelOption(item, "id", "name", efforts, [
+      "context_window",
+      "context_window_size",
+      "context_length",
+    ]);
+    return option === undefined ? [] : [option];
+  });
+  return createCatalog(models);
+}
+
 function readOpenAiCatalog(value: unknown): AgentModelCatalog {
   const models = providerModelList(value, "data")
     .map((item) =>
@@ -401,6 +429,7 @@ async function readProviderResponse(response: Response): Promise<unknown> {
   if (!response.ok) {
     throw modelDiscoveryError(
       `Model discovery failed with status ${String(response.status)}`,
+      response.status,
     );
   }
 
@@ -456,7 +485,9 @@ function discoveryRequest(
     ? `${OPENAI_CODEX_MODELS_URL}?client_version=${MODEL_CLIENT_VERSION}`
     : provider === "openai"
       ? OPENAI_MODELS_URL
-      : OPENROUTER_MODELS_URL;
+      : provider === "openrouter"
+        ? OPENROUTER_MODELS_URL
+        : genericProviderEndpoint(credential.baseUrl, "models");
   const headers = agentProviderRequestHeaders(
     provider,
     credential,
@@ -472,7 +503,7 @@ function discoveryRequest(
 
 export async function discoverAgentModels(
   provider: ProviderId,
-  credential: ProviderCredentialAccess,
+  credential: AgentProviderCredential,
   fetch: AgentModelDiscoveryFetch = (request) => globalThis.fetch(request),
 ): Promise<AgentModelCatalog> {
   try {
@@ -483,11 +514,17 @@ export async function discoverAgentModels(
     if (provider === "openrouter") {
       return readOpenRouterCatalog(value);
     }
+    if (provider === "generic") {
+      return readGenericCatalog(value);
+    }
 
     return credential.source === "oauth"
       ? readCodexCatalog(value)
       : readOpenAiCatalog(value);
   } catch (error) {
+    if (error instanceof AgentModelDiscoveryError) {
+      throw error;
+    }
     throw modelDiscoveryError(safeAgentModelDiscoveryError(error));
   }
 }

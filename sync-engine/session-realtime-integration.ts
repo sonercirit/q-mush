@@ -28,6 +28,7 @@ import {
 import {
   readSessionCredential,
   type SessionCredentialReaders,
+  type SessionCredentialSelection,
 } from "./session-credential-access.ts";
 import type { SessionCredentialOperation } from "./session-credential-operation.ts";
 import { requiredSessionDetail } from "./session-detail.ts";
@@ -138,14 +139,7 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
     };
   }
 
-  async #credential(
-    userId: string,
-    selection: {
-      readonly credentialId: string;
-      readonly provider: ProviderId;
-      readonly workspaceId?: string;
-    },
-  ) {
+  async #credential(userId: string, selection: SessionCredentialSelection) {
     try {
       const credential = await readSessionCredential(
         this.#dependencies.providers,

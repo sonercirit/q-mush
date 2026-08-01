@@ -7,7 +7,7 @@ import {
   readOpenRouterProviderTag,
 } from "./agent-configuration.ts";
 import { isRecord } from "./auth-model.ts";
-import { isProviderId, type ProviderId } from "./provider-credential-store.ts";
+import { isProviderId, type ProviderId } from "./provider-id.ts";
 import { readIdentifier } from "./validation.ts";
 
 export interface AttachmentFallbackSelection {

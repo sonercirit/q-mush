@@ -16,7 +16,7 @@ import {
   type PendingAskQuestions,
 } from "../shared/ask-questions.ts";
 import { isRecord, readNullableString } from "../shared/auth-model.ts";
-import type { ProviderId } from "../shared/provider-credential-store.ts";
+import { isProviderId } from "../shared/provider-id.ts";
 import {
   readProviderModelPricing,
   type ProviderModelPricing,
@@ -191,16 +191,6 @@ function readStatus(value: unknown): AgentSessionStatus | undefined {
   }
 }
 
-function readProvider(value: unknown): ProviderId | undefined {
-  switch (value) {
-    case "openai":
-    case "openrouter":
-      return value;
-    default:
-      return undefined;
-  }
-}
-
 const RESTART_HANDOFF_KEYS = new Set([
   "executionGeneration",
   "operation",
@@ -291,7 +281,8 @@ function readSummary(value: unknown): AgentSessionSummary {
     value["pendingQuestions"] === null
       ? null
       : readPendingAskQuestions(value["pendingQuestions"]);
-  const provider = readProvider(value["provider"]);
+  const providerValue = value["provider"];
+  const provider = isProviderId(providerValue) ? providerValue : undefined;
   const openRouterProviderTagValue = value["openRouterProviderTag"];
   const openRouterProviderTag =
     provider === "openrouter"

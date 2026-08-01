@@ -3,7 +3,7 @@ import {
   readOpenRouterProviderTag,
 } from "./agent-configuration.ts";
 import { isRecord } from "./auth-model.ts";
-import { isProviderId, type ProviderId } from "./provider-credential-store.ts";
+import { isProviderId, type ProviderId } from "./provider-id.ts";
 import { readBoundedString, readNonNegativeSafeInteger } from "./validation.ts";
 
 export const SESSION_PROVIDER_CACHE_WARNING =

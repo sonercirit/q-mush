@@ -5,6 +5,7 @@ import { createPromptViewState } from "../../solid/prompt-state.ts";
 import {
   BRAVE_SEARCH_PANEL,
   createProviderViewState,
+  GENERIC_PANEL,
   OPENAI_PANEL,
   OPENROUTER_PANEL,
   type ProviderPanelConfiguration,
@@ -49,6 +50,7 @@ test("keeps the prompt bank in the shared workspace composition", () => {
         )
       }
       braveSearch={providerController(BRAVE_SEARCH_PANEL)}
+      generic={providerController(GENERIC_PANEL)}
       logout={() => Promise.resolve()}
       logoutPending={false}
       openAi={providerController(OPENAI_PANEL)}

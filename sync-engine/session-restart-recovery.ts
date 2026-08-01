@@ -1,4 +1,7 @@
-import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
+import type {
+  ProviderCredentialAccess,
+  ProviderId,
+} from "../shared/provider-credential-store.ts";
 import type {
   AgentSessionDetail,
   RestartHandoff,
@@ -18,7 +21,7 @@ import {
 
 export interface RestartCredentialSelection {
   readonly credentialId: string;
-  readonly provider: "openai" | "openrouter";
+  readonly provider: ProviderId;
   readonly workspaceId: string;
 }
 

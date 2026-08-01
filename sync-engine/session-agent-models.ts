@@ -2,7 +2,10 @@ import type { AgentFile } from "../shared/agent-file.ts";
 import type { AgentModel } from "../shared/agent-loop.ts";
 import { createAgentSystemPrompt } from "../shared/agent-prompt.ts";
 import { createUuidV7 } from "../shared/ids.ts";
-import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
+import type {
+  ProviderCredentialAccess,
+  ProviderId,
+} from "../shared/provider-credential-store.ts";
 import type { ProviderModelPricing } from "../shared/provider-model-pricing.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import {
@@ -56,7 +59,7 @@ export function createFallbackModel(
     readonly model: string;
     readonly openRouterProviderTag?: string | null;
     readonly prompt: string | null;
-    readonly provider: "openai" | "openrouter";
+    readonly provider: ProviderId;
     readonly providerPricing: ProviderModelPricing | null;
   },
 ): AgentModel {

@@ -171,10 +171,11 @@ class BraveSearchSkillIntegration implements BraveSearchSkill {
       auth,
       labelRequired: true,
       now: dependencies.now ?? Date.now,
-      readCredentialDetails: () =>
-        Promise.resolve({ accountId: null, label: "Brave Search key" }),
-      readLabeledCredentialDetails: (_apiKey, label) =>
-        Promise.resolve({ accountId: null, label }),
+      readCredentialDetails: (_apiKey, { label }) =>
+        Promise.resolve({
+          accountId: null,
+          label: label ?? "Brave Search key",
+        }),
       store: this.#store,
       validateApiKey: (apiKey) => apiKey.startsWith("BSA"),
     });

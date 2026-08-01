@@ -4,6 +4,7 @@ import type { SessionCredentialOption } from "./session-credential-option.ts";
 export function credentialOptions(
   openAi: ProviderViewState,
   openRouter: ProviderViewState,
+  generic?: ProviderViewState,
 ): readonly SessionCredentialOption[] {
   return [
     ...(openAi.credentials ?? []).map((credential) => ({
@@ -13,6 +14,10 @@ export function credentialOptions(
     ...(openRouter.credentials ?? []).map((credential) => ({
       credential,
       provider: "openrouter" as const,
+    })),
+    ...(generic?.credentials ?? []).map((credential) => ({
+      credential,
+      provider: "generic" as const,
     })),
   ];
 }

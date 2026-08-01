@@ -5,7 +5,10 @@ import {
 import type { AgentModelOption } from "../shared/agent-configuration.ts";
 import type { AgentModelTurn } from "../shared/agent-loop.ts";
 import { modelSupportsAttachmentModality } from "../shared/attachment-fallback.ts";
-import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
+import type {
+  ProviderCredentialAccess,
+  ProviderId,
+} from "../shared/provider-credential-store.ts";
 import type { ProviderModelPricing } from "../shared/provider-model-pricing.ts";
 import {
   createFallbackModel,
@@ -16,7 +19,7 @@ import type { AttachmentFallbackRuntimeResources } from "./session-model-resourc
 export interface AttachmentExplanation {
   readonly content: string;
   readonly model: string;
-  readonly provider: "openai" | "openrouter";
+  readonly provider: ProviderId;
   readonly providerPricing: ProviderModelPricing | null;
   readonly usage: Pick<AgentModelTurn, "costUsd" | "tokenUsage">;
 }
@@ -27,7 +30,7 @@ export async function explainAttachment(
     readonly currentCredential: ProviderCredentialAccess;
     readonly currentModel: AgentModelOption;
     readonly currentModelId: string;
-    readonly currentProvider: "openai" | "openrouter";
+    readonly currentProvider: ProviderId;
     readonly currentProviderPricing: ProviderModelPricing | null;
     readonly currentProviderTag: string | null;
     readonly factory: AgentModelFactory;

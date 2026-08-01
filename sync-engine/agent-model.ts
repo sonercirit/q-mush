@@ -30,6 +30,7 @@ import type {
   AgentProviderCredential,
 } from "./agent-model-options.ts";
 import type { ModelRequestSleep } from "./agent-model-retry.ts";
+import { genericProviderEndpoint } from "./generic-provider-url.ts";
 import { readOpenAiOAuthCredential } from "./openai-credential.ts";
 import {
   providerChatMessage,
@@ -79,9 +80,14 @@ function endpoint(
     return OPENAI_CODEX_RESPONSES_URL;
   }
 
-  return provider === "openai"
-    ? OPENAI_COMPLETIONS_URL
-    : OPENROUTER_COMPLETIONS_URL;
+  switch (provider) {
+    case "openai":
+      return OPENAI_COMPLETIONS_URL;
+    case "openrouter":
+      return OPENROUTER_COMPLETIONS_URL;
+    case "generic":
+      return genericProviderEndpoint(credential.baseUrl, "chat/completions");
+  }
 }
 
 function accessToken(
@@ -109,14 +115,17 @@ export function agentProviderRequestHeaders(
 ): Headers {
   const headers = new Headers({
     accept,
-    authorization: `Bearer ${accessToken(provider, credential)}`,
     "content-type": "application/json",
   });
+  const token = accessToken(provider, credential);
+  if (token.length > 0) {
+    headers.set("authorization", `Bearer ${token}`);
+  }
 
   if (provider === "openrouter") {
     headers.set("http-referer", "https://q-mush.local");
     headers.set("x-title", "Q Mush");
-  } else if (credential.source === "oauth") {
+  } else if (usesCodexOAuth(provider, credential)) {
     if (
       accept === "text/event-stream" ||
       accept === "application/websocket-events"

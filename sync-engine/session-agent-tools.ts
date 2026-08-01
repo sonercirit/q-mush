@@ -8,7 +8,7 @@ import {
   readAgentSessionToolNames,
   type SessionAgentToolName,
 } from "../shared/agent-tools.ts";
-import { isProviderId } from "../shared/provider-credential-store.ts";
+import { isProviderId } from "../shared/provider-id.ts";
 import {
   failedRunnerCommandResult,
   readRunnerExecutionEnvironment,

@@ -28,7 +28,14 @@ export interface ProviderHttpOptions {
 }
 
 function providerName(provider: ProviderId): string {
-  return provider === "openai" ? "OpenAI" : "OpenRouter";
+  switch (provider) {
+    case "openai":
+      return "OpenAI";
+    case "openrouter":
+      return "OpenRouter";
+    case "generic":
+      return "Generic provider";
+  }
 }
 
 function errorDetail(body: string): string {

@@ -18,6 +18,7 @@ export function agentModelOpenRouterProviderRouting(
 
 export interface AgentProviderCredential {
   readonly accountId: string | null;
+  readonly baseUrl?: string;
   readonly secret: string;
   readonly source: ProviderCredentialSource;
 }

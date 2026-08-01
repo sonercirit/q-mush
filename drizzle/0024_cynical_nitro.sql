@@ -1,0 +1,3 @@
+DROP INDEX `provider_credentials_user_model_default_unique`;--> statement-breakpoint
+ALTER TABLE `provider_credentials` ADD `base_url` text;--> statement-breakpoint
+CREATE UNIQUE INDEX `provider_credentials_user_model_default_unique` ON `provider_credentials` (`user_id`) WHERE "provider_credentials"."provider" IN ('openai', 'openrouter', 'generic') AND "provider_credentials"."is_default" AND NOT "provider_credentials"."is_deleted";

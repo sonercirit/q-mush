@@ -3,6 +3,7 @@ import {
   ASK_QUESTIONS_TOOL_NAME,
 } from "./ask-questions-tool.ts";
 import { PAGE_FETCH_TOOL_DEFINITION } from "./page-fetch.ts";
+import { MODEL_PROVIDER_IDS } from "./provider-id.ts";
 
 const NUMBER_PARAMETER = { type: "number" } as const;
 const STRING_PARAMETER = { type: "string" } as const;
@@ -206,7 +207,7 @@ const SESSION_AGENT_TOOLS = [
       },
       provider: {
         description: "Model provider",
-        enum: ["openai", "openrouter"],
+        enum: MODEL_PROVIDER_IDS,
         type: "string",
       },
       reasoningEffort: {

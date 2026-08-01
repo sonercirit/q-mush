@@ -14,6 +14,7 @@ import {
   modelCatalogOptions,
   modelCredentialValue,
   reasoningModelOptions,
+  type SessionModelDiscoverer,
 } from "./session-model-options.ts";
 
 export interface SessionModelPickerSelection {
@@ -51,10 +52,9 @@ export function initialSessionModelPickerSelection(
   };
 }
 
-function sessionCredentialValueFromDetail(detail: {
-  readonly credentialId: string;
-  readonly provider: "openai" | "openrouter";
-}): string {
+function sessionCredentialValueFromDetail(
+  detail: Pick<AgentSessionSummary, "credentialId" | "provider">,
+): string {
   return modelCredentialValue({
     credentialId: detail.credentialId,
     provider: detail.provider,
@@ -195,10 +195,7 @@ function createSessionModelEditorActions(options: {
 
 export interface SessionModelPickerSelectionProps {
   readonly credentials: readonly SessionCredentialOption[];
-  readonly onDiscoverModels: (
-    provider: "openai" | "openrouter",
-    credentialId: string,
-  ) => Promise<AgentModelCatalog | undefined>;
+  readonly onDiscoverModels: SessionModelDiscoverer;
 }
 
 interface SessionModelDiscoveryState {

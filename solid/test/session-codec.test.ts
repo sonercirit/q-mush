@@ -69,6 +69,12 @@ test("reads durable pending-input request identities", () => {
   ).toThrow("invalid pending session input");
 });
 
+test("reads generic provider sessions", () => {
+  expect(readSessionDetail({ ...DETAIL, provider: "generic" }).provider).toBe(
+    "generic",
+  );
+});
+
 test("reads persisted session error messages", () => {
   const error = {
     content: "The provider connection failed",
