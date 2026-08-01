@@ -170,7 +170,7 @@ function runnerActivity(runner: RunnerSummary): string {
 interface RunnerItemProps {
   readonly controller: RunnerPanelController;
   readonly runner: RunnerSummary;
-  readonly state: RunnerViewState;
+  readonly state: Accessor<RunnerViewState>;
   readonly workspaces?: Accessor<WorkspaceList | undefined>;
 }
 
@@ -185,8 +185,8 @@ function RunnerActions(props: RunnerItemProps): JSX.Element {
       onSetDefault={() => {
         void props.controller.setDefault(props.runner.id);
       }}
-      removing={props.state.removingId === props.runner.id}
-      settingDefault={props.state.settingDefaultId === props.runner.id}
+      removing={props.state().removingId === props.runner.id}
+      settingDefault={props.state().settingDefaultId === props.runner.id}
     />
   );
 }
@@ -326,7 +326,7 @@ function RunnerList(props: RunnerControllerProps): JSX.Element {
         const item: RunnerItemProps = {
           controller: props.controller,
           runner,
-          state: state(),
+          state,
           ...optionalWorkspaces(props.workspaces),
         };
 

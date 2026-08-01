@@ -236,6 +236,24 @@ export function createRealtimeIntegration(
       return false;
     }
   };
+  options.runners.onRemoved((userId, runnerId) => {
+    const socket = options.hub.currentRunner(runnerId);
+    if (socket !== undefined) {
+      options.hub.setRunner(runnerId, socket, false);
+      const data: unknown = Reflect.get(socket, "data");
+      if (isRunnerSocketData(data)) {
+        data.fenced = true;
+        data.runner = undefined;
+        data.usable = false;
+      }
+      try {
+        socket.close(1000, "Runner removed");
+      } catch {
+        // Hub authority already fences the removed runner.
+      }
+    }
+    publishRunnerActivity(userId);
+  });
   options.sessions.onChange((userId, sessionId) => {
     for (const workspaceId of options.hub.userWorkspaces(userId)) {
       const session = options.sessions.detailForUser(
