@@ -151,7 +151,11 @@ describe("session runtimes", () => {
 
     const drain = runtimes.drain(runnerScope(), "durable-before-await");
     expect(persisted).toEqual([
-      { requestedBy: "runner", restartId: "durable-before-await" },
+      {
+        boundary: "handoff",
+        requestedBy: "runner",
+        restartId: "durable-before-await",
+      },
     ]);
     finish?.();
     await drain;
@@ -164,6 +168,7 @@ describe("session runtimes", () => {
 
     const drain = runtimes.drain(runnerScope(), "restart-1");
     expect(active[0].request()).toEqual({
+      boundary: "handoff",
       requestedBy: "runner",
       restartId: "restart-1",
     });
@@ -190,6 +195,7 @@ describe("session runtimes", () => {
 
     const drain = runtimes.drain({ kind: "server" }, "server-restart");
     const serverRequest: RestartRequest = {
+      boundary: "handoff",
       requestedBy: "server",
       restartId: "server-restart",
     };
@@ -223,6 +229,7 @@ describe("session runtimes", () => {
     runtime.finish();
     await Promise.all(drains);
     expect(runtimes.drainRequest({ kind: "server" })).toEqual({
+      boundary: "step",
       requestedBy: "server",
       restartId: "server-restart",
     });
@@ -244,6 +251,7 @@ describe("session runtimes", () => {
       runtimes.restoreRunner("runner-1", "restart-conflict"),
     ).toThrow("different restart");
     expect(runtimes.drainRequest(runnerScope())).toEqual({
+      boundary: "handoff",
       requestedBy: "runner",
       restartId: "restart-restored",
     });

@@ -5,7 +5,10 @@ export type RestartScope =
   | { readonly kind: "server" }
   | { readonly kind: "runner"; readonly runnerId: string };
 
+export type RestartBoundary = "handoff" | "step";
+
 export interface RestartRequest {
+  readonly boundary: RestartBoundary;
   readonly requestedBy: RestartHandoffRequester;
   readonly restartId: string;
 }
@@ -14,6 +17,7 @@ const BLOCKED_RUNNER_RESTART = Symbol("blocked runner restart");
 type RunnerRestartGate = RestartRequest | typeof BLOCKED_RUNNER_RESTART;
 
 interface ActiveSessionRuntime {
+  readonly boundary: RestartBoundary;
   readonly controller: AbortController;
   readonly generation: number;
   persistRestart: ((request: RestartRequest) => void) | undefined;
@@ -37,6 +41,7 @@ function restartRequest(
   restartId: string,
 ): RestartRequest {
   return {
+    boundary: scope.kind === "server" ? "step" : "handoff",
     requestedBy: scope.kind === "server" ? "server" : "runner",
     restartId,
   };
@@ -147,7 +152,10 @@ export class SessionRuntimes {
       scopeIncludes(scope, runnerId),
     );
     for (const runtime of affected) {
-      runtime.restartRequest ??= request;
+      runtime.restartRequest ??= {
+        ...request,
+        boundary: runtime.boundary,
+      };
       runtime.persistRestart?.(runtime.restartRequest);
     }
     await Promise.allSettled(affected.map(({ settled }) => settled));
@@ -157,12 +165,19 @@ export class SessionRuntimes {
     sessionId: string,
     runnerId: string,
     generationOrRun: number | SessionRuntime,
+    boundaryOrRun?: RestartBoundary | SessionRuntime,
     maybeRun?: SessionRuntime,
   ): boolean {
     const generation =
       typeof generationOrRun === "number" ? generationOrRun : 0;
+    const boundary =
+      typeof boundaryOrRun === "string" ? boundaryOrRun : "handoff";
     const run =
-      typeof generationOrRun === "number" ? maybeRun : generationOrRun;
+      typeof generationOrRun === "number"
+        ? typeof boundaryOrRun === "function"
+          ? boundaryOrRun
+          : maybeRun
+        : generationOrRun;
     if (
       run === undefined ||
       !this.accepts(runnerId) ||
@@ -172,6 +187,7 @@ export class SessionRuntimes {
     }
     const controller = new AbortController();
     const runtime: ActiveSessionRuntime = {
+      boundary,
       controller,
       generation,
       persistRestart: undefined,

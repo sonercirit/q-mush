@@ -92,14 +92,6 @@ type WorkspaceResponseAction<Result extends Promise<Response> | Response> = (
 export abstract class SessionIntegrationApi implements SessionDetailReader {
   protected abstract readonly resources: SessionIntegrationApiResources;
 
-  #whileRunning(
-    action: () => Promise<Response> | Response,
-  ): Promise<Response> | Response {
-    return this.resources.runtimes.draining
-      ? createApiError("server_restarting", 503)
-      : action();
-  }
-
   #forWorkspace(
     request: Request,
     action: WorkspaceResponseAction<Response>,
@@ -131,9 +123,7 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
             sessions: this.resources.store.list(user.id, workspaceId),
           });
         case "POST":
-          return this.#whileRunning(() =>
-            this.resources.createForUser(request, user, workspaceId),
-          );
+          return this.resources.createForUser(request, user, workspaceId);
         default:
           return createMethodNotAllowedResponse("GET, POST");
       }
@@ -146,7 +136,6 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
       user: AuthenticatedUser,
       workspaceId: string,
     ) => Response | Promise<Response>,
-    requireRunning = false,
   ): Promise<Response> {
     return Promise.resolve(
       this.resources.requests.postForUser(request, (user) => {
@@ -157,17 +146,15 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
             this.resources.workspaces,
             (workspaceId) => action(user, workspaceId),
           );
-        return requireRunning ? this.#whileRunning(run) : run();
+        return run();
       }),
     );
   }
 
   #queueWithoutPrompt(request: Request, sessionId: string): Promise<Response> {
     const queue = this.resources.queueForUser;
-    return this.#postForWorkspace(
-      request,
-      (user, workspaceId) => queue(user, sessionId, workspaceId),
-      true,
+    return this.#postForWorkspace(request, (user, workspaceId) =>
+      queue(user, sessionId, workspaceId),
     );
   }
 
@@ -182,26 +169,20 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
   }
 
   message(request: Request, sessionId: string): Promise<Response> {
+    const run = async (user: AuthenticatedUser): Promise<Response> => {
+      const input = await parseJsonRequest(request, readPrompt);
+      return input === undefined
+        ? createApiError("invalid_request", 400)
+        : withRequestSessionWorkspace(
+            request,
+            user,
+            this.resources.workspaces,
+            (workspaceId) =>
+              this.resources.queueForUser(user, sessionId, workspaceId, input),
+          );
+    };
     return Promise.resolve(
-      this.resources.requests.authenticate(request, "POST", (user) =>
-        this.#whileRunning(async () => {
-          const input = await parseJsonRequest(request, readPrompt);
-          return input === undefined
-            ? createApiError("invalid_request", 400)
-            : withRequestSessionWorkspace(
-                request,
-                user,
-                this.resources.workspaces,
-                (workspaceId) =>
-                  this.resources.queueForUser(
-                    user,
-                    sessionId,
-                    workspaceId,
-                    input,
-                  ),
-              );
-        }),
-      ),
+      this.resources.requests.authenticate(request, "POST", run),
     );
   }
 

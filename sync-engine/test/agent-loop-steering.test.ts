@@ -125,6 +125,29 @@ describe("agent-loop steering boundaries", () => {
     });
   });
 
+  test("keeps steering queued when a step handoff wins the boundary", async () => {
+    const requests: unknown[][] = [];
+    const queuedSteering = {
+      content: "Wait for restart",
+      kind: "steer" as const,
+    };
+    const pending = queuedInputs([queuedSteering]);
+    const result = await runAgentLoop({
+      executeTool: () => Promise.resolve("Tool output"),
+      handoffRequested: () => true,
+      initialMessages: [{ content: "Initial task", role: "user" }],
+      model: recordingModel(requests, () =>
+        Promise.resolve(toolStep("Working.")),
+      ),
+      recordMessage: () => undefined,
+      takeSteeringMessages: pending.takeSteeringMessages,
+    });
+
+    expect(result.status).toBe("handoff");
+    expect(requests).toHaveLength(0);
+    expect(pending.pending()).toEqual([queuedSteering]);
+  });
+
   test("keeps follow-ups queued at a step boundary", async () => {
     const requests: unknown[][] = [];
     const queuedFollowUp = { content: "Next turn", kind: "follow_up" } as const;

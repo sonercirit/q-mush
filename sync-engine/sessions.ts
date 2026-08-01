@@ -33,7 +33,6 @@ import { startManualSessionCompaction } from "./session-compaction-actions.ts";
 import {
   createValidatedSession,
   type SessionLaunchBoundary,
-  type SessionNotification,
 } from "./session-creation.ts";
 import {
   readSessionCredential,
@@ -61,6 +60,10 @@ import {
 } from "./session-integration-api.ts";
 import type { SessionIntegrationFactory } from "./session-integration-factory.ts";
 import type { SessionIntegration } from "./session-integration.ts";
+import {
+  recoverInterruptedSessions,
+  reportPendingSpawns,
+} from "./session-interrupted-recovery.ts";
 import { SessionLauncher } from "./session-launcher.ts";
 import { sessionMetadata } from "./session-provider-selection.ts";
 import {
@@ -233,16 +236,16 @@ class DrizzleSessionIntegration
       toolUpdates: this.#sessionMutationControl(),
       ...this.#launchBoundary(),
     });
+    const recover = (runnerId?: string): void => {
+      recoverInterruptedSessions(
+        { actions: this.#actions, now: this.#now, store: this.#store },
+        runnerId,
+      );
+    };
     this.#restartCoordinator = new SessionRestartCoordinator({
       launch: this.#launch,
       providers: this.#providers,
-      recoverInterrupted: (runnerId) => {
-        this.#actions.reportAll(
-          this.#store
-            .failInterrupted(this.#now())
-            .filter(({ detail }) => detail.runnerId === runnerId),
-        );
-      },
+      recoverInterrupted: recover,
       restart: this.#restart,
       runnerIsAvailable: this.#runnerIsAvailable,
       ...this.#sessionState(),
@@ -253,13 +256,16 @@ class DrizzleSessionIntegration
     this.#runners.onRemoved((userId, runnerId) =>
       this.#runnerRemoval.removed(userId, runnerId),
     );
-    this.#actions.reportAll(this.#store.failInterrupted(this.#now()));
+    recover();
     this.#restartCoordinator.restoreDurableRunnerGates();
     this.#restartCoordinator.recover();
+    reportPendingSpawns({
+      actions: this.#actions,
+      draining: this.#restart.draining,
+      store: this.#store,
+    });
     void recoverAnsweredQuestions(this.#questionActions);
-    for (const userId of this.#store.queuedSessionOwnerIds()) {
-      this.#launchQueuedSessions(userId);
-    }
+    this.#store.queuedSessionOwnerIds().forEach(this.#launchQueuedSessions);
   }
 
   protected get resources(): SessionIntegrationApiResources {
@@ -327,11 +333,7 @@ class DrizzleSessionIntegration
     };
   }
 
-  #sessionState(): {
-    readonly notify: SessionNotification;
-    readonly now: typeof Date.now;
-    readonly store: SessionStore;
-  } {
+  #sessionState() {
     return { notify: this.#notify, now: this.#now, store: this.#store };
   }
 

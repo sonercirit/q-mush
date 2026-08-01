@@ -17,10 +17,7 @@ import {
   type SessionModelRuntimeResources,
 } from "./session-model-runtime.ts";
 import type { SessionRestartRequester } from "./session-restart-requester.ts";
-import type {
-  RestartHandoffIdentity,
-  RestartHandoffRequester,
-} from "./session-restart-store.ts";
+import type { RestartHandoffIdentity } from "./session-restart-store.ts";
 import type { RestartRequest } from "./session-runtime.ts";
 import { sessionHasStatus } from "./session-status.ts";
 import type { SessionStore } from "./session-store.ts";
@@ -55,13 +52,17 @@ function identity(
       };
 }
 
+function persistedRestartRequest(request: RestartRequest): RestartRequest {
+  return request.boundary === "step"
+    ? { ...request, boundary: "handoff" }
+    : request;
+}
+
 function pauseForRestart(
   options: RunPersistedSessionOptions,
-  handoff: {
-    readonly requestedBy: RestartHandoffRequester;
-    readonly restartId: string;
-  },
+  request: RestartRequest,
 ): boolean {
+  const handoff = persistedRestartRequest(request);
   return options.store.pauseRunningForRestart(
     { generation: options.detail.generation, sessionId: options.detail.id },
     handoff.requestedBy,
@@ -155,6 +156,18 @@ function persistHandoffOutcome(options: RunPersistedSessionOptions): void {
   options.notify(options.userId, options.detail.id);
 }
 
+function finishAtRestartBoundary(
+  options: RunPersistedSessionOptions,
+  claimedIdentity: RestartHandoffIdentity | undefined,
+): void {
+  const request = options.restartRequest();
+  if (request?.boundary === "step") {
+    finishRecoveredSession(options, claimedIdentity);
+  } else {
+    persistHandoffOutcome(options);
+  }
+}
+
 export async function runPersistedSession(
   options: RunPersistedSessionOptions,
 ): Promise<void> {
@@ -205,7 +218,11 @@ export async function runPersistedSession(
       return;
     }
     if (outcome === "handoff") {
-      persistHandoffOutcome(options);
+      if (options.restartRequest() === undefined) {
+        persistRestartHandoff(options, false);
+        return;
+      }
+      finishAtRestartBoundary(options, claimedIdentity);
       return;
     }
     finishRecoveredSession(options, claimedIdentity);

@@ -348,6 +348,8 @@ export async function runSessionAgent(
     handoffController.signal,
   ]);
   const stepTools = new Set<AgentSessionToolName>(runtime.detail.tools);
+  const stepBoundaryRequested = (): boolean =>
+    runtime.detail.restartHandoff === null && runtime.restartHandoffRequested();
   const currentToolNames = (): readonly AgentSessionToolName[] | undefined =>
     currentExecutionTools({
       current: runtime.currentTools?.(),
@@ -529,7 +531,7 @@ export async function runSessionAgent(
         ? { initialContextTokens: runtime.detail.currentContextTokens }
         : {}),
       initialMessages: sessionConversation(runtime),
-      handoffRequested: runtime.restartHandoffRequested,
+      handoffRequested: stepBoundaryRequested,
       maxContextTokens: runtime.detail.maxContextTokens,
       model: models.agent,
       now: runtime.now,

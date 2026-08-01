@@ -50,13 +50,13 @@ Living project memory.
   in memory by Vite. Browser state, session updates, and runner work use
   authenticated WebSockets at `/api/realtime` and `/api/runner/realtime`; there
   is no polling or SSE application transport. Because agents may modify this
-  repository through the running app, `bun run dev` does not restart for source
-  edits. `scripts/dev.ts` watches only the ignored
+  repository through the running app, `bun run dev` watches production source
+  and local `.env` files, coalesces change bursts, and requests the same ignored
   `data/development-server.restart` trigger written by `bun run dev:restart`.
   `sync-engine/runner-executable.ts` fingerprints the runner source and
   compiler, builds in a private temporary directory, caches it in memory, and
-  serves it from `/runner/executable`. Triggered development restarts reject new
-  agent work, let active sessions finish, then replace the server process, so a
+  serves it from `/runner/executable`. Development restarts queue new agent
+  work, let each active step finish, then replace the server process, so a
   session can safely request its own restart. Textual response bodies are
   precompressed once per handler, with `zstd`, Brotli, gzip, or deflate
   negotiated in that server-preference order.
