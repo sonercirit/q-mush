@@ -112,6 +112,19 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+test("spaces adjacent top-level transcript blocks", () => {
+  const { container } = mountTestSessionDetail(copyTestDetail());
+  const transcript = queryTestElement(
+    container,
+    "[data-session-transcript='true']",
+  );
+
+  for (const className of ["flex", "flex-col", "gap-3"]) {
+    expect(transcript.classList).toContain(className);
+  }
+  expect(transcript.classList).not.toContain("space-y-3");
+});
+
 test("copies session information and transcript from the detail header", async () => {
   const writeText = mockClipboardWrite();
   const { container } = mountTestSessionDetail(copyTestDetail());
