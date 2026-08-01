@@ -87,7 +87,7 @@ function finishActiveSession(options: RuntimeStatusTransitionOptions): boolean {
     options.resources.database,
     condition,
   );
-  if (session === undefined || options.generation === undefined) {
+  if (session === undefined) {
     return false;
   }
   return transitionAndEndTurn(
