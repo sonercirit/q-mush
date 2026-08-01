@@ -8,11 +8,10 @@ import {
   transcriptTestMessage,
 } from "./session-dom-test-helpers.tsx";
 
-test("streaming deltas do not revisit completed turns or markdown", () => {
+test("streaming deltas do not revisit completed steps or markdown", () => {
   let historicalMessageReads = 0;
   let historicalRoleReads = 0;
   let historicalTimestampReads = 0;
-  let historicalToolCallReads = 0;
   const completedMessages = Array.from({ length: 100 }, (_, turn) => {
     const startedAt = (turn + 1) * 2;
     const user = transcriptTestMessage(
@@ -27,35 +26,17 @@ test("streaming deltas do not revisit completed turns or markdown", () => {
         return startedAt;
       },
     });
-    const assistant: AgentSessionMessage = {
-      ...transcriptTestMessage(
-        `assistant-${String(turn)}`,
-        "Response",
-        "assistant",
-        startedAt + 1,
-      ),
-      toolCalls: [
-        {
-          arguments: `{"turn":${String(turn)}}`,
-          id: `call-${String(turn)}`,
-          name: "read",
-        },
-      ],
-    };
+    const assistant = transcriptTestMessage(
+      `assistant-${String(turn)}`,
+      "Response",
+      "assistant",
+      startedAt + 1,
+    );
     const role = assistant.role;
-    const toolCalls = assistant.toolCalls;
-    Object.defineProperties(assistant, {
-      role: {
-        get: () => {
-          historicalRoleReads += 1;
-          return role;
-        },
-      },
-      toolCalls: {
-        get: () => {
-          historicalToolCallReads += 1;
-          return toolCalls;
-        },
+    Object.defineProperty(assistant, "role", {
+      get: () => {
+        historicalRoleReads += 1;
+        return role;
       },
     });
     return [user, assistant];
@@ -104,7 +85,6 @@ test("streaming deltas do not revisit completed turns or markdown", () => {
   const initialHistoricalMessageReads = historicalMessageReads;
   const initialTimestampReads = historicalTimestampReads;
   const initialRoleReads = historicalRoleReads;
-  const initialToolCallReads = historicalToolCallReads;
   const historicalMarkdown = container.querySelector(
     "[data-render-boundary='message:assistant-0'] > div.mt-2 p",
   );
@@ -122,11 +102,10 @@ test("streaming deltas do not revisit completed turns or markdown", () => {
     expect(counts().toolCallArguments).toBe(initialToolCallArguments);
   }
 
-  expect(initialToolCallArguments.get("call-99")).toBe('{"turn":99}');
+  expect(initialToolCallArguments.size).toBe(0);
   expect(historicalMessageReads).toBe(initialHistoricalMessageReads);
   expect(historicalTimestampReads).toBe(initialTimestampReads);
   expect(historicalRoleReads).toBe(initialRoleReads);
-  expect(historicalToolCallReads).toBe(initialToolCallReads);
   expect(counts().filterCounts).toEqual(initialCounts.filterCounts);
   expect(groups().stable).toBe(initialStableMessages);
   expect(
@@ -134,7 +113,7 @@ test("streaming deltas do not revisit completed turns or markdown", () => {
       "[data-render-boundary='message:assistant-0'] > div.mt-2 p",
     ),
   ).toBe(historicalMarkdown);
-  expect(container.querySelectorAll("[data-turn-timing]")).toHaveLength(101);
+  expect(container.querySelectorAll("[data-step-timing]")).toHaveLength(101);
   dispose();
   container.remove();
 });

@@ -32,6 +32,7 @@ import {
   toolStreamDisplayName,
 } from "./session-live-tool-activity.tsx";
 import { renderMarkdown } from "./session-markdown.tsx";
+import { createSessionStepTiming } from "./session-step-timing.ts";
 import { renderStructuredText } from "./session-structured-text.tsx";
 import { renderStructuredCode } from "./session-syntax.tsx";
 import { renderToolResult } from "./session-tool-result.tsx";
@@ -44,9 +45,8 @@ import type {
   SessionTranscriptFilters,
 } from "./session-transcript-filters.ts";
 import { createSessionTranscriptMessageGroups } from "./session-transcript-messages.ts";
-import { createSessionTurnTiming } from "./session-turn-timing.ts";
 
-function TurnTiming(props: {
+function StepTiming(props: {
   readonly endedAt: number | null;
   readonly startedAt: number;
 }): JSX.Element {
@@ -63,7 +63,7 @@ function TurnTiming(props: {
   return (
     <p
       class="flex flex-wrap gap-x-3 gap-y-1 px-1 text-xs text-slate-500"
-      data-turn-timing={props.endedAt === null ? "active" : "completed"}
+      data-step-timing={props.endedAt === null ? "active" : "completed"}
     >
       <span>{`Duration: ${formatSessionTime(duration())}`}</span>
       <span>Started: {time(props.startedAt)}</span>
@@ -486,7 +486,7 @@ export function SessionTranscript(props: {
   const serializedTools = createMemo(() =>
     JSON.stringify(selectedAgentTools(props.tools), null, 2),
   );
-  const turnTiming = createSessionTurnTiming(
+  const stepTiming = createSessionStepTiming(
     () => props.messages,
     () => props.status ?? "idle",
     () => props.turns,
@@ -523,10 +523,10 @@ export function SessionTranscript(props: {
           toolStreams={toolStreamsByCallId}
         />
       </Show>
-      <Show when={turnTiming().completedTimings.get(message.id)}>
+      <Show when={stepTiming().completedTimings.get(message.id)}>
         {(timing) => (
-          <TurnTiming
-            endedAt={timing().endedAt ?? message.createdAt}
+          <StepTiming
+            endedAt={timing().endedAt}
             startedAt={timing().startedAt}
           />
         )}
@@ -554,8 +554,8 @@ export function SessionTranscript(props: {
       </Show>
       <For each={messageGroups().stable}>{renderMessage}</For>
       <For each={messageGroups().streamed}>{renderMessage}</For>
-      <Show when={turnTiming().activeStartedAt}>
-        {(startedAt) => <TurnTiming endedAt={null} startedAt={startedAt()} />}
+      <Show when={stepTiming().activeStartedAt}>
+        {(startedAt) => <StepTiming endedAt={null} startedAt={startedAt()} />}
       </Show>
       <Show when={props.filters.toolActivity}>
         <For each={standaloneToolStreams()}>
