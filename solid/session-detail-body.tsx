@@ -32,7 +32,6 @@ import { sessionMutationPending } from "./session-pending.ts";
 import { SessionProviderUpdateEditor } from "./session-provider-update-client.tsx";
 import type { SessionProviderUpdateView } from "./session-provider-update-model.ts";
 import { RunnerReassignment } from "./session-reassignment-view.tsx";
-import { SessionSpawnEditor } from "./session-spawn-client.tsx";
 import { SessionToolUpdateEditor } from "./session-tool-update-client.tsx";
 import { createSessionTranscriptCounts } from "./session-transcript-counts.ts";
 import { SessionTranscriptFilterControls } from "./session-transcript-filter-controls.tsx";
@@ -226,7 +225,10 @@ export function SessionDetailBody(props: {
       <Show when={view().detail.runnerRequired}>
         <RunnerReassignment {...view()} />
       </Show>
-      <div class={SESSION_EDITOR_GROUP_CLASSES}>
+      <div
+        class={SESSION_EDITOR_GROUP_CLASSES}
+        data-session-editor-group="true"
+      >
         <SessionProviderUpdateEditor
           credentials={props.providerUpdate.credentials}
           detail={view().detail}
@@ -243,13 +245,6 @@ export function SessionDetailBody(props: {
           onApply={(tools, confirmedCacheDrop) => {
             return view().controller.updateTools(tools, confirmedCacheDrop);
           }}
-        />
-        <SessionSpawnEditor
-          credentials={view().credentials}
-          detail={view().detail}
-          onDiscoverModels={props.providerUpdate.onDiscoverModels}
-          onSpawn={(selection) => view().controller.spawn(selection)}
-          runners={view().runners}
         />
       </div>
       <SessionHistoryControls controller={view().controller} />

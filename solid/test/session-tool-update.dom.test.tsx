@@ -6,6 +6,7 @@ import {
   mountTestView,
   queryTestElementAs,
 } from "./dom-test-helpers.ts";
+import { mountTestSessionDetail } from "./session-dom-test-helpers.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
 const DISPOSALS: (() => void)[] = [];
@@ -15,6 +16,32 @@ function clearMountedEditor(): void {
 }
 
 afterEach(clearMountedEditor);
+
+test("renders only provider and tool access as compact collapsed rows", () => {
+  const { container } = mountTestSessionDetail(TEST_SESSION_DETAIL, DISPOSALS);
+  const editorGroup = queryTestElementAs(
+    container,
+    "[data-session-editor-group='true']",
+    HTMLDivElement,
+  );
+  const rows = [...editorGroup.children];
+
+  expect(rows).toHaveLength(2);
+  expect(container.textContent).not.toContain("Spawn child session");
+  expect(
+    container.querySelector("[data-session-spawn-toggle='true']"),
+  ).toBeNull();
+  expect(
+    rows.map((row) => row.getAttribute("data-session-editor-kind")),
+  ).toEqual(["provider", "tools"]);
+  for (const row of rows) {
+    expect(row.classList).toContain("py-1");
+    expect(row.classList).not.toContain("py-2");
+    expect(row.children).toHaveLength(1);
+    expect(row.firstElementChild).toBeInstanceOf(HTMLHeadingElement);
+    expect(row.firstElementChild?.classList).toContain("justify-between");
+  }
+});
 
 function expectToolEditorCollapsed(
   findUpdateButton: () => HTMLButtonElement | undefined,
