@@ -17,6 +17,7 @@ import {
 import { SESSION_ATTACHMENT_FALLBACKS_PATH } from "../shared/routes.ts";
 import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 import { requestJson } from "./browser-http.ts";
+import { RetryNotice } from "./collection.tsx";
 import { modalityLabel } from "./model-modalities-client.tsx";
 import type { SessionCredentialOption } from "./session-credential-option.ts";
 import {
@@ -225,6 +226,13 @@ export function AttachmentFallbackSettings(props: {
           />
         </Show>
       </div>
+      <RetryNotice
+        error={picker.request.error()}
+        onRetry={() => {
+          void picker.editor.discover(picker.draft().credential);
+        }}
+        retryLabel="Retry model discovery"
+      />
       <div class="mt-5 flex items-center gap-3">
         <button
           class="rounded-xl border border-cyan-300/30 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-100 disabled:opacity-50"
