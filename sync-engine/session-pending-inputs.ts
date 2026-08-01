@@ -18,7 +18,10 @@ import { storedActiveSessionState } from "./session-active-query.ts";
 import { currentSessionSegment } from "./session-segment.ts";
 import { notifySessionSteeringInput } from "./session-steering-wakeup.ts";
 import type { StoredUserMessageInput } from "./session-store-types.ts";
-import { userMessageValues } from "./session-store-values.ts";
+import {
+  nextStoredMessageTimestamp,
+  userMessageValues,
+} from "./session-store-values.ts";
 import { touchStoredSession } from "./session-touch.ts";
 import {
   activeSessionTurnId,
@@ -442,13 +445,19 @@ export function cancelPendingInput(options: {
 }
 
 export function promotePendingInput(
-  database: Pick<AppDatabase, "insert" | "update">,
+  database: Pick<AppDatabase, "insert" | "select" | "update">,
   input: PendingInputForPromotion,
   userId: string,
   now: number,
   segment: number,
   turnId?: string,
 ): void {
+  const messageNow = nextStoredMessageTimestamp(
+    database,
+    input.sessionId,
+    segment,
+    now,
+  );
   database
     .insert(agentMessages)
     .values(
@@ -456,7 +465,7 @@ export function promotePendingInput(
         content: input.content,
         id: input.id,
         images: input.images,
-        now,
+        now: messageNow,
         segment,
         sessionId: input.sessionId,
         turnId: turnId ?? null,

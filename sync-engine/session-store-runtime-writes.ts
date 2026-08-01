@@ -119,19 +119,20 @@ function appendStoredMessages(
   options: RuntimeWriteTarget,
   condition: SQL | undefined,
   messages: readonly StoredMessageValues[],
-): string {
+): number {
   const userId = requireRunningSessionUserId(transaction, condition);
+  let now = options.now;
   for (const message of messages) {
-    appendSystemStoredMessage({
+    now = appendSystemStoredMessage({
       database: transaction,
       generateId: options.resources.generateId,
       message,
-      now: options.now,
+      now,
       sessionId: options.sessionId,
       userId,
     });
   }
-  return userId;
+  return now;
 }
 
 function touchSessionWithMessages(options: {
@@ -140,7 +141,7 @@ function touchSessionWithMessages(options: {
   readonly target: RuntimeWriteTarget;
 }): void {
   options.target.resources.database.transaction((transaction) => {
-    appendStoredMessages(
+    const now = appendStoredMessages(
       transaction,
       options.target,
       options.condition,
@@ -148,7 +149,7 @@ function touchSessionWithMessages(options: {
     );
     transaction
       .update(agentSessions)
-      .set(updatedAuditFields(SYSTEM_ID, options.target.now))
+      .set(updatedAuditFields(SYSTEM_ID, now))
       .where(options.condition)
       .run();
   });
@@ -181,12 +182,21 @@ function writeStoredMessages(
   storedMessages: readonly StoredMessageValues[],
   after: (
     transaction: Pick<AppDatabase, "insert" | "select" | "update">,
+    now: number,
   ) => void,
 ): void {
-  options.resources.database.transaction((transaction) => {
-    appendStoredMessages(transaction, options, condition, storedMessages);
-    after(transaction);
-  });
+  const persist = (
+    transaction: Parameters<Parameters<AppDatabase["transaction"]>[0]>[0],
+  ): void => {
+    const now = appendStoredMessages(
+      transaction,
+      options,
+      condition,
+      storedMessages,
+    );
+    after(transaction, now);
+  };
+  options.resources.database.transaction(persist);
 }
 
 export function commitRuntimeTerminal(
@@ -202,22 +212,27 @@ export function commitRuntimeTerminal(
     sessionId: options.sessionId,
   });
   const storedMessages = storedRecordedMessages(options.messages);
-  writeStoredMessages(options, condition, storedMessages, (transaction) => {
-    if (options.usage !== undefined) {
-      updateSessionWithUsage(
+  writeStoredMessages(
+    options,
+    condition,
+    storedMessages,
+    (transaction, now) => {
+      if (options.usage !== undefined) {
+        updateSessionWithUsage(
+          transaction,
+          condition,
+          runtimeUsageValues(options.usage),
+        );
+      }
+      settleTerminalRuntime(
         transaction,
         condition,
-        runtimeUsageValues(options.usage),
+        "idle",
+        now,
+        options.sessionId,
       );
-    }
-    settleTerminalRuntime(
-      transaction,
-      condition,
-      "idle",
-      options.now,
-      options.sessionId,
-    );
-  });
+    },
+  );
 }
 
 export function appendRuntimeAgentMessages(
@@ -235,12 +250,17 @@ export function appendRuntimeAgentMessages(
   const condition = runningSessionCondition(options);
 
   const usageValues = runtimeUsageValues(options.usage);
-  writeStoredMessages(options, condition, storedMessages, (transaction) => {
-    updateSessionWithUsage(transaction, condition, {
-      ...usageValues,
-      ...updatedAuditFields(SYSTEM_ID, options.now),
-    });
-  });
+  writeStoredMessages(
+    options,
+    condition,
+    storedMessages,
+    (transaction, now) => {
+      updateSessionWithUsage(transaction, condition, {
+        ...usageValues,
+        ...updatedAuditFields(SYSTEM_ID, now),
+      });
+    },
+  );
 }
 
 export function appendRuntimeErrorMessage(
