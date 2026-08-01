@@ -99,3 +99,18 @@ jobs:
       - name: Check tracked whitespace
         if: ${{ !cancelled() }}
         run: git diff --check "$(git hash-object -t tree /dev/null)" HEAD
+
+  aggregate:
+    name: Tests and static checks
+    needs: [tests, static-checks, build]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Require every check leg to succeed
+        run: |
+          if [[ "${{ needs.tests.result }}" != "success" || \
+                "${{ needs.static-checks.result }}" != "success" || \
+                "${{ needs.build.result }}" != "success" ]]; then
+            exit 1
+          fi
