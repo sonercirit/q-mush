@@ -4,7 +4,7 @@ import type {
   ToolStreamState,
 } from "../shared/tool-stream.ts";
 import { renderStructuredCode } from "./session-syntax.tsx";
-import { renderToolResult } from "./session-tool-result.tsx";
+import { renderLiveToolResult } from "./session-tool-result.tsx";
 
 function toolStateLabel(state: ToolStreamState): string {
   switch (state) {
@@ -23,19 +23,21 @@ function toolStateLabel(state: ToolStreamState): string {
   }
 }
 
-function liveToolOutput(
-  stream: ToolStreamEntry,
-  channel: "stderr" | "stdout",
-): JSX.Element {
-  const content = stream[channel];
-  const result = renderToolResult({
-    arguments: stream.arguments,
-    content: `${channel}:\n${content}`,
-    name: toolStreamDisplayName(stream),
-  });
+function LiveToolOutput(props: {
+  readonly channel: "stderr" | "stdout";
+  readonly stream: ToolStreamEntry;
+}): JSX.Element {
   return (
-    <Show when={content.length > 0}>
-      <div class="mt-3">{result}</div>
+    <Show when={props.stream[props.channel]}>
+      {(content) => (
+        <div class="mt-3">
+          {renderLiveToolResult(
+            toolStreamDisplayName(props.stream),
+            `${props.channel}:\n${content()}`,
+            props.stream.arguments,
+          )}
+        </div>
+      )}
     </Show>
   );
 }
@@ -48,16 +50,17 @@ export function LiveToolActivityContent(props: {
   readonly includeArguments: boolean;
   readonly stream: ToolStreamEntry;
 }): JSX.Element {
+  const stream = (): ToolStreamEntry => props.stream;
   return (
     <>
       <p class="mt-2 text-xs font-semibold text-amber-200">
-        {toolStateLabel(props.stream.state)}
+        {toolStateLabel(stream().state)}
       </p>
-      <Show when={props.includeArguments && props.stream.arguments.length > 0}>
-        <div class="mt-2">{renderStructuredCode(props.stream.arguments)}</div>
+      <Show when={props.includeArguments && stream().arguments.length > 0}>
+        <div class="mt-2">{renderStructuredCode(stream().arguments)}</div>
       </Show>
-      {liveToolOutput(props.stream, "stdout")}
-      {liveToolOutput(props.stream, "stderr")}
+      <LiveToolOutput channel="stdout" stream={stream()} />
+      <LiveToolOutput channel="stderr" stream={stream()} />
     </>
   );
 }

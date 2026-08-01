@@ -415,15 +415,29 @@ function renderParallelOutput(
   );
 }
 
+function parsedToolArguments(
+  arguments_: string | undefined,
+): Readonly<Record<string, unknown>> | undefined {
+  return arguments_ === undefined
+    ? undefined
+    : parseOptionalJsonRecord(arguments_);
+}
+
+export function renderLiveToolResult(
+  name: string,
+  content: string,
+  arguments_: string | undefined,
+): JSX.Element {
+  // Live streams cannot be the parallel aggregate; skip its repeated JSON parse.
+  return renderToolOutput(name, content, parsedToolArguments(arguments_));
+}
+
 export function renderToolResult(options: {
   readonly arguments: string | undefined;
   readonly content: string;
   readonly name: string;
 }): JSX.Element {
-  const arguments_ =
-    options.arguments === undefined
-      ? undefined
-      : parseOptionalJsonRecord(options.arguments);
+  const arguments_ = parsedToolArguments(options.arguments);
   return options.name === "parallel"
     ? (renderParallelOutput({
         arguments: arguments_,
