@@ -1,10 +1,12 @@
 import { readFileSync } from "node:fs";
 import { afterEach, expect, test, vi } from "vitest";
 import { createProviderViewState } from "../provider-client.tsx";
+import { createReactiveState } from "../reactive-state.ts";
 import { createRunnerViewState } from "../runner-client.tsx";
-import { SessionPanel } from "../session-client.tsx";
+import { SessionPanel, type SessionViewState } from "../session-client.tsx";
 import { summaryFromDetail } from "../session-codec.ts";
 import { SessionController } from "../session-controller.ts";
+import { initialSessionViewState } from "../session-state.ts";
 import {
   clickTestButton,
   disposeTestViews,
@@ -21,12 +23,18 @@ const focusDisposals: (() => void)[] = [];
 function mountFocusPanel(
   sessions = [summaryFromDetail(TEST_SESSION_DETAIL)],
   runners = createRunnerViewState([]),
+  selected = true,
 ): {
   readonly container: HTMLDivElement;
   readonly controller: SessionController;
 } {
   const controller = new SessionController(
-    sessionDetailState(TEST_SESSION_DETAIL, sessions),
+    selected
+      ? sessionDetailState(TEST_SESSION_DETAIL, sessions)
+      : createReactiveState<SessionViewState>({
+          ...initialSessionViewState(),
+          sessions,
+        }),
     undefined,
     null,
   );
@@ -73,6 +81,12 @@ async function clickAndSettle(
 ): Promise<void> {
   clickTestButton(container, selector);
   await settleFocus();
+}
+
+function expectClasses(element: Element, classes: readonly string[]): void {
+  for (const className of classes) {
+    expect(element.classList).toContain(className);
+  }
 }
 
 function expectFocusMode(container: ParentNode, focused: boolean): void {
@@ -141,6 +155,41 @@ function expectPreservedView(
 
 afterEach(() => {
   disposeTestViews(focusDisposals);
+});
+
+test("session list follows the detail row and owns its overflow with or without a selection", () => {
+  for (const selected of [true, false]) {
+    const { container } = mountFocusPanel(
+      undefined,
+      createRunnerViewState([]),
+      selected,
+    );
+    const results = queryTestElement(
+      container,
+      "[data-session-results='true']",
+    );
+    const panel = queryTestElement(results, "[data-session-list-panel='true']");
+    const surface = queryTestElement(panel, ".session-list-surface");
+    const list = queryTestElement(surface, ".session-list-items");
+
+    expectClasses(results, ["auto-rows-fr", "items-stretch", "min-h-0"]);
+    expectClasses(panel, [
+      "min-h-0",
+      "overflow-hidden",
+      "relative",
+      "self-stretch",
+    ]);
+    expectClasses(surface, [
+      "absolute",
+      "flex",
+      "flex-col",
+      "h-full",
+      "inset-0",
+      "min-h-0",
+      "overflow-hidden",
+    ]);
+    expectClasses(list, ["flex-1", "min-h-0", "overflow-y-auto"]);
+  }
 });
 
 test("desktop focus mode keeps an open rail above a hidden backdrop", () => {
