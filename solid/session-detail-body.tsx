@@ -262,7 +262,7 @@ export function SessionDetailBody(props: {
       />
       <ul
         aria-live="polite"
-        class="session-transcript mt-5 max-h-[36rem] min-w-0 space-y-3 overflow-y-auto overscroll-contain pr-1"
+        class="session-transcript mt-5 flex max-h-[36rem] min-w-0 flex-col gap-3 overflow-y-auto overscroll-contain pr-1"
         data-session-transcript="true"
         onScroll={(event) => {
           const element = event.currentTarget;
