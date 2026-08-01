@@ -1,55 +1,67 @@
 # Convergence rules
 
 This document is normative detail for the
-[local-first architecture](../local-first-architecture.md). Operation and
-full-replica storage mechanics are specified in
-[replication.md](replication.md).
+[local-first architecture](../local-first-architecture.md). Operation, tier, and
+full-runner mechanics are specified in [replication.md](replication.md).
 
 “LWW” means an HLC register with causal context and device-ID tie-break, never
-`updatedAt`. IDs—not unique display names—define identity.
+`updatedAt`. IDs—not unique display names—define identity. These rules apply to
+runner replicas and the readable engine projection for its entitled partition.
+The engine is not a universal winner. Solid clients submit commands and refetch
+materialized views; they do not merge operations or participate in convergence.
 
-- **Account/trust/runner registry:** the account's owner-device trust chain
-  authorizes admission, capability-bounded delegation, renewal, revocation, and
-  runner membership. Concurrent non-widening updates merge; revocation is
-  remove-wins. The engine can author only identity recovery/bootstrap records
-  within its explicit key purpose. Credential secrets use the separate plane.
-- **Workspaces:** creation has immutable UUIDv7 identity; name is LWW; delete is
-  remove-wins. Concurrent same names remain distinct with stable disambiguators.
-  Default workspace is an account LWW register; a deleted target
-  deterministically repairs to the active workspace with lowest creation
-  clock/ID.
-- **Prompt bank:** name and body are separate LWW registers; delete is
-  remove-wins. Different-field edits combine. Concurrent body losers remain
-  conflict revisions for compare/restore. Existing prompt `revision` is a local
-  projection revision, not a distributed clock.
+- **Account/trust/runner registry:** a runner-local account genesis names the
+  first owner key. Owner trust operations authorize admission, bounded
+  delegation, renewal, revocation, and runner membership. Concurrent
+  non-widening changes merge; revocation is remove-wins. Google can author only
+  an identity binding/recovery assertion under its engine key purpose. Linking
+  anonymous to Google retains the account/entity/operation IDs. An explicit
+  existing-account merge preserves both provenances and rejects equivocation.
+- **Tier/backup entitlement:** the engine's billing/identity control plane is
+  the single writer for entitlement epochs. A later entitlement epoch supersedes
+  an earlier one; it does not modify runner data. Backup frontiers are immutable
+  acknowledgements per partition. Free endpoints reject rather than merge
+  session operations. Downgrade quarantine/purge is storage lifecycle, not an
+  application tombstone.
+- **Workspaces:** UUIDv7 identity is immutable; name is LWW; delete is
+  remove-wins. Concurrent same names remain distinct with disambiguators.
+  Default workspace is an account register; deletion deterministically repairs
+  to active workspace with lowest creation clock/ID.
+- **Prompt bank:** name/body are separate LWW registers; delete is remove-wins.
+  Different fields combine; losing concurrent bodies remain conflict revisions.
+  Existing prompt `revision` is projection metadata, not a distributed clock.
+- **Credential metadata:** labels, provider/source, version, policy, revoked
+  state, and target receipts converge as metadata. Plaintext, sensitive generic
+  URLs, and envelopes are absent. A recovered summary with no vault receipt is
+  deterministically `credential unavailable`, never usable.
 - **Session creation/configuration:** creation is immutable and names an
   executor. Title is LWW. Model, tools, directory, provider, and runner changes
-  are requests serialized or rejected by the executor at an epoch boundary. Two
-  offline creates are two sessions.
-- **Session assignment/epoch:** one writer with monotonically increasing epoch
-  and signed handoff. There is no timeout election. Stale output is quarantined;
-  unclean recovery forks.
+  are executor-serialized requests at epoch boundaries. Two offline creates are
+  distinct sessions. These operations have the session partition and a free
+  engine cannot acknowledge them.
+- **Session assignment/epoch:** one writer, monotonically increasing epoch, and
+  signed handoff. No timeout election; stale output quarantines and unclean
+  recovery forks.
 - **Messages/turns/status/usage/tool results:** append-only and executor-owned
-  for the certified epoch. IDs and per-epoch ordinals are immutable. Duplicate
-  operations dedupe; two values at one ordinal are equivocation and quarantine.
-- **Pending input, answer, stop, and steer requests:** any capable device
-  creates an immutable request keyed by `clientRequestId`; cancel is
-  remove-wins; the executor writes one terminal receipt. It accepts causally
-  ready requests in deterministic `(HLC, request ID)` order and assigns queue
-  sequence. A reused idempotency key with another payload hash is rejected.
-- **Attachments:** immutable SHA-256 blobs plus metadata, eagerly completed on
-  all ready runners. Equal hashes dedupe. Metadata tombstones control visibility
-  and safe byte collection.
-- **Credential records:** provider/type labels, version, policy, revoked state,
-  and target delivery receipts are convergent metadata. Plaintext and sealed
-  payload bytes are not operations and are never reconstructed from this state.
-- **Presence/live deltas and browser drafts/preferences:** ephemeral/profile-
-  local as described above.
+  for the certified epoch. IDs/ordinals are immutable. Duplicates dedupe; two
+  values at one ordinal are equivocation. Their references and blobs inherit the
+  session partition.
+- **Pending input, answer, stop, and steer:** capable clients send immutable
+  requests keyed by `clientRequestId` to a runner; cancel is remove-wins; the
+  executor writes one terminal receipt. Causally ready requests sort by
+  `(HLC, request ID)`. Reusing a key for another payload is rejected. A browser
+  draft that never reaches a runner is not an operation and has no merge rule.
+- **Attachments:** immutable SHA-256 blobs plus metadata, complete on every
+  ready runner. Equal hashes dedupe. Reference classification controls engine
+  tier: session-only bytes are paid-only, while any live non-session reference
+  admits the byte object to free backup. Metadata tombstones govern safe
+  collection.
+- **Presence/live deltas and browser caches/drafts:** ephemeral or client-local;
+  they never affect frontiers, causal stability, compaction, or restore.
 
 ### Why not a CRDT for the whole transcript?
 
-A transcript reflects an external model call and filesystem-affecting tools.
-Independent assistant branches cannot be safely interleaved: tool IDs, replay,
-provider charges, and side effects depend on one causal turn. The target uses an
-executor sequence. CRDTs apply around that boundary—inputs and user metadata—not
-to conceal split brain.
+A transcript reflects external model calls and filesystem-affecting tools.
+Independent assistant branches cannot safely interleave because tool IDs,
+replay, charges, and side effects depend on one causal turn. The design uses an
+executor sequence. CRDTs apply around that boundary—not to conceal split brain.

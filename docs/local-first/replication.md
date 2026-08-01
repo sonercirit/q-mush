@@ -5,86 +5,176 @@ This document is normative detail for the
 
 ## Replica scope and storage model
 
-A **full runner replica** contains the complete durable Q Mush application state
-for every account enrolled on that runner. For each such account this includes
-all workspace and prompt-bank records, runner/device/trust registries, provider
-credential summaries and availability receipts, sessions regardless of assigned
-executor, messages, turns, questions, pending inputs, usage, audit fields,
-tombstones, operation history needed after compaction, snapshots, and every
-referenced application blob.
+A full runner replica contains all durable ordinary Q Mush state for each local
+account: workspaces, prompts, trust/runner registries, credential metadata,
+every session regardless of executor, messages, turns, questions, pending
+inputs, usage, audit fields, tombstones, retained operations/snapshots, and
+application blobs.
 
-Full replication is an account boundary, not a workspace-placement rule. A
-runner cannot subscribe only to its assigned sessions, recently opened
-workspaces, or selected entities. Workspace grants still authorize who may view,
-edit, execute, or use a credential; they do not create partial runner storage.
-An engine serving multiple users does not disclose one account to another.
+This is an account boundary, not a workspace, tier, placement, or recent-use
+rule. Grants constrain use, not runner storage. Accounts remain isolated.
+Anonymous/free runners are as complete as paid runners; tier only filters the
+engine subscription.
 
-The only classes outside ordinary full replication are precisely bounded:
+Excluded classes are:
 
-- provider/skill plaintext and per-device sealed envelopes use the credential
-  plane and private runner vault described in [credentials.md](credentials.md);
-  their non-secret summaries, policy, versions, and delivery receipts do
-  replicate;
-- live presence, model deltas before final commit, and transport diagnostics are
-  ephemeral; their durable final messages/status/usage replicate;
-- a runner's external working directory is not silently copied. Workspace path
-  metadata and files deliberately imported as Q Mush attachments replicate;
-  source trees and other tool-accessed files remain runner-local resources; and
-- browser drafts/preferences remain profile-local unless promoted to a shared
-  entity.
+- provider secrets/envelopes, which use private runner vaults and the credential
+  plane; only summaries/policies/receipts replicate;
+- engine login/billing records and bearer tokens;
+- presence, unfinished deltas, and diagnostics (final messages/status/usage do
+  replicate);
+- external working directories except explicitly imported attachments; and
+- browser drafts/preferences/view caches.
 
-There is no size, age, session-owner, or workspace exemption for a durable Q
-Mush attachment. Admission applies before commitment: if an attachment exceeds
-product limits or no full-replica capacity policy can accept it, the authoring
-runner rejects the import rather than creating a permanently partial record.
-Once accepted, every ready runner must eventually store its verified bytes.
+Accepted attachments have no age/owner/workspace exemption. Reject an import
+before commitment if full-runner capacity cannot accept it; every ready runner
+eventually stores verified bytes.
 
-Each runner uses SQLite plus a private content-addressed blob directory. A
-browser profile uses IndexedDB and may keep a partial projection/blob cache. An
-optional engine backup may use SQLite but follows the same peer protocol. The
-logical layers are:
+Runners use SQLite and a content-addressed blob directory; the engine stores its
+entitled projection. Solid requests bounded active views and may cache selected
+responses, but receives no operation log and owns no shared outbox. A draft is
+shared only when a runner accepts its command.
+
+The logical storage layers are:
 
 1. **Inbox/outbox operation log:** immutable operations, verification state,
-   source peer, and rejection reason. Local durable commit precedes a success
-   response.
-2. **Materialized projection:** query-friendly account, session, message,
-   prompt, workspace, registry, and credential-summary records. Bun peers retain
-   Drizzle/SQLite tables in `shared/database/schema.ts` where practical;
-   browsers use IndexedDB and shared codecs.
+   source, and rejection reason. Local durable commit precedes success.
+2. **Materialized projection:** query-friendly account, session, prompt,
+   workspace, registry, and credential-summary records. SQLite tables in
+   `shared/database/schema.ts` remain useful projections.
 3. **Blob store:** attachments and large snapshots addressed by SHA-256, with
-   authorization metadata in operations and bounded transfer outside operation
-   envelopes.
-4. **Control store:** device keys, grants, revocations, peer checkpoints,
-   protocol versions, replica membership/readiness, and credential-envelope
-   metadata. Vault ciphertext is physically and cryptographically separate.
+   authorization metadata in operations and bounded transfer outside envelopes.
+4. **Control store:** device keys, grants/revocations, peer checkpoints, schema
+   versions, runner replica readiness, engine entitlement, and credential
+   delivery metadata. Vault ciphertext remains physically separate.
 
-SQLite rows are projections, not synchronization records. Replicating SQL
-`UPDATE` statements or database files would couple peers to one schema, lose
-causal intent, and make current partial unique indexes conflict during
-multi-writer merge. Existing stores such as `sync-engine/prompt-store.ts` and
-`sync-engine/session-store.ts` must write domain commands through one
-transactional operation/projection boundary rather than remain another source of
-truth.
+SQLite rows are projections, not synchronization records. SQL/file replication
+would couple schemas and erase causal intent. Stores must write commands through
+one transactional operation/projection boundary. Signed snapshots accelerate
+bootstrap but cannot invent authority.
 
-A transactionally maintained outbox avoids a dual-write window on Bun peers. A
-browser writes its operation and projection in one IndexedDB transaction. A
-background compactor can create a signed snapshot after all operations in its
-frontier are durable; snapshots accelerate bootstrap but never invent execution
-or trust authority.
+## Engine backup partition by schema entity
 
-### Operation envelope
+The target maps every table currently exported by `shared/database/schema.ts`.
+This list is exhaustive and disambiguates the web login table named `sessions`
+from agent sessions. Future entities must declare a partition before shipping;
+unknown kinds fail entitlement closed.
 
-The wire encoding is canonical and bounded (canonical CBOR by default; canonical
-JSON is acceptable only for the first read-only migration stage):
+**Non-session backup (free and paid):**
+
+- `users` — account profile and Google binding; anonymous identity remains local
+  until linking.
+- `workspaces` and `prompts` — configuration/content.
+- `provider_credentials` — a sanitized summary only: ID, provider, label,
+  source, fingerprint, default/connectivity metadata. Exclude
+  `encrypted_credential`; move sensitive generic `base_url` to the vault.
+- `provider_quota_settings`, `provider_quota_reset_receipts`,
+  `provider_credential_workspaces`, and `attachment_fallbacks` — non-secret
+  provider settings, receipts, relations, and fallback selection.
+- `runners` — sanitized device/trust/recovery metadata. Replace legacy token
+  fields with grants; never replicate reusable bearer secrets.
+- `runner_workspaces` — runner/workspace capability relations.
+
+**Session backup (paid only; free rejects):**
+
+- `agent_sessions` — root, configuration, assignment, status, usage, title,
+  captured agent file, and execution state;
+- `agent_session_turns` — turn boundaries/execution state;
+- `agent_pending_inputs` — queued content and image references;
+- `agent_question_requests` — tool questions and answers; and
+- `agent_messages` — transcript, tool, reasoning/error content, and image refs.
+
+**Engine control (neither peer partition):** `sessions` contains HttpOnly web
+login tokens, not agent history. It remains engine-local in both tiers, is
+rotated/recreated during login/recovery, and never goes to runners.
+
+All audit fields, tombstones, and relations inherit their entity's partition. A
+blob is session-tier when all live references are from the five `agent_*`
+entities, including pending-input/message images. Any live non-session reference
+admits it to the non-session partition. Free rejects session snapshots,
+operations, manifests, references, and bytes—not only SQL projections.
+
+New trust/operation entities are non-session unless they contain session
+payloads. Snapshots split by partition. Secrets remain excluded from both tiers.
+
+### Entitlement enforcement
+
+The engine is authoritative for `anonymous`/`free`/`paid` entitlement. A runner
+cannot assert paid scope. After Google authentication, a short-lived signed
+subscription capability names account ID, allowed partition(s), expiry, and
+subscription purpose. The engine authenticates every upload and download, parses
+the bounded entity/blob-reference envelope, and applies these rules before
+durable write or acknowledgement:
+
+- anonymous accounts have no engine subscription endpoint;
+- free capabilities allow only the non-session partition and reject a batch
+  containing a session entity, session snapshot, session-only blob/reference, or
+  unknown kind; and
+- paid capabilities allow both partitions, subject to normal authorization and
+  validation.
+
+Mixed batches fail atomically or are split by the sender before upload; the
+engine never silently drops a session record and acknowledges the containing
+frontier. Rejection uses a stable `tier_scope_denied` result without echoing
+content. Download/restore uses the same filter so stale paid bytes cannot leak
+through a free subscription. Entitlement changes invalidate old capabilities,
+are checked at connection and each bounded transaction, and are auditable
+without recording content. Rate/size limits are independent of tier.
+
+The readable engine subscriber verifies signatures, causal rules, tombstones,
+checksums, and blob hashes. Its durable ack advances the relevant backup
+frontier and may establish total-runner-loss recovery for that tier. UI reports
+`runner copies` and `engine backup` separately. It is a normal replication peer
+subscriber, but never execution authority or an ordinary A-to-B route. Its
+partition-scoped durable acknowledgement participates in replica safety and
+compaction only for data that tier actually stores.
+
+### Tier transitions and restore
+
+- **Anonymous to logged in:** Google proves the external identity while the
+  initiating owner device signs a link binding the existing account/trust root.
+  No new local account is created and no ID is rewritten. If the Google account
+  has no prior Q Mush account, the engine adopts that stable account ID and
+  backfills the tier partition. If it already has data, the UI requires an
+  explicit, resumable merge/import; operations keep IDs and provenance,
+  collisions/equivocation fail closed, and neither side is overwritten.
+- **Free to paid:** issue a paid capability, inventory the complete session
+  partition from any ready runner, upload a partitioned snapshot plus operation
+  tail and all session-only blobs, and verify roots. New session operations may
+  stream concurrently but `Paid backup complete` remains false until no gap
+  exists through the displayed frontier.
+- **Paid to free:** revoke paid capabilities immediately, reject new session
+  uploads/downloads, continue the non-session subscription, and mark the paid
+  session backup quarantined. Proposed policy retains inaccessible bytes for 30
+  days for re-upgrade, then cryptographically purges session snapshots,
+  operations, projections, and unshared blobs while retaining required audit
+  metadata without content. Immediate access/ingestion revocation enforces the
+  free entitlement; the short quarantine protects users from accidental
+  downgrade or transient billing failure without imposing indefinite operator
+  cost or surprise long-term retention. Exact grace and billing-failure
+  treatment remain open question 15; no runner data is removed.
+- **Restore after total runner loss:** Google recovery creates a fresh runner
+  device/trust transition. Free restores only the non-session partition and
+  explicitly starts with no session history. Paid restores both partitions and
+  all application blobs through the engine's acknowledged frontier. The new
+  runner is `joining` until its entitled restore verifies; it then becomes a
+  full local account replica for the recovered set. Anonymous has no engine
+  restore. Credential summaries may return, but vault secrets do not.
+
+## Operation envelope
+
+Canonical bounded encoding uses CBOR by default; canonical JSON is acceptable
+only for read-only migration:
 
 ```text
 operationId: UUIDv7
 schemaVersion: positive integer
+partition: non-session | session
 kind: namespaced domain operation
 scope: { accountId, workspaceId | absent }
 author: { deviceId, keyId }
 authorSequence: monotonic uint64
-clock: { physicalMs, logical, deviceId }       # hybrid logical clock
+clock: { physicalMs, logical, deviceId }
 parents: compact causal frontier / operation hashes
 entity: { type, id }
 payload: kind-specific value or blob refs
@@ -94,237 +184,177 @@ signature: Ed25519 over canonical preceding fields
 
 - `operationId` is the idempotency key. Unique `(deviceId, authorSequence)`
   detects rollback, gaps, and equivocation.
-- A hybrid logical clock (HLC) advances on local durable writes and received
-  operations. `(physicalMs, logical, deviceId)` orders otherwise concurrent LWW
-  register assignments without assuming synchronized clocks. Extreme forward
-  jumps are quarantined and shown as a device clock fault.
-- `parents` distinguishes happened-before from concurrent writes. Peers exchange
-  compact per-author ranges/checkpoints rather than a full vector in every
-  payload.
-- A signature authenticates author and scope; the verifier also evaluates the
-  delegated grant and, for executor-owned operations, the epoch certificate.
-- Unknown optional fields survive forwarding. An unknown operation kind remains
-  durably quarantined and advances no projection; it is never interpreted as a
-  generic row patch.
+- HLC `(physicalMs, logical, deviceId)` orders otherwise concurrent register
+  writes without assuming synchronized clocks. Extreme jumps quarantine.
+- `parents` distinguishes happened-before from concurrency. Peers exchange
+  compact author ranges/checkpoints rather than full vectors in every payload.
+- Signatures authenticate author/scope/grant and, for executor operations, the
+  epoch certificate. The declared partition is validated from `kind` and
+  references; a signature cannot relabel a session as non-session.
+- Unknown optional fields survive forwarding. Unknown kinds quarantine on
+  runners and fail engine entitlement closed; they are never generic row
+  patches.
 
-Operation-level schema versions allow projections to rebuild from a snapshot and
-operation tail. UUIDv7 identity from `shared/ids.ts`, audit fields from
-`shared/database/audit-columns.ts`, and soft deletes from
-`shared/database/schema.ts` remain the application representation.
+UUIDv7 identity, audit fields, and soft deletes remain projection conventions.
 
 ## Peer-first synchronization protocol
 
-The protocol lives in `shared/` and is transport-independent. Every ordinary
-sync session is endpoint-to-endpoint, including while the engine is healthy. A
-direct WebSocket, WebRTC data channel, or explicitly selected end-to-end
-encrypted fallback tunnel carries the same frames:
+The shared protocol is transport-independent. Runner-to-runner and
+runner-to-engine subscriptions use authenticated endpoint sessions, but only
+runners are full replica members. The browser uses bounded query/command/live
+APIs and does not send `frontier`, `need`, `operations`, blob-manifest, `ack`,
+or snapshot frames.
 
-1. `hello`: device identity, signed nonce, account/full-replica membership,
-   delegated grants, protocol/app versions, maximum frame size, compression,
-   blob capabilities, and replica state (`joining`, `ready`, or `retiring`).
-2. `frontier`: per-account/workspace operation ranges/checkpoints, compatible
-   snapshot frontiers, and blob-manifest root. No private entity metadata is
-   revealed before mutual authentication.
-3. `need` / `operations`: bounded missing ranges with flow control. The receiver
-   verifies shape, signature, grant, authority, causal dependencies, and
-   per-kind limits before atomic inbox/projection apply.
+1. `hello`: runner identity, signed nonce, account membership, grants,
+   protocol/app versions, limits, partition capability, and replica state
+   (`joining`, `ready`, or `retiring`).
+2. `frontier`: partitioned operation ranges/checkpoints, compatible snapshot
+   frontiers, and blob-manifest roots after mutual authorization.
+3. `need` / `operations`: bounded missing ranges. The receiver verifies shape,
+   signature, grant, authority, causal dependencies, tier, and limits before
+   atomic apply.
 4. `blob_manifest` / `blob_need` / `blob_chunk`: resumable, hash-verified,
-   size-bounded transfer after the referencing operation is authorized.
-5. `ack`: highest durable ranges, blob-manifest root, and rejected/quarantined
-   IDs. Acknowledgement means durable local receipt, not socket receipt.
-6. `presence` and stream frames: bounded events outside the durable frontier.
+   partition-aware transfer after the referencing operation is authorized.
+5. `ack`: highest durable ranges, blob roots, and rejected/quarantined IDs. This
+   means durable validated receipt, not socket receipt.
+6. `presence` and stream frames: bounded ephemeral events outside frontiers.
 
-Anti-entropy runs at connection, after frontier change, and periodically while a
-route remains open. Peers initiate and serve ranges symmetrically; no server
-winner exists. Runners prefer direct runner links for bulk catch-up and do not
-upload to the engine so another runner can download. If both independently
-subscribe an optional engine backup, each syncs its own frontier with that peer.
-The engine is not a bridge. A last-resort relay sees only encrypted frames and
-cannot materialize, authorize, reorder as valid, or merge data.
+Anti-entropy runs at connect and periodically. Peers serve ranges symmetrically;
+there is no server winner. Runners prefer direct links and never upload to the
+engine merely so another runner can download. Each logged-in runner may
+independently synchronize the engine backup, with duplicate operations deduped;
+the engine is never a bridge. Its paid relay sees only endpoint-encrypted frames
+and cannot materialize or merge them.
 
-The current protocol provides reusable payloads:
-`shared/user-realtime-protocol.ts` defines bounded command envelopes and
-idempotency keys; `solid/realtime-client-codec.ts` and `sync-engine/realtime.ts`
-define snapshots, receipts, deltas, and stream frames. Wrap durable changes in
-peer envelopes and split durable operations from streaming. The in-memory
-`sync-engine/realtime-command-ledger.ts` cannot remain the receipt store;
-authority runners persist receipts.
+Current bounded codecs are reusable inputs, but durable changes gain peer
+envelopes and streams remain ephemeral. The in-memory engine command ledger
+cannot remain receipt authority.
 
-## Full-replica lifecycle and storage growth
+## Full-runner lifecycle and storage growth
 
 ### Admission and catch-up
 
-A new or long-offline runner follows a declared state machine:
+A new or long-offline runner follows this state machine:
 
-1. An owner-authorized peer signs its full-account membership and confirms the
-   runner reports sufficient free space for the current projection, retained
-   operation tail, complete blob set, and configured growth reserve.
-2. The `joining` runner selects the newest compatible snapshot offered by any
-   ready runner, downloads it in verified resumable chunks, and rebuilds its
-   projection.
-3. It requests the operation tail from that snapshot frontier and continuously
-   follows new operations. If the log has compacted past its old checkpoint, it
-   discards that obsolete checkpoint and uses a newer snapshot; no permanently
-   missing range is tolerated.
-4. It compares the complete content-addressed blob manifest, fetches missing
-   blobs in bounded parallel chunks from any ready peers that advertise them,
-   and resumes by chunk/hash after interruption. Blob source selection may
-   balance peers but never changes authorization.
-5. It verifies operation frontier, projection checksum/version, tombstone
-   coverage, and blob-manifest root. Only then does it publish a signed `ready`
-   receipt and become eligible as a normal executor or redundancy target.
+1. An owner peer signs full-account membership and verifies capacity for current
+   projection, operation tail, complete blobs, and growth reserve.
+2. The `joining` runner downloads the newest compatible runner snapshot in
+   resumable verified chunks. If no runner survives, an entitled engine restore
+   is the source, with the tier-specific loss disclosed.
+3. It applies the operation tail and continuously follows new operations. A
+   compacted obsolete checkpoint requires a newer snapshot.
+4. It compares the complete blob manifest and fetches missing chunks from ready
+   runners; an engine restore provides only its entitled manifest.
+5. It verifies frontier, projection checksum/version, tombstone coverage, and
+   blob root before signing `ready`.
 
-Metadata becoming visible during `joining` does not imply full durability. The
-UI shows operation and blob bytes remaining, oldest missing frontier, estimated
-space, source peers, and errors. A joining runner can serve an explicitly
-partial read-only view, but cannot be described as a full replica, satisfy a
-redundancy acknowledgement, receive default execution, or trigger collection of
-another peer's data.
+A partial read during joining is labeled partial and cannot satisfy redundancy,
+execute by default, or trigger collection. UI reports remaining data, source,
+gaps, space, and errors. Portable encrypted seeds remain a transport
+optimization and require live signature/hash/grant validation.
 
-A runner offline for months uses exactly this snapshot-plus-tail path; catch-up
-does not require the engine and can be seeded from any ready runner over LAN,
-VPN, removable encrypted transfer, or other authenticated peer transport. A
-portable seed is a signed/encrypted transport optimization, not a distinct
-backup format, and must revalidate hashes, signatures, grant state, and the live
-tail before readiness.
+### Capacity, acknowledgements, and compaction
 
-### Capacity and retention
+Full runner disk growth follows total account history. Display logical/physical
+bytes, growth, reserve, and completeness. Deduplication and compaction reduce
+representation cost, not scope. Blob LRU, download-on-open, assignment-scoped
+history, and silent skips are forbidden. Pressure rejects large imports or
+requires shared deletion/retirement.
 
-Full replicas intentionally make runner disk growth proportional to total
-account history and attachments, not that runner's workload. The product must
-show total logical bytes, physical deduplicated bytes, per-class growth, growth
-rate, minimum free-space reserve, and each runner's complete/incomplete state.
-Content hashes deduplicate identical attachments and snapshots; compression and
-operation compaction reduce representation cost but not replica scope.
+A local write immediately schedules every reachable runner and entitled engine
+partition. Until another runner acknowledges it, UI reports one runner copy;
+until the engine acknowledges it, UI separately reports engine backup pending or
+not included by tier. An engine acknowledgement can protect against total runner
+loss but does not turn the engine into an execution peer.
 
-Runner blob LRU eviction, “download on open,” assignment-scoped history, and
-silent quota skipping are forbidden for ready replicas. Capacity pressure pauses
-admission of new large data before local disk exhaustion and surfaces a specific
-action: add capacity, delete shared application data through a replicated
-tombstone, or retire the runner. Retiring a runner first transfers all
-unacknowledged local operations/blobs to another ready runner, records a signed
-retirement, and then allows local cryptographic erase.
+Compaction requires a compatible snapshot on at least two eligible durable
+replicas plus retained coverage for unsuperseded frontiers. Every ready runner
+is eligible for both partitions. The readable engine subscriber is eligible only
+for the partition its current entitlement stores: non-session for free, both for
+paid, and neither for anonymous. Thus a free account with one runner and its
+engine backup may compact non-session history but must retain session history
+until another ready runner has its snapshot. A browser never counts. Retired
+runners stop blocking and bootstrap anew.
 
-Log compaction is safe only when a compatible snapshot is durable on at least
-two non-retiring ready runners and retained operations cover every frontier not
-superseded by that snapshot. Permanently retired peers do not block compaction;
-a returning retired device must enroll and bootstrap anew. Tombstone collection
-uses acknowledged causal frontiers plus the repository's audit/retention policy,
-never wall-clock age alone. Blob bytes are collected only after the referencing
-metadata is tombstoned, safe frontiers prove every member observed the
-tombstone, and no retained snapshot/reference needs them.
-
-A successful local write is durable on its author and immediately enters every
-reachable ready runner's outbound schedule. Until another runner durably
-acknowledges the operation and referenced blobs, the UI labels it `local-only`
-and identifies the author as the sole current copy. This replication interval
-cannot be eliminated without blocking offline writes. It does not make a ready
-runner a partial replica of prior state; it means its frontier has not yet
-advanced to this new write. Operators may require two receipts before large
-imports or before reporting the new frontier as single-failure redundant.
+Tombstone/blob collection likewise uses causal acknowledgement from every
+required durable member of that partition plus retention/reference checks. It
+includes the entitled engine subscriber and ready runners, never browser caches.
+A tier downgrade follows its explicit quarantine/purge lifecycle rather than
+letting the former paid copy indefinitely block free session collection.
 
 ## Conflict policy
 
-Entity conflict rules are normative and specified in
-[convergence.md](convergence.md). They use causal/HLC registers for mergeable
-metadata, remove-wins tombstones, immutable requests/events, and certified
-single-writer execution streams; no SQL row or engine copy is a universal
-winner.
+Entity rules are normative in [convergence.md](convergence.md). They use
+causal/HLC registers, remove-wins tombstones, immutable requests/events, and
+certified executor streams. No engine copy is a universal winner.
 
 ## Session execution protocol
 
 ### Authority certificate
 
-A session creation operation contains `(sessionId, runnerId, epoch = 0)` and the
-target runner acknowledges it. The authority certificate binds:
+Session creation binds `(sessionId, runnerId, epoch = 0)`. The certificate is:
 
 ```text
 session ID + epoch + runner device key + previous epoch frontier + grant ID
 ```
 
-The creator's valid grant and target acceptance establish epoch zero. For
-reassignment, the current runner signs a handoff offer at a quiescent boundary;
-the target signs acceptance. Any peer may retain/relay those records, but no
-engine co-signature is required. The target writes epoch `n + 1` only after both
-records are durable. The old runner fences itself before acknowledgement and can
-never resume that epoch.
+The creator's grant plus target acceptance establishes epoch zero. Reassignment
+requires a quiescent source offer and target acceptance. The source fences
+itself before acknowledging; the target starts epoch `n + 1` only after both
+records are durable. No engine co-signature or browser vote is accepted.
 
-`agent_sessions.execution_generation`, restart handoff fields, generation checks
-in `sync-engine/session-runtime.ts`, and update drain in
-`runner/runner-update.ts` provide concepts to generalize. They do not yet
-transfer authority because orchestration lives in the engine.
-
-If the source cannot participate, Q Mush offers **Fork for recovery**. Any ready
-runner already has the last verified transcript and starts a new session with
-that frontier plus a visible source link. This is not takeover; when the old
-runner returns, the original remains separate. Full replication prevents data
-loss but cannot prove the unavailable process stopped external side effects.
+If the source cannot participate, any ready runner offers **Fork for recovery**
+from the last verified transcript. This is not takeover; returning original and
+fork remain separate. Replication preserves history but cannot prove an
+unavailable process stopped external effects.
 
 ### Local execution path
 
-The runner hosts the coordinator, not only tools:
+1. The authority runner durably accepts a command and emits a receipt.
+2. It reads its local full projection and target-bound vault credential.
+3. It runs provider/model/agent logic and appends turn/message operations around
+   external effects.
+4. Tools invoke runner workspace/container modules directly, not an engine
+   command broker.
+5. It sends live deltas to browser clients and committed operations/blobs to
+   runner replicas.
+6. Its independent engine subscription sends the non-session or paid session
+   partition as entitled; another runner's path never traverses that engine
+   link.
 
-1. It durably accepts a create/continue/input request and emits a receipt.
-2. It reads its full local projection and target-bound private vault envelope.
-3. It runs the provider/model and agent loop locally, appending durable turn and
-   message operations around external effects.
-4. Its tool adapter directly invokes existing runner workspace/container/tool
-   modules; no command bounces through an engine WebSocket.
-5. It sends live deltas and committed operations directly to connected peers.
-6. Every reachable runner ingests the operations and referenced blobs. An
-   optional engine backup receives them only through its own peer subscription.
-
-Migration extracts runtime-neutral agent/provider/domain pieces from
-`sync-engine/session-agent-*.ts`, `sync-engine/session-launcher.ts`, and
-`sync-engine/agent-model.ts` into `shared/`, then adds engine and runner host
-adapters. `runner/` must not import `sync-engine/`.
+Migration extracts runtime-neutral agent/provider/domain pieces into `shared/`
+and adds host adapters. `runner/` never imports `sync-engine/`.
 
 ### External side effects
 
-Convergence cannot make arbitrary shell commands exactly once across a crash.
-Authority provides at-most-one concurrent executor, with explicit write-ahead
-recovery:
+Convergence cannot make arbitrary shell commands exactly once across a crash:
 
 - persist `tool_started(callId, epoch, argumentsHash)` before dispatch;
-- persist bounded output according to current policy;
+- persist bounded output under policy;
 - persist `tool_finished` after result;
-- never blindly rerun an indeterminate side-effecting call after crash; surface
-  it as interrupted; and
-- use provider idempotency keys where supported without claiming universal
-  exactly-once billing.
+- never blindly rerun an indeterminate side-effecting call; and
+- use provider idempotency where available without claiming universal billing
+  exactly once.
 
-Exactly one executor is the architecture guarantee; exactly once for every
-external system is not.
+The guarantee is one concurrent authority, not exactly-once external effects.
 
 ## Reconnection and convergence
 
-When peers connect, they authenticate device/trust state, gossip revocations,
-exchange operation/snapshot/blob frontiers, and apply missing control records
-before dependent data. Operations apply in causal batches; executor output is
-checked against its epoch. Unsupported kinds quarantine. Blob metadata may
-render during joining, but a ready runner cannot retain a “missing attachment”
-state. Projection uniqueness is repaired with domain rules rather than dropping
-an operation because a SQL index rejects an intermediate state. Durable
-acknowledgements advance readiness/compaction; ephemeral streams rebuild from
-live connections.
+Runners authenticate trust, prioritize revocations, exchange partitioned
+operation/snapshot/blob frontiers, and apply control records before dependent
+data. Executor output is checked against epoch; unsupported kinds quarantine;
+projection uniqueness repairs through domain rules. A ready runner cannot keep
+missing attachments. Browser clients invalidate/refetch affected active views
+from a runner instead of participating in anti-entropy.
 
-No engine copy overwrites peer work. If an optional engine replica has a valid
-concurrent register assignment, normal causal rules apply. If it has output from
-an invalid executor or control data outside its key purpose, peers quarantine
-it. Security-sensitive ambiguity fails closed.
+No engine projection overwrites peer work. Its valid subscribed operations obey
+normal causal rules; invalid executor/control records quarantine. A free engine
+cannot become a source of session data. Security ambiguity fails closed.
 
 ## CRDT library decision
 
-Use a small Q Mush domain operation layer initially, not a whole-database CRDT
-or generic JSON document as the canonical model. Multi-writer data is mostly
-registers, observed-remove sets, immutable events, and explicit single-writer
-streams. Visible domain rules keep authority, full-replica completeness,
-credential exclusion, tombstones, and relational projections reviewable.
-
-Do not implement novel text CRDT algorithms. If character-level prompt editing
-becomes required, adopt a mature CRDT behind the same operation boundary after a
-reproducible browser/Bun/Vite/standalone spike. Automerge and Yjs are candidates
-for that bounded use; cr-sqlite may be evaluated behind a projection adapter but
-does not solve IndexedDB, execution authority, full blob transfer, or credential
-separation. No such dependency belongs on the critical path without verified Bun
-standalone compatibility, bundle/resource measurements, and an ADR.
+Start with a small domain-operation layer, not a whole-database CRDT. State is
+mostly registers, observed-remove sets, immutable events, and executor streams.
+Do not invent a text CRDT. Evaluate a mature library only for a demonstrated
+character-editing need after compatibility/resource tests; it still would not
+solve authority, blobs, tiers, trust, or secrets.

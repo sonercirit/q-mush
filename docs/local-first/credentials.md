@@ -1,182 +1,229 @@
 # Peer credential distribution
 
 This document is normative detail for the
-[local-first architecture](../local-first-architecture.md). Device trust is
-specified in [trust-and-security.md](trust-and-security.md).
+[local-first architecture](../local-first-architecture.md). Device trust and
+account recovery are specified in
+[trust-and-security.md](trust-and-security.md).
 
 ## Credential-plane boundary
 
 Secrets use a runner-only credential plane separate from ordinary replication.
-The operation log contains only non-secret credential state:
+The operation log and readable engine backup may contain only non-secret state:
 
-- random credential ID, provider kind, display label, and version;
-- non-sensitive provider capabilities where appropriate;
-- policy naming authorized executor runner IDs (default: every trusted executor
-  runner), expiry, and revocation state; and
-- signed target delivery receipts containing no ciphertext or endpoint/key.
+- random credential ID, provider kind, display label, source, fingerprint, and
+  version;
+- non-sensitive provider capabilities/default/connectivity state;
+- policy naming authorized executor runners, expiry, and revocation; and
+- signed target delivery receipts without ciphertext, endpoint, or key.
 
-Generic base URLs can contain private hostnames, paths, or tenant data and
-therefore travel with the secret payload, not discovery or ordinary metadata.
-Plaintext credentials and sealed envelopes are never operations, snapshots,
-application blobs, browser-readable fields, or engine backup data.
+Generic base URLs can expose private hosts, paths, or tenant data and travel in
+the vault payload, not ordinary metadata. Plaintext credentials and sealed
+envelopes are never operations, snapshots, application blobs, browser-readable
+fields, or engine backup data. The current
+`provider_credentials.encrypted_credential` and potentially sensitive `base_url`
+therefore have no direct replicated projection; the precise sanitized schema
+mapping is in
+[replication.md](replication.md#engine-backup-partition-by-schema-entity).
 
-Each runner has an X25519 envelope key certified in its device grant and a
-private vault protected by OS keychain/secure hardware or a local wrapping key.
-For every credential version and target, the source creates a fresh random
-content key and authenticated ciphertext, then seals that key independently to
-the target's current X25519 key. Associated data binds:
+Each runner has an X25519 envelope key certified by its device grant and a
+private vault protected by OS keychain/secure hardware or a wrapping key. For
+each credential version/target, a source creates fresh authenticated ciphertext
+and independently seals its content key to the target's current key. Associated
+data binds:
 
 ```text
 account ID + credential ID + version + provider kind + target device ID
 + target key ID + policy operation hash + issued/expiry times + payload hash
 ```
 
-The signed envelope frame also binds source device, one-time delivery ID, and
-protocol version. Re-encryption always decrypts inside an authorized runner
-vault and creates a new target envelope; a target-bound envelope is never
-forwarded unchanged. Delivery is idempotent by
-`(credentialId, version, targetDeviceId)`. After durable vault write, the target
-emits a signed non-secret receipt into ordinary replication.
+The signed frame also binds source, one-time delivery ID, and protocol version.
+Re-encryption decrypts only inside an authorized runner and creates a fresh
+target envelope; an envelope is never forwarded unchanged. Delivery is
+idempotent by `(credentialId, version, targetDeviceId)`. After durable vault
+write, the target emits a non-secret receipt through ordinary replication.
 
-Offline targets catch up when they directly reach any currently authorized
-runner holding that credential. Revocation stops new use and resealing, removes
-local wrapped content keys, and gossips metadata. As with all offline
-revocation, a partitioned target may use its last valid envelope until bounded
-expiry.
+Offline targets catch up directly from any authorized credential holder.
+Revocation stops use/resealing, removes wrapped content keys, and gossips
+metadata. A partitioned target may use its last valid envelope until bounded
+expiry. Credential channels are runner-to-runner, mutually authenticated,
+forward-secret, replay-protected, bounded, and rate-limited. Browsers may submit
+policy intent by ID but never carry payload frames. An endpoint-encrypted relay
+may tunnel a live frame as opaque bytes but cannot store it.
 
-The credential channel is runner-to-runner, mutually authenticated,
-forward-secret, replay protected, size bounded, and rate limited. Browser peers
-may initiate policy intent by credential ID but never carry payload frames. An
-end-to-end encrypted fallback relay may tunnel a live frame as opaque bytes; it
-cannot store an envelope in the application log or address it as a blob. Crash
-dumps, metrics, traces, diagnostics, and audit logs record only IDs, version,
-target, size, result code, and timestamps.
-
-A credential policy may target fewer than all executor runners for
-least-privilege reasons, but that is a conscious secret-availability setting,
-not partial ordinary replication. The UI warns that excluded targets cannot run
-that provider and do not provide credential failover. It never implies that a
-full data replica includes the secret.
+A user may narrow the default all-executor target policy, but UI warns that
+excluded runners cannot execute with or fail over that credential. A full data
+replica does not imply a secret copy.
 
 ## User-entered credentials: no engine traffic
 
-API keys, generic LLM endpoint configuration/keys, Brave Search keys, and any
-future secret with no genuine third-party connect flow are created as follows:
+API keys, generic LLM endpoint configuration/keys, Brave Search keys, and future
+non-connect secrets follow this flow:
 
-1. The user opens the app served by a trusted runner. A secret-entry form posts
-   over the same-origin authenticated TLS/loopback request directly into that
-   runner vault. JavaScript holds the form value only for submission and clears
-   it; no browser persistence, application state store, analytics, or service
-   worker sees it.
-2. The runner creates the replicated non-secret policy/version operation and a
-   local vault record atomically enough to expose no usable summary without a
-   corresponding source vault version.
-3. It enumerates authorized runner device keys from the peer-replicated trust
-   registry, creates an independent envelope for each target, and sends them
-   over direct credential channels. **No engine endpoint is contacted for
-   create, rotate, revoke, distribution, retry, or acknowledgement.**
-4. Targets commit to private vaults, zero transient plaintext/key buffers where
-   runtime permits, and publish non-secret receipts. The UI reports target
-   availability without exposing secret values.
+1. At a trusted runner origin, a transient form posts directly into that
+   runner's vault. JavaScript clears the input; no browser persistence,
+   analytics, service worker, or shared state receives it.
+2. The runner commits a non-secret policy/version operation and local vault
+   record without exposing a usable summary before source custody exists.
+3. It reads authorized runner keys from the peer-replicated registry, makes an
+   independent target envelope, and sends each over direct credential channels.
+   **Create, rotate, revoke, retry, distribution, and acknowledgement issue zero
+   engine requests.**
+4. Targets commit privately and publish non-secret receipts. UI displays
+   availability without values.
 
-A remote browser that cannot safely post to a runner never receives a plaintext
-fallback. The UI asks the user to open a runner-served origin or establish a
-secure direct runner form channel. Credential export is a separate explicit,
-locally encrypted recovery workflow, not browser copy-through.
+A remote browser without a secure runner form path never receives a plaintext
+fallback; it asks the user to open a runner origin or establish a direct secure
+form channel. Export is a separate explicit locally encrypted recovery workflow.
 
-Secret rotation publishes a new metadata version only after its source vault
-commit. Each target receives a new independently sealed payload. Once policy
-marks the old version superseded/revoked and bounded offline use expires,
-targets cryptographically erase its wrapped key. Deleting the only source before
-another target receipt requires a destructive warning because ordinary full
-replication cannot recover secret bytes.
+Rotation creates new target envelopes and versions. After bounded old-version
+expiry, targets erase wrapped keys. Deleting the last holder before another
+receipt requires a destructive warning because ordinary/engine replicas cannot
+recover secret bytes.
 
-## Genuine third-party OAuth handshakes
+## Provider authorization flows
 
-Only a flow that inherently needs a public registered callback or confidential
-exchange may involve the engine: Google login/account recovery and OpenAI or
-OpenRouter OAuth. Even then the engine's role ends at handshake completion:
+Provider authorization is not a reason to send tokens through the engine. The
+current repository behavior was verified from `sync-engine/openai.ts`,
+`sync-engine/index.ts`, `sync-engine/openrouter.ts`, and shared routes:
 
-1. The initiating runner generates a one-time request ID, X25519 return key,
-   PKCE verifier/challenge where supported, expected provider/account, expiry,
-   and signed callback binding. It sends only this handshake request to the
-   engine and opens the authorization URL.
-2. The engine validates user/account intent, performs the registered callback
-   and code exchange, and immediately encrypts resulting access/refresh material
-   to the one-time runner return key with associated request/provider/account
-   data.
-3. The engine sends the sealed result to the initiating runner, erases
-   plaintext/code/verifier and any transient encrypted result after acknowledged
-   delivery or short timeout, and never inserts provider tokens into its
-   database, logs, optional backup replica, or environment-key credential store.
-4. The runner opens the result into its vault, publishes non-secret metadata,
-   and distributes per-device envelopes to authorized runners over the peer
-   credential plane. No per-target engine request occurs.
-5. Refresh happens runner-side whenever provider semantics permit. A designated
-   credential leader serializes rotation, emits a new metadata version, and
-   peer-distributes it. If a provider requires the registered engine client for
-   refresh, the same narrowly scoped sealed handshake is used only for refresh;
-   ordinary use and fan-out remain peer-side.
+- OpenAI currently starts an authorization-code/PKCE flow in the engine and, for
+  the default public client, starts a second Bun listener on
+  `http://localhost:1455/auth/callback`. That callback belongs to the machine
+  running the production engine, not necessarily the user's runner/browser, so
+  it is not a viable production connect flow.
+- OpenRouter currently sends a `callback_url` supplied by Q Mush, uses PKCE, and
+  exchanges the returned code at `/api/v1/auth/keys`. It has no configured
+  client ID or client secret in this repository. Its callback is URL-bound for
+  the transaction but not engine-bound: an initiating runner can host the exact
+  callback and perform the exchange.
 
-OAuth state is single-use, short-lived, account/request bound, and protected
-against callback mix-up and replay. The engine cannot substitute another target
-key undetectably because the initiating runner's signed request and return key
-are bound through authorization state and sealed response. Delivery failure
-retains no long-lived engine token: the user restarts the handshake.
+Consequently **Google identity is the target engine's only OAuth/OIDC flow**.
+Neither OpenAI nor OpenRouter provider material enters an engine process.
 
-This changes current custody deliberately. Provider OAuth material must no
-longer remain in `provider_credentials.encrypted_credential` for routine engine
-use. Migration performs an authenticated sealed handoff to at least one runner,
-verifies its vault receipt, peer-distributes to policy targets, then clears the
-legacy engine ciphertext under the existing soft-delete/audit policy. Until that
-succeeds, the credential is visibly `legacy engine-held` and not claimed as
-engine-independent.
+### OpenAI device-code flow
+
+OpenAI authorization is replaced—not supplemented—with a runner-side device
+flow:
+
+1. The runner requests a device/user code from the provider over outbound HTTPS.
+2. The Solid view displays the exact provider verification URL, short user code,
+   expiry, and cancellation state. The browser opens that provider URL but never
+   receives resulting tokens.
+3. The user enters/confirms the code at the provider. The runner polls the
+   provider token endpoint at the specified interval, handles pending/slow-down,
+   expiry, denial, and cancellation, and validates returned account metadata.
+4. The runner commits access/refresh material directly to its vault, publishes
+   sanitized metadata, and distributes fresh target envelopes peer-to-peer.
+5. A designated credential holder refreshes outbound from a runner, versions the
+   result, and redistributes it. No inbound listener, port `1455`, engine
+   callback, engine cookie, or engine credential key is involved.
+
+Implementation must verify the provider's production device-authorization
+contract, endpoints, client eligibility, polling rules, and scopes before
+shipping. If the provider does not expose a usable device-code contract, Q Mush
+must fail honestly or support API keys; it must not retain the old engine
+loopback flow as a hidden fallback.
+
+### OpenRouter runner-local PKCE
+
+OpenRouter connect starts at a trusted runner. That runner creates state/PKCE,
+uses its stable callback URL in OpenRouter's `callback_url`, validates callback
+state/origin/account intent, exchanges the code outbound, stores the returned
+user-controlled key in its vault, and peer-distributes it. Exact Host/Origin,
+short single-use state, callback path, expiry, replay, and mix-up checks apply.
+A runner without a provider-reachable callback may use an API key instead; it
+does not bounce through the engine. This conclusion must be revisited if
+OpenRouter later requires a confidential/registered engine client.
+
+## What the migration deletes
+
+After runner provider flows and vault migration are proven, remove the engine's
+provider connect/custody surface rather than leaving two paths:
+
+- the OpenAI loopback constants/listener and startup/shutdown handling in
+  `sync-engine/index.ts`/`sync-engine/openai.ts`, including port `1455`;
+- engine OpenAI authorization, callback, code exchange, refresh, and provider
+  credential routes (`/api/openai/oauth`, `/api/openai/oauth/callback`, and
+  engine credential mutation/custody);
+- `OPENAI_CLIENT_ID`, `OPENAI_REDIRECT_URI`, and `OPENAI_CREDENTIAL_KEY`
+  requirements for provider custody;
+- engine OpenRouter authorization/callback/key exchange and provider credential
+  routes (`/api/openrouter/oauth`, `/api/openrouter/oauth/callback`, and engine
+  credential mutation/custody), plus `OPENROUTER_REDIRECT_URI` and
+  `OPENROUTER_CREDENTIAL_KEY` custody;
+- shared/engine connected-account cookie/configuration code only after Google
+  auth no longer imports the pieces it still needs; and
+- provider-token ciphertext in legacy `provider_credentials` rows after verified
+  migration, under soft-delete/audit retention without retaining the secret.
+
+Do **not** delete Google `/api/auth/google/callback`, generic OAuth/PKCE helpers
+still used by Google, runner-side OpenAI token parsing/refresh/model support, or
+runner-side OpenRouter exchange/use merely because their current versions live
+under `sync-engine/`. Runtime-neutral/provider logic moves to `shared/` with
+runner adapters. Shared route constants and Solid links for removed engine
+provider callbacks are replaced by runner-local APIs, not retained aliases.
+
+## Legacy credential migration
+
+Current provider secrets are engine-encrypted. User-entered API/generic/Brave
+values may make a one-time authenticated target-sealed transfer to an owner
+runner if implementing that migration does not expose plaintext outside the
+legacy process. The runner verifies vault and peer receipts, then the engine
+clears ciphertext.
+
+For OpenAI OAuth, device-code **re-authorization is the default migration**:
+show `Re-authenticate on a runner`, retain only sanitized identity/label long
+enough to match the new credential, and delete old engine tokens after success
+or a clearly announced migration deadline. Do not build new long-lived engine
+token handoff around the obsolete callback flow. OpenRouter may likewise
+reauthorize runner-side; a narrowly bounded one-time sealed handoff is
+acceptable only as a migration mechanism and never steady-state custody.
+
+Until complete, a credential is visibly `legacy engine-held`; it is not claimed
+as engine-independent or recoverable from readable backup. Tier does not alter
+secret migration or custody.
 
 ## Secret exclusion and validation
 
 Plaintext and envelope ciphertext never enter:
 
-- IndexedDB, `localStorage`, service-worker cache, or browser application state
-  beyond the transient input field/request body;
-- ordinary operations, snapshots, application blobs, SQLite projections, or
-  optional engine backup state;
-- mDNS, candidate/peer lists, tab WebRTC/BroadcastChannel messages;
-- runner tool commands, prompts, transcripts, diagnostics, bundles, analytics,
-  or logs; or
-- engine processes at all, except transient plaintext during a genuine OAuth
-  exchange and its immediate sealed return.
+- IndexedDB, `localStorage`, service-worker cache, browser stores, or browser
+  messages beyond the transient secret input/request;
+- ordinary operations, snapshots, blobs, SQLite projections, or free/paid engine
+  backup;
+- discovery/candidate lists, `BroadcastChannel`, or browser WebRTC;
+- tools, prompts, transcripts, diagnostics, bundles, analytics, logs, or crash
+  output; or
+- engine processes after migration. Google identity tokens are separately
+  discarded under the auth design and are not provider credentials.
 
-Ordinary peer captures may contain credential IDs, policy, and delivery
-receipts, never payload bytes. Credential-plane captures contain only
-independently target-sealed frames. Browser and ordinary-sync codecs reject
-credential payload frame types rather than merely promising not to produce them.
-Vault files use a distinct path/key/schema and are excluded from replica
-snapshot/export code by construction.
+Ordinary captures may show only IDs/policy/receipts. Credential captures contain
+independent target ciphertext. Browser and engine codecs reject credential frame
+types. Vault paths/keys/schemas are separate from snapshot/export code.
 
-Required tests use canary secrets and process/network interception to prove:
+Required tests prove:
 
-- firewalling every engine endpoint still permits create, rotation,
-  distribution, revocation, and target acknowledgement for API, generic, and
-  Brave credentials;
-- engine request logs remain empty during those flows;
-- each target envelope differs, cannot open on another runner, and fails after
-  associated-data or policy modification;
-- replay, rollback, wrong target key, revoked policy, expired grant, and payload
-  mismatch fail closed;
-- a genuine OAuth exchange leaves no durable engine token and subsequent fan-out
-  generates only runner-to-runner traffic; and
-- browser memory/storage capture (apart from the unavoidable live input control
-  and request), ordinary replication, logs, crashes, updates, exports, and tool
-  invocations contain no canary.
+- blocking every engine endpoint still permits API/generic/Brave lifecycle,
+  OpenAI device authorization, OpenRouter runner callback, refresh, and
+  peer-distribution;
+- no request from those flows reaches the engine and no provider token row is
+  created there;
+- target envelopes differ and fail on wrong target/policy/version/replay;
+- browser/ordinary/backup/log/crash/update/export/tool captures contain no
+  canary; and
+- deleting legacy provider routes/listener does not remove Google login or
+  runner-side provider model/quota behavior.
 
 ## Credential-specific threats
 
-| Threat                                         | Required mitigation/test                                                                                                                                                                            |
-| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| One runner compromise steals its credentials   | Per-device envelopes, vault key separate from replica DB, OS keychain/secure hardware, target/policy/expiry binding, optional narrower policy, rapid revoke/rotate; no account-wide decryption key. |
-| Malicious source substitutes payload or target | Signed policy hash/source, certified target key, associated-data binding, one-time delivery, visible target receipt, monotonic version, OAuth callback-key binding.                                 |
-| Envelope replay or rollback                    | Version, target/key ID, expiry, revocation metadata, durable delivery ledger, nonce; reject lower version and duplicate delivery with another hash.                                                 |
-| Payload leaks into ordinary replication        | Separate endpoints/codecs/stores/keys, type-level separation, browser rejection, canary inspection of operations, snapshots, blobs, relays, logs, crashes, bundles, and commands.                   |
-| Compromised/curious engine reads secrets       | User-entered secrets never contact it; OAuth plaintext immediately target-sealed, no token row, strict redaction/retention, capture tests, and process-isolation review.                            |
-| Source disappears before distribution          | Default all-executor policy, explicit per-target receipts, destructive warning before last-copy erase, optional encrypted user-held recovery export.                                                |
-| Offline revoked target keeps using a key       | Short envelope/grant expiry, prioritized revocation gossip, provider-side rotation/revocation, visible stale window; instantaneous partition revocation is not claimed.                             |
+| Threat                                       | Required mitigation/test                                                                                                                           |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| One runner compromise steals its credentials | Per-device vault/envelopes, separate keys, OS protection, target/policy/expiry binding, revoke/rotate; no account-wide key.                        |
+| Source substitutes payload/target            | Signed policy/source, certified target key, associated data, one-time delivery, visible receipt, monotonic version.                                |
+| Replay or rollback                           | Version, target/key ID, expiry, revocation, durable ledger, nonce; reject lower version or changed duplicate.                                      |
+| Secret leaks to ordinary/engine storage      | Separate codecs/stores/routes/keys, type-level exclusion, canary inspection across snapshots, backup, browser, logs, crashes, exports, and tools.  |
+| Engine provider path survives migration      | Route/startup capture tests and removal assertions; only Google identity OAuth remains.                                                            |
+| Device authorization phishing                | Show exact provider-owned URL/domain and code/expiry; never ask for provider password; bind polled response to request/account and cancel visibly. |
+| Callback attack on runner OpenRouter flow    | Pinned callback origin/path, PKCE, state, short expiry, single use, account-intent binding, exact Host/Origin, no open redirect.                   |
+| Source disappears before distribution        | Default all-executor policy, per-target receipts, last-copy warning, optional user-held encrypted recovery.                                        |
+| Offline revoked target keeps using key       | Short grant/envelope expiry, priority gossip, provider rotation/revocation, visible stale window; no instant-partition claim.                      |

@@ -2,104 +2,133 @@
 
 This document is normative detail for the
 [local-first architecture](../local-first-architecture.md). Authentication,
-credential handling, and degraded behavior are specified in
+credentials, tier behavior, and recovery are specified in
 [trust-and-security.md](trust-and-security.md).
 
-## Peer-first topology
+## Three distinct runtime roles
+
+A runner, the Solid browser client, and the sync engine remain separate security
+and storage roles even when one machine runs more than one of them:
+
+```text
++----------------------+       direct mesh       +----------------------+
+| runner A             |<=======================>| runner B             |
+| full replica         |                         | full replica         |
+| app/API/exec/vault   |                         | app/API/exec/vault   |
++----------^-----------+                         +-----------^----------+
+           | bounded view queries / commands / live output  |
+           +----------------------+--------------------------+
+                                  |
+                        +---------v----------+
+                        | Solid client       |
+                        | partial on-demand  |
+                        | view/cache/drafts  |
+                        +--------------------+
+
+ runners .... independent entitled subscriptions .... sync engine
+            (readable backup; never A-to-B route)
+```
+
+Serving the Solid assets from a runner does not merge the browser JavaScript
+process with the runner replica. The browser has no full-log subscription,
+replica frontier, readiness state, compaction vote, or credential channel. It
+queries a reachable runner for the current session list/page/detail, workspace,
+prompt, settings, or attachment range; bounded invalidations trigger refetch. It
+may cache those responses and local drafts for usability, but those bytes are
+not durability evidence. Shared edits are commands submitted to a runner, not
+browser-originated replicated operations.
+
+## Peer-first runner topology
 
 Every runner starts a loopback app/API/peer listener by default and may
-explicitly enable a paired LAN or remote listener. Its port and stable local
-origin are persisted so IndexedDB, service-worker state, and cookies survive
-restarts. Discovery exposes only opaque peer ID, connection candidates, and
-protocol versions; private metadata appears only after mutual authentication.
+explicitly enable a paired LAN or remote listener. Persist its port/stable local
+origin so caches and cookies survive restarts. Discovery reveals only opaque
+peer ID, candidates, and protocol versions before authentication.
 
-The route policy is invariant, not an optimization:
+Route policy is invariant:
 
-1. Use a same-host runner WebSocket or `BroadcastChannel` route where available.
+1. Use a same-host runner WebSocket where available.
 2. Prefer direct authenticated runner WebSocket/TLS, LAN, user VPN/overlay, or
-   established WebRTC between remote peers.
-3. Use cached/manual rendezvous candidates to establish another direct route.
-4. Only after direct establishment fails may the user/policy select an
-   end-to-end encrypted relay/TURN tunnel. The UI labels it `Relay fallback`.
-5. If no direct route or approved fallback exists, report `No route`; do not
-   silently broker through the engine's application WebSocket.
+   established WebRTC transport.
+3. Use cached/manual candidates to establish another direct route.
+4. For paid logged-in accounts only, after direct establishment fails, policy
+   may select the managed end-to-end encrypted relay/TURN service. Label it
+   `Relay fallback`.
+5. Otherwise report `No route`; never broker through the engine application
+   WebSocket.
 
-Engine health does not change this ordering. Engine rendezvous can exchange
-signed, opaque candidates or WebRTC signaling, but after establishment all
-ordinary operations, blobs, commands, receipts, and live streams traverse the
-peer connection. An engine-operated relay is allowed only under step 4 and has
-no endpoint keys or workspace grants. The engine must never terminate A's data
-frames and re-emit them to B as an ordinary peer sync flow.
+Engine health does not change this order. Paid rendezvous exchanges signed,
+opaque candidates or signaling, but ordinary operations, blobs, commands,
+receipts, and streams still traverse endpoint-authenticated peer sessions. The
+paid relay has no endpoint keys or grants and cannot terminate, inspect,
+authorize, merge, or store-and-forward application frames. Anonymous/free users
+can use LAN, manual exchange, directly reachable addresses, or their own
+VPN/relay infrastructure; managed engine rendezvous/relay is not an entitlement
+for free mode.
 
-An optional engine backup is a normal subscriber: runner A can sync A's frontier
-to it and runner B can independently sync B's frontier to it. Those
-subscriptions must not replace or proxy the A-to-B connection. Path tests and
-diagnostics identify every frame's endpoint pair and assert that ordinary
-runner/browser traffic has no hidden engine hop.
+The readable engine backup is a normal **destination subscriber** with tier
+scope. Runner A and runner B may independently upload their own missing ranges;
+deduplication makes the result one account frontier. The engine cannot serve
+those live links as the A-to-B route. Endpoint-pair telemetry and capture tests
+must distinguish direct mesh, backup, rendezvous signaling, and opaque relay.
 
-### Same host and tabs
+### Same host and Solid views
 
-A tab opened from `http://127.0.0.1:`\<port>`/app` (or a stable loopback
-hostname) uses a same-origin WebSocket to that runner. This is the core outage
-path: the runner serves app and API, supplies a full account projection, accepts
-commands for its executor, and introduces other peers. An engine-served app may
-connect outward to a paired runner, but the design never depends on a public web
-origin reaching loopback through browser Local Network Access exceptions.
+A client opened from `http://127.0.0.1:<port>/app` (or a stable loopback
+hostname) uses a same-origin authenticated API/WebSocket to that runner. This is
+the core outage path: the runner serves assets and on-demand projections,
+accepts commands, and introduces runner peers. Multiple tabs at the same origin
+may use `BroadcastChannel` solely to elect one browser transport owner, share
+view invalidations, and coordinate drafts. Tabs remain clients, **not logical
+replication peers**, and `BroadcastChannel` traffic never contains operation
+ranges or acknowledgements.
 
-Same-origin tabs use `BroadcastChannel` to elect one transport owner per browser
-profile/origin and fan out operation notifications. Each tab remains a logical
-peer, but one connection avoids redundant anti-entropy. Tabs on engine and
-runner origins use authenticated peer transport rather than `BroadcastChannel`.
+An engine-served migration app may connect outward to a paired runner, but the
+target never depends on a public page reaching loopback through Local Network
+Access exceptions. Engine and runner origins cannot use `BroadcastChannel`
+together.
 
 ### LAN
 
 An explicitly LAN-enabled runner binds a private interface and advertises a
 DNS-SD service such as `_qmush._tcp` with protocol/app version, port, and opaque
-peer-key fingerprint. The runner process browses mDNS; ordinary pages cannot be
-assumed to have multicast APIs. A user opens the advertised `.local` URL or
-enters/scans an address and pairs.
+peer-key fingerprint. The runner process browses mDNS. A user opens the `.local`
+URL or enters/scans an address and pairs.
 
-Private addressing is not trust. Write-capable LAN mode requires a stable HTTPS
-origin with a pinned runner certificate, or loopback termination through a
-native helper. Stage 1 is loopback-only. Until certificate onboarding is usable,
-opt-in plain HTTP LAN access is read-only and visibly warned, or disabled.
+Private addressing is not trust. Write-capable LAN mode requires stable HTTPS
+with a pinned runner certificate or loopback termination through a native
+helper. Stage 1 is loopback-only. Until secure onboarding works, opt-in plain
+HTTP LAN access is read-only and visibly warned, or disabled.
 
 ### Remote networks and NAT
 
-A runner accepts a pinned manual HTTPS URL, including a user VPN, reverse
-tunnel, or overlay. WebRTC ICE may require STUN/TURN across firewalls and NAT,
-and a browser cannot accept arbitrary inbound TCP. Candidate sources are, in
-order, reachable runners, local cache, manual QR/copy-paste, and optional engine
-rendezvous. Candidate exchange grants no data authority.
+A runner accepts a pinned manual HTTPS URL, including user VPN, reverse tunnel,
+or overlay. WebRTC ICE may need STUN/TURN, and browsers cannot accept arbitrary
+inbound TCP. Candidate sources are reachable runners, local cache, manual
+QR/copy-paste, and paid engine rendezvous. Candidate exchange grants no data
+authority.
 
-If the only signaling or relay service fails before candidates are exchanged, a
-new remote route may be impossible. Remote outage operation therefore needs at
-least one of:
+If signaling/relay fails before exchange, a new route may be impossible. Remote
+outage operation therefore needs an existing WebRTC path/cached ICE, pinned
+reachable runner URL, shared LAN/VPN, manual one-time offer/answer, or
+separately reachable encrypted relay. Manual exchange is supported, not a debug
+path. P2P cannot defeat every NAT; honest `No route` is preferable to implicit
+brokerage.
 
-- an open/recoverable WebRTC connection with cached ICE information;
-- a pinned directly reachable HTTPS runner URL;
-- shared LAN or user VPN/overlay;
-- manual one-time offer/answer exchange; or
-- a separately reachable end-to-end encrypted fallback relay.
+### Browser connectivity
 
-Manual offer/answer is a supported engine-free bootstrap, not merely a debug
-path. P2P cannot defeat every NAT; honest `No route` is preferable to turning
-the engine into an implicit broker.
+Browsers connect outward only:
 
-### Browser-to-browser
+- same runner origin: authenticated HTTP/WebSocket, with optional local
+  `BroadcastChannel` transport ownership;
+- remote runner: pinned HTTPS/WebSocket or WebRTC, signaled by a runner, manual
+  exchange, or entitled rendezvous; and
+- no direct path: explicitly approved encrypted relay if available.
 
-Tabs have no listener, so they connect outward:
-
-- same origin: `BroadcastChannel`;
-- different origins/devices: WebRTC `RTCDataChannel`, signaled by a runner,
-  manual exchange, or optional engine rendezvous; and
-- no direct WebRTC route: an explicitly approved encrypted fallback relay.
-
-A tab may carry authorized ordinary operations but cannot execute a session,
-qualify as a full runner redundancy copy, or receive credential envelopes.
-WebRTC transport encryption does not replace Q Mush peer authentication.
-Credential envelopes are runner-to-runner only even when a browser helps with
-signaling.
+A browser can submit bounded queries and commands and receive live events. It
+cannot carry anti-entropy on behalf of runners, qualify as redundancy, or
+receive secrets. WebRTC encryption does not replace Q Mush client/runner
+authentication.
 
 ## App distribution and versioning
 
@@ -119,112 +148,100 @@ SHA-256 for every file
 release signature
 ```
 
-The runner serves it without Vite or sources. Hashed assets use immutable
-caching; manifest and shell use ETag revalidation. A later service worker may
-precache one verified release and retain the prior compatible release for
-rollback; it never caches API responses or credential-plane traffic.
+The runner serves it without Vite/sources. Hashed assets are immutable; manifest
+and shell use ETag. A service worker may cache verified app assets and a prior
+release, but never API projections, operation data, or credential traffic. Any
+browser data cache is explicit application storage with partial-view semantics.
 
-`sync-engine/client-build.ts` already points Vite at `solid/client.tsx`, and
-`sync-engine/server.ts` reads its output. Refactor this into one build-time
-artifact producer for engine migration hosting and runner packaging rather than
-creating another Solid build configuration.
+`sync-engine/client-build.ts` already points Vite at `solid/client.tsx`, while
+`sync-engine/server.ts` consumes output. Refactor one build artifact producer
+for runner packaging and temporary engine migration hosting; do not duplicate
+the Solid build.
 
 ### Existing update chain
 
-`sync-engine/runner-executable.ts` fingerprints runner source plus Bun version,
-cross-compiles privately, caches by target, and serves ETag/SHA-256.
-`runner/runner-update.ts` bounds/verifies download, atomically replaces the
-executable, and restarts after drain. Extend the chain:
+The existing engine fingerprints/cross-compiles runner sources and the runner
+hash-checks then atomically replaces itself. Extend it:
 
-1. Produce web manifest/assets once from the Vite build.
-2. Include their digest and compatibility range in the runner fingerprint and
-   embed the release in the executable by default.
-3. Verify executable/manifest, drain execution, atomically replace, and restart.
-4. Keep release `N` until active tabs can read or reload into `N + 1`.
-5. Sign with the installer-rooted release key. Any peer or mirror may distribute
-   the byte-identical artifact; none may author a release.
+1. Build one signed web manifest/assets set.
+2. Embed digest/compatibility in the runner executable fingerprint.
+3. Verify, drain execution, atomically replace, and restart.
+4. Keep release `N` until tabs can reload into `N + 1`.
+5. Trust an installer-rooted release signature, not the download host.
 
-Peer/mirror distribution minimizes engine traffic and lets a directly reachable
-updated runner seed another. Update checks prefer peers with a verified newer
-manifest and use the engine or configured mirror only when no peer has it.
-Publisher signature, not source host, establishes authenticity. Executable bytes
-remain outside ordinary application replication but use resumable, bounded,
-hash-checked transfer.
+Peers or mirrors may distribute identical artifacts. Checks prefer a verified
+newer peer and use engine/mirror only when needed. Executable bytes are not
+application replication but use resumable bounded hash-verified transfer.
 
 ### Version skew
 
-Handshake fields include app release, peer protocol min/max, operation schema
-min/max, snapshot version, blob/credential-plane capabilities, and replica
+Runner handshakes include release, peer protocol range, operation schema range,
+snapshot version, blob/credential capabilities, tier partition, and replica
 state.
 
-- Common versions: full read/write/sync.
-- Unknown optional fields: preserve and forward.
-- Unsupported operation kind/schema: quarantine, require update, and disable
-  affected writes; a negotiated turn may finish.
-- No common protocol: close after a minimal signed error and retain local
-  read-only app/data.
-- Incompatible snapshot: choose another snapshot/peer or replay a retained
-  compatible operation range. A joining runner cannot become ready without a
-  complete compatible path.
+- Common versions permit normal read/write/sync.
+- Preserve unknown optional fields.
+- Unsupported operation kinds quarantine and disable affected writes.
+- No common protocol closes after a signed error while local compatible reads
+  remain.
+- Incompatible snapshots require another peer/snapshot or retained operation
+  range; a joining runner cannot become ready without a complete path.
 
-The UI shows peer versions and compatibility. Cache invalidation is manifest
-based and never requires today's engine `/app.js`.
+Browser API negotiation is separate and exposes only supported view/query and
+command versions. A stale Solid release never receives raw unknown operation
+kinds. The UI shows compatibility and uses manifest-based cache invalidation,
+not today's engine `/app.js` dependency.
 
 ## Transport and traffic constraints
 
-The frame protocol is defined in
-[replication.md](replication.md#peer-first-synchronization-protocol). WebSocket,
-WebRTC, and opaque fallback adapters carry the same end-to-end authenticated
-frames. Durable operation anti-entropy, blob transfer, ephemeral live streams,
-and credential delivery are distinct logical channels with separate limits.
+The frame protocol is in
+[replication.md](replication.md#peer-first-synchronization-protocol). Direct
+WebSocket/WebRTC and opaque relay adapters carry endpoint-authenticated runner
+frames. Durable anti-entropy, blobs, streams, engine-backup subscription,
+view/query traffic, and credentials are separate limited channels.
 
-Credential channel constraints are stricter: runner endpoints only; mutual
-owner-grant and target-key proof; no browser forwarding; no store-and-forward
-relay that can read payloads; no inclusion in operation/snapshot/blob frontiers;
-and delivery receipts reveal only credential/version/target identifiers. An
-opaque byte relay may carry an already end-to-end encrypted live credential
-frame, but cannot persist it as ordinary replicated data.
+Credential channels allow runner endpoints only, require target-key proof, and
+exclude browser forwarding and persistent relay storage. An opaque live relay
+may carry already endpoint-encrypted frames. Engine backup parses ordinary data
+to enforce entitlement but receives no credential frame type.
 
-Minimize traffic without weakening full replicas:
+Minimize traffic without weakening runner completeness:
 
-- exchange compact frontiers and manifest trees before requesting bytes;
-- deduplicate content by SHA-256 and resume chunks;
-- choose one or several ready peers near the joining runner rather than routing
-  a full bootstrap through the engine;
-- coalesce live notifications while preserving durable operation boundaries;
-- compress bounded batches and enforce per-channel flow control; and
-- never repeatedly transfer a blob whose verified hash is already local.
+- compare compact partitioned frontiers/manifest trees before byte requests;
+- deduplicate by SHA-256 and resume chunks;
+- bootstrap from nearby ready runners instead of engine hairpinning;
+- coalesce browser invalidations and live notifications;
+- paginate/query only the active Solid view;
+- compress bounded batches with per-channel flow control; and
+- never retransmit a verified blob hash unnecessarily.
 
-Full replica means eventual byte completeness, not broadcast every byte to every
-socket at once. Backpressure and resumable catch-up can bound bandwidth, but a
-ready runner cannot declare quota-based permanent omissions.
+A full runner means eventual byte completeness, not immediate broadcast to every
+socket. A browser remains intentionally partial forever. A logged-in engine is
+complete only for the tier partition through its displayed backup frontier.
 
 ## Degraded-mode user interface
 
-The app separately reports route, engine control reachability, replica
-completeness/redundancy, executor authority, credential availability, provider
-reachability, and version. It never compresses these into one green/red dot. The
-complete action contract is in
-[trust-and-security.md](trust-and-security.md#degraded-mode-contract).
+Report route, runner completeness, engine backup scope/frontier, entitlement,
+executor authority, credential availability, provider reachability, and version
+separately. Persistent states include:
 
-Persistent states include:
+- **Direct — runner name** and **Mesh — n runners**;
+- **Relay fallback** (paid managed or named user-provided operator);
+- **Joining runner — x/y operations, a/b blob bytes**;
+- **Full runner — local-only changes** or **runner-redundant**;
+- **Engine backup — non-session**, **all data**, **pending**, or **not available
+  (anonymous)**;
+- **Solid partial view — cached/offline**; never “replica” and never a quorum
+  member;
+- **Authorization expires soon/expired**; and
+- **Update required/incompatible**.
 
-- **Direct — runner name:** command/data endpoint is the named peer.
-- **Mesh — n peers:** direct anti-entropy is active.
-- **Relay fallback:** explicit last-resort encrypted tunnel; reason and operator
-  shown.
-- **Joining replica — x/y operations, a/b blob bytes:** not redundancy-ready.
-- **Full replica — local-only changes:** complete base plus writes awaiting a
-  second durable runner receipt.
-- **Full replica — redundant:** complete frontier/blobs acknowledged elsewhere.
-- **Offline cache:** browser only; no executor route.
-- **Authorization expires soon/expired:** exact time and remediation peer.
-- **Update required/incompatible:** read-only where possible.
-
-Pending requests show `local-only`, `replicating`, `queued`, `accepted`,
-`executing`, `applied`, `rejected`, or `cancelled`. Only executor-accepted input
-becomes canonical. Diagnostics show peer/frontier/version, path endpoints,
-operation/blob lag, and unsynced byte counts without content or keys.
+Commands show `draft`, `submitting`, `runner-local`, `replicating`, `queued`,
+`accepted`, `executing`, `applied`, `rejected`, or `cancelled`. A browser draft
+is not `local-only` shared data; only a runner commit earns that label. Session
+views for free users warn that engine backup excludes them. Upgrade backfill and
+downgrade grace/purge are visible. Diagnostics show IDs, frontiers, endpoints,
+versions, lag, and byte counts without paths, content, or keys.
 
 ## Bounded transport research
 
@@ -232,13 +249,12 @@ operation/blob lag, and unsynced byte counts without content or keys.
   treats local copies as primary and servers as secondary helpers.
 - MDN's
   [WebRTC protocol overview](https://developer.mozilla.org/en-US/docs/Web/API/WebRTC_API/Protocols)
-  explains ICE/STUN/TURN and NAT limits. WebRTC's
+  and the
   [peer connection guide](https://webrtc.org/getting-started/peer-connections)
-  leaves signaling outside the specification, so optional engine rendezvous
-  cannot be the only supported route.
-- MDN documents `BroadcastChannel` as same-origin communication; it cannot
-  bridge engine and runner origins.
+  explain ICE/STUN/TURN and leave signaling unspecified; engine rendezvous
+  cannot be the sole route.
+- `BroadcastChannel` is same-origin and cannot bridge engine/runner origins.
 - Chrome's
   [Local Network Access](https://developer.chrome.com/blog/local-network-access)
-  work adds permissions around public-site access to loopback/LAN. Core offline
-  use therefore starts at the runner-served origin.
+  adds permissions around public-site access to loopback/LAN, so core local use
+  starts at the runner-served origin.

@@ -1,178 +1,228 @@
-# Trust, degraded operation, and security
+# Trust, login, recovery, and security
 
 This document is normative detail for the
-[local-first architecture](../local-first-architecture.md). Topology and app
-delivery are specified in [runtime-and-transport.md](runtime-and-transport.md);
-exact secret custody and flows are specified in
+[local-first architecture](../local-first-architecture.md). Topology is in
+[runtime-and-transport.md](runtime-and-transport.md), replication/tier scope in
+[replication.md](replication.md), and secret flows in
 [credentials.md](credentials.md).
 
-## Authentication and peer-side trust
+## Anonymous-first identity and peer trust
 
-### Account trust root and device grants
+### Runner-local account genesis
 
-Google remains an account bootstrap/recovery identity, not a steady-state login
-or offline authentication dependency. Initial enrollment creates:
+Login is optional. On first local use, a runner can create an **anonymous local
+account** without contacting the engine:
 
-- Ed25519 signing and X25519 encryption keys on the first owner device;
-- a random device ID distinct from machine fingerprint;
-- an engine-signed bootstrap assertion binding the Google account ID to the
-  owner's public signing key; and
-- a signed account genesis operation naming that owner key and recovery policy.
+- generate a stable random account UUIDv7, Ed25519 owner signing key, X25519
+  encryption key, and random device ID distinct from machine fingerprint;
+- write a signed account-genesis operation naming that owner and recovery state
+  `none`;
+- initialize the complete runner operation/projection/blob stores; and
+- issue a short-lived origin-bound browser client grant after local physical
+  confirmation.
 
-The engine assertion can establish or recover the first owner but cannot sign
-ordinary application data, execution epochs, runner grants, or credentials.
-Private owner keys never leave the device. Runner private keys stay mode `0600`
-in the private runner home, protected by OS keychain/secure hardware where
-available and a sealed private-file fallback. Browser profiles use
-non-extractable WebCrypto keys in IndexedDB where supported. A profile, not each
-tab, is the durable browser device.
+The private owner/device keys never leave an authorized device. Runner keys use
+mode `0600` and OS keychain/secure hardware where available, with a sealed-file
+fallback. Browser client keys may be non-extractable WebCrypto keys, but they
+only authenticate a partial view client; they do not make the browser a replica
+or owner unless an explicit high-risk owner grant says so.
 
-Thereafter trust administration is peer-side. An already trusted owner device
-can directly:
+Anonymous mode supports local app access, sessions, providers, tools, all-runner
+replication, manual/LAN/VPN peer discovery, and direct pairing among the user's
+devices. It has no engine identity, backup, managed rendezvous/relay, or total-
+runner-loss recovery. That loss posture is accepted and shown before destructive
+retirement of the last runner.
+
+### Peer grants
+
+An authorized owner can directly:
 
 - approve a runner or browser key after fingerprint/user confirmation;
-- issue grants no wider than its own capabilities;
-- renew another device within owner policy;
-- add another owner with explicit high-risk confirmation; and
-- sign a remove-wins revocation and gossip it to reachable peers.
+- issue grants no wider than its capabilities;
+- renew devices, add an owner with high-risk confirmation, and sign remove-wins
+  revocations; and
+- gossip trust operations to reachable runners and the entitled backup.
 
-None requires an engine request. Engine-assisted Google recovery may replace a
-lost owner only under recorded recovery policy and must produce an auditable
-trust-root transition; it cannot silently undo an owner revocation.
+No routine action needs the engine. A runner membership grant commits it to the
+full account replica. Workspace capabilities constrain access/execution/secret
+use, not runner storage. Browser grants authorize bounded view queries/commands
+and never include full-replica, compaction, backup, vault, or execution
+capabilities. Multi-account runners isolate keys and data.
 
-A runner membership grant commits it to storing the full account replica.
-Workspace capabilities constrain browser views, execution, directory access, and
-credential use, but do not permit an enrolled runner to omit durable account
-records. Every runner is therefore a high-trust account device. Multi-user
-installations keep cryptographically/logically separate account replicas.
+Grants expire. An offline device accepts only an unexpired chain not rejected by
+its latest revocation frontier and cannot self-renew. Persist highest trusted
+clock state so rollback fails writes closed while cached reads remain. A
+partitioned revoked device may retain authority until expiry; UI shows expiry
+and frontier age.
 
-Certificates/grants cover realistic outages but expire. An offline peer accepts
-only an unexpired chain not rejected by its newest revocation frontier and
-cannot self-renew. Persist highest trusted time/HLC so clock rollback fails new
-writes closed while cached reads remain. Revocation cannot instantly reach a
-partition: authorization may remain stale until grant expiry or newer gossip.
-The UI shows exact expiry and revocation-frontier age.
+## Optional Google login and lossless linking
 
-### Pairing without an engine
+Google login gates engine features; it does not gate the product. The engine's
+Google OIDC authorization-code/PKCE flow validates external identity, creates a
+short-lived engine web session, and discards provider tokens. It has no
+authority over ordinary operations merely because a user logged in.
 
-Serving assets is public; data remains locked. First access supports:
+To link an anonymous account:
 
-1. **Owner-device pairing (normal):** the joining peer presents ephemeral keys
-   and a one-time challenge. An owner is reached directly or through an
-   authenticated runner, both sides display fingerprints, the user approves, and
-   the owner signs the bounded grant.
-2. **Local physical pairing:** runner CLI/UI and owner use a transcript-bound
-   PAKE-style QR/code exchange and require confirmation. A non-owner runner may
-   introduce candidates but cannot mint a grant.
-3. **Engine identity bootstrap/recovery:** after Google login the engine signs
-   only a short-lived bootstrap/recovery assertion. The owner then records trust
-   operations directly with peers.
-4. **Returning profile:** device-key challenge-response followed by a
-   short-lived, origin-bound HttpOnly runner cookie and WebSocket proof.
+1. The owner runner starts Google login with a nonce binding its stable account
+   ID, owner public key, engine origin, and requested tier.
+2. After callback, the engine presents the verified Google subject and any
+   existing Q Mush account identity. The runner signs acceptance of the binding;
+   the engine signs a bootstrap assertion binding Google subject, account ID,
+   owner key, tier, and expiry.
+3. That assertion becomes an auditable trust-root binding operation. Existing
+   operations, IDs, sessions, blobs, keys, and peer grants are unchanged.
+4. The runner receives an entitlement-scoped backup capability and backfills the
+   non-session partition for free or both partitions for paid. Engine features
+   remain `linking/backing up` until the verified frontier completes.
 
-Codes expire in minutes, are single-use/rate-limited, and bind the live
-transcript. Never place durable bearer tokens in URLs, QR payloads,
-`localStorage`, bundles, or logs. State-changing HTTP requires exact `Origin`,
-CSRF, and device authorization; WebSockets require exact origin and signed
-nonce.
+If that Google subject already owns an engine-backed account, silently replacing
+or renumbering either side would not be lossless. Require explicit merge/import:
+restore the remote frontier into a temporary namespace, preserve
+operation/entity IDs and provenance, dedupe identical hashes, apply domain
+convergence, and stop on ID equivocation or incompatible trust roots. The user
+chooses the surviving account identity/trust-root transition with recovery
+confirmation. No local data is deleted merely because login succeeds or fails.
 
-The current `qmr_…` token in `runner/runner-agent.ts`, hashed by
-`sync-engine/runner-token.ts`, authenticates only the legacy runner/engine
-socket. It is neither browser password nor mesh key and is retired after device
-credential migration.
+Logging out deletes the engine browser session/capability but does not erase the
+local account or disable runner-local operation. “Unlink account” is a separate
+high-risk action with backup/tier consequences; it cannot silently turn an
+engine-backed account anonymous while leaving ambiguous recovery ownership.
 
-### Peer authentication and revocation
+### Pairing paths
 
-All peer links mutually sign nonce handshakes and validate account trust chain,
-grant capabilities, purpose-specific keys, protocol, and revocation frontier
-before revealing data. A browser receives only its grant intersection. A runner
-authenticates full-replica membership but still needs capabilities for execution
-or vault use.
+1. **Owner-device pairing:** joining key/challenge, direct authenticated path,
+   displayed fingerprints, explicit approval, bounded signed grant.
+2. **Local physical pairing:** transcript-bound PAKE-style QR/code exchange and
+   confirmation. A non-owner runner may introduce but not grant.
+3. **Google recovery/bootstrap:** engine signs only a short-lived assertion
+   after login; a fresh runner records the trust transition and restores
+   entitled backup.
+4. **Returning browser client:** device-key challenge followed by a short-lived,
+   origin-bound HttpOnly runner cookie and WebSocket proof.
 
-Owner trust operations replicate peer-first. Peers prioritize missing
-revocations over application data at handshake. The optional engine may
-retain/gossip them as one peer but is neither required signer nor freshness
-source. Sensitive owner or credential-policy changes require a configured
-maximum revocation age; without a sufficiently fresh owner peer they fail closed
-rather than defaulting through the engine.
+Codes expire in minutes, are single-use/rate-limited, and bind the transcript.
+Never place durable bearer tokens in URLs, QR codes, `localStorage`, bundles, or
+logs. State-changing HTTP requires exact `Host`/`Origin`, CSRF, and client
+grant; WebSockets require origin and signed nonce. The legacy `qmr_…` runner
+token is retired after device-key migration and never becomes a browser
+password.
 
-Keys are purpose-separated: identity bootstrap/recovery, owner delegation,
-device operation signing, envelope encryption, execution epoch, and release
-publication. An engine release or OAuth-handshake signature grants no device or
-transcript authority.
+## Engine identity, entitlement, and backup trust
+
+The engine signs separate key purposes for Google binding/recovery,
+entitlement-scoped backup capabilities, and release publication. None can sign a
+device grant, operation, credential, or session epoch. A free capability permits
+only non-session backup; paid permits both partitions and managed
+rendezvous/relay. Entitlement is checked server-side on every bounded backup
+transaction, not trusted from clients.
+
+The backup is default-on for a linked account and readable by the engine. This
+is a conscious confidentiality tradeoff for total-runner-loss recovery, not
+blind storage. Operators must protect account isolation, authorization,
+encryption at rest/in transit, audited access, retention, and purge. Secrets
+remain excluded. For replication the engine is a normal peer subscriber that
+validates and acknowledges its entitled frontier, including partition-scoped
+safety/compaction. It is never a bridge, execution authority, or ordinary route.
+Browsers never acknowledge a frontier or count toward any quorum.
+
+Peer handshakes prioritize revocations before application data. Sensitive owner
+or credential-policy changes may require a maximum revocation age; without a
+fresh enough owner peer they fail closed rather than consulting engine
+authority.
+
+## Recovery matrix
+
+“Data” below means ordinary application data; provider vault secrets have their
+own recovery policy.
+
+| Mode            | Identity/root               | Engine service                                              | Total runner loss                                                                                                                                                        | Browser cache role                        |
+| --------------- | --------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
+| Anonymous       | Device-key account genesis  | None                                                        | **All shared data and secrets lost. Accepted.**                                                                                                                          | None; partial cache is not restore input. |
+| Logged in, free | Device root bound to Google | Default readable non-session backup                         | Restore account, workspaces, prompts, runner/trust registry, credential summaries/configuration; **all session entities and session-only blobs lost by business policy** | None.                                     |
+| Logged in, paid | Device root bound to Google | Default readable full ordinary backup plus rendezvous/relay | Restore all ordinary records, sessions, tombstones, and application blobs through acknowledged frontier                                                                  | None.                                     |
+
+A fresh recovery runner authenticates with Google, verifies the recovery
+assertion, creates new device keys, records a visible trust-root transition,
+revokes lost devices, and restores the entitled snapshot/tail. It remains
+`joining` until hashes/frontiers verify. Free mode explicitly initializes an
+empty session partition rather than pretending missing history is corruption.
+Credential summaries can identify what needs re-entry/re-authorization but
+cannot recreate vault values. A write not yet acknowledged by another runner or
+the entitled engine remains outside the promise.
+
+Tier transitions are defined in
+[replication.md](replication.md#tier-transitions-and-restore). Downgrade stops
+session backup immediately; proposed 30-day quarantined retention before purge
+is open question 15. Runner copies remain full in every tier.
 
 ## Degraded-mode contract
 
-A hosted LLM still needs its provider network; engine independence does not mean
-internet independence. A fresh browser cannot load code from an unreachable
-host.
+A hosted model still needs its provider network. A fresh browser needs a runner
+to load code/views; an installed partial cache is not an executor.
 
-| Action                                     | Engine down, any ready runner reachable                        | Cached browser, no runner     | Contract                                                                    |
-| ------------------------------------------ | -------------------------------------------------------------- | ----------------------------- | --------------------------------------------------------------------------- |
-| Open app                                   | Yes, embedded release                                          | Previously installed only     | A runner is the normal app host.                                            |
-| Read all shared data/attachments           | Yes, full account replica                                      | Cached projection/blobs only  | Runner scope is never “its sessions.”                                       |
-| Edit prompts/workspace/session metadata    | Yes, direct operation                                          | Supported edits queue locally | Show `local-only` until another runner receipt.                             |
-| Create/continue/steer/answer/stop/compact  | With authority, grant, vault, and provider                     | Queue request only            | Executor receipt controls status.                                           |
-| Browse directories/run tools               | On selected reachable runner                                   | No                            | External filesystem stays local.                                            |
-| Spawn or graceful handoff                  | Directly between compatible authorized runners                 | No                            | Unreachable authority offers recovery fork.                                 |
-| Pair/renew/revoke a device                 | With a reachable authorized owner device                       | If that profile is owner      | Signed peer trust operations; bounded stale revocation.                     |
-| Add/rotate/revoke API/generic/Brave secret | Enter on a runner; distribute runner-to-runner                 | No                            | Zero engine requests.                                                       |
-| Redistribute existing OAuth material       | From an authorized credential-holding runner                   | No                            | Fresh per-target envelopes.                                                 |
-| Start/renew OpenAI/OpenRouter OAuth        | Not if its registered engine handshake endpoint is unavailable | No                            | Existing valid tokens continue.                                             |
-| Google login/trust-root recovery           | No                                                             | No                            | Existing grants continue until expiry.                                      |
-| Discover peers                             | Cached/manual/LAN/reachable runner rendezvous                  | Cached/manual/WebRTC          | Optional engine-only candidates may be unavailable; no hidden broker route. |
-| Replicate ordinary state                   | Direct peer links                                              | To reachable peers only       | Explicit opaque relay may be unavailable if engine-operated.                |
-| Download update                            | From a signed peer/mirror; otherwise continue existing release | Existing release              | Engine release hosting is optional distribution.                            |
-| Hosted model/Brave call                    | If provider, authority, and local vault work                   | No executor                   | Report provider failure separately.                                         |
+| Action                               | Engine down, ready runner reachable          | Cached Solid client, no runner       | Contract                                               |
+| ------------------------------------ | -------------------------------------------- | ------------------------------------ | ------------------------------------------------------ |
+| Open app                             | Yes, embedded release                        | App shell/cached views only          | Runner is the normal host.                             |
+| Read all shared data/attachments     | Yes, full runner                             | Cached partial views only            | Browser cache never proves completeness.               |
+| Commit prompt/workspace/session edit | Yes, runner operation                        | No; preserve draft                   | Shared commit starts at a runner.                      |
+| Create/continue/steer/answer/stop    | With authority, grant, vault, provider       | No                                   | Executor receipt controls state.                       |
+| Browse/run tools                     | On selected runner                           | No                                   | Filesystem stays external/local.                       |
+| Pair/renew/revoke                    | With owner peer                              | No, unless connected as owner client | Peer trust operation.                                  |
+| Add/rotate API/generic/Brave         | Enter at runner; direct distribution         | No                                   | Zero engine requests.                                  |
+| OpenAI device authorization          | Yes, runner polls provider                   | No                                   | No callback or engine.                                 |
+| OpenRouter connect                   | Yes, runner-local PKCE callback if reachable | No                                   | API key fallback; no engine bounce.                    |
+| Google link/recovery                 | No                                           | No                                   | Existing local grants continue.                        |
+| Runner replication                   | Direct links                                 | Not applicable                       | Browser is not a member.                               |
+| Backup progress/restore              | Paused                                       | No                                   | Local operation continues; frontier shown.             |
+| Managed rendezvous/relay             | No                                           | No                                   | Paid engine service only; direct/manual routes remain. |
+| Update                               | Signed peer/mirror or current release        | Existing release                     | Engine hosting is one source.                          |
 
-Engine-down therefore loses almost nothing in steady state. Unavailable
-functions are new Google bootstrap/recovery, genuine OAuth handshakes tied to
-the engine, engine-only rendezvous/relay reachability, an update held by no peer
-or mirror, and the optional engine backup itself. Ordinary sync, all-runner data
-access, local execution, peer trust administration, and user-entered credential
-provisioning continue.
+Engine loss disables Google linking/recovery, backup progress/restore, managed
+rendezvous/relay, and engine-only releases. It does not disable ordinary runner
+sync, execution, peer administration, provider connect, or user-entered secrets.
 
 ## Security analysis
 
-A runner changes from outbound-only worker into app server, full account
-replica, coordinator, trust participant, and credential holder. It is a
-high-value device; full replication deliberately trades availability for a
-larger compromise blast radius.
+A runner becomes app server, full replica, coordinator, trust participant, and
+credential holder. It is high value. The readable engine backup also increases
+operator-side data exposure for the entitled partition.
 
-| Threat                                       | Required mitigation/test                                                                                                                                                                                                                |
-| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| One runner host is compromised               | Treat as full account-data disclosure and writes within unexpired grant; encrypted disk/vault, OS keychain/hardware, least privilege, auto-lock, patching, remote revoke, short grants, audit/equivocation alert. Root is out of scope. |
-| Compromised runner steals credentials        | Independent device envelopes, vault key separate from replica DB, target/policy/expiry binding, optional hardware keys/narrow policy, rapid revoke/rotate; never one account decryption key.                                            |
-| Credential channel/envelope attack           | Separate channel/store/key, target-key and policy-hash binding, forward secrecy, replay/version checks, browser rejection, canary capture tests; see [credentials.md](credentials.md).                                                  |
-| Compromised or curious engine reads secrets  | User-entered secrets never contact it; OAuth plaintext is transient/immediately target-sealed, no token DB row, strict redaction/retention and process/network capture tests.                                                           |
-| Engine becomes an implicit data broker       | Enforced route order, endpoint/path telemetry, tests blocking engine data APIs while healthy, no ordinary store-forward endpoint; relay is opaque/end-to-end and explicitly labeled.                                                    |
-| DNS rebinding/hostile site attacks local API | Authenticate every endpoint; exact allowlisted `Host`/`Origin`; reject `null`; no wildcard CORS; CSRF; WebSocket nonce proof; secret form same-origin/non-reflective.                                                                   |
-| LAN interception/MITM                        | Pinned TLS and challenge-response; never trust RFC1918/`.local`; display fingerprints.                                                                                                                                                  |
-| Pairing theft/malicious delegated grant      | Transcript-bound PAKE, short single-use code, owner confirmation, delegation cannot widen issuer, owner-add ceremony, signed audit, rate limiting.                                                                                      |
-| Browser XSS steals capability/entered secret | Strict self/hash CSP, unsafe-HTML lint, HttpOnly/SameSite cookie, non-extractable keys, no secret persistence, isolated form/autocomplete policy, short lifetime, escaped output.                                                       |
-| Peer forges or poisons full replica          | Canonical signatures, grant/epoch checks, monotonic sequence, causal/schema/size validation, quarantine/equivocation alert, snapshot/blob Merkle/hash checks.                                                                           |
-| Split-brain model/tool effects               | No timeout takeover; signed handoff/epoch fencing; stale rejection; recovery fork; persist tool start before execution.                                                                                                                 |
-| Disk/network exhaustion                      | Capacity reserve, channel limits, bounded resumable chunks, decompression/signature budgets, dedupe, growth UI, reject oversized import before operation commit, safe retirement.                                                       |
-| False completeness receipt                   | Signed frontier/blob-root challenge, local verification, no `ready`/execution/redundancy role until complete; never delete based on an unverified receipt.                                                                              |
-| Offline revoked device                       | Bounded expiry, priority revocation gossip, freshness for sensitive changes, visible stale window, rotate affected secrets.                                                                                                             |
-| Update injection                             | Installer-rooted publisher signature, SHA-256, immutable assets, atomic rollback; peer supplies bytes but no authorship.                                                                                                                |
-| Discovery metadata leak                      | Opaque ID/candidates/version only; authenticate before frontier; no endpoint/provider labels.                                                                                                                                           |
+| Threat                               | Required mitigation/test                                                                                                                                                |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Runner compromise                    | Treat as full account disclosure and granted writes; disk/vault encryption, least privilege, patching, lock, revoke, short grants, audit. Root is out of scope.         |
+| Browser mistaken for durable replica | No browser frontier/ack capability; destroy-runner tests ignore IndexedDB; UI always says partial view.                                                                 |
+| Engine readable-backup breach        | Account isolation, encryption, least-privilege operator access, audited reads, retention/purge, incident response; free scope limits sessions but is readable.          |
+| Free entitlement bypass              | Engine-authoritative capabilities, semantic partition validation, mixed/unknown fail closed, split snapshots/manifests, restore filtering, transition revocation tests. |
+| Engine becomes broker                | Route telemetry, no ordinary fan-out endpoint, healthy/blocked engine tests; relay opaque and labeled.                                                                  |
+| Anonymous last-runner loss           | Persistent warning, optional encrypted export, destructive confirmation; never imply browser/engine recovery.                                                           |
+| Account-link takeover/collision      | Nonce binds account/owner/origin, signatures both sides, explicit merge, stable IDs/provenance, no silent overwrite.                                                    |
+| Credential compromise/leak           | Independent vault envelopes, separate keys/channel/store, target/policy binding, canary capture; see credentials design.                                                |
+| DNS rebinding/hostile site           | Authenticate endpoints; exact `Host`/`Origin`; reject `null`; no wildcard CORS; CSRF; WebSocket proof.                                                                  |
+| LAN interception                     | Pinned TLS/challenge-response; never trust RFC1918/`.local`; show fingerprints.                                                                                         |
+| Pairing theft/delegation             | Transcript-bound PAKE, one-use code, confirmation, non-widening delegation, owner ceremony, rate limits.                                                                |
+| Browser XSS                          | Strict CSP, unsafe-HTML lint, HttpOnly/SameSite cookie, non-extractable client key, no secret persistence.                                                              |
+| Replica poisoning                    | Signatures, grants/epochs, monotonic sequence, causal/schema/size checks, quarantine, snapshot/blob hashes.                                                             |
+| Split-brain effects                  | No timeout takeover; signed handoff/fencing; stale rejection; recovery fork; write-ahead tool start.                                                                    |
+| Resource exhaustion                  | Reserve, bounded chunks/decompression/signatures, dedupe, quotas, reject oversized imports before commit.                                                               |
+| False readiness                      | Signed frontier/blob-root challenge and local verification; no readiness role until complete.                                                                           |
+| Offline revoked device               | Expiry, priority gossip, sensitive-change freshness, visible stale window, secret rotation.                                                                             |
+| Update injection                     | Publisher signature, SHA-256, immutable assets, atomic rollback; source has no authorship.                                                                              |
+| Discovery leak                       | Opaque ID/candidates/version only; authenticate before frontier; no path/session/provider labels.                                                                       |
 
-Full-replica data at rest uses platform full-disk encryption at minimum; where
-practical an application database/blob key is sealed to OS keychain/secure
-hardware. This protects a powered-off stolen disk, not root/admin on a running
-host. Vault keys remain separate so a copied replica file reveals no
-credentials. Backups/exports are encrypted and exclude vault data unless the
-user explicitly creates a separate credential recovery export.
+Runner data at rest uses full-disk encryption and, where practical, a DB/blob
+key sealed to OS storage. Vault keys remain separate. Engine backup needs server
+encryption/access controls but cannot resist an authorized/compromised engine
+process. User exports are encrypted and exclude vault data unless explicitly
+created for credential recovery.
 
-Security logs contain IDs, kinds, sizes, routes, and rejection codes—not prompt
-content, paths, tokens, generic endpoints, or envelope bytes.
-`Forget/retire runner` revokes membership, moves any unique local data to
-another ready runner when possible, and cryptographically erases local
-replica/vault keys. It cannot erase exfiltrated copies. Shared application
-deletion continues through audited soft-delete operations and safe retention.
+Retiring a runner transfers unique local data where possible, revokes
+membership, and erases local keys. It cannot erase exfiltrated copies. Shared
+deletion uses audited tombstones and tier-aware retention. Security logs contain
+only IDs, kinds, sizes, routes, and result codes—not content, paths, endpoints,
+tokens, or envelopes.
 
 GitHub Security Lab's
 [localhost/CORS/DNS-rebinding analysis](https://github.blog/security/application-security/localhost-dangers-cors-and-dns-rebinding/)
-recommends authentication and approved `Host` checks. Loopback binding is not a
-security boundary.
+recommends authentication and approved `Host` checks. Loopback binding alone is
+not a security boundary.
