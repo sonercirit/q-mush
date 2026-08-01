@@ -284,17 +284,20 @@ export class SessionController {
   initializeDefaults(
     runnerId: string,
     credential: string,
-    credentialSettled: boolean,
+    credentialsSettled: boolean,
   ): void {
     const draft = this.#view.value.draft;
-    const credentialId = credentialSettled ? credential : draft.credential;
+    const selectedCredential =
+      credentialsSettled && draft.credential.length === 0
+        ? credential
+        : draft.credential;
     const next = {
       ...draft,
-      credential: credentialId,
-      ...(credentialId === draft.credential
+      credential: selectedCredential,
+      ...(selectedCredential === draft.credential
         ? {}
         : { model: "", openRouterProviderTag: "", reasoningEffort: "" }),
-      runnerId,
+      runnerId: draft.runnerId.length === 0 ? runnerId : draft.runnerId,
     };
     if (
       next.credential !== draft.credential ||
