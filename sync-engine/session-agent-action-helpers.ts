@@ -140,7 +140,23 @@ export function spawnedSessionReport(options: {
   if (completed === undefined) {
     return undefined;
   }
-  const lastMessage = lastSessionMessage(completed);
+  const failed = completed.status === "failed";
+  const assistant = completed.messages.findLast(
+    ({ role }) => role === "assistant",
+  );
+  const failure = failed
+    ? completed.messages.findLast(({ role }) => role === "error")
+    : undefined;
+  const lastMessage = failed
+    ? (assistant?.content.trim().length ?? 0) > 0
+      ? assistant
+      : {
+          content:
+            failure?.content ??
+            "Session failed without a recorded failure reason",
+          role: "error" as const,
+        }
+    : lastSessionMessage(completed);
   const status = completed.status === "idle" ? "completed" : completed.status;
   const summary = sessionToolOutput({
     lastMessage:
@@ -151,7 +167,7 @@ export function spawnedSessionReport(options: {
     status,
   });
   return {
-    content: `Spawned session completed:\n${summary}`,
+    content: `Spawned session ${failed ? "failed" : "completed"}:\n${summary}`,
     parentId: options.parentId,
   };
 }
