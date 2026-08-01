@@ -49,13 +49,14 @@ export function AttachmentFallbackSettings(props: {
     provider,
     credentialId,
   ) => {
+    const selectedModality = modality();
     const catalog = await props.onDiscoverModels(provider, credentialId);
     return catalog === undefined
       ? undefined
       : {
           ...catalog,
           models: catalog.models.filter(({ inputModalities }) =>
-            modelSupportsAttachmentModality(inputModalities, modality()),
+            modelSupportsAttachmentModality(inputModalities, selectedModality),
           ),
         };
   };
@@ -69,12 +70,10 @@ export function AttachmentFallbackSettings(props: {
     },
   );
   const [openProvider, setOpenProvider] = createSignal(false);
-  let initialized = false;
 
   createEffect(() => {
     const first = props.credentials[0];
-    if (initialized || first === undefined) return;
-    initialized = true;
+    if (first === undefined || picker.draft().credential.length > 0) return;
     const credential = `${first.provider}:${first.credential.id}`;
     untrack(() => {
       picker.editor.actions.choose.credential(credential);
@@ -160,6 +159,7 @@ export function AttachmentFallbackSettings(props: {
           Modality
           <select
             class="mt-2 w-full rounded-xl border border-white/10 bg-slate-950 p-3 text-sm text-white"
+            name="attachmentFallbackModality"
             onChange={(event) => {
               selectModality(event.currentTarget.value);
             }}
