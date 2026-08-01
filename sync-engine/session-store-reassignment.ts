@@ -136,6 +136,9 @@ export function interruptedStoredSessions(
       sessions.push(interrupted);
       continue;
     }
+    if (session.status === "queued" && session.restartHandoff === null) {
+      continue;
+    }
     if (recoverStoredTerminal(database, session, now)) {
       continue;
     }

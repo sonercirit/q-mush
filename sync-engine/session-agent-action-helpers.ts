@@ -173,6 +173,24 @@ export function spawnedSessionReport(options: {
   };
 }
 
+function sessionLaunchResponse(
+  sessionId: string,
+  status: "queued" | "spawned",
+): Response {
+  return createJsonResponse({ sessionId, status });
+}
+
+export function sessionCanResume(
+  session: Pick<AgentSessionDetail, "runnerRequired" | "status">,
+): boolean {
+  return (
+    !session.runnerRequired &&
+    session.status !== "paused" &&
+    session.status !== "queued" &&
+    session.status !== "running"
+  );
+}
+
 export async function spawnAgentSession(options: {
   readonly authority: SessionExecutionAuthority;
   readonly dependencies: SessionAgentActionDependencies;
@@ -197,9 +215,6 @@ export async function spawnAgentSession(options: {
       credential,
       options.userId,
     );
-    if (options.dependencies.draining()) {
-      return createJsonResponse({ error: "server_restarting" }, 503);
-    }
     const created = options.dependencies.store.create(
       {
         ...input,
@@ -215,9 +230,19 @@ export async function spawnAgentSession(options: {
       return createJsonResponse({ error: created.status }, 409);
     }
     const { detail: child } = created;
-    if (
-      !options.dependencies.launchSession(credential, child, options.userId)
-    ) {
+    const notifiedResponse = (status: "queued" | "spawned"): Response => {
+      options.dependencies.notify(options.userId, child.id);
+      return sessionLaunchResponse(child.id, status);
+    };
+    if (options.dependencies.draining()) {
+      return notifiedResponse("queued");
+    }
+    const launch = options.dependencies.launchSession(
+      credential,
+      child,
+      options.userId,
+    );
+    if (!launch) {
       if (
         pauseQueuedSessionForRestart(
           options.dependencies,
@@ -241,8 +266,7 @@ export async function spawnAgentSession(options: {
       );
       throw new Error("The child session could not be launched");
     }
-    options.dependencies.notify(options.userId, child.id);
-    return createJsonResponse({ sessionId: child.id, status: "spawned" });
+    return notifiedResponse("spawned");
   }
   const selection = { ...options.input, workspaceId: parent.workspaceId };
   const response = await options.dependencies.withCredential(

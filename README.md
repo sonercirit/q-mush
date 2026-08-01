@@ -61,19 +61,24 @@ Both commands serve Q Mush at `http://localhost:12345` by default. Set `PORT` to
 override the listening port, and update OAuth callback URLs and registrations to
 match.
 
-Source edits intentionally leave the running process untouched so an agent can
-modify Q Mush without interrupting its own session. Once the change is ready,
-restart explicitly:
+Source and local environment edits are watched in development. Changes under
+`runner/`, `shared/`, `solid/`, or `sync-engine/`, plus `.env`, `.env.local`,
+and root build/configuration source, are coalesced before requesting one
+graceful restart. Generated output, dependencies, tests, local data, VCS
+internals, and editor temporary files are ignored. To request the same restart
+explicitly:
 
 ```bash
 bun run dev:restart
 ```
 
-The restart rejects new agent work, lets active agent sessions finish, then
-rebuilds the browser assets and runner version. Connected runners observe that
-version on their next API response and immediately check for a changed
-executable. A session can therefore request the restart that will apply its own
-changes without being marked failed.
+A restart closes admission for new work, lets each in-flight agent step reach
+completion, and then rebuilds the browser assets and runner version. No
+additional step starts on the draining process; work submitted during the drain
+remains durably queued and launches after the new process starts. Connected
+runners observe that version on their next API response and immediately check
+for a changed executable. A session can therefore request the restart that will
+apply its own changes without being marked failed.
 
 Production source is split into four top-level workspaces: `solid/` owns the
 browser UI, `sync-engine/` owns the Bun server and synchronization/model
@@ -272,14 +277,14 @@ credential with its provider when it should no longer exist there.
 Drizzle stores users, seven-day application sessions, provider and skill
 credentials, runner registrations, agent sessions, and agent transcripts in
 local SQLite, so they survive server restarts. Graceful development restarts
-drain active sessions; sessions interrupted by an unexpected process exit are
-marked failed and can be continued from the control center. Application primary
-keys use UUIDv7; provider IDs, credential fingerprints, runner token hashes,
-machine fingerprints, and cookie tokens remain separate external identifiers.
-Plaintext runner tokens appear only in setup artifacts and the installed
-computer's private config. Every application row carries creation, update,
-actor, and soft-deletion audit fields. Committed migrations in `drizzle/` are
-applied automatically at startup.
+finish active steps and preserve queued work for the replacement process;
+sessions interrupted by an unexpected process exit are marked failed and can be
+continued from the control center. Application primary keys use UUIDv7; provider
+IDs, credential fingerprints, runner token hashes, machine fingerprints, and
+cookie tokens remain separate external identifiers. Plaintext runner tokens
+appear only in setup artifacts and the installed computer's private config.
+Every application row carries creation, update, actor, and soft-deletion audit
+fields. Committed migrations in `drizzle/` are applied automatically at startup.
 
 The UI in `solid/` uses SolidJS throughout. Vite and its Tailwind plugin build
 `solid/client.tsx` and `solid/styles.css`; the server invokes that build in

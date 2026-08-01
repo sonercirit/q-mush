@@ -14,6 +14,7 @@ import { createJsonResponse } from "./http.ts";
 import {
   pauseQueuedSessionForRestart,
   responseToolOutput,
+  sessionCanResume,
   spawnAgentSession,
   spawnedSessionReport,
   type SessionAgentActionDependencies,
@@ -81,17 +82,6 @@ interface SessionAgentActionsDependencies extends SessionAgentActionDependencies
     readonly items: SessionOptionsSource["runners"];
     readonly totalItems: number;
   };
-}
-
-function sessionCanResume(
-  session: Pick<AgentSessionDetail, "runnerRequired" | "status">,
-): boolean {
-  return (
-    !session.runnerRequired &&
-    session.status !== "paused" &&
-    session.status !== "queued" &&
-    session.status !== "running"
-  );
 }
 
 export class SessionAgentActions {
@@ -500,6 +490,11 @@ export class SessionAgentActions {
     });
   }
 
+  #queuedResponse(userId: string, sessionId: string): Response {
+    this.#dependencies.notify(userId, sessionId);
+    return createJsonResponse({ sessionId, status: "queued" });
+  }
+
   async #queue(
     userId: string,
     sessionId: string,
@@ -517,7 +512,8 @@ export class SessionAgentActions {
         userId,
         target.runnerId,
         target.workspaceId,
-      )
+      ) &&
+      this.#dependencies.pendingRestart(target.runnerId) === undefined
     ) {
       return runnerUnavailableOutput();
     }
@@ -537,6 +533,9 @@ export class SessionAgentActions {
         );
         if (queued.status !== "queued") {
           return createJsonResponse({ error: queued.status }, 409);
+        }
+        if (this.#dependencies.pendingRestart(target.runnerId) !== undefined) {
+          return this.#queuedResponse(userId, sessionId);
         }
         if (
           !this.#dependencies.launchSession(credential, queued.detail, userId)
@@ -559,8 +558,7 @@ export class SessionAgentActions {
           this.#dependencies.notify(userId, sessionId);
           return createJsonResponse({ error: "session_launch_failed" }, 500);
         }
-        this.#dependencies.notify(userId, sessionId);
-        return createJsonResponse({ sessionId, status: "queued" });
+        return this.#queuedResponse(userId, sessionId);
       },
     );
     return responseToolOutput(response);
@@ -608,9 +606,6 @@ export class SessionAgentActions {
     userId: string,
     input: SpawnSessionToolInput,
   ): Promise<string> {
-    if (this.#dependencies.draining()) {
-      return Promise.resolve(sessionToolOutput({ error: "server_restarting" }));
-    }
     const parentWorkspaceId = this.#dependencies.store.get(
       userId,
       authority.sessionId,

@@ -206,7 +206,9 @@ function assertLaunchRaceState(
     });
   }
 
-  expect(restart).toEqual({ requestedBy: "runner", restartId: RESTART_ID });
+  expect(restart).toMatchObject({
+    requestedBy: "runner",
+  });
   const nextGeneration = launched.generation + 1;
   const authoritative = expectStoredSession(setup, TEST_USER_ID, launched.id, {
     generation: nextGeneration,

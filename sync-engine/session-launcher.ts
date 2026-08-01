@@ -57,6 +57,7 @@ export class SessionLauncher {
       detail.id,
       detail.runnerId,
       detail.generation,
+      operation === "agent" ? "step" : "handoff",
       async ({ controller, restartRequest }) => {
         await this.#dependencies.beforeLaunch?.(detail);
         await runPersistedSession({

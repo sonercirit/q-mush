@@ -54,6 +54,7 @@ class TestRestartRuntimes implements RestartRuntimeControl {
   drain(scope: RestartScope, restartId: string): Promise<void> {
     this.drains.push({ restartId, scope });
     const request: RestartRequest = {
+      boundary: scope.kind === "server" ? "step" : "handoff",
       requestedBy: scope.kind,
       restartId,
     };
@@ -86,7 +87,11 @@ class TestRestartRuntimes implements RestartRuntimeControl {
     }
     this.#runnerRequests.set(
       runnerId,
-      existing ?? { requestedBy: "runner", restartId },
+      existing ?? {
+        boundary: "handoff",
+        requestedBy: "runner",
+        restartId,
+      },
     );
     return true;
   }

@@ -348,7 +348,7 @@ describe("session agent tools", () => {
     );
   });
 
-  test("hands off a parent that races with server draining", async () => {
+  test("hands off a parent at the step boundary when spawn races with draining", async () => {
     const model = scriptedModel([
       {
         content: "Delegate during restart; it must not launch.",
@@ -364,13 +364,11 @@ describe("session agent tools", () => {
         typeof session === "object" &&
         session !== null &&
         "status" in session &&
-        session.status === "paused",
+        session.status === "idle",
     );
 
-    expect(detail).toMatchObject({
-      restartHandoff: { requestedBy: "server" },
-      status: "paused",
-    });
+    expect(detail).toMatchObject({ restartHandoff: null, status: "idle" });
+    expect(model.requests.length).toBeLessThanOrEqual(1);
     await draining;
     closeSessionTestDatabase(setup.database);
   });

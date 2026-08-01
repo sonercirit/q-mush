@@ -100,7 +100,11 @@ test("disconnect during an in-flight runner command persists the exact restart h
     },
     restartRequest: () =>
       restartRequested
-        ? { requestedBy: "runner", restartId: "restart-disconnect" }
+        ? {
+            boundary: "handoff",
+            requestedBy: "runner",
+            restartId: "restart-disconnect",
+          }
         : undefined,
     store: setup.store,
     userId: TEST_USER_ID,

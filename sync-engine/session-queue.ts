@@ -72,17 +72,14 @@ export async function queueSessionForUser(
     sessionId,
     dependencies.workspaceId,
   );
-  if (
-    existing !== undefined &&
-    !dependencies.runtimes.accepts(existing.runnerId)
-  ) {
-    return createApiError("server_restarting", 503);
-  }
+  const draining =
+    existing !== undefined && !dependencies.runtimes.accepts(existing.runnerId);
   const unavailable = unavailableSessionResponse(existing);
   if (unavailable !== undefined || existing === undefined) {
     return unavailable ?? createApiError("not_found", 404);
   }
   if (
+    !draining &&
     !dependencies.runnerIsAvailable(
       userId,
       existing.runnerId,
@@ -103,6 +100,10 @@ export async function queueSessionForUser(
       return queued;
     }
     const detail = queued;
+    if (draining) {
+      dependencies.notify(userId, sessionId);
+      return createJsonResponse(detail, 202);
+    }
     if (!dependencies.launch(detail, credential, userId)) {
       const response = failedSessionLaunchResponse(
         dependencies,
