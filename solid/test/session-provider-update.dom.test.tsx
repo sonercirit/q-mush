@@ -143,6 +143,8 @@ function expanded(control: HTMLButtonElement): boolean {
   return control.getAttribute("aria-expanded") === "true";
 }
 
+const PROVIDER_DESCRIPTION =
+  "Change the model account, provider, model, or OpenRouter serving provider for future turns.";
 const PROVIDER_CONTROL_SELECTORS = [
   "[data-custom-select='sessionProviderCredential']",
   "[data-custom-select='sessionProviderModel']",
@@ -155,6 +157,9 @@ function expectProviderControls(
   expectedExpanded: boolean,
 ): void {
   expect(expanded(toggle)).toBe(expectedExpanded);
+  expect(container.textContent?.includes(PROVIDER_DESCRIPTION)).toBe(
+    expectedExpanded,
+  );
   for (const selector of PROVIDER_CONTROL_SELECTORS) {
     expect(container.querySelector(selector) !== null).toBe(expectedExpanded);
   }
