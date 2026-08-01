@@ -211,12 +211,20 @@ describe("agent sessions", () => {
     setup.database.$client.close();
   });
 
-  test("stores session failures as error messages", async () => {
-    const setup = connectedSessionSetup(new FailingModel());
+  test("stores session failures as error messages and settles active timing", async () => {
+    let now = TEST_NOW;
+    const setup = connectedSessionSetup(
+      new FailingModel(),
+      "api_key",
+      undefined,
+      { now: () => (now += 4_000) },
+    );
     const response = await setup.sessions.collection(createSessionRequest());
 
     expect(await expectSessionReaches(setup, response, "failed")).toMatchObject(
       {
+        activeDurationMs: 12_000,
+        activeStartedAt: null,
         messages: [
           { role: "user" },
           { content: "Session failed: Provider unavailable", role: "error" },
@@ -252,14 +260,22 @@ describe("agent sessions", () => {
     );
   });
 
-  test("persists image inputs and sends them to the model", async () => {
-    const setup = completingSessionSetup("Screenshot implemented.");
+  test("persists image inputs, completes with settled timing, and sends them to the model", async () => {
+    let now = TEST_NOW;
+    const model = new ScriptedAgentModel([
+      { content: "Screenshot implemented.", toolCalls: [] },
+    ]);
+    const setup = connectedSessionSetup(model, "api_key", undefined, {
+      now: () => (now += 3_000),
+    });
     const imageRequest = createSessionRequest(true, "high", "gpt-4.1-mini", [
       TEST_AGENT_IMAGE,
     ]);
     const response = await setup.sessions.collection(imageRequest);
 
     expect(await expectSessionReaches(setup, response, "idle")).toMatchObject({
+      activeDurationMs: 9_000,
+      activeStartedAt: null,
       messages: [
         {
           images: [TEST_AGENT_IMAGE],
@@ -268,7 +284,7 @@ describe("agent sessions", () => {
         { role: "assistant" },
       ],
     });
-    expect(setup.model.requests[0]?.[0]).toEqual({
+    expect(model.requests[0]?.[0]).toEqual({
       content: "Inspect README.md",
       images: [TEST_AGENT_IMAGE],
       role: "user",
@@ -455,12 +471,22 @@ describe("agent sessions", () => {
     setup.database.$client.close();
   });
 
-  test("stops a running model request", async () => {
+  test("stopping a running model request settles its active duration", async () => {
+    let now = TEST_NOW;
     const model = new BlockingModel();
-    const setup = connectedSessionSetup(model);
+    const setup = connectedSessionSetup(model, "api_key", undefined, {
+      now: () => now,
+    });
     const { database, sessions } = setup;
     const created = await sessions.collection(createSessionRequest());
     await expectSessionReaches(setup, created, "running");
+    const running = await sessionDetail(sessions);
+    expect(running).toMatchObject({
+      activeDurationMs: 0,
+      activeStartedAt: TEST_NOW,
+      status: "running",
+    });
+    now += 18_500;
 
     const stopped = await sessions.stop(
       createAuthenticatedRequest(
@@ -472,7 +498,11 @@ describe("agent sessions", () => {
     );
 
     expect(stopped.status).toBe(200);
-    expect(await stopped.json()).toMatchObject({ status: "stopped" });
+    expect(await stopped.json()).toMatchObject({
+      activeDurationMs: 18_500,
+      activeStartedAt: null,
+      status: "stopped",
+    });
     await waitForSessionValue(
       () => model.aborted,
       (value) => value === true,

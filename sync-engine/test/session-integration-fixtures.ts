@@ -55,6 +55,7 @@ interface ConnectedSessionOptions {
   readonly deletedCredentials?: FixtureCredentials;
   readonly foreignCredentials?: FixtureCredentials;
   readonly modelDiscovery?: AgentModelDiscoverer;
+  readonly now?: () => number;
   readonly providerDiscovery?: OpenRouterProviderDiscoverer;
   readonly onChange?: (userId: string, sessionId: string) => void;
   readonly onCredentialRead?: () => void;
@@ -71,13 +72,14 @@ export function connectedSessionSetup(
   options: ConnectedSessionOptions = {},
 ) {
   const database = options.database ?? createAuthenticatedTestDatabase();
-  const authOptions = { database, now: () => TEST_NOW };
+  const now = options.now ?? (() => TEST_NOW);
+  const authOptions = { database, now };
   const auth = createGoogleAuthFromEnvironment({}, authOptions);
   const runnerIds = [RUNNER_ID, REPLACEMENT_RUNNER_ID];
   const runnerTokens = ["session-runner-token", "replacement-runner-token"];
   const storedRunners = createRunnerIntegration(auth, {
     database,
-    now: () => TEST_NOW,
+    now,
     randomId: () => takeValue(runnerIds, "The test ran out of runner IDs"),
     randomToken: () =>
       takeValue(runnerTokens, "The test ran out of runner tokens"),
@@ -323,7 +325,7 @@ export function connectedSessionSetup(
         selectedTools.push(tools);
         return model;
       },
-      now: () => TEST_NOW,
+      now,
       randomId: () => takeValue(ids, "The session test ran out of IDs"),
       workspaces: new WorkspaceStore(database),
     },
