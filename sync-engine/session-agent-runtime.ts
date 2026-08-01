@@ -51,6 +51,7 @@ import { SessionRecorder } from "./session-recorder.ts";
 import { executeSessionSleepTool } from "./session-sleep-tool.ts";
 import { waitForSessionSteeringInput } from "./session-steering-wakeup.ts";
 import type { SessionStore } from "./session-store.ts";
+import { boundSessionToolOutput } from "./session-tool-output.ts";
 import { ToolStreamPublisher } from "./tool-stream-publisher.ts";
 
 export interface SessionAgentRuntimeDependencies extends AttachmentFallbackRuntimeResources {
@@ -233,6 +234,22 @@ function restartInterruptedToolResult(): RunnerCommandResult {
   return { output: RESTART_INTERRUPTED_TOOL_OUTPUT, state: "canceled" };
 }
 
+function boundRuntimeToolOutput(
+  runtime: SessionAgentRuntimeDependencies,
+  signal: AbortSignal,
+  result: RunnerCommandResult,
+): Promise<RunnerCommandResult> {
+  return boundSessionToolOutput(
+    {
+      broker: runtime.broker,
+      detail: runtime.detail,
+      isCurrent: runtime.isCurrent,
+      signal,
+    },
+    result,
+  );
+}
+
 async function executeAgentTool(
   runtime: SessionAgentRuntimeDependencies,
   turnTools: ReadonlySet<AgentSessionToolName>,
@@ -294,8 +311,11 @@ async function executeAgentTool(
       toolSignal,
       call.id,
     );
-    return await (skillOutput ??
+    const result = await (skillOutput ??
       dispatchTool(call.name, call.arguments, toolSignal, call.id));
+    return skillOutput === undefined
+      ? result
+      : await boundRuntimeToolOutput(runtime, toolSignal, result);
   } catch (error) {
     if (isAskQuestionsPause(error)) {
       throw error;
@@ -454,7 +474,11 @@ export async function runSessionAgent(
           runtime.now,
         ).then((output) => ({ output, state: "completed" }));
       }
-      return executeSessionAgentTool(runtime.sessionTools, name, toolArguments);
+      return executeSessionAgentTool(
+        runtime.sessionTools,
+        name,
+        toolArguments,
+      ).then((result) => boundRuntimeToolOutput(runtime, signal, result));
     }
     return dispatchRunnerTool(name, toolArguments, signal, callId);
   };

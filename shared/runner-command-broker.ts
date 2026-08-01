@@ -24,6 +24,8 @@ export type RunnerExecutionEnvironment = "bare_metal" | "container";
 
 export const RUNNER_EXECUTION_CLEANUP_COMMAND = "cleanup_execution_environment";
 export const RUNNER_TERMINAL_CLEANUP_ARGUMENT = "terminal";
+export const RUNNER_TOOL_OUTPUT_SPILL_COMMAND = "spill_tool_output";
+export const RUNNER_TOOL_OUTPUT_SPILL_CONTENT_ARGUMENT = "content";
 
 export function readRunnerExecutionEnvironment(
   value: unknown,
@@ -51,6 +53,7 @@ export interface DispatchRunnerToolCommand extends Omit<
 > {
   readonly authorize?: () => boolean;
   readonly generation?: number;
+  readonly queueIfUnavailable?: boolean;
   readonly runnerId: string;
 }
 
@@ -186,7 +189,7 @@ export class RunnerCommandBroker {
         }
 
         if (this.#deliver === undefined) {
-          this.#queue(input.runnerId).push(command);
+          this.#unavailable(input, pending);
           return;
         }
         if (!this.#requireAuthorization(pending)) {
@@ -194,7 +197,7 @@ export class RunnerCommandBroker {
         }
         pending.phase = "in_flight";
         if (!this.#deliver(input.runnerId, command)) {
-          this.#requeue(pending);
+          this.#unavailable(input, pending);
         }
       } catch (error) {
         if (this.#pending.has(id)) {
@@ -284,6 +287,17 @@ export class RunnerCommandBroker {
     if (this.#pending.has(pending.command.id)) {
       pending.phase = phase;
     }
+  }
+
+  #unavailable(
+    input: DispatchRunnerToolCommand,
+    pending: PendingCommand,
+  ): void {
+    if (input.queueIfUnavailable === false) {
+      this.#reject(pending.command.id, new RunnerDisconnectedError());
+      return;
+    }
+    this.#requeue(pending);
   }
 
   #requeue(pending: PendingCommand): void {

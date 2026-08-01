@@ -22,6 +22,7 @@ import type {
   RunnerCommandResult,
 } from "../shared/runner-command-broker.ts";
 
+import { MAXIMUM_TOOL_OUTPUT_LINES } from "../shared/tool-output-limits.ts";
 import {
   createPageFetchRunnerTool,
   PAGE_FETCH_TOOL_NAME,
@@ -29,7 +30,6 @@ import {
 } from "./page-fetch.ts";
 import { attachmentPathFromReference } from "./runner-attachments.ts";
 import {
-  MAXIMUM_TOOL_OUTPUT_LINES,
   readContinuation,
   type RunnerOutputSpills,
 } from "./runner-output-spills.ts";

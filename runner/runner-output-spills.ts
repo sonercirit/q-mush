@@ -2,43 +2,14 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { utf8Prefix } from "../shared/utf8.ts";
-
-const MAXIMUM_TOOL_OUTPUT_BYTES = 50 * 1_024;
-export const MAXIMUM_TOOL_OUTPUT_LINES = 2_000;
-
-interface TruncatedToolOutput {
-  readonly output: string;
-  readonly shownLines: number;
-  readonly truncated: boolean;
-}
-
-function boundedLineOutput(
-  lines: readonly string[],
-  maximumLines = MAXIMUM_TOOL_OUTPUT_LINES,
-  partialFirstLine = true,
-): TruncatedToolOutput {
-  let shownLines = Math.min(lines.length, maximumLines);
-  let output = lines.slice(0, shownLines).join("\n");
-  while (
-    shownLines > 0 &&
-    Buffer.byteLength(output, "utf8") > MAXIMUM_TOOL_OUTPUT_BYTES
-  ) {
-    shownLines -= 1;
-    output = lines.slice(0, shownLines).join("\n");
-  }
-  if (shownLines === 0 && lines.length > 0 && partialFirstLine) {
-    output = utf8Prefix(lines[0] ?? "", MAXIMUM_TOOL_OUTPUT_BYTES);
-    shownLines = 1;
-  }
-  return {
-    output,
-    shownLines,
-    truncated:
-      shownLines < lines.length ||
-      output !== lines.slice(0, shownLines).join("\n"),
-  };
-}
+import {
+  applyToolOutputNotice,
+  boundedToolOutput,
+  boundedToolOutputLines,
+  MAXIMUM_TOOL_OUTPUT_BYTES,
+  MAXIMUM_TOOL_OUTPUT_LINES,
+  toolOutputLimitNotice,
+} from "../shared/tool-output-limits.ts";
 
 export function readContinuation(
   content: string,
@@ -53,7 +24,7 @@ export function readContinuation(
     );
   }
   const requested = lines.slice(start, start + limit);
-  const shown = boundedLineOutput(
+  const shown = boundedToolOutputLines(
     requested,
     Math.min(limit, MAXIMUM_TOOL_OUTPUT_LINES),
     false,
@@ -76,16 +47,15 @@ export class RunnerOutputSpills {
   #spillSequence = 0;
 
   async apply(output: string): Promise<string> {
-    const bounded = boundedLineOutput(output.split("\n"));
-    if (!bounded.truncated) {
+    if (!boundedToolOutput(output).truncated) {
       return output;
     }
+    const notice = toolOutputLimitNotice(await this.#writeSpill(output));
+    return applyToolOutputNotice(output, notice);
+  }
 
-    const spillPath = await this.#writeSpill(output);
-    const notice = `Output exceeds the per-call limit (${String(MAXIMUM_TOOL_OUTPUT_LINES)} lines or ${String(MAXIMUM_TOOL_OUTPUT_BYTES)} bytes). The full output has been saved to ${spillPath}. Use the read tool with offset/limit to continue.`;
-    return bounded.output.length === 0
-      ? notice
-      : `${bounded.output}\n\n${notice}`;
+  async spill(output: string): Promise<string> {
+    return this.#writeSpill(output);
   }
 
   ownsPath(path: string): boolean {

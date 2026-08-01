@@ -12,6 +12,8 @@ import { RUNNER_AGENT_FILE_COMMAND } from "../../shared/agent-file.ts";
 import {
   RUNNER_EXECUTION_CLEANUP_COMMAND,
   RUNNER_TERMINAL_CLEANUP_ARGUMENT,
+  RUNNER_TOOL_OUTPUT_SPILL_COMMAND,
+  RUNNER_TOOL_OUTPUT_SPILL_CONTENT_ARGUMENT,
   type RunnerToolCommand,
 } from "../../shared/runner-command-broker.ts";
 import { testRunnerCommand } from "../../shared/test/runner-command-fixtures.ts";
@@ -161,6 +163,25 @@ function executeSession(
   );
 }
 
+function spillTestSession(sessionId: string): Promise<SessionExecutor> {
+  return readSession({
+    content: "workspace content",
+    path: "existing.txt",
+    sessionId,
+  });
+}
+
+function readSpillContinuation(
+  session: SessionExecutor,
+  path: string,
+): Promise<string> {
+  return executeSession(session, "read", { limit: 2, path });
+}
+
+async function expectSpillRemoved(path: string): Promise<void> {
+  expect(await Bun.file(path).exists()).toBe(false);
+}
+
 function cleanupSession(session: SessionExecutor): Promise<void> {
   return executeSession(session, RUNNER_EXECUTION_CLEANUP_COMMAND, {
     [RUNNER_TERMINAL_CLEANUP_ARGUMENT]: true,
@@ -304,11 +325,7 @@ describe("runner WebSocket protocol", () => {
   });
 
   test("spills oversized bash output per call and cleans it up terminally", async () => {
-    const session = await readSession({
-      content: "workspace content",
-      path: "existing.txt",
-      sessionId: "session-bash-spill",
-    });
+    const session = await spillTestSession("session-bash-spill");
     const command =
       "yes xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx | head -n 2000";
 
@@ -327,12 +344,9 @@ describe("runner WebSocket protocol", () => {
     expect(first.content).toContain("stdout:\nxxxxxxxx");
     expect(first.content).toContain("Exit code: 0");
     expect(second.path).not.toBe(first.path);
-    expect(
-      await executeSession(session, "read", {
-        limit: 2,
-        path: first.path,
-      }),
-    ).toContain("Use offset=3 to continue");
+    expect(await readSpillContinuation(session, first.path)).toContain(
+      "Use offset=3 to continue",
+    );
     const initialPaths = [first.path, second.path];
     for (const path of initialPaths) {
       expect(await Bun.file(path).exists()).toBe(true);
@@ -340,9 +354,30 @@ describe("runner WebSocket protocol", () => {
 
     await cleanupSession(session);
     while (initialPaths.length > 0) {
-      const path = initialPaths.pop() ?? "";
-      expect(await Bun.file(path).exists()).toBe(false);
+      await expectSpillRemoved(initialPaths.pop() ?? "");
     }
+  });
+
+  test("writes server-routed spills that read can continue and cleanup removes", async () => {
+    const session = await spillTestSession("session-routed-spill");
+    const content = Array.from(
+      { length: 2_500 },
+      (_value, index) => `routed-${String(index + 1)}`,
+    ).join("\n");
+    const path = await executeSession(
+      session,
+      RUNNER_TOOL_OUTPUT_SPILL_COMMAND,
+      {
+        [RUNNER_TOOL_OUTPUT_SPILL_CONTENT_ARGUMENT]: content,
+      },
+    );
+
+    expect(await readFile(path, "utf8")).toBe(content);
+    expect(await readSpillContinuation(session, path)).toContain(
+      "Use offset=3 to continue",
+    );
+    await cleanupSession(session);
+    await expectSpillRemoved(path);
   });
 
   test("spills an oversized page fetch result", async () => {
