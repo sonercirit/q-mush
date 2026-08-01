@@ -317,6 +317,7 @@ function App(): JSX.Element {
     command: (operation, payload, idempotencyKey) =>
       realtime.command(operation, payload, idempotencyKey),
     onReconnect: (listener) => realtime.onReconnect(listener),
+    yieldToStateApplication: () => realtime.yieldToStateApplication(),
   });
   const providerControllers = [
     openAi,

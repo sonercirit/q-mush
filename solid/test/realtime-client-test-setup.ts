@@ -14,6 +14,7 @@ interface RealtimeTestSetupOptions {
 
 interface RealtimeTestSetup {
   readonly connection: RealtimeConnection;
+  readonly requestFrames: (() => void)[];
   readonly sockets: RealtimeTestSocket[];
   readonly timers: (() => void)[];
 }
@@ -21,6 +22,7 @@ interface RealtimeTestSetup {
 export function realtimeTestSetup(
   options: RealtimeTestSetupOptions = {},
 ): RealtimeTestSetup {
+  const requestFrames: (() => void)[] = [];
   const sockets: RealtimeTestSocket[] = [];
   const timers: (() => void)[] = [];
   const connection = new RealtimeConnection(
@@ -33,9 +35,12 @@ export function realtimeTestSetup(
         return socket;
       },
       location: LOCATION,
-      ...(options.requestFrame === undefined
-        ? {}
-        : { requestFrame: options.requestFrame }),
+      requestFrame:
+        options.requestFrame ??
+        ((callback) => {
+          requestFrames.push(callback);
+          return requestFrames.length;
+        }),
       setTimeout: (callback) => {
         timers.push(callback);
         return timers.length;
@@ -43,5 +48,5 @@ export function realtimeTestSetup(
     },
   );
   connection.start();
-  return { connection, sockets, timers };
+  return { connection, requestFrames, sockets, timers };
 }

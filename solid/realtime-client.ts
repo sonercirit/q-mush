@@ -25,6 +25,17 @@ type SessionDelta = Extract<
 >;
 type ToolDelta = Extract<RealtimeServerEvent, { readonly type: "tool_stream" }>;
 type CoalescedDelta = SessionDelta | ToolDelta;
+type DeferredStateEvent = Extract<
+  RealtimeServerEvent,
+  {
+    readonly type:
+      | "runners"
+      | "session"
+      | "session_questions"
+      | "sessions"
+      | "sessions_changed";
+  }
+>;
 
 const RECONNECT_DELAYS = [250, 500, 1_000, 2_000, 5_000] as const;
 const MAXIMUM_PENDING_COMMANDS = 1_000;
@@ -94,6 +105,10 @@ export class RealtimeConnection {
   #queuedCommands: QueuedCommand[] = [];
   #reconnectAttempt = 0;
   #reconnectTimer: number | undefined;
+  #deferredStateEventGeneration = 0;
+  #deferredStateEventFrame: number | undefined;
+  readonly #deferredStateEvents = new Map<string, DeferredStateEvent>();
+  readonly #deferredStateWaiters: ((available: boolean) => void)[] = [];
   #sessionDeltaGeneration = 0;
   #sessionDeltas = new Map<string, CoalescedDelta[]>();
   #sessionDeltaFrame: number | undefined;
@@ -130,6 +145,13 @@ export class RealtimeConnection {
     return () => {
       this.#reconnectListeners.delete(listener);
     };
+  }
+
+  yieldToStateApplication(): Promise<boolean> {
+    return new Promise((resolve) => {
+      this.#deferredStateWaiters.push(resolve);
+      this.#scheduleDeferredStateEvent();
+    });
   }
 
   syncTools(sessionId: string): void {
@@ -175,6 +197,7 @@ export class RealtimeConnection {
 
     const socket = this.#socket;
     this.#socket = undefined;
+    this.#discardDeferredStateEvents();
     this.#sessionDeltaGeneration += 1;
     this.#sessionDeltaFrame = undefined;
     this.#sessionDeltas.clear();
@@ -292,6 +315,7 @@ export class RealtimeConnection {
       if (this.#socket === socket) {
         this.#socket = undefined;
         this.#instanceId = undefined;
+        this.#discardDeferredStateEvents();
         if (!this.#hasConnected && this.#queuedCommands.length > 0) {
           this.#rejectQueuedCommands(UNKNOWN_OUTCOME_ERROR);
         }
@@ -302,6 +326,60 @@ export class RealtimeConnection {
       if (this.#socket === socket && !this.#stopped) {
         socket.close();
       }
+    });
+  }
+
+  #deferredStateEventKey(event: DeferredStateEvent): string {
+    switch (event.type) {
+      case "session":
+        return `session:${event.session.id}`;
+      case "session_questions":
+        return `session_questions:${event.sessionId}`;
+      case "runners":
+      case "sessions":
+      case "sessions_changed":
+        return event.type;
+    }
+  }
+
+  #discardDeferredStateEvents(): void {
+    this.#deferredStateEventGeneration += 1;
+    this.#deferredStateEventFrame = undefined;
+    this.#deferredStateEvents.clear();
+    for (const resolve of this.#deferredStateWaiters.splice(0)) {
+      resolve(false);
+    }
+  }
+
+  #queueDeferredStateEvent(event: DeferredStateEvent): void {
+    this.#deferredStateEvents.set(this.#deferredStateEventKey(event), event);
+    this.#scheduleDeferredStateEvent();
+  }
+
+  #scheduleDeferredStateEvent(): void {
+    if (
+      this.#deferredStateEventFrame !== undefined ||
+      (this.#deferredStateEvents.size === 0 &&
+        this.#deferredStateWaiters.length === 0)
+    ) {
+      return;
+    }
+
+    const generation = this.#deferredStateEventGeneration;
+    this.#deferredStateEventFrame = this.#requestFrame(() => {
+      this.#deferredStateEventFrame = undefined;
+      if (generation !== this.#deferredStateEventGeneration || this.#stopped) {
+        return;
+      }
+      const next = this.#deferredStateEvents.entries().next();
+      if (next.done) {
+        this.#deferredStateWaiters.shift()?.(true);
+      } else {
+        const [key, queued] = next.value;
+        this.#deferredStateEvents.delete(key);
+        this.#listener(queued);
+      }
+      this.#scheduleDeferredStateEvent();
     });
   }
 
@@ -477,7 +555,7 @@ export class RealtimeConnection {
         this.syncTools(event.session.id);
       }
     }
-    this.#listener(event);
+    this.#queueDeferredStateEvent(event);
   }
 
   #queueStreamEvent(

@@ -2,6 +2,7 @@ import type { RealtimeConnection } from "./realtime-client.ts";
 
 export type SessionCommandTransport = Pick<RealtimeConnection, "command"> & {
   onReconnect?(listener: () => void): () => void;
+  yieldToStateApplication?(): Promise<boolean>;
 };
 
 /** @public Starts realtime before an initial load and rolls back on failure. */
