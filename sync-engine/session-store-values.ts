@@ -1,4 +1,4 @@
-import { eq, sql, type SQL } from "drizzle-orm";
+import { and, eq, sql, type SQL } from "drizzle-orm";
 import type { AgentImage } from "../shared/agent-images.ts";
 import type { AgentRecordedMessage } from "../shared/agent-loop.ts";
 import { createdAuditFields, updatedAuditFields } from "../shared/audit.ts";
@@ -125,17 +125,52 @@ function systemMessageInsertOptions(
   };
 }
 
+function requiredStoredMessageSegment(
+  database: Pick<AppDatabase, "select">,
+  sessionId: string,
+  segment: number | undefined,
+): number {
+  const resolved = segment ?? currentSessionSegment(database, sessionId);
+  if (resolved === undefined) {
+    throw new Error("The agent session no longer exists");
+  }
+  return resolved;
+}
+
+export function nextStoredMessageTimestamp(
+  database: Pick<AppDatabase, "select">,
+  sessionId: string,
+  segment: number,
+  now: number,
+): number {
+  const latest = database
+    .select({
+      createdAt: sql<number | null>`max(${agentMessages.createdAt})`,
+    })
+    .from(agentMessages)
+    .where(
+      and(
+        eq(agentMessages.sessionId, sessionId),
+        eq(agentMessages.segment, segment),
+        eq(agentMessages.isDeleted, false),
+      ),
+    )
+    .get()?.createdAt;
+  return latest === null || latest === undefined
+    ? now
+    : Math.max(now, latest + 1);
+}
+
 export function insertStoredMessage(
   database: Pick<AppDatabase, "insert" | "select">,
   message: StoredMessageValues,
   options: StoredMessageInsertOptions,
 ): void {
-  const segment =
-    options.segment ?? currentSessionSegment(database, options.sessionId);
-
-  if (segment === undefined) {
-    throw new Error("The agent session no longer exists");
-  }
+  const segment = requiredStoredMessageSegment(
+    database,
+    options.sessionId,
+    options.segment,
+  );
   database
     .insert(agentMessages)
     .values({
@@ -159,16 +194,28 @@ interface SystemStoredMessageOptions extends SystemStoredMessageInput {
 
 export function appendSystemStoredMessage(
   options: SystemStoredMessageOptions,
-): void {
+): number {
+  const segment = requiredStoredMessageSegment(
+    options.database,
+    options.sessionId,
+    options.segment,
+  );
+  const messageNow = nextStoredMessageTimestamp(
+    options.database,
+    options.sessionId,
+    segment,
+    options.now,
+  );
   insertStoredMessage(options.database, options.message, {
     ...systemMessageInsertOptions(
       options.generateId,
-      options.now,
+      messageNow,
       options.sessionId,
       options.userId,
     ),
-    ...(options.segment === undefined ? {} : { segment: options.segment }),
+    segment,
   });
+  return messageNow;
 }
 
 export function appendSystemMessageAndTouchSession(
@@ -177,10 +224,10 @@ export function appendSystemMessageAndTouchSession(
     readonly database: Pick<AppDatabase, "insert" | "select" | "update">;
   },
 ): void {
-  appendSystemStoredMessage(options);
+  const messageNow = appendSystemStoredMessage(options);
   options.database
     .update(agentSessions)
-    .set(updatedAuditFields(SYSTEM_ID, options.now))
+    .set(updatedAuditFields(SYSTEM_ID, messageNow))
     .where(options.condition)
     .run();
 }
