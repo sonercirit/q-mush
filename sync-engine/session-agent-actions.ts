@@ -259,7 +259,7 @@ export class SessionAgentActions {
 
   #wakeReportedParent(parentId: string | undefined, userId: string): void {
     if (parentId !== undefined) {
-      this.#wake(parentId, userId);
+      void this.#wake(parentId, userId);
     }
   }
 
@@ -342,11 +342,12 @@ export class SessionAgentActions {
 
   #wakeParents(userId: string, parentIds: readonly string[]): void {
     for (const parentId of new Set(parentIds)) {
-      this.#wake(parentId, userId);
+      void this.#wake(parentId, userId);
     }
   }
 
-  #wake(parentSessionId: string, userId: string): void {
+  async #wake(parentSessionId: string, userId: string): Promise<void> {
+    await this.#dependencies.settled?.(parentSessionId);
     const parent = this.#dependencies.store.get(userId, parentSessionId);
     if (
       parent !== undefined &&

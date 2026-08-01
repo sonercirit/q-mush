@@ -388,10 +388,9 @@ class DrizzleSessionIntegration
 
   #createActions(database: AppDatabase): SessionAgentActions {
     return new SessionAgentActions({
-      activeSession: (sessionId) => this.#runtimes.active(sessionId),
-      abortSession: (sessionId) => {
-        this.#runtimes.abort(sessionId);
-      },
+      activeSession: (id) => this.#runtimes.active(id),
+      settled: this.#runtimes.cleared.bind(this.#runtimes),
+      abortSession: this.#runtimes.abort.bind(this.#runtimes),
       broker: this.#broker,
       browseDirectories: (request, signal) =>
         this.#requests.browseDirectories(request, signal),

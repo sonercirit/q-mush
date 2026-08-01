@@ -413,18 +413,43 @@ describe("session agent tools", () => {
     closeSessionTestDatabase(spawnSetup.database);
   });
 
-  test("delivers a child result that arrives while the parent model is still running", async () => {
-    const { childId, setup } = await pausedChildSetup();
+  test("consumes steering at the boundary after concurrent child completion", async () => {
+    const running = await pausedChildSetup();
+    const { childId, model, setup } = running;
     await completePausedChild(setup, childId);
     const parent = setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID);
     expect(parent?.status).toBe("running");
     expect(parent?.pendingInputs).toHaveLength(1);
     expect(parent?.pendingInputs[0]?.content).toContain("Child final result.");
     expect(parent?.pendingInputs[0]?.kind).toBe("steer");
+
+    model.resumeParent();
+    const resumed = await waitForSessionValue(
+      () => setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID),
+      (value) => {
+        if (!isRecord(value)) return false;
+        const pendingInputs = value["pendingInputs"];
+        const messages = value["messages"];
+        return (
+          Array.isArray(pendingInputs) &&
+          pendingInputs.length === 0 &&
+          Array.isArray(messages) &&
+          messages.some(
+            (message) =>
+              isRecord(message) &&
+              typeof message["content"] === "string" &&
+              message["content"].includes("Child final result."),
+          )
+        );
+      },
+    );
+    expect(JSON.stringify(resumed)).toContain("Child final result.");
+    const pending = setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID);
+    expect(pending).toMatchObject({ pendingInputs: [] });
     closeSessionTestDatabase(setup.database);
   });
 
-  test("gracefully stops a parent after its child result is delivered", async () => {
+  test("a supervisor stop remains orderly after callback delivery", async () => {
     const { childId, model, setup } = await pausedChildSetup();
     const stopping = setup.sessions.realtimeCommands.stopForUser(
       TEST_AUTHENTICATED_USER,
