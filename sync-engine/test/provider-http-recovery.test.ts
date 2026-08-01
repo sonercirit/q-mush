@@ -142,8 +142,8 @@ function resetDeltas(
   return deltas.filter(({ reset }) => reset === true);
 }
 
-describe("provider HTTP turn recovery", () => {
-  test("resets a partial turn and persists only the recovered tool call", async () => {
+describe("provider HTTP step recovery", () => {
+  test("resets a partial step and persists only the recovered tool call", async () => {
     const provider = new ProviderResponses([
       eventStream([
         textEvent("Discarded partial output."),

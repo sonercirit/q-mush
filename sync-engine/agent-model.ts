@@ -6,7 +6,7 @@ import type {
 import type {
   AgentConversationMessage,
   AgentModel,
-  AgentModelTurn,
+  AgentModelStep,
 } from "../shared/agent-loop.ts";
 import { AGENT_SYSTEM_PROMPT } from "../shared/agent-prompt.ts";
 import {
@@ -23,7 +23,7 @@ import {
   completionMessages,
   completionSignal,
   type CompletionArguments,
-  type OptionalTurn,
+  type OptionalStep,
 } from "./agent-completion.ts";
 import type {
   AgentModelRequestOptions,
@@ -291,7 +291,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
   readonly #fetch: AgentModelFetch;
   readonly #model: string;
   readonly #onDelta: ((delta: ProviderTextDelta) => void) | undefined;
-  readonly #onTurnStart: () => void;
+  readonly #onStepStart: () => void;
   readonly #openRouterProviderRouting: OpenRouterProviderRouting | undefined;
   readonly #provider: ProviderId;
   readonly #reasoningEffort: AgentReasoningEffort | undefined;
@@ -307,7 +307,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
     this.#fetch = options.fetch ?? ((request) => globalThis.fetch(request));
     this.#model = options.model;
     this.#onDelta = options.onDelta;
-    this.#onTurnStart = options.onTurnStart ?? (() => undefined);
+    this.#onStepStart = options.onStepStart ?? (() => undefined);
     this.#openRouterProviderRouting =
       options.openRouterProviderRouting ??
       (options.openRouterProviderTag === undefined
@@ -324,11 +324,11 @@ export class ChatCompletionsAgentModel implements AgentModel {
     this.#webSocket = options.webSocket ?? defaultWebSocket;
   }
 
-  readonly startTurn = (): void => {
-    this.#onTurnStart();
+  readonly startStep = (): void => {
+    this.#onStepStart();
   };
 
-  async complete(...parameters: CompletionArguments): Promise<AgentModelTurn> {
+  async complete(...parameters: CompletionArguments): Promise<AgentModelStep> {
     if (this.#provider !== "openai") {
       return this.#completeHttp(...parameters);
     }
@@ -360,7 +360,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
 
   async #tryWebSocket(
     ...parameters: CompletionArguments
-  ): Promise<OptionalTurn> {
+  ): Promise<OptionalStep> {
     const signal = completionSignal(parameters);
 
     for (let attempt = 0; ; attempt += 1) {
@@ -424,7 +424,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
 
   #completeWebSocket(
     ...parameters: CompletionArguments
-  ): Promise<AgentModelTurn> {
+  ): Promise<AgentModelStep> {
     const { messages, signal } = completionInput(parameters);
     const headers = agentProviderRequestHeaders(
       this.#provider,
@@ -449,7 +449,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
     });
   }
 
-  #completeHttp(...parameters: CompletionArguments): Promise<AgentModelTurn> {
+  #completeHttp(...parameters: CompletionArguments): Promise<AgentModelStep> {
     const input = completionInput(parameters);
     const responsesProtocol = usesCodexOAuth(this.#provider, this.#credential);
     return completeProviderHttp(

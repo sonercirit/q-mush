@@ -1,4 +1,4 @@
-import type { AgentModelTurn } from "../shared/agent-loop.ts";
+import type { AgentModelStep } from "../shared/agent-loop.ts";
 import {
   createProviderStreamAccumulator,
   type ProviderTextDelta,
@@ -26,7 +26,7 @@ export async function readProviderEventStream(
   response: Response,
   protocol: "chat_completions" | "responses",
   onDelta?: (delta: ProviderTextDelta) => void,
-): Promise<AgentModelTurn> {
+): Promise<AgentModelStep> {
   const accumulator = createProviderStreamAccumulator(protocol, onDelta);
   const body = response.body;
   if (body === null) {

@@ -362,7 +362,7 @@ export function SessionDetailBody(props: {
           availabilityLabel={
             composerReason() ??
             (running()
-              ? "Running. Follow up starts the next turn; Steer changes direction at the next safe model or tool boundary."
+              ? "Running. Follow up starts the next turn; Steer is injected at the next step boundary, after the current model call and its tools settle."
               : queued()
                 ? "Queued. Follow up starts after the queued work; steering is available only while running."
                 : "Ready for another instruction.")

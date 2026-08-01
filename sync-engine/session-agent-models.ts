@@ -81,7 +81,7 @@ function modelOptions(
   credential: ProviderCredentialAccess,
   systemPrompt: string,
   onDelta?: AgentModelFactoryOptions["onDelta"],
-  onTurnStart?: AgentModelFactoryOptions["onTurnStart"],
+  onStepStart?: AgentModelFactoryOptions["onStepStart"],
 ): AgentModelFactoryOptions {
   return {
     credential,
@@ -95,7 +95,7 @@ function modelOptions(
     model: detail.model,
     ...agentModelRoutingOptions(detail.openRouterProviderTag),
     ...(onDelta === undefined ? {} : { onDelta }),
-    ...(onTurnStart === undefined ? {} : { onTurnStart }),
+    ...(onStepStart === undefined ? {} : { onStepStart }),
     provider: detail.provider,
     providerPricing: detail.providerPricing,
     reasoningEffort: detail.reasoningEffort,
@@ -118,9 +118,9 @@ export function createSessionAgentModels(options: {
 }): SessionAgentModels {
   const id = options.id ?? createUuidV7;
   let streamId = options.streamId ?? id();
-  const startTurn = (): void => {
+  const startStep = (): void => {
     streamId = id();
-    options.toolStream?.startTurn(streamId);
+    options.toolStream?.startStep(streamId);
   };
   const onDelta: AgentModelFactoryOptions["onDelta"] = (delta) => {
     if (!options.isCurrent()) {
@@ -147,7 +147,7 @@ export function createSessionAgentModels(options: {
         options.detail.workspaceId,
       );
     } catch {
-      // Live delivery must never interrupt the persisted model turn.
+      // Live delivery must never interrupt the persisted model step.
     }
   };
   return {
@@ -160,7 +160,7 @@ export function createSessionAgentModels(options: {
           options.detail.executionEnvironment,
         ),
         onDelta,
-        startTurn,
+        startStep,
       ),
     ),
     createCompactor: () => {

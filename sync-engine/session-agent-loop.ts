@@ -4,7 +4,7 @@ import {
   type AgentConversationMessage,
   type AgentMessageRecorder,
   type AgentModel,
-  type AgentModelTurn,
+  type AgentModelStep,
 } from "../shared/agent-loop.ts";
 import {
   shouldCompactContext,
@@ -12,14 +12,14 @@ import {
 } from "./agent-compaction.ts";
 import { restartHandoffResult } from "./session-agent-handoff.ts";
 import {
-  agentTurnUsage,
+  agentStepUsage,
   compactionUsage,
   type CompactionUsage,
 } from "./session-compaction-usage.ts";
 
 interface CompactingAgentLoopOptions {
   readonly agentCost: (
-    turn: Pick<AgentModelTurn, "costUsd" | "tokenUsage">,
+    step: Pick<AgentModelStep, "costUsd" | "tokenUsage">,
   ) => number | null;
   readonly autoCompact: boolean;
   readonly createCompactor: () => AgentConversationCompactor;
@@ -48,7 +48,7 @@ interface CompactingAgentLoopOptions {
   >[0]["takeSteeringMessages"];
 }
 
-function shouldCompactFinalTurn(
+function shouldCompactFinalStep(
   options: Pick<CompactingAgentLoopOptions, "autoCompact" | "maxContextTokens">,
   contextTokens: number | null,
 ): boolean {
@@ -60,11 +60,11 @@ function shouldCompactFinalTurn(
 }
 
 interface CompactionState {
-  latestTurn: AgentModelTurn | undefined;
+  latestStep: AgentModelStep | undefined;
   pending: boolean;
   progressSinceCompaction: boolean;
   restartPendingOnCompletion: boolean;
-  turnExceedsThreshold: boolean;
+  stepExceedsThreshold: boolean;
 }
 
 async function compactConversation(
@@ -92,7 +92,7 @@ export async function runCompactingAgentLoop(
 
   if (
     options.initialContextTokens !== undefined &&
-    shouldCompactFinalTurn(options, options.initialContextTokens)
+    shouldCompactFinalStep(options, options.initialContextTokens)
   ) {
     const beforeCompaction = restartHandoffResult(
       options.signal,
@@ -122,11 +122,11 @@ export async function runCompactingAgentLoop(
 
   for (;;) {
     const compaction: CompactionState = {
-      latestTurn: undefined,
+      latestStep: undefined,
       pending: false,
       progressSinceCompaction: false,
       restartPendingOnCompletion: false,
-      turnExceedsThreshold: false,
+      stepExceedsThreshold: false,
     };
     const final = await runAgentLoop({
       executeTool: options.executeTool,
@@ -136,20 +136,20 @@ export async function runCompactingAgentLoop(
       initialMessages: messages,
       model: {
         complete: async (conversation, signal) => {
-          const turn = await options.model.complete(conversation, signal);
-          compaction.latestTurn = turn;
-          compaction.turnExceedsThreshold = shouldCompactFinalTurn(
+          const step = await options.model.complete(conversation, signal);
+          compaction.latestStep = step;
+          compaction.stepExceedsThreshold = shouldCompactFinalStep(
             options,
-            turn.contextTokens,
+            step.contextTokens,
           );
           compaction.pending =
             (allowCompaction || compaction.progressSinceCompaction) &&
-            compaction.turnExceedsThreshold;
-          return turn;
+            compaction.stepExceedsThreshold;
+          return step;
         },
-        ...(options.model.startTurn === undefined
+        ...(options.model.startStep === undefined
           ? {}
-          : { startTurn: options.model.startTurn }),
+          : { startStep: options.model.startStep }),
       },
       ...(options.onToolCall === undefined
         ? {}
@@ -169,26 +169,26 @@ export async function runCompactingAgentLoop(
         );
         compaction.pending = false;
         compaction.progressSinceCompaction = false;
-        compaction.turnExceedsThreshold = false;
+        compaction.stepExceedsThreshold = false;
         allowCompaction = false;
         return compactedMessages;
       },
       recordMessage: async (recordedMessages) => {
-        const turn = compaction.latestTurn;
-        const terminal = turn?.toolCalls.length === 0 && !compaction.pending;
+        const step = compaction.latestStep;
+        const terminal = step?.toolCalls.length === 0 && !compaction.pending;
         const assistant = recordedMessages.some(
           (message) => message.role === "assistant",
         );
         const usage =
-          assistant && turn !== undefined
-            ? agentTurnUsage(turn, options.agentCost)
+          assistant && step !== undefined
+            ? agentStepUsage(step, options.agentCost)
             : undefined;
         await options.recordMessage(recordedMessages, usage, terminal);
         throwIfAgentAborted(options.signal);
         if (assistant) {
-          compaction.latestTurn = undefined;
+          compaction.latestStep = undefined;
           if (
-            turn?.toolCalls.length === 0 &&
+            step?.toolCalls.length === 0 &&
             options.handoffRequested?.() === true
           ) {
             compaction.restartPendingOnCompletion = true;
@@ -196,7 +196,7 @@ export async function runCompactingAgentLoop(
         }
         if (recordedMessages.some((message) => message.role === "tool")) {
           compaction.progressSinceCompaction = true;
-          if (compaction.turnExceedsThreshold) {
+          if (compaction.stepExceedsThreshold) {
             compaction.pending = true;
           }
         }

@@ -35,9 +35,9 @@ function largeCatalog() {
 
 function startModelOptionSession(
   models: ReturnType<typeof modelOption>[],
-  turns: Parameters<typeof scriptedModel>[0],
+  steps: Parameters<typeof scriptedModel>[0],
 ) {
-  return startToolSession(scriptedModel(turns), {}, () => catalog(models));
+  return startToolSession(scriptedModel(steps), {}, () => catalog(models));
 }
 
 function optionCall(

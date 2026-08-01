@@ -2,13 +2,13 @@ import { describe, expect, test } from "vitest";
 import {
   runAgentLoop,
   type AgentModel,
-  type AgentModelTurn,
+  type AgentModelStep,
   type AgentRecordedMessage,
 } from "../../shared/agent-loop.ts";
 import { createParallelToolUses } from "../../shared/test/parallel-fixtures.ts";
 import { createAgentSkills } from "../../sync-engine/agent-skills.ts";
 import { captureRejection } from "./promise-test-helpers.ts";
-import { providerTurn } from "./provider-turn-fixtures.ts";
+import { providerStep } from "./provider-step-fixtures.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
   abortedSignal,
@@ -49,12 +49,12 @@ async function runRecordedLoop(
 function emptyToolCall(
   id: string,
   name: string,
-): AgentModelTurn["toolCalls"][number] {
+): AgentModelStep["toolCalls"][number] {
   return { arguments: "{}", id, name };
 }
 
-function completedTurn(content: string): AgentModelTurn {
-  return providerTurn(content);
+function completedStep(content: string): AgentModelStep {
+  return providerStep(content);
 }
 
 function toolMessage(
@@ -231,7 +231,7 @@ describe("first-party agent loop", () => {
     ];
     const model = new ScriptedAgentModel([
       { content: "Running tools.", toolCalls },
-      { content: "This turn must wait for recovery.", toolCalls: [] },
+      { content: "This step must wait for recovery.", toolCalls: [] },
     ]);
     const firstToolPersistence = promiseGate();
     const recorded: AgentRecordedMessage[] = [];
@@ -267,7 +267,7 @@ describe("first-party agent loop", () => {
 
   test("completes when restart becomes pending during final persistence", async () => {
     const persistence = promiseGate();
-    const terminalModel = completedTurn("Durable response.");
+    const terminalModel = completedStep("Durable response.");
     const model = new ScriptedAgentModel([terminalModel]);
     const persistedMessages: AgentRecordedMessage[] = [];
     const handoff = deferredHandoff();
@@ -334,7 +334,7 @@ describe("first-party agent loop", () => {
     ]);
   });
 
-  test("continues until the model finishes without a turn limit", async () => {
+  test("continues until the model finishes without a step limit", async () => {
     const toolTurns = Array.from({ length: 33 }, (_, index) => ({
       content: "",
       toolCalls: [

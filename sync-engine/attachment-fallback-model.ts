@@ -3,7 +3,7 @@ import {
   type AgentAttachment,
 } from "../shared/agent-attachments.ts";
 import type { AgentModelOption } from "../shared/agent-configuration.ts";
-import type { AgentModelTurn } from "../shared/agent-loop.ts";
+import type { AgentModelStep } from "../shared/agent-loop.ts";
 import { modelSupportsAttachmentModality } from "../shared/attachment-fallback.ts";
 import type {
   ProviderCredentialAccess,
@@ -21,7 +21,7 @@ export interface AttachmentExplanation {
   readonly model: string;
   readonly provider: ProviderId;
   readonly providerPricing: ProviderModelPricing | null;
-  readonly usage: Pick<AgentModelTurn, "costUsd" | "tokenUsage">;
+  readonly usage: Pick<AgentModelStep, "costUsd" | "tokenUsage">;
 }
 
 export async function explainAttachment(
@@ -97,15 +97,15 @@ export async function explainAttachment(
     provider: selectedProvider,
     providerPricing: selectedPricing,
   });
-  const turn = await model.complete(
+  const step = await model.complete(
     [{ attachments: [options.attachment], content: "", role: "user" }],
     signal,
   );
   return {
-    content: turn.content,
+    content: step.content,
     model: selectedModelId,
     provider: selectedProvider,
     providerPricing: selectedPricing,
-    usage: { costUsd: turn.costUsd, tokenUsage: turn.tokenUsage },
+    usage: { costUsd: step.costUsd, tokenUsage: step.tokenUsage },
   };
 }

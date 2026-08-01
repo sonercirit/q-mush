@@ -1,6 +1,6 @@
 import { expect } from "vitest";
 import type { AgentModelCatalog } from "../../shared/agent-configuration.ts";
-import type { AgentModelTurn } from "../../shared/agent-loop.ts";
+import type { AgentModelStep } from "../../shared/agent-loop.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 import { connectedSessionSetup } from "./session-integration-fixtures.ts";
 import {
@@ -42,14 +42,14 @@ function compactionCatalog(label: string): AgentModelCatalog {
   return testModelCatalog(MODEL_ID, label);
 }
 
-export function compactionTurn(
+export function compactionStep(
   content: string,
   options: {
     readonly contextTokens?: number;
     readonly costUsd?: number;
   } = {},
 ): Omit<
-  AgentModelTurn,
+  AgentModelStep,
   "contextTokens" | "costUsd" | "thinking" | "tokenUsage"
 > & {
   readonly contextTokens?: number;
@@ -59,7 +59,7 @@ export function compactionTurn(
 }
 
 export function continuationSetup(
-  turns: ConstructorParameters<typeof ScriptedAgentModel>[0],
+  steps: ConstructorParameters<typeof ScriptedAgentModel>[0],
   options: {
     readonly blockRequest?: number;
     readonly label: string;
@@ -69,7 +69,7 @@ export function continuationSetup(
   const blocked = Promise.withResolvers<undefined>();
   const entered = Promise.withResolvers<undefined>();
   const notified = Promise.withResolvers<undefined>();
-  const model = new ScriptedAgentModel(turns, {
+  const model = new ScriptedAgentModel(steps, {
     onComplete: async (requestCount) => {
       if (requestCount === options.notifyRequest) {
         notified.resolve(undefined);

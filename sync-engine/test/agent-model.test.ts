@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { AgentModelTurn } from "../../shared/agent-loop.ts";
+import type { AgentModelStep } from "../../shared/agent-loop.ts";
 import { AGENT_SYSTEM_PROMPT } from "../../shared/agent-prompt.ts";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import { isRecord } from "../../shared/auth-model.ts";
@@ -8,7 +8,7 @@ import { createJsonResponse } from "../../sync-engine/http.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import { createOpenAiOAuthSecret } from "./oauth-test-helpers.ts";
 import { captureRejection, requireError } from "./promise-test-helpers.ts";
-import { expectDoneTurn } from "./provider-turn-fixtures.ts";
+import { expectDoneStep } from "./provider-step-fixtures.ts";
 
 type ModelOptions = ConstructorParameters<typeof ChatCompletionsAgentModel>[0];
 
@@ -194,7 +194,7 @@ function codexEventResponse(
 
 function completeHello(
   model: ChatCompletionsAgentModel,
-): Promise<AgentModelTurn> {
+): Promise<AgentModelStep> {
   return model.complete([{ content: "Hello", role: "user" }]);
 }
 
@@ -242,11 +242,11 @@ describe("chat completions agent model", () => {
       capture,
     );
 
-    const turn = await model.complete([
+    const step = await model.complete([
       { content: "Inspect the source", role: "user" },
     ]);
 
-    expect(turn).toEqual({
+    expect(step).toEqual({
       content: "Inspecting.",
       contextTokens: 12_345,
       costUsd: null,
@@ -611,7 +611,7 @@ describe("chat completions agent model", () => {
       model: "gpt-5-codex",
     });
 
-    expectDoneTurn(await completeHello(model));
+    expectDoneStep(await completeHello(model));
   });
 
   test("shows the provider's error message", async () => {

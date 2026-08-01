@@ -55,7 +55,7 @@ function estimatedCost(
   return costs.reduce((total, cost) => total + cost, 0);
 }
 
-export function estimateAgentTurnCost(
+export function estimateAgentStepCost(
   session: Pick<AgentSessionDetail, "providerPricing">,
   usage: AgentTokenUsage | null,
 ): number | null {

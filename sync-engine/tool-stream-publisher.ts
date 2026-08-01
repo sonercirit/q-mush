@@ -90,7 +90,7 @@ export class ToolStreamPublisher {
     this.#workspaceId = options.workspaceId;
   }
 
-  startTurn(streamId: string): boolean {
+  startStep(streamId: string): boolean {
     return this.#begin(streamId);
   }
 

@@ -281,14 +281,14 @@ Living project memory.
   Streamed reasoning deltas are grouped by `output_index` and `summary_index`;
   separate summary parts with paragraphs because completed responses may omit
   their output. OpenAI Responses WebSockets and accepted HTTP streams retry
-  transient interruptions or provider error events only before a model turn is
+  transient interruptions or provider error events only before a model step is
   persisted; partial UI deltas reset before replay, and exhausted WebSockets
   fall back to HTTP. Permanent provider errors and aborts do not retry, and
   terminal failures persist as non-replayed `error` messages.
 - Shell commands require a positive timeout. On macOS/Linux each has a POSIX
   session; stop/timeout signals only its group, including descendants retaining
   pipes. Agent launches and runner commands otherwise have no application-owned
-  turn, queue, or elapsed-time limits. Outside explicit or 95%-threshold
+  step, queue, or elapsed-time limits. Outside explicit or 95%-threshold
   compaction, providers replay the full conversation without a timeout.
 - Add new runtime roots and standalone non-TypeScript build entries (for example
   `solid/styles.css`) to the matching Knip configs; exclude test support from

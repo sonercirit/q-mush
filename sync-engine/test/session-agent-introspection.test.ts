@@ -497,7 +497,7 @@ describe("session agent introspection tools", () => {
       { category: "tools", page: 99 },
       { category: "runners", search: " ".repeat(101) },
     ];
-    const turns = invalidCalls.map((arguments_, index) => ({
+    const steps = invalidCalls.map((arguments_, index) => ({
       content: "Checking invalid options.",
       toolCalls: [
         toolCall(
@@ -507,8 +507,8 @@ describe("session agent introspection tools", () => {
         ),
       ],
     }));
-    turns.push({ content: "All option validations returned.", toolCalls: [] });
-    const model = scriptedModel(turns);
+    steps.push({ content: "All option validations returned.", toolCalls: [] });
+    const model = scriptedModel(steps);
     const setup = await startToolSession(model);
     const detail = await waitForToolResults(
       setup,

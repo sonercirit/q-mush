@@ -203,7 +203,7 @@ test("the composer stays mounted and retains focus through a busy transition", (
   expectPromptFocusAndSelection(prompt);
   expectPromptAvailability(prompt, true);
   expect(container.textContent).toContain(
-    "Running. Follow up starts the next turn; Steer changes direction at the next safe model or tool boundary.",
+    "Running. Follow up starts the next turn; Steer is injected at the next step boundary, after the current model call and its tools settle.",
   );
 
   controller.applyDelta({

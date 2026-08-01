@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import type { AgentModel, AgentModelTurn } from "../../shared/agent-loop.ts";
+import type { AgentModel, AgentModelStep } from "../../shared/agent-loop.ts";
 import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { ModelConversationCompactor } from "../../sync-engine/agent-compaction.ts";
@@ -36,7 +36,7 @@ interface ManualRuntimeSetup {
 }
 
 function gatedModel(
-  gate: ReturnType<typeof promiseGate<AgentModelTurn>>,
+  gate: ReturnType<typeof promiseGate<AgentModelStep>>,
 ): AgentModel {
   return { complete: () => gate.wait() };
 }
@@ -137,7 +137,7 @@ function compactionState(setup: ManualRuntimeSetup): unknown {
       };
 }
 
-function compactorTurn(content: string): AgentModelTurn {
+function compactorStep(content: string): AgentModelStep {
   return {
     content,
     contextTokens: null,
@@ -169,7 +169,7 @@ async function runGatedManualCompaction(options: {
   readonly controller?: AbortController;
   readonly summary: string;
 }): Promise<void> {
-  const gate = promiseGate<AgentModelTurn>();
+  const gate = promiseGate<AgentModelStep>();
   const setup = manualRuntime(
     gatedModel(gate),
     options.controller ?? new AbortController(),
@@ -177,7 +177,7 @@ async function runGatedManualCompaction(options: {
   const compaction = startManualCompaction(setup.runtime);
   await gate.entered;
   options.afterEntered(setup);
-  gate.release(compactorTurn(options.summary));
+  gate.release(compactorStep(options.summary));
   await expectFailureWithoutCompaction(setup, compaction, {
     name: "AbortError",
   });
@@ -185,7 +185,7 @@ async function runGatedManualCompaction(options: {
 
 describe("manual session compaction", () => {
   test("persists the actual wall-clock compaction duration", async () => {
-    const gate = promiseGate<AgentModelTurn>();
+    const gate = promiseGate<AgentModelStep>();
     const setup = runningManualStore();
     const controller = new AbortController();
     let now = TEST_NOW + 10;
@@ -199,7 +199,7 @@ describe("manual session compaction", () => {
     const compaction = startManualCompaction(runtime);
     await gate.entered;
     now += 12_345;
-    gate.release(compactorTurn("Timed manual handoff"));
+    gate.release(compactorStep("Timed manual handoff"));
 
     await expect(compaction).resolves.toBe("complete");
     expect(requireCompactionSession(setup.store).turns).toMatchObject([

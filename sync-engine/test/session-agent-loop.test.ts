@@ -14,7 +14,7 @@ import {
   expectCompactionFailure,
   expectCompletedHandoff,
   expectLoopCounts,
-  highTurn,
+  highStep,
   type LoopOptions,
   recordingCompactor,
   recordingMessages,
@@ -116,10 +116,10 @@ describe("compacting agent session loop", () => {
     expect(modelCosts).toEqual([null, 0.25]);
   });
 
-  test("compacts and continues a final turn that reaches 95%", async () => {
+  test("compacts and continues a final step that reaches 95%", async () => {
     const model = new ScriptedAgentModel([
-      highTurn("Done before compaction."),
-      highTurn("Done after compaction.", 96_000),
+      highStep("Done before compaction."),
+      highStep("Done after compaction.", 96_000),
     ]);
     const compactedConversations: unknown[] = [];
     const summaries: string[] = [];
@@ -165,8 +165,8 @@ describe("compacting agent session loop", () => {
 
   test("ignores stale high usage after the compacted handoff", async () => {
     const model = new ScriptedAgentModel([
-      highTurn("Before compaction."),
-      highTurn("After compaction.", 96_000),
+      highStep("Before compaction."),
+      highStep("After compaction.", 96_000),
     ]);
     let compactions = 0;
 
@@ -186,13 +186,13 @@ describe("compacting agent session loop", () => {
   test("allows later compaction after post-handoff tool progress", async () => {
     const firstToolCall = { ...TOOL_CALL, id: "call-2" };
     const model = new ScriptedAgentModel([
-      highTurn("First phase done."),
+      highStep("First phase done."),
       {
         content: "Progress after the handoff.",
         contextTokens: 96_000,
         toolCalls: [firstToolCall],
       },
-      highTurn("Second phase done."),
+      highStep("Second phase done."),
     ]);
     const summaries: string[] = [];
     const compactedConversations: unknown[] = [];
@@ -328,7 +328,7 @@ describe("compacting agent session loop", () => {
     );
   });
 
-  test("hands off a tool turn before pending compaction or another model request", async () => {
+  test("hands off a tool step before pending compaction or another model request", async () => {
     const toolCalls = [TOOL_CALL, { ...TOOL_CALL, id: "call-2" }];
     const model = new ScriptedAgentModel([
       {
@@ -336,7 +336,7 @@ describe("compacting agent session loop", () => {
         contextTokens: 95_000,
         toolCalls,
       },
-      highTurn("Must wait for restart recovery."),
+      highStep("Must wait for restart recovery."),
     ]);
     const toolPersistence = promiseGate();
     const recordedMessages: unknown[] = [];
@@ -374,8 +374,8 @@ describe("compacting agent session loop", () => {
   test("completes when restart becomes pending during durable terminal persistence", async () => {
     const persistence = promiseGate();
     const model = new ScriptedAgentModel([
-      highTurn("Persisted terminal response."),
-      highTurn("Must not run after restart."),
+      highStep("Persisted terminal response."),
+      highStep("Must not run after restart."),
     ]);
     const compactedConversations: unknown[] = [];
     const recordedMessages: unknown[] = [];
@@ -406,8 +406,8 @@ describe("compacting agent session loop", () => {
     const compactor = promiseGate<CompactedConversation>();
     const compactionPersistence = promiseGate();
     const model = new ScriptedAgentModel([
-      highTurn("Durable terminal response."),
-      highTurn("Must not run after restart."),
+      highStep("Durable terminal response."),
+      highStep("Must not run after restart."),
     ]);
     const recordedMessages: unknown[] = [];
     const recordedCompactions: string[] = [];
@@ -539,7 +539,7 @@ describe("compacting agent session loop", () => {
       maxContextTokens: null,
       model: new ScriptedAgentModel([
         {
-          content: "Persist this provider turn.",
+          content: "Persist this provider step.",
           contextTokens: 10,
           costUsd: 0.5,
           toolCalls: [],

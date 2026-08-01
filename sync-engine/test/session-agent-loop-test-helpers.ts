@@ -55,7 +55,7 @@ export function recordingCompactor(
   });
 }
 
-export function highTurn(content: string, contextTokens = 95_000) {
+export function highStep(content: string, contextTokens = 95_000) {
   return { content, contextTokens, toolCalls: [] };
 }
 
@@ -184,7 +184,7 @@ export function expectAborted(value: PromiseLike<unknown>): Promise<void> {
 }
 
 export function triggeredModel() {
-  return new ScriptedAgentModel([highTurn("Trigger compaction.")]);
+  return new ScriptedAgentModel([highStep("Trigger compaction.")]);
 }
 
 export async function expectCompactionFailure(options: {

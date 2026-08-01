@@ -6,7 +6,7 @@ import { createAuthenticatedRequest } from "./authenticated-integration-test-hel
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
   closeContinuationSetup,
-  compactionTurn,
+  compactionStep,
   continuationSetup,
   drainAndRead,
   expectContinuationRequests,
@@ -50,14 +50,14 @@ function expectFencedCompaction(options: {
 }
 
 describe("session continuation", () => {
-  test("continues automatically after final-turn compaction", async () => {
+  test("continues automatically after final-step compaction", async () => {
     const continuation = continuationSetup(
       [
-        compactionTurn("Work complete before compaction.", {
+        compactionStep("Work complete before compaction.", {
           contextTokens: 95_000,
         }),
-        compactionTurn("Compacted handoff.", { costUsd: 0.1 }),
-        compactionTurn("Work complete after compaction.", {
+        compactionStep("Compacted handoff.", { costUsd: 0.1 }),
+        compactionStep("Work complete after compaction.", {
           contextTokens: 96_000,
         }),
       ],
@@ -95,11 +95,11 @@ describe("session continuation", () => {
   test("persists continuation failure after the atomic handoff", async () => {
     const continuation = continuationSetup(
       [
-        compactionTurn("Work before failed continuation.", {
+        compactionStep("Work before failed continuation.", {
           contextTokens: 95_000,
           costUsd: 0.2,
         }),
-        compactionTurn("Durable handoff.", { costUsd: 0.1 }),
+        compactionStep("Durable handoff.", { costUsd: 0.1 }),
       ],
       { label: "Continuation failure model", notifyRequest: 3 },
     );
@@ -113,7 +113,7 @@ describe("session continuation", () => {
       messages: [
         { role: "user" },
         {
-          content: "Session failed: The scripted model ran out of turns",
+          content: "Session failed: The scripted model ran out of steps",
           role: "error",
         },
       ],
@@ -129,11 +129,11 @@ describe("session continuation", () => {
   test("fences an automatic compaction and continuation after a stop", async () => {
     const continuation = continuationSetup(
       [
-        compactionTurn("Work complete before stale compaction.", {
+        compactionStep("Work complete before stale compaction.", {
           contextTokens: 95_000,
           costUsd: 0.2,
         }),
-        compactionTurn("Stale compacted handoff.", { costUsd: 0.1 }),
+        compactionStep("Stale compacted handoff.", { costUsd: 0.1 }),
       ],
       { blockRequest: 2, label: "Compaction authority model" },
     );
@@ -159,11 +159,11 @@ describe("session continuation", () => {
   test("fences an automatic compaction after runner removal", async () => {
     const continuation = continuationSetup(
       [
-        compactionTurn("Work before runner removal.", {
+        compactionStep("Work before runner removal.", {
           contextTokens: 95_000,
           costUsd: 0.2,
         }),
-        compactionTurn("Runner-removed stale handoff.", { costUsd: 0.1 }),
+        compactionStep("Runner-removed stale handoff.", { costUsd: 0.1 }),
       ],
       { blockRequest: 2, label: "Runner removal compaction model" },
     );

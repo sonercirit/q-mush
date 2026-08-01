@@ -245,7 +245,7 @@ efforts explicitly enumerated for the model. Generic model metadata is used only
 when the endpoint explicitly returns it; missing capabilities remain unknown.
 OpenAI's standard models endpoint only publishes model availability, so API-key
 models use their provider default setting. A selected effort is sent using each
-provider's native request shape. Before a model turn is persisted or any
+provider's native request shape. Before a model step is persisted or any
 requested tool runs, Q Mush retries transient network failures, retryable HTTP
 statuses, accepted streams that disconnect or end early, and transient provider
 error events with bounded exponential backoff. Partial live output is cleared

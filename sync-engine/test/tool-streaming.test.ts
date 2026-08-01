@@ -35,7 +35,7 @@ class RecordingTransport implements ToolStreamTransport {
   }
 }
 
-function createPublisher(streamId = "turn-1") {
+function createPublisher(streamId = "step-1") {
   const transport = new RecordingTransport();
   return {
     publisher: new ToolStreamPublisher({
@@ -131,7 +131,7 @@ function populateCappedHub(options?: { maximumStreamsPerUser: number }) {
     expect(
       hub.apply(
         USER_ID,
-        preparingFrame(`turn-${String(index)}`, `call-${String(index)}`, index),
+        preparingFrame(`step-${String(index)}`, `call-${String(index)}`, index),
       ),
     ).toBe(true);
   }
@@ -172,9 +172,9 @@ test("streams partial provider names and arguments into a reconnect snapshot", (
     { channel: "name", content: "sh", sequence: 3 },
     { channel: "arguments", content: '"pwd"}', sequence: 4 },
   ]);
-  expect(transport.store.snapshot(USER_ID, SESSION_ID, "turn-1")).toEqual({
+  expect(transport.store.snapshot(USER_ID, SESSION_ID, "step-1")).toEqual({
     sessionId: SESSION_ID,
-    streamId: "turn-1",
+    streamId: "step-1",
     streams: [
       {
         arguments: '{"command":"pwd"}',
@@ -186,7 +186,7 @@ test("streams partial provider names and arguments into a reconnect snapshot", (
         state: "preparing",
         stderr: "",
         stdout: "",
-        streamId: "turn-1",
+        streamId: "step-1",
       },
     ],
     type: "tool_stream_snapshot",
@@ -196,7 +196,7 @@ test("streams partial provider names and arguments into a reconnect snapshot", (
 
 test("reconciles a provider placeholder with its final call ID", () => {
   const { publisher, transport } =
-    beginProviderReconciliation("turn-placeholder");
+    beginProviderReconciliation("step-placeholder");
   expectProviderAccepted(publisher, {
     arguments: "}",
     id: "call-final",
@@ -207,12 +207,12 @@ test("reconciles a provider placeholder with its final call ID", () => {
   expect(transport.frames).toContainEqual(
     expect.objectContaining({
       callId: "call-final",
-      previousCallId: "pending:turn-placeholder:0",
+      previousCallId: "pending:step-placeholder:0",
       sequence: 3,
     }),
   );
   expect(
-    transport.store.snapshot(USER_ID, SESSION_ID, "turn-placeholder")
+    transport.store.snapshot(USER_ID, SESSION_ID, "step-placeholder")
       .streams[0],
   ).toMatchObject({
     arguments: "{}",
@@ -223,7 +223,7 @@ test("reconciles a provider placeholder with its final call ID", () => {
 
 test("accumulates fragmented provider call IDs while reconciling placeholders", () => {
   const { publisher, transport } =
-    beginProviderReconciliation("turn-id-fragments");
+    beginProviderReconciliation("step-id-fragments");
   expectProviderAccepted(publisher, {
     arguments: "",
     id: "call-",
@@ -241,7 +241,7 @@ test("accumulates fragmented provider call IDs while reconciling placeholders", 
     expect.arrayContaining([
       expect.objectContaining({
         callId: "call-",
-        previousCallId: "pending:turn-id-fragments:0",
+        previousCallId: "pending:step-id-fragments:0",
       }),
       expect.objectContaining({
         callId: "call-1",
@@ -250,7 +250,7 @@ test("accumulates fragmented provider call IDs while reconciling placeholders", 
     ]),
   );
   expect(
-    transport.store.snapshot(USER_ID, SESSION_ID, "turn-id-fragments")
+    transport.store.snapshot(USER_ID, SESSION_ID, "step-id-fragments")
       .streams[0],
   ).toMatchObject({
     arguments: "{}",
@@ -260,7 +260,7 @@ test("accumulates fragmented provider call IDs while reconciling placeholders", 
 });
 
 test("reconciles server-side metadata when the provider omitted it", () => {
-  const { publisher, transport } = createPublisher("turn-session-tool");
+  const { publisher, transport } = createPublisher("step-session-tool");
 
   expectRunningSessionTool(
     publisher,
@@ -279,7 +279,7 @@ test("reconciles server-side metadata when the provider omitted it", () => {
     { sequence: 3, state: "running" },
   ]);
   expect(
-    transport.store.snapshot(USER_ID, SESSION_ID, "turn-session-tool")
+    transport.store.snapshot(USER_ID, SESSION_ID, "step-session-tool")
       .streams[0],
   ).toMatchObject({
     arguments: '{"prompt":"Delegate this"}',
@@ -290,7 +290,7 @@ test("reconciles server-side metadata when the provider omitted it", () => {
 });
 
 test("preserves provider metadata when execution supplies the fallback", () => {
-  const { publisher, transport } = createPublisher("turn-provider-metadata");
+  const { publisher, transport } = createPublisher("step-provider-metadata");
   expectProviderAccepted(publisher, {
     arguments: '{"prompt":"Already streamed"}',
     id: "call-provider",
@@ -305,7 +305,7 @@ test("preserves provider metadata when execution supplies the fallback", () => {
   );
 
   expect(
-    transport.store.snapshot(USER_ID, SESSION_ID, "turn-provider-metadata")
+    transport.store.snapshot(USER_ID, SESSION_ID, "step-provider-metadata")
       .streams[0],
   ).toMatchObject({
     arguments: '{"prompt":"Already streamed"}',
@@ -355,7 +355,7 @@ test("accepts contiguous runner output and rejects gaps and late deltas", () => 
     { sequence: 5, state: "completed" },
   ]);
   expect(
-    transport.store.snapshot(USER_ID, SESSION_ID, "turn-1").streams,
+    transport.store.snapshot(USER_ID, SESSION_ID, "step-1").streams,
   ).toEqual([]);
 });
 
@@ -365,7 +365,7 @@ test.each<ToolStreamTerminalState>([
   "canceled",
   "timed-out",
 ])("publishes the explicit %s terminal state", (state) => {
-  const { publisher, transport } = createPublisher(`turn-${state}`);
+  const { publisher, transport } = createPublisher(`step-${state}`);
   publisher.running(`call-${state}`, "bash");
 
   expect(publisher.result(`call-${state}`, { output: "result", state })).toBe(
@@ -375,34 +375,34 @@ test.each<ToolStreamTerminalState>([
 });
 
 test("retry reset cancels old calls and isolates reused provider indexes", () => {
-  const { publisher, transport } = createPublisher("turn-before-retry");
+  const { publisher, transport } = createPublisher("step-before-retry");
   publisher.provider({ arguments: "{}", id: "old", index: 0, name: "read" });
 
-  expect(publisher.reset("turn-after-retry")).toBe(true);
+  expect(publisher.reset("step-after-retry")).toBe(true);
   publisher.provider({ arguments: "{}", id: "new", index: 0, name: "read" });
 
   const starts = transport.frames.filter(({ state }) => state === "preparing");
   expect(starts).toMatchObject([
-    { callId: "old", sequence: 0, streamId: "turn-before-retry" },
-    { callId: "new", sequence: 0, streamId: "turn-after-retry" },
+    { callId: "old", sequence: 0, streamId: "step-before-retry" },
+    { callId: "new", sequence: 0, streamId: "step-after-retry" },
   ]);
   expect(transport.frames).toContainEqual(
     expect.objectContaining({
       callId: "old",
       state: "canceled",
-      streamId: "turn-before-retry",
+      streamId: "step-before-retry",
     }),
   );
   expect(
-    transport.store.snapshot(USER_ID, SESSION_ID, "turn-before-retry").streams,
+    transport.store.snapshot(USER_ID, SESSION_ID, "step-before-retry").streams,
   ).toEqual([]);
   expect(
-    transport.store.snapshot(USER_ID, SESSION_ID, "turn-after-retry").streams,
+    transport.store.snapshot(USER_ID, SESSION_ID, "step-after-retry").streams,
   ).toMatchObject([{ callId: "new", index: 0 }]);
 });
 
 test("bounds large streamed output and every emitted delta", () => {
-  const { publisher, transport } = createPublisher("turn-large");
+  const { publisher, transport } = createPublisher("step-large");
   publisher.running("call-large", "bash");
   const chunk = "x".repeat(MAXIMUM_TOOL_STREAM_DELTA_BYTES);
   for (let sequence = 0; sequence < 10; sequence += 1) {
@@ -424,7 +424,7 @@ test("bounds large streamed output and every emitted delta", () => {
         Buffer.byteLength(content) <= MAXIMUM_TOOL_STREAM_DELTA_BYTES,
     ),
   ).toBe(true);
-  const snapshot = transport.store.snapshot(USER_ID, SESSION_ID, "turn-large")
+  const snapshot = transport.store.snapshot(USER_ID, SESSION_ID, "step-large")
     .streams[0];
   expect(snapshot?.stdout.endsWith(TOOL_STREAM_TRUNCATED_MARKER)).toBe(true);
   expect(Buffer.byteLength(snapshot?.stdout ?? "")).toBeLessThanOrEqual(
@@ -433,7 +433,7 @@ test("bounds large streamed output and every emitted delta", () => {
 });
 
 test("the shared reducer rejects outbound gaps, duplicates, and late deltas", () => {
-  const preparing = frame("turn-reducer", "call-1", 0, 0, {
+  const preparing = frame("step-reducer", "call-1", 0, 0, {
     state: "preparing",
   });
   const started = applyToolStreamDelta(undefined, preparing);
@@ -445,7 +445,7 @@ test("the shared reducer rejects outbound gaps, duplicates, and late deltas", ()
   expect(
     applyToolStreamDelta(
       started.entry,
-      frame("turn-reducer", "call-1", 0, 2, {
+      frame("step-reducer", "call-1", 0, 2, {
         channel: "name",
         content: "gap",
       }),
@@ -453,7 +453,7 @@ test("the shared reducer rejects outbound gaps, duplicates, and late deltas", ()
   ).toMatchObject({ accepted: false, reason: "gap" });
   const named = applyToolStreamDelta(
     started.entry,
-    frame("turn-reducer", "call-1", 0, 1, {
+    frame("step-reducer", "call-1", 0, 1, {
       channel: "name",
       content: "read",
     }),
@@ -465,7 +465,7 @@ test("the shared reducer rejects outbound gaps, duplicates, and late deltas", ()
   expect(
     applyToolStreamDelta(
       named.entry,
-      frame("turn-reducer", "call-1", 0, 1, {
+      frame("step-reducer", "call-1", 0, 1, {
         channel: "arguments",
         content: "late",
       }),
@@ -476,41 +476,41 @@ test("the shared reducer rejects outbound gaps, duplicates, and late deltas", ()
 test("snapshot state is capped per user-session store", () => {
   const hub = populateCappedHub();
 
-  expectStreamCount(hub, "turn-0", 0);
-  expectStreamCount(hub, "turn-1", 1);
-  expectStreamCount(hub, "turn-2", 1);
+  expectStreamCount(hub, "step-0", 0);
+  expectStreamCount(hub, "step-1", 1);
+  expectStreamCount(hub, "step-2", 1);
 });
 
 test("per-user hub state bounds sessions and isolates users", () => {
   const hub = populateCappedHub({ maximumStreamsPerUser: 2 });
   expect(
-    hub.apply("other-user", preparingFrame("other-turn", "other-call")),
+    hub.apply("other-user", preparingFrame("other-step", "other-call")),
   ).toBe(true);
 
-  expectStreamCount(hub, "turn-0", 0);
-  expectStreamCount(hub, "turn-2", 1);
-  expectStreamCount(hub, "other-turn", 1, "other-user");
+  expectStreamCount(hub, "step-0", 0);
+  expectStreamCount(hub, "step-2", 1);
+  expectStreamCount(hub, "other-step", 1, "other-user");
 
   hub.clearSession(USER_ID, SESSION_ID);
-  expectStreamCount(hub, "turn-2", 0);
-  expectStreamCount(hub, "other-turn", 1, "other-user");
+  expectStreamCount(hub, "step-2", 0);
+  expectStreamCount(hub, "other-step", 1, "other-user");
 });
 
 test("reconnect snapshots replace stale state without rolling back newer deltas", () => {
   const store = new ToolStreamHubState();
   const apply = (delta: ToolStreamDeltaFrame): boolean =>
     store.apply(USER_ID, delta);
-  apply(frame("turn-reconnect", "current-call", 1, 0, { state: "preparing" }));
+  apply(frame("step-reconnect", "current-call", 1, 0, { state: "preparing" }));
   apply(
-    frame("turn-reconnect", "current-call", 1, 1, {
+    frame("step-reconnect", "current-call", 1, 1, {
       channel: "name",
       content: "newer",
     }),
   );
-  apply(frame("turn-reconnect", "stale-call", 0, 0, { state: "preparing" }));
+  apply(frame("step-reconnect", "stale-call", 0, 0, { state: "preparing" }));
   const snapshot = {
     sessionId: SESSION_ID,
-    streamId: "turn-reconnect",
+    streamId: "step-reconnect",
     streams: [
       {
         arguments: "{}",
@@ -522,7 +522,7 @@ test("reconnect snapshots replace stale state without rolling back newer deltas"
         state: "running" as const,
         stderr: "",
         stdout: "current",
-        streamId: "turn-reconnect",
+        streamId: "step-reconnect",
       },
     ],
     type: "tool_stream_snapshot" as const,
@@ -530,7 +530,7 @@ test("reconnect snapshots replace stale state without rolling back newer deltas"
 
   expect(isToolStreamSnapshotFrame(snapshot)).toBe(true);
   expect(store.replace(USER_ID, snapshot)).toBe(true);
-  expect(store.snapshot(USER_ID, SESSION_ID, "turn-reconnect").streams).toEqual(
+  expect(store.snapshot(USER_ID, SESSION_ID, "step-reconnect").streams).toEqual(
     [
       expect.objectContaining({
         callId: "current-call",
@@ -574,7 +574,7 @@ test("validates the provider, broker, and realtime integration contracts", () =>
     true,
   );
   expectContract(
-    isToolStreamDeltaFrame(preparingFrame("turn-codec", "call-codec")),
+    isToolStreamDeltaFrame(preparingFrame("step-codec", "call-codec")),
     true,
   );
 
@@ -588,7 +588,7 @@ test("validates the provider, broker, and realtime integration contracts", () =>
   );
   expectContract(
     isToolStreamDeltaFrame({
-      ...frame("turn-codec", "call-codec", 0, 1, {
+      ...frame("step-codec", "call-codec", 0, 1, {
         channel: "stdout",
         content: "both",
       }),
@@ -601,7 +601,7 @@ test("validates the provider, broker, and realtime integration contracts", () =>
 test("transport failures never interrupt canonical tool execution", () => {
   const publisher = new ToolStreamPublisher({
     sessionId: SESSION_ID,
-    streamId: "turn-throwing-transport",
+    streamId: "step-throwing-transport",
     transport: {
       publishToolStream: () => {
         throw new Error("socket closed");

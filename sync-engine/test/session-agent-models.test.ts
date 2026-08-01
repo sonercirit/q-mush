@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { AgentModelTurn } from "../../shared/agent-loop.ts";
+import type { AgentModelStep } from "../../shared/agent-loop.ts";
 import type { ProviderCredentialAccess } from "../../shared/provider-credential-store.ts";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
 import {
@@ -12,7 +12,7 @@ import {
   createSessionAgentModels,
   type AgentModelFactory,
 } from "../../sync-engine/session-agent-models.ts";
-import { providerTurn } from "./provider-turn-fixtures.ts";
+import { providerStep } from "./provider-step-fixtures.ts";
 import { RecordingRealtimeSocket } from "./realtime-hub-test-helpers.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 import { promiseGate } from "./session-race-test-helpers.ts";
@@ -144,9 +144,9 @@ describe("session agent models", () => {
     ]);
   });
 
-  test("streams compaction summaries as a distinct model turn", async () => {
+  test("streams compaction summaries as a distinct model step", async () => {
     const { hub, socket } = realtimeSetup();
-    const summary = promiseGate<AgentModelTurn>();
+    const summary = promiseGate<AgentModelStep>();
     const selections: Parameters<AgentModelFactory>[0][] = [];
     let nextStreamId = 0;
     const factory: AgentModelFactory = (options) => {
@@ -172,7 +172,7 @@ describe("session agent models", () => {
       sessionDelta("Incremental ", "", "stream-2"),
       sessionDelta("summary", "", "stream-2"),
     ]);
-    summary.release(providerTurn("Incremental summary"));
+    summary.release(providerStep("Incremental summary"));
     await compaction;
   });
 

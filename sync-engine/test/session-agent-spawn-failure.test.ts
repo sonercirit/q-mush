@@ -60,7 +60,7 @@ describe("failed spawned session reports", () => {
   test("includes an explicit reason when the child has no assistant content", async () => {
     const { report, setup } = await failedChildReport("");
 
-    expectFailedReport(report, "The scripted model ran out of turns");
+    expectFailedReport(report, "The scripted model ran out of steps");
     closeSessionTestDatabase(setup.database);
   });
 });
