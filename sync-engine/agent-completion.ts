@@ -1,7 +1,7 @@
 import {
   normalizeAgentToolCall,
   type AgentConversationMessage,
-  type AgentModelTurn,
+  type AgentModelStep,
 } from "../shared/agent-loop.ts";
 export type CompletionArguments = readonly [
   messages: readonly AgentConversationMessage[],
@@ -74,4 +74,4 @@ export function completionSignal(parameters: CompletionArguments) {
   return parameters[1];
 }
 
-export type OptionalTurn = AgentModelTurn | undefined;
+export type OptionalStep = AgentModelStep | undefined;

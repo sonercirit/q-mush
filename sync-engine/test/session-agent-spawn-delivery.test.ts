@@ -1,12 +1,12 @@
 import { expect, test } from "vitest";
-import type { AgentModel, AgentModelTurn } from "../../shared/agent-loop.ts";
+import type { AgentModel, AgentModelStep } from "../../shared/agent-loop.ts";
 import { SESSIONS_PATH } from "../../shared/routes.ts";
 import type { RunnerToolCommand } from "../../shared/runner-command-broker.ts";
 import {
   createAuthenticatedRequest,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
-import { providerTurn } from "./provider-turn-fixtures.ts";
+import { providerStep } from "./provider-step-fixtures.ts";
 import { childSessionId, spawnCall } from "./session-agent-spawn-helpers.ts";
 import {
   startToolSession,
@@ -22,11 +22,11 @@ import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
 class ParentGenerationDeliveryModel implements AgentModel {
   #requestCount = 0;
 
-  complete(): Promise<AgentModelTurn> {
+  complete(): Promise<AgentModelStep> {
     this.#requestCount += 1;
-    const turn = [
+    const step = [
       {
-        content: "Delegating before another parent turn.",
+        content: "Delegating before another parent step.",
         toolCalls: [spawnCall("Complete after the parent advances")],
       },
       { content: "The parent is initially idle.", toolCalls: [] },
@@ -37,11 +37,11 @@ class ParentGenerationDeliveryModel implements AgentModel {
         toolCalls: [],
       },
     ][this.#requestCount - 1];
-    if (turn === undefined) {
-      throw new Error("The delivery model ran out of turns");
+    if (step === undefined) {
+      throw new Error("The delivery model ran out of steps");
     }
     return Promise.resolve(
-      providerTurn(turn.content, { toolCalls: turn.toolCalls }),
+      providerStep(step.content, { toolCalls: step.toolCalls }),
     );
   }
 }

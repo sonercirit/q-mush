@@ -3,7 +3,7 @@ import type { AgentAttachment } from "../../shared/agent-attachments.ts";
 import type { AttachmentFallbackSelection } from "../../shared/attachment-fallback.ts";
 import { testAgentModelOption } from "../../shared/test/agent-model-fixtures.ts";
 import { explainAttachment } from "../attachment-fallback-model.ts";
-import { providerTurn } from "./provider-turn-fixtures.ts";
+import { providerStep } from "./provider-step-fixtures.ts";
 
 const ATTACHMENT: AgentAttachment = {
   data: Uint8Array.from([1]).toBase64(),
@@ -36,7 +36,7 @@ function options(
   inputModalities: readonly string[] | null,
   selections = [FALLBACK],
 ) {
-  const complete = vi.fn(() => Promise.resolve(providerTurn("explained")));
+  const complete = vi.fn(() => Promise.resolve(providerStep("explained")));
   const factory = vi.fn(() => ({ complete }));
   return {
     complete,

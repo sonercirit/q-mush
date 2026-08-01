@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import type { AgentTokenUsage } from "../../shared/agent-loop.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
-import { estimateAgentTurnCost } from "../../sync-engine/agent-cost.ts";
+import { estimateAgentStepCost } from "../../sync-engine/agent-cost.ts";
 
 const SESSION: Pick<AgentSessionDetail, "providerPricing"> = {
   providerPricing: null,
@@ -27,12 +27,12 @@ function providerSession(
 
 describe("agent cost", () => {
   test("does not use built-in pricing", () => {
-    expect(estimateAgentTurnCost(SESSION, USAGE)).toBeNull();
+    expect(estimateAgentStepCost(SESSION, USAGE)).toBeNull();
   });
 
   test("uses provider prices expressed per token", () => {
     expect(
-      estimateAgentTurnCost(
+      estimateAgentStepCost(
         providerSession({
           cachedInput: "0.0000001",
           input: "0.0000004",
@@ -45,7 +45,7 @@ describe("agent cost", () => {
 
   test("does not bill cache-write tokens twice as regular input", () => {
     expect(
-      estimateAgentTurnCost(
+      estimateAgentStepCost(
         providerSession({
           cacheWriteInput: 0.0000005,
           input: 0.0000004,
@@ -58,13 +58,13 @@ describe("agent cost", () => {
 
   test("does not invent missing cache prices", () => {
     expect(
-      estimateAgentTurnCost(
+      estimateAgentStepCost(
         providerSession({ input: 0.0000004, output: 0.0000016 }),
         USAGE,
       ),
     ).toBeNull();
     expect(
-      estimateAgentTurnCost(
+      estimateAgentStepCost(
         providerSession({ input: 0.0000004, output: 0 }),
         CACHE_WRITE_USAGE,
       ),
@@ -72,6 +72,6 @@ describe("agent cost", () => {
   });
 
   test("returns no estimate without pricing or usage", () => {
-    expect(estimateAgentTurnCost(SESSION, null)).toBeNull();
+    expect(estimateAgentStepCost(SESSION, null)).toBeNull();
   });
 });

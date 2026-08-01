@@ -1,12 +1,12 @@
 import type {
   AgentConversationMessage,
   AgentModel,
-  AgentModelTurn,
+  AgentModelStep,
 } from "../../shared/agent-loop.ts";
 import { recordAgentModelRequest } from "./scripted-agent-model.ts";
 import { connectedSessionSetup } from "./session-integration-fixtures.ts";
 
-export function terminalAgentTurn(content: string): AgentModelTurn {
+export function terminalAgentStep(content: string): AgentModelStep {
   return {
     content,
     contextTokens: 1_000,
@@ -27,20 +27,20 @@ export function deferredSessionSetup(): Readonly<{
 
 export class DeferredAgentModel implements AgentModel {
   readonly requests: AgentConversationMessage[][] = [];
-  readonly #result = Promise.withResolvers<AgentModelTurn>();
+  readonly #result = Promise.withResolvers<AgentModelStep>();
 
-  resolve(turn: AgentModelTurn): void {
-    this.#result.resolve(turn);
+  resolve(step: AgentModelStep): void {
+    this.#result.resolve(step);
   }
 
   readonly complete = (
     messages: readonly AgentConversationMessage[],
-  ): Promise<AgentModelTurn> => {
+  ): Promise<AgentModelStep> => {
     recordAgentModelRequest(this.requests, messages);
     return this.#result.promise;
   };
 
   resolveContent(content: string): void {
-    this.resolve(terminalAgentTurn(content));
+    this.resolve(terminalAgentStep(content));
   }
 }

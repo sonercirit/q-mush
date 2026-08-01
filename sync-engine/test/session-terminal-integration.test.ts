@@ -4,7 +4,7 @@ import {
   TEST_USER_ID,
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
-import { terminalAgentTurn } from "./deferred-agent-model.ts";
+import { terminalAgentStep } from "./deferred-agent-model.ts";
 import {
   connectedSessionSetup,
   RUNNER_ID,
@@ -69,7 +69,7 @@ test("commits a terminal follow-up before relaunching after runtime deregistrati
     status: "running",
   });
 
-  model.resolve(terminalAgentTurn("First durable answer."));
+  model.resolve(terminalAgentStep("First durable answer."));
   await completeAgentFileLookup(setup);
   await waitForSessionValue(
     () => model.requests.length,

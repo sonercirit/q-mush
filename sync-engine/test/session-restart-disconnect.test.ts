@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import type {
   AgentConversationMessage,
   AgentModel,
-  AgentModelTurn,
+  AgentModelStep,
 } from "../../shared/agent-loop.ts";
 import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
@@ -11,7 +11,7 @@ import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
-import { providerTurn } from "./provider-turn-fixtures.ts";
+import { providerStep } from "./provider-step-fixtures.ts";
 import {
   closeCompactionStore,
   completeNullRunnerCommand,
@@ -36,7 +36,7 @@ interface RestartDisconnectModel extends AgentModel {
 }
 
 function restartDisconnectModel(
-  toolCall: AgentModelTurn["toolCalls"][number],
+  toolCall: AgentModelStep["toolCalls"][number],
 ): RestartDisconnectModel {
   const requests: AgentConversationMessage[][] = [];
   return {
@@ -44,7 +44,7 @@ function restartDisconnectModel(
     complete: (messages) => {
       requests.push([...messages]);
       return Promise.resolve(
-        providerTurn("Reading before restart.", { toolCalls: [toolCall] }),
+        providerStep("Reading before restart.", { toolCalls: [toolCall] }),
       );
     },
   };

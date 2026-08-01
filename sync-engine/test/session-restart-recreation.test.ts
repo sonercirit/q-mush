@@ -120,7 +120,7 @@ async function recoverRunner(
   restartId?: string,
 ): Promise<void> {
   coordinator.recover(STORE_RUNNER_ID, restartId);
-  await settleRestartRecovery({ turns: 3 });
+  await settleRestartRecovery({ steps: 3 });
 }
 
 const CREDENTIAL = restartTestCredential("restart-recreation-credential", {
@@ -265,19 +265,19 @@ test("credential and launch retries are deduplicated and stop after recovery", a
 
   fixture.coordinator.recover(STORE_RUNNER_ID, identity.restartId);
   fixture.coordinator.recover(STORE_RUNNER_ID, identity.restartId);
-  await settleRestartRecovery({ turns: 5 });
+  await settleRestartRecovery({ steps: 5 });
   expect(fixture.retryDelays).toEqual([1_000]);
   expectLaunches(launches, []);
 
   credentialAvailable = true;
   fixture.runRetry();
-  await settleRestartRecovery({ turns: 5 });
+  await settleRestartRecovery({ steps: 5 });
   expectLaunches(launches, []);
   expect(fixture.retryDelays).toEqual([1_000, 2_000]);
 
   launchAvailable = true;
   fixture.runRetry();
-  await settleRestartRecovery({ turns: 5 });
+  await settleRestartRecovery({ steps: 5 });
   expect(launches).toEqual([identity.sessionId]);
   expect(fixture.retryDelays).toEqual([1_000, 2_000]);
   closeCompactionStore(setup);

@@ -96,7 +96,7 @@ export interface AgentTokenUsage {
   readonly outputTokens: number;
 }
 
-export interface AgentModelTurn {
+export interface AgentModelStep {
   readonly content: string;
   readonly contextTokens: number | null;
   readonly costUsd: number | null;
@@ -109,8 +109,8 @@ export interface AgentModel {
   readonly complete: (
     messages: readonly AgentConversationMessage[],
     signal?: AbortSignal,
-  ) => Promise<AgentModelTurn>;
-  readonly startTurn?: () => void;
+  ) => Promise<AgentModelStep>;
+  readonly startStep?: () => void;
 }
 
 type ParsedAgentToolCall = AgentToolRequest<Readonly<Record<string, unknown>>>;
@@ -231,39 +231,39 @@ export async function runAgentLoop(
         return preparedHandoff;
       }
     }
-    options.model.startTurn?.();
-    const turn = await options.model.complete(messages, options.signal);
+    options.model.startStep?.();
+    const step = await options.model.complete(messages, options.signal);
     throwIfAgentAborted(options.signal);
     const recordedMessages: AgentRecordedMessage[] = [];
-    if (turn.thinking.length > 0) {
+    if (step.thinking.length > 0) {
       recordedMessages.push({
-        content: turn.thinking,
+        content: step.thinking,
         role: "thinking",
       });
     }
 
     if (
-      turn.contextTokens !== null &&
-      (turn.contextTokens < 0 || !Number.isSafeInteger(turn.contextTokens))
+      step.contextTokens !== null &&
+      (step.contextTokens < 0 || !Number.isSafeInteger(step.contextTokens))
     ) {
       throw new Error("The model returned invalid context usage");
     }
 
     const assistantMessage: AgentConversationMessage = {
-      content: turn.content,
+      content: step.content,
       role: "assistant",
-      toolCalls: turn.toolCalls,
+      toolCalls: step.toolCalls,
     };
     recordedMessages.push(assistantMessage);
     await options.recordMessage(recordedMessages, {
-      contextTokens: turn.contextTokens,
-      costBasis: turn.costUsd === null ? null : "reported",
-      costUsd: turn.costUsd,
+      contextTokens: step.contextTokens,
+      costBasis: step.costUsd === null ? null : "reported",
+      costUsd: step.costUsd,
     });
     throwIfAgentAborted(options.signal);
     messages.push(assistantMessage);
 
-    if (turn.toolCalls.length === 0) {
+    if (step.toolCalls.length === 0) {
       const steering = await takeSteeringMessages(options);
       if (storeMessages(messages, steering)) {
         continue;
@@ -271,7 +271,7 @@ export async function runAgentLoop(
       return { messages, status: "complete" };
     }
 
-    for (const call of turn.toolCalls) {
+    for (const call of step.toolCalls) {
       throwIfAgentAborted(options.signal);
       await options.onToolCall?.(call);
       const arguments_ = parseArguments(call.arguments);

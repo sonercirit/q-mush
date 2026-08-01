@@ -334,7 +334,7 @@ describe("session store", () => {
             role: "thinking",
           },
           {
-            content: "Usage-failing model turn",
+            content: "Usage-failing model step",
             role: "assistant",
             toolCalls: [],
           },

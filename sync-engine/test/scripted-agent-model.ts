@@ -1,17 +1,17 @@
 import type {
   AgentConversationMessage,
   AgentModel,
-  AgentModelTurn,
+  AgentModelStep,
 } from "../../shared/agent-loop.ts";
 
-type ScriptedTurn = Omit<
-  AgentModelTurn,
+type ScriptedStep = Omit<
+  AgentModelStep,
   "contextTokens" | "costUsd" | "thinking" | "tokenUsage"
 > & {
   readonly contextTokens?: number | null;
   readonly costUsd?: number | null;
   readonly thinking?: string;
-  readonly tokenUsage?: AgentModelTurn["tokenUsage"];
+  readonly tokenUsage?: AgentModelStep["tokenUsage"];
 };
 
 interface ScriptedModelOptions {
@@ -36,31 +36,31 @@ export class ScriptedAgentModel implements AgentModel {
   readonly requests: AgentConversationMessage[][] = [];
   readonly #onComplete:
     ((requestCount: number) => Promise<void> | void) | undefined;
-  readonly #turns: AgentModelTurn[];
+  readonly #steps: AgentModelStep[];
 
-  constructor(turns: ScriptedTurn[], options: ScriptedModelOptions = {}) {
+  constructor(steps: ScriptedStep[], options: ScriptedModelOptions = {}) {
     this.#onComplete = options.onComplete;
-    this.#turns = turns.map((turn) => ({
-      ...turn,
+    this.#steps = steps.map((step) => ({
+      ...step,
       contextTokens:
-        turn.contextTokens === undefined ? null : turn.contextTokens,
-      costUsd: turn.costUsd ?? null,
-      thinking: turn.thinking ?? "",
-      tokenUsage: turn.tokenUsage ?? null,
+        step.contextTokens === undefined ? null : step.contextTokens,
+      costUsd: step.costUsd ?? null,
+      thinking: step.thinking ?? "",
+      tokenUsage: step.tokenUsage ?? null,
     }));
   }
 
   async complete(
     messages: readonly AgentConversationMessage[],
-  ): Promise<AgentModelTurn> {
+  ): Promise<AgentModelStep> {
     const { requestCount } = recordAgentModelRequest(this.requests, messages);
     await this.#onComplete?.(requestCount);
-    const turn = this.#turns.shift();
+    const step = this.#steps.shift();
 
-    if (turn === undefined) {
-      throw new Error("The scripted model ran out of turns");
+    if (step === undefined) {
+      throw new Error("The scripted model ran out of steps");
     }
 
-    return turn;
+    return step;
   }
 }

@@ -1,5 +1,5 @@
 import type {
-  AgentModelTurn,
+  AgentModelStep,
   AgentTokenUsage,
   AgentToolCall,
 } from "../shared/agent-loop.ts";
@@ -16,7 +16,7 @@ import {
 } from "./provider-stream-buffers.ts";
 import {
   emitProviderDelta,
-  providerTurn,
+  providerStep,
   sortedToolCalls,
 } from "./provider-stream-helpers.ts";
 
@@ -40,7 +40,7 @@ function emitToolCallDelta(
 interface ProviderStreamAccumulatorBase {
   readonly completed: boolean;
   readonly receivedEvent: boolean;
-  finish(): AgentModelTurn;
+  finish(): AgentModelStep;
   push(event: unknown): void;
 }
 
@@ -194,7 +194,7 @@ function readChatToolCall(value: unknown): AgentToolCall {
   return { arguments: arguments_, id, name };
 }
 
-function readChatTurn(value: unknown): AgentModelTurn {
+function readChatStep(value: unknown): AgentModelStep {
   const choices = readRequiredArray(
     value,
     "choices",
@@ -217,7 +217,7 @@ function readChatTurn(value: unknown): AgentModelTurn {
   if (rawToolCalls !== undefined && !Array.isArray(rawToolCalls)) {
     throw new Error("The model returned invalid tool calls");
   }
-  return providerTurn(
+  return providerStep(
     typeof content === "string" ? content : "",
     readContextTokens(value, "usage"),
     readChatThinking(message),
@@ -260,7 +260,7 @@ function readResponsesSummary(value: unknown): readonly string[] {
   });
 }
 
-function readResponsesTurn(value: unknown): AgentModelTurn {
+function readResponsesStep(value: unknown): AgentModelStep {
   if (!isRecord(value)) {
     throw new Error("The Responses model returned an invalid response");
   }
@@ -354,18 +354,18 @@ class ResponsesAccumulator
   #reasoningSummary:
     { readonly outputIndex: number; readonly summaryIndex: number } | undefined;
   readonly #toolCalls = new Map<number, AgentToolCall>();
-  #completed: AgentModelTurn | undefined;
+  #completed: AgentModelStep | undefined;
 
   get completed(): boolean {
     return this.#completed !== undefined;
   }
 
-  finish(): AgentModelTurn {
+  finish(): AgentModelStep {
     if (this.#completed === undefined) {
       throw new Error("The provider response ended before completion");
     }
 
-    return providerTurn(
+    return providerStep(
       this.#completed.content.length === 0 && this.buffers.text.length > 0
         ? this.buffers.text.join("")
         : this.#completed.content,
@@ -390,7 +390,7 @@ class ResponsesAccumulator
     const type = value["type"];
 
     if (type === "response.completed") {
-      this.#completed = readResponsesTurn(value["response"]);
+      this.#completed = readResponsesStep(value["response"]);
       return;
     }
 
@@ -526,8 +526,8 @@ class ChatCompletionsAccumulator
   readonly completed = false;
   readonly protocol = "chat_completions" as const;
 
-  finish(): AgentModelTurn {
-    return providerTurn(
+  finish(): AgentModelStep {
+    return providerStep(
       this.buffers.text.join(""),
       this.#contextTokens,
       this.buffers.thinking.join(""),
@@ -626,24 +626,24 @@ class ChatCompletionsAccumulator
 }
 
 class JsonChatCompletionsAccumulator implements CompletedStreamAccumulator {
-  #turn: AgentModelTurn | undefined;
+  #step: AgentModelStep | undefined;
   readonly protocol = "chat_completions_json" as const;
   receivedEvent = false;
 
   get completed(): boolean {
-    return this.#turn !== undefined;
+    return this.#step !== undefined;
   }
 
-  finish(): AgentModelTurn {
-    if (this.#turn === undefined) {
+  finish(): AgentModelStep {
+    if (this.#step === undefined) {
       throw new Error("The provider response ended before completion");
     }
-    return this.#turn;
+    return this.#step;
   }
 
   push(value: unknown): void {
     this.receivedEvent = true;
-    this.#turn = readChatTurn(value);
+    this.#step = readChatStep(value);
   }
 }
 

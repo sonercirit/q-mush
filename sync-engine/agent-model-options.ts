@@ -28,7 +28,7 @@ export interface AgentModelRequestOptions {
   readonly dynamicToolCache?: boolean;
   readonly model: string;
   readonly onDelta?: (delta: ProviderTextDelta) => void;
-  readonly onTurnStart?: () => void;
+  readonly onStepStart?: () => void;
   readonly openRouterProviderRouting?: OpenRouterProviderRouting;
   readonly openRouterProviderTag?: string;
   readonly provider: ProviderId;

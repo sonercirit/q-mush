@@ -1,7 +1,7 @@
 import type {
   AgentConversationMessage,
   AgentModel,
-  AgentModelTurn,
+  AgentModelStep,
 } from "../shared/agent-loop.ts";
 import { forEachAssistantToolCall } from "./agent-conversation.ts";
 
@@ -25,7 +25,7 @@ export interface CompactedConversation {
   readonly costUsd: number | null;
   readonly messages: readonly AgentConversationMessage[];
   readonly summary: string;
-  readonly tokenUsage: AgentModelTurn["tokenUsage"];
+  readonly tokenUsage: AgentModelStep["tokenUsage"];
 }
 
 interface InvalidCompactionUsage {
@@ -101,21 +101,21 @@ export class ModelConversationCompactor implements AgentConversationCompactor {
     ...parameters: CompactionArguments
   ): Promise<CompactedConversation> {
     const [messages, signal] = parameters;
-    const turn: AgentModelTurn = await this.#model.complete(
+    const step: AgentModelStep = await this.#model.complete(
       compactionMessages(messages),
       signal,
     );
 
-    if (turn.toolCalls.length > 0 || turn.content.trim().length === 0) {
+    if (step.toolCalls.length > 0 || step.content.trim().length === 0) {
       throw new InvalidCompactionSummaryError();
     }
 
-    const summary = turn.content.trim();
+    const summary = step.content.trim();
     return {
-      costUsd: turn.costUsd,
+      costUsd: step.costUsd,
       messages: [{ content: `${COMPACTION_PREFIX}${summary}`, role: "user" }],
       summary,
-      tokenUsage: turn.tokenUsage,
+      tokenUsage: step.tokenUsage,
     };
   }
 }

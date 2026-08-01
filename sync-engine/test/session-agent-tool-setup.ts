@@ -105,7 +105,7 @@ export function waitForToolResults(
 }
 
 export function scriptedModel(
-  turns: ConstructorParameters<typeof ScriptedAgentModel>[0],
+  steps: ConstructorParameters<typeof ScriptedAgentModel>[0],
 ): ScriptedAgentModel {
-  return new ScriptedAgentModel(turns);
+  return new ScriptedAgentModel(steps);
 }

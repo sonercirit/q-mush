@@ -2,7 +2,7 @@ import { expect, test, vi, type MockInstance } from "vitest";
 import type {
   AgentConversationMessage,
   AgentModel,
-  AgentModelTurn,
+  AgentModelStep,
 } from "../../shared/agent-loop.ts";
 import { agentMessages, agentSessions } from "../../shared/database/schema.ts";
 import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
@@ -24,7 +24,7 @@ import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
-import { expectDoneTurn, providerTurn } from "./provider-turn-fixtures.ts";
+import { expectDoneStep, providerStep } from "./provider-step-fixtures.ts";
 import {
   closeCompactionStore,
   expectCompactedIdleSession,
@@ -62,13 +62,13 @@ interface RecoveredRunSetup {
 
 function modelTurn(
   content: string,
-  overrides: Partial<AgentModelTurn> = {},
-): AgentModelTurn {
-  const turn = providerTurn(content, overrides);
+  overrides: Partial<AgentModelStep> = {},
+): AgentModelStep {
+  const step = providerStep(content, overrides);
   if (content === "Done.") {
-    expectDoneTurn(turn);
+    expectDoneStep(step);
   }
-  return turn;
+  return step;
 }
 
 function recoveredRunSetup(model: AgentModel): RecoveredRunSetup {
@@ -581,7 +581,7 @@ test("recovered tool handoff compacts before its first request", async () => {
       },
     ],
   };
-  const turns = [
+  const steps = [
     modelTurn("Recovered compacted summary."),
     modelTurn("Recovered after compaction.", { contextTokens: 1_000 }),
   ];
@@ -589,10 +589,10 @@ test("recovered tool handoff compacts before its first request", async () => {
   const model: AgentModel = {
     complete: (messages) => {
       requests.push([...messages]);
-      const turn = turns.shift();
-      return turn === undefined
+      const step = steps.shift();
+      return step === undefined
         ? Promise.reject(new Error("Unexpected extra provider request"))
-        : Promise.resolve(turn);
+        : Promise.resolve(step);
     },
   };
   const setup = highContextRecoveredRunSetup(model, [

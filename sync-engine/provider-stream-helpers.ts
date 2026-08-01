@@ -1,6 +1,6 @@
 import {
   normalizeAgentToolCall,
-  type AgentModelTurn,
+  type AgentModelStep,
   type AgentTokenUsage,
   type AgentToolCall,
 } from "../shared/agent-loop.ts";
@@ -28,13 +28,13 @@ export function emitProviderDelta(
   }
 }
 
-export function providerTurn(
+export function providerStep(
   content: string,
   contextTokens: number | null,
   thinking: string,
   toolCalls: readonly AgentToolCall[],
   costUsd: number | null = null,
   tokenUsage: AgentTokenUsage | null = null,
-): AgentModelTurn {
+): AgentModelStep {
   return { content, contextTokens, costUsd, thinking, tokenUsage, toolCalls };
 }

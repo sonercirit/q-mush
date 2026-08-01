@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { AgentModel, AgentModelTurn } from "../../shared/agent-loop.ts";
+import type { AgentModel, AgentModelStep } from "../../shared/agent-loop.ts";
 import { isRecord } from "../../shared/auth-model.ts";
 import { SessionStore } from "../../sync-engine/session-store.ts";
 import {
@@ -8,7 +8,7 @@ import {
   TEST_USER_ID,
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
-import { providerTurn } from "./provider-turn-fixtures.ts";
+import { providerStep } from "./provider-step-fixtures.ts";
 import {
   jsonRecord,
   records,
@@ -59,7 +59,7 @@ class PausedParentChildModel implements AgentModel {
     this.#resumeParent.resolve(undefined);
   }
 
-  async complete(): Promise<AgentModelTurn> {
+  async complete(): Promise<AgentModelStep> {
     this.#requestCount += 1;
     let content: string;
     let toolCalls: ReturnType<typeof spawnCall>[];
@@ -78,19 +78,19 @@ class PausedParentChildModel implements AgentModel {
       content = "Parent received the child result.";
       toolCalls = [];
     }
-    return providerTurn(content, { toolCalls });
+    return providerStep(content, { toolCalls });
   }
 }
 
 class SelfStoppingChildModel implements AgentModel {
   childSessionId: string | undefined;
-  #turn = 0;
+  #step = 0;
 
-  complete(): Promise<AgentModelTurn> {
-    this.#turn += 1;
+  complete(): Promise<AgentModelStep> {
+    this.#step += 1;
     const childSessionId = this.childSessionId;
-    const turn =
-      this.#turn === 1
+    const step =
+      this.#step === 1
         ? {
             content: "Delegating stoppable work.",
             toolCalls: [
@@ -99,7 +99,7 @@ class SelfStoppingChildModel implements AgentModel {
               ]),
             ],
           }
-        : this.#turn === 2
+        : this.#step === 2
           ? { content: "Parent work is complete.", toolCalls: [] }
           : childSessionId === undefined
             ? undefined
@@ -109,11 +109,11 @@ class SelfStoppingChildModel implements AgentModel {
                   toolCall("stop_session", { sessionId: childSessionId }),
                 ],
               };
-    if (turn === undefined) {
+    if (step === undefined) {
       throw new Error("The child session ID is not available");
     }
     return Promise.resolve({
-      ...turn,
+      ...step,
       contextTokens: null,
       costUsd: null,
       thinking: "",

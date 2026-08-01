@@ -1,4 +1,4 @@
-import type { AgentModelTurn } from "../shared/agent-loop.ts";
+import type { AgentModelStep } from "../shared/agent-loop.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
 import {
@@ -103,7 +103,7 @@ function streamFailure(
 async function readAcceptedResponse(
   response: Response,
   options: ProviderHttpOptions,
-): Promise<AgentModelTurn> {
+): Promise<AgentModelStep> {
   if (!response.ok) {
     throw await requestError(options.provider, response);
   }
@@ -140,7 +140,7 @@ async function readAcceptedResponse(
 export async function completeProviderHttp(
   options: ProviderHttpOptions,
   signal?: AbortSignal,
-): Promise<AgentModelTurn> {
+): Promise<AgentModelStep> {
   const request = new Request(options.url, {
     body: JSON.stringify(options.body),
     headers: options.headers,
@@ -148,7 +148,7 @@ export async function completeProviderHttp(
     ...(signal === undefined ? {} : { signal }),
   });
   let streamed = false;
-  const retryAttempt = async (): Promise<AgentModelTurn> => {
+  const retryAttempt = async (): Promise<AgentModelStep> => {
     const response = await fetchModelRequestAttempt(options.fetch, request);
     try {
       return await readAcceptedResponse(response, {

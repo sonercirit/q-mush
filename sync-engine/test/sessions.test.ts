@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import type {
   AgentConversationMessage,
   AgentModel,
-  AgentModelTurn,
+  AgentModelStep,
 } from "../../shared/agent-loop.ts";
 import { runnerDirectoriesPath, SESSIONS_PATH } from "../../shared/routes.ts";
 import { WorkspaceStore } from "../../sync-engine/workspace-store.ts";
@@ -39,7 +39,7 @@ import { expectJsonResponse } from "./session-launch-race-helpers.ts";
 
 const SECOND_WORKSPACE_ID = "018bcfe5-6800-7000-8000-000000000081";
 class FailingModel implements AgentModel {
-  complete(): Promise<AgentModelTurn> {
+  complete(): Promise<AgentModelStep> {
     return Promise.reject(new Error("Provider unavailable"));
   }
 }
@@ -51,7 +51,7 @@ class BlockingModel implements AgentModel {
   complete(
     _messages: readonly AgentConversationMessage[],
     signal?: AbortSignal,
-  ): Promise<AgentModelTurn> {
+  ): Promise<AgentModelStep> {
     this.started = true;
 
     return new Promise((_resolve, reject) => {
@@ -381,7 +381,7 @@ describe("agent sessions", () => {
     }
   });
 
-  test("hands off a durable tool turn and resumes only after explicit recovery", async () => {
+  test("hands off a durable tool step and resumes only after explicit recovery", async () => {
     const restartCall = {
       arguments: '{"command":"bun run dev:restart","timeout":30}',
       id: "restart-call",

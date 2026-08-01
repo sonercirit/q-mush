@@ -1,4 +1,4 @@
-import type { AgentModelTurn } from "../shared/agent-loop.ts";
+import type { AgentModelStep } from "../shared/agent-loop.ts";
 import { ProviderStreamError } from "./provider-error.ts";
 import {
   createProviderStreamAccumulator,
@@ -55,12 +55,12 @@ export function completeProviderWebSocket(options: {
   readonly onDelta?: (delta: ProviderTextDelta) => void;
   readonly signal?: AbortSignal;
   readonly url: string;
-}): Promise<AgentModelTurn> {
+}): Promise<AgentModelStep> {
   if (options.signal?.aborted === true) {
     return Promise.reject(abortError());
   }
 
-  return new Promise<AgentModelTurn>((resolve, reject) => {
+  return new Promise<AgentModelStep>((resolve, reject) => {
     const accumulator = createProviderStreamAccumulator(
       "responses",
       options.onDelta,
@@ -71,17 +71,17 @@ export function completeProviderWebSocket(options: {
     const socket = options.createSocket(options.url, {
       headers: options.headers,
     });
-    const settle = (error: Error | undefined, turn?: AgentModelTurn): void => {
+    const settle = (error: Error | undefined, step?: AgentModelStep): void => {
       if (settled) {
         return;
       }
 
       settled = true;
       options.signal?.removeEventListener("abort", onAbort);
-      if (error === undefined && turn !== undefined) {
-        resolve(turn);
+      if (error === undefined && step !== undefined) {
+        resolve(step);
       } else {
-        reject(error ?? new Error("The provider returned no model turn"));
+        reject(error ?? new Error("The provider returned no model step"));
       }
     };
     const fail = (error: Error): void => {

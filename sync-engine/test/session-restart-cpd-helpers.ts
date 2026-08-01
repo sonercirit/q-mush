@@ -65,7 +65,7 @@ export function recoverRestartTestHandoffs(
 
 interface RestartSettlementOptions {
   readonly gate?: Promise<unknown>;
-  readonly turns?: number;
+  readonly steps?: number;
 }
 
 export async function settleRestartRecovery(
@@ -74,8 +74,8 @@ export async function settleRestartRecovery(
   if (options.gate !== undefined) {
     await options.gate;
   }
-  const turns = options.turns ?? 2;
-  for (let turn = 0; turn < turns; turn += 1) {
+  const steps = options.steps ?? 2;
+  for (let step = 0; step < steps; step += 1) {
     await Promise.resolve();
   }
 }

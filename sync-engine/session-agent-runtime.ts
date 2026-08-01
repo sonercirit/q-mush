@@ -19,7 +19,7 @@ import {
 } from "../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { forEachAssistantToolCall } from "./agent-conversation.ts";
-import { estimateAgentTurnCost } from "./agent-cost.ts";
+import { estimateAgentStepCost } from "./agent-cost.ts";
 import { createAgentSkills, type AgentSkillExecutor } from "./agent-skills.ts";
 import {
   isAskQuestionsPause,
@@ -42,7 +42,7 @@ import {
   type SessionAgentToolActions,
 } from "./session-agent-tools.ts";
 import {
-  agentTurnUsage,
+  agentStepUsage,
   compactionUsage,
   type CompactionUsage,
 } from "./session-compaction-usage.ts";
@@ -208,8 +208,8 @@ export async function compactSessionConversation(
   const conversation = sessionConversation(runtime);
   const compactor = models.createCompactor();
   const startedAt = runtime.now();
-  const estimateCost = (turn: Parameters<typeof compactionUsage>[0]) =>
-    estimateAgentTurnCost(runtime.detail, turn.tokenUsage);
+  const estimateCost = (step: Parameters<typeof compactionUsage>[0]) =>
+    estimateAgentStepCost(runtime.detail, step.tokenUsage);
   const final = await compactor.compact(conversation, runtime.signal);
   throwIfAgentAborted(runtime.signal);
   const usage = compactionUsage(final, estimateCost);
@@ -252,7 +252,7 @@ function boundRuntimeToolOutput(
 
 async function executeAgentTool(
   runtime: SessionAgentRuntimeDependencies,
-  turnTools: ReadonlySet<AgentSessionToolName>,
+  stepTools: ReadonlySet<AgentSessionToolName>,
   currentTools: () => ReadonlySet<AgentSessionToolName> | undefined,
   skills: ReturnType<typeof createAgentSkills>,
   dispatchTool: AgentToolDispatcher,
@@ -269,7 +269,7 @@ async function executeAgentTool(
   try {
     if (
       !isAgentSessionToolName(call.name) ||
-      !turnTools.has(call.name) ||
+      !stepTools.has(call.name) ||
       currentTools()?.has(call.name) !== true
     ) {
       return {
@@ -295,7 +295,7 @@ async function executeAgentTool(
           {
             arguments: call.arguments,
             executionGeneration: runtime.detail.generation,
-            selected: turnTools.has("ask_questions"),
+            selected: stepTools.has("ask_questions"),
             sessionId: runtime.detail.id,
             source: "direct",
             toolCallId: call.id,
@@ -347,7 +347,7 @@ export async function runSessionAgent(
     runtime.signal,
     handoffController.signal,
   ]);
-  const turnTools = new Set<AgentSessionToolName>(runtime.detail.tools);
+  const stepTools = new Set<AgentSessionToolName>(runtime.detail.tools);
   const currentToolNames = (): readonly AgentSessionToolName[] | undefined =>
     currentExecutionTools({
       current: runtime.currentTools?.(),
@@ -439,12 +439,12 @@ export async function runSessionAgent(
       },
       signal,
     );
-    const usage = agentTurnUsage(
+    const usage = agentStepUsage(
       { contextTokens: null, ...explanation.usage },
-      (turn) =>
-        estimateAgentTurnCost(
+      (step) =>
+        estimateAgentStepCost(
           { providerPricing: explanation.providerPricing },
-          turn.tokenUsage,
+          step.tokenUsage,
         ),
     );
     if (usage !== undefined) {
@@ -511,14 +511,14 @@ export async function runSessionAgent(
   };
   try {
     return await runCompactingAgentLoop({
-      agentCost: (turn) =>
-        estimateAgentTurnCost(runtime.detail, turn.tokenUsage),
+      agentCost: (step) =>
+        estimateAgentStepCost(runtime.detail, step.tokenUsage),
       autoCompact: runtime.detail.autoCompact,
       createCompactor: models.createCompactor,
       executeTool: (call) =>
         executeAgentTool(
           runtime,
-          turnTools,
+          stepTools,
           currentTools,
           skills,
           dispatchTool,

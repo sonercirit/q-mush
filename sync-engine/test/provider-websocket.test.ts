@@ -12,7 +12,7 @@ import {
   providerDelta,
   retryingSocket,
 } from "./provider-recovery-fixtures.ts";
-import { expectDoneTurn } from "./provider-turn-fixtures.ts";
+import { expectDoneStep } from "./provider-step-fixtures.ts";
 
 async function expectAbortWithoutHttp(
   model: ChatCompletionsAgentModel,
@@ -53,7 +53,7 @@ test("prefers the Responses WebSocket for OpenAI API keys", async () => {
   socket?.receive({ type: "response.output_text.delta", delta: "Done." });
   socket?.receive(COMPLETED_EVENT);
 
-  expectDoneTurn(await pending);
+  expectDoneStep(await pending);
 });
 
 test("does not start an HTTP fallback after a WebSocket abort", async () => {
@@ -115,7 +115,7 @@ test("retries partial output after a socket error without stale deltas", async (
   });
   recoveredSocket?.receive(COMPLETED_EVENT);
 
-  expectDoneTurn(await pending);
+  expectDoneStep(await pending);
   const expectedDeltas: ProviderTextDelta[] = [
     providerDelta("Partial"),
     providerDelta("", true),
@@ -148,7 +148,7 @@ test("retries transient failed events and clears partial output", async () => {
   successfulSocket?.open();
   successfulSocket?.receive(COMPLETED_EVENT);
 
-  expectDoneTurn(await pending);
+  expectDoneStep(await pending);
   expect(delays).toEqual([1_000]);
   expect(deltas).toEqual([providerDelta("Partial"), providerDelta("", true)]);
 });

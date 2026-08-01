@@ -76,7 +76,7 @@ test.each([
   {
     label: "Follow up",
     reason:
-      "Running. Follow up starts the next turn; Steer changes direction at the next safe model or tool boundary.",
+      "Running. Follow up starts the next turn; Steer is injected at the next step boundary, after the current model call and its tools settle.",
     status: "running",
   },
 ] as const)(
