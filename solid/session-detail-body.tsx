@@ -11,6 +11,7 @@ import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { AskQuestionsForm } from "./ask-questions-client.tsx";
 import { clipboardCopyLabel, createClipboardCopy } from "./clipboard-copy.ts";
 import { findById } from "./id-selection.ts";
+import { createNestedScrollRef } from "./nested-scroll.ts";
 import { SessionAutoCompactToggle } from "./session-autocompact-toggle.tsx";
 import { SessionFollowUp } from "./session-client-forms.tsx";
 import { sessionComposerUnavailableReason } from "./session-composer-availability.ts";
@@ -81,6 +82,7 @@ export function SessionDetailBody(props: {
   readonly view: LoadedSessionDetailViewProps;
 }): JSX.Element {
   const view = (): LoadedSessionDetailViewProps => props.view;
+  const nestedScrollRef = createNestedScrollRef(() => view().detail.id, true);
   const running = (): boolean => view().detail.status === "running";
   const queued = (): boolean => view().detail.status === "queued";
   const active = (): boolean =>
@@ -157,7 +159,11 @@ export function SessionDetailBody(props: {
   );
 
   return (
-    <div class="session-detail-view min-w-0" data-session-detail-view="true">
+    <div
+      class="session-detail-view min-w-0"
+      data-session-detail-view="true"
+      ref={nestedScrollRef}
+    >
       <div class="flex flex-col gap-4 border-b border-white/10 pb-5 sm:flex-row sm:items-start sm:justify-between">
         <div class="min-w-0 flex-1">
           <div class="flex flex-wrap items-center gap-2">

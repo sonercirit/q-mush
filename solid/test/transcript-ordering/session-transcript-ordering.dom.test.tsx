@@ -264,6 +264,105 @@ test.each([
   expect(updatedTable.scrollLeft).toBe(expected);
 });
 
+function setNestedScrollPosition(
+  element: HTMLElement,
+  top: number,
+  left: number,
+): void {
+  element.scrollTop = top;
+  element.scrollLeft = left;
+  element.dispatchEvent(new Event("scroll"));
+}
+
+function expectNestedScrollPosition(
+  element: HTMLElement,
+  top: number,
+  left: number,
+): void {
+  expect(element.scrollTop).toBe(top);
+  expect(element.scrollLeft).toBe(left);
+}
+
+test.each([
+  {
+    expectedLeft: 71,
+    expectedTop: 83,
+    label: "user position",
+    scrollLeft: 71,
+    scrollTop: 83,
+  },
+  {
+    expectedLeft: 400,
+    expectedTop: 400,
+    label: "bottom-right edge",
+    scrollLeft: 300,
+    scrollTop: 300,
+  },
+])(
+  "keeps nested scroll at the $label when a streamed message settles",
+  async ({ expectedLeft, expectedTop, label, scrollLeft, scrollTop }) => {
+    const fixture = nestedStreamFixture(`settled-${label}`, "Show the output");
+    const { container, controller, detail } = fixture;
+    const streamed = startNestedCodeStream(
+      container,
+      controller,
+      detail,
+      scrollTop,
+    );
+    defineElementWidth(streamed, 100, 400);
+    setNestedScrollPosition(streamed, scrollTop, scrollLeft);
+
+    controller.applyDetail({
+      ...detail,
+      messages: [
+        ...detail.messages,
+        transcriptMessage(
+          "assistant-persisted",
+          "```ts\nconst first = 1;\nconst second = 2;",
+          "assistant",
+          3,
+        ),
+      ],
+      status: "idle",
+      updatedAt: 3,
+    });
+    const persisted = codeBlock(container);
+    defineElementSize(persisted, 100, 500);
+    defineElementWidth(persisted, 100, 500);
+    await Promise.resolve();
+
+    expect(persisted).not.toBe(streamed);
+    expectNestedScrollPosition(persisted, expectedTop, expectedLeft);
+  },
+);
+
+test("keeps nested scroll positions when a persisted detail is patched", async () => {
+  const message = transcriptMessage(
+    "assistant-patched",
+    "```ts\nconst first = 1;",
+    "assistant",
+    3,
+  );
+  const { container, controller, detail } = mountedTranscript([message]);
+  const initial = codeBlock(container);
+  defineElementSize(initial, 100, 400);
+  defineElementWidth(initial, 100, 400);
+  setNestedScrollPosition(initial, 83, 71);
+
+  controller.applyDetail({
+    ...detail,
+    messages: [{ ...message, content: `${message.content}\nconst next = 2;` }],
+    updatedAt: 4,
+  });
+  const patched = codeBlock(container);
+  defineElementSize(patched, 100, 500);
+  defineElementWidth(patched, 100, 500);
+  await Promise.resolve();
+
+  expect(patched).not.toBe(initial);
+  expectNestedScrollPosition(patched, 83, 71);
+});
+
 test("keeps persisted and streamed turns in canonical DOM order", () => {
   const messages: AgentSessionDetail["messages"] = [
     transcriptMessage("user-earlier", "Earlier request", "user", 1),
