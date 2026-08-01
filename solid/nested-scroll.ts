@@ -4,6 +4,7 @@ interface NestedScrollState {
   readonly fromEnd: number;
   readonly fromRight: number;
   readonly left: number;
+  readonly lineWrap: boolean | undefined;
   readonly top: number;
 }
 
@@ -41,6 +42,10 @@ function nestedScrollState(element: HTMLElement): NestedScrollState {
     fromEnd: element.scrollHeight - element.clientHeight - element.scrollTop,
     fromRight: element.scrollWidth - element.clientWidth - element.scrollLeft,
     left: element.scrollLeft,
+    lineWrap:
+      element.dataset["lineWrap"] === undefined
+        ? undefined
+        : element.dataset["lineWrap"] === "true",
     top: element.scrollTop,
   };
 }
@@ -60,6 +65,14 @@ function restoreNestedScroll(
   element: HTMLElement,
   state: NestedScrollState,
 ): void {
+  if (state.lineWrap !== undefined) {
+    element.dispatchEvent(
+      new CustomEvent<boolean>("subscroll-wrap-restore", {
+        bubbles: true,
+        detail: state.lineWrap,
+      }),
+    );
+  }
   element.scrollTop =
     state.fromEnd <= 2
       ? element.scrollHeight - element.clientHeight
@@ -82,11 +95,12 @@ export function createNestedScrollRef(
 ): (element: HTMLElement) => void {
   let current: HTMLElement | undefined;
   let currentKey: string | undefined;
-  let remember: (() => void) | undefined;
+  let remember: ((event?: Event) => void) | undefined;
   const nestedScrollByElement = new WeakMap<HTMLElement, IndexedNestedScroll>();
   onCleanup(() => {
     if (current !== undefined && remember !== undefined) {
       current.removeEventListener("scroll", remember, true);
+      current.removeEventListener("subscroll-wrap-change", remember);
     }
     const key = currentKey;
     const element = current;
@@ -113,13 +127,34 @@ export function createNestedScrollRef(
         }
       });
     }
-    remember = () => {
+    remember = (event?: Event) => {
+      const states = rememberNestedScroll(element, nestedScrollByElement);
+      const changedWrap =
+        event instanceof CustomEvent && typeof event.detail === "boolean"
+          ? event.detail
+          : undefined;
+      const changedPane =
+        changedWrap === undefined || !(event?.target instanceof HTMLElement)
+          ? undefined
+          : event.target.querySelector<HTMLElement>("[data-line-wrap]");
+      const changedIndex =
+        changedPane === undefined || changedPane === null
+          ? -1
+          : nestedScrollElements(element).indexOf(changedPane);
       nestedScrollByMessage.set(key, {
         element,
-        states: rememberNestedScroll(element, nestedScrollByElement),
+        states:
+          changedIndex === -1
+            ? states
+            : states.map((state, index) =>
+                index === changedIndex
+                  ? { ...state, lineWrap: changedWrap }
+                  : state,
+              ),
       });
     };
     element.addEventListener("scroll", remember, true);
+    element.addEventListener("subscroll-wrap-change", remember);
     if (!observeReplacements) return;
 
     const observer = new MutationObserver((mutations) => {
