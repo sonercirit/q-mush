@@ -59,6 +59,36 @@ afterEach(() => {
   disposeTestViews(DISPOSALS);
 });
 
+test("keeps spawn controls and description collapsed until expanded", () => {
+  const container = mountSpawnEditor({
+    detail: () => TEST_SESSION_DETAIL,
+    onDiscoverModels: () =>
+      Promise.resolve(testAgentModelCatalog({ id: TEST_SESSION_DETAIL.model })),
+    onSpawn: resolvedSpawn,
+  });
+  const toggle = queryTestElementAs(
+    container,
+    "[data-session-spawn-toggle='true']",
+    HTMLButtonElement,
+  );
+  const description =
+    "Start a child whose completion is reported back to this session.";
+
+  expect(toggle.textContent).toBe("Expand");
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  expect(container.textContent).not.toContain(description);
+  expect(container.querySelector("[name='spawnPrompt']")).toBeNull();
+
+  toggle.click();
+
+  expect(toggle.textContent).toBe("Collapse");
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(container.textContent).toContain(description);
+  expect(container.querySelector("[name='spawnPrompt']")).toBeInstanceOf(
+    HTMLTextAreaElement,
+  );
+});
+
 test("preserves a spawned child draft across unrelated parent updates", async () => {
   const onSpawn = vi.fn(resolvedSpawn);
   const parent = {

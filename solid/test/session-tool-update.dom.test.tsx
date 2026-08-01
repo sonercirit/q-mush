@@ -37,7 +37,7 @@ test("shows update access only while the tool picker is expanded", () => {
   );
   const toolToggle = queryTestElementAs(
     container,
-    "[data-tool-picker-toggle='true']",
+    "[data-session-tool-toggle='true']",
     HTMLButtonElement,
   );
   const findUpdateButton = (): HTMLButtonElement | undefined =>
@@ -53,7 +53,7 @@ test("shows update access only while the tool picker is expanded", () => {
   expect(toolToggle.textContent).toBe("Expand");
   expect(toolToggle.getAttribute("aria-expanded")).toBe("false");
   expect(
-    container.querySelector("[data-tool-picker-controls='true']"),
+    container.querySelector("[data-tool-picker-toggle='true']"),
   ).toBeNull();
   expectToolEditorCollapsed(findUpdateButton, findDescription);
 
@@ -91,7 +91,7 @@ test("keeps the tool draft stable across unrelated realtime detail updates", asy
 
   const toolToggle = queryTestElementAs(
     container,
-    "[data-tool-picker-toggle='true']",
+    "[data-session-tool-toggle='true']",
     HTMLButtonElement,
   );
   toolToggle.click();
@@ -120,7 +120,7 @@ test("keeps the tool draft stable across unrelated realtime detail updates", asy
   expect(
     queryTestElementAs(
       container,
-      "[data-tool-picker-toggle='true']",
+      "[data-session-tool-toggle='true']",
       HTMLButtonElement,
     ).getAttribute("aria-expanded"),
   ).toBe("true");

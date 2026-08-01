@@ -52,6 +52,7 @@ function ToolDetailsPanel(props: {
 }
 
 export function SessionToolPicker(props: {
+  readonly controlsOnly?: boolean;
   readonly disabled: boolean;
   readonly onChange: (tools: readonly AgentSessionToolName[]) => void;
   readonly onExpandedChange?: (expanded: boolean) => void;
@@ -196,21 +197,26 @@ export function SessionToolPicker(props: {
         picker = element;
       }}
     >
-      <legend class="text-sm font-medium text-slate-200">
-        <span>Tools &amp; skills</span>
-        <button
-          aria-expanded={expanded()}
-          class="ml-3 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
-          data-tool-picker-toggle="true"
-          onClick={toggleExpanded}
-          data-tool-picker-action="toggle"
-          type="button"
-        >
-          {expanded() ? "Collapse" : "Expand"}
-        </button>
-        <span class="sr-only">Tools and skills controls</span>
-      </legend>
-      <Show when={expanded()}>
+      <Show
+        fallback={<legend class="sr-only">Tools and skills controls</legend>}
+        when={!props.controlsOnly}
+      >
+        <legend class="text-sm font-medium text-slate-200">
+          <span>Tools &amp; skills</span>
+          <button
+            aria-expanded={expanded()}
+            class="ml-3 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300"
+            data-tool-picker-toggle="true"
+            onClick={toggleExpanded}
+            data-tool-picker-action="toggle"
+            type="button"
+          >
+            {expanded() ? "Collapse" : "Expand"}
+          </button>
+          <span class="sr-only">Tools and skills controls</span>
+        </legend>
+      </Show>
+      <Show when={(props.controlsOnly ?? false) || expanded()}>
         <div data-tool-picker-controls="true">
           <p class="mt-1 text-xs leading-5 text-slate-500">
             Choose what the agent may use in this session. You can run a session

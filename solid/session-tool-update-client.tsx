@@ -9,10 +9,7 @@ import {
 } from "solid-js";
 import type { AgentSessionToolName } from "../shared/agent-tools.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
-import {
-  SESSION_EDITOR_SECTION_CLASSES,
-  SessionEditorDescription,
-} from "./session-editor-client.tsx";
+import { SessionEditorSection } from "./session-editor-client.tsx";
 import { SessionToolPicker } from "./session-tool-picker.tsx";
 
 export function SessionToolUpdateEditor(props: {
@@ -28,7 +25,6 @@ export function SessionToolUpdateEditor(props: {
   );
   const [warning, setWarning] = createSignal<string | null>(null);
   const [applying, setApplying] = createSignal(false);
-  const [expanded, setExpanded] = createSignal(false);
   const toolRevision = createMemo(() => props.detail.tools.join("\n"));
   createEffect(
     on(toolRevision, () => {
@@ -47,19 +43,21 @@ export function SessionToolUpdateEditor(props: {
   };
 
   return (
-    <section class={SESSION_EDITOR_SECTION_CLASSES}>
-      <h4 class="text-sm font-semibold text-slate-200">Session tool access</h4>
-      <Show when={expanded()}>
-        <SessionEditorDescription>
+    <SessionEditorSection
+      description={
+        <>
           Changes fence the current execution generation. Newly enabled tools
           start on the next turn; removed tools cannot pass the execution gate.
-        </SessionEditorDescription>
-      </Show>
+        </>
+      }
+      kind="tools"
+      title="Session tool access"
+    >
       <div class="mt-4">
         <SessionToolPicker
+          controlsOnly
           disabled={props.disabled || applying()}
           onChange={setTools}
-          onExpandedChange={setExpanded}
           tools={tools()}
         />
       </div>
@@ -81,16 +79,14 @@ export function SessionToolUpdateEditor(props: {
           </div>
         )}
       </Show>
-      <Show when={expanded()}>
-        <button
-          class="mt-4 rounded-xl border border-cyan-300/30 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-100 disabled:opacity-50"
-          disabled={props.disabled || applying()}
-          onClick={() => void apply(false)}
-          type="button"
-        >
-          {applying() ? "Applying…" : "Update tool access"}
-        </button>
-      </Show>
-    </section>
+      <button
+        class="mt-4 rounded-xl border border-cyan-300/30 bg-cyan-300/10 px-4 py-2 text-sm font-semibold text-cyan-100 disabled:opacity-50"
+        disabled={props.disabled || applying()}
+        onClick={() => void apply(false)}
+        type="button"
+      >
+        {applying() ? "Applying…" : "Update tool access"}
+      </button>
+    </SessionEditorSection>
   );
 }
