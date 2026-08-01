@@ -10,6 +10,11 @@ import {
 } from "node:net";
 import { parseRunnerUrl } from "./runner-url.ts";
 
+interface PageAddressResolution {
+  readonly address: unknown;
+  readonly family: unknown;
+}
+
 interface PageAddress {
   readonly address: string;
   readonly family: 4 | 6;
@@ -17,7 +22,7 @@ interface PageAddress {
 
 export type PageAddressResolver = (
   hostname: string,
-) => Promise<readonly PageAddress[]>;
+) => Promise<readonly PageAddressResolution[]>;
 
 function ipv4Number(address: string): number | undefined {
   const parts = address.split(".");
@@ -177,6 +182,10 @@ function unsafeDestination(): Error {
   return new Error("Page URL resolves to an unsafe network destination");
 }
 
+function hostnameResolutionFailure(): Error {
+  return new Error("Page URL hostname could not be resolved");
+}
+
 export function assertPublicPageAddress(address: string): void {
   if (!pageAddressIsPublic(address)) {
     throw unsafeDestination();
@@ -187,13 +196,7 @@ export const defaultPageAddressResolver: PageAddressResolver = async (
   hostname,
 ) => {
   const values = await lookup(hostname, { all: true, verbatim: true });
-  const result: PageAddress[] = [];
-  for (const value of values) {
-    if (value.family === 4 || value.family === 6) {
-      result.push({ address: value.address, family: value.family });
-    }
-  }
-  return result;
+  return values;
 };
 
 function normalizedHostname(url: URL): string {
@@ -214,17 +217,27 @@ async function publicPageAddresses(
     assertPublicPageAddress(hostname);
     return [{ address: hostname, family: isIP(hostname) === 4 ? 4 : 6 }];
   }
-  let addresses: readonly PageAddress[];
+  let resolved: readonly PageAddressResolution[];
   try {
-    addresses = await resolveAddress(hostname);
+    resolved = await resolveAddress(hostname);
   } catch {
-    throw new Error("Page URL hostname could not be resolved");
+    throw hostnameResolutionFailure();
   }
-  if (
-    addresses.length === 0 ||
-    addresses.some(({ address }) => !pageAddressIsPublic(address))
-  ) {
+  const addresses: PageAddress[] = [];
+  for (const value of resolved) {
+    if (typeof value.address !== "string") {
+      continue;
+    }
+    const family = isIP(value.address);
+    if (family === 4 || family === 6) {
+      addresses.push({ address: value.address, family });
+    }
+  }
+  if (addresses.some(({ address }) => !pageAddressIsPublic(address))) {
     throw unsafeDestination();
+  }
+  if (addresses.length === 0) {
+    throw hostnameResolutionFailure();
   }
   return addresses;
 }
@@ -399,7 +412,7 @@ export class PageFetchProxy {
     const addresses = await publicPageAddresses(url, this.#resolveAddress);
     const address = addresses[0];
     if (address === undefined) {
-      throw unsafeDestination();
+      throw hostnameResolutionFailure();
     }
     const upstream = createConnection({
       family: address.family,

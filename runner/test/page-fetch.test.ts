@@ -1,3 +1,4 @@
+import { connect } from "node:net";
 import { describe, expect, test, vi } from "vitest";
 import { chromiumArguments } from "../page-fetch-chromium.ts";
 import {
@@ -5,6 +6,11 @@ import {
   type PageCapture,
   type PageResponse,
 } from "../page-fetch-content.ts";
+import {
+  assertPublicPageUrl,
+  PageFetchProxy,
+  type PageAddressResolver,
+} from "../page-fetch-process.ts";
 import {
   createPageFetchRunnerTool,
   fetchRenderedPage,
@@ -15,6 +21,7 @@ import {
 type PageRenderer = NonNullable<PageFetchDependencies["render"]>;
 
 const PUBLIC_ADDRESS = "93.184.216.34";
+const PUBLIC_IPV6_ADDRESS = "2606:2800:220:1:248:1893:25c8:1946";
 const publicResolver = () =>
   Promise.resolve([{ address: PUBLIC_ADDRESS, family: 4 as const }]);
 
@@ -73,6 +80,36 @@ async function rejection(promise: Promise<unknown>): Promise<Error> {
     return error instanceof Error ? error : new Error(String(error));
   }
   throw new Error("Expected operation to reject");
+}
+
+async function proxyError(
+  resolver: PageAddressResolver,
+  target: string,
+): Promise<Error> {
+  const proxy = new PageFetchProxy(resolver);
+  const port = await proxy.start();
+  const client = connect({ host: "127.0.0.1", port });
+  const proxyFailure = new Promise<Error>((resolve) => {
+    const check = (): void => {
+      if (proxy.failure === undefined) {
+        setTimeout(check, 1);
+      } else {
+        resolve(proxy.failure);
+      }
+    };
+    check();
+  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      client.once("connect", resolve);
+      client.once("error", reject);
+    });
+    client.write(`GET ${target} HTTP/1.1\r\nHost: example.com\r\n\r\n`);
+    return await proxyFailure;
+  } finally {
+    client.destroy();
+    await proxy.close();
+  }
 }
 
 async function fetchError(
@@ -190,6 +227,47 @@ describe("page_fetch", () => {
       const error = await fetchError(renderer, "https://example.com/error");
       expect(error.message).toContain(expected);
     }
+  });
+
+  test("normalizes divergent DNS family metadata at page and proxy boundaries", async () => {
+    const pageResolver: PageAddressResolver = () =>
+      Promise.resolve([
+        { address: PUBLIC_ADDRESS, family: "IPv4" },
+        { address: PUBLIC_IPV6_ADDRESS, family: 0 },
+      ]);
+    const proxyResolver: PageAddressResolver = () =>
+      Promise.resolve([{ address: "2001:4860:ffff::1", family: 0 }]);
+
+    await expect(
+      assertPublicPageUrl(new URL("https://example.com/"), pageResolver),
+    ).resolves.toBeUndefined();
+
+    const proxyFailure = await proxyError(proxyResolver, "http://example.com/");
+    expect(proxyFailure.message).toMatch(/ECONNREFUSED|ENETUNREACH/u);
+  });
+
+  test("distinguishes resolution failures from unsafe DNS answers", async () => {
+    const unresolved = await rejection(
+      assertPublicPageUrl(new URL("https://missing.example/"), () =>
+        Promise.resolve([]),
+      ),
+    );
+    const failed = await rejection(
+      assertPublicPageUrl(new URL("https://failed.example/"), () =>
+        Promise.reject(new Error("DNS unavailable")),
+      ),
+    );
+    const unsafe = await rejection(
+      assertPublicPageUrl(new URL("https://private.example/"), () =>
+        Promise.resolve([{ address: "127.0.0.1", family: 4 }]),
+      ),
+    );
+
+    expect(unresolved.message).toContain("could not be resolved");
+    expect(unresolved.message).not.toContain("unsafe network destination");
+    expect(failed.message).toContain("could not be resolved");
+    expect(failed.message).not.toContain("unsafe network destination");
+    expect(unsafe.message).toContain("unsafe network destination");
   });
 
   test("guards URL, DNS, redirect, connected-address, and browser process capabilities", async () => {
