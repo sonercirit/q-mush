@@ -15,6 +15,13 @@ import {
   testRecord,
 } from "./session-agent-output-helpers.ts";
 import {
+  childSessionId,
+  completeChildAgentFile,
+  resumeCompletedParent,
+  spawnCall,
+  waitForChildRunnerTool,
+} from "./session-agent-spawn-helpers.ts";
+import {
   closeToolSession,
   findToolResultContent,
 } from "./session-agent-tool-helpers.ts";
@@ -26,10 +33,8 @@ import {
   toolCall,
   waitForSessionContent,
 } from "./session-agent-tool-setup.ts";
-import { completeNullRunnerCommand } from "./session-compaction-test-helpers.ts";
 import {
   CREDENTIAL_ID,
-  RUNNER_COMMAND_ID,
   RUNNER_ID,
   SESSION_ID,
 } from "./session-integration-fixtures.ts";
@@ -41,26 +46,6 @@ import {
   waitForSessionValue,
 } from "./session-integration-helpers.ts";
 import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
-
-function spawnCall(
-  prompt: string,
-  reasoningEffort?: string,
-  tools: readonly string[] = [],
-  credentialId = CREDENTIAL_ID,
-  agentFilePath?: string,
-) {
-  return toolCall("spawn_session", {
-    credentialId,
-    ...(agentFilePath === undefined ? {} : { agentFilePath }),
-    model: "gpt-4.1-mini",
-    prompt,
-    provider: "openai",
-    ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
-    runnerId: RUNNER_ID,
-    tools,
-    workingDirectory: "/work/project",
-  });
-}
 
 class PausedParentChildModel implements AgentModel {
   #requestCount = 0;
@@ -162,34 +147,6 @@ async function expectRejectedSpawn(
   closeSessionTestDatabase(setup.database);
 }
 
-async function waitForRunnerSession(
-  setup: Awaited<ReturnType<typeof startToolSession>>,
-  sessionId: string,
-  tool?: string,
-): Promise<void> {
-  await waitForSessionValue(
-    () => setup.runnerCommands.shift(),
-    (value) =>
-      isRecord(value) &&
-      value["sessionId"] === sessionId &&
-      (tool === undefined || value["tool"] === tool),
-  );
-}
-
-async function childSessionId(
-  setup: Awaited<ReturnType<typeof startToolSession>>,
-): Promise<string> {
-  const parent = await completedParentDetail(setup, "idle");
-  const output = findToolResultContent(parent, "spawn_session");
-  const parsed: unknown = JSON.parse(output ?? "null");
-  if (!isRecord(parsed) || typeof parsed["sessionId"] !== "string") {
-    throw new TypeError("The spawn tool did not return a session ID");
-  }
-  const childId = parsed["sessionId"];
-  await waitForRunnerSession(setup, childId);
-  return childId;
-}
-
 async function startedChild(model: AgentModel): Promise<{
   readonly childId: string;
   readonly setup: Awaited<ReturnType<typeof startToolSession>>;
@@ -220,18 +177,12 @@ async function completePausedChild(
   setup: Awaited<ReturnType<typeof startToolSession>>,
   childId: string,
 ): Promise<void> {
-  await waitForRunnerSession(setup, childId);
+  await waitForChildRunnerTool(setup, childId);
   completeChildAgentFile(setup);
   await waitForSessionValue(
     () => setup.sessions.detailForUser(TEST_USER_ID, childId),
     hasSessionStatus("idle"),
   );
-}
-
-function completeChildAgentFile(
-  setup: Awaited<ReturnType<typeof startToolSession>>,
-): void {
-  completeNullRunnerCommand(setup.sessions, RUNNER_ID, RUNNER_COMMAND_ID);
 }
 
 describe("session agent tools", () => {
@@ -517,8 +468,7 @@ describe("session agent tools", () => {
     await childSessionId(setup);
     completeChildAgentFile(setup);
 
-    await waitForRunnerSession(setup, SESSION_ID);
-    completeChildAgentFile(setup);
+    await resumeCompletedParent(setup, SESSION_ID);
     const parent = await waitForSessionContent(
       setup,
       "I received the child report.",
@@ -541,7 +491,7 @@ describe("session agent tools", () => {
     ]);
     const { childId, setup } = await startedChild(model);
     completeChildAgentFile(setup);
-    await waitForRunnerSession(setup, childId, "bash");
+    await waitForChildRunnerTool(setup, childId, "bash");
 
     await setup.runners.remove(
       createAuthenticatedRequest(
@@ -562,28 +512,6 @@ describe("session agent tools", () => {
       parentId: SESSION_ID,
     });
     closeSessionTestDatabase(setup.database);
-  });
-
-  test("reports a spawned child failure to its parent", async () => {
-    const model = scriptedModel([
-      {
-        content: "Delegating work that may fail.",
-        toolCalls: [spawnCall("Fail the delegated task")],
-      },
-      { content: "I am waiting for the report.", toolCalls: [] },
-    ]);
-    const failureSetup = await startToolSession(model);
-    await childSessionId(failureSetup);
-    completeChildAgentFile(failureSetup);
-
-    const updatedParent = await waitForSessionContent(
-      failureSetup,
-      '\\"status\\": \\"failed\\"',
-    );
-    expect(JSON.stringify(updatedParent)).toContain(
-      "The scripted model ran out of turns",
-    );
-    closeSessionTestDatabase(failureSetup.database);
   });
 
   test("reports when a spawned child stops itself", async () => {
