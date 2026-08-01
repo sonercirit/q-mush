@@ -6,6 +6,10 @@ import {
   shouldRenderJsonStringAsMarkdown,
   tokenizeStreamingJson,
 } from "./session-json-stream.ts";
+import {
+  SubscrollPane,
+  subscrollPaneClasses,
+} from "./session-subscroll-pane.tsx";
 
 type RichTextRenderer = (
   content: string,
@@ -42,7 +46,7 @@ const SYNTAX_TOKEN_CLASSES: Readonly<Record<SyntaxTokenKind, string>> = {
 };
 
 const CODE_BLOCK_CLASSES =
-  "max-h-80 max-w-full overflow-auto overscroll-contain rounded-lg border border-white/10 bg-slate-950/90 p-3 font-mono text-xs leading-5 text-slate-300";
+  "max-h-80 max-w-full overflow-y-auto overscroll-contain rounded-lg border border-white/10 bg-slate-950/90 p-3 pr-20 font-mono text-xs leading-5 text-slate-300";
 const INLINE_CODE_CLASSES =
   "rounded bg-slate-950/80 px-1.5 py-0.5 font-mono text-[0.8em] text-cyan-200";
 const RICH_JSON_STRING_CLASSES =
@@ -288,19 +292,43 @@ function jsonSegment(
   };
 }
 
+function codePane(
+  content: JSX.Element,
+  classes: string,
+  language?: string,
+): JSX.Element {
+  return (
+    <SubscrollPane
+      label="code"
+      pane={(wrapped) => (
+        <pre
+          class={subscrollPaneClasses(classes)}
+          data-language={language}
+          data-line-wrap={String(wrapped())}
+        >
+          {content}
+        </pre>
+      )}
+    />
+  );
+}
+
 function renderMixedJson(
   content: string,
   classes: string,
   renderRichText: RichTextRenderer,
 ): JSX.Element | undefined {
   const segment = jsonSegment(content, renderRichText);
-  return segment === undefined ? undefined : (
-    <pre class={classes}>
-      {segment.before}
-      <code data-language="json">{segment.highlighted}</code>
-      {segment.after}
-    </pre>
-  );
+  return segment === undefined
+    ? undefined
+    : codePane(
+        <>
+          {segment.before}
+          <code data-language="json">{segment.highlighted}</code>
+          {segment.after}
+        </>,
+        classes,
+      );
 }
 
 function tokenizeSourceLine(line: string): readonly SyntaxToken[] {
@@ -406,11 +434,7 @@ export function renderHighlightedCodeWith(
           ? highlightedSource(code)
           : code;
 
-  return (
-    <pre class={classes} data-language={normalized}>
-      <code>{highlighted}</code>
-    </pre>
-  );
+  return codePane(<code>{highlighted}</code>, classes, normalized);
 }
 
 export function renderStructuredCodeWith(
@@ -420,17 +444,16 @@ export function renderStructuredCodeWith(
 ): JSX.Element {
   const json = parseJson(content);
   if (json !== undefined) {
-    return (
-      <pre class={classes} data-language="json">
-        <code>{renderJsonLines(json, renderRichText)}</code>
-      </pre>
+    return codePane(
+      <code>{renderJsonLines(json, renderRichText)}</code>,
+      classes,
+      "json",
     );
   }
 
   return (
-    renderMixedJson(content, classes, renderRichText) ?? (
-      <pre class={classes}>{content}</pre>
-    )
+    renderMixedJson(content, classes, renderRichText) ??
+    codePane(content, classes)
   );
 }
 

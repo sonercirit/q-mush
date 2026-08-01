@@ -2,6 +2,10 @@ import { For, type JSX } from "solid-js";
 import { isRecord } from "../shared/auth-model.ts";
 import { parseOptionalJsonRecord } from "../shared/json-record.ts";
 import {
+  SubscrollPane,
+  subscrollPaneClasses,
+} from "./session-subscroll-pane.tsx";
+import {
   renderHighlightedCode,
   renderStructuredCode,
 } from "./session-syntax.tsx";
@@ -157,9 +161,19 @@ function renderShellStream(options: {
           {options.kind}
         </span>
       </p>
-      <pre class="max-h-80 max-w-full overflow-auto overscroll-contain p-3 font-mono text-xs leading-5 text-slate-300">
-        {options.content.length > 0 ? options.content : "(empty)"}
-      </pre>
+      <SubscrollPane
+        label={stderr ? "standard error" : "standard output"}
+        pane={(wrapped) => (
+          <pre
+            class={subscrollPaneClasses(
+              "max-h-80 max-w-full overflow-y-auto overscroll-contain p-3 pr-20 font-mono text-xs leading-5 text-slate-300",
+            )}
+            data-line-wrap={String(wrapped())}
+          >
+            {options.content.length > 0 ? options.content : "(empty)"}
+          </pre>
+        )}
+      />
     </section>
   );
 }
@@ -274,7 +288,7 @@ function renderDiffLine(
   const added = kind === "added";
   return (
     <span
-      class={`block min-w-max px-3 ${added ? "bg-emerald-400/10 text-emerald-200" : "bg-rose-400/10 text-rose-200"}`}
+      class={`block px-3 ${added ? "bg-emerald-400/10 text-emerald-200" : "bg-rose-400/10 text-rose-200"}`}
       data-diff-line={kind}
     >
       {`${added ? "+" : "-"}${content}`}
@@ -302,21 +316,29 @@ function renderEditOutput(options: ToolOutputOptions): JSX.Element | undefined {
         <p class="path-wrap border-b border-white/10 px-3 py-2 font-mono text-[0.65rem] text-slate-400">
           {call.path}
         </p>
-        <pre
-          class="max-h-80 max-w-full overflow-auto overscroll-contain py-2 font-mono text-xs leading-5"
-          data-language="diff"
-        >
-          <code>
-            {call.edits.flatMap((edit) => [
-              ...diffLines(edit.oldText).map((line) =>
-                renderDiffLine(line, "removed"),
-              ),
-              ...diffLines(edit.newText).map((line) =>
-                renderDiffLine(line, "added"),
-              ),
-            ])}
-          </code>
-        </pre>
+        <SubscrollPane
+          label={`diff for ${call.path}`}
+          pane={(wrapped) => (
+            <pre
+              class={subscrollPaneClasses(
+                "max-h-80 max-w-full overflow-y-auto overscroll-contain py-2 pr-20 font-mono text-xs leading-5",
+              )}
+              data-language="diff"
+              data-line-wrap={String(wrapped())}
+            >
+              <code>
+                {call.edits.flatMap((edit) => [
+                  ...diffLines(edit.oldText).map((line) =>
+                    renderDiffLine(line, "removed"),
+                  ),
+                  ...diffLines(edit.newText).map((line) =>
+                    renderDiffLine(line, "added"),
+                  ),
+                ])}
+              </code>
+            </pre>
+          )}
+        />
       </section>
       <p class="rounded-lg border border-emerald-300/20 bg-emerald-300/10 px-3 py-2 font-mono text-xs text-emerald-300">
         {options.content}

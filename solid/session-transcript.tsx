@@ -128,9 +128,7 @@ function ToolDefinitions(props: {
         <summary class="cursor-pointer text-sm font-medium text-cyan-100 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300">
           Show selected tool schemas
         </summary>
-        <div class="mt-3 max-h-80 overflow-auto">
-          {renderStructuredCode(props.serializedTools)}
-        </div>
+        <div class="mt-3">{renderStructuredCode(props.serializedTools)}</div>
       </details>
     </li>
   );
