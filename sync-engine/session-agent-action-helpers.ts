@@ -35,6 +35,7 @@ interface SessionAgentMetadata {
 }
 
 export interface SessionAgentActionDependencies {
+  readonly settled?: (sessionId: string) => Promise<void>;
   readonly database: AppDatabase;
   readonly discoverModels: (
     provider: ProviderId,

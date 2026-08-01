@@ -12,6 +12,7 @@ import {
   waitForSessionContent,
 } from "./session-agent-tool-setup.ts";
 import { SESSION_ID } from "./session-integration-fixtures.ts";
+import { waitForSessionValue } from "./session-integration-helpers.ts";
 import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
 
 async function failedChildReport(content: string): Promise<{
@@ -49,6 +50,10 @@ describe("failed spawned session reports", () => {
     );
 
     expectFailedReport(report, "The child made partial progress.");
+    await waitForSessionValue(
+      () => setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID)?.generation,
+      (generation) => generation === 1,
+    );
     closeSessionTestDatabase(setup.database);
   });
 

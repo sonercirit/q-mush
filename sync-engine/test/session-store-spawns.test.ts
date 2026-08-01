@@ -98,6 +98,15 @@ function childSummary(setup: SpawnedChildReference) {
   });
 }
 
+function parentHasChildReport(
+  parent: ReturnType<SpawnedChildReference["store"]["get"]>,
+): boolean {
+  return (
+    parent?.messages.some(({ content }) => content === "Child complete") ===
+    true
+  );
+}
+
 function expectNoPendingReports(setup: SpawnedChildReference): void {
   expect(setup.store.pendingSpawnedSessions()).toEqual([]);
 }
@@ -132,10 +141,11 @@ describe("spawned session report generation fencing", () => {
       { detail: childDetail, userId: TEST_USER_ID },
     ]);
     expectReportClaimed(setup);
-    expect(setup.store.get(TEST_USER_ID, setup.parentId)).toMatchObject({
-      pendingInputs: [expectedPendingReport(setup)],
-      status: "running",
-    });
+    const currentParent = setup.store.get(TEST_USER_ID, setup.parentId);
+    expect(currentParent?.status).toBe("running");
+    expect(currentParent?.pendingInputs).toMatchObject([
+      expectedPendingReport(setup),
+    ]);
     expect(childSummary(setup)?.parentSessionId).toBe(setup.parentId);
     expectNoPendingReports(setup);
     expect(
@@ -162,37 +172,85 @@ describe("spawned session report generation fencing", () => {
     closeSetup(setup);
   });
 
-  test.each(["parent", "child"] as const)(
-    "retains the callback when the %s generation changes",
-    (target) => {
-      const setup = spawnedChildSetup();
-      updateGeneration(setup, target);
+  test("delivers the callback when the parent generation changes", () => {
+    const setup = spawnedChildSetup();
+    updateGeneration(setup, "parent");
 
-      expectRetainedReport(setup);
-      if (target === "parent") {
-        const parent = setup.store.get(TEST_USER_ID, setup.parentId);
-        const parentHasReport = parent?.messages.some(
-          (message) => message.content === "Child complete",
-        );
-        expect(parentHasReport).toBe(false);
+    expectReportClaimed(setup);
+    closeAfterParentAssertion(setup, (parent) => {
+      expect(parent).toMatchObject({
+        pendingInputs: [expectedPendingReport(setup)],
+        status: "running",
+      });
+    });
+  });
+
+  test("retains the callback when the child generation changes", () => {
+    const setup = spawnedChildSetup();
+    updateGeneration(setup, "child");
+
+    expectRetainedReport(setup);
+    closeSetup(setup);
+  });
+
+  test.each(["failed", "idle", "stopped"] as const)(
+    "stores the callback for a %s parent so it can be resumed",
+    (status) => {
+      const setup = spawnedChildSetup();
+      if (status === "failed") {
+        expect(
+          setup.store.transitionRuntime(
+            setup.parentId,
+            "failed",
+            TEST_NOW + 5,
+            setup.parentGeneration,
+          ),
+        ).toBe(true);
+      } else {
+        expect(
+          setup.store.transitionRuntime(
+            setup.parentId,
+            "idle",
+            TEST_NOW + 5,
+            setup.parentGeneration,
+          ),
+        ).toBe(true);
+        if (status === "stopped") {
+          expect(
+            setup.store.stop(TEST_USER_ID, setup.parentId, TEST_NOW + 6),
+          ).toBe(true);
+        }
       }
-      closeSetup(setup);
+
+      expectReportClaimed(setup, TEST_NOW + 7);
+      closeAfterParentAssertion(setup, (parent) => {
+        expect(parentHasChildReport(parent)).toBe(true);
+        expect(parent?.pendingInputs).toEqual([]);
+        expect(parent?.status).toBe(status);
+      });
     },
   );
 
-  test("delivers the callback to a stopped parent", () => {
+  test("stores the callback without falling through for a paused parent", () => {
     const setup = spawnedChildSetup();
-    expect(setup.store.stop(TEST_USER_ID, setup.parentId, TEST_NOW + 5)).toBe(
-      true,
-    );
+    expect(
+      setup.store.pauseRunningForRestart(
+        {
+          generation: setup.parentGeneration,
+          sessionId: setup.parentId,
+        },
+        "server",
+        "spawn-report-restart",
+        "agent",
+        TEST_NOW + 5,
+      ),
+    ).toBe(true);
 
     expectReportClaimed(setup, TEST_NOW + 6);
-    closeAfterParentAssertion(setup, (parent) => {
-      expect(
-        parent?.messages.some(({ content }) => content === "Child complete"),
-      ).toBe(true);
-      expect(parent).toMatchObject({ pendingInputs: [], status: "stopped" });
-    });
+    const paused = setup.store.get(TEST_USER_ID, setup.parentId);
+    expect(parentHasChildReport(paused)).toBe(true);
+    expect(paused).toMatchObject({ pendingInputs: [], status: "paused" });
+    closeSetup(setup);
   });
 
   test("keeps completed hierarchy links without scheduling another callback", () => {

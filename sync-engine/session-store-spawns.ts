@@ -134,7 +134,6 @@ export function appendSpawnedSessionReport(options: {
 }): boolean {
   return options.database.transaction((transaction) => {
     const parentCondition = storedSessionCondition({
-      generation: options.parentGeneration,
       id: options.parentId,
       status: REPORTABLE_PARENT_STATUSES,
       userId: options.userId,
@@ -167,22 +166,29 @@ export function appendSpawnedSessionReport(options: {
     ) {
       return false;
     }
-    if (
-      parent.status === "running" &&
-      !appendSystemFollowUp({
-        ...reportMessageOptions(options, transaction),
-        clientRequestId: `spawn:${options.childId}:${String(options.childGeneration)}`,
-        content: options.content,
-        kind: "steer",
-      })
-    ) {
-      return false;
-    }
-    if (parent.status !== "running") {
-      appendSystemStoredMessage({
-        ...reportMessageOptions(options, transaction),
-        message: storedUserMessageValues(options.content),
-      });
+    switch (parent.status) {
+      case "running":
+        if (
+          !appendSystemFollowUp({
+            ...reportMessageOptions(options, transaction),
+            clientRequestId: `spawn:${options.childId}:${String(options.childGeneration)}`,
+            content: options.content,
+            kind: "steer",
+          })
+        ) {
+          return false;
+        }
+        break;
+      case "failed":
+      case "idle":
+      case "paused":
+      case "queued":
+      case "stopped":
+        appendSystemStoredMessage({
+          ...reportMessageOptions(options, transaction),
+          message: storedUserMessageValues(options.content),
+        });
+        break;
     }
 
     transaction
