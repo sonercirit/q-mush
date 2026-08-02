@@ -5,6 +5,7 @@ import {
   startDevelopmentServer,
   triggerDevelopmentRestart,
 } from "./development-server.ts";
+import { createDevelopmentShutdown } from "./development-shutdown.ts";
 import { startDevelopmentSourceWatcher } from "./development-source-watcher.ts";
 
 const projectRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -23,19 +24,12 @@ console.log(
   "Watching production source and local environment files for graceful restarts.",
 );
 console.log("Run `bun run dev:restart` to request one explicitly.");
-let exiting = false;
-
-function shutDown(exitCode: number): void {
-  if (exiting) {
-    return;
-  }
-
-  exiting = true;
-  sourceWatcher.stop();
-  void developmentServer.stop().then(() => {
-    process.exit(exitCode);
-  });
-}
+const shutDown = createDevelopmentShutdown({
+  developmentServer,
+  stopSourceWatcher: () => {
+    sourceWatcher.stop();
+  },
+});
 
 process.on("SIGINT", () => {
   shutDown(130);
