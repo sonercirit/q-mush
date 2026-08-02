@@ -153,6 +153,7 @@ export function queueStoredSession(options: {
       .set({
         activeStartedAt: null,
         executionGeneration: sql`${agentSessions.executionGeneration} + 1`,
+        parentExecutionGeneration: null,
         status: "queued",
         ...updatedAuditFields(userId, now),
       })

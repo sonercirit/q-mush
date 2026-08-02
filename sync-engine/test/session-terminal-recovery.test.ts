@@ -13,6 +13,10 @@ import {
   requireCompactionSession,
   runningCompactionStore,
 } from "./session-compaction-test-helpers.ts";
+import {
+  createStore,
+  testSessionInput,
+} from "./session-store-test-fixtures.ts";
 
 const TERMINAL_USAGE: AgentSessionUsageUpdate = {
   contextTokens: 432,
@@ -81,6 +85,62 @@ test("recreation recognizes a terminal assistant append without replaying it", (
     ),
   ).toHaveLength(1);
   closeCompactionStore(setup);
+});
+
+test("interrupted terminal child recovery preserves a pending spawn callback", () => {
+  const setup = createStore();
+  const parentInput = testSessionInput({
+    prompt: "Parent with interrupted child",
+  });
+  const parentResult = setup.store.create(parentInput, TEST_NOW);
+  if (parentResult.status !== "created") {
+    throw new Error("The recovery parent was not created");
+  }
+  const parent = parentResult.detail;
+  const runningParent = setup.store.transitionCurrent(
+    parent.id,
+    "running",
+    TEST_NOW + 1,
+  );
+  expect(runningParent).toBe(true);
+  const childInput = testSessionInput();
+  const created = setup.store.create(
+    {
+      ...childInput,
+      parentGeneration: parent.generation,
+      parentSessionId: parent.id,
+      prompt: "Finish interrupted child",
+    },
+    TEST_NOW + 2,
+  );
+  if (created.status !== "created") {
+    throw new Error("The recovery child was not created");
+  }
+  const child = created.detail;
+  const runningChild = setup.store.transitionCurrent(
+    child.id,
+    "running",
+    TEST_NOW + 3,
+  );
+  expect(runningChild).toBe(true);
+  setup.store.appendRuntimeAgentMessages(
+    child.id,
+    [terminalMessage()],
+    TEST_NOW + 4,
+    child.generation,
+    TERMINAL_USAGE,
+  );
+
+  const recreated = new SessionStore(setup.database);
+  const pending = recreated.failInterrupted(TEST_NOW + 5);
+  const settled = recreated.get(TEST_USER_ID, child.id);
+  expect(settled).toMatchObject({
+    parentExecutionGeneration: parent.generation,
+    parentSessionId: parent.id,
+    status: "completed",
+  });
+  expect(pending).toEqual([{ detail: settled, userId: TEST_USER_ID }]);
+  setup.database.$client.close();
 });
 
 test("recreation recognizes a committed compaction without repeating it", () => {

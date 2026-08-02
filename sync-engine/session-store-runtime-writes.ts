@@ -14,7 +14,10 @@ import {
 import type { CompactionUsage } from "./session-compaction-usage.ts";
 import { compactStoredConversation } from "./session-compaction.ts";
 import { storedRecordedMessages } from "./session-message-values.ts";
-import { runningCondition } from "./session-store-persistence.ts";
+import {
+  runningCondition,
+  storedParentExecutionGeneration,
+} from "./session-store-persistence.ts";
 import { requireRunningSessionUserId } from "./session-store-state.ts";
 import type { SessionRuntimeTarget } from "./session-store-types.ts";
 import {
@@ -203,13 +206,12 @@ function writeStoredMessages(
 function terminalSessionStatus(
   options: RuntimeWriteTarget,
 ): "completed" | "idle" {
-  const detail = options.resources.database
-    .select({ parentSessionId: agentSessions.parentSessionId })
-    .from(agentSessions)
-    .where(runningSessionCondition(options))
-    .get();
+  const condition = runningSessionCondition(options);
   return normalSessionCompletionStatus({
-    parentSessionId: detail?.parentSessionId,
+    parentExecutionGeneration: storedParentExecutionGeneration(
+      options.resources.database,
+      condition,
+    ),
   });
 }
 
