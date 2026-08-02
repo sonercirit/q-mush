@@ -142,6 +142,20 @@ test("converts a corrupt shutdown marker into a corrupt restart handoff", () => 
   closeCompactionStore(setup);
 });
 
+test("skips startup time reads when no shutdown markers exist", () => {
+  const setup = runningRestartStore();
+  const interrupted = interruptedStore(setup);
+  let reads = 0;
+
+  interrupted.recover(() => {
+    reads += 1;
+    return TEST_NOW + 2;
+  });
+
+  expect(reads).toBe(0);
+  closeCompactionStore(setup);
+});
+
 function expectRestartCleared(setup: RestartStoreSetup): void {
   expect(readRawRestartHandoff(setup)).toBeNull();
   expect(setup.store.pendingRestartHandoffs()).toEqual([]);
