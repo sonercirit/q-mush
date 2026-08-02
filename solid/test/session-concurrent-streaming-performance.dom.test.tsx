@@ -81,16 +81,21 @@ function trackedStream(
   onStdoutRead: () => void,
 ): ToolStreamEntry {
   const stdout = stream.stdout;
-  return Object.defineProperty({ ...stream }, "stdout", {
-    get: () => {
+  const tracked = { ...stream };
+  const descriptor: PropertyDescriptor = {
+    configurable: true,
+    enumerable: true,
+    get() {
       onStdoutRead();
       return stdout;
     },
-  });
+  };
+  Reflect.defineProperty(tracked, "stdout", descriptor);
+  return tracked;
 }
 
 afterEach(() => {
-  for (const dispose of disposals.splice(0)) dispose();
+  while (disposals.length > 0) disposals.pop()?.();
   document.body.replaceChildren();
 });
 
@@ -140,7 +145,28 @@ test("a tool delta reads and replaces only its own concurrent stream", () => {
     agentFile: null,
     executionEnvironment: "bare_metal",
     filters: DEFAULT_SESSION_TRANSCRIPT_FILTERS,
-    messages: [],
+    messages: [
+      {
+        content: "",
+        createdAt: 1,
+        id: "stream:performance:assistant",
+        images: [],
+        role: "assistant",
+        toolCallId: null,
+        toolCalls: [],
+        toolName: null,
+      },
+    ],
+    status: "running",
+    turns: [
+      {
+        boundaryMessageId: null,
+        endedAt: null,
+        executionGeneration: 0,
+        id: "streaming-turn",
+        startedAt: 1,
+      },
+    ],
     tools: [],
   };
   disposals.push(

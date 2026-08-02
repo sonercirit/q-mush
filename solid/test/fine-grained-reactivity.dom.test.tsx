@@ -455,6 +455,14 @@ test("selected transcript deltas do not rebuild the multi-session hierarchy", ()
 test("keeps a running tool visible while a stop request is pending", () => {
   const running = {
     ...TEST_SESSION_DETAIL,
+    messages: [
+      transcriptMessage(
+        `stream:${TEST_SESSION_DETAIL.id}:assistant`,
+        "",
+        "assistant",
+        TEST_SESSION_DETAIL.updatedAt,
+      ),
+    ],
     status: "running" as const,
     updatedAt: 3,
   };

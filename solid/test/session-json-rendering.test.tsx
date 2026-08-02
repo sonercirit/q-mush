@@ -51,15 +51,30 @@ function message(options: {
 function renderTestTranscript(
   messages: readonly AgentSessionMessage[],
   toolStreams: readonly ToolStreamEntry[],
+  status?: Parameters<typeof SessionTranscript>[0]["status"],
 ): string {
+  const turns =
+    status === "running"
+      ? [
+          {
+            boundaryMessageId: null,
+            endedAt: null,
+            executionGeneration: 0,
+            id: "live-json-turn",
+            startedAt: 1,
+          },
+        ]
+      : undefined;
   return renderSolidToString(() => (
     <SessionTranscript
       agentFile={null}
       executionEnvironment="bare_metal"
       filters={DEFAULT_SESSION_TRANSCRIPT_FILTERS}
       messages={messages}
+      status={status}
       toolStreams={toolStreams}
       tools={[]}
+      turns={turns}
     />
   ));
 }
@@ -217,8 +232,14 @@ test("colorizes mixed messages and partial settled and live tool arguments", () 
         role: "assistant",
         toolArguments: '{"settled":"still streaming',
       }),
+      message({
+        content: "",
+        id: "stream:session-1:assistant",
+        role: "assistant",
+      }),
     ],
     [toolStream('{"live":fal')],
+    "running",
   );
 
   expectSpawnedSessionText(html);
