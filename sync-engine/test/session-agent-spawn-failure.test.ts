@@ -9,14 +9,13 @@ import {
   scriptedModel,
   startToolSession,
   toolCall,
-  waitForSessionContent,
 } from "./session-agent-tool-setup.ts";
 import { SESSION_ID } from "./session-integration-fixtures.ts";
-import { waitForSessionValue } from "./session-integration-helpers.ts";
 import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
+import { waitForTerminalParentNote } from "./session-terminal-parent-helpers.ts";
 
 async function failedChildReport(content: string): Promise<{
-  readonly report: string;
+  readonly child: string;
   readonly setup: Awaited<ReturnType<typeof startToolSession>>;
 }> {
   const model = scriptedModel([
@@ -34,33 +33,35 @@ async function failedChildReport(content: string): Promise<{
   const child = setup.sessions.detailForUser(TEST_USER_ID, childId);
   expect(child?.parentSessionId).toBe(SESSION_ID);
   completeChildAgentFile(setup);
-  const parent = await waitForSessionContent(setup, "Spawned session failed");
-  return { report: JSON.stringify(parent), setup };
+  await waitForTerminalParentNote(setup.sessions, childId);
+  return {
+    child: JSON.stringify(setup.sessions.detailForUser(TEST_USER_ID, childId)),
+    setup,
+  };
 }
 
-function expectFailedReport(report: string, expectedContent: string): void {
-  expect(report).toContain(expectedContent);
-  expect(report).toContain('\\"status\\": \\"failed\\"');
+function expectFailedChild(child: string, expectedContent: string): void {
+  expect(child).toContain(expectedContent);
+  expect(child).toContain("already terminal");
 }
 
 describe("failed spawned session reports", () => {
   test("includes the child's last assistant message", async () => {
-    const { report, setup } = await failedChildReport(
+    const { child, setup } = await failedChildReport(
       "The child made partial progress.",
     );
 
-    expectFailedReport(report, "The child made partial progress.");
-    await waitForSessionValue(
-      () => setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID)?.generation,
-      (generation) => generation === 1,
-    );
+    expectFailedChild(child, "The child made partial progress.");
+    expect(
+      setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID),
+    ).toMatchObject({ generation: 0, status: "idle" });
     closeSessionTestDatabase(setup.database);
   });
 
   test("includes an explicit reason when the child has no assistant content", async () => {
-    const { report, setup } = await failedChildReport("");
+    const { child, setup } = await failedChildReport("");
 
-    expectFailedReport(report, "The scripted model ran out of steps");
+    expectFailedChild(child, "The scripted model ran out of steps");
     closeSessionTestDatabase(setup.database);
   });
 });

@@ -16,7 +16,7 @@ import {
   testSessionInput,
 } from "./session-store-test-fixtures.ts";
 
-function report(setup: SpawnedChildReference, now = TEST_NOW + 5): boolean {
+function report(setup: SpawnedChildReference, now = TEST_NOW + 5) {
   return setup.store.appendSpawnedSessionReport(
     TEST_USER_ID,
     setup.childId,
@@ -194,7 +194,7 @@ describe("spawned session report generation fencing", () => {
   });
 
   test.each(["failed", "idle", "stopped"] as const)(
-    "stores the callback for a %s parent so it can be resumed",
+    "consumes the callback for a terminal %s parent on the child transcript",
     (status) => {
       const setup = spawnedChildSetup();
       if (status === "failed") {
@@ -223,8 +223,13 @@ describe("spawned session report generation fencing", () => {
       }
 
       expectReportClaimed(setup, TEST_NOW + 7);
+      expect(
+        setup.store
+          .get(TEST_USER_ID, setup.childId)
+          ?.messages.some(({ role }) => role === "system"),
+      ).toBe(true);
       closeAfterParentAssertion(setup, (parent) => {
-        expect(parentHasChildReport(parent)).toBe(true);
+        expect(parentHasChildReport(parent)).toBe(false);
         expect(parent?.pendingInputs).toEqual([]);
         expect(parent?.status).toBe(status);
       });

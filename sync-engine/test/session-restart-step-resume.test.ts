@@ -35,6 +35,7 @@ import {
   waitForRestartCommands,
 } from "./session-restart-step-resume-helpers.ts";
 import { completeTestRunnerCommands } from "./session-runner-command-helpers.ts";
+import { waitForTerminalParentNote } from "./session-terminal-parent-helpers.ts";
 
 const CHILD_PROMPT = "Finish this work across a server restart.";
 const CHILD_TOOL_OUTPUT = "Durable child tool output.";
@@ -176,17 +177,15 @@ test("a spawned session resumes its interrupted step after server recreation", a
     restartHandoff: null,
     status: "idle",
   });
-  const reports = await waitForSessionValue(
-    () => completionReports(recreated),
-    (value) => Array.isArray(value) && value.length === 1,
+  await waitForTerminalParentNote(recreated.sessions, childId);
+  expect(completionReports(recreated)).toHaveLength(0);
+  expect(JSON.stringify(sessionFor(recreated, childId))).toContain(
+    CHILD_SUMMARY,
   );
-  expect(reports).toHaveLength(1);
-  if (!Array.isArray(reports) || typeof reports[0] !== "string") {
-    throw new Error("The child completion report is unavailable");
-  }
-  expect(reports[0]).toContain(CHILD_SUMMARY);
-  expect(reports[0]).toContain('"role": "assistant"');
-  expect(reports[0]).not.toContain('"role": "tool"');
+  expect(sessionFor(recreated, SESSION_ID)).toMatchObject({
+    generation: 0,
+    status: "idle",
+  });
   closeSessionTestDatabase(initial.database);
 });
 

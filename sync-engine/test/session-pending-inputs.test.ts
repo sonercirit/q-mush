@@ -472,7 +472,7 @@ describe("durable pending session inputs", () => {
     const runtimes = new SessionRuntimes();
     const launchStates: boolean[] = [];
     const finisher = new SessionFinisher({
-      actions: { finished: vi.fn() },
+      actions: { finished: vi.fn(), stopChildren: vi.fn() },
       launchQueued: () => {
         launchStates.push(runtimes.active(setup.detail.id));
       },

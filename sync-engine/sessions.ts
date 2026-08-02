@@ -282,6 +282,7 @@ class DrizzleSessionIntegration
       restartCoordinator: this.#restartCoordinator,
       runnerRemoval: this.#runnerRemoval,
       runtimes: this.#runtimes,
+      stopChildren: this.#actions.stopChildren.bind(this.#actions),
       store: this.#store,
       withCredentialAccess: this.#withCredentialAccess,
       workspaces: this.#workspaces,

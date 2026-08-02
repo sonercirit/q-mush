@@ -83,12 +83,12 @@ import {
   updateRuntimeUsage,
 } from "./session-store-runtime-writes.ts";
 import {
+  activeSpawnedSessionChildren,
   appendSpawnedSessionReport,
   pendingSpawnedSessions,
   spawnedSessionChildren,
   spawnedSessionLink,
   type PendingSpawnedSession,
-  type SpawnedSessionLink,
 } from "./session-store-spawns.ts";
 
 import {
@@ -545,6 +545,12 @@ export class SessionStore {
   }
 
   appendSpawnedSessionReport(
+    ...parameters: Parameters<SessionStore["spawnedSessionCallbackDisposition"]>
+  ): boolean {
+    return this.spawnedSessionCallbackDisposition(...parameters) !== false;
+  }
+
+  spawnedSessionCallbackDisposition(
     userId: string,
     childId: string,
     childGeneration: number,
@@ -552,7 +558,7 @@ export class SessionStore {
     parentGeneration: number,
     content: string,
     now: number,
-  ): boolean {
+  ) {
     return appendSpawnedSessionReport({
       childGeneration,
       childId,
@@ -566,14 +572,14 @@ export class SessionStore {
     });
   }
 
+  activeSpawnedSessionChildren(userId: string, sessionId: string) {
+    return activeSpawnedSessionChildren(this.#database, userId, sessionId);
+  }
   spawnedSessionChildren(userId: string, sessionId: string): readonly string[] {
     return spawnedSessionChildren(this.#database, userId, sessionId);
   }
 
-  spawnedSessionLink(
-    userId: string,
-    sessionId: string,
-  ): SpawnedSessionLink | undefined {
+  spawnedSessionLink(userId: string, sessionId: string) {
     return spawnedSessionLink(this.#database, userId, sessionId);
   }
 
