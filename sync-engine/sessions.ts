@@ -255,8 +255,7 @@ class DrizzleSessionIntegration
     this.#runners.onRemoved((userId, runnerId) =>
       this.#runnerRemoval.removed(userId, runnerId),
     );
-    this.#shutdownInterrupted.failInvalid(this.#now());
-    this.#shutdownInterrupted.restore(this.#now());
+    this.#shutdownInterrupted.recover(this.#now);
     recover();
     this.#restartCoordinator.restoreDurableRunnerGates();
     this.#restartCoordinator.recover();

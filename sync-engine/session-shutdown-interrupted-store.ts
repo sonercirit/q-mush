@@ -126,6 +126,15 @@ export class ShutdownInterruptedSessionStore {
       : { marker, raw: session.interruptedHandoff };
   }
 
+  recover(now: () => number): void {
+    if (this.#markedSessions().length === 0) {
+      return;
+    }
+    const recoveredAt = now();
+    this.failInvalid(recoveredAt);
+    this.restore(recoveredAt);
+  }
+
   failInvalid(now: number): void {
     const invalid = this.#markedSessions().filter((session) => {
       try {
