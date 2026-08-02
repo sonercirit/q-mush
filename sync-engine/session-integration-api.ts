@@ -4,7 +4,10 @@ import type {
   RunnerCommandBroker,
   RunnerToolCommand,
 } from "../shared/runner-command-broker.ts";
-import type { AgentSessionSummary } from "../shared/session-model.ts";
+import type {
+  AgentSessionDetail,
+  AgentSessionSummary,
+} from "../shared/session-model.ts";
 import type { GoogleAuth } from "./auth.ts";
 import { authenticatedGet } from "./authenticated-get.ts";
 import {
@@ -77,6 +80,7 @@ export interface SessionIntegrationApiResources {
   readonly restartCoordinator: SessionRestartCoordinator;
   readonly runnerRemoval: RunnerRemovalCoordinator;
   readonly runtimes: SessionRuntimes;
+  readonly stopChildren: (detail: AgentSessionDetail, userId: string) => void;
   readonly store: SessionStore;
   readonly withCredentialAccess: Parameters<
     typeof openRouterProvidersForUser
@@ -423,6 +427,7 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
                   sessionId,
                   this.resources.now(),
                 );
+                this.resources.stopChildren(existing, user.id);
               }
               await this.resources.executionCleanup.cleanupTerminal(existing);
               this.resources.notify(user.id, sessionId);

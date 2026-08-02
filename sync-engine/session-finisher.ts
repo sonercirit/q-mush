@@ -13,7 +13,7 @@ function safeErrorMessage(error: unknown): string {
 }
 
 interface SessionFinisherOptions {
-  readonly actions: Pick<SessionAgentActions, "finished">;
+  readonly actions: Pick<SessionAgentActions, "finished" | "stopChildren">;
   readonly cleanup?: (detail: AgentSessionDetail) => void;
   readonly launchQueued?: (userId: string) => Promise<void> | void;
   readonly notify: SessionNotification;
@@ -111,12 +111,16 @@ export class SessionFinisher {
       );
     }
     if (errorMessage !== undefined) {
-      this.#options.store.transitionRuntime(
-        detail.id,
-        "failed",
-        now,
-        detail.generation,
-      );
+      if (
+        this.#options.store.transitionRuntime(
+          detail.id,
+          "failed",
+          now,
+          detail.generation,
+        )
+      ) {
+        this.#options.actions.stopChildren(detail, userId);
+      }
       notifyFinished();
       return;
     }

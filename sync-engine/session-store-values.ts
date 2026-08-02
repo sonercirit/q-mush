@@ -47,6 +47,12 @@ export function errorMessageValues(content: string): StoredMessageValues {
   return { ...emptyToolMetadata(), content, role: "error" };
 }
 
+export function storedSystemMessageValues(
+  content: string,
+): StoredMessageValues {
+  return { ...emptyToolMetadata(), content, role: "system" };
+}
+
 export function storedUserMessageValues(
   content: string,
   images: readonly AgentImage[] = [],

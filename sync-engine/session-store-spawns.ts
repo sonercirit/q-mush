@@ -11,8 +11,24 @@ import {
 } from "./session-store-persistence.ts";
 import {
   appendSystemStoredMessage,
+  storedSystemMessageValues,
   storedUserMessageValues,
 } from "./session-store-values.ts";
+
+type TerminalParentStatus = "failed" | "idle" | "stopped";
+
+const TERMINAL_PARENT_CALLBACK_NOTE =
+  "Completion callback was not delivered because the parent session was already terminal";
+
+function terminalParentCallbackNote(status: TerminalParentStatus): string {
+  return `${TERMINAL_PARENT_CALLBACK_NOTE} (${status}).`;
+}
+
+function parentIsTerminal(
+  status: (typeof REPORTABLE_PARENT_STATUSES)[number],
+): status is TerminalParentStatus {
+  return status === "failed" || status === "idle" || status === "stopped";
+}
 
 const REPORTABLE_PARENT_STATUSES = [
   "failed",
@@ -28,21 +44,18 @@ export interface SpawnedSessionLink {
   readonly parentId: string;
 }
 
-export function spawnedSessionChildren(
-  database: Pick<AppDatabase, "select">,
-  userId: string,
+interface SpawnedSessionRow {
+  readonly id: string;
+  readonly parent: string | null;
+  readonly parentGeneration?: number | null;
+  readonly status?: AgentSessionDetail["status"];
+}
+
+function spawnedDescendants(
+  sessions: readonly SpawnedSessionRow[],
   parentId: string,
-): readonly string[] {
-  const ownerCondition = and(
-    eq(agentSessions.userId, userId),
-    eq(agentSessions.isDeleted, false),
-  );
-  const sessions = database
-    .select({ id: agentSessions.id, parent: agentSessions.parentSessionId })
-    .from(agentSessions)
-    .where(ownerCondition)
-    .all();
-  const descendants: string[] = [];
+): readonly SpawnedSessionRow[] {
+  const descendants: SpawnedSessionRow[] = [];
   const parents = new Set([parentId]);
   for (;;) {
     const children = sessions.filter(
@@ -50,11 +63,64 @@ export function spawnedSessionChildren(
         parent !== null && parents.has(parent) && !parents.has(id),
     );
     if (children.length === 0) return descendants;
-    for (const { id } of children) {
-      parents.add(id);
-      descendants.push(id);
+    for (const child of children) {
+      parents.add(child.id);
+      descendants.push(child);
     }
   }
+}
+
+function ownedSessionCondition(userId: string) {
+  return and(
+    eq(agentSessions.userId, userId),
+    eq(agentSessions.isDeleted, false),
+  );
+}
+
+function ownedSpawnedSessionRows(
+  database: Pick<AppDatabase, "select">,
+  userId: string,
+) {
+  return database
+    .select({
+      id: agentSessions.id,
+      parent: agentSessions.parentSessionId,
+      parentGeneration: agentSessions.parentExecutionGeneration,
+      status: agentSessions.status,
+    })
+    .from(agentSessions)
+    .where(ownedSessionCondition(userId))
+    .all();
+}
+
+export function spawnedSessionChildren(
+  ...parameters: readonly [Pick<AppDatabase, "select">, string, string]
+): readonly string[] {
+  const [database, userId, parentId] = parameters;
+  return spawnedDescendants(
+    ownedSpawnedSessionRows(database, userId),
+    parentId,
+  ).map(({ id }) => id);
+}
+
+const CANCELLABLE_CHILD_STATUSES = ["paused", "queued", "running"] as const;
+
+export function activeSpawnedSessionChildren(
+  database: Pick<AppDatabase, "select">,
+  userId: string,
+  parentId: string,
+): readonly string[] {
+  const rows = ownedSpawnedSessionRows(database, userId).filter(
+    ({ id }) => id !== parentId,
+  );
+  return spawnedDescendants(rows, parentId).flatMap(
+    ({ id, parentGeneration, status }) =>
+      parentGeneration !== null &&
+      status !== undefined &&
+      CANCELLABLE_CHILD_STATUSES.some((candidate) => candidate === status)
+        ? [id]
+        : [],
+  );
 }
 
 export interface PendingSpawnedSession {
@@ -111,12 +177,13 @@ export function spawnedSessionLink(
 function reportMessageOptions(
   options: Parameters<typeof appendSpawnedSessionReport>[0],
   database: Pick<AppDatabase, "insert" | "select" | "update">,
+  sessionId = options.parentId,
 ) {
   return {
     database,
     generateId: options.generateId,
     now: options.now,
-    sessionId: options.parentId,
+    sessionId,
     userId: options.userId,
   };
 }
@@ -131,7 +198,7 @@ export function appendSpawnedSessionReport(options: {
   readonly parentGeneration: number;
   readonly parentId: string;
   readonly userId: string;
-}): boolean {
+}): false | "reportable" | "terminal" {
   return options.database.transaction((transaction) => {
     const parentCondition = storedSessionCondition({
       id: options.parentId,
@@ -181,9 +248,16 @@ export function appendSpawnedSessionReport(options: {
         break;
       case "failed":
       case "idle":
+      case "stopped":
+        appendSystemStoredMessage({
+          ...reportMessageOptions(options, transaction, options.childId),
+          message: storedSystemMessageValues(
+            terminalParentCallbackNote(parent.status),
+          ),
+        });
+        break;
       case "paused":
       case "queued":
-      case "stopped":
         appendSystemStoredMessage({
           ...reportMessageOptions(options, transaction),
           message: storedUserMessageValues(options.content),
@@ -191,14 +265,21 @@ export function appendSpawnedSessionReport(options: {
         break;
     }
 
+    const terminal = parentIsTerminal(parent.status);
+    const reportedSessionId = terminal ? options.childId : options.parentId;
     transaction
       .update(agentSessions)
       .set({
         updatedAt: new Date(options.now),
         updatedById: SYSTEM_ID,
       })
-      .where(eligibleParent)
+      .where(
+        storedSessionCondition({
+          id: reportedSessionId,
+          userId: options.userId,
+        }),
+      )
       .run();
-    return true;
+    return terminal ? ("terminal" as const) : ("reportable" as const);
   });
 }

@@ -16,7 +16,6 @@ import {
   responseToolOutput,
   sessionCanResume,
   spawnAgentSession,
-  spawnedSessionReport,
   type SessionAgentActionDependencies,
 } from "./session-agent-action-helpers.ts";
 import {
@@ -36,6 +35,10 @@ import {
   type SpawnSessionToolInput,
 } from "./session-agent-tools.ts";
 import { unavailableSessionResponse } from "./session-availability.ts";
+import {
+  reportSpawnedSessionCompletion,
+  stopSpawnedSessionChildren,
+} from "./session-child-lifecycle.ts";
 import type { SessionDetailLookup } from "./session-command-types.ts";
 import type { SessionExecutionAuthority } from "./session-execution-authority.ts";
 import type {
@@ -207,11 +210,20 @@ export class SessionAgentActions {
     detail: AgentSessionDetail,
     userId: string,
   ): string | undefined {
-    const parentId = this.#report(detail, userId);
-    if (parentId !== undefined) {
-      this.#dependencies.notify(userId, parentId);
+    const reported = reportSpawnedSessionCompletion(
+      this.#dependencies,
+      detail,
+      userId,
+    );
+    if (reported !== undefined) {
+      this.#dependencies.notify(
+        userId,
+        reported.disposition === "reportable" ? reported.parentId : detail.id,
+      );
     }
-    return parentId;
+    return reported?.disposition === "reportable"
+      ? reported.parentId
+      : undefined;
   }
 
   reportAll(pending: readonly PendingSpawnedSession[]): void {
@@ -238,6 +250,12 @@ export class SessionAgentActions {
     if (detail !== undefined) {
       this.#dependencies.cleanupSession(detail);
     }
+  }
+
+  stopChildren(parent: AgentSessionDetail, userId: string): void {
+    stopSpawnedSessionChildren(this.#dependencies, parent, userId, (child) => {
+      this.stopSession(child.id, child);
+    });
   }
 
   #cancelSession(): CancelSession {
@@ -300,34 +318,6 @@ export class SessionAgentActions {
     } catch {
       return sessionToolOutput({ error: "directory_unavailable" });
     }
-  }
-
-  #report(detail: AgentSessionDetail, userId: string): string | undefined {
-    const link = this.#dependencies.store.spawnedSessionLink(userId, detail.id);
-    if (link === undefined) {
-      return undefined;
-    }
-    const report = spawnedSessionReport({
-      childId: detail.id,
-      dependencies: this.#dependencies,
-      parentId: link.parentId,
-      userId,
-    });
-    if (
-      report !== undefined &&
-      this.#dependencies.store.appendSpawnedSessionReport(
-        userId,
-        detail.id,
-        detail.generation,
-        report.parentId,
-        link.parentGeneration,
-        report.content,
-        this.#dependencies.now(),
-      )
-    ) {
-      return report.parentId;
-    }
-    return undefined;
   }
 
   #wakeParents(userId: string, parentIds: readonly string[]): void {
@@ -647,6 +637,7 @@ export class SessionAgentActions {
         sessionId,
         this.#dependencies.now(),
       );
+      this.stopChildren(target, userId);
     }
     const cancel = this.#cancelSession();
     if (sessionId === parentSessionId) {

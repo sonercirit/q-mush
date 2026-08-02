@@ -508,6 +508,7 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
         sessionId,
         this.#dependencies.now(),
       );
+      this.#dependencies.actions.stopChildren(current, user.id);
     }
     const stopped = this.#detail(user.id, sessionId, workspaceId);
     this.#dependencies.actions.finished(stopped, user.id);

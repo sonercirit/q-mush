@@ -67,14 +67,6 @@ export function completeChildAgentFile(
   completeNullRunnerCommand(setup.sessions, RUNNER_ID, RUNNER_COMMAND_ID);
 }
 
-export async function resumeCompletedParent(
-  setup: Awaited<ReturnType<typeof startToolSession>>,
-  parentId: string,
-): Promise<void> {
-  await waitForRunnerSession(setup, parentId);
-  completeChildAgentFile(setup);
-}
-
 export async function waitForChildRunnerTool(
   setup: Awaited<ReturnType<typeof startToolSession>>,
   childId: string,

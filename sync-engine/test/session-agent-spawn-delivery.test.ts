@@ -18,6 +18,7 @@ import {
   waitForSessionValue,
 } from "./session-integration-helpers.ts";
 import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
+import { waitForTerminalParentNote } from "./session-terminal-parent-helpers.ts";
 
 class ParentGenerationDeliveryModel implements AgentModel {
   #requestCount = 0;
@@ -53,7 +54,10 @@ function completeRunnerCommand(
   const completed = setup.sessions.completeRunnerCommand(
     RUNNER_ID,
     command.id,
-    { output: "null", state: "completed" },
+    {
+      output: "null",
+      state: "completed",
+    },
   );
   expect(completed).toBe(true);
 }
@@ -124,18 +128,10 @@ test("delivers and runs an idle parent after its generation advances", async () 
   );
   expect(childStatus(completedChild)).toBe(true);
 
-  const callbackCommand = await latestCommandFor(
-    setup,
-    SESSION_ID,
-    interveningCommand.id,
-  );
-  completeRunnerCommand(setup, callbackCommand);
-  const parent = await waitForSessionContent(
-    setup,
-    "The advanced parent received the child report.",
-  );
-  expect(JSON.stringify(parent)).toContain(
-    "The child completed after that advance.",
-  );
+  await waitForTerminalParentNote(setup.sessions, childId);
+  expect(setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID)).toMatchObject({
+    generation: 1,
+    status: "idle",
+  });
   closeSessionTestDatabase(setup.database);
 });
