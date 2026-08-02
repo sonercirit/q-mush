@@ -45,6 +45,8 @@ interface RunnerExecutableBuildOptions {
 
 export interface RunnerExecutableProvider {
   readonly version: string;
+  /** @internal Compiles an alternate entrypoint with the production runner settings. */
+  compile(target: RunnerExecutableTarget, entrypoint: string): Promise<Blob>;
   serve(request: Request): Promise<Response>;
   serveSupervisor(request: Request): Promise<Response>;
 }
@@ -154,6 +156,10 @@ class LazyRunnerExecutableProvider implements RunnerExecutableProvider {
     this.version = version;
     this.#executables = { build, cache: new Map() };
     this.#supervisors = { build: buildSupervisor, cache: new Map() };
+  }
+
+  compile(target: RunnerExecutableTarget, entrypoint: string): Promise<Blob> {
+    return compileStandaloneExecutable(target, this.version, entrypoint);
   }
 
   serve(request: Request): Promise<Response> {

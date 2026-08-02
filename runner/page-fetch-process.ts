@@ -186,7 +186,7 @@ function hostnameResolutionFailure(): Error {
   return new Error("Page URL hostname could not be resolved");
 }
 
-export function assertPublicPageAddress(address: string): void {
+function assertPublicPageAddress(address: string): void {
   if (!pageAddressIsPublic(address)) {
     throw unsafeDestination();
   }
