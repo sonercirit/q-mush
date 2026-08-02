@@ -87,8 +87,10 @@ test("maps every child-session stop choice explicitly", () => {
   expect(mounted.stop).not.toHaveBeenCalled();
 });
 
-test("traps dialog focus and lets Escape cancel safely", async () => {
+test("traps dialog focus, cancels on Escape, and restores trigger focus", async () => {
   const mounted = mountStopSession(1);
+  const trigger = findTestButton(mounted.container, "Stop session");
+  trigger?.focus();
   mounted.click("Stop session");
   await Promise.resolve();
 
@@ -109,6 +111,8 @@ test("traps dialog focus and lets Escape cancel safely", async () => {
   expect(document.activeElement).toBe(cancel);
 
   window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+  await Promise.resolve();
   expect(mounted.dialog()).toBeNull();
+  expect(document.activeElement).toBe(trigger);
   expect(mounted.stop).not.toHaveBeenCalled();
 });

@@ -286,13 +286,16 @@ export function executeSessionAgentTool(
         break;
       case "stop_session": {
         if (
-          !hasOnlySessionToolArguments(arguments_, ["sessionId", "cascade"]) ||
-          typeof arguments_["cascade"] !== "boolean"
+          !hasOnlySessionToolArguments(arguments_, ["sessionId", "cascade"])
         ) {
           throw new Error("stop_session received invalid arguments");
         }
+        const cascade = arguments_["cascade"];
+        if (cascade !== undefined && typeof cascade !== "boolean") {
+          throw new Error("stop_session received invalid arguments");
+        }
         output = Promise.resolve(
-          actions.stopSession(sessionId(arguments_), arguments_["cascade"]),
+          actions.stopSession(sessionId(arguments_), cascade ?? true),
         );
         break;
       }

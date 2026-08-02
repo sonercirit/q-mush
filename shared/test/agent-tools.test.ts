@@ -124,13 +124,15 @@ test("defines the session tools as one selectable group", () => {
     "continue_session",
     "stop_session",
   ]);
-  expect(
-    AGENT_TOOLS.find(
-      ({ function: definition }) => definition.name === "stop_session",
-    )?.function.parameters,
-  ).toMatchObject({
-    properties: { cascade: { type: "boolean" } },
-    required: ["sessionId", "cascade"],
+  const stopTool = AGENT_TOOLS.find(
+    ({ function: definition }) => definition.name === "stop_session",
+  )?.function;
+  expect(stopTool).toMatchObject({
+    description: expect.stringContaining("By default"),
+    parameters: {
+      properties: { cascade: { type: "boolean" } },
+      required: ["sessionId"],
+    },
   });
   expect(
     AGENT_TOOLS.filter(({ function: definition }) =>
