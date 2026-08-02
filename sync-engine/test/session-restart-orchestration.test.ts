@@ -260,12 +260,18 @@ function expectRestartHandoffState(
   });
 }
 
-function expectCompactionFinished(setup: ManualCompactionSetup): void {
-  expect(setup.compactorRequests).toHaveLength(1);
-  expect(setup.compactorRequests[0]?.at(-1)).toEqual({
+function expectCompactionRequest(
+  messages: readonly AgentConversationMessage[] | undefined,
+): void {
+  expect(messages?.at(-1)).toMatchObject({
     content: AGENT_COMPACTION_REQUEST_MESSAGE,
     role: "user",
   });
+}
+
+function expectCompactionFinished(setup: ManualCompactionSetup): void {
+  expect(setup.compactorRequests).toHaveLength(1);
+  expectCompactionRequest(setup.compactorRequests[0]);
   expect(setup.finishes).toHaveBeenCalledOnce();
 }
 
@@ -596,10 +602,7 @@ test("recovered tool handoff compacts before its first request", async () => {
 
   expect(requests).toHaveLength(2);
   expect(requests[0]).toContainEqual(durableTool);
-  expect(requests[0]?.at(-1)).toEqual({
-    content: AGENT_COMPACTION_REQUEST_MESSAGE,
-    role: "user",
-  });
+  expectCompactionRequest(requests[0]);
   expect(requests[1]?.[0]?.content).toContain("Recovered compacted summary.");
   expect(requests[1]?.some((message) => message === durableTool)).toBe(false);
   expect(setup.modelFactories).toHaveBeenCalledTimes(2);

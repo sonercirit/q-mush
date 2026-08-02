@@ -2,6 +2,7 @@ import { createRoot } from "solid-js";
 import { expect, test } from "vitest";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { SessionController } from "../../solid/session-controller.ts";
+import { installFetch } from "./controller-test-helpers.ts";
 import { createResponseFetch } from "./session-dom-test-helpers.tsx";
 import {
   sessionDetailWithStatus,
@@ -17,12 +18,13 @@ function applyDelta(controller: SessionController, sessionId: string): void {
   });
 }
 
-function selectedController(
+async function selectedController(
   selected: AgentSessionDetail,
 ): Promise<SessionController> {
-  globalThis.fetch = createResponseFetch(selected);
+  installFetch(createResponseFetch(selected));
   const controller = createRoot(() => new SessionController());
-  return controller.select(selected.id).then(() => controller);
+  await controller.select(selected.id);
+  return controller;
 }
 
 test("anchors a streamed compaction response after its visible request", async () => {

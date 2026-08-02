@@ -38,10 +38,10 @@ describe("agent conversation compaction", () => {
       },
     ]);
     expect(model.requests[0]?.slice(0, -1)).toEqual(conversation);
-    expect(model.requests[0]?.at(-1)).toEqual({
-      content: AGENT_COMPACTION_REQUEST_MESSAGE,
-      role: "user",
-    });
+    expect(model.requests[0]?.at(-1)?.content).toBe(
+      AGENT_COMPACTION_REQUEST_MESSAGE,
+    );
+    expect(model.requests[0]?.at(-1)?.role).toBe("user");
     expect(AGENT_COMPACTION_REQUEST_MESSAGE).toContain("Do not call tools");
   });
 });

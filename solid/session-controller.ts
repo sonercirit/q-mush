@@ -146,21 +146,20 @@ export class SessionController {
       showNewestSessionHistory(this.#view, detail.hasOlderSegments);
     }
   }
+  #applyNewestSnapshot(apply: () => void): void {
+    if (this.#view.value.history.page === undefined) {
+      this.#applySnapshot(apply);
+    }
+  }
   applyCompactionRequest(
     event: Parameters<SessionRealtimeState["applyCompactionRequest"]>[0],
   ): void {
-    if (this.#view.value.history.page !== undefined) {
-      return;
-    }
-    this.#applySnapshot(() => {
+    this.#applyNewestSnapshot(() => {
       this.#realtime.applyCompactionRequest(event);
     });
   }
   applyDelta(event: Parameters<SessionRealtimeState["applyDelta"]>[0]): void {
-    if (this.#view.value.history.page !== undefined) {
-      return;
-    }
-    this.#applySnapshot(() => {
+    this.#applyNewestSnapshot(() => {
       this.#realtime.applyDelta(event);
     });
   }
