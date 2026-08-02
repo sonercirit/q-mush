@@ -87,6 +87,17 @@ export function sessionGenerationCondition(
   return storedSessionCondition({ ...filter, generation });
 }
 
+export function storedParentExecutionGeneration(
+  ...parameters: readonly [Pick<AppDatabase, "select">, SQL | undefined]
+): number | null | undefined {
+  const [database, condition] = parameters;
+  const selection = {
+    parentExecutionGeneration: agentSessions.parentExecutionGeneration,
+  };
+  const query = database.select(selection).from(agentSessions);
+  return query.where(condition).get()?.parentExecutionGeneration;
+}
+
 export function runningCondition(
   sessionId: string,
   userId?: string,

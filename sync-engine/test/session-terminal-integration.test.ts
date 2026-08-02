@@ -6,11 +6,13 @@ import type {
   AgentModelStep,
 } from "../../shared/agent-loop.ts";
 import { isRecord } from "../../shared/auth-model.ts";
+import { SESSIONS_PATH } from "../../shared/routes.ts";
 import {
   RunnerCommandBroker,
   type RunnerToolCommand,
 } from "../../shared/runner-command-broker.ts";
 import {
+  createAuthenticatedRequest,
   TEST_AUTHENTICATED_USER,
   TEST_USER_ID,
   TEST_WORKSPACE_ID,
@@ -60,7 +62,11 @@ class PrefillRejectingSleepWakeCallbackModel implements AgentModel {
     const initial = messages[0]?.content;
     if (initial === "Complete during the parent sleep") {
       await this.#childCompletion.promise;
-      return terminalAgentStep("Child callback result.");
+      return terminalAgentStep(
+        messages.at(-1)?.content === "Continue."
+          ? "Continued child result."
+          : "Child callback result.",
+      );
     }
     const parentRequest = parentSessionRequests(this.requests).length;
     if (parentRequest === 1) {
@@ -228,6 +234,47 @@ test("does not relaunch after consuming a sleep-wake child callback", async () =
   expect(callbackMessages).toHaveLength(1);
   expect(callbackMessages[0]?.content).toContain("Child callback result.");
   expect(callbackMessages[0]?.content).toContain('"role": "assistant"');
+
+  if (!isRecord(completedChild) || typeof completedChild["id"] !== "string") {
+    throw new Error("The completed child is unavailable");
+  }
+  const continued = await setup.sessions.continue(
+    createAuthenticatedRequest(
+      `${SESSIONS_PATH}/${completedChild["id"]}/continue`,
+      undefined,
+      "POST",
+    ),
+    completedChild["id"],
+  );
+  expect(continued.status).toBe(202);
+  const continuedChild = await waitForSessionValue(
+    readChild,
+    (value) =>
+      hasSessionStatus("idle")(value) &&
+      isRecord(value) &&
+      value["generation"] === 1,
+  );
+  expect(continuedChild).toMatchObject({
+    generation: 1,
+    parentExecutionGeneration: null,
+    parentSessionId: SESSION_ID,
+    status: "idle",
+  });
+  const continuedChildDetail = setup.sessions.detailForUser(
+    TEST_USER_ID,
+    completedChild["id"],
+  );
+  expect(
+    continuedChildDetail?.messages.filter(
+      ({ content }) => content === "Continued child result.",
+    ),
+  ).toHaveLength(1);
+  expect(parentSessionRequests(model.requests)).toHaveLength(3);
+  expect(
+    readParent()?.messages.filter(({ content }) =>
+      content.includes("Spawned session completed"),
+    ),
+  ).toHaveLength(1);
   expect(
     commands.filter(
       ({ sessionId, tool }) =>

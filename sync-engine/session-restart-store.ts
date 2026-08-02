@@ -20,6 +20,7 @@ import {
   activeSessionCondition,
   readActiveSessionTiming,
   sessionTimingUpdate,
+  storedParentExecutionGeneration,
   storedSessionCondition,
   updateStoredSessions,
 } from "./session-store-persistence.ts";
@@ -600,13 +601,11 @@ export class RestartHandoffStore {
                 status:
                   settlement.status === "idle"
                     ? normalSessionCompletionStatus({
-                        parentSessionId: transaction
-                          .select({
-                            parentSessionId: agentSessions.parentSessionId,
-                          })
-                          .from(agentSessions)
-                          .where(condition)
-                          .get()?.parentSessionId,
+                        parentExecutionGeneration:
+                          storedParentExecutionGeneration(
+                            transaction,
+                            condition,
+                          ),
                       })
                     : settlement.status,
                 ...updatedAuditFields(SYSTEM_ID, now),
