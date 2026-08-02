@@ -32,6 +32,7 @@ import {
   nextCommandId,
   recreateRestartSetup,
   RESTART_SESSION_COUNT,
+  restartSessionIds,
   waitForRestartCommands,
 } from "./session-restart-step-resume-helpers.ts";
 import { completeTestRunnerCommands } from "./session-runner-command-helpers.ts";
@@ -192,12 +193,6 @@ test("a spawned session resumes its interrupted step after server recreation", a
 const AGENT_FILE_COMMAND = "read_agent_file";
 const CORRUPTED_HANDOFF_ERROR = "Stored restart handoff is invalid";
 
-function sessionIds(
-  setup: ReturnType<typeof connectedSessionSetup>,
-): readonly string[] {
-  return setup.sessions.listForUser(TEST_USER_ID).map(({ id }) => id);
-}
-
 async function startParkedSessions(model: AgentModel) {
   const initial = connectedSessionSetup(model, "api_key", undefined, {
     commandId: nextCommandId("restart-multi-command"),
@@ -226,7 +221,7 @@ async function drainParkedSessions(model: AgentModel): Promise<{
   readonly initial: ReturnType<typeof connectedSessionSetup>;
 }> {
   const initial = await startParkedSessions(model);
-  const ids = sessionIds(initial);
+  const ids = restartSessionIds(initial);
   await completeMultiSessionCommands(initial, AGENT_FILE_COMMAND, () => "null");
   const runningCommands = await waitForRestartCommands(initial, "bash");
   const drain = initial.sessions.drain();

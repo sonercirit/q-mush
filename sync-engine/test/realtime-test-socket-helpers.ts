@@ -52,6 +52,20 @@ interface RunnerRealtimeWithTokenSetup {
   readonly upgrade: () => Extract<QmushWebSocketData, { kind: "runner" }>;
 }
 
+export function upgradeRunnerWithToken(
+  realtime: ReturnType<typeof createRealtimeIntegration>,
+  token: string,
+): Extract<QmushWebSocketData, { kind: "runner" }> {
+  const request = createRunnerRequest(RUNNER_REALTIME_PATH, token);
+  request.headers.set("upgrade", "websocket");
+  const server = new RealtimeUpgradeServer();
+  expect(realtime.upgrade(request, server)).toBeUndefined();
+  if (server.data?.kind !== "runner") {
+    throw new Error("The runner token did not upgrade a runner socket");
+  }
+  return server.data;
+}
+
 export function runnerRealtimeWithToken(
   runners: RunnerIntegration,
   token: string,
@@ -63,16 +77,7 @@ export function runnerRealtimeWithToken(
   });
   return {
     realtime,
-    upgrade: () => {
-      const request = createRunnerRequest(RUNNER_REALTIME_PATH, token);
-      request.headers.set("upgrade", "websocket");
-      const server = new RealtimeUpgradeServer();
-      expect(realtime.upgrade(request, server)).toBeUndefined();
-      if (server.data?.kind !== "runner") {
-        throw new Error("The runner token did not upgrade a runner socket");
-      }
-      return server.data;
-    },
+    upgrade: () => upgradeRunnerWithToken(realtime, token),
   };
 }
 

@@ -3,6 +3,7 @@ import type {
   AgentModel,
   AgentModelStep,
 } from "../../shared/agent-loop.ts";
+import { TEST_USER_ID } from "./authenticated-integration-test-helpers.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
 import { toolCall } from "./session-agent-tool-setup.ts";
 import { connectedSessionSetup } from "./session-integration-fixtures.ts";
@@ -29,6 +30,10 @@ export class MultiSessionRestartModel implements AgentModel {
           }),
     );
   }
+}
+
+export function restartSessionIds(setup: RestartStepSetup): readonly string[] {
+  return setup.sessions.listForUser(TEST_USER_ID).map(({ id }) => id);
 }
 
 export function nextCommandId(prefix: string): () => string {

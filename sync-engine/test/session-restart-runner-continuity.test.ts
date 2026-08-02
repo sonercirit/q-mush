@@ -1,32 +1,13 @@
 import { expect, test } from "vitest";
-import { RUNNER_REALTIME_PATH } from "../../shared/routes.ts";
-import {
-  encodeRunnerActivationReceipt,
-  runnerConnectMessage,
-} from "../../shared/runner-realtime-protocol.ts";
 import {
   TEST_AUTHENTICATED_USER,
   TEST_USER_ID,
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
-import { realtimeSocketMessage } from "./realtime-handler-fixtures.ts";
-import {
-  configuredRealtimeTestIntegration,
-  RealtimeUpgradeServer,
-} from "./realtime-test-helpers.ts";
-import {
-  acceptRunnerRegistration,
-  acknowledgeActiveRunnerRegistration,
-  acknowledgeFinalizedRunnerRegistration,
-  acknowledgeOperationalRunnerRegistration,
-  realtimeTestSocket,
-  receiveRunnerRegistration,
-} from "./realtime-test-socket-helpers.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
   connectedSessionSetup,
   RUNNER_ID,
-  RUNNER_TOKEN,
   SESSION_ID,
 } from "./session-integration-fixtures.ts";
 import {
@@ -36,13 +17,10 @@ import {
   waitForSessionStatus,
   waitForSessionValue,
 } from "./session-integration-helpers.ts";
-
-const RUNNER_METADATA = {
-  architecture: "x64",
-  machineFingerprint: "session-test-machine",
-  name: "workstation",
-  platform: "linux",
-} as const;
+import {
+  durableSessionRunnerReceipt,
+  reconnectDurableSessionRunner,
+} from "./session-restart-runner-continuity-helpers.ts";
 
 test("a queued continuation launches when its existing runner reconnects after server recreation", async () => {
   const model = new ScriptedAgentModel([
@@ -62,14 +40,7 @@ test("a queued continuation launches when its existing runner reconnects after s
   );
   expect(queued.status).toBe("queued");
 
-  const retained = initial.runners.preflightRegistration(
-    RUNNER_TOKEN,
-    RUNNER_METADATA,
-  );
-  const prepared = retained?.prepare();
-  if (prepared?.status !== "registered") {
-    throw new Error("The connected runner receipt was unavailable");
-  }
+  const activationReceipt = durableSessionRunnerReceipt(initial);
   initial.runners.disconnected({
     id: RUNNER_ID,
     userId: TEST_USER_ID,
@@ -81,47 +52,7 @@ test("a queued continuation launches when its existing runner reconnects after s
   expect(await sessionDetail(recreated.sessions)).toMatchObject({
     status: "queued",
   });
-  const realtime = configuredRealtimeTestIntegration({
-    runners: recreated.runners,
-    sessions: recreated.sessions,
-  });
-  const request = new Request(`http://localhost${RUNNER_REALTIME_PATH}`, {
-    headers: {
-      authorization: `Bearer ${RUNNER_TOKEN}`,
-      upgrade: "websocket",
-    },
-  });
-  const server = new RealtimeUpgradeServer();
-  const upgrade = realtime.upgrade(request, server);
-  expect(upgrade).toBeUndefined();
-  const socket = realtimeTestSocket(server.data);
-
-  realtimeSocketMessage(
-    realtime.websocket,
-    socket,
-    runnerConnectMessage(
-      {
-        architecture: RUNNER_METADATA.architecture,
-        machineId: RUNNER_METADATA.machineFingerprint,
-        name: RUNNER_METADATA.name,
-        platform: RUNNER_METADATA.platform,
-      },
-      {
-        activationReceipt: encodeRunnerActivationReceipt({
-          value: prepared.activationReceipt,
-        }),
-      },
-    ),
-  );
-  acceptRunnerRegistration(realtime.websocket, socket);
-  receiveRunnerRegistration(realtime.websocket, socket);
-  acknowledgeActiveRunnerRegistration(realtime.websocket, socket);
-  acknowledgeFinalizedRunnerRegistration(realtime.websocket, socket);
-  acknowledgeOperationalRunnerRegistration(realtime.websocket, socket);
-  expect(socket.data).toMatchObject({
-    runner: { id: RUNNER_ID },
-    usable: true,
-  });
+  reconnectDurableSessionRunner(recreated, activationReceipt);
   const afterReconnect = await sessionDetail(recreated.sessions);
   expect(afterReconnect).toMatchObject({ status: "queued" });
 
