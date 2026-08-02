@@ -15,7 +15,7 @@ import {
   storedUserMessageValues,
 } from "./session-store-values.ts";
 
-type TerminalParentStatus = "failed" | "idle" | "stopped";
+type TerminalParentStatus = "completed" | "failed" | "idle" | "stopped";
 
 const TERMINAL_PARENT_CALLBACK_NOTE =
   "Completion callback was not delivered because the parent session was already terminal";
@@ -27,10 +27,16 @@ function terminalParentCallbackNote(status: TerminalParentStatus): string {
 function parentIsTerminal(
   status: (typeof REPORTABLE_PARENT_STATUSES)[number],
 ): status is TerminalParentStatus {
-  return status === "failed" || status === "idle" || status === "stopped";
+  return (
+    status === "completed" ||
+    status === "failed" ||
+    status === "idle" ||
+    status === "stopped"
+  );
 }
 
 const REPORTABLE_PARENT_STATUSES = [
+  "completed",
   "failed",
   "idle",
   "paused",
@@ -130,6 +136,8 @@ export interface PendingSpawnedSession {
   readonly userId: string;
 }
 
+const REPORTABLE_CHILD_STATUSES = ["completed", "failed", "stopped"] as const;
+
 export function pendingSpawnedSessions(
   database: AppDatabase,
   read: (userId: string, sessionId: string) => AgentSessionDetail | undefined,
@@ -140,7 +148,7 @@ export function pendingSpawnedSessions(
     .where(
       and(
         storedSessionCondition({
-          status: ["idle", "stopped", "failed"],
+          status: REPORTABLE_CHILD_STATUSES,
         }),
         isNotNull(agentSessions.parentSessionId),
         isNotNull(agentSessions.parentExecutionGeneration),
@@ -223,6 +231,7 @@ export function appendSpawnedSessionReport(options: {
       storedSessionCondition({
         generation: options.childGeneration,
         id: options.childId,
+        status: REPORTABLE_CHILD_STATUSES,
         userId: options.userId,
       }),
       eq(agentSessions.parentSessionId, options.parentId),
@@ -248,6 +257,7 @@ export function appendSpawnedSessionReport(options: {
           return undefined;
         }
         break;
+      case "completed":
       case "failed":
       case "idle":
       case "stopped":

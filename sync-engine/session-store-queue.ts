@@ -93,7 +93,7 @@ export function queueStoredSession(options: {
     ) {
       return "busy" as const;
     }
-    if (!["idle", "failed", "stopped"].includes(stored.status)) {
+    if (!["completed", "idle", "failed", "stopped"].includes(stored.status)) {
       return "busy" as const;
     }
     if (stored.runnerRequired) {

@@ -141,8 +141,8 @@ export function spawnedSessionReport(options: {
     return undefined;
   }
   if (
+    completed.status !== "completed" &&
     completed.status !== "failed" &&
-    completed.status !== "idle" &&
     completed.status !== "stopped"
   ) {
     return undefined;
@@ -169,7 +169,7 @@ export function spawnedSessionReport(options: {
     : completed.status === "stopped"
       ? completed.messages.findLast(({ role }) => role !== "thinking")
       : terminalAssistant;
-  const status = completed.status === "idle" ? "completed" : completed.status;
+  const status = completed.status;
   const summary = sessionToolOutput({
     lastMessage:
       lastMessage === undefined

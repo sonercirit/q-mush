@@ -3,12 +3,13 @@ import { updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID } from "../shared/ids.ts";
-import type {
-  AgentSessionDetail,
-  AgentSessionStatus,
-  RestartHandoff,
-  RestartHandoffOperation,
-  RestartHandoffRequester,
+import {
+  normalSessionCompletionStatus,
+  type AgentSessionDetail,
+  type AgentSessionStatus,
+  type RestartHandoff,
+  type RestartHandoffOperation,
+  type RestartHandoffRequester,
 } from "../shared/session-model.ts";
 import { readNonNegativeSafeInteger } from "../shared/validation.ts";
 import type { SessionExecutionAuthority } from "./session-execution-authority.ts";
@@ -58,7 +59,7 @@ export interface RestartHandoffIdentity extends SessionExecutionAuthority {
 }
 
 export type RestartHandoffSettlement =
-  | { readonly status: "idle" }
+  | { readonly status: "completed" | "idle" }
   | { readonly error: string; readonly status: "failed" };
 
 type RestartHandoffStoreOptions = SessionStoreWriteResources & {
@@ -596,7 +597,18 @@ export class RestartHandoffStore {
               values: {
                 ...sessionTimingUpdate(timing, now),
                 restartHandoff: null,
-                status: settlement.status,
+                status:
+                  settlement.status === "idle"
+                    ? normalSessionCompletionStatus({
+                        parentSessionId: transaction
+                          .select({
+                            parentSessionId: agentSessions.parentSessionId,
+                          })
+                          .from(agentSessions)
+                          .where(condition)
+                          .get()?.parentSessionId,
+                      })
+                    : settlement.status,
                 ...updatedAuditFields(SYSTEM_ID, now),
               },
             })

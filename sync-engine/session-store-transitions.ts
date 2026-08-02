@@ -171,7 +171,7 @@ export function stopStoredSession(options: {
       actorId: options.userId,
       clearRestartHandoff: true,
       ...options,
-      from: ["queued", "running", "paused", "idle", "failed"],
+      from: ["queued", "running", "paused", "idle", "completed", "failed"],
       status: "stopped",
     })
   );

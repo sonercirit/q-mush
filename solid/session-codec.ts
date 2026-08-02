@@ -179,6 +179,7 @@ export function readOpenRouterProviderCatalog(
 
 function readStatus(value: unknown): AgentSessionStatus | undefined {
   switch (value) {
+    case "completed":
     case "failed":
     case "idle":
     case "paused":

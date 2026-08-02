@@ -31,6 +31,7 @@ import {
   expectDrainedTerminalSession,
   expectSingleModelRequest,
   expectSingleTranscriptOccurrence,
+  hasSessionStatus,
   reconnectRunnerAndExpectNoReplay,
   startSessionAndCompleteAgentFile,
   waitForSessionValue,
@@ -192,6 +193,18 @@ test("does not relaunch after consuming a sleep-wake child callback", async () =
   expect(isRecord(sleeping)).toBe(true);
   model.finishChild();
 
+  const readChild = () => {
+    const children = setup.sessions.listForUser(TEST_USER_ID);
+    return children.find(
+      ({ title }) => title === "Complete during the parent sleep",
+    );
+  };
+  const completedChild = await waitForSessionValue(
+    readChild,
+    hasSessionStatus("completed"),
+  );
+  expect(completedChild).toMatchObject({ status: "completed" });
+
   const parentIsTerminal = (value: unknown) => {
     if (!isRecord(value)) return false;
     if (value["status"] === "failed") return true;
@@ -208,11 +221,13 @@ test("does not relaunch after consuming a sleep-wake child callback", async () =
   expect(terminal).toMatchObject({ status: "idle" });
   expect(settled).toMatchObject({ pendingInputs: [], status: "idle" });
   expect(parentRequests).toHaveLength(3);
-  expect(
+  const callbackMessages =
     settled?.messages.filter(({ content }) =>
       content.includes("Spawned session completed"),
-    ),
-  ).toHaveLength(1);
+    ) ?? [];
+  expect(callbackMessages).toHaveLength(1);
+  expect(callbackMessages[0]?.content).toContain("Child callback result.");
+  expect(callbackMessages[0]?.content).toContain('"role": "assistant"');
   expect(
     commands.filter(
       ({ sessionId, tool }) =>

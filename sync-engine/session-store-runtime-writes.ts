@@ -5,10 +5,11 @@ import { updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
-import type {
-  AgentSessionCostBasis,
-  AgentSessionUsageUpdate,
-  RestartHandoff,
+import {
+  normalSessionCompletionStatus,
+  type AgentSessionCostBasis,
+  type AgentSessionUsageUpdate,
+  type RestartHandoff,
 } from "../shared/session-model.ts";
 import type { CompactionUsage } from "./session-compaction-usage.ts";
 import { compactStoredConversation } from "./session-compaction.ts";
@@ -199,6 +200,19 @@ function writeStoredMessages(
   options.resources.database.transaction(persist);
 }
 
+function terminalSessionStatus(
+  options: RuntimeWriteTarget,
+): "completed" | "idle" {
+  const detail = options.resources.database
+    .select({ parentSessionId: agentSessions.parentSessionId })
+    .from(agentSessions)
+    .where(runningSessionCondition(options))
+    .get();
+  return normalSessionCompletionStatus({
+    parentSessionId: detail?.parentSessionId,
+  });
+}
+
 export function commitRuntimeTerminal(
   options: RuntimeWriteTarget & {
     readonly messages: readonly AgentRecordedMessage[];
@@ -227,7 +241,7 @@ export function commitRuntimeTerminal(
       settleTerminalRuntime(
         transaction,
         condition,
-        "idle",
+        terminalSessionStatus(options),
         now,
         options.sessionId,
       );

@@ -12,6 +12,7 @@ import {
 import { AGENT_ATTACHMENT_MODALITIES } from "../agent-attachments.ts";
 import { AGENT_REASONING_EFFORTS } from "../agent-configuration.ts";
 import { AGENT_SESSION_TOOL_NAMES } from "../agent-tools.ts";
+import { AGENT_SESSION_STATUSES } from "../session-model.ts";
 import { auditColumns } from "./audit-columns.ts";
 import {
   connectionColumns,
@@ -404,9 +405,7 @@ export const agentSessions = sqliteTable(
     tools: text("tools")
       .notNull()
       .default(JSON.stringify(AGENT_SESSION_TOOL_NAMES)),
-    status: text("status", {
-      enum: ["queued", "running", "paused", "idle", "stopped", "failed"],
-    }).notNull(),
+    status: text("status", { enum: AGENT_SESSION_STATUSES }).notNull(),
   },
   (table) => [
     check(

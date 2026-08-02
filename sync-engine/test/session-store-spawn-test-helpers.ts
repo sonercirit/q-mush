@@ -1,4 +1,7 @@
+import { eq } from "drizzle-orm";
 import { expect } from "vitest";
+import type { AppDatabase } from "../../shared/database.ts";
+import { agentSessions } from "../../shared/database/schema.ts";
 import type { SessionStore } from "../../sync-engine/session-store.ts";
 import {
   TEST_NOW,
@@ -10,6 +13,7 @@ import {
 } from "./session-store-test-fixtures.ts";
 
 function completedChildWithParent(
+  database: AppDatabase,
   store: SessionStore,
   parent: { readonly generation: number; readonly id: string },
 ) {
@@ -19,6 +23,11 @@ function completedChildWithParent(
   });
   expect(store.transitionCurrent(child.id, "running", TEST_NOW + 3)).toBe(true);
   expect(store.transitionCurrent(child.id, "idle", TEST_NOW + 4)).toBe(true);
+  database
+    .update(agentSessions)
+    .set({ status: "completed" })
+    .where(eq(agentSessions.id, child.id))
+    .run();
   return child;
 }
 
@@ -30,7 +39,7 @@ export function spawnedChildSetup() {
   expect(
     setup.store.transitionCurrent(parent.id, "running", TEST_NOW + 1),
   ).toBe(true);
-  const child = completedChildWithParent(setup.store, parent);
+  const child = completedChildWithParent(setup.database, setup.store, parent);
   return {
     ...setup,
     childGeneration: child.generation,

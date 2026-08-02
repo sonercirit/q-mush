@@ -193,7 +193,7 @@ async function completePausedChild(
   completeChildAgentFile(setup);
   await waitForSessionValue(
     () => setup.sessions.detailForUser(TEST_USER_ID, childId),
-    hasSessionStatus("idle"),
+    hasSessionStatus("completed"),
   );
 }
 
@@ -413,7 +413,7 @@ describe("session agent tools", () => {
           "018bcfe5-6800-7000-8000-000000000021",
           childId,
         ),
-      hasSessionStatus("idle"),
+      hasSessionStatus("completed"),
     );
     await waitForTerminalParentNote(spawnSetup.sessions, childId);
     const child = spawnSetup.sessions.detailForUser(TEST_USER_ID, childId);

@@ -185,11 +185,9 @@ type StoredSessionUpdate = Omit<
   readonly executionGeneration?: number | SQL;
 };
 
-export function terminalSessionValues<Status extends "failed" | "idle">(
-  session: StoredSessionTiming,
-  status: Status,
-  now: number,
-) {
+export function terminalSessionValues<
+  Status extends "completed" | "failed" | "idle",
+>(session: StoredSessionTiming, status: Status, now: number) {
   return {
     ...sessionTimingUpdate(session, now),
     restartHandoff: null,

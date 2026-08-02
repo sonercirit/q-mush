@@ -121,7 +121,7 @@ test("delivers and runs an idle parent after its generation advances", async () 
     throw new Error("The child runner command is unavailable");
   }
   completeRunnerCommand(setup, childCommand);
-  const childStatus = hasSessionStatus("idle");
+  const childStatus = hasSessionStatus("completed");
   const completedChild = await waitForSessionValue(
     () => setup.sessions.detailForUser(TEST_USER_ID, childId),
     childStatus,

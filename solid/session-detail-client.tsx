@@ -37,6 +37,10 @@ const STATUS_PRESENTATION: Readonly<
     { readonly classes: string; readonly label: string }
   >
 > = {
+  completed: {
+    classes: "border-cyan-300/20 bg-cyan-300/10 text-cyan-200",
+    label: "Completed",
+  },
   failed: {
     classes: "border-rose-300/20 bg-rose-300/10 text-rose-200",
     label: "Failed",
