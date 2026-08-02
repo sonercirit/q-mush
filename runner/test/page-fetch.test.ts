@@ -228,7 +228,7 @@ describe("page_fetch", () => {
     }
   });
 
-  test("does not treat the proxy's local peer as the remote page address", async () => {
+  test("accepts a rendered response after document URL validation", async () => {
     const renderer: PageRenderer = documentedRenderer((request) => {
       request.policy.response(RESPONSE);
       return Promise.resolve({
@@ -287,7 +287,7 @@ describe("page_fetch", () => {
     expect(unsafe.message).toContain("unsafe network destination");
   });
 
-  test("guards URL, DNS, redirect, connected-address, and browser process capabilities", async () => {
+  test("guards URL, DNS, redirect, and browser process capabilities", async () => {
     let renders = 0;
     const unusedRenderer: PageRenderer = () => {
       renders += 1;
