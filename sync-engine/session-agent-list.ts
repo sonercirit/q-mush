@@ -4,7 +4,7 @@ import { utf8ByteLength, utf8Prefix } from "../shared/utf8.ts";
 import { boundedPaginatedOutput } from "./session-agent-pagination.ts";
 
 export const DEFAULT_LIST_SESSIONS_PAGE_SIZE = 20;
-export const MAXIMUM_LIST_SESSIONS_PAGE_SIZE = 100;
+export const MAXIMUM_LIST_SESSIONS_PAGE_SIZE = 26;
 export const MAXIMUM_LIST_SESSIONS_SEARCH_LENGTH = 100;
 const MAXIMUM_LIST_SESSIONS_OUTPUT_BYTES = 48_000;
 const MAXIMUM_LIST_SESSION_TEXT_BYTES = 80;

@@ -100,8 +100,8 @@ test("defines list-session pagination and search parameters", () => {
       parameters: {
         additionalProperties: false,
         properties: {
-          page: { minimum: 1, type: "number" },
-          pageSize: { maximum: 100, minimum: 1, type: "number" },
+          page: { minimum: 1, type: "integer" },
+          pageSize: { maximum: 26, minimum: 1, type: "integer" },
           search: { maxLength: 100, type: "string" },
         },
         required: [],
