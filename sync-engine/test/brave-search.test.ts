@@ -22,69 +22,81 @@ const ENVIRONMENT = {
   BRAVE_SEARCH_CREDENTIAL_KEY: Buffer.alloc(32, 11).toString("base64url"),
 };
 
-function createSetup() {
+function successfulSearchResponse(): Response {
+  return Response.json({
+    web: {
+      results: [
+        {
+          title: "Bun",
+          url: "https://bun.sh/",
+          age: "2 days ago",
+          description: "A fast all-in-one JavaScript runtime.",
+        },
+      ],
+    },
+  });
+}
+
+function defaultSearchResponse(apiKey: string | null): Response {
+  if (apiKey === FIRST_KEY) {
+    return Response.json({ message: "rate limited" }, { status: 429 });
+  }
+  return apiKey === SECOND_KEY
+    ? successfulSearchResponse()
+    : Response.json({ message: "invalid key" }, { status: 401 });
+}
+
+function createSetup(
+  options: {
+    readonly now?: () => number;
+    readonly response?: (apiKey: string | null) => Response;
+  } = {},
+) {
   const { auth, database } = createAuthenticatedTestContext();
   const requests: Request[] = [];
   const fetch: NonNullable<OAuthDependencies["fetch"]> = (input, init) => {
     const request = new Request(input, init);
     requests.push(request.clone());
-    const apiKey = request.headers.get("x-subscription-token");
-
-    if (apiKey === FIRST_KEY) {
-      return Promise.resolve(
-        Response.json({ message: "rate limited" }, { status: 429 }),
-      );
-    }
-
-    if (apiKey === SECOND_KEY) {
-      return Promise.resolve(
-        Response.json({
-          web: {
-            results: [
-              {
-                title: "Bun",
-                url: "https://bun.sh/",
-                age: "2 days ago",
-                description: "A fast all-in-one JavaScript runtime.",
-              },
-            ],
-          },
-        }),
-      );
-    }
-
     return Promise.resolve(
-      Response.json({ message: "invalid key" }, { status: 401 }),
+      (options.response ?? defaultSearchResponse)(
+        request.headers.get("x-subscription-token"),
+      ),
     );
   };
   const ids = [FIRST_KEY_ID, SECOND_KEY_ID];
   const skill = createBraveSearchSkillFromEnvironment(ENVIRONMENT, auth, {
     database,
     fetch,
-    now: () => TEST_NOW,
+    now: options.now ?? (() => TEST_NOW),
     randomId: () => takeValue(ids, "The test ran out of Brave key IDs"),
   });
   return { database, requests, skill };
+}
+
+async function saveTestKeys(
+  setup: ReturnType<typeof createSetup>,
+): Promise<void> {
+  for (const key of [
+    { apiKey: FIRST_KEY, label: "Primary" },
+    { apiKey: SECOND_KEY, label: "Backup" },
+  ]) {
+    const request = createAuthenticatedRequest(
+      BRAVE_SEARCH_KEYS_PATH,
+      key,
+      "POST",
+    );
+    const response = await setup.skill.keys(request);
+    expect(response.status).toBe(201);
+    const body = await response.text();
+    expect(body.includes(key.apiKey)).toBe(false);
+  }
 }
 
 describe("Brave Search skill", () => {
   test("stores multiple keys and uses the next key when one is rate limited", async () => {
     const setup = createSetup();
 
-    for (const key of [
-      { apiKey: FIRST_KEY, label: "Primary" },
-      { apiKey: SECOND_KEY, label: "Backup" },
-    ]) {
-      const request = createAuthenticatedRequest(
-        BRAVE_SEARCH_KEYS_PATH,
-        key,
-        "POST",
-      );
-      const response = await setup.skill.keys(request);
-      expect(response.status).toBe(201);
-      const body = await response.text();
-      expect(body.includes(key.apiKey)).toBe(false);
-    }
+    await saveTestKeys(setup);
 
     const listResponse = await setup.skill.keys(
       createAuthenticatedRequest(BRAVE_SEARCH_KEYS_PATH),
@@ -161,6 +173,51 @@ describe("Brave Search skill", () => {
     expect(removedCredentials).toMatchObject([
       { encryptedCredential: "", isDeleted: true },
     ]);
+    setup.database.$client.close();
+  });
+
+  test("alternates keys across calls and temporarily skips rejected keys", async () => {
+    let now = TEST_NOW;
+    const setup = createSetup({ now: () => now });
+    await saveTestKeys(setup);
+
+    await setup.skill.execute(TEST_USER_ID, TEST_WORKSPACE_ID, {
+      query: "first",
+    });
+    await setup.skill.execute(TEST_USER_ID, TEST_WORKSPACE_ID, {
+      query: "second",
+    });
+    expect(
+      setup.requests.map((request) =>
+        request.headers.get("x-subscription-token"),
+      ),
+    ).toEqual([FIRST_KEY, SECOND_KEY, SECOND_KEY]);
+
+    now += 30_001;
+    await setup.skill.execute(TEST_USER_ID, TEST_WORKSPACE_ID, {
+      query: "after cooldown",
+    });
+    expect(
+      setup.requests.map((request) =>
+        request.headers.get("x-subscription-token"),
+      ),
+    ).toEqual([FIRST_KEY, SECOND_KEY, SECOND_KEY, FIRST_KEY, SECOND_KEY]);
+    setup.database.$client.close();
+  });
+
+  test("round robins healthy keys between calls", async () => {
+    const setup = createSetup({ response: successfulSearchResponse });
+    await saveTestKeys(setup);
+
+    for (const query of ["first", "second", "third", "fourth"]) {
+      await setup.skill.execute(TEST_USER_ID, TEST_WORKSPACE_ID, { query });
+    }
+
+    expect(
+      setup.requests.map((request) =>
+        request.headers.get("x-subscription-token"),
+      ),
+    ).toEqual([FIRST_KEY, SECOND_KEY, FIRST_KEY, SECOND_KEY]);
     setup.database.$client.close();
   });
 

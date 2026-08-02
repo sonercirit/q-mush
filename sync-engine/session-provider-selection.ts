@@ -10,7 +10,10 @@ import type {
 } from "../shared/provider-credential-store.ts";
 import type { AgentSessionSummary } from "../shared/session-model.ts";
 import { RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
-import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
+import {
+  isCredentialRejectionError,
+  type AgentModelDiscoverer,
+} from "./agent-model-discovery.ts";
 import { createApiError, createJsonResponse } from "./http.ts";
 import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
 import type {
@@ -228,7 +231,8 @@ export async function sessionMetadata(options: {
       maxContextTokens: model?.contextWindow ?? null,
       providerPricing: model?.pricing ?? null,
     };
-  } catch {
+  } catch (error) {
+    if (isCredentialRejectionError(error)) throw error;
     return { maxContextTokens: null, providerPricing: null };
   }
 }

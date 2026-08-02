@@ -191,7 +191,8 @@ const SESSION_AGENT_TOOLS = [
         ...BOOLEAN_PARAMETER,
       },
       credentialId: {
-        description: "Model credential ID",
+        description:
+          "Model credential ID, or balanced:<provider> to balance this spawn across scoped provider credentials and persist the resolved ID",
         ...STRING_PARAMETER,
       },
       executionEnvironment: {

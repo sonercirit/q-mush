@@ -371,6 +371,35 @@ export class ProviderCredentialStore {
     );
   }
 
+  static listActiveModelCredentials(
+    database: AppDatabase,
+    userId: string,
+    provider: ProviderId,
+    workspaceId?: string,
+  ): readonly ProviderCredentialSummary[] {
+    const accessibleIds =
+      workspaceId === undefined
+        ? undefined
+        : accessibleCredentialIds(database, provider, userId, workspaceId);
+    const stored = database
+      .select(credentialSummarySelection())
+      .from(providerCredentials)
+      .where(
+        and(
+          activeCredentialCondition(provider, userId),
+          accessibleIds === undefined
+            ? undefined
+            : inArray(providerCredentials.id, accessibleIds),
+        ),
+      )
+      .orderBy(...credentialOrder())
+      .all();
+    return stored.map(({ baseUrl, ...credential }) => ({
+      ...credential,
+      ...(baseUrl === null ? {} : { baseUrl }),
+    }));
+  }
+
   static hasActiveModelCredential(
     database: AppDatabase,
     userId: string,

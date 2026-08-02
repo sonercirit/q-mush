@@ -16,6 +16,7 @@ import { createAttachmentFallbackIntegration } from "./attachment-fallback-integ
 import type { GoogleAuth } from "./auth.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
 import { createApiError, parseJsonRequest } from "./http.ts";
+import { ModelCredentialPool } from "./model-credential-pool.ts";
 import {
   discoverOpenRouterProviders,
   type OpenRouterProviderDiscoverer,
@@ -91,6 +92,7 @@ class DrizzleSessionIntegration
   readonly #braveSearch: Pick<BraveSearchSkill, "execute">;
   readonly #discoverModels: AgentModelDiscoverer;
   readonly #discoverOpenRouterProviders: OpenRouterProviderDiscoverer;
+  readonly #modelCredentialPool: ModelCredentialPool;
   readonly #modelFactory: AgentModelFactory;
   readonly #now: () => number;
   readonly #onChange = new Set<(userId: string, sessionId: string) => void>();
@@ -142,6 +144,10 @@ class DrizzleSessionIntegration
       ((options) => new ChatCompletionsAgentModel(options));
     this.#now = dependencies.now ?? Date.now;
     this.#providers = providers;
+    this.#modelCredentialPool = new ModelCredentialPool({
+      database,
+      readCredential: this.#readCredential,
+    });
     this.#workspaces = dependencies.workspaces ?? permissiveWorkspaceReader;
     this.#requests = new SessionRequestHelpers(auth, this.#broker, runners);
     this.#runners = runners;
@@ -228,6 +234,7 @@ class DrizzleSessionIntegration
       database,
       discoverModels: this.#discoverModels,
       discoverOpenRouterProviders: this.#discoverOpenRouterProviders,
+      modelCredentialPool: this.#modelCredentialPool,
       providerUpdates: this.#sessionMutationControl(),
       providers: this.#providers,
       questions: this.#questionActions,
@@ -420,6 +427,7 @@ class DrizzleSessionIntegration
           },
           request.workspaceId,
         ),
+      modelCredentialPool: this.#modelCredentialPool,
       notify: this.#notify,
       now: this.#now,
       readCredential: this.#readCredential,

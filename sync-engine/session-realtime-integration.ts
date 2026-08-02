@@ -1,5 +1,6 @@
 import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
+import { isBalancedCredentialId } from "../shared/provider-credential-pool.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
 import type { SessionForkInput } from "../shared/session-fork.ts";
 import type {
@@ -14,6 +15,7 @@ import type {
 } from "../shared/session-tool-update.ts";
 import { RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
 import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
+import type { ModelCredentialPool } from "./model-credential-pool.ts";
 import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
 import type { SessionAgentActions } from "./session-agent-actions.ts";
 import type {
@@ -83,6 +85,7 @@ export interface RealtimeSessionCommandsOptions {
   readonly discoverModels: AgentModelDiscoverer;
   readonly discoverOpenRouterProviders: OpenRouterProviderDiscoverer;
   readonly lifecycle: SessionLaunchBoundary;
+  readonly modelCredentialPool: ModelCredentialPool;
   readonly providers: SessionCredentialReaders;
   readonly providerUpdates: Omit<
     SessionProviderUpdateDependencies,
@@ -261,24 +264,57 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
     ) {
       throw new RealtimeCommandError("runner_unavailable");
     }
-    const credential = await this.#credential(user.id, scopedInput);
-    const created: { detail?: AgentSessionDetail } = {};
-    const response = await createValidatedSession(
-      {
-        ...this.#dependencies,
-        onCreated: (detail) => {
-          created.detail = detail;
-        },
-      },
-      user,
-      scopedInput,
-      credential,
+    const balanced = isBalancedCredentialId(
+      scopedInput.provider,
+      scopedInput.credentialId,
     );
-    await responseValue(response);
-    if (created.detail === undefined) {
-      throw new RealtimeCommandError("command_failed");
+    const credentials = balanced
+      ? await this.#dependencies.modelCredentialPool.candidates(
+          user.id,
+          scopedInput,
+        )
+      : [await this.#credential(user.id, scopedInput)];
+    if (credentials.length === 0) {
+      throw new RealtimeCommandError("credential_unavailable");
     }
-    return created.detail;
+    let lastFailure: unknown;
+    for (const credential of credentials) {
+      const resolvedInput = { ...scopedInput, credentialId: credential.id };
+      const created: { detail?: AgentSessionDetail } = {};
+      try {
+        const response = await createValidatedSession(
+          {
+            ...this.#dependencies,
+            onCreated: (detail) => {
+              created.detail = detail;
+            },
+          },
+          user,
+          resolvedInput,
+          credential,
+        );
+        await responseValue(response);
+        if (created.detail === undefined) {
+          throw new RealtimeCommandError("command_failed");
+        }
+        return created.detail;
+      } catch (error) {
+        lastFailure = error;
+        if (
+          !this.#dependencies.modelCredentialPool.reject(
+            user.id,
+            scopedInput,
+            credential.id,
+            error,
+          )
+        ) {
+          throw error;
+        }
+      }
+    }
+    throw lastFailure instanceof Error
+      ? lastFailure
+      : new RealtimeCommandError("credential_unavailable");
   }
 
   createForUser: SessionCreateAction = (user, input, workspaceId) =>
@@ -323,6 +359,7 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
         discoverModels: this.#dependencies.discoverModels,
         discoverOpenRouterProviders:
           this.#dependencies.discoverOpenRouterProviders,
+        modelCredentialPool: this.#dependencies.modelCredentialPool,
         notify: this.#dependencies.notify,
         now: this.#dependencies.now,
         store: this.#dependencies.store,
@@ -388,15 +425,30 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
     readonly user: AuthenticatedUser;
     readonly workspaceId: string;
   }): Promise<AgentModelCatalog> {
-    const credential = await this.#credential(selection.user.id, selection);
-    try {
-      return await this.#dependencies.discoverModels(
-        selection.provider,
-        credential,
+    const credentials =
+      await this.#dependencies.modelCredentialPool.representative(
+        selection.user.id,
+        selection,
       );
-    } catch {
-      throw new RealtimeCommandError("provider_unavailable");
+    if (credentials.length === 0) {
+      throw new RealtimeCommandError("credential_unavailable");
     }
+    let lastError: unknown;
+    for (const credential of credentials) {
+      try {
+        return await this.#dependencies.discoverModels(
+          selection.provider,
+          credential,
+        );
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw new RealtimeCommandError(
+      lastError === undefined
+        ? "credential_unavailable"
+        : "provider_unavailable",
+    );
   }
 
   async previewToolUpdateForUser(

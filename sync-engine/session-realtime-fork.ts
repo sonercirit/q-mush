@@ -7,6 +7,7 @@ import {
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
 import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
+import type { ModelCredentialPool } from "./model-credential-pool.ts";
 import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
 import type { SessionCredentialSelection } from "./session-credential-access.ts";
 import { compactChangedSessionFork } from "./session-fork-compaction.ts";
@@ -28,6 +29,7 @@ export interface SessionForkDependencies
   extends SessionCredentialReader, SessionLifecycleDependencies {
   readonly discoverModels: AgentModelDiscoverer;
   readonly discoverOpenRouterProviders: OpenRouterProviderDiscoverer;
+  readonly modelCredentialPool: ModelCredentialPool;
   readonly store: Pick<SessionStore, "fork">;
 }
 
@@ -39,40 +41,60 @@ async function selectedForkConfiguration(
 ) {
   const selection = sessionForkSelection(input);
   if (selection === undefined) return undefined;
-  const credential = await dependencies.credential(userId, {
-    ...selection,
-    workspaceId: input.workspaceId,
-  });
-  const openRouterProviderTag =
-    selection.provider === source.provider && selection.model === source.model
-      ? source.openRouterProviderTag
-      : null;
-  const metadata = requireSessionMetadata(
-    await sessionMetadataFromDependencies({
-      credential,
-      dependencies,
-      input: {
-        model: selection.model,
-        openRouterProviderTag,
-        provider: selection.provider,
-      },
-      ownerId: userId,
-    }),
+  const credentials = await dependencies.modelCredentialPool.candidates(
+    userId,
+    { ...selection, workspaceId: input.workspaceId },
   );
-  return {
-    configuration: {
-      credentialId: selection.credentialId,
-      ...metadata,
-      model: selection.model,
-      openRouterProviderTag,
-      provider: selection.provider,
-      reasoningEffort:
-        "reasoningEffort" in selection
-          ? (selection.reasoningEffort ?? null)
-          : source.reasoningEffort,
-    },
-    selection,
-  };
+  if (credentials.length === 0) {
+    throw new RealtimeCommandError("credential_unavailable");
+  }
+  for (const credential of credentials) {
+    try {
+      const openRouterProviderTag =
+        selection.provider === source.provider &&
+        selection.model === source.model
+          ? source.openRouterProviderTag
+          : null;
+      const metadata = requireSessionMetadata(
+        await sessionMetadataFromDependencies({
+          credential,
+          dependencies,
+          input: {
+            model: selection.model,
+            openRouterProviderTag,
+            provider: selection.provider,
+          },
+          ownerId: userId,
+        }),
+      );
+      return {
+        configuration: {
+          credentialId: credential.id,
+          ...metadata,
+          model: selection.model,
+          openRouterProviderTag,
+          provider: selection.provider,
+          reasoningEffort:
+            "reasoningEffort" in selection
+              ? (selection.reasoningEffort ?? null)
+              : source.reasoningEffort,
+        },
+        selection: { ...selection, credentialId: credential.id },
+      };
+    } catch (error) {
+      if (
+        !dependencies.modelCredentialPool.reject(
+          userId,
+          { ...selection, workspaceId: input.workspaceId },
+          credential.id,
+          error,
+        )
+      ) {
+        throw error;
+      }
+    }
+  }
+  throw new RealtimeCommandError("credential_unavailable");
 }
 
 export async function forkSessionForUser(options: {

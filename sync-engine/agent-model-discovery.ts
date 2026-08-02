@@ -70,6 +70,13 @@ export class AgentModelDiscoveryError extends Error {
   }
 }
 
+export function isCredentialRejectionError(error: unknown): boolean {
+  return (
+    error instanceof AgentModelDiscoveryError &&
+    (error.status === 401 || error.status === 403 || error.status === 429)
+  );
+}
+
 function modelDiscoveryError(
   message: string,
   status?: number,
