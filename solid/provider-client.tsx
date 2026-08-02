@@ -521,7 +521,7 @@ export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
               reassignmentDialog,
             );
           }}
-          trigger={reassignmentTrigger()}
+          returnFocus={reassignmentTrigger}
         />
       </Show>
     </section>

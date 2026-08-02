@@ -125,6 +125,14 @@ test("defines the session tools as one selectable group", () => {
     "stop_session",
   ]);
   expect(
+    AGENT_TOOLS.find(
+      ({ function: definition }) => definition.name === "stop_session",
+    )?.function.parameters,
+  ).toMatchObject({
+    properties: { cascade: { type: "boolean" } },
+    required: ["sessionId", "cascade"],
+  });
+  expect(
     AGENT_TOOLS.filter(({ function: definition }) =>
       SESSION_AGENT_TOOL_NAMES.includes(definition.name),
     ).map(({ function: definition }) => definition.name),

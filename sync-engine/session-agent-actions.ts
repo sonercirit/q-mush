@@ -58,8 +58,6 @@ function runnerUnavailableOutput(): string {
   return sessionToolOutput({ error: "runner_unavailable" });
 }
 
-type CancelSession = (sessionId: string) => void;
-
 interface RunnerPageRequest {
   readonly limit: number;
   readonly offset: number;
@@ -203,8 +201,14 @@ export class SessionAgentActions {
       spawnSession: guardParent("spawn_session", (input) =>
         this.#spawn(authority, userId, input),
       ),
-      stopSession: guardParent("stop_session", (sessionId) =>
-        this.#stop(parentSessionId, userId, sessionId, parentWorkspaceId()),
+      stopSession: guardParent("stop_session", (sessionId, cascade) =>
+        this.#stop(
+          parentSessionId,
+          userId,
+          sessionId,
+          cascade,
+          parentWorkspaceId(),
+        ),
       ),
     };
   }
@@ -270,7 +274,7 @@ export class SessionAgentActions {
     });
   }
 
-  #cancelSession(): CancelSession {
+  #cancelSession(): (sessionId: string) => void {
     return (sessionId) => {
       this.#dependencies.abortSession(sessionId);
       this.#dependencies.broker.cancelSession(sessionId);
@@ -634,6 +638,7 @@ export class SessionAgentActions {
     parentSessionId: string,
     userId: string,
     sessionId: string,
+    cascade: boolean,
     workspaceId: string,
   ): string {
     const target = this.#detail(userId, sessionId, workspaceId);
@@ -643,7 +648,7 @@ export class SessionAgentActions {
         sessionId,
         this.#dependencies.now(),
       );
-      this.stopChildren(target, userId);
+      if (cascade) this.stopChildren(target, userId);
     }
     const cancel = this.#cancelSession();
     if (sessionId === parentSessionId) {

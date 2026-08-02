@@ -32,6 +32,7 @@ import { sessionMutationPending } from "./session-pending.ts";
 import { SessionProviderUpdateEditor } from "./session-provider-update-client.tsx";
 import type { SessionProviderUpdateView } from "./session-provider-update-model.ts";
 import { RunnerReassignment } from "./session-reassignment-view.tsx";
+import { SessionStopDialog } from "./session-stop-dialog.tsx";
 import { SessionToolUpdateEditor } from "./session-tool-update-client.tsx";
 import { createSessionTranscriptCounts } from "./session-transcript-counts.ts";
 import { SessionTranscriptFilterControls } from "./session-transcript-filter-controls.tsx";
@@ -99,19 +100,20 @@ export function SessionDetailBody(props: {
     view().detail.runnerRequired || sessionMutationPending(view().state);
   const compactionDisabled = (): boolean =>
     active() || autoCompactionDisabled();
-  const hasChildren = (): boolean =>
-    view().state.sessions?.some(
+  const childCount = (): number =>
+    view().state.sessions?.filter(
       ({ parentSessionId }) => parentSessionId === view().detail.id,
-    ) === true;
-  const stopSession = (): void => {
-    if (!hasChildren()) {
-      void view().controller.stop();
-      return;
-    }
-    const graceful = window.confirm(
-      "This session has child sessions. Choose OK to wait for their final messages before stopping, or Cancel to stop immediately.",
-    );
-    void view().controller.stop(graceful);
+    ).length ?? 0;
+  const [stopDialogChildCount, setStopDialogChildCount] =
+    createSignal<number>();
+  const [stopTrigger, setStopTrigger] = createSignal<HTMLElement>();
+  const closeStopDialog = (): void => {
+    setStopDialogChildCount(undefined);
+  };
+  const confirmStop = (cascade?: boolean): void => {
+    closeStopDialog();
+    if (cascade === undefined) void view().controller.stop();
+    else void view().controller.stop(cascade);
   };
   const currentTranscript = (): boolean =>
     view().state.history.page === undefined;
@@ -214,7 +216,10 @@ export function SessionDetailBody(props: {
             <button
               class="rounded-xl border border-rose-300/30 bg-rose-300/10 px-4 py-2 text-sm font-semibold text-rose-200 disabled:opacity-50"
               disabled={view().state.stopping}
-              onClick={stopSession}
+              onClick={(event) => {
+                setStopTrigger(event.currentTarget);
+                setStopDialogChildCount(childCount());
+              }}
               type="button"
             >
               {view().state.stopping ? "Stopping…" : "Stop session"}
@@ -222,6 +227,13 @@ export function SessionDetailBody(props: {
           </Show>
         </div>
       </div>
+      <SessionStopDialog
+        childCount={stopDialogChildCount()}
+        onCancel={closeStopDialog}
+        onDecision={confirmStop}
+        returnFocus={stopTrigger}
+        variant="stop"
+      />
       <Show when={view().detail.runnerRequired}>
         <RunnerReassignment {...view()} />
       </Show>

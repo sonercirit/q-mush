@@ -49,6 +49,7 @@ import {
 } from "./session-pending-input-request.ts";
 import { readSessionReassignment } from "./session-reassignment.ts";
 import { readIdentifier } from "./session-request-helpers.ts";
+import { readSessionStopCascade } from "./session-stop-input.ts";
 
 export type SessionQuestionAnswerAction = (
   user: AuthenticatedUser,
@@ -91,7 +92,7 @@ export type SessionAutoCompactionAction = (
 export type SessionStopAction = (
   user: AuthenticatedUser,
   sessionId: string,
-  graceful: boolean,
+  cascade: boolean,
   workspaceId: string,
 ) => Promise<AgentSessionDetail> | AgentSessionDetail;
 
@@ -180,12 +181,8 @@ function readAutoCompaction(
   return autoCompact;
 }
 
-function readGracefulStop(payload: Readonly<Record<string, unknown>>): boolean {
-  const graceful = payload["graceful"];
-  if (graceful !== undefined && typeof graceful !== "boolean") {
-    throw new RealtimeCommandFailure("invalid_request");
-  }
-  return graceful === true;
+function readCascadeStop(payload: Readonly<Record<string, unknown>>): boolean {
+  return requiredRealtimeInput(readSessionStopCascade(payload["cascade"]));
 }
 
 function readModelSelection(payload: Readonly<Record<string, unknown>>): {
@@ -360,7 +357,7 @@ export async function executeSessionRealtimeCommand(
       return sessions.stopForUser(
         user,
         readSessionId(payload),
-        readGracefulStop(payload),
+        readCascadeStop(payload),
         workspaceId,
       );
     case SESSION_REALTIME_OPERATIONS.subscribe:

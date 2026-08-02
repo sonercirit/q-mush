@@ -4,9 +4,7 @@ import { isRecord } from "../../shared/auth-model.ts";
 import { SessionStore } from "../../sync-engine/session-store.ts";
 import {
   createAuthenticatedRequest,
-  TEST_AUTHENTICATED_USER,
   TEST_USER_ID,
-  TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
 import {
@@ -105,7 +103,10 @@ class SelfStoppingChildModel implements AgentModel {
             : {
                 content: "Stopping the delegated session.",
                 toolCalls: [
-                  toolCall("stop_session", { sessionId: childSessionId }),
+                  toolCall("stop_session", {
+                    cascade: true,
+                    sessionId: childSessionId,
+                  }),
                 ],
               };
     if (step === undefined) {
@@ -305,7 +306,9 @@ describe("session agent tools", () => {
       },
       {
         content: "Stopping the session.",
-        toolCalls: [toolCall("stop_session", { sessionId: SESSION_ID })],
+        toolCalls: [
+          toolCall("stop_session", { cascade: true, sessionId: SESSION_ID }),
+        ],
       },
       { content: "Session controls checked.", toolCalls: [] },
     ]);
@@ -459,36 +462,6 @@ describe("session agent tools", () => {
     expect(JSON.stringify(resumed)).toContain("Child final result.");
     const pending = setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID);
     expect(pending).toMatchObject({ pendingInputs: [] });
-    closeSessionTestDatabase(setup.database);
-  });
-
-  test("a supervisor stop remains orderly after callback delivery", async () => {
-    const { childId, model, setup } = await pausedChildSetup();
-    const stopping = setup.sessions.realtimeCommands.stopForUser(
-      TEST_AUTHENTICATED_USER,
-      SESSION_ID,
-      true,
-      TEST_WORKSPACE_ID,
-    );
-    let settled = false;
-    void Promise.resolve(stopping).then(() => {
-      settled = true;
-    });
-    await Promise.resolve();
-    expect(settled).toBe(false);
-    expect(setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID)?.status).toBe(
-      "running",
-    );
-
-    await completePausedChild(setup, childId);
-    model.resumeParent();
-
-    await expect(stopping).resolves.toMatchObject({ status: "stopped" });
-    const parent = setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID);
-    const delivered = parent?.messages.find(({ content }) => {
-      return content.includes("Child final result.");
-    });
-    expect(delivered).toBeDefined();
     closeSessionTestDatabase(setup.database);
   });
 

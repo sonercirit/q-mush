@@ -75,7 +75,7 @@ export interface SessionAgentToolActions {
     message: string,
   ) => Promise<string>;
   readonly spawnSession: (input: SpawnSessionToolInput) => Promise<string>;
-  readonly stopSession: (sessionId: string) => string;
+  readonly stopSession: (sessionId: string, cascade: boolean) => string;
 }
 
 function sessionId(arguments_: Readonly<Record<string, unknown>>): string {
@@ -284,12 +284,18 @@ export function executeSessionAgentTool(
       case "spawn_session":
         output = actions.spawnSession(spawnInput(arguments_));
         break;
-      case "stop_session":
-        if (!hasOnlySessionToolArguments(arguments_, ["sessionId"])) {
+      case "stop_session": {
+        if (
+          !hasOnlySessionToolArguments(arguments_, ["sessionId", "cascade"]) ||
+          typeof arguments_["cascade"] !== "boolean"
+        ) {
           throw new Error("stop_session received invalid arguments");
         }
-        output = Promise.resolve(actions.stopSession(sessionId(arguments_)));
+        output = Promise.resolve(
+          actions.stopSession(sessionId(arguments_), arguments_["cascade"]),
+        );
         break;
+      }
     }
     return output.then(completedRunnerCommandResult, failedToolOutput);
   } catch (error) {

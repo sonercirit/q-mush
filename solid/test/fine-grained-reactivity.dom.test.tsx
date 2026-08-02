@@ -25,7 +25,6 @@ import {
   clickTestButton,
   disposeTestViews,
   expectTestText,
-  findTestButton,
   mountTestView,
   queryTestElement,
   queryTestTranscript,
@@ -493,48 +492,6 @@ test("keeps a running tool visible while a stop request is pending", () => {
   expect(
     container.querySelector("[data-tool-stream-state='running']"),
   ).not.toBeNull();
-});
-
-test("asks how to stop a parent with child sessions", () => {
-  const parent = {
-    ...TEST_SESSION_DETAIL,
-    id: "parent-stop-session",
-    status: "running" as const,
-    updatedAt: 3,
-  };
-  const child = {
-    ...summaryFromDetail(TEST_SESSION_DETAIL),
-    id: "child-stop-session",
-    parentExecutionGeneration: parent.generation,
-    parentSessionId: parent.id,
-  };
-  const reactive = createReactiveState<SessionViewState>({
-    ...initialSessionViewState(),
-    detail: parent,
-    selectedId: parent.id,
-    sessions: [summaryFromDetail(parent), child],
-  });
-  const command = vi.fn(() =>
-    Promise.resolve({ ...parent, status: "stopped" as const }),
-  );
-  const transport = { command };
-  const confirm = vi.fn(() => true);
-  Object.defineProperty(window, "confirm", {
-    configurable: true,
-    value: confirm,
-  });
-  const { container } = mountSessionDetailBody(reactive, disposals, transport);
-  const stop = findTestButton(container, "Stop session");
-  if (!(stop instanceof HTMLButtonElement)) {
-    throw new TypeError("The stop button was not rendered");
-  }
-  stop.click();
-
-  expect(confirm).toHaveBeenCalledOnce();
-  expect(command).toHaveBeenCalledWith("sessions.stop", {
-    graceful: true,
-    sessionId: parent.id,
-  });
 });
 
 test("session resources, drafts, realtime lists, and selected details update in place", async () => {

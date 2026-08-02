@@ -490,8 +490,8 @@ export class SessionController {
   setWorkspace(workspaceId: string): void {
     this.#providers.setWorkspace(workspaceId);
   }
-  stop(graceful = false): Promise<void> {
-    return this.#stop(graceful);
+  stop(cascade?: boolean): Promise<void> {
+    return this.#stop(cascade);
   }
   steer(): Promise<void> {
     return this.#pendingInputs.submit("steer");
@@ -610,9 +610,9 @@ export class SessionController {
   async #continue(): Promise<void> {
     await this.#mutateRecoverable(continueSessionMutation);
   }
-  async #stop(graceful: boolean): Promise<void> {
+  async #stop(cascade?: boolean): Promise<void> {
     await this.#mutateWhen(sessionIsActive, (sessionId) =>
-      stopSessionMutation(sessionId, graceful),
+      stopSessionMutation(sessionId, cascade),
     );
   }
   async #mutateSelected(

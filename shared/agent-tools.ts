@@ -387,10 +387,17 @@ const SESSION_AGENT_TOOLS = [
     required: ["sessionId"],
   }),
   toolDefinition({
-    description: "Stop an owned agent session.",
+    description:
+      "Stop an owned agent session, with an explicit choice to cascade-stop its active descendants.",
     name: "stop_session",
-    properties: SESSION_ID_PARAMETER,
-    required: ["sessionId"],
+    properties: {
+      cascade: {
+        description: "Whether to stop active child sessions and descendants",
+        type: "boolean",
+      },
+      ...SESSION_ID_PARAMETER,
+    },
+    required: ["sessionId", "cascade"],
   }),
 ] as const;
 

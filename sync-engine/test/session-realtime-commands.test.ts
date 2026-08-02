@@ -321,7 +321,7 @@ describe("session realtime command dispatch", () => {
       sessionId: "session-1",
     });
     await execute(integration, SESSION_REALTIME_OPERATIONS.stop, {
-      graceful: true,
+      cascade: false,
       sessionId: "session-1",
     });
     await execute(integration, SESSION_REALTIME_OPERATIONS.reassign, {
@@ -352,7 +352,7 @@ describe("session realtime command dispatch", () => {
     expect(stopForUser).toHaveBeenCalledWith(
       TEST_USER,
       "session-1",
-      true,
+      false,
       TEST_WORKSPACE_ID,
     );
     expect(reassignForUser).toHaveBeenCalledWith(
@@ -394,6 +394,10 @@ describe("session realtime command dispatch", () => {
       [
         SESSION_REALTIME_OPERATIONS.reassign,
         { runnerId: "runner-2", sessionId: "session-1" },
+      ],
+      [
+        SESSION_REALTIME_OPERATIONS.stop,
+        { cascade: "false", sessionId: "session-1" },
       ],
       [
         SESSION_REALTIME_OPERATIONS.setAutoCompaction,
