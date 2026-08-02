@@ -1,12 +1,13 @@
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import {
   startDevelopmentServer,
   triggerDevelopmentRestart,
   type DevelopmentServer,
 } from "../development-server.ts";
+import { createDevelopmentShutdown } from "../development-shutdown.ts";
 
 async function readStartCount(pathname: string): Promise<number> {
   const file = Bun.file(pathname);
@@ -22,19 +23,18 @@ async function waitForStartCount(
   pathname: string,
   expected: number,
 ): Promise<void> {
-  const deadline = Date.now() + 5_000;
+  await expect
+    .poll(() => readStartCount(pathname), {
+      interval: 10,
+      timeout: 5_000,
+    })
+    .toBeGreaterThanOrEqual(expected);
+}
 
-  while (Date.now() < deadline) {
-    if ((await readStartCount(pathname)) >= expected) {
-      return;
-    }
-
-    await Bun.sleep(10);
-  }
-
-  throw new Error(
-    `The development server did not start ${String(expected)} times`,
-  );
+async function waitForFile(pathname: string): Promise<void> {
+  await expect
+    .poll(() => Bun.file(pathname).exists(), { interval: 10, timeout: 5_000 })
+    .toBe(true);
 }
 
 async function expectStableStartCount(
@@ -43,6 +43,21 @@ async function expectStableStartCount(
 ): Promise<void> {
   await Bun.sleep(100);
   expect(await readStartCount(pathname)).toBe(expected);
+}
+
+async function openSocket(url: string): Promise<WebSocket> {
+  const socket = new WebSocket(url);
+  const opened = Promise.withResolvers<undefined>();
+  socket.onopen = () => {
+    opened.resolve(undefined);
+  };
+  socket.onerror = () => {
+    opened.reject(new Error(`Could not open fixture socket ${url}`));
+  };
+  await opened.promise;
+  socket.onopen = null;
+  socket.onerror = null;
+  return socket;
 }
 
 test("keeps changed source running until the restart trigger changes", async () => {
@@ -83,4 +98,167 @@ await new Promise(() => {});
     await server?.stop();
     await rm(directory, { force: true, recursive: true });
   }
+});
+
+test("bounds shutdown and force-closes active server resources", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "q-mush-dev-stop-test-"));
+  const childPath = join(directory, "child.ts");
+  const serverPath = join(directory, "server.json");
+  const pendingPath = join(directory, "pending.txt");
+  const reportPath = join(directory, "shutdown.json");
+  const triggerPath = join(directory, "restart.trigger");
+  const sockets: WebSocket[] = [];
+  let pendingRequest: Promise<unknown> | undefined;
+  let server: DevelopmentServer | undefined;
+
+  try {
+    await Bun.write(triggerPath, "");
+    await Bun.write(
+      childPath,
+      `import { writeFileSync } from "node:fs";
+const [serverPath, pendingPath, reportPath] = process.argv.slice(2);
+if (serverPath === undefined || pendingPath === undefined || reportPath === undefined) {
+  throw new Error("Missing fixture path");
+}
+const pending = new Promise<Response>(() => {});
+const socketKinds = new Set<string>();
+const keepalive = setInterval(() => {}, 1_000);
+const server = Bun.serve<{ kind: string }>({
+  port: 0,
+  fetch(request, current) {
+    const pathname = new URL(request.url).pathname;
+    if (pathname === "/pending") {
+      writeFileSync(pendingPath, "pending\\n");
+      return pending;
+    }
+    const kind = pathname === "/realtime" ? "realtime" : pathname === "/runner" ? "runner" : undefined;
+    return kind !== undefined && current.upgrade(request, { data: { kind } })
+      ? undefined
+      : new Response("Not found", { status: 404 });
+  },
+  websocket: {
+    close(socket) {
+      socketKinds.delete(socket.data.kind);
+    },
+    message() {},
+    open(socket) {
+      socketKinds.add(socket.data.kind);
+    },
+  },
+});
+writeFileSync(serverPath, JSON.stringify({ url: String(server.url) }));
+process.on("SIGTERM", () => {
+  writeFileSync(reportPath, JSON.stringify({
+    keepaliveTimers: keepalive === undefined ? 0 : 1,
+    openHandles: [
+      "keepalive timer",
+      ...(server.pendingRequests === 0 ? [] : ["in-flight HTTP request"]),
+      ...[...socketKinds].sort().map((kind) => kind + " socket"),
+    ],
+    pendingRequests: server.pendingRequests,
+    pendingWebSockets: server.pendingWebSockets,
+    socketKinds: [...socketKinds].sort(),
+  }));
+  void server.stop();
+});
+await new Promise(() => {});
+`,
+    );
+    server = startDevelopmentServer({
+      command: [
+        process.execPath,
+        childPath,
+        serverPath,
+        pendingPath,
+        reportPath,
+      ],
+      cwd: directory,
+      restartTriggerPath: triggerPath,
+      shutdownForceMilliseconds: 200,
+      shutdownGraceMilliseconds: 80,
+    });
+    await waitForFile(serverPath);
+    const serverState: unknown = await Bun.file(serverPath).json();
+    const url =
+      typeof serverState === "object" &&
+      serverState !== null &&
+      "url" in serverState &&
+      typeof serverState.url === "string"
+        ? serverState.url
+        : "";
+    expect(url).toMatch(/^http:\/\//u);
+    sockets.push(
+      await openSocket(new URL("/realtime", url).toString()),
+      await openSocket(new URL("/runner", url).toString()),
+    );
+    pendingRequest = fetch(new URL("/pending", url)).catch(() => undefined);
+    await waitForFile(pendingPath);
+
+    const startedAt = performance.now();
+    await server.stop();
+    const elapsedMilliseconds = performance.now() - startedAt;
+    server = undefined;
+
+    expect(elapsedMilliseconds).toBeGreaterThanOrEqual(60);
+    expect(elapsedMilliseconds).toBeLessThan(1_000);
+    expect(await Bun.file(reportPath).json()).toEqual({
+      keepaliveTimers: 1,
+      openHandles: [
+        "keepalive timer",
+        "in-flight HTTP request",
+        "realtime socket",
+        "runner socket",
+      ],
+      pendingRequests: 1,
+      pendingWebSockets: 2,
+      socketKinds: ["realtime", "runner"],
+    });
+    await pendingRequest;
+    expect(
+      sockets.every(({ readyState }) => readyState === WebSocket.CLOSED),
+    ).toBe(true);
+  } finally {
+    if (server !== undefined) {
+      server.forceStop();
+    }
+    sockets.forEach((socket) => {
+      socket.close();
+    });
+    await Promise.all([pendingRequest, rm(directory, { recursive: true })]);
+  }
+});
+
+test("a repeat shutdown signal escalates to immediate forced exit", async () => {
+  const stopped = Promise.withResolvers<undefined>();
+  const events: string[] = [];
+  const developmentServer: DevelopmentServer = {
+    forceStop: vi.fn(() => {
+      events.push("forced");
+    }),
+    stop: vi.fn(() => {
+      events.push("stopping");
+      return stopped.promise;
+    }),
+  };
+  const shutDown = createDevelopmentShutdown({
+    developmentServer,
+    exit: (code) => {
+      events.push(`exit ${String(code)}`);
+    },
+    stopSourceWatcher: () => {
+      events.push("watcher stopped");
+    },
+  });
+
+  shutDown(130);
+  expect(events).toEqual(["watcher stopped", "stopping"]);
+
+  const escalatedEvents = ["watcher stopped", "stopping", "forced", "exit 143"];
+  shutDown(143);
+  expect(events).toEqual(escalatedEvents);
+
+  stopped.resolve(undefined);
+  await stopped.promise;
+  await Promise.resolve();
+  expect(events).toEqual(escalatedEvents);
 });
