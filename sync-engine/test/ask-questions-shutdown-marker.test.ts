@@ -5,22 +5,20 @@ import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
+import { requireSession } from "./session-reassignment-hardening-helpers.ts";
 import { runningStore } from "./session-store-lifecycle-test-helpers.ts";
 import { closeSessionStoreTestSetup } from "./session-store-reassignment-helpers.ts";
 import { STORE_SESSION_ID } from "./session-store-test-fixtures.ts";
 
 test("stopping a question-paused session clears its shutdown marker", () => {
   const { database, store } = runningStore();
-  const generation = store.get(TEST_USER_ID, STORE_SESSION_ID)?.generation;
-  if (generation === undefined) {
-    throw new Error("The running session is unavailable");
-  }
+  const session = requireSession(store, STORE_SESSION_ID);
   store
     .questions()
     .create(
       TEST_USER_ID,
       STORE_SESSION_ID,
-      generation,
+      session.generation,
       "call-question",
       testAskQuestionsInput(),
       TEST_NOW + 2,
@@ -32,10 +30,7 @@ test("stopping a question-paused session clears its shutdown marker", () => {
 
   expect(store.stop(TEST_USER_ID, STORE_SESSION_ID, TEST_NOW + 3)).toBe(true);
   expect(
-    database
-      .select({ marker: agentSessions.interruptedHandoff })
-      .from(agentSessions)
-      .get()?.marker,
+    database.select().from(agentSessions).get()?.interruptedHandoff,
   ).toBeNull();
   closeSessionStoreTestSetup({ database, store });
 });
