@@ -264,9 +264,23 @@ const SESSION_AGENT_TOOLS = [
   }),
   toolDefinition({
     description:
-      "List owned agent sessions and report which ones need runner reassignment.",
+      "List sessions with pagination (page defaults to 1; pageSize defaults to 20, max 100). Search is case-insensitive across title, status, model, provider, and working directory.",
     name: "list_sessions",
-    properties: {},
+    properties: {
+      page: {
+        minimum: 1,
+        ...NUMBER_PARAMETER,
+      },
+      pageSize: {
+        maximum: 100,
+        minimum: 1,
+        ...NUMBER_PARAMETER,
+      },
+      search: {
+        maxLength: 100,
+        ...STRING_PARAMETER,
+      },
+    },
     required: [],
   }),
   toolDefinition({

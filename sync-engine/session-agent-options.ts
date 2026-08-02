@@ -13,6 +13,7 @@ import {
 import type { RunnerSummary } from "../shared/runner-model.ts";
 import { normalizeSearchText } from "../shared/search.ts";
 import { utf8ByteLength, utf8Prefix } from "../shared/utf8.ts";
+import { boundedPaginatedOutput } from "./session-agent-pagination.ts";
 
 export const SESSION_OPTION_CATEGORIES = [
   "runners",
@@ -496,33 +497,21 @@ export function sessionOptionsOutput(
   const selected = page.matching;
   const items = selected.map(({ option }) => option);
   const sourceFields = selected.some(({ truncated }) => truncated);
-  const output = JSON.stringify(
-    {
-      category: input.category,
-      filters: {
-        ...(input.credentialId === undefined
-          ? {}
-          : { credentialId: input.credentialId }),
-        ...(input.provider === undefined ? {} : { provider: input.provider }),
-        ...(input.search === undefined ? {} : { search: input.search }),
-      },
-      hasNext: input.page < totalPages,
-      hasPrevious: input.page > 1,
-      items,
-      page: input.page,
-      pageSize: SESSION_OPTIONS_PAGE_SIZE,
-      totalItems,
-      totalPages,
-      truncated: sourceFields,
-      truncation: { outputBytes: false, sourceFields },
+  return boundedPaginatedOutput({
+    fields: { category: input.category },
+    filters: {
+      ...(input.credentialId === undefined
+        ? {}
+        : { credentialId: input.credentialId }),
+      ...(input.provider === undefined ? {} : { provider: input.provider }),
+      ...(input.search === undefined ? {} : { search: input.search }),
     },
-    null,
-    2,
-  );
-  if (
-    Buffer.byteLength(output, "utf8") > MAXIMUM_SESSION_OPTIONS_OUTPUT_BYTES
-  ) {
-    throw new Error("The bounded session options output is too large");
-  }
-  return output;
+    items,
+    maximumBytes: MAXIMUM_SESSION_OPTIONS_OUTPUT_BYTES,
+    page: input.page,
+    pageSize: SESSION_OPTIONS_PAGE_SIZE,
+    sourceFields,
+    tooLargeMessage: "The bounded session options output is too large",
+    totalItems,
+  });
 }
