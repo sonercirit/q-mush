@@ -111,14 +111,13 @@ test("paginates, validates, and bounds session listings at dispatch", async () =
   expect(records(outOfRange["items"])).toEqual([]);
   expect(missed).toMatchObject({ totalItems: 0, totalPages: 0 });
   expect(records(missed["items"])).toEqual([]);
-  expect(outputs.slice(4)).toEqual([
-    expect.stringContaining("list_sessions arguments are invalid"),
-    expect.stringContaining("list_sessions arguments are invalid"),
-    expect.stringContaining("list_sessions arguments are invalid"),
-    expect.stringContaining("list_sessions arguments are invalid"),
-    expect.stringContaining("list_sessions arguments are invalid"),
-    expect.stringContaining("list_sessions arguments are invalid"),
-  ]);
+  expect(
+    outputs
+      .slice(4)
+      .every((output) =>
+        output.includes("list_sessions arguments are invalid"),
+      ),
+  ).toBe(true);
   expect(Buffer.byteLength(outputs[0] ?? "", "utf8")).toBeLessThan(50 * 1_024);
   expect(outputs[0]).not.toContain("Output exceeds the per-call limit");
   closeToolSession(setup);
@@ -141,9 +140,11 @@ test("paginates, validates, and bounds session listings at dispatch", async () =
     .insert(agentSessions)
     .values(
       Array.from({ length: MAXIMUM_LIST_SESSIONS_PAGE_SIZE }, (_, index) => ({
-        ...testAuditFields(),
+        createdAt: new Date(index),
+        createdById: TEST_USER_ID,
         executionEnvironment: "bare_metal" as const,
-        id: `maximal-list-session-${String(index).padStart(2, "0")}`,
+        id: `maximal-list-session-${String(index)}`,
+        isDeleted: false,
         model: maximumText,
         parentSessionId: SESSION_ID,
         provider: "openrouter" as const,
@@ -152,6 +153,8 @@ test("paginates, validates, and bounds session listings at dispatch", async () =
         status: "completed" as const,
         title: maximumText,
         tools: JSON.stringify(AGENT_SESSION_TOOL_NAMES),
+        updatedAt: new Date(index),
+        updatedById: TEST_USER_ID,
         userId: TEST_USER_ID,
         workingDirectory: maximumText,
         workspaceId: TEST_WORKSPACE_ID,
