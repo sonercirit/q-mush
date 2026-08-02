@@ -1,9 +1,11 @@
+import { eq } from "drizzle-orm";
 import { expect, test } from "vitest";
 import type {
   AgentConversationMessage,
   AgentModel,
   AgentModelStep,
 } from "../../shared/agent-loop.ts";
+import { agentSessions } from "../../shared/database/schema.ts";
 import { TEST_USER_ID } from "./authenticated-integration-test-helpers.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
 import {
@@ -15,6 +17,7 @@ import {
 import { startToolSession, toolCall } from "./session-agent-tool-setup.ts";
 import {
   connectedSessionSetup,
+  createSessionRequest,
   RUNNER_COMMAND_ID,
   RUNNER_ID,
   SESSION_ID,
@@ -176,5 +179,187 @@ test("a spawned session resumes its interrupted step after server recreation", a
   expect(reports[0]).toContain(CHILD_SUMMARY);
   expect(reports[0]).toContain('"role": "assistant"');
   expect(reports[0]).not.toContain('"role": "tool"');
+  closeSessionTestDatabase(initial.database);
+});
+
+const MULTI_SESSION_COUNT = 3;
+const AGENT_FILE_COMMAND = "read_agent_file";
+const CORRUPTED_HANDOFF_ERROR = "Stored restart handoff is invalid";
+
+function sessionIds(
+  setup: ReturnType<typeof connectedSessionSetup>,
+): readonly string[] {
+  return setup.sessions.listForUser(TEST_USER_ID).map(({ id }) => id);
+}
+
+async function startParkedSessions(model: AgentModel) {
+  let commandId = 0;
+  const initial = connectedSessionSetup(model, "api_key", undefined, {
+    commandId: () => `restart-multi-command-${String((commandId += 1))}`,
+  });
+  for (let index = 0; index < MULTI_SESSION_COUNT; index += 1) {
+    const created = await initial.sessions.collection(createSessionRequest());
+    expect(created.status).toBe(201);
+  }
+  return initial;
+}
+
+async function waitForCommands(
+  setup: ReturnType<typeof connectedSessionSetup>,
+  tool: string,
+): Promise<void> {
+  await waitForSessionValue(
+    () =>
+      setup.runnerCommands.filter((command) => command.tool === tool).length,
+    (value) => value === MULTI_SESSION_COUNT,
+  );
+}
+
+async function completeMultiSessionCommands(
+  setup: ReturnType<typeof connectedSessionSetup>,
+  tool: string,
+  output: (sessionId: string) => string,
+): Promise<void> {
+  await waitForCommands(setup, tool);
+  const commands = setup.runnerCommands.filter(
+    (command) => command.tool === tool,
+  );
+  setup.runnerCommands.splice(0);
+  for (const command of commands) {
+    expect(
+      setup.sessions.completeRunnerCommand(RUNNER_ID, command.id, {
+        output: output(command.sessionId),
+        state: "completed",
+      }),
+    ).toBe(true);
+  }
+}
+
+function corruptRestartHandoff(
+  setup: ReturnType<typeof connectedSessionSetup>,
+  sessionId: string,
+): void {
+  setup.database
+    .update(agentSessions)
+    .set({ restartHandoff: "not-json" })
+    .where(eq(agentSessions.id, sessionId))
+    .run();
+}
+
+class MultiSessionRestartModel implements AgentModel {
+  complete(
+    messages: readonly AgentConversationMessage[],
+  ): Promise<AgentModelStep> {
+    return Promise.resolve(
+      includesContent(messages, "Durable tool output")
+        ? providerStep("Completed after restart.")
+        : providerStep("Using a tool.", {
+            toolCalls: [
+              toolCall("bash", { command: "printf durable", timeout: 30 }),
+            ],
+          }),
+    );
+  }
+}
+
+test("multiple sessions resume their interrupted steps after one server recreation", async () => {
+  const model = new MultiSessionRestartModel();
+  const initial = await startParkedSessions(model);
+  const ids = sessionIds(initial);
+  initial.database
+    .update(agentSessions)
+    .set({ executionEnvironment: "container" })
+    .run();
+  expect(ids).toHaveLength(MULTI_SESSION_COUNT);
+
+  await completeMultiSessionCommands(initial, AGENT_FILE_COMMAND, () => "null");
+  await waitForCommands(initial, "bash");
+
+  const drain = initial.sessions.drain();
+  for (const command of initial.runnerCommands.splice(0)) {
+    expect(
+      initial.sessions.completeRunnerCommand(RUNNER_ID, command.id, {
+        output: `Durable tool output for ${command.sessionId}`,
+        state: "completed",
+      }),
+    ).toBe(true);
+  }
+  await drain;
+  expect(ids.map((id) => sessionFor(initial, id)?.status)).toEqual(
+    Array.from({ length: MULTI_SESSION_COUNT }, () => "paused"),
+  );
+
+  const recreated = connectedSessionSetup(model, "api_key", undefined, {
+    commandId: (() => {
+      let commandId = 100;
+      return () => `restart-multi-command-${String((commandId += 1))}`;
+    })(),
+    database: initial.database,
+  });
+  await completeMultiSessionCommands(
+    recreated,
+    AGENT_FILE_COMMAND,
+    () => "null",
+  );
+  await waitForSessionValue(
+    () =>
+      ids.every((id) =>
+        JSON.stringify(sessionFor(recreated, id)).includes(
+          "Completed after restart.",
+        ),
+      ),
+    (value) => value === true,
+  );
+  expect(ids.map((id) => sessionFor(recreated, id)?.status)).toEqual(
+    Array.from({ length: MULTI_SESSION_COUNT }, () => "idle"),
+  );
+  closeSessionTestDatabase(initial.database);
+});
+
+test("one corrupt handoff fails visibly without blocking other restart resumes", async () => {
+  const model = new MultiSessionRestartModel();
+  const initial = await startParkedSessions(model);
+  const ids = sessionIds(initial);
+
+  await completeMultiSessionCommands(initial, AGENT_FILE_COMMAND, () => "null");
+  await waitForCommands(initial, "bash");
+
+  const drain = initial.sessions.drain();
+  for (const command of initial.runnerCommands.splice(0)) {
+    expect(
+      initial.sessions.completeRunnerCommand(RUNNER_ID, command.id, {
+        output: `Durable tool output for ${command.sessionId}`,
+        state: "completed",
+      }),
+    ).toBe(true);
+  }
+  await drain;
+  const corruptId = ids[1];
+  if (corruptId === undefined) {
+    throw new Error("The corrupt handoff fixture is unavailable");
+  }
+  corruptRestartHandoff(initial, corruptId);
+
+  const recreated = recreateSessionSetup(model, initial);
+  await waitForSessionValue(
+    () =>
+      ids.every((id) => {
+        const detail = sessionFor(recreated, id);
+        return id === corruptId
+          ? detail?.status === "failed"
+          : detail?.status === "idle";
+      }),
+    (value) => value === true,
+  );
+  expect(sessionFor(recreated, corruptId)).toMatchObject({
+    messages: expect.arrayContaining([
+      expect.objectContaining({
+        content: expect.stringContaining(CORRUPTED_HANDOFF_ERROR),
+        role: "error",
+      }),
+    ]),
+    restartHandoff: null,
+    status: "failed",
+  });
   closeSessionTestDatabase(initial.database);
 });
