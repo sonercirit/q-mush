@@ -334,13 +334,16 @@ describe("durable pending session inputs", () => {
     closeRunningStore(setup);
   });
 
-  test("peeks at steering without consuming it", () => {
+  test("consumes one steering input exactly once", () => {
     const setup = runningStore();
     enqueueInput(setup, "steer", "Change direction", "steer");
 
     expect(steeringIsPending(setup)).toBe(true);
     expect(pendingInputs(setup)?.[0]?.kind).toBe("steer");
     expectSteeringTaken(setup);
+    expect(
+      setup.store.takeSteeringInputs(setup.detail.id, TEST_NOW + 4),
+    ).toEqual([]);
     expect(steeringIsPending(setup)).toBe(false);
     expect(pendingInputs(setup)).toEqual([]);
 

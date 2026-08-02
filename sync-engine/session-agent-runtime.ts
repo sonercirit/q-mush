@@ -59,6 +59,7 @@ export interface SessionAgentRuntimeDependencies extends AttachmentFallbackRunti
   readonly broker: RunnerCommandBroker;
   readonly credential: ProviderCredentialAccess;
   readonly currentTools?: () => readonly AgentSessionToolName[] | undefined;
+  readonly continuous: boolean;
   readonly detail: AgentSessionDetail;
   readonly hasPendingSteeringInput: () => boolean;
   readonly isCurrent: () => boolean;
@@ -334,6 +335,11 @@ export async function runSessionAgent(
   runtime: SessionAgentRuntimeDependencies,
 ): Promise<"complete" | "handoff"> {
   const streamId = createUuidV7();
+  const initialMessages = sessionConversation(runtime);
+  const messages =
+    runtime.continuous && initialMessages.at(-1)?.role === "assistant"
+      ? [...initialMessages, { content: "Continue.", role: "user" as const }]
+      : initialMessages;
   const toolStream = new ToolStreamPublisher({
     sessionId: runtime.detail.id,
     streamId,
@@ -530,7 +536,7 @@ export async function runSessionAgent(
       ...(runtime.detail.restartHandoff?.operation === "agent"
         ? { initialContextTokens: runtime.detail.currentContextTokens }
         : {}),
-      initialMessages: sessionConversation(runtime),
+      initialMessages: messages,
       handoffRequested: stepBoundaryRequested,
       maxContextTokens: runtime.detail.maxContextTokens,
       model: models.agent,

@@ -39,6 +39,8 @@ const REPORTABLE_PARENT_STATUSES = [
   "stopped",
 ] as const;
 
+export type SpawnedReportDisposition = "delivered" | "promoted" | "terminal";
+
 export interface SpawnedSessionLink {
   readonly parentGeneration: number;
   readonly parentId: string;
@@ -198,7 +200,7 @@ export function appendSpawnedSessionReport(options: {
   readonly parentGeneration: number;
   readonly parentId: string;
   readonly userId: string;
-}): false | "reportable" | "terminal" {
+}): SpawnedReportDisposition | undefined {
   return options.database.transaction((transaction) => {
     const parentCondition = storedSessionCondition({
       id: options.parentId,
@@ -215,7 +217,7 @@ export function appendSpawnedSessionReport(options: {
       .where(eligibleParent)
       .get();
     if (parent === undefined) {
-      return false;
+      return undefined;
     }
     const childCondition = and(
       storedSessionCondition({
@@ -231,7 +233,7 @@ export function appendSpawnedSessionReport(options: {
         parentExecutionGeneration: null,
       })
     ) {
-      return false;
+      return undefined;
     }
     switch (parent.status) {
       case "running":
@@ -243,7 +245,7 @@ export function appendSpawnedSessionReport(options: {
             kind: "steer",
           })
         ) {
-          return false;
+          return undefined;
         }
         break;
       case "failed":
@@ -280,6 +282,7 @@ export function appendSpawnedSessionReport(options: {
         }),
       )
       .run();
-    return terminal ? ("terminal" as const) : ("reportable" as const);
+    if (terminal) return "terminal";
+    return parent.status === "running" ? "promoted" : "delivered";
   });
 }

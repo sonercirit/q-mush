@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { RUNNER_AGENT_FILE_COMMAND } from "../../shared/agent-file.ts";
 import type {
   AgentConversationMessage,
   AgentModel,
@@ -6,13 +7,21 @@ import type {
 } from "../../shared/agent-loop.ts";
 import { isRecord } from "../../shared/auth-model.ts";
 import {
+  RunnerCommandBroker,
+  type RunnerToolCommand,
+} from "../../shared/runner-command-broker.ts";
+import {
   TEST_AUTHENTICATED_USER,
   TEST_USER_ID,
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { terminalAgentStep } from "./deferred-agent-model.ts";
+import { providerStep } from "./provider-step-fixtures.ts";
+import { spawnCall } from "./session-agent-spawn-helpers.ts";
+import { toolCall } from "./session-agent-tool-setup.ts";
 import {
   connectedSessionSetup,
+  createSessionRequest,
   RUNNER_ID,
   SESSION_ID,
 } from "./session-integration-fixtures.ts";
@@ -27,14 +36,103 @@ import {
   waitForSessionValue,
 } from "./session-integration-helpers.ts";
 
+function parentSessionRequests(
+  requests: readonly AgentConversationMessage[][],
+): readonly AgentConversationMessage[][] {
+  return requests.filter((messages) => {
+    const request = messages[0];
+    return request?.content === "Inspect README.md";
+  });
+}
+
+class PrefillRejectingSleepWakeCallbackModel implements AgentModel {
+  readonly #childCompletion = Promise.withResolvers<undefined>();
+  readonly #sleepStep = Promise.withResolvers<undefined>();
+  readonly requests: AgentConversationMessage[][] = [];
+
+  readonly complete = async (
+    ...parameters: Parameters<AgentModel["complete"]>
+  ) => {
+    const [messages] = parameters;
+    const copied = messages.map((message) => ({ ...message }));
+    this.requests.push(copied);
+    const initial = messages[0]?.content;
+    if (initial === "Complete during the parent sleep") {
+      await this.#childCompletion.promise;
+      return terminalAgentStep("Child callback result.");
+    }
+    const parentRequest = parentSessionRequests(this.requests).length;
+    if (parentRequest === 1) {
+      return providerStep("Delegating before sleeping.", {
+        toolCalls: [spawnCall("Complete during the parent sleep")],
+      });
+    }
+    if (parentRequest === 2) {
+      this.#sleepStep.resolve();
+      return providerStep("Waiting for the child callback.", {
+        toolCalls: [toolCall("sleep", { durationMs: 60_000 })],
+      });
+    }
+    if (messages.at(-1)?.role !== "user") {
+      throw new Error(
+        "This model does not support assistant message prefill. The conversation must end with a user message.",
+      );
+    }
+    return terminalAgentStep("Callback handled once.");
+  };
+
+  finishChild(): void {
+    this.#childCompletion.resolve();
+  }
+
+  waitForSleepStep(): Promise<undefined> {
+    return this.#sleepStep.promise;
+  }
+}
+
+function completeBrokerCommand(
+  broker: RunnerCommandBroker,
+  runnerId: string,
+  command: RunnerToolCommand,
+): void {
+  const accepted = broker.complete(runnerId, command.id, {
+    output: String(null),
+    state: "completed",
+  });
+  if (!accepted) throw new Error("The test command was not pending");
+}
+
+function autoCompletingAgentFileBroker(): {
+  readonly broker: RunnerCommandBroker;
+  readonly commands: readonly RunnerToolCommand[];
+} {
+  const commands: RunnerToolCommand[] = [];
+  let commandSequence = 0;
+  const broker = new RunnerCommandBroker({
+    commandId: () => `phantom-step-command-${String(++commandSequence)}`,
+    deliver: (runnerId, command) => {
+      commands.push(command);
+      if (command.tool === RUNNER_AGENT_FILE_COMMAND) {
+        queueMicrotask(() => {
+          completeBrokerCommand(broker, runnerId, command);
+        });
+      }
+      return true;
+    },
+  });
+  return { broker, commands };
+}
+
 class PrefillRejectingSteeringModel implements AgentModel {
   readonly #firstStep = Promise.withResolvers<AgentModelStep>();
   readonly requests: AgentConversationMessage[][] = [];
 
   readonly complete = (
-    messages: readonly AgentConversationMessage[],
+    ...parameters: Parameters<AgentModel["complete"]>
   ): Promise<AgentModelStep> => {
-    this.requests.push([...messages]);
+    const [messages] = parameters;
+    const request = messages.slice();
+    this.requests.push(request);
     if (this.requests.length === 1) {
       return this.#firstStep.promise;
     }
@@ -75,6 +173,53 @@ test("settles one deferred terminal answer without a restart handoff", async () 
 
     await reconnectRunnerAndExpectNoReplay(recreated, model, RUNNER_ID);
   });
+});
+
+test("does not relaunch after consuming a sleep-wake child callback", async () => {
+  const model = new PrefillRejectingSleepWakeCallbackModel();
+  const { broker, commands } = autoCompletingAgentFileBroker();
+  const setup = connectedSessionSetup(model, "api_key", undefined, { broker });
+
+  const initialRequest = setup.sessions.collection(createSessionRequest());
+  expect((await initialRequest).status).toBe(201);
+  await model.waitForSleepStep();
+  const readParent = () =>
+    setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID);
+  const sleeping = await waitForSessionValue(readParent, (value) => {
+    const detail = isRecord(value) ? value : {};
+    return JSON.stringify(detail).includes("Waiting for the child callback.");
+  });
+  expect(isRecord(sleeping)).toBe(true);
+  model.finishChild();
+
+  const parentIsTerminal = (value: unknown) => {
+    if (!isRecord(value)) return false;
+    if (value["status"] === "failed") return true;
+    return (
+      value["status"] === "idle" &&
+      JSON.stringify(value).includes("Callback handled once.")
+    );
+  };
+  const terminal = await waitForSessionValue(readParent, parentIsTerminal);
+  await Promise.resolve();
+  const settled = readParent();
+  const parentRequests = parentSessionRequests(model.requests);
+
+  expect(terminal).toMatchObject({ status: "idle" });
+  expect(settled).toMatchObject({ pendingInputs: [], status: "idle" });
+  expect(parentRequests).toHaveLength(3);
+  expect(
+    settled?.messages.filter(({ content }) =>
+      content.includes("Spawned session completed"),
+    ),
+  ).toHaveLength(1);
+  expect(
+    commands.filter(
+      ({ sessionId, tool }) =>
+        sessionId === SESSION_ID && tool === RUNNER_AGENT_FILE_COMMAND,
+    ),
+  ).toHaveLength(1);
+  setup.database.$client.close();
 });
 
 test("orders a mid-step steer after the in-flight assistant output", async () => {

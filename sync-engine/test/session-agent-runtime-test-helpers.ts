@@ -28,8 +28,13 @@ export function completingTestBroker(): RunnerCommandBroker {
 
 export const IDLE_RUNTIME_SIGNALS: Pick<
   SessionAgentRuntimeDependencies,
-  "hasPendingSteeringInput" | "notify" | "realtime" | "restartHandoffRequested"
+  | "continuous"
+  | "hasPendingSteeringInput"
+  | "notify"
+  | "realtime"
+  | "restartHandoffRequested"
 > = {
+  continuous: false,
   hasPendingSteeringInput: () => false,
   notify: () => undefined,
   realtime: undefined,
