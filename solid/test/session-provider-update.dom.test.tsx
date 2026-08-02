@@ -165,6 +165,16 @@ function expectProviderControls(
   }
 }
 
+function expectProviderSectionPadding(
+  section: HTMLElement,
+  expected: "py-1.5" | "py-2",
+): void {
+  expect(section.classList).toContain(expected);
+  expect(section.classList).not.toContain(
+    expected === "py-1.5" ? "py-2" : "py-1.5",
+  );
+}
+
 afterEach(() => {
   disposeView?.();
   disposeView = undefined;
@@ -182,14 +192,24 @@ test("keeps session provider controls collapsed until expanded", () => {
     HTMLButtonElement,
   );
 
+  const providerSection = queryTestElementAs(
+    container,
+    "[data-session-editor-kind='provider']",
+    HTMLElement,
+  );
+
+  expectProviderSectionPadding(providerSection, "py-1.5");
+  expect(providerSection.classList).not.toContain("py-0");
   expectProviderControls(container, toggle, false);
 
   toggle.click();
 
+  expectProviderSectionPadding(providerSection, "py-2");
   expectProviderControls(container, toggle, true);
 
   toggle.click();
 
+  expectProviderSectionPadding(providerSection, "py-1.5");
   expectProviderControls(container, toggle, false);
 });
 

@@ -35,7 +35,8 @@ test("renders only provider and tool access as compact collapsed rows", () => {
     rows.map((row) => row.getAttribute("data-session-editor-kind")),
   ).toEqual(["provider", "tools"]);
   for (const row of rows) {
-    expect(row.classList).toContain("py-0");
+    expect(row.classList).toContain("py-1.5");
+    expect(row.classList).not.toContain("py-0");
     expect(row.classList).not.toContain("py-1");
     expect(row.classList).not.toContain("py-2");
     expect(row.children).toHaveLength(1);
