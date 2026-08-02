@@ -65,6 +65,14 @@ function fallbackModel(
   return testAgentModelOption({ id, inputModalities, label });
 }
 
+function fallbackSelectionValue(
+  container: ParentNode,
+  name: string,
+): string | undefined {
+  return container.querySelector<HTMLInputElement>(`input[name='${name}']`)
+    ?.value;
+}
+
 async function expectDiscoveredModel(
   discoverModels: ReturnType<typeof vi.fn>,
   container: ParentNode,
@@ -215,10 +223,27 @@ test("offers only fallback models supporting the selected attachment modality", 
   );
 
   await expectModelDiscovery(discoverModels, 1);
-  const modality = container.querySelector<HTMLSelectElement>("select");
-  if (modality === null) throw new TypeError("Missing modality select");
-  modality.value = "audio";
-  modality.dispatchEvent(new Event("change", { bubbles: true }));
+  expect(
+    container.querySelector("select[name='attachmentFallbackModality']"),
+  ).toBeNull();
+  const modalityControl = container.querySelector(
+    "[data-custom-select='attachmentFallbackModality']",
+  );
+  expect(modalityControl).not.toBeNull();
+  expect(fallbackSelectionValue(container, "attachmentFallbackModality")).toBe(
+    "image",
+  );
+  openFallbackSelect(container, "attachmentFallbackModality");
+  for (const label of ["Image", "Video", "Audio", "PDF", "File"]) {
+    expect(modalityControl?.textContent).toContain(label);
+  }
+  clickTestButton(
+    container,
+    "[data-custom-select='attachmentFallbackModality'] [data-option-value='audio']",
+  );
+  expect(fallbackSelectionValue(container, "attachmentFallbackModality")).toBe(
+    "audio",
+  );
 
   await expectDiscoveredModel(discoverModels, container, 2, "audio-model");
   openFallbackSelect(container, "attachmentFallbackModel");

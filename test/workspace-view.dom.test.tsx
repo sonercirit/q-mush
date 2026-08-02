@@ -154,14 +154,23 @@ test("discovers global fallbacks through the mounted workspace", async () => {
     () => selectedFallbackModel(container) === "openrouter/image-model",
   );
 
-  const modality = container.querySelector<HTMLSelectElement>(
-    "select[name='attachmentFallbackModality']",
+  const modality = container.querySelector(
+    "[data-custom-select='attachmentFallbackModality']",
   );
-  expect(modality).toBeInstanceOf(HTMLSelectElement);
-  if (modality === null) return;
-  modality.value = "audio";
-  modality.dispatchEvent(new InputEvent("input", { bubbles: true }));
-  modality.dispatchEvent(new InputEvent("change", { bubbles: true }));
+  expect(modality).not.toBeNull();
+  expect(
+    container.querySelector<HTMLInputElement>(
+      "input[name='attachmentFallbackModality']",
+    )?.value,
+  ).toBe("image");
+  clickTestButton(
+    container,
+    "[data-custom-select='attachmentFallbackModality'] > button",
+  );
+  clickTestButton(
+    container,
+    "[data-custom-select='attachmentFallbackModality'] [data-option-value='audio']",
+  );
   await vi.waitUntil(
     () => selectedFallbackModel(container) === "openrouter/audio-model",
   );

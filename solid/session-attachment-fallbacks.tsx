@@ -1,11 +1,4 @@
-import {
-  createEffect,
-  createSignal,
-  For,
-  Show,
-  untrack,
-  type JSX,
-} from "solid-js";
+import { createEffect, createSignal, Show, untrack, type JSX } from "solid-js";
 import {
   AGENT_ATTACHMENT_MODALITIES,
   type AgentAttachmentModality,
@@ -18,6 +11,7 @@ import { SESSION_ATTACHMENT_FALLBACKS_PATH } from "../shared/routes.ts";
 import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 import { requestJson } from "./browser-http.ts";
 import { RetryNotice } from "./collection.tsx";
+import { CustomSelect } from "./custom-select.tsx";
 import { modalityLabel } from "./model-modalities-client.tsx";
 import type { SessionCredentialOption } from "./session-credential-option.ts";
 import {
@@ -69,6 +63,7 @@ export function AttachmentFallbackSettings(props: {
       onDiscoverModels: discoverFallbackModels,
     },
   );
+  const [openModality, setOpenModality] = createSignal(false);
   const [openProvider, setOpenProvider] = createSignal(false);
 
   createEffect(() => {
@@ -99,6 +94,7 @@ export function AttachmentFallbackSettings(props: {
     for (const candidate of AGENT_ATTACHMENT_MODALITIES) {
       if (candidate === value) {
         setModality(candidate);
+        setOpenModality(false);
         if (picker.draft().credential.length > 0) {
           void picker.editor.discover(picker.draft().credential);
         }
@@ -155,25 +151,24 @@ export function AttachmentFallbackSettings(props: {
         with optional instructions for that call.
       </p>
       <div class="mt-5 grid gap-4 sm:grid-cols-2">
-        <label class="text-sm font-medium text-slate-200">
-          Modality
-          <select
-            class="mt-2 w-full rounded-xl border border-white/10 bg-slate-950 p-3 text-sm text-white"
-            name="attachmentFallbackModality"
-            onChange={(event) => {
-              selectModality(event.currentTarget.value);
-            }}
-            value={modality()}
-          >
-            <For each={AGENT_ATTACHMENT_MODALITIES}>
-              {(value) => (
-                <option value={value}>
-                  {modalityLabel(value).replace("Pdf", "PDF")}
-                </option>
-              )}
-            </For>
-          </select>
-        </label>
+        <CustomSelect
+          disabled={saving()}
+          emptyLabel="Choose modality"
+          id="attachment-fallback-modality"
+          label="Modality"
+          name="attachmentFallbackModality"
+          onChoose={selectModality}
+          onToggle={() => {
+            setOpenModality(!openModality());
+          }}
+          open={openModality()}
+          options={AGENT_ATTACHMENT_MODALITIES.map((value) => ({
+            label: modalityLabel(value).replace("Pdf", "PDF"),
+            value,
+          }))}
+          required
+          selectedValue={modality()}
+        />
         <SessionModelPickerFields
           catalog={picker.editor.catalog()}
           credentialEmptyLabel="No global model credentials"
