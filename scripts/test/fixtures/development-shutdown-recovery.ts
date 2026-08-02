@@ -29,7 +29,7 @@ function shutdownStore() {
   });
 }
 
-if (mode === "start") {
+if (mode === "start" || mode === "start-no-ack") {
   const userId = createUuidV7(now);
   const workspaceId = createUuidV7(now + 1);
   const runnerId = createUuidV7(now + 2);
@@ -130,7 +130,9 @@ if (mode === "start") {
     void Bun.sleep(150)
       .then(() => runtimes.mark({ kind: "server" }, "bounded-final-shutdown"))
       .then(() => {
-        process.send?.(FINAL_SHUTDOWN_PREPARED_MESSAGE);
+        if (mode === "start") {
+          process.send?.(FINAL_SHUTDOWN_PREPARED_MESSAGE);
+        }
       });
   });
   await Bun.write(statePath, JSON.stringify({ sessionId, userId }));
