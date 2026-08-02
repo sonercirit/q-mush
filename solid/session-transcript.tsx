@@ -22,6 +22,7 @@ import { clipboardCopyLabel, createClipboardCopy } from "./clipboard-copy.ts";
 import { createNestedScrollRef } from "./nested-scroll.ts";
 import { renderDebugBoundary } from "./render-debug.tsx";
 import { ActiveStepAnchor } from "./session-active-step.tsx";
+import { CompactionRequestTranscriptMessage } from "./session-compaction-transcript-message.tsx";
 import { SessionImagePreviews } from "./session-image-client.tsx";
 import {
   LiveToolActivityContent,
@@ -38,15 +39,16 @@ import {
   createSessionTranscriptCounts,
   type SessionTranscriptCounts,
 } from "./session-transcript-counts.ts";
-import type {
-  SessionTranscriptFilterName,
-  SessionTranscriptFilters,
-} from "./session-transcript-filters.ts";
+import type { SessionTranscriptFilters } from "./session-transcript-filters.ts";
 import {
   createSessionTranscriptMessageGroups,
   transcriptNestedScrollKeys,
 } from "./session-transcript-messages.ts";
 import { TranscriptStepTiming } from "./session-transcript-step-timing.tsx";
+import {
+  SESSION_TRANSCRIPT_FILTER_NAMES,
+  transcriptMessageIsVisible,
+} from "./session-transcript-visibility.ts";
 
 function TranscriptNote(props: {
   readonly boundaryKey: string;
@@ -309,43 +311,6 @@ function ConversationTranscriptMessage(props: {
   );
 }
 
-function messageIsVisible(
-  message: AgentSessionMessage,
-  filters: SessionTranscriptFilters,
-): boolean {
-  switch (message.role) {
-    case "compaction_request":
-      return filters.notices;
-    case "error":
-    case "system":
-      return filters.notices;
-    case "thinking":
-      return filters.thinking;
-    case "tool":
-      return filters.toolActivity;
-    case "user":
-      return filters.userMessages;
-    case "assistant":
-      return (
-        (filters.assistantMessages &&
-          (message.content.length > 0 || message.images.length > 0)) ||
-        (filters.toolActivity && message.toolCalls.length > 0)
-      );
-  }
-}
-
-const SESSION_TRANSCRIPT_FILTER_NAMES: readonly SessionTranscriptFilterName[] =
-  [
-    "agentInstructions",
-    "assistantMessages",
-    "notices",
-    "systemPrompt",
-    "thinking",
-    "toolActivity",
-    "toolDefinitions",
-    "userMessages",
-  ];
-
 type TranscriptRenderableMessageProps = TranscriptMessageProps & {
   readonly filters: Readonly<SessionTranscriptFilters>;
   readonly liveToolStreams: readonly ToolStreamEntry[];
@@ -370,16 +335,7 @@ function renderTranscriptMessage(
         />
       );
     case "compaction_request":
-      return (
-        <>
-          {transcriptMessageNote({
-            classes: "border-amber-300/20 bg-amber-300/10",
-            label: "Compaction request",
-            labelClasses: "text-amber-200",
-            message: props.message,
-          })}
-        </>
-      );
+      return <CompactionRequestTranscriptMessage message={props.message} />;
     case "error":
       return <NoteTranscriptMessage kind="error" message={props.message} />;
     case "thinking":
@@ -501,7 +457,7 @@ export function SessionTranscript(props: {
     standaloneToolStreams().length === 0
       ? messageGroups().streamed
       : messageGroups().streamed.filter((message) =>
-          messageIsVisible(message, props.filters),
+          transcriptMessageIsVisible(message, props.filters),
         ),
   );
   const renderMessageWithStreams = (
@@ -509,7 +465,7 @@ export function SessionTranscript(props: {
     liveToolStreams: readonly ToolStreamEntry[],
   ): JSX.Element => (
     <>
-      <Show when={messageIsVisible(message, props.filters)}>
+      <Show when={transcriptMessageIsVisible(message, props.filters)}>
         <TranscriptMessage
           callArguments={() => counts().toolCallArguments}
           filters={props.filters}

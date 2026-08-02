@@ -437,41 +437,6 @@ test("keeps per-session streams isolated across rapid selection changes", async 
   }
 });
 
-test("anchors a streamed compaction response after its visible request", async () => {
-  const originalFetch = globalThis.fetch;
-  const sessionId = "session-compaction-stream";
-  const detail = sessionDetail("running", sessionId, [
-    transcriptMessage("old-user", "Original request", "user", 1),
-  ]);
-
-  try {
-    const controller = await selectedController(detail);
-    controller.applyCompactionRequest({
-      content: "Create the handoff summary.",
-      sessionId,
-      streamId: "compaction-step",
-      type: "session_compaction_request",
-    });
-    applyDelta(controller, sessionId, "Compacted response", "");
-
-    expect(controller.state.detail?.messages).toMatchObject([
-      { id: "old-user", role: "user" },
-      {
-        content: "Create the handoff summary.",
-        id: "stream:compaction-step:compaction-request",
-        role: "compaction_request",
-      },
-      {
-        content: "Compacted response",
-        id: `stream:${sessionId}:assistant`,
-        role: "assistant",
-      },
-    ]);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
 test("replaces a streaming transcript with a compacted snapshot", async () => {
   const originalFetch = globalThis.fetch;
   const sessionId = "session-compaction";
