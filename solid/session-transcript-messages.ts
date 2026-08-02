@@ -14,29 +14,47 @@ function streamStart(messages: readonly AgentSessionMessage[]): number {
   return start;
 }
 
-export function transcriptMessageNestedScrollKey(
+export interface TranscriptNestedScrollKeys {
+  readonly byMessageId: ReadonlyMap<string, string>;
+  readonly nextByRole: ReadonlyMap<AgentSessionMessage["role"], string>;
+}
+
+export function transcriptNestedScrollKeys(
   messages: readonly AgentSessionMessage[],
-  message: AgentSessionMessage,
-): string {
-  if (message.role !== "assistant" && message.role !== "thinking") {
-    return message.id;
+): TranscriptNestedScrollKeys {
+  const byMessageId = new Map<string, string>();
+  let anchor: string | undefined;
+  const roleOrdinals = new Map<AgentSessionMessage["role"], number>();
+  for (const message of messages) {
+    if (message.role === "assistant" || message.role === "thinking") {
+      const ordinal = roleOrdinals.get(message.role) ?? 0;
+      byMessageId.set(
+        message.id,
+        anchor === undefined
+          ? message.id
+          : `after:${anchor}:${message.role}:${String(ordinal)}`,
+      );
+      roleOrdinals.set(message.role, ordinal + 1);
+    } else {
+      anchor = message.id;
+      roleOrdinals.clear();
+      byMessageId.set(message.id, message.id);
+    }
   }
-  const index = messages.indexOf(message);
-  let anchor = index - 1;
-  while (
-    anchor >= 0 &&
-    (messages[anchor]?.role === "assistant" ||
-      messages[anchor]?.role === "thinking")
-  ) {
-    anchor -= 1;
-  }
-  const anchorMessage = messages[anchor];
-  if (anchorMessage === undefined) return message.id;
-  let ordinal = 0;
-  for (let candidate = anchor + 1; candidate < index; candidate += 1) {
-    if (messages[candidate]?.role === message.role) ordinal += 1;
-  }
-  return `after:${anchorMessage.id}:${message.role}:${String(ordinal)}`;
+  return {
+    byMessageId,
+    nextByRole: new Map(
+      (["assistant", "thinking"] as const).map((role) => {
+        const ordinal = roleOrdinals.get(role) ?? 0;
+        return [
+          role,
+          anchor === undefined
+            ? role
+            : `after:${anchor}:${role}:${String(ordinal)}`,
+        ];
+      }),
+    ),
+  };
 }
 
 export function createSessionTranscriptMessageGroups(
