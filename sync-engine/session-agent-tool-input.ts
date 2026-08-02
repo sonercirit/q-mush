@@ -60,7 +60,8 @@ function pageAndSearch(
   arguments_: Readonly<Record<string, unknown>>,
   maximumSearchLength: number,
 ): PageAndSearch {
-  const page = arguments_["page"] ?? 1;
+  const pageValue = arguments_["page"];
+  const page = pageValue === undefined ? 1 : pageValue;
   const searchValue = arguments_["search"];
   const search =
     searchValue === undefined
@@ -82,7 +83,11 @@ export function listSessionsToolInput(
     arguments_,
     MAXIMUM_LIST_SESSIONS_SEARCH_LENGTH,
   );
-  const pageSize = arguments_["pageSize"] ?? DEFAULT_LIST_SESSIONS_PAGE_SIZE;
+  const pageSizeValue = arguments_["pageSize"];
+  const pageSize =
+    pageSizeValue === undefined
+      ? DEFAULT_LIST_SESSIONS_PAGE_SIZE
+      : pageSizeValue;
   if (
     !hasOnlySessionToolArguments(arguments_, ["page", "pageSize", "search"]) ||
     typeof page !== "number" ||

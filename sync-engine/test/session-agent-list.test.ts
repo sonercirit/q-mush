@@ -21,14 +21,21 @@ import {
   startToolSession,
   toolCall,
 } from "./session-agent-tool-setup.ts";
-import { CREDENTIAL_ID, RUNNER_ID } from "./session-integration-fixtures.ts";
+import {
+  CREDENTIAL_ID,
+  RUNNER_ID,
+  SESSION_ID,
+} from "./session-integration-fixtures.ts";
 
-test("paginates and searches session listings at the dispatch mount", async () => {
+test("paginates, validates, and bounds session listings at dispatch", async () => {
   const listCalls = [
     {},
     { page: 2, pageSize: 2, search: "RUNNING" },
     { page: 99, pageSize: 2 },
     { search: "no matching session" },
+    { page: null },
+    { pageSize: null },
+    { page: 1.5 },
     { page: 0 },
     { pageSize: MAXIMUM_LIST_SESSIONS_PAGE_SIZE + 1 },
     { unexpected: true },
@@ -108,8 +115,60 @@ test("paginates and searches session listings at the dispatch mount", async () =
     expect.stringContaining("list_sessions arguments are invalid"),
     expect.stringContaining("list_sessions arguments are invalid"),
     expect.stringContaining("list_sessions arguments are invalid"),
+    expect.stringContaining("list_sessions arguments are invalid"),
+    expect.stringContaining("list_sessions arguments are invalid"),
+    expect.stringContaining("list_sessions arguments are invalid"),
   ]);
   expect(Buffer.byteLength(outputs[0] ?? "", "utf8")).toBeLessThan(50 * 1_024);
   expect(outputs[0]).not.toContain("Output exceeds the per-call limit");
   closeToolSession(setup);
+
+  const maximumText = "\u0000".repeat(100);
+  const maxModel = scriptedModel([
+    {
+      content: "Inspect the largest session-list page.",
+      toolCalls: [
+        toolCall("list_sessions", {
+          pageSize: MAXIMUM_LIST_SESSIONS_PAGE_SIZE,
+          search: maximumText,
+        }),
+      ],
+    },
+    { content: "Largest page checked.", toolCalls: [] },
+  ]);
+  const maxSetup = await startToolSession(maxModel);
+  maxSetup.database
+    .insert(agentSessions)
+    .values(
+      Array.from({ length: MAXIMUM_LIST_SESSIONS_PAGE_SIZE }, (_, index) => ({
+        ...testAuditFields(),
+        executionEnvironment: "bare_metal" as const,
+        id: `maximal-list-session-${String(index).padStart(2, "0")}`,
+        model: maximumText,
+        parentSessionId: SESSION_ID,
+        provider: "openrouter" as const,
+        providerCredentialId: CREDENTIAL_ID,
+        runnerId: RUNNER_ID,
+        status: "completed" as const,
+        title: maximumText,
+        tools: JSON.stringify(AGENT_SESSION_TOOL_NAMES),
+        userId: TEST_USER_ID,
+        workingDirectory: maximumText,
+        workspaceId: TEST_WORKSPACE_ID,
+      })),
+    )
+    .run();
+  const [maxOutput] = findToolResultContents(
+    await completedParentDetail(maxSetup, "idle"),
+    "list_sessions",
+  );
+
+  expect(maxOutput).not.toContain("bounded session list output is too large");
+  expect(records(jsonRecord(maxOutput ?? "null")["items"])).toHaveLength(
+    MAXIMUM_LIST_SESSIONS_PAGE_SIZE,
+  );
+  expect(Buffer.byteLength(maxOutput ?? "", "utf8")).toBeLessThanOrEqual(
+    48_000,
+  );
+  closeToolSession(maxSetup);
 });

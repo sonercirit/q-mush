@@ -264,17 +264,17 @@ const SESSION_AGENT_TOOLS = [
   }),
   toolDefinition({
     description:
-      "List sessions with pagination (page defaults to 1; pageSize defaults to 20, max 100). Search is case-insensitive across title, status, model, provider, and working directory.",
+      "List sessions with pagination (page defaults to 1; pageSize defaults to 20, max 26). Search is case-insensitive across title, status, model, provider, and working directory.",
     name: "list_sessions",
     properties: {
       page: {
         minimum: 1,
-        ...NUMBER_PARAMETER,
+        type: "integer",
       },
       pageSize: {
-        maximum: 100,
+        maximum: 26,
         minimum: 1,
-        ...NUMBER_PARAMETER,
+        type: "integer",
       },
       search: {
         maxLength: 100,
