@@ -133,11 +133,21 @@ export class SessionRestartCoordinator {
       this.#resetRetry(runnerId);
     }
     this.#options.restart.recover((selectedRunnerId) => {
-      if (
-        selectedRunnerId === undefined ||
-        !this.#recoveries.has(selectedRunnerId)
-      ) {
-        this.#recover(selectedRunnerId, restartId);
+      const runnerIds =
+        selectedRunnerId === undefined
+          ? new Set([
+              ...this.#options.store
+                .pendingRestartHandoffs()
+                .map(({ detail }) => detail.runnerId),
+              ...this.#options.store
+                .invalidRestartHandoffs()
+                .map(({ runnerId: invalidRunnerId }) => invalidRunnerId),
+            ])
+          : [selectedRunnerId];
+      for (const selected of runnerIds) {
+        if (!this.#recoveries.has(selected)) {
+          this.#recover(selected, restartId);
+        }
       }
     }, runnerId);
   }

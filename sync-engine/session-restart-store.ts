@@ -1,7 +1,7 @@
-import { and, eq, isNotNull, type SQL, sql } from "drizzle-orm";
-import { createdAuditFields, updatedAuditFields } from "../shared/audit.ts";
+import { and, eq, isNotNull, type SQL } from "drizzle-orm";
+import { updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
-import { agentMessages, agentSessions } from "../shared/database/schema.ts";
+import { agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID } from "../shared/ids.ts";
 import type {
   AgentSessionDetail,
@@ -12,6 +12,7 @@ import type {
 } from "../shared/session-model.ts";
 import { readNonNegativeSafeInteger } from "../shared/validation.ts";
 import type { SessionExecutionAuthority } from "./session-execution-authority.ts";
+import { failRestartSession } from "./session-restart-failure-store.ts";
 import { restartHandoffValues } from "./session-restart-handoff.ts";
 import { runnerSessionCondition } from "./session-runner-condition.ts";
 import {
@@ -23,7 +24,10 @@ import {
 } from "./session-store-persistence.ts";
 import type { InterruptedStoredSession } from "./session-store-reassignment.ts";
 import type { SessionStoreWriteResources } from "./session-store-resources.ts";
-import { errorMessageValues } from "./session-store-values.ts";
+import {
+  errorMessageValues,
+  insertStoredMessage,
+} from "./session-store-values.ts";
 import {
   rotateSessionTurn,
   updateSessionAndEndGenerationTurn,
@@ -33,6 +37,13 @@ export type {
   RestartHandoff,
   RestartHandoffRequester,
 } from "../shared/session-model.ts";
+
+export interface InvalidRestartSession {
+  readonly rawHandoff: string;
+  readonly runnerId: string;
+  readonly sessionId: string;
+  readonly userId: string;
+}
 
 export interface PendingRestartSession {
   readonly detail: AgentSessionDetail & {
@@ -356,12 +367,13 @@ export class RestartHandoffStore {
     );
   }
 
-  pending(runnerId?: string): readonly PendingRestartSession[] {
+  #restartRows(runnerId?: string) {
     return this.#options.database
       .select({
         executionGeneration: agentSessions.executionGeneration,
         id: agentSessions.id,
         restartHandoff: agentSessions.restartHandoff,
+        runnerId: agentSessions.runnerId,
         userId: agentSessions.userId,
       })
       .from(agentSessions)
@@ -372,9 +384,41 @@ export class RestartHandoffStore {
           runnerSessionCondition(runnerId),
         ),
       )
-      .all()
-      .flatMap(({ executionGeneration, id, restartHandoff, userId }) => {
-        const handoff = parseRestartHandoff(restartHandoff);
+      .all();
+  }
+
+  invalid(runnerId?: string): readonly InvalidRestartSession[] {
+    return this.#restartRows(runnerId).flatMap(
+      ({ restartHandoff, runnerId: selectedRunnerId, id, userId }) => {
+        if (restartHandoff === null) {
+          return [];
+        }
+        try {
+          parseRestartHandoff(restartHandoff);
+          return [];
+        } catch {
+          return [
+            {
+              rawHandoff: restartHandoff,
+              runnerId: selectedRunnerId,
+              sessionId: id,
+              userId,
+            },
+          ];
+        }
+      },
+    );
+  }
+
+  pending(runnerId?: string): readonly PendingRestartSession[] {
+    return this.#restartRows(runnerId).flatMap(
+      ({ executionGeneration, id, restartHandoff, userId }) => {
+        let handoff: RestartHandoff | null;
+        try {
+          handoff = parseRestartHandoff(restartHandoff);
+        } catch {
+          return [];
+        }
         const current = this.#options.read(userId, id);
         const detail =
           current === undefined
@@ -384,7 +428,69 @@ export class RestartHandoffStore {
           detail === undefined
           ? []
           : [{ detail, handoff, userId }];
-      });
+      },
+    );
+  }
+
+  failInvalid(
+    invalid: InvalidRestartSession,
+    error: string,
+    now: number,
+  ): boolean {
+    return this.#options.database.transaction((transaction) => {
+      const condition = and(
+        activeSessionCondition({
+          id: invalid.sessionId,
+          status: "paused",
+          userId: invalid.userId,
+        }),
+        eq(agentSessions.restartHandoff, invalid.rawHandoff),
+      );
+      const generation = transaction.query.agentSessions
+        .findFirst({
+          columns: { executionGeneration: true },
+          where: condition,
+        })
+        .sync()?.executionGeneration;
+      return generation === undefined
+        ? false
+        : failRestartSession(
+            {
+              condition,
+              database: transaction,
+              generateId: this.#options.generateId,
+              generation,
+              now,
+              sessionId: invalid.sessionId,
+              userId: invalid.userId,
+            },
+            error,
+          );
+    });
+  }
+
+  failQueued(
+    userId: string,
+    identity: RestartHandoffIdentity,
+    error: string,
+    now: number,
+  ): boolean {
+    return (
+      this.#withExactHandoff(userId, identity, "queued", (transaction, exact) =>
+        failRestartSession(
+          {
+            condition: exactHandoffCondition(exact, "queued", userId),
+            database: transaction,
+            generateId: this.#options.generateId,
+            generation: identity.generation,
+            now,
+            sessionId: identity.sessionId,
+            userId,
+          },
+          error,
+        ),
+      ) ?? false
+    );
   }
 
   #withExactHandoff<T>(
@@ -498,18 +604,17 @@ export class RestartHandoffStore {
             return false;
           }
           if (settlement.status === "failed") {
-            const message = errorMessageValues(settlement.error);
-            transaction
-              .insert(agentMessages)
-              .values({
-                ...createdAuditFields(SYSTEM_ID, now),
-                ...message,
+            insertStoredMessage(
+              transaction,
+              errorMessageValues(settlement.error),
+              {
+                actorId: SYSTEM_ID,
                 id: this.#options.generateId(now),
-                segment: sql<number>`(SELECT ${agentSessions.currentSegment} FROM ${agentSessions} WHERE ${agentSessions.id} = ${identity.sessionId})`,
+                now,
                 sessionId: identity.sessionId,
                 userId,
-              })
-              .run();
+              },
+            );
           }
           return true;
         },
