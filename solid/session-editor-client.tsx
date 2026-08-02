@@ -49,7 +49,7 @@ export function SessionEditorSection(
   const [expanded, setExpanded] = createSignal(false);
   return (
     <section
-      class={`${SESSION_EDITOR_SECTION_CLASSES} ${expanded() ? "py-2" : "py-0"}`}
+      class={`${SESSION_EDITOR_SECTION_CLASSES} ${expanded() ? "py-2" : "py-1.5"}`}
       data-session-editor-kind={props.kind}
     >
       <h4
