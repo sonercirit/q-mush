@@ -21,9 +21,13 @@ import {
 import {
   createSessionModelPickerState,
   SessionModelPickerFields,
+  type SessionModelPickerSelection,
 } from "./session-model-picker.tsx";
 import { OpenRouterProviderSelect } from "./session-provider-select.tsx";
 import { discoverProviderUpdateProviders } from "./session-provider-update-controller.ts";
+
+type AttachmentFallbackOpen =
+  "credential" | "modality" | "model" | "provider" | "reasoning";
 
 export function AttachmentFallbackSettings(props: {
   readonly credentials: readonly SessionCredentialOption[];
@@ -54,7 +58,10 @@ export function AttachmentFallbackSettings(props: {
           ),
         };
   };
-  const picker = createSessionModelPickerState(
+  const picker = createSessionModelPickerState<
+    SessionModelPickerSelection,
+    AttachmentFallbackOpen
+  >(
     { credential: "", model: "", reasoningEffort: "" },
     {
       get credentials() {
@@ -63,8 +70,6 @@ export function AttachmentFallbackSettings(props: {
       onDiscoverModels: discoverFallbackModels,
     },
   );
-  const [openModality, setOpenModality] = createSignal(false);
-  const [openProvider, setOpenProvider] = createSignal(false);
 
   createEffect(() => {
     const first = props.credentials[0];
@@ -94,7 +99,7 @@ export function AttachmentFallbackSettings(props: {
     for (const candidate of AGENT_ATTACHMENT_MODALITIES) {
       if (candidate === value) {
         setModality(candidate);
-        setOpenModality(false);
+        picker.setOpen(undefined);
         if (picker.draft().credential.length > 0) {
           void picker.editor.discover(picker.draft().credential);
         }
@@ -159,9 +164,11 @@ export function AttachmentFallbackSettings(props: {
           name="attachmentFallbackModality"
           onChoose={selectModality}
           onToggle={() => {
-            setOpenModality(!openModality());
+            picker.setOpen(
+              picker.open() === "modality" ? undefined : "modality",
+            );
           }}
-          open={openModality()}
+          open={picker.open() === "modality"}
           options={AGENT_ATTACHMENT_MODALITIES.map((value) => ({
             label: modalityLabel(value).replace("Pdf", "PDF"),
             value,
@@ -194,7 +201,15 @@ export function AttachmentFallbackSettings(props: {
           onToggle={(name) =>
             picker.setOpen(picker.open() === name ? undefined : name)
           }
-          open={picker.open()}
+          open={
+            picker.open() === "credential"
+              ? "credential"
+              : picker.open() === "model"
+                ? "model"
+                : picker.open() === "reasoning"
+                  ? "reasoning"
+                  : undefined
+          }
           selection={picker.draft()}
         />
         <Show when={selectedCredential()?.provider === "openrouter"}>
@@ -202,12 +217,15 @@ export function AttachmentFallbackSettings(props: {
             controller={{
               chooseOption: (_name, value) => {
                 setProviderTag(value);
-                setOpenProvider(false);
+                picker.setOpen(undefined);
               },
               retryProviders: () => {
                 void discoverProviders(picker.draft().model);
               },
-              toggleSelect: () => setOpenProvider(!openProvider()),
+              toggleSelect: () =>
+                picker.setOpen(
+                  picker.open() === "provider" ? undefined : "provider",
+                ),
             }}
             creating={saving()}
             discovery={{
@@ -216,7 +234,7 @@ export function AttachmentFallbackSettings(props: {
               key: "global-attachment-fallback",
               loading: false,
             }}
-            open={openProvider()}
+            open={picker.open() === "provider"}
             selectedValue={providerTag()}
           />
         </Show>
