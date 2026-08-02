@@ -1,9 +1,21 @@
 import { createDatabase } from "../shared/database.ts";
 import { readDatabasePath } from "../shared/database/config.ts";
-import { FINAL_SHUTDOWN_PREPARED_MESSAGE } from "../shared/development-shutdown.ts";
 import { createGoogleAuthFromEnvironment } from "./auth.ts";
 import { createBraveSearchSkillFromEnvironment } from "./brave-search.ts";
 import { createCoreIntegrationResources } from "./core-integration-resources.ts";
+import {
+  cleanupRepairSnapshots,
+  startDatabaseFreeSpaceMonitor,
+} from "./database-storage-maintenance.ts";
+import {
+  enableIncrementalVacuum,
+  startIncrementalVacuum,
+} from "./database-vacuum.ts";
+import {
+  DatabaseWriteResilience,
+  installDatabaseWriteResilience,
+} from "./database-write-resilience.ts";
+import { EngineHealth } from "./engine-health.ts";
 import { createGenericIntegrationFromEnvironment } from "./generic-provider.ts";
 import {
   createOpenAiIntegrationFromEnvironment,
@@ -30,7 +42,22 @@ import {
 import { createSessionsChangedPublisher } from "./session-credential-reassignment-realtime.ts";
 import { createSessionIntegration } from "./sessions.ts";
 
-const database = createDatabase(readDatabasePath(Bun.env));
+const databasePath = readDatabasePath(Bun.env);
+const health = new EngineHealth();
+cleanupRepairSnapshots(databasePath);
+const database = createDatabase(databasePath);
+const vacuum = enableIncrementalVacuum(database.$client);
+if (vacuum.requiresRebuild) {
+  console.warn(
+    "Q Mush database needs a one-time offline VACUUM before periodic incremental vacuum can reclaim pages",
+  );
+}
+installDatabaseWriteResilience(
+  database,
+  new DatabaseWriteResilience({ health }),
+);
+const freeSpaceMonitor = startDatabaseFreeSpaceMonitor(databasePath, health);
+const vacuumTimer = startIncrementalVacuum(database.$client);
 const [clientJavaScript, pages, runnerExecutables, stylesheet] =
   await Promise.all([
     buildClientJavaScript(),
@@ -73,6 +100,7 @@ const sessions = createSessionIntegration(
 );
 const realtime = createRealtimeIntegration({
   auth: googleAuth,
+  health,
   hub: realtimeHub,
   runnerVersion: runnerExecutables.version,
   runners,
@@ -130,8 +158,10 @@ async function shutDown(): Promise<void> {
   }
 
   shuttingDown = true;
-  await sessions.prepareFinalShutdown();
-  process.send?.(FINAL_SHUTDOWN_PREPARED_MESSAGE);
+  clearInterval(vacuumTimer);
+  if (freeSpaceMonitor !== undefined) {
+    clearInterval(freeSpaceMonitor);
+  }
   await sessions.drain();
   await Promise.all([server.stop(), callbackServer?.stop()]);
   database.$client.close();

@@ -9,6 +9,7 @@ import { isWorkspaceId } from "../shared/workspace-model.ts";
 import type { GoogleAuth } from "./auth.ts";
 import { withAuthenticatedUser } from "./authenticated-request.ts";
 import { scopedCollectionForUser } from "./authenticated-scoped-collection.ts";
+import { runNoncriticalDatabaseWrite } from "./database-write-resilience.ts";
 import {
   createApiError,
   createJsonResponse,
@@ -266,7 +267,9 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
   }
 
   #setOnline(runner: RunnerConnection, online: boolean): void {
-    this.#store.setOnline(runner.id, runner.userId, this.#now(), online);
+    runNoncriticalDatabaseWrite(this.#store.database, () => {
+      this.#store.setOnline(runner.id, runner.userId, this.#now(), online);
+    });
   }
 
   disconnected(runner: RunnerConnection): void {

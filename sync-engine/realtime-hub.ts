@@ -150,6 +150,16 @@ export class RealtimeHub {
       .filter((workspaceId) => workspaceId !== "*");
   }
 
+  userIds(): readonly string[] {
+    return [
+      ...new Set(
+        [...this.#connections.user.keys()]
+          .map((key) => /^user:([^:]+):/u.exec(key)?.[1])
+          .filter((userId) => userId !== undefined),
+      ),
+    ];
+  }
+
   publishRunnerCancellation(runnerId: string, commandId: string): void {
     publish(this.#sockets("runner", runnerId), { commandId, type: "cancel" });
   }

@@ -1,4 +1,5 @@
 import type { PendingAskQuestions } from "../shared/ask-questions.ts";
+import type { EngineHealthSnapshot } from "../shared/engine-health.ts";
 import {
   parseJsonRecord,
   requiredRecordString,
@@ -33,6 +34,7 @@ export type RealtimeServerEvent =
       readonly type: "command_success";
     }
   | { readonly instanceId: string; readonly type: "ready" }
+  | { readonly health: EngineHealthSnapshot; readonly type: "health" }
   | ToolStreamDeltaFrame
   | ToolStreamSnapshotFrame
   | { readonly runners: readonly RunnerSummary[]; readonly type: "runners" }
@@ -76,6 +78,26 @@ export function readRealtimeServerEvent(message: string): RealtimeServerEvent {
   switch (value["type"]) {
     case "ready":
       return { instanceId: requiredString(value, "instanceId"), type: "ready" };
+    case "health": {
+      const health = value["health"];
+      if (
+        typeof health !== "object" ||
+        health === null ||
+        !("degraded" in health) ||
+        typeof health.degraded !== "boolean" ||
+        !("reasons" in health) ||
+        !Array.isArray(health.reasons) ||
+        !health.reasons.every(
+          (reason) => reason === "disk_full" || reason === "low_disk_space",
+        )
+      ) {
+        throw new Error("The realtime server event was invalid");
+      }
+      return {
+        health: { degraded: health.degraded, reasons: health.reasons },
+        type: "health",
+      };
+    }
     case "command_success":
       return {
         commandId: requiredString(value, "commandId"),

@@ -531,6 +531,10 @@ export class RealtimeConnection {
       this.#listener(event);
       return;
     }
+    if (event.type === "health") {
+      this.#listener(event);
+      return;
+    }
     if (event.type === "session_delta" || event.type === "tool_stream") {
       this.#queueStreamEvent(event);
       return;

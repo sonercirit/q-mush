@@ -8,6 +8,20 @@ function roundTrip(payload: Readonly<Record<string, unknown>>): unknown {
   return readRealtimeServerEvent(JSON.stringify(payload));
 }
 
+test("reads storage-health warnings", () => {
+  const expected = {
+    health: { degraded: true, reasons: ["disk_full", "low_disk_space"] },
+    type: "health",
+  } as const;
+  expect(roundTrip(expected)).toEqual(expected);
+  expect(() =>
+    roundTrip({
+      health: { degraded: true, reasons: ["unknown"] },
+      type: "health",
+    }),
+  ).toThrow("invalid");
+});
+
 test("reads complete session snapshots from realtime messages", () => {
   expect(roundTrip({ session: TEST_SESSION_DETAIL, type: "session" })).toEqual({
     session: TEST_SESSION_DETAIL,

@@ -205,8 +205,12 @@ export class RunnerStore {
     );
   }
 
-  get #database(): AppDatabase {
+  get database(): AppDatabase {
     return this.#context.database;
+  }
+
+  get #database(): AppDatabase {
+    return this.database;
   }
 
   #backfillLegacyToken(token: string, digest: string): boolean {

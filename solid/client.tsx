@@ -272,6 +272,7 @@ function SignIn(props: {
 function App(): JSX.Element {
   const [loadFailed, setLoadFailed] = createSignal(false);
   const [logoutPending, setLogoutPending] = createSignal(false);
+  const [storageWarning, setStorageWarning] = createSignal(false);
   const [session, setSession] = createSignal<AuthSession>();
   const notices = readNotices();
   const debug = new RenderDebugView();
@@ -283,6 +284,9 @@ function App(): JSX.Element {
   const runners = new RunnerController();
   const realtime = new RealtimeConnection((event) => {
     switch (event.type) {
+      case "health":
+        setStorageWarning(event.health.degraded);
+        break;
       case "runners":
         runners.applyRealtime(event.runners);
         break;
@@ -445,6 +449,15 @@ function App(): JSX.Element {
             <p class="mt-5 max-w-2xl text-lg leading-8 text-slate-400">
               Coordinate your local swarm from one authenticated workspace.
             </p>
+            <Show when={storageWarning()}>
+              <p
+                class="mt-8 rounded-2xl border border-amber-300/30 bg-amber-300/10 p-4 text-sm text-amber-100"
+                role="alert"
+              >
+                Storage is running low. Q Mush is retrying critical saves; free
+                disk space to restore normal persistence.
+              </p>
+            </Show>
             <For each={notices}>
               {(notice) => (
                 <p
