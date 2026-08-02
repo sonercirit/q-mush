@@ -124,60 +124,62 @@ Exit criteria:
   restores paid data/blobs completely through the acknowledged frontier.
   Anonymous and credential-secret loss are explicitly tested.
 
-### Stage 4 — Engine-independent discovery and peer-first transport
+### Stage 4 — Private-mesh discovery and peer-first transport
 
-**Standalone value:** two never-paired runners behind NAT can discover and
-connect with the engine blocked, and ordinary replication/commands remain
-endpoint-to-endpoint even while the engine is healthy.
+**Standalone value:** admitted runners retain and recover remote routes with the
+engine blocked, new runners dial candidates carried by their admission package,
+and ordinary replication/commands remain endpoint-to-endpoint even while the
+engine is healthy.
 
 Scope:
 
 - Implement authenticated runner WebSocket/WebRTC frames, loopback, pinned-TLS
-  LAN/manual/VPN routes, mDNS with opaque metadata, ICE, and a pluggable
-  discovery/relay adapter. Candidate import never bypasses endpoint-key, grant,
-  nonce, or explicit pairing checks.
-- Ship a small separately deployable connectivity artifact with opaque,
-  encrypted, short-lived returning-peer and one-use admission rendezvous
-  descriptors plus STUN/TURN or equivalent bounded live byte relay. Publish
-  container/binary, configuration, and operator guidance. It has no backup/data
-  APIs and no engine billing dependency.
-- Run the managed paid rendezvous/relay as one deployment of exactly that
-  protocol with entitlement only at its service edge. Expose arbitrary
-  self-hosted/community URLs and user TURN configuration to anonymous/free/paid
-  clients with no client entitlement gate.
-- Implement hardened full-gather public/custom-STUN ICE offer/answer as compact
-  encrypted text/file/QR packages for arbitrary side channels, with one-use
-  attempt ID, expected keys, transcript confirmation, expiry, and no
-  auto-admission. Keep LAN, pinned address, VPN, and cached candidates.
-- Enforce same-host/direct/LAN/VPN first, then ICE; use a named configured relay
-  only after direct checks fail. Never use the engine application WebSocket or
-  backup subscription as a peer route; exhaust approved paths with `No route`.
-- Reserve a versioned DHT discovery adapter but do not ship/enable a public DHT
-  baseline. Add a bounded research spike measuring dependency/binary weight,
-  bootstrap and abuse resistance, metadata exposure, reachability, and residual
-  relay rate before any later opt-in proposal.
-- Make Solid realtime a runner view/query/command/live multiplexer. Add route
-  and operator diagnostics, direct-upgrade attempts, grant intersection,
+  LAN/manual/VPN routes, mDNS with opaque metadata, and direct candidate checks.
+  Candidate import never bypasses endpoint-key, grant, nonce, or explicit
+  pairing checks.
+- Maintain persistent authenticated member links. Gather host/pinned candidates,
+  opportunistic UPnP/NAT-PMP/PCP mappings, and member-observed public addresses;
+  sign/version/expire each set and gossip every member's latest set only through
+  encrypted member channels.
+- Let any mutually reachable member exchange candidates and synchronize a hole
+  punch over existing links. Prefer the resulting direct path; for hard pairs,
+  relay bounded endpoint-encrypted live frames through a mutually reachable
+  member. Keep the existing paid engine relay as an entitled convenience, never
+  the engine application or backup stream.
+- Treat every stably reachable member as an anchor. Recommend and test a mapped/
+  port-forwarded home runner or VPS; use the linked engine backup subscriber as
+  an anchor when present. Permit an optional user-designated third-party anchor
+  only after disclosing that it learns member addresses and timing.
+- Put the mesh's current candidate set directly in the compact one-use
+  QR/text/file admission package. Implement encrypted/authenticated expiring
+  manual offer/answer for no-anchor blackout recovery and cross-account first
+  contact. Neither package auto-admits or confers data authority.
+- Do not implement public STUN, DHT, standalone/community rendezvous, or public
+  candidate publication. After cached/direct/punch/member-relay and approved
+  engine-relay attempts fail, report `No route`.
+- Make Solid realtime a runner view/query/command/live multiplexer. Add route,
+  anchor, and relay diagnostics, direct-upgrade attempts, grant intersection,
   revocation priority, flow control, quotas, and endpoint-pair assertions.
 
 Exit criteria:
 
-- With all engine addresses blocked, two never-paired anonymous/free runners
-  behind separate NATs find each other through a configured standalone service,
-  attempt direct ICE, then replicate directly or use its labeled
-  endpoint-encrypted relay. No Q Mush entitlement request occurs.
-- Manual public-STUN offer/answer succeeds via delayed text/file exchange with
-  rendezvous blocked; wrong/replayed/expired offers and candidates without a
-  valid grant reveal no frontier and cannot pair.
-- Symmetric-NAT/UDP-block cases use only an approved named TURN/relay or report
-  `No route`. Captures prove the engine application/backup sockets never carry
-  A-to-B frames and relay storage has no offline payload.
-- Healthy-engine captures show direct runner traffic and separate backup links.
-  The managed deployment enforces paid admission, while identical standalone
-  protocol paths remain available to anonymous/free users.
-- Loopback/LAN/manual/WebRTC/NAT/relay/revocation/version cases pass;
-  rendezvous, STUN, and relay metadata exposure is bounded and surfaced.
-  Browsers remain partial clients and never forward anti-entropy.
+- With all engine addresses blocked, established anonymous/free members gossip a
+  changed address privately, use a third member to coordinate a synchronized
+  punch, and replicate directly. Captures prove no third-party discovery network
+  learns a candidate and no Q Mush entitlement request occurs.
+- A never-paired runner dials the candidates in a delayed admission package;
+  wrong/replayed/expired packages and candidates without a valid grant reveal no
+  frontier and cannot pair. No discovery endpoint is contacted.
+- Symmetric/symmetric or blocked pairs use a mutually reachable member relay;
+  where no such member or approved paid relay works, they report `No route`.
+  Captures prove engine application/backup sockets never carry A-to-B frames.
+- A stable member restores contact after other members move simultaneously. A
+  total-move/no-anchor fixture degrades explicitly to delayed manual
+  offer/answer/re-pairing rather than claiming automatic recovery.
+- Healthy-engine captures show direct runner traffic and separate backup links;
+  paid relay admission is entitled and opaque. Loopback/LAN/manual/WebRTC/NAT/
+  mapping/relay/revocation/version cases pass, and browsers never forward
+  anti-entropy.
 
 ### Stage 5 — Runner credential plane and provider authorization
 
@@ -256,13 +258,15 @@ Scope:
   asset precache, compaction/GC, growth UI, encrypted export, removable catch-up
   seed, retirement, and erase.
 - Complete grants/revocation, tier and backup UI, suspicious clocks, credential
-  recovery/rotation, route diagnostics, audit export, and lost-device workflows.
-- Finalize standalone connectivity packaging/defaults, discovery-key rotation,
-  metadata padding/logging, abuse controls, operator diagnostics, and multi-
-  service failover; do not defer shipping the Stage 4 component to hardening.
+  recovery/rotation, route/anchor diagnostics, audit export, and lost-device
+  workflows.
+- Finalize candidate expiry/gossip, adaptive keepalives, opportunistic router
+  mapping, anchor reachability checks, manual blackout recovery, relay bounds,
+  address-recipient audit, and capture tests; no dedicated discovery component
+  is deferred to hardening.
 - Run chaos/fuzz/malicious-peer, readable-engine breach boundaries, entitlement
   bypass, DNS/CORS/CSRF, exhaustion, partition, update interruption, huge/old
-  catch-up, total-loss restore, and all-platform standalone tests.
+  catch-up, total-loss restore, and all-target mesh tests.
 - Migrate every account/entity/blob and credential; remove engine broker,
   execution, legacy vault, provider connect, and ordinary authority APIs after a
   release-scoped rollback window.
@@ -276,9 +280,9 @@ Exit criteria:
 - Anonymous use has zero engine dependency; free/paid restore exactly their
   partition; upgrades/downgrades enforce policy without runner loss.
 - Default steady state issues engine requests only for explicit Google
-  identity/recovery, independent default backup, paid managed connectivity, or
-  an update source—never ordinary runner traffic, engine-independent discovery,
-  or provider credentials.
+  identity/recovery, independent default backup, linked-account anchor control,
+  paid relay, or an update source—never ordinary runner traffic,
+  engine-independent mesh connectivity, or provider credentials.
 
 ## Cross-stage testing strategy
 
@@ -290,15 +294,18 @@ crashes, malicious peers, revoked grants, tier transitions, and total runner
 loss. Property tests cover idempotence, merge commutativity, projection
 convergence, partition derivation, and full-runner inventory equality.
 
-Topology instrumentation records endpoint pairs/bytes by channel and discovery
-source/operator. A healthy engine sees only its own backup and managed
-rendezvous/opaque-relay traffic, never ordinary broker flow. Engine-blocked
-first-contact fixtures start never-paired peers behind cone and symmetric NATs;
-they exercise standalone discovery, direct ICE upgrade, relay fallback, delayed
-manual offer/answer, and honest `No route`. The harness asserts no entitlement
-call for self-hosted/community/manual paths and no frontier before endpoint
-authentication. Browser tests prove absence of replica/frontier/ack capability.
-Restore tests physically remove all runner storage and ignore browser caches.
+Topology instrumentation records endpoint pairs/bytes by channel, route, and
+anchor/relay. A healthy engine sees only its own backup, private anchor control,
+and paid opaque-relay traffic, never ordinary broker flow. Engine-blocked NAT
+fixtures exercise private candidate gossip, member-observed addresses,
+member-coordinated punches, member relay, admission packages, delayed manual
+offer/answer, and honest `No route`. A total-simultaneous-move fixture succeeds
+through a stable anchor and degrades to re-pairing when none exists. The harness
+asserts that no public discovery endpoint receives candidate material, no
+entitlement call gates member/manual paths, and no frontier is revealed before
+endpoint authentication. Browser tests prove absence of replica/frontier/ack
+capability. Restore tests physically remove all runner storage and ignore
+browser caches.
 
 Entitlement fixtures enumerate every schema entity and blob-reference shape.
 Adding a schema/operation kind without classification fails tests/build. Free
@@ -307,12 +314,15 @@ backfill remains gap-aware under concurrent writes. Downgrade fake clocks
 exercise grace and purge.
 
 Canary tests inspect browser traffic/storage/assets, runner ordinary replicas,
-operations, snapshots, both backup tiers, P2P/relay captures, rendezvous and
-manual packages, logs, crashes, exports, and tools. Discovery adversarial tests
-cover malicious operators, forged/omitted/replayed descriptors, topic theft,
-clock overlap, rate/amplification limits, relay persistence, and candidate-
-without-grant attempts; public STUN/TURN metadata is documented, not called
-secret. Credential tests separately inspect target ciphertext and verify no
-engine request. OpenAI device and OpenRouter runner callback tests include
-denial, expiry, slow-down, replay, mix-up, cancellation, and route removal. Full
-suites must not overlap repository-policy scans that create probe files.
+operations, snapshots, both backup tiers, direct/member/engine-relay captures,
+candidate gossip, admission/manual packages, local router mapping, logs,
+crashes, exports, and tools. Connectivity adversarial tests cover forged,
+omitted, replayed, or stale candidate sets; admission-package theft; malicious
+anchors; relay persistence; simultaneous address changes; and
+candidate-without-grant attempts. Capture allowlists prove candidates reach only
+members, explicit packages, a user-designated anchor, or the engine in its
+documented tier role; public DHT/STUN/rendezvous egress fails the suite.
+Credential tests separately inspect target ciphertext and verify no engine
+request. OpenAI device and OpenRouter runner callback tests include denial,
+expiry, slow-down, replay, mix-up, cancellation, and route removal. Full suites
+must not overlap repository-policy scans that create probe files.

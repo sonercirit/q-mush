@@ -56,10 +56,10 @@ materialized views; they do not merge operations or participate in convergence.
   tier: session-only bytes are paid-only, while any live non-session reference
   admits the byte object to free backup. Metadata tombstones govern safe
   collection.
-- **Presence/live deltas, discovery descriptors, and browser caches/drafts:**
-  ephemeral or client-local; they never affect frontiers, causal stability,
-  compaction, or restore. A rendezvous registration is not a runner-registry
-  operation, and candidate discovery cannot admit a replica.
+- **Presence/live deltas, signed candidate sets, punch/relay control, and
+  browser caches/drafts:** ephemeral or client-local; they never affect
+  frontiers, causal stability, compaction, or restore. Candidate gossip is not a
+  runner-registry operation, and candidate possession cannot admit a replica.
 
 ### Why not a CRDT for the whole transcript?
 

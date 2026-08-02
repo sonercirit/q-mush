@@ -5,8 +5,7 @@ Status: revised proposed design for
 PR accepts the decisions in this document; implementation still lands as
 separately reviewed stages.
 
-This is the index and normative overview. Details are split to stay within the
-repository's file-size policy:
+This is the normative overview; linked documents hold protocol detail:
 
 - [Replication, tier partition, replica lifecycle, and execution authority](local-first/replication.md)
 - [Entity convergence rules](local-first/convergence.md)
@@ -43,20 +42,22 @@ browser views and an entitlement-scoped engine backup.
 4. **Logged-in accounts have free and paid engine tiers.** Both automatically
    maintain a readable engine backup of the non-session partition. Paid accounts
    additionally back up all session entities and blobs and may use the managed
-   rendezvous/relay deployment. The engine can query what it stores; this is
-   deliberately not E2EE-blind backup. A free engine subscriber rejects session
+   endpoint-encrypted relay. A linked account's engine backup subscriber may
+   also act as a recovery anchor. The engine can query what it stores; this is
+   deliberately not E2EE-blind backup. A free subscriber rejects session
    operations, snapshots, manifests, blobs, and acknowledgements.
-5. **Ordinary data remains peer-first, and remote discovery is not engine-
-   dependent.** Runners exchange operations and blobs over endpoint-
-   authenticated connections whether or not the engine is healthy. Q Mush ships
-   a separately deployable rendezvous/relay component for any user to operate,
-   alongside a hardened public-STUN/manual ICE path. The paid managed service is
-   one deployment of that component; self-hosted and manual paths have no Q Mush
-   entitlement check. Each runner-to-engine backup relationship is an
-   independent destination subscription. Candidate exchange grants no data
-   authority, the engine application WebSocket is never a peer route, and
-   exhausted approved paths report `No route` rather than silently brokering
-   traffic.
+5. **Discovery stays inside the private mesh.** Admitted members keep persistent
+   authenticated links, cache every member's current candidates, and gossip
+   signed address changes only over encrypted member channels. Members report
+   each other's observed addresses, coordinate synchronized hole punches, and
+   relay endpoint-encrypted traffic when a direct route fails. Any stably
+   reachable member—including a port-forwarded home runner, VPS runner, or the
+   linked engine backup subscriber—automatically serves as a recovery anchor.
+   Onboarding packages carry the current candidate set directly; manual
+   offer/answer is the blackout and cross-account floor. No public STUN,
+   rendezvous, or DHT announcement is part of the design. Candidate exchange
+   grants no data authority, the engine application WebSocket is never a peer
+   route, and exhausted approved paths report `No route`.
 6. **Replication uses a typed, append-only operation log.** Operations have
    UUIDv7 IDs, per-device sequence numbers, causal frontiers, hybrid logical
    clocks, scopes, schema versions, and signatures. SQLite projections are
@@ -86,24 +87,21 @@ browser views and an entitlement-scoped engine backup.
     bind that trust root to an engine account and recover it after total runner
     loss, but the engine cannot sign ordinary data or execution epochs.
 
-A “full account replica” means the complete shared Q Mush data set for one local
-account, not every account known to an engine and not a copy of arbitrary source
-trees. Workspace records, session attachments, and deliberately imported files
-replicate; working directories remain external runner resources. Live presence,
-unfinished stream deltas, and browser-local drafts are ephemeral. Provider
-secrets are durable but use the separate vault boundary described in
-[credentials.md](local-first/credentials.md); “all” in the backup matrices means
-all ordinary replicated application data within that boundary.
+A full replica is the shared Q Mush data set for one local account, not every
+engine account or arbitrary source trees. Workspace records, session
+attachments, and imported files replicate; working directories remain external.
+Presence, unfinished deltas, and browser drafts are ephemeral. Provider secrets
+use the separate [vault boundary](local-first/credentials.md); “all” in backup
+matrices means all ordinary data within that boundary.
 
 ## Availability and recovery guarantee
 
-Every ready runner contains all ordinary data through its declared frontier, so
-failure of one ready runner does not erase that frontier or stop surviving
-runners. A new local write is durable on its author but is visibly `local-only`
-until another eligible durable replica acknowledges the operation and any blob.
-No local-first design can recover a host destroyed before an offline write
-leaves it. The engine separately exposes its last durable backup frontier, and
-total-runner-loss recovery is guaranteed through that acknowledged frontier:
+Every ready runner contains ordinary data through its declared frontier, so one
+runner's failure does not erase that frontier or stop survivors. A local write
+is visibly `local-only` until another eligible durable replica acknowledges its
+operation and blobs. Nothing can recover a host destroyed before an offline
+write leaves it. The engine exposes its last durable backup frontier; total-loss
+recovery reaches that acknowledged frontier:
 
 | Mode            | Readable engine backup                          | Recovery after every runner is lost                                          |
 | --------------- | ----------------------------------------------- | ---------------------------------------------------------------------------- |
@@ -111,10 +109,10 @@ total-runner-loss recovery is guaranteed through that acknowledged frontier:
 | Logged in, free | Non-session partition, default-on               | Account/configuration data returns; session history and session blobs do not |
 | Logged in, paid | Non-session plus session partitions, default-on | All ordinary records and application blobs return                            |
 
-Browser caches never improve these guarantees. Credential summaries recover in
-free and paid modes; vault secrets require another runner or the separately
-chosen credential-recovery mechanism. The exact entity partition, including the
-otherwise ambiguous `sessions` login table, is normative in
+Browser caches do not improve these guarantees. Credential summaries recover in
+free/paid mode; secrets need another runner or separate credential recovery. The
+exact entity partition, including the ambiguous login `sessions` table, is
+normative in
 [replication.md](local-first/replication.md#engine-backup-partition-by-schema-entity).
 
 A free-to-paid upgrade starts a complete session/tombstone/blob backfill and is
@@ -134,16 +132,16 @@ their full copies because of tier.
                   +-----------------------------------+
                   | sync engine                       |
                   | readable backup subscriber        |
-                  | free: non-session; paid: all data |
+                  | linked anchor; paid relay option  |
                   +---------:---------------:---------+
                             :               :
-                  independent backup subscriptions
+                 independent backup / private control
                             :               :
 +---------------------------:---------------:---------------------------+
 |                           :               :                           |
 |  +------------------------v-+  direct   +-v------------------------+  |
 |  | runner A                 |<=========>| runner B                 |  |
-|  | full SQLite + all blobs  |  peer     | full SQLite + all blobs |  |
+|  | full SQLite + all blobs  |  private  | full SQLite + all blobs |  |
 |  | app/API/executor/vault   |  mesh     | app/API/executor/vault  |  |
 |  +------------^-------------+           +-------------^-----------+  |
 |               | on-demand views, commands, live output |              |
@@ -154,29 +152,22 @@ their full copies because of tier.
 |                     | partial view/cache/drafts |                     |
 |                     | never a replica member    |                     |
 |                     +---------------------------+                     |
-+--------------------------^-----------------^--------------------------+
-                           : signaling / optional
-                           : endpoint-encrypted relay
-             +-------------:-----------------:-------------+
-             | connectivity service                         |
-             | self-hosted/community, or paid managed       |
-             | opaque rendezvous + STUN/TURN; no authority  |
-             +----------------------------------------------+
++-----------------------------------------------------------------------+
 
         runners ---- runner-side device/PKCE/API flows ---- providers
 ```
 
-The four component roles remain separate even when a runner serves the Solid
-assets. Serving code does not make the browser process part of that runner's
-SQLite replica. The engine may restore its stored frontier, but cannot forward a
-runner stream as another runner's ordinary route.
+The three roles remain separate even when a runner serves Solid assets. The
+browser is not part of its SQLite replica. The engine may restore data and help
+members re-establish a route, but cannot forward an application stream as
+another runner's ordinary route. A stable runner needs no separate service to be
+an anchor; a third-party anchor is an explicit trust choice.
 
-| Component            | Durable state                                                                  | Execution      | Role                                                                         |
-| -------------------- | ------------------------------------------------------------------------------ | -------------- | ---------------------------------------------------------------------------- |
-| Runner               | Full ordinary account state and all blobs; target-bound secrets in its vault   | Epochs it owns | App/API host, peer replication, tools, trust admission                       |
-| Solid browser client | Only current-view cache, selected blobs, local preferences/drafts; no frontier | No             | Authenticated window and request client to runners                           |
-| Sync engine          | Identity/control state plus readable entitled backup; no provider vault        | No             | Google identity/recovery, backup/restore, entitlement, releases              |
-| Connectivity service | Expiring opaque signaling and live relay state only                            | No             | Untrusted candidate exchange and optional TURN/relay; self-hosted or managed |
+| Component            | Durable state                                                            | Execution    | Role                                                                      |
+| -------------------- | ------------------------------------------------------------------------ | ------------ | ------------------------------------------------------------------------- |
+| Runner               | Full ordinary account state and blobs; target-bound secrets in its vault | Owned epochs | App/API, replication, tools, trust; stable members anchor/relay           |
+| Solid browser client | Current-view cache, selected blobs, preferences/drafts; no frontier      | No           | Authenticated on-demand window onto runners                               |
+| Sync engine          | Identity/control plus readable entitled backup; no provider vault        | No           | Google/recovery, backup, linked anchor, paid relay, entitlement, releases |
 
 ## Authority and data boundaries
 
@@ -211,15 +202,18 @@ runner stream as another runner's ordinary route.
    result independent of delivery order; wall-clock `updatedAt` is not a merge
    rule.
 5. Ordinary operations, blobs, commands, receipts, and live output use
-   endpoint-authenticated peer sessions. Discovery may use LAN, a configured
-   standalone rendezvous, paid managed rendezvous, or manual ICE exchange, but
-   candidates confer no grant. Engine backup links and the engine application
-   WebSocket are never inter-runner routes; after approved direct/relay paths
-   fail, report `No route`.
+   endpoint-authenticated peer sessions. Candidate sets are signed, expiring
+   mesh-control state gossiped only through encrypted member links or carried in
+   an explicit one-use admission/manual package; candidates confer no grant.
+   Engine backup links and the engine application WebSocket are never
+   inter-runner data routes. Members try direct paths and synchronized punching,
+   then an approved member or paid engine relay; otherwise they report
+   `No route`.
 6. Free and anonymous users receive every engine-independent connectivity path:
-   self-hosted/community rendezvous and relay, public/custom STUN, manual
-   offer/answer, LAN, and VPN. Only the managed deployment checks paid
-   entitlement.
+   private candidate gossip, member-observed addresses, member-coordinated hole
+   punching and relay, opportunistic router mapping, manual offer/answer, LAN,
+   pinned addresses, and VPN. Only the managed engine relay checks paid
+   entitlement; no member announces candidates to public discovery networks.
 7. A free engine endpoint rejects every session entity and session-owned blob
    before storage and emits no durable acknowledgement for it. Paid access is
    based on engine-authoritative entitlement, not a runner claim.
@@ -254,14 +248,19 @@ local drafts; it cannot commit shared operations, count as a data copy, execute,
 or access a filesystem.
 
 Engine loss disables new Google linking/recovery, progress to the engine backup
-frontier, the paid managed connectivity deployment, and releases available from
-no peer or mirror. Remote never-paired runners can still discover through a
-configured self-hosted/community rendezvous and use its relay when direct ICE
-fails, or exchange public-STUN ICE descriptions over any authenticated side
-channel. These paths are available to anonymous/free users. It does not disable
-runner replication, local execution, routine device administration, provider
-authorization, or credential provisioning. After total runner loss, Google plus
-the engine backup is required to recover a free or paid account.
+frontier, use of that subscriber as an anchor, the paid managed relay, and
+releases available from no peer or mirror. The private mesh otherwise keeps its
+persistent authenticated links, gossips changed candidates, asks mutually
+reachable members to coordinate hole punches, and relays through the user's own
+members. A one-use onboarding package supplies a new runner with the mesh's
+current candidates without discovery. If every member moves simultaneously and
+no stable member remains reachable, manual offer/answer or re-pairing is the
+honest recovery path; failed direct and approved relay attempts report
+`No route`. These engine-independent paths are available to anonymous and free
+users. Engine loss does not disable runner replication, local execution, routine
+device administration, provider authorization, or credential provisioning. After
+total runner loss, Google plus the engine backup is required to recover a free
+or paid account.
 
 ## Success criteria
 
@@ -277,14 +276,17 @@ capture tests demonstrate:
   recovery input.
 - Healthy-engine path assertions show direct runner traffic and independent
   backup subscriptions, with no engine broker/fan-out. With engine connectivity
-  blocked, two never-paired NATed runners rendezvous through a configured
-  standalone deployment and try direct ICE before its endpoint-encrypted relay;
-  arbitrary-side-channel offer/answer works without rendezvous. Exhausted paths
-  visibly report `No route`, and a candidate alone never authenticates a peer.
+  blocked, admitted peers gossip candidate changes privately, a mutually
+  reachable member coordinates a direct punch and, for a hard-NAT fixture,
+  relays endpoint-encrypted frames. A one-use admission package supplies current
+  mesh candidates to a never-paired runner; manual offer/answer recovers a
+  total-move blackout with no anchor. No public discovery endpoint receives a
+  candidate. Exhausted paths visibly report `No route`, and a candidate alone
+  never authenticates a peer.
 - Anonymous runners initialize and execute without engine traffic, pair remotely
-  through engine-independent discovery without entitlement, then link to Google
-  without changing IDs or losing an operation/blob. Tier backfill status is
-  accurate throughout.
+  through the private mesh or admission package without entitlement, then link
+  to Google without changing IDs or losing an operation/blob. Tier backfill
+  status stays accurate.
 - A free engine rejects all five schema session entities and their blobs while
   retaining every non-session entity; paid upgrade backfills all session data.
   Downgrade stops ingestion, enforces grace/purge policy, and never alters

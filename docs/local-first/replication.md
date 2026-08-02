@@ -220,15 +220,15 @@ or snapshot frames.
 6. `presence` and stream frames: bounded ephemeral events outside frontiers.
 
 Anti-entropy runs at connect and periodically. Peers serve ranges symmetrically;
-there is no server winner. Discovery or signaling—LAN, standalone/community
-rendezvous, paid managed rendezvous, or a manual ICE package—supplies only an
-untrusted candidate. It neither admits a replica nor authorizes `hello`; the
-runner verifies endpoint key, account grant, signed nonce, and protocol before
-revealing a frontier. Runners prefer direct links and never upload to the engine
-merely so another runner can download. Each logged-in runner may independently
-synchronize the engine backup, with duplicate operations deduped; the engine is
-never a bridge. Any configured relay sees only endpoint-encrypted frames and
-cannot materialize or merge them.
+there is no server winner. Private mesh gossip or an onboarding/manual package
+supplies an untrusted candidate only. It neither admits a replica nor authorizes
+`hello`; the runner verifies endpoint key, account grant, signed nonce, and
+protocol before revealing a frontier. Runners prefer direct links and never
+upload to the engine merely so another runner can download. Each logged-in
+runner may independently synchronize the engine backup, with duplicate
+operations deduped; the engine is never a bridge. A mutually reachable member or
+paid engine relay carries only endpoint-encrypted live frames and cannot
+materialize or merge them.
 
 Current bounded codecs are reusable inputs, but durable changes gain peer
 envelopes and streams remain ephemeral. The in-memory engine command ledger

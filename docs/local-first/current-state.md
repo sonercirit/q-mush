@@ -58,7 +58,7 @@ hiding rows at query time.
   local product admission.
 - Runner `qmr_…` tokens are parsed/stored by engine runner modules. They cannot
   become browser passwords, peer identities, anonymous trust roots, backup
-  capabilities, or rendezvous topics.
+  capabilities, or mesh candidate topics.
 - Provider secrets live in `provider_credentials.encrypted_credential` under
   engine environment keys; engine integrations decrypt/use them. Copying this
   field into ordinary replicas would violate secret boundaries and would not
@@ -70,31 +70,29 @@ hiding rows at query time.
   client secret, so its target callback/exchange runs on the runner. Google
   remains the sole engine-hosted OIDC flow. Exact removal scope is in
   [credentials.md](credentials.md#what-the-migration-deletes).
-- There is no standalone rendezvous/TURN service, ICE/manual-signaling protocol,
-  or discovery adapter today. The current application WebSockets are not a
+- There is no private-mesh candidate gossip, observed-address/punch protocol,
+  member relay, anchor health model, admission/manual offer package, or
+  opportunistic router mapping today. Current application WebSockets are not a
   peer-discovery primitive and must never be relabeled as a peer route.
 
-The target adds a separate, deployable connectivity protocol/artifact. Its
-managed paid instance shares the same wire behavior as self-hosted/community
-instances, but only the managed admission edge uses engine entitlement. Public
-STUN and arbitrary-side-channel offer/answer are runner networking paths and do
-not reuse engine realtime. The DHT adapter is reserved research, not a migration
-prerequisite.
+The target puts those functions in runners and the existing linked engine
+subscriber rather than adding a dedicated rendezvous component. Admitted members
+exchange address material only over encrypted member channels; a one-use
+onboarding package carries current candidates before admission. A stable
+home/VPS runner or linked engine subscriber is an anchor, members relay for one
+another, and the paid engine relay remains a convenience. Public STUN, public
+DHT, and standalone/community rendezvous are intentionally not migration
+prerequisites or target paths.
 
 ## Repository and migration boundaries
 
 Production imports currently have four enforced roots. `solid/`, `sync-engine/`,
 and `runner/` may import themselves and `shared/`; `shared/` imports no other
-workspace. Runtime-neutral operations, peer/credential and discovery wire
-formats, crypto interfaces, and agent/provider pieces move to `shared/`; HTTP,
-storage, platform, and discovery adapters stay in their owning runtime.
-
-The separately deployable connectivity executable will need an explicit
-production root/build entry when implemented. It cannot import application
-storage, Google, billing, provider, vault, or execution code. A managed wrapper
-may validate a short-lived entitlement before handing the request to the common
-rendezvous/relay core; the standalone core never calls engine billing. Runner
-coordination/provider code cannot import `sync-engine/`.
+workspace. Runtime-neutral operations, peer/credential and private mesh-control
+wire formats, crypto interfaces, and agent/provider pieces move to `shared/`;
+HTTP, storage, and platform networking adapters stay in their owning runtime.
+Runner coordination/provider code cannot import `sync-engine/`. No new
+standalone production root is needed for mesh connectivity.
 
 Migration adapters may expose old engine records as partitioned operations or
 legacy views, but cannot establish a second authority. Each legacy write must

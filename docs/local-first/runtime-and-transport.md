@@ -5,20 +5,19 @@ This document is normative detail for the
 credentials, tier behavior, and recovery are specified in
 [trust-and-security.md](trust-and-security.md).
 
-## Four distinct runtime roles
+## Three distinct runtime roles
 
-A runner, the Solid browser client, the sync engine, and the separately
-deployable connectivity service remain distinct security and storage roles even
-when one machine or operator runs more than one:
+A runner, the Solid browser client, and the sync engine remain distinct security
+and storage roles even when one machine or operator runs more than one:
 
 ```text
-+----------------------+       direct mesh       +----------------------+
-| runner A             |<=======================>| runner B             |
-| full replica         |                         | full replica         |
-| app/API/exec/vault   |                         | app/API/exec/vault   |
-+----------^-----------+                         +-----------^----------+
-           | bounded view queries / commands / live output  |
-           +----------------------+--------------------------+
++----------------------+       private mesh       +----------------------+
+| runner A             |<========================>| runner B             |
+| full replica         |   direct / member relay  | full replica         |
+| app/API/exec/vault   |                          | app/API/exec/vault   |
++----------^-----------+                          +-----------^----------+
+           | bounded view queries / commands / live output   |
+           +----------------------+---------------------------+
                                   |
                         +---------v----------+
                         | Solid client       |
@@ -27,10 +26,7 @@ when one machine or operator runs more than one:
                         +--------------------+
 
  runners .... independent entitled subscriptions .... sync engine
-            (readable backup; never A-to-B route)
-
- runners .... opaque discovery / optional encrypted .... connectivity service
-                       live relay                 (self-hosted or managed)
+       (readable backup; linked anchor; never application A-to-B route)
 ```
 
 Serving the Solid assets from a runner does not merge the browser JavaScript
@@ -46,52 +42,40 @@ browser-originated replicated operations.
 
 Every runner starts a loopback app/API/peer listener by default and may
 explicitly enable a paired LAN or remote listener. Persist its port/stable local
-origin so caches and cookies survive restarts. Discovery reveals only opaque
-peer ID, candidates, and protocol versions before authentication.
+origin so caches and cookies survive restarts. Before authentication, a dialed
+endpoint reveals only the minimum handshake needed to prove its peer key and
+protocol compatibility.
 
-Route policy is invariant:
+The route policy is short and invariant:
 
-1. Use a same-host runner WebSocket where available.
-2. Prefer direct authenticated runner WebSocket/TLS over LAN, a pinned public
-   address, user VPN/overlay, or established WebRTC.
-3. To establish remote first contact, try cached candidates and parallel
-   user-configured discovery sources: self-hosted/community rendezvous and
-   public-STUN ICE descriptions exchanged manually over any side channel. The
-   paid managed rendezvous is another configured source, not a privileged peer
-   protocol.
-4. Run ICE connectivity checks and upgrade any signaling/relayed introduction to
-   a direct endpoint-authenticated path when possible.
-5. If direct establishment fails, use only an explicitly configured and labeled
-   endpoint-encrypted relay/TURN allocation: self-hosted/community for any user,
-   or the paid managed deployment for entitled users.
-6. Otherwise report `No route`; never broker through the engine application
-   WebSocket.
+1. Use same-host, established authenticated, LAN, pinned public, or user
+   VPN/overlay paths. Dial cached host, mapped, and peer-observed candidates in
+   parallel; prefer a direct endpoint-authenticated path.
+2. If two members each reach a third, that member exchanges their candidates
+   over existing encrypted links and synchronizes a hole punch. Retain the
+   direct path when it works.
+3. If direct establishment fails, relay endpoint-encrypted frames through any
+   mutually reachable member. An entitled account may instead use its existing
+   paid engine relay convenience.
+4. Otherwise report `No route`; never broker through the engine application
+   WebSocket or backup subscription.
 
-Engine health does not reorder this policy. All rendezvous deployments exchange
-only short-lived opaque lookup values and endpoint-encrypted descriptors with
-candidates and signaling. Candidate exchange grants no account membership,
-capability, data, credential, or execution authority; peers complete the normal
-grant and nonce handshake before any application frame. A relay has no endpoint
-keys or grants and cannot terminate, inspect, authorize, merge, or
-store-and-forward application frames. Its operator can still observe
-source/destination network addresses, timing, allocation IDs, and byte volume.
-
-The **connectivity service** is a small separately deployable artifact and
-protocol, not a mode of the sync-engine application WebSocket. It combines an
-opaque authenticated rendezvous API with STUN/TURN or an equivalent bounded live
-byte relay. Q Mush publishes a container/binary, configuration schema, and
-operator guide; users may point runners at one or more deployments. The managed
-paid service runs the same protocol as one deployment and adds engine-issued
-short-lived service entitlement only at its admission edge. The standalone
-service accepts its own operator-selected authentication/rate policy and never
-calls Q Mush billing. Client code does not entitlement-gate self-hosted,
-community, public-STUN, manual, LAN, or VPN paths.
+Engine health does not reorder this policy. Candidate exchange grants no account
+membership, capability, data, credential, or execution authority; peers complete
+the normal grant and nonce handshake before any application frame. A relaying
+member is already trusted as a full account replica, but relay transport still
+cannot bypass endpoint authentication or authorize the destination. The engine
+relay has no endpoint keys or grants and sees only source/destination network
+addresses, timing, allocation IDs, and byte volume—not endpoint-encrypted
+application frames.
 
 The readable engine backup remains a normal **destination subscriber** with tier
 scope. Runner A and B may independently upload missing ranges; deduplication
-makes one account frontier. Neither the backup endpoint nor engine application
-socket can serve their live route. Endpoint-pair telemetry and capture tests
-distinguish direct mesh, backup, every rendezvous source, and opaque relay.
+makes one account frontier. A linked subscriber also participates in the private
+mesh control plane as a stable anchor, and its paid relay may carry opaque live
+frames, but neither role turns the application WebSocket or backup stream into a
+runner data route. Endpoint-pair telemetry and capture tests distinguish direct
+mesh, member relay, backup, and paid engine relay.
 
 ### Same host and Solid views
 
@@ -121,74 +105,74 @@ with a pinned runner certificate or loopback termination through a native
 helper. Stage 1 is loopback-only. Until secure onboarding works, opt-in plain
 HTTP LAN access is read-only and visibly warned, or disabled.
 
-### Remote first contact and NAT
+### Private-mesh discovery and NAT traversal
 
-This section covers both returning account peers and admission of a never-paired
-runner. Remote discovery and reachability are separate. A discovery result is an
-untrusted hint; possession of an opaque lookup value or offer is not a bearer
-credential. A runner reveals no frontier or stable account ID until the peer
-proves its device key and account grant.
+Once admitted, members keep persistent authenticated links when a route exists.
+Each member gathers host candidates plus any explicit public endpoint and
+opportunistic UPnP, NAT-PMP, or PCP mapping. Connected peers report the source
+address they observe for it. The member signs its candidate-set version and
+expiry; peers gossip updates over encrypted member channels until every member
+caches every other member's latest set. Keepalives preserve useful NAT bindings
+but are bounded and adaptive. No candidate, presence record, or timing signal is
+published to public STUN, a DHT, community rendezvous, or any other third-party
+discovery network.
 
-Q Mush combines two engine-independent first-contact paths:
+Members therefore provide the three network functions themselves:
 
-1. **Configured standalone rendezvous/relay.** Returning account peers derive a
-   rotating discovery topic with domain-separated HKDF from a secret replicated
-   only to admitted runners. For a new runner, the owner creates a separate
-   one-use high-entropy admission topic/secret; no account key is disclosed
-   before approval. Topics are opaque and unlinkable to account IDs without the
-   applicable secret. A runner registers a short-lived descriptor signed by the
-   ephemeral rendezvous key and containing protocol range, expiry, and ICE
-   candidates encrypted to that topic secret. A peer queries the topic, decrypts
-   and verifies locally, then runs ICE. Deployments require bounded TTL,
-   pagination, registration proof, replay rejection, rate/size limits, and no
-   application payload persistence. A user may configure several self-hosted/
-   community URLs; the new runner receives a service URL and one-use secret in
-   its onboarding package—not prior IP connectivity or an account authority key.
-   This is remote first contact despite using a human onboarding side channel:
-   no existing peer route, public address, engine, or VPN is assumed. After the
-   route forms, owner confirmation and the normal grant protocol admit it;
-   cancelling or completing admission erases the one-use secret.
-2. **Hardened manual ICE.** Either runner gathers host and server-reflexive
-   candidates from configurable public or private STUN servers (and relayed
-   candidates when the user supplies TURN), emits a compact
-   encrypted/authenticated offer as text/file/QR, and accepts an answer returned
-   through email, messenger, phone, removable media, or any arbitrary side
-   channel. The package binds a random attempt ID, both expected peer keys when
-   known, ICE credentials/candidates, expiry, protocol version, and transcript
-   confirmation; it is one-use and contains no account ID or data authority.
-   Trickle updates are optional; a bounded full-gather offer/answer always works
-   without a live signaling service. Import never auto-approves pairing. An
-   offer reaches the intended peer through the package's one-use PAKE/admission
-   secret and transcript confirmation, or—between admitted peers—by encryption
-   to the expected device key; transport encryption alone is insufficient.
+- **Observed address:** reports from authenticated peers replace an external
+  STUN oracle. Multiple observations reveal endpoint-dependent mappings.
+- **Punch coordination:** a member reachable by both endpoints privately passes
+  their current candidates and a short-lived attempt ID, then synchronizes
+  outbound checks. One predictably mapped/reachable side is often enough. A
+  successful authenticated path supersedes stale candidates and is gossiped.
+- **Relay:** when a symmetric/symmetric or blocked pair cannot form a direct
+  path, any mutually reachable member forwards bounded endpoint-encrypted live
+  frames. It is the user's own hardware and already a full trusted replica. Paid
+  users may choose the engine's existing live relay convenience. No relay is an
+  offline inbox or authority shortcut.
 
-Public STUN is only an address oracle and receives no account topic, offer, or
-application data, though it observes the caller IP and timing. STUN plus
-signaling does not guarantee a route: endpoint-dependent/symmetric NAT, UDP
-blocking, or restrictive firewalls can require TURN. The configured standalone
-component therefore includes relay capability and manual descriptions may name
-user-supplied TURN credentials. If no allowed relay exists and direct ICE fails,
-show `No route`—never substitute the engine application WebSocket.
+An **anchor** is simply a mesh member expected to retain a stable candidate: a
+port-forwarded or opportunistically mapped home runner, a VPS runner, or the
+engine backup subscriber for a linked account. It needs no separate protocol or
+server role. Every stable member automatically acts as a recovery meeting point
+after other members move together. Setup recommends designating and testing at
+least one, but never claims a guarantee: if all members change addresses at once
+and no cached route or anchor remains reachable, the mesh is blacked out and the
+UI asks for manual re-pairing. A user may designate a third-party-hosted anchor;
+that operator then learns member addresses and timing and is trusted only for
+connectivity, not data authority. It can coordinate candidate exchange and relay
+live encrypted frames when configured. Q Mush ships no dedicated rendezvous
+service in the baseline.
 
-### Why no public DHT in the baseline
+Onboarding is not discovery. An owner creates a compact QR/text/file admission
+package containing the current candidate set for the mesh, a one-use
+high-entropy PAKE/admission secret, expected owner key, protocol range, attempt
+ID, and expiry. The joining runner dials those candidates directly; successful
+transport still requires transcript confirmation and an explicit signed member
+grant. Completion, cancellation, or expiry erases the secret. The package may be
+carried by any side channel without revealing account data or granting data
+access.
 
-A public Kademlia/BitTorrent-style DHT could publish provider records under the
-same rotating returning-peer or one-use admission topics, removing a named
-rendezvous operator. Opaque keys hide the account name from outsiders who lack
-the key, but publishing still exposes a live runner's IP/multiaddress and timing
-to DHT nodes and any party that learns or guesses the topic; network-wide
-queries invite scraping, correlation, poisoning, eclipse/Sybil, replay, and
-amplification defenses. It also adds a substantial P2P stack, bootstrap-node
-policy, record validation, NAT behavior, resource limits, and cross-platform
-maintenance to a project that still needs TURN/circuit relay for hard NATs. A
-DHT discovers candidates but is not a relay.
+Manual offer/answer is the floor when no anchor survives a blackout and for
+cross-account first contact. Each intended endpoint locally gathers candidates
+and exchanges an encrypted, authenticated, expiring one-use offer and answer as
+text/file/QR over a user-chosen side channel. A peer can also report the other's
+observed address during this exchange. Import never auto-approves pairing, and
+candidate possession never reveals a frontier. If synchronized checks and all
+approved member/engine relays fail, show `No route`.
 
-Accordingly DHT rendezvous is **evaluated but not shipped in the baseline**. The
-pluggable discovery interface reserves a versioned `dht` source, and an
-experiment may compare implementation weight, reachability, abuse resistance,
-and metadata leakage. It cannot be enabled by default or advertised as private
-until that review passes; it would remain free of Q Mush entitlement and would
-not remove the relay/manual paths.
+### Rejected public discovery
+
+A public DHT is rejected, not reserved for experiment: even opaque rotating keys
+announce a member's IP and timing to strangers and add bootstrap, scraping,
+Sybil/eclipse, poisoning, resource, and cross-platform complexity without
+solving relay. Public STUN and standalone/community rendezvous have the same
+baseline privacy mismatch because a third party learns an address solely for
+discovery. A user-designated third-party anchor can expose the same private
+observed- address, punch-coordination, and live-relay protocol as a stable
+member without joining the data replica set. This is different only because the
+user explicitly chooses that address recipient. The private mesh, onboarding
+package, and manual exchange cover the baseline with one mechanism.
 
 A runner also accepts a pinned HTTPS URL, user VPN, reverse tunnel, or overlay.
 Browsers cannot accept arbitrary inbound TCP, so browser-to-runner remote access
@@ -201,10 +185,10 @@ Browsers connect outward only:
 
 - same runner origin: authenticated HTTP/WebSocket, with optional local
   `BroadcastChannel` transport ownership;
-- remote runner: pinned HTTPS/WebSocket or WebRTC, signaled by a runner,
-  standalone/managed rendezvous, or manual offer/answer; and
-- no direct path: an explicitly configured endpoint-encrypted standalone,
-  community, user TURN, or paid managed relay.
+- remote runner: pinned HTTPS/WebSocket or WebRTC, reached from the private
+  mesh's cached candidates, member-coordinated punching, an admission package,
+  or manual offer/answer; and
+- no direct path: a mutually reachable member relay or the paid engine relay.
 
 A browser can submit bounded queries and commands and receive live events. It
 cannot carry anti-entropy on behalf of runners, qualify as redundancy, or
@@ -282,9 +266,9 @@ frames. Durable anti-entropy, blobs, streams, engine-backup subscription,
 view/query traffic, and credentials are separate limited channels.
 
 Credential channels allow runner endpoints only, require target-key proof, and
-exclude browser forwarding and persistent relay storage. An opaque live relay
-may carry already endpoint-encrypted frames. Engine backup parses ordinary data
-to enforce entitlement but receives no credential frame type.
+exclude browser forwarding and persistent relay storage. A member or paid engine
+relay may carry already endpoint-encrypted frames. Engine backup parses ordinary
+data to enforce entitlement but receives no credential frame type.
 
 Minimize traffic without weakening runner completeness:
 
@@ -306,12 +290,12 @@ Report route, runner completeness, engine backup scope/frontier, entitlement,
 executor authority, credential availability, provider reachability, and version
 separately. Persistent states include:
 
-- **Discovering — local**, **standalone — operator name**, **managed**, or
-  **manual offer waiting/expired**;
-- **Direct — runner name** and **Mesh — n runners**;
-- **Relay fallback — operator name** with self-hosted/community/managed label;
-- **No route** with the failed direct/STUN/rendezvous/relay attempts and actions
-  to copy an offer or configure a service, never an implicit engine fallback;
+- **Connecting through cached candidates** or **Punching via — runner name**;
+- **Direct — runner name**, **Mesh — n runners**, and **Anchor — runner name**;
+- **Member relay — runner name** or **Paid engine relay**;
+- **No route** with actions to wake/test the anchor, copy an offer, re-pair, add
+  a stable member, or configure an explicit third-party anchor—never an implicit
+  public-discovery or engine-application fallback;
 - **Joining runner — x/y operations, a/b blob bytes**;
 - **Full runner — local-only changes** or **runner-redundant**;
 - **Engine backup — non-session**, **all data**, **pending**, or **not available
@@ -335,23 +319,32 @@ relevant implementation documentation; no library is selected by this design.
 
 - The [local-first essay](https://www.inkandswitch.com/essay/local-first/)
   treats local copies as primary and servers as secondary helpers.
-- [ICE (RFC 8445)](https://datatracker.ietf.org/doc/html/rfc8445) gathers host,
-  server-reflexive STUN, and relayed TURN candidates and deliberately leaves
-  offer/answer exchange to the application.
-  [JSEP (RFC 9429)](https://datatracker.ietf.org/doc/html/rfc9429) likewise
-  separates WebRTC negotiation from the signaling mechanism, supporting
-  arbitrary side-channel offer/answer.
-- [TURN (RFC 8656)](https://datatracker.ietf.org/doc/html/rfc8656) is the relay
-  fallback when NAT/firewall behavior prevents direct communication; operating
-  rendezvous or a DHT cannot eliminate this residual bandwidth role.
-- The
-  [libp2p rendezvous specification](https://github.com/libp2p/specs/tree/master/rendezvous)
-  uses expiring namespace registration at a rendezvous point, while its
-  [Kademlia DHT](https://github.com/libp2p/specs/tree/master/kad-dht)
-  illustrates the extra bootstrap/routing stack and client/server split for
-  NATed nodes. [BitTorrent BEP 5](https://www.bittorrent.org/beps/bep_0005.html)
-  explicitly stores announcing peer IP/port under an infohash, demonstrating why
-  an opaque DHT key does not hide presence metadata.
+- [Tailscale's NAT traversal writeup](https://tailscale.com/blog/how-nat-traversal-works)
+  explains observed public endpoints, coordinated UDP hole punching, relay
+  fallback, and why one predictably mapped side can be enough. Q Mush reuses the
+  traversal insights but obtains observations and coordination from private mesh
+  members rather than public/vendor discovery infrastructure.
+- libp2p
+  [Identify](https://github.com/libp2p/specs/blob/master/identify/README.md)
+  carries observed addresses, while
+  [DCUtR](https://github.com/libp2p/specs/blob/master/relay/DCUtR.md)
+  coordinates a simultaneous direct-connection attempt over an existing relayed
+  link. The useful pattern is peer observation plus in-band coordination, not
+  public rendezvous.
+- [WireGuard](https://www.wireguard.com/) demonstrates authenticated peer
+  endpoint roaming, and its [quick start](https://www.wireguard.com/quickstart/)
+  documents optional persistent keepalives for retaining NAT/firewall mappings.
+  Q Mush similarly treats addresses as changing hints beneath stable peer keys.
+- [ICE (RFC 8445)](https://datatracker.ietf.org/doc/html/rfc8445) and
+  [JSEP (RFC 9429)](https://datatracker.ietf.org/doc/html/rfc9429) separate
+  candidate checking from offer/answer transport; Q Mush uses the checking model
+  but keeps candidate exchange private. UPnP, NAT-PMP, and
+  [PCP (RFC 6887)](https://datatracker.ietf.org/doc/html/rfc6887) are
+  opportunistic reachability improvements, never dependencies.
+- A public DHT is intentionally absent: BitTorrent
+  [BEP 5](https://www.bittorrent.org/beps/bep_0005.html) stores an announcing
+  peer's IP/port even when the lookup key itself is opaque, which violates the
+  address-privacy rule.
 - `BroadcastChannel` is same-origin and cannot bridge engine/runner origins.
 - Chrome's
   [Local Network Access](https://developer.chrome.com/blog/local-network-access)
