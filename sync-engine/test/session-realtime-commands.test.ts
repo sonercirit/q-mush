@@ -10,9 +10,9 @@ import {
   type SessionRealtimeCommands,
 } from "../../sync-engine/session-realtime-commands.ts";
 import {
-  TEST_WORKSPACE_ID as INTEGRATION_WORKSPACE_ID,
   TEST_AUTHENTICATED_USER,
   TEST_USER_ID,
+  TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { userRealtimeCommand } from "./realtime-command-fixtures.ts";
 import {
@@ -30,7 +30,7 @@ const TEST_USER: AuthenticatedUser = {
   id: "user-1",
   name: "Mush",
 };
-const TEST_WORKSPACE_ID = REALTIME_TEST_SESSION_DETAIL.workspaceId;
+const REALTIME_WORKSPACE_ID = REALTIME_TEST_SESSION_DETAIL.workspaceId;
 
 function resolvedSessionDetail() {
   return Promise.resolve(REALTIME_TEST_SESSION_DETAIL);
@@ -45,7 +45,7 @@ function execute(
     integration,
     TEST_USER,
     userRealtimeCommand(operation, payload),
-    TEST_WORKSPACE_ID,
+    REALTIME_WORKSPACE_ID,
   );
 }
 
@@ -99,7 +99,7 @@ describe("session realtime command dispatch", () => {
       userRealtimeCommand(SESSION_REALTIME_OPERATIONS.stop, {
         sessionId: SESSION_ID,
       }),
-      INTEGRATION_WORKSPACE_ID,
+      TEST_WORKSPACE_ID,
     );
 
     expect(setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID)?.status).toBe(
@@ -129,7 +129,7 @@ describe("session realtime command dispatch", () => {
     ).resolves.toEqual({ status: "answered" });
     expect(answerQuestionsForUser).toHaveBeenCalledWith(TEST_USER, {
       ...payload,
-      workspaceId: TEST_WORKSPACE_ID,
+      workspaceId: REALTIME_WORKSPACE_ID,
     });
 
     await expect(
@@ -160,7 +160,7 @@ describe("session realtime command dispatch", () => {
       TEST_USER,
       "session-1",
       null,
-      TEST_WORKSPACE_ID,
+      REALTIME_WORKSPACE_ID,
     );
   });
 
@@ -183,12 +183,12 @@ describe("session realtime command dispatch", () => {
 
     expect(summariesForUser).toHaveBeenCalledWith(
       TEST_USER.id,
-      TEST_WORKSPACE_ID,
+      REALTIME_WORKSPACE_ID,
     );
     expect(detailForUser).toHaveBeenCalledWith(
       TEST_USER.id,
       "session-1",
-      TEST_WORKSPACE_ID,
+      REALTIME_WORKSPACE_ID,
     );
   });
 
@@ -232,7 +232,7 @@ describe("session realtime command dispatch", () => {
       credentialId: "credential-1",
       provider: "openai",
       user: TEST_USER,
-      workspaceId: TEST_WORKSPACE_ID,
+      workspaceId: REALTIME_WORKSPACE_ID,
     });
     expect(createForUser).toHaveBeenCalledWith(
       TEST_USER,
@@ -241,7 +241,7 @@ describe("session realtime command dispatch", () => {
         images: [image],
         prompt: "Inspect the workspace",
       }),
-      TEST_WORKSPACE_ID,
+      REALTIME_WORKSPACE_ID,
     );
     expect(messageForUser).toHaveBeenCalledWith(
       TEST_USER,
@@ -250,7 +250,7 @@ describe("session realtime command dispatch", () => {
         images: [image],
         prompt: "Review it",
       },
-      TEST_WORKSPACE_ID,
+      REALTIME_WORKSPACE_ID,
     );
   });
 
@@ -277,7 +277,7 @@ describe("session realtime command dispatch", () => {
         parentSessionId: "parent-session",
         tools: ["read", "brave_search"],
       }),
-      TEST_WORKSPACE_ID,
+      REALTIME_WORKSPACE_ID,
     );
   });
 
@@ -291,7 +291,7 @@ describe("session realtime command dispatch", () => {
       provider: "openrouter" as const,
       reasoningEffort: "high" as const,
       sourceSessionId: "session-1",
-      workspaceId: TEST_WORKSPACE_ID,
+      workspaceId: REALTIME_WORKSPACE_ID,
     };
 
     await expect(
@@ -300,7 +300,7 @@ describe("session realtime command dispatch", () => {
     expect(forkForUser).toHaveBeenCalledWith(
       TEST_USER,
       payload,
-      TEST_WORKSPACE_ID,
+      REALTIME_WORKSPACE_ID,
     );
 
     await expect(
@@ -322,7 +322,7 @@ describe("session realtime command dispatch", () => {
       openRouterProviderTag: null,
       provider: "openai" as const,
       sessionId: "session-1",
-      workspaceId: TEST_WORKSPACE_ID,
+      workspaceId: REALTIME_WORKSPACE_ID,
     };
 
     await execute(
@@ -382,36 +382,36 @@ describe("session realtime command dispatch", () => {
     expect(compactForUser).toHaveBeenCalledWith(
       TEST_USER,
       "session-1",
-      TEST_WORKSPACE_ID,
+      REALTIME_WORKSPACE_ID,
     );
     expect(compactAndContinueForUser).toHaveBeenCalledWith(
       TEST_USER,
       "session-1",
-      TEST_WORKSPACE_ID,
+      REALTIME_WORKSPACE_ID,
     );
     expect(continueForUser).toHaveBeenCalledWith(
       TEST_USER,
       "session-1",
-      TEST_WORKSPACE_ID,
+      REALTIME_WORKSPACE_ID,
     );
     expect(stopForUser).toHaveBeenCalledWith(
       TEST_USER,
       "session-1",
       false,
-      TEST_WORKSPACE_ID,
+      REALTIME_WORKSPACE_ID,
     );
     expect(reassignForUser).toHaveBeenCalledWith(
       TEST_USER,
       "session-1",
       "runner-2",
       "/replacement/project",
-      TEST_WORKSPACE_ID,
+      REALTIME_WORKSPACE_ID,
     );
     expect(setAutoCompactionForUser).toHaveBeenCalledWith(
       TEST_USER,
       "session-1",
       false,
-      TEST_WORKSPACE_ID,
+      REALTIME_WORKSPACE_ID,
     );
   });
 
