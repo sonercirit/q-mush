@@ -109,11 +109,13 @@ HTTP LAN access is read-only and visibly warned, or disabled.
 
 Once admitted, members keep persistent authenticated links when a route exists.
 Each member gathers host candidates plus any explicit public endpoint and
-opportunistic UPnP, NAT-PMP, or PCP mapping. Connected peers report the source
-address they observe for it. The member signs its candidate-set version and
-expiry; peers gossip updates over encrypted member channels until every member
-caches every other member's latest set. Keepalives preserve useful NAT bindings
-but are bounded and adaptive. No candidate, presence record, or timing signal is
+opportunistic UPnP, NAT-PMP, or PCP mapping. Candidate sets always include IPv6
+candidates, and members try IPv6 before any IPv4 punch. Connected peers report
+the source address they observe for it. The member signs its candidate-set
+version and expiry; peers gossip updates over encrypted member channels until
+every member caches every other member's latest set. Keepalives preserve useful
+NAT bindings but are bounded and adaptive. Except for the explicit consented
+one-shot observation below, no candidate, presence record, or timing signal is
 published to public STUN, a DHT, community rendezvous, or any other third-party
 discovery network.
 
@@ -145,34 +147,54 @@ live encrypted frames when configured. Q Mush ships no dedicated rendezvous
 service in the baseline.
 
 Onboarding is not discovery. An owner creates a compact QR/text/file admission
-package containing the current candidate set for the mesh, a one-use
-high-entropy PAKE/admission secret, expected owner key, protocol range, attempt
-ID, and expiry. The joining runner dials those candidates directly; successful
-transport still requires transcript confirmation and an explicit signed member
-grant. Completion, cancellation, or expiry erases the secret. The package may be
-carried by any side channel without revealing account data or granting data
-access.
+package containing the current candidate set for the mesh, always including IPv6
+candidates, a one-use high-entropy PAKE/admission secret, expected owner key,
+protocol range, attempt ID, and expiry. The joining runner dials those
+candidates directly; successful transport still requires transcript confirmation
+and an explicit signed member grant. Completion, cancellation, or expiry erases
+the secret. The package may be carried by any side channel without revealing
+account data or granting data access.
 
 Manual offer/answer is the floor when no anchor survives a blackout and for
 cross-account first contact. Each intended endpoint locally gathers candidates
 and exchanges an encrypted, authenticated, expiring one-use offer and answer as
 text/file/QR over a user-chosen side channel. A peer can also report the other's
-observed address during this exchange. Import never auto-approves pairing, and
+observed address during this exchange. When no member has yet observed a device,
+its user may consent to one address-observation query to a STUN server; it is
+not registration or announcement. Import never auto-approves pairing, and
 candidate possession never reveals a frontier. If synchronized checks and all
 approved member/engine relays fail, show `No route`.
+
+#### First contact: two home laptops
+
+- **Same network once, including a momentary phone hotspot:** mDNS/QR direct;
+  mesh caching handles later remote contact.
+- **Both homes have IPv6:** direct simultaneous open before IPv4 punching.
+- **Either router supports UPnP, NAT-PMP, or PCP:** that laptop maps a port and
+  learns its public IP; the other dials it.
+- **Neither router maps a port:** manual punch with a router-reported WAN tuple
+  or the consented one-shot STUN observation.
+- **Both have CGNAT or symmetric NAT, with no IPv6:** use an anchor or report
+  `No route`. Asymmetric CGNAT is fine: that side dials outward.
+
+In a two-device mesh, simultaneous address changes by both lone members cause a
+blackout requiring an anchor or fresh offer/answer; one changed side re-knits
+through the unchanged member.
 
 ### Rejected public discovery
 
 A public DHT is rejected, not reserved for experiment: even opaque rotating keys
 announce a member's IP and timing to strangers and add bootstrap, scraping,
 Sybil/eclipse, poisoning, resource, and cross-platform complexity without
-solving relay. Public STUN and standalone/community rendezvous have the same
-baseline privacy mismatch because a third party learns an address solely for
-discovery. A user-designated third-party anchor can expose the same private
-observed- address, punch-coordination, and live-relay protocol as a stable
-member without joining the data replica set. This is different only because the
-user explicitly chooses that address recipient. The private mesh, onboarding
-package, and manual exchange cover the baseline with one mechanism.
+solving relay. Persistent public STUN use and standalone/community rendezvous
+have the same baseline privacy mismatch. The single exception is the
+user-consented one-shot observation above when no member has observed a device
+for first contact; it is never registration or announcement. A user-designated
+third-party anchor can expose the same private observed-address,
+punch-coordination, and live-relay protocol as a stable member without joining
+the data replica set. This is different only because the user explicitly chooses
+that address recipient. The private mesh, onboarding package, and manual
+exchange cover the baseline with one mechanism.
 
 A runner also accepts a pinned HTTPS URL, user VPN, reverse tunnel, or overlay.
 Browsers cannot accept arbitrary inbound TCP, so browser-to-runner remote access
@@ -315,22 +337,23 @@ versions, lag, and byte counts without paths, content, or keys.
 ## Bounded transport research
 
 Research was intentionally bounded to protocol specifications and directly
-relevant implementation documentation; no library is selected by this design.
+relevant implementation documentation; no library is selected by this design. A
+2026 deep-research pass (report retained outside the repository at
+`~/q-mush-workspaces/DEEP_RESEARCH.md`) validated the member-mesh model:
+member-provided observation, coordination, and relay are production patterns in
+[Tailscale](https://tailscale.com/blog/how-nat-traversal-works),
+[iroh](https://www.iroh.computer/docs/concepts/dialing), and
+[libp2p](https://github.com/libp2p/specs/blob/master/relay/DCUtR.md). It also
+confirmed that two hard-NAT peers need a relay and a simultaneous two-device
+address blackout needs an anchor or human exchange.
+[RFC 4787](https://datatracker.ietf.org/doc/html/rfc4787), the
+[DCUtR measurement study](https://arxiv.org/abs/2510.27500), and the expired,
+informative
+[QUIC NAT traversal draft](https://datatracker.ietf.org/doc/draft-seemann-quic-nat-traversal/)
+provide NAT evidence and QUIC-native punching prior art for Stage 4.
 
 - The [local-first essay](https://www.inkandswitch.com/essay/local-first/)
   treats local copies as primary and servers as secondary helpers.
-- [Tailscale's NAT traversal writeup](https://tailscale.com/blog/how-nat-traversal-works)
-  explains observed public endpoints, coordinated UDP hole punching, relay
-  fallback, and why one predictably mapped side can be enough. Q Mush reuses the
-  traversal insights but obtains observations and coordination from private mesh
-  members rather than public/vendor discovery infrastructure.
-- libp2p
-  [Identify](https://github.com/libp2p/specs/blob/master/identify/README.md)
-  carries observed addresses, while
-  [DCUtR](https://github.com/libp2p/specs/blob/master/relay/DCUtR.md)
-  coordinates a simultaneous direct-connection attempt over an existing relayed
-  link. The useful pattern is peer observation plus in-band coordination, not
-  public rendezvous.
 - [WireGuard](https://www.wireguard.com/) demonstrates authenticated peer
   endpoint roaming, and its [quick start](https://www.wireguard.com/quickstart/)
   documents optional persistent keepalives for retaining NAT/firewall mappings.

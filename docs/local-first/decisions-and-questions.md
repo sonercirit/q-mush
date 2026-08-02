@@ -47,11 +47,13 @@ without a newly accepted design.
   is already an anchor and any mutually reachable member can coordinate or
   relay. A third-party-hosted anchor remains an explicit user choice with its
   address-metadata exposure, not a default discovery network.
-- **Use public STUN or a public DHT:** rejected. Nobody announces a member's
-  address or timing to third-party discovery networks. Opaque rotating DHT keys
-  do not hide the announcing IP, add bootstrap/Sybil/eclipse/poisoning and
-  dependency weight, and still do not relay hard-NAT traffic. Q17's DHT
-  experiment is dead for this privacy reason.
+- **Use persistent public STUN or a public DHT:** rejected. Nobody announces a
+  member's address or timing to third-party discovery networks. The only STUN
+  exception is one user-consented address observation for first contact when no
+  member has observed the device; it is never registration or announcement.
+  Opaque rotating DHT keys do not hide the announcing IP, add
+  bootstrap/Sybil/eclipse/poisoning and dependency weight, and still do not
+  relay hard-NAT traffic. Q17's DHT experiment is dead for this privacy reason.
 - **Treat candidate exchange as pairing:** rejected. Private mesh gossip,
   admission/manual packages, observed-address reports, and punch coordination
   provide route hints only. Endpoint key, grant, nonce, and explicit admission
@@ -108,12 +110,14 @@ needs no discovery. Manual offer/answer is the honest floor for a no-anchor
 total-move blackout and cross-account first contact. The existing paid engine
 relay remains a convenience; otherwise return `No route`.
 
-No dedicated rendezvous service ships in the baseline. Public STUN and DHT are
-not plugins or experiments: sending candidate addresses/timing to third-party
-discovery networks violates the address-privacy invariant. A user may explicitly
-designate a third-party-hosted anchor and accept that operator learning member
-addresses, but it gains no data authority. This round-5 decision supersedes the
-round-4 standalone-service resolution.
+No dedicated rendezvous service ships in the baseline. Persistent public STUN
+and DHT are not plugins or experiments: sending candidate addresses/timing to
+third-party discovery networks violates the address-privacy invariant. The sole
+exception is the user-consented, one-shot STUN observation for first contact,
+which does not register or announce the member. A user may explicitly designate
+a third-party-hosted anchor and accept that operator learning member addresses,
+but it gains no data authority. This round-5 decision supersedes the round-4
+standalone-service resolution.
 
 ## Resolved decision: readable default engine backup (former Q11)
 

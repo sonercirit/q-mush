@@ -202,7 +202,10 @@ material. They may be learned only by:
 - the engine in its documented linked-account anchor/paid-relay role.
 
 No runner announces candidates or presence to public STUN, DHT, community
-rendezvous, analytics, logs, or other third-party networks. A side-channel
+rendezvous, analytics, logs, or other third-party networks. The sole exception
+is a user-consented one-shot STUN observation when no member has observed a
+device for first contact: that operator learns only the source tuple and timing,
+and the query is observation, never registration or announcement. A side-channel
 provider used for onboarding/manual exchange sees the encrypted package and its
 participants, so users should choose it accordingly; the package is expiring,
 one-use, and contains no account data or authority. Opportunistic UPnP, NAT-PMP,
