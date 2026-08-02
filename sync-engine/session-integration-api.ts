@@ -34,6 +34,7 @@ import type {
 } from "./session-restart-coordinator.ts";
 import type { RunnerRemovalCoordinator } from "./session-runner-removal.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
+import { readSessionStopInput } from "./session-stop-input.ts";
 import type { SessionStore } from "./session-store.ts";
 import { forRequestWorkspace } from "./session-workspace-request.ts";
 import {
@@ -410,6 +411,14 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
   }
 
   async stop(request: Request, sessionId: string): Promise<Response> {
+    const cascade =
+      request.headers
+        .get("content-type")
+        ?.toLowerCase()
+        .startsWith("application/json") === true
+        ? await parseJsonRequest(request, readSessionStopInput)
+        : true;
+    if (cascade === undefined) return createApiError("invalid_request", 400);
     return this.resources.requests.postForUser(request, (user) =>
       withRequestSessionWorkspace(
         request,
@@ -431,7 +440,7 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
                   sessionId,
                   this.resources.now(),
                 );
-                this.resources.stopChildren(existing, user.id);
+                if (cascade) this.resources.stopChildren(existing, user.id);
               }
               await this.resources.executionCleanup.cleanupTerminal(existing);
               this.resources.notify(user.id, sessionId);

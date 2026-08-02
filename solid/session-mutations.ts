@@ -111,7 +111,7 @@ export function reassignSessionMutation(
 
 export function stopSessionMutation(
   sessionId: string,
-  graceful = false,
+  cascade?: boolean,
 ): SessionMutation {
   const mutation = sessionMutation(
     sessionId,
@@ -119,9 +119,9 @@ export function stopSessionMutation(
     "stop that session",
     "stopping",
   );
-  return graceful
-    ? { ...mutation, payload: { graceful: true, sessionId } }
-    : mutation;
+  return cascade === undefined
+    ? mutation
+    : { ...mutation, payload: { cascade, sessionId } };
 }
 
 export function compactionModeMutation(
@@ -169,8 +169,9 @@ function validSessionMutationPayload(mutation: SessionMutation): boolean {
     case SESSION_REALTIME_OPERATIONS.stop:
       return (
         Object.keys(payload).length ===
-          (payload["graceful"] === true ? 2 : 1) &&
-        (payload["graceful"] === undefined || payload["graceful"] === true)
+          (payload["cascade"] === undefined ? 1 : 2) &&
+        (payload["cascade"] === undefined ||
+          typeof payload["cascade"] === "boolean")
       );
     case SESSION_REALTIME_OPERATIONS.followUp:
     case SESSION_REALTIME_OPERATIONS.steer:

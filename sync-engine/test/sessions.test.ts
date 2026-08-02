@@ -68,6 +68,19 @@ class BlockingModel implements AgentModel {
   }
 }
 
+async function stopHttpSession(
+  setup: ReturnType<typeof connectedSessionSetup>,
+  cascade?: boolean | string,
+): Promise<Response> {
+  const body = cascade === undefined ? undefined : ({ cascade } as const);
+  const request = createAuthenticatedRequest(
+    `${SESSIONS_PATH}/${SESSION_ID}/stop?workspaceId=${encodeURIComponent(TEST_WORKSPACE_ID)}`,
+    body,
+    "POST",
+  );
+  return setup.sessions.stop(request, SESSION_ID);
+}
+
 async function startSessionWithAgentFile(
   model: AgentModel,
   agentFile: unknown,
@@ -500,14 +513,7 @@ describe("agent sessions", () => {
     });
     now += 18_500;
 
-    const stopped = await sessions.stop(
-      createAuthenticatedRequest(
-        `${SESSIONS_PATH}/${SESSION_ID}/stop`,
-        undefined,
-        "POST",
-      ),
-      SESSION_ID,
-    );
+    const stopped = await stopHttpSession(setup);
 
     expect(stopped.status).toBe(200);
     expect(await stopped.json()).toMatchObject({
@@ -521,6 +527,31 @@ describe("agent sessions", () => {
     );
     expect(model.started).toBe(true);
     database.$client.close();
+  });
+
+  test("accepts explicit HTTP parent-only stop semantics", async () => {
+    const setup = connectedSessionSetup(new BlockingModel());
+    const createResponse = await setup.sessions.collection(
+      createSessionRequest(),
+    );
+    await expectSessionReaches(setup, createResponse, "running");
+
+    const stopped = await stopHttpSession(setup, false);
+
+    expect(await stopped.json()).toMatchObject({ status: "stopped" });
+    expect(stopped.status).toBe(200);
+    setup.database.$client.close();
+  });
+
+  test("rejects malformed HTTP stop semantics", async () => {
+    const setup = connectedSessionSetup(new BlockingModel());
+    await setup.sessions.collection(createSessionRequest());
+
+    const stopped = await stopHttpSession(setup, "false");
+
+    expect(await stopped.json()).toEqual({ error: "invalid_request" });
+    expect(stopped.status).toBe(400);
+    setup.database.$client.close();
   });
 
   test("protects session endpoints", async () => {

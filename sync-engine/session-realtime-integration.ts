@@ -475,7 +475,7 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
   stopForUser: SessionStopAction = async (
     user,
     sessionId,
-    graceful,
+    cascade,
     workspaceId,
   ) => {
     const existing = this.#dependencies.store.get(
@@ -486,19 +486,6 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
     if (existing === undefined) {
       throw new RealtimeCommandError("not_found");
     }
-    const children = this.#dependencies.store.spawnedSessionChildren(
-      user.id,
-      sessionId,
-    );
-    if (graceful && children.length > 0) {
-      await Promise.all(
-        children.map((childId) => this.#dependencies.runtimes.cleared(childId)),
-      );
-      const completed = this.#detail(user.id, sessionId, workspaceId);
-      if (completed.status === "queued" || completed.status === "running") {
-        await this.#dependencies.runtimes.cleared(sessionId);
-      }
-    }
     const current = this.#detail(user.id, sessionId, workspaceId);
     if (current.status !== "stopped") {
       this.#dependencies.actions.stopSession(sessionId, current);
@@ -508,7 +495,7 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
         sessionId,
         this.#dependencies.now(),
       );
-      this.#dependencies.actions.stopChildren(current, user.id);
+      if (cascade) this.#dependencies.actions.stopChildren(current, user.id);
     }
     const stopped = this.#detail(user.id, sessionId, workspaceId);
     this.#dependencies.actions.finished(stopped, user.id);

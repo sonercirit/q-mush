@@ -224,6 +224,17 @@ async function closeLifecycle(lifecycle: ChildLifecycleSetup): Promise<void> {
   closeSessionTestDatabase(lifecycle.setup.database);
 }
 
+async function completeChildAndConsumeCallback(
+  lifecycle: ChildLifecycleSetup,
+  parentStatus: ParentTerminalStatus,
+): Promise<void> {
+  lifecycle.model.finishChild();
+  await waitForChildStatus(lifecycle, "completed");
+  await waitForCallbackDisposition(lifecycle);
+  expectCallbackNoOp(lifecycle, parentStatus);
+  await closeLifecycle(lifecycle);
+}
+
 async function exerciseTerminalParent(
   status: "failed" | "stopped",
 ): Promise<void> {
@@ -236,7 +247,7 @@ async function exerciseTerminalParent(
       lifecycle.setup.sessions.realtimeCommands.stopForUser(
         TEST_AUTHENTICATED_USER,
         SESSION_ID,
-        false,
+        true,
         TEST_WORKSPACE_ID,
       ),
     ).resolves.toMatchObject({ status: "stopped" });
@@ -255,6 +266,22 @@ describe("terminal parents with running children", () => {
     await exerciseTerminalParent("stopped");
   });
 
+  test("a parent-only stop lets its child finish without delivering a callback", async () => {
+    const lifecycle = await runningChildSetup();
+
+    await expect(
+      lifecycle.setup.sessions.realtimeCommands.stopForUser(
+        TEST_AUTHENTICATED_USER,
+        SESSION_ID,
+        false,
+        TEST_WORKSPACE_ID,
+      ),
+    ).resolves.toMatchObject({ status: "stopped" });
+    expect(childDetail(lifecycle)?.status).toBe("running");
+
+    await completeChildAndConsumeCallback(lifecycle, "stopped");
+  });
+
   test("a completed parent lets its child finish and consumes the callback", async () => {
     const lifecycle = await runningChildSetup();
 
@@ -265,11 +292,6 @@ describe("terminal parents with running children", () => {
         ?.status,
     ).toBe("running");
 
-    lifecycle.model.finishChild();
-    await waitForChildStatus(lifecycle, "completed");
-    await waitForCallbackDisposition(lifecycle);
-
-    expectCallbackNoOp(lifecycle, "idle");
-    await closeLifecycle(lifecycle);
+    await completeChildAndConsumeCallback(lifecycle, "idle");
   });
 });

@@ -21,12 +21,12 @@ test.each([
   });
 });
 
-test("includes the graceful tree-stop choice only when selected", () => {
+test("includes the parent-only stop choice only when selected", () => {
   expect(stopSessionMutation("session-1").payload).toEqual({
     sessionId: "session-1",
   });
-  expect(stopSessionMutation("session-1", true).payload).toEqual({
-    graceful: true,
+  expect(stopSessionMutation("session-1", false).payload).toEqual({
+    cascade: false,
     sessionId: "session-1",
   });
 });

@@ -1,27 +1,18 @@
-import { createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
-import { restoreDialogFocus } from "./dialog-focus.ts";
+import { createSignal, Show, type JSX } from "solid-js";
+import { setupDialogFocus } from "./dialog-focus.ts";
 import type { ProviderPanelConfiguration } from "./provider-client.tsx";
 import type { SessionReassignmentDialogController } from "./session-reassignment-dialog-controller.ts";
 
-const FOCUSABLE_SELECTOR =
-  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+type ReassignmentDialogProps = Readonly<{
+  configuration: ProviderPanelConfiguration;
+  controller: SessionReassignmentDialogController;
+  onConfirm: () => void;
+  returnFocus: () => HTMLElement | undefined;
+}>;
 
-function focusableElements(
-  dialog: HTMLElement | undefined,
-): readonly HTMLElement[] {
-  return dialog === undefined
-    ? []
-    : [...dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)].filter(
-        (element) => !element.hasAttribute("disabled"),
-      );
-}
-
-export function SessionReassignmentDialog(props: {
-  readonly configuration: ProviderPanelConfiguration;
-  readonly controller: SessionReassignmentDialogController;
-  readonly onConfirm: () => void;
-  readonly trigger: HTMLElement | undefined;
-}): JSX.Element {
+export function SessionReassignmentDialog(
+  props: ReassignmentDialogProps,
+): JSX.Element {
   const [dialog, setDialog] = createSignal<HTMLDivElement>();
   const titleId = () => `${props.configuration.id}-session-reassignment-title`;
   const descriptionId = () =>
@@ -30,56 +21,19 @@ export function SessionReassignmentDialog(props: {
     props.controller.close();
   };
 
-  const onKeyDown = (event: KeyboardEvent): void => {
-    const current = props.controller.state;
-    if (current === undefined) {
-      return;
-    }
-    if (event.key === "Escape") {
-      event.preventDefault();
-      if (!current.pending) {
-        close();
-      }
-      return;
-    }
-    if (event.key !== "Tab") {
-      return;
-    }
-
-    const container = dialog();
-    if (container === undefined) {
-      return;
-    }
-    const focusable = focusableElements(container);
-    const first = focusable[0];
-    const last = focusable.at(-1);
-    if (first === undefined || last === undefined) {
-      event.preventDefault();
-      container.focus();
-    } else if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
+  const focusState = {
+    dialog,
+    open: () => props.controller.state !== undefined,
   };
-
-  restoreDialogFocus(
-    () => props.controller.state !== undefined,
-    () => {
-      queueMicrotask(() => {
-        focusableElements(dialog())[0]?.focus();
-      });
+  const returnFocus = (): HTMLElement | undefined => props.returnFocus();
+  setupDialogFocus({
+    ...focusState,
+    onEscape: () => {
+      const current = props.controller.state;
+      if (current !== undefined && !current.pending) close();
     },
-    () => props.trigger,
-  );
-
-  onMount(() => {
-    window.addEventListener("keydown", onKeyDown);
-    onCleanup(() => {
-      window.removeEventListener("keydown", onKeyDown);
-    });
+    open: focusState.open,
+    returnFocus,
   });
 
   return (
