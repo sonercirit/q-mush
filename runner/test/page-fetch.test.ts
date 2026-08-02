@@ -63,7 +63,6 @@ function acceptedResponse(
   request: Parameters<PageRenderer>[0],
   response: PageResponse,
 ): void {
-  request.policy.connected(PUBLIC_ADDRESS);
   request.policy.response(response);
 }
 
@@ -229,6 +228,24 @@ describe("page_fetch", () => {
     }
   });
 
+  test("does not treat the proxy's local peer as the remote page address", async () => {
+    const renderer: PageRenderer = documentedRenderer((request) => {
+      request.policy.response(RESPONSE);
+      return Promise.resolve({
+        evaluated: evaluatedCapture(),
+        response: RESPONSE,
+      });
+    });
+
+    await expect(
+      fetchRenderedPage(
+        { url: "https://example.com/" },
+        undefined,
+        dependencies(renderer),
+      ),
+    ).resolves.toContain("Rendered title");
+  });
+
   test("normalizes divergent DNS family metadata at page and proxy boundaries", async () => {
     const pageResolver: PageAddressResolver = () =>
       Promise.resolve([
@@ -309,23 +326,17 @@ describe("page_fetch", () => {
     expect(mixedDnsError.message).toContain("unsafe network destination");
     expect(renders).toBe(0);
 
-    for (const renderer of [
+    const redirectError = await fetchError(
       documentedRenderer(async (request) => {
         await request.policy.redirect(
           "http://127.0.0.1/private",
           request.url.toString(),
         );
         throw new Error("redirect policy unexpectedly continued");
-      }) satisfies PageRenderer,
-      documentedRenderer((request) => {
-        request.policy.connected("127.0.0.1");
-        throw new Error("address policy unexpectedly continued");
       }),
-    ]) {
-      const error = await fetchError(renderer, "https://example.com");
-
-      expect(error.message).toContain("unsafe network destination");
-    }
+      "https://example.com",
+    );
+    expect(redirectError.message).toContain("unsafe network destination");
 
     const arguments_ = chromiumArguments("/chromium", "/isolated", 8_080);
     expect(arguments_).toEqual(

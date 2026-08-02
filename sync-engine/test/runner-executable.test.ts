@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import {
   RUNNER_EXECUTABLE_PATH,
@@ -17,6 +18,9 @@ import {
 const RUNNER_VERSION = "c".repeat(64);
 const TARGET = "bun-linux-x64-baseline";
 const EXECUTABLE = new TextEncoder().encode("compiled runner executable");
+const PAGE_FETCH_PROBE = fileURLToPath(
+  new URL("../../runner/test/page-fetch-compiled-probe.ts", import.meta.url),
+);
 
 function localRunnerTarget(): RunnerExecutableTarget {
   if (process.platform === "darwin") {
@@ -38,6 +42,17 @@ function localRunnerTarget(): RunnerExecutableTarget {
   }
 
   return usesMusl ? RUNNER_TARGETS.linuxX64Musl : RUNNER_TARGETS.linuxX64;
+}
+
+function emptyExecutableProvider() {
+  return buildRunnerExecutableProvider({
+    build: () => Promise.resolve(new Blob()),
+    version: RUNNER_VERSION,
+  });
+}
+
+function removeTemporaryDirectory(directory: string): void {
+  rmSync(directory, { force: true, recursive: true });
 }
 
 function executableRequest(
@@ -125,10 +140,7 @@ describe("runner executable downloads", () => {
   });
 
   test("rejects unsupported targets and methods", async () => {
-    const provider = await buildRunnerExecutableProvider({
-      build: () => Promise.resolve(new Blob()),
-      version: RUNNER_VERSION,
-    });
+    const provider = await emptyExecutableProvider();
     const unsupported = await provider.serve(
       executableRequest("bun-windows-x64"),
     );
@@ -140,6 +152,39 @@ describe("runner executable downloads", () => {
     expect(wrongMethod.status).toBe(405);
     expect(wrongMethod.headers.get("allow")).toBe("GET");
   });
+
+  test("fetches a hostname inside the packaged Bun runtime", async () => {
+    const compiler = await emptyExecutableProvider();
+    const executable = await compiler.compile(
+      localRunnerTarget(),
+      PAGE_FETCH_PROBE,
+    );
+    const directory = mkdtempSync(join(tmpdir(), "q-mush-page-fetch-probe-"));
+    const executablePath = join(directory, "page-fetch-probe");
+
+    try {
+      writeFileSync(executablePath, await executable.bytes(), { mode: 0o755 });
+      const publicResult = Bun.spawnSync([
+        executablePath,
+        "fetch",
+        "https://example.com/",
+      ]);
+      const unsafeResult = Bun.spawnSync([
+        executablePath,
+        "unsafe",
+        "http://127.0.0.1/",
+      ]);
+
+      expect(publicResult.exitCode).toBe(0);
+      expect(publicResult.stdout.toString()).toBe("Example Domain\n");
+      expect(publicResult.stderr.toString()).toBe("");
+      expect(unsafeResult.exitCode).toBe(0);
+      expect(unsafeResult.stdout.toString()).toBe("unsafe\n");
+      expect(unsafeResult.stderr.toString()).toBe("");
+    } finally {
+      removeTemporaryDirectory(directory);
+    }
+  }, 30_000);
 
   test("builds a runnable executable that does not need Bun on PATH", async () => {
     const provider = await buildRunnerExecutableProvider();
@@ -170,7 +215,7 @@ describe("runner executable downloads", () => {
         `Q Mush runner ${provider.version}\n`,
       );
     } finally {
-      rmSync(directory, { force: true, recursive: true });
+      removeTemporaryDirectory(directory);
     }
   }, 120_000);
 });

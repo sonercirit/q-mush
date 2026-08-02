@@ -62,6 +62,7 @@ const compressionCases: readonly CompressionCase[] = [
 const clientJavaScript = 'document.querySelector("#app")?.replaceChildren();';
 const runnerExecutable = "standalone runner executable";
 const runnerExecutables: RunnerExecutableProvider = {
+  compile: () => Promise.resolve(new Blob()),
   version: "a".repeat(64),
   serve: () =>
     Promise.resolve(

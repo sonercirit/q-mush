@@ -22,7 +22,6 @@ import {
   type DevtoolsEvent,
 } from "./page-fetch-devtools.ts";
 import {
-  assertPublicPageAddress,
   assertPublicPageUrl,
   defaultPageAddressResolver,
   PageFetchProxy,
@@ -44,7 +43,6 @@ type PageCapture = Pick<PageRenderRequest, "captureExpression" | "url">;
 
 interface PageNavigationPolicy {
   bytes(byteLength: number): void;
-  connected(address: string): void;
   document(url: string): Promise<void>;
   redirect(location: string, sourceUrl: string): Promise<void>;
   request(url: string): Promise<void>;
@@ -156,7 +154,6 @@ function createNavigationPolicy(
         throw responseSizeError();
       }
     },
-    connected: assertPublicPageAddress,
     document: async (value) => {
       const url = parsePageUrl(
         value,
@@ -402,10 +399,6 @@ async function followPageEvents(
         }
       } else if (event.method === "Network.responseReceived") {
         if (isRecord(event.params) && isRecord(event.params["response"])) {
-          const remoteAddress = event.params["response"]["remoteIPAddress"];
-          if (typeof remoteAddress === "string") {
-            request.policy.connected(remoteAddress);
-          }
           if (event.params["type"] === "Document") {
             const response = responseFromEvent(event.params);
             if (response !== undefined) {
