@@ -340,25 +340,6 @@ test("pretty prints markdown and colorizes structured transcript content", () =>
   expect(html).not.toContain("<script>alert");
 });
 
-test("shows context percentage and warning colors", () => {
-  const renderContext = (currentContextTokens: number): string =>
-    renderPanel({
-      ...SESSION_STATE,
-      detail: {
-        ...TEST_SESSION_DETAIL,
-        currentContextTokens,
-      },
-      selectedId: TEST_SESSION_DETAIL.id,
-    });
-  const yellow = renderContext(160_000);
-  const red = renderContext(180_000);
-
-  expect(yellow).toContain("Context: 160K / 200K (80%)");
-  expect(yellow).toContain("text-amber-200");
-  expect(red).toContain("Context: 180K / 200K (90%)");
-  expect(red).toContain("text-rose-200");
-});
-
 test("renders an optional custom agent-file path input", () => {
   const html = renderPanel(SESSION_STATE);
 

@@ -24,10 +24,7 @@ function contextPercentage(
 ): number | null {
   return maxContextTokens === null
     ? null
-    : Math.min(
-        100,
-        Math.round((currentContextTokens / maxContextTokens) * 100),
-      );
+    : Math.round((currentContextTokens / maxContextTokens) * 100);
 }
 
 export function sessionContextLabel(
