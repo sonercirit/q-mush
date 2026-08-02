@@ -4,7 +4,9 @@ import { RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
 import type { ModelCredentialPool } from "./model-credential-pool.ts";
 import { attemptBalancedCredentials } from "./session-balanced-credential-attempt.ts";
 import {
-  createValidatedSession,
+  createPreparedSession,
+  prepareSessionCredential,
+  sessionMetadataErrorResponse,
   type SessionCreationDependencies,
 } from "./session-creation.ts";
 import type { CreateSessionInput } from "./session-input.ts";
@@ -28,7 +30,7 @@ interface BalancedSessionCreationDependencies extends SessionCreationDependencie
 type SessionCreationCredentialReader = (
   userId: string,
   selection: CreateSessionInput & { readonly workspaceId: string },
-) => Promise<Parameters<typeof createValidatedSession>[3]>;
+) => Promise<Parameters<typeof createPreparedSession>[3]>;
 
 export async function createSessionWithCredentialPool(
   options: WorkspaceSessionRealtimeActionOptions<
@@ -50,18 +52,31 @@ export async function createSessionWithCredentialPool(
       credentials,
       dependencies: {
         attempt: async (credential, resolvedInput) => {
-          const created: { detail?: AgentSessionDetail } = {};
-          const response = await createValidatedSession(
+          const metadata = await prepareSessionCredential(
             {
               ...dependencies,
-              onCreated: (detail) => {
-                created.detail = detail;
-              },
               rejectCredentialErrors: balanced,
             },
             user,
             resolvedInput,
             credential,
+          );
+          if ("error" in metadata) {
+            await requireJsonResponse(sessionMetadataErrorResponse(metadata));
+            throw new RealtimeCommandError("command_failed");
+          }
+          const created: { detail?: AgentSessionDetail } = {};
+          const response = await createPreparedSession(
+            {
+              ...dependencies,
+              onCreated: (detail) => {
+                created.detail = detail;
+              },
+            },
+            user,
+            resolvedInput,
+            credential,
+            metadata,
           );
           await requireJsonResponse(response);
           if (created.detail === undefined) {

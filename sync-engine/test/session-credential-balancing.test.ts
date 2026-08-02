@@ -102,6 +102,14 @@ describe("session credential balancing", () => {
     );
     expect(balanced.credentialId).toBe(SECOND_CREDENTIAL_ID);
     expect(discovered).toEqual([CREDENTIAL_ID, SECOND_CREDENTIAL_ID]);
+    const persistedBalanced = sessions.sessions.detailForUser(
+      TEST_AUTHENTICATED_USER.id,
+      balanced.id,
+    );
+    expect(persistedBalanced).toMatchObject({
+      credentialId: SECOND_CREDENTIAL_ID,
+      id: balanced.id,
+    });
 
     const explicit = await sessions.sessions.realtimeCommands.createForUser(
       TEST_AUTHENTICATED_USER,
