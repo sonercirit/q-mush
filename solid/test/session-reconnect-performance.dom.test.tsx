@@ -265,6 +265,20 @@ test("streaming tool updates do not invalidate the controlled new-session input"
     controller.applyToolDelta(toolDelta(detail.id, sequence));
   }
 
+  expect(controller.state.toolStreams).toEqual([
+    {
+      arguments: "",
+      callId: "call-typing-profile",
+      index: 0,
+      name: "bash",
+      sequence: 39,
+      sessionId: detail.id,
+      state: "running",
+      stderr: "",
+      stdout: "x".repeat(37),
+      streamId: "stream-typing-profile",
+    },
+  ]);
   expect(draftReads).toBe(0);
   expect(prompt.value).toBe("");
 });
