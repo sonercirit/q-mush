@@ -13,9 +13,18 @@ interface RememberedNestedScroll {
   readonly states: readonly NestedScrollState[];
 }
 
-interface IndexedNestedScroll {
-  readonly index: number;
+interface NestedScrollMutation {
+  readonly added: readonly HTMLElement[];
+  readonly mutationIndex: number;
+  readonly removed: readonly HTMLElement[];
+  readonly target: Node;
+}
+
+interface UnmatchedNestedScroll {
+  readonly element: HTMLElement;
+  readonly mutationIndex: number;
   readonly state: NestedScrollState;
+  readonly target: Node;
 }
 
 const nestedScrollByMessage = new Map<string, RememberedNestedScroll>();
@@ -50,22 +59,15 @@ function nestedScrollState(element: HTMLElement): NestedScrollState {
   };
 }
 
-function indexNestedScroll(
-  nested: readonly HTMLElement[],
-  indexed?: WeakMap<HTMLElement, IndexedNestedScroll>,
-): readonly NestedScrollState[] {
-  return nested.map((element, index) => {
-    const state = nestedScrollState(element);
-    indexed?.set(element, { index, state });
-    return state;
-  });
-}
-
 function rememberNestedScroll(
   element: HTMLElement,
-  indexed?: WeakMap<HTMLElement, IndexedNestedScroll>,
+  indexed?: WeakMap<HTMLElement, NestedScrollState>,
 ): readonly NestedScrollState[] {
-  return indexNestedScroll(nestedScrollElements(element), indexed);
+  return nestedScrollElements(element).map((nested) => {
+    const state = nestedScrollState(nested);
+    indexed?.set(nested, state);
+    return state;
+  });
 }
 
 function restoreNestedScroll(
@@ -96,42 +98,85 @@ function sameScrollKind(left: HTMLElement, right: HTMLElement): boolean {
   );
 }
 
+function matchingReplacement(
+  removed: HTMLElement,
+  added: readonly HTMLElement[],
+  available: ReadonlySet<HTMLElement>,
+  samePosition?: HTMLElement,
+): HTMLElement | undefined {
+  return samePosition !== undefined &&
+    available.has(samePosition) &&
+    sameScrollKind(removed, samePosition)
+    ? samePosition
+    : added.find(
+        (candidate) =>
+          available.has(candidate) && sameScrollKind(removed, candidate),
+      );
+}
+
 function updateRememberedReplacement(
   element: HTMLElement,
-  nestedScrollByElement: WeakMap<HTMLElement, IndexedNestedScroll>,
+  nestedScrollByElement: WeakMap<HTMLElement, NestedScrollState>,
   mutations: readonly MutationRecord[],
 ): void {
-  const removed = mutations.flatMap((mutation) =>
-    nestedScrollElementsIn(mutation.removedNodes),
+  const paneMutations = mutations.flatMap(
+    (mutation, mutationIndex): readonly NestedScrollMutation[] => {
+      const removed = nestedScrollElementsIn(mutation.removedNodes);
+      const added = nestedScrollElementsIn(mutation.addedNodes);
+      return removed.length === 0 && added.length === 0
+        ? []
+        : [{ added, mutationIndex, removed, target: mutation.target }];
+    },
   );
-  const added = new Set(
-    mutations.flatMap((mutation) =>
-      nestedScrollElementsIn(mutation.addedNodes),
-    ),
-  );
-  if (removed.length === 0 && added.size === 0) return;
+  if (paneMutations.length === 0) return;
 
-  const rememberedRemoved = removed.flatMap((removedElement) => {
-    const remembered = nestedScrollByElement.get(removedElement);
-    return remembered === undefined ? [] : [{ remembered, removedElement }];
-  });
-  const nested = nestedScrollElements(element);
-  for (const { remembered, removedElement } of rememberedRemoved) {
-    const indexedReplacement = nested[remembered.index];
-    const replacement =
-      indexedReplacement !== undefined &&
-      added.has(indexedReplacement) &&
-      sameScrollKind(removedElement, indexedReplacement)
-        ? indexedReplacement
-        : [...added].findLast((candidate) =>
-            sameScrollKind(removedElement, candidate),
-          );
-    if (replacement !== undefined) {
-      added.delete(replacement);
-      restoreNestedScroll(replacement, remembered.state);
+  const available = new Set(
+    paneMutations
+      .flatMap(({ added }) => added)
+      .filter((candidate) => element.contains(candidate)),
+  );
+  const unmatched: UnmatchedNestedScroll[] = [];
+  for (const mutation of paneMutations) {
+    for (const [index, removedElement] of mutation.removed.entries()) {
+      const state = nestedScrollByElement.get(removedElement);
+      if (state === undefined) continue;
+      const replacement = matchingReplacement(
+        removedElement,
+        mutation.added,
+        available,
+        mutation.added[index],
+      );
+      if (replacement === undefined) {
+        unmatched.push({
+          element: removedElement,
+          mutationIndex: mutation.mutationIndex,
+          state,
+          target: mutation.target,
+        });
+      } else {
+        available.delete(replacement);
+        restoreNestedScroll(replacement, state);
+      }
     }
   }
-  indexNestedScroll(nested, nestedScrollByElement);
+  for (const removed of unmatched) {
+    const laterSameTarget = paneMutations.flatMap((mutation) =>
+      mutation.target === removed.target &&
+      mutation.mutationIndex > removed.mutationIndex
+        ? mutation.added
+        : [],
+    );
+    const replacement = matchingReplacement(
+      removed.element,
+      laterSameTarget,
+      available,
+    );
+    if (replacement !== undefined) {
+      available.delete(replacement);
+      restoreNestedScroll(replacement, removed.state);
+    }
+  }
+  rememberNestedScroll(element, nestedScrollByElement);
 }
 
 export function createNestedScrollRef(
@@ -141,7 +186,7 @@ export function createNestedScrollRef(
   let current: HTMLElement | undefined;
   let currentKey: string | undefined;
   let remember: ((event?: Event) => void) | undefined;
-  const nestedScrollByElement = new WeakMap<HTMLElement, IndexedNestedScroll>();
+  const nestedScrollByElement = new WeakMap<HTMLElement, NestedScrollState>();
   onCleanup(() => {
     if (current !== undefined && remember !== undefined) {
       current.removeEventListener("scroll", remember, true);
