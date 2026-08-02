@@ -1,5 +1,6 @@
 import { createDatabase } from "../shared/database.ts";
 import { readDatabasePath } from "../shared/database/config.ts";
+import { FINAL_SHUTDOWN_PREPARED_MESSAGE } from "../shared/development-shutdown.ts";
 import { createGoogleAuthFromEnvironment } from "./auth.ts";
 import { createBraveSearchSkillFromEnvironment } from "./brave-search.ts";
 import { createCoreIntegrationResources } from "./core-integration-resources.ts";
@@ -130,6 +131,7 @@ async function shutDown(): Promise<void> {
 
   shuttingDown = true;
   await sessions.prepareFinalShutdown();
+  process.send?.(FINAL_SHUTDOWN_PREPARED_MESSAGE);
   await sessions.drain();
   await Promise.all([server.stop(), callbackServer?.stop()]);
   database.$client.close();

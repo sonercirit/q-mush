@@ -10,6 +10,7 @@ const ACTIVE_SESSION_STATE_SELECTION = {
   currentSegment: agentSessions.currentSegment,
   executionGeneration: agentSessions.executionGeneration,
   id: agentSessions.id,
+  interruptedHandoff: agentSessions.interruptedHandoff,
   isDeleted: agentSessions.isDeleted,
   status: agentSessions.status,
   updatedAt: agentSessions.updatedAt,

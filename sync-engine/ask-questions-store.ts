@@ -31,6 +31,7 @@ export interface StoredQuestionSession {
   readonly activeStartedAt: number | null;
   readonly executionGeneration: number;
   readonly id: string;
+  readonly interruptedHandoff: string | null;
   readonly isDeleted: boolean;
   readonly status: AgentSessionStatus;
   readonly updatedAt: number;
@@ -232,6 +233,7 @@ function updateQuestionSession(
       ? { activeDurationMs: activeDuration(session, now) }
       : {}),
     activeStartedAt: null,
+    interruptedHandoff: null,
     status,
     ...auditedUpdate(actorId, now),
   });
