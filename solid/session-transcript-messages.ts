@@ -14,6 +14,31 @@ function streamStart(messages: readonly AgentSessionMessage[]): number {
   return start;
 }
 
+export function transcriptMessageNestedScrollKey(
+  messages: readonly AgentSessionMessage[],
+  message: AgentSessionMessage,
+): string {
+  if (message.role !== "assistant" && message.role !== "thinking") {
+    return message.id;
+  }
+  const index = messages.indexOf(message);
+  let anchor = index - 1;
+  while (
+    anchor >= 0 &&
+    (messages[anchor]?.role === "assistant" ||
+      messages[anchor]?.role === "thinking")
+  ) {
+    anchor -= 1;
+  }
+  const anchorMessage = messages[anchor];
+  if (anchorMessage === undefined) return message.id;
+  let ordinal = 0;
+  for (let candidate = anchor + 1; candidate < index; candidate += 1) {
+    if (messages[candidate]?.role === message.role) ordinal += 1;
+  }
+  return `after:${anchorMessage.id}:${message.role}:${String(ordinal)}`;
+}
+
 export function createSessionTranscriptMessageGroups(
   messages: Accessor<readonly AgentSessionMessage[]>,
 ): Accessor<SessionTranscriptMessageGroups> {

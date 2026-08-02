@@ -46,7 +46,10 @@ import type {
   SessionTranscriptFilterName,
   SessionTranscriptFilters,
 } from "./session-transcript-filters.ts";
-import { createSessionTranscriptMessageGroups } from "./session-transcript-messages.ts";
+import {
+  createSessionTranscriptMessageGroups,
+  transcriptMessageNestedScrollKey,
+} from "./session-transcript-messages.ts";
 
 function StepTiming(props: {
   readonly endedAt: number | null;
@@ -373,6 +376,7 @@ const SESSION_TRANSCRIPT_FILTER_NAMES: readonly SessionTranscriptFilterName[] =
 type TranscriptRenderableMessageProps = TranscriptMessageProps & {
   readonly filters: Readonly<SessionTranscriptFilters>;
   readonly liveToolStreams: readonly ToolStreamEntry[];
+  readonly nestedScrollKey: string;
   readonly onForkMessage?: ((messageId: string) => void) | undefined;
   readonly streamEntries: () => ReadonlyMap<string, ToolStreamEntry>;
 };
@@ -418,7 +422,7 @@ function renderTranscriptMessage(
 function TranscriptMessage(
   props: TranscriptRenderableMessageProps,
 ): JSX.Element {
-  const nestedScrollRef = createNestedScrollRef(() => props.message.id);
+  const nestedScrollRef = createNestedScrollRef(() => props.nestedScrollKey);
   return (
     <li class="contents" ref={nestedScrollRef}>
       {renderTranscriptMessage(props)}
@@ -494,6 +498,10 @@ export function SessionTranscript(props: {
           filters={props.filters}
           liveToolStreams={liveToolStreams}
           message={message}
+          nestedScrollKey={transcriptMessageNestedScrollKey(
+            props.messages,
+            message,
+          )}
           onForkMessage={props.onFork}
           streamEntries={toolStreamsByCallId}
         />
