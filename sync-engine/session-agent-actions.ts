@@ -18,6 +18,7 @@ import {
   spawnAgentSession,
   type SessionAgentActionDependencies,
 } from "./session-agent-action-helpers.ts";
+import { listSessionsOutput } from "./session-agent-list.ts";
 import {
   SESSION_OPTIONS_PAGE_SIZE,
   sessionOptionsOutput,
@@ -169,8 +170,9 @@ export class SessionAgentActions {
           this.#dependencies.listOnlineRunners(userId, parentWorkspaceId()),
         ),
       ),
-      listSessions: guardParent("list_sessions", () =>
-        sessionToolOutput(
+      listSessions: guardParent("list_sessions", (input) =>
+        listSessionsOutput(
+          input,
           this.#dependencies.store.list(userId, parentWorkspaceId()),
         ),
       ),

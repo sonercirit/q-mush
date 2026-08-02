@@ -1,5 +1,11 @@
 import { isProviderId, type ProviderId } from "../shared/provider-id.ts";
 import {
+  DEFAULT_LIST_SESSIONS_PAGE_SIZE,
+  MAXIMUM_LIST_SESSIONS_PAGE_SIZE,
+  MAXIMUM_LIST_SESSIONS_SEARCH_LENGTH,
+  type ListSessionsToolInput,
+} from "./session-agent-list.ts";
+import {
   MAXIMUM_SESSION_OPTIONS_SEARCH_LENGTH,
   SESSION_OPTION_CATEGORIES,
   type GetSessionOptionsToolInput,
@@ -42,6 +48,59 @@ function readCategories(
     categories.push(category);
   }
   return categories;
+}
+
+interface PageAndSearch {
+  readonly page: unknown;
+  readonly search?: string;
+  readonly validSearch: boolean;
+}
+
+function pageAndSearch(
+  arguments_: Readonly<Record<string, unknown>>,
+  maximumSearchLength: number,
+): PageAndSearch {
+  const page = arguments_["page"] ?? 1;
+  const searchValue = arguments_["search"];
+  const search =
+    searchValue === undefined
+      ? undefined
+      : readStringField(arguments_, "search", maximumSearchLength, {
+          trim: true,
+        });
+  return {
+    page,
+    ...(search === undefined ? {} : { search }),
+    validSearch: searchValue === undefined || search !== undefined,
+  };
+}
+
+export function listSessionsToolInput(
+  arguments_: Readonly<Record<string, unknown>>,
+): ListSessionsToolInput {
+  const { page, search, validSearch } = pageAndSearch(
+    arguments_,
+    MAXIMUM_LIST_SESSIONS_SEARCH_LENGTH,
+  );
+  const pageSize = arguments_["pageSize"] ?? DEFAULT_LIST_SESSIONS_PAGE_SIZE;
+  if (
+    !hasOnlySessionToolArguments(arguments_, ["page", "pageSize", "search"]) ||
+    typeof page !== "number" ||
+    !Number.isSafeInteger(page) ||
+    page < 1 ||
+    typeof pageSize !== "number" ||
+    !Number.isSafeInteger(pageSize) ||
+    pageSize < 1 ||
+    pageSize > MAXIMUM_LIST_SESSIONS_PAGE_SIZE ||
+    !validSearch
+  ) {
+    throw new Error("The list_sessions arguments are invalid");
+  }
+  return {
+    page,
+    pageSize,
+    ...(search === undefined ? {} : { search }),
+  };
 }
 
 export function readSessionToolInput(
@@ -110,18 +169,10 @@ export function getSessionOptionsToolInput(
     arguments_["credentialId"],
     arguments_["provider"],
   );
-  const pageValue = arguments_["page"];
-  const page = pageValue === undefined ? 1 : pageValue;
-  const searchValue = arguments_["search"];
-  const search =
-    searchValue === undefined
-      ? undefined
-      : readStringField(
-          arguments_,
-          "search",
-          MAXIMUM_SESSION_OPTIONS_SEARCH_LENGTH,
-          { trim: true },
-        );
+  const { page, search, validSearch } = pageAndSearch(
+    arguments_,
+    MAXIMUM_SESSION_OPTIONS_SEARCH_LENGTH,
+  );
   if (
     !hasOnlySessionToolArguments(arguments_, [
       "category",
@@ -135,7 +186,7 @@ export function getSessionOptionsToolInput(
     typeof page !== "number" ||
     !Number.isSafeInteger(page) ||
     page < 1 ||
-    (searchValue !== undefined && search === undefined)
+    !validSearch
   ) {
     throw new Error("The get_session_options arguments are invalid");
   }

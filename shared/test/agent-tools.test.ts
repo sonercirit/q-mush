@@ -89,6 +89,27 @@ test("defines optional agent-file path and auto-compaction for spawned sessions"
   });
 });
 
+test("defines list-session pagination and search parameters", () => {
+  const listSessions = AGENT_TOOLS.find(
+    ({ function: definition }) => definition.name === "list_sessions",
+  );
+
+  expect(listSessions?.function.description).toContain("pagination");
+  expect(listSessions).toMatchObject({
+    function: {
+      parameters: {
+        additionalProperties: false,
+        properties: {
+          page: { minimum: 1, type: "number" },
+          pageSize: { maximum: 100, minimum: 1, type: "number" },
+          search: { maxLength: 100, type: "string" },
+        },
+        required: [],
+      },
+    },
+  });
+});
+
 test("defines the session tools as one selectable group", () => {
   expect(SESSION_AGENT_TOOL_NAMES).toEqual([
     "sleep",

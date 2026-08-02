@@ -18,11 +18,13 @@ import {
 import { MAXIMUM_RUNNER_PATH_LENGTH } from "../shared/runner-directory-model.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { completedRunnerCommandResult } from "./runner-command-result.ts";
+import type { ListSessionsToolInput } from "./session-agent-list.ts";
 import type { GetSessionOptionsToolInput } from "./session-agent-options.ts";
 import type { ReadSessionToolInput } from "./session-agent-read.ts";
 import {
   getSessionOptionsToolInput,
   hasOnlySessionToolArguments,
+  listSessionsToolInput,
   readSessionToolInput,
 } from "./session-agent-tool-input.ts";
 import {
@@ -61,7 +63,7 @@ export interface SessionAgentToolActions {
     input: GetSessionOptionsToolInput,
   ) => Promise<string>;
   readonly listRunners: () => string;
-  readonly listSessions: () => string;
+  readonly listSessions: (input: ListSessionsToolInput) => string;
   readonly readSession: (input: ReadSessionToolInput) => string;
   readonly reassignSession: (
     sessionId: string,
@@ -253,10 +255,9 @@ export function executeSessionAgentTool(
         output = Promise.resolve(actions.listRunners());
         break;
       case "list_sessions":
-        if (Object.keys(arguments_).length > 0) {
-          throw new Error("list_sessions does not accept arguments");
-        }
-        output = Promise.resolve(actions.listSessions());
+        output = Promise.resolve(
+          actions.listSessions(listSessionsToolInput(arguments_)),
+        );
         break;
       case "read_session":
         output = Promise.resolve(
