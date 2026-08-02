@@ -33,12 +33,18 @@ async function recoverRetry(
   });
 }
 
-test("recovery retries once", async () => {
-  const failed = restartStoreAtStatus("paused", "l");
-  for (const result of [false, "x"] as const) {
-    await recoverRetry(failed, result);
-    expect(requireCompactionSession(failed.setup.store).status).toBe("paused");
-  }
+test("recovery retries a refused launch and fails a thrown launch visibly", async () => {
+  const refused = restartStoreAtStatus("paused", "l");
+  await recoverRetry(refused, false);
+  expect(requireCompactionSession(refused.setup.store).status).toBe("paused");
+  closeCompactionStore(refused.setup);
+
+  const failed = restartStoreAtStatus("paused", "x");
+  await recoverRetry(failed, "x");
+  expect(requireCompactionSession(failed.setup.store)).toMatchObject({
+    restartHandoff: null,
+    status: "failed",
+  });
   closeCompactionStore(failed.setup);
 
   const replayed = restartStoreAtStatus("paused", "r");

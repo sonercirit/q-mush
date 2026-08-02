@@ -246,6 +246,22 @@ export class SessionStore {
     return this.#restartHandoffs.pauseRunning(...arguments_);
   }
 
+  failInvalidRestartHandoff(
+    ...arguments_: Parameters<RestartHandoffStore["failInvalid"]>
+  ): boolean {
+    return this.#restartHandoffs.failInvalid(...arguments_);
+  }
+
+  failRestartHandoff(
+    ...arguments_: Parameters<RestartHandoffStore["failQueued"]>
+  ): boolean {
+    return this.#restartHandoffs.failQueued(...arguments_);
+  }
+
+  invalidRestartHandoffs(runnerId?: string) {
+    return this.#restartHandoffs.invalid(runnerId);
+  }
+
   pendingRestartHandoffs(runnerId?: string) {
     return this.#restartHandoffs.pending(runnerId);
   }

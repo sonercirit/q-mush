@@ -178,16 +178,21 @@ function validInputState(
   return acceptedStatuses.some((accepted) => status === accepted);
 }
 
-export function appendSystemFollowUp(options: {
-  readonly clientRequestId: string;
-  readonly content: string;
+export interface SessionSystemWriteTarget {
   readonly database: Pick<AppDatabase, "insert" | "select" | "update">;
   readonly generateId: IdGenerator;
-  readonly kind: AgentSessionPendingInputKind;
   readonly now: number;
   readonly sessionId: string;
   readonly userId: string;
-}): boolean {
+}
+
+export function appendSystemFollowUp(
+  options: SessionSystemWriteTarget & {
+    readonly clientRequestId: string;
+    readonly content: string;
+    readonly kind: AgentSessionPendingInputKind;
+  },
+): boolean {
   const session = storedSessionForUser({
     database: options.database,
     sessionId: options.sessionId,

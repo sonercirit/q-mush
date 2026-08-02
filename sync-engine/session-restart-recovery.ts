@@ -11,6 +11,7 @@ import type {
   SessionNotification,
 } from "./session-creation.ts";
 import type {
+  InvalidRestartSession,
   PendingRestartSession,
   RestartHandoffIdentity,
 } from "./session-restart-store.ts";
@@ -26,6 +27,20 @@ export interface RestartCredentialSelection {
 }
 
 interface SessionRestartRecoveryStore {
+  readonly failInvalidRestartHandoff: (
+    invalid: InvalidRestartSession,
+    error: string,
+    now: number,
+  ) => boolean;
+  readonly failRestartHandoff: (
+    userId: string,
+    identity: RestartHandoffIdentity,
+    error: string,
+    now: number,
+  ) => boolean;
+  readonly invalidRestartHandoffs: (
+    runnerId?: string,
+  ) => readonly InvalidRestartSession[];
   readonly claimRestartHandoff: (
     userId: string,
     identity: RestartHandoffIdentity,
@@ -87,6 +102,23 @@ interface RestartRecoveryResult {
   readonly pendingLaunches: boolean;
 }
 
+function restartFailureMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return `Session failed: ${error.message.slice(0, 500)}`;
+  }
+  return "Session failed: Unknown error";
+}
+
+const RECOVERY_COMPLETE: RestartRecoveryResult = {
+  pendingCredentials: false,
+  pendingLaunches: false,
+};
+
+const RECOVERY_RETRY_LAUNCH: RestartRecoveryResult = {
+  pendingCredentials: false,
+  pendingLaunches: true,
+};
+
 async function recoverOne(
   dependencies: SessionRestartRecoveryDependencies,
   pending: PendingRestartSession,
@@ -95,7 +127,7 @@ async function recoverOne(
     pending.handoff.requestedBy === "runner" &&
     pending.handoff.restartId !== dependencies.restartId
   ) {
-    return { pendingCredentials: false, pendingLaunches: false };
+    return RECOVERY_COMPLETE;
   }
   if (
     !sessionRunnerIsAvailable(
@@ -104,7 +136,7 @@ async function recoverOne(
       pending.detail,
     )
   ) {
-    return { pendingCredentials: false, pendingLaunches: false };
+    return RECOVERY_COMPLETE;
   }
   let credential: ProviderCredentialAccess | undefined;
   try {
@@ -125,7 +157,7 @@ async function recoverOne(
     pending.detail.generation !== pending.handoff.executionGeneration ||
     !handoffsMatch(handoff, pending.handoff)
   ) {
-    return { pendingCredentials: false, pendingLaunches: false };
+    return RECOVERY_COMPLETE;
   }
   const identity = handoffIdentity(pending);
   const claimed = dependencies.store.claimRestartHandoff(
@@ -134,7 +166,7 @@ async function recoverOne(
     dependencies.now(),
   );
   if (claimed === undefined) {
-    return { pendingCredentials: false, pendingLaunches: false };
+    return RECOVERY_COMPLETE;
   }
   const claimedHandoff = claimed.restartHandoff;
   if (
@@ -143,12 +175,9 @@ async function recoverOne(
     !handoffsMatch(claimedHandoff, pending.handoff)
   ) {
     restoreClaim(dependencies, identity);
-    return { pendingCredentials: false, pendingLaunches: false };
+    return RECOVERY_COMPLETE;
   }
-  const queued = (): RestartRecoveryResult => ({
-    pendingCredentials: false,
-    pendingLaunches: true,
-  });
+  const queued = (): RestartRecoveryResult => RECOVERY_RETRY_LAUNCH;
   let launched: boolean;
   try {
     launched = dependencies.launch(
@@ -157,9 +186,15 @@ async function recoverOne(
       pending.userId,
       claimedHandoff.operation,
     );
-  } catch {
-    restoreClaim(dependencies, identity);
-    return queued();
+  } catch (error) {
+    dependencies.store.failRestartHandoff(
+      pending.userId,
+      identity,
+      restartFailureMessage(error),
+      dependencies.now(),
+    );
+    dependencies.notify(pending.userId, pending.detail.id);
+    return RECOVERY_COMPLETE;
   }
 
   if (!launched) {
@@ -167,21 +202,47 @@ async function recoverOne(
     return queued();
   }
   dependencies.notify(pending.userId, pending.detail.id);
-  return { pendingCredentials: false, pendingLaunches: false };
+  return RECOVERY_COMPLETE;
+}
+
+const INVALID_RESTART_HANDOFF_ERROR =
+  "Session failed: Stored restart handoff is invalid";
+
+function failInvalid(
+  dependencies: SessionRestartRecoveryDependencies,
+  runnerId?: string,
+): void {
+  for (const invalid of dependencies.store.invalidRestartHandoffs(runnerId)) {
+    if (
+      dependencies.store.failInvalidRestartHandoff(
+        invalid,
+        INVALID_RESTART_HANDOFF_ERROR,
+        dependencies.now(),
+      )
+    ) {
+      dependencies.notify(invalid.userId, invalid.sessionId);
+    }
+  }
 }
 
 export function recoverSessionRestartHandoffs(
   dependencies: SessionRestartRecoveryDependencies,
   runnerId?: string,
 ): Promise<RestartRecoveryResult> {
-  return Promise.all(
+  failInvalid(dependencies, runnerId);
+  return Promise.allSettled(
     dependencies.store
       .pendingRestartHandoffs(runnerId)
       .map((pending) => recoverOne(dependencies, pending)),
-  ).then((results) => ({
-    pendingCredentials: results.some(
-      ({ pendingCredentials }) => pendingCredentials,
-    ),
-    pendingLaunches: results.some(({ pendingLaunches }) => pendingLaunches),
-  }));
+  ).then((results) => {
+    const recovered = results.flatMap((result) =>
+      result.status === "fulfilled" ? [result.value] : [],
+    );
+    return {
+      pendingCredentials:
+        results.some((result) => result.status === "rejected") ||
+        recovered.some(({ pendingCredentials }) => pendingCredentials),
+      pendingLaunches: recovered.some(({ pendingLaunches }) => pendingLaunches),
+    };
+  });
 }
