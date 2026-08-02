@@ -1,4 +1,4 @@
-import { createSignal, Show, type JSX } from "solid-js";
+import { createSignal, For, Show, type JSX } from "solid-js";
 import { afterEach, expect, test, vi } from "vitest";
 import type { AgentSessionMessage } from "../../shared/session-model.ts";
 import { createNestedScrollRef } from "../nested-scroll.ts";
@@ -279,6 +279,47 @@ function queryMutationPane(container: ParentNode, label: string): HTMLElement {
   return pane;
 }
 
+function WithinScopeFixture(props: {
+  readonly labels: readonly string[];
+}): JSX.Element {
+  const nestedScrollRef = createNestedScrollRef(
+    () => "within-scope-mutations",
+    true,
+  );
+  return (
+    <section data-within-scope-fixture="true" ref={nestedScrollRef}>
+      <For each={props.labels}>
+        {(label) => (
+          <div
+            class="overflow-auto"
+            data-line-wrap="true"
+            data-mutation-pane={label}
+          />
+        )}
+      </For>
+    </section>
+  );
+}
+
+function mountWithinScopeFixture(
+  labels: readonly string[],
+): MountedMutationDetail {
+  const harness = installMutationObserverHarness();
+  const container = mountTestView(
+    () => <WithinScopeFixture labels={labels} />,
+    disposals,
+  );
+  const root = container.querySelector("[data-within-scope-fixture]");
+  if (!(root instanceof HTMLElement))
+    throw new TypeError("Missing within-scope fixture");
+  return {
+    callback: mutationCallback(harness),
+    container,
+    harness,
+    root,
+  };
+}
+
 afterEach(() => {
   document.body.replaceChildren();
   vi.restoreAllMocks();
@@ -288,6 +329,68 @@ afterEach(() => {
     if (dispose === undefined) return;
     dispose();
   }
+});
+
+test("keeps pane state with elements reordered within one scope", () => {
+  const { callback, container, harness, root } = mountWithinScopeFixture([
+    "first",
+    "second",
+  ]);
+  const first = queryMutationPane(container, "first");
+  const second = queryMutationPane(container, "second");
+  rememberPane(first, 20);
+  rememberPane(second, 70);
+  const movedNodes = nodeList(second);
+  root.prepend(second);
+
+  callback(
+    [
+      mutation({
+        addedNodes: movedNodes,
+        removedNodes: movedNodes,
+        target: root,
+      }),
+    ],
+    harness.observer(),
+  );
+
+  expect(
+    [...root.querySelectorAll<HTMLElement>("[data-mutation-pane]")].map(
+      (pane) => [pane.dataset["mutationPane"], pane.scrollTop],
+    ),
+  ).toEqual([
+    ["second", 70],
+    ["first", 20],
+  ]);
+});
+
+test("drops a removed middle pane without shifting its state", () => {
+  const { callback, container, harness, root } = mountWithinScopeFixture([
+    "first",
+    "middle",
+    "last",
+  ]);
+  const first = queryMutationPane(container, "first");
+  const middle = queryMutationPane(container, "middle");
+  const last = queryMutationPane(container, "last");
+  rememberPane(first, 20);
+  rememberPane(middle, 40);
+  rememberPane(last, 70);
+  const removedNodes = nodeList(middle);
+
+  callback(
+    [mutation({ addedNodes: nodeList(), removedNodes, target: root })],
+    harness.observer(),
+  );
+
+  expect(
+    [...root.querySelectorAll<HTMLElement>("[data-mutation-pane]")].map(
+      (pane) => [pane.dataset["mutationPane"], pane.scrollTop],
+    ),
+  ).toEqual([
+    ["first", 20],
+    ["last", 70],
+  ]);
 });
 
 test("unrelated transcript mutations do not rescan historical panes", () => {

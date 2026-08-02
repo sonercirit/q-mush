@@ -18,6 +18,15 @@ interface RememberedNestedScroll {
   readonly panes: ReadonlyMap<number, RememberedNestedScrollPane>;
 }
 
+interface ElementNestedScrollState {
+  readonly key: string;
+  readonly state: NestedScrollState;
+}
+
+const nestedScrollByElement = new WeakMap<
+  HTMLElement,
+  ElementNestedScrollState
+>();
 const nestedScrollByMessage = new Map<string, RememberedNestedScroll>();
 
 const NESTED_SCROLL_KEY_ATTRIBUTE = "data-nested-scroll-key";
@@ -89,17 +98,59 @@ function restoreNestedScroll(
       : state.left;
 }
 
-function rememberedPanes(
+function recordNestedScrollPane(
+  key: string,
+  element: HTMLElement,
+  state = nestedScrollState(element),
+): RememberedNestedScrollPane {
+  nestedScrollByElement.set(element, { key, state });
+  return { element, state };
+}
+
+function currentNestedScrollPanes(
+  key: string,
   elements: readonly HTMLElement[],
-  previous?: RememberedNestedScroll,
 ): ReadonlyMap<number, RememberedNestedScrollPane> {
   return new Map(
+    elements.map((element, ordinal) => [
+      ordinal,
+      recordNestedScrollPane(key, element),
+    ]),
+  );
+}
+
+function rebuiltNestedScrollPanes(
+  key: string,
+  elements: readonly HTMLElement[],
+  previous: RememberedNestedScroll,
+): ReadonlyMap<number, RememberedNestedScrollPane> {
+  const previousElements = new Set(
+    [...previous.panes.values()].map((pane) => pane.element),
+  );
+  const hasSurvivingElement = elements.some((element) =>
+    previousElements.has(element),
+  );
+  const canRestoreByOrdinal =
+    !hasSurvivingElement && elements.length === previous.panes.size;
+  const currentElements = new Set(elements);
+  for (const pane of previous.panes.values()) {
+    if (currentElements.has(pane.element)) continue;
+    if (nestedScrollByElement.get(pane.element)?.key === key) {
+      nestedScrollByElement.delete(pane.element);
+    }
+  }
+  return new Map(
     elements.map((element, ordinal) => {
-      const remembered = previous?.panes.get(ordinal);
-      if (remembered !== undefined && remembered.element !== element) {
-        restoreNestedScroll(element, remembered.state);
-      }
-      return [ordinal, { element, state: nestedScrollState(element) }];
+      const elementState = nestedScrollByElement.get(element);
+      const state = previousElements.has(element)
+        ? elementState?.key === key
+          ? elementState.state
+          : undefined
+        : canRestoreByOrdinal
+          ? previous.panes.get(ordinal)?.state
+          : undefined;
+      if (state !== undefined) restoreNestedScroll(element, state);
+      return [ordinal, recordNestedScrollPane(key, element)];
     }),
   );
 }
@@ -125,7 +176,7 @@ function rememberNestedScroll(event: Event): void {
   const key = nestedScrollScopeKey(scope);
   if (key === undefined) return;
   const nested = ownedNestedScrollElements(scope);
-  const panes = rememberedPanes(nested);
+  const panes = currentNestedScrollPanes(key, nested);
   const changedOrdinal = nested.indexOf(changedPane);
   const changed = panes.get(changedOrdinal);
   nestedScrollByMessage.set(key, {
@@ -133,10 +184,13 @@ function rememberNestedScroll(event: Event): void {
     panes:
       changedWrap === undefined || changed === undefined
         ? panes
-        : new Map(panes).set(changedOrdinal, {
-            element: changed.element,
-            state: { ...changed.state, lineWrap: changedWrap },
-          }),
+        : new Map(panes).set(
+            changedOrdinal,
+            recordNestedScrollPane(key, changed.element, {
+              ...changed.state,
+              lineWrap: changedWrap,
+            }),
+          ),
   });
 }
 
@@ -147,7 +201,11 @@ function restoreRememberedNestedScroll(
 ): void {
   nestedScrollByMessage.set(key, {
     element,
-    panes: rememberedPanes(ownedNestedScrollElements(element), previous),
+    panes: rebuiltNestedScrollPanes(
+      key,
+      ownedNestedScrollElements(element),
+      previous,
+    ),
   });
 }
 
@@ -250,7 +308,10 @@ export function createNestedScrollRef(
     if (previous === undefined) {
       nestedScrollByMessage.set(key, {
         element,
-        panes: rememberedPanes(ownedNestedScrollElements(element)),
+        panes: currentNestedScrollPanes(
+          key,
+          ownedNestedScrollElements(element),
+        ),
       });
     } else if (previous.element !== element) {
       nestedScrollByMessage.set(key, { ...previous, element });
