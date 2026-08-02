@@ -58,7 +58,7 @@ export const SessionStopDialog = (
               ? "The parent session will stop immediately. Choose whether its child sessions should stop too."
               : "The session will stop immediately and its in-flight work will be lost."}
           </p>
-          <div class="mt-7 flex flex-col gap-3 sm:flex-row sm:justify-end">
+          <menu class="mt-7 flex flex-col gap-3 sm:flex-row sm:justify-end">
             <button
               class="min-h-11 rounded-xl border border-white/10 px-4 py-2.5 text-sm font-semibold text-slate-300 transition hover:border-white/20 hover:text-white"
               onClick={() => {
@@ -89,8 +89,7 @@ export const SessionStopDialog = (
             >
               {hasChildren() ? "Stop session and children" : "Stop"}
             </button>
-          </div>
-          <span aria-hidden="true" />
+          </menu>
         </div>
       </div>
     </Show>
