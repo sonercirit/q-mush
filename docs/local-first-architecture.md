@@ -42,17 +42,21 @@ browser views and an entitlement-scoped engine backup.
    relationships remain valid while the entitled engine partition backfills.
 4. **Logged-in accounts have free and paid engine tiers.** Both automatically
    maintain a readable engine backup of the non-session partition. Paid accounts
-   additionally back up all session entities and their blobs and receive the
-   managed rendezvous/relay service. The engine can query what it stores; this
-   is deliberately not E2EE-blind backup. A free engine subscriber rejects
-   session operations, snapshots, manifests, blobs, and acknowledgements.
-5. **Ordinary data remains peer-first at all times.** Runners exchange
-   operations and blobs directly whether or not the engine is healthy. Each
-   runner-to-engine backup relationship is an independent subscription. The
-   engine never bridges runner A to runner B, never becomes the routine
-   data-plane route, and never brokers commands or live output. Its paid opaque
-   relay is an explicit last resort whose encryption terminates only at the
-   endpoint peers.
+   additionally back up all session entities and blobs and may use the managed
+   rendezvous/relay deployment. The engine can query what it stores; this is
+   deliberately not E2EE-blind backup. A free engine subscriber rejects session
+   operations, snapshots, manifests, blobs, and acknowledgements.
+5. **Ordinary data remains peer-first, and remote discovery is not engine-
+   dependent.** Runners exchange operations and blobs over endpoint-
+   authenticated connections whether or not the engine is healthy. Q Mush ships
+   a separately deployable rendezvous/relay component for any user to operate,
+   alongside a hardened public-STUN/manual ICE path. The paid managed service is
+   one deployment of that component; self-hosted and manual paths have no Q Mush
+   entitlement check. Each runner-to-engine backup relationship is an
+   independent destination subscription. Candidate exchange grants no data
+   authority, the engine application WebSocket is never a peer route, and
+   exhausted approved paths report `No route` rather than silently brokering
+   traffic.
 6. **Replication uses a typed, append-only operation log.** Operations have
    UUIDv7 IDs, per-device sequence numbers, causal frontiers, hybrid logical
    clocks, scopes, schema versions, and signatures. SQLite projections are
@@ -121,17 +125,7 @@ re-upgrade grace period before purging it. The duration and involuntary billing
 failure treatment remain an explicit product question; runners never delete
 their full copies because of tier.
 
-## Current architecture and constraints
-
-Today the engine serves the app, requires Google login, owns relational state
-and provider credentials, runs model orchestration, and brokers tool commands to
-an outbound-only runner. The target removes those runtime couplings. Existing
-foundations, the observed OpenAI/OpenRouter callback behavior, schema migration
-hazards, and workspace import boundaries are catalogued in
-[current-state.md](local-first/current-state.md). Caching JavaScript alone would
-not address the dependency.
-
-## Target topology
+## Topology
 
 ```text
                               Google identity
@@ -141,7 +135,6 @@ not address the dependency.
                   | sync engine                       |
                   | readable backup subscriber        |
                   | free: non-session; paid: all data |
-                  | paid rendezvous / opaque relay    |
                   +---------:---------------:---------+
                             :               :
                   independent backup subscriptions
@@ -161,37 +154,44 @@ not address the dependency.
 |                     | partial view/cache/drafts |                     |
 |                     | never a replica member    |                     |
 |                     +---------------------------+                     |
-+-----------------------------------------------------------------------+
++--------------------------^-----------------^--------------------------+
+                           : signaling / optional
+                           : endpoint-encrypted relay
+             +-------------:-----------------:-------------+
+             | connectivity service                         |
+             | self-hosted/community, or paid managed       |
+             | opaque rendezvous + STUN/TURN; no authority  |
+             +----------------------------------------------+
 
         runners ---- runner-side device/PKCE/API flows ---- providers
 ```
 
-The three component roles remain separate even when a runner serves the Solid
+The four component roles remain separate even when a runner serves the Solid
 assets. Serving code does not make the browser process part of that runner's
-SQLite replica. The engine may serve its own stored frontier during explicit
-restore, but it cannot forward one live runner stream as another runner's
-ordinary route.
+SQLite replica. The engine may restore its stored frontier, but cannot forward a
+runner stream as another runner's ordinary route.
 
-| Component            | Durable state                                                                  | Execution      | Role                                                                      |
-| -------------------- | ------------------------------------------------------------------------------ | -------------- | ------------------------------------------------------------------------- |
-| Runner               | Full ordinary account state and all blobs; target-bound secrets in its vault   | Epochs it owns | App/API host, peer replication, tools, trust admission                    |
-| Solid browser client | Only current-view cache, selected blobs, local preferences/drafts; no frontier | No             | Authenticated window and request client to runners                        |
-| Sync engine          | Identity/control state plus readable entitled backup; no provider vault        | No             | Google identity/recovery, backup/restore, paid rendezvous/relay, releases |
+| Component            | Durable state                                                                  | Execution      | Role                                                                         |
+| -------------------- | ------------------------------------------------------------------------------ | -------------- | ---------------------------------------------------------------------------- |
+| Runner               | Full ordinary account state and all blobs; target-bound secrets in its vault   | Epochs it owns | App/API host, peer replication, tools, trust admission                       |
+| Solid browser client | Only current-view cache, selected blobs, local preferences/drafts; no frontier | No             | Authenticated window and request client to runners                           |
+| Sync engine          | Identity/control state plus readable entitled backup; no provider vault        | No             | Google identity/recovery, backup/restore, entitlement, releases              |
+| Connectivity service | Expiring opaque signaling and live relay state only                            | No             | Untrusted candidate exchange and optional TURN/relay; self-hosted or managed |
 
 ## Authority and data boundaries
 
-- **Ordinary replicated state:** account/workspace metadata, trust and runner
-  registries, credential summaries, prompts, session records, canonical
-  messages, attachments, tombstones, pending requests, receipts, and usage go to
-  every runner. The engine subscribes only to its tier partition.
+- **Ordinary state:** account, workspace, trust, and runner state; credential
+  summaries; prompts; sessions; messages; attachments; tombstones; requests;
+  receipts; and usage go to every runner. The engine subscribes only to its tier
+  partition.
 - **Executor-owned state:** session runner, epoch, turn sequence, transcript
   output, status, usage, and tool effects have one writer. Other replicas verify
   and retain the resulting operations.
 - **Secret state:** provider credential payloads and target envelopes exist only
   in private runner vaults/channels. Backed-up summaries cannot recreate them.
-- **Control state:** Google subject, tier entitlement, engine web-login token,
-  and billing state are engine control records. They do not grant operation or
-  execution authority and bearer login tokens are not replicated.
+- **Control state:** Google subject, tier, engine login token, and billing state
+  are engine records. They confer no operation/execution authority and login
+  tokens do not replicate.
 - **External/ephemeral state:** source trees, presence, transient deltas, and
   browser drafts are not shared durable records. Final output and deliberately
   imported files cross the ordinary replication boundary.
@@ -210,37 +210,42 @@ ordinary route.
 4. Honest replicas with the same authorized operation set materialize the same
    result independent of delivery order; wall-clock `updatedAt` is not a merge
    rule.
-5. Ordinary operations, blobs, commands, receipts, and live output use direct
-   endpoint peer sessions. Engine backup links are independent destinations,
-   never inter-runner bridges.
-6. A free engine endpoint rejects every session entity and session-owned blob
+5. Ordinary operations, blobs, commands, receipts, and live output use
+   endpoint-authenticated peer sessions. Discovery may use LAN, a configured
+   standalone rendezvous, paid managed rendezvous, or manual ICE exchange, but
+   candidates confer no grant. Engine backup links and the engine application
+   WebSocket are never inter-runner routes; after approved direct/relay paths
+   fail, report `No route`.
+6. Free and anonymous users receive every engine-independent connectivity path:
+   self-hosted/community rendezvous and relay, public/custom STUN, manual
+   offer/answer, LAN, and VPN. Only the managed deployment checks paid
+   entitlement.
+7. A free engine endpoint rejects every session entity and session-owned blob
    before storage and emits no durable acknowledgement for it. Paid access is
    based on engine-authoritative entitlement, not a runner claim.
-7. Every model/tool output names an execution epoch and is signed by its
+8. Every model/tool output names an execution epoch and is signed by its
    authority. Stale or non-authority output is quarantined.
-8. Inputs and new writes display their actual local, runner-redundant, and
+9. Inputs and new writes display their actual local, runner-redundant, and
    engine-backup status; `local-only` is never called backed up.
-9. Deletes remain tombstones and materialize through `isDeleted`. UUIDv7 entity
-   IDs remain stable across anonymous login linking and tier transitions.
-10. Owner peers can admit, renew, and revoke devices without the engine;
+10. Deletes remain tombstones and materialize through `isDeleted`. UUIDv7 entity
+    IDs remain stable across anonymous login linking and tier transitions.
+11. Owner peers can admit, renew, and revoke devices without the engine;
     delegation cannot widen the issuer's scope.
-11. User-entered secrets and provider authorization tokens never traverse the
+12. User-entered secrets and provider authorization tokens never traverse the
     engine. OpenAI device authorization and OpenRouter PKCE complete at runners.
-12. Plaintext and sealed credential payloads never enter browser persistence,
+13. Plaintext and sealed credential payloads never enter browser persistence,
     ordinary operations/snapshots/blobs, engine backup, discovery, diagnostics,
     exports, or logs.
-13. Version skew fails affected writes closed while retaining compatible local
+14. Version skew fails affected writes closed while retaining compatible local
     reads. Updating or logging in to the engine is never required to open a
     runner's embedded app.
 
 ## Product behavior when the engine is absent
 
-With any reachable ready runner, an anonymous or previously linked user can open
-the embedded app and read every session, message, prompt, workspace, runner
-record, and attachment—not only data created there. The user can edit convergent
-state, execute on a credential-authorized runner, steer/stop/answer, compact,
-browse that runner's directories, and spawn or hand off directly. Hosted models
-still require their provider network.
+With a reachable ready runner, a user can open the embedded app and read all
+ordinary data—not only data created there—then edit, execute, steer, compact,
+browse local directories, and spawn or hand off directly. Hosted models still
+require their provider network.
 
 Owner devices can pair/revoke peers and distribute user-entered credentials.
 OpenAI device-code authorization and OpenRouter's runner callback also work
@@ -249,11 +254,14 @@ local drafts; it cannot commit shared operations, count as a data copy, execute,
 or access a filesystem.
 
 Engine loss disables new Google linking/recovery, progress to the engine backup
-frontier, paid engine-only rendezvous/relay routes, and releases available from
-no peer or mirror. It does not disable runner replication, local execution,
-routine device administration, provider authorization, or credential
-provisioning. After total runner loss, Google plus the engine backup is required
-to recover a free or paid account.
+frontier, the paid managed connectivity deployment, and releases available from
+no peer or mirror. Remote never-paired runners can still discover through a
+configured self-hosted/community rendezvous and use its relay when direct ICE
+fails, or exchange public-STUN ICE descriptions over any authenticated side
+channel. These paths are available to anonymous/free users. It does not disable
+runner replication, local execution, routine device administration, provider
+authorization, or credential provisioning. After total runner loss, Google plus
+the engine backup is required to recover a free or paid account.
 
 ## Success criteria
 
@@ -268,11 +276,15 @@ capture tests demonstrate:
   compaction acknowledgements; destroying all runners cannot treat IndexedDB as
   recovery input.
 - Healthy-engine path assertions show direct runner traffic and independent
-  backup subscriptions, with no engine broker/fan-out. Forced route failure is
-  visibly relayed end-to-end or reports `No route`.
-- Anonymous runners initialize, execute, and pair without engine traffic, then
-  link to Google without changing IDs or losing an operation/blob. Tier backfill
-  status is accurate throughout.
+  backup subscriptions, with no engine broker/fan-out. With engine connectivity
+  blocked, two never-paired NATed runners rendezvous through a configured
+  standalone deployment and try direct ICE before its endpoint-encrypted relay;
+  arbitrary-side-channel offer/answer works without rendezvous. Exhausted paths
+  visibly report `No route`, and a candidate alone never authenticates a peer.
+- Anonymous runners initialize and execute without engine traffic, pair remotely
+  through engine-independent discovery without entitlement, then link to Google
+  without changing IDs or losing an operation/blob. Tier backfill status is
+  accurate throughout.
 - A free engine rejects all five schema session entities and their blobs while
   retaining every non-session entity; paid upgrade backfills all session data.
   Downgrade stops ingestion, enforces grace/purge policy, and never alters

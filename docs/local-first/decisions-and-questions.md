@@ -3,8 +3,9 @@
 This document records rejected approaches and genuine follow-up decisions for
 the [local-first architecture](../local-first-architecture.md). Open questions
 may tune policy; they cannot weaken full runner replicas, partial-view browsers,
-optional login, entitlement-filtered readable backup, runner-side provider
-authorization, or the peer-first data plane without a newly accepted design.
+optional login, entitlement-filtered readable backup, engine-independent remote
+first contact, runner-side provider authorization, or the peer-first data plane
+without a newly accepted design.
 
 ## Alternatives considered
 
@@ -12,8 +13,9 @@ authorization, or the peer-first data plane without a newly accepted design.
   replace auth, orchestration, state, provider calls, or command routing.
 - **Engine fan-out while online, P2P only during outage:** rejected. Ordinary
   runner traffic is peer-first at all times. The engine may independently
-  subscribe to entitled backup data or tunnel opaque paid fallback bytes, but
-  never terminates A-to-B replication.
+  subscribe to entitled backup data, and the separately deployed managed service
+  may relay endpoint-encrypted live bytes as an explicit fallback, but neither
+  terminates A-to-B replication.
 - **Optional, disabled, or E2EE-blind engine backup:** rejected by the
   total-runner-loss requirement. Once a user links, readable backup is
   default-on for the tier partition: non-session for free, all ordinary data for
@@ -24,7 +26,8 @@ authorization, or the peer-first data plane without a newly accepted design.
   them.
 - **Require Google before local use:** rejected. Anonymous account genesis is
   device-key-rooted and supports local/peer operation. Google gates engine
-  identity, backup, managed rendezvous/relay, and recovery only.
+  identity, backup, the managed connectivity deployment, and recovery only;
+  standalone/manual connectivity remains available to all users.
 - **Recreate an account during login:** rejected. Anonymous-to-logged-in linking
   retains IDs, operations, trust root, peers, sessions, and blobs, with explicit
   merge if the Google identity already has remote data.
@@ -34,11 +37,31 @@ authorization, or the peer-first data plane without a newly accepted design.
 - **Browser offline operation outbox:** rejected for this design. A disconnected
   browser may preserve drafts, but only a runner accepts a shared operation.
   This keeps replica membership and causal safety runner-only.
+- **Leave remote first contact to paid engine service, VPN, or ad hoc address
+  exchange:** rejected. Never-paired NATed runners need an engine-independent
+  supported path. Q Mush ships a standalone rendezvous plus TURN/opaque-relay
+  component and hardened public-STUN manual offer/answer.
+- **Make a public DHT the baseline rendezvous:** rejected for initial delivery.
+  Opaque, rotating account-derived keys conceal semantic account identity, but
+  DHT storage/routing still publishes presence/IP/timing to infrastructure and
+  anyone with the topic, adds bootstrap/Sybil/eclipse/poisoning/resource and
+  cross-platform dependency weight, and cannot relay through symmetric NAT. Keep
+  a pluggable experiment; do not depend on it or describe it as private.
+- **Treat candidate exchange as pairing:** rejected. Rendezvous, DHT, STUN, and
+  side-channel descriptions provide untrusted route hints only. Endpoint key,
+  grant, nonce, and explicit admission checks still gate all data.
+- **Use the engine application WebSocket when discovery fails:** rejected. The
+  backup/application channel is never an A-to-B route; use an approved opaque
+  relay or report `No route`.
 - **Engine provisioning for API/generic/Brave secrets:** rejected. Runner vaults
   and per-target envelopes distribute them without unrelated control traffic.
 - **Put sealed envelopes in ordinary replication/readable backup:** rejected. It
   expands copying/retention and erasure ambiguity. Replicate only sanitized
   summaries/policy/receipts.
+- **Entitlement-gate the shared connectivity client/protocol:** rejected. Free
+  and anonymous users may use self-hosted/community rendezvous/relay, custom or
+  public STUN, manual exchange, LAN, and VPN. Only admission to Q Mush's managed
+  deployment is paid.
 - **Engine-hosted OpenAI callback:** rejected. The current default loopback
   listener is on engine localhost port `1455`, which production cannot map to
   the user's device. Replace it with runner-side device authorization.
@@ -65,6 +88,21 @@ authorization, or the peer-first data plane without a newly accepted design.
   compromise, rotation, and receipts bounded.
 - **Lazy runner attachments/metadata-only readiness:** rejected. Ready runners
   retain every accepted blob; admission/capacity handles growth.
+
+## Resolved decision: engine-independent remote discovery (former Q7)
+
+Question 7 is resolved: ship a small standalone opaque rendezvous plus
+TURN/live-relay component, and make the paid managed service one deployment of
+that protocol. Also ship a first-class public/custom-STUN manual ICE
+offer/answer path over arbitrary side channels. Try direct ICE first and use a
+named relay only when needed; otherwise report `No route`. Neither path grants
+data authority, and neither standalone nor manual use is entitlement-gated.
+
+A public DHT is not baseline: it adds a large routing/abuse/privacy surface
+while still requiring relay for hard NATs. Its reserved plugin remains an
+experiment, not an availability dependency. This resolves whether to ship
+self-hosted connectivity while leaving deployment defaults and abuse controls
+open below.
 
 ## Resolved decision: readable default engine backup (former Q11)
 
@@ -97,9 +135,11 @@ excluded in every mode.
 6. **LAN certificates.** Proposed loopback writes first; non-loopback writes
    need pinned HTTPS, with plain HTTP refused/read-only. Is read-only LAN HTTP
    worth the surface?
-7. **Connectivity outside the paid service.** Direct/manual/VPN remain primary.
-   Should Q Mush ship a self-hosted rendezvous/relay component or standard TURN
-   configuration for anonymous/free users?
+7. **Standalone connectivity defaults.** The component now ships and supports
+   opaque rendezvous plus bounded live relay. Which packaging (single binary,
+   OCI image, Helm), default TTL/quota/auth, TURN transport/ports, service-list
+   distribution, and community-directory policy should ship? Defaults must not
+   call engine billing or turn community services into implicit trusted peers.
 8. **Unreachable executor recovery.** Default is recovery fork. Is a canonical
    takeover worth future fencing/quorum dependency despite arbitrary shell
    effects?
@@ -130,9 +170,21 @@ excluded in every mode.
 16. **OpenAI device-flow contract.** Before implementation, verify production
     endpoint/client/scopes/polling terms. If unavailable, API keys are the
     honest fallback; the engine loopback callback does not return as a fallback.
+17. **DHT experiment threshold.** What measured binary/dependency cost,
+    first-contact success, bootstrap diversity, Sybil/eclipse resistance,
+    mobile/desktop resource use, and IP/timing privacy result would justify an
+    opt-in public-DHT plugin? It must not become required, default, or a claimed
+    relay substitute without architecture/security review.
+18. **Discovery-key lifecycle and metadata padding.** Choose returning-peer
+    rendezvous epoch duration/clock overlap, rotation after device removal or
+    leak, one-use admission-topic expiry/erasure, descriptor padding, and
+    whether each service gets a distinct derived topic to resist operator
+    correlation. Admission secrets must never derive account authority;
+    candidate possession remains non-authoritative.
 
 Resolved choices—runner completeness, browser partial-view status, anonymous
-use, readable tiered backup, peer trust/provisioning, runner-side OpenAI and
+use, readable tiered backup, engine-independent remote first contact, standalone
+connectivity plus manual ICE, peer trust/provisioning, runner-side OpenAI and
 OpenRouter authorization under current contracts, and peer-first transport—are
 absent from discretionary selection. Changing one requires architecture
 re-acceptance.

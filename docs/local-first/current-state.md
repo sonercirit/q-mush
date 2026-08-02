@@ -51,53 +51,54 @@ stable IDs/tombstones and then make the engine an independent readable
 subscriber. Free session rejection must occur before durable storage/ack, not by
 hiding rows at query time.
 
-## Current identity and provider authorization
+## Current identity, credentials, and connectivity
 
-- Google OIDC/engine cookies live in `sync-engine/auth.ts`. Target Google login
-  becomes optional account linking, entitlement, and recovery rather than local
-  product admission.
+- Google OIDC and engine cookies live in `sync-engine/auth.ts`. Target Google
+  login becomes optional account linking, entitlement, and recovery rather than
+  local product admission.
 - Runner `qmr_…` tokens are parsed/stored by engine runner modules. They cannot
-  become browser passwords, peer identities, anonymous trust roots, or backup
-  capabilities.
+  become browser passwords, peer identities, anonymous trust roots, backup
+  capabilities, or rendezvous topics.
 - Provider secrets live in `provider_credentials.encrypted_credential` under
   engine environment keys; engine integrations decrypt/use them. Copying this
   field into ordinary replicas would violate secret boundaries and would not
   make it usable with runner keys.
+- `sync-engine/openai.ts` implements authorization-code/PKCE, refresh, and a
+  default `http://localhost:1455/auth/callback`; target OpenAI uses runner
+  device code and deletes this engine path.
+- `sync-engine/openrouter.ts` uses caller-supplied callback URL plus PKCE and no
+  client secret, so its target callback/exchange runs on the runner. Google
+  remains the sole engine-hosted OIDC flow. Exact removal scope is in
+  [credentials.md](credentials.md#what-the-migration-deletes).
+- There is no standalone rendezvous/TURN service, ICE/manual-signaling protocol,
+  or discovery adapter today. The current application WebSockets are not a
+  peer-discovery primitive and must never be relabeled as a peer route.
 
-Repository inspection also establishes what provider OAuth migration must
-remove:
+The target adds a separate, deployable connectivity protocol/artifact. Its
+managed paid instance shares the same wire behavior as self-hosted/community
+instances, but only the managed admission edge uses engine entitlement. Public
+STUN and arbitrary-side-channel offer/answer are runner networking paths and do
+not reuse engine realtime. The DHT adapter is reserved research, not a migration
+prerequisite.
 
-- `sync-engine/openai.ts` implements authorization-code/PKCE, token refresh, and
-  a default public client redirect of `http://localhost:1455/auth/callback`.
-  `sync-engine/index.ts` attempts to start that second localhost server. The
-  production engine's localhost is not the user's runner, so target OpenAI
-  authorization is runner-side device code and the listener/engine callback path
-  is deleted.
-- `sync-engine/openrouter.ts` sends a caller-derived `callback_url`, uses PKCE,
-  and exchanges the code for a key. It has no client ID/secret configuration;
-  only optional callback URI and encryption-key settings exist. Therefore it is
-  callback-bound but not engine-bound. The target runner hosts the callback and
-  exchange; engine OpenRouter OAuth is deleted.
-- Google genuinely uses the engine's registered callback and remains the sole
-  engine-hosted OAuth/OIDC flow. Shared OAuth helpers still needed by Google are
-  retained rather than indiscriminately deleting `oauth.ts`.
+## Repository and migration boundaries
 
-Detailed target flows and exact removal scope are in
-[credentials.md](credentials.md#what-the-migration-deletes). Legacy OpenAI OAuth
-migration assumes device-code re-authentication rather than designing new engine
-custody.
+Production imports currently have four enforced roots. `solid/`, `sync-engine/`,
+and `runner/` may import themselves and `shared/`; `shared/` imports no other
+workspace. Runtime-neutral operations, peer/credential and discovery wire
+formats, crypto interfaces, and agent/provider pieces move to `shared/`; HTTP,
+storage, platform, and discovery adapters stay in their owning runtime.
 
-## Repository boundaries
-
-Production imports have four enforced roots. `solid/`, `sync-engine/`, and
-`runner/` may import themselves and `shared/`; `shared/` imports no other
-workspace. Runner coordination/provider code cannot import engine modules.
-Runtime-neutral domain operations, peer/credential protocols, crypto interfaces,
-and agent/provider pieces move to `shared/`; HTTP/storage/platform/discovery
-adapters stay in their roots.
+The separately deployable connectivity executable will need an explicit
+production root/build entry when implemented. It cannot import application
+storage, Google, billing, provider, vault, or execution code. A managed wrapper
+may validate a short-lived entitlement before handing the request to the common
+rendezvous/relay core; the standalone core never calls engine billing. Runner
+coordination/provider code cannot import `sync-engine/`.
 
 Migration adapters may expose old engine records as partitioned operations or
 legacy views, but cannot establish a second authority. Each legacy write must
 cross the same transactional operation/projection boundary before convergence is
-claimed. Temporary export/bridge/provider routes are removed at cutover; none
-count as the peer-first target.
+claimed. Temporary export/bridge/provider routes are removed at cutover. The
+legacy engine application socket, even during migration, never satisfies remote
+first contact or the peer-first data-plane target.

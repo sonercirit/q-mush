@@ -52,7 +52,11 @@ may tunnel a live frame as opaque bytes but cannot store it.
 
 A user may narrow the default all-executor target policy, but UI warns that
 excluded runners cannot execute with or fail over that credential. A full data
-replica does not imply a secret copy.
+replica does not imply a secret copy. Discovery and signaling remain outside the
+credential plane: a rendezvous topic, candidate, STUN response, or manual ICE
+package cannot request an envelope. Only an endpoint-authenticated runner that
+proves its target key and valid credential policy may open this channel, whether
+the bytes travel directly or through a named opaque relay.
 
 ## User-entered credentials: no engine traffic
 
@@ -191,7 +195,8 @@ Plaintext and envelope ciphertext never enter:
   messages beyond the transient secret input/request;
 - ordinary operations, snapshots, blobs, SQLite projections, or free/paid engine
   backup;
-- discovery/candidate lists, `BroadcastChannel`, or browser WebRTC;
+- discovery descriptors/topics, candidate lists, STUN/TURN control data, manual
+  offer/answer packages, `BroadcastChannel`, or browser WebRTC;
 - tools, prompts, transcripts, diagnostics, bundles, analytics, logs, or crash
   output; or
 - engine processes after migration. Google identity tokens are separately

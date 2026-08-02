@@ -28,10 +28,12 @@ only authenticate a partial view client; they do not make the browser a replica
 or owner unless an explicit high-risk owner grant says so.
 
 Anonymous mode supports local app access, sessions, providers, tools, all-runner
-replication, manual/LAN/VPN peer discovery, and direct pairing among the user's
-devices. It has no engine identity, backup, managed rendezvous/relay, or total-
-runner-loss recovery. That loss posture is accepted and shown before destructive
-retirement of the last runner.
+replication, and direct pairing among the user's devices. Remote first contact
+may use a configured standalone/community rendezvous and relay or manual
+public-STUN offer/answer exactly like free mode; these paths never require login
+or entitlement. Anonymous mode has no engine identity, backup, **managed**
+connectivity service, or total-runner-loss recovery. That loss posture is shown
+before destructive retirement of the last runner.
 
 ### Peer grants
 
@@ -91,8 +93,11 @@ engine-backed account anonymous while leaving ambiguous recovery ownership.
 
 ### Pairing paths
 
-1. **Owner-device pairing:** joining key/challenge, direct authenticated path,
-   displayed fingerprints, explicit approval, bounded signed grant.
+1. **Owner-device pairing:** a joining key/challenge, discovered over any route,
+   displayed fingerprints, explicit approval, and bounded signed grant. For
+   remote first contact, a one-use package carries a high-entropy rendezvous
+   secret plus standalone service URL, or a manual ICE offer; rendezvous creates
+   a route but cannot approve the device.
 2. **Local physical pairing:** transcript-bound PAKE-style QR/code exchange and
    confirmation. A non-owner runner may introduce but not grant.
 3. **Google recovery/bootstrap:** engine signs only a short-lived assertion
@@ -111,11 +116,14 @@ password.
 ## Engine identity, entitlement, and backup trust
 
 The engine signs separate key purposes for Google binding/recovery,
-entitlement-scoped backup capabilities, and release publication. None can sign a
-device grant, operation, credential, or session epoch. A free capability permits
-only non-session backup; paid permits both partitions and managed
-rendezvous/relay. Entitlement is checked server-side on every bounded backup
-transaction, not trusted from clients.
+entitlement-scoped backup capabilities, managed-connectivity admission, and
+release publication. None can sign a device grant, operation, credential, or
+session epoch. A free capability permits only non-session backup; paid permits
+both partitions and the managed rendezvous/relay deployment. Standalone
+connectivity uses the same wire protocol but its own operator policy and no Q
+Mush entitlement; it is not an engine trust assertion. Entitlement is checked
+server-side on every bounded backup or managed-service transaction, not trusted
+from clients.
 
 The backup is default-on for a linked account and readable by the engine. This
 is a conscious confidentiality tradeoff for total-runner-loss recovery, not
@@ -136,11 +144,11 @@ authority.
 “Data” below means ordinary application data; provider vault secrets have their
 own recovery policy.
 
-| Mode            | Identity/root               | Engine service                                              | Total runner loss                                                                                                                                                        | Browser cache role                        |
-| --------------- | --------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
-| Anonymous       | Device-key account genesis  | None                                                        | **All shared data and secrets lost. Accepted.**                                                                                                                          | None; partial cache is not restore input. |
-| Logged in, free | Device root bound to Google | Default readable non-session backup                         | Restore account, workspaces, prompts, runner/trust registry, credential summaries/configuration; **all session entities and session-only blobs lost by business policy** | None.                                     |
-| Logged in, paid | Device root bound to Google | Default readable full ordinary backup plus rendezvous/relay | Restore all ordinary records, sessions, tombstones, and application blobs through acknowledged frontier                                                                  | None.                                     |
+| Mode            | Identity/root               | Engine service                                                             | Total runner loss                                                                                                                                                        | Browser cache role                        |
+| --------------- | --------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
+| Anonymous       | Device-key account genesis  | None                                                                       | **All shared data and secrets lost. Accepted.**                                                                                                                          | None; partial cache is not restore input. |
+| Logged in, free | Device root bound to Google | Default readable non-session backup                                        | Restore account, workspaces, prompts, runner/trust registry, credential summaries/configuration; **all session entities and session-only blobs lost by business policy** | None.                                     |
+| Logged in, paid | Device root bound to Google | Default readable full ordinary backup; paid managed connectivity available | Restore all ordinary records, sessions, tombstones, and application blobs through acknowledged frontier                                                                  | None.                                     |
 
 A fresh recovery runner authenticates with Google, verifies the recovery
 assertion, creates new device keys, records a visible trust-root transition,
@@ -158,29 +166,52 @@ is open question 15. Runner copies remain full in every tier.
 
 ## Degraded-mode contract
 
-A hosted model still needs its provider network. A fresh browser needs a runner
-to load code/views; an installed partial cache is not an executor.
+The UI reports independently: runner route, discovery source/operator, direct or
+relay transport, runner completeness, executor/vault/provider state, and engine
+backup frontier. It never collapses discovery into authorization or a relayed
+route into backup.
 
-| Action                               | Engine down, ready runner reachable          | Cached Solid client, no runner       | Contract                                               |
-| ------------------------------------ | -------------------------------------------- | ------------------------------------ | ------------------------------------------------------ |
-| Open app                             | Yes, embedded release                        | App shell/cached views only          | Runner is the normal host.                             |
-| Read all shared data/attachments     | Yes, full runner                             | Cached partial views only            | Browser cache never proves completeness.               |
-| Commit prompt/workspace/session edit | Yes, runner operation                        | No; preserve draft                   | Shared commit starts at a runner.                      |
-| Create/continue/steer/answer/stop    | With authority, grant, vault, provider       | No                                   | Executor receipt controls state.                       |
-| Browse/run tools                     | On selected runner                           | No                                   | Filesystem stays external/local.                       |
-| Pair/renew/revoke                    | With owner peer                              | No, unless connected as owner client | Peer trust operation.                                  |
-| Add/rotate API/generic/Brave         | Enter at runner; direct distribution         | No                                   | Zero engine requests.                                  |
-| OpenAI device authorization          | Yes, runner polls provider                   | No                                   | No callback or engine.                                 |
-| OpenRouter connect                   | Yes, runner-local PKCE callback if reachable | No                                   | API key fallback; no engine bounce.                    |
-| Google link/recovery                 | No                                           | No                                   | Existing local grants continue.                        |
-| Runner replication                   | Direct links                                 | Not applicable                       | Browser is not a member.                               |
-| Backup progress/restore              | Paused                                       | No                                   | Local operation continues; frontier shown.             |
-| Managed rendezvous/relay             | No                                           | No                                   | Paid engine service only; direct/manual routes remain. |
-| Update                               | Signed peer/mirror or current release        | Existing release                     | Engine hosting is one source.                          |
+A hosted model still needs its provider network. A browser cache is not an
+executor. With the engine down, a ready runner can open the embedded app; read
+all data; commit edits; execute/steer/stop; browse tools; administer peers;
+provision credentials; and run OpenAI device or reachable OpenRouter PKCE flows.
+Google link/recovery and backup progress pause. Without a runner, Solid only
+shows cached partial views/drafts and commits nothing.
 
-Engine loss disables Google linking/recovery, backup progress/restore, managed
-rendezvous/relay, and engine-only releases. It does not disable ordinary runner
-sync, execution, peer administration, provider connect, or user-entered secrets.
+Remote first contact remains available through direct/LAN/VPN routes,
+standalone/community rendezvous and relay, or public-STUN offer/answer over an
+arbitrary side channel. These are available in anonymous/free mode without an
+entitlement check. Only the paid managed deployment is unavailable with the
+engine; failed direct and configured relay attempts end in `No route`.
+
+## Connectivity-service trust boundary
+
+A self-hosted/community or managed rendezvous/relay operator is an untrusted
+network facilitator, not an account peer. Source IP, timing, allocation IDs, and
+byte volume remain visible to the operator. It can censor, rate-limit, or
+inflate cost. Public STUN sees caller IP and timing; a side-channel provider
+sees the encrypted offer and participants.
+
+The operator cannot derive a stable account ID from rotating opaque topics
+alone, decrypt endpoint descriptors or application/credential frames, forge a
+runner key/grant, approve pairing, authorize an operation, vote on replica
+safety, or read/store-and-forward account data. Those claims depend on topic
+secrets, endpoint authentication, and grants, not TLS to the service. A
+malicious service can still correlate repeated network metadata. Anyone who
+obtains a returning-peer discovery secret can monitor its topics; rotate it
+after device removal or suspected leakage. A one-use admission secret creates a
+route only and is erased after completion/cancellation; it is not derived into
+account keys or grants.
+
+Require short TTLs, minimal logs, encrypted descriptors, topic/key rotation,
+padding/bounded sizes where practical, replay and registration proofs, quotas,
+and multi-service/manual fallback. Relay allocations are live and bounded; no
+offline inbox exists. TLS protects clients from passive observers but does not
+make an operator trusted. UI names the operator and route. Self-hosting changes
+who sees metadata, not what authority the service has. If candidates do not
+produce an authenticated direct route and no approved relay works, return
+`No route`; neither the engine application socket nor backup subscription is a
+hidden fallback.
 
 ## Security analysis
 
@@ -194,7 +225,9 @@ operator-side data exposure for the entitled partition.
 | Browser mistaken for durable replica | No browser frontier/ack capability; destroy-runner tests ignore IndexedDB; UI always says partial view.                                                                 |
 | Engine readable-backup breach        | Account isolation, encryption, least-privilege operator access, audited reads, retention/purge, incident response; free scope limits sessions but is readable.          |
 | Free entitlement bypass              | Engine-authoritative capabilities, semantic partition validation, mixed/unknown fail closed, split snapshots/manifests, restore filtering, transition revocation tests. |
-| Engine becomes broker                | Route telemetry, no ordinary fan-out endpoint, healthy/blocked engine tests; relay opaque and labeled.                                                                  |
+| Engine becomes broker                | Route telemetry, no ordinary fan-out endpoint, healthy/blocked engine tests; any relay is opaque and labeled.                                                           |
+| Rendezvous/relay operator abuse      | Rotating opaque topics, encrypted signed descriptors, endpoint grant checks, bounded live allocations, multi-source fallback; operator metadata exposure is disclosed.  |
+| Discovery-topic or offer theft       | High-entropy domain-separated returning/one-use secrets, expiry/transcript binding, no auto-admission, rotation/erasure after leak/use; candidates grant no authority.  |
 | Anonymous last-runner loss           | Persistent warning, optional encrypted export, destructive confirmation; never imply browser/engine recovery.                                                           |
 | Account-link takeover/collision      | Nonce binds account/owner/origin, signatures both sides, explicit merge, stable IDs/provenance, no silent overwrite.                                                    |
 | Credential compromise/leak           | Independent vault envelopes, separate keys/channel/store, target/policy binding, canary capture; see credentials design.                                                |
@@ -208,7 +241,7 @@ operator-side data exposure for the entitled partition.
 | False readiness                      | Signed frontier/blob-root challenge and local verification; no readiness role until complete.                                                                           |
 | Offline revoked device               | Expiry, priority gossip, sensitive-change freshness, visible stale window, secret rotation.                                                                             |
 | Update injection                     | Publisher signature, SHA-256, immutable assets, atomic rollback; source has no authorship.                                                                              |
-| Discovery leak                       | Opaque ID/candidates/version only; authenticate before frontier; no path/session/provider labels.                                                                       |
+| Discovery leak/poisoning             | No account ID/content; rotating opaque topic, encrypted signed descriptors, short TTL, replay/rate limits, endpoint handshake; DHT off by default.                      |
 
 Runner data at rest uses full-disk encryption and, where practical, a DB/blob
 key sealed to OS storage. Vault keys remain separate. Engine backup needs server
