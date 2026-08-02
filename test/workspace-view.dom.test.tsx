@@ -1,10 +1,10 @@
 import { afterEach, expect, test, vi } from "vitest";
-import type { AgentModelCatalog } from "../../shared/agent-configuration.ts";
-import { testAgentModelOption } from "../../shared/test/agent-model-fixtures.ts";
-import { TEST_WORKSPACE_LIST } from "../../shared/test/workspace-fixtures.ts";
-import { GLOBAL_WORKSPACE_ID } from "../../shared/workspace-model.ts";
-import { PromptController } from "../../solid/prompt-controller.ts";
-import { createPromptViewState } from "../../solid/prompt-state.ts";
+import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
+import { testAgentModelOption } from "../shared/test/agent-model-fixtures.ts";
+import { TEST_WORKSPACE_LIST } from "../shared/test/workspace-fixtures.ts";
+import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
+import { PromptController } from "../solid/prompt-controller.ts";
+import { createPromptViewState } from "../solid/prompt-state.ts";
 import {
   BRAVE_SEARCH_PANEL,
   createProviderViewState,
@@ -13,23 +13,23 @@ import {
   OPENROUTER_PANEL,
   type ProviderCredential,
   type ProviderPanelConfiguration,
-} from "../../solid/provider-client.tsx";
-import { ProviderController } from "../../solid/provider-controller.ts";
-import { createReactiveState } from "../../solid/reactive-state.ts";
-import { createRunnerViewState } from "../../solid/runner-client.tsx";
-import { RunnerController } from "../../solid/runner-controller.ts";
-import { SessionController } from "../../solid/session-controller.ts";
-import { initialSessionViewState } from "../../solid/session-state.ts";
-import { createWorkspaceViewState } from "../../solid/workspace-client.tsx";
-import { WorkspaceController } from "../../solid/workspace-controller.ts";
-import { Workspace } from "../../solid/workspace-view.tsx";
+} from "../solid/provider-client.tsx";
+import { ProviderController } from "../solid/provider-controller.ts";
+import { createReactiveState } from "../solid/reactive-state.ts";
+import { createRunnerViewState } from "../solid/runner-client.tsx";
+import { RunnerController } from "../solid/runner-controller.ts";
+import { SessionController } from "../solid/session-controller.ts";
+import { initialSessionViewState } from "../solid/session-state.ts";
 import {
   clickTestButton,
   disposeTestViews,
   findTestButton,
   mountTestView,
-} from "./dom-test-helpers.ts";
-import { TEST_PROMPT } from "./prompt-fixtures.ts";
+} from "../solid/test/dom-test-helpers.ts";
+import { TEST_PROMPT } from "../solid/test/prompt-fixtures.ts";
+import { createWorkspaceViewState } from "../solid/workspace-client.tsx";
+import { WorkspaceController } from "../solid/workspace-controller.ts";
+import { Workspace } from "../solid/workspace-view.tsx";
 
 const DISPOSALS: (() => void)[] = [];
 const OPENROUTER_CREDENTIAL: ProviderCredential = {
