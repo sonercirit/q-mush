@@ -4,10 +4,19 @@ import type {
   AgentSessionDetail,
   AgentSessionSummary,
 } from "../../shared/session-model.ts";
+import {
+  createProviderViewState,
+  type ProviderCredential,
+} from "../provider-client.tsx";
 import type { RealtimeServerEvent } from "../realtime-client-codec.ts";
+import { createRunnerViewState } from "../runner-client.tsx";
+import { SessionPanel } from "../session-client.tsx";
 import { summaryFromDetail } from "../session-codec.ts";
-import type { SessionController } from "../session-controller.ts";
+import { SessionController } from "../session-controller.ts";
+import { mountTestView } from "./dom-test-helpers.ts";
 import { realtimeTestSetup } from "./realtime-client-test-setup.ts";
+import { runnerSummary } from "./runner-fixtures.ts";
+import { sessionDetailState } from "./session-detail-test-state.ts";
 import { mountTestSessionDetail } from "./session-dom-test-helpers.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 import { transcriptMessage } from "./transcript-ordering-fixtures.ts";
@@ -44,6 +53,61 @@ function sessionSnapshot(
       updatedAt: count - index,
     })),
   ];
+}
+
+const TEST_CREDENTIAL: ProviderCredential = {
+  accountId: null,
+  id: "credential-typing-profile",
+  isDefault: true,
+  label: "Typing profile credential",
+  source: "api_key",
+};
+
+function mountRealSessionPanel(detail: AgentSessionDetail) {
+  const controller = new SessionController(
+    sessionDetailState(detail, sessionSnapshot(detail, 100)),
+  );
+  const provider = () => createProviderViewState([TEST_CREDENTIAL]);
+  const runner = () => createRunnerViewState([runnerSummary(1)]);
+  const panel = () =>
+    SessionPanel({
+      controller,
+      openAi: provider,
+      openRouter: provider,
+      runners: runner,
+    });
+  const container = mountTestView(panel, disposals);
+  return { container, controller };
+}
+
+function toolDelta(
+  sessionId: string,
+  sequence: number,
+): Extract<RealtimeServerEvent, { type: "tool_stream" }> {
+  return sequence === 0
+    ? {
+        callId: "call-typing-profile",
+        index: 0,
+        sequence,
+        sessionId,
+        state: "preparing",
+        streamId: "stream-typing-profile",
+        type: "tool_stream",
+      }
+    : {
+        callId: "call-typing-profile",
+        ...(sequence === 2
+          ? { state: "running" as const }
+          : {
+              channel: sequence === 1 ? ("name" as const) : ("stdout" as const),
+              content: sequence === 1 ? "bash" : "x",
+            }),
+        index: 0,
+        sequence,
+        sessionId,
+        streamId: "stream-typing-profile",
+        type: "tool_stream",
+      };
 }
 
 function applySessionEvent(
@@ -177,4 +241,30 @@ test("a superseded connection discards deferred state and unblocks hydration", a
   await expect(yielded).resolves.toBe(false);
   setup.requestFrames.shift()?.();
   expect(receivedTypes).toEqual(["ready"]);
+});
+
+test("streaming tool updates do not invalidate the controlled new-session input", () => {
+  const detail = largeRunningDetail();
+  const { container, controller } = mountRealSessionPanel(detail);
+  const prompt = container.querySelector("#session-prompt");
+  if (!(prompt instanceof HTMLTextAreaElement)) {
+    throw new TypeError("Expected the new-session prompt textarea");
+  }
+  let draftReads = 0;
+  const draft = controller.state.draft;
+  Reflect.defineProperty(draft, "prompt", {
+    configurable: true,
+    get() {
+      draftReads += 1;
+      return "";
+    },
+  });
+  draftReads = 0;
+
+  for (let sequence = 0; sequence < 40; sequence += 1) {
+    controller.applyToolDelta(toolDelta(detail.id, sequence));
+  }
+
+  expect(draftReads).toBe(0);
+  expect(prompt.value).toBe("");
 });
