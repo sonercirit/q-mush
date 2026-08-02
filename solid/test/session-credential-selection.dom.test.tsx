@@ -95,6 +95,11 @@ const PRESERVED_DRAFT = {
 } as const;
 
 const OPEN_AI_CREDENTIAL = credential("credential-1", "OpenAI account", true);
+const SECOND_OPEN_AI_CREDENTIAL = credential(
+  "credential-3",
+  "OpenAI backup",
+  false,
+);
 const OPENROUTER_CREDENTIAL = credential(
   "credential-2",
   "OpenRouter account",
@@ -228,6 +233,54 @@ test("changing the new-session account drives model loading and creation", async
       credentialId: "credential-2",
       model: "openrouter/model",
       provider: "openrouter",
+    }),
+  );
+});
+
+test("choosing a balanced pool discovers and creates with its sentinel", async () => {
+  const command = mockSessionCommand((operation, payload) =>
+    operation === "sessions.models"
+      ? modelCatalog([selectedAccountModel(payload)])
+      : Promise.resolve({
+          ...TEST_SESSION_DETAIL,
+          credentialId: String(payload["credentialId"]),
+          model: String(payload["model"]),
+          provider: "openai",
+          status: "queued",
+        }),
+  );
+  installModelDiscoveryFetch();
+  const controller = createSessionTestController(command);
+  const container = mountTestView(
+    () =>
+      SessionPanel({
+        controller,
+        openAi: () =>
+          createProviderViewState([
+            OPEN_AI_CREDENTIAL,
+            SECOND_OPEN_AI_CREDENTIAL,
+          ]),
+        openRouter: () => createProviderViewState([]),
+        runners: () => createRunnerViewState([runnerSummary(1)]),
+      }),
+    disposals,
+  );
+
+  await waitForModel(container, "OpenAI model");
+  chooseOption(container, "#session-credential", "openai:balanced:openai");
+  await waitForModel(container, "OpenAI model");
+  controller.setDraftField("prompt", "Balance this session");
+  await controller.create();
+
+  expect(command).toHaveBeenCalledWith("sessions.models", {
+    credentialId: "balanced:openai",
+    provider: "openai",
+  });
+  expect(command).toHaveBeenCalledWith(
+    "sessions.create",
+    expect.objectContaining({
+      credentialId: "balanced:openai",
+      provider: "openai",
     }),
   );
 });
