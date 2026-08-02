@@ -54,9 +54,8 @@ import type { PendingSpawnedSession } from "./session-store-spawns.ts";
 const optionsPageOffset = (page: number): number =>
   (page - 1) * SESSION_OPTIONS_PAGE_SIZE;
 
-function runnerUnavailableOutput(): string {
-  return sessionToolOutput({ error: "runner_unavailable" });
-}
+const runnerUnavailableOutput = (): string =>
+  sessionToolOutput({ error: "runner_unavailable" });
 
 interface RunnerPageRequest {
   readonly limit: number;
@@ -262,7 +261,7 @@ export class SessionAgentActions {
   }
 
   stopSession(sessionId: string, detail?: AgentSessionDetail): void {
-    this.#cancelSession()(sessionId);
+    this.#cancel(sessionId);
     if (detail !== undefined) {
       this.#dependencies.cleanupSession(detail);
     }
@@ -274,12 +273,10 @@ export class SessionAgentActions {
     });
   }
 
-  #cancelSession(): (sessionId: string) => void {
-    return (sessionId) => {
-      this.#dependencies.abortSession(sessionId);
-      this.#dependencies.broker.cancelSession(sessionId);
-    };
-  }
+  #cancel = (sessionId: string): void => {
+    this.#dependencies.abortSession(sessionId);
+    this.#dependencies.broker.cancelSession(sessionId);
+  };
 
   #wakeReportedParent(parentId: string | undefined, userId: string): void {
     if (parentId !== undefined) {
@@ -650,7 +647,7 @@ export class SessionAgentActions {
       );
       if (cascade) this.stopChildren(target, userId);
     }
-    const cancel = this.#cancelSession();
+    const cancel = this.#cancel;
     if (sessionId === parentSessionId) {
       queueMicrotask(() => {
         cancel(sessionId);

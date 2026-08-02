@@ -1,3 +1,4 @@
+import { AGENT_TOOL_LABELS } from "./agent-tool-labels.ts";
 import {
   ASK_QUESTIONS_TOOL_DEFINITION,
   ASK_QUESTIONS_TOOL_NAME,
@@ -7,6 +8,7 @@ import { MODEL_PROVIDER_IDS } from "./provider-id.ts";
 
 const NUMBER_PARAMETER = { type: "number" } as const;
 const STRING_PARAMETER = { type: "string" } as const;
+const BOOLEAN_PARAMETER = { type: "boolean" } as const;
 const STRING_ARRAY_PARAMETER = {
   items: STRING_PARAMETER,
   type: "array",
@@ -186,7 +188,7 @@ const SESSION_AGENT_TOOLS = [
       },
       autoCompact: {
         description: "Automatically compact near the context limit",
-        type: "boolean",
+        ...BOOLEAN_PARAMETER,
       },
       credentialId: {
         description: "Model credential ID",
@@ -387,14 +389,10 @@ const SESSION_AGENT_TOOLS = [
     required: ["sessionId"],
   }),
   toolDefinition({
-    description:
-      "Stop an owned agent session. By default, this also stops its active descendants; set cascade to false to stop only the selected session.",
+    description: "Stop an owned session. By default, includes descendants.",
     name: "stop_session",
     properties: {
-      cascade: {
-        description: "Whether to stop active child sessions and descendants",
-        type: "boolean",
-      },
+      cascade: { description: "Also stop descendants", ...BOOLEAN_PARAMETER },
       ...SESSION_ID_PARAMETER,
     },
     required: ["sessionId"],
@@ -495,29 +493,6 @@ export function isSessionAgentToolName(
 
 export const AGENT_SESSION_TOOL_NAMES: readonly AgentSessionToolName[] =
   AGENT_TOOLS.map(({ function: definition }) => definition.name);
-
-const AGENT_TOOL_LABELS: Readonly<Record<AgentSessionToolName, string>> = {
-  ask_questions: "Ask questions",
-  bash: "Shell",
-  brave_search: "Brave Search",
-  browse_runner_directories: "Browse runner directories",
-  continue_session: "Continue session",
-  edit: "Edit files",
-  explain_file: "Explain files",
-  get_session_options: "Get session options",
-  list_runners: "List runners",
-  list_sessions: "List sessions",
-  page_fetch: "Fetch page",
-  parallel: "Parallel calls",
-  read: "Read files",
-  read_session: "Read session",
-  reassign_session: "Reassign session",
-  send_to_session: "Send to session",
-  sleep: "Sleep",
-  spawn_session: "Spawn session",
-  stop_session: "Stop session",
-  write: "Write files",
-};
 
 type AgentToolClassification = "runner_tool" | "session_tool" | "skill";
 
