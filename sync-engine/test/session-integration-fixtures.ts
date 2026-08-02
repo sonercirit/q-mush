@@ -356,6 +356,29 @@ export function connectedSessionSetup(
   };
 }
 
+export function createSpawnSessionInput(
+  parentSessionId: string,
+  parentGeneration: number,
+) {
+  return {
+    agentFilePath: null,
+    autoCompact: true,
+    credentialId: CREDENTIAL_ID,
+    executionEnvironment: "bare_metal" as const,
+    images: [],
+    model: "gpt-4.1-mini",
+    openRouterProviderTag: null,
+    parentGeneration,
+    parentSessionId,
+    prompt: "Keep working",
+    provider: "openai" as const,
+    reasoningEffort: "high" as const,
+    runnerId: RUNNER_ID,
+    tools: AGENT_SESSION_TOOL_NAMES,
+    workingDirectory: "/work/project",
+  };
+}
+
 export function createSessionRequest(
   includeModel = true,
   reasoningEffort = "high",

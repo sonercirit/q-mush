@@ -9,6 +9,7 @@ import { WorkspaceStore } from "../../sync-engine/workspace-store.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import {
   createAuthenticatedRequest,
+  TEST_AUTHENTICATED_USER,
   TEST_NOW,
   TEST_USER_ID,
   TEST_WORKSPACE_ID,
@@ -17,6 +18,7 @@ import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
   connectedSessionSetup,
   createSessionRequest,
+  createSpawnSessionInput,
   RUNNER_ID,
   SESSION_ID,
 } from "./session-integration-fixtures.ts";
@@ -527,6 +529,29 @@ describe("agent sessions", () => {
     );
     expect(model.started).toBe(true);
     database.$client.close();
+  });
+
+  test("omitted HTTP stop body cascade-stops actual children", async () => {
+    const setup = connectedSessionSetup(new BlockingModel());
+    const createResponse = await setup.sessions.collection(
+      createSessionRequest(),
+    );
+    await expectSessionReaches(setup, createResponse, "running");
+    const parent = setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID);
+    const child = await setup.sessions.realtimeCommands.spawnForUser(
+      TEST_AUTHENTICATED_USER,
+      createSpawnSessionInput(SESSION_ID, parent?.generation ?? -1),
+      TEST_WORKSPACE_ID,
+    );
+
+    const stopped = await stopHttpSession(setup);
+
+    expect(stopped.status).toBe(200);
+    expect(await stopped.json()).toMatchObject({ status: "stopped" });
+    expect(setup.sessions.detailForUser(TEST_USER_ID, child.id)?.status).toBe(
+      "stopped",
+    );
+    setup.database.$client.close();
   });
 
   test("accepts explicit HTTP parent-only stop semantics", async () => {

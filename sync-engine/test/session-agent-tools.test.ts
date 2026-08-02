@@ -103,10 +103,7 @@ class SelfStoppingChildModel implements AgentModel {
             : {
                 content: "Stopping the delegated session.",
                 toolCalls: [
-                  toolCall("stop_session", {
-                    cascade: true,
-                    sessionId: childSessionId,
-                  }),
+                  toolCall("stop_session", { sessionId: childSessionId }),
                 ],
               };
     if (step === undefined) {
@@ -306,9 +303,7 @@ describe("session agent tools", () => {
       },
       {
         content: "Stopping the session.",
-        toolCalls: [
-          toolCall("stop_session", { cascade: true, sessionId: SESSION_ID }),
-        ],
+        toolCalls: [toolCall("stop_session", { sessionId: SESSION_ID })],
       },
       { content: "Session controls checked.", toolCalls: [] },
     ]);

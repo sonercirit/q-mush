@@ -9,12 +9,21 @@ import {
   executeSessionRealtimeCommand,
   type SessionRealtimeCommands,
 } from "../../sync-engine/session-realtime-commands.ts";
+import {
+  TEST_WORKSPACE_ID as INTEGRATION_WORKSPACE_ID,
+  TEST_AUTHENTICATED_USER,
+  TEST_USER_ID,
+} from "./authenticated-integration-test-helpers.ts";
 import { userRealtimeCommand } from "./realtime-command-fixtures.ts";
 import {
   REALTIME_TEST_SESSION_DETAIL,
   realtimeTestHistoryPage,
   realtimeTestSessionCommands,
 } from "./realtime-session-fixture.ts";
+import { spawnCall } from "./session-agent-spawn-helpers.ts";
+import { scriptedModel, startToolSession } from "./session-agent-tool-setup.ts";
+import { SESSION_ID } from "./session-integration-fixtures.ts";
+import { waitForSessionValue } from "./session-integration-helpers.ts";
 
 const TEST_USER: AuthenticatedUser = {
   email: "mush@example.com",
@@ -65,6 +74,42 @@ function createPayload(): Readonly<{
 }
 
 describe("session realtime command dispatch", () => {
+  test("omitted cascade stops a session and its actual descendant", async () => {
+    const setup = await startToolSession(
+      scriptedModel([
+        {
+          content: "Spawn a child.",
+          toolCalls: [spawnCall("Keep working")],
+        },
+        { content: "Keep the parent active.", toolCalls: [] },
+      ]),
+    );
+    await waitForSessionValue(
+      () => setup.sessions.listForUser(TEST_USER_ID),
+      (sessions) => Array.isArray(sessions) && sessions.length === 2,
+    );
+    const child = setup.sessions
+      .listForUser(TEST_USER_ID)
+      .find(({ parentSessionId }) => parentSessionId === SESSION_ID);
+    if (child === undefined) throw new Error("Missing spawned child");
+
+    await executeSessionRealtimeCommand(
+      setup.sessions.realtimeCommands,
+      TEST_AUTHENTICATED_USER,
+      userRealtimeCommand(SESSION_REALTIME_OPERATIONS.stop, {
+        sessionId: SESSION_ID,
+      }),
+      INTEGRATION_WORKSPACE_ID,
+    );
+
+    expect(setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID)?.status).toBe(
+      "stopped",
+    );
+    expect(setup.sessions.detailForUser(TEST_USER_ID, child.id)?.status).toBe(
+      "stopped",
+    );
+    setup.database.$client.close();
+  });
   test("routes question answers through the authenticated workspace", async () => {
     const answerQuestionsForUser = vi.fn(() =>
       Promise.resolve({ status: "answered" }),
