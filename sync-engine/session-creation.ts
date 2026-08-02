@@ -231,13 +231,13 @@ export function prepareSessionCredential(
   });
 }
 
-export async function createPreparedSession(
+export function createPreparedSession(
   dependencies: SessionCreationDependencies,
   user: AuthenticatedUser,
   input: CreateSessionInput & Pick<CreateAgentSession, "workspaceId">,
   credential: ProviderCredentialAccess,
   metadata: PreparedSessionMetadata,
-): Promise<Response> {
+): Response {
   if (!dependencies.runtimes.accepts(input.runnerId)) {
     return createApiError("server_restarting", 503);
   }

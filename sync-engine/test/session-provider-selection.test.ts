@@ -1,4 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
+import { ProviderCredentialRejectionError } from "../../sync-engine/provider-error.ts";
 import type { AuthenticatedUser } from "../../shared/auth-model.ts";
 import { SESSION_OPENROUTER_PROVIDERS_PATH } from "../../shared/routes.ts";
 import { testAgentModelCatalog } from "../../shared/test/agent-model-fixtures.ts";
@@ -238,6 +239,26 @@ describe("OpenRouter session provider validation", () => {
       sessionMetadata(
         metadataOptions({
           discoverProviders: () => Promise.reject(new Error("unavailable")),
+        }),
+      ),
+    ).resolves.toEqual({ error: "validation_failed" });
+  });
+
+  test("propagates tagged-provider credential rejections when requested", async () => {
+    const rejection = new ProviderCredentialRejectionError("rejected", 429);
+    await expect(
+      sessionMetadata(
+        metadataOptions({
+          discoverProviders: () => Promise.reject(rejection),
+          rejectCredentialErrors: true,
+        }),
+      ),
+    ).rejects.toBe(rejection);
+
+    await expect(
+      sessionMetadata(
+        metadataOptions({
+          discoverProviders: () => Promise.reject(rejection),
         }),
       ),
     ).resolves.toEqual({ error: "validation_failed" });

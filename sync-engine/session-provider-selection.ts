@@ -234,7 +234,13 @@ export async function sessionMetadata(
             maxContextTokens: selected.contextWindow,
             providerPricing: selected.pricing,
           };
-    } catch {
+    } catch (error) {
+      if (
+        options.rejectCredentialErrors === true &&
+        isCredentialRejectionError(error)
+      ) {
+        throw error;
+      }
       return { error: "validation_failed" };
     }
   }

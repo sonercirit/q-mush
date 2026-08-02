@@ -66,7 +66,7 @@ export async function createSessionWithCredentialPool(
             throw new RealtimeCommandError("command_failed");
           }
           const created: { detail?: AgentSessionDetail } = {};
-          const response = await createPreparedSession(
+          const response = createPreparedSession(
             {
               ...dependencies,
               onCreated: (detail) => {

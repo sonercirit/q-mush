@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { ProviderCredentialRejectionError } from "../../sync-engine/provider-error.ts";
 import { discoverOpenRouterProviders } from "../../sync-engine/openrouter-provider-discovery.ts";
 import {
   discoverWithResponse,
@@ -92,6 +93,19 @@ describe("OpenRouter serving-provider discovery", () => {
       );
     }
     expect(requests).toBe(0);
+  });
+
+  test("classifies credential rejection responses", async () => {
+    for (const status of [401, 403, 429] as const) {
+      await expect(
+        invoke(discoverWithResponse(new Response(null, { status }))),
+      ).rejects.toEqual(
+        expect.objectContaining({
+          name: ProviderCredentialRejectionError.name,
+          status,
+        }),
+      );
+    }
   });
 
   test("bounds response bytes and endpoint count", async () => {
