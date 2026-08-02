@@ -66,21 +66,29 @@ interface MountedMutationDetail {
   readonly root: HTMLElement;
 }
 
-function mountMutationDetail(
-  messages: readonly AgentSessionMessage[],
+function mountedMutationDetail(
+  container: HTMLDivElement,
+  harness: MutationObserverHarness,
+  selector: string,
 ): MountedMutationDetail {
-  const harness = installMutationObserverHarness();
-  const detail = { ...runningSessionDetail(messages), tools: [] };
-  const { container } = mountTestSessionDetail(detail, disposals);
-  const root = container.querySelector(".session-detail-view");
+  const root = container.querySelector(selector);
   if (!(root instanceof HTMLElement))
-    throw new TypeError("Missing detail root");
+    throw new TypeError(`Missing mutation root: ${selector}`);
   return {
     callback: mutationCallback(harness),
     container,
     harness,
     root,
   };
+}
+
+function mountMutationDetail(
+  messages: readonly AgentSessionMessage[],
+): MountedMutationDetail {
+  const harness = installMutationObserverHarness();
+  const detail = { ...runningSessionDetail(messages), tools: [] };
+  const { container } = mountTestSessionDetail(detail, disposals);
+  return mountedMutationDetail(container, harness, ".session-detail-view");
 }
 
 function mutation(options: {
@@ -309,15 +317,40 @@ function mountWithinScopeFixture(
     () => <WithinScopeFixture labels={labels} />,
     disposals,
   );
-  const root = container.querySelector("[data-within-scope-fixture]");
-  if (!(root instanceof HTMLElement))
-    throw new TypeError("Missing within-scope fixture");
-  return {
-    callback: mutationCallback(harness),
+  return mountedMutationDetail(
     container,
     harness,
-    root,
-  };
+    "[data-within-scope-fixture]",
+  );
+}
+
+function rememberWithinScopePanes(
+  panes: readonly (readonly [label: string, top: number])[],
+): MountedMutationDetail {
+  const mounted = mountWithinScopeFixture(panes.map(([label]) => label));
+  for (const [label, top] of panes) {
+    rememberPane(queryMutationPane(mounted.container, label), top);
+  }
+  return mounted;
+}
+
+function withinScopePaneStates(
+  root: HTMLElement,
+): readonly (readonly [string | undefined, number])[] {
+  return [...root.querySelectorAll<HTMLElement>("[data-mutation-pane]")].map(
+    (pane) => [pane.dataset["mutationPane"], pane.scrollTop],
+  );
+}
+
+function notifyWithinScopeMutation(
+  mounted: MountedMutationDetail,
+  addedNodes: NodeList,
+  removedNodes: NodeList,
+): void {
+  mounted.callback(
+    [mutation({ addedNodes, removedNodes, target: mounted.root })],
+    mounted.harness.observer(),
+  );
 }
 
 afterEach(() => {
@@ -332,62 +365,33 @@ afterEach(() => {
 });
 
 test("keeps pane state with elements reordered within one scope", () => {
-  const { callback, container, harness, root } = mountWithinScopeFixture([
-    "first",
-    "second",
+  const mounted = rememberWithinScopePanes([
+    ["first", 20],
+    ["second", 70],
   ]);
-  const first = queryMutationPane(container, "first");
-  const second = queryMutationPane(container, "second");
-  rememberPane(first, 20);
-  rememberPane(second, 70);
+  const second = queryMutationPane(mounted.container, "second");
   const movedNodes = nodeList(second);
-  root.prepend(second);
+  mounted.root.prepend(second);
 
-  callback(
-    [
-      mutation({
-        addedNodes: movedNodes,
-        removedNodes: movedNodes,
-        target: root,
-      }),
-    ],
-    harness.observer(),
-  );
+  notifyWithinScopeMutation(mounted, movedNodes, movedNodes);
 
-  expect(
-    [...root.querySelectorAll<HTMLElement>("[data-mutation-pane]")].map(
-      (pane) => [pane.dataset["mutationPane"], pane.scrollTop],
-    ),
-  ).toEqual([
+  expect(withinScopePaneStates(mounted.root)).toEqual([
     ["second", 70],
     ["first", 20],
   ]);
 });
 
 test("drops a removed middle pane without shifting its state", () => {
-  const { callback, container, harness, root } = mountWithinScopeFixture([
-    "first",
-    "middle",
-    "last",
+  const mounted = rememberWithinScopePanes([
+    ["first", 20],
+    ["middle", 40],
+    ["last", 70],
   ]);
-  const first = queryMutationPane(container, "first");
-  const middle = queryMutationPane(container, "middle");
-  const last = queryMutationPane(container, "last");
-  rememberPane(first, 20);
-  rememberPane(middle, 40);
-  rememberPane(last, 70);
-  const removedNodes = nodeList(middle);
+  const middle = queryMutationPane(mounted.container, "middle");
 
-  callback(
-    [mutation({ addedNodes: nodeList(), removedNodes, target: root })],
-    harness.observer(),
-  );
+  notifyWithinScopeMutation(mounted, nodeList(), nodeList(middle));
 
-  expect(
-    [...root.querySelectorAll<HTMLElement>("[data-mutation-pane]")].map(
-      (pane) => [pane.dataset["mutationPane"], pane.scrollTop],
-    ),
-  ).toEqual([
+  expect(withinScopePaneStates(mounted.root)).toEqual([
     ["first", 20],
     ["last", 70],
   ]);
