@@ -6,7 +6,7 @@ import type {
 import { forEachAssistantToolCall } from "./agent-conversation.ts";
 
 const AUTO_COMPACTION_THRESHOLD = 0.95;
-export const AGENT_COMPACTION_REQUEST_MESSAGE = `Compact the conversation above into a concise handoff summary now. Preserve the user's goals, important decisions, constraints, relevant file paths, changes already made, command and test results, unresolved errors, and concrete next steps. Do not call tools. Return only the summary.`;
+const AGENT_COMPACTION_REQUEST_MESSAGE = `Compact the conversation above into a concise handoff summary now. Preserve the user's goals, important decisions, constraints, relevant file paths, changes already made, command and test results, unresolved errors, and concrete next steps. Do not call tools. Return only the summary.`;
 
 const COMPACTION_PREFIX = `The earlier conversation was compacted into this handoff summary. Treat it as prior context and continue from it:\n\n`;
 

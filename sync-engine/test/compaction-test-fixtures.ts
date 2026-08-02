@@ -1,0 +1,1 @@
+export const TEST_COMPACTION_REQUEST_MESSAGE = `Compact the conversation above into a concise handoff summary now. Preserve the user's goals, important decisions, constraints, relevant file paths, changes already made, command and test results, unresolved errors, and concrete next steps. Do not call tools. Return only the summary.`;

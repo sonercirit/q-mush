@@ -8,7 +8,6 @@ import { createAgentSystemPrompt } from "../../shared/agent-prompt.ts";
 import { agentMessages, agentSessions } from "../../shared/database/schema.ts";
 import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
-import { AGENT_COMPACTION_REQUEST_MESSAGE } from "../../sync-engine/agent-compaction.ts";
 import type { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
 import type { AgentModelFactory } from "../../sync-engine/session-agent-models.ts";
 import type { SessionAgentRuntimeDependencies } from "../../sync-engine/session-agent-runtime.ts";
@@ -25,6 +24,7 @@ import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
+import { TEST_COMPACTION_REQUEST_MESSAGE } from "./compaction-test-fixtures.ts";
 import { expectDoneStep, providerStep } from "./provider-step-fixtures.ts";
 import {
   closeCompactionStore,
@@ -264,7 +264,7 @@ function expectCompactionRequest(
   messages: readonly AgentConversationMessage[] | undefined,
 ): void {
   expect(messages?.at(-1)).toMatchObject({
-    content: AGENT_COMPACTION_REQUEST_MESSAGE,
+    content: TEST_COMPACTION_REQUEST_MESSAGE,
     role: "user",
   });
 }

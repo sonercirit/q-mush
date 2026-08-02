@@ -3,7 +3,6 @@ import type { AgentModelStep } from "../../shared/agent-loop.ts";
 import { createAgentSystemPrompt } from "../../shared/agent-prompt.ts";
 import type { ProviderCredentialAccess } from "../../shared/provider-credential-store.ts";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
-import { AGENT_COMPACTION_REQUEST_MESSAGE } from "../../sync-engine/agent-compaction.ts";
 import {
   createProviderStreamAccumulator,
   type ProviderTextDelta,
@@ -14,6 +13,7 @@ import {
   createSessionAgentModels,
   type AgentModelFactory,
 } from "../../sync-engine/session-agent-models.ts";
+import { TEST_COMPACTION_REQUEST_MESSAGE } from "./compaction-test-fixtures.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
 import { RecordingRealtimeSocket } from "./realtime-hub-test-helpers.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
@@ -178,7 +178,7 @@ describe("session agent models", () => {
     ]);
     expectRealtimeDeltas(socket, [
       {
-        content: AGENT_COMPACTION_REQUEST_MESSAGE,
+        content: TEST_COMPACTION_REQUEST_MESSAGE,
         sessionId: TEST_SESSION_DETAIL.id,
         streamId: "stream-2",
         type: "session_compaction_request",

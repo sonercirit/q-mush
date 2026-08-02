@@ -1,9 +1,9 @@
 import { describe, expect, test } from "vitest";
 import {
-  AGENT_COMPACTION_REQUEST_MESSAGE,
   ModelConversationCompactor,
   shouldCompactContext,
 } from "../../sync-engine/agent-compaction.ts";
+import { TEST_COMPACTION_REQUEST_MESSAGE } from "./compaction-test-fixtures.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 
 describe("agent conversation compaction", () => {
@@ -39,9 +39,8 @@ describe("agent conversation compaction", () => {
     ]);
     expect(model.requests[0]?.slice(0, -1)).toEqual(conversation);
     expect(model.requests[0]?.at(-1)?.content).toBe(
-      AGENT_COMPACTION_REQUEST_MESSAGE,
+      TEST_COMPACTION_REQUEST_MESSAGE,
     );
     expect(model.requests[0]?.at(-1)?.role).toBe("user");
-    expect(AGENT_COMPACTION_REQUEST_MESSAGE).toContain("Do not call tools");
   });
 });
