@@ -89,6 +89,44 @@ function sameScrollKind(left: HTMLElement, right: HTMLElement): boolean {
   );
 }
 
+function updateRememberedReplacement(
+  element: HTMLElement,
+  nestedScrollByElement: WeakMap<HTMLElement, IndexedNestedScroll>,
+  mutations: readonly MutationRecord[],
+): void {
+  const removed = mutations.flatMap((mutation) =>
+    nestedScrollElementsIn(mutation.removedNodes),
+  );
+  const added = new Set(
+    mutations.flatMap((mutation) =>
+      nestedScrollElementsIn(mutation.addedNodes),
+    ),
+  );
+  const rememberedRemoved = removed.flatMap((removedElement) => {
+    const remembered = nestedScrollByElement.get(removedElement);
+    return remembered === undefined ? [] : [{ remembered, removedElement }];
+  });
+  if (rememberedRemoved.length === 0 || added.size === 0) return;
+
+  const nested = nestedScrollElements(element);
+  for (const { remembered, removedElement } of rememberedRemoved) {
+    const indexedReplacement = nested[remembered.index];
+    const replacement =
+      indexedReplacement !== undefined &&
+      added.has(indexedReplacement) &&
+      sameScrollKind(removedElement, indexedReplacement)
+        ? indexedReplacement
+        : [...added].findLast((candidate) =>
+            sameScrollKind(removedElement, candidate),
+          );
+    if (replacement !== undefined) {
+      added.delete(replacement);
+      restoreNestedScroll(replacement, remembered.state);
+    }
+  }
+  rememberNestedScroll(element, nestedScrollByElement);
+}
+
 export function createNestedScrollRef(
   messageId: () => string,
   observeReplacements = false,
@@ -158,33 +196,7 @@ export function createNestedScrollRef(
     if (!observeReplacements) return;
 
     const observer = new MutationObserver((mutations) => {
-      const removed = mutations.flatMap((mutation) =>
-        nestedScrollElementsIn(mutation.removedNodes),
-      );
-      const added = new Set(
-        mutations.flatMap((mutation) =>
-          nestedScrollElementsIn(mutation.addedNodes),
-        ),
-      );
-      const nested = nestedScrollElements(element);
-      for (const removedElement of removed) {
-        const remembered = nestedScrollByElement.get(removedElement);
-        if (remembered === undefined) continue;
-        const indexedReplacement = nested[remembered.index];
-        const replacement =
-          indexedReplacement !== undefined &&
-          added.has(indexedReplacement) &&
-          sameScrollKind(removedElement, indexedReplacement)
-            ? indexedReplacement
-            : [...added].findLast((candidate) =>
-                sameScrollKind(removedElement, candidate),
-              );
-        if (replacement !== undefined) {
-          added.delete(replacement);
-          restoreNestedScroll(replacement, remembered.state);
-        }
-      }
-      rememberNestedScroll(element, nestedScrollByElement);
+      updateRememberedReplacement(element, nestedScrollByElement, mutations);
     });
     observer.observe(element, { childList: true, subtree: true });
     onCleanup(() => {
