@@ -12,12 +12,14 @@ import {
   promotePendingInput,
 } from "./session-pending-inputs.ts";
 import { storedSessionRunnerIsAvailable } from "./session-runner-availability-store.ts";
+import { spawnedSessionReport } from "./session-spawn-report.ts";
 import {
   activeSessionCondition,
   type SessionFilter,
 } from "./session-store-persistence.ts";
 import type { SessionStoreWriteResources } from "./session-store-resources.ts";
 import { readStoredSessionResult } from "./session-store-result.ts";
+import { appendSpawnedSessionReportInTransaction } from "./session-store-spawns.ts";
 import { readStoredSessionState } from "./session-store-state.ts";
 import { userMessageValues } from "./session-store-values.ts";
 import { rotateSessionTurn } from "./session-turn-store.ts";
@@ -40,12 +42,22 @@ export type QueueSessionResult =
   | {
       readonly status:
         | "busy"
+        | "callback_pending"
         | "not_found"
         | "parent_stale"
         | "pending_input_conflict"
         | "runner_required"
         | "runner_unavailable";
     };
+
+function readCallbackDetail(
+  options: Pick<
+    Parameters<typeof queueStoredSession>[0],
+    "resources" | "sessionId" | "userId"
+  >,
+): AgentSessionDetail | undefined {
+  return options.resources.read(options.userId, options.sessionId);
+}
 
 export function queueStoredSession(options: {
   readonly authorization?: SessionQueueAuthorization;
@@ -70,6 +82,7 @@ export function queueStoredSession(options: {
   } = options;
   const messageId =
     prompt === undefined ? undefined : resources.generateId(now);
+  const completed = readCallbackDetail(options);
   const status = resources.database.transaction((transaction) => {
     if (
       authorization?.parent !== undefined &&
@@ -106,6 +119,36 @@ export function queueStoredSession(options: {
     const pending = activePendingInput(transaction, sessionId);
     if (pending !== undefined && prompt !== undefined) {
       return "pending_input_conflict" as const;
+    }
+
+    if (stored.status === "completed") {
+      const parentId = stored.parentSessionId;
+      const parentGeneration = stored.parentExecutionGeneration;
+      if (parentId !== null && parentGeneration !== null) {
+        const report =
+          completed?.generation !== stored.executionGeneration
+            ? undefined
+            : spawnedSessionReport(completed, parentId);
+        if (report === undefined) {
+          return "callback_pending" as const;
+        }
+        const disposition = appendSpawnedSessionReportInTransaction(
+          transaction,
+          {
+            childGeneration: stored.executionGeneration,
+            childId: sessionId,
+            content: report.content,
+            generateId: resources.generateId,
+            now,
+            parentGeneration,
+            parentId: report.parentId,
+            userId,
+          },
+        );
+        if (disposition === undefined) {
+          return "callback_pending" as const;
+        }
+      }
     }
 
     const turnId = rotateSessionTurn({

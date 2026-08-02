@@ -1,8 +1,6 @@
 import type { AgentSessionDetail } from "../shared/session-model.ts";
-import {
-  spawnedSessionReport,
-  type SessionAgentActionDependencies,
-} from "./session-agent-action-helpers.ts";
+import type { SessionAgentActionDependencies } from "./session-agent-action-helpers.ts";
+import { spawnedSessionReport } from "./session-spawn-report.ts";
 
 export interface SpawnedSessionCompletion {
   readonly disposition: "delivered" | "promoted" | "terminal";
@@ -18,12 +16,7 @@ export function reportSpawnedSessionCompletion(
   if (link === undefined) {
     return undefined;
   }
-  const report = spawnedSessionReport({
-    childId: detail.id,
-    dependencies,
-    parentId: link.parentId,
-    userId,
-  });
+  const report = spawnedSessionReport(detail, link.parentId);
   if (report === undefined) {
     return undefined;
   }

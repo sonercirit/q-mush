@@ -23,11 +23,6 @@ type SessionAgentCredentialSelection = Pick<
   "credentialId" | "provider" | "workspaceId"
 >;
 
-interface ParentSessionReport {
-  readonly content: string;
-  readonly parentId: string;
-}
-
 interface SessionAgentMetadata {
   readonly maxContextTokens: number | null;
   readonly providerPricing: AgentSessionDetail["providerPricing"];
@@ -125,63 +120,6 @@ export function pauseQueuedSessionForRestart(
 export async function responseToolOutput(response: Response): Promise<string> {
   const value: unknown = await response.json();
   return sessionToolOutput(value);
-}
-
-export function spawnedSessionReport(options: {
-  readonly childId: string;
-  readonly dependencies: SessionAgentActionDependencies;
-  readonly parentId: string;
-  readonly userId: string;
-}): ParentSessionReport | undefined {
-  const completed = options.dependencies.store.get(
-    options.userId,
-    options.childId,
-  );
-  if (completed === undefined) {
-    return undefined;
-  }
-  if (
-    completed.status !== "completed" &&
-    completed.status !== "failed" &&
-    completed.status !== "stopped"
-  ) {
-    return undefined;
-  }
-  const failed = completed.status === "failed";
-  const terminalAssistant = completed.messages.findLast(
-    ({ role, toolCalls }) => role === "assistant" && toolCalls.length === 0,
-  );
-  const assistant = completed.messages.findLast(
-    ({ role }) => role === "assistant",
-  );
-  const failure = failed
-    ? completed.messages.findLast(({ role }) => role === "error")
-    : undefined;
-  const lastMessage = failed
-    ? (assistant?.content.trim().length ?? 0) > 0
-      ? assistant
-      : {
-          content:
-            failure?.content ??
-            "Session failed without a recorded failure reason",
-          role: "error" as const,
-        }
-    : completed.status === "stopped"
-      ? completed.messages.findLast(({ role }) => role !== "thinking")
-      : terminalAssistant;
-  const status = completed.status;
-  const summary = sessionToolOutput({
-    lastMessage:
-      lastMessage === undefined
-        ? null
-        : { content: lastMessage.content, role: lastMessage.role },
-    sessionId: completed.id,
-    status,
-  });
-  return {
-    content: `Spawned session ${failed ? "failed" : "completed"}:\n${summary}`,
-    parentId: options.parentId,
-  };
 }
 
 function sessionLaunchResponse(

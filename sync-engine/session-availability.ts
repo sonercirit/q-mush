@@ -8,6 +8,8 @@ export function queueFailureResponse(
   switch (result.status) {
     case "busy":
       return createApiError("session_busy", 409);
+    case "callback_pending":
+      return createApiError("callback_pending", 409);
     case "not_found":
       return createApiError("not_found", 404);
     case "parent_stale":

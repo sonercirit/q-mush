@@ -185,7 +185,12 @@ export function spawnedSessionLink(
 }
 
 function reportMessageOptions(
-  options: Parameters<typeof appendSpawnedSessionReport>[0],
+  options: Readonly<{
+    generateId: IdGenerator;
+    now: number;
+    parentId: string;
+    userId: string;
+  }>,
   database: Pick<AppDatabase, "insert" | "select" | "update">,
   sessionId = options.parentId,
 ) {
@@ -198,7 +203,7 @@ function reportMessageOptions(
   };
 }
 
-export function appendSpawnedSessionReport(options: {
+interface SpawnedReportOptions {
   readonly childGeneration: number;
   readonly childId: string;
   readonly content: string;
@@ -208,91 +213,112 @@ export function appendSpawnedSessionReport(options: {
   readonly parentGeneration: number;
   readonly parentId: string;
   readonly userId: string;
-}): SpawnedReportDisposition | undefined {
-  return options.database.transaction((transaction) => {
-    const parentCondition = storedSessionCondition({
-      id: options.parentId,
-      status: REPORTABLE_PARENT_STATUSES,
+}
+
+type SpawnedReportDatabase = Pick<AppDatabase, "insert" | "select" | "update">;
+type SpawnedReportValues = Omit<SpawnedReportOptions, "database">;
+
+function callbackDisposition(
+  database: SpawnedReportDatabase,
+  options: SpawnedReportValues,
+): SpawnedReportDisposition | undefined {
+  const parentCondition = storedSessionCondition({
+    id: options.parentId,
+    status: REPORTABLE_PARENT_STATUSES,
+    userId: options.userId,
+  });
+  const eligibleParent = and(
+    parentCondition,
+    eq(agentSessions.runnerRequired, false),
+  );
+  const parent = database
+    .select({ status: agentSessions.status })
+    .from(agentSessions)
+    .where(eligibleParent)
+    .get();
+  if (parent === undefined) {
+    return undefined;
+  }
+  const childCondition = and(
+    storedSessionCondition({
+      generation: options.childGeneration,
+      id: options.childId,
+      status: REPORTABLE_CHILD_STATUSES,
       userId: options.userId,
-    });
-    const eligibleParent = and(
-      parentCondition,
-      eq(agentSessions.runnerRequired, false),
-    );
-    const parent = transaction
-      .select({ status: agentSessions.status })
-      .from(agentSessions)
-      .where(eligibleParent)
-      .get();
-    if (parent === undefined) {
-      return undefined;
-    }
-    const childCondition = and(
+    }),
+    eq(agentSessions.parentSessionId, options.parentId),
+    eq(agentSessions.parentExecutionGeneration, options.parentGeneration),
+  );
+  if (
+    !updateStoredSessions(database, childCondition, {
+      parentExecutionGeneration: null,
+    })
+  ) {
+    return undefined;
+  }
+  switch (parent.status) {
+    case "running":
+      if (
+        !appendSystemFollowUp({
+          ...reportMessageOptions(options, database),
+          clientRequestId: `spawn:${options.childId}:${String(options.childGeneration)}`,
+          content: options.content,
+          kind: "steer",
+        })
+      ) {
+        return undefined;
+      }
+      break;
+    case "completed":
+    case "failed":
+    case "idle":
+    case "stopped":
+      appendSystemStoredMessage({
+        ...reportMessageOptions(options, database, options.childId),
+        message: storedSystemMessageValues(
+          terminalParentCallbackNote(parent.status),
+        ),
+      });
+      break;
+    case "paused":
+    case "queued":
+      appendSystemStoredMessage({
+        ...reportMessageOptions(options, database),
+        message: storedUserMessageValues(options.content),
+      });
+      break;
+  }
+
+  const terminal = parentIsTerminal(parent.status);
+  const reportedSessionId = terminal ? options.childId : options.parentId;
+  database
+    .update(agentSessions)
+    .set({
+      updatedAt: new Date(options.now),
+      updatedById: SYSTEM_ID,
+    })
+    .where(
       storedSessionCondition({
-        generation: options.childGeneration,
-        id: options.childId,
-        status: REPORTABLE_CHILD_STATUSES,
+        id: reportedSessionId,
         userId: options.userId,
       }),
-      eq(agentSessions.parentSessionId, options.parentId),
-      eq(agentSessions.parentExecutionGeneration, options.parentGeneration),
-    );
-    if (
-      !updateStoredSessions(transaction, childCondition, {
-        parentExecutionGeneration: null,
-      })
-    ) {
-      return undefined;
-    }
-    switch (parent.status) {
-      case "running":
-        if (
-          !appendSystemFollowUp({
-            ...reportMessageOptions(options, transaction),
-            clientRequestId: `spawn:${options.childId}:${String(options.childGeneration)}`,
-            content: options.content,
-            kind: "steer",
-          })
-        ) {
-          return undefined;
-        }
-        break;
-      case "completed":
-      case "failed":
-      case "idle":
-      case "stopped":
-        appendSystemStoredMessage({
-          ...reportMessageOptions(options, transaction, options.childId),
-          message: storedSystemMessageValues(
-            terminalParentCallbackNote(parent.status),
-          ),
-        });
-        break;
-      case "paused":
-      case "queued":
-        appendSystemStoredMessage({
-          ...reportMessageOptions(options, transaction),
-          message: storedUserMessageValues(options.content),
-        });
-        break;
-    }
+    )
+    .run();
+  if (terminal) return "terminal";
+  return parent.status === "running" ? "promoted" : "delivered";
+}
 
-    const terminal = parentIsTerminal(parent.status);
-    const reportedSessionId = terminal ? options.childId : options.parentId;
-    transaction
-      .update(agentSessions)
-      .set({
-        updatedAt: new Date(options.now),
-        updatedById: SYSTEM_ID,
-      })
-      .where(
-        storedSessionCondition({
-          id: reportedSessionId,
-          userId: options.userId,
-        }),
-      )
-      .run();
-    if (terminal) return "terminal";
-    return parent.status === "running" ? "promoted" : "delivered";
-  });
+export function appendSpawnedSessionReport(
+  options: SpawnedReportOptions,
+): SpawnedReportDisposition | undefined {
+  return options.database.transaction((transaction) =>
+    callbackDisposition(transaction, options),
+  );
+}
+
+export function appendSpawnedSessionReportInTransaction(
+  database: SpawnedReportDatabase,
+  options: SpawnedReportValues,
+): SpawnedReportDisposition | undefined {
+  return callbackDisposition(database, options);
 }
