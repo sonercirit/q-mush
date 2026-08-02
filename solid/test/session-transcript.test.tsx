@@ -509,14 +509,23 @@ test("renders successful edit results as a diff", () => {
 
   expect(html).toContain('aria-label="Diff for src/example.ts"');
   expect(html).toContain('data-language="diff"');
-  expect(html).toContain(
-    'data-diff-line="removed">-const ready = false;</span>',
-  );
-  expect(html).toContain('data-diff-line="removed">-stop();</span>');
-  expect(html).toContain('data-diff-line="added">+const ready = true;</span>');
-  expect(html).toContain('data-diff-line="added">+start();</span>');
-  expect(html).toContain('data-diff-line="removed">-removeMe();</span>');
-  expect(html).not.toContain('data-diff-line="removed">-</span>');
+  expect(html).toContain('data-diff-line-number="1"');
+  expect(html).toContain('data-diff-line-number="5"');
+  expect(html).toContain('aria-hidden="true"');
+  expect(html).toContain("select-none");
+  expect(html).toContain('data-diff-line="removed"><span aria-hidden="true"');
+  expect(html).toContain(">1</span><span class=");
+  expect(html).toContain(">-const ready = false;</span>");
+  expect(html).toContain(">2</span><span class=");
+  expect(html).toContain(">-stop();</span>");
+  expect(html).toContain(">3</span><span class=");
+  expect(html).toContain(">+const ready = true;</span>");
+  expect(html).toContain(">4</span><span class=");
+  expect(html).toContain(">+start();</span>");
+  expect(html).toContain(">5</span><span class=");
+  expect(html).toContain(">-removeMe();</span>");
+  expect(html).not.toContain(">6</span>");
+  expect(html).not.toContain(">-</span>");
   expect(html).toContain("Successfully replaced 2 block(s) in src/example.ts.");
 });
 
