@@ -3,6 +3,8 @@ import type {
   ToolStreamEntry,
   ToolStreamState,
 } from "../shared/tool-stream.ts";
+import { createNestedScrollRef } from "./nested-scroll.ts";
+import { renderDebugBoundary } from "./render-debug.tsx";
 import { renderStructuredCode } from "./session-syntax.tsx";
 import { renderLiveToolResult } from "./session-tool-result.tsx";
 
@@ -42,8 +44,54 @@ function LiveToolOutput(props: {
   );
 }
 
-export function toolStreamDisplayName(stream: ToolStreamEntry): string {
+function toolStreamDisplayName(stream: ToolStreamEntry): string {
   return stream.name || "Preparing tool";
+}
+
+export function renderToolHeader(options: {
+  readonly id: string | null;
+  readonly kind: "Tool call" | "Tool result";
+  readonly name: string;
+}): JSX.Element {
+  return (
+    <div class="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+      <p class="text-xs font-semibold tracking-wide text-cyan-300 uppercase">
+        {`${options.kind} · ${options.name}`}
+      </p>
+      {options.id === null ? null : (
+        <code class="break-all text-[0.65rem] text-slate-500">
+          {options.id}
+        </code>
+      )}
+    </div>
+  );
+}
+
+export function LiveToolStream(props: {
+  readonly stream: ToolStreamEntry;
+}): JSX.Element {
+  const name = (): string => toolStreamDisplayName(props.stream);
+  const nestedScrollRef = createNestedScrollRef(
+    () => `tool-stream:${props.stream.streamId}:${props.stream.callId}`,
+  );
+  return (
+    <li
+      class="rounded-lg border border-cyan-300/20 bg-cyan-300/10 p-3"
+      data-tool-stream-state={props.stream.state}
+      ref={nestedScrollRef}
+      {...renderDebugBoundary(
+        `tool-stream:${props.stream.streamId}:${props.stream.callId}`,
+        `Live tool: ${name()}`,
+      )}
+    >
+      {renderToolHeader({
+        id: props.stream.callId,
+        kind: "Tool call",
+        name: name(),
+      })}
+      <LiveToolActivityContent includeArguments={true} stream={props.stream} />
+    </li>
+  );
 }
 
 export function LiveToolActivityContent(props: {

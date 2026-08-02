@@ -30,7 +30,8 @@ import { ActiveStepAnchor } from "./session-active-step.tsx";
 import { SessionImagePreviews } from "./session-image-client.tsx";
 import {
   LiveToolActivityContent,
-  toolStreamDisplayName,
+  LiveToolStream,
+  renderToolHeader,
 } from "./session-live-tool-activity.tsx";
 import { renderMarkdown } from "./session-markdown.tsx";
 import { createSessionStepTiming } from "./session-step-timing.ts";
@@ -134,25 +135,6 @@ function ToolDefinitions(props: {
   );
 }
 
-function renderToolHeader(options: {
-  readonly id: string | null;
-  readonly kind: "Tool call" | "Tool result";
-  readonly name: string;
-}): JSX.Element {
-  return (
-    <div class="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-      <p class="text-xs font-semibold tracking-wide text-cyan-300 uppercase">
-        {`${options.kind} · ${options.name}`}
-      </p>
-      {options.id === null ? null : (
-        <code class="break-all text-[0.65rem] text-slate-500">
-          {options.id}
-        </code>
-      )}
-    </div>
-  );
-}
-
 function transcriptMessageNote(options: {
   readonly classes: string;
   readonly label: string;
@@ -248,6 +230,7 @@ function MessageCopyButton(props: {
 }
 
 function ConversationTranscriptMessage(props: {
+  readonly liveToolStreams?: readonly ToolStreamEntry[];
   readonly message: AgentSessionMessage;
   readonly onFork?: ((messageId: string) => void) | undefined;
   readonly showContent?: boolean;
@@ -341,6 +324,13 @@ function ConversationTranscriptMessage(props: {
           </For>
         </ul>
       ) : null}
+      <Show when={showTools() && (props.liveToolStreams?.length ?? 0) > 0}>
+        <ul class="mt-3 space-y-2">
+          <For each={props.liveToolStreams}>
+            {(stream) => <LiveToolStream stream={stream} />}
+          </For>
+        </ul>
+      </Show>
     </li>
   );
 }
@@ -380,11 +370,12 @@ const SESSION_TRANSCRIPT_FILTER_NAMES: readonly SessionTranscriptFilterName[] =
     "userMessages",
   ];
 
-interface TranscriptRenderableMessageProps extends TranscriptMessageProps {
-  readonly filters: SessionTranscriptFilters;
-  readonly onFork?: ((messageId: string) => void) | undefined;
-  readonly toolStreams: Accessor<ReadonlyMap<string, ToolStreamEntry>>;
-}
+type TranscriptRenderableMessageProps = TranscriptMessageProps & {
+  readonly filters: Readonly<SessionTranscriptFilters>;
+  readonly liveToolStreams: readonly ToolStreamEntry[];
+  readonly onForkMessage?: ((messageId: string) => void) | undefined;
+  readonly streamEntries: () => ReadonlyMap<string, ToolStreamEntry>;
+};
 
 function renderTranscriptMessage(
   props: TranscriptRenderableMessageProps,
@@ -393,11 +384,12 @@ function renderTranscriptMessage(
     case "assistant":
       return (
         <ConversationTranscriptMessage
+          liveToolStreams={props.liveToolStreams}
           message={props.message}
-          onFork={props.onFork}
+          onFork={props.onForkMessage}
           showContent={props.filters.assistantMessages}
           showTools={props.filters.toolActivity}
-          toolStreams={props.toolStreams}
+          toolStreams={props.streamEntries}
         />
       );
     case "error":
@@ -417,7 +409,7 @@ function renderTranscriptMessage(
       return (
         <ConversationTranscriptMessage
           message={props.message}
-          onFork={props.onFork}
+          onFork={props.onForkMessage}
         />
       );
   }
@@ -430,33 +422,6 @@ function TranscriptMessage(
   return (
     <li class="contents" ref={nestedScrollRef}>
       {renderTranscriptMessage(props)}
-    </li>
-  );
-}
-
-function LiveToolStream(props: {
-  readonly stream: ToolStreamEntry;
-}): JSX.Element {
-  const name = (): string => toolStreamDisplayName(props.stream);
-  const nestedScrollRef = createNestedScrollRef(
-    () => `tool-stream:${props.stream.streamId}:${props.stream.callId}`,
-  );
-  return (
-    <li
-      class="min-w-0 rounded-xl border border-cyan-300/20 bg-cyan-300/10 p-3 sm:p-4"
-      data-tool-stream-state={props.stream.state}
-      ref={nestedScrollRef}
-      {...renderDebugBoundary(
-        `tool-stream:${props.stream.streamId}:${props.stream.callId}`,
-        `Live tool: ${name()}`,
-      )}
-    >
-      {renderToolHeader({
-        id: props.stream.callId,
-        kind: "Tool call",
-        name: name(),
-      })}
-      <LiveToolActivityContent includeArguments={true} stream={props.stream} />
     </li>
   );
 }
@@ -511,15 +476,26 @@ export function SessionTranscript(props: {
       (stream) => !counts().toolCallArguments.has(stream.callId),
     ),
   );
-  const renderMessage = (message: AgentSessionMessage): JSX.Element => (
+  const activeMessages = createMemo(() =>
+    standaloneToolStreams().length === 0
+      ? messageGroups().streamed
+      : messageGroups().streamed.filter((message) =>
+          messageIsVisible(message, props.filters),
+        ),
+  );
+  const renderMessageWithStreams = (
+    message: AgentSessionMessage,
+    liveToolStreams: readonly ToolStreamEntry[],
+  ): JSX.Element => (
     <>
       <Show when={messageIsVisible(message, props.filters)}>
         <TranscriptMessage
           callArguments={() => counts().toolCallArguments}
           filters={props.filters}
+          liveToolStreams={liveToolStreams}
           message={message}
-          onFork={props.onFork}
-          toolStreams={toolStreamsByCallId}
+          onForkMessage={props.onFork}
+          streamEntries={toolStreamsByCallId}
         />
       </Show>
       <Show when={stepTiming().completedTimings.get(message.id)}>
@@ -532,6 +508,8 @@ export function SessionTranscript(props: {
       </Show>
     </>
   );
+  const renderMessage = (message: AgentSessionMessage): JSX.Element =>
+    renderMessageWithStreams(message, []);
   return (
     <>
       <Show when={props.filters.systemPrompt}>
@@ -559,16 +537,15 @@ export function SessionTranscript(props: {
       >
         {(startedAt) => (
           <ActiveStepAnchor
-            messages={messageGroups().streamed}
+            messages={activeMessages()}
             renderMessage={renderMessage}
+            renderMessageWithToolStreams={renderMessageWithStreams}
             timing={<StepTiming endedAt={null} startedAt={startedAt} />}
+            toolStreams={
+              props.filters.toolActivity ? standaloneToolStreams() : []
+            }
           />
         )}
-      </Show>
-      <Show when={props.filters.toolActivity}>
-        <For each={standaloneToolStreams()}>
-          {(stream) => <LiveToolStream stream={stream} />}
-        </For>
       </Show>
       <Show when={visibleItemCount() === 0}>
         <li class="rounded-xl border border-dashed border-white/15 p-5 text-sm leading-6 text-slate-400">

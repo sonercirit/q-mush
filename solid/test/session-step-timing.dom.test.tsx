@@ -212,7 +212,7 @@ test("places every step duration after that step's settlement message", () => {
   }
 });
 
-test("anchors an output-free step and preserves its running block", () => {
+test("keeps timing without an empty agent shell until output starts", () => {
   vi.useFakeTimers();
   const startedAt = startedAtUtc();
   vi.setSystemTime(startedAt + 4_000);
@@ -226,14 +226,12 @@ test("anchors an output-free step and preserves its running block", () => {
   const view = mountTestTranscriptView({ messages, status: () => "running" });
   disposals.push(view.dispose);
 
-  const runningBlock = view.container.querySelector(
-    "[data-active-step='running']",
-  );
-  const activeTiming = runningBlock?.querySelector(
+  const activeTiming = view.container.querySelector(
     "[data-step-timing='active']",
   );
-  expect(runningBlock?.getAttribute("aria-busy")).toBe("true");
-  expect(runningBlock?.textContent).toContain("AgentRunning");
+  expect(
+    view.container.querySelector("[data-active-step='running']"),
+  ).toBeNull();
   expect(activeTiming?.textContent).toContain("Duration: 0s");
   expect(activeTiming?.textContent).toContain("Started:");
   expect(view.container.querySelectorAll("[data-step-timing]")).toHaveLength(2);
@@ -246,13 +244,14 @@ test("anchors an output-free step and preserves its running block", () => {
     },
   ]);
 
-  expect(view.container.querySelector("[data-active-step='running']")).toBe(
-    runningBlock,
+  const runningBlock = view.container.querySelector(
+    "[data-active-step='running']",
   );
+  expect(runningBlock?.getAttribute("aria-busy")).toBe("true");
   expect(runningBlock?.textContent).toContain("The next step is streaming.");
-  expect(runningBlock?.querySelector("[data-step-timing='active']")).toBe(
-    activeTiming,
-  );
+  expect(
+    runningBlock?.querySelector("[data-step-timing='active']")?.textContent,
+  ).toBe(activeTiming?.textContent);
 });
 
 test("active clocks share one interval and release it after final dispose", () => {
