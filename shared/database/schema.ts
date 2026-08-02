@@ -52,9 +52,7 @@ export const workspaces = sqliteTable(
     id: text("id").primaryKey(),
     userId: userIdColumn(),
     name: text("name").notNull(),
-    isDefault: integer("is_default", { mode: "boolean" })
-      .notNull()
-      .default(false),
+    isDefault: connectionColumns().isDefault,
     ...auditColumns(),
   },
   (table) => [

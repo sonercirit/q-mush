@@ -177,7 +177,7 @@ describe("session runtimes", () => {
           settled(() => {
             cleared = true;
           });
-          return deferredPromise((resolve) => {
+          return new Promise<void>((resolve) => {
             finish = resolve;
           });
         },
