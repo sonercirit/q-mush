@@ -39,6 +39,7 @@ import {
 import { SessionDirectoryInput } from "./session-directory-input.tsx";
 import { SessionExecutionEnvironmentSelect } from "./session-execution-environment.tsx";
 import { SessionResults } from "./session-focus-client.tsx";
+import type { NewSessionFormState } from "./session-new-form-state.ts";
 import {
   defaultModelCredentialValue,
   defaultOnlineRunnerId,
@@ -65,9 +66,8 @@ export type {
 
 type CredentialOption = SessionCredentialOption;
 
-function onlineRunners(state: RunnerViewState): readonly RunnerSummary[] {
-  return state.runners?.filter(({ status }) => status === "online") ?? [];
-}
+const onlineRunners = (state: RunnerViewState): readonly RunnerSummary[] =>
+  state.runners?.filter(({ status }) => status === "online") ?? [];
 
 function providerIsLoading(state: ProviderViewState): boolean {
   return state.credentials === undefined && state.error === undefined;
@@ -85,16 +85,10 @@ function credentialFallbackReady(
   );
 }
 
-function selectedCredential(
-  credentials: readonly CredentialOption[],
-  value: string,
-): CredentialOption | undefined {
-  return selectedSessionCredentialOption(credentials, value);
-}
-
 const selectValue = selectedOptionValue;
 const defaultRunnerId = defaultOnlineRunnerId;
 const defaultCredentialValue = defaultModelCredentialValue;
+const selectedCredential = selectedSessionCredentialOption;
 
 function modelSelectOptions(
   models: AgentModelCatalog["models"],
@@ -150,9 +144,10 @@ function ModelDiscoveryError(props: {
 }
 
 function NewSessionForm(
-  props: SessionRunnerViewProps & {
+  props: Omit<SessionRunnerViewProps, "state"> & {
     readonly credentials: readonly CredentialOption[];
     readonly credentialsSettled: boolean;
+    readonly state: NewSessionFormState;
   },
 ): JSX.Element {
   const runners = createMemo(() => props.runners);
@@ -496,6 +491,19 @@ export function SessionPanel(
   props: SessionPanelResources & { readonly controller: SessionController },
 ): JSX.Element {
   const state = controllerView(props);
+  const newSessionState = createMemo<NewSessionFormState>((previous) => {
+    const current = state();
+    if (
+      previous?.creating === current.creating &&
+      previous.draft === current.draft &&
+      previous.modelDiscovery === current.modelDiscovery &&
+      previous.openSelect === current.openSelect &&
+      previous.providerDiscovery === current.providerDiscovery
+    ) {
+      return previous;
+    }
+    return current;
+  });
   const online = () => onlineRunners(props.runners());
   const providerStates = () =>
     [props.openAi(), props.openRouter(), props.generic?.()] as const;
@@ -558,7 +566,7 @@ export function SessionPanel(
           credentialsSettled={credentialsSettled()}
           onOpenDirectoryPicker={openDirectoryPicker}
           runners={online()}
-          state={state()}
+          state={newSessionState()}
         />
         <ControllerRetryNotice
           error={state().error}

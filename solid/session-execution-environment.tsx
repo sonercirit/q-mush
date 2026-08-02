@@ -1,11 +1,11 @@
 import { type JSX } from "solid-js";
 import { CustomSelect } from "./custom-select.tsx";
-import type { SessionViewState } from "./session-client.tsx";
 import type { SessionController } from "./session-controller.ts";
+import type { NewSessionFormState } from "./session-new-form-state.ts";
 
 export function SessionExecutionEnvironmentSelect(props: {
   readonly controller: SessionController;
-  readonly state: SessionViewState;
+  readonly state: NewSessionFormState;
 }): JSX.Element {
   return (
     <CustomSelect

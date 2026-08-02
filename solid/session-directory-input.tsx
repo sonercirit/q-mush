@@ -2,7 +2,7 @@ import type { JSX } from "solid-js";
 import { DirectoryBrowseButton } from "./directory-browse-button.tsx";
 import { renderFormField } from "./form-field.tsx";
 import type { SessionController } from "./session-controller.ts";
-import type { SessionViewState } from "./session-view-state.ts";
+import type { NewSessionFormState } from "./session-new-form-state.ts";
 
 interface SessionControlOptions {
   readonly disabled: boolean;
@@ -27,7 +27,7 @@ export function SessionDirectoryInput(props: {
   readonly controller: SessionController;
   readonly onOpenDirectoryPicker: () => void;
   readonly runnerAvailable: boolean;
-  readonly state: SessionViewState;
+  readonly state: NewSessionFormState;
 }): JSX.Element {
   const options = () => ({
     disabled: props.state.creating,
