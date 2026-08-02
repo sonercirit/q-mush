@@ -1,7 +1,9 @@
 import { describe, expect, test } from "vitest";
 import type { AgentModelStep } from "../../shared/agent-loop.ts";
+import { createAgentSystemPrompt } from "../../shared/agent-prompt.ts";
 import type { ProviderCredentialAccess } from "../../shared/provider-credential-store.ts";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
+import { AGENT_COMPACTION_REQUEST_MESSAGE } from "../../sync-engine/agent-compaction.ts";
 import {
   createProviderStreamAccumulator,
   type ProviderTextDelta,
@@ -160,15 +162,27 @@ describe("session agent models", () => {
       }),
     );
 
-    const compaction = models
-      .createCompactor()
-      .compact([{ content: "Conversation to compact", role: "user" }]);
+    const conversation = [
+      { content: "Conversation to compact", role: "user" as const },
+    ];
+    const compaction = models.createCompactor().compact(conversation);
     await summary.entered;
     const compactorOptions = selections.at(-1);
     compactorOptions?.onDelta?.({ content: "Incremental ", thinking: "" });
     compactorOptions?.onDelta?.({ content: "summary", thinking: "" });
 
+    expect(selections).toHaveLength(2);
+    expect(selections.map(({ systemPrompt }) => systemPrompt)).toEqual([
+      createAgentSystemPrompt(null, TEST_SESSION_DETAIL.executionEnvironment),
+      createAgentSystemPrompt(null, TEST_SESSION_DETAIL.executionEnvironment),
+    ]);
     expectRealtimeDeltas(socket, [
+      {
+        content: AGENT_COMPACTION_REQUEST_MESSAGE,
+        sessionId: TEST_SESSION_DETAIL.id,
+        streamId: "stream-2",
+        type: "session_compaction_request",
+      },
       sessionDelta("Incremental ", "", "stream-2"),
       sessionDelta("summary", "", "stream-2"),
     ]);

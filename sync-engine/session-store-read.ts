@@ -237,6 +237,7 @@ export function withInterruptedToolResults(
         finishPending();
         complete.push(message);
         break;
+      case "compaction_request":
       case "error":
       case "system":
       case "thinking":
@@ -306,6 +307,7 @@ export function conversationFromMessages(
         });
         break;
       }
+      case "compaction_request":
       case "error":
       case "system":
       case "thinking":

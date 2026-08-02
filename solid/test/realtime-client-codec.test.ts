@@ -80,6 +80,16 @@ test("reads runner snapshots from realtime messages", () => {
   });
 });
 
+test("reads compaction requests from realtime messages", () => {
+  const request = {
+    content: "Compact the conversation.",
+    sessionId: "session-1",
+    streamId: "stream-1",
+    type: "session_compaction_request",
+  } as const;
+  expect(roundTrip(request)).toEqual(request);
+});
+
 test("reads reset model deltas from realtime messages", () => {
   const delta = {
     content: "replacement",

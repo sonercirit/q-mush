@@ -181,6 +181,7 @@ type StreamRole = "assistant" | "thinking";
 
 interface StreamedSessionContent {
   readonly baseMessageId: string | null | undefined;
+  readonly compactionRequest?: AgentSessionMessage;
   readonly content: string;
   readonly streamId: string | undefined;
   readonly thinking: string;
@@ -283,6 +284,12 @@ function reconcileStream(
   streamed: StreamedSessionContent,
 ): ReconciledStream {
   const messages = [...detail.messages];
+  if (
+    streamed.compactionRequest !== undefined &&
+    !messages.some(({ id }) => id === streamed.compactionRequest?.id)
+  ) {
+    messages.push(streamed.compactionRequest);
+  }
   const startIndex = streamStartIndex(messages, streamed.baseMessageId);
   const thinkingIndex = matchingStreamMessageIndex(
     messages,
@@ -359,6 +366,9 @@ function streamMessages(
   return {
     messages: [
       ...messages,
+      ...(streamed.compactionRequest === undefined
+        ? []
+        : [streamed.compactionRequest]),
       ...(thinkingPersisted
         ? []
         : [
@@ -450,6 +460,36 @@ export class SessionRealtimeState {
     });
   }
 
+  applyCompactionRequest(
+    event: Extract<RealtimeServerEvent, { type: "session_compaction_request" }>,
+  ): void {
+    const view = this.#view.value;
+    const detail =
+      view.selectedId === event.sessionId && view.detail?.id === event.sessionId
+        ? view.detail
+        : undefined;
+    if (detail === undefined || !sessionIsActive(detail) || view.stopping) {
+      return;
+    }
+    const messages = persistedMessages(detail);
+    const request = createDisplaySessionMessage({
+      content: event.content,
+      createdAt: detail.updatedAt,
+      id: `stream:${event.streamId}:compaction-request`,
+      role: "compaction_request",
+    });
+    this.#streamedContent.set(event.sessionId, {
+      baseMessageId: request.id,
+      compactionRequest: request,
+      content: "",
+      streamId: event.streamId,
+      thinking: "",
+    });
+    this.#view.patch({
+      detail: { ...detail, messages: [...messages, request] },
+    });
+  }
+
   applyDelta(
     event: Extract<RealtimeServerEvent, { type: "session_delta" }>,
   ): void {
@@ -481,6 +521,9 @@ export class SessionRealtimeState {
         : undefined;
     const next: StreamedSessionContent = {
       baseMessageId: current?.baseMessageId ?? initialBase,
+      ...(current?.compactionRequest === undefined
+        ? {}
+        : { compactionRequest: current.compactionRequest }),
       content: (current?.content ?? "") + event.content,
       streamId: event.streamId,
       thinking: (current?.thinking ?? "") + event.thinking,

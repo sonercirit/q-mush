@@ -50,6 +50,7 @@ function addTranscriptMessageCounts(
   message: AgentSessionMessage,
 ): AgentSessionMessage["toolCalls"] | undefined {
   switch (message.role) {
+    case "compaction_request":
     case "error":
     case "system":
       filterCounts.notices += 1;

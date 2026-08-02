@@ -13,6 +13,7 @@ export function sessionMessageRole(
 ): AgentSessionMessage["role"] | undefined {
   switch (value) {
     case "assistant":
+    case "compaction_request":
     case "error":
     case "system":
     case "thinking":

@@ -314,6 +314,8 @@ function messageIsVisible(
   filters: SessionTranscriptFilters,
 ): boolean {
   switch (message.role) {
+    case "compaction_request":
+      return filters.notices;
     case "error":
     case "system":
       return filters.notices;
@@ -366,6 +368,17 @@ function renderTranscriptMessage(
           showTools={props.filters.toolActivity}
           toolStreams={props.streamEntries}
         />
+      );
+    case "compaction_request":
+      return (
+        <>
+          {transcriptMessageNote({
+            classes: "border-amber-300/20 bg-amber-300/10",
+            label: "Compaction request",
+            labelClasses: "text-amber-200",
+            message: props.message,
+          })}
+        </>
       );
     case "error":
       return <NoteTranscriptMessage kind="error" message={props.message} />;

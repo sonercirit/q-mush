@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
-  AGENT_COMPACTION_SYSTEM_PROMPT,
+  AGENT_COMPACTION_REQUEST_MESSAGE,
   ModelConversationCompactor,
   shouldCompactContext,
 } from "../../sync-engine/agent-compaction.ts";
@@ -13,14 +13,20 @@ describe("agent conversation compaction", () => {
     expect(shouldCompactContext(100_000, null)).toBe(false);
   });
 
-  test("replaces a complete conversation with a handoff summary", async () => {
+  test("appends the handoff request without changing the conversation prefix", async () => {
     const model = new ScriptedAgentModel([
       { content: " Keep the current changes and run tests. ", toolCalls: [] },
     ]);
     const compactor = new ModelConversationCompactor(model);
-    const compacted = await compactor.compact([
-      { content: "Make the change", role: "user" },
-    ]);
+    const conversation = [
+      { content: "Make the change", role: "user" as const },
+      {
+        content: "The change is ready.",
+        role: "assistant" as const,
+        toolCalls: [],
+      },
+    ];
+    const compacted = await compactor.compact(conversation);
 
     expect(compacted.summary).toBe("Keep the current changes and run tests.");
     expect(compacted).toMatchObject({ costUsd: null, tokenUsage: null });
@@ -31,11 +37,11 @@ describe("agent conversation compaction", () => {
         role: "user",
       },
     ]);
+    expect(model.requests[0]?.slice(0, -1)).toEqual(conversation);
     expect(model.requests[0]?.at(-1)).toEqual({
-      content:
-        "Compact this conversation now. Return only the handoff summary.",
+      content: AGENT_COMPACTION_REQUEST_MESSAGE,
       role: "user",
     });
-    expect(AGENT_COMPACTION_SYSTEM_PROMPT).toContain("Do not call tools");
+    expect(AGENT_COMPACTION_REQUEST_MESSAGE).toContain("Do not call tools");
   });
 });

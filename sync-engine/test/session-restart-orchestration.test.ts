@@ -4,10 +4,11 @@ import type {
   AgentModel,
   AgentModelStep,
 } from "../../shared/agent-loop.ts";
+import { createAgentSystemPrompt } from "../../shared/agent-prompt.ts";
 import { agentMessages, agentSessions } from "../../shared/database/schema.ts";
 import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
-import { AGENT_COMPACTION_SYSTEM_PROMPT } from "../../sync-engine/agent-compaction.ts";
+import { AGENT_COMPACTION_REQUEST_MESSAGE } from "../../sync-engine/agent-compaction.ts";
 import type { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
 import type { AgentModelFactory } from "../../sync-engine/session-agent-models.ts";
 import type { SessionAgentRuntimeDependencies } from "../../sync-engine/session-agent-runtime.ts";
@@ -162,7 +163,10 @@ function manualCompactionSetup(
   const compactorRequests: AgentConversationMessage[][] = [];
   const modelFactories = vi.fn<AgentModelFactory>((options) => ({
     complete: (messages: readonly AgentConversationMessage[]) => {
-      if (options.systemPrompt !== AGENT_COMPACTION_SYSTEM_PROMPT) {
+      if (
+        options.systemPrompt !==
+        createAgentSystemPrompt(null, detail.executionEnvironment)
+      ) {
         return Promise.reject(new Error("The agent model was unexpected"));
       }
       compactorRequests.push([...messages]);
@@ -258,6 +262,10 @@ function expectRestartHandoffState(
 
 function expectCompactionFinished(setup: ManualCompactionSetup): void {
   expect(setup.compactorRequests).toHaveLength(1);
+  expect(setup.compactorRequests[0]?.at(-1)).toEqual({
+    content: AGENT_COMPACTION_REQUEST_MESSAGE,
+    role: "user",
+  });
   expect(setup.finishes).toHaveBeenCalledOnce();
 }
 
@@ -588,10 +596,19 @@ test("recovered tool handoff compacts before its first request", async () => {
 
   expect(requests).toHaveLength(2);
   expect(requests[0]).toContainEqual(durableTool);
-  expect(requests[0]?.at(-1)?.content).toContain("Compact this conversation");
+  expect(requests[0]?.at(-1)).toEqual({
+    content: AGENT_COMPACTION_REQUEST_MESSAGE,
+    role: "user",
+  });
   expect(requests[1]?.[0]?.content).toContain("Recovered compacted summary.");
   expect(requests[1]?.some((message) => message === durableTool)).toBe(false);
   expect(setup.modelFactories).toHaveBeenCalledTimes(2);
+  expect(
+    setup.modelFactories.mock.calls.map(([options]) => options.systemPrompt),
+  ).toEqual([
+    createAgentSystemPrompt(null, setup.detail.executionEnvironment),
+    createAgentSystemPrompt(null, setup.detail.executionEnvironment),
+  ]);
   const detail = persisted(setup);
   expect(detail).toMatchObject({
     currentContextTokens: 1_000,

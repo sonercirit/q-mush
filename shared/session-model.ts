@@ -60,7 +60,13 @@ export interface AgentSessionUsageUpdate {
 }
 
 type AgentSessionMessageRole =
-  "user" | "assistant" | "tool" | "thinking" | "system" | "error";
+  | "user"
+  | "assistant"
+  | "tool"
+  | "thinking"
+  | "system"
+  | "error"
+  | "compaction_request";
 
 export interface AttachmentContentFields {
   readonly attachments?: readonly AgentAttachment[];

@@ -8,10 +8,7 @@ import type {
 } from "../shared/provider-credential-store.ts";
 import type { ProviderModelPricing } from "../shared/provider-model-pricing.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
-import {
-  AGENT_COMPACTION_SYSTEM_PROMPT,
-  ModelConversationCompactor,
-} from "./agent-compaction.ts";
+import { ModelConversationCompactor } from "./agent-compaction.ts";
 import {
   agentModelOpenRouterProviderRouting,
   type AgentModelRequestOptions,
@@ -150,15 +147,35 @@ export function createSessionAgentModels(options: {
       // Live delivery must never interrupt the persisted model step.
     }
   };
+  const systemPrompt = createAgentSystemPrompt(
+    options.agentFile,
+    options.detail.executionEnvironment,
+  );
+  const publishCompactionRequest = (content: string): void => {
+    if (!options.isCurrent()) {
+      return;
+    }
+    try {
+      options.realtime?.publishUser(
+        options.userId,
+        {
+          content,
+          sessionId: options.detail.id,
+          streamId,
+          type: "session_compaction_request",
+        },
+        options.detail.workspaceId,
+      );
+    } catch {
+      // Live delivery must never interrupt the persisted model step.
+    }
+  };
   return {
     agent: options.factory(
       modelOptions(
         options.detail,
         options.credential,
-        createAgentSystemPrompt(
-          options.agentFile,
-          options.detail.executionEnvironment,
-        ),
+        systemPrompt,
         onDelta,
         startStep,
       ),
@@ -170,10 +187,11 @@ export function createSessionAgentModels(options: {
           modelOptions(
             options.detail,
             options.credential,
-            AGENT_COMPACTION_SYSTEM_PROMPT,
+            systemPrompt,
             onDelta,
           ),
         ),
+        publishCompactionRequest,
       );
     },
   };
