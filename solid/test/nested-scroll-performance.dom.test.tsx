@@ -1,5 +1,8 @@
+import { createSignal, Show, type JSX } from "solid-js";
 import { afterEach, expect, test, vi } from "vitest";
 import type { AgentSessionMessage } from "../../shared/session-model.ts";
+import { createNestedScrollRef } from "../nested-scroll.ts";
+import { mountTestView } from "./dom-test-helpers.ts";
 import { defineElementSize } from "./element-size-test-helpers.ts";
 import {
   mountTestSessionDetail,
@@ -50,6 +53,12 @@ function installMutationObserverHarness(): MutationObserverHarness {
   };
 }
 
+function mutationCallback(harness: MutationObserverHarness): MutationCallback {
+  const callback = harness.callbacks[0];
+  if (callback === undefined) throw new TypeError("Missing mutation observer");
+  return callback;
+}
+
 interface MountedMutationDetail {
   readonly callback: MutationCallback;
   readonly container: HTMLDivElement;
@@ -66,9 +75,12 @@ function mountMutationDetail(
   const root = container.querySelector(".session-detail-view");
   if (!(root instanceof HTMLElement))
     throw new TypeError("Missing detail root");
-  const callback = harness.callbacks[0];
-  if (callback === undefined) throw new TypeError("Missing mutation observer");
-  return { callback, container, harness, root };
+  return {
+    callback: mutationCallback(harness),
+    container,
+    harness,
+    root,
+  };
 }
 
 function mutation(options: {
@@ -133,6 +145,17 @@ interface StructuralPaneScenario extends MountedMutationDetail {
   readonly second: HTMLElement;
 }
 
+function rememberPane(
+  pane: HTMLElement,
+  top: number,
+  toggle?: HTMLButtonElement,
+): void {
+  defineElementSize(pane, 100, 1_000);
+  toggle?.click();
+  pane.scrollTop = top;
+  pane.dispatchEvent(new Event("scroll", { bubbles: true }));
+}
+
 function structuralPaneScenario(): StructuralPaneScenario {
   const mounted = mountMutationDetail([toolResult(0), toolResult(1)]);
   const panes = [
@@ -152,11 +175,8 @@ function structuralPaneScenario(): StructuralPaneScenario {
   );
   if (firstToggle === undefined || firstToggle === null)
     throw new TypeError("Missing wrap toggle");
-  firstToggle.click();
-  first.scrollTop = 20;
-  first.dispatchEvent(new Event("scroll", { bubbles: true }));
-  second.scrollTop = 70;
-  second.dispatchEvent(new Event("scroll", { bubbles: true }));
+  rememberPane(first, 20, firstToggle);
+  rememberPane(second, 70);
   return { ...mounted, first, insertedWrapper, second };
 }
 
@@ -209,6 +229,54 @@ function expectStructuralPaneStates(root: HTMLElement): void {
         ?.getAttribute("aria-pressed"),
     ),
   ).toEqual(["true", "false", "true"]);
+}
+
+function paneScope(pane: HTMLElement): HTMLElement {
+  const scope = pane.closest(".contents");
+  if (!(scope instanceof HTMLElement))
+    throw new TypeError("Missing pane scope");
+  return scope;
+}
+
+function mutationTestPane(props: {
+  readonly id: string;
+  readonly label: string;
+}): JSX.Element {
+  const nestedScrollRef = createNestedScrollRef(() => props.id);
+  return (
+    <section data-mutation-pane-scope={props.label} ref={nestedScrollRef}>
+      <div
+        class="overflow-auto"
+        data-mutation-pane={props.label}
+        data-line-wrap="true"
+      />
+    </section>
+  );
+}
+
+function MutationDetailFixture(props: {
+  readonly extra: boolean;
+}): JSX.Element {
+  const nestedScrollRef = createNestedScrollRef(
+    () => "mutation-remount-detail",
+    true,
+  );
+  return (
+    <div data-mutation-detail="true" ref={nestedScrollRef}>
+      <Show when={props.extra}>
+        {mutationTestPane({ id: "mutation-pane-extra", label: "extra" })}
+      </Show>
+      {mutationTestPane({ id: "mutation-pane-first", label: "first" })}
+      {mutationTestPane({ id: "mutation-pane-second", label: "second" })}
+    </div>
+  );
+}
+
+function queryMutationPane(container: ParentNode, label: string): HTMLElement {
+  const pane = container.querySelector(`[data-mutation-pane='${label}']`);
+  if (!(pane instanceof HTMLElement))
+    throw new TypeError(`Missing ${label} mutation pane`);
+  return pane;
 }
 
 afterEach(() => {
@@ -270,4 +338,132 @@ test("restores replacements after insertion in the same mutation batch", () => {
   scenario.callback(mutations, scenario.harness.observer());
 
   expectStructuralPaneStates(scenario.root);
+});
+
+function scenarioPaneScope(scenario: StructuralPaneScenario): HTMLElement {
+  return paneScope(scenario.first);
+}
+
+function splitMutation(
+  removedNodes: NodeList,
+  removalTarget: Node,
+  addedNodes: NodeList,
+  additionTarget: Node,
+): MutationRecord[] {
+  return [
+    mutation({ addedNodes: nodeList(), removedNodes, target: removalTarget }),
+    mutation({ addedNodes, removedNodes: nodeList(), target: additionTarget }),
+  ];
+}
+
+function currentPaneWrapper(scenario: StructuralPaneScenario): HTMLElement {
+  const wrapper = scenario.first.parentElement;
+  if (wrapper === null) throw new TypeError("Missing pane wrapper");
+  return wrapper;
+}
+
+test("restores a split replacement across different mutation targets", () => {
+  const scenario = structuralPaneScenario();
+  const scope = scenarioPaneScope(scenario);
+  const currentWrapper = currentPaneWrapper(scenario);
+  const removalTarget = currentWrapper.parentElement;
+  if (removalTarget === null)
+    throw new TypeError("Missing split replacement host");
+  const replacement = nestedPaneReplacement(scenario.first);
+  defineElementSize(replacement.pane, 100, 1_000);
+  const additionTarget = document.createElement("div");
+  scope.append(additionTarget);
+  const removedNodes = nodeList(currentWrapper);
+  const addedNodes = nodeList(replacement.wrapper);
+  additionTarget.append(replacement.wrapper);
+
+  scenario.callback(
+    splitMutation(removedNodes, removalTarget, addedNodes, additionTarget),
+    scenario.harness.observer(),
+  );
+
+  expect(replacement.pane.scrollTop).toBe(20);
+  expect(replacement.pane.dataset["lineWrap"]).toBe("false");
+});
+
+test("does not transfer removed state to an unrelated same-target addition", () => {
+  const scenario = structuralPaneScenario();
+  const target = scenarioPaneScope(scenario).parentElement;
+  if (target === null) throw new TypeError("Missing shared mutation target");
+  const scope = scenarioPaneScope(scenario);
+  const unrelated = scope.cloneNode(true);
+  if (!(unrelated instanceof HTMLElement))
+    throw new TypeError("Missing unrelated pane scope");
+  unrelated.dataset["nestedScrollKey"] = "unrelated-pane";
+  unrelated.dataset["renderBoundary"] = "message:unrelated-pane";
+  const unrelatedPane =
+    unrelated.querySelector<HTMLElement>("[data-line-wrap]");
+  if (unrelatedPane === null) throw new TypeError("Missing unrelated pane");
+  defineElementSize(unrelatedPane, 100, 1_000);
+  const removedNodes = nodeList(scope);
+  const addedNodes = nodeList(unrelated);
+  target.append(unrelated);
+
+  scenario.callback(
+    splitMutation(removedNodes, target, addedNodes, target),
+    scenario.harness.observer(),
+  );
+
+  expect(unrelatedPane.scrollTop).toBe(0);
+});
+
+interface MountedRemountFixture {
+  readonly container: HTMLDivElement;
+  readonly setExtra: (value: boolean) => void;
+  readonly setVersion: (value: number) => void;
+}
+
+function mountRemountFixture(): MountedRemountFixture {
+  const [extra, setExtra] = createSignal(false);
+  const [version, setVersion] = createSignal(0);
+  const container = mountTestView(
+    () => (
+      <Show
+        when={version()}
+        keyed
+        fallback={<MutationDetailFixture extra={extra()} />}
+      >
+        <MutationDetailFixture extra={extra()} />
+      </Show>
+    ),
+    disposals,
+  );
+  return { container, setExtra, setVersion };
+}
+
+test("structural updates and same-key remounts share pane state", async () => {
+  const harness = installMutationObserverHarness();
+  const { container, setExtra, setVersion } = mountRemountFixture();
+  const first = queryMutationPane(container, "first");
+  const second = queryMutationPane(container, "second");
+  rememberPane(first, 20);
+  rememberPane(second, 70);
+
+  setExtra(true);
+  const root = container.querySelector("[data-mutation-detail]");
+  const extraScope = container.querySelector(
+    "[data-mutation-pane-scope='extra']",
+  );
+  if (!(root instanceof HTMLElement) || !(extraScope instanceof HTMLElement))
+    throw new TypeError("Missing structural pane insertion");
+  const addedNodes = nodeList(extraScope);
+  root.prepend(extraScope);
+  mutationCallback(harness)(
+    [mutation({ addedNodes, removedNodes: nodeList(), target: root })],
+    harness.observer(),
+  );
+  setVersion(1);
+  await Promise.resolve();
+
+  const restored = ["extra", "first", "second"].map((label) => {
+    const pane = queryMutationPane(container, label);
+    defineElementSize(pane, 100, 1_000);
+    return pane.scrollTop;
+  });
+  expect(restored).toEqual([0, 20, 70]);
 });
