@@ -5,6 +5,7 @@ import {
   selectedAgentTools,
   type SessionAgentToolName,
 } from "../shared/agent-tools.ts";
+import { isBalancedCredentialId } from "../shared/provider-credential-pool.ts";
 import { ProviderCredentialStore } from "../shared/provider-credential-store.ts";
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type { RunnerSummary } from "../shared/runner-model.ts";
@@ -415,6 +416,7 @@ export class SessionAgentActions {
       const provider = input.provider;
       const credentialId = input.credentialId;
       if (
+        !isBalancedCredentialId(provider, credentialId) &&
         !ProviderCredentialStore.hasActiveModelCredential(
           this.#dependencies.database,
           userId,
@@ -425,28 +427,37 @@ export class SessionAgentActions {
       ) {
         throw new Error("The model credential or provider is unavailable");
       }
-      let credential;
-      try {
-        credential = await this.#dependencies.readCredential(userId, {
-          credentialId,
-          provider,
-          workspaceId,
+      const selection = { credentialId, provider, workspaceId };
+      const credentials =
+        isBalancedCredentialId(provider, credentialId) &&
+        this.#dependencies.modelCredentialPool !== undefined
+          ? await this.#dependencies.modelCredentialPool.representative(
+              userId,
+              selection,
+            )
+          : await this.#singleModelCredential(userId, selection);
+      if (credentials.length === 0) {
+        throw new Error("The model credential or provider is unavailable");
+      }
+      let failure: unknown;
+      for (const credential of credentials) {
+        try {
+          const catalog = await this.#dependencies.discoverModels(
+            provider,
+            credential,
+          );
+          models = catalog.models;
+          reasoningEfforts = [];
+          failure = undefined;
+          break;
+        } catch (error) {
+          failure = error;
+        }
+      }
+      if (failure !== undefined) {
+        throw new Error(safeAgentModelDiscoveryError(failure), {
+          cause: failure,
         });
-      } catch {
-        throw new Error("The model credential or provider is unavailable");
-      }
-      if (credential?.id !== credentialId) {
-        throw new Error("The model credential or provider is unavailable");
-      }
-      try {
-        const catalog = await this.#dependencies.discoverModels(
-          provider,
-          credential,
-        );
-        models = catalog.models;
-        reasoningEfforts = [];
-      } catch (error) {
-        throw new Error(safeAgentModelDiscoveryError(error), { cause: error });
       }
     }
     const offset = optionsPageOffset(input.page);
@@ -485,6 +496,19 @@ export class SessionAgentActions {
       runners: runnerPage?.items ?? [],
       tools: AGENT_SESSION_TOOL_OPTIONS,
     });
+  }
+
+  async #singleModelCredential(
+    userId: string,
+    selection: Parameters<SessionAgentActionDependencies["readCredential"]>[1],
+  ) {
+    let credential;
+    try {
+      credential = await this.#dependencies.readCredential(userId, selection);
+    } catch {
+      return [];
+    }
+    return credential?.id === selection.credentialId ? [credential] : [];
   }
 
   #queuedResponse(userId: string, sessionId: string): Response {

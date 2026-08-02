@@ -20,6 +20,7 @@ import {
   type AgentProviderCredential,
 } from "./agent-model.ts";
 import { genericProviderEndpoint } from "./generic-provider-url.ts";
+import { isProviderCredentialRejection } from "./provider-error.ts";
 
 const OPENAI_MODELS_URL = "https://api.openai.com/v1/models";
 const OPENAI_CODEX_MODELS_URL = "https://chatgpt.com/backend-api/codex/models";
@@ -72,8 +73,9 @@ export class AgentModelDiscoveryError extends Error {
 
 export function isCredentialRejectionError(error: unknown): boolean {
   return (
-    error instanceof AgentModelDiscoveryError &&
-    (error.status === 401 || error.status === 403 || error.status === 429)
+    isProviderCredentialRejection(error) ||
+    (error instanceof AgentModelDiscoveryError &&
+      (error.status === 401 || error.status === 403 || error.status === 429))
   );
 }
 

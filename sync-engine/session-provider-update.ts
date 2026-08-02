@@ -24,6 +24,7 @@ export interface SessionProviderUpdateDependencies {
   readonly discoverOpenRouterProviders: OpenRouterProviderDiscoverer;
   readonly now: () => number;
   readonly providers: SessionCredentialReaders;
+  readonly rejectCredentialErrors?: boolean;
   readonly runtimes: Pick<SessionRuntimes, "abortForGeneration">;
   readonly store: {
     readonly database: Parameters<typeof updateStoredSessionProvider>[0];
@@ -61,6 +62,9 @@ async function targetMetadata(
       dependencies,
       input,
       ownerId: userId,
+      ...(dependencies.rejectCredentialErrors === undefined
+        ? {}
+        : { rejectCredentialErrors: dependencies.rejectCredentialErrors }),
     }),
   );
 }

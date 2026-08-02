@@ -6,6 +6,7 @@ import {
   type ModelRequestSleep,
 } from "../../sync-engine/agent-model-retry.ts";
 import { createJsonResponse } from "../../sync-engine/http.ts";
+import { ProviderCredentialRejectionError } from "../../sync-engine/provider-error.ts";
 import { captureRejection, requireError } from "./promise-test-helpers.ts";
 
 function unwrapResponse(error: unknown): Response {
@@ -146,6 +147,35 @@ describe("agent model request retries", () => {
 
     expect(await result.response.json()).toEqual({ completion: "Accepted." });
     expect(result.delays.join(",")).toBe("1000,2000,4000,4000");
+  });
+
+  test("classifies authentication and exhausted rate limits as credential rejections", async () => {
+    await expect(
+      runModelRequestWithRetries(
+        () =>
+          fetchModelRequestAttempt(
+            fetchResponses([new Response(null, { status: 401 })]),
+            REQUEST,
+          ),
+        REQUEST.signal,
+      ),
+    ).rejects.toMatchObject({ status: 401 });
+
+    let attempts = 0;
+    await expect(
+      runModelRequestWithRetries(
+        () => {
+          attempts += 1;
+          return fetchModelRequestAttempt(
+            () => Promise.resolve(new Response(null, { status: 429 })),
+            REQUEST,
+          );
+        },
+        REQUEST.signal,
+        () => Promise.resolve(),
+      ),
+    ).rejects.toBeInstanceOf(ProviderCredentialRejectionError);
+    expect(attempts).toBe(13);
   });
 
   test("does not retry a non-retryable response", async () => {

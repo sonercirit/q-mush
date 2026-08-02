@@ -53,6 +53,22 @@ interface ProviderErrorDetails {
   readonly status: number | undefined;
 }
 
+export class ProviderCredentialRejectionError extends Error {
+  readonly status: 401 | 403 | 429;
+
+  constructor(message: string, status: 401 | 403 | 429) {
+    super(message);
+    this.name = "ProviderCredentialRejectionError";
+    this.status = status;
+  }
+}
+
+export function isProviderCredentialRejection(
+  error: unknown,
+): error is ProviderCredentialRejectionError {
+  return error instanceof ProviderCredentialRejectionError;
+}
+
 export class ProviderStreamError extends Error {
   readonly retryAfterMilliseconds: number | undefined;
   readonly transient: boolean;

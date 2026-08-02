@@ -572,6 +572,43 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
     user: AuthenticatedUser,
     input: SessionProviderUpdateInput,
   ): Promise<AgentSessionDetail> {
+    if (isBalancedCredentialId(input.provider, input.credentialId)) {
+      const credentials =
+        await this.#dependencies.modelCredentialPool.candidates(user.id, input);
+      if (credentials.length === 0) {
+        throw new RealtimeCommandError("credential_unavailable");
+      }
+      let lastFailure: unknown;
+      for (const credential of credentials) {
+        const resolvedInput = { ...input, credentialId: credential.id };
+        try {
+          return await this.#applyProviderUpdate(user.id, resolvedInput, true);
+        } catch (error) {
+          lastFailure = error;
+          if (
+            !this.#dependencies.modelCredentialPool.reject(
+              user.id,
+              input,
+              credential.id,
+              error,
+            )
+          ) {
+            throw error;
+          }
+        }
+      }
+      throw lastFailure instanceof Error
+        ? lastFailure
+        : new RealtimeCommandError("credential_unavailable");
+    }
+    return this.#applyProviderUpdate(user.id, input, false);
+  }
+
+  async #applyProviderUpdate(
+    userId: string,
+    input: SessionProviderUpdateInput,
+    rejectCredentialErrors: boolean,
+  ): Promise<AgentSessionDetail> {
     const outcome = await applySessionProviderUpdate(
       {
         ...this.#dependencies.providerUpdates,
@@ -579,12 +616,13 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
         discoverOpenRouterProviders:
           this.#dependencies.discoverOpenRouterProviders,
         providers: this.#dependencies.providers,
+        rejectCredentialErrors,
         store: this.#providerUpdateStoreAccess(),
       },
-      user.id,
+      userId,
       input,
     );
-    return this.#notifyUpdatedSession(user.id, input.sessionId, outcome);
+    return this.#notifyUpdatedSession(userId, input.sessionId, outcome);
   }
 
   async updateToolsForUser(
