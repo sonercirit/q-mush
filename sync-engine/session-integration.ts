@@ -27,6 +27,7 @@ export interface SessionIntegration extends SessionDetailReader {
   ): boolean;
   directories(request: Request, runnerId: string): Promise<Response>;
   drain(): Promise<void>;
+  prepareFinalShutdown(): Promise<void>;
   item(request: Request, sessionId: string): Response;
   listForUser(
     userId: string,

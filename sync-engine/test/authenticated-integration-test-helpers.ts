@@ -129,6 +129,13 @@ export function ensureWaveOneColumns(database: AppDatabase): void {
       "ALTER TABLE agent_sessions ADD COLUMN restart_handoff text",
     );
   }
+  if (
+    !sessionColumns.some(({ name }) => name === "shutdown_interrupted_handoff")
+  ) {
+    database.$client.run(
+      "ALTER TABLE agent_sessions ADD COLUMN shutdown_interrupted_handoff text",
+    );
+  }
   if (!sessionColumns.some(({ name }) => name === "current_segment")) {
     database.$client.run(
       "ALTER TABLE agent_sessions ADD COLUMN current_segment integer NOT NULL DEFAULT 0",

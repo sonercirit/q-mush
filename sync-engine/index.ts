@@ -129,6 +129,7 @@ async function shutDown(): Promise<void> {
   }
 
   shuttingDown = true;
+  await sessions.prepareFinalShutdown();
   await sessions.drain();
   await Promise.all([server.stop(), callbackServer?.stop()]);
   database.$client.close();

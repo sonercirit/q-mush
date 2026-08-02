@@ -2,7 +2,7 @@ import { SessionLauncher } from "../session-launcher.ts";
 
 type TestSessionLauncherDependencies = Omit<
   ConstructorParameters<typeof SessionLauncher>[0],
-  "braveSearch" | "realtime"
+  "braveSearch" | "realtime" | "shutdownInterrupted"
 >;
 
 export function createSessionLauncher(
@@ -12,5 +12,9 @@ export function createSessionLauncher(
     ...dependencies,
     braveSearch: { execute: () => Promise.resolve("unused search") },
     realtime: undefined,
+    shutdownInterrupted: {
+      clear: () => false,
+      mark: () => false,
+    },
   });
 }

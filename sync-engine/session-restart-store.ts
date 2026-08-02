@@ -254,6 +254,7 @@ export class RestartHandoffStore {
   #pauseValues(options: PauseRestartHandoff, handoffGeneration: number) {
     return {
       executionGeneration: handoffGeneration,
+      interruptedHandoff: null,
       restartHandoff: handoffValue({
         executionGeneration: handoffGeneration,
         operation: options.operation,
@@ -597,6 +598,7 @@ export class RestartHandoffStore {
               sessionId: identity.sessionId,
               values: {
                 ...sessionTimingUpdate(timing, now),
+                interruptedHandoff: null,
                 restartHandoff: null,
                 status:
                   settlement.status === "idle"

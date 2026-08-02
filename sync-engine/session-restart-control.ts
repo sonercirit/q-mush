@@ -13,6 +13,7 @@ export interface RestartRuntimeControl {
   readonly accepts: (runnerId: string) => boolean;
   readonly blockRunner: (runnerId: string) => void;
   readonly drain: (scope: RestartScope, restartId: string) => Promise<unknown>;
+  readonly mark: (scope: RestartScope, restartId: string) => Promise<unknown>;
   readonly drainRequest: (scope: RestartScope) => RestartRequest | undefined;
   readonly draining: boolean;
   readonly resumeRunner: (runnerId: string, restartId: string) => boolean;
@@ -28,6 +29,7 @@ export interface SessionRestartControl extends Pick<
   readonly drainServer: () => Promise<void>;
   readonly drainRunner: (runnerId: string, restartId: string) => Promise<void>;
   readonly pendingRunnerRestart: (runnerId: string) => string | undefined;
+  readonly prepareServerShutdown: () => Promise<void>;
   readonly recover: (
     launchPending: (runnerId?: string) => void,
     runnerId?: string,
@@ -69,6 +71,9 @@ export function createSessionRestartControl(
     },
     drainServer: async () => {
       await runtimes.drain({ kind: "server" }, nextServerRestartId());
+    },
+    prepareServerShutdown: async () => {
+      await runtimes.mark({ kind: "server" }, nextServerRestartId());
     },
     drainRunner: async (runnerId, restartId) => {
       validRestartId(restartId);

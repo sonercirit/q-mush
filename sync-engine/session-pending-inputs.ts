@@ -638,6 +638,7 @@ export function settleNormalSessionBoundary(options: {
       .set({
         activeDurationMs: activeSessionDuration(session, options.now),
         activeStartedAt: null,
+        interruptedHandoff: null,
         status: queued ? "queued" : "idle",
         updatedAt: new Date(options.now),
         updatedById: SYSTEM_ID,

@@ -61,6 +61,7 @@ function fenceAssignedSession(
     values: {
       ...sessionTimingUpdate(session, now),
       executionGeneration: sql`${agentSessions.executionGeneration} + 1`,
+      interruptedHandoff: null,
       restartHandoff: null,
       runnerRequired: true,
       status:

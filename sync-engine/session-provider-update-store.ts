@@ -48,6 +48,7 @@ export function updateStoredSessionProvider(
     executionGeneration: sql`${agentSessions.executionGeneration} + 1`,
     maxContextTokens: input.maxContextTokens,
     model: input.model,
+    interruptedHandoff: null,
     provider: input.provider,
     providerCredentialId: input.credentialId,
     openRouterProviderTag: input.openRouterProviderTag,

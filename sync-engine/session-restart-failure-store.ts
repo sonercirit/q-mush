@@ -20,6 +20,7 @@ export function failRestartSession(
 ): boolean {
   const failedValues = {
     ...updatedAuditFields(SYSTEM_ID, options.now),
+    interruptedHandoff: null,
     restartHandoff: null,
     status: "failed" as const,
   };

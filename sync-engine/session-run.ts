@@ -16,7 +16,10 @@ import {
   sessionModelRuntime,
   type SessionModelRuntimeResources,
 } from "./session-model-runtime.ts";
-import type { SessionRestartRequester } from "./session-restart-requester.ts";
+import type {
+  DurableRestartPersistence,
+  SessionRestartRequester,
+} from "./session-restart-requester.ts";
 import type { RestartHandoffIdentity } from "./session-restart-store.ts";
 import type { RestartRequest } from "./session-runtime.ts";
 import { sessionHasStatus } from "./session-status.ts";
@@ -31,6 +34,7 @@ interface RunPersistedSessionOptions extends SessionRestartRequester {
   readonly now: typeof Date.now;
   readonly operation: RestartHandoffOperation;
   readonly resources: SessionModelRuntimeResources;
+  readonly restartPersistence: DurableRestartPersistence;
   readonly store: SessionStore;
   readonly userId: string;
 }
@@ -170,7 +174,7 @@ export async function runPersistedSession(
     return;
   }
   const claimedIdentity = identity(options.detail);
-  options.restartRequest();
+  options.restartRequest(options.restartPersistence.persist);
   options.notify(options.userId, options.detail.id);
 
   try {

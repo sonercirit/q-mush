@@ -1,0 +1,1 @@
+ALTER TABLE `agent_sessions` ADD `shutdown_interrupted_handoff` text;

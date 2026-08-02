@@ -139,7 +139,10 @@ describe("session runtimes", () => {
     let finish: (() => void) | undefined;
     expect(
       runtimes.launch("session-1", "runner-1", ({ restartRequest }) => {
-        restartRequest((request) => {
+        restartRequest((request, durable) => {
+          if (!durable) {
+            throw new Error("The shutdown marker was not durable");
+          }
           persisted.push(request);
         });
 
@@ -149,7 +152,8 @@ describe("session runtimes", () => {
       }),
     ).toBe(true);
 
-    const drain = runtimes.drain(runnerScope(), "durable-before-await");
+    const drain = runtimes.mark(runnerScope(), "durable-before-await");
+    await drain;
     expect(persisted).toEqual([
       {
         boundary: "handoff",
@@ -158,7 +162,33 @@ describe("session runtimes", () => {
       },
     ]);
     finish?.();
-    await drain;
+  });
+
+  test("clears a durable marker after the runtime settles cleanly", async () => {
+    const runtimes = new SessionRuntimes();
+    let finish: (() => void) | undefined;
+    let cleared = false;
+    expect(
+      runtimes.launch(
+        "session-1",
+        "runner-1",
+        ({ restartRequest, settled }) => {
+          restartRequest(() => undefined);
+          settled(() => {
+            cleared = true;
+          });
+          return deferredPromise((resolve) => {
+            finish = resolve;
+          });
+        },
+      ),
+    ).toBe(true);
+
+    await runtimes.mark({ kind: "server" }, "server-shutdown");
+    expect(cleared).toBe(false);
+    finish?.();
+    await runtimes.settled("session-1");
+    expect(cleared).toBe(true);
   });
 
   test("scopes runner drains and retains them until exact acknowledgement", async () => {

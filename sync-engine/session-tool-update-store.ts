@@ -62,6 +62,7 @@ export function updateStoredSessionTools(
             }
           : {}),
         executionGeneration: sql`${agentSessions.executionGeneration} + 1`,
+        interruptedHandoff: null,
         restartHandoff: null,
         tools: JSON.stringify(input.tools),
         ...updatedAuditFields(input.userId, input.now),

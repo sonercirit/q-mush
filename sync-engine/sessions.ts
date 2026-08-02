@@ -76,6 +76,7 @@ import { createSessionRestartControl } from "./session-restart-control.ts";
 import { SessionRestartCoordinator } from "./session-restart-coordinator.ts";
 import { RunnerRemovalCoordinator } from "./session-runner-removal.ts";
 import { SessionRuntimes } from "./session-runtime.ts";
+import { ShutdownInterruptedSessionStore } from "./session-shutdown-interrupted-store.ts";
 import { SessionStore } from "./session-store.ts";
 import type { SessionWorkspaceReader } from "./session-workspace.ts";
 
@@ -106,6 +107,7 @@ class DrizzleSessionIntegration
   readonly #restart;
   readonly #restartCoordinator: SessionRestartCoordinator;
   readonly #runnerRemoval: RunnerRemovalCoordinator;
+  readonly #shutdownInterrupted: ShutdownInterruptedSessionStore;
   readonly #store: SessionStore;
   readonly #workspaces: SessionWorkspaceReader;
   readonly #actions: SessionAgentActions;
@@ -147,6 +149,10 @@ class DrizzleSessionIntegration
       database,
       dependencies.randomId ?? createUuidV7,
     );
+    this.#shutdownInterrupted = new ShutdownInterruptedSessionStore({
+      database,
+      generateId: dependencies.randomId ?? createUuidV7,
+    });
     this.#attachmentFallbacks = createAttachmentFallbackIntegration({
       database,
       discoverModels: this.#discoverModels,
@@ -213,6 +219,7 @@ class DrizzleSessionIntegration
       modelFactory: this.#modelFactory,
       readCredential: this.#readCredential,
       realtime: this.#realtime,
+      shutdownInterrupted: this.#shutdownInterrupted,
       ...this.#sessionRuntimeState(),
     });
     this.#launch = launcher.launch.bind(launcher);
@@ -248,6 +255,8 @@ class DrizzleSessionIntegration
     this.#runners.onRemoved((userId, runnerId) =>
       this.#runnerRemoval.removed(userId, runnerId),
     );
+    this.#shutdownInterrupted.failInvalid(this.#now());
+    this.#shutdownInterrupted.restore(this.#now());
     recover();
     this.#restartCoordinator.restoreDurableRunnerGates();
     this.#restartCoordinator.recover();

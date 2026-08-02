@@ -8,6 +8,7 @@ import {
   type DevelopmentServer,
 } from "../development-server.ts";
 import { createDevelopmentShutdown } from "../development-shutdown.ts";
+import { withTemporaryDirectory } from "./temporary-directory.ts";
 
 async function readStartCount(pathname: string): Promise<number> {
   const file = Bun.file(pathname);
@@ -43,6 +44,43 @@ async function expectStableStartCount(
 ): Promise<void> {
   await Bun.sleep(100);
   expect(await readStartCount(pathname)).toBe(expected);
+}
+
+async function stoppedWithin(
+  server: DevelopmentServer,
+  minimumMilliseconds: number,
+): Promise<number> {
+  const startedAt = performance.now();
+  await server.stop();
+  const elapsedMilliseconds = performance.now() - startedAt;
+  expect(elapsedMilliseconds).toBeGreaterThanOrEqual(minimumMilliseconds);
+  expect(elapsedMilliseconds).toBeLessThan(1_000);
+  return elapsedMilliseconds;
+}
+
+function shutdownServerOptions(
+  directory: string,
+  triggerPath: string,
+  command: readonly string[],
+) {
+  return {
+    command,
+    cwd: directory,
+    restartTriggerPath: triggerPath,
+    shutdownForceMilliseconds: 200,
+    shutdownGraceMilliseconds: 80,
+  };
+}
+
+async function useDevelopmentServer(
+  prefix: string,
+  run: (directory: string, triggerPath: string) => Promise<void>,
+): Promise<void> {
+  await withTemporaryDirectory(prefix, async (directory) => {
+    const triggerPath = join(directory, "restart.trigger");
+    await Bun.write(triggerPath, "");
+    await run(directory, triggerPath);
+  });
 }
 
 async function openSocket(url: string): Promise<WebSocket> {
@@ -161,22 +199,17 @@ process.on("SIGTERM", () => {
   }));
   void server.stop();
 });
-await new Promise(() => {});
 `,
     );
-    server = startDevelopmentServer({
-      command: [
+    server = startDevelopmentServer(
+      shutdownServerOptions(directory, triggerPath, [
         process.execPath,
         childPath,
         serverPath,
         pendingPath,
         reportPath,
-      ],
-      cwd: directory,
-      restartTriggerPath: triggerPath,
-      shutdownForceMilliseconds: 200,
-      shutdownGraceMilliseconds: 80,
-    });
+      ]),
+    );
     await waitForFile(serverPath);
     const serverState: unknown = await Bun.file(serverPath).json();
     const url =
@@ -194,13 +227,8 @@ await new Promise(() => {});
     pendingRequest = fetch(new URL("/pending", url)).catch(() => undefined);
     await waitForFile(pendingPath);
 
-    const startedAt = performance.now();
-    await server.stop();
-    const elapsedMilliseconds = performance.now() - startedAt;
+    await stoppedWithin(server, 60);
     server = undefined;
-
-    expect(elapsedMilliseconds).toBeGreaterThanOrEqual(60);
-    expect(elapsedMilliseconds).toBeLessThan(1_000);
     expect(await Bun.file(reportPath).json()).toEqual({
       keepaliveTimers: 1,
       openHandles: [
@@ -226,6 +254,55 @@ await new Promise(() => {});
     });
     await Promise.all([pendingRequest, rm(directory, { recursive: true })]);
   }
+});
+
+const RECOVERY_FIXTURE_PATH = join(
+  import.meta.dirname,
+  "fixtures",
+  "development-shutdown-recovery.ts",
+);
+
+async function runRecoveryFixture(
+  databasePath: string,
+  statePath: string,
+): Promise<void> {
+  const recoveryArguments = [databasePath, statePath, "recover"];
+  const recovery = Bun.spawn(
+    [process.execPath, RECOVERY_FIXTURE_PATH, ...recoveryArguments],
+    { stderr: "pipe", stdout: "pipe" },
+  );
+  const [exitCode, standardError] = await Promise.all([
+    recovery.exited,
+    new Response(recovery.stderr).text(),
+  ]);
+  expect(exitCode, standardError).toBe(0);
+}
+
+test("recovers a session when bounded shutdown kills an in-flight step", async () => {
+  await useDevelopmentServer(
+    "q-mush-dev-recovery-test-",
+    async (directory, triggerPath) => {
+      const databasePath = join(directory, "fixture.sqlite");
+      const statePath = join(directory, "state.json");
+      const recoveryArguments = [databasePath, statePath, "start"];
+      const server = startDevelopmentServer(
+        shutdownServerOptions(directory, triggerPath, [
+          process.execPath,
+          RECOVERY_FIXTURE_PATH,
+          ...recoveryArguments,
+        ]),
+      );
+
+      await waitForFile(statePath);
+      await stoppedWithin(server, 60);
+      await runRecoveryFixture(databasePath, statePath);
+      const recovered: unknown = await Bun.file(statePath).json();
+      expect(recovered).toMatchObject({
+        restartHandoff: { restartId: "bounded-final-shutdown" },
+        status: "paused",
+      });
+    },
+  );
 });
 
 test("a repeat shutdown signal escalates to immediate forced exit", async () => {

@@ -71,6 +71,7 @@ function transitionValues(
 ) {
   return {
     ...additional,
+    interruptedHandoff: null,
     status: options.status,
     ...updatedAuditFields(options.actorId ?? SYSTEM_ID, options.now),
     ...optionalRestartHandoff(options.clearRestartHandoff),
@@ -115,6 +116,7 @@ export function transitionSessionRuntime(options: {
       ),
       {
         activeStartedAt: new Date(options.now),
+        interruptedHandoff: null,
         status: "running",
         ...updatedAuditFields(SYSTEM_ID, options.now),
       },
