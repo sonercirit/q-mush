@@ -116,16 +116,32 @@ function pendingCondition(sessionId: string) {
   );
 }
 
+function orderedActiveInputs(query: ReturnType<typeof activeInputQuery>) {
+  return query.orderBy(asc(agentPendingInputs.sequence));
+}
+
+function activeInputQuery(
+  database: Pick<AppDatabase, "select">,
+  sessionId: string,
+) {
+  return database
+    .select(PENDING_SELECTION)
+    .from(agentPendingInputs)
+    .where(pendingCondition(sessionId));
+}
+
+function firstPendingInput(
+  database: Pick<AppDatabase, "select">,
+  sessionId: string,
+): StoredPendingInput | undefined {
+  return orderedActiveInputs(activeInputQuery(database, sessionId)).get();
+}
+
 function activeInputs(
   database: Pick<AppDatabase, "select">,
   sessionId: string,
 ): readonly StoredPendingInput[] {
-  return database
-    .select(PENDING_SELECTION)
-    .from(agentPendingInputs)
-    .where(pendingCondition(sessionId))
-    .orderBy(asc(agentPendingInputs.sequence))
-    .all();
+  return orderedActiveInputs(activeInputQuery(database, sessionId)).all();
 }
 
 export interface PendingInputForPromotion extends Pick<
@@ -140,7 +156,7 @@ export function activePendingInput(
   database: Pick<AppDatabase, "select">,
   sessionId: string,
 ): PendingInputForPromotion | undefined {
-  const pending = activeInputs(database, sessionId)[0];
+  const pending = firstPendingInput(database, sessionId);
   return pending === undefined
     ? undefined
     : {
@@ -449,6 +465,24 @@ export function cancelPendingInput(options: {
   return result;
 }
 
+function consumePendingInputWhere(
+  database: Pick<AppDatabase, "update">,
+  inputId: string,
+  now: number,
+  sessionId?: string,
+) {
+  return database
+    .update(agentPendingInputs)
+    .set(softDeletedAuditFields(SYSTEM_ID, now))
+    .where(
+      and(
+        pendingInputCondition(inputId, sessionId),
+        eq(agentPendingInputs.isDeleted, false),
+      ),
+    )
+    .returning({ id: agentPendingInputs.id });
+}
+
 export function promotePendingInput(
   database: Pick<AppDatabase, "insert" | "select" | "update">,
   input: PendingInputForPromotion,
@@ -478,16 +512,7 @@ export function promotePendingInput(
       }),
     )
     .run();
-  database
-    .update(agentPendingInputs)
-    .set(softDeletedAuditFields(SYSTEM_ID, now))
-    .where(
-      and(
-        eq(agentPendingInputs.id, input.id),
-        eq(agentPendingInputs.isDeleted, false),
-      ),
-    )
-    .run();
+  consumePendingInputWhere(database, input.id, now).run();
 }
 
 function promoteInput(
@@ -582,7 +607,7 @@ export function settleNormalSessionBoundary(options: {
       return { status: "idle" };
     }
 
-    const pending = activeInputs(transaction, options.sessionId)[0];
+    const pending = firstPendingInput(transaction, options.sessionId);
     const queued = pending !== undefined;
     const successorTurnId = queued
       ? rotateSessionTurn({

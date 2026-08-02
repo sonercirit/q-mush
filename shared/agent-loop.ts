@@ -214,6 +214,20 @@ function storeMessages(
   return true;
 }
 
+async function takeAndStoreSteering(
+  options: AgentLoopOptions,
+  messages: AgentConversationMessage[],
+): Promise<boolean> {
+  return storeMessages(messages, await takeSteeringMessages(options));
+}
+
+function nextStepHasInput(
+  messages: readonly AgentConversationMessage[],
+): boolean {
+  const last = messages.at(-1);
+  return last !== undefined && last.role !== "assistant";
+}
+
 export async function runAgentLoop(
   options: AgentLoopOptions,
 ): Promise<AgentLoopResult> {
@@ -230,6 +244,9 @@ export async function runAgentLoop(
       if (preparedHandoff !== undefined) {
         return preparedHandoff;
       }
+    }
+    if (!nextStepHasInput(messages)) {
+      return { messages, status: "complete" };
     }
     options.model.startStep?.();
     const step = await options.model.complete(messages, options.signal);
@@ -264,8 +281,7 @@ export async function runAgentLoop(
     messages.push(assistantMessage);
 
     if (step.toolCalls.length === 0) {
-      const steering = await takeSteeringMessages(options);
-      if (storeMessages(messages, steering)) {
+      if (await takeAndStoreSteering(options, messages)) {
         continue;
       }
       return { messages, status: "complete" };
@@ -304,7 +320,6 @@ export async function runAgentLoop(
       await options.onToolResult?.(call, result);
     }
 
-    const steering = await takeSteeringMessages(options);
-    storeMessages(messages, steering);
+    await takeAndStoreSteering(options, messages);
   }
 }

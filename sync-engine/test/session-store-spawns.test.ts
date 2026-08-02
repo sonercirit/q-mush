@@ -16,8 +16,11 @@ import {
   testSessionInput,
 } from "./session-store-test-fixtures.ts";
 
-function report(setup: SpawnedChildReference, now = TEST_NOW + 5) {
-  return setup.store.appendSpawnedSessionReport(
+function report(
+  setup: SpawnedChildReference,
+  now = TEST_NOW + 5,
+): "delivered" | "promoted" | "terminal" | undefined {
+  return setup.store.spawnedSessionCallbackDisposition(
     TEST_USER_ID,
     setup.childId,
     setup.childGeneration,
@@ -47,7 +50,7 @@ function expectReportDisposition(
   claimed: boolean,
   now = TEST_NOW + 5,
 ): void {
-  expect(report(setup, now)).toBe(claimed);
+  expect(report(setup, now) !== undefined).toBe(claimed);
   if (claimed) expect(spawnedLink(setup)).toBeUndefined();
   else expectParentId(setup);
 }
@@ -165,7 +168,7 @@ describe("spawned session report generation fencing", () => {
     const setup = spawnedChildSetup();
 
     expectReportClaimed(setup);
-    expect(report(setup, TEST_NOW + 6)).toBe(false);
+    expect(report(setup, TEST_NOW + 6)).toBeUndefined();
     expect(
       setup.store.get(TEST_USER_ID, setup.parentId)?.pendingInputs,
     ).toMatchObject([expectedPendingReport(setup)]);

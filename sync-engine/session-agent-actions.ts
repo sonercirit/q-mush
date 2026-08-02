@@ -38,6 +38,7 @@ import { unavailableSessionResponse } from "./session-availability.ts";
 import {
   reportSpawnedSessionCompletion,
   stopSpawnedSessionChildren,
+  type SpawnedSessionCompletion,
 } from "./session-child-lifecycle.ts";
 import type { SessionDetailLookup } from "./session-command-types.ts";
 import type { SessionExecutionAuthority } from "./session-execution-authority.ts";
@@ -209,7 +210,7 @@ export class SessionAgentActions {
   #reportAndNotify(
     detail: AgentSessionDetail,
     userId: string,
-  ): string | undefined {
+  ): SpawnedSessionCompletion | undefined {
     const reported = reportSpawnedSessionCompletion(
       this.#dependencies,
       detail,
@@ -218,31 +219,40 @@ export class SessionAgentActions {
     if (reported !== undefined) {
       this.#dependencies.notify(
         userId,
-        reported.disposition === "reportable" ? reported.parentId : detail.id,
+        reported.disposition === "terminal" ? detail.id : reported.parentId,
       );
     }
-    return reported?.disposition === "reportable"
-      ? reported.parentId
-      : undefined;
+    return reported;
+  }
+
+  #wakeReport(
+    report: SpawnedSessionCompletion | undefined,
+    userId: string,
+  ): void {
+    if (report?.disposition === "delivered") {
+      this.#wakeReportedParent(report.parentId, userId);
+    }
   }
 
   reportAll(pending: readonly PendingSpawnedSession[]): void {
     const parentsByUser = new Map<string, string[]>();
     for (const { detail, userId } of pending) {
-      const parentId = this.#reportAndNotify(detail, userId);
-      if (parentId !== undefined) {
+      const report = this.#reportAndNotify(detail, userId);
+      if (report?.disposition === "delivered") {
         const parents = parentsByUser.get(userId) ?? [];
-        parents.push(parentId);
+        parents.push(report.parentId);
         parentsByUser.set(userId, parents);
       }
     }
     for (const [userId, parents] of parentsByUser) {
-      this.#wakeParents(userId, parents);
+      for (const parentId of new Set(parents)) {
+        this.#wakeReport({ disposition: "delivered", parentId }, userId);
+      }
     }
   }
 
   reportOne(detail: AgentSessionDetail, userId: string): void {
-    this.#wakeReportedParent(this.#reportAndNotify(detail, userId), userId);
+    this.#wakeReport(this.#reportAndNotify(detail, userId), userId);
   }
 
   stopSession(sessionId: string, detail?: AgentSessionDetail): void {
@@ -317,12 +327,6 @@ export class SessionAgentActions {
       );
     } catch {
       return sessionToolOutput({ error: "directory_unavailable" });
-    }
-  }
-
-  #wakeParents(userId: string, parentIds: readonly string[]): void {
-    for (const parentId of new Set(parentIds)) {
-      void this.#wake(parentId, userId);
     }
   }
 

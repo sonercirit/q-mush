@@ -5,7 +5,7 @@ import {
 } from "./session-agent-action-helpers.ts";
 
 export interface SpawnedSessionCompletion {
-  readonly disposition: "reportable" | "terminal";
+  readonly disposition: "delivered" | "promoted" | "terminal";
   readonly parentId: string;
 }
 
@@ -27,7 +27,7 @@ export function reportSpawnedSessionCompletion(
   if (report === undefined) {
     return undefined;
   }
-  const disposition = dependencies.store.spawnedSessionCallbackDisposition(
+  const delivered = dependencies.store.spawnedSessionCallbackDisposition(
     userId,
     detail.id,
     detail.generation,
@@ -36,9 +36,9 @@ export function reportSpawnedSessionCompletion(
     report.content,
     dependencies.now(),
   );
-  return disposition === false
+  return delivered === undefined
     ? undefined
-    : { disposition, parentId: report.parentId };
+    : { disposition: delivered, parentId: report.parentId };
 }
 
 export function stopSpawnedSessionChildren(
@@ -66,7 +66,7 @@ export function stopSpawnedSessionChildren(
     if (reported !== undefined) {
       dependencies.notify(
         userId,
-        reported.disposition === "reportable" ? reported.parentId : childId,
+        reported.disposition === "terminal" ? childId : reported.parentId,
       );
     }
   }

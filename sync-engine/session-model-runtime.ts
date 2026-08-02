@@ -45,6 +45,7 @@ export function sessionModelRuntime(
     braveSearch: resources.braveSearch,
     broker: resources.broker,
     credential,
+    continuous: detail.generation > 0,
     detail,
     ...(resources.discoverModels === undefined
       ? {}

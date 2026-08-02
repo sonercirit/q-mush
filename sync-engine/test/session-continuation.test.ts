@@ -298,8 +298,11 @@ describe("session continuation", () => {
       throw new Error("The model did not receive the follow-up request");
     }
     expect(continuationRequest).toEqual([
-      ...followUpRequest,
+      ...followUpRequest.filter(
+        (message) => message.role !== "user" || message.content !== "Continue.",
+      ),
       { content: "Follow-up complete.", role: "assistant", toolCalls: [] },
+      { content: "Continue.", role: "user" },
     ]);
     expect(selectedReasoningEfforts).toEqual(["high", "high", "high"]);
     database.$client.close();

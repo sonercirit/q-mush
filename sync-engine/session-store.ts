@@ -89,6 +89,7 @@ import {
   spawnedSessionChildren,
   spawnedSessionLink,
   type PendingSpawnedSession,
+  type SpawnedReportDisposition,
 } from "./session-store-spawns.ts";
 
 import {
@@ -547,7 +548,7 @@ export class SessionStore {
   appendSpawnedSessionReport(
     ...parameters: Parameters<SessionStore["spawnedSessionCallbackDisposition"]>
   ): boolean {
-    return this.spawnedSessionCallbackDisposition(...parameters) !== false;
+    return this.spawnedSessionCallbackDisposition(...parameters) !== undefined;
   }
 
   spawnedSessionCallbackDisposition(
@@ -558,7 +559,7 @@ export class SessionStore {
     parentGeneration: number,
     content: string,
     now: number,
-  ) {
+  ): SpawnedReportDisposition | undefined {
     return appendSpawnedSessionReport({
       childGeneration,
       childId,
