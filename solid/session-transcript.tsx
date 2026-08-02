@@ -48,7 +48,7 @@ import type {
 } from "./session-transcript-filters.ts";
 import {
   createSessionTranscriptMessageGroups,
-  transcriptMessageNestedScrollKey,
+  transcriptNestedScrollKeys,
 } from "./session-transcript-messages.ts";
 
 function StepTiming(props: {
@@ -430,6 +430,11 @@ function TranscriptMessage(
   );
 }
 
+interface StableTranscriptNestedScrollKeys {
+  readonly keys: ReturnType<typeof transcriptNestedScrollKeys>;
+  readonly messages: readonly AgentSessionMessage[];
+}
+
 export function SessionTranscript(props: {
   readonly agentFile: AgentFile | null;
   readonly counts?: SessionTranscriptCounts | undefined;
@@ -445,6 +450,34 @@ export function SessionTranscript(props: {
   const messageGroups = createSessionTranscriptMessageGroups(
     () => props.messages,
   );
+  const stableNestedScrollKeys = createMemo(
+    (previous: StableTranscriptNestedScrollKeys | undefined) => {
+      const messages = messageGroups().stable;
+      return previous?.messages === messages
+        ? previous
+        : { keys: transcriptNestedScrollKeys(messages), messages };
+    },
+  );
+  const messageNestedScrollKeys = createMemo(() => {
+    const stable = stableNestedScrollKeys().keys;
+    const byMessageId = new Map(stable.byMessageId);
+    const nextByRole = new Map(stable.nextByRole);
+    for (const message of messageGroups().streamed) {
+      const key = nextByRole.get(message.role);
+      if (key === undefined) {
+        byMessageId.set(message.id, message.id);
+        continue;
+      }
+      byMessageId.set(message.id, key);
+      const separator = key.lastIndexOf(":");
+      const ordinal = Number(key.slice(separator + 1));
+      nextByRole.set(
+        message.role,
+        `${key.slice(0, separator + 1)}${String(ordinal + 1)}`,
+      );
+    }
+    return { byMessageId, nextByRole };
+  });
   const localCounts = createSessionTranscriptCounts(
     () => props.agentFile,
     () => props.messages,
@@ -498,10 +531,9 @@ export function SessionTranscript(props: {
           filters={props.filters}
           liveToolStreams={liveToolStreams}
           message={message}
-          nestedScrollKey={transcriptMessageNestedScrollKey(
-            props.messages,
-            message,
-          )}
+          nestedScrollKey={
+            messageNestedScrollKeys().byMessageId.get(message.id) ?? message.id
+          }
           onForkMessage={props.onFork}
           streamEntries={toolStreamsByCallId}
         />
