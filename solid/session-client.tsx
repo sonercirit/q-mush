@@ -39,7 +39,10 @@ import {
 import { SessionDirectoryInput } from "./session-directory-input.tsx";
 import { SessionExecutionEnvironmentSelect } from "./session-execution-environment.tsx";
 import { SessionResults } from "./session-focus-client.tsx";
-import type { NewSessionFormState } from "./session-new-form-state.ts";
+import {
+  retainNewSessionFormState,
+  type NewSessionFormState,
+} from "./session-new-form-state.ts";
 import {
   defaultModelCredentialValue,
   defaultOnlineRunnerId,
@@ -491,19 +494,9 @@ export function SessionPanel(
   props: SessionPanelResources & { readonly controller: SessionController },
 ): JSX.Element {
   const state = controllerView(props);
-  const newSessionState = createMemo<NewSessionFormState>((previous) => {
-    const current = state();
-    if (
-      previous?.creating === current.creating &&
-      previous.draft === current.draft &&
-      previous.modelDiscovery === current.modelDiscovery &&
-      previous.openSelect === current.openSelect &&
-      previous.providerDiscovery === current.providerDiscovery
-    ) {
-      return previous;
-    }
-    return current;
-  });
+  const newSessionState = createMemo<NewSessionFormState>((previous) =>
+    retainNewSessionFormState(state(), previous),
+  );
   const online = () => onlineRunners(props.runners());
   const providerStates = () =>
     [props.openAi(), props.openRouter(), props.generic?.()] as const;
