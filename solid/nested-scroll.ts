@@ -155,12 +155,14 @@ function addNestedScrollScope(
   scopes: Map<string, Set<HTMLElement>>,
   scope: HTMLElement | null,
 ): void {
-  if (scope === null) return;
-  const key = nestedScrollScopeKey(scope);
-  if (key === undefined) return;
-  const candidates = scopes.get(key) ?? new Set<HTMLElement>();
-  candidates.add(scope);
-  scopes.set(key, candidates);
+  if (scope !== null) {
+    const key = nestedScrollScopeKey(scope);
+    if (key !== undefined) {
+      const candidates = scopes.get(key) ?? new Set<HTMLElement>();
+      candidates.add(scope);
+      scopes.set(key, candidates);
+    }
+  }
 }
 
 function changedNestedScrollScopes(
