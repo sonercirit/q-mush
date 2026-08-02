@@ -175,7 +175,22 @@ test("offers routing modes in global fallback settings", async () => {
   );
 
   await expectDiscoveredModel(discoverModels, container, 1, "image-model");
-  openFallbackSelect(container, "openRouterProviderTag");
+  const selectNames = [
+    "attachmentFallbackModality",
+    "attachmentFallbackCredential",
+    "attachmentFallbackModel",
+    "openRouterProviderTag",
+  ] as const;
+  for (const name of selectNames) {
+    openFallbackSelect(container, name);
+    for (const candidate of selectNames) {
+      expect(
+        container
+          .querySelector(`[data-custom-select='${candidate}']`)
+          ?.getAttribute("data-custom-select-open"),
+      ).toBe(String(candidate === name));
+    }
+  }
 
   for (const label of [
     "OpenRouter automatic routing",
