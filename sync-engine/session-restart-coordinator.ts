@@ -110,6 +110,9 @@ export class SessionRestartCoordinator {
   }
 
   recover(runnerId?: string, restartId?: string, resetRetry = true): void {
+    if (runnerId !== undefined && this.#options.restart.draining()) {
+      return;
+    }
     if (runnerId !== undefined && this.#recoveries.has(runnerId)) {
       return;
     }
@@ -194,6 +197,11 @@ export class SessionRestartCoordinator {
         }
         if (pendingCredentials || pendingLaunches) {
           this.#scheduleRetry(runnerId, restartId);
+        } else if (
+          !this.#options.restart.draining() &&
+          this.#options.store.pendingRestartHandoffs(runnerId).length > 0
+        ) {
+          this.#recover(runnerId, restartId);
         } else {
           this.#resetRetry(runnerId);
         }
