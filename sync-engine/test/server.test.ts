@@ -21,6 +21,7 @@ import {
   providerCredentialDefaultPath,
   RUNNER_EXECUTABLE_PATH,
   RUNNER_INSTALLER_PATH,
+  RUNNER_SUPERVISOR_PATH,
   runnerDefaultPath,
   runnerDirectoriesPath,
   RUNNERS_PATH,
@@ -65,6 +66,12 @@ const runnerExecutables: RunnerExecutableProvider = {
   serve: () =>
     Promise.resolve(
       new Response(runnerExecutable, {
+        headers: { "content-type": "application/octet-stream" },
+      }),
+    ),
+  serveSupervisor: () =>
+    Promise.resolve(
+      new Response("standalone runner supervisor", {
         headers: { "content-type": "application/octet-stream" },
       }),
     ),
@@ -328,6 +335,14 @@ describe("page server", () => {
       `${RUNNER_EXECUTABLE_PATH}?target=bun-linux-x64-baseline`,
       "application/octet-stream",
       runnerExecutable,
+    );
+  });
+
+  test("serves the standalone runner supervisor", async () => {
+    await expectAsset(
+      `${RUNNER_SUPERVISOR_PATH}?target=bun-linux-x64-baseline`,
+      "application/octet-stream",
+      "standalone runner supervisor",
     );
   });
 

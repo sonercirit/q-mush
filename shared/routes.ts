@@ -113,6 +113,7 @@ export const RUNNER_REALTIME_PATH = `${RUNNER_BASE_PATH}/realtime`;
 export const RUNNER_VERSION_HEADER = "x-q-mush-runner-version";
 export const RUNNER_INSTALLER_PATH = "/runner/install.sh";
 export const RUNNER_EXECUTABLE_PATH = "/runner/executable";
+export const RUNNER_SUPERVISOR_PATH = "/runner/supervisor";
 export const RUNNER_EXECUTABLE_SHA256_HEADER = "x-q-mush-runner-sha256";
 export const SESSIONS_PATH = `${API_BASE_PATH}/sessions`;
 export const SESSION_ATTACHMENT_FALLBACKS_PATH = `${SESSIONS_PATH}/attachment-fallbacks`;
