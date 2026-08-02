@@ -1,4 +1,7 @@
-import { RUNNER_EXECUTABLE_PATH } from "../shared/routes.ts";
+import {
+  RUNNER_EXECUTABLE_PATH,
+  RUNNER_SUPERVISOR_PATH,
+} from "../shared/routes.ts";
 import { RUNNER_TARGETS } from "./runner-target.ts";
 
 export function quoteShellValue(value: string): string {
@@ -13,6 +16,9 @@ export function renderRunnerInstaller(
   const runnerUrl = quoteShellValue(
     new URL(RUNNER_EXECUTABLE_PATH, serverOrigin).toString(),
   );
+  const supervisorUrl = quoteShellValue(
+    new URL(RUNNER_SUPERVISOR_PATH, serverOrigin).toString(),
+  );
   const setupToken = quoteShellValue(token);
 
   return `#!/bin/sh
@@ -21,8 +27,10 @@ set -eu
 SERVER_ORIGIN=${origin}
 RUNNER_TOKEN=${setupToken}
 RUNNER_URL=${runnerUrl}
+SUPERVISOR_URL=${supervisorUrl}
 INSTALL_DIR="\${Q_MUSH_RUNNER_HOME:-$HOME/.q-mush/runner}"
 RUNNER_FILE="$INSTALL_DIR/q-mush-runner"
+SUPERVISOR_FILE="$INSTALL_DIR/q-mush-runner-supervisor"
 LEGACY_RUNNER_FILE="$INSTALL_DIR/q-mush-runner.js"
 CONFIG_FILE="$INSTALL_DIR/config"
 PID_FILE="$INSTALL_DIR/runner.pid"
@@ -59,9 +67,11 @@ esac
 mkdir -p "$INSTALL_DIR"
 chmod 700 "$INSTALL_DIR"
 TEMP_RUNNER="$RUNNER_FILE.tmp.$$"
-trap 'rm -f "$TEMP_RUNNER"' EXIT HUP INT TERM
+TEMP_SUPERVISOR="$SUPERVISOR_FILE.tmp.$$"
+trap 'rm -f "$TEMP_RUNNER" "$TEMP_SUPERVISOR"' EXIT HUP INT TERM
 curl -fsSL "$RUNNER_URL?target=$RUNNER_TARGET" -o "$TEMP_RUNNER"
-chmod 755 "$TEMP_RUNNER"
+curl -fsSL "$SUPERVISOR_URL?target=$RUNNER_TARGET" -o "$TEMP_SUPERVISOR"
+chmod 755 "$TEMP_RUNNER" "$TEMP_SUPERVISOR"
 printf '%s\\n%s\\n' "$SERVER_ORIGIN" "$RUNNER_TOKEN" > "$CONFIG_FILE"
 chmod 600 "$CONFIG_FILE"
 
@@ -74,8 +84,9 @@ if [ -f "$PID_FILE" ]; then
 fi
 
 mv "$TEMP_RUNNER" "$RUNNER_FILE"
+mv "$TEMP_SUPERVISOR" "$SUPERVISOR_FILE"
 rm -f "$LEGACY_RUNNER_FILE"
-nohup "$RUNNER_FILE" --config "$CONFIG_FILE" >> "$LOG_FILE" 2>&1 &
+nohup "$SUPERVISOR_FILE" "$RUNNER_FILE" "$CONFIG_FILE" >> "$LOG_FILE" 2>&1 &
 RUNNER_PID=$!
 printf '%s\\n' "$RUNNER_PID" > "$PID_FILE"
 sleep 1

@@ -6,6 +6,7 @@ import { describe, expect, test } from "vitest";
 import {
   RUNNER_EXECUTABLE_PATH,
   RUNNER_EXECUTABLE_SHA256_HEADER,
+  RUNNER_SUPERVISOR_PATH,
 } from "../../shared/routes.ts";
 import { buildRunnerExecutableProvider } from "../../sync-engine/runner-executable.ts";
 import {
@@ -82,6 +83,29 @@ describe("runner executable downloads", () => {
     expect(new Uint8Array(await first.arrayBuffer())).toEqual(EXECUTABLE);
     expect(new Uint8Array(await second.arrayBuffer())).toEqual(EXECUTABLE);
     expect(builds).toBe(1);
+  });
+
+  test("serves a separately cached standalone supervisor", async () => {
+    let supervisorBuilds = 0;
+    const provider = await buildRunnerExecutableProvider({
+      build: () => Promise.resolve(new Blob([EXECUTABLE])),
+      buildSupervisor: (target) => {
+        expect(target).toBe(TARGET);
+        supervisorBuilds += 1;
+        return Promise.resolve(new Blob(["compiled supervisor"]));
+      },
+      version: RUNNER_VERSION,
+    });
+    const supervisorRequest = new Request(
+      `http://localhost:3000${RUNNER_SUPERVISOR_PATH}?target=${TARGET}`,
+    );
+
+    const first = await provider.serveSupervisor(supervisorRequest);
+    const second = await provider.serveSupervisor(supervisorRequest);
+
+    expect(await first.text()).toBe("compiled supervisor");
+    expect(await second.text()).toBe("compiled supervisor");
+    expect(supervisorBuilds).toBe(1);
   });
 
   test("returns not modified without building when the runner is current", async () => {

@@ -23,6 +23,7 @@ import {
   RUNNER_DIRECTORIES_SEGMENT,
   RUNNER_EXECUTABLE_PATH,
   RUNNER_INSTALLER_PATH,
+  RUNNER_SUPERVISOR_PATH,
   RUNNERS_PATH,
   SESSION_ATTACHMENT_FALLBACKS_PATH,
   SESSION_MODELS_PATH,
@@ -594,18 +595,15 @@ export function createRequestHandler(
       return createTextResponse(request, appPage, HTML_HEADERS);
     }
 
-    if (pathname === APP_SCRIPT_PATH) {
+    if (pathname === APP_SCRIPT_PATH)
       return createTextResponse(request, browserBundle, JAVASCRIPT_HEADERS);
-    }
 
-    if (pathname === RUNNER_INSTALLER_PATH) {
-      return runners.installer(request);
-    }
+    if (pathname === RUNNER_INSTALLER_PATH) return runners.installer(request);
 
-    if (pathname === RUNNER_EXECUTABLE_PATH) {
+    if (pathname === RUNNER_EXECUTABLE_PATH)
       return runnerExecutables.serve(request);
-    }
-
+    if (pathname === RUNNER_SUPERVISOR_PATH)
+      return runnerExecutables.serveSupervisor(request);
     if (pathname === STYLESHEET_PATH) {
       return createTextResponse(request, styles, CSS_HEADERS);
     }

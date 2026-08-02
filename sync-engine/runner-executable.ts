@@ -14,6 +14,9 @@ import {
 const RUNNER_ENTRYPOINT = fileURLToPath(
   new URL("../runner/runner-agent.ts", import.meta.url),
 );
+const RUNNER_SUPERVISOR_ENTRYPOINT = fileURLToPath(
+  new URL("../runner/runner-supervisor-agent.ts", import.meta.url),
+);
 const RUNNER_VERSION_PATTERN = /^[a-f\d]{64}$/u;
 const VERSION_GLOBAL = "Q_MUSH_RUNNER_VERSION";
 const TARGET_GLOBAL = "Q_MUSH_RUNNER_TARGET";
@@ -29,26 +32,34 @@ type RunnerExecutableBuilder = (
   target: RunnerExecutableTarget,
 ) => Promise<Blob>;
 
+interface RunnerExecutableSource {
+  readonly build: RunnerExecutableBuilder;
+  readonly cache: Map<RunnerExecutableTarget, Promise<RunnerExecutable>>;
+}
+
 interface RunnerExecutableBuildOptions {
   readonly build?: RunnerExecutableBuilder;
+  readonly buildSupervisor?: RunnerExecutableBuilder;
   readonly version?: string;
 }
 
 export interface RunnerExecutableProvider {
   readonly version: string;
   serve(request: Request): Promise<Response>;
+  serveSupervisor(request: Request): Promise<Response>;
 }
 
 function runnerBuildConfiguration(
   version: string,
   target: string,
+  entrypoint = RUNNER_ENTRYPOINT,
 ): Bun.BuildConfig {
   return {
     define: {
       [TARGET_GLOBAL]: JSON.stringify(target),
       [VERSION_GLOBAL]: JSON.stringify(version),
     },
-    entrypoints: [RUNNER_ENTRYPOINT],
+    entrypoints: [entrypoint],
     format: "esm",
     minify: true,
     target: "bun",
@@ -63,16 +74,17 @@ async function bundleRunnerSource(): Promise<Bun.BuildArtifact> {
   return readBuildArtifact("runner source", result);
 }
 
-async function compileRunnerExecutable(
+async function compileStandaloneExecutable(
   target: RunnerExecutableTarget,
   version: string,
+  entrypoint = RUNNER_ENTRYPOINT,
 ): Promise<Blob> {
   const directory = await mkdtemp(join(tmpdir(), "q-mush-runner-build-"));
   const executablePath = join(directory, "q-mush-runner");
 
   try {
     const result = await Bun.build({
-      ...runnerBuildConfiguration(version, target),
+      ...runnerBuildConfiguration(version, target, entrypoint),
       compile: {
         autoloadBunfig: false,
         autoloadDotenv: false,
@@ -126,29 +138,43 @@ function acceptsEntityTag(request: Request, tag: string): boolean {
 }
 
 class LazyRunnerExecutableProvider implements RunnerExecutableProvider {
-  readonly #build: RunnerExecutableBuilder;
-  readonly #executables = new Map<
-    RunnerExecutableTarget,
-    Promise<RunnerExecutable>
-  >();
+  readonly #executables: RunnerExecutableSource;
+  readonly #supervisors: RunnerExecutableSource;
   readonly version: string;
 
-  constructor(version: string, build: RunnerExecutableBuilder) {
+  constructor(
+    version: string,
+    build: RunnerExecutableBuilder,
+    buildSupervisor: RunnerExecutableBuilder,
+  ) {
     if (!RUNNER_VERSION_PATTERN.test(version)) {
       throw new Error("The runner version must be a SHA-256 digest");
     }
 
     this.version = version;
-    this.#build = build;
+    this.#executables = { build, cache: new Map() };
+    this.#supervisors = { build: buildSupervisor, cache: new Map() };
   }
 
-  async serve(request: Request): Promise<Response> {
+  serve(request: Request): Promise<Response> {
+    return this.#serve(request, this.#executables);
+  }
+
+  serveSupervisor(request: Request): Promise<Response> {
+    const source = this.#supervisors;
+    return this.#serve(request, source);
+  }
+
+  #serve(request: Request, source: RunnerExecutableSource): Promise<Response> {
     return request.method === "GET"
-      ? this.#serveDownload(request)
-      : createMethodNotAllowedResponse("GET");
+      ? this.#serveDownload(request, source)
+      : Promise.resolve(createMethodNotAllowedResponse("GET"));
   }
 
-  async #serveDownload(request: Request): Promise<Response> {
+  async #serveDownload(
+    request: Request,
+    source: RunnerExecutableSource,
+  ): Promise<Response> {
     const targetValue = new URL(request.url).searchParams.get("target");
 
     if (targetValue === null || !isRunnerExecutableTarget(targetValue)) {
@@ -166,7 +192,7 @@ class LazyRunnerExecutableProvider implements RunnerExecutableProvider {
     }
 
     try {
-      const executable = await this.#load(targetValue);
+      const executable = await this.#load(targetValue, source);
       cacheHeaders.set(
         "content-disposition",
         'attachment; filename="q-mush-runner"',
@@ -185,25 +211,28 @@ class LazyRunnerExecutableProvider implements RunnerExecutableProvider {
     }
   }
 
-  #load(target: RunnerExecutableTarget): Promise<RunnerExecutable> {
-    const existing = this.#executables.get(target);
+  #load(
+    target: RunnerExecutableTarget,
+    source: RunnerExecutableSource,
+  ): Promise<RunnerExecutable> {
+    const existing = source.cache.get(target);
 
     if (existing !== undefined) {
       return existing;
     }
 
     const pending = Promise.resolve()
-      .then(() => this.#build(target))
+      .then(() => source.build(target))
       .then(async (body) => ({
         body,
         sha256: createHash("sha256")
           .update(new Uint8Array(await body.arrayBuffer()))
           .digest("hex"),
       }));
-    this.#executables.set(target, pending);
+    source.cache.set(target, pending);
     void pending.catch(() => {
-      if (this.#executables.get(target) === pending) {
-        this.#executables.delete(target);
+      if (source.cache.get(target) === pending) {
+        source.cache.delete(target);
       }
     });
     return pending;
@@ -217,6 +246,14 @@ export async function buildRunnerExecutableProvider(
   const build =
     options.build ??
     ((target: RunnerExecutableTarget) =>
-      compileRunnerExecutable(target, version));
-  return new LazyRunnerExecutableProvider(version, build);
+      compileStandaloneExecutable(target, version));
+  const buildSupervisor =
+    options.buildSupervisor ??
+    ((target: RunnerExecutableTarget) =>
+      compileStandaloneExecutable(
+        target,
+        version,
+        RUNNER_SUPERVISOR_ENTRYPOINT,
+      ));
+  return new LazyRunnerExecutableProvider(version, build, buildSupervisor);
 }
