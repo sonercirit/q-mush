@@ -6,6 +6,7 @@ import {
   users,
   workspaces,
 } from "../../../shared/database/schema.ts";
+import { FINAL_SHUTDOWN_PREPARED_MESSAGE } from "../../../shared/development-shutdown.ts";
 import { createUuidV7 } from "../../../shared/ids.ts";
 import { SessionRuntimes } from "../../../sync-engine/session-runtime.ts";
 import { ShutdownInterruptedSessionStore } from "../../../sync-engine/session-shutdown-interrupted-store.ts";
@@ -116,7 +117,6 @@ if (mode === "start") {
   }
   store.transitionRuntime(sessionId, "running", now + 1, 0);
   const interrupted = shutdownStore();
-  await Bun.write(statePath, JSON.stringify({ sessionId, userId }));
   const runtimes = new SessionRuntimes();
   runtimes.launch(sessionId, runnerId, 0, "step", ({ restartRequest }) => {
     restartRequest((request, durable) => {
@@ -127,8 +127,13 @@ if (mode === "start") {
     return new Promise(() => undefined);
   });
   process.on("SIGTERM", () => {
-    void runtimes.mark({ kind: "server" }, "bounded-final-shutdown");
+    void Bun.sleep(150)
+      .then(() => runtimes.mark({ kind: "server" }, "bounded-final-shutdown"))
+      .then(() => {
+        process.send?.(FINAL_SHUTDOWN_PREPARED_MESSAGE);
+      });
   });
+  await Bun.write(statePath, JSON.stringify({ sessionId, userId }));
   setInterval(() => undefined, 1_000);
 } else {
   const state: unknown = await Bun.file(statePath).json();

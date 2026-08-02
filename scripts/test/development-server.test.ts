@@ -69,6 +69,7 @@ function shutdownServerOptions(
     restartTriggerPath: triggerPath,
     shutdownForceMilliseconds: 200,
     shutdownGraceMilliseconds: 80,
+    shutdownPreparationMilliseconds: 500,
   };
 }
 
@@ -197,6 +198,7 @@ process.on("SIGTERM", () => {
     pendingWebSockets: server.pendingWebSockets,
     socketKinds: [...socketKinds].sort(),
   }));
+  process.send?.("q-mush:final-shutdown-prepared");
   void server.stop();
 });
 `,
@@ -247,7 +249,7 @@ process.on("SIGTERM", () => {
     ).toBe(true);
   } finally {
     if (server !== undefined) {
-      server.forceStop();
+      await server.forceStop();
     }
     sockets.forEach((socket) => {
       socket.close();
@@ -278,7 +280,7 @@ async function runRecoveryFixture(
   expect(exitCode, standardError).toBe(0);
 }
 
-test("recovers a session when bounded shutdown kills an in-flight step", async () => {
+test("recovers a session when forced shutdown waits for the durable marker", async () => {
   await useDevelopmentServer(
     "q-mush-dev-recovery-test-",
     async (directory, triggerPath) => {
@@ -294,7 +296,10 @@ test("recovers a session when bounded shutdown kills an in-flight step", async (
       );
 
       await waitForFile(statePath);
-      await stoppedWithin(server, 60);
+      const stopping = server.stop();
+      await Bun.sleep(20);
+      await server.forceStop();
+      await stopping;
       await runRecoveryFixture(databasePath, statePath);
       const recovered: unknown = await Bun.file(statePath).json();
       expect(recovered).toMatchObject({
@@ -305,12 +310,14 @@ test("recovers a session when bounded shutdown kills an in-flight step", async (
   );
 });
 
-test("a repeat shutdown signal escalates to immediate forced exit", async () => {
+test("a repeat shutdown signal escalates after forced shutdown settles", async () => {
   const stopped = Promise.withResolvers<undefined>();
+  const forceStopped = Promise.withResolvers<undefined>();
   const events: string[] = [];
   const developmentServer: DevelopmentServer = {
     forceStop: vi.fn(() => {
       events.push("forced");
+      return forceStopped.promise;
     }),
     stop: vi.fn(() => {
       events.push("stopping");
@@ -330,8 +337,13 @@ test("a repeat shutdown signal escalates to immediate forced exit", async () => 
   shutDown(130);
   expect(events).toEqual(["watcher stopped", "stopping"]);
 
-  const escalatedEvents = ["watcher stopped", "stopping", "forced", "exit 143"];
   shutDown(143);
+  expect(events).toEqual(["watcher stopped", "stopping", "forced"]);
+
+  forceStopped.resolve(undefined);
+  await forceStopped.promise;
+  await Promise.resolve();
+  const escalatedEvents = ["watcher stopped", "stopping", "forced", "exit 143"];
   expect(events).toEqual(escalatedEvents);
 
   stopped.resolve(undefined);

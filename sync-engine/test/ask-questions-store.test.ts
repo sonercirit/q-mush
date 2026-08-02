@@ -172,6 +172,7 @@ function runningSession(): StoredQuestionSession {
     activeStartedAt: NOW,
     executionGeneration: 3,
     id: SESSION_ID,
+    interruptedHandoff: "durable-shutdown-marker",
     isDeleted: false,
     status: "running",
     updatedAt: NOW,
@@ -273,6 +274,7 @@ describe("ask questions store", () => {
     expect(persistence.state.sessions[0]).toMatchObject({
       activeDurationMs: 40,
       activeStartedAt: null,
+      interruptedHandoff: null,
       status: "paused",
     });
     expect(persistence.state.requests[0]).toMatchObject({
@@ -408,6 +410,14 @@ describe("ask questions store", () => {
 
   test("atomically stops and soft-cancels pending questions", () => {
     const { persistence, store } = setupWithQuestion();
+    const pausedSession = persistence.state.sessions[0];
+    if (pausedSession === undefined) {
+      throw new Error("The paused test session is unavailable");
+    }
+    persistence.state.sessions[0] = {
+      ...pausedSession,
+      interruptedHandoff: "durable-shutdown-marker",
+    };
     expect(pendingQuestionStatus(store)).not.toBeNull();
 
     expect(store.stop(USER_ID, SESSION_ID, NOW + 30)).toBe(true);
@@ -418,5 +428,6 @@ describe("ask questions store", () => {
     });
 
     expectSessionStatus(persistence, "stopped");
+    expect(persistence.state.sessions[0].interruptedHandoff).toBeNull();
   });
 });

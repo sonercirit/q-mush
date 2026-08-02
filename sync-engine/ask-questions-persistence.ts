@@ -26,6 +26,7 @@ type StoredDatabaseQuestionSession = Pick<
   | "activeStartedAt"
   | "executionGeneration"
   | "id"
+  | "interruptedHandoff"
   | "isDeleted"
   | "status"
   | "updatedAt"
@@ -122,6 +123,9 @@ function sessionUpdateValues(
               ? null
               : new Date(update.activeStartedAt),
         }),
+    ...(update.interruptedHandoff === undefined
+      ? {}
+      : { interruptedHandoff: update.interruptedHandoff }),
     ...(update.status === undefined ? {} : { status: update.status }),
   };
 }

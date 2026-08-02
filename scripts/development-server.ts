@@ -1,9 +1,11 @@
 import { watch } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { FINAL_SHUTDOWN_PREPARED_MESSAGE } from "../shared/development-shutdown.ts";
 
 const DEFAULT_SHUTDOWN_FORCE_MILLISECONDS = 1_000;
 const DEFAULT_SHUTDOWN_GRACE_MILLISECONDS = 10_000;
+const DEFAULT_SHUTDOWN_PREPARATION_MILLISECONDS = 30_000;
 
 interface DevelopmentServerOptions {
   readonly command: readonly string[];
@@ -12,10 +14,11 @@ interface DevelopmentServerOptions {
   readonly restartTriggerPath: string;
   readonly shutdownForceMilliseconds?: number;
   readonly shutdownGraceMilliseconds?: number;
+  readonly shutdownPreparationMilliseconds?: number;
 }
 
 export interface DevelopmentServer {
-  forceStop(): void;
+  forceStop(): Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -46,10 +49,18 @@ function positiveDelay(value: number | undefined, fallback: number): number {
 export function startDevelopmentServer(
   options: DevelopmentServerOptions,
 ): DevelopmentServer {
+  let preparation = Promise.withResolvers<undefined>();
+  let forced = Promise.withResolvers<undefined>();
+  let forceRequested = false;
   const spawn = () =>
     Bun.spawn([...options.command], {
       cwd: options.cwd,
       detached: true,
+      ipc: (message) => {
+        if (message === FINAL_SHUTDOWN_PREPARED_MESSAGE) {
+          preparation.resolve();
+        }
+      },
       stderr: "inherit",
       stdin: "inherit",
       stdout: "inherit",
@@ -61,6 +72,10 @@ export function startDevelopmentServer(
   const forceMilliseconds = positiveDelay(
     options.shutdownForceMilliseconds,
     DEFAULT_SHUTDOWN_FORCE_MILLISECONDS,
+  );
+  const preparationMilliseconds = positiveDelay(
+    options.shutdownPreparationMilliseconds,
+    DEFAULT_SHUTDOWN_PREPARATION_MILLISECONDS,
   );
   let child = spawn();
   let operation = Promise.resolve();
@@ -80,13 +95,19 @@ export function startDevelopmentServer(
     }
   };
 
-  const childSettledWithin = (milliseconds: number): Promise<boolean> => {
+  const childSettledWithin = (
+    milliseconds: number,
+    interruption?: Promise<unknown>,
+  ): Promise<boolean> => {
     const settled = Promise.withResolvers<boolean>();
     const timer = setTimeout(() => {
       settled.resolve(false);
     }, milliseconds);
     void child.exited.then(() => {
       settled.resolve(true);
+    });
+    void interruption?.then(() => {
+      settled.resolve(false);
     });
     return settled.promise.finally(() => {
       clearTimeout(timer);
@@ -98,9 +119,29 @@ export function startDevelopmentServer(
     await child.exited;
   };
 
+  const preparationFinishedWithin = async (): Promise<boolean> => {
+    const timeout = Promise.withResolvers<boolean>();
+    const timer = setTimeout(() => {
+      timeout.resolve(false);
+    }, preparationMilliseconds);
+    const prepared = await Promise.race([
+      preparation.promise.then(() => true),
+      child.exited.then(() => false),
+      timeout.promise,
+    ]);
+    clearTimeout(timer);
+    return prepared;
+  };
+
   const shutDownChild = async (): Promise<void> => {
     signalChild("SIGTERM");
-    if (await childSettledWithin(graceMilliseconds)) {
+    const prepared = await preparationFinishedWithin();
+    if (
+      child.exitCode !== null ||
+      (prepared &&
+        !forceRequested &&
+        (await childSettledWithin(graceMilliseconds, forced.promise)))
+    ) {
       return;
     }
     signalChild("SIGKILL");
@@ -121,6 +162,9 @@ export function startDevelopmentServer(
         await drainChild();
 
         if (!stopping) {
+          preparation = Promise.withResolvers<undefined>();
+          forced = Promise.withResolvers<undefined>();
+          forceRequested = false;
           child = spawn();
         }
       });
@@ -137,11 +181,13 @@ export function startDevelopmentServer(
     restartTrigger.close();
   };
 
-  const forceStop = (): void => {
+  const forceStop = (): Promise<void> => {
     stopping = true;
     closeSupervisorResources();
-    signalChild("SIGKILL");
-    child.unref();
+    forceRequested = true;
+    forced.resolve();
+    stopPromise ??= shutDownChild();
+    return stopPromise;
   };
 
   return {

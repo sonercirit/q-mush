@@ -3,7 +3,7 @@ import {
   AGENT_SESSION_TOOL_NAMES,
   type AgentSessionToolName,
 } from "../../shared/agent-tools.ts";
-import { agentMessages } from "../../shared/database/schema.ts";
+import { agentMessages, agentSessions } from "../../shared/database/schema.ts";
 import { SYSTEM_ID } from "../../shared/ids.ts";
 import type {
   AgentSessionDetail,
@@ -13,6 +13,7 @@ import { RunnerStore } from "../../sync-engine/runner-store.ts";
 import type { SessionStore } from "../../sync-engine/session-store.ts";
 import { endGenerationSessionTurn } from "../../sync-engine/session-turn-store.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
+import { testAskQuestionsInput } from "./ask-questions-test-fixtures.ts";
 import {
   TEST_NOW,
   TEST_USER_ID,
@@ -499,6 +500,37 @@ describe("session store", () => {
       }),
     ]);
     database.$client.close();
+  });
+
+  test("stopping a question-paused session clears its shutdown marker", () => {
+    const { database, store } = runningStore();
+    const generation = store.get(TEST_USER_ID, SESSION_ID)?.generation;
+    if (generation === undefined) {
+      throw new Error("The running session is unavailable");
+    }
+    store
+      .questions()
+      .create(
+        TEST_USER_ID,
+        SESSION_ID,
+        generation,
+        "call-question",
+        testAskQuestionsInput(),
+        TEST_NOW + 2,
+      );
+    database
+      .update(agentSessions)
+      .set({ interruptedHandoff: "durable-shutdown-marker" })
+      .run();
+
+    expect(store.stop(TEST_USER_ID, SESSION_ID, TEST_NOW + 3)).toBe(true);
+    expect(
+      database
+        .select({ marker: agentSessions.interruptedHandoff })
+        .from(agentSessions)
+        .get()?.marker,
+    ).toBeNull();
+    closeSessionStoreTestSetup({ database, store });
   });
 
   test("rejects a runtime message after an ordinary stop", () => {

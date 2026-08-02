@@ -19,8 +19,14 @@ export function createDevelopmentShutdown(
   const forceExit = (exitCode: number): void => {
     if (!forced) {
       forced = true;
-      options.developmentServer.forceStop();
-      exit(exitCode);
+      options.developmentServer.forceStop().then(
+        () => {
+          exit(exitCode);
+        },
+        () => {
+          exit(exitCode);
+        },
+      );
     }
   };
 
