@@ -59,6 +59,25 @@ async function releaseAndWait(
   );
 }
 
+async function waitForHealthyTimer(): Promise<void> {
+  const timer = Promise.withResolvers<undefined>();
+  setTimeout(() => {
+    timer.resolve(undefined);
+  }, 20);
+  await timer.promise;
+}
+
+function expectParkedSession(setup: RestartStepSetup, sessionId: string): void {
+  const detail = setup.sessions.detailForUser(TEST_USER_ID, sessionId);
+  expect(detail).toBeDefined();
+  expect(isRecord(detail) && detail.status).toBe("paused");
+  expect(
+    isRecord(detail) &&
+      isRecord(detail.restartHandoff) &&
+      detail.restartHandoff.requestedBy,
+  ).toBe("server");
+}
+
 test("the supervisor restores a parked session through a double engine restart", async () => {
   const model = new MultiSessionRestartModel();
   const initial = connectedSessionSetup(model, "api_key", undefined, {
@@ -110,9 +129,7 @@ test("the supervisor restores a parked session through a double engine restart",
     () => delayGates.length,
     (count) => count === 1,
   );
-  expect(initial.sessions.detailForUser(TEST_USER_ID, sessionId)).toMatchObject(
-    { restartHandoff: { requestedBy: "server" }, status: "paused" },
-  );
+  expectParkedSession(initial, sessionId);
 
   const middle = connectedSessionSetup(model, "api_key", undefined, {
     commandId: nextCommandId("supervised-middle"),
@@ -136,6 +153,9 @@ test("the supervisor restores a parked session through a double engine restart",
     commandId: nextCommandId("supervised-final"),
     database: initial.database,
   });
+  await waitForHealthyTimer();
+  expect(connections).toHaveLength(1);
+  expectParkedSession(final, sessionId);
   relaunchTarget = final;
   await releaseAndWait(delayGates[1], connections, 2);
   await completeCommand(final, "read_agent_file", "null");
@@ -152,11 +172,11 @@ test("the supervisor restores a parked session through a double engine restart",
       JSON.stringify(detail).includes("Completed after restart."),
   );
 
-  expect(final.sessions.detailForUser(TEST_USER_ID, sessionId)).toMatchObject({
-    restartHandoff: null,
-    runnerId: RUNNER_ID,
-    status: "idle",
-  });
+  const completed = final.sessions.detailForUser(TEST_USER_ID, sessionId);
+  expect(completed).toBeDefined();
+  expect(isRecord(completed) && completed.restartHandoff).toBeNull();
+  expect(isRecord(completed) && completed.runnerId).toBe(RUNNER_ID);
+  expect(isRecord(completed) && completed.status).toBe("idle");
   expect(delays).toEqual([5_000, 5_000]);
   expect(launches).toHaveLength(3);
   for (const launch of launches) {
