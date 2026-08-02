@@ -281,21 +281,6 @@ function diffLines(content: string): readonly string[] {
   return lines.at(-1) === "" ? lines.slice(0, -1) : lines;
 }
 
-function renderDiffLine(
-  content: string,
-  kind: "added" | "removed",
-): JSX.Element {
-  const added = kind === "added";
-  return (
-    <span
-      class={`block px-3 ${added ? "bg-emerald-400/10 text-emerald-200" : "bg-rose-400/10 text-rose-200"}`}
-      data-diff-line={kind}
-    >
-      {`${added ? "+" : "-"}${content}`}
-    </span>
-  );
-}
-
 function renderEditOutput(options: ToolOutputOptions): JSX.Element | undefined {
   if (!options.content.startsWith("Successfully replaced ")) {
     return undefined;
@@ -306,6 +291,17 @@ function renderEditOutput(options: ToolOutputOptions): JSX.Element | undefined {
   if (call === undefined) {
     return undefined;
   }
+
+  const lines = call.edits.flatMap((edit) => [
+    ...diffLines(edit.oldText).map((content) => ({
+      content,
+      kind: "removed" as const,
+    })),
+    ...diffLines(edit.newText).map((content) => ({
+      content,
+      kind: "added" as const,
+    })),
+  ]);
 
   return (
     <div class="space-y-2">
@@ -321,20 +317,33 @@ function renderEditOutput(options: ToolOutputOptions): JSX.Element | undefined {
           pane={(wrapped) => (
             <pre
               class={subscrollPaneClasses(
-                "max-h-80 max-w-full overflow-y-auto overscroll-contain py-2 pr-20 font-mono text-xs leading-5",
+                "max-h-80 max-w-full overflow-y-auto overscroll-contain py-2 font-mono text-xs leading-5",
               )}
               data-language="diff"
               data-line-wrap={String(wrapped())}
             >
-              <code>
-                {call.edits.flatMap((edit) => [
-                  ...diffLines(edit.oldText).map((line) =>
-                    renderDiffLine(line, "removed"),
-                  ),
-                  ...diffLines(edit.newText).map((line) =>
-                    renderDiffLine(line, "added"),
-                  ),
-                ])}
+              <code
+                class={`block ${wrapped() ? "w-full" : "w-max min-w-full"}`}
+              >
+                <For each={lines}>
+                  {(line, index) => (
+                    <span
+                      class={`flex w-full ${line.kind === "added" ? "bg-emerald-400/10 text-emerald-200" : "bg-rose-400/10 text-rose-200"}`}
+                      data-diff-line={line.kind}
+                    >
+                      <span
+                        aria-hidden="true"
+                        class="w-12 shrink-0 select-none border-r border-white/10 pr-2 text-right text-slate-500"
+                        data-diff-line-number={index() + 1}
+                      >
+                        {index() + 1}
+                      </span>
+                      <span class="min-w-0 flex-1 px-3 pr-20">
+                        {`${line.kind === "added" ? "+" : "-"}${line.content}`}
+                      </span>
+                    </span>
+                  )}
+                </For>
               </code>
             </pre>
           )}
