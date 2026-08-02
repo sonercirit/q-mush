@@ -74,6 +74,7 @@ function mountMutationDetail(
 function mutation(options: {
   readonly addedNodes: NodeList;
   readonly removedNodes: NodeList;
+  readonly target?: Node;
 }): MutationRecord {
   return {
     addedNodes: options.addedNodes,
@@ -83,7 +84,7 @@ function mutation(options: {
     oldValue: null,
     previousSibling: null,
     removedNodes: options.removedNodes,
-    target: document.createElement("div"),
+    target: options.target ?? document.createElement("div"),
     type: "childList",
   };
 }
@@ -116,8 +117,98 @@ function replacePaneWrapper(
   replacement: HTMLElement,
 ): MutationRecord {
   const addedNodes = nodeList(replacement);
+  const target = current.parentElement;
+  if (target === null) throw new TypeError("Missing replacement parent");
   current.replaceWith(replacement);
-  return mutation({ addedNodes, removedNodes: nodeList(current) });
+  return mutation({
+    addedNodes,
+    removedNodes: nodeList(current),
+    target,
+  });
+}
+
+interface StructuralPaneScenario extends MountedMutationDetail {
+  readonly first: HTMLElement;
+  readonly insertedWrapper: HTMLElement;
+  readonly second: HTMLElement;
+}
+
+function structuralPaneScenario(): StructuralPaneScenario {
+  const mounted = mountMutationDetail([toolResult(0), toolResult(1)]);
+  const panes = [
+    ...mounted.root.querySelectorAll<HTMLElement>("[data-line-wrap]"),
+  ];
+  const first = panes[0];
+  const second = panes[1];
+  if (first === undefined || second === undefined)
+    throw new TypeError("Missing remembered panes");
+  const insertedWrapper = first.parentElement?.cloneNode(true);
+  if (!(insertedWrapper instanceof HTMLElement))
+    throw new TypeError("Missing inserted pane");
+  defineElementSize(first, 100, 1_000);
+  defineElementSize(second, 100, 1_000);
+  const firstToggle = first.parentElement?.querySelector<HTMLButtonElement>(
+    "[data-subscroll-wrap-toggle]",
+  );
+  if (firstToggle === undefined || firstToggle === null)
+    throw new TypeError("Missing wrap toggle");
+  firstToggle.click();
+  first.scrollTop = 20;
+  first.dispatchEvent(new Event("scroll", { bubbles: true }));
+  second.scrollTop = 70;
+  second.dispatchEvent(new Event("scroll", { bubbles: true }));
+  return { ...mounted, first, insertedWrapper, second };
+}
+
+function insertStructuralPane(
+  scenario: StructuralPaneScenario,
+): MutationRecord {
+  const insertedNodes = nodeList(scenario.insertedWrapper);
+  const insertionHost = document.createElement("div");
+  insertionHost.append(scenario.insertedWrapper);
+  scenario.root.prepend(insertionHost);
+  return mutation({
+    addedNodes: insertedNodes,
+    removedNodes: nodeList(),
+    target: scenario.root,
+  });
+}
+
+function replaceRememberedPanes(
+  scenario: StructuralPaneScenario,
+): MutationRecord[] {
+  const firstReplacement = nestedPaneReplacement(scenario.first);
+  const secondReplacement = nestedPaneReplacement(scenario.second);
+  defineElementSize(firstReplacement.pane, 100, 1_000);
+  defineElementSize(secondReplacement.pane, 100, 1_000);
+  return [
+    replacePaneWrapper(
+      scenario.first.parentElement ?? scenario.first,
+      firstReplacement.wrapper,
+    ),
+    replacePaneWrapper(
+      scenario.second.parentElement ?? scenario.second,
+      secondReplacement.wrapper,
+    ),
+  ];
+}
+
+function expectStructuralPaneStates(root: HTMLElement): void {
+  const panes = [...root.querySelectorAll<HTMLElement>("[data-line-wrap]")];
+  expect(
+    panes.map((pane) => [pane.scrollTop, pane.dataset["lineWrap"] === "true"]),
+  ).toEqual([
+    [0, true],
+    [20, false],
+    [70, true],
+  ]);
+  expect(
+    panes.map((pane) =>
+      pane.parentElement
+        ?.querySelector("[data-subscroll-wrap-toggle]")
+        ?.getAttribute("aria-pressed"),
+    ),
+  ).toEqual(["true", "false", "true"]);
 }
 
 afterEach(() => {
@@ -156,70 +247,27 @@ test("unrelated transcript mutations do not rescan historical panes", () => {
 });
 
 test("structural pane insertion keeps later replacements correctly indexed", () => {
-  const { callback, harness, root } = mountMutationDetail([
-    toolResult(0),
-    toolResult(1),
-  ]);
-  const panes = [...root.querySelectorAll<HTMLElement>("[data-line-wrap]")];
-  const first = panes[0];
-  const second = panes[1];
-  if (first === undefined || second === undefined)
-    throw new TypeError("Missing remembered panes");
-  defineElementSize(first, 100, 1_000);
-  defineElementSize(second, 100, 1_000);
-  const firstToggle = first.parentElement?.querySelector<HTMLButtonElement>(
-    "[data-subscroll-wrap-toggle]",
+  const scenario = structuralPaneScenario();
+  scenario.callback(
+    [insertStructuralPane(scenario)],
+    scenario.harness.observer(),
   );
-  if (firstToggle === undefined || firstToggle === null)
-    throw new TypeError("Missing wrap toggle");
-  firstToggle.click();
-  first.scrollTop = 20;
-  first.dispatchEvent(new Event("scroll", { bubbles: true }));
-  second.scrollTop = 70;
-  second.dispatchEvent(new Event("scroll", { bubbles: true }));
-
-  const insertedWrapper = first.parentElement?.cloneNode(true);
-  if (!(insertedWrapper instanceof HTMLElement))
-    throw new TypeError("Missing inserted pane");
-  const insertedNodes = nodeList(insertedWrapper);
-  const insertionHost = document.createElement("div");
-  insertionHost.append(insertedWrapper);
-  root.prepend(insertionHost);
-  callback(
-    [mutation({ addedNodes: insertedNodes, removedNodes: nodeList() })],
-    harness.observer(),
+  scenario.callback(
+    replaceRememberedPanes(scenario),
+    scenario.harness.observer(),
   );
 
-  const firstReplacement = nestedPaneReplacement(first);
-  const secondReplacement = nestedPaneReplacement(second);
-  defineElementSize(firstReplacement.pane, 100, 1_000);
-  defineElementSize(secondReplacement.pane, 100, 1_000);
-  callback(
-    [
-      replacePaneWrapper(
-        first.parentElement ?? first,
-        firstReplacement.wrapper,
-      ),
-      replacePaneWrapper(
-        second.parentElement ?? second,
-        secondReplacement.wrapper,
-      ),
-    ],
-    harness.observer(),
-  );
+  expectStructuralPaneStates(scenario.root);
+});
 
-  expect(firstReplacement.pane.scrollTop).toBe(20);
-  expect(firstReplacement.pane.dataset["lineWrap"]).toBe("false");
-  expect(
-    firstReplacement.wrapper
-      .querySelector("[data-subscroll-wrap-toggle]")
-      ?.getAttribute("aria-pressed"),
-  ).toBe("false");
-  expect(secondReplacement.pane.scrollTop).toBe(70);
-  expect(secondReplacement.pane.dataset["lineWrap"]).toBe("true");
-  expect(
-    secondReplacement.wrapper
-      .querySelector("[data-subscroll-wrap-toggle]")
-      ?.getAttribute("aria-pressed"),
-  ).toBe("true");
+test("restores replacements after insertion in the same mutation batch", () => {
+  const scenario = structuralPaneScenario();
+  const mutations = [
+    insertStructuralPane(scenario),
+    ...replaceRememberedPanes(scenario),
+  ];
+
+  scenario.callback(mutations, scenario.harness.observer());
+
+  expectStructuralPaneStates(scenario.root);
 });
