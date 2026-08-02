@@ -20,6 +20,7 @@ import type { AgentModelDiscoverer } from "../../sync-engine/agent-model-discove
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
 import type { OpenRouterProviderDiscoverer } from "../../sync-engine/openrouter-provider-discovery.ts";
 import { createRunnerIntegration } from "../../sync-engine/runners.ts";
+import { readUserSpawnSession } from "../../sync-engine/session-input.ts";
 import { createSessionIntegration } from "../../sync-engine/sessions.ts";
 import { WorkspaceStore } from "../../sync-engine/workspace-store.ts";
 import {
@@ -356,27 +357,23 @@ export function connectedSessionSetup(
   };
 }
 
-export function createSpawnSessionInput(
+export async function createSpawnSessionInput(
   parentSessionId: string,
   parentGeneration: number,
 ) {
-  return {
-    agentFilePath: null,
-    autoCompact: true,
-    credentialId: CREDENTIAL_ID,
-    executionEnvironment: "bare_metal" as const,
-    images: [],
-    model: "gpt-4.1-mini",
-    openRouterProviderTag: null,
+  const requestInput: unknown = await createSessionRequest().json();
+  if (typeof requestInput !== "object" || requestInput === null) {
+    throw new TypeError("The session request fixture is invalid");
+  }
+  const input = readUserSpawnSession({
+    ...requestInput,
     parentGeneration,
     parentSessionId,
-    prompt: "Keep working",
-    provider: "openai" as const,
-    reasoningEffort: "high" as const,
-    runnerId: RUNNER_ID,
-    tools: AGENT_SESSION_TOOL_NAMES,
-    workingDirectory: "/work/project",
-  };
+  });
+  if (input === undefined) {
+    throw new TypeError("The spawn request fixture is invalid");
+  }
+  return input;
 }
 
 export function createSessionRequest(

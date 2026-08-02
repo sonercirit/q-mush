@@ -540,26 +540,42 @@ describe("agent sessions", () => {
     const parent = setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID);
     const child = await setup.sessions.realtimeCommands.spawnForUser(
       TEST_AUTHENTICATED_USER,
-      createSpawnSessionInput(SESSION_ID, parent?.generation ?? -1),
+      await createSpawnSessionInput(SESSION_ID, parent?.generation ?? -1),
       TEST_WORKSPACE_ID,
+    );
+    expect(child.status).toBe("queued");
+    await waitForSessionValue(
+      () => setup.latestRunnerCommand()?.sessionId,
+      (sessionId) => sessionId === child.id,
+    );
+    expect(completeRunnerCommand(setup, "null").status).toBe(204);
+    await waitForSessionValue(
+      () => setup.sessions.detailForUser(TEST_USER_ID, child.id)?.status,
+      (status) => status === "running",
     );
 
     const stopped = await stopHttpSession(setup);
 
-    expect(stopped.status).toBe(200);
-    expect(await stopped.json()).toMatchObject({ status: "stopped" });
-    expect(setup.sessions.detailForUser(TEST_USER_ID, child.id)?.status).toBe(
-      "stopped",
-    );
+    const stoppedBody: unknown = await stopped.json();
+    expect({ body: stoppedBody, status: stopped.status }).toMatchObject({
+      body: { status: "stopped" },
+      status: 200,
+    });
+    const childStatus = setup.sessions.detailForUser(
+      TEST_USER_ID,
+      child.id,
+    )?.status;
+    expect(childStatus).toBe("stopped");
     setup.database.$client.close();
   });
 
   test("accepts explicit HTTP parent-only stop semantics", async () => {
     const setup = connectedSessionSetup(new BlockingModel());
-    const createResponse = await setup.sessions.collection(
-      createSessionRequest(),
+    await expectSessionReaches(
+      setup,
+      await setup.sessions.collection(createSessionRequest()),
+      "running",
     );
-    await expectSessionReaches(setup, createResponse, "running");
 
     const stopped = await stopHttpSession(setup, false);
 

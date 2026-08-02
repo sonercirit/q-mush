@@ -88,10 +88,14 @@ describe("session realtime command dispatch", () => {
       () => setup.sessions.listForUser(TEST_USER_ID),
       (sessions) => Array.isArray(sessions) && sessions.length === 2,
     );
-    const child = setup.sessions
+    const children = setup.sessions
       .listForUser(TEST_USER_ID)
-      .find(({ parentSessionId }) => parentSessionId === SESSION_ID);
-    if (child === undefined) throw new Error("Missing spawned child");
+      .filter(({ parentSessionId }) => parentSessionId === SESSION_ID);
+    expect(children).toHaveLength(1);
+    const childId = children[0]?.id ?? "missing-child";
+    expect(setup.sessions.detailForUser(TEST_USER_ID, childId)?.status).toBe(
+      "running",
+    );
 
     await executeSessionRealtimeCommand(
       setup.sessions.realtimeCommands,
@@ -102,12 +106,15 @@ describe("session realtime command dispatch", () => {
       TEST_WORKSPACE_ID,
     );
 
-    expect(setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID)?.status).toBe(
-      "stopped",
+    const parentAfterStop = setup.sessions.detailForUser(
+      TEST_USER_ID,
+      SESSION_ID,
     );
-    expect(setup.sessions.detailForUser(TEST_USER_ID, child.id)?.status).toBe(
+    const childAfterStop = setup.sessions.detailForUser(TEST_USER_ID, childId);
+    expect([parentAfterStop?.status, childAfterStop?.status]).toEqual([
       "stopped",
-    );
+      "stopped",
+    ]);
     setup.database.$client.close();
   });
   test("routes question answers through the authenticated workspace", async () => {
