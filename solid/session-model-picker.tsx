@@ -15,6 +15,7 @@ import {
   modelCredentialValue,
   reasoningModelOptions,
   type SessionModelDiscoverer,
+  type SessionModelDiscoveryResult,
 } from "./session-model-options.ts";
 
 export interface SessionModelPickerSelection {
@@ -231,17 +232,18 @@ function createSessionModelDiscovery(
       const currentRequest = options.request.latest.begin();
       options.request.setError(undefined);
       setCatalog(undefined);
-      const models = await options.onDiscoverModels(
-        selected.provider,
-        selected.credential.id,
-      );
+      const result: SessionModelDiscoveryResult =
+        await options.onDiscoverModels(
+          selected.provider,
+          selected.credential.id,
+        );
       if (!options.request.latest.isLatest(currentRequest)) return;
-      setCatalog(models);
-      if (models === undefined) {
-        options.request.setError("Models are unavailable for that credential.");
+      if ("error" in result) {
+        options.request.setError(result.error);
         return;
       }
-      options.patch(discoveredSessionModelSelection(models, options.current()));
+      setCatalog(result);
+      options.patch(discoveredSessionModelSelection(result, options.current()));
     },
   };
 }

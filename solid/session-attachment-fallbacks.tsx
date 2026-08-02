@@ -50,12 +50,12 @@ export function AttachmentFallbackSettings(props: {
     credentialId,
   ) => {
     const selectedModality = modality();
-    const catalog = await props.onDiscoverModels(provider, credentialId);
-    return catalog === undefined
-      ? undefined
+    const result = await props.onDiscoverModels(provider, credentialId);
+    return "error" in result
+      ? result
       : {
-          ...catalog,
-          models: catalog.models.filter(({ inputModalities }) =>
+          ...result,
+          models: result.models.filter(({ inputModalities }) =>
             modelSupportsAttachmentModality(inputModalities, selectedModality),
           ),
         };

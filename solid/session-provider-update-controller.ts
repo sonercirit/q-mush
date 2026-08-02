@@ -1,4 +1,3 @@
-import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
 import {
   SESSION_MODELS_PATH,
@@ -11,12 +10,16 @@ import {
 } from "../shared/session-provider-update.ts";
 import { SESSION_REALTIME_OPERATIONS } from "../shared/user-realtime-protocol.ts";
 import type { WorkspaceSummary } from "../shared/workspace-model.ts";
-import { requestJson } from "./browser-http.ts";
+import { HttpResponseError, requestJson } from "./browser-http.ts";
 import {
   readAgentModelCatalog,
   readOpenRouterProviderCatalog,
   readSessionDetail,
 } from "./session-codec.ts";
+import type {
+  SessionModelDiscoveryFailure,
+  SessionModelDiscoveryResult,
+} from "./session-model-options.ts";
 import type { SessionCommandTransport } from "./session-transport.ts";
 
 export async function discoverProviderUpdateModels(
@@ -24,7 +27,7 @@ export async function discoverProviderUpdateModels(
   provider: ProviderId,
   credentialId: string,
   workspaceId?: WorkspaceSummary["id"],
-): Promise<AgentModelCatalog | undefined> {
+): Promise<SessionModelDiscoveryResult> {
   try {
     return readAgentModelCatalog(
       transport === undefined
@@ -40,9 +43,45 @@ export async function discoverProviderUpdateModels(
             provider,
           }),
     );
-  } catch {
-    return undefined;
+  } catch (error) {
+    return modelDiscoveryFailure(provider, error);
   }
+}
+
+function modelDiscoveryFailure(
+  provider: ProviderId,
+  error: unknown,
+): SessionModelDiscoveryFailure {
+  const providerName = provider === "openrouter" ? "OpenRouter" : "Provider";
+  const code =
+    error instanceof HttpResponseError
+      ? error.code
+      : typeof error === "object" &&
+          error !== null &&
+          "code" in error &&
+          typeof error.code === "string"
+        ? error.code
+        : undefined;
+  if (code === "credential_unavailable") {
+    return {
+      error: `That ${providerName} credential is not available in this workspace.`,
+    };
+  }
+  if (code === "workspace_unavailable") {
+    return { error: "That workspace is unavailable for model discovery." };
+  }
+  if (
+    error instanceof HttpResponseError &&
+    error.code === "provider_unavailable"
+  ) {
+    return {
+      error: error.detail ?? `${providerName} model discovery is unavailable.`,
+    };
+  }
+  if (code === "provider_unavailable") {
+    return { error: `${providerName} model discovery is unavailable.` };
+  }
+  return { error: `${providerName} model discovery failed. Please try again.` };
 }
 
 export async function discoverProviderUpdateProviders(

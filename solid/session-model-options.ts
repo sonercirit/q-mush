@@ -5,10 +5,17 @@ import type {
 import type { ProviderId } from "../shared/provider-credential-store.ts";
 import type { CustomSelectOption } from "./custom-select.tsx";
 
+export interface SessionModelDiscoveryFailure {
+  readonly error: string;
+}
+
+export type SessionModelDiscoveryResult =
+  AgentModelCatalog | SessionModelDiscoveryFailure;
+
 export type SessionModelDiscoverer = (
   provider: ProviderId,
   credentialId: string,
-) => Promise<AgentModelCatalog | undefined>;
+) => Promise<SessionModelDiscoveryResult>;
 
 export interface ModelCredentialIdentity {
   readonly credentialId: string;

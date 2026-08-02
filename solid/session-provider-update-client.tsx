@@ -53,19 +53,19 @@ export function SessionProviderUpdateEditor(
     const current = discovery.begin();
     setModels(undefined);
     setProviders(undefined);
-    const catalog = await props.onDiscoverModels(
+    const result = await props.onDiscoverModels(
       next.provider,
       next.credentialId,
     );
     if (!discovery.isLatest(current)) return;
-    setModels(catalog);
-    if (catalog === undefined) {
-      setError("Models are unavailable for that credential.");
+    if ("error" in result) {
+      setError(result.error);
       return;
     }
-    const model = catalog.models.some(({ id }) => id === next.model)
+    setModels(result);
+    const model = result.models.some(({ id }) => id === next.model)
       ? next.model
-      : (catalog.models[0]?.id ?? "");
+      : (result.models[0]?.id ?? "");
     const selected = {
       ...next,
       model,

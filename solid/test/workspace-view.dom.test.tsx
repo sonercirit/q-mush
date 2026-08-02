@@ -142,7 +142,7 @@ test("discovers global fallbacks through the mounted workspace", async () => {
       container
         .querySelector("[role='alert']")
         ?.textContent.includes(
-          "Models are unavailable for that credential.",
+          "That workspace is unavailable for model discovery.",
         ) === true,
   );
   const retry = findTestButton(container, "Retry model discovery");
