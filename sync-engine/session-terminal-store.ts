@@ -3,7 +3,10 @@ import { updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID } from "../shared/ids.ts";
-import type { RestartHandoff } from "../shared/session-model.ts";
+import {
+  normalSessionCompletionStatus,
+  type RestartHandoff,
+} from "../shared/session-model.ts";
 import {
   activePendingInput,
   promotePendingInput,
@@ -12,6 +15,7 @@ import { canonicalRestartHandoff } from "./session-restart-store.ts";
 import {
   runningCondition,
   sessionTimingUpdate,
+  storedSessionSnapshotCondition,
   terminalSessionValues,
   updateStoredSessions,
   type StoredSessionSnapshot,
@@ -45,10 +49,10 @@ export function terminalRuntimeCondition(
 export function settleTerminalRuntime(
   database: Pick<AppDatabase, "insert" | "select" | "update">,
   condition: SQL | undefined,
-  status: "failed" | "idle",
+  status: "completed" | "failed" | "idle",
   now: number,
   sessionId?: string,
-): "failed" | "idle" | "queued" {
+): "completed" | "failed" | "idle" | "queued" {
   const session = database
     .select({
       activeDurationMs: agentSessions.activeDurationMs,
@@ -64,7 +68,7 @@ export function settleTerminalRuntime(
     throw new DOMException("The agent session was stopped", "AbortError");
   }
   const pending =
-    status === "idle" && sessionId !== undefined
+    status !== "failed" && sessionId !== undefined
       ? activePendingInput(database, sessionId)
       : undefined;
   const successorTurnId =
@@ -158,14 +162,27 @@ export function recoverStoredTerminal(
   session: StoredSessionSnapshot,
   now: number,
 ): boolean {
-  return database.transaction(
-    (transaction) =>
+  const settle = (
+    transaction: Pick<AppDatabase, "insert" | "select" | "update">,
+  ): boolean => {
+    const parentSessionId = transaction
+      .select({ parentSessionId: agentSessions.parentSessionId })
+      .from(agentSessions)
+      .where(storedSessionSnapshotCondition(session))
+      .get()?.parentSessionId;
+    return (
       storedTerminalExists(transaction, session.id) &&
       updateStoredSnapshotAndEndGenerationTurn(
         transaction,
         session,
         now,
-        terminalSessionValues(session, "idle", now),
-      ),
-  );
+        terminalSessionValues(
+          session,
+          normalSessionCompletionStatus({ parentSessionId }),
+          now,
+        ),
+      )
+    );
+  };
+  return database.transaction(settle);
 }

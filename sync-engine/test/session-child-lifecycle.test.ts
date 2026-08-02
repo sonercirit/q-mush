@@ -161,7 +161,7 @@ function childDetail(lifecycle: ChildLifecycleSetup) {
 
 async function waitForChildStatus(
   lifecycle: ChildLifecycleSetup,
-  status: "idle" | "stopped",
+  status: "completed" | "stopped",
 ): Promise<void> {
   await waitForSessionValue(
     () => childDetail(lifecycle),
@@ -266,7 +266,7 @@ describe("terminal parents with running children", () => {
     ).toBe("running");
 
     lifecycle.model.finishChild();
-    await waitForChildStatus(lifecycle, "idle");
+    await waitForChildStatus(lifecycle, "completed");
     await waitForCallbackDisposition(lifecycle);
 
     expectCallbackNoOp(lifecycle, "idle");

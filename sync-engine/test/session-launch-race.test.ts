@@ -26,6 +26,8 @@ import {
   expectJsonResponse,
   expectStoredSession,
   type SessionStoreTestSetup,
+  transitionTestSession,
+  unsupportedFixtureStatus,
 } from "./session-launch-race-helpers.ts";
 import {
   createStore,
@@ -259,17 +261,6 @@ function credentialAction(
   return (_userId, _detail, action) => Promise.resolve(action(credential));
 }
 
-function transitionTestSession(
-  setup: SessionStoreTestSetup,
-  detail: AgentSessionDetail,
-  status: "failed" | "idle" | "running",
-  now: () => number,
-): void {
-  expect(
-    setup.store.transitionRuntime(detail.id, status, now(), detail.generation),
-  ).toBe(true);
-}
-
 function launchableSessionSetup(
   status: AgentSessionStatus,
 ): FailedLaunchTestSetup {
@@ -277,6 +268,9 @@ function launchableSessionSetup(
   const now = testClock();
   const created = createTestSession(setup.store);
   switch (status) {
+    case "completed": {
+      return unsupportedFixtureStatus(status);
+    }
     case "failed":
       failCreatedSession(setup, created, now);
       break;

@@ -354,7 +354,7 @@ const SESSION_AGENT_TOOLS = [
   }),
   toolDefinition({
     description:
-      "Send a user message to another idle, failed, or stopped owned session and start it.",
+      "Send a user message to another completed, idle, failed, or stopped owned session and start it.",
     name: "send_to_session",
     properties: {
       ...SESSION_ID_PARAMETER,
@@ -367,7 +367,7 @@ const SESSION_AGENT_TOOLS = [
   }),
   toolDefinition({
     description:
-      "Continue another idle, failed, or stopped owned session without adding a message.",
+      "Continue another completed, idle, failed, or stopped owned session without adding a message.",
     name: "continue_session",
     properties: SESSION_ID_PARAMETER,
     required: ["sessionId"],

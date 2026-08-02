@@ -23,7 +23,15 @@ function affectedRunnerSessions(
     database,
     and(
       storedSessionCondition({
-        status: ["paused", "queued", "running", "idle", "stopped", "failed"],
+        status: [
+          "paused",
+          "queued",
+          "running",
+          "idle",
+          "completed",
+          "stopped",
+          "failed",
+        ],
         userId,
       }),
       eq(agentSessions.runnerId, runnerId),
@@ -55,7 +63,12 @@ function fenceAssignedSession(
       executionGeneration: sql`${agentSessions.executionGeneration} + 1`,
       restartHandoff: null,
       runnerRequired: true,
-      status: session.status === "stopped" ? "stopped" : "idle",
+      status:
+        session.status === "stopped"
+          ? "stopped"
+          : session.status === "completed"
+            ? "completed"
+            : "idle",
       ...updatedAuditFields(SYSTEM_ID, now),
     },
   });

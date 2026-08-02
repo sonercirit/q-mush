@@ -9,8 +9,17 @@ import type { ProviderModelPricing } from "./provider-model-pricing.ts";
 import type { RunnerExecutionEnvironment } from "./runner-command-broker.ts";
 import type { SessionPendingInputContent } from "./session-pending-input.ts";
 
-export type AgentSessionStatus =
-  "queued" | "running" | "paused" | "idle" | "stopped" | "failed";
+export const AGENT_SESSION_STATUSES = [
+  "queued",
+  "running",
+  "paused",
+  "idle",
+  "completed",
+  "stopped",
+  "failed",
+] as const;
+
+export type AgentSessionStatus = (typeof AGENT_SESSION_STATUSES)[number];
 
 export type RestartHandoffRequester = "runner" | "server";
 export type RestartHandoffOperation =
@@ -22,6 +31,12 @@ export interface RestartHandoff {
   readonly pendingInput: readonly [];
   readonly requestedBy: RestartHandoffRequester;
   readonly restartId: string;
+}
+
+export function normalSessionCompletionStatus(
+  session: Readonly<{ parentSessionId: string | null | undefined }>,
+): "completed" | "idle" {
+  return session.parentSessionId == null ? "idle" : "completed";
 }
 
 export type AgentSessionCostBasis = "estimated" | "none" | "reported";

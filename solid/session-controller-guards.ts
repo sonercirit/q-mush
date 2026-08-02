@@ -24,7 +24,12 @@ export function sessionCanCompactAndContinue(
 }
 
 export function sessionCanResume(status: AgentSessionStatus): boolean {
-  return status === "idle" || status === "failed" || status === "stopped";
+  return (
+    status === "completed" ||
+    status === "idle" ||
+    status === "failed" ||
+    status === "stopped"
+  );
 }
 
 export function sessionCanUpdateAutoCompaction(

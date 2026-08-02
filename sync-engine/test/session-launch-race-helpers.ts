@@ -39,6 +39,21 @@ export function expectStoredSession(
   return detail;
 }
 
+export function transitionTestSession(
+  setup: SessionStoreTestSetup,
+  detail: AgentSessionDetail,
+  status: "failed" | "idle" | "running",
+  now: () => number,
+): void {
+  expect(
+    setup.store.transitionRuntime(detail.id, status, now(), detail.generation),
+  ).toBe(true);
+}
+
+export function unsupportedFixtureStatus(status: string): never {
+  throw new Error(`Unsupported fixture status: ${status}`);
+}
+
 export function expectedRestartHandoff(
   executionGeneration: number,
   operation: RestartHandoffOperation,

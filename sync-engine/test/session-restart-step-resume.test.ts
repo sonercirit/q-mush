@@ -154,7 +154,7 @@ test("a spawned session resumes its interrupted step after server recreation", a
   await waitForSessionValue(
     () => sessionFor(recreated, childId),
     (value) =>
-      hasSessionStatus("idle")(value) &&
+      hasSessionStatus("completed")(value) &&
       JSON.stringify(value).includes(CHILD_SUMMARY),
   );
 
@@ -175,7 +175,7 @@ test("a spawned session resumes its interrupted step after server recreation", a
   ).toBe(true);
   expect(sessionFor(recreated, childId)).toMatchObject({
     restartHandoff: null,
-    status: "idle",
+    status: "completed",
   });
   await waitForTerminalParentNote(recreated.sessions, childId);
   expect(completionReports(recreated)).toHaveLength(0);
