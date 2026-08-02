@@ -115,6 +115,8 @@ test("manual continuation claims a completed child's pending callback", () => {
   expect(queued.status).toBe("queued");
   expect(childCallbackCount(setup)).toBe(1);
   const callback = requireChildCallback(setup);
+  expect(callback.content).toContain("Child terminal assistant message");
+  expect(callback.content).toContain('"role": "assistant"');
   expect(callback.content).toBe(finisherCallbackContent());
   expect(setup.store.spawnedSessionLink(TEST_USER_ID, setup.childId)).toBe(
     undefined,
