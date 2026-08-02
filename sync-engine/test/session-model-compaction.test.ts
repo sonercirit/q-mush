@@ -1,7 +1,11 @@
 import { describe, expect, test } from "vitest";
 import type { AgentModelCatalog } from "../../shared/agent-configuration.ts";
 import { SESSION_MODELS_PATH, SESSIONS_PATH } from "../../shared/routes.ts";
-import type { AgentModelDiscoverer } from "../../sync-engine/agent-model-discovery.ts";
+import { GLOBAL_WORKSPACE_ID } from "../../shared/workspace-model.ts";
+import {
+  AgentModelDiscoveryError,
+  type AgentModelDiscoverer,
+} from "../../sync-engine/agent-model-discovery.ts";
 import {
   createAuthenticatedRequest,
   TEST_AUTHENTICATED_USER,
@@ -114,6 +118,31 @@ describe("session models and compaction", () => {
     await expectSessionReaches(setup, createResponse, "idle");
     expect(setup.selectedPricing).toEqual([catalog.models[0]?.pricing]);
     database.$client.close();
+  });
+
+  test("supports descriptive discovery in the Global scope", async () => {
+    const setup = connectedSessionSetup(
+      new ScriptedAgentModel([]),
+      "api_key",
+      () =>
+        Promise.reject(
+          new AgentModelDiscoveryError(
+            "Model discovery failed with status 503",
+            503,
+          ),
+        ),
+    );
+    const response = await setup.sessions.models(
+      createAuthenticatedRequest(
+        `${SESSION_MODELS_PATH}?provider=openai&credentialId=${CREDENTIAL_ID}&workspaceId=${GLOBAL_WORKSPACE_ID}`,
+      ),
+    );
+
+    await expectJsonResponse(response, 502, {
+      error: "provider_unavailable",
+      message: "Model discovery failed with status 503",
+    });
+    setup.database.$client.close();
   });
 
   test("updates compaction mode and manually compacts an idle session", async () => {

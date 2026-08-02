@@ -1,7 +1,8 @@
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
+import { readIdentifier } from "../shared/validation.ts";
+import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 import { createApiError, createJsonResponse } from "./http.ts";
-import { readIdentifier } from "./session-request-helpers.ts";
 import type { SessionStore } from "./session-store.ts";
 
 export interface SessionWorkspaceReader {
@@ -19,7 +20,9 @@ export function requestSessionWorkspaceId(
     supplied === null
       ? workspaces.defaultForUser(userId)?.id
       : readIdentifier(supplied);
-  return workspaceId !== undefined && workspaces.exists(userId, workspaceId)
+  return workspaceId !== undefined &&
+    (workspaceId === GLOBAL_WORKSPACE_ID ||
+      workspaces.exists(userId, workspaceId))
     ? workspaceId
     : undefined;
 }

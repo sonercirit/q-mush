@@ -32,8 +32,15 @@ export function createJsonResponse(value: unknown, status = 200): Response {
   });
 }
 
-export function createApiError(error: string, status: number): Response {
-  return createJsonResponse({ error }, status);
+export function createApiError(
+  error: string,
+  status: number,
+  message?: string,
+): Response {
+  return createJsonResponse(
+    { error, ...(message === undefined ? {} : { message }) },
+    status,
+  );
 }
 
 export function createNoContentResponse(): Response {

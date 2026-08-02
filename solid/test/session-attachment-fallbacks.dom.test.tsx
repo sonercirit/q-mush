@@ -103,13 +103,31 @@ test("discovers global fallback models over HTTP without realtime", async () => 
   expect(new Headers(init?.headers).get("accept")).toBe("application/json");
 });
 
+test("reports descriptive HTTP discovery failures", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    Response.json(
+      {
+        error: "provider_unavailable",
+        message: "Model discovery failed with status 503",
+      },
+      { status: 502 },
+    ),
+  );
+
+  await expect(
+    discoverProviderUpdateModels(undefined, "openrouter", "credential-1"),
+  ).resolves.toEqual({ error: "Model discovery failed with status 503" });
+});
+
 test("shows an explicit fallback model discovery error and retries", async () => {
   const catalog = fallbackCatalog([
     fallbackModel("image-model", ["text", "image"], "Image model"),
   ]);
   const discoverModels = vi
-    .fn<() => Promise<AgentModelCatalog | undefined>>()
-    .mockResolvedValueOnce(undefined)
+    .fn<() => Promise<AgentModelCatalog | { readonly error: string }>>()
+    .mockResolvedValueOnce({
+      error: "OpenRouter model discovery is temporarily unavailable.",
+    })
     .mockResolvedValueOnce(catalog);
   const container = mountFallbackSettings(
     fallbackCredential("openrouter", "OpenRouter credential"),
@@ -119,7 +137,7 @@ test("shows an explicit fallback model discovery error and retries", async () =>
   await expectModelDiscovery(discoverModels, 1);
   await vi.waitFor(() => {
     expect(container.querySelector("[role='alert']")?.textContent).toContain(
-      "Models are unavailable for that credential.",
+      "OpenRouter model discovery is temporarily unavailable.",
     );
   });
   const retry = findTestButton(container, "Retry model discovery");

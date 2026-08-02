@@ -15,11 +15,7 @@ import { ChatCompletionsAgentModel } from "./agent-model.ts";
 import { createAttachmentFallbackIntegration } from "./attachment-fallback-integration.ts";
 import type { GoogleAuth } from "./auth.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
-import {
-  createApiError,
-  createJsonResponse,
-  parseJsonRequest,
-} from "./http.ts";
+import { createApiError, parseJsonRequest } from "./http.ts";
 import {
   discoverOpenRouterProviders,
   type OpenRouterProviderDiscoverer,
@@ -50,7 +46,6 @@ import { SessionExecutionCleanup } from "./session-execution-cleanup.ts";
 import { SessionFinisher } from "./session-finisher.ts";
 import {
   readCreateSession,
-  readProvider,
   type CreateSessionInput,
   type PromptInput,
 } from "./session-input.ts";
@@ -65,6 +60,7 @@ import {
   reportPendingSpawns,
 } from "./session-interrupted-recovery.ts";
 import { SessionLauncher } from "./session-launcher.ts";
+import { modelsForUser } from "./session-model-discovery.ts";
 import { sessionMetadata } from "./session-provider-selection.ts";
 import {
   recoverAnsweredQuestions,
@@ -80,12 +76,8 @@ import { createSessionRestartControl } from "./session-restart-control.ts";
 import { SessionRestartCoordinator } from "./session-restart-coordinator.ts";
 import { RunnerRemovalCoordinator } from "./session-runner-removal.ts";
 import { SessionRuntimes } from "./session-runtime.ts";
-import { requestSearchSelection } from "./session-search-selection.ts";
 import { SessionStore } from "./session-store.ts";
-import {
-  requestSessionWorkspaceId,
-  type SessionWorkspaceReader,
-} from "./session-workspace.ts";
+import type { SessionWorkspaceReader } from "./session-workspace.ts";
 
 export type { SessionIntegration } from "./session-integration.ts";
 
@@ -473,39 +465,17 @@ class DrizzleSessionIntegration
       : createApiError("runner_unavailable", 409);
   }
 
-  #requestWorkspaceId(request: Request, userId: string): string | undefined {
-    return requestSessionWorkspaceId(request, userId, this.#workspaces);
-  }
-
   async #modelsForUser(
     request: Request,
     user: AuthenticatedUser,
   ): Promise<Response> {
-    const { credentialId, search } = requestSearchSelection(request);
-    const provider = readProvider(search.get("provider"));
-    const workspaceId = this.#requestWorkspaceId(request, user.id);
-
-    if (
-      credentialId === undefined ||
-      provider === undefined ||
-      workspaceId === undefined
-    ) {
-      return createApiError("invalid_request", 400);
-    }
-
-    return this.#withCredentialAccess(
-      user.id,
-      { credentialId, provider, workspaceId },
-      async (credential) => {
-        try {
-          return createJsonResponse(
-            await this.#discoverModels(provider, credential),
-          );
-        } catch {
-          return createApiError("provider_unavailable", 502);
-        }
-      },
-    );
+    return modelsForUser({
+      discoverModels: this.#discoverModels,
+      request,
+      user,
+      withCredential: this.#withCredentialAccess,
+      workspaces: this.#workspaces,
+    });
   }
 
   async #createForUser(
