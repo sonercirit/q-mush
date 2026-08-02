@@ -12,6 +12,7 @@ import {
   type SessionCredentialReaders,
 } from "./session-credential-access.ts";
 import {
+  optionalCredentialRejection,
   requireSessionMetadata,
   sessionMetadataFromDependencies,
 } from "./session-provider-selection.ts";
@@ -62,9 +63,7 @@ async function targetMetadata(
       dependencies,
       input,
       ownerId: userId,
-      ...(dependencies.rejectCredentialErrors === undefined
-        ? {}
-        : { rejectCredentialErrors: dependencies.rejectCredentialErrors }),
+      ...optionalCredentialRejection(dependencies.rejectCredentialErrors),
     }),
   );
 }

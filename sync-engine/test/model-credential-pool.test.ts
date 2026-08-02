@@ -10,6 +10,10 @@ import {
   TEST_USER_ID,
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
+import {
+  balancedTestCredentialOrder,
+  fourBalancedPoolSelections,
+} from "./credential-balancing-fixtures.ts";
 
 const FIRST_CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000091";
 const SECOND_CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000092";
@@ -45,19 +49,14 @@ function createSetup() {
 describe("model credential pool", () => {
   test("distributes four balanced spawns evenly while explicit selection bypasses", async () => {
     const setup = createSetup();
-    const selected: (string | undefined)[] = [];
-
-    for (let index = 0; index < 4; index += 1) {
-      selected.push(
-        (await setup.pool.candidates(TEST_USER_ID, SELECTION))[0]?.id,
-      );
-    }
-    expect(selected).toEqual([
-      FIRST_CREDENTIAL_ID,
-      SECOND_CREDENTIAL_ID,
-      FIRST_CREDENTIAL_ID,
-      SECOND_CREDENTIAL_ID,
-    ]);
+    const selected = await fourBalancedPoolSelections(
+      setup.pool,
+      TEST_USER_ID,
+      SELECTION,
+    );
+    expect(selected).toEqual(
+      balancedTestCredentialOrder(FIRST_CREDENTIAL_ID, SECOND_CREDENTIAL_ID),
+    );
 
     await expect(
       setup.pool.candidates(TEST_USER_ID, {

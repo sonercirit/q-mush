@@ -9,7 +9,10 @@ import { createApiError } from "./http.ts";
 import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
 import { persistQueuedRestartHandoff } from "./session-agent-action-helpers.ts";
 import type { CreateSessionInput } from "./session-input.ts";
-import { sessionMetadataFromDependencies } from "./session-provider-selection.ts";
+import {
+  optionalCredentialRejection,
+  sessionMetadataFromDependencies,
+} from "./session-provider-selection.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
 import type { CreateAgentSession } from "./session-store-create.ts";
 import type { SessionStore } from "./session-store.ts";
@@ -202,9 +205,7 @@ export async function createValidatedSession(
     dependencies,
     input,
     ownerId: user.id,
-    ...(dependencies.rejectCredentialErrors === undefined
-      ? {}
-      : { rejectCredentialErrors: dependencies.rejectCredentialErrors }),
+    ...optionalCredentialRejection(dependencies.rejectCredentialErrors),
   });
   if ("error" in metadata) {
     return createApiError(

@@ -3,6 +3,10 @@ import { CredentialPoolBalancer } from "../credential-pool-balancer.ts";
 
 const MEMBERS = [{ id: "first" }, { id: "second" }] as const;
 
+function memberIds(balancer: CredentialPoolBalancer): readonly string[] {
+  return balancer.ordered("pool", MEMBERS).map(({ id }) => id);
+}
+
 describe("credential pool balancer", () => {
   test("selects members in deterministic round-robin order", () => {
     const balancer = new CredentialPoolBalancer();
@@ -21,14 +25,9 @@ describe("credential pool balancer", () => {
     });
 
     balancer.coolDown("pool", "first");
-    expect(balancer.ordered("pool", MEMBERS).map(({ id }) => id)).toEqual([
-      "second",
-    ]);
+    expect(memberIds(balancer)).toEqual(["second"]);
 
     now += 30_000;
-    expect(balancer.ordered("pool", MEMBERS).map(({ id }) => id)).toEqual([
-      "second",
-      "first",
-    ]);
+    expect(memberIds(balancer)).toEqual(["second", "first"]);
   });
 });

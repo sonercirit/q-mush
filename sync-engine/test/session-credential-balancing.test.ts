@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import type { AgentModel } from "../../shared/agent-loop.ts";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
+import { testAgentModelCatalog } from "../../shared/test/agent-model-fixtures.ts";
 import { AgentModelDiscoveryError } from "../agent-model-discovery.ts";
 import type { CreateSessionInput } from "../session-input.ts";
 import {
@@ -9,6 +10,10 @@ import {
   TEST_WORKSPACE_ID,
   createTestProviderCredential,
 } from "./authenticated-integration-test-helpers.ts";
+import {
+  balancedTestCredentialOrder,
+  fourBalancedSessions,
+} from "./credential-balancing-fixtures.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
 import {
   CREDENTIAL_ID,
@@ -18,20 +23,10 @@ import {
 import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
 
 const SECOND_CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000093";
-const TEST_CATALOG = {
-  defaultModel: "gpt-4.1-mini",
-  models: [
-    {
-      contextWindow: 128_000,
-      id: "gpt-4.1-mini",
-      inputModalities: ["text"],
-      label: "GPT 4.1 mini",
-      outputModalities: ["text"],
-      pricing: null,
-      reasoningEfforts: [],
-    },
-  ],
-} as const;
+const TEST_CATALOG = testAgentModelCatalog({
+  id: "gpt-4.1-mini",
+  label: "GPT 4.1 mini",
+});
 const IDLE_MODEL: AgentModel = {
   complete: () => Promise.resolve(providerStep("Done")),
 };
@@ -70,27 +65,24 @@ function setup(discoverModels: Parameters<typeof connectedSessionSetup>[2]) {
 describe("session credential balancing", () => {
   test("distributes four sessions evenly and persists each resolved credential", async () => {
     const sessions = setup(() => Promise.resolve(TEST_CATALOG));
-    const selected: string[] = [];
-
-    for (let index = 0; index < 4; index += 1) {
-      const detail = await sessions.sessions.realtimeCommands.createForUser(
-        TEST_AUTHENTICATED_USER,
-        input(balancedCredentialId("openai")),
-        TEST_WORKSPACE_ID,
-      );
-      selected.push(detail.credentialId);
-      expect(
+    const create: Parameters<
+      typeof sessions.sessions.realtimeCommands.createForUser
+    > = [
+      TEST_AUTHENTICATED_USER,
+      input(balancedCredentialId("openai")),
+      TEST_WORKSPACE_ID,
+    ];
+    const selected = await fourBalancedSessions({
+      commands: sessions.sessions.realtimeCommands,
+      create,
+      persistedCredentialId: (detail) =>
         sessions.sessions.detailForUser(TEST_AUTHENTICATED_USER.id, detail.id)
           ?.credentialId,
-      ).toBe(detail.credentialId);
-    }
+    });
 
-    expect(selected).toEqual([
-      CREDENTIAL_ID,
-      SECOND_CREDENTIAL_ID,
-      CREDENTIAL_ID,
-      SECOND_CREDENTIAL_ID,
-    ]);
+    expect(selected).toEqual(
+      balancedTestCredentialOrder(CREDENTIAL_ID, SECOND_CREDENTIAL_ID),
+    );
     closeSessionTestDatabase(sessions.database);
   });
 

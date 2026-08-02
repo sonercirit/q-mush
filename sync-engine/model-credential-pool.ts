@@ -4,21 +4,17 @@ import { isBalancedCredentialId } from "../shared/provider-credential-pool.ts";
 import {
   ProviderCredentialStore,
   type ProviderCredentialAccess,
-  type ProviderId,
 } from "../shared/provider-credential-store.ts";
 import { isCredentialRejectionError } from "./agent-model-discovery.ts";
+import type { SessionCredentialSelection } from "./session-credential-access.ts";
 
-interface BalancedCredentialSelection {
-  readonly credentialId: string;
-  readonly provider: ProviderId;
-  readonly workspaceId?: string;
-}
+export type ModelCredentialSelection = SessionCredentialSelection;
 
 export interface ModelCredentialPoolDependencies {
   readonly database: AppDatabase;
   readonly readCredential: (
     userId: string,
-    selection: BalancedCredentialSelection,
+    selection: ModelCredentialSelection,
   ) => Promise<ProviderCredentialAccess | undefined>;
 }
 
@@ -34,19 +30,12 @@ export class ModelCredentialPool {
     this.#dependencies = dependencies;
   }
 
-  async representative(
+  async #readCandidates(
     userId: string,
-    selection: BalancedCredentialSelection,
+    selection: ModelCredentialSelection,
+    summaries: readonly { readonly id: string }[],
+    pool?: string,
   ): Promise<readonly ProviderCredentialAccess[]> {
-    if (!isBalancedCredentialId(selection.provider, selection.credentialId)) {
-      return this.candidates(userId, selection);
-    }
-    const summaries = ProviderCredentialStore.listActiveModelCredentials(
-      this.#dependencies.database,
-      userId,
-      selection.provider,
-      selection.workspaceId,
-    );
     const credentials: ProviderCredentialAccess[] = [];
     for (const summary of summaries) {
       try {
@@ -56,48 +45,75 @@ export class ModelCredentialPool {
         });
         if (credential !== undefined) credentials.push(credential);
       } catch {
-        // A later member can still provide the shared provider catalog.
+        if (pool !== undefined) this.#balancer.coolDown(pool, summary.id);
       }
     }
     return credentials;
   }
 
-  async candidates(
-    userId: string,
-    selection: BalancedCredentialSelection,
-  ): Promise<readonly ProviderCredentialAccess[]> {
-    if (!isBalancedCredentialId(selection.provider, selection.credentialId)) {
-      const credential = await this.#dependencies.readCredential(
-        userId,
-        selection,
-      );
-      return credential === undefined ? [] : [credential];
-    }
-    const pool = this.#poolKey(userId, selection);
-    const summaries = ProviderCredentialStore.listActiveModelCredentials(
+  #activeSummaries(userId: string, selection: ModelCredentialSelection) {
+    return ProviderCredentialStore.listActiveModelCredentials(
       this.#dependencies.database,
       userId,
       selection.provider,
       selection.workspaceId,
     );
-    const credentials: ProviderCredentialAccess[] = [];
-    for (const summary of this.#balancer.ordered(pool, summaries)) {
-      try {
-        const credential = await this.#dependencies.readCredential(userId, {
-          ...selection,
-          credentialId: summary.id,
-        });
-        if (credential !== undefined) credentials.push(credential);
-      } catch {
-        this.#balancer.coolDown(pool, summary.id);
-      }
-    }
-    return credentials;
+  }
+
+  async #balancedCandidates(
+    userId: string,
+    selection: ModelCredentialSelection,
+    pool?: string,
+  ): Promise<readonly ProviderCredentialAccess[]> {
+    const summaries = this.#activeSummaries(userId, selection);
+    return this.#readCandidates(
+      userId,
+      selection,
+      pool === undefined ? summaries : this.#balancer.ordered(pool, summaries),
+      pool,
+    );
+  }
+
+  async #poolOrSingle(options: {
+    readonly pool?: string;
+    readonly selection: ModelCredentialSelection;
+    readonly userId: string;
+  }): Promise<readonly ProviderCredentialAccess[]> {
+    const { pool, selection, userId } = options;
+    return isBalancedCredentialId(selection.provider, selection.credentialId)
+      ? this.#balancedCandidates(userId, selection, pool)
+      : this.#readCandidates(userId, selection, [
+          { id: selection.credentialId },
+        ]);
+  }
+
+  async representative(
+    userId: string,
+    selection: ModelCredentialSelection,
+  ): Promise<readonly ProviderCredentialAccess[]> {
+    return this.#poolOrSingle({ selection, userId });
+  }
+
+  async candidates(
+    userId: string,
+    selection: ModelCredentialSelection,
+  ): Promise<readonly ProviderCredentialAccess[]> {
+    const pool = isBalancedCredentialId(
+      selection.provider,
+      selection.credentialId,
+    )
+      ? this.#poolKey(userId, selection)
+      : undefined;
+    return this.#poolOrSingle({
+      ...(pool === undefined ? {} : { pool }),
+      selection,
+      userId,
+    });
   }
 
   reject(
     userId: string,
-    selection: BalancedCredentialSelection,
+    selection: ModelCredentialSelection,
     credentialId: string,
     error: unknown,
   ): boolean {
@@ -111,7 +127,7 @@ export class ModelCredentialPool {
     return true;
   }
 
-  #poolKey(userId: string, selection: BalancedCredentialSelection): string {
+  #poolKey(userId: string, selection: ModelCredentialSelection): string {
     return [userId, selection.workspaceId ?? "", selection.provider].join(":");
   }
 }

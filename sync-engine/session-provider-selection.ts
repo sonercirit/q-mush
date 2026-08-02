@@ -174,13 +174,34 @@ export function requireSessionMetadata(
   return metadata;
 }
 
+export function optionalCredentialRejection(
+  rejectCredentialErrors: boolean | undefined,
+): Readonly<{ rejectCredentialErrors?: boolean }> {
+  return rejectCredentialErrors === undefined ? {} : { rejectCredentialErrors };
+}
+
+interface SessionMetadataInput {
+  readonly model: string;
+  readonly openRouterProviderTag: string | null;
+  readonly provider: ProviderId;
+}
+
+interface SessionMetadataOptions {
+  readonly credential: ProviderCredentialAccess;
+  readonly discoverModels: AgentModelDiscoverer;
+  readonly discoverProviders: OpenRouterProviderDiscoverer;
+  readonly input: SessionMetadataInput;
+  readonly ownerId: string;
+  readonly rejectCredentialErrors?: boolean;
+}
+
 export function sessionMetadataFromDependencies(options: {
   readonly credential: ProviderCredentialAccess;
   readonly dependencies: {
     readonly discoverModels: AgentModelDiscoverer;
     readonly discoverOpenRouterProviders: OpenRouterProviderDiscoverer;
   };
-  readonly input: Parameters<typeof sessionMetadata>[0]["input"];
+  readonly input: SessionMetadataInput;
   readonly ownerId: string;
   readonly rejectCredentialErrors?: boolean;
 }): Promise<SessionMetadataResult> {
@@ -190,24 +211,13 @@ export function sessionMetadataFromDependencies(options: {
     discoverProviders: options.dependencies.discoverOpenRouterProviders,
     input: options.input,
     ownerId: options.ownerId,
-    ...(options.rejectCredentialErrors === undefined
-      ? {}
-      : { rejectCredentialErrors: options.rejectCredentialErrors }),
+    ...optionalCredentialRejection(options.rejectCredentialErrors),
   });
 }
 
-export async function sessionMetadata(options: {
-  readonly credential: ProviderCredentialAccess;
-  readonly discoverModels: AgentModelDiscoverer;
-  readonly discoverProviders: OpenRouterProviderDiscoverer;
-  readonly input: {
-    readonly model: string;
-    readonly openRouterProviderTag: string | null;
-    readonly provider: ProviderId;
-  };
-  readonly ownerId: string;
-  readonly rejectCredentialErrors?: boolean;
-}): Promise<SessionMetadataResult> {
+export async function sessionMetadata(
+  options: SessionMetadataOptions,
+): Promise<SessionMetadataResult> {
   const { credential, input } = options;
   if (endpointProviderTag(input.openRouterProviderTag) !== undefined) {
     try {

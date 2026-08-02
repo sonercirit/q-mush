@@ -121,6 +121,58 @@ function testProviderStates() {
   };
 }
 
+function createdSession(payload: Record<string, unknown>) {
+  return Promise.resolve({
+    ...TEST_SESSION_DETAIL,
+    credentialId: String(payload["credentialId"]),
+    model: String(payload["model"]),
+    provider: payload["provider"] === "openrouter" ? "openrouter" : "openai",
+    status: "queued",
+  });
+}
+
+function mountedSessionPanel(
+  command: TestSessionCommand,
+  providers = testProviderStates(),
+): {
+  readonly container: HTMLElement;
+  readonly controller: SessionController;
+} {
+  installModelDiscoveryFetch();
+  const controller = createSessionTestController(command);
+  const container = mountTestView(
+    () =>
+      SessionPanel({
+        controller,
+        openAi: () => providers.ai,
+        openRouter: () => providers.router,
+        runners: () => createRunnerViewState([runnerSummary(1)]),
+      }),
+    disposals,
+  );
+  return { container, controller };
+}
+
+function verifySessionCommand(
+  command: ReturnType<typeof mockSessionCommand>,
+  credentialId: string,
+  provider: "openai" | "openrouter",
+  model?: string,
+): void {
+  expect(command).toHaveBeenCalledWith("sessions.models", {
+    credentialId,
+    provider,
+  });
+  expect(command).toHaveBeenCalledWith(
+    "sessions.create",
+    expect.objectContaining({
+      credentialId,
+      ...(model === undefined ? {} : { model }),
+      provider,
+    }),
+  );
+}
+
 function selectedAccountModel(payload: Record<string, unknown>) {
   const openRouter = payload["provider"] === "openrouter";
   return {
@@ -192,29 +244,9 @@ test("changing the new-session account drives model loading and creation", async
   const command = mockSessionCommand((operation, payload) =>
     operation === "sessions.models"
       ? modelCatalog([selectedAccountModel(payload)])
-      : Promise.resolve({
-          ...TEST_SESSION_DETAIL,
-          credentialId: String(payload["credentialId"]),
-          model: String(payload["model"]),
-          provider:
-            payload["provider"] === "openrouter" ? "openrouter" : "openai",
-          status: "queued",
-        }),
+      : createdSession(payload),
   );
-  installModelDiscoveryFetch();
-  const controller = createSessionTestController(command);
-  const resources = {
-    ...testProviderStates(),
-    runner: createRunnerViewState([runnerSummary(1)]),
-  };
-  const panel = (): ReturnType<typeof SessionPanel> =>
-    SessionPanel({
-      controller,
-      openAi: () => resources.ai,
-      openRouter: () => resources.router,
-      runners: () => resources.runner,
-    });
-  const container = mountTestView(panel, disposals);
+  const { container, controller } = mountedSessionPanel(command);
 
   await waitForModel(container, "OpenAI model");
   chooseOption(container, "#session-credential", "openrouter:credential-2");
@@ -223,66 +255,39 @@ test("changing the new-session account drives model loading and creation", async
   controller.setDraftField("prompt", "Use the selected account");
   await controller.create();
 
-  expect(command).toHaveBeenCalledWith("sessions.models", {
-    credentialId: "credential-2",
-    provider: "openrouter",
-  });
-  expect(command).toHaveBeenCalledWith(
-    "sessions.create",
-    expect.objectContaining({
-      credentialId: "credential-2",
-      model: "openrouter/model",
-      provider: "openrouter",
-    }),
+  verifySessionCommand(
+    command,
+    "credential-2",
+    "openrouter",
+    "openrouter/model",
   );
 });
 
 test("choosing a balanced pool discovers and creates with its sentinel", async () => {
-  const command = mockSessionCommand((operation, payload) =>
-    operation === "sessions.models"
-      ? modelCatalog([selectedAccountModel(payload)])
-      : Promise.resolve({
-          ...TEST_SESSION_DETAIL,
-          credentialId: String(payload["credentialId"]),
-          model: String(payload["model"]),
-          provider: "openai",
-          status: "queued",
-        }),
-  );
-  installModelDiscoveryFetch();
-  const controller = createSessionTestController(command);
-  const container = mountTestView(
-    () =>
-      SessionPanel({
-        controller,
-        openAi: () =>
-          createProviderViewState([
-            OPEN_AI_CREDENTIAL,
-            SECOND_OPEN_AI_CREDENTIAL,
-          ]),
-        openRouter: () => createProviderViewState([]),
-        runners: () => createRunnerViewState([runnerSummary(1)]),
-      }),
-    disposals,
-  );
+  const command = mockSessionCommand((operation, payload) => {
+    if (operation !== "sessions.models") return createdSession(payload);
+    return modelCatalog([
+      {
+        ...selectedAccountModel(payload),
+        label: "Balanced OpenAI model",
+      },
+    ]);
+  });
+  const { container, controller } = mountedSessionPanel(command, {
+    ai: createProviderViewState([
+      OPEN_AI_CREDENTIAL,
+      SECOND_OPEN_AI_CREDENTIAL,
+    ]),
+    router: createProviderViewState([]),
+  });
 
   await waitForModel(container, "OpenAI model");
   chooseOption(container, "#session-credential", "openai:balanced:openai");
-  await waitForModel(container, "OpenAI model");
+  await waitForModel(container, "Balanced OpenAI model");
   controller.setDraftField("prompt", "Balance this session");
   await controller.create();
 
-  expect(command).toHaveBeenCalledWith("sessions.models", {
-    credentialId: "balanced:openai",
-    provider: "openai",
-  });
-  expect(command).toHaveBeenCalledWith(
-    "sessions.create",
-    expect.objectContaining({
-      credentialId: "balanced:openai",
-      provider: "openai",
-    }),
-  );
+  verifySessionCommand(command, "balanced:openai", "openai");
 });
 
 test("preserves the new-session draft across background resource updates", async () => {

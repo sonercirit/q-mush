@@ -12,6 +12,7 @@ import {
   TEST_USER_ID,
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
+import { balancedTestCredentialOrder } from "./credential-balancing-fixtures.ts";
 import { takeValue } from "./oauth-test-helpers.ts";
 
 const FIRST_KEY_ID = "018bcfe5-6800-7000-8000-000000000081";
@@ -44,6 +45,12 @@ function defaultSearchResponse(apiKey: string | null): Response {
   return apiKey === SECOND_KEY
     ? successfulSearchResponse()
     : Response.json({ message: "invalid key" }, { status: 401 });
+}
+
+function credentialIds(
+  requests: readonly Request[],
+): readonly (string | null)[] {
+  return requests.map((request) => request.headers.get("x-subscription-token"));
 }
 
 function createSetup(
@@ -90,6 +97,20 @@ async function saveTestKeys(
     const body = await response.text();
     expect(body.includes(key.apiKey)).toBe(false);
   }
+}
+
+function expectCredentialOrder(
+  setup: ReturnType<typeof createSetup>,
+  expected: readonly string[],
+): void {
+  expect(credentialIds(setup.requests)).toEqual(expected);
+}
+
+async function search(
+  setup: ReturnType<typeof createSetup>,
+  query: string,
+): Promise<void> {
+  await setup.skill.execute(TEST_USER_ID, TEST_WORKSPACE_ID, { query });
 }
 
 describe("Brave Search skill", () => {
@@ -147,11 +168,7 @@ describe("Brave Search skill", () => {
       ],
     });
     expect(setup.requests).toHaveLength(2);
-    expect(
-      setup.requests.map((request) =>
-        request.headers.get("x-subscription-token"),
-      ),
-    ).toEqual([FIRST_KEY, SECOND_KEY]);
+    expectCredentialOrder(setup, [FIRST_KEY, SECOND_KEY]);
     expect(new URL(setup.requests[1]?.url ?? "http://invalid").search).toBe(
       "?q=bun+typescript&count=2",
     );
@@ -181,27 +198,19 @@ describe("Brave Search skill", () => {
     const setup = createSetup({ now: () => now });
     await saveTestKeys(setup);
 
-    await setup.skill.execute(TEST_USER_ID, TEST_WORKSPACE_ID, {
-      query: "first",
-    });
-    await setup.skill.execute(TEST_USER_ID, TEST_WORKSPACE_ID, {
-      query: "second",
-    });
-    expect(
-      setup.requests.map((request) =>
-        request.headers.get("x-subscription-token"),
-      ),
-    ).toEqual([FIRST_KEY, SECOND_KEY, SECOND_KEY]);
+    await search(setup, "first");
+    await search(setup, "second");
+    expectCredentialOrder(setup, [FIRST_KEY, SECOND_KEY, SECOND_KEY]);
 
     now += 30_001;
-    await setup.skill.execute(TEST_USER_ID, TEST_WORKSPACE_ID, {
-      query: "after cooldown",
-    });
-    expect(
-      setup.requests.map((request) =>
-        request.headers.get("x-subscription-token"),
-      ),
-    ).toEqual([FIRST_KEY, SECOND_KEY, SECOND_KEY, FIRST_KEY, SECOND_KEY]);
+    await search(setup, "after cooldown");
+    expectCredentialOrder(setup, [
+      FIRST_KEY,
+      SECOND_KEY,
+      SECOND_KEY,
+      FIRST_KEY,
+      SECOND_KEY,
+    ]);
     setup.database.$client.close();
   });
 
@@ -210,14 +219,13 @@ describe("Brave Search skill", () => {
     await saveTestKeys(setup);
 
     for (const query of ["first", "second", "third", "fourth"]) {
-      await setup.skill.execute(TEST_USER_ID, TEST_WORKSPACE_ID, { query });
+      await search(setup, query);
     }
 
-    expect(
-      setup.requests.map((request) =>
-        request.headers.get("x-subscription-token"),
-      ),
-    ).toEqual([FIRST_KEY, SECOND_KEY, FIRST_KEY, SECOND_KEY]);
+    expectCredentialOrder(
+      setup,
+      balancedTestCredentialOrder(FIRST_KEY, SECOND_KEY),
+    );
     setup.database.$client.close();
   });
 
