@@ -99,6 +99,7 @@ export function settleTerminalRuntime(
     settledStatus === "queued"
       ? {
           ...sessionTimingUpdate(session, now),
+          interruptedHandoff: null,
           restartHandoff: null,
           status: "queued" as const,
           ...updatedAuditFields(SYSTEM_ID, now),

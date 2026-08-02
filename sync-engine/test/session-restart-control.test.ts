@@ -66,6 +66,10 @@ class TestRestartRuntimes implements RestartRuntimeControl {
     return Promise.resolve();
   }
 
+  mark(scope: RestartScope, restartId: string): Promise<void> {
+    return this.drain(scope, restartId);
+  }
+
   drainRequest(scope: RestartScope): RestartRequest | undefined {
     return scope.kind === "server"
       ? this.#serverRequest

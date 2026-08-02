@@ -217,6 +217,10 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
     });
   }
 
+  prepareFinalShutdown(): Promise<void> {
+    return this.resources.restart.prepareServerShutdown();
+  }
+
   drainRunner(runnerId: string, restartId: string): Promise<void> {
     return this.resources.restart.drainRunner(runnerId, restartId);
   }

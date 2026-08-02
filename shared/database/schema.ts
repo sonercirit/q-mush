@@ -54,7 +54,7 @@ export const workspaces = sqliteTable(
     name: text("name").notNull(),
     isDefault: integer("is_default", { mode: "boolean" })
       .notNull()
-      .default(Boolean()),
+      .default(false),
     ...auditColumns(),
   },
   (table) => [
@@ -131,7 +131,7 @@ function providerCredentialIdColumn() {
   );
 }
 
-function quotaSettingActiveIndex(table: {
+function quotaIndex(table: {
   readonly isDeleted: AnySQLiteColumn;
   readonly providerCredentialId: AnySQLiteColumn;
 }) {
@@ -140,7 +140,7 @@ function quotaSettingActiveIndex(table: {
     .where(sql`NOT ${table.isDeleted}`);
 }
 
-function quotaThresholdColumn() {
+function threshold() {
   return real("auto_reset_threshold_percent").notNull().default(1);
 }
 
@@ -149,14 +149,14 @@ export const providerQuotaSettings = sqliteTable(
   {
     ...userOwnedAuditColumns(),
     providerCredentialId: providerCredentialIdColumn(),
-    autoResetThresholdPercent: quotaThresholdColumn(),
+    autoResetThresholdPercent: threshold(),
   },
   (table) => [
     index("provider_quota_settings_user_deletion_index").on(
       table.userId,
       table.isDeleted,
     ),
-    quotaSettingActiveIndex(table),
+    quotaIndex(table),
     check(
       "provider_quota_settings_threshold_range_check",
       sql`${table.autoResetThresholdPercent} >= 0 AND ${table.autoResetThresholdPercent} <= 100`,
@@ -366,6 +366,7 @@ export const agentSessions = sqliteTable(
     executionGeneration: integer("execution_generation").notNull().default(0),
     currentSegment: integer("current_segment").notNull().default(0),
     restartHandoff: text("restart_handoff"),
+    interruptedHandoff: text("shutdown_interrupted_handoff"),
     providerCredentialId: text("provider_credential_id")
       .notNull()
       .references(() => providerCredentials.id, { onDelete: "restrict" }),

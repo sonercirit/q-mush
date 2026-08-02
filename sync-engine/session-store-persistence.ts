@@ -114,6 +114,7 @@ export interface StoredSessionTiming {
 export interface StoredSessionSnapshot extends StoredSessionTiming {
   readonly executionGeneration: number;
   readonly id: string;
+  readonly interruptedHandoff: string | null;
   readonly restartHandoff: string | null;
   readonly status: AgentSessionStatus;
   readonly userId: string;
@@ -123,6 +124,7 @@ const STORED_SESSION_SNAPSHOT_SELECTION = {
   ...SESSION_TIMING_SELECTION,
   executionGeneration: agentSessions.executionGeneration,
   id: agentSessions.id,
+  interruptedHandoff: agentSessions.interruptedHandoff,
   restartHandoff: agentSessions.restartHandoff,
   status: agentSessions.status,
   userId: agentSessions.userId,
@@ -149,6 +151,9 @@ export function storedSessionSnapshotCondition(
       status: session.status,
       userId: session.userId,
     }),
+    session.interruptedHandoff === null
+      ? isNull(agentSessions.interruptedHandoff)
+      : eq(agentSessions.interruptedHandoff, session.interruptedHandoff),
     session.restartHandoff === null
       ? isNull(agentSessions.restartHandoff)
       : eq(agentSessions.restartHandoff, session.restartHandoff),
@@ -192,6 +197,7 @@ export function terminalSessionValues<Status extends "failed" | "idle">(
 ) {
   return {
     ...sessionTimingUpdate(session, now),
+    interruptedHandoff: null,
     restartHandoff: null,
     status,
     ...updatedAuditFields(SYSTEM_ID, now),

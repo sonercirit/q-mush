@@ -20,14 +20,19 @@ interface ActiveSessionRuntime {
   readonly boundary: RestartBoundary;
   readonly controller: AbortController;
   readonly generation: number;
-  persistRestart: ((request: RestartRequest) => void) | undefined;
+  persistRestart:
+    | ((request: RestartRequest, durable: boolean) => Promise<void> | void)
+    | undefined;
+  restartDurable: boolean;
   restartRequest: RestartRequest | undefined;
+  clearDurable: (() => Promise<void> | void) | undefined;
   readonly runnerId: string;
   settled: Promise<void>;
 }
 
 interface SessionRuntimeContext extends SessionRestartRequester {
   readonly controller: AbortController;
+  readonly settled: (clearDurable: () => Promise<void> | void) => void;
 }
 
 type SessionRuntime = (context: SessionRuntimeContext) => Promise<void>;
@@ -133,7 +138,11 @@ export class SessionRuntimes {
     );
   }
 
-  async drain(scope: RestartScope, restartId: string): Promise<void> {
+  async #request(
+    scope: RestartScope,
+    restartId: string,
+    durable: boolean,
+  ): Promise<readonly ActiveSessionRuntime[]> {
     assertRestartId(restartId);
     const existing =
       scope.kind === "server"
@@ -156,8 +165,26 @@ export class SessionRuntimes {
         ...request,
         boundary: runtime.boundary,
       };
-      runtime.persistRestart?.(runtime.restartRequest);
+      runtime.restartDurable ||= durable;
     }
+    await Promise.all(
+      affected.flatMap((runtime) => {
+        const persisted = runtime.persistRestart?.(
+          runtime.restartRequest ?? request,
+          runtime.restartDurable,
+        );
+        return persisted === undefined ? [] : [persisted];
+      }),
+    );
+    return affected;
+  }
+
+  async mark(scope: RestartScope, restartId: string): Promise<void> {
+    await this.#request(scope, restartId, true);
+  }
+
+  async drain(scope: RestartScope, restartId: string): Promise<void> {
+    const affected = await this.#request(scope, restartId, false);
     await Promise.allSettled(affected.map(({ settled }) => settled));
   }
 
@@ -191,7 +218,9 @@ export class SessionRuntimes {
       controller,
       generation,
       persistRestart: undefined,
+      restartDurable: false,
       restartRequest: undefined,
+      clearDurable: undefined,
       runnerId,
       settled: Promise.resolve(),
     };
@@ -204,10 +233,13 @@ export class SessionRuntimes {
             if (persist !== undefined) {
               runtime.persistRestart = persist;
               if (runtime.restartRequest !== undefined) {
-                persist(runtime.restartRequest);
+                void persist(runtime.restartRequest, runtime.restartDurable);
               }
             }
             return runtime.restartRequest;
+          },
+          settled: (clearDurable) => {
+            runtime.clearDurable = clearDurable;
           },
         }),
       );
@@ -219,6 +251,9 @@ export class SessionRuntimes {
       );
     }
     const clear = () => {
+      if (runtime.restartDurable) {
+        void runtime.clearDurable?.();
+      }
       if (this.#active.get(sessionId) === runtime) {
         this.#active.delete(sessionId);
       }

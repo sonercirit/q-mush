@@ -330,6 +330,7 @@ export function realtimeTestSessions(
     onChange: () => undefined,
     openRouterProviders: () => Promise.resolve(new Response()),
     pendingQuestionForUser: () => null,
+    prepareFinalShutdown: () => Promise.resolve(),
     pendingRunnerRestart: () => ({ status: "none" }),
     realtimeCommands: new RealtimeTestSessionCommands(),
     reassign: () => Promise.resolve(new Response()),

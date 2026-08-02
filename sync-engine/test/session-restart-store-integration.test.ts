@@ -1,6 +1,8 @@
 import { expect, test } from "vitest";
+import { agentSessions } from "../../shared/database/schema.ts";
 import type { RestartHandoffOperation } from "../../shared/session-model.ts";
 import { RunnerStore } from "../../sync-engine/runner-store.ts";
+import { ShutdownInterruptedSessionStore } from "../../sync-engine/session-shutdown-interrupted-store.ts";
 import {
   TEST_NOW,
   TEST_USER_ID,
@@ -49,6 +51,96 @@ function expectInterruptedRestored(
     status: "paused",
   });
 }
+
+function interruptedStore(setup: RestartStoreSetup) {
+  return new ShutdownInterruptedSessionStore({
+    database: setup.database,
+    generateId: () => `shutdown-interrupted-${crypto.randomUUID()}`,
+  });
+}
+
+function rawInterruptedMarker(setup: RestartStoreSetup): string | null {
+  return (
+    setup.database
+      .select({ marker: agentSessions.interruptedHandoff })
+      .from(agentSessions)
+      .get()?.marker ?? null
+  );
+}
+
+test("restores a running session from a durable shutdown interruption marker", () => {
+  const setup = runningRestartStore();
+  const running = projectedSession(setup);
+  if (running === undefined) {
+    throw new Error("The shutdown interruption session is unavailable");
+  }
+  const interrupted = interruptedStore(setup);
+
+  expect(
+    interrupted.mark(
+      running.id,
+      running.generation,
+      "bounded-final-shutdown",
+      "agent",
+      TEST_NOW + 2,
+    ),
+  ).toBe(true);
+  expect(rawInterruptedMarker(setup)).not.toBeNull();
+  interrupted.restore(TEST_NOW + 3);
+
+  const recovered = projectedSession(setup);
+  expect(recovered).toMatchObject({
+    activeStartedAt: null,
+    generation: running.generation + 1,
+    messages: running.messages,
+    restartHandoff: {
+      executionGeneration: running.generation + 1,
+      operation: "agent",
+      requestedBy: "server",
+      restartId: "bounded-final-shutdown",
+    },
+    status: "paused",
+  });
+  expect(rawInterruptedMarker(setup)).toBeNull();
+  expect(recovered).not.toMatchObject({ status: "failed" });
+  expect(setup.store.failInterrupted(TEST_NOW + 4)).toHaveLength(0);
+  closeCompactionStore(setup);
+});
+
+test("converts a corrupt shutdown marker into a corrupt restart handoff", () => {
+  const setup = runningRestartStore();
+  setup.database
+    .update(agentSessions)
+    .set({ interruptedHandoff: "not-json" })
+    .run();
+  const interrupted = interruptedStore(setup);
+
+  interrupted.failInvalid(TEST_NOW + 2);
+
+  expect(rawInterruptedMarker(setup)).toBeNull();
+  const invalid = setup.store.invalidRestartHandoffs()[0];
+  if (invalid === undefined) {
+    throw new Error("The corrupt converted handoff is unavailable");
+  }
+  expect(
+    setup.store.failInvalidRestartHandoff(
+      invalid,
+      "Session failed: Stored restart handoff is invalid",
+      TEST_NOW + 3,
+    ),
+  ).toBe(true);
+  const failed = projectedSession(setup);
+  expect(failed?.restartHandoff).toBeNull();
+  expect(failed?.status).toBe("failed");
+  const hasCorruptionError =
+    failed?.messages.some(
+      (message) =>
+        message.role === "error" &&
+        message.content.includes("Stored restart handoff is invalid"),
+    ) ?? false;
+  expect(hasCorruptionError).toBe(true);
+  closeCompactionStore(setup);
+});
 
 function expectRestartCleared(setup: RestartStoreSetup): void {
   expect(readRawRestartHandoff(setup)).toBeNull();

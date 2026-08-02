@@ -9,9 +9,11 @@ import type { SessionAgentActions } from "./session-agent-actions.ts";
 import type { AgentModelFactory } from "./session-agent-models.ts";
 import type { SessionNotification } from "./session-creation.ts";
 import type { SessionModelRuntimeResources } from "./session-model-runtime.ts";
+import type { DurableRestartPersistence } from "./session-restart-requester.ts";
 import type { RestartHandoffIdentity } from "./session-restart-store.ts";
 import { runPersistedSession } from "./session-run.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
+import type { ShutdownInterruptedSessionStore } from "./session-shutdown-interrupted-store.ts";
 import type { SessionStore } from "./session-store.ts";
 
 export type FinishSession = (
@@ -37,6 +39,10 @@ interface SessionLauncherDependencies {
   readonly realtime: RealtimeHub | undefined;
   readonly readCredential?: SessionModelRuntimeResources["readCredential"];
   readonly runtimes: SessionRuntimes;
+  readonly shutdownInterrupted: Pick<
+    ShutdownInterruptedSessionStore,
+    "clear" | "mark"
+  >;
   readonly store: SessionStore;
 }
 
@@ -53,12 +59,36 @@ export class SessionLauncher {
     userId: string,
     operation: RestartHandoffOperation = "agent",
   ): boolean {
+    const clearShutdownMarker = () => {
+      this.#dependencies.shutdownInterrupted.clear(
+        detail.id,
+        detail.generation,
+        this.#dependencies.now(),
+      );
+    };
     return this.#dependencies.runtimes.launch(
       detail.id,
       detail.runnerId,
       detail.generation,
       operation === "agent" ? "step" : "handoff",
-      async ({ controller, restartRequest }) => {
+      async ({ controller, restartRequest, settled }) => {
+        const restartPersistence: DurableRestartPersistence = {
+          clear: clearShutdownMarker,
+          operation,
+          persist: (request, durable) => {
+            if (durable) {
+              this.#dependencies.shutdownInterrupted.mark(
+                detail.id,
+                detail.generation,
+                request.restartId,
+                operation,
+                this.#dependencies.now(),
+              );
+            }
+          },
+        };
+        restartRequest(restartPersistence.persist);
+        settled(restartPersistence.clear);
         await this.#dependencies.beforeLaunch?.(detail);
         await runPersistedSession({
           controller,
@@ -90,6 +120,7 @@ export class SessionLauncher {
             store: this.#dependencies.store,
           },
           restartRequest,
+          restartPersistence,
           store: this.#dependencies.store,
           userId,
         });
