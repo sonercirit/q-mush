@@ -370,8 +370,14 @@ class DrizzleSessionIntegration
     input: SpawnSessionToolInput,
     credential: ProviderCredentialAccess,
     ownerId: string,
+    rejectCredentialErrors: boolean,
   ): Promise<Pick<AgentSessionDetail, "maxContextTokens" | "providerPricing">> {
-    const metadata = await this.#metadata(input, credential, ownerId);
+    const metadata = await this.#metadata(
+      input,
+      credential,
+      ownerId,
+      rejectCredentialErrors,
+    );
     if ("error" in metadata) {
       throw new Error(
         metadata.error === "provider_unavailable"
@@ -386,6 +392,7 @@ class DrizzleSessionIntegration
     input: Parameters<typeof sessionMetadata>[0]["input"],
     credential: ProviderCredentialAccess,
     ownerId: string,
+    rejectCredentialErrors: boolean,
   ) {
     return sessionMetadata({
       credential,
@@ -393,6 +400,7 @@ class DrizzleSessionIntegration
       discoverProviders: this.#discoverOpenRouterProviders,
       input,
       ownerId,
+      rejectCredentialErrors,
     });
   }
 
@@ -411,8 +419,18 @@ class DrizzleSessionIntegration
         void this.#executionCleanup.cleanupTerminal(detail);
       },
       pendingRestart: (runnerId) => this.#runtimes.pendingRestart(runnerId),
-      discoverSessionMetadata: (input, credential, userId) =>
-        this.#discoverSessionMetadata(input, credential, userId),
+      discoverSessionMetadata: (
+        input,
+        credential,
+        userId,
+        rejectCredentialErrors,
+      ) =>
+        this.#discoverSessionMetadata(
+          input,
+          credential,
+          userId,
+          rejectCredentialErrors,
+        ),
       launchSession: (credential, detail, userId) =>
         this.#launch(detail, credential, userId),
       listOnlineRunners: (userId, workspaceId) =>

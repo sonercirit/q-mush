@@ -182,6 +182,7 @@ export function sessionMetadataFromDependencies(options: {
   };
   readonly input: Parameters<typeof sessionMetadata>[0]["input"];
   readonly ownerId: string;
+  readonly rejectCredentialErrors?: boolean;
 }): Promise<SessionMetadataResult> {
   return sessionMetadata({
     credential: options.credential,
@@ -189,6 +190,9 @@ export function sessionMetadataFromDependencies(options: {
     discoverProviders: options.dependencies.discoverOpenRouterProviders,
     input: options.input,
     ownerId: options.ownerId,
+    ...(options.rejectCredentialErrors === undefined
+      ? {}
+      : { rejectCredentialErrors: options.rejectCredentialErrors }),
   });
 }
 
@@ -202,6 +206,7 @@ export async function sessionMetadata(options: {
     readonly provider: ProviderId;
   };
   readonly ownerId: string;
+  readonly rejectCredentialErrors?: boolean;
 }): Promise<SessionMetadataResult> {
   const { credential, input } = options;
   if (endpointProviderTag(input.openRouterProviderTag) !== undefined) {
@@ -232,7 +237,12 @@ export async function sessionMetadata(options: {
       providerPricing: model?.pricing ?? null,
     };
   } catch (error) {
-    if (isCredentialRejectionError(error)) throw error;
+    if (
+      options.rejectCredentialErrors === true &&
+      isCredentialRejectionError(error)
+    ) {
+      throw error;
+    }
     return { maxContextTokens: null, providerPricing: null };
   }
 }

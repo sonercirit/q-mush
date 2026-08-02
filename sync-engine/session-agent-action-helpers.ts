@@ -50,6 +50,7 @@ export interface SessionAgentActionDependencies {
     input: SpawnSessionToolInput,
     credential: ProviderCredentialAccess,
     userId: string,
+    rejectCredentialErrors: boolean,
   ) => Promise<SessionAgentMetadata>;
   readonly readCredential: (
     userId: string,
@@ -157,6 +158,13 @@ export async function spawnAgentSession(options: {
     return sessionToolOutput({ error: "parent_session_unavailable" });
   }
 
+  const selection = { ...options.input, workspaceId: parent.workspaceId };
+  const pool = options.dependencies.modelCredentialPool;
+  const balanced = isBalancedCredentialId(
+    selection.provider,
+    selection.credentialId,
+  );
+
   async function enqueue(
     input: SpawnSessionToolInput,
     credential: ProviderCredentialAccess,
@@ -166,6 +174,7 @@ export async function spawnAgentSession(options: {
       input,
       credential,
       options.userId,
+      balanced,
     );
     const created = options.dependencies.store.create(
       {
@@ -220,12 +229,6 @@ export async function spawnAgentSession(options: {
     }
     return notifiedResponse("spawned");
   }
-  const selection = { ...options.input, workspaceId: parent.workspaceId };
-  const pool = options.dependencies.modelCredentialPool;
-  const balanced = isBalancedCredentialId(
-    selection.provider,
-    selection.credentialId,
-  );
   if (pool !== undefined && balanced) {
     const credentials = await pool.candidates(options.userId, selection);
     if (credentials.length === 0) {

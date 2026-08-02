@@ -96,6 +96,7 @@ export type SessionCreationDependencies = Omit<
   readonly discoverModels: AgentModelDiscoverer;
   readonly discoverOpenRouterProviders: OpenRouterProviderDiscoverer;
   readonly onCreated?: (detail: AgentSessionDetail) => void;
+  readonly rejectCredentialErrors?: boolean;
   readonly runtimes: Pick<SessionRuntimes, "accepts" | "pendingRestart">;
   readonly serializeCreatedDetail?: CreatedSessionSerializer;
   readonly store: Pick<
@@ -201,6 +202,9 @@ export async function createValidatedSession(
     dependencies,
     input,
     ownerId: user.id,
+    ...(dependencies.rejectCredentialErrors === undefined
+      ? {}
+      : { rejectCredentialErrors: dependencies.rejectCredentialErrors }),
   });
   if ("error" in metadata) {
     return createApiError(

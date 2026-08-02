@@ -65,6 +65,7 @@ async function selectedForkConfiguration(
             provider: selection.provider,
           },
           ownerId: userId,
+          rejectCredentialErrors: true,
         }),
       );
       return {

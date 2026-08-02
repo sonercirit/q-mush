@@ -288,6 +288,7 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
             onCreated: (detail) => {
               created.detail = detail;
             },
+            rejectCredentialErrors: balanced,
           },
           user,
           resolvedInput,
