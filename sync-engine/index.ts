@@ -1,4 +1,5 @@
 import { readDatabasePath } from "../shared/database/config.ts";
+import { FINAL_SHUTDOWN_PREPARED_MESSAGE } from "../shared/development-shutdown.ts";
 import { createGoogleAuthFromEnvironment } from "./auth.ts";
 import { createBraveSearchSkillFromEnvironment } from "./brave-search.ts";
 import { createCoreIntegrationResources } from "./core-integration-resources.ts";
@@ -44,7 +45,9 @@ import { createSessionIntegration } from "./sessions.ts";
 
 const databasePath = readDatabasePath(Bun.env);
 const health = new EngineHealth();
-const database = openDatabaseAndCleanupRepairSnapshots(databasePath);
+const database = openDatabaseAndCleanupRepairSnapshots(databasePath, {
+  health,
+});
 // Run the free-space preflight before the optional full VACUUM rebuild.
 const vacuumRequiredBytes = databaseVacuumSafetyBytes(database.$client);
 const freeSpace = startDatabaseFreeSpaceMonitor(
@@ -54,6 +57,7 @@ const freeSpace = startDatabaseFreeSpaceMonitor(
 );
 const vacuum = enableIncrementalVacuum(database.$client, {
   availableBytes: freeSpace.availableBytes,
+  minimumFreeBytes: freeSpace.minimumFreeBytes,
 });
 if (vacuum.skipped) {
   health.degrade(
@@ -173,9 +177,11 @@ async function shutDown(): Promise<void> {
   if (freeSpace.timer !== undefined) {
     clearInterval(freeSpace.timer);
   }
+  writeResilience.close();
+  await sessions.prepareFinalShutdown();
+  process.send?.(FINAL_SHUTDOWN_PREPARED_MESSAGE);
   await sessions.drain();
   await Promise.all([server.stop(), callbackServer?.stop()]);
-  writeResilience.close();
   database.$client.close();
 }
 

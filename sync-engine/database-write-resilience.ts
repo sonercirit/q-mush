@@ -14,7 +14,7 @@ const WRITE_STATEMENT_PATTERN = /^\s*(?:delete|insert|replace|update)\b/iu;
 
 export type DatabaseWritePriority = "critical" | "noncritical";
 
-type RetrySleep = (delay: number) => void;
+type RetrySleep = (delay: number, signal: AbortSignal) => Promise<void>;
 
 type DatabaseWriteAttempt<Result> =
   | { readonly result: Result; readonly status: "persisted" }
@@ -69,7 +69,26 @@ function queueFullError(): Error {
   );
 }
 
+function abortableSleep(delay: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(closedError());
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", abort);
+      resolve();
+    }, delay);
+    function abort(): void {
+      clearTimeout(timer);
+      reject(closedError());
+    }
+    signal.addEventListener("abort", abort, { once: true });
+  });
+}
+
 export class DatabaseWriteResilience {
+  readonly #controller = new AbortController();
   readonly #health: StorageHealth;
   readonly #sleep: RetrySleep;
   #closed = false;
@@ -77,11 +96,15 @@ export class DatabaseWriteResilience {
 
   constructor(options: DatabaseWriteResilienceOptions) {
     this.#health = options.health;
-    this.#sleep = options.sleep ?? Bun.sleepSync;
+    this.#sleep = options.sleep ?? abortableSleep;
   }
 
   close(): void {
+    if (this.#closed) {
+      return;
+    }
     this.#closed = true;
+    this.#controller.abort();
   }
 
   #throwIfClosed(): void {
@@ -115,27 +138,14 @@ export class DatabaseWriteResilience {
     }
   }
 
-  #criticalRetry<Result>(
-    attempted: DatabaseWriteAttempt<Result>,
-    operation: () => Result,
-  ): Result {
-    if (attempted.status === "persisted") {
-      return attempted.result;
-    }
-    return this.#retry(operation);
-  }
-
   run<Result>(
     priority: DatabaseWritePriority,
     operation: () => Result,
-  ): Result | undefined {
-    if (this.#closed) {
-      throw closedError();
-    }
-    // Database calls are synchronous. Keeping the one active retry coupled to
-    // its caller also serializes later callers without retaining their payloads.
-    // Reentrant writes cannot wait for that caller, so the bounded queue rejects
-    // them before execution instead of applying them out of order.
+  ): Promise<Result> | Result | undefined {
+    this.#throwIfClosed();
+    // One caller owns the retry slot until its write is durably resolved. The
+    // asynchronous wait keeps the engine responsive without retaining an
+    // unbounded queue of later write payloads.
     if (this.#retrying) {
       if (priority === "noncritical") {
         return undefined;
@@ -153,12 +163,10 @@ export class DatabaseWriteResilience {
         : "a non-critical database write was dropped because the disk is full",
       attempted.error,
     );
-    return priority === "noncritical"
-      ? undefined
-      : this.#criticalRetry(attempted, operation);
+    return priority === "noncritical" ? undefined : this.#retry(operation);
   }
 
-  #retry<Result>(operation: () => Result): Result {
+  async #retry<Result>(operation: () => Result): Promise<Result> {
     this.#retrying = true;
     let attempt = 0;
     try {
@@ -170,11 +178,11 @@ export class DatabaseWriteResilience {
         if (delay === undefined) {
           throw new Error("The critical database retry policy is invalid");
         }
-        this.#sleep(delay);
+        await this.#sleep(delay, this.#controller.signal);
         this.#throwIfClosed();
         const attempted = this.#perform(operation, true);
         if (attempted.status === "persisted") {
-          return this.#criticalRetry(attempted, operation);
+          return attempted.result;
         }
         this.#health.degrade(
           "disk_full",
@@ -292,7 +300,7 @@ export function installDatabaseWriteResilience(
       >[0],
     ) => Result,
     config?: { behavior?: "deferred" | "exclusive" | "immediate" },
-  ): Result | undefined {
+  ): Promise<Result> | Result | undefined {
     const execute = () => {
       resilientTransactionDepth += 1;
       try {

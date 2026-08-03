@@ -23,6 +23,7 @@ export interface IncrementalVacuumEnablement {
 
 interface IncrementalVacuumOptions {
   readonly availableBytes?: number | undefined;
+  readonly minimumFreeBytes?: number | undefined;
   readonly run?: (sql: string) => void;
   readonly warn?: (message: string) => void;
 }
@@ -89,7 +90,10 @@ export function enableIncrementalVacuum(
     }
     return result(database, false);
   }
-  const requiredBytes = databaseBytes(database) * 2;
+  const requiredBytes = Math.max(
+    databaseBytes(database) * 2,
+    options.minimumFreeBytes ?? 0,
+  );
   if (
     options.availableBytes !== undefined &&
     options.availableBytes < requiredBytes

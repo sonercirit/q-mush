@@ -88,7 +88,10 @@ export function readRealtimeServerEvent(message: string): RealtimeServerEvent {
         !("reasons" in health) ||
         !Array.isArray(health.reasons) ||
         !health.reasons.every(
-          (reason) => reason === "disk_full" || reason === "low_disk_space",
+          (reason) =>
+            reason === "database_corrupt" ||
+            reason === "disk_full" ||
+            reason === "low_disk_space",
         )
       ) {
         throw new Error("The realtime server event was invalid");

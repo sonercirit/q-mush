@@ -72,16 +72,20 @@ test("enabling incremental vacuum performs the guarded one-time rebuild", () => 
   );
 });
 
-test("low-space preflight skips the rebuild without changing the database", () => {
+test("low-space preflight skips a small rebuild below the five-GiB floor", () => {
   const fixture = fileDatabase("low-space.sqlite");
   const warning = warningRecorder();
+  const availableBytes = 4 * 1024 ** 3;
+  const minimumFreeBytes = 5 * 1024 ** 3;
+  expect(statSync(fixture.path).size * 2).toBeLessThan(availableBytes);
 
   const enabled = enableIncrementalVacuum(fixture.database.$client, {
-    availableBytes: 0,
+    availableBytes,
+    minimumFreeBytes,
     warn: warning.warn,
   });
 
-  expectSkipped(fixture, enabled, warning.messages, "Skipping");
+  expectSkipped(fixture, enabled, warning.messages, String(minimumFreeBytes));
 });
 
 test("a rebuild failure is reported and never blocks startup", () => {

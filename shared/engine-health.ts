@@ -1,4 +1,5 @@
-export type EngineHealthReason = "disk_full" | "low_disk_space";
+export type EngineHealthReason =
+  "database_corrupt" | "disk_full" | "low_disk_space";
 
 export interface EngineHealthSnapshot {
   readonly degraded: boolean;

@@ -10,7 +10,10 @@ function roundTrip(payload: Readonly<Record<string, unknown>>): unknown {
 
 test("reads storage-health warnings", () => {
   const expected = {
-    health: { degraded: true, reasons: ["disk_full", "low_disk_space"] },
+    health: {
+      degraded: true,
+      reasons: ["database_corrupt", "disk_full", "low_disk_space"],
+    },
     type: "health",
   } as const;
   expect(roundTrip(expected)).toEqual(expected);

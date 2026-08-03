@@ -1,6 +1,16 @@
-import { mkdirSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  mkdirSync,
+  openSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+  writeSync,
+} from "node:fs";
 import { join } from "node:path";
 import { expect, test, vi } from "vitest";
+import { createDatabase } from "../../shared/database.ts";
+import { readSqlitePragmaNumber } from "../../shared/test/sqlite.ts";
 import { useSynchronousTemporaryDirectories } from "../../shared/test/temporary-directories.ts";
 import { checkDatabaseFreeSpace } from "../database-free-space.ts";
 import { cleanupRepairSnapshots } from "../database-repair-snapshots.ts";
@@ -77,6 +87,47 @@ test("main database can be opened and validated before snapshot cleanup", () => 
   ).toThrow();
 
   expect(statSync(recoveryCopy).size).toBe(4);
+});
+
+test("quick_check retains every snapshot for corruption outside the schema", () => {
+  const fixture = maintenanceFixture();
+  const newest = repairSnapshot(fixture.directory, "newest", 1, 1);
+  const older = repairSnapshot(fixture.directory, "older", 30, 2);
+  const created = createDatabase(fixture.databasePath);
+  created.$client.run(
+    "CREATE TABLE corruption_fixture (payload BLOB NOT NULL)",
+  );
+  created.$client.run(
+    "INSERT INTO corruption_fixture VALUES (zeroblob(32768))",
+  );
+  const rootPage = created.$client
+    .query(
+      "SELECT rootpage FROM sqlite_master WHERE name = 'corruption_fixture'",
+    )
+    .values()[0]?.[0];
+  const pageSize = readSqlitePragmaNumber(created.$client, "page_size");
+  created.$client.close();
+  if (typeof rootPage !== "number") {
+    throw new TypeError("The corruption fixture root page is unavailable");
+  }
+  const file = openSync(fixture.databasePath, "r+");
+  writeSync(file, Buffer.from([0]), 0, 1, (rootPage - 1) * pageSize);
+  closeSync(file);
+  const warn = vi.fn();
+  const health = new EngineHealth(warn);
+
+  const database = openDatabaseAndCleanupRepairSnapshots(fixture.databasePath, {
+    health,
+  });
+
+  expect(health.snapshot().reasons).toContain("database_corrupt");
+  expect(warn).toHaveBeenCalledWith(
+    expect.stringContaining("quick_check"),
+    expect.objectContaining({ code: "SQLITE_CORRUPT" }),
+  );
+  expect(statSync(newest).size).toBe(1);
+  expect(statSync(older).size).toBe(2);
+  database.$client.close();
 });
 
 test("low-space preflight degrades and then restores storage health", () => {
