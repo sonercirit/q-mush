@@ -14,11 +14,11 @@ import {
 import type { CompactionUsage } from "./session-compaction-usage.ts";
 import { compactStoredConversation } from "./session-compaction.ts";
 import { storedRecordedMessages } from "./session-message-values.ts";
+import { settleSessionFailure } from "./session-restart-failure-store.ts";
 import {
   runningCondition,
   sessionGenerationCondition,
   storedParentExecutionGeneration,
-  terminalSessionValues,
 } from "./session-store-persistence.ts";
 import { requireRunningSessionUserId } from "./session-store-state.ts";
 import type { SessionRuntimeTarget } from "./session-store-types.ts";
@@ -31,7 +31,6 @@ import {
   settleTerminalRuntime,
   terminalRuntimeCondition,
 } from "./session-terminal-store.ts";
-import { updateSessionAndEndGenerationTurn } from "./session-turn-store.ts";
 import { runtimeUsageValues } from "./session-usage-values.ts";
 
 interface SessionRuntimeWriteResources {
@@ -293,44 +292,26 @@ export function settleRuntimeFailure(
 ): boolean {
   return options.resources.database.transaction((transaction) => {
     const condition = sessionGenerationCondition(
-      {
-        id: options.sessionId,
-        status: ["queued", "running"],
-      },
+      { id: options.sessionId, status: ["queued", "running"] },
       options.generation,
     );
-    const session = transaction
-      .select({
-        activeDurationMs: agentSessions.activeDurationMs,
-        activeStartedAt: agentSessions.activeStartedAt,
-        userId: agentSessions.userId,
-      })
+    const userId = transaction
+      .select({ userId: agentSessions.userId })
       .from(agentSessions)
       .where(condition)
-      .get();
-    if (session === undefined) {
-      return false;
-    }
-    const settled = updateSessionAndEndGenerationTurn({
-      condition,
-      database: transaction,
-      generation: options.generation,
-      now: options.now,
-      sessionId: options.sessionId,
-      values: terminalSessionValues(session, "failed", options.now),
-    });
-    if (!settled) {
-      return false;
-    }
-    appendSystemStoredMessage({
-      database: transaction,
-      generateId: options.resources.generateId,
-      message: errorMessageValues(options.content),
-      now: options.now,
-      sessionId: options.sessionId,
-      userId: session.userId,
-    });
-    return true;
+      .get()?.userId;
+    return (
+      userId !== undefined &&
+      settleSessionFailure(
+        {
+          ...runtimeWriteTarget(options),
+          condition,
+          database: transaction,
+          userId,
+        },
+        options.content,
+      )
+    );
   });
 }
 

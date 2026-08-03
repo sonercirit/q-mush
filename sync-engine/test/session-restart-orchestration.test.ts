@@ -33,6 +33,10 @@ import {
   runningRestartStore,
   type RestartStoreSetup,
 } from "./session-compaction-test-helpers.ts";
+import {
+  completeLaunchAgentFile,
+  runLaunchedSession,
+} from "./session-launch-test-helpers.ts";
 import { createSessionLauncher } from "./session-launcher-fixtures.ts";
 import { settleRestartRecovery } from "./session-restart-cpd-helpers.ts";
 import {
@@ -262,7 +266,7 @@ async function settleManualCompaction(
 ): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
-  completeAgentFileCommand(setup.broker, setup.detail);
+  completeLaunchAgentFile(setup.broker, setup.detail);
   await setup.runtimes.settled(setup.detail.id);
 }
 
@@ -344,33 +348,13 @@ function highContextRecoveredRunSetup(
   return { ...setup, detail };
 }
 
-function completeAgentFile(setup: RecoveredRunSetup): void {
-  completeAgentFileCommand(setup.broker, setup.detail);
-}
-
-function completeAgentFileCommand(
-  broker: RunnerCommandBroker,
-  detail: AgentSessionDetail,
-): void {
-  const command = broker.take(detail.runnerId);
-  if (command === undefined) {
-    throw new Error("The recovered run did not request its agent file");
-  }
-  expect(
-    broker.complete(detail.runnerId, command.id, {
-      output: "null",
-      state: "completed",
-    }),
-  ).toBe(true);
-}
-
 async function runRecovered(setup: RecoveredRunSetup): Promise<void> {
-  expect(
-    setup.launcher.launch(setup.detail, CREDENTIAL, TEST_USER_ID, "agent"),
-  ).toBe(true);
-  await Promise.resolve();
-  completeAgentFile(setup);
-  await setup.runtimes.settled(setup.detail.id);
+  await runLaunchedSession({
+    broker: setup.broker,
+    detail: setup.detail,
+    launcher: setup.launcher,
+    runtimes: setup.runtimes,
+  });
 }
 
 function invocationOrder(

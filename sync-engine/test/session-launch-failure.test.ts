@@ -10,21 +10,8 @@ import {
   expectFailedLaunch,
   launchFailureSetup,
 } from "./session-launch-failure-helpers.ts";
-import { CREDENTIAL } from "./session-restart-orchestration-test-helpers.ts";
+import { runLaunchedSession } from "./session-launch-test-helpers.ts";
 import { createStore } from "./session-store-test-fixtures.ts";
-
-function completeAgentFile(setup: ReturnType<typeof launchFailureSetup>): void {
-  const command = setup.broker.take(setup.detail.runnerId);
-  if (command === undefined) {
-    throw new Error("The recovered run did not request its agent file");
-  }
-  expect(
-    setup.broker.complete(setup.detail.runnerId, command.id, {
-      output: "null",
-      state: "completed",
-    }),
-  ).toBe(true);
-}
 
 test("launch failure at the queued transition is visible and continuable", async () => {
   let attempts = 0;
@@ -55,12 +42,12 @@ test("launch failure at the queued transition is visible and continuable", async
   if (continued.status !== "queued") {
     throw new Error("The failed launch was not continuable");
   }
-  expect(
-    setup.launcher.launch(continued.detail, CREDENTIAL, TEST_USER_ID),
-  ).toBe(true);
-  await Promise.resolve();
-  completeAgentFile(setup);
-  await setup.runtimes.settled(setup.detail.id);
+  await runLaunchedSession({
+    broker: setup.broker,
+    detail: continued.detail,
+    launcher: setup.launcher,
+    runtimes: setup.runtimes,
+  });
   const recovered = setup.storeSetup.store.get(TEST_USER_ID, setup.detail.id);
   expect(recovered?.activeStartedAt).toBeNull();
   expect(recovered?.status).toBe("idle");

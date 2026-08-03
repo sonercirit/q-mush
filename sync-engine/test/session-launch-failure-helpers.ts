@@ -36,9 +36,9 @@ export function launchFailureSetup(
   now: number,
 ): LaunchFailureSetup {
   const detail = createTestSession(storeSetup.store);
+  const notify = vi.fn();
   const actions = orchestrationActions(storeSetup.database, storeSetup.store);
   const finished = vi.spyOn(actions, "finished");
-  const notify = vi.fn();
   const runtimes = new SessionRuntimes();
   const broker = new RunnerCommandBroker({
     commandId: () => "recovered-launch-agent-file",

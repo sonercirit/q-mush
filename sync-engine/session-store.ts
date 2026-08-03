@@ -428,10 +428,8 @@ export class SessionStore {
     now: number,
     generation: number,
   ): boolean {
-    return settleRuntimeFailure({
-      content,
-      ...this.#runtimeTarget(sessionId, now, generation),
-    });
+    const target = this.#runtimeTarget(sessionId, now, generation);
+    return settleRuntimeFailure({ content, ...target });
   }
 
   appendRuntimeErrorMessage(

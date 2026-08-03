@@ -116,16 +116,13 @@ export class SessionFinisher {
       return;
     }
     if (errorMessage !== undefined) {
-      if (
-        this.#options.store.settleRuntimeFailure(
-          detail.id,
-          errorMessage,
-          now,
-          detail.generation,
-        )
-      ) {
-        this.#options.actions.stopChildren(detail, userId);
-      }
+      const failed = this.#options.store.settleRuntimeFailure(
+        detail.id,
+        errorMessage,
+        now,
+        detail.generation,
+      );
+      if (failed) this.#options.actions.stopChildren(detail, userId);
       notifyFinished();
       return;
     }
