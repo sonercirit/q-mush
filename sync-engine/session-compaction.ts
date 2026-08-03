@@ -6,6 +6,7 @@ import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 import type { RestartHandoff } from "../shared/session-model.ts";
 import { AGENT_COMPACTION_REQUEST_MESSAGE } from "./agent-compaction.ts";
 import type { CompactionUsage } from "./session-compaction-usage.ts";
+import { retireManualCompactionOperations } from "./session-manual-compaction-query.ts";
 import { sessionSegment } from "./session-segment.ts";
 import { runningCondition } from "./session-store-persistence.ts";
 import { requireRunningSessionUserId } from "./session-store-state.ts";
@@ -150,6 +151,13 @@ export function compactStoredConversation(options: {
       userId,
     };
     appendSystemStoredMessage(handoff);
+    retireManualCompactionOperations(
+      transaction,
+      options.sessionId,
+      options.generation,
+      options.now,
+      "exact",
+    );
     if (options.settle === true) {
       settleTerminalRuntime(
         transaction,

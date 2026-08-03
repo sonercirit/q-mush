@@ -15,6 +15,7 @@ import {
   TEST_USER_ID,
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
+import { TEST_COMPACTION_REQUEST_MESSAGE } from "./compaction-test-fixtures.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
 import {
   completedParentDetail,
@@ -35,11 +36,8 @@ import {
 } from "./session-integration-helpers.ts";
 import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
 
-const COMPACTION_INSTRUCTION =
-  "Compact this conversation now. Return only the handoff summary.";
-
 function isCompactionRequest(input: readonly AgentConversationMessage[]) {
-  return input.at(-1)?.content === COMPACTION_INSTRUCTION;
+  return input.at(-1)?.content === TEST_COMPACTION_REQUEST_MESSAGE;
 }
 
 function scheduledCompactionStep(

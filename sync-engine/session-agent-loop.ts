@@ -30,6 +30,8 @@ interface CompactingAgentLoopOptions {
   readonly maxContextTokens: number | null;
   readonly model: AgentModel;
   readonly now: () => number;
+  readonly onStepBoundary?: () =>
+    Promise<"compact" | undefined> | "compact" | undefined;
   readonly onToolCall?: Parameters<typeof runAgentLoop>[0]["onToolCall"];
   readonly onToolResult?: Parameters<typeof runAgentLoop>[0]["onToolResult"];
   readonly recordCompaction: (
@@ -62,35 +64,93 @@ function shouldCompactFinalStep(
 
 interface CompactionState {
   latestStep: AgentModelStep | undefined;
+  manualPending: boolean;
   pending: boolean;
   progressSinceCompaction: boolean;
   restartPendingOnCompletion: boolean;
   stepExceedsThreshold: boolean;
 }
 
+interface CompactConversationOptions
+  extends
+    Pick<
+      CompactingAgentLoopOptions,
+      "createCompactor" | "now" | "settleCompaction"
+    >,
+    Pick<CompactingAgentLoopOptions, "agentCost" | "recordCompaction"> {}
+
 async function compactConversation(
-  options: Pick<
-    CompactingAgentLoopOptions,
-    | "agentCost"
-    | "createCompactor"
-    | "now"
-    | "recordCompaction"
-    | "settleCompaction"
-  >,
-  messages: readonly AgentConversationMessage[],
-  signal?: AbortSignal,
+  options: CompactConversationOptions,
+  input: {
+    readonly messages: readonly AgentConversationMessage[];
+    readonly signal: AbortSignal | undefined;
+  },
 ): Promise<readonly AgentConversationMessage[]> {
+  const { messages, signal } = input;
   const startedAt = options.now();
   try {
     const compacted = await options.createCompactor().compact(messages, signal);
-    throwIfAgentAborted(signal);
-    const usage = compactionUsage(compacted, options.agentCost);
-    await options.recordCompaction(compacted.summary, usage, startedAt);
-    throwIfAgentAborted(signal);
+    const finish = () => {
+      throwIfAgentAborted(signal);
+    };
+    finish();
+    await compactionFinished(compacted, options, startedAt);
+    finish();
     return compacted.messages;
   } finally {
     options.settleCompaction?.();
   }
+}
+
+function resetCompactionState(compaction: CompactionState): void {
+  compaction.manualPending = false;
+  compaction.pending = false;
+  compaction.progressSinceCompaction = false;
+  compaction.stepExceedsThreshold = false;
+}
+
+function compactionIsPending(
+  compaction: CompactionState,
+  boundaryResult: "compact" | undefined,
+): boolean {
+  return compaction.manualPending || boundaryResult === "compact";
+}
+
+function compactionFinished(
+  compacted: Awaited<ReturnType<AgentConversationCompactor["compact"]>>,
+  options: Pick<CompactingAgentLoopOptions, "agentCost" | "recordCompaction">,
+  startedAt: number,
+): Promise<void> | void {
+  return options.recordCompaction(
+    compacted.summary,
+    compactionUsage(compacted, options.agentCost),
+    startedAt,
+  );
+}
+
+async function preparedMessagesWithCompaction(
+  options: CompactingAgentLoopOptions,
+  compaction: CompactionState,
+  messages: readonly AgentConversationMessage[],
+  signal?: AbortSignal,
+): Promise<readonly AgentConversationMessage[]> {
+  const manual = compactionIsPending(
+    compaction,
+    await options.onStepBoundary?.(),
+  );
+  if (!manual && !compaction.pending) {
+    return messages;
+  }
+  const compacted = await compactConversation(options, { messages, signal });
+  resetCompactionState(compaction);
+  return compacted;
+}
+
+async function compactLoopMessages(
+  options: CompactingAgentLoopOptions,
+  messages: readonly AgentConversationMessage[],
+): Promise<readonly AgentConversationMessage[]> {
+  return compactConversation(options, { messages, signal: options.signal });
 }
 
 export async function runCompactingAgentLoop(
@@ -111,11 +171,10 @@ export async function runCompactingAgentLoop(
     if (beforeCompaction !== undefined) {
       return beforeCompaction;
     }
-    const compacted = await compactConversation(
-      options,
+    const compacted = await compactConversation(options, {
       messages,
-      options.signal,
-    );
+      signal: options.signal,
+    });
 
     const afterCompaction = restartHandoffResult(
       options.signal,
@@ -132,6 +191,7 @@ export async function runCompactingAgentLoop(
   for (;;) {
     const compaction: CompactionState = {
       latestStep: undefined,
+      manualPending: false,
       pending: false,
       progressSinceCompaction: false,
       restartPendingOnCompletion: false,
@@ -167,27 +227,29 @@ export async function runCompactingAgentLoop(
         ? {}
         : { onToolResult: options.onToolResult }),
       prepareMessages: async (preparedMessages, signal) => {
-        if (!compaction.pending) {
-          return preparedMessages;
-        }
-
-        const compactedMessages = await compactConversation(
+        const compactedMessages = await preparedMessagesWithCompaction(
           options,
+          compaction,
           preparedMessages,
           signal,
         );
-        compaction.pending = false;
-        compaction.progressSinceCompaction = false;
-        compaction.stepExceedsThreshold = false;
-        allowCompaction = false;
+        if (compactedMessages !== preparedMessages) {
+          allowCompaction = false;
+        }
         return compactedMessages;
       },
       recordMessage: async (recordedMessages) => {
         const step = compaction.latestStep;
-        const terminal = step?.toolCalls.length === 0 && !compaction.pending;
         const assistant = recordedMessages.some(
           (message) => message.role === "assistant",
         );
+        if (assistant && (await options.onStepBoundary?.()) === "compact") {
+          compaction.manualPending = true;
+        }
+        const terminal =
+          step?.toolCalls.length === 0 &&
+          !compaction.manualPending &&
+          !compaction.pending;
         const usage =
           assistant && step !== undefined
             ? agentStepUsage(step, options.agentCost)
@@ -220,12 +282,17 @@ export async function runCompactingAgentLoop(
     if (final.status === "handoff") {
       return "handoff";
     }
+    const manual = compactionIsPending(
+      compaction,
+      await options.onStepBoundary?.(),
+    );
+    if (manual) {
+      messages = await compactLoopMessages(options, final.messages);
+      allowCompaction = false;
+      continue;
+    }
     if (compaction.pending) {
-      messages = await compactConversation(
-        options,
-        final.messages,
-        options.signal,
-      );
+      messages = await compactLoopMessages(options, final.messages);
       allowCompaction = false;
       throwIfAgentAborted(options.signal);
       if (
