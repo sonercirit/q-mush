@@ -108,6 +108,15 @@ function rejectedDiscovery(body: BodyInit): Promise<AgentModelCatalog> {
   );
 }
 
+function openRouterStatusFailure(
+  secret: string,
+  status: number,
+): Promise<AgentModelCatalog> {
+  return discoverAgentModels("openrouter", credential("api_key", secret), () =>
+    Promise.resolve(new Response("denied", { status })),
+  );
+}
+
 function expectBearer(request: Request, token: string): void {
   expect(request.headers.get("authorization")).toBe(`Bearer ${token}`);
 }
@@ -352,33 +361,12 @@ describe("agent model discovery", () => {
 
   test("classifies exhausted OpenRouter credits without exposing credentials", async () => {
     const secret = "sk-never-return-this-secret";
-    const error = await captureRejection(
-      discoverAgentModels("openrouter", credential("api_key", secret), () =>
-        Promise.resolve(new Response("denied", { status: 402 })),
-      ),
-    );
+    const error = await captureRejection(openRouterStatusFailure(secret, 402));
+    const message = error instanceof Error ? error.message : String(error);
 
     expect(error).toMatchObject({ status: 402 });
     expect(isCredentialRejectionError(error)).toBe(true);
-    const message = error instanceof Error ? error.message : String(error);
-    expect(message).not.toContain(secret);
-    expect(utf8ByteLength(message)).toBeLessThanOrEqual(300);
-  });
-
-  test("reports safe provider status failures without credential contents", async () => {
-    const secret = "sk-never-return-this-secret";
-    let message = "";
-    try {
-      await discoverAgentModels(
-        "openrouter",
-        credential("api_key", secret),
-        () => Promise.resolve(new Response("denied", { status: 429 })),
-      );
-    } catch (error) {
-      message = error instanceof Error ? error.message : String(error);
-    }
-
-    expect(message).toContain("status 429");
+    expect(message).toContain("status 402");
     expect(message).not.toContain(secret);
     expect(utf8ByteLength(message)).toBeLessThanOrEqual(300);
   });

@@ -277,20 +277,25 @@ describe("OpenRouter session provider validation", () => {
 
   test("separates strict probe failures from explicit metadata fallback", async () => {
     const transient = new AgentModelDiscoveryError("provider unavailable", 503);
-    const strictOptions = metadataOptions({
+    const automaticInput = { ...SELECTED_INPUT, openRouterProviderTag: null };
+    const discoveryFailure = {
       discoverModels: () => Promise.reject(transient),
-      input: { ...SELECTED_INPUT, openRouterProviderTag: null },
-      rejectCredentialErrors: true,
-    });
-    await expect(sessionMetadata(strictOptions)).rejects.toMatchObject({
-      code: "provider_unavailable",
-    });
+    };
+    await expect(
+      sessionMetadata(
+        metadataOptions({
+          ...discoveryFailure,
+          input: automaticInput,
+          rejectCredentialErrors: true,
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "provider_unavailable" });
 
-    const explicitOptions = metadataOptions({
-      discoverModels: () => Promise.reject(transient),
-      input: { ...SELECTED_INPUT, openRouterProviderTag: null },
-    });
-    await expect(sessionMetadata(explicitOptions)).resolves.toEqual({
+    await expect(
+      sessionMetadata(
+        metadataOptions({ ...discoveryFailure, input: automaticInput }),
+      ),
+    ).resolves.toEqual({
       maxContextTokens: null,
       providerPricing: null,
     });

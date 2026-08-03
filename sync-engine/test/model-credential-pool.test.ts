@@ -24,11 +24,26 @@ const SELECTION = {
   workspaceId: TEST_WORKSPACE_ID,
 };
 
-function createSetup() {
+function testDatabase() {
   const database = createAuthenticatedTestDatabase();
   for (const id of [FIRST_CREDENTIAL_ID, SECOND_CREDENTIAL_ID]) {
     addTestProviderCredential(database, id);
   }
+  return database;
+}
+
+function modelPool(
+  database: ReturnType<typeof createAuthenticatedTestDatabase>,
+  readCredential: ConstructorParameters<
+    typeof ModelCredentialPool
+  >[0]["readCredential"],
+  balancer?: CredentialPoolBalancer,
+): ModelCredentialPool {
+  return new ModelCredentialPool({ database, readCredential }, balancer);
+}
+
+function createSetup() {
+  const database = testDatabase();
   const credentials = new Map(
     [FIRST_CREDENTIAL_ID, SECOND_CREDENTIAL_ID].map((id) => [
       id,
@@ -36,12 +51,10 @@ function createSetup() {
     ]),
   );
   const balancer = new CredentialPoolBalancer();
-  const pool = new ModelCredentialPool(
-    {
-      database,
-      readCredential: (_userId, selection) =>
-        Promise.resolve(credentials.get(selection.credentialId)),
-    },
+  const pool = modelPool(
+    database,
+    (_userId, selection) =>
+      Promise.resolve(credentials.get(selection.credentialId)),
     balancer,
   );
   return { balancer, database, pool };
@@ -69,19 +82,15 @@ describe("model credential pool", () => {
   });
 
   test("retries transient credential loading immediately after recovery", async () => {
-    const database = createAuthenticatedTestDatabase();
-    for (const id of [FIRST_CREDENTIAL_ID, SECOND_CREDENTIAL_ID]) {
-      addTestProviderCredential(database, id);
-    }
+    const database = testDatabase();
     let refreshAvailable = false;
-    const pool = new ModelCredentialPool({
-      database,
-      readCredential: (_userId, selection) => {
-        if (!refreshAvailable) return Promise.reject(new TypeError("offline"));
-        return Promise.resolve(
-          createTestProviderCredential(selection.credentialId, "oauth"),
-        );
-      },
+    const pool = modelPool(database, (_userId, selection) => {
+      if (!refreshAvailable) return Promise.reject(new TypeError("offline"));
+      const credential = createTestProviderCredential(
+        selection.credentialId,
+        "oauth",
+      );
+      return Promise.resolve(credential);
     });
 
     await expect(pool.candidates(TEST_USER_ID, SELECTION)).resolves.toEqual([]);
@@ -93,28 +102,23 @@ describe("model credential pool", () => {
   });
 
   test("cools down only classified credential loading rejections", async () => {
-    const database = createAuthenticatedTestDatabase();
-    for (const id of [FIRST_CREDENTIAL_ID, SECOND_CREDENTIAL_ID]) {
-      addTestProviderCredential(database, id);
-    }
-    const pool = new ModelCredentialPool({
-      database,
-      readCredential: (_userId, selection) =>
-        selection.credentialId === FIRST_CREDENTIAL_ID
-          ? Promise.reject(
-              new ProviderCredentialRejectionError("rejected", 402),
-            )
-          : Promise.resolve(
-              createTestProviderCredential(selection.credentialId),
-            ),
+    const database = testDatabase();
+    const pool = modelPool(database, (_userId, selection) => {
+      if (selection.credentialId === FIRST_CREDENTIAL_ID) {
+        return Promise.reject(
+          new ProviderCredentialRejectionError("rejected", 402),
+        );
+      }
+      const credential = createTestProviderCredential(selection.credentialId);
+      return Promise.resolve(credential);
     });
 
-    await expect(
-      pool.candidates(TEST_USER_ID, SELECTION),
-    ).resolves.toMatchObject([{ id: SECOND_CREDENTIAL_ID }]);
-    await expect(
-      pool.candidates(TEST_USER_ID, SELECTION),
-    ).resolves.toMatchObject([{ id: SECOND_CREDENTIAL_ID }]);
+    const firstAttempt = await pool.candidates(TEST_USER_ID, SELECTION);
+    const secondAttempt = await pool.candidates(TEST_USER_ID, SELECTION);
+    expect([firstAttempt, secondAttempt]).toEqual([
+      [expect.objectContaining({ id: SECOND_CREDENTIAL_ID })],
+      [expect.objectContaining({ id: SECOND_CREDENTIAL_ID })],
+    ]);
     database.$client.close();
   });
 

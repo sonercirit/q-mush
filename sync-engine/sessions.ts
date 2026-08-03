@@ -3,10 +3,7 @@ import { createDatabase, type AppDatabase } from "../shared/database.ts";
 import { createUuidV7 } from "../shared/ids.ts";
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
-import type {
-  AgentSessionDetail,
-  RestartHandoffOperation,
-} from "../shared/session-model.ts";
+import type { RestartHandoffOperation } from "../shared/session-model.ts";
 import {
   discoverAgentModels,
   type AgentModelDiscoverer,
@@ -24,8 +21,8 @@ import {
 import type { RealtimeHub } from "./realtime-hub.ts";
 import type { RunnerIntegration } from "./runners.ts";
 import { SessionAgentActions } from "./session-agent-actions.ts";
+import { discoverSessionAgentMetadata } from "./session-agent-metadata.ts";
 import type { AgentModelFactory } from "./session-agent-models.ts";
-import type { SpawnSessionToolInput } from "./session-agent-tools.ts";
 import { startManualSessionCompaction } from "./session-compaction-actions.ts";
 import {
   createValidatedSession,
@@ -62,7 +59,6 @@ import {
 } from "./session-interrupted-recovery.ts";
 import { SessionLauncher } from "./session-launcher.ts";
 import { modelsForUser } from "./session-model-discovery.ts";
-import { sessionMetadata } from "./session-provider-selection.ts";
 import {
   recoverAnsweredQuestions,
   type SessionQuestionActionDependencies,
@@ -373,44 +369,6 @@ class DrizzleSessionIntegration
     };
   }
 
-  async #discoverSessionMetadata(
-    input: SpawnSessionToolInput,
-    credential: ProviderCredentialAccess,
-    ownerId: string,
-    rejectCredentialErrors: boolean,
-  ): Promise<Pick<AgentSessionDetail, "maxContextTokens" | "providerPricing">> {
-    const metadata = await this.#metadata(
-      input,
-      credential,
-      ownerId,
-      rejectCredentialErrors,
-    );
-    if ("error" in metadata) {
-      throw new Error(
-        metadata.error === "provider_unavailable"
-          ? "The OpenRouter serving provider is unavailable"
-          : "The OpenRouter serving provider could not be validated",
-      );
-    }
-    return metadata;
-  }
-
-  #metadata(
-    input: Parameters<typeof sessionMetadata>[0]["input"],
-    credential: ProviderCredentialAccess,
-    ownerId: string,
-    rejectCredentialErrors: boolean,
-  ) {
-    return sessionMetadata({
-      credential,
-      discoverModels: this.#discoverModels,
-      discoverProviders: this.#discoverOpenRouterProviders,
-      input,
-      ownerId,
-      rejectCredentialErrors,
-    });
-  }
-
   #createActions(database: AppDatabase): SessionAgentActions {
     return new SessionAgentActions({
       activeSession: (id) => this.#runtimes.active(id),
@@ -432,7 +390,11 @@ class DrizzleSessionIntegration
         userId,
         rejectCredentialErrors,
       ) =>
-        this.#discoverSessionMetadata(
+        discoverSessionAgentMetadata(
+          {
+            discoverModels: this.#discoverModels,
+            discoverOpenRouterProviders: this.#discoverOpenRouterProviders,
+          },
           input,
           credential,
           userId,

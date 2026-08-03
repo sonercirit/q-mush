@@ -47,9 +47,9 @@ function input(credentialId: string): CreateSessionInput {
   return {
     agentFilePath: null,
     autoCompact: true,
+    images: [],
     credentialId,
     executionEnvironment: "bare_metal",
-    images: [],
     model: "gpt-4.1-mini",
     openRouterProviderTag: null,
     prompt: "Inspect the workspace",
@@ -112,7 +112,9 @@ function selectedCredentialFactory(
   });
 }
 
-function setup(discoverModels: Parameters<typeof connectedSessionSetup>[2]) {
+function sessionFixture(
+  discoverModels: Parameters<typeof connectedSessionSetup>[2],
+) {
   let command = 0;
   return connectedSessionSetup(IDLE_MODEL, "api_key", discoverModels, {
     commandId: () => `balanced-command-${String((command += 1))}`,
@@ -120,9 +122,21 @@ function setup(discoverModels: Parameters<typeof connectedSessionSetup>[2]) {
   });
 }
 
+function balancedCreate(setup: ReturnType<typeof sessionFixture>) {
+  return setup.sessions.realtimeCommands.createForUser(
+    TEST_AUTHENTICATED_USER,
+    input(balancedCredentialId("openai")),
+    TEST_WORKSPACE_ID,
+  );
+}
+
+function expectNoSessions(setup: ReturnType<typeof sessionFixture>): void {
+  expect(setup.sessions.listForUser(TEST_AUTHENTICATED_USER.id)).toEqual([]);
+}
+
 describe("session credential balancing", () => {
   test("distributes four sessions evenly and persists each resolved credential", async () => {
-    const sessions = setup(() => Promise.resolve(TEST_CATALOG));
+    const sessions = sessionFixture(() => Promise.resolve(TEST_CATALOG));
     const create: Parameters<
       typeof sessions.sessions.realtimeCommands.createForUser
     > = [
@@ -244,19 +258,12 @@ describe("session credential balancing", () => {
             : Promise.reject(new TypeError("refresh unavailable")),
       },
     );
-    const createBalanced = () =>
-      sessions.sessions.realtimeCommands.createForUser(
-        TEST_AUTHENTICATED_USER,
-        input(balancedCredentialId("openai")),
-        TEST_WORKSPACE_ID,
-      );
+    const createBalanced = () => balancedCreate(sessions);
 
     await expect(createBalanced()).rejects.toMatchObject({
       code: "credential_unavailable",
     });
-    expect(sessions.sessions.listForUser(TEST_AUTHENTICATED_USER.id)).toEqual(
-      [],
-    );
+    expectNoSessions(sessions);
     refreshAvailable = true;
     const created = await createBalanced();
     expect([CREDENTIAL_ID, SECOND_CREDENTIAL_ID]).toContain(
@@ -266,26 +273,20 @@ describe("session credential balancing", () => {
   });
 
   test("rejects a transient balanced probe without creating a session", async () => {
-    const sessions = setup(() =>
+    const sessions = sessionFixture(() =>
       Promise.reject(new AgentModelDiscoveryError("temporary outage", 503)),
     );
 
-    await expect(
-      sessions.sessions.realtimeCommands.createForUser(
-        TEST_AUTHENTICATED_USER,
-        input(balancedCredentialId("openai")),
-        TEST_WORKSPACE_ID,
-      ),
-    ).rejects.toMatchObject({ code: "provider_unavailable" });
-    expect(sessions.sessions.listForUser(TEST_AUTHENTICATED_USER.id)).toEqual(
-      [],
-    );
+    await expect(balancedCreate(sessions)).rejects.toMatchObject({
+      code: "provider_unavailable",
+    });
+    expectNoSessions(sessions);
     closeSessionTestDatabase(sessions.database);
   });
 
   test("falls through an immediately rejected member but leaves explicit selection untouched", async () => {
     const discovered: string[] = [];
-    const sessions = setup((_provider, credential) => {
+    const sessions = sessionFixture((_provider, credential) => {
       discovered.push(credential.id);
       return credential.id === CREDENTIAL_ID
         ? Promise.reject(new AgentModelDiscoveryError("rejected", 429))
