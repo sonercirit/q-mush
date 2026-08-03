@@ -391,15 +391,11 @@ export class SessionStore {
       writeOptions,
     );
   }
-
-  settleRuntimeFailure(
-    sessionId: string,
-    content: string,
-    now: number,
-    generation: number,
-  ): boolean {
-    const target = this.#runtimeTarget(sessionId, now, generation);
-    return settleRuntimeFailure({ content, ...target });
+  settleRuntimeFailure(...p: [string, string, number, number]): boolean {
+    return settleRuntimeFailure({
+      content: p[1],
+      ...this.#runtimeTarget(p[0], p[2], p[3]),
+    });
   }
 
   appendRuntimeErrorMessage(
@@ -585,7 +581,6 @@ export class SessionStore {
       status,
     });
   }
-
   /**
    * Administrative/test helper that intentionally targets the current generation.
    * Runtime code must use the generation-required methods above.
