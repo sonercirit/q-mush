@@ -27,8 +27,8 @@ import type { SessionCommandTransport } from "./session-transport.ts";
 const PENDING_INPUT_CONFIRMATION_TIMEOUT_MS = 30_000;
 
 export interface PendingInputTimer {
-  readonly clearTimeout: (timeout: number) => void;
-  readonly setTimeout: (callback: () => void, delay: number) => number;
+  clearTimeout(timeout: number): void;
+  setTimeout(callback: () => void, delay: number): number;
 }
 
 const DEFAULT_PENDING_INPUT_TIMER: PendingInputTimer = {

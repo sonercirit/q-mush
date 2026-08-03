@@ -449,16 +449,11 @@ export class RealtimeCommandLedger {
     if (commandDigest === undefined || entry.commandDigest !== commandDigest) {
       return this.#error(command.commandId, "idempotency_conflict");
     }
-    if (entry.completedAcknowledgement !== undefined) {
-      const completed = entry.completedAcknowledgement.value;
+    const receipt = entry.completedAcknowledgement;
+    if (receipt !== undefined) {
       return command.commandId === entry.commandId
-        ? entry.completedAcknowledgement
-        : acknowledgement({
-            commandId: command.commandId,
-            ...(completed.type === "command_success"
-              ? { result: completed.result, type: completed.type }
-              : { error: completed.error, type: completed.type }),
-          });
+        ? receipt
+        : acknowledgement({ ...receipt.value, commandId: command.commandId });
     }
     const replayedCommand: Promise<CommandResult | undefined> =
       entry.expiresAt === Number.POSITIVE_INFINITY

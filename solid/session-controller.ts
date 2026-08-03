@@ -88,7 +88,6 @@ export class SessionController {
   readonly #transport: SessionCommandTransport | undefined;
   readonly #view: RevisionState<SessionViewState>;
   readonly #reactiveView: ReactiveState<SessionViewState>;
-
   constructor(
     reactiveView = createReactiveState(initialSessionViewState()),
     directoryPicker = new DirectoryPickerController(),
@@ -122,9 +121,9 @@ export class SessionController {
     this.#pendingInputs = new SessionPendingInputController({
       loader: this.#loader,
       realtime: this.#realtime,
-      ...(pendingInputTimer === undefined ? {} : { timer: pendingInputTimer }),
       transport,
       view: this.#view,
+      ...(pendingInputTimer && { timer: pendingInputTimer }),
     });
     this.#directoryPicker = directoryPicker;
     this.#transcriptFilterStorage = transcriptFilterStorage ?? undefined;
@@ -133,6 +132,7 @@ export class SessionController {
       this.#reconciliation.reconnect();
     });
   }
+
   applyDetail(detail: AgentSessionDetail): void {
     this.#applySnapshot(() => {
       this.#realtime.applyDetail(detail);
