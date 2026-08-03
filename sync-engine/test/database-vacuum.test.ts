@@ -1,4 +1,10 @@
-import { statSync } from "node:fs";
+import {
+  closeSync,
+  openSync,
+  statSync,
+  truncateSync,
+  writeSync,
+} from "node:fs";
 import { join } from "node:path";
 import { expect, test, vi } from "vitest";
 import { createDatabase, type AppDatabase } from "../../shared/database.ts";
@@ -104,21 +110,23 @@ test("low-space preflight skips a small rebuild below the five-GiB floor", () =>
 
 test("low-space preflight skips a large rebuild when twice its size governs", () => {
   const fixture = fileDatabase("large-low-space.sqlite");
-  const warning = warningRecorder();
-  const databaseBytes = 3 * 1024 ** 3;
-  const availableBytes = databaseBytes * 2 - 1;
-  const minimumFreeBytes = 5 * 1024 ** 3;
   const pageSize = readSqlitePragmaNumber(
     fixture.database.$client,
     "page_size",
   );
+  fixture.database.$client.close();
+  const databaseBytes = 3 * 1024 ** 3;
   const pageCount = databaseBytes / pageSize;
-  const read = fixture.database.$client.query.bind(fixture.database.$client);
-  const pageCountQuery = fixture.database.$client.query("PRAGMA page_count");
-  vi.spyOn(pageCountQuery, "get").mockReturnValue({ page_count: pageCount });
-  vi.spyOn(fixture.database.$client, "query").mockImplementation((sql) =>
-    sql === "PRAGMA page_count" ? pageCountQuery : read(sql),
-  );
+  const headerPageCount = Buffer.alloc(4);
+  headerPageCount.writeUInt32BE(pageCount);
+  const file = openSync(fixture.path, "r+");
+  writeSync(file, headerPageCount, 0, 4, 28);
+  closeSync(file);
+  truncateSync(fixture.path, databaseBytes);
+  fixture.database = createDatabase(fixture.path);
+  const warning = warningRecorder();
+  const availableBytes = databaseBytes * 2 - 1;
+  const minimumFreeBytes = 5 * 1024 ** 3;
 
   const enabled = enableWithSpace(
     fixture,
@@ -127,6 +135,7 @@ test("low-space preflight skips a large rebuild when twice its size governs", ()
     warning,
   );
 
+  expect(statSync(fixture.path).size).toBe(databaseBytes);
   expect(databaseBytes * 2).toBeGreaterThan(minimumFreeBytes);
   expectSkipped(fixture, enabled, warning.messages, String(databaseBytes * 2));
 });
