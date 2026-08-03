@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import { RunnerConnectionError } from "../../runner/runner-connection.ts";
 import { completeRunnerRegistration } from "../../runner/runner-registration.ts";
+import { RunnerRegistrationRejectedError } from "../../runner/runner-socket.ts";
 import {
   RunnerStartupRestart,
   type RunnerStartupConnection,
@@ -96,8 +97,15 @@ function invalidRegistrationError() {
   return new RunnerConnectionError("The server returned invalid setup data");
 }
 
-async function expectInvalidPromise(setup: RegistrationSetup): Promise<void> {
-  await expect(setup.promise).rejects.toEqual(invalidRegistrationError());
+function expectConnectionError(
+  promise: Promise<void>,
+  error: RunnerConnectionError,
+): Promise<void> {
+  return expect(promise).rejects.toEqual(error);
+}
+
+function expectInvalidPromise(setup: RegistrationSetup): Promise<void> {
+  return expectConnectionError(setup.promise, invalidRegistrationError());
 }
 
 async function expectInvalidRegistration(
@@ -142,6 +150,22 @@ function registrationTest(
   });
 }
 
+function expectRestartIdentity(setup: RegistrationSetup): void {
+  expect(setup.startup.restartId).toBe("restart-client");
+}
+
+test("reports explicit rejection without mutating startup restart identity", async () => {
+  const setup = registration();
+
+  setup.socket.receive({ type: "registration_rejected" });
+
+  await expectConnectionError(
+    setup.promise,
+    new RunnerRegistrationRejectedError(),
+  );
+  expectRestartIdentity(setup);
+});
+
 test("reports the proposed server runner version", () => {
   const versions: string[] = [];
   const setup = registration(null, (version) => {
@@ -163,7 +187,7 @@ registrationTest("rejects mismatched registration IDs", async (setup) => {
       type: "registration_accept",
     }),
   ]);
-  expect(setup.startup.restartId).toBe("restart-client");
+  expectRestartIdentity(setup);
 });
 
 test("rejects duplicate and out-of-order registration stages", async () => {

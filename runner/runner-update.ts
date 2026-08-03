@@ -51,6 +51,7 @@ export class RunnerStartupRestart {
   #connectionGeneration = 0;
   #operationalActivationReceipt: string | undefined;
   #restartId: string | undefined;
+  #restartWasProvided: boolean;
 
   constructor(restartId?: string) {
     if (
@@ -60,6 +61,7 @@ export class RunnerStartupRestart {
       throw new Error("The runner restart ID is invalid");
     }
     this.#restartId = restartId;
+    this.#restartWasProvided = restartId !== undefined;
   }
 
   get activationReceipt(): string | undefined {
@@ -76,6 +78,10 @@ export class RunnerStartupRestart {
 
   get restartId(): string | undefined {
     return this.#restartId;
+  }
+
+  get startupRestart(): boolean {
+    return this.#restartWasProvided;
   }
 
   #snapshot(): RunnerStartupConnection {

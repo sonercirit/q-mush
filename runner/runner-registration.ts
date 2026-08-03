@@ -321,6 +321,9 @@ export function completeRunnerRegistration(
         typeof event.data === "string"
       ) {
         const message = parseRunnerRegistrationMessage(event.data);
+        if (message?.["type"] === "registration_rejected") {
+          return;
+        }
         if (message === undefined) {
           invalidRegistration(context);
           return;

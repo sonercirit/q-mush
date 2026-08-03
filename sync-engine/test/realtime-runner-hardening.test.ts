@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import { RUNNER_REALTIME_PATH, RUNNERS_PATH } from "../../shared/routes.ts";
+import { runnerRegistrationRejectedMessage } from "../../shared/runner-realtime-protocol.ts";
 import {
   createAuthenticatedRequest,
   createAuthenticatedTestDatabase,
@@ -290,7 +291,7 @@ test("rejects a reinstallation before rotating its token when a durable restart 
       restartId,
     );
 
-    expect(socket.sent).toEqual([]);
+    expect(socket.sent).toEqual([runnerRegistrationRejectedMessage()]);
     expect(presenceEffects).toEqual({ delivered: 0, resumed: 0 });
     expect(
       runners.runnerToken(createRunnerRequest(RUNNER_REALTIME_PATH, tokenA)),
@@ -494,9 +495,12 @@ test("replacing an authoritative socket does not disconnect the shared runner", 
 
   reconnectRunnerRealtimeTestSocket(realtime, "machine-new-authority");
 
+  expect(replaced.record.sent).toContain(
+    JSON.stringify({ type: "superseded" }),
+  );
   expect(replaced.record.closed).toEqual([
-    1000,
-    "Replaced by a newer runner connection",
+    4001,
+    "Superseded by a newer runner process",
   ]);
   expect(disconnected).toEqual([]);
 });
