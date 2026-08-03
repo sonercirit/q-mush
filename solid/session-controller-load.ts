@@ -254,7 +254,7 @@ export class SessionLoadController {
         !sessionMutationPending(this.#view.value) &&
         this.#view.value.selectedId === selectedId
       ) {
-        this.#realtime.applyDetail(detail);
+        this.#realtime.applyReconnectDetail(detail);
       } else {
         this.#hydrationPending = true;
       }

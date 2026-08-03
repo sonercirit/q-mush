@@ -1,4 +1,3 @@
-import { isProviderId, type ProviderId } from "../shared/provider-id.ts";
 import { canonicalAgentSessionMessages } from "../shared/session-message-order.ts";
 import type {
   AgentSessionDetail,
@@ -13,23 +12,6 @@ import { summaryFromDetail } from "./session-codec.ts";
 import { createDisplaySessionMessage } from "./session-message.ts";
 import { sessionMutationPending } from "./session-pending.ts";
 import { toolStreamKey } from "./tool-stream-client.ts";
-
-export function selectedSessionCredential(value: string):
-  | {
-      readonly credentialId: string;
-      readonly provider: ProviderId;
-    }
-  | undefined {
-  const separator = value.indexOf(":");
-  const provider = value.slice(0, separator);
-  const credentialId = value.slice(separator + 1);
-
-  if (separator < 1 || !isProviderId(provider) || credentialId.length === 0) {
-    return undefined;
-  }
-
-  return { credentialId, provider };
-}
 
 export function replaceSessionSummary(
   sessions: readonly AgentSessionSummary[],
@@ -396,12 +378,29 @@ export class SessionRealtimeState {
     this.#view = view;
   }
 
+  #clearCompaction(sessionId: string): void {
+    this.#compactionRequests.delete(sessionId);
+    this.#streamedContent.delete(sessionId);
+  }
+
+  applyReconnectDetail(detail: AgentSessionDetail): void {
+    const current = this.#streamedContent.get(detail.id);
+    const messages = persistedMessages(detail);
+    const base =
+      current?.baseMessageId === null
+        ? messages.length === 0
+        : messages.some(({ id }) => id === current?.baseMessageId);
+    if (this.#compactionRequests.has(detail.id) && !base) {
+      this.#clearCompaction(detail.id);
+    }
+    this.applyDetail(detail);
+  }
+
   applyDetail(detail: AgentSessionDetail): void {
     const persistable = persistedDetail(detail);
     const active = sessionIsActive(persistable);
     if (!active) {
-      this.#compactionRequests.delete(detail.id);
-      this.#streamedContent.delete(detail.id);
+      this.#clearCompaction(detail.id);
     }
     const currentStream = this.#streamedContent.get(detail.id);
     const streamed =
@@ -459,8 +458,7 @@ export class SessionRealtimeState {
     >,
   ): void {
     if (event.type === "session_compaction_settled") {
-      this.#compactionRequests.delete(event.sessionId);
-      this.#streamedContent.delete(event.sessionId);
+      this.#clearCompaction(event.sessionId);
       const detail = this.#view.value.detail;
       if (
         this.#view.value.selectedId === event.sessionId &&

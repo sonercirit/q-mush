@@ -15,7 +15,7 @@ import type {
   SessionCommandViewOptions,
   SessionCreationViewOptions,
 } from "./session-controller-options.ts";
-import { selectedSessionCredential } from "./session-controller-state.ts";
+import { selectedSessionCredential } from "./session-credential-option.ts";
 import { reconcileUnknownSessionMutation } from "./session-mutation-reconciliation.ts";
 import { sessionMutationError } from "./session-mutations.ts";
 import { sessionMutationPending } from "./session-pending.ts";

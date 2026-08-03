@@ -1,10 +1,12 @@
 import { createRoot } from "solid-js";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
+import { SESSION_REALTIME_OPERATIONS } from "../../shared/user-realtime-protocol.ts";
 import { SessionController } from "../../solid/session-controller.ts";
 import { createDisplaySessionMessage } from "../../solid/session-message.ts";
 import { DEFAULT_SESSION_TRANSCRIPT_FILTERS } from "../../solid/session-transcript-filters.ts";
 import { SessionTranscript } from "../../solid/session-transcript.tsx";
+import type { SessionCommandTransport } from "../../solid/session-transport.ts";
 import { installFetch, withRestoredFetch } from "./controller-test-helpers.ts";
 import { renderSolidToString } from "./render-solid.tsx";
 import { createResponseFetch } from "./session-dom-test-helpers.tsx";
@@ -20,6 +22,62 @@ async function selectedController(
   const controller = createRoot(() => new SessionController());
   await controller.select(selected.id);
   return controller;
+}
+
+interface ReconnectableCompactionController {
+  readonly controller: SessionController;
+  hydrate(detail: AgentSessionDetail): Promise<void>;
+}
+
+async function reconnectableCompactionController(
+  detail: AgentSessionDetail,
+): Promise<ReconnectableCompactionController> {
+  let reconnect: (() => void) | undefined;
+  let hydratedDetail = detail;
+  const transport: SessionCommandTransport = {
+    command(operation) {
+      const response =
+        operation === SESSION_REALTIME_OPERATIONS.subscribe
+          ? { sessions: [hydratedDetail] }
+          : hydratedDetail;
+      return Promise.resolve(response);
+    },
+    onReconnect(listener) {
+      reconnect = listener;
+      return () => {
+        reconnect = undefined;
+        return undefined;
+      };
+    },
+  };
+  const controller = createRoot(() => {
+    return new SessionController(undefined, undefined, null, transport);
+  });
+  await controller.select(detail.id);
+
+  return {
+    controller,
+    async hydrate(nextDetail) {
+      hydratedDetail = nextDetail;
+      reconnect?.();
+      await vi.waitFor(() => {
+        expect(controller.state.detail?.updatedAt).toBe(nextDetail.updatedAt);
+      });
+    },
+  };
+}
+
+async function preparedReconnectController(
+  sessionId: string,
+  content: string,
+): Promise<
+  ReconnectableCompactionController & { readonly detail: AgentSessionDetail }
+> {
+  const detail = compactionDetail(sessionId);
+  const reconnectable = await reconnectableCompactionController(detail);
+  applyCompactionRequest(reconnectable.controller, sessionId);
+  applyCompactionDelta(reconnectable.controller, sessionId, content);
+  return { ...reconnectable, detail };
 }
 
 const COMPACTION_REQUEST = "Create the handoff summary.";
@@ -141,6 +199,10 @@ function compactionRequestIds(
 
 const HANDOFF_MESSAGE =
   "Conversation compacted:\n\nContinue from this handoff.";
+
+function handoffPrefix(): readonly unknown[] {
+  return [{ content: HANDOFF_MESSAGE, id: "handoff", role: "user" }];
+}
 
 function expectCompactionMessages(
   controller: SessionController,
@@ -294,14 +356,60 @@ test.each(SNAPSHOT_TIMINGS)(
       });
 
       applyOrdinaryContinuation(controller, sessionId);
-      expectOrdinaryContinuation(controller, [
-        { content: HANDOFF_MESSAGE, id: "handoff", role: "user" },
-      ]);
+      expectOrdinaryContinuation(controller, handoffPrefix());
     } finally {
       globalThis.fetch = originalFetch;
     }
   },
 );
+
+test("settles a handoff whose realtime marker was lost before reconnect hydration", async () => {
+  const sessionId = "session-compaction-reconnect-settlement";
+  const reconnectable = await preparedReconnectController(
+    sessionId,
+    "Compacted response",
+  );
+  const { controller, detail } = reconnectable;
+  const handoff = transcriptMessage("handoff", HANDOFF_MESSAGE, "user", 3);
+  const handoffDetail = {
+    ...detail,
+    hasOlderSegments: true,
+    messages: [handoff],
+    updatedAt: detail.updatedAt + 1,
+  };
+  controller.applyDetail(handoffDetail);
+
+  await reconnectable.hydrate({
+    ...handoffDetail,
+    updatedAt: handoffDetail.updatedAt + 1,
+  });
+  applyCompactionDelta(
+    controller,
+    sessionId,
+    "Ordinary continuation",
+    "later-stream",
+  );
+
+  expectOrdinaryContinuation(controller, handoffPrefix());
+});
+
+test("keeps an active compaction request across reconnect hydration", async () => {
+  const sessionId = "session-compaction-active-reconnect";
+  const reconnectable = await preparedReconnectController(
+    sessionId,
+    "Compacted ",
+  );
+  const { controller, detail } = reconnectable;
+
+  await reconnectable.hydrate({
+    ...detail,
+    updatedAt: detail.updatedAt + 1,
+  });
+  expectCompactionMessages(controller, "Compacted ");
+  applyCompactionDelta(controller, sessionId, "response");
+
+  expectCompactionMessages(controller, "Compacted response");
+});
 
 test("clears a failed compaction request without a snapshot", async () => {
   const sessionId = "session-compaction-failed";

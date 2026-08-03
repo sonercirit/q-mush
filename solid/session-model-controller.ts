@@ -7,7 +7,7 @@ import { shouldDiscover } from "./discovery-state.ts";
 import type { RevisionState } from "./revision-state.ts";
 import type { SessionViewState } from "./session-client.tsx";
 import { readAgentModelCatalog } from "./session-codec.ts";
-import { selectedSessionCredential } from "./session-controller-state.ts";
+import { selectedSessionCredential } from "./session-credential-option.ts";
 import { draftWithModelCatalog } from "./session-form.ts";
 import { sessionModelDiscoveryState } from "./session-state.ts";
 import type { SessionCommandTransport } from "./session-transport.ts";
