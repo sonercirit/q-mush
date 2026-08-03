@@ -16,17 +16,21 @@ import {
 } from "./session-store-test-fixtures.ts";
 
 function runningSetup() {
-  const setup = createStore();
-  const detail = createTestSession(setup.store);
-  expect(
-    setup.store.transitionRuntime(
-      detail.id,
-      "running",
-      TEST_NOW + 1,
-      detail.generation,
-    ),
-  ).toBe(true);
-  return { ...setup, detail };
+  const { database, generateId, store } = createStore();
+  const detail = createTestSession(store);
+  const running = store.transitionCurrent(
+    STORE_SESSION_ID,
+    "running",
+    TEST_NOW + 1,
+  );
+  expect(running).toBe(true);
+  return { database, detail, generateId, store };
+}
+
+function closeSetup(
+  setup: Pick<ReturnType<typeof createStore>, "database">,
+): void {
+  setup.database.$client.close();
 }
 
 function watchdogSetup(
@@ -74,50 +78,68 @@ function watchdogSetup(
   };
 }
 
+function scanPastGrace(
+  watchdog: ReturnType<typeof watchdogSetup>,
+  elapsedMs = 1_003,
+): void {
+  watchdog.scan();
+  watchdog.setNow(TEST_NOW + elapsedMs);
+  watchdog.scan();
+}
+
+function launchRuntime(
+  setup: ReturnType<typeof runningSetup>,
+  runtimes: SessionRuntimes,
+  generation: number,
+) {
+  const deferred = Promise.withResolvers<undefined>();
+  expect(
+    runtimes.launch(
+      setup.detail.id,
+      STORE_RUNNER_ID,
+      generation,
+      () => deferred.promise,
+    ),
+  ).toBe(true);
+  return deferred;
+}
+
 test("fails a running session whose runtime disappeared beyond the grace bound", () => {
   const setup = runningSetup();
-  const watchdog = watchdogSetup(setup, { graceMs: 1_000 });
+  const liveness = watchdogSetup(setup, { graceMs: 1_000 });
 
-  watchdog.scan();
-  expect(setup.store.get(TEST_USER_ID, STORE_SESSION_ID)?.status).toBe(
-    "running",
-  );
-
-  watchdog.setNow(TEST_NOW + 1_003);
-  watchdog.scan();
+  scanPastGrace(liveness);
 
   const failed = setup.store.get(TEST_USER_ID, STORE_SESSION_ID);
   expect(failed).toMatchObject({ status: "failed" });
   expect(failed?.messages.at(-1)?.content).toContain(
     "liveness watchdog found no active runtime",
   );
-  expect(watchdog.stopChildren).toHaveBeenCalledOnce();
-  expect(watchdog.finished).toHaveBeenCalledOnce();
-  expect(watchdog.notify).toHaveBeenCalledWith(TEST_USER_ID, STORE_SESSION_ID);
-  setup.database.$client.close();
+  expect(liveness.stopChildren).toHaveBeenCalledOnce();
+  expect(liveness.finished).toHaveBeenCalledOnce();
+  expect(liveness.notify).toHaveBeenCalledWith(TEST_USER_ID, STORE_SESSION_ID);
+  closeSetup(setup);
 });
 
 test("requires the stored execution generation to match its runtime", () => {
   const setup = runningSetup();
-  const runtimes = new SessionRuntimes();
-  const runtime = Promise.withResolvers<undefined>();
-  expect(
-    runtimes.launch(
-      setup.detail.id,
-      STORE_RUNNER_ID,
-      setup.detail.generation + 1,
-      () => runtime.promise,
-    ),
-  ).toBe(true);
-  const watchdog = watchdogSetup(setup, { graceMs: 1_000, runtimes });
+  const staleRuntimes = new SessionRuntimes();
+  const runtime = launchRuntime(
+    setup,
+    staleRuntimes,
+    setup.detail.generation + 1,
+  );
+  const watchdog = watchdogSetup(setup, {
+    graceMs: 1_000,
+    runtimes: staleRuntimes,
+  });
 
-  watchdog.scan();
-  watchdog.setNow(TEST_NOW + 1_003);
-  watchdog.scan();
+  scanPastGrace(watchdog);
 
-  expect(setup.store.get(TEST_USER_ID, setup.detail.id)?.status).toBe("failed");
+  const status = setup.store.get(TEST_USER_ID, setup.detail.id)?.status;
+  expect(status).toBe("failed");
   runtime.resolve();
-  setup.database.$client.close();
+  closeSetup(setup);
 });
 
 test("recovers a durable shutdown marker instead of failing its session", () => {
@@ -134,16 +156,15 @@ test("recovers a durable shutdown marker instead of failing its session", () => 
   ).toBe(true);
 
   watchdog.scan();
-  watchdog.setNow(TEST_NOW + 1_003);
-  watchdog.scan();
 
-  expect(setup.store.get(TEST_USER_ID, setup.detail.id)).toMatchObject({
+  const recovered = setup.store.get(TEST_USER_ID, setup.detail.id);
+  expect(recovered).toMatchObject({
     generation: setup.detail.generation + 1,
     restartHandoff: { restartId: "bounded-shutdown" },
     status: "paused",
   });
   expect(watchdog.finished).not.toHaveBeenCalled();
-  setup.database.$client.close();
+  closeSetup(setup);
 });
 
 test("retries pending completed-child callback delivery on every scan", () => {
@@ -160,21 +181,17 @@ test("retries pending completed-child callback delivery on every scan", () => {
       userId: TEST_USER_ID,
     },
   ]);
-  setup.database.$client.close();
+  closeSetup(setup);
 });
 
 test("does not time out a twenty-minute command on a live runner connection", async () => {
   const setup = runningSetup();
-  const runtimes = new SessionRuntimes();
-  const runtime = Promise.withResolvers<undefined>();
-  expect(
-    runtimes.launch(
-      setup.detail.id,
-      STORE_RUNNER_ID,
-      setup.detail.generation,
-      () => runtime.promise,
-    ),
-  ).toBe(true);
+  const currentRuntimes = new SessionRuntimes();
+  const runtime = launchRuntime(
+    setup,
+    currentRuntimes,
+    setup.detail.generation,
+  );
   const broker = new RunnerCommandBroker({
     commandId: () => "twenty-minute-command",
     deliver: () => true,
@@ -191,17 +208,20 @@ test("does not time out a twenty-minute command on a live runner connection", as
   const watchdog = watchdogSetup(setup, {
     broker,
     graceMs: 60_000,
-    runtimes,
+    runtimes: currentRuntimes,
   });
   watchdog.watchdog.runnerConnected(STORE_RUNNER_ID);
 
+  const twentyMinutesLater = TEST_NOW + 20 * 60_000;
   watchdog.scan();
-  watchdog.setNow(TEST_NOW + 20 * 60_000);
+  watchdog.setNow(twentyMinutesLater);
   watchdog.scan();
 
-  expect(setup.store.get(TEST_USER_ID, setup.detail.id)?.status).toBe(
-    "running",
-  );
+  const statusAfterTwentyMinutes = setup.store.get(
+    TEST_USER_ID,
+    setup.detail.id,
+  )?.status;
+  expect(statusAfterTwentyMinutes).toBe("running");
   expect(broker.isActive(STORE_RUNNER_ID, "twenty-minute-command")).toBe(true);
   expect(watchdog.notify).not.toHaveBeenCalled();
 
@@ -213,6 +233,6 @@ test("does not time out a twenty-minute command on a live runner connection", as
   ).toBe(true);
   await expect(result).resolves.toMatchObject({ output: "done" });
   runtime.resolve();
-  await runtimes.settled(setup.detail.id);
-  setup.database.$client.close();
+  await currentRuntimes.settled(setup.detail.id);
+  closeSetup(setup);
 });
