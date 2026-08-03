@@ -1,4 +1,3 @@
-import type { AgentFile } from "../shared/agent-file.ts";
 import type { AgentImage } from "../shared/agent-images.ts";
 import type { AgentConversationMessage } from "../shared/agent-loop.ts";
 import type { AgentSessionToolName } from "../shared/agent-tools.ts";
@@ -10,8 +9,6 @@ import type { SessionHistoryPage } from "../shared/session-history.ts";
 import type {
   AgentSessionDetail,
   AgentSessionSummary,
-  AgentSessionUsageUpdate,
-  RestartHandoff,
 } from "../shared/session-model.ts";
 import { createAskQuestionsPersistence } from "./ask-questions-persistence.ts";
 import { AskQuestionsStore } from "./ask-questions-store.ts";
@@ -34,18 +31,6 @@ import {
   queuedSessionDetails,
   queuedSessionOwnerIds,
 } from "./session-queued.ts";
-import {
-  RestartHandoffStore,
-  type RestartHandoffIdentity,
-} from "./session-restart-store.ts";
-import {
-  runtimeUsageOption,
-  type RuntimeAppendMessageParameters,
-  type RuntimeCompactionParameters,
-  type RuntimeMessageParameters,
-  type RuntimeMessageWriteOptions,
-  type RuntimeTerminalMessageParameters,
-} from "./session-runtime-write-options.ts";
 import {
   createStoredSession,
   type CreateAgentSession,
@@ -78,16 +63,7 @@ import {
   reassignStoredSession,
   type ReassignSessionResult,
 } from "./session-store-reassignment.ts";
-import {
-  appendRuntimeAgentMessages,
-  appendRuntimeErrorMessage,
-  commitRuntimeTerminal,
-  compactRuntimeConversation,
-  compactRuntimeTerminal,
-  setRuntimeAgentFile,
-  settleRuntimeFailure,
-  updateRuntimeUsage,
-} from "./session-store-runtime-writes.ts";
+import { SessionStoreRestarts } from "./session-store-restarts.ts";
 import {
   setSessionAutoCompact,
   setSessionContextTokenCap,
@@ -108,26 +84,18 @@ import {
   transitionSessionRuntime,
 } from "./session-store-transitions.ts";
 import { appendSessionUserMessage } from "./session-store-values.ts";
-export class SessionStore {
+export class SessionStore extends SessionStoreRestarts {
   readonly #manualCompactions: ManualCompactionStore;
   readonly #questions: AskQuestionsStore;
   readonly #resources: readonly [AppDatabase, IdGenerator];
-  readonly #restartHandoffs: RestartHandoffStore;
   constructor(database: AppDatabase, generateId: IdGenerator = createUuidV7) {
+    super(database, generateId);
     this.#resources = [database, generateId];
     this.#manualCompactions = new ManualCompactionStore(database, generateId);
     this.#questions = new AskQuestionsStore({
       generateId,
       persistence: createAskQuestionsPersistence(database),
       systemActorId: SYSTEM_ID,
-    });
-    this.#restartHandoffs = new RestartHandoffStore({
-      database,
-      generateId,
-      interruptUnknownTools: (transaction, sessionId, now) => {
-        this.appendUnknownRestartToolResults(transaction, sessionId, now);
-      },
-      read: (userId, sessionId) => this.get(userId, sessionId),
     });
   }
   get #database(): AppDatabase {
@@ -222,192 +190,11 @@ export class SessionStore {
       ),
     );
   }
-  pauseQueuedForRestart(
-    ...arguments_: Parameters<RestartHandoffStore["pauseQueued"]>
-  ): boolean {
-    return this.#restartHandoffs.pauseQueued(...arguments_);
+  protected readRestartSession(userId: string, sessionId: string) {
+    return this.get(userId, sessionId);
   }
-  pauseRunningForRestart(
-    ...arguments_: Parameters<RestartHandoffStore["pauseRunning"]>
-  ): boolean {
-    return this.#restartHandoffs.pauseRunning(...arguments_);
-  }
-  failInvalidRestartHandoff(
-    ...arguments_: Parameters<RestartHandoffStore["failInvalid"]>
-  ): boolean {
-    return this.#restartHandoffs.failInvalid(...arguments_);
-  }
-  failRestartHandoff(
-    ...arguments_: Parameters<RestartHandoffStore["failQueued"]>
-  ): boolean {
-    return this.#restartHandoffs.failQueued(...arguments_);
-  }
-  invalidRestartHandoffs(runnerId?: string) {
-    return this.#restartHandoffs.invalid(runnerId);
-  }
-  pendingRestartHandoffs(runnerId?: string) {
-    return this.#restartHandoffs.pending(runnerId);
-  }
-  claimRestartHandoff(
-    userId: string,
-    identity: RestartHandoffIdentity,
-    now: number,
-  ): AgentSessionDetail | undefined {
-    return this.#restartHandoffs.claim(userId, identity, now);
-  }
-  settleRestartHandoff(
-    userId: string,
-    identity: RestartHandoffIdentity,
-    settlement: Parameters<RestartHandoffStore["settle"]>[2],
-    now: number,
-  ): boolean {
-    return this.#restartHandoffs.settle(userId, identity, settlement, now);
-  }
-  restoreRestartHandoff(
-    identity: RestartHandoffIdentity,
-    now: number,
-  ): boolean {
-    return this.#restartHandoffs.restore(identity, now);
-  }
-  #runtimeTarget(sessionId: string, now: number, generation: number) {
-    return {
-      generation,
-      now,
-      resources: this.#writeResources(),
-      sessionId,
-    };
-  }
-  setRuntimeAgentFile(
-    sessionId: string,
-    agentFile: AgentFile | null,
-    now: number,
-    generation: number,
-  ): void {
-    setRuntimeAgentFile({
-      agentFile,
-      ...this.#runtimeTarget(sessionId, now, generation),
-    });
-  }
-  #agentMessageWrite(
-    parameters: RuntimeMessageParameters,
-    options: RuntimeMessageWriteOptions,
-  ): void {
-    const [sessionId, messages, now, generation] = parameters;
-    const target = {
-      ...this.#runtimeTarget(sessionId, now, generation),
-      messages,
-    };
-    if (options.kind === "terminal") {
-      commitRuntimeTerminal({
-        ...target,
-        restartHandoff: options.restartHandoff,
-        ...runtimeUsageOption(options.usage),
-      });
-      return;
-    }
-    appendRuntimeAgentMessages({
-      ...target,
-      ...runtimeUsageOption(options.usage),
-    });
-  }
-  commitRuntimeTerminal(
-    ...[
-      sessionId,
-      messages,
-      now,
-      generation,
-      restartHandoff,
-      usage,
-    ]: RuntimeTerminalMessageParameters
-  ): void {
-    this.#agentMessageWrite([sessionId, messages, now, generation], {
-      kind: "terminal",
-      restartHandoff,
-      ...runtimeUsageOption(usage),
-    });
-  }
-  #compactRuntime(
-    parameters:
-      | RuntimeCompactionParameters
-      | readonly [
-          ...RuntimeCompactionParameters,
-          restartHandoff: RestartHandoff | null,
-        ],
-  ): void {
-    const [
-      sessionId,
-      summary,
-      usage,
-      now,
-      generation,
-      startedAt,
-      restartHandoff,
-    ] = parameters;
-    const target = this.#runtimeTarget(sessionId, now, generation);
-    if (restartHandoff === undefined) {
-      compactRuntimeConversation({ ...target, startedAt, summary, usage });
-    } else {
-      compactRuntimeTerminal({
-        ...target,
-        restartHandoff,
-        startedAt,
-        summary,
-        usage,
-      });
-    }
-  }
-  compactRuntimeTerminal(
-    ...parameters: readonly [
-      ...RuntimeCompactionParameters,
-      restartHandoff: RestartHandoff | null,
-    ]
-  ): void {
-    this.#compactRuntime(parameters);
-  }
-  compactRuntimeConversation(...parameters: RuntimeCompactionParameters): void {
-    this.#compactRuntime(parameters);
-  }
-  updateRuntimeUsage(
-    sessionId: string,
-    input: AgentSessionUsageUpdate,
-    now: number,
-    generation: number,
-  ): void {
-    updateRuntimeUsage({
-      ...this.#runtimeTarget(sessionId, now, generation),
-      input,
-    });
-  }
-  appendRuntimeAgentMessages(
-    ...parameters: RuntimeAppendMessageParameters
-  ): void {
-    const [sessionId, messages, now, generation, usage] = parameters;
-    const writeOptions: RuntimeMessageWriteOptions = {
-      kind: "append",
-      ...runtimeUsageOption(usage),
-    };
-    this.#agentMessageWrite(
-      [sessionId, messages, now, generation],
-      writeOptions,
-    );
-  }
-  settleRuntimeFailure(...p: [string, string, number, number]): boolean {
-    return settleRuntimeFailure({
-      content: p[1],
-      ...this.#runtimeTarget(p[0], p[2], p[3]),
-    });
-  }
-
-  appendRuntimeErrorMessage(
-    sessionId: string,
-    content: string,
-    now: number,
-    generation: number,
-  ): void {
-    appendRuntimeErrorMessage({
-      content,
-      ...this.#runtimeTarget(sessionId, now, generation),
-    });
+  protected runtimeWriteResources() {
+    return this.#writeResources();
   }
   reassign(
     userId: string,
@@ -663,7 +450,7 @@ export class SessionStore {
   failInterrupted(now: number): readonly PendingSpawnedSession[] {
     const interrupted = interruptedStoredSessions(this.#database, now);
     for (const session of interrupted) {
-      if (this.#restartHandoffs.restoreInterrupted(session, now)) {
+      if (this.restoreInterruptedRestart(session, now)) {
         continue;
       }
       failInterruptedStoredSession(
