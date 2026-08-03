@@ -183,6 +183,13 @@
       "when": 1785688254771,
       "tag": "0025_curly_nicolaos",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1785746141954,
+      "tag": "0026_blushing_king_cobra",
+      "breakpoints": true
     }
   ]
 }

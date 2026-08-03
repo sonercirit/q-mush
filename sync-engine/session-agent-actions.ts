@@ -120,6 +120,7 @@ export class SessionAgentActions {
     return {
       compactSession: guardParent("compact_session", (sessionId) =>
         this.#compact({
+          authority: { ...authority, tool: "compact_session" },
           sessionId,
           userId,
           workspaceId: parentWorkspaceId(),
@@ -522,11 +523,12 @@ export class SessionAgentActions {
   }
 
   #compact(input: {
+    readonly authority: SessionExecutionAuthority;
     readonly sessionId: string;
     readonly userId: string;
     readonly workspaceId: string;
   }): Promise<string> {
-    const { sessionId, userId, workspaceId } = input;
+    const { authority, sessionId, userId, workspaceId } = input;
     const { compactSession, runtimes } = this.#compactionDependencies();
     const shared = sessionControlDependencies(this.#dependencies);
     return compactSessionAction(
@@ -546,6 +548,7 @@ export class SessionAgentActions {
               notify: this.#dependencies.notify,
               now: this.#dependencies.now,
               operation: "compact_and_continue",
+              parentAuthority: authority,
               runtimes,
               store: this.#dependencies.store,
               workspaceId: targetWorkspaceId,
@@ -555,7 +558,13 @@ export class SessionAgentActions {
           ),
         ...shared,
         scheduleCompaction: (targetId, generation) =>
-          runtimes.scheduleManualCompaction(targetId, generation),
+          runtimes.activeGenerationMatches(targetId, generation)
+            ? this.#dependencies.store.scheduleManualCompaction(
+                targetId,
+                generation,
+                this.#dependencies.now(),
+              )
+            : "unavailable",
       },
       userId,
       sessionId,

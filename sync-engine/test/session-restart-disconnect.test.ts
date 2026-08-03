@@ -108,7 +108,7 @@ test("disconnect during an in-flight runner command persists the exact restart h
         : undefined,
     restartPersistence: {
       clear: () => undefined,
-      operation: "agent",
+      operation: () => "agent",
       persist: () => undefined,
     },
     store: setup.store,

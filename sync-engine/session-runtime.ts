@@ -76,7 +76,6 @@ export function isValidRestartId(restartId: string): boolean {
 
 export class SessionRuntimes {
   readonly #active = new Map<string, ActiveSessionRuntime>();
-  readonly #manualCompactionRequests = new Map<string, number>();
   readonly #drainingRunners = new Map<string, RunnerRestartGate>();
   #drainingServer: RestartRequest | undefined;
 
@@ -92,36 +91,12 @@ export class SessionRuntimes {
     this.#active.get(sessionId)?.controller.abort();
   }
 
-  #manualCompactionMatches(sessionId: string, generation: number): boolean {
-    return this.#manualCompactionRequests.get(sessionId) === generation;
-  }
-
-  #activeGenerationMatches(sessionId: string, generation: number): boolean {
+  activeGenerationMatches(sessionId: string, generation: number): boolean {
     return this.#active.get(sessionId)?.generation === generation;
   }
 
-  scheduleManualCompaction(sessionId: string, generation: number): boolean {
-    const ready =
-      this.#manualCompactionMatches(sessionId, generation) ||
-      this.#activeGenerationMatches(sessionId, generation);
-    if (!ready) {
-      return false;
-    }
-    this.#manualCompactionRequests.set(sessionId, generation);
-    return true;
-  }
-
-  takeManualCompactionRequest(sessionId: string, generation: number): boolean {
-    const pending = this.#manualCompactionMatches(sessionId, generation);
-    if (!pending) {
-      return false;
-    }
-    this.#manualCompactionRequests.delete(sessionId);
-    return true;
-  }
-
   abortForGeneration(sessionId: string, generation: number): boolean {
-    if (!this.#activeGenerationMatches(sessionId, generation)) {
+    if (!this.activeGenerationMatches(sessionId, generation)) {
       return false;
     }
     this.#active
@@ -286,7 +261,6 @@ export class SessionRuntimes {
       }
       if (this.#active.get(sessionId) === runtime) {
         this.#active.delete(sessionId);
-        this.#manualCompactionRequests.delete(sessionId);
       }
     };
     void runtime.settled.then(clear, clear);

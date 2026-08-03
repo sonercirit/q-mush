@@ -14,6 +14,6 @@ export interface SessionRestartRequester {
 
 export interface DurableRestartPersistence {
   readonly clear: () => Promise<void> | void;
-  readonly operation: RestartHandoffOperation;
+  readonly operation: () => RestartHandoffOperation;
   readonly persist: RestartRequestPersistence;
 }

@@ -1,7 +1,11 @@
 import { and, eq, sql } from "drizzle-orm";
-import { updatedAuditFields } from "../shared/audit.ts";
+import { softDeletedAuditFields, updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
-import { agentMessages, agentSessions } from "../shared/database/schema.ts";
+import {
+  agentMessages,
+  agentSessionOperations,
+  agentSessions,
+} from "../shared/database/schema.ts";
 import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 import type { RestartHandoff } from "../shared/session-model.ts";
 import type { CompactionUsage } from "./session-compaction-usage.ts";
@@ -92,6 +96,24 @@ export function compactStoredConversation(options: {
         ),
       )
       .run();
+    const operation = transaction
+      .select({ id: agentSessionOperations.id })
+      .from(agentSessionOperations)
+      .where(
+        and(
+          eq(agentSessionOperations.sessionId, options.sessionId),
+          eq(agentSessionOperations.operation, "compact_and_continue"),
+          eq(agentSessionOperations.isDeleted, false),
+        ),
+      )
+      .get();
+    if (operation !== undefined) {
+      transaction
+        .update(agentSessionOperations)
+        .set(softDeletedAuditFields(SYSTEM_ID, options.now))
+        .where(eq(agentSessionOperations.id, operation.id))
+        .run();
+    }
     const handoff = {
       database: transaction,
       generateId: options.generateId,

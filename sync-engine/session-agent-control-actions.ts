@@ -20,7 +20,7 @@ interface SessionCompactionDependencies extends SessionControlBaseDependencies {
   readonly scheduleCompaction: (
     sessionId: string,
     generation: number,
-  ) => boolean;
+  ) => "already_pending" | "scheduled" | "unavailable";
 }
 
 export function sessionControlDependencies(
@@ -64,8 +64,18 @@ export async function compactSessionAction(
     workspaceId,
   });
   if (target.status === "running") {
-    if (!dependencies.scheduleCompaction(sessionId, target.generation)) {
+    const scheduled = dependencies.scheduleCompaction(
+      sessionId,
+      target.generation,
+    );
+    if (scheduled === "unavailable") {
       throw new Error("The running session is unavailable");
+    }
+    if (scheduled === "already_pending") {
+      return sessionToolOutput({
+        sessionId,
+        status: "compaction_already_scheduled",
+      });
     }
   } else {
     const response = await dependencies.compactSession(

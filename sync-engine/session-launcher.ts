@@ -74,14 +74,20 @@ export class SessionLauncher {
       async ({ controller, restartRequest, settled }) => {
         const restartPersistence: DurableRestartPersistence = {
           clear: clearShutdownMarker,
-          operation,
+          operation: () =>
+            this.#dependencies.store.manualCompactionPending(
+              detail.id,
+              detail.generation,
+            )
+              ? "compact_and_continue"
+              : operation,
           persist: (request, durable) => {
             if (durable) {
               this.#dependencies.shutdownInterrupted.mark(
                 detail.id,
                 detail.generation,
                 request.restartId,
-                operation,
+                restartPersistence.operation(),
                 this.#dependencies.now(),
               );
             }
@@ -114,7 +120,6 @@ export class SessionLauncher {
             now: this.#dependencies.now,
             notify: this.#dependencies.notify,
             realtime: this.#dependencies.realtime,
-            runtimes: this.#dependencies.runtimes,
             ...(this.#dependencies.readCredential === undefined
               ? {}
               : { readCredential: this.#dependencies.readCredential }),

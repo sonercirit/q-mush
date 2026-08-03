@@ -338,6 +338,18 @@ describe("cross-session parent execution authority", () => {
     },
   );
 
+  test("rejects credential-paused compact after the parent is fenced", async () => {
+    const setup = setupWithTarget("credential");
+    const before = setup.store.get(TEST_USER_ID, TARGET_SESSION_ID);
+    const result = setup.actions.compactSession(TARGET_SESSION_ID);
+
+    await fenceAtGate(setup.credentialGate, setup);
+    await expectParentStale(result);
+
+    expectTargetUnchanged(setup, before);
+    closeAuthoritySetup(setup);
+  });
+
   test("rejects stale compact and steer actions before mutating the target", () => {
     const setup = setupWithTarget("running");
     const before = setup.store.get(TEST_USER_ID, TARGET_SESSION_ID);
@@ -388,7 +400,6 @@ describe("cross-session parent execution authority", () => {
   test("running compaction schedules at the next step boundary", async () => {
     const setup = setupWithTarget("running");
     const target = targetDetail(setup);
-
     const runtime = Promise.withResolvers<undefined>();
     expect(
       setup.runtimes.launch(
@@ -400,12 +411,33 @@ describe("cross-session parent execution authority", () => {
     ).toBe(true);
     await expectCompactionScheduled(setup);
     expect(
-      setup.runtimes.takeManualCompactionRequest(
-        TARGET_SESSION_ID,
-        target.generation,
-      ),
+      setup.store.manualCompactionPending(TARGET_SESSION_ID, target.generation),
     ).toBe(true);
     expect(setup.launchOperations).toEqual([]);
+    runtime.resolve();
+    closeSetup(setup);
+  });
+
+  test("coalesces repeated running compaction requests", async () => {
+    const setup = setupWithTarget("running");
+    const target = targetDetail(setup);
+    const runtime = Promise.withResolvers<undefined>();
+    expect(
+      setup.runtimes.launch(
+        target.id,
+        target.runnerId,
+        target.generation,
+        () => runtime.promise,
+      ),
+    ).toBe(true);
+
+    await expectCompactionScheduled(setup);
+    expect(await setup.actions.compactSession(TARGET_SESSION_ID)).toContain(
+      "compaction_already_scheduled",
+    );
+    expect(
+      setup.store.manualCompactionPending(TARGET_SESSION_ID, target.generation),
+    ).toBe(true);
     runtime.resolve();
     closeSetup(setup);
   });

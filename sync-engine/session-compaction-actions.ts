@@ -10,12 +10,13 @@ import {
   createJsonResponse,
   parseJsonRequest,
 } from "./http.ts";
+import { queueFailureResponse } from "./session-availability.ts";
 import {
   pauseSessionForRestart,
   type SessionLaunchBoundary,
 } from "./session-creation.ts";
 import type { SessionCredentialOperation } from "./session-credential-operation.ts";
-import { queueSessionDetail } from "./session-queue.ts";
+import type { SessionExecutionAuthority } from "./session-execution-authority.ts";
 import type { SessionStore } from "./session-store.ts";
 
 function readCompactionMode(value: unknown): boolean | undefined {
@@ -83,6 +84,7 @@ interface ManualCompactionDependencies extends SessionLaunchBoundary {
     RestartHandoffOperation,
     "compact" | "compact_and_continue"
   >;
+  readonly parentAuthority?: SessionExecutionAuthority;
   readonly workspaceId?: string;
 }
 
@@ -107,7 +109,8 @@ export async function startManualSessionCompactionForUserId(
   }
   if (
     dependencies.operation === "compact_and_continue" &&
-    existing.status !== "idle"
+    existing.status !== "idle" &&
+    existing.status !== "completed"
   ) {
     return createApiError("session_busy", 409);
   }
@@ -122,13 +125,24 @@ export async function startManualSessionCompactionForUserId(
     return createApiError("session_busy", 409);
   }
 
-  const queueParameters: Parameters<typeof queueSessionDetail>[1] = [
-    userId,
-    sessionId,
-    undefined,
-    dependencies.workspaceId,
-  ];
-  const queue = () => queueSessionDetail(dependencies, queueParameters);
+  const queue = () => {
+    const queued = dependencies.store.queue(
+      userId,
+      sessionId,
+      dependencies.now(),
+      undefined,
+      {
+        ...(dependencies.parentAuthority === undefined
+          ? {}
+          : { parent: dependencies.parentAuthority }),
+        targetGeneration: existing.generation,
+      },
+      dependencies.workspaceId,
+    );
+    return queued.status === "queued"
+      ? queued.detail
+      : queueFailureResponse(queued);
+  };
   return dependencies.credential(userId, existing, (credential) => {
     const queued = queue();
     if (queued instanceof Response) {
