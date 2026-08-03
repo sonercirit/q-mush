@@ -273,6 +273,7 @@ test("requires explicit context, cost, and compaction metadata from session resp
     { ...DETAIL, costBasis: undefined },
     { ...DETAIL, costBasis: "none", costUsd: 1 },
     { ...DETAIL, maxContextTokens: undefined },
+    { ...DETAIL, modelContextTokens: undefined },
   ]) {
     expectInvalidSession(invalid);
   }

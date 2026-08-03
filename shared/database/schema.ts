@@ -23,6 +23,7 @@ import {
   activeDefaultIndex,
   ownedAuditColumns,
   ownedForeignKey,
+  sessionContextColumns,
   tokenUsageColumns,
 } from "./schema-columns.ts";
 import { agentSessionTables } from "./session-operation-schema.ts";
@@ -386,10 +387,7 @@ export const agentSessions = sqliteTable(
       .notNull()
       .default("none"),
     costUsd: real("cost_usd").notNull().default(0),
-    currentContextTokens: integer("current_context_tokens")
-      .notNull()
-      .default(0),
-    maxContextTokens: integer("max_context_tokens"),
+    ...sessionContextColumns(),
     agentFilePath: text("agent_file_path"),
     agentFileName: text("agent_file_name"),
     agentFileContent: text("agent_file_content"),

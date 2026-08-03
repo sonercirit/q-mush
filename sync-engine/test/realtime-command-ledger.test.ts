@@ -481,6 +481,27 @@ test("retains valid explicit command failures and sanitizes invalid codes", asyn
   ]);
 });
 
+test("preserves explicit command error detail for the browser", async () => {
+  const ledger = new RealtimeCommandLedger();
+  await expectExecution(
+    ledger,
+    command("invalid-cap"),
+    () => {
+      throw new RealtimeCommandFailure(
+        "invalid_context_token_cap",
+        "Context token cap cannot exceed the model limit of 64,000 tokens.",
+      );
+    },
+    {
+      commandId: "invalid-cap",
+      detail:
+        "Context token cap cannot exceed the model limit of 64,000 tokens.",
+      error: "invalid_context_token_cap",
+      type: "command_error",
+    },
+  );
+});
+
 test("rejects invalid accounting, clocks, identities, and constructor limits", async () => {
   const action = vi.fn(unexpected);
   const invalidExecutions: readonly InvalidLedgerExecution[] = [

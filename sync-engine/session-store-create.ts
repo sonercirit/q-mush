@@ -46,6 +46,7 @@ export interface CreateAgentSession extends Pick<
   readonly parentSessionId?: string;
   readonly parentUserInitiated?: boolean;
   readonly prompt: string;
+  readonly userContextTokenCap?: number | null;
   readonly userId: string;
 }
 
@@ -79,7 +80,10 @@ export type ForkSessionResult = Readonly<{
 function validateSessionConfiguration(
   input: Pick<
     CreateAgentSession,
-    "maxContextTokens" | "openRouterProviderTag" | "provider"
+    | "maxContextTokens"
+    | "userContextTokenCap"
+    | "openRouterProviderTag"
+    | "provider"
   >,
 ): void {
   if (
@@ -88,6 +92,16 @@ function validateSessionConfiguration(
       input.maxContextTokens <= 0)
   ) {
     throw new Error("The agent session context limit is invalid");
+  }
+  if (
+    input.userContextTokenCap !== undefined &&
+    input.userContextTokenCap !== null &&
+    (!Number.isSafeInteger(input.userContextTokenCap) ||
+      input.userContextTokenCap <= 0 ||
+      (input.maxContextTokens !== null &&
+        input.userContextTokenCap > input.maxContextTokens))
+  ) {
+    throw new Error("The agent session context token cap is invalid");
   }
 
   if (input.openRouterProviderTag !== null && input.provider !== "openrouter") {
@@ -103,6 +117,7 @@ function storedSessionValues(
     | "credentialId"
     | "executionEnvironment"
     | "maxContextTokens"
+    | "userContextTokenCap"
     | "model"
     | "openRouterProviderTag"
     | "provider"
@@ -131,6 +146,7 @@ function storedSessionValues(
     executionEnvironment: input.executionEnvironment,
     id,
     maxContextTokens: input.maxContextTokens,
+    userContextTokenCap: input.userContextTokenCap ?? null,
     model: input.model,
     openRouterProviderTag: input.openRouterProviderTag,
     parentExecutionGeneration: options.parentExecutionGeneration,

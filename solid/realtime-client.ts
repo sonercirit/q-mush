@@ -48,8 +48,11 @@ function normalizedCommandError(error: string): string {
     : error;
 }
 
-function commandFailure(code: string): Error & { readonly code: string } {
-  return Object.assign(new Error(code), { code });
+function commandFailure(
+  code: string,
+  detail?: string,
+): Error & { readonly code: string } {
+  return Object.assign(new Error(detail ?? code), { code });
 }
 
 interface RealtimeLocation {
@@ -475,7 +478,7 @@ export class RealtimeConnection {
       pending.resolve(event.result);
     } else {
       const code = normalizedCommandError(event.error);
-      pending.reject(commandFailure(code));
+      pending.reject(commandFailure(code, event.detail));
     }
   }
 

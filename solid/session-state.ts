@@ -36,6 +36,7 @@ function initialSessionDraft(): SessionDraft {
     reasoningEffort: emptySelection,
     runnerId: emptySelection,
     tools: AGENT_SESSION_TOOL_NAMES,
+    userContextTokenCap: emptySelection,
     workingDirectory: CURRENT_RUNNER_DIRECTORY,
   };
 }

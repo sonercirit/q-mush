@@ -180,6 +180,7 @@ function creationMatchesDescriptor(
     detail.runnerId === descriptor.runnerId &&
     detail.workingDirectory === descriptor.workingDirectory &&
     detail.model === descriptor.model &&
+    detail.userContextTokenCap === descriptor.userContextTokenCap &&
     detail.openRouterProviderTag ===
       (descriptor.openRouterProviderTag || null) &&
     sameStringSet(detail.tools, descriptor.tools) &&

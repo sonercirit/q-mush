@@ -24,7 +24,9 @@ test("renders only provider and tool access as compact collapsed rows", () => {
     "[data-session-editor-group='true']",
     HTMLDivElement,
   );
-  const rows = [...editorGroup.children];
+  const rows = [
+    ...editorGroup.querySelectorAll(":scope > .contents > section"),
+  ];
 
   expect(rows).toHaveLength(2);
   expect(container.textContent).not.toContain("Spawn child session");

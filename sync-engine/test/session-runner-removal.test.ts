@@ -46,6 +46,7 @@ function testSession(): AgentSessionDetail {
     hasOlderSegments: false,
     id: SESSION_ID,
     maxContextTokens: null,
+    userContextTokenCap: null,
     messages: [
       runningMessage,
       {
@@ -60,6 +61,7 @@ function testSession(): AgentSessionDetail {
       },
     ],
     model: "model-1",
+    modelContextTokens: null,
     openRouterProviderTag: null,
     pendingInputs: [],
     pendingQuestions: null,

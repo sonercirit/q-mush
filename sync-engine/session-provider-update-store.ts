@@ -3,6 +3,7 @@ import { updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentSessions } from "../shared/database/schema.ts";
 import type { ProviderModelPricing } from "../shared/provider-model-pricing.ts";
+import { contextTokenCapValidationError } from "../shared/session-context-limit.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import {
   sessionProviderSelectionMatches,
@@ -14,7 +15,13 @@ import { serializeProviderPricing } from "./session-store-read.ts";
 import { updateSessionAndEndGenerationTurn } from "./session-turn-store.ts";
 export type SessionProviderUpdateStoreResult = Readonly<{
   detail?: AgentSessionDetail;
-  status: "conflict" | "not_found" | "unchanged" | "updated";
+  error?: string;
+  status:
+    | "conflict"
+    | "invalid_context_token_cap"
+    | "not_found"
+    | "unchanged"
+    | "updated";
 }>;
 
 type ReadProviderUpdateSession = (
@@ -39,6 +46,19 @@ export function updateStoredSessionProvider(
   }
   if (existing.generation !== input.expectedGeneration) {
     return { status: "conflict" };
+  }
+  const capError = contextTokenCapValidationError(
+    existing.userContextTokenCap,
+    input.maxContextTokens,
+  );
+  if (capError !== undefined) {
+    const cap = existing.userContextTokenCap;
+    const limit = input.maxContextTokens;
+    const error =
+      cap !== null && limit !== null && cap > limit
+        ? `The current context token cap of ${cap.toLocaleString("en-US")} tokens exceeds the new model limit of ${limit.toLocaleString("en-US")} tokens. Lower or clear the cap before changing models.`
+        : `${capError} Lower or clear the cap before changing models.`;
+    return { error, status: "invalid_context_token_cap" };
   }
 
   const active = ["queued", "running", "paused"].includes(existing.status);

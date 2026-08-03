@@ -1,0 +1,1 @@
+ALTER TABLE `agent_sessions` ADD `user_context_token_cap` integer;

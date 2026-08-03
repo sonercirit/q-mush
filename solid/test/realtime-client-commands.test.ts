@@ -172,6 +172,28 @@ test("rejects unserializable command payloads without throwing synchronously", a
   setup.connection.stop();
 });
 
+test("preserves server command error detail", async () => {
+  const setup = openedCommandSetup("invalid-cap");
+  const result = setup.connection.command(
+    SESSION_REALTIME_OPERATIONS.setContextTokenCap,
+    { sessionId: "session-1", userContextTokenCap: 120_000 },
+  );
+
+  setup.sockets[0]?.receive({
+    commandId: "invalid-cap",
+    detail: "Context token cap cannot exceed the model limit of 64,000 tokens.",
+    error: "invalid_context_token_cap",
+    type: "command_error",
+  });
+
+  await expect(result).rejects.toMatchObject({
+    code: "invalid_context_token_cap",
+    message:
+      "Context token cap cannot exceed the model limit of 64,000 tokens.",
+  });
+  setup.connection.stop();
+});
+
 test.each(["outcome_unknown", "command_outcome_unknown"])(
   "normalizes server unknown-outcome code %s",
   async (error) => {

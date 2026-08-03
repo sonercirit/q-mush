@@ -275,6 +275,10 @@ class RealtimeTestSessionCommands implements SessionRealtimeCommands {
     return REALTIME_TEST_SESSION_DETAIL;
   }
 
+  setContextTokenCapForUser() {
+    return REALTIME_TEST_SESSION_DETAIL;
+  }
+
   stopForUser() {
     return REALTIME_TEST_SESSION_DETAIL;
   }

@@ -18,7 +18,11 @@ export function commandRequiresDurableReceipt(operation: string): boolean {
 
 export type CommandResult =
   | { readonly result: unknown; readonly type: "command_success" }
-  | { readonly error: string; readonly type: "command_error" };
+  | {
+      readonly detail?: string;
+      readonly error: string;
+      readonly type: "command_error";
+    };
 
 export interface CommandExecution {
   readonly replayResult: Promise<CommandResult>;
@@ -49,11 +53,19 @@ function completedResult(result: unknown, maximumResultBytes: number): unknown {
   return parsed;
 }
 
-function safeError(error: unknown): string {
-  return error instanceof RealtimeCommandError &&
-    /^[a-z][a-z\d_]{0,99}$/u.test(error.code)
-    ? error.code
-    : "command_failed";
+function safeError(
+  error: unknown,
+): Readonly<{ detail?: string; error: string }> {
+  if (
+    !(error instanceof RealtimeCommandError) ||
+    !/^[a-z][a-z\d_]{0,99}$/u.test(error.code)
+  ) {
+    return { error: "command_failed" };
+  }
+  return {
+    error: error.code,
+    ...(error.detail === undefined ? {} : { detail: error.detail }),
+  };
 }
 
 export function commandExecution(
@@ -70,7 +82,7 @@ export function commandExecution(
     .then(
       (result) => ({ result, type: "command_success" as const }),
       (error: unknown) => ({
-        error: safeError(error),
+        ...safeError(error),
         type: "command_error" as const,
       }),
     );
@@ -87,7 +99,9 @@ export function commandExecution(
 export function resultBodyBytes(result: CommandResult): number {
   try {
     const body =
-      result.type === "command_success" ? result.result : result.error;
+      result.type === "command_success"
+        ? result.result
+        : { detail: result.detail, error: result.error };
     const serialized = JSON.stringify(body);
     return typeof serialized === "string" ? utf8ByteLength(serialized) : 0;
   } catch {

@@ -29,6 +29,7 @@ import type { RunnerViewState } from "./runner-client.tsx";
 import { SessionAutoCompactToggle } from "./session-autocompact-toggle.tsx";
 import { SessionPromptInput } from "./session-client-forms.tsx";
 import { formatTokenCount } from "./session-context-client.tsx";
+import { SessionContextTokenCapInput } from "./session-context-token-cap-input.tsx";
 import { selectedSessionCredential } from "./session-controller-state.ts";
 import type { SessionController } from "./session-controller.ts";
 import { credentialOptions } from "./session-credential-list.ts";
@@ -422,6 +423,14 @@ function NewSessionForm(
         selectedValue={props.state.draft.reasoningEffort}
       />
       {renderModelModalities(model())}
+      <SessionContextTokenCapInput
+        disabled={props.state.creating}
+        model={model()}
+        onInput={(value) => {
+          props.controller.setDraftField("userContextTokenCap", value);
+        }}
+        value={props.state.draft.userContextTokenCap}
+      />
       <SessionAutoCompactToggle
         checked={props.state.draft.autoCompact}
         disabled={props.state.creating}

@@ -3,7 +3,6 @@ import type { AgentImage } from "../shared/agent-images.ts";
 import type { AgentConversationMessage } from "../shared/agent-loop.ts";
 import type { AgentSessionToolName } from "../shared/agent-tools.ts";
 import type { PendingAskQuestions } from "../shared/ask-questions.ts";
-import { updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentSessions } from "../shared/database/schema.ts";
 import { createUuidV7, SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
@@ -21,7 +20,6 @@ import {
   sessionExecutionIsCurrent,
   type SessionQueueAuthorization,
 } from "./session-execution-authority.ts";
-import { userSessionFilter } from "./session-filter.ts";
 import { readStoredSessionHistory } from "./session-history-store.ts";
 import { ManualCompactionStore } from "./session-manual-compaction-store.ts";
 import {
@@ -58,10 +56,7 @@ import {
   type SessionStoreForkParameters,
   type SessionStoreForkResult,
 } from "./session-store-fork.ts";
-import {
-  activeSessionCondition,
-  updateStoredSessions,
-} from "./session-store-persistence.ts";
+import { activeSessionCondition } from "./session-store-persistence.ts";
 import {
   listStoredSessions,
   readStoredSessionDetail,
@@ -93,6 +88,12 @@ import {
   settleRuntimeFailure,
   updateRuntimeUsage,
 } from "./session-store-runtime-writes.ts";
+import {
+  setSessionAutoCompact,
+  setSessionContextTokenCap,
+  type SessionAutoCompactParameters,
+  type SessionContextTokenCapParameters,
+} from "./session-store-settings.ts";
 import {
   activeSpawnedSessionChildren,
   appendSpawnedSessionReport,
@@ -429,19 +430,18 @@ export class SessionStore {
       workingDirectory,
     });
   }
-  setAutoCompact(
-    userId: string,
-    sessionId: string,
-    autoCompact: boolean,
-    now: number,
-    workspaceId?: string,
-  ): AgentSessionDetail | undefined {
-    const updated = updateStoredSessions(
-      this.#database,
-      activeSessionCondition(userSessionFilter(userId, sessionId, workspaceId)),
-      { autoCompact, ...updatedAuditFields(userId, now) },
-    );
-    return updated ? this.get(userId, sessionId, workspaceId) : undefined;
+  #settingContext() {
+    return {
+      database: this.#database,
+      read: (userId: string, sessionId: string, workspaceId?: string) =>
+        this.get(userId, sessionId, workspaceId),
+    };
+  }
+  setContextTokenCap(...parameters: SessionContextTokenCapParameters) {
+    return setSessionContextTokenCap(this.#settingContext(), ...parameters);
+  }
+  setAutoCompact(...parameters: SessionAutoCompactParameters) {
+    return setSessionAutoCompact(this.#settingContext(), ...parameters);
   }
   appendUnknownRestartToolResults(
     database: Parameters<typeof appendUnknownRestartToolResults>[0]["database"],
@@ -606,10 +606,14 @@ export class SessionStore {
       this.#currentGeneration(sessionId),
     );
   }
-  appendCurrentAgentMessage: CurrentSessionStore["appendAgentMessage"] = (...a) => {
+  appendCurrentAgentMessage: CurrentSessionStore["appendAgentMessage"] = (
+    ...a
+  ) => {
     this.#current().appendAgentMessage(...a);
   };
-  appendCurrentErrorMessage: CurrentSessionStore["appendErrorMessage"] = (...a) => {
+  appendCurrentErrorMessage: CurrentSessionStore["appendErrorMessage"] = (
+    ...a
+  ) => {
     this.#current().appendErrorMessage(...a);
   };
   compactCurrentConversation: CurrentSessionStore["compactConversation"] = (
