@@ -197,6 +197,7 @@ test("leaves non-JSON text unchanged and bounds arbitrary candidates", () => {
 
 test("colorizes embedded JSON in queued instructions", () => {
   const input = {
+    clientRequestId: "request-1",
     content: 'Spawned session completed:\n{"result":"ok"}',
     id: "queued-1",
     images: [],

@@ -179,6 +179,14 @@ test("acknowledges a send locally without waiting for persistence, echo, or comm
   socket.receive({ session: authoritative, type: "session" });
   clock = 55;
   frames.at(-1)?.();
+  expect(measure.echoedAt).toBe(55);
+  expect(controller.state.detail?.pendingInputs).toMatchObject([
+    { id: "pending-authoritative" },
+  ]);
+  expect(controller.state.optimisticPendingInputs).toEqual([]);
+  expect(container.textContent).not.toContain("Sending…");
+  expect(container.textContent.match(/Measure every seam/gu)).toHaveLength(1);
+
   clock = 80;
   socket.receive({
     commandId: command.commandId,

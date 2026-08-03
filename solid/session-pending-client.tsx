@@ -5,6 +5,7 @@ import {
 } from "./session-structured-text.tsx";
 
 interface DisplayPendingInput {
+  readonly clientRequestId: string;
   readonly content: string;
   readonly createdAt?: number;
   readonly id: string;
@@ -89,7 +90,7 @@ function pendingInputLabel(kind: DisplayPendingInput["kind"]): string {
 interface SessionPendingInputsProps {
   readonly inputs: readonly DisplayPendingInput[];
   readonly onCancel: (inputId: string) => void;
-  readonly onRetry: (kind: DisplayPendingInput["kind"]) => void;
+  readonly onRetry: (clientRequestId: string) => void;
 }
 
 export function SessionPendingInputs(
@@ -119,7 +120,7 @@ export function SessionPendingInputs(
                     <button
                       class="rounded-lg border border-white/10 px-2 py-1 text-xs font-semibold text-slate-400 transition hover:border-amber-300/30 hover:text-amber-200"
                       onClick={() => {
-                        props.onRetry(input.kind);
+                        props.onRetry(input.clientRequestId);
                       }}
                       type="button"
                     >

@@ -351,9 +351,8 @@ export function SessionDetailBody(props: {
         onCancel={(inputId) => {
           void view().controller.cancelPendingInput(inputId);
         }}
-        onRetry={(kind) => {
-          if (kind === "steer") void view().controller.steer();
-          else void view().controller.followUp();
+        onRetry={(clientRequestId) => {
+          void view().controller.retryPendingInput(clientRequestId);
         }}
       />
       <Show when={view().detail.pendingQuestions}>

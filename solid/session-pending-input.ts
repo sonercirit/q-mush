@@ -16,18 +16,6 @@ export interface OptimisticPendingInput extends AgentSessionPendingInput {
   readonly status: "sending" | "unconfirmed";
 }
 
-export function samePendingInputAttempt(
-  attempt: PendingInputAttempt,
-  requested: Omit<PendingInputAttempt, "clientRequestId">,
-): boolean {
-  return (
-    attempt.sessionId === requested.sessionId &&
-    attempt.kind === requested.kind &&
-    attempt.prompt === requested.prompt &&
-    JSON.stringify(attempt.images) === JSON.stringify(requested.images)
-  );
-}
-
 export function sessionCanQueuePendingInput(
   status: AgentSessionStatus,
   kind: AgentSessionPendingInputKind,

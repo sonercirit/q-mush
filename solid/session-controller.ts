@@ -131,7 +131,8 @@ export class SessionController {
   applyDetail(detail: AgentSessionDetail): void {
     this.#applySnapshot(() => {
       this.#realtime.applyDetail(detail);
-    });
+      this.#pendingInputs.reconcile(detail);
+    }, true);
     if (
       this.#view.value.selectedId === detail.id &&
       this.#view.value.history.page === undefined
@@ -179,8 +180,11 @@ export class SessionController {
     };
     this.#applyToolEvent(applySnapshot, event);
   }
-  #applySnapshot(apply: () => void): void {
-    if (!sessionMutationPending(this.#view.value)) {
+  #applySnapshot(apply: () => void, applyWhileSending = false): void {
+    if (
+      !sessionMutationPending(this.#view.value) ||
+      (applyWhileSending && this.#view.value.sending)
+    ) {
       apply();
     }
   }
@@ -426,6 +430,9 @@ export class SessionController {
   }
   followUp() {
     return this.#pendingInputs.submit("follow_up");
+  }
+  retryPendingInput(clientRequestId: string): Promise<void> {
+    return this.#pendingInputs.retry(clientRequestId);
   }
   fork(
     messageId: string,
