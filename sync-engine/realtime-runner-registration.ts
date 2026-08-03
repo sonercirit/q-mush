@@ -1,4 +1,5 @@
 import { createUuidV7 } from "../shared/ids.ts";
+import { runnerRegistrationRejectedMessage } from "../shared/runner-realtime-protocol.ts";
 import type { RealtimeSocket } from "./realtime-hub.ts";
 import { readRunnerConnectMessage } from "./realtime-protocol.ts";
 import {
@@ -49,6 +50,7 @@ interface RunnerRegistrationCoordinatorOptions {
 }
 
 function rejectRegistration(socket: RealtimeSocket, reason: string): void {
+  safeSend(socket, runnerRegistrationRejectedMessage());
   socket.close(1008, reason);
 }
 

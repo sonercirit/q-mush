@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import { RUNNER_REALTIME_PATH } from "../../shared/routes.ts";
+import { runnerRegistrationRejectedMessage } from "../../shared/runner-realtime-protocol.ts";
 import {
   connectedRunnerRecorder,
   expectCommittedRegistrationFailure,
@@ -244,7 +245,7 @@ test("rejects a finalized retry whose exact restart scope no longer matches", ()
   );
 
   expect(recoveries).toEqual([]);
-  expect(retry.sent).toEqual([]);
+  expect(retry.sent).toEqual([runnerRegistrationRejectedMessage()]);
 });
 
 test("a prepared activation receipt retries the required durable release", () => {
@@ -260,7 +261,7 @@ test("a prepared activation receipt retries the required durable release", () =>
     "prepared",
   );
 
-  expect(retry.sent).toEqual([]);
+  expect(retry.sent).toEqual([runnerRegistrationRejectedMessage()]);
   expect(recoveries).toEqual([]);
 });
 
@@ -315,7 +316,7 @@ test.each(committedRegistrationFailures)(
       "machine-commit-restart",
       { restartId: "restart-other" },
     );
-    expect(mismatched.sent).toEqual([]);
+    expect(mismatched.sent).toEqual([runnerRegistrationRejectedMessage()]);
 
     const retry = reconnectRunnerRealtimeTestSocket(
       recreated,

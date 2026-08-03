@@ -1,4 +1,5 @@
 import { expect } from "vitest";
+import { runnerRegistrationRejectedMessage } from "../../shared/runner-realtime-protocol.ts";
 import { type createRealtimeIntegration } from "../../sync-engine/realtime.ts";
 import {
   connectedRunnerRealtimeTestIntegration,
@@ -201,14 +202,16 @@ export function expectRejectedConnection(
   sent: readonly string[],
   effects: readonly unknown[],
 ): void {
-  expect(sent).toEqual([]);
+  expect(sent).toEqual([runnerRegistrationRejectedMessage()]);
   expect(effects).toEqual([]);
 }
 
 export function expectRejectedSockets(
   sockets: readonly { readonly sent: readonly string[] }[],
 ): void {
-  expect(sockets.map(({ sent }) => sent)).toEqual(sockets.map(() => []));
+  expect(sockets.map(({ sent }) => sent)).toEqual(
+    sockets.map(() => [runnerRegistrationRejectedMessage()]),
+  );
 }
 
 export function expectCount(value: number, expected: number): void {

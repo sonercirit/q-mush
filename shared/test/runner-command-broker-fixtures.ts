@@ -88,14 +88,14 @@ export interface StreamedDispatch extends DeliveredDispatch {
 }
 
 export function deliveredBroker(
-  commandId: string,
+  commandId: string | (() => string),
   options: {
     readonly cancel?: (runnerId: string, canceledId: string) => void;
   } = {},
 ): RunnerCommandBroker {
   return new RunnerCommandBroker({
     ...options,
-    commandId: () => commandId,
+    commandId: typeof commandId === "string" ? () => commandId : commandId,
     deliver: () => true,
   });
 }

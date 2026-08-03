@@ -64,8 +64,8 @@ interface RunnerCommandBrokerOptions {
 }
 
 export class RunnerDisconnectedError extends Error {
-  constructor() {
-    super("The runner disconnected before the command returned");
+  constructor(message = "The runner disconnected before the command returned") {
+    super(message);
     this.name = "RunnerDisconnectedError";
   }
 }
@@ -79,6 +79,7 @@ interface PendingCommand {
   readonly abort: (() => void) | undefined;
   readonly authorize: (() => boolean) | undefined;
   readonly command: RunnerToolCommand;
+  connectionGeneration: number | undefined;
   readonly generation: number | undefined;
   readonly reject: (error: Error) => void;
   readonly resolve: (result: RunnerCommandResult) => void;
@@ -108,6 +109,7 @@ export class RunnerCommandBroker {
     ((runnerId: string, command: RunnerToolCommand) => boolean) | undefined;
   readonly #pending = new Map<string, PendingCommand>();
   readonly #queues = new Map<string, RunnerToolCommand[]>();
+  readonly #runnerConnectionGenerations = new Map<string, number>();
 
   constructor(options: RunnerCommandBrokerOptions = {}) {
     this.#cancel = options.cancel;
@@ -164,6 +166,7 @@ export class RunnerCommandBroker {
         abort: signal === undefined ? undefined : cancel,
         authorize: input.authorize,
         command,
+        connectionGeneration: undefined,
         generation: input.generation,
         nextSequence: 0,
         phase: "queued",
@@ -195,6 +198,9 @@ export class RunnerCommandBroker {
         if (!this.#requireAuthorization(pending)) {
           return;
         }
+        pending.connectionGeneration = this.runnerConnectionGeneration(
+          input.runnerId,
+        );
         pending.phase = "in_flight";
         if (!this.#deliver(input.runnerId, command)) {
           this.#unavailable(input, pending);
@@ -213,6 +219,7 @@ export class RunnerCommandBroker {
     if (pending === undefined) {
       return undefined;
     }
+    pending.connectionGeneration = this.runnerConnectionGeneration(runnerId);
     pending.phase = "in_flight";
     return pending.command;
   }
@@ -301,6 +308,7 @@ export class RunnerCommandBroker {
   }
 
   #requeue(pending: PendingCommand): void {
+    pending.connectionGeneration = undefined;
     this.#setPendingPhase(pending, "queued");
     if (this.#pending.has(pending.command.id)) {
       this.#queue(pending.runnerId).unshift(pending.command);
@@ -310,6 +318,7 @@ export class RunnerCommandBroker {
   deliverQueued(
     runnerId: string,
     deliver: (command: RunnerToolCommand) => boolean,
+    connectionGeneration = this.runnerConnectionGeneration(runnerId),
   ): void {
     for (;;) {
       const pending = this.#authorizedQueued(runnerId);
@@ -318,6 +327,7 @@ export class RunnerCommandBroker {
       }
       let delivered: boolean;
       try {
+        pending.connectionGeneration = connectionGeneration;
         pending.phase = "in_flight";
         delivered = deliver(pending.command);
       } catch (error) {
@@ -421,6 +431,36 @@ export class RunnerCommandBroker {
     return matching;
   }
 
+  runnerConnectionGeneration(runnerId: string): number {
+    return this.#runnerConnectionGenerations.get(runnerId) ?? 0;
+  }
+
+  replaceRunnerConnection(
+    runnerId: string,
+    replacedGeneration = this.runnerConnectionGeneration(runnerId),
+  ): number {
+    if (this.runnerConnectionGeneration(runnerId) !== replacedGeneration) {
+      return this.runnerConnectionGeneration(runnerId);
+    }
+    this.#runnerConnectionGenerations.set(runnerId, replacedGeneration + 1);
+    const inFlight = [...this.#pending.values()].filter(
+      (pending) =>
+        pending.runnerId === runnerId &&
+        pending.phase === "in_flight" &&
+        pending.connectionGeneration === replacedGeneration,
+    );
+    for (const pending of inFlight) {
+      this.#reject(
+        pending.command.id,
+        new RunnerDisconnectedError(
+          "The runner connection was superseded before the command returned",
+        ),
+        false,
+      );
+    }
+    return replacedGeneration + 1;
+  }
+
   disconnectRunner(runnerId: string): void {
     for (const pending of [...this.#pending.values()]) {
       if (pending.runnerId === runnerId && pending.phase === "in_flight") {
@@ -476,14 +516,18 @@ export class RunnerCommandBroker {
     );
   }
 
-  #reject(commandId: string, error: Error): void {
+  #reject(commandId: string, error: Error, cancelInFlight = true): void {
     const pending = this.#pending.get(commandId);
     if (pending === undefined) {
       return;
     }
 
     this.#settle(commandId, pending);
-    if (pending.phase === "in_flight" && this.#cancel !== undefined) {
+    if (
+      cancelInFlight &&
+      pending.phase === "in_flight" &&
+      this.#cancel !== undefined
+    ) {
       const cancel = this.#cancel;
       ignoreCleanupError(() => {
         cancel(pending.runnerId, commandId);
