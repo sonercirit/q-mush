@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import type { AuthenticatedUser } from "../../shared/auth-model.ts";
 import { RUNNER_REALTIME_PATH, RUNNERS_PATH } from "../../shared/routes.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
@@ -19,11 +19,15 @@ import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
+import { createSessionRealtimeCommandPayload } from "./realtime-command-fixtures.ts";
 import {
   createRecordedRunnerEffects,
   expectOperationalRegistration,
 } from "./realtime-hardening-helpers.ts";
-import { REALTIME_TEST_SESSION_DETAIL } from "./realtime-session-fixture.ts";
+import {
+  REALTIME_TEST_SESSION_DETAIL,
+  realtimeTestSessionCommands,
+} from "./realtime-session-fixture.ts";
 import {
   configuredRealtimeTestIntegration,
   connectedRunnerRealtimeTestIntegration,
@@ -316,6 +320,65 @@ test("executes authenticated browser commands", async () => {
     result: REALTIME_TEST_SESSION_DETAIL,
     type: "command_success",
   });
+});
+
+test("does not replay a retained command result across workspaces", async () => {
+  const createForUser = vi.fn((_user, _input, workspaceId: string) =>
+    Promise.resolve({ ...REALTIME_TEST_SESSION_DETAIL, workspaceId }),
+  );
+  const realtime = configuredRealtimeTestIntegration({
+    auth: realtimeTestAuth(USER),
+    sessions: realtimeTestSessions({
+      realtimeCommands: realtimeTestSessionCommands({ createForUser }),
+    }),
+  });
+  const first = recordedRealtimeTestSocket(
+    assertRealtimeUpgrade(realtime, "/api/realtime?workspaceId=workspace-a"),
+    { failure: "zero" },
+  );
+  const retry = recordedRealtimeTestSocket(
+    assertRealtimeUpgrade(realtime, "/api/realtime?workspaceId=workspace-b"),
+  );
+  const identifiers = {
+    commandId: "create-command-1",
+    idempotencyKey: "create-request-1",
+  };
+  sendUserRealtimeCommand(realtime.websocket, first.socket, [
+    SESSION_REALTIME_OPERATIONS.create,
+    createSessionRealtimeCommandPayload(),
+    identifiers,
+  ]);
+  await vi.waitFor(() => {
+    expect(first.record.closed).toEqual([
+      1011,
+      "Realtime acknowledgement failed",
+    ]);
+  });
+  expect(first.record.sent).toEqual([]);
+
+  sendUserRealtimeCommand(realtime.websocket, retry.socket, [
+    SESSION_REALTIME_OPERATIONS.create,
+    createSessionRealtimeCommandPayload(),
+    { ...identifiers, commandId: "create-command-2" },
+  ]);
+  await waitForRealtimeEvent(retry.record.sent, "command_success");
+
+  expect(
+    parseRealtimeMessages(retry.record.sent).find(
+      (message) =>
+        typeof message === "object" &&
+        message !== null &&
+        Reflect.get(message, "type") === "command_success",
+    ),
+  ).toMatchObject({
+    commandId: "create-command-2",
+    result: { workspaceId: "workspace-b" },
+  });
+  expect(createForUser).toHaveBeenCalledTimes(2);
+  expect(createForUser.mock.calls.map((call) => call[2])).toEqual([
+    "workspace-a",
+    "workspace-b",
+  ]);
 });
 
 test("restores owned active tool streams", () => {

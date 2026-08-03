@@ -6,6 +6,7 @@ import {
 } from "../../sync-engine/realtime-command-ledger.ts";
 import {
   USER_ID,
+  WORKSPACE_ID,
   command,
   constrainedRetentionLedger,
   deferredValue,
@@ -53,10 +54,16 @@ test("replays the literal serialized acknowledgement envelope", async () => {
   const selectedCommand = command("command-serialized");
   const first = await ledger.execute(
     USER_ID,
+    WORKSPACE_ID,
     selectedCommand,
     resolved({ status: "created" }),
   );
-  const replay = await ledger.execute(USER_ID, selectedCommand, unexpected);
+  const replay = await ledger.execute(
+    USER_ID,
+    WORKSPACE_ID,
+    selectedCommand,
+    unexpected,
+  );
 
   expect(replay.serialized).toBe(first.serialized);
   expect(replay.value).toEqual(first.value);
@@ -327,6 +334,42 @@ test("replays an idempotency key under a fresh command ID", async () => {
       command: command("command-2", "first-key"),
     },
   ]);
+  expect(action).toHaveBeenCalledOnce();
+});
+
+test("coalesces an in-flight idempotency key under a fresh command ID", async () => {
+  const ledger = new RealtimeCommandLedger();
+  const pending = deferredValue<string>();
+  const action = vi.fn(() => pending.promise);
+  const first = execute(ledger, command("command-1", "first-key"), action);
+  const retry = execute(ledger, command("command-2", "first-key"), action);
+
+  pending.resolve("first");
+  await Promise.all([
+    expect(first).resolves.toEqual(success("command-1", "first")),
+    expect(retry).resolves.toEqual(success("command-2", "first")),
+  ]);
+  expect(action).toHaveBeenCalledOnce();
+});
+
+test("replays a failed idempotency key under a fresh command ID", async () => {
+  const ledger = new RealtimeCommandLedger();
+  const action = vi.fn(() => {
+    throw new RealtimeCommandFailure("session_busy");
+  });
+
+  await expectExecution(
+    ledger,
+    command("command-1", "first-key"),
+    action,
+    failure("command-1", "session_busy"),
+  );
+  await expectExecution(
+    ledger,
+    command("command-2", "first-key"),
+    action,
+    failure("command-2", "session_busy"),
+  );
   expect(action).toHaveBeenCalledOnce();
 });
 

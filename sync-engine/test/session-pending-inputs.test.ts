@@ -200,10 +200,16 @@ describe("durable pending session inputs", () => {
       return setup.store.get(TEST_USER_ID, setup.detail.id);
     });
     const firstCommand = pendingInputCommand("first-command");
-    const first = await ledger.execute(TEST_USER_ID, firstCommand, persist);
+    const first = await ledger.execute(
+      TEST_USER_ID,
+      setup.detail.workspaceId,
+      firstCommand,
+      persist,
+    );
 
     const retry = await ledger.execute(
       TEST_USER_ID,
+      setup.detail.workspaceId,
       pendingInputCommand("retry-command"),
       persist,
     );
