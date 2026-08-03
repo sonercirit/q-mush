@@ -239,10 +239,10 @@ export async function compactSessionConversation(
   const estimateCost = (
     step: Pick<Parameters<typeof compactionUsage>[0], "costUsd" | "tokenUsage">,
   ) => estimateAgentStepCost(runtime.detail, step.tokenUsage);
-  const final = await compactor.compact(conversation, runtime.signal);
-  throwIfAgentAborted(runtime.signal);
-  const usage = compactionUsage(final, estimateCost);
   try {
+    const final = await compactor.compact(conversation, runtime.signal);
+    throwIfAgentAborted(runtime.signal);
+    const usage = compactionUsage(final, estimateCost);
     recordCompaction(
       runtime,
       final.summary,
