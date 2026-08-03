@@ -278,28 +278,24 @@ test("bounds an unacknowledged pending-input send as unconfirmed", async () => {
 });
 
 test("authoritative echo settles a send and cancels its confirmation timer", async () => {
-  let confirmation: (() => void) | undefined;
   let timeoutSequence = 0;
   const timers = new Map<number, () => void>();
-  const detail = { ...TEST_SESSION_DETAIL, status: "running" as const };
-  const state: SessionViewState = {
-    ...initialSessionViewState(),
-    detail,
+  const detail: AgentSessionDetail = Object.assign({}, TEST_SESSION_DETAIL, {
+    pendingInputs: [],
+    status: "running",
+  });
+  const state: SessionViewState = Object.assign(initialSessionViewState(), {
     followUp: "Confirm from the echo",
+    detail,
+    sessions: Array.of(summaryFromDetail(detail)),
     selectedId: detail.id,
-    sessions: [summaryFromDetail(detail)],
-  };
+  });
   const controller = new SessionController(
-    createReactiveState(state),
+    createReactiveState<SessionViewState>(state),
     undefined,
     null,
     {
-      command: () =>
-        new Promise((resolve) => {
-          confirmation = () => {
-            resolve(undefined);
-          };
-        }),
+      command: () => Promise.withResolvers<unknown>().promise,
     },
     {
       clearTimeout: (timeout) => {
@@ -314,9 +310,9 @@ test("authoritative echo settles a send and cancels its confirmation timer", asy
   );
 
   const submitted = controller.followUp();
-  const optimistic = controller.state.optimisticPendingInputs[0];
+  const [optimistic] = controller.state.optimisticPendingInputs;
   if (optimistic === undefined) {
-    throw new TypeError("Expected an optimistic pending input");
+    throw new TypeError("The echo confirmation input was not created");
   }
   expect(timers).toHaveLength(1);
   controller.applyDetail({
@@ -337,7 +333,6 @@ test("authoritative echo settles a send and cancels its confirmation timer", asy
     optimisticPendingInputs: [],
     sending: false,
   });
-  confirmation?.();
 });
 
 function mountedComposer(status: AgentSessionDetail["status"] = "running"): {

@@ -77,14 +77,12 @@ function requestPendingInputWithTimeout(
     };
     void requestPendingInput(transport, attempt).then(
       (value) => {
-        settle(() => {
-          resolve(value);
-        });
+        settle(resolve.bind(undefined, value));
       },
       (error: unknown) => {
-        settle(() => {
-          reject(error instanceof Error ? error : new Error(String(error)));
-        });
+        const failure =
+          error instanceof Error ? error : new Error(String(error));
+        settle(reject.bind(undefined, failure));
       },
     );
   });
