@@ -100,6 +100,9 @@ export function queueStoredSession(options: {
     if (stored === undefined) {
       return "not_found" as const;
     }
+    if (stored.runnerRequired) {
+      return "runner_required" as const;
+    }
     if (
       authorization?.targetGeneration !== undefined &&
       authorization.targetGeneration !== stored.executionGeneration
@@ -108,9 +111,6 @@ export function queueStoredSession(options: {
     }
     if (!["completed", "idle", "failed", "stopped"].includes(stored.status)) {
       return "busy" as const;
-    }
-    if (stored.runnerRequired) {
-      return "runner_required" as const;
     }
     if (!storedSessionRunnerIsAvailable(transaction, userId, sessionId, now)) {
       return "runner_unavailable" as const;
