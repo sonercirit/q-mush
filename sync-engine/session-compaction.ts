@@ -1,15 +1,11 @@
 import { and, eq, sql } from "drizzle-orm";
-import { softDeletedAuditFields, updatedAuditFields } from "../shared/audit.ts";
+import { updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
-import {
-  agentMessages,
-  agentSessionOperations,
-  agentSessions,
-} from "../shared/database/schema.ts";
+import { agentMessages, agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 import type { RestartHandoff } from "../shared/session-model.ts";
 import type { CompactionUsage } from "./session-compaction-usage.ts";
-import { manualCompactionOperation } from "./session-manual-compaction-query.ts";
+import { retireManualCompactionOperation } from "./session-manual-compaction-query.ts";
 import { sessionSegment } from "./session-segment.ts";
 import { runningCondition } from "./session-store-persistence.ts";
 import { requireRunningSessionUserId } from "./session-store-state.ts";
@@ -97,14 +93,12 @@ export function compactStoredConversation(options: {
         ),
       )
       .run();
-    const operation = manualCompactionOperation(transaction, options.sessionId);
-    if (operation !== undefined) {
-      transaction
-        .update(agentSessionOperations)
-        .set(softDeletedAuditFields(SYSTEM_ID, options.now))
-        .where(eq(agentSessionOperations.id, operation.id))
-        .run();
-    }
+    retireManualCompactionOperation(
+      transaction,
+      options.sessionId,
+      options.generation,
+      options.now,
+    );
     const handoff = {
       database: transaction,
       generateId: options.generateId,

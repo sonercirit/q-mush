@@ -13,6 +13,7 @@ import {
 } from "../shared/session-model.ts";
 import { readNonNegativeSafeInteger } from "../shared/validation.ts";
 import type { SessionExecutionAuthority } from "./session-execution-authority.ts";
+import { retireAbandonedManualCompactionOperations } from "./session-manual-compaction-query.ts";
 import { failRestartSession } from "./session-restart-failure-store.ts";
 import { restartHandoffValues } from "./session-restart-handoff.ts";
 import { runnerSessionCondition } from "./session-runner-condition.ts";
@@ -337,6 +338,12 @@ export class RestartHandoffStore {
       if (!updated) {
         return false;
       }
+      retireAbandonedManualCompactionOperations(
+        transaction,
+        options.authority.sessionId,
+        options.authority.generation,
+        options.now,
+      );
       this.#rotateTurn(transaction, options, handoffGeneration);
       if (from === "running") {
         this.#options.interruptUnknownTools?.(

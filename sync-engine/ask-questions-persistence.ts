@@ -14,6 +14,7 @@ import type {
 import { nullableColumnCondition } from "./database-condition.ts";
 import { exactlyOneUpdatedRow } from "./database-update.ts";
 import { storedActiveSessionState } from "./session-active-query.ts";
+import { retireAbandonedManualCompactionOperations } from "./session-manual-compaction-query.ts";
 import { runnerSessionCondition } from "./session-runner-condition.ts";
 import { activeSessionCondition } from "./session-store-persistence.ts";
 import { insertStoredMessage } from "./session-store-values.ts";
@@ -243,6 +244,14 @@ function drizzleQuestionTransaction(
         )
         .all()
         .map(storedQuestionRequest),
+    retireManualCompactionOperation: (sessionId, generation, now) => {
+      retireAbandonedManualCompactionOperations(
+        database,
+        sessionId,
+        generation,
+        now,
+      );
+    },
     updateQuestionRequest: (request, update) =>
       exactlyOneUpdatedRow(
         database,

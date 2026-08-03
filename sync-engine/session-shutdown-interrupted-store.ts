@@ -7,6 +7,7 @@ import type {
   RestartHandoff,
   RestartHandoffOperation,
 } from "../shared/session-model.ts";
+import { retireAbandonedManualCompactionOperations } from "./session-manual-compaction-query.ts";
 import {
   canonicalRestartHandoff,
   parseRestartHandoff,
@@ -189,6 +190,12 @@ export class ShutdownInterruptedSessionStore {
         if (!changed) {
           return;
         }
+        retireAbandonedManualCompactionOperations(
+          transaction,
+          session.id,
+          session.executionGeneration,
+          now,
+        );
         const segment =
           transaction.query.agentSessions
             .findFirst({

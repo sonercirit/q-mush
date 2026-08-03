@@ -15,6 +15,7 @@ import type {
 } from "../shared/session-model.ts";
 import { activeSessionDuration } from "../shared/session-timing.ts";
 import { storedActiveSessionState } from "./session-active-query.ts";
+import { retireAbandonedManualCompactionOperations } from "./session-manual-compaction-query.ts";
 import { currentSessionSegment } from "./session-segment.ts";
 import { notifySessionSteeringInput } from "./session-steering-wakeup.ts";
 import type { StoredUserMessageInput } from "./session-store-types.ts";
@@ -655,6 +656,12 @@ export function settleNormalSessionBoundary(options: {
     if (changed.length === 0) {
       throw new Error("The running session changed at its terminal boundary");
     }
+    retireAbandonedManualCompactionOperations(
+      transaction,
+      options.sessionId,
+      options.generation,
+      options.now,
+    );
     if (!queued) {
       endGenerationSessionTurn(
         transaction,

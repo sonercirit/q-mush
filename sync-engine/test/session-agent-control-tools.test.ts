@@ -93,6 +93,41 @@ class RestartScheduledCompactionModel implements AgentModel {
   }
 }
 
+class FailedThenRetriedCompactionModel implements AgentModel {
+  compactionRequests = 0;
+  #agentSteps = 0;
+
+  complete(
+    input: readonly AgentConversationMessage[],
+  ): Promise<AgentModelStep> {
+    if (isCompactionRequest(input)) {
+      this.compactionRequests += 1;
+      if (this.compactionRequests === 1) {
+        return Promise.resolve(providerStep(""));
+      }
+      if (this.compactionRequests === 2) {
+        return Promise.resolve(providerStep("Generation-one handoff."));
+      }
+      throw new Error("Unexpected repeated compaction");
+    }
+    if (JSON.stringify(input).includes("Generation-one handoff.")) {
+      return Promise.resolve(providerStep("Continued exactly once."));
+    }
+    this.#agentSteps += 1;
+    return Promise.resolve(
+      providerStep(`Schedule generation ${String(this.#agentSteps - 1)}.`, {
+        toolCalls: [
+          toolCall(
+            "compact_session",
+            { sessionId: SESSION_ID },
+            `call-compact-generation-${String(this.#agentSteps - 1)}`,
+          ),
+        ],
+      }),
+    );
+  }
+}
+
 class SteeringDispatchModel implements AgentModel {
   readonly releaseTarget = Promise.withResolvers<undefined>();
   readonly targetWaiting = Promise.withResolvers<undefined>();
@@ -369,6 +404,58 @@ test("scheduled self-compaction survives restart before its boundary", async () 
       .get()?.deleted,
   ).toBe(true);
   closeSessionTestDatabase(initial.database);
+});
+
+test("retires a failed scheduled generation before retrying compaction", async () => {
+  const model = new FailedThenRetriedCompactionModel();
+  const setup = controlledSetup(model);
+  await expectCreatedDefaultSession(setup);
+  await completeRunnerCommand(setup, SESSION_ID, RUNNER_AGENT_FILE_COMMAND);
+  await waitForSessionValue(
+    () => setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID),
+    hasSessionStatus("failed"),
+  );
+  expect(
+    setup.database
+      .select({ deleted: agentSessionOperations.isDeleted })
+      .from(agentSessionOperations)
+      .where(eq(agentSessionOperations.sessionId, SESSION_ID))
+      .get()?.deleted,
+  ).toBe(true);
+
+  const continued = await setup.sessions.continue(
+    createAuthenticatedRequest(
+      `${SESSIONS_PATH}/${SESSION_ID}/continue`,
+      undefined,
+      "POST",
+    ),
+    SESSION_ID,
+  );
+  expect(continued.status).toBe(202);
+  await completeRunnerCommand(setup, SESSION_ID, RUNNER_AGENT_FILE_COMMAND);
+  const settled = await completedSessionContaining(
+    setup,
+    SESSION_ID,
+    "Continued exactly once.",
+  );
+
+  expect(model.compactionRequests).toBe(2);
+  expect(JSON.stringify(settled)).toContain("Generation-one handoff.");
+  expect(
+    setup.database
+      .select({
+        deleted: agentSessionOperations.isDeleted,
+        generation: agentSessionOperations.executionGeneration,
+      })
+      .from(agentSessionOperations)
+      .where(eq(agentSessionOperations.sessionId, SESSION_ID))
+      .orderBy(agentSessionOperations.executionGeneration)
+      .all(),
+  ).toEqual([
+    { deleted: true, generation: 0 },
+    { deleted: true, generation: 1 },
+  ]);
+  closeSessionTestDatabase(setup.database);
 });
 
 test("steer_session dispatch is consumed by a running target at its boundary", async () => {

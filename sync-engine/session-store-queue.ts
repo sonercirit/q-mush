@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { AgentImage } from "../shared/agent-images.ts";
 import { updatedAuditFields } from "../shared/audit.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
@@ -7,6 +7,7 @@ import {
   sessionExecutionIsCurrent,
   type SessionQueueAuthorization,
 } from "./session-execution-authority.ts";
+import { retireAbandonedManualCompactionOperations } from "./session-manual-compaction-query.ts";
 import {
   activePendingInput,
   promotePendingInput,
@@ -191,6 +192,12 @@ export function queueStoredSession(options: {
         turnId,
       );
     }
+    retireAbandonedManualCompactionOperations(
+      transaction,
+      sessionId,
+      stored.executionGeneration,
+      now,
+    );
     transaction
       .update(agentSessions)
       .set({
@@ -201,7 +208,12 @@ export function queueStoredSession(options: {
         status: "queued",
         ...updatedAuditFields(userId, now),
       })
-      .where(eq(agentSessions.id, sessionId))
+      .where(
+        and(
+          eq(agentSessions.id, sessionId),
+          eq(agentSessions.executionGeneration, stored.executionGeneration),
+        ),
+      )
       .run();
     return "queued" as const;
   });

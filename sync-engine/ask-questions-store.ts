@@ -86,6 +86,11 @@ export interface AskQuestionsPersistenceTransaction {
   listRecoverableAnsweredRequests(
     runnerId?: string,
   ): readonly StoredQuestionRequest[];
+  retireManualCompactionOperation(
+    sessionId: string,
+    generation: number,
+    now: number,
+  ): void;
   updateQuestionRequest(
     request: StoredQuestionRequest,
     update: Partial<StoredQuestionRequest>,
@@ -589,14 +594,24 @@ export class AskQuestionsStore {
         throw new Error("The pending question request could not be cancelled");
       }
 
-      return updateQuestionSession(
-        transaction,
-        session,
-        "stopped",
-        userId,
+      if (
+        !updateQuestionSession(
+          transaction,
+          session,
+          "stopped",
+          userId,
+          now,
+          true,
+        )
+      ) {
+        return false;
+      }
+      transaction.retireManualCompactionOperation(
+        sessionId,
+        session.executionGeneration,
         now,
-        true,
       );
+      return true;
     });
   }
 

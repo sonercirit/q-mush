@@ -7,6 +7,7 @@ import {
   normalSessionCompletionStatus,
   type RestartHandoff,
 } from "../shared/session-model.ts";
+import { retireAbandonedManualCompactionOperations } from "./session-manual-compaction-query.ts";
 import {
   activePendingInput,
   promotePendingInput,
@@ -114,6 +115,12 @@ export function settleTerminalRuntime(
     throw new DOMException("The agent session was stopped", "AbortError");
   }
   if (sessionId !== undefined) {
+    retireAbandonedManualCompactionOperations(
+      database,
+      sessionId,
+      session.executionGeneration,
+      now,
+    );
     if (settledStatus !== "queued") {
       endGenerationSessionTurn(
         database,
