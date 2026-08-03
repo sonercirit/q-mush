@@ -10,11 +10,15 @@ export function SessionContextTokenCapDialog(props: {
 }): JSX.Element {
   const [dialog, setDialog] = createSignal<HTMLDivElement>();
   const open = (): boolean => props.cap !== undefined;
+  const onEscape = (): void => {
+    props.onCancel();
+  };
+  const returnFocus = (): HTMLElement | undefined => props.returnFocus();
   setupDialogFocus({
     dialog,
-    onEscape: props.onCancel,
+    onEscape,
     open,
-    returnFocus: props.returnFocus,
+    returnFocus,
   });
 
   return (
@@ -60,7 +64,9 @@ export function SessionContextTokenCapDialog(props: {
               </button>
               <button
                 class="min-h-11 rounded-xl bg-amber-300 px-4 py-2.5 text-sm font-semibold text-slate-950"
-                onClick={() => props.onConfirm(cap())}
+                onClick={() => {
+                  props.onConfirm(cap());
+                }}
                 type="button"
               >
                 Apply cap

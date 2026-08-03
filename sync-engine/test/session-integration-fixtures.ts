@@ -405,6 +405,7 @@ export function createSessionRequest(
   images: readonly AgentImage[] = [],
   autoCompact?: boolean,
   selectedProviderTag?: string,
+  userContextTokenCap?: number,
 ): Request {
   return createAuthenticatedRequest(
     `${SESSIONS_PATH}?workspaceId=${encodeURIComponent(TEST_WORKSPACE_ID)}`,
@@ -422,6 +423,7 @@ export function createSessionRequest(
       reasoningEffort,
       runnerId: RUNNER_ID,
       tools: AGENT_SESSION_TOOL_NAMES,
+      ...(userContextTokenCap === undefined ? {} : { userContextTokenCap }),
       workingDirectory: "/work/project",
     },
     "POST",

@@ -45,6 +45,7 @@ export type SessionCreationDescriptor = Readonly<{
 function sessionCreationDescriptor(
   draft: SessionViewState["draft"],
   credential: SessionCredentialSelection,
+  userContextTokenCap: number | null,
 ): SessionCreationDescriptor {
   return {
     ...credential,
@@ -58,9 +59,7 @@ function sessionCreationDescriptor(
     reasoningEffort: draft.reasoningEffort,
     runnerId: draft.runnerId,
     tools: [...draft.tools],
-    userContextTokenCap: parseContextTokenCapInput(
-      draft.userContextTokenCap,
-    ) as number | null,
+    userContextTokenCap,
     workingDirectory: draft.workingDirectory.trim(),
   };
 }
@@ -130,15 +129,21 @@ export async function createSessionFromView(
     ({ id }) => id === draft.model,
   );
   const parsedCap = parseContextTokenCapInput(draft.userContextTokenCap);
-  const capError =
-    parsedCap === undefined
-      ? "Context token cap must be a positive integer."
-      : contextTokenCapValidationError(parsedCap, model?.contextWindow ?? null);
+  if (parsedCap === undefined) {
+    options.view.patch({
+      error: "Context token cap must be a positive integer.",
+    });
+    return;
+  }
+  const capError = contextTokenCapValidationError(
+    parsedCap,
+    model?.contextWindow ?? null,
+  );
   if (capError !== undefined) {
     options.view.patch({ error: capError });
     return;
   }
-  const descriptor = sessionCreationDescriptor(draft, credential);
+  const descriptor = sessionCreationDescriptor(draft, credential, parsedCap);
   const previousIds = new Set(sessions.map(({ id }) => id));
   const revision = options.view.begin({ creating: true, error: undefined });
   options.loader.noteMutationStarted();

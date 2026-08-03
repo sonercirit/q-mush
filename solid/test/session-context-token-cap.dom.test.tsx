@@ -10,7 +10,9 @@ import { mountSessionDetailBody } from "./session-dom-test-helpers.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
 const disposals = new Array<() => void>();
-afterEach(() => disposeTestViews(disposals));
+afterEach(() => {
+  disposeTestViews(disposals);
+});
 
 function mountCapEditor(autoCompact = true) {
   const detail = {
@@ -99,7 +101,9 @@ test("applies an exceeded cap without compaction when auto-compact is off", asyn
   findTestButton(mounted.container, "Save cap")?.click();
   findTestButton(mounted.container, "Apply cap")?.click();
 
-  await vi.waitFor(() => expect(mounted.command).toHaveBeenCalledTimes(1));
+  await vi.waitFor(() => {
+    expect(mounted.command).toHaveBeenCalledTimes(1);
+  });
   expect(mounted.command).not.toHaveBeenCalledWith(
     SESSION_REALTIME_OPERATIONS.compact,
     expect.anything(),

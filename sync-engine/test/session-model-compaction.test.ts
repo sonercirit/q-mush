@@ -147,22 +147,22 @@ describe("session models and compaction", () => {
 
   test("rejects caps above the discovered model limit during creation", async () => {
     const setup = compactionSetup(new ScriptedAgentModel([]), "Cap validation");
-    const request = createSessionRequest();
-    const payload: unknown = await request.json();
     const response = await setup.sessions.collection(
-      createAuthenticatedRequest(
-        `${SESSIONS_PATH}?workspaceId=${encodeURIComponent(TEST_WORKSPACE_ID)}`,
-        {
-          ...(payload as Record<string, unknown>),
-          userContextTokenCap: 100_001,
-        },
-        "POST",
+      createSessionRequest(
+        true,
+        "high",
+        "gpt-4.1-mini",
+        [],
+        undefined,
+        undefined,
+        100_001,
       ),
     );
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({
       error: "invalid_context_token_cap",
-      message: expect.stringContaining("cannot exceed the model limit"),
+      message:
+        "Context token cap cannot exceed the model limit of 100,000 tokens.",
     });
     closeSessionTestDatabase(setup.database);
   });

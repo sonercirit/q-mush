@@ -29,6 +29,7 @@ import type { RunnerViewState } from "./runner-client.tsx";
 import { SessionAutoCompactToggle } from "./session-autocompact-toggle.tsx";
 import { SessionPromptInput } from "./session-client-forms.tsx";
 import { formatTokenCount } from "./session-context-client.tsx";
+import { SessionContextTokenCapInput } from "./session-context-token-cap-input.tsx";
 import { selectedSessionCredential } from "./session-controller-state.ts";
 import type { SessionController } from "./session-controller.ts";
 import { credentialOptions } from "./session-credential-list.ts";
@@ -209,11 +210,6 @@ function NewSessionForm(
       : (models()[0]?.id ?? ""),
   );
   const model = createMemo(() => findById(models(), modelValue()));
-  const modelLimitLabel = createMemo(() =>
-    model()?.contextWindow === null || model()?.contextWindow === undefined
-      ? "the model limit is not reported"
-      : `the model limit is ${formatTokenCount(model()?.contextWindow ?? 0)} tokens`,
-  );
   const modelOptions = createMemo(() =>
     retainedSelectionOptions(modelSelectOptions(models()), modelValue()),
   );
@@ -427,32 +423,14 @@ function NewSessionForm(
         selectedValue={props.state.draft.reasoningEffort}
       />
       {renderModelModalities(model())}
-      {renderFormField(
-        "session-context-token-cap",
-        <>Context token cap (optional)</>,
-        <div>
-          <input
-            class="mt-2 min-w-0 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none"
-            disabled={props.state.creating}
-            id="session-context-token-cap"
-            min="1"
-            name="userContextTokenCap"
-            onInput={(event) => {
-              props.controller.setDraftField(
-                "userContextTokenCap",
-                event.currentTarget.value,
-              );
-            }}
-            placeholder="Use the model limit"
-            step="1"
-            type="number"
-            value={props.state.draft.userContextTokenCap}
-          />
-          <p class="mt-1 text-xs text-slate-500">
-            {`Leave blank to use the model limit; ${modelLimitLabel()}.`}
-          </p>
-        </div>,
-      )}
+      <SessionContextTokenCapInput
+        disabled={props.state.creating}
+        model={model()}
+        onInput={(value) => {
+          props.controller.setDraftField("userContextTokenCap", value);
+        }}
+        value={props.state.draft.userContextTokenCap}
+      />
       <SessionAutoCompactToggle
         checked={props.state.draft.autoCompact}
         disabled={props.state.creating}

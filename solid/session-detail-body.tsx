@@ -258,7 +258,9 @@ export function SessionDetailBody(props: {
       />
       <SessionContextTokenCapDialog
         cap={pendingContextTokenCap()}
-        onCancel={() => setPendingContextTokenCap(undefined)}
+        onCancel={() => {
+          setPendingContextTokenCap(undefined);
+        }}
         onConfirm={(cap) => {
           setPendingContextTokenCap(undefined);
           void view().controller.setContextTokenCap(cap, true);
@@ -290,9 +292,14 @@ export function SessionDetailBody(props: {
             view().state.updatingTools ||
             sessionMutationPending(view().state)
           }
-          onApply={(cap) => view().controller.setContextTokenCap(cap)}
+          onApply={(cap) => {
+            return view().controller.setContextTokenCap(cap);
+          }}
           onWarning={(cap) => {
-            setContextTokenCapTrigger(document.activeElement as HTMLElement);
+            const activeElement = document.activeElement;
+            setContextTokenCapTrigger(
+              activeElement instanceof HTMLElement ? activeElement : undefined,
+            );
             setPendingContextTokenCap(cap);
           }}
         />

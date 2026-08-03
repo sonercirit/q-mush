@@ -21,6 +21,7 @@ import {
   compactSessionFromView,
   toggleSessionAutoCompaction,
 } from "./session-controller-compaction.ts";
+import { setSessionContextTokenCap } from "./session-controller-context-cap.ts";
 import { createSessionFromView } from "./session-controller-create.ts";
 import { forkSessionFromView } from "./session-controller-fork.ts";
 import {
@@ -59,7 +60,6 @@ import { selectedDraftOption } from "./session-form.ts";
 import { loadSessionHistoryPage } from "./session-history-controller.ts";
 import { SessionModelController } from "./session-model-controller.ts";
 import {
-  contextTokenCapMutation,
   continueSessionMutation,
   sendSessionMutation,
   stopSessionMutation,
@@ -517,28 +517,14 @@ export class SessionController {
       view: this.#view,
     });
   }
-  async setContextTokenCap(
-    userContextTokenCap: number | null,
-    compactIfExceeded = false,
-  ): Promise<void> {
-    const detail = this.#view.value.detail;
-    if (
-      detail === undefined ||
-      detail.id !== this.#view.value.selectedId ||
-      sessionMutationPending(this.#view.value)
-    ) {
-      return;
-    }
-    await this.#mutateDetail(
-      contextTokenCapMutation(detail.id, userContextTokenCap),
+  setContextTokenCap(cap: number | null, compactFirst = false) {
+    return setSessionContextTokenCap(
+      this.#view.value,
+      cap,
+      compactFirst,
+      this.#mutateDetail.bind(this),
+      this.compact.bind(this),
     );
-    if (
-      compactIfExceeded &&
-      detail.autoCompact &&
-      userContextTokenCap !== null
-    ) {
-      await this.compact();
-    }
   }
   setTranscriptFilter(
     name: SessionTranscriptFilterName,

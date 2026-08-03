@@ -1,4 +1,4 @@
-import { createSignal, type JSX } from "solid-js";
+import { createEffect, createSignal, type JSX } from "solid-js";
 import {
   contextTokenCapValidationError,
   parseContextTokenCapInput,
@@ -15,11 +15,14 @@ export interface ContextTokenCapEditorProps {
 export function SessionContextTokenCapEditor(
   props: ContextTokenCapEditorProps,
 ): JSX.Element {
-  const [value, setValue] = createSignal(
-    props.detail.userContextTokenCap === null
-      ? ""
-      : String(props.detail.userContextTokenCap),
-  );
+  const [value, setValue] = createSignal("");
+  createEffect(() => {
+    setValue(
+      props.detail.userContextTokenCap === null
+        ? ""
+        : String(props.detail.userContextTokenCap),
+    );
+  });
   const [error, setError] = createSignal<string>();
   const submit = (): void => {
     const cap = parseContextTokenCapInput(value());

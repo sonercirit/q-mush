@@ -12,13 +12,21 @@ import {
 export function updateStoredSessionContextTokenCap(options: {
   readonly database: AppDatabase;
   readonly now: number;
-  readonly read: () => AgentSessionDetail | undefined;
+  readonly read: (
+    userId: string,
+    sessionId: string,
+    workspaceId?: string,
+  ) => AgentSessionDetail | undefined;
   readonly sessionId: string;
   readonly userContextTokenCap: number | null;
   readonly userId: string;
   readonly workspaceId?: string;
 }): AgentSessionDetail | undefined {
-  const existing = options.read();
+  const existing = options.read(
+    options.userId,
+    options.sessionId,
+    options.workspaceId,
+  );
   if (existing === undefined) return undefined;
   const condition = activeSessionCondition(
     userSessionFilter(options.userId, options.sessionId, options.workspaceId),
@@ -41,5 +49,7 @@ export function updateStoredSessionContextTokenCap(options: {
     userContextTokenCap: options.userContextTokenCap,
     ...updatedAuditFields(options.userId, options.now),
   });
-  return updated ? options.read() : undefined;
+  return updated
+    ? options.read(options.userId, options.sessionId, options.workspaceId)
+    : undefined;
 }
