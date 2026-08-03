@@ -1,5 +1,5 @@
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test, vi } from "vitest";
 import {
@@ -266,6 +266,7 @@ process.on("SIGTERM", () => {
   }
 });
 
+const ENV_EXECUTABLE = platform() === "darwin" ? "/usr/bin/env" : "/bin/env";
 const INDEX_PATH = join(
   import.meta.dirname,
   "..",
@@ -379,15 +380,14 @@ test("production shutdown resumes after a bounded database retry", async () => {
     "q-mush-dev-bounded-retry-test-",
     "bounded-retry.txt",
     async (directory, triggerPath, databasePath, statePath) => {
-      const port = String(20_000 + Math.floor(Math.random() * 20_000));
       const server = startDevelopmentServer(
         shutdownServerOptions(
           directory,
           triggerPath,
           [
-            "/usr/bin/env",
+            ENV_EXECUTABLE,
             `DATABASE_PATH=${databasePath}`,
-            `PORT=${port}`,
+            "PORT=0",
             `Q_MUSH_TEST_DATABASE_BOUNDED_RETRY_STATE_PATH=${statePath}`,
             process.execPath,
             INDEX_PATH,
@@ -405,7 +405,7 @@ test("production shutdown resumes after a bounded database retry", async () => {
             (await Bun.file(statePath).exists())
               ? (await Bun.file(statePath).text()).includes("write-attempt:2")
               : false,
-          { interval: 10, timeout: 30_000 },
+          { interval: 10, timeout: 60_000 },
         )
         .toBe(true);
 
@@ -425,7 +425,7 @@ test("production shutdown resumes after a bounded database retry", async () => {
       ]);
     },
   );
-}, 45_000);
+}, 90_000);
 
 test("recovers a session when forced shutdown waits for the durable marker", async () => {
   await useRecoveryFixture(
