@@ -454,8 +454,9 @@ describe("compacting agent session loop", () => {
     expectLoopCounts(compactorRequests, model, 1, 1);
   });
 
-  test("does not persist a rejected compaction", async () => {
+  test("does not persist and does settle a rejected compaction", async () => {
     const compactions: unknown[] = [];
+    let settled = false;
     await expectCompactionFailure({
       compactor: {
         compact: () => Promise.reject(new Error("Compactor unavailable")),
@@ -464,9 +465,13 @@ describe("compacting agent session loop", () => {
       recordCompaction: (...input) => {
         compactions.push(input);
       },
+      settleCompaction: () => {
+        settled = true;
+      },
     });
 
     expect(compactions).toEqual([]);
+    expect(settled).toBe(true);
   });
 
   test("does not persist or continue an aborted compaction", async () => {

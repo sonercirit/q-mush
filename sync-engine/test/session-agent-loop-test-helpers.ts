@@ -199,23 +199,23 @@ export async function expectCompactionFailure(options: {
   readonly compactor: AgentConversationCompactor;
   readonly expected: string | { readonly name: string };
   readonly recordCompaction: LoopOptions["recordCompaction"];
+  readonly settleCompaction?: LoopOptions["settleCompaction"];
   readonly signal?: AbortSignal;
 }): Promise<void> {
   const model = triggeredModel();
+  const common = {
+    createCompactor: () => options.compactor,
+    model,
+    recordCompaction: options.recordCompaction,
+    ...(options.settleCompaction === undefined
+      ? {}
+      : { settleCompaction: options.settleCompaction }),
+  };
   const failure = expect(
     runTestLoop(
       options.signal === undefined
-        ? {
-            createCompactor: () => options.compactor,
-            model,
-            recordCompaction: options.recordCompaction,
-          }
-        : {
-            createCompactor: () => options.compactor,
-            model,
-            recordCompaction: options.recordCompaction,
-            signal: options.signal,
-          },
+        ? common
+        : { ...common, signal: options.signal },
     ),
   ).rejects;
   if (typeof options.expected === "string") {

@@ -581,12 +581,9 @@ export async function runSessionAgent(
       onStepBoundary: () =>
         runtime.manualCompactionRequested() ? "compact" : undefined,
       recordCompaction: (summary, usage, startedAt) => {
-        try {
-          recordCompaction(runtime, summary, usage, startedAt);
-        } finally {
-          models.publishCompactionSettled();
-        }
+        recordCompaction(runtime, summary, usage, startedAt);
       },
+      settleCompaction: models.publishCompactionSettled,
       recordMessage: (messages, usage, terminal) => {
         if (terminal && runtime.detail.restartHandoff === null) {
           recorder.terminal(messages, null, usage);
