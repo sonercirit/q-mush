@@ -1,7 +1,10 @@
 import { AGENT_REASONING_EFFORTS } from "../shared/agent-configuration.ts";
 import { AGENT_SESSION_TOOL_OPTIONS } from "../shared/agent-tools.ts";
 import type { AppDatabase } from "../shared/database.ts";
-import { isBalancedCredentialId } from "../shared/provider-credential-pool.ts";
+import {
+  balancedCredentialId,
+  isBalancedCredentialId,
+} from "../shared/provider-credential-pool.ts";
 import {
   ProviderCredentialStore,
   type ProviderCredentialAccess,
@@ -109,6 +112,70 @@ async function modelOptions(
   throw new Error(safeAgentModelDiscoveryError(failure), { cause: failure });
 }
 
+function balancedCredentials(
+  dependencies: SessionAgentOptionDependencies,
+  userId: string,
+  workspaceId: string,
+): SessionOptionsSource["credentials"] {
+  return (["openai", "openrouter", "generic"] as const).flatMap((provider) => {
+    const count = ProviderCredentialStore.listActiveModelCredentials(
+      dependencies.database,
+      userId,
+      provider,
+      workspaceId,
+    ).length;
+    return count < 2
+      ? []
+      : [
+          {
+            accountId: null,
+            id: balancedCredentialId(provider),
+            isDefault: false,
+            label: `Balanced (${String(count)} accounts)`,
+            provider,
+            source: "api_key" as const,
+          },
+        ];
+  });
+}
+
+function credentialOptions(
+  dependencies: SessionAgentOptionDependencies,
+  userId: string,
+  input: GetSessionOptionsToolInput,
+  workspaceId: string,
+) {
+  if (input.category !== "credentials") return undefined;
+  const offset = optionsPageOffset(input.page);
+  const balanced = balancedCredentials(dependencies, userId, workspaceId).filter(
+    ({ id, label, provider }) =>
+      input.search === undefined ||
+      [id, label, provider].some((value) =>
+        value.toLocaleLowerCase().includes(input.search?.toLocaleLowerCase() ?? ""),
+      ),
+  );
+  const regularOffset = Math.max(0, offset - balanced.length);
+  const regularLimit = Math.max(
+    1,
+    SESSION_OPTIONS_PAGE_SIZE - Math.max(0, balanced.length - offset),
+  );
+  const regular = ProviderCredentialStore.listModelCredentials(
+    dependencies.database,
+    userId,
+    regularOffset,
+    regularLimit,
+    input.search,
+    workspaceId,
+  );
+  return {
+    items: [
+      ...balanced.slice(offset, offset + SESSION_OPTIONS_PAGE_SIZE),
+      ...regular.items,
+    ].slice(0, SESSION_OPTIONS_PAGE_SIZE),
+    totalItems: balanced.length + regular.totalItems,
+  };
+}
+
 export async function sessionAgentOptions(options: {
   readonly dependencies: SessionAgentOptionDependencies;
   readonly input: GetSessionOptionsToolInput;
@@ -118,17 +185,12 @@ export async function sessionAgentOptions(options: {
   const { dependencies, input, userId, workspaceId } = options;
   const models = await modelOptions(dependencies, userId, input, workspaceId);
   const offset = optionsPageOffset(input.page);
-  const credentialPage =
-    input.category === "credentials"
-      ? ProviderCredentialStore.listModelCredentials(
-          dependencies.database,
-          userId,
-          offset,
-          SESSION_OPTIONS_PAGE_SIZE,
-          input.search,
-          workspaceId,
-        )
-      : undefined;
+  const credentialPage = credentialOptions(
+    dependencies,
+    userId,
+    input,
+    workspaceId,
+  );
   const runnerPage =
     input.category === "runners"
       ? dependencies.listRunnerOptions(userId, {

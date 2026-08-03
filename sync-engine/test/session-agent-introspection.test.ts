@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { AGENT_TOOLS } from "../../shared/agent-tools.ts";
+import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
 import {
   agentMessages,
   agentSessions,
@@ -169,6 +170,45 @@ describe("session agent introspection tools", () => {
     expect(serialized).toContain("hidden reasoning");
     expect(serialized).toContain("call-list_sessions");
     expect(Buffer.byteLength(serialized, "utf8")).toBeLessThanOrEqual(32_768);
+    setup.database.$client.close();
+  });
+
+  test("lists balanced credential sentinels for providers with multiple accounts", async () => {
+    const secondCredentialId = "018bcfe5-6800-7000-8000-000000000094";
+    const model = scriptedModel([
+      {
+        content: "Discovering balanced credentials.",
+        toolCalls: [
+          toolCall("get_session_options", {
+            category: "credentials",
+            page: 1,
+          }),
+        ],
+      },
+      { content: "Done.", toolCalls: [] },
+    ]);
+    const setup = await startToolSession(model, {
+      credentials: {
+        openai: [
+          { ...credential(CREDENTIAL_ID, "Primary"), secret: "provider-secret" },
+          credential(secondCredentialId, "Secondary"),
+        ],
+      },
+    });
+    const detail = await waitForToolResults(setup, "get_session_options", 1);
+    const output = jsonRecord(
+      findToolResultContents(detail, "get_session_options")[0] ?? "null",
+    );
+
+    expect(records(output["items"])).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: balancedCredentialId("openai"),
+          label: "Balanced (2 accounts)",
+          provider: "openai",
+        }),
+      ]),
+    );
     setup.database.$client.close();
   });
 
@@ -395,11 +435,11 @@ describe("session agent introspection tools", () => {
       hasNext: false,
       page: 2,
       pageSize: 10,
-      totalItems: 11,
+      totalItems: 12,
       totalPages: 2,
     });
     expect(outputs[0]?.["hasPrevious"]).toBe(true);
-    expect(testArray(outputs[0]?.["items"])).toHaveLength(1);
+    expect(testArray(outputs[0]?.["items"])).toHaveLength(2);
     expect(JSON.stringify(outputs[0])).not.toContain("secret-openrouter");
     expect(outputs[1]).toMatchObject({
       page: 2,

@@ -191,7 +191,8 @@ const SESSION_AGENT_TOOLS = [
         ...BOOLEAN_PARAMETER,
       },
       credentialId: {
-        description: "ID or balanced pool sentinel",
+        description:
+          'Owned model credential ID or the exact balanced sentinel "balanced:<provider>" (for example "balanced:openai")',
         ...STRING_PARAMETER,
       },
       executionEnvironment: {
@@ -287,7 +288,7 @@ const SESSION_AGENT_TOOLS = [
   }),
   toolDefinition({
     description:
-      "Discover bounded, paginated options accepted by spawn_session. Model lookups require provider and credentialId. Results never contain credential secrets or runner tokens.",
+      'Discover bounded, paginated options accepted by spawn_session. Credential results include a "balanced:<provider>" sentinel when at least two scoped accounts can be balanced. Model lookups require provider and credentialId. Results never contain credential secrets or runner tokens.',
     name: "get_session_options",
     properties: {
       category: {
