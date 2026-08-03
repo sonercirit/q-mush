@@ -21,7 +21,7 @@ import {
   readSessionPendingQuestions,
 } from "./session-codec.ts";
 
-export interface RealtimeCommandErrorEvent {
+interface RealtimeCommandErrorEvent {
   readonly commandId: string;
   readonly detail?: string;
   readonly error: string;
