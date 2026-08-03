@@ -9,10 +9,10 @@ import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 import { transcriptMessage } from "./transcript-ordering-fixtures.ts";
 
 const TOKEN_USAGE = {
-  cacheWriteInputTokens: 0,
   cachedInputTokens: 30,
   inputTokens: 100,
   outputTokens: 20,
+  cacheWriteInputTokens: 0,
 } as const;
 
 test("replaces a retained message when its persisted usage changes", () => {

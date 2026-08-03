@@ -17,10 +17,10 @@ const THINKING_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000045";
 const ASSISTANT_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000046";
 const TOOL_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000048";
 const TOKEN_USAGE = {
+  outputTokens: 20,
+  inputTokens: 100,
   cacheWriteInputTokens: 0,
   cachedInputTokens: 30,
-  inputTokens: 100,
-  outputTokens: 20,
 } as const;
 
 function prepareForkSource() {
@@ -58,10 +58,10 @@ function prepareForkSource() {
     TEST_NOW + 3,
     source.generation,
     {
-      contextTokens: 100,
-      costBasis: null,
-      costUsd: null,
       tokenUsage: TOKEN_USAGE,
+      costUsd: null,
+      costBasis: null,
+      contextTokens: 100,
     },
   );
   setup.store.appendCurrentErrorMessage(

@@ -1,6 +1,9 @@
 import { eq } from "drizzle-orm";
 import { expect, test } from "vitest";
+import type { AgentTokenUsage } from "../../shared/agent-loop.ts";
 import { agentMessages } from "../../shared/database/schema.ts";
+import type { AgentSessionUsageUpdate } from "../../shared/session-model.ts";
+import type { SessionStore } from "../../sync-engine/session-store.ts";
 import {
   TEST_NOW,
   TEST_USER_ID,
@@ -21,6 +24,26 @@ const NEXT_SEGMENT_TOKEN_USAGE = {
   inputTokens: 400,
   outputTokens: 100,
 } as const;
+
+function appendStep(
+  store: SessionStore,
+  content: string,
+  now: number,
+  tokenUsage?: AgentTokenUsage,
+): void {
+  const message = { content, role: "assistant" as const, toolCalls: [] };
+  if (tokenUsage === undefined) {
+    store.appendCurrentAgentMessage(STORE_SESSION_ID, message, now);
+    return;
+  }
+  const usage: AgentSessionUsageUpdate = {
+    contextTokens: tokenUsage.inputTokens,
+    costBasis: null,
+    costUsd: null,
+    tokenUsage,
+  };
+  store.appendRuntimeAgentMessages(STORE_SESSION_ID, [message], now, 0, usage);
+}
 
 test("persists model-step usage on its assistant message and aggregates it", () => {
   const setup = runningStore();
@@ -67,49 +90,25 @@ test("persists model-step usage on its assistant message and aggregates it", () 
 
 test("aggregates partial usage coverage by each message's segment", () => {
   const setup = runningStore();
-  setup.store.appendRuntimeAgentMessages(
-    STORE_SESSION_ID,
-    [{ content: "First reported step", role: "assistant", toolCalls: [] }],
-    TEST_NOW + 2,
-    0,
-    {
-      contextTokens: 1_000,
-      costBasis: null,
-      costUsd: null,
-      tokenUsage: TOKEN_USAGE,
-    },
-  );
-  setup.store.appendCurrentAgentMessage(
-    STORE_SESSION_ID,
-    { content: "First unreported step", role: "assistant", toolCalls: [] },
-    TEST_NOW + 3,
-  );
+  appendStep(setup.store, "First reported step", TEST_NOW + 2, TOKEN_USAGE);
+  appendStep(setup.store, "First unreported step", TEST_NOW + 3);
   setup.store.compactCurrentConversation(
     STORE_SESSION_ID,
     "Continue in the next segment",
     { contextTokens: null, costBasis: null, costUsd: null },
     TEST_NOW + 4,
   );
-  setup.store.appendRuntimeAgentMessages(
-    STORE_SESSION_ID,
-    [{ content: "Second reported step", role: "assistant", toolCalls: [] }],
+  appendStep(
+    setup.store,
+    "Second reported step",
     TEST_NOW + 5,
-    0,
-    {
-      contextTokens: 400,
-      costBasis: null,
-      costUsd: null,
-      tokenUsage: NEXT_SEGMENT_TOKEN_USAGE,
-    },
+    NEXT_SEGMENT_TOKEN_USAGE,
   );
-  setup.store.appendCurrentAgentMessage(
-    STORE_SESSION_ID,
-    { content: "Second unreported step", role: "assistant", toolCalls: [] },
-    TEST_NOW + 6,
-  );
+  appendStep(setup.store, "Second unreported step", TEST_NOW + 6);
+  expect(setup.store.conversation(STORE_SESSION_ID)).toHaveLength(3);
 
-  const detail = setup.store.get(TEST_USER_ID, STORE_SESSION_ID);
-  expect(detail?.tokenUsage).toEqual({
+  const session = setup.store.get(TEST_USER_ID, STORE_SESSION_ID);
+  expect(session?.tokenUsage).toEqual({
     cacheWriteInputTokens: 75,
     cachedInputTokens: 800,
     inputTokens: 1_400,
@@ -117,7 +116,7 @@ test("aggregates partial usage coverage by each message's segment", () => {
     reportedStepCount: 2,
     stepCount: 4,
   });
-  expect(detail?.segmentTokenUsage).toEqual({
+  expect(session?.segmentTokenUsage).toEqual({
     ...NEXT_SEGMENT_TOKEN_USAGE,
     reportedStepCount: 1,
     stepCount: 2,
