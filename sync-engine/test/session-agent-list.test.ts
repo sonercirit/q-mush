@@ -111,6 +111,7 @@ test("paginates, validates, and bounds session listings at dispatch", async () =
   expect(records(outOfRange["items"])).toEqual([]);
   expect(missed).toMatchObject({ totalItems: 0, totalPages: 0 });
   expect(records(missed["items"])).toEqual([]);
+  expect(outputs).toHaveLength(listCalls.length);
   expect(
     outputs
       .slice(4)
