@@ -9,7 +9,7 @@ import type { SessionRuntimes } from "./session-runtime.ts";
 import type { ShutdownInterruptedSessionStore } from "./session-shutdown-interrupted-store.ts";
 import type { SessionStore } from "./session-store.ts";
 
-export const DEFAULT_SESSION_LIVENESS_INTERVAL_MS = 30_000;
+const DEFAULT_SESSION_LIVENESS_INTERVAL_MS = 30_000;
 
 interface SessionLivenessSchedulerOptions {
   readonly actions: Pick<
@@ -59,8 +59,3 @@ export function createSessionLivenessWatchdog(
   }
   return watchdog;
 }
-
-export type SessionLivenessDependencies = Pick<
-  SessionDependencies,
-  "liveness" | "randomId"
->;

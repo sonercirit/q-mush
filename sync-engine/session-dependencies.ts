@@ -8,7 +8,7 @@ import type { RealtimeHub } from "./realtime-hub.ts";
 import type { AgentModelFactory } from "./session-agent-models.ts";
 import type { SessionWorkspaceReader } from "./session-workspace.ts";
 
-export interface SessionLivenessOptions {
+interface SessionLivenessOptions {
   readonly graceMs?: number;
   readonly intervalMs?: number;
   readonly setInterval?: (callback: () => void, interval: number) => unknown;

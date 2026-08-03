@@ -15,7 +15,7 @@ import {
 } from "./session-store-reassignment.ts";
 import type { SessionStore } from "./session-store.ts";
 
-export const DEFAULT_SESSION_LIVENESS_GRACE_MS = 5 * 60_000;
+const DEFAULT_SESSION_LIVENESS_GRACE_MS = 5 * 60_000;
 
 interface SessionLivenessWatchdogOptions {
   readonly actions: Pick<
