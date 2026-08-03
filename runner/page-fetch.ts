@@ -29,6 +29,11 @@ import {
   stopChromium,
   type PageAddressResolver,
 } from "./page-fetch-process.ts";
+import {
+  retryChromiumStartup,
+  runWithCleanup,
+  waitForChromiumDevtoolsUrl,
+} from "./page-fetch-startup.ts";
 import { parseRunnerUrl } from "./runner-url.ts";
 
 const DEFAULT_TIMEOUT_SECONDS = 30;
@@ -212,44 +217,6 @@ function abortError(signal: AbortSignal): Error {
   return signal.reason instanceof Error
     ? signal.reason
     : new Error("The page fetch was stopped");
-}
-
-async function waitForDevtoolsUrl(
-  child: Bun.ReadableSubprocess,
-  signal: AbortSignal,
-): Promise<string> {
-  const reader = child.stderr.getReader();
-  let diagnostic = "";
-  const stop = (): void => {
-    void reader.cancel().catch(() => undefined);
-  };
-  signal.addEventListener("abort", stop, { once: true });
-  try {
-    for (let attempts = 0; attempts < 20; attempts += 1) {
-      if (signal.aborted) {
-        throw abortError(signal);
-      }
-      const part = await reader.read();
-      if (part.done) {
-        throw new Error("Chromium stopped before exposing DevTools");
-      }
-      diagnostic += Buffer.from(part.value).toString("utf8");
-      const url = /DevTools listening on (ws:\/\/\S+)/u.exec(diagnostic)?.[1];
-      if (url !== undefined) {
-        return url;
-      }
-      diagnostic = diagnostic.slice(-MAXIMUM_BROWSER_DIAGNOSTIC_BYTES);
-    }
-  } finally {
-    signal.removeEventListener("abort", stop);
-    await reader.cancel().catch(() => undefined);
-  }
-  const detail = diagnostic.trim().slice(-1_000);
-  throw new Error(
-    detail.length === 0
-      ? "Chromium did not expose its DevTools endpoint"
-      : `Chromium could not start: ${detail}`,
-  );
 }
 
 function responseFromEvent(params: unknown): PageResponse | undefined {
@@ -443,112 +410,124 @@ function defaultRenderer(
   options: ChromiumDiscoveryOptions,
   resolveAddress: PageAddressResolver,
 ): PageRenderer {
-  return async (request) => {
-    const executablePath = await discoverChromiumExecutable(options);
-    const profilePath = await mkdtemp(join(tmpdir(), "q-mush-page-fetch-"));
-    const proxy = new PageFetchProxy(resolveAddress);
-    let child: Bun.ReadableSubprocess;
-    try {
-      const proxyPort = await proxy.start();
-      child = Bun.spawn(
-        [...chromiumArguments(executablePath, profilePath, proxyPort)],
-        {
-          cwd: profilePath,
-          detached: process.platform !== "win32",
-          env: {
-            HOME: profilePath,
-            LANG: process.env["LANG"] ?? "C.UTF-8",
-            PATH: process.env["PATH"] ?? "",
-            TMPDIR: profilePath,
-            XDG_CACHE_HOME: join(profilePath, "cache"),
-            XDG_CONFIG_HOME: join(profilePath, "config"),
-            XDG_DATA_HOME: join(profilePath, "data"),
-            XDG_STATE_HOME: join(profilePath, "state"),
+  return (request) =>
+    retryChromiumStartup(async () => {
+      const executablePath = await discoverChromiumExecutable(options);
+      const profilePath = await mkdtemp(join(tmpdir(), "q-mush-page-fetch-"));
+      const proxy = new PageFetchProxy(resolveAddress);
+      let child: Bun.ReadableSubprocess;
+      try {
+        const proxyPort = await proxy.start();
+        child = Bun.spawn(
+          [...chromiumArguments(executablePath, profilePath, proxyPort)],
+          {
+            cwd: profilePath,
+            detached: process.platform !== "win32",
+            env: {
+              HOME: profilePath,
+              LANG: process.env["LANG"] ?? "C.UTF-8",
+              PATH: process.env["PATH"] ?? "",
+              TMPDIR: profilePath,
+              XDG_CACHE_HOME: join(profilePath, "cache"),
+              XDG_CONFIG_HOME: join(profilePath, "config"),
+              XDG_DATA_HOME: join(profilePath, "data"),
+              XDG_STATE_HOME: join(profilePath, "state"),
+            },
+            stderr: "pipe",
+            stdout: "pipe",
           },
-          stderr: "pipe",
-          stdout: "pipe",
-        },
-      );
-    } catch (error) {
-      try {
-        await proxy.close();
-      } finally {
-        await removeChromiumProfile(profilePath);
-      }
-      throw error;
-    }
-    const browser = child;
-    let connection: DevtoolsConnection | undefined;
-    let stopping: Promise<void> | undefined;
-    const stoppingPromise = (): Promise<void> => {
-      stopping ??= stopChromium(browser, profilePath);
-      return stopping;
-    };
-    const stop = (): void => {
-      void stoppingPromise().catch(() => undefined);
-    };
-    request.signal.addEventListener("abort", stop, { once: true });
-    try {
-      const devtoolsUrl = await waitForDevtoolsUrl(browser, request.signal);
-      connection = await connectToPage(devtoolsUrl);
-      await connection.open();
-      await Promise.all([
-        connection.command("Page.enable"),
-        connection.command("Network.enable", {
-          maxResourceBufferSize: MAXIMUM_RESPONSE_BYTES,
-          maxTotalBufferSize: MAXIMUM_RESPONSE_BYTES,
-        }),
-        connection.command("Runtime.enable"),
-        connection.command("Fetch.enable", {
-          patterns: [
-            { requestStage: "Request" },
-            { requestStage: "Response", resourceType: "Document" },
-          ],
-        }),
-      ]);
-      await connection.command("Network.clearBrowserCache");
-      await connection.command("Network.clearBrowserCookies");
-      const loading = followPageEvents(connection, request);
-      void loading.catch(() => undefined);
-      const navigation = await connection.command("Page.navigate", {
-        url: request.url.toString(),
-      });
-      if (!isRecord(navigation) || typeof navigation["frameId"] !== "string") {
-        throw new Error("Chromium did not start the page navigation");
-      }
-      if (typeof navigation["errorText"] === "string") {
-        throw new Error(`Page navigation failed: ${navigation["errorText"]}`);
-      }
-      const response = await loading;
-      if (proxy.failure !== undefined) {
-        throw proxy.failure;
-      }
-      await Bun.sleep(SETTLE_MILLISECONDS);
-      const evaluated = await connection.command("Runtime.evaluate", {
-        awaitPromise: true,
-        expression: request.captureExpression,
-        returnByValue: true,
-      });
-      return { evaluated, response };
-    } finally {
-      request.signal.removeEventListener("abort", stop);
-      connection?.close();
-      stop();
-      try {
-        await stoppingPromise();
-      } finally {
+        );
+      } catch (error) {
         try {
           await proxy.close();
         } finally {
-          try {
-            await drainStream(browser.stdout);
-          } finally {
-            await removeChromiumProfile(profilePath);
-          }
+          await removeChromiumProfile(profilePath);
         }
+        throw error;
       }
-    }
-  };
+      const browser = child;
+      let connection: DevtoolsConnection | undefined;
+      let stopping: Promise<void> | undefined;
+      const stoppingPromise = (): Promise<void> => {
+        stopping ??= stopChromium(browser, profilePath);
+        return stopping;
+      };
+      const stop = (): void => {
+        void stoppingPromise().catch(() => undefined);
+      };
+      request.signal.addEventListener("abort", stop, { once: true });
+      return await runWithCleanup(
+        async () => {
+          const devtoolsUrl = await waitForChromiumDevtoolsUrl(
+            browser,
+            request.signal,
+          );
+          connection = await connectToPage(devtoolsUrl);
+          await connection.open();
+          await Promise.all([
+            connection.command("Page.enable"),
+            connection.command("Network.enable", {
+              maxResourceBufferSize: MAXIMUM_RESPONSE_BYTES,
+              maxTotalBufferSize: MAXIMUM_RESPONSE_BYTES,
+            }),
+            connection.command("Runtime.enable"),
+            connection.command("Fetch.enable", {
+              patterns: [
+                { requestStage: "Request" },
+                { requestStage: "Response", resourceType: "Document" },
+              ],
+            }),
+          ]);
+          await connection.command("Network.clearBrowserCache");
+          await connection.command("Network.clearBrowserCookies");
+          const loading = followPageEvents(connection, request);
+          void loading.catch(() => undefined);
+          const navigation = await connection.command("Page.navigate", {
+            url: request.url.toString(),
+          });
+          if (
+            !isRecord(navigation) ||
+            typeof navigation["frameId"] !== "string"
+          ) {
+            throw new Error("Chromium did not start the page navigation");
+          }
+          if (typeof navigation["errorText"] === "string") {
+            throw new Error(
+              `Page navigation failed: ${navigation["errorText"]}`,
+            );
+          }
+          const response = await loading;
+          if (proxy.failure !== undefined) {
+            throw proxy.failure;
+          }
+          await Bun.sleep(SETTLE_MILLISECONDS);
+          const evaluated = await connection.command("Runtime.evaluate", {
+            awaitPromise: true,
+            expression: request.captureExpression,
+            returnByValue: true,
+          });
+          return { evaluated, response };
+        },
+        async () => {
+          request.signal.removeEventListener("abort", stop);
+          connection?.close();
+          stop();
+          try {
+            await stoppingPromise();
+          } finally {
+            try {
+              await proxy.close();
+            } finally {
+              try {
+                await drainStream(browser.stdout);
+              } finally {
+                await removeChromiumProfile(profilePath);
+              }
+            }
+          }
+        },
+      );
+    }, request.signal);
 }
 
 function createPageCapture(arguments_: ToolArguments): PageCapture {
