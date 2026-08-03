@@ -6,6 +6,7 @@ import { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts"
 import { startManualSessionCompactionForUserId } from "../../sync-engine/session-compaction-actions.ts";
 import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
 import { SessionStore } from "../../sync-engine/session-store.ts";
+import { insertWorkspace } from "../../sync-engine/workspace-write.ts";
 import {
   addTestProviderCredential,
   createAuthenticatedTestDatabase,
@@ -30,6 +31,7 @@ import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
 
 const TARGET_SESSION_ID = "018bcfe5-6800-7000-8000-000000000090";
 const CHILD_SESSION_ID = "018bcfe5-6800-7000-8000-000000000092";
+const FOREIGN_WORKSPACE_ID = "018bcfe5-6800-7000-8000-000000000099";
 
 interface AuthoritySetup {
   readonly actions: ReturnType<SessionAgentActions["actions"]>;
@@ -44,7 +46,7 @@ interface AuthoritySetup {
   readonly store: SessionStore;
 }
 
-function sessionInput(id: string, runnerId: string) {
+function sessionInput(id: string, runnerId: string, workspaceId?: string) {
   return {
     ...createSessionInput({
       credentialId: CREDENTIAL_ID,
@@ -52,6 +54,7 @@ function sessionInput(id: string, runnerId: string) {
       runnerId,
     }),
     tools: AGENT_SESSION_TOOL_NAMES,
+    ...(workspaceId === undefined ? {} : { workspaceId }),
   };
 }
 
@@ -59,9 +62,10 @@ function createStoredSession(
   store: SessionStore,
   id: string,
   runnerId: string,
+  workspaceId?: string,
 ) {
   const detail = requireCreatedSession(
-    store.create(sessionInput(id, runnerId), TEST_NOW),
+    store.create(sessionInput(id, runnerId, workspaceId), TEST_NOW),
   );
   expect(detail.id).toBe(id);
   return detail;
@@ -97,6 +101,12 @@ function authoritySetup(options: {
   readonly withTarget?: boolean;
 }): AuthoritySetup {
   const database = createAuthenticatedTestDatabase();
+  insertWorkspace(database, {
+    id: FOREIGN_WORKSPACE_ID,
+    name: "Foreign workspace",
+    now: TEST_NOW,
+    userId: TEST_USER_ID,
+  });
   addSessionTestRunner(database, "parent-authority-runner", RUNNER_ID);
   addSessionTestRunner(
     database,
@@ -287,6 +297,15 @@ async function expectCompactionScheduled(
   );
 }
 
+async function expectCompactionRejected(
+  setup: AuthoritySetup,
+  sessionId: string,
+): Promise<void> {
+  await expectCompactionScheduled(setup, sessionId).catch((error: unknown) => {
+    expect(error).toHaveProperty("message", "Session not found");
+  });
+}
+
 function expectTargetUnchanged(
   setup: AuthoritySetup,
   before: ReturnType<SessionStore["get"]>,
@@ -338,14 +357,21 @@ describe("cross-session parent execution authority", () => {
 
   test("rejects missing and cross-workspace compact or steer targets", async () => {
     const setup = setupWithTarget("running");
-
-    await expectCompactionScheduled(setup, "missing-session").catch(
-      (error: unknown) => {
-        expect(error).toHaveProperty("message", "Session not found");
-      },
+    const foreign = createStoredSession(
+      setup.store,
+      CHILD_SESSION_ID,
+      REPLACEMENT_RUNNER_ID,
+      FOREIGN_WORKSPACE_ID,
     );
+
+    await expectCompactionRejected(setup, "missing-session");
     expectSessionActionThrows(
       () => setup.actions.steerSession("missing-session", "Do not deliver"),
+      "Session not found",
+    );
+    await expectCompactionRejected(setup, foreign.id);
+    expectSessionActionThrows(
+      () => setup.actions.steerSession(foreign.id, "Do not cross scope"),
       "Session not found",
     );
     closeSetup(setup);
