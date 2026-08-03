@@ -212,6 +212,10 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
     return delivered;
   }
 
+  replaceRunnerConnection(runnerId: string): void {
+    this.resources.broker.replaceRunnerConnection(runnerId);
+  }
+
   drain(): Promise<void> {
     return this.resources.restart.drainServer().then(async () => {
       await Promise.allSettled(this.resources.executionCleanup.pending);

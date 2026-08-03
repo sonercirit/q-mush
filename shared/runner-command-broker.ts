@@ -64,8 +64,8 @@ interface RunnerCommandBrokerOptions {
 }
 
 export class RunnerDisconnectedError extends Error {
-  constructor() {
-    super("The runner disconnected before the command returned");
+  constructor(message = "The runner disconnected before the command returned") {
+    super(message);
     this.name = "RunnerDisconnectedError";
   }
 }
@@ -419,6 +419,21 @@ export class RunnerCommandBroker {
       this.#reject(rejected.command.id, rejected.error);
     }
     return matching;
+  }
+
+  replaceRunnerConnection(runnerId: string): void {
+    const inFlight = [...this.#pending.values()].filter(
+      (pending) =>
+        pending.runnerId === runnerId && pending.phase === "in_flight",
+    );
+    for (const pending of inFlight) {
+      this.#reject(
+        pending.command.id,
+        new RunnerDisconnectedError(
+          "The runner connection was superseded before the command returned",
+        ),
+      );
+    }
   }
 
   disconnectRunner(runnerId: string): void {

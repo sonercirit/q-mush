@@ -303,6 +303,7 @@ export type RealtimeSessionOverrides = Partial<
     | "onChange"
     | "pendingQuestionForUser"
     | "pendingRunnerRestart"
+    | "replaceRunnerConnection"
     | "runnerConnected"
     | "runnerDisconnected"
     | "runnerRestartReady"
@@ -334,6 +335,7 @@ export function realtimeTestSessions(
     pendingRunnerRestart: () => ({ status: "none" }),
     realtimeCommands: new RealtimeTestSessionCommands(),
     reassign: () => Promise.resolve(new Response()),
+    replaceRunnerConnection: () => true,
     runnerConnected: () => undefined,
     runnerDisconnected: () => undefined,
     runnerRestartReady: () => undefined,

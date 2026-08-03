@@ -1,7 +1,12 @@
 import { isRecord } from "../shared/auth-model.ts";
+import {
+  RUNNER_SUPERSEDED_CLOSE_CODE,
+  runnerSupersededMessage,
+} from "../shared/runner-realtime-protocol.ts";
 import type { RealtimeSocket } from "./realtime-hub.ts";
 import {
   closeServerError,
+  safeSend,
   type PendingRunnerRegistration,
   type RunnerSocketData,
 } from "./realtime-runner-runtime.ts";
@@ -122,6 +127,18 @@ export function establishPendingRunnerAuthority(
   return options.hub.runnerIsCurrent(runner.id, socket);
 }
 
+function notifySupersededRunner(socket: RealtimeSocket): void {
+  safeSend(socket, runnerSupersededMessage());
+  try {
+    socket.close(
+      RUNNER_SUPERSEDED_CLOSE_CODE,
+      "Superseded by a newer runner process",
+    );
+  } catch {
+    // Hub authority already fences the superseded socket.
+  }
+}
+
 function fenceReplacedSocket(
   replaced: RealtimeSocket | undefined,
   socket: RealtimeSocket,
@@ -130,11 +147,7 @@ function fenceReplacedSocket(
     return;
   }
   runnerSocketAuthority(replaced)?.fence();
-  try {
-    replaced.close(1000, "Replaced by a newer runner connection");
-  } catch {
-    // Hub authority already fences the replaced socket.
-  }
+  notifySupersededRunner(replaced);
 }
 
 export function finishRunnerOperational(
@@ -152,15 +165,16 @@ export function finishRunnerOperational(
     return;
   }
   data.usable = true;
+  const replaced = pending.previousAuthority;
+  const deliver = (command: Parameters<typeof options.sendCommand>[1]) =>
+    data.usable &&
+    options.hub.runnerIsCurrent(runner.id, socket) &&
+    options.hub.currentRunner(runner.id) === socket
+      ? options.sendCommand(socket, command)
+      : false;
   let delivered = false;
   try {
-    delivered = options.sessions.deliverRunnerCommands(runner.id, (command) =>
-      data.usable &&
-      options.hub.runnerIsCurrent(runner.id, socket) &&
-      options.hub.currentRunner(runner.id) === socket
-        ? options.sendCommand(socket, command)
-        : false,
-    );
+    delivered = options.sessions.deliverRunnerCommands(runner.id, deliver);
   } catch {
     // The replacement remains provisional until queued delivery succeeds.
   }
@@ -171,7 +185,9 @@ export function finishRunnerOperational(
     fenceRunnerRegistration(socket, data, "Runner command delivery failed");
     return;
   }
-  const replaced = pending.previousAuthority;
+  if (replaced !== undefined) {
+    options.sessions.replaceRunnerConnection(runner.id);
+  }
   data.committed = undefined;
   data.registration = undefined;
   fenceReplacedSocket(replaced, socket);

@@ -25,6 +25,7 @@ export interface SessionIntegration extends SessionDetailReader {
     runnerId: string,
     deliver: (command: RunnerToolCommand) => boolean,
   ): boolean;
+  replaceRunnerConnection(runnerId: string): void;
   directories(request: Request, runnerId: string): Promise<Response>;
   drain(): Promise<void>;
   prepareFinalShutdown(): Promise<void>;

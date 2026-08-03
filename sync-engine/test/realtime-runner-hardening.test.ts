@@ -494,9 +494,12 @@ test("replacing an authoritative socket does not disconnect the shared runner", 
 
   reconnectRunnerRealtimeTestSocket(realtime, "machine-new-authority");
 
+  expect(replaced.record.sent).toContain(
+    JSON.stringify({ type: "superseded" }),
+  );
   expect(replaced.record.closed).toEqual([
-    1000,
-    "Replaced by a newer runner connection",
+    4001,
+    "Superseded by a newer runner process",
   ]);
   expect(disconnected).toEqual([]);
 });

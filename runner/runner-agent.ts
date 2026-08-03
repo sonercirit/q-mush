@@ -20,7 +20,9 @@ import { completeRunnerRegistration } from "./runner-registration.ts";
 import { RunnerRestartCoordinator } from "./runner-restart.ts";
 import {
   addRunnerSocketFailureListeners,
+  observeOperationalRunnerSocket,
   parseSocketJsonRecord,
+  RunnerSupersededError,
 } from "./runner-socket.ts";
 import { RunnerUpdateTrigger } from "./runner-update-trigger.ts";
 import {
@@ -315,6 +317,9 @@ function bindOperationalSocket(
       return;
     }
 
+    if (message["type"] === "superseded") {
+      return;
+    }
     if (message["type"] === "command") {
       executeCommand(
         connected,
@@ -481,6 +486,7 @@ async function maintainConnection(
   startupRestart: RunnerStartupRestart,
 ): Promise<void> {
   const active = new Map<string, ActiveCommand>();
+  const exitOnDisconnect = startupRestart.restartId !== undefined;
   const installOperationalHandlers = (connected: WebSocket): void => {
     bindOperationalSocket(connected, active);
   };
@@ -490,17 +496,33 @@ async function maintainConnection(
     startupRestart,
     installOperationalHandlers,
   );
+  let socketFailure = observeOperationalRunnerSocket(socket);
   let initialUpdatePending = true;
   let nextUpdateAt = Date.now() + UPDATE_INTERVAL_MILLISECONDS;
 
   for (;;) {
     if (socket.readyState !== WebSocket.OPEN) {
+      const failure = await socketFailure;
+      if (exitOnDisconnect || failure instanceof RunnerSupersededError) {
+        throw failure;
+      }
       socket = await connectRunner(
         configuration,
         configurationPath,
         startupRestart,
         installOperationalHandlers,
       );
+      socketFailure = observeOperationalRunnerSocket(socket);
+    }
+
+    if (socket.readyState === WebSocket.OPEN) {
+      const failure = await Promise.race([
+        setTimeout(0).then(() => undefined),
+        socketFailure,
+      ]);
+      if (failure instanceof RunnerSupersededError) {
+        throw failure;
+      }
     }
 
     if (

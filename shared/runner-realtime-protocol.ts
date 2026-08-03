@@ -1,3 +1,9 @@
+export const RUNNER_SUPERSEDED_CLOSE_CODE = 4_001;
+
+export function runnerSupersededMessage(): string {
+  return JSON.stringify({ type: "superseded" });
+}
+
 export interface RunnerConnectMetadata {
   readonly architecture: string;
   readonly machineId: string;
