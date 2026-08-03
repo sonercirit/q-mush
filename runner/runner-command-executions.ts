@@ -13,6 +13,7 @@ interface CommandExecution {
   completedAt: number | undefined;
   readonly controller: AbortController;
   result: Readonly<Record<string, unknown>> | undefined;
+  retentionTimer: ReturnType<typeof setTimeout> | undefined;
   socket: RunnerWritableSocket;
 }
 
@@ -93,6 +94,10 @@ export class RunnerCommandExecutions {
     if (this.#active.get(execution.command.id) === execution) {
       this.#active.delete(execution.command.id);
     }
+    if (execution.retentionTimer !== undefined) {
+      clearTimeout(execution.retentionTimer);
+      execution.retentionTimer = undefined;
+    }
   }
 
   #discardCompleted(execution: CommandExecution, reason: string): void {
@@ -100,6 +105,19 @@ export class RunnerCommandExecutions {
     this.#log(
       `Q Mush discarded unacknowledged result for runner command ${execution.command.id} ${reason}.`,
     );
+  }
+
+  #scheduleExpiry(execution: CommandExecution): void {
+    execution.retentionTimer = setTimeout(() => {
+      execution.retentionTimer = undefined;
+      if (
+        this.#active.get(execution.command.id) === execution &&
+        execution.result !== undefined
+      ) {
+        this.#discardCompleted(execution, "after its retention TTL elapsed");
+      }
+    }, this.#completedExecutionTtlMs);
+    execution.retentionTimer.unref();
   }
 
   #prune(): void {
@@ -148,6 +166,7 @@ export class RunnerCommandExecutions {
       completedAt: undefined,
       controller,
       result: undefined,
+      retentionTimer: undefined,
       socket,
     };
     this.#active.set(command.id, execution);
@@ -166,6 +185,7 @@ export class RunnerCommandExecutions {
         if (!controller.signal.aborted) {
           execution.completedAt = this.#now();
           execution.result = message;
+          this.#scheduleExpiry(execution);
           sendCommandMessage(execution, message);
           this.#prune();
         }
