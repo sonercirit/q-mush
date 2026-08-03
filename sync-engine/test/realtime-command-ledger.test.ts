@@ -339,12 +339,12 @@ test("replays an idempotency key under a fresh command ID", async () => {
 
 test("coalesces an in-flight idempotency key under a fresh command ID", async () => {
   const ledger = new RealtimeCommandLedger();
-  const pending = deferredValue<string>();
-  const action = vi.fn(() => pending.promise);
+  const { promise, resolve } = Promise.withResolvers<string>();
+  const action = vi.fn(() => promise);
   const first = execute(ledger, command("command-1", "first-key"), action);
   const retry = execute(ledger, command("command-2", "first-key"), action);
 
-  pending.resolve("first");
+  resolve("first");
   await Promise.all([
     expect(first).resolves.toEqual(success("command-1", "first")),
     expect(retry).resolves.toEqual(success("command-2", "first")),
@@ -353,10 +353,10 @@ test("coalesces an in-flight idempotency key under a fresh command ID", async ()
 });
 
 test("replays a failed idempotency key under a fresh command ID", async () => {
-  const ledger = new RealtimeCommandLedger();
   const action = vi.fn(() => {
     throw new RealtimeCommandFailure("session_busy");
   });
+  const ledger = new RealtimeCommandLedger();
 
   await expectExecution(
     ledger,
