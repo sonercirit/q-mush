@@ -461,6 +461,14 @@ export class SessionRealtimeState {
     if (event.type === "session_compaction_settled") {
       this.#compactionRequests.delete(event.sessionId);
       this.#streamedContent.delete(event.sessionId);
+      const detail = this.#view.value.detail;
+      if (
+        this.#view.value.selectedId === event.sessionId &&
+        detail?.id === event.sessionId
+      ) {
+        const persisted = persistedDetail(detail);
+        if (persisted !== detail) this.#view.patch({ detail: persisted });
+      }
       return;
     }
     const view = this.#view.value;

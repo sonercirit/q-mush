@@ -275,12 +275,12 @@ test.each(SNAPSHOT_TIMINGS)(
       }
 
       const handoff = transcriptMessage("handoff", HANDOFF_MESSAGE, "user", 3);
-      settleCompaction(controller, sessionId);
       controller.applyDetail({
         ...detail,
         hasOlderSegments: true,
         messages: [handoff],
       });
+      settleCompaction(controller, sessionId);
       requestCounts.push(compactionRequests().length);
 
       expect(requestCounts.slice(0, -1)).toEqual(
