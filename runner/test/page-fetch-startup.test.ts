@@ -31,6 +31,21 @@ async function failedChromium(
   throw new Error("Expected Chromium startup to fail");
 }
 
+async function startupFailure(
+  operation: () => Promise<never>,
+): Promise<AggregateError> {
+  const failure = await retryChromiumStartup(
+    operation,
+    new AbortController().signal,
+    () => Promise.resolve(),
+  ).catch((error: unknown) => error);
+  expect(failure).toBeInstanceOf(AggregateError);
+  if (failure instanceof AggregateError) {
+    return failure;
+  }
+  throw new Error("Expected an aggregate startup failure");
+}
+
 describe("Chromium startup", () => {
   test("reports the exit code and byte-bounded stderr tail", async () => {
     const prefix = "😀".repeat(5_000);
@@ -99,17 +114,9 @@ describe("Chromium startup", () => {
         () => Promise.reject(new Error(`cleanup ${String(attempts)} failed`)),
       );
 
-    const failure = await retryChromiumStartup(
-      operation,
-      new AbortController().signal,
-      () => Promise.resolve(),
-    ).catch((error: unknown) => error);
+    const failure = await startupFailure(operation);
 
     expect(attempts).toBe(2);
-    expect(failure).toBeInstanceOf(AggregateError);
-    if (!(failure instanceof AggregateError)) {
-      throw new Error("Expected an aggregate startup failure");
-    }
     expect(failure.message).toContain("launch 1 failed");
     expect(failure.message).toContain("launch 2 failed");
     expect(failure.errors).toMatchObject([
@@ -138,18 +145,10 @@ describe("Chromium startup", () => {
       .mockRejectedValueOnce(first)
       .mockRejectedValueOnce(second);
 
-    const failure = await retryChromiumStartup(
-      operation,
-      new AbortController().signal,
-      () => Promise.resolve(),
-    ).catch((error: unknown) => error);
-    expect(failure).toBeInstanceOf(AggregateError);
+    const failure = await startupFailure(operation);
     expect(failure).toMatchObject({
       errors: [{}, {}],
     });
-    if (!(failure instanceof AggregateError)) {
-      throw new Error("Expected an aggregate startup failure");
-    }
     expect(failure.message).toContain(
       "Chromium failed to start after two attempts",
     );
