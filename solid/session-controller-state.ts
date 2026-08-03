@@ -201,6 +201,7 @@ function isStreamedMessage(
   message: AgentSessionMessage,
 ): boolean {
   return (
+    message.role === "compaction_request" ||
     message.id === streamedMessageId(sessionId, "thinking") ||
     message.id === streamedMessageId(sessionId, "assistant")
   );
@@ -284,13 +285,17 @@ function reconcileStream(
   streamed: StreamedSessionContent,
 ): ReconciledStream {
   const messages = [...detail.messages];
-  if (
-    streamed.compactionRequest !== undefined &&
-    !messages.some(({ id }) => id === streamed.compactionRequest?.id)
-  ) {
-    messages.push(streamed.compactionRequest);
+  let startIndex = streamStartIndex(messages, streamed.baseMessageId);
+  if (streamed.compactionRequest !== undefined) {
+    let requestIndex = messages.findIndex(
+      ({ id }) => id === streamed.compactionRequest?.id,
+    );
+    if (requestIndex < 0) {
+      messages.splice(startIndex, 0, streamed.compactionRequest);
+      requestIndex = startIndex;
+    }
+    startIndex = requestIndex + 1;
   }
-  const startIndex = streamStartIndex(messages, streamed.baseMessageId);
   const thinkingIndex = matchingStreamMessageIndex(
     messages,
     startIndex,
@@ -479,7 +484,7 @@ export class SessionRealtimeState {
       role: "compaction_request",
     });
     this.#streamedContent.set(event.sessionId, {
-      baseMessageId: request.id,
+      baseMessageId: messages.at(-1)?.id ?? null,
       compactionRequest: request,
       content: "",
       streamId: event.streamId,

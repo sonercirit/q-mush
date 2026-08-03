@@ -9,10 +9,15 @@ import {
   transcriptMessage,
 } from "./transcript-ordering-fixtures.ts";
 
-function applyDelta(controller: SessionController, sessionId: string): void {
+function applyDelta(
+  controller: SessionController,
+  sessionId: string,
+  content: string,
+): void {
   controller.applyDelta({
-    content: "Compacted response",
+    content,
     sessionId,
+    streamId: "compaction-step",
     thinking: "",
     type: "session_delta",
   });
@@ -44,8 +49,41 @@ test("anchors a streamed compaction response after its visible request", async (
       streamId: "compaction-step",
       type: "session_compaction_request",
     });
-    applyDelta(controller, sessionId);
+    const compactionRequests = (): readonly string[] =>
+      controller.state.detail?.messages
+        .filter(({ role }) => role === "compaction_request")
+        .map(({ id }) => id) ?? [];
 
+    expect(compactionRequests()).toEqual([
+      "stream:compaction-step:compaction-request",
+    ]);
+
+    applyDelta(controller, sessionId, "Compacted ");
+    expect(compactionRequests()).toEqual([
+      "stream:compaction-step:compaction-request",
+    ]);
+
+    applyDelta(controller, sessionId, "response");
+    expect(compactionRequests()).toEqual([
+      "stream:compaction-step:compaction-request",
+    ]);
+
+    controller.applyDetail({
+      ...detail,
+      messages: [
+        ...detail.messages,
+        transcriptMessage(
+          "settled-summary",
+          "Compacted response",
+          "assistant",
+          2,
+        ),
+      ],
+    });
+
+    expect(compactionRequests()).toEqual([
+      "stream:compaction-step:compaction-request",
+    ]);
     expect(controller.state.detail?.messages).toMatchObject([
       { id: "old-user", role: "user" },
       {
@@ -55,7 +93,7 @@ test("anchors a streamed compaction response after its visible request", async (
       },
       {
         content: "Compacted response",
-        id: `stream:${sessionId}:assistant`,
+        id: "settled-summary",
         role: "assistant",
       },
     ]);
