@@ -47,6 +47,7 @@ export function SessionProviderUpdateEditor(
   const request = createSessionEditorRequestState();
   const { error, latest: discovery, pending, setError, setPending } = request;
   let discoveredSelection: SessionProviderUpdateDraft | undefined;
+  let observedDetailSelection: SessionProviderUpdateDraft | undefined;
 
   const discoverModels = async (
     next: SessionProviderUpdateDraft,
@@ -84,6 +85,16 @@ export function SessionProviderUpdateEditor(
 
   createEffect(() => {
     const initial = sessionProviderUpdateDraft(props.detail);
+    if (
+      initial.credentialId === observedDetailSelection?.credentialId &&
+      initial.model === observedDetailSelection.model &&
+      initial.provider === observedDetailSelection.provider &&
+      initial.openRouterProviderTag ===
+        observedDetailSelection.openRouterProviderTag
+    ) {
+      return;
+    }
+    observedDetailSelection = initial;
     if (
       initial.credentialId === discoveredSelection?.credentialId &&
       initial.model === discoveredSelection.model &&
