@@ -1,13 +1,13 @@
-import { createDatabase } from "../shared/database.ts";
 import { readDatabasePath } from "../shared/database/config.ts";
 import { createGoogleAuthFromEnvironment } from "./auth.ts";
 import { createBraveSearchSkillFromEnvironment } from "./brave-search.ts";
 import { createCoreIntegrationResources } from "./core-integration-resources.ts";
 import {
-  cleanupRepairSnapshots,
+  openDatabaseAndCleanupRepairSnapshots,
   startDatabaseFreeSpaceMonitor,
 } from "./database-storage-maintenance.ts";
 import {
+  databaseVacuumSafetyBytes,
   enableIncrementalVacuum,
   startIncrementalVacuum,
 } from "./database-vacuum.ts";
@@ -44,19 +44,30 @@ import { createSessionIntegration } from "./sessions.ts";
 
 const databasePath = readDatabasePath(Bun.env);
 const health = new EngineHealth();
-cleanupRepairSnapshots(databasePath);
-const database = createDatabase(databasePath);
-const vacuum = enableIncrementalVacuum(database.$client);
+const database = openDatabaseAndCleanupRepairSnapshots(databasePath);
+// Run the free-space preflight before the optional full VACUUM rebuild.
+const vacuumRequiredBytes = databaseVacuumSafetyBytes(database.$client);
+const freeSpace = startDatabaseFreeSpaceMonitor(
+  databasePath,
+  health,
+  vacuumRequiredBytes,
+);
+const vacuum = enableIncrementalVacuum(database.$client, {
+  availableBytes: freeSpace.availableBytes,
+});
+if (vacuum.skipped) {
+  health.degrade(
+    "low_disk_space",
+    `incremental-vacuum rebuild needs at least ${String(vacuumRequiredBytes)} free bytes and was skipped`,
+  );
+}
 if (vacuum.rebuilt) {
   console.log(
     "Q Mush rebuilt the database once to enable incremental vacuum maintenance",
   );
 }
-installDatabaseWriteResilience(
-  database,
-  new DatabaseWriteResilience({ health }),
-);
-const freeSpaceMonitor = startDatabaseFreeSpaceMonitor(databasePath, health);
+const writeResilience = new DatabaseWriteResilience({ health });
+installDatabaseWriteResilience(database, writeResilience);
 const vacuumTimer = startIncrementalVacuum(database.$client);
 const [clientJavaScript, pages, runnerExecutables, stylesheet] =
   await Promise.all([
@@ -159,11 +170,12 @@ async function shutDown(): Promise<void> {
 
   shuttingDown = true;
   clearInterval(vacuumTimer);
-  if (freeSpaceMonitor !== undefined) {
-    clearInterval(freeSpaceMonitor);
+  if (freeSpace.timer !== undefined) {
+    clearInterval(freeSpace.timer);
   }
   await sessions.drain();
   await Promise.all([server.stop(), callbackServer?.stop()]);
+  writeResilience.close();
   database.$client.close();
 }
 

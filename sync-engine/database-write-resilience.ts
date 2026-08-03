@@ -14,10 +14,11 @@ const WRITE_STATEMENT_PATTERN = /^\s*(?:delete|insert|replace|update)\b/iu;
 
 export type DatabaseWritePriority = "critical" | "noncritical";
 
-type RetryTimer = (
-  callback: () => void,
-  delay: number,
-) => ReturnType<typeof setTimeout>;
+type RetrySleep = (delay: number) => void;
+
+type DatabaseWriteAttempt<Result> =
+  | { readonly result: Result; readonly status: "persisted" }
+  | { readonly error: unknown; readonly status: "disk_full" };
 
 export interface StorageHealth {
   degrade(
@@ -31,7 +32,7 @@ export interface StorageHealth {
 
 export interface DatabaseWriteResilienceOptions {
   readonly health: StorageHealth;
-  readonly setTimeout?: RetryTimer;
+  readonly sleep?: RetrySleep;
 }
 
 function isDiskFullError(error: unknown): boolean {
@@ -58,66 +59,134 @@ function droppedChanges(): Changes {
   return { changes: 0, lastInsertRowid: 0 };
 }
 
+function closedError(): Error {
+  return new Error("Database write resilience has shut down");
+}
+
+function queueFullError(): Error {
+  return new Error(
+    "The critical database write retry queue is full; the write was not attempted",
+  );
+}
+
 export class DatabaseWriteResilience {
   readonly #health: StorageHealth;
-  readonly #retryTimer: RetryTimer;
+  readonly #sleep: RetrySleep;
+  #closed = false;
+  #retrying = false;
 
   constructor(options: DatabaseWriteResilienceOptions) {
     this.#health = options.health;
-    this.#retryTimer = options.setTimeout ?? setTimeout;
+    this.#sleep = options.sleep ?? Bun.sleepSync;
+  }
+
+  close(): void {
+    this.#closed = true;
+  }
+
+  #throwIfClosed(): void {
+    if (this.#closed) {
+      throw closedError();
+    }
+  }
+
+  #restoreAndReturn<Result>(result: Result): Result {
+    this.#health.restore("disk_full");
+    return result;
+  }
+
+  #perform<Result>(
+    operation: () => Result,
+    retry: boolean,
+  ): DatabaseWriteAttempt<Result> {
+    try {
+      return {
+        result: this.#restoreAndReturn(operation()),
+        status: "persisted",
+      };
+    } catch (error) {
+      if (!isDiskFullError(error)) {
+        if (retry) {
+          this.#health.restore("disk_full");
+        }
+        throw error;
+      }
+      return { error, status: "disk_full" };
+    }
+  }
+
+  #criticalRetry<Result>(
+    attempted: DatabaseWriteAttempt<Result>,
+    operation: () => Result,
+  ): Result {
+    if (attempted.status === "persisted") {
+      return attempted.result;
+    }
+    return this.#retry(operation);
   }
 
   run<Result>(
     priority: DatabaseWritePriority,
     operation: () => Result,
   ): Result | undefined {
-    try {
-      const result = operation();
-      this.#health.restore("disk_full");
-      return result;
-    } catch (error) {
-      if (!isDiskFullError(error)) {
-        throw error;
-      }
-      this.#health.degrade(
-        "disk_full",
-        priority === "critical"
-          ? "a critical database write ran out of space and will be retried"
-          : "a non-critical database write was dropped because the disk is full",
-        error,
-      );
-      if (priority === "critical") {
-        this.#retry(operation, 0);
-      }
-      return undefined;
+    if (this.#closed) {
+      throw closedError();
     }
+    // Database calls are synchronous. Keeping the one active retry coupled to
+    // its caller also serializes later callers without retaining their payloads.
+    // Reentrant writes cannot wait for that caller, so the bounded queue rejects
+    // them before execution instead of applying them out of order.
+    if (this.#retrying) {
+      if (priority === "noncritical") {
+        return undefined;
+      }
+      throw queueFullError();
+    }
+    const attempted = this.#perform(operation, false);
+    if (attempted.status === "persisted") {
+      return attempted.result;
+    }
+    this.#health.degrade(
+      "disk_full",
+      priority === "critical"
+        ? "a critical database write ran out of space and is waiting to retry"
+        : "a non-critical database write was dropped because the disk is full",
+      attempted.error,
+    );
+    return priority === "noncritical"
+      ? undefined
+      : this.#criticalRetry(attempted, operation);
   }
 
-  #retry(operation: () => unknown, attempt: number): void {
-    const delay =
-      CRITICAL_RETRY_DELAYS_MS[
-        Math.min(attempt, CRITICAL_RETRY_DELAYS_MS.length - 1)
-      ] ?? CRITICAL_RETRY_DELAYS_MS.at(-1);
-    if (delay === undefined) {
-      return;
-    }
-    this.#retryTimer(() => {
-      try {
-        operation();
-        this.#health.restore("disk_full");
-      } catch (error) {
-        if (!isDiskFullError(error)) {
-          console.error("Critical database write retry failed", error);
-          return;
+  #retry<Result>(operation: () => Result): Result {
+    this.#retrying = true;
+    let attempt = 0;
+    try {
+      while (!this.#closed) {
+        const delay =
+          CRITICAL_RETRY_DELAYS_MS[
+            Math.min(attempt, CRITICAL_RETRY_DELAYS_MS.length - 1)
+          ];
+        if (delay === undefined) {
+          throw new Error("The critical database retry policy is invalid");
+        }
+        this.#sleep(delay);
+        this.#throwIfClosed();
+        const attempted = this.#perform(operation, true);
+        if (attempted.status === "persisted") {
+          return this.#criticalRetry(attempted, operation);
         }
         this.#health.degrade(
           "disk_full",
           "a critical database write retry still cannot persist to disk",
-          error,
+          attempted.error,
         );
-        this.#retry(operation, attempt + 1);
+        attempt += 1;
       }
-    }, delay);
+      throw closedError();
+    } finally {
+      this.#retrying = false;
+    }
   }
 }
 
@@ -154,6 +223,7 @@ function resilientStatement<ReturnType, ParamsType extends SQLQueryBindings[]>(
   statement: Statement<ReturnType, ParamsType>,
   resilience: DatabaseWriteResilience,
   priority: () => DatabaseWritePriority,
+  inResilientTransaction: () => boolean,
 ): Statement<ReturnType, ParamsType> {
   const mutation = WRITE_STATEMENT_PATTERN.test(sql);
   return new Proxy(statement, {
@@ -164,19 +234,25 @@ function resilientStatement<ReturnType, ParamsType extends SQLQueryBindings[]>(
         typeof method !== "function" ||
         (property !== "run" && !mutation)
       ) {
-        return method;
+        if (typeof method !== "function") {
+          return method;
+        }
+        const boundMethod: (...parameters: unknown[]) => unknown = (
+          ...parameters
+        ) => Reflect.apply(method, target, parameters);
+        return boundMethod;
       }
       return (...parameters: ParamsType) => {
         const execute = (): unknown =>
           Reflect.apply(method, target, parameters);
         const priorityValue = priority();
-        if (database.inTransaction && priorityValue !== "noncritical") {
+        if (database.inTransaction || inResilientTransaction()) {
           return execute();
         }
-        return (
-          resilience.run(priorityValue, execute) ??
-          defaultStatementResult(property)
-        );
+        const result = resilience.run(priorityValue, execute);
+        return priorityValue === "noncritical" && result === undefined
+          ? defaultStatementResult(property)
+          : result;
       };
     },
   });
@@ -204,9 +280,11 @@ export function installDatabaseWriteResilience(
         prepare<ReturnType, ParamsType>(sql, params),
         resilience,
         () => activePriority,
+        () => resilientTransactionDepth > 0,
       ),
   });
   const transaction = database.transaction.bind(database);
+  let resilientTransactionDepth = 0;
   function resilientTransaction<Result>(
     transactionAction: (
       transactionDatabase: Parameters<
@@ -215,9 +293,15 @@ export function installDatabaseWriteResilience(
     ) => Result,
     config?: { behavior?: "deferred" | "exclusive" | "immediate" },
   ): Result | undefined {
-    return resilience.run(activePriority, () =>
-      transaction(transactionAction, config),
-    );
+    const execute = () => {
+      resilientTransactionDepth += 1;
+      try {
+        return transaction(transactionAction, config);
+      } finally {
+        resilientTransactionDepth -= 1;
+      }
+    };
+    return resilience.run(activePriority, execute);
   }
   Object.defineProperty(database, "transaction", {
     configurable: true,
