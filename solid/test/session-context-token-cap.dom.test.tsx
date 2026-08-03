@@ -4,7 +4,11 @@ import { createReactiveState } from "../reactive-state.ts";
 import { setSessionContextTokenCap } from "../session-controller-context-cap.ts";
 import { initialSessionViewState } from "../session-state.ts";
 import type { SessionViewState } from "../session-view-state.ts";
-import { findTestButton, queryTestElement } from "./dom-test-helpers.ts";
+import {
+  findTestButton,
+  queryTestElement,
+  queryTestElementAs,
+} from "./dom-test-helpers.ts";
 import { sessionDetailState } from "./session-detail-test-state.ts";
 import { mountSessionDetailBody } from "./session-dom-test-helpers.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
@@ -61,13 +65,11 @@ function mountCapEditor(autoCompact = true) {
 }
 
 function capInput(container: ParentNode): HTMLInputElement {
-  const input = queryTestElement(
+  return queryTestElementAs(
     container,
     "#session-detail-context-token-cap",
+    HTMLInputElement,
   );
-  if (!(input instanceof HTMLInputElement))
-    throw new TypeError("Missing cap input");
-  return input;
 }
 
 function setInput(input: HTMLInputElement, value: string): void {
@@ -105,14 +107,47 @@ test("warns before applying an already exceeded cap", async () => {
   });
 });
 
-test("applies an exceeded cap without compaction when auto-compact is off", async () => {
+test("shows the server rejection beside the cap editor", async () => {
+  const detail = contextCapDetail(true);
+  const rejectionDetail =
+    "The context token cap exceeds the newly discovered model limit.";
+  const failure = Object.assign(new Error(rejectionDetail), {
+    code: "invalid_context_token_cap",
+  });
+  const command = vi.fn(() => Promise.reject(failure));
+  const rejectedView = mountSessionDetailBody(
+    sessionDetailState(detail),
+    disposals,
+    { command },
+  );
+  setInput(capInput(rejectedView.container), "160000");
+  findTestButton(rejectedView.container, "Save cap")?.click();
+
+  await vi.waitFor(() => {
+    const editor = queryTestElement(
+      rejectedView.container,
+      "#session-detail-context-token-cap",
+    ).closest("form");
+    expect(editor?.textContent).toContain(rejectionDetail);
+  });
+});
+
+test("applies an exceeded cap directly when auto-compact is off", async () => {
   const manualView = mountCapEditor(false);
   setInput(capInput(manualView.container), "120000");
   findTestButton(manualView.container, "Save cap")?.click();
-  findTestButton(manualView.container, "Apply cap")?.click();
 
+  expect(
+    manualView.container.querySelector(
+      "[data-context-token-cap-dialog='true']",
+    ),
+  ).toBeNull();
   await vi.waitFor(() => {
     expect(manualView.command).toHaveBeenCalledTimes(1);
+    expect(manualView.command).toHaveBeenCalledWith(
+      SESSION_REALTIME_OPERATIONS.setContextTokenCap,
+      { sessionId: manualView.detail.id, userContextTokenCap: 120_000 },
+    );
   });
   expect(manualView.command).not.toHaveBeenCalledWith(
     SESSION_REALTIME_OPERATIONS.compact,

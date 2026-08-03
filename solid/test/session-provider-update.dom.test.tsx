@@ -18,9 +18,53 @@ import {
   expectTestText,
   mountTestView,
   queryTestElementAs,
+  setTestInputValue,
 } from "./dom-test-helpers.ts";
 import { testSessionCredentialOption } from "./session-credential-fixtures.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
+
+const RETAINED_CAP_ERROR =
+  "Lower or clear the context token cap before changing models.";
+
+function invalidContextCapError(): Error & { readonly code: string } {
+  return Object.assign(new Error(RETAINED_CAP_ERROR), {
+    code: "invalid_context_token_cap",
+  });
+}
+
+function modelCredential(
+  detail: Pick<AgentSessionDetail, "credentialId" | "provider">,
+  label = "Session credential",
+) {
+  return {
+    id: detail.credentialId,
+    label,
+    provider: detail.provider,
+  };
+}
+
+function modelCatalogDiscovery(): Promise<AgentModelCatalog> {
+  return Promise.resolve(MODEL_CATALOG);
+}
+
+function providerDiscovery() {
+  return Promise.resolve({ providers: [] });
+}
+
+async function submitProviderChange(container: ParentNode): Promise<void> {
+  clickTestButton(container, "[data-session-provider-toggle='true']");
+  await vi.waitFor(() => {
+    expect(
+      queryTestElementAs(
+        container,
+        "[data-session-provider-update-submit='true']",
+        HTMLButtonElement,
+      ).disabled,
+    ).toBe(false);
+  });
+  clickTestButton(container, "[data-session-provider-update-submit='true']");
+  clickTestButton(container, "[data-session-provider-update-confirm='true']");
+}
 
 const MODEL_CATALOG = testAgentModelCatalog({
   contextWindow: 64_000,
@@ -302,45 +346,108 @@ test("reselecting the current credential preserves its model and serving provide
 
 test("surfaces a provider change blocked by the retained cap", async () => {
   const detail = { ...TEST_SESSION_DETAIL, userContextTokenCap: 120_000 };
-  const failure = Object.assign(
-    new Error("Lower or clear the context token cap before changing models."),
-    { code: "invalid_context_token_cap" },
-  );
-  const apply = vi.fn(() => Promise.reject(failure));
+  const apply = vi.fn(() => Promise.reject(invalidContextCapError()));
   const container = mount(() => (
     <SessionProviderUpdateEditor
-      credentials={[
-        {
-          id: detail.credentialId,
-          label: "Session credential",
-          provider: detail.provider,
-        },
-      ]}
+      credentials={[modelCredential(detail)]}
       detail={detail}
       disabled={false}
       onApply={apply}
-      onDiscoverModels={() => Promise.resolve(MODEL_CATALOG)}
-      onDiscoverProviders={() => Promise.resolve({ providers: [] })}
+      onDiscoverModels={modelCatalogDiscovery}
+      onDiscoverProviders={() => providerDiscovery()}
     />
   ));
-  clickTestButton(container, "[data-session-provider-toggle='true']");
-  await vi.waitFor(() => {
-    expect(
-      queryTestElementAs(
-        container,
-        "[data-session-provider-update-submit='true']",
-        HTMLButtonElement,
-      ).disabled,
-    ).toBe(false);
-  });
-  clickTestButton(container, "[data-session-provider-update-submit='true']");
-  clickTestButton(container, "[data-session-provider-update-confirm='true']");
+  await submitProviderChange(container);
 
-  await expectTestText(
-    container,
-    "Lower or clear the context token cap before changing models.",
-  );
+  await expectTestText(container, RETAINED_CAP_ERROR);
   expect(apply).toHaveBeenCalledOnce();
+});
+
+test("clears the cap and retries a blocked model change", async () => {
+  const cappedDetail = {
+    ...TEST_SESSION_DETAIL,
+    userContextTokenCap: 120_000,
+  };
+  const failure = invalidContextCapError();
+  let detail: AgentSessionDetail = cappedDetail;
+  const command = vi.fn((operation: string) => {
+    if (operation === "sessions.models") return Promise.resolve(MODEL_CATALOG);
+    if (operation === "sessions.set_context_token_cap") {
+      detail = {
+        ...detail,
+        updatedAt: detail.updatedAt + 1,
+        userContextTokenCap: null,
+      };
+      return Promise.resolve(detail);
+    }
+    if (operation === "sessions.update_provider") {
+      if (detail.userContextTokenCap !== null) return Promise.reject(failure);
+      detail = {
+        ...detail,
+        maxContextTokens: 64_000,
+        model: "model-2",
+        updatedAt: detail.updatedAt + 1,
+      };
+      return Promise.resolve(detail);
+    }
+    return Promise.reject(new Error(`Unexpected operation: ${operation}`));
+  });
+  const initial = initialSessionViewState();
+  const reactive = createReactiveState<SessionViewState>({
+    ...initial,
+    detail,
+    selectedId: detail.id,
+    sessions: [detail],
+    transcriptFilters: { ...initial.transcriptFilters },
+  });
+  const controller = new SessionController(
+    ...([reactive, undefined, null, { command }] as const),
+  );
+  const credentials = [
+    testSessionCredentialOption({ ...modelCredential(detail, "OpenAI") }),
+  ];
+  const renderDetail = (): ReturnType<typeof SessionDetail> => (
+    <SessionDetail
+      controller={controller}
+      credentialAvailable
+      credentials={credentials}
+      onOpenDirectoryPicker={vi.fn()}
+      runners={Array.of()}
+      state={reactive.state()}
+    />
+  );
+  const container = mount(renderDetail);
+  await submitProviderChange(container);
+  await expectTestText(container, RETAINED_CAP_ERROR);
+
+  const capInput = queryTestElementAs(
+    container,
+    "#session-detail-context-token-cap",
+    HTMLInputElement,
+  );
+  setTestInputValue(capInput, "");
+  capInput.form?.requestSubmit();
+  await vi.waitFor(() => {
+    const cap = reactive.state().detail?.userContextTokenCap;
+    if (cap !== null) throw new Error(`Context cap is still ${String(cap)}`);
+  });
+
+  clickTestButton(container, "[data-session-provider-update-confirm='true']");
+  await vi.waitFor(() => {
+    const state = reactive.state().detail;
+    const confirm = container.querySelector(
+      "[data-session-provider-update-confirm='true']",
+    );
+    if (state?.model !== "model-2" || confirm !== null) {
+      throw new Error("The retried provider update has not completed");
+    }
+  });
+  const providerUpdates = command.mock.calls.reduce(
+    (count, [operation]) =>
+      count + (operation === "sessions.update_provider" ? 1 : 0),
+    0,
+  );
+  expect(providerUpdates).toBe(2);
 });
 
 test("warns and requires explicit confirmation before changing providers", async () => {

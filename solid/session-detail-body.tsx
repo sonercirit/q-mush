@@ -19,7 +19,6 @@ import {
   CompactionControls,
   sessionContextClasses,
 } from "./session-context-client.tsx";
-import { SessionContextTokenCapDialog } from "./session-context-token-cap-dialog.tsx";
 import { SessionContextTokenCapEditor } from "./session-context-token-cap-editor.tsx";
 import type { LoadedSessionDetailViewProps } from "./session-detail-view-props.ts";
 import { SessionEditorGroup } from "./session-editor-group.tsx";
@@ -126,10 +125,6 @@ export function SessionDetailBody(props: {
   const [stopDialogChildCount, setStopDialogChildCount] =
     createSignal<number>();
   const [stopTrigger, setStopTrigger] = createSignal<HTMLElement>();
-  const [pendingContextTokenCap, setPendingContextTokenCap] =
-    createSignal<number>();
-  const [contextTokenCapTrigger, setContextTokenCapTrigger] =
-    createSignal<HTMLElement>();
   const closeStopDialog = (): void => {
     setStopDialogChildCount(undefined);
   };
@@ -258,17 +253,6 @@ export function SessionDetailBody(props: {
         returnFocus={stopTrigger}
         variant="stop"
       />
-      <SessionContextTokenCapDialog
-        cap={pendingContextTokenCap()}
-        onCancel={() => {
-          setPendingContextTokenCap(undefined);
-        }}
-        onConfirm={(cap) => {
-          setPendingContextTokenCap(undefined);
-          void view().controller.setContextTokenCap(cap, true);
-        }}
-        returnFocus={contextTokenCapTrigger}
-      />
       <Show when={view().detail.runnerRequired}>
         <RunnerReassignment {...view()} />
       </Show>
@@ -289,16 +273,9 @@ export function SessionDetailBody(props: {
             disabled={
               sessionEditorDisabled() || sessionMutationPending(view().state)
             }
-            onApply={(cap) => view().controller.setContextTokenCap(cap)}
-            onWarning={(cap) => {
-              const activeElement = document.activeElement;
-              setContextTokenCapTrigger(
-                activeElement instanceof HTMLElement
-                  ? activeElement
-                  : undefined,
-              );
-              setPendingContextTokenCap(cap);
-            }}
+            onApply={(cap, compactIfExceeded) =>
+              view().controller.setContextTokenCap(cap, compactIfExceeded)
+            }
           />
         }
         tools={

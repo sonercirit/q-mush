@@ -29,7 +29,6 @@ function storedSessionSelection() {
     activeStartedAt: agentSessions.activeStartedAt,
     agentFilePath: agentSessions.agentFilePath,
     autoCompact: agentSessions.autoCompact,
-    modelContextTokens: agentSessions.maxContextTokens,
     costBasis: agentSessions.costBasis,
     costUsd: agentSessions.costUsd,
     createdAt: agentSessions.createdAt,

@@ -517,13 +517,14 @@ export class SessionController {
       view: this.#view,
     });
   }
-  setContextTokenCap(cap: number | null, compactFirst = false) {
-    const mutate = (mutation: SessionMutation) => this.#mutateDetail(mutation);
+  setContextTokenCap(cap: number | null, c = false) {
+    const run = (m: SessionMutation) =>
+      mutateSessionDetail(this.#mutationDependencies(), m, true);
     return setSessionContextTokenCap(
       () => this.#view.value,
       cap,
-      compactFirst,
-      mutate,
+      c,
+      run,
       async () => this.compact(),
     );
   }

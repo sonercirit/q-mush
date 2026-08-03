@@ -10,15 +10,34 @@ import { initialSessionViewState } from "../session-state.ts";
 import {
   clickTestButton,
   disposeTestViews,
+  findTestButton,
   mountTestView,
   queryTestElement,
   queryTestTranscript,
+  setTestInputValue,
 } from "./dom-test-helpers.ts";
 import { runnerSummary } from "./runner-fixtures.ts";
 import { sessionDetailState } from "./session-detail-test-state.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
 const focusDisposals: (() => void)[] = [];
+
+function mountFocusPanelWithController(
+  controller: SessionController,
+  runners = createRunnerViewState([]),
+): HTMLDivElement {
+  return mountTestView(
+    () => (
+      <SessionPanel
+        controller={controller}
+        openAi={() => createProviderViewState([])}
+        openRouter={() => createProviderViewState([])}
+        runners={() => runners}
+      />
+    ),
+    focusDisposals,
+  );
+}
 
 function mountFocusPanel(
   sessions = [summaryFromDetail(TEST_SESSION_DETAIL)],
@@ -38,17 +57,7 @@ function mountFocusPanel(
     undefined,
     null,
   );
-  const container = mountTestView(
-    () => (
-      <SessionPanel
-        controller={controller}
-        openAi={() => createProviderViewState([])}
-        openRouter={() => createProviderViewState([])}
-        runners={() => runners}
-      />
-    ),
-    focusDisposals,
-  );
+  const container = mountFocusPanelWithController(controller, runners);
   return { container, controller };
 }
 
@@ -225,6 +234,49 @@ test("focus mode keeps the mounted detail and draft controls stable", async () =
 
   expectFocusMode(container, false);
   expectPreservedView(container, original);
+});
+
+test("cap rejections stay visible beside the editor in focus mode", async () => {
+  const detail = { ...TEST_SESSION_DETAIL, currentContextTokens: 50_000 };
+  let rejected = false;
+  const rejectionDetail =
+    "The context token cap exceeds the model limit discovered by the server.";
+  const command = vi.fn((operation: string) => {
+    if (operation !== "sessions.set_context_token_cap") {
+      throw new Error(`Unexpected command: ${operation}`);
+    }
+    rejected = true;
+    return Promise.reject(
+      Object.assign(new Error(rejectionDetail), {
+        code: "invalid_context_token_cap",
+      }),
+    );
+  });
+  const reactive = sessionDetailState(detail, [summaryFromDetail(detail)]);
+  const controllerArguments = [reactive, undefined, null, { command }] as const;
+  const controller = new SessionController(...controllerArguments);
+  const container = mountFocusPanelWithController(controller);
+  await enterFocusMode(container);
+  const input = container.querySelector<HTMLInputElement>(
+    "#session-detail-context-token-cap",
+  );
+  if (input === null) throw new TypeError("Detail cap field was not rendered");
+  setTestInputValue(input, "64000");
+  findTestButton(container, "Save cap")?.click();
+
+  await vi.waitFor(() => {
+    const localText = input.closest("form")?.textContent;
+    if (!localText?.includes(rejectionDetail)) {
+      throw new Error("The local cap rejection is not visible");
+    }
+    expect({
+      focused: queryTestElement(
+        container,
+        "[data-session-focus-toggle='true']",
+      ).getAttribute("aria-pressed"),
+      rejected,
+    }).toEqual({ focused: "true", rejected: true });
+  });
 });
 
 test("focus mode manages its session drawer, focus, Escape, and resize", async () => {
