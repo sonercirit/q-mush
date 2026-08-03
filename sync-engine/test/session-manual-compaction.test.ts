@@ -313,6 +313,37 @@ describe("manual session compaction", () => {
     closeSessionTestDatabase(running.database);
   });
 
+  test("reports compaction call context before resetting handoff context", async () => {
+    const setup = manualRuntime(
+      new ScriptedAgentModel([
+        {
+          content: "Context-accounted handoff",
+          contextTokens: 98_000,
+          toolCalls: [],
+        },
+      ]),
+    );
+    const observedContext: number[] = [];
+    const runtime: SessionAgentRuntimeDependencies = {
+      ...setup.runtime,
+      notify: () => {
+        const session = setup.store.get(TEST_USER_ID, SESSION_ID);
+        if (session !== undefined) {
+          observedContext.push(session.currentContextTokens);
+        }
+      },
+    };
+
+    await startManualCompaction(runtime);
+
+    expect(observedContext).toContain(98_000);
+    expect(observedContext.at(-1)).toBe(0);
+    expect(
+      setup.store.get(TEST_USER_ID, SESSION_ID)?.currentContextTokens,
+    ).toBe(0);
+    closeSessionTestDatabase(setup.database);
+  });
+
   test("persists reported compaction usage exactly once with the handoff", async () => {
     const setup = manualRuntime(
       new ScriptedAgentModel([

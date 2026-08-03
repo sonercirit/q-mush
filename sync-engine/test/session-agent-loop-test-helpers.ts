@@ -24,6 +24,7 @@ export function compacted(
   costUsd: number | null = null,
 ): CompactedConversation {
   return {
+    contextTokens: null,
     costUsd,
     messages: [{ content: summary, role: "user" }],
     summary,

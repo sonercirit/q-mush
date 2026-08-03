@@ -57,9 +57,9 @@ export function compactStoredConversation(options: {
     const advanced = transaction
       .update(agentSessions)
       .set({
+        ...runtimeUsageValues(options.usage),
         currentContextTokens: 0,
         currentSegment: sql`${agentSessions.currentSegment} + 1`,
-        ...runtimeUsageValues(options.usage),
         ...updatedAuditFields(SYSTEM_ID, options.now),
       })
       .where(and(condition, eq(agentSessions.currentSegment, currentSegment)))

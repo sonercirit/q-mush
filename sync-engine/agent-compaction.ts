@@ -20,6 +20,7 @@ type CompactionArguments = readonly [
 ];
 
 export interface CompactedConversation {
+  readonly contextTokens: AgentModelStep["contextTokens"];
   readonly costUsd: number | null;
   readonly messages: readonly AgentConversationMessage[];
   readonly summary: string;
@@ -111,6 +112,7 @@ export class ModelConversationCompactor implements AgentConversationCompactor {
 
     const summary = step.content.trim();
     return {
+      contextTokens: step.contextTokens,
       costUsd: step.costUsd,
       messages: [{ content: `${COMPACTION_PREFIX}${summary}`, role: "user" }],
       summary,

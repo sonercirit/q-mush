@@ -83,6 +83,23 @@ function writeRuntime(
   runtime.notify();
 }
 
+function recordCompactionContext(
+  runtime: SessionAgentRuntimeDependencies,
+  contextTokens: number | null,
+): void {
+  if (contextTokens === null) {
+    return;
+  }
+  writeRuntime(runtime, (sessionId, now, generation) => {
+    runtime.store.updateRuntimeUsage(
+      sessionId,
+      { contextTokens, costBasis: null, costUsd: null },
+      now,
+      generation,
+    );
+  });
+}
+
 function recordCompaction(
   runtime: SessionAgentRuntimeDependencies,
   summary: string,
@@ -90,6 +107,7 @@ function recordCompaction(
   startedAt: number,
   terminal = false,
 ): void {
+  recordCompactionContext(runtime, usage.contextTokens);
   writeRuntime(runtime, (sessionId, now, generation) => {
     if (terminal) {
       runtime.store.compactRuntimeTerminal(
@@ -210,8 +228,9 @@ export async function compactSessionConversation(
   const conversation = sessionConversation(runtime);
   const compactor = models.createCompactor();
   const startedAt = runtime.now();
-  const estimateCost = (step: Parameters<typeof compactionUsage>[0]) =>
-    estimateAgentStepCost(runtime.detail, step.tokenUsage);
+  const estimateCost = (
+    step: Pick<Parameters<typeof compactionUsage>[0], "costUsd" | "tokenUsage">,
+  ) => estimateAgentStepCost(runtime.detail, step.tokenUsage);
   const final = await compactor.compact(conversation, runtime.signal);
   throwIfAgentAborted(runtime.signal);
   const usage = compactionUsage(final, estimateCost);

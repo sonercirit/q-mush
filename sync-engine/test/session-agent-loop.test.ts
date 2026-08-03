@@ -70,6 +70,7 @@ describe("compacting agent session loop", () => {
       compact: (messages) => {
         compactorRequests.push(messages);
         return Promise.resolve({
+          contextTokens: null,
           costUsd: 0.1,
           messages: [{ content: "Compacted handoff", role: "user" }],
           summary: "Compacted handoff",
@@ -503,7 +504,11 @@ describe("compacting agent session loop", () => {
     await expect(
       runTestLoop({
         createCompactor: () => ({
-          compact: () => Promise.resolve(compacted("Stored handoff", 0.25)),
+          compact: () =>
+            Promise.resolve({
+              ...compacted("Stored handoff", 0.25),
+              contextTokens: 97_500,
+            }),
         }),
         model,
         now: () => compactionStartedAt,
@@ -525,7 +530,7 @@ describe("compacting agent session loop", () => {
         startedAt: compactionStartedAt,
         summary: "Stored handoff",
         usage: {
-          contextTokens: null,
+          contextTokens: 97_500,
           costBasis: "reported",
           costUsd: 0.25,
         },

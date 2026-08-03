@@ -17,7 +17,7 @@ import {
 import { STORE_SESSION_ID } from "./session-store-test-fixtures.ts";
 
 const COMPACTION_USAGE: CompactionUsage = {
-  contextTokens: null,
+  contextTokens: 98_000,
   costBasis: "reported",
   costUsd: 0.1,
 };

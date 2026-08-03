@@ -15,7 +15,11 @@ describe("agent conversation compaction", () => {
 
   test("appends the handoff request without changing the conversation prefix", async () => {
     const model = new ScriptedAgentModel([
-      { content: " Keep the current changes and run tests. ", toolCalls: [] },
+      {
+        content: " Keep the current changes and run tests. ",
+        contextTokens: 12_345,
+        toolCalls: [],
+      },
     ]);
     const compactor = new ModelConversationCompactor(model);
     const conversation = [
@@ -29,7 +33,11 @@ describe("agent conversation compaction", () => {
     const compacted = await compactor.compact(conversation);
 
     expect(compacted.summary).toBe("Keep the current changes and run tests.");
-    expect(compacted).toMatchObject({ costUsd: null, tokenUsage: null });
+    expect(compacted).toMatchObject({
+      contextTokens: 12_345,
+      costUsd: null,
+      tokenUsage: null,
+    });
     expect(compacted.messages).toEqual([
       {
         content:
