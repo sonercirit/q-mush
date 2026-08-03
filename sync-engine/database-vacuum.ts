@@ -17,7 +17,7 @@ function pragmaNumber(
 
 export interface IncrementalVacuumEnablement {
   readonly enabled: boolean;
-  readonly requiresRebuild: boolean;
+  readonly rebuilt: boolean;
 }
 
 export function enableIncrementalVacuum(
@@ -25,14 +25,17 @@ export function enableIncrementalVacuum(
 ): IncrementalVacuumEnablement {
   const current = pragmaNumber(database, "auto_vacuum");
   if (current === 2) {
-    return { enabled: true, requiresRebuild: false };
+    return { enabled: true, rebuilt: false };
   }
   if (current === 0) {
     database.run("PRAGMA auto_vacuum = INCREMENTAL");
+    // Changing auto_vacuum on an existing database requires one rebuild. This
+    // runs before the server opens; subsequent live maintenance is incremental.
+    database.run("VACUUM");
   }
   return {
     enabled: pragmaNumber(database, "auto_vacuum") === 2,
-    requiresRebuild: current === 0,
+    rebuilt: current === 0,
   };
 }
 
