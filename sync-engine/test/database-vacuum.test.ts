@@ -20,16 +20,22 @@ function pragma(
   return typeof rows[0]?.[0] === "number" ? rows[0][0] : 0;
 }
 
+test("enabling incremental vacuum performs the required one-time rebuild", () => {
+  const path = join(temporaryDirectory(), "enable.sqlite");
+  const database = createDatabase(path);
+
+  expect(enableIncrementalVacuum(database.$client).rebuilt).toBe(true);
+  expect(pragma(database, "auto_vacuum")).toBe(2);
+  database.$client.close();
+});
+
 test("incremental vacuum reclaims pages after synthetic database churn", () => {
   vi.useFakeTimers();
   const path = join(temporaryDirectory(), "churn.sqlite");
   const database = createDatabase(path);
   database.$client.run("PRAGMA auto_vacuum = INCREMENTAL");
   database.$client.run("VACUUM");
-  expect(enableIncrementalVacuum(database.$client)).toEqual({
-    enabled: true,
-    requiresRebuild: false,
-  });
+  expect(enableIncrementalVacuum(database.$client).rebuilt).toBe(false);
   database.$client.run("CREATE TABLE churn (value BLOB NOT NULL)");
   const insert = database.$client.prepare("INSERT INTO churn VALUES (?)");
   const payload = Buffer.alloc(32 * 1024);
