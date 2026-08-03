@@ -1,4 +1,5 @@
 import { setTimeout } from "node:timers/promises";
+import { abortSignalError } from "../shared/validation.ts";
 
 const MAXIMUM_BROWSER_DIAGNOSTIC_BYTES = 4_096;
 const CHROMIUM_RETRY_DELAY_MILLISECONDS = 500;
@@ -14,12 +15,6 @@ type ChromiumRetryWait = (
   milliseconds: number,
   signal: AbortSignal,
 ) => Promise<void>;
-
-function abortError(signal: AbortSignal): Error {
-  return signal.reason instanceof Error
-    ? signal.reason
-    : new Error("The page fetch was stopped");
-}
 
 function exitDescription(child: Bun.ReadableSubprocess): string {
   return `exit code ${String(child.exitCode ?? "null")}, signal ${child.signalCode ?? "none"}`;
@@ -48,7 +43,7 @@ export async function waitForChromiumDevtoolsUrl(
   try {
     for (;;) {
       if (signal.aborted) {
-        throw abortError(signal);
+        throw abortSignalError(signal, "The page fetch was stopped");
       }
       const part = await reader.read();
       if (part.done) {
@@ -70,11 +65,11 @@ export async function waitForChromiumDevtoolsUrl(
   }
 }
 
-function waitForChromiumRetry(
+async function waitForChromiumRetry(
   milliseconds: number,
   signal: AbortSignal,
 ): Promise<void> {
-  return setTimeout(milliseconds, undefined, { signal });
+  await setTimeout(milliseconds, undefined, { signal });
 }
 
 export async function retryChromiumStartup<Value>(

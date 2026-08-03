@@ -13,15 +13,19 @@ async function failedChromium(
     stdout: "pipe",
   });
   const controller = new AbortController();
+  let failure: unknown;
   try {
     await waitForChromiumDevtoolsUrl(child, controller.signal);
   } catch (error) {
-    return error instanceof Error ? error : new Error(String(error));
+    failure = error;
   } finally {
     if (child.exitCode === null) {
       child.kill("SIGKILL");
       await child.exited;
     }
+  }
+  if (failure instanceof Error) {
+    return failure;
   }
   throw new Error("Expected Chromium startup to fail");
 }
