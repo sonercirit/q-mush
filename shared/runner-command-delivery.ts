@@ -29,16 +29,17 @@ export class RunnerCommandDelivery<
     const queue = this.#queue(runnerId);
     if (queue === undefined) return undefined;
 
-    const queuedCount = queue.length;
-    for (let index = 0; index < queuedCount; index += 1) {
-      const command = queue.shift();
-      if (command === undefined) break;
+    for (let index = 0; index < queue.length; index += 1) {
+      const command = queue[index];
+      if (command === undefined) continue;
       const pending = this.#pending(command.id);
-      if (pending === undefined) continue;
-      if (excludedCommandIds?.has(command.id) === true) {
-        queue.push(command);
+      if (pending === undefined) {
+        queue.splice(index, 1);
+        index -= 1;
         continue;
       }
+      if (excludedCommandIds?.has(command.id) === true) continue;
+      queue.splice(index, 1);
       this.#removeEmpty(runnerId, queue);
       return pending;
     }
