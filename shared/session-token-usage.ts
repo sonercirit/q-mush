@@ -9,7 +9,7 @@ export interface AgentTokenUsageStep {
   readonly tokenUsage?: AgentTokenUsage | null;
 }
 
-export const EMPTY_AGENT_TOKEN_USAGE: AgentTokenUsage = {
+const EMPTY_AGENT_TOKEN_USAGE: AgentTokenUsage = {
   cacheWriteInputTokens: 0,
   cachedInputTokens: 0,
   inputTokens: 0,
