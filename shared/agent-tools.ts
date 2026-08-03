@@ -182,8 +182,7 @@ const SESSION_AGENT_TOOLS = [
     name: "spawn_session",
     properties: {
       agentFilePath: {
-        description:
-          "Optional agent-file path; may be relative or absolute, inside or outside the workspace",
+        description: "Optional agent-file path, relative or absolute",
         ...STRING_PARAMETER,
       },
       autoCompact: {
@@ -191,7 +190,7 @@ const SESSION_AGENT_TOOLS = [
         ...BOOLEAN_PARAMETER,
       },
       credentialId: {
-        description: "Model credential ID",
+        description: 'Credential ID or "balanced:<provider>" sentinel',
         ...STRING_PARAMETER,
       },
       executionEnvironment: {
@@ -226,8 +225,7 @@ const SESSION_AGENT_TOOLS = [
         ...STRING_ARRAY_PARAMETER,
       },
       workingDirectory: {
-        description:
-          "Any working directory on the selected runner, inside or outside the parent workspace",
+        description: "Working directory on the selected runner",
         ...STRING_PARAMETER,
       },
     },
@@ -287,7 +285,7 @@ const SESSION_AGENT_TOOLS = [
   }),
   toolDefinition({
     description:
-      "Discover bounded, paginated options accepted by spawn_session. Model lookups require provider and credentialId. Results never contain credential secrets or runner tokens.",
+      'Discover paginated spawn_session options. Credential results include "balanced:<provider>" for providers with at least two scoped accounts. Model lookups require provider and credentialId. No secrets or runner tokens are returned.',
     name: "get_session_options",
     properties: {
       category: {
@@ -369,8 +367,7 @@ const SESSION_AGENT_TOOLS = [
     required: ["sessionId", "runnerId", "workingDirectory"],
   }),
   toolDefinition({
-    description:
-      "Send a user message to another completed, idle, failed, or stopped owned session and start it.",
+    description: "Send a message to another owned idle or terminal session.",
     name: "send_to_session",
     properties: {
       ...SESSION_ID_PARAMETER,
@@ -382,8 +379,7 @@ const SESSION_AGENT_TOOLS = [
     required: ["sessionId", "message"],
   }),
   toolDefinition({
-    description:
-      "Continue another completed, idle, failed, or stopped owned session without adding a message.",
+    description: "Continue an owned idle or terminal session.",
     name: "continue_session",
     properties: SESSION_ID_PARAMETER,
     required: ["sessionId"],

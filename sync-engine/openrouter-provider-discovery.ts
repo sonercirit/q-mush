@@ -14,6 +14,7 @@ import {
   requireRecord,
 } from "../shared/validation.ts";
 import { agentProviderRequestHeaders } from "./agent-model.ts";
+import { ProviderCredentialRejectionError } from "./provider-error.ts";
 
 const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models";
 const DEFAULT_TIMEOUT_MILLISECONDS = 10_000;
@@ -235,9 +236,12 @@ async function responseJson(
   signal: AbortSignal,
 ): Promise<unknown> {
   if (!response.ok) {
-    throw new Error(
-      `OpenRouter serving-provider discovery failed with status ${String(response.status)}`,
-    );
+    const status = response.status;
+    const message = `OpenRouter serving-provider discovery failed with status ${String(status)}`;
+    if (status === 401 || status === 402 || status === 403 || status === 429) {
+      throw new ProviderCredentialRejectionError(message, status);
+    }
+    throw new Error(message);
   }
   if (declaredResponseIsTooLarge(response)) {
     throw new Error("The OpenRouter serving-provider response was too large");

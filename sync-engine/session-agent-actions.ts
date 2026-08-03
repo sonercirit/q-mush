@@ -1,15 +1,11 @@
-import { AGENT_REASONING_EFFORTS } from "../shared/agent-configuration.ts";
 import { createAgentSystemPrompt } from "../shared/agent-prompt.ts";
 import {
-  AGENT_SESSION_TOOL_OPTIONS,
   selectedAgentTools,
   type SessionAgentToolName,
 } from "../shared/agent-tools.ts";
-import { ProviderCredentialStore } from "../shared/provider-credential-store.ts";
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type { RunnerSummary } from "../shared/runner-model.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
-import { safeAgentModelDiscoveryError } from "./agent-model-discovery.ts";
 import { createJsonResponse } from "./http.ts";
 import {
   pauseQueuedSessionForRestart,
@@ -20,11 +16,12 @@ import {
 } from "./session-agent-action-helpers.ts";
 import { listSessionsOutput } from "./session-agent-list.ts";
 import {
-  SESSION_OPTIONS_PAGE_SIZE,
-  sessionOptionsOutput,
-  sessionOptionsPageFilter,
-  type GetSessionOptionsToolInput,
-  type SessionOptionsSource,
+  sessionAgentOptions,
+  type SessionRunnerPageRequest,
+} from "./session-agent-options-action.ts";
+import type {
+  GetSessionOptionsToolInput,
+  SessionOptionsSource,
 } from "./session-agent-options.ts";
 import {
   readSessionOutput,
@@ -51,18 +48,11 @@ import type { SessionRunnerAvailability } from "./session-runner-availability.ts
 import { readSessionSnapshot } from "./session-store-agent-read.ts";
 import type { PendingSpawnedSession } from "./session-store-spawns.ts";
 
-const optionsPageOffset = (page: number): number =>
-  (page - 1) * SESSION_OPTIONS_PAGE_SIZE;
-
-const runnerUnavailableOutput = (): string =>
-  sessionToolOutput({ error: "runner_unavailable" });
-
-interface RunnerPageRequest {
-  readonly limit: number;
-  readonly offset: number;
-  readonly search?: string;
-  readonly workspaceId?: string;
+function runnerUnavailableOutput(): string {
+  return sessionToolOutput({ error: "runner_unavailable" });
 }
+
+type RunnerPageRequest = SessionRunnerPageRequest;
 
 interface SessionAgentActionsDependencies extends SessionAgentActionDependencies {
   readonly abortSession: (sessionId: string) => void;
@@ -404,86 +394,11 @@ export class SessionAgentActions {
     input: GetSessionOptionsToolInput,
     workspaceId: string,
   ): Promise<string> {
-    let models: SessionOptionsSource["models"] = [];
-    let reasoningEfforts: SessionOptionsSource["reasoningEfforts"] =
-      AGENT_REASONING_EFFORTS;
-    if (
-      input.category === "models" &&
-      input.credentialId !== undefined &&
-      input.provider !== undefined
-    ) {
-      const provider = input.provider;
-      const credentialId = input.credentialId;
-      if (
-        !ProviderCredentialStore.hasActiveModelCredential(
-          this.#dependencies.database,
-          userId,
-          provider,
-          credentialId,
-          workspaceId,
-        )
-      ) {
-        throw new Error("The model credential or provider is unavailable");
-      }
-      let credential;
-      try {
-        credential = await this.#dependencies.readCredential(userId, {
-          credentialId,
-          provider,
-          workspaceId,
-        });
-      } catch {
-        throw new Error("The model credential or provider is unavailable");
-      }
-      if (credential?.id !== credentialId) {
-        throw new Error("The model credential or provider is unavailable");
-      }
-      try {
-        const catalog = await this.#dependencies.discoverModels(
-          provider,
-          credential,
-        );
-        models = catalog.models;
-        reasoningEfforts = [];
-      } catch (error) {
-        throw new Error(safeAgentModelDiscoveryError(error), { cause: error });
-      }
-    }
-    const offset = optionsPageOffset(input.page);
-    const credentialPage =
-      input.category === "credentials"
-        ? ProviderCredentialStore.listModelCredentials(
-            this.#dependencies.database,
-            userId,
-            offset,
-            SESSION_OPTIONS_PAGE_SIZE,
-            input.search,
-            workspaceId,
-          )
-        : undefined;
-    const runnerPage =
-      input.category === "runners"
-        ? this.#dependencies.listRunnerOptions(userId, {
-            limit: SESSION_OPTIONS_PAGE_SIZE,
-            offset,
-            ...sessionOptionsPageFilter(input),
-            workspaceId,
-          })
-        : undefined;
-    return sessionOptionsOutput(input, {
-      credentials: credentialPage?.items ?? [],
-      models,
-      ...(credentialPage === undefined && runnerPage === undefined
-        ? {}
-        : {
-            page: {
-              totalItems:
-                credentialPage?.totalItems ?? runnerPage?.totalItems ?? 0,
-            },
-          }),
-      reasoningEfforts,
-      runners: runnerPage?.items ?? [],
-      tools: AGENT_SESSION_TOOL_OPTIONS,
+    return sessionAgentOptions({
+      dependencies: this.#dependencies,
+      input,
+      userId,
+      workspaceId,
     });
   }
 

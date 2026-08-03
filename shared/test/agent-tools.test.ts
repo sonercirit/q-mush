@@ -94,14 +94,12 @@ test("defines optional agent-file path and auto-compaction for spawned sessions"
       parameters: {
         properties: {
           agentFilePath: {
-            description:
-              "Optional agent-file path; may be relative or absolute, inside or outside the workspace",
+            description: "Optional agent-file path, relative or absolute",
             type: "string",
           },
           autoCompact: { type: "boolean" },
           workingDirectory: {
-            description:
-              "Any working directory on the selected runner, inside or outside the parent workspace",
+            description: "Working directory on the selected runner",
             type: "string",
           },
         },

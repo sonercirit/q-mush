@@ -3,10 +3,7 @@ import { createDatabase, type AppDatabase } from "../shared/database.ts";
 import { createUuidV7 } from "../shared/ids.ts";
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
-import type {
-  AgentSessionDetail,
-  RestartHandoffOperation,
-} from "../shared/session-model.ts";
+import type { RestartHandoffOperation } from "../shared/session-model.ts";
 import {
   discoverAgentModels,
   type AgentModelDiscoverer,
@@ -16,6 +13,7 @@ import { createAttachmentFallbackIntegration } from "./attachment-fallback-integ
 import type { GoogleAuth } from "./auth.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
 import { createApiError, parseJsonRequest } from "./http.ts";
+import { ModelCredentialPool } from "./model-credential-pool.ts";
 import {
   discoverOpenRouterProviders,
   type OpenRouterProviderDiscoverer,
@@ -23,8 +21,8 @@ import {
 import type { RealtimeHub } from "./realtime-hub.ts";
 import type { RunnerIntegration } from "./runners.ts";
 import { SessionAgentActions } from "./session-agent-actions.ts";
+import { discoverSessionAgentMetadata } from "./session-agent-metadata.ts";
 import type { AgentModelFactory } from "./session-agent-models.ts";
-import type { SpawnSessionToolInput } from "./session-agent-tools.ts";
 import { startManualSessionCompaction } from "./session-compaction-actions.ts";
 import {
   createValidatedSession,
@@ -61,7 +59,6 @@ import {
 } from "./session-interrupted-recovery.ts";
 import { SessionLauncher } from "./session-launcher.ts";
 import { modelsForUser } from "./session-model-discovery.ts";
-import { sessionMetadata } from "./session-provider-selection.ts";
 import {
   recoverAnsweredQuestions,
   type SessionQuestionActionDependencies,
@@ -91,6 +88,7 @@ class DrizzleSessionIntegration
   readonly #braveSearch: Pick<BraveSearchSkill, "execute">;
   readonly #discoverModels: AgentModelDiscoverer;
   readonly #discoverOpenRouterProviders: OpenRouterProviderDiscoverer;
+  readonly #modelCredentialPool: ModelCredentialPool;
   readonly #modelFactory: AgentModelFactory;
   readonly #now: () => number;
   readonly #onChange = new Set<(userId: string, sessionId: string) => void>();
@@ -142,6 +140,10 @@ class DrizzleSessionIntegration
       ((options) => new ChatCompletionsAgentModel(options));
     this.#now = dependencies.now ?? Date.now;
     this.#providers = providers;
+    this.#modelCredentialPool = new ModelCredentialPool({
+      database,
+      readCredential: this.#readCredential,
+    });
     this.#workspaces = dependencies.workspaces ?? permissiveWorkspaceReader;
     this.#requests = new SessionRequestHelpers(auth, this.#broker, runners);
     this.#runners = runners;
@@ -228,6 +230,7 @@ class DrizzleSessionIntegration
       database,
       discoverModels: this.#discoverModels,
       discoverOpenRouterProviders: this.#discoverOpenRouterProviders,
+      modelCredentialPool: this.#modelCredentialPool,
       providerUpdates: this.#sessionMutationControl(),
       providers: this.#providers,
       questions: this.#questionActions,
@@ -268,6 +271,14 @@ class DrizzleSessionIntegration
     this.#store.queuedSessionOwnerIds().forEach(this.#launchQueuedSessions);
   }
 
+  #context() {
+    return {
+      modelCredentialPool: this.#modelCredentialPool,
+      notify: this.#notify,
+      now: this.#now,
+    };
+  }
+
   protected get resources(): SessionIntegrationApiResources {
     return {
       auth: this.#auth,
@@ -280,8 +291,7 @@ class DrizzleSessionIntegration
       executionCleanup: this.#executionCleanup,
       launchQueuedSessions: this.#launchQueuedSessions,
       modelsForUser: (request, user) => this.#modelsForUser(request, user),
-      notify: this.#notify,
-      now: this.#now,
+      ...this.#context(),
       questionActions: this.#questionActions,
       queueForUser: (user, sessionId, workspaceId, prompt) =>
         this.#queueForUser(user, sessionId, workspaceId, prompt),
@@ -359,36 +369,6 @@ class DrizzleSessionIntegration
     };
   }
 
-  async #discoverSessionMetadata(
-    input: SpawnSessionToolInput,
-    credential: ProviderCredentialAccess,
-    ownerId: string,
-  ): Promise<Pick<AgentSessionDetail, "maxContextTokens" | "providerPricing">> {
-    const metadata = await this.#metadata(input, credential, ownerId);
-    if ("error" in metadata) {
-      throw new Error(
-        metadata.error === "provider_unavailable"
-          ? "The OpenRouter serving provider is unavailable"
-          : "The OpenRouter serving provider could not be validated",
-      );
-    }
-    return metadata;
-  }
-
-  #metadata(
-    input: Parameters<typeof sessionMetadata>[0]["input"],
-    credential: ProviderCredentialAccess,
-    ownerId: string,
-  ) {
-    return sessionMetadata({
-      credential,
-      discoverModels: this.#discoverModels,
-      discoverProviders: this.#discoverOpenRouterProviders,
-      input,
-      ownerId,
-    });
-  }
-
   #createActions(database: AppDatabase): SessionAgentActions {
     return new SessionAgentActions({
       activeSession: (id) => this.#runtimes.active(id),
@@ -404,8 +384,22 @@ class DrizzleSessionIntegration
         void this.#executionCleanup.cleanupTerminal(detail);
       },
       pendingRestart: (runnerId) => this.#runtimes.pendingRestart(runnerId),
-      discoverSessionMetadata: (input, credential, userId) =>
-        this.#discoverSessionMetadata(input, credential, userId),
+      discoverSessionMetadata: (
+        input,
+        credential,
+        userId,
+        rejectCredentialErrors,
+      ) =>
+        discoverSessionAgentMetadata(
+          {
+            discoverModels: this.#discoverModels,
+            discoverOpenRouterProviders: this.#discoverOpenRouterProviders,
+          },
+          input,
+          credential,
+          userId,
+          rejectCredentialErrors,
+        ),
       launchSession: (credential, detail, userId) =>
         this.#launch(detail, credential, userId),
       listOnlineRunners: (userId, workspaceId) =>
@@ -420,8 +414,7 @@ class DrizzleSessionIntegration
           },
           request.workspaceId,
         ),
-      notify: this.#notify,
-      now: this.#now,
+      ...this.#context(),
       readCredential: this.#readCredential,
       runnerIsAvailable: this.#runnerIsAvailable,
       store: this.#store,

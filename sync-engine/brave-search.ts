@@ -1,5 +1,6 @@
 import { isRecord } from "../shared/auth-model.ts";
 import { createCredentialCipher } from "../shared/credential-cipher.ts";
+import { CredentialPoolBalancer } from "../shared/credential-pool-balancer.ts";
 import { createDatabase, type AppDatabase } from "../shared/database.ts";
 import { createUuidV7, type IdGenerator } from "../shared/ids.ts";
 import { ProviderCredentialStore } from "../shared/provider-credential-store.ts";
@@ -17,6 +18,7 @@ const BRAVE_SEARCH_API_URL = "https://api.search.brave.com/res/v1/web/search";
 const QUERY_MAXIMUM_LENGTH = 500;
 const DEFAULT_RESULT_COUNT = 10;
 const MAXIMUM_RESULT_COUNT = 20;
+const BRAVE_SEARCH_RETRYABLE_STATUSES = new Set([401, 403, 429]);
 
 type BraveSearchFetch = NonNullable<OAuthDependencies["fetch"]>;
 
@@ -145,6 +147,7 @@ async function readSearchOutput(
 type BraveSearchExecute = BraveSearchSkill["execute"];
 
 class BraveSearchSkillIntegration implements BraveSearchSkill {
+  readonly #balancer: CredentialPoolBalancer;
   readonly #credentials: ProviderCredentialEndpoints;
   readonly #fetch: BraveSearchFetch;
   readonly #store: ProviderCredentialStore | undefined;
@@ -155,6 +158,9 @@ class BraveSearchSkillIntegration implements BraveSearchSkill {
     encodedCredentialKey: string | undefined,
   ) {
     this.#fetch = dependencies.fetch ?? globalThis.fetch;
+    this.#balancer = new CredentialPoolBalancer({
+      ...(dependencies.now === undefined ? {} : { now: dependencies.now }),
+    });
     this.#store =
       encodedCredentialKey === undefined
         ? undefined
@@ -218,7 +224,10 @@ class BraveSearchSkillIntegration implements BraveSearchSkill {
       return "Error: no Brave Search API keys are available.";
     }
 
-    for (const credential of credentials) {
+    for (const credential of this.#balancer.ordered(
+      `${userId}:${workspaceId}:brave_search`,
+      credentials,
+    )) {
       try {
         const secret = this.#store.readSecret(
           userId,
@@ -241,12 +250,15 @@ class BraveSearchSkillIntegration implements BraveSearchSkill {
           return await readSearchOutput(response, parameters.get("q") ?? "");
         }
 
-        if (
-          response.status === 401 ||
-          response.status === 403 ||
-          response.status === 429 ||
-          response.status >= 500
-        ) {
+        if (BRAVE_SEARCH_RETRYABLE_STATUSES.has(response.status)) {
+          this.#balancer.coolDown(
+            `${userId}:${workspaceId}:brave_search`,
+            credential.id,
+          );
+          continue;
+        }
+
+        if (response.status >= 500) {
           continue;
         }
 

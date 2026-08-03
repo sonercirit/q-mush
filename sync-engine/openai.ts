@@ -19,6 +19,7 @@ import {
 } from "./oauth.ts";
 import { readOpenAiOAuthCredential } from "./openai-credential.ts";
 import { createApiKeyMetadataReader } from "./provider-credentials.ts";
+import { ProviderCredentialRejectionError } from "./provider-error.ts";
 import {
   createProviderIntegration,
   readProviderIntegrationConfiguration,
@@ -161,6 +162,28 @@ async function prepareCredential(
       refresh_token: stored.refresh,
     },
     "OpenAI rejected the refresh token",
+    async (response) => {
+      if (response.status === 401) {
+        return new ProviderCredentialRejectionError(
+          "OpenAI rejected the refresh token",
+          401,
+        );
+      }
+      if (response.status !== 400) return undefined;
+      let body: unknown;
+      try {
+        body = await response.json();
+      } catch {
+        return undefined;
+      }
+      const code = isRecord(body) ? body["error"] : undefined;
+      return code === "invalid_grant" || code === "invalid_client"
+        ? new ProviderCredentialRejectionError(
+            "OpenAI rejected the refresh token",
+            400,
+          )
+        : undefined;
+    },
   );
   return readTokenSecret(runtime, tokens, stored.refresh);
 }

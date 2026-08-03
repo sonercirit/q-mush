@@ -73,6 +73,7 @@ export function SessionProviderUpdateEditor(
         model === next.model ? next.openRouterProviderTag : null,
     };
     setDraft(selected);
+    discoveredSelection = selected;
     if (selected.provider === "openrouter" && model.length > 0) {
       setProviders(
         await props.onDiscoverProviders(selected.credentialId, model),

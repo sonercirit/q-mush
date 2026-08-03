@@ -1,5 +1,6 @@
 import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
 import type { AppDatabase } from "../shared/database.ts";
+import { isBalancedCredentialId } from "../shared/provider-credential-pool.ts";
 import type {
   ProviderCredentialAccess,
   ProviderId,
@@ -9,6 +10,7 @@ import type {
   RestartHandoffOperation,
 } from "../shared/session-model.ts";
 import { createJsonResponse } from "./http.ts";
+import type { ModelCredentialPool } from "./model-credential-pool.ts";
 import {
   sessionToolOutput,
   type SpawnSessionToolInput,
@@ -48,11 +50,13 @@ export interface SessionAgentActionDependencies {
     input: SpawnSessionToolInput,
     credential: ProviderCredentialAccess,
     userId: string,
+    rejectCredentialErrors: boolean,
   ) => Promise<SessionAgentMetadata>;
   readonly readCredential: (
     userId: string,
     selection: SessionAgentCredentialSelection,
   ) => Promise<ProviderCredentialAccess | undefined>;
+  readonly modelCredentialPool?: ModelCredentialPool;
   readonly notify: (userId: string, sessionId: string) => void;
   readonly runnerIsAvailable: (
     userId: string,
@@ -154,6 +158,13 @@ export async function spawnAgentSession(options: {
     return sessionToolOutput({ error: "parent_session_unavailable" });
   }
 
+  const selection = { ...options.input, workspaceId: parent.workspaceId };
+  const pool = options.dependencies.modelCredentialPool;
+  const balanced = isBalancedCredentialId(
+    selection.provider,
+    selection.credentialId,
+  );
+
   async function enqueue(
     input: SpawnSessionToolInput,
     credential: ProviderCredentialAccess,
@@ -163,6 +174,7 @@ export async function spawnAgentSession(options: {
       input,
       credential,
       options.userId,
+      balanced,
     );
     const created = options.dependencies.store.create(
       {
@@ -217,7 +229,32 @@ export async function spawnAgentSession(options: {
     }
     return notifiedResponse("spawned");
   }
-  const selection = { ...options.input, workspaceId: parent.workspaceId };
+  if (pool !== undefined && balanced) {
+    const credentials = await pool.candidates(options.userId, selection);
+    if (credentials.length === 0) {
+      return responseToolOutput(
+        createJsonResponse({ error: "credential_unavailable" }, 409),
+      );
+    }
+    for (const credential of credentials) {
+      try {
+        return await responseToolOutput(
+          await enqueue(
+            { ...options.input, credentialId: credential.id },
+            credential,
+            parent.workspaceId,
+          ),
+        );
+      } catch (error) {
+        if (!pool.reject(options.userId, selection, credential.id, error)) {
+          throw error;
+        }
+      }
+    }
+    return responseToolOutput(
+      createJsonResponse({ error: "credential_unavailable" }, 409),
+    );
+  }
   const response = await options.dependencies.withCredential(
     options.userId,
     selection,
