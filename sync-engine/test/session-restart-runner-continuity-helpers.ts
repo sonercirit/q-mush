@@ -27,12 +27,23 @@ const RUNNER_METADATA = {
   platform: "linux",
 } as const;
 
+const RUNNER_PROCESS_NONCE = "session-test-process";
 type SessionSetup = ReturnType<typeof connectedSessionSetup>;
 
 export function durableSessionRunnerReceipt(
   setup: SessionSetup,
   restartId?: string,
 ): string {
+  if (
+    !setup.sessions.deliverRunnerCommands(
+      RUNNER_ID,
+      RUNNER_PROCESS_NONCE,
+      () => true,
+      () => true,
+    )
+  ) {
+    throw new Error("The connected runner process identity was unavailable");
+  }
   const retained = setup.runners.preflightRegistration(
     RUNNER_TOKEN,
     RUNNER_METADATA,
@@ -75,6 +86,7 @@ export function reconnectDurableSessionRunner(
               }),
             }),
         ...(restartId === undefined ? {} : { restartId }),
+        processNonce: RUNNER_PROCESS_NONCE,
       },
     ),
   );

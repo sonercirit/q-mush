@@ -207,9 +207,24 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
 
   deliverRunnerCommands: DeliverRunnerCommands = (
     runnerId,
+    processNonce,
     deliver,
+    deliverCancellation,
     connectionGeneration,
   ) => {
+    const sameProcess = this.resources.broker.registerRunnerProcess(
+      runnerId,
+      processNonce,
+    );
+    if (
+      sameProcess &&
+      !this.resources.broker.deliverCancellationTombstones(
+        runnerId,
+        deliverCancellation,
+      )
+    ) {
+      return false;
+    }
     let delivered = true;
     this.resources.broker.deliverQueued(
       runnerId,
@@ -229,6 +244,10 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
 
   replaceRunnerConnection(runnerId: string, replacedGeneration: number): void {
     this.resources.broker.replaceRunnerConnection(runnerId, replacedGeneration);
+  }
+
+  acknowledgeRunnerCancellation(runnerId: string, commandId: string): boolean {
+    return this.resources.broker.acknowledgeCancellation(runnerId, commandId);
   }
 
   drain(): Promise<void> {

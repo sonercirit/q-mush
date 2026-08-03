@@ -177,11 +177,19 @@ export function finishRunnerOperational(
     options.hub.currentRunner(runner.id) === socket
       ? options.sendCommand(socket, command)
       : false;
+  const deliverCancellation = (commandId: string) =>
+    data.usable &&
+    options.hub.runnerIsCurrent(runner.id, socket) &&
+    options.hub.currentRunner(runner.id) === socket
+      ? safeSend(socket, JSON.stringify({ commandId, type: "cancel" }))
+      : false;
   let delivered = false;
   try {
     delivered = options.sessions.deliverRunnerCommands(
       runner.id,
+      pending.processNonce,
       deliver,
+      deliverCancellation,
       connectionGeneration,
     );
   } catch {

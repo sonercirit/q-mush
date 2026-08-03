@@ -181,6 +181,25 @@ describe("spawned session report generation fencing", () => {
     closeSetup(setup);
   });
 
+  test("includes a completed child whose runner was removed when its parent is runnable", () => {
+    const setup = spawnedChildSetup();
+    setup.database
+      .update(agentSessions)
+      .set({ runnerRequired: true })
+      .where(eq(agentSessions.id, setup.childId))
+      .run();
+
+    expect(
+      setup.store.pendingSpawnedSessions().map(({ detail }) => detail.id),
+    ).toContain(setup.childId);
+    expectReportClaimed(setup);
+    closeAfterParentAssertion(setup, (parent) => {
+      expect(parent?.pendingInputs).toMatchObject([
+        expectedPendingReport(setup),
+      ]);
+    });
+  });
+
   test("persists and claims the current parent callback", () => {
     const setup = spawnedChildSetup();
     const childDetail = setup.store.get(TEST_USER_ID, setup.childId);

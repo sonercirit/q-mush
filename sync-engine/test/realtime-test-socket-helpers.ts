@@ -100,6 +100,7 @@ export type RunnerConnectOptions = Readonly<{
   activationReceipt?: string;
   /** A caller claim retained only to prove it is not encoded on the wire. */
   claimedActivationReceiptPhase?: "finalized" | "prepared";
+  processNonce?: string;
   restartId?: string;
 }>;
 
@@ -196,6 +197,7 @@ export function reconnectRunnerRealtimeTestSocket(
     true,
     options.activationReceipt,
     options.claimedActivationReceiptPhase,
+    options.processNonce,
   );
   return socket;
 }
@@ -395,6 +397,7 @@ export function connectedRecordedRunnerRealtimeTestSocket(
     false,
     options.activationReceipt,
     options.claimedActivationReceiptPhase,
+    options.processNonce,
   );
   finishRunnerRegistration(realtime, connection.socket);
   return connection;
@@ -583,12 +586,14 @@ export function sendRunnerConnect(
   finish = true,
   activationReceipt?: string,
   claimedActivationReceiptPhase: "finalized" | "prepared" = "finalized",
+  processNonce?: string,
 ): unknown {
   const connected = sendRunnerConnectProposal(handler, socket, machineId, {
     ...(activationReceipt === undefined
       ? {}
       : { activationReceipt, claimedActivationReceiptPhase }),
     ...optionalRunnerRestartId(restartId),
+    ...(processNonce === undefined ? {} : { processNonce }),
   });
 
   if (

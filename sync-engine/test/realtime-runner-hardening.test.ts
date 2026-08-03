@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import { RUNNER_REALTIME_PATH, RUNNERS_PATH } from "../../shared/routes.ts";
+import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 import { runnerRegistrationRejectedMessage } from "../../shared/runner-realtime-protocol.ts";
 import {
   createAuthenticatedRequest,
@@ -137,7 +138,7 @@ test("conflicting in-memory and durable restart gates reject every reconnect", a
   const { recovered, resumed } = restartRecords();
   const durableGate = unsetDurableGate();
   const realtime = connectedRunnerRealtimeTestIntegration({
-    deliverRunnerCommands: (_runnerId, deliver) =>
+    deliverRunnerCommands: (_runnerId, _processNonce, deliver) =>
       durableGate.restartId === undefined
         ? true
         : deliver(runnerCommand("conflict-command", "session-conflict")),
@@ -312,7 +313,7 @@ test("queued command delivery failure fences the replacement and preserves resta
   const disconnected: string[] = [];
   const { recovered, resumed } = restartRecords();
   const realtime = connectedRunnerRealtimeTestIntegration({
-    deliverRunnerCommands: (_runnerId, deliver) =>
+    deliverRunnerCommands: (_runnerId, _processNonce, deliver) =>
       deliver(runnerCommand("queued-command", "session-1")),
     pendingRunnerRestart: () => runnerRestartGate("restart-delivery"),
     ...realtimeRunnerLifecycle({
@@ -449,6 +450,61 @@ test("queued commands remain hidden until activation", () => {
   expectCount(deliveries, 0);
   acknowledgeOperationalRunnerRegistration(realtime.websocket, pending.socket);
   expect(deliveries).toBe(1);
+});
+
+test("fresh process nonce fails disconnected commands before queued delivery", async () => {
+  const delivered: string[] = [];
+  const rejected: unknown[] = [];
+  const broker = new RunnerCommandBroker({
+    commandId: () => "fresh-process-command",
+    deliver: () => true,
+  });
+  broker.registerRunnerProcess("runner-1", "process-old");
+  const result = broker.dispatch({
+    arguments: {},
+    executionEnvironment: "bare_metal",
+    runnerId: "runner-1",
+    sessionId: "session-fresh-process",
+    tool: "read",
+    workingDirectory: "/workspace",
+  });
+  void result.catch((error: unknown) => {
+    rejected.push(error);
+  });
+  broker.disconnectRunner("runner-1");
+  const realtime = connectedRunnerRealtimeTestIntegration({
+    deliverRunnerCommands: (
+      runnerId,
+      processNonce,
+      deliver,
+      _deliverCancellation,
+      generation,
+    ) => {
+      broker.registerRunnerProcess(runnerId, processNonce);
+      broker.deliverQueued(
+        runnerId,
+        (command) => {
+          delivered.push(command.id);
+          return deliver(command);
+        },
+        generation,
+      );
+      return true;
+    },
+  });
+
+  connectedRecordedRunnerRealtimeTestSocket(realtime, "machine-fresh-process", {
+    processNonce: "process-fresh",
+  });
+  await result.catch(() => undefined);
+
+  expect(delivered).toEqual([]);
+  expect(rejected).toEqual([
+    expect.objectContaining({
+      message: "The runner process restarted before the command returned",
+      name: "RunnerDisconnectedError",
+    }),
+  ]);
 });
 
 test("thrown queued delivery rolls authority back to the previous socket", () => {

@@ -309,6 +309,7 @@ export type RealtimeSessionOverrides = Partial<
     | "pendingRunnerRestart"
     | "realtimeCommands"
     | "replaceRunnerConnection"
+    | "acknowledgeRunnerCancellation"
     | "runnerConnected"
     | "runnerConnectionGeneration"
     | "runnerDisconnected"
@@ -345,6 +346,7 @@ export function realtimeTestSessions(
     realtimeCommands: new RealtimeTestSessionCommands(),
     reassign: () => Promise.resolve(new Response()),
     replaceRunnerConnection: () => undefined,
+    acknowledgeRunnerCancellation: () => false,
     runnerConnected: () => undefined,
     runnerConnectionGeneration: () => 0,
     runnerDisconnected: () => undefined,

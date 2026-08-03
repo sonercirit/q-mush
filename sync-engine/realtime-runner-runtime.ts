@@ -24,6 +24,7 @@ export interface PendingRunnerRegistration {
   lifecycleCallbackCompleted: boolean;
   readonly metadata: RunnerMetadata;
   operationalSent: boolean;
+  readonly processNonce: string | undefined;
   preparedReceipt: string | undefined;
   previousAuthority: RealtimeSocket | undefined;
   readonly proposal: RunnerRegistrationProposal | undefined;

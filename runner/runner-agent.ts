@@ -39,6 +39,7 @@ const HEARTBEAT_INTERVAL_MILLISECONDS = 15_000;
 const RETRY_INTERVAL_MILLISECONDS = 5_000;
 const UPDATE_INTERVAL_MILLISECONDS = 5 * 60_000;
 const TOKEN_PATTERN = /^qmr_[A-Za-z\d_-]{8,200}$/u;
+const RUNNER_PROCESS_NONCE = randomBytes(32).toString("base64url");
 const runnerUpdateTrigger = new RunnerUpdateTrigger(Q_MUSH_RUNNER_VERSION);
 const runnerRestart = new RunnerRestartCoordinator({
   restartId: () => randomBytes(32).toString("base64url"),
@@ -269,7 +270,7 @@ function bindOperationalSocket(
       message["type"] === "cancel" &&
       typeof message["commandId"] === "string"
     ) {
-      active.cancel(message["commandId"]);
+      active.cancel(connected, message["commandId"]);
     } else if (
       message["type"] === "result_received" &&
       typeof message["commandId"] === "string"
@@ -286,6 +287,7 @@ async function connectRunner(
   configurationPath: string,
   startupRestart: RunnerStartupRestart,
   installOperationalHandlers: (socket: WebSocket) => void,
+  onOperational: (socket: WebSocket) => void,
 ): Promise<WebSocket> {
   const metadata = {
     architecture: arch(),
@@ -313,6 +315,7 @@ async function connectRunner(
             ...(startupConnection.restartId === undefined
               ? {}
               : { restartId: startupConnection.restartId }),
+            processNonce: RUNNER_PROCESS_NONCE,
           }),
         );
       } catch {
@@ -336,6 +339,7 @@ async function connectRunner(
           }
         },
       );
+      onOperational(socket);
       console.log(`Q Mush runner connected as ${metadata.name}.`);
       return socket;
     } catch (error) {
@@ -484,6 +488,9 @@ async function maintainConnection(
     configurationPath,
     startupRestart,
     installOperationalHandlers,
+    (connected) => {
+      active.connected(connected);
+    },
   );
   let socketFailure = observeOperationalRunnerSocket(socket);
   let initialUpdatePending = true;
@@ -500,6 +507,9 @@ async function maintainConnection(
         configurationPath,
         startupRestart,
         installOperationalHandlers,
+        (connected) => {
+          active.connected(connected);
+        },
       );
       socketFailure = observeOperationalRunnerSocket(socket);
     }

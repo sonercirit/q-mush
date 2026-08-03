@@ -17,6 +17,7 @@ export interface RunnerConnectMetadata {
 
 export interface RunnerConnectOptions {
   readonly activationReceipt?: string;
+  readonly processNonce?: string;
   readonly restartId?: string;
 }
 
@@ -88,6 +89,7 @@ export function runnerConnectMessage(
   return JSON.stringify({
     ...metadata,
     ...optionalObjectEntry("activationReceipt", options.activationReceipt),
+    ...optionalObjectEntry("processNonce", options.processNonce),
     ...optionalObjectEntry("restartId", options.restartId),
     type: "connect",
   });

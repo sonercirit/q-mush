@@ -165,7 +165,6 @@ export function pendingSpawnedSessions(
         }),
         isNotNull(agentSessions.parentSessionId),
         isNotNull(agentSessions.parentExecutionGeneration),
-        eq(agentSessions.runnerRequired, false),
       ),
     )
     .orderBy(asc(agentSessions.createdAt), asc(agentSessions.id))

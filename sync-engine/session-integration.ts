@@ -12,7 +12,9 @@ import type { DurableRunnerRestartGate } from "./session-restart-coordinator.ts"
 
 export type DeliverRunnerCommands = (
   runnerId: string,
+  processNonce: string | undefined,
   deliver: (command: RunnerToolCommand) => boolean,
+  deliverCancellation: (commandId: string) => boolean,
   connectionGeneration?: number,
 ) => boolean;
 
@@ -30,6 +32,7 @@ export interface SessionIntegration extends SessionDetailReader {
   deliverRunnerCommands: DeliverRunnerCommands;
   runnerConnectionGeneration(runnerId: string): number;
   replaceRunnerConnection(runnerId: string, replacedGeneration: number): void;
+  acknowledgeRunnerCancellation(runnerId: string, commandId: string): boolean;
   runnerOperational(runnerId: string, restartId?: string): void;
   directories(request: Request, runnerId: string): Promise<Response>;
   drain(): Promise<void>;

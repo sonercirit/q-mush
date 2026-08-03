@@ -51,6 +51,10 @@ interface RunnerTestServerOptions {
   readonly transientRegistrationFailures?: number;
 }
 
+interface RunnerConnectRecord {
+  readonly processNonce: string | undefined;
+}
+
 function operationalSocket(
   sockets: ReadonlySet<Bun.ServerWebSocket<RunnerTestSocketData>>,
   required: keyof Pick<RunnerTestSocketData, "heartbeat" | "operational">,
@@ -60,7 +64,9 @@ function operationalSocket(
 
 function runnerServer(options: RunnerTestServerOptions = {}): Readonly<{
   readonly origin: string;
+  acknowledge(commandId: string): boolean;
   attempts(): number;
+  connections(): readonly RunnerConnectRecord[];
   disconnect(): boolean;
   registered(): boolean;
   results(): readonly Readonly<Record<string, unknown>>[];
@@ -90,6 +96,7 @@ function runnerServer(options: RunnerTestServerOptions = {}): Readonly<{
     { registrationId, type: "registration_operational" },
   ];
   let attempts = 0;
+  const connections: RunnerConnectRecord[] = [];
   const results: Readonly<Record<string, unknown>>[] = [];
   const sockets = new Set<Bun.ServerWebSocket<RunnerTestSocketData>>();
   const sendNext = (
@@ -142,6 +149,14 @@ function runnerServer(options: RunnerTestServerOptions = {}): Readonly<{
           results.push(value);
           return;
         }
+        if (value.type === "connect") {
+          connections.push({
+            processNonce:
+              "processNonce" in value && typeof value.processNonce === "string"
+                ? value.processNonce
+                : undefined,
+          });
+        }
         if (
           value.type === "connect" &&
           attempts <= (options.transientRegistrationFailures ?? 0)
@@ -167,6 +182,15 @@ function runnerServer(options: RunnerTestServerOptions = {}): Readonly<{
   const hostname = server.hostname ?? "127.0.0.1";
   return {
     attempts: () => attempts,
+    connections: () => connections,
+    acknowledge: (commandId: string) => {
+      const socket = operationalSocket(sockets, "operational");
+      if (socket === undefined) {
+        return false;
+      }
+      socket.send(JSON.stringify({ commandId, type: "result_received" }));
+      return true;
+    },
     disconnect: () => {
       const socket = operationalSocket(sockets, "operational");
       if (socket === undefined) {
@@ -282,6 +306,11 @@ test("a command executes once and reports through the reconnected socket", async
     expect(await waitUntil(() => setup.server.attempts() === 2, 7_000)).toBe(
       true,
     );
+    expect(setup.server.connections()).toHaveLength(2);
+    expect(setup.server.connections()[0]?.processNonce).toBeDefined();
+    expect(setup.server.connections()[1]?.processNonce).toBe(
+      setup.server.connections()[0]?.processNonce,
+    );
     expect(
       await waitUntil(() => setup.server.results().length === 1, 2_000),
     ).toBe(true);
@@ -291,6 +320,7 @@ test("a command executes once and reports through the reconnected socket", async
       type: "result",
     });
     expect(readFileSync(auditPath, "utf8")).toBe("x");
+    expect(setup.server.acknowledge(command.id)).toBe(true);
   } finally {
     await cleanupProcessTest(setup);
     if (existsSync(directory)) {

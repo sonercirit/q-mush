@@ -5,12 +5,25 @@ import {
   type RunnerWritableSocket,
 } from "./runner-socket-send.ts";
 
+const COMPLETED_EXECUTION_TTL_MILLISECONDS = 24 * 60 * 60_000;
+const MAXIMUM_COMPLETED_EXECUTIONS = 1_000;
+
 interface CommandExecution {
   readonly command: RunnerToolCommand;
+  completedAt: number | undefined;
   readonly controller: AbortController;
   result: Readonly<Record<string, unknown>> | undefined;
   socket: RunnerWritableSocket;
 }
+
+interface RunnerCommandExecutionsOptions {
+  readonly completedExecutionTtlMs?: number;
+  readonly log?: (message: string) => void;
+  readonly maximumCompletedExecutions?: number;
+  readonly now?: () => number;
+}
+
+type CommandExecutor = Pick<RunnerCommandExecutor, "executeResult">;
 
 function sendCommandMessage(
   execution: CommandExecution,
@@ -29,12 +42,36 @@ function commandsMatch(
   return JSON.stringify(first) === JSON.stringify(second);
 }
 
+function requirePositiveInteger(value: number, name: string): number {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new RangeError(`${name} must be positive`);
+  }
+  return value;
+}
+
 export class RunnerCommandExecutions {
   readonly #active = new Map<string, CommandExecution>();
-  readonly #commands: RunnerCommandExecutor;
+  readonly #commands: CommandExecutor;
+  readonly #completedExecutionTtlMs: number;
+  readonly #log: (message: string) => void;
+  readonly #maximumCompletedExecutions: number;
+  readonly #now: () => number;
 
-  constructor(commands: RunnerCommandExecutor) {
+  constructor(
+    commands: CommandExecutor,
+    options: RunnerCommandExecutionsOptions = {},
+  ) {
     this.#commands = commands;
+    this.#completedExecutionTtlMs = requirePositiveInteger(
+      options.completedExecutionTtlMs ?? COMPLETED_EXECUTION_TTL_MILLISECONDS,
+      "The completed runner execution TTL",
+    );
+    this.#log = options.log ?? console.error;
+    this.#maximumCompletedExecutions = requirePositiveInteger(
+      options.maximumCompletedExecutions ?? MAXIMUM_COMPLETED_EXECUTIONS,
+      "The completed runner execution limit",
+    );
+    this.#now = options.now ?? Date.now;
   }
 
   #attach(
@@ -58,7 +95,47 @@ export class RunnerCommandExecutions {
     }
   }
 
+  #discardCompleted(execution: CommandExecution, reason: string): void {
+    this.#forget(execution);
+    this.#log(
+      `Q Mush discarded unacknowledged result for runner command ${execution.command.id} ${reason}.`,
+    );
+  }
+
+  #prune(): void {
+    const now = this.#now();
+    const completed = [...this.#active.values()]
+      .filter(
+        (execution): execution is CommandExecution & { completedAt: number } =>
+          execution.result !== undefined && execution.completedAt !== undefined,
+      )
+      .sort((first, second) => first.completedAt - second.completedAt);
+    for (const execution of completed) {
+      if (now - execution.completedAt >= this.#completedExecutionTtlMs) {
+        this.#discardCompleted(execution, "after its retention TTL elapsed");
+      }
+    }
+    const retained = completed.filter(
+      (execution) => this.#active.get(execution.command.id) === execution,
+    );
+    const excess = retained.length - this.#maximumCompletedExecutions;
+    for (const execution of retained.slice(0, Math.max(excess, 0))) {
+      this.#discardCompleted(execution, "after reaching the retention limit");
+    }
+  }
+
+  connected(socket: RunnerWritableSocket): void {
+    this.#prune();
+    for (const execution of this.#active.values()) {
+      execution.socket = socket;
+      if (execution.result !== undefined) {
+        sendCommandMessage(execution, execution.result);
+      }
+    }
+  }
+
   execute(socket: RunnerWritableSocket, command: RunnerToolCommand): void {
+    this.#prune();
     const existing = this.#active.get(command.id);
     if (existing !== undefined) {
       this.#attach(socket, command, existing);
@@ -68,6 +145,7 @@ export class RunnerCommandExecutions {
     const controller = new AbortController();
     const execution: CommandExecution = {
       command,
+      completedAt: undefined,
       controller,
       result: undefined,
       socket,
@@ -86,23 +164,24 @@ export class RunnerCommandExecutions {
       .then((result) => {
         const message = { ...result, type: "result" };
         if (!controller.signal.aborted) {
+          execution.completedAt = this.#now();
           execution.result = message;
           sendCommandMessage(execution, message);
+          this.#prune();
         }
       });
   }
 
-  #command(commandId: string): CommandExecution | undefined {
-    return this.#active.get(commandId);
-  }
-
-  cancel(commandId: string): void {
-    const execution = this.#command(commandId);
-    if (execution === undefined) {
-      return;
+  cancel(socket: RunnerWritableSocket, commandId: string): void {
+    const execution = this.#active.get(commandId);
+    if (execution !== undefined) {
+      execution.controller.abort();
+      this.#forget(execution);
     }
-    execution.controller.abort();
-    this.#forget(execution);
+    sendOpenRunnerSocketMessage(socket, {
+      commandId,
+      type: "cancellation_received",
+    });
   }
 
   resultReceived(commandId: string): void {

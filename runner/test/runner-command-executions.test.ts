@@ -1,0 +1,155 @@
+import { expect, test, vi } from "vitest";
+import { RunnerCommandExecutions } from "../../runner/runner-command-executions.ts";
+import type { RunnerCommandExecutor } from "../../runner/runner-command.ts";
+import type { RunnerWritableSocket } from "../../runner/runner-socket-send.ts";
+import { isRecord } from "../../shared/auth-model.ts";
+import type {
+  RunnerCommandResult,
+  RunnerToolCommand,
+} from "../../shared/runner-command-broker.ts";
+
+function command(id: string): RunnerToolCommand {
+  return {
+    arguments: {},
+    executionEnvironment: "bare_metal",
+    id,
+    sessionId: "session-1",
+    tool: "read",
+    workingDirectory: "/workspace",
+  };
+}
+
+function controlledExecutor() {
+  const completions = new Map<string, (result: RunnerCommandResult) => void>();
+  const aborted: string[] = [];
+  const calls: string[] = [];
+  class ControlledExecutor implements Pick<
+    RunnerCommandExecutor,
+    "executeResult"
+  > {
+    executeResult(
+      selected: RunnerToolCommand,
+      signal?: AbortSignal,
+    ): Promise<RunnerCommandResult> {
+      calls.push(selected.id);
+      signal?.addEventListener(
+        "abort",
+        () => {
+          aborted.push(selected.id);
+        },
+        { once: true },
+      );
+      return new Promise<RunnerCommandResult>((resolve) => {
+        completions.set(selected.id, resolve);
+      });
+    }
+  }
+  return { aborted, calls, completions, executor: new ControlledExecutor() };
+}
+
+function socket() {
+  const sent: Readonly<Record<string, unknown>>[] = [];
+  const writable: RunnerWritableSocket = {
+    close: vi.fn(),
+    readyState: WebSocket.OPEN,
+    send: (message) => {
+      if (typeof message !== "string") {
+        throw new Error("The runner execution test received binary data");
+      }
+      const parsed: unknown = JSON.parse(message);
+      if (!isRecord(parsed)) {
+        throw new Error("The runner execution test received invalid JSON");
+      }
+      sent.push(parsed);
+    },
+  };
+  return { sent, writable };
+}
+
+async function flush(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+test("replays a completed result after reconnect until the engine acknowledges it", async () => {
+  const controlled = controlledExecutor();
+  const first = socket();
+  const second = socket();
+  const executions = new RunnerCommandExecutions(controlled.executor);
+  const selected = command("lost-ack-result");
+
+  executions.execute(first.writable, selected);
+  controlled.completions.get(selected.id)?.({
+    output: "complete",
+    state: "completed",
+  });
+  await flush();
+  executions.connected(second.writable);
+
+  expect(controlled.calls).toEqual([selected.id]);
+  expect(second.sent).toContainEqual({
+    commandId: selected.id,
+    output: "complete",
+    state: "completed",
+    type: "result",
+  });
+  executions.resultReceived(selected.id);
+  second.sent.length = 0;
+  executions.connected(second.writable);
+  expect(second.sent).toEqual([]);
+});
+
+test("acknowledges a cancellation tombstone and discards the surviving execution", () => {
+  const controlled = controlledExecutor();
+  const connected = socket();
+  const executions = new RunnerCommandExecutions(controlled.executor);
+  const selected = command("disconnect-gap-cancel");
+
+  executions.execute(connected.writable, selected);
+  executions.cancel(connected.writable, selected.id);
+
+  expect(controlled.aborted).toEqual([selected.id]);
+  expect(connected.sent.at(-1)).toEqual({
+    commandId: selected.id,
+    type: "cancellation_received",
+  });
+  executions.execute(connected.writable, selected);
+  expect(controlled.calls).toEqual([selected.id, selected.id]);
+});
+
+test("drops old unacknowledged results at the bounded retention cap with loud logging", async () => {
+  const controlled = controlledExecutor();
+  const connected = socket();
+  const logs: string[] = [];
+  const executions = new RunnerCommandExecutions(controlled.executor, {
+    log: (message) => logs.push(message),
+    maximumCompletedExecutions: 1,
+  });
+
+  executions.execute(connected.writable, command("retained-1"));
+  controlled.completions.get("retained-1")?.({
+    output: "one",
+    state: "completed",
+  });
+  await flush();
+  executions.execute(connected.writable, command("retained-2"));
+  controlled.completions.get("retained-2")?.({
+    output: "two",
+    state: "completed",
+  });
+  await flush();
+  connected.sent.length = 0;
+  executions.connected(connected.writable);
+
+  expect(logs).toEqual([
+    expect.stringContaining("retained-1 after reaching the retention limit"),
+  ]);
+  expect(connected.sent).toEqual([
+    {
+      commandId: "retained-2",
+      output: "two",
+      state: "completed",
+      type: "result",
+    },
+  ]);
+});
