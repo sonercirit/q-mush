@@ -89,6 +89,13 @@ export type SessionAutoCompactionAction = (
   workspaceId: string,
 ) => AgentSessionDetail;
 
+export type SessionContextTokenCapAction = (
+  user: AuthenticatedUser,
+  sessionId: string,
+  userContextTokenCap: number | null,
+  workspaceId: string,
+) => AgentSessionDetail;
+
 export type SessionStopAction = (
   user: AuthenticatedUser,
   sessionId: string,
@@ -146,6 +153,7 @@ export interface SessionRealtimeCommands extends SessionDetailReader {
     workspaceId: string,
   ): AgentSessionDetail;
   readonly setAutoCompactionForUser: SessionAutoCompactionAction;
+  readonly setContextTokenCapForUser: SessionContextTokenCapAction;
   stopForUser: SessionStopAction;
   summariesForUser(
     userId: string,
@@ -179,6 +187,19 @@ function readAutoCompaction(
     throw new RealtimeCommandFailure("invalid_request");
   }
   return autoCompact;
+}
+
+function readContextTokenCap(
+  payload: Readonly<Record<string, unknown>>,
+): number | null {
+  const cap = payload["userContextTokenCap"];
+  if (
+    cap !== null &&
+    (typeof cap !== "number" || !Number.isSafeInteger(cap) || cap <= 0)
+  ) {
+    throw new RealtimeCommandFailure("invalid_request");
+  }
+  return cap;
 }
 
 function readCascadeStop(payload: Readonly<Record<string, unknown>>): boolean {
@@ -351,6 +372,13 @@ export async function executeSessionRealtimeCommand(
         user,
         readSessionId(payload),
         readAutoCompaction(payload),
+        workspaceId,
+      );
+    case SESSION_REALTIME_OPERATIONS.setContextTokenCap:
+      return sessions.setContextTokenCapForUser(
+        user,
+        readSessionId(payload),
+        readContextTokenCap(payload),
         workspaceId,
       );
     case SESSION_REALTIME_OPERATIONS.stop:

@@ -124,6 +124,18 @@ export function stopSessionMutation(
     : { ...mutation, payload: { cascade, sessionId } };
 }
 
+export function contextTokenCapMutation(
+  sessionId: string,
+  userContextTokenCap: number | null,
+): SessionMutation {
+  return {
+    action: "change the context token cap",
+    operation: SESSION_REALTIME_OPERATIONS.setContextTokenCap,
+    payload: { sessionId, userContextTokenCap },
+    pending: "compacting",
+  };
+}
+
 export function compactionModeMutation(
   sessionId: string,
   autoCompact: boolean,
@@ -191,6 +203,14 @@ function validSessionMutationPayload(mutation: SessionMutation): boolean {
       return (
         validOptionalImagePayload(payload, 2) &&
         typeof payload["prompt"] === "string"
+      );
+    case SESSION_REALTIME_OPERATIONS.setContextTokenCap:
+      return (
+        Object.keys(payload).length === 2 &&
+        (payload["userContextTokenCap"] === null ||
+          (typeof payload["userContextTokenCap"] === "number" &&
+            Number.isSafeInteger(payload["userContextTokenCap"]) &&
+            payload["userContextTokenCap"] > 0))
       );
     case SESSION_REALTIME_OPERATIONS.setAutoCompaction:
       return (
@@ -285,6 +305,10 @@ function mutationIsReconciled(
         )
       );
     }
+    case SESSION_REALTIME_OPERATIONS.setContextTokenCap:
+      return (
+        detail.userContextTokenCap === mutation.payload["userContextTokenCap"]
+      );
     case SESSION_REALTIME_OPERATIONS.setAutoCompaction:
       return detail.autoCompact === mutation.payload["autoCompact"];
     case SESSION_REALTIME_OPERATIONS.stop:

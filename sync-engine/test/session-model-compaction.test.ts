@@ -145,6 +145,28 @@ describe("session models and compaction", () => {
     setup.database.$client.close();
   });
 
+  test("rejects caps above the discovered model limit during creation", async () => {
+    const setup = compactionSetup(new ScriptedAgentModel([]), "Cap validation");
+    const request = createSessionRequest();
+    const payload: unknown = await request.json();
+    const response = await setup.sessions.collection(
+      createAuthenticatedRequest(
+        `${SESSIONS_PATH}?workspaceId=${encodeURIComponent(TEST_WORKSPACE_ID)}`,
+        {
+          ...(payload as Record<string, unknown>),
+          userContextTokenCap: 100_001,
+        },
+        "POST",
+      ),
+    );
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "invalid_context_token_cap",
+      message: expect.stringContaining("cannot exceed the model limit"),
+    });
+    closeSessionTestDatabase(setup.database);
+  });
+
   test("updates compaction mode and manually compacts an idle session", async () => {
     const model = new ScriptedAgentModel([
       {

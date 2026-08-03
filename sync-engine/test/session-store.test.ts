@@ -285,6 +285,33 @@ describe("session store", () => {
     database.$client.close();
   });
 
+  test("applies and clears an effective context token cap", () => {
+    const { database, store } = createStore();
+    createTestSession(store);
+
+    const capped = store.setContextTokenCap(
+      TEST_USER_ID,
+      SESSION_ID,
+      120_000,
+      TEST_NOW + 1,
+    );
+    expect(capped).toMatchObject({
+      maxContextTokens: 120_000,
+      userContextTokenCap: 120_000,
+    });
+    expect(() =>
+      store.setContextTokenCap(TEST_USER_ID, SESSION_ID, 200_001, TEST_NOW + 2),
+    ).toThrow("cannot exceed the model limit");
+
+    expect(
+      store.setContextTokenCap(TEST_USER_ID, SESSION_ID, null, TEST_NOW + 3),
+    ).toMatchObject({
+      maxContextTokens: 200_000,
+      userContextTokenCap: null,
+    });
+    database.$client.close();
+  });
+
   test("keeps an estimated cost basis after a provider-reported charge", () => {
     const { database, store } = runningStore();
 

@@ -47,6 +47,7 @@ import {
 import type {
   SessionAutoCompactionAction,
   SessionCancelPendingInputAction,
+  SessionContextTokenCapAction,
   SessionCreateAction,
   SessionHistoryAction,
   SessionQuestionAnswerAction,
@@ -433,6 +434,34 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
         this.#dependencies.now(),
         workspaceId,
       );
+      if (detail === undefined) {
+        throw new RealtimeCommandError("not_found");
+      }
+      this.#dependencies.notify(user.id, sessionId);
+      return detail;
+    });
+
+  setContextTokenCapForUser: SessionContextTokenCapAction = (
+    user,
+    sessionId,
+    userContextTokenCap,
+    workspaceId,
+  ) =>
+    this.#withOwnedDetail(user, sessionId, workspaceId, () => {
+      let detail: AgentSessionDetail | undefined;
+      try {
+        detail = this.#dependencies.store.setContextTokenCap(
+          user.id,
+          sessionId,
+          userContextTokenCap,
+          this.#dependencies.now(),
+          workspaceId,
+        );
+      } catch (error) {
+        throw new RealtimeCommandError(
+          error instanceof Error ? error.message : "invalid_context_token_cap",
+        );
+      }
       if (detail === undefined) {
         throw new RealtimeCommandError("not_found");
       }

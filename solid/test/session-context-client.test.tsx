@@ -18,6 +18,22 @@ function renderContext(currentContextTokens: number): string {
   return renderSessionPanelForTest(SESSION_PANEL_TEST_CONTEXT, state);
 }
 
+test("uses the effective user cap for context percentage and over-limit color", () => {
+  const state: SessionViewState = {
+    ...SESSION_PANEL_TEST_CONTEXT.state,
+    detail: {
+      ...TEST_SESSION_DETAIL,
+      currentContextTokens: 130_000,
+      maxContextTokens: 120_000,
+      userContextTokenCap: 120_000,
+    },
+    selectedId: TEST_SESSION_DETAIL.id,
+  };
+  const html = renderSessionPanelForTest(SESSION_PANEL_TEST_CONTEXT, state);
+
+  expect(html).toContain("Context: 130K / 120K (108%)");
+  expect(html).toContain("text-rose-200");
+});
 test("shows context percentage and warning colors", () => {
   const yellow = renderContext(160_000);
   const red = renderContext(180_000);

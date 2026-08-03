@@ -26,6 +26,7 @@ export interface SessionDraft {
   readonly reasoningEffort: string;
   readonly runnerId: string;
   readonly tools: readonly AgentSessionToolName[];
+  readonly userContextTokenCap: string;
   readonly workingDirectory: string;
 }
 

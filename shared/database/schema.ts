@@ -390,6 +390,7 @@ export const agentSessions = sqliteTable(
       .notNull()
       .default(0),
     maxContextTokens: integer("max_context_tokens"),
+    userContextTokenCap: integer("user_context_token_cap"),
     agentFilePath: text("agent_file_path"),
     agentFileName: text("agent_file_name"),
     agentFileContent: text("agent_file_content"),

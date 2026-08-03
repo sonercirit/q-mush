@@ -523,6 +523,7 @@ export async function runSessionAgent(
       agentCost: (step) =>
         estimateAgentStepCost(runtime.detail, step.tokenUsage),
       autoCompact: runtime.detail.autoCompact,
+      maxContextTokens: runtime.detail.maxContextTokens,
       createCompactor: models.createCompactor,
       executeTool: (call) =>
         executeAgentTool(
@@ -539,7 +540,6 @@ export async function runSessionAgent(
         : {}),
       initialMessages: messages,
       handoffRequested: stepBoundaryRequested,
-      maxContextTokens: runtime.detail.maxContextTokens,
       model: models.agent,
       now: runtime.now,
       onToolResult: (call, outcome) => {

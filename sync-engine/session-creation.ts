@@ -1,5 +1,6 @@
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
+import { contextTokenCapValidationError } from "../shared/session-context-limit.ts";
 import type {
   AgentSessionDetail,
   RestartHandoffOperation,
@@ -239,6 +240,13 @@ export function createPreparedSession(
   credential: ProviderCredentialAccess,
   metadata: PreparedSessionMetadata,
 ): Response {
+  const capError = contextTokenCapValidationError(
+    input.userContextTokenCap ?? null,
+    metadata.maxContextTokens,
+  );
+  if (capError !== undefined) {
+    return createApiError("invalid_context_token_cap", 400, capError);
+  }
   if (!dependencies.runtimes.accepts(input.runnerId)) {
     return createApiError("server_restarting", 503);
   }

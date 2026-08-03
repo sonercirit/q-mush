@@ -21,6 +21,7 @@ export const TEST_SESSION_DETAIL: AgentSessionDetail = {
   executionEnvironment: "bare_metal",
   id: "session-1",
   maxContextTokens: 200_000,
+  userContextTokenCap: null,
   messages: [],
   model: "gpt-5-codex",
   openRouterProviderTag: null,

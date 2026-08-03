@@ -94,6 +94,7 @@ export interface AgentSessionSummary {
   readonly hasOlderSegments: boolean;
   readonly id: string;
   readonly maxContextTokens: number | null;
+  readonly userContextTokenCap: number | null;
   readonly model: string;
   readonly openRouterProviderTag: string | null;
   readonly parentExecutionGeneration: number | null;

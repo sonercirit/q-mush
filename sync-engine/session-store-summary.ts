@@ -4,6 +4,7 @@ import {
 } from "../shared/agent-tools.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentSessions } from "../shared/database/schema.ts";
+import { effectiveContextTokenLimit } from "../shared/session-context-limit.ts";
 import type { AgentSessionSummary } from "../shared/session-model.ts";
 import { parseRestartHandoff } from "./session-restart-store.ts";
 import {
@@ -28,6 +29,7 @@ function storedSessionSelection() {
     activeStartedAt: agentSessions.activeStartedAt,
     agentFilePath: agentSessions.agentFilePath,
     autoCompact: agentSessions.autoCompact,
+    modelContextTokens: agentSessions.maxContextTokens,
     costBasis: agentSessions.costBasis,
     costUsd: agentSessions.costUsd,
     createdAt: agentSessions.createdAt,
@@ -38,6 +40,7 @@ function storedSessionSelection() {
     executionGeneration: agentSessions.executionGeneration,
     id: agentSessions.id,
     maxContextTokens: agentSessions.maxContextTokens,
+    userContextTokenCap: agentSessions.userContextTokenCap,
     model: agentSessions.model,
     openRouterProviderTag: agentSessions.openRouterProviderTag,
     parentExecutionGeneration: agentSessions.parentExecutionGeneration,
@@ -72,6 +75,7 @@ type StoredSessionSummary = Pick<
   | "executionGeneration"
   | "id"
   | "maxContextTokens"
+  | "userContextTokenCap"
   | "model"
   | "openRouterProviderTag"
   | "parentExecutionGeneration"
@@ -108,11 +112,18 @@ export function summarizeStoredSession(
   const {
     currentSegment,
     executionGeneration: generation,
+    maxContextTokens,
+    userContextTokenCap,
     ...summary
   } = stored;
   return {
     ...summary,
     generation,
+    maxContextTokens: effectiveContextTokenLimit(
+      maxContextTokens,
+      userContextTokenCap,
+    ),
+    userContextTokenCap,
     hasOlderSegments: currentSegment > 0,
     activeStartedAt: stored.activeStartedAt?.getTime() ?? null,
     createdAt: stored.createdAt.getTime(),

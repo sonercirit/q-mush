@@ -49,6 +49,7 @@ const DRAFT: SessionDraft = {
   reasoningEffort: "",
   runnerId: "runner-1",
   tools: AGENT_SESSION_TOOL_NAMES,
+  userContextTokenCap: "",
   workingDirectory: ".",
 };
 

@@ -120,14 +120,22 @@ function metadataUpdatesAreComplete(
 }
 
 function applyMetadataUpdates(
-  transaction: Pick<AppDatabase, "update">,
+  transaction: Pick<AppDatabase, "select" | "update">,
   updates: readonly SessionCredentialMetadataUpdate[],
 ): void {
   for (const update of updates) {
+    const current = transaction
+      .select({ cap: agentSessions.userContextTokenCap })
+      .from(agentSessions)
+      .where(eq(agentSessions.id, update.id))
+      .get();
     transaction
       .update(agentSessions)
       .set({
-        maxContextTokens: update.maxContextTokens,
+        maxContextTokens:
+          current?.cap === null || current?.cap === undefined
+            ? update.maxContextTokens
+            : Math.min(current.cap, update.maxContextTokens ?? current.cap),
         providerPricing: serializeProviderPricing(update.providerPricing),
       })
       .where(eq(agentSessions.id, update.id))

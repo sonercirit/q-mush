@@ -17,6 +17,7 @@ import type {
 import { createAskQuestionsPersistence } from "./ask-questions-persistence.ts";
 import { AskQuestionsStore } from "./ask-questions-store.ts";
 import { CurrentSessionStore } from "./session-current-store.ts";
+import { updateStoredSessionContextTokenCap } from "./session-context-limit-store.ts";
 import {
   sessionExecutionIsCurrent,
   type SessionQueueAuthorization,
@@ -419,6 +420,23 @@ export class SessionStore {
       sessionId,
       userId,
       workingDirectory,
+    });
+  }
+  setContextTokenCap(
+    userId: string,
+    sessionId: string,
+    userContextTokenCap: number | null,
+    now: number,
+    workspaceId?: string,
+  ): AgentSessionDetail | undefined {
+    return updateStoredSessionContextTokenCap({
+      database: this.#database,
+      now,
+      read: () => this.get(userId, sessionId, workspaceId),
+      sessionId,
+      userContextTokenCap,
+      userId,
+      ...(workspaceId === undefined ? {} : { workspaceId }),
     });
   }
   setAutoCompact(

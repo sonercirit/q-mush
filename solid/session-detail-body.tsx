@@ -19,6 +19,8 @@ import {
   CompactionControls,
   sessionContextClasses,
 } from "./session-context-client.tsx";
+import { SessionContextTokenCapDialog } from "./session-context-token-cap-dialog.tsx";
+import { SessionContextTokenCapEditor } from "./session-context-token-cap-editor.tsx";
 import type { LoadedSessionDetailViewProps } from "./session-detail-view-props.ts";
 import { SESSION_EDITOR_GROUP_CLASSES } from "./session-editor-client.tsx";
 import { SessionForkEditor } from "./session-fork-client.tsx";
@@ -122,6 +124,10 @@ export function SessionDetailBody(props: {
   const [stopDialogChildCount, setStopDialogChildCount] =
     createSignal<number>();
   const [stopTrigger, setStopTrigger] = createSignal<HTMLElement>();
+  const [pendingContextTokenCap, setPendingContextTokenCap] =
+    createSignal<number>();
+  const [contextTokenCapTrigger, setContextTokenCapTrigger] =
+    createSignal<HTMLElement>();
   const closeStopDialog = (): void => {
     setStopDialogChildCount(undefined);
   };
@@ -250,6 +256,15 @@ export function SessionDetailBody(props: {
         returnFocus={stopTrigger}
         variant="stop"
       />
+      <SessionContextTokenCapDialog
+        cap={pendingContextTokenCap()}
+        onCancel={() => setPendingContextTokenCap(undefined)}
+        onConfirm={(cap) => {
+          setPendingContextTokenCap(undefined);
+          void view().controller.setContextTokenCap(cap, true);
+        }}
+        returnFocus={contextTokenCapTrigger}
+      />
       <Show when={view().detail.runnerRequired}>
         <RunnerReassignment {...view()} />
       </Show>
@@ -266,6 +281,20 @@ export function SessionDetailBody(props: {
           onApply={props.providerUpdate.onApply}
           onDiscoverModels={props.providerUpdate.onDiscoverModels}
           onDiscoverProviders={props.providerUpdate.onDiscoverProviders}
+        />
+        <SessionContextTokenCapEditor
+          detail={view().detail}
+          disabled={
+            active() ||
+            view().state.reassigning ||
+            view().state.updatingTools ||
+            sessionMutationPending(view().state)
+          }
+          onApply={(cap) => view().controller.setContextTokenCap(cap)}
+          onWarning={(cap) => {
+            setContextTokenCapTrigger(document.activeElement as HTMLElement);
+            setPendingContextTokenCap(cap);
+          }}
         />
         <SessionToolUpdateEditor
           detail={view().detail}

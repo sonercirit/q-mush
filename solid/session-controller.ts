@@ -59,6 +59,7 @@ import { selectedDraftOption } from "./session-form.ts";
 import { loadSessionHistoryPage } from "./session-history-controller.ts";
 import { SessionModelController } from "./session-model-controller.ts";
 import {
+  contextTokenCapMutation,
   continueSessionMutation,
   sendSessionMutation,
   stopSessionMutation,
@@ -466,7 +467,8 @@ export class SessionController {
     this.#patchDraft({ autoCompact });
   }
   setDraftField(
-    name: "agentFilePath" | "prompt" | "workingDirectory",
+    name:
+      "agentFilePath" | "prompt" | "userContextTokenCap" | "workingDirectory",
     value: string,
   ): void {
     this.#patchDraft({ [name]: value });
@@ -514,6 +516,29 @@ export class SessionController {
       mutate: (mutation) => this.#mutateDetail(mutation),
       view: this.#view,
     });
+  }
+  async setContextTokenCap(
+    userContextTokenCap: number | null,
+    compactIfExceeded = false,
+  ): Promise<void> {
+    const detail = this.#view.value.detail;
+    if (
+      detail === undefined ||
+      detail.id !== this.#view.value.selectedId ||
+      sessionMutationPending(this.#view.value)
+    ) {
+      return;
+    }
+    await this.#mutateDetail(
+      contextTokenCapMutation(detail.id, userContextTokenCap),
+    );
+    if (
+      compactIfExceeded &&
+      detail.autoCompact &&
+      userContextTokenCap !== null
+    ) {
+      await this.compact();
+    }
   }
   setTranscriptFilter(
     name: SessionTranscriptFilterName,

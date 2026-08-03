@@ -2,6 +2,10 @@ import type { AgentImage } from "../shared/agent-images.ts";
 import type { AgentSessionToolName } from "../shared/agent-tools.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
 import { SESSIONS_PATH } from "../shared/routes.ts";
+import {
+  contextTokenCapValidationError,
+  parseContextTokenCapInput,
+} from "../shared/session-context-limit.ts";
 import { SESSION_REALTIME_OPERATIONS } from "../shared/user-realtime-protocol.ts";
 import { requestJson } from "./browser-http.ts";
 import type { SessionViewState } from "./session-client.tsx";
@@ -34,6 +38,7 @@ export type SessionCreationDescriptor = Readonly<{
   reasoningEffort: string;
   runnerId: string;
   tools: readonly AgentSessionToolName[];
+  userContextTokenCap: number | null;
   workingDirectory: string;
 }>;
 
@@ -53,6 +58,9 @@ function sessionCreationDescriptor(
     reasoningEffort: draft.reasoningEffort,
     runnerId: draft.runnerId,
     tools: [...draft.tools],
+    userContextTokenCap: parseContextTokenCapInput(
+      draft.userContextTokenCap,
+    ) as number | null,
     workingDirectory: draft.workingDirectory.trim(),
   };
 }
@@ -79,6 +87,9 @@ function sessionCreatePayload(
       : { reasoningEffort: descriptor.reasoningEffort }),
     runnerId: descriptor.runnerId,
     tools: descriptor.tools,
+    ...(descriptor.userContextTokenCap === null
+      ? {}
+      : { userContextTokenCap: descriptor.userContextTokenCap }),
     workingDirectory: descriptor.workingDirectory,
   };
 }
@@ -113,6 +124,18 @@ export async function createSessionFromView(
     options.view.patch({
       error: "Wait for your agent sessions to finish loading, then try again.",
     });
+    return;
+  }
+  const model = options.view.value.modelDiscovery.catalog?.models.find(
+    ({ id }) => id === draft.model,
+  );
+  const parsedCap = parseContextTokenCapInput(draft.userContextTokenCap);
+  const capError =
+    parsedCap === undefined
+      ? "Context token cap must be a positive integer."
+      : contextTokenCapValidationError(parsedCap, model?.contextWindow ?? null);
+  if (capError !== undefined) {
+    options.view.patch({ error: capError });
     return;
   }
   const descriptor = sessionCreationDescriptor(draft, credential);

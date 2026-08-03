@@ -46,6 +46,7 @@ function testSession(): AgentSessionDetail {
     hasOlderSegments: false,
     id: SESSION_ID,
     maxContextTokens: null,
+    userContextTokenCap: null,
     messages: [
       runningMessage,
       {

@@ -277,6 +277,7 @@ function readSummary(value: unknown): AgentSessionSummary {
   const hasOlderSegments = value["hasOlderSegments"];
   const id = value["id"];
   const maxContextTokens = value["maxContextTokens"];
+  const userContextTokenCap = value["userContextTokenCap"];
   const model = value["model"];
   const pendingQuestions =
     value["pendingQuestions"] === undefined ||
@@ -339,6 +340,10 @@ function readSummary(value: unknown): AgentSessionSummary {
       (typeof maxContextTokens !== "number" ||
         !Number.isSafeInteger(maxContextTokens) ||
         maxContextTokens <= 0)) ||
+    (userContextTokenCap !== null &&
+      (typeof userContextTokenCap !== "number" ||
+        !Number.isSafeInteger(userContextTokenCap) ||
+        userContextTokenCap <= 0)) ||
     typeof model !== "string" ||
     pendingQuestions === undefined ||
     (pendingQuestions !== null &&
@@ -394,6 +399,7 @@ function readSummary(value: unknown): AgentSessionSummary {
     hasOlderSegments,
     id,
     maxContextTokens,
+    userContextTokenCap,
     model,
     openRouterProviderTag,
     parentExecutionGeneration,
@@ -561,6 +567,7 @@ export function summaryFromDetail(
     hasOlderSegments: detail.hasOlderSegments,
     id: detail.id,
     maxContextTokens: detail.maxContextTokens,
+    userContextTokenCap: detail.userContextTokenCap,
     model: detail.model,
     openRouterProviderTag: detail.openRouterProviderTag,
     parentExecutionGeneration: detail.parentExecutionGeneration,
