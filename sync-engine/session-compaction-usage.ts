@@ -45,5 +45,6 @@ export function compactionUsage(
   return {
     contextTokens: step.contextTokens,
     ...usageCost(step, estimateCost),
+    ...(step.tokenUsage === null ? {} : { tokenUsage: step.tokenUsage }),
   };
 }

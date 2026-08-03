@@ -393,6 +393,16 @@ function streamMessages(
   };
 }
 
+function retainCompactionStream(
+  current: StreamedSessionContent | undefined,
+  reconciled: ReconciledStream,
+): boolean {
+  return (
+    current !== undefined &&
+    (current.compactionRequest !== undefined || !reconciled.persisted)
+  );
+}
+
 export class SessionRealtimeState {
   readonly #streamedContent = new Map<string, StreamedSessionContent>();
   readonly #view: RevisionState<SessionViewState>;
@@ -417,12 +427,12 @@ export class SessionRealtimeState {
         ? { messages: persistable.messages, persisted: true }
         : reconcileStream(persistable, streamed);
 
-    if (streamed !== undefined) {
-      if (reconciled.persisted) {
-        this.#streamedContent.delete(detail.id);
-      } else {
+    if (retainCompactionStream(currentStream, reconciled)) {
+      if (streamed !== undefined) {
         this.#streamedContent.set(detail.id, streamed);
       }
+    } else {
+      this.#streamedContent.delete(detail.id);
     }
 
     if (this.#view.value.selectedId !== detail.id) {

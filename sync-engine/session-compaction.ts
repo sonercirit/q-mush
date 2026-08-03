@@ -4,13 +4,15 @@ import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 import type { RestartHandoff } from "../shared/session-model.ts";
+import { AGENT_COMPACTION_REQUEST_MESSAGE } from "./agent-compaction.ts";
 import type { CompactionUsage } from "./session-compaction-usage.ts";
-import { retireManualCompactionOperations } from "./session-manual-compaction-query.ts";
 import { sessionSegment } from "./session-segment.ts";
 import { runningCondition } from "./session-store-persistence.ts";
 import { requireRunningSessionUserId } from "./session-store-state.ts";
 import {
   appendSystemStoredMessage,
+  recordedMessageValues,
+  storedCompactionRequestValues,
   storedUserMessageValues,
 } from "./session-store-values.ts";
 import {
@@ -68,17 +70,6 @@ export function compactStoredConversation(options: {
     if (advanced.segment !== nextSegment) {
       throw new DOMException("The agent session was stopped", "AbortError");
     }
-    const nextTurnId = rotateSessionTurn({
-      database: transaction,
-      executionGeneration: options.generation,
-      generateId: options.generateId,
-      now: options.now,
-      previousExecutionGeneration: options.generation,
-      segment: nextSegment,
-      sessionId: options.sessionId,
-      startedAt: options.startedAt,
-      userId,
-    });
     transaction
       .update(agentMessages)
       .set({
@@ -93,13 +84,42 @@ export function compactStoredConversation(options: {
         ),
       )
       .run();
-    retireManualCompactionOperations(
-      transaction,
-      options.sessionId,
-      options.generation,
-      options.now,
-      "exact",
-    );
+    appendSystemStoredMessage({
+      database: transaction,
+      generateId: options.generateId,
+      message: storedCompactionRequestValues(AGENT_COMPACTION_REQUEST_MESSAGE),
+      now: options.now,
+      segment: currentSegment,
+      sessionId: options.sessionId,
+      userId,
+    });
+    appendSystemStoredMessage({
+      database: transaction,
+      generateId: options.generateId,
+      message: recordedMessageValues(
+        {
+          content: options.summary,
+          role: "assistant",
+          toolCalls: [],
+        },
+        options.usage.tokenUsage,
+      ),
+      now: options.now,
+      segment: currentSegment,
+      sessionId: options.sessionId,
+      userId,
+    });
+    const nextTurnId = rotateSessionTurn({
+      database: transaction,
+      executionGeneration: options.generation,
+      generateId: options.generateId,
+      now: options.now,
+      previousExecutionGeneration: options.generation,
+      segment: nextSegment,
+      sessionId: options.sessionId,
+      startedAt: options.startedAt,
+      userId,
+    });
     const handoff = {
       database: transaction,
       generateId: options.generateId,

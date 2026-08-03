@@ -12,7 +12,10 @@ import {
 import { AGENT_ATTACHMENT_MODALITIES } from "../agent-attachments.ts";
 import { AGENT_REASONING_EFFORTS } from "../agent-configuration.ts";
 import { AGENT_SESSION_TOOL_NAMES } from "../agent-tools.ts";
-import { AGENT_SESSION_STATUSES } from "../session-model.ts";
+import {
+  AGENT_SESSION_MESSAGE_ROLES,
+  AGENT_SESSION_STATUSES,
+} from "../session-model.ts";
 import { auditColumns } from "./audit-columns.ts";
 import {
   connectionColumns,
@@ -505,9 +508,7 @@ export const agentMessages = sqliteTable(
       onDelete: "restrict",
     }),
     segment: integer("segment").notNull().default(0),
-    role: text("role", {
-      enum: ["user", "assistant", "tool", "thinking", "system", "error"],
-    }).notNull(),
+    role: text("role", { enum: AGENT_SESSION_MESSAGE_ROLES }).notNull(),
     content: text("content").notNull(),
     toolCallId: text("tool_call_id"),
     toolName: text("tool_name"),

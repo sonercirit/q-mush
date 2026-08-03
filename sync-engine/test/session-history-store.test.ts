@@ -39,7 +39,7 @@ test("compaction advances durable segment identity and pages old messages", () =
       .orderBy(agentMessages.segment)
       .all()
       .map(({ segment }) => segment),
-  ).toEqual([0, 0, 1]);
+  ).toEqual([0, 0, 0, 0, 1]);
 
   const history = setup.store.history(TEST_USER_ID, STORE_SESSION_ID, null);
   expect(history).toMatchObject({
@@ -49,12 +49,14 @@ test("compaction advances durable segment identity and pages old messages", () =
     tokenUsage: {
       cacheWriteInputTokens: 0,
       reportedStepCount: 0,
-      stepCount: 1,
+      stepCount: 2,
     },
   });
   expect(history?.messages.map(({ content }) => content)).toEqual([
     expect.any(String),
     "Before compaction",
+    expect.stringContaining("Compact the conversation above"),
+    "Continue after handoff",
   ]);
   expect(
     setup.store.history("other-user", STORE_SESSION_ID, null),

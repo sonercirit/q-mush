@@ -59,14 +59,17 @@ export interface AgentSessionUsageUpdate {
   readonly tokenUsage?: AgentTokenUsage | null;
 }
 
-type AgentSessionMessageRole =
-  | "user"
-  | "assistant"
-  | "tool"
-  | "thinking"
-  | "system"
-  | "error"
-  | "compaction_request";
+export const AGENT_SESSION_MESSAGE_ROLES = [
+  "user",
+  "assistant",
+  "tool",
+  "thinking",
+  "system",
+  "error",
+  "compaction_request",
+] as const;
+
+type AgentSessionMessageRole = (typeof AGENT_SESSION_MESSAGE_ROLES)[number];
 
 export interface AttachmentContentFields {
   readonly attachments?: readonly AgentAttachment[];

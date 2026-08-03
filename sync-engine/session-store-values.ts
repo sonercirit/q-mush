@@ -25,7 +25,13 @@ export interface StoredMessageValues {
   readonly content: string;
   readonly images: string | null;
   readonly role:
-    "assistant" | "error" | "system" | "thinking" | "tool" | "user";
+    | "assistant"
+    | "compaction_request"
+    | "error"
+    | "system"
+    | "thinking"
+    | "tool"
+    | "user";
   readonly toolCallId: string | null;
   readonly toolCalls: string | null;
   readonly toolName: string | null;
@@ -49,6 +55,12 @@ function emptyToolMetadata() {
 
 export function errorMessageValues(content: string): StoredMessageValues {
   return { ...emptyToolMetadata(), content, role: "error" };
+}
+
+export function storedCompactionRequestValues(
+  content: string,
+): StoredMessageValues {
+  return { ...emptyToolMetadata(), content, role: "compaction_request" };
 }
 
 export function storedSystemMessageValues(

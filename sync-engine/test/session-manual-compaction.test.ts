@@ -27,6 +27,13 @@ import { STORE_SESSION_ID } from "./session-store-test-fixtures.ts";
 
 const SESSION_ID = STORE_SESSION_ID;
 
+const COMPACTION_TOKEN_USAGE = {
+  cacheWriteInputTokens: 25,
+  cachedInputTokens: 600,
+  inputTokens: 800,
+  outputTokens: 200,
+} as const;
+
 interface ManualRuntimeSetup {
   readonly controller: AbortController;
   readonly database: ReturnType<typeof runningCompactionStore>["database"];
@@ -347,13 +354,19 @@ describe("manual session compaction", () => {
   test("persists reported compaction usage exactly once with the handoff", async () => {
     const setup = manualRuntime(
       new ScriptedAgentModel([
-        { content: "Manual handoff", costUsd: 0.4, toolCalls: [] },
+        {
+          content: "Manual handoff",
+          costUsd: 0.4,
+          tokenUsage: COMPACTION_TOKEN_USAGE,
+          toolCalls: [],
+        },
       ]),
     );
 
     await startManualCompaction(setup.runtime);
 
-    expect(setup.store.get(TEST_USER_ID, SESSION_ID)).toMatchObject({
+    const compacted = setup.store.get(TEST_USER_ID, SESSION_ID);
+    expect(compacted).toMatchObject({
       costBasis: "reported",
       costUsd: 0.4,
       currentContextTokens: 0,
@@ -363,6 +376,23 @@ describe("manual session compaction", () => {
           role: "user",
         },
       ],
+    });
+    expect(compacted?.tokenUsage).toEqual({
+      ...COMPACTION_TOKEN_USAGE,
+      reportedStepCount: 1,
+      stepCount: 1,
+    });
+    expect(setup.store.history(TEST_USER_ID, SESSION_ID, null)).toMatchObject({
+      messages: [
+        expect.any(Object),
+        expect.objectContaining({ role: "compaction_request" }),
+        expect.objectContaining({
+          content: "Manual handoff",
+          role: "assistant",
+          tokenUsage: COMPACTION_TOKEN_USAGE,
+        }),
+      ],
+      tokenUsage: compacted?.tokenUsage,
     });
     closeSessionTestDatabase(setup.database);
   });

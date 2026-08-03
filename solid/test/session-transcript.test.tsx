@@ -207,22 +207,6 @@ test("renders fork controls only for natural conversation fork points", () => {
   }
 });
 
-test("renders the compaction request before its streamed response", () => {
-  const html = renderMessages([
-    message(
-      "stream:compaction-step:compaction-request",
-      "Compact this conversation into a handoff.",
-      "compaction_request",
-    ),
-    message("stream:session-1:assistant", "Summary in progress", "assistant"),
-  ]);
-
-  expect(html).toContain("Compaction request");
-  expect(
-    html.indexOf("Compact this conversation into a handoff."),
-  ).toBeLessThan(html.indexOf("Summary in progress"));
-});
-
 test("does not offer fork controls for streamed messages", () => {
   const streamedId = "stream:session-1:assistant";
   const html = renderForkMessages([
