@@ -17,7 +17,10 @@ import {
   type RunnerCommandOutputDelta,
   type RunnerCommandResult,
 } from "../shared/runner-command-broker.ts";
-import type { AgentSessionDetail } from "../shared/session-model.ts";
+import type {
+  AgentSessionDetail,
+  AgentSessionUsageUpdate,
+} from "../shared/session-model.ts";
 import { forEachAssistantToolCall } from "./agent-conversation.ts";
 import { estimateAgentStepCost } from "./agent-cost.ts";
 import { createAgentSkills, type AgentSkillExecutor } from "./agent-skills.ts";
@@ -83,21 +86,26 @@ function writeRuntime(
   runtime.notify();
 }
 
+function recordRuntimeUsage(
+  runtime: SessionAgentRuntimeDependencies,
+  usage: AgentSessionUsageUpdate,
+): void {
+  writeRuntime(runtime, (sessionId, now, generation) => {
+    runtime.store.updateRuntimeUsage(sessionId, usage, now, generation);
+  });
+}
+
 function recordCompactionContext(
   runtime: SessionAgentRuntimeDependencies,
   contextTokens: number | null,
 ): void {
-  if (contextTokens === null) {
-    return;
+  if (contextTokens !== null) {
+    recordRuntimeUsage(runtime, {
+      contextTokens,
+      costBasis: null,
+      costUsd: null,
+    });
   }
-  writeRuntime(runtime, (sessionId, now, generation) => {
-    runtime.store.updateRuntimeUsage(
-      sessionId,
-      { contextTokens, costBasis: null, costUsd: null },
-      now,
-      generation,
-    );
-  });
 }
 
 function recordCompaction(
@@ -476,9 +484,7 @@ export async function runSessionAgent(
         ),
     );
     if (usage !== undefined) {
-      writeRuntime(runtime, (sessionId, now, generation) => {
-        runtime.store.updateRuntimeUsage(sessionId, usage, now, generation);
-      });
+      recordRuntimeUsage(runtime, usage);
     }
     return { output: explanation.content, state: "completed" };
   };

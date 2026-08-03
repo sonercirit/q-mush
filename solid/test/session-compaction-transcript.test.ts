@@ -9,20 +9,6 @@ import {
   transcriptMessage,
 } from "./transcript-ordering-fixtures.ts";
 
-function applyDelta(
-  controller: SessionController,
-  sessionId: string,
-  content: string,
-): void {
-  controller.applyDelta({
-    content,
-    sessionId,
-    streamId: "compaction-step",
-    thinking: "",
-    type: "session_delta",
-  });
-}
-
 async function selectedController(
   selected: AgentSessionDetail,
 ): Promise<SessionController> {
@@ -49,39 +35,37 @@ test("anchors a streamed compaction response after its visible request", async (
       streamId: "compaction-step",
       type: "session_compaction_request",
     });
-    const compactionRequests = (): readonly string[] =>
-      controller.state.detail?.messages
-        .filter(({ role }) => role === "compaction_request")
-        .map(({ id }) => id) ?? [];
+    const compactionRequests = () =>
+      controller.state.detail?.messages.filter(
+        ({ role }) => role === "compaction_request",
+      ) ?? [];
+    const requestCounts = [compactionRequests().length];
 
-    expect(compactionRequests()).toEqual([
-      "stream:compaction-step:compaction-request",
-    ]);
+    for (const content of ["Compacted ", "response"]) {
+      controller.applyDelta({
+        content,
+        sessionId,
+        streamId: "compaction-step",
+        thinking: "",
+        type: "session_delta",
+      });
+      requestCounts.push(compactionRequests().length);
+    }
 
-    applyDelta(controller, sessionId, "Compacted ");
-    expect(compactionRequests()).toEqual([
-      "stream:compaction-step:compaction-request",
-    ]);
-
-    applyDelta(controller, sessionId, "response");
-    expect(compactionRequests()).toEqual([
-      "stream:compaction-step:compaction-request",
-    ]);
-
+    const settledSummary = transcriptMessage(
+      "settled-summary",
+      "Compacted response",
+      "assistant",
+      2,
+    );
     controller.applyDetail({
       ...detail,
-      messages: [
-        ...detail.messages,
-        transcriptMessage(
-          "settled-summary",
-          "Compacted response",
-          "assistant",
-          2,
-        ),
-      ],
+      messages: detail.messages.concat(settledSummary),
     });
+    requestCounts.push(compactionRequests().length);
 
-    expect(compactionRequests()).toEqual([
+    expect(requestCounts).toEqual([1, 1, 1, 1]);
+    expect(compactionRequests().map(({ id }) => id)).toEqual([
       "stream:compaction-step:compaction-request",
     ]);
     expect(controller.state.detail?.messages).toMatchObject([
