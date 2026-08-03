@@ -226,7 +226,7 @@ export class SessionStore extends SessionStoreRestarts {
   setAutoCompact(...parameters: SessionAutoCompactParameters) {
     return setSessionAutoCompact(this.#settingContext(), ...parameters);
   }
-  protected interruptUnknownRestartTools(
+  appendUnknownRestartToolResults(
     database: Parameters<typeof appendUnknownRestartToolResults>[0]["database"],
     sessionId: string,
     now: number,

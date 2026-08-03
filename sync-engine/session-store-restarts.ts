@@ -18,13 +18,13 @@ export abstract class SessionStoreRestarts extends SessionStoreRuntime {
       database,
       generateId,
       interruptUnknownTools: (transaction, sessionId, now) => {
-        this.interruptUnknownRestartTools(transaction, sessionId, now);
+        this.appendUnknownRestartToolResults(transaction, sessionId, now);
       },
       read: (userId, sessionId) => this.readRestartSession(userId, sessionId),
     });
   }
 
-  protected abstract interruptUnknownRestartTools(
+  protected abstract appendUnknownRestartToolResults(
     database: RestartToolDatabase,
     sessionId: string,
     now: number,
@@ -42,27 +42,27 @@ export abstract class SessionStoreRestarts extends SessionStoreRuntime {
   }
 
   pauseQueuedForRestart(
-    ...parameters: Parameters<RestartHandoffStore["pauseQueued"]>
+    ...arguments_: Parameters<RestartHandoffStore["pauseQueued"]>
   ): boolean {
-    return this.#restartHandoffs.pauseQueued(...parameters);
+    return this.#restartHandoffs.pauseQueued(...arguments_);
   }
 
   pauseRunningForRestart(
-    ...parameters: Parameters<RestartHandoffStore["pauseRunning"]>
+    ...arguments_: Parameters<RestartHandoffStore["pauseRunning"]>
   ): boolean {
-    return this.#restartHandoffs.pauseRunning(...parameters);
+    return this.#restartHandoffs.pauseRunning(...arguments_);
   }
 
   failInvalidRestartHandoff(
-    ...parameters: Parameters<RestartHandoffStore["failInvalid"]>
+    ...arguments_: Parameters<RestartHandoffStore["failInvalid"]>
   ): boolean {
-    return this.#restartHandoffs.failInvalid(...parameters);
+    return this.#restartHandoffs.failInvalid(...arguments_);
   }
 
   failRestartHandoff(
-    ...parameters: Parameters<RestartHandoffStore["failQueued"]>
+    ...arguments_: Parameters<RestartHandoffStore["failQueued"]>
   ): boolean {
-    return this.#restartHandoffs.failQueued(...parameters);
+    return this.#restartHandoffs.failQueued(...arguments_);
   }
 
   invalidRestartHandoffs(runnerId?: string) {
