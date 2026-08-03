@@ -166,8 +166,9 @@ test("renders a live sleep duration before the result arrives", () => {
   );
 
   const boundary = liveStreamBoundary(container, stream);
+  const duration = boundary?.querySelector("p.text-cyan-100");
   expect(boundary?.getAttribute("data-tool-stream-state")).toBe("running");
-  expect(boundary?.textContent).toContain("Duration: 1m 1s");
+  expect(duration?.textContent).toBe("Duration: 1m 1s");
   expect(boundary?.textContent).not.toContain(stream.arguments);
   expect(
     container.querySelector("[data-render-boundary^='tool-result:']"),
