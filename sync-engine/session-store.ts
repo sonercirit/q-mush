@@ -597,10 +597,14 @@ export class SessionStore {
       this.#currentGeneration(sessionId),
     );
   }
-  appendCurrentAgentMessage: CurrentSessionStore["appendAgentMessage"] = (...a) => {
+  appendCurrentAgentMessage: CurrentSessionStore["appendAgentMessage"] = (
+    ...a
+  ) => {
     this.#current().appendAgentMessage(...a);
   };
-  appendCurrentErrorMessage: CurrentSessionStore["appendErrorMessage"] = (...a) => {
+  appendCurrentErrorMessage: CurrentSessionStore["appendErrorMessage"] = (
+    ...a
+  ) => {
     this.#current().appendErrorMessage(...a);
   };
   compactCurrentConversation: CurrentSessionStore["compactConversation"] = (
