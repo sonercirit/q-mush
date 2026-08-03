@@ -201,13 +201,27 @@ async function cleanupProcessTest(
   rmSync(setup.directory, { force: true, recursive: true });
 }
 
+function childStderr(
+  setup: ReturnType<typeof processTestSetup>,
+): Promise<string> {
+  return new Response(setup.child.stderr).text();
+}
+
+async function expectChildFailure(
+  setup: ReturnType<typeof processTestSetup>,
+  message: string,
+): Promise<void> {
+  expect(await waitForExit(setup.child, 900)).toBe(1);
+  expect(await childStderr(setup)).toContain(message);
+}
+
 test("the runner process exits promptly when superseded mid-heartbeat", async () => {
   const setup = processTestSetup();
 
   try {
     expect(await waitUntil(() => setup.server.supersede(), 1_000)).toBe(true);
-    expect(await waitForExit(setup.child, 900)).toBe(1);
-    expect(await new Response(setup.child.stderr).text()).toContain(
+    await expectChildFailure(
+      setup,
       "The runner connection was superseded by a newer process",
     );
   } finally {
@@ -231,8 +245,8 @@ test("a stale restart runner exits after one explicit registration rejection", a
   const setup = processTestSetup({ rejectRegistration: true });
 
   try {
-    expect(await waitForExit(setup.child, 900)).toBe(1);
-    expect(await new Response(setup.child.stderr).text()).toContain(
+    await expectChildFailure(
+      setup,
       "The runner registration was rejected by Q Mush",
     );
     await Bun.sleep(100);

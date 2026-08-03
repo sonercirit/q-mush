@@ -11,24 +11,23 @@ function expectSuperseded(failure: Promise<Error>): Promise<void> {
   return expect(failure).resolves.toEqual(new RunnerSupersededError());
 }
 
-test("reports an explicit registration rejection distinctly", () => {
+function observedSocketFailure(
+  message: Readonly<Record<string, unknown>>,
+): Promise<Error> {
   const socket = new RecordingTestSocket();
   const failure = observeOperationalRunnerSocket(socket);
+  socket.receive(message);
+  return failure;
+}
 
-  socket.receive({ type: "registration_rejected" });
-
-  return expect(failure).resolves.toEqual(
-    new RunnerRegistrationRejectedError(),
-  );
+test("reports an explicit registration rejection distinctly", () => {
+  return expect(
+    observedSocketFailure({ type: "registration_rejected" }),
+  ).resolves.toEqual(new RunnerRegistrationRejectedError());
 });
 
 test("reports an explicit supersession frame distinctly", () => {
-  const socket = new RecordingTestSocket();
-  const failure = observeOperationalRunnerSocket(socket);
-
-  socket.receive({ type: "superseded" });
-
-  return expectSuperseded(failure);
+  return expectSuperseded(observedSocketFailure({ type: "superseded" }));
 });
 
 test("reports a supersession close distinctly when its frame is lost", () => {

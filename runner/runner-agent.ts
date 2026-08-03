@@ -513,6 +513,18 @@ async function pendingSocketFailure(
   }
 }
 
+async function pendingSupersession(
+  socket: WebSocket,
+  active: Map<string, ActiveCommand>,
+  failure: Promise<Error>,
+  milliseconds: number,
+): Promise<void> {
+  const pending = await pendingSocketFailure(failure, milliseconds);
+  if (pending instanceof RunnerSupersededError) {
+    await throwSocketFailure(socket, active, pending);
+  }
+}
+
 async function throwSocketFailure(
   socket: WebSocket,
   active: Map<string, ActiveCommand>,
@@ -561,10 +573,7 @@ async function maintainConnection(
     }
 
     if (socket.readyState === WebSocket.OPEN) {
-      const failure = await pendingSocketFailure(socketFailure, 0);
-      if (failure instanceof RunnerSupersededError) {
-        await throwSocketFailure(socket, active, failure);
-      }
+      await pendingSupersession(socket, active, socketFailure, 0);
     }
 
     if (
@@ -592,13 +601,12 @@ async function maintainConnection(
     }
 
     sendOpenSocketMessage(socket, { type: "heartbeat" });
-    const failure = await pendingSocketFailure(
+    await pendingSupersession(
+      socket,
+      active,
       socketFailure,
       HEARTBEAT_INTERVAL_MILLISECONDS,
     );
-    if (failure instanceof RunnerSupersededError) {
-      await throwSocketFailure(socket, active, failure);
-    }
   }
 }
 

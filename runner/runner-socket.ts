@@ -71,29 +71,15 @@ export function observeOperationalRunnerSocket(
   };
   return new Promise((resolve) => {
     let settled = false;
-    const settle = (error: Error): void => {
-      if (!settled) {
-        settled = true;
-        resolve(error);
-      }
-    };
-    socket.addEventListener("message", (event) => {
-      const error = socketMessageFailure(event);
-      if (error !== undefined) settle(error);
-    });
-    socket.addEventListener(
-      "close",
-      (event) => {
-        settle(socketCloseFailure(event, messages));
+    addRunnerSocketFailureListeners(
+      socket,
+      (error) => {
+        if (!settled) {
+          settled = true;
+          resolve(error);
+        }
       },
-      { once: true },
-    );
-    socket.addEventListener(
-      "error",
-      () => {
-        settle(new RunnerConnectionError(messages.error));
-      },
-      { once: true },
+      messages,
     );
   });
 }
