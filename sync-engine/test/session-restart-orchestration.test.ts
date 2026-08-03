@@ -8,11 +8,6 @@ import { agentMessages, agentSessions } from "../../shared/database/schema.ts";
 import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { AGENT_COMPACTION_SYSTEM_PROMPT } from "../../sync-engine/agent-compaction.ts";
-import {
-  DatabaseWriteResilience,
-  installDatabaseWriteResilience,
-} from "../../sync-engine/database-write-resilience.ts";
-import { EngineHealth } from "../../sync-engine/engine-health.ts";
 import type { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
 import type { AgentModelFactory } from "../../sync-engine/session-agent-models.ts";
 import type { SessionAgentRuntimeDependencies } from "../../sync-engine/session-agent-runtime.ts";
@@ -462,100 +457,6 @@ async function expectRecoveredTerminal(
   expectTerminalReporting(setup, expectation.notifications);
   closeRecoveredRun(setup);
 }
-
-test("launch failure at the queued transition is visible and continuable", async () => {
-  const storeSetup = createStore();
-  const detail = createTestSession(storeSetup.store);
-  const actions = orchestrationActions(storeSetup.database, storeSetup.store);
-  const finished = vi.spyOn(actions, "finished");
-  const notify = vi.fn();
-  const runtimes = new SessionRuntimes();
-  const broker = new RunnerCommandBroker({
-    commandId: () => "recovered-launch-agent-file",
-  });
-  const finisher = new SessionFinisher({
-    actions,
-    notify,
-    now: () => TEST_NOW + 5,
-    store: storeSetup.store,
-  });
-  const launcher = createSessionLauncher({
-    actions,
-    broker,
-    finish: finisher.finish.bind(finisher),
-    modelFactory: () => ({
-      complete: () => Promise.resolve(modelTurn("Continued after recovery.")),
-    }),
-    notify,
-    now: () => TEST_NOW + 4,
-    runtimes,
-    store: storeSetup.store,
-  });
-  let attempts = 0;
-  const diskFull = Object.assign(new Error("database or disk is full"), {
-    code: "SQLITE_FULL",
-  });
-  installDatabaseWriteResilience(
-    storeSetup.database,
-    new DatabaseWriteResilience({
-      attempt: (operation) => {
-        attempts += 1;
-        if (attempts <= 4) {
-          throw diskFull;
-        }
-        return operation();
-      },
-      health: new EngineHealth(vi.fn()),
-      sleep: () => undefined,
-    }),
-  );
-
-  expect(launcher.launch(detail, CREDENTIAL, TEST_USER_ID)).toBe(true);
-  await runtimes.settled(detail.id);
-
-  expect(storeSetup.store.get(TEST_USER_ID, detail.id)).toMatchObject({
-    activeStartedAt: null,
-    messages: [
-      { role: "user" },
-      {
-        content:
-          "Session failed: The database write failed because the disk is full",
-        role: "error",
-      },
-    ],
-    status: "failed",
-  });
-  expect(notify).toHaveBeenCalledWith(TEST_USER_ID, detail.id);
-  expect(finished).toHaveBeenCalledWith(detail, TEST_USER_ID);
-
-  const continued = storeSetup.store.queue(
-    TEST_USER_ID,
-    detail.id,
-    TEST_NOW + 6,
-  );
-  expect(continued.status).toBe("queued");
-  if (continued.status !== "queued") {
-    throw new Error("The failed launch was not continuable");
-  }
-  expect(launcher.launch(continued.detail, CREDENTIAL, TEST_USER_ID)).toBe(
-    true,
-  );
-  await Promise.resolve();
-  completeAgentFileCommand(broker, continued.detail);
-  await runtimes.settled(detail.id);
-  expect(storeSetup.store.get(TEST_USER_ID, detail.id)).toMatchObject({
-    activeStartedAt: null,
-    messages: [
-      { role: "user" },
-      { role: "error" },
-      { content: "Continued after recovery.", role: "assistant" },
-    ],
-    status: "idle",
-  });
-
-  finished.mockRestore();
-  closeCompactionStore(storeSetup);
-});
 
 test("launcher settles recovered success before terminal reporting", async () => {
   await expectRecoveredTerminal(

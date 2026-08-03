@@ -138,12 +138,11 @@ export class SessionStore {
   }
 
   #writeResources(workspaceId?: string) {
-    return {
-      database: this.#database,
-      generateId: this.#resources[1],
-      read: (userId: string, sessionId: string) =>
-        this.get(userId, sessionId, workspaceId),
-    };
+    const database = this.#database;
+    const generateId = this.#resources[1];
+    const read = (userId: string, sessionId: string) =>
+      this.get(userId, sessionId, workspaceId);
+    return { database, generateId, read };
   }
 
   #generateId(now: number): string {
@@ -431,10 +430,7 @@ export class SessionStore {
   ): boolean {
     return settleRuntimeFailure({
       content,
-      generation,
-      now,
-      resources: this.#writeResources(),
-      sessionId,
+      ...this.#runtimeTarget(sessionId, now, generation),
     });
   }
 
@@ -446,10 +442,7 @@ export class SessionStore {
   ): void {
     appendRuntimeErrorMessage({
       content,
-      generation,
-      now,
-      resources: this.#writeResources(),
-      sessionId,
+      ...this.#runtimeTarget(sessionId, now, generation),
     });
   }
 
@@ -637,10 +630,6 @@ export class SessionStore {
     });
   }
 
-  /**
-   * Administrative/test helper that intentionally targets the current generation.
-   * Runtime code must use the generation-required methods above.
-   */
   #currentGeneration(sessionId: string): number {
     const current = this.#database
       .select({ generation: agentSessions.executionGeneration })
