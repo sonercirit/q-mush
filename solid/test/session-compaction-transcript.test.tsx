@@ -5,7 +5,7 @@ import { SessionController } from "../../solid/session-controller.ts";
 import { createDisplaySessionMessage } from "../../solid/session-message.ts";
 import { DEFAULT_SESSION_TRANSCRIPT_FILTERS } from "../../solid/session-transcript-filters.ts";
 import { SessionTranscript } from "../../solid/session-transcript.tsx";
-import { installFetch } from "./controller-test-helpers.ts";
+import { installFetch, withRestoredFetch } from "./controller-test-helpers.ts";
 import { renderSolidToString } from "./render-solid.tsx";
 import { createResponseFetch } from "./session-dom-test-helpers.tsx";
 import {
@@ -23,7 +23,8 @@ async function selectedController(
 }
 
 const COMPACTION_REQUEST = "Create the handoff summary.";
-const COMPACTION_STREAM_ID = "compaction-step";
+const COMPACTION_STREAM_ID = "attempt-1";
+const REPLACEMENT_STREAM_ID = "attempt-2";
 
 function compactionDetail(sessionId: string): AgentSessionDetail {
   return sessionDetailWithStatus(
@@ -36,11 +37,12 @@ function compactionDetail(sessionId: string): AgentSessionDetail {
 function applyCompactionRequest(
   controller: SessionController,
   sessionId: string,
+  streamId = COMPACTION_STREAM_ID,
 ): void {
   controller.applyCompactionRequest({
     content: COMPACTION_REQUEST,
     sessionId,
-    streamId: COMPACTION_STREAM_ID,
+    streamId,
     type: "session_compaction_request",
   });
 }
@@ -63,17 +65,53 @@ function applyCompactionDelta(
   controller: SessionController,
   sessionId: string,
   content: string,
+  streamId = COMPACTION_STREAM_ID,
   reset = false,
 ): void {
   const delta = {
     content,
     sessionId,
-    streamId: COMPACTION_STREAM_ID,
+    streamId,
     thinking: "",
     type: "session_delta" as const,
   };
   controller.applyDelta(reset ? { ...delta, reset: true } : delta);
 }
+
+function applyProductionResetSequence(
+  controller: SessionController,
+  sessionId: string,
+): void {
+  let streamId = COMPACTION_STREAM_ID;
+  applyCompactionRequest(controller, sessionId, streamId);
+  streamId = REPLACEMENT_STREAM_ID;
+  applyCompactionDelta(controller, sessionId, "", streamId, true);
+  applyCompactionDelta(controller, sessionId, "Replacement response", streamId);
+}
+
+function compactionRequestIds(
+  controller: SessionController,
+): readonly string[] {
+  return (
+    controller.state.detail?.messages
+      .filter(({ role }) => role === "compaction_request")
+      .map(({ id }) => id) ?? []
+  );
+}
+
+const SETTLED_COMPACTION_MESSAGES = [
+  { id: "old-user", role: "user" },
+  {
+    content: COMPACTION_REQUEST,
+    id: "settled-request",
+    role: "compaction_request",
+  },
+  {
+    content: "Compacted response",
+    id: "settled-summary",
+    role: "assistant",
+  },
+] as const;
 
 function expectCompactionMessages(
   controller: SessionController,
@@ -131,20 +169,53 @@ test("renders a compaction request before its streamed response", () => {
   ).toBeLessThan(html.indexOf("Summary in progress"));
 });
 
-test("keeps the streamed compaction request across a provider reset", async () => {
-  const originalFetch = globalThis.fetch;
+async function expectResetKeepsRequest(options: {
+  readonly controller: SessionController;
+  readonly execute: () => void;
+}): Promise<void> {
+  await withRestoredFetch(() => {
+    options.execute();
+    expectCompactionMessages(options.controller, "Replacement response");
+    return Promise.resolve();
+  });
+}
+
+test("keeps the compaction request when a reset gets a production-style new stream ID", async () => {
   const sessionId = "session-compaction-reset";
+  const detail = compactionDetail(sessionId);
+  const controller = await selectedController(detail);
+
+  await expectResetKeepsRequest({
+    controller,
+    execute: () => {
+      applyProductionResetSequence(controller, sessionId);
+    },
+  });
+});
+
+test("keeps the compaction request when a provider reset reuses the stream ID", async () => {
+  const sessionId = "session-compaction-same-stream-reset";
   const { controller } = await selectedCompactionController(sessionId);
 
-  try {
-    applyCompactionDelta(controller, sessionId, "Discarded partial response");
-    applyCompactionDelta(controller, sessionId, "Replacement ", true);
-    applyCompactionDelta(controller, sessionId, "response");
-
-    expectCompactionMessages(controller, "Replacement response");
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+  await expectResetKeepsRequest({
+    controller,
+    execute: () => {
+      applyCompactionDelta(controller, sessionId, "Discarded partial response");
+      applyCompactionDelta(
+        controller,
+        sessionId,
+        "",
+        COMPACTION_STREAM_ID,
+        true,
+      );
+      applyCompactionDelta(
+        controller,
+        sessionId,
+        "Replacement response",
+        COMPACTION_STREAM_ID,
+      );
+    },
+  });
 });
 
 const SNAPSHOT_TIMINGS = ["delta-first", "snapshot-first"] as const;
@@ -174,29 +245,39 @@ test.each(SNAPSHOT_TIMINGS)(
         requestCounts.push(compactionRequests().length);
       }
 
+      const settledRequest = createDisplaySessionMessage({
+        content: COMPACTION_REQUEST,
+        createdAt: 2,
+        id: "settled-request",
+        role: "compaction_request",
+      });
       const settledSummary = transcriptMessage(
         "settled-summary",
         "Compacted response",
         "assistant",
-        2,
+        3,
       );
       controller.applyDetail({
         ...detail,
-        messages: detail.messages.concat(settledSummary),
+        messages: detail.messages.concat(settledRequest, settledSummary),
       });
       requestCounts.push(compactionRequests().length);
 
       expect(requestCounts).toEqual(
         Array.from({ length: requestCounts.length }, () => 1),
       );
-      expect(compactionRequests().map(({ id }) => id)).toEqual([
-        "stream:compaction-step:compaction-request",
-      ]);
-      expectCompactionMessages(
-        controller,
-        "Compacted response",
-        "settled-summary",
+      expect(compactionRequestIds(controller)).toEqual(["settled-request"]);
+      expect(controller.state.detail?.messages).toMatchObject(
+        SETTLED_COMPACTION_MESSAGES,
       );
+
+      applyCompactionDelta(
+        controller,
+        sessionId,
+        "Unrelated later response",
+        "later-stream",
+      );
+      expect(compactionRequestIds(controller)).toEqual(["settled-request"]);
     } finally {
       globalThis.fetch = originalFetch;
     }

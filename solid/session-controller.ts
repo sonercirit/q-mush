@@ -147,9 +147,7 @@ export class SessionController {
     }
   }
   #applyNewestSnapshot(apply: () => void): void {
-    if (this.#view.value.history.page === undefined) {
-      this.#applySnapshot(apply);
-    }
+    if (this.#view.value.history.page === undefined) this.#applySnapshot(apply);
   }
   applyCompactionRequest(
     event: Parameters<SessionRealtimeState["applyCompactionRequest"]>[0],
@@ -173,27 +171,17 @@ export class SessionController {
       }
     });
   }
-  #applyToolEvent<Event>(apply: (event: Event) => void, event: Event): void {
+  applyToolDelta(event: Parameters<SessionRealtimeState["applyToolDelta"]>[0]) {
     applyWhenViewingNewestHistory(this.#view, () => {
-      apply(event);
+      this.#realtime.applyToolDelta(event);
     });
-  }
-
-  applyToolDelta(
-    event: Parameters<SessionRealtimeState["applyToolDelta"]>[0],
-  ): void {
-    const realtime = this.#realtime;
-    this.#applyToolEvent((toolEvent) => {
-      realtime.applyToolDelta(toolEvent);
-    }, event);
   }
   applyToolSnapshot(
     event: Parameters<SessionRealtimeState["applyToolSnapshot"]>[0],
-  ): void {
-    const applySnapshot = (toolEvent: typeof event): void => {
-      this.#realtime.applyToolSnapshot(toolEvent);
-    };
-    this.#applyToolEvent(applySnapshot, event);
+  ) {
+    applyWhenViewingNewestHistory(this.#view, () => {
+      this.#realtime.applyToolSnapshot(event);
+    });
   }
   #applySnapshot(apply: () => void, applyWhileSending = false): void {
     if (
