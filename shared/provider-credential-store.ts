@@ -109,6 +109,68 @@ function credentialSummarySelection() {
   };
 }
 
+function accessibleActiveCredentialCondition(options: {
+  readonly credentialId?: string;
+  readonly database: AppDatabase;
+  readonly provider: CredentialProviderId;
+  readonly userId: string;
+  readonly workspaceId?: string;
+}): SQL | undefined {
+  const accessibleIds =
+    options.workspaceId === undefined
+      ? undefined
+      : accessibleCredentialIds(
+          options.database,
+          options.provider,
+          options.userId,
+          options.workspaceId,
+        );
+  return and(
+    activeCredentialCondition(
+      options.provider,
+      options.userId,
+      options.credentialId,
+    ),
+    accessibleIds === undefined
+      ? undefined
+      : inArray(providerCredentials.id, accessibleIds),
+  );
+}
+
+function credentialScope(
+  database: AppDatabase,
+  provider: CredentialProviderId,
+  userId: string,
+  credentialId: string | undefined,
+  workspaceId: string | undefined,
+): SQL | undefined {
+  return accessibleActiveCredentialCondition(
+    Object.assign(
+      { database, provider, userId },
+      credentialId === undefined ? {} : { credentialId },
+      workspaceId === undefined ? {} : { workspaceId },
+    ),
+  );
+}
+
+function activeCredentialSummaries(
+  database: AppDatabase,
+  provider: CredentialProviderId,
+  userId: string,
+  workspaceId?: string,
+): readonly ProviderCredentialSummary[] {
+  return database
+    .select(credentialSummarySelection())
+    .from(providerCredentials)
+    .where(credentialScope(database, provider, userId, undefined, workspaceId))
+    .orderBy(...credentialOrder())
+    .all()
+    .map(({ baseUrl, ...credential }) => ({
+      ...credential,
+      ...(baseUrl === null ? {} : { baseUrl }),
+    }));
+}
+
 function accessibleCredentialIds(
   database: AppDatabase,
   provider: CredentialProviderId,
@@ -333,31 +395,13 @@ export class ProviderCredentialStore {
     userId: string,
     workspaceId?: string,
   ): readonly ProviderCredentialSummary[] {
-    const accessibleIds =
-      workspaceId === undefined
-        ? undefined
-        : accessibleCredentialIds(
-            this.#database,
-            this.#provider,
-            userId,
-            workspaceId,
-          );
-    const stored = this.#database
-      .select(credentialSummarySelection())
-      .from(providerCredentials)
-      .where(
-        accessibleIds === undefined
-          ? activeCredentialCondition(this.#provider, userId)
-          : and(
-              activeCredentialCondition(this.#provider, userId),
-              inArray(providerCredentials.id, accessibleIds),
-            ),
-      )
-      .orderBy(...credentialOrder())
-      .all();
-    return stored.map(({ baseUrl, ...credential }) => ({
+    return activeCredentialSummaries(
+      this.#database,
+      this.#provider,
+      userId,
+      workspaceId,
+    ).map((credential) => ({
       ...credential,
-      ...(baseUrl === null ? {} : { baseUrl }),
       workspaceIds: this.#workspaceIds(userId, credential.id),
     }));
   }
@@ -371,6 +415,15 @@ export class ProviderCredentialStore {
     );
   }
 
+  static listActiveModelCredentials(
+    database: AppDatabase,
+    userId: string,
+    provider: ProviderId,
+    workspaceId?: string,
+  ): readonly ProviderCredentialSummary[] {
+    return activeCredentialSummaries(database, provider, userId, workspaceId);
+  }
+
   static hasActiveModelCredential(
     database: AppDatabase,
     userId: string,
@@ -378,19 +431,10 @@ export class ProviderCredentialStore {
     credentialId: string,
     workspaceId?: string,
   ): boolean {
-    const accessibleIds =
-      workspaceId === undefined
-        ? undefined
-        : accessibleCredentialIds(database, provider, userId, workspaceId);
     return (
       matchingCredentialId(
         database,
-        and(
-          activeCredentialCondition(provider, userId, credentialId),
-          accessibleIds === undefined
-            ? undefined
-            : inArray(providerCredentials.id, accessibleIds),
-        ),
+        credentialScope(database, provider, userId, credentialId, workspaceId),
       ) !== undefined
     );
   }

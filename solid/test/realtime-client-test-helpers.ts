@@ -26,7 +26,7 @@ export function openRealtimeTestConnection(
   realtimeTestSocket(setup)?.open(instanceId);
 }
 
-export function finishRealtimeTestReconnect(
+function finishRealtimeTestReconnect(
   setup: RealtimeClientTestSetup,
   instanceId: string,
 ): void {

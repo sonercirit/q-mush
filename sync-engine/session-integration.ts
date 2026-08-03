@@ -10,6 +10,12 @@ import type { SessionDetailReader } from "./session-command-types.ts";
 import type { SessionRealtimeCommands } from "./session-realtime-commands.ts";
 import type { DurableRunnerRestartGate } from "./session-restart-coordinator.ts";
 
+export type DeliverRunnerCommands = (
+  runnerId: string,
+  deliver: (command: RunnerToolCommand) => boolean,
+  connectionGeneration?: number,
+) => boolean;
+
 export interface SessionIntegration extends SessionDetailReader {
   attachmentFallbacks?(request: Request): Promise<Response> | Response;
   collection(request: Request): Response | Promise<Response>;
@@ -21,10 +27,9 @@ export interface SessionIntegration extends SessionDetailReader {
     result: RunnerCommandResult,
   ): boolean;
   continue(request: Request, sessionId: string): Promise<Response>;
-  deliverRunnerCommands(
-    runnerId: string,
-    deliver: (command: RunnerToolCommand) => boolean,
-  ): boolean;
+  deliverRunnerCommands: DeliverRunnerCommands;
+  runnerConnectionGeneration(runnerId: string): number;
+  replaceRunnerConnection(runnerId: string, replacedGeneration: number): void;
   directories(request: Request, runnerId: string): Promise<Response>;
   drain(): Promise<void>;
   prepareFinalShutdown(): Promise<void>;

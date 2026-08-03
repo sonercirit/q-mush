@@ -1,0 +1,43 @@
+import { expect, test } from "vitest";
+import {
+  observeOperationalRunnerSocket,
+  RunnerRegistrationRejectedError,
+  RunnerSupersededError,
+} from "../../runner/runner-socket.ts";
+import { RUNNER_SUPERSEDED_CLOSE_CODE } from "../../shared/runner-realtime-protocol.ts";
+import { RecordingTestSocket } from "../../shared/test/websocket-fixtures.ts";
+
+function expectSuperseded(failure: Promise<Error>): Promise<void> {
+  return expect(failure).resolves.toEqual(new RunnerSupersededError());
+}
+
+function observedSocketFailure(
+  message: Readonly<Record<string, unknown>>,
+): Promise<Error> {
+  const socket = new RecordingTestSocket();
+  const failure = observeOperationalRunnerSocket(socket);
+  socket.receive(message);
+  return failure;
+}
+
+test("reports an explicit registration rejection distinctly", () => {
+  return expect(
+    observedSocketFailure({ type: "registration_rejected" }),
+  ).resolves.toEqual(new RunnerRegistrationRejectedError());
+});
+
+test("reports an explicit supersession frame distinctly", () => {
+  return expectSuperseded(observedSocketFailure({ type: "superseded" }));
+});
+
+test("reports a supersession close distinctly when its frame is lost", () => {
+  const socket = new RecordingTestSocket({
+    closeEvent: () =>
+      new CloseEvent("close", { code: RUNNER_SUPERSEDED_CLOSE_CODE }),
+  });
+  const failure = observeOperationalRunnerSocket(socket);
+
+  socket.close();
+
+  return expectSuperseded(failure);
+});

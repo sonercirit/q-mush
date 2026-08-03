@@ -20,7 +20,10 @@ import { completeRunnerRegistration } from "./runner-registration.ts";
 import { RunnerRestartCoordinator } from "./runner-restart.ts";
 import {
   addRunnerSocketFailureListeners,
+  observeOperationalRunnerSocket,
   parseSocketJsonRecord,
+  RunnerRegistrationRejectedError,
+  RunnerSupersededError,
 } from "./runner-socket.ts";
 import { RunnerUpdateTrigger } from "./runner-update-trigger.ts";
 import {
@@ -299,6 +302,13 @@ function executeCommand(
   active.set(command.id, { controller });
 }
 
+function abortActiveCommands(active: Map<string, ActiveCommand>): void {
+  for (const command of active.values()) {
+    command.controller.abort();
+  }
+  active.clear();
+}
+
 function bindOperationalSocket(
   connected: WebSocket,
   active: Map<string, ActiveCommand>,
@@ -315,6 +325,9 @@ function bindOperationalSocket(
       return;
     }
 
+    if (message["type"] === "superseded") {
+      return;
+    }
     if (message["type"] === "command") {
       executeCommand(
         connected,
@@ -331,10 +344,7 @@ function bindOperationalSocket(
     }
   });
   connected.addEventListener("close", () => {
-    for (const command of active.values()) {
-      command.controller.abort();
-    }
-    active.clear();
+    abortActiveCommands(active);
     void activeRunnerExecution().containers.cleanupAll();
   });
 }
@@ -396,8 +406,14 @@ async function connectRunner(
       );
       console.log(`Q Mush runner connected as ${metadata.name}.`);
       return socket;
-    } catch {
+    } catch (error) {
       socket.close();
+      if (
+        error instanceof RunnerRegistrationRejectedError ||
+        error instanceof RunnerSupersededError
+      ) {
+        throw error;
+      }
       console.warn("Could not reach Q Mush; retrying setup…");
       await setTimeout(RETRY_INTERVAL_MILLISECONDS);
     }
@@ -475,6 +491,53 @@ async function installUpdateIfAvailable(
   }
 }
 
+async function pendingSocketFailure(
+  failure: Promise<Error>,
+  milliseconds: number,
+): Promise<Error | undefined> {
+  const controller = new AbortController();
+  try {
+    return await Promise.race([
+      setTimeout(milliseconds, undefined, {
+        signal: controller.signal,
+      }).catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          throw error;
+        }
+        return undefined;
+      }),
+      failure,
+    ]);
+  } finally {
+    controller.abort();
+  }
+}
+
+async function pendingSupersession(
+  socket: WebSocket,
+  active: Map<string, ActiveCommand>,
+  failure: Promise<Error>,
+  milliseconds: number,
+): Promise<void> {
+  const pending = await pendingSocketFailure(failure, milliseconds);
+  if (pending instanceof RunnerSupersededError) {
+    await throwSocketFailure(socket, active, pending);
+  }
+}
+
+async function throwSocketFailure(
+  socket: WebSocket,
+  active: Map<string, ActiveCommand>,
+  failure: Error,
+): Promise<never> {
+  if (failure instanceof RunnerSupersededError) {
+    socket.close(1000, "Superseded");
+    abortActiveCommands(active);
+    await activeRunnerExecution().containers.cleanupAll();
+  }
+  throw failure;
+}
+
 async function maintainConnection(
   configuration: RunnerConfiguration,
   configurationPath: string,
@@ -490,17 +553,27 @@ async function maintainConnection(
     startupRestart,
     installOperationalHandlers,
   );
+  let socketFailure = observeOperationalRunnerSocket(socket);
   let initialUpdatePending = true;
   let nextUpdateAt = Date.now() + UPDATE_INTERVAL_MILLISECONDS;
 
   for (;;) {
     if (socket.readyState !== WebSocket.OPEN) {
+      const failure = await socketFailure;
+      if (failure instanceof RunnerSupersededError) {
+        await throwSocketFailure(socket, active, failure);
+      }
       socket = await connectRunner(
         configuration,
         configurationPath,
         startupRestart,
         installOperationalHandlers,
       );
+      socketFailure = observeOperationalRunnerSocket(socket);
+    }
+
+    if (socket.readyState === WebSocket.OPEN) {
+      await pendingSupersession(socket, active, socketFailure, 0);
     }
 
     if (
@@ -528,7 +601,12 @@ async function maintainConnection(
     }
 
     sendOpenSocketMessage(socket, { type: "heartbeat" });
-    await setTimeout(HEARTBEAT_INTERVAL_MILLISECONDS);
+    await pendingSupersession(
+      socket,
+      active,
+      socketFailure,
+      HEARTBEAT_INTERVAL_MILLISECONDS,
+    );
   }
 }
 

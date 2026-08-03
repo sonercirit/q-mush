@@ -9,6 +9,7 @@ import type {
 import type { ToolStreamEntry } from "../shared/tool-stream.ts";
 import type { DirectoryPickerState } from "./directory-picker-controller.ts";
 import type { SessionHistoryState } from "./session-history-state.ts";
+import type { OptimisticPendingInput } from "./session-pending-input.ts";
 import type { SessionProviderDiscoveryState } from "./session-provider-select.tsx";
 import type { SessionReassignmentDraft } from "./session-reassignment-client.ts";
 import type { SessionTranscriptFilters } from "./session-transcript-filters.ts";
@@ -49,6 +50,7 @@ export interface SessionViewState {
   readonly history: SessionHistoryState;
   readonly loadingDetail: boolean;
   readonly modelDiscovery: SessionModelDiscoveryState;
+  readonly optimisticPendingInputs: readonly OptimisticPendingInput[];
   readonly providerDiscovery: SessionProviderDiscoveryState;
   readonly openSelect:
     | "credential"

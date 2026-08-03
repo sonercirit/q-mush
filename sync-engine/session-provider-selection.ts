@@ -4,14 +4,19 @@ import {
 } from "../shared/agent-configuration.ts";
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
 import { mapWithParallelConcurrency } from "../shared/parallel.ts";
+import { isBalancedCredentialId } from "../shared/provider-credential-pool.ts";
 import type {
   ProviderCredentialAccess,
   ProviderId,
 } from "../shared/provider-credential-store.ts";
 import type { AgentSessionSummary } from "../shared/session-model.ts";
 import { RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
-import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
+import {
+  isCredentialRejectionError,
+  type AgentModelDiscoverer,
+} from "./agent-model-discovery.ts";
 import { createApiError, createJsonResponse } from "./http.ts";
+import type { ModelCredentialPool } from "./model-credential-pool.ts";
 import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
 import type {
   PreparedSessionCredentialProviderState,
@@ -58,6 +63,7 @@ export type WithCredential = (
  */
 export async function openRouterProvidersForUser(options: {
   readonly discover: OpenRouterProviderDiscoverer;
+  readonly pool: Pick<ModelCredentialPool, "representative">;
   readonly request: Request;
   readonly user: AuthenticatedUser;
   readonly withCredential: WithCredential;
@@ -72,18 +78,51 @@ export async function openRouterProvidersForUser(options: {
   ) {
     return createApiError("invalid_request", 400);
   }
+  const selection = {
+    credentialId,
+    provider: "openrouter" as const,
+    workspaceId,
+  };
+  const discover = async (
+    credential: ProviderCredentialAccess,
+  ): Promise<Response> => {
+    try {
+      const catalog = await options.discover(
+        options.user.id,
+        credential,
+        model,
+      );
+      const response = createJsonResponse(catalog);
+      return response;
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("identifier")) {
+        return createApiError("invalid_request", 400);
+      }
+      throw error;
+    }
+  };
+  if (isBalancedCredentialId("openrouter", credentialId)) {
+    const credentials = await options.pool.representative(
+      options.user.id,
+      selection,
+    );
+    for (const credential of credentials) {
+      try {
+        return await discover(credential);
+      } catch {
+        // Discovery is read-only; any pool member may represent the selection.
+      }
+    }
+    return createApiError("provider_unavailable", 502);
+  }
   return options.withCredential(
     options.user.id,
-    { credentialId, provider: "openrouter", workspaceId },
+    selection,
     async (credential) => {
       try {
-        return createJsonResponse(
-          await options.discover(options.user.id, credential, model),
-        );
-      } catch (error) {
-        return error instanceof Error && error.message.includes("identifier")
-          ? createApiError("invalid_request", 400)
-          : createApiError("provider_unavailable", 502);
+        return await discover(credential);
+      } catch {
+        return createApiError("provider_unavailable", 502);
       }
     },
   );
@@ -171,14 +210,36 @@ export function requireSessionMetadata(
   return metadata;
 }
 
+export function optionalCredentialRejection(
+  rejectCredentialErrors: boolean | undefined,
+): Readonly<{ rejectCredentialErrors?: boolean }> {
+  return rejectCredentialErrors === undefined ? {} : { rejectCredentialErrors };
+}
+
+interface SessionMetadataInput {
+  readonly model: string;
+  readonly openRouterProviderTag: string | null;
+  readonly provider: ProviderId;
+}
+
+interface SessionMetadataOptions {
+  readonly credential: ProviderCredentialAccess;
+  readonly discoverModels: AgentModelDiscoverer;
+  readonly discoverProviders: OpenRouterProviderDiscoverer;
+  readonly input: SessionMetadataInput;
+  readonly ownerId: string;
+  readonly rejectCredentialErrors?: boolean;
+}
+
 export function sessionMetadataFromDependencies(options: {
   readonly credential: ProviderCredentialAccess;
   readonly dependencies: {
     readonly discoverModels: AgentModelDiscoverer;
     readonly discoverOpenRouterProviders: OpenRouterProviderDiscoverer;
   };
-  readonly input: Parameters<typeof sessionMetadata>[0]["input"];
+  readonly input: SessionMetadataInput;
   readonly ownerId: string;
+  readonly rejectCredentialErrors?: boolean;
 }): Promise<SessionMetadataResult> {
   return sessionMetadata({
     credential: options.credential,
@@ -186,20 +247,25 @@ export function sessionMetadataFromDependencies(options: {
     discoverProviders: options.dependencies.discoverOpenRouterProviders,
     input: options.input,
     ownerId: options.ownerId,
+    ...optionalCredentialRejection(options.rejectCredentialErrors),
   });
 }
 
-export async function sessionMetadata(options: {
-  readonly credential: ProviderCredentialAccess;
-  readonly discoverModels: AgentModelDiscoverer;
-  readonly discoverProviders: OpenRouterProviderDiscoverer;
-  readonly input: {
-    readonly model: string;
-    readonly openRouterProviderTag: string | null;
-    readonly provider: ProviderId;
-  };
-  readonly ownerId: string;
-}): Promise<SessionMetadataResult> {
+function credentialFailure(
+  options: SessionMetadataOptions,
+  error: unknown,
+  fallback: SessionMetadataResult,
+): SessionMetadataResult {
+  if (options.rejectCredentialErrors === true) {
+    if (isCredentialRejectionError(error)) throw error;
+    throw new RealtimeCommandError("provider_unavailable");
+  }
+  return fallback;
+}
+
+export async function sessionMetadata(
+  options: SessionMetadataOptions,
+): Promise<SessionMetadataResult> {
   const { credential, input } = options;
   if (endpointProviderTag(input.openRouterProviderTag) !== undefined) {
     try {
@@ -216,8 +282,8 @@ export async function sessionMetadata(options: {
             maxContextTokens: selected.contextWindow,
             providerPricing: selected.pricing,
           };
-    } catch {
-      return { error: "validation_failed" };
+    } catch (error) {
+      return credentialFailure(options, error, { error: "validation_failed" });
     }
   }
 
@@ -228,7 +294,10 @@ export async function sessionMetadata(options: {
       maxContextTokens: model?.contextWindow ?? null,
       providerPricing: model?.pricing ?? null,
     };
-  } catch {
-    return { maxContextTokens: null, providerPricing: null };
+  } catch (error) {
+    return credentialFailure(options, error, {
+      maxContextTokens: null,
+      providerPricing: null,
+    });
   }
 }

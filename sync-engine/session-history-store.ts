@@ -12,6 +12,7 @@ import { countSelectedRows } from "./database-count.ts";
 import { storedActiveSessionState } from "./session-active-query.ts";
 import { STORED_SESSION_MESSAGE_SELECTION } from "./session-message-selection.ts";
 import { summarizeStoredMessage } from "./session-store-read.ts";
+import { storedSegmentTokenUsage } from "./session-token-usage-store.ts";
 
 interface AuthorizedHistorySegment {
   readonly currentSegment: number;
@@ -115,5 +116,10 @@ export function readStoredSessionHistory(
           : null,
     segment: authorized.segment,
     sessionId: request.sessionId,
+    tokenUsage: storedSegmentTokenUsage(
+      database,
+      request.sessionId,
+      authorized.segment,
+    ),
   };
 }

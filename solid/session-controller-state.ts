@@ -75,6 +75,7 @@ function sessionMessageMatches(
     left.toolName === right.toolName &&
     serializedDataMatches(left.attachments, right.attachments) &&
     serializedDataMatches(left.images, right.images) &&
+    serializedDataMatches(left.tokenUsage, right.tokenUsage) &&
     serializedDataMatches(left.toolCalls, right.toolCalls)
   );
 }
@@ -414,17 +415,34 @@ export class SessionRealtimeState {
     }
 
     const current = this.#view.value.detail;
+    const confirmedRequestIds = new Set(
+      persistable.pendingInputs.map(({ clientRequestId }) => clientRequestId),
+    );
+    const retainedOptimisticInputs =
+      this.#view.value.optimisticPendingInputs.filter(
+        ({ clientRequestId }) => !confirmedRequestIds.has(clientRequestId),
+      );
+    const optimisticPendingInputs =
+      retainedOptimisticInputs.length ===
+      this.#view.value.optimisticPendingInputs.length
+        ? this.#view.value.optimisticPendingInputs
+        : retainedOptimisticInputs;
     const visibleDetail = retainUnchangedSessionData(current, {
       ...persistable,
       messages: reconciled.messages,
     });
-    if (current !== undefined && sessionDataMatches(current, visibleDetail)) {
+    const detailUnchanged =
+      current !== undefined && sessionDataMatches(current, visibleDetail);
+    const optimisticUnchanged =
+      optimisticPendingInputs === this.#view.value.optimisticPendingInputs;
+    if (detailUnchanged && optimisticUnchanged) {
       return;
     }
 
     this.#view.patch({
-      detail: visibleDetail,
+      ...(detailUnchanged ? {} : { detail: visibleDetail }),
       loadingDetail: false,
+      optimisticPendingInputs,
       sessions: replaceSessionSummary(
         this.#view.value.sessions ?? [],
         persistable,

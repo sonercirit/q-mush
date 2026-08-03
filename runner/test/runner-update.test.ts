@@ -357,6 +357,18 @@ function runnerConnectFrame(restartId?: string): unknown {
   return frame;
 }
 
+test("remembers startup restart ownership after registration consumes its ID", () => {
+  const startupRestart = new RunnerStartupRestart("restart-owned-process");
+  const connection = startupRestart.connection();
+
+  connection.finalizeActivation("restart-owned-receipt");
+  connection.operational("restart-owned-receipt");
+
+  expect(startupRestart.restartId).toBeUndefined();
+  expect(startupRestart.startupRestart).toBe(true);
+  expect(new RunnerStartupRestart().startupRestart).toBe(false);
+});
+
 test("rejects invalid startup restart identities", () => {
   expect(() => new RunnerStartupRestart("")).toThrow(
     "runner restart ID is invalid",

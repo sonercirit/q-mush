@@ -7,6 +7,7 @@ import {
   users,
 } from "../../shared/database/schema.ts";
 import { SYSTEM_ID } from "../../shared/ids.ts";
+import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
 import {
   ProviderCredentialStore,
   type ProviderCredentialAccess,
@@ -59,6 +60,7 @@ function modelOption(id: string) {
 }
 
 function singleReadModel(id: string, categories?: readonly string[]) {
+  const terminalStep = { content: "Context read.", toolCalls: [] };
   return scriptedModel([
     {
       content: "Read selected session context.",
@@ -73,7 +75,7 @@ function singleReadModel(id: string, categories?: readonly string[]) {
         ),
       ],
     },
-    { content: "Done.", toolCalls: [] },
+    terminalStep,
   ]);
 }
 
@@ -169,6 +171,47 @@ describe("session agent introspection tools", () => {
     expect(serialized).toContain("hidden reasoning");
     expect(serialized).toContain("call-list_sessions");
     expect(Buffer.byteLength(serialized, "utf8")).toBeLessThanOrEqual(32_768);
+    setup.database.$client.close();
+  });
+
+  test("lists balanced credential sentinels for providers with multiple accounts", async () => {
+    const secondCredentialId = "018bcfe5-6800-7000-8000-000000000094";
+    const model = scriptedModel([
+      {
+        content: "Discovering balanced credentials.",
+        toolCalls: [
+          toolCall("get_session_options", {
+            category: "credentials",
+            page: 1,
+          }),
+        ],
+      },
+      { content: "Balanced discovery complete.", toolCalls: [] },
+    ]);
+    const balancedCredentials = [
+      {
+        ...credential(CREDENTIAL_ID, "Primary"),
+        secret: "provider-secret",
+      },
+      credential(secondCredentialId, "Secondary"),
+    ];
+    const setup = await startToolSession(model, {
+      credentials: { openai: balancedCredentials },
+    });
+    const detail = await waitForToolResults(setup, "get_session_options", 1);
+    const output = jsonRecord(
+      findToolResultContents(detail, "get_session_options")[0] ?? "null",
+    );
+
+    expect(records(output["items"])).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: balancedCredentialId("openai"),
+          label: "Balanced (2 accounts)",
+          provider: "openai",
+        }),
+      ]),
+    );
     setup.database.$client.close();
   });
 
@@ -367,24 +410,20 @@ describe("session agent introspection tools", () => {
           ),
         ],
       },
-      { content: "Discovery complete.", toolCalls: [] },
+      { content: "All option discovery complete.", toolCalls: [] },
     ]);
-    const setup = await startToolSession(
-      model,
-      {
-        credentials: {
-          openai: openAiCredentials,
-          openrouter: openRouterCredentials,
-        },
-      },
-      (provider) =>
-        Promise.resolve({
-          defaultModel:
-            provider === "openai"
-              ? (openAiModels[0]?.id ?? null)
-              : (openRouterModels[0]?.id ?? null),
-          models: provider === "openai" ? openAiModels : openRouterModels,
-        }),
+    const credentials = {
+      openai: openAiCredentials,
+      openrouter: openRouterCredentials,
+    };
+    const setup = await startToolSession(model, { credentials }, (provider) =>
+      Promise.resolve({
+        defaultModel:
+          provider === "openai"
+            ? (openAiModels[0]?.id ?? null)
+            : (openRouterModels[0]?.id ?? null),
+        models: provider === "openai" ? openAiModels : openRouterModels,
+      }),
     );
     const detail = await waitForToolResults(setup, "get_session_options", 3);
     const outputs = findToolResultContents(detail, "get_session_options").map(
@@ -395,11 +434,11 @@ describe("session agent introspection tools", () => {
       hasNext: false,
       page: 2,
       pageSize: 10,
-      totalItems: 11,
+      totalItems: 12,
       totalPages: 2,
     });
     expect(outputs[0]?.["hasPrevious"]).toBe(true);
-    expect(testArray(outputs[0]?.["items"])).toHaveLength(1);
+    expect(testArray(outputs[0]?.["items"])).toHaveLength(2);
     expect(JSON.stringify(outputs[0])).not.toContain("secret-openrouter");
     expect(outputs[1]).toMatchObject({
       page: 2,

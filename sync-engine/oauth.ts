@@ -135,11 +135,16 @@ export function normalizeOptionalValue(
     : normalized;
 }
 
+export type OAuthErrorResponse = (
+  response: Response,
+) => Error | Promise<Error | undefined> | undefined;
+
 export async function postFormJson(
   runtime: OAuthRuntime,
   url: string,
   parameters: Readonly<Record<string, string>>,
   errorMessage: string,
+  errorResponse?: OAuthErrorResponse,
 ): Promise<JsonRecord> {
   const response = await runtime.fetch(url, {
     body: new URLSearchParams(parameters),
@@ -149,6 +154,10 @@ export async function postFormJson(
     },
     method: "POST",
   });
+  if (!response.ok && errorResponse !== undefined) {
+    const classified = await errorResponse(response);
+    if (classified !== undefined) throw classified;
+  }
   return readJsonRecord(response, errorMessage);
 }
 

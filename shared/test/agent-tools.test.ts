@@ -43,6 +43,27 @@ test("lets parallel call every eligible tool and skill by default", () => {
   ]);
 });
 
+test("defines the sleep duration in bounded whole seconds", () => {
+  const sleep = AGENT_TOOLS.find(
+    ({ function: definition }) => definition.name === "sleep",
+  );
+
+  if (sleep?.function.name !== "sleep") {
+    throw new Error("The sleep tool definition is unavailable");
+  }
+  expect(sleep.function.description).toContain("duration in seconds");
+  expect(sleep.function.parameters.required).toEqual(["durationSeconds"]);
+  const properties = sleep.function.parameters.properties;
+  const durationSeconds = properties.durationSeconds;
+  expect(Object.keys(properties)).toEqual(["durationSeconds"]);
+  expect(durationSeconds.description).toBe(
+    "Duration to sleep in seconds (1-3,600)",
+  );
+  expect(durationSeconds.maximum).toBe(3_600);
+  expect(durationSeconds.minimum).toBe(1);
+  expect(durationSeconds.type).toBe("integer");
+});
+
 test("keeps sleep session-local and unavailable to parallel", () => {
   const sleep = AGENT_SESSION_TOOL_OPTIONS.find(({ name }) => name === "sleep");
   const parallel = selectedAgentTools(["sleep", "parallel"]);
@@ -73,14 +94,12 @@ test("defines optional agent-file path and auto-compaction for spawned sessions"
       parameters: {
         properties: {
           agentFilePath: {
-            description:
-              "Optional agent-file path; may be relative or absolute, inside or outside the workspace",
+            description: "Optional agent-file path, relative or absolute",
             type: "string",
           },
           autoCompact: { type: "boolean" },
           workingDirectory: {
-            description:
-              "Any working directory on the selected runner, inside or outside the parent workspace",
+            description: "Working directory on the selected runner",
             type: "string",
           },
         },

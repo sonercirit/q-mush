@@ -1,9 +1,6 @@
 import type { PendingAskQuestions } from "../shared/ask-questions.ts";
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
-import type {
-  RunnerCommandBroker,
-  RunnerToolCommand,
-} from "../shared/runner-command-broker.ts";
+import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type {
   AgentSessionDetail,
   AgentSessionSummary,
@@ -23,6 +20,7 @@ import { updateSessionCompactionMode } from "./session-compaction-actions.ts";
 import type { SessionNotification } from "./session-creation.ts";
 import type { SessionExecutionCleanup } from "./session-execution-cleanup.ts";
 import { readPrompt, type PromptInput } from "./session-input.ts";
+import type { DeliverRunnerCommands } from "./session-integration.ts";
 import { openRouterProvidersForUser } from "./session-provider-selection.ts";
 import { recoverAnsweredQuestions } from "./session-question-actions.ts";
 import { reassignSessionRequest } from "./session-reassignment-request.ts";
@@ -67,6 +65,9 @@ export interface SessionIntegrationApiResources {
   readonly executionCleanup: SessionExecutionCleanup;
   readonly launchQueuedSessions: (userId: string) => void;
   readonly modelsForUser: SessionModelsForUser;
+  readonly modelCredentialPool: Parameters<
+    typeof openRouterProvidersForUser
+  >[0]["pool"];
   readonly notify: SessionNotification;
   readonly now: typeof Date.now;
   readonly questionActions: Parameters<typeof recoverAnsweredQuestions>[0];
@@ -199,17 +200,30 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
     return this.resources.broker.complete(runnerId, commandId, result);
   }
 
-  deliverRunnerCommands(
-    runnerId: string,
-    deliver: (command: RunnerToolCommand) => boolean,
-  ): boolean {
+  deliverRunnerCommands: DeliverRunnerCommands = (
+    runnerId,
+    deliver,
+    connectionGeneration,
+  ) => {
     let delivered = true;
-    this.resources.broker.deliverQueued(runnerId, (command) => {
-      const accepted = deliver(command);
-      delivered &&= accepted;
-      return accepted;
-    });
+    this.resources.broker.deliverQueued(
+      runnerId,
+      (command) => {
+        const accepted = deliver(command);
+        delivered &&= accepted;
+        return accepted;
+      },
+      connectionGeneration,
+    );
     return delivered;
+  };
+
+  runnerConnectionGeneration(runnerId: string): number {
+    return this.resources.broker.runnerConnectionGeneration(runnerId);
+  }
+
+  replaceRunnerConnection(runnerId: string, replacedGeneration: number): void {
+    this.resources.broker.replaceRunnerConnection(runnerId, replacedGeneration);
   }
 
   drain(): Promise<void> {
@@ -309,6 +323,7 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
     return this.#getForUser(request, (user) =>
       openRouterProvidersForUser({
         discover: this.resources.discoverOpenRouterProviders,
+        pool: this.resources.modelCredentialPool,
         request,
         user,
         withCredential: this.resources.withCredentialAccess,

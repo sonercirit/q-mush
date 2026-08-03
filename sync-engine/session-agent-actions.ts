@@ -1,4 +1,8 @@
-import type { SessionAgentToolName } from "../shared/agent-tools.ts";
+import { createAgentSystemPrompt } from "../shared/agent-prompt.ts";
+import {
+  selectedAgentTools,
+  type SessionAgentToolName,
+} from "../shared/agent-tools.ts";
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type { RunnerSummary } from "../shared/runner-model.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
@@ -11,16 +15,23 @@ import {
   type SessionAgentActionDependencies,
 } from "./session-agent-action-helpers.ts";
 import {
-  compactSessionAction,
-  sessionControlDependencies,
-  steerSessionAction,
-} from "./session-agent-control-actions.ts";
-import {
-  readSessionAction,
-  sessionOptionsAction,
-  type SessionInspectionDependencies,
-} from "./session-agent-inspection-actions.ts";
+  compactSessionForAgent,
+  steerSessionForAgent,
+  type SessionControlActionDependencies,
+} from "./session-agent-control.ts";
 import { listSessionsOutput } from "./session-agent-list.ts";
+import {
+  sessionAgentOptions,
+  type SessionRunnerPageRequest,
+} from "./session-agent-options-action.ts";
+import type {
+  GetSessionOptionsToolInput,
+  SessionOptionsSource,
+} from "./session-agent-options.ts";
+import {
+  readSessionOutput,
+  type ReadSessionToolInput,
+} from "./session-agent-read.ts";
 import {
   sessionToolOutput,
   type SessionAgentToolActions,
@@ -33,27 +44,27 @@ import {
   type SpawnedSessionCompletion,
 } from "./session-child-lifecycle.ts";
 import type { SessionDetailLookup } from "./session-command-types.ts";
-import type { startManualSessionCompactionForUserId } from "./session-compaction-actions.ts";
 import type { SessionExecutionAuthority } from "./session-execution-authority.ts";
 import type {
   RunnerDirectoryBrowseResult,
   RunnerDirectoryRequest,
 } from "./session-request-helpers.ts";
 import type { SessionRunnerAvailability } from "./session-runner-availability.ts";
-import type { SessionRuntimes } from "./session-runtime.ts";
+import { readSessionSnapshot } from "./session-store-agent-read.ts";
 import type { PendingSpawnedSession } from "./session-store-spawns.ts";
 
-const runnerUnavailableOutput = (): string =>
-  sessionToolOutput({ error: "runner_unavailable" });
+function runnerUnavailableOutput(): string {
+  return sessionToolOutput({ error: "runner_unavailable" });
+}
+
+type RunnerPageRequest = SessionRunnerPageRequest;
 
 interface SessionAgentActionsDependencies
-  extends SessionAgentActionDependencies, SessionInspectionDependencies {
+  extends SessionAgentActionDependencies, SessionControlActionDependencies {
   readonly abortSession: (sessionId: string) => void;
   readonly activeSession: (sessionId: string) => boolean;
   readonly broker: Pick<RunnerCommandBroker, "cancelSession">;
   readonly cleanupSession: (detail: AgentSessionDetail) => void;
-  readonly compactSession?: typeof startManualSessionCompactionForUserId;
-  readonly runtimes?: SessionRuntimes;
   readonly browseDirectories: (
     request: RunnerDirectoryRequest,
     signal: AbortSignal,
@@ -62,6 +73,13 @@ interface SessionAgentActionsDependencies
     userId: string,
     workspaceId?: string,
   ) => readonly RunnerSummary[];
+  readonly listRunnerOptions: (
+    userId: string,
+    request: RunnerPageRequest,
+  ) => {
+    readonly items: SessionOptionsSource["runners"];
+    readonly totalItems: number;
+  };
 }
 
 export class SessionAgentActions {
@@ -146,12 +164,7 @@ export class SessionAgentActions {
           parentWorkspaceId(),
         ),
       getSessionOptions: guardParent("get_session_options", (input) =>
-        sessionOptionsAction(
-          this.#dependencies,
-          userId,
-          input,
-          parentWorkspaceId(),
-        ),
+        this.#options(userId, input, parentWorkspaceId()),
       ),
       listRunners: guardParent("list_runners", () =>
         sessionToolOutput(
@@ -165,12 +178,7 @@ export class SessionAgentActions {
         ),
       ),
       readSession: guardParent("read_session", (input) =>
-        readSessionAction(
-          this.#dependencies,
-          userId,
-          input,
-          parentWorkspaceId(),
-        ),
+        this.#read(userId, input, parentWorkspaceId()),
       ),
       reassignSession: guardParent(
         "reassign_session",
@@ -364,6 +372,53 @@ export class SessionAgentActions {
     return detail;
   }
 
+  #read(
+    userId: string,
+    input: ReadSessionToolInput,
+    workspaceId: string,
+  ): string {
+    const selected = new Set(input.categories);
+    const detail = readSessionSnapshot(this.#dependencies.database, {
+      includeSystem: selected.has("system"),
+      limit: input.limit,
+      roles: (["user", "assistant", "thinking", "tool"] as const).filter(
+        (role) => selected.has(role),
+      ),
+      sessionId: input.sessionId,
+      userId,
+      workspaceId,
+    });
+    if (detail === undefined) {
+      throw new Error("Session not found");
+    }
+    return readSessionOutput({
+      input,
+      matchedRecords: detail.transcript.matchedRecords,
+      messages: detail.transcript.messages,
+      session: { id: detail.id, status: detail.status, title: detail.title },
+      systemPrompt: createAgentSystemPrompt(
+        detail.agentFile,
+        detail.executionEnvironment,
+      ),
+      toolDefinitions: selectedAgentTools(detail.tools).map(
+        ({ function: definition }) => definition,
+      ),
+    });
+  }
+
+  async #options(
+    userId: string,
+    input: GetSessionOptionsToolInput,
+    workspaceId: string,
+  ): Promise<string> {
+    return sessionAgentOptions({
+      dependencies: this.#dependencies,
+      input,
+      userId,
+      workspaceId,
+    });
+  }
+
   #queuedResponse(userId: string, sessionId: string): Response {
     this.#dependencies.notify(userId, sessionId);
     return createJsonResponse({ sessionId, status: "queued" });
@@ -508,68 +563,15 @@ export class SessionAgentActions {
     });
   }
 
-  #compactionDependencies(): {
-    readonly compactSession: NonNullable<
-      SessionAgentActionsDependencies["compactSession"]
-    >;
-    readonly runtimes: SessionRuntimes;
-  } {
-    const compactSession = this.#dependencies.compactSession;
-    const runtimes = this.#dependencies.runtimes;
-    if (compactSession === undefined || runtimes === undefined) {
-      throw new Error("Session compaction is unavailable");
-    }
-    return { compactSession, runtimes };
-  }
-
   #compact(input: {
-    readonly authority: SessionExecutionAuthority;
+    readonly authority: SessionExecutionAuthority & {
+      readonly tool: "compact_session";
+    };
     readonly sessionId: string;
     readonly userId: string;
     readonly workspaceId: string;
   }): Promise<string> {
-    const { authority, sessionId, userId, workspaceId } = input;
-    const { compactSession, runtimes } = this.#compactionDependencies();
-    const shared = sessionControlDependencies(this.#dependencies);
-    return compactSessionAction(
-      {
-        compactSession: (ownerId, targetId, targetWorkspaceId) =>
-          compactSession(
-            {
-              credential: (...parameters) =>
-                this.#dependencies.withCredential(...parameters),
-              launch: (detail, credential, owner, operation) =>
-                this.#dependencies.launchSession(
-                  credential,
-                  detail,
-                  owner,
-                  operation,
-                ),
-              notify: this.#dependencies.notify,
-              now: this.#dependencies.now,
-              operation: "compact_and_continue",
-              parentAuthority: authority,
-              runtimes,
-              store: this.#dependencies.store,
-              workspaceId: targetWorkspaceId,
-            },
-            ownerId,
-            targetId,
-          ),
-        ...shared,
-        scheduleCompaction: (targetId, generation) =>
-          runtimes.activeGenerationMatches(targetId, generation)
-            ? this.#dependencies.store.scheduleManualCompaction(
-                targetId,
-                generation,
-                this.#dependencies.now(),
-              )
-            : "unavailable",
-      },
-      userId,
-      sessionId,
-      workspaceId,
-    );
+    return compactSessionForAgent(this.#dependencies, input);
   }
 
   #steer(
@@ -578,20 +580,12 @@ export class SessionAgentActions {
     message: string,
     workspaceId: string,
   ): Promise<string> {
-    const output = steerSessionAction(
-      {
-        notify: (...parameters) => {
-          this.#dependencies.notify(...parameters);
-        },
-        now: this.#dependencies.now,
-        store: this.#dependencies.store,
-      },
-      userId,
-      sessionId,
+    return steerSessionForAgent(this.#dependencies, {
       message,
+      sessionId,
+      userId,
       workspaceId,
-    );
-    return Promise.resolve(output);
+    });
   }
 
   #stop(

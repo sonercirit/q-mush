@@ -23,9 +23,12 @@ import {
   activeDefaultIndex,
   ownedAuditColumns,
   ownedForeignKey,
+  tokenUsageColumns,
 } from "./schema-columns.ts";
 import { agentSessionTables } from "./session-operation-schema.ts";
+
 export { auditColumns } from "./audit-columns.ts";
+
 export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
   googleSubject: text("google_subject").notNull().unique(),
@@ -34,14 +37,18 @@ export const users = sqliteTable("users", {
   picture: text("picture"),
   ...auditColumns(),
 });
+
 function userIdColumn() {
   return ownedForeignKey("user_id", () => users.id);
 }
+
 const userOwnedAuditColumns = () => ownedAuditColumns(() => users.id);
+
 const workspaceDefaultIndex = activeDefaultIndex(
   "workspaces_user_default_unique",
 );
-const runnerDefaultIndex = activeDefaultIndex("runners_user_default_unique");
+const runnerDefault = activeDefaultIndex("runners_user_default_unique");
+
 export const workspaces = sqliteTable(
   "workspaces",
   {
@@ -59,9 +66,11 @@ export const workspaces = sqliteTable(
     workspaceDefaultIndex(table),
   ],
 );
+
 function workspaceIdColumn() {
   return ownedForeignKey("workspace_id", () => workspaces.id);
 }
+
 export const prompts = sqliteTable(
   "prompts",
   {
@@ -83,6 +92,7 @@ export const prompts = sqliteTable(
     check("prompts_revision_positive_check", sql`${table.revision} > 0`),
   ],
 );
+
 export const providerCredentials = sqliteTable(
   "provider_credentials",
   {
@@ -114,12 +124,14 @@ export const providerCredentials = sqliteTable(
       ),
   ],
 );
+
 function providerCredentialIdColumn() {
   return ownedForeignKey(
     "provider_credential_id",
     () => providerCredentials.id,
   );
 }
+
 function quotaIndex(table: {
   readonly isDeleted: AnySQLiteColumn;
   readonly providerCredentialId: AnySQLiteColumn;
@@ -128,9 +140,11 @@ function quotaIndex(table: {
     .on(table.providerCredentialId)
     .where(sql`NOT ${table.isDeleted}`);
 }
+
 function threshold() {
   return real("auto_reset_threshold_percent").notNull().default(1);
 }
+
 export const providerQuotaSettings = sqliteTable(
   "provider_quota_settings",
   {
@@ -150,6 +164,7 @@ export const providerQuotaSettings = sqliteTable(
     ),
   ],
 );
+
 export const providerQuotaResetReceipts = sqliteTable(
   "provider_quota_reset_receipts",
   {
@@ -174,6 +189,7 @@ export const providerQuotaResetReceipts = sqliteTable(
       .where(sql`NOT ${table.isDeleted} AND ${table.outcome} IS NULL`),
   ],
 );
+
 function activeConnectionIndex(
   name: string,
   ownerId: AnySQLiteColumn,
@@ -184,6 +200,7 @@ function activeConnectionIndex(
     .on(ownerId, workspaceId)
     .where(sql`NOT ${isDeleted}`);
 }
+
 export const providerCredentialWorkspaces = sqliteTable(
   "provider_credential_workspaces",
   {
@@ -204,6 +221,7 @@ export const providerCredentialWorkspaces = sqliteTable(
     ),
   ],
 );
+
 export const attachmentFallbacks = sqliteTable(
   "attachment_fallbacks",
   {
@@ -224,6 +242,7 @@ export const attachmentFallbacks = sqliteTable(
       .where(sql`NOT ${table.isDeleted}`),
   ],
 );
+
 export const runners = sqliteTable(
   "runners",
   {
@@ -279,7 +298,7 @@ export const runners = sqliteTable(
     uniqueIndex("runners_active_token_unique")
       .on(table.tokenHash)
       .where(sql`${table.isDeleted} = false`),
-    runnerDefaultIndex(table),
+    runnerDefault(table),
     check(
       "runners_activation_generation_nonnegative_check",
       sql`${table.activationGeneration} >= 0`,
@@ -310,6 +329,7 @@ export const runners = sqliteTable(
     ),
   ],
 );
+
 export const runnerWorkspaces = sqliteTable(
   "runner_workspaces",
   {
@@ -330,6 +350,7 @@ export const runnerWorkspaces = sqliteTable(
     ),
   ],
 );
+
 export const agentSessions = sqliteTable(
   "agent_sessions",
   {
@@ -404,10 +425,12 @@ export const agentSessions = sqliteTable(
     ),
   ],
 );
+
 function agentSessionIdColumn() {
   const column = text("session_id").notNull();
   return column.references(() => agentSessions.id, { onDelete: "restrict" });
 }
+
 export const { agentSessionOperations, agentSessionTurns } = agentSessionTables(
   () => users.id,
   () => agentSessions.id,
@@ -440,6 +463,7 @@ export const agentPendingInputs = sqliteTable(
     ),
   ],
 );
+
 export const agentQuestionRequests = sqliteTable(
   "agent_question_requests",
   {
@@ -473,6 +497,7 @@ export const agentQuestionRequests = sqliteTable(
     ),
   ],
 );
+
 export const agentMessages = sqliteTable(
   "agent_messages",
   {
@@ -490,6 +515,7 @@ export const agentMessages = sqliteTable(
     toolName: text("tool_name"),
     toolCalls: text("tool_calls"),
     images: text("images"),
+    ...tokenUsageColumns(),
   },
   (table) => [
     index("agent_messages_session_deletion_creation_index").on(
@@ -513,6 +539,7 @@ export const agentMessages = sqliteTable(
     ),
   ],
 );
+
 export const sessions = sqliteTable(
   "sessions",
   {

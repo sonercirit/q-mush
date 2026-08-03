@@ -13,6 +13,7 @@ const ACTIVE_STEP_STATUSES: ReadonlySet<AgentSessionStatus> = new Set([
 interface CompletedStepTiming {
   readonly endedAt: number;
   readonly startedAt: number;
+  readonly tokenUsage?: AgentSessionMessage["tokenUsage"];
 }
 
 interface SessionStepTiming {
@@ -60,20 +61,27 @@ export function sessionStepTiming(
   let startedAt: number | undefined;
   let latestStepMessage: AgentSessionMessage | undefined;
   let pendingToolCallIds: Set<string> | undefined;
+  let stepTokenUsage: AgentSessionMessage["tokenUsage"] | undefined;
 
   const start = (message: AgentSessionMessage): void => {
     startedAt =
       turnForMessage(message, turnsById)?.startedAt ?? message.createdAt;
     latestStepMessage = undefined;
     pendingToolCallIds = undefined;
+    stepTokenUsage = undefined;
   };
   const complete = (message: AgentSessionMessage, endedAt: number): void => {
     if (startedAt !== undefined) {
-      completedTimings.set(message.id, { endedAt, startedAt });
+      completedTimings.set(message.id, {
+        endedAt,
+        startedAt,
+        ...(stepTokenUsage === undefined ? {} : { tokenUsage: stepTokenUsage }),
+      });
     }
     startedAt = undefined;
     latestStepMessage = undefined;
     pendingToolCallIds = undefined;
+    stepTokenUsage = undefined;
   };
 
   for (const message of messages) {
@@ -91,6 +99,7 @@ export function sessionStepTiming(
 
     if (message.role === "assistant") {
       if (transientAssistant(message)) continue;
+      stepTokenUsage = message.tokenUsage;
       if (message.toolCalls.length === 0) {
         const endedAt =
           turnForMessage(message, turnsById)?.endedAt ?? message.createdAt;

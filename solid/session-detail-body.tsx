@@ -28,6 +28,7 @@ import {
   sessionComposerShortcut,
   SessionPendingInputs,
 } from "./session-pending-client.tsx";
+import { reconcilePendingInputs } from "./session-pending-input.ts";
 import { sessionMutationPending } from "./session-pending.ts";
 import { SessionProviderUpdateEditor } from "./session-provider-update-client.tsx";
 import type { SessionProviderUpdateView } from "./session-provider-update-model.ts";
@@ -37,8 +38,22 @@ import { SessionToolUpdateEditor } from "./session-tool-update-client.tsx";
 import { createSessionTranscriptCounts } from "./session-transcript-counts.ts";
 import { SessionTranscriptFilterControls } from "./session-transcript-filter-controls.tsx";
 import { SessionTranscript } from "./session-transcript.tsx";
+import { SessionUsage } from "./session-usage-view.tsx";
 
 const SCROLL_END_TOLERANCE = 64;
+
+function currentPendingInputs(
+  fallback: AgentSessionDetail,
+  view: ReturnType<LoadedSessionDetailViewProps["controller"]["view"]>,
+): ReturnType<typeof reconcilePendingInputs> {
+  const detail = view.detail?.id === fallback.id ? view.detail : fallback;
+  return reconcilePendingInputs(
+    detail.pendingInputs,
+    view.optimisticPendingInputs.filter(
+      ({ sessionId }) => sessionId === detail.id,
+    ),
+  );
+}
 
 function sessionCopyText(detail: AgentSessionDetail): string {
   const transcript = detail.messages
@@ -188,6 +203,7 @@ export function SessionDetailBody(props: {
             </span>
           </div>
           <span class="mt-2 block">{props.sessionMetrics}</span>
+          <SessionUsage kind="session" usage={view().detail.tokenUsage} />
         </div>
         <div class="flex shrink-0 flex-wrap items-center gap-2">
           <button
@@ -259,7 +275,15 @@ export function SessionDetailBody(props: {
           }}
         />
       </div>
-      <SessionHistoryControls controller={view().controller} />
+      <SessionHistoryControls
+        controller={view().controller}
+        tokenUsage={
+          view().state.history.page?.tokenUsage ??
+          (view().state.history.page === undefined
+            ? view().detail.segmentTokenUsage
+            : undefined)
+        }
+      />
       <SessionTranscriptFilterControls
         counts={transcriptCounts().filterCounts}
         filters={view().state.transcriptFilters}
@@ -323,12 +347,12 @@ export function SessionDetailBody(props: {
         )}
       </Show>
       <SessionPendingInputs
-        inputs={
-          view().controller.view().detail?.pendingInputs ??
-          view().detail.pendingInputs
-        }
+        inputs={currentPendingInputs(view().detail, view().controller.view())}
         onCancel={(inputId) => {
           void view().controller.cancelPendingInput(inputId);
+        }}
+        onRetry={(clientRequestId) => {
+          void view().controller.retryPendingInput(clientRequestId);
         }}
       />
       <Show when={view().detail.pendingQuestions}>

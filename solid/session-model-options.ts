@@ -2,6 +2,7 @@ import type {
   AgentModelCatalog,
   AgentReasoningEffort,
 } from "../shared/agent-configuration.ts";
+import { balancedCredentialId } from "../shared/provider-credential-pool.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
 import type { CustomSelectOption } from "./custom-select.tsx";
 
@@ -67,10 +68,34 @@ export function modelProviderLabel(provider: ProviderId): string {
 export function modelCredentialOptions(
   credentials: readonly ModelCredentialOption[],
 ): readonly CustomSelectOption[] {
-  return credentials.map((credential) => ({
-    label: `${modelProviderLabel(credential.provider)} · ${credential.label}`,
-    value: modelCredentialValue(credential),
-  }));
+  const counts = new Map<ProviderId, number>();
+  for (const credential of credentials) {
+    counts.set(credential.provider, (counts.get(credential.provider) ?? 0) + 1);
+  }
+  const addedPools = new Set<ProviderId>();
+  return credentials.flatMap((credential) => {
+    const count = counts.get(credential.provider) ?? 0;
+    const pool =
+      count >= 2 && !addedPools.has(credential.provider)
+        ? [
+            {
+              label: `${modelProviderLabel(credential.provider)} · Balanced (${String(count)} accounts)`,
+              value: modelCredentialValue({
+                credentialId: balancedCredentialId(credential.provider),
+                provider: credential.provider,
+              }),
+            },
+          ]
+        : [];
+    addedPools.add(credential.provider);
+    return [
+      ...pool,
+      {
+        label: `${modelProviderLabel(credential.provider)} · ${credential.label}`,
+        value: modelCredentialValue(credential),
+      },
+    ];
+  });
 }
 
 export function reasoningModelOptions(

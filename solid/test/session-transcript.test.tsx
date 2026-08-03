@@ -1,114 +1,16 @@
 import { expect, test } from "vitest";
-import type { AgentFile } from "../../shared/agent-file.ts";
-import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
-import type {
-  AgentSessionMessage,
-  AgentSessionTurn,
-} from "../../shared/session-model.ts";
-import { startedAtUtc } from "../../shared/test/session-fixtures.ts";
+import type { AgentSessionMessage } from "../../shared/session-model.ts";
 import {
   DEFAULT_SESSION_TRANSCRIPT_FILTERS,
   type SessionTranscriptFilters,
 } from "../../solid/session-transcript-filters.ts";
-import { SessionTranscript } from "../../solid/session-transcript.tsx";
-import { renderSolidToString } from "./render-solid.tsx";
-
-interface TranscriptTestMessageOptions {
-  readonly content: string;
-  readonly id: string;
-  readonly name: string;
-}
-
-const EMPTY_MESSAGE_METADATA = {
-  images: [],
-  toolCallId: null,
-  toolCalls: [],
-  toolName: null,
-} as const;
-
-function transcriptMessage(
-  options: TranscriptTestMessageOptions,
-  kind: "call" | "result",
-): AgentSessionMessage {
-  const call = kind === "call";
-  return {
-    content: call ? "" : options.content,
-    createdAt: call ? 1 : 2,
-    id: `${call ? "assistant" : "result"}-${options.id}`,
-    images: [],
-    role: call ? "assistant" : "tool",
-    toolCallId: call ? null : options.id,
-    toolCalls: call
-      ? [{ arguments: options.content, id: options.id, name: options.name }]
-      : [],
-    toolName: call ? null : options.name,
-  };
-}
-
-function assistantToolCall(options: {
-  readonly arguments: string;
-  readonly id: string;
-  readonly name: string;
-}): AgentSessionMessage {
-  return transcriptMessage(
-    { content: options.arguments, id: options.id, name: options.name },
-    "call",
-  );
-}
-
-function toolResult(
-  options: TranscriptTestMessageOptions,
-): AgentSessionMessage {
-  return transcriptMessage(options, "result");
-}
-
-function userMessage(content: string): AgentSessionMessage {
-  const message = transcriptMessage(
-    { content, id: "user-1", name: "unused" },
-    "result",
-  );
-  return {
-    ...message,
-    role: "user",
-    toolCallId: null,
-    toolName: null,
-  };
-}
-
-function renderMessages(
-  messages: readonly AgentSessionMessage[],
-  tools = AGENT_SESSION_TOOL_NAMES,
-  filters: SessionTranscriptFilters = DEFAULT_SESSION_TRANSCRIPT_FILTERS,
-  agentFile: AgentFile | null = null,
-  onFork?: (messageId: string) => void,
-  turns?: readonly AgentSessionTurn[],
-): string {
-  return renderSolidToString(() => (
-    <SessionTranscript
-      agentFile={agentFile}
-      executionEnvironment="bare_metal"
-      filters={filters}
-      messages={messages}
-      {...(onFork === undefined ? {} : { onFork })}
-      tools={tools}
-      turns={turns}
-    />
-  ));
-}
-
-function message(
-  id: string,
-  content: string,
-  role: AgentSessionMessage["role"],
-): AgentSessionMessage {
-  return {
-    content,
-    createdAt: 1,
-    id,
-    role,
-    ...EMPTY_MESSAGE_METADATA,
-  };
-}
+import {
+  assistantToolCall,
+  message,
+  renderMessages,
+  toolResult,
+  userMessage,
+} from "./session-transcript-test-helpers.tsx";
 
 function filtersWith(
   category: keyof SessionTranscriptFilters,
@@ -223,97 +125,6 @@ test("filters assistant text independently from tool calls on the same message",
   expect(toolOnly).not.toContain("Assistant text with tool");
   expect(assistantOnly).toContain("Assistant text with tool");
   expect(assistantOnly).not.toContain("Tool call · read");
-});
-
-test("shows per-step timing for a call, tools, and following call", () => {
-  const startedAt = startedAtUtc();
-  const firstAssistantAt = startedAt + 1_000;
-  const toolSettledAt = startedAt + 8_000;
-  const finalAssistantAt = startedAt + 13_000;
-  const call = {
-    ...assistantToolCall({
-      arguments: '{"path":"README.md"}',
-      id: "timed-read",
-      name: "read",
-    }),
-    createdAt: firstAssistantAt,
-  };
-  const result = {
-    ...toolResult({
-      content: "Timed output",
-      id: "timed-read",
-      name: "read",
-    }),
-    createdAt: toolSettledAt,
-  };
-  const html = renderMessages([
-    {
-      ...message("user-timed", "Timed request", "user"),
-      createdAt: startedAt,
-    },
-    call,
-    result,
-    {
-      ...message("thinking-timed", "Considering output", "thinking"),
-      createdAt: toolSettledAt + 2_000,
-    },
-    {
-      ...message("assistant-timed", "Timed response", "assistant"),
-      createdAt: finalAssistantAt,
-    },
-  ]);
-
-  expect(html.match(/data-step-timing="completed"/gu)).toHaveLength(2);
-  expect(html).not.toContain("data-turn-timing");
-  for (const duration of ["Duration: 8s", "Duration: 5s"]) {
-    expect(html).toContain(duration);
-  }
-  for (const timestamp of [startedAt, toolSettledAt, finalAssistantAt]) {
-    expect(html).toContain(`datetime="${new Date(timestamp).toISOString()}"`);
-  }
-});
-
-test("renders durable settlement time for a terminal step", () => {
-  const durableStartedAt = Date.UTC(2026, 6, 27, 12, 0, 0);
-  const durableMessageAt = durableStartedAt + 2_000;
-  const durableEndedAt = durableStartedAt + 3_000;
-  const durableTurnId = "durable-turn";
-  const messages = [
-    {
-      ...message("durable-user", "Durable request", "user"),
-      createdAt: durableStartedAt,
-      turnId: durableTurnId,
-    },
-    {
-      ...message("durable-assistant", "Durable response", "assistant"),
-      createdAt: durableMessageAt,
-      turnId: durableTurnId,
-    },
-  ];
-  const html = renderMessages(
-    messages,
-    AGENT_SESSION_TOOL_NAMES,
-    DEFAULT_SESSION_TRANSCRIPT_FILTERS,
-    null,
-    undefined,
-    [
-      {
-        boundaryMessageId: "durable-assistant",
-        endedAt: durableEndedAt,
-        executionGeneration: 1,
-        id: durableTurnId,
-        startedAt: durableStartedAt,
-      },
-    ],
-  );
-
-  const completedTimingCount = html.match(
-    /data-step-timing="completed"/gu,
-  )?.length;
-  expect(completedTimingCount).toBe(1);
-  expect(html).toContain("Duration: 3s");
-  const settlementDateTime = new Date(durableEndedAt).toISOString();
-  expect(html).toContain(`datetime="${settlementDateTime}"`);
 });
 
 test("shows a clear state when every visible category is empty", () => {
