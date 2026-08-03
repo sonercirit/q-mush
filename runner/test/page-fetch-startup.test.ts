@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import {
   retryChromiumStartup,
+  runWithCleanup,
   waitForChromiumDevtoolsUrl,
 } from "../page-fetch-startup.ts";
 
@@ -31,8 +32,8 @@ async function failedChromium(
 }
 
 describe("Chromium startup", () => {
-  test("reports the exit code and bounded stderr tail", async () => {
-    const prefix = "x".repeat(5_000);
+  test("reports the exit code and byte-bounded stderr tail", async () => {
+    const prefix = "😀".repeat(5_000);
     const error = await failedChromium(
       'await Bun.write(Bun.stderr, Bun.argv[1] + "RESOURCE LIMIT\\n"); process.exit(23)',
       [prefix],
@@ -43,6 +44,11 @@ describe("Chromium startup", () => {
     expect(error.message).toContain("Stderr tail:");
     expect(error.message).toContain("RESOURCE LIMIT");
     expect(error.message).not.toContain(prefix);
+    const diagnostic = error.message.split("Stderr tail: ")[1];
+    expect(diagnostic).toBeDefined();
+    expect(Buffer.byteLength(diagnostic ?? "", "utf8")).toBeLessThanOrEqual(
+      4_096,
+    );
   });
 
   test("reports a terminating signal and empty stderr", async () => {
@@ -77,6 +83,45 @@ describe("Chromium startup", () => {
     expect(result).toBe("ready");
     expect(attempts).toEqual([1, 2]);
     expect(wait).toHaveBeenCalledWith(500, controller.signal);
+  });
+
+  test("preserves startup failures through rejected cleanup and retries", async () => {
+    let attempts = 0;
+    const operation = (): Promise<never> =>
+      runWithCleanup(
+        async () => {
+          attempts += 1;
+          throw await failedChromium(
+            `console.error("launch ${String(attempts)} failed"); process.exit(${String(attempts)})`,
+            [],
+          );
+        },
+        () => Promise.reject(new Error(`cleanup ${String(attempts)} failed`)),
+      );
+
+    const failure = await retryChromiumStartup(
+      operation,
+      new AbortController().signal,
+      () => Promise.resolve(),
+    ).catch((error: unknown) => error);
+
+    expect(attempts).toBe(2);
+    expect(failure).toBeInstanceOf(AggregateError);
+    if (!(failure instanceof AggregateError)) {
+      throw new Error("Expected an aggregate startup failure");
+    }
+    expect(failure.message).toContain("launch 1 failed");
+    expect(failure.message).toContain("launch 2 failed");
+    expect(failure.errors).toMatchObject([
+      {
+        cause: { message: "cleanup 1 failed" },
+        name: "ChromiumStartupError",
+      },
+      {
+        cause: { message: "cleanup 2 failed" },
+        name: "ChromiumStartupError",
+      },
+    ]);
   });
 
   test("reports both startup failures without retrying other errors", async () => {

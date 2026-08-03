@@ -20,11 +20,47 @@ function exitDescription(child: Bun.ReadableSubprocess): string {
   return `exit code ${String(child.exitCode ?? "null")}, signal ${child.signalCode ?? "none"}`;
 }
 
+function boundedUtf8Tail(value: string): string {
+  const characters: string[] = [];
+  let byteLength = 0;
+  for (const character of Array.from(value.trim()).reverse()) {
+    const characterByteLength = Buffer.byteLength(character, "utf8");
+    if (byteLength + characterByteLength > MAXIMUM_BROWSER_DIAGNOSTIC_BYTES) {
+      break;
+    }
+    characters.push(character);
+    byteLength += characterByteLength;
+  }
+  return characters.reverse().join("");
+}
+
+function decodeDiagnostic(bytes: Uint8Array): string {
+  let start = 0;
+  while (start < bytes.byteLength) {
+    const byte = bytes[start];
+    if (byte === undefined || (byte & 0xc0) !== 0x80) {
+      break;
+    }
+    start += 1;
+  }
+  return Buffer.from(bytes.subarray(start)).toString("utf8");
+}
+
+function appendDiagnostic(
+  diagnostic: Uint8Array,
+  part: Uint8Array,
+): Uint8Array {
+  const combined = Buffer.concat([diagnostic, part]);
+  return combined.subarray(
+    Math.max(0, combined.byteLength - MAXIMUM_BROWSER_DIAGNOSTIC_BYTES),
+  );
+}
+
 function startupError(
   child: Bun.ReadableSubprocess,
-  diagnostic: string,
+  diagnostic: Uint8Array,
 ): ChromiumStartupError {
-  const detail = diagnostic.trim().slice(-MAXIMUM_BROWSER_DIAGNOSTIC_BYTES);
+  const detail = boundedUtf8Tail(decodeDiagnostic(diagnostic));
   return new ChromiumStartupError(
     `Chromium stopped before exposing DevTools (${exitDescription(child)}). Stderr tail: ${detail.length === 0 ? "<empty>" : detail}`,
   );
@@ -35,7 +71,7 @@ export async function waitForChromiumDevtoolsUrl(
   signal: AbortSignal,
 ): Promise<string> {
   const reader = child.stderr.getReader();
-  let diagnostic = "";
+  let diagnostic: Uint8Array = Buffer.alloc(0);
   const stop = (): void => {
     void reader.cancel().catch(() => undefined);
   };
@@ -50,11 +86,10 @@ export async function waitForChromiumDevtoolsUrl(
         await child.exited;
         throw startupError(child, diagnostic);
       }
-      diagnostic =
-        `${diagnostic}${Buffer.from(part.value).toString("utf8")}`.slice(
-          -MAXIMUM_BROWSER_DIAGNOSTIC_BYTES,
-        );
-      const url = /DevTools listening on (ws:\/\/\S+)/u.exec(diagnostic)?.[1];
+      diagnostic = appendDiagnostic(diagnostic, part.value);
+      const url = /DevTools listening on (ws:\/\/\S+)/u.exec(
+        decodeDiagnostic(diagnostic),
+      )?.[1];
       if (url !== undefined) {
         return url;
       }
@@ -63,6 +98,45 @@ export async function waitForChromiumDevtoolsUrl(
     signal.removeEventListener("abort", stop);
     await reader.cancel().catch(() => undefined);
   }
+}
+
+function attachCleanupError(
+  primaryError: unknown,
+  cleanupError: unknown,
+): void {
+  if (!(primaryError instanceof Error)) {
+    return;
+  }
+  try {
+    primaryError.cause =
+      primaryError.cause === undefined
+        ? cleanupError
+        : new AggregateError(
+            [primaryError.cause, cleanupError],
+            "Operation and cleanup both failed",
+          );
+  } catch {
+    // A non-extensible primary error must still remain authoritative.
+  }
+}
+
+export async function runWithCleanup<Value>(
+  operation: () => Promise<Value>,
+  cleanup: () => Promise<void>,
+): Promise<Value> {
+  let result: Value;
+  try {
+    result = await operation();
+  } catch (error) {
+    try {
+      await cleanup();
+    } catch (cleanupError) {
+      attachCleanupError(error, cleanupError);
+    }
+    throw error;
+  }
+  await cleanup();
+  return result;
 }
 
 async function waitForChromiumRetry(

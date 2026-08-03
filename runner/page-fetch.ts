@@ -31,6 +31,7 @@ import {
 } from "./page-fetch-process.ts";
 import {
   retryChromiumStartup,
+  runWithCleanup,
   waitForChromiumDevtoolsUrl,
 } from "./page-fetch-startup.ts";
 import { parseRunnerUrl } from "./runner-url.ts";
@@ -455,72 +456,77 @@ function defaultRenderer(
         void stoppingPromise().catch(() => undefined);
       };
       request.signal.addEventListener("abort", stop, { once: true });
-      try {
-        const devtoolsUrl = await waitForChromiumDevtoolsUrl(
-          browser,
-          request.signal,
-        );
-        connection = await connectToPage(devtoolsUrl);
-        await connection.open();
-        await Promise.all([
-          connection.command("Page.enable"),
-          connection.command("Network.enable", {
-            maxResourceBufferSize: MAXIMUM_RESPONSE_BYTES,
-            maxTotalBufferSize: MAXIMUM_RESPONSE_BYTES,
-          }),
-          connection.command("Runtime.enable"),
-          connection.command("Fetch.enable", {
-            patterns: [
-              { requestStage: "Request" },
-              { requestStage: "Response", resourceType: "Document" },
-            ],
-          }),
-        ]);
-        await connection.command("Network.clearBrowserCache");
-        await connection.command("Network.clearBrowserCookies");
-        const loading = followPageEvents(connection, request);
-        void loading.catch(() => undefined);
-        const navigation = await connection.command("Page.navigate", {
-          url: request.url.toString(),
-        });
-        if (
-          !isRecord(navigation) ||
-          typeof navigation["frameId"] !== "string"
-        ) {
-          throw new Error("Chromium did not start the page navigation");
-        }
-        if (typeof navigation["errorText"] === "string") {
-          throw new Error(`Page navigation failed: ${navigation["errorText"]}`);
-        }
-        const response = await loading;
-        if (proxy.failure !== undefined) {
-          throw proxy.failure;
-        }
-        await Bun.sleep(SETTLE_MILLISECONDS);
-        const evaluated = await connection.command("Runtime.evaluate", {
-          awaitPromise: true,
-          expression: request.captureExpression,
-          returnByValue: true,
-        });
-        return { evaluated, response };
-      } finally {
-        request.signal.removeEventListener("abort", stop);
-        connection?.close();
-        stop();
-        try {
-          await stoppingPromise();
-        } finally {
+      return await runWithCleanup(
+        async () => {
+          const devtoolsUrl = await waitForChromiumDevtoolsUrl(
+            browser,
+            request.signal,
+          );
+          connection = await connectToPage(devtoolsUrl);
+          await connection.open();
+          await Promise.all([
+            connection.command("Page.enable"),
+            connection.command("Network.enable", {
+              maxResourceBufferSize: MAXIMUM_RESPONSE_BYTES,
+              maxTotalBufferSize: MAXIMUM_RESPONSE_BYTES,
+            }),
+            connection.command("Runtime.enable"),
+            connection.command("Fetch.enable", {
+              patterns: [
+                { requestStage: "Request" },
+                { requestStage: "Response", resourceType: "Document" },
+              ],
+            }),
+          ]);
+          await connection.command("Network.clearBrowserCache");
+          await connection.command("Network.clearBrowserCookies");
+          const loading = followPageEvents(connection, request);
+          void loading.catch(() => undefined);
+          const navigation = await connection.command("Page.navigate", {
+            url: request.url.toString(),
+          });
+          if (
+            !isRecord(navigation) ||
+            typeof navigation["frameId"] !== "string"
+          ) {
+            throw new Error("Chromium did not start the page navigation");
+          }
+          if (typeof navigation["errorText"] === "string") {
+            throw new Error(
+              `Page navigation failed: ${navigation["errorText"]}`,
+            );
+          }
+          const response = await loading;
+          if (proxy.failure !== undefined) {
+            throw proxy.failure;
+          }
+          await Bun.sleep(SETTLE_MILLISECONDS);
+          const evaluated = await connection.command("Runtime.evaluate", {
+            awaitPromise: true,
+            expression: request.captureExpression,
+            returnByValue: true,
+          });
+          return { evaluated, response };
+        },
+        async () => {
+          request.signal.removeEventListener("abort", stop);
+          connection?.close();
+          stop();
           try {
-            await proxy.close();
+            await stoppingPromise();
           } finally {
             try {
-              await drainStream(browser.stdout);
+              await proxy.close();
             } finally {
-              await removeChromiumProfile(profilePath);
+              try {
+                await drainStream(browser.stdout);
+              } finally {
+                await removeChromiumProfile(profilePath);
+              }
             }
           }
-        }
-      }
+        },
+      );
     }, request.signal);
 }
 
