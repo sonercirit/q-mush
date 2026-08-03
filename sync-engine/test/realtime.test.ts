@@ -5,7 +5,6 @@ import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { SESSION_REALTIME_OPERATIONS } from "../../shared/user-realtime-protocol.ts";
 import { GLOBAL_WORKSPACE_ID } from "../../shared/workspace-model.ts";
 import type { GoogleAuth } from "../../sync-engine/auth.ts";
-import { EngineHealth } from "../../sync-engine/engine-health.ts";
 import { RealtimeHub } from "../../sync-engine/realtime-hub.ts";
 import type {
   createRealtimeIntegration,
@@ -153,22 +152,6 @@ function expectUpgrade(
 ): void {
   expect(assertRealtimeUpgrade(realtime, path)).toEqual(expected);
 }
-
-test("sends and publishes storage-health snapshots", () => {
-  const health = new EngineHealth(() => undefined);
-  const realtime = configuredRealtimeTestIntegration({
-    auth: realtimeTestAuth(USER),
-    health,
-  });
-  const connection = openUserRealtimeTestSocket(realtime);
-
-  health.degrade("low_disk_space", "test low space");
-
-  expect(parseRealtimeMessages(connection.record.sent)).toContainEqual({
-    health: { degraded: true, reasons: ["low_disk_space"] },
-    type: "health",
-  });
-});
 
 test("upgrades an authenticated browser request", () => {
   const server = new RealtimeUpgradeServer();

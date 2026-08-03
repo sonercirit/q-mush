@@ -21,9 +21,8 @@ interface ResilientDatabaseFixture {
 }
 
 function diskFullError(): Error & { readonly code: string } {
-  return Object.assign(new Error("database or disk is full"), {
-    code: "SQLITE_FULL",
-  });
+  const error = new Error("database or disk is full");
+  return Object.assign(error, { code: "SQLITE_FULL" });
 }
 
 function adjustPageLimit(database: AppDatabase, pages: number): void {
