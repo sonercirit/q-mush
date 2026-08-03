@@ -287,6 +287,7 @@ class DrizzleSessionIntegration
       executionCleanup: this.#executionCleanup,
       launchQueuedSessions: this.#launchQueuedSessions,
       modelsForUser: (request, user) => this.#modelsForUser(request, user),
+      modelCredentialPool: this.#modelCredentialPool,
       notify: this.#notify,
       now: this.#now,
       questionActions: this.#questionActions,

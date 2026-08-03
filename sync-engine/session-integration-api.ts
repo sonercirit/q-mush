@@ -65,6 +65,9 @@ export interface SessionIntegrationApiResources {
   readonly executionCleanup: SessionExecutionCleanup;
   readonly launchQueuedSessions: (userId: string) => void;
   readonly modelsForUser: SessionModelsForUser;
+  readonly modelCredentialPool: Parameters<
+    typeof openRouterProvidersForUser
+  >[0]["pool"];
   readonly notify: SessionNotification;
   readonly now: typeof Date.now;
   readonly questionActions: Parameters<typeof recoverAnsweredQuestions>[0];
@@ -320,6 +323,7 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
     return this.#getForUser(request, (user) =>
       openRouterProvidersForUser({
         discover: this.resources.discoverOpenRouterProviders,
+        pool: this.resources.modelCredentialPool,
         request,
         user,
         withCredential: this.resources.withCredentialAccess,

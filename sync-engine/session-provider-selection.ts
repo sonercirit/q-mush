@@ -4,6 +4,7 @@ import {
 } from "../shared/agent-configuration.ts";
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
 import { mapWithParallelConcurrency } from "../shared/parallel.ts";
+import { isBalancedCredentialId } from "../shared/provider-credential-pool.ts";
 import type {
   ProviderCredentialAccess,
   ProviderId,
@@ -15,6 +16,7 @@ import {
   type AgentModelDiscoverer,
 } from "./agent-model-discovery.ts";
 import { createApiError, createJsonResponse } from "./http.ts";
+import type { ModelCredentialPool } from "./model-credential-pool.ts";
 import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
 import type {
   PreparedSessionCredentialProviderState,
@@ -61,6 +63,7 @@ export type WithCredential = (
  */
 export async function openRouterProvidersForUser(options: {
   readonly discover: OpenRouterProviderDiscoverer;
+  readonly pool: Pick<ModelCredentialPool, "representative">;
   readonly request: Request;
   readonly user: AuthenticatedUser;
   readonly withCredential: WithCredential;
@@ -75,18 +78,47 @@ export async function openRouterProvidersForUser(options: {
   ) {
     return createApiError("invalid_request", 400);
   }
+  const selection = {
+    credentialId,
+    provider: "openrouter" as const,
+    workspaceId,
+  };
+  const discover = async (
+    credential: ProviderCredentialAccess,
+  ): Promise<Response> => {
+    try {
+      return createJsonResponse(
+        await options.discover(options.user.id, credential, model),
+      );
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("identifier")) {
+        return createApiError("invalid_request", 400);
+      }
+      throw error;
+    }
+  };
+  if (isBalancedCredentialId("openrouter", credentialId)) {
+    const credentials = await options.pool.representative(
+      options.user.id,
+      selection,
+    );
+    for (const credential of credentials) {
+      try {
+        return await discover(credential);
+      } catch {
+        // Discovery is read-only; any pool member may represent the selection.
+      }
+    }
+    return createApiError("provider_unavailable", 502);
+  }
   return options.withCredential(
     options.user.id,
-    { credentialId, provider: "openrouter", workspaceId },
+    selection,
     async (credential) => {
       try {
-        return createJsonResponse(
-          await options.discover(options.user.id, credential, model),
-        );
-      } catch (error) {
-        return error instanceof Error && error.message.includes("identifier")
-          ? createApiError("invalid_request", 400)
-          : createApiError("provider_unavailable", 502);
+        return await discover(credential);
+      } catch {
+        return createApiError("provider_unavailable", 502);
       }
     },
   );
