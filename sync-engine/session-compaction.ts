@@ -5,7 +5,7 @@ import { agentMessages, agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 import type { RestartHandoff } from "../shared/session-model.ts";
 import type { CompactionUsage } from "./session-compaction-usage.ts";
-import { retireManualCompactionOperation } from "./session-manual-compaction-query.ts";
+import { retireManualCompactionOperations } from "./session-manual-compaction-query.ts";
 import { sessionSegment } from "./session-segment.ts";
 import { runningCondition } from "./session-store-persistence.ts";
 import { requireRunningSessionUserId } from "./session-store-state.ts";
@@ -93,11 +93,12 @@ export function compactStoredConversation(options: {
         ),
       )
       .run();
-    retireManualCompactionOperation(
+    retireManualCompactionOperations(
       transaction,
       options.sessionId,
       options.generation,
       options.now,
+      "exact",
     );
     const handoff = {
       database: transaction,

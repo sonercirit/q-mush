@@ -18,34 +18,21 @@ function activeManualCompactionCondition(
   );
 }
 
-export function retireManualCompactionOperation(
+export function retireManualCompactionOperations(
   database: Pick<AppDatabase, "update">,
   sessionId: string,
   generation: number,
   now: number,
+  scope: "exact" | "through",
 ): void {
+  const generationCondition =
+    scope === "exact"
+      ? eq(agentSessionOperations.executionGeneration, generation)
+      : lte(agentSessionOperations.executionGeneration, generation);
   database
     .update(agentSessionOperations)
     .set(softDeletedAuditFields(SYSTEM_ID, now))
-    .where(activeManualCompactionCondition(sessionId, generation))
-    .run();
-}
-
-export function retireAbandonedManualCompactionOperations(
-  database: Pick<AppDatabase, "update">,
-  sessionId: string,
-  generation: number,
-  now: number,
-): void {
-  database
-    .update(agentSessionOperations)
-    .set(softDeletedAuditFields(SYSTEM_ID, now))
-    .where(
-      and(
-        activeManualCompactionCondition(sessionId),
-        lte(agentSessionOperations.executionGeneration, generation),
-      ),
-    )
+    .where(and(activeManualCompactionCondition(sessionId), generationCondition))
     .run();
 }
 

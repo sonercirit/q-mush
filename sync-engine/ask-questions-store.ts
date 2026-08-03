@@ -86,7 +86,7 @@ export interface AskQuestionsPersistenceTransaction {
   listRecoverableAnsweredRequests(
     runnerId?: string,
   ): readonly StoredQuestionRequest[];
-  retireManualCompactionOperation(
+  retireManualCompactionOperations(
     sessionId: string,
     generation: number,
     now: number,
@@ -606,7 +606,7 @@ export class AskQuestionsStore {
       ) {
         return false;
       }
-      transaction.retireManualCompactionOperation(
+      transaction.retireManualCompactionOperations(
         sessionId,
         session.executionGeneration,
         now,

@@ -149,7 +149,7 @@ function transactionFor(
         );
         return session?.status === "queued";
       }),
-    retireManualCompactionOperation: () => undefined,
+    retireManualCompactionOperations: () => undefined,
     updateQuestionRequest: (request, update) =>
       replaceMatching(state.requests, request, update),
     updateSession: (session, update) =>

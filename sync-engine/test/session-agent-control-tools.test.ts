@@ -7,10 +7,7 @@ import type {
   AgentModelStep,
 } from "../../shared/agent-loop.ts";
 import { isRecord } from "../../shared/auth-model.ts";
-import {
-  agentSessionOperations,
-  agentSessions,
-} from "../../shared/database/schema.ts";
+import { agentSessions } from "../../shared/database/schema.ts";
 import { SESSIONS_PATH } from "../../shared/routes.ts";
 import { executeSessionAgentTool } from "../session-agent-tools.ts";
 import {
@@ -25,6 +22,7 @@ import {
   toolCall,
 } from "./session-agent-tool-setup.ts";
 import { unusedSessionToolActions } from "./session-agent-tool-test-helpers.ts";
+import { readManualCompactionRows } from "./session-compaction-test-helpers.ts";
 import {
   connectedSessionSetup,
   createSessionRequest,
@@ -44,6 +42,15 @@ function isCompactionRequest(input: readonly AgentConversationMessage[]) {
   return input.at(-1)?.content === COMPACTION_INSTRUCTION;
 }
 
+function scheduledCompactionStep(
+  content: string,
+  callId = "call-compact_session",
+): AgentModelStep {
+  return providerStep(content, {
+    toolCalls: [toolCall("compact_session", { sessionId: SESSION_ID }, callId)],
+  });
+}
+
 class SelfCompactingModel implements AgentModel {
   #step = 0;
 
@@ -52,14 +59,11 @@ class SelfCompactingModel implements AgentModel {
   ): Promise<AgentModelStep> {
     this.#step += 1;
     const response = isCompactionRequest(input)
-      ? { content: "Self-compaction handoff", toolCalls: [] }
+      ? providerStep("Self-compaction handoff")
       : this.#step === 1
-        ? {
-            content: "I will compact at this step boundary.",
-            toolCalls: [toolCall("compact_session", { sessionId: SESSION_ID })],
-          }
-        : { content: "Continued after self-compaction.", toolCalls: [] };
-    return Promise.resolve(providerStep(response.content, response));
+        ? scheduledCompactionStep("I will compact at this step boundary.")
+        : providerStep("Continued after self-compaction.");
+    return Promise.resolve(response);
   }
 }
 
@@ -72,7 +76,7 @@ class RestartScheduledCompactionModel implements AgentModel {
   ): Promise<AgentModelStep> {
     if (isCompactionRequest(input)) {
       this.compacting.resolve();
-      return Promise.resolve(providerStep("Restart-safe compacted handoff."));
+      return successfulCompactionStep("Restart-safe compacted handoff.");
     }
     if (!this.#scheduled) {
       this.#scheduled = true;
@@ -93,6 +97,14 @@ class RestartScheduledCompactionModel implements AgentModel {
   }
 }
 
+function failedCompactionStep(): Promise<AgentModelStep> {
+  return Promise.reject(new Error("Generation-zero compactor failed"));
+}
+
+function successfulCompactionStep(content: string): Promise<AgentModelStep> {
+  return Promise.resolve(providerStep(content));
+}
+
 class FailedThenRetriedCompactionModel implements AgentModel {
   compactionRequests = 0;
   #agentSteps = 0;
@@ -100,30 +112,28 @@ class FailedThenRetriedCompactionModel implements AgentModel {
   complete(
     input: readonly AgentConversationMessage[],
   ): Promise<AgentModelStep> {
-    if (isCompactionRequest(input)) {
-      this.compactionRequests += 1;
-      if (this.compactionRequests === 1) {
-        return Promise.resolve(providerStep(""));
-      }
-      if (this.compactionRequests === 2) {
-        return Promise.resolve(providerStep("Generation-one handoff."));
-      }
-      throw new Error("Unexpected repeated compaction");
+    if (!isCompactionRequest(input)) {
+      return this.#agentStep();
     }
-    if (JSON.stringify(input).includes("Generation-one handoff.")) {
-      return Promise.resolve(providerStep("Continued exactly once."));
+    this.compactionRequests += 1;
+    if (this.compactionRequests === 1) {
+      return failedCompactionStep();
     }
+    if (this.compactionRequests === 2) {
+      return successfulCompactionStep("Generation-one handoff.");
+    }
+    throw new Error("Unexpected repeated compaction");
+  }
+
+  #agentStep(): Promise<AgentModelStep> {
     this.#agentSteps += 1;
     return Promise.resolve(
-      providerStep(`Schedule generation ${String(this.#agentSteps - 1)}.`, {
-        toolCalls: [
-          toolCall(
-            "compact_session",
-            { sessionId: SESSION_ID },
+      this.#agentSteps === 3
+        ? providerStep("Continued exactly once.")
+        : scheduledCompactionStep(
+            `Schedule generation ${String(this.#agentSteps - 1)}.`,
             `call-compact-generation-${String(this.#agentSteps - 1)}`,
           ),
-        ],
-      }),
     );
   }
 }
@@ -218,6 +228,14 @@ async function sessionRequest(prompt: string): Promise<Request> {
   );
 }
 
+async function continueSession(setup: ConnectedSetup): Promise<Response> {
+  const url = `${SESSIONS_PATH}/${SESSION_ID}/continue`;
+  return setup.sessions.continue(
+    createAuthenticatedRequest(url, undefined, "POST"),
+    SESSION_ID,
+  );
+}
+
 async function createPromptSession(
   setup: ConnectedSetup,
   prompt: string,
@@ -286,6 +304,10 @@ async function completeRunnerCommand(
   ).toBe(true);
 }
 
+function operationRows(setup: ConnectedSetup, sessionId = SESSION_ID) {
+  return readManualCompactionRows(setup.database, sessionId);
+}
+
 function controlledSetup(model: AgentModel): ConnectedSetup {
   return connectedSessionSetup(model, "api_key", undefined, {
     commandId: commandIds(),
@@ -312,6 +334,17 @@ function markSessionCompleted(setup: ConnectedSetup): void {
     .set({ status: "completed" })
     .where(eq(agentSessions.id, SESSION_ID))
     .run();
+}
+
+async function waitForSessionStatus(
+  setup: ConnectedSetup,
+  sessionId: string,
+  status: string,
+): Promise<unknown> {
+  return waitForSessionValue(
+    () => setup.sessions.detailForUser(TEST_USER_ID, sessionId),
+    hasSessionStatus(status),
+  );
 }
 
 async function completedSessionContaining(
@@ -396,13 +429,7 @@ test("scheduled self-compaction survives restart before its boundary", async () 
   expect(JSON.stringify(continued)).toContain(
     "Restart-safe compacted handoff.",
   );
-  expect(
-    recreated.database
-      .select({ deleted: agentSessionOperations.isDeleted })
-      .from(agentSessionOperations)
-      .where(eq(agentSessionOperations.sessionId, SESSION_ID))
-      .get()?.deleted,
-  ).toBe(true);
+  expect(operationRows(recreated)[0]?.deleted).toBe(true);
   closeSessionTestDatabase(initial.database);
 });
 
@@ -411,26 +438,10 @@ test("retires a failed scheduled generation before retrying compaction", async (
   const setup = controlledSetup(model);
   await expectCreatedDefaultSession(setup);
   await completeRunnerCommand(setup, SESSION_ID, RUNNER_AGENT_FILE_COMMAND);
-  await waitForSessionValue(
-    () => setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID),
-    hasSessionStatus("failed"),
-  );
-  expect(
-    setup.database
-      .select({ deleted: agentSessionOperations.isDeleted })
-      .from(agentSessionOperations)
-      .where(eq(agentSessionOperations.sessionId, SESSION_ID))
-      .get()?.deleted,
-  ).toBe(true);
+  await waitForSessionStatus(setup, SESSION_ID, "failed");
+  expect(operationRows(setup)[0]?.deleted).toBe(true);
 
-  const continued = await setup.sessions.continue(
-    createAuthenticatedRequest(
-      `${SESSIONS_PATH}/${SESSION_ID}/continue`,
-      undefined,
-      "POST",
-    ),
-    SESSION_ID,
-  );
+  const continued = await continueSession(setup);
   expect(continued.status).toBe(202);
   await completeRunnerCommand(setup, SESSION_ID, RUNNER_AGENT_FILE_COMMAND);
   const settled = await completedSessionContaining(
@@ -441,17 +452,7 @@ test("retires a failed scheduled generation before retrying compaction", async (
 
   expect(model.compactionRequests).toBe(2);
   expect(JSON.stringify(settled)).toContain("Generation-one handoff.");
-  expect(
-    setup.database
-      .select({
-        deleted: agentSessionOperations.isDeleted,
-        generation: agentSessionOperations.executionGeneration,
-      })
-      .from(agentSessionOperations)
-      .where(eq(agentSessionOperations.sessionId, SESSION_ID))
-      .orderBy(agentSessionOperations.executionGeneration)
-      .all(),
-  ).toEqual([
+  expect(operationRows(setup)).toEqual([
     { deleted: true, generation: 0 },
     { deleted: true, generation: 1 },
   ]);
@@ -494,10 +495,7 @@ test("compact_session wakes a completed target, compacts, and continues it", asy
   const setup = controlledSetup(model);
   await expectCreatedPromptSession(setup, "Completed compaction target.");
   await completeRunnerCommand(setup, SESSION_ID, RUNNER_AGENT_FILE_COMMAND);
-  await waitForSessionValue(
-    () => setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID),
-    hasSessionStatus("idle"),
-  );
+  await waitForSessionStatus(setup, SESSION_ID, "idle");
   markSessionCompleted(setup);
 
   const parentId = await createPromptSession(

@@ -1,7 +1,10 @@
 import { and, eq } from "drizzle-orm";
 import { expect } from "vitest";
 import type { AppDatabase } from "../../shared/database.ts";
-import { agentSessions } from "../../shared/database/schema.ts";
+import {
+  agentSessionOperations,
+  agentSessions,
+} from "../../shared/database/schema.ts";
 import type { RunnerCommandResult } from "../../shared/runner-command-broker.ts";
 import type {
   AgentSessionDetail,
@@ -30,6 +33,21 @@ export interface CompactionStoreSetup {
 export type RestartStoreSetup = CompactionStoreSetup & {
   readonly restart: RestartHandoffStore;
 };
+
+export function readManualCompactionRows(
+  database: Pick<AppDatabase, "select">,
+  sessionId = STORE_SESSION_ID,
+) {
+  return database
+    .select({
+      deleted: agentSessionOperations.isDeleted,
+      generation: agentSessionOperations.executionGeneration,
+    })
+    .from(agentSessionOperations)
+    .where(eq(agentSessionOperations.sessionId, sessionId))
+    .orderBy(agentSessionOperations.executionGeneration)
+    .all();
+}
 
 export function runningCompactionStore(): CompactionStoreSetup {
   const setup = createStore();

@@ -7,7 +7,7 @@ import {
   sessionExecutionIsCurrent,
   type SessionQueueAuthorization,
 } from "./session-execution-authority.ts";
-import { retireAbandonedManualCompactionOperations } from "./session-manual-compaction-query.ts";
+import { retireManualCompactionOperations } from "./session-manual-compaction-query.ts";
 import {
   activePendingInput,
   promotePendingInput,
@@ -192,11 +192,12 @@ export function queueStoredSession(options: {
         turnId,
       );
     }
-    retireAbandonedManualCompactionOperations(
+    retireManualCompactionOperations(
       transaction,
       sessionId,
       stored.executionGeneration,
       now,
+      "through",
     );
     transaction
       .update(agentSessions)
