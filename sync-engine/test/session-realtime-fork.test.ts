@@ -19,6 +19,7 @@ import {
 const FIRST_CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000091";
 const SECOND_CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000092";
 const FORK_DETAIL = { ...TEST_SESSION_DETAIL, id: "fork-session" };
+const FORKED_RESULT = { detail: FORK_DETAIL, status: "forked" as const };
 const BALANCED_INPUT: SessionForkInput = {
   credentialId: balancedCredentialId("openai"),
   forkPointMessageId: "message-1",
@@ -34,10 +35,7 @@ function forkSetup(discoverModels: Parameters<typeof forkDependencies>[0]) {
     addTestProviderCredential(database, id);
     return createTestProviderCredential(id);
   });
-  const storeFork = vi.fn(() => ({
-    detail: FORK_DETAIL,
-    status: "forked" as const,
-  }));
+  const storeFork = vi.fn(() => FORKED_RESULT);
   const modelCredentialPool = new ModelCredentialPool(
     {
       database,
@@ -70,7 +68,7 @@ function singleCredentialPool() {
 function forkDependencies(
   discoverModels: (credentialId: string) => Promise<AgentModelCatalog>,
   modelCredentialPool?: ModelCredentialPool,
-  storeFork = vi.fn(() => ({ detail: FORK_DETAIL, status: "forked" as const })),
+  storeFork = vi.fn(() => FORKED_RESULT),
 ) {
   return {
     credential: () => Promise.reject(new Error("unexpected credential read")),
@@ -151,10 +149,7 @@ describe("balanced session forks", () => {
   });
 
   test("preserves explicit credential metadata fallback", async () => {
-    const storeFork = vi.fn(() => ({
-      detail: FORK_DETAIL,
-      status: "forked" as const,
-    }));
+    const storeFork = vi.fn(() => FORKED_RESULT);
     const dependencies = forkDependencies(
       () => Promise.reject(new AgentModelDiscoveryError("offline", 503)),
       undefined,
