@@ -37,7 +37,7 @@ import { SessionToolUpdateEditor } from "./session-tool-update-client.tsx";
 import { createSessionTranscriptCounts } from "./session-transcript-counts.ts";
 import { SessionTranscriptFilterControls } from "./session-transcript-filter-controls.tsx";
 import { SessionTranscript } from "./session-transcript.tsx";
-import { sessionUsageText } from "./session-usage.ts";
+import { SessionUsage } from "./session-usage-view.tsx";
 
 const SCROLL_END_TOLERANCE = 64;
 
@@ -189,16 +189,7 @@ export function SessionDetailBody(props: {
             </span>
           </div>
           <span class="mt-2 block">{props.sessionMetrics}</span>
-          <Show when={view().detail.tokenUsage}>
-            {(usage) => (
-              <span
-                class="mt-1 block text-xs text-slate-500"
-                data-session-usage="true"
-              >
-                {sessionUsageText(usage())}
-              </span>
-            )}
-          </Show>
+          <SessionUsage kind="session" usage={view().detail.tokenUsage} />
         </div>
         <div class="flex shrink-0 flex-wrap items-center gap-2">
           <button

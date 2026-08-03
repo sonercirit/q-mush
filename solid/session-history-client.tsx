@@ -1,7 +1,7 @@
 import { Show, type JSX } from "solid-js";
 import type { AgentTokenUsageSummary } from "../shared/session-token-usage.ts";
 import type { SessionController } from "./session-controller.ts";
-import { sessionUsageText } from "./session-usage.ts";
+import { SessionUsage } from "./session-usage-view.tsx";
 
 export function SessionHistoryControls(props: {
   readonly controller: SessionController;
@@ -48,13 +48,7 @@ export function SessionHistoryControls(props: {
         </button>
         <span class="text-center text-xs text-slate-400">
           <span class="block">{label()}</span>
-          <Show when={props.tokenUsage}>
-            {(usage) => (
-              <span class="mt-1 block" data-segment-usage="true">
-                {sessionUsageText(usage())}
-              </span>
-            )}
-          </Show>
+          <SessionUsage kind="segment" usage={props.tokenUsage} />
         </span>
         <button
           class="rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 disabled:cursor-not-allowed disabled:opacity-40"

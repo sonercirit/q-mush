@@ -72,10 +72,10 @@ export interface AgentSessionMessage extends AttachmentContentFields {
   readonly createdAt: number;
   readonly id: string;
   readonly role: AgentSessionMessageRole;
+  readonly tokenUsage?: AgentTokenUsage | null;
   readonly toolCallId: string | null;
   readonly toolCalls: readonly AgentToolCall[];
   readonly toolName: string | null;
-  readonly tokenUsage?: AgentTokenUsage | null;
   readonly turnId?: string | null;
 }
 

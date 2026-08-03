@@ -1,46 +1,49 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages } from "../shared/database/schema.ts";
-import type { AgentTokenUsageSummary } from "../shared/session-token-usage.ts";
+import {
+  summarizeTokenUsage,
+  type AgentTokenUsageSummary,
+} from "../shared/session-token-usage.ts";
 
-const reportedUsage = and(
-  sql`${agentMessages.inputTokens} IS NOT NULL`,
-  sql`${agentMessages.outputTokens} IS NOT NULL`,
-  sql`${agentMessages.cachedInputTokens} IS NOT NULL`,
-  sql`${agentMessages.cacheWriteInputTokens} IS NOT NULL`,
-);
-
-function usageSummary(
-  database: Pick<AppDatabase, "select">,
-  condition: ReturnType<typeof and>,
-): AgentTokenUsageSummary {
-  const usage = database
-    .select({
-      cacheWriteInputTokens: sql<number>`coalesce(sum(CASE WHEN ${reportedUsage} THEN ${agentMessages.cacheWriteInputTokens} ELSE 0 END), 0)`,
-      cachedInputTokens: sql<number>`coalesce(sum(CASE WHEN ${reportedUsage} THEN ${agentMessages.cachedInputTokens} ELSE 0 END), 0)`,
-      inputTokens: sql<number>`coalesce(sum(CASE WHEN ${reportedUsage} THEN ${agentMessages.inputTokens} ELSE 0 END), 0)`,
-      outputTokens: sql<number>`coalesce(sum(CASE WHEN ${reportedUsage} THEN ${agentMessages.outputTokens} ELSE 0 END), 0)`,
-      reportedStepCount: sql<number>`coalesce(sum(CASE WHEN ${reportedUsage} THEN 1 ELSE 0 END), 0)`,
-      stepCount: sql<number>`count(*)`,
-    })
-    .from(agentMessages)
-    .where(and(condition, eq(agentMessages.role, "assistant")))
-    .get();
-  return {
-    cacheWriteInputTokens: usage?.cacheWriteInputTokens ?? 0,
-    cachedInputTokens: usage?.cachedInputTokens ?? 0,
-    inputTokens: usage?.inputTokens ?? 0,
-    outputTokens: usage?.outputTokens ?? 0,
-    reportedStepCount: usage?.reportedStepCount ?? 0,
-    stepCount: usage?.stepCount ?? 0,
-  };
+function usageSummary(options: {
+  readonly condition: ReturnType<typeof and>;
+  readonly database: Pick<AppDatabase, "select">;
+}): AgentTokenUsageSummary {
+  return summarizeTokenUsage(
+    options.database
+      .select({
+        tokenUsage: {
+          cacheWriteInputTokens: agentMessages.cacheWriteInputTokens,
+          cachedInputTokens: agentMessages.cachedInputTokens,
+          inputTokens: agentMessages.inputTokens,
+          outputTokens: agentMessages.outputTokens,
+        },
+      })
+      .from(agentMessages)
+      .where(and(options.condition, eq(agentMessages.role, "assistant")))
+      .all()
+      .map(({ tokenUsage }) => ({
+        tokenUsage: Object.values(tokenUsage).every((value) => value !== null)
+          ? {
+              cacheWriteInputTokens: tokenUsage.cacheWriteInputTokens ?? 0,
+              cachedInputTokens: tokenUsage.cachedInputTokens ?? 0,
+              inputTokens: tokenUsage.inputTokens ?? 0,
+              outputTokens: tokenUsage.outputTokens ?? 0,
+            }
+          : null,
+      })),
+  );
 }
 
 export function storedSessionTokenUsage(
   database: Pick<AppDatabase, "select">,
   sessionId: string,
 ): AgentTokenUsageSummary {
-  return usageSummary(database, eq(agentMessages.sessionId, sessionId));
+  return usageSummary({
+    condition: eq(agentMessages.sessionId, sessionId),
+    database,
+  });
 }
 
 export function storedSegmentTokenUsage(
@@ -48,11 +51,11 @@ export function storedSegmentTokenUsage(
   sessionId: string,
   segment: number,
 ): AgentTokenUsageSummary {
-  return usageSummary(
-    database,
-    and(
-      eq(agentMessages.sessionId, sessionId),
+  return usageSummary({
+    condition: and(
       eq(agentMessages.segment, segment),
+      eq(agentMessages.sessionId, sessionId),
     ),
-  );
+    database,
+  });
 }

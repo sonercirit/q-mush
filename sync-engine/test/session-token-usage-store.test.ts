@@ -45,15 +45,15 @@ test("persists model-step usage on its assistant message and aggregates it", () 
   expect(
     setup.database
       .select({
-        cacheWriteInputTokens: agentMessages.cacheWriteInputTokens,
-        cachedInputTokens: agentMessages.cachedInputTokens,
-        inputTokens: agentMessages.inputTokens,
-        outputTokens: agentMessages.outputTokens,
+        cached: agentMessages.cachedInputTokens,
+        input: agentMessages.inputTokens,
+        output: agentMessages.outputTokens,
+        written: agentMessages.cacheWriteInputTokens,
       })
       .from(agentMessages)
       .where(eq(agentMessages.role, "assistant"))
       .all()
       .at(-1),
-  ).toEqual(TOKEN_USAGE);
+  ).toEqual({ cached: 600, input: 1_000, output: 200, written: 50 });
   setup.database.$client.close();
 });

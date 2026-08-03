@@ -2,7 +2,10 @@ import { readAgentAttachments } from "../shared/agent-attachments.ts";
 import type { AgentTokenUsage } from "../shared/agent-loop.ts";
 import { isRecord, readNullableString } from "../shared/auth-model.ts";
 import type { AttachmentContentFields } from "../shared/session-model.ts";
-import { readFiniteNumber } from "../shared/validation.ts";
+import {
+  readFiniteNumber,
+  readNonNegativeSafeInteger,
+} from "../shared/validation.ts";
 
 export interface SessionContentFields extends AttachmentContentFields {
   readonly content: string;
@@ -60,12 +63,15 @@ export function readSessionMessageFields(
 }
 
 function readTokenUsage(value: unknown): AgentTokenUsage | null | undefined {
-  if (value === null || value === undefined) return null;
-  if (!isRecord(value)) return undefined;
-  const cacheWriteInputTokens = readTokenCount(value["cacheWriteInputTokens"]);
-  const cachedInputTokens = readTokenCount(value["cachedInputTokens"]);
-  const inputTokens = readTokenCount(value["inputTokens"]);
-  const outputTokens = readTokenCount(value["outputTokens"]);
+  const normalized = value === null ? undefined : value;
+  if (normalized === undefined) return null;
+  if (!isRecord(normalized)) return undefined;
+  const cacheWriteInputTokens = readTokenCount(
+    normalized["cacheWriteInputTokens"],
+  );
+  const cachedInputTokens = readTokenCount(normalized["cachedInputTokens"]);
+  const inputTokens = readTokenCount(normalized["inputTokens"]);
+  const outputTokens = readTokenCount(normalized["outputTokens"]);
   return cacheWriteInputTokens === undefined ||
     cachedInputTokens === undefined ||
     inputTokens === undefined ||
@@ -80,7 +86,5 @@ function readTokenUsage(value: unknown): AgentTokenUsage | null | undefined {
 }
 
 function readTokenCount(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
-    ? value
-    : undefined;
+  return readNonNegativeSafeInteger(value);
 }

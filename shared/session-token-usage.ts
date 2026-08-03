@@ -9,6 +9,13 @@ export interface AgentTokenUsageStep {
   readonly tokenUsage?: AgentTokenUsage | null;
 }
 
+export const EMPTY_AGENT_TOKEN_USAGE: AgentTokenUsage = {
+  cacheWriteInputTokens: 0,
+  cachedInputTokens: 0,
+  inputTokens: 0,
+  outputTokens: 0,
+};
+
 export function summarizeTokenUsage(
   steps: readonly AgentTokenUsageStep[],
 ): AgentTokenUsageSummary {
@@ -20,10 +27,7 @@ export function summarizeTokenUsage(
     reportedStepCount: number;
     stepCount: number;
   } = {
-    cacheWriteInputTokens: 0,
-    cachedInputTokens: 0,
-    inputTokens: 0,
-    outputTokens: 0,
+    ...EMPTY_AGENT_TOKEN_USAGE,
     reportedStepCount: 0,
     stepCount: steps.length,
   };

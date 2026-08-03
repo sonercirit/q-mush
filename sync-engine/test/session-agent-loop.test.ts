@@ -43,6 +43,13 @@ function expectNoCompaction(
   expect(model.requests).toHaveLength(0);
 }
 
+const STEP_TOKEN_USAGE = {
+  cacheWriteInputTokens: 25,
+  cachedInputTokens: 600,
+  inputTokens: 800,
+  outputTokens: 200,
+} as const;
+
 describe("compacting agent session loop", () => {
   test("automatically compacts at 95% before the next model request", async () => {
     const model = new ScriptedAgentModel([
@@ -542,12 +549,7 @@ describe("compacting agent session loop", () => {
           content: "Persist this provider step.",
           contextTokens: 10,
           costUsd: 0.5,
-          tokenUsage: {
-            cacheWriteInputTokens: 25,
-            cachedInputTokens: 600,
-            inputTokens: 800,
-            outputTokens: 200,
-          },
+          tokenUsage: STEP_TOKEN_USAGE,
           toolCalls: [],
         },
       ]),
@@ -563,12 +565,7 @@ describe("compacting agent session loop", () => {
           contextTokens: 10,
           costBasis: "reported",
           costUsd: 0.5,
-          tokenUsage: {
-            cacheWriteInputTokens: 25,
-            cachedInputTokens: 600,
-            inputTokens: 800,
-            outputTokens: 200,
-          },
+          tokenUsage: STEP_TOKEN_USAGE,
         },
       },
     ]);

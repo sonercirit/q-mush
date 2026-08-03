@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import { agentMessages } from "../../shared/database/schema.ts";
+import { EMPTY_AGENT_TOKEN_USAGE } from "../../shared/session-token-usage.ts";
 import {
   TEST_NOW,
   TEST_USER_ID,
@@ -47,10 +48,7 @@ test("compaction advances durable segment identity and pages old messages", () =
     segment: 0,
     sessionId: STORE_SESSION_ID,
     tokenUsage: {
-      cacheWriteInputTokens: 0,
-      cachedInputTokens: 0,
-      inputTokens: 0,
-      outputTokens: 0,
+      ...EMPTY_AGENT_TOKEN_USAGE,
       reportedStepCount: 0,
       stepCount: 1,
     },
