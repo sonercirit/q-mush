@@ -326,6 +326,7 @@ export function createRunnerRegistrationCoordinator({
       lifecycleCallbackCompleted: false,
       metadata: selectedMetadata,
       operationalSent: false,
+      processNonce: connect.processNonce,
       preparedReceipt: undefined,
       previousAuthority: undefined,
       proposal: admitted.proposal,

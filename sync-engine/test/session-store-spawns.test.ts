@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
 import { agentSessions } from "../../shared/database/schema.ts";
 import {
@@ -87,6 +87,17 @@ function closeAfterParentAssertion(
   closeSetup(setup);
 }
 
+function updateChild(
+  setup: SpawnedChildReference,
+  values: { parentExecutionGeneration?: null; runnerRequired?: true },
+): void {
+  setup.database
+    .update(agentSessions)
+    .set(values)
+    .where(eq(agentSessions.id, setup.childId))
+    .run();
+}
+
 function expectedPendingReport(setup: SpawnedChildReference) {
   return {
     clientRequestId: `spawn:${setup.childId}:${String(setup.childGeneration)}`,
@@ -134,6 +145,66 @@ describe("spawned session report generation fencing", () => {
       "read",
     ]);
     setup.database.$client.close();
+  });
+
+  test("skips over more than a batch of callbacks blocked by runner-required parents", () => {
+    const setup = spawnedChildSetup();
+    const fixtureRows = setup.database
+      .select()
+      .from(agentSessions)
+      .where(inArray(agentSessions.id, [setup.parentId, setup.childId]))
+      .all();
+    const parent = fixtureRows.find(({ id }) => id === setup.parentId);
+    const child = fixtureRows.find(({ id }) => id === setup.childId);
+    if (parent === undefined || child === undefined) {
+      throw new Error("The spawned-session fixture rows were unavailable");
+    }
+    setup.database.$client
+      .query("UPDATE agent_sessions SET runner_required = 1 WHERE id = ?")
+      .run(setup.parentId);
+    for (let index = 0; index < 100; index += 1) {
+      setup.database
+        .insert(agentSessions)
+        .values({
+          ...child,
+          id: `blocked-child-${String(index).padStart(3, "0")}`,
+        })
+        .run();
+    }
+    const deliverableParentId = "deliverable-parent";
+    const deliverableChildId = "deliverable-child";
+    setup.database
+      .insert(agentSessions)
+      .values({ ...parent, id: deliverableParentId, runnerRequired: false })
+      .run();
+    setup.database
+      .insert(agentSessions)
+      .values({
+        ...child,
+        id: deliverableChildId,
+        parentSessionId: deliverableParentId,
+      })
+      .run();
+
+    expect(
+      setup.store.pendingSpawnedSessions(100).map(({ detail }) => detail.id),
+    ).toContain(deliverableChildId);
+    closeSetup(setup);
+  });
+
+  test("includes a completed child whose runner was removed when its parent is runnable", () => {
+    const setup = spawnedChildSetup();
+    updateChild(setup, { runnerRequired: true });
+
+    expect(
+      setup.store.pendingSpawnedSessions().map(({ detail }) => detail.id),
+    ).toContain(setup.childId);
+    expectReportClaimed(setup);
+    closeAfterParentAssertion(setup, (parent) => {
+      expect(parent?.pendingInputs).toMatchObject([
+        expectedPendingReport(setup),
+      ]);
+    });
   });
 
   test("persists and claims the current parent callback", () => {
@@ -277,11 +348,7 @@ describe("spawned session report generation fencing", () => {
 
   test("does not expose historical links without a generation", () => {
     const setup = spawnedChildSetup();
-    setup.database
-      .update(agentSessions)
-      .set({ parentExecutionGeneration: null })
-      .where(eq(agentSessions.id, setup.childId))
-      .run();
+    updateChild(setup, { parentExecutionGeneration: null });
 
     expect(spawnedLink(setup)).toBeUndefined();
     expectNoPendingReports(setup);

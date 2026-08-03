@@ -1,4 +1,5 @@
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
@@ -141,10 +142,22 @@ const REPORTABLE_CHILD_STATUSES = ["completed", "failed", "stopped"] as const;
 export function pendingSpawnedSessions(
   database: AppDatabase,
   read: (userId: string, sessionId: string) => AgentSessionDetail | undefined,
+  limit?: number,
 ): readonly PendingSpawnedSession[] {
-  return database
+  const parentSessions = alias(agentSessions, "callback_parent_sessions");
+  const query = database
     .select({ id: agentSessions.id, userId: agentSessions.userId })
     .from(agentSessions)
+    .innerJoin(
+      parentSessions,
+      and(
+        eq(parentSessions.id, agentSessions.parentSessionId),
+        eq(parentSessions.userId, agentSessions.userId),
+        eq(parentSessions.isDeleted, false),
+        eq(parentSessions.runnerRequired, false),
+        inArray(parentSessions.status, REPORTABLE_PARENT_STATUSES),
+      ),
+    )
     .where(
       and(
         storedSessionCondition({
@@ -152,14 +165,15 @@ export function pendingSpawnedSessions(
         }),
         isNotNull(agentSessions.parentSessionId),
         isNotNull(agentSessions.parentExecutionGeneration),
-        eq(agentSessions.runnerRequired, false),
       ),
     )
-    .all()
-    .flatMap(({ id, userId }) => {
-      const detail = read(userId, id);
-      return detail === undefined ? [] : [{ detail, userId }];
-    });
+    .orderBy(asc(agentSessions.createdAt), asc(agentSessions.id))
+    .$dynamic();
+  const rows = limit === undefined ? query.all() : query.limit(limit).all();
+  return rows.flatMap(({ id, userId }) => {
+    const detail = read(userId, id);
+    return detail === undefined ? [] : [{ detail, userId }];
+  });
 }
 
 export function spawnedSessionLink(

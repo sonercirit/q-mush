@@ -1,10 +1,12 @@
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import type { SessionAgentActions } from "./session-agent-actions.ts";
+import type { SessionRuntimes } from "./session-runtime.ts";
 import type { SessionStore } from "./session-store.ts";
 
 interface InterruptedSessionRecoveryDependencies {
   readonly actions: Pick<SessionAgentActions, "reportAll">;
   readonly now: () => number;
+  readonly runtimes?: Pick<SessionRuntimes, "activeForGeneration">;
   readonly store: Pick<SessionStore, "failInterrupted">;
 }
 
@@ -32,7 +34,10 @@ export function recoverInterruptedSessions(
       : detail.runnerId === runnerId;
   dependencies.actions.reportAll(
     dependencies.store
-      .failInterrupted(dependencies.now())
+      .failInterrupted(
+        dependencies.now(),
+        dependencies.runtimes?.activeForGeneration.bind(dependencies.runtimes),
+      )
       .filter(({ detail }) => matches(detail)),
   );
 }

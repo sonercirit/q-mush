@@ -10,10 +10,16 @@ import type { SessionDetailReader } from "./session-command-types.ts";
 import type { SessionRealtimeCommands } from "./session-realtime-commands.ts";
 import type { DurableRunnerRestartGate } from "./session-restart-coordinator.ts";
 
+interface RunnerCommandDeliveryOptions {
+  readonly connectionGeneration?: number;
+  readonly deliver: (command: RunnerToolCommand) => boolean;
+  readonly deliverCancellation: (commandId: string) => boolean;
+  readonly processNonce: string | undefined;
+  readonly runnerId: string;
+}
+
 export type DeliverRunnerCommands = (
-  runnerId: string,
-  deliver: (command: RunnerToolCommand) => boolean,
-  connectionGeneration?: number,
+  options: RunnerCommandDeliveryOptions,
 ) => boolean;
 
 export interface SessionIntegration extends SessionDetailReader {
@@ -21,6 +27,7 @@ export interface SessionIntegration extends SessionDetailReader {
   collection(request: Request): Response | Promise<Response>;
   compact(request: Request, sessionId: string): Promise<Response>;
   compaction(request: Request, sessionId: string): Promise<Response>;
+  commitRunnerProcess(runnerId: string, processNonce?: string): void;
   completeRunnerCommand(
     runnerId: string,
     commandId: string,
@@ -30,6 +37,8 @@ export interface SessionIntegration extends SessionDetailReader {
   deliverRunnerCommands: DeliverRunnerCommands;
   runnerConnectionGeneration(runnerId: string): number;
   replaceRunnerConnection(runnerId: string, replacedGeneration: number): void;
+  acknowledgeRunnerCancellation(runnerId: string, commandId: string): boolean;
+  runnerOperational(runnerId: string, restartId?: string): void;
   directories(request: Request, runnerId: string): Promise<Response>;
   drain(): Promise<void>;
   prepareFinalShutdown(): Promise<void>;

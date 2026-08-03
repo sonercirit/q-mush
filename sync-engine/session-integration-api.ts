@@ -21,6 +21,7 @@ import type { SessionNotification } from "./session-creation.ts";
 import type { SessionExecutionCleanup } from "./session-execution-cleanup.ts";
 import { readPrompt, type PromptInput } from "./session-input.ts";
 import type { DeliverRunnerCommands } from "./session-integration.ts";
+import type { SessionLivenessWatchdog } from "./session-liveness-watchdog.ts";
 import { openRouterProvidersForUser } from "./session-provider-selection.ts";
 import { recoverAnsweredQuestions } from "./session-question-actions.ts";
 import { reassignSessionRequest } from "./session-reassignment-request.ts";
@@ -64,6 +65,10 @@ export interface SessionIntegrationApiResources {
   readonly discoverOpenRouterProviders: OpenRouterProviderDiscoverer;
   readonly executionCleanup: SessionExecutionCleanup;
   readonly launchQueuedSessions: (userId: string) => void;
+  readonly liveness: Pick<
+    SessionLivenessWatchdog,
+    "runnerConnected" | "runnerDisconnected"
+  >;
   readonly modelsForUser: SessionModelsForUser;
   readonly modelCredentialPool: Parameters<
     typeof openRouterProvidersForUser
@@ -192,6 +197,10 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
     );
   }
 
+  commitRunnerProcess(runnerId: string, processNonce?: string): void {
+    this.resources.broker.commitRunnerProcess(runnerId, processNonce);
+  }
+
   completeRunnerCommand(
     runnerId: string,
     commandId: string,
@@ -200,23 +209,20 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
     return this.resources.broker.complete(runnerId, commandId, result);
   }
 
-  deliverRunnerCommands: DeliverRunnerCommands = (
-    runnerId,
-    deliver,
+  deliverRunnerCommands: DeliverRunnerCommands = ({
     connectionGeneration,
-  ) => {
-    let delivered = true;
-    this.resources.broker.deliverQueued(
+    deliver,
+    deliverCancellation,
+    processNonce,
+    runnerId,
+  }) =>
+    this.resources.broker.deliverRunnerCommands(
       runnerId,
-      (command) => {
-        const accepted = deliver(command);
-        delivered &&= accepted;
-        return accepted;
-      },
+      processNonce,
+      deliver,
+      deliverCancellation,
       connectionGeneration,
     );
-    return delivered;
-  };
 
   runnerConnectionGeneration(runnerId: string): number {
     return this.resources.broker.runnerConnectionGeneration(runnerId);
@@ -224,6 +230,10 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
 
   replaceRunnerConnection(runnerId: string, replacedGeneration: number): void {
     this.resources.broker.replaceRunnerConnection(runnerId, replacedGeneration);
+  }
+
+  acknowledgeRunnerCancellation(runnerId: string, commandId: string): boolean {
+    return this.resources.broker.acknowledgeCancellation(runnerId, commandId);
   }
 
   drain(): Promise<void> {
@@ -379,7 +389,11 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
   }
 
   runnerDisconnected(runnerId: string): void {
-    this.resources.broker.disconnectRunner(runnerId);
+    this.resources.liveness.runnerDisconnected(runnerId);
+    const restartPending =
+      this.resources.restart.draining() ||
+      this.resources.restart.pendingRunnerRestart(runnerId) !== undefined;
+    this.resources.broker.disconnectRunner(runnerId, !restartPending);
   }
 
   streamRunnerCommand(
@@ -395,6 +409,13 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
       return;
     }
     this.resources.restartCoordinator.recover(runnerId, restartId);
+  }
+
+  runnerOperational(runnerId: string, restartId?: string): void {
+    this.resources.liveness.runnerConnected(runnerId);
+    if (restartId !== undefined) {
+      this.resources.restartCoordinator.recover(runnerId, restartId);
+    }
   }
 
   async runnerRemoved(userId: string, runnerId: string): Promise<void> {

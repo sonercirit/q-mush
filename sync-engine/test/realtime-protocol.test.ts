@@ -73,8 +73,26 @@ test("reads an optional exact restart identity from runner registration", () => 
   });
 });
 
+test("reads the optional runner process nonce", () => {
+  const metadata = { ...testRunnerMetadata(), name: "nonce-runner" };
+  expect(
+    readRunnerConnectMessage(
+      runnerConnectMessage(metadata, { processNonce: "process-1" }),
+    ),
+  ).toEqual({
+    ...metadata,
+    processNonce: "process-1",
+    type: "connect",
+  });
+  for (const processNonce of ["", "x".repeat(201)]) {
+    expectInvalidConnectMessage(
+      runnerConnectMessage(metadata, { processNonce }),
+    );
+  }
+});
+
 test("validates optional activation receipts and exact connect shape", () => {
-  const metadata = testRunnerMetadata();
+  const metadata = { ...testRunnerMetadata(), architecture: "arm64" };
   expect(
     readRunnerConnectMessage(
       runnerConnectMessage(metadata, {
@@ -168,6 +186,10 @@ test("reads bounded output deltas and explicit final result states", () => {
     content: "warning",
     sequence: 3,
     type: "output",
+  });
+  expectRoundTripClientMessage({
+    commandId: "command-1",
+    type: "cancellation_received",
   });
   expectRoundTripClientMessage({
     commandId: "command-1",

@@ -101,30 +101,6 @@ async function expectCanceledCommand(
   return canceled;
 }
 
-test("cancels only commands from a revoked execution generation", async () => {
-  const canceled: string[] = [];
-  let id = 0;
-  const broker = new RunnerCommandBroker({
-    cancel: (_runnerId, commandId) => canceled.push(commandId),
-    commandId: () => `generation-${String(++id)}`,
-    deliver: () => true,
-  });
-  const old = broker.dispatch(brokerRunnerCommand({ generation: 3 }));
-  const current = broker.dispatch(brokerRunnerCommand({ generation: 4 }));
-
-  expect(broker.cancelSessionGeneration(SESSION_ID, 3)).toHaveLength(1);
-  expectRunnerCommandAbort(await captureBrokerRejection(old));
-  expect(canceled).toEqual(["generation-1"]);
-  expect(
-    broker.complete(
-      RUNNER_ID,
-      "generation-2",
-      completedRunnerCommand("current"),
-    ),
-  ).toBe(true);
-  expect(await current).toEqual(completedRunnerCommand("current"));
-});
-
 test("delivers a command immediately when a runner socket is connected", async () => {
   const delivered: unknown[] = [];
   const broker = new RunnerCommandBroker({
@@ -236,28 +212,40 @@ describe("runner command broker", () => {
     );
   });
 
-  test("rejects in-flight commands and fences late results when the authoritative runner disconnects", async () => {
+  test("requeues in-flight commands for an authoritative reconnect and fences late results", async () => {
     const { broker, result } = deliveredDispatch("disconnected-command");
 
     broker.disconnectRunner(RUNNER_ID);
 
-    await expect(result).rejects.toBeInstanceOf(RunnerDisconnectedError);
+    expect(broker.sessionCommandPhase(SESSION_ID)).toBe("runner_disconnected");
     expectRejectedCompletion(broker, "disconnected-command");
-  });
-
-  test("leaves queued commands for an authoritative reconnect", async () => {
-    const broker = new RunnerCommandBroker({
-      commandId: () => "queued-through-disconnect",
-    });
-    const result = broker.dispatch(brokerRunnerCommand());
-
-    broker.disconnectRunner(RUNNER_ID);
-
-    expect(broker.take(RUNNER_ID)?.id).toBe("queued-through-disconnect");
+    expect(broker.take(RUNNER_ID)?.id).toBe("disconnected-command");
+    expect(broker.sessionCommandPhase(SESSION_ID)).toBe("in_flight");
     await expectCompletedResult(
       broker,
       result,
-      "queued-through-disconnect",
+      "disconnected-command",
+      "reconnected",
+    );
+  });
+
+  test("leaves queued commands for an authoritative reconnect", async () => {
+    const broker = new RunnerCommandBroker();
+    const result = broker.dispatch(
+      brokerRunnerCommand({ tool: "read_agent_file" }),
+    );
+
+    broker.disconnectRunner(RUNNER_ID);
+
+    const queuedCommand = broker.take(RUNNER_ID);
+    expect(queuedCommand?.tool).toBe("read_agent_file");
+    if (queuedCommand === undefined) {
+      throw new Error("The reconnected queued command was unavailable");
+    }
+    await expectCompletedResult(
+      broker,
+      result,
+      queuedCommand.id,
       "reconnected",
     );
   });

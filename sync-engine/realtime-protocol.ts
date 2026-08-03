@@ -12,6 +12,10 @@ import { readBoundedString } from "../shared/validation.ts";
 
 export type RunnerClientMessage =
   | {
+      readonly commandId: string;
+      readonly type: "cancellation_received";
+    }
+  | {
       readonly channel: "stderr" | "stdout";
       readonly commandId: string;
       readonly content: string;
@@ -27,6 +31,7 @@ export type RunnerClientMessage =
 
 export interface RunnerConnectMessage extends RunnerConnectMetadata {
   readonly activationReceipt?: RunnerActivationReceipt;
+  readonly processNonce?: string;
   readonly restartId?: string;
   readonly type: "connect";
 }
@@ -83,6 +88,7 @@ export function readRunnerConnectMessage(
         "machineId",
         "name",
         "platform",
+        "processNonce",
         "restartId",
         "type",
       ].includes(key),
@@ -92,6 +98,10 @@ export function readRunnerConnectMessage(
     typeof machineId !== "string" ||
     typeof name !== "string" ||
     typeof platform !== "string" ||
+    (value["processNonce"] !== undefined &&
+      (typeof value["processNonce"] !== "string" ||
+        value["processNonce"].length === 0 ||
+        value["processNonce"].length > 200)) ||
     (restartId !== undefined &&
       (typeof restartId !== "string" ||
         restartId.length === 0 ||
@@ -106,6 +116,9 @@ export function readRunnerConnectMessage(
     machineId,
     name,
     platform,
+    ...(typeof value["processNonce"] === "string"
+      ? { processNonce: value["processNonce"] }
+      : {}),
     ...(typeof restartId === "string" ? { restartId } : {}),
     type: "connect",
   };
@@ -161,6 +174,13 @@ export function readRunnerClientMessage(message: string): RunnerClientMessage {
     commandId.length > 200
   ) {
     throw new Error("The runner WebSocket message was invalid");
+  }
+
+  if (value["type"] === "cancellation_received") {
+    if (Object.keys(value).length !== 2) {
+      throw new Error("The runner WebSocket message was invalid");
+    }
+    return { commandId, type: "cancellation_received" };
   }
 
   if (value["type"] === "output") {

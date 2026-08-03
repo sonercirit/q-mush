@@ -83,6 +83,7 @@ interface FakeRunnerProcess {
 function fakeRunnerProcess(
   realtime: ReturnType<typeof createRealtimeIntegration>,
   restartId?: string,
+  processNonce = "fake-runner-process",
 ): FakeRunnerProcess {
   const client = new FakeRunnerSocket();
   const startup = new RunnerStartupRestart(restartId);
@@ -120,7 +121,7 @@ function fakeRunnerProcess(
         name: "runner",
         platform: "linux",
       },
-      restartId === undefined ? {} : { restartId },
+      restartId === undefined ? { processNonce } : { processNonce, restartId },
     ),
   );
   return {
@@ -199,11 +200,11 @@ test("a supervised relaunch supersedes a stale restart process without rejecting
         : false,
   });
   const realtime = connectedRunnerRealtimeTestIntegration({
-    deliverRunnerCommands: (
+    deliverRunnerCommands: ({
+      connectionGeneration: deliveredGeneration = connectionGeneration,
+      deliver: deliverQueued,
       runnerId,
-      deliverQueued,
-      deliveredGeneration = connectionGeneration,
-    ) => {
+    }) => {
       broker.deliverQueued(runnerId, deliverQueued, deliveredGeneration);
       return true;
     },
@@ -221,7 +222,11 @@ test("a supervised relaunch supersedes a stale restart process without rejecting
       if (restartId === pendingRestartId) pendingRestartId = undefined;
     },
   });
-  staleRestartProcess = fakeRunnerProcess(realtime, RESTART_ID);
+  staleRestartProcess = fakeRunnerProcess(
+    realtime,
+    RESTART_ID,
+    "stale-restart-process",
+  );
   await expect(staleRestartProcess.registration).resolves.toBeUndefined();
 
   const commandResult = broker.dispatch(runnerCommandInput());
@@ -232,7 +237,11 @@ test("a supervised relaunch supersedes a stale restart process without rejecting
     true,
   );
 
-  const supervisedProcess = fakeRunnerProcess(realtime);
+  const supervisedProcess = fakeRunnerProcess(
+    realtime,
+    undefined,
+    "supervised-process",
+  );
   const staleProcess = staleRestartProcess;
   await expect(supervisedProcess.registration).resolves.toBeUndefined();
 

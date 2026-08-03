@@ -1,4 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { RunnerCommandDelivery } from "./runner-command-delivery.ts";
+import {
+  RunnerCommandSurvivalState,
+  type RunnerCommandSurvivalOptions,
+} from "./runner-command-survival.ts";
 import type {
   RunnerCommandOutputDelta,
   RunnerCommandResult,
@@ -57,7 +62,7 @@ export interface DispatchRunnerToolCommand extends Omit<
   readonly runnerId: string;
 }
 
-interface RunnerCommandBrokerOptions {
+interface RunnerCommandBrokerOptions extends RunnerCommandSurvivalOptions {
   readonly cancel?: (runnerId: string, commandId: string) => void;
   readonly commandId?: () => string;
   readonly deliver?: (runnerId: string, command: RunnerToolCommand) => boolean;
@@ -68,11 +73,6 @@ export class RunnerDisconnectedError extends Error {
     super(message);
     this.name = "RunnerDisconnectedError";
   }
-}
-
-interface RejectedCommand {
-  readonly command: RunnerToolCommand;
-  readonly error: Error;
 }
 
 interface PendingCommand {
@@ -88,6 +88,7 @@ interface PendingCommand {
   readonly stream: ((delta: RunnerCommandOutputDelta) => void) | undefined;
   nextSequence: number;
   phase: "in_flight" | "queued";
+  queuedAfterDisconnect: boolean;
 }
 
 function abortError(message: string): DOMException {
@@ -102,19 +103,33 @@ function ignoreCleanupError(callback: () => void): void {
   }
 }
 
+interface RejectedCommand {
+  readonly command: RunnerToolCommand;
+  readonly error: Error;
+}
+
 export class RunnerCommandBroker {
   readonly #cancel: ((runnerId: string, commandId: string) => void) | undefined;
   readonly #commandId: () => string;
   readonly #deliver:
     ((runnerId: string, command: RunnerToolCommand) => boolean) | undefined;
+  readonly #delivery: RunnerCommandDelivery<PendingCommand>;
   readonly #pending = new Map<string, PendingCommand>();
-  readonly #queues = new Map<string, RunnerToolCommand[]>();
+  readonly #processRegistrations = new Map<
+    string,
+    Readonly<{ commit: () => void; processNonce: string | undefined }>
+  >();
   readonly #runnerConnectionGenerations = new Map<string, number>();
+  readonly #survival: RunnerCommandSurvivalState;
 
   constructor(options: RunnerCommandBrokerOptions = {}) {
     this.#cancel = options.cancel;
     this.#commandId = options.commandId ?? randomUUID;
     this.#deliver = options.deliver;
+    this.#delivery = new RunnerCommandDelivery((commandId) =>
+      this.#pending.get(commandId),
+    );
+    this.#survival = new RunnerCommandSurvivalState(options);
   }
 
   dispatch(
@@ -170,6 +185,7 @@ export class RunnerCommandBroker {
         generation: input.generation,
         nextSequence: 0,
         phase: "queued",
+        queuedAfterDisconnect: false,
         reject,
         resolve,
         runnerId: input.runnerId,
@@ -221,6 +237,7 @@ export class RunnerCommandBroker {
     }
     pending.connectionGeneration = this.runnerConnectionGeneration(runnerId);
     pending.phase = "in_flight";
+    pending.queuedAfterDisconnect = false;
     return pending.command;
   }
 
@@ -250,41 +267,16 @@ export class RunnerCommandBroker {
     return true;
   }
 
-  #authorizedQueued(runnerId: string): PendingCommand | undefined {
+  #authorizedQueued(
+    runnerId: string,
+    excludedCommandIds?: ReadonlySet<string>,
+  ): PendingCommand | undefined {
     for (;;) {
-      const pending = this.#nextQueued(runnerId);
+      const pending = this.#delivery.next(runnerId, excludedCommandIds);
       if (pending === undefined || this.#requireAuthorization(pending)) {
         return pending;
       }
     }
-  }
-
-  #nextQueued(runnerId: string): PendingCommand | undefined {
-    const queue = this.#queues.get(runnerId);
-    if (queue === undefined) {
-      return undefined;
-    }
-
-    for (;;) {
-      const command = queue.shift();
-      if (command === undefined) {
-        this.#queues.delete(runnerId);
-        return undefined;
-      }
-      if (queue.length === 0) {
-        this.#queues.delete(runnerId);
-      }
-      const pending = this.#pending.get(command.id);
-      if (pending !== undefined) {
-        return pending;
-      }
-    }
-  }
-
-  #queue(runnerId: string): RunnerToolCommand[] {
-    const queue = this.#queues.get(runnerId) ?? [];
-    this.#queues.set(runnerId, queue);
-    return queue;
   }
 
   #setPendingPhase(
@@ -311,17 +303,114 @@ export class RunnerCommandBroker {
     pending.connectionGeneration = undefined;
     this.#setPendingPhase(pending, "queued");
     if (this.#pending.has(pending.command.id)) {
-      this.#queue(pending.runnerId).unshift(pending.command);
+      this.#delivery.requeue(pending.runnerId, pending.command);
     }
+  }
+
+  deliverCancellationTombstones(
+    runnerId: string,
+    deliver: (commandId: string) => boolean,
+  ): boolean {
+    return this.#survival.deliverCancellations(runnerId, deliver);
+  }
+
+  acknowledgeCancellation(runnerId: string, commandId: string): boolean {
+    return this.#survival.acknowledgeCancellation(runnerId, commandId);
+  }
+
+  #queuedCommandIds(runnerId: string): ReadonlySet<string> {
+    return new Set(
+      this.#matchingPending(
+        (pending) =>
+          pending.runnerId === runnerId && pending.queuedAfterDisconnect,
+      ).map(({ command }) => command.id),
+    );
+  }
+
+  #runnerProcessMatches(runnerId: string, processNonce?: string): boolean {
+    if (processNonce === undefined) return false;
+    return this.#survival.processMatches(runnerId, processNonce);
+  }
+
+  #stageRunnerProcess(
+    runnerId: string,
+    processNonce: string | undefined,
+    lostIds: ReadonlySet<string>,
+  ): () => void {
+    const processCommit = this.#survival.stageProcess(runnerId, processNonce);
+    return () => {
+      processCommit();
+      for (const commandId of lostIds) {
+        this.#reject(
+          commandId,
+          new RunnerDisconnectedError(
+            "The runner process restarted before the command returned",
+          ),
+          false,
+        );
+      }
+    };
+  }
+
+  registerRunnerProcess(runnerId: string, processNonce?: string): boolean {
+    const sameProcess = this.#runnerProcessMatches(runnerId, processNonce);
+    this.#stageRunnerProcess(
+      runnerId,
+      processNonce,
+      sameProcess ? new Set() : this.#queuedCommandIds(runnerId),
+    )();
+    return sameProcess;
+  }
+
+  commitRunnerProcess(runnerId: string, processNonce?: string): void {
+    const registration = this.#processRegistrations.get(runnerId);
+    if (registration === undefined) return;
+    if (registration.processNonce !== processNonce) return;
+    this.#processRegistrations.delete(runnerId);
+    registration.commit();
+  }
+
+  deliverRunnerCommands(
+    runnerId: string,
+    processNonce: string | undefined,
+    deliver: (command: RunnerToolCommand) => boolean,
+    deliverCancellation: (commandId: string) => boolean,
+    connectionGeneration?: number,
+  ): boolean {
+    const sameProcess = this.#runnerProcessMatches(runnerId, processNonce);
+    const lostIds = sameProcess
+      ? new Set<string>()
+      : this.#queuedCommandIds(runnerId);
+    const commit = this.#stageRunnerProcess(runnerId, processNonce, lostIds);
+    if (
+      sameProcess &&
+      !this.deliverCancellationTombstones(runnerId, deliverCancellation)
+    ) {
+      return false;
+    }
+    const failed = new Set<string>();
+    this.deliverQueued(
+      runnerId,
+      (command) => {
+        if (!deliver(command)) failed.add(command.id);
+        return !failed.has(command.id);
+      },
+      connectionGeneration,
+      lostIds,
+    );
+    if (failed.size > 0) return false;
+    this.#processRegistrations.set(runnerId, { commit, processNonce });
+    return true;
   }
 
   deliverQueued(
     runnerId: string,
     deliver: (command: RunnerToolCommand) => boolean,
     connectionGeneration = this.runnerConnectionGeneration(runnerId),
+    excludedCommandIds?: ReadonlySet<string>,
   ): void {
     for (;;) {
-      const pending = this.#authorizedQueued(runnerId);
+      const pending = this.#authorizedQueued(runnerId, excludedCommandIds);
       if (pending === undefined) {
         return;
       }
@@ -339,6 +428,7 @@ export class RunnerCommandBroker {
         this.#requeue(pending);
         return;
       }
+      pending.queuedAfterDisconnect = false;
     }
   }
 
@@ -368,6 +458,29 @@ export class RunnerCommandBroker {
 
   isActive(runnerId: string, commandId: string): boolean {
     return this.#authorizedForRunner(runnerId, commandId) !== undefined;
+  }
+
+  #matchingPending(
+    matches: (pending: PendingCommand) => boolean,
+  ): PendingCommand[] {
+    return Array.from(this.#pending.values()).filter(matches);
+  }
+
+  sessionCommandPhase(
+    sessionId: string,
+  ): "in_flight" | "queued" | "runner_disconnected" | undefined {
+    const commands = this.#matchingPending(
+      ({ command }) => command.sessionId === sessionId,
+    );
+    if (commands.length === 0) {
+      return undefined;
+    }
+    if (commands.some(({ queuedAfterDisconnect }) => queuedAfterDisconnect)) {
+      return "runner_disconnected";
+    }
+    return commands.every(({ phase }) => phase === "in_flight")
+      ? "in_flight"
+      : "queued";
   }
 
   #settleAuthorized(
@@ -443,11 +556,11 @@ export class RunnerCommandBroker {
       return this.runnerConnectionGeneration(runnerId);
     }
     this.#runnerConnectionGenerations.set(runnerId, replacedGeneration + 1);
-    const inFlight = [...this.#pending.values()].filter(
-      (pending) =>
-        pending.runnerId === runnerId &&
-        pending.phase === "in_flight" &&
-        pending.connectionGeneration === replacedGeneration,
+    const inFlight = this.#matchingPending(
+      ({ connectionGeneration, phase, runnerId: assignedRunner }) =>
+        assignedRunner === runnerId &&
+        phase === "in_flight" &&
+        connectionGeneration === replacedGeneration,
     );
     for (const pending of inFlight) {
       this.#reject(
@@ -461,11 +574,21 @@ export class RunnerCommandBroker {
     return replacedGeneration + 1;
   }
 
-  disconnectRunner(runnerId: string): void {
-    for (const pending of [...this.#pending.values()]) {
-      if (pending.runnerId === runnerId && pending.phase === "in_flight") {
+  disconnectRunner(runnerId: string, retry = true): void {
+    const disconnected = this.#matchingPending(
+      ({ phase, runnerId: assignedRunner }) =>
+        assignedRunner === runnerId && phase === "in_flight",
+    );
+    if (!retry) {
+      for (const pending of disconnected) {
         this.#reject(pending.command.id, new RunnerDisconnectedError());
       }
+      return;
+    }
+    for (const pending of disconnected.toReversed()) {
+      pending.nextSequence = 0;
+      pending.queuedAfterDisconnect = true;
+      this.#requeue(pending);
     }
   }
 
@@ -516,23 +639,26 @@ export class RunnerCommandBroker {
     );
   }
 
-  #reject(commandId: string, error: Error, cancelInFlight = true): void {
+  #reject(commandId: string, error: Error, publishCancellation = true): void {
     const pending = this.#pending.get(commandId);
     if (pending === undefined) {
       return;
     }
 
-    this.#settle(commandId, pending);
-    if (
-      cancelInFlight &&
-      pending.phase === "in_flight" &&
-      this.#cancel !== undefined
-    ) {
-      const cancel = this.#cancel;
-      ignoreCleanupError(() => {
-        cancel(pending.runnerId, commandId);
-      });
+    const runnerMayStillBeExecuting =
+      pending.phase === "in_flight" || pending.queuedAfterDisconnect;
+    if (publishCancellation && runnerMayStillBeExecuting) {
+      if (pending.queuedAfterDisconnect) {
+        this.#survival.recordCancellation(pending.runnerId, commandId);
+      }
+      if (this.#cancel !== undefined) {
+        const cancel = this.#cancel;
+        ignoreCleanupError(() => {
+          cancel(pending.runnerId, commandId);
+        });
+      }
     }
+    this.#settle(commandId, pending);
     pending.reject(error);
   }
 
@@ -548,16 +674,7 @@ export class RunnerCommandBroker {
     }
 
     if (pending.phase === "queued") {
-      const queue = this.#queues.get(pending.runnerId);
-      if (queue !== undefined) {
-        const index = queue.findIndex(({ id }) => id === commandId);
-        if (index >= 0) {
-          queue.splice(index, 1);
-        }
-        if (queue.length === 0) {
-          this.#queues.delete(pending.runnerId);
-        }
-      }
+      this.#delivery.remove(pending.runnerId, commandId);
     }
   }
 }

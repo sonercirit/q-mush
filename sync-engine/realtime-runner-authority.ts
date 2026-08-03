@@ -171,19 +171,25 @@ export function finishRunnerOperational(
   );
   const connectionGeneration =
     replaced === undefined ? replacedGeneration : replacedGeneration + 1;
-  const deliver = (command: Parameters<typeof options.sendCommand>[1]) =>
+  const isCurrent = () =>
     data.usable &&
     options.hub.runnerIsCurrent(runner.id, socket) &&
-    options.hub.currentRunner(runner.id) === socket
-      ? options.sendCommand(socket, command)
+    options.hub.currentRunner(runner.id) === socket;
+  const deliver = (command: Parameters<typeof options.sendCommand>[1]) =>
+    isCurrent() ? options.sendCommand(socket, command) : false;
+  const deliverCancellation = (commandId: string) =>
+    isCurrent()
+      ? safeSend(socket, JSON.stringify({ commandId, type: "cancel" }))
       : false;
   let delivered = false;
   try {
-    delivered = options.sessions.deliverRunnerCommands(
-      runner.id,
-      deliver,
+    delivered = options.sessions.deliverRunnerCommands({
       connectionGeneration,
-    );
+      deliver,
+      deliverCancellation,
+      processNonce: pending.processNonce,
+      runnerId: runner.id,
+    });
   } catch {
     // The replacement remains provisional until queued delivery succeeds.
   }
@@ -194,9 +200,16 @@ export function finishRunnerOperational(
     fenceRunnerRegistration(socket, data, "Runner command delivery failed");
     return;
   }
+  options.sessions.commitRunnerProcess(runner.id, pending.processNonce);
   if (replaced !== undefined) {
     options.sessions.replaceRunnerConnection(runner.id, replacedGeneration);
   }
+  options.sessions.runnerOperational(
+    runner.id,
+    pending.gate.lifecycle === "restart"
+      ? pending.gate.expectedRestartId
+      : undefined,
+  );
   data.committed = undefined;
   data.registration = undefined;
   fenceReplacedSocket(replaced, socket);

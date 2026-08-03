@@ -22,6 +22,7 @@ import {
 } from "./session-store-persistence.ts";
 import { readStoredSessionState } from "./session-store-state.ts";
 import {
+  errorMessageValues,
   insertStoredMessage,
   interruptedSessionErrorValues,
 } from "./session-store-values.ts";
@@ -164,6 +165,7 @@ export function failInterruptedStoredSession(
   session: InterruptedStoredSession,
   messageId: string,
   now: number,
+  error?: string,
 ): boolean {
   return database.transaction((transaction) => {
     const updated = updateStoredSnapshotAndEndGenerationTurn(
@@ -175,13 +177,19 @@ export function failInterruptedStoredSession(
     if (!updated) {
       return false;
     }
-    insertStoredMessage(transaction, interruptedSessionErrorValues(), {
-      actorId: SYSTEM_ID,
-      id: messageId,
-      now,
-      sessionId: session.id,
-      userId: session.userId,
-    });
+    insertStoredMessage(
+      transaction,
+      error === undefined
+        ? interruptedSessionErrorValues()
+        : errorMessageValues(error),
+      {
+        actorId: SYSTEM_ID,
+        id: messageId,
+        now,
+        sessionId: session.id,
+        userId: session.userId,
+      },
+    );
     return true;
   });
 }

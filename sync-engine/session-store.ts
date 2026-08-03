@@ -335,10 +335,8 @@ export class SessionStore extends SessionStoreRestarts {
   spawnedSessionLink(userId: string, sessionId: string) {
     return spawnedSessionLink(this.#database, userId, sessionId);
   }
-  pendingSpawnedSessions(): readonly PendingSpawnedSession[] {
-    return pendingSpawnedSessions(this.#database, (userId, sessionId) =>
-      this.get(userId, sessionId),
-    );
+  pendingSpawnedSessions(limit?: number): readonly PendingSpawnedSession[] {
+    return pendingSpawnedSessions(this.#database, this.get.bind(this), limit);
   }
   queuedSessionOwnerIds(): readonly string[] {
     return queuedSessionOwnerIds(this.#database);
@@ -447,9 +445,15 @@ export class SessionStore extends SessionStoreRestarts {
       ...(workspaceId === undefined ? {} : { workspaceId }),
     });
   }
-  failInterrupted(now: number): readonly PendingSpawnedSession[] {
+  failInterrupted(
+    now: number,
+    active: (id: string, generation: number) => boolean = () => false,
+  ) {
     const interrupted = interruptedStoredSessions(this.#database, now);
     for (const session of interrupted) {
+      if (active(session.id, session.executionGeneration)) {
+        continue;
+      }
       if (this.restoreInterruptedRestart(session, now)) {
         continue;
       }

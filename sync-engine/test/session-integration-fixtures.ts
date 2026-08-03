@@ -22,6 +22,7 @@ import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
 import type { OpenRouterProviderDiscoverer } from "../../sync-engine/openrouter-provider-discovery.ts";
 import { createRunnerIntegration } from "../../sync-engine/runners.ts";
 import type { AgentModelFactory } from "../../sync-engine/session-agent-models.ts";
+import type { SessionDependencies } from "../../sync-engine/session-dependencies.ts";
 import { readUserSpawnSession } from "../../sync-engine/session-input.ts";
 import { createSessionIntegration } from "../../sync-engine/sessions.ts";
 import { WorkspaceStore } from "../../sync-engine/workspace-store.ts";
@@ -57,6 +58,7 @@ interface ConnectedSessionOptions {
   readonly database?: ReturnType<typeof createAuthenticatedTestDatabase>;
   readonly deletedCredentials?: FixtureCredentials;
   readonly foreignCredentials?: FixtureCredentials;
+  readonly liveness?: SessionDependencies["liveness"];
   readonly modelDiscovery?: AgentModelDiscoverer;
   readonly modelFactory?: AgentModelFactory;
   readonly now?: () => number;
@@ -326,6 +328,7 @@ export function connectedSessionSetup(
       ...(options.providerDiscovery === undefined
         ? {}
         : { discoverOpenRouterProviders: options.providerDiscovery }),
+      ...(options.liveness === undefined ? {} : { liveness: options.liveness }),
       modelFactory:
         options.modelFactory ??
         ((factoryOptions) => {
@@ -358,6 +361,7 @@ export function connectedSessionSetup(
       workspaces: new WorkspaceStore(database),
     },
   );
+  sessions.runnerOperational(RUNNER_ID);
   sessions.onChange((userId, sessionId) => {
     notifications.push({ sessionId, userId });
     options.onChange?.(userId, sessionId);

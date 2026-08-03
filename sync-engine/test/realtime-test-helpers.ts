@@ -299,6 +299,7 @@ class RealtimeTestSessionCommands implements SessionRealtimeCommands {
 export type RealtimeSessionOverrides = Partial<
   Pick<
     SessionIntegration,
+    | "commitRunnerProcess"
     | "completeRunnerCommand"
     | "deliverRunnerCommands"
     | "detailForUser"
@@ -309,9 +310,11 @@ export type RealtimeSessionOverrides = Partial<
     | "pendingRunnerRestart"
     | "realtimeCommands"
     | "replaceRunnerConnection"
+    | "acknowledgeRunnerCancellation"
     | "runnerConnected"
     | "runnerConnectionGeneration"
     | "runnerDisconnected"
+    | "runnerOperational"
     | "runnerRestartReady"
   >
 >;
@@ -323,6 +326,7 @@ export function realtimeTestSessions(
     collection: () => Promise.resolve(new Response()),
     compact: () => Promise.resolve(new Response()),
     compaction: () => Promise.resolve(new Response()),
+    commitRunnerProcess: () => undefined,
     completeRunnerCommand: () => false,
     continue: () => Promise.resolve(new Response()),
     deliverRunnerCommands: () => true,
@@ -344,9 +348,11 @@ export function realtimeTestSessions(
     realtimeCommands: new RealtimeTestSessionCommands(),
     reassign: () => Promise.resolve(new Response()),
     replaceRunnerConnection: () => undefined,
+    acknowledgeRunnerCancellation: () => false,
     runnerConnected: () => undefined,
     runnerConnectionGeneration: () => 0,
     runnerDisconnected: () => undefined,
+    runnerOperational: () => undefined,
     runnerRestartReady: () => undefined,
     runnerRemoved: () => Promise.resolve(),
     stop: () => Promise.resolve(new Response()),
@@ -362,9 +368,9 @@ interface RealtimeRunnerLifecycleRecord {
 
 export function realtimeRunnerLifecycle(
   record: RealtimeRunnerLifecycleRecord,
-): Pick<RealtimeSessionOverrides, "runnerConnected" | "runnerDisconnected"> {
+): Pick<RealtimeSessionOverrides, "runnerDisconnected" | "runnerOperational"> {
   return {
-    runnerConnected: (runnerId) => {
+    runnerOperational: (runnerId) => {
       record.connected.push(runnerId);
     },
     runnerDisconnected: (runnerId) => {

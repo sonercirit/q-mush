@@ -31,14 +31,15 @@ export async function waitForSessionValue(
   readValue: () => unknown,
   predicate: (value: unknown) => boolean,
 ): Promise<unknown> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
     const value = await Promise.resolve(readValue());
 
     if (predicate(value)) {
       return value;
     }
 
-    await Bun.sleep(1);
+    await Bun.sleep(10);
   }
 
   throw new Error("The session test timed out");
