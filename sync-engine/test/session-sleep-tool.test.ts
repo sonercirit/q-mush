@@ -23,7 +23,7 @@ function inactiveSteering(): boolean {
 }
 
 function startSleep(
-  durationMs: number,
+  durationSeconds: number,
   sessionId: string,
   options: {
     readonly pending?: () => boolean;
@@ -32,7 +32,7 @@ function startSleep(
 ): Promise<string> {
   const signal = options.signal ?? new AbortController().signal;
   return executeSessionSleepTool(
-    { durationMs },
+    { durationSeconds },
     signal,
     options.pending ?? inactiveSteering,
     (waitSignal) => waitForSessionSteeringInput(sessionId, waitSignal),
@@ -54,11 +54,11 @@ function elapsedMilliseconds(output: string): number {
 describe("session sleep tool", () => {
   test("sleeps for the requested duration and reports actual versus expected", async () => {
     await withFakeTimers(async () => {
-      const assertion = expect(startSleep(100, "full")).resolves.toMatch(
-        /Slept for the full duration.*actual 100 ms.*expected 100 ms/,
+      const assertion = expect(startSleep(1, "full")).resolves.toMatch(
+        /Slept for the full duration.*actual 1000 ms.*expected 1000 ms/,
       );
 
-      await advance(100);
+      await advance(1_000);
       await assertion;
       expectNoTimers();
     });
@@ -66,7 +66,7 @@ describe("session sleep tool", () => {
 
   test("returns immediately when steering is already pending", async () => {
     await withFakeTimers(async () => {
-      const output = await startSleep(1_000, "pending", {
+      const output = await startSleep(1, "pending", {
         pending: () => true,
       });
 
@@ -79,7 +79,7 @@ describe("session sleep tool", () => {
 
   test("wakes early for pending steering and reports elapsed versus expected", async () => {
     await withFakeTimers(async () => {
-      const sleeping = startSleep(1_000, "steered");
+      const sleeping = startSleep(1, "steered");
 
       await advance(100);
       notifySessionSteeringInput("steered");
@@ -96,22 +96,35 @@ describe("session sleep tool", () => {
   test("rejects invalid and unreasonably long durations", async () => {
     const signal = new AbortController().signal;
     const wait = () => Promise.resolve();
-    for (const durationMs of [
+    for (const durationSeconds of [
       undefined,
       0,
       -1,
       Number.NaN,
       Number.POSITIVE_INFINITY,
       1.5,
-      3_600_001,
+      3_601,
     ]) {
       await expect(
-        executeSessionSleepTool({ durationMs }, signal, inactiveSteering, wait),
-      ).rejects.toThrow("durationMs");
+        executeSessionSleepTool(
+          { durationSeconds },
+          signal,
+          inactiveSteering,
+          wait,
+        ),
+      ).rejects.toThrow("durationSeconds");
     }
     await expect(
       executeSessionSleepTool(
-        { durationMs: 1, extra: true },
+        { durationMs: 1_000 },
+        signal,
+        inactiveSteering,
+        wait,
+      ),
+    ).rejects.toThrow("durationSeconds");
+    await expect(
+      executeSessionSleepTool(
+        { durationSeconds: 1, extra: true },
         signal,
         inactiveSteering,
         wait,
@@ -123,7 +136,7 @@ describe("session sleep tool", () => {
     await withFakeTimers(async () => {
       const controller = new AbortController();
       const assertion = expect(
-        startSleep(1_000, "stopped", { signal: controller.signal }),
+        startSleep(1, "stopped", { signal: controller.signal }),
       ).rejects.toMatchObject({ name: "AbortError" });
 
       await advance(100);

@@ -1,7 +1,8 @@
 import { setTimeout } from "node:timers/promises";
 import { throwIfAgentAborted } from "../shared/agent-loop.ts";
 
-const MAXIMUM_SLEEP_DURATION_MS = 3_600_000;
+const MAXIMUM_SLEEP_DURATION_SECONDS = 3_600;
+const MILLISECONDS_PER_SECOND = 1_000;
 
 function requestedDuration(
   arguments_: Readonly<Record<string, unknown>>,
@@ -9,18 +10,18 @@ function requestedDuration(
   if (Object.keys(arguments_).length !== 1) {
     throw new Error("The sleep arguments are invalid");
   }
-  const durationMs = arguments_["durationMs"];
+  const durationSeconds = arguments_["durationSeconds"];
   if (
-    typeof durationMs !== "number" ||
-    !Number.isSafeInteger(durationMs) ||
-    durationMs <= 0 ||
-    durationMs > MAXIMUM_SLEEP_DURATION_MS
+    typeof durationSeconds !== "number" ||
+    !Number.isSafeInteger(durationSeconds) ||
+    durationSeconds <= 0 ||
+    durationSeconds > MAXIMUM_SLEEP_DURATION_SECONDS
   ) {
     throw new Error(
-      `Tool argument durationMs must be a positive integer no greater than ${String(MAXIMUM_SLEEP_DURATION_MS)}`,
+      `Tool argument durationSeconds must be a positive integer no greater than ${String(MAXIMUM_SLEEP_DURATION_SECONDS)}`,
     );
   }
-  return durationMs;
+  return durationSeconds * MILLISECONDS_PER_SECOND;
 }
 
 function sleepResult(

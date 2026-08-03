@@ -34,6 +34,7 @@ import {
   renderToolHeader,
 } from "./session-live-tool-activity.tsx";
 import { renderMarkdown } from "./session-markdown.tsx";
+import { renderToolArguments } from "./session-sleep-renderer.tsx";
 import { createSessionStepTiming } from "./session-step-timing.ts";
 import { renderStructuredText } from "./session-structured-text.tsx";
 import { renderStructuredCode } from "./session-syntax.tsx";
@@ -312,7 +313,9 @@ function ConversationTranscriptMessage(props: {
                     kind: "Tool call",
                     name: call.name,
                   })}
-                  <div class="mt-2">{renderStructuredCode(call.arguments)}</div>
+                  <div class="mt-2">
+                    {renderToolArguments(call.name, call.arguments)}
+                  </div>
                   <Show when={stream()}>
                     {(liveStream) => (
                       <LiveToolActivityContent

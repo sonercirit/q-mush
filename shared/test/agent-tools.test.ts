@@ -43,6 +43,30 @@ test("lets parallel call every eligible tool and skill by default", () => {
   ]);
 });
 
+test("defines the sleep duration in bounded whole seconds", () => {
+  const sleep = AGENT_TOOLS.find(
+    ({ function: definition }) => definition.name === "sleep",
+  );
+
+  expect(sleep).toMatchObject({
+    function: {
+      description:
+        "Pause this session for a positive bounded duration in seconds. Pending steering wakes it early; the result reports actual and expected duration.",
+      parameters: {
+        properties: {
+          durationSeconds: {
+            description: "Duration to sleep in seconds (1-3,600)",
+            maximum: 3_600,
+            minimum: 1,
+            type: "integer",
+          },
+        },
+        required: ["durationSeconds"],
+      },
+    },
+  });
+});
+
 test("keeps sleep session-local and unavailable to parallel", () => {
   const sleep = AGENT_SESSION_TOOL_OPTIONS.find(({ name }) => name === "sleep");
   const parallel = selectedAgentTools(["sleep", "parallel"]);

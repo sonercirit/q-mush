@@ -17,7 +17,7 @@ test("rejects sleep inside parallel without dispatching it", async () => {
     userId: "user-id",
   });
   const toolUses = [
-    { parameters: { durationMs: 10 }, recipient_name: "sleep" },
+    { parameters: { durationSeconds: 10 }, recipient_name: "sleep" },
     { parameters: {}, recipient_name: "read" },
   ];
   const output = await skills.execute("parallel", { tool_uses: toolUses });
