@@ -288,6 +288,7 @@ export function installDatabaseWriteResilience(
 export function startDatabaseRecoveryWatcher(
   database: Database,
   health: StorageHealth,
+  recovered: () => Promise<void> | void = () => undefined,
 ): ReturnType<typeof setInterval> {
   return setInterval(() => {
     if (!health.snapshot?.().reasons.includes("disk_full")) {
@@ -308,7 +309,18 @@ export function startDatabaseRecoveryWatcher(
       );
       database.run("ROLLBACK TO q_mush_storage_recovery_probe");
       database.run("RELEASE q_mush_storage_recovery_probe");
-      health.restore("disk_full");
+      void Promise.resolve(recovered()).then(
+        () => {
+          health.restore("disk_full");
+        },
+        (error: unknown) => {
+          health.degrade(
+            "disk_full",
+            "post-recovery database writes still cannot persist",
+            error,
+          );
+        },
+      );
     } catch (error) {
       try {
         database.run("ROLLBACK TO q_mush_storage_recovery_probe");

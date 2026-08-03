@@ -4,6 +4,7 @@ import type {
   RestartHandoffOperation,
 } from "../shared/session-model.ts";
 import { isAskQuestionsPause } from "./ask-questions-pause.ts";
+import { isDiskFullFailure } from "./database-write-resilience.ts";
 import {
   compactSessionConversation,
   isRestartHandoffError,
@@ -216,7 +217,16 @@ export async function runPersistedSession(
     }
     finishRecoveredSession(options, claimedIdentity);
   } catch (error) {
-    const terminal = currentSessionIsIdle(options);
+    let terminal: AgentSessionDetail | undefined;
+    try {
+      terminal = currentSessionIsIdle(options);
+    } catch (readError) {
+      if (isDiskFullFailure(error) && isDiskFullFailure(readError)) {
+        finishFailedSession(options, error, claimedIdentity);
+        return;
+      }
+      throw readError;
+    }
     if (terminal !== undefined) {
       options.finish(terminal, options.userId);
       return;

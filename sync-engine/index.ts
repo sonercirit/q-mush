@@ -77,7 +77,6 @@ if (vacuum.rebuilt) {
 }
 const writeResilience = new DatabaseWriteResilience({ health });
 installDatabaseWriteResilience(database, writeResilience);
-const recoveryTimer = startDatabaseRecoveryWatcher(database.$client, health);
 const vacuumTimer = startIncrementalVacuum(database.$client);
 const [clientJavaScript, pages, runnerExecutables, stylesheet] =
   await Promise.all([
@@ -118,6 +117,13 @@ const sessions = createSessionIntegration(
   runners,
   { generic, openai: openAi, openrouter: openRouter },
   { braveSearch, database, realtime: realtimeHub, workspaces },
+);
+const recoveryTimer = startDatabaseRecoveryWatcher(
+  database.$client,
+  health,
+  () => {
+    sessions.reconcileDatabaseWrites();
+  },
 );
 const realtime = createRealtimeIntegration({
   auth: googleAuth,

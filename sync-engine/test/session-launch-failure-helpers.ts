@@ -26,6 +26,7 @@ export interface LaunchFailureSetup {
   readonly finished: ReturnType<typeof vi.fn>;
   readonly launcher: SessionLauncher;
   readonly notify: ReturnType<typeof vi.fn>;
+  readonly reconcile: () => void;
   readonly runtimes: SessionRuntimes;
   readonly storeSetup: CompactionStoreSetup;
 }
@@ -34,8 +35,9 @@ export function launchFailureSetup(
   storeSetup: CompactionStoreSetup,
   resilience: DatabaseWriteResilience,
   now: number,
+  existingDetail?: AgentSessionDetail,
 ): LaunchFailureSetup {
-  const detail = createTestSession(storeSetup.store);
+  const detail = existingDetail ?? createTestSession(storeSetup.store);
   const notify = vi.fn();
   const actions = orchestrationActions(storeSetup.database, storeSetup.store);
   const finished = vi.spyOn(actions, "finished");
@@ -43,10 +45,24 @@ export function launchFailureSetup(
   const broker = new RunnerCommandBroker({
     commandId: () => "recovered-launch-agent-file",
   });
+  const pending = new Map<string, Parameters<SessionFinisher["finish"]>>();
   const finisher = new SessionFinisher({
     actions,
     notify,
     now: () => now + 2,
+    reconciliationFailed: ({
+      detail: failedDetail,
+      error,
+      recovered,
+      userId,
+    }) => {
+      pending.set(
+        failedDetail.id,
+        recovered === undefined
+          ? [failedDetail, userId, error]
+          : [failedDetail, userId, error, recovered],
+      );
+    },
     store: storeSetup.store,
   });
   const launcher = createSessionLauncher({
@@ -71,6 +87,12 @@ export function launchFailureSetup(
     finished,
     launcher,
     notify,
+    reconcile: () => {
+      for (const [sessionId, parameters] of pending) {
+        finisher.finish(...parameters);
+        pending.delete(sessionId);
+      }
+    },
     runtimes,
     storeSetup,
   };
