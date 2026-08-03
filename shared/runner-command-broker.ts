@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { RunnerCommandSurvivalState } from "./runner-command-survival.ts";
 import type {
   RunnerCommandOutputDelta,
   RunnerCommandResult,
@@ -107,33 +108,19 @@ interface RejectedCommand {
 
 export class RunnerCommandBroker {
   readonly #cancel: ((runnerId: string, commandId: string) => void) | undefined;
-  readonly #cancellationTombstones = new Map<string, Set<string>>();
   readonly #commandId: () => string;
   readonly #deliver:
     ((runnerId: string, command: RunnerToolCommand) => boolean) | undefined;
-  readonly #log: (message: string) => void;
-  readonly #maximumCancellationTombstones: number;
   readonly #pending = new Map<string, PendingCommand>();
   readonly #queues = new Map<string, RunnerToolCommand[]>();
   readonly #runnerConnectionGenerations = new Map<string, number>();
-  readonly #runnerProcessNonces = new Map<string, string | undefined>();
+  readonly #survival: RunnerCommandSurvivalState;
 
   constructor(options: RunnerCommandBrokerOptions = {}) {
-    const maximumCancellationTombstones =
-      options.maximumCancellationTombstones ?? 1_000;
-    if (
-      !Number.isSafeInteger(maximumCancellationTombstones) ||
-      maximumCancellationTombstones < 1
-    ) {
-      throw new RangeError(
-        "The runner cancellation tombstone limit must be positive",
-      );
-    }
     this.#cancel = options.cancel;
     this.#commandId = options.commandId ?? randomUUID;
     this.#deliver = options.deliver;
-    this.#log = options.log ?? console.error;
-    this.#maximumCancellationTombstones = maximumCancellationTombstones;
+    this.#survival = new RunnerCommandSurvivalState(options);
   }
 
   dispatch(
@@ -340,40 +327,19 @@ export class RunnerCommandBroker {
     runnerId: string,
     deliver: (commandId: string) => boolean,
   ): boolean {
-    const tombstones = this.#cancellationTombstones.get(runnerId);
-    if (tombstones === undefined) {
-      return true;
-    }
-    for (const commandId of tombstones) {
-      if (!deliver(commandId)) {
-        return false;
-      }
-    }
-    return true;
+    return this.#survival.deliverCancellations(runnerId, deliver);
   }
 
   acknowledgeCancellation(runnerId: string, commandId: string): boolean {
-    const tombstones = this.#cancellationTombstones.get(runnerId);
-    if (tombstones?.delete(commandId) !== true) {
-      return false;
-    }
-    if (tombstones.size === 0) {
-      this.#cancellationTombstones.delete(runnerId);
-    }
-    return true;
+    return this.#survival.acknowledgeCancellation(runnerId, commandId);
   }
 
   registerRunnerProcess(runnerId: string, processNonce?: string): boolean {
-    const sameProcess =
-      processNonce !== undefined &&
-      this.#runnerProcessNonces.has(runnerId) &&
-      this.#runnerProcessNonces.get(runnerId) === processNonce;
+    const sameProcess = this.#survival.observeProcess(runnerId, processNonce);
     if (sameProcess) {
       return true;
     }
 
-    this.#runnerProcessNonces.set(runnerId, processNonce);
-    this.#cancellationTombstones.delete(runnerId);
     const lost = this.#matchingPending(
       (pending) =>
         pending.runnerId === runnerId && pending.queuedAfterDisconnect,
@@ -625,41 +591,6 @@ export class RunnerCommandBroker {
     );
   }
 
-  #recordCancellationTombstone(runnerId: string, commandId: string): void {
-    const tombstones = this.#cancellationTombstones.get(runnerId) ?? new Set();
-    tombstones.delete(commandId);
-    tombstones.add(commandId);
-    this.#cancellationTombstones.set(runnerId, tombstones);
-    if (
-      this.#cancellationTombstoneCount() <= this.#maximumCancellationTombstones
-    ) {
-      return;
-    }
-    for (const [discardedRunnerId, discardedTombstones] of this
-      .#cancellationTombstones) {
-      const discarded = discardedTombstones.values().next().value;
-      if (discarded === undefined) {
-        continue;
-      }
-      discardedTombstones.delete(discarded);
-      if (discardedTombstones.size === 0) {
-        this.#cancellationTombstones.delete(discardedRunnerId);
-      }
-      this.#log(
-        `Q Mush discarded an unacknowledged runner cancellation tombstone for ${discarded} after reaching the safety limit.`,
-      );
-      return;
-    }
-  }
-
-  #cancellationTombstoneCount(): number {
-    let count = 0;
-    for (const tombstones of this.#cancellationTombstones.values()) {
-      count += tombstones.size;
-    }
-    return count;
-  }
-
   #reject(commandId: string, error: Error, publishCancellation = true): void {
     const pending = this.#pending.get(commandId);
     if (pending === undefined) {
@@ -670,7 +601,7 @@ export class RunnerCommandBroker {
       pending.phase === "in_flight" || pending.queuedAfterDisconnect;
     if (publishCancellation && runnerMayStillBeExecuting) {
       if (pending.queuedAfterDisconnect) {
-        this.#recordCancellationTombstone(pending.runnerId, commandId);
+        this.#survival.recordCancellation(pending.runnerId, commandId);
       }
       if (this.#cancel !== undefined) {
         const cancel = this.#cancel;
