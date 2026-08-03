@@ -483,6 +483,16 @@ async function installUpdateIfAvailable(
   }
 }
 
+async function pendingSocketFailure(
+  failure: Promise<Error>,
+  milliseconds: number,
+): Promise<Error | undefined> {
+  return Promise.race([
+    setTimeout(milliseconds).then(() => undefined),
+    failure,
+  ]);
+}
+
 async function maintainConnection(
   configuration: RunnerConfiguration,
   configurationPath: string,
@@ -519,10 +529,7 @@ async function maintainConnection(
     }
 
     if (socket.readyState === WebSocket.OPEN) {
-      const failure = await Promise.race([
-        setTimeout(0).then(() => undefined),
-        socketFailure,
-      ]);
+      const failure = await pendingSocketFailure(socketFailure, 0);
       if (failure instanceof RunnerSupersededError) {
         throw failure;
       }
@@ -553,10 +560,10 @@ async function maintainConnection(
     }
 
     sendOpenSocketMessage(socket, { type: "heartbeat" });
-    const failure = await Promise.race([
-      setTimeout(HEARTBEAT_INTERVAL_MILLISECONDS).then(() => undefined),
+    const failure = await pendingSocketFailure(
       socketFailure,
-    ]);
+      HEARTBEAT_INTERVAL_MILLISECONDS,
+    );
     if (
       failure instanceof RunnerSupersededError ||
       (failure !== undefined && exitOnDisconnect)

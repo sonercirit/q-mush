@@ -8,6 +8,7 @@ import {
   RunnerStartupRestart,
   type RunnerStartupConnection,
 } from "../runner/runner-update.ts";
+import { isRecord } from "../shared/auth-model.ts";
 import {
   RunnerCommandBroker,
   RunnerDisconnectedError,
@@ -157,6 +158,16 @@ function deliverToProcess(
   );
 }
 
+function isCommandFrame(message: string): boolean {
+  const value: unknown = JSON.parse(message);
+  return (
+    isRecord(value) &&
+    value["type"] === "command" &&
+    isRecord(value["command"]) &&
+    value["command"]["id"] === "command-on-stale-restart-process"
+  );
+}
+
 test("a supervised relaunch supersedes a stale restart process and fails its command promptly", async () => {
   let pendingRestartId: string | undefined = RESTART_ID;
   let staleRestartProcess: FakeRunnerProcess | undefined;
@@ -211,22 +222,7 @@ test("a supervised relaunch supersedes a stale restart process and fails its com
       "The runner connection was superseded before the command returned",
     ),
   );
-  expect(
-    staleProcess.client.received.some((message) => {
-      const value: unknown = JSON.parse(message);
-      return (
-        typeof value === "object" &&
-        value !== null &&
-        "type" in value &&
-        value.type === "command" &&
-        "command" in value &&
-        typeof value.command === "object" &&
-        value.command !== null &&
-        "id" in value.command &&
-        value.command.id === "command-on-stale-restart-process"
-      );
-    }),
-  ).toBe(true);
+  expect(staleProcess.client.received.some(isCommandFrame)).toBe(true);
   expect(
     staleProcess.client.received.some((message) =>
       message.includes(String(RUNNER_SUPERSEDED_CLOSE_CODE)),
