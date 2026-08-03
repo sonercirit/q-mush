@@ -53,41 +53,49 @@ test("cancels only commands from a revoked execution generation", async () => {
   expect(await current).toEqual(completedRunnerCommand("current"));
 });
 
+function recordCancellation(
+  broker: RunnerCommandBroker,
+  canceled: string[],
+): boolean {
+  return broker.deliverCancellationTombstones(RUNNER_ID, (commandId) => {
+    canceled.push(commandId);
+    return true;
+  });
+}
+
+function disconnectedDispatch(commandId: string, processNonce?: string) {
+  const broker = deliveredBroker(commandId);
+  if (processNonce !== undefined) {
+    broker.registerRunnerProcess(RUNNER_ID, processNonce);
+  }
+  const result = broker.dispatch(brokerRunnerCommand());
+  broker.disconnectRunner(RUNNER_ID);
+  return { broker, result };
+}
+
 describe("runner command disconnect survival", () => {
   test("delivers cancellation after a disconnected command is stopped", async () => {
     const canceled: string[] = [];
-    const broker = deliveredBroker("cancel-after-disconnect");
-    const result = broker.dispatch(brokerRunnerCommand());
-    broker.disconnectRunner(RUNNER_ID);
+    const { broker, result } = disconnectedDispatch("cancel-after-disconnect");
 
     broker.cancelSession(SESSION_ID);
 
     await expectUnauthorizedRunnerCommand(result);
-    expect(
-      broker.deliverCancellationTombstones(RUNNER_ID, (commandId) => {
-        canceled.push(commandId);
-        return true;
-      }),
-    ).toBe(true);
-    expect(canceled).toEqual(["cancel-after-disconnect"]);
+    expect(recordCancellation(broker, canceled)).toBe(true);
+    expect(canceled.join(",")).toBe("cancel-after-disconnect");
     expect(
       broker.acknowledgeCancellation(RUNNER_ID, "cancel-after-disconnect"),
     ).toBe(true);
     canceled.length = 0;
-    expect(
-      broker.deliverCancellationTombstones(RUNNER_ID, (commandId) => {
-        canceled.push(commandId);
-        return true;
-      }),
-    ).toBe(true);
-    expect(canceled).toEqual([]);
+    expect(recordCancellation(broker, canceled)).toBe(true);
+    expect(canceled).toHaveLength(0);
   });
 
   test("fails disconnected commands instead of redelivering them to a fresh process", async () => {
-    const broker = deliveredBroker("lost-process-command");
-    expect(broker.registerRunnerProcess(RUNNER_ID, "process-old")).toBe(false);
-    const result = broker.dispatch(brokerRunnerCommand());
-    broker.disconnectRunner(RUNNER_ID);
+    const { broker, result } = disconnectedDispatch(
+      "lost-process-command",
+      "process-old",
+    );
 
     expect(broker.registerRunnerProcess(RUNNER_ID, "process-fresh")).toBe(
       false,
@@ -102,10 +110,10 @@ describe("runner command disconnect survival", () => {
   });
 
   test("redelivers disconnected commands only to the same process nonce", async () => {
-    const broker = deliveredBroker("same-process-command");
-    broker.registerRunnerProcess(RUNNER_ID, "process-same");
-    const result = broker.dispatch(brokerRunnerCommand());
-    broker.disconnectRunner(RUNNER_ID);
+    const { broker, result } = disconnectedDispatch(
+      "same-process-command",
+      "process-same",
+    );
 
     expect(broker.registerRunnerProcess(RUNNER_ID, "process-same")).toBe(true);
     expect(broker.take(RUNNER_ID)?.id).toBe("same-process-command");

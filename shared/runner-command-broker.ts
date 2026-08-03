@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { RunnerCommandSurvivalState } from "./runner-command-survival.ts";
+import {
+  RunnerCommandSurvivalState,
+  type RunnerCommandSurvivalOptions,
+} from "./runner-command-survival.ts";
 import type {
   RunnerCommandOutputDelta,
   RunnerCommandResult,
@@ -58,12 +61,10 @@ export interface DispatchRunnerToolCommand extends Omit<
   readonly runnerId: string;
 }
 
-interface RunnerCommandBrokerOptions {
+interface RunnerCommandBrokerOptions extends RunnerCommandSurvivalOptions {
   readonly cancel?: (runnerId: string, commandId: string) => void;
   readonly commandId?: () => string;
   readonly deliver?: (runnerId: string, command: RunnerToolCommand) => boolean;
-  readonly log?: (message: string) => void;
-  readonly maximumCancellationTombstones?: number;
 }
 
 export class RunnerDisconnectedError extends Error {

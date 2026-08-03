@@ -87,6 +87,17 @@ function closeAfterParentAssertion(
   closeSetup(setup);
 }
 
+function updateChild(
+  setup: SpawnedChildReference,
+  values: { parentExecutionGeneration?: null; runnerRequired?: true },
+): void {
+  setup.database
+    .update(agentSessions)
+    .set(values)
+    .where(eq(agentSessions.id, setup.childId))
+    .run();
+}
+
 function expectedPendingReport(setup: SpawnedChildReference) {
   return {
     clientRequestId: `spawn:${setup.childId}:${String(setup.childGeneration)}`,
@@ -183,11 +194,7 @@ describe("spawned session report generation fencing", () => {
 
   test("includes a completed child whose runner was removed when its parent is runnable", () => {
     const setup = spawnedChildSetup();
-    setup.database
-      .update(agentSessions)
-      .set({ runnerRequired: true })
-      .where(eq(agentSessions.id, setup.childId))
-      .run();
+    updateChild(setup, { runnerRequired: true });
 
     expect(
       setup.store.pendingSpawnedSessions().map(({ detail }) => detail.id),
@@ -341,11 +348,7 @@ describe("spawned session report generation fencing", () => {
 
   test("does not expose historical links without a generation", () => {
     const setup = spawnedChildSetup();
-    setup.database
-      .update(agentSessions)
-      .set({ parentExecutionGeneration: null })
-      .where(eq(agentSessions.id, setup.childId))
-      .run();
+    updateChild(setup, { parentExecutionGeneration: null });
 
     expect(spawnedLink(setup)).toBeUndefined();
     expectNoPendingReports(setup);

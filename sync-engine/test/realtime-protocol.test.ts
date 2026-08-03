@@ -74,7 +74,7 @@ test("reads an optional exact restart identity from runner registration", () => 
 });
 
 test("reads the optional runner process nonce", () => {
-  const metadata = testRunnerMetadata();
+  const metadata = { ...testRunnerMetadata(), name: "nonce-runner" };
   expect(
     readRunnerConnectMessage(
       runnerConnectMessage(metadata, { processNonce: "process-1" }),
@@ -92,7 +92,7 @@ test("reads the optional runner process nonce", () => {
 });
 
 test("validates optional activation receipts and exact connect shape", () => {
-  const metadata = testRunnerMetadata();
+  const metadata = { ...testRunnerMetadata(), architecture: "arm64" };
   expect(
     readRunnerConnectMessage(
       runnerConnectMessage(metadata, {

@@ -67,54 +67,59 @@ function socket() {
 }
 
 async function flush(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
+  await Bun.sleep(0);
+}
+
+function executionSetup() {
+  const controlled = controlledExecutor();
+  const connected = socket();
+  return {
+    connected,
+    controlled,
+    executions: new RunnerCommandExecutions(controlled.executor),
+  };
 }
 
 test("replays a completed result after reconnect until the engine acknowledges it", async () => {
-  const controlled = controlledExecutor();
-  const first = socket();
+  const setup = executionSetup();
   const second = socket();
-  const executions = new RunnerCommandExecutions(controlled.executor);
   const selected = command("lost-ack-result");
 
-  executions.execute(first.writable, selected);
-  controlled.completions.get(selected.id)?.({
+  setup.executions.execute(setup.connected.writable, selected);
+  setup.controlled.completions.get(selected.id)?.({
     output: "complete",
     state: "completed",
   });
   await flush();
-  executions.connected(second.writable);
+  setup.executions.connected(second.writable);
 
-  expect(controlled.calls).toEqual([selected.id]);
+  expect(setup.controlled.calls).toEqual([selected.id]);
   expect(second.sent).toContainEqual({
     commandId: selected.id,
     output: "complete",
     state: "completed",
     type: "result",
   });
-  executions.resultReceived(selected.id);
+  setup.executions.resultReceived(selected.id);
   second.sent.length = 0;
-  executions.connected(second.writable);
+  setup.executions.connected(second.writable);
   expect(second.sent).toEqual([]);
 });
 
 test("acknowledges a cancellation tombstone and discards the surviving execution", () => {
-  const controlled = controlledExecutor();
-  const connected = socket();
-  const executions = new RunnerCommandExecutions(controlled.executor);
+  const setup = executionSetup();
   const selected = command("disconnect-gap-cancel");
 
-  executions.execute(connected.writable, selected);
-  executions.cancel(connected.writable, selected.id);
+  setup.executions.execute(setup.connected.writable, selected);
+  setup.executions.cancel(setup.connected.writable, selected.id);
 
-  expect(controlled.aborted).toEqual([selected.id]);
-  expect(connected.sent.at(-1)).toEqual({
+  expect(setup.controlled.aborted).toEqual([selected.id]);
+  expect(setup.connected.sent.at(-1)).toEqual({
     commandId: selected.id,
     type: "cancellation_received",
   });
-  executions.execute(connected.writable, selected);
-  expect(controlled.calls).toEqual([selected.id, selected.id]);
+  setup.executions.execute(setup.connected.writable, selected);
+  expect(setup.controlled.calls).toEqual([selected.id, selected.id]);
 });
 
 test("drops old unacknowledged results at the bounded retention cap with loud logging", async () => {

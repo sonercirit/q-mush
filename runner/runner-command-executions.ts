@@ -75,6 +75,13 @@ export class RunnerCommandExecutions {
     this.#now = options.now ?? Date.now;
   }
 
+  #useSocket(execution: CommandExecution, socket: RunnerWritableSocket): void {
+    execution.socket = socket;
+    if (execution.result !== undefined) {
+      sendCommandMessage(execution, execution.result);
+    }
+  }
+
   #attach(
     socket: RunnerWritableSocket,
     command: RunnerToolCommand,
@@ -84,10 +91,7 @@ export class RunnerCommandExecutions {
       socket.close(1008, "Conflicting command ID");
       return;
     }
-    execution.socket = socket;
-    if (execution.result !== undefined) {
-      sendCommandMessage(execution, execution.result);
-    }
+    this.#useSocket(execution, socket);
   }
 
   #forget(execution: CommandExecution): void {
@@ -145,10 +149,7 @@ export class RunnerCommandExecutions {
   connected(socket: RunnerWritableSocket): void {
     this.#prune();
     for (const execution of this.#active.values()) {
-      execution.socket = socket;
-      if (execution.result !== undefined) {
-        sendCommandMessage(execution, execution.result);
-      }
+      this.#useSocket(execution, socket);
     }
   }
 

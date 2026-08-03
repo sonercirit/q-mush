@@ -171,16 +171,14 @@ export function finishRunnerOperational(
   );
   const connectionGeneration =
     replaced === undefined ? replacedGeneration : replacedGeneration + 1;
+  const isCurrent = () =>
+    data.usable &&
+    options.hub.runnerIsCurrent(runner.id, socket) &&
+    options.hub.currentRunner(runner.id) === socket;
   const deliver = (command: Parameters<typeof options.sendCommand>[1]) =>
-    data.usable &&
-    options.hub.runnerIsCurrent(runner.id, socket) &&
-    options.hub.currentRunner(runner.id) === socket
-      ? options.sendCommand(socket, command)
-      : false;
+    isCurrent() ? options.sendCommand(socket, command) : false;
   const deliverCancellation = (commandId: string) =>
-    data.usable &&
-    options.hub.runnerIsCurrent(runner.id, socket) &&
-    options.hub.currentRunner(runner.id) === socket
+    isCurrent()
       ? safeSend(socket, JSON.stringify({ commandId, type: "cancel" }))
       : false;
   let delivered = false;

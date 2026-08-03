@@ -230,18 +230,22 @@ describe("runner command broker", () => {
   });
 
   test("leaves queued commands for an authoritative reconnect", async () => {
-    const broker = new RunnerCommandBroker({
-      commandId: () => "queued-through-disconnect",
-    });
-    const result = broker.dispatch(brokerRunnerCommand());
+    const broker = new RunnerCommandBroker();
+    const result = broker.dispatch(
+      brokerRunnerCommand({ tool: "read_agent_file" }),
+    );
 
     broker.disconnectRunner(RUNNER_ID);
 
-    expect(broker.take(RUNNER_ID)?.id).toBe("queued-through-disconnect");
+    const queuedCommand = broker.take(RUNNER_ID);
+    expect(queuedCommand?.tool).toBe("read_agent_file");
+    if (queuedCommand === undefined) {
+      throw new Error("The reconnected queued command was unavailable");
+    }
     await expectCompletedResult(
       broker,
       result,
-      "queued-through-disconnect",
+      queuedCommand.id,
       "reconnected",
     );
   });

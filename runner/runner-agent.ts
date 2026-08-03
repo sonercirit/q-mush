@@ -483,15 +483,17 @@ async function maintainConnection(
   const installOperationalHandlers = (connected: WebSocket): void => {
     bindOperationalSocket(connected, active);
   };
-  let socket = await connectRunner(
-    configuration,
-    configurationPath,
-    startupRestart,
-    installOperationalHandlers,
-    (connected) => {
-      active.connected(connected);
-    },
-  );
+  const establishConnection = () =>
+    connectRunner(
+      configuration,
+      configurationPath,
+      startupRestart,
+      installOperationalHandlers,
+      (connected) => {
+        active.connected(connected);
+      },
+    );
+  let socket = await establishConnection();
   let socketFailure = observeOperationalRunnerSocket(socket);
   let initialUpdatePending = true;
   let nextUpdateAt = Date.now() + UPDATE_INTERVAL_MILLISECONDS;
@@ -502,15 +504,7 @@ async function maintainConnection(
       if (failure instanceof RunnerSupersededError) {
         await throwSocketFailure(socket, active, failure);
       }
-      socket = await connectRunner(
-        configuration,
-        configurationPath,
-        startupRestart,
-        installOperationalHandlers,
-        (connected) => {
-          active.connected(connected);
-        },
-      );
+      socket = await establishConnection();
       socketFailure = observeOperationalRunnerSocket(socket);
     }
 

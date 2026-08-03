@@ -1,4 +1,4 @@
-interface RunnerCommandSurvivalOptions {
+export interface RunnerCommandSurvivalOptions {
   readonly log?: (message: string) => void;
   readonly maximumCancellationTombstones?: number;
 }

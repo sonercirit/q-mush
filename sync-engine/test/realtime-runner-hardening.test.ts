@@ -455,9 +455,10 @@ test("queued commands remain hidden until activation", () => {
 test("fresh process nonce fails disconnected commands before queued delivery", async () => {
   const delivered: string[] = [];
   const rejected: unknown[] = [];
+  const commandId = ["fresh", "process", "command"].join("-");
   const broker = new RunnerCommandBroker({
-    commandId: () => "fresh-process-command",
-    deliver: () => true,
+    commandId: () => commandId,
+    deliver: (_runnerId, command) => command.tool === "read",
   });
   broker.registerRunnerProcess("runner-1", "process-old");
   const result = broker.dispatch({

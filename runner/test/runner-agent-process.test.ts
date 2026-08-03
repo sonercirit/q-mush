@@ -179,26 +179,28 @@ function runnerServer(options: RunnerTestServerOptions = {}): Readonly<{
       },
     },
   });
+  const controlOperationalSocket = (
+    action: (socket: Bun.ServerWebSocket<RunnerTestSocketData>) => void,
+  ): boolean => {
+    const socket = operationalSocket(sockets, "operational");
+    if (socket === undefined) {
+      return false;
+    }
+    action(socket);
+    return true;
+  };
   const hostname = server.hostname ?? "127.0.0.1";
   return {
     attempts: () => attempts,
     connections: () => connections,
-    acknowledge: (commandId: string) => {
-      const socket = operationalSocket(sockets, "operational");
-      if (socket === undefined) {
-        return false;
-      }
-      socket.send(JSON.stringify({ commandId, type: "result_received" }));
-      return true;
-    },
-    disconnect: () => {
-      const socket = operationalSocket(sockets, "operational");
-      if (socket === undefined) {
-        return false;
-      }
-      socket.close(1012, "Fixture connection blip");
-      return true;
-    },
+    acknowledge: (commandId: string) =>
+      controlOperationalSocket((socket) => {
+        socket.send(JSON.stringify({ commandId, type: "result_received" }));
+      }),
+    disconnect: () =>
+      controlOperationalSocket((socket) => {
+        socket.close(1012, "Fixture connection blip");
+      }),
     origin: `http://${hostname}:${String(server.port)}`,
     registered: () => [...sockets].some(({ data }) => data.operational),
     results: () => results,
