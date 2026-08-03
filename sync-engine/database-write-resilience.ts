@@ -288,7 +288,8 @@ export function installDatabaseWriteResilience(
 export function startDatabaseRecoveryWatcher(
   database: Database,
   health: StorageHealth,
-  recovered: () => Promise<void> | void = () => undefined,
+  recovered: () => Promise<boolean | undefined> | boolean | undefined = () =>
+    undefined,
 ): ReturnType<typeof setInterval> {
   return setInterval(() => {
     if (!health.snapshot?.().reasons.includes("disk_full")) {
@@ -310,8 +311,10 @@ export function startDatabaseRecoveryWatcher(
       database.run("ROLLBACK TO q_mush_storage_recovery_probe");
       database.run("RELEASE q_mush_storage_recovery_probe");
       void Promise.resolve(recovered()).then(
-        () => {
-          health.restore("disk_full");
+        (reconciled) => {
+          if (reconciled !== false) {
+            health.restore("disk_full");
+          }
         },
         (error: unknown) => {
           health.degrade(

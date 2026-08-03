@@ -222,13 +222,21 @@ test("surfaces a non-disk retry failure synchronously", () => {
   expectDiskFullHealth(health);
 });
 
-test("an asynchronous probe clears disk-full health after storage recovers", async () => {
+test("recovery health waits for pending reconciliation", async () => {
   vi.useFakeTimers();
   const health = newHealth();
   const database = createDatabase(":memory:");
+  let reconciled = false;
   health.degrade("disk_full", "fixture disk full", diskFullError());
-  const timer = startDatabaseRecoveryWatcher(database.$client, health);
+  const timer = startDatabaseRecoveryWatcher(
+    database.$client,
+    health,
+    () => reconciled,
+  );
 
+  await vi.advanceTimersByTimeAsync(30_000);
+  expectDiskFullHealth(health);
+  reconciled = true;
   await vi.advanceTimersByTimeAsync(30_000);
 
   expect(health.snapshot().reasons).toStrictEqual([]);

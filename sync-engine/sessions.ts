@@ -436,8 +436,8 @@ class DrizzleSessionIntegration
     return this.#attachmentFallbacks.api.collection(request);
   }
 
-  reconcileDatabaseWrites(): void {
-    this.#failureReconciler.reconcile(this.#finisher);
+  reconcileDatabaseWrites(): boolean {
+    return this.#failureReconciler.reconcile(this.#finisher);
   }
 
   onChange(listener: (userId: string, sessionId: string) => void): void {

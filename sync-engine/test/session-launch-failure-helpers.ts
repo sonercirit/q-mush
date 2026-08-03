@@ -26,7 +26,7 @@ export interface LaunchFailureSetup {
   readonly finished: ReturnType<typeof vi.fn>;
   readonly launcher: SessionLauncher;
   readonly notify: ReturnType<typeof vi.fn>;
-  readonly reconcile: () => void;
+  readonly reconcile: () => boolean;
   readonly runtimes: SessionRuntimes;
   readonly storeSetup: CompactionStoreSetup;
 }
@@ -92,6 +92,7 @@ export function launchFailureSetup(
         finisher.finish(...parameters);
         pending.delete(sessionId);
       }
+      return pending.size === 0;
     },
     runtimes,
     storeSetup,

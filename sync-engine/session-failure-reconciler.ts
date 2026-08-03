@@ -10,8 +10,8 @@ export class SessionFailureReconciler {
     this.#pending.set(failure.detail.id, failure);
   }
 
-  reconcile(finisher: SessionFinisher): void {
-    for (const [sessionId, failure] of this.#pending) {
+  reconcile(finisher: SessionFinisher): boolean {
+    for (const [sessionId, failure] of [...this.#pending]) {
       this.#pending.delete(sessionId);
       try {
         if (failure.recovered === undefined) {
@@ -29,5 +29,6 @@ export class SessionFailureReconciler {
         throw error;
       }
     }
+    return this.#pending.size === 0;
   }
 }
