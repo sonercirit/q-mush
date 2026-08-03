@@ -15,7 +15,7 @@ import {
 } from "./session-store-reassignment.ts";
 import type { SessionStore } from "./session-store.ts";
 
-export const MIN_SESSION_LIVENESS_GRACE_MS = 60_000;
+const MIN_SESSION_LIVENESS_GRACE_MS = 60_000;
 export const DEFAULT_SESSION_LIVENESS_GRACE_MS = 5 * 60_000;
 const SESSION_LIVENESS_CALLBACK_BATCH_SIZE = 100;
 

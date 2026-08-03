@@ -370,9 +370,15 @@ export class RunnerCommandBroker {
     return this.#authorizedForRunner(runnerId, commandId) !== undefined;
   }
 
+  #matchingPending(
+    matches: (pending: PendingCommand) => boolean,
+  ): PendingCommand[] {
+    return Array.from(this.#pending.values()).filter(matches);
+  }
+
   sessionCommandPhase(sessionId: string): "in_flight" | "queued" | undefined {
-    const commands = [...this.#pending.values()].filter(
-      (pending) => pending.command.sessionId === sessionId,
+    const commands = this.#matchingPending(
+      ({ command }) => command.sessionId === sessionId,
     );
     if (commands.length === 0) {
       return undefined;
@@ -455,11 +461,11 @@ export class RunnerCommandBroker {
       return this.runnerConnectionGeneration(runnerId);
     }
     this.#runnerConnectionGenerations.set(runnerId, replacedGeneration + 1);
-    const inFlight = [...this.#pending.values()].filter(
-      (pending) =>
-        pending.runnerId === runnerId &&
-        pending.phase === "in_flight" &&
-        pending.connectionGeneration === replacedGeneration,
+    const inFlight = this.#matchingPending(
+      ({ connectionGeneration, phase, runnerId: assignedRunner }) =>
+        assignedRunner === runnerId &&
+        phase === "in_flight" &&
+        connectionGeneration === replacedGeneration,
     );
     for (const pending of inFlight) {
       this.#reject(
@@ -474,9 +480,9 @@ export class RunnerCommandBroker {
   }
 
   disconnectRunner(runnerId: string, retry = true): void {
-    const disconnected = [...this.#pending.values()].filter(
-      (pending) =>
-        pending.runnerId === runnerId && pending.phase === "in_flight",
+    const disconnected = this.#matchingPending(
+      ({ phase, runnerId: assignedRunner }) =>
+        assignedRunner === runnerId && phase === "in_flight",
     );
     if (!retry) {
       for (const pending of disconnected) {

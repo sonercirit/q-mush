@@ -1,9 +1,6 @@
 import { expect, test } from "vitest";
 import { isRecord } from "../../shared/auth-model.ts";
-import {
-  TEST_NOW,
-  TEST_USER_ID,
-} from "./authenticated-integration-test-helpers.ts";
+import { TEST_USER_ID } from "./authenticated-integration-test-helpers.ts";
 import { realtimeSocketMessage } from "./realtime-handler-fixtures.ts";
 import {
   scriptedModel,
@@ -21,6 +18,11 @@ import {
   waitForSessionValue,
 } from "./session-integration-helpers.ts";
 import {
+  closeLivenessSession,
+  sessionDetailStatus,
+  testLivenessClock,
+} from "./session-liveness-test-helpers.ts";
+import {
   durableSessionRunnerReceipt,
   reconnectDurableSessionRunner,
 } from "./session-restart-runner-continuity-helpers.ts";
@@ -32,17 +34,22 @@ import {
 const GRACE_MS = 60_000;
 const BLIP_MS = 5_000;
 
+function requireRunnerCommandFrame(
+  message: string,
+): Readonly<Record<string, unknown>> | undefined {
+  const value: unknown = JSON.parse(message);
+  if (!isRecord(value) || value["type"] !== "command") {
+    return undefined;
+  }
+  const command = value["command"];
+  return isRecord(command) ? command : undefined;
+}
+
 function readCommandId(messages: readonly string[], tool: string): string {
   for (const message of messages) {
-    const value: unknown = JSON.parse(message);
-    if (
-      isRecord(value) &&
-      value["type"] === "command" &&
-      isRecord(value["command"]) &&
-      value["command"]["tool"] === tool &&
-      typeof value["command"]["id"] === "string"
-    ) {
-      return value["command"]["id"];
+    const command = requireRunnerCommandFrame(message);
+    if (command?.["tool"] === tool && typeof command["id"] === "string") {
+      return command["id"];
     }
   }
   throw new Error(`The reconnected runner did not receive ${tool}`);
@@ -63,46 +70,83 @@ function sequenceCommandIds(): () => string {
   return () => `agent-command-${String(++sequence)}`;
 }
 
+async function runnerCommand(
+  setup: ReturnType<typeof connectedSessionSetup>,
+  tool: string,
+  previousId?: unknown,
+) {
+  return waitForSessionValue(
+    setup.latestRunnerCommand,
+    (candidate) =>
+      isRecord(candidate) &&
+      candidate["tool"] === tool &&
+      candidate["id"] !== previousId,
+  );
+}
+
+function requireCommandId(command: unknown, description: string): string {
+  if (!isRecord(command) || typeof command["id"] !== "string") {
+    throw new Error(`The ${description} command was unavailable`);
+  }
+  return command["id"];
+}
+
+function completeCommand(
+  setup: ReturnType<typeof connectedSessionSetup>,
+  command: unknown,
+  output: string,
+  description: string,
+): void {
+  expect(
+    setup.sessions.completeRunnerCommand(
+      RUNNER_ID,
+      requireCommandId(command, description),
+      { output, state: "completed" },
+    ),
+  ).toBe(true);
+}
+
+function readSessionDetail(
+  setup: Pick<ReturnType<typeof connectedSessionSetup>, "sessions">,
+) {
+  return setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID);
+}
+
+async function waitForStatus(
+  setup: Pick<ReturnType<typeof connectedSessionSetup>, "sessions">,
+  status: string,
+) {
+  return waitForSessionValue(
+    () => readSessionDetail(setup),
+    hasSessionStatus(status),
+  );
+}
+
+function expectDetailStatus(
+  setup: Pick<ReturnType<typeof connectedSessionSetup>, "sessions">,
+  status: string,
+): void {
+  expect(sessionDetailStatus(setup, SESSION_ID)).toBe(status);
+}
+
 async function severedToolSetup() {
-  let now = TEST_NOW;
-  let scan: (() => void) | undefined;
+  const clock = testLivenessClock(GRACE_MS, 10_000);
   const setup = await startToolSession(recoveryModel(), {
     commandId: sequenceCommandIds(),
-    liveness: {
-      graceMs: GRACE_MS,
-      intervalMs: 10_000,
-      setInterval: (callback) => {
-        scan = callback;
-        return 1;
-      },
-    },
-    now: () => now,
+    liveness: clock.dependencies,
+    now: clock.now,
   });
-  const command = await waitForSessionValue(
-    setup.latestRunnerCommand,
-    (candidate) => isRecord(candidate) && candidate["tool"] === "read",
-  );
+  const command = await runnerCommand(setup, "read");
   expect(command).toMatchObject({ id: "agent-command-2", tool: "read" });
-  if (scan === undefined) {
-    throw new Error("The liveness scan was not scheduled");
-  }
   const activationReceipt = durableSessionRunnerReceipt(setup);
-  setup.sessions.runnerDisconnected(RUNNER_ID);
-  setup.runners.disconnected({ id: RUNNER_ID, userId: TEST_USER_ID });
-  scan();
-  return {
-    advance: (milliseconds: number) => {
-      now += milliseconds;
-    },
-    activationReceipt,
-    scan,
-    setup,
-  };
+  clock.connectionLost(setup);
+  clock.scan();
+  return { activationReceipt, clock, setup };
 }
 
 test("a five-second runner blip redelivers the severed tool and completes automatically", async () => {
   const recovery = await severedToolSetup();
-  recovery.advance(BLIP_MS);
+  recovery.clock.advance(BLIP_MS);
 
   const reconnected = reconnectDurableSessionRunner(
     recovery.setup,
@@ -121,7 +165,7 @@ test("a five-second runner blip redelivers the severed tool and completes automa
   );
 
   const completed = await waitForSessionValue(
-    () => recovery.setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID),
+    () => readSessionDetail(recovery.setup),
     (detail) =>
       hasSessionStatus("idle")(detail) &&
       JSON.stringify(detail).includes(
@@ -129,134 +173,79 @@ test("a five-second runner blip redelivers the severed tool and completes automa
       ),
   );
   expect(completed).toMatchObject({ status: "idle" });
-  recovery.advance(GRACE_MS);
-  recovery.scan();
-  expect(
-    recovery.setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID)?.status,
-  ).toBe("idle");
-  recovery.setup.database.$client.close();
+  recovery.clock.advance(GRACE_MS);
+  recovery.clock.scan();
+  expectDetailStatus(recovery.setup, "idle");
+  closeLivenessSession(recovery.setup);
 });
 
 test("a planned-restart reconnect becomes healthy on the production operational path", async () => {
-  let now = TEST_NOW;
-  let scan: (() => void) | undefined;
+  const clock = testLivenessClock(GRACE_MS, 10_000);
   const setup = connectedSessionSetup(
     new MultiSessionRestartModel(),
     "api_key",
     undefined,
     {
       commandId: nextCommandId("planned-restart"),
-      liveness: {
-        graceMs: GRACE_MS,
-        intervalMs: 10_000,
-        setInterval: () => 1,
-        testScan: (scheduled) => {
-          scan = scheduled;
-        },
-      },
-      now: () => now,
+      liveness: clock.dependencies,
+      now: clock.now,
     },
   );
   expect((await setup.sessions.collection(createSessionRequest())).status).toBe(
     201,
   );
-  const agentFile = await waitForSessionValue(
-    setup.latestRunnerCommand,
-    (candidate) =>
-      isRecord(candidate) && candidate["tool"] === "read_agent_file",
-  );
-  if (!isRecord(agentFile) || typeof agentFile["id"] !== "string") {
-    throw new Error("The agent-file command was unavailable");
-  }
-  expect(
-    setup.sessions.completeRunnerCommand(RUNNER_ID, agentFile["id"], {
-      output: "null",
-      state: "completed",
-    }),
-  ).toBe(true);
-  const command = await waitForSessionValue(
-    setup.latestRunnerCommand,
-    (candidate) => isRecord(candidate) && candidate["tool"] === "bash",
-  );
-  if (!isRecord(command) || typeof command["id"] !== "string") {
-    throw new Error("The planned-restart command was unavailable");
-  }
+  const agentFile = await runnerCommand(setup, "read_agent_file");
+  completeCommand(setup, agentFile, "null", "agent-file");
+  const command = await runnerCommand(setup, "bash");
   const restartId = "planned-restart-liveness";
   const drain = setup.sessions.drainRunner(RUNNER_ID, restartId);
-  expect(
-    setup.sessions.completeRunnerCommand(RUNNER_ID, command["id"], {
-      output: "Durable tool output after planned restart.",
-      state: "completed",
-    }),
-  ).toBe(true);
+  completeCommand(
+    setup,
+    command,
+    "Durable tool output after planned restart.",
+    "planned-restart",
+  );
   await drain;
   expect(setup.sessions.pendingRunnerRestart(RUNNER_ID)).toMatchObject({
     requestedBy: "runner",
     restartId,
     status: "pending",
   });
-  setup.sessions.runnerDisconnected(RUNNER_ID);
-  setup.runners.disconnected({ id: RUNNER_ID, userId: TEST_USER_ID });
+  clock.connectionLost(setup);
 
   reconnectDurableSessionRunner(setup, undefined, restartId);
-  now += 1;
+  clock.advance(1);
   setup.runners.seen({ id: RUNNER_ID, userId: TEST_USER_ID });
-  const resumedAgentFile = await waitForSessionValue(
-    setup.latestRunnerCommand,
-    (candidate) =>
-      isRecord(candidate) &&
-      candidate["tool"] === "read_agent_file" &&
-      candidate["id"] !== agentFile["id"],
+  const resumedAgentFile = await runnerCommand(
+    setup,
+    "read_agent_file",
+    requireCommandId(agentFile, "agent-file"),
   );
-  if (
-    !isRecord(resumedAgentFile) ||
-    typeof resumedAgentFile["id"] !== "string"
-  ) {
-    throw new Error("The resumed agent-file command was unavailable");
-  }
-  expect(
-    setup.sessions.completeRunnerCommand(RUNNER_ID, resumedAgentFile["id"], {
-      output: "null",
-      state: "completed",
-    }),
-  ).toBe(true);
-  await waitForSessionValue(
-    () => setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID),
-    hasSessionStatus("idle"),
-  );
-  expect(setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID)).toMatchObject({
+  completeCommand(setup, resumedAgentFile, "null", "resumed agent-file");
+  await waitForStatus(setup, "idle");
+  expect(readSessionDetail(setup)).toMatchObject({
     restartHandoff: null,
     status: "idle",
   });
-  if (scan === undefined) throw new Error("The liveness scan was not captured");
-  now += GRACE_MS;
-  scan();
-  expect(setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID)?.status).toBe(
-    "idle",
-  );
-  setup.database.$client.close();
+  clock.advance(GRACE_MS);
+  clock.scan();
+  expectDetailStatus(setup, "idle");
+  closeLivenessSession(setup);
 });
 
 test("a severed tool fails only after the runner misses the reconnect grace", async () => {
   const recovery = await severedToolSetup();
 
-  expect(
-    recovery.setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID)?.status,
-  ).toBe("running");
-  recovery.advance(GRACE_MS - 1);
-  recovery.scan();
-  expect(
-    recovery.setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID)?.status,
-  ).toBe("running");
+  expectDetailStatus(recovery.setup, "running");
+  recovery.clock.advance(GRACE_MS - 1);
+  recovery.clock.scan();
+  expectDetailStatus(recovery.setup, "running");
 
-  recovery.advance(1);
-  recovery.scan();
-  const failed = await waitForSessionValue(
-    () => recovery.setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID),
-    hasSessionStatus("failed"),
-  );
+  recovery.clock.advance(1);
+  recovery.clock.scan();
+  const failed = await waitForStatus(recovery.setup, "failed");
   expect(JSON.stringify(failed)).toContain(
     "runner command that could not be dispatched during the recovery window",
   );
-  recovery.setup.database.$client.close();
+  closeLivenessSession(recovery.setup);
 });

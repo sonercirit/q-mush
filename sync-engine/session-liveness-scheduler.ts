@@ -13,7 +13,7 @@ import type { ShutdownInterruptedSessionStore } from "./session-shutdown-interru
 import type { SessionStore } from "./session-store.ts";
 
 const DEFAULT_SESSION_LIVENESS_INTERVAL_MS = 30_000;
-export const MIN_SESSION_LIVENESS_INTERVAL_MS = 10_000;
+const MIN_SESSION_LIVENESS_INTERVAL_MS = 10_000;
 
 interface SessionLivenessSchedulerOptions {
   readonly actions: Pick<
