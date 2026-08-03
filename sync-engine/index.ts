@@ -47,9 +47,9 @@ const health = new EngineHealth();
 cleanupRepairSnapshots(databasePath);
 const database = createDatabase(databasePath);
 const vacuum = enableIncrementalVacuum(database.$client);
-if (vacuum.rebuilt) {
-  console.log(
-    "Q Mush rebuilt the database once to enable incremental vacuum maintenance",
+if (vacuum.requiresRebuild) {
+  console.warn(
+    "Q Mush database needs a one-time offline VACUUM before periodic incremental vacuum can reclaim pages",
   );
 }
 installDatabaseWriteResilience(
