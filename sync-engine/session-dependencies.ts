@@ -8,6 +8,12 @@ import type { RealtimeHub } from "./realtime-hub.ts";
 import type { AgentModelFactory } from "./session-agent-models.ts";
 import type { SessionWorkspaceReader } from "./session-workspace.ts";
 
+export interface SessionLivenessOptions {
+  readonly graceMs?: number;
+  readonly intervalMs?: number;
+  readonly setInterval?: (callback: () => void, interval: number) => unknown;
+}
+
 export interface SessionDependencies {
   readonly broker?: RunnerCommandBroker;
   readonly braveSearch: Pick<BraveSearchSkill, "execute">;
@@ -16,6 +22,7 @@ export interface SessionDependencies {
   readonly discoverOpenRouterProviders?: OpenRouterProviderDiscoverer;
   readonly modelFactory?: AgentModelFactory;
   readonly now?: () => number;
+  readonly liveness?: SessionLivenessOptions;
   readonly randomId?: IdGenerator;
   readonly realtime?: RealtimeHub;
   readonly workspaces?: SessionWorkspaceReader;

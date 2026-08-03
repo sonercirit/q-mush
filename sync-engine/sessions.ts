@@ -62,6 +62,8 @@ import {
   reportPendingSpawns,
 } from "./session-interrupted-recovery.ts";
 import { SessionLauncher } from "./session-launcher.ts";
+import { createSessionLivenessWatchdog } from "./session-liveness-scheduler.ts";
+import type { SessionLivenessWatchdog } from "./session-liveness-watchdog.ts";
 import { modelsForUser } from "./session-model-discovery.ts";
 import {
   recoverAnsweredQuestions,
@@ -102,6 +104,7 @@ class DrizzleSessionIntegration
   readonly #questionActions: SessionQuestionActionDependencies;
   readonly #requests: SessionRequestHelpers;
   readonly #launch: SessionLaunchBoundary["launch"];
+  readonly #liveness: SessionLivenessWatchdog;
   readonly #executionCleanup: SessionExecutionCleanup;
   readonly #finisher: SessionFinisher;
   readonly #failureReconciler = new SessionFailureReconciler();
@@ -260,6 +263,15 @@ class DrizzleSessionIntegration
       runnerIsAvailable: this.#runnerIsAvailable,
       ...this.#sessionState(),
     });
+    this.#liveness = createSessionLivenessWatchdog({
+      actions: this.#actions,
+      broker: this.#broker,
+      database,
+      dependencies,
+      runtimes: this.#runtimes,
+      shutdownInterrupted: this.#shutdownInterrupted,
+      ...this.#sessionState(),
+    });
     this.#runners.onRemoving((userId, runnerId) => {
       this.#runnerRemoval.removing(userId, runnerId);
     });
@@ -298,6 +310,7 @@ class DrizzleSessionIntegration
       discoverOpenRouterProviders: this.#discoverOpenRouterProviders,
       executionCleanup: this.#executionCleanup,
       launchQueuedSessions: this.#launchQueuedSessions,
+      liveness: this.#liveness,
       modelsForUser: (request, user) => this.#modelsForUser(request, user),
       ...this.#context(),
       questionActions: this.#questionActions,

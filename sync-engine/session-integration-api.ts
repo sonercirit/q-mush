@@ -21,6 +21,7 @@ import type { SessionNotification } from "./session-creation.ts";
 import type { SessionExecutionCleanup } from "./session-execution-cleanup.ts";
 import { readPrompt, type PromptInput } from "./session-input.ts";
 import type { DeliverRunnerCommands } from "./session-integration.ts";
+import type { SessionLivenessWatchdog } from "./session-liveness-watchdog.ts";
 import { openRouterProvidersForUser } from "./session-provider-selection.ts";
 import { recoverAnsweredQuestions } from "./session-question-actions.ts";
 import { reassignSessionRequest } from "./session-reassignment-request.ts";
@@ -64,6 +65,10 @@ export interface SessionIntegrationApiResources {
   readonly discoverOpenRouterProviders: OpenRouterProviderDiscoverer;
   readonly executionCleanup: SessionExecutionCleanup;
   readonly launchQueuedSessions: (userId: string) => void;
+  readonly liveness: Pick<
+    SessionLivenessWatchdog,
+    "runnerConnected" | "runnerDisconnected"
+  >;
   readonly modelsForUser: SessionModelsForUser;
   readonly modelCredentialPool: Parameters<
     typeof openRouterProvidersForUser
@@ -371,6 +376,7 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
   }
 
   runnerConnected(runnerId: string): void {
+    this.resources.liveness.runnerConnected(runnerId);
     this.resources.restartCoordinator.recover(runnerId);
     void recoverAnsweredQuestions(this.resources.questionActions, runnerId);
     for (const userId of this.resources.store.queuedSessionOwnerIds()) {
@@ -379,6 +385,7 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
   }
 
   runnerDisconnected(runnerId: string): void {
+    this.resources.liveness.runnerDisconnected(runnerId);
     this.resources.broker.disconnectRunner(runnerId);
   }
 

@@ -370,6 +370,12 @@ export class RunnerCommandBroker {
     return this.#authorizedForRunner(runnerId, commandId) !== undefined;
   }
 
+  hasSessionCommand(sessionId: string): boolean {
+    return [...this.#pending.values()].some(
+      (pending) => pending.command.sessionId === sessionId,
+    );
+  }
+
   #settleAuthorized(
     runnerId: string,
     commandId: string,

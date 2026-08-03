@@ -87,6 +87,10 @@ export class SessionRuntimes {
     return this.#active.has(sessionId);
   }
 
+  activeForGeneration(sessionId: string, generation: number): boolean {
+    return this.#active.get(sessionId)?.generation === generation;
+  }
+
   abort(sessionId: string): void {
     this.#active.get(sessionId)?.controller.abort();
   }
