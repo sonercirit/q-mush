@@ -22,6 +22,12 @@ function usageCost(
   };
 }
 
+function withTokenUsage(
+  step: Pick<AgentModelStep, "tokenUsage">,
+): Pick<AgentSessionUsageUpdate, "tokenUsage"> {
+  return step.tokenUsage === null ? {} : { tokenUsage: step.tokenUsage };
+}
+
 export function agentStepUsage(
   step: CostEstimate & Pick<AgentModelStep, "contextTokens">,
   estimateCost: EstimateCost,
@@ -34,7 +40,7 @@ export function agentStepUsage(
     : {
         contextTokens: step.contextTokens,
         ...cost,
-        ...(step.tokenUsage === null ? {} : { tokenUsage: step.tokenUsage }),
+        ...withTokenUsage(step),
       };
 }
 
@@ -45,6 +51,6 @@ export function compactionUsage(
   return {
     contextTokens: step.contextTokens,
     ...usageCost(step, estimateCost),
-    ...(step.tokenUsage === null ? {} : { tokenUsage: step.tokenUsage }),
+    ...withTokenUsage(step),
   };
 }

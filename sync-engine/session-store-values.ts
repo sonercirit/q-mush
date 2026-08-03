@@ -53,20 +53,27 @@ function emptyToolMetadata() {
   };
 }
 
+function storedNoteMessageValues(
+  content: string,
+  role: "compaction_request" | "error" | "system",
+): StoredMessageValues {
+  return { ...emptyToolMetadata(), content, role };
+}
+
 export function errorMessageValues(content: string): StoredMessageValues {
-  return { ...emptyToolMetadata(), content, role: "error" };
+  return storedNoteMessageValues(content, "error");
 }
 
 export function storedCompactionRequestValues(
   content: string,
 ): StoredMessageValues {
-  return { ...emptyToolMetadata(), content, role: "compaction_request" };
+  return storedNoteMessageValues(content, "compaction_request");
 }
 
 export function storedSystemMessageValues(
   content: string,
 ): StoredMessageValues {
-  return { ...emptyToolMetadata(), content, role: "system" };
+  return storedNoteMessageValues(content, "system");
 }
 
 export function storedUserMessageValues(

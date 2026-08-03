@@ -20,6 +20,7 @@ import {
   recordingMessages,
   recordingToolPersistence,
   runTestLoop,
+  STEP_TOKEN_USAGE,
   terminalPersistence,
   TOOL_CALL,
   toolMessage,
@@ -42,13 +43,6 @@ function expectNoCompaction(
   expect(compactorRequests).toBe(0);
   expect(model.requests).toHaveLength(0);
 }
-
-const STEP_TOKEN_USAGE = {
-  cacheWriteInputTokens: 25,
-  cachedInputTokens: 600,
-  inputTokens: 800,
-  outputTokens: 200,
-} as const;
 
 describe("compacting agent session loop", () => {
   test("automatically compacts at 95% before the next model request", async () => {

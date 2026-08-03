@@ -22,29 +22,35 @@ async function selectedController(
   return controller;
 }
 
-test("renders a compaction request before its streamed response", () => {
-  const html = renderSolidToString(() => (
+function renderCompactionMessages(
+  messages: readonly AgentSessionDetail["messages"][number][],
+): string {
+  return renderSolidToString(() => (
     <SessionTranscript
-      agentFile={null}
       executionEnvironment="bare_metal"
       filters={DEFAULT_SESSION_TRANSCRIPT_FILTERS}
-      messages={[
-        createDisplaySessionMessage({
-          content: "Compact this conversation into a handoff.",
-          createdAt: 1,
-          id: "stream:compaction-step:compaction-request",
-          role: "compaction_request",
-        }),
-        transcriptMessage(
-          "stream:session-1:assistant",
-          "Summary in progress",
-          "assistant",
-          2,
-        ),
-      ]}
+      messages={messages}
+      agentFile={null}
       tools={[]}
     />
   ));
+}
+
+test("renders a compaction request before its streamed response", () => {
+  const html = renderCompactionMessages([
+    createDisplaySessionMessage({
+      content: "Compact this conversation into a handoff.",
+      createdAt: 1,
+      id: "stream:compaction-step:compaction-request",
+      role: "compaction_request",
+    }),
+    transcriptMessage(
+      "stream:session-1:assistant",
+      "Summary in progress",
+      "assistant",
+      2,
+    ),
+  ]);
 
   expect(html).toContain("Compaction request");
   expect(

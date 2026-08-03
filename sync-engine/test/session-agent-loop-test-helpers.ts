@@ -11,6 +11,13 @@ import { runCompactingAgentLoop } from "../../sync-engine/session-agent-loop.ts"
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 import type { PromiseGate } from "./session-race-test-helpers.ts";
 
+export const STEP_TOKEN_USAGE = {
+  cacheWriteInputTokens: 25,
+  cachedInputTokens: 600,
+  inputTokens: 800,
+  outputTokens: 200,
+} as const;
+
 export const TOOL_CALL = {
   arguments: '{"path":"README.md"}',
   id: "call-1",

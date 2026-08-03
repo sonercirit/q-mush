@@ -13,6 +13,7 @@ import {
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { STEP_TOKEN_USAGE } from "./session-agent-loop-test-helpers.ts";
 import { IDLE_RUNTIME_SIGNALS } from "./session-agent-runtime-test-helpers.ts";
 import { unusedSessionToolActions } from "./session-agent-tool-test-helpers.ts";
 import {
@@ -26,13 +27,6 @@ import { promiseGate } from "./session-race-test-helpers.ts";
 import { STORE_SESSION_ID } from "./session-store-test-fixtures.ts";
 
 const SESSION_ID = STORE_SESSION_ID;
-
-const COMPACTION_TOKEN_USAGE = {
-  cacheWriteInputTokens: 25,
-  cachedInputTokens: 600,
-  inputTokens: 800,
-  outputTokens: 200,
-} as const;
 
 interface ManualRuntimeSetup {
   readonly controller: AbortController;
@@ -357,7 +351,7 @@ describe("manual session compaction", () => {
         {
           content: "Manual handoff",
           costUsd: 0.4,
-          tokenUsage: COMPACTION_TOKEN_USAGE,
+          tokenUsage: STEP_TOKEN_USAGE,
           toolCalls: [],
         },
       ]),
@@ -378,7 +372,7 @@ describe("manual session compaction", () => {
       ],
     });
     expect(compacted?.tokenUsage).toEqual({
-      ...COMPACTION_TOKEN_USAGE,
+      ...STEP_TOKEN_USAGE,
       reportedStepCount: 1,
       stepCount: 1,
     });
@@ -389,7 +383,7 @@ describe("manual session compaction", () => {
         expect.objectContaining({
           content: "Manual handoff",
           role: "assistant",
-          tokenUsage: COMPACTION_TOKEN_USAGE,
+          tokenUsage: STEP_TOKEN_USAGE,
         }),
       ],
       tokenUsage: compacted?.tokenUsage,

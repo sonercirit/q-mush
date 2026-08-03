@@ -28,6 +28,38 @@ function compactionMessage(summary: string): string {
   return `${COMPACTION_MESSAGE_PREFIX}${summary}`;
 }
 
+function compactionTranscriptValues(
+  summary: string,
+  tokenUsage: CompactionUsage["tokenUsage"],
+) {
+  return [
+    storedCompactionRequestValues(AGENT_COMPACTION_REQUEST_MESSAGE),
+    recordedMessageValues(
+      { content: summary, role: "assistant", toolCalls: [] },
+      tokenUsage,
+    ),
+  ];
+}
+
+function appendCompactionTranscript(options: {
+  readonly database: Pick<AppDatabase, "insert" | "select">;
+  readonly generateId: IdGenerator;
+  readonly now: number;
+  readonly segment: number;
+  readonly sessionId: string;
+  readonly summary: string;
+  readonly tokenUsage: CompactionUsage["tokenUsage"];
+  readonly userId: string;
+}): void {
+  let now = options.now;
+  for (const message of compactionTranscriptValues(
+    options.summary,
+    options.tokenUsage,
+  )) {
+    now = appendSystemStoredMessage({ ...options, message, now });
+  }
+}
+
 export function compactStoredConversation(options: {
   readonly database: AppDatabase;
   readonly generateId: IdGenerator;
@@ -84,29 +116,14 @@ export function compactStoredConversation(options: {
         ),
       )
       .run();
-    appendSystemStoredMessage({
+    appendCompactionTranscript({
       database: transaction,
       generateId: options.generateId,
-      message: storedCompactionRequestValues(AGENT_COMPACTION_REQUEST_MESSAGE),
       now: options.now,
       segment: currentSegment,
       sessionId: options.sessionId,
-      userId,
-    });
-    appendSystemStoredMessage({
-      database: transaction,
-      generateId: options.generateId,
-      message: recordedMessageValues(
-        {
-          content: options.summary,
-          role: "assistant",
-          toolCalls: [],
-        },
-        options.usage.tokenUsage,
-      ),
-      now: options.now,
-      segment: currentSegment,
-      sessionId: options.sessionId,
+      summary: options.summary,
+      tokenUsage: options.usage.tokenUsage,
       userId,
     });
     const nextTurnId = rotateSessionTurn({
