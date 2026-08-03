@@ -310,7 +310,7 @@ test("partitions retained body count and byte budgets per user", async () => {
   );
 });
 
-test("reserves command IDs and idempotency keys for retained receipts", async () => {
+test("replays an idempotency key under a fresh command ID", async () => {
   const ledger = new RealtimeCommandLedger();
   const action = vi.fn(resolved("first"));
   await execute(ledger, command("command-1", "first-key"), action);
@@ -322,7 +322,7 @@ test("reserves command IDs and idempotency keys for retained receipts", async ()
       command: command("command-1", "second-key"),
     },
     {
-      acknowledgement: failure("command-2", "idempotency_command_id_conflict"),
+      acknowledgement: success("command-2", "first"),
       action,
       command: command("command-2", "first-key"),
     },

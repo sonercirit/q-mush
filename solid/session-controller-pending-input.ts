@@ -26,6 +26,23 @@ import type { SessionCommandTransport } from "./session-transport.ts";
 
 const PENDING_INPUT_CONFIRMATION_TIMEOUT_MS = 30_000;
 
+export interface PendingInputTimer {
+  readonly clearTimeout: (timeout: number) => void;
+  readonly setTimeout: (callback: () => void, delay: number) => number;
+}
+
+const DEFAULT_PENDING_INPUT_TIMER: PendingInputTimer = {
+  clearTimeout: (timeout) => {
+    clearTimeout(timeout);
+  },
+  setTimeout: (callback, delay) => Number(setTimeout(callback, delay)),
+};
+
+interface PendingInputRequest {
+  readonly confirm: (detail: AgentSessionDetail) => void;
+  readonly result: Promise<unknown>;
+}
+
 function unknownOutcomeError(): Error & { readonly code: string } {
   return Object.assign(new Error("outcome_unknown"), {
     code: "outcome_unknown",
@@ -35,34 +52,63 @@ function unknownOutcomeError(): Error & { readonly code: string } {
 function requestPendingInputWithTimeout(
   transport: SessionCommandTransport,
   attempt: PendingInputAttempt,
-): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(unknownOutcomeError());
+  timer: PendingInputTimer,
+): PendingInputRequest {
+  let confirm: (detail: AgentSessionDetail) => void = () => undefined;
+  const result = new Promise<unknown>((resolve, reject) => {
+    let settled = false;
+    const timeout = timer.setTimeout(() => {
+      settle(() => {
+        reject(unknownOutcomeError());
+      });
     }, PENDING_INPUT_CONFIRMATION_TIMEOUT_MS);
+    function settle(action: () => void): void {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      timer.clearTimeout(timeout);
+      action();
+    }
+    confirm = (detail) => {
+      settle(() => {
+        resolve(detail);
+      });
+    };
     void requestPendingInput(transport, attempt).then(
       (value) => {
-        clearTimeout(timeout);
-        resolve(value);
+        settle(() => {
+          resolve(value);
+        });
       },
       (error: unknown) => {
-        clearTimeout(timeout);
-        reject(error instanceof Error ? error : new Error(String(error)));
+        settle(() => {
+          reject(error instanceof Error ? error : new Error(String(error)));
+        });
       },
     );
   });
+  return {
+    confirm: (detail) => {
+      confirm(detail);
+    },
+    result,
+  };
 }
 
 interface PendingInputControllerOptions {
   readonly loader: SessionLoadController;
   readonly realtime: SessionRealtimeState;
+  readonly timer?: PendingInputTimer;
   readonly transport: SessionCommandTransport | undefined;
   readonly view: RevisionState<SessionViewState>;
 }
 
 interface ActivePendingInputAttempt {
   readonly attempt: PendingInputAttempt;
+  confirm: ((detail: AgentSessionDetail) => void) | undefined;
   confirmed: boolean;
+  confirmedDetail: AgentSessionDetail | undefined;
   readonly revision: number;
 }
 
@@ -125,6 +171,8 @@ export class SessionPendingInputController {
       return;
     }
     active.confirmed = true;
+    active.confirmedDetail = detail;
+    active.confirm?.(detail);
     if (this.#activeAttempt === active) {
       this.#activeAttempt = undefined;
     }
@@ -186,7 +234,13 @@ export class SessionPendingInputController {
   ): Promise<void> {
     const optimistic = optimisticPendingInput(attempt, Date.now());
     const revision = this.#startMutation();
-    const active = { attempt, confirmed: false, revision };
+    const active: ActivePendingInputAttempt = {
+      attempt,
+      confirm: undefined,
+      confirmed: false,
+      confirmedDetail: undefined,
+      revision,
+    };
     this.#activeAttempt = active;
     this.#options.view.patchCurrent(revision, {
       ...(restoreDraft ? {} : { followUp: "", followUpImages: [] }),
@@ -197,9 +251,16 @@ export class SessionPendingInputController {
       if (transport === undefined) {
         return;
       }
-      const authoritative = readSessionDetail(
-        await requestPendingInputWithTimeout(transport, attempt),
+      const pending = requestPendingInputWithTimeout(
+        transport,
+        attempt,
+        this.#options.timer ?? DEFAULT_PENDING_INPUT_TIMER,
       );
+      active.confirm = pending.confirm;
+      if (active.confirmedDetail !== undefined) {
+        pending.confirm(active.confirmedDetail);
+      }
+      const authoritative = readSessionDetail(await pending.result);
       if (this.#options.view.isCurrent(revision)) {
         this.#options.realtime.applyDetail(authoritative);
         this.#options.view.patchCurrent(revision, {

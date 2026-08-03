@@ -38,7 +38,10 @@ import type {
   SessionCreationViewOptions,
   SessionToolUpdateResult,
 } from "./session-controller-options.ts";
-import { SessionPendingInputController } from "./session-controller-pending-input.ts";
+import {
+  SessionPendingInputController,
+  type PendingInputTimer,
+} from "./session-controller-pending-input.ts";
 import { updatedSessionQuestions } from "./session-controller-question-event.ts";
 import { answerSessionQuestions } from "./session-controller-questions.ts";
 import {
@@ -94,6 +97,7 @@ export class SessionController {
       | null
       | undefined = browserTranscriptFilterStorage(),
     transport?: SessionCommandTransport,
+    pendingInputTimer?: PendingInputTimer,
   ) {
     this.#reactiveView = reactiveView;
     this.#view = new RevisionState(reactiveView.state, reactiveView.setState);
@@ -118,6 +122,7 @@ export class SessionController {
     this.#pendingInputs = new SessionPendingInputController({
       loader: this.#loader,
       realtime: this.#realtime,
+      ...(pendingInputTimer === undefined ? {} : { timer: pendingInputTimer }),
       transport,
       view: this.#view,
     });

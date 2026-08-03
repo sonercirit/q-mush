@@ -450,7 +450,15 @@ export class RealtimeCommandLedger {
       return this.#error(command.commandId, "idempotency_conflict");
     }
     if (entry.completedAcknowledgement !== undefined) {
-      return entry.completedAcknowledgement;
+      const completed = entry.completedAcknowledgement.value;
+      return command.commandId === entry.commandId
+        ? entry.completedAcknowledgement
+        : acknowledgement({
+            commandId: command.commandId,
+            ...(completed.type === "command_success"
+              ? { result: completed.result, type: completed.type }
+              : { error: completed.error, type: completed.type }),
+          });
     }
     const replayedCommand: Promise<CommandResult | undefined> =
       entry.expiresAt === Number.POSITIVE_INFINITY
@@ -500,7 +508,7 @@ export class RealtimeCommandLedger {
       return this.#replay(command, commandDigest, commandIdEntry);
     }
     if (existing !== undefined) {
-      return this.#error(command.commandId, "idempotency_command_id_conflict");
+      return this.#replay(command, commandDigest, existing);
     }
 
     let payloadBytes: number | undefined;

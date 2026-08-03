@@ -277,6 +277,69 @@ test("bounds an unacknowledged pending-input send as unconfirmed", async () => {
   expect(container.textContent).toContain("Delivery unconfirmed");
 });
 
+test("authoritative echo settles a send and cancels its confirmation timer", async () => {
+  let confirmation: (() => void) | undefined;
+  let timeoutSequence = 0;
+  const timers = new Map<number, () => void>();
+  const detail = { ...TEST_SESSION_DETAIL, status: "running" as const };
+  const state: SessionViewState = {
+    ...initialSessionViewState(),
+    detail,
+    followUp: "Confirm from the echo",
+    selectedId: detail.id,
+    sessions: [summaryFromDetail(detail)],
+  };
+  const controller = new SessionController(
+    createReactiveState(state),
+    undefined,
+    null,
+    {
+      command: () =>
+        new Promise((resolve) => {
+          confirmation = () => {
+            resolve(undefined);
+          };
+        }),
+    },
+    {
+      clearTimeout: (timeout) => {
+        timers.delete(timeout);
+      },
+      setTimeout: (callback) => {
+        timeoutSequence += 1;
+        timers.set(timeoutSequence, callback);
+        return timeoutSequence;
+      },
+    },
+  );
+
+  const submitted = controller.followUp();
+  const optimistic = controller.state.optimisticPendingInputs[0];
+  if (optimistic === undefined) {
+    throw new TypeError("Expected an optimistic pending input");
+  }
+  expect(timers).toHaveLength(1);
+  controller.applyDetail({
+    ...detail,
+    pendingInputs: [
+      pendingInputFixture(optimistic.content, {
+        clientRequestId: optimistic.clientRequestId,
+        id: "pending-echo",
+      }),
+    ],
+    updatedAt: detail.updatedAt + 1,
+  });
+
+  await submitted;
+
+  expect(timers).toHaveLength(0);
+  expect(controller.state).toMatchObject({
+    optimisticPendingInputs: [],
+    sending: false,
+  });
+  confirmation?.();
+});
+
 function mountedComposer(status: AgentSessionDetail["status"] = "running"): {
   readonly container: HTMLDivElement;
   readonly controller: SessionController;
