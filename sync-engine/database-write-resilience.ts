@@ -91,7 +91,9 @@ export class DatabaseWriteResilience {
   readonly #controller = new AbortController();
   readonly #health: StorageHealth;
   readonly #sleep: RetrySleep;
+  #activeRetry: Promise<unknown> | undefined;
   #closed = false;
+  #retriesCancelled = false;
   #retrying = false;
 
   constructor(options: DatabaseWriteResilienceOptions) {
@@ -99,11 +101,25 @@ export class DatabaseWriteResilience {
     this.#sleep = options.sleep ?? abortableSleep;
   }
 
+  async cancelRetries(): Promise<void> {
+    if (this.#retriesCancelled) {
+      return;
+    }
+    this.#retriesCancelled = true;
+    this.#controller.abort();
+    try {
+      await this.#activeRetry;
+    } catch {
+      // The caller that owns the retry receives the shutdown cancellation.
+    }
+  }
+
   close(): void {
     if (this.#closed) {
       return;
     }
     this.#closed = true;
+    this.#retriesCancelled = true;
     this.#controller.abort();
   }
 
@@ -163,7 +179,27 @@ export class DatabaseWriteResilience {
         : "a non-critical database write was dropped because the disk is full",
       attempted.error,
     );
-    return priority === "noncritical" ? undefined : this.#retry(operation);
+    if (priority === "noncritical") {
+      return undefined;
+    }
+    if (this.#retriesCancelled) {
+      throw attempted.error;
+    }
+    const retry = this.#retry(operation);
+    this.#activeRetry = retry;
+    void retry.then(
+      () => {
+        if (this.#activeRetry === retry) {
+          this.#activeRetry = undefined;
+        }
+      },
+      () => {
+        if (this.#activeRetry === retry) {
+          this.#activeRetry = undefined;
+        }
+      },
+    );
+    return retry;
   }
 
   async #retry<Result>(operation: () => Result): Promise<Result> {

@@ -177,11 +177,12 @@ async function shutDown(): Promise<void> {
   if (freeSpace.timer !== undefined) {
     clearInterval(freeSpace.timer);
   }
-  writeResilience.close();
+  await writeResilience.cancelRetries();
   await sessions.prepareFinalShutdown();
   process.send?.(FINAL_SHUTDOWN_PREPARED_MESSAGE);
   await sessions.drain();
   await Promise.all([server.stop(), callbackServer?.stop()]);
+  writeResilience.close();
   database.$client.close();
 }
 

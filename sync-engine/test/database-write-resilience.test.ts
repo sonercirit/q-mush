@@ -227,11 +227,16 @@ test("shutdown aborts the production async sleep before another attempt", async 
 
   const firstAttempt = resilience.run("critical", write);
   await vi.advanceTimersByTimeAsync(50);
-  resilience.close();
+  await resilience.cancelRetries();
 
   await expect(firstAttempt).rejects.toThrow("shut down");
   expect(attempts).toBe(1);
+  expect(() => resilience.run("critical", write)).toThrow(
+    "database or disk is full",
+  );
+  expect(attempts).toBe(2);
+  resilience.close();
   expect(() => resilience.run("critical", write)).toThrow("shut down");
-  expect(attempts).toBe(1);
+  expect(attempts).toBe(2);
   vi.useRealTimers();
 });
