@@ -52,8 +52,7 @@ function capCommand(detail: ReturnType<typeof contextCapDetail>) {
   return command;
 }
 
-function mountCapEditor(autoCompact = true) {
-  const detail = contextCapDetail(autoCompact);
+function mountCapDetail(detail: ReturnType<typeof contextCapDetail>) {
   const command = capCommand(detail);
   return {
     ...mountSessionDetailBody(sessionDetailState(detail), disposals, {
@@ -62,6 +61,10 @@ function mountCapEditor(autoCompact = true) {
     command,
     detail,
   };
+}
+
+function mountCapEditor(autoCompact = true) {
+  return mountCapDetail(contextCapDetail(autoCompact));
 }
 
 function capInput(container: ParentNode): HTMLInputElement {
@@ -77,6 +80,15 @@ function setInput(input: HTMLInputElement, value: string): void {
   input.dispatchEvent(new InputEvent("input", { bubbles: true }));
 }
 
+function submitCap(container: ParentNode, value: string): void {
+  setInput(capInput(container), value);
+  findTestButton(container, "Save cap")?.click();
+}
+
+function capEditor(container: ParentNode): HTMLFormElement | null {
+  return capInput(container).closest("form");
+}
+
 test("raises a cap within the underlying model limit", async () => {
   const detail = {
     ...contextCapDetail(false),
@@ -85,17 +97,11 @@ test("raises a cap within the underlying model limit", async () => {
     modelContextTokens: 200_000,
     userContextTokenCap: 120_000,
   };
-  const command = capCommand(detail);
-  const raisedView = mountSessionDetailBody(
-    sessionDetailState(detail),
-    disposals,
-    { command },
-  );
-  setInput(capInput(raisedView.container), "150000");
-  findTestButton(raisedView.container, "Save cap")?.click();
+  const raisedView = mountCapDetail(detail);
+  submitCap(raisedView.container, "150000");
 
   await vi.waitFor(() => {
-    expect(command).toHaveBeenCalledWith(
+    expect(raisedView.command).toHaveBeenCalledWith(
       SESSION_REALTIME_OPERATIONS.setContextTokenCap,
       { sessionId: detail.id, userContextTokenCap: 150_000 },
     );
@@ -109,28 +115,18 @@ test("rejects a cap above the underlying model limit", () => {
     modelContextTokens: 200_000,
     userContextTokenCap: 120_000,
   };
-  const command = capCommand(detail);
-  const rejectedView = mountSessionDetailBody(
-    sessionDetailState(detail),
-    disposals,
-    { command },
-  );
-  setInput(capInput(rejectedView.container), "200001");
-  findTestButton(rejectedView.container, "Save cap")?.click();
+  const rejectedView = mountCapDetail(detail);
+  submitCap(rejectedView.container, "200001");
 
-  expect(command).not.toHaveBeenCalled();
-  expect(
-    queryTestElement(
-      rejectedView.container,
-      "#session-detail-context-token-cap",
-    ).closest("form")?.textContent,
-  ).toContain("cannot exceed the model limit of 200,000 tokens");
+  expect(rejectedView.command).not.toHaveBeenCalled();
+  expect(capEditor(rejectedView.container)?.textContent).toContain(
+    "cannot exceed the model limit of 200,000 tokens",
+  );
 });
 
 test("warns before applying an already exceeded cap", async () => {
   const warningView = mountCapEditor();
-  setInput(capInput(warningView.container), "120000");
-  findTestButton(warningView.container, "Save cap")?.click();
+  submitCap(warningView.container, "120000");
 
   const dialog = queryTestElement(
     warningView.container,
@@ -170,22 +166,18 @@ test("shows the server rejection beside the cap editor", async () => {
     disposals,
     { command },
   );
-  setInput(capInput(rejectedView.container), "160000");
-  findTestButton(rejectedView.container, "Save cap")?.click();
+  submitCap(rejectedView.container, "160000");
 
   await vi.waitFor(() => {
-    const editor = queryTestElement(
-      rejectedView.container,
-      "#session-detail-context-token-cap",
-    ).closest("form");
-    expect(editor?.textContent).toContain(rejectionDetail);
+    expect(capEditor(rejectedView.container)?.textContent).toContain(
+      rejectionDetail,
+    );
   });
 });
 
 test("applies an exceeded cap directly when auto-compact is off", async () => {
   const manualView = mountCapEditor(false);
-  setInput(capInput(manualView.container), "120000");
-  findTestButton(manualView.container, "Save cap")?.click();
+  submitCap(manualView.container, "120000");
 
   expect(
     manualView.container.querySelector(
