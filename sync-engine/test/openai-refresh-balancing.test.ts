@@ -114,6 +114,7 @@ function refreshPool(
 describe("OpenAI OAuth refresh balancing", () => {
   test.each([
     [401, { error: "unauthorized" }],
+    [403, { error: "forbidden" }],
     [400, { error: "invalid_grant" }],
     [400, { error: "invalid_client" }],
   ])(

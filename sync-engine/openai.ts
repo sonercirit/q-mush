@@ -163,10 +163,10 @@ async function prepareCredential(
     },
     "OpenAI rejected the refresh token",
     async (response) => {
-      if (response.status === 401) {
+      if (response.status === 401 || response.status === 403) {
         return new ProviderCredentialRejectionError(
           "OpenAI rejected the refresh token",
-          401,
+          response.status,
         );
       }
       if (response.status !== 400) return undefined;
