@@ -280,32 +280,76 @@ async function runRecoveryFixture(
   expect(exitCode, standardError).toBe(0);
 }
 
-test("recovers a session when forced shutdown waits for the durable marker", async () => {
-  await useDevelopmentServer(
-    "q-mush-dev-recovery-test-",
-    async (directory, triggerPath) => {
-      const databasePath = join(directory, "fixture.sqlite");
-      const statePath = join(directory, "state.json");
-      const recoveryArguments = [databasePath, statePath, "start"];
-      const server = startDevelopmentServer(
-        shutdownServerOptions(directory, triggerPath, [
-          process.execPath,
-          RECOVERY_FIXTURE_PATH,
-          ...recoveryArguments,
-        ]),
-      );
+function startRecoveryFixture(
+  directory: string,
+  triggerPath: string,
+  databasePath: string,
+  statePath: string,
+  mode: "start" | "start-no-ack",
+): DevelopmentServer {
+  return startDevelopmentServer(
+    shutdownServerOptions(directory, triggerPath, [
+      process.execPath,
+      RECOVERY_FIXTURE_PATH,
+      databasePath,
+      statePath,
+      mode,
+    ]),
+  );
+}
 
-      await waitForFile(statePath);
+async function expectRecoveredSession(
+  databasePath: string,
+  statePath: string,
+): Promise<void> {
+  await runRecoveryFixture(databasePath, statePath);
+  const recovered: unknown = await Bun.file(statePath).json();
+  expect(recovered).toMatchObject({
+    restartHandoff: { restartId: "bounded-final-shutdown" },
+    status: "paused",
+  });
+}
+
+async function useRecoveryFixture(
+  prefix: string,
+  mode: "start" | "start-no-ack",
+  stop: (server: DevelopmentServer) => Promise<void>,
+): Promise<void> {
+  await useDevelopmentServer(prefix, async (directory, triggerPath) => {
+    const databasePath = join(directory, "fixture.sqlite");
+    const statePath = join(directory, "state.json");
+    const server = startRecoveryFixture(
+      directory,
+      triggerPath,
+      databasePath,
+      statePath,
+      mode,
+    );
+    await waitForFile(statePath);
+    await stop(server);
+    await expectRecoveredSession(databasePath, statePath);
+  });
+}
+
+test("recovers a session when forced shutdown waits for the durable marker", async () => {
+  await useRecoveryFixture(
+    "q-mush-dev-recovery-test-",
+    "start",
+    async (server) => {
       const stopping = server.stop();
       await Bun.sleep(20);
       await server.forceStop();
       await stopping;
-      await runRecoveryFixture(databasePath, statePath);
-      const recovered: unknown = await Bun.file(statePath).json();
-      expect(recovered).toMatchObject({
-        restartHandoff: { restartId: "bounded-final-shutdown" },
-        status: "paused",
-      });
+    },
+  );
+});
+
+test("bounds shutdown when a live child never acknowledges preparation", async () => {
+  await useRecoveryFixture(
+    "q-mush-dev-no-ack-test-",
+    "start-no-ack",
+    async (server) => {
+      await stoppedWithin(server, 500);
     },
   );
 });
