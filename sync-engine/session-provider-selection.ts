@@ -251,20 +251,14 @@ export function sessionMetadataFromDependencies(options: {
   });
 }
 
-function rejectedCredentialError(
-  rejectCredentialErrors: boolean | undefined,
-  error: unknown,
-): boolean {
-  return rejectCredentialErrors === true && isCredentialRejectionError(error);
-}
-
 function credentialFailure(
   options: SessionMetadataOptions,
   error: unknown,
   fallback: SessionMetadataResult,
 ): SessionMetadataResult {
-  if (rejectedCredentialError(options.rejectCredentialErrors, error)) {
-    throw error;
+  if (options.rejectCredentialErrors === true) {
+    if (isCredentialRejectionError(error)) throw error;
+    throw new RealtimeCommandError("provider_unavailable");
   }
   return fallback;
 }

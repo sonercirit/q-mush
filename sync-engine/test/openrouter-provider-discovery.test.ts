@@ -96,7 +96,7 @@ describe("OpenRouter serving-provider discovery", () => {
   });
 
   test("classifies credential rejection responses", async () => {
-    for (const status of [401, 403, 429] as const) {
+    for (const status of [401, 402, 403, 429] as const) {
       await expect(
         invoke(discoverWithResponse(new Response(null, { status }))),
       ).rejects.toEqual(

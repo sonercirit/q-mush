@@ -1,4 +1,5 @@
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
+import { isBalancedCredentialId } from "../shared/provider-credential-pool.ts";
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import {
   sessionForkSelection,
@@ -41,6 +42,10 @@ async function selectedForkConfiguration(
 ) {
   const selection = sessionForkSelection(input);
   if (selection === undefined) return undefined;
+  const balanced = isBalancedCredentialId(
+    selection.provider,
+    selection.credentialId,
+  );
   const credentials = await dependencies.modelCredentialPool.candidates(
     userId,
     { ...selection, workspaceId: input.workspaceId },
@@ -65,7 +70,7 @@ async function selectedForkConfiguration(
             provider: selection.provider,
           },
           ownerId: userId,
-          rejectCredentialErrors: true,
+          rejectCredentialErrors: balanced,
         }),
       );
       return {

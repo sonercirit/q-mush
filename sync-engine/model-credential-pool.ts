@@ -44,8 +44,10 @@ export class ModelCredentialPool {
           credentialId: summary.id,
         });
         if (credential !== undefined) credentials.push(credential);
-      } catch {
-        if (pool !== undefined) this.#balancer.coolDown(pool, summary.id);
+      } catch (error) {
+        if (pool !== undefined && isCredentialRejectionError(error)) {
+          this.#balancer.coolDown(pool, summary.id);
+        }
       }
     }
     return credentials;

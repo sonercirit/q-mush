@@ -3,6 +3,7 @@ import { CredentialPoolBalancer } from "../../shared/credential-pool-balancer.ts
 import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
 import { AgentModelDiscoveryError } from "../agent-model-discovery.ts";
 import { ModelCredentialPool } from "../model-credential-pool.ts";
+import { ProviderCredentialRejectionError } from "../provider-error.ts";
 import {
   addTestProviderCredential,
   createAuthenticatedTestDatabase,
@@ -65,6 +66,56 @@ describe("model credential pool", () => {
       }),
     ).resolves.toMatchObject([{ id: SECOND_CREDENTIAL_ID }]);
     setup.database.$client.close();
+  });
+
+  test("retries transient credential loading immediately after recovery", async () => {
+    const database = createAuthenticatedTestDatabase();
+    for (const id of [FIRST_CREDENTIAL_ID, SECOND_CREDENTIAL_ID]) {
+      addTestProviderCredential(database, id);
+    }
+    let refreshAvailable = false;
+    const pool = new ModelCredentialPool({
+      database,
+      readCredential: (_userId, selection) => {
+        if (!refreshAvailable) return Promise.reject(new TypeError("offline"));
+        return Promise.resolve(
+          createTestProviderCredential(selection.credentialId, "oauth"),
+        );
+      },
+    });
+
+    await expect(pool.candidates(TEST_USER_ID, SELECTION)).resolves.toEqual([]);
+    refreshAvailable = true;
+    await expect(
+      pool.candidates(TEST_USER_ID, SELECTION),
+    ).resolves.toHaveLength(2);
+    database.$client.close();
+  });
+
+  test("cools down only classified credential loading rejections", async () => {
+    const database = createAuthenticatedTestDatabase();
+    for (const id of [FIRST_CREDENTIAL_ID, SECOND_CREDENTIAL_ID]) {
+      addTestProviderCredential(database, id);
+    }
+    const pool = new ModelCredentialPool({
+      database,
+      readCredential: (_userId, selection) =>
+        selection.credentialId === FIRST_CREDENTIAL_ID
+          ? Promise.reject(
+              new ProviderCredentialRejectionError("rejected", 402),
+            )
+          : Promise.resolve(
+              createTestProviderCredential(selection.credentialId),
+            ),
+    });
+
+    await expect(
+      pool.candidates(TEST_USER_ID, SELECTION),
+    ).resolves.toMatchObject([{ id: SECOND_CREDENTIAL_ID }]);
+    await expect(
+      pool.candidates(TEST_USER_ID, SELECTION),
+    ).resolves.toMatchObject([{ id: SECOND_CREDENTIAL_ID }]);
+    database.$client.close();
   });
 
   test("falls through rejected credentials and skips them during cooldown", async () => {

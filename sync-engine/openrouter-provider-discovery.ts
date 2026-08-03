@@ -238,7 +238,7 @@ async function responseJson(
   if (!response.ok) {
     const status = response.status;
     const message = `OpenRouter serving-provider discovery failed with status ${String(status)}`;
-    if (status === 401 || status === 403 || status === 429) {
+    if (status === 401 || status === 402 || status === 403 || status === 429) {
       throw new ProviderCredentialRejectionError(message, status);
     }
     throw new Error(message);

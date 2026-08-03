@@ -75,7 +75,10 @@ export function isCredentialRejectionError(error: unknown): boolean {
   return (
     isProviderCredentialRejection(error) ||
     (error instanceof AgentModelDiscoveryError &&
-      (error.status === 401 || error.status === 403 || error.status === 429))
+      (error.status === 401 ||
+        error.status === 402 ||
+        error.status === 403 ||
+        error.status === 429))
   );
 }
 

@@ -3,6 +3,7 @@ import type { AuthenticatedUser } from "../../shared/auth-model.ts";
 import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
 import { SESSION_OPENROUTER_PROVIDERS_PATH } from "../../shared/routes.ts";
 import { testAgentModelCatalog } from "../../shared/test/agent-model-fixtures.ts";
+import { AgentModelDiscoveryError } from "../../sync-engine/agent-model-discovery.ts";
 import { ProviderCredentialRejectionError } from "../../sync-engine/provider-error.ts";
 import {
   openRouterProvidersForUser,
@@ -274,14 +275,41 @@ describe("OpenRouter session provider validation", () => {
     ).resolves.toEqual({ error: "validation_failed" });
   });
 
-  test("propagates tagged-provider credential rejections when requested", async () => {
-    const rejection = new ProviderCredentialRejectionError("rejected", 429);
-    const rejectedOptions = metadataOptions({
-      discoverProviders: () => Promise.reject(rejection),
+  test("separates strict probe failures from explicit metadata fallback", async () => {
+    const transient = new AgentModelDiscoveryError("provider unavailable", 503);
+    const strictOptions = metadataOptions({
+      discoverModels: () => Promise.reject(transient),
+      input: { ...SELECTED_INPUT, openRouterProviderTag: null },
       rejectCredentialErrors: true,
     });
-    await expect(sessionMetadata(rejectedOptions)).rejects.toBe(rejection);
+    await expect(sessionMetadata(strictOptions)).rejects.toMatchObject({
+      code: "provider_unavailable",
+    });
 
+    const explicitOptions = metadataOptions({
+      discoverModels: () => Promise.reject(transient),
+      input: { ...SELECTED_INPUT, openRouterProviderTag: null },
+    });
+    await expect(sessionMetadata(explicitOptions)).resolves.toEqual({
+      maxContextTokens: null,
+      providerPricing: null,
+    });
+  });
+
+  test("propagates tagged-provider credential rejections when requested", async () => {
+    for (const status of [402, 429] as const) {
+      const rejection = new ProviderCredentialRejectionError(
+        "rejected",
+        status,
+      );
+      const rejectedOptions = metadataOptions({
+        discoverProviders: () => Promise.reject(rejection),
+        rejectCredentialErrors: true,
+      });
+      await expect(sessionMetadata(rejectedOptions)).rejects.toBe(rejection);
+    }
+
+    const rejection = new ProviderCredentialRejectionError("rejected", 429);
     const handledOptions = metadataOptions({
       discoverProviders: () => Promise.reject(rejection),
     });

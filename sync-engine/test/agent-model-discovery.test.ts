@@ -13,10 +13,12 @@ import type { ProviderModelPricing } from "../../shared/provider-model-pricing.t
 import { utf8ByteLength } from "../../shared/utf8.ts";
 import {
   discoverAgentModels,
+  isCredentialRejectionError,
   type AgentModelDiscoveryFetch,
 } from "../../sync-engine/agent-model-discovery.ts";
 import { createJsonResponse } from "../../sync-engine/http.ts";
 import { createOpenAiOAuthSecret } from "./oauth-test-helpers.ts";
+import { captureRejection } from "./promise-test-helpers.ts";
 
 class RequestCapture {
   request?: Request;
@@ -346,6 +348,21 @@ describe("agent model discovery", () => {
       utf8ByteLength(String(bounded?.pricing?.input ?? "")),
     ).toBeLessThanOrEqual(100);
     expect(JSON.stringify(discovered)).not.toContain("�");
+  });
+
+  test("classifies exhausted OpenRouter credits without exposing credentials", async () => {
+    const secret = "sk-never-return-this-secret";
+    const error = await captureRejection(
+      discoverAgentModels("openrouter", credential("api_key", secret), () =>
+        Promise.resolve(new Response("denied", { status: 402 })),
+      ),
+    );
+
+    expect(error).toMatchObject({ status: 402 });
+    expect(isCredentialRejectionError(error)).toBe(true);
+    const message = error instanceof Error ? error.message : String(error);
+    expect(message).not.toContain(secret);
+    expect(utf8ByteLength(message)).toBeLessThanOrEqual(300);
   });
 
   test("reports safe provider status failures without credential contents", async () => {

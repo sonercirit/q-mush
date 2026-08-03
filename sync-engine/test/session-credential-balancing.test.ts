@@ -225,6 +225,64 @@ describe("session credential balancing", () => {
     closeSessionTestDatabase(initial.database);
   });
 
+  test("retries an OAuth refresh outage on the next spawn", async () => {
+    let refreshAvailable = false;
+    const sessions = connectedSessionSetup(
+      IDLE_MODEL,
+      "oauth",
+      () => Promise.resolve(TEST_CATALOG),
+      {
+        credentials: {
+          openai: [
+            createTestProviderCredential(CREDENTIAL_ID, "oauth"),
+            createTestProviderCredential(SECOND_CREDENTIAL_ID, "oauth"),
+          ],
+        },
+        readCredential: (read) =>
+          refreshAvailable
+            ? Promise.resolve(read())
+            : Promise.reject(new TypeError("refresh unavailable")),
+      },
+    );
+    const createBalanced = () =>
+      sessions.sessions.realtimeCommands.createForUser(
+        TEST_AUTHENTICATED_USER,
+        input(balancedCredentialId("openai")),
+        TEST_WORKSPACE_ID,
+      );
+
+    await expect(createBalanced()).rejects.toMatchObject({
+      code: "credential_unavailable",
+    });
+    expect(sessions.sessions.listForUser(TEST_AUTHENTICATED_USER.id)).toEqual(
+      [],
+    );
+    refreshAvailable = true;
+    const created = await createBalanced();
+    expect([CREDENTIAL_ID, SECOND_CREDENTIAL_ID]).toContain(
+      created.credentialId,
+    );
+    closeSessionTestDatabase(sessions.database);
+  });
+
+  test("rejects a transient balanced probe without creating a session", async () => {
+    const sessions = setup(() =>
+      Promise.reject(new AgentModelDiscoveryError("temporary outage", 503)),
+    );
+
+    await expect(
+      sessions.sessions.realtimeCommands.createForUser(
+        TEST_AUTHENTICATED_USER,
+        input(balancedCredentialId("openai")),
+        TEST_WORKSPACE_ID,
+      ),
+    ).rejects.toMatchObject({ code: "provider_unavailable" });
+    expect(sessions.sessions.listForUser(TEST_AUTHENTICATED_USER.id)).toEqual(
+      [],
+    );
+    closeSessionTestDatabase(sessions.database);
+  });
+
   test("falls through an immediately rejected member but leaves explicit selection untouched", async () => {
     const discovered: string[] = [];
     const sessions = setup((_provider, credential) => {
