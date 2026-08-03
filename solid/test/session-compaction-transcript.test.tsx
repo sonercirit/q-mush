@@ -22,6 +22,79 @@ async function selectedController(
   return controller;
 }
 
+const COMPACTION_REQUEST = "Create the handoff summary.";
+const COMPACTION_STREAM_ID = "compaction-step";
+
+function compactionDetail(sessionId: string): AgentSessionDetail {
+  return sessionDetailWithStatus(
+    "running",
+    [transcriptMessage("old-user", "Original request", "user", 1)],
+    sessionId,
+  );
+}
+
+function applyCompactionRequest(
+  controller: SessionController,
+  sessionId: string,
+): void {
+  controller.applyCompactionRequest({
+    content: COMPACTION_REQUEST,
+    sessionId,
+    streamId: COMPACTION_STREAM_ID,
+    type: "session_compaction_request",
+  });
+}
+
+interface SelectedCompactionController {
+  readonly controller: SessionController;
+  readonly detail: AgentSessionDetail;
+}
+
+async function selectedCompactionController(
+  sessionId: string,
+): Promise<SelectedCompactionController> {
+  const detail = compactionDetail(sessionId);
+  const controller = await selectedController(detail);
+  applyCompactionRequest(controller, sessionId);
+  return { controller, detail };
+}
+
+function applyCompactionDelta(
+  controller: SessionController,
+  sessionId: string,
+  content: string,
+  reset = false,
+): void {
+  const delta = {
+    content,
+    sessionId,
+    streamId: COMPACTION_STREAM_ID,
+    thinking: "",
+    type: "session_delta" as const,
+  };
+  controller.applyDelta(reset ? { ...delta, reset: true } : delta);
+}
+
+function expectCompactionMessages(
+  controller: SessionController,
+  assistantContent: string,
+  assistantId?: string,
+): void {
+  expect(controller.state.detail?.messages).toMatchObject([
+    { id: "old-user", role: "user" },
+    {
+      content: COMPACTION_REQUEST,
+      id: `stream:${COMPACTION_STREAM_ID}:compaction-request`,
+      role: "compaction_request",
+    },
+    {
+      content: assistantContent,
+      ...(assistantId === undefined ? {} : { id: assistantId }),
+      role: "assistant",
+    },
+  ]);
+}
+
 function renderCompactionMessages(
   messages: readonly AgentSessionDetail["messages"][number][],
 ): string {
@@ -58,6 +131,22 @@ test("renders a compaction request before its streamed response", () => {
   ).toBeLessThan(html.indexOf("Summary in progress"));
 });
 
+test("keeps the streamed compaction request across a provider reset", async () => {
+  const originalFetch = globalThis.fetch;
+  const sessionId = "session-compaction-reset";
+  const { controller } = await selectedCompactionController(sessionId);
+
+  try {
+    applyCompactionDelta(controller, sessionId, "Discarded partial response");
+    applyCompactionDelta(controller, sessionId, "Replacement ", true);
+    applyCompactionDelta(controller, sessionId, "response");
+
+    expectCompactionMessages(controller, "Replacement response");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 const SNAPSHOT_TIMINGS = ["delta-first", "snapshot-first"] as const;
 
 test.each(SNAPSHOT_TIMINGS)(
@@ -65,20 +154,10 @@ test.each(SNAPSHOT_TIMINGS)(
   async (snapshotTiming) => {
     const originalFetch = globalThis.fetch;
     const sessionId = "session-compaction-stream";
-    const detail = sessionDetailWithStatus(
-      "running",
-      [transcriptMessage("old-user", "Original request", "user", 1)],
-      sessionId,
-    );
+    const { controller, detail } =
+      await selectedCompactionController(sessionId);
 
     try {
-      const controller = await selectedController(detail);
-      controller.applyCompactionRequest({
-        content: "Create the handoff summary.",
-        sessionId,
-        streamId: "compaction-step",
-        type: "session_compaction_request",
-      });
       const compactionRequests = () =>
         controller.state.detail?.messages.filter(
           ({ role }) => role === "compaction_request",
@@ -91,13 +170,7 @@ test.each(SNAPSHOT_TIMINGS)(
       }
 
       for (const content of ["Compacted ", "response"]) {
-        controller.applyDelta({
-          content,
-          sessionId,
-          streamId: "compaction-step",
-          thinking: "",
-          type: "session_delta",
-        });
+        applyCompactionDelta(controller, sessionId, content);
         requestCounts.push(compactionRequests().length);
       }
 
@@ -119,19 +192,11 @@ test.each(SNAPSHOT_TIMINGS)(
       expect(compactionRequests().map(({ id }) => id)).toEqual([
         "stream:compaction-step:compaction-request",
       ]);
-      expect(controller.state.detail?.messages).toMatchObject([
-        { id: "old-user", role: "user" },
-        {
-          content: "Create the handoff summary.",
-          id: "stream:compaction-step:compaction-request",
-          role: "compaction_request",
-        },
-        {
-          content: "Compacted response",
-          id: "settled-summary",
-          role: "assistant",
-        },
-      ]);
+      expectCompactionMessages(
+        controller,
+        "Compacted response",
+        "settled-summary",
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }

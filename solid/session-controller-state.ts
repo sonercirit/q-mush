@@ -529,16 +529,14 @@ export class SessionRealtimeState {
     const initialBase = active
       ? (selectedDetail.messages.at(-1)?.id ?? null)
       : undefined;
-    const current =
-      !event.reset &&
-      this.#streamedContent.get(event.sessionId)?.streamId === event.streamId
-        ? this.#streamedContent.get(event.sessionId)
-        : undefined;
+    const previous = this.#streamedContent.get(event.sessionId);
+    const matchingPrevious =
+      previous?.streamId === event.streamId ? previous : undefined;
+    const current = event.reset ? undefined : matchingPrevious;
+    const compactionRequest = matchingPrevious?.compactionRequest;
     const next: StreamedSessionContent = {
       baseMessageId: current?.baseMessageId ?? initialBase,
-      ...(current?.compactionRequest === undefined
-        ? {}
-        : { compactionRequest: current.compactionRequest }),
+      ...(compactionRequest === undefined ? {} : { compactionRequest }),
       content: (current?.content ?? "") + event.content,
       streamId: event.streamId,
       thinking: (current?.thinking ?? "") + event.thinking,
