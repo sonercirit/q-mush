@@ -17,7 +17,10 @@ import {
   type RunnerCommandOutputDelta,
   type RunnerCommandResult,
 } from "../shared/runner-command-broker.ts";
-import type { AgentSessionDetail } from "../shared/session-model.ts";
+import type {
+  AgentSessionDetail,
+  AgentSessionUsageUpdate,
+} from "../shared/session-model.ts";
 import { forEachAssistantToolCall } from "./agent-conversation.ts";
 import { estimateAgentStepCost } from "./agent-cost.ts";
 import { createAgentSkills, type AgentSkillExecutor } from "./agent-skills.ts";
@@ -83,6 +86,28 @@ function writeRuntime(
   runtime.notify();
 }
 
+function recordRuntimeUsage(
+  runtime: SessionAgentRuntimeDependencies,
+  usage: AgentSessionUsageUpdate,
+): void {
+  writeRuntime(runtime, (sessionId, now, generation) => {
+    runtime.store.updateRuntimeUsage(sessionId, usage, now, generation);
+  });
+}
+
+function recordCompactionContext(
+  runtime: SessionAgentRuntimeDependencies,
+  contextTokens: number | null,
+): void {
+  if (contextTokens !== null) {
+    recordRuntimeUsage(runtime, {
+      contextTokens,
+      costBasis: null,
+      costUsd: null,
+    });
+  }
+}
+
 function recordCompaction(
   runtime: SessionAgentRuntimeDependencies,
   summary: string,
@@ -90,6 +115,7 @@ function recordCompaction(
   startedAt: number,
   terminal = false,
 ): void {
+  recordCompactionContext(runtime, usage.contextTokens);
   writeRuntime(runtime, (sessionId, now, generation) => {
     if (terminal) {
       runtime.store.compactRuntimeTerminal(
@@ -210,19 +236,24 @@ export async function compactSessionConversation(
   const conversation = sessionConversation(runtime);
   const compactor = models.createCompactor();
   const startedAt = runtime.now();
-  const estimateCost = (step: Parameters<typeof compactionUsage>[0]) =>
-    estimateAgentStepCost(runtime.detail, step.tokenUsage);
-  const final = await compactor.compact(conversation, runtime.signal);
-  throwIfAgentAborted(runtime.signal);
-  const usage = compactionUsage(final, estimateCost);
-  recordCompaction(
-    runtime,
-    final.summary,
-    usage,
-    startedAt,
-    !continueAfterCompaction,
-  );
-  return "complete";
+  const estimateCost = (
+    step: Pick<Parameters<typeof compactionUsage>[0], "costUsd" | "tokenUsage">,
+  ) => estimateAgentStepCost(runtime.detail, step.tokenUsage);
+  try {
+    const final = await compactor.compact(conversation, runtime.signal);
+    throwIfAgentAborted(runtime.signal);
+    const usage = compactionUsage(final, estimateCost);
+    recordCompaction(
+      runtime,
+      final.summary,
+      usage,
+      startedAt,
+      !continueAfterCompaction,
+    );
+    return "complete";
+  } finally {
+    models.publishCompactionSettled();
+  }
 }
 
 const RESTART_INTERRUPTED_TOOL_OUTPUT =
@@ -457,9 +488,7 @@ export async function runSessionAgent(
         ),
     );
     if (usage !== undefined) {
-      writeRuntime(runtime, (sessionId, now, generation) => {
-        runtime.store.updateRuntimeUsage(sessionId, usage, now, generation);
-      });
+      recordRuntimeUsage(runtime, usage);
     }
     return { output: explanation.content, state: "completed" };
   };
@@ -554,6 +583,7 @@ export async function runSessionAgent(
       recordCompaction: (summary, usage, startedAt) => {
         recordCompaction(runtime, summary, usage, startedAt);
       },
+      settleCompaction: models.publishCompactionSettled,
       recordMessage: (messages, usage, terminal) => {
         if (terminal && runtime.detail.restartHandoff === null) {
           recorder.terminal(messages, null, usage);

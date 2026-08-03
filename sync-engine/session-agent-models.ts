@@ -8,10 +8,7 @@ import type {
 } from "../shared/provider-credential-store.ts";
 import type { ProviderModelPricing } from "../shared/provider-model-pricing.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
-import {
-  AGENT_COMPACTION_SYSTEM_PROMPT,
-  ModelConversationCompactor,
-} from "./agent-compaction.ts";
+import { ModelConversationCompactor } from "./agent-compaction.ts";
 import {
   agentModelOpenRouterProviderRouting,
   type AgentModelRequestOptions,
@@ -34,6 +31,7 @@ export type AgentModelFactory = (
 export interface SessionAgentModels {
   readonly agent: AgentModel;
   readonly createCompactor: () => ModelConversationCompactor;
+  readonly publishCompactionSettled: () => void;
 }
 
 function agentModelRoutingOptions(
@@ -150,15 +148,50 @@ export function createSessionAgentModels(options: {
       // Live delivery must never interrupt the persisted model step.
     }
   };
+  const systemPrompt = createAgentSystemPrompt(
+    options.agentFile,
+    options.detail.executionEnvironment,
+  );
+  const publishCompaction = (
+    event:
+      | { readonly content: string; readonly type: "request" }
+      | { readonly type: "settled" },
+  ): void => {
+    if (!options.isCurrent()) {
+      return;
+    }
+    try {
+      options.realtime?.publishUser(
+        options.userId,
+        event.type === "request"
+          ? {
+              content: event.content,
+              sessionId: options.detail.id,
+              streamId,
+              type: "session_compaction_request",
+            }
+          : {
+              sessionId: options.detail.id,
+              type: "session_compaction_settled",
+            },
+        options.detail.workspaceId,
+      );
+    } catch {
+      // Live delivery must never interrupt the persisted model step.
+    }
+  };
+  const publishCompactionRequest = (content: string): void => {
+    publishCompaction({ content, type: "request" });
+  };
+  const publishCompactionSettled = (): void => {
+    publishCompaction({ type: "settled" });
+  };
   return {
     agent: options.factory(
       modelOptions(
         options.detail,
         options.credential,
-        createAgentSystemPrompt(
-          options.agentFile,
-          options.detail.executionEnvironment,
-        ),
+        systemPrompt,
         onDelta,
         startStep,
       ),
@@ -170,11 +203,13 @@ export function createSessionAgentModels(options: {
           modelOptions(
             options.detail,
             options.credential,
-            AGENT_COMPACTION_SYSTEM_PROMPT,
+            systemPrompt,
             onDelta,
           ),
         ),
+        publishCompactionRequest,
       );
     },
+    publishCompactionSettled,
   };
 }

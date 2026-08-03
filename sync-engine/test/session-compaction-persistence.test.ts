@@ -3,6 +3,7 @@ import {
   agentMessages,
   agentSessionTurns,
 } from "../../shared/database/schema.ts";
+import { AGENT_COMPACTION_REQUEST_MESSAGE } from "../../sync-engine/agent-compaction.ts";
 import type { CompactionUsage } from "../../sync-engine/session-compaction-usage.ts";
 import {
   TEST_NOW,
@@ -16,10 +17,18 @@ import {
 } from "./session-compaction-test-helpers.ts";
 import { STORE_SESSION_ID } from "./session-store-test-fixtures.ts";
 
+const COMPACTION_TOKEN_USAGE = {
+  cacheWriteInputTokens: 500,
+  cachedInputTokens: 90_000,
+  inputTokens: 98_000,
+  outputTokens: 1_000,
+} as const;
+
 const COMPACTION_USAGE: CompactionUsage = {
-  contextTokens: null,
+  contextTokens: 98_000,
   costBasis: "reported",
   costUsd: 0.1,
+  tokenUsage: COMPACTION_TOKEN_USAGE,
 };
 
 function compactionStoreWithUsage(): CompactionStoreSetup {
@@ -104,6 +113,38 @@ describe("session compaction persistence", () => {
       ],
     });
     expect(compactedSession?.costUsd).toBeCloseTo(0.3);
+    expect(compactedSession?.segmentTokenUsage).toMatchObject({
+      reportedStepCount: 0,
+      stepCount: 0,
+    });
+    expect(setup.store.conversation(STORE_SESSION_ID)).toEqual([
+      {
+        content: "Conversation compacted:\n\nContinue from this handoff.",
+        role: "user",
+      },
+    ]);
+    const compactedHistory = setup.store.history(
+      TEST_USER_ID,
+      STORE_SESSION_ID,
+      null,
+    );
+    expect(compactedHistory?.messages.slice(-2)).toMatchObject([
+      {
+        content: AGENT_COMPACTION_REQUEST_MESSAGE,
+        role: "compaction_request",
+      },
+      {
+        content: "Continue from this handoff.",
+        role: "assistant",
+        tokenUsage: COMPACTION_TOKEN_USAGE,
+      },
+    ]);
+    expect(compactedHistory?.tokenUsage).toEqual({
+      ...COMPACTION_TOKEN_USAGE,
+      reportedStepCount: 1,
+      stepCount: 2,
+    });
+    expect(compactedSession?.tokenUsage).toEqual(compactedHistory?.tokenUsage);
     expectCurrentCompactionTurn(setup, false);
     setup.database.$client.close();
   });

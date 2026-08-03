@@ -1,9 +1,7 @@
 import type { AgentModelStep } from "../shared/agent-loop.ts";
 import type { AgentSessionUsageUpdate } from "../shared/session-model.ts";
 
-export type CompactionUsage = AgentSessionUsageUpdate & {
-  readonly contextTokens: null;
-};
+export type CompactionUsage = AgentSessionUsageUpdate;
 
 type CostEstimate = Pick<AgentModelStep, "costUsd" | "tokenUsage">;
 type EstimateCost = (estimate: CostEstimate) => number | null;
@@ -24,6 +22,12 @@ function usageCost(
   };
 }
 
+function withTokenUsage(
+  step: Pick<AgentModelStep, "tokenUsage">,
+): Pick<AgentSessionUsageUpdate, "tokenUsage"> {
+  return step.tokenUsage === null ? {} : { tokenUsage: step.tokenUsage };
+}
+
 export function agentStepUsage(
   step: CostEstimate & Pick<AgentModelStep, "contextTokens">,
   estimateCost: EstimateCost,
@@ -36,13 +40,17 @@ export function agentStepUsage(
     : {
         contextTokens: step.contextTokens,
         ...cost,
-        ...(step.tokenUsage === null ? {} : { tokenUsage: step.tokenUsage }),
+        ...withTokenUsage(step),
       };
 }
 
 export function compactionUsage(
-  step: CostEstimate,
+  step: CostEstimate & Pick<AgentModelStep, "contextTokens">,
   estimateCost: EstimateCost,
 ): CompactionUsage {
-  return { contextTokens: null, ...usageCost(step, estimateCost) };
+  return {
+    contextTokens: step.contextTokens,
+    ...usageCost(step, estimateCost),
+    ...withTokenUsage(step),
+  };
 }

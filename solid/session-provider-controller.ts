@@ -6,7 +6,7 @@ import { shouldDiscover } from "./discovery-state.ts";
 import type { RevisionState } from "./revision-state.ts";
 import type { SessionViewState } from "./session-client.tsx";
 import { readOpenRouterProviderCatalog } from "./session-codec.ts";
-import { selectedSessionCredential } from "./session-controller-state.ts";
+import { selectedSessionCredential } from "./session-credential-option.ts";
 import { sessionProviderDiscoveryState } from "./session-state.ts";
 
 function discoveryKey(credential: string, model: string): string {

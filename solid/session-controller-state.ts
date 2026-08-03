@@ -1,4 +1,3 @@
-import { isProviderId, type ProviderId } from "../shared/provider-id.ts";
 import { canonicalAgentSessionMessages } from "../shared/session-message-order.ts";
 import type {
   AgentSessionDetail,
@@ -13,23 +12,6 @@ import { summaryFromDetail } from "./session-codec.ts";
 import { createDisplaySessionMessage } from "./session-message.ts";
 import { sessionMutationPending } from "./session-pending.ts";
 import { toolStreamKey } from "./tool-stream-client.ts";
-
-export function selectedSessionCredential(value: string):
-  | {
-      readonly credentialId: string;
-      readonly provider: ProviderId;
-    }
-  | undefined {
-  const separator = value.indexOf(":");
-  const provider = value.slice(0, separator);
-  const credentialId = value.slice(separator + 1);
-
-  if (separator < 1 || !isProviderId(provider) || credentialId.length === 0) {
-    return undefined;
-  }
-
-  return { credentialId, provider };
-}
 
 export function replaceSessionSummary(
   sessions: readonly AgentSessionSummary[],
@@ -64,8 +46,7 @@ function sessionMessageMatches(
   right: AgentSessionMessage | undefined,
 ): boolean {
   if (left === right) return true;
-  if (left === undefined) return false;
-  if (right === undefined) return false;
+  if (left === undefined || right === undefined) return false;
   return (
     left.content === right.content &&
     left.createdAt === right.createdAt &&
@@ -85,8 +66,7 @@ function sessionDetailMatches(
   right: AgentSessionDetail | undefined,
 ): boolean {
   if (left === right) return true;
-  if (right === undefined) return false;
-  if (left === undefined) return false;
+  if (right === undefined || left === undefined) return false;
   const { messages: leftMessages, ...leftMetadata } = left;
   const { messages: rightMessages, ...rightMetadata } = right;
   return (
@@ -98,12 +78,7 @@ function sessionDetailMatches(
   );
 }
 
-export function sessionDataMatches(
-  left: AgentSessionDetail | undefined,
-  right: AgentSessionDetail | undefined,
-): boolean {
-  return sessionDetailMatches(left, right);
-}
+export const sessionDataMatches = sessionDetailMatches;
 
 export function sessionSummariesMatch(
   left: readonly AgentSessionSummary[] | undefined,
@@ -161,11 +136,10 @@ export function retainUnchangedSessionData(
   detail: AgentSessionDetail,
 ): AgentSessionDetail {
   const orderedMessages = sortedMessages(detail);
-  if (current?.id !== detail.id) {
+  if (current?.id !== detail.id)
     return orderedMessages === detail.messages
       ? detail
       : { ...detail, messages: orderedMessages };
-  }
 
   const agentFile = serializedDataMatches(current.agentFile, detail.agentFile)
     ? current.agentFile
@@ -181,6 +155,7 @@ type StreamRole = "assistant" | "thinking";
 
 interface StreamedSessionContent {
   readonly baseMessageId: string | null | undefined;
+  readonly compactionRequest?: AgentSessionMessage;
   readonly content: string;
   readonly streamId: string | undefined;
   readonly thinking: string;
@@ -200,6 +175,7 @@ function isStreamedMessage(
   message: AgentSessionMessage,
 ): boolean {
   return (
+    message.role === "compaction_request" ||
     message.id === streamedMessageId(sessionId, "thinking") ||
     message.id === streamedMessageId(sessionId, "assistant")
   );
@@ -214,9 +190,8 @@ function persistedMessages(
     if (message === undefined || !isStreamedMessage(detail.id, message)) break;
     streamStart -= 1;
   }
-  return streamStart === detail.messages.length
-    ? sortedMessages(detail)
-    : detail.messages.slice(0, streamStart);
+  if (streamStart === detail.messages.length) return sortedMessages(detail);
+  return detail.messages.slice(0, streamStart);
 }
 
 function persistedDetail(detail: AgentSessionDetail): AgentSessionDetail {
@@ -236,21 +211,16 @@ function resolveStreamBase(
   detail: AgentSessionDetail,
   streamed: StreamedSessionContent,
 ): StreamedSessionContent {
-  return streamed.baseMessageId === undefined
-    ? { ...streamed, baseMessageId: detail.messages.at(-1)?.id ?? null }
-    : streamed;
+  if (streamed.baseMessageId !== undefined) return streamed;
+  return { ...streamed, baseMessageId: detail.messages.at(-1)?.id ?? null };
 }
 
 function streamStartIndex(
   messages: AgentSessionDetail["messages"],
   baseMessageId: StreamedSessionContent["baseMessageId"],
 ): number {
-  if (baseMessageId === null) {
-    return 0;
-  }
-  if (baseMessageId === undefined) {
-    return messages.length;
-  }
+  if (baseMessageId === null) return 0;
+  if (baseMessageId === undefined) return messages.length;
   const baseIndex = messages.findIndex(({ id }) => id === baseMessageId);
   return baseIndex < 0 ? messages.length : baseIndex + 1;
 }
@@ -283,7 +253,17 @@ function reconcileStream(
   streamed: StreamedSessionContent,
 ): ReconciledStream {
   const messages = [...detail.messages];
-  const startIndex = streamStartIndex(messages, streamed.baseMessageId);
+  let startIndex = streamStartIndex(messages, streamed.baseMessageId);
+  if (streamed.compactionRequest) {
+    let requestIndex = messages.findIndex(
+      ({ id }) => id === streamed.compactionRequest?.id,
+    );
+    if (requestIndex < 0) {
+      messages.splice(startIndex, 0, streamed.compactionRequest);
+      requestIndex = startIndex;
+    }
+    startIndex = requestIndex + 1;
+  }
   const thinkingIndex = matchingStreamMessageIndex(
     messages,
     startIndex,
@@ -299,9 +279,8 @@ function reconcileStream(
   const assistantPersisted =
     streamed.content.length === 0 || assistantIndex >= 0;
 
-  if (thinkingPersisted && assistantPersisted) {
+  if (thinkingPersisted && assistantPersisted)
     return { messages, persisted: true };
-  }
 
   if (!thinkingPersisted && assistantPersisted) {
     messages.splice(
@@ -345,9 +324,8 @@ function streamMessages(
   const assistant = streamedMessage(detail, "assistant");
   const thinkingPersisted = streamed.thinking.length === 0;
   const assistantPersisted = streamed.content.length === 0;
-  if (thinkingPersisted && assistantPersisted) {
+  if (thinkingPersisted && assistantPersisted)
     return { messages: detail.messages, persisted: true };
-  }
   if (
     (thinkingPersisted || thinking?.content === streamed.thinking) &&
     (assistantPersisted || assistant?.content === streamed.content)
@@ -359,6 +337,9 @@ function streamMessages(
   return {
     messages: [
       ...messages,
+      ...(streamed.compactionRequest === undefined
+        ? []
+        : [streamed.compactionRequest]),
       ...(thinkingPersisted
         ? []
         : [
@@ -378,7 +359,18 @@ function streamMessages(
   };
 }
 
+function retainCompactionStream(
+  current: StreamedSessionContent | undefined,
+  reconciled: ReconciledStream,
+): boolean {
+  return (
+    current !== undefined &&
+    (current.compactionRequest !== undefined || !reconciled.persisted)
+  );
+}
+
 export class SessionRealtimeState {
+  readonly #compactionRequests = new Map<string, AgentSessionMessage>();
   readonly #streamedContent = new Map<string, StreamedSessionContent>();
   readonly #view: RevisionState<SessionViewState>;
 
@@ -386,34 +378,45 @@ export class SessionRealtimeState {
     this.#view = view;
   }
 
+  #clearCompaction(sessionId: string): void {
+    this.#compactionRequests.delete(sessionId);
+    this.#streamedContent.delete(sessionId);
+  }
+
+  applyReconnectDetail(detail: AgentSessionDetail): void {
+    const current = this.#streamedContent.get(detail.id);
+    const messages = persistedMessages(detail);
+    const base =
+      current?.baseMessageId === null
+        ? messages.length === 0
+        : messages.some(({ id }) => id === current?.baseMessageId);
+    if (this.#compactionRequests.has(detail.id) && !base) {
+      this.#clearCompaction(detail.id);
+    }
+    this.applyDetail(detail);
+  }
+
   applyDetail(detail: AgentSessionDetail): void {
     const persistable = persistedDetail(detail);
-    if (!sessionIsActive(persistable)) {
-      this.#streamedContent.delete(detail.id);
+    const active = sessionIsActive(persistable);
+    if (!active) {
+      this.#clearCompaction(detail.id);
     }
-
     const currentStream = this.#streamedContent.get(detail.id);
     const streamed =
       currentStream === undefined
         ? undefined
         : resolveStreamBase(persistable, currentStream);
-    const reconciled =
-      streamed === undefined
-        ? { messages: persistable.messages, persisted: true }
-        : reconcileStream(persistable, streamed);
+    const reconciled = streamed
+      ? reconcileStream(persistable, streamed)
+      : { messages: persistable.messages, persisted: true };
 
-    if (streamed !== undefined) {
-      if (reconciled.persisted) {
-        this.#streamedContent.delete(detail.id);
-      } else {
-        this.#streamedContent.set(detail.id, streamed);
-      }
+    if (retainCompactionStream(currentStream, reconciled) && streamed) {
+      this.#streamedContent.set(detail.id, streamed);
+    } else if (!retainCompactionStream(currentStream, reconciled)) {
+      this.#streamedContent.delete(detail.id);
     }
-
-    if (this.#view.value.selectedId !== detail.id) {
-      return;
-    }
-
+    if (this.#view.value.selectedId !== detail.id) return;
     const current = this.#view.value.detail;
     const confirmedRequestIds = new Set(
       persistable.pendingInputs.map(({ clientRequestId }) => clientRequestId),
@@ -435,9 +438,7 @@ export class SessionRealtimeState {
       current !== undefined && sessionDataMatches(current, visibleDetail);
     const optimisticUnchanged =
       optimisticPendingInputs === this.#view.value.optimisticPendingInputs;
-    if (detailUnchanged && optimisticUnchanged) {
-      return;
-    }
+    if (detailUnchanged && optimisticUnchanged) return;
 
     this.#view.patch({
       ...(detailUnchanged ? {} : { detail: visibleDetail }),
@@ -450,6 +451,50 @@ export class SessionRealtimeState {
     });
   }
 
+  applyCompaction(
+    event: Extract<
+      RealtimeServerEvent,
+      { type: "session_compaction_request" | "session_compaction_settled" }
+    >,
+  ): void {
+    if (event.type === "session_compaction_settled") {
+      this.#clearCompaction(event.sessionId);
+      const detail = this.#view.value.detail;
+      if (
+        this.#view.value.selectedId === event.sessionId &&
+        detail?.id === event.sessionId
+      ) {
+        const persisted = persistedDetail(detail);
+        if (persisted !== detail) this.#view.patch({ detail: persisted });
+      }
+      return;
+    }
+    const view = this.#view.value;
+    const detail =
+      view.selectedId === event.sessionId && view.detail?.id === event.sessionId
+        ? view.detail
+        : undefined;
+    if (detail === undefined || !sessionIsActive(detail) || view.stopping)
+      return;
+    const messages = persistedMessages(detail);
+    const request = createDisplaySessionMessage({
+      content: event.content,
+      createdAt: detail.updatedAt,
+      id: `stream:${event.streamId}:compaction-request`,
+      role: "compaction_request",
+    });
+    this.#compactionRequests.set(event.sessionId, request);
+    this.#streamedContent.set(event.sessionId, {
+      baseMessageId: messages.at(-1)?.id ?? null,
+      compactionRequest: request,
+      content: "",
+      streamId: event.streamId,
+      thinking: "",
+    });
+    this.#view.patch({
+      detail: { ...detail, messages: [...messages, request] },
+    });
+  }
   applyDelta(
     event: Extract<RealtimeServerEvent, { type: "session_delta" }>,
   ): void {
@@ -467,46 +512,38 @@ export class SessionRealtimeState {
     if (
       selectedDetail !== undefined &&
       (!sessionIsActive(selectedDetail) || view.stopping)
-    ) {
+    )
       return;
-    }
 
     const initialBase = active
       ? (selectedDetail.messages.at(-1)?.id ?? null)
       : undefined;
-    const current =
-      !event.reset &&
-      this.#streamedContent.get(event.sessionId)?.streamId === event.streamId
-        ? this.#streamedContent.get(event.sessionId)
-        : undefined;
+    const previous = this.#streamedContent.get(event.sessionId);
+    const matchingPrevious =
+      previous?.streamId === event.streamId ? previous : undefined;
+    const current = event.reset ? undefined : matchingPrevious;
+    const compactionRequest = this.#compactionRequests.get(event.sessionId);
     const next: StreamedSessionContent = {
       baseMessageId: current?.baseMessageId ?? initialBase,
+      ...(compactionRequest === undefined ? {} : { compactionRequest }),
       content: (current?.content ?? "") + event.content,
       streamId: event.streamId,
       thinking: (current?.thinking ?? "") + event.thinking,
     };
     this.#streamedContent.set(event.sessionId, next);
 
-    if (!active) {
-      return;
-    }
-
-    if (visibleSelectedDetail === undefined) {
-      return;
-    }
+    if (!active) return;
+    if (!visibleSelectedDetail) return;
     const currentMessages = visibleSelectedDetail.messages;
     const visibleMessages = streamMessages(
       visibleSelectedDetail,
       next,
     ).messages;
-    if (visibleMessages === currentMessages) {
-      return;
-    }
+    if (visibleMessages === currentMessages) return;
     this.#view.patch({
       detail: { ...visibleSelectedDetail, messages: visibleMessages },
     });
   }
-
   #selectedForToolStream(sessionId: string, requireDetail: boolean): boolean {
     return (
       this.#view.value.selectedId === sessionId &&
@@ -517,16 +554,12 @@ export class SessionRealtimeState {
   applyToolDelta(
     event: Extract<RealtimeServerEvent, { type: "tool_stream" }>,
   ): void {
-    if (!this.#selectedForToolStream(event.sessionId, true)) {
-      return;
-    }
+    if (!this.#selectedForToolStream(event.sessionId, true)) return;
     const current = this.#view.value.toolStreams.find(
       (entry) => toolStreamKey(entry) === toolStreamKey(event),
     );
     const result = applyToolStreamDelta(current, event);
-    if (!result.accepted) {
-      return;
-    }
+    if (!result.accepted) return;
     const retained = this.#view.value.toolStreams.filter(
       (entry) => toolStreamKey(entry) !== toolStreamKey(event),
     );
@@ -542,9 +575,7 @@ export class SessionRealtimeState {
   applyToolSnapshot(
     event: Extract<RealtimeServerEvent, { type: "tool_stream_snapshot" }>,
   ): void {
-    if (!this.#selectedForToolStream(event.sessionId, false)) {
-      return;
-    }
+    if (!this.#selectedForToolStream(event.sessionId, false)) return;
     const current = new Map(
       this.#view.value.toolStreams.map((entry) => [
         toolStreamKey(entry),
@@ -561,18 +592,15 @@ export class SessionRealtimeState {
   }
 
   applySessions(sessions: readonly AgentSessionSummary[]): void {
-    if (
-      this.#view.value.sessions === undefined ||
-      sessionMutationPending(this.#view.value) ||
-      sessionSummariesMatch(this.#view.value.sessions, sessions)
-    ) {
-      return;
-    }
+    if (this.#view.value.sessions === undefined) return;
+    if (sessionMutationPending(this.#view.value)) return;
+    if (sessionSummariesMatch(this.#view.value.sessions, sessions)) return;
 
     this.#view.patch({ sessions });
   }
 
   reset(): void {
+    this.#compactionRequests.clear();
     this.#streamedContent.clear();
     if (this.#view.value.toolStreams.length > 0) {
       this.#view.patch({ toolStreams: [] });

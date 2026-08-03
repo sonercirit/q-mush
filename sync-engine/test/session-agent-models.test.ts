@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { AgentModelStep } from "../../shared/agent-loop.ts";
+import { createAgentSystemPrompt } from "../../shared/agent-prompt.ts";
 import type { ProviderCredentialAccess } from "../../shared/provider-credential-store.ts";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
 import {
@@ -12,6 +13,7 @@ import {
   createSessionAgentModels,
   type AgentModelFactory,
 } from "../../sync-engine/session-agent-models.ts";
+import { TEST_COMPACTION_REQUEST_MESSAGE } from "./compaction-test-fixtures.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
 import { RecordingRealtimeSocket } from "./realtime-hub-test-helpers.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
@@ -58,6 +60,22 @@ function realtimeSetup(): {
   const socket = new RecordingRealtimeSocket();
   connectedRealtime(hub, socket);
   return { hub, socket };
+}
+
+function compactionRequest(streamId: string) {
+  return {
+    content: TEST_COMPACTION_REQUEST_MESSAGE,
+    sessionId: TEST_SESSION_DETAIL.id,
+    streamId,
+    type: "session_compaction_request" as const,
+  };
+}
+
+function compactionSettled() {
+  return {
+    sessionId: TEST_SESSION_DETAIL.id,
+    type: "session_compaction_settled" as const,
+  };
 }
 
 function sessionDelta(content: string, thinking: string, streamId: string) {
@@ -160,20 +178,50 @@ describe("session agent models", () => {
       }),
     );
 
-    const compaction = models
-      .createCompactor()
-      .compact([{ content: "Conversation to compact", role: "user" }]);
+    const conversation = [
+      { content: "Conversation to compact", role: "user" as const },
+    ];
+    const compaction = models.createCompactor().compact(conversation);
     await summary.entered;
     const compactorOptions = selections.at(-1);
     compactorOptions?.onDelta?.({ content: "Incremental ", thinking: "" });
     compactorOptions?.onDelta?.({ content: "summary", thinking: "" });
 
-    expectRealtimeDeltas(socket, [
+    expect(selections).toHaveLength(2);
+    expect(selections.map(({ systemPrompt }) => systemPrompt)).toEqual([
+      createAgentSystemPrompt(null, TEST_SESSION_DETAIL.executionEnvironment),
+      createAgentSystemPrompt(null, TEST_SESSION_DETAIL.executionEnvironment),
+    ]);
+    const streamed = [
+      compactionRequest("stream-2"),
       sessionDelta("Incremental ", "", "stream-2"),
       sessionDelta("summary", "", "stream-2"),
-    ]);
+    ];
+    expectRealtimeDeltas(socket, streamed);
     summary.release(providerStep("Incremental summary"));
     await compaction;
+    models.publishCompactionSettled();
+    expectRealtimeDeltas(socket, [...streamed, compactionSettled()]);
+  });
+
+  test("does not publish settlement before compaction persistence", async () => {
+    const { hub, socket } = realtimeSetup();
+    const models = createSessionAgentModels(
+      sessionModelOptions(
+        () => ({
+          complete: () => Promise.reject(new Error("provider failed")),
+        }),
+        { realtime: hub },
+      ),
+    );
+
+    await expect(
+      models
+        .createCompactor()
+        .compact([{ content: "Conversation", role: "user" }]),
+    ).rejects.toThrow("provider failed");
+
+    expectRealtimeDeltas(socket, [compactionRequest("stream-id")]);
   });
 
   test("passes the persisted routing selection to agent and compactor", () => {

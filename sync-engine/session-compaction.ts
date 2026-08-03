@@ -4,6 +4,7 @@ import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 import type { RestartHandoff } from "../shared/session-model.ts";
+import { AGENT_COMPACTION_REQUEST_MESSAGE } from "./agent-compaction.ts";
 import type { CompactionUsage } from "./session-compaction-usage.ts";
 import { retireManualCompactionOperations } from "./session-manual-compaction-query.ts";
 import { sessionSegment } from "./session-segment.ts";
@@ -11,6 +12,8 @@ import { runningCondition } from "./session-store-persistence.ts";
 import { requireRunningSessionUserId } from "./session-store-state.ts";
 import {
   appendSystemStoredMessage,
+  recordedMessageValues,
+  storedCompactionRequestValues,
   storedUserMessageValues,
 } from "./session-store-values.ts";
 import {
@@ -24,6 +27,38 @@ const COMPACTION_MESSAGE_PREFIX = "Conversation compacted:\n\n";
 
 function compactionMessage(summary: string): string {
   return `${COMPACTION_MESSAGE_PREFIX}${summary}`;
+}
+
+function compactionTranscriptValues(
+  summary: string,
+  tokenUsage: CompactionUsage["tokenUsage"],
+) {
+  return [
+    storedCompactionRequestValues(AGENT_COMPACTION_REQUEST_MESSAGE),
+    recordedMessageValues(
+      { content: summary, role: "assistant", toolCalls: [] },
+      tokenUsage,
+    ),
+  ];
+}
+
+function appendCompactionTranscript(options: {
+  readonly database: Pick<AppDatabase, "insert" | "select">;
+  readonly generateId: IdGenerator;
+  readonly now: number;
+  readonly segment: number;
+  readonly sessionId: string;
+  readonly summary: string;
+  readonly tokenUsage: CompactionUsage["tokenUsage"];
+  readonly userId: string;
+}): void {
+  let now = options.now;
+  for (const message of compactionTranscriptValues(
+    options.summary,
+    options.tokenUsage,
+  )) {
+    now = appendSystemStoredMessage({ ...options, message, now });
+  }
 }
 
 export function compactStoredConversation(options: {
@@ -57,9 +92,9 @@ export function compactStoredConversation(options: {
     const advanced = transaction
       .update(agentSessions)
       .set({
+        ...runtimeUsageValues(options.usage),
         currentContextTokens: 0,
         currentSegment: sql`${agentSessions.currentSegment} + 1`,
-        ...runtimeUsageValues(options.usage),
         ...updatedAuditFields(SYSTEM_ID, options.now),
       })
       .where(and(condition, eq(agentSessions.currentSegment, currentSegment)))
@@ -68,17 +103,6 @@ export function compactStoredConversation(options: {
     if (advanced.segment !== nextSegment) {
       throw new DOMException("The agent session was stopped", "AbortError");
     }
-    const nextTurnId = rotateSessionTurn({
-      database: transaction,
-      executionGeneration: options.generation,
-      generateId: options.generateId,
-      now: options.now,
-      previousExecutionGeneration: options.generation,
-      segment: nextSegment,
-      sessionId: options.sessionId,
-      startedAt: options.startedAt,
-      userId,
-    });
     transaction
       .update(agentMessages)
       .set({
@@ -93,13 +117,27 @@ export function compactStoredConversation(options: {
         ),
       )
       .run();
-    retireManualCompactionOperations(
-      transaction,
-      options.sessionId,
-      options.generation,
-      options.now,
-      "exact",
-    );
+    appendCompactionTranscript({
+      database: transaction,
+      generateId: options.generateId,
+      now: options.now,
+      segment: currentSegment,
+      sessionId: options.sessionId,
+      summary: options.summary,
+      tokenUsage: options.usage.tokenUsage,
+      userId,
+    });
+    const nextTurnId = rotateSessionTurn({
+      database: transaction,
+      executionGeneration: options.generation,
+      generateId: options.generateId,
+      now: options.now,
+      previousExecutionGeneration: options.generation,
+      segment: nextSegment,
+      sessionId: options.sessionId,
+      startedAt: options.startedAt,
+      userId,
+    });
     const handoff = {
       database: transaction,
       generateId: options.generateId,
@@ -113,6 +151,13 @@ export function compactStoredConversation(options: {
       userId,
     };
     appendSystemStoredMessage(handoff);
+    retireManualCompactionOperations(
+      transaction,
+      options.sessionId,
+      options.generation,
+      options.now,
+      "exact",
+    );
     if (options.settle === true) {
       settleTerminalRuntime(
         transaction,

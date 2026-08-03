@@ -30,10 +30,10 @@ import { SessionAutoCompactToggle } from "./session-autocompact-toggle.tsx";
 import { SessionPromptInput } from "./session-client-forms.tsx";
 import { formatTokenCount } from "./session-context-client.tsx";
 import { SessionContextTokenCapInput } from "./session-context-token-cap-input.tsx";
-import { selectedSessionCredential } from "./session-controller-state.ts";
 import type { SessionController } from "./session-controller.ts";
 import { credentialOptions } from "./session-credential-list.ts";
 import {
+  selectedSessionCredential,
   sessionCredentialSelectOptions,
   type SessionCredentialOption,
 } from "./session-credential-option.ts";

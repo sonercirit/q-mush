@@ -11,6 +11,13 @@ import { runCompactingAgentLoop } from "../../sync-engine/session-agent-loop.ts"
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 import type { PromiseGate } from "./session-race-test-helpers.ts";
 
+export const STEP_TOKEN_USAGE = {
+  cacheWriteInputTokens: 25,
+  cachedInputTokens: 600,
+  inputTokens: 800,
+  outputTokens: 200,
+} as const;
+
 export const TOOL_CALL = {
   arguments: '{"path":"README.md"}',
   id: "call-1",
@@ -24,6 +31,7 @@ export function compacted(
   costUsd: number | null = null,
 ): CompactedConversation {
   return {
+    contextTokens: null,
     costUsd,
     messages: [{ content: summary, role: "user" }],
     summary,
@@ -191,23 +199,23 @@ export async function expectCompactionFailure(options: {
   readonly compactor: AgentConversationCompactor;
   readonly expected: string | { readonly name: string };
   readonly recordCompaction: LoopOptions["recordCompaction"];
+  readonly settleCompaction?: LoopOptions["settleCompaction"];
   readonly signal?: AbortSignal;
 }): Promise<void> {
   const model = triggeredModel();
+  const common = {
+    createCompactor: () => options.compactor,
+    model,
+    recordCompaction: options.recordCompaction,
+    ...(options.settleCompaction === undefined
+      ? {}
+      : { settleCompaction: options.settleCompaction }),
+  };
   const failure = expect(
     runTestLoop(
       options.signal === undefined
-        ? {
-            createCompactor: () => options.compactor,
-            model,
-            recordCompaction: options.recordCompaction,
-          }
-        : {
-            createCompactor: () => options.compactor,
-            model,
-            recordCompaction: options.recordCompaction,
-            signal: options.signal,
-          },
+        ? common
+        : { ...common, signal: options.signal },
     ),
   ).rejects;
   if (typeof options.expected === "string") {

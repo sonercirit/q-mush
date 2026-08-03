@@ -6,10 +6,8 @@ import type {
 import { forEachAssistantToolCall } from "./agent-conversation.ts";
 
 const AUTO_COMPACTION_THRESHOLD = 0.95;
-export const AGENT_COMPACTION_SYSTEM_PROMPT = `You compact coding-agent conversations into concise handoff summaries. Preserve the user's goals, important decisions, constraints, relevant file paths, changes already made, command and test results, unresolved errors, and concrete next steps. Do not call tools. Return only the summary.`;
+export const AGENT_COMPACTION_REQUEST_MESSAGE = `Compact the conversation above into a concise handoff summary now. Preserve the user's goals, important decisions, constraints, relevant file paths, changes already made, command and test results, unresolved errors, and concrete next steps. Do not call tools. Return only the summary.`;
 
-const COMPACTION_INSTRUCTION =
-  "Compact this conversation now. Return only the handoff summary.";
 const COMPACTION_PREFIX = `The earlier conversation was compacted into this handoff summary. Treat it as prior context and continue from it:\n\n`;
 
 export interface AgentConversationCompactor {
@@ -22,6 +20,7 @@ type CompactionArguments = readonly [
 ];
 
 export interface CompactedConversation {
+  readonly contextTokens: AgentModelStep["contextTokens"];
   readonly costUsd: number | null;
   readonly messages: readonly AgentConversationMessage[];
   readonly summary: string;
@@ -76,7 +75,7 @@ function compactionMessages(
 
   return [
     ...messages,
-    { content: COMPACTION_INSTRUCTION, role: "user" as const },
+    { content: AGENT_COMPACTION_REQUEST_MESSAGE, role: "user" as const },
   ];
 }
 
@@ -92,19 +91,20 @@ export function shouldCompactContext(
 
 export class ModelConversationCompactor implements AgentConversationCompactor {
   readonly #model: AgentModel;
+  readonly #onRequest: ((content: string) => void) | undefined;
 
-  constructor(model: AgentModel) {
+  constructor(model: AgentModel, onRequest?: (content: string) => void) {
     this.#model = model;
+    this.#onRequest = onRequest;
   }
 
   async compact(
     ...parameters: CompactionArguments
   ): Promise<CompactedConversation> {
     const [messages, signal] = parameters;
-    const step: AgentModelStep = await this.#model.complete(
-      compactionMessages(messages),
-      signal,
-    );
+    const input = compactionMessages(messages);
+    this.#onRequest?.(AGENT_COMPACTION_REQUEST_MESSAGE);
+    const step: AgentModelStep = await this.#model.complete(input, signal);
 
     if (step.toolCalls.length > 0 || step.content.trim().length === 0) {
       throw new InvalidCompactionSummaryError();
@@ -112,6 +112,7 @@ export class ModelConversationCompactor implements AgentConversationCompactor {
 
     const summary = step.content.trim();
     return {
+      contextTokens: step.contextTokens,
       costUsd: step.costUsd,
       messages: [{ content: `${COMPACTION_PREFIX}${summary}`, role: "user" }],
       summary,

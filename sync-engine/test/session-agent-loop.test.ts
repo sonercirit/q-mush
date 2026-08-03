@@ -20,6 +20,7 @@ import {
   recordingMessages,
   recordingToolPersistence,
   runTestLoop,
+  STEP_TOKEN_USAGE,
   terminalPersistence,
   TOOL_CALL,
   toolMessage,
@@ -43,13 +44,6 @@ function expectNoCompaction(
   expect(model.requests).toHaveLength(0);
 }
 
-const STEP_TOKEN_USAGE = {
-  cacheWriteInputTokens: 25,
-  cachedInputTokens: 600,
-  inputTokens: 800,
-  outputTokens: 200,
-} as const;
-
 describe("compacting agent session loop", () => {
   test("automatically compacts at 95% before the next model request", async () => {
     const model = new ScriptedAgentModel([
@@ -70,6 +64,7 @@ describe("compacting agent session loop", () => {
       compact: (messages) => {
         compactorRequests.push(messages);
         return Promise.resolve({
+          contextTokens: null,
           costUsd: 0.1,
           messages: [{ content: "Compacted handoff", role: "user" }],
           summary: "Compacted handoff",
@@ -459,8 +454,9 @@ describe("compacting agent session loop", () => {
     expectLoopCounts(compactorRequests, model, 1, 1);
   });
 
-  test("does not persist a rejected compaction", async () => {
+  test("does not persist and does settle a rejected compaction", async () => {
     const compactions: unknown[] = [];
+    let settled = false;
     await expectCompactionFailure({
       compactor: {
         compact: () => Promise.reject(new Error("Compactor unavailable")),
@@ -469,9 +465,13 @@ describe("compacting agent session loop", () => {
       recordCompaction: (...input) => {
         compactions.push(input);
       },
+      settleCompaction: () => {
+        settled = true;
+      },
     });
 
     expect(compactions).toEqual([]);
+    expect(settled).toBe(true);
   });
 
   test("does not persist or continue an aborted compaction", async () => {
@@ -503,7 +503,11 @@ describe("compacting agent session loop", () => {
     await expect(
       runTestLoop({
         createCompactor: () => ({
-          compact: () => Promise.resolve(compacted("Stored handoff", 0.25)),
+          compact: () =>
+            Promise.resolve({
+              ...compacted("Stored handoff", 0.25),
+              contextTokens: 97_500,
+            }),
         }),
         model,
         now: () => compactionStartedAt,
@@ -525,7 +529,7 @@ describe("compacting agent session loop", () => {
         startedAt: compactionStartedAt,
         summary: "Stored handoff",
         usage: {
-          contextTokens: null,
+          contextTokens: 97_500,
           costBasis: "reported",
           costUsd: 0.25,
         },

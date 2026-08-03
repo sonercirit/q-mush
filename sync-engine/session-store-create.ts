@@ -289,6 +289,8 @@ export function createStoredSession(
 function forkMessageValues(message: AgentSessionMessage) {
   const { content, toolCallId, toolCalls, toolName } = message;
   switch (message.role) {
+    case "compaction_request":
+      throw new Error("A transient compaction request cannot be copied");
     case "assistant":
       return recordedMessageValues(
         {

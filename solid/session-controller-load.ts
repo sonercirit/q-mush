@@ -254,7 +254,10 @@ export class SessionLoadController {
         !sessionMutationPending(this.#view.value) &&
         this.#view.value.selectedId === selectedId
       ) {
-        this.#realtime.applyDetail(detail);
+        // The durable request lives in the old segment after compaction;
+        // reconnect hydration drops its transient copy unless the stream base
+        // still proves that compaction is active.
+        this.#realtime.applyReconnectDetail(detail);
       } else {
         this.#hydrationPending = true;
       }

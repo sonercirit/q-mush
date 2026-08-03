@@ -1,5 +1,5 @@
 import { balancedCredentialId } from "../shared/provider-credential-pool.ts";
-import type { ProviderId } from "../shared/provider-credential-store.ts";
+import { isProviderId, type ProviderId } from "../shared/provider-id.ts";
 import type { ProviderCredential } from "./provider-client.tsx";
 import {
   modelCredentialOptions,
@@ -9,6 +9,20 @@ import {
 export interface SessionCredentialOption {
   readonly credential: ProviderCredential;
   readonly provider: ProviderId;
+}
+
+export function selectedSessionCredential(value: string):
+  | {
+      readonly credentialId: string;
+      readonly provider: ProviderId;
+    }
+  | undefined {
+  const separator = value.indexOf(":");
+  const provider = value.slice(0, separator);
+  const credentialId = value.slice(separator + 1);
+  return separator > 0 && isProviderId(provider) && credentialId.length > 0
+    ? { credentialId, provider }
+    : undefined;
 }
 
 export function sessionCredentialValue(

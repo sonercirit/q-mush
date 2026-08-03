@@ -13,6 +13,7 @@ import {
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { STEP_TOKEN_USAGE } from "./session-agent-loop-test-helpers.ts";
 import { IDLE_RUNTIME_SIGNALS } from "./session-agent-runtime-test-helpers.ts";
 import { unusedSessionToolActions } from "./session-agent-tool-test-helpers.ts";
 import {
@@ -313,16 +314,53 @@ describe("manual session compaction", () => {
     closeSessionTestDatabase(running.database);
   });
 
+  test("reports compaction call context before resetting handoff context", async () => {
+    const setup = manualRuntime(
+      new ScriptedAgentModel([
+        {
+          content: "Context-accounted handoff",
+          contextTokens: 98_000,
+          toolCalls: [],
+        },
+      ]),
+    );
+    const observedContext: number[] = [];
+    const runtime: SessionAgentRuntimeDependencies = {
+      ...setup.runtime,
+      notify: () => {
+        const session = setup.store.get(TEST_USER_ID, SESSION_ID);
+        if (session !== undefined) {
+          observedContext.push(session.currentContextTokens);
+        }
+      },
+    };
+
+    await startManualCompaction(runtime);
+
+    expect(observedContext).toContain(98_000);
+    expect(observedContext.at(-1)).toBe(0);
+    expect(
+      setup.store.get(TEST_USER_ID, SESSION_ID)?.currentContextTokens,
+    ).toBe(0);
+    closeSessionTestDatabase(setup.database);
+  });
+
   test("persists reported compaction usage exactly once with the handoff", async () => {
     const setup = manualRuntime(
       new ScriptedAgentModel([
-        { content: "Manual handoff", costUsd: 0.4, toolCalls: [] },
+        {
+          content: "Manual handoff",
+          costUsd: 0.4,
+          tokenUsage: STEP_TOKEN_USAGE,
+          toolCalls: [],
+        },
       ]),
     );
 
     await startManualCompaction(setup.runtime);
 
-    expect(setup.store.get(TEST_USER_ID, SESSION_ID)).toMatchObject({
+    const compacted = setup.store.get(TEST_USER_ID, SESSION_ID);
+    expect(compacted).toMatchObject({
       costBasis: "reported",
       costUsd: 0.4,
       currentContextTokens: 0,
@@ -332,6 +370,23 @@ describe("manual session compaction", () => {
           role: "user",
         },
       ],
+    });
+    expect(compacted?.tokenUsage).toEqual({
+      ...STEP_TOKEN_USAGE,
+      reportedStepCount: 1,
+      stepCount: 1,
+    });
+    expect(setup.store.history(TEST_USER_ID, SESSION_ID, null)).toMatchObject({
+      messages: [
+        expect.any(Object),
+        expect.objectContaining({ role: "compaction_request" }),
+        expect.objectContaining({
+          content: "Manual handoff",
+          role: "assistant",
+          tokenUsage: STEP_TOKEN_USAGE,
+        }),
+      ],
+      tokenUsage: compacted?.tokenUsage,
     });
     closeSessionTestDatabase(setup.database);
   });

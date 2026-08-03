@@ -39,6 +39,7 @@ interface CompactingAgentLoopOptions {
     usage: CompactionUsage,
     startedAt: number,
   ) => Promise<void> | void;
+  readonly settleCompaction?: () => void;
   readonly recordMessage: (
     messages: Parameters<AgentMessageRecorder>[0],
     usage: Parameters<AgentMessageRecorder>[1],
@@ -72,7 +73,10 @@ interface CompactionState {
 
 interface CompactConversationOptions
   extends
-    Pick<CompactingAgentLoopOptions, "createCompactor" | "now">,
+    Pick<
+      CompactingAgentLoopOptions,
+      "createCompactor" | "now" | "settleCompaction"
+    >,
     Pick<CompactingAgentLoopOptions, "agentCost" | "recordCompaction"> {}
 
 async function compactConversation(
@@ -84,14 +88,18 @@ async function compactConversation(
 ): Promise<readonly AgentConversationMessage[]> {
   const { messages, signal } = input;
   const startedAt = options.now();
-  const compacted = await options.createCompactor().compact(messages, signal);
-  const finish = () => {
-    throwIfAgentAborted(signal);
-  };
-  finish();
-  await compactionFinished(compacted, options, startedAt);
-  finish();
-  return compacted.messages;
+  try {
+    const compacted = await options.createCompactor().compact(messages, signal);
+    const finish = () => {
+      throwIfAgentAborted(signal);
+    };
+    finish();
+    await compactionFinished(compacted, options, startedAt);
+    finish();
+    return compacted.messages;
+  } finally {
+    options.settleCompaction?.();
+  }
 }
 
 function resetCompactionState(compaction: CompactionState): void {

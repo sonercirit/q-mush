@@ -114,7 +114,7 @@ test("aggregates partial usage coverage by each message's segment", () => {
     inputTokens: 1_400,
     outputTokens: 300,
     reportedStepCount: 2,
-    stepCount: 4,
+    stepCount: 5,
   });
   expect(session?.segmentTokenUsage).toEqual({
     ...NEXT_SEGMENT_TOKEN_USAGE,
@@ -126,7 +126,7 @@ test("aggregates partial usage coverage by each message's segment", () => {
   ).toEqual({
     ...TOKEN_USAGE,
     reportedStepCount: 1,
-    stepCount: 2,
+    stepCount: 3,
   });
   setup.database.$client.close();
 });

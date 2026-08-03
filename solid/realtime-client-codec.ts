@@ -54,6 +54,16 @@ export type RealtimeServerEvent =
     }
   | {
       readonly content: string;
+      readonly sessionId: string;
+      readonly streamId: string;
+      readonly type: "session_compaction_request";
+    }
+  | {
+      readonly sessionId: string;
+      readonly type: "session_compaction_settled";
+    }
+  | {
+      readonly content: string;
       readonly reset?: true;
       readonly sessionId: string;
       readonly streamId?: string;
@@ -146,6 +156,18 @@ export function readRealtimeServerEvent(message: string): RealtimeServerEvent {
       };
     case "sessions_changed":
       return { type: "sessions_changed" };
+    case "session_compaction_request":
+      return {
+        content: requiredString(value, "content"),
+        sessionId: requiredString(value, "sessionId"),
+        streamId: requiredString(value, "streamId"),
+        type: "session_compaction_request",
+      };
+    case "session_compaction_settled":
+      return {
+        sessionId: requiredString(value, "sessionId"),
+        type: "session_compaction_settled",
+      };
     case "session_delta": {
       const reset = value["reset"];
       if (reset !== undefined && reset !== true) {
