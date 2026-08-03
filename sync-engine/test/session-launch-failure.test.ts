@@ -134,13 +134,16 @@ test.each([
 
     let unrelatedAttempts = 0;
     const unrelatedWrite = new DatabaseWriteResilience({
-      attempt: (operation) => {
+      attempt(operation) {
+        const thisAttempt = unrelatedAttempts;
         unrelatedAttempts += 1;
-        if (unrelatedAttempts === 1) throw fullError;
+        if (thisAttempt === 0) {
+          throw fullError;
+        }
         return operation();
       },
       health,
-      sleep: () => undefined,
+      sleep: vi.fn(),
     });
     unrelatedWrite.run("critical", () => undefined);
     expect(unrelatedAttempts).toBe(2);
