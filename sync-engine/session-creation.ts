@@ -211,13 +211,16 @@ export function sessionMetadataErrorResponse(
   );
 }
 
+type PreparedSessionInput = CreateSessionInput &
+  Pick<CreateAgentSession, "workspaceId">;
+
 export function prepareSessionCredential(
   dependencies: Pick<
     SessionCreationDependencies,
     "discoverModels" | "discoverOpenRouterProviders" | "rejectCredentialErrors"
   >,
   user: AuthenticatedUser,
-  input: CreateSessionInput & Pick<CreateAgentSession, "workspaceId">,
+  input: PreparedSessionInput,
   credential: ProviderCredentialAccess,
 ): Promise<SessionMetadataResult> {
   return sessionMetadataFromDependencies({
@@ -232,7 +235,7 @@ export function prepareSessionCredential(
 export function createPreparedSession(
   dependencies: SessionCreationDependencies,
   user: AuthenticatedUser,
-  input: CreateSessionInput & Pick<CreateAgentSession, "workspaceId">,
+  input: PreparedSessionInput,
   credential: ProviderCredentialAccess,
   metadata: PreparedSessionMetadata,
 ): Response {
@@ -303,7 +306,7 @@ export function createPreparedSession(
 export async function createValidatedSession(
   dependencies: SessionCreationDependencies,
   user: AuthenticatedUser,
-  input: CreateSessionInput & Pick<CreateAgentSession, "workspaceId">,
+  input: PreparedSessionInput,
   credential: ProviderCredentialAccess,
 ): Promise<Response> {
   const metadata = await prepareSessionCredential(

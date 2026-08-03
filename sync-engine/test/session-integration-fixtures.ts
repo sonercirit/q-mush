@@ -69,6 +69,14 @@ interface ConnectedSessionOptions {
   readonly runners?: readonly RunnerSummary[];
 }
 
+export function testCredentialId(credential: object): string {
+  const selectedId: unknown = Reflect.get(credential, "id");
+  if (typeof selectedId !== "string") {
+    throw new Error("The model request credential ID is unavailable");
+  }
+  return selectedId;
+}
+
 export function connectedSessionSetup(
   model: AgentModel,
   credentialSource: ProviderCredentialAccess["source"] = "api_key",

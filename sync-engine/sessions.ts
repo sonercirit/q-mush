@@ -275,6 +275,14 @@ class DrizzleSessionIntegration
     this.#store.queuedSessionOwnerIds().forEach(this.#launchQueuedSessions);
   }
 
+  #context() {
+    return {
+      modelCredentialPool: this.#modelCredentialPool,
+      notify: this.#notify,
+      now: this.#now,
+    };
+  }
+
   protected get resources(): SessionIntegrationApiResources {
     return {
       auth: this.#auth,
@@ -287,9 +295,7 @@ class DrizzleSessionIntegration
       executionCleanup: this.#executionCleanup,
       launchQueuedSessions: this.#launchQueuedSessions,
       modelsForUser: (request, user) => this.#modelsForUser(request, user),
-      modelCredentialPool: this.#modelCredentialPool,
-      notify: this.#notify,
-      now: this.#now,
+      ...this.#context(),
       questionActions: this.#questionActions,
       queueForUser: (user, sessionId, workspaceId, prompt) =>
         this.#queueForUser(user, sessionId, workspaceId, prompt),
@@ -446,9 +452,7 @@ class DrizzleSessionIntegration
           },
           request.workspaceId,
         ),
-      modelCredentialPool: this.#modelCredentialPool,
-      notify: this.#notify,
-      now: this.#now,
+      ...this.#context(),
       readCredential: this.#readCredential,
       runnerIsAvailable: this.#runnerIsAvailable,
       store: this.#store,

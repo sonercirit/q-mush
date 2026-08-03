@@ -25,6 +25,7 @@ import {
   CREDENTIAL_ID,
   RUNNER_ID,
   connectedSessionSetup,
+  testCredentialId,
 } from "./session-integration-fixtures.ts";
 import {
   completeAgentFileLookup,
@@ -64,27 +65,30 @@ class RestartPinnedModel implements AgentModel {
   #blockRequest: number | undefined;
   readonly entered = Promise.withResolvers<undefined>();
   readonly release = Promise.withResolvers<undefined>();
-  readonly requests: AgentConversationMessage[][] = [];
+  readonly requests: AgentConversationMessage[][];
 
   constructor(blockRequest?: number) {
     this.#blockRequest = blockRequest;
+    this.requests = [];
   }
 
-  async complete(
+  complete = async (
     messages: readonly AgentConversationMessage[],
-  ): Promise<AgentModelStep> {
+  ): Promise<AgentModelStep> => {
+    const step = this.requests.length + 1;
     this.requests.push([...messages]);
-    if (this.requests.length === this.#blockRequest) {
+    if (step === this.#blockRequest) {
       this.entered.resolve(undefined);
       await this.release.promise;
       this.#blockRequest = undefined;
     }
-    return this.requests.length === 1 || this.requests.length === 3
-      ? providerStep("Inspecting sessions", {
+    const content = `Step ${String(step)}`;
+    return step === 1 || step === 3
+      ? providerStep(content, {
           toolCalls: [toolCall("list_runners", {})],
         })
-      : providerStep(`Step ${String(this.requests.length)}`);
-  }
+      : providerStep(content);
+  };
 }
 
 function balancedCredentials() {
@@ -94,6 +98,18 @@ function balancedCredentials() {
       createTestProviderCredential(SECOND_CREDENTIAL_ID),
     ],
   };
+}
+
+function selectedCredentialFactory(
+  model: AgentModel,
+  selectedCredentials: string[],
+): AgentModelFactory {
+  return ({ credential }) => ({
+    complete: (messages, signal) => {
+      selectedCredentials.push(testCredentialId(credential));
+      return model.complete(messages, signal);
+    },
+  });
 }
 
 function setup(discoverModels: Parameters<typeof connectedSessionSetup>[2]) {
@@ -131,31 +147,25 @@ describe("session credential balancing", () => {
   test("pins the resolved credential across steps, continue, and restart resume", async () => {
     const selectedCredentials: string[] = [];
     const beforeRestart = new RestartPinnedModel(3);
-    const factory =
-      (model: AgentModel): AgentModelFactory =>
-      ({ credential }) => ({
-        complete: (messages, signal) => {
-          const selectedId: unknown = Reflect.get(credential, "id");
-          if (typeof selectedId !== "string") {
-            throw new Error("The model request credential ID is unavailable");
-          }
-          selectedCredentials.push(selectedId);
-          return model.complete(messages, signal);
-        },
-      });
     const initial = connectedSessionSetup(
       beforeRestart,
       "api_key",
       () => Promise.resolve(TEST_CATALOG),
       {
         credentials: balancedCredentials(),
-        modelFactory: factory(beforeRestart),
+        modelFactory: selectedCredentialFactory(
+          beforeRestart,
+          selectedCredentials,
+        ),
       },
     );
-    const created = await initial.sessions.realtimeCommands.createForUser(
+    const createBalanced = [
       TEST_AUTHENTICATED_USER,
       input(balancedCredentialId("openai")),
       TEST_WORKSPACE_ID,
+    ] as const;
+    const created = await initial.sessions.realtimeCommands.createForUser(
+      ...createBalanced,
     );
     await completeAgentFileLookup(initial);
     await waitForSessionValue(
@@ -179,15 +189,19 @@ describe("session credential balancing", () => {
     ).toMatchObject({ credentialId: CREDENTIAL_ID, status: "paused" });
 
     const afterRestart = new RestartPinnedModel();
+    const recreatedOptions = {
+      credentials: balancedCredentials(),
+      database: initial.database,
+      modelFactory: selectedCredentialFactory(
+        afterRestart,
+        selectedCredentials,
+      ),
+    };
     const recreated = connectedSessionSetup(
       afterRestart,
       "api_key",
       () => Promise.resolve(TEST_CATALOG),
-      {
-        credentials: balancedCredentials(),
-        database: initial.database,
-        modelFactory: factory(afterRestart),
-      },
+      recreatedOptions,
     );
     await completeAgentFileLookup(recreated);
     await waitForSessionValue(
@@ -220,9 +234,10 @@ describe("session credential balancing", () => {
         : Promise.resolve(TEST_CATALOG);
     });
 
+    const balancedInput = input(balancedCredentialId("openai"));
     const balanced = await sessions.sessions.realtimeCommands.createForUser(
       TEST_AUTHENTICATED_USER,
-      input(balancedCredentialId("openai")),
+      balancedInput,
       TEST_WORKSPACE_ID,
     );
     expect(balanced.credentialId).toBe(SECOND_CREDENTIAL_ID);
@@ -236,9 +251,10 @@ describe("session credential balancing", () => {
       id: balanced.id,
     });
 
+    const explicitInput = input(CREDENTIAL_ID);
     const explicit = await sessions.sessions.realtimeCommands.createForUser(
       TEST_AUTHENTICATED_USER,
-      input(CREDENTIAL_ID),
+      explicitInput,
       TEST_WORKSPACE_ID,
     );
     expect(explicit.credentialId).toBe(CREDENTIAL_ID);

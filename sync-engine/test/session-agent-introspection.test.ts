@@ -60,6 +60,7 @@ function modelOption(id: string) {
 }
 
 function singleReadModel(id: string, categories?: readonly string[]) {
+  const terminalStep = { content: "Context read.", toolCalls: [] };
   return scriptedModel([
     {
       content: "Read selected session context.",
@@ -74,7 +75,7 @@ function singleReadModel(id: string, categories?: readonly string[]) {
         ),
       ],
     },
-    { content: "Done.", toolCalls: [] },
+    terminalStep,
   ]);
 }
 
@@ -185,18 +186,17 @@ describe("session agent introspection tools", () => {
           }),
         ],
       },
-      { content: "Done.", toolCalls: [] },
+      { content: "Balanced discovery complete.", toolCalls: [] },
     ]);
-    const setup = await startToolSession(model, {
-      credentials: {
-        openai: [
-          {
-            ...credential(CREDENTIAL_ID, "Primary"),
-            secret: "provider-secret",
-          },
-          credential(secondCredentialId, "Secondary"),
-        ],
+    const balancedCredentials = [
+      {
+        ...credential(CREDENTIAL_ID, "Primary"),
+        secret: "provider-secret",
       },
+      credential(secondCredentialId, "Secondary"),
+    ];
+    const setup = await startToolSession(model, {
+      credentials: { openai: balancedCredentials },
     });
     const detail = await waitForToolResults(setup, "get_session_options", 1);
     const output = jsonRecord(
@@ -410,24 +410,20 @@ describe("session agent introspection tools", () => {
           ),
         ],
       },
-      { content: "Discovery complete.", toolCalls: [] },
+      { content: "All option discovery complete.", toolCalls: [] },
     ]);
-    const setup = await startToolSession(
-      model,
-      {
-        credentials: {
-          openai: openAiCredentials,
-          openrouter: openRouterCredentials,
-        },
-      },
-      (provider) =>
-        Promise.resolve({
-          defaultModel:
-            provider === "openai"
-              ? (openAiModels[0]?.id ?? null)
-              : (openRouterModels[0]?.id ?? null),
-          models: provider === "openai" ? openAiModels : openRouterModels,
-        }),
+    const credentials = {
+      openai: openAiCredentials,
+      openrouter: openRouterCredentials,
+    };
+    const setup = await startToolSession(model, { credentials }, (provider) =>
+      Promise.resolve({
+        defaultModel:
+          provider === "openai"
+            ? (openAiModels[0]?.id ?? null)
+            : (openRouterModels[0]?.id ?? null),
+        models: provider === "openai" ? openAiModels : openRouterModels,
+      }),
     );
     const detail = await waitForToolResults(setup, "get_session_options", 3);
     const outputs = findToolResultContents(detail, "get_session_options").map(

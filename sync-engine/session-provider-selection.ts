@@ -87,9 +87,13 @@ export async function openRouterProvidersForUser(options: {
     credential: ProviderCredentialAccess,
   ): Promise<Response> => {
     try {
-      return createJsonResponse(
-        await options.discover(options.user.id, credential, model),
+      const catalog = await options.discover(
+        options.user.id,
+        credential,
+        model,
       );
+      const response = createJsonResponse(catalog);
+      return response;
     } catch (error) {
       if (error instanceof Error && error.message.includes("identifier")) {
         return createApiError("invalid_request", 400);
@@ -247,6 +251,24 @@ export function sessionMetadataFromDependencies(options: {
   });
 }
 
+function rejectedCredentialError(
+  rejectCredentialErrors: boolean | undefined,
+  error: unknown,
+): boolean {
+  return rejectCredentialErrors === true && isCredentialRejectionError(error);
+}
+
+function credentialFailure(
+  options: SessionMetadataOptions,
+  error: unknown,
+  fallback: SessionMetadataResult,
+): SessionMetadataResult {
+  if (rejectedCredentialError(options.rejectCredentialErrors, error)) {
+    throw error;
+  }
+  return fallback;
+}
+
 export async function sessionMetadata(
   options: SessionMetadataOptions,
 ): Promise<SessionMetadataResult> {
@@ -267,13 +289,7 @@ export async function sessionMetadata(
             providerPricing: selected.pricing,
           };
     } catch (error) {
-      if (
-        options.rejectCredentialErrors === true &&
-        isCredentialRejectionError(error)
-      ) {
-        throw error;
-      }
-      return { error: "validation_failed" };
+      return credentialFailure(options, error, { error: "validation_failed" });
     }
   }
 
@@ -285,12 +301,9 @@ export async function sessionMetadata(
       providerPricing: model?.pricing ?? null,
     };
   } catch (error) {
-    if (
-      options.rejectCredentialErrors === true &&
-      isCredentialRejectionError(error)
-    ) {
-      throw error;
-    }
-    return { maxContextTokens: null, providerPricing: null };
+    return credentialFailure(options, error, {
+      maxContextTokens: null,
+      providerPricing: null,
+    });
   }
 }

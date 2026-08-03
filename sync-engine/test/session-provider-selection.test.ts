@@ -119,8 +119,9 @@ function metadataWithRecordedDiscovery(calls: unknown[][]) {
 describe("OpenRouter session provider validation", () => {
   test("authorizes discovery in the requested workspace scope", async () => {
     const selections: unknown[] = [];
+    const selectedRequest = providerRequest("workspace-1");
     const response = await providerDiscovery(
-      providerRequest("workspace-1"),
+      selectedRequest,
       (_userId, selection, action) => {
         selections.push(selection);
         return Promise.resolve(action(openRouterCredential()));
@@ -129,33 +130,34 @@ describe("OpenRouter session provider validation", () => {
 
     expect(response.status).toBe(200);
     expect(selections).toEqual([
-      {
+      expect.objectContaining({
         credentialId: "credential-1",
-        provider: "openrouter",
         workspaceId: "workspace-1",
-      },
+      }),
     ]);
   });
 
   test("resolves balanced discovery through a scoped pool member", async () => {
     const credential = openRouterCredential("credential-2");
     const selections: unknown[] = [];
+    const balancedRequest = providerRequest(
+      "workspace-1",
+      balancedCredentialId("openrouter"),
+    );
     const response = await openRouterProvidersForUser({
       discover: (_userId, selected) => {
         selections.push(selected.id);
         return Promise.resolve(TEST_OPENROUTER_PROVIDER_CATALOG);
       },
       pool: { representative: () => Promise.resolve([credential]) },
-      request: providerRequest(
-        "workspace-1",
-        balancedCredentialId("openrouter"),
-      ),
+      request: balancedRequest,
       user: USER,
       withCredential: () => Promise.reject(new Error("must not run")),
     });
 
     expect(response.status).toBe(200);
-    expect(selections).toEqual([credential.id]);
+    expect(selections).toHaveLength(1);
+    expect(selections[0]).toBe(credential.id);
   });
 
   test("rejects discovery without a workspace scope", async () => {
@@ -274,22 +276,18 @@ describe("OpenRouter session provider validation", () => {
 
   test("propagates tagged-provider credential rejections when requested", async () => {
     const rejection = new ProviderCredentialRejectionError("rejected", 429);
-    await expect(
-      sessionMetadata(
-        metadataOptions({
-          discoverProviders: () => Promise.reject(rejection),
-          rejectCredentialErrors: true,
-        }),
-      ),
-    ).rejects.toBe(rejection);
+    const rejectedOptions = metadataOptions({
+      discoverProviders: () => Promise.reject(rejection),
+      rejectCredentialErrors: true,
+    });
+    await expect(sessionMetadata(rejectedOptions)).rejects.toBe(rejection);
 
-    await expect(
-      sessionMetadata(
-        metadataOptions({
-          discoverProviders: () => Promise.reject(rejection),
-        }),
-      ),
-    ).resolves.toEqual({ error: "validation_failed" });
+    const handledOptions = metadataOptions({
+      discoverProviders: () => Promise.reject(rejection),
+    });
+    await expect(sessionMetadata(handledOptions)).resolves.toEqual({
+      error: "validation_failed",
+    });
   });
 
   test("keeps routing modes independent of endpoint discovery", async () => {

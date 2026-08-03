@@ -14,7 +14,11 @@ import {
   spawnCall,
 } from "./session-agent-spawn-helpers.ts";
 import { startToolSession } from "./session-agent-tool-setup.ts";
-import { CREDENTIAL_ID, SESSION_ID } from "./session-integration-fixtures.ts";
+import {
+  CREDENTIAL_ID,
+  SESSION_ID,
+  testCredentialId,
+} from "./session-integration-fixtures.ts";
 import { waitForSessionValue } from "./session-integration-helpers.ts";
 import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
 
@@ -57,24 +61,20 @@ describe("balanced session agent spawn", () => {
         },
         modelFactory: ({ credential }) => ({
           complete: () => {
-            const selectedId: unknown = Reflect.get(credential, "id");
-            if (typeof selectedId !== "string") {
-              throw new Error("The model request credential ID is unavailable");
-            }
-            selectedCredentials.push(selectedId);
+            selectedCredentials.push(testCredentialId(credential));
             return model.complete();
           },
         }),
       },
-      (_provider, credential) =>
-        credential.id === CREDENTIAL_ID
-          ? Promise.reject(new AgentModelDiscoveryError("rejected", 429))
-          : Promise.resolve(testAgentModelCatalog()),
+      (_provider, credential) => {
+        if (credential.id === CREDENTIAL_ID) {
+          throw new AgentModelDiscoveryError("rejected", 429);
+        }
+        return Promise.resolve(testAgentModelCatalog());
+      },
     );
     const childId = await childSessionId(setup);
-    const child = setup.sessions.detailForUser(TEST_USER_ID, childId);
-
-    expect(child).toMatchObject({
+    expect(setup.sessions.detailForUser(TEST_USER_ID, childId)).toMatchObject({
       credentialId: SECOND_CREDENTIAL_ID,
       parentSessionId: SESSION_ID,
       status: "running",
