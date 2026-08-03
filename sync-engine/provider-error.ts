@@ -54,9 +54,9 @@ interface ProviderErrorDetails {
 }
 
 export class ProviderCredentialRejectionError extends Error {
-  readonly status: 401 | 402 | 403 | 429;
+  readonly status: 400 | 401 | 402 | 403 | 429;
 
-  constructor(message: string, status: 401 | 402 | 403 | 429) {
+  constructor(message: string, status: 400 | 401 | 402 | 403 | 429) {
     super(message);
     this.name = "ProviderCredentialRejectionError";
     this.status = status;

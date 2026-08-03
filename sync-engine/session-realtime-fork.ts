@@ -30,7 +30,10 @@ export interface SessionForkDependencies
   extends SessionCredentialReader, SessionLifecycleDependencies {
   readonly discoverModels: AgentModelDiscoverer;
   readonly discoverOpenRouterProviders: OpenRouterProviderDiscoverer;
-  readonly modelCredentialPool: ModelCredentialPool;
+  readonly modelCredentialPool: Pick<
+    ModelCredentialPool,
+    "candidates" | "reject"
+  >;
   readonly store: Pick<SessionStore, "fork">;
 }
 
