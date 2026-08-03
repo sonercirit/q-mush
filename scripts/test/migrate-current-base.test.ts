@@ -34,9 +34,10 @@ const CURRENT_BASE_MIGRATIONS = [
   "0024_cynical_nitro.sql",
   "0025_curly_nicolaos.sql",
   "0026_skinny_polaris.sql",
+  "0027_worthless_sentinels.sql",
 ] as const;
-const CURRENT_BASE_TIMESTAMP = 1_785_728_741_972;
-const CONTEXT_CAP_MIGRATION_TIMESTAMP = 1_785_746_819_376;
+const CURRENT_BASE_TIMESTAMP = 1_785_753_783_416;
+const CONTEXT_CAP_MIGRATION_TIMESTAMP = 1_785_760_990_831;
 
 let temporaryDirectory: string | undefined;
 
@@ -61,8 +62,8 @@ function agentSessionColumnNames(database: Database): readonly string[] {
   return query.all().map((column) => column.name);
 }
 
-test("upgrades the current base through the context cap migration", async () => {
-  temporaryDirectory = mkdtempSync(join(tmpdir(), "q-mush-0027-upgrade-"));
+test("upgrades migration 0027 through the context cap migration", async () => {
+  temporaryDirectory = mkdtempSync(join(tmpdir(), "q-mush-0028-upgrade-"));
   const path = join(temporaryDirectory, "current-base.sqlite");
   const currentBaseDatabase = new Database(path, { create: true });
   for (const migration of CURRENT_BASE_MIGRATIONS) {
@@ -73,7 +74,7 @@ test("upgrades the current base through the context cap migration", async () => 
   );
   currentBaseDatabase.run(
     "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)",
-    [CURRENT_BASE_MIGRATIONS[26], CURRENT_BASE_TIMESTAMP],
+    ["0027_worthless_sentinels.sql", CURRENT_BASE_TIMESTAMP],
   );
   expect(agentSessionColumnNames(currentBaseDatabase)).not.toContain(
     "user_context_token_cap",
