@@ -16,7 +16,6 @@ import type {
 } from "../shared/session-model.ts";
 import { createAskQuestionsPersistence } from "./ask-questions-persistence.ts";
 import { AskQuestionsStore } from "./ask-questions-store.ts";
-import type { CurrentSessionStoreMethods } from "./session-current-store-types.ts";
 import { CurrentSessionStore } from "./session-current-store.ts";
 import {
   sessionExecutionIsCurrent,
@@ -24,12 +23,14 @@ import {
 } from "./session-execution-authority.ts";
 import { userSessionFilter } from "./session-filter.ts";
 import { readStoredSessionHistory } from "./session-history-store.ts";
-import { SessionInputStore } from "./session-input-store.ts";
 import { ManualCompactionStore } from "./session-manual-compaction-store.ts";
-import type {
-  CancelPendingInputResult,
-  EnqueuePendingInputResult,
-  EnqueuePendingSessionInput,
+import {
+  cancelPendingInput,
+  enqueuePendingInput,
+  settleNormalSessionBoundary,
+  takeSteeringInputs,
+  type EnqueuePendingInputResult,
+  type EnqueuePendingSessionInput,
 } from "./session-pending-inputs.ts";
 import {
   queuedSessionDetails,
@@ -105,7 +106,7 @@ import {
   transitionSessionRuntime,
 } from "./session-store-transitions.ts";
 import { appendSessionUserMessage } from "./session-store-values.ts";
-export class SessionStore implements CurrentSessionStoreMethods {
+export class SessionStore {
   readonly #manualCompactions: ManualCompactionStore;
   readonly #questions: AskQuestionsStore;
   readonly #resources: readonly [AppDatabase, IdGenerator];
@@ -454,15 +455,10 @@ export class SessionStore implements CurrentSessionStoreMethods {
       sessionId,
     });
   }
-  cancelPendingInput(options: {
-    readonly inputId: string;
-    readonly now: number;
-    readonly sessionId: string;
-    readonly userId: string;
-  }): CancelPendingInputResult {
-    return new SessionInputStore(this.#database, this.#resources[1]).cancel(
-      options,
-    );
+  cancelPendingInput(
+    options: Omit<Parameters<typeof cancelPendingInput>[0], "database">,
+  ) {
+    return cancelPendingInput({ ...options, database: this.#database });
   }
   enqueuePendingInput(
     userId: string,
@@ -470,21 +466,20 @@ export class SessionStore implements CurrentSessionStoreMethods {
     input: EnqueuePendingSessionInput,
     now: number,
   ): EnqueuePendingInputResult {
-    return new SessionInputStore(this.#database, this.#resources[1]).enqueue(
-      userId,
-      sessionId,
+    return enqueuePendingInput({
+      database: this.#database,
+      generateId: this.#resources[1],
       input,
       now,
-    );
+      sessionId,
+      userId,
+    });
   }
   takeSteeringInputs(
     sessionId: string,
     now: number,
   ): readonly Extract<AgentConversationMessage, { readonly role: "user" }>[] {
-    return new SessionInputStore(
-      this.#database,
-      this.#resources[1],
-    ).takeSteering(sessionId, now);
+    return takeSteeringInputs({ database: this.#database, now, sessionId });
   }
   manualCompactionPending(sessionId: string, generation: number): boolean {
     return this.#manualCompactions.pending(sessionId, generation);
@@ -493,11 +488,12 @@ export class SessionStore implements CurrentSessionStoreMethods {
     return this.#manualCompactions.schedule(sessionId, generation, now);
   }
   settleNormalBoundary(sessionId: string, now: number, generation: number) {
-    return new SessionInputStore(this.#database, this.#resources[1]).settle(
-      sessionId,
-      now,
+    return settleNormalSessionBoundary({
+      database: this.#database,
       generation,
-    );
+      now,
+      sessionId,
+    });
   }
   appendUserMessage(
     userId: string,
@@ -601,29 +597,24 @@ export class SessionStore implements CurrentSessionStoreMethods {
       this.#currentGeneration(sessionId),
     );
   }
-  appendCurrentAgentMessage: CurrentSessionStoreMethods["appendCurrentAgentMessage"] =
-    (...a) => {
-      this.#current().appendAgentMessage(...a);
-    };
-  appendCurrentErrorMessage: CurrentSessionStoreMethods["appendCurrentErrorMessage"] =
-    (...a) => {
-      this.#current().appendErrorMessage(...a);
-    };
-  compactCurrentConversation: CurrentSessionStoreMethods["compactCurrentConversation"] =
-    (...a) => {
-      this.#current().compactConversation(...a);
-    };
-  setCurrentAgentFile: CurrentSessionStoreMethods["setCurrentAgentFile"] = (
+  appendCurrentAgentMessage: CurrentSessionStore["appendAgentMessage"] = (...a) => {
+    this.#current().appendAgentMessage(...a);
+  };
+  appendCurrentErrorMessage: CurrentSessionStore["appendErrorMessage"] = (...a) => {
+    this.#current().appendErrorMessage(...a);
+  };
+  compactCurrentConversation: CurrentSessionStore["compactConversation"] = (
     ...a
   ) => {
+    this.#current().compactConversation(...a);
+  };
+  setCurrentAgentFile: CurrentSessionStore["setAgentFile"] = (...a) => {
     this.#current().setAgentFile(...a);
   };
-  updateCurrentUsage: CurrentSessionStoreMethods["updateCurrentUsage"] = (
-    ...a
-  ) => {
+  updateCurrentUsage: CurrentSessionStore["updateUsage"] = (...a) => {
     this.#current().updateUsage(...a);
   };
-  transitionCurrent: CurrentSessionStoreMethods["transitionCurrent"] = (...a) =>
+  transitionCurrent: CurrentSessionStore["transition"] = (...a) =>
     this.#current().transition(...a);
   stop(userId: string, sessionId: string, now: number): boolean {
     if (this.#questions.pending(userId, sessionId) !== null) {
