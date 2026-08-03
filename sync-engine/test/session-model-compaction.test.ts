@@ -210,12 +210,13 @@ describe("session models and compaction", () => {
 
     // Confirmation invokes the same realtime manual-compaction operation used
     // by the existing-session controller, rather than a test-only callback.
-    const queued = await setup.sessions.realtimeCommands.compactForUser(
-      TEST_AUTHENTICATED_USER,
-      SESSION_ID,
-      TEST_WORKSPACE_ID,
+    const compact = setup.sessions.realtimeCommands.compactForUser.bind(
+      setup.sessions.realtimeCommands,
     );
-    expect(["queued", "running"]).toContain(queued.status);
+    const queuedStatus = (
+      await compact(TEST_AUTHENTICATED_USER, SESSION_ID, TEST_WORKSPACE_ID)
+    ).status;
+    expect(["queued", "running"]).toContain(queuedStatus);
     await completeAgentFileLookup(setup);
     const compacted = await waitForIdleContent(setup, "Confirmed cap handoff.");
     expect(compacted).toMatchObject({

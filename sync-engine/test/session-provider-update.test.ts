@@ -130,14 +130,19 @@ function sessionRow(setupValue: ReturnType<typeof setup>) {
 }
 
 describe("session provider update", () => {
+  const applyUpdate = (
+    setupValue: ReturnType<typeof setup>,
+    confirmedCacheDrop = true,
+  ) =>
+    applySessionProviderUpdate(setupValue.dependencies, TEST_USER_ID, {
+      ...setupValue.input,
+      confirmedCacheDrop,
+    });
+
   test("updates provider metadata and drops the current cache segment once", async () => {
     const setupValue = setup();
 
-    const updated = await applySessionProviderUpdate(
-      setupValue.dependencies,
-      TEST_USER_ID,
-      setupValue.input,
-    );
+    const updated = await applyUpdate(setupValue);
 
     expect(updated).toMatchObject({
       credentialId: "openrouter-target",
@@ -195,11 +200,7 @@ describe("session provider update", () => {
   test("retains a cap below the target model limit", async () => {
     const setupValue = setup(32_000);
 
-    const updated = await applySessionProviderUpdate(
-      setupValue.dependencies,
-      TEST_USER_ID,
-      setupValue.input,
-    );
+    const updated = await applyUpdate(setupValue);
 
     expect(updated).toMatchObject({
       maxContextTokens: 32_000,
@@ -214,13 +215,7 @@ describe("session provider update", () => {
   test("rejects a target model below the retained cap", async () => {
     const setupValue = setup(120_000);
 
-    await expect(
-      applySessionProviderUpdate(
-        setupValue.dependencies,
-        TEST_USER_ID,
-        setupValue.input,
-      ),
-    ).rejects.toMatchObject({
+    await expect(applyUpdate(setupValue)).rejects.toMatchObject({
       code: "invalid_context_token_cap",
       message:
         "The current context token cap of 120,000 tokens exceeds the new model limit of 64,000 tokens. Lower or clear the cap before changing models.",
@@ -240,15 +235,6 @@ describe("session provider update", () => {
       setupValue.dependencies.broker.cancelSessionGeneration,
     ).not.toHaveBeenCalled();
   });
-
-  const applyUpdate = (
-    setupValue: ReturnType<typeof setup>,
-    confirmedCacheDrop: boolean,
-  ) =>
-    applySessionProviderUpdate(setupValue.dependencies, TEST_USER_ID, {
-      ...setupValue.input,
-      confirmedCacheDrop,
-    });
 
   const expectRejectedUpdate = async (
     setupValue: ReturnType<typeof setup>,

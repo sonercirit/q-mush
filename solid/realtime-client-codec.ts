@@ -21,13 +21,15 @@ import {
   readSessionPendingQuestions,
 } from "./session-codec.ts";
 
+export interface RealtimeCommandErrorEvent {
+  readonly commandId: string;
+  readonly detail?: string;
+  readonly error: string;
+  readonly type: "command_error";
+}
+
 export type RealtimeServerEvent =
-  | {
-      readonly commandId: string;
-      readonly detail?: string;
-      readonly error: string;
-      readonly type: "command_error";
-    }
+  | RealtimeCommandErrorEvent
   | {
       readonly commandId: string;
       readonly result: unknown;

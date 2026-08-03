@@ -33,11 +33,14 @@ interface RealtimeCommandSuccess {
   readonly type: "command_success";
 }
 
-interface RealtimeCommandErrorAcknowledgement {
-  readonly commandId: string;
+interface RealtimeCommandFailure {
   readonly detail?: string;
   readonly error: string;
   readonly type: "command_error";
+}
+
+interface RealtimeCommandErrorAcknowledgement extends RealtimeCommandFailure {
+  readonly commandId: string;
 }
 
 type RealtimeCommandAcknowledgement =
