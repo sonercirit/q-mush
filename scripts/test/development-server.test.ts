@@ -1,5 +1,5 @@
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { platform, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test, vi } from "vitest";
 import {
@@ -266,14 +266,8 @@ process.on("SIGTERM", () => {
   }
 });
 
-const ENV_EXECUTABLE = platform() === "darwin" ? "/usr/bin/env" : "/bin/env";
-const INDEX_PATH = join(
-  import.meta.dirname,
-  "..",
-  "..",
-  "sync-engine",
-  "index.ts",
-);
+const PROJECT_ROOT = join(import.meta.dirname, "..", "..");
+const INDEX_PATH = join(PROJECT_ROOT, "sync-engine", "index.ts");
 const RECOVERY_FIXTURE_PATH = join(
   import.meta.dirname,
   "fixtures",
@@ -385,10 +379,13 @@ test("production shutdown resumes after a bounded database retry", async () => {
           directory,
           triggerPath,
           [
-            ENV_EXECUTABLE,
-            `DATABASE_PATH=${databasePath}`,
-            "PORT=0",
-            `Q_MUSH_TEST_DATABASE_BOUNDED_RETRY_STATE_PATH=${statePath}`,
+            "/bin/sh",
+            "-c",
+            'cd "$1" && DATABASE_PATH="$2" PORT=0 Q_MUSH_TEST_DATABASE_BOUNDED_RETRY_STATE_PATH="$3" exec "$4" "$5"',
+            "q-mush-index-fixture",
+            PROJECT_ROOT,
+            databasePath,
+            statePath,
             process.execPath,
             INDEX_PATH,
           ],
