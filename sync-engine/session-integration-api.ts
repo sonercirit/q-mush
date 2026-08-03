@@ -202,18 +202,27 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
   deliverRunnerCommands(
     runnerId: string,
     deliver: (command: RunnerToolCommand) => boolean,
+    connectionGeneration?: number,
   ): boolean {
     let delivered = true;
-    this.resources.broker.deliverQueued(runnerId, (command) => {
-      const accepted = deliver(command);
-      delivered &&= accepted;
-      return accepted;
-    });
+    this.resources.broker.deliverQueued(
+      runnerId,
+      (command) => {
+        const accepted = deliver(command);
+        delivered &&= accepted;
+        return accepted;
+      },
+      connectionGeneration,
+    );
     return delivered;
   }
 
-  replaceRunnerConnection(runnerId: string): void {
-    this.resources.broker.replaceRunnerConnection(runnerId);
+  runnerConnectionGeneration(runnerId: string): number {
+    return this.resources.broker.runnerConnectionGeneration(runnerId);
+  }
+
+  replaceRunnerConnection(runnerId: string, replacedGeneration: number): void {
+    this.resources.broker.replaceRunnerConnection(runnerId, replacedGeneration);
   }
 
   drain(): Promise<void> {

@@ -487,10 +487,38 @@ async function pendingSocketFailure(
   failure: Promise<Error>,
   milliseconds: number,
 ): Promise<Error | undefined> {
-  return Promise.race([
-    setTimeout(milliseconds).then(() => undefined),
-    failure,
-  ]);
+  const controller = new AbortController();
+  try {
+    return await Promise.race([
+      setTimeout(milliseconds, undefined, {
+        signal: controller.signal,
+      }).catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          throw error;
+        }
+        return undefined;
+      }),
+      failure,
+    ]);
+  } finally {
+    controller.abort();
+  }
+}
+
+async function throwSocketFailure(
+  socket: WebSocket,
+  active: Map<string, ActiveCommand>,
+  failure: Error,
+): Promise<never> {
+  if (failure instanceof RunnerSupersededError) {
+    socket.close(1000, "Superseded");
+    for (const command of active.values()) {
+      command.controller.abort();
+    }
+    active.clear();
+    await activeRunnerExecution().containers.cleanupAll();
+  }
+  throw failure;
 }
 
 async function maintainConnection(
@@ -517,7 +545,7 @@ async function maintainConnection(
     if (socket.readyState !== WebSocket.OPEN) {
       const failure = await socketFailure;
       if (exitOnDisconnect || failure instanceof RunnerSupersededError) {
-        throw failure;
+        await throwSocketFailure(socket, active, failure);
       }
       socket = await connectRunner(
         configuration,
@@ -531,7 +559,7 @@ async function maintainConnection(
     if (socket.readyState === WebSocket.OPEN) {
       const failure = await pendingSocketFailure(socketFailure, 0);
       if (failure instanceof RunnerSupersededError) {
-        throw failure;
+        await throwSocketFailure(socket, active, failure);
       }
     }
 
@@ -568,7 +596,7 @@ async function maintainConnection(
       failure instanceof RunnerSupersededError ||
       (failure !== undefined && exitOnDisconnect)
     ) {
-      throw failure;
+      await throwSocketFailure(socket, active, failure);
     }
   }
 }

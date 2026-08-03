@@ -166,6 +166,11 @@ export function finishRunnerOperational(
   }
   data.usable = true;
   const replaced = pending.previousAuthority;
+  const replacedGeneration = options.sessions.runnerConnectionGeneration(
+    runner.id,
+  );
+  const connectionGeneration =
+    replaced === undefined ? replacedGeneration : replacedGeneration + 1;
   const deliver = (command: Parameters<typeof options.sendCommand>[1]) =>
     data.usable &&
     options.hub.runnerIsCurrent(runner.id, socket) &&
@@ -174,7 +179,11 @@ export function finishRunnerOperational(
       : false;
   let delivered = false;
   try {
-    delivered = options.sessions.deliverRunnerCommands(runner.id, deliver);
+    delivered = options.sessions.deliverRunnerCommands(
+      runner.id,
+      deliver,
+      connectionGeneration,
+    );
   } catch {
     // The replacement remains provisional until queued delivery succeeds.
   }
@@ -186,7 +195,7 @@ export function finishRunnerOperational(
     return;
   }
   if (replaced !== undefined) {
-    options.sessions.replaceRunnerConnection(runner.id);
+    options.sessions.replaceRunnerConnection(runner.id, replacedGeneration);
   }
   data.committed = undefined;
   data.registration = undefined;

@@ -497,6 +497,42 @@ describe("runner command broker", () => {
     expect(await result).toEqual(completedRunnerCommand("# Q Mush"));
   });
 
+  test("rejects only old-generation commands when a replacement takes authority", async () => {
+    const canceled: string[] = [];
+    let nextCommandId = 0;
+    const broker = new RunnerCommandBroker({
+      cancel: (_runnerId, commandId) => canceled.push(commandId),
+      commandId: () => `connection-command-${String(++nextCommandId)}`,
+      deliver: () => true,
+    });
+    const old = broker.dispatch(brokerRunnerCommand());
+    const oldGeneration = broker.runnerConnectionGeneration(RUNNER_ID);
+    const currentGeneration = broker.replaceRunnerConnection(
+      RUNNER_ID,
+      oldGeneration,
+    );
+    const current = broker.dispatch(brokerRunnerCommand());
+
+    await expect(old).rejects.toEqual(
+      new RunnerDisconnectedError(
+        "The runner connection was superseded before the command returned",
+      ),
+    );
+    expect(canceled).toEqual([]);
+    broker.replaceRunnerConnection(RUNNER_ID, oldGeneration);
+    expect(
+      broker.complete(
+        RUNNER_ID,
+        "connection-command-2",
+        completedRunnerCommand("current"),
+      ),
+    ).toBe(true);
+    expect(await current).toEqual(completedRunnerCommand("current"));
+    expect(broker.runnerConnectionGeneration(RUNNER_ID)).toBe(
+      currentGeneration,
+    );
+  });
+
   test("keeps pending commands active until completion or cancellation", async () => {
     vi.useFakeTimers();
 
