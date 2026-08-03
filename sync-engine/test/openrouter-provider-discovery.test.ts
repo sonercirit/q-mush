@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { ProviderCredentialRejectionError } from "../../sync-engine/provider-error.ts";
 import { discoverOpenRouterProviders } from "../../sync-engine/openrouter-provider-discovery.ts";
+import { ProviderCredentialRejectionError } from "../../sync-engine/provider-error.ts";
 import {
   discoverWithResponse,
   endpoint,

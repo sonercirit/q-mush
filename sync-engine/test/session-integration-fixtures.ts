@@ -17,11 +17,11 @@ import {
 import type { RunnerSummary } from "../../shared/runner-model.ts";
 import { normalizeSearchText } from "../../shared/search.ts";
 import { GLOBAL_WORKSPACE_ID } from "../../shared/workspace-model.ts";
-import type { AgentModelFactory } from "../../sync-engine/session-agent-models.ts";
 import type { AgentModelDiscoverer } from "../../sync-engine/agent-model-discovery.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
 import type { OpenRouterProviderDiscoverer } from "../../sync-engine/openrouter-provider-discovery.ts";
 import { createRunnerIntegration } from "../../sync-engine/runners.ts";
+import type { AgentModelFactory } from "../../sync-engine/session-agent-models.ts";
 import { readUserSpawnSession } from "../../sync-engine/session-input.ts";
 import { createSessionIntegration } from "../../sync-engine/sessions.ts";
 import { WorkspaceStore } from "../../sync-engine/workspace-store.ts";

@@ -1,9 +1,9 @@
 import { describe, expect, test, vi } from "vitest";
-import { ProviderCredentialRejectionError } from "../../sync-engine/provider-error.ts";
 import type { AuthenticatedUser } from "../../shared/auth-model.ts";
 import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
 import { SESSION_OPENROUTER_PROVIDERS_PATH } from "../../shared/routes.ts";
 import { testAgentModelCatalog } from "../../shared/test/agent-model-fixtures.ts";
+import { ProviderCredentialRejectionError } from "../../sync-engine/provider-error.ts";
 import {
   openRouterProvidersForUser,
   prepareOpenRouterSessionCredentialProviderState,

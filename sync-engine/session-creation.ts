@@ -214,9 +214,7 @@ export function sessionMetadataErrorResponse(
 export function prepareSessionCredential(
   dependencies: Pick<
     SessionCreationDependencies,
-    | "discoverModels"
-    | "discoverOpenRouterProviders"
-    | "rejectCredentialErrors"
+    "discoverModels" | "discoverOpenRouterProviders" | "rejectCredentialErrors"
   >,
   user: AuthenticatedUser,
   input: CreateSessionInput & Pick<CreateAgentSession, "workspaceId">,

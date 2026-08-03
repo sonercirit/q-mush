@@ -1,6 +1,5 @@
 import { describe, expect, test } from "vitest";
 import { AGENT_TOOLS } from "../../shared/agent-tools.ts";
-import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
 import {
   agentMessages,
   agentSessions,
@@ -8,6 +7,7 @@ import {
   users,
 } from "../../shared/database/schema.ts";
 import { SYSTEM_ID } from "../../shared/ids.ts";
+import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
 import {
   ProviderCredentialStore,
   type ProviderCredentialAccess,
@@ -190,7 +190,10 @@ describe("session agent introspection tools", () => {
     const setup = await startToolSession(model, {
       credentials: {
         openai: [
-          { ...credential(CREDENTIAL_ID, "Primary"), secret: "provider-secret" },
+          {
+            ...credential(CREDENTIAL_ID, "Primary"),
+            secret: "provider-secret",
+          },
           credential(secondCredentialId, "Secondary"),
         ],
       },

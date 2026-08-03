@@ -7,8 +7,8 @@ import type {
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
 import { testAgentModelCatalog } from "../../shared/test/agent-model-fixtures.ts";
-import type { AgentModelFactory } from "../session-agent-models.ts";
 import { AgentModelDiscoveryError } from "../agent-model-discovery.ts";
+import type { AgentModelFactory } from "../session-agent-models.ts";
 import type { CreateSessionInput } from "../session-input.ts";
 import {
   TEST_AUTHENTICATED_USER,
@@ -131,7 +131,8 @@ describe("session credential balancing", () => {
   test("pins the resolved credential across steps, continue, and restart resume", async () => {
     const selectedCredentials: string[] = [];
     const beforeRestart = new RestartPinnedModel(3);
-    const factory = (model: AgentModel): AgentModelFactory =>
+    const factory =
+      (model: AgentModel): AgentModelFactory =>
       ({ credential }) => ({
         complete: (messages, signal) => {
           const selectedId: unknown = Reflect.get(credential, "id");
@@ -158,7 +159,8 @@ describe("session credential balancing", () => {
     );
     await completeAgentFileLookup(initial);
     await waitForSessionValue(
-      () => initial.sessions.detailForUser(TEST_AUTHENTICATED_USER.id, created.id),
+      () =>
+        initial.sessions.detailForUser(TEST_AUTHENTICATED_USER.id, created.id),
       hasSessionStatus("idle"),
     );
     expect(beforeRestart.requests).toHaveLength(2);

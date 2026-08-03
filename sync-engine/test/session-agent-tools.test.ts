@@ -3,8 +3,8 @@ import type { AgentModel, AgentModelStep } from "../../shared/agent-loop.ts";
 import { isRecord } from "../../shared/auth-model.ts";
 import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
 import { testAgentModelCatalog } from "../../shared/test/agent-model-fixtures.ts";
-import { AgentModelDiscoveryError } from "../agent-model-discovery.ts";
 import { SessionStore } from "../../sync-engine/session-store.ts";
+import { AgentModelDiscoveryError } from "../agent-model-discovery.ts";
 import {
   createAuthenticatedRequest,
   createTestProviderCredential,

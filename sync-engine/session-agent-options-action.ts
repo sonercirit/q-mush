@@ -147,11 +147,17 @@ function credentialOptions(
 ) {
   if (input.category !== "credentials") return undefined;
   const offset = optionsPageOffset(input.page);
-  const balanced = balancedCredentials(dependencies, userId, workspaceId).filter(
+  const balanced = balancedCredentials(
+    dependencies,
+    userId,
+    workspaceId,
+  ).filter(
     ({ id, label, provider }) =>
       input.search === undefined ||
       [id, label, provider].some((value) =>
-        value.toLocaleLowerCase().includes(input.search?.toLocaleLowerCase() ?? ""),
+        value
+          .toLocaleLowerCase()
+          .includes(input.search?.toLocaleLowerCase() ?? ""),
       ),
   );
   const regularOffset = Math.max(0, offset - balanced.length);
