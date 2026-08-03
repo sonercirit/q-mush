@@ -4,6 +4,10 @@ export function runnerSupersededMessage(): string {
   return JSON.stringify({ type: "superseded" });
 }
 
+export function runnerRegistrationRejectedMessage(): string {
+  return JSON.stringify({ type: "registration_rejected" });
+}
+
 export interface RunnerConnectMetadata {
   readonly architecture: string;
   readonly machineId: string;

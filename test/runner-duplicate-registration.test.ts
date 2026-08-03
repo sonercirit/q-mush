@@ -1,5 +1,4 @@
 import { expect, test } from "vitest";
-import { RunnerConnectionError } from "../runner/runner-connection.ts";
 import { completeRunnerRegistration } from "../runner/runner-registration.ts";
 import {
   observeOperationalRunnerSocket,
@@ -78,8 +77,6 @@ interface FakeRunnerProcess {
   readonly client: FakeRunnerSocket;
   readonly registration: Promise<void>;
   readonly server: RealtimeTestSocket;
-  readonly startup: RunnerStartupRestart;
-  readonly terminated: Promise<void>;
   stopped(): Promise<Error>;
 }
 
@@ -126,26 +123,16 @@ function fakeRunnerProcess(
       restartId === undefined ? {} : { restartId },
     ),
   );
-  const terminated = registration.then(
-    () => new Promise<void>(() => undefined),
-    (error: unknown) => {
-      if (!startup.startupRestart) {
-        throw error;
-      }
-    },
-  );
   return {
     client,
     registration,
     server,
-    startup,
     stopped: () => {
       if (stopped === undefined) {
         throw new Error("The fake runner process is not operational");
       }
       return stopped;
     },
-    terminated,
   };
 }
 
@@ -281,31 +268,4 @@ test("a supervised relaunch supersedes a stale restart process without rejecting
       message.includes(String(RUNNER_SUPERSEDED_CLOSE_CODE)),
     ),
   ).toBe(false);
-});
-
-test("a stale restart process arriving after the supervised child is rejected once", async () => {
-  const realtime = connectedRunnerRealtimeTestIntegration();
-  const supervisedProcess = fakeRunnerProcess(realtime);
-  await expect(supervisedProcess.registration).resolves.toBeUndefined();
-
-  const staleRestartProcess = fakeRunnerProcess(realtime, RESTART_ID);
-
-  await expect(staleRestartProcess.registration).rejects.toEqual(
-    new RunnerConnectionError(
-      "The WebSocket connection closed during registration",
-    ),
-  );
-  await expect(staleRestartProcess.terminated).resolves.toBeUndefined();
-  expect(staleRestartProcess.startup.restartId).toBe(RESTART_ID);
-  expect(staleRestartProcess.client.readyState).toBe(WebSocket.CLOSED);
-  expect(staleRestartProcess.client.received).toEqual([]);
-  expect(supervisedProcess.client.readyState).toBe(WebSocket.OPEN);
-
-  const command = {
-    ...runnerCommandInput(),
-    id: "authority-check",
-  };
-  expect(deliverToProcess(supervisedProcess, command)).toBe(true);
-  expect(receivedCommand(supervisedProcess, "authority-check")).toBe(true);
-  expect(staleRestartProcess.client.received).toEqual([]);
 });

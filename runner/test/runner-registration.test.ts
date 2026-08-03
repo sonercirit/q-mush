@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import { RunnerConnectionError } from "../../runner/runner-connection.ts";
 import { completeRunnerRegistration } from "../../runner/runner-registration.ts";
+import { RunnerRegistrationRejectedError } from "../../runner/runner-socket.ts";
 import {
   RunnerStartupRestart,
   type RunnerStartupConnection,
@@ -141,6 +142,17 @@ function registrationTest(
     await action(registration());
   });
 }
+
+test("reports explicit rejection without mutating startup restart identity", async () => {
+  const setup = registration();
+
+  setup.socket.receive({ type: "registration_rejected" });
+
+  await expect(setup.promise).rejects.toEqual(
+    new RunnerRegistrationRejectedError(),
+  );
+  expect(setup.startup.restartId).toBe("restart-client");
+});
 
 test("reports the proposed server runner version", () => {
   const versions: string[] = [];

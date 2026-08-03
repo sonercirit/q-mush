@@ -22,6 +22,7 @@ import {
   addRunnerSocketFailureListeners,
   observeOperationalRunnerSocket,
   parseSocketJsonRecord,
+  RunnerRegistrationRejectedError,
   RunnerSupersededError,
 } from "./runner-socket.ts";
 import { RunnerUpdateTrigger } from "./runner-update-trigger.ts";
@@ -407,7 +408,10 @@ async function connectRunner(
       return socket;
     } catch (error) {
       socket.close();
-      if (startupConnection.restartId !== undefined) {
+      if (
+        error instanceof RunnerRegistrationRejectedError ||
+        error instanceof RunnerSupersededError
+      ) {
         throw error;
       }
       console.warn("Could not reach Q Mush; retrying setup…");
@@ -528,7 +532,6 @@ async function maintainConnection(
   startupRestart: RunnerStartupRestart,
 ): Promise<void> {
   const active = new Map<string, ActiveCommand>();
-  const exitOnDisconnect = startupRestart.startupRestart;
   const installOperationalHandlers = (connected: WebSocket): void => {
     bindOperationalSocket(connected, active);
   };
@@ -545,7 +548,7 @@ async function maintainConnection(
   for (;;) {
     if (socket.readyState !== WebSocket.OPEN) {
       const failure = await socketFailure;
-      if (exitOnDisconnect || failure instanceof RunnerSupersededError) {
+      if (failure instanceof RunnerSupersededError) {
         await throwSocketFailure(socket, active, failure);
       }
       socket = await connectRunner(
@@ -593,10 +596,7 @@ async function maintainConnection(
       socketFailure,
       HEARTBEAT_INTERVAL_MILLISECONDS,
     );
-    if (
-      failure instanceof RunnerSupersededError ||
-      (failure !== undefined && exitOnDisconnect)
-    ) {
+    if (failure instanceof RunnerSupersededError) {
       await throwSocketFailure(socket, active, failure);
     }
   }

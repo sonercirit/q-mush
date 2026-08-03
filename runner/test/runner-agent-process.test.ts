@@ -2,9 +2,13 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import { runnerSupersededMessage } from "../../shared/runner-realtime-protocol.ts";
+import {
+  runnerRegistrationRejectedMessage,
+  runnerSupersededMessage,
+} from "../../shared/runner-realtime-protocol.ts";
 
 const RUNNER_VERSION = "a".repeat(64);
+const POLL_INTERVAL_MILLISECONDS = 10;
 
 function waitForExit(
   child: Bun.Subprocess<"ignore", "pipe", "pipe">,
@@ -16,14 +20,32 @@ function waitForExit(
   ]);
 }
 
+async function waitUntil(
+  condition: () => boolean,
+  milliseconds: number,
+): Promise<boolean> {
+  const deadline = Date.now() + milliseconds;
+  while (!condition() && Date.now() < deadline) {
+    await Bun.sleep(POLL_INTERVAL_MILLISECONDS);
+  }
+  return condition();
+}
+
 interface RunnerTestSocketData {
   heartbeat: boolean;
   nextMessage: number;
   operational: boolean;
 }
 
-function runnerServer(): Readonly<{
+interface RunnerTestServerOptions {
+  readonly rejectRegistration?: boolean;
+  readonly transientRegistrationFailures?: number;
+}
+
+function runnerServer(options: RunnerTestServerOptions = {}): Readonly<{
   readonly origin: string;
+  attempts(): number;
+  registered(): boolean;
   stop(): void;
   supersede(): boolean;
 }> {
@@ -49,6 +71,7 @@ function runnerServer(): Readonly<{
     },
     { registrationId, type: "registration_operational" },
   ];
+  let attempts = 0;
   const sockets = new Set<Bun.ServerWebSocket<RunnerTestSocketData>>();
   const sendNext = (
     socket: Bun.ServerWebSocket<RunnerTestSocketData>,
@@ -80,24 +103,44 @@ function runnerServer(): Readonly<{
       message: (socket, message) => {
         const value: unknown = JSON.parse(String(message));
         if (
-          typeof value === "object" &&
-          value !== null &&
-          "type" in value &&
-          value.type === "heartbeat"
+          typeof value !== "object" ||
+          value === null ||
+          !("type" in value) ||
+          typeof value.type !== "string"
         ) {
+          return;
+        }
+        if (value.type === "heartbeat") {
           socket.data.heartbeat = true;
+          return;
+        }
+        if (
+          value.type === "connect" &&
+          attempts <= (options.transientRegistrationFailures ?? 0)
+        ) {
+          socket.close(1011, "Transient setup failure");
+          return;
+        }
+        if (value.type === "connect" && options.rejectRegistration === true) {
+          socket.send(runnerRegistrationRejectedMessage());
+          setTimeout(() => {
+            socket.close(1008, "Registration rejected");
+          }, 20);
+          return;
         }
         sendNext(socket);
       },
       open: (socket) => {
+        attempts += 1;
         sockets.add(socket);
-        sendNext(socket);
       },
     },
   });
   const hostname = server.hostname ?? "127.0.0.1";
   return {
+    attempts: () => attempts,
     origin: `http://${hostname}:${String(server.port)}`,
+    registered: () => [...sockets].some(({ data }) => data.operational),
     stop: () => {
       void server.stop(true);
     },
@@ -112,15 +155,10 @@ function runnerServer(): Readonly<{
   };
 }
 
-test("the runner process exits promptly when superseded mid-heartbeat", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "q-mush-runner-exit-test-"));
-  const configurationPath = join(directory, "runner.conf");
-  const server = runnerServer();
-  writeFileSync(
-    configurationPath,
-    `${server.origin}\nqmr_process_test_token\n`,
-  );
-  const child = Bun.spawn(
+function spawnRunner(
+  configurationPath: string,
+): Bun.Subprocess<"ignore", "pipe", "pipe"> {
+  return Bun.spawn(
     [
       process.execPath,
       "--define",
@@ -135,21 +173,71 @@ test("the runner process exits promptly when superseded mid-heartbeat", async ()
     ],
     { stderr: "pipe", stdout: "pipe" },
   );
+}
+
+function processTestSetup(options?: RunnerTestServerOptions): Readonly<{
+  readonly child: Bun.Subprocess<"ignore", "pipe", "pipe">;
+  readonly directory: string;
+  readonly server: ReturnType<typeof runnerServer>;
+}> {
+  const directory = mkdtempSync(join(tmpdir(), "q-mush-runner-exit-test-"));
+  const configurationPath = join(directory, "runner.conf");
+  const server = runnerServer(options);
+  writeFileSync(
+    configurationPath,
+    `${server.origin}\nqmr_process_test_token\n`,
+  );
+  return { child: spawnRunner(configurationPath), directory, server };
+}
+
+async function cleanupProcessTest(
+  setup: ReturnType<typeof processTestSetup>,
+): Promise<void> {
+  if (setup.child.exitCode === null) {
+    setup.child.kill();
+    await setup.child.exited;
+  }
+  setup.server.stop();
+  rmSync(setup.directory, { force: true, recursive: true });
+}
+
+test("the runner process exits promptly when superseded mid-heartbeat", async () => {
+  const setup = processTestSetup();
 
   try {
-    let superseded = false;
-    for (let index = 0; !superseded && index < 100; index += 1) {
-      superseded = server.supersede();
-      if (!superseded) await Bun.sleep(10);
-    }
-    expect(superseded).toBe(true);
-    expect(await waitForExit(child, 900)).toBe(1);
-    expect(await new Response(child.stderr).text()).toContain(
+    expect(await waitUntil(() => setup.server.supersede(), 1_000)).toBe(true);
+    expect(await waitForExit(setup.child, 900)).toBe(1);
+    expect(await new Response(setup.child.stderr).text()).toContain(
       "The runner connection was superseded by a newer process",
     );
   } finally {
-    if (child.exitCode === null) child.kill();
-    server.stop();
-    rmSync(directory, { force: true, recursive: true });
+    await cleanupProcessTest(setup);
+  }
+});
+
+test("a restart runner retries a transient registration failure", async () => {
+  const setup = processTestSetup({ transientRegistrationFailures: 1 });
+
+  try {
+    expect(await waitUntil(() => setup.server.registered(), 7_000)).toBe(true);
+    expect(setup.server.attempts()).toBe(2);
+    expect(setup.child.exitCode).toBeNull();
+  } finally {
+    await cleanupProcessTest(setup);
+  }
+});
+
+test("a stale restart runner exits after one explicit registration rejection", async () => {
+  const setup = processTestSetup({ rejectRegistration: true });
+
+  try {
+    expect(await waitForExit(setup.child, 900)).toBe(1);
+    expect(await new Response(setup.child.stderr).text()).toContain(
+      "The runner registration was rejected by Q Mush",
+    );
+    await Bun.sleep(100);
+    expect(setup.server.attempts()).toBe(1);
+  } finally {
+    await cleanupProcessTest(setup);
   }
 });

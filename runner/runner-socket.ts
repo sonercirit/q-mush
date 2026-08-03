@@ -2,6 +2,13 @@ import { parseJsonRecord } from "../shared/json-record.ts";
 import { RUNNER_SUPERSEDED_CLOSE_CODE } from "../shared/runner-realtime-protocol.ts";
 import { RunnerConnectionError } from "./runner-connection.ts";
 
+export class RunnerRegistrationRejectedError extends RunnerConnectionError {
+  constructor() {
+    super("The runner registration was rejected by Q Mush");
+    this.name = "RunnerRegistrationRejectedError";
+  }
+}
+
 export class RunnerSupersededError extends RunnerConnectionError {
   constructor() {
     super("The runner connection was superseded by a newer process");
@@ -29,9 +36,39 @@ export function parseSocketJsonRecord(
   );
 }
 
+interface RunnerSocketFailureMessages {
+  readonly close: string;
+  readonly error: string;
+}
+
+function socketMessageFailure(event: Event): Error | undefined {
+  if (!(event instanceof MessageEvent) || typeof event.data !== "string") {
+    return undefined;
+  }
+  const type = parseSocketJsonRecord(event.data)?.["type"];
+  if (type === "registration_rejected") {
+    return new RunnerRegistrationRejectedError();
+  }
+  return type === "superseded" ? new RunnerSupersededError() : undefined;
+}
+
+function socketCloseFailure(
+  event: Event,
+  messages: RunnerSocketFailureMessages,
+): Error {
+  return event instanceof CloseEvent &&
+    event.code === RUNNER_SUPERSEDED_CLOSE_CODE
+    ? new RunnerSupersededError()
+    : new RunnerConnectionError(messages.close);
+}
+
 export function observeOperationalRunnerSocket(
   socket: Pick<WebSocket, "addEventListener">,
 ): Promise<Error> {
+  const messages = {
+    close: "The WebSocket connection closed",
+    error: "The WebSocket connection failed",
+  };
   return new Promise((resolve) => {
     let settled = false;
     const settle = (error: Error): void => {
@@ -41,30 +78,20 @@ export function observeOperationalRunnerSocket(
       }
     };
     socket.addEventListener("message", (event) => {
-      if (
-        event instanceof MessageEvent &&
-        typeof event.data === "string" &&
-        parseSocketJsonRecord(event.data)?.["type"] === "superseded"
-      ) {
-        settle(new RunnerSupersededError());
-      }
+      const error = socketMessageFailure(event);
+      if (error !== undefined) settle(error);
     });
     socket.addEventListener(
       "close",
       (event) => {
-        settle(
-          event instanceof CloseEvent &&
-            event.code === RUNNER_SUPERSEDED_CLOSE_CODE
-            ? new RunnerSupersededError()
-            : new RunnerConnectionError("The WebSocket connection closed"),
-        );
+        settle(socketCloseFailure(event, messages));
       },
       { once: true },
     );
     socket.addEventListener(
       "error",
       () => {
-        settle(new RunnerConnectionError("The WebSocket connection failed"));
+        settle(new RunnerConnectionError(messages.error));
       },
       { once: true },
     );
@@ -74,18 +101,24 @@ export function observeOperationalRunnerSocket(
 export function addRunnerSocketFailureListeners(
   socket: Pick<WebSocket, "addEventListener">,
   settle: (error: Error) => void,
-  messages: Readonly<{ readonly close: string; readonly error: string }>,
+  messages: RunnerSocketFailureMessages,
 ): void {
-  for (const [type, message] of [
-    ["error", messages.error],
-    ["close", messages.close],
-  ] as const) {
-    socket.addEventListener(
-      type,
-      () => {
-        settle(new RunnerConnectionError(message));
-      },
-      { once: true },
-    );
-  }
+  socket.addEventListener("message", (event) => {
+    const error = socketMessageFailure(event);
+    if (error !== undefined) settle(error);
+  });
+  socket.addEventListener(
+    "close",
+    (event) => {
+      settle(socketCloseFailure(event, messages));
+    },
+    { once: true },
+  );
+  socket.addEventListener(
+    "error",
+    () => {
+      settle(new RunnerConnectionError(messages.error));
+    },
+    { once: true },
+  );
 }
