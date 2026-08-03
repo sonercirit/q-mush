@@ -62,6 +62,22 @@ function realtimeSetup(): {
   return { hub, socket };
 }
 
+function compactionRequest(streamId: string) {
+  return {
+    content: TEST_COMPACTION_REQUEST_MESSAGE,
+    sessionId: TEST_SESSION_DETAIL.id,
+    streamId,
+    type: "session_compaction_request" as const,
+  };
+}
+
+function compactionSettled() {
+  return {
+    sessionId: TEST_SESSION_DETAIL.id,
+    type: "session_compaction_settled" as const,
+  };
+}
+
 function sessionDelta(content: string, thinking: string, streamId: string) {
   return {
     content,
@@ -176,33 +192,16 @@ describe("session agent models", () => {
       createAgentSystemPrompt(null, TEST_SESSION_DETAIL.executionEnvironment),
       createAgentSystemPrompt(null, TEST_SESSION_DETAIL.executionEnvironment),
     ]);
-    expectRealtimeDeltas(socket, [
-      {
-        content: TEST_COMPACTION_REQUEST_MESSAGE,
-        sessionId: TEST_SESSION_DETAIL.id,
-        streamId: "stream-2",
-        type: "session_compaction_request",
-      },
+    const streamed = [
+      compactionRequest("stream-2"),
       sessionDelta("Incremental ", "", "stream-2"),
       sessionDelta("summary", "", "stream-2"),
-    ]);
+    ];
+    expectRealtimeDeltas(socket, streamed);
     summary.release(providerStep("Incremental summary"));
     await compaction;
     models.publishCompactionSettled();
-    expectRealtimeDeltas(socket, [
-      {
-        content: TEST_COMPACTION_REQUEST_MESSAGE,
-        sessionId: TEST_SESSION_DETAIL.id,
-        streamId: "stream-2",
-        type: "session_compaction_request",
-      },
-      sessionDelta("Incremental ", "", "stream-2"),
-      sessionDelta("summary", "", "stream-2"),
-      {
-        sessionId: TEST_SESSION_DETAIL.id,
-        type: "session_compaction_settled",
-      },
-    ]);
+    expectRealtimeDeltas(socket, [...streamed, compactionSettled()]);
   });
 
   test("publishes settlement when compaction fails", async () => {
@@ -223,16 +222,8 @@ describe("session agent models", () => {
     ).rejects.toThrow("provider failed");
 
     expectRealtimeDeltas(socket, [
-      {
-        content: TEST_COMPACTION_REQUEST_MESSAGE,
-        sessionId: TEST_SESSION_DETAIL.id,
-        streamId: "stream-id",
-        type: "session_compaction_request",
-      },
-      {
-        sessionId: TEST_SESSION_DETAIL.id,
-        type: "session_compaction_settled",
-      },
+      compactionRequest("stream-id"),
+      compactionSettled(),
     ]);
   });
 

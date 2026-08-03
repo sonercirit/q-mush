@@ -155,41 +155,39 @@ export function createSessionAgentModels(options: {
     options.agentFile,
     options.detail.executionEnvironment,
   );
-  const publishCompactionRequest = (content: string): void => {
+  const publishCompaction = (
+    event:
+      | { readonly content: string; readonly type: "request" }
+      | { readonly type: "settled" },
+  ): void => {
     if (!options.isCurrent()) {
       return;
     }
     try {
       options.realtime?.publishUser(
         options.userId,
-        {
-          content,
-          sessionId: options.detail.id,
-          streamId,
-          type: "session_compaction_request",
-        },
+        event.type === "request"
+          ? {
+              content: event.content,
+              sessionId: options.detail.id,
+              streamId,
+              type: "session_compaction_request",
+            }
+          : {
+              sessionId: options.detail.id,
+              type: "session_compaction_settled",
+            },
         options.detail.workspaceId,
       );
     } catch {
       // Live delivery must never interrupt the persisted model step.
     }
   };
+  const publishCompactionRequest = (content: string): void => {
+    publishCompaction({ content, type: "request" });
+  };
   const publishCompactionSettled = (): void => {
-    if (!options.isCurrent()) {
-      return;
-    }
-    try {
-      options.realtime?.publishUser(
-        options.userId,
-        {
-          sessionId: options.detail.id,
-          type: "session_compaction_settled",
-        },
-        options.detail.workspaceId,
-      );
-    } catch {
-      // Live delivery must never interrupt the persisted compaction.
-    }
+    publishCompaction({ type: "settled" });
   };
   return {
     agent: options.factory(

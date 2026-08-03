@@ -89,6 +89,46 @@ function applyProductionResetSequence(
   applyCompactionDelta(controller, sessionId, "Replacement response", streamId);
 }
 
+function settleCompaction(
+  controller: SessionController,
+  sessionId: string,
+): void {
+  controller.applyCompaction({
+    sessionId,
+    type: "session_compaction_settled",
+  });
+}
+
+function applyOrdinaryContinuation(
+  controller: SessionController,
+  sessionId: string,
+): void {
+  settleCompaction(controller, sessionId);
+  applyCompactionDelta(
+    controller,
+    sessionId,
+    "Ordinary continuation",
+    "later-stream",
+  );
+}
+
+function expectOrdinaryContinuation(
+  controller: SessionController,
+  expectedPrefix: readonly unknown[] = [],
+): void {
+  expect(compactionRequestIds(controller)).toEqual([]);
+  expect(controller.state.detail?.messages.at(-1)).toMatchObject({
+    content: "Ordinary continuation",
+    role: "assistant",
+  });
+  if (expectedPrefix.length > 0) {
+    expect(controller.state.detail?.messages).toMatchObject([
+      ...expectedPrefix,
+      { content: "Ordinary continuation", role: "assistant" },
+    ]);
+  }
+}
+
 function compactionRequestIds(
   controller: SessionController,
 ): readonly string[] {
@@ -235,10 +275,7 @@ test.each(SNAPSHOT_TIMINGS)(
       }
 
       const handoff = transcriptMessage("handoff", HANDOFF_MESSAGE, "user", 3);
-      controller.applyCompaction({
-        sessionId,
-        type: "session_compaction_settled",
-      });
+      settleCompaction(controller, sessionId);
       controller.applyDetail({
         ...detail,
         hasOlderSegments: true,
@@ -250,20 +287,15 @@ test.each(SNAPSHOT_TIMINGS)(
         Array.from({ length: requestCounts.length - 1 }, () => 1),
       );
       expect(requestCounts.at(-1)).toBe(0);
-      expect(controller.state.detail?.messages).toMatchObject([
-        { content: HANDOFF_MESSAGE, id: "handoff", role: "user" },
-      ]);
+      expect(controller.state.detail?.messages.at(0)).toMatchObject({
+        content: HANDOFF_MESSAGE,
+        id: "handoff",
+        role: "user",
+      });
 
-      applyCompactionDelta(
-        controller,
-        sessionId,
-        "Ordinary continuation",
-        "later-stream",
-      );
-      expect(compactionRequestIds(controller)).toEqual([]);
-      expect(controller.state.detail?.messages).toMatchObject([
+      applyOrdinaryContinuation(controller, sessionId);
+      expectOrdinaryContinuation(controller, [
         { content: HANDOFF_MESSAGE, id: "handoff", role: "user" },
-        { content: "Ordinary continuation", role: "assistant" },
       ]);
     } finally {
       globalThis.fetch = originalFetch;
@@ -276,20 +308,7 @@ test("clears a failed compaction request without a snapshot", async () => {
   const { controller } = await selectedCompactionController(sessionId);
   applyCompactionDelta(controller, sessionId, "Aborted summary");
 
-  controller.applyCompaction({
-    sessionId,
-    type: "session_compaction_settled",
-  });
-  applyCompactionDelta(
-    controller,
-    sessionId,
-    "Ordinary continuation",
-    "later-stream",
-  );
+  applyOrdinaryContinuation(controller, sessionId);
 
-  expect(compactionRequestIds(controller)).toEqual([]);
-  expect(controller.state.detail?.messages.at(-1)).toMatchObject({
-    content: "Ordinary continuation",
-    role: "assistant",
-  });
+  expectOrdinaryContinuation(controller);
 });
