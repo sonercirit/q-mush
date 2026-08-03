@@ -385,7 +385,10 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
 
   runnerDisconnected(runnerId: string): void {
     this.resources.liveness.runnerDisconnected(runnerId);
-    this.resources.broker.disconnectRunner(runnerId);
+    const restartPending =
+      this.resources.restart.draining() ||
+      this.resources.restart.pendingRunnerRestart(runnerId) !== undefined;
+    this.resources.broker.disconnectRunner(runnerId, !restartPending);
   }
 
   streamRunnerCommand(
