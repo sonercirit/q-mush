@@ -115,9 +115,6 @@ export class DatabaseWriteResilience {
   }
 
   close(): void {
-    if (this.#closed) {
-      return;
-    }
     this.#closed = true;
     this.#retriesCancelled = true;
     this.#controller.abort();
@@ -187,18 +184,12 @@ export class DatabaseWriteResilience {
     }
     const retry = this.#retry(operation);
     this.#activeRetry = retry;
-    void retry.then(
-      () => {
-        if (this.#activeRetry === retry) {
-          this.#activeRetry = undefined;
-        }
-      },
-      () => {
-        if (this.#activeRetry === retry) {
-          this.#activeRetry = undefined;
-        }
-      },
-    );
+    const clear = () => {
+      if (this.#activeRetry === retry) {
+        this.#activeRetry = undefined;
+      }
+    };
+    void retry.then(clear, clear);
     return retry;
   }
 
@@ -217,8 +208,11 @@ export class DatabaseWriteResilience {
         await this.#sleep(delay, this.#controller.signal);
         this.#throwIfClosed();
         const attempted = this.#perform(operation, true);
-        if (attempted.status === "persisted") {
-          return attempted.result;
+        switch (attempted.status) {
+          case "persisted":
+            return attempted.result;
+          case "disk_full":
+            break;
         }
         this.#health.degrade(
           "disk_full",

@@ -30,13 +30,32 @@ function adjustPageLimit(database: AppDatabase, pages: number): void {
   );
 }
 
+function firstAttemptFails(attempt: number): void {
+  if (attempt === 1) {
+    throw diskFullError();
+  }
+}
+
+function newHealth(): EngineHealth {
+  return new EngineHealth(vi.fn());
+}
+
+function useFakeClock(): void {
+  vi.useFakeTimers();
+}
+
+function incrementAndFailFirst(attempts: { value: number }): void {
+  attempts.value += 1;
+  firstAttemptFails(attempts.value);
+}
+
 function resilientDatabase(
   configure?: (
     health: EngineHealth,
     database: AppDatabase,
   ) => DatabaseWriteResilience,
 ): ResilientDatabaseFixture {
-  const health = new EngineHealth(vi.fn());
+  const health = newHealth();
   const database = createDatabase(":memory:");
   database.$client.run(
     "CREATE TABLE resilience_fixture (payload BLOB NOT NULL)",
@@ -119,7 +138,7 @@ test("recognizes Bun's wrapped SQLiteError and returns only after retry lands", 
 });
 
 test("retries one critical write in order with capped backoff", async () => {
-  const health = new EngineHealth(vi.fn());
+  const health = newHealth();
   const delays: number[] = [];
   const events: string[] = [];
   let attempts = 0;
@@ -169,16 +188,13 @@ test("retries one critical write in order with capped backoff", async () => {
 });
 
 test("keeps the event loop responsive while a critical write waits", async () => {
-  vi.useFakeTimers();
-  const health = new EngineHealth(vi.fn());
-  let attempts = 0;
+  useFakeClock();
+  const health = newHealth();
+  const attempts = { value: 0 };
   let timerRan = false;
   const resilience = new DatabaseWriteResilience({ health });
   const persisted = resilience.run("critical", () => {
-    attempts += 1;
-    if (attempts === 1) {
-      throw diskFullError();
-    }
+    incrementAndFailFirst(attempts);
     return "persisted";
   });
   setTimeout(() => {
@@ -187,37 +203,34 @@ test("keeps the event loop responsive while a critical write waits", async () =>
 
   await vi.advanceTimersByTimeAsync(0);
   expect(timerRan).toBe(true);
-  expect(attempts).toBe(1);
+  expect(attempts.value).toBe(1);
   await vi.advanceTimersByTimeAsync(100);
   await expect(persisted).resolves.toBe("persisted");
   vi.useRealTimers();
 });
 
 test("surfaces a non-disk retry failure to the waiting caller", async () => {
-  const health = new EngineHealth(vi.fn());
+  const health = newHealth();
   const changedCondition = new Error("the write precondition changed");
-  let attempts = 0;
+  const attempts = { value: 0 };
   const resilience = new DatabaseWriteResilience({
     health,
     sleep: () => Promise.resolve(),
   });
 
   const result = resilience.run("critical", () => {
-    attempts += 1;
-    if (attempts === 1) {
-      throw diskFullError();
-    }
+    incrementAndFailFirst(attempts);
     throw changedCondition;
   });
 
   await expect(result).rejects.toBe(changedCondition);
-  expect(attempts).toBe(2);
+  expect(attempts.value).toBe(2);
   expect(health.snapshot().reasons).toHaveLength(0);
 });
 
 test("shutdown aborts the production async sleep before another attempt", async () => {
-  vi.useFakeTimers();
-  const health = new EngineHealth(vi.fn());
+  useFakeClock();
+  const health = newHealth();
   let attempts = 0;
   const resilience = new DatabaseWriteResilience({ health });
   const write = () => {

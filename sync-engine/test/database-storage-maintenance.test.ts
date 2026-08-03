@@ -34,6 +34,10 @@ function maintenanceFixture(): MaintenanceFixture {
   return { databasePath: join(directory, "q-mush.sqlite"), directory };
 }
 
+function expectSnapshotSize(path: string, size: number): void {
+  expect(statSync(path).size).toBe(size);
+}
+
 function repairSnapshot(
   directory: string,
   name: string,
@@ -58,15 +62,15 @@ test("repair cleanup retains two young snapshots and removes the rest", () => {
   const result = cleanupRepairSnapshots(databasePath, { log });
 
   expect(result).toEqual({ bytesReclaimed: 7, removed: [surplus, expired] });
-  expect(statSync(newest).size).toBe(1);
-  expect(statSync(second).size).toBe(2);
+  expectSnapshotSize(newest, 1);
+  expectSnapshotSize(second, 2);
   expect(log).toHaveBeenCalledWith(expect.stringContaining("7 bytes"));
 });
 
-test("repair cleanup always retains the newest snapshot regardless of age", () => {
+test("age policy cannot remove the final repair artifact", () => {
   const fixture = maintenanceFixture();
-  const newest = repairSnapshot(fixture.directory, "old-newest", 30, 1);
   const oldest = repairSnapshot(fixture.directory, "old-oldest", 31, 2);
+  const newest = repairSnapshot(fixture.directory, "old-newest", 30, 1);
 
   const result = cleanupRepairSnapshots(fixture.databasePath, {
     log: vi.fn(),
@@ -74,7 +78,7 @@ test("repair cleanup always retains the newest snapshot regardless of age", () =
 
   expect(result.bytesReclaimed).toBe(2);
   expect(result.removed).toStrictEqual([oldest]);
-  expect(statSync(newest).size).toBe(1);
+  expectSnapshotSize(newest, 1);
 });
 
 test("main database can be opened and validated before snapshot cleanup", () => {
@@ -86,10 +90,10 @@ test("main database can be opened and validated before snapshot cleanup", () => 
     openDatabaseAndCleanupRepairSnapshots(fixture.databasePath),
   ).toThrow();
 
-  expect(statSync(recoveryCopy).size).toBe(4);
+  expectSnapshotSize(recoveryCopy, 4);
 });
 
-test("quick_check retains every snapshot for corruption outside the schema", () => {
+test("damaged content prevents all recovery-file pruning", () => {
   const fixture = maintenanceFixture();
   const newest = repairSnapshot(fixture.directory, "newest", 1, 1);
   const older = repairSnapshot(fixture.directory, "older", 30, 2);
@@ -125,8 +129,8 @@ test("quick_check retains every snapshot for corruption outside the schema", () 
     expect.stringContaining("quick_check"),
     expect.objectContaining({ code: "SQLITE_CORRUPT" }),
   );
-  expect(statSync(newest).size).toBe(1);
-  expect(statSync(older).size).toBe(2);
+  expectSnapshotSize(newest, 1);
+  expectSnapshotSize(older, 2);
   database.$client.close();
 });
 
