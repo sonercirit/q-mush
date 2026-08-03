@@ -21,8 +21,12 @@ import {
   compactSessionFromView,
   toggleSessionAutoCompaction,
 } from "./session-controller-compaction.ts";
-import { setSessionContextTokenCap } from "./session-controller-context-cap.ts";
+import { updateSessionContextTokenCap } from "./session-controller-context-cap.ts";
 import { createSessionFromView } from "./session-controller-create.ts";
+import {
+  initializeSessionDefaults,
+  openSessionDirectoryPicker,
+} from "./session-controller-defaults.ts";
 import { forkSessionFromView } from "./session-controller-fork.ts";
 import {
   selectedDetailHasStatus,
@@ -35,10 +39,7 @@ import {
   showNewestSessionHistory,
 } from "./session-controller-history.ts";
 import { SessionLoadController } from "./session-controller-load.ts";
-import type {
-  SessionCreationViewOptions,
-  SessionToolUpdateResult,
-} from "./session-controller-options.ts";
+import type { SessionToolUpdateResult } from "./session-controller-options.ts";
 import {
   SessionPendingInputController,
   type PendingInputTimer,
@@ -63,7 +64,6 @@ import {
   continueSessionMutation,
   sendSessionMutation,
   stopSessionMutation,
-  type SessionMutation,
 } from "./session-mutations.ts";
 import {
   runUnlessSessionMutation,
@@ -214,6 +214,12 @@ export class SessionController {
   get transport(): SessionCommandTransport | undefined {
     return this.#transport;
   }
+  get currentDraft() {
+    return this.#view.value.draft;
+  }
+  get detail() {
+    return this.#view.value.detail;
+  }
   addImages(files: readonly File[], follow: boolean) {
     return addSessionImages({ files, follow, view: this.#view });
   }
@@ -276,57 +282,29 @@ export class SessionController {
   continueSession() {
     return this.#continue();
   }
-  #createOptions(): SessionCreationViewOptions {
-    return {
+  create() {
+    return createSessionFromView({
       loader: this.#loader,
       reconciliation: this.#reconciliation,
       transport: this.#transport,
       view: this.#view,
-    };
-  }
-  create() {
-    return createSessionFromView(this.#createOptions());
+    });
   }
   initializeDefaults(
     runnerId: string,
     credential: string,
     credentialsSettled: boolean,
   ): void {
-    const draft = this.#view.value.draft;
-    const selectedCredential =
-      credentialsSettled && draft.credential.length === 0
-        ? credential
-        : draft.credential;
-    const next = {
-      ...draft,
-      credential: selectedCredential,
-      ...(selectedCredential === draft.credential
-        ? {}
-        : { model: "", openRouterProviderTag: "", reasoningEffort: "" }),
-      runnerId: draft.runnerId.length === 0 ? runnerId : draft.runnerId,
-    };
-    if (
-      next.credential !== draft.credential ||
-      next.runnerId !== draft.runnerId
-    ) {
-      this.#view.patch({ draft: next });
-    }
-    if (next.credential.length > 0) {
-      this.#models.ensure(next.credential);
-    }
+    initializeSessionDefaults(this, runnerId, credential, credentialsSettled);
+  }
+  ensureModels(credential: string): void {
+    this.#models.ensure(credential);
+  }
+  patchDraft(draft: SessionViewState["draft"]): void {
+    this.#view.patch({ draft });
   }
   openDirectoryPicker(): void {
-    const required = this.#view.value.detail?.runnerRequired === true;
-    const selection = required
-      ? this.#view.value.reassignment
-      : this.#view.value.draft;
-    if (selection.runnerId.length > 0) {
-      void this.#directoryPicker.open(
-        selection.runnerId,
-        selection.workingDirectory.trim() || "~",
-        this.#view.value.detail?.workspaceId,
-      );
-    }
+    openSessionDirectoryPicker(this);
   }
   reassign(onlineRunnerIds: readonly string[]): Promise<void> {
     return reassignSessionFromView(
@@ -444,12 +422,14 @@ export class SessionController {
     messageId: string,
     selection?: Parameters<typeof forkSessionFromView>[0]["selection"],
   ) {
-    return forkSessionFromView(
-      Object.assign(this.#createOptions(), {
-        forkPointMessageId: messageId,
-        selection,
-      }),
-    );
+    return forkSessionFromView({
+      forkPointMessageId: messageId,
+      loader: this.#loader,
+      reconciliation: this.#reconciliation,
+      selection,
+      transport: this.#transport,
+      view: this.#view,
+    });
   }
   send(): Promise<void> {
     return this.#send();
@@ -517,16 +497,11 @@ export class SessionController {
       view: this.#view,
     });
   }
-  setContextTokenCap(cap: number | null, c = false) {
-    const run = (m: SessionMutation) =>
-      mutateSessionDetail(this.#mutationDependencies(), m, true);
-    return setSessionContextTokenCap(
-      () => this.#view.value,
-      cap,
-      c,
-      run,
-      async () => this.compact(),
-    );
+  setContextTokenCap(cap: number | null, compact = false) {
+    return updateSessionContextTokenCap(this, cap, compact);
+  }
+  mutateContextTokenCap(mutation: Parameters<typeof mutateSessionDetail>[1]) {
+    return mutateSessionDetail(this.#mutationDependencies(), mutation, true);
   }
   setTranscriptFilter(
     name: SessionTranscriptFilterName,
@@ -614,7 +589,7 @@ export class SessionController {
   }
   async #mutateWhen(
     allowed: (status: AgentSessionStatus) => boolean,
-    mutation: (sessionId: string) => SessionMutation,
+    mutation: Parameters<typeof selectedMutation>[1],
   ): Promise<void> {
     if (
       sessionMutationPending(this.#view.value) ||
@@ -625,7 +600,7 @@ export class SessionController {
     await this.#mutateSelected(mutation);
   }
   async #mutateRecoverable(
-    mutation: (sessionId: string) => SessionMutation,
+    mutation: Parameters<typeof selectedMutation>[1],
     allowed = sessionCanResume,
   ): Promise<void> {
     if (this.#view.value.detail?.runnerRequired !== true) {
@@ -641,7 +616,7 @@ export class SessionController {
     );
   }
   async #mutateSelected(
-    create: (sessionId: string) => SessionMutation,
+    create: Parameters<typeof selectedMutation>[1],
   ): Promise<void> {
     const mutation = selectedMutation(this.#view.value.selectedId, create);
     if (mutation !== undefined) {

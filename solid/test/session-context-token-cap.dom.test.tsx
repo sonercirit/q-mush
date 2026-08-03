@@ -1,7 +1,7 @@
 import { expect, test, vi } from "vitest";
 import { SESSION_REALTIME_OPERATIONS } from "../../shared/user-realtime-protocol.ts";
 import { createReactiveState } from "../reactive-state.ts";
-import { setSessionContextTokenCap } from "../session-controller-context-cap.ts";
+import { updateSessionContextTokenCap } from "../session-controller-context-cap.ts";
 import { initialSessionViewState } from "../session-state.ts";
 import type { SessionViewState } from "../session-view-state.ts";
 import {
@@ -180,12 +180,14 @@ test.each([
       return Promise.resolve();
     });
 
-    await setSessionContextTokenCap(
-      reactive.state,
+    await updateSessionContextTokenCap(
+      {
+        compact,
+        mutateContextTokenCap: mutate,
+        view: reactive.state,
+      },
       120_000,
       true,
-      mutate,
-      compact,
     );
 
     expect(mutate).toHaveBeenCalledOnce();

@@ -27,9 +27,10 @@ const RETAINED_CAP_ERROR =
   "Lower or clear the context token cap before changing models.";
 
 function invalidContextCapError(): Error & { readonly code: string } {
-  return Object.assign(new Error(RETAINED_CAP_ERROR), {
-    code: "invalid_context_token_cap",
-  });
+  class InvalidContextCapError extends Error {
+    readonly code = "invalid_context_token_cap";
+  }
+  return new InvalidContextCapError(RETAINED_CAP_ERROR);
 }
 
 function modelCredential(

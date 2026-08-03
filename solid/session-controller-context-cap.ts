@@ -5,8 +5,30 @@ import {
 } from "./session-mutations.ts";
 import type { SessionViewState } from "./session-view-state.ts";
 
-export async function setSessionContextTokenCap(
-  readState: () => Pick<SessionViewState, "detail" | "selectedId">,
+type ContextCapState = Pick<SessionViewState, "detail" | "selectedId">;
+
+export interface ContextTokenCapController {
+  compact(): Promise<void>;
+  mutateContextTokenCap(mutation: SessionMutation): Promise<void>;
+  readonly view: () => SessionViewState;
+}
+
+export async function updateSessionContextTokenCap(
+  controller: ContextTokenCapController,
+  userContextTokenCap: number | null,
+  compactIfExceeded = false,
+): Promise<void> {
+  await setSessionContextTokenCap(
+    controller.view,
+    userContextTokenCap,
+    compactIfExceeded,
+    controller.mutateContextTokenCap.bind(controller),
+    async () => controller.compact(),
+  );
+}
+
+async function setSessionContextTokenCap(
+  readState: () => ContextCapState,
   userContextTokenCap: number | null,
   compactIfExceeded: boolean,
   mutate: (mutation: SessionMutation) => Promise<void>,
