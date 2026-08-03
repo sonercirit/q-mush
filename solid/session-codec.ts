@@ -35,6 +35,7 @@ import {
 } from "../shared/validation.ts";
 import { readSessionContentFields } from "./session-message-codec.ts";
 import { decodedSessionMessage } from "./session-message-decoder.ts";
+import { readTokenUsageSummary } from "./session-usage-codec.ts";
 
 function readModelReasoningEfforts(
   value: unknown,
@@ -514,11 +515,18 @@ export function readSessionDetail(value: unknown): AgentSessionDetail {
     throw new Error("The server returned invalid agent session details");
   }
 
+  const segmentTokenUsage = readTokenUsageSummary(value["segmentTokenUsage"]);
+  const tokenUsage = readTokenUsageSummary(value["tokenUsage"]);
+  if (segmentTokenUsage === undefined || tokenUsage === undefined) {
+    throw new Error("The server returned invalid agent session details");
+  }
   return {
     ...readSummary(value),
     agentFile: readAgentFile(value["agentFile"]),
     messages: value["messages"].map(readMessage),
     pendingInputs: value["pendingInputs"].map(readSessionPendingInput),
+    ...(segmentTokenUsage === null ? {} : { segmentTokenUsage }),
+    ...(tokenUsage === null ? {} : { tokenUsage }),
     ...(Array.isArray(value["turns"])
       ? { turns: value["turns"].map(readTurn) }
       : {}),

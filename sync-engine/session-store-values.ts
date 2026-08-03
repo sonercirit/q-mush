@@ -1,6 +1,9 @@
 import { and, eq, sql, type SQL } from "drizzle-orm";
 import type { AgentImage } from "../shared/agent-images.ts";
-import type { AgentRecordedMessage } from "../shared/agent-loop.ts";
+import type {
+  AgentRecordedMessage,
+  AgentTokenUsage,
+} from "../shared/agent-loop.ts";
 import { createdAuditFields, updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
@@ -26,6 +29,7 @@ export interface StoredMessageValues {
   readonly toolCallId: string | null;
   readonly toolCalls: string | null;
   readonly toolName: string | null;
+  readonly tokenUsage?: AgentTokenUsage | null;
   readonly turnId?: string | null;
 }
 
@@ -71,12 +75,14 @@ export function interruptedSessionErrorValues(): StoredMessageValues {
 
 export function recordedMessageValues(
   message: AgentRecordedMessage,
+  tokenUsage?: AgentTokenUsage | null,
 ): StoredMessageValues {
   if (message.role === "assistant") {
     return {
       ...emptyToolMetadata(),
       content: message.content,
       role: "assistant",
+      ...(tokenUsage === undefined ? {} : { tokenUsage }),
       toolCalls: JSON.stringify(message.toolCalls),
     };
   }
@@ -182,6 +188,14 @@ export function insertStoredMessage(
     .values({
       ...createdAuditFields(options.actorId, options.now),
       ...message,
+      ...(message.tokenUsage === undefined || message.tokenUsage === null
+        ? {}
+        : {
+            cacheWriteInputTokens: message.tokenUsage.cacheWriteInputTokens,
+            cachedInputTokens: message.tokenUsage.cachedInputTokens,
+            inputTokens: message.tokenUsage.inputTokens,
+            outputTokens: message.tokenUsage.outputTokens,
+          }),
       id: options.id,
       segment,
       sessionId: options.sessionId,

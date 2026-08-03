@@ -23,6 +23,7 @@ import {
   activeDefaultIndex,
   ownedAuditColumns,
   ownedForeignKey,
+  tokenUsageColumns,
 } from "./schema-columns.ts";
 
 export { auditColumns } from "./audit-columns.ts";
@@ -45,7 +46,7 @@ const userOwnedAuditColumns = () => ownedAuditColumns(() => users.id);
 const workspaceDefaultIndex = activeDefaultIndex(
   "workspaces_user_default_unique",
 );
-const runnerDefaultIndex = activeDefaultIndex("runners_user_default_unique");
+const runnerDefault = activeDefaultIndex("runners_user_default_unique");
 
 export const workspaces = sqliteTable(
   "workspaces",
@@ -296,7 +297,7 @@ export const runners = sqliteTable(
     uniqueIndex("runners_active_token_unique")
       .on(table.tokenHash)
       .where(sql`${table.isDeleted} = false`),
-    runnerDefaultIndex(table),
+    runnerDefault(table),
     check(
       "runners_activation_generation_nonnegative_check",
       sql`${table.activationGeneration} >= 0`,
@@ -543,6 +544,7 @@ export const agentMessages = sqliteTable(
     toolName: text("tool_name"),
     toolCalls: text("tool_calls"),
     images: text("images"),
+    ...tokenUsageColumns(),
   },
   (table) => [
     index("agent_messages_session_deletion_creation_index").on(

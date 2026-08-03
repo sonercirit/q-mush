@@ -7,6 +7,7 @@ import {
   readNullableString,
 } from "../shared/validation.ts";
 import { decodedSessionMessage } from "./session-message-decoder.ts";
+import { readTokenUsageSummary } from "./session-usage-codec.ts";
 
 function sessionMessage(value: unknown): AgentSessionMessage {
   const invalidMessage = "The server returned an invalid session history page";
@@ -32,13 +33,15 @@ export function readSessionHistoryPage(value: unknown): SessionHistoryPage {
   const segment = readNonNegativeSafeInteger(value["segment"]);
   const newerCursor = readNullableString(value["newerCursor"]);
   const olderCursor = readNullableString(value["olderCursor"]);
+  const tokenUsage = readTokenUsageSummary(value["tokenUsage"]);
   if (
     currentSegment === undefined ||
     segment === undefined ||
     segment >= currentSegment ||
     typeof value["sessionId"] !== "string" ||
     newerCursor === undefined ||
-    olderCursor === undefined
+    olderCursor === undefined ||
+    tokenUsage === undefined
   ) {
     throw new Error("The server returned an invalid session history page");
   }
@@ -49,5 +52,6 @@ export function readSessionHistoryPage(value: unknown): SessionHistoryPage {
     olderCursor,
     segment,
     sessionId: value["sessionId"],
+    ...(tokenUsage === null ? {} : { tokenUsage }),
   };
 }

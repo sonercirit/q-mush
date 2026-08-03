@@ -29,9 +29,15 @@ export function agentStepUsage(
   estimateCost: EstimateCost,
 ): AgentSessionUsageUpdate | undefined {
   const cost = usageCost(step, estimateCost);
-  return step.contextTokens === null && cost.costUsd === null
+  return step.contextTokens === null &&
+    cost.costUsd === null &&
+    step.tokenUsage === null
     ? undefined
-    : { contextTokens: step.contextTokens, ...cost };
+    : {
+        contextTokens: step.contextTokens,
+        ...cost,
+        ...(step.tokenUsage === null ? {} : { tokenUsage: step.tokenUsage }),
+      };
 }
 
 export function compactionUsage(

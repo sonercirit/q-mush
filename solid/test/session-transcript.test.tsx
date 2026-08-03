@@ -287,6 +287,12 @@ test("renders durable settlement time for a terminal step", () => {
     {
       ...message("durable-assistant", "Durable response", "assistant"),
       createdAt: durableMessageAt,
+      tokenUsage: {
+        cacheWriteInputTokens: 20,
+        cachedInputTokens: 300,
+        inputTokens: 400,
+        outputTokens: 50,
+      },
       turnId: durableTurnId,
     },
   ];
@@ -312,6 +318,7 @@ test("renders durable settlement time for a terminal step", () => {
   )?.length;
   expect(completedTimingCount).toBe(1);
   expect(html).toContain("Duration: 3s");
+  expect(html).toContain("Cache: 75%");
   const settlementDateTime = new Date(durableEndedAt).toISOString();
   expect(html).toContain(`datetime="${settlementDateTime}"`);
 });
@@ -429,6 +436,118 @@ test("renders persisted session errors distinctly", () => {
   expect(html).toContain("Error message");
   expect(html).toContain("The provider connection failed");
   expect(html).toContain("text-rose-200");
+});
+
+function renderedElementTexts(
+  html: string,
+  pattern: RegExp,
+): readonly string[] {
+  return [...html.matchAll(pattern)].map((match) =>
+    (match[1] ?? "").replace(/<[^>]*>/gu, "").replaceAll("&quot;", '"'),
+  );
+}
+
+const SLEEP_DURATION_ELEMENT_PATTERN =
+  /<p class="[^"]*text-sm text-cyan-100[^"]*">([^<]*)<\/p>/gu;
+const SLEEP_RESULT_TIMING_ELEMENT_PATTERN =
+  /<p class="[^"]*mt-1 text-xs text-slate-400[^"]*">([^<]*)<\/p>/gu;
+const JSON_CODE_ELEMENT_PATTERN =
+  /<pre[^>]*data-language="json"[^>]*>([\s\S]*?)<\/pre>/gu;
+
+test("renders sleep calls and results with human-readable durations", () => {
+  const cases = [
+    {
+      arguments: '{"durationSeconds":59}',
+      duration: "59s",
+      id: "seconds-under-minute",
+    },
+    {
+      arguments: '{"durationSeconds":60}',
+      duration: "1m",
+      id: "seconds-minute",
+    },
+    {
+      arguments: '{"durationSeconds":61}',
+      duration: "1m 1s",
+      id: "seconds-over-minute",
+    },
+    {
+      arguments: '{"durationSeconds":3600}',
+      duration: "1h",
+      id: "seconds-hour",
+    },
+    {
+      arguments: '{"durationSeconds":90}',
+      duration: "1m 30s",
+      id: "seconds",
+      result:
+        "Steering arrived; woke early (actual 75000 ms, expected 90000 ms).",
+      resultTiming: "Actual: 1m 15s · Expected: 1m 30s",
+    },
+    {
+      arguments: '{"durationMs":1200000}',
+      duration: "20m",
+      id: "legacy-milliseconds",
+      result:
+        "Slept for the full duration (actual 1200000 ms, expected 1200000 ms).",
+      resultTiming: "Actual: 20m · Expected: 20m",
+    },
+  ];
+
+  for (const case_ of cases) {
+    const messages = [
+      assistantToolCall({
+        arguments: case_.arguments,
+        id: case_.id,
+        name: "sleep",
+      }),
+    ];
+    if (case_.result !== undefined) {
+      messages.push(
+        toolResult({
+          content: case_.result,
+          id: case_.id,
+          name: "sleep",
+        }),
+      );
+    }
+    const html = renderMessages(messages);
+
+    expect(renderedElementTexts(html, SLEEP_DURATION_ELEMENT_PATTERN)).toEqual([
+      `Duration: ${case_.duration}`,
+    ]);
+    expect(
+      renderedElementTexts(html, SLEEP_RESULT_TIMING_ELEMENT_PATTERN),
+    ).toEqual(case_.resultTiming === undefined ? [] : [case_.resultTiming]);
+    expect(html).not.toContain(case_.arguments.replaceAll('"', "&quot;"));
+  }
+});
+
+test("falls back to raw sleep arguments when the duration is malformed", () => {
+  for (const [id, arguments_, expectedJson] of [
+    ["missing", '{"timeout":1}', '{\n  "timeout": 1\n}'],
+    ["empty", "{}", "{}"],
+    [
+      "seconds-string",
+      '{"durationSeconds":"60"}',
+      '{\n  "durationSeconds": "60"\n}',
+    ],
+    [
+      "milliseconds-string",
+      '{"durationMs":"60000"}',
+      '{\n  "durationMs": "60000"\n}',
+    ],
+  ] as const) {
+    const html = renderMessages([
+      assistantToolCall({ arguments: arguments_, id, name: "sleep" }),
+    ]);
+
+    expect(html).toContain("Tool call · sleep");
+    expect(html).not.toContain("text-sm text-cyan-100");
+    expect(renderedElementTexts(html, JSON_CODE_ELEMENT_PATTERN)).toContain(
+      expectedJson,
+    );
+  }
 });
 
 test("separates and colorizes shell output and its exit status", () => {

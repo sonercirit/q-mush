@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   type AnySQLiteColumn,
+  integer,
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
@@ -18,6 +19,15 @@ export function ownedAuditColumns(userReference: () => AnySQLiteColumn) {
     id: text("id").primaryKey(),
     userId: ownedForeignKey("user_id", userReference),
     ...auditColumns(),
+  };
+}
+
+export function tokenUsageColumns() {
+  return {
+    cacheWriteInputTokens: integer("cache_write_input_tokens"),
+    cachedInputTokens: integer("cached_input_tokens"),
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
   };
 }
 

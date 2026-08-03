@@ -77,7 +77,7 @@ class PrefillRejectingSleepWakeCallbackModel implements AgentModel {
     if (parentRequest === 2) {
       this.#sleepStep.resolve();
       return providerStep("Waiting for the child callback.", {
-        toolCalls: [toolCall("sleep", { durationMs: 60_000 })],
+        toolCalls: [toolCall("sleep", { durationSeconds: 60 })],
       });
     }
     if (messages.at(-1)?.role !== "user") {

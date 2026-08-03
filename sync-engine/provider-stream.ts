@@ -91,7 +91,9 @@ function readTokenUsage(
     usage["input_tokens_details"] ?? usage["prompt_tokens_details"];
   const cachedInputTokens = readTokenCount(inputDetails, "cached_tokens") ?? 0;
   const cacheWriteInputTokens =
-    readTokenCount(inputDetails, "cache_write_tokens") ?? 0;
+    readTokenCount(inputDetails, "cache_write_tokens") ??
+    readTokenCount(usage, "cache_write_input_tokens") ??
+    0;
 
   return inputTokens === undefined || outputTokens === undefined
     ? null
