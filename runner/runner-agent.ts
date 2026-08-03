@@ -401,8 +401,11 @@ async function connectRunner(
       );
       console.log(`Q Mush runner connected as ${metadata.name}.`);
       return socket;
-    } catch {
+    } catch (error) {
       socket.close();
+      if (startupConnection.restartId !== undefined) {
+        throw error;
+      }
       console.warn("Could not reach Q Mush; retrying setup…");
       await setTimeout(RETRY_INTERVAL_MILLISECONDS);
     }
@@ -486,7 +489,7 @@ async function maintainConnection(
   startupRestart: RunnerStartupRestart,
 ): Promise<void> {
   const active = new Map<string, ActiveCommand>();
-  const exitOnDisconnect = startupRestart.restartId !== undefined;
+  const exitOnDisconnect = startupRestart.startupRestart;
   const installOperationalHandlers = (connected: WebSocket): void => {
     bindOperationalSocket(connected, active);
   };
@@ -550,7 +553,16 @@ async function maintainConnection(
     }
 
     sendOpenSocketMessage(socket, { type: "heartbeat" });
-    await setTimeout(HEARTBEAT_INTERVAL_MILLISECONDS);
+    const failure = await Promise.race([
+      setTimeout(HEARTBEAT_INTERVAL_MILLISECONDS).then(() => undefined),
+      socketFailure,
+    ]);
+    if (
+      failure instanceof RunnerSupersededError ||
+      (failure !== undefined && exitOnDisconnect)
+    ) {
+      throw failure;
+    }
   }
 }
 
