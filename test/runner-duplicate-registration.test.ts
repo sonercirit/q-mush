@@ -160,6 +160,22 @@ function runnerCommandInput() {
   };
 }
 
+function activeCommand(
+  broker: RunnerCommandBroker,
+  commandId: string,
+): boolean {
+  return broker.isActive(RUNNER_ID, commandId);
+}
+
+function receivedCommand(
+  process: FakeRunnerProcess,
+  commandId: string,
+): boolean {
+  return process.client.received.some((message) =>
+    isCommandFrame(message, commandId),
+  );
+}
+
 function deliverToProcess(
   process: FakeRunnerProcess,
   command: RunnerToolCommand,
@@ -221,21 +237,13 @@ test("a supervised relaunch supersedes a stale restart process without rejecting
   staleRestartProcess = fakeRunnerProcess(realtime, RESTART_ID);
   await expect(staleRestartProcess.registration).resolves.toBeUndefined();
 
-  const commandResult = broker.dispatch({
-    ...runnerCommandInput(),
-    authorize: () => true,
-  });
+  const commandResult = broker.dispatch(runnerCommandInput());
   const commandRejection = commandResult.catch((error: unknown) => error);
-  const queuedResult = broker.dispatch({
-    ...runnerCommandInput(),
-    authorize: () => true,
-  });
-  expect(broker.isActive(RUNNER_ID, "command-on-stale-restart-process")).toBe(
+  const queuedResult = broker.dispatch(runnerCommandInput());
+  expect(activeCommand(broker, "command-on-stale-restart-process")).toBe(true);
+  expect(activeCommand(broker, "queued-command-for-supervised-process")).toBe(
     true,
   );
-  expect(
-    broker.isActive(RUNNER_ID, "queued-command-for-supervised-process"),
-  ).toBe(true);
 
   const supervisedProcess = fakeRunnerProcess(realtime);
   const staleProcess = staleRestartProcess;
@@ -263,14 +271,10 @@ test("a supervised relaunch supersedes a stale restart process without rejecting
     state: "completed",
   });
   expect(
-    staleProcess.client.received.some((message) =>
-      isCommandFrame(message, "command-on-stale-restart-process"),
-    ),
+    receivedCommand(staleProcess, "command-on-stale-restart-process"),
   ).toBe(true);
   expect(
-    supervisedProcess.client.received.some((message) =>
-      isCommandFrame(message, "queued-command-for-supervised-process"),
-    ),
+    receivedCommand(supervisedProcess, "queued-command-for-supervised-process"),
   ).toBe(true);
   expect(
     staleProcess.client.received.some((message) =>
@@ -302,10 +306,6 @@ test("a stale restart process arriving after the supervised child is rejected on
     id: "authority-check",
   };
   expect(deliverToProcess(supervisedProcess, command)).toBe(true);
-  expect(
-    supervisedProcess.client.received.some((message) =>
-      isCommandFrame(message, "authority-check"),
-    ),
-  ).toBe(true);
+  expect(receivedCommand(supervisedProcess, "authority-check")).toBe(true);
   expect(staleRestartProcess.client.received).toEqual([]);
 });

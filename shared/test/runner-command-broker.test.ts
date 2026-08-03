@@ -498,13 +498,10 @@ describe("runner command broker", () => {
   });
 
   test("rejects only old-generation commands when a replacement takes authority", async () => {
-    const canceled: string[] = [];
-    let nextCommandId = 0;
-    const broker = new RunnerCommandBroker({
-      cancel: (_runnerId, commandId) => canceled.push(commandId),
-      commandId: () => `connection-command-${String(++nextCommandId)}`,
-      deliver: () => true,
-    });
+    let sequence = 0;
+    const broker = deliveredBroker(
+      () => `connection-command-${String((sequence += 1))}`,
+    );
     const old = broker.dispatch(brokerRunnerCommand());
     const oldGeneration = broker.runnerConnectionGeneration(RUNNER_ID);
     const currentGeneration = broker.replaceRunnerConnection(
@@ -518,16 +515,14 @@ describe("runner command broker", () => {
         "The runner connection was superseded before the command returned",
       ),
     );
-    expect(canceled).toEqual([]);
+    expect(broker.isActive(RUNNER_ID, "connection-command-1")).toBe(false);
     broker.replaceRunnerConnection(RUNNER_ID, oldGeneration);
-    expect(
-      broker.complete(
-        RUNNER_ID,
-        "connection-command-2",
-        completedRunnerCommand("current"),
-      ),
-    ).toBe(true);
-    expect(await current).toEqual(completedRunnerCommand("current"));
+    await expectCompletedResult(
+      broker,
+      current,
+      "connection-command-2",
+      "current",
+    );
     expect(broker.runnerConnectionGeneration(RUNNER_ID)).toBe(
       currentGeneration,
     );

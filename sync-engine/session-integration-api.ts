@@ -1,9 +1,6 @@
 import type { PendingAskQuestions } from "../shared/ask-questions.ts";
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
-import type {
-  RunnerCommandBroker,
-  RunnerToolCommand,
-} from "../shared/runner-command-broker.ts";
+import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type {
   AgentSessionDetail,
   AgentSessionSummary,
@@ -23,6 +20,7 @@ import { updateSessionCompactionMode } from "./session-compaction-actions.ts";
 import type { SessionNotification } from "./session-creation.ts";
 import type { SessionExecutionCleanup } from "./session-execution-cleanup.ts";
 import { readPrompt, type PromptInput } from "./session-input.ts";
+import type { DeliverRunnerCommands } from "./session-integration.ts";
 import { openRouterProvidersForUser } from "./session-provider-selection.ts";
 import { recoverAnsweredQuestions } from "./session-question-actions.ts";
 import { reassignSessionRequest } from "./session-reassignment-request.ts";
@@ -199,11 +197,11 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
     return this.resources.broker.complete(runnerId, commandId, result);
   }
 
-  deliverRunnerCommands(
-    runnerId: string,
-    deliver: (command: RunnerToolCommand) => boolean,
-    connectionGeneration?: number,
-  ): boolean {
+  deliverRunnerCommands: DeliverRunnerCommands = (
+    runnerId,
+    deliver,
+    connectionGeneration,
+  ) => {
     let delivered = true;
     this.resources.broker.deliverQueued(
       runnerId,
@@ -215,7 +213,7 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
       connectionGeneration,
     );
     return delivered;
-  }
+  };
 
   runnerConnectionGeneration(runnerId: string): number {
     return this.resources.broker.runnerConnectionGeneration(runnerId);

@@ -301,6 +301,13 @@ function executeCommand(
   active.set(command.id, { controller });
 }
 
+function abortActiveCommands(active: Map<string, ActiveCommand>): void {
+  for (const command of active.values()) {
+    command.controller.abort();
+  }
+  active.clear();
+}
+
 function bindOperationalSocket(
   connected: WebSocket,
   active: Map<string, ActiveCommand>,
@@ -336,10 +343,7 @@ function bindOperationalSocket(
     }
   });
   connected.addEventListener("close", () => {
-    for (const command of active.values()) {
-      command.controller.abort();
-    }
-    active.clear();
+    abortActiveCommands(active);
     void activeRunnerExecution().containers.cleanupAll();
   });
 }
@@ -512,10 +516,7 @@ async function throwSocketFailure(
 ): Promise<never> {
   if (failure instanceof RunnerSupersededError) {
     socket.close(1000, "Superseded");
-    for (const command of active.values()) {
-      command.controller.abort();
-    }
-    active.clear();
+    abortActiveCommands(active);
     await activeRunnerExecution().containers.cleanupAll();
   }
   throw failure;
