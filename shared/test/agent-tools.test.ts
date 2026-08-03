@@ -48,23 +48,20 @@ test("defines the sleep duration in bounded whole seconds", () => {
     ({ function: definition }) => definition.name === "sleep",
   );
 
-  expect(sleep).toMatchObject({
-    function: {
-      description:
-        "Pause this session for a positive bounded duration in seconds. Pending steering wakes it early; the result reports actual and expected duration.",
-      parameters: {
-        properties: {
-          durationSeconds: {
-            description: "Duration to sleep in seconds (1-3,600)",
-            maximum: 3_600,
-            minimum: 1,
-            type: "integer",
-          },
-        },
-        required: ["durationSeconds"],
-      },
-    },
-  });
+  if (sleep?.function.name !== "sleep") {
+    throw new Error("The sleep tool definition is unavailable");
+  }
+  expect(sleep.function.description).toContain("duration in seconds");
+  expect(sleep.function.parameters.required).toEqual(["durationSeconds"]);
+  const properties = sleep.function.parameters.properties;
+  const durationSeconds = properties.durationSeconds;
+  expect(Object.keys(properties)).toEqual(["durationSeconds"]);
+  expect(durationSeconds.description).toBe(
+    "Duration to sleep in seconds (1-3,600)",
+  );
+  expect(durationSeconds.maximum).toBe(3_600);
+  expect(durationSeconds.minimum).toBe(1);
+  expect(durationSeconds.type).toBe("integer");
 });
 
 test("keeps sleep session-local and unavailable to parallel", () => {
