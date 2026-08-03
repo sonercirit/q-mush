@@ -447,8 +447,8 @@ export class SessionStore extends SessionStoreRestarts {
   }
   failInterrupted(
     now: number,
-    active = (_id: string, _generation: number) => false,
-  ): readonly PendingSpawnedSession[] {
+    active: (id: string, generation: number) => boolean = () => false,
+  ) {
     const interrupted = interruptedStoredSessions(this.#database, now);
     for (const session of interrupted) {
       if (active(session.id, session.executionGeneration)) {
