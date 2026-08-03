@@ -251,17 +251,13 @@ async function fenceAtGate(
   gate.release(undefined);
 }
 
-async function expectParentStale(result: Promise<string>): Promise<void> {
-  expect(await result).toContain("parent_stale");
-}
-
 async function expectStaleSpawn(
   gate: PromiseGate,
   setup: AuthoritySetup,
   result: Promise<string>,
 ): Promise<void> {
   await fenceAtGate(gate, setup);
-  await expectParentStale(result);
+  expect(await result).toContain("parent_stale");
   expect(setup.store.list(TEST_USER_ID)).toHaveLength(1);
   closeAuthoritySetup(setup);
 }
@@ -313,6 +309,21 @@ function expectTargetUnchanged(
   expect(setup.store.get(TEST_USER_ID, TARGET_SESSION_ID)).toEqual(before);
 }
 
+async function expectTargetUnchangedAfterFencing(
+  setup: AuthoritySetup,
+  gate: PromiseGate,
+  before: ReturnType<SessionStore["get"]>,
+  result: Promise<string>,
+): Promise<void> {
+  await Promise.race([gate.entered]);
+  fenceParent(setup);
+  gate.release(undefined);
+  const output = await result;
+  expect(output).toContain("parent_stale");
+  expectTargetUnchanged(setup, before);
+  closeAuthoritySetup(setup);
+}
+
 function expectSessionActionThrows(
   action: () => unknown,
   message: string,
@@ -320,35 +331,50 @@ function expectSessionActionThrows(
   expect(action).toThrow(message);
 }
 
+function activeRuntime(setup: AuthoritySetup) {
+  const target = targetDetail(setup);
+  const runtime = Promise.withResolvers<undefined>();
+  expect(
+    setup.runtimes.launch(
+      target.id,
+      target.runnerId,
+      target.generation,
+      () => runtime.promise,
+    ),
+  ).toBe(true);
+  return { runtime, target };
+}
+
+async function expectPendingCompaction(
+  setup: AuthoritySetup,
+  target: { readonly generation: number; readonly id: string },
+): Promise<void> {
+  await expectCompactionScheduled(setup, target.id);
+  expect(
+    setup.store.manualCompactionPending(target.id, target.generation),
+  ).toBe(true);
+}
+
 describe("cross-session parent execution authority", () => {
-  test.each(["continue", "send"] as const)(
+  test.each(["compact", "continue", "send"] as const)(
     "rejects credential-paused %s after the parent is fenced",
     async (operation) => {
       const setup = setupWithTarget("credential");
       const before = setup.store.get(TEST_USER_ID, TARGET_SESSION_ID);
       const result =
-        operation === "continue"
-          ? setup.actions.continueSession(TARGET_SESSION_ID)
-          : setup.actions.sendToSession(TARGET_SESSION_ID, "stale message");
-      await fenceAtGate(setup.credentialGate, setup);
-      await expectParentStale(result);
-
-      expectTargetUnchanged(setup, before);
-      closeAuthoritySetup(setup);
+        operation === "compact"
+          ? setup.actions.compactSession(TARGET_SESSION_ID)
+          : operation === "continue"
+            ? setup.actions.continueSession(TARGET_SESSION_ID)
+            : setup.actions.sendToSession(TARGET_SESSION_ID, "stale message");
+      await expectTargetUnchangedAfterFencing(
+        setup,
+        setup.credentialGate,
+        before,
+        result,
+      );
     },
   );
-
-  test("rejects credential-paused compact after the parent is fenced", async () => {
-    const setup = setupWithTarget("credential");
-    const before = setup.store.get(TEST_USER_ID, TARGET_SESSION_ID);
-    const result = setup.actions.compactSession(TARGET_SESSION_ID);
-
-    await fenceAtGate(setup.credentialGate, setup);
-    await expectParentStale(result);
-
-    expectTargetUnchanged(setup, before);
-    closeAuthoritySetup(setup);
-  });
 
   test("rejects stale compact and steer actions before mutating the target", () => {
     const setup = setupWithTarget("running");
@@ -397,41 +423,11 @@ describe("cross-session parent execution authority", () => {
     closeSetup(setup);
   });
 
-  test("running compaction schedules at the next step boundary", async () => {
+  test("running compaction schedules once at the next step boundary", async () => {
     const setup = setupWithTarget("running");
-    const target = targetDetail(setup);
-    const runtime = Promise.withResolvers<undefined>();
-    expect(
-      setup.runtimes.launch(
-        target.id,
-        target.runnerId,
-        target.generation,
-        () => runtime.promise,
-      ),
-    ).toBe(true);
-    await expectCompactionScheduled(setup);
-    expect(
-      setup.store.manualCompactionPending(TARGET_SESSION_ID, target.generation),
-    ).toBe(true);
+    const { runtime, target } = activeRuntime(setup);
+    await expectPendingCompaction(setup, target);
     expect(setup.launchOperations).toEqual([]);
-    runtime.resolve();
-    closeSetup(setup);
-  });
-
-  test("coalesces repeated running compaction requests", async () => {
-    const setup = setupWithTarget("running");
-    const target = targetDetail(setup);
-    const runtime = Promise.withResolvers<undefined>();
-    expect(
-      setup.runtimes.launch(
-        target.id,
-        target.runnerId,
-        target.generation,
-        () => runtime.promise,
-      ),
-    ).toBe(true);
-
-    await expectCompactionScheduled(setup);
     expect(await setup.actions.compactSession(TARGET_SESSION_ID)).toContain(
       "compaction_already_scheduled",
     );

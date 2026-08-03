@@ -100,13 +100,11 @@ class SteeringDispatchModel implements AgentModel {
   #parentStep = 0;
   #targetStarted = false;
 
-  async complete(
-    input: readonly AgentConversationMessage[],
-  ): Promise<AgentModelStep> {
-    const text = JSON.stringify(input);
-    if (text.includes("Running steering target.")) {
-      this.targetRequests.push([...input]);
-      if (text.includes("Change direction at the boundary.")) {
+  async complete(messages: readonly AgentConversationMessage[]) {
+    const steeringText = JSON.stringify(messages);
+    if (steeringText.includes("Running steering target.")) {
+      this.targetRequests.push([...messages]);
+      if (steeringText.includes("Change direction at the boundary.")) {
         return providerStep("Steering consumed.");
       }
       if (this.#targetStarted) {
@@ -117,7 +115,7 @@ class SteeringDispatchModel implements AgentModel {
       await this.releaseTarget.promise;
       return providerStep("Reached the steering boundary.");
     }
-    if (text.includes("Dispatch steering from the real tool mount.")) {
+    if (steeringText.includes("Dispatch steering from the real tool mount.")) {
       this.#parentStep += 1;
       return this.#parentStep === 1
         ? providerStep("Steer the running target.", {
@@ -137,22 +135,20 @@ class SteeringDispatchModel implements AgentModel {
 class CompletedTargetCompactionModel implements AgentModel {
   #parentStep = 0;
 
-  complete(
-    input: readonly AgentConversationMessage[],
-  ): Promise<AgentModelStep> {
-    const text = JSON.stringify(input);
-    if (isCompactionRequest(input)) {
+  complete(messages: readonly AgentConversationMessage[]) {
+    const compactingText = JSON.stringify(messages);
+    if (isCompactionRequest(messages)) {
       return Promise.resolve(providerStep("Completed target handoff."));
     }
-    if (text.includes("Completed target handoff.")) {
+    if (compactingText.includes("Completed target handoff.")) {
       return Promise.resolve(providerStep("Completed target continued."));
     }
-    if (text.includes("Completed compaction target.")) {
+    if (compactingText.includes("Completed compaction target.")) {
       return Promise.resolve(
         providerStep("Target completed before compaction."),
       );
     }
-    if (text.includes("Compact the completed target.")) {
+    if (compactingText.includes("Compact the completed target.")) {
       this.#parentStep += 1;
       return Promise.resolve(
         this.#parentStep === 1
@@ -202,6 +198,21 @@ async function createPromptSession(
   return value["id"];
 }
 
+async function expectCreatedDefaultSession(
+  setup: ConnectedSetup,
+): Promise<void> {
+  expect((await setup.sessions.collection(createSessionRequest())).status).toBe(
+    201,
+  );
+}
+
+async function expectCreatedPromptSession(
+  setup: ConnectedSetup,
+  prompt: string,
+): Promise<void> {
+  expect(await createPromptSession(setup, prompt)).toBe(SESSION_ID);
+}
+
 async function takeRunnerCommand(
   setup: ConnectedSetup,
   sessionId: string,
@@ -240,10 +251,45 @@ async function completeRunnerCommand(
   ).toBe(true);
 }
 
-function recreatedSetup(model: AgentModel, initial: ConnectedSetup) {
+function controlledSetup(model: AgentModel): ConnectedSetup {
   return connectedSessionSetup(model, "api_key", undefined, {
-    database: initial.database,
+    commandId: commandIds(),
   });
+}
+
+function recreatedSetup(model: AgentModel, initial: ConnectedSetup) {
+  const { database } = initial;
+  return connectedSessionSetup(model, "api_key", undefined, { database });
+}
+
+async function completeAndWaitForSession(
+  setup: ConnectedSetup,
+  sessionId: string,
+  content: string,
+) {
+  await completeRunnerCommand(setup, sessionId, RUNNER_AGENT_FILE_COMMAND);
+  return completedSessionContaining(setup, sessionId, content);
+}
+
+function markSessionCompleted(setup: ConnectedSetup): void {
+  setup.database
+    .update(agentSessions)
+    .set({ status: "completed" })
+    .where(eq(agentSessions.id, SESSION_ID))
+    .run();
+}
+
+async function completedSessionContaining(
+  setup: ConnectedSetup,
+  sessionId: string,
+  content: string,
+) {
+  return waitForSessionValue(
+    () => setup.sessions.detailForUser(TEST_USER_ID, sessionId),
+    (value) =>
+      hasSessionStatus("idle")(value) &&
+      JSON.stringify(value).includes(content),
+  );
 }
 
 test("rejects invalid compact and steer dispatch arguments", async () => {
@@ -274,12 +320,8 @@ test("self-compaction schedules at the tool boundary and continues", async () =>
 
 test("scheduled self-compaction survives restart before its boundary", async () => {
   const model = new RestartScheduledCompactionModel();
-  const initial = connectedSessionSetup(model, "api_key", undefined, {
-    commandId: commandIds(),
-  });
-  expect(
-    (await initial.sessions.collection(createSessionRequest())).status,
-  ).toBe(201);
+  const initial = controlledSetup(model);
+  await expectCreatedDefaultSession(initial);
   await completeRunnerCommand(initial, SESSION_ID, RUNNER_AGENT_FILE_COMMAND);
   const restartGapCommand = await takeRunnerCommand(
     initial,
@@ -311,11 +353,10 @@ test("scheduled self-compaction survives restart before its boundary", async () 
   await completeRunnerCommand(recreated, SESSION_ID, RUNNER_AGENT_FILE_COMMAND);
   await model.compacting.promise;
   await completeRunnerCommand(recreated, SESSION_ID, RUNNER_AGENT_FILE_COMMAND);
-  const continued = await waitForSessionValue(
-    () => recreated.sessions.detailForUser(TEST_USER_ID, SESSION_ID),
-    (value) =>
-      hasSessionStatus("idle")(value) &&
-      JSON.stringify(value).includes("Continued after restart compaction."),
+  const continued = await completedSessionContaining(
+    recreated,
+    SESSION_ID,
+    "Continued after restart compaction.",
   );
   expect(JSON.stringify(continued)).toContain(
     "Restart-safe compacted handoff.",
@@ -332,12 +373,8 @@ test("scheduled self-compaction survives restart before its boundary", async () 
 
 test("steer_session dispatch is consumed by a running target at its boundary", async () => {
   const model = new SteeringDispatchModel();
-  const setup = connectedSessionSetup(model, "api_key", undefined, {
-    commandId: commandIds(),
-  });
-  expect(await createPromptSession(setup, "Running steering target.")).toBe(
-    SESSION_ID,
-  );
+  const setup = controlledSetup(model);
+  await expectCreatedPromptSession(setup, "Running steering target.");
   await completeRunnerCommand(setup, SESSION_ID, RUNNER_AGENT_FILE_COMMAND);
   await model.targetWaiting.promise;
 
@@ -351,13 +388,10 @@ test("steer_session dispatch is consumed by a running target at its boundary", a
     (value) => JSON.stringify(value).includes("steering_scheduled"),
   );
   model.releaseTarget.resolve();
-  await completeRunnerCommand(setup, SESSION_ID, RUNNER_AGENT_FILE_COMMAND);
-
-  const target = await waitForSessionValue(
-    () => setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID),
-    (value) =>
-      hasSessionStatus("idle")(value) &&
-      JSON.stringify(value).includes("Steering consumed."),
+  const target = await completeAndWaitForSession(
+    setup,
+    SESSION_ID,
+    "Steering consumed.",
   );
   expect(JSON.stringify(target)).toContain("Change direction at the boundary.");
   expect(
@@ -370,22 +404,14 @@ test("steer_session dispatch is consumed by a running target at its boundary", a
 
 test("compact_session wakes a completed target, compacts, and continues it", async () => {
   const model = new CompletedTargetCompactionModel();
-  const setup = connectedSessionSetup(model, "api_key", undefined, {
-    commandId: commandIds(),
-  });
-  expect(await createPromptSession(setup, "Completed compaction target.")).toBe(
-    SESSION_ID,
-  );
+  const setup = controlledSetup(model);
+  await expectCreatedPromptSession(setup, "Completed compaction target.");
   await completeRunnerCommand(setup, SESSION_ID, RUNNER_AGENT_FILE_COMMAND);
   await waitForSessionValue(
     () => setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID),
     hasSessionStatus("idle"),
   );
-  setup.database
-    .update(agentSessions)
-    .set({ status: "completed" })
-    .where(eq(agentSessions.id, SESSION_ID))
-    .run();
+  markSessionCompleted(setup);
 
   const parentId = await createPromptSession(
     setup,
@@ -396,13 +422,10 @@ test("compact_session wakes a completed target, compacts, and continues it", asy
   expect(setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID)?.status).toBe(
     "running",
   );
-  await completeRunnerCommand(setup, SESSION_ID, RUNNER_AGENT_FILE_COMMAND);
-
-  const target = await waitForSessionValue(
-    () => setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID),
-    (value) =>
-      hasSessionStatus("idle")(value) &&
-      JSON.stringify(value).includes("Completed target continued."),
+  const target = await completeAndWaitForSession(
+    setup,
+    SESSION_ID,
+    "Completed target continued.",
   );
   const serialized = JSON.stringify(target);
   expect(serialized).toContain("Completed target handoff.");

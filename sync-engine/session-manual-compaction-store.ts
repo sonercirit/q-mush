@@ -1,4 +1,3 @@
-import { and, eq } from "drizzle-orm";
 import { createdAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import {
@@ -6,36 +5,24 @@ import {
   agentSessions,
 } from "../shared/database/schema.ts";
 import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
+import { manualCompactionOperation } from "./session-manual-compaction-query.ts";
 import { runningCondition } from "./session-store-persistence.ts";
 
 export type ManualCompactionScheduleResult =
   "already_pending" | "scheduled" | "unavailable";
 
-function pendingCondition(sessionId: string, generation: number) {
-  return and(
-    eq(agentSessionOperations.sessionId, sessionId),
-    eq(agentSessionOperations.executionGeneration, generation),
-    eq(agentSessionOperations.operation, "compact_and_continue"),
-    eq(agentSessionOperations.isDeleted, false),
-  );
-}
-
 export class ManualCompactionStore {
   readonly #database: AppDatabase;
-  readonly #generateId: IdGenerator;
-
-  constructor(database: AppDatabase, generateId: IdGenerator) {
+  readonly #id: IdGenerator;
+  constructor(database: AppDatabase, id: IdGenerator) {
     this.#database = database;
-    this.#generateId = generateId;
+    this.#id = id;
   }
 
   pending(sessionId: string, generation: number): boolean {
     return (
-      this.#database
-        .select({ id: agentSessionOperations.id })
-        .from(agentSessionOperations)
-        .where(pendingCondition(sessionId, generation))
-        .get() !== undefined
+      manualCompactionOperation(this.#database, sessionId, generation) !==
+      undefined
     );
   }
 
@@ -45,20 +32,17 @@ export class ManualCompactionStore {
     now: number,
   ): ManualCompactionScheduleResult {
     return this.#database.transaction((transaction) => {
-      const running = transaction
-        .select({ id: agentSessions.id, userId: agentSessions.userId })
+      const current = transaction
+        .select({ userId: agentSessions.userId })
         .from(agentSessions)
         .where(runningCondition(sessionId, undefined, generation))
         .get();
-      if (running === undefined) {
+      if (current === undefined) {
         return "unavailable";
       }
       if (
-        transaction
-          .select({ id: agentSessionOperations.id })
-          .from(agentSessionOperations)
-          .where(pendingCondition(sessionId, generation))
-          .get() !== undefined
+        manualCompactionOperation(transaction, sessionId, generation) !==
+        undefined
       ) {
         return "already_pending";
       }
@@ -67,10 +51,10 @@ export class ManualCompactionStore {
         .values({
           ...createdAuditFields(SYSTEM_ID, now),
           executionGeneration: generation,
-          id: this.#generateId(now),
+          id: this.#id(now),
           operation: "compact_and_continue",
           sessionId,
-          userId: running.userId,
+          userId: current.userId,
         })
         .run();
       return "scheduled";

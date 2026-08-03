@@ -9,6 +9,7 @@ import {
 import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 import type { RestartHandoff } from "../shared/session-model.ts";
 import type { CompactionUsage } from "./session-compaction-usage.ts";
+import { manualCompactionOperation } from "./session-manual-compaction-query.ts";
 import { sessionSegment } from "./session-segment.ts";
 import { runningCondition } from "./session-store-persistence.ts";
 import { requireRunningSessionUserId } from "./session-store-state.ts";
@@ -96,17 +97,7 @@ export function compactStoredConversation(options: {
         ),
       )
       .run();
-    const operation = transaction
-      .select({ id: agentSessionOperations.id })
-      .from(agentSessionOperations)
-      .where(
-        and(
-          eq(agentSessionOperations.sessionId, options.sessionId),
-          eq(agentSessionOperations.operation, "compact_and_continue"),
-          eq(agentSessionOperations.isDeleted, false),
-        ),
-      )
-      .get();
+    const operation = manualCompactionOperation(transaction, options.sessionId);
     if (operation !== undefined) {
       transaction
         .update(agentSessionOperations)

@@ -15,16 +15,18 @@ export function agentSessionTables(
   sessionReference: () => AnySQLiteColumn,
 ) {
   const sessionIdColumn = () => ownedForeignKey("session_id", sessionReference);
+  const executionGenerationColumn = () =>
+    integer("execution_generation").notNull();
   const agentSessionTurns = sqliteTable(
     "agent_session_turns",
     {
       ...ownedAuditColumns(userReference),
-      sessionId: sessionIdColumn(),
-      executionGeneration: integer("execution_generation").notNull(),
       boundaryMessageId: text("boundary_message_id"),
-      segment: integer("segment").notNull().default(0),
-      startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
       endedAt: integer("ended_at", { mode: "timestamp_ms" }),
+      executionGeneration: executionGenerationColumn(),
+      segment: integer("segment").notNull().default(0),
+      sessionId: sessionIdColumn(),
+      startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
     },
     (table) => [
       index("agent_session_turns_session_segment_start_index").on(
@@ -53,11 +55,11 @@ export function agentSessionTables(
     "agent_session_operations",
     {
       ...ownedAuditColumns(userReference),
-      sessionId: sessionIdColumn(),
-      executionGeneration: integer("execution_generation").notNull(),
       operation: text("operation", {
         enum: ["compact_and_continue"],
       }).notNull(),
+      sessionId: sessionIdColumn(),
+      executionGeneration: executionGenerationColumn(),
     },
     (table) => [
       uniqueIndex("agent_session_operations_active_generation_unique")
