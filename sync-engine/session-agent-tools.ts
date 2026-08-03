@@ -58,6 +58,7 @@ export interface SessionAgentToolActions {
     runnerId: string,
     path: string,
   ) => Promise<string>;
+  readonly compactSession: (sessionId: string) => Promise<string>;
   readonly continueSession: (sessionId: string) => Promise<string>;
   readonly getSessionOptions: (
     input: GetSessionOptionsToolInput,
@@ -75,6 +76,10 @@ export interface SessionAgentToolActions {
     message: string,
   ) => Promise<string>;
   readonly spawnSession: (input: SpawnSessionToolInput) => Promise<string>;
+  readonly steerSession: (
+    sessionId: string,
+    message: string,
+  ) => Promise<string>;
   readonly stopSession: (sessionId: string, cascade: boolean) => string;
 }
 
@@ -237,6 +242,12 @@ export function executeSessionAgentTool(
         output = actions.browseRunnerDirectories(runnerId, path);
         break;
       }
+      case "compact_session":
+        if (!hasOnlySessionToolArguments(arguments_, ["sessionId"])) {
+          throw new Error("compact_session received invalid arguments");
+        }
+        output = actions.compactSession(sessionId(arguments_));
+        break;
       case "continue_session":
         if (!hasOnlySessionToolArguments(arguments_, ["sessionId"])) {
           throw new Error("continue_session received invalid arguments");
@@ -283,6 +294,12 @@ export function executeSessionAgentTool(
         break;
       case "spawn_session":
         output = actions.spawnSession(spawnInput(arguments_));
+        break;
+      case "steer_session":
+        output = actions.steerSession(
+          sessionId(arguments_),
+          message(arguments_),
+        );
         break;
       case "stop_session": {
         if (

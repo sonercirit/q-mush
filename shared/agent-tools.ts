@@ -1,3 +1,4 @@
+import { EDIT_REPLACEMENT_PARAMETER } from "./agent-edit-tool-schema.ts";
 import { AGENT_TOOL_LABELS } from "./agent-tool-labels.ts";
 import {
   ASK_QUESTIONS_TOOL_DEFINITION,
@@ -38,23 +39,6 @@ function toolDefinition<
     type: "function",
   } as const;
 }
-
-const EDIT_REPLACEMENT_PARAMETER = {
-  additionalProperties: false,
-  properties: {
-    newText: {
-      description: "Replacement text for this targeted edit.",
-      type: "string",
-    },
-    oldText: {
-      description:
-        "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call.",
-      type: "string",
-    },
-  },
-  required: ["oldText", "newText"],
-  type: "object",
-} as const;
 
 const FILE_PATH_PARAMETER = {
   description: "Workspace-relative or contained absolute file path",
@@ -387,6 +371,27 @@ const SESSION_AGENT_TOOLS = [
     name: "continue_session",
     properties: SESSION_ID_PARAMETER,
     required: ["sessionId"],
+  }),
+  toolDefinition({
+    description:
+      "Schedule compaction for this session or another owned session. It runs at the target's current or next safe step boundary and always continues afterward; this call returns immediately when scheduled.",
+    name: "compact_session",
+    properties: SESSION_ID_PARAMETER,
+    required: ["sessionId"],
+  }),
+  toolDefinition({
+    description:
+      "Steer a running owned session. The message is consumed at its next safe step boundary. For a non-running session, use send_to_session instead.",
+    name: "steer_session",
+    properties: {
+      message: {
+        description:
+          "Steering instruction to deliver at the next step boundary",
+        ...STRING_PARAMETER,
+      },
+      ...SESSION_ID_PARAMETER,
+    },
+    required: ["sessionId", "message"],
   }),
   toolDefinition({
     description: "Stop an owned session. By default, includes descendants.",

@@ -3,6 +3,8 @@ import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import type { AppDatabase } from "../../shared/database.ts";
 import { RunnerStore } from "../../sync-engine/runner-store.ts";
 import { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
+import { startManualSessionCompactionForUserId } from "../../sync-engine/session-compaction-actions.ts";
+import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
 import { SessionStore } from "../../sync-engine/session-store.ts";
 import {
   addTestProviderCredential,
@@ -35,8 +37,10 @@ interface AuthoritySetup {
   readonly credentialGate: PromiseGate;
   readonly database: AppDatabase;
   readonly launch: ReturnType<typeof vi.fn>;
+  readonly launchOperations: (string | undefined)[];
   readonly metadataGate: PromiseGate;
   readonly notify: ReturnType<typeof vi.fn>;
+  readonly runtimes: SessionRuntimes;
   readonly store: SessionStore;
 }
 
@@ -89,6 +93,7 @@ function commonActionDependencies() {
 function authoritySetup(options: {
   readonly gateCredential?: boolean;
   readonly gateMetadata?: boolean;
+  readonly runningTarget?: boolean;
   readonly withTarget?: boolean;
 }): AuthoritySetup {
   const database = createAuthenticatedTestDatabase();
@@ -120,17 +125,32 @@ function authoritySetup(options: {
       REPLACEMENT_RUNNER_ID,
     );
     transition(store, target, "running", TEST_NOW + 1);
-    transition(store, target, "idle", TEST_NOW + 2);
+    if (options.runningTarget !== true) {
+      transition(store, target, "idle", TEST_NOW + 2);
+    }
   }
 
   const credentialGate = promiseGate();
   const metadataGate = promiseGate();
   const credential = createTestProviderCredential(CREDENTIAL_ID);
 
-  const launch = vi.fn(() => true);
+  const launchOperations: (string | undefined)[] = [];
+  const launch = vi.fn(
+    (
+      _credential: unknown,
+      _detail: unknown,
+      _userId: unknown,
+      operation?: string,
+    ) => {
+      launchOperations.push(operation);
+      return true;
+    },
+  );
   const notify = vi.fn();
+  const runtimes = new SessionRuntimes();
   const actions = new SessionAgentActions({
     ...commonActionDependencies(),
+    compactSession: startManualSessionCompactionForUserId,
     database,
     discoverSessionMetadata: async () => {
       if (options.gateMetadata === true) {
@@ -143,6 +163,7 @@ function authoritySetup(options: {
     notify,
     now: () => TEST_NOW + 3,
     readCredential: () => Promise.resolve(credential),
+    runtimes,
     store,
     withCredential: async (_userId, _selection, action) => {
       if (options.gateCredential === true) {
@@ -165,8 +186,10 @@ function authoritySetup(options: {
     credentialGate,
     database,
     launch,
+    launchOperations,
     metadataGate,
     notify,
+    runtimes,
     store,
   };
 }
@@ -233,11 +256,56 @@ async function expectStaleSpawn(
   closeAuthoritySetup(setup);
 }
 
+function targetDetail(setup: AuthoritySetup) {
+  const target = setup.store.get(TEST_USER_ID, TARGET_SESSION_ID);
+  if (target === undefined) {
+    throw new Error("Target session not found");
+  }
+  return target;
+}
+
+function closeSetup(setup: AuthoritySetup): void {
+  setup.database.$client.close();
+}
+
+function setupWithTarget(
+  state: "credential" | "idle" | "running",
+): AuthoritySetup {
+  return authoritySetup({
+    ...(state === "credential" ? { gateCredential: true } : {}),
+    ...(state === "running" ? { runningTarget: true } : {}),
+    withTarget: true,
+  });
+}
+
+async function expectCompactionScheduled(
+  setup: AuthoritySetup,
+  sessionId = TARGET_SESSION_ID,
+): Promise<void> {
+  expect(await setup.actions.compactSession(sessionId)).toContain(
+    "compaction_scheduled",
+  );
+}
+
+function expectTargetUnchanged(
+  setup: AuthoritySetup,
+  before: ReturnType<SessionStore["get"]>,
+): void {
+  expect(setup.store.get(TEST_USER_ID, TARGET_SESSION_ID)).toEqual(before);
+}
+
+function expectSessionActionThrows(
+  action: () => unknown,
+  message: string,
+): void {
+  expect(action).toThrow(message);
+}
+
 describe("cross-session parent execution authority", () => {
   test.each(["continue", "send"] as const)(
     "rejects credential-paused %s after the parent is fenced",
     async (operation) => {
-      const setup = authoritySetup({ gateCredential: true, withTarget: true });
+      const setup = setupWithTarget("credential");
       const before = setup.store.get(TEST_USER_ID, TARGET_SESSION_ID);
       const result =
         operation === "continue"
@@ -246,10 +314,93 @@ describe("cross-session parent execution authority", () => {
       await fenceAtGate(setup.credentialGate, setup);
       await expectParentStale(result);
 
-      expect(setup.store.get(TEST_USER_ID, TARGET_SESSION_ID)).toEqual(before);
+      expectTargetUnchanged(setup, before);
       closeAuthoritySetup(setup);
     },
   );
+
+  test("rejects stale compact and steer actions before mutating the target", () => {
+    const setup = setupWithTarget("running");
+    const before = setup.store.get(TEST_USER_ID, TARGET_SESSION_ID);
+    fenceParent(setup);
+
+    expectSessionActionThrows(
+      () => setup.actions.compactSession(TARGET_SESSION_ID),
+      "stopped",
+    );
+    expectSessionActionThrows(
+      () => setup.actions.steerSession(TARGET_SESSION_ID, "stale steering"),
+      "stopped",
+    );
+    expectTargetUnchanged(setup, before);
+    closeAuthoritySetup(setup);
+  });
+
+  test("rejects missing and cross-workspace compact or steer targets", async () => {
+    const setup = setupWithTarget("running");
+
+    await expectCompactionScheduled(setup, "missing-session").catch(
+      (error: unknown) => {
+        expect(error).toHaveProperty("message", "Session not found");
+      },
+    );
+    expectSessionActionThrows(
+      () => setup.actions.steerSession("missing-session", "Do not deliver"),
+      "Session not found",
+    );
+    closeSetup(setup);
+  });
+
+  test("idle compaction launches compact-and-continue", async () => {
+    const setup = setupWithTarget("idle");
+
+    await expectCompactionScheduled(setup);
+    expect(setup.launchOperations).toEqual(["compact_and_continue"]);
+    closeSetup(setup);
+  });
+
+  test("running compaction schedules at the next step boundary", async () => {
+    const setup = setupWithTarget("running");
+    const target = targetDetail(setup);
+
+    const runtime = Promise.withResolvers<undefined>();
+    expect(
+      setup.runtimes.launch(
+        target.id,
+        target.runnerId,
+        target.generation,
+        () => runtime.promise,
+      ),
+    ).toBe(true);
+    await expectCompactionScheduled(setup);
+    expect(
+      setup.runtimes.takeManualCompactionRequest(
+        TARGET_SESSION_ID,
+        target.generation,
+      ),
+    ).toBe(true);
+    expect(setup.launchOperations).toEqual([]);
+    runtime.resolve();
+    closeSetup(setup);
+  });
+
+  test("steers only a running target and points idle callers to send_to_session", async () => {
+    const running = setupWithTarget("running");
+
+    await expect(
+      running.actions.steerSession(TARGET_SESSION_ID, "Change direction"),
+    ).resolves.toContain("steering_scheduled");
+    expect(
+      running.store.get(TEST_USER_ID, TARGET_SESSION_ID)?.pendingInputs,
+    ).toMatchObject([{ content: "Change direction", kind: "steer" }]);
+    closeSetup(running);
+
+    const idle = setupWithTarget("idle");
+    expect(() =>
+      idle.actions.steerSession(TARGET_SESSION_ID, "Too late"),
+    ).toThrow("send_to_session");
+    closeSetup(idle);
+  });
 
   test("does not create a child when the parent is fenced during credential access", async () => {
     const setup = authoritySetup({ gateCredential: true });

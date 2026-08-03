@@ -1,15 +1,7 @@
-import { AGENT_REASONING_EFFORTS } from "../shared/agent-configuration.ts";
-import { createAgentSystemPrompt } from "../shared/agent-prompt.ts";
-import {
-  AGENT_SESSION_TOOL_OPTIONS,
-  selectedAgentTools,
-  type SessionAgentToolName,
-} from "../shared/agent-tools.ts";
-import { ProviderCredentialStore } from "../shared/provider-credential-store.ts";
+import type { SessionAgentToolName } from "../shared/agent-tools.ts";
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type { RunnerSummary } from "../shared/runner-model.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
-import { safeAgentModelDiscoveryError } from "./agent-model-discovery.ts";
 import { createJsonResponse } from "./http.ts";
 import {
   pauseQueuedSessionForRestart,
@@ -18,18 +10,17 @@ import {
   spawnAgentSession,
   type SessionAgentActionDependencies,
 } from "./session-agent-action-helpers.ts";
+import {
+  compactSessionAction,
+  sessionControlDependencies,
+  steerSessionAction,
+} from "./session-agent-control-actions.ts";
+import {
+  readSessionAction,
+  sessionOptionsAction,
+  type SessionInspectionDependencies,
+} from "./session-agent-inspection-actions.ts";
 import { listSessionsOutput } from "./session-agent-list.ts";
-import {
-  SESSION_OPTIONS_PAGE_SIZE,
-  sessionOptionsOutput,
-  sessionOptionsPageFilter,
-  type GetSessionOptionsToolInput,
-  type SessionOptionsSource,
-} from "./session-agent-options.ts";
-import {
-  readSessionOutput,
-  type ReadSessionToolInput,
-} from "./session-agent-read.ts";
 import {
   sessionToolOutput,
   type SessionAgentToolActions,
@@ -42,33 +33,27 @@ import {
   type SpawnedSessionCompletion,
 } from "./session-child-lifecycle.ts";
 import type { SessionDetailLookup } from "./session-command-types.ts";
+import type { startManualSessionCompactionForUserId } from "./session-compaction-actions.ts";
 import type { SessionExecutionAuthority } from "./session-execution-authority.ts";
 import type {
   RunnerDirectoryBrowseResult,
   RunnerDirectoryRequest,
 } from "./session-request-helpers.ts";
 import type { SessionRunnerAvailability } from "./session-runner-availability.ts";
-import { readSessionSnapshot } from "./session-store-agent-read.ts";
+import type { SessionRuntimes } from "./session-runtime.ts";
 import type { PendingSpawnedSession } from "./session-store-spawns.ts";
-
-const optionsPageOffset = (page: number): number =>
-  (page - 1) * SESSION_OPTIONS_PAGE_SIZE;
 
 const runnerUnavailableOutput = (): string =>
   sessionToolOutput({ error: "runner_unavailable" });
 
-interface RunnerPageRequest {
-  readonly limit: number;
-  readonly offset: number;
-  readonly search?: string;
-  readonly workspaceId?: string;
-}
-
-interface SessionAgentActionsDependencies extends SessionAgentActionDependencies {
+interface SessionAgentActionsDependencies
+  extends SessionAgentActionDependencies, SessionInspectionDependencies {
   readonly abortSession: (sessionId: string) => void;
   readonly activeSession: (sessionId: string) => boolean;
   readonly broker: Pick<RunnerCommandBroker, "cancelSession">;
   readonly cleanupSession: (detail: AgentSessionDetail) => void;
+  readonly compactSession?: typeof startManualSessionCompactionForUserId;
+  readonly runtimes?: SessionRuntimes;
   readonly browseDirectories: (
     request: RunnerDirectoryRequest,
     signal: AbortSignal,
@@ -77,13 +62,6 @@ interface SessionAgentActionsDependencies extends SessionAgentActionDependencies
     userId: string,
     workspaceId?: string,
   ) => readonly RunnerSummary[];
-  readonly listRunnerOptions: (
-    userId: string,
-    request: RunnerPageRequest,
-  ) => {
-    readonly items: SessionOptionsSource["runners"];
-    readonly totalItems: number;
-  };
 }
 
 export class SessionAgentActions {
@@ -140,6 +118,13 @@ export class SessionAgentActions {
       return sessionId;
     };
     return {
+      compactSession: guardParent("compact_session", (sessionId) =>
+        this.#compact({
+          sessionId,
+          userId,
+          workspaceId: parentWorkspaceId(),
+        }),
+      ),
       continueSession: guardParent("continue_session", (sessionId) =>
         this.#queue(
           userId,
@@ -160,7 +145,12 @@ export class SessionAgentActions {
           parentWorkspaceId(),
         ),
       getSessionOptions: guardParent("get_session_options", (input) =>
-        this.#options(userId, input, parentWorkspaceId()),
+        sessionOptionsAction(
+          this.#dependencies,
+          userId,
+          input,
+          parentWorkspaceId(),
+        ),
       ),
       listRunners: guardParent("list_runners", () =>
         sessionToolOutput(
@@ -174,7 +164,12 @@ export class SessionAgentActions {
         ),
       ),
       readSession: guardParent("read_session", (input) =>
-        this.#read(userId, input, parentWorkspaceId()),
+        readSessionAction(
+          this.#dependencies,
+          userId,
+          input,
+          parentWorkspaceId(),
+        ),
       ),
       reassignSession: guardParent(
         "reassign_session",
@@ -199,6 +194,9 @@ export class SessionAgentActions {
       ),
       spawnSession: guardParent("spawn_session", (input) =>
         this.#spawn(authority, userId, input),
+      ),
+      steerSession: guardParent("steer_session", (sessionId, message) =>
+        this.#steer(userId, sessionId, message, parentWorkspaceId()),
       ),
       stopSession: guardParent("stop_session", (sessionId, cascade) =>
         this.#stop(
@@ -365,128 +363,6 @@ export class SessionAgentActions {
     return detail;
   }
 
-  #read(
-    userId: string,
-    input: ReadSessionToolInput,
-    workspaceId: string,
-  ): string {
-    const selected = new Set(input.categories);
-    const detail = readSessionSnapshot(this.#dependencies.database, {
-      includeSystem: selected.has("system"),
-      limit: input.limit,
-      roles: (["user", "assistant", "thinking", "tool"] as const).filter(
-        (role) => selected.has(role),
-      ),
-      sessionId: input.sessionId,
-      userId,
-      workspaceId,
-    });
-    if (detail === undefined) {
-      throw new Error("Session not found");
-    }
-    return readSessionOutput({
-      input,
-      matchedRecords: detail.transcript.matchedRecords,
-      messages: detail.transcript.messages,
-      session: { id: detail.id, status: detail.status, title: detail.title },
-      systemPrompt: createAgentSystemPrompt(
-        detail.agentFile,
-        detail.executionEnvironment,
-      ),
-      toolDefinitions: selectedAgentTools(detail.tools).map(
-        ({ function: definition }) => definition,
-      ),
-    });
-  }
-
-  async #options(
-    userId: string,
-    input: GetSessionOptionsToolInput,
-    workspaceId: string,
-  ): Promise<string> {
-    let models: SessionOptionsSource["models"] = [];
-    let reasoningEfforts: SessionOptionsSource["reasoningEfforts"] =
-      AGENT_REASONING_EFFORTS;
-    if (
-      input.category === "models" &&
-      input.credentialId !== undefined &&
-      input.provider !== undefined
-    ) {
-      const provider = input.provider;
-      const credentialId = input.credentialId;
-      if (
-        !ProviderCredentialStore.hasActiveModelCredential(
-          this.#dependencies.database,
-          userId,
-          provider,
-          credentialId,
-          workspaceId,
-        )
-      ) {
-        throw new Error("The model credential or provider is unavailable");
-      }
-      let credential;
-      try {
-        credential = await this.#dependencies.readCredential(userId, {
-          credentialId,
-          provider,
-          workspaceId,
-        });
-      } catch {
-        throw new Error("The model credential or provider is unavailable");
-      }
-      if (credential?.id !== credentialId) {
-        throw new Error("The model credential or provider is unavailable");
-      }
-      try {
-        const catalog = await this.#dependencies.discoverModels(
-          provider,
-          credential,
-        );
-        models = catalog.models;
-        reasoningEfforts = [];
-      } catch (error) {
-        throw new Error(safeAgentModelDiscoveryError(error), { cause: error });
-      }
-    }
-    const offset = optionsPageOffset(input.page);
-    const credentialPage =
-      input.category === "credentials"
-        ? ProviderCredentialStore.listModelCredentials(
-            this.#dependencies.database,
-            userId,
-            offset,
-            SESSION_OPTIONS_PAGE_SIZE,
-            input.search,
-            workspaceId,
-          )
-        : undefined;
-    const runnerPage =
-      input.category === "runners"
-        ? this.#dependencies.listRunnerOptions(userId, {
-            limit: SESSION_OPTIONS_PAGE_SIZE,
-            offset,
-            ...sessionOptionsPageFilter(input),
-            workspaceId,
-          })
-        : undefined;
-    return sessionOptionsOutput(input, {
-      credentials: credentialPage?.items ?? [],
-      models,
-      ...(credentialPage === undefined && runnerPage === undefined
-        ? {}
-        : {
-            page: {
-              totalItems:
-                credentialPage?.totalItems ?? runnerPage?.totalItems ?? 0,
-            },
-          }),
-      reasoningEfforts,
-      runners: runnerPage?.items ?? [],
-      tools: AGENT_SESSION_TOOL_OPTIONS,
-    });
-  }
-
   #queuedResponse(userId: string, sessionId: string): Response {
     this.#dependencies.notify(userId, sessionId);
     return createJsonResponse({ sessionId, status: "queued" });
@@ -629,6 +505,84 @@ export class SessionAgentActions {
       input,
       userId,
     });
+  }
+
+  #compactionDependencies(): {
+    readonly compactSession: NonNullable<
+      SessionAgentActionsDependencies["compactSession"]
+    >;
+    readonly runtimes: SessionRuntimes;
+  } {
+    const compactSession = this.#dependencies.compactSession;
+    const runtimes = this.#dependencies.runtimes;
+    if (compactSession === undefined || runtimes === undefined) {
+      throw new Error("Session compaction is unavailable");
+    }
+    return { compactSession, runtimes };
+  }
+
+  #compact(input: {
+    readonly sessionId: string;
+    readonly userId: string;
+    readonly workspaceId: string;
+  }): Promise<string> {
+    const { sessionId, userId, workspaceId } = input;
+    const { compactSession, runtimes } = this.#compactionDependencies();
+    const shared = sessionControlDependencies(this.#dependencies);
+    return compactSessionAction(
+      {
+        compactSession: (ownerId, targetId, targetWorkspaceId) =>
+          compactSession(
+            {
+              credential: (...parameters) =>
+                this.#dependencies.withCredential(...parameters),
+              launch: (detail, credential, owner, operation) =>
+                this.#dependencies.launchSession(
+                  credential,
+                  detail,
+                  owner,
+                  operation,
+                ),
+              notify: this.#dependencies.notify,
+              now: this.#dependencies.now,
+              operation: "compact_and_continue",
+              runtimes,
+              store: this.#dependencies.store,
+              workspaceId: targetWorkspaceId,
+            },
+            ownerId,
+            targetId,
+          ),
+        ...shared,
+        scheduleCompaction: (targetId, generation) =>
+          runtimes.scheduleManualCompaction(targetId, generation),
+      },
+      userId,
+      sessionId,
+      workspaceId,
+    );
+  }
+
+  #steer(
+    userId: string,
+    sessionId: string,
+    message: string,
+    workspaceId: string,
+  ): Promise<string> {
+    const output = steerSessionAction(
+      {
+        notify: (...parameters) => {
+          this.#dependencies.notify(...parameters);
+        },
+        now: this.#dependencies.now,
+        store: this.#dependencies.store,
+      },
+      userId,
+      sessionId,
+      message,
+      workspaceId,
+    );
+    return Promise.resolve(output);
   }
 
   #stop(

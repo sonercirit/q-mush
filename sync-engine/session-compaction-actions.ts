@@ -86,9 +86,9 @@ interface ManualCompactionDependencies extends SessionLaunchBoundary {
   readonly workspaceId?: string;
 }
 
-export async function startManualSessionCompaction(
+export async function startManualSessionCompactionForUserId(
   dependencies: ManualCompactionDependencies,
-  user: AuthenticatedUser,
+  userId: string,
   sessionId: string,
 ): Promise<Response> {
   if (dependencies.runtimes.draining) {
@@ -98,7 +98,7 @@ export async function startManualSessionCompaction(
     });
   }
   const existing = dependencies.store.get(
-    user.id,
+    userId,
     sessionId,
     dependencies.workspaceId,
   );
@@ -122,24 +122,26 @@ export async function startManualSessionCompaction(
     return createApiError("session_busy", 409);
   }
 
-  return dependencies.credential(user.id, existing, (credential) => {
-    const queued = queueSessionDetail(dependencies, [
-      user.id,
-      sessionId,
-      undefined,
-      dependencies.workspaceId,
-    ]);
+  const queueParameters: Parameters<typeof queueSessionDetail>[1] = [
+    userId,
+    sessionId,
+    undefined,
+    dependencies.workspaceId,
+  ];
+  const queue = () => queueSessionDetail(dependencies, queueParameters);
+  return dependencies.credential(userId, existing, (credential) => {
+    const queued = queue();
     if (queued instanceof Response) {
       return queued;
     }
 
     if (
-      !dependencies.launch(queued, credential, user.id, dependencies.operation)
+      !dependencies.launch(queued, credential, userId, dependencies.operation)
     ) {
       if (
         pauseSessionForRestart(dependencies, queued, dependencies.operation)
       ) {
-        dependencies.notify(user.id, queued.id);
+        dependencies.notify(userId, queued.id);
         return createApiError("server_restarting", 503);
       }
       dependencies.store.transitionRuntime(
@@ -148,11 +150,23 @@ export async function startManualSessionCompaction(
         dependencies.now(),
         queued.generation,
       );
-      dependencies.notify(user.id, queued.id);
+      dependencies.notify(userId, queued.id);
       return createApiError("session_launch_failed", 500);
     }
-    const notify = withUserNotification(dependencies, user.id, queued.id);
+    const notify = withUserNotification(dependencies, userId, queued.id);
     queueMicrotask(notify);
     return createJsonResponse(queued, 202);
   });
+}
+
+export function startManualSessionCompaction(
+  dependencies: ManualCompactionDependencies,
+  user: AuthenticatedUser,
+  sessionId: string,
+): Promise<Response> {
+  return startManualSessionCompactionForUserId(
+    dependencies,
+    user.id,
+    sessionId,
+  );
 }

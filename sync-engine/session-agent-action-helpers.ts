@@ -43,6 +43,7 @@ export interface SessionAgentActionDependencies {
     credential: ProviderCredentialAccess,
     session: AgentSessionDetail,
     ownerId: string,
+    operation?: RestartHandoffOperation,
   ) => boolean;
   readonly discoverSessionMetadata: (
     input: SpawnSessionToolInput,

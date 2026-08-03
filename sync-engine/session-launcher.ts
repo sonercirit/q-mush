@@ -114,6 +114,7 @@ export class SessionLauncher {
             now: this.#dependencies.now,
             notify: this.#dependencies.notify,
             realtime: this.#dependencies.realtime,
+            runtimes: this.#dependencies.runtimes,
             ...(this.#dependencies.readCredential === undefined
               ? {}
               : { readCredential: this.#dependencies.readCredential }),

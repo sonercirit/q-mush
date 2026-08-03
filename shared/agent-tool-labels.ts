@@ -3,6 +3,7 @@ export const AGENT_TOOL_LABELS = {
   bash: "Shell",
   brave_search: "Brave Search",
   browse_runner_directories: "Browse runner directories",
+  compact_session: "Compact session",
   continue_session: "Continue session",
   edit: "Edit files",
   explain_file: "Explain files",
@@ -17,6 +18,7 @@ export const AGENT_TOOL_LABELS = {
   send_to_session: "Send to session",
   sleep: "Sleep",
   spawn_session: "Spawn session",
+  steer_session: "Steer session",
   stop_session: "Stop session",
   write: "Write files",
 } as const;
