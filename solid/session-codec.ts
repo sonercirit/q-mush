@@ -521,15 +521,24 @@ export function readSessionDetail(value: unknown): AgentSessionDetail {
     throw new Error("The server returned invalid agent session details");
   }
 
+  const modelContextTokens = value["modelContextTokens"];
   const segmentTokenUsage = readTokenUsageSummary(value["segmentTokenUsage"]);
   const tokenUsage = readTokenUsageSummary(value["tokenUsage"]);
-  if (segmentTokenUsage === undefined || tokenUsage === undefined) {
+  if (
+    (modelContextTokens !== null &&
+      (typeof modelContextTokens !== "number" ||
+        !Number.isSafeInteger(modelContextTokens) ||
+        modelContextTokens <= 0)) ||
+    segmentTokenUsage === undefined ||
+    tokenUsage === undefined
+  ) {
     throw new Error("The server returned invalid agent session details");
   }
   return {
     ...readSummary(value),
     agentFile: readAgentFile(value["agentFile"]),
     messages: value["messages"].map(readMessage),
+    modelContextTokens,
     pendingInputs: value["pendingInputs"].map(readSessionPendingInput),
     ...(segmentTokenUsage === null ? {} : { segmentTokenUsage }),
     ...(tokenUsage === null ? {} : { tokenUsage }),

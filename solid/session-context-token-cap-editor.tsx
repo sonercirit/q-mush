@@ -46,7 +46,7 @@ export function SessionContextTokenCapEditor(
     const message =
       cap === undefined
         ? "Context token cap must be a positive integer."
-        : contextTokenCapValidationError(cap, props.detail.maxContextTokens);
+        : contextTokenCapValidationError(cap, props.detail.modelContextTokens);
     setError(message);
     if (message !== undefined || cap === undefined) return;
     if (

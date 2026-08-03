@@ -61,6 +61,7 @@ function testSession(): AgentSessionDetail {
       },
     ],
     model: "model-1",
+    modelContextTokens: null,
     openRouterProviderTag: null,
     pendingInputs: [],
     pendingQuestions: null,

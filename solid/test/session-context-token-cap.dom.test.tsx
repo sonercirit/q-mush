@@ -77,6 +77,56 @@ function setInput(input: HTMLInputElement, value: string): void {
   input.dispatchEvent(new InputEvent("input", { bubbles: true }));
 }
 
+test("raises a cap within the underlying model limit", async () => {
+  const detail = {
+    ...contextCapDetail(false),
+    currentContextTokens: 100_000,
+    maxContextTokens: 120_000,
+    modelContextTokens: 200_000,
+    userContextTokenCap: 120_000,
+  };
+  const command = capCommand(detail);
+  const raisedView = mountSessionDetailBody(
+    sessionDetailState(detail),
+    disposals,
+    { command },
+  );
+  setInput(capInput(raisedView.container), "150000");
+  findTestButton(raisedView.container, "Save cap")?.click();
+
+  await vi.waitFor(() => {
+    expect(command).toHaveBeenCalledWith(
+      SESSION_REALTIME_OPERATIONS.setContextTokenCap,
+      { sessionId: detail.id, userContextTokenCap: 150_000 },
+    );
+  });
+});
+
+test("rejects a cap above the underlying model limit", () => {
+  const detail = {
+    ...contextCapDetail(false),
+    maxContextTokens: 120_000,
+    modelContextTokens: 200_000,
+    userContextTokenCap: 120_000,
+  };
+  const command = capCommand(detail);
+  const rejectedView = mountSessionDetailBody(
+    sessionDetailState(detail),
+    disposals,
+    { command },
+  );
+  setInput(capInput(rejectedView.container), "200001");
+  findTestButton(rejectedView.container, "Save cap")?.click();
+
+  expect(command).not.toHaveBeenCalled();
+  expect(
+    queryTestElement(
+      rejectedView.container,
+      "#session-detail-context-token-cap",
+    ).closest("form")?.textContent,
+  ).toContain("cannot exceed the model limit of 200,000 tokens");
+});
+
 test("warns before applying an already exceeded cap", async () => {
   const warningView = mountCapEditor();
   setInput(capInput(warningView.container), "120000");

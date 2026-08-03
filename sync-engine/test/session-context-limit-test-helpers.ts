@@ -17,14 +17,26 @@ export function expectSessionContextTokenCapLifecycle(
   );
   expect(capped).toMatchObject({
     maxContextTokens: 120_000,
+    modelContextTokens: 200_000,
     userContextTokenCap: 120_000,
+  });
+  const raised = store.setContextTokenCap(
+    TEST_USER_ID,
+    STORE_SESSION_ID,
+    150_000,
+    TEST_NOW + 2,
+  );
+  expect(raised).toMatchObject({
+    maxContextTokens: 150_000,
+    modelContextTokens: 200_000,
+    userContextTokenCap: 150_000,
   });
   expect(() =>
     store.setContextTokenCap(
       TEST_USER_ID,
       STORE_SESSION_ID,
       200_001,
-      TEST_NOW + 2,
+      TEST_NOW + 3,
     ),
   ).toThrow("cannot exceed the model limit");
   expect(
@@ -32,10 +44,11 @@ export function expectSessionContextTokenCapLifecycle(
       TEST_USER_ID,
       STORE_SESSION_ID,
       null,
-      TEST_NOW + 3,
+      TEST_NOW + 4,
     ),
   ).toMatchObject({
     maxContextTokens: 200_000,
+    modelContextTokens: 200_000,
     userContextTokenCap: null,
   });
 }

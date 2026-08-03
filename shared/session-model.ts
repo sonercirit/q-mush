@@ -125,6 +125,7 @@ export interface AgentSessionTurn {
 export interface AgentSessionDetail extends AgentSessionSummary {
   readonly agentFile: AgentFile | null;
   readonly messages: readonly AgentSessionMessage[];
+  readonly modelContextTokens: number | null;
   readonly pendingInputs: readonly AgentSessionPendingInput[];
   readonly segmentTokenUsage?: AgentTokenUsageSummary;
   readonly tokenUsage?: AgentTokenUsageSummary;

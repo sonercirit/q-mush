@@ -24,6 +24,7 @@ export const TEST_SESSION_DETAIL: AgentSessionDetail = {
   userContextTokenCap: null,
   messages: [],
   model: "gpt-5-codex",
+  modelContextTokens: 200_000,
   openRouterProviderTag: null,
   parentExecutionGeneration: null,
   parentSessionId: null,
