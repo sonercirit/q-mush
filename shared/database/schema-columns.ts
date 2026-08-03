@@ -7,6 +7,16 @@ import {
 } from "drizzle-orm/sqlite-core";
 import { auditColumns } from "./audit-columns.ts";
 
+export function sessionContextColumns() {
+  return {
+    currentContextTokens: integer("current_context_tokens")
+      .notNull()
+      .default(0),
+    maxContextTokens: integer("max_context_tokens"),
+    userContextTokenCap: integer("user_context_token_cap"),
+  };
+}
+
 export function ownedForeignKey(
   name: string,
   reference: () => AnySQLiteColumn,

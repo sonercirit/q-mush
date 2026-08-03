@@ -20,6 +20,7 @@ import {
   modelCredentialOptions,
   parseModelCredentialValue,
 } from "./session-model-options.ts";
+import { sessionMutationError } from "./session-mutations.ts";
 import { OpenRouterProviderSelect } from "./session-provider-select.tsx";
 import {
   providerCredentialValue,
@@ -46,6 +47,7 @@ export function SessionProviderUpdateEditor(
   const request = createSessionEditorRequestState();
   const { error, latest: discovery, pending, setError, setPending } = request;
   let discoveredSelection: SessionProviderUpdateDraft | undefined;
+  let observedDetailSelection: SessionProviderUpdateDraft | undefined;
 
   const discoverModels = async (
     next: SessionProviderUpdateDraft,
@@ -83,6 +85,16 @@ export function SessionProviderUpdateEditor(
 
   createEffect(() => {
     const initial = sessionProviderUpdateDraft(props.detail);
+    if (
+      initial.credentialId === observedDetailSelection?.credentialId &&
+      initial.model === observedDetailSelection.model &&
+      initial.provider === observedDetailSelection.provider &&
+      initial.openRouterProviderTag ===
+        observedDetailSelection.openRouterProviderTag
+    ) {
+      return;
+    }
+    observedDetailSelection = initial;
     if (
       initial.credentialId === discoveredSelection?.credentialId &&
       initial.model === discoveredSelection.model &&
@@ -138,8 +150,8 @@ export function SessionProviderUpdateEditor(
     setError(undefined);
     try {
       if (await props.onApply(draft())) setConfirming(false);
-    } catch {
-      setError("We could not change the session provider. Please try again.");
+    } catch (error) {
+      setError(sessionMutationError(error, "change the session provider"));
     } finally {
       setPending(false);
     }

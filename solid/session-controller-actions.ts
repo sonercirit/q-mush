@@ -79,7 +79,9 @@ interface DetailMutationDependencies {
 export async function mutateSessionDetail(
   dependencies: DetailMutationDependencies,
   mutation: DetailMutationOptions,
+  rethrowRejection = false,
 ): Promise<void> {
+  let rejection: unknown;
   const pending = { [mutation.pending]: true };
   const settled = { [mutation.pending]: false };
   const baseline = dependencies.view.value.detail;
@@ -115,6 +117,7 @@ export async function mutateSessionDetail(
           baseline,
         ),
       reject: (normalized) => {
+        rejection = normalized;
         dependencies.view.patchCurrent(revision, {
           ...settled,
           error: sessionMutationError(normalized, mutation.action),
@@ -123,6 +126,11 @@ export async function mutateSessionDetail(
     });
   } finally {
     dependencies.loader.continueHydration();
+  }
+  if (rethrowRejection && rejection !== undefined) {
+    throw rejection instanceof Error
+      ? rejection
+      : new Error("Session mutation rejected", { cause: rejection });
   }
 }
 

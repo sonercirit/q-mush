@@ -94,6 +94,7 @@ export interface AgentSessionSummary {
   readonly hasOlderSegments: boolean;
   readonly id: string;
   readonly maxContextTokens: number | null;
+  readonly userContextTokenCap: number | null;
   readonly model: string;
   readonly openRouterProviderTag: string | null;
   readonly parentExecutionGeneration: number | null;
@@ -124,6 +125,7 @@ export interface AgentSessionTurn {
 export interface AgentSessionDetail extends AgentSessionSummary {
   readonly agentFile: AgentFile | null;
   readonly messages: readonly AgentSessionMessage[];
+  readonly modelContextTokens: number | null;
   readonly pendingInputs: readonly AgentSessionPendingInput[];
   readonly segmentTokenUsage?: AgentTokenUsageSummary;
   readonly tokenUsage?: AgentTokenUsageSummary;

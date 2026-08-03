@@ -6,8 +6,6 @@ import {
   type Setter,
 } from "solid-js";
 
-export const SESSION_EDITOR_GROUP_CLASSES =
-  "mt-3 divide-y divide-white/10 rounded-2xl border border-white/10 bg-white/[0.03]";
 const SESSION_EDITOR_SECTION_CLASSES = "px-4";
 const SESSION_EDITOR_DESCRIPTION_CLASSES =
   "mt-1 text-xs leading-5 text-slate-500";

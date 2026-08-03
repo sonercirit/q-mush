@@ -32,6 +32,18 @@ import {
   expectJsonResponse,
 } from "./session-launch-race-helpers.ts";
 
+function contextCapCreationRequest(): Request {
+  return createSessionRequest(
+    true,
+    "high",
+    "gpt-4.1-mini",
+    [],
+    undefined,
+    undefined,
+    100_001,
+  );
+}
+
 function compactionSetup(model: ScriptedAgentModel, label: string) {
   const catalog = testModelCatalog("gpt-4.1-mini", label);
   return connectedSessionSetup(model, "api_key", () =>
@@ -143,6 +155,78 @@ describe("session models and compaction", () => {
       message: "Model discovery failed with status 503",
     });
     setup.database.$client.close();
+  });
+
+  test("rejects caps above the discovered model limit during creation", async () => {
+    const setup = compactionSetup(new ScriptedAgentModel([]), "Cap");
+    const response = await setup.sessions.collection(
+      contextCapCreationRequest(),
+    );
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "invalid_context_token_cap",
+      message:
+        "Context token cap cannot exceed the model limit of 100,000 tokens.",
+    });
+    closeSessionTestDatabase(setup.database);
+  });
+
+  test("compacts through existing machinery after confirming an exceeded cap", async () => {
+    const model = new ScriptedAgentModel([
+      {
+        content: "Large context complete.",
+        contextTokens: 90_000,
+        toolCalls: [],
+      },
+      { content: "Confirmed cap handoff.", toolCalls: [] },
+    ]);
+    const setup = compactionSetup(model, "Existing cap");
+    await startSessionAndCompleteAgentFile(setup);
+    await waitForSessionStatus(setup, "idle");
+    const requestedCap = 80_000;
+    const before = setup.sessions.detailForUser(
+      TEST_AUTHENTICATED_USER.id,
+      SESSION_ID,
+      TEST_WORKSPACE_ID,
+    );
+    if (before === undefined) throw new Error("Missing integration session");
+
+    // This is the condition that opens the browser confirmation dialog.
+    expect(before.currentContextTokens).toBeGreaterThan(requestedCap);
+    expect(before.autoCompact).toBe(true);
+
+    const capped = setup.sessions.realtimeCommands.setContextTokenCapForUser(
+      TEST_AUTHENTICATED_USER,
+      SESSION_ID,
+      requestedCap,
+      TEST_WORKSPACE_ID,
+    );
+    expect(capped).toMatchObject({
+      currentContextTokens: 90_000,
+      maxContextTokens: requestedCap,
+      status: "idle",
+      userContextTokenCap: requestedCap,
+    });
+
+    // Confirmation invokes the same realtime manual-compaction operation used
+    // by the existing-session controller, rather than a test-only callback.
+    const compact = setup.sessions.realtimeCommands.compactForUser.bind(
+      setup.sessions.realtimeCommands,
+    );
+    const queuedStatus = (
+      await compact(TEST_AUTHENTICATED_USER, SESSION_ID, TEST_WORKSPACE_ID)
+    ).status;
+    expect(["queued", "running"]).toContain(queuedStatus);
+    await completeAgentFileLookup(setup);
+    const compacted = await waitForIdleContent(setup, "Confirmed cap handoff.");
+    expect(compacted).toMatchObject({
+      currentContextTokens: 0,
+      maxContextTokens: requestedCap,
+      userContextTokenCap: requestedCap,
+    });
+    expect(JSON.stringify(compacted)).not.toContain("Large context complete.");
+
+    closeSessionTestDatabase(setup.database);
   });
 
   test("updates compaction mode and manually compacts an idle session", async () => {

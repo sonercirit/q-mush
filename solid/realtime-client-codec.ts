@@ -21,12 +21,15 @@ import {
   readSessionPendingQuestions,
 } from "./session-codec.ts";
 
+interface RealtimeCommandErrorEvent {
+  readonly commandId: string;
+  readonly detail?: string;
+  readonly error: string;
+  readonly type: "command_error";
+}
+
 export type RealtimeServerEvent =
-  | {
-      readonly commandId: string;
-      readonly error: string;
-      readonly type: "command_error";
-    }
+  | RealtimeCommandErrorEvent
   | {
       readonly commandId: string;
       readonly result: unknown;
@@ -82,12 +85,18 @@ export function readRealtimeServerEvent(message: string): RealtimeServerEvent {
         result: value["result"],
         type: "command_success",
       };
-    case "command_error":
+    case "command_error": {
+      const detail = value["detail"];
+      if (detail !== undefined && typeof detail !== "string") {
+        throw new Error("The realtime server event was invalid");
+      }
       return {
         commandId: requiredString(value, "commandId"),
+        ...(typeof detail === "string" ? { detail } : {}),
         error: requiredString(value, "error"),
         type: "command_error",
       };
+    }
     case "tool_stream":
       if (!isToolStreamDeltaFrame(value)) {
         throw new Error("The realtime server event was invalid");

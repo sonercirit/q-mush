@@ -45,6 +45,7 @@ export function readStoredSessionDetail(
 
   return {
     ...summarizeStoredSession(stored),
+    modelContextTokens: stored.maxContextTokens,
     pendingQuestions: readPendingQuestions(userId, sessionId),
     agentFile: storedSessionAgentFile(database, sessionId),
     messages: withInterruptedToolResults(

@@ -103,6 +103,13 @@ export async function applySessionProviderUpdate(
     },
   );
   const detail = result.detail;
+  if (result.status === "invalid_context_token_cap") {
+    throw new RealtimeCommandError(
+      "invalid_context_token_cap",
+      result.error ??
+        "Lower or clear the context token cap before changing models.",
+    );
+  }
   if (result.status !== "updated" || detail === undefined) {
     throw new RealtimeCommandError(
       result.status === "not_found" ? "not_found" : "stale_generation",

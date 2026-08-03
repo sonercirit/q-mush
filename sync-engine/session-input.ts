@@ -67,6 +67,7 @@ export function readCreateSession(
   const runnerId = readIdentifier(value["runnerId"]);
   const workingDirectory = readWorkingDirectory(value);
   const modelValue = value["model"];
+  const userContextTokenCapValue = value["userContextTokenCap"];
   const openRouterProviderTagValue = value["openRouterProviderTag"];
   const reasoningEffortValue = value["reasoningEffort"];
   const toolsValue = value["tools"];
@@ -85,6 +86,10 @@ export function readCreateSession(
     runnerId === undefined ||
     workingDirectory === undefined ||
     !isAgentModelId(modelValue) ||
+    (userContextTokenCapValue !== undefined &&
+      (!Number.isSafeInteger(userContextTokenCapValue) ||
+        typeof userContextTokenCapValue !== "number" ||
+        userContextTokenCapValue <= 0)) ||
     (openRouterProviderTagValue !== undefined &&
       !isOpenRouterProviderSelection(openRouterProviderTagValue)) ||
     (provider !== "openrouter" && openRouterProviderTagValue !== undefined) ||
@@ -114,6 +119,10 @@ export function readCreateSession(
       : null,
     runnerId,
     tools,
+    userContextTokenCap:
+      typeof userContextTokenCapValue === "number"
+        ? userContextTokenCapValue
+        : null,
     workingDirectory,
   };
 }

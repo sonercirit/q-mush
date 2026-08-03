@@ -22,6 +22,7 @@ import type {
   SessionDetailLookup,
 } from "./session-command-types.ts";
 import { startManualSessionCompaction } from "./session-compaction-actions.ts";
+import { createSessionContextTokenCapAction } from "./session-context-limit-action.ts";
 import { type SessionLaunchBoundary } from "./session-creation.ts";
 import {
   readSessionCredential,
@@ -47,6 +48,7 @@ import {
 import type {
   SessionAutoCompactionAction,
   SessionCancelPendingInputAction,
+  SessionContextTokenCapAction,
   SessionCreateAction,
   SessionHistoryAction,
   SessionQuestionAnswerAction,
@@ -119,6 +121,7 @@ function cancellationError(
 }
 
 export class RealtimeSessionCommands implements SessionRealtimeCommands {
+  readonly #contextTokenCapAction: SessionContextTokenCapAction;
   readonly #dependencies: RealtimeSessionCommandDependencies;
 
   constructor(options: RealtimeSessionCommandsOptions) {
@@ -127,6 +130,11 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
       ...options.availability,
       ...options.lifecycle,
     };
+    this.#contextTokenCapAction = createSessionContextTokenCapAction({
+      now: () => this.#dependencies.now(),
+      notify: this.#dependencies.notify,
+      store: this.#dependencies.store,
+    });
   }
 
   async #credential(userId: string, selection: SessionCredentialSelection) {
@@ -440,6 +448,12 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
       return detail;
     });
 
+  setContextTokenCapForUser(
+    ...parameters: Parameters<SessionContextTokenCapAction>
+  ) {
+    return this.#contextTokenCapAction(...parameters);
+  }
+
   stopForUser: SessionStopAction = async (
     user,
     sessionId,
@@ -512,13 +526,9 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
     return this.#notifyUpdatedSession(user.id, input.sessionId, applied);
   }
 
-  #notifyUpdatedSession(
-    userId: string,
-    sessionId: string,
-    detail: AgentSessionDetail,
-  ): AgentSessionDetail {
-    this.#dependencies.notify(userId, sessionId);
-    return detail;
+  #notifyUpdatedSession(...parameters: [string, string, AgentSessionDetail]) {
+    this.#dependencies.notify(parameters[0], parameters[1]);
+    return parameters[2];
   }
 
   #withOwnedDetail<Value>(
@@ -526,7 +536,7 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
     sessionId: string,
     workspaceId: string | undefined,
     action: (detail: AgentSessionDetail) => Value,
-  ): Value {
+  ) {
     return action(this.#detail(user.id, sessionId, workspaceId));
   }
 

@@ -31,6 +31,20 @@ test("includes the parent-only stop choice only when selected", () => {
   });
 });
 
+test("shows the context cap rejection detail", () => {
+  expect(
+    sessionMutationError(
+      Object.assign(
+        new Error(
+          "Context token cap cannot exceed the model limit of 64,000 tokens.",
+        ),
+        { code: "invalid_context_token_cap" },
+      ),
+      "change the context token cap",
+    ),
+  ).toBe("Context token cap cannot exceed the model limit of 64,000 tokens.");
+});
+
 test("reports aggregate capacity as a definitive local admission failure", () => {
   expect(
     sessionMutationError(

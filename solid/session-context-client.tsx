@@ -33,6 +33,7 @@ export function sessionContextLabel(
     "currentContextTokens" | "maxContextTokens" | "status"
   >,
 ): string {
+  const limit = session.maxContextTokens;
   const current =
     session.currentContextTokens === 0
       ? session.status === "queued" ||
@@ -41,12 +42,9 @@ export function sessionContextLabel(
         ? "Pending"
         : "Not reported"
       : formatTokenCount(session.currentContextTokens);
-  const percentage = contextPercentage(
-    session.currentContextTokens,
-    session.maxContextTokens,
-  );
+  const percentage = contextPercentage(session.currentContextTokens, limit);
   const suffix = percentage === null ? "" : ` (${String(percentage)}%)`;
-  return `Context: ${current} / ${session.maxContextTokens === null ? "Not reported" : formatTokenCount(session.maxContextTokens)}${suffix}`;
+  return `Context: ${current} / ${limit === null ? "Not reported" : formatTokenCount(limit)}${suffix}`;
 }
 
 export function sessionContextClasses(

@@ -72,6 +72,7 @@ export function realtimeTestSessionCommands(
     detailForUser: () => REALTIME_TEST_SESSION_DETAIL,
     reassignForUser: () => REALTIME_TEST_SESSION_DETAIL,
     setAutoCompactionForUser: () => REALTIME_TEST_SESSION_DETAIL,
+    setContextTokenCapForUser: () => REALTIME_TEST_SESSION_DETAIL,
     stopForUser: () => REALTIME_TEST_SESSION_DETAIL,
     summariesForUser: () => [REALTIME_TEST_SESSION_DETAIL],
     updateProviderForUser: () => Promise.resolve(REALTIME_TEST_SESSION_DETAIL),

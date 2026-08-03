@@ -27,6 +27,7 @@ export const SESSION_REALTIME_OPERATIONS = {
   followUp: "sessions.follow_up",
   send: "sessions.send",
   setAutoCompaction: "sessions.set_auto_compaction",
+  setContextTokenCap: "sessions.set_context_token_cap",
   stop: "sessions.stop",
   steer: "sessions.steer",
   subscribe: "sessions.subscribe",
@@ -35,11 +36,13 @@ export const SESSION_REALTIME_OPERATIONS = {
 
 export class RealtimeCommandError extends Error {
   readonly code: string;
+  readonly detail: string | undefined;
 
-  constructor(code: string) {
-    super(code);
+  constructor(code: string, detail?: string) {
+    super(detail ?? code);
     this.name = "RealtimeCommandError";
     this.code = code;
+    this.detail = detail;
   }
 }
 
