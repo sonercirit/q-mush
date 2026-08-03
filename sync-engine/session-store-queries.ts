@@ -17,6 +17,10 @@ import {
   selectStoredSessions,
   summarizeStoredSession,
 } from "./session-store-summary.ts";
+import {
+  storedSegmentTokenUsage,
+  storedSessionTokenUsage,
+} from "./session-token-usage-store.ts";
 import { readSessionTurns } from "./session-turn-store.ts";
 
 type ReadPendingQuestions = (
@@ -50,6 +54,13 @@ export function readStoredSessionDetail(
         stored.status !== "paused",
     ),
     pendingInputs: storedPendingInputs(database, sessionId),
+    segmentTokenUsage: storedSegmentTokenUsage(
+      database,
+      sessionId,
+      stored.currentSegment,
+      true,
+    ),
+    tokenUsage: storedSessionTokenUsage(database, sessionId, true),
     turns: readSessionTurns(database, sessionId),
   };
 }

@@ -46,6 +46,14 @@ test("compaction advances durable segment identity and pages old messages", () =
     currentSegment: 1,
     segment: 0,
     sessionId: STORE_SESSION_ID,
+    tokenUsage: {
+      cacheWriteInputTokens: 0,
+      cachedInputTokens: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      reportedStepCount: 0,
+      stepCount: 1,
+    },
   });
   expect(history?.messages.map(({ content }) => content)).toEqual([
     expect.any(String),

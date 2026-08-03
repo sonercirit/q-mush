@@ -514,6 +514,7 @@ export function SessionTranscript(props: {
           <TranscriptStepTiming
             endedAt={timing().endedAt}
             startedAt={timing().startedAt}
+            tokenUsage={timing().tokenUsage}
           />
         )}
       </Show>

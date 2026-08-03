@@ -542,6 +542,12 @@ describe("compacting agent session loop", () => {
           content: "Persist this provider step.",
           contextTokens: 10,
           costUsd: 0.5,
+          tokenUsage: {
+            cacheWriteInputTokens: 25,
+            cachedInputTokens: 600,
+            inputTokens: 800,
+            outputTokens: 200,
+          },
           toolCalls: [],
         },
       ]),
@@ -557,6 +563,12 @@ describe("compacting agent session loop", () => {
           contextTokens: 10,
           costBasis: "reported",
           costUsd: 0.5,
+          tokenUsage: {
+            cacheWriteInputTokens: 25,
+            cachedInputTokens: 600,
+            inputTokens: 800,
+            outputTokens: 200,
+          },
         },
       },
     ]);

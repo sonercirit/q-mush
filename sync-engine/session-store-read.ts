@@ -41,10 +41,14 @@ export function readStoredToolCalls(
 
 type StoredMessage = Omit<
   AgentSessionMessage,
-  "createdAt" | "images" | "toolCalls"
+  "createdAt" | "images" | "tokenUsage" | "toolCalls"
 > & {
+  readonly cacheWriteInputTokens: number | null;
+  readonly cachedInputTokens: number | null;
   readonly createdAt: Date;
   readonly images: string | null;
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
   readonly toolCalls: string | null;
 };
 
@@ -55,10 +59,37 @@ export function summarizeStoredMessage(
     stored.images,
     "Stored agent attachments are invalid",
   );
+  const {
+    cacheWriteInputTokens,
+    cachedInputTokens,
+    inputTokens,
+    outputTokens,
+    ...fields
+  } = stored;
+  const usageValues = [
+    cacheWriteInputTokens,
+    cachedInputTokens,
+    inputTokens,
+    outputTokens,
+  ];
+  const tokenUsage = usageValues.every((value) => value === null)
+    ? null
+    : usageValues.every((value) => value !== null)
+      ? {
+          cacheWriteInputTokens: cacheWriteInputTokens ?? 0,
+          cachedInputTokens: cachedInputTokens ?? 0,
+          inputTokens: inputTokens ?? 0,
+          outputTokens: outputTokens ?? 0,
+        }
+      : undefined;
+  if (tokenUsage === undefined) {
+    throw new Error("Stored agent token usage is invalid");
+  }
   return {
-    ...stored,
+    ...fields,
     createdAt: stored.createdAt.getTime(),
     images: parsedAttachments,
+    ...(tokenUsage === null ? {} : { tokenUsage }),
     toolCalls: readStoredToolCalls(stored.toolCalls),
   };
 }

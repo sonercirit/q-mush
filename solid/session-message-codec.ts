@@ -1,5 +1,6 @@
 import { readAgentAttachments } from "../shared/agent-attachments.ts";
-import { readNullableString } from "../shared/auth-model.ts";
+import type { AgentTokenUsage } from "../shared/agent-loop.ts";
+import { isRecord, readNullableString } from "../shared/auth-model.ts";
 import type { AttachmentContentFields } from "../shared/session-model.ts";
 import { readFiniteNumber } from "../shared/validation.ts";
 
@@ -10,6 +11,7 @@ export interface SessionContentFields extends AttachmentContentFields {
 }
 
 export interface SessionMessageFields extends SessionContentFields {
+  readonly tokenUsage?: AgentTokenUsage;
   readonly toolCallId: string | null;
   readonly toolName: string | null;
 }
@@ -41,11 +43,44 @@ export function readSessionMessageFields(
   value: Readonly<Record<string, unknown>>,
 ): SessionMessageFields | undefined {
   const contentFields = readSessionContentFields(value);
+  const tokenUsage = readTokenUsage(value["tokenUsage"]);
   const toolCallId = readNullableString(value["toolCallId"]);
   const toolName = readNullableString(value["toolName"]);
   return contentFields !== undefined &&
+    tokenUsage !== undefined &&
     toolCallId !== undefined &&
     toolName !== undefined
-    ? { ...contentFields, toolCallId, toolName }
+    ? {
+        ...contentFields,
+        ...(tokenUsage === null ? {} : { tokenUsage }),
+        toolCallId,
+        toolName,
+      }
+    : undefined;
+}
+
+function readTokenUsage(value: unknown): AgentTokenUsage | null | undefined {
+  if (value === null || value === undefined) return null;
+  if (!isRecord(value)) return undefined;
+  const cacheWriteInputTokens = readTokenCount(value["cacheWriteInputTokens"]);
+  const cachedInputTokens = readTokenCount(value["cachedInputTokens"]);
+  const inputTokens = readTokenCount(value["inputTokens"]);
+  const outputTokens = readTokenCount(value["outputTokens"]);
+  return cacheWriteInputTokens === undefined ||
+    cachedInputTokens === undefined ||
+    inputTokens === undefined ||
+    outputTokens === undefined
+    ? undefined
+    : {
+        cacheWriteInputTokens,
+        cachedInputTokens,
+        inputTokens,
+        outputTokens,
+      };
+}
+
+function readTokenCount(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
     : undefined;
 }

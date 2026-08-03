@@ -1,13 +1,14 @@
 import type { AgentAttachment } from "./agent-attachments.ts";
 import type { AgentReasoningEffort } from "./agent-configuration.ts";
 import type { AgentFile } from "./agent-file.ts";
-import type { AgentToolCall } from "./agent-loop.ts";
+import type { AgentTokenUsage, AgentToolCall } from "./agent-loop.ts";
 import type { AgentSessionToolName } from "./agent-tools.ts";
 import type { PendingAskQuestions } from "./ask-questions.ts";
 import type { ProviderId } from "./provider-credential-store.ts";
 import type { ProviderModelPricing } from "./provider-model-pricing.ts";
 import type { RunnerExecutionEnvironment } from "./runner-command-broker.ts";
 import type { SessionPendingInputContent } from "./session-pending-input.ts";
+import type { AgentTokenUsageSummary } from "./session-token-usage.ts";
 
 export const AGENT_SESSION_STATUSES = [
   "queued",
@@ -55,6 +56,7 @@ export interface AgentSessionUsageUpdate {
   readonly contextTokens: number | null;
   readonly costBasis: Exclude<AgentSessionCostBasis, "none"> | null;
   readonly costUsd: number | null;
+  readonly tokenUsage?: AgentTokenUsage | null;
 }
 
 type AgentSessionMessageRole =
@@ -73,6 +75,7 @@ export interface AgentSessionMessage extends AttachmentContentFields {
   readonly toolCallId: string | null;
   readonly toolCalls: readonly AgentToolCall[];
   readonly toolName: string | null;
+  readonly tokenUsage?: AgentTokenUsage | null;
   readonly turnId?: string | null;
 }
 
@@ -122,5 +125,7 @@ export interface AgentSessionDetail extends AgentSessionSummary {
   readonly agentFile: AgentFile | null;
   readonly messages: readonly AgentSessionMessage[];
   readonly pendingInputs: readonly AgentSessionPendingInput[];
+  readonly segmentTokenUsage?: AgentTokenUsageSummary;
+  readonly tokenUsage?: AgentTokenUsageSummary;
   readonly turns?: readonly AgentSessionTurn[];
 }

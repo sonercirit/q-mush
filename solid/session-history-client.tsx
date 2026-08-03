@@ -1,8 +1,11 @@
 import { Show, type JSX } from "solid-js";
+import type { AgentTokenUsageSummary } from "../shared/session-token-usage.ts";
 import type { SessionController } from "./session-controller.ts";
+import { sessionUsageText } from "./session-usage.ts";
 
 export function SessionHistoryControls(props: {
   readonly controller: SessionController;
+  readonly tokenUsage?: AgentTokenUsageSummary | undefined;
 }): JSX.Element {
   const history = () => props.controller.view().history;
   const canGoOlder = (): boolean => {
@@ -43,7 +46,16 @@ export function SessionHistoryControls(props: {
         >
           Older
         </button>
-        <span class="text-xs text-slate-400">{label()}</span>
+        <span class="text-center text-xs text-slate-400">
+          <span class="block">{label()}</span>
+          <Show when={props.tokenUsage}>
+            {(usage) => (
+              <span class="mt-1 block" data-segment-usage="true">
+                {sessionUsageText(usage())}
+              </span>
+            )}
+          </Show>
+        </span>
         <button
           class="rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 disabled:cursor-not-allowed disabled:opacity-40"
           disabled={history().loading || history().page === undefined}
