@@ -1,2 +1,5 @@
 # Generated lockfile
 bun.lock
+
+# Strict-size stores are deliberately compact while remaining linted/type-checked
+sync-engine/session-store.ts

@@ -63,6 +63,7 @@ export interface SessionAgentRuntimeDependencies extends AttachmentFallbackRunti
   readonly detail: AgentSessionDetail;
   readonly hasPendingSteeringInput: () => boolean;
   readonly isCurrent: () => boolean;
+  readonly manualCompactionRequested: () => boolean;
   readonly modelFactory: AgentModelFactory;
   readonly now: () => number;
   readonly restartHandoffRequested: () => boolean;
@@ -548,6 +549,8 @@ export async function runSessionAgent(
           toolStream.finish(call.id, outcome.state ?? "completed");
         }
       },
+      onStepBoundary: () =>
+        runtime.manualCompactionRequested() ? "compact" : undefined,
       recordCompaction: (summary, usage, startedAt) => {
         recordCompaction(runtime, summary, usage, startedAt);
       },

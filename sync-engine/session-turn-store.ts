@@ -8,6 +8,7 @@ import {
 } from "../shared/database/schema.ts";
 import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 import type { AgentSessionTurn } from "../shared/session-model.ts";
+import { retireManualCompactionOperations } from "./session-manual-compaction-query.ts";
 import {
   storedSessionSnapshotCondition,
   updateStoredSessions,
@@ -159,6 +160,13 @@ export function updateSessionAndEndGenerationTurn(
   ) {
     return false;
   }
+  retireManualCompactionOperations(
+    options.database,
+    options.sessionId,
+    options.generation,
+    options.now,
+    "through",
+  );
   endGenerationSessionTurn(
     options.database,
     options.sessionId,

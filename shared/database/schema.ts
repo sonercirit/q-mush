@@ -25,6 +25,7 @@ import {
   ownedForeignKey,
   tokenUsageColumns,
 } from "./schema-columns.ts";
+import { agentSessionTables } from "./session-operation-schema.ts";
 
 export { auditColumns } from "./audit-columns.ts";
 
@@ -430,39 +431,9 @@ function agentSessionIdColumn() {
   return column.references(() => agentSessions.id, { onDelete: "restrict" });
 }
 
-export const agentSessionTurns = sqliteTable(
-  "agent_session_turns",
-  {
-    ...userOwnedAuditColumns(),
-    sessionId: agentSessionIdColumn(),
-    executionGeneration: integer("execution_generation").notNull(),
-    boundaryMessageId: text("boundary_message_id"),
-    segment: integer("segment").notNull().default(0),
-    startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
-    endedAt: integer("ended_at", { mode: "timestamp_ms" }),
-  },
-  (table) => [
-    index("agent_session_turns_session_segment_start_index").on(
-      table.sessionId,
-      table.segment,
-      table.startedAt,
-    ),
-    uniqueIndex("agent_session_turns_active_session_unique")
-      .on(table.sessionId)
-      .where(sql`${table.endedAt} IS NULL AND NOT ${table.isDeleted}`),
-    check(
-      "agent_session_turns_segment_nonnegative_check",
-      sql`${table.segment} >= 0`,
-    ),
-    check(
-      "agent_session_turns_generation_nonnegative_check",
-      sql`${table.executionGeneration} >= 0`,
-    ),
-    check(
-      "agent_session_turns_end_check",
-      sql`${table.endedAt} IS NULL OR ${table.endedAt} >= ${table.startedAt}`,
-    ),
-  ],
+export const { agentSessionOperations, agentSessionTurns } = agentSessionTables(
+  () => users.id,
+  () => agentSessions.id,
 );
 
 export const agentPendingInputs = sqliteTable(
