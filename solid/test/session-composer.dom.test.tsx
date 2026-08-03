@@ -17,13 +17,17 @@ import {
   sessionCanQueuePendingInput,
 } from "../session-pending-input.ts";
 import { initialSessionViewState } from "../session-state.ts";
+import type { SessionCommandTransport } from "../session-transport.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import {
   disposeTestViews,
   mountTestView,
   queryTestElement,
 } from "./dom-test-helpers.ts";
-import { mountTestSessionDetail } from "./session-dom-test-helpers.tsx";
+import {
+  mountSessionDetailBody,
+  mountTestSessionDetail,
+} from "./session-dom-test-helpers.tsx";
 import { pendingInputFixture } from "./session-pending-fixtures.ts";
 
 const disposals = new Array<() => void>();
@@ -126,6 +130,86 @@ test("sends pending input through authenticated realtime commands", async () => 
   ]);
 });
 
+function testPendingInputState(
+  prompt: string,
+  command: SessionCommandTransport["command"],
+) {
+  const detail = { ...TEST_SESSION_DETAIL, status: "running" as const };
+  const reactive = createReactiveState<SessionViewState>({
+    ...initialSessionViewState(),
+    detail,
+    followUp: prompt,
+    selectedId: detail.id,
+    sessions: [summaryFromDetail(detail)],
+  });
+  return {
+    detail,
+    ...mountSessionDetailBody(reactive, disposals, { command }),
+  };
+}
+
+test("optimistically shows pending input before the realtime command settles", async () => {
+  let resolveCommand: ((value: unknown) => void) | undefined;
+  const completion = new Promise<unknown>((resolve) => {
+    resolveCommand = resolve;
+  });
+  const {
+    container,
+    controller,
+    detail: running,
+  } = testPendingInputState("Visible immediately", () => completion);
+
+  const submitted = controller.followUp();
+
+  expect(container.textContent).toContain("Visible immediately");
+  expect(container.textContent).toContain("Sending…");
+  const optimistic = controller.state.optimisticPendingInputs[0];
+  if (optimistic === undefined || resolveCommand === undefined) {
+    throw new TypeError("Expected an optimistic pending input");
+  }
+  expect(controller.state.optimisticPendingInputs).toMatchObject([
+    {
+      content: "Visible immediately",
+      status: "sending",
+    },
+  ]);
+  expect(optimistic.clientRequestId).not.toBe("");
+  resolveCommand({
+    ...running,
+    pendingInputs: [
+      pendingInputFixture(optimistic.content, {
+        clientRequestId: optimistic.clientRequestId,
+        createdAt: optimistic.createdAt + 1,
+        id: "pending-authoritative",
+      }),
+    ],
+    updatedAt: running.updatedAt + 1,
+  });
+  await submitted;
+
+  expect(controller.state.detail?.pendingInputs).toMatchObject([
+    { id: "pending-authoritative" },
+  ]);
+  expect(container.textContent).not.toContain("Sending…");
+  expect(controller.state.optimisticPendingInputs).toEqual([]);
+});
+
+test("rolls an optimistic pending input back into the composer on failure", async () => {
+  const { container, controller } = testPendingInputState(
+    "Do not lose this",
+    () => Promise.reject(new Error("request_failed")),
+  );
+
+  await controller.followUp();
+
+  expect(controller.state).toMatchObject({
+    followUp: "Do not lose this",
+    optimisticPendingInputs: [],
+    sending: false,
+  });
+  expect(container.textContent).not.toContain("Do not lose this");
+  expect(controller.state.error).toContain("could not queue that follow-up");
+});
 test("reuses request identity after an unknown browser outcome", async () => {
   const running = { ...TEST_SESSION_DETAIL, status: "running" as const };
   const state: SessionViewState = {
@@ -406,6 +490,7 @@ test("pending cancellation button invokes its callback", () => {
       <SessionPendingInputs
         inputs={[pendingInputFixture("Editable", { id: "pending-1" })]}
         onCancel={onCancel}
+        onRetry={() => undefined}
       />
     ),
     disposals,
@@ -432,6 +517,7 @@ test("renders pending instructions in FIFO order", () => {
           pendingInputFixture("Second", { id: "pending-2", kind: "steer" }),
         ]}
         onCancel={() => undefined}
+        onRetry={() => undefined}
       />
     ),
     disposals,

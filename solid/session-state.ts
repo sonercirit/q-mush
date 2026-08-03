@@ -73,6 +73,7 @@ export function initialSessionViewState(): SessionViewState {
     history: initialSessionHistoryState(),
     loadingDetail: false,
     modelDiscovery: sessionModelDiscoveryState(undefined, false),
+    optimisticPendingInputs: [],
     providerDiscovery: sessionProviderDiscoveryState(undefined, false),
     openSelect: undefined,
     reassigning: false,

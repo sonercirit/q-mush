@@ -28,6 +28,7 @@ import {
   sessionComposerShortcut,
   SessionPendingInputs,
 } from "./session-pending-client.tsx";
+import { reconcilePendingInputs } from "./session-pending-input.ts";
 import { sessionMutationPending } from "./session-pending.ts";
 import { SessionProviderUpdateEditor } from "./session-provider-update-client.tsx";
 import type { SessionProviderUpdateView } from "./session-provider-update-model.ts";
@@ -40,6 +41,19 @@ import { SessionTranscript } from "./session-transcript.tsx";
 import { SessionUsage } from "./session-usage-view.tsx";
 
 const SCROLL_END_TOLERANCE = 64;
+
+function currentPendingInputs(
+  fallback: AgentSessionDetail,
+  view: ReturnType<LoadedSessionDetailViewProps["controller"]["view"]>,
+): ReturnType<typeof reconcilePendingInputs> {
+  const detail = view.detail?.id === fallback.id ? view.detail : fallback;
+  return reconcilePendingInputs(
+    detail.pendingInputs,
+    view.optimisticPendingInputs.filter(
+      ({ sessionId }) => sessionId === detail.id,
+    ),
+  );
+}
 
 function sessionCopyText(detail: AgentSessionDetail): string {
   const transcript = detail.messages
@@ -333,12 +347,13 @@ export function SessionDetailBody(props: {
         )}
       </Show>
       <SessionPendingInputs
-        inputs={
-          view().controller.view().detail?.pendingInputs ??
-          view().detail.pendingInputs
-        }
+        inputs={currentPendingInputs(view().detail, view().controller.view())}
         onCancel={(inputId) => {
           void view().controller.cancelPendingInput(inputId);
+        }}
+        onRetry={(kind) => {
+          if (kind === "steer") void view().controller.steer();
+          else void view().controller.followUp();
         }}
       />
       <Show when={view().detail.pendingQuestions}>

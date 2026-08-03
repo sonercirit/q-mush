@@ -1,4 +1,5 @@
 import type {
+  AgentSessionPendingInput,
   AgentSessionPendingInputKind,
   AgentSessionStatus,
 } from "../shared/session-model.ts";
@@ -8,6 +9,11 @@ import type { SessionCommandTransport } from "./session-transport.ts";
 export interface PendingInputAttempt extends SessionPendingInputRequest {
   readonly prompt: string;
   readonly sessionId: string;
+}
+
+export interface OptimisticPendingInput extends AgentSessionPendingInput {
+  readonly sessionId: string;
+  readonly status: "sending" | "unconfirmed";
 }
 
 export function samePendingInputAttempt(
@@ -35,6 +41,44 @@ export function pendingInputOperation(
   kind: AgentSessionPendingInputKind,
 ): "sessions.follow_up" | "sessions.steer" {
   return kind === "follow_up" ? "sessions.follow_up" : "sessions.steer";
+}
+
+export function optimisticPendingInput(
+  attempt: PendingInputAttempt,
+  createdAt: number,
+): OptimisticPendingInput {
+  return {
+    clientRequestId: attempt.clientRequestId,
+    content: attempt.prompt,
+    createdAt,
+    id: `pending:${attempt.clientRequestId}`,
+    images: attempt.images,
+    kind: attempt.kind,
+    sessionId: attempt.sessionId,
+    status: "sending",
+  };
+}
+
+export function reconcilePendingInputs(
+  authoritative: readonly AgentSessionPendingInput[],
+  optimistic: readonly OptimisticPendingInput[],
+): readonly (AgentSessionPendingInput | OptimisticPendingInput)[] {
+  const authoritativeRequestIds = new Set(
+    authoritative.map(({ clientRequestId }) => clientRequestId),
+  );
+  return [
+    ...authoritative,
+    ...optimistic.filter(
+      ({ clientRequestId }) => !authoritativeRequestIds.has(clientRequestId),
+    ),
+  ];
+}
+
+export function withoutOptimisticPendingInput(
+  inputs: readonly OptimisticPendingInput[],
+  clientRequestId: string,
+): readonly OptimisticPendingInput[] {
+  return inputs.filter((input) => input.clientRequestId !== clientRequestId);
 }
 
 export function requestPendingInput(

@@ -12,9 +12,11 @@ import {
   sessionMutationOutcomeIsUnknown,
 } from "./session-mutations.ts";
 import {
+  optimisticPendingInput,
   requestPendingInput,
   samePendingInputAttempt,
   sessionCanQueuePendingInput,
+  withoutOptimisticPendingInput,
   type PendingInputAttempt,
 } from "./session-pending-input.ts";
 import { sessionMutationPending } from "./session-pending.ts";
@@ -61,6 +63,13 @@ export class SessionPendingInputController {
 
   #finishMutation(): void {
     this.#options.loader.continueHydration();
+  }
+
+  #withoutAttempt(attempt: PendingInputAttempt) {
+    return withoutOptimisticPendingInput(
+      this.#options.view.value.optimisticPendingInputs,
+      attempt.clientRequestId,
+    );
   }
 
   reset(): void {
@@ -142,19 +151,23 @@ export class SessionPendingInputController {
         ? this.#attempt
         : { ...requested, clientRequestId: crypto.randomUUID() };
     this.#attempt = attempt;
+    const optimistic = optimisticPendingInput(attempt, Date.now());
     const revision = this.#startMutation();
+    this.#options.view.patchCurrent(revision, {
+      followUp: "",
+      followUpImages: [],
+      optimisticPendingInputs: [...this.#withoutAttempt(attempt), optimistic],
+    });
     try {
       const authoritative = readSessionDetail(
         await requestPendingInput(this.#options.transport, attempt),
       );
-      if (
-        this.#options.view.patchCurrent(revision, {
-          followUp: "",
-          followUpImages: [],
-          sending: false,
-        })
-      ) {
+      if (this.#options.view.isCurrent(revision)) {
         this.#options.realtime.applyDetail(authoritative);
+        this.#options.view.patchCurrent(revision, {
+          optimisticPendingInputs: this.#withoutAttempt(attempt),
+          sending: false,
+        });
       }
       this.#attempt = undefined;
     } catch (error) {
@@ -163,6 +176,22 @@ export class SessionPendingInputController {
         this.#attempt = undefined;
       }
       this.#options.view.patchCurrent(revision, {
+        ...(sessionMutationOutcomeIsUnknown(normalized)
+          ? {
+              followUp: attempt.prompt,
+              followUpImages: attempt.images,
+              optimisticPendingInputs:
+                this.#options.view.value.optimisticPendingInputs.map((input) =>
+                  input.clientRequestId === attempt.clientRequestId
+                    ? { ...input, status: "unconfirmed" }
+                    : input,
+                ),
+            }
+          : {
+              followUp: attempt.prompt,
+              followUpImages: attempt.images,
+              optimisticPendingInputs: this.#withoutAttempt(attempt),
+            }),
         sending: false,
         error: sessionMutationError(
           normalized,
