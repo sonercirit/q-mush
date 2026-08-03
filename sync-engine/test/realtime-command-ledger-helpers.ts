@@ -4,6 +4,7 @@ import type { UserRealtimeCommand } from "../../shared/user-realtime-protocol.ts
 import { RealtimeCommandLedger } from "../../sync-engine/realtime-command-ledger.ts";
 
 export const USER_ID = "user-1";
+export const WORKSPACE_ID = "workspace-1";
 type Acknowledgement = Awaited<
   ReturnType<RealtimeCommandLedger["execute"]>
 >["value"];
@@ -52,7 +53,7 @@ export function execute(
   userId = USER_ID,
 ): Promise<Acknowledgement> {
   return ledger
-    .execute(userId, selectedCommand, action)
+    .execute(userId, WORKSPACE_ID, selectedCommand, action)
     .then(({ value }) => value);
 }
 

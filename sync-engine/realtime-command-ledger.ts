@@ -1,6 +1,4 @@
-import { createHash } from "node:crypto";
 import type { UserRealtimeCommand } from "../shared/user-realtime-protocol.ts";
-import { utf8ByteLength } from "../shared/utf8.ts";
 import {
   commandExecution,
   commandRequiresDurableReceipt,
@@ -8,6 +6,11 @@ import {
   type CommandExecution,
   type CommandResult,
 } from "./realtime-command-execution.ts";
+import {
+  commandFingerprint,
+  commandPayloadBytes,
+  scopedCommandIdentity,
+} from "./realtime-command-identity.ts";
 
 export { RealtimeCommandError as RealtimeCommandFailure } from "../shared/user-realtime-protocol.ts";
 
@@ -63,6 +66,7 @@ interface LedgerEntry {
   readonly result: Promise<CommandResult>;
   retainedResult: CommandResult | undefined;
   readonly userId: string;
+  readonly workspaceId: string;
 }
 
 interface CompletedUserUsage {
@@ -87,32 +91,6 @@ interface RealtimeCommandLedgerOptions {
   readonly now?: () => number;
   readonly payloadBytes?: (command: UserRealtimeCommand) => number;
   readonly retentionMs?: number;
-}
-
-function commandFingerprint(command: UserRealtimeCommand): string | undefined {
-  try {
-    const serialized = JSON.stringify({
-      operation: command.operation,
-      payload: command.payload,
-    });
-    if (typeof serialized !== "string") {
-      return undefined;
-    }
-    return createHash("sha256").update(serialized).digest("base64url");
-  } catch {
-    return undefined;
-  }
-}
-
-function defaultPayloadBytes(command: UserRealtimeCommand): number {
-  try {
-    const serialized = JSON.stringify(command.payload);
-    return typeof serialized === "string"
-      ? utf8ByteLength(serialized)
-      : Number.POSITIVE_INFINITY;
-  } catch {
-    return Number.POSITIVE_INFINITY;
-  }
 }
 
 function positiveLimit(limit: number | undefined): boolean {
@@ -178,7 +156,7 @@ export class RealtimeCommandLedger {
     this.#maximumResultBytes =
       options.maximumResultBytes ?? MAXIMUM_COMMAND_RESULT_LENGTH;
     this.#now = options.now ?? Date.now;
-    this.#payloadBytes = options.payloadBytes ?? defaultPayloadBytes;
+    this.#payloadBytes = options.payloadBytes ?? commandPayloadBytes;
     this.#retentionMs = options.retentionMs ?? 7 * 24 * 60 * 60 * 1_000;
 
     const operationLimits = Object.entries(
@@ -216,12 +194,16 @@ export class RealtimeCommandLedger {
     const userCommandIds = this.#commandIds.get(userId);
     const userEntries = this.#entries.get(userId);
     if (
-      userCommandIds?.get(entry.commandId) !== entry ||
+      userCommandIds?.get(
+        scopedCommandIdentity(entry.workspaceId, entry.commandId),
+      ) !== entry ||
       userEntries?.get(idempotencyKey) !== entry
     ) {
       return;
     }
-    userCommandIds.delete(entry.commandId);
+    userCommandIds.delete(
+      scopedCommandIdentity(entry.workspaceId, entry.commandId),
+    );
     userEntries.delete(idempotencyKey);
     this.#removeRetainedResult(entry);
     if (userCommandIds.size === 0) {
@@ -428,7 +410,11 @@ export class RealtimeCommandLedger {
         this.#retainResult(entry, result);
       } else {
         // Later retries execute a fresh read and cannot consume mutation slots.
-        this.#deleteEntry(entry.userId, entry.idempotencyKey, entry);
+        this.#deleteEntry(
+          entry.userId,
+          scopedCommandIdentity(entry.workspaceId, entry.idempotencyKey),
+          entry,
+        );
       }
     } finally {
       execution.resolveCompletion();
@@ -449,8 +435,11 @@ export class RealtimeCommandLedger {
     if (commandDigest === undefined || entry.commandDigest !== commandDigest) {
       return this.#error(command.commandId, "idempotency_conflict");
     }
-    if (entry.completedAcknowledgement !== undefined) {
-      return entry.completedAcknowledgement;
+    const receipt = entry.completedAcknowledgement;
+    if (receipt !== undefined) {
+      return command.commandId === entry.commandId
+        ? receipt
+        : acknowledgement({ ...receipt.value, commandId: command.commandId });
     }
     const replayedCommand: Promise<CommandResult | undefined> =
       entry.expiresAt === Number.POSITIVE_INFINITY
@@ -477,6 +466,7 @@ export class RealtimeCommandLedger {
 
   async execute(
     userId: string,
+    workspaceId: string,
     command: UserRealtimeCommand,
     execute: () => unknown,
   ): Promise<SerializedRealtimeAcknowledgement> {
@@ -484,15 +474,26 @@ export class RealtimeCommandLedger {
     if (
       admittedAt === undefined ||
       !Number.isSafeInteger(admittedAt) ||
-      userId.length === 0
+      userId.length === 0 ||
+      workspaceId.length === 0
     ) {
       return this.#error(command.commandId, "command_capacity_exceeded");
     }
     this.#pruneExpired(admittedAt);
     const userEntries = this.#entries.get(userId);
-    const existing = userEntries?.get(command.idempotencyKey);
+    // Retained outcomes are local to the authenticated connection workspace.
+    // Reusing either identifier in another workspace starts a fresh command.
+    const idempotencyIdentity = scopedCommandIdentity(
+      workspaceId,
+      command.idempotencyKey,
+    );
+    const commandIdentity = scopedCommandIdentity(
+      workspaceId,
+      command.commandId,
+    );
+    const existing = userEntries?.get(idempotencyIdentity);
     const commandDigest = commandFingerprint(command);
-    const commandIdEntry = this.#commandIds.get(userId)?.get(command.commandId);
+    const commandIdEntry = this.#commandIds.get(userId)?.get(commandIdentity);
     if (commandIdEntry !== undefined) {
       if (commandIdEntry !== existing) {
         return this.#error(command.commandId, "command_id_conflict");
@@ -500,7 +501,7 @@ export class RealtimeCommandLedger {
       return this.#replay(command, commandDigest, commandIdEntry);
     }
     if (existing !== undefined) {
-      return this.#error(command.commandId, "idempotency_command_id_conflict");
+      return this.#replay(command, commandDigest, existing);
     }
 
     let payloadBytes: number | undefined;
@@ -543,13 +544,14 @@ export class RealtimeCommandLedger {
       result: execution.replayResult,
       retainedResult: undefined,
       userId,
+      workspaceId,
     };
     const userCommandIds =
       this.#commandIds.get(userId) ?? new Map<string, LedgerEntry>();
-    userCommandIds.set(command.commandId, created);
+    userCommandIds.set(commandIdentity, created);
     this.#commandIds.set(userId, userCommandIds);
     const selectedUserEntries = userEntries ?? new Map<string, LedgerEntry>();
-    selectedUserEntries.set(command.idempotencyKey, created);
+    selectedUserEntries.set(idempotencyIdentity, created);
     this.#entries.set(userId, selectedUserEntries);
 
     void execution.result.then((result) => {

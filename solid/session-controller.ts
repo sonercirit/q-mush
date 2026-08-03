@@ -38,7 +38,10 @@ import type {
   SessionCreationViewOptions,
   SessionToolUpdateResult,
 } from "./session-controller-options.ts";
-import { SessionPendingInputController } from "./session-controller-pending-input.ts";
+import {
+  SessionPendingInputController,
+  type PendingInputTimer,
+} from "./session-controller-pending-input.ts";
 import { updatedSessionQuestions } from "./session-controller-question-event.ts";
 import { answerSessionQuestions } from "./session-controller-questions.ts";
 import {
@@ -85,7 +88,6 @@ export class SessionController {
   readonly #transport: SessionCommandTransport | undefined;
   readonly #view: RevisionState<SessionViewState>;
   readonly #reactiveView: ReactiveState<SessionViewState>;
-
   constructor(
     reactiveView = createReactiveState(initialSessionViewState()),
     directoryPicker = new DirectoryPickerController(),
@@ -94,6 +96,7 @@ export class SessionController {
       | null
       | undefined = browserTranscriptFilterStorage(),
     transport?: SessionCommandTransport,
+    pendingInputTimer?: PendingInputTimer,
   ) {
     this.#reactiveView = reactiveView;
     this.#view = new RevisionState(reactiveView.state, reactiveView.setState);
@@ -120,6 +123,7 @@ export class SessionController {
       realtime: this.#realtime,
       transport,
       view: this.#view,
+      ...(pendingInputTimer && { timer: pendingInputTimer }),
     });
     this.#directoryPicker = directoryPicker;
     this.#transcriptFilterStorage = transcriptFilterStorage ?? undefined;
@@ -128,10 +132,12 @@ export class SessionController {
       this.#reconciliation.reconnect();
     });
   }
+
   applyDetail(detail: AgentSessionDetail): void {
     this.#applySnapshot(() => {
       this.#realtime.applyDetail(detail);
-    });
+      this.#pendingInputs.reconcile(detail);
+    }, true);
     if (
       this.#view.value.selectedId === detail.id &&
       this.#view.value.history.page === undefined
@@ -179,8 +185,11 @@ export class SessionController {
     };
     this.#applyToolEvent(applySnapshot, event);
   }
-  #applySnapshot(apply: () => void): void {
-    if (!sessionMutationPending(this.#view.value)) {
+  #applySnapshot(apply: () => void, applyWhileSending = false): void {
+    if (
+      !sessionMutationPending(this.#view.value) ||
+      (applyWhileSending && this.#view.value.sending)
+    ) {
       apply();
     }
   }
@@ -426,6 +435,9 @@ export class SessionController {
   }
   followUp() {
     return this.#pendingInputs.submit("follow_up");
+  }
+  retryPendingInput(clientRequestId: string): Promise<void> {
+    return this.#pendingInputs.retry(clientRequestId);
   }
   fork(
     messageId: string,

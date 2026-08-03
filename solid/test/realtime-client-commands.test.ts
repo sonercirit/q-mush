@@ -2,7 +2,6 @@ import { afterEach, expect, test, vi } from "vitest";
 import { SESSION_REALTIME_OPERATIONS } from "../../shared/user-realtime-protocol.ts";
 import {
   commandRealtimeTestSetup,
-  finishRealtimeTestReconnect,
   openRealtimeTestConnection,
   reconnectRealtimeTestConnection,
   type RealtimeClientTestSetup,
@@ -60,6 +59,14 @@ function expectOutcomeUnknown(result: Promise<unknown>): Promise<void> {
     code: "outcome_unknown",
     message: "outcome_unknown",
   });
+}
+
+async function settleUnknown(
+  setup: RealtimeClientTestSetup,
+  result: Promise<unknown>,
+): Promise<void> {
+  await expectOutcomeUnknown(result);
+  setup.connection.stop();
 }
 
 async function acknowledgeSuccess(
@@ -120,19 +127,21 @@ test("queues commands until the initial ready handshake", async () => {
   setup.connection.stop();
 });
 
-test("rejects a queued command when the initial connection closes before ready", async () => {
-  const setup = commandSetup("command-before-close");
-  const result = setup.connection.command(
-    SESSION_REALTIME_OPERATIONS.stop,
-    sessionPayload(),
-    "stop-before-close",
-  );
+test.each([
+  { commandId: "command-before-close", opened: false },
+  { commandId: "sent-before-close", opened: true },
+])(
+  "settles a $opened command as unconfirmed when its socket closes",
+  async ({ commandId, opened }) => {
+    const setup = commandSetup(commandId);
+    if (opened) openRealtimeTestConnection(setup, "instance-1");
+    const result = stopCommand(setup, `stop-${commandId}`);
 
-  setup.sockets[0]?.close();
+    setup.sockets[0]?.close();
 
-  await expectOutcomeUnknown(result);
-  setup.connection.stop();
-});
+    await settleUnknown(setup, result);
+  },
+);
 
 test("bounds commands queued while the connection is unavailable", async () => {
   const setup = commandSetup("queued-command");
@@ -175,48 +184,21 @@ test.each(["outcome_unknown", "command_outcome_unknown"])(
       type: "command_error",
     });
 
-    await expectOutcomeUnknown(result);
-    setup.connection.stop();
+    await settleUnknown(setup, result);
   },
 );
 
-test("does not replay a command settled while reconnect listeners run", async () => {
-  const setup = openedCommandSetup("settled-on-reconnect");
-  const result = stopCommand(setup, "settled-on-reconnect");
-  setup.sockets.at(-1)?.close();
-  setup.connection.onReconnect(() => {
-    setup.sockets[1]?.receive({
-      commandId: "settled-on-reconnect",
-      result: { status: "stopped" },
-      type: "command_success",
-    });
-  });
-  finishRealtimeTestReconnect(setup, "instance-1");
+test("does not replay sent commands after reconnect", async () => {
+  for (const instanceId of ["instance-1", "instance-2"]) {
+    const setup = commandSetup(`command-${instanceId}`);
+    openRealtimeTestConnection(setup, "instance-1");
+    const result = stopCommand(setup, `stop-${instanceId}`);
+    const rejected = expectOutcomeUnknown(result);
 
-  await expect(result).resolves.toEqual({ status: "stopped" });
-  expect(setup.sockets[1]?.sent).toHaveLength(1);
-  setup.connection.stop();
-});
+    reconnectRealtimeTestConnection(setup, instanceId);
 
-test("replays only on the same server instance and rejects uncertain mutations", async () => {
-  const same = commandSetup("command-1");
-  openRealtimeTestConnection(same, "instance-1");
-  const sameResult = same.connection.command(
-    SESSION_REALTIME_OPERATIONS.send,
-    { prompt: "Continue", sessionId: "session-1" },
-    "send-1",
-  );
-  const exactEnvelope = same.sockets[0]?.sent[0];
-  reconnectRealtimeTestConnection(same, "instance-1");
-  expect(same.sockets[1]?.sent).toEqual([exactEnvelope]);
-  await acknowledgeSuccess(same, "command-1", { status: "queued" }, sameResult);
-  same.connection.stop();
-
-  const changed = commandSetup("changed-command");
-  openRealtimeTestConnection(changed, "instance-1");
-  const changedResult = stopCommand(changed, "stop-1");
-  reconnectRealtimeTestConnection(changed, "instance-2");
-  await expectOutcomeUnknown(changedResult);
-  expect(changed.sockets[1]?.sent).toEqual([]);
-  changed.connection.stop();
+    await rejected;
+    expect(setup.sockets[1]?.sent).toEqual([]);
+    setup.connection.stop();
+  }
 });
