@@ -75,6 +75,7 @@ function sessionMessageMatches(
     left.toolName === right.toolName &&
     serializedDataMatches(left.attachments, right.attachments) &&
     serializedDataMatches(left.images, right.images) &&
+    serializedDataMatches(left.tokenUsage, right.tokenUsage) &&
     serializedDataMatches(left.toolCalls, right.toolCalls)
   );
 }

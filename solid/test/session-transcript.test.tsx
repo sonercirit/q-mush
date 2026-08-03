@@ -287,6 +287,12 @@ test("renders durable settlement time for a terminal step", () => {
     {
       ...message("durable-assistant", "Durable response", "assistant"),
       createdAt: durableMessageAt,
+      tokenUsage: {
+        cacheWriteInputTokens: 20,
+        cachedInputTokens: 300,
+        inputTokens: 400,
+        outputTokens: 50,
+      },
       turnId: durableTurnId,
     },
   ];
@@ -312,6 +318,7 @@ test("renders durable settlement time for a terminal step", () => {
   )?.length;
   expect(completedTimingCount).toBe(1);
   expect(html).toContain("Duration: 3s");
+  expect(html).toContain("Cache: 75%");
   const settlementDateTime = new Date(durableEndedAt).toISOString();
   expect(html).toContain(`datetime="${settlementDateTime}"`);
 });

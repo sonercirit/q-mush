@@ -227,7 +227,10 @@ export function commitRuntimeTerminal(
     restartHandoff: options.restartHandoff,
     sessionId: options.sessionId,
   });
-  const storedMessages = storedRecordedMessages(options.messages);
+  const storedMessages = storedRecordedMessages(
+    options.messages,
+    options.usage?.tokenUsage,
+  );
   writeStoredMessages(
     options,
     condition,
@@ -257,7 +260,10 @@ export function appendRuntimeAgentMessages(
     readonly usage?: AgentSessionUsageUpdate;
   },
 ): void {
-  const storedMessages = storedRecordedMessages(options.messages);
+  const storedMessages = storedRecordedMessages(
+    options.messages,
+    options.usage?.tokenUsage,
+  );
   if (options.usage === undefined) {
     appendRuntimeMessages({ ...options, messages: storedMessages });
     return;

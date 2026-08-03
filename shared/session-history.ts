@@ -1,5 +1,6 @@
 import { isRecord } from "./auth-model.ts";
 import type { AgentSessionMessage } from "./session-model.ts";
+import type { AgentTokenUsageSummary } from "./session-token-usage.ts";
 
 export const SESSION_HISTORY_PAGE_SIZE = 100;
 export const SESSION_HISTORY_REALTIME_OPERATION = "sessions.history";
@@ -11,6 +12,7 @@ export interface SessionHistoryPage {
   readonly olderCursor: string | null;
   readonly segment: number;
   readonly sessionId: string;
+  readonly tokenUsage?: AgentTokenUsageSummary;
 }
 
 export interface SessionHistoryRequest {
