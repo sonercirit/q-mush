@@ -152,6 +152,29 @@ test("attaches a live tool stream to its persisted tool call", () => {
   expectSingleSleepCall(container);
 });
 
+test("renders a live sleep duration before the result arrives", () => {
+  const startedAt = testStartedAt(2);
+  const stream = testToolStream(
+    "live-sleep",
+    '{"durationSeconds":61}',
+    "sleep",
+    { streamId: "live-sleep-step" },
+  );
+  const { container } = mountRunningTranscriptView(
+    () => [userMessage("live-sleep-user", startedAt)],
+    () => [stream],
+  );
+
+  const boundary = liveStreamBoundary(container, stream);
+  const duration = boundary?.querySelector("p.text-cyan-100");
+  expect(boundary?.getAttribute("data-tool-stream-state")).toBe("running");
+  expect(duration?.textContent).toBe("Duration: 1m 1s");
+  expect(boundary?.textContent).not.toContain(stream.arguments);
+  expect(
+    container.querySelector("[data-render-boundary^='tool-result:']"),
+  ).toBeNull();
+});
+
 test("renders parallel unlanded tool streams inside the output-free active agent block", () => {
   const startedAt = testStartedAt(2);
   const streams = [
