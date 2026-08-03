@@ -5,6 +5,7 @@ import {
   AGENT_SESSION_TOOL_NAMES,
   type AgentSessionToolName,
 } from "../../shared/agent-tools.ts";
+import { providerCredentials } from "../../shared/database/schema.ts";
 import type { ProviderCredentialAccess } from "../../shared/provider-credential-store.ts";
 import type { ProviderModelPricing } from "../../shared/provider-model-pricing.ts";
 import { SESSIONS_PATH } from "../../shared/routes.ts";
@@ -16,6 +17,7 @@ import {
 import type { RunnerSummary } from "../../shared/runner-model.ts";
 import { normalizeSearchText } from "../../shared/search.ts";
 import { GLOBAL_WORKSPACE_ID } from "../../shared/workspace-model.ts";
+import type { AgentModelFactory } from "../../sync-engine/session-agent-models.ts";
 import type { AgentModelDiscoverer } from "../../sync-engine/agent-model-discovery.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
 import type { OpenRouterProviderDiscoverer } from "../../sync-engine/openrouter-provider-discovery.ts";
@@ -56,6 +58,7 @@ interface ConnectedSessionOptions {
   readonly deletedCredentials?: FixtureCredentials;
   readonly foreignCredentials?: FixtureCredentials;
   readonly modelDiscovery?: AgentModelDiscoverer;
+  readonly modelFactory?: AgentModelFactory;
   readonly now?: () => number;
   readonly providerDiscovery?: OpenRouterProviderDiscoverer;
   readonly onChange?: (userId: string, sessionId: string) => void;
@@ -100,8 +103,18 @@ export function connectedSessionSetup(
     }
   }
 
+  const insertedCredentialIds = new Set(
+    options.database === undefined
+      ? []
+      : database
+          .select({ id: providerCredentials.id })
+          .from(providerCredentials)
+          .all()
+          .map(({ id }) => id),
+  );
   if (options.database === undefined) {
     addTestProviderCredential(database, CREDENTIAL_ID);
+    insertedCredentialIds.add(CREDENTIAL_ID);
   }
   const credential = createTestProviderCredential(
     CREDENTIAL_ID,
@@ -111,7 +124,6 @@ export function connectedSessionSetup(
     openai: options.credentials?.openai ?? [credential],
     openrouter: options.credentials?.openrouter ?? [],
   };
-  const insertedCredentialIds = new Set([CREDENTIAL_ID]);
   const foreignCredentials = options.foreignCredentials;
   if (
     foreignCredentials?.openai !== undefined ||
@@ -306,27 +318,29 @@ export function connectedSessionSetup(
       ...(options.providerDiscovery === undefined
         ? {}
         : { discoverOpenRouterProviders: options.providerDiscovery }),
-      modelFactory: (factoryOptions) => {
-        const {
-          credential: selectedCredential,
-          model: selectedModel,
-          openRouterProviderTag,
-          providerPricing,
-          reasoningEffort,
-          systemPrompt,
-          tools,
-        } = factoryOptions;
-        if (selectedCredential.secret !== "provider-secret") {
-          throw new Error("Unexpected test credential");
-        }
-        selectedModels.push(selectedModel);
-        selectedOpenRouterProviderTags.push(openRouterProviderTag);
-        selectedPricing.push(providerPricing);
-        selectedReasoningEfforts.push(reasoningEffort);
-        selectedSystemPrompts.push(systemPrompt);
-        selectedTools.push(tools);
-        return model;
-      },
+      modelFactory:
+        options.modelFactory ??
+        ((factoryOptions) => {
+          const {
+            credential: selectedCredential,
+            model: selectedModel,
+            openRouterProviderTag,
+            providerPricing,
+            reasoningEffort,
+            systemPrompt,
+            tools,
+          } = factoryOptions;
+          if (selectedCredential.secret !== "provider-secret") {
+            throw new Error("Unexpected test credential");
+          }
+          selectedModels.push(selectedModel);
+          selectedOpenRouterProviderTags.push(openRouterProviderTag);
+          selectedPricing.push(providerPricing);
+          selectedReasoningEfforts.push(reasoningEffort);
+          selectedSystemPrompts.push(systemPrompt);
+          selectedTools.push(tools);
+          return model;
+        }),
       now,
       randomId: () => {
         const id = takeValue(ids, "The session test ran out of IDs");

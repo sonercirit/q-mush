@@ -1,8 +1,13 @@
 import { describe, expect, test } from "vitest";
-import type { AgentModel } from "../../shared/agent-loop.ts";
+import type {
+  AgentConversationMessage,
+  AgentModel,
+  AgentModelStep,
+} from "../../shared/agent-loop.ts";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
 import { testAgentModelCatalog } from "../../shared/test/agent-model-fixtures.ts";
+import type { AgentModelFactory } from "../session-agent-models.ts";
 import { AgentModelDiscoveryError } from "../agent-model-discovery.ts";
 import type { CreateSessionInput } from "../session-input.ts";
 import {
@@ -15,11 +20,17 @@ import {
   fourBalancedSessions,
 } from "./credential-balancing-fixtures.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
+import { toolCall } from "./session-agent-tool-setup.ts";
 import {
   CREDENTIAL_ID,
   RUNNER_ID,
   connectedSessionSetup,
 } from "./session-integration-fixtures.ts";
+import {
+  completeAgentFileLookup,
+  hasSessionStatus,
+  waitForSessionValue,
+} from "./session-integration-helpers.ts";
 import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
 
 const SECOND_CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000093";
@@ -49,16 +60,47 @@ function input(credentialId: string): CreateSessionInput {
   };
 }
 
+class RestartPinnedModel implements AgentModel {
+  #blockRequest: number | undefined;
+  readonly entered = Promise.withResolvers<undefined>();
+  readonly release = Promise.withResolvers<undefined>();
+  readonly requests: AgentConversationMessage[][] = [];
+
+  constructor(blockRequest?: number) {
+    this.#blockRequest = blockRequest;
+  }
+
+  async complete(
+    messages: readonly AgentConversationMessage[],
+  ): Promise<AgentModelStep> {
+    this.requests.push([...messages]);
+    if (this.requests.length === this.#blockRequest) {
+      this.entered.resolve(undefined);
+      await this.release.promise;
+      this.#blockRequest = undefined;
+    }
+    return this.requests.length === 1 || this.requests.length === 3
+      ? providerStep("Inspecting sessions", {
+          toolCalls: [toolCall("list_runners", {})],
+        })
+      : providerStep(`Step ${String(this.requests.length)}`);
+  }
+}
+
+function balancedCredentials() {
+  return {
+    openai: [
+      createTestProviderCredential(CREDENTIAL_ID),
+      createTestProviderCredential(SECOND_CREDENTIAL_ID),
+    ],
+  };
+}
+
 function setup(discoverModels: Parameters<typeof connectedSessionSetup>[2]) {
   let command = 0;
   return connectedSessionSetup(IDLE_MODEL, "api_key", discoverModels, {
     commandId: () => `balanced-command-${String((command += 1))}`,
-    credentials: {
-      openai: [
-        createTestProviderCredential(CREDENTIAL_ID),
-        createTestProviderCredential(SECOND_CREDENTIAL_ID),
-      ],
-    },
+    credentials: balancedCredentials(),
   });
 }
 
@@ -84,6 +126,87 @@ describe("session credential balancing", () => {
       balancedTestCredentialOrder(CREDENTIAL_ID, SECOND_CREDENTIAL_ID),
     );
     closeSessionTestDatabase(sessions.database);
+  });
+
+  test("pins the resolved credential across steps, continue, and restart resume", async () => {
+    const selectedCredentials: string[] = [];
+    const beforeRestart = new RestartPinnedModel(3);
+    const factory = (model: AgentModel): AgentModelFactory =>
+      ({ credential }) => ({
+        complete: (messages, signal) => {
+          const selectedId: unknown = Reflect.get(credential, "id");
+          if (typeof selectedId !== "string") {
+            throw new Error("The model request credential ID is unavailable");
+          }
+          selectedCredentials.push(selectedId);
+          return model.complete(messages, signal);
+        },
+      });
+    const initial = connectedSessionSetup(
+      beforeRestart,
+      "api_key",
+      () => Promise.resolve(TEST_CATALOG),
+      {
+        credentials: balancedCredentials(),
+        modelFactory: factory(beforeRestart),
+      },
+    );
+    const created = await initial.sessions.realtimeCommands.createForUser(
+      TEST_AUTHENTICATED_USER,
+      input(balancedCredentialId("openai")),
+      TEST_WORKSPACE_ID,
+    );
+    await completeAgentFileLookup(initial);
+    await waitForSessionValue(
+      () => initial.sessions.detailForUser(TEST_AUTHENTICATED_USER.id, created.id),
+      hasSessionStatus("idle"),
+    );
+    expect(beforeRestart.requests).toHaveLength(2);
+    await initial.sessions.realtimeCommands.continueForUser(
+      TEST_AUTHENTICATED_USER,
+      created.id,
+      TEST_WORKSPACE_ID,
+    );
+    await completeAgentFileLookup(initial);
+    await beforeRestart.entered.promise;
+    const draining = initial.sessions.drain();
+    beforeRestart.release.resolve(undefined);
+    await draining;
+    expect(
+      initial.sessions.detailForUser(TEST_AUTHENTICATED_USER.id, created.id),
+    ).toMatchObject({ credentialId: CREDENTIAL_ID, status: "paused" });
+
+    const afterRestart = new RestartPinnedModel();
+    const recreated = connectedSessionSetup(
+      afterRestart,
+      "api_key",
+      () => Promise.resolve(TEST_CATALOG),
+      {
+        credentials: balancedCredentials(),
+        database: initial.database,
+        modelFactory: factory(afterRestart),
+      },
+    );
+    await completeAgentFileLookup(recreated);
+    await waitForSessionValue(
+      () =>
+        recreated.sessions.detailForUser(
+          TEST_AUTHENTICATED_USER.id,
+          created.id,
+        ),
+      hasSessionStatus("idle"),
+    );
+
+    expect(beforeRestart.requests).toHaveLength(3);
+    expect(afterRestart.requests).toHaveLength(2);
+    expect(selectedCredentials).toEqual([
+      CREDENTIAL_ID,
+      CREDENTIAL_ID,
+      CREDENTIAL_ID,
+      CREDENTIAL_ID,
+      CREDENTIAL_ID,
+    ]);
+    closeSessionTestDatabase(initial.database);
   });
 
   test("falls through an immediately rejected member but leaves explicit selection untouched", async () => {
