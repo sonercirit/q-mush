@@ -12,6 +12,7 @@ import {
   TEST_USER_ID,
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
+import { balancedTestCredentialOrder } from "./credential-balancing-fixtures.ts";
 import { takeValue } from "./oauth-test-helpers.ts";
 
 const FIRST_KEY_ID = "018bcfe5-6800-7000-8000-000000000081";
@@ -22,69 +23,108 @@ const ENVIRONMENT = {
   BRAVE_SEARCH_CREDENTIAL_KEY: Buffer.alloc(32, 11).toString("base64url"),
 };
 
-function createSetup() {
+function successfulSearchResponse(): Response {
+  return Response.json({
+    web: {
+      results: [
+        {
+          title: "Bun",
+          url: "https://bun.sh/",
+          age: "2 days ago",
+          description: "A fast all-in-one JavaScript runtime.",
+        },
+      ],
+    },
+  });
+}
+
+function defaultSearchResponse(apiKey: string | null): Response {
+  if (apiKey === FIRST_KEY) {
+    return Response.json({ message: "rate limited" }, { status: 429 });
+  }
+  return apiKey === SECOND_KEY
+    ? successfulSearchResponse()
+    : Response.json({ message: "invalid key" }, { status: 401 });
+}
+
+function credentialIds(
+  requests: readonly Request[],
+): readonly (string | null)[] {
+  return requests.map((request) => request.headers.get("x-subscription-token"));
+}
+
+function createSetup(
+  options: {
+    readonly now?: () => number;
+    readonly response?: (apiKey: string | null) => Response;
+  } = {},
+) {
   const { auth, database } = createAuthenticatedTestContext();
   const requests: Request[] = [];
   const fetch: NonNullable<OAuthDependencies["fetch"]> = (input, init) => {
     const request = new Request(input, init);
     requests.push(request.clone());
-    const apiKey = request.headers.get("x-subscription-token");
-
-    if (apiKey === FIRST_KEY) {
-      return Promise.resolve(
-        Response.json({ message: "rate limited" }, { status: 429 }),
-      );
-    }
-
-    if (apiKey === SECOND_KEY) {
-      return Promise.resolve(
-        Response.json({
-          web: {
-            results: [
-              {
-                title: "Bun",
-                url: "https://bun.sh/",
-                age: "2 days ago",
-                description: "A fast all-in-one JavaScript runtime.",
-              },
-            ],
-          },
-        }),
-      );
-    }
-
     return Promise.resolve(
-      Response.json({ message: "invalid key" }, { status: 401 }),
+      (options.response ?? defaultSearchResponse)(
+        request.headers.get("x-subscription-token"),
+      ),
     );
   };
   const ids = [FIRST_KEY_ID, SECOND_KEY_ID];
   const skill = createBraveSearchSkillFromEnvironment(ENVIRONMENT, auth, {
     database,
     fetch,
-    now: () => TEST_NOW,
+    now: options.now ?? (() => TEST_NOW),
     randomId: () => takeValue(ids, "The test ran out of Brave key IDs"),
   });
   return { database, requests, skill };
+}
+
+async function saveTestKey(
+  setup: ReturnType<typeof createSetup>,
+  key: { readonly apiKey: string; readonly label: string },
+): Promise<void> {
+  const request = createAuthenticatedRequest(
+    BRAVE_SEARCH_KEYS_PATH,
+    key,
+    "POST",
+  );
+  const response = await setup.skill.keys(request);
+  expect(response.status).toBe(201);
+  const body = await response.text();
+  expect(body.includes(key.apiKey)).toBe(false);
+}
+
+async function saveTestKeys(
+  setup: ReturnType<typeof createSetup>,
+): Promise<void> {
+  for (const key of [
+    { apiKey: FIRST_KEY, label: "Primary" },
+    { apiKey: SECOND_KEY, label: "Backup" },
+  ]) {
+    await saveTestKey(setup, key);
+  }
+}
+
+function expectCredentialOrder(
+  setup: ReturnType<typeof createSetup>,
+  expected: readonly string[],
+): void {
+  expect(credentialIds(setup.requests)).toEqual(expected);
+}
+
+async function search(
+  setup: ReturnType<typeof createSetup>,
+  query: string,
+): Promise<void> {
+  await setup.skill.execute(TEST_USER_ID, TEST_WORKSPACE_ID, { query });
 }
 
 describe("Brave Search skill", () => {
   test("stores multiple keys and uses the next key when one is rate limited", async () => {
     const setup = createSetup();
 
-    for (const key of [
-      { apiKey: FIRST_KEY, label: "Primary" },
-      { apiKey: SECOND_KEY, label: "Backup" },
-    ]) {
-      const request = createAuthenticatedRequest(
-        BRAVE_SEARCH_KEYS_PATH,
-        key,
-        "POST",
-      );
-      const response = await setup.skill.keys(request);
-      expect(response.status).toBe(201);
-      const body = await response.text();
-      expect(body.includes(key.apiKey)).toBe(false);
-    }
+    await saveTestKeys(setup);
 
     const listResponse = await setup.skill.keys(
       createAuthenticatedRequest(BRAVE_SEARCH_KEYS_PATH),
@@ -135,11 +175,7 @@ describe("Brave Search skill", () => {
       ],
     });
     expect(setup.requests).toHaveLength(2);
-    expect(
-      setup.requests.map((request) =>
-        request.headers.get("x-subscription-token"),
-      ),
-    ).toEqual([FIRST_KEY, SECOND_KEY]);
+    expectCredentialOrder(setup, [FIRST_KEY, SECOND_KEY]);
     expect(new URL(setup.requests[1]?.url ?? "http://invalid").search).toBe(
       "?q=bun+typescript&count=2",
     );
@@ -161,6 +197,58 @@ describe("Brave Search skill", () => {
     expect(removedCredentials).toMatchObject([
       { encryptedCredential: "", isDeleted: true },
     ]);
+    setup.database.$client.close();
+  });
+
+  test("alternates keys across calls and temporarily skips rejected keys", async () => {
+    let now = TEST_NOW;
+    const setup = createSetup({ now: () => now });
+    await saveTestKeys(setup);
+
+    await search(setup, "first");
+    await search(setup, "second");
+    expectCredentialOrder(setup, [FIRST_KEY, SECOND_KEY, SECOND_KEY]);
+
+    now += 30_001;
+    await search(setup, "after cooldown");
+    expectCredentialOrder(setup, [
+      FIRST_KEY,
+      SECOND_KEY,
+      SECOND_KEY,
+      FIRST_KEY,
+      SECOND_KEY,
+    ]);
+    setup.database.$client.close();
+  });
+
+  test("round robins healthy keys between calls", async () => {
+    const setup = createSetup({ response: successfulSearchResponse });
+    await saveTestKeys(setup);
+
+    for (const query of ["first", "second", "third", "fourth"]) {
+      await search(setup, query);
+    }
+
+    expectCredentialOrder(
+      setup,
+      balancedTestCredentialOrder(FIRST_KEY, SECOND_KEY),
+    );
+    setup.database.$client.close();
+  });
+
+  test("keeps single-key success behavior unchanged", async () => {
+    const setup = createSetup({ response: successfulSearchResponse });
+    await saveTestKey(setup, { apiKey: FIRST_KEY, label: "Only key" });
+
+    const output = await setup.skill.execute(TEST_USER_ID, TEST_WORKSPACE_ID, {
+      query: "bun",
+    });
+
+    expect(JSON.parse(output)).toMatchObject({
+      query: "bun",
+      results: [{ title: "Bun", url: "https://bun.sh/" }],
+    });
+    expectCredentialOrder(setup, [FIRST_KEY]);
     setup.database.$client.close();
   });
 

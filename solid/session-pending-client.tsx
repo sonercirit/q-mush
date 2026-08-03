@@ -5,11 +5,13 @@ import {
 } from "./session-structured-text.tsx";
 
 interface DisplayPendingInput {
+  readonly clientRequestId: string;
   readonly content: string;
   readonly createdAt?: number;
   readonly id: string;
   readonly images: readonly unknown[];
   readonly kind: "follow_up" | "steer";
+  readonly status?: "sending" | "unconfirmed";
 }
 
 export interface SessionShortcut {
@@ -88,6 +90,7 @@ function pendingInputLabel(kind: DisplayPendingInput["kind"]): string {
 interface SessionPendingInputsProps {
   readonly inputs: readonly DisplayPendingInput[];
   readonly onCancel: (inputId: string) => void;
+  readonly onRetry: (clientRequestId: string) => void;
 }
 
 export function SessionPendingInputs(
@@ -105,21 +108,37 @@ export function SessionPendingInputs(
         <ol class="mt-3 space-y-2">
           <For each={props.inputs}>
             {(input) => (
-              <li class="rounded-xl border border-white/10 bg-slate-950/70 p-3">
+              <li
+                class="rounded-xl border border-white/10 bg-slate-950/70 p-3"
+                data-pending-input-status={input.status ?? "confirmed"}
+              >
                 <div class="flex items-start justify-between gap-3">
                   <p class="text-xs font-semibold tracking-wide text-amber-200 uppercase">
-                    {pendingInputLabel(input.kind)}
+                    {`${pendingInputLabel(input.kind)}${input.status === "sending" ? " · Sending…" : input.status === "unconfirmed" ? " · Delivery unconfirmed" : ""}`}
                   </p>
-                  <button
-                    aria-label={`Cancel ${pendingInputLabel(input.kind).toLowerCase()}`}
-                    class="rounded-lg border border-white/10 px-2 py-1 text-xs font-semibold text-slate-400 transition hover:border-rose-300/30 hover:text-rose-200"
-                    onClick={() => {
-                      props.onCancel(input.id);
-                    }}
-                    type="button"
-                  >
-                    Cancel
-                  </button>
+                  <Show when={input.status === "unconfirmed"}>
+                    <button
+                      class="rounded-lg border border-white/10 px-2 py-1 text-xs font-semibold text-slate-400 transition hover:border-amber-300/30 hover:text-amber-200"
+                      onClick={() => {
+                        props.onRetry(input.clientRequestId);
+                      }}
+                      type="button"
+                    >
+                      Retry
+                    </button>
+                  </Show>
+                  <Show when={input.status === undefined}>
+                    <button
+                      aria-label={`Cancel ${pendingInputLabel(input.kind).toLowerCase()}`}
+                      class="rounded-lg border border-white/10 px-2 py-1 text-xs font-semibold text-slate-400 transition hover:border-rose-300/30 hover:text-rose-200"
+                      onClick={() => {
+                        props.onCancel(input.id);
+                      }}
+                      type="button"
+                    >
+                      Cancel
+                    </button>
+                  </Show>
                 </div>
                 <Show when={input.content.length > 0}>
                   <div class="mt-2 text-sm text-slate-300">

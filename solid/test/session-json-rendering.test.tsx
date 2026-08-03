@@ -196,19 +196,20 @@ test("leaves non-JSON text unchanged and bounds arbitrary candidates", () => {
 });
 
 test("colorizes embedded JSON in queued instructions", () => {
-  const html = renderSolidToString(() => (
-    <SessionPendingInputs
-      inputs={[
-        {
-          content: 'Spawned session completed:\n{"result":"ok"}',
-          id: "queued-1",
-          images: [],
-          kind: "steer",
-        },
-      ]}
-      onCancel={() => undefined}
-    />
-  ));
+  const input = {
+    clientRequestId: "request-1",
+    content: 'Spawned session completed:\n{"result":"ok"}',
+    id: "queued-1",
+    images: [],
+    kind: "steer" as const,
+  };
+  const html = renderSolidToString(() =>
+    SessionPendingInputs({
+      inputs: [input],
+      onCancel: () => undefined,
+      onRetry: () => undefined,
+    }),
+  );
 
   expect(html).toContain("Queued steer");
   expectSpawnedSessionText(html);

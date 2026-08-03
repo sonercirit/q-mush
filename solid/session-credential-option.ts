@@ -1,3 +1,4 @@
+import { balancedCredentialId } from "../shared/provider-credential-pool.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
 import type { ProviderCredential } from "./provider-client.tsx";
 import {
@@ -23,7 +24,17 @@ export function selectedSessionCredentialOption(
   credentials: readonly SessionCredentialOption[],
   value: string,
 ): SessionCredentialOption | undefined {
-  return credentials.find((option) => sessionCredentialValue(option) === value);
+  const direct = credentials.find(
+    (option) => sessionCredentialValue(option) === value,
+  );
+  if (direct !== undefined) return direct;
+  return credentials.find(
+    ({ provider }) =>
+      modelCredentialValue({
+        credentialId: balancedCredentialId(provider),
+        provider,
+      }) === value,
+  );
 }
 
 export function sessionCredentialSelectOptions(

@@ -3,6 +3,11 @@ import { describe, expect, test, vi } from "vitest";
 import type { AgentImage } from "../../shared/agent-images.ts";
 import { agentPendingInputs } from "../../shared/database/schema.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
+import {
+  SESSION_REALTIME_OPERATIONS,
+  type UserRealtimeCommand,
+} from "../../shared/user-realtime-protocol.ts";
+import { RealtimeCommandLedger } from "../realtime-command-ledger.ts";
 import { SessionFinisher } from "../session-finisher.ts";
 import {
   cancelPendingInput,
@@ -22,6 +27,21 @@ import {
 } from "./session-store-test-fixtures.ts";
 
 const OTHER_USER_ID = "018bcfe5-6800-7000-8000-000000000099";
+
+function pendingInputCommand(commandId: string): UserRealtimeCommand {
+  return {
+    commandId,
+    idempotencyKey: "lost-ack-request",
+    operation: SESSION_REALTIME_OPERATIONS.followUp,
+    payload: {
+      clientRequestId: "lost-ack-request",
+      kind: "follow_up",
+      prompt: "Persist exactly once",
+      sessionId: "session-under-test",
+    },
+    type: "command",
+  };
+}
 
 function runningStore() {
   const setup = createStore();
@@ -165,6 +185,50 @@ function expectQueuedBoundary(
 }
 
 describe("durable pending session inputs", () => {
+  test("retries a ledger-recorded send after its acknowledgement is lost", async () => {
+    const setup = runningStore();
+    const ledger = new RealtimeCommandLedger();
+    const persist = vi.fn(() => {
+      const result = enqueueInput(
+        setup,
+        "lost-ack-request",
+        "Persist exactly once",
+      );
+      if (!("input" in result)) {
+        throw new Error("The pending input was not accepted");
+      }
+      return setup.store.get(TEST_USER_ID, setup.detail.id);
+    });
+    const firstCommand = pendingInputCommand("first-command");
+    const first = await ledger.execute(
+      TEST_USER_ID,
+      setup.detail.workspaceId,
+      firstCommand,
+      persist,
+    );
+
+    const retry = await ledger.execute(
+      TEST_USER_ID,
+      setup.detail.workspaceId,
+      pendingInputCommand("retry-command"),
+      persist,
+    );
+
+    expect(first.value.type).toBe("command_success");
+    expect(retry.value).toMatchObject({
+      commandId: "retry-command",
+      type: "command_success",
+    });
+    expect(persist).toHaveBeenCalledOnce();
+    expect(pendingInputs(setup)).toMatchObject([
+      {
+        clientRequestId: "lost-ack-request",
+        content: "Persist exactly once",
+      },
+    ]);
+    closeRunningStore(setup);
+  });
+
   test("persists more than eight FIFO inputs with owner-scoped idempotency", () => {
     const setup = runningStore();
     const inputCount = 20;

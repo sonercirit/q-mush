@@ -303,6 +303,7 @@ export type RealtimeSessionOverrides = Partial<
     | "onChange"
     | "pendingQuestionForUser"
     | "pendingRunnerRestart"
+    | "realtimeCommands"
     | "replaceRunnerConnection"
     | "runnerConnected"
     | "runnerConnectionGeneration"

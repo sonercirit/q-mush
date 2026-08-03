@@ -9,7 +9,11 @@ import { createApiError } from "./http.ts";
 import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
 import { persistQueuedRestartHandoff } from "./session-agent-action-helpers.ts";
 import type { CreateSessionInput } from "./session-input.ts";
-import { sessionMetadataFromDependencies } from "./session-provider-selection.ts";
+import {
+  optionalCredentialRejection,
+  sessionMetadataFromDependencies,
+  type SessionMetadataResult,
+} from "./session-provider-selection.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
 import type { CreateAgentSession } from "./session-store-create.ts";
 import type { SessionStore } from "./session-store.ts";
@@ -96,6 +100,7 @@ export type SessionCreationDependencies = Omit<
   readonly discoverModels: AgentModelDiscoverer;
   readonly discoverOpenRouterProviders: OpenRouterProviderDiscoverer;
   readonly onCreated?: (detail: AgentSessionDetail) => void;
+  readonly rejectCredentialErrors?: boolean;
   readonly runtimes: Pick<SessionRuntimes, "accepts" | "pendingRestart">;
   readonly serializeCreatedDetail?: CreatedSessionSerializer;
   readonly store: Pick<
@@ -190,26 +195,50 @@ function committedSessionResponse(
   return response;
 }
 
-export async function createValidatedSession(
-  dependencies: SessionCreationDependencies,
+export type PreparedSessionMetadata = Exclude<
+  SessionMetadataResult,
+  { readonly error: string }
+>;
+
+export function sessionMetadataErrorResponse(
+  metadata: Extract<SessionMetadataResult, { readonly error: string }>,
+): Response {
+  return createApiError(
+    metadata.error === "provider_unavailable"
+      ? "openrouter_provider_unavailable"
+      : "openrouter_provider_validation_failed",
+    metadata.error === "provider_unavailable" ? 409 : 502,
+  );
+}
+
+type PreparedSessionInput = CreateSessionInput &
+  Pick<CreateAgentSession, "workspaceId">;
+
+export function prepareSessionCredential(
+  dependencies: Pick<
+    SessionCreationDependencies,
+    "discoverModels" | "discoverOpenRouterProviders" | "rejectCredentialErrors"
+  >,
   user: AuthenticatedUser,
-  input: CreateSessionInput & Pick<CreateAgentSession, "workspaceId">,
+  input: PreparedSessionInput,
   credential: ProviderCredentialAccess,
-): Promise<Response> {
-  const metadata = await sessionMetadataFromDependencies({
+): Promise<SessionMetadataResult> {
+  return sessionMetadataFromDependencies({
     credential,
     dependencies,
     input,
     ownerId: user.id,
+    ...optionalCredentialRejection(dependencies.rejectCredentialErrors),
   });
-  if ("error" in metadata) {
-    return createApiError(
-      metadata.error === "provider_unavailable"
-        ? "openrouter_provider_unavailable"
-        : "openrouter_provider_validation_failed",
-      metadata.error === "provider_unavailable" ? 409 : 502,
-    );
-  }
+}
+
+export function createPreparedSession(
+  dependencies: SessionCreationDependencies,
+  user: AuthenticatedUser,
+  input: PreparedSessionInput,
+  credential: ProviderCredentialAccess,
+  metadata: PreparedSessionMetadata,
+): Response {
   if (!dependencies.runtimes.accepts(input.runnerId)) {
     return createApiError("server_restarting", 503);
   }
@@ -272,4 +301,21 @@ export async function createValidatedSession(
       launchOutcome === "not_launched" ? 500 : 503,
     )
   );
+}
+
+export async function createValidatedSession(
+  dependencies: SessionCreationDependencies,
+  user: AuthenticatedUser,
+  input: PreparedSessionInput,
+  credential: ProviderCredentialAccess,
+): Promise<Response> {
+  const metadata = await prepareSessionCredential(
+    dependencies,
+    user,
+    input,
+    credential,
+  );
+  return "error" in metadata
+    ? sessionMetadataErrorResponse(metadata)
+    : createPreparedSession(dependencies, user, input, credential, metadata);
 }

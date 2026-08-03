@@ -13,6 +13,7 @@ import {
 import {
   modelCatalogOptions,
   modelCredentialValue,
+  parseModelCredentialValue,
   reasoningModelOptions,
   type SessionModelDiscoverer,
   type SessionModelDiscoveryResult,
@@ -228,14 +229,15 @@ function createSessionModelDiscovery(
         options.credentials,
         credentialValue,
       );
-      if (selected === undefined) return;
+      const identity = parseModelCredentialValue(credentialValue);
+      if (selected === undefined || identity === undefined) return;
       const currentRequest = options.request.latest.begin();
       options.request.setError(undefined);
       setCatalog(undefined);
       const result: SessionModelDiscoveryResult =
         await options.onDiscoverModels(
-          selected.provider,
-          selected.credential.id,
+          identity.provider,
+          identity.credentialId,
         );
       if (!options.request.latest.isLatest(currentRequest)) return;
       if ("error" in result) {

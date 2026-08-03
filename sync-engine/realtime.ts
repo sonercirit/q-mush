@@ -477,7 +477,7 @@ export function createRealtimeIntegration(
           throw error;
         }
         void ledger
-          .execute(user.id, command, () => {
+          .execute(user.id, userData.workspaceId, command, () => {
             const current = options.auth.revalidateUser(
               userData.request,
               user.id,

@@ -183,10 +183,7 @@ export class RealtimeConnection {
     this.#lastInstanceId = undefined;
 
     this.#rejectQueuedCommands(UNKNOWN_OUTCOME_ERROR);
-    for (const pending of this.#pendingCommands.values()) {
-      pending.reject(commandFailure(UNKNOWN_OUTCOME_ERROR));
-    }
-    this.#pendingCommands.clear();
+    this.#rejectPendingCommands(UNKNOWN_OUTCOME_ERROR);
     this.#pendingCommandBytes = 0;
     this.#instanceId = undefined;
 
@@ -316,6 +313,7 @@ export class RealtimeConnection {
         this.#socket = undefined;
         this.#instanceId = undefined;
         this.#discardDeferredStateEvents();
+        this.#rejectPendingCommands(UNKNOWN_OUTCOME_ERROR);
         if (!this.#hasConnected && this.#queuedCommands.length > 0) {
           this.#rejectQueuedCommands(UNKNOWN_OUTCOME_ERROR);
         }
@@ -443,6 +441,14 @@ export class RealtimeConnection {
         this.#flushSessionDelta();
       }
     });
+  }
+
+  #rejectPendingCommands(code: string): void {
+    for (const pending of this.#pendingCommands.values()) {
+      pending.reject(commandFailure(code));
+      this.#pendingCommandBytes -= pending.bytes;
+    }
+    this.#pendingCommands.clear();
   }
 
   #rejectQueuedCommands(code: string): void {

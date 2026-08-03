@@ -12,6 +12,7 @@ import {
   type SessionCredentialReaders,
 } from "./session-credential-access.ts";
 import {
+  optionalCredentialRejection,
   requireSessionMetadata,
   sessionMetadataFromDependencies,
 } from "./session-provider-selection.ts";
@@ -24,6 +25,7 @@ export interface SessionProviderUpdateDependencies {
   readonly discoverOpenRouterProviders: OpenRouterProviderDiscoverer;
   readonly now: () => number;
   readonly providers: SessionCredentialReaders;
+  readonly rejectCredentialErrors?: boolean;
   readonly runtimes: Pick<SessionRuntimes, "abortForGeneration">;
   readonly store: {
     readonly database: Parameters<typeof updateStoredSessionProvider>[0];
@@ -61,6 +63,7 @@ async function targetMetadata(
       dependencies,
       input,
       ownerId: userId,
+      ...optionalCredentialRejection(dependencies.rejectCredentialErrors),
     }),
   );
 }

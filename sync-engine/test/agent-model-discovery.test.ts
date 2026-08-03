@@ -13,10 +13,12 @@ import type { ProviderModelPricing } from "../../shared/provider-model-pricing.t
 import { utf8ByteLength } from "../../shared/utf8.ts";
 import {
   discoverAgentModels,
+  isCredentialRejectionError,
   type AgentModelDiscoveryFetch,
 } from "../../sync-engine/agent-model-discovery.ts";
 import { createJsonResponse } from "../../sync-engine/http.ts";
 import { createOpenAiOAuthSecret } from "./oauth-test-helpers.ts";
+import { captureRejection } from "./promise-test-helpers.ts";
 
 class RequestCapture {
   request?: Request;
@@ -103,6 +105,15 @@ function rejectedDiscovery(body: BodyInit): Promise<AgentModelCatalog> {
       Promise.resolve(
         new Response(body, { headers: { "content-type": "application/json" } }),
       ),
+  );
+}
+
+function openRouterStatusFailure(
+  secret: string,
+  status: number,
+): Promise<AgentModelCatalog> {
+  return discoverAgentModels("openrouter", credential("api_key", secret), () =>
+    Promise.resolve(new Response("denied", { status })),
   );
 }
 
@@ -348,20 +359,14 @@ describe("agent model discovery", () => {
     expect(JSON.stringify(discovered)).not.toContain("�");
   });
 
-  test("reports safe provider status failures without credential contents", async () => {
+  test("classifies exhausted OpenRouter credits without exposing credentials", async () => {
     const secret = "sk-never-return-this-secret";
-    let message = "";
-    try {
-      await discoverAgentModels(
-        "openrouter",
-        credential("api_key", secret),
-        () => Promise.resolve(new Response("denied", { status: 429 })),
-      );
-    } catch (error) {
-      message = error instanceof Error ? error.message : String(error);
-    }
+    const error = await captureRejection(openRouterStatusFailure(secret, 402));
+    const message = error instanceof Error ? error.message : String(error);
 
-    expect(message).toContain("status 429");
+    expect(error).toMatchObject({ status: 402 });
+    expect(isCredentialRejectionError(error)).toBe(true);
+    expect(message).toContain("status 402");
     expect(message).not.toContain(secret);
     expect(utf8ByteLength(message)).toBeLessThanOrEqual(300);
   });

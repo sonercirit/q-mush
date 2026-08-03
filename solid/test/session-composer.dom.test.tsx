@@ -13,17 +13,20 @@ import {
 import {
   pendingInputOperation,
   requestPendingInput,
-  samePendingInputAttempt,
   sessionCanQueuePendingInput,
 } from "../session-pending-input.ts";
 import { initialSessionViewState } from "../session-state.ts";
+import type { SessionCommandTransport } from "../session-transport.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import {
   disposeTestViews,
   mountTestView,
   queryTestElement,
 } from "./dom-test-helpers.ts";
-import { mountTestSessionDetail } from "./session-dom-test-helpers.tsx";
+import {
+  mountSessionDetailBody,
+  mountTestSessionDetail,
+} from "./session-dom-test-helpers.tsx";
 import { pendingInputFixture } from "./session-pending-fixtures.ts";
 
 const disposals = new Array<() => void>();
@@ -60,32 +63,6 @@ test("pending input capabilities distinguish follow-up and steering", () => {
   expect(sessionCanQueuePendingInput("running", "steer")).toBe(true);
   expect(pendingInputOperation("follow_up")).toBe("sessions.follow_up");
   expect(pendingInputOperation("steer")).toBe("sessions.steer");
-});
-
-test("reuses only an exactly matching durable request attempt", () => {
-  const attempt = {
-    clientRequestId: "request-1",
-    images: [],
-    kind: "follow_up" as const,
-    prompt: "Continue",
-    sessionId: "session-1",
-  };
-  expect(
-    samePendingInputAttempt(attempt, {
-      images: [],
-      kind: "follow_up",
-      prompt: "Continue",
-      sessionId: "session-1",
-    }),
-  ).toBe(true);
-  expect(
-    samePendingInputAttempt(attempt, {
-      images: [],
-      kind: "steer",
-      prompt: "Continue",
-      sessionId: "session-1",
-    }),
-  ).toBe(false);
 });
 
 function acceptedPendingInputTransport(calls: unknown[][]) {
@@ -126,12 +103,97 @@ test("sends pending input through authenticated realtime commands", async () => 
   ]);
 });
 
-test("reuses request identity after an unknown browser outcome", async () => {
+function testPendingInputState(
+  prompt: string,
+  command: SessionCommandTransport["command"],
+) {
+  const detail = { ...TEST_SESSION_DETAIL, status: "running" as const };
+  const reactive = createReactiveState<SessionViewState>({
+    ...initialSessionViewState(),
+    detail,
+    followUp: prompt,
+    selectedId: detail.id,
+    sessions: [summaryFromDetail(detail)],
+  });
+  return {
+    detail,
+    ...mountSessionDetailBody(reactive, disposals, { command }),
+  };
+}
+
+test("optimistically shows pending input before the realtime command settles", async () => {
+  let resolveCommand: ((value: unknown) => void) | undefined;
+  const completion = new Promise<unknown>((resolve) => {
+    resolveCommand = resolve;
+  });
+  const {
+    container,
+    controller,
+    detail: running,
+  } = testPendingInputState("Visible immediately", () => completion);
+
+  const submitted = controller.followUp();
+
+  expect(container.textContent).toContain("Visible immediately");
+  expect(container.textContent).toContain("Sending…");
+  const optimistic = controller.state.optimisticPendingInputs[0];
+  if (optimistic === undefined || resolveCommand === undefined) {
+    throw new TypeError("Expected an optimistic pending input");
+  }
+  expect(controller.state.optimisticPendingInputs).toMatchObject([
+    {
+      content: "Visible immediately",
+      status: "sending",
+    },
+  ]);
+  expect(optimistic.clientRequestId).not.toBe("");
+  resolveCommand({
+    ...running,
+    pendingInputs: [
+      pendingInputFixture(optimistic.content, {
+        clientRequestId: optimistic.clientRequestId,
+        createdAt: optimistic.createdAt + 1,
+        id: "pending-authoritative",
+      }),
+    ],
+    updatedAt: running.updatedAt + 1,
+  });
+  await submitted;
+
+  expect(controller.state.detail?.pendingInputs.map(({ id }) => id)).toContain(
+    "pending-authoritative",
+  );
+  expect(container.textContent).not.toContain("Sending…");
+  expect(controller.state.optimisticPendingInputs).toEqual([]);
+});
+
+test("rolls an optimistic pending input back into the composer on failure", async () => {
+  const { container, controller } = testPendingInputState(
+    "Do not lose this",
+    () => Promise.reject(new Error("request_failed")),
+  );
+
+  await controller.followUp();
+
+  expect(controller.state).toMatchObject({
+    followUp: "Do not lose this",
+    optimisticPendingInputs: [],
+    sending: false,
+  });
+  const prompt = queryTestElement(container, "textarea[name='prompt']");
+  if (!(prompt instanceof HTMLTextAreaElement)) {
+    throw new TypeError("Expected the follow-up textarea");
+  }
+  expect(prompt.value).toBe("Do not lose this");
+  expect(controller.state.error).toContain("could not queue that follow-up");
+});
+test("retries the clicked unconfirmed payload with its original identity", async () => {
   const running = { ...TEST_SESSION_DETAIL, status: "running" as const };
   const state: SessionViewState = {
     ...initialSessionViewState(),
     detail: running,
-    followUp: "Retry this",
+    followUp: "Retry this exact payload",
+    followUpImages: [TEST_AGENT_IMAGE],
     selectedId: running.id,
     sessions: [summaryFromDetail(running)],
   };
@@ -143,7 +205,7 @@ test("reuses request identity after an unknown browser outcome", async () => {
     {
       command: (_operation, payload, idempotencyKey) => {
         calls.push([payload, idempotencyKey]);
-        if (calls.length === 1) {
+        if (calls.length < 3) {
           return Promise.reject(new Error("outcome_unknown"));
         }
         return Promise.resolve({
@@ -160,16 +222,117 @@ test("reuses request identity after an unknown browser outcome", async () => {
   );
 
   await controller.followUp();
+  const firstRequestId =
+    controller.state.optimisticPendingInputs[0]?.clientRequestId;
+  if (firstRequestId === undefined) {
+    throw new TypeError("Expected the first unconfirmed attempt");
+  }
+  controller.setFollowUp("A genuinely new send");
+  controller.removeImage(0, "followUp");
   await controller.followUp();
+  const secondRequestId =
+    controller.state.optimisticPendingInputs[1]?.clientRequestId;
+  controller.setFollowUp("Keep this edited draft");
 
-  expect(calls).toHaveLength(2);
-  expect(calls[0]?.[0]).toMatchObject({
-    clientRequestId: calls[0]?.[1],
-    prompt: "Retry this",
+  await controller.retryPendingInput(firstRequestId);
+
+  expect(secondRequestId).toEqual(expect.any(String));
+  expect(secondRequestId).not.toBe(firstRequestId);
+  expect(calls).toHaveLength(3);
+  expect(calls[2]).toEqual(calls[0]);
+  expect(calls[2]).not.toEqual(calls[1]);
+  expect(calls[2]?.[0]).toMatchObject({
+    clientRequestId: firstRequestId,
+    images: [TEST_AGENT_IMAGE],
+    prompt: "Retry this exact payload",
   });
-  expect(calls[1]).toEqual(calls[0]);
-  expect(controller.state).toMatchObject({ followUp: "", sending: false });
-  expect(controller.state.detail?.pendingInputs).toHaveLength(1);
+  expect(controller.state).toMatchObject({
+    followUp: "Keep this edited draft",
+    sending: false,
+  });
+  expect(controller.state.optimisticPendingInputs).toMatchObject([
+    { clientRequestId: secondRequestId, status: "unconfirmed" },
+  ]);
+});
+
+test("bounds an unacknowledged pending-input send as unconfirmed", async () => {
+  vi.useFakeTimers();
+  disposals.push(vi.useRealTimers);
+  const { container, controller } = testPendingInputState(
+    "Do not wait forever",
+    () => new Promise(() => undefined),
+  );
+
+  const submitted = controller.followUp();
+  await vi.advanceTimersByTimeAsync(60_000);
+  await submitted;
+
+  expect(controller.state).toMatchObject({
+    followUp: "Do not wait forever",
+    sending: false,
+  });
+  expect(controller.state.optimisticPendingInputs[0]?.status).toBe(
+    "unconfirmed",
+  );
+  expect(container.textContent).toContain("Delivery unconfirmed");
+});
+
+test("authoritative echo settles a send and cancels its confirmation timer", async () => {
+  let timeoutSequence = 0;
+  const timers = new Map<number, () => void>();
+  const detail: AgentSessionDetail = Object.assign({}, TEST_SESSION_DETAIL, {
+    pendingInputs: [],
+    status: "running",
+  });
+  const state: SessionViewState = Object.assign(initialSessionViewState(), {
+    followUp: "Confirm from the echo",
+    detail,
+    sessions: Array.of(summaryFromDetail(detail)),
+    selectedId: detail.id,
+  });
+  const controller = new SessionController(
+    createReactiveState<SessionViewState>(state),
+    undefined,
+    null,
+    {
+      command: () => Promise.withResolvers<unknown>().promise,
+    },
+    {
+      clearTimeout: (timeout) => {
+        timers.delete(timeout);
+      },
+      setTimeout: (callback) => {
+        timeoutSequence += 1;
+        timers.set(timeoutSequence, callback);
+        return timeoutSequence;
+      },
+    },
+  );
+
+  const submitted = controller.followUp();
+  const [optimistic] = controller.state.optimisticPendingInputs;
+  if (optimistic === undefined) {
+    throw new TypeError("The echo confirmation input was not created");
+  }
+  expect(timers).toHaveLength(1);
+  controller.applyDetail({
+    ...detail,
+    pendingInputs: [
+      pendingInputFixture(optimistic.content, {
+        clientRequestId: optimistic.clientRequestId,
+        id: "pending-echo",
+      }),
+    ],
+    updatedAt: detail.updatedAt + 1,
+  });
+
+  await submitted;
+
+  expect(timers).toHaveLength(0);
+  expect(controller.state).toMatchObject({
+    optimisticPendingInputs: [],
+    sending: false,
+  });
 });
 
 function mountedComposer(status: AgentSessionDetail["status"] = "running"): {
@@ -406,6 +569,7 @@ test("pending cancellation button invokes its callback", () => {
       <SessionPendingInputs
         inputs={[pendingInputFixture("Editable", { id: "pending-1" })]}
         onCancel={onCancel}
+        onRetry={() => undefined}
       />
     ),
     disposals,
@@ -432,6 +596,7 @@ test("renders pending instructions in FIFO order", () => {
           pendingInputFixture("Second", { id: "pending-2", kind: "steer" }),
         ]}
         onCancel={() => undefined}
+        onRetry={() => undefined}
       />
     ),
     disposals,

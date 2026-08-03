@@ -14,6 +14,7 @@ import type {
 } from "../shared/session-tool-update.ts";
 import { RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
 import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
+import type { ModelCredentialPool } from "./model-credential-pool.ts";
 import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
 import type { SessionAgentActions } from "./session-agent-actions.ts";
 import type {
@@ -21,10 +22,7 @@ import type {
   SessionDetailLookup,
 } from "./session-command-types.ts";
 import { startManualSessionCompaction } from "./session-compaction-actions.ts";
-import {
-  createValidatedSession,
-  type SessionLaunchBoundary,
-} from "./session-creation.ts";
+import { type SessionLaunchBoundary } from "./session-creation.ts";
 import {
   readSessionCredential,
   type SessionCredentialReaders,
@@ -36,10 +34,7 @@ import { readAuthorizedSessionHistory } from "./session-history.ts";
 import type { CreateSessionInput, PromptInput } from "./session-input.ts";
 import type { SessionPendingInputCommand } from "./session-pending-input-request.ts";
 import { type CancelPendingInputResult } from "./session-pending-inputs.ts";
-import {
-  applySessionProviderUpdate,
-  type SessionProviderUpdateDependencies,
-} from "./session-provider-update.ts";
+import type { SessionProviderUpdateDependencies } from "./session-provider-update.ts";
 import {
   answerSessionQuestionsCommand,
   QuestionActionFailure,
@@ -59,7 +54,15 @@ import type {
   SessionReassignmentAction,
   SessionStopAction,
 } from "./session-realtime-commands.ts";
+import { createSessionWithCredentialPool } from "./session-realtime-create.ts";
+import { requireJsonResponse } from "./session-realtime-errors.ts";
 import { forkSessionForUser } from "./session-realtime-fork.ts";
+import { discoverSessionModelsFromPool } from "./session-realtime-models.ts";
+import {
+  applyResolvedSessionProviderUpdate,
+  updateSessionProviderWithPool,
+} from "./session-realtime-provider-update.ts";
+import { stopSessionForUser } from "./session-realtime-stop.ts";
 import {
   reassignSession,
   sessionReassignmentError,
@@ -77,12 +80,13 @@ export type RealtimeSessionCommandDependencies = SessionLaunchBoundary &
   Pick<SessionQueueDependencies, "runnerIsAvailable"> &
   Omit<RealtimeSessionCommandsOptions, "availability" | "lifecycle">;
 
-export interface RealtimeSessionCommandsOptions {
+interface RealtimeSessionCommandsOptions {
   readonly actions: SessionAgentActions;
   readonly database: SessionToolUpdateDependencies["store"]["database"];
   readonly discoverModels: AgentModelDiscoverer;
   readonly discoverOpenRouterProviders: OpenRouterProviderDiscoverer;
   readonly lifecycle: SessionLaunchBoundary;
+  readonly modelCredentialPool: ModelCredentialPool;
   readonly providers: SessionCredentialReaders;
   readonly providerUpdates: Omit<
     SessionProviderUpdateDependencies,
@@ -97,24 +101,10 @@ export interface RealtimeSessionCommandsOptions {
   readonly store: SessionStore;
 }
 
-async function responseValue(response: Response): Promise<unknown> {
-  let value: unknown;
-  try {
-    value = await response.json();
-  } catch {
-    throw new RealtimeCommandError("command_failed");
-  }
-  if (!response.ok) {
-    let code = "command_failed";
-    if (typeof value === "object" && value !== null && "error" in value) {
-      const candidate: unknown = value.error;
-      if (typeof candidate === "string") {
-        code = candidate;
-      }
-    }
-    throw new RealtimeCommandError(code);
-  }
-  return value;
+export type { RealtimeSessionCommandsOptions };
+
+async function responseValue(response: Response): Promise<void> {
+  return requireJsonResponse(response);
 }
 
 function cancellationError(
@@ -251,34 +241,16 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
     input: CreateSessionInput & { readonly parentUserInitiated?: boolean },
     workspaceId: string,
   ): Promise<AgentSessionDetail> {
-    const scopedInput = { ...input, workspaceId };
-    if (
-      !this.#dependencies.runnerIsAvailable(
-        user.id,
-        scopedInput.runnerId,
-        workspaceId,
-      )
-    ) {
-      throw new RealtimeCommandError("runner_unavailable");
-    }
-    const credential = await this.#credential(user.id, scopedInput);
-    const created: { detail?: AgentSessionDetail } = {};
-    const response = await createValidatedSession(
-      {
+    return createSessionWithCredentialPool({
+      dependencies: {
         ...this.#dependencies,
-        onCreated: (detail) => {
-          created.detail = detail;
-        },
+        readCredential: (userId, selection) =>
+          this.#credential(userId, selection),
       },
+      input,
       user,
-      scopedInput,
-      credential,
-    );
-    await responseValue(response);
-    if (created.detail === undefined) {
-      throw new RealtimeCommandError("command_failed");
-    }
-    return created.detail;
+      workspaceId,
+    });
   }
 
   createForUser: SessionCreateAction = (user, input, workspaceId) =>
@@ -323,6 +295,7 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
         discoverModels: this.#dependencies.discoverModels,
         discoverOpenRouterProviders:
           this.#dependencies.discoverOpenRouterProviders,
+        modelCredentialPool: this.#dependencies.modelCredentialPool,
         notify: this.#dependencies.notify,
         now: this.#dependencies.now,
         store: this.#dependencies.store,
@@ -388,15 +361,11 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
     readonly user: AuthenticatedUser;
     readonly workspaceId: string;
   }): Promise<AgentModelCatalog> {
-    const credential = await this.#credential(selection.user.id, selection);
-    try {
-      return await this.#dependencies.discoverModels(
-        selection.provider,
-        credential,
-      );
-    } catch {
-      throw new RealtimeCommandError("provider_unavailable");
-    }
+    return discoverSessionModelsFromPool({
+      discover: this.#dependencies.discoverModels,
+      pool: this.#dependencies.modelCredentialPool,
+      selection: { ...selection, userId: selection.user.id },
+    });
   }
 
   async previewToolUpdateForUser(
@@ -411,8 +380,7 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
   detailForUser: SessionDetailLookup = (...parameters) =>
     this.#dependencies.store.get(...parameters);
 
-  readForUser: SessionDetailLookup = (...parameters) =>
-    this.detailForUser(...parameters);
+  readForUser = this.detailForUser;
 
   historyForUser: SessionHistoryAction = (
     user,
@@ -477,31 +445,14 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
     sessionId,
     cascade,
     workspaceId,
-  ) => {
-    const existing = this.#dependencies.store.get(
-      user.id,
+  ) =>
+    stopSessionForUser({
+      cascade,
+      dependencies: this.#dependencies,
       sessionId,
+      user,
       workspaceId,
-    );
-    if (existing === undefined) {
-      throw new RealtimeCommandError("not_found");
-    }
-    const current = this.#detail(user.id, sessionId, workspaceId);
-    if (current.status !== "stopped") {
-      this.#dependencies.actions.stopSession(sessionId, current);
-      await this.#dependencies.runtimes.cleared(sessionId);
-      this.#dependencies.store.stop(
-        user.id,
-        sessionId,
-        this.#dependencies.now(),
-      );
-      if (cascade) this.#dependencies.actions.stopChildren(current, user.id);
-    }
-    const stopped = this.#detail(user.id, sessionId, workspaceId);
-    this.#dependencies.actions.finished(stopped, user.id);
-    this.#dependencies.notify(user.id, sessionId);
-    return stopped;
-  };
+    });
 
   summariesForUser(userId: string, workspaceId: string) {
     return this.#dependencies.store.list(userId, workspaceId);
@@ -519,19 +470,36 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
     user: AuthenticatedUser,
     input: SessionProviderUpdateInput,
   ): Promise<AgentSessionDetail> {
-    const outcome = await applySessionProviderUpdate(
-      {
+    return updateSessionProviderWithPool({
+      dependencies: {
+        apply: (userId, resolved, rejectCredentialErrors) =>
+          this.#applyProviderUpdate(userId, resolved, rejectCredentialErrors),
+        pool: this.#dependencies.modelCredentialPool,
+      },
+      input,
+      user,
+    });
+  }
+
+  async #applyProviderUpdate(
+    userId: string,
+    input: SessionProviderUpdateInput,
+    rejectCredentialErrors: boolean,
+  ): Promise<AgentSessionDetail> {
+    const outcome = await applyResolvedSessionProviderUpdate({
+      dependencies: {
         ...this.#dependencies.providerUpdates,
         discoverModels: this.#dependencies.discoverModels,
         discoverOpenRouterProviders:
           this.#dependencies.discoverOpenRouterProviders,
         providers: this.#dependencies.providers,
-        store: this.#providerUpdateStoreAccess(),
+        rejectCredentialErrors,
       },
-      user.id,
       input,
-    );
-    return this.#notifyUpdatedSession(user.id, input.sessionId, outcome);
+      store: this.#providerUpdateStoreAccess(),
+      userId,
+    });
+    return this.#notifyUpdatedSession(userId, input.sessionId, outcome);
   }
 
   async updateToolsForUser(
