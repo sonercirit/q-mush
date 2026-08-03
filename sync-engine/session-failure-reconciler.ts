@@ -6,6 +6,10 @@ import type {
 export class SessionFailureReconciler {
   readonly #pending = new Map<string, SessionFailureReconciliation>();
 
+  hasPending(): boolean {
+    return this.#pending.size > 0;
+  }
+
   pending(failure: SessionFailureReconciliation): void {
     this.#pending.set(failure.detail.id, failure);
   }

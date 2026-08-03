@@ -122,6 +122,7 @@ const recoveryTimer = startDatabaseRecoveryWatcher(
   database.$client,
   health,
   () => sessions.reconcileDatabaseWrites(),
+  () => sessions.hasPendingDatabaseWrites(),
 );
 const realtime = createRealtimeIntegration({
   auth: googleAuth,

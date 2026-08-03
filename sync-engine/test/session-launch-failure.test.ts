@@ -117,6 +117,7 @@ test.each([
       setup.storeSetup.database.$client,
       health,
       setup.reconcile,
+      setup.hasPendingReconciliation,
     );
     await setup.runtimes.settled(setup.detail.id);
     diskFull = false;
@@ -129,6 +130,21 @@ test.each([
     });
     expect(queued?.restartHandoff?.restartId).toBe(expectedRestartId);
     expect(setup.runtimes.active(queuedId)).toBe(false);
+    expect(setup.hasPendingReconciliation()).toBe(true);
+
+    let unrelatedAttempts = 0;
+    const unrelatedWrite = new DatabaseWriteResilience({
+      attempt: (operation) => {
+        unrelatedAttempts += 1;
+        if (unrelatedAttempts === 1) throw fullError;
+        return operation();
+      },
+      health,
+      sleep: () => undefined,
+    });
+    unrelatedWrite.run("critical", () => undefined);
+    expect(unrelatedAttempts).toBe(2);
+    expect(health.snapshot().reasons).toStrictEqual([]);
 
     await vi.advanceTimersByTimeAsync(30_000);
 

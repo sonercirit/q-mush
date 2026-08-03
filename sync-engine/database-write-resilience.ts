@@ -290,9 +290,13 @@ export function startDatabaseRecoveryWatcher(
   health: StorageHealth,
   recovered: () => Promise<boolean | undefined> | boolean | undefined = () =>
     undefined,
+  reconciliationPending: () => boolean = () => false,
 ): ReturnType<typeof setInterval> {
   return setInterval(() => {
-    if (!health.snapshot?.().reasons.includes("disk_full")) {
+    if (
+      !health.snapshot?.().reasons.includes("disk_full") &&
+      !reconciliationPending()
+    ) {
       return;
     }
     try {

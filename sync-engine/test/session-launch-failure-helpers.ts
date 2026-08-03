@@ -24,6 +24,7 @@ export interface LaunchFailureSetup {
   readonly broker: RunnerCommandBroker;
   readonly detail: AgentSessionDetail;
   readonly finished: ReturnType<typeof vi.fn>;
+  readonly hasPendingReconciliation: () => boolean;
   readonly launcher: SessionLauncher;
   readonly notify: ReturnType<typeof vi.fn>;
   readonly reconcile: () => boolean;
@@ -85,6 +86,7 @@ export function launchFailureSetup(
     broker,
     detail,
     finished,
+    hasPendingReconciliation: () => pending.size > 0,
     launcher,
     notify,
     reconcile: () => {

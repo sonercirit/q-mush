@@ -436,6 +436,10 @@ class DrizzleSessionIntegration
     return this.#attachmentFallbacks.api.collection(request);
   }
 
+  hasPendingDatabaseWrites(): boolean {
+    return this.#failureReconciler.hasPending();
+  }
+
   reconcileDatabaseWrites(): boolean {
     return this.#failureReconciler.reconcile(this.#finisher);
   }
