@@ -123,8 +123,12 @@ afterEach(() => {
 
 test("attaches a live tool stream to its persisted tool call", () => {
   const callId = "call-running";
-  const message = testAssistantToolCall(callId, '{"durationMs":1000}', "sleep");
-  const stream = testToolStream(callId, '{"durationMs":1000}', "sleep");
+  const message = testAssistantToolCall(
+    callId,
+    '{"durationSeconds":1}',
+    "sleep",
+  );
+  const stream = testToolStream(callId, '{"durationSeconds":1}', "sleep");
   const container = document.body.appendChild(document.createElement("ul"));
   const transcriptProps: Parameters<typeof SessionTranscript>[0] = {
     agentFile: null,
@@ -151,11 +155,11 @@ test("attaches a live tool stream to its persisted tool call", () => {
 test("renders parallel unlanded tool streams inside the output-free active agent block", () => {
   const startedAt = testStartedAt(2);
   const streams = [
-    testToolStream("parallel-one", '{"durationMs":1000}', "sleep", {
+    testToolStream("parallel-one", '{"durationSeconds":1}', "sleep", {
       index: 0,
       streamId: "parallel-step",
     }),
-    testToolStream("parallel-two", '{"durationMs":2000}', "sleep", {
+    testToolStream("parallel-two", '{"durationSeconds":2}', "sleep", {
       index: 1,
       streamId: "parallel-step",
     }),
@@ -235,7 +239,7 @@ test("lands live activity in its agent message without an empty running shell", 
   const startedAt = testStartedAt(4);
   const stream = testToolStream(
     "landing-call",
-    '{"durationMs":1000}',
+    '{"durationSeconds":1}',
     "sleep",
     { streamId: "landing-step" },
   );
@@ -326,13 +330,13 @@ test("keeps the next step's tool stream out of the prior agent block", () => {
   const startedAt = testStartedAt(6);
   const priorCall = testAssistantToolCall(
     "prior-call",
-    '{"durationMs":1000}',
+    '{"durationSeconds":1}',
     "sleep",
     { createdAt: startedAt + 1_000, id: "prior-assistant" },
   );
   const nextStream = testToolStream(
     "next-call",
-    '{"durationMs":2000}',
+    '{"durationSeconds":2}',
     "sleep",
     { streamId: "next-step" },
   );

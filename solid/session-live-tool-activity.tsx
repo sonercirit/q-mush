@@ -5,7 +5,7 @@ import type {
 } from "../shared/tool-stream.ts";
 import { createNestedScrollRef } from "./nested-scroll.ts";
 import { renderDebugBoundary } from "./render-debug.tsx";
-import { renderStructuredCode } from "./session-syntax.tsx";
+import { renderToolArguments } from "./session-sleep-renderer.tsx";
 import { renderLiveToolResult } from "./session-tool-result.tsx";
 
 function toolStateLabel(state: ToolStreamState): string {
@@ -105,7 +105,9 @@ export function LiveToolActivityContent(props: {
         {toolStateLabel(stream().state)}
       </p>
       <Show when={props.includeArguments && stream().arguments.length > 0}>
-        <div class="mt-2">{renderStructuredCode(stream().arguments)}</div>
+        <div class="mt-2">
+          {renderToolArguments(stream().name, stream().arguments)}
+        </div>
       </Show>
       <LiveToolOutput channel="stdout" stream={stream()} />
       <LiveToolOutput channel="stderr" stream={stream()} />

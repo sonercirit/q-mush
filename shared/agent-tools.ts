@@ -164,17 +164,17 @@ const SESSION_ID_PARAMETER = {
 const SESSION_AGENT_TOOLS = [
   toolDefinition({
     description:
-      "Pause this session for a positive bounded duration in milliseconds. Pending steering wakes it early; the result reports actual and expected duration.",
+      "Pause this session for a positive bounded duration in seconds. Pending steering wakes it early; the result reports actual and expected duration.",
     name: "sleep",
     properties: {
-      durationMs: {
-        description: "Duration to sleep in milliseconds (1-3,600,000)",
-        maximum: 3_600_000,
+      durationSeconds: {
+        description: "Duration to sleep in seconds (1-3,600)",
+        maximum: 3_600,
         minimum: 1,
         type: "integer",
       },
     },
-    required: ["durationMs"],
+    required: ["durationSeconds"],
   }),
   toolDefinition({
     description:

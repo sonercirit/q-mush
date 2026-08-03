@@ -1,6 +1,7 @@
 import { For, type JSX } from "solid-js";
 import { isRecord } from "../shared/auth-model.ts";
 import { parseOptionalJsonRecord } from "../shared/json-record.ts";
+import { renderSleepResult } from "./session-sleep-renderer.tsx";
 import {
   SubscrollPane,
   subscrollPaneClasses,
@@ -370,6 +371,10 @@ function renderToolOutput(
       renderEditOutput({ arguments: arguments_, content }) ??
       renderStructuredCode(content)
     );
+  }
+
+  if (name === "sleep") {
+    return renderSleepResult(content) ?? renderStructuredCode(content);
   }
 
   if (name === "read") {

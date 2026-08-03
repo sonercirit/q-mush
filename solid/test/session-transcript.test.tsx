@@ -431,6 +431,45 @@ test("renders persisted session errors distinctly", () => {
   expect(html).toContain("text-rose-200");
 });
 
+test("renders sleep calls and results with human-readable durations", () => {
+  const cases = [
+    {
+      arguments: '{"durationSeconds":90}',
+      expected: ["1m 30s", "Actual: 1m 15s", "Expected: 1m 30s"],
+      id: "seconds",
+      result:
+        "Steering arrived; woke early (actual 75000 ms, expected 90000 ms).",
+    },
+    {
+      arguments: '{"durationMs":1200000}',
+      expected: ["20m", "Actual: 20m", "Expected: 20m"],
+      id: "legacy-milliseconds",
+      result:
+        "Slept for the full duration (actual 1200000 ms, expected 1200000 ms).",
+    },
+  ];
+
+  for (const case_ of cases) {
+    const html = renderMessages([
+      assistantToolCall({
+        arguments: case_.arguments,
+        id: case_.id,
+        name: "sleep",
+      }),
+      toolResult({
+        content: case_.result,
+        id: case_.id,
+        name: "sleep",
+      }),
+    ]);
+
+    for (const expected of case_.expected) {
+      expect(html).toContain(expected);
+    }
+    expect(html).not.toContain(case_.arguments.replaceAll('"', "&quot;"));
+  }
+});
+
 test("separates and colorizes shell output and its exit status", () => {
   const call = assistantToolCall({
     arguments: '{"command":"bun test","timeout":30}',

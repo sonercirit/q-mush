@@ -17,13 +17,8 @@ import type {
   AgentSessionMessage,
   AgentSessionStatus,
 } from "../shared/session-model.ts";
-import {
-  activeSessionDuration,
-  formatSessionTime,
-} from "../shared/session-timing.ts";
 import type { ToolStreamEntry } from "../shared/tool-stream.ts";
 import { clipboardCopyLabel, createClipboardCopy } from "./clipboard-copy.ts";
-import { createLiveNow } from "./live-now.ts";
 import { createNestedScrollRef } from "./nested-scroll.ts";
 import { renderDebugBoundary } from "./render-debug.tsx";
 import { ActiveStepAnchor } from "./session-active-step.tsx";
@@ -34,6 +29,7 @@ import {
   renderToolHeader,
 } from "./session-live-tool-activity.tsx";
 import { renderMarkdown } from "./session-markdown.tsx";
+import { renderToolArguments } from "./session-sleep-renderer.tsx";
 import { createSessionStepTiming } from "./session-step-timing.ts";
 import { renderStructuredText } from "./session-structured-text.tsx";
 import { renderStructuredCode } from "./session-syntax.tsx";
@@ -50,34 +46,7 @@ import {
   createSessionTranscriptMessageGroups,
   transcriptNestedScrollKeys,
 } from "./session-transcript-messages.ts";
-
-function StepTiming(props: {
-  readonly endedAt: number | null;
-  readonly startedAt: number;
-}): JSX.Element {
-  const now = createLiveNow(() => props.endedAt === null);
-  const duration = (): number =>
-    activeSessionDuration(
-      { activeDurationMs: 0, activeStartedAt: props.startedAt },
-      props.endedAt ?? now(),
-    );
-  const time = (value: number): JSX.Element => {
-    const date = new Date(value);
-    return <time dateTime={date.toISOString()}>{date.toLocaleString()}</time>;
-  };
-  return (
-    <p
-      class="flex flex-wrap gap-x-3 gap-y-1 px-1 text-xs text-slate-500"
-      data-step-timing={props.endedAt === null ? "active" : "completed"}
-    >
-      <span>{`Duration: ${formatSessionTime(duration())}`}</span>
-      <span>Started: {time(props.startedAt)}</span>
-      <Show when={props.endedAt}>
-        {(endedAt) => <span>Ended: {time(endedAt())}</span>}
-      </Show>
-    </p>
-  );
-}
+import { TranscriptStepTiming } from "./session-transcript-step-timing.tsx";
 
 function TranscriptNote(props: {
   readonly boundaryKey: string;
@@ -312,7 +281,9 @@ function ConversationTranscriptMessage(props: {
                     kind: "Tool call",
                     name: call.name,
                   })}
-                  <div class="mt-2">{renderStructuredCode(call.arguments)}</div>
+                  <div class="mt-2">
+                    {renderToolArguments(call.name, call.arguments)}
+                  </div>
                   <Show when={stream()}>
                     {(liveStream) => (
                       <LiveToolActivityContent
@@ -540,7 +511,7 @@ export function SessionTranscript(props: {
       </Show>
       <Show when={stepTiming().completedTimings.get(message.id)}>
         {(timing) => (
-          <StepTiming
+          <TranscriptStepTiming
             endedAt={timing().endedAt}
             startedAt={timing().startedAt}
           />
@@ -580,7 +551,9 @@ export function SessionTranscript(props: {
             messages={activeMessages()}
             renderMessage={renderMessage}
             renderMessageWithToolStreams={renderMessageWithStreams}
-            timing={<StepTiming endedAt={null} startedAt={startedAt} />}
+            timing={
+              <TranscriptStepTiming endedAt={null} startedAt={startedAt} />
+            }
             toolStreams={
               props.filters.toolActivity ? standaloneToolStreams() : []
             }
