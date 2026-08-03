@@ -61,6 +61,14 @@ function expectOutcomeUnknown(result: Promise<unknown>): Promise<void> {
   });
 }
 
+async function settleUnknown(
+  setup: RealtimeClientTestSetup,
+  result: Promise<unknown>,
+): Promise<void> {
+  await expectOutcomeUnknown(result);
+  setup.connection.stop();
+}
+
 async function acknowledgeSuccess(
   setup: RealtimeClientTestSetup,
   commandId: string,
@@ -119,29 +127,21 @@ test("queues commands until the initial ready handshake", async () => {
   setup.connection.stop();
 });
 
-test("rejects a queued command when the initial connection closes before ready", async () => {
-  const setup = commandSetup("command-before-close");
-  const result = setup.connection.command(
-    SESSION_REALTIME_OPERATIONS.stop,
-    sessionPayload(),
-    "stop-before-close",
-  );
+test.each([
+  { commandId: "command-before-close", opened: false },
+  { commandId: "sent-before-close", opened: true },
+])(
+  "settles a $opened command as unconfirmed when its socket closes",
+  async ({ commandId, opened }) => {
+    const setup = commandSetup(commandId);
+    if (opened) openRealtimeTestConnection(setup, "instance-1");
+    const result = stopCommand(setup, `stop-${commandId}`);
 
-  setup.sockets[0]?.close();
+    setup.sockets[0]?.close();
 
-  await expectOutcomeUnknown(result);
-  setup.connection.stop();
-});
-
-test("settles a sent command as unconfirmed when its socket closes", async () => {
-  const setup = openedCommandSetup("sent-before-close");
-  const result = stopCommand(setup, "stop-sent-before-close");
-
-  setup.sockets[0]?.close();
-
-  await expectOutcomeUnknown(result);
-  setup.connection.stop();
-});
+    await settleUnknown(setup, result);
+  },
+);
 
 test("bounds commands queued while the connection is unavailable", async () => {
   const setup = commandSetup("queued-command");
@@ -184,8 +184,7 @@ test.each(["outcome_unknown", "command_outcome_unknown"])(
       type: "command_error",
     });
 
-    await expectOutcomeUnknown(result);
-    setup.connection.stop();
+    await settleUnknown(setup, result);
   },
 );
 

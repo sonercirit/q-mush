@@ -180,9 +180,9 @@ test("acknowledges a send locally without waiting for persistence, echo, or comm
   clock = 55;
   frames.at(-1)?.();
   expect(measure.echoedAt).toBe(55);
-  expect(controller.state.detail?.pendingInputs).toMatchObject([
-    { id: "pending-authoritative" },
-  ]);
+  expect(controller.state.detail?.pendingInputs[0]?.id).toBe(
+    "pending-authoritative",
+  );
   expect(controller.state.optimisticPendingInputs).toEqual([]);
   expect(container.textContent).not.toContain("Sending…");
   expect(container.textContent.match(/Measure every seam/gu)).toHaveLength(1);

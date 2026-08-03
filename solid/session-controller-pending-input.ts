@@ -213,15 +213,13 @@ export class SessionPendingInputController {
       }
       const normalized = normalizedSessionMutationError(error);
       const outcomeUnknown = sessionMutationOutcomeIsUnknown(normalized);
+      const draft = restoreDraft
+        ? {}
+        : { followUp: attempt.prompt, followUpImages: attempt.images };
       this.#options.view.patchCurrent(revision, {
         ...(outcomeUnknown
           ? {
-              ...(restoreDraft
-                ? {}
-                : {
-                    followUp: attempt.prompt,
-                    followUpImages: attempt.images,
-                  }),
+              ...draft,
               optimisticPendingInputs:
                 this.#options.view.value.optimisticPendingInputs.map((input) =>
                   input.clientRequestId === attempt.clientRequestId
@@ -230,12 +228,7 @@ export class SessionPendingInputController {
                 ),
             }
           : {
-              ...(restoreDraft
-                ? {}
-                : {
-                    followUp: attempt.prompt,
-                    followUpImages: attempt.images,
-                  }),
+              ...draft,
               optimisticPendingInputs: this.#withoutAttempt(attempt),
             }),
         sending: false,
@@ -256,11 +249,9 @@ export class SessionPendingInputController {
 
   async retry(clientRequestId: string): Promise<void> {
     const selected = this.#sessionInput();
-    if (
-      selected === undefined ||
-      this.#options.transport === undefined ||
-      sessionMutationPending(selected.state)
-    ) {
+    const blocked =
+      selected === undefined || sessionMutationPending(selected.state);
+    if (blocked || this.#options.transport === undefined) {
       return;
     }
     const input = this.#options.view.value.optimisticPendingInputs.find(

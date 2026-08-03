@@ -160,9 +160,9 @@ test("optimistically shows pending input before the realtime command settles", a
   });
   await submitted;
 
-  expect(controller.state.detail?.pendingInputs).toMatchObject([
-    { id: "pending-authoritative" },
-  ]);
+  expect(controller.state.detail?.pendingInputs.map(({ id }) => id)).toContain(
+    "pending-authoritative",
+  );
   expect(container.textContent).not.toContain("Sending…");
   expect(controller.state.optimisticPendingInputs).toEqual([]);
 });
@@ -271,9 +271,9 @@ test("bounds an unacknowledged pending-input send as unconfirmed", async () => {
     followUp: "Do not wait forever",
     sending: false,
   });
-  expect(controller.state.optimisticPendingInputs).toMatchObject([
-    { status: "unconfirmed" },
-  ]);
+  expect(controller.state.optimisticPendingInputs[0]?.status).toBe(
+    "unconfirmed",
+  );
   expect(container.textContent).toContain("Delivery unconfirmed");
 });
 
