@@ -40,14 +40,13 @@ export function SessionContextTokenCapEditor(
   };
 
   return (
-    <section class="px-4 py-2" data-session-editor-kind="context-token-cap">
-      <form
-        class="flex flex-wrap items-end gap-3"
-        onSubmit={(event) => {
-          event.preventDefault();
-          submit();
-        }}
-      >
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        submit();
+      }}
+    >
+      <div class="flex flex-wrap items-end gap-3">
         <label class="min-w-52 flex-1 text-sm font-medium text-slate-200">
           Context token cap
           <input
@@ -72,7 +71,7 @@ export function SessionContextTokenCapEditor(
         >
           Save cap
         </button>
-      </form>
+      </div>
       <p class="mt-1 text-xs text-slate-500">
         Leave blank to restore the model limit.
       </p>
@@ -81,6 +80,6 @@ export function SessionContextTokenCapEditor(
           {error()}
         </p>
       )}
-    </section>
+    </form>
   );
 }

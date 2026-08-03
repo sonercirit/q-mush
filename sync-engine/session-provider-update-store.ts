@@ -46,7 +46,6 @@ export function updateStoredSessionProvider(
     currentContextTokens: 0,
     currentSegment: sql<number>`${agentSessions.currentSegment} + 1`,
     executionGeneration: sql`${agentSessions.executionGeneration} + 1`,
-    userContextTokenCap: null,
     maxContextTokens: input.maxContextTokens,
     model: input.model,
     interruptedHandoff: null,

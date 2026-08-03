@@ -22,7 +22,7 @@ import {
 import { SessionContextTokenCapDialog } from "./session-context-token-cap-dialog.tsx";
 import { SessionContextTokenCapEditor } from "./session-context-token-cap-editor.tsx";
 import type { LoadedSessionDetailViewProps } from "./session-detail-view-props.ts";
-import { SESSION_EDITOR_GROUP_CLASSES } from "./session-editor-client.tsx";
+import { SessionEditorGroup } from "./session-editor-group.tsx";
 import { SessionForkEditor } from "./session-fork-client.tsx";
 import { SessionHistoryControls } from "./session-history-client.tsx";
 import {
@@ -272,42 +272,45 @@ export function SessionDetailBody(props: {
       <Show when={view().detail.runnerRequired}>
         <RunnerReassignment {...view()} />
       </Show>
-      <div
-        class={SESSION_EDITOR_GROUP_CLASSES}
-        data-session-editor-group="true"
-      >
-        <SessionProviderUpdateEditor
-          credentials={props.providerUpdate.credentials}
-          detail={view().detail}
-          disabled={sessionEditorDisabled()}
-          onApply={props.providerUpdate.onApply}
-          onDiscoverModels={props.providerUpdate.onDiscoverModels}
-          onDiscoverProviders={props.providerUpdate.onDiscoverProviders}
-        />
-        <SessionContextTokenCapEditor
-          detail={view().detail}
-          disabled={
-            sessionEditorDisabled() || sessionMutationPending(view().state)
-          }
-          onApply={(cap) => {
-            return view().controller.setContextTokenCap(cap);
-          }}
-          onWarning={(cap) => {
-            const activeElement = document.activeElement;
-            setContextTokenCapTrigger(
-              activeElement instanceof HTMLElement ? activeElement : undefined,
-            );
-            setPendingContextTokenCap(cap);
-          }}
-        />
-        <SessionToolUpdateEditor
-          detail={view().detail}
-          disabled={view().state.updatingTools}
-          onApply={(tools, confirmedCacheDrop) => {
-            return view().controller.updateTools(tools, confirmedCacheDrop);
-          }}
-        />
-      </div>
+      <SessionEditorGroup
+        provider={
+          <SessionProviderUpdateEditor
+            credentials={props.providerUpdate.credentials}
+            detail={view().detail}
+            disabled={sessionEditorDisabled()}
+            onApply={props.providerUpdate.onApply}
+            onDiscoverModels={props.providerUpdate.onDiscoverModels}
+            onDiscoverProviders={props.providerUpdate.onDiscoverProviders}
+          />
+        }
+        cap={
+          <SessionContextTokenCapEditor
+            detail={view().detail}
+            disabled={
+              sessionEditorDisabled() || sessionMutationPending(view().state)
+            }
+            onApply={(cap) => view().controller.setContextTokenCap(cap)}
+            onWarning={(cap) => {
+              const activeElement = document.activeElement;
+              setContextTokenCapTrigger(
+                activeElement instanceof HTMLElement
+                  ? activeElement
+                  : undefined,
+              );
+              setPendingContextTokenCap(cap);
+            }}
+          />
+        }
+        tools={
+          <SessionToolUpdateEditor
+            detail={view().detail}
+            disabled={view().state.updatingTools}
+            onApply={(tools, confirmedCacheDrop) =>
+              view().controller.updateTools(tools, confirmedCacheDrop)
+            }
+          />
+        }
+      />
       <SessionHistoryControls
         controller={view().controller}
         tokenUsage={

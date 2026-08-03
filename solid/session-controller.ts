@@ -518,12 +518,13 @@ export class SessionController {
     });
   }
   setContextTokenCap(cap: number | null, compactFirst = false) {
+    const mutate = (mutation: SessionMutation) => this.#mutateDetail(mutation);
     return setSessionContextTokenCap(
       this.#view.value,
       cap,
       compactFirst,
-      this.#mutateDetail.bind(this),
-      this.compact.bind(this),
+      mutate,
+      async () => this.compact(),
     );
   }
   setTranscriptFilter(
