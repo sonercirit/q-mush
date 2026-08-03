@@ -163,21 +163,22 @@ function persistHandoffOutcome(options: RunPersistedSessionOptions): void {
 export async function runPersistedSession(
   options: RunPersistedSessionOptions,
 ): Promise<void> {
-  if (
-    !options.store.transitionRuntime(
-      options.detail.id,
-      "running",
-      options.now(),
-      options.detail.generation,
-    )
-  ) {
-    return;
-  }
   const claimedIdentity = identity(options.detail);
-  options.restartRequest(options.restartPersistence.persist);
-  options.notify(options.userId, options.detail.id);
 
   try {
+    if (
+      !options.store.transitionRuntime(
+        options.detail.id,
+        "running",
+        options.now(),
+        options.detail.generation,
+      )
+    ) {
+      return;
+    }
+    options.restartRequest(options.restartPersistence.persist);
+    options.notify(options.userId, options.detail.id);
+
     const runtime = sessionModelRuntime(
       options.resources,
       options.detail,

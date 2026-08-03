@@ -88,33 +88,38 @@ export class SessionFinisher {
       }
     }
     if (recovered !== undefined) {
-      const settled = this.#options.store.settleRestartHandoff(
-        userId,
-        recovered,
+      const settlement =
         errorMessage === undefined
-          ? { status: "idle" }
-          : { error: errorMessage, status: "failed" },
-        now,
-      );
+          ? { status: "idle" as const }
+          : { error: errorMessage, status: "failed" as const };
+      const settled =
+        this.#options.store.settleRestartHandoff(
+          userId,
+          recovered,
+          settlement,
+          now,
+        ) ||
+        (settlement.status === "failed" &&
+          this.#options.store.failRestartHandoff(
+            userId,
+            recovered,
+            settlement.error,
+            now,
+          ));
       if (!settled) {
         return;
+      }
+      if (settlement.status === "failed") {
+        this.#options.actions.stopChildren(detail, userId);
       }
       notifyFinished();
       return;
     }
     if (errorMessage !== undefined) {
-      this.#options.store.appendRuntimeErrorMessage(
-        detail.id,
-        errorMessage,
-        now,
-        detail.generation,
-      );
-    }
-    if (errorMessage !== undefined) {
       if (
-        this.#options.store.transitionRuntime(
+        this.#options.store.settleRuntimeFailure(
           detail.id,
-          "failed",
+          errorMessage,
           now,
           detail.generation,
         )

@@ -80,6 +80,7 @@ import {
   compactRuntimeConversation,
   compactRuntimeTerminal,
   setRuntimeAgentFile,
+  settleRuntimeFailure,
   updateRuntimeUsage,
 } from "./session-store-runtime-writes.ts";
 import {
@@ -420,6 +421,21 @@ export class SessionStore {
       [sessionId, messages, now, generation],
       writeOptions,
     );
+  }
+
+  settleRuntimeFailure(
+    sessionId: string,
+    content: string,
+    now: number,
+    generation: number,
+  ): boolean {
+    return settleRuntimeFailure({
+      content,
+      generation,
+      now,
+      resources: this.#writeResources(),
+      sessionId,
+    });
   }
 
   appendRuntimeErrorMessage(
