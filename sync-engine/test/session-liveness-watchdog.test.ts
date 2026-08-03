@@ -104,6 +104,29 @@ function launchRuntime(
   return deferred;
 }
 
+function dispatchBash(
+  setup: ReturnType<typeof runningSetup>,
+  broker: RunnerCommandBroker,
+) {
+  return broker.dispatch({
+    arguments: { command: "sleep 1200" },
+    executionEnvironment: "bare_metal",
+    generation: setup.detail.generation,
+    runnerId: STORE_RUNNER_ID,
+    sessionId: setup.detail.id,
+    tool: "bash",
+    workingDirectory: "/work/project",
+  });
+}
+
+function expectStoredStatus(
+  setup: ReturnType<typeof runningSetup>,
+  expected: string,
+): void {
+  const status = setup.store.get(TEST_USER_ID, setup.detail.id)?.status;
+  expect(status).toBe(expected);
+}
+
 test("fails a running session whose runtime disappeared beyond the grace bound", () => {
   const setup = runningSetup();
   const liveness = watchdogSetup(setup, { graceMs: 1_000 });
@@ -136,8 +159,30 @@ test("requires the stored execution generation to match its runtime", () => {
 
   scanPastGrace(watchdog);
 
-  const status = setup.store.get(TEST_USER_ID, setup.detail.id)?.status;
-  expect(status).toBe("failed");
+  expectStoredStatus(setup, "failed");
+  runtime.resolve();
+  closeSetup(setup);
+});
+
+test("fails a queued runner command even when its runner recently connected", async () => {
+  const setup = runningSetup();
+  const runtimes = new SessionRuntimes();
+  const runtime = launchRuntime(setup, runtimes, setup.detail.generation);
+  const broker = new RunnerCommandBroker({
+    commandId: () => "undispatched-command",
+  });
+  const queuedCommand = dispatchBash(setup, broker);
+  const watchdog = watchdogSetup(setup, {
+    runtimes,
+    graceMs: 1_000,
+    broker,
+  });
+  watchdog.watchdog.runnerConnected(STORE_RUNNER_ID);
+
+  scanPastGrace(watchdog);
+
+  expectStoredStatus(setup, "failed");
+  await expect(queuedCommand).rejects.toThrow("stopped");
   runtime.resolve();
   closeSetup(setup);
 });
@@ -196,15 +241,7 @@ test("does not time out a twenty-minute command on a live runner connection", as
     commandId: () => "twenty-minute-command",
     deliver: () => true,
   });
-  const result = broker.dispatch({
-    arguments: { command: "sleep 1200" },
-    executionEnvironment: "bare_metal",
-    generation: setup.detail.generation,
-    runnerId: STORE_RUNNER_ID,
-    sessionId: setup.detail.id,
-    tool: "bash",
-    workingDirectory: "/work/project",
-  });
+  const result = dispatchBash(setup, broker);
   const watchdog = watchdogSetup(setup, {
     broker,
     graceMs: 60_000,

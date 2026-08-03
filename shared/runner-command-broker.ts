@@ -370,10 +370,16 @@ export class RunnerCommandBroker {
     return this.#authorizedForRunner(runnerId, commandId) !== undefined;
   }
 
-  hasSessionCommand(sessionId: string): boolean {
-    return [...this.#pending.values()].some(
+  sessionCommandPhase(sessionId: string): "in_flight" | "queued" | undefined {
+    const commands = [...this.#pending.values()].filter(
       (pending) => pending.command.sessionId === sessionId,
     );
+    if (commands.length === 0) {
+      return undefined;
+    }
+    return commands.every(({ phase }) => phase === "in_flight")
+      ? "in_flight"
+      : "queued";
   }
 
   #settleAuthorized(

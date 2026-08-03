@@ -22,7 +22,10 @@ interface SessionLivenessWatchdogOptions {
     SessionAgentActions,
     "finished" | "reportAll" | "stopChildren"
   >;
-  readonly broker: Pick<RunnerCommandBroker, "hasSessionCommand">;
+  readonly broker: Pick<
+    RunnerCommandBroker,
+    "cancelSession" | "sessionCommandPhase"
+  >;
   readonly database: AppDatabase;
   readonly generateId: IdGenerator;
   readonly graceMs?: number;
@@ -111,9 +114,11 @@ export class SessionLivenessWatchdog {
     ) {
       return false;
     }
+    const commandPhase = this.#options.broker.sessionCommandPhase(sessionId);
     return (
-      !this.#options.broker.hasSessionCommand(sessionId) ||
-      this.#connectedRunners.has(detail.runnerId)
+      commandPhase === undefined ||
+      (commandPhase === "in_flight" &&
+        this.#connectedRunners.has(detail.runnerId))
     );
   }
 
@@ -129,6 +134,7 @@ export class SessionLivenessWatchdog {
     ) {
       return;
     }
+    this.#options.broker.cancelSession(session.id);
     const detail = this.#options.store.get(session.userId, session.id);
     this.#options.notify(session.userId, session.id);
     if (detail === undefined) {
