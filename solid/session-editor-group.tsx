@@ -1,6 +1,6 @@
 import { type JSX } from "solid-js";
 
-export const SESSION_EDITOR_GROUP_CLASSES =
+const SESSION_EDITOR_GROUP_CLASSES =
   "mt-3 divide-y divide-white/10 rounded-2xl border border-white/10 bg-white/[0.03]";
 
 export function SessionEditorGroup(props: {
