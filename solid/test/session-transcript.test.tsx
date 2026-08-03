@@ -434,6 +434,26 @@ test("renders persisted session errors distinctly", () => {
 test("renders sleep calls and results with human-readable durations", () => {
   const cases = [
     {
+      arguments: '{"durationSeconds":59}',
+      expected: ["Duration: 59s"],
+      id: "seconds-under-minute",
+    },
+    {
+      arguments: '{"durationSeconds":60}',
+      expected: ["Duration: 1m"],
+      id: "seconds-minute",
+    },
+    {
+      arguments: '{"durationSeconds":61}',
+      expected: ["Duration: 1m 1s"],
+      id: "seconds-over-minute",
+    },
+    {
+      arguments: '{"durationSeconds":3600}',
+      expected: ["Duration: 1h"],
+      id: "seconds-hour",
+    },
+    {
       arguments: '{"durationSeconds":90}',
       expected: ["1m 30s", "Actual: 1m 15s", "Expected: 1m 30s"],
       id: "seconds",
@@ -450,23 +470,46 @@ test("renders sleep calls and results with human-readable durations", () => {
   ];
 
   for (const case_ of cases) {
-    const html = renderMessages([
+    const messages = [
       assistantToolCall({
         arguments: case_.arguments,
         id: case_.id,
         name: "sleep",
       }),
-      toolResult({
-        content: case_.result,
-        id: case_.id,
-        name: "sleep",
-      }),
-    ]);
+    ];
+    if (case_.result !== undefined) {
+      messages.push(
+        toolResult({
+          content: case_.result,
+          id: case_.id,
+          name: "sleep",
+        }),
+      );
+    }
+    const html = renderMessages(messages);
 
     for (const expected of case_.expected) {
       expect(html).toContain(expected);
     }
     expect(html).not.toContain(case_.arguments.replaceAll('"', "&quot;"));
+  }
+});
+
+test("falls back to raw sleep arguments when the duration is malformed", () => {
+  for (const [id, arguments_, expectedKey] of [
+    ["missing", '{"timeout":1}', "timeout"],
+    ["empty", "{}", "{}"],
+    ["seconds-string", '{"durationSeconds":"60"}', "durationSeconds"],
+    ["milliseconds-string", '{"durationMs":"60000"}', "durationMs"],
+  ]) {
+    const html = renderMessages([
+      assistantToolCall({ arguments: arguments_, id, name: "sleep" }),
+    ]);
+
+    expect(html).toContain("Tool call · sleep");
+    expect(html).toContain('data-language="json"');
+    expect(html).not.toContain("text-sm text-cyan-100");
+    expect(html).toContain(expectedKey);
   }
 });
 
