@@ -204,7 +204,7 @@ describe("session agent models", () => {
     expectRealtimeDeltas(socket, [...streamed, compactionSettled()]);
   });
 
-  test("publishes settlement when compaction fails", async () => {
+  test("does not publish settlement before compaction persistence", async () => {
     const { hub, socket } = realtimeSetup();
     const models = createSessionAgentModels(
       sessionModelOptions(
@@ -221,10 +221,7 @@ describe("session agent models", () => {
         .compact([{ content: "Conversation", role: "user" }]),
     ).rejects.toThrow("provider failed");
 
-    expectRealtimeDeltas(socket, [
-      compactionRequest("stream-id"),
-      compactionSettled(),
-    ]);
+    expectRealtimeDeltas(socket, [compactionRequest("stream-id")]);
   });
 
   test("passes the persisted routing selection to agent and compactor", () => {

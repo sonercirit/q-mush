@@ -8,10 +8,7 @@ import type {
 } from "../shared/provider-credential-store.ts";
 import type { ProviderModelPricing } from "../shared/provider-model-pricing.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
-import {
-  ModelConversationCompactor,
-  type AgentConversationCompactor,
-} from "./agent-compaction.ts";
+import { ModelConversationCompactor } from "./agent-compaction.ts";
 import {
   agentModelOpenRouterProviderRouting,
   type AgentModelRequestOptions,
@@ -33,7 +30,7 @@ export type AgentModelFactory = (
 
 export interface SessionAgentModels {
   readonly agent: AgentModel;
-  readonly createCompactor: () => AgentConversationCompactor;
+  readonly createCompactor: () => ModelConversationCompactor;
   readonly publishCompactionSettled: () => void;
 }
 
@@ -201,7 +198,7 @@ export function createSessionAgentModels(options: {
     ),
     createCompactor: () => {
       streamId = id();
-      const compactor = new ModelConversationCompactor(
+      return new ModelConversationCompactor(
         options.factory(
           modelOptions(
             options.detail,
@@ -212,13 +209,6 @@ export function createSessionAgentModels(options: {
         ),
         publishCompactionRequest,
       );
-      return {
-        compact: (...parameters) =>
-          compactor.compact(...parameters).catch((error: unknown) => {
-            publishCompactionSettled();
-            throw error;
-          }),
-      };
     },
     publishCompactionSettled,
   };
