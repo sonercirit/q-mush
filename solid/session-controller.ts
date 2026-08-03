@@ -83,7 +83,7 @@ export class SessionController {
   readonly #models: SessionModelController;
   readonly #providers: SessionProviderController;
   readonly #pendingInputs: SessionPendingInputController;
-  readonly #realtime: SessionRealtimeState;
+  readonly #live: SessionRealtimeState;
   readonly #reconciliation: SessionReconciliationController;
   readonly #transcriptFilterStorage: SessionTranscriptFilterStorage | undefined;
   readonly #transport: SessionCommandTransport | undefined;
@@ -107,12 +107,8 @@ export class SessionController {
         transcriptFilterStorage,
       ),
     });
-    this.#realtime = new SessionRealtimeState(this.#view);
-    this.#loader = new SessionLoadController(
-      this.#view,
-      this.#realtime,
-      transport,
-    );
+    this.#live = new SessionRealtimeState(this.#view);
+    this.#loader = new SessionLoadController(this.#view, this.#live, transport);
     this.#reconciliation = new SessionReconciliationController(
       this.#view,
       this.#loader,
@@ -121,7 +117,7 @@ export class SessionController {
     this.#providers = new SessionProviderController(this.#view);
     this.#pendingInputs = new SessionPendingInputController({
       loader: this.#loader,
-      realtime: this.#realtime,
+      realtime: this.#live,
       transport,
       view: this.#view,
       ...(pendingInputTimer && { timer: pendingInputTimer }),
@@ -136,7 +132,7 @@ export class SessionController {
 
   applyDetail(detail: AgentSessionDetail): void {
     this.#applySnapshot(() => {
-      this.#realtime.applyDetail(detail);
+      this.#live.applyDetail(detail);
       this.#pendingInputs.reconcile(detail);
     }, true);
     if (
@@ -149,23 +145,20 @@ export class SessionController {
   #applyNewestSnapshot(apply: () => void): void {
     if (this.#view.value.history.page === undefined) this.#applySnapshot(apply);
   }
-  applyCompactionRequest(
-    event: Parameters<SessionRealtimeState["applyCompactionRequest"]>[0],
-  ): void {
+  applyCompaction(
+    event: Parameters<SessionRealtimeState["applyCompaction"]>[0],
+  ) {
+    if (event.type === "session_compaction_settled") {
+      this.#live.applyCompaction(event);
+      return;
+    }
     this.#applyNewestSnapshot(() => {
-      this.#realtime.applyCompactionRequest(event);
-    });
-  }
-  applyCompactionSettled(
-    event: Parameters<SessionRealtimeState["applyCompactionSettled"]>[0],
-  ): void {
-    this.#applyNewestSnapshot(() => {
-      this.#realtime.applyCompactionSettled(event);
+      this.#live.applyCompaction(event);
     });
   }
   applyDelta(event: Parameters<SessionRealtimeState["applyDelta"]>[0]): void {
     this.#applyNewestSnapshot(() => {
-      this.#realtime.applyDelta(event);
+      this.#live.applyDelta(event);
     });
   }
   applyQuestions(
@@ -174,20 +167,20 @@ export class SessionController {
     this.#applySnapshot(() => {
       const detail = updatedSessionQuestions(this.#view.value.detail, event);
       if (detail !== undefined) {
-        this.#realtime.applyDetail(detail);
+        this.#live.applyDetail(detail);
       }
     });
   }
   applyToolDelta(event: Parameters<SessionRealtimeState["applyToolDelta"]>[0]) {
     applyWhenViewingNewestHistory(this.#view, () => {
-      this.#realtime.applyToolDelta(event);
+      this.#live.applyToolDelta(event);
     });
   }
   applyToolSnapshot(
     event: Parameters<SessionRealtimeState["applyToolSnapshot"]>[0],
   ) {
     applyWhenViewingNewestHistory(this.#view, () => {
-      this.#realtime.applyToolSnapshot(event);
+      this.#live.applyToolSnapshot(event);
     });
   }
   #applySnapshot(apply: () => void, applyWhileSending = false): void {
@@ -200,7 +193,7 @@ export class SessionController {
   }
   applyRealtime(sessions: readonly AgentSessionSummary[]): void {
     this.#applySnapshot(() => {
-      this.#realtime.applySessions(sessions);
+      this.#live.applySessions(sessions);
     });
   }
   get directoryPicker(): DirectoryPickerController {
@@ -479,7 +472,7 @@ export class SessionController {
   ): Promise<SessionToolUpdateResult> {
     return updateSessionTools({
       confirmedCacheDrop,
-      realtime: this.#realtime,
+      realtime: this.#live,
       tools,
       transport: this.#transport,
       view: this.#view,
@@ -564,7 +557,7 @@ export class SessionController {
     this.#providers.reset();
     this.#reconciliation.reset();
     this.#loader.reset();
-    this.#realtime.reset();
+    this.#live.reset();
     this.#view.reset({ ...initialSessionViewState(), transcriptFilters });
   }
   async #send(): Promise<void> {
@@ -638,7 +631,7 @@ export class SessionController {
     };
     return {
       ...shared,
-      realtime: this.#realtime,
+      realtime: this.#live,
       reconciliation: this.#reconciliation,
     };
   }

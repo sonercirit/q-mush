@@ -306,10 +306,8 @@ function App(): JSX.Element {
         void agentSessions.refresh();
         break;
       case "session_compaction_request":
-        agentSessions.applyCompactionRequest(event);
-        break;
       case "session_compaction_settled":
-        agentSessions.applyCompactionSettled(event);
+        agentSessions.applyCompaction(event);
         break;
       case "session_delta":
         agentSessions.applyDelta(event);

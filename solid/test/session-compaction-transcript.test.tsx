@@ -39,7 +39,7 @@ function applyCompactionRequest(
   sessionId: string,
   streamId = COMPACTION_STREAM_ID,
 ): void {
-  controller.applyCompactionRequest({
+  controller.applyCompaction({
     content: COMPACTION_REQUEST,
     sessionId,
     streamId,
@@ -235,7 +235,7 @@ test.each(SNAPSHOT_TIMINGS)(
       }
 
       const handoff = transcriptMessage("handoff", HANDOFF_MESSAGE, "user", 3);
-      controller.applyCompactionSettled({
+      controller.applyCompaction({
         sessionId,
         type: "session_compaction_settled",
       });
@@ -276,7 +276,7 @@ test("clears a failed compaction request without a snapshot", async () => {
   const { controller } = await selectedCompactionController(sessionId);
   applyCompactionDelta(controller, sessionId, "Aborted summary");
 
-  controller.applyCompactionSettled({
+  controller.applyCompaction({
     sessionId,
     type: "session_compaction_settled",
   });

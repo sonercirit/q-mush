@@ -452,9 +452,17 @@ export class SessionRealtimeState {
     });
   }
 
-  applyCompactionRequest(
-    event: Extract<RealtimeServerEvent, { type: "session_compaction_request" }>,
+  applyCompaction(
+    event: Extract<
+      RealtimeServerEvent,
+      { type: "session_compaction_request" | "session_compaction_settled" }
+    >,
   ): void {
+    if (event.type === "session_compaction_settled") {
+      this.#compactionRequests.delete(event.sessionId);
+      this.#streamedContent.delete(event.sessionId);
+      return;
+    }
     const view = this.#view.value;
     const detail =
       view.selectedId === event.sessionId && view.detail?.id === event.sessionId
@@ -480,12 +488,6 @@ export class SessionRealtimeState {
     this.#view.patch({
       detail: { ...detail, messages: [...messages, request] },
     });
-  }
-  applyCompactionSettled(
-    event: Extract<RealtimeServerEvent, { type: "session_compaction_settled" }>,
-  ): void {
-    this.#compactionRequests.delete(event.sessionId);
-    this.#streamedContent.delete(event.sessionId);
   }
   applyDelta(
     event: Extract<RealtimeServerEvent, { type: "session_delta" }>,
