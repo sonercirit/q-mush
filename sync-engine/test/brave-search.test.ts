@@ -80,6 +80,21 @@ function createSetup(
   return { database, requests, skill };
 }
 
+async function saveTestKey(
+  setup: ReturnType<typeof createSetup>,
+  key: { readonly apiKey: string; readonly label: string },
+): Promise<void> {
+  const request = createAuthenticatedRequest(
+    BRAVE_SEARCH_KEYS_PATH,
+    key,
+    "POST",
+  );
+  const response = await setup.skill.keys(request);
+  expect(response.status).toBe(201);
+  const body = await response.text();
+  expect(body.includes(key.apiKey)).toBe(false);
+}
+
 async function saveTestKeys(
   setup: ReturnType<typeof createSetup>,
 ): Promise<void> {
@@ -87,15 +102,7 @@ async function saveTestKeys(
     { apiKey: FIRST_KEY, label: "Primary" },
     { apiKey: SECOND_KEY, label: "Backup" },
   ]) {
-    const request = createAuthenticatedRequest(
-      BRAVE_SEARCH_KEYS_PATH,
-      key,
-      "POST",
-    );
-    const response = await setup.skill.keys(request);
-    expect(response.status).toBe(201);
-    const body = await response.text();
-    expect(body.includes(key.apiKey)).toBe(false);
+    await saveTestKey(setup, key);
   }
 }
 
@@ -226,6 +233,22 @@ describe("Brave Search skill", () => {
       setup,
       balancedTestCredentialOrder(FIRST_KEY, SECOND_KEY),
     );
+    setup.database.$client.close();
+  });
+
+  test("keeps single-key success behavior unchanged", async () => {
+    const setup = createSetup({ response: successfulSearchResponse });
+    await saveTestKey(setup, { apiKey: FIRST_KEY, label: "Only key" });
+
+    const output = await setup.skill.execute(TEST_USER_ID, TEST_WORKSPACE_ID, {
+      query: "bun",
+    });
+
+    expect(JSON.parse(output)).toMatchObject({
+      query: "bun",
+      results: [{ title: "Bun", url: "https://bun.sh/" }],
+    });
+    expectCredentialOrder(setup, [FIRST_KEY]);
     setup.database.$client.close();
   });
 
