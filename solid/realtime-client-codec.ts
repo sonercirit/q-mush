@@ -59,6 +59,10 @@ export type RealtimeServerEvent =
       readonly type: "session_compaction_request";
     }
   | {
+      readonly sessionId: string;
+      readonly type: "session_compaction_settled";
+    }
+  | {
       readonly content: string;
       readonly reset?: true;
       readonly sessionId: string;
@@ -158,6 +162,11 @@ export function readRealtimeServerEvent(message: string): RealtimeServerEvent {
         sessionId: requiredString(value, "sessionId"),
         streamId: requiredString(value, "streamId"),
         type: "session_compaction_request",
+      };
+    case "session_compaction_settled":
+      return {
+        sessionId: requiredString(value, "sessionId"),
+        type: "session_compaction_settled",
       };
     case "session_delta": {
       const reset = value["reset"];

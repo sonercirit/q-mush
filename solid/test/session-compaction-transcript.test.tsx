@@ -99,19 +99,8 @@ function compactionRequestIds(
   );
 }
 
-const SETTLED_COMPACTION_MESSAGES = [
-  { id: "old-user", role: "user" },
-  {
-    content: COMPACTION_REQUEST,
-    id: "settled-request",
-    role: "compaction_request",
-  },
-  {
-    content: "Compacted response",
-    id: "settled-summary",
-    role: "assistant",
-  },
-] as const;
+const HANDOFF_MESSAGE =
+  "Conversation compacted:\n\nContinue from this handoff.";
 
 function expectCompactionMessages(
   controller: SessionController,
@@ -221,7 +210,7 @@ test("keeps the compaction request when a provider reset reuses the stream ID", 
 const SNAPSHOT_TIMINGS = ["delta-first", "snapshot-first"] as const;
 
 test.each(SNAPSHOT_TIMINGS)(
-  "anchors one streamed compaction request when the snapshot is %s",
+  "settles the streamed compaction request on an active handoff snapshot when the snapshot is %s",
   async (snapshotTiming) => {
     const originalFetch = globalThis.fetch;
     const sessionId = "session-compaction-stream";
@@ -245,41 +234,62 @@ test.each(SNAPSHOT_TIMINGS)(
         requestCounts.push(compactionRequests().length);
       }
 
-      const settledRequest = createDisplaySessionMessage({
-        content: COMPACTION_REQUEST,
-        createdAt: 2,
-        id: "settled-request",
-        role: "compaction_request",
+      const handoff = transcriptMessage("handoff", HANDOFF_MESSAGE, "user", 3);
+      controller.applyCompactionSettled({
+        sessionId,
+        type: "session_compaction_settled",
       });
-      const settledSummary = transcriptMessage(
-        "settled-summary",
-        "Compacted response",
-        "assistant",
-        3,
-      );
       controller.applyDetail({
         ...detail,
-        messages: detail.messages.concat(settledRequest, settledSummary),
+        hasOlderSegments: true,
+        messages: [handoff],
       });
       requestCounts.push(compactionRequests().length);
 
-      expect(requestCounts).toEqual(
-        Array.from({ length: requestCounts.length }, () => 1),
+      expect(requestCounts.slice(0, -1)).toEqual(
+        Array.from({ length: requestCounts.length - 1 }, () => 1),
       );
-      expect(compactionRequestIds(controller)).toEqual(["settled-request"]);
-      expect(controller.state.detail?.messages).toMatchObject(
-        SETTLED_COMPACTION_MESSAGES,
-      );
+      expect(requestCounts.at(-1)).toBe(0);
+      expect(controller.state.detail?.messages).toMatchObject([
+        { content: HANDOFF_MESSAGE, id: "handoff", role: "user" },
+      ]);
 
       applyCompactionDelta(
         controller,
         sessionId,
-        "Unrelated later response",
+        "Ordinary continuation",
         "later-stream",
       );
-      expect(compactionRequestIds(controller)).toEqual(["settled-request"]);
+      expect(compactionRequestIds(controller)).toEqual([]);
+      expect(controller.state.detail?.messages).toMatchObject([
+        { content: HANDOFF_MESSAGE, id: "handoff", role: "user" },
+        { content: "Ordinary continuation", role: "assistant" },
+      ]);
     } finally {
       globalThis.fetch = originalFetch;
     }
   },
 );
+
+test("clears a failed compaction request without a snapshot", async () => {
+  const sessionId = "session-compaction-failed";
+  const { controller } = await selectedCompactionController(sessionId);
+  applyCompactionDelta(controller, sessionId, "Aborted summary");
+
+  controller.applyCompactionSettled({
+    sessionId,
+    type: "session_compaction_settled",
+  });
+  applyCompactionDelta(
+    controller,
+    sessionId,
+    "Ordinary continuation",
+    "later-stream",
+  );
+
+  expect(compactionRequestIds(controller)).toEqual([]);
+  expect(controller.state.detail?.messages.at(-1)).toMatchObject({
+    content: "Ordinary continuation",
+    role: "assistant",
+  });
+});

@@ -188,6 +188,52 @@ describe("session agent models", () => {
     ]);
     summary.release(providerStep("Incremental summary"));
     await compaction;
+    models.publishCompactionSettled();
+    expectRealtimeDeltas(socket, [
+      {
+        content: TEST_COMPACTION_REQUEST_MESSAGE,
+        sessionId: TEST_SESSION_DETAIL.id,
+        streamId: "stream-2",
+        type: "session_compaction_request",
+      },
+      sessionDelta("Incremental ", "", "stream-2"),
+      sessionDelta("summary", "", "stream-2"),
+      {
+        sessionId: TEST_SESSION_DETAIL.id,
+        type: "session_compaction_settled",
+      },
+    ]);
+  });
+
+  test("publishes settlement when compaction fails", async () => {
+    const { hub, socket } = realtimeSetup();
+    const models = createSessionAgentModels(
+      sessionModelOptions(
+        () => ({
+          complete: () => Promise.reject(new Error("provider failed")),
+        }),
+        { realtime: hub },
+      ),
+    );
+
+    await expect(
+      models
+        .createCompactor()
+        .compact([{ content: "Conversation", role: "user" }]),
+    ).rejects.toThrow("provider failed");
+
+    expectRealtimeDeltas(socket, [
+      {
+        content: TEST_COMPACTION_REQUEST_MESSAGE,
+        sessionId: TEST_SESSION_DETAIL.id,
+        streamId: "stream-id",
+        type: "session_compaction_request",
+      },
+      {
+        sessionId: TEST_SESSION_DETAIL.id,
+        type: "session_compaction_settled",
+      },
+    ]);
   });
 
   test("passes the persisted routing selection to agent and compactor", () => {

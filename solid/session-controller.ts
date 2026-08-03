@@ -156,6 +156,13 @@ export class SessionController {
       this.#realtime.applyCompactionRequest(event);
     });
   }
+  applyCompactionSettled(
+    event: Parameters<SessionRealtimeState["applyCompactionSettled"]>[0],
+  ): void {
+    this.#applyNewestSnapshot(() => {
+      this.#realtime.applyCompactionSettled(event);
+    });
+  }
   applyDelta(event: Parameters<SessionRealtimeState["applyDelta"]>[0]): void {
     this.#applyNewestSnapshot(() => {
       this.#realtime.applyDelta(event);

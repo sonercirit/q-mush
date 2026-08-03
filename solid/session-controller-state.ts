@@ -387,16 +387,6 @@ function retainCompactionStream(
   );
 }
 
-function hasDurableCompactionRequest(
-  messages: AgentSessionDetail["messages"],
-  request: AgentSessionMessage | undefined,
-): boolean {
-  if (request === undefined) return false;
-  return messages.some(
-    ({ id, role }) => role === "compaction_request" && id !== request.id,
-  );
-}
-
 export class SessionRealtimeState {
   readonly #compactionRequests = new Map<string, AgentSessionMessage>();
   readonly #streamedContent = new Map<string, StreamedSessionContent>();
@@ -409,11 +399,7 @@ export class SessionRealtimeState {
   applyDetail(detail: AgentSessionDetail): void {
     const persistable = persistedDetail(detail);
     const active = sessionIsActive(persistable);
-    const compactionSettled = hasDurableCompactionRequest(
-      detail.messages,
-      this.#compactionRequests.get(detail.id),
-    );
-    if (!active || compactionSettled) {
+    if (!active) {
       this.#compactionRequests.delete(detail.id);
       this.#streamedContent.delete(detail.id);
     }
@@ -494,6 +480,12 @@ export class SessionRealtimeState {
     this.#view.patch({
       detail: { ...detail, messages: [...messages, request] },
     });
+  }
+  applyCompactionSettled(
+    event: Extract<RealtimeServerEvent, { type: "session_compaction_settled" }>,
+  ): void {
+    this.#compactionRequests.delete(event.sessionId);
+    this.#streamedContent.delete(event.sessionId);
   }
   applyDelta(
     event: Extract<RealtimeServerEvent, { type: "session_delta" }>,

@@ -90,6 +90,14 @@ test("reads compaction requests from realtime messages", () => {
   expect(roundTrip(request)).toEqual(request);
 });
 
+test("reads compaction settlement from realtime messages", () => {
+  const settlement = {
+    sessionId: "session-1",
+    type: "session_compaction_settled",
+  } as const;
+  expect(roundTrip(settlement)).toEqual(settlement);
+});
+
 test("reads reset model deltas from realtime messages", () => {
   const delta = {
     content: "replacement",

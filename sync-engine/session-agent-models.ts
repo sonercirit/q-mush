@@ -8,7 +8,10 @@ import type {
 } from "../shared/provider-credential-store.ts";
 import type { ProviderModelPricing } from "../shared/provider-model-pricing.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
-import { ModelConversationCompactor } from "./agent-compaction.ts";
+import {
+  ModelConversationCompactor,
+  type AgentConversationCompactor,
+} from "./agent-compaction.ts";
 import {
   agentModelOpenRouterProviderRouting,
   type AgentModelRequestOptions,
@@ -30,7 +33,8 @@ export type AgentModelFactory = (
 
 export interface SessionAgentModels {
   readonly agent: AgentModel;
-  readonly createCompactor: () => ModelConversationCompactor;
+  readonly createCompactor: () => AgentConversationCompactor;
+  readonly publishCompactionSettled: () => void;
 }
 
 function agentModelRoutingOptions(
@@ -170,6 +174,23 @@ export function createSessionAgentModels(options: {
       // Live delivery must never interrupt the persisted model step.
     }
   };
+  const publishCompactionSettled = (): void => {
+    if (!options.isCurrent()) {
+      return;
+    }
+    try {
+      options.realtime?.publishUser(
+        options.userId,
+        {
+          sessionId: options.detail.id,
+          type: "session_compaction_settled",
+        },
+        options.detail.workspaceId,
+      );
+    } catch {
+      // Live delivery must never interrupt the persisted compaction.
+    }
+  };
   return {
     agent: options.factory(
       modelOptions(
@@ -182,7 +203,7 @@ export function createSessionAgentModels(options: {
     ),
     createCompactor: () => {
       streamId = id();
-      return new ModelConversationCompactor(
+      const compactor = new ModelConversationCompactor(
         options.factory(
           modelOptions(
             options.detail,
@@ -193,6 +214,14 @@ export function createSessionAgentModels(options: {
         ),
         publishCompactionRequest,
       );
+      return {
+        compact: (...parameters) =>
+          compactor.compact(...parameters).catch((error: unknown) => {
+            publishCompactionSettled();
+            throw error;
+          }),
+      };
     },
+    publishCompactionSettled,
   };
 }

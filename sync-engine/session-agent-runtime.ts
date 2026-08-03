@@ -242,14 +242,18 @@ export async function compactSessionConversation(
   const final = await compactor.compact(conversation, runtime.signal);
   throwIfAgentAborted(runtime.signal);
   const usage = compactionUsage(final, estimateCost);
-  recordCompaction(
-    runtime,
-    final.summary,
-    usage,
-    startedAt,
-    !continueAfterCompaction,
-  );
-  return "complete";
+  try {
+    recordCompaction(
+      runtime,
+      final.summary,
+      usage,
+      startedAt,
+      !continueAfterCompaction,
+    );
+    return "complete";
+  } finally {
+    models.publishCompactionSettled();
+  }
 }
 
 const RESTART_INTERRUPTED_TOOL_OUTPUT =
@@ -577,7 +581,11 @@ export async function runSessionAgent(
       onStepBoundary: () =>
         runtime.manualCompactionRequested() ? "compact" : undefined,
       recordCompaction: (summary, usage, startedAt) => {
-        recordCompaction(runtime, summary, usage, startedAt);
+        try {
+          recordCompaction(runtime, summary, usage, startedAt);
+        } finally {
+          models.publishCompactionSettled();
+        }
       },
       recordMessage: (messages, usage, terminal) => {
         if (terminal && runtime.detail.restartHandoff === null) {
