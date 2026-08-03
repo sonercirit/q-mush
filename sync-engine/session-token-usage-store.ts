@@ -13,7 +13,6 @@ const reportedUsage = and(
 function usageSummary(
   database: Pick<AppDatabase, "select">,
   condition: ReturnType<typeof and>,
-  includeSoftDeleted: boolean,
 ): AgentTokenUsageSummary {
   const usage = database
     .select({
@@ -25,13 +24,7 @@ function usageSummary(
       stepCount: sql<number>`count(*)`,
     })
     .from(agentMessages)
-    .where(
-      and(
-        condition,
-        eq(agentMessages.role, "assistant"),
-        ...(includeSoftDeleted ? [] : [eq(agentMessages.isDeleted, false)]),
-      ),
-    )
+    .where(and(condition, eq(agentMessages.role, "assistant")))
     .get();
   return {
     cacheWriteInputTokens: usage?.cacheWriteInputTokens ?? 0,
@@ -46,20 +39,14 @@ function usageSummary(
 export function storedSessionTokenUsage(
   database: Pick<AppDatabase, "select">,
   sessionId: string,
-  includeSoftDeleted = false,
 ): AgentTokenUsageSummary {
-  return usageSummary(
-    database,
-    eq(agentMessages.sessionId, sessionId),
-    includeSoftDeleted,
-  );
+  return usageSummary(database, eq(agentMessages.sessionId, sessionId));
 }
 
 export function storedSegmentTokenUsage(
   database: Pick<AppDatabase, "select">,
   sessionId: string,
   segment: number,
-  includeSoftDeleted = false,
 ): AgentTokenUsageSummary {
   return usageSummary(
     database,
@@ -67,6 +54,5 @@ export function storedSegmentTokenUsage(
       eq(agentMessages.sessionId, sessionId),
       eq(agentMessages.segment, segment),
     ),
-    includeSoftDeleted,
   );
 }

@@ -58,9 +58,8 @@ export function readStoredSessionDetail(
       database,
       sessionId,
       stored.currentSegment,
-      true,
     ),
-    tokenUsage: storedSessionTokenUsage(database, sessionId, true),
+    tokenUsage: storedSessionTokenUsage(database, sessionId),
     turns: readSessionTurns(database, sessionId),
   };
 }

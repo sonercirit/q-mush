@@ -120,7 +120,6 @@ export function readStoredSessionHistory(
       database,
       request.sessionId,
       authorized.segment,
-      true,
     ),
   };
 }
