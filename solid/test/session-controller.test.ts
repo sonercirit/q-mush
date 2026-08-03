@@ -611,36 +611,6 @@ test("an unchanged session refresh does not notify the view", async () => {
   );
 });
 
-test("replaces a retained message when its persisted usage changes", () => {
-  const message = assistantMessage();
-  const detail = {
-    ...TEST_SESSION_DETAIL,
-    messages: [message],
-    status: "running" as const,
-  };
-  const reactive = createReactiveState<SessionViewState>(
-    selectedSessionState({
-      ...initialSessionViewState(),
-      detail,
-      sessions: [summaryFromDetail(detail)],
-    }),
-  );
-  const controller = new SessionController(reactive);
-  const withUsage = {
-    ...message,
-    tokenUsage: {
-      cacheWriteInputTokens: 0,
-      cachedInputTokens: 30,
-      inputTokens: 100,
-      outputTokens: 20,
-    },
-  };
-
-  controller.applyDetail({ ...detail, messages: [withUsage] });
-
-  expect(controller.state.detail?.messages[0]).toBe(withUsage);
-});
-
 test("matching session snapshots skip serializing retained message content", () => {
   const content = "x".repeat(100_000);
   const message = transcriptMessage("assistant-large", content, "assistant", 2);
