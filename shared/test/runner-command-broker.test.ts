@@ -241,8 +241,10 @@ describe("runner command broker", () => {
 
     broker.disconnectRunner(RUNNER_ID);
 
+    expect(broker.sessionCommandPhase(SESSION_ID)).toBe("runner_disconnected");
     expectRejectedCompletion(broker, "disconnected-command");
     expect(broker.take(RUNNER_ID)?.id).toBe("disconnected-command");
+    expect(broker.sessionCommandPhase(SESSION_ID)).toBe("in_flight");
     await expectCompletedResult(
       broker,
       result,

@@ -191,9 +191,10 @@ test("a planned-restart reconnect becomes healthy on the production operational 
       now: clock.now,
     },
   );
-  expect((await setup.sessions.collection(createSessionRequest())).status).toBe(
-    201,
-  );
+  const creationStatus = (
+    await setup.sessions.collection(createSessionRequest())
+  ).status;
+  expect(creationStatus).toBe(201);
   const agentFile = await runnerCommand(setup, "read_agent_file");
   completeCommand(setup, agentFile, "null", "agent-file");
   const command = await runnerCommand(setup, "bash");
@@ -245,7 +246,7 @@ test("a severed tool fails only after the runner misses the reconnect grace", as
   recovery.clock.scan();
   const failed = await waitForStatus(recovery.setup, "failed");
   expect(JSON.stringify(failed)).toContain(
-    "runner command that could not be dispatched during the recovery window",
+    "assigned runner did not reconnect during the liveness recovery window",
   );
   closeLivenessSession(recovery.setup);
 });

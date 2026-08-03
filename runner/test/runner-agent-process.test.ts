@@ -1,7 +1,14 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
+import type { RunnerToolCommand } from "../../shared/runner-command-broker.ts";
 import {
   runnerRegistrationRejectedMessage,
   runnerSupersededMessage,
@@ -39,14 +46,24 @@ interface RunnerTestSocketData {
 }
 
 interface RunnerTestServerOptions {
+  readonly command?: RunnerToolCommand;
   readonly rejectRegistration?: boolean;
   readonly transientRegistrationFailures?: number;
+}
+
+function operationalSocket(
+  sockets: ReadonlySet<Bun.ServerWebSocket<RunnerTestSocketData>>,
+  required: keyof Pick<RunnerTestSocketData, "heartbeat" | "operational">,
+): Bun.ServerWebSocket<RunnerTestSocketData> | undefined {
+  return [...sockets].find(({ data }) => data[required]);
 }
 
 function runnerServer(options: RunnerTestServerOptions = {}): Readonly<{
   readonly origin: string;
   attempts(): number;
+  disconnect(): boolean;
   registered(): boolean;
+  results(): readonly Readonly<Record<string, unknown>>[];
   stop(): void;
   supersede(): boolean;
 }> {
@@ -73,6 +90,7 @@ function runnerServer(options: RunnerTestServerOptions = {}): Readonly<{
     { registrationId, type: "registration_operational" },
   ];
   let attempts = 0;
+  const results: Readonly<Record<string, unknown>>[] = [];
   const sockets = new Set<Bun.ServerWebSocket<RunnerTestSocketData>>();
   const sendNext = (
     socket: Bun.ServerWebSocket<RunnerTestSocketData>,
@@ -80,6 +98,11 @@ function runnerServer(options: RunnerTestServerOptions = {}): Readonly<{
     const message = messages[socket.data.nextMessage++];
     if (message === undefined) {
       socket.data.operational = true;
+      if (options.command !== undefined) {
+        socket.send(
+          JSON.stringify({ command: options.command, type: "command" }),
+        );
+      }
     } else {
       socket.send(JSON.stringify(message));
     }
@@ -115,6 +138,10 @@ function runnerServer(options: RunnerTestServerOptions = {}): Readonly<{
           socket.data.heartbeat = true;
           return;
         }
+        if (value.type === "result") {
+          results.push(value);
+          return;
+        }
         if (
           value.type === "connect" &&
           attempts <= (options.transientRegistrationFailures ?? 0)
@@ -140,13 +167,22 @@ function runnerServer(options: RunnerTestServerOptions = {}): Readonly<{
   const hostname = server.hostname ?? "127.0.0.1";
   return {
     attempts: () => attempts,
+    disconnect: () => {
+      const socket = operationalSocket(sockets, "operational");
+      if (socket === undefined) {
+        return false;
+      }
+      socket.close(1012, "Fixture connection blip");
+      return true;
+    },
     origin: `http://${hostname}:${String(server.port)}`,
     registered: () => [...sockets].some(({ data }) => data.operational),
+    results: () => results,
     stop: () => {
       void server.stop(true);
     },
     supersede: () => {
-      const socket = [...sockets].find(({ data }) => data.heartbeat);
+      const socket = operationalSocket(sockets, "heartbeat");
       if (socket === undefined) {
         return false;
       }
@@ -215,6 +251,53 @@ async function expectChildFailure(
   expect(await waitForExit(setup.child, 900)).toBe(1);
   expect(await childStderr(setup)).toContain(message);
 }
+
+test("a command executes once and reports through the reconnected socket", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "q-mush-runner-blip-test-"));
+  const auditPath = join(directory, "audit.log");
+  const command: RunnerToolCommand = {
+    arguments: {
+      command: `printf x >> ${JSON.stringify(auditPath)}; sleep 1`,
+      timeout: 10,
+    },
+    executionEnvironment: "bare_metal",
+    id: "blip-command",
+    sessionId: "blip-session",
+    tool: "bash",
+    workingDirectory: directory,
+  };
+  const setup = processTestSetup({ command });
+
+  try {
+    expect(
+      await waitUntil(() => {
+        try {
+          return readFileSync(auditPath, "utf8") === "x";
+        } catch {
+          return false;
+        }
+      }, 2_000),
+    ).toBe(true);
+    expect(setup.server.disconnect()).toBe(true);
+    expect(await waitUntil(() => setup.server.attempts() === 2, 7_000)).toBe(
+      true,
+    );
+    expect(
+      await waitUntil(() => setup.server.results().length === 1, 2_000),
+    ).toBe(true);
+    expect(setup.server.results()[0]).toMatchObject({
+      commandId: command.id,
+      state: "completed",
+      type: "result",
+    });
+    expect(readFileSync(auditPath, "utf8")).toBe("x");
+  } finally {
+    await cleanupProcessTest(setup);
+    if (existsSync(directory)) {
+      rmSync(directory, { recursive: true });
+    }
+  }
+});
 
 test("the runner process exits promptly when superseded mid-heartbeat", async () => {
   const setup = processTestSetup();

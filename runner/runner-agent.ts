@@ -4,12 +4,12 @@ import { arch, hostname, networkInterfaces, platform } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { RUNNER_REALTIME_PATH } from "../shared/routes.ts";
-import type { RunnerToolCommand } from "../shared/runner-command-broker.ts";
 import {
   encodeRunnerActivationReceipt,
   runnerConnectMessage,
 } from "../shared/runner-realtime-protocol.ts";
 import { createServerWebSocket } from "../shared/server-websocket.ts";
+import { RunnerCommandExecutions } from "./runner-command-executions.ts";
 import { readRunnerCommand, RunnerCommandExecutor } from "./runner-command.ts";
 import {
   createRunnerConnectionSettlement,
@@ -18,6 +18,7 @@ import {
 import { RunnerContainerManager } from "./runner-container.ts";
 import { completeRunnerRegistration } from "./runner-registration.ts";
 import { RunnerRestartCoordinator } from "./runner-restart.ts";
+import { sendOpenRunnerSocketMessage } from "./runner-socket-send.ts";
 import {
   addRunnerSocketFailureListeners,
   observeOperationalRunnerSocket,
@@ -223,10 +224,6 @@ function runnerWebSocket(configuration: RunnerConfiguration): WebSocket {
   );
 }
 
-interface ActiveCommand {
-  readonly controller: AbortController;
-}
-
 function waitForSocket(socket: WebSocket): Promise<void> {
   return new Promise((resolve, reject) => {
     const { settle } = createRunnerConnectionSettlement(resolve, reject);
@@ -244,74 +241,9 @@ function waitForSocket(socket: WebSocket): Promise<void> {
   });
 }
 
-function sendSocketMessage(socket: WebSocket, message: string): boolean {
-  try {
-    socket.send(message);
-    return true;
-  } catch {
-    socket.close();
-    return false;
-  }
-}
-
-function sendCommandMessage(
-  socket: WebSocket,
-  command: RunnerToolCommand,
-  message: Readonly<Record<string, unknown>>,
-): void {
-  sendOpenSocketMessage(socket, { ...message, commandId: command.id });
-}
-
-function sendOpenSocketMessage(
-  socket: WebSocket,
-  message: Readonly<Record<string, unknown>>,
-): void {
-  if (socket.readyState === WebSocket.OPEN) {
-    sendSocketMessage(socket, JSON.stringify(message));
-  }
-}
-
-function executeCommand(
-  socket: WebSocket,
-  command: RunnerToolCommand,
-  active: Map<string, ActiveCommand>,
-): void {
-  if (active.has(command.id)) {
-    socket.close(1008, "Duplicate command ID");
-    return;
-  }
-
-  const controller = new AbortController();
-  let sequence = 0;
-  const publish = (message: Readonly<Record<string, unknown>>): void => {
-    if (!controller.signal.aborted) {
-      sendCommandMessage(socket, command, message);
-    }
-  };
-  void activeRunnerExecution()
-    .commands.executeResult(command, controller.signal, (delta) => {
-      publish({ ...delta, sequence, type: "output" });
-      sequence += 1;
-    })
-    .then((result) => {
-      publish({ ...result, type: "result" });
-    })
-    .finally(() => {
-      active.delete(command.id);
-    });
-  active.set(command.id, { controller });
-}
-
-function abortActiveCommands(active: Map<string, ActiveCommand>): void {
-  for (const command of active.values()) {
-    command.controller.abort();
-  }
-  active.clear();
-}
-
 function bindOperationalSocket(
   connected: WebSocket,
-  active: Map<string, ActiveCommand>,
+  active: RunnerCommandExecutions,
 ): void {
   connected.addEventListener("message", (event) => {
     if (typeof event.data !== "string") {
@@ -329,23 +261,23 @@ function bindOperationalSocket(
       return;
     }
     if (message["type"] === "command") {
-      executeCommand(
+      active.execute(
         connected,
         readRunnerCommand({ command: message["command"] }),
-        active,
       );
     } else if (
       message["type"] === "cancel" &&
       typeof message["commandId"] === "string"
     ) {
-      active.get(message["commandId"])?.controller.abort();
+      active.cancel(message["commandId"]);
+    } else if (
+      message["type"] === "result_received" &&
+      typeof message["commandId"] === "string"
+    ) {
+      active.resultReceived(message["commandId"]);
     } else if (message["type"] !== "restart_ready") {
       connected.close(1003, "Invalid server message");
     }
-  });
-  connected.addEventListener("close", () => {
-    abortActiveCommands(active);
-    void activeRunnerExecution().containers.cleanupAll();
   });
 }
 
@@ -515,7 +447,7 @@ async function pendingSocketFailure(
 
 async function pendingSupersession(
   socket: WebSocket,
-  active: Map<string, ActiveCommand>,
+  active: RunnerCommandExecutions,
   failure: Promise<Error>,
   milliseconds: number,
 ): Promise<void> {
@@ -527,12 +459,12 @@ async function pendingSupersession(
 
 async function throwSocketFailure(
   socket: WebSocket,
-  active: Map<string, ActiveCommand>,
+  active: RunnerCommandExecutions,
   failure: Error,
 ): Promise<never> {
   if (failure instanceof RunnerSupersededError) {
     socket.close(1000, "Superseded");
-    abortActiveCommands(active);
+    active.abortAll();
     await activeRunnerExecution().containers.cleanupAll();
   }
   throw failure;
@@ -543,7 +475,7 @@ async function maintainConnection(
   configurationPath: string,
   startupRestart: RunnerStartupRestart,
 ): Promise<void> {
-  const active = new Map<string, ActiveCommand>();
+  const active = new RunnerCommandExecutions(activeRunnerExecution().commands);
   const installOperationalHandlers = (connected: WebSocket): void => {
     bindOperationalSocket(connected, active);
   };
@@ -594,13 +526,15 @@ async function maintainConnection(
         )
       ) {
         socket.close(1000, "Updating");
+        active.abortAll();
+        await activeRunnerExecution().containers.cleanupAll();
         return;
       }
 
       nextUpdateAt = Date.now() + UPDATE_INTERVAL_MILLISECONDS;
     }
 
-    sendOpenSocketMessage(socket, { type: "heartbeat" });
+    sendOpenRunnerSocketMessage(socket, { type: "heartbeat" });
     await pendingSupersession(
       socket,
       active,

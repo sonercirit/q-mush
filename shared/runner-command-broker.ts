@@ -70,11 +70,6 @@ export class RunnerDisconnectedError extends Error {
   }
 }
 
-interface RejectedCommand {
-  readonly command: RunnerToolCommand;
-  readonly error: Error;
-}
-
 interface PendingCommand {
   readonly abort: (() => void) | undefined;
   readonly authorize: (() => boolean) | undefined;
@@ -88,6 +83,7 @@ interface PendingCommand {
   readonly stream: ((delta: RunnerCommandOutputDelta) => void) | undefined;
   nextSequence: number;
   phase: "in_flight" | "queued";
+  queuedAfterDisconnect: boolean;
 }
 
 function abortError(message: string): DOMException {
@@ -100,6 +96,11 @@ function ignoreCleanupError(callback: () => void): void {
   } catch {
     // The broker has already fenced the command; cleanup is best effort.
   }
+}
+
+interface RejectedCommand {
+  readonly command: RunnerToolCommand;
+  readonly error: Error;
 }
 
 export class RunnerCommandBroker {
@@ -170,6 +171,7 @@ export class RunnerCommandBroker {
         generation: input.generation,
         nextSequence: 0,
         phase: "queued",
+        queuedAfterDisconnect: false,
         reject,
         resolve,
         runnerId: input.runnerId,
@@ -221,6 +223,7 @@ export class RunnerCommandBroker {
     }
     pending.connectionGeneration = this.runnerConnectionGeneration(runnerId);
     pending.phase = "in_flight";
+    pending.queuedAfterDisconnect = false;
     return pending.command;
   }
 
@@ -339,6 +342,7 @@ export class RunnerCommandBroker {
         this.#requeue(pending);
         return;
       }
+      pending.queuedAfterDisconnect = false;
     }
   }
 
@@ -376,12 +380,17 @@ export class RunnerCommandBroker {
     return Array.from(this.#pending.values()).filter(matches);
   }
 
-  sessionCommandPhase(sessionId: string): "in_flight" | "queued" | undefined {
+  sessionCommandPhase(
+    sessionId: string,
+  ): "in_flight" | "queued" | "runner_disconnected" | undefined {
     const commands = this.#matchingPending(
       ({ command }) => command.sessionId === sessionId,
     );
     if (commands.length === 0) {
       return undefined;
+    }
+    if (commands.some(({ queuedAfterDisconnect }) => queuedAfterDisconnect)) {
+      return "runner_disconnected";
     }
     return commands.every(({ phase }) => phase === "in_flight")
       ? "in_flight"
@@ -492,6 +501,7 @@ export class RunnerCommandBroker {
     }
     for (const pending of disconnected.toReversed()) {
       pending.nextSequence = 0;
+      pending.queuedAfterDisconnect = true;
       this.#requeue(pending);
     }
   }

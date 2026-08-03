@@ -1,4 +1,5 @@
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
@@ -143,9 +144,20 @@ export function pendingSpawnedSessions(
   read: (userId: string, sessionId: string) => AgentSessionDetail | undefined,
   limit?: number,
 ): readonly PendingSpawnedSession[] {
+  const parentSessions = alias(agentSessions, "callback_parent_sessions");
   const query = database
     .select({ id: agentSessions.id, userId: agentSessions.userId })
     .from(agentSessions)
+    .innerJoin(
+      parentSessions,
+      and(
+        eq(parentSessions.id, agentSessions.parentSessionId),
+        eq(parentSessions.userId, agentSessions.userId),
+        eq(parentSessions.isDeleted, false),
+        eq(parentSessions.runnerRequired, false),
+        inArray(parentSessions.status, REPORTABLE_PARENT_STATUSES),
+      ),
+    )
     .where(
       and(
         storedSessionCondition({
@@ -156,6 +168,7 @@ export function pendingSpawnedSessions(
         eq(agentSessions.runnerRequired, false),
       ),
     )
+    .orderBy(asc(agentSessions.createdAt), asc(agentSessions.id))
     .$dynamic();
   const rows = limit === undefined ? query.all() : query.limit(limit).all();
   return rows.flatMap(({ id, userId }) => {

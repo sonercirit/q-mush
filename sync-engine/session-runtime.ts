@@ -88,7 +88,7 @@ export class SessionRuntimes {
   }
 
   activeForGeneration(sessionId: string, generation: number): boolean {
-    return this.#active.get(sessionId)?.generation === generation;
+    return this.activeGenerationMatches(sessionId, generation);
   }
 
   abort(sessionId: string): void {

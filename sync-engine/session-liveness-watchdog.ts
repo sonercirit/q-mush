@@ -145,6 +145,9 @@ export class SessionLivenessWatchdog {
       return "missing_runtime";
     }
     const commandPhase = this.#options.broker.sessionCommandPhase(sessionId);
+    if (commandPhase === "runner_disconnected") {
+      return "runner_disconnected";
+    }
     if (commandPhase === "queued") {
       return "queued_command";
     }

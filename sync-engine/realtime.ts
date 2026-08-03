@@ -382,11 +382,21 @@ export function createRealtimeIntegration(
           publishRunnerActivity(connectedRunner.userId);
 
           if (event.type === "result") {
-            options.sessions.completeRunnerCommand(
-              connectedRunner.id,
-              event.commandId,
-              { output: event.output, state: event.state },
-            );
+            if (
+              options.sessions.completeRunnerCommand(
+                connectedRunner.id,
+                event.commandId,
+                { output: event.output, state: event.state },
+              )
+            ) {
+              safeSend(
+                socket,
+                JSON.stringify({
+                  commandId: event.commandId,
+                  type: "result_received",
+                }),
+              );
+            }
           } else if (event.type === "output") {
             options.sessions.streamRunnerCommand(
               connectedRunner.id,

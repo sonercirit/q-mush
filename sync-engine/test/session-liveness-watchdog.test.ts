@@ -1,6 +1,8 @@
 import { expect, test, vi } from "vitest";
 import type { AgentModel } from "../../shared/agent-loop.ts";
 import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import type { SessionDependencies } from "../../sync-engine/session-dependencies.ts";
+import { createSessionLivenessWatchdog } from "../../sync-engine/session-liveness-scheduler.ts";
 import { SessionLivenessWatchdog } from "../../sync-engine/session-liveness-watchdog.ts";
 import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
 import { ShutdownInterruptedSessionStore } from "../../sync-engine/session-shutdown-interrupted-store.ts";
@@ -149,6 +151,37 @@ function expectStoredStatus(
   expect(status).toBe(expected);
 }
 
+function expectSchedulerError(
+  liveness: NonNullable<SessionDependencies["liveness"]>,
+  message: string,
+): void {
+  const setup = runningSetup();
+  expect(() =>
+    createSessionLivenessWatchdog({
+      actions: {
+        finished: vi.fn(),
+        reportAll: vi.fn(),
+        stopChildren: vi.fn(),
+      },
+      broker: new RunnerCommandBroker(),
+      database: setup.database,
+      dependencies: {
+        braveSearch: { execute: () => Promise.resolve("unused") },
+        liveness,
+      },
+      notify: vi.fn(),
+      now: () => TEST_NOW,
+      runtimes: new SessionRuntimes(),
+      shutdownInterrupted: new ShutdownInterruptedSessionStore({
+        database: setup.database,
+        generateId: () => "scheduler-handoff-message",
+      }),
+      store: setup.store,
+    }),
+  ).toThrow(message);
+  closeSetup(setup);
+}
+
 test("rejects a below-floor grace outside the explicit test bypass", () => {
   const setup = runningSetup();
 
@@ -159,6 +192,20 @@ test("rejects a below-floor grace outside the explicit test bypass", () => {
     }),
   ).toThrow("at least 60000 ms");
   closeSetup(setup);
+});
+
+test("rejects a below-floor production scan interval", () => {
+  expectSchedulerError(
+    { graceMs: 60_000, intervalMs: 9_999 },
+    "interval must be at least 10000 ms",
+  );
+});
+
+test("rejects a production scan interval longer than its grace", () => {
+  expectSchedulerError(
+    { graceMs: 60_000, intervalMs: 60_001 },
+    "interval must not exceed the grace period",
+  );
 });
 
 test("fails a running session whose runtime disappeared beyond the grace bound", () => {

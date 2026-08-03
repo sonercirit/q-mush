@@ -63,7 +63,6 @@ import {
 } from "./session-interrupted-recovery.ts";
 import { SessionLauncher } from "./session-launcher.ts";
 import { createSessionLivenessWatchdog } from "./session-liveness-scheduler.ts";
-import type { SessionLivenessWatchdog } from "./session-liveness-watchdog.ts";
 import { modelsForUser } from "./session-model-discovery.ts";
 import {
   recoverAnsweredQuestions,
@@ -104,7 +103,7 @@ class DrizzleSessionIntegration
   readonly #questionActions: SessionQuestionActionDependencies;
   readonly #requests: SessionRequestHelpers;
   readonly #launch: SessionLaunchBoundary["launch"];
-  readonly #liveness: SessionLivenessWatchdog;
+  readonly #liveness;
   readonly #executionCleanup: SessionExecutionCleanup;
   readonly #finisher: SessionFinisher;
   readonly #failureReconciler = new SessionFailureReconciler();
