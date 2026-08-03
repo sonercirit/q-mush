@@ -30,12 +30,14 @@ export const IDLE_RUNTIME_SIGNALS: Pick<
   SessionAgentRuntimeDependencies,
   | "continuous"
   | "hasPendingSteeringInput"
+  | "manualCompactionRequested"
   | "notify"
   | "realtime"
   | "restartHandoffRequested"
 > = {
   continuous: false,
   hasPendingSteeringInput: () => false,
+  manualCompactionRequested: () => false,
   notify: () => undefined,
   realtime: undefined,
   restartHandoffRequested: () => false,

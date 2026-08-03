@@ -129,6 +129,27 @@ test("defines list-session pagination and search parameters", () => {
   });
 });
 
+test("validates compact-session and steer-session schemas", () => {
+  for (const name of ["compact_session", "steer_session"] as const) {
+    const tool = AGENT_TOOLS.find(
+      ({ function: definition }) => definition.name === name,
+    );
+    expect(tool?.function.parameters).toMatchObject({
+      additionalProperties: false,
+      properties: { sessionId: { type: "string" } },
+      required:
+        name === "compact_session" ? ["sessionId"] : ["sessionId", "message"],
+    });
+  }
+  const steer = AGENT_TOOLS.find(
+    ({ function: definition }) => definition.name === "steer_session",
+  );
+  expect(steer?.function.parameters.properties).toMatchObject({
+    message: { type: "string" },
+  });
+  expect(steer?.function.description).toContain("send_to_session");
+});
+
 test("defines the session tools as one selectable group", () => {
   expect(SESSION_AGENT_TOOL_NAMES).toEqual([
     "sleep",
@@ -141,6 +162,8 @@ test("defines the session tools as one selectable group", () => {
     "reassign_session",
     "send_to_session",
     "continue_session",
+    "compact_session",
+    "steer_session",
     "stop_session",
   ]);
   const stopTool = AGENT_TOOLS.find(

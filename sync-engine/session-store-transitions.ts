@@ -34,14 +34,14 @@ function transitionAndEndTurn(
 ): boolean {
   return options.database.transaction((transaction) => {
     const session = readStoredSessionState(transaction, options.condition);
-    return (
-      session !== undefined &&
-      updateSessionAndEndGenerationTurn({
-        ...options,
-        database: transaction,
-        generation: session.executionGeneration,
-      })
-    );
+    if (session === undefined) {
+      return false;
+    }
+    return updateSessionAndEndGenerationTurn({
+      ...options,
+      database: transaction,
+      generation: session.executionGeneration,
+    });
   });
 }
 

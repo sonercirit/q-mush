@@ -49,18 +49,6 @@ function queuedSessionDetail(
     : queueFailureResponse(result);
 }
 
-export function queueSessionDetail(
-  dependencies: Pick<SessionQueueDependencies, "now" | "store">,
-  parameters: readonly [
-    userId: string,
-    sessionId: string,
-    prompt: PromptInput | undefined,
-    workspaceId: string | undefined,
-  ],
-): AgentSessionDetail | Response {
-  return queuedSessionDetail(queueSession(dependencies, ...parameters));
-}
-
 export async function queueSessionForUser(
   dependencies: SessionQueueDependencies,
   userId: string,
@@ -89,12 +77,15 @@ export async function queueSessionForUser(
     return createApiError("runner_unavailable", 409);
   }
   return dependencies.credential(userId, existing, (credential) => {
-    const queued = queueSessionDetail(dependencies, [
-      userId,
-      existing.id,
-      prompt,
-      dependencies.workspaceId,
-    ]);
+    const queued = queuedSessionDetail(
+      queueSession(
+        dependencies,
+        userId,
+        existing.id,
+        prompt,
+        dependencies.workspaceId,
+      ),
+    );
 
     if (queued instanceof Response) {
       return queued;

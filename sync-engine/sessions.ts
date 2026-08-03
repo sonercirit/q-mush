@@ -23,7 +23,10 @@ import type { RunnerIntegration } from "./runners.ts";
 import { SessionAgentActions } from "./session-agent-actions.ts";
 import { discoverSessionAgentMetadata } from "./session-agent-metadata.ts";
 import type { AgentModelFactory } from "./session-agent-models.ts";
-import { startManualSessionCompaction } from "./session-compaction-actions.ts";
+import {
+  startManualSessionCompaction,
+  startManualSessionCompactionForUserId,
+} from "./session-compaction-actions.ts";
 import {
   createValidatedSession,
   type SessionLaunchBoundary,
@@ -388,6 +391,8 @@ class DrizzleSessionIntegration
       cleanupSession: (detail) => {
         void this.#executionCleanup.cleanupTerminal(detail);
       },
+      compactSession: startManualSessionCompactionForUserId,
+      runtimes: this.#runtimes,
       pendingRestart: (runnerId) => this.#runtimes.pendingRestart(runnerId),
       discoverSessionMetadata: (
         input,
@@ -405,8 +410,8 @@ class DrizzleSessionIntegration
           userId,
           rejectCredentialErrors,
         ),
-      launchSession: (credential, detail, userId) =>
-        this.#launch(detail, credential, userId),
+      launchSession: (credential, detail, userId, operation) =>
+        this.#launch(detail, credential, userId, operation),
       listOnlineRunners: (userId, workspaceId) =>
         this.#runners.onlineForUser(userId, workspaceId),
       listRunnerOptions: (userId, request) =>

@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { AgentImage } from "../shared/agent-images.ts";
 import { updatedAuditFields } from "../shared/audit.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
@@ -7,6 +7,7 @@ import {
   sessionExecutionIsCurrent,
   type SessionQueueAuthorization,
 } from "./session-execution-authority.ts";
+import { retireManualCompactionOperations } from "./session-manual-compaction-query.ts";
 import {
   activePendingInput,
   promotePendingInput,
@@ -100,6 +101,9 @@ export function queueStoredSession(options: {
     if (stored === undefined) {
       return "not_found" as const;
     }
+    if (stored.runnerRequired) {
+      return "runner_required" as const;
+    }
     if (
       authorization?.targetGeneration !== undefined &&
       authorization.targetGeneration !== stored.executionGeneration
@@ -108,9 +112,6 @@ export function queueStoredSession(options: {
     }
     if (!["completed", "idle", "failed", "stopped"].includes(stored.status)) {
       return "busy" as const;
-    }
-    if (stored.runnerRequired) {
-      return "runner_required" as const;
     }
     if (!storedSessionRunnerIsAvailable(transaction, userId, sessionId, now)) {
       return "runner_unavailable" as const;
@@ -191,6 +192,13 @@ export function queueStoredSession(options: {
         turnId,
       );
     }
+    retireManualCompactionOperations(
+      transaction,
+      sessionId,
+      stored.executionGeneration,
+      now,
+      "through",
+    );
     transaction
       .update(agentSessions)
       .set({
@@ -201,7 +209,12 @@ export function queueStoredSession(options: {
         status: "queued",
         ...updatedAuditFields(userId, now),
       })
-      .where(eq(agentSessions.id, sessionId))
+      .where(
+        and(
+          eq(agentSessions.id, sessionId),
+          eq(agentSessions.executionGeneration, stored.executionGeneration),
+        ),
+      )
       .run();
     return "queued" as const;
   });

@@ -63,6 +63,18 @@ function persistedRestartRequest(request: RestartRequest): RestartRequest {
     : request;
 }
 
+function restartOperation(
+  options: Pick<RunPersistedSessionOptions, "detail" | "operation" | "store">,
+): RestartHandoffOperation {
+  return options.operation === "agent" &&
+    options.store.manualCompactionPending(
+      options.detail.id,
+      options.detail.generation,
+    )
+    ? "compact_and_continue"
+    : options.operation;
+}
+
 function pauseForRestart(
   options: RunPersistedSessionOptions,
   request: RestartRequest,
@@ -72,7 +84,7 @@ function pauseForRestart(
     { generation: options.detail.generation, sessionId: options.detail.id },
     handoff.requestedBy,
     handoff.restartId,
-    options.operation,
+    restartOperation(options),
     options.now(),
   );
 }

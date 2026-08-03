@@ -14,6 +14,11 @@ import {
   spawnAgentSession,
   type SessionAgentActionDependencies,
 } from "./session-agent-action-helpers.ts";
+import {
+  compactSessionForAgent,
+  steerSessionForAgent,
+  type SessionControlActionDependencies,
+} from "./session-agent-control.ts";
 import { listSessionsOutput } from "./session-agent-list.ts";
 import {
   sessionAgentOptions,
@@ -54,7 +59,8 @@ function runnerUnavailableOutput(): string {
 
 type RunnerPageRequest = SessionRunnerPageRequest;
 
-interface SessionAgentActionsDependencies extends SessionAgentActionDependencies {
+interface SessionAgentActionsDependencies
+  extends SessionAgentActionDependencies, SessionControlActionDependencies {
   readonly abortSession: (sessionId: string) => void;
   readonly activeSession: (sessionId: string) => boolean;
   readonly broker: Pick<RunnerCommandBroker, "cancelSession">;
@@ -130,6 +136,14 @@ export class SessionAgentActions {
       return sessionId;
     };
     return {
+      compactSession: guardParent("compact_session", (sessionId) =>
+        this.#compact({
+          authority: { ...authority, tool: "compact_session" },
+          sessionId,
+          userId,
+          workspaceId: parentWorkspaceId(),
+        }),
+      ),
       continueSession: guardParent("continue_session", (sessionId) =>
         this.#queue(
           userId,
@@ -189,6 +203,9 @@ export class SessionAgentActions {
       ),
       spawnSession: guardParent("spawn_session", (input) =>
         this.#spawn(authority, userId, input),
+      ),
+      steerSession: guardParent("steer_session", (sessionId, message) =>
+        this.#steer(userId, sessionId, message, parentWorkspaceId()),
       ),
       stopSession: guardParent("stop_session", (sessionId, cascade) =>
         this.#stop(
@@ -543,6 +560,31 @@ export class SessionAgentActions {
       dependencies: this.#dependencies,
       input,
       userId,
+    });
+  }
+
+  #compact(input: {
+    readonly authority: SessionExecutionAuthority & {
+      readonly tool: "compact_session";
+    };
+    readonly sessionId: string;
+    readonly userId: string;
+    readonly workspaceId: string;
+  }): Promise<string> {
+    return compactSessionForAgent(this.#dependencies, input);
+  }
+
+  #steer(
+    userId: string,
+    sessionId: string,
+    message: string,
+    workspaceId: string,
+  ): Promise<string> {
+    return steerSessionForAgent(this.#dependencies, {
+      message,
+      sessionId,
+      userId,
+      workspaceId,
     });
   }
 

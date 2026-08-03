@@ -57,6 +57,8 @@ export function sessionModelRuntime(
     currentTools: () => resources.store.get(userId, detail.id)?.tools,
     isCurrent: () =>
       resources.store.executionIsCurrent(userId, detail.id, detail.generation),
+    manualCompactionRequested: () =>
+      resources.store.manualCompactionPending(detail.id, detail.generation),
     modelFactory: resources.modelFactory,
     now: resources.now,
     restartHandoffRequested,

@@ -295,19 +295,17 @@ export function settleRuntimeFailure(
       { id: options.sessionId, status: ["queued", "running"] },
       options.generation,
     );
-    const userId = transaction
-      .select({ userId: agentSessions.userId })
-      .from(agentSessions)
-      .where(condition)
-      .get()?.userId;
+    const selectedUser = transaction.query.agentSessions
+      .findFirst({ columns: { userId: true }, where: condition })
+      .sync();
     return (
-      userId !== undefined &&
+      selectedUser !== undefined &&
       settleSessionFailure(
         {
           ...runtimeWriteTarget(options),
           condition,
           database: transaction,
-          userId,
+          userId: selectedUser.userId,
         },
         options.content,
       )

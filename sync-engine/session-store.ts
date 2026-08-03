@@ -1,9 +1,6 @@
 import type { AgentFile } from "../shared/agent-file.ts";
 import type { AgentImage } from "../shared/agent-images.ts";
-import type {
-  AgentConversationMessage,
-  AgentRecordedMessage,
-} from "../shared/agent-loop.ts";
+import type { AgentConversationMessage } from "../shared/agent-loop.ts";
 import type { AgentSessionToolName } from "../shared/agent-tools.ts";
 import type { PendingAskQuestions } from "../shared/ask-questions.ts";
 import { updatedAuditFields } from "../shared/audit.ts";
@@ -19,13 +16,14 @@ import type {
 } from "../shared/session-model.ts";
 import { createAskQuestionsPersistence } from "./ask-questions-persistence.ts";
 import { AskQuestionsStore } from "./ask-questions-store.ts";
-import type { CompactionUsage } from "./session-compaction-usage.ts";
+import { CurrentSessionStore } from "./session-current-store.ts";
 import {
   sessionExecutionIsCurrent,
   type SessionQueueAuthorization,
 } from "./session-execution-authority.ts";
 import { userSessionFilter } from "./session-filter.ts";
 import { readStoredSessionHistory } from "./session-history-store.ts";
+import { ManualCompactionStore } from "./session-manual-compaction-store.ts";
 import {
   cancelPendingInput,
   enqueuePendingInput,
@@ -43,6 +41,14 @@ import {
   type RestartHandoffIdentity,
 } from "./session-restart-store.ts";
 import {
+  runtimeUsageOption,
+  type RuntimeAppendMessageParameters,
+  type RuntimeCompactionParameters,
+  type RuntimeMessageParameters,
+  type RuntimeMessageWriteOptions,
+  type RuntimeTerminalMessageParameters,
+} from "./session-runtime-write-options.ts";
+import {
   createStoredSession,
   type CreateAgentSession,
   type CreateSessionResult,
@@ -56,6 +62,10 @@ import {
   activeSessionCondition,
   updateStoredSessions,
 } from "./session-store-persistence.ts";
+import {
+  listStoredSessions,
+  readStoredSessionDetail,
+} from "./session-store-queries.ts";
 import {
   queueStoredSession,
   type QueueSessionResult,
@@ -92,32 +102,19 @@ import {
   type PendingSpawnedSession,
   type SpawnedReportDisposition,
 } from "./session-store-spawns.ts";
-
-import {
-  runtimeUsageOption,
-  type RuntimeAppendMessageParameters,
-  type RuntimeCompactionParameters,
-  type RuntimeMessageParameters,
-  type RuntimeMessageWriteOptions,
-  type RuntimeTerminalMessageParameters,
-} from "./session-runtime-write-options.ts";
-import {
-  listStoredSessions,
-  readStoredSessionDetail,
-} from "./session-store-queries.ts";
 import {
   stopStoredSession,
   transitionSessionRuntime,
 } from "./session-store-transitions.ts";
 import { appendSessionUserMessage } from "./session-store-values.ts";
-
 export class SessionStore {
+  readonly #manualCompactions: ManualCompactionStore;
   readonly #questions: AskQuestionsStore;
   readonly #resources: readonly [AppDatabase, IdGenerator];
   readonly #restartHandoffs: RestartHandoffStore;
-
   constructor(database: AppDatabase, generateId: IdGenerator = createUuidV7) {
     this.#resources = [database, generateId];
+    this.#manualCompactions = new ManualCompactionStore(database, generateId);
     this.#questions = new AskQuestionsStore({
       generateId,
       persistence: createAskQuestionsPersistence(database),
@@ -132,11 +129,9 @@ export class SessionStore {
       read: (userId, sessionId) => this.get(userId, sessionId),
     });
   }
-
   get #database(): AppDatabase {
     return this.#resources[0];
   }
-
   #writeResources(workspaceId?: string) {
     const database = this.#database;
     const generateId = this.#resources[1];
@@ -144,11 +139,9 @@ export class SessionStore {
       this.get(userId, sessionId, workspaceId);
     return { database, generateId, read };
   }
-
   #generateId(now: number): string {
     return this.#resources[1](now);
   }
-
   create(input: CreateAgentSession, now: number): CreateSessionResult {
     return createStoredSession(this.#writeResources(), input, now);
   }
@@ -161,18 +154,15 @@ export class SessionStore {
   questions(): AskQuestionsStore {
     return this.#questions;
   }
-
   #readPendingQuestions(userId: string, sessionId: string) {
     return this.#questions.pending(userId, sessionId);
   }
-
   pendingQuestions(
     userId: string,
     sessionId: string,
   ): PendingAskQuestions | null {
     return this.#readPendingQuestions(userId, sessionId);
   }
-
   executionIsCurrent(
     userId: string,
     sessionId: string,
@@ -189,7 +179,6 @@ export class SessionStore {
       userId,
     );
   }
-
   get(
     userId: string,
     sessionId: string,
@@ -211,7 +200,6 @@ export class SessionStore {
       workspaceId,
     );
   }
-
   history(
     userId: string,
     sessionId: string,
@@ -222,7 +210,6 @@ export class SessionStore {
       sessionId,
     });
   }
-
   conversation(
     sessionId: string,
     interrupted = true,
@@ -234,39 +221,32 @@ export class SessionStore {
       ),
     );
   }
-
   pauseQueuedForRestart(
     ...arguments_: Parameters<RestartHandoffStore["pauseQueued"]>
   ): boolean {
     return this.#restartHandoffs.pauseQueued(...arguments_);
   }
-
   pauseRunningForRestart(
     ...arguments_: Parameters<RestartHandoffStore["pauseRunning"]>
   ): boolean {
     return this.#restartHandoffs.pauseRunning(...arguments_);
   }
-
   failInvalidRestartHandoff(
     ...arguments_: Parameters<RestartHandoffStore["failInvalid"]>
   ): boolean {
     return this.#restartHandoffs.failInvalid(...arguments_);
   }
-
   failRestartHandoff(
     ...arguments_: Parameters<RestartHandoffStore["failQueued"]>
   ): boolean {
     return this.#restartHandoffs.failQueued(...arguments_);
   }
-
   invalidRestartHandoffs(runnerId?: string) {
     return this.#restartHandoffs.invalid(runnerId);
   }
-
   pendingRestartHandoffs(runnerId?: string) {
     return this.#restartHandoffs.pending(runnerId);
   }
-
   claimRestartHandoff(
     userId: string,
     identity: RestartHandoffIdentity,
@@ -274,7 +254,6 @@ export class SessionStore {
   ): AgentSessionDetail | undefined {
     return this.#restartHandoffs.claim(userId, identity, now);
   }
-
   settleRestartHandoff(
     userId: string,
     identity: RestartHandoffIdentity,
@@ -283,14 +262,12 @@ export class SessionStore {
   ): boolean {
     return this.#restartHandoffs.settle(userId, identity, settlement, now);
   }
-
   restoreRestartHandoff(
     identity: RestartHandoffIdentity,
     now: number,
   ): boolean {
     return this.#restartHandoffs.restore(identity, now);
   }
-
   #runtimeTarget(sessionId: string, now: number, generation: number) {
     return {
       generation,
@@ -299,7 +276,6 @@ export class SessionStore {
       sessionId,
     };
   }
-
   setRuntimeAgentFile(
     sessionId: string,
     agentFile: AgentFile | null,
@@ -311,7 +287,6 @@ export class SessionStore {
       ...this.#runtimeTarget(sessionId, now, generation),
     });
   }
-
   #agentMessageWrite(
     parameters: RuntimeMessageParameters,
     options: RuntimeMessageWriteOptions,
@@ -334,7 +309,6 @@ export class SessionStore {
       ...runtimeUsageOption(options.usage),
     });
   }
-
   commitRuntimeTerminal(
     ...[
       sessionId,
@@ -351,7 +325,6 @@ export class SessionStore {
       ...runtimeUsageOption(usage),
     });
   }
-
   #compactRuntime(
     parameters:
       | RuntimeCompactionParameters
@@ -382,7 +355,6 @@ export class SessionStore {
       });
     }
   }
-
   compactRuntimeTerminal(
     ...parameters: readonly [
       ...RuntimeCompactionParameters,
@@ -391,11 +363,9 @@ export class SessionStore {
   ): void {
     this.#compactRuntime(parameters);
   }
-
   compactRuntimeConversation(...parameters: RuntimeCompactionParameters): void {
     this.#compactRuntime(parameters);
   }
-
   updateRuntimeUsage(
     sessionId: string,
     input: AgentSessionUsageUpdate,
@@ -407,7 +377,6 @@ export class SessionStore {
       input,
     });
   }
-
   appendRuntimeAgentMessages(
     ...parameters: RuntimeAppendMessageParameters
   ): void {
@@ -443,7 +412,6 @@ export class SessionStore {
       ...this.#runtimeTarget(sessionId, now, generation),
     });
   }
-
   reassign(
     userId: string,
     sessionId: string,
@@ -461,7 +429,6 @@ export class SessionStore {
       workingDirectory,
     });
   }
-
   setAutoCompact(
     userId: string,
     sessionId: string,
@@ -476,7 +443,6 @@ export class SessionStore {
     );
     return updated ? this.get(userId, sessionId, workspaceId) : undefined;
   }
-
   appendUnknownRestartToolResults(
     database: Parameters<typeof appendUnknownRestartToolResults>[0]["database"],
     sessionId: string,
@@ -489,7 +455,6 @@ export class SessionStore {
       sessionId,
     });
   }
-
   appendInterruptedRunnerTool(sessionId: string, now: number): void {
     appendInterruptedRunnerToolResult({
       database: this.#database,
@@ -498,13 +463,11 @@ export class SessionStore {
       sessionId,
     });
   }
-
   cancelPendingInput(
     options: Omit<Parameters<typeof cancelPendingInput>[0], "database">,
   ) {
     return cancelPendingInput({ ...options, database: this.#database });
   }
-
   enqueuePendingInput(
     userId: string,
     sessionId: string,
@@ -520,14 +483,18 @@ export class SessionStore {
       userId,
     });
   }
-
   takeSteeringInputs(
     sessionId: string,
     now: number,
   ): readonly Extract<AgentConversationMessage, { readonly role: "user" }>[] {
     return takeSteeringInputs({ database: this.#database, now, sessionId });
   }
-
+  manualCompactionPending(sessionId: string, generation: number): boolean {
+    return this.#manualCompactions.pending(sessionId, generation);
+  }
+  scheduleManualCompaction(sessionId: string, generation: number, now: number) {
+    return this.#manualCompactions.schedule(sessionId, generation, now);
+  }
   settleNormalBoundary(sessionId: string, now: number, generation: number) {
     return settleNormalSessionBoundary({
       database: this.#database,
@@ -536,7 +503,6 @@ export class SessionStore {
       sessionId,
     });
   }
-
   appendUserMessage(
     userId: string,
     sessionId: string,
@@ -551,13 +517,11 @@ export class SessionStore {
       userId,
     });
   }
-
   appendSpawnedSessionReport(
     ...parameters: Parameters<SessionStore["spawnedSessionCallbackDisposition"]>
   ): boolean {
     return this.spawnedSessionCallbackDisposition(...parameters) !== undefined;
   }
-
   spawnedSessionCallbackDisposition(
     userId: string,
     childId: string,
@@ -579,28 +543,23 @@ export class SessionStore {
       userId,
     });
   }
-
   activeSpawnedSessionChildren(userId: string, sessionId: string) {
     return activeSpawnedSessionChildren(this.#database, userId, sessionId);
   }
   spawnedSessionChildren(userId: string, sessionId: string): readonly string[] {
     return spawnedSessionChildren(this.#database, userId, sessionId);
   }
-
   spawnedSessionLink(userId: string, sessionId: string) {
     return spawnedSessionLink(this.#database, userId, sessionId);
   }
-
   pendingSpawnedSessions(): readonly PendingSpawnedSession[] {
     return pendingSpawnedSessions(this.#database, (userId, sessionId) =>
       this.get(userId, sessionId),
     );
   }
-
   queuedSessionOwnerIds(): readonly string[] {
     return queuedSessionOwnerIds(this.#database);
   }
-
   queuedSessions(userId: string): readonly AgentSessionDetail[] {
     const awaitingAnsweredLaunch = new Set(
       this.#questions
@@ -612,7 +571,6 @@ export class SessionStore {
       this.get(ownerId, sessionId),
     ).filter(({ id }) => !awaitingAnsweredLaunch.has(id));
   }
-
   transitionRuntime(
     sessionId: string,
     status: "failed" | "idle" | "running",
@@ -628,6 +586,10 @@ export class SessionStore {
     });
   }
 
+  /**
+   * Administrative/test helper that intentionally targets the current generation.
+   * Runtime code must use the generation-required methods above.
+   */
   #currentGeneration(sessionId: string): number {
     const current = this.#database
       .select({ generation: agentSessions.executionGeneration })
@@ -639,92 +601,30 @@ export class SessionStore {
     }
     return current.generation;
   }
-
-  appendCurrentAgentMessage(
-    sessionId: string,
-    message: AgentRecordedMessage,
-    now: number,
-  ): void {
-    this.appendRuntimeAgentMessages(
-      sessionId,
-      [message],
-      now,
+  #current(): CurrentSessionStore {
+    return new CurrentSessionStore(this, (sessionId) =>
       this.#currentGeneration(sessionId),
     );
   }
-
-  appendCurrentErrorMessage(
-    sessionId: string,
-    content: string,
-    now: number,
-  ): void {
-    this.appendRuntimeErrorMessage(
-      sessionId,
-      content,
-      now,
-      this.#currentGeneration(sessionId),
-    );
-  }
-
-  compactCurrentConversation(
-    sessionId: string,
-    summary: string,
-    usage: CompactionUsage,
-    now: number,
-  ): void {
-    this.compactRuntimeConversation(
-      sessionId,
-      summary,
-      usage,
-      now,
-      this.#currentGeneration(sessionId),
-      now,
-    );
-  }
-
-  setCurrentAgentFile(
-    sessionId: string,
-    agentFile: AgentFile | null,
-    now: number,
-  ): void {
-    this.setRuntimeAgentFile(
-      sessionId,
-      agentFile,
-      now,
-      this.#currentGeneration(sessionId),
-    );
-  }
-
-  updateCurrentUsage(
-    sessionId: string,
-    input: AgentSessionUsageUpdate,
-    now: number,
-  ): void {
-    this.updateRuntimeUsage(
-      sessionId,
-      input,
-      now,
-      this.#currentGeneration(sessionId),
-    );
-  }
-
-  transitionCurrent(
-    sessionId: string,
-    status: "failed" | "idle" | "running",
-    now: number,
-  ): boolean {
-    try {
-      return this.transitionRuntime(
-        sessionId,
-        status,
-        now,
-        this.#currentGeneration(sessionId),
-      );
-    } catch {
-      return false;
-    }
-  }
-
+  appendCurrentAgentMessage: CurrentSessionStore["appendAgentMessage"] = (...a) => {
+    this.#current().appendAgentMessage(...a);
+  };
+  appendCurrentErrorMessage: CurrentSessionStore["appendErrorMessage"] = (...a) => {
+    this.#current().appendErrorMessage(...a);
+  };
+  compactCurrentConversation: CurrentSessionStore["compactConversation"] = (
+    ...a
+  ) => {
+    this.#current().compactConversation(...a);
+  };
+  setCurrentAgentFile: CurrentSessionStore["setAgentFile"] = (...a) => {
+    this.#current().setAgentFile(...a);
+  };
+  updateCurrentUsage: CurrentSessionStore["updateUsage"] = (...a) => {
+    this.#current().updateUsage(...a);
+  };
+  transitionCurrent: CurrentSessionStore["transition"] = (...a) =>
+    this.#current().transition(...a);
   stop(userId: string, sessionId: string, now: number): boolean {
     if (this.#questions.pending(userId, sessionId) !== null) {
       return this.#questions.stop(userId, sessionId, now);
@@ -736,7 +636,6 @@ export class SessionStore {
       userId,
     });
   }
-
   queue(
     userId: string,
     sessionId: string,
@@ -762,10 +661,8 @@ export class SessionStore {
       ...(workspaceId === undefined ? {} : { workspaceId }),
     });
   }
-
   failInterrupted(now: number): readonly PendingSpawnedSession[] {
     const interrupted = interruptedStoredSessions(this.#database, now);
-
     for (const session of interrupted) {
       if (this.#restartHandoffs.restoreInterrupted(session, now)) {
         continue;

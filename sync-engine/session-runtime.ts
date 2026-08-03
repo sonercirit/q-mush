@@ -91,14 +91,19 @@ export class SessionRuntimes {
     this.#active.get(sessionId)?.controller.abort();
   }
 
+  activeGenerationMatches(sessionId: string, generation: number): boolean {
+    return this.#active.get(sessionId)?.generation === generation;
+  }
+
   abortForGeneration(sessionId: string, generation: number): boolean {
-    const runtime = this.#active.get(sessionId);
-    if (runtime?.generation !== generation) {
+    if (!this.activeGenerationMatches(sessionId, generation)) {
       return false;
     }
-    runtime.controller.abort(
-      new DOMException("The session tools changed", "AbortError"),
-    );
+    this.#active
+      .get(sessionId)
+      ?.controller.abort(
+        new DOMException("The session tools changed", "AbortError"),
+      );
     return true;
   }
 
