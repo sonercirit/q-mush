@@ -9,6 +9,7 @@ import {
 
 const RUNNER_VERSION = "a".repeat(64);
 const POLL_INTERVAL_MILLISECONDS = 10;
+const RUNNER_STARTUP_TIMEOUT_MILLISECONDS = 10_000;
 
 function waitForExit(
   child: Bun.Subprocess<"ignore", "pipe", "pipe">,
@@ -219,7 +220,12 @@ test("the runner process exits promptly when superseded mid-heartbeat", async ()
   const setup = processTestSetup();
 
   try {
-    expect(await waitUntil(() => setup.server.supersede(), 1_000)).toBe(true);
+    expect(
+      await waitUntil(
+        () => setup.server.supersede(),
+        RUNNER_STARTUP_TIMEOUT_MILLISECONDS,
+      ),
+    ).toBe(true);
     await expectChildFailure(
       setup,
       "The runner connection was superseded by a newer process",
