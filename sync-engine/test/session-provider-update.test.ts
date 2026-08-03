@@ -17,7 +17,10 @@ import {
 import { testModelCatalog } from "./session-continuation-test-helpers.ts";
 import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
 
-function createProviderUpdateSession(store: SessionStore) {
+function createProviderUpdateSession(
+  store: SessionStore,
+  userContextTokenCap?: number,
+) {
   const values = {
     autoCompact: true,
     credentialId: "openai-source",
@@ -32,6 +35,7 @@ function createProviderUpdateSession(store: SessionStore) {
     reasoningEffort: null,
     runnerId: "runner-1",
     tools: [],
+    ...(userContextTokenCap === undefined ? {} : { userContextTokenCap }),
     userId: TEST_USER_ID,
     workingDirectory: "/tmp",
     workspaceId: TEST_WORKSPACE_ID,
@@ -39,13 +43,13 @@ function createProviderUpdateSession(store: SessionStore) {
   return store.create(values, TEST_NOW);
 }
 
-function setup() {
+function setup(userContextTokenCap?: number) {
   const database = createAuthenticatedTestDatabase();
   addSessionTestRunner(database, "provider-update-machine", "runner-1");
   addTestProviderCredential(database, "openai-source");
   addTestProviderCredential(database, "openrouter-target", "openrouter");
   const store = new SessionStore(database);
-  const created = createProviderUpdateSession(store);
+  const created = createProviderUpdateSession(store, userContextTokenCap);
   if (created.status !== "created") throw new Error("Fixture failed");
   const cancelSessionGeneration = vi.fn<
     (_sessionId: string, _generation: number) => readonly []
@@ -118,6 +122,7 @@ function sessionRow(setupValue: ReturnType<typeof setup>) {
       provider: agentSessions.provider,
       segment: agentSessions.currentSegment,
       tag: agentSessions.openRouterProviderTag,
+      userContextTokenCap: agentSessions.userContextTokenCap,
     })
     .from(agentSessions)
     .where(eq(agentSessions.id, setupValue.created.detail.id))
@@ -185,6 +190,55 @@ describe("session provider update", () => {
     expect(
       setupValue.store.queue(TEST_USER_ID, updated.id, TEST_NOW + 2).status,
     ).toBe("queued");
+  });
+
+  test("retains a cap below the target model limit", async () => {
+    const setupValue = setup(32_000);
+
+    const updated = await applySessionProviderUpdate(
+      setupValue.dependencies,
+      TEST_USER_ID,
+      setupValue.input,
+    );
+
+    expect(updated).toMatchObject({
+      maxContextTokens: 32_000,
+      userContextTokenCap: 32_000,
+    });
+    expect(sessionRow(setupValue)).toMatchObject({
+      maxContextTokens: 64_000,
+      userContextTokenCap: 32_000,
+    });
+  });
+
+  test("rejects a target model below the retained cap", async () => {
+    const setupValue = setup(120_000);
+
+    await expect(
+      applySessionProviderUpdate(
+        setupValue.dependencies,
+        TEST_USER_ID,
+        setupValue.input,
+      ),
+    ).rejects.toMatchObject({
+      code: "invalid_context_token_cap",
+      message:
+        "The current context token cap of 120,000 tokens exceeds the new model limit of 64,000 tokens. Lower or clear the cap before changing models.",
+    });
+    expect(sessionRow(setupValue)).toMatchObject({
+      generation: 0,
+      maxContextTokens: 128_000,
+      model: "gpt-4.1-mini",
+      provider: "openai",
+      segment: 0,
+      userContextTokenCap: 120_000,
+    });
+    expect(
+      setupValue.dependencies.runtimes.abortForGeneration,
+    ).not.toHaveBeenCalled();
+    expect(
+      setupValue.dependencies.broker.cancelSessionGeneration,
+    ).not.toHaveBeenCalled();
   });
 
   const applyUpdate = (

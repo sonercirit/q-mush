@@ -171,6 +171,63 @@ describe("session models and compaction", () => {
     closeSessionTestDatabase(setup.database);
   });
 
+  test("compacts through existing machinery after confirming an exceeded cap", async () => {
+    const model = new ScriptedAgentModel([
+      {
+        content: "Large context complete.",
+        contextTokens: 90_000,
+        toolCalls: [],
+      },
+      { content: "Confirmed cap handoff.", toolCalls: [] },
+    ]);
+    const setup = compactionSetup(model, "Existing cap");
+    await startSessionAndCompleteAgentFile(setup);
+    await waitForSessionStatus(setup, "idle");
+    const requestedCap = 80_000;
+    const before = setup.sessions.detailForUser(
+      TEST_AUTHENTICATED_USER.id,
+      SESSION_ID,
+      TEST_WORKSPACE_ID,
+    );
+    if (before === undefined) throw new Error("Missing integration session");
+
+    // This is the condition that opens the browser confirmation dialog.
+    expect(before.currentContextTokens).toBeGreaterThan(requestedCap);
+    expect(before.autoCompact).toBe(true);
+
+    const capped = setup.sessions.realtimeCommands.setContextTokenCapForUser(
+      TEST_AUTHENTICATED_USER,
+      SESSION_ID,
+      requestedCap,
+      TEST_WORKSPACE_ID,
+    );
+    expect(capped).toMatchObject({
+      currentContextTokens: 90_000,
+      maxContextTokens: requestedCap,
+      status: "idle",
+      userContextTokenCap: requestedCap,
+    });
+
+    // Confirmation invokes the same realtime manual-compaction operation used
+    // by the existing-session controller, rather than a test-only callback.
+    const queued = await setup.sessions.realtimeCommands.compactForUser(
+      TEST_AUTHENTICATED_USER,
+      SESSION_ID,
+      TEST_WORKSPACE_ID,
+    );
+    expect(["queued", "running"]).toContain(queued.status);
+    await completeAgentFileLookup(setup);
+    const compacted = await waitForIdleContent(setup, "Confirmed cap handoff.");
+    expect(compacted).toMatchObject({
+      currentContextTokens: 0,
+      maxContextTokens: requestedCap,
+      userContextTokenCap: requestedCap,
+    });
+    expect(JSON.stringify(compacted)).not.toContain("Large context complete.");
+
+    closeSessionTestDatabase(setup.database);
+  });
+
   test("updates compaction mode and manually compacts an idle session", async () => {
     const model = new ScriptedAgentModel([
       {

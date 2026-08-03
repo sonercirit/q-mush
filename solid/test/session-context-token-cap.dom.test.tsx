@@ -1,5 +1,9 @@
 import { expect, test, vi } from "vitest";
 import { SESSION_REALTIME_OPERATIONS } from "../../shared/user-realtime-protocol.ts";
+import { createReactiveState } from "../reactive-state.ts";
+import { setSessionContextTokenCap } from "../session-controller-context-cap.ts";
+import { initialSessionViewState } from "../session-state.ts";
+import type { SessionViewState } from "../session-view-state.ts";
 import { findTestButton, queryTestElement } from "./dom-test-helpers.ts";
 import { sessionDetailState } from "./session-detail-test-state.ts";
 import { mountSessionDetailBody } from "./session-dom-test-helpers.tsx";
@@ -115,6 +119,44 @@ test("applies an exceeded cap without compaction when auto-compact is off", asyn
     expect.anything(),
   );
 });
+
+test.each([
+  { currentContextTokens: 150_000, status: "running" as const },
+  { currentContextTokens: 100_000, status: "idle" as const },
+])(
+  "rechecks live status and usage before launching compaction %#",
+  async (changes) => {
+    const detail = contextCapDetail(true);
+    const reactive = createReactiveState<SessionViewState>({
+      ...initialSessionViewState(),
+      detail,
+      selectedId: detail.id,
+    });
+    const compact = vi.fn(() => Promise.resolve());
+    const mutate = vi.fn(() => {
+      reactive.setState((state) => ({
+        ...state,
+        detail: {
+          ...detail,
+          ...changes,
+          userContextTokenCap: 120_000,
+        },
+      }));
+      return Promise.resolve();
+    });
+
+    await setSessionContextTokenCap(
+      reactive.state,
+      120_000,
+      true,
+      mutate,
+      compact,
+    );
+
+    expect(mutate).toHaveBeenCalledOnce();
+    expect(compact).not.toHaveBeenCalled();
+  },
+);
 
 test("clearing the cap restores the model limit", async () => {
   const clearedView = mountCapEditor();

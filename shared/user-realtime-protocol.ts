@@ -36,11 +36,13 @@ export const SESSION_REALTIME_OPERATIONS = {
 
 export class RealtimeCommandError extends Error {
   readonly code: string;
+  readonly detail: string | undefined;
 
-  constructor(code: string) {
-    super(code);
+  constructor(code: string, detail?: string) {
+    super(detail ?? code);
     this.name = "RealtimeCommandError";
     this.code = code;
+    this.detail = detail;
   }
 }
 

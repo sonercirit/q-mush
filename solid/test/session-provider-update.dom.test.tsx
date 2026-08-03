@@ -300,6 +300,49 @@ test("reselecting the current credential preserves its model and serving provide
   expect(discoverModels).toHaveBeenCalledTimes(1);
 });
 
+test("surfaces a provider change blocked by the retained cap", async () => {
+  const detail = { ...TEST_SESSION_DETAIL, userContextTokenCap: 120_000 };
+  const failure = Object.assign(
+    new Error("Lower or clear the context token cap before changing models."),
+    { code: "invalid_context_token_cap" },
+  );
+  const apply = vi.fn(() => Promise.reject(failure));
+  const container = mount(() => (
+    <SessionProviderUpdateEditor
+      credentials={[
+        {
+          id: detail.credentialId,
+          label: "Session credential",
+          provider: detail.provider,
+        },
+      ]}
+      detail={detail}
+      disabled={false}
+      onApply={apply}
+      onDiscoverModels={() => Promise.resolve(MODEL_CATALOG)}
+      onDiscoverProviders={() => Promise.resolve({ providers: [] })}
+    />
+  ));
+  clickTestButton(container, "[data-session-provider-toggle='true']");
+  await vi.waitFor(() => {
+    expect(
+      queryTestElementAs(
+        container,
+        "[data-session-provider-update-submit='true']",
+        HTMLButtonElement,
+      ).disabled,
+    ).toBe(false);
+  });
+  clickTestButton(container, "[data-session-provider-update-submit='true']");
+  clickTestButton(container, "[data-session-provider-update-confirm='true']");
+
+  await expectTestText(
+    container,
+    "Lower or clear the context token cap before changing models.",
+  );
+  expect(apply).toHaveBeenCalledOnce();
+});
+
 test("warns and requires explicit confirmation before changing providers", async () => {
   const updated = Object.assign(
     { ...TEST_SESSION_DETAIL },

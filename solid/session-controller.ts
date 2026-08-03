@@ -520,7 +520,7 @@ export class SessionController {
   setContextTokenCap(cap: number | null, compactFirst = false) {
     const mutate = (mutation: SessionMutation) => this.#mutateDetail(mutation);
     return setSessionContextTokenCap(
-      this.#view.value,
+      () => this.#view.value,
       cap,
       compactFirst,
       mutate,

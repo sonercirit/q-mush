@@ -353,6 +353,11 @@ export async function executeSessionMutation(
 
 export function sessionMutationError(error: unknown, action: string): string {
   const code = errorCode(error);
+  if (code === "invalid_context_token_cap") {
+    return error instanceof Error && error.message !== code
+      ? error.message
+      : "The context token cap is invalid. Refresh the session and try again.";
+  }
   if (code === "command_capacity_exceeded") {
     return (
       `The browser has too much pending session data to ${action}. ` +

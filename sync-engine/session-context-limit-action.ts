@@ -21,7 +21,10 @@ export function createSessionContextTokenCapAction(
       );
     } catch (error) {
       throw new RealtimeCommandError(
-        error instanceof Error ? error.message : "invalid_context_token_cap",
+        "invalid_context_token_cap",
+        error instanceof Error
+          ? error.message
+          : "The context token cap is invalid.",
       );
     }
     if (detail === undefined) throw new RealtimeCommandError("not_found");

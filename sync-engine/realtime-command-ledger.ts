@@ -35,6 +35,7 @@ interface RealtimeCommandSuccess {
 
 interface RealtimeCommandErrorAcknowledgement {
   readonly commandId: string;
+  readonly detail?: string;
   readonly error: string;
   readonly type: "command_error";
 }

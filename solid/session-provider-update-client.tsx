@@ -20,6 +20,7 @@ import {
   modelCredentialOptions,
   parseModelCredentialValue,
 } from "./session-model-options.ts";
+import { sessionMutationError } from "./session-mutations.ts";
 import { OpenRouterProviderSelect } from "./session-provider-select.tsx";
 import {
   providerCredentialValue,
@@ -138,8 +139,8 @@ export function SessionProviderUpdateEditor(
     setError(undefined);
     try {
       if (await props.onApply(draft())) setConfirming(false);
-    } catch {
-      setError("We could not change the session provider. Please try again.");
+    } catch (error) {
+      setError(sessionMutationError(error, "change the session provider"));
     } finally {
       setPending(false);
     }
