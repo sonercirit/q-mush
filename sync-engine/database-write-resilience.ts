@@ -9,12 +9,14 @@ import type { EngineHealthSnapshot } from "../shared/engine-health.ts";
 
 const SQLITE_FULL_CODE = "SQLITE_FULL";
 const SQLITE_FULL_ERRNO = 13;
-const CRITICAL_RETRY_DELAYS_MS = [100, 500, 2_000, 5_000] as const;
+const CRITICAL_RETRY_DELAYS_MS = [100, 400, 1_500] as const;
+const RECOVERY_PROBE_INTERVAL_MS = 30_000;
 const WRITE_STATEMENT_PATTERN = /^\s*(?:delete|insert|replace|update)\b/iu;
 
 export type DatabaseWritePriority = "critical" | "noncritical";
 
-type RetrySleep = (delay: number, signal: AbortSignal) => Promise<void>;
+type DatabaseWriteAttemptRunner = <Result>(operation: () => Result) => Result;
+type RetrySleep = (delay: number) => void;
 
 type DatabaseWriteAttempt<Result> =
   | { readonly result: Result; readonly status: "persisted" }
@@ -31,8 +33,23 @@ export interface StorageHealth {
 }
 
 export interface DatabaseWriteResilienceOptions {
+  readonly attempt?: DatabaseWriteAttemptRunner;
   readonly health: StorageHealth;
   readonly sleep?: RetrySleep;
+}
+
+export function isDiskFullFailure(error: unknown): boolean {
+  return error instanceof DiskFullError;
+}
+
+class DiskFullError extends Error {
+  override readonly cause: unknown;
+
+  constructor(cause: unknown) {
+    super("The database write failed because the disk is full");
+    this.name = "DiskFullError";
+    this.cause = cause;
+  }
 }
 
 function isDiskFullError(error: unknown): boolean {
@@ -63,61 +80,20 @@ function closedError(): Error {
   return new Error("Database write resilience has shut down");
 }
 
-function queueFullError(): Error {
-  return new Error(
-    "The critical database write retry queue is full; the write was not attempted",
-  );
-}
-
-function abortableSleep(delay: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal.aborted) {
-      reject(closedError());
-      return;
-    }
-    const timer = setTimeout(() => {
-      signal.removeEventListener("abort", abort);
-      resolve();
-    }, delay);
-    function abort(): void {
-      clearTimeout(timer);
-      reject(closedError());
-    }
-    signal.addEventListener("abort", abort, { once: true });
-  });
-}
-
 export class DatabaseWriteResilience {
-  readonly #controller = new AbortController();
+  readonly #attempt: DatabaseWriteAttemptRunner;
   readonly #health: StorageHealth;
   readonly #sleep: RetrySleep;
-  #activeRetry: Promise<unknown> | undefined;
   #closed = false;
-  #retriesCancelled = false;
-  #retrying = false;
 
   constructor(options: DatabaseWriteResilienceOptions) {
+    this.#attempt = options.attempt ?? ((operation) => operation());
     this.#health = options.health;
-    this.#sleep = options.sleep ?? abortableSleep;
-  }
-
-  async cancelRetries(): Promise<void> {
-    if (this.#retriesCancelled) {
-      return;
-    }
-    this.#retriesCancelled = true;
-    this.#controller.abort();
-    try {
-      await this.#activeRetry;
-    } catch {
-      // The caller that owns the retry receives the shutdown cancellation.
-    }
+    this.#sleep = options.sleep ?? Bun.sleepSync;
   }
 
   close(): void {
     this.#closed = true;
-    this.#retriesCancelled = true;
-    this.#controller.abort();
   }
 
   #throwIfClosed(): void {
@@ -126,25 +102,11 @@ export class DatabaseWriteResilience {
     }
   }
 
-  #restoreAndReturn<Result>(result: Result): Result {
-    this.#health.restore("disk_full");
-    return result;
-  }
-
-  #perform<Result>(
-    operation: () => Result,
-    retry: boolean,
-  ): DatabaseWriteAttempt<Result> {
+  #perform<Result>(operation: () => Result): DatabaseWriteAttempt<Result> {
     try {
-      return {
-        result: this.#restoreAndReturn(operation()),
-        status: "persisted",
-      };
+      return { result: this.#attempt(operation), status: "persisted" };
     } catch (error) {
       if (!isDiskFullError(error)) {
-        if (retry) {
-          this.#health.restore("disk_full");
-        }
         throw error;
       }
       return { error, status: "disk_full" };
@@ -154,77 +116,41 @@ export class DatabaseWriteResilience {
   run<Result>(
     priority: DatabaseWritePriority,
     operation: () => Result,
-  ): Promise<Result> | Result | undefined {
+  ): Result | undefined {
     this.#throwIfClosed();
-    // One caller owns the retry slot until its write is durably resolved. The
-    // asynchronous wait keeps the engine responsive without retaining an
-    // unbounded queue of later write payloads.
-    if (this.#retrying) {
-      if (priority === "noncritical") {
-        return undefined;
-      }
-      throw queueFullError();
-    }
-    const attempted = this.#perform(operation, false);
+    let attempted = this.#perform(operation);
     if (attempted.status === "persisted") {
       return attempted.result;
     }
     this.#health.degrade(
       "disk_full",
       priority === "critical"
-        ? "a critical database write ran out of space and is waiting to retry"
+        ? "a critical database write ran out of space and is retrying briefly"
         : "a non-critical database write was dropped because the disk is full",
       attempted.error,
     );
     if (priority === "noncritical") {
       return undefined;
     }
-    if (this.#retriesCancelled) {
-      throw attempted.error;
-    }
-    const retry = this.#retry(operation);
-    this.#activeRetry = retry;
-    const clear = () => {
-      if (this.#activeRetry === retry) {
-        this.#activeRetry = undefined;
-      }
-    };
-    void retry.then(clear, clear);
-    return retry;
-  }
 
-  async #retry<Result>(operation: () => Result): Promise<Result> {
-    this.#retrying = true;
-    let attempt = 0;
-    try {
-      while (!this.#closed) {
-        const delay =
-          CRITICAL_RETRY_DELAYS_MS[
-            Math.min(attempt, CRITICAL_RETRY_DELAYS_MS.length - 1)
-          ];
-        if (delay === undefined) {
-          throw new Error("The critical database retry policy is invalid");
-        }
-        await this.#sleep(delay, this.#controller.signal);
-        this.#throwIfClosed();
-        const attempted = this.#perform(operation, true);
-        switch (attempted.status) {
-          case "persisted":
-            return attempted.result;
-          case "disk_full":
-            break;
-        }
-        this.#health.degrade(
-          "disk_full",
-          "a critical database write retry still cannot persist to disk",
-          attempted.error,
-        );
-        attempt += 1;
+    // Bun SQLite and Drizzle are synchronous. Keeping retries synchronous is
+    // the only way to return an honest result to their callers. This bounded
+    // two-second window may delay the event loop (and signal callbacks), but it
+    // cannot monopolize it indefinitely; callers then receive DiskFullError.
+    for (const delay of CRITICAL_RETRY_DELAYS_MS) {
+      this.#sleep(delay);
+      attempted = this.#perform(operation);
+      if (attempted.status === "persisted") {
+        this.#health.restore("disk_full");
+        return attempted.result;
       }
-      throw closedError();
-    } finally {
-      this.#retrying = false;
     }
+    this.#health.degrade(
+      "disk_full",
+      "a critical database write still cannot persist after bounded retries",
+      attempted.error,
+    );
+    throw new DiskFullError(attempted.error);
   }
 }
 
@@ -330,7 +256,7 @@ export function installDatabaseWriteResilience(
       >[0],
     ) => Result,
     config?: { behavior?: "deferred" | "exclusive" | "immediate" },
-  ): Promise<Result> | Result | undefined {
+  ): Result | undefined {
     const execute = () => {
       resilientTransactionDepth += 1;
       try {
@@ -357,4 +283,44 @@ export function installDatabaseWriteResilience(
       }
     },
   });
+}
+
+export function startDatabaseRecoveryWatcher(
+  database: Database,
+  health: StorageHealth,
+): ReturnType<typeof setInterval> {
+  return setInterval(() => {
+    if (!health.snapshot?.().reasons.includes("disk_full")) {
+      return;
+    }
+    try {
+      // This health-only probe never stands in for a caller's write. The
+      // savepoint keeps it quick and leaves no durable application mutation.
+      const originalVersion = database
+        .query("PRAGMA user_version")
+        .values()[0]?.[0];
+      if (typeof originalVersion !== "number") {
+        throw new Error("The database recovery probe could not read its state");
+      }
+      database.run("SAVEPOINT q_mush_storage_recovery_probe");
+      database.run(
+        `PRAGMA user_version = ${String(originalVersion === 0 ? 1 : 0)}`,
+      );
+      database.run("ROLLBACK TO q_mush_storage_recovery_probe");
+      database.run("RELEASE q_mush_storage_recovery_probe");
+      health.restore("disk_full");
+    } catch (error) {
+      try {
+        database.run("ROLLBACK TO q_mush_storage_recovery_probe");
+        database.run("RELEASE q_mush_storage_recovery_probe");
+      } catch {
+        // The original probe error describes the storage condition.
+      }
+      health.degrade(
+        "disk_full",
+        "the database recovery probe still cannot write to disk",
+        error,
+      );
+    }
+  }, RECOVERY_PROBE_INTERVAL_MS);
 }

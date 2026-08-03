@@ -72,6 +72,19 @@ test("enabling incremental vacuum performs the guarded one-time rebuild", () => 
   );
 });
 
+function enableWithSpace(
+  fixture: ReturnType<typeof fileDatabase>,
+  availableBytes: number,
+  minimumFreeBytes: number,
+  warning: ReturnType<typeof warningRecorder>,
+): ReturnType<typeof enableIncrementalVacuum> {
+  return enableIncrementalVacuum(fixture.database.$client, {
+    availableBytes,
+    minimumFreeBytes,
+    warn: warning.warn,
+  });
+}
+
 test("low-space preflight skips a small rebuild below the five-GiB floor", () => {
   const fixture = fileDatabase("low-space.sqlite");
   const warning = warningRecorder();
@@ -79,13 +92,43 @@ test("low-space preflight skips a small rebuild below the five-GiB floor", () =>
   const minimumFreeBytes = 5 * 1024 ** 3;
   expect(statSync(fixture.path).size * 2).toBeLessThan(availableBytes);
 
-  const enabled = enableIncrementalVacuum(fixture.database.$client, {
+  const enabled = enableWithSpace(
+    fixture,
     availableBytes,
     minimumFreeBytes,
-    warn: warning.warn,
-  });
+    warning,
+  );
 
   expectSkipped(fixture, enabled, warning.messages, String(minimumFreeBytes));
+});
+
+test("low-space preflight skips a large rebuild when twice its size governs", () => {
+  const fixture = fileDatabase("large-low-space.sqlite");
+  const warning = warningRecorder();
+  const databaseBytes = 3 * 1024 ** 3;
+  const availableBytes = databaseBytes * 2 - 1;
+  const minimumFreeBytes = 5 * 1024 ** 3;
+  const pageSize = readSqlitePragmaNumber(
+    fixture.database.$client,
+    "page_size",
+  );
+  const pageCount = databaseBytes / pageSize;
+  const read = fixture.database.$client.query.bind(fixture.database.$client);
+  const pageCountQuery = fixture.database.$client.query("PRAGMA page_count");
+  vi.spyOn(pageCountQuery, "get").mockReturnValue({ page_count: pageCount });
+  vi.spyOn(fixture.database.$client, "query").mockImplementation((sql) =>
+    sql === "PRAGMA page_count" ? pageCountQuery : read(sql),
+  );
+
+  const enabled = enableWithSpace(
+    fixture,
+    availableBytes,
+    minimumFreeBytes,
+    warning,
+  );
+
+  expect(databaseBytes * 2).toBeGreaterThan(minimumFreeBytes);
+  expectSkipped(fixture, enabled, warning.messages, String(databaseBytes * 2));
 });
 
 test("a rebuild failure is reported and never blocks startup", () => {

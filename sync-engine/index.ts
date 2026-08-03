@@ -13,8 +13,13 @@ import {
   startIncrementalVacuum,
 } from "./database-vacuum.ts";
 import {
+  recordDatabaseRetryFixtureEvent,
+  startDatabaseRetryFixture,
+} from "./database-write-resilience-fixture.ts";
+import {
   DatabaseWriteResilience,
   installDatabaseWriteResilience,
+  startDatabaseRecoveryWatcher,
 } from "./database-write-resilience.ts";
 import { EngineHealth } from "./engine-health.ts";
 import { createGenericIntegrationFromEnvironment } from "./generic-provider.ts";
@@ -72,6 +77,7 @@ if (vacuum.rebuilt) {
 }
 const writeResilience = new DatabaseWriteResilience({ health });
 installDatabaseWriteResilience(database, writeResilience);
+const recoveryTimer = startDatabaseRecoveryWatcher(database.$client, health);
 const vacuumTimer = startIncrementalVacuum(database.$client);
 const [clientJavaScript, pages, runnerExecutables, stylesheet] =
   await Promise.all([
@@ -173,17 +179,22 @@ async function shutDown(): Promise<void> {
   }
 
   shuttingDown = true;
+  clearInterval(recoveryTimer);
   clearInterval(vacuumTimer);
   if (freeSpace.timer !== undefined) {
     clearInterval(freeSpace.timer);
   }
-  await writeResilience.cancelRetries();
   await sessions.prepareFinalShutdown();
+  recordDatabaseRetryFixtureEvent(Bun.env, "shutdown:prepared");
   process.send?.(FINAL_SHUTDOWN_PREPARED_MESSAGE);
+  recordDatabaseRetryFixtureEvent(Bun.env, "shutdown:acknowledged");
   await sessions.drain();
+  recordDatabaseRetryFixtureEvent(Bun.env, "shutdown:drained");
   await Promise.all([server.stop(), callbackServer?.stop()]);
+  recordDatabaseRetryFixtureEvent(Bun.env, "shutdown:servers-closed");
   writeResilience.close();
   database.$client.close();
+  recordDatabaseRetryFixtureEvent(Bun.env, "shutdown:database-closed");
 }
 
 process.on("SIGINT", () => {
@@ -192,5 +203,6 @@ process.on("SIGINT", () => {
 process.on("SIGTERM", () => {
   void shutDown();
 });
+startDatabaseRetryFixture(database, health, Bun.env);
 
 console.log(`Q Mush is running at ${server.url}`);
