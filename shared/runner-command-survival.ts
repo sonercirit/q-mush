@@ -1,3 +1,5 @@
+export type RunnerProcessCommit = () => void;
+
 export interface RunnerCommandSurvivalOptions {
   readonly log?: (message: string) => void;
   readonly maximumCancellationTombstones?: number;
@@ -51,16 +53,22 @@ export class RunnerCommandSurvivalState {
     return true;
   }
 
-  observeProcess(runnerId: string, processNonce?: string): boolean {
-    const sameProcess =
-      processNonce !== undefined &&
+  processMatches(runnerId: string, processNonce: string): boolean {
+    return (
       this.#runnerProcessNonces.has(runnerId) &&
-      this.#runnerProcessNonces.get(runnerId) === processNonce;
-    if (!sameProcess) {
-      this.#runnerProcessNonces.set(runnerId, processNonce);
-      this.#cancellationTombstones.delete(runnerId);
-    }
-    return sameProcess;
+      this.#runnerProcessNonces.get(runnerId) === processNonce
+    );
+  }
+
+  stageProcess(runnerId: string, processNonce?: string): RunnerProcessCommit {
+    const sameProcess =
+      processNonce !== undefined && this.processMatches(runnerId, processNonce);
+    return () => {
+      if (!sameProcess) {
+        this.#runnerProcessNonces.set(runnerId, processNonce);
+        this.#cancellationTombstones.delete(runnerId);
+      }
+    };
   }
 
   recordCancellation(runnerId: string, commandId: string): void {

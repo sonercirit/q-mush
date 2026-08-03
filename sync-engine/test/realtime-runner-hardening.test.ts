@@ -138,7 +138,7 @@ test("conflicting in-memory and durable restart gates reject every reconnect", a
   const { recovered, resumed } = restartRecords();
   const durableGate = unsetDurableGate();
   const realtime = connectedRunnerRealtimeTestIntegration({
-    deliverRunnerCommands: (_runnerId, _processNonce, deliver) =>
+    deliverRunnerCommands: ({ deliver }) =>
       durableGate.restartId === undefined
         ? true
         : deliver(runnerCommand("conflict-command", "session-conflict")),
@@ -313,7 +313,7 @@ test("queued command delivery failure fences the replacement and preserves resta
   const disconnected: string[] = [];
   const { recovered, resumed } = restartRecords();
   const realtime = connectedRunnerRealtimeTestIntegration({
-    deliverRunnerCommands: (_runnerId, _processNonce, deliver) =>
+    deliverRunnerCommands: ({ deliver }) =>
       deliver(runnerCommand("queued-command", "session-1")),
     pendingRunnerRestart: () => runnerRestartGate("restart-delivery"),
     ...realtimeRunnerLifecycle({
@@ -474,13 +474,12 @@ test("fresh process nonce fails disconnected commands before queued delivery", a
   });
   broker.disconnectRunner("runner-1");
   const realtime = connectedRunnerRealtimeTestIntegration({
-    deliverRunnerCommands: (
-      runnerId,
-      processNonce,
+    deliverRunnerCommands: ({
+      connectionGeneration: generation,
       deliver,
-      _deliverCancellation,
-      generation,
-    ) => {
+      processNonce,
+      runnerId,
+    }) => {
       broker.registerRunnerProcess(runnerId, processNonce);
       broker.deliverQueued(
         runnerId,

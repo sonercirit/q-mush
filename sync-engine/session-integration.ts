@@ -10,12 +10,16 @@ import type { SessionDetailReader } from "./session-command-types.ts";
 import type { SessionRealtimeCommands } from "./session-realtime-commands.ts";
 import type { DurableRunnerRestartGate } from "./session-restart-coordinator.ts";
 
+interface RunnerCommandDeliveryOptions {
+  readonly connectionGeneration?: number;
+  readonly deliver: (command: RunnerToolCommand) => boolean;
+  readonly deliverCancellation: (commandId: string) => boolean;
+  readonly processNonce: string | undefined;
+  readonly runnerId: string;
+}
+
 export type DeliverRunnerCommands = (
-  runnerId: string,
-  processNonce: string | undefined,
-  deliver: (command: RunnerToolCommand) => boolean,
-  deliverCancellation: (commandId: string) => boolean,
-  connectionGeneration?: number,
+  options: RunnerCommandDeliveryOptions,
 ) => boolean;
 
 export interface SessionIntegration extends SessionDetailReader {
@@ -23,6 +27,7 @@ export interface SessionIntegration extends SessionDetailReader {
   collection(request: Request): Response | Promise<Response>;
   compact(request: Request, sessionId: string): Promise<Response>;
   compaction(request: Request, sessionId: string): Promise<Response>;
+  commitRunnerProcess(runnerId: string, processNonce?: string): void;
   completeRunnerCommand(
     runnerId: string,
     commandId: string,

@@ -197,6 +197,10 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
     );
   }
 
+  commitRunnerProcess(runnerId: string, processNonce?: string): void {
+    this.resources.broker.commitRunnerProcess(runnerId, processNonce);
+  }
+
   completeRunnerCommand(
     runnerId: string,
     commandId: string,
@@ -205,38 +209,20 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
     return this.resources.broker.complete(runnerId, commandId, result);
   }
 
-  deliverRunnerCommands: DeliverRunnerCommands = (
-    runnerId,
-    processNonce,
+  deliverRunnerCommands: DeliverRunnerCommands = ({
+    connectionGeneration,
     deliver,
     deliverCancellation,
-    connectionGeneration,
-  ) => {
-    const sameProcess = this.resources.broker.registerRunnerProcess(
+    processNonce,
+    runnerId,
+  }) =>
+    this.resources.broker.deliverRunnerCommands(
       runnerId,
       processNonce,
-    );
-    if (
-      sameProcess &&
-      !this.resources.broker.deliverCancellationTombstones(
-        runnerId,
-        deliverCancellation,
-      )
-    ) {
-      return false;
-    }
-    let delivered = true;
-    this.resources.broker.deliverQueued(
-      runnerId,
-      (command) => {
-        const accepted = deliver(command);
-        delivered &&= accepted;
-        return accepted;
-      },
+      deliver,
+      deliverCancellation,
       connectionGeneration,
     );
-    return delivered;
-  };
 
   runnerConnectionGeneration(runnerId: string): number {
     return this.resources.broker.runnerConnectionGeneration(runnerId);

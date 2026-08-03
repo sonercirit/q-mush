@@ -493,7 +493,12 @@ export function sendRunnerConnectProposal(
         name: "runner",
         platform: "linux",
       },
-      encodedOptions,
+      {
+        ...encodedOptions,
+        ...(options.processNonce === undefined
+          ? {}
+          : { processNonce: options.processNonce }),
+      },
     ),
   );
 }

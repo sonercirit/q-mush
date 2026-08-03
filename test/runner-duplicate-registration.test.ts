@@ -200,13 +200,11 @@ test("a supervised relaunch supersedes a stale restart process without rejecting
         : false,
   });
   const realtime = connectedRunnerRealtimeTestIntegration({
-    deliverRunnerCommands: (
+    deliverRunnerCommands: ({
+      connectionGeneration: deliveredGeneration = connectionGeneration,
+      deliver: deliverQueued,
       runnerId,
-      _processNonce,
-      deliverQueued,
-      _deliverCancellation,
-      deliveredGeneration = connectionGeneration,
-    ) => {
+    }) => {
       broker.deliverQueued(runnerId, deliverQueued, deliveredGeneration);
       return true;
     },

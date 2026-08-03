@@ -183,13 +183,13 @@ export function finishRunnerOperational(
       : false;
   let delivered = false;
   try {
-    delivered = options.sessions.deliverRunnerCommands(
-      runner.id,
-      pending.processNonce,
+    delivered = options.sessions.deliverRunnerCommands({
+      connectionGeneration,
       deliver,
       deliverCancellation,
-      connectionGeneration,
-    );
+      processNonce: pending.processNonce,
+      runnerId: runner.id,
+    });
   } catch {
     // The replacement remains provisional until queued delivery succeeds.
   }
@@ -200,6 +200,7 @@ export function finishRunnerOperational(
     fenceRunnerRegistration(socket, data, "Runner command delivery failed");
     return;
   }
+  options.sessions.commitRunnerProcess(runner.id, pending.processNonce);
   if (replaced !== undefined) {
     options.sessions.replaceRunnerConnection(runner.id, replacedGeneration);
   }

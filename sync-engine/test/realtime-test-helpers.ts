@@ -299,6 +299,7 @@ class RealtimeTestSessionCommands implements SessionRealtimeCommands {
 export type RealtimeSessionOverrides = Partial<
   Pick<
     SessionIntegration,
+    | "commitRunnerProcess"
     | "completeRunnerCommand"
     | "deliverRunnerCommands"
     | "detailForUser"
@@ -325,6 +326,7 @@ export function realtimeTestSessions(
     collection: () => Promise.resolve(new Response()),
     compact: () => Promise.resolve(new Response()),
     compaction: () => Promise.resolve(new Response()),
+    commitRunnerProcess: () => undefined,
     completeRunnerCommand: () => false,
     continue: () => Promise.resolve(new Response()),
     deliverRunnerCommands: () => true,

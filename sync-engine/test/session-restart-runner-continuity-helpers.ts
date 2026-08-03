@@ -35,15 +35,16 @@ export function durableSessionRunnerReceipt(
   restartId?: string,
 ): string {
   if (
-    !setup.sessions.deliverRunnerCommands(
-      RUNNER_ID,
-      RUNNER_PROCESS_NONCE,
-      () => true,
-      () => true,
-    )
+    !setup.sessions.deliverRunnerCommands({
+      deliver: () => true,
+      deliverCancellation: () => true,
+      processNonce: RUNNER_PROCESS_NONCE,
+      runnerId: RUNNER_ID,
+    })
   ) {
     throw new Error("The connected runner process identity was unavailable");
   }
+  setup.sessions.commitRunnerProcess(RUNNER_ID, RUNNER_PROCESS_NONCE);
   const retained = setup.runners.preflightRegistration(
     RUNNER_TOKEN,
     RUNNER_METADATA,

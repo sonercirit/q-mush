@@ -55,6 +55,8 @@ interface RunnerConnectRecord {
   readonly processNonce: string | undefined;
 }
 
+type RunnerChild = Bun.Subprocess<"ignore", "pipe", "pipe">;
+
 function operationalSocket(
   sockets: ReadonlySet<Bun.ServerWebSocket<RunnerTestSocketData>>,
   required: keyof Pick<RunnerTestSocketData, "heartbeat" | "operational">,
@@ -218,9 +220,7 @@ function runnerServer(options: RunnerTestServerOptions = {}): Readonly<{
   };
 }
 
-function spawnRunner(
-  configurationPath: string,
-): Bun.Subprocess<"ignore", "pipe", "pipe"> {
+function spawnRunner(configurationPath: string): RunnerChild {
   return Bun.spawn(
     [
       process.execPath,
@@ -239,7 +239,7 @@ function spawnRunner(
 }
 
 function processTestSetup(options?: RunnerTestServerOptions): Readonly<{
-  readonly child: Bun.Subprocess<"ignore", "pipe", "pipe">;
+  readonly child: RunnerChild;
   readonly directory: string;
   readonly server: ReturnType<typeof runnerServer>;
 }> {
@@ -253,12 +253,22 @@ function processTestSetup(options?: RunnerTestServerOptions): Readonly<{
   return { child: spawnRunner(configurationPath), directory, server };
 }
 
+function terminateRunner(child: RunnerChild): Promise<number> {
+  child.kill();
+  return child.exited;
+}
+
+async function expectRegistered(
+  server: ReturnType<typeof runnerServer>,
+): Promise<void> {
+  expect(await waitUntil(() => server.registered(), 7_000)).toBe(true);
+}
+
 async function cleanupProcessTest(
   setup: ReturnType<typeof processTestSetup>,
 ): Promise<void> {
   if (setup.child.exitCode === null) {
-    setup.child.kill();
-    await setup.child.exited;
+    await terminateRunner(setup.child);
   }
   setup.server.stop();
   rmSync(setup.directory, { force: true, recursive: true });
@@ -331,6 +341,32 @@ test("a command executes once and reports through the reconnected socket", async
   }
 });
 
+test("separate runner process launches use distinct process nonces", async () => {
+  const setup = processTestSetup();
+  let replacement: ReturnType<typeof spawnRunner> | undefined;
+
+  try {
+    await expectRegistered(setup.server);
+    const firstNonce = setup.server.connections()[0]?.processNonce;
+    expect(firstNonce).toBeDefined();
+
+    await terminateRunner(setup.child);
+    replacement = spawnRunner(join(setup.directory, "runner.conf"));
+    expect(
+      await waitUntil(() => setup.server.connections().length === 2, 7_000),
+    ).toBe(true);
+
+    const secondNonce = setup.server.connections()[1]?.processNonce;
+    expect(secondNonce).toBeDefined();
+    expect(secondNonce).not.toBe(firstNonce);
+  } finally {
+    if (replacement?.exitCode === null) {
+      await terminateRunner(replacement);
+    }
+    await cleanupProcessTest(setup);
+  }
+});
+
 test("the runner process exits promptly when superseded mid-heartbeat", async () => {
   const setup = processTestSetup();
 
@@ -354,7 +390,7 @@ test("a restart runner retries a transient registration failure", async () => {
   const setup = processTestSetup({ transientRegistrationFailures: 1 });
 
   try {
-    expect(await waitUntil(() => setup.server.registered(), 7_000)).toBe(true);
+    await expectRegistered(setup.server);
     expect(setup.server.attempts()).toBe(2);
     expect(setup.child.exitCode).toBeNull();
   } finally {
