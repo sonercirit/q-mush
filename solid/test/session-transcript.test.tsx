@@ -431,41 +431,59 @@ test("renders persisted session errors distinctly", () => {
   expect(html).toContain("text-rose-200");
 });
 
+function renderedElementTexts(
+  html: string,
+  pattern: RegExp,
+): readonly string[] {
+  return [...html.matchAll(pattern)].map((match) =>
+    (match[1] ?? "").replace(/<[^>]*>/gu, "").replaceAll("&quot;", '"'),
+  );
+}
+
+const SLEEP_DURATION_ELEMENT_PATTERN =
+  /<p class="[^"]*text-sm text-cyan-100[^"]*">([^<]*)<\/p>/gu;
+const SLEEP_RESULT_TIMING_ELEMENT_PATTERN =
+  /<p class="[^"]*mt-1 text-xs text-slate-400[^"]*">([^<]*)<\/p>/gu;
+const JSON_CODE_ELEMENT_PATTERN =
+  /<pre[^>]*data-language="json"[^>]*>([\s\S]*?)<\/pre>/gu;
+
 test("renders sleep calls and results with human-readable durations", () => {
   const cases = [
     {
       arguments: '{"durationSeconds":59}',
-      expected: ["Duration: 59s"],
+      duration: "59s",
       id: "seconds-under-minute",
     },
     {
       arguments: '{"durationSeconds":60}',
-      expected: ["Duration: 1m"],
+      duration: "1m",
       id: "seconds-minute",
     },
     {
       arguments: '{"durationSeconds":61}',
-      expected: ["Duration: 1m 1s"],
+      duration: "1m 1s",
       id: "seconds-over-minute",
     },
     {
       arguments: '{"durationSeconds":3600}',
-      expected: ["Duration: 1h"],
+      duration: "1h",
       id: "seconds-hour",
     },
     {
       arguments: '{"durationSeconds":90}',
-      expected: ["1m 30s", "Actual: 1m 15s", "Expected: 1m 30s"],
+      duration: "1m 30s",
       id: "seconds",
       result:
         "Steering arrived; woke early (actual 75000 ms, expected 90000 ms).",
+      resultTiming: "Actual: 1m 15s · Expected: 1m 30s",
     },
     {
       arguments: '{"durationMs":1200000}',
-      expected: ["20m", "Actual: 20m", "Expected: 20m"],
+      duration: "20m",
       id: "legacy-milliseconds",
       result:
         "Slept for the full duration (actual 1200000 ms, expected 1200000 ms).",
+      resultTiming: "Actual: 20m · Expected: 20m",
     },
   ];
 
@@ -488,28 +506,40 @@ test("renders sleep calls and results with human-readable durations", () => {
     }
     const html = renderMessages(messages);
 
-    for (const expected of case_.expected) {
-      expect(html).toContain(expected);
-    }
+    expect(renderedElementTexts(html, SLEEP_DURATION_ELEMENT_PATTERN)).toEqual([
+      `Duration: ${case_.duration}`,
+    ]);
+    expect(
+      renderedElementTexts(html, SLEEP_RESULT_TIMING_ELEMENT_PATTERN),
+    ).toEqual(case_.resultTiming === undefined ? [] : [case_.resultTiming]);
     expect(html).not.toContain(case_.arguments.replaceAll('"', "&quot;"));
   }
 });
 
 test("falls back to raw sleep arguments when the duration is malformed", () => {
-  for (const [id, arguments_, expectedKey] of [
-    ["missing", '{"timeout":1}', "timeout"],
+  for (const [id, arguments_, expectedJson] of [
+    ["missing", '{"timeout":1}', '{\n  "timeout": 1\n}'],
     ["empty", "{}", "{}"],
-    ["seconds-string", '{"durationSeconds":"60"}', "durationSeconds"],
-    ["milliseconds-string", '{"durationMs":"60000"}', "durationMs"],
+    [
+      "seconds-string",
+      '{"durationSeconds":"60"}',
+      '{\n  "durationSeconds": "60"\n}',
+    ],
+    [
+      "milliseconds-string",
+      '{"durationMs":"60000"}',
+      '{\n  "durationMs": "60000"\n}',
+    ],
   ] as const) {
     const html = renderMessages([
       assistantToolCall({ arguments: arguments_, id, name: "sleep" }),
     ]);
 
     expect(html).toContain("Tool call · sleep");
-    expect(html).toContain('data-language="json"');
     expect(html).not.toContain("text-sm text-cyan-100");
-    expect(html).toContain(expectedKey);
+    expect(renderedElementTexts(html, JSON_CODE_ELEMENT_PATTERN)).toContain(
+      expectedJson,
+    );
   }
 });
 
