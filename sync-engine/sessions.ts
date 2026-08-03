@@ -251,7 +251,7 @@ class DrizzleSessionIntegration
     });
     const recover = (runnerId?: string): void => {
       recoverInterruptedSessions(
-        { actions: this.#actions, now: this.#now, store: this.#store },
+        { actions: this.#actions, ...this.#sessionRuntimeState() },
         runnerId,
       );
     };

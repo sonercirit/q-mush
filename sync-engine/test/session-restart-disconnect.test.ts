@@ -119,7 +119,7 @@ test("disconnect during an in-flight runner command persists the exact restart h
   completeNullRunnerCommand(broker, STORE_RUNNER_ID, "agent-file-command");
   await toolDispatched.promise;
   restartRequested = true;
-  broker.disconnectRunner(STORE_RUNNER_ID);
+  broker.disconnectRunner(STORE_RUNNER_ID, false);
   expect(
     broker.complete(STORE_RUNNER_ID, "in-flight-command", {
       output: "stale output",

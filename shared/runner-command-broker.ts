@@ -473,11 +473,20 @@ export class RunnerCommandBroker {
     return replacedGeneration + 1;
   }
 
-  disconnectRunner(runnerId: string): void {
-    for (const pending of [...this.#pending.values()]) {
-      if (pending.runnerId === runnerId && pending.phase === "in_flight") {
+  disconnectRunner(runnerId: string, retry = true): void {
+    const disconnected = [...this.#pending.values()].filter(
+      (pending) =>
+        pending.runnerId === runnerId && pending.phase === "in_flight",
+    );
+    if (!retry) {
+      for (const pending of disconnected) {
         this.#reject(pending.command.id, new RunnerDisconnectedError());
       }
+      return;
+    }
+    for (const pending of disconnected.toReversed()) {
+      pending.nextSequence = 0;
+      this.#requeue(pending);
     }
   }
 

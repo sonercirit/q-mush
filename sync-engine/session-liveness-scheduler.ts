@@ -4,12 +4,16 @@ import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type { SessionAgentActions } from "./session-agent-actions.ts";
 import type { SessionNotification } from "./session-creation.ts";
 import type { SessionDependencies } from "./session-dependencies.ts";
-import { SessionLivenessWatchdog } from "./session-liveness-watchdog.ts";
+import {
+  DEFAULT_SESSION_LIVENESS_GRACE_MS,
+  SessionLivenessWatchdog,
+} from "./session-liveness-watchdog.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
 import type { ShutdownInterruptedSessionStore } from "./session-shutdown-interrupted-store.ts";
 import type { SessionStore } from "./session-store.ts";
 
 const DEFAULT_SESSION_LIVENESS_INTERVAL_MS = 30_000;
+export const MIN_SESSION_LIVENESS_INTERVAL_MS = 10_000;
 
 interface SessionLivenessSchedulerOptions {
   readonly actions: Pick<
@@ -35,6 +39,9 @@ export function createSessionLivenessWatchdog(
     broker: options.broker,
     database: options.database,
     generateId: dependencies.randomId ?? createUuidV7,
+    ...(dependencies.liveness?.allowUnsafeTestTiming === true
+      ? { allowUnsafeTestTiming: true }
+      : {}),
     ...(dependencies.liveness?.graceMs === undefined
       ? {}
       : { graceMs: dependencies.liveness.graceMs }),
@@ -46,12 +53,27 @@ export function createSessionLivenessWatchdog(
   });
   const intervalMs =
     dependencies.liveness?.intervalMs ?? DEFAULT_SESSION_LIVENESS_INTERVAL_MS;
-  if (!Number.isSafeInteger(intervalMs) || intervalMs < 1) {
-    throw new RangeError("The session liveness interval must be positive");
+  if (
+    !Number.isSafeInteger(intervalMs) ||
+    intervalMs < 1 ||
+    (!dependencies.liveness?.allowUnsafeTestTiming &&
+      intervalMs < MIN_SESSION_LIVENESS_INTERVAL_MS)
+  ) {
+    throw new RangeError(
+      `The session liveness interval must be at least ${String(MIN_SESSION_LIVENESS_INTERVAL_MS)} ms`,
+    );
+  }
+  const graceMs =
+    dependencies.liveness?.graceMs ?? DEFAULT_SESSION_LIVENESS_GRACE_MS;
+  if (!dependencies.liveness?.allowUnsafeTestTiming && intervalMs > graceMs) {
+    throw new RangeError(
+      "The session liveness interval must not exceed the grace period",
+    );
   }
   const scan = () => {
     watchdog.scan();
   };
+  dependencies.liveness?.testScan?.(scan);
   if (dependencies.liveness?.setInterval === undefined) {
     setInterval(scan, intervalMs).unref();
   } else {

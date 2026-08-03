@@ -236,13 +236,19 @@ describe("runner command broker", () => {
     );
   });
 
-  test("rejects in-flight commands and fences late results when the authoritative runner disconnects", async () => {
+  test("requeues in-flight commands for an authoritative reconnect and fences late results", async () => {
     const { broker, result } = deliveredDispatch("disconnected-command");
 
     broker.disconnectRunner(RUNNER_ID);
 
-    await expect(result).rejects.toBeInstanceOf(RunnerDisconnectedError);
     expectRejectedCompletion(broker, "disconnected-command");
+    expect(broker.take(RUNNER_ID)?.id).toBe("disconnected-command");
+    await expectCompletedResult(
+      broker,
+      result,
+      "disconnected-command",
+      "reconnected",
+    );
   });
 
   test("leaves queued commands for an authoritative reconnect", async () => {

@@ -312,6 +312,7 @@ export type RealtimeSessionOverrides = Partial<
     | "runnerConnected"
     | "runnerConnectionGeneration"
     | "runnerDisconnected"
+    | "runnerOperational"
     | "runnerRestartReady"
   >
 >;
@@ -347,6 +348,7 @@ export function realtimeTestSessions(
     runnerConnected: () => undefined,
     runnerConnectionGeneration: () => 0,
     runnerDisconnected: () => undefined,
+    runnerOperational: () => undefined,
     runnerRestartReady: () => undefined,
     runnerRemoved: () => Promise.resolve(),
     stop: () => Promise.resolve(new Response()),
@@ -362,9 +364,9 @@ interface RealtimeRunnerLifecycleRecord {
 
 export function realtimeRunnerLifecycle(
   record: RealtimeRunnerLifecycleRecord,
-): Pick<RealtimeSessionOverrides, "runnerConnected" | "runnerDisconnected"> {
+): Pick<RealtimeSessionOverrides, "runnerDisconnected" | "runnerOperational"> {
   return {
-    runnerConnected: (runnerId) => {
+    runnerOperational: (runnerId) => {
       record.connected.push(runnerId);
     },
     runnerDisconnected: (runnerId) => {

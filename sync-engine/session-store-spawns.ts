@@ -141,8 +141,9 @@ const REPORTABLE_CHILD_STATUSES = ["completed", "failed", "stopped"] as const;
 export function pendingSpawnedSessions(
   database: AppDatabase,
   read: (userId: string, sessionId: string) => AgentSessionDetail | undefined,
+  limit?: number,
 ): readonly PendingSpawnedSession[] {
-  return database
+  const query = database
     .select({ id: agentSessions.id, userId: agentSessions.userId })
     .from(agentSessions)
     .where(
@@ -155,11 +156,12 @@ export function pendingSpawnedSessions(
         eq(agentSessions.runnerRequired, false),
       ),
     )
-    .all()
-    .flatMap(({ id, userId }) => {
-      const detail = read(userId, id);
-      return detail === undefined ? [] : [{ detail, userId }];
-    });
+    .$dynamic();
+  const rows = limit === undefined ? query.all() : query.limit(limit).all();
+  return rows.flatMap(({ id, userId }) => {
+    const detail = read(userId, id);
+    return detail === undefined ? [] : [{ detail, userId }];
+  });
 }
 
 export function spawnedSessionLink(

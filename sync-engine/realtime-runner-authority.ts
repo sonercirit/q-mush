@@ -197,6 +197,12 @@ export function finishRunnerOperational(
   if (replaced !== undefined) {
     options.sessions.replaceRunnerConnection(runner.id, replacedGeneration);
   }
+  options.sessions.runnerOperational(
+    runner.id,
+    pending.gate.lifecycle === "restart"
+      ? pending.gate.expectedRestartId
+      : undefined,
+  );
   data.committed = undefined;
   data.registration = undefined;
   fenceReplacedSocket(replaced, socket);

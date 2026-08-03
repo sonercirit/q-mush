@@ -9,9 +9,12 @@ import type { AgentModelFactory } from "./session-agent-models.ts";
 import type { SessionWorkspaceReader } from "./session-workspace.ts";
 
 interface SessionLivenessOptions {
+  /** Internal test-only escape hatch for deterministic sub-floor timers. */
+  readonly allowUnsafeTestTiming?: boolean;
   readonly graceMs?: number;
   readonly intervalMs?: number;
   readonly setInterval?: (callback: () => void, interval: number) => unknown;
+  readonly testScan?: (scan: () => void) => void;
 }
 
 export interface SessionDependencies {

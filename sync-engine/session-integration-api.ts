@@ -376,10 +376,6 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
   }
 
   runnerConnected(runnerId: string): void {
-    // Any in-flight command belonged to the connection being replaced. Its
-    // fenced socket can no longer return a result on the new authority.
-    this.resources.broker.disconnectRunner(runnerId);
-    this.resources.liveness.runnerConnected(runnerId);
     this.resources.restartCoordinator.recover(runnerId);
     void recoverAnsweredQuestions(this.resources.questionActions, runnerId);
     for (const userId of this.resources.store.queuedSessionOwnerIds()) {
@@ -405,6 +401,13 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
       return;
     }
     this.resources.restartCoordinator.recover(runnerId, restartId);
+  }
+
+  runnerOperational(runnerId: string, restartId?: string): void {
+    this.resources.liveness.runnerConnected(runnerId);
+    if (restartId !== undefined) {
+      this.resources.restartCoordinator.recover(runnerId, restartId);
+    }
   }
 
   async runnerRemoved(userId: string, runnerId: string): Promise<void> {

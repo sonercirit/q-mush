@@ -29,12 +29,15 @@ const RUNNER_METADATA = {
 
 type SessionSetup = ReturnType<typeof connectedSessionSetup>;
 
-export function durableSessionRunnerReceipt(setup: SessionSetup): string {
+export function durableSessionRunnerReceipt(
+  setup: SessionSetup,
+  restartId?: string,
+): string {
   const retained = setup.runners.preflightRegistration(
     RUNNER_TOKEN,
     RUNNER_METADATA,
   );
-  const prepared = retained?.prepare();
+  const prepared = retained?.prepare(restartId);
   if (prepared?.status !== "registered") {
     throw new Error("The connected runner receipt was unavailable");
   }
@@ -43,7 +46,8 @@ export function durableSessionRunnerReceipt(setup: SessionSetup): string {
 
 export function reconnectDurableSessionRunner(
   setup: SessionSetup,
-  activationReceipt: string,
+  activationReceipt: string | undefined,
+  restartId?: string,
 ) {
   const realtime = configuredRealtimeTestIntegration({
     runners: setup.runners,
@@ -63,9 +67,14 @@ export function reconnectDurableSessionRunner(
         platform: RUNNER_METADATA.platform,
       },
       {
-        activationReceipt: encodeRunnerActivationReceipt({
-          value: activationReceipt,
-        }),
+        ...(activationReceipt === undefined
+          ? {}
+          : {
+              activationReceipt: encodeRunnerActivationReceipt({
+                value: activationReceipt,
+              }),
+            }),
+        ...(restartId === undefined ? {} : { restartId }),
       },
     ),
   );

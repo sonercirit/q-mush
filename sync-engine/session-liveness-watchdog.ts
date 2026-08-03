@@ -15,7 +15,9 @@ import {
 } from "./session-store-reassignment.ts";
 import type { SessionStore } from "./session-store.ts";
 
-const DEFAULT_SESSION_LIVENESS_GRACE_MS = 5 * 60_000;
+export const MIN_SESSION_LIVENESS_GRACE_MS = 60_000;
+export const DEFAULT_SESSION_LIVENESS_GRACE_MS = 5 * 60_000;
+const SESSION_LIVENESS_CALLBACK_BATCH_SIZE = 100;
 
 interface SessionLivenessWatchdogOptions {
   readonly actions: Pick<
@@ -29,6 +31,7 @@ interface SessionLivenessWatchdogOptions {
   readonly database: AppDatabase;
   readonly generateId: IdGenerator;
   readonly graceMs?: number;
+  readonly allowUnsafeTestTiming?: boolean;
   readonly notify: SessionNotification;
   readonly now: () => number;
   readonly runtimes: Pick<SessionRuntimes, "activeForGeneration">;
@@ -41,11 +44,21 @@ interface SessionLivenessWatchdogOptions {
 
 interface MissingRuntime {
   readonly generation: number;
+  readonly reason: MissingRuntimeReason;
   missingSince: number;
 }
 
-const MISSING_RUNTIME_ERROR =
-  "Session failed: the liveness watchdog found no active runtime driving this running session";
+type MissingRuntimeReason =
+  "missing_runtime" | "queued_command" | "runner_disconnected";
+
+const LIVENESS_ERRORS: Readonly<Record<MissingRuntimeReason, string>> = {
+  missing_runtime:
+    "Session failed: the liveness watchdog found no active runtime driving this running session",
+  queued_command:
+    "Session failed: the liveness watchdog found a runner command that could not be dispatched during the recovery window",
+  runner_disconnected:
+    "Session failed: the assigned runner did not reconnect during the liveness recovery window",
+};
 
 export class SessionLivenessWatchdog {
   readonly #options: SessionLivenessWatchdogOptions;
@@ -54,8 +67,15 @@ export class SessionLivenessWatchdog {
 
   constructor(options: SessionLivenessWatchdogOptions) {
     const graceMs = options.graceMs ?? DEFAULT_SESSION_LIVENESS_GRACE_MS;
-    if (!Number.isSafeInteger(graceMs) || graceMs < 1) {
-      throw new RangeError("The session liveness grace must be positive");
+    if (
+      !Number.isSafeInteger(graceMs) ||
+      graceMs < 1 ||
+      (!options.allowUnsafeTestTiming &&
+        graceMs < MIN_SESSION_LIVENESS_GRACE_MS)
+    ) {
+      throw new RangeError(
+        `The session liveness grace must be at least ${String(MIN_SESSION_LIVENESS_GRACE_MS)} ms`,
+      );
     }
     this.#options = { ...options, graceMs };
   }
@@ -78,22 +98,27 @@ export class SessionLivenessWatchdog {
       ).map((session) => ({ ...session, status: "running" }));
     const runningIds = new Set(running.map(({ id }) => id));
     for (const session of running) {
-      if (this.#backedByLiveRuntime(session.id, session.userId)) {
+      const missingReason = this.#missingReason(session.id, session.userId);
+      if (missingReason === undefined) {
         this.#missing.delete(session.id);
         continue;
       }
       const missing = this.#missing.get(session.id);
-      if (missing?.generation !== session.executionGeneration) {
+      if (
+        missing?.generation !== session.executionGeneration ||
+        missing.reason !== missingReason
+      ) {
         this.#missing.set(session.id, {
           generation: session.executionGeneration,
           missingSince: now,
+          reason: missingReason,
         });
         continue;
       }
       if (now - missing.missingSince < (this.#options.graceMs ?? 0)) {
         continue;
       }
-      this.#fail(session, now);
+      this.#fail(session, now, missing.reason);
       this.#missing.delete(session.id);
     }
     for (const sessionId of this.#missing.keys()) {
@@ -102,34 +127,45 @@ export class SessionLivenessWatchdog {
       }
     }
     this.#options.actions.reportAll(
-      this.#options.store.pendingSpawnedSessions(),
+      this.#options.store.pendingSpawnedSessions(
+        SESSION_LIVENESS_CALLBACK_BATCH_SIZE,
+      ),
     );
   }
 
-  #backedByLiveRuntime(sessionId: string, userId: string): boolean {
+  #missingReason(
+    sessionId: string,
+    userId: string,
+  ): MissingRuntimeReason | undefined {
     const detail = this.#options.store.get(userId, sessionId);
     if (
       detail === undefined ||
       !this.#options.runtimes.activeForGeneration(sessionId, detail.generation)
     ) {
-      return false;
+      return "missing_runtime";
     }
     const commandPhase = this.#options.broker.sessionCommandPhase(sessionId);
-    return (
-      commandPhase === undefined ||
-      (commandPhase === "in_flight" &&
-        this.#connectedRunners.has(detail.runnerId))
-    );
+    if (commandPhase === "queued") {
+      return "queued_command";
+    }
+    return commandPhase === "in_flight" &&
+      !this.#connectedRunners.has(detail.runnerId)
+      ? "runner_disconnected"
+      : undefined;
   }
 
-  #fail(session: InterruptedStoredSession, now: number): void {
+  #fail(
+    session: InterruptedStoredSession,
+    now: number,
+    reason: MissingRuntimeReason,
+  ): void {
     if (
       !failInterruptedStoredSession(
         this.#options.database,
         session,
         this.#options.generateId(now),
         now,
-        MISSING_RUNTIME_ERROR,
+        LIVENESS_ERRORS[reason],
       )
     ) {
       return;
