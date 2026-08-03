@@ -501,7 +501,7 @@ test("falls back to raw sleep arguments when the duration is malformed", () => {
     ["empty", "{}", "{}"],
     ["seconds-string", '{"durationSeconds":"60"}', "durationSeconds"],
     ["milliseconds-string", '{"durationMs":"60000"}', "durationMs"],
-  ]) {
+  ] as const) {
     const html = renderMessages([
       assistantToolCall({ arguments: arguments_, id, name: "sleep" }),
     ]);
