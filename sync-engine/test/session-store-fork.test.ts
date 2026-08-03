@@ -16,6 +16,12 @@ import {
 const THINKING_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000045";
 const ASSISTANT_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000046";
 const TOOL_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000048";
+const TOKEN_USAGE = {
+  cacheWriteInputTokens: 0,
+  cachedInputTokens: 30,
+  inputTokens: 100,
+  outputTokens: 20,
+} as const;
 
 function prepareForkSource() {
   const setup = createStore();
@@ -34,16 +40,29 @@ function prepareForkSource() {
     { content: "Private reasoning", role: "thinking" },
     TEST_NOW + 2,
   );
-  setup.store.appendCurrentAgentMessage(
+  setup.store.appendRuntimeAgentMessages(
     STORE_SESSION_ID,
-    {
-      content: "I will inspect the file.",
-      role: "assistant",
-      toolCalls: [
-        { arguments: '{"path":"README.md"}', id: "call-1", name: "read" },
-      ],
-    },
+    [
+      {
+        content: "I will inspect the file.",
+        role: "assistant",
+        toolCalls: [
+          {
+            arguments: '{"path":"README.md"}',
+            id: "call-1",
+            name: "read",
+          },
+        ],
+      },
+    ],
     TEST_NOW + 3,
+    source.generation,
+    {
+      contextTokens: 100,
+      costBasis: null,
+      costUsd: null,
+      tokenUsage: TOKEN_USAGE,
+    },
   );
   setup.store.appendCurrentErrorMessage(
     STORE_SESSION_ID,
@@ -137,6 +156,30 @@ describe("session store forks", () => {
     }
     expect(fork.messages[0]?.images).toEqual(source.messages[0]?.images);
     expect(store.list(TEST_USER_ID)).toHaveLength(2);
+    database.$client.close();
+  });
+
+  test("preserves persisted assistant usage in a fork", () => {
+    const { database, store } = prepareForkSource();
+    const source = store.get(TEST_USER_ID, STORE_SESSION_ID);
+
+    const fork = requireForked(
+      store.fork(
+        TEST_USER_ID,
+        STORE_SESSION_ID,
+        ASSISTANT_MESSAGE_ID,
+        TEST_WORKSPACE_ID,
+        TEST_NOW + 7,
+      ),
+    );
+
+    const expected = { ...TOKEN_USAGE, reportedStepCount: 1, stepCount: 1 };
+    expect(source?.tokenUsage).toEqual(expected);
+    expect(fork.tokenUsage).toEqual(expected);
+    expect(fork.segmentTokenUsage).toEqual(expected);
+    expect(
+      fork.messages.find(({ role }) => role === "assistant")?.tokenUsage,
+    ).toEqual(TOKEN_USAGE);
     database.$client.close();
   });
 

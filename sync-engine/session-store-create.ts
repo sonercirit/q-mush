@@ -274,11 +274,14 @@ function forkMessageValues(message: AgentSessionMessage) {
   const { content, toolCallId, toolCalls, toolName } = message;
   switch (message.role) {
     case "assistant":
-      return recordedMessageValues({
-        content,
-        role: "assistant",
-        toolCalls,
-      });
+      return recordedMessageValues(
+        {
+          content,
+          role: "assistant",
+          toolCalls,
+        },
+        message.tokenUsage,
+      );
     case "tool":
       if (toolCallId === null || toolName === null) {
         throw new Error("A stored tool result has no tool identity");

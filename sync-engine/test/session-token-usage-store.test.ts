@@ -15,6 +15,13 @@ const TOKEN_USAGE = {
   outputTokens: 200,
 } as const;
 
+const NEXT_SEGMENT_TOKEN_USAGE = {
+  cacheWriteInputTokens: 25,
+  cachedInputTokens: 200,
+  inputTokens: 400,
+  outputTokens: 100,
+} as const;
+
 test("persists model-step usage on its assistant message and aggregates it", () => {
   const setup = runningStore();
   setup.store.appendRuntimeAgentMessages(
@@ -55,5 +62,72 @@ test("persists model-step usage on its assistant message and aggregates it", () 
       .all()
       .at(-1),
   ).toEqual({ cached: 600, input: 1_000, output: 200, written: 50 });
+  setup.database.$client.close();
+});
+
+test("aggregates partial usage coverage by each message's segment", () => {
+  const setup = runningStore();
+  setup.store.appendRuntimeAgentMessages(
+    STORE_SESSION_ID,
+    [{ content: "First reported step", role: "assistant", toolCalls: [] }],
+    TEST_NOW + 2,
+    0,
+    {
+      contextTokens: 1_000,
+      costBasis: null,
+      costUsd: null,
+      tokenUsage: TOKEN_USAGE,
+    },
+  );
+  setup.store.appendCurrentAgentMessage(
+    STORE_SESSION_ID,
+    { content: "First unreported step", role: "assistant", toolCalls: [] },
+    TEST_NOW + 3,
+  );
+  setup.store.compactCurrentConversation(
+    STORE_SESSION_ID,
+    "Continue in the next segment",
+    { contextTokens: null, costBasis: null, costUsd: null },
+    TEST_NOW + 4,
+  );
+  setup.store.appendRuntimeAgentMessages(
+    STORE_SESSION_ID,
+    [{ content: "Second reported step", role: "assistant", toolCalls: [] }],
+    TEST_NOW + 5,
+    0,
+    {
+      contextTokens: 400,
+      costBasis: null,
+      costUsd: null,
+      tokenUsage: NEXT_SEGMENT_TOKEN_USAGE,
+    },
+  );
+  setup.store.appendCurrentAgentMessage(
+    STORE_SESSION_ID,
+    { content: "Second unreported step", role: "assistant", toolCalls: [] },
+    TEST_NOW + 6,
+  );
+
+  const detail = setup.store.get(TEST_USER_ID, STORE_SESSION_ID);
+  expect(detail?.tokenUsage).toEqual({
+    cacheWriteInputTokens: 75,
+    cachedInputTokens: 800,
+    inputTokens: 1_400,
+    outputTokens: 300,
+    reportedStepCount: 2,
+    stepCount: 4,
+  });
+  expect(detail?.segmentTokenUsage).toEqual({
+    ...NEXT_SEGMENT_TOKEN_USAGE,
+    reportedStepCount: 1,
+    stepCount: 2,
+  });
+  expect(
+    setup.store.history(TEST_USER_ID, STORE_SESSION_ID, null)?.tokenUsage,
+  ).toEqual({
+    ...TOKEN_USAGE,
+    reportedStepCount: 1,
+    stepCount: 2,
+  });
   setup.database.$client.close();
 });
