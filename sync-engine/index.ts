@@ -1,9 +1,27 @@
-import { createDatabase } from "../shared/database.ts";
 import { readDatabasePath } from "../shared/database/config.ts";
 import { FINAL_SHUTDOWN_PREPARED_MESSAGE } from "../shared/development-shutdown.ts";
 import { createGoogleAuthFromEnvironment } from "./auth.ts";
 import { createBraveSearchSkillFromEnvironment } from "./brave-search.ts";
 import { createCoreIntegrationResources } from "./core-integration-resources.ts";
+import {
+  openDatabaseAndCleanupRepairSnapshots,
+  startDatabaseFreeSpaceMonitor,
+} from "./database-storage-maintenance.ts";
+import {
+  databaseVacuumSafetyBytes,
+  enableIncrementalVacuum,
+  startIncrementalVacuum,
+} from "./database-vacuum.ts";
+import {
+  recordDatabaseRetryFixtureEvent,
+  startDatabaseRetryFixture,
+} from "./database-write-resilience-fixture.ts";
+import {
+  DatabaseWriteResilience,
+  installDatabaseWriteResilience,
+  startDatabaseRecoveryWatcher,
+} from "./database-write-resilience.ts";
+import { EngineHealth } from "./engine-health.ts";
 import { createGenericIntegrationFromEnvironment } from "./generic-provider.ts";
 import {
   createOpenAiIntegrationFromEnvironment,
@@ -30,7 +48,36 @@ import {
 import { createSessionsChangedPublisher } from "./session-credential-reassignment-realtime.ts";
 import { createSessionIntegration } from "./sessions.ts";
 
-const database = createDatabase(readDatabasePath(Bun.env));
+const databasePath = readDatabasePath(Bun.env);
+const health = new EngineHealth();
+const database = openDatabaseAndCleanupRepairSnapshots(databasePath, {
+  health,
+});
+// Run the free-space preflight before the optional full VACUUM rebuild.
+const vacuumRequiredBytes = databaseVacuumSafetyBytes(database.$client);
+const freeSpace = startDatabaseFreeSpaceMonitor(
+  databasePath,
+  health,
+  vacuumRequiredBytes,
+);
+const vacuum = enableIncrementalVacuum(database.$client, {
+  availableBytes: freeSpace.availableBytes,
+  minimumFreeBytes: freeSpace.minimumFreeBytes,
+});
+if (vacuum.skipped) {
+  health.degrade(
+    "low_disk_space",
+    `incremental-vacuum rebuild needs at least ${String(vacuumRequiredBytes)} free bytes and was skipped`,
+  );
+}
+if (vacuum.rebuilt) {
+  console.log(
+    "Q Mush rebuilt the database once to enable incremental vacuum maintenance",
+  );
+}
+const writeResilience = new DatabaseWriteResilience({ health });
+installDatabaseWriteResilience(database, writeResilience);
+const vacuumTimer = startIncrementalVacuum(database.$client);
 const [clientJavaScript, pages, runnerExecutables, stylesheet] =
   await Promise.all([
     buildClientJavaScript(),
@@ -71,8 +118,15 @@ const sessions = createSessionIntegration(
   { generic, openai: openAi, openrouter: openRouter },
   { braveSearch, database, realtime: realtimeHub, workspaces },
 );
+const recoveryTimer = startDatabaseRecoveryWatcher(
+  database.$client,
+  health,
+  () => sessions.reconcileDatabaseWrites(),
+  () => sessions.hasPendingDatabaseWrites(),
+);
 const realtime = createRealtimeIntegration({
   auth: googleAuth,
+  health,
   hub: realtimeHub,
   runnerVersion: runnerExecutables.version,
   runners,
@@ -130,11 +184,22 @@ async function shutDown(): Promise<void> {
   }
 
   shuttingDown = true;
+  clearInterval(recoveryTimer);
+  clearInterval(vacuumTimer);
+  if (freeSpace.timer !== undefined) {
+    clearInterval(freeSpace.timer);
+  }
   await sessions.prepareFinalShutdown();
+  recordDatabaseRetryFixtureEvent(Bun.env, "shutdown:prepared");
   process.send?.(FINAL_SHUTDOWN_PREPARED_MESSAGE);
+  recordDatabaseRetryFixtureEvent(Bun.env, "shutdown:acknowledged");
   await sessions.drain();
+  recordDatabaseRetryFixtureEvent(Bun.env, "shutdown:drained");
   await Promise.all([server.stop(), callbackServer?.stop()]);
+  recordDatabaseRetryFixtureEvent(Bun.env, "shutdown:servers-closed");
+  writeResilience.close();
   database.$client.close();
+  recordDatabaseRetryFixtureEvent(Bun.env, "shutdown:database-closed");
 }
 
 process.on("SIGINT", () => {
@@ -143,5 +208,6 @@ process.on("SIGINT", () => {
 process.on("SIGTERM", () => {
   void shutDown();
 });
+startDatabaseRetryFixture(database, health, Bun.env);
 
 console.log(`Q Mush is running at ${server.url}`);

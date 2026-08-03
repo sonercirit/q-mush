@@ -1,5 +1,6 @@
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { isAskQuestionsPause } from "./ask-questions-pause.ts";
+import { isDiskFullFailure } from "./database-write-resilience.ts";
 import type { SessionAgentActions } from "./session-agent-actions.ts";
 import type { SessionNotification } from "./session-creation.ts";
 import type { FinishSession } from "./session-launcher.ts";
@@ -12,12 +13,24 @@ function safeErrorMessage(error: unknown): string {
   return `Session failed: ${message.slice(0, 500)}`;
 }
 
+type FinishResult = [error?: unknown, recovered?: RestartHandoffIdentity];
+
+export interface SessionFailureReconciliation {
+  readonly detail: AgentSessionDetail;
+  readonly error: unknown;
+  readonly recovered?: RestartHandoffIdentity;
+  readonly userId: string;
+}
+
 interface SessionFinisherOptions {
   readonly actions: Pick<SessionAgentActions, "finished" | "stopChildren">;
   readonly cleanup?: (detail: AgentSessionDetail) => void;
   readonly launchQueued?: (userId: string) => Promise<void> | void;
   readonly notify: SessionNotification;
   readonly now: typeof Date.now;
+  readonly reconciliationFailed?: (
+    failure: SessionFailureReconciliation,
+  ) => void;
   readonly settled?: (sessionId: string) => Promise<void>;
   readonly store: SessionStore;
 }
@@ -45,8 +58,30 @@ export class SessionFinisher {
   finish(
     detail: AgentSessionDetail,
     userId: string,
-    ...result: [error?: unknown, recovered?: RestartHandoffIdentity]
+    ...result: FinishResult
   ): ReturnType<FinishSession> {
+    try {
+      this.#finish(detail, userId, result);
+    } catch (settlementError) {
+      const [error, recovered] = result;
+      if (error !== undefined && isDiskFullFailure(settlementError)) {
+        this.#options.reconciliationFailed?.({
+          detail,
+          error,
+          ...(recovered === undefined ? {} : { recovered }),
+          userId,
+        });
+        return;
+      }
+      throw settlementError;
+    }
+  }
+
+  #finish(
+    detail: AgentSessionDetail,
+    userId: string,
+    result: FinishResult,
+  ): void {
     const notifyFinished = () => {
       this.#afterNotify(detail, userId, "finished");
     };
@@ -88,39 +123,41 @@ export class SessionFinisher {
       }
     }
     if (recovered !== undefined) {
-      const settled = this.#options.store.settleRestartHandoff(
-        userId,
-        recovered,
+      const settlement =
         errorMessage === undefined
-          ? { status: "idle" }
-          : { error: errorMessage, status: "failed" },
-        now,
-      );
+          ? { status: "idle" as const }
+          : { error: errorMessage, status: "failed" as const };
+      const settled =
+        this.#options.store.settleRestartHandoff(
+          userId,
+          recovered,
+          settlement,
+          now,
+        ) ||
+        (settlement.status === "failed" &&
+          this.#options.store.failRestartHandoff(
+            userId,
+            recovered,
+            settlement.error,
+            now,
+          ));
       if (!settled) {
         return;
+      }
+      if (settlement.status === "failed") {
+        this.#options.actions.stopChildren(detail, userId);
       }
       notifyFinished();
       return;
     }
     if (errorMessage !== undefined) {
-      this.#options.store.appendRuntimeErrorMessage(
+      const failed = this.#options.store.settleRuntimeFailure(
         detail.id,
         errorMessage,
         now,
         detail.generation,
       );
-    }
-    if (errorMessage !== undefined) {
-      if (
-        this.#options.store.transitionRuntime(
-          detail.id,
-          "failed",
-          now,
-          detail.generation,
-        )
-      ) {
-        this.#options.actions.stopChildren(detail, userId);
-      }
+      if (failed) this.#options.actions.stopChildren(detail, userId);
       notifyFinished();
       return;
     }

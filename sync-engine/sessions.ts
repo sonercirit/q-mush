@@ -44,6 +44,7 @@ import {
   type SessionDependencies,
 } from "./session-dependencies.ts";
 import { SessionExecutionCleanup } from "./session-execution-cleanup.ts";
+import { SessionFailureReconciler } from "./session-failure-reconciler.ts";
 import { SessionFinisher } from "./session-finisher.ts";
 import {
   readCreateSession,
@@ -103,6 +104,7 @@ class DrizzleSessionIntegration
   readonly #launch: SessionLaunchBoundary["launch"];
   readonly #executionCleanup: SessionExecutionCleanup;
   readonly #finisher: SessionFinisher;
+  readonly #failureReconciler = new SessionFailureReconciler();
   readonly #runners: RunnerIntegration;
   readonly #runtimes = new SessionRuntimes();
   readonly #restart;
@@ -185,7 +187,10 @@ class DrizzleSessionIntegration
         void this.#executionCleanup.cleanup(detail);
       },
       launchQueued: this.#launchQueuedSessions,
-      settled: (sessionId) => this.#runtimes.cleared(sessionId),
+      reconciliationFailed: (failure) => {
+        this.#failureReconciler.pending(failure);
+      },
+      settled: this.#runtimes.cleared.bind(this.#runtimes),
       ...this.#sessionState(),
     });
     this.#questionActions = {
@@ -429,6 +434,14 @@ class DrizzleSessionIntegration
 
   attachmentFallbacks(request: Request): Promise<Response> | Response {
     return this.#attachmentFallbacks.api.collection(request);
+  }
+
+  hasPendingDatabaseWrites(): boolean {
+    return this.#failureReconciler.hasPending();
+  }
+
+  reconcileDatabaseWrites(): boolean {
+    return this.#failureReconciler.reconcile(this.#finisher);
   }
 
   onChange(listener: (userId: string, sessionId: string) => void): void {

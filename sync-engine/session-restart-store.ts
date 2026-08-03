@@ -14,7 +14,7 @@ import {
 import { readNonNegativeSafeInteger } from "../shared/validation.ts";
 import type { SessionExecutionAuthority } from "./session-execution-authority.ts";
 import { retireManualCompactionOperations } from "./session-manual-compaction-query.ts";
-import { failRestartSession } from "./session-restart-failure-store.ts";
+import { settleSessionFailure } from "./session-restart-failure-store.ts";
 import { restartHandoffValues } from "./session-restart-handoff.ts";
 import { runnerSessionCondition } from "./session-runner-condition.ts";
 import {
@@ -465,7 +465,7 @@ export class RestartHandoffStore {
         .sync()?.executionGeneration;
       return generation === undefined
         ? false
-        : failRestartSession(
+        : settleSessionFailure(
             {
               condition,
               database: transaction,
@@ -488,7 +488,7 @@ export class RestartHandoffStore {
   ): boolean {
     return (
       this.#withExactHandoff(userId, identity, "queued", (transaction, exact) =>
-        failRestartSession(
+        settleSessionFailure(
           {
             condition: exactHandoffCondition(exact, "queued", userId),
             database: transaction,

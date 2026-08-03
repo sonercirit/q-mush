@@ -14,8 +14,10 @@ import {
 import type { CompactionUsage } from "./session-compaction-usage.ts";
 import { compactStoredConversation } from "./session-compaction.ts";
 import { storedRecordedMessages } from "./session-message-values.ts";
+import { settleSessionFailure } from "./session-restart-failure-store.ts";
 import {
   runningCondition,
+  sessionGenerationCondition,
   storedParentExecutionGeneration,
 } from "./session-store-persistence.ts";
 import { requireRunningSessionUserId } from "./session-store-state.ts";
@@ -283,6 +285,32 @@ export function appendRuntimeAgentMessages(
       });
     },
   );
+}
+
+export function settleRuntimeFailure(
+  options: RuntimeWriteTarget & { readonly content: string },
+): boolean {
+  return options.resources.database.transaction((transaction) => {
+    const condition = sessionGenerationCondition(
+      { id: options.sessionId, status: ["queued", "running"] },
+      options.generation,
+    );
+    const selectedUser = transaction.query.agentSessions
+      .findFirst({ columns: { userId: true }, where: condition })
+      .sync();
+    return (
+      selectedUser !== undefined &&
+      settleSessionFailure(
+        {
+          ...runtimeWriteTarget(options),
+          condition,
+          database: transaction,
+          userId: selectedUser.userId,
+        },
+        options.content,
+      )
+    );
+  });
 }
 
 export function appendRuntimeErrorMessage(

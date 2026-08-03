@@ -8,6 +8,7 @@ import {
   USER_REALTIME_MAX_PAYLOAD_LENGTH,
   UserRealtimeProtocolError,
 } from "../shared/user-realtime-protocol.ts";
+import type { EngineHealth } from "./engine-health.ts";
 import { RealtimeCommandLedger } from "./realtime-command-ledger.ts";
 import type { RealtimeSocket } from "./realtime-hub.ts";
 import { readRunnerClientMessage } from "./realtime-protocol.ts";
@@ -41,6 +42,7 @@ export interface RealtimeIntegrationOptions extends Omit<
   RealtimeRegistrationDependencies,
   "sendCommand"
 > {
+  readonly health?: EngineHealth;
   readonly ledger?: RealtimeCommandLedger;
   readonly workspaceExists?: (userId: string, workspaceId: string) => boolean;
 }
@@ -195,6 +197,18 @@ export function createRealtimeIntegration(
   const setIntervalTimer = options.setInterval ?? setInterval;
   const userAuthTimers = new WeakMap<RealtimeSocket, number>();
   const runnerRestarts = new Map<string, RunnerRestartState>();
+  options.health?.onChange((health) => {
+    for (const userId of options.hub.userIds()) {
+      options.hub.publishUser(userId, { health, type: "health" });
+      for (const workspaceId of options.hub.userWorkspaces(userId)) {
+        options.hub.publishUser(
+          userId,
+          { health, type: "health" },
+          workspaceId,
+        );
+      }
+    }
+  });
   const publishSessions = createWorkspaceSnapshotPublisher(
     options.hub,
     "sessions",
@@ -501,6 +515,19 @@ export function createRealtimeIntegration(
         }
         if (!safeSend(socket, JSON.stringify({ instanceId, type: "ready" }))) {
           closeServerError(socket, "Realtime ready message failed");
+          return;
+        }
+        if (
+          options.health !== undefined &&
+          !safeSend(
+            socket,
+            JSON.stringify({
+              health: options.health.snapshot(),
+              type: "health",
+            }),
+          )
+        ) {
+          closeServerError(socket, "Realtime health message failed");
           return;
         }
         if (!sendUserSnapshots(socket, user.id, socket.data.workspaceId)) {

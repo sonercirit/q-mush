@@ -33,6 +33,8 @@ export interface SessionIntegration extends SessionDetailReader {
   directories(request: Request, runnerId: string): Promise<Response>;
   drain(): Promise<void>;
   prepareFinalShutdown(): Promise<void>;
+  hasPendingDatabaseWrites(): boolean;
+  reconcileDatabaseWrites(): boolean;
   item(request: Request, sessionId: string): Response;
   listForUser(
     userId: string,

@@ -1,6 +1,7 @@
-import { updatedAuditFields } from "../shared/audit.ts";
+import { agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID } from "../shared/ids.ts";
 import type { SessionSystemWriteTarget } from "./session-pending-inputs.ts";
+import { terminalSessionValues } from "./session-store-persistence.ts";
 import {
   errorMessageValues,
   insertStoredMessage,
@@ -14,16 +15,21 @@ export interface RestartFailureTarget extends SessionSystemWriteTarget {
   readonly generation: number;
 }
 
-export function failRestartSession(
+export function settleSessionFailure(
   options: RestartFailureTarget,
   error: string,
 ): boolean {
-  const failedValues = {
-    ...updatedAuditFields(SYSTEM_ID, options.now),
-    interruptedHandoff: null,
-    restartHandoff: null,
-    status: "failed" as const,
-  };
+  const timing = options.database
+    .select({
+      activeDurationMs: agentSessions.activeDurationMs,
+      activeStartedAt: agentSessions.activeStartedAt,
+    })
+    .from(agentSessions)
+    .where(options.condition)
+    .get();
+  if (timing === undefined) {
+    return false;
+  }
   if (
     !updateSessionAndEndGenerationTurn({
       condition: options.condition,
@@ -31,7 +37,7 @@ export function failRestartSession(
       generation: options.generation,
       now: options.now,
       sessionId: options.sessionId,
-      values: failedValues,
+      values: terminalSessionValues(timing, "failed", options.now),
     })
   ) {
     return false;

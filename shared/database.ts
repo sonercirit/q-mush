@@ -48,6 +48,7 @@ const databaseSchema = {
 };
 export type AppDatabase = BunSQLiteDatabase<typeof databaseSchema> & {
   readonly $client: Database;
+  noncriticalWrite(action: () => void): void;
 };
 
 export function createDatabase(path: string): AppDatabase {
@@ -56,7 +57,11 @@ export function createDatabase(path: string): AppDatabase {
   }
 
   const client = new Database(path, { create: true });
-  const database = drizzle(client, { schema: databaseSchema });
+  const database = Object.assign(drizzle(client, { schema: databaseSchema }), {
+    noncriticalWrite(action: () => void): void {
+      action();
+    },
+  });
 
   try {
     // Drizzle wraps migrations in a transaction, where SQLite ignores changes

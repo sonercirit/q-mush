@@ -62,6 +62,13 @@ function shutdownServerOptions(
   directory: string,
   triggerPath: string,
   command: readonly string[],
+  overrides: Readonly<
+    Partial<{
+      shutdownForceMilliseconds: number;
+      shutdownGraceMilliseconds: number;
+      shutdownPreparationMilliseconds: number;
+    }>
+  > = {},
 ) {
   return {
     command,
@@ -70,6 +77,7 @@ function shutdownServerOptions(
     shutdownForceMilliseconds: 200,
     shutdownGraceMilliseconds: 80,
     shutdownPreparationMilliseconds: 500,
+    ...overrides,
   };
 }
 
@@ -258,6 +266,8 @@ process.on("SIGTERM", () => {
   }
 });
 
+const PROJECT_ROOT = join(import.meta.dirname, "..", "..");
+const INDEX_PATH = join(PROJECT_ROOT, "sync-engine", "index.ts");
 const RECOVERY_FIXTURE_PATH = join(
   import.meta.dirname,
   "fixtures",
@@ -298,6 +308,32 @@ function startRecoveryFixture(
   );
 }
 
+function maintenancePaths(
+  directory: string,
+  stateName: string,
+): { readonly databasePath: string; readonly statePath: string } {
+  return {
+    databasePath: join(directory, "fixture.sqlite"),
+    statePath: join(directory, stateName),
+  };
+}
+
+async function withMaintenancePaths(
+  prefix: string,
+  stateName: string,
+  run: (
+    directory: string,
+    triggerPath: string,
+    databasePath: string,
+    statePath: string,
+  ) => Promise<void>,
+): Promise<void> {
+  await useDevelopmentServer(prefix, async (directory, triggerPath) => {
+    const paths = maintenancePaths(directory, stateName);
+    await run(directory, triggerPath, paths.databasePath, paths.statePath);
+  });
+}
+
 async function expectRecoveredSession(
   databasePath: string,
   statePath: string,
@@ -315,21 +351,78 @@ async function useRecoveryFixture(
   mode: "start" | "start-no-ack",
   stop: (server: DevelopmentServer) => Promise<void>,
 ): Promise<void> {
-  await useDevelopmentServer(prefix, async (directory, triggerPath) => {
-    const databasePath = join(directory, "fixture.sqlite");
-    const statePath = join(directory, "state.json");
-    const server = startRecoveryFixture(
-      directory,
-      triggerPath,
-      databasePath,
-      statePath,
-      mode,
-    );
-    await waitForFile(statePath);
-    await stop(server);
-    await expectRecoveredSession(databasePath, statePath);
-  });
+  await withMaintenancePaths(
+    prefix,
+    "state.json",
+    async (directory, triggerPath, databasePath, statePath) => {
+      const server = startRecoveryFixture(
+        directory,
+        triggerPath,
+        databasePath,
+        statePath,
+        mode,
+      );
+      await waitForFile(statePath);
+      await stop(server);
+      await expectRecoveredSession(databasePath, statePath);
+    },
+  );
 }
+
+test("production shutdown resumes after a bounded database retry", async () => {
+  await withMaintenancePaths(
+    "q-mush-dev-bounded-retry-test-",
+    "bounded-retry.txt",
+    async (directory, triggerPath, databasePath, statePath) => {
+      const server = startDevelopmentServer(
+        shutdownServerOptions(
+          directory,
+          triggerPath,
+          [
+            "/bin/sh",
+            "-c",
+            'cd "$1" && DATABASE_PATH="$2" PORT=0 Q_MUSH_TEST_DATABASE_BOUNDED_RETRY_STATE_PATH="$3" exec "$4" "$5"',
+            "q-mush-index-fixture",
+            PROJECT_ROOT,
+            databasePath,
+            statePath,
+            process.execPath,
+            INDEX_PATH,
+          ],
+          {
+            shutdownForceMilliseconds: 1_000,
+            shutdownGraceMilliseconds: 5_000,
+            shutdownPreparationMilliseconds: 5_000,
+          },
+        ),
+      );
+      await expect
+        .poll(
+          async () =>
+            (await Bun.file(statePath).exists())
+              ? (await Bun.file(statePath).text()).includes("write-attempt:2")
+              : false,
+          { interval: 10, timeout: 60_000 },
+        )
+        .toBe(true);
+
+      await server.stop();
+
+      expect((await Bun.file(statePath).text()).trim().split("\n")).toEqual([
+        "write-attempt:1",
+        "write-attempt:2",
+        "write-attempt:3",
+        "write-attempt:4",
+        "caller:typed-disk-full-error",
+        "shutdown:prepared",
+        "shutdown:acknowledged",
+        "shutdown:drained",
+        "shutdown:servers-closed",
+        "shutdown:database-closed",
+      ]);
+    },
+  );
+}, 90_000);
 
 test("recovers a session when forced shutdown waits for the durable marker", async () => {
   await useRecoveryFixture(

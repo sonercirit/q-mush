@@ -4,6 +4,7 @@ import type {
   RestartHandoffOperation,
 } from "../shared/session-model.ts";
 import { isAskQuestionsPause } from "./ask-questions-pause.ts";
+import { isDiskFullFailure } from "./database-write-resilience.ts";
 import {
   compactSessionConversation,
   isRestartHandoffError,
@@ -175,21 +176,22 @@ function persistHandoffOutcome(options: RunPersistedSessionOptions): void {
 export async function runPersistedSession(
   options: RunPersistedSessionOptions,
 ): Promise<void> {
-  if (
-    !options.store.transitionRuntime(
-      options.detail.id,
-      "running",
-      options.now(),
-      options.detail.generation,
-    )
-  ) {
-    return;
-  }
   const claimedIdentity = identity(options.detail);
-  options.restartRequest(options.restartPersistence.persist);
-  options.notify(options.userId, options.detail.id);
 
   try {
+    if (
+      !options.store.transitionRuntime(
+        options.detail.id,
+        "running",
+        options.now(),
+        options.detail.generation,
+      )
+    ) {
+      return;
+    }
+    options.restartRequest(options.restartPersistence.persist);
+    options.notify(options.userId, options.detail.id);
+
     const runtime = sessionModelRuntime(
       options.resources,
       options.detail,
@@ -227,7 +229,16 @@ export async function runPersistedSession(
     }
     finishRecoveredSession(options, claimedIdentity);
   } catch (error) {
-    const terminal = currentSessionIsIdle(options);
+    let terminal: AgentSessionDetail | undefined;
+    try {
+      terminal = currentSessionIsIdle(options);
+    } catch (readError) {
+      if (isDiskFullFailure(error) && isDiskFullFailure(readError)) {
+        finishFailedSession(options, error, claimedIdentity);
+        return;
+      }
+      throw readError;
+    }
     if (terminal !== undefined) {
       options.finish(terminal, options.userId);
       return;

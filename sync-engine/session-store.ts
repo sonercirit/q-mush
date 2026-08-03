@@ -85,6 +85,7 @@ import {
   compactRuntimeConversation,
   compactRuntimeTerminal,
   setRuntimeAgentFile,
+  settleRuntimeFailure,
   updateRuntimeUsage,
 } from "./session-store-runtime-writes.ts";
 import {
@@ -133,12 +134,11 @@ export class SessionStore {
     return this.#resources[0];
   }
   #writeResources(workspaceId?: string) {
-    return {
-      database: this.#database,
-      generateId: this.#resources[1],
-      read: (userId: string, sessionId: string) =>
-        this.get(userId, sessionId, workspaceId),
-    };
+    const database = this.#database;
+    const generateId = this.#resources[1];
+    const read = (userId: string, sessionId: string) =>
+      this.get(userId, sessionId, workspaceId);
+    return { database, generateId, read };
   }
   #generateId(now: number): string {
     return this.#resources[1](now);
@@ -391,6 +391,13 @@ export class SessionStore {
       writeOptions,
     );
   }
+  settleRuntimeFailure(...p: [string, string, number, number]): boolean {
+    return settleRuntimeFailure({
+      content: p[1],
+      ...this.#runtimeTarget(p[0], p[2], p[3]),
+    });
+  }
+
   appendRuntimeErrorMessage(
     sessionId: string,
     content: string,
@@ -399,10 +406,7 @@ export class SessionStore {
   ): void {
     appendRuntimeErrorMessage({
       content,
-      generation,
-      now,
-      resources: this.#writeResources(),
-      sessionId,
+      ...this.#runtimeTarget(sessionId, now, generation),
     });
   }
   reassign(
