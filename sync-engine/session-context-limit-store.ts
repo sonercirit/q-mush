@@ -4,6 +4,7 @@ import { agentSessions } from "../shared/database/schema.ts";
 import { contextTokenCapValidationError } from "../shared/session-context-limit.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { userSessionFilter } from "./session-filter.ts";
+import type { SessionSettingsReader } from "./session-settings-types.ts";
 import {
   activeSessionCondition,
   updateStoredSessions,
@@ -12,11 +13,7 @@ import {
 export function updateStoredSessionContextTokenCap(options: {
   readonly database: AppDatabase;
   readonly now: number;
-  readonly read: (
-    userId: string,
-    sessionId: string,
-    workspaceId?: string,
-  ) => AgentSessionDetail | undefined;
+  readonly read: SessionSettingsReader;
   readonly sessionId: string;
   readonly userContextTokenCap: number | null;
   readonly userId: string;

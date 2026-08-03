@@ -526,7 +526,7 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
     return this.#notifyUpdatedSession(user.id, input.sessionId, applied);
   }
 
-  #notifyUpdatedSession(...parameters: [string,string,AgentSessionDetail]) {
+  #notifyUpdatedSession(...parameters: [string, string, AgentSessionDetail]) {
     this.#dependencies.notify(parameters[0], parameters[1]);
     return parameters[2];
   }

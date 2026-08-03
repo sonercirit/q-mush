@@ -1,6 +1,8 @@
-import type { AppDatabase } from "../shared/database.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
-import { setStoredSessionAutoCompact } from "./session-auto-compact-store.ts";
+import {
+  setStoredSessionAutoCompact,
+  type SessionSettingContext,
+} from "./session-auto-compact-store.ts";
 import { updateStoredSessionContextTokenCap } from "./session-context-limit-store.ts";
 
 export type SessionContextTokenCapParameters = readonly [
@@ -11,15 +13,8 @@ export type SessionContextTokenCapParameters = readonly [
   workspaceId?: string,
 ];
 
-export type SessionReader = (
-  userId: string,
-  sessionId: string,
-  workspaceId?: string,
-) => AgentSessionDetail | undefined;
-
 export function setSessionContextTokenCap(
-  database: AppDatabase,
-  read: SessionReader,
+  context: SessionSettingContext,
   ...[
     userId,
     sessionId,
@@ -28,15 +23,17 @@ export function setSessionContextTokenCap(
     workspaceId,
   ]: SessionContextTokenCapParameters
 ): AgentSessionDetail | undefined {
-  return updateStoredSessionContextTokenCap({
-    database,
+  const values = {
+    database: context.database,
     now,
-    read,
+    read: context.read,
     sessionId,
     userContextTokenCap: cap,
     userId,
-    ...(workspaceId === undefined ? {} : { workspaceId }),
-  });
+  };
+  return updateStoredSessionContextTokenCap(
+    workspaceId === undefined ? values : { ...values, workspaceId },
+  );
 }
 
 export type SessionAutoCompactParameters = readonly [
@@ -48,23 +45,8 @@ export type SessionAutoCompactParameters = readonly [
 ];
 
 export function setSessionAutoCompact(
-  database: AppDatabase,
-  read: SessionReader,
-  ...[
-    userId,
-    sessionId,
-    autoCompact,
-    now,
-    workspaceId,
-  ]: SessionAutoCompactParameters
+  context: SessionSettingContext,
+  ...parameters: SessionAutoCompactParameters
 ): AgentSessionDetail | undefined {
-  return setStoredSessionAutoCompact(
-    database,
-    read,
-    userId,
-    sessionId,
-    autoCompact,
-    now,
-    workspaceId,
-  );
+  return setStoredSessionAutoCompact(context, ...parameters);
 }

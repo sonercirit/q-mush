@@ -32,6 +32,18 @@ import {
   expectJsonResponse,
 } from "./session-launch-race-helpers.ts";
 
+function contextCapCreationRequest(): Request {
+  return createSessionRequest(
+    true,
+    "high",
+    "gpt-4.1-mini",
+    [],
+    undefined,
+    undefined,
+    100_001,
+  );
+}
+
 function compactionSetup(model: ScriptedAgentModel, label: string) {
   const catalog = testModelCatalog("gpt-4.1-mini", label);
   return connectedSessionSetup(model, "api_key", () =>
@@ -146,17 +158,9 @@ describe("session models and compaction", () => {
   });
 
   test("rejects caps above the discovered model limit during creation", async () => {
-    const setup = compactionSetup(new ScriptedAgentModel([]), "Cap validation");
+    const setup = compactionSetup(new ScriptedAgentModel([]), "Cap");
     const response = await setup.sessions.collection(
-      createSessionRequest(
-        true,
-        "high",
-        "gpt-4.1-mini",
-        [],
-        undefined,
-        undefined,
-        100_001,
-      ),
+      contextCapCreationRequest(),
     );
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({

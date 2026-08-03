@@ -1,13 +1,14 @@
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
+import type { SessionLifecycleDependencies } from "./session-lifecycle-types.ts";
 import type { SessionContextTokenCapAction } from "./session-realtime-commands.ts";
 import type { SessionStore } from "./session-store.ts";
 
-export function createSessionContextTokenCapAction(dependencies: {
-  readonly now: () => number;
-  readonly notify: (userId: string, sessionId: string) => void;
-  readonly store: SessionStore;
-}): SessionContextTokenCapAction {
+export function createSessionContextTokenCapAction(
+  dependencies: SessionLifecycleDependencies & {
+    readonly store: SessionStore;
+  },
+): SessionContextTokenCapAction {
   return (user, sessionId, userContextTokenCap, workspaceId) => {
     let detail: AgentSessionDetail | undefined;
     try {

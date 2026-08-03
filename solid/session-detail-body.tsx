@@ -113,6 +113,8 @@ export function SessionDetailBody(props: {
       view().credentialAvailable,
     );
   const composerDisabled = (): boolean => composerReason() !== undefined;
+  const sessionEditorDisabled = (): boolean =>
+    active() || view().state.reassigning || view().state.updatingTools;
   const autoCompactionDisabled = (): boolean =>
     view().detail.runnerRequired || sessionMutationPending(view().state);
   const compactionDisabled = (): boolean =>
@@ -277,9 +279,7 @@ export function SessionDetailBody(props: {
         <SessionProviderUpdateEditor
           credentials={props.providerUpdate.credentials}
           detail={view().detail}
-          disabled={
-            active() || view().state.reassigning || view().state.updatingTools
-          }
+          disabled={sessionEditorDisabled()}
           onApply={props.providerUpdate.onApply}
           onDiscoverModels={props.providerUpdate.onDiscoverModels}
           onDiscoverProviders={props.providerUpdate.onDiscoverProviders}
@@ -287,10 +287,7 @@ export function SessionDetailBody(props: {
         <SessionContextTokenCapEditor
           detail={view().detail}
           disabled={
-            active() ||
-            view().state.reassigning ||
-            view().state.updatingTools ||
-            sessionMutationPending(view().state)
+            sessionEditorDisabled() || sessionMutationPending(view().state)
           }
           onApply={(cap) => {
             return view().controller.setContextTokenCap(cap);

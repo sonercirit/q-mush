@@ -422,19 +422,14 @@ export class SessionStore {
       workingDirectory,
     });
   }
+  get #settingsContext() {
+    return { database: this.#database, read: this.get.bind(this) };
+  }
   setContextTokenCap(...parameters: SessionContextTokenCapParameters) {
-    return setSessionContextTokenCap(
-      this.#database,
-      this.get.bind(this),
-      ...parameters,
-    );
+    return setSessionContextTokenCap(this.#settingsContext, ...parameters);
   }
   setAutoCompact(...parameters: SessionAutoCompactParameters) {
-    return setSessionAutoCompact(
-      this.#database,
-      this.get.bind(this),
-      ...parameters,
-    );
+    return setSessionAutoCompact(this.#settingsContext, ...parameters);
   }
   appendUnknownRestartToolResults(
     database: Parameters<typeof appendUnknownRestartToolResults>[0]["database"],

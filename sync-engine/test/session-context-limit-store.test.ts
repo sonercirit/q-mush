@@ -6,8 +6,8 @@ import {
 } from "./session-store-test-fixtures.ts";
 
 test("applies and clears an effective context token cap", () => {
-  const { database, store } = createStore();
-  createTestSession(store);
-  expectSessionContextTokenCapLifecycle(store);
-  database.$client.close();
+  const fixture = createStore();
+  createTestSession(fixture.store);
+  expectSessionContextTokenCapLifecycle(fixture.store);
+  fixture.database.$client.close();
 });
