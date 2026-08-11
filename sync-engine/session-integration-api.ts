@@ -88,6 +88,7 @@ export interface SessionIntegrationApiResources {
   readonly runnerRemoval: RunnerRemovalCoordinator;
   readonly runtimes: SessionRuntimes;
   readonly stopChildren: (detail: AgentSessionDetail, userId: string) => void;
+  readonly stopLivenessScans: () => void;
   readonly store: SessionStore;
   readonly withCredentialAccess: Parameters<
     typeof openRouterProvidersForUser
@@ -243,6 +244,7 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
   }
 
   prepareFinalShutdown(): Promise<void> {
+    this.resources.stopLivenessScans();
     return this.resources.restart.prepareServerShutdown();
   }
 

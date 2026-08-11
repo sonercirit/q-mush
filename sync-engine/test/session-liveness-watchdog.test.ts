@@ -14,7 +14,10 @@ import {
 import { DeferredAgentModel } from "./deferred-agent-model.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
 import { toolCall } from "./session-agent-tool-setup.ts";
-import { SESSION_ID } from "./session-integration-fixtures.ts";
+import {
+  connectedSessionSetup,
+  SESSION_ID,
+} from "./session-integration-fixtures.ts";
 import { waitForSessionValue } from "./session-integration-helpers.ts";
 import {
   awaitProviderCall,
@@ -151,12 +154,9 @@ function expectStoredStatus(
   expect(status).toBe(expected);
 }
 
-function expectSchedulerError(
-  liveness: NonNullable<SessionDependencies["liveness"]>,
-  message: string,
-): void {
+function schedulerSetup(liveness?: SessionDependencies["liveness"]) {
   const setup = runningSetup();
-  expect(() =>
+  const create = () =>
     createSessionLivenessWatchdog({
       actions: {
         finished: vi.fn(),
@@ -167,7 +167,7 @@ function expectSchedulerError(
       database: setup.database,
       dependencies: {
         braveSearch: { execute: () => Promise.resolve("unused") },
-        liveness,
+        ...(liveness === undefined ? {} : { liveness }),
       },
       notify: vi.fn(),
       now: () => TEST_NOW,
@@ -177,10 +177,53 @@ function expectSchedulerError(
         generateId: () => "scheduler-handoff-message",
       }),
       store: setup.store,
-    }),
-  ).toThrow(message);
+    });
+  return { create, setup };
+}
+
+function expectSchedulerError(
+  liveness: NonNullable<SessionDependencies["liveness"]>,
+  message: string,
+): void {
+  const { create, setup } = schedulerSetup(liveness);
+  expect(create).toThrow(message);
   closeSetup(setup);
 }
+
+test("stops the default global scan interval", () => {
+  const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
+  const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval");
+  try {
+    const { create, setup } = schedulerSetup();
+    const liveness = create();
+    expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 30_000);
+    const timer: unknown = setIntervalSpy.mock.results[0]?.value;
+    liveness.stop();
+    expect(clearIntervalSpy).toHaveBeenCalledWith(timer);
+    closeSetup(setup);
+  } finally {
+    setIntervalSpy.mockRestore();
+    clearIntervalSpy.mockRestore();
+  }
+});
+
+test("stops an injected scan interval on final shutdown", async () => {
+  const cleared: unknown[] = [];
+  const setup = connectedSessionSetup(
+    new DeferredAgentModel(),
+    "api_key",
+    undefined,
+    {
+      liveness: {
+        clearInterval: (timer) => cleared.push(timer),
+        setInterval: () => "liveness-timer",
+      },
+    },
+  );
+  await setup.sessions.prepareFinalShutdown();
+  expect(cleared).toEqual(["liveness-timer"]);
+  closeLivenessSession(setup);
+});
 
 test("rejects a below-floor grace outside the explicit test bypass", () => {
   const setup = runningSetup();
