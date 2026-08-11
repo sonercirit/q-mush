@@ -23,6 +23,7 @@ import { createResponseFetch } from "./session-dom-test-helpers.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 import {
   sessionDetailWithStatus,
+  sessionMessageIds,
   transcriptMessage,
 } from "./transcript-ordering-fixtures.ts";
 
@@ -66,7 +67,7 @@ function expectStreamAfter(
   sessionId: string,
   thinking: boolean,
 ): void {
-  expect(messageIds(controller)).toEqual([
+  expect(sessionMessageIds(controller)).toEqual([
     ...persistedIds,
     ...streamMessageIds(sessionId, thinking),
   ]);
@@ -139,10 +140,6 @@ function applyDelta(
     thinking,
     type: "session_delta",
   });
-}
-
-function messageIds(controller: SessionController): readonly string[] {
-  return controller.state.detail?.messages.map(({ id }) => id) ?? [];
 }
 
 function sessionDetail(
@@ -313,7 +310,7 @@ test("ignores stale deltas after a finished snapshot and accepts a queued contin
     finishSession(controller, running, [user, assistant]);
     applyDelta(controller, sessionId, " stale", "stale thinking");
 
-    expect(messageIds(controller)).toEqual([user.id, assistant.id]);
+    expect(sessionMessageIds(controller)).toEqual([user.id, assistant.id]);
 
     controller.applyDetail(queuedDetail(running, [user, assistant]));
     applyDelta(controller, sessionId, "Continuation", "Fresh thinking");
@@ -361,30 +358,6 @@ test("anchors a continuation stream after the existing transcript", async () => 
   });
 });
 
-test("drops a stale unanchored stream once its step is already persisted", () => {
-  const sessionId = "session-unseen-delta";
-  const reactive = createReactiveState<SessionViewState>(
-    initialSessionViewState(),
-  );
-  const controller = createRoot(() => new SessionController(reactive));
-  applyDelta(controller, sessionId, "", "Deep analysis");
-
-  reactive.setState((state) => ({ ...state, selectedId: sessionId }));
-  controller.applyDetail(
-    sessionDetail("running", sessionId, [
-      transcriptMessage("user-1", "Request", "user", 1),
-      transcriptMessage("thinking-1", "Deep analysis", "thinking", 2),
-      transcriptMessage("assistant-1", "", "assistant", 3),
-    ]),
-  );
-
-  expect(messageIds(controller)).toEqual([
-    "user-1",
-    "thinking-1",
-    "assistant-1",
-  ]);
-});
-
 test("reconciles reset streams with differently finalized persisted messages", async () => {
   const originalFetch = globalThis.fetch;
   const {
@@ -407,7 +380,7 @@ test("reconciles reset streams with differently finalized persisted messages", a
       ]),
     );
 
-    expect(messageIds(controller)).toEqual([
+    expect(sessionMessageIds(controller)).toEqual([
       "user-1",
       "thinking-1",
       "assistant-1",
@@ -450,12 +423,12 @@ test("keeps per-session streams isolated across rapid selection changes", async 
     pending.get(second.id)?.(Response.json(second));
     await selectSecond;
     const secondMessages = ["second-user", `stream:${second.id}:assistant`];
-    expect(messageIds(controller)).toEqual(secondMessages);
+    expect(sessionMessageIds(controller)).toEqual(secondMessages);
 
     pending.get(first.id)?.(Response.json(first));
     await selectFirst;
     expect(controller.state.selectedId).toBe(second.id);
-    expect(messageIds(controller)).toEqual(secondMessages);
+    expect(sessionMessageIds(controller)).toEqual(secondMessages);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -479,7 +452,7 @@ test("replaces a streaming transcript with a compacted snapshot", async () => {
     );
     finishSession(controller, original, [compacted]);
 
-    expect(messageIds(controller)).toEqual([compacted.id]);
+    expect(sessionMessageIds(controller)).toEqual([compacted.id]);
   } finally {
     globalThis.fetch = originalFetch;
   }

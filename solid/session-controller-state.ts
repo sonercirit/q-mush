@@ -1,4 +1,3 @@
-import { canonicalAgentSessionMessages } from "../shared/session-message-order.ts";
 import type {
   AgentSessionDetail,
   AgentSessionMessage,
@@ -8,148 +7,18 @@ import { applyToolStreamDelta } from "../shared/tool-stream.ts";
 import type { RealtimeServerEvent } from "./realtime-client-codec.ts";
 import type { RevisionState } from "./revision-state.ts";
 import type { SessionViewState } from "./session-client.tsx";
-import { summaryFromDetail } from "./session-codec.ts";
+import {
+  isStreamedMessage,
+  replaceSessionSummary,
+  retainUnchangedSessionData,
+  sessionDataMatches,
+  sessionSummariesMatch,
+  sortedMessages,
+  streamedMessageId,
+} from "./session-data-matching.ts";
 import { createDisplaySessionMessage } from "./session-message.ts";
 import { sessionMutationPending } from "./session-pending.ts";
 import { toolStreamKey } from "./tool-stream-client.ts";
-
-export function replaceSessionSummary(
-  sessions: readonly AgentSessionSummary[],
-  detail: AgentSessionDetail,
-): readonly AgentSessionSummary[] {
-  const summary = summaryFromDetail(detail);
-  return [summary, ...sessions.filter(({ id }) => id !== summary.id)].sort(
-    (left, right) => right.updatedAt - left.updatedAt,
-  );
-}
-
-export function mergeNewerSelectedSessionSummary(
-  sessions: readonly AgentSessionSummary[],
-  selectedId: string | undefined,
-  detail: AgentSessionDetail | undefined,
-): readonly AgentSessionSummary[] {
-  const selectedDetail = detail?.id === selectedId ? detail : undefined;
-  const fetched = sessions.find(({ id }) => id === selectedId);
-  return selectedDetail !== undefined &&
-    fetched !== undefined &&
-    selectedDetail.updatedAt > fetched.updatedAt
-    ? replaceSessionSummary(sessions, selectedDetail)
-    : sessions;
-}
-
-function serializedDataMatches(left: unknown, right: unknown): boolean {
-  return left === right || JSON.stringify(left) === JSON.stringify(right);
-}
-
-function sessionMessageMatches(
-  left: AgentSessionMessage | undefined,
-  right: AgentSessionMessage | undefined,
-): boolean {
-  if (left === right) return true;
-  if (left === undefined || right === undefined) return false;
-  return (
-    left.content === right.content &&
-    left.createdAt === right.createdAt &&
-    left.id === right.id &&
-    left.role === right.role &&
-    left.toolCallId === right.toolCallId &&
-    left.toolName === right.toolName &&
-    serializedDataMatches(left.attachments, right.attachments) &&
-    serializedDataMatches(left.images, right.images) &&
-    serializedDataMatches(left.tokenUsage, right.tokenUsage) &&
-    serializedDataMatches(left.toolCalls, right.toolCalls)
-  );
-}
-
-function sessionDetailMatches(
-  left: AgentSessionDetail | undefined,
-  right: AgentSessionDetail | undefined,
-): boolean {
-  if (left === right) return true;
-  if (right === undefined || left === undefined) return false;
-  const { messages: leftMessages, ...leftMetadata } = left;
-  const { messages: rightMessages, ...rightMetadata } = right;
-  return (
-    leftMessages.length === rightMessages.length &&
-    leftMessages.every((message, index) =>
-      sessionMessageMatches(message, rightMessages[index]),
-    ) &&
-    serializedDataMatches(leftMetadata, rightMetadata)
-  );
-}
-
-export const sessionDataMatches = sessionDetailMatches;
-
-export function sessionSummariesMatch(
-  left: readonly AgentSessionSummary[] | undefined,
-  right: readonly AgentSessionSummary[] | undefined,
-): boolean {
-  return serializedDataMatches(left, right);
-}
-
-function canonicalSessionMessages(
-  messages: AgentSessionDetail["messages"],
-): AgentSessionDetail["messages"] {
-  return canonicalAgentSessionMessages(messages);
-}
-
-function retainUnchangedMessages(
-  current: AgentSessionDetail,
-  messages: AgentSessionDetail["messages"],
-): AgentSessionDetail["messages"] {
-  const currentById = new Map(
-    current.messages.map((message) => [message.id, message]),
-  );
-  return messages.map((message) => {
-    const existing = currentById.get(message.id);
-    return sessionMessageMatches(existing, message) && existing !== undefined
-      ? existing
-      : message;
-  });
-}
-
-function sortedMessages(
-  detail: AgentSessionDetail,
-): AgentSessionDetail["messages"] {
-  if (
-    detail.messages.some((message) => isStreamedMessage(detail.id, message))
-  ) {
-    return detail.messages;
-  }
-  for (let index = 1; index < detail.messages.length; index += 1) {
-    const previous = detail.messages[index - 1];
-    const current = detail.messages[index];
-    if (
-      previous !== undefined &&
-      current !== undefined &&
-      (previous.createdAt > current.createdAt ||
-        (previous.createdAt === current.createdAt && previous.id > current.id))
-    ) {
-      return canonicalSessionMessages(detail.messages);
-    }
-  }
-  return detail.messages;
-}
-
-export function retainUnchangedSessionData(
-  current: AgentSessionDetail | undefined,
-  detail: AgentSessionDetail,
-): AgentSessionDetail {
-  const orderedMessages = sortedMessages(detail);
-  if (current?.id !== detail.id)
-    return orderedMessages === detail.messages
-      ? detail
-      : { ...detail, messages: orderedMessages };
-
-  const agentFile = serializedDataMatches(current.agentFile, detail.agentFile)
-    ? current.agentFile
-    : detail.agentFile;
-  const messages = retainUnchangedMessages(current, orderedMessages);
-  return agentFile !== detail.agentFile ||
-    messages.some((message, index) => message !== detail.messages[index])
-    ? { ...detail, agentFile, messages }
-    : detail;
-}
 
 type StreamRole = "assistant" | "thinking";
 
@@ -164,21 +33,6 @@ interface StreamedSessionContent {
 interface ReconciledStream {
   readonly messages: AgentSessionDetail["messages"];
   readonly persisted: boolean;
-}
-
-function streamedMessageId(sessionId: string, role: StreamRole): string {
-  return `stream:${sessionId}:${role}`;
-}
-
-function isStreamedMessage(
-  sessionId: string,
-  message: AgentSessionMessage,
-): boolean {
-  return (
-    message.role === "compaction_request" ||
-    message.id === streamedMessageId(sessionId, "thinking") ||
-    message.id === streamedMessageId(sessionId, "assistant")
-  );
 }
 
 function persistedMessages(
@@ -207,21 +61,58 @@ function sessionIsActive(detail: AgentSessionDetail): boolean {
   );
 }
 
+function persistedStreamStart(
+  messages: AgentSessionDetail["messages"],
+  streamed: StreamedSessionContent,
+): number | undefined {
+  // Search the trailing step run (thinking/assistant/tool messages) for
+  // persisted content matching the buffered stream. Content equality is the
+  // evidence that this exact stream already persisted; role presence alone
+  // would swallow fresh streams after unrelated trailing assistants.
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message === undefined) return undefined;
+    if (
+      message.role !== "assistant" &&
+      message.role !== "thinking" &&
+      message.role !== "tool"
+    ) {
+      return undefined;
+    }
+    if (streamed.thinking.length > 0) {
+      if (message.role !== "thinking" || message.content !== streamed.thinking)
+        continue;
+      if (streamed.content.length === 0) return index;
+      const assistant = messages
+        .slice(index + 1)
+        .find(({ role }) => role === "assistant");
+      return assistant?.content === streamed.content ? index : undefined;
+    }
+    if (message.role === "assistant" && message.content === streamed.content) {
+      return index;
+    }
+  }
+  return undefined;
+}
+
 function resolveStreamBase(
   detail: AgentSessionDetail,
   streamed: StreamedSessionContent,
 ): StreamedSessionContent {
   if (streamed.baseMessageId !== undefined) return streamed;
   // The stream began before this session's detail was available, so the
-  // streamed step may already be persisted. Anchor before the trailing
-  // thinking/assistant run so reconciliation can recognize those messages
-  // as this stream's persisted content instead of duplicating it.
-  let base = detail.messages.length - 1;
-  while (base >= 0) {
-    const role = detail.messages[base]?.role;
-    if (role !== "assistant" && role !== "thinking") break;
-    base -= 1;
-  }
+  // streamed step may already be persisted. Anchor before the persisted
+  // messages whose content matches the stream so reconciliation recognizes
+  // them as this stream's content; otherwise the stream is new and anchors
+  // after the existing transcript.
+  const persistedStart =
+    streamed.thinking.length === 0 && streamed.content.length === 0
+      ? undefined
+      : persistedStreamStart(detail.messages, streamed);
+  const base =
+    persistedStart === undefined
+      ? detail.messages.length - 1
+      : persistedStart - 1;
   return { ...streamed, baseMessageId: detail.messages[base]?.id ?? null };
 }
 
