@@ -146,7 +146,7 @@ function SessionMetrics(props: {
       <Show when={stepStartedAt()} keyed>
         {(startedAt) => (
           <span class="text-emerald-300/80">
-            {`Step: ${formatSessionTime(Math.max(0, now() - startedAt))}`}
+            {`Run: ${formatSessionTime(Math.max(0, now() - startedAt))}`}
           </span>
         )}
       </Show>

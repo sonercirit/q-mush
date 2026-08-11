@@ -223,12 +223,22 @@ function expectScrollLock(toggle: Element, enabled: boolean): void {
   expect(toggle.getAttribute("aria-pressed")).toBe(String(enabled));
 }
 
-test("a mounted session timer starts when the session begins running", () => {
+function useFakeClock(startMs: number): void {
   vi.useFakeTimers();
-  vi.setSystemTime(new Date(10_000));
+  vi.setSystemTime(new Date(startMs));
   disposals.push(() => {
     vi.useRealTimers();
   });
+}
+
+function findSpanText(container: ParentNode, text: string): boolean {
+  return [...container.querySelectorAll("span")].some(
+    ({ textContent }) => textContent === text,
+  );
+}
+
+test("a mounted session timer starts when the session begins running", () => {
+  useFakeClock(10_000);
   const queued = { ...TEST_SESSION_DETAIL, status: "queued" as const };
   const { container, controller } = mountSessionDetail(queued);
 
@@ -242,11 +252,55 @@ test("a mounted session timer starts when the session begins running", () => {
   vi.advanceTimersByTime(2_000);
 
   expect(sessionTimeText(container)).toBe("Time: 2s");
-  expect(
-    [...container.querySelectorAll("span")].some(
-      ({ textContent }) => textContent === "Step: 2s",
-    ),
-  ).toBe(true);
+  expect(findSpanText(container, "Run: 2s")).toBe(true);
+});
+
+test("a retained sidebar row keeps ticking its run duration", () => {
+  useFakeClock(50_000);
+  const running = {
+    ...summaryFromDetail(TEST_SESSION_DETAIL),
+    activeStartedAt: Date.now(),
+    status: "running" as const,
+  };
+  const other = {
+    ...summaryFromDetail(TEST_SESSION_DETAIL),
+    id: "session-other",
+    title: "Other session",
+  };
+  const state = createReactiveState<SessionViewState>({
+    ...initialSessionViewState(),
+    sessions: [running, other],
+  });
+  const controller = new SessionController(state);
+  const container = mountTestView(
+    () => <SessionList controller={controller} />,
+    disposals,
+  );
+  const spans = () => [...container.querySelectorAll("span")];
+  const runLabel = () =>
+    spans().find(({ textContent }) => textContent.startsWith("Run: "));
+  const initialRow = container.querySelector(
+    `[data-session-id='${running.id}']`,
+  );
+  expect(runLabel()?.textContent).toBe("Run: 0s");
+
+  vi.advanceTimersByTime(2_000);
+  controller.applyRealtime([
+    running,
+    { ...other, title: "Renamed", updatedAt: other.updatedAt + 1 },
+  ]);
+  vi.advanceTimersByTime(1_000);
+
+  expect(container.querySelector(`[data-session-id='${running.id}']`)).toBe(
+    initialRow,
+  );
+  expect(runLabel()?.textContent).toBe("Run: 3s");
+
+  controller.applyRealtime([
+    { ...running, activeStartedAt: null, status: "idle" as const },
+    other,
+  ]);
+  expect(runLabel()).toBeUndefined();
 });
 
 test("scrolling away from and back to the transcript end updates scroll lock", () => {

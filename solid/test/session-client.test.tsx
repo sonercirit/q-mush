@@ -155,10 +155,10 @@ test("shows session time and cost in the list and detail", () => {
 
   expect(html.match(/Time: 1m 5s/gu)).toHaveLength(2);
   expect(html.match(/Estimated cost: \$0\.0042/gu)).toHaveLength(2);
-  expect(html).not.toContain("Step:");
+  expect(html).not.toContain("Run:");
 });
 
-test("shows the running step duration only for active sessions", () => {
+test("shows the running run duration only for active sessions", () => {
   const session = {
     ...TEST_SESSION_DETAIL,
     activeDurationMs: 5_000,
@@ -168,7 +168,7 @@ test("shows the running step duration only for active sessions", () => {
   const state = { ...SESSION_STATE, detail: session, selectedId: session.id };
 
   expect(
-    renderPanel({ ...state, sessions: [session] }).match(/Step: \d+s/gu),
+    renderPanel({ ...state, sessions: [session] }).match(/Run: \d+s/gu),
   ).toHaveLength(2);
 });
 
