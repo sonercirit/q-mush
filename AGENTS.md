@@ -15,7 +15,7 @@ Living project memory.
   credentials, inspect local services, enumerate schemas via validation errors,
   read usage metrics.
 - Call a capability impossible only when evidence excludes it — docs searched,
-  schema enumerated, matrix covered — otherwise record an open question.
+  schema enumerated — otherwise record an open question.
 - Preserve patterns, add tools only as needed, and proactively improve whatever
   you touch — code health, tests, docs, performance, security, DX: ship small
   improvements with the change, larger ones as immediate follow-ups.
@@ -73,7 +73,7 @@ Living project memory.
   its own restart. Textual bodies precompress once per handler, negotiating
   `zstd`, Brotli, gzip, then deflate. `/favicon.svg` revalidates with ETag,
   separate from PWA icons.
-- `solid/pages.tsx` renders both server page shells through Solid's SSR runtime;
+- `solid/pages.tsx` renders both server page shells via Solid's SSR runtime;
   `sync-engine/pages.ts` loads it with Vite's SSR runner for Bun. The browser
   app mounts from `solid/client.tsx`; routes live in `shared/routes.ts`.
 - `sync-engine/auth.ts` implements Google OpenID Connect (authorization code +
@@ -166,11 +166,11 @@ Living project memory.
   fresh tool output); persistent shortfalls are bugs, lone misses provider noise
   — writes land seconds late and 128-token blocks hide small growth. Codex
   socket reuse re-tested cache-neutral vs per-step reconnects (~92% at hit,
-  sporadic misses in both; 0%-on-reuse did not reproduce), so sockets stay open
-  across a run, reconnect on failure, and close at its end. UI rates divide by
-  summed input minus the final request (summary) or the prior step's input (per
-  step), clamped at 100%. Requests carry the session ID as `prompt_cache_key`
-  and as the Codex `session_id` header (cache routing); that surface rejects
+  sporadic misses in both), so sockets stay open across a run, reconnect on
+  failure, and close at its end. UI rates divide by summed input minus the final
+  request (summary) or the prior step's input (per step), clamped at 100%.
+  Requests carry the session ID as `prompt_cache_key` and as the Codex
+  `session_id` header (cache routing); that surface rejects
   `prompt_cache_breakpoint`/`prompt_cache_retention`. OpenRouter and generic
   requests mark one-hour `cache_control` breakpoints on the system prompt,
   transcript tail, and Anthropic tool definitions (`provider-prompt-cache.ts`);
@@ -184,7 +184,8 @@ Living project memory.
   server-rendered shells, and `solid/styles.css` is Tailwind's source. Vitest
   uses an SSR Solid transform for string-rendering tests and a Happy DOM project
   for post-mount reactivity; run it under Bun because tests and application
-  modules use Bun APIs and `bun:sqlite`.
+  modules use Bun APIs and `bun:sqlite`. Fixtures stub provider discovery; tests
+  never hit live provider APIs.
 - `tsconfig.json` configures strict, no-emit, bundler-style checking with unused
   and unreachable code diagnostics. Library declaration checking is skipped
   because Drizzle (ORM 1.0.0-rc.4, TypeScript 7.0.2) publishes optional
@@ -217,8 +218,8 @@ Living project memory.
 - Google login reads `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and optional
   `GOOGLE_REDIRECT_URI`; the two must appear together. The callback
   `http://localhost:12345/api/auth/google/callback` must be registered exactly
-  on the Google web OAuth client. Never expose the client secret to browser code
-  or tracked files.
+  on the Google OAuth client. Never expose the client secret to browser code or
+  tracked files.
 - `DATABASE_PATH` selects SQLite (default `data/q-mush.sqlite`; `data/` is
   ignored). Update `shared/database/schema.ts`, register tables in
   `databaseSchema`, `bun run db:generate`, and commit the migration and
