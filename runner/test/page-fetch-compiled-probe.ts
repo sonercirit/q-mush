@@ -10,7 +10,9 @@ if ((operation !== "fetch" && operation !== "unsafe") || value === undefined) {
 const url = new URL(value);
 
 if (operation === "fetch") {
-  const output = await fetchRenderedPage({ url: url.toString() });
+  // The page-fetch maximum timeout: slow CI Chromium startups and external
+  // fetches otherwise exceed the 30-second default and flake the probe.
+  const output = await fetchRenderedPage({ timeout: 120, url: url.toString() });
   const result: unknown = JSON.parse(output);
   if (
     typeof result !== "object" ||
