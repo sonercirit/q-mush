@@ -11,6 +11,7 @@
     "db:migrate": "bun run scripts/migrate-database.ts",
     "dev": "bun run scripts/dev.ts",
     "dev:restart": "bun run scripts/restart-development-server.ts",
+    "dev:watch": "bun run scripts/dev.ts --watch",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "knip": "bun run --parallel --no-exit-on-error --filter '*' knip:production knip:test",
