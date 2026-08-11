@@ -5,6 +5,7 @@ import { updateSessionContextTokenCap } from "../session-controller-context-cap.
 import { initialSessionViewState } from "../session-state.ts";
 import type { SessionViewState } from "../session-view-state.ts";
 import {
+  clickTestButton,
   findTestButton,
   queryTestElement,
   queryTestElementAs,
@@ -68,6 +69,9 @@ function mountCapEditor(autoCompact = true) {
 }
 
 function capInput(container: ParentNode): HTMLInputElement {
+  if (container.querySelector("#session-detail-context-token-cap") === null) {
+    clickTestButton(container, "[data-session-cap-toggle='true']");
+  }
   return queryTestElementAs(
     container,
     "#session-detail-context-token-cap",

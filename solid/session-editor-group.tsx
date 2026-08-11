@@ -11,7 +11,7 @@ export function SessionEditorGroup(props: {
   return (
     <div class={SESSION_EDITOR_GROUP_CLASSES} data-session-editor-group="true">
       <div class="contents">{props.provider}</div>
-      {props.cap}
+      <div class="contents">{props.cap}</div>
       <div class="contents">{props.tools}</div>
     </div>
   );
