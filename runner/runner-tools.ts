@@ -1,5 +1,5 @@
-import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, relative, resolve } from "node:path";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, relative } from "node:path";
 import {
   agentAttachmentMediaTypeFromName,
   MAXIMUM_AGENT_ATTACHMENT_BYTES,
@@ -40,8 +40,8 @@ import {
 } from "./runner-process.ts";
 import {
   openSecureRunnerPath,
+  resolveRunnerPath,
   resolveRunnerWorkspace,
-  secureRunnerPath,
 } from "./runner-workspace.ts";
 
 const MAX_FILE_BYTES = 1024 * 1024;
@@ -141,7 +141,6 @@ async function pathArgument(
   root: string,
   arguments_: ToolArguments,
   options: {
-    readonly allowedExternalPath?: (path: string) => boolean;
     readonly mapAbsolutePath?: (path: string) => string;
     readonly mayNotExist?: boolean;
   } = {},
@@ -152,13 +151,7 @@ async function pathArgument(
   if (attachmentPath !== undefined) {
     return attachmentPath;
   }
-  if (options.allowedExternalPath?.(resolve(root, mapped)) === true) {
-    const canonical = await realpath(mapped);
-    if (options.allowedExternalPath(canonical)) {
-      return canonical;
-    }
-  }
-  return secureRunnerPath(root, mapped, options.mayNotExist);
+  return resolveRunnerPath(root, mapped, options.mayNotExist);
 }
 
 function displayPath(root: string, path: string): string {
@@ -190,9 +183,6 @@ async function readPathContent(
   ownedSpillPath?: (path: string) => boolean,
 ): Promise<{ readonly content: string; readonly path: string }> {
   const path = await pathArgument(root, arguments_, {
-    ...(ownedSpillPath === undefined
-      ? {}
-      : { allowedExternalPath: ownedSpillPath }),
     ...(mapAbsolutePath === undefined ? {} : { mapAbsolutePath }),
   });
   const maximumBytes =

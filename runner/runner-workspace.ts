@@ -43,7 +43,8 @@ async function existingAncestor(path: string): Promise<string> {
   }
 }
 
-export async function secureRunnerPath(
+/** Contained resolution for session attachment records only. */
+export async function containedRunnerPath(
   root: string,
   path: string,
   mayNotExist = false,
@@ -59,6 +60,17 @@ export async function secureRunnerPath(
   const canonical = await realpath(candidate);
   assertWithin(root, canonical);
   return canonical;
+}
+
+export function resolveRunnerPath(
+  root: string,
+  path: string,
+  mayNotExist?: boolean,
+): Promise<string> {
+  const candidate = resolve(root, path);
+  return mayNotExist === true
+    ? Promise.resolve(candidate)
+    : realpath(candidate);
 }
 
 interface OpenRunnerPath {
@@ -149,54 +161,23 @@ function secureCanonicalRunnerPath(
 function validateCanonicalRunnerPath(
   openedPath: string,
   canonical: string,
-  root?: string,
 ): void {
-  if (root === undefined) {
-    if (openedPath !== canonical) {
-      throw new Error("The opened path changed while it was being validated");
-    }
-  } else {
-    assertWithin(root, openedPath);
+  if (openedPath !== canonical) {
+    throw new Error("The opened path changed while it was being validated");
   }
 }
-
-function openSecureRunnerPathWithOptions(
-  resolveCanonical: () => Promise<string>,
-  options: SecureRunnerOpenOptions,
-  root?: string,
-): Promise<OpenRunnerPath> {
-  return secureCanonicalRunnerPath(
-    resolveCanonical,
-    (openedPath, canonical) => {
-      validateCanonicalRunnerPath(openedPath, canonical, root);
-    },
-    options,
-  );
-}
-
-function securePathOptions(
-  path: string,
-  options: SecureRunnerOpenOptions = {},
-  root?: string,
-): Promise<OpenRunnerPath> {
-  const resolver =
-    root === undefined
-      ? () => realpath(path)
-      : () => secureRunnerPath(root, path);
-  return openSecureRunnerPathWithOptions(resolver, options, root);
-}
-
-export const openSecureAbsoluteRunnerPath: (
-  path: string,
-  options?: SecureRunnerOpenOptions,
-) => Promise<OpenRunnerPath> = securePathOptions;
 
 export function openSecureRunnerPath(
   root: string,
   path: string,
   options: SecureRunnerOpenOptions = {},
 ): Promise<OpenRunnerPath> {
-  return securePathOptions(path, options, root);
+  const candidate = resolve(root, path);
+  return secureCanonicalRunnerPath(
+    () => realpath(candidate),
+    validateCanonicalRunnerPath,
+    options,
+  );
 }
 
 export async function resolveRunnerWorkspace(path: string): Promise<string> {

@@ -1,7 +1,5 @@
-import { isAbsolute } from "node:path";
 import { AGENT_FILE_NAMES, type AgentFile } from "../shared/agent-file.ts";
 import {
-  openSecureAbsoluteRunnerPath,
   openSecureRunnerPath,
   resolveRunnerWorkspace,
 } from "./runner-workspace.ts";
@@ -18,26 +16,14 @@ async function loadCandidate(
   root: string,
   path: string,
   name: string,
-  absoluteOutsideAllowed: boolean,
 ): Promise<AgentFile | undefined> {
   let opened: Awaited<ReturnType<typeof openSecureRunnerPath>>;
 
   try {
-    opened =
-      absoluteOutsideAllowed && isAbsolute(path)
-        ? await openSecureAbsoluteRunnerPath(path)
-        : await openSecureRunnerPath(root, path);
+    opened = await openSecureRunnerPath(root, path);
   } catch (error) {
     if (isMissingPath(error)) {
       return undefined;
-    }
-    if (
-      error instanceof Error &&
-      error.message === "The requested path is outside the session workspace"
-    ) {
-      throw new Error("The agent file is outside the session workspace", {
-        cause: error,
-      });
     }
     throw error;
   }
@@ -54,7 +40,7 @@ async function loadCandidate(
 
 async function loadDefaultAgentFile(root: string): Promise<AgentFile | null> {
   for (const name of AGENT_FILE_NAMES) {
-    const file = await loadCandidate(root, name, name, false);
+    const file = await loadCandidate(root, name, name);
     if (file !== undefined) {
       return file;
     }
@@ -70,5 +56,5 @@ export async function loadRunnerAgentFile(
   if (customPath === undefined) {
     return loadDefaultAgentFile(root);
   }
-  return (await loadCandidate(root, customPath, customPath, true)) ?? null;
+  return (await loadCandidate(root, customPath, customPath)) ?? null;
 }

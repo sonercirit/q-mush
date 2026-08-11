@@ -112,20 +112,21 @@ describe("runner agent file", () => {
     });
   });
 
-  test("confines relative custom agent files to the workspace", async () => {
+  test("follows custom agent-file symlinks outside the workspace", async () => {
     const { root } = await symlinkOutsideAgentFile("custom.md");
 
-    await expect(loadRunnerAgentFile(root, "custom.md")).rejects.toThrow(
-      "outside the session workspace",
-    );
+    await expectAgentFileScenario(root, {
+      customPath: "custom.md",
+      expectedContent: "Outside instructions",
+    });
   });
 
-  test("confines default agent files to the workspace", async () => {
+  test("follows default agent-file symlinks outside the workspace", async () => {
     const { root } = await symlinkOutsideAgentFile("AGENTS.md");
 
-    await expect(loadRunnerAgentFile(root)).rejects.toThrow(
-      "outside the session workspace",
-    );
+    await expectAgentFileScenario(root, {
+      expectedContent: "Outside instructions",
+    });
   });
 
   test("fails closed for a custom non-regular path", async () => {

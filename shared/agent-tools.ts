@@ -41,14 +41,14 @@ function toolDefinition<
 }
 
 const FILE_PATH_PARAMETER = {
-  description: "Workspace-relative or contained absolute file path",
+  description: "Absolute file path, or a path relative to the workspace",
   type: "string",
 } as const;
 
 const BASE_AGENT_TOOLS = [
   toolDefinition({
     description:
-      "Read up to 2,000 lines or 50KB from a UTF-8 text file in the workspace per call, including q-mush-attachment links supplied in messages. Use offset and limit to continue reading the same file.",
+      "Read up to 2,000 lines or 50KB from a UTF-8 text file per call, including q-mush-attachment links supplied in messages. Use offset and limit to continue reading the same file.",
     name: "read",
     properties: {
       limit: {
@@ -65,7 +65,7 @@ const BASE_AGENT_TOOLS = [
   }),
   toolDefinition({
     description:
-      "Read a workspace file and ask the session model, or its configured global modality fallback, to explain its content. An optional per-call prompt controls what to explain.",
+      "Read a file and ask the session model, or its configured global modality fallback, to explain its content. An optional per-call prompt controls what to explain.",
     name: "explain_file",
     properties: {
       path: FILE_PATH_PARAMETER,
@@ -79,7 +79,7 @@ const BASE_AGENT_TOOLS = [
   }),
   toolDefinition({
     description:
-      "Execute a bash command in the workspace. Returns bounded stdout, stderr, and the exit status. A positive timeout in seconds is required.",
+      "Execute a bash command from the workspace directory. Returns bounded stdout, stderr, and the exit status. A positive timeout in seconds is required.",
     name: "bash",
     properties: {
       command: {
@@ -109,7 +109,7 @@ const BASE_AGENT_TOOLS = [
       },
       path: {
         description:
-          "Path to the file to edit, relative to the workspace or absolute within it",
+          "Absolute path to the file to edit, or a path relative to the workspace",
         type: "string",
       },
     },
@@ -117,7 +117,7 @@ const BASE_AGENT_TOOLS = [
   }),
   toolDefinition({
     description:
-      "Write content to a file in the workspace. Creates the file if it does not exist, overwrites it if it does, and creates parent directories.",
+      "Write content to a file. Creates the file if it does not exist, overwrites it if it does, and creates parent directories.",
     name: "write",
     properties: {
       content: {
@@ -126,7 +126,7 @@ const BASE_AGENT_TOOLS = [
       },
       path: {
         description:
-          "Path to the file to write, relative to the workspace or absolute within it",
+          "Absolute path to the file to write, or a path relative to the workspace",
         ...STRING_PARAMETER,
       },
     },
