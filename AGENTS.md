@@ -125,16 +125,16 @@ Living project memory.
   metadata. Before each run, `read_agent_file` loads exact-root `AGENTS.md`,
   falling back to `CLAUDE.md`; only `AGENTS.md` is used when both exist.
 
-  `runner/runner-workspace.ts` shares canonical workspace resolution and
-  containment with file tools. Tool and skill choices persist per session.
-  Agent-facing `read_session` is bounded across transcript categories and
-  definitions; `get_session_options` pages spawn choices. Grouped tools manage
-  non-blocking owned children, report final messages, and resume idle parents.
-  `parallel` accepts 2+ calls, uses four ordered workers, bounds output, and
-  propagates cancellation to tools and skills. Picker details use canonical
-  schemas. `solid/session-transcript.tsx` renders prompts, tool definitions, raw
-  details, Markdown, code/JSON, diffs, and contextual results while preserving
-  user line breaks. Session lists paginate by ten. Live sessions use
+  `runner/runner-workspace.ts` owns canonical workspace and tool path
+  resolution. Tool and skill choices persist per session. Agent-facing
+  `read_session` is bounded across transcript categories and definitions;
+  `get_session_options` pages spawn choices. Grouped tools manage non-blocking
+  owned children, report final messages, and resume idle parents. `parallel`
+  accepts 2+ calls, uses four ordered workers, bounds output, and propagates
+  cancellation to tools and skills. Picker details use canonical schemas.
+  `solid/session-transcript.tsx` renders prompts, tool definitions, raw details,
+  Markdown, code/JSON, diffs, and contextual results while preserving user line
+  breaks. Session lists paginate by ten. Live sessions use
   `solid/realtime-client.ts`, `solid/session-client.tsx`, and
   `solid/session-controller.ts`. Model deltas are combined per session once per
   animation frame; snapshots and other events remain immediate. Unchanged

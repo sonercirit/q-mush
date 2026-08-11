@@ -16,14 +16,24 @@ async function loadCandidate(
   root: string,
   path: string,
   name: string,
+  contained: boolean,
 ): Promise<AgentFile | undefined> {
   let opened: Awaited<ReturnType<typeof openSecureRunnerPath>>;
 
   try {
-    opened = await openSecureRunnerPath(root, path);
+    opened = await openSecureRunnerPath(root, path, {}, contained);
   } catch (error) {
     if (isMissingPath(error)) {
       return undefined;
+    }
+    if (
+      contained &&
+      error instanceof Error &&
+      error.message === "The requested path is outside the session workspace"
+    ) {
+      throw new Error("The agent file is outside the session workspace", {
+        cause: error,
+      });
     }
     throw error;
   }
@@ -38,9 +48,12 @@ async function loadCandidate(
   }
 }
 
-async function loadDefaultAgentFile(root: string): Promise<AgentFile | null> {
+async function loadDefaultAgentFile(
+  root: string,
+  contained: boolean,
+): Promise<AgentFile | null> {
   for (const name of AGENT_FILE_NAMES) {
-    const file = await loadCandidate(root, name, name);
+    const file = await loadCandidate(root, name, name, contained);
     if (file !== undefined) {
       return file;
     }
@@ -51,10 +64,11 @@ async function loadDefaultAgentFile(root: string): Promise<AgentFile | null> {
 export async function loadRunnerAgentFile(
   workingDirectory: string,
   customPath?: string,
+  contained = false,
 ): Promise<AgentFile | null> {
   const root = await resolveRunnerWorkspace(workingDirectory);
   if (customPath === undefined) {
-    return loadDefaultAgentFile(root);
+    return loadDefaultAgentFile(root, contained);
   }
-  return (await loadCandidate(root, customPath, customPath)) ?? null;
+  return (await loadCandidate(root, customPath, customPath, contained)) ?? null;
 }

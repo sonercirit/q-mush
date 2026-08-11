@@ -380,6 +380,26 @@ describe("runner WebSocket protocol", () => {
     await expectSpillRemoved(path);
   });
 
+  test("reads a spill larger than the plain-file byte limit", async () => {
+    const spills = new RunnerOutputSpills();
+    const oversized = "spilled line\n".repeat(200_000);
+    const readSpillArguments = [
+      await temporaryDirectory(),
+      "read",
+      { offset: 199_999, path: await spills.spill(oversized) },
+      undefined,
+      undefined,
+      { outputSpills: spills },
+    ] as const;
+
+    const result = await executeRunnerToolResult(...readSpillArguments);
+
+    expect(oversized.length).toBeGreaterThan(1_024 * 1_024);
+    expect(result.state).toBe("completed");
+    expect(result.output).toContain("spilled line");
+    await spills.cleanup();
+  });
+
   test("spills an oversized page fetch result", async () => {
     const root = await temporaryDirectory();
     const spills = new RunnerOutputSpills();

@@ -171,11 +171,17 @@ export function openSecureRunnerPath(
   root: string,
   path: string,
   options: SecureRunnerOpenOptions = {},
+  contained = false,
 ): Promise<OpenRunnerPath> {
-  const candidate = resolve(root, path);
   return secureCanonicalRunnerPath(
-    () => realpath(candidate),
-    validateCanonicalRunnerPath,
+    contained
+      ? () => containedRunnerPath(root, path)
+      : () => realpath(resolve(root, path)),
+    contained
+      ? (openedPath) => {
+          assertWithin(root, openedPath);
+        }
+      : validateCanonicalRunnerPath,
     options,
   );
 }

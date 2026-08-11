@@ -105,6 +105,7 @@ function mapContainerPath(root: string, path: string): string {
 function agentFileResult(
   workingDirectory: string,
   arguments_: RunnerCommandArguments,
+  contained = false,
 ): Promise<RunnerCommandResult> {
   const pathValue = arguments_[RUNNER_AGENT_FILE_PATH_ARGUMENT];
   const path =
@@ -112,10 +113,12 @@ function agentFileResult(
   if (path === null || (pathValue !== undefined && path === undefined)) {
     return Promise.reject(new Error("The agent file path is invalid"));
   }
-  return loadRunnerAgentFile(workingDirectory, path).then((agentFile) => ({
-    output: JSON.stringify(agentFile),
-    state: "completed",
-  }));
+  return loadRunnerAgentFile(workingDirectory, path, contained).then(
+    (agentFile) => ({
+      output: JSON.stringify(agentFile),
+      state: "completed",
+    }),
+  );
 }
 
 /** @public Backwards-compatible runner command helper. */
@@ -209,7 +212,7 @@ export class RunnerCommandExecutor {
         const root = await resolveRunnerWorkspace(command.workingDirectory);
         await this.#containers.prepare(command.sessionId, root, signal);
         if (command.tool === RUNNER_AGENT_FILE_COMMAND) {
-          return await agentFileResult(root, command.arguments);
+          return await agentFileResult(root, command.arguments, true);
         }
         const shell = async (
           _workspace: string,
@@ -235,6 +238,7 @@ export class RunnerCommandExecutor {
           signal,
           undefined,
           {
+            containPaths: true,
             mapAbsolutePath: (path) => mapContainerPath(root, path),
             outputSpills: this.#outputSpill(command.sessionId),
             shell,
