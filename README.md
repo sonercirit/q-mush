@@ -61,12 +61,12 @@ Both commands serve Q Mush at `http://localhost:12345` by default. Set `PORT` to
 override the listening port, and update OAuth callback URLs and registrations to
 match.
 
-Source and local environment edits are watched in development. Changes under
-`runner/`, `shared/`, `solid/`, or `sync-engine/`, plus `.env`, `.env.local`,
-and root build/configuration source, are coalesced before requesting one
-graceful restart. Generated output, dependencies, tests, local data, VCS
-internals, and editor temporary files are ignored. To request the same restart
-explicitly:
+To also watch source and local environment edits, run `bun run dev:watch`
+instead of `bun run dev`. Changes under `runner/`, `shared/`, `solid/`, or
+`sync-engine/`, plus `.env`, `.env.local`, and root build/configuration source,
+are coalesced before requesting one graceful restart. Generated output,
+dependencies, tests, local data, VCS internals, and editor temporary files are
+ignored. To request the same restart explicitly:
 
 ```bash
 bun run dev:restart

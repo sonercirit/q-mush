@@ -42,7 +42,7 @@ Living project memory.
 ## Setup and Commands
 
 - Install/run: `bun install`; `bun run sync-engine/index.ts`
-- Develop: `bun run dev` (+ `dev:restart`); build: `bun run build`
+- Develop: `bun run dev` (+ `dev:restart`, `dev:watch`); build: `bun run build`
 - Migrations: `bun run db:generate` / `db:migrate`
 - Test/watch: `bun run test` / `test:watch`
 - `bun run check` runs all static checks (`format:check`, `typecheck`, `lint`,
@@ -62,30 +62,31 @@ Living project memory.
   Vite builds in memory. Browser state, session updates, and runner work use
   authenticated WebSockets at `/api/realtime` and `/api/runner/realtime`; no
   polling or SSE. Because agents may modify this repository via the running app,
-  `bun run dev` watches production source and local `.env` files, coalesces
-  bursts, and requests the same ignored `data/development-server.restart`
-  trigger as `bun run dev:restart`. `sync-engine/runner-executable.ts`
-  fingerprints the runner source and compiler, builds in a private temp
-  directory, caches in memory, and serves `/runner/executable`. Development
-  restarts queue new agent work, let active steps finish, then replace the
-  server process, so a session can safely request its own restart. Textual
-  bodies precompress once per handler, negotiating `zstd`, Brotli, gzip, then
-  deflate. `/favicon.svg` revalidates with ETag, separate from PWA icons.
+  `bun run dev:watch` watches production source and local `.env` files,
+  coalescing bursts into the ignored `data/development-server.restart` trigger
+  `bun run dev:restart` writes; plain `dev` restarts only on that trigger.
+  `sync-engine/runner-executable.ts` fingerprints the runner source and
+  compiler, builds in a private temp directory, caches in memory, and serves
+  `/runner/executable`. Development restarts queue new agent work, let active
+  steps finish, then replace the server process, so a session can safely request
+  its own restart. Textual bodies precompress once per handler, negotiating
+  `zstd`, Brotli, gzip, then deflate. `/favicon.svg` revalidates with ETag,
+  separate from PWA icons.
 - `solid/pages.tsx` renders both server page shells through Solid's SSR runtime;
   `sync-engine/pages.ts` loads it with Vite's SSR runner for Bun. The browser
   app mounts from `solid/client.tsx`; routes live in `shared/routes.ts`.
 - `sync-engine/auth.ts` implements Google OpenID Connect (authorization code +
   PKCE) with HttpOnly state/verifier cookies, fetching the basic profile and
   discarding provider tokens. `sync-engine/auth-store.ts` uses Drizzle with Bun
-  SQLite to upsert users and persist seven-day sessions in the schema tables.
-  Application primary keys are UUIDv7; Google subjects and session cookie tokens
-  are separate unique fields; every table carries creation/update timestamps,
-  actor IDs, and an `isDeleted` flag. `shared/database.ts` applies committed
-  `drizzle/` migrations on open; `sync-engine/index.ts` injects the persistent
-  connection, and the auth factory falls back to in-memory SQLite. Shared PKCE,
-  provider parsing, and redirects live in `oauth.ts`; cookie and response
-  helpers in `http.ts`. `solid/client.tsx` reads `/api/auth/session`, gates the
-  control center, and posts logout.
+  SQLite to upsert users and persist seven-day sessions. Application primary
+  keys are UUIDv7; Google subjects and session cookie tokens are separate unique
+  fields; every table carries creation/update timestamps, actor IDs, and an
+  `isDeleted` flag. `shared/database.ts` applies committed `drizzle/` migrations
+  on open; `sync-engine/index.ts` injects the persistent connection, and the
+  auth factory falls back to in-memory SQLite. Shared PKCE, provider parsing,
+  and redirects live in `oauth.ts`; cookie and response helpers in `http.ts`.
+  `solid/client.tsx` reads `/api/auth/session`, gates the control center, and
+  posts logout.
 - `sync-engine/runner-store.ts` persists user runner registrations in `runners`:
   one active registration per machine fingerprint, one default runner per user.
   `sync-engine/runners.ts` issues hashed opaque setup tokens, owns authenticated
@@ -100,7 +101,7 @@ Living project memory.
   executable, and restart it; development restarts drain active sessions first.
   Reinstalling for the same user and machine rotates the registration to the new
   token instead of adding a second runner; other users' registrations stay
-  protected, and tokens never appear in list responses.
+  protected, and tokens never appear in lists.
 - Browser messages sort by time then ID; live output anchors after its
   initiating message, snapshots replacing it. `session-agent-read.ts`
   byte-bounds transcript messages, assistant calls, the system prompt, and tool
@@ -111,8 +112,8 @@ Living project memory.
   compaction, token usage, and the context limit; reported charges are
   authoritative; estimates need provider-discovered rates per token category.
   Auto-compaction defaults on: at 95% it summarizes completed history and
-  continues from the handoff; idle sessions compact manually, and compaction
-  soft-deletes prior messages while inserting a replayable handoff. The composer
+  continues from the handoff; idle sessions compact manually; compaction
+  soft-deletes prior messages and inserts a replayable handoff. The composer
   stays mounted across statuses, explaining unavailable actions and preserving
   drafts; local preferences filter transcript categories. Provider secrets stay
   out of browser and runner work payloads. The working-directory field opens
@@ -238,8 +239,8 @@ Living project memory.
 - `shared/ids.ts` is the authoritative UUIDv7 generator and defines `SYSTEM` as
   the system audit actor; user actions use the internal user UUID. Never hard
   delete application records: set `isDeleted`, `updatedAt`, and `updatedById`,
-  and exclude soft-deleted rows from active queries. Audit actor fields are
-  deliberately not foreign keys because `SYSTEM` is not a user row.
+  and exclude soft-deleted rows from active queries. Audit actor fields are not
+  foreign keys because `SYSTEM` is not a user row.
 - Keep HTTP `deflate` zlib-wrapped; Bun's is raw.
 - Knip severities alone do not activate default-off issue types; keep the
   included-issue list complete. Do not run the full test suite in parallel with
@@ -262,8 +263,8 @@ Living project memory.
   cancellation, terminating an active shell command. OpenAI API-key and OAuth
   requests prefer Responses WebSockets, falling back to HTTP streaming;
   OpenRouter and generic endpoints stream chat completions, Anthropic-format
-  endpoints Messages events. OpenAI OAuth refreshes its token bundle shortly
-  before expiry. Session creation requires an explicit model ID with no built-in
+  endpoints Messages events. OpenAI OAuth refreshes its token bundle before
+  expiry. Session creation requires an explicit model ID with no built-in
   fallbacks. Catalogs: OpenAI `/v1/models`, OpenRouter `/api/v1/models/user`,
   ChatGPT Codex `/models`, or the generic `/models`; Anthropic-format catalogs
   read `display_name` and `max_input_tokens`, and merge per-model
