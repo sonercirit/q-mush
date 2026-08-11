@@ -1,4 +1,4 @@
-import { For, type JSX } from "solid-js";
+import { createMemo, For, Index, type JSX } from "solid-js";
 import {
   inlineCodeClasses,
   renderHighlightedCodeWith,
@@ -665,6 +665,43 @@ export function renderMarkdown(
   return (
     <div class="min-w-0 space-y-3 text-sm leading-6 text-slate-200 [overflow-wrap:anywhere]">
       {parseMarkdownBlocks(content, preserveNewlines).map(renderMarkdownBlock)}
+    </div>
+  );
+}
+
+interface RenderedMarkdownBlock {
+  readonly key: string;
+  readonly node: JSX.Element;
+}
+
+/**
+ * Reactive Markdown that re-renders only changed blocks. Streaming deltas
+ * grow the final block, so settled blocks keep their DOM and each frame
+ * renders one block instead of the whole accumulated document.
+ */
+export function MarkdownView(props: {
+  readonly content: string;
+  readonly preserveNewlines?: boolean;
+}): JSX.Element {
+  const blocks = createMemo(() =>
+    parseMarkdownBlocks(props.content, props.preserveNewlines ?? false),
+  );
+  return (
+    <div class="min-w-0 space-y-3 text-sm leading-6 text-slate-200 [overflow-wrap:anywhere]">
+      <Index each={blocks()}>
+        {(block) => {
+          const rendered = createMemo(
+            (previous: RenderedMarkdownBlock | undefined) => {
+              const value = block();
+              const key = `${value.type}:${JSON.stringify(value)}`;
+              return previous?.key === key
+                ? previous
+                : { key, node: renderMarkdownBlock(value) };
+            },
+          );
+          return <>{rendered().node}</>;
+        }}
+      </Index>
     </div>
   );
 }

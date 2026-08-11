@@ -354,7 +354,7 @@ test("filtering streamed categories preserves placeholders and canonical order",
   expectThinkingHidden(container, thinking, "Hidden thought");
   applyTranscriptDelta(controller, detail.id, " continues", " continues");
   expect(container.textContent).toContain("Visible answer continues");
-  expect(messageBoundary(container, streamId)).not.toBe(streamedAnswer);
+  expect(messageBoundary(container, streamId)).toBe(streamedAnswer);
   expect(container.textContent.indexOf("Prompt before stream")).toBeLessThan(
     container.textContent.indexOf("Visible answer continues"),
   );

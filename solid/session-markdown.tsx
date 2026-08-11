@@ -1,1 +1,1 @@
-export { renderMarkdown } from "./session-markdown-render.tsx";
+export { MarkdownView, renderMarkdown } from "./session-markdown-render.tsx";
