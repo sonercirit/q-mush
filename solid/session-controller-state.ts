@@ -212,7 +212,17 @@ function resolveStreamBase(
   streamed: StreamedSessionContent,
 ): StreamedSessionContent {
   if (streamed.baseMessageId !== undefined) return streamed;
-  return { ...streamed, baseMessageId: detail.messages.at(-1)?.id ?? null };
+  // The stream began before this session's detail was available, so the
+  // streamed step may already be persisted. Anchor before the trailing
+  // thinking/assistant run so reconciliation can recognize those messages
+  // as this stream's persisted content instead of duplicating it.
+  let base = detail.messages.length - 1;
+  while (base >= 0) {
+    const role = detail.messages[base]?.role;
+    if (role !== "assistant" && role !== "thinking") break;
+    base -= 1;
+  }
+  return { ...streamed, baseMessageId: detail.messages[base]?.id ?? null };
 }
 
 function streamStartIndex(

@@ -361,6 +361,30 @@ test("anchors a continuation stream after the existing transcript", async () => 
   });
 });
 
+test("drops a stale unanchored stream once its step is already persisted", () => {
+  const sessionId = "session-unseen-delta";
+  const reactive = createReactiveState<SessionViewState>(
+    initialSessionViewState(),
+  );
+  const controller = createRoot(() => new SessionController(reactive));
+  applyDelta(controller, sessionId, "", "Deep analysis");
+
+  reactive.setState((state) => ({ ...state, selectedId: sessionId }));
+  controller.applyDetail(
+    sessionDetail("running", sessionId, [
+      transcriptMessage("user-1", "Request", "user", 1),
+      transcriptMessage("thinking-1", "Deep analysis", "thinking", 2),
+      transcriptMessage("assistant-1", "", "assistant", 3),
+    ]),
+  );
+
+  expect(messageIds(controller)).toEqual([
+    "user-1",
+    "thinking-1",
+    "assistant-1",
+  ]);
+});
+
 test("reconciles reset streams with differently finalized persisted messages", async () => {
   const originalFetch = globalThis.fetch;
   const {
