@@ -158,20 +158,6 @@ test("shows session time and cost in the list and detail", () => {
   expect(html).not.toContain("Run:");
 });
 
-test("shows the running run duration only for active sessions", () => {
-  const session = {
-    ...TEST_SESSION_DETAIL,
-    activeDurationMs: 5_000,
-    activeStartedAt: Date.now() - 8_000,
-    status: "running" as const,
-  };
-  const state = { ...SESSION_STATE, detail: session, selectedId: session.id };
-
-  expect(
-    renderPanel({ ...state, sessions: [session] }).match(/Run: \d+s/gu),
-  ).toHaveLength(2);
-});
-
 test("renders the session list as a scrollable region", () => {
   const html = renderPanel({
     ...SESSION_STATE,

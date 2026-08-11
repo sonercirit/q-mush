@@ -136,16 +136,15 @@ function SessionMetrics(props: {
   >;
 }): JSX.Element {
   const now = createLiveNow(() => props.session.activeStartedAt !== null);
-  const stepStartedAt = (): number | null => props.session.activeStartedAt;
 
   return (
     <span class="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
       <span>
         {`Time: ${formatSessionTime(activeSessionDuration(props.session, now()))}`}
       </span>
-      <Show when={stepStartedAt()} keyed>
+      <Show when={props.session.activeStartedAt} keyed>
         {(startedAt) => (
-          <span class="text-emerald-300/80">
+          <span class="text-emerald-200" data-session-run-duration="true">
             {`Run: ${formatSessionTime(Math.max(0, now() - startedAt))}`}
           </span>
         )}

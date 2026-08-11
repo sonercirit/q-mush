@@ -231,9 +231,10 @@ function useFakeClock(startMs: number): void {
   });
 }
 
-function findSpanText(container: ParentNode, text: string): boolean {
-  return [...container.querySelectorAll("span")].some(
-    ({ textContent }) => textContent === text,
+function runDurationText(container: ParentNode): string | undefined {
+  return (
+    container.querySelector("[data-session-run-duration='true']")
+      ?.textContent ?? undefined
   );
 }
 
@@ -252,7 +253,7 @@ test("a mounted session timer starts when the session begins running", () => {
   vi.advanceTimersByTime(2_000);
 
   expect(sessionTimeText(container)).toBe("Time: 2s");
-  expect(findSpanText(container, "Run: 2s")).toBe(true);
+  expect(runDurationText(container)).toBe("Run: 2s");
 });
 
 test("a retained sidebar row keeps ticking its run duration", () => {
@@ -276,13 +277,11 @@ test("a retained sidebar row keeps ticking its run duration", () => {
     () => <SessionList controller={controller} />,
     disposals,
   );
-  const spans = () => [...container.querySelectorAll("span")];
-  const runLabel = () =>
-    spans().find(({ textContent }) => textContent.startsWith("Run: "));
+  const runLabel = () => runDurationText(container);
   const initialRow = container.querySelector(
     `[data-session-id='${running.id}']`,
   );
-  expect(runLabel()?.textContent).toBe("Run: 0s");
+  expect(runLabel()).toBe("Run: 0s");
 
   vi.advanceTimersByTime(2_000);
   controller.applyRealtime([
@@ -294,7 +293,7 @@ test("a retained sidebar row keeps ticking its run duration", () => {
   expect(container.querySelector(`[data-session-id='${running.id}']`)).toBe(
     initialRow,
   );
-  expect(runLabel()?.textContent).toBe("Run: 3s");
+  expect(runLabel()).toBe("Run: 3s");
 
   controller.applyRealtime([
     { ...running, activeStartedAt: null, status: "idle" as const },
