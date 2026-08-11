@@ -17,7 +17,7 @@ function clearMountedEditor(): void {
 
 afterEach(clearMountedEditor);
 
-test("renders only provider and tool access as compact collapsed rows", () => {
+test("renders provider, cap, and tool access as compact collapsed rows", () => {
   const { container } = mountTestSessionDetail(TEST_SESSION_DETAIL, DISPOSALS);
   const editorGroup = queryTestElementAs(
     container,
@@ -25,17 +25,24 @@ test("renders only provider and tool access as compact collapsed rows", () => {
     HTMLDivElement,
   );
   const rows = [
-    ...editorGroup.querySelectorAll(":scope > .contents > section"),
+    ...editorGroup.querySelectorAll(":scope > [data-session-editor-kind]"),
   ];
 
-  expect(rows).toHaveLength(2);
+  expect(rows).toHaveLength(3);
   expect(container.textContent).not.toContain("Spawn child session");
   expect(
     container.querySelector("[data-session-spawn-toggle='true']"),
   ).toBeNull();
   expect(
     rows.map((row) => row.getAttribute("data-session-editor-kind")),
-  ).toEqual(["provider", "tools"]);
+  ).toEqual(["provider", "cap", "tools"]);
+  expect(
+    rows.map((row) => row.querySelector("button")?.getAttribute("aria-label")),
+  ).toEqual([
+    "Expand Session provider",
+    "Expand Context token cap",
+    "Expand Session tool access",
+  ]);
   for (const row of rows) {
     expect(row.classList).toContain("py-1.5");
     expect(row.classList).not.toContain("py-0");
