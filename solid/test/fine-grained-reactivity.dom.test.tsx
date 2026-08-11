@@ -242,6 +242,11 @@ test("a mounted session timer starts when the session begins running", () => {
   vi.advanceTimersByTime(2_000);
 
   expect(sessionTimeText(container)).toBe("Time: 2s");
+  expect(
+    [...container.querySelectorAll("span")].some(
+      ({ textContent }) => textContent === "Step: 2s",
+    ),
+  ).toBe(true);
 });
 
 test("scrolling away from and back to the transcript end updates scroll lock", () => {
