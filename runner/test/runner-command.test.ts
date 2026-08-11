@@ -14,6 +14,7 @@ import {
   RUNNER_TERMINAL_CLEANUP_ARGUMENT,
   RUNNER_TOOL_OUTPUT_SPILL_COMMAND,
   RUNNER_TOOL_OUTPUT_SPILL_CONTENT_ARGUMENT,
+  type RunnerCommandResult,
   type RunnerToolCommand,
 } from "../../shared/runner-command-broker.ts";
 import { testRunnerCommand } from "../../shared/test/runner-command-fixtures.ts";
@@ -381,11 +382,11 @@ describe("runner WebSocket protocol", () => {
   });
 
   async function expectCompletedSpillRead(
-    readArguments: Parameters<typeof executeRunnerToolResult>,
+    execution: Promise<RunnerCommandResult>,
     spills: RunnerOutputSpills,
     expected: string,
   ): Promise<void> {
-    const result = await executeRunnerToolResult(...readArguments);
+    const result = await execution;
     expect(result.state).toBe("completed");
     expect(result.output).toContain(expected);
     await spills.cleanup();
@@ -403,14 +404,10 @@ describe("runner WebSocket protocol", () => {
       const root = await temporaryDirectory();
 
       await expectCompletedSpillRead(
-        [
-          root,
-          "read",
-          { path },
-          undefined,
-          undefined,
-          { containPaths: true, outputSpills: spills },
-        ],
+        executeRunnerToolResult(root, "read", { path }, undefined, undefined, {
+          containPaths: true,
+          outputSpills: spills,
+        }),
         spills,
         "contained spill body",
       );
@@ -425,14 +422,14 @@ describe("runner WebSocket protocol", () => {
     const oversized = "spilled line\n".repeat(200_000);
     expect(oversized.length).toBeGreaterThan(1_024 * 1_024);
     await expectCompletedSpillRead(
-      [
+      executeRunnerToolResult(
         await temporaryDirectory(),
         "read",
         { offset: 199_999, path: await spills.spill(oversized) },
         undefined,
         undefined,
         { outputSpills: spills },
-      ],
+      ),
       spills,
       "spilled line",
     );

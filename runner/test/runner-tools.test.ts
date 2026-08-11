@@ -221,6 +221,15 @@ describe("runner tools", () => {
     expect(tooLong.message).toContain("prompt must be a string");
   });
 
+  test("displays double-dot-named workspace files relatively", async () => {
+    const written = await executeRunnerTool(await workspace(), "write", {
+      content: "kept relative\n",
+      path: "..notes",
+    });
+
+    expect(written).toContain("Wrote 14 bytes to ..notes.");
+  });
+
   test("reads and writes sibling paths outside the workspace", async () => {
     const outside = await workspace();
     const root = join(outside, "workspace");
