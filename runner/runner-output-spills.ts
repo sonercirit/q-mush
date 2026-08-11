@@ -91,9 +91,11 @@ export class RunnerOutputSpills {
     this.#spillSequence += 1;
     const path = join(directory, `output-${String(this.#spillSequence)}.txt`);
     await writeFile(path, content, { encoding: "utf8", mode: 0o600 });
-    // Record the canonical location so ownsPath matches canonicalized reads
-    // even when the temporary directory itself sits behind a symlink.
-    this.#spillPaths.add(await realpath(path));
-    return path;
+    // Record and hand out the canonical location so ownsPath matches both the
+    // advertised path and canonicalized reads even when the temporary
+    // directory itself sits behind a symlink.
+    const canonical = await realpath(path);
+    this.#spillPaths.add(canonical);
+    return canonical;
   }
 }

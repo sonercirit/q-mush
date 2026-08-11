@@ -1,5 +1,5 @@
 import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, relative, resolve } from "node:path";
+import { basename, dirname, relative, resolve, sep } from "node:path";
 import {
   agentAttachmentMediaTypeFromName,
   MAXIMUM_AGENT_ATTACHMENT_BYTES,
@@ -174,6 +174,7 @@ async function pathArgument(
   }
   if (options.allowedExternalPath?.(resolve(root, mapped)) === true) {
     const canonical = await realpath(mapped);
+    // Re-check after canonicalization so a symlink swap cannot widen access.
     if (options.allowedExternalPath(canonical)) {
       return canonical;
     }
@@ -184,7 +185,9 @@ async function pathArgument(
 function displayPath(root: string, path: string): string {
   const displayed = relative(root, path);
   if (displayed.length === 0) return ".";
-  return displayed.startsWith("..") ? path : displayed;
+  return displayed === ".." || displayed.startsWith(`..${sep}`)
+    ? path
+    : displayed;
 }
 
 async function readTextFile(
@@ -616,12 +619,6 @@ function parallelArguments(
   ];
 }
 
-function parallelResultFromResolved(
-  resolved: ResolvedRunnerTool,
-): Promise<RunnerCommandResult> {
-  return parallelToolResult(...parallelArguments(resolved));
-}
-
 async function executeResolvedRunnerTool(
   resolved: ResolvedRunnerTool,
 ): Promise<string> {
@@ -676,7 +673,7 @@ async function resolvedRunnerTool(
   };
 }
 
-/** @public Direct runner-tool helper retained for runner integrations. */
+/** @public Direct runner-tool helper for runner integrations. */
 export async function executeRunnerTool(
   ...parameters: ExecuteRunnerToolArguments
 ): Promise<string> {
@@ -693,7 +690,7 @@ export async function executeRunnerToolResult(
   const resolved = await resolvedRunnerTool(parameters);
   const spills = resolved.options?.outputSpills;
   if (resolved.name === "parallel") {
-    const result = await parallelResultFromResolved(resolved);
+    const result = await parallelToolResult(...parallelArguments(resolved));
     if (spills !== undefined) {
       return { ...result, output: await spills.apply(result.output) };
     }

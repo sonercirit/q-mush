@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { describe, expect, test } from "vitest";
 import {
@@ -380,24 +380,62 @@ describe("runner WebSocket protocol", () => {
     await expectSpillRemoved(path);
   });
 
+  async function expectCompletedSpillRead(
+    readArguments: Parameters<typeof executeRunnerToolResult>,
+    spills: RunnerOutputSpills,
+    expected: string,
+  ): Promise<void> {
+    const result = await executeRunnerToolResult(...readArguments);
+    expect(result.state).toBe("completed");
+    expect(result.output).toContain(expected);
+    await spills.cleanup();
+  }
+
+  test("reads a contained spill under a symlinked temporary directory", async () => {
+    const realTemporary = await temporaryDirectory();
+    const linkedTemporary = join(await temporaryDirectory(), "tmp-link");
+    await symlink(realTemporary, linkedTemporary);
+    const originalTmpdir = process.env["TMPDIR"];
+    process.env["TMPDIR"] = linkedTemporary;
+    try {
+      const spills = new RunnerOutputSpills();
+      const path = await spills.spill("contained spill body\n");
+      const root = await temporaryDirectory();
+
+      await expectCompletedSpillRead(
+        [
+          root,
+          "read",
+          { path },
+          undefined,
+          undefined,
+          { containPaths: true, outputSpills: spills },
+        ],
+        spills,
+        "contained spill body",
+      );
+    } finally {
+      if (originalTmpdir === undefined) delete process.env["TMPDIR"];
+      else process.env["TMPDIR"] = originalTmpdir;
+    }
+  });
+
   test("reads a spill larger than the plain-file byte limit", async () => {
     const spills = new RunnerOutputSpills();
     const oversized = "spilled line\n".repeat(200_000);
-    const readSpillArguments = [
-      await temporaryDirectory(),
-      "read",
-      { offset: 199_999, path: await spills.spill(oversized) },
-      undefined,
-      undefined,
-      { outputSpills: spills },
-    ] as const;
-
-    const result = await executeRunnerToolResult(...readSpillArguments);
-
     expect(oversized.length).toBeGreaterThan(1_024 * 1_024);
-    expect(result.state).toBe("completed");
-    expect(result.output).toContain("spilled line");
-    await spills.cleanup();
+    await expectCompletedSpillRead(
+      [
+        await temporaryDirectory(),
+        "read",
+        { offset: 199_999, path: await spills.spill(oversized) },
+        undefined,
+        undefined,
+        { outputSpills: spills },
+      ],
+      spills,
+      "spilled line",
+    );
   });
 
   test("spills an oversized page fetch result", async () => {

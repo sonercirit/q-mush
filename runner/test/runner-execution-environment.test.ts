@@ -166,9 +166,54 @@ describe("container runner commands", () => {
       workingDirectory: root,
     });
 
+    const writeEscape = await executor.execute(
+      command("write", "container", root, {
+        content: "leak",
+        path: `${outside}/injected.txt`,
+      }),
+    );
+    const editEscape = await executor.execute(
+      command("edit", "container", root, {
+        edits: [{ newText: "changed", oldText: "host secret" }],
+        path: "../secret.txt",
+      }),
+    );
+    const explainEscape = await executor.execute(
+      command("explain_file", "container", root, {
+        path: `${outside}/secret.txt`,
+      }),
+    );
+    const parallelEscape = await executor.execute(
+      command("parallel", "container", root, {
+        tool_uses: [
+          {
+            parameters: { path: "../secret.txt" },
+            recipient_name: "read",
+          },
+          {
+            parameters: { content: "leak", path: `${outside}/parallel.txt` },
+            recipient_name: "write",
+          },
+        ],
+      }),
+    );
+
     expect(escape).toContain("outside the session workspace");
     expect(absoluteEscape).toContain("outside the session workspace");
     expect(agentFile).toContain("outside the session workspace");
+    for (const blocked of [writeEscape, editEscape, explainEscape]) {
+      expect(blocked).toContain("outside the session workspace");
+    }
+    expect(
+      parallelEscape.match(/outside the session workspace/gu),
+    ).toHaveLength(2);
+    const leaked = await Promise.all(
+      ["injected.txt", "parallel.txt"].map((name) =>
+        Bun.file(`${outside}/${name}`).exists(),
+      ),
+    );
+    expect(leaked).toEqual([false, false]);
+    expect(await Bun.file(`${outside}/secret.txt`).text()).toBe("host secret");
     expect(
       await executor.execute(
         command("read", "container", root, { path: "README.md" }),

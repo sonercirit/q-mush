@@ -261,31 +261,32 @@ Living project memory.
   Cross-target compilation may first download the matching Bun executable into
   Bun's user cache, while subsequent runner downloads use the in-process binary
   cache.
-- File tools resolve relative paths against the runner workspace but accept any
-  runner-account-accessible path; only attachment records stay contained. `read`
-  pages its source; `bash` runs there with full account permissions. The
-  directory picker browses with runner-account permissions, returns directory
-  metadata only, bounds each listing, and times out stalled requests. Stopping a
-  session aborts its model request and pushes runner-command cancellation over
-  WebSocket so an active shell command terminates. OpenAI API-key and OAuth
-  requests prefer Responses WebSocket mode and fall back to HTTP streaming;
-  OpenRouter uses its supported streaming chat-completions transport. OpenAI
-  OAuth refreshes its encrypted token bundle shortly before expiry. Session
-  creation requires an explicit model ID; there are no built-in fallback model
-  IDs. Catalogs come from OpenAI `/v1/models`, OpenRouter `/api/v1/models/user`,
-  ChatGPT Codex `/models`, or the configured generic `/models`. Codex parsing
-  retains streamed output-text and function-call argument deltas because a
-  completed event may omit its `output` items. OpenAI's standard catalog lacks
-  reasoning metadata; only explicitly listed Codex, OpenRouter, or generic
-  efforts are offered. Optional reasoning uses `reasoning_effort` for OpenAI and
-  generic chat completions and `reasoning.effort` for OpenRouter and Codex
-  Responses. Streamed reasoning deltas are grouped by `output_index` and
-  `summary_index`; separate summary parts with paragraphs because completed
-  responses may omit their output. OpenAI Responses WebSockets and accepted HTTP
-  streams retry transient interruptions or provider error events only before a
-  model step is persisted; partial UI deltas reset before replay, and exhausted
-  WebSockets fall back to HTTP. Permanent provider errors and aborts do not
-  retry, and terminal failures persist as non-replayed `error` messages.
+- Bare-metal file tools resolve relative paths against the runner workspace but
+  accept any runner-account-accessible path; container sessions and attachment
+  records stay contained (file tools run on the host, so containment is the
+  container boundary). `read` pages its source. The directory picker browses
+  with runner-account permissions, returns directory metadata only, bounds each
+  listing, and times out stalled requests. Stopping a session aborts its model
+  request and pushes runner-command cancellation over WebSocket so an active
+  shell command terminates. OpenAI API-key and OAuth requests prefer Responses
+  WebSocket mode and fall back to HTTP streaming; OpenRouter uses its supported
+  streaming chat-completions transport. OpenAI OAuth refreshes its encrypted
+  token bundle shortly before expiry. Session creation requires an explicit
+  model ID; there are no built-in fallback model IDs. Catalogs come from OpenAI
+  `/v1/models`, OpenRouter `/api/v1/models/user`, ChatGPT Codex `/models`, or
+  the configured generic `/models`. Codex parsing retains streamed output-text
+  and function-call argument deltas because a completed event may omit its
+  `output` items. OpenAI's standard catalog lacks reasoning metadata; only
+  explicitly listed Codex, OpenRouter, or generic efforts are offered. Optional
+  reasoning uses `reasoning_effort` for OpenAI and generic chat completions and
+  `reasoning.effort` for OpenRouter and Codex Responses. Streamed reasoning
+  deltas are grouped by `output_index` and `summary_index`; separate summary
+  parts with paragraphs because completed responses may omit their output.
+  OpenAI Responses WebSockets and accepted HTTP streams retry transient
+  interruptions or provider error events only before a model step is persisted;
+  partial UI deltas reset before replay, and exhausted WebSockets fall back to
+  HTTP. Permanent provider errors and aborts do not retry, and terminal failures
+  persist as non-replayed `error` messages.
 - Shell commands require a positive timeout. On macOS/Linux each has a POSIX
   session; stop/timeout signals only its group, including descendants retaining
   pipes. Agent launches and runner commands otherwise have no application-owned

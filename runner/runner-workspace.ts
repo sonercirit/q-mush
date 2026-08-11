@@ -43,7 +43,7 @@ async function existingAncestor(path: string): Promise<string> {
   }
 }
 
-/** Contained resolution for session attachment records only. */
+/** Contained resolution for attachment records and container sessions. */
 export async function containedRunnerPath(
   root: string,
   path: string,
