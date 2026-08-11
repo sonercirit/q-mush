@@ -259,15 +259,6 @@ class DrizzleSessionIntegration
       runnerIsAvailable: this.#runnerAvailable,
       ...this.#sessionState(),
     });
-    this.#liveness = createSessionLivenessWatchdog({
-      actions: this.#actions,
-      broker: this.#broker,
-      database,
-      dependencies,
-      runtimes: this.#runtimes,
-      shutdownInterrupted: this.#shutdown,
-      ...this.#sessionState(),
-    });
     this.#runners.onRemoving((userId, runnerId) => {
       this.#removal.removing(userId, runnerId);
     });
@@ -284,6 +275,16 @@ class DrizzleSessionIntegration
       store: this.#store,
     });
     void recoverAnsweredQuestions(this.#questions);
+    // Last so a constructor failure above cannot orphan the scan interval.
+    this.#liveness = createSessionLivenessWatchdog({
+      actions: this.#actions,
+      broker: this.#broker,
+      database,
+      dependencies,
+      runtimes: this.#runtimes,
+      shutdownInterrupted: this.#shutdown,
+      ...this.#sessionState(),
+    });
     this.#store.queuedSessionOwnerIds().forEach(this.#launchQueued);
   }
 

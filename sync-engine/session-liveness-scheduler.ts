@@ -79,19 +79,25 @@ export function createSessionLivenessWatchdog(
     watchdog.scan();
   };
   dependencies.liveness?.testScan?.(scan);
-  let stop: () => void;
+  let clear: () => void;
   if (dependencies.liveness?.setInterval === undefined) {
     const timer = setInterval(scan, intervalMs);
     timer.unref();
-    stop = () => {
+    clear = () => {
       clearInterval(timer);
     };
   } else {
     const timer = dependencies.liveness.setInterval(scan, intervalMs);
-    const clear = dependencies.liveness.clearInterval;
-    stop = () => {
-      clear?.(timer);
+    const clearInjected = dependencies.liveness.clearInterval;
+    clear = () => {
+      clearInjected?.(timer);
     };
   }
+  let stopped = false;
+  const stop = (): void => {
+    if (stopped) return;
+    stopped = true;
+    clear();
+  };
   return { stop, watchdog };
 }
