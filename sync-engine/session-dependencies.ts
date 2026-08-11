@@ -11,9 +11,13 @@ import type { SessionWorkspaceReader } from "./session-workspace.ts";
 interface SessionLivenessOptions {
   /** Internal test-only escape hatch for deterministic sub-floor timers. */
   readonly allowUnsafeTestTiming?: boolean;
+  /**
+   * Pairs with an injected setInterval; without it, stop() cannot clear an
+   * injected timer, so only omit it for timers that never fire on their own.
+   */
+  readonly clearInterval?: (timer: unknown) => void;
   readonly graceMs?: number;
   readonly intervalMs?: number;
-  readonly clearInterval?: (timer: unknown) => void;
   readonly setInterval?: (callback: () => void, interval: number) => unknown;
   readonly testScan?: (scan: () => void) => void;
 }
