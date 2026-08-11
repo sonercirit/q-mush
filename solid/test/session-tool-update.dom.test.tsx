@@ -36,6 +36,13 @@ test("renders provider, cap, and tool access as compact collapsed rows", () => {
   expect(
     rows.map((row) => row.getAttribute("data-session-editor-kind")),
   ).toEqual(["provider", "cap", "tools"]);
+  expect(
+    rows.map((row) => row.querySelector("button")?.getAttribute("aria-label")),
+  ).toEqual([
+    "Expand Session provider",
+    "Expand Context token cap",
+    "Expand Session tool access",
+  ]);
   for (const row of rows) {
     expect(row.classList).toContain("py-1.5");
     expect(row.classList).not.toContain("py-0");

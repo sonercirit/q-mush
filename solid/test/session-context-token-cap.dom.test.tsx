@@ -265,6 +265,11 @@ test("keeps cap controls collapsed until expanded and hides them again", () => {
   expect(capState()).toEqual(collapsedState);
 
   clickTestButton(container, "[data-session-cap-toggle='true']");
+  expect(
+    container
+      .querySelector("[data-session-cap-toggle='true']")
+      ?.getAttribute("aria-label"),
+  ).toBe("Collapse Context token cap");
   const expanded = capState();
   expect(expanded.described).toBe(true);
   expect(expanded.input).toBeInstanceOf(HTMLInputElement);
