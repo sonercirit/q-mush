@@ -69,6 +69,50 @@ test.each([
   },
 );
 
+test("drops a stale stream whose buffer holds only a suffix of the step", () => {
+  const controller = unanchoredDeltaController(
+    "session-partial-buffer",
+    "",
+    "analysis",
+    [...UNANCHORED_STEP_MESSAGES],
+  );
+
+  expect(sessionMessageIds(controller)).toEqual(
+    UNANCHORED_STEP_MESSAGES.map(({ id }) => id),
+  );
+});
+
+test("keeps a fresh stream matching an earlier step's assistant text", () => {
+  const sessionId = "session-cross-step";
+  const controller = unanchoredDeltaController(sessionId, "Done", "", [
+    transcriptMessage("user-1", "Request", "user", 1),
+    transcriptMessage("assistant-old", "Done", "assistant", 2),
+    {
+      ...createDisplaySessionMessage({
+        content: "tool output",
+        createdAt: 3,
+        id: "tool-old",
+        role: "tool",
+      }),
+      toolCallId: "call-old",
+      toolName: "bash",
+    },
+    transcriptMessage("thinking-new", "Next step", "thinking", 4),
+    transcriptMessage("assistant-new", "", "assistant", 5),
+  ]);
+
+  // The final step's assistant is empty, so "Done" only matches the earlier
+  // step's text and must not anchor there; the stream stays live at the end.
+  expect(sessionMessageIds(controller)).toEqual([
+    "user-1",
+    "assistant-old",
+    "tool-old",
+    "thinking-new",
+    "assistant-new",
+    `stream:${sessionId}:assistant`,
+  ]);
+});
+
 test("keeps a fresh unanchored continuation after a prior trailing assistant", () => {
   const sessionId = "session-fresh-continuation";
   const controller = unanchoredDeltaController(

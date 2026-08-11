@@ -61,36 +61,55 @@ function sessionIsActive(detail: AgentSessionDetail): boolean {
   );
 }
 
+// A buffered stream matches persisted text exactly, or as its tail or head
+// when the buffer missed leading deltas or stopped before the step settled.
+function streamBufferMatches(persisted: string, buffered: string): boolean {
+  return (
+    buffered.length > 0 &&
+    (persisted === buffered ||
+      persisted.endsWith(buffered) ||
+      persisted.startsWith(buffered))
+  );
+}
+
 function persistedStreamStart(
   messages: AgentSessionDetail["messages"],
   streamed: StreamedSessionContent,
 ): number | undefined {
-  // Search the trailing step run (thinking/assistant/tool messages) for
-  // persisted content matching the buffered stream. Content equality is the
-  // evidence that this exact stream already persisted; role presence alone
-  // would swallow fresh streams after unrelated trailing assistants.
+  // Search only the final step run (its tool results, one assistant, and one
+  // thinking message) for persisted content matching the buffered stream.
+  // A content match is the evidence that this exact stream already
+  // persisted; role presence alone would swallow fresh streams after
+  // unrelated trailing assistants, and earlier steps' text must not match.
+  let assistantIndex: number | undefined;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    if (message === undefined) return undefined;
-    if (
-      message.role !== "assistant" &&
-      message.role !== "thinking" &&
-      message.role !== "tool"
-    ) {
-      return undefined;
+    const role = message?.role;
+    if (message === undefined || role === undefined) return undefined;
+    if (role === "tool") continue;
+    if (role === "assistant" && assistantIndex === undefined) {
+      assistantIndex = index;
+      if (
+        streamed.thinking.length === 0 &&
+        streamBufferMatches(message.content, streamed.content)
+      ) {
+        return index;
+      }
+      continue;
     }
-    if (streamed.thinking.length > 0) {
-      if (message.role !== "thinking" || message.content !== streamed.thinking)
-        continue;
+    if (role === "thinking" && streamed.thinking.length > 0) {
+      if (!streamBufferMatches(message.content, streamed.thinking)) {
+        return undefined;
+      }
       if (streamed.content.length === 0) return index;
-      const assistant = messages
-        .slice(index + 1)
-        .find(({ role }) => role === "assistant");
-      return assistant?.content === streamed.content ? index : undefined;
+      const assistant =
+        assistantIndex === undefined ? undefined : messages[assistantIndex];
+      return assistant !== undefined &&
+        streamBufferMatches(assistant.content, streamed.content)
+        ? index
+        : undefined;
     }
-    if (message.role === "assistant" && message.content === streamed.content) {
-      return index;
-    }
+    return undefined;
   }
   return undefined;
 }
@@ -104,16 +123,17 @@ function resolveStreamBase(
   // streamed step may already be persisted. Anchor before the persisted
   // messages whose content matches the stream so reconciliation recognizes
   // them as this stream's content; otherwise the stream is new and anchors
-  // after the existing transcript.
+  // after the existing transcript. A pending compaction request always
+  // anchors after the transcript so reconciliation appends it last.
   const persistedStart =
-    streamed.thinking.length === 0 && streamed.content.length === 0
+    streamed.compactionRequest !== undefined
       ? undefined
       : persistedStreamStart(detail.messages, streamed);
-  const base =
+  const baseMessage =
     persistedStart === undefined
-      ? detail.messages.length - 1
-      : persistedStart - 1;
-  return { ...streamed, baseMessageId: detail.messages[base]?.id ?? null };
+      ? detail.messages.at(-1)
+      : detail.messages[persistedStart - 1];
+  return { ...streamed, baseMessageId: baseMessage?.id ?? null };
 }
 
 function streamStartIndex(
