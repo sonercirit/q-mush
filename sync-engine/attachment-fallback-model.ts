@@ -97,10 +97,15 @@ export async function explainAttachment(
     provider: selectedProvider,
     providerPricing: selectedPricing,
   });
-  const step = await model.complete(
-    [{ attachments: [options.attachment], content: "", role: "user" }],
-    signal,
-  );
+  let step;
+  try {
+    step = await model.complete(
+      [{ attachments: [options.attachment], content: "", role: "user" }],
+      signal,
+    );
+  } finally {
+    model.close?.();
+  }
   return {
     content: step.content,
     model: selectedModelId,

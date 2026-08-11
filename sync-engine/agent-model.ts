@@ -51,8 +51,8 @@ import type {
 } from "./provider-request.ts";
 import type { ProviderTextDelta } from "./provider-stream.ts";
 import {
-  completeProviderWebSocket,
   ProviderWebSocketError,
+  ProviderWebSocketSession,
   type ProviderWebSocketFactory,
 } from "./provider-websocket.ts";
 
@@ -382,6 +382,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
   readonly #selectedTools: readonly AgentSessionToolName[];
   readonly #tools: readonly AgentToolDefinition[];
   readonly #webSocket: ProviderWebSocketFactory;
+  readonly #webSocketSession = new ProviderWebSocketSession();
 
   constructor(options: ChatCompletionsAgentModelOptions) {
     this.#credential = options.credential;
@@ -409,6 +410,10 @@ export class ChatCompletionsAgentModel implements AgentModel {
 
   readonly startStep = (): void => {
     this.#onStepStart();
+  };
+
+  readonly close = (): void => {
+    this.#webSocketSession.close();
   };
 
   async complete(...parameters: CompletionArguments): Promise<AgentModelStep> {
@@ -532,10 +537,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
       throw new Error("The model request body was invalid");
     }
 
-    // One socket per step is deliberate: reads through a reused connection
-    // lose the Codex prompt cache (measured 0% on later turns), so per-step
-    // reconnects are cache-protective.
-    return completeProviderWebSocket({
+    return this.#webSocketSession.complete({
       body,
       createSocket: this.#webSocket,
       headers: headersRecord(headers),

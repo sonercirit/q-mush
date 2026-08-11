@@ -20,6 +20,8 @@ export type ProviderWebSocketFactory = (
   options: ProviderWebSocketOptions,
 ) => ProviderWebSocket;
 
+const OPEN_STATE = 1;
+
 export class ProviderWebSocketError extends Error {
   readonly retryAfterMilliseconds: number | undefined;
   readonly started: boolean;
@@ -48,123 +50,181 @@ function messageText(event: Event): string {
   return event.data;
 }
 
-export function completeProviderWebSocket(options: {
+interface ProviderWebSocketRequest {
   readonly body: Readonly<Record<string, unknown>>;
   readonly createSocket: ProviderWebSocketFactory;
   readonly headers: Readonly<Record<string, string>>;
   readonly onDelta?: (delta: ProviderTextDelta) => void;
   readonly signal?: AbortSignal;
   readonly url: string;
-}): Promise<AgentModelStep> {
-  if (options.signal?.aborted === true) {
-    return Promise.reject(abortError());
+}
+
+// A session keeps one provider socket open across sequential steps: a live
+// A/B re-test measured reuse and per-step reconnects cache-neutral (~92%
+// cacheable-prefix reads at hit, sporadic misses in both — the early
+// 0%-on-reuse reading did not reproduce), so reuse saves a TLS and WebSocket
+// handshake per step. Failed or aborted requests close the socket; the next
+// step reconnects.
+export class ProviderWebSocketSession {
+  #socket: ProviderWebSocket | undefined;
+
+  close(): void {
+    const socket = this.#socket;
+    this.#socket = undefined;
+    socket?.close(1000, "Session complete");
   }
 
-  return new Promise<AgentModelStep>((resolve, reject) => {
-    const accumulator = createProviderStreamAccumulator(
-      "responses",
-      options.onDelta,
-    );
-    let opened = false;
-    let receivedEvent = false;
-    let settled = false;
-    const socket = options.createSocket(options.url, {
-      headers: options.headers,
-    });
-    const settle = (error: Error | undefined, step?: AgentModelStep): void => {
-      if (settled) {
-        return;
-      }
+  #takeOpenSocket(): ProviderWebSocket | undefined {
+    const socket = this.#socket;
+    this.#socket = undefined;
+    if (socket === undefined) {
+      return undefined;
+    }
+    if (socket.readyState === OPEN_STATE) {
+      return socket;
+    }
+    socket.close(1000, "Connection expired");
+    return undefined;
+  }
 
-      settled = true;
-      options.signal?.removeEventListener("abort", onAbort);
-      if (error === undefined && step !== undefined) {
-        resolve(step);
-      } else {
-        reject(error ?? new Error("The provider returned no model step"));
-      }
-    };
-    const fail = (error: Error): void => {
-      settle(error);
-    };
-    const failUnknown = (error: unknown): void => {
-      if (error instanceof ProviderStreamError && error.transient) {
-        fail(
-          new ProviderWebSocketError(
-            error.message,
-            receivedEvent,
-            error.retryAfterMilliseconds,
-          ),
-        );
-        return;
-      }
-      fail(error instanceof Error ? error : new Error(String(error)));
-    };
-    const onAbort = (): void => {
-      fail(abortError());
-      socket.close(1000, "Aborted");
-    };
+  complete(options: ProviderWebSocketRequest): Promise<AgentModelStep> {
+    if (options.signal?.aborted === true) {
+      return Promise.reject(abortError());
+    }
 
-    socket.addEventListener("open", () => {
-      try {
-        socket.send(
-          JSON.stringify({ ...options.body, type: "response.create" }),
-        );
-        opened = true;
-      } catch (error) {
-        failUnknown(error);
-      }
-    });
-
-    socket.addEventListener("message", (event) => {
-      if (settled) {
-        return;
-      }
-      let invalidProviderMessage = true;
-      try {
-        const value: unknown = JSON.parse(messageText(event));
-        invalidProviderMessage = false;
-        accumulator.push(value);
-        receivedEvent = true;
-
-        if (accumulator.completed) {
-          settle(undefined, accumulator.finish());
-          socket.close(1000, "Complete");
-        }
-      } catch (error) {
-        failUnknown(error);
-        socket.close(
-          invalidProviderMessage ? 1002 : 1011,
-          invalidProviderMessage
-            ? "Invalid provider message"
-            : "Provider request failed",
-        );
-      }
-    });
-    socket.addEventListener("error", () => {
-      if (settled) {
-        return;
-      }
-      fail(
-        new ProviderWebSocketError(
-          "The provider WebSocket connection failed",
-          receivedEvent,
-        ),
+    return new Promise<AgentModelStep>((resolve, reject) => {
+      const accumulator = createProviderStreamAccumulator(
+        "responses",
+        options.onDelta,
       );
-      socket.close(1011, "Provider connection failed");
-    });
-    socket.addEventListener("close", () => {
-      if (!settled) {
+      const reusedSocket = this.#takeOpenSocket();
+      const socket =
+        reusedSocket ??
+        options.createSocket(options.url, { headers: options.headers });
+      let opened = reusedSocket !== undefined;
+      let receivedEvent = false;
+      let settled = false;
+      const settle = (
+        error: Error | undefined,
+        step?: AgentModelStep,
+      ): void => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        options.signal?.removeEventListener("abort", onAbort);
+        socket.removeEventListener("open", onOpen);
+        socket.removeEventListener("message", onMessage);
+        socket.removeEventListener("error", onError);
+        socket.removeEventListener("close", onClose);
+        if (error === undefined && step !== undefined) {
+          this.#socket = socket;
+          resolve(step);
+        } else {
+          reject(error ?? new Error("The provider returned no model step"));
+        }
+      };
+      const fail = (error: Error): void => {
+        settle(error);
+      };
+      const failUnknown = (error: unknown): void => {
+        if (error instanceof ProviderStreamError && error.transient) {
+          fail(
+            new ProviderWebSocketError(
+              error.message,
+              receivedEvent,
+              error.retryAfterMilliseconds,
+            ),
+          );
+          return;
+        }
+        fail(error instanceof Error ? error : new Error(String(error)));
+      };
+      const onAbort = (): void => {
+        fail(abortError());
+        socket.close(1000, "Aborted");
+      };
+      const onOpen = (): void => {
+        try {
+          socket.send(
+            JSON.stringify({ ...options.body, type: "response.create" }),
+          );
+          opened = true;
+        } catch (error) {
+          if (reusedSocket === undefined) {
+            failUnknown(error);
+            return;
+          }
+          // A reused socket that rejects a send died between steps; surface
+          // the transient connection error so the caller reconnects.
+          fail(
+            new ProviderWebSocketError(
+              "The provider WebSocket connection was unavailable",
+              receivedEvent,
+            ),
+          );
+          socket.close(1011, "Provider connection failed");
+        }
+      };
+      const onMessage = (event: Event): void => {
+        if (settled) {
+          return;
+        }
+        let invalidProviderMessage = true;
+        try {
+          const value: unknown = JSON.parse(messageText(event));
+          invalidProviderMessage = false;
+          accumulator.push(value);
+          receivedEvent = true;
+
+          if (accumulator.completed) {
+            settle(undefined, accumulator.finish());
+          }
+        } catch (error) {
+          failUnknown(error);
+          socket.close(
+            invalidProviderMessage ? 1002 : 1011,
+            invalidProviderMessage
+              ? "Invalid provider message"
+              : "Provider request failed",
+          );
+        }
+      };
+      const onError = (): void => {
+        if (settled) {
+          return;
+        }
         fail(
           new ProviderWebSocketError(
-            opened
-              ? "The provider WebSocket closed before completion"
-              : "The provider WebSocket connection was unavailable",
+            "The provider WebSocket connection failed",
             receivedEvent,
           ),
         );
+        socket.close(1011, "Provider connection failed");
+      };
+      const onClose = (): void => {
+        if (!settled) {
+          fail(
+            new ProviderWebSocketError(
+              opened
+                ? "The provider WebSocket closed before completion"
+                : "The provider WebSocket connection was unavailable",
+              receivedEvent,
+            ),
+          );
+        }
+      };
+
+      socket.addEventListener("message", onMessage);
+      socket.addEventListener("error", onError);
+      socket.addEventListener("close", onClose);
+      options.signal?.addEventListener("abort", onAbort);
+      if (reusedSocket === undefined) {
+        socket.addEventListener("open", onOpen);
+      } else {
+        onOpen();
       }
     });
-    options.signal?.addEventListener("abort", onAbort, { once: true });
-  });
+  }
 }

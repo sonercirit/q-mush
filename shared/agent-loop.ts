@@ -106,6 +106,9 @@ export interface AgentModelStep {
 }
 
 export interface AgentModel {
+  // Releases pooled provider resources (such as a kept-alive WebSocket) when
+  // the owning run finishes; safe to omit and to call repeatedly.
+  readonly close?: () => void;
   readonly complete: (
     messages: readonly AgentConversationMessage[],
     signal?: AbortSignal,

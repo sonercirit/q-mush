@@ -22,7 +22,7 @@ Living project memory.
   prefer the simplest clear solution.
 - Never invent numeric limits or tunables: probe omission first and prefer the
   provider's default; otherwise derive values from provider metadata, docs, or
-  provider feedback.
+  feedback.
 - Integrate completely the first time: wire every session capability (reasoning,
   caching, attachments, limits) to each protocol's native control, recording
   what a protocol lacks.
@@ -32,7 +32,9 @@ Living project memory.
   harmful, codify why in a test.
 - Record new decisions, gotchas, and lessons here in the same change, unprompted
   — a repeated user instruction means a rule is missing, so add it; condense
-  elsewhere to fit the size policy.
+  elsewhere to fit the size policy. When evidence overturns a recorded finding,
+  fix the code it justified and every stale record — here, code comments,
+  handoff, PR text — in that change; act, don't ask.
 - Keep workflows local-first. Time is money: narrow checks per change, broad
   suites once with output captured, then rerun only the narrowest failing scope.
 - Never commit secrets, generated artifacts, or env files.
@@ -83,8 +85,7 @@ Living project memory.
   connection, and the auth factory falls back to in-memory SQLite. Shared PKCE,
   provider parsing, and redirects live in `oauth.ts`; cookie and response
   helpers in `http.ts`. `solid/client.tsx` reads `/api/auth/session`, gates the
-  control center, and posts logout; API routes derive from the `/api` base in
-  `shared/routes.ts`.
+  control center, and posts logout.
 - `sync-engine/runner-store.ts` persists user runner registrations in `runners`:
   one active registration per machine fingerprint, one default runner per user.
   `sync-engine/runners.ts` issues hashed opaque setup tokens, owns authenticated
@@ -105,21 +106,18 @@ Living project memory.
   byte-bounds transcript messages, assistant calls, the system prompt, and tool
   definitions.
 - `sync-engine/sessions.ts` and `session-store.ts` persist coding sessions. User
-  messages support eight 10 MB PNG/JPEG/GIF/WebP images, persisted with the
-  transcript as native multimodal input. Sessions record cumulative active time,
-  model cost including compaction, token usage, and the context limit; reported
-  charges are authoritative, and estimates need provider-discovered rates per
-  used token category. Usage turns yellow at 80%, red at 90%. Auto-compaction
-  defaults on: at 95% it summarizes completed history and continues the run from
-  the handoff transparently; idle sessions compact manually, and compaction
+  messages support eight 10 MB PNG/JPEG/GIF/WebP images, persisted as native
+  multimodal input. Sessions record cumulative active time, model cost including
+  compaction, token usage, and the context limit; reported charges are
+  authoritative; estimates need provider-discovered rates per token category.
+  Auto-compaction defaults on: at 95% it summarizes completed history and
+  continues from the handoff; idle sessions compact manually, and compaction
   soft-deletes prior messages while inserting a replayable handoff. The composer
   stays mounted across statuses, explaining unavailable actions and preserving
-  drafts; local preferences filter transcript categories without changing
-  messages. Provider secrets stay out of browser and runner work payloads. The
-  working-directory field opens `solid/directory-picker-client.tsx`, posting to
-  `/api/runners/:id/directories` for canonical metadata. Each run,
-  `read_agent_file` loads exact-root `AGENTS.md` (else `CLAUDE.md`); `AGENTS.md`
-  wins.
+  drafts; local preferences filter transcript categories. Provider secrets stay
+  out of browser and runner work payloads. The working-directory field opens
+  `solid/directory-picker-client.tsx` backed by `/api/runners/:id/directories`.
+  Each run, `read_agent_file` loads exact-root `AGENTS.md` (else `CLAUDE.md`).
 
   `runner/runner-workspace.ts` shares canonical workspace resolution and
   containment with file tools. Tool and skill choices persist per session;
@@ -142,11 +140,10 @@ Living project memory.
   maximum reported reasoning effort. Unknown modalities do not imply attachment
   support; choices show provider and Q Mush modalities.
   `solid/custom-select.tsx` shares search normalization, paginates past ten
-  items (opening on the selected page, clamping or resetting), and owns
-  accessible keyboard/focus. Focus mode fills the app viewport (not browser
-  Fullscreen), preserving drafts and scroll; its rail overlays on desktop,
-  becomes a small-screen drawer, collapses on selection, and closes with Escape
-  first; full paths wrap. Model and effort choices persist with the session.
+  items, and owns accessible keyboard/focus. Focus mode fills the app viewport
+  (not browser Fullscreen), preserving drafts and scroll; its rail overlays on
+  desktop, becomes a small-screen drawer, collapses on selection, and closes
+  with Escape first. Model and effort choices persist with the session.
   `shared/agent-prompt.ts` builds the model system prompt and transcript
   display; reasoning summaries persist as `thinking` messages excluded from
   replay. Session and transcript rows live in `agent_sessions` and
@@ -165,12 +162,14 @@ Living project memory.
   three model providers. Shared behavior: `provider-credentials.ts`,
   `connected-account-oauth.ts`, and the `solid/provider-*` client modules.
 - Measure cache hits against the cacheable prefix (total input dilutes with
-  fresh tool output); shortfalls by that metric are bugs to root-cause. UI rates
-  divide by summed input minus the final request (summary) or the prior step's
-  input (per step), clamped at 100%. Requests carry the session ID as
-  `prompt_cache_key` and as the Codex `session_id` header (cache routing). Codex
-  WebSockets reconnect per step deliberately — reused connections measured 0%
-  cache reads on later turns — and that surface rejects
+  fresh tool output); persistent shortfalls are bugs, lone misses provider noise
+  — writes land seconds late and 128-token blocks hide small growth. Codex
+  socket reuse re-tested cache-neutral vs per-step reconnects (~92% at hit,
+  sporadic misses in both; 0%-on-reuse did not reproduce), so sockets stay open
+  across a run, reconnect on failure, and close at its end. UI rates divide by
+  summed input minus the final request (summary) or the prior step's input (per
+  step), clamped at 100%. Requests carry the session ID as `prompt_cache_key`
+  and as the Codex `session_id` header (cache routing); that surface rejects
   `prompt_cache_breakpoint`/`prompt_cache_retention`. OpenRouter and generic
   requests mark one-hour `cache_control` breakpoints on the system prompt,
   transcript tail, and Anthropic tool definitions (`provider-prompt-cache.ts`);
@@ -294,4 +293,4 @@ Living project memory.
   replay the whole conversation without a timeout.
 - Add new runtime roots and standalone non-TypeScript build entries (like
   `solid/styles.css`) to the matching Knip configs; exclude test support from
-  production patterns. Put tests under a `test` directory.
+  production patterns.

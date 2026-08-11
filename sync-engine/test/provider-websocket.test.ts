@@ -56,23 +56,37 @@ test("prefers the Responses WebSocket for OpenAI API keys", async () => {
   expectDoneStep(await pending);
 });
 
-test("opens a fresh WebSocket per step", async () => {
-  // Deliberate: reads through a reused connection lose the Codex prompt cache
-  // (measured 0% of the cacheable prefix on later turns), so each step
-  // reconnects and lets cache routing pick the machine holding the prefix.
-  const perStepSockets = new FakeProviderSockets();
-  const model = apiKeyModel({ webSocket: perStepSockets.create });
+test("reuses one WebSocket across steps and reconnects after idle close", async () => {
+  // Deliberate: an early trial measured 0% cacheable-prefix reads through a
+  // reused connection, but a live A/B re-test measured reuse and per-step
+  // reconnects cache-neutral (~92% at hit, sporadic misses in both), so steps
+  // share one socket, replace a dead connection, and close at run end.
+  const stepSockets = new FakeProviderSockets();
+  const model = apiKeyModel({ webSocket: stepSockets.create });
 
-  for (let step = 0; step < 2; step += 1) {
-    const pending = complete(model);
-    await perStepSockets.waitForAttempt(step);
-    const socket = perStepSockets.created[step];
-    socket?.open();
-    socket?.receive(COMPLETED_EVENT);
-    expectDoneStep(await pending);
-  }
+  const first = complete(model);
+  await stepSockets.waitForAttempt(0);
+  const socket = stepSockets.created[0];
+  socket?.open();
+  socket?.receive(COMPLETED_EVENT);
+  expectDoneStep(await first);
 
-  expect(perStepSockets.created).toHaveLength(2);
+  const second = complete(model);
+  expect(socket?.sent).toHaveLength(2);
+  socket?.receive(COMPLETED_EVENT);
+  expectDoneStep(await second);
+  expect(stepSockets.created).toHaveLength(1);
+
+  socket?.close();
+  const third = complete(model);
+  await stepSockets.waitForAttempt(1);
+  const reconnected = stepSockets.created[1];
+  reconnected?.open();
+  reconnected?.receive(COMPLETED_EVENT);
+  expectDoneStep(await third);
+
+  model.close();
+  expect(reconnected?.readyState).toBe(WebSocket.CLOSED);
 });
 
 test("does not start an HTTP fallback after a WebSocket abort", async () => {
