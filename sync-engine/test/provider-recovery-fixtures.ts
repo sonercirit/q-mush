@@ -4,7 +4,7 @@ import { RecordingTestSocket } from "../../shared/test/websocket-fixtures.ts";
 import type { ModelRequestSleep } from "../../sync-engine/agent-model-retry.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
-import { createOpenAiOAuthSecret } from "./oauth-test-helpers.ts";
+import { codexOAuthCredential } from "./prompt-cache-fixtures.ts";
 
 export const COMPLETED_EVENT = {
   response: {
@@ -144,11 +144,7 @@ function oauthModel(
   webSocket: WebSocketFactory,
 ): ChatCompletionsAgentModel {
   return new ChatCompletionsAgentModel({
-    credential: {
-      accountId: "chatgpt-account",
-      secret: createOpenAiOAuthSecret(),
-      source: "oauth",
-    },
+    credential: codexOAuthCredential(),
     fetch,
     model: "gpt-5-codex",
     provider: "openai",
@@ -157,9 +153,26 @@ function oauthModel(
   });
 }
 
-function completedEventResponse(): Response {
+export function completedEventResponse(): Response {
   const event = JSON.stringify(COMPLETED_EVENT);
   return new Response(`data: ${event}\n\ndata: [DONE]\n\n`);
+}
+
+export async function failWebSocketAttempts(
+  sockets: FakeProviderSockets,
+  failAttempt: (socket: FakeProviderSocket, index: number) => void = (
+    socket,
+  ) => {
+    socket.fail();
+  },
+): Promise<void> {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await sockets.waitForAttempt(attempt);
+    const socket = sockets.created[attempt];
+    if (socket !== undefined) {
+      failAttempt(socket, attempt);
+    }
+  }
 }
 
 export async function expectBoundedHttpFallback(options: {
@@ -178,13 +191,7 @@ export async function expectBoundedHttpFallback(options: {
   );
   const pending = complete(model);
 
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    await sockets.waitForAttempt(attempt);
-    const socket = sockets.created[attempt];
-    if (socket !== undefined) {
-      options.failAttempt(socket, attempt);
-    }
-  }
+  await failWebSocketAttempts(sockets, options.failAttempt);
 
   expect(await pending).toMatchObject({ content: "Done." });
   expect(delays).toEqual([1_000, 2_000, 4_000]);

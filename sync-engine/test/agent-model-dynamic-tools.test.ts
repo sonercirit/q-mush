@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { isRecord } from "../../shared/auth-model.ts";
 import { ChatCompletionsAgentModel } from "../agent-model.ts";
-import { createOpenAiOAuthSecret } from "./oauth-test-helpers.ts";
+import { codexOAuthCredential } from "./prompt-cache-fixtures.ts";
 import {
   COMPLETED_EVENT,
   FakeProviderSockets,
@@ -10,11 +10,7 @@ import {
 test("OpenAI dynamic allowed_tools keeps the full cached catalog stable", async () => {
   const sockets = new FakeProviderSockets();
   const model = new ChatCompletionsAgentModel({
-    credential: {
-      accountId: "account",
-      secret: createOpenAiOAuthSecret(),
-      source: "oauth",
-    },
+    credential: codexOAuthCredential(),
     dynamicToolCache: true,
     fetch: () => Promise.reject(new Error("HTTP fallback should not run")),
     model: "gpt-5-codex",

@@ -1,11 +1,13 @@
 import { isRecord, type AuthenticatedUser } from "../shared/auth-model.ts";
 import {
   DuplicateProviderCredentialError,
+  type ProviderApiFormat,
   type ProviderCredentialAccess,
   type ProviderCredentialDetails,
   type ProviderCredentialStore,
   type ProviderCredentialSummary,
 } from "../shared/provider-credential-store.ts";
+import { isProviderApiFormat } from "../shared/provider-id.ts";
 import {
   GLOBAL_WORKSPACE_ID,
   isWorkspaceId,
@@ -74,6 +76,7 @@ async function readApiKeyMetadata(
 }
 
 export interface ProviderCredentialInputDetails {
+  readonly apiFormat?: ProviderApiFormat;
   readonly baseUrl?: string;
   readonly label?: string;
 }
@@ -84,6 +87,7 @@ export type ReadCredentialDetails = (
 ) => Promise<ProviderCredentialDetails>;
 
 export class ProviderCredentialEndpoints {
+  readonly #acceptedApiFormats: readonly ProviderApiFormat[];
   readonly #apiKeyRequired: boolean;
   readonly #auth: GoogleAuth;
   readonly #authenticate: Authenticator;
@@ -95,6 +99,7 @@ export class ProviderCredentialEndpoints {
   readonly #validateApiKey: (apiKey: string) => boolean;
 
   constructor(options: {
+    readonly acceptedApiFormats?: readonly ProviderApiFormat[];
     readonly apiKeyRequired?: boolean;
     readonly auth: GoogleAuth;
     readonly labelRequired?: boolean;
@@ -104,6 +109,7 @@ export class ProviderCredentialEndpoints {
     readonly store: ProviderCredentialStore | undefined;
     readonly validateApiKey?: (apiKey: string) => boolean;
   }) {
+    this.#acceptedApiFormats = options.acceptedApiFormats ?? [];
     this.#apiKeyRequired = options.apiKeyRequired ?? true;
     this.#auth = options.auth;
     this.#authenticate = createConfiguredAuthenticator(
@@ -157,6 +163,12 @@ export class ProviderCredentialEndpoints {
       const apiKeyValue = value["apiKey"];
       const apiKey =
         apiKeyValue === undefined && !this.#apiKeyRequired ? "" : apiKeyValue;
+      const apiFormatValue = value["apiFormat"];
+      const apiFormat =
+        isProviderApiFormat(apiFormatValue) &&
+        this.#acceptedApiFormats.includes(apiFormatValue)
+          ? apiFormatValue
+          : undefined;
       const baseUrlValue = value["baseUrl"];
       const label = value["label"];
       const workspaceIds = value["workspaceIds"];
@@ -167,6 +179,7 @@ export class ProviderCredentialEndpoints {
 
       if (
         typeof apiKey !== "string" ||
+        (apiFormatValue !== undefined && apiFormat === undefined) ||
         (this.#readBaseUrl === undefined
           ? baseUrlValue !== undefined
           : baseUrl === undefined) ||
@@ -190,6 +203,7 @@ export class ProviderCredentialEndpoints {
       }
 
       return {
+        apiFormat,
         apiKey,
         ...(baseUrl === undefined ? {} : { baseUrl }),
         label: normalizedLabel,
@@ -220,6 +234,9 @@ export class ProviderCredentialEndpoints {
 
     try {
       const details = await this.#readCredentialDetails(apiKey, {
+        ...(supplied.apiFormat === undefined
+          ? {}
+          : { apiFormat: supplied.apiFormat }),
         ...(supplied.baseUrl === undefined
           ? {}
           : { baseUrl: supplied.baseUrl }),

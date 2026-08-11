@@ -36,7 +36,7 @@ export function normalizeGenericProviderBaseUrl(
 
 export function genericProviderEndpoint(
   baseUrl: string | undefined,
-  resource: "chat/completions" | "models",
+  resource: "chat/completions" | "messages" | "models",
 ): string {
   const normalized = normalizeGenericProviderBaseUrl(baseUrl);
   if (normalized === undefined) {

@@ -41,6 +41,15 @@ test("renders a generic endpoint form with an optional API key", () => {
           label: "Local Ollama",
           source: "api_key",
         },
+        {
+          accountId: null,
+          apiFormat: "anthropic",
+          baseUrl: "https://anthropic.example.test/v1",
+          id: "anthropic-credential",
+          isDefault: false,
+          label: "Claude proxy",
+          source: "api_key",
+        },
       ]),
     ),
   );
@@ -54,6 +63,11 @@ test("renders a generic endpoint form with an optional API key", () => {
   expect(html).toContain("API key (optional)");
   expect(html).toContain("http://localhost:11434/v1");
   expect(html).toContain("Add provider");
+  expect(html).toContain("API format");
+  expect(html).toContain('name="apiFormat"');
+  expect(html).toContain("Anthropic messages");
+  expect(html).toContain("OpenAI API endpoint");
+  expect(html).toContain("Anthropic API endpoint");
   expect(html).not.toContain("Quota");
 });
 

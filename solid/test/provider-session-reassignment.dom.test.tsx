@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { providerCredentialSessionReassignmentPath } from "../../shared/routes.ts";
-import { createProviderViewState } from "../provider-client.tsx";
 import { ProviderController } from "../provider-controller.ts";
+import { createProviderViewState } from "../provider-credential-model.ts";
 import { createReactiveState } from "../reactive-state.ts";
 import { expectTestText } from "./dom-test-helpers.ts";
 import {

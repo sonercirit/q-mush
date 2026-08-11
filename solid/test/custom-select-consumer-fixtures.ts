@@ -1,6 +1,6 @@
 import type { AgentModelCatalog } from "../../shared/agent-configuration.ts";
 import type { RunnerSummary } from "../../shared/runner-model.ts";
-import type { ProviderCredential } from "../provider-client.tsx";
+import type { ProviderCredential } from "../provider-credential-model.ts";
 
 const POSITIONS = [
   "1",

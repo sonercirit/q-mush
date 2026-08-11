@@ -1,4 +1,4 @@
-import type { ProviderViewState } from "../provider-client.tsx";
+import type { ProviderViewState } from "../provider-credential-model.ts";
 import type { RunnerViewState } from "../runner-client.tsx";
 import { providerViewState, runnerViewState } from "./client-state-fixtures.ts";
 import { runnerSummary } from "./runner-fixtures.ts";

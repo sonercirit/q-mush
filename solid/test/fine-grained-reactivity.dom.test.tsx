@@ -2,13 +2,13 @@ import type { JSX } from "solid-js";
 import { afterEach, expect, test, vi } from "vitest";
 import type { AgentModelCatalog } from "../../shared/agent-configuration.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
+import { OPENAI_PANEL } from "../provider-client.tsx";
+import { ProviderController } from "../provider-controller.ts";
 import {
-  OPENAI_PANEL,
   createProviderViewState,
   type ProviderCredential,
   type ProviderViewState,
-} from "../provider-client.tsx";
-import { ProviderController } from "../provider-controller.ts";
+} from "../provider-credential-model.ts";
 import { createReactiveState } from "../reactive-state.ts";
 import {
   RunnerPanel,

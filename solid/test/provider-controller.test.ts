@@ -4,12 +4,9 @@ import {
   OPENAI_CREDENTIALS_PATH,
   connectionScopesPath,
 } from "../../shared/routes.ts";
-import {
-  GENERIC_PANEL,
-  OPENAI_PANEL,
-  type ProviderPanelConfiguration,
-} from "../../solid/provider-client.tsx";
+import { GENERIC_PANEL, OPENAI_PANEL } from "../../solid/provider-client.tsx";
 import { ProviderController } from "../../solid/provider-controller.ts";
+import type { ProviderPanelConfiguration } from "../../solid/provider-panel-configuration.ts";
 import {
   installRecordedFetch,
   restoreFetchAfterEach,
@@ -56,29 +53,49 @@ function recordedProvider(
   return { controller: new ProviderController(configuration), requests };
 }
 
-test("submits a generic provider base URL, label, and optional key", async () => {
+async function expectSubmittedGenericCredential(
+  addInput: Parameters<ProviderController["add"]>,
+  expectedBody: Readonly<Record<string, unknown>>,
+): Promise<void> {
   const { controller, requests } = recordedProvider(
     GENERIC_PANEL,
-    createdCredential({
-      baseUrl: "http://localhost:11434/v1",
-      id: "generic-credential",
-      label: "Local Ollama",
-    }),
+    createdCredential({ id: "generic-credential", ...expectedBody }),
   );
 
-  await controller.add("", "Local Ollama", "http://localhost:11434/v1/");
+  await controller.add(...addInput);
 
   expect(requests).toContainEqual({
-    body: {
-      apiKey: "",
-      baseUrl: "http://localhost:11434/v1/",
-      label: "Local Ollama",
-      workspaceIds: ["global"],
-    },
+    body: { ...expectedBody, workspaceIds: ["global"] },
     method: "POST",
     url: GENERIC_CREDENTIALS_PATH,
   });
-});
+}
+
+test("submits a generic provider base URL, label, and optional key", () =>
+  expectSubmittedGenericCredential(
+    ["", "Local Ollama", "http://localhost:11434/v1/"],
+    {
+      apiKey: "",
+      baseUrl: "http://localhost:11434/v1/",
+      label: "Local Ollama",
+    },
+  ));
+
+test("submits the selected generic provider API format", () =>
+  expectSubmittedGenericCredential(
+    [
+      "anthropic-key",
+      "Claude proxy",
+      "https://anthropic.example.test/v1",
+      "anthropic",
+    ],
+    {
+      apiFormat: "anthropic",
+      apiKey: "anthropic-key",
+      baseUrl: "https://anthropic.example.test/v1",
+      label: "Claude proxy",
+    },
+  ));
 
 test("uses the selected workspace for provider load, creation, and scope updates", async () => {
   const { controller, requests } = recordedProvider(

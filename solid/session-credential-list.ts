@@ -1,4 +1,4 @@
-import type { ProviderViewState } from "./provider-client.tsx";
+import type { ProviderViewState } from "./provider-credential-model.ts";
 import type { SessionCredentialOption } from "./session-credential-option.ts";
 
 export function credentialOptions(

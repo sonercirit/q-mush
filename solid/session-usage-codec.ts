@@ -14,6 +14,7 @@ export function readTokenUsageSummary(
     value["cachedInputTokens"],
   );
   const inputTokens = readNonNegativeSafeInteger(value["inputTokens"]);
+  const lastInputTokens = readNonNegativeSafeInteger(value["lastInputTokens"]);
   const outputTokens = readNonNegativeSafeInteger(value["outputTokens"]);
   const reportedStepCount = readNonNegativeSafeInteger(
     value["reportedStepCount"],
@@ -22,6 +23,8 @@ export function readTokenUsageSummary(
   return cacheWriteInputTokens === undefined ||
     cachedInputTokens === undefined ||
     inputTokens === undefined ||
+    lastInputTokens === undefined ||
+    lastInputTokens > inputTokens ||
     outputTokens === undefined ||
     reportedStepCount === undefined ||
     stepCount === undefined ||
@@ -31,6 +34,7 @@ export function readTokenUsageSummary(
         cacheWriteInputTokens,
         cachedInputTokens,
         inputTokens,
+        lastInputTokens,
         outputTokens,
         reportedStepCount,
         stepCount,

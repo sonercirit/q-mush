@@ -10,31 +10,18 @@ import {
   isProviderStreamErrorEvent,
   readProviderStreamError,
 } from "./provider-error.ts";
-import {
-  createStreamBuffers,
-  type StreamBuffers,
-} from "./provider-stream-buffers.ts";
-import {
-  emitProviderDelta,
-  providerStep,
-  sortedToolCalls,
-} from "./provider-stream-helpers.ts";
+import { AnthropicStreamAccumulator } from "./provider-stream-anthropic.ts";
+import { BufferedAccumulator } from "./provider-stream-buffers.ts";
+import { providerEventIndex, providerStep } from "./provider-stream-helpers.ts";
 
 type ProviderStreamProtocol =
-  "chat_completions" | "chat_completions_json" | "responses";
+  "anthropic" | "chat_completions" | "chat_completions_json" | "responses";
 
 export interface ProviderTextDelta {
   readonly content: string;
   readonly reset?: true;
   readonly thinking: string;
   readonly toolCall?: ProviderToolCallDelta;
-}
-
-function emitToolCallDelta(
-  onDelta: ((delta: ProviderTextDelta) => void) | undefined,
-  toolCall: ProviderToolCallDelta,
-): void {
-  onDelta?.({ content: "", thinking: "", toolCall });
 }
 
 interface ProviderStreamAccumulatorBase {
@@ -49,7 +36,7 @@ interface ChatCompletionsStreamAccumulator extends ProviderStreamAccumulatorBase
 }
 
 interface CompletedStreamAccumulator extends ProviderStreamAccumulatorBase {
-  readonly protocol: "chat_completions_json" | "responses";
+  readonly protocol: "anthropic" | "chat_completions_json" | "responses";
 }
 
 export type ProviderStreamAccumulator =
@@ -317,13 +304,7 @@ function readResponsesStep(value: unknown): AgentModelStep {
 }
 
 function outputIndex(event: Readonly<Record<string, unknown>>): number {
-  const value = event["output_index"];
-
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
-    throw new Error("The Responses model returned an invalid output index");
-  }
-
-  return value;
+  return providerEventIndex(event, "output_index", "output index");
 }
 
 function stringDelta(
@@ -339,15 +320,6 @@ function stringDelta(
   return delta;
 }
 
-abstract class BufferedAccumulator {
-  readonly buffers: StreamBuffers;
-  receivedEvent = false;
-
-  constructor(onDelta?: (delta: ProviderTextDelta) => void) {
-    this.buffers = createStreamBuffers(onDelta);
-  }
-}
-
 class ResponsesAccumulator
   extends BufferedAccumulator
   implements CompletedStreamAccumulator
@@ -355,7 +327,6 @@ class ResponsesAccumulator
   readonly protocol = "responses" as const;
   #reasoningSummary:
     { readonly outputIndex: number; readonly summaryIndex: number } | undefined;
-  readonly #toolCalls = new Map<number, AgentToolCall>();
   #completed: AgentModelStep | undefined;
 
   get completed(): boolean {
@@ -375,20 +346,19 @@ class ResponsesAccumulator
       this.#completed.thinking.length === 0 && this.buffers.thinking.length > 0
         ? this.buffers.thinking.join("")
         : this.#completed.thinking,
-      this.#completed.toolCalls.length === 0 && this.#toolCalls.size > 0
-        ? sortedToolCalls(this.#toolCalls)
+      this.#completed.toolCalls.length === 0 && this.toolCalls.size > 0
+        ? this.recordedToolCalls()
         : this.#completed.toolCalls,
       this.#completed.costUsd,
       this.#completed.tokenUsage,
     );
   }
 
-  push(value: unknown): void {
-    if (!isRecord(value)) {
-      throw new Error("The provider returned an invalid streaming event");
-    }
-    this.receivedEvent = true;
-
+  push(event: unknown): void {
+    const value = this.readEvent(
+      event,
+      "The provider returned an invalid streaming event",
+    );
     const type = value["type"];
 
     if (type === "response.completed") {
@@ -404,35 +374,16 @@ class ResponsesAccumulator
       const item = value["item"];
 
       if (isRecord(item) && item["type"] === "function_call") {
-        const call = readResponsesToolCall(item);
-        const index = outputIndex(value);
-        this.#toolCalls.set(index, call);
-        emitToolCallDelta(this.buffers.onDelta, { ...call, index });
+        this.registerToolCall(outputIndex(value), readResponsesToolCall(item));
       }
       return;
     }
 
     if (type === "response.function_call_arguments.delta") {
-      const index = outputIndex(value);
-      const call = this.#toolCalls.get(index);
-
-      if (call === undefined) {
-        throw new Error(
-          "The provider returned a tool-call delta before its call",
-        );
-      }
-
-      const argumentsDelta = stringDelta(value, "tool-call");
-      this.#toolCalls.set(index, {
-        ...call,
-        arguments: call.arguments + argumentsDelta,
-      });
-      emitToolCallDelta(this.buffers.onDelta, {
-        arguments: argumentsDelta,
-        id: "",
-        index,
-        name: "",
-      });
+      this.appendToolCallArguments(
+        outputIndex(value),
+        stringDelta(value, "tool-call"),
+      );
       return;
     }
 
@@ -454,28 +405,18 @@ class ResponsesAccumulator
           this.#reasoningSummary.summaryIndex !== summaryIndexValue)
           ? "\n\n"
           : "";
-      const thinking = separator + stringDelta(value, "reasoning");
       this.#reasoningSummary = {
         outputIndex: outputIndexValue,
         summaryIndex: summaryIndexValue,
       };
-      this.buffers.thinking.push(thinking);
-      emitProviderDelta(this.buffers.onDelta, "", thinking);
+      this.pushThinking(separator + stringDelta(value, "reasoning"));
       return;
     }
 
     if (type === "response.output_text.delta") {
-      const content = stringDelta(value, "text");
-      this.buffers.text.push(content);
-      emitProviderDelta(this.buffers.onDelta, content, "");
+      this.pushText(stringDelta(value, "text"));
     }
   }
-}
-
-interface PartialChatToolCall {
-  arguments: string;
-  id: string;
-  name: string;
 }
 
 function readChatDelta(value: unknown): Readonly<Record<string, unknown>> {
@@ -523,7 +464,6 @@ class ChatCompletionsAccumulator
   #contextTokens: number | null = null;
   #costUsd: number | null = null;
   #tokenUsage: AgentTokenUsage | null = null;
-  readonly #toolCalls = new Map<number, PartialChatToolCall>();
 
   readonly completed = false;
   readonly protocol = "chat_completions" as const;
@@ -533,18 +473,17 @@ class ChatCompletionsAccumulator
       this.buffers.text.join(""),
       this.#contextTokens,
       this.buffers.thinking.join(""),
-      sortedToolCalls(this.#toolCalls),
+      this.recordedToolCalls(),
       this.#costUsd,
       this.#tokenUsage,
     );
   }
 
   push(value: unknown): void {
-    const event = isRecord(value) ? value : undefined;
-    if (event === undefined) {
-      throw new Error("The model returned an invalid completion chunk");
-    }
-    this.receivedEvent = true;
+    const event = this.readEvent(
+      value,
+      "The model returned an invalid completion chunk",
+    );
     if (isProviderStreamErrorEvent(event)) {
       throw readProviderStreamError(event);
     }
@@ -557,12 +496,11 @@ class ChatCompletionsAccumulator
     ]);
 
     if (content.length > 0) {
-      this.buffers.text.push(content);
+      this.pushText(content);
     }
     if (thinking.length > 0) {
-      this.buffers.thinking.push(thinking);
+      this.pushThinking(thinking);
     }
-    emitProviderDelta(this.buffers.onDelta, content, thinking);
 
     const rawToolCalls = delta["tool_calls"];
     if (rawToolCalls !== undefined && !Array.isArray(rawToolCalls)) {
@@ -580,7 +518,7 @@ class ChatCompletionsAccumulator
         throw new Error("The model returned an invalid streaming tool index");
       }
 
-      const existing = this.#toolCalls.get(index) ?? {
+      const existing = this.toolCalls.get(index) ?? {
         arguments: "",
         id: "",
         name: "",
@@ -593,7 +531,7 @@ class ChatCompletionsAccumulator
         ? optionalDeltaString(function_, ["name"])
         : "";
       const idDelta = optionalDeltaString(rawCall, ["id"]);
-      this.#toolCalls.set(index, {
+      this.toolCalls.set(index, {
         arguments: existing.arguments + argumentsDelta,
         id: existing.id + idDelta,
         name: existing.name + nameDelta,
@@ -603,10 +541,9 @@ class ChatCompletionsAccumulator
         idDelta.length > 0 ||
         nameDelta.length > 0
       ) {
-        emitToolCallDelta(this.buffers.onDelta, {
+        this.emitToolCallProgress(index, {
           arguments: argumentsDelta,
           id: idDelta,
-          index,
           name: nameDelta,
         });
       }
@@ -649,7 +586,7 @@ class JsonChatCompletionsAccumulator
     this.receivedEvent = true;
     this.#step = readChatStep(value);
     for (const [index, toolCall] of this.#step.toolCalls.entries()) {
-      emitToolCallDelta(this.buffers.onDelta, { ...toolCall, index });
+      this.emitToolCallProgress(index, toolCall);
     }
   }
 }
@@ -658,6 +595,9 @@ export function createProviderStreamAccumulator(
   protocol: ProviderStreamProtocol,
   onDelta?: (delta: ProviderTextDelta) => void,
 ): ProviderStreamAccumulator {
+  if (protocol === "anthropic") {
+    return new AnthropicStreamAccumulator(onDelta);
+  }
   if (protocol === "chat_completions_json") {
     return new JsonChatCompletionsAccumulator(onDelta);
   }

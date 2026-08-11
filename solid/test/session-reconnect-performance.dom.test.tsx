@@ -7,7 +7,7 @@ import type {
 import {
   createProviderViewState,
   type ProviderCredential,
-} from "../provider-client.tsx";
+} from "../provider-credential-model.ts";
 import type { RealtimeServerEvent } from "../realtime-client-codec.ts";
 import { createRunnerViewState } from "../runner-client.tsx";
 import { SessionPanel } from "../session-client.tsx";

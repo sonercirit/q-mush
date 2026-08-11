@@ -1,6 +1,7 @@
 import { expect, vi } from "vitest";
-import { OPENAI_PANEL, type ProviderCredential } from "../provider-client.tsx";
+import { OPENAI_PANEL } from "../provider-client.tsx";
 import type { ProviderController } from "../provider-controller.ts";
+import { type ProviderCredential } from "../provider-credential-model.ts";
 import { disposeTestViews, mountTestView } from "./dom-test-helpers.ts";
 import { openAiProviderPanel } from "./provider-panel-fixtures.tsx";
 

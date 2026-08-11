@@ -1,0 +1,113 @@
+import { describe, expect, test } from "vitest";
+import { isRecord } from "../../shared/auth-model.ts";
+import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
+import {
+  chatCompletionsDone,
+  codexOAuthCredential,
+} from "./prompt-cache-fixtures.ts";
+import {
+  completedEventResponse,
+  failWebSocketAttempts,
+  FakeProviderSockets,
+} from "./provider-recovery-fixtures.ts";
+
+type ModelOptions = ConstructorParameters<typeof ChatCompletionsAgentModel>[0];
+
+const SESSION_KEY = "0193dummy-session-id";
+
+function apiKeyChatOptions(
+  provider: "openai" | "openrouter",
+  model: string,
+  promptCacheKey: string | undefined,
+): Omit<ModelOptions, "fetch"> {
+  return {
+    credential: { accountId: null, secret: "sk-chat", source: "api_key" },
+    model,
+    ...(promptCacheKey === undefined ? {} : { promptCacheKey }),
+    provider,
+  };
+}
+
+async function captureChat(
+  options: Omit<ModelOptions, "fetch">,
+): Promise<{ readonly body: unknown; readonly request: Request }> {
+  let captured: Request | undefined;
+  const model = new ChatCompletionsAgentModel({
+    ...options,
+    fetch: (request) => {
+      captured = request;
+      return Promise.resolve(Response.json(chatCompletionsDone()));
+    },
+  });
+  await model.complete([{ content: "Hello", role: "user" }]);
+  if (captured === undefined) {
+    throw new Error("No request was captured");
+  }
+  return { body: await captured.json(), request: captured };
+}
+
+function promptCacheKeyOf(body: unknown): unknown {
+  return isRecord(body) ? body["prompt_cache_key"] : undefined;
+}
+
+describe("prompt cache request state", () => {
+  test("keys OpenRouter requests to the session and marks 1h breakpoints", async () => {
+    const { body } = await captureChat(
+      apiKeyChatOptions(
+        "openrouter",
+        "anthropic/claude-sonnet-4.5",
+        SESSION_KEY,
+      ),
+    );
+
+    expect(promptCacheKeyOf(body)).toBe(SESSION_KEY);
+    expect(JSON.stringify(body)).toContain('"ttl":"1h"');
+  });
+
+  test("sends prompt_cache_key but no breakpoints to OpenAI api-key chat", async () => {
+    const { body } = await captureChat(
+      apiKeyChatOptions("openai", "gpt-4.1-mini", SESSION_KEY),
+    );
+
+    expect(JSON.stringify(body)).not.toContain("cache_control");
+    expect(body).toMatchObject({
+      messages: [{ role: "system" }, { content: "Hello", role: "user" }],
+      prompt_cache_key: SESSION_KEY,
+    });
+  });
+
+  test("routes Codex requests with the session_id header and body key", async () => {
+    const sockets = new FakeProviderSockets();
+    let captured: Request | undefined;
+    const model = new ChatCompletionsAgentModel({
+      credential: codexOAuthCredential(),
+      fetch: (request) => {
+        captured = request;
+        return Promise.resolve(completedEventResponse());
+      },
+      model: "gpt-5-codex",
+      promptCacheKey: SESSION_KEY,
+      provider: "openai",
+      sleep: () => Promise.resolve(),
+      webSocket: sockets.create,
+    });
+
+    const stepPromise = model.complete([{ content: "Hello", role: "user" }]);
+    await failWebSocketAttempts(sockets);
+    const step = await stepPromise;
+
+    expect(step.content).toBe("Done.");
+    expect(captured?.headers.get("session_id")).toBe(SESSION_KEY);
+    expect(promptCacheKeyOf(await captured?.json())).toBe(SESSION_KEY);
+  });
+
+  test("omits the cache key field when no session key exists", async () => {
+    const { body, request } = await captureChat(
+      apiKeyChatOptions("openrouter", "openai/gpt-4.1-mini", undefined),
+    );
+
+    expect(request.headers.has("session_id")).toBe(false);
+    expect(isRecord(body)).toBe(true);
+    expect(body).not.toHaveProperty("prompt_cache_key");
+  });
+});

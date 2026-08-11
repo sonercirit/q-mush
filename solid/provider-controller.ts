@@ -15,9 +15,10 @@ import { ControllerState, jsonRequestInit } from "./controller-mutation.ts";
 import {
   createProviderViewState,
   readProviderCredentials,
-  type ProviderPanelConfiguration,
+  type ProviderCredentialAddInput,
   type ProviderViewState,
-} from "./provider-client.tsx";
+} from "./provider-credential-model.ts";
+import { type ProviderPanelConfiguration } from "./provider-panel-configuration.ts";
 import {
   readProviderQuota,
   readQuotaResetResult,
@@ -60,11 +61,17 @@ export class ProviderController {
     return this.#state.accessor;
   }
 
-  async add(apiKey: string, label?: string, baseUrl?: string): Promise<void> {
+  async add(
+    ...[apiKey, label, baseUrl, apiFormat]: ProviderCredentialAddInput
+  ): Promise<void> {
     await this.#mutate(
       this.#configuration.credentialsPath,
       jsonRequestInit(
         {
+          ...(this.#configuration.apiFormatSelectable === true &&
+          apiFormat !== undefined
+            ? { apiFormat }
+            : {}),
           apiKey,
           ...(this.#configuration.baseUrlPlaceholder === undefined
             ? {}

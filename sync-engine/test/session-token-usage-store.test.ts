@@ -25,6 +25,12 @@ const NEXT_SEGMENT_TOKEN_USAGE = {
   outputTokens: 100,
 } as const;
 
+const SINGLE_STEP_SUMMARY = {
+  ...TOKEN_USAGE,
+  lastInputTokens: TOKEN_USAGE.inputTokens,
+  reportedStepCount: 1,
+} as const;
+
 function appendStep(
   store: SessionStore,
   content: string,
@@ -65,11 +71,7 @@ test("persists model-step usage on its assistant message and aggregates it", () 
 
   const detail = setup.store.get(TEST_USER_ID, STORE_SESSION_ID);
   expect(detail?.messages.at(-1)?.tokenUsage).toEqual(TOKEN_USAGE);
-  expect(detail?.tokenUsage).toEqual({
-    ...TOKEN_USAGE,
-    reportedStepCount: 1,
-    stepCount: 1,
-  });
+  expect(detail?.tokenUsage).toEqual({ ...SINGLE_STEP_SUMMARY, stepCount: 1 });
   expect(detail?.segmentTokenUsage).toEqual(detail?.tokenUsage);
   expect(setup.store.list(TEST_USER_ID)[0]).not.toHaveProperty("tokenUsage");
   expect(
@@ -112,21 +114,19 @@ test("aggregates partial usage coverage by each message's segment", () => {
     cacheWriteInputTokens: 75,
     cachedInputTokens: 800,
     inputTokens: 1_400,
+    lastInputTokens: NEXT_SEGMENT_TOKEN_USAGE.inputTokens,
     outputTokens: 300,
     reportedStepCount: 2,
     stepCount: 5,
   });
   expect(session?.segmentTokenUsage).toEqual({
     ...NEXT_SEGMENT_TOKEN_USAGE,
+    lastInputTokens: NEXT_SEGMENT_TOKEN_USAGE.inputTokens,
     reportedStepCount: 1,
     stepCount: 2,
   });
   expect(
     setup.store.history(TEST_USER_ID, STORE_SESSION_ID, null)?.tokenUsage,
-  ).toEqual({
-    ...TOKEN_USAGE,
-    reportedStepCount: 1,
-    stepCount: 3,
-  });
+  ).toEqual({ ...SINGLE_STEP_SUMMARY, stepCount: 3 });
   setup.database.$client.close();
 });

@@ -12,6 +12,7 @@ type BrowserProviderId = "brave-search" | ProviderId;
 
 export interface ProviderPanelConfiguration {
   readonly accountIdUnavailable: string;
+  readonly apiFormatSelectable?: boolean;
   readonly baseUrlPlaceholder?: string;
   readonly connectLabel?: string;
   readonly credentialsPath: string;
@@ -28,11 +29,12 @@ export interface ProviderPanelConfiguration {
 }
 
 export const GENERIC_PANEL: ProviderPanelConfiguration = {
-  accountIdUnavailable: "OpenAI-compatible API endpoint",
+  accountIdUnavailable: "Compatible API endpoint",
+  apiFormatSelectable: true,
   baseUrlPlaceholder: "http://localhost:11434/v1",
   credentialsPath: GENERIC_CREDENTIALS_PATH,
   description:
-    "Connect any OpenAI-compatible chat-completions endpoint. Q Mush stores its API base URL and encrypts the optional API key locally.",
+    "Connect any OpenAI-compatible chat-completions endpoint or Anthropic-compatible messages endpoint. Q Mush stores its API base URL and encrypts the optional API key locally.",
   emptyMessage:
     "No generic providers yet. Add a compatible API base URL and an API key when that endpoint requires one.",
   id: "generic",

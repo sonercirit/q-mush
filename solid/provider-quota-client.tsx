@@ -4,10 +4,8 @@ import type {
   ProviderQuotaResetOutcome,
   ProviderQuotaSnapshot,
 } from "../shared/provider-quota.ts";
-import type {
-  ProviderCredential,
-  ProviderPanelController,
-} from "./provider-client.tsx";
+import type { ProviderPanelController } from "./provider-client.tsx";
+import type { ProviderCredential } from "./provider-credential-model.ts";
 
 function nullableNumber(value: unknown): number | null | undefined {
   return value === null || (typeof value === "number" && Number.isFinite(value))

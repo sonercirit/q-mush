@@ -173,7 +173,12 @@ describe("session store forks", () => {
       ),
     );
 
-    const expected = { ...TOKEN_USAGE, reportedStepCount: 1, stepCount: 1 };
+    const expected = {
+      ...TOKEN_USAGE,
+      lastInputTokens: TOKEN_USAGE.inputTokens,
+      reportedStepCount: 1,
+      stepCount: 1,
+    };
     expect(source?.tokenUsage).toEqual(expected);
     expect(fork.tokenUsage).toEqual(expected);
     expect(fork.segmentTokenUsage).toEqual(expected);

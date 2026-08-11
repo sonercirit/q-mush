@@ -24,7 +24,7 @@ function parseEventData(data: string): unknown {
 
 export async function readProviderEventStream(
   response: Response,
-  protocol: "chat_completions" | "responses",
+  protocol: "anthropic" | "chat_completions" | "responses",
   onDelta?: (delta: ProviderTextDelta) => void,
 ): Promise<AgentModelStep> {
   const accumulator = createProviderStreamAccumulator(protocol, onDelta);

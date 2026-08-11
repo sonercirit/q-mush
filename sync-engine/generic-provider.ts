@@ -1,5 +1,6 @@
 import { createCredentialCipher } from "../shared/credential-cipher.ts";
 import type { ProviderCredentialDetails } from "../shared/provider-credential-store.ts";
+import { PROVIDER_API_FORMATS } from "../shared/provider-id.ts";
 import {
   AgentModelDiscoveryError,
   discoverAgentModels,
@@ -51,14 +52,19 @@ async function readGenericCredentialDetails(
   apiKey: string,
   details: ProviderCredentialInputDetails,
 ): Promise<ProviderCredentialDetails> {
-  const { baseUrl, label } = details;
+  const { apiFormat, baseUrl, label } = details;
   if (baseUrl === undefined || label === undefined) {
     throw new Error("The generic provider endpoint details are invalid");
   }
+  const endpoint = {
+    accountId: null,
+    ...(apiFormat === undefined ? {} : { apiFormat }),
+    baseUrl,
+  };
   try {
     await discoverAgentModels(
       "generic",
-      { accountId: null, baseUrl, secret: apiKey, source: "api_key" },
+      { ...endpoint, secret: apiKey, source: "api_key" },
       (request) => runtime.fetch(request),
     );
   } catch (error) {
@@ -70,7 +76,7 @@ async function readGenericCredentialDetails(
     }
     throw error;
   }
-  return { accountId: null, baseUrl, label };
+  return { ...endpoint, label };
 }
 
 type GenericProviderEnvironment = Readonly<Record<string, string | undefined>>;
@@ -85,6 +91,7 @@ export function createGenericIntegrationFromEnvironment(
     auth,
     configuration: genericProviderConfiguration(environment),
     credentialOptions: {
+      acceptedApiFormats: PROVIDER_API_FORMATS,
       apiKeyRequired: false,
       labelRequired: true,
       readBaseUrl: normalizeGenericProviderBaseUrl,

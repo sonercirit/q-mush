@@ -1,5 +1,5 @@
 import { createSignal, type Accessor, type Setter } from "solid-js";
-import type { ProviderCredential } from "./provider-client.tsx";
+import type { ProviderCredential } from "./provider-credential-model.ts";
 
 export interface SessionReassignmentDialogState {
   readonly credential: ProviderCredential;

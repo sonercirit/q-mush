@@ -13,6 +13,9 @@ const ACTIVE_STEP_STATUSES: ReadonlySet<AgentSessionStatus> = new Set([
 interface CompletedStepTiming {
   readonly endedAt: number;
   readonly startedAt: number;
+  // Input tokens of the previous reported step: that request's prefix is what
+  // this step could read from cache.
+  readonly previousInputTokens?: number;
   readonly tokenUsage?: AgentSessionMessage["tokenUsage"];
 }
 
@@ -62,6 +65,7 @@ export function sessionStepTiming(
   let latestStepMessage: AgentSessionMessage | undefined;
   let pendingToolCallIds: Set<string> | undefined;
   let stepTokenUsage: AgentSessionMessage["tokenUsage"] | undefined;
+  let previousInputTokens: number | undefined;
 
   const start = (message: AgentSessionMessage): void => {
     startedAt =
@@ -74,10 +78,12 @@ export function sessionStepTiming(
     if (startedAt !== undefined) {
       completedTimings.set(message.id, {
         endedAt,
+        ...(previousInputTokens === undefined ? {} : { previousInputTokens }),
         startedAt,
         ...(stepTokenUsage === undefined ? {} : { tokenUsage: stepTokenUsage }),
       });
     }
+    previousInputTokens = stepTokenUsage?.inputTokens;
     startedAt = undefined;
     latestStepMessage = undefined;
     pendingToolCallIds = undefined;

@@ -56,6 +56,25 @@ test("prefers the Responses WebSocket for OpenAI API keys", async () => {
   expectDoneStep(await pending);
 });
 
+test("opens a fresh WebSocket per step", async () => {
+  // Deliberate: reads through a reused connection lose the Codex prompt cache
+  // (measured 0% of the cacheable prefix on later turns), so each step
+  // reconnects and lets cache routing pick the machine holding the prefix.
+  const perStepSockets = new FakeProviderSockets();
+  const model = apiKeyModel({ webSocket: perStepSockets.create });
+
+  for (let step = 0; step < 2; step += 1) {
+    const pending = complete(model);
+    await perStepSockets.waitForAttempt(step);
+    const socket = perStepSockets.created[step];
+    socket?.open();
+    socket?.receive(COMPLETED_EVENT);
+    expectDoneStep(await pending);
+  }
+
+  expect(perStepSockets.created).toHaveLength(2);
+});
+
 test("does not start an HTTP fallback after a WebSocket abort", async () => {
   const controller = new AbortController();
   let socket: FakeProviderSocket | undefined;

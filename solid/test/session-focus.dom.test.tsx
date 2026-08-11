@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { afterEach, expect, test, vi } from "vitest";
-import { createProviderViewState } from "../provider-client.tsx";
+import { createProviderViewState } from "../provider-credential-model.ts";
 import { createReactiveState } from "../reactive-state.ts";
 import { createRunnerViewState } from "../runner-client.tsx";
 import { SessionPanel, type SessionViewState } from "../session-client.tsx";

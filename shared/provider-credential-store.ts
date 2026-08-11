@@ -26,17 +26,19 @@ import { validPageWindow } from "./pagination.ts";
 import {
   isProviderId,
   MODEL_PROVIDER_IDS,
+  type ProviderApiFormat,
   type ProviderId,
 } from "./provider-id.ts";
 import { GLOBAL_WORKSPACE_ID } from "./workspace-model.ts";
 
-export { isProviderId, type ProviderId };
+export { isProviderId, type ProviderApiFormat, type ProviderId };
 
 export type ProviderCredentialSource = "api_key" | "oauth";
 export type CredentialProviderId = ProviderId | "brave_search";
 
 export interface ProviderCredentialDetails {
   readonly accountId: string | null;
+  readonly apiFormat?: ProviderApiFormat;
   readonly baseUrl?: string;
   readonly label: string;
 }
@@ -100,12 +102,26 @@ function credentialOrder() {
 function credentialSummarySelection() {
   return {
     accountId: providerCredentials.providerAccountId,
+    apiFormat: providerCredentials.apiFormat,
     baseUrl: providerCredentials.baseUrl,
     id: providerCredentials.id,
     isDefault: providerCredentials.isDefault,
     isGlobal: providerCredentials.isGlobal,
     label: providerCredentials.label,
     source: providerCredentials.source,
+  };
+}
+
+function withEndpointFields<
+  Credential extends {
+    readonly apiFormat: ProviderApiFormat | null;
+    readonly baseUrl: string | null;
+  },
+>({ apiFormat, baseUrl, ...credential }: Credential) {
+  return {
+    ...credential,
+    ...(apiFormat === null ? {} : { apiFormat }),
+    ...(baseUrl === null ? {} : { baseUrl }),
   };
 }
 
@@ -165,10 +181,7 @@ function activeCredentialSummaries(
     .where(credentialScope(database, provider, userId, undefined, workspaceId))
     .orderBy(...credentialOrder())
     .all()
-    .map(({ baseUrl, ...credential }) => ({
-      ...credential,
-      ...(baseUrl === null ? {} : { baseUrl }),
-    }));
+    .map(withEndpointFields);
 }
 
 function accessibleCredentialIds(
@@ -252,6 +265,9 @@ function legacyCredentialSummary(
 ): ProviderCredentialSummary {
   return {
     accountId: credential.accountId,
+    ...(credential.apiFormat === undefined
+      ? {}
+      : { apiFormat: credential.apiFormat }),
     ...(credential.baseUrl === undefined
       ? {}
       : { baseUrl: credential.baseUrl }),
@@ -309,10 +325,16 @@ export class ProviderCredentialStore {
     now: number,
     workspaceIds: readonly string[] = [GLOBAL_WORKSPACE_ID],
   ): ProviderCredentialSummary {
+    // The "openai" format is the historical default, so only the Anthropic
+    // format extends the fingerprint; existing stored fingerprints stay valid.
+    const fingerprintedCredential =
+      details.apiFormat === "anthropic"
+        ? `${credential}\n${details.apiFormat}`
+        : credential;
     const fingerprint = fingerprintCredential(
       details.baseUrl === undefined
-        ? credential
-        : `${details.baseUrl}\n${credential}`,
+        ? fingerprintedCredential
+        : `${details.baseUrl}\n${fingerprintedCredential}`,
     );
     const existing = this.#database
       .select({
@@ -336,6 +358,7 @@ export class ProviderCredentialStore {
     );
     const timestamp = new Date(now);
     const mutableValues = {
+      apiFormat: details.apiFormat ?? null,
       baseUrl: details.baseUrl ?? null,
       encryptedCredential,
       isDeleted: false,
@@ -476,15 +499,9 @@ export class ProviderCredentialStore {
       .limit(limit)
       .offset(offset)
       .all()
-      .flatMap(({ baseUrl, ...credential }) =>
-        isProviderId(credential.provider)
-          ? [
-              {
-                ...credential,
-                ...(baseUrl === null ? {} : { baseUrl }),
-                provider: credential.provider,
-              },
-            ]
+      .flatMap((stored) =>
+        isProviderId(stored.provider)
+          ? [{ ...withEndpointFields(stored), provider: stored.provider }]
           : [],
       );
     return {
@@ -497,6 +514,7 @@ export class ProviderCredentialStore {
     return this.#database.query.providerCredentials
       .findFirst({
         columns: {
+          apiFormat: true,
           baseUrl: true,
           encryptedCredential: true,
           id: true,
@@ -534,6 +552,7 @@ export class ProviderCredentialStore {
 
     const summary: ProviderCredentialAccess = {
       accountId: stored.providerAccountId,
+      ...(stored.apiFormat === null ? {} : { apiFormat: stored.apiFormat }),
       ...(stored.baseUrl === null ? {} : { baseUrl: stored.baseUrl }),
       id: stored.id,
       isDefault: stored.isDefault,

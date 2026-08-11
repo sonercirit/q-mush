@@ -1,4 +1,4 @@
-import type { ProviderViewState } from "../provider-client.tsx";
+import type { ProviderViewState } from "../provider-credential-model.ts";
 import type { RunnerViewState } from "../runner-client.tsx";
 import type { SessionViewState } from "../session-client.tsx";
 import { renderSessionPanel } from "./render-session-panel.ts";

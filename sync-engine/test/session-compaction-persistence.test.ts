@@ -141,6 +141,7 @@ describe("session compaction persistence", () => {
     ]);
     expect(compactedHistory?.tokenUsage).toEqual({
       ...COMPACTION_TOKEN_USAGE,
+      lastInputTokens: COMPACTION_TOKEN_USAGE.inputTokens,
       reportedStepCount: 1,
       stepCount: 2,
     });

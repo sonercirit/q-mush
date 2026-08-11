@@ -4,15 +4,16 @@ import {
   type AgentAttachment,
 } from "../shared/agent-attachments.ts";
 import type { AgentConversationMessage } from "../shared/agent-loop.ts";
+import { withPromptCacheControl } from "./provider-prompt-cache.ts";
 
-function textInputItems(
+export function textInputItems(
   content: string,
   type: "input_text" | "text",
 ): readonly unknown[] {
   return content.length === 0 ? [] : [{ text: content, type }];
 }
 
-function userAttachments(
+export function userAttachments(
   message: Extract<AgentConversationMessage, { readonly role: "user" }>,
 ) {
   return message.attachments ?? message.images ?? [];
@@ -55,26 +56,51 @@ function providerAttachmentInput(
   }
 }
 
+// A cached message switches its text to content parts so an Anthropic-style
+// cache_control marker can ride on the final part.
+function chatContent(
+  content: string | null,
+  parts: readonly unknown[] | undefined,
+  cached: boolean,
+): unknown {
+  if (!cached) {
+    return parts ?? content;
+  }
+
+  const items =
+    parts ??
+    (typeof content === "string" ? textInputItems(content, "text") : []);
+  return items.length === 0 ? content : withPromptCacheControl(items);
+}
+
 export function providerChatMessage(
   message: AgentConversationMessage,
+  cached = false,
 ): unknown {
   switch (message.role) {
     case "user":
       return {
-        content:
+        content: chatContent(
+          message.content,
           userAttachments(message).length === 0
-            ? message.content
+            ? undefined
             : [
                 ...textInputItems(message.content, "text"),
                 ...userAttachments(message).map((attachment) =>
                   providerAttachmentInput(attachment, false),
                 ),
               ],
+          cached,
+        ),
         role: "user",
       };
     case "assistant":
       return {
-        content: message.content.length === 0 ? null : message.content,
+        content: chatContent(
+          message.content.length === 0 ? null : message.content,
+          undefined,
+          cached,
+        ),
         role: "assistant",
         ...(message.toolCalls.length === 0
           ? {}
@@ -88,7 +114,7 @@ export function providerChatMessage(
       };
     case "tool":
       return {
-        content: message.content,
+        content: chatContent(message.content, undefined, cached),
         role: "tool",
         tool_call_id: message.toolCallId,
       };

@@ -398,25 +398,90 @@ function supportsOpenAiAgentLoop(modelId: string): boolean {
   );
 }
 
-function readGenericCatalog(value: unknown): AgentModelCatalog {
+function genericReasoningEfforts(
+  entry: Readonly<Record<string, unknown>>,
+): readonly AgentReasoningEffort[] {
+  const nested = entry["reasoning"];
+  return reasoningEfforts(
+    entry["supported_reasoning_levels"] ??
+      entry["supported_reasoning_efforts"] ??
+      (isRecord(nested) ? nested["supported_efforts"] : undefined),
+  );
+}
+
+function readGenericCatalog(
+  value: unknown,
+  credential: AgentProviderCredential,
+): AgentModelCatalog {
   const models = providerModelList(value, "data").flatMap((item) => {
     if (!isRecord(item)) {
       return [];
     }
-    const reasoning = item["reasoning"];
-    const efforts = reasoningEfforts(
-      item["supported_reasoning_levels"] ??
-        item["supported_reasoning_efforts"] ??
-        (isRecord(reasoning) ? reasoning["supported_efforts"] : undefined),
+    const option = modelOption(
+      item,
+      "id",
+      credential.apiFormat === "anthropic" ? "display_name" : "name",
+      genericReasoningEfforts(item),
+      [
+        "context_window",
+        "context_window_size",
+        "context_length",
+        "max_input_tokens",
+      ],
     );
-    const option = modelOption(item, "id", "name", efforts, [
-      "context_window",
-      "context_window_size",
-      "context_length",
-    ]);
     return option === undefined ? [] : [option];
   });
   return createCatalog(models);
+}
+
+// Anthropic-style model listings carry no reasoning metadata, but endpoints
+// that serve both API formats publish `supported_reasoning_efforts` on their
+// OpenAI-style listing at the same base URL. Merge those per-model efforts
+// best-effort so Anthropic-format sessions can offer them; endpoints without
+// an OpenAI-style listing simply offer none.
+async function mergeOpenAiListedEfforts(
+  catalog: AgentModelCatalog,
+  credential: AgentProviderCredential,
+  fetch: AgentModelDiscoveryFetch,
+): Promise<AgentModelCatalog> {
+  try {
+    const headers = new Headers({ accept: "application/json" });
+    if (credential.secret.length > 0) {
+      headers.set("authorization", `Bearer ${credential.secret}`);
+    }
+    const value = await readProviderResponse(
+      await fetch(
+        new Request(genericProviderEndpoint(credential.baseUrl, "models"), {
+          headers,
+          method: "GET",
+          signal: AbortSignal.timeout(10_000),
+        }),
+      ),
+    );
+    const efforts = new Map<string, readonly AgentReasoningEffort[]>();
+    for (const item of providerModelList(value, "data")) {
+      if (isRecord(item) && typeof item["id"] === "string") {
+        const listed = genericReasoningEfforts(item);
+        if (listed.length > 0) {
+          efforts.set(item["id"], listed);
+        }
+      }
+    }
+    if (efforts.size === 0) {
+      return catalog;
+    }
+    return {
+      ...catalog,
+      models: catalog.models.map((model) => {
+        const listed = efforts.get(model.id);
+        return listed === undefined
+          ? model
+          : { ...model, reasoningEfforts: listed };
+      }),
+    };
+  } catch {
+    return catalog;
+  }
 }
 
 function readOpenAiCatalog(value: unknown): AgentModelCatalog {
@@ -527,7 +592,10 @@ export async function discoverAgentModels(
       return readOpenRouterCatalog(value);
     }
     if (provider === "generic") {
-      return readGenericCatalog(value);
+      const catalog = readGenericCatalog(value, credential);
+      return credential.apiFormat === "anthropic"
+        ? await mergeOpenAiListedEfforts(catalog, credential, fetch)
+        : catalog;
     }
 
     return credential.source === "oauth"

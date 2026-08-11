@@ -1,20 +1,17 @@
 import { createSignal, For, Show, type Accessor, type JSX } from "solid-js";
-import { isRecord } from "../shared/auth-model.ts";
-import type { ScopedConnectionSummary } from "../shared/connection-model.ts";
-import type {
-  ProviderQuotaResetOutcome,
-  ProviderQuotaSnapshot,
-} from "../shared/provider-quota.ts";
+import type { ProviderQuotaResetOutcome } from "../shared/provider-quota.ts";
 import type { WorkspaceList } from "../shared/workspace-model.ts";
 import { RemovalButton } from "./client-controls.tsx";
 import { Collection } from "./collection.tsx";
-import {
-  optionalWorkspaces,
-  workspaceIdsAreValid,
-} from "./connection-client.ts";
+import { optionalWorkspaces } from "./connection-client.ts";
 import { controllerView } from "./controller-view.ts";
 import { DefaultableActions } from "./defaultable-actions.tsx";
 import { FormField } from "./form-field.tsx";
+import type {
+  ProviderCredential,
+  ProviderCredentialAddInput,
+  ProviderViewState,
+} from "./provider-credential-model.ts";
 import type { ProviderPanelConfiguration } from "./provider-panel-configuration.ts";
 import { ProviderQuota } from "./provider-quota-client.tsx";
 import { renderDebugBoundary } from "./render-debug.tsx";
@@ -27,115 +24,7 @@ export {
   GENERIC_PANEL,
   OPENAI_PANEL,
   OPENROUTER_PANEL,
-  type ProviderPanelConfiguration,
 } from "./provider-panel-configuration.ts";
-
-export interface ProviderCredential extends ScopedConnectionSummary {
-  readonly accountId: string | null;
-  readonly baseUrl?: string;
-  readonly label: string;
-  readonly source: "api_key" | "oauth";
-}
-
-interface ProviderViewStateBase {
-  readonly credentials: readonly ProviderCredential[] | undefined;
-  readonly error: string | undefined;
-  readonly quotaLoadingIds: readonly string[];
-  readonly quotaNotice:
-    | {
-        readonly credentialId: string;
-        readonly outcome: ProviderQuotaResetOutcome;
-      }
-    | undefined;
-  readonly quotaPendingId: string | undefined;
-  readonly quotas: Readonly<Record<string, ProviderQuotaSnapshot>>;
-  readonly quotaThresholdPendingId: string | undefined;
-  readonly removingId: string | undefined;
-  readonly savePending: boolean;
-  readonly sessionReassignmentNotice: string | undefined;
-  readonly settingDefaultId: string | undefined;
-}
-
-export function createProviderViewState(
-  credentials: readonly ProviderCredential[] | undefined,
-): ProviderViewStateBase {
-  return {
-    credentials,
-    error: undefined,
-    quotaLoadingIds: [],
-    quotaNotice: undefined,
-    quotaPendingId: undefined,
-    quotas: {},
-    quotaThresholdPendingId: undefined,
-    removingId: undefined,
-    savePending: false,
-    sessionReassignmentNotice: undefined,
-    settingDefaultId: undefined,
-  };
-}
-
-export type ProviderViewState = ProviderViewStateBase;
-
-function readCredential(
-  value: unknown,
-  providerName: string,
-): ProviderCredential {
-  if (!isRecord(value)) {
-    throw new Error(
-      `The server returned an invalid ${providerName} credential`,
-    );
-  }
-
-  const accountId = value["accountId"];
-  const baseUrl = value["baseUrl"];
-  const id = value["id"];
-  const label = value["label"];
-  const isDefault = value["isDefault"];
-  const isGlobal = value["isGlobal"];
-  const source = value["source"];
-  const workspaceIds = value["workspaceIds"];
-
-  if (
-    (accountId !== null && typeof accountId !== "string") ||
-    (baseUrl !== undefined && typeof baseUrl !== "string") ||
-    typeof id !== "string" ||
-    typeof isDefault !== "boolean" ||
-    (isGlobal !== undefined && typeof isGlobal !== "boolean") ||
-    typeof label !== "string" ||
-    (source !== "api_key" && source !== "oauth") ||
-    !workspaceIdsAreValid(workspaceIds)
-  ) {
-    throw new Error(
-      `The server returned an invalid ${providerName} credential`,
-    );
-  }
-
-  return {
-    accountId,
-    ...(baseUrl === undefined ? {} : { baseUrl }),
-    id,
-    isDefault,
-    ...(isGlobal === undefined ? {} : { isGlobal }),
-    label,
-    source,
-    ...(workspaceIds === undefined ? {} : { workspaceIds }),
-  };
-}
-
-export function readProviderCredentials(
-  value: unknown,
-  providerName: string,
-): readonly ProviderCredential[] {
-  if (!isRecord(value) || !Array.isArray(value["credentials"])) {
-    throw new Error(
-      `The server returned an invalid ${providerName} credential list`,
-    );
-  }
-
-  return value["credentials"].map((credential) =>
-    readCredential(credential, providerName),
-  );
-}
 
 interface ProviderPanelProps {
   readonly configuration: ProviderPanelConfiguration;
@@ -219,7 +108,9 @@ function ProviderCredentialItem(props: CredentialItemProps): JSX.Element {
             {props.credential.source === "oauth"
               ? "Connected account"
               : props.configuration.id === "generic"
-                ? "API endpoint"
+                ? props.credential.apiFormat === "anthropic"
+                  ? "Anthropic API endpoint"
+                  : "OpenAI API endpoint"
                 : "API key"}
           </span>
         </div>
@@ -340,6 +231,9 @@ function CredentialTextInput(props: CredentialTextInputProps): JSX.Element {
 }
 
 function providerFormLayout(configuration: ProviderPanelConfiguration): string {
+  if (configuration.apiFormatSelectable === true) {
+    return "md:grid-cols-2 xl:grid-cols-[minmax(0,0.6fr)_minmax(0,0.6fr)_minmax(0,1fr)_minmax(0,1fr)_auto]";
+  }
   if (configuration.baseUrlPlaceholder !== undefined) {
     return "md:grid-cols-2 xl:grid-cols-[minmax(0,0.7fr)_minmax(0,1fr)_minmax(0,1fr)_auto]";
   }
@@ -386,8 +280,9 @@ export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
     apiKey: string,
     label: string | undefined,
     baseUrl: string | undefined,
+    apiFormat: string | undefined,
   ): Promise<void> => {
-    await props.controller.add(apiKey, label, baseUrl);
+    await props.controller.add(apiKey, label, baseUrl, apiFormat);
     form()?.reset();
   };
 
@@ -442,6 +337,7 @@ export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
         onSubmit={(event) => {
           event.preventDefault();
           const data = new FormData(event.currentTarget);
+          const apiFormat = data.get("apiFormat");
           const apiKey = data.get("apiKey");
           const baseUrl = data.get("baseUrl");
           const label = data.get("label");
@@ -450,6 +346,7 @@ export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
               apiKey,
               typeof label === "string" ? label : undefined,
               typeof baseUrl === "string" ? baseUrl : undefined,
+              typeof apiFormat === "string" ? apiFormat : undefined,
             );
           }
         }}
@@ -464,6 +361,22 @@ export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
             <CredentialTextInput {...field} disabled={state().savePending} />
           )}
         </For>
+        <Show when={props.configuration.apiFormatSelectable === true}>
+          <FormField
+            control={
+              <select
+                {...credentialInputAttributes(state().savePending)}
+                id={`${props.configuration.id}-api-format`}
+                name="apiFormat"
+              >
+                <option value="openai">OpenAI chat completions</option>
+                <option value="anthropic">Anthropic messages</option>
+              </select>
+            }
+            id={`${props.configuration.id}-api-format`}
+            label="API format"
+          />
+        </Show>
         <div>
           <label class="text-sm font-medium text-slate-200" for={inputId()}>
             {`${props.configuration.name} API key${props.configuration.keyRequired === false ? " (optional)" : ""}`}
@@ -530,7 +443,7 @@ export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
 
 export interface ProviderPanelController {
   readonly view: Accessor<ProviderViewState>;
-  add(apiKey: string, label?: string, baseUrl?: string): Promise<void>;
+  add(...input: ProviderCredentialAddInput): Promise<void>;
   load(): Promise<void>;
   loadQuota(credentialId: string): Promise<void>;
   consumeQuotaReset(

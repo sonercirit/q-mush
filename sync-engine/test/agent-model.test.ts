@@ -8,6 +8,10 @@ import { createJsonResponse } from "../../sync-engine/http.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import { createOpenAiOAuthSecret } from "./oauth-test-helpers.ts";
 import { captureRejection, requireError } from "./promise-test-helpers.ts";
+import {
+  cachedTextMessage,
+  chatCompletionsDone,
+} from "./prompt-cache-fixtures.ts";
 import { expectDoneStep } from "./provider-step-fixtures.ts";
 
 type ModelOptions = ConstructorParameters<typeof ChatCompletionsAgentModel>[0];
@@ -94,15 +98,11 @@ function expectUnboundedParallelSchema(body: unknown): void {
   expect(() => JSON.stringify(body)).not.toThrow();
 }
 
-function doneResponse(): unknown {
-  return { choices: [{ message: { content: "Done." } }] };
-}
-
 function capturedModel(
   capture: RequestCapture,
   options: Omit<ModelOptions, "fetch">,
 ): ChatCompletionsAgentModel {
-  return respondingModel(options, doneResponse(), capture);
+  return respondingModel(options, chatCompletionsDone(), capture);
 }
 
 function openRouterModelWithTools(
@@ -264,11 +264,8 @@ describe("chat completions agent model", () => {
     expect(capturedToolNames(body)).toEqual(AGENT_SESSION_TOOL_NAMES);
     expect(body).toMatchObject({
       messages: [
-        {
-          content: "Workspace instructions from AGENTS.md",
-          role: "system",
-        },
-        { content: "Inspect the source", role: "user" },
+        cachedTextMessage("system", "Workspace instructions from AGENTS.md"),
+        cachedTextMessage("user", "Inspect the source"),
       ],
       model: "openai/gpt-4.1-mini",
       reasoning: { effort: "high", summary: "auto" },
@@ -298,8 +295,8 @@ describe("chat completions agent model", () => {
       "Bearer generic-secret",
     );
     expect(isRecord(body) ? body["messages"] : undefined).toEqual([
-      { content: AGENT_SYSTEM_PROMPT, role: "system" },
-      { content: "Hello", role: "user" },
+      cachedTextMessage("system", AGENT_SYSTEM_PROMPT),
+      cachedTextMessage("user", "Hello"),
     ]);
     expect(body).toMatchObject({
       model: "llama-3.3-70b",
@@ -476,7 +473,7 @@ describe("chat completions agent model", () => {
         provider: "openai",
         reasoningEffort: "low",
       },
-      doneResponse(),
+      chatCompletionsDone(),
       capture,
     );
 

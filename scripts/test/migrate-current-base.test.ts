@@ -37,7 +37,7 @@ const CURRENT_BASE_MIGRATIONS = [
   "0027_worthless_sentinels.sql",
 ] as const;
 const CURRENT_BASE_TIMESTAMP = 1_785_753_783_416;
-const CONTEXT_CAP_MIGRATION_TIMESTAMP = 1_785_760_990_831;
+const API_FORMAT_MIGRATION_TIMESTAMP = 1_786_401_077_642;
 
 let temporaryDirectory: string | undefined;
 
@@ -85,11 +85,18 @@ test("upgrades migration 0027 through the context cap migration", async () => {
   expect(agentSessionColumnNames(upgradedDatabase.$client)).toContain(
     "user_context_token_cap",
   );
+  const credentialColumns = upgradedDatabase.$client
+    .query<{ readonly name: string }, []>(
+      "SELECT name FROM pragma_table_info('provider_credentials')",
+    )
+    .all()
+    .map((column) => column.name);
+  expect(credentialColumns).toContain("api_format");
   const latestMigration = upgradedDatabase.$client
     .query<{ readonly createdAt: number }, []>(
       "SELECT created_at AS createdAt FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 1",
     )
     .get();
-  expect(latestMigration?.createdAt).toBe(CONTEXT_CAP_MIGRATION_TIMESTAMP);
+  expect(latestMigration?.createdAt).toBe(API_FORMAT_MIGRATION_TIMESTAMP);
   upgradedDatabase.$client.close();
 });

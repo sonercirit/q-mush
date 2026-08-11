@@ -541,6 +541,7 @@ test("preserves existing OpenRouter credentials", async () => {
   const migratedDatabase = await migrateLegacyDatabase(legacyDatabase, path);
   expect(migratedDatabase.select().from(providerCredentials).all()).toEqual([
     {
+      apiFormat: null,
       baseUrl: null,
       createdAt: new Date(timestamp),
       createdById: userId,

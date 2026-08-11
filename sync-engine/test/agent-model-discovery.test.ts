@@ -68,6 +68,14 @@ function catalog(
   return { defaultModel, models };
 }
 
+function anthropicFormatCredential(): ProviderCredentialAccess {
+  return {
+    ...credential("api_key", "anthropic-secret"),
+    apiFormat: "anthropic",
+    baseUrl: "https://anthropic.example.test/v1",
+  };
+}
+
 function discoveryFetch(
   body: unknown,
   capture: RequestCapture,
@@ -281,6 +289,88 @@ describe("agent model discovery", () => {
     );
     expect(request.url).toBe("https://models.example.test/openai/v1/models");
     expectBearer(request, "generic-secret");
+  });
+
+  test("discovers Anthropic-format models and merges OpenAI-listed efforts", async () => {
+    const requests: Request[] = [];
+    const discovered = await discoverAgentModels(
+      "generic",
+      anthropicFormatCredential(),
+      (request) => {
+        requests.push(request);
+        if (request.headers.has("x-api-key")) {
+          return Promise.resolve(
+            createJsonResponse({
+              data: [
+                {
+                  created_at: "2026-01-01T00:00:00Z",
+                  display_name: "Claude Test 4",
+                  id: "claude-test-4",
+                  max_input_tokens: 200_000,
+                  type: "model",
+                },
+              ],
+              has_more: false,
+            }),
+          );
+        }
+        return Promise.resolve(
+          createJsonResponse({
+            data: [
+              {
+                id: "claude-test-4",
+                supported_reasoning_efforts: ["none", "low", "high", "max"],
+              },
+            ],
+          }),
+        );
+      },
+    );
+
+    expect(discovered).toEqual(
+      catalog("claude-test-4", [
+        model(
+          "claude-test-4",
+          "Claude Test 4",
+          ["none", "low", "high", "max"],
+          200_000,
+        ),
+      ]),
+    );
+    expect(requests).toHaveLength(2);
+    const [primary, secondary] = requests;
+    expect(primary?.url).toBe("https://anthropic.example.test/v1/models");
+    expect(primary?.headers.get("x-api-key")).toBe("anthropic-secret");
+    expect(primary?.headers.get("anthropic-version")).toBe("2023-06-01");
+    expect(primary?.headers.has("authorization")).toBe(false);
+    expect(secondary?.url).toBe("https://anthropic.example.test/v1/models");
+    expect(secondary?.headers.get("authorization")).toBe(
+      "Bearer anthropic-secret",
+    );
+    expect(secondary?.headers.has("x-api-key")).toBe(false);
+  });
+
+  test("keeps the Anthropic-format catalog when no OpenAI listing exists", async () => {
+    const discovered = await discoverAgentModels(
+      "generic",
+      anthropicFormatCredential(),
+      (request) =>
+        Promise.resolve(
+          request.headers.has("x-api-key")
+            ? createJsonResponse({
+                data: [
+                  { display_name: "Claude Plain 1", id: "claude-plain-1" },
+                ],
+              })
+            : new Response("denied", { status: 404 }),
+        ),
+    );
+
+    expect(discovered).toEqual(
+      catalog("claude-plain-1", [
+        model("claude-plain-1", "Claude Plain 1", []),
+      ]),
+    );
   });
 
   test("aborts an oversized streamed catalog before fully buffering it", async () => {
