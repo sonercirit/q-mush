@@ -12,31 +12,33 @@ Living project memory.
 - Always research online before a change, unasked: search current provider docs
   and issue trackers (brave-search skill) for each integration or surprise —
   search finds switches probes miss. Then verify: probe real APIs with local
-  credentials, inspect local services (configs, logs), enumerate schemas via
-  validation errors, read usage metrics.
+  credentials, inspect local services, enumerate schemas via validation errors,
+  read usage metrics.
 - Call a capability impossible only when evidence excludes it — docs searched,
   schema enumerated, matrix covered — otherwise record an open question.
-- Preserve patterns, keep changes focused, add tools only as needed.
+- Preserve patterns, add tools only as needed, and proactively improve whatever
+  you touch — code health, tests, docs, performance, security, DX: ship small
+  improvements with the change, larger ones as immediate follow-ups.
 - Practice TDD: failing test first, implement, refactor green.
-- Follow DRY and KISS: keep logic authoritative without premature abstractions;
-  prefer the simplest clear solution.
-- Never invent numeric limits or tunables: probe omission first and prefer the
-  provider's default; otherwise derive values from provider metadata, docs, or
-  feedback.
+- Follow DRY and KISS: authoritative logic, no premature abstractions, the
+  simplest clear solution.
+- Never invent numeric limits or tunables: probe omission first, prefer the
+  provider default, else derive from provider metadata, docs, or feedback.
 - Integrate completely the first time: wire every session capability (reasoning,
   caching, attachments, limits) to each protocol's native control, recording
   what a protocol lacks.
 - No reward hacking: never weaken tests, special-case checks, or claim
-  unperformed verification; disclose whatever stays unverified. Fix obvious
-  defects on sight, unprompted — and when an experiment proves the obvious fix
-  harmful, codify why in a test.
+  unperformed verification; disclose whatever stays unverified. Fix defects on
+  sight in the branch at hand, unprompted, even when pre-existing or out of
+  scope — never punt them to a separate PR or ask permission first; when an
+  experiment proves the obvious fix harmful, codify why in a test.
 - Record new decisions, gotchas, and lessons here in the same change, unprompted
   — a repeated user instruction means a rule is missing, so add it; condense
   elsewhere to fit the size policy. When evidence overturns a recorded finding,
   fix the code it justified and every stale record — here, code comments,
   handoff, PR text — in that change; act, don't ask.
-- Keep workflows local-first. Time is money: narrow checks per change, broad
-  suites once with output captured, then rerun only the narrowest failing scope.
+- Keep workflows local-first: narrow checks per change, broad suites once with
+  output captured, then rerun only the narrowest failing scope.
 - Never commit secrets, generated artifacts, or env files.
 
 ## Setup and Commands
@@ -45,9 +47,8 @@ Living project memory.
 - Develop: `bun run dev` (+ `dev:restart`, `dev:watch`); build: `bun run build`
 - Migrations: `bun run db:generate` / `db:migrate`
 - Test/watch: `bun run test` / `test:watch`
-- `bun run check` runs all static checks (`format:check`, `typecheck`, `lint`,
-  `knip`, `cpd`, `repository-check`), each also standalone; `bun run format` /
-  `lint:fix` write fixes.
+- `bun run check` runs every static check, each also standalone;
+  `bun run format` / `lint:fix` write fixes.
 - CI (`.github/workflows/checks.yml`): tests, static checks, build, and
   whitespace checks on Bun 1.3.14 with a frozen lockfile.
 
@@ -136,21 +137,20 @@ Living project memory.
   Solid root preserves focus and scroll; the transcript starts at and returns to
   the bottom when messages or the agent file change. `agent-model-discovery.ts`
   queries metadata; `shared/agent-configuration.ts` owns catalog
-  types/validation. New sessions use the default online runner (else the first
-  one) and credential, first discovered model, latest working directory, and
-  maximum reported reasoning effort. Unknown modalities do not imply attachment
-  support; choices show provider and Q Mush modalities.
-  `solid/custom-select.tsx` shares search normalization, paginates past ten
-  items, and owns accessible keyboard/focus. Focus mode fills the app viewport
-  (not browser Fullscreen), preserving drafts and scroll; its rail overlays on
-  desktop, becomes a small-screen drawer, collapses on selection, and closes
-  with Escape first. Model and effort choices persist with the session.
-  `shared/agent-prompt.ts` builds the model system prompt and transcript
-  display; reasoning summaries persist as `thinking` messages excluded from
-  replay. Session and transcript rows live in `agent_sessions` and
-  `agent_messages`; interrupted processes mark active sessions failed for
-  resumption, and rebuilt conversations add error results for interrupted tool
-  calls only on resume.
+  types/validation. New sessions use the default online runner (else the first)
+  and credential, first discovered model, latest working directory, and maximum
+  reported reasoning effort. Unknown modalities do not imply attachment support;
+  choices show provider and Q Mush modalities. `solid/custom-select.tsx` shares
+  search normalization, paginates past ten items, and owns accessible
+  keyboard/focus. Focus mode fills the app viewport (not browser Fullscreen),
+  preserving drafts and scroll; its rail overlays on desktop, becomes a
+  small-screen drawer, collapses on selection, and closes with Escape first.
+  Model and effort choices persist with the session. `shared/agent-prompt.ts`
+  builds the model system prompt and transcript display; reasoning summaries
+  persist as `thinking` messages excluded from replay. Session and transcript
+  rows live in `agent_sessions` and `agent_messages`; interrupted processes mark
+  active sessions failed for resumption, and rebuilt conversations add error
+  results for interrupted tool calls only on resume.
 
 - `openai.ts`, `openrouter.ts`, and `generic-provider.ts` implement model
   connections. Generic providers store a normalized base URL, an optional key,
@@ -179,18 +179,17 @@ Living project memory.
 - `sync-engine/brave-search.ts` implements the authenticated server-side
   `brave_search` skill and key API. Users keep multiple encrypted keys in
   `provider_credentials`; failures fall through keys in creation order, and
-  secrets never reach browser, runner, or model provider. The UI reuses the
-  shared credential panel and controller.
-- The UI uses SolidJS and Vite. `solid/client.tsx` is the browser entry,
-  `solid/pages.tsx` owns server-rendered shells, and `solid/styles.css` is
-  Tailwind's source. Vitest uses an SSR Solid transform for string-rendering
-  tests and a Happy DOM project for post-mount reactivity tests; run it under
-  Bun because tests and application modules use Bun APIs and `bun:sqlite`.
+  secrets never reach browser, runner, or model provider.
+- `solid/client.tsx` is the browser entry, `solid/pages.tsx` owns
+  server-rendered shells, and `solid/styles.css` is Tailwind's source. Vitest
+  uses an SSR Solid transform for string-rendering tests and a Happy DOM project
+  for post-mount reactivity; run it under Bun because tests and application
+  modules use Bun APIs and `bun:sqlite`.
 - `tsconfig.json` configures strict, no-emit, bundler-style checking with unused
   and unreachable code diagnostics. Library declaration checking is skipped
   because Drizzle (ORM 1.0.0-rc.4, TypeScript 7.0.2) publishes optional
   cross-dialect declarations that fail here; application source stays fully
-  checked. Re-enable it only after verifying an upstream Drizzle fix.
+  checked. Re-enable only after an upstream Drizzle fix.
 - `eslint.config.ts` uses type-aware strict/stylistic `typescript-eslint`
   presets, imports `.gitignore`, bans non-const assertions, and enforces
   exhaustive switches and canonical named imports (one declaration per module
@@ -252,8 +251,8 @@ Living project memory.
   need one installer rerun to auto-update.
 - Bun 1.3.14's `Bun.build({ compile: ... })` writes the standalone binary only
   to `compile.outfile` (`outputs[0]` is bundled JavaScript): build runners in a
-  temporary directory and read the outfile before cleanup. Cross-target
-  compilation may download a Bun into the user cache.
+  temp directory and read the outfile before cleanup. Cross-target compilation
+  may download a Bun into the user cache.
 - File tools stay in the runner workspace after symlink resolution; only
   session-owned non-read output spills may leave it, and `read` pages its
   source. `bash` has full runner-account permissions, rooted there. The
@@ -292,6 +291,5 @@ Living project memory.
   included). Agent launches and runner commands otherwise have no
   application-owned step, queue, or time limits; outside compaction, providers
   replay the whole conversation without a timeout.
-- Add new runtime roots and standalone non-TypeScript build entries (like
-  `solid/styles.css`) to the matching Knip configs; exclude test support from
-  production patterns.
+- Add new runtime roots and standalone non-TypeScript build entries to the
+  matching Knip configs; exclude test support from production patterns.
