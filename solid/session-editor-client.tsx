@@ -56,6 +56,7 @@ export function SessionEditorSection(
         <span>{props.title}</span>
         <button
           aria-expanded={expanded()}
+          aria-label={`${expanded() ? "Collapse" : "Expand"} ${props.title}`}
           class={
             expanded()
               ? SESSION_EDITOR_EXPANDED_TOGGLE_CLASSES

@@ -25,7 +25,7 @@ test("renders provider, cap, and tool access as compact collapsed rows", () => {
     HTMLDivElement,
   );
   const rows = [
-    ...editorGroup.querySelectorAll(":scope > .contents > section"),
+    ...editorGroup.querySelectorAll(":scope > [data-session-editor-kind]"),
   ];
 
   expect(rows).toHaveLength(3);

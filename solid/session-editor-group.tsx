@@ -10,9 +10,9 @@ export function SessionEditorGroup(props: {
 }): JSX.Element {
   return (
     <div class={SESSION_EDITOR_GROUP_CLASSES} data-session-editor-group="true">
-      <div class="contents">{props.provider}</div>
-      <div class="contents">{props.cap}</div>
-      <div class="contents">{props.tools}</div>
+      {props.provider}
+      {props.cap}
+      {props.tools}
     </div>
   );
 }

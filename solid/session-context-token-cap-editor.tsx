@@ -89,7 +89,7 @@ export function SessionContextTokenCapEditor(
             <label class="min-w-52 flex-1">
               <span class="sr-only">Context token cap</span>
               <input
-                class="min-h-10 w-full rounded-xl border border-white/10 bg-slate-900 px-4 text-sm text-white placeholder:text-slate-600 focus:border-cyan-300/50 focus:outline-none"
+                class="min-h-10 w-full rounded-xl border border-white/10 bg-slate-900 px-4 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none"
                 disabled={props.disabled}
                 id="session-detail-context-token-cap"
                 min="1"
