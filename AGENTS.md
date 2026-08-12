@@ -164,15 +164,14 @@ Living project memory.
   `solid/provider-*` client modules.
 - Measure cache hits against the cacheable prefix (total input dilutes with
   fresh tool output); persistent shortfalls are bugs, lone misses provider noise
-  — writes land late and 128-token blocks hide small growth. Codex socket reuse
-  tested cache-neutral vs reconnects: sockets stay open per run, reconnect on
-  failure, close at its end. UI rates divide by summed input minus the final
-  request (summary) or the prior step's input (per step), clamped at 100%; the
-  divisor counts only fully reported steps. OpenAI/Codex requests carry the
-  session ID as `prompt_cache_key` and the Codex `session_id` header (cache
-  routing); that surface rejects
-  `prompt_cache_breakpoint`/`prompt_cache_retention`. OpenRouter and
-  Anthropic-format requests mark one-hour `cache_control` breakpoints on the
+  — writes land late and 128-token blocks hide small growth. Codex sockets stay
+  open per run (tested cache-neutral), reconnect on failure, close at run end.
+  UI rates divide by summed input minus the final request (summary) or the prior
+  step's input (per step), clamped at 100%; the divisor counts only fully
+  reported steps. OpenAI/Codex requests carry the session ID as
+  `prompt_cache_key` and the Codex `session_id` header (cache routing); that
+  surface rejects `prompt_cache_breakpoint`/`prompt_cache_retention`. OpenRouter
+  and Anthropic-format requests mark one-hour `cache_control` breakpoints on the
   system prompt, transcript tail, and Anthropic tool definitions
   (`provider-prompt-cache.ts`); OpenAI rejects markers, and generic
   OpenAI-format endpoints get neither markers nor `prompt_cache_key` (Ollama
@@ -216,7 +215,7 @@ Living project memory.
 
 ## Decisions and Gotchas
 
-- The HTTP server uses port 12345; `PORT` overrides.
+- HTTP port 12345; `PORT` overrides.
 - Google login reads `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and optional
   `GOOGLE_REDIRECT_URI`; the two must appear together, and the exact callback
   `http://localhost:12345/api/auth/google/callback` must be registered on the
@@ -242,16 +241,17 @@ Living project memory.
   delete application records: set `isDeleted`, `updatedAt`, and `updatedById`,
   and exclude soft-deleted rows from active queries. Audit actor fields are not
   foreign keys because `SYSTEM` is not a user row.
-- Keep HTTP `deflate` zlib-wrapped; Bun's is raw.
+- Keep HTTP `deflate` zlib-wrapped; Bun's is raw. page_fetch proxy upstream
+  connects are bounded at 10s, subordinate to the tool deadline.
 - Knip severities alone do not activate default-off issue types; keep the
-  included-issue list complete. Do not run the full test suite in parallel with
-  lint or repository scans; tooling-policy tests briefly probe `solid`.
+  included-issue list complete. Do not run the full test suite parallel with
+  lint or repository scans; tooling-policy tests probe `solid`.
 - Runner install commands use the HTTP request origin: connect other computers
   through a reachable origin, not `localhost`. Removing a runner leaves
   `~/.q-mush/runner`.
 - Bun 1.3.14's `Bun.build({ compile: ... })` writes the binary only to
-  `compile.outfile` (`outputs[0]` is bundled JavaScript): build in a temp
-  directory, read the outfile before cleanup.
+  `compile.outfile` (`outputs[0]` is bundled JS): build in a temp directory,
+  read the outfile before cleanup.
 - Bare-metal file tools resolve relative paths against the runner workspace but
   accept any runner-account-accessible path; container sessions and attachment
   records stay contained (file tools run on the host). `read` pages its source.
