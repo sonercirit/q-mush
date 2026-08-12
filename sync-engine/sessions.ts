@@ -276,7 +276,7 @@ class DrizzleSessionIntegration
     });
     void recoverAnsweredQuestions(this.#questions);
     const queuedOwnerIds = this.#store.queuedSessionOwnerIds();
-    // Last so a constructor failure above cannot orphan the scan interval.
+    // Last so a throw cannot orphan the interval.
     this.#liveness = createSessionLivenessWatchdog({
       actions: this.#actions,
       broker: this.#broker,
