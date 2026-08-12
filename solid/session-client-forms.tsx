@@ -99,6 +99,17 @@ function createLocalPromptEcho(options: {
   const setTextarea = (element: HTMLTextAreaElement): void => {
     setTextareaElement(element);
   };
+  const handleKeyDown = (
+    event: SessionPromptKeyEvent,
+    delegate: (event: SessionPromptKeyEvent) => void,
+  ): void => {
+    // Composer shortcuts requestSubmit() synchronously, so flush before
+    // delegating; a pending timer syncs the draft shortly regardless.
+    if (sessionComposerShortcut(event) !== undefined) {
+      syncPrompt();
+    }
+    delegate(event);
+  };
   createEffect(() => {
     // A capture-phase listener runs before the form's own submit handler,
     // so requestSubmit(), button.click(), and assistive-technology
@@ -127,6 +138,7 @@ function createLocalPromptEcho(options: {
   onCleanup(clearSyncTimer);
   return {
     handleInput,
+    handleKeyDown,
     localPrompt,
     resetLocalPrompt,
     setTextarea,
@@ -189,15 +201,12 @@ export function SessionPromptInput(
         disabled={props.disabled}
         id="session-prompt"
         name="prompt"
-        // The Create button lives outside this component, so flushing on
-        // blur guarantees the click-submit path reads the typed text.
+        // The capture-phase form-submit listener guarantees click submits;
+        // blur is a secondary flush for tab-away and window switches.
         onBlur={echo.syncPrompt}
         onInput={echo.handleInput}
         onKeyDown={(event) => {
-          if (sessionComposerShortcut(event) !== undefined) {
-            echo.syncPrompt();
-          }
-          props.onKeyDown(event);
+          echo.handleKeyDown(event, props.onKeyDown);
         }}
         onPaste={promptEvents(props).onPaste}
         placeholder="Describe the change you want the agent to make…"
@@ -226,13 +235,8 @@ function composerActionProps(
 export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
   const echo = promptEcho(props);
   const { localPrompt, syncPrompt } = echo;
-  const handleKeyDown = (
-    event: KeyboardEvent & { readonly currentTarget: HTMLTextAreaElement },
-  ): void => {
-    if (!props.disabled && sessionComposerShortcut(event) !== undefined) {
-      syncPrompt();
-    }
-    props.onKeyDown(event);
+  const handleKeyDown = (event: SessionPromptKeyEvent): void => {
+    echo.handleKeyDown(event, props.onKeyDown);
   };
   const runAction = (action: (() => void) | undefined): void => {
     syncPrompt();

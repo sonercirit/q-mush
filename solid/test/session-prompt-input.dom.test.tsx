@@ -135,8 +135,8 @@ test("an external insert wins over pending typing", () => {
   expect(onInput).not.toHaveBeenCalled();
 });
 
-// Blur covers the Create-button click path (the button lives outside the
-// component); the composer shortcut covers keyboard submits.
+// The capture-phase submit listener covers click submits; blur flushes on
+// tab-away, and the composer shortcut covers keyboard submits.
 test.each([
   [
     "blur",
