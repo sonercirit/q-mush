@@ -216,10 +216,23 @@ test("keeps authoritative Anthropic effort metadata over the OpenAI listing", as
     ),
     // Named levels but no adaptive leaf anywhere: efforts imply sending
     // adaptive thinking, which is unverifiable here, so authoritative.
-    capabilityListing(
-      { effort: { low: { supported: true }, supported: true } },
-      "claude-bare-1",
-      "Claude Bare 1",
+    // With the boolean-shorthand adaptive leaf, support is confirmed.
+    ...[
+      { id: "claude-bare-1", label: "Claude Bare 1", thinking: undefined },
+      {
+        id: "claude-short-1",
+        label: "Claude Short 1",
+        thinking: { types: { adaptive: true } },
+      },
+    ].map(({ id, label, thinking }) =>
+      capabilityListing(
+        {
+          effort: { low: { supported: true }, supported: true },
+          ...(thinking === undefined ? {} : { thinking }),
+        },
+        id,
+        label,
+      ),
     ),
     { display_name: "Claude Unknown 1", id: "claude-unknown-1" },
   ];
@@ -245,6 +258,7 @@ test("keeps authoritative Anthropic effort metadata over the OpenAI listing", as
     ["claude-gated-1", []],
     ["claude-off-1", []],
     ["claude-bare-1", []],
+    ["claude-short-1", ["none", "low"]],
     ["claude-unknown-1", ["low", "high"]],
   ]);
   expect(requests).toHaveLength(2);
