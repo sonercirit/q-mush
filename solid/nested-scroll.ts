@@ -321,8 +321,15 @@ export function createNestedScrollRef(
       });
     } else if (previous.element !== element) {
       nestedScrollByMessage.set(key, { ...previous, element });
+      // Restore only when the previous owner really left the document: in a
+      // single update a new row can claim a key before the retained old row
+      // re-keys itself, and restoring then would copy the retained row's
+      // state onto the newcomer.
       queueMicrotask(() => {
-        if (nestedScrollByMessage.get(key)?.element === element) {
+        if (
+          nestedScrollByMessage.get(key)?.element === element &&
+          !previous.element.isConnected
+        ) {
           restoreRememberedNestedScroll(key, element, previous);
         }
       });

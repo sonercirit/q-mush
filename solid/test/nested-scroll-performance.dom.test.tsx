@@ -5,12 +5,18 @@ import { createNestedScrollRef } from "../nested-scroll.ts";
 import { mountTestView } from "./dom-test-helpers.ts";
 import { defineElementSize } from "./element-size-test-helpers.ts";
 import {
+  mutationTestPane,
+  queryMutationPane,
+  rememberPane,
+  trackedDisposals,
+} from "./nested-scroll-test-helpers.tsx";
+import {
   mountTestSessionDetail,
   transcriptTestMessage,
 } from "./session-dom-test-helpers.tsx";
 import { runningSessionDetail } from "./transcript-ordering-fixtures.ts";
 
-const disposals: (() => void)[] = [];
+const disposals = trackedDisposals();
 
 function toolResult(index: number): AgentSessionMessage {
   return {
@@ -153,17 +159,6 @@ interface StructuralPaneScenario extends MountedMutationDetail {
   readonly second: HTMLElement;
 }
 
-function rememberPane(
-  pane: HTMLElement,
-  top: number,
-  toggle?: HTMLButtonElement,
-): void {
-  defineElementSize(pane, 100, 1_000);
-  toggle?.click();
-  pane.scrollTop = top;
-  pane.dispatchEvent(new Event("scroll", { bubbles: true }));
-}
-
 function structuralPaneScenario(): StructuralPaneScenario {
   const mounted = mountMutationDetail([toolResult(0), toolResult(1)]);
   const panes = [
@@ -246,22 +241,6 @@ function paneScope(pane: HTMLElement): HTMLElement {
   return scope;
 }
 
-function mutationTestPane(props: {
-  readonly id: string;
-  readonly label: string;
-}): JSX.Element {
-  const nestedScrollRef = createNestedScrollRef(() => props.id);
-  return (
-    <section data-mutation-pane-scope={props.label} ref={nestedScrollRef}>
-      <div
-        class="overflow-auto"
-        data-mutation-pane={props.label}
-        data-line-wrap="true"
-      />
-    </section>
-  );
-}
-
 function MutationDetailFixture(props: {
   readonly extra: boolean;
 }): JSX.Element {
@@ -278,13 +257,6 @@ function MutationDetailFixture(props: {
       {mutationTestPane({ id: "mutation-pane-second", label: "second" })}
     </div>
   );
-}
-
-function queryMutationPane(container: ParentNode, label: string): HTMLElement {
-  const pane = container.querySelector(`[data-mutation-pane='${label}']`);
-  if (!(pane instanceof HTMLElement))
-    throw new TypeError(`Missing ${label} mutation pane`);
-  return pane;
 }
 
 function WithinScopeFixture(props: {
@@ -357,60 +329,6 @@ afterEach(() => {
   document.body.replaceChildren();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
-  for (;;) {
-    const dispose = disposals.pop();
-    if (dispose === undefined) return;
-    dispose();
-  }
-});
-
-function ReKeyedRowFixture(props: {
-  readonly rowKey: string;
-  readonly showSecond: boolean;
-}): JSX.Element {
-  // The lazy id re-keys the mounted pane in place instead of remounting.
-  return (
-    <div>
-      {mutationTestPane({
-        get id() {
-          return props.rowKey;
-        },
-        label: "retained",
-      })}
-      <Show when={props.showSecond}>
-        {mutationTestPane({ id: "after:user-1:thinking:0", label: "claimant" })}
-      </Show>
-    </div>
-  );
-}
-
-test("a row claiming a migrated key does not inherit the old row's state", async () => {
-  const [rowKey, setRowKey] = createSignal("after:user-1:thinking:0");
-  const [showSecond, setShowSecond] = createSignal(false);
-  const container = mountTestView(
-    () => <ReKeyedRowFixture rowKey={rowKey()} showSecond={showSecond()} />,
-    disposals,
-  );
-  const retained = queryMutationPane(container, "retained");
-  rememberPane(retained, 55);
-
-  // The retained row re-keys (its transcript prefix grew), then a new row
-  // claims the released key: the claimant must start clean, not restore
-  // the offset remembered under the old key. Restores run on microtasks.
-  setRowKey("after:tool-1:thinking:0");
-  setShowSecond(true);
-  const claimant = queryMutationPane(container, "claimant");
-  defineElementSize(claimant, 100, 1_000);
-  const scopeKey = (label: string): string | null =>
-    container
-      .querySelector(`[data-mutation-pane-scope='${label}']`)
-      ?.getAttribute("data-nested-scroll-key") ?? null;
-  expect(scopeKey("retained")).toBe("after:tool-1:thinking:0");
-  expect(scopeKey("claimant")).toBe("after:user-1:thinking:0");
-  await Promise.resolve();
-  await Promise.resolve();
-  expect(claimant.scrollTop).toBe(0);
-  expect(retained.scrollTop).toBe(55);
 });
 
 test("keeps pane state with elements reordered within one scope", () => {
