@@ -60,13 +60,19 @@ const COMPOSER_BUTTON_CLASSES =
 
 // Typing writes a local signal and syncs the shared draft on a short delay:
 // per-keystroke patches of the whole session view state re-run every memo
-// reading it, which froze Firefox on long prompts. Shortcut and action paths
-// flush synchronously so submits always read the latest text.
+// reading it, which froze Firefox on long prompts. Shortcut, action, and
+// form-submit paths flush synchronously so submits always read the latest
+// text.
 function createLocalPromptEcho(options: {
+  // With externalWins, a conflicting external write (insertPrompt) cancels
+  // pending typing and replaces the local text, so an acknowledged insert
+  // is never silently undone; without it (follow-up), in-progress typing
+  // survives concurrent rollbacks.
+  readonly externalWins?: boolean;
   readonly onInput: (value: string) => void;
   readonly prompt: () => string;
 }) {
-  const [textarea, setTextarea] = createSignal<HTMLTextAreaElement>();
+  const [textarea, setTextareaElement] = createSignal<HTMLTextAreaElement>();
   const [localPrompt, setLocalPrompt] = createSignal(untrack(options.prompt));
   let syncTimer: ReturnType<typeof setTimeout> | undefined;
   const clearSyncTimer = (): void => {
@@ -90,12 +96,30 @@ function createLocalPromptEcho(options: {
     clearSyncTimer();
     setLocalPrompt(options.prompt());
   };
+  const setTextarea = (element: HTMLTextAreaElement): void => {
+    setTextareaElement(element);
+  };
+  createEffect(() => {
+    // A capture-phase listener runs before the form's own submit handler,
+    // so requestSubmit(), button.click(), and assistive-technology
+    // activation all read a flushed draft even while the textarea is
+    // focused with a pending sync.
+    const form = textarea()?.form;
+    if (form === null || form === undefined) return;
+    form.addEventListener("submit", syncPrompt, true);
+    onCleanup(() => {
+      form.removeEventListener("submit", syncPrompt, true);
+    });
+  });
   createEffect(
     on(options.prompt, (prompt, previousPrompt) => {
+      if (prompt === previousPrompt) return;
       if (
-        prompt !== previousPrompt &&
-        (syncTimer === undefined || textarea() !== document.activeElement)
+        options.externalWins === true ||
+        syncTimer === undefined ||
+        textarea() !== document.activeElement
       ) {
+        clearSyncTimer();
         setLocalPrompt(prompt);
       }
     }),
@@ -110,8 +134,12 @@ function createLocalPromptEcho(options: {
   };
 }
 
-function promptEcho(props: PromptEventProps & { readonly prompt: string }) {
+function promptEcho(
+  props: PromptEventProps & { readonly prompt: string },
+  externalWins = false,
+) {
   return createLocalPromptEcho({
+    externalWins,
     onInput: (value) => {
       props.onInput(value);
     },
@@ -151,7 +179,9 @@ function renderSessionImages(
 export function SessionPromptInput(
   props: SessionPromptInputProps,
 ): JSX.Element {
-  const echo = promptEcho(props);
+  // insertPrompt acknowledges success, so an external write must win over
+  // in-flight typing here; the follow-up composer keeps typing priority.
+  const echo = promptEcho(props, true);
   return (
     <div class="md:col-span-2">
       <label class="text-sm font-medium text-slate-200" for="session-prompt">
