@@ -229,16 +229,17 @@ local account permissions. In bare-metal sessions file tools accept any path
 that account can access, resolving relative paths against the selected
 workspace; shell commands are intentionally full shell commands rooted in that
 directory. Container sessions confine file tools to the workspace, matching the
-container's workspace mount; container shells run as root inside the disposable
-session container with network access; with a rootful runtime the files they
-create are root-owned on the host (rootless Podman maps them to the runner
-account). The default `archlinux:latest` image is amd64-only; on other
-architectures set `Q_MUSH_CONTAINER_IMAGE` to a compatible image
-(`Q_MUSH_CONTAINER_RUNTIME` selects docker or podman). Before a workspace is
-selected, the authenticated directory browser can inspect directories readable
-by that same runner account; each response contains only the canonical location,
-parent, and at most 500 child directories. Only use runners and model
-credentials you trust with the selected project. The selected agent file is sent
+container's mount; container shells run as root in the disposable session
+container with network access. With a rootful runtime that root is host root
+over the mounted workspace and can leave root-owned files (hooks, setuid
+binaries) a host user later runs, so trust container sessions like the
+workspace; rootless Podman maps files to the runner account. The default
+`archlinux:latest` image is amd64-only; without amd64 emulation set
+`Q_MUSH_CONTAINER_IMAGE` to a compatible image (`Q_MUSH_CONTAINER_RUNTIME`
+selects docker or podman). The authenticated directory browser inspects
+directories readable by that account; responses hold only the canonical
+location, parent, and at most 500 child directories. Only use runners and model
+credentials you trust with the selected project; the selected agent file is sent
 to the model provider as project instructions. Provider secrets remain on the Q
 Mush server: the browser and runner work protocol never receive them.
 

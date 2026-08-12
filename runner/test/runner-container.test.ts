@@ -86,11 +86,19 @@ describe("RunnerContainerManager", () => {
   });
 
   test.each([
-    "docker: no matching manifest for linux/arm64 in the manifest list entries",
-    'Error: choosing an image from manifest list docker.io/library/archlinux:latest: no image found in image index for architecture "arm64"',
+    [
+      "docker: no matching manifest for linux/arm64 in the manifest list entries",
+      true,
+    ],
+    [
+      'Error: choosing an image from manifest list docker.io/library/archlinux:latest: no image found in image index for architecture "arm64"',
+      true,
+    ],
+    // Unrelated failures must not claim an architecture mismatch.
+    ["Error response from daemon: connection refused", false],
   ])(
     "explains architecture mismatches with the image override",
-    async (standardError) => {
+    async (standardError, expectGuidance) => {
       const calls: FakeCall[] = [];
       const manager = new RunnerContainerManager({
         run: containerOperationRun(calls, {
@@ -98,10 +106,19 @@ describe("RunnerContainerManager", () => {
             Promise.resolve(processResult({ exitCode: 125, standardError })),
         }),
       });
+      const guidance = "set Q_MUSH_CONTAINER_IMAGE to a compatible image";
+      let failure: unknown;
+      try {
+        await manager.prepare("session-1", temporaryDirectory());
+      } catch (error) {
+        failure = error;
+      }
 
-      await expect(
-        manager.prepare("session-1", temporaryDirectory()),
-      ).rejects.toThrow("set Q_MUSH_CONTAINER_IMAGE to a compatible image");
+      if (!(failure instanceof Error)) {
+        throw new TypeError("The container start did not fail");
+      }
+      expect(failure.message).toContain(standardError);
+      expect(failure.message.includes(guidance)).toBe(expectGuidance);
     },
   );
 

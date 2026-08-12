@@ -11,8 +11,9 @@ import {
   type RunnerProcessResult,
 } from "./runner-process.ts";
 
-// Arch publishes amd64-only images; ARM64 runners need a multi-arch
-// Q_MUSH_CONTAINER_IMAGE override (startup fails loudly there otherwise).
+// Arch publishes amd64-only images; hosts without amd64 support or
+// emulation need a multi-arch Q_MUSH_CONTAINER_IMAGE override (startup
+// fails loudly with that guidance otherwise).
 const DEFAULT_CONTAINER_IMAGE = "archlinux:latest";
 const CONTAINER_WORKSPACE = "/workspace";
 const CONTAINER_IDENTIFIER_PATTERN = /^[A-Za-z\d][A-Za-z\d_.-]{0,199}$/u;
@@ -176,11 +177,15 @@ function processError(
   action: string,
   result: RunnerProcessResult,
 ): Error {
-  const detail = result.standardError.trim() || result.standardOutput.trim();
+  // Slice before matching: the process streams allow large outputs, and the
+  // greedy platform pattern backtracks measurably on long single lines.
+  const detail = (
+    result.standardError.trim() || result.standardOutput.trim()
+  ).slice(0, 500);
   // The default Arch image is amd64-only; hosts that cannot run it (ARM64
-  // Linux without emulation) need the image override, so say so. Docker
-  // reports "no matching manifest", Podman "no image found in image index
-  // (or manifest list) for architecture".
+  // without emulation) need the image override, so say so. Docker reports
+  // "no matching manifest", Podman "no image found in image index (or
+  // manifest list) for architecture".
   const guidance =
     /no matching manifest|no image found in (?:image index|manifest list) for architecture|platform.+does not match/iu.test(
       detail,
@@ -188,7 +193,7 @@ function processError(
       ? " The configured image does not support this host architecture; set Q_MUSH_CONTAINER_IMAGE to a compatible image."
       : "";
   return new Error(
-    `Container execution is unavailable: ${runtime} could not ${action}${detail.length === 0 ? "" : `: ${detail.slice(0, 500)}`}${guidance}`,
+    `Container execution is unavailable: ${runtime} could not ${action}${detail.length === 0 ? "" : `: ${detail}`}.${guidance}`,
   );
 }
 
