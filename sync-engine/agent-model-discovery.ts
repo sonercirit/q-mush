@@ -15,6 +15,7 @@ import type {
 import type { ProviderModelPricing } from "../shared/provider-model-pricing.ts";
 import { utf8Prefix } from "../shared/utf8.ts";
 import { readPositiveSafeInteger } from "../shared/validation.ts";
+import { withAnthropicCapabilities } from "./agent-model-discovery-anthropic.ts";
 import {
   agentProviderRequestHeaders,
   type AgentProviderCredential,
@@ -413,6 +414,7 @@ function readGenericCatalog(
   value: unknown,
   credential: AgentProviderCredential,
 ): AgentModelCatalog {
+  const anthropicFormat = credential.apiFormat === "anthropic";
   const models = providerModelList(value, "data").flatMap((item) => {
     if (!isRecord(item)) {
       return [];
@@ -420,7 +422,7 @@ function readGenericCatalog(
     const option = modelOption(
       item,
       "id",
-      credential.apiFormat === "anthropic" ? "display_name" : "name",
+      anthropicFormat ? "display_name" : "name",
       genericReasoningEfforts(item),
       [
         "context_window",
@@ -429,7 +431,10 @@ function readGenericCatalog(
         "max_input_tokens",
       ],
     );
-    return option === undefined ? [] : [option];
+    if (option === undefined) {
+      return [];
+    }
+    return [anthropicFormat ? withAnthropicCapabilities(option, item) : option];
   });
   return createCatalog(models);
 }
@@ -439,24 +444,39 @@ function readGenericCatalog(
 // OpenAI-style listing at the same base URL. Merge those per-model efforts
 // best-effort so Anthropic-format sessions can offer them; endpoints without
 // an OpenAI-style listing simply offer none.
+async function fetchDiscoveryJson(
+  fetch: AgentModelDiscoveryFetch,
+  url: URL | string,
+  headers: Headers,
+): Promise<unknown> {
+  return readProviderResponse(
+    await fetch(
+      new Request(url, {
+        headers,
+        method: "GET",
+        signal: AbortSignal.timeout(10_000),
+      }),
+    ),
+  );
+}
+
 async function mergeOpenAiListedEfforts(
   catalog: AgentModelCatalog,
   credential: AgentProviderCredential,
   fetch: AgentModelDiscoveryFetch,
 ): Promise<AgentModelCatalog> {
+  if (catalog.models.every((model) => model.reasoningEfforts.length > 0)) {
+    return catalog;
+  }
   try {
     const headers = new Headers({ accept: "application/json" });
     if (credential.secret.length > 0) {
       headers.set("authorization", `Bearer ${credential.secret}`);
     }
-    const value = await readProviderResponse(
-      await fetch(
-        new Request(genericProviderEndpoint(credential.baseUrl, "models"), {
-          headers,
-          method: "GET",
-          signal: AbortSignal.timeout(10_000),
-        }),
-      ),
+    const value = await fetchDiscoveryJson(
+      fetch,
+      genericProviderEndpoint(credential.baseUrl, "models"),
+      headers,
     );
     const efforts = new Map<string, readonly AgentReasoningEffort[]>();
     for (const item of providerModelList(value, "data")) {
@@ -474,7 +494,7 @@ async function mergeOpenAiListedEfforts(
       ...catalog,
       models: catalog.models.map((model) => {
         const listed = efforts.get(model.id);
-        return listed === undefined
+        return listed === undefined || model.reasoningEfforts.length > 0
           ? model
           : { ...model, reasoningEfforts: listed };
       }),
@@ -556,7 +576,7 @@ async function readProviderResponse(response: Response): Promise<unknown> {
 function discoveryRequest(
   provider: ProviderId,
   credential: AgentProviderCredential,
-): Request {
+): { readonly headers: Headers; readonly url: string } {
   const codexOAuth = provider === "openai" && credential.source === "oauth";
   const url = codexOAuth
     ? `${OPENAI_CODEX_MODELS_URL}?client_version=${MODEL_CLIENT_VERSION}`
@@ -571,11 +591,38 @@ function discoveryRequest(
     "application/json",
   );
   headers.delete("content-type");
-  return new Request(url, {
-    headers,
-    method: "GET",
-    signal: AbortSignal.timeout(10_000),
-  });
+  return { headers, url };
+}
+
+// The Anthropic Models API pages with `has_more`/`last_id` cursors and a
+// 20-item default page; request its documented 1000-item maximum and follow
+// cursors so large catalogs list completely.
+async function readAnthropicModelList(
+  credential: AgentProviderCredential,
+  fetch: AgentModelDiscoveryFetch,
+): Promise<readonly unknown[]> {
+  const base = discoveryRequest("generic", credential);
+  const items: unknown[] = [];
+  let afterId: string | undefined;
+  for (;;) {
+    const url = new URL(base.url);
+    url.searchParams.set("limit", "1000");
+    if (afterId !== undefined) {
+      url.searchParams.set("after_id", afterId);
+    }
+    const value = await fetchDiscoveryJson(fetch, url, base.headers);
+    const page = providerModelList(value, "data");
+    items.push(...page);
+    if (items.length > MAXIMUM_AGENT_MODEL_OPTIONS) {
+      throw modelDiscoveryError(MODEL_CATALOG_HAS_TOO_MANY_OPTIONS);
+    }
+    const lastId = isRecord(value) ? value["last_id"] : undefined;
+    const hasMore = isRecord(value) && value["has_more"] === true;
+    if (!hasMore || typeof lastId !== "string" || page.length === 0) {
+      return items;
+    }
+    afterId = lastId;
+  }
 }
 
 export async function discoverAgentModels(
@@ -584,18 +631,21 @@ export async function discoverAgentModels(
   fetch: AgentModelDiscoveryFetch = (request) => globalThis.fetch(request),
 ): Promise<AgentModelCatalog> {
   try {
-    const value = await readProviderResponse(
-      await fetch(discoveryRequest(provider, credential)),
-    );
+    if (provider === "generic" && credential.apiFormat === "anthropic") {
+      const catalog = readGenericCatalog(
+        { data: await readAnthropicModelList(credential, fetch) },
+        credential,
+      );
+      return await mergeOpenAiListedEfforts(catalog, credential, fetch);
+    }
+    const request = discoveryRequest(provider, credential);
+    const value = await fetchDiscoveryJson(fetch, request.url, request.headers);
 
     if (provider === "openrouter") {
       return readOpenRouterCatalog(value);
     }
     if (provider === "generic") {
-      const catalog = readGenericCatalog(value, credential);
-      return credential.apiFormat === "anthropic"
-        ? await mergeOpenAiListedEfforts(catalog, credential, fetch)
-        : catalog;
+      return readGenericCatalog(value, credential);
     }
 
     return credential.source === "oauth"

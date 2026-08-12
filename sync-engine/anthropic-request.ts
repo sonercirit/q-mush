@@ -137,12 +137,16 @@ export function anthropicRequestBody(
   // `output_config.effort` and turns on adaptive thinking with visible
   // summaries: adaptive-only models (Fable) ignore `enabled`, and newer
   // models default `display` to "omitted", which streams empty thinking text
-  // while still billing thinking tokens. "none" sends neither parameter.
+  // while still billing thinking tokens. "none" sends neither parameter, and
+  // "minimal" (an OpenAI level the Messages API rejects — valid levels are
+  // low through max) maps to "low".
+  const effort =
+    options.reasoningEffort === "minimal" ? "low" : options.reasoningEffort;
   const reasoning =
-    options.reasoningEffort === undefined || options.reasoningEffort === "none"
+    effort === undefined || effort === "none"
       ? {}
       : {
-          output_config: { effort: options.reasoningEffort },
+          output_config: { effort },
           thinking: { display: "summarized", type: "adaptive" },
         };
   return {

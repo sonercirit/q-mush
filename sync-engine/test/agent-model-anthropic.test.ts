@@ -68,7 +68,9 @@ function expectAbsentProperties(
   }
 }
 
-async function effortRequestBody(effort: "none" | "xhigh"): Promise<unknown> {
+async function effortRequestBody(
+  effort: "minimal" | "none" | "xhigh",
+): Promise<unknown> {
   const harness = anthropicHarness([doneEvents()], { reasoningEffort: effort });
   await harness.complete();
   return harness.requestBody(0);
@@ -288,6 +290,52 @@ describe("anthropic-format generic provider", () => {
   test('sends no reasoning parameters for the "none" effort', async () => {
     const body = await effortRequestBody("none");
     expectAbsentProperties(body, ["output_config", "thinking"]);
+  });
+
+  test("maps image and PDF attachments to native content blocks", async () => {
+    const harness = anthropicHarness([doneEvents()]);
+    await harness.complete([
+      {
+        attachments: [
+          { data: "aW1n", mediaType: "image/png", name: "shot.png" },
+          { data: "cGRm", mediaType: "application/pdf", name: "spec.pdf" },
+          { data: "dHh0", mediaType: "text/plain", name: "notes.txt" },
+        ],
+        content: "See the files",
+        role: "user",
+      },
+    ]);
+
+    const body = await harness.requestBody(0);
+    const messages = isRecord(body) ? body["messages"] : undefined;
+    if (!Array.isArray(messages) || !isRecord(messages[0])) {
+      throw new Error("The captured messages were invalid");
+    }
+    const content = messages[0]["content"];
+    if (!Array.isArray(content)) {
+      throw new Error("The captured content was not an array");
+    }
+    // Image and PDF map to native blocks; other modalities fall through to
+    // the attachment fallback instead of the request body.
+    expect(content).toHaveLength(3);
+    expect(content[1]).toEqual({
+      source: { data: "aW1n", media_type: "image/png", type: "base64" },
+      type: "image",
+    });
+    // The final part carries the rolling transcript-tail cache breakpoint.
+    expect(content[2]).toEqual({
+      cache_control: { ttl: "1h", type: "ephemeral" },
+      source: { data: "cGRm", media_type: "application/pdf", type: "base64" },
+      title: "spec.pdf",
+      type: "document",
+    });
+  });
+
+  test('maps the OpenAI-only "minimal" effort to "low"', async () => {
+    // The Messages API rejects "minimal": valid levels are low through max.
+    expect(await effortRequestBody("minimal")).toMatchObject({
+      output_config: { effort: "low" },
+    });
   });
 
   test("surfaces a provider effort rejection", async () => {

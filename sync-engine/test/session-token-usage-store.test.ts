@@ -4,6 +4,7 @@ import type { AgentTokenUsage } from "../../shared/agent-loop.ts";
 import { agentMessages } from "../../shared/database/schema.ts";
 import type { AgentSessionUsageUpdate } from "../../shared/session-model.ts";
 import type { SessionStore } from "../../sync-engine/session-store.ts";
+import { storedSessionTokenUsage } from "../../sync-engine/session-token-usage-store.ts";
 import {
   TEST_NOW,
   TEST_USER_ID,
@@ -87,6 +88,25 @@ test("persists model-step usage on its assistant message and aggregates it", () 
       .all()
       .at(-1),
   ).toEqual({ cached: 600, input: 1_000, output: 200, written: 50 });
+  setup.database.$client.close();
+});
+
+test("a partially reported step never becomes the cache-rate divisor", () => {
+  const setup = runningStore();
+  appendStep(setup.store, "Reported step", TEST_NOW + 2, TOKEN_USAGE);
+  appendStep(setup.store, "Partial step", TEST_NOW + 3);
+  setup.database
+    .update(agentMessages)
+    .set({ inputTokens: 9_999 })
+    .where(eq(agentMessages.content, "Partial step"))
+    .run();
+
+  // The sums skip the partial row, so the last-input subtraction must too:
+  // otherwise rates divide by summed input minus tokens never counted.
+  expect(storedSessionTokenUsage(setup.database, STORE_SESSION_ID)).toEqual({
+    ...SINGLE_STEP_SUMMARY,
+    stepCount: 2,
+  });
   setup.database.$client.close();
 });
 

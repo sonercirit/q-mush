@@ -291,39 +291,49 @@ describe("agent model discovery", () => {
     expectBearer(request, "generic-secret");
   });
 
-  test("discovers Anthropic-format models and merges OpenAI-listed efforts", async () => {
+  async function discoverAnthropicFormat(
+    respond: (request: Request) => Response,
+  ): Promise<{
+    readonly discovered: AgentModelCatalog;
+    readonly requests: Request[];
+  }> {
     const requests: Request[] = [];
     const discovered = await discoverAgentModels(
       "generic",
       anthropicFormatCredential(),
       (request) => {
         requests.push(request);
+        return Promise.resolve(respond(request));
+      },
+    );
+    return { discovered, requests };
+  }
+
+  test("discovers Anthropic-format models and merges OpenAI-listed efforts", async () => {
+    const { discovered, requests } = await discoverAnthropicFormat(
+      (request) => {
         if (request.headers.has("x-api-key")) {
-          return Promise.resolve(
-            createJsonResponse({
-              data: [
-                {
-                  created_at: "2026-01-01T00:00:00Z",
-                  display_name: "Claude Test 4",
-                  id: "claude-test-4",
-                  max_input_tokens: 200_000,
-                  type: "model",
-                },
-              ],
-              has_more: false,
-            }),
-          );
-        }
-        return Promise.resolve(
-          createJsonResponse({
+          return createJsonResponse({
             data: [
               {
+                created_at: "2026-01-01T00:00:00Z",
+                display_name: "Claude Test 4",
                 id: "claude-test-4",
-                supported_reasoning_efforts: ["none", "low", "high", "max"],
+                max_input_tokens: 200_000,
+                type: "model",
               },
             ],
-          }),
-        );
+            has_more: false,
+          });
+        }
+        return createJsonResponse({
+          data: [
+            {
+              id: "claude-test-4",
+              supported_reasoning_efforts: ["none", "low", "high", "max"],
+            },
+          ],
+        });
       },
     );
 
@@ -339,7 +349,9 @@ describe("agent model discovery", () => {
     );
     expect(requests).toHaveLength(2);
     const [primary, secondary] = requests;
-    expect(primary?.url).toBe("https://anthropic.example.test/v1/models");
+    expect(primary?.url).toBe(
+      "https://anthropic.example.test/v1/models?limit=1000",
+    );
     expect(primary?.headers.get("x-api-key")).toBe("anthropic-secret");
     expect(primary?.headers.get("anthropic-version")).toBe("2023-06-01");
     expect(primary?.headers.has("authorization")).toBe(false);
@@ -350,20 +362,85 @@ describe("agent model discovery", () => {
     expect(secondary?.headers.has("x-api-key")).toBe(false);
   });
 
-  test("keeps the Anthropic-format catalog when no OpenAI listing exists", async () => {
-    const discovered = await discoverAgentModels(
-      "generic",
-      anthropicFormatCredential(),
-      (request) =>
-        Promise.resolve(
-          request.headers.has("x-api-key")
-            ? createJsonResponse({
-                data: [
-                  { display_name: "Claude Plain 1", id: "claude-plain-1" },
-                ],
-              })
-            : new Response("denied", { status: 404 }),
+  test("reads Anthropic capability efforts and modalities without a second probe", async () => {
+    const { discovered, requests } = await discoverAnthropicFormat(() =>
+      createJsonResponse({
+        data: [
+          {
+            capabilities: {
+              effort: {
+                high: { supported: true },
+                low: { supported: true },
+                max: { supported: true },
+                medium: { supported: true },
+                supported: true,
+                xhigh: { supported: false },
+              },
+              image_input: { supported: true },
+              pdf_input: { supported: true },
+              thinking: {
+                supported: true,
+                types: { adaptive: { supported: true } },
+              },
+            },
+            display_name: "Claude Caps 5",
+            id: "claude-caps-5",
+            max_input_tokens: 1_000_000,
+            type: "model",
+          },
+        ],
+        has_more: false,
+      }),
+    );
+
+    expect(discovered).toEqual(
+      catalog("claude-caps-5", [
+        model(
+          "claude-caps-5",
+          "Claude Caps 5",
+          ["none", "low", "medium", "high", "max"],
+          1_000_000,
+          ["text", "image", "pdf"],
         ),
+      ]),
+    );
+    // Capability metadata answered efforts, so no OpenAI-style probe runs.
+    expect(requests).toHaveLength(1);
+  });
+
+  test("follows Anthropic has_more cursors across pages", async () => {
+    const paginated = await discoverAnthropicFormat((request) => {
+      if (!request.headers.has("x-api-key")) {
+        return createJsonResponse({ data: [] });
+      }
+      const paged = new URL(request.url).searchParams.has("after_id");
+      return createJsonResponse({
+        data: [
+          {
+            display_name: paged ? "Claude Page 2" : "Claude Page 1",
+            id: paged ? "claude-page-2" : "claude-page-1",
+          },
+        ],
+        has_more: !paged,
+        last_id: paged ? "claude-page-2" : "claude-page-1",
+      });
+    });
+
+    expect(paginated.discovered.models.map(({ id }) => id)).toEqual([
+      "claude-page-1",
+      "claude-page-2",
+    ]);
+    expect(paginated.requests[0]?.url).toContain("limit=1000");
+    expect(paginated.requests[1]?.url).toContain("after_id=claude-page-1");
+  });
+
+  test("keeps the Anthropic-format catalog when no OpenAI listing exists", async () => {
+    const { discovered } = await discoverAnthropicFormat((request) =>
+      request.headers.has("x-api-key")
+        ? createJsonResponse({
+            data: [{ display_name: "Claude Plain 1", id: "claude-plain-1" }],
+          })
+        : new Response("denied", { status: 404 }),
     );
 
     expect(discovered).toEqual(

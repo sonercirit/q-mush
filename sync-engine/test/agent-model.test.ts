@@ -294,10 +294,13 @@ describe("chat completions agent model", () => {
     expect(capture.request?.headers.get("authorization")).toBe(
       "Bearer generic-secret",
     );
+    // Generic OpenAI-format endpoints get plain messages: local runtimes
+    // such as Ollama reject array content carrying cache markers.
     expect(isRecord(body) ? body["messages"] : undefined).toEqual([
-      cachedTextMessage("system", AGENT_SYSTEM_PROMPT),
-      cachedTextMessage("user", "Hello"),
+      { content: AGENT_SYSTEM_PROMPT, role: "system" },
+      { content: "Hello", role: "user" },
     ]);
+    expect(JSON.stringify(body)).not.toContain("cache_control");
     expect(body).toMatchObject({
       model: "llama-3.3-70b",
       reasoning_effort: "high",

@@ -62,7 +62,7 @@ function agentSessionColumnNames(database: Database): readonly string[] {
   return query.all().map((column) => column.name);
 }
 
-test("upgrades migration 0027 through the context cap migration", async () => {
+test("upgrades migration 0027 through the api-format migration", async () => {
   temporaryDirectory = mkdtempSync(join(tmpdir(), "q-mush-0028-upgrade-"));
   const path = join(temporaryDirectory, "current-base.sqlite");
   const currentBaseDatabase = new Database(path, { create: true });

@@ -254,11 +254,13 @@ function openRouterProviderPreferences(
 }
 
 // OpenRouter forwards Anthropic-style cache_control markers to providers that
-// price cached prefixes and strips them elsewhere, and generic OpenAI-format
-// proxies forward them to Anthropic-compatible backends the same way. OpenAI
-// itself caches automatically, keyed by prompt_cache_key.
+// price cached prefixes and strips them elsewhere. Generic OpenAI-format
+// endpoints get plain messages: local runtimes such as Ollama reject array
+// content with tool metadata, and only the Anthropic protocol is known to
+// honor the markers. OpenAI itself caches automatically, keyed by
+// prompt_cache_key.
 function usesCacheBreakpoints(request: ProviderModelRequest): boolean {
-  return request.provider === "openrouter" || request.provider === "generic";
+  return request.provider === "openrouter";
 }
 
 function chatMessages(request: ProviderModelRequest): readonly unknown[] {
@@ -282,10 +284,13 @@ function chatMessages(request: ProviderModelRequest): readonly unknown[] {
   ];
 }
 
+// prompt_cache_key is an OpenAI parameter; OpenRouter tolerates and may
+// forward it, but strict generic OpenAI-compatible servers reject unknown
+// fields, so generic requests omit it.
 function promptCacheKeyField(
   request: ProviderModelRequest,
 ): Readonly<Record<string, string>> {
-  return request.promptCacheKey === undefined
+  return request.promptCacheKey === undefined || request.provider === "generic"
     ? {}
     : { prompt_cache_key: request.promptCacheKey };
 }

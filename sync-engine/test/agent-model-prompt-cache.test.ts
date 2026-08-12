@@ -16,12 +16,19 @@ type ModelOptions = ConstructorParameters<typeof ChatCompletionsAgentModel>[0];
 const SESSION_KEY = "0193dummy-session-id";
 
 function apiKeyChatOptions(
-  provider: "openai" | "openrouter",
+  provider: "generic" | "openai" | "openrouter",
   model: string,
   promptCacheKey: string | undefined,
 ): Omit<ModelOptions, "fetch"> {
   return {
-    credential: { accountId: null, secret: "sk-chat", source: "api_key" },
+    credential: {
+      accountId: null,
+      ...(provider === "generic"
+        ? { baseUrl: "https://generic.example.test/v1" }
+        : {}),
+      secret: "sk-chat",
+      source: "api_key",
+    },
     model,
     ...(promptCacheKey === undefined ? {} : { promptCacheKey }),
     provider,
@@ -50,6 +57,17 @@ function promptCacheKeyOf(body: unknown): unknown {
   return isRecord(body) ? body["prompt_cache_key"] : undefined;
 }
 
+async function markerFreeChatBody(
+  provider: "generic" | "openai",
+  model: string,
+): Promise<unknown> {
+  const { body } = await captureChat(
+    apiKeyChatOptions(provider, model, SESSION_KEY),
+  );
+  expect(JSON.stringify(body)).not.toContain("cache_control");
+  return body;
+}
+
 describe("prompt cache request state", () => {
   test("keys OpenRouter requests to the session and marks 1h breakpoints", async () => {
     const { body } = await captureChat(
@@ -65,11 +83,8 @@ describe("prompt cache request state", () => {
   });
 
   test("sends prompt_cache_key but no breakpoints to OpenAI api-key chat", async () => {
-    const { body } = await captureChat(
-      apiKeyChatOptions("openai", "gpt-4.1-mini", SESSION_KEY),
-    );
+    const body = await markerFreeChatBody("openai", "gpt-4.1-mini");
 
-    expect(JSON.stringify(body)).not.toContain("cache_control");
     expect(body).toMatchObject({
       messages: [{ role: "system" }, { content: "Hello", role: "user" }],
       prompt_cache_key: SESSION_KEY,
@@ -99,6 +114,14 @@ describe("prompt cache request state", () => {
     expect(step.content).toBe("Done.");
     expect(captured?.headers.get("session_id")).toBe(SESSION_KEY);
     expect(promptCacheKeyOf(await captured?.json())).toBe(SESSION_KEY);
+  });
+
+  test("sends neither breakpoints nor cache key to generic OpenAI chat", async () => {
+    // Strict OpenAI-compatible servers reject unknown fields, and local
+    // runtimes reject array content carrying cache markers.
+    const body = await markerFreeChatBody("generic", "llama-3.3-70b");
+
+    expect(body).not.toHaveProperty("prompt_cache_key");
   });
 
   test("omits the cache key field when no session key exists", async () => {
