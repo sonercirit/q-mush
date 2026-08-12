@@ -214,11 +214,19 @@ test("keeps authoritative Anthropic effort metadata over the OpenAI listing", as
       "claude-off-1",
       "Claude Off 1",
     ),
+    // Named levels but no adaptive leaf anywhere: efforts imply sending
+    // adaptive thinking, which is unverifiable here, so authoritative.
+    capabilityListing(
+      { effort: { low: { supported: true }, supported: true } },
+      "claude-bare-1",
+      "Claude Bare 1",
+    ),
     { display_name: "Claude Unknown 1", id: "claude-unknown-1" },
   ];
   const openAiListing = [
     { id: "claude-gated-1", supported_reasoning_efforts: ["low"] },
     { id: "claude-off-1", supported_reasoning_efforts: ["low"] },
+    { id: "claude-bare-1", supported_reasoning_efforts: ["low"] },
     {
       id: "claude-unknown-1",
       supported_reasoning_efforts: ["low", "high"],
@@ -236,30 +244,39 @@ test("keeps authoritative Anthropic effort metadata over the OpenAI listing", as
   ).toEqual([
     ["claude-gated-1", []],
     ["claude-off-1", []],
+    ["claude-bare-1", []],
     ["claude-unknown-1", ["low", "high"]],
   ]);
   expect(requests).toHaveLength(2);
 });
 
 test("an adaptive-incapable model without effort metadata stays effortless", async () => {
-  const manualThinking = { types: { adaptive: { supported: false } } };
-  const { discovered } = await discoverAnthropicFormat(
-    dualListing(
-      [
-        capabilityListing(
-          { thinking: manualThinking },
-          "claude-manual-1",
-          "Claude Manual 1",
-        ),
-      ],
-      [{ id: "claude-manual-1", supported_reasoning_efforts: ["low", "high"] }],
-    ),
-  );
+  // Full leaf, partial-tree denial, and boolean shorthand all count.
+  for (const thinking of [
+    { types: { adaptive: { supported: false } } },
+    { supported: false },
+    { types: { adaptive: false } },
+  ]) {
+    const { discovered } = await discoverAnthropicFormat(
+      dualListing(
+        [capabilityListing({ thinking }, "claude-manual-1", "Claude Manual 1")],
+        [
+          {
+            id: "claude-manual-1",
+            supported_reasoning_efforts: ["low", "high"],
+          },
+        ],
+      ),
+    );
 
-  // The explicit adaptive non-support is authoritative even though the
-  // capability tree carries no effort node: the OpenAI-style listing must
-  // not enable efforts that would send a rejected adaptive thinking type.
-  expectSoleModel(discovered, model("claude-manual-1", "Claude Manual 1", []));
+    // The explicit non-support is authoritative even though the capability
+    // tree carries no effort node: the OpenAI-style listing must not
+    // enable efforts that would send a rejected adaptive thinking type.
+    expectSoleModel(
+      discovered,
+      model("claude-manual-1", "Claude Manual 1", []),
+    );
+  }
 });
 
 test("affirmed effort support without named levels accepts listed efforts", async () => {

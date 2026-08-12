@@ -269,14 +269,13 @@ Living project memory.
   (`agent-model-discovery-anthropic.ts`: per-level `effort` support gated on
   adaptive thinking, modalities only from `image_input`/`pdf_input` leaves),
   page via `has_more`/`last_id` at `limit=1000` with stale-cursor and page-count
-  guards, and probe the endpoint's OpenAI-style listing only for models whose
-  capabilities carried no effort metadata. Codex parsing retains streamed
-  output-text and function-call argument deltas since completed events may omit
-  `output`. Only explicitly listed efforts are offered; OpenAI's catalog lacks
-  reasoning metadata. Optional reasoning uses `reasoning_effort` for OpenAI and
-  generic chat completions and `reasoning.effort` for OpenRouter and Codex
-  Responses; the Anthropic Messages format maps efforts to
-  `output_config.effort` plus
+  guards, and probe the endpoint's OpenAI-style listing only where capabilities
+  left efforts unknown. Codex parsing retains streamed output-text and
+  function-call argument deltas since completed events may omit `output`. Only
+  explicitly listed efforts are offered; OpenAI's catalog lacks reasoning
+  metadata. Optional reasoning uses `reasoning_effort` for OpenAI and generic
+  chat completions and `reasoning.effort` for OpenRouter and Codex Responses;
+  the Anthropic Messages format maps efforts to `output_config.effort` plus
   `thinking: {type: "adaptive", display: "summarized"}` on provider-default
   budgets, sending neither for `none` and `minimal` as `low` (rejected
   otherwise). Adaptive-only models (Fable) ignore `enabled`; newer models

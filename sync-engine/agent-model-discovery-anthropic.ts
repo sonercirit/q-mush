@@ -31,34 +31,37 @@ function capabilitySupported(
   return capabilityRecord(value, ...path)?.["supported"] === true;
 }
 
-// Undefined means the listing carries no effort metadata (unknown), while an
-// array — possibly empty — is authoritative: an explicit
-// `effort.supported: false` or a missing adaptive-thinking capability must
-// not be overwritten by the OpenAI-style fallback listing. Efforts are
-// offered only alongside adaptive thinking because selecting one turns on
-// `thinking: {type: "adaptive"}`, which adaptive-incapable models reject —
-// including effort-capable extended-thinking-only models (Claude Opus 4.5),
-// which stay effortless here until sessions carry per-model thinking
-// capabilities.
+// Undefined means efforts are unknown (fallback-eligible), while an array —
+// possibly empty — is authoritative: explicit denials and unverifiable
+// adaptive support must not be overwritten by the OpenAI-style fallback
+// listing. Efforts are offered only alongside adaptive thinking because
+// selecting one turns on `thinking: {type: "adaptive"}`, which
+// adaptive-incapable models reject — including effort-capable
+// extended-thinking-only models (Claude Opus 4.5), which stay effortless
+// here until sessions carry per-model thinking capabilities.
 function anthropicCapabilityEfforts(
   capabilities: unknown,
 ): readonly AgentReasoningEffort[] | undefined {
   const effort = capabilityRecord(capabilities, "effort");
-  const adaptive = capabilityRecord(
-    capabilities,
-    "thinking",
-    "types",
-    "adaptive",
-  );
-  // An explicit adaptive leaf that withholds support is authoritative even
-  // without effort metadata; only when both are absent is support unknown.
-  if (adaptive !== undefined && adaptive["supported"] !== true) {
+  const thinking = capabilityRecord(capabilities, "thinking");
+  const adaptive = capabilityRecord(thinking, "types")?.["adaptive"];
+  const adaptiveSupported = isRecord(adaptive)
+    ? adaptive["supported"] === true
+    : adaptive === true;
+  // An explicit denial — a thinking node whose own leaf withholds support,
+  // or an adaptive leaf (record or boolean shorthand) that does — is
+  // authoritative even without effort metadata; when every leaf is absent,
+  // support is unknown.
+  if (
+    thinking?.["supported"] === false ||
+    (adaptive !== undefined && !adaptiveSupported)
+  ) {
     return [];
   }
   if (effort === undefined) {
     return undefined;
   }
-  if (effort["supported"] !== true || adaptive?.["supported"] !== true) {
+  if (effort["supported"] !== true || !adaptiveSupported) {
     return [];
   }
   // The documented tree has no "none" leaf; skipping it defends against a
