@@ -142,6 +142,13 @@ function SessionMetrics(props: {
       <span>
         {`Time: ${formatSessionTime(activeSessionDuration(props.session, now()))}`}
       </span>
+      <Show when={props.session.activeStartedAt} keyed>
+        {(startedAt) => (
+          <span class="text-emerald-200" data-session-run-duration="true">
+            {`Run: ${formatSessionTime(Math.max(0, now() - startedAt))}`}
+          </span>
+        )}
+      </Show>
       <span>{sessionCostText(props.session)}</span>
     </span>
   );
