@@ -58,6 +58,67 @@ const FOLLOW_UP_SYNC_DELAY_MS = 150;
 const COMPOSER_BUTTON_CLASSES =
   "min-h-11 w-full rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto";
 
+// Typing writes a local signal and syncs the shared draft on a short delay:
+// per-keystroke patches of the whole session view state re-run every memo
+// reading it, which froze Firefox on long prompts. Shortcut and action paths
+// flush synchronously so submits always read the latest text.
+function createLocalPromptEcho(options: {
+  readonly onInput: (value: string) => void;
+  readonly prompt: () => string;
+}) {
+  const [textarea, setTextarea] = createSignal<HTMLTextAreaElement>();
+  const [localPrompt, setLocalPrompt] = createSignal(untrack(options.prompt));
+  let syncTimer: ReturnType<typeof setTimeout> | undefined;
+  const clearSyncTimer = (): void => {
+    if (syncTimer !== undefined) {
+      clearTimeout(syncTimer);
+      syncTimer = undefined;
+    }
+  };
+  const syncPrompt = (): void => {
+    clearSyncTimer();
+    if (localPrompt() !== options.prompt()) options.onInput(localPrompt());
+  };
+  const handleInput = (
+    event: InputEvent & { readonly currentTarget: HTMLTextAreaElement },
+  ): void => {
+    setLocalPrompt(event.currentTarget.value);
+    clearSyncTimer();
+    syncTimer = setTimeout(syncPrompt, FOLLOW_UP_SYNC_DELAY_MS);
+  };
+  const resetLocalPrompt = (): void => {
+    clearSyncTimer();
+    setLocalPrompt(options.prompt());
+  };
+  createEffect(
+    on(options.prompt, (prompt, previousPrompt) => {
+      if (
+        prompt !== previousPrompt &&
+        (syncTimer === undefined || textarea() !== document.activeElement)
+      ) {
+        setLocalPrompt(prompt);
+      }
+    }),
+  );
+  onCleanup(clearSyncTimer);
+  return {
+    handleInput,
+    localPrompt,
+    resetLocalPrompt,
+    setTextarea,
+    syncPrompt,
+  };
+}
+
+function promptEcho(props: PromptEventProps & { readonly prompt: string }) {
+  return createLocalPromptEcho({
+    onInput: (value) => {
+      props.onInput(value);
+    },
+    prompt: () => props.prompt,
+  });
+}
+
 function promptEvents(props: PromptEventProps) {
   return {
     onInput: (event: InputEvent & { currentTarget: HTMLTextAreaElement }) => {
@@ -90,6 +151,7 @@ function renderSessionImages(
 export function SessionPromptInput(
   props: SessionPromptInputProps,
 ): JSX.Element {
+  const echo = promptEcho(props);
   return (
     <div class="md:col-span-2">
       <label class="text-sm font-medium text-slate-200" for="session-prompt">
@@ -100,12 +162,20 @@ export function SessionPromptInput(
         disabled={props.disabled}
         id="session-prompt"
         name="prompt"
+        // The Create button lives outside this component, so flushing on
+        // blur guarantees the click-submit path reads the typed text.
+        onBlur={echo.syncPrompt}
+        onInput={echo.handleInput}
         onKeyDown={(event) => {
+          if (sessionComposerShortcut(event) !== undefined) {
+            echo.syncPrompt();
+          }
           props.onKeyDown(event);
         }}
+        onPaste={promptEvents(props).onPaste}
         placeholder="Describe the change you want the agent to make…"
-        value={props.prompt}
-        {...promptEvents(props)}
+        ref={echo.setTextarea}
+        value={echo.localPrompt()}
       />
       <div class="mt-3">{renderSessionImages(props, "session-images")}</div>
     </div>
@@ -127,31 +197,8 @@ function composerActionProps(
 }
 
 export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
-  const [localPrompt, setLocalPrompt] = createSignal(
-    untrack(() => props.prompt),
-  );
-  const [textarea, setTextarea] = createSignal<HTMLTextAreaElement>();
-  let syncTimer: ReturnType<typeof setTimeout> | undefined;
-  const clearSyncTimer = (): void => {
-    if (syncTimer !== undefined) {
-      clearTimeout(syncTimer);
-      syncTimer = undefined;
-    }
-  };
-  const syncPrompt = (): void => {
-    clearSyncTimer();
-    if (localPrompt() !== props.prompt) props.onInput(localPrompt());
-  };
-  const schedulePromptSync = (): void => {
-    clearSyncTimer();
-    syncTimer = setTimeout(syncPrompt, FOLLOW_UP_SYNC_DELAY_MS);
-  };
-  const handleInput = (
-    event: InputEvent & { readonly currentTarget: HTMLTextAreaElement },
-  ): void => {
-    setLocalPrompt(event.currentTarget.value);
-    schedulePromptSync();
-  };
+  const echo = promptEcho(props);
+  const { localPrompt, syncPrompt } = echo;
   const handleKeyDown = (
     event: KeyboardEvent & { readonly currentTarget: HTMLTextAreaElement },
   ): void => {
@@ -197,32 +244,17 @@ export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
   };
   createEffect(
     on(
-      () => props.prompt,
-      (prompt, previousPrompt) => {
-        if (
-          prompt !== previousPrompt &&
-          (syncTimer === undefined || textarea() !== document.activeElement)
-        ) {
-          setLocalPrompt(prompt);
-        }
-      },
-    ),
-  );
-  createEffect(
-    on(
       () => props.sessionId,
       (sessionId, previousSessionId) => {
         if (
           previousSessionId !== undefined &&
           sessionId !== previousSessionId
         ) {
-          clearSyncTimer();
-          setLocalPrompt(props.prompt);
+          echo.resetLocalPrompt();
         }
       },
     ),
   );
-  onCleanup(clearSyncTimer);
 
   return (
     <form
@@ -242,12 +274,12 @@ export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
         aria-label="Follow-up instruction"
         class="min-h-20 w-full resize-y rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
         name="prompt"
-        onInput={handleInput}
+        onInput={echo.handleInput}
         onKeyDown={handleKeyDown}
         onPaste={promptEvents(props).onPaste}
         placeholder="Give this session another instruction…"
         {...(props.disabled ? { readOnly: true } : {})}
-        ref={setTextarea}
+        ref={echo.setTextarea}
         value={promptValue()}
       />
       {renderSessionImages(props, "follow-up-images")}

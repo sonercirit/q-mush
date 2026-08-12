@@ -22,6 +22,7 @@ import {
   disposeTestViews,
   mountTestView,
   queryTestElement,
+  useFakeTestClock,
 } from "./dom-test-helpers.ts";
 import {
   mountSessionDetailBody,
@@ -354,8 +355,7 @@ function mountedComposer(status: AgentSessionDetail["status"] = "running"): {
 }
 
 test("follow-up typing updates locally before the shared session view", () => {
-  vi.useFakeTimers({ shouldClearNativeTimers: true });
-  disposals.push(vi.useRealTimers);
+  useFakeTestClock(disposals);
   const { controller, detail, prompt } = mountedComposer();
 
   prompt.value = "Change direction immediately";
