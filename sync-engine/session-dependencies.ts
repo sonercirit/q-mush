@@ -18,7 +18,6 @@ interface SessionLivenessOptions {
   readonly clearInterval?: (timer: unknown) => void;
   readonly graceMs?: number;
   readonly intervalMs?: number;
-  readonly clearInterval?: (timer: unknown) => void;
   readonly setInterval?: (callback: () => void, interval: number) => unknown;
   readonly testScan?: (scan: () => void) => void;
 }
