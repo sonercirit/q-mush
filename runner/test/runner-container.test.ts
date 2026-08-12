@@ -73,7 +73,7 @@ function createTrackingPath(value: unknown): string {
 }
 
 describe("RunnerContainerManager", () => {
-  test("starts one hardened container per session and maps the workspace", async () => {
+  test("starts one root container per session and maps the workspace", async () => {
     const fake = successfulFake();
     const root = temporaryDirectory();
     const manager = new RunnerContainerManager({
@@ -106,12 +106,6 @@ describe("RunnerContainerManager", () => {
         "--rm",
         "--name",
         "q-mush-test-session",
-        "--network",
-        "none",
-        "--cap-drop",
-        "ALL",
-        "--security-opt",
-        "no-new-privileges",
         "--mount",
         `type=bind,source=${root},target=/workspace`,
         "--workdir",
@@ -119,6 +113,17 @@ describe("RunnerContainerManager", () => {
         "example/image:latest",
       ]),
     );
+    // Full-freedom container: the agent is root with default capabilities
+    // and network access so package installs work.
+    for (const dropped of [
+      "--network",
+      "--cap-drop",
+      "--security-opt",
+      "--user",
+      "--env",
+    ]) {
+      expect(start?.arguments).not.toContain(dropped);
+    }
     const executions = fake.calls.filter(
       ({ arguments: args }) => args[0] === "exec",
     );

@@ -10,7 +10,7 @@ export function createAgentSystemPrompt(
 ): string {
   const environment =
     executionEnvironment === "container"
-      ? "Shell tools execute inside an isolated container whose state persists for this session only and whose network access is disabled. The canonical workspace is mounted there at /workspace; use /workspace for absolute paths. File tools remain confined to the canonical workspace by host-side enforcement, so their changes are immediately visible in the container."
+      ? "Shell tools execute as root inside a disposable Arch Linux container dedicated to this session: install packages with pacman, use the network, and change the system freely; only this container is affected and it is removed when the session ends. The canonical workspace is mounted there at /workspace; use /workspace for absolute paths. File tools remain confined to the canonical workspace by host-side enforcement, so their changes are immediately visible in the container."
       : "File and shell tools execute directly on the selected runner.";
   const base = `${AGENT_SYSTEM_PROMPT}\n${environment}`;
   if (agentFile === null) {

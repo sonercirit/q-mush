@@ -11,7 +11,7 @@ import {
   type RunnerProcessResult,
 } from "./runner-process.ts";
 
-const DEFAULT_CONTAINER_IMAGE = "debian:bookworm-slim";
+const DEFAULT_CONTAINER_IMAGE = "archlinux:latest";
 const CONTAINER_WORKSPACE = "/workspace";
 const CONTAINER_IDENTIFIER_PATTERN = /^[A-Za-z\d][A-Za-z\d_.-]{0,199}$/u;
 type RunnerContainerRunOptions = Pick<
@@ -124,31 +124,16 @@ function configuredValue(
   return value === undefined || value.length === 0 ? fallback : value;
 }
 
-function runtimeUser(): string | undefined {
-  return process.getuid === undefined || process.getgid === undefined
-    ? undefined
-    : `${String(process.getuid())}:${String(process.getgid())}`;
-}
-
-function containerEnvironment(): readonly string[] {
-  const environment: string[] = [];
-  const entries = [
-    ["HOME", "/tmp/q-mush-home"],
-    ["TMPDIR", "/tmp"],
-  ] as const;
-  for (const [name, value] of entries) {
-    environment.push("--env", `${name}=${value}`);
-  }
-  return environment;
-}
-
 function runtimeArguments(
   root: string,
   name: string,
   image: string,
 ): readonly string[] {
   const mount = `type=bind,source=${root},target=${CONTAINER_WORKSPACE}`;
-  const user = runtimeUser();
+  // The session container is the agent's own disposable machine: root with
+  // the runtime's default capabilities and network access, so package
+  // installs (pacman on the default Arch image) work. Isolation comes from
+  // the container boundary and per-session teardown, not host-uid mapping.
   return [
     "run",
     "--detach",
@@ -158,14 +143,6 @@ function runtimeArguments(
     "--label",
     "dev.q-mush.owner=session",
     "--init",
-    "--network",
-    "none",
-    "--cap-drop",
-    "ALL",
-    "--security-opt",
-    "no-new-privileges",
-    ...(user === undefined ? [] : ["--user", user]),
-    ...containerEnvironment(),
     "--mount",
     mount,
     "--workdir",
@@ -174,7 +151,7 @@ function runtimeArguments(
     "/bin/sh",
     image,
     "-c",
-    'mkdir -p "$HOME" && while :; do sleep 3600; done',
+    "while :; do sleep 3600; done",
   ];
 }
 

@@ -4,6 +4,16 @@ import {
   createAgentSystemPrompt,
 } from "../../shared/agent-prompt.ts";
 
+test("describes the root Arch container environment for container sessions", () => {
+  const prompt = createAgentSystemPrompt(null, "container");
+
+  expect(prompt).toContain("root");
+  expect(prompt).toContain("Arch Linux");
+  expect(prompt).toContain("pacman");
+  expect(prompt).toContain("/workspace");
+  expect(prompt).not.toContain("network access is disabled");
+});
+
 test("adds a selected workspace agent file to the system prompt", () => {
   expect(createAgentSystemPrompt(null)).toBe(
     `${AGENT_SYSTEM_PROMPT}\nFile and shell tools execute directly on the selected runner.`,
