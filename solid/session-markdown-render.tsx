@@ -457,6 +457,7 @@ function parseMarkdownBlocks(
     preserveNewlines,
     blocks,
     [],
+    [],
   );
   return blocks;
 }
@@ -466,6 +467,7 @@ export function appendMarkdownBlocks(
   start: number,
   preserveNewlines: boolean,
   blocks: MarkdownBlock[],
+  starts: number[],
   ends: number[],
 ): void {
   let index = start;
@@ -477,6 +479,10 @@ export function appendMarkdownBlocks(
       index += 1;
       continue;
     }
+
+    // Every non-blank iteration emits exactly one block; recording its
+    // start lets incremental reparses resume past settled blank gaps.
+    starts.push(index);
 
     const table = markdownTable(lines, index);
 

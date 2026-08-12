@@ -14,12 +14,14 @@ interface ParsedMarkdownDocument {
   // Raw offset of the final normalized line: both newline forms end in
   // "\n", so the last raw "\n" starts it and appending only extends it.
   readonly rawLastLineStart: number;
+  readonly starts: readonly number[];
 }
 
 function parsedMarkdownDocument(
   content: string,
   lines: readonly string[],
   blocks: readonly MarkdownBlock[],
+  starts: readonly number[],
   ends: readonly number[],
 ): ParsedMarkdownDocument {
   return {
@@ -28,6 +30,7 @@ function parsedMarkdownDocument(
     ends,
     lines,
     rawLastLineStart: content.lastIndexOf("\n") + 1,
+    starts,
   };
 }
 
@@ -43,16 +46,14 @@ function parseMarkdownDocument(
   content: string,
 ): ParsedMarkdownDocument {
   if (previous?.content === content) return previous;
-  if (
-    previous === undefined ||
-    previous.content.length === 0 ||
-    !content.startsWith(previous.content)
-  ) {
+  const preserveNewlines = false;
+  if (previous === undefined || !content.startsWith(previous.content)) {
     const lines = normalizedMarkdownLines(content);
     const blocks: MarkdownBlock[] = [];
+    const starts: number[] = [];
     const ends: number[] = [];
-    appendMarkdownBlocks(lines, 0, /* preserveNewlines */ false, blocks, ends);
-    return parsedMarkdownDocument(content, lines, blocks, ends);
+    appendMarkdownBlocks(lines, 0, preserveNewlines, blocks, starts, ends);
+    return parsedMarkdownDocument(content, lines, blocks, starts, ends);
   }
   // Only the previous final raw line can change, so normalize and split just
   // that line plus the appended text; earlier line strings stay shared.
@@ -79,10 +80,20 @@ function parseMarkdownDocument(
   }
   const retained = low;
   const blocks = previous.blocks.slice(0, retained);
+  const starts = previous.starts.slice(0, retained);
   const ends = previous.ends.slice(0, retained);
-  const preserveNewlines = false;
-  appendMarkdownBlocks(lines, ends.at(-1) ?? 0, preserveNewlines, blocks, ends);
-  return parsedMarkdownDocument(content, lines, blocks, ends);
+  // Lines between the retained blocks and the first block that may change
+  // are settled blanks; resume at that block’s recorded start — or at the
+  // final line when every block settled — instead of rescanning the gap.
+  appendMarkdownBlocks(
+    lines,
+    previous.starts[retained] ?? settledBefore,
+    preserveNewlines,
+    blocks,
+    starts,
+    ends,
+  );
+  return parsedMarkdownDocument(content, lines, blocks, starts, ends);
 }
 
 /**

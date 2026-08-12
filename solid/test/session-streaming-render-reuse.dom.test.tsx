@@ -112,6 +112,7 @@ test("a settled streamed code block keeps a live wrap toggle across deltas", () 
 });
 
 test("incremental parsing matches a fresh render at every streamed prefix", () => {
+  // The CRLF line exercises deltas that split a "\r\n" pair mid-stream.
   const document = [
     "Intro paragraph with **bold** text.",
     "",
@@ -123,7 +124,7 @@ test("incremental parsing matches a fresh render at every streamed prefix", () =
     'const value = "streamed";',
     "```",
     "",
-    "- item one",
+    "- item one\r",
     "- item two",
     "",
     "> closing quote",
@@ -138,7 +139,7 @@ test("incremental parsing matches a fresh render at every streamed prefix", () =
     () => <MarkdownView content={content()} />,
     incremental,
   );
-  for (let end = 1; end <= document.length; end += 7) {
+  for (let end = 1; end <= document.length; end += 1) {
     const prefix = document.slice(0, end);
     setContent(prefix);
     const fresh = host();
@@ -152,6 +153,40 @@ test("incremental parsing matches a fresh render at every streamed prefix", () =
   }
   disposeIncremental();
   incremental.remove();
+});
+
+test("appending after a long settled blank gap does bounded parser work", () => {
+  const settled = `# Settled heading\n${"\n".repeat(1000)}First tail`;
+  const [content, setContent] = createSignal(settled);
+  const host = window.document.body.appendChild(
+    window.document.createElement("div"),
+  );
+  const dispose = render(() => <MarkdownView content={content()} />, host);
+  expect(host.textContent).toContain("First tail");
+
+  // Count parser line inspections through String#trim: rescanning the
+  // settled blank gap (or re-parsing the settled document) inspects the
+  // 1,000 blank lines again and blows the bound, while a resume at the
+  // recorded tail block start touches only the growing tail.
+  const descriptor = Object.getOwnPropertyDescriptor(String.prototype, "trim");
+  if (descriptor === undefined) throw new TypeError("Missing String#trim");
+  let calls = 0;
+  Object.defineProperty(String.prototype, "trim", {
+    ...descriptor,
+    value: function trackedTrim(this: string): string {
+      calls += 1;
+      return this.replace(/^\s+|\s+$/gu, "");
+    },
+  });
+  try {
+    setContent(`${settled} grows`);
+  } finally {
+    Object.defineProperty(String.prototype, "trim", descriptor);
+  }
+  expect(host.textContent).toContain("First tail grows");
+  expect(calls).toBeLessThan(50);
+  dispose();
+  host.remove();
 });
 
 test("a retained streamed row follows its recomputed nested scroll key", () => {

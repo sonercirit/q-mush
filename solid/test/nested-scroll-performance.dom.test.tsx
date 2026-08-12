@@ -364,6 +364,55 @@ afterEach(() => {
   }
 });
 
+function ReKeyedRowFixture(props: {
+  readonly rowKey: string;
+  readonly showSecond: boolean;
+}): JSX.Element {
+  // The lazy id re-keys the mounted pane in place instead of remounting.
+  return (
+    <div>
+      {mutationTestPane({
+        get id() {
+          return props.rowKey;
+        },
+        label: "retained",
+      })}
+      <Show when={props.showSecond}>
+        {mutationTestPane({ id: "after:user-1:thinking:0", label: "claimant" })}
+      </Show>
+    </div>
+  );
+}
+
+test("a row claiming a migrated key does not inherit the old row's state", async () => {
+  const [rowKey, setRowKey] = createSignal("after:user-1:thinking:0");
+  const [showSecond, setShowSecond] = createSignal(false);
+  const container = mountTestView(
+    () => <ReKeyedRowFixture rowKey={rowKey()} showSecond={showSecond()} />,
+    disposals,
+  );
+  const retained = queryMutationPane(container, "retained");
+  rememberPane(retained, 55);
+
+  // The retained row re-keys (its transcript prefix grew), then a new row
+  // claims the released key: the claimant must start clean, not restore
+  // the offset remembered under the old key. Restores run on microtasks.
+  setRowKey("after:tool-1:thinking:0");
+  setShowSecond(true);
+  const claimant = queryMutationPane(container, "claimant");
+  defineElementSize(claimant, 100, 1_000);
+  const scopeKey = (label: string): string | null =>
+    container
+      .querySelector(`[data-mutation-pane-scope='${label}']`)
+      ?.getAttribute("data-nested-scroll-key") ?? null;
+  expect(scopeKey("retained")).toBe("after:tool-1:thinking:0");
+  expect(scopeKey("claimant")).toBe("after:user-1:thinking:0");
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(claimant.scrollTop).toBe(0);
+  expect(retained.scrollTop).toBe(55);
+});
+
 test("keeps pane state with elements reordered within one scope", () => {
   const mounted = rememberWithinScopePanes([
     ["first", 20],
