@@ -257,6 +257,7 @@ test("cap rejections stay visible beside the editor in focus mode", async () => 
   const controller = new SessionController(...controllerArguments);
   const container = mountFocusPanelWithController(controller);
   await enterFocusMode(container);
+  clickTestButton(container, "[data-session-cap-toggle='true']");
   const input = container.querySelector<HTMLInputElement>(
     "#session-detail-context-token-cap",
   );

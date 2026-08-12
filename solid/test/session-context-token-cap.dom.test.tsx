@@ -5,6 +5,7 @@ import { updateSessionContextTokenCap } from "../session-controller-context-cap.
 import { initialSessionViewState } from "../session-state.ts";
 import type { SessionViewState } from "../session-view-state.ts";
 import {
+  clickTestButton,
   findTestButton,
   queryTestElement,
   queryTestElementAs,
@@ -54,13 +55,15 @@ function capCommand(detail: ReturnType<typeof contextCapDetail>) {
 
 function mountCapDetail(detail: ReturnType<typeof contextCapDetail>) {
   const command = capCommand(detail);
-  return {
-    ...mountSessionDetailBody(sessionDetailState(detail), disposals, {
+  const mounted = mountSessionDetailBody(
+    sessionDetailState(detail),
+    disposals,
+    {
       command,
-    }),
-    command,
-    detail,
-  };
+    },
+  );
+  clickTestButton(mounted.container, "[data-session-cap-toggle='true']");
+  return { ...mounted, command, detail };
 }
 
 function mountCapEditor(autoCompact = true) {
@@ -166,6 +169,7 @@ test("shows the server rejection beside the cap editor", async () => {
     disposals,
     { command },
   );
+  clickTestButton(rejectedView.container, "[data-session-cap-toggle='true']");
   submitCap(rejectedView.container, "160000");
 
   await vi.waitFor(() => {
@@ -236,6 +240,44 @@ test.each([
     expect(compact).not.toHaveBeenCalled();
   },
 );
+
+test("keeps cap controls collapsed until expanded and hides them again", () => {
+  const detail = contextCapDetail(false);
+  const command = capCommand(detail);
+  const { container } = mountSessionDetailBody(
+    sessionDetailState(detail),
+    disposals,
+    { command },
+  );
+  const description =
+    "Cap the context tokens available to future turns. Leave blank to restore the model limit.";
+  const collapsedState = {
+    described: false,
+    input: null,
+    save: undefined,
+  };
+  const capState = () => ({
+    described: container.textContent.includes(description),
+    input: container.querySelector("#session-detail-context-token-cap"),
+    save: findTestButton(container, "Save cap"),
+  });
+
+  expect(capState()).toEqual(collapsedState);
+
+  clickTestButton(container, "[data-session-cap-toggle='true']");
+  expect(
+    container
+      .querySelector("[data-session-cap-toggle='true']")
+      ?.getAttribute("aria-label"),
+  ).toBe("Collapse Context token cap");
+  const expanded = capState();
+  expect(expanded.described).toBe(true);
+  expect(expanded.input).toBeInstanceOf(HTMLInputElement);
+  expect(expanded.save).toBeInstanceOf(HTMLButtonElement);
+
+  clickTestButton(container, "[data-session-cap-toggle='true']");
+  expect(capState()).toEqual(collapsedState);
+});
 
 test("clearing the cap restores the model limit", async () => {
   const clearedView = mountCapEditor();
