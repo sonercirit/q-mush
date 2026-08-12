@@ -244,7 +244,7 @@ describe("runner tools", () => {
         content: "shared state\n",
         path: join(outside, "notes.txt"),
       }),
-    ).toContain("Wrote 13 bytes");
+    ).toContain(`Wrote 13 bytes to ${join(outside, "notes.txt")}.`);
     expect(await readFile(join(outside, "notes.txt"), "utf8")).toBe(
       "shared state\n",
     );
