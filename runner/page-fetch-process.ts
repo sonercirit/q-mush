@@ -5,6 +5,7 @@ import {
   createConnection,
   createServer,
   isIP,
+  type NetConnectOpts,
   type Server,
   type Socket,
 } from "node:net";
@@ -250,6 +251,11 @@ export async function assertPublicPageUrl(
 }
 
 const MAXIMUM_PROXY_HEADER_BYTES = 64 * 1_024;
+// Hosts with partial connectivity (an IPv6 route that silently drops SYNs)
+// otherwise hang the upstream connect until the kernel gives up, stalling
+// the browser request; page_fetch's own deadline is at least 1 second, so
+// a bounded connect still leaves room to fail visibly within it.
+const UPSTREAM_CONNECT_TIMEOUT_MILLISECONDS = 10_000;
 const PROXY_FAILURE_RESPONSE = Buffer.from(
   "HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
 );
@@ -323,7 +329,10 @@ const processProxySocket = (proxy: PageFetchProxy, socket: Socket): void => {
   proxy.accept(socket);
 };
 
+export type UpstreamConnector = (options: NetConnectOpts) => Socket;
+
 export class PageFetchProxy {
+  readonly #connectUpstream: UpstreamConnector;
   readonly #resolveAddress: PageAddressResolver;
   readonly #sockets = new Set<Socket>();
   #server: Server | undefined;
@@ -331,7 +340,9 @@ export class PageFetchProxy {
 
   constructor(
     resolveAddress: PageAddressResolver = defaultPageAddressResolver,
+    connectUpstream: UpstreamConnector = createConnection,
   ) {
+    this.#connectUpstream = connectUpstream;
     this.#resolveAddress = resolveAddress;
   }
 
@@ -414,10 +425,11 @@ export class PageFetchProxy {
     if (address === undefined) {
       throw hostnameResolutionFailure();
     }
-    const upstream = createConnection({
+    const upstream = this.#connectUpstream({
       family: address.family,
       host: address.address,
       port: targetPort(url),
+      timeout: UPSTREAM_CONNECT_TIMEOUT_MILLISECONDS,
     });
     this.#sockets.add(upstream);
     upstream.once("close", () => {
@@ -429,7 +441,17 @@ export class PageFetchProxy {
     await new Promise<void>((resolve, reject) => {
       upstream.once("connect", resolve);
       upstream.once("error", reject);
+      upstream.once("timeout", () => {
+        const timedOut = new Error(
+          "The upstream connection timed out (ETIMEDOUT)",
+        );
+        upstream.destroy(timedOut);
+        reject(timedOut);
+      });
     });
+    // The bound covers only connection establishment; page_fetch's own
+    // deadline governs an established tunnel.
+    upstream.setTimeout(0);
     if (isConnect) {
       client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
     } else {

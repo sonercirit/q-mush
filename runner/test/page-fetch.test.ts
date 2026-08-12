@@ -1,4 +1,4 @@
-import { connect } from "node:net";
+import { connect, Socket } from "node:net";
 import { describe, expect, test, vi } from "vitest";
 import { chromiumArguments } from "../page-fetch-chromium.ts";
 import {
@@ -10,6 +10,7 @@ import {
   assertPublicPageUrl,
   PageFetchProxy,
   type PageAddressResolver,
+  type UpstreamConnector,
 } from "../page-fetch-process.ts";
 import {
   createPageFetchRunnerTool,
@@ -84,8 +85,9 @@ async function rejection(promise: Promise<unknown>): Promise<Error> {
 async function proxyError(
   resolver: PageAddressResolver,
   target: string,
+  connectUpstream?: UpstreamConnector,
 ): Promise<Error> {
-  const proxy = new PageFetchProxy(resolver);
+  const proxy = new PageFetchProxy(resolver, connectUpstream);
   const port = await proxy.start();
   const client = connect({ host: "127.0.0.1", port });
   const proxyFailure = new Promise<Error>((resolve) => {
@@ -259,8 +261,46 @@ describe("page_fetch", () => {
       assertPublicPageUrl(new URL("https://example.com/"), pageResolver),
     ).resolves.toBeUndefined();
 
-    const proxyFailure = await proxyError(proxyResolver, "http://example.com/");
-    expect(proxyFailure.message).toMatch(/ECONNREFUSED|ENETUNREACH/u);
+    // The injected connector observes the normalized family and fails fast
+    // without real network I/O (a live SYN to this address hangs on hosts
+    // whose IPv6 route silently drops packets).
+    let connected: unknown;
+    const proxyFailure = await proxyError(
+      proxyResolver,
+      "http://example.com/",
+      (options) => {
+        connected = options;
+        const socket = new Socket();
+        queueMicrotask(() => {
+          socket.destroy(new Error("connect ECONNREFUSED (stubbed)"));
+        });
+        return socket;
+      },
+    );
+    expect(connected).toMatchObject({ family: 6, host: "2001:4860:ffff::1" });
+    expect(proxyFailure.message).toContain("ECONNREFUSED");
+  });
+
+  test("bounds a hanging upstream connect instead of stalling the tunnel", async () => {
+    // Node arms the connect timeout only when the options carry one;
+    // Socket timers are internal, so the stub emits the timeout it was
+    // configured with instead of sleeping through it.
+    let configuredTimeout: number | undefined;
+    const hanging = await proxyError(
+      () => Promise.resolve([{ address: PUBLIC_ADDRESS, family: 4 }]),
+      "http://example.com/",
+      (options) => {
+        // Never connects: emulates a SYN silently dropped upstream.
+        configuredTimeout = "timeout" in options ? options.timeout : undefined;
+        const socket = new Socket();
+        if (configuredTimeout !== undefined) {
+          queueMicrotask(() => socket.emit("timeout"));
+        }
+        return socket;
+      },
+    );
+    expect(configuredTimeout).toBe(10_000);
+    expect(hanging.message).toContain("timed out");
   });
 
   test("distinguishes resolution failures from unsafe DNS answers", async () => {
