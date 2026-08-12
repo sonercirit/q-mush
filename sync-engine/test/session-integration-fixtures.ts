@@ -328,7 +328,7 @@ export function connectedSessionSetup(
       ...(options.providerDiscovery === undefined
         ? {}
         : { discoverOpenRouterProviders: options.providerDiscovery }),
-      ...(options.liveness === undefined ? {} : { liveness: options.liveness }),
+      liveness: options.liveness ?? { setInterval: () => undefined },
       modelFactory:
         options.modelFactory ??
         ((factoryOptions) => {
