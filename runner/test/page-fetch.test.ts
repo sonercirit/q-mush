@@ -331,8 +331,9 @@ describe("page_fetch", () => {
         queueMicrotask(() => socket.emit("connect"));
         return socket;
       },
-      // CONNECT keeps the proxy from writing into the stub socket, which
-      // would fail: only the client side sees the 200 response.
+      // CONNECT keeps the exchange client-side only; the non-CONNECT
+      // branch would call forwardedRequest and exercise unrelated
+      // request-line rewriting against the stub.
       "CONNECT example.com:443 HTTP/1.1\r\n\r\n",
       async (proxy) => {
         // A silent origin past the bound must not kill the tunnel: the
@@ -342,6 +343,9 @@ describe("page_fetch", () => {
           expect(upstream?.timeout).toBe(0);
         });
         expect(upstream?.listenerCount("timeout")).toBe(0);
+        // Even a late timer firing must be a no-op on the tunnel.
+        upstream?.emit("timeout");
+        expect(upstream?.destroyed).toBe(false);
         expect(proxy.failure).toBeUndefined();
       },
     );
