@@ -120,7 +120,7 @@ function agentFileResult(
     contained && path !== undefined
       ? mapContainerPath(workingDirectory, path)
       : path;
-  return loadRunnerAgentFile(workingDirectory, mapped, contained).then(
+  return loadRunnerAgentFile(workingDirectory, mapped, contained, path).then(
     (agentFile) => ({
       output: JSON.stringify(agentFile),
       state: "completed",

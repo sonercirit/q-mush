@@ -14,6 +14,16 @@ import { useTemporaryDirectories } from "./temporary-directories.ts";
 
 const workspace = useTemporaryDirectories("q-mush-environment-test-");
 
+// A session workspace nested inside a host directory, so tests can place
+// files just outside the containment boundary.
+async function nestedWorkspace(): Promise<{
+  readonly outside: string;
+  readonly root: string;
+}> {
+  const outside = await workspace();
+  return { outside, root: `${outside}/workspace` };
+}
+
 class FakeContainers {
   readonly cleaned: string[] = [];
   readonly prepared: {
@@ -145,8 +155,10 @@ describe("container runner commands", () => {
 
   test("maps /workspace-absolute agent-file paths in container sessions", async () => {
     const { executor } = containerExecutor();
-    const root = await workspace();
+    const { outside, root } = await nestedWorkspace();
     await Bun.write(`${root}/docs/custom.md`, "# Container instructions");
+    await Bun.write(`${outside}/escape.md`, "# Outside the workspace");
+    await symlink(`${outside}/escape.md`, `${root}/docs/link.md`);
     const agentFile = (path: string): Promise<string> =>
       executor.execute({
         arguments: { path },
@@ -159,25 +171,55 @@ describe("container runner commands", () => {
 
     // The system prompt tells container agents to use /workspace for
     // absolute paths; the agent file must accept the same form as every
-    // other file tool, alongside the relative spelling.
-    expect(await agentFile("/workspace/docs/custom.md")).toContain(
-      "# Container instructions",
-    );
-    expect(await agentFile("docs/custom.md")).toContain(
-      "# Container instructions",
-    );
-    // Mapping must not open an escape: other absolute paths stay contained.
+    // other file tool, alongside the relative spelling. The reported name
+    // must stay in the requested form: the mapped host path never leaks
+    // into persisted or model-visible output.
+    expect(JSON.parse(await agentFile("/workspace/docs/custom.md"))).toEqual({
+      content: "# Container instructions",
+      name: "/workspace/docs/custom.md",
+    });
+    expect(JSON.parse(await agentFile("docs/custom.md"))).toEqual({
+      content: "# Container instructions",
+      name: "docs/custom.md",
+    });
+    // Mapping must not open an escape: other absolute paths stay contained,
+    // traversal out of /workspace is rejected, and a mapped path that
+    // resolves through a symlink to a real outside file still fails.
     expect(await agentFile("/etc/hostname")).toContain(
       "outside the session workspace",
     );
     expect(await agentFile("/workspace/../escape.md")).toContain(
       "outside the session workspace",
     );
+    expect(await agentFile("/workspace/docs/link.md")).toContain(
+      "outside the session workspace",
+    );
+  });
+
+  test("does not map /workspace agent-file paths for bare-metal sessions", async () => {
+    const { executor } = containerExecutor();
+    const root = await workspace();
+    await Bun.write(`${root}/docs/custom.md`, "# Bare metal instructions");
+
+    // Bare metal has no /workspace alias: the path resolves as an ordinary
+    // absolute path (and loads nothing here) instead of mapping into the
+    // session workspace.
+    expect(
+      JSON.parse(
+        await executor.execute({
+          arguments: { path: "/workspace/docs/custom.md" },
+          executionEnvironment: "bare_metal",
+          id: "command-agent-file-bare-metal",
+          sessionId: "session-1",
+          tool: "read_agent_file",
+          workingDirectory: root,
+        }),
+      ),
+    ).toBeNull();
   });
 
   test("confines container file tools and agent files to the workspace", async () => {
-    const outside = await workspace();
-    const root = `${outside}/workspace`;
+    const { outside, root } = await nestedWorkspace();
     await Bun.write(`${root}/README.md`, "# Contained");
     await Bun.write(`${outside}/secret.txt`, "host secret");
     await symlink(`${outside}/secret.txt`, `${root}/AGENTS.md`);
