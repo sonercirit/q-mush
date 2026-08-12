@@ -60,16 +60,16 @@ Living project memory.
 - `sync-engine/server.ts` serves the browser JavaScript and Tailwind CSS that
   Vite builds in memory. Browser state, session updates, and runner work use
   authenticated WebSockets at `/api/realtime` and `/api/runner/realtime`; no
-  polling or SSE. Because agents may modify this repository via the running app,
+  polling or SSE. Agents modify this repository via the running app, so
   `bun run dev:watch` watches production source and local `.env` files,
   coalescing bursts into the ignored `data/development-server.restart` trigger
   `bun run dev:restart` writes; plain `dev` restarts only on that trigger.
-  `sync-engine/runner-executable.ts` fingerprints the runner source and
-  compiler, builds in a private temp directory, caches in memory, and serves
+  `sync-engine/runner-executable.ts` fingerprints runner source and compiler,
+  builds in a private temp directory, caches in memory, serves
   `/runner/executable`. Development restarts queue new agent work, let active
   steps finish, then replace the server process, so a session can safely request
   its own restart. Textual bodies precompress once per handler, negotiating
-  `zstd`, Brotli, gzip, then deflate. `/favicon.svg` revalidates with ETag,
+  `zstd`, Brotli, gzip, then deflate; `/favicon.svg` revalidates with ETag,
   separate from PWA icons.
 - `solid/pages.tsx` renders both server page shells via Solid's SSR runtime;
   `sync-engine/pages.ts` loads it with Vite's SSR runner. The browser app mounts
@@ -94,40 +94,41 @@ Living project memory.
   macOS/Linux one-liner: it picks an x64/ARM64 glibc/musl target and starts a
   downloaded standalone executable under `~/.q-mush/runner`; no Bun needed. The
   runner reports metadata and 15-second heartbeats over its authenticated
-  WebSocket, checks for updates at startup and every five minutes, rechecks via
+  WebSocket, checks updates at startup and every five minutes, rechecks via
   handshake version after restarts, and replaces an older socket on reconnect.
   Updates use a source/compiler ETag and SHA-256 digest, atomically replace the
   executable, and restart it; development restarts drain active sessions first.
   Reinstalling for the same user and machine rotates the registration to the new
-  token instead of adding a second runner; other users' registrations stay
-  protected, and tokens never appear in lists.
-- Browser messages sort by time then ID; live output anchors after its
-  initiating message, snapshots replacing it. `session-agent-read.ts`
-  byte-bounds transcript messages, assistant calls, the system prompt, and tool
-  definitions.
+  token instead of adding a second runner; other registrations stay protected,
+  and tokens never appear in lists.
+- Browser messages sort by time then ID; live output anchors after the
+  initiating message, snapshots replace it. `session-agent-read.ts` byte-bounds
+  transcript messages, assistant calls, the system prompt, and tool definitions.
 - `sync-engine/sessions.ts` and `session-store.ts` persist coding sessions. User
-  messages support eight 10 MB PNG/JPEG/GIF/WebP images, persisted as native
-  multimodal input. Sessions record cumulative active time, model cost including
-  compaction, token usage, and the context limit; reported charges are
-  authoritative. Auto-compaction defaults on: at 95% it summarizes completed
-  history and continues from the handoff; idle sessions compact manually or, by
-  opt-in, after 30 idle minutes; compaction soft-deletes prior messages and
-  inserts a replayable handoff. The composer stays mounted across statuses,
-  explaining unavailable actions and preserving drafts; local preferences filter
-  transcript categories. Provider secrets stay out of browser and runner work
-  payloads. The working-directory field opens
-  `solid/directory-picker-client.tsx` backed by `/api/runners/:id/directories`.
-  Each run, `read_agent_file` loads exact-root `AGENTS.md` (else `CLAUDE.md`).
+  messages support eight 10 MB PNG/JPEG/GIF/WebP images as native multimodal
+  input. Sessions record cumulative active time, model cost including
+  compaction, token usage, and the context limit; reported charges win.
+  Auto-compaction defaults on: at 95% it summarizes completed history and
+  continues from the handoff; idle sessions compact manually or, opted in, after
+  30 idle minutes; compaction soft-deletes prior messages, inserting a
+  replayable handoff. The composer stays mounted across statuses, explaining
+  unavailable actions, preserving drafts; composer text fields echo a local
+  signal debounced into the shared draft — submit paths (blur, shortcut,
+  capture-phase submit) must flush first; local preferences filter transcript
+  categories. Provider secrets stay out of browser and runner work payloads. The
+  working-directory field opens `solid/directory-picker-client.tsx` backed by
+  `/api/runners/:id/directories`. Each run, `read_agent_file` loads exact-root
+  `AGENTS.md` (else `CLAUDE.md`).
 
   `runner/runner-workspace.ts` owns canonical workspace and tool path
-  resolution. Tool and skill choices persist per session; picker details use
-  canonical schemas. Bounded `read_session` spans transcript categories and
-  definitions; `get_session_options` pages spawn choices. Grouped tools manage
-  non-blocking owned children, report final messages, and resume idle parents;
-  `parallel` takes 2+ calls on four ordered workers, bounds output, propagates
-  cancellation. `solid/session-transcript.tsx` renders prompts, tool
-  definitions, raw details, Markdown, code/JSON, diffs, and contextual results,
-  preserving user line breaks; session lists paginate by ten. Live sessions use
+  resolution. Tool and skill choices persist per session; pickers use canonical
+  schemas. Bounded `read_session` spans transcript categories and definitions;
+  `get_session_options` pages spawn choices. Grouped tools manage non-blocking
+  owned children, report final messages, resume idle parents; `parallel` takes
+  2+ calls on four ordered workers, bounds output, propagates cancellation.
+  `solid/session-transcript.tsx` renders prompts, tool definitions, raw details,
+  Markdown, code/JSON, diffs, and contextual results, preserving user line
+  breaks; session lists paginate by ten. Live sessions use
   `solid/realtime-client.ts`, `solid/session-client.tsx`, and
   `solid/session-controller.ts`: model deltas combine once per frame per
   session, other events stay immediate, unchanged snapshots suppress
@@ -136,29 +137,29 @@ Living project memory.
   the bottom when messages or the agent file change. `agent-model-discovery.ts`
   queries metadata; `shared/agent-configuration.ts` owns catalog
   types/validation. New sessions use the default online runner (else the first)
-  and credential, first discovered model, latest working directory, and maximum
+  and credential, first discovered model, latest working directory, and top
   reported reasoning effort. Unknown modalities do not imply attachment support;
   choices show provider and Q Mush modalities. `solid/custom-select.tsx` shares
   search normalization, paginates past ten items, and owns accessible
   keyboard/focus. Focus mode fills the app viewport (not browser Fullscreen),
-  preserving drafts and scroll; its rail overlays on desktop, becomes a
-  small-screen drawer, collapses on selection, and closes with Escape first.
-  Model and effort choices persist with the session. `shared/agent-prompt.ts`
-  builds the model system prompt and transcript display; reasoning summaries
-  persist as `thinking` messages excluded from replay. Session and transcript
-  rows live in `agent_sessions` and `agent_messages`; interrupted processes mark
-  active sessions failed for resumption, and rebuilt conversations add error
-  results for interrupted tool calls only on resume.
+  preserving drafts and scroll; its rail overlays on desktop, becomes a small
+  drawer, collapses on selection, and closes with Escape first. Model and effort
+  choices persist per session. `shared/agent-prompt.ts` builds the model system
+  prompt and transcript display; reasoning summaries persist as `thinking`
+  messages excluded from replay. Session and transcript rows live in
+  `agent_sessions` and `agent_messages`; interrupted processes mark active
+  sessions failed for resumption; rebuilt conversations add error results for
+  interrupted tool calls only on resume.
 
 - `openai.ts`, `openrouter.ts`, and `generic-provider.ts` implement model
   connections. Generic providers store a normalized base URL, optional key, and
-  `apiFormat` toggle: the default OpenAI format uses `/models` plus streamed
+  an `apiFormat` toggle: the default OpenAI format uses `/models` plus streamed
   `/chat/completions`; the Anthropic format sends `x-api-key` and
   `anthropic-version` to `/models` and streamed `/messages`
   (`anthropic-request.ts`, `provider-stream-anthropic.ts`; images/PDFs map to
   native blocks). Credentials live in `provider_credentials` with per-record
   AES-256-GCM encryption; API responses expose only metadata, and one credential
-  may be the user's default across the three model providers. Shared behavior:
+  may be the user's default across the three providers. Shared behavior:
   `provider-credentials.ts`, `connected-account-oauth.ts`, and the
   `solid/provider-*` client modules.
 - Measure cache hits against the cacheable prefix (total input dilutes with
@@ -166,9 +167,9 @@ Living project memory.
   land late and 128-token blocks hide small growth. Codex sockets stay open per
   run (tested cache-neutral), reconnect on failure, close at run end. UI rates
   divide by summed input minus the final request (summary) or the prior step's
-  input (per step), clamped at 100%; the divisor counts only fully reported
-  steps. OpenAI/Codex requests carry the session ID as `prompt_cache_key` and
-  the Codex `session_id` header (cache routing); that surface rejects
+  input (per step), clamped at 100%; the divisor counts fully reported steps.
+  OpenAI/Codex requests carry the session ID as `prompt_cache_key` and the Codex
+  `session_id` header (cache routing); that surface rejects
   `prompt_cache_breakpoint`/`prompt_cache_retention`. OpenRouter and
   Anthropic-format requests mark one-hour `cache_control` breakpoints on the
   system prompt, transcript tail, and Anthropic tool definitions
@@ -178,19 +179,19 @@ Living project memory.
   requests send no `max_tokens` (optional).
 - `sync-engine/brave-search.ts` implements the authenticated server-side
   `brave_search` skill and key API. Users keep multiple encrypted keys in
-  `provider_credentials`; failures fall through keys in creation order, and
-  secrets never reach browser, runner, or model provider.
+  `provider_credentials`; failures fall through keys in creation order; secrets
+  never reach browser, runner, or model provider.
 - `solid/client.tsx` is the browser entry, `solid/pages.tsx` owns
   server-rendered shells, and `solid/styles.css` is Tailwind's source. Vitest
   uses an SSR Solid transform for string-rendering tests and a Happy DOM project
-  for post-mount reactivity; run it under Bun because tests and application
-  modules use Bun APIs and `bun:sqlite`. Fixtures stub provider discovery; tests
-  never hit live provider APIs.
+  for post-mount reactivity; run it under Bun — tests and application modules
+  use Bun APIs and `bun:sqlite`. Fixtures stub provider discovery; tests never
+  hit live provider APIs.
 - `tsconfig.json` configures strict, no-emit, bundler-style checking with unused
-  and unreachable code diagnostics. Library declaration checking is skipped
-  because Drizzle (ORM 1.0.0-rc.4, TypeScript 7.0.2) publishes optional
-  cross-dialect declarations that fail here; application source stays fully
-  checked. Re-enable only after an upstream Drizzle fix.
+  and unreachable code diagnostics. Library declaration checking is off: Drizzle
+  (ORM 1.0.0-rc.4, TypeScript 7.0.2) publishes optional cross-dialect
+  declarations that fail here; application source stays fully checked. Re-enable
+  only after an upstream Drizzle fix.
 - `eslint.config.ts` uses type-aware strict/stylistic `typescript-eslint`
   presets, imports `.gitignore`, bans non-const assertions, and enforces
   exhaustive switches and canonical named imports (one declaration per module
@@ -204,13 +205,13 @@ Living project memory.
   `knip.production.config.ts` limits the graph to runtime source. Both passes
   run, so tests cannot keep production code alive and unused test helpers still
   fail.
-- `.jscpd.json` maps all JS/TS extensions to the TSX format for cross-extension
-  detection; import declarations are ignored, and clones of ≥20 tokens and one
-  line fail the zero threshold.
+- `.jscpd.json` maps all JS/TS extensions to TSX for cross-extension detection;
+  import declarations are ignored; clones of ≥20 tokens and one line fail the
+  zero threshold.
 - `scripts/repository-check.ts` lists tracked, unignored files and calls the
   policy APIs under `scripts/`: no files at 20,000 Unicode code points
-  (`bun.lock` and `drizzle/` excepted), no JS/TS tests outside `test`
-  directories, no `.htm(l)`/`.xhtml` app files outside `test`/`fixtures`.
+  (`bun.lock`, `drizzle/` excepted), no JS/TS tests outside `test` directories,
+  no `.htm(l)`/`.xhtml` app files outside `test`/`fixtures`.
 
 ## Decisions and Gotchas
 
@@ -245,7 +246,7 @@ Living project memory.
 - Knip severities alone do not activate default-off issue types; keep the
   included-issue list complete. Do not run the full test suite parallel with
   lint or repository scans; tooling-policy tests probe `solid`.
-- Runner install commands use the HTTP request origin: connect other computers
+- Runner install commands use the HTTP request origin: connect other machines
   through a reachable origin, not `localhost`. Removing a runner leaves
   `~/.q-mush/runner`.
 - Bun 1.3.14's `Bun.build({ compile: ... })` writes the binary only to
@@ -282,12 +283,11 @@ Living project memory.
   thinking tokens bill. The local proxy tolerates tool-loop replay without
   signed thinking blocks; strict endpoints may not. Streamed reasoning deltas
   group by `output_index` and `summary_index`; separate summary parts with
-  paragraphs because completed responses may omit them. OpenAI Responses
+  paragraphs since completed responses may omit them. OpenAI Responses
   WebSockets and accepted HTTP streams retry transient interruptions or provider
   errors only before a model step persists; partial UI deltas reset on replay,
-  and exhausted WebSockets fall back to HTTP. Permanent provider errors and
-  aborts do not retry; terminal failures persist as non-replayed `error`
-  messages.
+  exhausted WebSockets fall back to HTTP. Permanent provider errors and aborts
+  do not retry; terminal failures persist as non-replayed `error` messages.
 - Shell commands require a positive timeout; on macOS/Linux each gets a POSIX
   session, and stop/timeout signals only its group. Agent launches and runner
   commands otherwise have no application-owned step, queue, or time limits;

@@ -54,7 +54,7 @@ interface SessionFollowUpProps extends PromptEventProps, SessionImagesProps {
   readonly submitShortcut: SessionComposerShortcut;
 }
 
-const FOLLOW_UP_SYNC_DELAY_MS = 150;
+const PROMPT_SYNC_DELAY_MS = 150;
 const COMPOSER_BUTTON_CLASSES =
   "min-h-11 w-full rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto";
 
@@ -90,7 +90,7 @@ function createLocalPromptEcho(options: {
   ): void => {
     setLocalPrompt(event.currentTarget.value);
     clearSyncTimer();
-    syncTimer = setTimeout(syncPrompt, FOLLOW_UP_SYNC_DELAY_MS);
+    syncTimer = setTimeout(syncPrompt, PROMPT_SYNC_DELAY_MS);
   };
   const resetLocalPrompt = (): void => {
     clearSyncTimer();
@@ -149,9 +149,6 @@ function promptEcho(
 
 function promptEvents(props: PromptEventProps) {
   return {
-    onInput: (event: InputEvent & { currentTarget: HTMLTextAreaElement }) => {
-      props.onInput(event.currentTarget.value);
-    },
     onPaste: (event: ClipboardEvent) => {
       const files = readPastedAgentImageFiles(event);
       if (files.length > 0) {

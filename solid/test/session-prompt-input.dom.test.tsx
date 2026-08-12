@@ -27,24 +27,50 @@ function mountPromptInput() {
           onRemoveImage={() => undefined}
           prompt={prompt()}
         />
+        <button type="submit">Create</button>
       </form>
     ),
     disposals,
   );
   const form = container.querySelector("form");
   const textarea = container.querySelector("#session-prompt");
+  const submit = container.querySelector("button[type='submit']");
   if (!(form instanceof HTMLFormElement)) {
     throw new TypeError("The prompt form is unavailable");
   }
   if (!(textarea instanceof HTMLTextAreaElement)) {
     throw new TypeError("The session prompt is not a textarea");
   }
-  return { container, form, onInput, prompt, setPrompt, submitted, textarea };
+  if (!(submit instanceof HTMLButtonElement)) {
+    throw new TypeError("The submit button is unavailable");
+  }
+  return {
+    container,
+    form,
+    onInput,
+    prompt,
+    setPrompt,
+    submit,
+    submitted,
+    textarea,
+  };
 }
 
 function type(textarea: HTMLTextAreaElement, value: string): void {
   textarea.value = value;
   textarea.dispatchEvent(new InputEvent("input", { bubbles: true }));
+}
+
+function expectFlushedBeforeSubmit(
+  onInput: ReturnType<typeof vi.fn>,
+  submitted: ReturnType<typeof vi.fn>,
+  prompt: string,
+): void {
+  expect(onInput).toHaveBeenCalledWith(prompt);
+  expect(submitted).toHaveBeenCalledTimes(1);
+  const order = onInput.mock.invocationCallOrder[0] ?? Number.NaN;
+  const submitOrder = submitted.mock.invocationCallOrder[0] ?? Number.NaN;
+  expect(order).toBeLessThan(submitOrder);
 }
 
 test("new-session typing echoes locally before the shared draft", () => {
@@ -79,11 +105,20 @@ test("form submission flushes pending typing even while focused", () => {
   // submit event without blurring the textarea first.
   form.requestSubmit();
 
-  expect(onInput).toHaveBeenCalledWith("Create me now");
-  expect(submitted).toHaveBeenCalledTimes(1);
-  const order = onInput.mock.invocationCallOrder[0] ?? Number.NaN;
-  const submitOrder = submitted.mock.invocationCallOrder[0] ?? Number.NaN;
-  expect(order).toBeLessThan(submitOrder);
+  expectFlushedBeforeSubmit(onInput, submitted, "Create me now");
+});
+
+test("clicking Create flushes without a blur", () => {
+  const { onInput, submit, submitted, textarea } = mountPromptInput();
+
+  type(textarea, "Fix the flaky login test");
+  textarea.focus();
+  // macOS Firefox and Safari do not focus (or blur) on button click, so
+  // the click path must flush through the form submit event alone.
+  submit.click();
+
+  expect(document.activeElement).toBe(textarea);
+  expectFlushedBeforeSubmit(onInput, submitted, "Fix the flaky login test");
 });
 
 test("an external insert wins over pending typing", () => {
