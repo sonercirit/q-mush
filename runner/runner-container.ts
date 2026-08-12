@@ -11,6 +11,8 @@ import {
   type RunnerProcessResult,
 } from "./runner-process.ts";
 
+// Arch publishes amd64-only images; ARM64 runners need a multi-arch
+// Q_MUSH_CONTAINER_IMAGE override (startup fails loudly there otherwise).
 const DEFAULT_CONTAINER_IMAGE = "archlinux:latest";
 const CONTAINER_WORKSPACE = "/workspace";
 const CONTAINER_IDENTIFIER_PATTERN = /^[A-Za-z\d][A-Za-z\d_.-]{0,199}$/u;

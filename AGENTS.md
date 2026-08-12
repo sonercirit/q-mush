@@ -251,31 +251,31 @@ Living project memory.
   read the outfile before cleanup.
 - Bare-metal file tools resolve relative paths against the runner workspace but
   accept any runner-account-accessible path; container file tools and attachment
-  records stay contained (file tools run on the host). Container shells run as
-  root in a disposable per-session Arch Linux container (default
-  `archlinux:latest`) with network and default capabilities so pacman installs
-  work; only the workspace is bind-mounted. `read` pages its source. The
-  directory picker browses beyond a session workspace with runner-account
-  permissions, returns only directory metadata, bounds listings, and times out
-  stalls. Stopping a session aborts its model request and pushes runner-command
-  cancellation, terminating an active shell command. OpenAI API-key and OAuth
-  requests prefer Responses WebSockets, falling back to HTTP streaming;
-  OpenRouter and generic endpoints stream chat completions, Anthropic-format
-  endpoints Messages events. OpenAI OAuth refreshes its token bundle before
-  expiry. Session creation requires an explicit model ID with no built-in
-  fallbacks. Catalogs: OpenAI `/v1/models`, OpenRouter `/api/v1/models/user`,
-  ChatGPT Codex `/models`, or the generic `/models`; Anthropic-format catalogs
-  read `display_name`, `max_input_tokens`, and the `capabilities` tree
-  (`agent-model-discovery-anthropic.ts`: per-level `effort` support gated on
-  adaptive thinking, modalities only from `image_input`/`pdf_input` leaves),
-  page via `has_more`/`last_id` at `limit=1000` with stale-cursor and page-count
-  guards, and probe the endpoint's OpenAI-style listing only where capabilities
-  left efforts unknown. Codex parsing retains streamed output-text and
-  function-call argument deltas since completed events may omit `output`. Only
-  explicitly listed efforts are offered; OpenAI's catalog lacks reasoning
-  metadata. Optional reasoning uses `reasoning_effort` for OpenAI and generic
-  chat completions and `reasoning.effort` for OpenRouter and Codex Responses;
-  the Anthropic Messages format maps efforts to `output_config.effort` plus
+  records stay contained (they run on the host). Container shells run as root in
+  a disposable per-session Arch container (default `archlinux:latest`) with
+  network and default capabilities, so pacman works; only the workspace is
+  bind-mounted. `read` pages its source. The directory picker browses beyond a
+  session workspace with runner-account permissions, returns only directory
+  metadata, bounds listings, and times out stalls. Stopping a session aborts its
+  model request and pushes runner-command cancellation, terminating an active
+  shell command. OpenAI API-key and OAuth requests prefer Responses WebSockets,
+  falling back to HTTP streaming; OpenRouter and generic endpoints stream chat
+  completions, Anthropic-format endpoints Messages events. OpenAI OAuth
+  refreshes its token bundle before expiry. Session creation requires an
+  explicit model ID with no built-in fallbacks. Catalogs: OpenAI `/v1/models`,
+  OpenRouter `/api/v1/models/user`, ChatGPT Codex `/models`, or the generic
+  `/models`; Anthropic-format catalogs read `display_name`, `max_input_tokens`,
+  and the `capabilities` tree (`agent-model-discovery-anthropic.ts`: per-level
+  `effort` support gated on adaptive thinking, modalities only from
+  `image_input`/`pdf_input` leaves), page via `has_more`/`last_id` at
+  `limit=1000` with stale-cursor and page-count guards, and probe the endpoint's
+  OpenAI-style listing only where capabilities left efforts unknown. Codex
+  parsing retains streamed output-text and function-call argument deltas since
+  completed events may omit `output`. Only explicitly listed efforts are
+  offered; OpenAI's catalog lacks reasoning metadata. Optional reasoning uses
+  `reasoning_effort` for OpenAI and generic chat completions and
+  `reasoning.effort` for OpenRouter and Codex Responses; the Anthropic Messages
+  format maps efforts to `output_config.effort` plus
   `thinking: {type: "adaptive", display: "summarized"}` on provider-default
   budgets, sending neither for `none` and `minimal` as `low` (rejected
   otherwise). Adaptive-only models (Fable) ignore `enabled`; newer models

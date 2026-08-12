@@ -101,29 +101,29 @@ describe("RunnerContainerManager", () => {
     const start = fake.calls[0];
     expect(start).toBeDefined();
     expect(start?.executable).toBe("podman");
-    expect(start?.arguments).toEqual(
-      expect.arrayContaining([
-        "--rm",
-        "--name",
-        "q-mush-test-session",
-        "--mount",
-        `type=bind,source=${root},target=/workspace`,
-        "--workdir",
-        "/workspace",
-        "example/image:latest",
-      ]),
-    );
-    // Full-freedom container: the agent is root with default capabilities
-    // and network access so package installs work.
-    for (const dropped of [
-      "--network",
-      "--cap-drop",
-      "--security-opt",
-      "--user",
-      "--env",
-    ]) {
-      expect(start?.arguments).not.toContain(dropped);
-    }
+    // Full-freedom container: exact argv pins that the agent stays root
+    // with default capabilities and network access (no --network/--cap-drop/
+    // --security-opt/--user/--env in any spelling) alongside the retained
+    // per-session lifecycle flags.
+    expect(start?.arguments).toEqual([
+      "run",
+      "--detach",
+      "--rm",
+      "--name",
+      "q-mush-test-session",
+      "--label",
+      "dev.q-mush.owner=session",
+      "--init",
+      "--mount",
+      `type=bind,source=${root},target=/workspace`,
+      "--workdir",
+      "/workspace",
+      "--entrypoint",
+      "/bin/sh",
+      "example/image:latest",
+      "-c",
+      "while :; do sleep 3600; done",
+    ]);
     const executions = fake.calls.filter(
       ({ arguments: args }) => args[0] === "exec",
     );
