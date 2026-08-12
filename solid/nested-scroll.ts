@@ -107,6 +107,13 @@ function recordNestedScrollPane(
   return { element, state };
 }
 
+function recordOwnNestedScrollPanes(key: string, element: HTMLElement): void {
+  nestedScrollByMessage.set(key, {
+    element,
+    panes: currentNestedScrollPanes(key, ownedNestedScrollElements(element)),
+  });
+}
+
 function currentNestedScrollPanes(
   key: string,
   elements: readonly HTMLElement[],
@@ -312,26 +319,22 @@ export function createNestedScrollRef(
     current = element;
     element.dataset["nestedScrollKey"] = key;
     if (previous === undefined) {
-      nestedScrollByMessage.set(key, {
-        element,
-        panes: currentNestedScrollPanes(
-          key,
-          ownedNestedScrollElements(element),
-        ),
-      });
+      recordOwnNestedScrollPanes(key, element);
     } else if (previous.element !== element) {
       nestedScrollByMessage.set(key, { ...previous, element });
       // Restore only when the previous owner really left the document: in a
       // single update a new row can claim a key before the retained old row
       // re-keys itself, and restoring then would copy the retained row's
-      // state onto the newcomer.
+      // state onto the newcomer. A still-connected owner also means the
+      // inherited panes describe that other row, so re-record the claimant's
+      // own panes instead of leaving them to restore on a later re-render.
       queueMicrotask(() => {
-        if (
-          nestedScrollByMessage.get(key)?.element === element &&
-          !previous.element.isConnected
-        ) {
-          restoreRememberedNestedScroll(key, element, previous);
+        if (nestedScrollByMessage.get(key)?.element !== element) return;
+        if (previous.element.isConnected) {
+          recordOwnNestedScrollPanes(key, element);
+          return;
         }
+        restoreRememberedNestedScroll(key, element, previous);
       });
     }
   };

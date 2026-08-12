@@ -112,7 +112,10 @@ test("a settled streamed code block keeps a live wrap toggle across deltas", () 
 });
 
 test("incremental parsing matches a fresh render at every streamed prefix", () => {
-  // The CRLF line exercises deltas that split a "\r\n" pair mid-stream.
+  // The CRLF line exercises deltas that split a "\r\n" pair mid-stream:
+  // paired with the stride-1 walk it kills boundary mutants like
+  // Math.max(lastIndexOf("\n"), lastIndexOf("\r")) + 1, which stride-7 or
+  // an LF-only document each let survive.
   const document = [
     "Intro paragraph with **bold** text.",
     "",

@@ -35,13 +35,21 @@ function ReKeyedRowFixture(props: {
 }
 
 interface ReKeyedScenario {
+  readonly claimGrownPrefix: () => void;
   readonly claimant: () => HTMLElement;
   readonly expectCleanClaimant: (pane: HTMLElement) => Promise<void>;
+  readonly mountCleanClaimant: () => Promise<void>;
   readonly retained: HTMLElement;
   readonly setRowKey: (key: string) => void;
   readonly setShowFirst: (value: boolean) => void;
   readonly setShowSecond: (value: boolean) => void;
   readonly scopeKey: (label: string) => string | null;
+}
+
+// Restores are queued across two microtask hops before they land.
+async function expectCleanClaimant(pane: HTMLElement): Promise<void> {
+  await Promise.resolve().then(() => Promise.resolve());
+  expect(pane.scrollTop).toBe(0);
 }
 
 function mountReKeyedScenario(): ReKeyedScenario {
@@ -61,15 +69,25 @@ function mountReKeyedScenario(): ReKeyedScenario {
   const retained = queryMutationPane(container, "retained");
   rememberPane(retained, 55);
   return {
+    // One batched update grows the transcript prefix: the claimant's ref
+    // runs before the retained row re-keys, exactly as in the transcript.
+    claimGrownPrefix: () => {
+      batch(() => {
+        setRowKey("after:tool-1:thinking:0");
+        setShowSecond(true);
+      });
+    },
     claimant: () => {
       const pane = queryMutationPane(container, "claimant");
       defineElementSize(pane, 100, 1_000);
       return pane;
     },
-    expectCleanClaimant: async (pane) => {
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(pane.scrollTop).toBe(0);
+    expectCleanClaimant,
+    mountCleanClaimant: async () => {
+      setShowSecond(true);
+      const pane = queryMutationPane(container, "claimant");
+      defineElementSize(pane, 100, 1_000);
+      await expectCleanClaimant(pane);
     },
     retained,
     scopeKey: (label) =>
@@ -85,19 +103,28 @@ function mountReKeyedScenario(): ReKeyedScenario {
 test("a row claiming a migrated key does not inherit the old row's state", async () => {
   const scenario = mountReKeyedScenario();
 
-  // One batched update grows the transcript prefix: the claimant's ref can
-  // run before the retained row re-keys, exactly as in the transcript, and
-  // must start clean instead of restoring the offset remembered under the
-  // old key. Restores run on microtasks.
-  batch(() => {
-    scenario.setRowKey("after:tool-1:thinking:0");
-    scenario.setShowSecond(true);
-  });
+  // The claimant must start clean instead of restoring the offset
+  // remembered under the old key. Restores run on microtasks.
+  scenario.claimGrownPrefix();
   const claimant = scenario.claimant();
   expect(scenario.scopeKey("retained")).toBe("after:tool-1:thinking:0");
   expect(scenario.scopeKey("claimant")).toBe("after:user-1:thinking:0");
   await scenario.expectCleanClaimant(claimant);
   expect(scenario.retained.scrollTop).toBe(55);
+});
+
+test("a claimant re-created under its key does not restore inherited panes", async () => {
+  const scenario = mountReKeyedScenario();
+
+  // The still-mounted owner suppressed the claimant's restore; the entry
+  // must now describe the claimant itself, or re-creating the claimant row
+  // under the same key would restore the retained row's leftover offset.
+  scenario.claimGrownPrefix();
+  await scenario.expectCleanClaimant(scenario.claimant());
+  // Re-create before cleanup microtasks run, as a delta replacing the row
+  // does: the fresh element inherits the entry and restores from it.
+  scenario.setShowSecond(false);
+  await scenario.mountCleanClaimant();
 });
 
 test("a re-keyed row's released key does not leak state after it unmounts", async () => {
@@ -109,6 +136,5 @@ test("a re-keyed row's released key does not leak state after it unmounts", asyn
   scenario.setShowFirst(false);
   await Promise.resolve();
   await Promise.resolve();
-  scenario.setShowSecond(true);
-  await scenario.expectCleanClaimant(scenario.claimant());
+  await scenario.mountCleanClaimant();
 });
