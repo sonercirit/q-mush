@@ -224,20 +224,22 @@ image, and compaction controls until an online replacement and a confirmed
 working directory are selected. Reassignment itself does not resume work. **Stop
 session** aborts the model request and cancels an active runner command.
 
-The runner executes tools with the runner process's local account permissions.
-In bare-metal sessions file tools accept any path that account can access,
-resolving relative paths against the selected workspace; shell commands are
-intentionally full shell commands rooted in that directory. Container sessions
-confine file tools to the workspace, matching the container's workspace mount;
-container shells run as root inside the disposable session container with
-network access, and files they create are root-owned on the host. Before a
-workspace is selected, the authenticated directory browser can inspect
-directories readable by that same runner account; each response contains only
-the canonical location, parent, and at most 500 child directories. Only use
-runners and model credentials you trust with the selected project. The selected
-agent file is sent to the model provider as project instructions. Provider
-secrets remain on the Q Mush server: the browser and runner work protocol never
-receive them.
+The runner executes file tools and bare-metal shells with the runner process's
+local account permissions. In bare-metal sessions file tools accept any path
+that account can access, resolving relative paths against the selected
+workspace; shell commands are intentionally full shell commands rooted in that
+directory. Container sessions confine file tools to the workspace, matching the
+container's workspace mount; container shells run as root inside the disposable
+session container with network access, and files they create are root-owned on
+the host. The default `archlinux:latest` image is amd64-only; on other
+architectures set `Q_MUSH_CONTAINER_IMAGE` to a compatible image
+(`Q_MUSH_CONTAINER_RUNTIME` selects docker or podman). Before a workspace is
+selected, the authenticated directory browser can inspect directories readable
+by that same runner account; each response contains only the canonical location,
+parent, and at most 500 child directories. Only use runners and model
+credentials you trust with the selected project. The selected agent file is sent
+to the model provider as project instructions. Provider secrets remain on the Q
+Mush server: the browser and runner work protocol never receive them.
 
 OpenAI API keys and connected accounts prefer the streaming Responses WebSocket
 and fall back to HTTP streaming when that transport is unavailable. OpenRouter

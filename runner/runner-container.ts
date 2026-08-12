@@ -173,8 +173,15 @@ function processError(
   result: RunnerProcessResult,
 ): Error {
   const detail = result.standardError.trim() || result.standardOutput.trim();
+  // The default Arch image is amd64-only; hosts that cannot run it (ARM64
+  // Linux without emulation) need the image override, so say so.
+  const guidance = /no matching manifest|platform.+does not match/iu.test(
+    detail,
+  )
+    ? " The configured image does not support this host architecture; set Q_MUSH_CONTAINER_IMAGE to a compatible image."
+    : "";
   return new Error(
-    `Container execution is unavailable: ${runtime} could not ${action}${detail.length === 0 ? "" : `: ${detail.slice(0, 500)}`}`,
+    `Container execution is unavailable: ${runtime} could not ${action}${detail.length === 0 ? "" : `: ${detail.slice(0, 500)}`}${guidance}`,
   );
 }
 

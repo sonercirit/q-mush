@@ -73,6 +73,38 @@ function createTrackingPath(value: unknown): string {
 }
 
 describe("RunnerContainerManager", () => {
+  test("defaults to the Arch Linux image", async () => {
+    const fake = successfulFake();
+    const manager = new RunnerContainerManager({
+      environment: {},
+      run: fake.run,
+    });
+    await manager.prepare("session-1", temporaryDirectory());
+
+    expect(fake.calls[0]?.executable).toBe("docker");
+    expect(fake.calls[0]?.arguments).toContain("archlinux:latest");
+  });
+
+  test("explains architecture mismatches with the image override", async () => {
+    const calls: FakeCall[] = [];
+    const manager = new RunnerContainerManager({
+      run: containerOperationRun(calls, {
+        run: () =>
+          Promise.resolve(
+            processResult({
+              exitCode: 125,
+              standardError:
+                "docker: no matching manifest for linux/arm64 in the manifest list entries",
+            }),
+          ),
+      }),
+    });
+
+    await expect(
+      manager.prepare("session-1", temporaryDirectory()),
+    ).rejects.toThrow("set Q_MUSH_CONTAINER_IMAGE to a compatible image");
+  });
+
   test("starts one root container per session and maps the workspace", async () => {
     const fake = successfulFake();
     const root = temporaryDirectory();

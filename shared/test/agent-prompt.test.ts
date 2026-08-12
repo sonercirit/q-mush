@@ -12,6 +12,8 @@ test("describes the root Arch container environment for container sessions", () 
   expect(prompt).toContain("pacman");
   expect(prompt).toContain("/workspace");
   expect(prompt).toContain("chown");
+  expect(prompt).toContain("use the network");
+  expect(prompt).toContain("unless the runner overrides the image");
   expect(prompt).not.toContain("network access is disabled");
 });
 
