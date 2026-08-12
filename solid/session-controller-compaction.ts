@@ -11,6 +11,7 @@ import type { DetailMutationOptions } from "./session-controller-reconciliation.
 import {
   compactionModeMutation,
   compactSessionMutation,
+  idleCompactionModeMutation,
   type SessionMutation,
 } from "./session-mutations.ts";
 import { sessionMutationPending } from "./session-pending.ts";
@@ -28,9 +29,10 @@ export function compactSessionFromView(
   );
 }
 
-export async function toggleSessionAutoCompaction(options: {
-  readonly autoCompact: boolean;
+export async function toggleSessionCompactionFlag(options: {
+  readonly enabled: boolean;
   readonly mutate: (mutation: DetailMutationOptions) => Promise<void>;
+  readonly name: "autoCompact" | "idleCompact";
   readonly view: RevisionState<SessionViewState>;
 }): Promise<void> {
   const sessionId = options.view.value.selectedId;
@@ -42,5 +44,9 @@ export async function toggleSessionAutoCompaction(options: {
   ) {
     return;
   }
-  await options.mutate(compactionModeMutation(sessionId, options.autoCompact));
+  await options.mutate(
+    options.name === "autoCompact"
+      ? compactionModeMutation(sessionId, options.enabled)
+      : idleCompactionModeMutation(sessionId, options.enabled),
+  );
 }

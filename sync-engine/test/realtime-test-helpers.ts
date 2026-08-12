@@ -275,6 +275,10 @@ class RealtimeTestSessionCommands implements SessionRealtimeCommands {
     return REALTIME_TEST_SESSION_DETAIL;
   }
 
+  setIdleCompactionForUser() {
+    return REALTIME_TEST_SESSION_DETAIL;
+  }
+
   setContextTokenCapForUser() {
     return REALTIME_TEST_SESSION_DETAIL;
   }

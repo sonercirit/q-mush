@@ -50,6 +50,7 @@ export function forkStoredSessionFromSource(
     resources,
     {
       autoCompact: source.autoCompact,
+      idleCompact: source.idleCompact,
       ...(configuration === undefined ? {} : { configuration }),
       messages: copied,
       source,

@@ -28,6 +28,7 @@ function initialSessionDraft(): SessionDraft {
   return {
     autoCompact: true,
     credential: emptySelection,
+    idleCompact: false,
     executionEnvironment: "bare_metal",
     images: [],
     model: emptySelection,

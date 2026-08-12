@@ -148,6 +148,18 @@ export function compactionModeMutation(
   };
 }
 
+export function idleCompactionModeMutation(
+  sessionId: string,
+  idleCompact: boolean,
+): SessionMutation {
+  return {
+    action: "change idle compaction",
+    operation: SESSION_REALTIME_OPERATIONS.setIdleCompaction,
+    payload: { idleCompact, sessionId },
+    pending: "compacting",
+  };
+}
+
 function sessionMutation(
   sessionId: string,
   operation: SessionMutation["operation"],
@@ -216,6 +228,11 @@ function validSessionMutationPayload(mutation: SessionMutation): boolean {
       return (
         Object.keys(payload).length === 2 &&
         typeof payload["autoCompact"] === "boolean"
+      );
+    case SESSION_REALTIME_OPERATIONS.setIdleCompaction:
+      return (
+        Object.keys(payload).length === 2 &&
+        typeof payload["idleCompact"] === "boolean"
       );
     case SESSION_REALTIME_OPERATIONS.updateProvider:
       return false;
@@ -311,6 +328,8 @@ function mutationIsReconciled(
       );
     case SESSION_REALTIME_OPERATIONS.setAutoCompaction:
       return detail.autoCompact === mutation.payload["autoCompact"];
+    case SESSION_REALTIME_OPERATIONS.setIdleCompaction:
+      return detail.idleCompact === mutation.payload["idleCompact"];
     case SESSION_REALTIME_OPERATIONS.stop:
       return detail.status === "stopped";
     case SESSION_REALTIME_OPERATIONS.updateProvider:

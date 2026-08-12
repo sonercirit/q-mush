@@ -1,8 +1,24 @@
 import type { JSX } from "solid-js";
 
-export function SessionAutoCompactToggle(props: {
+export type SessionCompactionFlag = "autoCompact" | "idleCompact";
+
+const COMPACTION_TOGGLES: Readonly<
+  Record<SessionCompactionFlag, { readonly id: string; readonly label: string }>
+> = {
+  autoCompact: {
+    id: "session-auto-compact",
+    label: "Compact automatically near the context limit",
+  },
+  idleCompact: {
+    id: "session-idle-compact",
+    label: "Compact 30 minutes after the agent finishes",
+  },
+};
+
+export function SessionCompactionToggle(props: {
   readonly checked: boolean;
   readonly disabled: boolean;
+  readonly flag: SessionCompactionFlag;
   readonly onChange: (checked: boolean) => void;
 }): JSX.Element {
   return (
@@ -10,15 +26,43 @@ export function SessionAutoCompactToggle(props: {
       <input
         checked={props.checked}
         disabled={props.disabled}
-        id="session-auto-compact"
-        name="autoCompact"
+        id={COMPACTION_TOGGLES[props.flag].id}
+        name={props.flag}
         onChange={(event) => {
           const selected = event.currentTarget.checked;
           props.onChange(selected);
         }}
         type="checkbox"
       />
-      Compact automatically near the context limit
+      {COMPACTION_TOGGLES[props.flag].label}
     </label>
+  );
+}
+
+export function SessionDraftCompactionToggles(props: {
+  readonly autoCompact: boolean;
+  readonly disabled: boolean;
+  readonly idleCompact: boolean;
+  readonly onChange: (flag: SessionCompactionFlag, checked: boolean) => void;
+}): JSX.Element {
+  return (
+    <>
+      <SessionCompactionToggle
+        checked={props.autoCompact}
+        disabled={props.disabled}
+        flag="autoCompact"
+        onChange={(checked) => {
+          props.onChange("autoCompact", checked);
+        }}
+      />
+      <SessionCompactionToggle
+        checked={props.idleCompact}
+        disabled={props.disabled}
+        flag="idleCompact"
+        onChange={(checked) => {
+          props.onChange("idleCompact", checked);
+        }}
+      />
+    </>
   );
 }

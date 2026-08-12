@@ -353,6 +353,7 @@ describe("session realtime command dispatch", () => {
     );
     const reassignForUser = vi.fn(() => REALTIME_TEST_SESSION_DETAIL);
     const setAutoCompactionForUser = vi.fn(() => REALTIME_TEST_SESSION_DETAIL);
+    const setIdleCompactionForUser = vi.fn(() => REALTIME_TEST_SESSION_DETAIL);
     const stopForUser = vi.fn(() => REALTIME_TEST_SESSION_DETAIL);
     const integration = realtimeTestSessionCommands({
       compactAndContinueForUser,
@@ -360,6 +361,7 @@ describe("session realtime command dispatch", () => {
       continueForUser,
       reassignForUser,
       setAutoCompactionForUser,
+      setIdleCompactionForUser,
       stopForUser,
     });
 
@@ -383,6 +385,10 @@ describe("session realtime command dispatch", () => {
     });
     await execute(integration, SESSION_REALTIME_OPERATIONS.setAutoCompaction, {
       autoCompact: false,
+      sessionId: "session-1",
+    });
+    await execute(integration, SESSION_REALTIME_OPERATIONS.setIdleCompaction, {
+      idleCompact: true,
       sessionId: "session-1",
     });
 
@@ -418,6 +424,12 @@ describe("session realtime command dispatch", () => {
       TEST_USER,
       "session-1",
       false,
+      REALTIME_WORKSPACE_ID,
+    );
+    expect(setIdleCompactionForUser).toHaveBeenCalledWith(
+      TEST_USER,
+      "session-1",
+      true,
       REALTIME_WORKSPACE_ID,
     );
   });

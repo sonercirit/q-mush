@@ -11,6 +11,7 @@ export const TEST_SESSION_DETAIL: AgentSessionDetail = {
   agentFile: null,
   agentFilePath: null,
   autoCompact: true,
+  idleCompact: false,
   costBasis: "none",
   costUsd: 0,
   createdAt: 1,

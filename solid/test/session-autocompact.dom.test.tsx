@@ -32,6 +32,7 @@ function mountCompactionControls(status: AgentSessionStatus) {
   const command = vi.fn(
     (operation: string, payload: Readonly<Record<string, unknown>>) => {
       const autoCompact = payload["autoCompact"];
+      const idleCompact = payload["idleCompact"];
       if (
         operation === SESSION_REALTIME_OPERATIONS.setAutoCompaction &&
         typeof autoCompact === "boolean"
@@ -39,6 +40,16 @@ function mountCompactionControls(status: AgentSessionStatus) {
         return Promise.resolve({
           ...detail,
           autoCompact,
+          updatedAt: detail.updatedAt + 1,
+        });
+      }
+      if (
+        operation === SESSION_REALTIME_OPERATIONS.setIdleCompaction &&
+        typeof idleCompact === "boolean"
+      ) {
+        return Promise.resolve({
+          ...detail,
+          idleCompact,
           updatedAt: detail.updatedAt + 1,
         });
       }
@@ -65,10 +76,17 @@ function mountCompactionControls(status: AgentSessionStatus) {
     mounted.container,
     "#session-auto-compact",
   );
-  if (!(autoCompact instanceof HTMLInputElement)) {
-    throw new TypeError("The auto-compaction control is not a checkbox");
+  const idleCompact = queryTestElement(
+    mounted.container,
+    "#session-idle-compact",
+  );
+  if (
+    !(autoCompact instanceof HTMLInputElement) ||
+    !(idleCompact instanceof HTMLInputElement)
+  ) {
+    throw new TypeError("The compaction controls are not checkboxes");
   }
-  return { ...mounted, autoCompact, command, detail };
+  return { ...mounted, autoCompact, command, detail, idleCompact };
 }
 
 function expectAutoCompactUpdate(options: {
@@ -110,6 +128,22 @@ test.each(["queued", "running", "paused"] as const)(
 test("persists auto-compaction changes while a session is running", async () => {
   const mounted = mountCompactionControls("running");
   await toggleAutoCompaction(mounted);
+});
+
+test("persists idle-compaction changes on an existing session", async () => {
+  const mounted = mountCompactionControls("completed");
+
+  expect(mounted.idleCompact.checked).toBe(false);
+  expect(mounted.idleCompact.disabled).toBe(false);
+  mounted.idleCompact.click();
+
+  await vi.waitFor(() => {
+    expect(mounted.controller.state.detail?.idleCompact).toBe(true);
+  });
+  expect(mounted.command).toHaveBeenLastCalledWith(
+    SESSION_REALTIME_OPERATIONS.setIdleCompaction,
+    { idleCompact: true, sessionId: mounted.detail.id },
+  );
 });
 
 test.each(["failed", "stopped"] as const)(

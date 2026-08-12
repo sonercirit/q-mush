@@ -41,6 +41,7 @@ export interface CreateAgentSession extends Pick<
 > {
   readonly agentFilePath?: string | null;
   readonly credentialId: string;
+  readonly idleCompact?: boolean;
   readonly images: readonly AgentImage[];
   readonly parentGeneration?: number;
   readonly parentSessionId?: string;
@@ -58,6 +59,7 @@ export interface ForkAgentSession extends Pick<
   CreateAgentSession,
   "autoCompact" | "userId" | "workspaceId"
 > {
+  readonly idleCompact: boolean;
   readonly configuration?: Pick<
     CreateAgentSession,
     | "credentialId"
@@ -115,6 +117,7 @@ function storedSessionValues(
     | "agentFilePath"
     | "autoCompact"
     | "credentialId"
+    | "idleCompact"
     | "executionEnvironment"
     | "maxContextTokens"
     | "userContextTokenCap"
@@ -145,6 +148,7 @@ function storedSessionValues(
     autoCompact: input.autoCompact,
     executionEnvironment: input.executionEnvironment,
     id,
+    idleCompact: input.idleCompact ?? false,
     maxContextTokens: input.maxContextTokens,
     userContextTokenCap: input.userContextTokenCap ?? null,
     model: input.model,
@@ -329,6 +333,7 @@ export function forkStoredSession(
     ...input.source,
     ...input.configuration,
     autoCompact: input.autoCompact,
+    idleCompact: input.idleCompact,
     userId: input.userId,
     workspaceId: input.workspaceId,
   };

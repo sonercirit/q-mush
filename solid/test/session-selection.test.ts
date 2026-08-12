@@ -40,6 +40,7 @@ const CATALOG: AgentModelCatalog = {
 
 const DRAFT: SessionDraft = {
   autoCompact: true,
+  idleCompact: false,
   credential: "",
   executionEnvironment: "bare_metal",
   images: [],

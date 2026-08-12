@@ -153,6 +153,7 @@ export interface SessionRealtimeCommands extends SessionDetailReader {
     workspaceId: string,
   ): AgentSessionDetail;
   readonly setAutoCompactionForUser: SessionAutoCompactionAction;
+  readonly setIdleCompactionForUser: SessionAutoCompactionAction;
   readonly setContextTokenCapForUser: SessionContextTokenCapAction;
   stopForUser: SessionStopAction;
   summariesForUser(
@@ -179,14 +180,15 @@ function readReassignment(payload: Readonly<Record<string, unknown>>) {
   return requiredRealtimeInput(readSessionReassignment(payload));
 }
 
-function readAutoCompaction(
+function readBooleanSetting(
   payload: Readonly<Record<string, unknown>>,
+  key: "autoCompact" | "idleCompact",
 ): boolean {
-  const autoCompact = payload["autoCompact"];
-  if (typeof autoCompact !== "boolean") {
+  const setting = payload[key];
+  if (typeof setting !== "boolean") {
     throw new RealtimeCommandFailure("invalid_request");
   }
-  return autoCompact;
+  return setting;
 }
 
 function readContextTokenCap(
@@ -371,7 +373,14 @@ export async function executeSessionRealtimeCommand(
       return sessions.setAutoCompactionForUser(
         user,
         readSessionId(payload),
-        readAutoCompaction(payload),
+        readBooleanSetting(payload, "autoCompact"),
+        workspaceId,
+      );
+    case SESSION_REALTIME_OPERATIONS.setIdleCompaction:
+      return sessions.setIdleCompactionForUser(
+        user,
+        readSessionId(payload),
+        readBooleanSetting(payload, "idleCompact"),
         workspaceId,
       );
     case SESSION_REALTIME_OPERATIONS.setContextTokenCap:

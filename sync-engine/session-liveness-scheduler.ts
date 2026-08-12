@@ -20,6 +20,8 @@ interface SessionLivenessSchedulerOptions {
     SessionAgentActions,
     "finished" | "reportAll" | "stopChildren"
   >;
+  /** Runs after each liveness scan on the same cadence and stop lifecycle. */
+  readonly afterScan?: () => void;
   readonly broker: RunnerCommandBroker;
   readonly database: AppDatabase;
   readonly dependencies: SessionDependencies;
@@ -77,6 +79,7 @@ export function createSessionLivenessWatchdog(
   }
   const scan = () => {
     watchdog.scan();
+    options.afterScan?.();
   };
   dependencies.liveness?.testScan?.(scan);
   let clear: () => void;

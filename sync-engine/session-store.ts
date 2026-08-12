@@ -65,7 +65,7 @@ import {
 } from "./session-store-reassignment.ts";
 import { SessionStoreRestarts } from "./session-store-restarts.ts";
 import {
-  setSessionAutoCompact,
+  setSessionCompactionFlag,
   setSessionContextTokenCap,
   type SessionAutoCompactParameters,
   type SessionContextTokenCapParameters,
@@ -224,7 +224,18 @@ export class SessionStore extends SessionStoreRestarts {
     return setSessionContextTokenCap(this.#settingContext(), ...parameters);
   }
   setAutoCompact(...parameters: SessionAutoCompactParameters) {
-    return setSessionAutoCompact(this.#settingContext(), ...parameters);
+    return setSessionCompactionFlag(
+      this.#settingContext(),
+      "autoCompact",
+      ...parameters,
+    );
+  }
+  setIdleCompact(...parameters: SessionAutoCompactParameters) {
+    return setSessionCompactionFlag(
+      this.#settingContext(),
+      "idleCompact",
+      ...parameters,
+    );
   }
   appendUnknownRestartToolResults(
     database: Parameters<typeof appendUnknownRestartToolResults>[0]["database"],

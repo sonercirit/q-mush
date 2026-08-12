@@ -28,6 +28,7 @@ interface SessionCredentialSelection {
 export type SessionCreationDescriptor = Readonly<{
   autoCompact: boolean;
   agentFilePath: string;
+  idleCompact: boolean;
   credentialId: string;
   images: readonly AgentImage[];
   executionEnvironment: SessionViewState["draft"]["executionEnvironment"];
@@ -51,6 +52,7 @@ function sessionCreationDescriptor(
     ...credential,
     agentFilePath: draft.agentFilePath?.trim() ?? "",
     autoCompact: draft.autoCompact,
+    idleCompact: draft.idleCompact,
     executionEnvironment: draft.executionEnvironment,
     images: [...draft.images],
     model: draft.model.trim(),
@@ -74,6 +76,7 @@ function sessionCreatePayload(
       : { agentFilePath: descriptor.agentFilePath }),
     autoCompact: descriptor.autoCompact,
     credentialId: descriptor.credentialId,
+    idleCompact: descriptor.idleCompact,
     executionEnvironment: descriptor.executionEnvironment,
     model: descriptor.model,
     provider: descriptor.provider,
