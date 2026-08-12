@@ -33,21 +33,29 @@ async function enabledFixture(): Promise<StoreFixture> {
   return fixture;
 }
 
-async function dueSessionCount(
+async function dueSessionIds(
   fixture: StoreFixture,
   now = DUE_NOW,
-): Promise<number> {
-  const compacted: (readonly [string, string])[] = [];
+): Promise<readonly string[]> {
+  const compacted: string[] = [];
   await compactIdleSessions({
     compact: (userId, sessionId) => {
-      compacted.push([userId, sessionId]);
+      expect(userId).toBe(TEST_USER_ID);
+      compacted.push(sessionId);
       return Promise.resolve(new Response(null, { status: 202 }));
     },
     database: fixture.database,
     now: () => now,
   });
-  for (const [userId, sessionId] of compacted) {
-    expect(userId).toBe(TEST_USER_ID);
+  return compacted;
+}
+
+async function dueSessionCount(
+  fixture: StoreFixture,
+  now = DUE_NOW,
+): Promise<number> {
+  const compacted = await dueSessionIds(fixture, now);
+  for (const sessionId of compacted) {
     expect(sessionId).toBe(STORE_SESSION_ID);
   }
   return compacted.length;
@@ -65,14 +73,18 @@ function completedSession(fixture: StoreFixture, idleCompact: boolean) {
       ),
     ).toBe(true);
   }
-  // Terminal user-visible completion mirrors the agent finishing its run
-  // with context accumulated on the provider.
+  markCompleted(fixture);
+  return detail;
+}
+
+// Terminal user-visible completion mirrors the agent finishing its run
+// with context accumulated on the provider.
+function markCompleted(fixture: StoreFixture): void {
   updateSessions(fixture, {
     currentContextTokens: 5_000,
     status: "completed",
     updatedAt: new Date(TEST_NOW),
   });
-  return detail;
 }
 
 function updateSessions(
@@ -103,6 +115,20 @@ test("ignores disabled sessions and non-terminal statuses", async () => {
     await expectDue(fixture, 0);
   }
 
+  // Deleted, runner-detached, and restart-pending sessions never qualify.
+  updateSessions(fixture, { status: "completed" });
+  await expectDue(fixture, 1);
+  updateSessions(fixture, { isDeleted: true });
+  await expectDue(fixture, 0);
+  updateSessions(fixture, { isDeleted: false, runnerRequired: true });
+  await expectDue(fixture, 0);
+  updateSessions(fixture, {
+    restartHandoff: "handoff",
+    runnerRequired: false,
+  });
+  await expectDue(fixture, 0);
+  updateSessions(fixture, { restartHandoff: null });
+
   // Idle sessions qualify, but only with uncompacted context: compaction
   // zeroes the tracked tokens, so a compacted session cannot loop.
   updateSessions(fixture, { status: "idle" });
@@ -112,8 +138,13 @@ test("ignores disabled sessions and non-terminal statuses", async () => {
   fixture.database.$client.close();
 });
 
-test("compacts every due session and survives per-session failures", async () => {
+test("continues the batch when a candidate fails and retries next scan", async () => {
   const fixture = await enabledFixture();
+  const second = createTestSession(fixture.store, TEST_NOW, {
+    idleCompact: true,
+  });
+  expect(second.id).not.toBe(STORE_SESSION_ID);
+  markCompleted(fixture);
   const compact = vi
     .fn<(userId: string, sessionId: string) => Promise<Response>>()
     .mockRejectedValueOnce(new Error("credential missing"))
@@ -125,11 +156,25 @@ test("compacts every due session and survives per-session failures", async () =>
       now: () => DUE_NOW,
     });
 
-  await scan();
-  expect(compact).toHaveBeenCalledWith(TEST_USER_ID, STORE_SESSION_ID);
-
-  // The rejected attempt did not mark anything; the next scan retries.
+  // The first candidate's rejection must not abort the batch: the second
+  // candidate still compacts in the same scan.
   await scan();
   expect(compact).toHaveBeenCalledTimes(2);
+  expect(compact).toHaveBeenNthCalledWith(1, TEST_USER_ID, STORE_SESSION_ID);
+  expect(compact).toHaveBeenNthCalledWith(2, TEST_USER_ID, second.id);
+
+  // The rejected attempt marked nothing durable; the next scan retries both.
+  await scan();
+  expect(compact).toHaveBeenCalledTimes(4);
   fixture.database.$client.close();
+});
+
+test("never rejects even when the candidate query fails", async () => {
+  const fixture = await enabledFixture();
+  fixture.database.$client.close();
+
+  // The scan is fire-and-forget from the liveness interval: a closed or
+  // failing database must resolve quietly, not become a fatal unhandled
+  // rejection.
+  await expect(dueSessionIds(fixture)).resolves.toEqual([]);
 });

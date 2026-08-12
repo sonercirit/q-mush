@@ -19,8 +19,7 @@ Living project memory.
   you touch — code health, tests, docs, performance, security, DX: ship small
   improvements with the change, larger ones as immediate follow-ups.
 - Practice TDD: failing test first, implement, refactor green.
-- Follow DRY and KISS: authoritative logic, no premature abstractions, simplest
-  clear solution.
+- Follow DRY and KISS: authoritative logic, no premature abstractions.
 - Never invent numeric limits or tunables: probe omission first, prefer the
   provider default, else derive from provider metadata, docs, or feedback.
 - Integrate completely the first time: wire every session capability (reasoning,
@@ -40,7 +39,7 @@ Living project memory.
   captured, then rerun only the narrowest failing scope.
 - Never commit secrets, generated artifacts, or env files.
 
-## Setup and Commands
+## Setup, Commands
 
 - Install/run: `bun install`; `bun run sync-engine/index.ts`
 - Develop: `bun run dev` (+ `dev:restart`, `dev:watch`); build: `bun run build`
@@ -111,14 +110,14 @@ Living project memory.
   multimodal input. Sessions record cumulative active time, model cost including
   compaction, token usage, and the context limit; reported charges are
   authoritative. Auto-compaction defaults on: at 95% it summarizes completed
-  history and continues from the handoff; idle sessions compact manually;
-  compaction soft-deletes prior messages and inserts a replayable handoff. The
-  composer stays mounted across statuses, explaining unavailable actions and
-  preserving drafts; local preferences filter transcript categories. Provider
-  secrets stay out of browser and runner work payloads. The working-directory
-  field opens `solid/directory-picker-client.tsx` backed by
-  `/api/runners/:id/directories`. Each run, `read_agent_file` loads exact-root
-  `AGENTS.md` (else `CLAUDE.md`).
+  history and continues from the handoff; idle sessions compact manually or, by
+  opt-in, after 30 idle minutes; compaction soft-deletes prior messages and
+  inserts a replayable handoff. The composer stays mounted across statuses,
+  explaining unavailable actions and preserving drafts; local preferences filter
+  transcript categories. Provider secrets stay out of browser and runner work
+  payloads. The working-directory field opens
+  `solid/directory-picker-client.tsx` backed by `/api/runners/:id/directories`.
+  Each run, `read_agent_file` loads exact-root `AGENTS.md` (else `CLAUDE.md`).
 
   `runner/runner-workspace.ts` owns canonical workspace and tool path
   resolution. Tool and skill choices persist per session; picker details use
@@ -163,15 +162,15 @@ Living project memory.
   `provider-credentials.ts`, `connected-account-oauth.ts`, and the
   `solid/provider-*` client modules.
 - Measure cache hits against the cacheable prefix (total input dilutes with
-  fresh tool output); persistent shortfalls are bugs, lone misses provider noise
-  — writes land late and 128-token blocks hide small growth. Codex sockets stay
-  open per run (tested cache-neutral), reconnect on failure, close at run end.
-  UI rates divide by summed input minus the final request (summary) or the prior
-  step's input (per step), clamped at 100%; the divisor counts only fully
-  reported steps. OpenAI/Codex requests carry the session ID as
-  `prompt_cache_key` and the Codex `session_id` header (cache routing); that
-  surface rejects `prompt_cache_breakpoint`/`prompt_cache_retention`. OpenRouter
-  and Anthropic-format requests mark one-hour `cache_control` breakpoints on the
+  fresh tool output); persistent shortfalls are bugs, lone misses noise — writes
+  land late and 128-token blocks hide small growth. Codex sockets stay open per
+  run (tested cache-neutral), reconnect on failure, close at run end. UI rates
+  divide by summed input minus the final request (summary) or the prior step's
+  input (per step), clamped at 100%; the divisor counts only fully reported
+  steps. OpenAI/Codex requests carry the session ID as `prompt_cache_key` and
+  the Codex `session_id` header (cache routing); that surface rejects
+  `prompt_cache_breakpoint`/`prompt_cache_retention`. OpenRouter and
+  Anthropic-format requests mark one-hour `cache_control` breakpoints on the
   system prompt, transcript tail, and Anthropic tool definitions
   (`provider-prompt-cache.ts`); OpenAI rejects markers, and generic
   OpenAI-format endpoints get neither markers nor `prompt_cache_key` (Ollama
@@ -215,7 +214,7 @@ Living project memory.
 
 ## Decisions and Gotchas
 
-- HTTP port 12345; `PORT` overrides.
+- HTTP port 12345 (`PORT` overrides).
 - Google login reads `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and optional
   `GOOGLE_REDIRECT_URI`; the two must appear together, and the exact callback
   `http://localhost:12345/api/auth/google/callback` must be registered on the

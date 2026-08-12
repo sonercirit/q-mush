@@ -393,10 +393,8 @@ function agentActionsSetup(
 function spawnInput(
   setup: Pick<AgentActionsTestSetup, "parent">,
   prompt: string,
-  autoCompact?: unknown,
 ) {
   return {
-    ...(autoCompact === undefined ? {} : { autoCompact }),
     credentialId: setup.parent.credentialId,
     executionEnvironment: setup.parent.executionEnvironment,
     model: setup.parent.model,
@@ -412,12 +410,6 @@ function spawnedSession(setup: AgentActionsTestSetup) {
   return setup.store
     .list(TEST_USER_ID)
     .find(({ id }) => id !== setup.parent.id);
-}
-
-function spawnedSessionAutoCompact(
-  setup: AgentActionsTestSetup,
-): boolean | undefined {
-  return spawnedSession(setup)?.autoCompact;
 }
 
 function parseToolOutput(
@@ -595,59 +587,61 @@ test("persists unrestricted paths", async () => {
     { agentFilePath: "/x/rules.md" },
   ] as const;
   for (const scenario of scenarios) {
-    const setup = agentActionsSetup("none", false);
-
-    await executeSessionAgentTool(setup.actions, "spawn_session", {
-      ...spawnInput(setup, "Create child"),
-      ...scenario,
+    await spawnAndInspect(scenario, (spawned) => {
+      expect(spawned).toMatchObject(scenario);
     });
-
-    expect(spawnedSession(setup)).toMatchObject(scenario);
-    closeSessionTestDatabase(setup.database);
   }
 });
 
-test("validates and persists spawn auto-compaction", async () => {
-  for (const autoCompact of ["false", 0, null]) {
-    const setup = agentActionsSetup("none", false);
-    const invalidSpawn = spawnInput(
-      setup,
-      "Do not create this child",
-      autoCompact,
-    );
-    const output = await executeSessionAgentTool(
-      setup.actions,
-      "spawn_session",
-      invalidSpawn,
-    );
-
-    expect(output).toEqual({
-      output: "Error: The spawn_session arguments are invalid",
-      state: "failed",
-    });
-    expect(setup.store.list(TEST_USER_ID)).toHaveLength(1);
-    closeSessionTestDatabase(setup.database);
-  }
-
+async function spawnAndInspect(
+  input: Record<string, unknown>,
+  inspect: (spawned: ReturnType<typeof spawnedSession>) => void,
+): Promise<void> {
   const setup = agentActionsSetup("none", false);
-
-  await executeSessionAgentTool(
-    setup.actions,
-    "spawn_session",
-    spawnInput(setup, "Create with the default"),
-  );
-  expect(spawnedSessionAutoCompact(setup)).toBe(true);
+  await executeSessionAgentTool(setup.actions, "spawn_session", {
+    ...spawnInput(setup, "Create the child"),
+    ...input,
+  });
+  inspect(spawnedSession(setup));
   closeSessionTestDatabase(setup.database);
+}
 
-  const disabledSetup = agentActionsSetup("none", false);
-  await executeSessionAgentTool(
-    disabledSetup.actions,
-    "spawn_session",
-    spawnInput(disabledSetup, "Create without automatic compaction", false),
-  );
-  expect(spawnedSessionAutoCompact(disabledSetup)).toBe(false);
-  closeSessionTestDatabase(disabledSetup.database);
-});
+async function expectSpawnedFlag(
+  input: Record<string, unknown>,
+  flag: "autoCompact" | "idleCompact",
+  expected: boolean,
+): Promise<void> {
+  await spawnAndInspect(input, (spawned) => {
+    expect(spawned?.[flag]).toBe(expected);
+  });
+}
+
+test.each([
+  ["autoCompact", true, false] as const,
+  ["idleCompact", false, true] as const,
+])(
+  "validates and persists spawn %s",
+  async (flag, defaultValue, explicitValue) => {
+    for (const invalid of ["false", 0, null]) {
+      const setup = agentActionsSetup("none", false);
+      const output = await executeSessionAgentTool(
+        setup.actions,
+        "spawn_session",
+        { ...spawnInput(setup, "Do not create this child"), [flag]: invalid },
+      );
+
+      expect(output).toEqual({
+        output: "Error: The spawn_session arguments are invalid",
+        state: "failed",
+      });
+      expect(setup.store.list(TEST_USER_ID)).toHaveLength(1);
+      closeSessionTestDatabase(setup.database);
+    }
+
+    await expectSpawnedFlag({}, flag, defaultValue);
+    await expectSpawnedFlag({ [flag]: explicitValue }, flag, explicitValue);
+  },
+);
 
 test.each(["failed", "paused", "queued", "running", "stopped"] as const)(
   "rejects compact and continue for a $status session before credential access",

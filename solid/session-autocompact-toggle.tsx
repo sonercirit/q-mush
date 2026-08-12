@@ -11,7 +11,7 @@ const COMPACTION_TOGGLES: Readonly<
   },
   idleCompact: {
     id: "session-idle-compact",
-    label: "Compact 30 minutes after the agent finishes",
+    label: "Compact after 30 minutes idle",
   },
 };
 

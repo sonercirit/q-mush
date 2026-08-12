@@ -46,14 +46,19 @@ interface IdleCompactionSchedulerOptions {
 // Runs on the liveness scan cadence: compacts every due session, letting
 // per-session failures fall through to the next scan without aborting the
 // batch. startManualSessionCompactionForUserId re-checks status, draining,
-// runner requirements, and credentials at execution time.
+// runner requirements, and credentials at execution time. The scan never
+// rejects — its caller fires and forgets from the liveness interval, so a
+// candidate-query failure must not become a fatal unhandled rejection.
 export async function compactIdleSessions(
   options: IdleCompactionSchedulerOptions,
 ): Promise<void> {
-  for (const candidate of idleCompactionCandidates(
-    options.database,
-    options.now(),
-  )) {
+  let candidates: readonly IdleCompactionCandidate[];
+  try {
+    candidates = idleCompactionCandidates(options.database, options.now());
+  } catch {
+    return;
+  }
+  for (const candidate of candidates) {
     try {
       await options.compact(candidate.userId, candidate.id);
     } catch {

@@ -270,6 +270,7 @@ test("requires explicit context and modality metadata from model responses", () 
 test("requires explicit context, cost, and compaction metadata from session responses", () => {
   for (const invalid of [
     { ...DETAIL, autoCompact: undefined },
+    { ...DETAIL, idleCompact: "yes" },
     { ...DETAIL, costBasis: undefined },
     { ...DETAIL, costBasis: "none", costUsd: 1 },
     { ...DETAIL, maxContextTokens: undefined },

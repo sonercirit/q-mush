@@ -219,6 +219,7 @@ function spawnInput() {
     agentFilePath: null,
     autoCompact: true,
     credentialId: CREDENTIAL_ID,
+    idleCompact: false,
     executionEnvironment: "bare_metal" as const,
     images: [],
     model: "gpt-4.1-mini",

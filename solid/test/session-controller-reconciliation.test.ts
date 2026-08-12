@@ -14,7 +14,7 @@ import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
 async function confirmCreationOption(
   prompt: string,
-  key: "agentFilePath" | "autoCompact",
+  key: "agentFilePath" | "autoCompact" | "idleCompact",
   value: string | boolean,
 ): Promise<void> {
   const run = await uncertainCreationScenario(prompt, {
@@ -193,6 +193,17 @@ registerReconciliationTests({
 
   "keeps creation blocked when the new detail has another auto-compaction mode":
     () => expectMismatchedCreationBlocked({ autoCompact: false }),
+
+  "threads idle compaction through creation reconciliation": async () => {
+    await confirmCreationOption(
+      "Create with idle compaction",
+      "idleCompact",
+      true,
+    );
+  },
+
+  "keeps creation blocked when the new detail has another idle-compaction mode":
+    () => expectMismatchedCreationBlocked({ idleCompact: true }),
 
   "keeps creation blocked when the new detail has another credential": () =>
     expectMismatchedCreationBlocked({ credentialId: "credential-other" }),
