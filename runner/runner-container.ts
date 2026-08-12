@@ -136,6 +136,8 @@ function runtimeArguments(
   // the runtime's default capabilities and network access, so package
   // installs (pacman on the default Arch image) work. Isolation comes from
   // the container boundary and per-session teardown, not host-uid mapping.
+  // --user 0:0 enforces the root contract even when an override image
+  // declares a USER directive.
   return [
     "run",
     "--detach",
@@ -145,6 +147,8 @@ function runtimeArguments(
     "--label",
     "dev.q-mush.owner=session",
     "--init",
+    "--user",
+    "0:0",
     "--mount",
     mount,
     "--workdir",
@@ -174,12 +178,15 @@ function processError(
 ): Error {
   const detail = result.standardError.trim() || result.standardOutput.trim();
   // The default Arch image is amd64-only; hosts that cannot run it (ARM64
-  // Linux without emulation) need the image override, so say so.
-  const guidance = /no matching manifest|platform.+does not match/iu.test(
-    detail,
-  )
-    ? " The configured image does not support this host architecture; set Q_MUSH_CONTAINER_IMAGE to a compatible image."
-    : "";
+  // Linux without emulation) need the image override, so say so. Docker
+  // reports "no matching manifest", Podman "no image found in image index
+  // (or manifest list) for architecture".
+  const guidance =
+    /no matching manifest|no image found in (?:image index|manifest list) for architecture|platform.+does not match/iu.test(
+      detail,
+    )
+      ? " The configured image does not support this host architecture; set Q_MUSH_CONTAINER_IMAGE to a compatible image."
+      : "";
   return new Error(
     `Container execution is unavailable: ${runtime} could not ${action}${detail.length === 0 ? "" : `: ${detail.slice(0, 500)}`}${guidance}`,
   );

@@ -85,25 +85,25 @@ describe("RunnerContainerManager", () => {
     expect(fake.calls[0]?.arguments).toContain("archlinux:latest");
   });
 
-  test("explains architecture mismatches with the image override", async () => {
-    const calls: FakeCall[] = [];
-    const manager = new RunnerContainerManager({
-      run: containerOperationRun(calls, {
-        run: () =>
-          Promise.resolve(
-            processResult({
-              exitCode: 125,
-              standardError:
-                "docker: no matching manifest for linux/arm64 in the manifest list entries",
-            }),
-          ),
-      }),
-    });
+  test.each([
+    "docker: no matching manifest for linux/arm64 in the manifest list entries",
+    'Error: choosing an image from manifest list docker.io/library/archlinux:latest: no image found in image index for architecture "arm64"',
+  ])(
+    "explains architecture mismatches with the image override",
+    async (standardError) => {
+      const calls: FakeCall[] = [];
+      const manager = new RunnerContainerManager({
+        run: containerOperationRun(calls, {
+          run: () =>
+            Promise.resolve(processResult({ exitCode: 125, standardError })),
+        }),
+      });
 
-    await expect(
-      manager.prepare("session-1", temporaryDirectory()),
-    ).rejects.toThrow("set Q_MUSH_CONTAINER_IMAGE to a compatible image");
-  });
+      await expect(
+        manager.prepare("session-1", temporaryDirectory()),
+      ).rejects.toThrow("set Q_MUSH_CONTAINER_IMAGE to a compatible image");
+    },
+  );
 
   test("starts one root container per session and maps the workspace", async () => {
     const fake = successfulFake();
@@ -146,6 +146,8 @@ describe("RunnerContainerManager", () => {
       "--label",
       "dev.q-mush.owner=session",
       "--init",
+      "--user",
+      "0:0",
       "--mount",
       `type=bind,source=${root},target=/workspace`,
       "--workdir",

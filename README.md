@@ -230,8 +230,9 @@ that account can access, resolving relative paths against the selected
 workspace; shell commands are intentionally full shell commands rooted in that
 directory. Container sessions confine file tools to the workspace, matching the
 container's workspace mount; container shells run as root inside the disposable
-session container with network access, and files they create are root-owned on
-the host. The default `archlinux:latest` image is amd64-only; on other
+session container with network access; with a rootful runtime the files they
+create are root-owned on the host (rootless Podman maps them to the runner
+account). The default `archlinux:latest` image is amd64-only; on other
 architectures set `Q_MUSH_CONTAINER_IMAGE` to a compatible image
 (`Q_MUSH_CONTAINER_RUNTIME` selects docker or podman). Before a workspace is
 selected, the authenticated directory browser can inspect directories readable
