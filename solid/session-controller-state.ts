@@ -61,15 +61,13 @@ function sessionIsActive(detail: AgentSessionDetail): boolean {
   );
 }
 
-// A buffered stream matches persisted text exactly, or as its tail or head
-// when the buffer missed leading deltas or stopped before the step settled.
+// A buffered stream matches persisted text exactly (a string is its own
+// suffix) or as its tail when the buffer missed leading deltas. Head or
+// interior fragments never match: a fresh stream's first short delta often
+// prefixes unrelated persisted text, and swallowing a fresh stream loses
+// live output, so a briefly duplicated transient is the safer failure.
 function streamBufferMatches(persisted: string, buffered: string): boolean {
-  return (
-    buffered.length > 0 &&
-    (persisted === buffered ||
-      persisted.endsWith(buffered) ||
-      persisted.startsWith(buffered))
-  );
+  return buffered.length > 0 && persisted.endsWith(buffered);
 }
 
 function persistedStreamStart(
@@ -84,8 +82,8 @@ function persistedStreamStart(
   let assistantIndex: number | undefined;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    const role = message?.role;
-    if (message === undefined || role === undefined) return undefined;
+    if (message === undefined) return undefined;
+    const role = message.role;
     if (role === "tool") continue;
     if (role === "assistant" && assistantIndex === undefined) {
       assistantIndex = index;
@@ -123,8 +121,9 @@ function resolveStreamBase(
   // streamed step may already be persisted. Anchor before the persisted
   // messages whose content matches the stream so reconciliation recognizes
   // them as this stream's content; otherwise the stream is new and anchors
-  // after the existing transcript. A pending compaction request always
-  // anchors after the transcript so reconciliation appends it last.
+  // after the existing transcript. A compaction request skips content
+  // matching: its buffered text is a prompt, not step output, so it always
+  // anchors after the transcript for reconciliation to append it last.
   const persistedStart =
     streamed.compactionRequest !== undefined
       ? undefined

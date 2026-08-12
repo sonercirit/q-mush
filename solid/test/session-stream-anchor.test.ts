@@ -113,6 +113,28 @@ test("keeps a fresh stream matching an earlier step's assistant text", () => {
   ]);
 });
 
+test.each([
+  { buffered: "D", name: "single-character head collision" },
+  { buffered: "Deep ", name: "head fragment" },
+  { buffered: "analys", name: "interior fragment" },
+])(
+  "keeps a fresh stream whose $name only starts or splits persisted text",
+  ({ buffered }) => {
+    const sessionId = "session-partial-collision";
+    const controller = unanchoredDeltaController(sessionId, "", buffered, [
+      ...UNANCHORED_STEP_MESSAGES,
+    ]);
+
+    // Head and interior fragments are weak evidence: a fresh stream's first
+    // short delta often prefixes unrelated persisted text, and swallowing a
+    // fresh stream loses live output, so the stream must stay live.
+    expect(sessionMessageIds(controller)).toEqual([
+      ...UNANCHORED_STEP_MESSAGES.map(({ id }) => id),
+      `stream:${sessionId}:thinking`,
+    ]);
+  },
+);
+
 test("keeps a fresh unanchored continuation after a prior trailing assistant", () => {
   const sessionId = "session-fresh-continuation";
   const controller = unanchoredDeltaController(
