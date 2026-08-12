@@ -1,4 +1,4 @@
-import { onCleanup } from "solid-js";
+import { createRenderEffect, onCleanup } from "solid-js";
 
 interface NestedScrollState {
   readonly fromEnd: number;
@@ -299,8 +299,14 @@ export function createNestedScrollRef(
       }
     });
   });
-  return (element) => {
-    const key = messageId();
+  const assign = (element: HTMLElement, key: string): void => {
+    if (
+      currentKey !== undefined &&
+      currentKey !== key &&
+      nestedScrollByMessage.get(currentKey)?.element === element
+    ) {
+      nestedScrollByMessage.delete(currentKey);
+    }
     currentKey = key;
     const previous = nestedScrollByMessage.get(key);
     current = element;
@@ -321,6 +327,18 @@ export function createNestedScrollRef(
         }
       });
     }
+  };
+  // Retained rows can be re-keyed when the settled transcript prefix grows
+  // around a live stream; the bookkeeping must follow the new key or scroll
+  // and wrap state is recorded under a stale key and never restored.
+  createRenderEffect(() => {
+    const key = messageId();
+    if (current !== undefined && key !== currentKey) {
+      assign(current, key);
+    }
+  });
+  return (element) => {
+    assign(element, messageId());
     element.addEventListener("scroll", rememberNestedScroll, true);
     element.addEventListener("subscroll-wrap-change", rememberNestedScroll);
     if (!observeReplacements) return;

@@ -1,4 +1,4 @@
-import { createMemo, For, Index, type JSX } from "solid-js";
+import { createMemo, For, Index, Show, type JSX } from "solid-js";
 import {
   inlineCodeClasses,
   renderHighlightedCodeWith,
@@ -442,13 +442,33 @@ function parseSpecialBlock(
   return listItem === null ? undefined : markdownList(lines, index, listItem);
 }
 
+function normalizedMarkdownLines(content: string): readonly string[] {
+  return content.replaceAll("\r\n", "\n").split("\n");
+}
+
 function parseMarkdownBlocks(
   content: string,
   preserveNewlines = false,
 ): readonly MarkdownBlock[] {
-  const lines = content.replaceAll("\r\n", "\n").split("\n");
   const blocks: MarkdownBlock[] = [];
-  let index = 0;
+  appendMarkdownBlocks(
+    normalizedMarkdownLines(content),
+    0,
+    preserveNewlines,
+    blocks,
+    [],
+  );
+  return blocks;
+}
+
+function appendMarkdownBlocks(
+  lines: readonly string[],
+  start: number,
+  preserveNewlines: boolean,
+  blocks: MarkdownBlock[],
+  ends: number[],
+): void {
+  let index = start;
 
   while (index < lines.length) {
     const line = lines[index] ?? "";
@@ -463,6 +483,7 @@ function parseMarkdownBlocks(
     if (table !== undefined) {
       blocks.push(table.block);
       index = table.nextIndex;
+      ends.push(index);
       continue;
     }
 
@@ -471,6 +492,7 @@ function parseMarkdownBlocks(
     if (special !== undefined) {
       blocks.push(special.block);
       index = special.nextIndex;
+      ends.push(index);
       continue;
     }
 
@@ -483,6 +505,7 @@ function parseMarkdownBlocks(
         type: "heading",
       });
       index += 1;
+      ends.push(index);
       continue;
     }
 
@@ -495,12 +518,14 @@ function parseMarkdownBlocks(
       }
 
       blocks.push({ text: paragraphText(quote), type: "quote" });
+      ends.push(index);
       continue;
     }
 
     if (/^\s*(?:-{3,}|_{3,}|\*{3,})\s*$/u.test(line)) {
       blocks.push({ text: "", type: "rule" });
       index += 1;
+      ends.push(index);
       continue;
     }
 
@@ -511,9 +536,8 @@ function parseMarkdownBlocks(
       type: raw ? "raw" : preserveNewlines ? "preserved" : "paragraph",
     });
     index = parsed.nextIndex;
+    ends.push(index);
   }
-
-  return blocks;
 }
 
 function headingClasses(level: number): string {
@@ -669,38 +693,71 @@ export function renderMarkdown(
   );
 }
 
-interface RenderedMarkdownBlock {
-  readonly key: string;
-  readonly node: JSX.Element;
+interface ParsedMarkdownDocument {
+  readonly blocks: readonly MarkdownBlock[];
+  readonly content: string;
+  readonly ends: readonly number[];
+  readonly lineCount: number;
 }
 
 /**
- * Reactive Markdown that re-renders only changed blocks. Streaming deltas
- * grow the final block, so settled blocks keep their DOM and each frame
- * renders one block instead of the whole accumulated document.
+ * Parses Markdown incrementally: when new content extends the previous
+ * document, settled blocks are reused by reference and parsing resumes at
+ * the first block that can still change, so per-delta parse work is bounded
+ * by the growing tail instead of the whole accumulated document.
  */
-export function MarkdownView(props: {
-  readonly content: string;
-  readonly preserveNewlines?: boolean;
-}): JSX.Element {
-  const blocks = createMemo(() =>
-    parseMarkdownBlocks(props.content, props.preserveNewlines ?? false),
+function parseMarkdownDocument(
+  previous: ParsedMarkdownDocument | undefined,
+  content: string,
+): ParsedMarkdownDocument {
+  if (previous?.content === content) return previous;
+  const lines = normalizedMarkdownLines(content);
+  const blocks: MarkdownBlock[] = [];
+  const ends: number[] = [];
+  let resume = 0;
+  if (
+    previous !== undefined &&
+    previous.content.length > 0 &&
+    content.startsWith(previous.content)
+  ) {
+    // Appending can only grow the previous final line or add lines after
+    // it, so a block parses identically when its scan stopped strictly
+    // before that line: every line its parser examined is unchanged.
+    const settledBefore = previous.lineCount - 1;
+    let retained = 0;
+    while (retained < previous.blocks.length) {
+      const end = previous.ends[retained];
+      if (end === undefined || end >= settledBefore) break;
+      retained += 1;
+    }
+    if (retained > 0) {
+      blocks.push(...previous.blocks.slice(0, retained));
+      ends.push(...previous.ends.slice(0, retained));
+      resume = previous.ends[retained - 1] ?? 0;
+    }
+  }
+  appendMarkdownBlocks(lines, resume, false, blocks, ends);
+  return { blocks, content, ends, lineCount: lines.length };
+}
+
+/**
+ * Reactive Markdown that re-renders only changed blocks. Settled blocks are
+ * reference-stable across deltas, so their keyed rows keep both their DOM
+ * and their reactive owners (wrap toggles stay live); only the growing tail
+ * block re-renders.
+ */
+export function MarkdownView(props: { readonly content: string }): JSX.Element {
+  const parsed = createMemo((previous: ParsedMarkdownDocument | undefined) =>
+    parseMarkdownDocument(previous, props.content),
   );
   return (
     <div class="min-w-0 space-y-3 text-sm leading-6 text-slate-200 [overflow-wrap:anywhere]">
-      <Index each={blocks()}>
-        {(block) => {
-          const rendered = createMemo(
-            (previous: RenderedMarkdownBlock | undefined) => {
-              const value = block();
-              const key = `${value.type}:${JSON.stringify(value)}`;
-              return previous?.key === key
-                ? previous
-                : { key, node: renderMarkdownBlock(value) };
-            },
-          );
-          return <>{rendered().node}</>;
-        }}
+      <Index each={parsed().blocks}>
+        {(block) => (
+          <Show keyed when={block()}>
+            {(value) => renderMarkdownBlock(value)}
+          </Show>
+        )}
       </Index>
     </div>
   );
