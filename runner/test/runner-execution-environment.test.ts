@@ -160,14 +160,7 @@ describe("container runner commands", () => {
     await Bun.write(`${outside}/escape.md`, "# Outside the workspace");
     await symlink(`${outside}/escape.md`, `${root}/docs/link.md`);
     const agentFile = (path: string): Promise<string> =>
-      executor.execute({
-        arguments: { path },
-        executionEnvironment: "container",
-        id: "command-agent-file-mapped",
-        sessionId: "session-1",
-        tool: "read_agent_file",
-        workingDirectory: root,
-      });
+      executor.execute(command("read_agent_file", "container", root, { path }));
 
     // The system prompt tells container agents to use /workspace for
     // absolute paths; the agent file must accept the same form as every
@@ -202,20 +195,21 @@ describe("container runner commands", () => {
     await Bun.write(`${root}/docs/custom.md`, "# Bare metal instructions");
 
     // Bare metal has no /workspace alias: the path resolves as an ordinary
-    // absolute path (and loads nothing here) instead of mapping into the
-    // session workspace.
+    // host-absolute path instead of mapping into the session workspace, so
+    // it must never load the workspace file. (Asserting on the workspace
+    // file, not null, keeps hosts with a real /workspace directory honest.)
     expect(
       JSON.parse(
-        await executor.execute({
-          arguments: { path: "/workspace/docs/custom.md" },
-          executionEnvironment: "bare_metal",
-          id: "command-agent-file-bare-metal",
-          sessionId: "session-1",
-          tool: "read_agent_file",
-          workingDirectory: root,
-        }),
+        await executor.execute(
+          command("read_agent_file", "bare_metal", root, {
+            path: "/workspace/docs/custom.md",
+          }),
+        ),
       ),
-    ).toBeNull();
+    ).not.toEqual({
+      content: "# Bare metal instructions",
+      name: "/workspace/docs/custom.md",
+    });
   });
 
   test("confines container file tools and agent files to the workspace", async () => {

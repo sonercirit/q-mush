@@ -66,9 +66,10 @@ export async function loadRunnerAgentFile(
   customPath?: string,
   contained = false,
   // Reported as AgentFile.name; defaults to the lookup path. Container
-  // sessions pass the requested /workspace form so mapped host paths never
-  // leak into persisted or model-visible output.
-  name = customPath,
+  // sessions pass the requested /workspace form so successful loads report
+  // that form instead of the mapped host path. (Failed opens still surface
+  // host paths in error messages, matching every other file tool.)
+  name?: string,
 ): Promise<AgentFile | null> {
   const root = await resolveRunnerWorkspace(workingDirectory);
   if (customPath === undefined) {
