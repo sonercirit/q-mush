@@ -143,6 +143,38 @@ describe("container runner commands", () => {
     ]);
   });
 
+  test("maps /workspace-absolute agent-file paths in container sessions", async () => {
+    const { executor } = containerExecutor();
+    const root = await workspace();
+    await Bun.write(`${root}/docs/custom.md`, "# Container instructions");
+    const agentFile = (path: string): Promise<string> =>
+      executor.execute({
+        arguments: { path },
+        executionEnvironment: "container",
+        id: "command-agent-file-mapped",
+        sessionId: "session-1",
+        tool: "read_agent_file",
+        workingDirectory: root,
+      });
+
+    // The system prompt tells container agents to use /workspace for
+    // absolute paths; the agent file must accept the same form as every
+    // other file tool, alongside the relative spelling.
+    expect(await agentFile("/workspace/docs/custom.md")).toContain(
+      "# Container instructions",
+    );
+    expect(await agentFile("docs/custom.md")).toContain(
+      "# Container instructions",
+    );
+    // Mapping must not open an escape: other absolute paths stay contained.
+    expect(await agentFile("/etc/hostname")).toContain(
+      "outside the session workspace",
+    );
+    expect(await agentFile("/workspace/../escape.md")).toContain(
+      "outside the session workspace",
+    );
+  });
+
   test("confines container file tools and agent files to the workspace", async () => {
     const outside = await workspace();
     const root = `${outside}/workspace`;

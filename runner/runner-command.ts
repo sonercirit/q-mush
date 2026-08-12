@@ -113,7 +113,14 @@ function agentFileResult(
   if (path === null || (pathValue !== undefined && path === undefined)) {
     return Promise.reject(new Error("The agent file path is invalid"));
   }
-  return loadRunnerAgentFile(workingDirectory, path, contained).then(
+  // Container sessions accept the /workspace-absolute form everywhere else
+  // (and the system prompt tells agents to use it), so the agent file maps
+  // it too before contained resolution.
+  const mapped =
+    contained && path !== undefined
+      ? mapContainerPath(workingDirectory, path)
+      : path;
+  return loadRunnerAgentFile(workingDirectory, mapped, contained).then(
     (agentFile) => ({
       output: JSON.stringify(agentFile),
       state: "completed",
