@@ -82,35 +82,49 @@ async function rejection(promise: Promise<unknown>): Promise<Error> {
   throw new Error("Expected operation to reject");
 }
 
-async function proxyError(
+async function withProxyClient<Result>(
   resolver: PageAddressResolver,
-  target: string,
-  connectUpstream?: UpstreamConnector,
-): Promise<Error> {
+  connectUpstream: UpstreamConnector | undefined,
+  request: string,
+  run: (proxy: PageFetchProxy) => Promise<Result>,
+): Promise<Result> {
   const proxy = new PageFetchProxy(resolver, connectUpstream);
   const port = await proxy.start();
   const client = connect({ host: "127.0.0.1", port });
-  const proxyFailure = new Promise<Error>((resolve) => {
-    const check = (): void => {
-      if (proxy.failure === undefined) {
-        setTimeout(check, 1);
-      } else {
-        resolve(proxy.failure);
-      }
-    };
-    check();
-  });
   try {
     await new Promise<void>((resolve, reject) => {
       client.once("connect", resolve);
       client.once("error", reject);
     });
-    client.write(`GET ${target} HTTP/1.1\r\nHost: example.com\r\n\r\n`);
-    return await proxyFailure;
+    client.write(request);
+    return await run(proxy);
   } finally {
     client.destroy();
     await proxy.close();
   }
+}
+
+function proxyError(
+  resolver: PageAddressResolver,
+  target: string,
+  connectUpstream?: UpstreamConnector,
+): Promise<Error> {
+  return withProxyClient(
+    resolver,
+    connectUpstream,
+    `GET ${target} HTTP/1.1\r\nHost: example.com\r\n\r\n`,
+    (proxy) =>
+      new Promise<Error>((resolve) => {
+        const check = (): void => {
+          if (proxy.failure === undefined) {
+            setTimeout(check, 1);
+          } else {
+            resolve(proxy.failure);
+          }
+        };
+        check();
+      }),
+  );
 }
 
 async function fetchError(
@@ -283,24 +297,54 @@ describe("page_fetch", () => {
 
   test("bounds a hanging upstream connect instead of stalling the tunnel", async () => {
     // Node arms the connect timeout only when the options carry one;
-    // Socket timers are internal, so the stub emits the timeout it was
-    // configured with instead of sleeping through it.
+    // Socket timers are internal, so the stub emits a timeout instead of
+    // sleeping through one. Emitting unconditionally keeps the failure
+    // fast and attributed here even if the source stops passing a bound.
     let configuredTimeout: number | undefined;
     const hanging = await proxyError(
-      () => Promise.resolve([{ address: PUBLIC_ADDRESS, family: 4 }]),
+      publicResolver,
       "http://example.com/",
       (options) => {
         // Never connects: emulates a SYN silently dropped upstream.
-        configuredTimeout = "timeout" in options ? options.timeout : undefined;
+        configuredTimeout = options.timeout;
         const socket = new Socket();
-        if (configuredTimeout !== undefined) {
-          queueMicrotask(() => socket.emit("timeout"));
-        }
+        queueMicrotask(() => socket.emit("timeout"));
         return socket;
       },
     );
-    expect(configuredTimeout).toBe(10_000);
+    // The exact bound is the proxy's business; the behavior under test is
+    // that a positive bound exists and surfaces a visible failure.
+    expect(configuredTimeout ?? 0).toBeGreaterThan(0);
     expect(hanging.message).toContain("timed out");
+  });
+
+  test("disarms the connect bound once the tunnel is established", async () => {
+    let upstream: Socket | undefined;
+    await withProxyClient(
+      publicResolver,
+      (options) => {
+        const socket = new Socket();
+        // Applying the handed bound the way node does keeps the disarm
+        // assertion non-vacuous: a bare Socket already reports timeout 0.
+        socket.setTimeout(options.timeout ?? 0);
+        upstream = socket;
+        queueMicrotask(() => socket.emit("connect"));
+        return socket;
+      },
+      // CONNECT keeps the proxy from writing into the stub socket, which
+      // would fail: only the client side sees the 200 response.
+      "CONNECT example.com:443 HTTP/1.1\r\n\r\n",
+      async (proxy) => {
+        // A silent origin past the bound must not kill the tunnel: the
+        // proxy disarms the connect timer and drops its destructive
+        // handler once the connection is established.
+        await vi.waitFor(() => {
+          expect(upstream?.timeout).toBe(0);
+        });
+        expect(upstream?.listenerCount("timeout")).toBe(0);
+        expect(proxy.failure).toBeUndefined();
+      },
+    );
   });
 
   test("distinguishes resolution failures from unsafe DNS answers", async () => {

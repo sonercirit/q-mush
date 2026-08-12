@@ -253,8 +253,8 @@ export async function assertPublicPageUrl(
 const MAXIMUM_PROXY_HEADER_BYTES = 64 * 1_024;
 // Hosts with partial connectivity (an IPv6 route that silently drops SYNs)
 // otherwise hang the upstream connect until the kernel gives up, stalling
-// the browser request; page_fetch's own deadline is at least 1 second, so
-// a bounded connect still leaves room to fail visibly within it.
+// the browser request; the bound fails visibly instead of relying on the
+// kernel timeout, and the overall page_fetch deadline stays authoritative.
 const UPSTREAM_CONNECT_TIMEOUT_MILLISECONDS = 10_000;
 const PROXY_FAILURE_RESPONSE = Buffer.from(
   "HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
@@ -450,8 +450,10 @@ export class PageFetchProxy {
       });
     });
     // The bound covers only connection establishment; page_fetch's own
-    // deadline governs an established tunnel.
+    // deadline governs an established tunnel. Dropping the connect-phase
+    // handler keeps a later timer reset from destroying the tunnel.
     upstream.setTimeout(0);
+    upstream.removeAllListeners("timeout");
     if (isConnect) {
       client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
     } else {
@@ -472,7 +474,7 @@ export class PageFetchProxy {
         socket.destroy();
       }
     }
-    if (!client.destroyed) {
+    if (!client.destroyed && !client.writableEnded) {
       client.end(PROXY_FAILURE_RESPONSE);
     }
   }
