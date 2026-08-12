@@ -44,13 +44,21 @@ function anthropicCapabilityEfforts(
   capabilities: unknown,
 ): readonly AgentReasoningEffort[] | undefined {
   const effort = capabilityRecord(capabilities, "effort");
+  const adaptive = capabilityRecord(
+    capabilities,
+    "thinking",
+    "types",
+    "adaptive",
+  );
+  // An explicit adaptive leaf that withholds support is authoritative even
+  // without effort metadata; only when both are absent is support unknown.
+  if (adaptive !== undefined && adaptive["supported"] !== true) {
+    return [];
+  }
   if (effort === undefined) {
     return undefined;
   }
-  if (
-    effort["supported"] !== true ||
-    !capabilitySupported(capabilities, "thinking", "types", "adaptive")
-  ) {
+  if (effort["supported"] !== true || adaptive?.["supported"] !== true) {
     return [];
   }
   // The documented tree has no "none" leaf; skipping it defends against a
@@ -59,7 +67,9 @@ function anthropicCapabilityEfforts(
   const efforts = AGENT_REASONING_EFFORTS.filter(
     (level) => level !== "none" && capabilitySupported(effort, level),
   );
-  return efforts.length === 0 ? [] : ["none", ...efforts];
+  // Affirmed effort support without named levels reads as unknown, not
+  // none: adaptive is confirmed, so listing-sourced levels are safe.
+  return efforts.length === 0 ? undefined : ["none", ...efforts];
 }
 
 // Modalities are derived only when the tree actually describes them: proxies

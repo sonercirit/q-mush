@@ -241,6 +241,64 @@ test("keeps authoritative Anthropic effort metadata over the OpenAI listing", as
   expect(requests).toHaveLength(2);
 });
 
+test("an adaptive-incapable model without effort metadata stays effortless", async () => {
+  const manualThinking = { types: { adaptive: { supported: false } } };
+  const { discovered } = await discoverAnthropicFormat(
+    dualListing(
+      [
+        capabilityListing(
+          { thinking: manualThinking },
+          "claude-manual-1",
+          "Claude Manual 1",
+        ),
+      ],
+      [{ id: "claude-manual-1", supported_reasoning_efforts: ["low", "high"] }],
+    ),
+  );
+
+  // The explicit adaptive non-support is authoritative even though the
+  // capability tree carries no effort node: the OpenAI-style listing must
+  // not enable efforts that would send a rejected adaptive thinking type.
+  expectSoleModel(discovered, model("claude-manual-1", "Claude Manual 1", []));
+});
+
+test("affirmed effort support without named levels accepts listed efforts", async () => {
+  const levelless = {
+    effort: { supported: true },
+    thinking: { types: { adaptive: { supported: true } } },
+  };
+  const { discovered } = await discoverAnthropicFormat(
+    dualListing(
+      [capabilityListing(levelless, "claude-terse-1", "Claude Terse 1")],
+      [{ id: "claude-terse-1", supported_reasoning_efforts: ["low", "max"] }],
+    ),
+  );
+
+  // Support without levels reads as unknown, not none — and adaptive is
+  // confirmed, so levels from the OpenAI-style listing are safe to offer.
+  expectSoleModel(
+    discovered,
+    model("claude-terse-1", "Claude Terse 1", ["low", "max"]),
+  );
+});
+
+test("a metadata-free duplicate cannot reopen an authoritative model", async () => {
+  const effortless = { effort: { supported: false } };
+  const { discovered } = await discoverAnthropicFormat(
+    dualListing(
+      [
+        capabilityListing(effortless, "claude-dup-1", "Claude Dup 1"),
+        { display_name: "Claude Dup 1 Again", id: "claude-dup-1" },
+      ],
+      [{ id: "claude-dup-1", supported_reasoning_efforts: ["low"] }],
+    ),
+  );
+
+  // The catalog keeps the first (authoritative) occurrence, so the later
+  // metadata-free duplicate must not mark the ID for the fallback merge.
+  expectSoleModel(discovered, model("claude-dup-1", "Claude Dup 1", []));
+});
+
 test("fails discovery when a has_more page lacks a fresh cursor", async () => {
   const expectInconsistentPage = (
     page: Readonly<Record<string, unknown>>,
@@ -261,7 +319,8 @@ test("fails discovery when a has_more page lacks a fresh cursor", async () => {
   });
 
   // Distinct cursors over near-empty pages stop at the page cap instead
-  // of stretching discovery into thousands of requests.
+  // of stretching discovery into thousands of requests; the pages were
+  // well-formed, so the failure reports catalog size rather than shape.
   let page = 0;
   await expect(
     discoverAnthropicFormat(() => {
@@ -272,7 +331,7 @@ test("fails discovery when a has_more page lacks a fresh cursor", async () => {
         last_id: `cursor-${String(page)}`,
       });
     }),
-  ).rejects.toThrow("inconsistent model catalog page");
+  ).rejects.toThrow("too many options");
   expect(page).toBe(500);
 });
 

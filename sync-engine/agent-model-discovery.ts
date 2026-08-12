@@ -444,16 +444,27 @@ function readAnthropicCatalog(items: readonly unknown[]): {
   readonly unknownEffortIds: ReadonlySet<string>;
 } {
   const unknownEffortIds = new Set<string>();
+  const seen = new Set<string>();
   const models = items.flatMap((item) => {
+    if (!isRecord(item)) {
+      return [];
+    }
     const option = genericModelOption(item, true);
-    if (option === undefined || !isRecord(item)) {
-      return option === undefined ? [] : [option];
+    if (option === undefined) {
+      return [];
     }
-    const withCapabilities = withAnthropicCapabilities(option, item);
-    if (!withCapabilities.effortsAuthoritative) {
-      unknownEffortIds.add(withCapabilities.option.id);
+    const { effortsAuthoritative, option: model } = withAnthropicCapabilities(
+      option,
+      item,
+    );
+    // The catalog keeps the first ID occurrence; only its authority counts.
+    if (!seen.has(model.id)) {
+      seen.add(model.id);
+      if (!effortsAuthoritative) {
+        unknownEffortIds.add(model.id);
+      }
     }
-    return [withCapabilities.option];
+    return [model];
   });
   return { catalog: createCatalog(models), unknownEffortIds };
 }
@@ -482,8 +493,8 @@ async function mergeOpenAiListedEfforts(
   credential: AgentProviderCredential,
   fetch: AgentModelDiscoveryFetch,
 ): Promise<AgentModelCatalog> {
-  // Authoritative capabilities (including explicit non-support) must not be
-  // overwritten; only metadata-free models are eligible.
+  // Only metadata-free models are eligible; authoritative answers
+  // (including explicit non-support) stay.
   if (unknownEffortIds.size === 0) {
     return catalog;
   }
@@ -613,11 +624,10 @@ function discoveryRequest(
   return { headers, url };
 }
 
-// The Anthropic Models API pages with `has_more`/`last_id` cursors (20-item
-// default); request the documented 1000-item maximum. A page claiming more
-// must supply a fresh nonempty cursor and items — else fail rather than loop
-// or truncate — and total pages are capped at what a 20-item-default server
-// needs for the largest accepted catalog.
+// Anthropic Models pages with `has_more`/`last_id` (20-item default);
+// request the documented 1000-item maximum. A page claiming more must
+// carry a fresh nonempty cursor and items — never loop or truncate —
+// within a default-page-size crawl budget.
 const MAXIMUM_ANTHROPIC_CATALOG_PAGES = MAXIMUM_AGENT_MODEL_OPTIONS / 20;
 
 async function readAnthropicModelList(
@@ -657,9 +667,8 @@ async function readAnthropicModelList(
     seenCursors.add(lastId);
     afterId = lastId;
   }
-  throw modelDiscoveryError(
-    "The provider returned an inconsistent model catalog page",
-  );
+  // Pages were well-formed; the crawl budget ran out.
+  throw modelDiscoveryError(MODEL_CATALOG_HAS_TOO_MANY_OPTIONS);
 }
 
 export async function discoverAgentModels(
