@@ -61,19 +61,32 @@ function sessionIsActive(detail: AgentSessionDetail): boolean {
   );
 }
 
-// A buffered stream matches persisted text exactly (a string is its own
-// suffix) or as its tail when the buffer missed leading deltas. Head or
-// interior fragments never match: a fresh stream's first short delta often
-// prefixes unrelated persisted text, and swallowing a fresh stream loses
-// live output, so a briefly duplicated transient is the safer failure.
-function streamBufferMatches(persisted: string, buffered: string): boolean {
-  return buffered.length > 0 && persisted.endsWith(buffered);
+// A buffered stream matches persisted text exactly or as its tail when the
+// buffer missed leading deltas. Head or interior fragments never match: a
+// fresh stream's first short delta often prefixes unrelated persisted text,
+// and swallowing a fresh stream loses live output. A tail match short of
+// equality is only weak evidence — a fresh delta can collide with the end
+// of unrelated persisted text — so callers treat it as provisional.
+type StreamBufferMatch = "exact" | "none" | "suffix";
+
+function streamBufferMatch(
+  persisted: string,
+  buffered: string,
+): StreamBufferMatch {
+  if (buffered.length === 0) return "none";
+  if (persisted === buffered) return "exact";
+  return persisted.endsWith(buffered) ? "suffix" : "none";
+}
+
+interface PersistedStreamMatch {
+  readonly exact: boolean;
+  readonly index: number;
 }
 
 function persistedStreamStart(
   messages: AgentSessionDetail["messages"],
   streamed: StreamedSessionContent,
-): number | undefined {
+): PersistedStreamMatch | undefined {
   // Search only the final step run (its tool results, one assistant, and one
   // thinking message) for persisted content matching the buffered stream.
   // A content match is the evidence that this exact stream already
@@ -87,52 +100,71 @@ function persistedStreamStart(
     if (role === "tool") continue;
     if (role === "assistant" && assistantIndex === undefined) {
       assistantIndex = index;
-      if (
-        streamed.thinking.length === 0 &&
-        streamBufferMatches(message.content, streamed.content)
-      ) {
-        return index;
+      if (streamed.thinking.length === 0) {
+        const match = streamBufferMatch(message.content, streamed.content);
+        if (match !== "none") return { exact: match === "exact", index };
       }
       continue;
     }
     if (role === "thinking" && streamed.thinking.length > 0) {
-      if (!streamBufferMatches(message.content, streamed.thinking)) {
-        return undefined;
+      const thinkingMatch = streamBufferMatch(
+        message.content,
+        streamed.thinking,
+      );
+      if (thinkingMatch === "none") return undefined;
+      const exactThinking = thinkingMatch === "exact";
+      if (streamed.content.length === 0) {
+        return { exact: exactThinking, index };
       }
-      if (streamed.content.length === 0) return index;
       const assistant =
         assistantIndex === undefined ? undefined : messages[assistantIndex];
-      return assistant !== undefined &&
-        streamBufferMatches(assistant.content, streamed.content)
-        ? index
-        : undefined;
+      if (assistant === undefined) return undefined;
+      const contentMatch = streamBufferMatch(
+        assistant.content,
+        streamed.content,
+      );
+      return contentMatch === "none"
+        ? undefined
+        : { exact: exactThinking && contentMatch === "exact", index };
     }
     return undefined;
   }
   return undefined;
 }
 
+interface ResolvedStreamBase {
+  readonly provisional: boolean;
+  readonly streamed: StreamedSessionContent;
+}
+
 function resolveStreamBase(
   detail: AgentSessionDetail,
   streamed: StreamedSessionContent,
-): StreamedSessionContent {
-  if (streamed.baseMessageId !== undefined) return streamed;
+): ResolvedStreamBase {
+  if (streamed.baseMessageId !== undefined) {
+    return { provisional: false, streamed };
+  }
   // The stream began before this session's detail was available, so the
   // streamed step may already be persisted. Anchor before the persisted
   // messages whose content matches the stream so reconciliation recognizes
   // them as this stream's content; otherwise the stream is new and anchors
   // after the existing transcript. A compaction request skips content
-  // matching: its buffered text is a prompt, not step output, so it always
-  // anchors after the transcript for reconciliation to append it last.
-  const persistedStart =
+  // matching: the request itself establishes a new transcript boundary, so
+  // it always anchors after the transcript for reconciliation to append it
+  // last. Suffix-only matches are provisional: the duplicate is suppressed
+  // but the buffer must survive so a later delta re-evaluates the match.
+  const match =
     streamed.compactionRequest !== undefined
       ? undefined
       : persistedStreamStart(detail.messages, streamed);
   const baseMessage =
-    persistedStart === undefined
+    match === undefined
       ? detail.messages.at(-1)
-      : detail.messages[persistedStart - 1];
-  return { ...streamed, baseMessageId: baseMessage?.id ?? null };
+      : detail.messages[match.index - 1];
+  return {
+    provisional: match !== undefined && !match.exact,
+    streamed: { ...streamed, baseMessageId: baseMessage?.id ?? null },
+  };
 }
 
 function streamStartIndex(
@@ -323,17 +355,24 @@ export class SessionRealtimeState {
       this.#clearCompaction(detail.id);
     }
     const currentStream = this.#streamedContent.get(detail.id);
-    const streamed =
+    const resolved =
       currentStream === undefined
         ? undefined
         : resolveStreamBase(persistable, currentStream);
+    const streamed = resolved?.streamed;
     const reconciled = streamed
       ? reconcileStream(persistable, streamed)
       : { messages: persistable.messages, persisted: true };
 
     if (retainCompactionStream(currentStream, reconciled) && streamed) {
       this.#streamedContent.set(detail.id, streamed);
-    } else if (!retainCompactionStream(currentStream, reconciled)) {
+    } else if (
+      !retainCompactionStream(currentStream, reconciled) &&
+      resolved?.provisional !== true
+    ) {
+      // A provisional suffix match keeps its unanchored buffer: dropping it
+      // would lose a fresh stream's head when its first delta merely
+      // collides with the end of persisted text.
       this.#streamedContent.delete(detail.id);
     }
     if (this.#view.value.selectedId !== detail.id) return;

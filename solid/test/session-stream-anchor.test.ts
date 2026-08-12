@@ -135,6 +135,38 @@ test.each([
   },
 );
 
+test("a provisional suffix collision recovers the full fresh stream", () => {
+  const sessionId = "session-suffix-collision";
+  const stepIds = UNANCHORED_STEP_MESSAGES.map(({ id }) => id);
+  // The fresh stream's first delta "s" collides with the tail of the
+  // persisted "Deep analysis"; the duplicate is suppressed provisionally.
+  const controller = unanchoredDeltaController(sessionId, "", "s", [
+    ...UNANCHORED_STEP_MESSAGES,
+  ]);
+  expect(sessionMessageIds(controller)).toEqual(stepIds);
+
+  // The next delta disproves the collision, so the buffer must have
+  // survived: the stream reappears with its head intact.
+  controller.applyDelta({
+    content: "",
+    sessionId,
+    thinking: "omething new",
+    type: "session_delta",
+  });
+  const refreshed = sessionDetailWithStatus(
+    "running",
+    [...UNANCHORED_STEP_MESSAGES],
+    sessionId,
+  );
+  controller.applyDetail(refreshed);
+  expect(sessionMessageIds(controller)).toEqual([
+    ...stepIds,
+    `stream:${sessionId}:thinking`,
+  ]);
+  const recovered = controller.state.detail?.messages.at(-1);
+  expect(recovered?.content).toBe("something new");
+});
+
 test("keeps a fresh unanchored continuation after a prior trailing assistant", () => {
   const sessionId = "session-fresh-continuation";
   const controller = unanchoredDeltaController(
