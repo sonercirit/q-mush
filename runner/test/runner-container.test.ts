@@ -94,6 +94,14 @@ describe("RunnerContainerManager", () => {
       'Error: choosing an image from manifest list docker.io/library/archlinux:latest: no image found in image index for architecture "arm64"',
       true,
     ],
+    // Pull chatter precedes the diagnostic; matching must span past the
+    // 500-character display truncation.
+    [
+      `Unable to find image 'archlinux:latest' locally\n${"latest: pulling layer\n".repeat(30)}docker: no matching manifest for linux/arm64/v8 in the manifest list entries`,
+      true,
+    ],
+    // Emulated pulls can succeed and still start a mismatched binary.
+    ["exec /bin/sh: exec format error", true],
     // Unrelated failures must not claim an architecture mismatch.
     ["Error response from daemon: connection refused", false],
   ])(
@@ -117,7 +125,7 @@ describe("RunnerContainerManager", () => {
       if (!(failure instanceof Error)) {
         throw new TypeError("The container start did not fail");
       }
-      expect(failure.message).toContain(standardError);
+      expect(failure.message).toContain(standardError.slice(0, 500));
       expect(failure.message.includes(guidance)).toBe(expectGuidance);
     },
   );
@@ -150,10 +158,11 @@ describe("RunnerContainerManager", () => {
     const start = fake.calls[0];
     expect(start).toBeDefined();
     expect(start?.executable).toBe("podman");
-    // Full-freedom container: exact argv pins that the agent stays root
-    // with default capabilities and network access (no --network/--cap-drop/
-    // --security-opt/--user/--env in any spelling) alongside the retained
-    // per-session lifecycle flags.
+    // Full-freedom container: exact argv pins that the agent runs as an
+    // explicitly enforced root (--user 0:0 beats image USER directives)
+    // with default capabilities and network access (no --network/
+    // --cap-drop/--security-opt/--env in any spelling) alongside the
+    // retained per-session lifecycle flags.
     expect(start?.arguments).toEqual([
       "run",
       "--detach",

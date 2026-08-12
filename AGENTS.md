@@ -14,14 +14,14 @@ Living project memory.
   Then verify: probe real APIs with local credentials, enumerate schemas via
   validation errors, read usage metrics.
 - Call a capability impossible only when evidence excludes it — docs searched,
-  schema enumerated — otherwise record an open question.
+  schema enumerated — else record an open question.
 - Preserve patterns, add tools only as needed, and proactively improve what you
   touch — code health, tests, docs, performance, security, DX: small
   improvements ship with the change, larger ones as immediate follow-ups.
 - Practice TDD: failing test first, implement, refactor green.
 - Follow DRY and KISS: authoritative logic, no premature abstractions.
 - Never invent numeric limits or tunables: probe omission first, prefer the
-  provider default, else derive from provider metadata, docs, or feedback.
+  provider default, else derive from metadata, docs, or feedback.
 - Integrate completely the first time: wire every session capability to each
   protocol's native control, recording what a protocol lacks.
 - No reward hacking: never weaken tests, special-case checks, or claim
