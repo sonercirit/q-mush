@@ -31,43 +31,74 @@ function capabilitySupported(
   return capabilityRecord(value, ...path)?.["supported"] === true;
 }
 
+// Undefined means the listing carries no effort metadata (unknown), while an
+// array — possibly empty — is authoritative: an explicit
+// `effort.supported: false` or a missing adaptive-thinking capability must
+// not be overwritten by the OpenAI-style fallback listing. Efforts are
+// offered only alongside adaptive thinking because selecting one turns on
+// `thinking: {type: "adaptive"}`, which adaptive-incapable models reject —
+// including effort-capable extended-thinking-only models (Claude Opus 4.5),
+// which stay effortless here until sessions carry per-model thinking
+// capabilities.
 function anthropicCapabilityEfforts(
   capabilities: unknown,
-): readonly AgentReasoningEffort[] {
+): readonly AgentReasoningEffort[] | undefined {
   const effort = capabilityRecord(capabilities, "effort");
-  if (effort?.["supported"] !== true) {
+  if (effort === undefined) {
+    return undefined;
+  }
+  if (
+    effort["supported"] !== true ||
+    !capabilitySupported(capabilities, "thinking", "types", "adaptive")
+  ) {
     return [];
   }
-  const efforts = AGENT_REASONING_EFFORTS.filter((level) =>
-    capabilitySupported(effort, level),
+  // The documented tree has no "none" leaf; skipping it defends against a
+  // server publishing one, which would otherwise duplicate the prepended
+  // level. Omitting both effort and thinking parameters is always valid.
+  const efforts = AGENT_REASONING_EFFORTS.filter(
+    (level) => level !== "none" && capabilitySupported(effort, level),
   );
-  // Omitting both effort and thinking parameters is always valid.
   return efforts.length === 0 ? [] : ["none", ...efforts];
 }
 
+// Modalities are derived only when the tree actually describes them: proxies
+// reuse `capabilities` for other metadata (context_window) while publishing
+// top-level `input_modalities`, and an unconditional ["text"] would clobber
+// that already-supported shape.
 function anthropicCapabilityModalities(
   capabilities: unknown,
 ): readonly string[] | null {
-  if (!isRecord(capabilities)) {
+  const image = capabilityRecord(capabilities, "image_input");
+  const pdf = capabilityRecord(capabilities, "pdf_input");
+  if (image === undefined && pdf === undefined) {
     return null;
   }
   return [
     "text",
-    ...(capabilitySupported(capabilities, "image_input") ? ["image"] : []),
-    ...(capabilitySupported(capabilities, "pdf_input") ? ["pdf"] : []),
+    ...(image?.["supported"] === true ? ["image"] : []),
+    ...(pdf?.["supported"] === true ? ["pdf"] : []),
   ];
+}
+
+export interface AnthropicCapabilityOption {
+  readonly effortsAuthoritative: boolean;
+  readonly option: AgentModelOption;
 }
 
 export function withAnthropicCapabilities(
   option: AgentModelOption,
   entry: Readonly<Record<string, unknown>>,
-): AgentModelOption {
+): AnthropicCapabilityOption {
   const capabilities = entry["capabilities"];
   const efforts = anthropicCapabilityEfforts(capabilities);
   const modalities = anthropicCapabilityModalities(capabilities);
   return {
-    ...option,
-    ...(modalities === null ? {} : { inputModalities: modalities }),
-    ...(efforts.length === 0 ? {} : { reasoningEfforts: efforts }),
+    effortsAuthoritative: efforts !== undefined,
+    option: {
+      ...option,
+      ...(modalities === null ? {} : { inputModalities: modalities }),
+      ...(efforts === undefined ? {} : { reasoningEfforts: efforts }),
+    },
   };
 }

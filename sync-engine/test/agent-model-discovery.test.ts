@@ -1,15 +1,9 @@
 import { describe, expect, test } from "vitest";
-import type {
-  AgentModelCatalog,
-  AgentModelOption,
-  AgentReasoningEffort,
-} from "../../shared/agent-configuration.ts";
+import type { AgentModelCatalog } from "../../shared/agent-configuration.ts";
 import type {
   ProviderCredentialAccess,
-  ProviderCredentialSource,
   ProviderId,
 } from "../../shared/provider-credential-store.ts";
-import type { ProviderModelPricing } from "../../shared/provider-model-pricing.ts";
 import { utf8ByteLength } from "../../shared/utf8.ts";
 import {
   discoverAgentModels,
@@ -17,63 +11,12 @@ import {
   type AgentModelDiscoveryFetch,
 } from "../../sync-engine/agent-model-discovery.ts";
 import { createJsonResponse } from "../../sync-engine/http.ts";
+import { catalog, credential, model } from "./agent-model-discovery-helpers.ts";
 import { createOpenAiOAuthSecret } from "./oauth-test-helpers.ts";
 import { captureRejection } from "./promise-test-helpers.ts";
 
 class RequestCapture {
   request?: Request;
-}
-
-function credential(
-  source: ProviderCredentialSource,
-  secret: string,
-  accountId: string | null = null,
-  baseUrl?: string,
-): ProviderCredentialAccess {
-  return {
-    accountId,
-    ...(baseUrl === undefined ? {} : { baseUrl }),
-    id: "credential-id",
-    isDefault: false,
-    label: "Provider credential",
-    secret,
-    source,
-  };
-}
-
-function model(
-  id: string,
-  label: string,
-  reasoningEfforts: readonly AgentReasoningEffort[],
-  contextWindow: number | null = null,
-  inputModalities: readonly string[] | null = null,
-  outputModalities: readonly string[] | null = null,
-  pricing: ProviderModelPricing | null = null,
-): AgentModelOption {
-  return {
-    contextWindow,
-    id,
-    inputModalities,
-    label,
-    outputModalities,
-    pricing,
-    reasoningEfforts,
-  };
-}
-
-function catalog(
-  defaultModel: string,
-  models: readonly AgentModelOption[],
-): AgentModelCatalog {
-  return { defaultModel, models };
-}
-
-function anthropicFormatCredential(): ProviderCredentialAccess {
-  return {
-    ...credential("api_key", "anthropic-secret"),
-    apiFormat: "anthropic",
-    baseUrl: "https://anthropic.example.test/v1",
-  };
 }
 
 function discoveryFetch(
@@ -289,165 +232,6 @@ describe("agent model discovery", () => {
     );
     expect(request.url).toBe("https://models.example.test/openai/v1/models");
     expectBearer(request, "generic-secret");
-  });
-
-  async function discoverAnthropicFormat(
-    respond: (request: Request) => Response,
-  ): Promise<{
-    readonly discovered: AgentModelCatalog;
-    readonly requests: Request[];
-  }> {
-    const requests: Request[] = [];
-    const discovered = await discoverAgentModels(
-      "generic",
-      anthropicFormatCredential(),
-      (request) => {
-        requests.push(request);
-        return Promise.resolve(respond(request));
-      },
-    );
-    return { discovered, requests };
-  }
-
-  test("discovers Anthropic-format models and merges OpenAI-listed efforts", async () => {
-    const { discovered, requests } = await discoverAnthropicFormat(
-      (request) => {
-        if (request.headers.has("x-api-key")) {
-          return createJsonResponse({
-            data: [
-              {
-                created_at: "2026-01-01T00:00:00Z",
-                display_name: "Claude Test 4",
-                id: "claude-test-4",
-                max_input_tokens: 200_000,
-                type: "model",
-              },
-            ],
-            has_more: false,
-          });
-        }
-        return createJsonResponse({
-          data: [
-            {
-              id: "claude-test-4",
-              supported_reasoning_efforts: ["none", "low", "high", "max"],
-            },
-          ],
-        });
-      },
-    );
-
-    expect(discovered).toEqual(
-      catalog("claude-test-4", [
-        model(
-          "claude-test-4",
-          "Claude Test 4",
-          ["none", "low", "high", "max"],
-          200_000,
-        ),
-      ]),
-    );
-    expect(requests).toHaveLength(2);
-    const [primary, secondary] = requests;
-    expect(primary?.url).toBe(
-      "https://anthropic.example.test/v1/models?limit=1000",
-    );
-    expect(primary?.headers.get("x-api-key")).toBe("anthropic-secret");
-    expect(primary?.headers.get("anthropic-version")).toBe("2023-06-01");
-    expect(primary?.headers.has("authorization")).toBe(false);
-    expect(secondary?.url).toBe("https://anthropic.example.test/v1/models");
-    expect(secondary?.headers.get("authorization")).toBe(
-      "Bearer anthropic-secret",
-    );
-    expect(secondary?.headers.has("x-api-key")).toBe(false);
-  });
-
-  test("reads Anthropic capability efforts and modalities without a second probe", async () => {
-    const { discovered, requests } = await discoverAnthropicFormat(() =>
-      createJsonResponse({
-        data: [
-          {
-            capabilities: {
-              effort: {
-                high: { supported: true },
-                low: { supported: true },
-                max: { supported: true },
-                medium: { supported: true },
-                supported: true,
-                xhigh: { supported: false },
-              },
-              image_input: { supported: true },
-              pdf_input: { supported: true },
-              thinking: {
-                supported: true,
-                types: { adaptive: { supported: true } },
-              },
-            },
-            display_name: "Claude Caps 5",
-            id: "claude-caps-5",
-            max_input_tokens: 1_000_000,
-            type: "model",
-          },
-        ],
-        has_more: false,
-      }),
-    );
-
-    expect(discovered).toEqual(
-      catalog("claude-caps-5", [
-        model(
-          "claude-caps-5",
-          "Claude Caps 5",
-          ["none", "low", "medium", "high", "max"],
-          1_000_000,
-          ["text", "image", "pdf"],
-        ),
-      ]),
-    );
-    // Capability metadata answered efforts, so no OpenAI-style probe runs.
-    expect(requests).toHaveLength(1);
-  });
-
-  test("follows Anthropic has_more cursors across pages", async () => {
-    const paginated = await discoverAnthropicFormat((request) => {
-      if (!request.headers.has("x-api-key")) {
-        return createJsonResponse({ data: [] });
-      }
-      const paged = new URL(request.url).searchParams.has("after_id");
-      return createJsonResponse({
-        data: [
-          {
-            display_name: paged ? "Claude Page 2" : "Claude Page 1",
-            id: paged ? "claude-page-2" : "claude-page-1",
-          },
-        ],
-        has_more: !paged,
-        last_id: paged ? "claude-page-2" : "claude-page-1",
-      });
-    });
-
-    expect(paginated.discovered.models.map(({ id }) => id)).toEqual([
-      "claude-page-1",
-      "claude-page-2",
-    ]);
-    expect(paginated.requests[0]?.url).toContain("limit=1000");
-    expect(paginated.requests[1]?.url).toContain("after_id=claude-page-1");
-  });
-
-  test("keeps the Anthropic-format catalog when no OpenAI listing exists", async () => {
-    const { discovered } = await discoverAnthropicFormat((request) =>
-      request.headers.has("x-api-key")
-        ? createJsonResponse({
-            data: [{ display_name: "Claude Plain 1", id: "claude-plain-1" }],
-          })
-        : new Response("denied", { status: 404 }),
-    );
-
-    expect(discovered).toEqual(
-      catalog("claude-plain-1", [
-        model("claude-plain-1", "Claude Plain 1", []),
-      ]),
-    );
   });
 
   test("aborts an oversized streamed catalog before fully buffering it", async () => {

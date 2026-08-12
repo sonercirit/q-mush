@@ -164,13 +164,13 @@ Living project memory.
   `solid/provider-*` client modules.
 - Measure cache hits against the cacheable prefix (total input dilutes with
   fresh tool output); persistent shortfalls are bugs, lone misses provider noise
-  — writes land seconds late and 128-token blocks hide small growth. Codex
-  socket reuse tested cache-neutral vs reconnects, so sockets stay open across a
-  run, reconnect on failure, and close at its end. UI rates divide by summed
-  input minus the final request (summary) or the prior step's input (per step),
-  clamped at 100%; the divisor counts only fully reported steps. OpenAI/Codex
-  requests carry the session ID as `prompt_cache_key` and the Codex `session_id`
-  header (cache routing); that surface rejects
+  — writes land late and 128-token blocks hide small growth. Codex socket reuse
+  tested cache-neutral vs reconnects: sockets stay open per run, reconnect on
+  failure, close at its end. UI rates divide by summed input minus the final
+  request (summary) or the prior step's input (per step), clamped at 100%; the
+  divisor counts only fully reported steps. OpenAI/Codex requests carry the
+  session ID as `prompt_cache_key` and the Codex `session_id` header (cache
+  routing); that surface rejects
   `prompt_cache_breakpoint`/`prompt_cache_retention`. OpenRouter and
   Anthropic-format requests mark one-hour `cache_control` breakpoints on the
   system prompt, transcript tail, and Anthropic tool definitions
@@ -245,14 +245,13 @@ Living project memory.
 - Keep HTTP `deflate` zlib-wrapped; Bun's is raw.
 - Knip severities alone do not activate default-off issue types; keep the
   included-issue list complete. Do not run the full test suite in parallel with
-  lint or repository scans; tooling-policy tests briefly create probe files
-  under `solid`.
+  lint or repository scans; tooling-policy tests briefly probe `solid`.
 - Runner install commands use the HTTP request origin: connect other computers
-  through a reachable origin, not `localhost`. Removing a runner revokes its
-  registration but leaves `~/.q-mush/runner`.
-- Bun 1.3.14's `Bun.build({ compile: ... })` writes the standalone binary only
-  to `compile.outfile` (`outputs[0]` is bundled JavaScript): build in a temp
-  directory and read the outfile before cleanup.
+  through a reachable origin, not `localhost`. Removing a runner leaves
+  `~/.q-mush/runner`.
+- Bun 1.3.14's `Bun.build({ compile: ... })` writes the binary only to
+  `compile.outfile` (`outputs[0]` is bundled JavaScript): build in a temp
+  directory, read the outfile before cleanup.
 - File tools stay in the runner workspace after symlink resolution; only
   session-owned non-read output spills may leave it, and `read` pages its
   source. `bash` has full runner-account permissions, rooted there. The
@@ -267,15 +266,17 @@ Living project memory.
   fallbacks. Catalogs: OpenAI `/v1/models`, OpenRouter `/api/v1/models/user`,
   ChatGPT Codex `/models`, or the generic `/models`; Anthropic-format catalogs
   read `display_name`, `max_input_tokens`, and the `capabilities` tree
-  (`agent-model-discovery-anthropic.ts`: per-level `effort` support plus `none`,
-  `image_input`/`pdf_input` modalities), page via `has_more`/`last_id` at
-  `limit=1000`, and probe the endpoint's OpenAI-style listing for efforts only
-  when capabilities left them empty. Codex parsing retains streamed output-text
-  and function-call argument deltas since completed events may omit `output`.
-  Only explicitly listed efforts are offered; OpenAI's catalog lacks reasoning
-  metadata. Optional reasoning uses `reasoning_effort` for OpenAI and generic
-  chat completions and `reasoning.effort` for OpenRouter and Codex Responses;
-  the Anthropic Messages format maps efforts to `output_config.effort` plus
+  (`agent-model-discovery-anthropic.ts`: per-level `effort` support gated on
+  adaptive thinking, modalities only from `image_input`/`pdf_input` leaves),
+  page via `has_more`/`last_id` at `limit=1000` with stale-cursor and page-count
+  guards, and probe the endpoint's OpenAI-style listing only for models whose
+  capabilities carried no effort metadata. Codex parsing retains streamed
+  output-text and function-call argument deltas since completed events may omit
+  `output`. Only explicitly listed efforts are offered; OpenAI's catalog lacks
+  reasoning metadata. Optional reasoning uses `reasoning_effort` for OpenAI and
+  generic chat completions and `reasoning.effort` for OpenRouter and Codex
+  Responses; the Anthropic Messages format maps efforts to
+  `output_config.effort` plus
   `thinking: {type: "adaptive", display: "summarized"}` on provider-default
   budgets, sending neither for `none` and `minimal` as `low` (rejected
   otherwise). Adaptive-only models (Fable) ignore `enabled`; newer models

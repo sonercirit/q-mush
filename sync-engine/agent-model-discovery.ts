@@ -410,40 +410,56 @@ function genericReasoningEfforts(
   );
 }
 
-function readGenericCatalog(
-  value: unknown,
-  credential: AgentProviderCredential,
-): AgentModelCatalog {
-  const anthropicFormat = credential.apiFormat === "anthropic";
+function genericModelOption(
+  item: unknown,
+  anthropicFormat: boolean,
+): AgentModelOption | undefined {
+  if (!isRecord(item)) {
+    return undefined;
+  }
+  return modelOption(
+    item,
+    "id",
+    anthropicFormat ? "display_name" : "name",
+    genericReasoningEfforts(item),
+    [
+      "context_window",
+      "context_window_size",
+      "context_length",
+      "max_input_tokens",
+    ],
+  );
+}
+
+function readGenericCatalog(value: unknown): AgentModelCatalog {
   const models = providerModelList(value, "data").flatMap((item) => {
-    if (!isRecord(item)) {
-      return [];
-    }
-    const option = modelOption(
-      item,
-      "id",
-      anthropicFormat ? "display_name" : "name",
-      genericReasoningEfforts(item),
-      [
-        "context_window",
-        "context_window_size",
-        "context_length",
-        "max_input_tokens",
-      ],
-    );
-    if (option === undefined) {
-      return [];
-    }
-    return [anthropicFormat ? withAnthropicCapabilities(option, item) : option];
+    const option = genericModelOption(item, false);
+    return option === undefined ? [] : [option];
   });
   return createCatalog(models);
 }
 
-// Anthropic-style model listings carry no reasoning metadata, but endpoints
-// that serve both API formats publish `supported_reasoning_efforts` on their
-// OpenAI-style listing at the same base URL. Merge those per-model efforts
-// best-effort so Anthropic-format sessions can offer them; endpoints without
-// an OpenAI-style listing simply offer none.
+function readAnthropicCatalog(items: readonly unknown[]): {
+  readonly catalog: AgentModelCatalog;
+  readonly unknownEffortIds: ReadonlySet<string>;
+} {
+  const unknownEffortIds = new Set<string>();
+  const models = items.flatMap((item) => {
+    const option = genericModelOption(item, true);
+    if (option === undefined || !isRecord(item)) {
+      return option === undefined ? [] : [option];
+    }
+    const withCapabilities = withAnthropicCapabilities(option, item);
+    if (!withCapabilities.effortsAuthoritative) {
+      unknownEffortIds.add(withCapabilities.option.id);
+    }
+    return [withCapabilities.option];
+  });
+  return { catalog: createCatalog(models), unknownEffortIds };
+}
+
+// Dual-format endpoints publish `supported_reasoning_efforts` on their
+// OpenAI-style listing at the same base URL; merge it best-effort.
 async function fetchDiscoveryJson(
   fetch: AgentModelDiscoveryFetch,
   url: URL | string,
@@ -462,10 +478,13 @@ async function fetchDiscoveryJson(
 
 async function mergeOpenAiListedEfforts(
   catalog: AgentModelCatalog,
+  unknownEffortIds: ReadonlySet<string>,
   credential: AgentProviderCredential,
   fetch: AgentModelDiscoveryFetch,
 ): Promise<AgentModelCatalog> {
-  if (catalog.models.every((model) => model.reasoningEfforts.length > 0)) {
+  // Authoritative capabilities (including explicit non-support) must not be
+  // overwritten; only metadata-free models are eligible.
+  if (unknownEffortIds.size === 0) {
     return catalog;
   }
   try {
@@ -494,7 +513,7 @@ async function mergeOpenAiListedEfforts(
       ...catalog,
       models: catalog.models.map((model) => {
         const listed = efforts.get(model.id);
-        return listed === undefined || model.reasoningEfforts.length > 0
+        return listed === undefined || !unknownEffortIds.has(model.id)
           ? model
           : { ...model, reasoningEfforts: listed };
       }),
@@ -594,17 +613,22 @@ function discoveryRequest(
   return { headers, url };
 }
 
-// The Anthropic Models API pages with `has_more`/`last_id` cursors and a
-// 20-item default page; request its documented 1000-item maximum and follow
-// cursors so large catalogs list completely.
+// The Anthropic Models API pages with `has_more`/`last_id` cursors (20-item
+// default); request the documented 1000-item maximum. A page claiming more
+// must supply a fresh nonempty cursor and items — else fail rather than loop
+// or truncate — and total pages are capped at what a 20-item-default server
+// needs for the largest accepted catalog.
+const MAXIMUM_ANTHROPIC_CATALOG_PAGES = MAXIMUM_AGENT_MODEL_OPTIONS / 20;
+
 async function readAnthropicModelList(
   credential: AgentProviderCredential,
   fetch: AgentModelDiscoveryFetch,
 ): Promise<readonly unknown[]> {
   const base = discoveryRequest("generic", credential);
   const items: unknown[] = [];
+  const seenCursors = new Set<string>();
   let afterId: string | undefined;
-  for (;;) {
+  while (seenCursors.size < MAXIMUM_ANTHROPIC_CATALOG_PAGES) {
     const url = new URL(base.url);
     url.searchParams.set("limit", "1000");
     if (afterId !== undefined) {
@@ -616,13 +640,26 @@ async function readAnthropicModelList(
     if (items.length > MAXIMUM_AGENT_MODEL_OPTIONS) {
       throw modelDiscoveryError(MODEL_CATALOG_HAS_TOO_MANY_OPTIONS);
     }
-    const lastId = isRecord(value) ? value["last_id"] : undefined;
-    const hasMore = isRecord(value) && value["has_more"] === true;
-    if (!hasMore || typeof lastId !== "string" || page.length === 0) {
+    if (!isRecord(value) || value["has_more"] !== true) {
       return items;
     }
+    const lastId = value["last_id"];
+    if (
+      typeof lastId !== "string" ||
+      lastId.length === 0 ||
+      seenCursors.has(lastId) ||
+      page.length === 0
+    ) {
+      throw modelDiscoveryError(
+        "The provider returned an inconsistent model catalog page",
+      );
+    }
+    seenCursors.add(lastId);
     afterId = lastId;
   }
+  throw modelDiscoveryError(
+    "The provider returned an inconsistent model catalog page",
+  );
 }
 
 export async function discoverAgentModels(
@@ -632,11 +669,15 @@ export async function discoverAgentModels(
 ): Promise<AgentModelCatalog> {
   try {
     if (provider === "generic" && credential.apiFormat === "anthropic") {
-      const catalog = readGenericCatalog(
-        { data: await readAnthropicModelList(credential, fetch) },
-        credential,
+      const { catalog, unknownEffortIds } = readAnthropicCatalog(
+        await readAnthropicModelList(credential, fetch),
       );
-      return await mergeOpenAiListedEfforts(catalog, credential, fetch);
+      return await mergeOpenAiListedEfforts(
+        catalog,
+        unknownEffortIds,
+        credential,
+        fetch,
+      );
     }
     const request = discoveryRequest(provider, credential);
     const value = await fetchDiscoveryJson(fetch, request.url, request.headers);
@@ -645,7 +686,7 @@ export async function discoverAgentModels(
       return readOpenRouterCatalog(value);
     }
     if (provider === "generic") {
-      return readGenericCatalog(value, credential);
+      return readGenericCatalog(value);
     }
 
     return credential.source === "oauth"
