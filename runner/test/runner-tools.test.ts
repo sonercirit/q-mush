@@ -107,12 +107,14 @@ describe("runner tools", () => {
     );
   });
 
-  test("loads explainable files only from the contained workspace", async () => {
+  test("loads explainable files inside and outside the workspace", async () => {
     const root = await explainWorkspace();
+    const outside = await workspace();
+    await writeFile(join(outside, "secret.png"), Uint8Array.from([4, 5]));
 
     const output = await explainOutput(root);
-    const error = await captureToolError(root, "explain_file", {
-      path: "../secret.png",
+    const outsideOutput = await executeRunnerTool(root, "explain_file", {
+      path: join(outside, "secret.png"),
     });
 
     expect(output).toEqual({
@@ -120,10 +122,14 @@ describe("runner tools", () => {
       mediaType: "image/png",
       name: "diagram.png",
     });
-    expect(error.message).toContain("outside the session workspace");
+    expect(JSON.parse(outsideOutput)).toEqual({
+      data: Uint8Array.from([4, 5]).toBase64(),
+      mediaType: "image/png",
+      name: "secret.png",
+    });
   });
 
-  test("binds Darwin containment validation to the opened descriptor", async () => {
+  test("binds Darwin descriptor validation to the opened descriptor", async () => {
     const fixture = await swappedPathFixture();
     const { liveDirectory, outsideDirectory, retainedDirectory, root } =
       fixture;
@@ -155,10 +161,10 @@ describe("runner tools", () => {
     expect(openCount).toBe(1);
     expect(openedFileDescriptor).toBe(validatedFileDescriptor);
     expect(openedPath).toBe(join(liveDirectory, "diagram.png"));
-    expect(error.message).toContain("outside the session workspace");
+    expect(error.message).toContain("changed while it was being validated");
   });
 
-  test("keeps reads on the opened contained object during a path swap", async () => {
+  test("keeps reads on the opened object during a path swap", async () => {
     const fixture = await swappedPathFixture();
 
     const { handle, stats } = await openSecureRunnerPath(
@@ -215,10 +221,39 @@ describe("runner tools", () => {
     expect(tooLong.message).toContain("prompt must be a string");
   });
 
-  test("rejects unsafe or incomplete tool calls", async () => {
+  test("displays double-dot-named workspace files relatively", async () => {
+    const written = await executeRunnerTool(await workspace(), "write", {
+      content: "kept relative\n",
+      path: "..notes",
+    });
+
+    expect(written).toContain("Wrote 14 bytes to ..notes.");
+  });
+
+  test("reads and writes sibling paths outside the workspace", async () => {
+    const outside = await workspace();
+    const root = join(outside, "workspace");
+    await mkdir(root);
+    await writeFile(join(outside, "HANDOFF.md"), "handoff notes\n", "utf8");
+
+    expect(
+      await executeRunnerTool(root, "read", { path: "../HANDOFF.md" }),
+    ).toBe("handoff notes\n");
+    expect(
+      await executeRunnerTool(root, "write", {
+        content: "shared state\n",
+        path: join(outside, "notes.txt"),
+      }),
+    ).toContain(`Wrote 13 bytes to ${join(outside, "notes.txt")}.`);
+    expect(await readFile(join(outside, "notes.txt"), "utf8")).toBe(
+      "shared state\n",
+    );
+  });
+
+  test("rejects incomplete tool calls", async () => {
     const root = await workspace();
-    const pathError = await captureToolError(root, "read", {
-      path: "../secret.txt",
+    const missingError = await captureToolError(root, "read", {
+      path: "missing-file.txt",
     });
     const timeoutError = await captureToolError(root, "bash", {
       command: "printf completed",
@@ -227,7 +262,7 @@ describe("runner tools", () => {
       ({ function: definition }) => definition.name === "bash",
     );
 
-    expect(pathError.message).toContain("outside the session workspace");
+    expect(missingError.message).toContain("ENOENT");
     expect(timeoutError.message).toContain("timeout");
     expect(bashDefinition?.function.parameters.required).toEqual([
       "command",

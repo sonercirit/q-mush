@@ -3,7 +3,7 @@ import type { SessionViewState } from "./session-client.tsx";
 import {
   replaceSessionSummary,
   retainUnchangedSessionData,
-} from "./session-controller-state.ts";
+} from "./session-data-matching.ts";
 
 export function sessionDetailState(
   state: SessionViewState,

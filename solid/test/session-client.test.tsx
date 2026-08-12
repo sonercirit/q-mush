@@ -155,6 +155,7 @@ test("shows session time and cost in the list and detail", () => {
 
   expect(html.match(/Time: 1m 5s/gu)).toHaveLength(2);
   expect(html.match(/Estimated cost: \$0\.0042/gu)).toHaveLength(2);
+  expect(html).not.toContain("Run:");
 });
 
 test("renders the session list as a scrollable region", () => {

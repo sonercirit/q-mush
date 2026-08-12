@@ -1,4 +1,3 @@
-import { canonicalAgentSessionMessages } from "../shared/session-message-order.ts";
 import type {
   AgentSessionDetail,
   AgentSessionMessage,
@@ -8,148 +7,18 @@ import { applyToolStreamDelta } from "../shared/tool-stream.ts";
 import type { RealtimeServerEvent } from "./realtime-client-codec.ts";
 import type { RevisionState } from "./revision-state.ts";
 import type { SessionViewState } from "./session-client.tsx";
-import { summaryFromDetail } from "./session-codec.ts";
+import {
+  isStreamedMessage,
+  replaceSessionSummary,
+  retainUnchangedSessionData,
+  sessionDataMatches,
+  sessionSummariesMatch,
+  sortedMessages,
+  streamedMessageId,
+} from "./session-data-matching.ts";
 import { createDisplaySessionMessage } from "./session-message.ts";
 import { sessionMutationPending } from "./session-pending.ts";
 import { toolStreamKey } from "./tool-stream-client.ts";
-
-export function replaceSessionSummary(
-  sessions: readonly AgentSessionSummary[],
-  detail: AgentSessionDetail,
-): readonly AgentSessionSummary[] {
-  const summary = summaryFromDetail(detail);
-  return [summary, ...sessions.filter(({ id }) => id !== summary.id)].sort(
-    (left, right) => right.updatedAt - left.updatedAt,
-  );
-}
-
-export function mergeNewerSelectedSessionSummary(
-  sessions: readonly AgentSessionSummary[],
-  selectedId: string | undefined,
-  detail: AgentSessionDetail | undefined,
-): readonly AgentSessionSummary[] {
-  const selectedDetail = detail?.id === selectedId ? detail : undefined;
-  const fetched = sessions.find(({ id }) => id === selectedId);
-  return selectedDetail !== undefined &&
-    fetched !== undefined &&
-    selectedDetail.updatedAt > fetched.updatedAt
-    ? replaceSessionSummary(sessions, selectedDetail)
-    : sessions;
-}
-
-function serializedDataMatches(left: unknown, right: unknown): boolean {
-  return left === right || JSON.stringify(left) === JSON.stringify(right);
-}
-
-function sessionMessageMatches(
-  left: AgentSessionMessage | undefined,
-  right: AgentSessionMessage | undefined,
-): boolean {
-  if (left === right) return true;
-  if (left === undefined || right === undefined) return false;
-  return (
-    left.content === right.content &&
-    left.createdAt === right.createdAt &&
-    left.id === right.id &&
-    left.role === right.role &&
-    left.toolCallId === right.toolCallId &&
-    left.toolName === right.toolName &&
-    serializedDataMatches(left.attachments, right.attachments) &&
-    serializedDataMatches(left.images, right.images) &&
-    serializedDataMatches(left.tokenUsage, right.tokenUsage) &&
-    serializedDataMatches(left.toolCalls, right.toolCalls)
-  );
-}
-
-function sessionDetailMatches(
-  left: AgentSessionDetail | undefined,
-  right: AgentSessionDetail | undefined,
-): boolean {
-  if (left === right) return true;
-  if (right === undefined || left === undefined) return false;
-  const { messages: leftMessages, ...leftMetadata } = left;
-  const { messages: rightMessages, ...rightMetadata } = right;
-  return (
-    leftMessages.length === rightMessages.length &&
-    leftMessages.every((message, index) =>
-      sessionMessageMatches(message, rightMessages[index]),
-    ) &&
-    serializedDataMatches(leftMetadata, rightMetadata)
-  );
-}
-
-export const sessionDataMatches = sessionDetailMatches;
-
-export function sessionSummariesMatch(
-  left: readonly AgentSessionSummary[] | undefined,
-  right: readonly AgentSessionSummary[] | undefined,
-): boolean {
-  return serializedDataMatches(left, right);
-}
-
-function canonicalSessionMessages(
-  messages: AgentSessionDetail["messages"],
-): AgentSessionDetail["messages"] {
-  return canonicalAgentSessionMessages(messages);
-}
-
-function retainUnchangedMessages(
-  current: AgentSessionDetail,
-  messages: AgentSessionDetail["messages"],
-): AgentSessionDetail["messages"] {
-  const currentById = new Map(
-    current.messages.map((message) => [message.id, message]),
-  );
-  return messages.map((message) => {
-    const existing = currentById.get(message.id);
-    return sessionMessageMatches(existing, message) && existing !== undefined
-      ? existing
-      : message;
-  });
-}
-
-function sortedMessages(
-  detail: AgentSessionDetail,
-): AgentSessionDetail["messages"] {
-  if (
-    detail.messages.some((message) => isStreamedMessage(detail.id, message))
-  ) {
-    return detail.messages;
-  }
-  for (let index = 1; index < detail.messages.length; index += 1) {
-    const previous = detail.messages[index - 1];
-    const current = detail.messages[index];
-    if (
-      previous !== undefined &&
-      current !== undefined &&
-      (previous.createdAt > current.createdAt ||
-        (previous.createdAt === current.createdAt && previous.id > current.id))
-    ) {
-      return canonicalSessionMessages(detail.messages);
-    }
-  }
-  return detail.messages;
-}
-
-export function retainUnchangedSessionData(
-  current: AgentSessionDetail | undefined,
-  detail: AgentSessionDetail,
-): AgentSessionDetail {
-  const orderedMessages = sortedMessages(detail);
-  if (current?.id !== detail.id)
-    return orderedMessages === detail.messages
-      ? detail
-      : { ...detail, messages: orderedMessages };
-
-  const agentFile = serializedDataMatches(current.agentFile, detail.agentFile)
-    ? current.agentFile
-    : detail.agentFile;
-  const messages = retainUnchangedMessages(current, orderedMessages);
-  return agentFile !== detail.agentFile ||
-    messages.some((message, index) => message !== detail.messages[index])
-    ? { ...detail, agentFile, messages }
-    : detail;
-}
 
 type StreamRole = "assistant" | "thinking";
 
@@ -164,21 +33,6 @@ interface StreamedSessionContent {
 interface ReconciledStream {
   readonly messages: AgentSessionDetail["messages"];
   readonly persisted: boolean;
-}
-
-function streamedMessageId(sessionId: string, role: StreamRole): string {
-  return `stream:${sessionId}:${role}`;
-}
-
-function isStreamedMessage(
-  sessionId: string,
-  message: AgentSessionMessage,
-): boolean {
-  return (
-    message.role === "compaction_request" ||
-    message.id === streamedMessageId(sessionId, "thinking") ||
-    message.id === streamedMessageId(sessionId, "assistant")
-  );
 }
 
 function persistedMessages(
@@ -207,12 +61,112 @@ function sessionIsActive(detail: AgentSessionDetail): boolean {
   );
 }
 
+// A buffered stream matches persisted text exactly or as its tail when the
+// buffer missed leading deltas. Head or interior fragments never match: a
+// fresh stream's first short delta often prefixes unrelated persisted text,
+// and swallowing a fresh stream loses live output. A tail match short of
+// equality is only weak evidence — a fresh delta can collide with the end
+// of unrelated persisted text — so callers treat it as provisional. An
+// exact match is strong evidence but not proof: a fresh first delta equal
+// to the persisted text verbatim still drops, an accepted rarity.
+type StreamBufferMatch = "exact" | "none" | "suffix";
+
+function streamBufferMatch(
+  persisted: string,
+  buffered: string,
+): StreamBufferMatch {
+  if (buffered.length === 0) return "none";
+  if (persisted === buffered) return "exact";
+  return persisted.endsWith(buffered) ? "suffix" : "none";
+}
+
+interface PersistedStreamMatch {
+  readonly exact: boolean;
+  readonly index: number;
+}
+
+function persistedStreamStart(
+  messages: AgentSessionDetail["messages"],
+  streamed: StreamedSessionContent,
+): PersistedStreamMatch | undefined {
+  // Search only the final step run (its tool results, one assistant, and one
+  // thinking message) for persisted content matching the buffered stream.
+  // A content match is the evidence that this exact stream already
+  // persisted; role presence alone would swallow fresh streams after
+  // unrelated trailing assistants, and earlier steps' text must not match.
+  let assistantIndex: number | undefined;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message === undefined) return undefined;
+    const role = message.role;
+    if (role === "tool") continue;
+    if (role === "assistant" && assistantIndex === undefined) {
+      assistantIndex = index;
+      if (streamed.thinking.length === 0) {
+        const match = streamBufferMatch(message.content, streamed.content);
+        if (match !== "none") return { exact: match === "exact", index };
+      }
+      continue;
+    }
+    if (role === "thinking" && streamed.thinking.length > 0) {
+      const thinkingMatch = streamBufferMatch(
+        message.content,
+        streamed.thinking,
+      );
+      if (thinkingMatch === "none") return undefined;
+      const exactThinking = thinkingMatch === "exact";
+      if (streamed.content.length === 0) {
+        return { exact: exactThinking, index };
+      }
+      const assistant =
+        assistantIndex === undefined ? undefined : messages[assistantIndex];
+      if (assistant === undefined) return undefined;
+      const contentMatch = streamBufferMatch(
+        assistant.content,
+        streamed.content,
+      );
+      return contentMatch === "none"
+        ? undefined
+        : { exact: exactThinking && contentMatch === "exact", index };
+    }
+    return undefined;
+  }
+  return undefined;
+}
+
+interface ResolvedStreamBase {
+  readonly provisional: boolean;
+  readonly streamed: StreamedSessionContent;
+}
+
 function resolveStreamBase(
   detail: AgentSessionDetail,
   streamed: StreamedSessionContent,
-): StreamedSessionContent {
-  if (streamed.baseMessageId !== undefined) return streamed;
-  return { ...streamed, baseMessageId: detail.messages.at(-1)?.id ?? null };
+): ResolvedStreamBase {
+  if (streamed.baseMessageId !== undefined) {
+    return { provisional: false, streamed };
+  }
+  // The stream began before this session's detail was available, so the
+  // streamed step may already be persisted. Anchor before the persisted
+  // messages whose content matches the stream so reconciliation recognizes
+  // them as this stream's content; otherwise the stream is new and anchors
+  // after the existing transcript. A compaction request skips content
+  // matching: the request itself establishes a new transcript boundary, so
+  // it always anchors after the transcript for reconciliation to append it
+  // last. Suffix-only matches are provisional: the duplicate is suppressed
+  // but the buffer must survive so a later delta re-evaluates the match.
+  const match =
+    streamed.compactionRequest !== undefined
+      ? undefined
+      : persistedStreamStart(detail.messages, streamed);
+  const baseMessage =
+    match === undefined
+      ? detail.messages.at(-1)
+      : detail.messages[match.index - 1];
+  return {
+    provisional: match !== undefined && !match.exact,
+    streamed: { ...streamed, baseMessageId: baseMessage?.id ?? null },
+  };
 }
 
 function streamStartIndex(
@@ -403,17 +357,26 @@ export class SessionRealtimeState {
       this.#clearCompaction(detail.id);
     }
     const currentStream = this.#streamedContent.get(detail.id);
-    const streamed =
+    const resolved =
       currentStream === undefined
         ? undefined
         : resolveStreamBase(persistable, currentStream);
+    const streamed = resolved?.streamed;
     const reconciled = streamed
       ? reconcileStream(persistable, streamed)
       : { messages: persistable.messages, persisted: true };
 
     if (retainCompactionStream(currentStream, reconciled) && streamed) {
       this.#streamedContent.set(detail.id, streamed);
-    } else if (!retainCompactionStream(currentStream, reconciled)) {
+    } else if (
+      !retainCompactionStream(currentStream, reconciled) &&
+      resolved?.provisional !== true
+    ) {
+      // A provisional suffix match keeps its unanchored buffer: dropping it
+      // would lose a fresh stream's head when its first delta merely
+      // collides with the end of persisted text. A retained stale buffer
+      // can surface as a transient if a later snapshot advances past the
+      // matched step; the next delta or a terminal status clears it.
       this.#streamedContent.delete(detail.id);
     }
     if (this.#view.value.selectedId !== detail.id) return;

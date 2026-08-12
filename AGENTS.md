@@ -120,17 +120,17 @@ Living project memory.
   `/api/runners/:id/directories`. Each run, `read_agent_file` loads exact-root
   `AGENTS.md` (else `CLAUDE.md`).
 
-  `runner/runner-workspace.ts` shares canonical workspace resolution and
-  containment with file tools. Tool and skill choices persist per session;
-  picker details use canonical schemas. Bounded `read_session` spans transcript
-  categories and definitions; `get_session_options` pages spawn choices. Grouped
-  tools manage non-blocking owned children, report final messages, and resume
-  idle parents; `parallel` takes 2+ calls on four ordered workers, bounds
-  output, propagates cancellation. `solid/session-transcript.tsx` renders
-  prompts, tool definitions, raw details, Markdown, code/JSON, diffs, and
-  contextual results, preserving user line breaks; session lists paginate by
-  ten. Live sessions use `solid/realtime-client.ts`, `solid/session-client.tsx`,
-  and `solid/session-controller.ts`: model deltas combine once per frame per
+  `runner/runner-workspace.ts` owns canonical workspace and tool path
+  resolution. Tool and skill choices persist per session; picker details use
+  canonical schemas. Bounded `read_session` spans transcript categories and
+  definitions; `get_session_options` pages spawn choices. Grouped tools manage
+  non-blocking owned children, report final messages, and resume idle parents;
+  `parallel` takes 2+ calls on four ordered workers, bounds output, propagates
+  cancellation. `solid/session-transcript.tsx` renders prompts, tool
+  definitions, raw details, Markdown, code/JSON, diffs, and contextual results,
+  preserving user line breaks; session lists paginate by ten. Live sessions use
+  `solid/realtime-client.ts`, `solid/session-client.tsx`, and
+  `solid/session-controller.ts`: model deltas combine once per frame per
   session, other events stay immediate, unchanged snapshots suppress
   notifications, and keyed messages rerender only what changed. The long-lived
   Solid root preserves focus and scroll; the transcript starts at and returns to
@@ -252,10 +252,10 @@ Living project memory.
 - Bun 1.3.14's `Bun.build({ compile: ... })` writes the binary only to
   `compile.outfile` (`outputs[0]` is bundled JavaScript): build in a temp
   directory, read the outfile before cleanup.
-- File tools stay in the runner workspace after symlink resolution; only
-  session-owned non-read output spills may leave it, and `read` pages its
-  source. `bash` has full runner-account permissions, rooted there. The
-  directory picker browses beyond a session workspace with runner-account
+- Bare-metal file tools resolve relative paths against the runner workspace but
+  accept any runner-account-accessible path; container sessions and attachment
+  records stay contained (file tools run on the host). `read` pages its source.
+  The directory picker browses beyond a session workspace with runner-account
   permissions, returns only directory metadata, bounds listings, and times out
   stalls. Stopping a session aborts its model request and pushes runner-command
   cancellation, terminating an active shell command. OpenAI API-key and OAuth

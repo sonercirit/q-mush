@@ -9,12 +9,12 @@ import type { RevisionState } from "./revision-state.ts";
 import type { SessionViewState } from "./session-client.tsx";
 import { readSessionDetail, readSessionList } from "./session-codec.ts";
 import { sessionDetailState } from "./session-controller-detail.ts";
+import type { SessionRealtimeState } from "./session-controller-state.ts";
 import {
   mergeNewerSelectedSessionSummary,
   sessionDataMatches,
   sessionSummariesMatch,
-  type SessionRealtimeState,
-} from "./session-controller-state.ts";
+} from "./session-data-matching.ts";
 import {
   runUnlessSessionMutation,
   sessionMutationPending,

@@ -1,5 +1,5 @@
 import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, relative, resolve } from "node:path";
+import { basename, dirname, relative, resolve, sep } from "node:path";
 import {
   agentAttachmentMediaTypeFromName,
   MAXIMUM_AGENT_ATTACHMENT_BYTES,
@@ -39,9 +39,10 @@ import {
   runRunnerProcess,
 } from "./runner-process.ts";
 import {
+  containedRunnerPath,
   openSecureRunnerPath,
+  resolveRunnerPath,
   resolveRunnerWorkspace,
-  secureRunnerPath,
 } from "./runner-workspace.ts";
 
 const MAX_FILE_BYTES = 1024 * 1024;
@@ -63,6 +64,8 @@ type RunnerShellExecutor = (
 ) => Promise<RunnerCommandResult | string>;
 
 export interface RunnerToolExecutionOptions {
+  /** Container sessions confine host-side file tools to the workspace. */
+  readonly containPaths?: boolean;
   readonly mapAbsolutePath?: (path: string) => string;
   readonly outputSpills?: RunnerOutputSpills;
   readonly pageFetch?: PageFetchRunnerTool;
@@ -137,14 +140,28 @@ function requiredInteger(
   return value;
 }
 
+function pathResolutionOptions(
+  options: RunnerToolExecutionOptions | undefined,
+): Pick<PathArgumentOptions, "containPaths" | "mapAbsolutePath"> {
+  return {
+    ...(options?.containPaths === true ? { containPaths: true } : {}),
+    ...(options?.mapAbsolutePath === undefined
+      ? {}
+      : { mapAbsolutePath: options.mapAbsolutePath }),
+  };
+}
+
+interface PathArgumentOptions {
+  readonly allowedExternalPath?: (path: string) => boolean;
+  readonly containPaths?: boolean;
+  readonly mapAbsolutePath?: (path: string) => string;
+  readonly mayNotExist?: boolean;
+}
+
 async function pathArgument(
   root: string,
   arguments_: ToolArguments,
-  options: {
-    readonly allowedExternalPath?: (path: string) => boolean;
-    readonly mapAbsolutePath?: (path: string) => string;
-    readonly mayNotExist?: boolean;
-  } = {},
+  options: PathArgumentOptions = {},
 ): Promise<string> {
   const requested = requiredString(arguments_, "path", 4_096);
   const mapped = options.mapAbsolutePath?.(requested) ?? requested;
@@ -152,18 +169,25 @@ async function pathArgument(
   if (attachmentPath !== undefined) {
     return attachmentPath;
   }
+  if (options.containPaths !== true) {
+    return resolveRunnerPath(root, mapped, options.mayNotExist);
+  }
   if (options.allowedExternalPath?.(resolve(root, mapped)) === true) {
     const canonical = await realpath(mapped);
+    // Re-check after canonicalization so a symlink swap cannot widen access.
     if (options.allowedExternalPath(canonical)) {
       return canonical;
     }
   }
-  return secureRunnerPath(root, mapped, options.mayNotExist);
+  return containedRunnerPath(root, mapped, options.mayNotExist);
 }
 
 function displayPath(root: string, path: string): string {
   const displayed = relative(root, path);
-  return displayed.length === 0 ? "." : displayed;
+  if (displayed.length === 0) return ".";
+  return displayed === ".." || displayed.startsWith(`..${sep}`)
+    ? path
+    : displayed;
 }
 
 async function readTextFile(
@@ -181,23 +205,6 @@ async function readTextFile(
   }
 
   return readFile(path, "utf8");
-}
-
-async function readPathContent(
-  root: string,
-  arguments_: ToolArguments,
-  mapAbsolutePath?: (path: string) => string,
-  ownedSpillPath?: (path: string) => boolean,
-): Promise<{ readonly content: string; readonly path: string }> {
-  const path = await pathArgument(root, arguments_, {
-    ...(ownedSpillPath === undefined
-      ? {}
-      : { allowedExternalPath: ownedSpillPath }),
-    ...(mapAbsolutePath === undefined ? {} : { mapAbsolutePath }),
-  });
-  const maximumBytes =
-    ownedSpillPath?.(path) === true ? undefined : MAX_FILE_BYTES;
-  return { content: await readTextFile(path, maximumBytes), path };
 }
 
 type RunnerFileTool = (
@@ -226,22 +233,23 @@ function resolvedFileToolArguments(
 ): Promise<RunnerFileToolArguments & { readonly path: string }> {
   const context = runnerFileToolArguments(parameters);
   return pathArgument(context.root, context.arguments_, {
-    ...(context.options?.mapAbsolutePath === undefined
-      ? {}
-      : { mapAbsolutePath: context.options.mapAbsolutePath }),
+    ...pathResolutionOptions(context.options),
     mayNotExist,
   }).then((path) => ({ ...context, path }));
 }
 
 async function readTool(
-  ...parameters: Parameters<RunnerFileTool>
+  ...[root, arguments_, , options]: Parameters<RunnerFileTool>
 ): Promise<string> {
-  const { arguments_, options, root } = runnerFileToolArguments(parameters);
-  const { content } = await readPathContent(
-    root,
-    arguments_,
-    options?.mapAbsolutePath,
-    (candidate) => options?.outputSpills?.ownsPath(candidate) === true,
+  const ownedSpillPath = (candidate: string): boolean =>
+    options?.outputSpills?.ownsPath(candidate) === true;
+  const path = await pathArgument(root, arguments_, {
+    allowedExternalPath: ownedSpillPath,
+    ...pathResolutionOptions(options),
+  });
+  const content = await readTextFile(
+    path,
+    ownedSpillPath(path) ? undefined : MAX_FILE_BYTES,
   );
   const offset = optionalInteger(arguments_, "offset", 1, 1, 1_000_000_000);
   const limit = optionalInteger(
@@ -257,7 +265,7 @@ async function readTool(
 async function explainFileTool(
   ...parameters: Parameters<RunnerFileTool>
 ): Promise<string> {
-  const { arguments_, path, root } =
+  const { arguments_, options, path, root } =
     await resolvedFileToolArguments(parameters);
   const prompt = arguments_["prompt"];
   if (
@@ -268,7 +276,12 @@ async function explainFileTool(
       "Tool argument prompt must be a string of at most 4000 characters",
     );
   }
-  const { handle, stats } = await openSecureRunnerPath(root, path);
+  const { handle, stats } = await openSecureRunnerPath(
+    root,
+    path,
+    {},
+    options?.containPaths === true,
+  );
   try {
     if (!stats.isFile()) {
       throw new Error("The requested path is not a file");
@@ -606,12 +619,6 @@ function parallelArguments(
   ];
 }
 
-function parallelResultFromResolved(
-  resolved: ResolvedRunnerTool,
-): Promise<RunnerCommandResult> {
-  return parallelToolResult(...parallelArguments(resolved));
-}
-
 async function executeResolvedRunnerTool(
   resolved: ResolvedRunnerTool,
 ): Promise<string> {
@@ -666,7 +673,7 @@ async function resolvedRunnerTool(
   };
 }
 
-/** @public Direct runner-tool helper retained for runner integrations. */
+/** @public Direct runner-tool helper for runner integrations. */
 export async function executeRunnerTool(
   ...parameters: ExecuteRunnerToolArguments
 ): Promise<string> {
@@ -683,7 +690,7 @@ export async function executeRunnerToolResult(
   const resolved = await resolvedRunnerTool(parameters);
   const spills = resolved.options?.outputSpills;
   if (resolved.name === "parallel") {
-    const result = await parallelResultFromResolved(resolved);
+    const result = await parallelToolResult(...parallelArguments(resolved));
     if (spills !== undefined) {
       return { ...result, output: await spills.apply(result.output) };
     }

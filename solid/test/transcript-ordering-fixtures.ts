@@ -2,6 +2,7 @@ import type {
   AgentSessionDetail,
   AgentSessionMessage,
 } from "../../shared/session-model.ts";
+import type { SessionController } from "../session-controller.ts";
 import { createDisplaySessionMessage } from "../session-message.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
@@ -26,4 +27,10 @@ export function runningSessionDetail(
   messages: AgentSessionDetail["messages"],
 ): AgentSessionDetail {
   return sessionDetailWithStatus("running", messages, TEST_SESSION_DETAIL.id);
+}
+
+export function sessionMessageIds(
+  controller: Pick<SessionController, "state">,
+): readonly string[] {
+  return controller.state.detail?.messages.map(({ id }) => id) ?? [];
 }

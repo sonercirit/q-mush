@@ -78,17 +78,6 @@ function query(container: ParentNode, selector: string): Element {
   return queryTestElement(container, selector);
 }
 
-function sessionTimeText(container: ParentNode): string {
-  const text = [...container.querySelectorAll("span")].find(
-    ({ textContent }) =>
-      textContent.startsWith("Time: ") && !textContent.includes("Cost:"),
-  )?.textContent;
-  if (text === undefined) {
-    throw new Error("The session time was not rendered");
-  }
-  return text;
-}
-
 function credential(id: string, label: string): ProviderCredential {
   return {
     accountId: null,
@@ -222,27 +211,6 @@ function expectScrollLock(toggle: Element, enabled: boolean): void {
   );
   expect(toggle.getAttribute("aria-pressed")).toBe(String(enabled));
 }
-
-test("a mounted session timer starts when the session begins running", () => {
-  vi.useFakeTimers();
-  vi.setSystemTime(new Date(10_000));
-  disposals.push(() => {
-    vi.useRealTimers();
-  });
-  const queued = { ...TEST_SESSION_DETAIL, status: "queued" as const };
-  const { container, controller } = mountSessionDetail(queued);
-
-  expect(sessionTimeText(container)).toBe("Time: 0s");
-  controller.applyDetail({
-    ...queued,
-    activeStartedAt: Date.now(),
-    status: "running",
-    updatedAt: queued.updatedAt + 1,
-  });
-  vi.advanceTimersByTime(2_000);
-
-  expect(sessionTimeText(container)).toBe("Time: 2s");
-});
 
 test("scrolling away from and back to the transcript end updates scroll lock", () => {
   const detail = runningSessionDetail([
