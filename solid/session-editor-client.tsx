@@ -23,7 +23,7 @@ function SessionEditorDescription(props: {
 interface SessionEditorSectionProps {
   readonly children: JSX.Element;
   readonly description: JSX.Element;
-  readonly kind: "provider" | "tools";
+  readonly kind: "cap" | "provider" | "tools";
   readonly title: string;
 }
 
@@ -56,11 +56,13 @@ export function SessionEditorSection(
         <span>{props.title}</span>
         <button
           aria-expanded={expanded()}
+          aria-label={`${expanded() ? "Collapse" : "Expand"} ${props.title}`}
           class={
             expanded()
               ? SESSION_EDITOR_EXPANDED_TOGGLE_CLASSES
               : SESSION_EDITOR_COLLAPSED_TOGGLE_CLASSES
           }
+          data-session-cap-toggle={props.kind === "cap" ? "true" : undefined}
           data-session-provider-toggle={
             props.kind === "provider" ? "true" : undefined
           }

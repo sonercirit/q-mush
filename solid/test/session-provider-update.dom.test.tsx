@@ -421,6 +421,7 @@ test("clears the cap and retries a blocked model change", async () => {
   await submitProviderChange(container);
   await expectTestText(container, RETAINED_CAP_ERROR);
 
+  clickTestButton(container, "[data-session-cap-toggle='true']");
   const capInput = queryTestElementAs(
     container,
     "#session-detail-context-token-cap",

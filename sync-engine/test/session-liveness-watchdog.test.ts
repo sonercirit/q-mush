@@ -199,7 +199,11 @@ test("stops the default global scan interval", () => {
     expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 30_000);
     const timer: unknown = setIntervalSpy.mock.results[0]?.value;
     liveness.stop();
-    expect(clearIntervalSpy).toHaveBeenCalledWith(timer);
+    liveness.stop();
+    const timerClears = clearIntervalSpy.mock.calls.filter(
+      ([cleared]) => cleared === timer,
+    );
+    expect(timerClears).toHaveLength(1);
     closeSetup(setup);
   } finally {
     setIntervalSpy.mockRestore();
@@ -207,7 +211,7 @@ test("stops the default global scan interval", () => {
   }
 });
 
-test("stops an injected scan interval on final shutdown", async () => {
+test("stops an injected scan interval once across repeated shutdowns", async () => {
   const cleared: unknown[] = [];
   const setup = connectedSessionSetup(
     new DeferredAgentModel(),
@@ -220,6 +224,7 @@ test("stops an injected scan interval on final shutdown", async () => {
       },
     },
   );
+  await setup.sessions.prepareFinalShutdown();
   await setup.sessions.prepareFinalShutdown();
   expect(cleared).toEqual(["liveness-timer"]);
   closeLivenessSession(setup);

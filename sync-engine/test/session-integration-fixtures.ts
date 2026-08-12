@@ -17,10 +17,7 @@ import {
 import type { RunnerSummary } from "../../shared/runner-model.ts";
 import { normalizeSearchText } from "../../shared/search.ts";
 import { GLOBAL_WORKSPACE_ID } from "../../shared/workspace-model.ts";
-import {
-  AgentModelDiscoveryError,
-  type AgentModelDiscoverer,
-} from "../../sync-engine/agent-model-discovery.ts";
+import type { AgentModelDiscoverer } from "../../sync-engine/agent-model-discovery.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
 import type { OpenRouterProviderDiscoverer } from "../../sync-engine/openrouter-provider-discovery.ts";
 import { createRunnerIntegration } from "../../sync-engine/runners.ts";
@@ -313,15 +310,7 @@ export function connectedSessionSetup(
     setScopes: (request, runnerId) =>
       storedRunners.setScopes(request, runnerId),
   };
-  // Reject like an unreachable provider so metadata falls back to null; a
-  // missing default would silently hit the live provider APIs on every
-  // creation and spawn.
-  const stubbedDiscovery = (): Promise<never> =>
-    Promise.reject(
-      new AgentModelDiscoveryError("Discovery is stubbed in tests", 503),
-    );
-  const configuredDiscoverModels =
-    options.modelDiscovery ?? discoverModels ?? stubbedDiscovery;
+  const configuredDiscoverModels = options.modelDiscovery ?? discoverModels;
   const sessions = createSessionIntegration(
     auth,
     runnerIntegration,
@@ -333,9 +322,12 @@ export function connectedSessionSetup(
       },
       broker,
       database,
-      discoverModels: configuredDiscoverModels,
-      discoverOpenRouterProviders:
-        options.providerDiscovery ?? stubbedDiscovery,
+      ...(configuredDiscoverModels === undefined
+        ? {}
+        : { discoverModels: configuredDiscoverModels }),
+      ...(options.providerDiscovery === undefined
+        ? {}
+        : { discoverOpenRouterProviders: options.providerDiscovery }),
       liveness: options.liveness ?? { setInterval: () => undefined },
       modelFactory:
         options.modelFactory ??

@@ -259,15 +259,6 @@ class DrizzleSessionIntegration
       runnerIsAvailable: this.#runnerAvailable,
       ...this.#sessionState(),
     });
-    this.#liveness = createSessionLivenessWatchdog({
-      actions: this.#actions,
-      broker: this.#broker,
-      database,
-      dependencies,
-      runtimes: this.#runtimes,
-      shutdownInterrupted: this.#shutdown,
-      ...this.#sessionState(),
-    });
     this.#runners.onRemoving((userId, runnerId) => {
       this.#removal.removing(userId, runnerId);
     });
@@ -284,7 +275,18 @@ class DrizzleSessionIntegration
       store: this.#store,
     });
     void recoverAnsweredQuestions(this.#questions);
-    this.#store.queuedSessionOwnerIds().forEach(this.#launchQueued);
+    const queuedOwnerIds = this.#store.queuedSessionOwnerIds();
+    // Last so a throw cannot orphan the interval.
+    this.#liveness = createSessionLivenessWatchdog({
+      actions: this.#actions,
+      broker: this.#broker,
+      database,
+      dependencies,
+      runtimes: this.#runtimes,
+      shutdownInterrupted: this.#shutdown,
+      ...this.#sessionState(),
+    });
+    queuedOwnerIds.forEach(this.#launchQueued);
   }
 
   #context() {
