@@ -37,7 +37,7 @@ const CURRENT_BASE_MIGRATIONS = [
   "0027_worthless_sentinels.sql",
 ] as const;
 const CURRENT_BASE_TIMESTAMP = 1_785_753_783_416;
-const API_FORMAT_MIGRATION_TIMESTAMP = 1_786_401_077_642;
+const IDLE_COMPACT_MIGRATION_TIMESTAMP = 1_786_555_592_457;
 
 let temporaryDirectory: string | undefined;
 
@@ -92,11 +92,14 @@ test("upgrades migration 0027 through the api-format migration", async () => {
     .all()
     .map((column) => column.name);
   expect(credentialColumns).toContain("api_format");
+  expect(agentSessionColumnNames(upgradedDatabase.$client)).toContain(
+    "idle_compact",
+  );
   const latestMigration = upgradedDatabase.$client
     .query<{ readonly createdAt: number }, []>(
       "SELECT created_at AS createdAt FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 1",
     )
     .get();
-  expect(latestMigration?.createdAt).toBe(API_FORMAT_MIGRATION_TIMESTAMP);
+  expect(latestMigration?.createdAt).toBe(IDLE_COMPACT_MIGRATION_TIMESTAMP);
   upgradedDatabase.$client.close();
 });

@@ -27,6 +27,7 @@ export const SESSION_REALTIME_OPERATIONS = {
   followUp: "sessions.follow_up",
   send: "sessions.send",
   setAutoCompaction: "sessions.set_auto_compaction",
+  setIdleCompaction: "sessions.set_idle_compaction",
   setContextTokenCap: "sessions.set_context_token_cap",
   stop: "sessions.stop",
   steer: "sessions.steer",

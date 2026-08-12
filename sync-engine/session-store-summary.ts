@@ -38,6 +38,7 @@ function storedSessionSelection() {
     executionEnvironment: agentSessions.executionEnvironment,
     executionGeneration: agentSessions.executionGeneration,
     id: agentSessions.id,
+    idleCompact: agentSessions.idleCompact,
     maxContextTokens: agentSessions.maxContextTokens,
     userContextTokenCap: agentSessions.userContextTokenCap,
     model: agentSessions.model,
@@ -73,6 +74,7 @@ type StoredSessionSummary = Pick<
   | "executionEnvironment"
   | "executionGeneration"
   | "id"
+  | "idleCompact"
   | "maxContextTokens"
   | "userContextTokenCap"
   | "model"

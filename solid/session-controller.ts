@@ -19,7 +19,7 @@ import {
 } from "./session-controller-actions.ts";
 import {
   compactSessionFromView,
-  toggleSessionAutoCompaction,
+  toggleSessionCompactionFlag,
 } from "./session-controller-compaction.ts";
 import { updateSessionContextTokenCap } from "./session-controller-context-cap.ts";
 import { createSessionFromView } from "./session-controller-create.ts";
@@ -440,9 +440,12 @@ export class SessionController {
     const draft = { ...this.#view.value.draft, ...values };
     this.#view.patch({ draft });
   }
-  setDraftAutoCompact(autoCompact: boolean): void {
-    this.#patchDraft({ autoCompact });
-  }
+  readonly setDraftFlag = (
+    name: "autoCompact" | "idleCompact",
+    value: boolean,
+  ): void => {
+    this.#patchDraft({ [name]: value });
+  };
   setDraftField(
     name:
       "agentFilePath" | "prompt" | "userContextTokenCap" | "workingDirectory",
@@ -487,10 +490,14 @@ export class SessionController {
   steer(): Promise<void> {
     return this.#pendingInputs.submit("steer");
   }
-  toggleAutoCompact(autoCompact: boolean): Promise<void> {
-    return toggleSessionAutoCompaction({
-      autoCompact,
+  toggleCompactionFlag(
+    name: "autoCompact" | "idleCompact",
+    enabled: boolean,
+  ): Promise<void> {
+    return toggleSessionCompactionFlag({
+      enabled,
       mutate: (mutation) => this.#mutateDetail(mutation),
+      name,
       view: this.#view,
     });
   }

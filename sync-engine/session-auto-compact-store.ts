@@ -13,20 +13,29 @@ export interface SessionSettingContext {
   readonly read: SessionSettingsReader;
 }
 
-export function setStoredSessionAutoCompact(
+export type SessionCompactionFlagParameters = readonly [
+  userId: string,
+  sessionId: string,
+  enabled: boolean,
+  now: number,
+  workspaceId?: string,
+];
+
+export function setStoredSessionCompactionFlag(
   context: SessionSettingContext,
-  ...[userId, sessionId, autoCompact, now, workspaceId]: readonly [
-    string,
-    string,
-    boolean,
-    number,
-    string?,
-  ]
+  flag: "autoCompact" | "idleCompact",
+  ...[
+    userId,
+    sessionId,
+    enabled,
+    now,
+    workspaceId,
+  ]: SessionCompactionFlagParameters
 ): AgentSessionDetail | undefined {
   const updated = updateStoredSessions(
     context.database,
     activeSessionCondition(userSessionFilter(userId, sessionId, workspaceId)),
-    { autoCompact, ...updatedAuditFields(userId, now) },
+    { [flag]: enabled, ...updatedAuditFields(userId, now) },
   );
   return updated ? context.read(userId, sessionId, workspaceId) : undefined;
 }

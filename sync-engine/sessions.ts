@@ -41,6 +41,7 @@ import {
 import { SessionExecutionCleanup } from "./session-execution-cleanup.ts";
 import { SessionFailureReconciler } from "./session-failure-reconciler.ts";
 import { SessionFinisher } from "./session-finisher.ts";
+import { compactIdleSessions } from "./session-idle-compaction.ts";
 import {
   SessionIntegrationApi,
   type SessionIntegrationApiResources,
@@ -274,6 +275,18 @@ class DrizzleSessionIntegration
     // Last so a throw cannot orphan the interval.
     this.#liveness = createSessionLivenessWatchdog({
       actions: this.#actions,
+      afterScan: () => {
+        void compactIdleSessions({
+          compact: (userId, sessionId) =>
+            startManualSessionCompactionForUserId(
+              this.#authorizedLaunchBoundary("compact"),
+              userId,
+              sessionId,
+            ),
+          database,
+          now: this.#now,
+        });
+      },
       broker: this.#broker,
       database,
       dependencies,

@@ -32,6 +32,9 @@ export function sessionCanResume(status: AgentSessionStatus): boolean {
   );
 }
 
+// Gates both compaction flags (auto and idle): the settings are durable
+// per-session preferences, editable even on failed/stopped sessions where
+// the idle timer stays inert until the session runs again.
 export function sessionCanUpdateAutoCompaction(
   status: AgentSessionStatus,
 ): boolean {

@@ -28,6 +28,8 @@ function prepareForkSource() {
   const source = createTestSession(setup.store, TEST_NOW, {
     autoCompact: false,
     executionEnvironment: "container",
+    // Non-default so the fork copy assertion cannot pass by accident.
+    idleCompact: true,
     maxContextTokens: null,
     model: "fork-model",
     reasoningEffort: null,
@@ -119,6 +121,7 @@ describe("session store forks", () => {
     expect(fork).toMatchObject({
       autoCompact: source.autoCompact,
       credentialId: source.credentialId,
+      idleCompact: source.idleCompact,
       executionEnvironment: source.executionEnvironment,
       maxContextTokens: source.maxContextTokens,
       model: source.model,

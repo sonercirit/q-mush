@@ -14,6 +14,7 @@ function testSession(): AgentSessionDetail {
     agentFile: null,
     agentFilePath: null,
     autoCompact: true,
+    idleCompact: false,
     costBasis: "none" as const,
     provider: "openai" as const,
     status: "idle" as const,

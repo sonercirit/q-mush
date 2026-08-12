@@ -173,6 +173,10 @@ const SESSION_AGENT_TOOLS = [
         description: "Automatically compact near the context limit",
         ...BOOLEAN_PARAMETER,
       },
+      idleCompact: {
+        description: "Compact after 30 minutes idle (default false)",
+        ...BOOLEAN_PARAMETER,
+      },
       credentialId: {
         description: 'Credential ID or "balanced:<provider>" sentinel',
         ...STRING_PARAMETER,

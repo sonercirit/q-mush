@@ -102,6 +102,7 @@ export interface AgentSessionSummary {
   readonly generation: number;
   readonly hasOlderSegments: boolean;
   readonly id: string;
+  readonly idleCompact: boolean;
   readonly maxContextTokens: number | null;
   readonly userContextTokenCap: number | null;
   readonly model: string;

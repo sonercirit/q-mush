@@ -1,5 +1,6 @@
 import { expect, test, vi } from "vitest";
 import type { AgentModel } from "../../shared/agent-loop.ts";
+import { agentSessions, runners } from "../../shared/database/schema.ts";
 import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 import type { SessionDependencies } from "../../sync-engine/session-dependencies.ts";
 import { createSessionLivenessWatchdog } from "../../sync-engine/session-liveness-scheduler.ts";
@@ -25,6 +26,7 @@ import {
   createUnsafeLivenessSession,
   scanAfter,
   sessionDetailStatus,
+  waitForCompactedSession,
   waitForIdleSession,
 } from "./session-liveness-test-helpers.ts";
 import { orchestrationActions } from "./session-restart-orchestration-test-helpers.ts";
@@ -403,9 +405,43 @@ test("a watchdog-failed child reports failure to its parent exactly once", () =>
   closeSetup(setup);
 });
 
-test("does not time out a provider-call-only runtime", async () => {
+async function deferredLivenessSession() {
   const model = new DeferredAgentModel();
-  const { clock, setup } = await createUnsafeLivenessSession(model);
+  return { model, ...(await createUnsafeLivenessSession(model)) };
+}
+
+test("compacts an opted-in idle session after a liveness scan", async () => {
+  const run = await deferredLivenessSession();
+  const { clock, setup } = run;
+  const restDuration = 30 * 60_000 + 1_000;
+  run.model.resolveContent("Initial run complete.");
+  await waitForIdleSession(setup);
+  setup.database
+    .update(agentSessions)
+    .set({
+      currentContextTokens: 5_000,
+      idleCompact: true,
+      updatedAt: new Date(TEST_NOW),
+    })
+    .run();
+  // Thirty minutes pass for the session, not the runner: keep its
+  // heartbeat fresh so queueing sees an available runner.
+  setup.database
+    .update(runners)
+    .set({ lastSeenAt: new Date(clock.now() + restDuration) })
+    .run();
+
+  // The idle scheduler rides the liveness cadence: thirty minutes of rest
+  // plus one scan must compact without any other trigger, proving the
+  // afterScan seam is actually wired.
+  scanAfter(clock, restDuration);
+
+  await waitForCompactedSession(setup);
+  closeLivenessSession(setup);
+});
+
+test("does not time out a provider-call-only runtime", async () => {
+  const { clock, model, setup } = await deferredLivenessSession();
   await awaitProviderCall(model.requests);
 
   scanAfter(clock, 20 * 60_000);

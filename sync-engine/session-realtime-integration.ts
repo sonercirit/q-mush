@@ -427,17 +427,26 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
     return this.#withOwnedDetail(user, sessionId, workspaceId, change);
   };
 
-  setAutoCompactionForUser: SessionAutoCompactionAction = (
-    user,
-    sessionId,
-    autoCompact,
-    workspaceId,
-  ) =>
-    this.#withOwnedDetail(user, sessionId, workspaceId, () => {
-      const detail = this.#dependencies.store.setAutoCompact(
+  setAutoCompactionForUser: SessionAutoCompactionAction = (...parameters) =>
+    this.#setCompactionFlag("setAutoCompact", ...parameters);
+
+  setIdleCompactionForUser: SessionAutoCompactionAction = (...parameters) =>
+    this.#setCompactionFlag("setIdleCompact", ...parameters);
+
+  #setCompactionFlag(
+    setter: "setAutoCompact" | "setIdleCompact",
+    ...[
+      user,
+      sessionId,
+      enabled,
+      workspaceId,
+    ]: Parameters<SessionAutoCompactionAction>
+  ): ReturnType<SessionAutoCompactionAction> {
+    return this.#withOwnedDetail(user, sessionId, workspaceId, () => {
+      const detail = this.#dependencies.store[setter](
         user.id,
         sessionId,
-        autoCompact,
+        enabled,
         this.#dependencies.now(),
         workspaceId,
       );
@@ -447,6 +456,7 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
       this.#dependencies.notify(user.id, sessionId);
       return detail;
     });
+  }
 
   setContextTokenCapForUser(
     ...parameters: Parameters<SessionContextTokenCapAction>

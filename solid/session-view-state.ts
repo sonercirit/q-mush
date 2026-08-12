@@ -18,6 +18,7 @@ export interface SessionDraft {
   readonly agentFilePath?: string;
   readonly autoCompact: boolean;
   readonly credential: string;
+  readonly idleCompact: boolean;
   readonly executionEnvironment: RunnerExecutionEnvironment;
   readonly images: readonly AgentAttachment[];
   readonly model: string;

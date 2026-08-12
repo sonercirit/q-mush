@@ -384,6 +384,9 @@ export const agentSessions = sqliteTable(
     autoCompact: integer("auto_compact", { mode: "boolean" })
       .notNull()
       .default(true),
+    idleCompact: integer("idle_compact", { mode: "boolean" })
+      .notNull()
+      .default(false),
     activeDurationMs: integer("active_duration_ms").notNull().default(0),
     activeStartedAt: integer("active_started_at", { mode: "timestamp_ms" }),
     costBasis: text("cost_basis", {

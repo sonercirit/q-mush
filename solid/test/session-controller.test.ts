@@ -504,7 +504,13 @@ test.each([
   },
 );
 
-test.each(["compact", "continueSession", "stop", "toggleAutoCompact"] as const)(
+test.each([
+  "compact",
+  "continueSession",
+  "stop",
+  "autoCompact",
+  "idleCompact",
+] as const)(
   "rejects %s when the detail does not match the selected session",
   async (action) => {
     const reactive = createReactiveState<SessionViewState>(
@@ -516,11 +522,9 @@ test.each(["compact", "continueSession", "stop", "toggleAutoCompact"] as const)(
     const controller = new SessionController(reactive, undefined, null);
     const fetch = vi.spyOn(globalThis, "fetch");
 
-    if (action === "toggleAutoCompact") {
-      await controller.toggleAutoCompact(false);
-    } else {
-      await controller[action]();
-    }
+    await (action === "autoCompact" || action === "idleCompact"
+      ? controller.toggleCompactionFlag(action, false)
+      : controller[action]());
 
     expect(fetch).not.toHaveBeenCalled();
   },

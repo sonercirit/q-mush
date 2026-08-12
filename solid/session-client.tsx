@@ -26,8 +26,8 @@ import {
 import type { ProviderViewState } from "./provider-credential-model.ts";
 import { renderDebugBoundary } from "./render-debug.tsx";
 import type { RunnerViewState } from "./runner-client.tsx";
-import { SessionAutoCompactToggle } from "./session-autocompact-toggle.tsx";
 import { SessionPromptInput } from "./session-client-forms.tsx";
+import { SessionDraftCompactionToggles } from "./session-compaction-toggle.tsx";
 import { formatTokenCount } from "./session-context-client.tsx";
 import { SessionContextTokenCapInput } from "./session-context-token-cap-input.tsx";
 import type { SessionController } from "./session-controller.ts";
@@ -431,12 +431,11 @@ function NewSessionForm(
         }}
         value={props.state.draft.userContextTokenCap}
       />
-      <SessionAutoCompactToggle
-        checked={props.state.draft.autoCompact}
+      <SessionDraftCompactionToggles
+        autoCompact={props.state.draft.autoCompact}
         disabled={props.state.creating}
-        onChange={(autoCompact) => {
-          props.controller.setDraftAutoCompact(autoCompact);
-        }}
+        idleCompact={props.state.draft.idleCompact}
+        onChange={props.controller.setDraftFlag}
       />
       <SessionToolPicker
         disabled={props.state.creating}

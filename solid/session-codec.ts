@@ -267,6 +267,7 @@ function readSummary(value: unknown): AgentSessionSummary {
     throw new Error("The server returned an invalid agent session");
   }
   const autoCompact = value["autoCompact"];
+  const idleCompact = value["idleCompact"];
   const costBasis = value["costBasis"];
   const costUsd = readFiniteNumber(value["costUsd"]);
   const createdAt = readFiniteNumber(value["createdAt"]);
@@ -318,6 +319,7 @@ function readSummary(value: unknown): AgentSessionSummary {
     agentFilePath === undefined ||
     (activeStartedAt !== null && !Number.isSafeInteger(activeStartedAt)) ||
     typeof autoCompact !== "boolean" ||
+    typeof idleCompact !== "boolean" ||
     (costBasis !== "none" &&
       costBasis !== "reported" &&
       costBasis !== "estimated") ||
@@ -389,6 +391,7 @@ function readSummary(value: unknown): AgentSessionSummary {
     activeStartedAt,
     agentFilePath,
     autoCompact,
+    idleCompact,
     costBasis,
     costUsd,
     createdAt,
@@ -566,6 +569,7 @@ export function summaryFromDetail(
     activeStartedAt: detail.activeStartedAt,
     agentFilePath: detail.agentFilePath,
     autoCompact: detail.autoCompact,
+    idleCompact: detail.idleCompact,
     costBasis: detail.costBasis,
     costUsd: detail.costUsd,
     createdAt: detail.createdAt,

@@ -1,0 +1,1 @@
+ALTER TABLE `agent_sessions` ADD `idle_compact` integer DEFAULT false NOT NULL;

@@ -171,6 +171,7 @@ function creationMatchesDescriptor(
   const initialMessage = detail.messages.find(({ role }) => role === "user");
   return (
     detail.autoCompact === descriptor.autoCompact &&
+    detail.idleCompact === descriptor.idleCompact &&
     detail.agentFilePath === (descriptor.agentFilePath || null) &&
     detail.credentialId === descriptor.credentialId &&
     detail.executionEnvironment === descriptor.executionEnvironment &&

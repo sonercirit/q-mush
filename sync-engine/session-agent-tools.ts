@@ -40,6 +40,7 @@ export interface SpawnSessionToolInput extends Pick<
   | "agentFilePath"
   | "autoCompact"
   | "credentialId"
+  | "idleCompact"
   | "executionEnvironment"
   | "model"
   | "openRouterProviderTag"
@@ -125,6 +126,7 @@ function spawnInput(
   const credentialId = readIdentifier(arguments_["credentialId"]);
   const agentFilePath = readOptionalAgentFilePath(arguments_["agentFilePath"]);
   const autoCompact = arguments_["autoCompact"];
+  const idleCompact = arguments_["idleCompact"];
   const executionEnvironment = readRunnerExecutionEnvironment(
     arguments_["executionEnvironment"],
   );
@@ -148,6 +150,7 @@ function spawnInput(
       "autoCompact",
       "credentialId",
       "executionEnvironment",
+      "idleCompact",
       "model",
       "prompt",
       "provider",
@@ -157,6 +160,7 @@ function spawnInput(
       "workingDirectory",
     ]) ||
     (autoCompact !== undefined && typeof autoCompact !== "boolean") ||
+    (idleCompact !== undefined && typeof idleCompact !== "boolean") ||
     agentFilePath === undefined ||
     credentialId === undefined ||
     executionEnvironment === undefined ||
@@ -176,6 +180,7 @@ function spawnInput(
     agentFilePath,
     autoCompact: typeof autoCompact === "boolean" ? autoCompact : true,
     credentialId,
+    idleCompact: typeof idleCompact === "boolean" ? idleCompact : false,
     executionEnvironment,
     images: [],
     model,

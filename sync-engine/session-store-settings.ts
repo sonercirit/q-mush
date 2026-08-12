@@ -1,9 +1,12 @@
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import {
-  setStoredSessionAutoCompact,
+  setStoredSessionCompactionFlag,
+  type SessionCompactionFlagParameters,
   type SessionSettingContext,
 } from "./session-auto-compact-store.ts";
 import { updateStoredSessionContextTokenCap } from "./session-context-limit-store.ts";
+
+export type { SessionCompactionFlagParameters } from "./session-auto-compact-store.ts";
 
 export type SessionContextTokenCapParameters = readonly [
   userId: string,
@@ -36,17 +39,10 @@ export function setSessionContextTokenCap(
   );
 }
 
-export type SessionAutoCompactParameters = readonly [
-  userId: string,
-  sessionId: string,
-  autoCompact: boolean,
-  now: number,
-  workspaceId?: string,
-];
-
-export function setSessionAutoCompact(
+export function setSessionCompactionFlag(
   context: SessionSettingContext,
-  ...parameters: SessionAutoCompactParameters
+  flag: "autoCompact" | "idleCompact",
+  ...parameters: SessionCompactionFlagParameters
 ): AgentSessionDetail | undefined {
-  return setStoredSessionAutoCompact(context, ...parameters);
+  return setStoredSessionCompactionFlag(context, flag, ...parameters);
 }

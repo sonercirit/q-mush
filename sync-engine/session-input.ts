@@ -59,6 +59,7 @@ export function readCreateSession(
   const credentialId = readIdentifier(value["credentialId"]);
   const agentFilePath = readOptionalAgentFilePath(value["agentFilePath"]);
   const autoCompactValue = value["autoCompact"];
+  const idleCompactValue = value["idleCompact"];
   const executionEnvironment = readRunnerExecutionEnvironment(
     value["executionEnvironment"],
   );
@@ -78,6 +79,7 @@ export function readCreateSession(
 
   if (
     (autoCompactValue !== undefined && typeof autoCompactValue !== "boolean") ||
+    (idleCompactValue !== undefined && typeof idleCompactValue !== "boolean") ||
     agentFilePath === undefined ||
     credentialId === undefined ||
     executionEnvironment === undefined ||
@@ -104,6 +106,8 @@ export function readCreateSession(
     agentFilePath,
     autoCompact:
       typeof autoCompactValue === "boolean" ? autoCompactValue : true,
+    idleCompact:
+      typeof idleCompactValue === "boolean" ? idleCompactValue : false,
     credentialId,
     executionEnvironment,
     ...message,

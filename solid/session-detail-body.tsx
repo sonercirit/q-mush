@@ -12,8 +12,8 @@ import { AskQuestionsForm } from "./ask-questions-client.tsx";
 import { clipboardCopyLabel, createClipboardCopy } from "./clipboard-copy.ts";
 import { findById } from "./id-selection.ts";
 import { createNestedScrollRef } from "./nested-scroll.ts";
-import { SessionAutoCompactToggle } from "./session-autocompact-toggle.tsx";
 import { SessionFollowUp } from "./session-client-forms.tsx";
+import { SessionCompactionToggle } from "./session-compaction-toggle.tsx";
 import { sessionComposerUnavailableReason } from "./session-composer-availability.ts";
 import {
   CompactionControls,
@@ -383,11 +383,26 @@ export function SessionDetailBody(props: {
       </Show>
       <div class="session-composer mt-5 flex min-w-0 flex-col gap-3">
         <div class="flex flex-wrap items-center gap-3">
-          <SessionAutoCompactToggle
+          <SessionCompactionToggle
             checked={view().detail.autoCompact}
             disabled={autoCompactionDisabled()}
+            flag="autoCompact"
             onChange={(enabled) =>
-              void view().controller.toggleAutoCompact(enabled)
+              void view().controller.toggleCompactionFlag(
+                "autoCompact",
+                enabled,
+              )
+            }
+          />
+          <SessionCompactionToggle
+            checked={view().detail.idleCompact}
+            disabled={autoCompactionDisabled()}
+            flag="idleCompact"
+            onChange={(enabled) =>
+              void view().controller.toggleCompactionFlag(
+                "idleCompact",
+                enabled,
+              )
             }
           />
           <Show when={!active()}>
