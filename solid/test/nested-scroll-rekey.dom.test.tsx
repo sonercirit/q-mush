@@ -46,7 +46,7 @@ interface ReKeyedScenario {
   readonly scopeKey: (label: string) => string | null;
 }
 
-// Restores are queued across two microtask hops before they land.
+// Chained awaits drain several microtask hops so queued restores land.
 async function expectCleanClaimant(pane: HTMLElement): Promise<void> {
   await Promise.resolve().then(() => Promise.resolve());
   expect(pane.scrollTop).toBe(0);
