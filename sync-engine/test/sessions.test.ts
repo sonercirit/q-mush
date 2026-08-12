@@ -118,8 +118,15 @@ async function sessionRequestWithTools(
   );
 }
 
-function emptySessionSetup() {
-  return connectedSessionSetup(new ScriptedAgentModel([]));
+function emptySessionSetup(
+  options?: Parameters<typeof connectedSessionSetup>[3],
+) {
+  return connectedSessionSetup(
+    new ScriptedAgentModel([]),
+    "api_key",
+    undefined,
+    options ?? {},
+  );
 }
 
 function completingSessionSetup(content: string) {
@@ -241,6 +248,28 @@ describe("agent sessions", () => {
         ],
       },
     );
+    setup.database.$client.close();
+  });
+
+  test("rejects an unavailable runner before reading the credential", async () => {
+    let credentialReads = 0;
+    const setup = emptySessionSetup({
+      onCredentialRead: () => {
+        credentialReads += 1;
+      },
+    });
+    const input = await sessionRequestInput();
+    const response = await setup.sessions.collection(
+      createAuthenticatedRequest(
+        `${SESSIONS_PATH}?workspaceId=${encodeURIComponent(TEST_WORKSPACE_ID)}`,
+        { ...input, runnerId: "01936a52-0000-7000-8000-00000000dead" },
+        "POST",
+      ),
+    );
+    // Fail closed: no credential is read (or decrypted) for a runner the
+    // user cannot reach, and the restart gate shares this ordering.
+    await expectJsonResponse(response, 409, { error: "runner_unavailable" });
+    expect(credentialReads).toBe(0);
     setup.database.$client.close();
   });
 

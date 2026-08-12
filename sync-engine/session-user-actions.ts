@@ -20,7 +20,7 @@ import {
   type PromptInput,
 } from "./session-input.ts";
 import { queueSessionForUser } from "./session-queue.ts";
-import type { SessionWorkspaceReader } from "./session-workspace.ts";
+import type { SessionRunnerAvailability } from "./session-runner-availability.ts";
 
 export interface SessionUserActionDependencies {
   readonly compactionBoundary: (
@@ -29,17 +29,12 @@ export interface SessionUserActionDependencies {
   readonly discoverModels: AgentModelDiscoverer;
   readonly discoverOpenRouterProviders: OpenRouterProviderDiscoverer;
   readonly launchBoundary: () => SessionLaunchBoundary;
-  readonly runnerIsAvailable: (
-    userId: string,
-    runnerId: string,
-    workspaceId?: string,
-  ) => boolean;
+  readonly runnerIsAvailable: SessionRunnerAvailability;
   readonly withCredential: (
     userId: string,
     selection: SessionCredentialSelection,
     action: SessionCredentialAction,
   ) => Promise<Response>;
-  readonly workspaces: SessionWorkspaceReader;
 }
 
 export async function createSessionForUser(
@@ -83,7 +78,7 @@ function createValidatedSessionForUser(
   );
 }
 
-export async function compactSessionForUser(
+export function compactSessionForUser(
   dependencies: SessionUserActionDependencies,
   user: AuthenticatedUser,
   sessionId: string,
@@ -96,7 +91,7 @@ export async function compactSessionForUser(
   );
 }
 
-export async function queueSessionPromptForUser(
+export function queueSessionPromptForUser(
   dependencies: SessionUserActionDependencies,
   user: AuthenticatedUser,
   sessionId: string,

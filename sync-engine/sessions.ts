@@ -41,7 +41,6 @@ import {
 import { SessionExecutionCleanup } from "./session-execution-cleanup.ts";
 import { SessionFailureReconciler } from "./session-failure-reconciler.ts";
 import { SessionFinisher } from "./session-finisher.ts";
-
 import {
   SessionIntegrationApi,
   type SessionIntegrationApiResources,
@@ -512,7 +511,6 @@ class DrizzleSessionIntegration
       launchBoundary: () => this.#launchBoundary(),
       runnerIsAvailable: this.#runnerAvailable,
       withCredential: this.#withCredential,
-      workspaces: this.#workspaces,
     };
   }
 }
