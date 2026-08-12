@@ -12,7 +12,6 @@ import { ChatCompletionsAgentModel } from "./agent-model.ts";
 import { createAttachmentFallbackIntegration } from "./attachment-fallback-integration.ts";
 import type { GoogleAuth } from "./auth.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
-import { createApiError, parseJsonRequest } from "./http.ts";
 import { ModelCredentialPool } from "./model-credential-pool.ts";
 import {
   discoverOpenRouterProviders,
@@ -24,20 +23,16 @@ import { SessionAgentActions } from "./session-agent-actions.ts";
 import { discoverSessionAgentMetadata } from "./session-agent-metadata.ts";
 import type { AgentModelFactory } from "./session-agent-models.ts";
 import {
-  startManualSessionCompaction,
   startManualSessionCompactionForUserId,
+  type ManualCompactionDependencies,
 } from "./session-compaction-actions.ts";
-import {
-  createValidatedSession,
-  type SessionLaunchBoundary,
-} from "./session-creation.ts";
+import type { SessionLaunchBoundary } from "./session-creation.ts";
 import {
   readSessionCredential,
   withSessionCredential,
   type SessionCredentialAction,
   type SessionCredentialReaders,
   type SessionCredentialSelection,
-  type SessionRuntimeSelection,
 } from "./session-credential-access.ts";
 import {
   permissiveWorkspaceReader,
@@ -46,11 +41,7 @@ import {
 import { SessionExecutionCleanup } from "./session-execution-cleanup.ts";
 import { SessionFailureReconciler } from "./session-failure-reconciler.ts";
 import { SessionFinisher } from "./session-finisher.ts";
-import {
-  readCreateSession,
-  type CreateSessionInput,
-  type PromptInput,
-} from "./session-input.ts";
+
 import {
   SessionIntegrationApi,
   type SessionIntegrationApiResources,
@@ -69,7 +60,6 @@ import {
   type SessionQuestionActionDependencies,
 } from "./session-question-actions.ts";
 import { launchAnsweredQuestionSession } from "./session-question-launcher.ts";
-import { queueSessionForUser } from "./session-queue.ts";
 import { launchQueuedSessions } from "./session-queued-launcher.ts";
 import { createRealtimeSessionCommands } from "./session-realtime-factory.ts";
 import type { RealtimeSessionCommands } from "./session-realtime-integration.ts";
@@ -80,6 +70,12 @@ import { RunnerRemovalCoordinator } from "./session-runner-removal.ts";
 import { SessionRuntimes } from "./session-runtime.ts";
 import { ShutdownInterruptedSessionStore } from "./session-shutdown-interrupted-store.ts";
 import { SessionStore } from "./session-store.ts";
+import {
+  compactSessionForUser,
+  createSessionForUser,
+  queueSessionPromptForUser,
+  type SessionUserActionDependencies,
+} from "./session-user-actions.ts";
 import type { SessionWorkspaceReader } from "./session-workspace.ts";
 
 export type { SessionIntegration } from "./session-integration.ts";
@@ -302,9 +298,14 @@ class DrizzleSessionIntegration
       auth: this.#auth,
       broker: this.#broker,
       compactForUser: (user, sessionId, workspaceId) =>
-        this.#compactForUser(user, sessionId, workspaceId),
+        compactSessionForUser(
+          this.#userActions(),
+          user,
+          sessionId,
+          workspaceId,
+        ),
       createForUser: (request, user, workspaceId) =>
-        this.#createForUser(request, user, workspaceId),
+        createSessionForUser(this.#userActions(), request, user, workspaceId),
       discoverOpenRouterProviders: this.#discoverProviders,
       executionCleanup: this.#cleanup,
       launchQueuedSessions: this.#launchQueued,
@@ -313,7 +314,13 @@ class DrizzleSessionIntegration
       ...this.#context(),
       questionActions: this.#questions,
       queueForUser: (user, sessionId, workspaceId, prompt) =>
-        this.#queueForUser(user, sessionId, workspaceId, prompt),
+        queueSessionPromptForUser(
+          this.#userActions(),
+          user,
+          sessionId,
+          workspaceId,
+          prompt,
+        ),
       requests: this.#requests,
       restart: this.#restart,
       restartCoordinator: this.#restartGate,
@@ -381,7 +388,7 @@ class DrizzleSessionIntegration
       RestartHandoffOperation,
       "compact" | "compact_and_continue"
     >,
-  ): Parameters<typeof startManualSessionCompaction>[0] {
+  ): ManualCompactionDependencies {
     return {
       ...this.#launchBoundary(),
       credential: this.#withCredential,
@@ -483,20 +490,6 @@ class DrizzleSessionIntegration
   ): Promise<Response> =>
     withSessionCredential(this.#providers, userId, selection, action);
 
-  async #withRuntimeAccess(
-    userId: string,
-    selection: SessionRuntimeSelection,
-    action: SessionCredentialAction,
-  ): Promise<Response> {
-    return this.#runnerAvailable(
-      userId,
-      selection.runnerId,
-      selection.workspaceId,
-    )
-      ? this.#withCredential(userId, selection, action)
-      : createApiError("runner_unavailable", 409);
-  }
-
   async #modelsForUser(
     request: Request,
     user: AuthenticatedUser,
@@ -510,66 +503,17 @@ class DrizzleSessionIntegration
     });
   }
 
-  async #createForUser(
-    request: Request,
-    user: AuthenticatedUser,
-    workspaceId: string,
-  ): Promise<Response> {
-    const input = await parseJsonRequest(request, readCreateSession);
-    return input === undefined
-      ? createApiError("invalid_request", 400)
-      : this.#createValidatedSession(user, input, workspaceId);
-  }
-
-  async #createValidatedSession(
-    user: AuthenticatedUser,
-    input: CreateSessionInput,
-    workspaceId: string,
-  ): Promise<Response> {
-    const scopedInput = { ...input, workspaceId };
-    return this.#withRuntimeAccess(user.id, scopedInput, (credential) =>
-      createValidatedSession(
-        {
-          discoverModels: this.#models,
-          discoverOpenRouterProviders: this.#discoverProviders,
-          ...this.#launchBoundary(),
-        },
-        user,
-        scopedInput,
-        credential,
-      ),
-    );
-  }
-
-  async #compactForUser(
-    user: AuthenticatedUser,
-    sessionId: string,
-    workspaceId: string,
-  ): Promise<Response> {
-    return startManualSessionCompaction(
-      { ...this.#authorizedLaunchBoundary("compact"), workspaceId },
-      user,
-      sessionId,
-    );
-  }
-
-  async #queueForUser(
-    user: AuthenticatedUser,
-    sessionId: string,
-    workspaceId: string,
-    prompt?: PromptInput,
-  ): Promise<Response> {
-    return queueSessionForUser(
-      {
-        ...this.#launchBoundary(),
-        credential: this.#withCredential,
-        runnerIsAvailable: this.#runnerAvailable,
-        workspaceId,
-      },
-      user.id,
-      sessionId,
-      prompt,
-    );
+  #userActions(): SessionUserActionDependencies {
+    return {
+      compactionBoundary: (operation) =>
+        this.#authorizedLaunchBoundary(operation),
+      discoverModels: this.#models,
+      discoverOpenRouterProviders: this.#discoverProviders,
+      launchBoundary: () => this.#launchBoundary(),
+      runnerIsAvailable: this.#runnerAvailable,
+      withCredential: this.#withCredential,
+      workspaces: this.#workspaces,
+    };
   }
 }
 

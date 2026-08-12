@@ -78,7 +78,7 @@ export function updateSessionCompactionMode(
 
 type ManualCompactionCredential = SessionCredentialOperation;
 
-interface ManualCompactionDependencies extends SessionLaunchBoundary {
+export interface ManualCompactionDependencies extends SessionLaunchBoundary {
   readonly credential: ManualCompactionCredential;
   readonly operation: Extract<
     RestartHandoffOperation,

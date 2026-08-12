@@ -30,10 +30,6 @@ export interface SessionCredentialSelection {
   readonly workspaceId?: string;
 }
 
-export interface SessionRuntimeSelection extends SessionCredentialSelection {
-  readonly runnerId: string;
-}
-
 export function readSessionCredential(
   providers: SessionCredentialReaders,
   userId: string,
