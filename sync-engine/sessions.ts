@@ -259,15 +259,6 @@ class DrizzleSessionIntegration
       runnerIsAvailable: this.#runnerAvailable,
       ...this.#sessionState(),
     });
-    this.#liveness = createSessionLivenessWatchdog({
-      actions: this.#actions,
-      broker: this.#broker,
-      database,
-      dependencies,
-      runtimes: this.#runtimes,
-      shutdownInterrupted: this.#shutdown,
-      ...this.#sessionState(),
-    });
     this.#runners.onRemoving((userId, runnerId) => {
       this.#removal.removing(userId, runnerId);
     });
@@ -284,7 +275,18 @@ class DrizzleSessionIntegration
       store: this.#store,
     });
     void recoverAnsweredQuestions(this.#questions);
-    this.#store.queuedSessionOwnerIds().forEach(this.#launchQueued);
+    const queuedOwnerIds = this.#store.queuedSessionOwnerIds();
+    // Last so a throw cannot orphan the interval.
+    this.#liveness = createSessionLivenessWatchdog({
+      actions: this.#actions,
+      broker: this.#broker,
+      database,
+      dependencies,
+      runtimes: this.#runtimes,
+      shutdownInterrupted: this.#shutdown,
+      ...this.#sessionState(),
+    });
+    queuedOwnerIds.forEach(this.#launchQueued);
   }
 
   #context() {
@@ -306,7 +308,7 @@ class DrizzleSessionIntegration
       discoverOpenRouterProviders: this.#discoverProviders,
       executionCleanup: this.#cleanup,
       launchQueuedSessions: this.#launchQueued,
-      liveness: this.#liveness,
+      liveness: this.#liveness.watchdog,
       modelsForUser: (request, user) => this.#modelsForUser(request, user),
       ...this.#context(),
       questionActions: this.#questions,
@@ -318,6 +320,7 @@ class DrizzleSessionIntegration
       runnerRemoval: this.#removal,
       runtimes: this.#runtimes,
       stopChildren: this.#actions.stopChildren.bind(this.#actions),
+      stopLivenessScans: this.#liveness.stop,
       store: this.#store,
       withCredentialAccess: this.#withCredential,
       workspaces: this.#workspaces,
