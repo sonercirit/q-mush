@@ -5,8 +5,14 @@ import {
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { startToolSessionSetup } from "./session-agent-tool-setup.ts";
-import { connectedSessionSetup } from "./session-integration-fixtures.ts";
-import { waitForSessionValue } from "./session-integration-helpers.ts";
+import {
+  connectedSessionSetup,
+  SESSION_ID,
+} from "./session-integration-fixtures.ts";
+import {
+  completeAgentFileLookup,
+  waitForSessionValue,
+} from "./session-integration-helpers.ts";
 
 export interface TestLivenessClock {
   readonly advance: (milliseconds: number) => void;
@@ -79,6 +85,19 @@ export async function createUnsafeLivenessSession(model: AgentModel) {
     clock,
     setup: await createRunningLivenessSession(model, clock),
   };
+}
+
+// The queued compaction relaunches the agent, which re-reads the agent
+// file before the model call; complete that runner command, then wait for
+// the compacted (older-segments) shape.
+export function waitForCompactedSession(
+  setup: ReturnType<typeof connectedSessionSetup>,
+): Promise<unknown> {
+  const olderSegments = () =>
+    setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID)?.hasOlderSegments;
+  return completeAgentFileLookup(setup).then(() =>
+    waitForSessionValue(olderSegments, (value) => value === true),
+  );
 }
 
 export async function waitForIdleSession(

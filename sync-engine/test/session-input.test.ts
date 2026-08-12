@@ -126,17 +126,20 @@ test("accepts OpenRouter routing modes and legacy provider tags", () => {
   ).toBeUndefined();
 });
 
-test("defaults auto-compaction on and strictly accepts a boolean override", () => {
-  expect(readCreateSession(SESSION_INPUT)?.autoCompact).toBe(true);
-  expect(
-    readCreateSession({ ...SESSION_INPUT, autoCompact: false })?.autoCompact,
-  ).toBe(false);
-  for (const autoCompact of ["false", 0, null]) {
+test.each([["autoCompact", true] as const, ["idleCompact", false] as const])(
+  "defaults %s to %s and strictly accepts a boolean override",
+  (flag, defaultValue) => {
+    expect(readCreateSession(SESSION_INPUT)?.[flag]).toBe(defaultValue);
     expect(
-      readCreateSession({ ...SESSION_INPUT, autoCompact }),
-    ).toBeUndefined();
-  }
-});
+      readCreateSession({ ...SESSION_INPUT, [flag]: !defaultValue })?.[flag],
+    ).toBe(!defaultValue);
+    for (const invalid of ["false", 0, null]) {
+      expect(
+        readCreateSession({ ...SESSION_INPUT, [flag]: invalid }),
+      ).toBeUndefined();
+    }
+  },
+);
 
 test("accepts an image-only user message", () => {
   expect(readPrompt({ images: [TEST_AGENT_IMAGE], prompt: "" })).toEqual({

@@ -12,8 +12,8 @@ import { AskQuestionsForm } from "./ask-questions-client.tsx";
 import { clipboardCopyLabel, createClipboardCopy } from "./clipboard-copy.ts";
 import { findById } from "./id-selection.ts";
 import { createNestedScrollRef } from "./nested-scroll.ts";
-import { SessionCompactionToggle } from "./session-autocompact-toggle.tsx";
 import { SessionFollowUp } from "./session-client-forms.tsx";
+import { SessionCompactionToggle } from "./session-compaction-toggle.tsx";
 import { sessionComposerUnavailableReason } from "./session-composer-availability.ts";
 import {
   CompactionControls,

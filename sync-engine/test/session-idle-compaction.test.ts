@@ -169,6 +169,30 @@ test("continues the batch when a candidate fails and retries next scan", async (
   fixture.database.$client.close();
 });
 
+test("persists each compaction flag independently", () => {
+  const fixture = createStore();
+  const created = createTestSession(fixture.store);
+
+  // The store setter is the load-bearing persistence path for toggling
+  // idle compaction on an existing session; it must not touch the
+  // context-threshold flag (and vice versa).
+  const enabled = fixture.store.setIdleCompact(
+    TEST_USER_ID,
+    created.id,
+    true,
+    TEST_NOW + 1,
+  );
+  expect(enabled).toMatchObject({ autoCompact: true, idleCompact: true });
+  const disabledAuto = fixture.store.setAutoCompact(
+    TEST_USER_ID,
+    created.id,
+    false,
+    TEST_NOW + 2,
+  );
+  expect(disabledAuto).toMatchObject({ autoCompact: false, idleCompact: true });
+  fixture.database.$client.close();
+});
+
 test("never rejects even when the candidate query fails", async () => {
   const fixture = await enabledFixture();
   fixture.database.$client.close();

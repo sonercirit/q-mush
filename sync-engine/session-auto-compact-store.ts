@@ -14,11 +14,11 @@ export interface SessionSettingContext {
 }
 
 export type SessionCompactionFlagParameters = readonly [
-  string,
-  string,
-  boolean,
-  number,
-  string?,
+  userId: string,
+  sessionId: string,
+  enabled: boolean,
+  now: number,
+  workspaceId?: string,
 ];
 
 export function setStoredSessionCompactionFlag(

@@ -6,6 +6,8 @@ import {
 } from "./session-auto-compact-store.ts";
 import { updateStoredSessionContextTokenCap } from "./session-context-limit-store.ts";
 
+export type { SessionCompactionFlagParameters } from "./session-auto-compact-store.ts";
+
 export type SessionContextTokenCapParameters = readonly [
   userId: string,
   sessionId: string,
@@ -36,8 +38,6 @@ export function setSessionContextTokenCap(
     workspaceId === undefined ? values : { ...values, workspaceId },
   );
 }
-
-export type SessionAutoCompactParameters = SessionCompactionFlagParameters;
 
 export function setSessionCompactionFlag(
   context: SessionSettingContext,

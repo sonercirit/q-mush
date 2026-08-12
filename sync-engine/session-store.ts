@@ -67,7 +67,7 @@ import { SessionStoreRestarts } from "./session-store-restarts.ts";
 import {
   setSessionCompactionFlag,
   setSessionContextTokenCap,
-  type SessionAutoCompactParameters,
+  type SessionCompactionFlagParameters,
   type SessionContextTokenCapParameters,
 } from "./session-store-settings.ts";
 import {
@@ -223,14 +223,14 @@ export class SessionStore extends SessionStoreRestarts {
   setContextTokenCap(...parameters: SessionContextTokenCapParameters) {
     return setSessionContextTokenCap(this.#settingContext(), ...parameters);
   }
-  setAutoCompact(...parameters: SessionAutoCompactParameters) {
+  setAutoCompact(...parameters: SessionCompactionFlagParameters) {
     return setSessionCompactionFlag(
       this.#settingContext(),
       "autoCompact",
       ...parameters,
     );
   }
-  setIdleCompact(...parameters: SessionAutoCompactParameters) {
+  setIdleCompact(...parameters: SessionCompactionFlagParameters) {
     return setSessionCompactionFlag(
       this.#settingContext(),
       "idleCompact",
