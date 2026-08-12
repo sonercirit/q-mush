@@ -31,6 +31,10 @@ function unanchoredDeltaController(
   return controller;
 }
 
+function expectLiveTail(controller: SessionController, content: string): void {
+  expect(controller.state.detail?.messages.at(-1)?.content).toBe(content);
+}
+
 const UNANCHORED_STEP_MESSAGES = [
   transcriptMessage("user-1", "Request", "user", 1),
   transcriptMessage("thinking-1", "Deep analysis", "thinking", 2),
@@ -183,8 +187,12 @@ function pairedController(
   ]);
 }
 
-function expectLiveTail(controller: SessionController, content: string): void {
-  expect(controller.state.detail?.messages.at(-1)?.content).toBe(content);
+function pairedIdsWithStreams(sessionId: string): readonly string[] {
+  return [
+    ...PAIRED_STEP_MESSAGES.map(({ id }) => id),
+    `stream:${sessionId}:thinking`,
+    `stream:${sessionId}:assistant`,
+  ];
 }
 
 test("keeps a fresh stream whose paired content mismatches the step", () => {
@@ -193,11 +201,9 @@ test("keeps a fresh stream whose paired content mismatches the step", () => {
 
   // Exact thinking alone is not enough: the paired assistant content must
   // also match, or a fresh stream reusing earlier phrasing is swallowed.
-  expect(sessionMessageIds(controller)).toEqual([
-    ...PAIRED_STEP_MESSAGES.map(({ id }) => id),
-    `stream:${sessionId}:thinking`,
-    `stream:${sessionId}:assistant`,
-  ]);
+  expect(sessionMessageIds(controller)).toEqual(
+    pairedIdsWithStreams(sessionId),
+  );
 });
 
 test("a paired exact-thinking suffix-content match stays provisional", () => {
@@ -218,6 +224,9 @@ test("a paired exact-thinking suffix-content match stays provisional", () => {
   expectLiveTail(controller, "answer more");
   controller.applyDetail(
     sessionDetailWithStatus("running", [...PAIRED_STEP_MESSAGES], sessionId),
+  );
+  expect(sessionMessageIds(controller)).toEqual(
+    pairedIdsWithStreams(sessionId),
   );
   expectLiveTail(controller, "answer more");
 });
