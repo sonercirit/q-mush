@@ -146,25 +146,27 @@ test("a provisional suffix collision recovers the full fresh stream", () => {
   expect(sessionMessageIds(controller)).toEqual(stepIds);
 
   // The next delta disproves the collision, so the buffer must have
-  // survived: the stream reappears with its head intact.
+  // survived: the stream reappears immediately with its head intact, before
+  // any snapshot refresh.
   controller.applyDelta({
     content: "",
     sessionId,
     thinking: "omething new",
     type: "session_delta",
   });
-  const refreshed = sessionDetailWithStatus(
-    "running",
-    [...UNANCHORED_STEP_MESSAGES],
-    sessionId,
+  expectLiveTail(controller, "something new");
+  controller.applyDetail(
+    sessionDetailWithStatus(
+      "running",
+      [...UNANCHORED_STEP_MESSAGES],
+      sessionId,
+    ),
   );
-  controller.applyDetail(refreshed);
   expect(sessionMessageIds(controller)).toEqual([
     ...stepIds,
     `stream:${sessionId}:thinking`,
   ]);
-  const recovered = controller.state.detail?.messages.at(-1);
-  expect(recovered?.content).toBe("something new");
+  expectLiveTail(controller, "something new");
 });
 
 const PAIRED_STEP_MESSAGES = [
@@ -179,6 +181,10 @@ function pairedController(
   return unanchoredDeltaController(sessionId, content, "Deep analysis", [
     ...PAIRED_STEP_MESSAGES,
   ]);
+}
+
+function expectLiveTail(controller: SessionController, content: string): void {
+  expect(controller.state.detail?.messages.at(-1)?.content).toBe(content);
 }
 
 test("keeps a fresh stream whose paired content mismatches the step", () => {
@@ -202,18 +208,18 @@ test("a paired exact-thinking suffix-content match stays provisional", () => {
   );
 
   // The suffix-content half keeps the match provisional, so the buffer
-  // survives and a disproving delta restores the full stream.
+  // survives and a disproving delta restores the full stream immediately.
   controller.applyDelta({
     content: " more",
     sessionId,
     thinking: "",
     type: "session_delta",
   });
+  expectLiveTail(controller, "answer more");
   controller.applyDetail(
     sessionDetailWithStatus("running", [...PAIRED_STEP_MESSAGES], sessionId),
   );
-  const recoveredContent = controller.state.detail?.messages.at(-1)?.content;
-  expect(recoveredContent).toBe("answer more");
+  expectLiveTail(controller, "answer more");
 });
 
 test("keeps a fresh unanchored continuation after a prior trailing assistant", () => {
