@@ -66,7 +66,9 @@ function sessionIsActive(detail: AgentSessionDetail): boolean {
 // fresh stream's first short delta often prefixes unrelated persisted text,
 // and swallowing a fresh stream loses live output. A tail match short of
 // equality is only weak evidence — a fresh delta can collide with the end
-// of unrelated persisted text — so callers treat it as provisional.
+// of unrelated persisted text — so callers treat it as provisional. An
+// exact match is strong evidence but not proof: a fresh first delta equal
+// to the persisted text verbatim still drops, an accepted rarity.
 type StreamBufferMatch = "exact" | "none" | "suffix";
 
 function streamBufferMatch(
@@ -372,7 +374,9 @@ export class SessionRealtimeState {
     ) {
       // A provisional suffix match keeps its unanchored buffer: dropping it
       // would lose a fresh stream's head when its first delta merely
-      // collides with the end of persisted text.
+      // collides with the end of persisted text. A retained stale buffer
+      // can surface as a transient if a later snapshot advances past the
+      // matched step; the next delta or a terminal status clears it.
       this.#streamedContent.delete(detail.id);
     }
     if (this.#view.value.selectedId !== detail.id) return;

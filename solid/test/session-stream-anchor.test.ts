@@ -167,6 +167,55 @@ test("a provisional suffix collision recovers the full fresh stream", () => {
   expect(recovered?.content).toBe("something new");
 });
 
+const PAIRED_STEP_MESSAGES = [
+  ...UNANCHORED_STEP_MESSAGES.slice(0, 2),
+  transcriptMessage("assistant-1", "Persisted answer", "assistant", 3),
+] as const;
+
+function pairedController(
+  sessionId: string,
+  content: string,
+): SessionController {
+  return unanchoredDeltaController(sessionId, content, "Deep analysis", [
+    ...PAIRED_STEP_MESSAGES,
+  ]);
+}
+
+test("keeps a fresh stream whose paired content mismatches the step", () => {
+  const sessionId = "session-paired-mismatch";
+  const controller = pairedController(sessionId, "Totally different");
+
+  // Exact thinking alone is not enough: the paired assistant content must
+  // also match, or a fresh stream reusing earlier phrasing is swallowed.
+  expect(sessionMessageIds(controller)).toEqual([
+    ...PAIRED_STEP_MESSAGES.map(({ id }) => id),
+    `stream:${sessionId}:thinking`,
+    `stream:${sessionId}:assistant`,
+  ]);
+});
+
+test("a paired exact-thinking suffix-content match stays provisional", () => {
+  const sessionId = "session-mixed-provisional";
+  const controller = pairedController(sessionId, "answer");
+  expect(sessionMessageIds(controller)).toEqual(
+    PAIRED_STEP_MESSAGES.map(({ id }) => id),
+  );
+
+  // The suffix-content half keeps the match provisional, so the buffer
+  // survives and a disproving delta restores the full stream.
+  controller.applyDelta({
+    content: " more",
+    sessionId,
+    thinking: "",
+    type: "session_delta",
+  });
+  controller.applyDetail(
+    sessionDetailWithStatus("running", [...PAIRED_STEP_MESSAGES], sessionId),
+  );
+  const recoveredContent = controller.state.detail?.messages.at(-1)?.content;
+  expect(recoveredContent).toBe("answer more");
+});
+
 test("keeps a fresh unanchored continuation after a prior trailing assistant", () => {
   const sessionId = "session-fresh-continuation";
   const controller = unanchoredDeltaController(
