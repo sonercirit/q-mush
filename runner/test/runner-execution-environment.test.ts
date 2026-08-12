@@ -1,3 +1,4 @@
+import { symlink } from "node:fs/promises";
 import { describe, expect, test } from "vitest";
 import {
   readRunnerCommand,
@@ -56,18 +57,28 @@ function command(
   tool: string,
   executionEnvironment: RunnerExecutionEnvironment = "container",
   workingDirectory = process.cwd(),
+  arguments_?: RunnerToolCommand["arguments"],
 ): RunnerToolCommand {
   return {
     arguments:
-      tool === "bash"
+      arguments_ ??
+      (tool === "bash"
         ? { command: "pwd", timeout: 5 }
-        : { path: "/workspace/README.md" },
+        : { path: "/workspace/README.md" }),
     executionEnvironment,
     id: `command-${tool}`,
     sessionId: "session-1",
     tool,
     workingDirectory,
   };
+}
+
+function containerExecutor(): {
+  readonly containers: FakeContainers;
+  readonly executor: RunnerCommandExecutor;
+} {
+  const containers = new FakeContainers();
+  return { containers, executor: new RunnerCommandExecutor(containers) };
 }
 
 describe("container runner commands", () => {
@@ -88,8 +99,7 @@ describe("container runner commands", () => {
   test("maps absolute container paths and routes bash into one session container", async () => {
     const root = await workspace();
     await Bun.write(`${root}/README.md`, "# Q Mush");
-    const containers = new FakeContainers();
-    const executor = new RunnerCommandExecutor(containers);
+    const { containers, executor } = containerExecutor();
     const controller = new AbortController();
 
     const parallel = await executor.execute(
@@ -131,6 +141,84 @@ describe("container runner commands", () => {
         timeout: 5,
       },
     ]);
+  });
+
+  test("confines container file tools and agent files to the workspace", async () => {
+    const outside = await workspace();
+    const root = `${outside}/workspace`;
+    await Bun.write(`${root}/README.md`, "# Contained");
+    await Bun.write(`${outside}/secret.txt`, "host secret");
+    await symlink(`${outside}/secret.txt`, `${root}/AGENTS.md`);
+    const { executor } = containerExecutor();
+
+    const escape = await executor.execute(
+      command("read", "container", root, { path: "../secret.txt" }),
+    );
+    const absoluteEscape = await executor.execute(
+      command("read", "container", root, { path: `${outside}/secret.txt` }),
+    );
+    const agentFile = await executor.execute({
+      arguments: {},
+      executionEnvironment: "container",
+      id: "command-agent-file",
+      sessionId: "session-1",
+      tool: "read_agent_file",
+      workingDirectory: root,
+    });
+
+    const writeEscape = await executor.execute(
+      command("write", "container", root, {
+        content: "leak",
+        path: `${outside}/injected.txt`,
+      }),
+    );
+    const editEscape = await executor.execute(
+      command("edit", "container", root, {
+        edits: [{ newText: "changed", oldText: "host secret" }],
+        path: "../secret.txt",
+      }),
+    );
+    const explainEscape = await executor.execute(
+      command("explain_file", "container", root, {
+        path: `${outside}/secret.txt`,
+      }),
+    );
+    const parallelEscape = await executor.execute(
+      command("parallel", "container", root, {
+        tool_uses: [
+          {
+            parameters: { path: "../secret.txt" },
+            recipient_name: "read",
+          },
+          {
+            parameters: { content: "leak", path: `${outside}/parallel.txt` },
+            recipient_name: "write",
+          },
+        ],
+      }),
+    );
+
+    expect(escape).toContain("outside the session workspace");
+    expect(absoluteEscape).toContain("outside the session workspace");
+    expect(agentFile).toContain("outside the session workspace");
+    for (const blocked of [writeEscape, editEscape, explainEscape]) {
+      expect(blocked).toContain("outside the session workspace");
+    }
+    expect(
+      parallelEscape.match(/outside the session workspace/gu),
+    ).toHaveLength(2);
+    const leaked = await Promise.all(
+      ["injected.txt", "parallel.txt"].map((name) =>
+        Bun.file(`${outside}/${name}`).exists(),
+      ),
+    );
+    expect(leaked).toEqual([false, false]);
+    expect(await Bun.file(`${outside}/secret.txt`).text()).toBe("host secret");
+    expect(
+      await executor.execute(
+        command("read", "container", root, { path: "README.md" }),
+      ),
+    ).toContain("# Contained");
   });
 
   test("cleans a tracked container only for an explicit session cleanup command", async () => {

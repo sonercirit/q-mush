@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -42,7 +42,7 @@ export function readContinuation(
 
 export class RunnerOutputSpills {
   readonly #spillPaths = new Set<string>();
-  readonly #temporaryRoot = resolve(tmpdir());
+  #temporaryRoot = resolve(tmpdir());
   #directory: Promise<string> | undefined;
   #spillSequence = 0;
 
@@ -77,7 +77,12 @@ export class RunnerOutputSpills {
   }
 
   #spillDirectory(): Promise<string> {
-    this.#directory ??= mkdtemp(join(tmpdir(), "q-mush-tool-output-"));
+    this.#directory ??= mkdtemp(join(tmpdir(), "q-mush-tool-output-")).then(
+      async (directory) => {
+        this.#temporaryRoot = await realpath(directory);
+        return directory;
+      },
+    );
     return this.#directory;
   }
 
@@ -86,7 +91,11 @@ export class RunnerOutputSpills {
     this.#spillSequence += 1;
     const path = join(directory, `output-${String(this.#spillSequence)}.txt`);
     await writeFile(path, content, { encoding: "utf8", mode: 0o600 });
-    this.#spillPaths.add(resolve(path));
-    return path;
+    // Record and hand out the canonical location so ownsPath matches both the
+    // advertised path and canonicalized reads even when the temporary
+    // directory itself sits behind a symlink.
+    const canonical = await realpath(path);
+    this.#spillPaths.add(canonical);
+    return canonical;
   }
 }

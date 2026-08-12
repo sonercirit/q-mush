@@ -5,8 +5,8 @@ import {
   ATTACHMENT_WRITE_COMMAND,
 } from "../shared/attachment-reference.ts";
 import {
+  containedRunnerPath,
   resolveRunnerWorkspace,
-  secureRunnerPath,
 } from "./runner-workspace.ts";
 
 const DIRECTORY = ".q-mush/attachments";
@@ -43,7 +43,7 @@ async function secureAttachmentDirectory(
   mayNotExist = false,
 ): Promise<string> {
   const workspace = await resolveRunnerWorkspace(root);
-  return secureRunnerPath(workspace, DIRECTORY, mayNotExist);
+  return containedRunnerPath(workspace, DIRECTORY, mayNotExist);
 }
 
 export async function attachmentPathFromReference(
@@ -61,7 +61,7 @@ export async function attachmentPathFromReference(
   const [id] = parsed.pathname.slice(1).split("/");
   if (id === undefined) throw new Error("The attachment reference is invalid");
   const directory = await secureAttachmentDirectory(root);
-  return secureRunnerPath(directory, safeIdentifier(id));
+  return containedRunnerPath(directory, safeIdentifier(id));
 }
 
 export async function executeAttachmentCommand(
@@ -88,7 +88,11 @@ export async function executeAttachmentCommand(
     // Resolve after creation so a later swap of the lexical attachment symlink
     // cannot redirect the write away from this validated canonical directory.
     const canonicalDirectory = await secureAttachmentDirectory(root);
-    const path = await secureRunnerPath(canonicalDirectory, attachmentId, true);
+    const path = await containedRunnerPath(
+      canonicalDirectory,
+      attachmentId,
+      true,
+    );
     await writeFile(
       path,
       JSON.stringify({

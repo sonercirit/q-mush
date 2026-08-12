@@ -225,15 +225,17 @@ working directory are selected. Reassignment itself does not resume work. **Stop
 session** aborts the model request and cancels an active runner command.
 
 The runner executes tools with the runner process's local account permissions.
-File tools reject paths outside the selected workspace, while shell commands are
-intentionally full shell commands rooted in that directory and can access
-anything that account can access. Before a workspace is selected, the
-authenticated directory browser can inspect directories readable by that same
-runner account; each response contains only the canonical location, parent, and
-at most 500 child directories. Only use runners and model credentials you trust
-with the selected project. The selected agent file is sent to the model provider
-as project instructions. Provider secrets remain on the Q Mush server: the
-browser and runner work protocol never receive them.
+In bare-metal sessions file tools accept any path that account can access,
+resolving relative paths against the selected workspace; shell commands are
+intentionally full shell commands rooted in that directory. Container sessions
+confine file tools to the workspace, matching the container's isolation. Before
+a workspace is selected, the authenticated directory browser can inspect
+directories readable by that same runner account; each response contains only
+the canonical location, parent, and at most 500 child directories. Only use
+runners and model credentials you trust with the selected project. The selected
+agent file is sent to the model provider as project instructions. Provider
+secrets remain on the Q Mush server: the browser and runner work protocol never
+receive them.
 
 OpenAI API keys and connected accounts prefer the streaming Responses WebSocket
 and fall back to HTTP streaming when that transport is unavailable. OpenRouter
