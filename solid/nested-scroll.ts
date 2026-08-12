@@ -1,4 +1,4 @@
-import { onCleanup } from "solid-js";
+import { createRenderEffect, onCleanup } from "solid-js";
 
 interface NestedScrollState {
   readonly fromEnd: number;
@@ -105,6 +105,13 @@ function recordNestedScrollPane(
 ): RememberedNestedScrollPane {
   nestedScrollByElement.set(element, { key, state });
   return { element, state };
+}
+
+function recordOwnNestedScrollPanes(key: string, element: HTMLElement): void {
+  nestedScrollByMessage.set(key, {
+    element,
+    panes: currentNestedScrollPanes(key, ownedNestedScrollElements(element)),
+  });
 }
 
 function currentNestedScrollPanes(
@@ -299,28 +306,49 @@ export function createNestedScrollRef(
       }
     });
   });
-  return (element) => {
-    const key = messageId();
+  const assign = (element: HTMLElement, key: string): void => {
+    if (
+      currentKey !== undefined &&
+      currentKey !== key &&
+      nestedScrollByMessage.get(currentKey)?.element === element
+    ) {
+      nestedScrollByMessage.delete(currentKey);
+    }
     currentKey = key;
     const previous = nestedScrollByMessage.get(key);
     current = element;
     element.dataset["nestedScrollKey"] = key;
     if (previous === undefined) {
-      nestedScrollByMessage.set(key, {
-        element,
-        panes: currentNestedScrollPanes(
-          key,
-          ownedNestedScrollElements(element),
-        ),
-      });
+      recordOwnNestedScrollPanes(key, element);
     } else if (previous.element !== element) {
       nestedScrollByMessage.set(key, { ...previous, element });
+      // Restore only when the previous owner really left the document: in a
+      // single update a new row can claim a key before the retained old row
+      // re-keys itself, and restoring then would copy the retained row's
+      // state onto the newcomer. A still-connected owner also means the
+      // inherited panes describe that other row, so re-record the claimant's
+      // own panes instead of leaving them to restore on a later re-render.
       queueMicrotask(() => {
-        if (nestedScrollByMessage.get(key)?.element === element) {
-          restoreRememberedNestedScroll(key, element, previous);
+        if (nestedScrollByMessage.get(key)?.element !== element) return;
+        if (previous.element.isConnected) {
+          recordOwnNestedScrollPanes(key, element);
+          return;
         }
+        restoreRememberedNestedScroll(key, element, previous);
       });
     }
+  };
+  // Retained rows can be re-keyed when the settled transcript prefix grows
+  // around a live stream; the bookkeeping must follow the new key or scroll
+  // and wrap state is recorded under a stale key and never restored.
+  createRenderEffect(() => {
+    const key = messageId();
+    if (current !== undefined && key !== currentKey) {
+      assign(current, key);
+    }
+  });
+  return (element) => {
+    assign(element, messageId());
     element.addEventListener("scroll", rememberNestedScroll, true);
     element.addEventListener("subscroll-wrap-change", rememberNestedScroll);
     if (!observeReplacements) return;

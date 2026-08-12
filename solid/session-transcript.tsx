@@ -29,9 +29,13 @@ import {
   LiveToolStream,
   renderToolHeader,
 } from "./session-live-tool-activity.tsx";
-import { renderMarkdown } from "./session-markdown.tsx";
+import { MarkdownView } from "./session-markdown.tsx";
 import { renderToolArguments } from "./session-sleep-renderer.tsx";
 import { createSessionStepTiming } from "./session-step-timing.ts";
+import {
+  StreamedMessageList,
+  type StreamedMessageRenderer,
+} from "./session-streamed-messages.tsx";
 import { renderStructuredText } from "./session-structured-text.tsx";
 import { renderStructuredCode } from "./session-syntax.tsx";
 import { renderToolResult } from "./session-tool-result.tsx";
@@ -67,7 +71,9 @@ function TranscriptNote(props: {
       >
         {props.label}
       </p>
-      <div class="mt-2">{renderMarkdown(props.content)}</div>
+      <div class="mt-2">
+        <MarkdownView content={props.content} />
+      </div>
     </li>
   );
 }
@@ -109,39 +115,23 @@ function ToolDefinitions(props: {
   );
 }
 
-function transcriptMessageNote(options: {
-  readonly classes: string;
-  readonly label: string;
-  readonly labelClasses: string;
-  readonly message: AgentSessionMessage;
-}): JSX.Element {
-  return (
-    <TranscriptNote
-      boundaryKey={`message:${options.message.id}`}
-      classes={options.classes}
-      content={options.message.content}
-      label={options.label}
-      labelClasses={options.labelClasses}
-    />
-  );
-}
-
 function NoteTranscriptMessage(props: {
   readonly kind: "error" | "thinking";
   readonly message: AgentSessionMessage;
 }): JSX.Element {
   const error = (): boolean => props.kind === "error";
   return (
-    <>
-      {transcriptMessageNote({
-        classes: error()
+    <TranscriptNote
+      boundaryKey={`message:${props.message.id}`}
+      classes={
+        error()
           ? "border-rose-300/20 bg-rose-300/10"
-          : "border-violet-300/20 bg-violet-300/10",
-        label: error() ? "Error message" : "Thinking",
-        labelClasses: error() ? "text-rose-200" : "text-violet-200",
-        message: props.message,
-      })}
-    </>
+          : "border-violet-300/20 bg-violet-300/10"
+      }
+      content={props.message.content}
+      label={error() ? "Error message" : "Thinking"}
+      labelClasses={error() ? "text-rose-200" : "text-violet-200"}
+    />
   );
 }
 
@@ -256,7 +246,9 @@ function ConversationTranscriptMessage(props: {
             </p>
           ))
         ) : (
-          <div class="mt-2">{renderMarkdown(props.message.content)}</div>
+          <div class="mt-2">
+            <MarkdownView content={props.message.content} />
+          </div>
         )
       ) : null}
       {showContent() && props.message.images.length > 0 ? (
@@ -460,25 +452,26 @@ export function SessionTranscript(props: {
           transcriptMessageIsVisible(message, props.filters),
         ),
   );
-  const renderMessageWithStreams = (
-    message: AgentSessionMessage,
-    liveToolStreams: readonly ToolStreamEntry[],
-  ): JSX.Element => (
+  const renderStreamedMessage: StreamedMessageRenderer = (
+    message,
+    liveToolStreams,
+  ) => (
     <>
-      <Show when={transcriptMessageIsVisible(message, props.filters)}>
+      <Show when={transcriptMessageIsVisible(message(), props.filters)}>
         <TranscriptMessage
           callArguments={() => counts().toolCallArguments}
           filters={props.filters}
-          liveToolStreams={liveToolStreams}
-          message={message}
+          liveToolStreams={liveToolStreams()}
+          message={message()}
           nestedScrollKey={
-            messageNestedScrollKeys().byMessageId.get(message.id) ?? message.id
+            messageNestedScrollKeys().byMessageId.get(message().id) ??
+            message().id
           }
           onForkMessage={props.onFork}
           streamEntries={toolStreamsByCallId}
         />
       </Show>
-      <Show when={stepTiming().completedTimings.get(message.id)}>
+      <Show when={stepTiming().completedTimings.get(message().id)}>
         {(timing) => (
           <TranscriptStepTiming
             endedAt={timing().endedAt}
@@ -491,7 +484,10 @@ export function SessionTranscript(props: {
     </>
   );
   const renderMessage = (message: AgentSessionMessage): JSX.Element =>
-    renderMessageWithStreams(message, []);
+    renderStreamedMessage(
+      () => message,
+      () => [],
+    );
   return (
     <>
       <Show when={props.filters.systemPrompt}>
@@ -513,15 +509,19 @@ export function SessionTranscript(props: {
       </Show>
       <For each={messageGroups().stable}>{renderMessage}</For>
       <Show
-        fallback={<For each={messageGroups().streamed}>{renderMessage}</For>}
+        fallback={
+          <StreamedMessageList
+            messages={messageGroups().streamed}
+            render={renderStreamedMessage}
+          />
+        }
         when={stepTiming().activeStartedAt}
         keyed
       >
         {(startedAt) => (
           <ActiveStepAnchor
             messages={activeMessages()}
-            renderMessage={renderMessage}
-            renderMessageWithToolStreams={renderMessageWithStreams}
+            render={renderStreamedMessage}
             timing={
               <TranscriptStepTiming endedAt={null} startedAt={startedAt} />
             }

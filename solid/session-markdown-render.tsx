@@ -64,7 +64,7 @@ interface MarkdownQuoteBlock {
   readonly type: "quote";
 }
 
-type MarkdownBlock =
+export type MarkdownBlock =
   | MarkdownCodeBlock
   | MarkdownHeadingBlock
   | MarkdownListBlock
@@ -442,13 +442,35 @@ function parseSpecialBlock(
   return listItem === null ? undefined : markdownList(lines, index, listItem);
 }
 
+export function normalizedMarkdownLines(content: string): readonly string[] {
+  return content.replaceAll("\r\n", "\n").split("\n");
+}
+
 function parseMarkdownBlocks(
   content: string,
   preserveNewlines = false,
 ): readonly MarkdownBlock[] {
-  const lines = content.replaceAll("\r\n", "\n").split("\n");
   const blocks: MarkdownBlock[] = [];
-  let index = 0;
+  appendMarkdownBlocks(
+    normalizedMarkdownLines(content),
+    0,
+    preserveNewlines,
+    blocks,
+    [],
+    [],
+  );
+  return blocks;
+}
+
+export function appendMarkdownBlocks(
+  lines: readonly string[],
+  start: number,
+  preserveNewlines: boolean,
+  blocks: MarkdownBlock[],
+  starts: number[],
+  ends: number[],
+): void {
+  let index = start;
 
   while (index < lines.length) {
     const line = lines[index] ?? "";
@@ -458,11 +480,16 @@ function parseMarkdownBlocks(
       continue;
     }
 
+    // Every non-blank iteration emits exactly one block; recording its
+    // start lets incremental reparses resume past settled blank gaps.
+    starts.push(index);
+
     const table = markdownTable(lines, index);
 
     if (table !== undefined) {
       blocks.push(table.block);
       index = table.nextIndex;
+      ends.push(index);
       continue;
     }
 
@@ -471,6 +498,7 @@ function parseMarkdownBlocks(
     if (special !== undefined) {
       blocks.push(special.block);
       index = special.nextIndex;
+      ends.push(index);
       continue;
     }
 
@@ -483,6 +511,7 @@ function parseMarkdownBlocks(
         type: "heading",
       });
       index += 1;
+      ends.push(index);
       continue;
     }
 
@@ -495,12 +524,14 @@ function parseMarkdownBlocks(
       }
 
       blocks.push({ text: paragraphText(quote), type: "quote" });
+      ends.push(index);
       continue;
     }
 
     if (/^\s*(?:-{3,}|_{3,}|\*{3,})\s*$/u.test(line)) {
       blocks.push({ text: "", type: "rule" });
       index += 1;
+      ends.push(index);
       continue;
     }
 
@@ -511,9 +542,8 @@ function parseMarkdownBlocks(
       type: raw ? "raw" : preserveNewlines ? "preserved" : "paragraph",
     });
     index = parsed.nextIndex;
+    ends.push(index);
   }
-
-  return blocks;
 }
 
 function headingClasses(level: number): string {
@@ -617,7 +647,7 @@ function renderMarkdownTable(block: MarkdownTableBlock): JSX.Element {
   );
 }
 
-function renderMarkdownBlock(block: MarkdownBlock): JSX.Element {
+export function renderMarkdownBlock(block: MarkdownBlock): JSX.Element {
   switch (block.type) {
     case "code":
       return renderHighlightedCodeWith(
