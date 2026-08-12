@@ -5,7 +5,10 @@ import {
 } from "../shared/session-context-limit.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { SessionContextTokenCapDialog } from "./session-context-token-cap-dialog.tsx";
-import { SessionEditorError } from "./session-editor-client.tsx";
+import {
+  SessionEditorError,
+  SessionEditorSection,
+} from "./session-editor-client.tsx";
 import { sessionMutationError } from "./session-mutations.ts";
 
 export interface ContextTokenCapEditorProps {
@@ -66,43 +69,51 @@ export function SessionContextTokenCapEditor(
 
   return (
     <>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          submit();
-        }}
+      <SessionEditorSection
+        description={
+          <>
+            Cap the context tokens available to future turns. Leave blank to
+            restore the model limit.
+          </>
+        }
+        kind="cap"
+        title="Context token cap"
       >
-        <div class="flex flex-wrap items-end gap-3">
-          <label class="min-w-52 flex-1 text-sm font-medium text-slate-200">
-            Context token cap
-            <input
-              class="mt-2 min-h-10 w-full rounded-lg border border-white/10 bg-slate-950 px-3 text-white"
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            submit();
+          }}
+        >
+          <div class="mt-4 flex flex-wrap items-center gap-3">
+            <label class="min-w-52 flex-1">
+              <span class="sr-only">Context token cap</span>
+              <input
+                class="min-h-10 w-full rounded-xl border border-white/10 bg-slate-900 px-4 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none"
+                disabled={props.disabled}
+                id="session-detail-context-token-cap"
+                min="1"
+                onInput={(event) => {
+                  setValue(event.currentTarget.value);
+                  setError(undefined);
+                }}
+                placeholder="Use the model limit"
+                step="1"
+                type="number"
+                value={value()}
+              />
+            </label>
+            <button
+              class="min-h-10 rounded-xl border border-cyan-300/30 bg-cyan-300/10 px-4 text-sm font-semibold text-cyan-100 disabled:opacity-50"
               disabled={props.disabled}
-              id="session-detail-context-token-cap"
-              min="1"
-              onInput={(event) => {
-                setValue(event.currentTarget.value);
-                setError(undefined);
-              }}
-              placeholder="Use the model limit"
-              step="1"
-              type="number"
-              value={value()}
-            />
-          </label>
-          <button
-            class="min-h-10 rounded-lg border border-cyan-300/20 px-3 text-xs font-semibold text-cyan-200 disabled:opacity-50"
-            disabled={props.disabled}
-            type="submit"
-          >
-            Save cap
-          </button>
-        </div>
-        <p class="mt-1 text-xs text-slate-500">
-          Leave blank to restore the model limit.
-        </p>
-        <SessionEditorError message={error()} />
-      </form>
+              type="submit"
+            >
+              Save cap
+            </button>
+          </div>
+          <SessionEditorError message={error()} />
+        </form>
+      </SessionEditorSection>
       <SessionContextTokenCapDialog
         cap={pendingCap()}
         onCancel={() => {

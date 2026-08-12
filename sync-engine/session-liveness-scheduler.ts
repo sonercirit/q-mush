@@ -30,9 +30,14 @@ interface SessionLivenessSchedulerOptions {
   readonly store: SessionStore;
 }
 
+export interface SessionLiveness {
+  readonly stop: () => void;
+  readonly watchdog: SessionLivenessWatchdog;
+}
+
 export function createSessionLivenessWatchdog(
   options: SessionLivenessSchedulerOptions,
-): SessionLivenessWatchdog {
+): SessionLiveness {
   const { dependencies } = options;
   const watchdog = new SessionLivenessWatchdog({
     actions: options.actions,
@@ -74,10 +79,25 @@ export function createSessionLivenessWatchdog(
     watchdog.scan();
   };
   dependencies.liveness?.testScan?.(scan);
+  let clear: () => void;
   if (dependencies.liveness?.setInterval === undefined) {
-    setInterval(scan, intervalMs).unref();
+    const timer = setInterval(scan, intervalMs);
+    timer.unref();
+    clear = () => {
+      clearInterval(timer);
+    };
   } else {
-    dependencies.liveness.setInterval(scan, intervalMs);
+    const timer = dependencies.liveness.setInterval(scan, intervalMs);
+    const clearInjected = dependencies.liveness.clearInterval;
+    clear = () => {
+      clearInjected?.(timer);
+    };
   }
-  return watchdog;
+  let stopped = false;
+  const stop = (): void => {
+    if (stopped) return;
+    stopped = true;
+    clear();
+  };
+  return { stop, watchdog };
 }

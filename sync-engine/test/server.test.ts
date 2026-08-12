@@ -124,7 +124,12 @@ function createTestRequestHandler(): (request: Request) => Promise<Response> {
     googleAuth,
     runners,
     modelProviders,
-    { braveSearch, database, workspaces },
+    {
+      braveSearch,
+      database,
+      liveness: { setInterval: () => undefined },
+      workspaces,
+    },
   );
   const integrations = [googleAuth, openAi, openRouter, braveSearch] as const;
   return createRequestHandler(
