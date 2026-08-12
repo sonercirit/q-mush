@@ -1,4 +1,4 @@
-import { createMemo, For, Index, Show, type JSX } from "solid-js";
+import { For, type JSX } from "solid-js";
 import {
   inlineCodeClasses,
   renderHighlightedCodeWith,
@@ -64,7 +64,7 @@ interface MarkdownQuoteBlock {
   readonly type: "quote";
 }
 
-type MarkdownBlock =
+export type MarkdownBlock =
   | MarkdownCodeBlock
   | MarkdownHeadingBlock
   | MarkdownListBlock
@@ -442,7 +442,7 @@ function parseSpecialBlock(
   return listItem === null ? undefined : markdownList(lines, index, listItem);
 }
 
-function normalizedMarkdownLines(content: string): readonly string[] {
+export function normalizedMarkdownLines(content: string): readonly string[] {
   return content.replaceAll("\r\n", "\n").split("\n");
 }
 
@@ -461,7 +461,7 @@ function parseMarkdownBlocks(
   return blocks;
 }
 
-function appendMarkdownBlocks(
+export function appendMarkdownBlocks(
   lines: readonly string[],
   start: number,
   preserveNewlines: boolean,
@@ -641,7 +641,7 @@ function renderMarkdownTable(block: MarkdownTableBlock): JSX.Element {
   );
 }
 
-function renderMarkdownBlock(block: MarkdownBlock): JSX.Element {
+export function renderMarkdownBlock(block: MarkdownBlock): JSX.Element {
   switch (block.type) {
     case "code":
       return renderHighlightedCodeWith(
@@ -689,76 +689,6 @@ export function renderMarkdown(
   return (
     <div class="min-w-0 space-y-3 text-sm leading-6 text-slate-200 [overflow-wrap:anywhere]">
       {parseMarkdownBlocks(content, preserveNewlines).map(renderMarkdownBlock)}
-    </div>
-  );
-}
-
-interface ParsedMarkdownDocument {
-  readonly blocks: readonly MarkdownBlock[];
-  readonly content: string;
-  readonly ends: readonly number[];
-  readonly lineCount: number;
-}
-
-/**
- * Parses Markdown incrementally: when new content extends the previous
- * document, settled blocks are reused by reference and parsing resumes at
- * the first block that can still change, so per-delta parse work is bounded
- * by the growing tail instead of the whole accumulated document.
- */
-function parseMarkdownDocument(
-  previous: ParsedMarkdownDocument | undefined,
-  content: string,
-): ParsedMarkdownDocument {
-  if (previous?.content === content) return previous;
-  const lines = normalizedMarkdownLines(content);
-  const blocks: MarkdownBlock[] = [];
-  const ends: number[] = [];
-  let resume = 0;
-  if (
-    previous !== undefined &&
-    previous.content.length > 0 &&
-    content.startsWith(previous.content)
-  ) {
-    // Appending can only grow the previous final line or add lines after
-    // it, so a block parses identically when its scan stopped strictly
-    // before that line: every line its parser examined is unchanged.
-    const settledBefore = previous.lineCount - 1;
-    let retained = 0;
-    while (retained < previous.blocks.length) {
-      const end = previous.ends[retained];
-      if (end === undefined || end >= settledBefore) break;
-      retained += 1;
-    }
-    if (retained > 0) {
-      blocks.push(...previous.blocks.slice(0, retained));
-      ends.push(...previous.ends.slice(0, retained));
-      resume = previous.ends[retained - 1] ?? 0;
-    }
-  }
-  appendMarkdownBlocks(lines, resume, false, blocks, ends);
-  return { blocks, content, ends, lineCount: lines.length };
-}
-
-/**
- * Reactive Markdown that re-renders only changed blocks. Settled blocks are
- * reference-stable across deltas, so their keyed rows keep both their DOM
- * and their reactive owners (wrap toggles stay live); only the growing tail
- * block re-renders.
- */
-export function MarkdownView(props: { readonly content: string }): JSX.Element {
-  const parsed = createMemo((previous: ParsedMarkdownDocument | undefined) =>
-    parseMarkdownDocument(previous, props.content),
-  );
-  return (
-    <div class="min-w-0 space-y-3 text-sm leading-6 text-slate-200 [overflow-wrap:anywhere]">
-      <Index each={parsed().blocks}>
-        {(block) => (
-          <Show keyed when={block()}>
-            {(value) => renderMarkdownBlock(value)}
-          </Show>
-        )}
-      </Index>
     </div>
   );
 }

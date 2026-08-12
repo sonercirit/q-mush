@@ -1,6 +1,8 @@
 import { createSignal } from "solid-js";
+import { render } from "solid-js/web";
 import { expect, test } from "vitest";
 import type { AgentSessionMessage } from "../../shared/session-model.ts";
+import { MarkdownView } from "../session-markdown.tsx";
 import { createDisplaySessionMessage } from "../session-message.ts";
 import { mountTestTranscriptView } from "./session-dom-test-helpers.tsx";
 import { transcriptMessage } from "./transcript-ordering-fixtures.ts";
@@ -107,6 +109,49 @@ test("a settled streamed code block keeps a live wrap toggle across deltas", () 
   expect(pane()?.dataset["lineWrap"]).toBe("true");
   dispose();
   container.remove();
+});
+
+test("incremental parsing matches a fresh render at every streamed prefix", () => {
+  const document = [
+    "Intro paragraph with **bold** text.",
+    "",
+    "| a | b |",
+    "|---|---|",
+    "| 1 | 2 |",
+    "",
+    "```ts",
+    'const value = "streamed";',
+    "```",
+    "",
+    "- item one",
+    "- item two",
+    "",
+    "> closing quote",
+  ].join("\n");
+  const host = (): HTMLDivElement =>
+    window.document.body.appendChild(window.document.createElement("div"));
+  const serialized = (element: HTMLElement): string =>
+    new XMLSerializer().serializeToString(element);
+  const [content, setContent] = createSignal("");
+  const incremental = host();
+  const disposeIncremental = render(
+    () => <MarkdownView content={content()} />,
+    incremental,
+  );
+  for (let end = 1; end <= document.length; end += 7) {
+    const prefix = document.slice(0, end);
+    setContent(prefix);
+    const fresh = host();
+    const disposeFresh = render(() => <MarkdownView content={prefix} />, fresh);
+    // A retained settled block must render exactly as a from-scratch parse:
+    // this kills any unsound retention boundary (for example an off-by-one
+    // that freezes a table row that could still change).
+    expect(serialized(incremental)).toBe(serialized(fresh));
+    disposeFresh();
+    fresh.remove();
+  }
+  disposeIncremental();
+  incremental.remove();
 });
 
 test("a retained streamed row follows its recomputed nested scroll key", () => {
