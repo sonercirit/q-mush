@@ -1,7 +1,7 @@
 import {
   createProviderViewState,
   type ProviderViewState,
-} from "../../solid/provider-client.tsx";
+} from "../../solid/provider-credential-model.ts";
 import {
   createRunnerViewState,
   type RunnerViewState,

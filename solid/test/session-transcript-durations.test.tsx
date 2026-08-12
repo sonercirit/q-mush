@@ -35,7 +35,15 @@ test("shows per-step timing for a call, tools, and following call", () => {
       ...message("user-timed", "Timed request", "user"),
       createdAt: startedAt,
     },
-    call,
+    {
+      ...call,
+      tokenUsage: {
+        cacheWriteInputTokens: 0,
+        cachedInputTokens: 0,
+        inputTokens: 400,
+        outputTokens: 30,
+      },
+    },
     result,
     {
       ...message("thinking-timed", "Considering output", "thinking"),
@@ -44,6 +52,12 @@ test("shows per-step timing for a call, tools, and following call", () => {
     {
       ...message("assistant-timed", "Timed response", "assistant"),
       createdAt: finalAssistantAt,
+      tokenUsage: {
+        cacheWriteInputTokens: 0,
+        cachedInputTokens: 300,
+        inputTokens: 900,
+        outputTokens: 40,
+      },
     },
   ]);
 
@@ -52,6 +66,10 @@ test("shows per-step timing for a call, tools, and following call", () => {
   for (const duration of ["Duration: 8s", "Duration: 5s"]) {
     expect(html).toContain(duration);
   }
+  // The second step read 300 of the 400 tokens its predecessor made cacheable;
+  // the first step has no cacheable prefix, so it shows no rate.
+  expect(html.match(/Cache: /gu)).toHaveLength(1);
+  expect(html).toContain("Cache: 75%");
   for (const timestamp of [startedAt, toolSettledAt, finalAssistantAt]) {
     expect(html).toContain(`datetime="${new Date(timestamp).toISOString()}"`);
   }
@@ -102,7 +120,8 @@ test("renders durable settlement time for a terminal step", () => {
   )?.length;
   expect(completedTimingCount).toBe(1);
   expect(html).toContain("Duration: 3s");
-  expect(html).toContain("Cache: 75%");
+  // A session's first step has no cacheable prefix, so no rate is shown.
+  expect(html).not.toContain("Cache:");
   const settlementDateTime = new Date(durableEndedAt).toISOString();
   expect(html).toContain(`datetime="${settlementDateTime}"`);
 });

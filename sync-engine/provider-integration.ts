@@ -4,6 +4,7 @@ import {
 } from "../shared/credential-cipher.ts";
 import {
   ProviderCredentialStore,
+  type ProviderApiFormat,
   type ProviderCredentialAccess,
   type ProviderCredentialDetails,
   type ProviderId,
@@ -111,6 +112,7 @@ export function createProviderIntegration(options: {
   readonly configuration: ProviderIntegrationConfiguration | undefined;
   readonly createOAuthConfiguration?: OAuthConfigurationFactory;
   readonly credentialOptions?: {
+    readonly acceptedApiFormats?: readonly ProviderApiFormat[];
     readonly apiKeyRequired?: boolean;
     readonly labelRequired?: boolean;
     readonly readBaseUrl?: (value: unknown) => string | undefined;

@@ -12,6 +12,7 @@ import {
 import { AGENT_ATTACHMENT_MODALITIES } from "../agent-attachments.ts";
 import { AGENT_REASONING_EFFORTS } from "../agent-configuration.ts";
 import { AGENT_SESSION_TOOL_NAMES } from "../agent-tools.ts";
+import { PROVIDER_API_FORMATS } from "../provider-id.ts";
 import {
   AGENT_SESSION_MESSAGE_ROLES,
   AGENT_SESSION_STATUSES,
@@ -104,6 +105,7 @@ export const providerCredentials = sqliteTable(
     provider: credentialProviderColumn(),
     providerAccountId: text("provider_account_id"),
     baseUrl: text("base_url"),
+    apiFormat: text("api_format", { enum: PROVIDER_API_FORMATS }),
     label: text("label").notNull(),
     source: text("source", { enum: ["oauth", "api_key"] }).notNull(),
     encryptedCredential: text("encrypted_credential").notNull(),

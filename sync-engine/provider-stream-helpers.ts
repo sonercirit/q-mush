@@ -4,13 +4,18 @@ import {
   type AgentTokenUsage,
   type AgentToolCall,
 } from "../shared/agent-loop.ts";
+import type { ProviderToolCallDelta } from "../shared/tool-stream.ts";
+import { readNonNegativeSafeInteger } from "../shared/validation.ts";
 import type { ProviderTextDelta } from "./provider-stream.ts";
 
+export interface PartialProviderToolCall {
+  arguments: string;
+  id: string;
+  name: string;
+}
+
 export function sortedToolCalls(
-  toolCalls: ReadonlyMap<
-    number,
-    AgentToolCall | { arguments: string; id: string; name: string }
-  >,
+  toolCalls: ReadonlyMap<number, AgentToolCall | PartialProviderToolCall>,
 ): readonly AgentToolCall[] {
   return [...toolCalls.entries()]
     .sort(([left], [right]) => left - right)
@@ -26,6 +31,27 @@ export function emitProviderDelta(
   if (content.length > 0 || thinking.length > 0) {
     onDelta?.({ content, thinking });
   }
+}
+
+export function emitToolCallDelta(
+  onDelta: ((delta: ProviderTextDelta) => void) | undefined,
+  toolCall: ProviderToolCallDelta,
+): void {
+  onDelta?.({ content: "", thinking: "", toolCall });
+}
+
+export function providerEventIndex(
+  event: Readonly<Record<string, unknown>>,
+  key: string,
+  kind: string,
+): number {
+  const index = readNonNegativeSafeInteger(event[key]);
+
+  if (index === undefined) {
+    throw new Error(`The provider returned an invalid ${kind}`);
+  }
+
+  return index;
 }
 
 export function providerStep(

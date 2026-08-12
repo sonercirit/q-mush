@@ -9,6 +9,7 @@ import { createLiveNow } from "./live-now.ts";
 
 export function TranscriptStepTiming(props: {
   readonly endedAt: number | null;
+  readonly previousInputTokens?: number | undefined;
   readonly startedAt: number;
   readonly tokenUsage?: AgentSessionMessage["tokenUsage"];
 }): JSX.Element {
@@ -23,9 +24,14 @@ export function TranscriptStepTiming(props: {
     return <time dateTime={date.toISOString()}>{date.toLocaleString()}</time>;
   };
   const cacheRate = (): number | null =>
-    props.tokenUsage === null || props.tokenUsage === undefined
+    props.tokenUsage === null ||
+    props.tokenUsage === undefined ||
+    props.previousInputTokens === undefined
       ? null
-      : tokenCacheRate(props.tokenUsage);
+      : tokenCacheRate(
+          props.tokenUsage.cachedInputTokens,
+          props.previousInputTokens,
+        );
   return (
     <p
       class="flex flex-wrap gap-x-3 gap-y-1 px-1 text-xs text-slate-500"

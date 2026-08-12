@@ -4,7 +4,7 @@ import type { AgentModelCatalog } from "../../shared/agent-configuration.ts";
 import {
   createProviderViewState,
   type ProviderCredential,
-} from "../provider-client.tsx";
+} from "../provider-credential-model.ts";
 import { createReactiveState } from "../reactive-state.ts";
 import { createRunnerViewState } from "../runner-client.tsx";
 import { SessionPanel, type SessionViewState } from "../session-client.tsx";

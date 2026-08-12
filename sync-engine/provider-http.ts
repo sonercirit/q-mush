@@ -21,8 +21,8 @@ export interface ProviderHttpOptions {
   readonly fetch: AgentModelFetch;
   readonly headers: Headers;
   readonly onDelta: ((delta: ProviderTextDelta) => void) | undefined;
+  readonly protocol: "anthropic" | "chat_completions" | "responses";
   readonly provider: ProviderId;
-  readonly responsesProtocol: boolean;
   readonly sleep: ModelRequestSleep | undefined;
   readonly url: string;
 }
@@ -110,7 +110,7 @@ async function readAcceptedResponse(
 
   if (response.headers.get("content-type")?.includes("application/json")) {
     const accumulator = createProviderStreamAccumulator(
-      "chat_completions_json",
+      options.protocol === "anthropic" ? "anthropic" : "chat_completions_json",
       options.onDelta,
     );
     try {
@@ -129,7 +129,7 @@ async function readAcceptedResponse(
   try {
     return await readProviderEventStream(
       response,
-      options.responsesProtocol ? "responses" : "chat_completions",
+      options.protocol,
       options.onDelta,
     );
   } catch (error) {

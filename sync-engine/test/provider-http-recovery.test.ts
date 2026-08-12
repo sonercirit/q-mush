@@ -6,6 +6,7 @@ import {
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
 import { captureRejection, requireError } from "./promise-test-helpers.ts";
+import { cachedTextMessage } from "./prompt-cache-fixtures.ts";
 
 const FIRST_REQUEST_ID = "d128368f-4052-4f00-9233-61153d3f5953";
 const SECOND_REQUEST_ID = "5a18ebce-f9b5-4375-9beb-833abb711910";
@@ -270,7 +271,7 @@ describe("provider HTTP step recovery", () => {
     expect(body).toMatchObject({
       messages: [
         { role: "system" },
-        { content: "Hello", role: "user" },
+        cachedTextMessage("user", "Hello"),
         {
           content: "```text\nFix\n```",
           role: "assistant",
@@ -283,8 +284,7 @@ describe("provider HTTP step recovery", () => {
           ],
         },
         {
-          content: "# Q Mush",
-          role: "tool",
+          ...cachedTextMessage("tool", "# Q Mush"),
           tool_call_id: "repaired-call",
         },
       ],

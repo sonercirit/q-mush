@@ -7,14 +7,16 @@ import { PromptController } from "../solid/prompt-controller.ts";
 import { createPromptViewState } from "../solid/prompt-state.ts";
 import {
   BRAVE_SEARCH_PANEL,
-  createProviderViewState,
   GENERIC_PANEL,
   OPENAI_PANEL,
   OPENROUTER_PANEL,
-  type ProviderCredential,
-  type ProviderPanelConfiguration,
 } from "../solid/provider-client.tsx";
 import { ProviderController } from "../solid/provider-controller.ts";
+import {
+  createProviderViewState,
+  type ProviderCredential,
+} from "../solid/provider-credential-model.ts";
+import type { ProviderPanelConfiguration } from "../solid/provider-panel-configuration.ts";
 import { createReactiveState } from "../solid/reactive-state.ts";
 import { createRunnerViewState } from "../solid/runner-client.tsx";
 import { RunnerController } from "../solid/runner-controller.ts";

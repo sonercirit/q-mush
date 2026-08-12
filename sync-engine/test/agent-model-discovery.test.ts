@@ -1,15 +1,9 @@
 import { describe, expect, test } from "vitest";
-import type {
-  AgentModelCatalog,
-  AgentModelOption,
-  AgentReasoningEffort,
-} from "../../shared/agent-configuration.ts";
+import type { AgentModelCatalog } from "../../shared/agent-configuration.ts";
 import type {
   ProviderCredentialAccess,
-  ProviderCredentialSource,
   ProviderId,
 } from "../../shared/provider-credential-store.ts";
-import type { ProviderModelPricing } from "../../shared/provider-model-pricing.ts";
 import { utf8ByteLength } from "../../shared/utf8.ts";
 import {
   discoverAgentModels,
@@ -17,55 +11,12 @@ import {
   type AgentModelDiscoveryFetch,
 } from "../../sync-engine/agent-model-discovery.ts";
 import { createJsonResponse } from "../../sync-engine/http.ts";
+import { catalog, credential, model } from "./agent-model-discovery-helpers.ts";
 import { createOpenAiOAuthSecret } from "./oauth-test-helpers.ts";
 import { captureRejection } from "./promise-test-helpers.ts";
 
 class RequestCapture {
   request?: Request;
-}
-
-function credential(
-  source: ProviderCredentialSource,
-  secret: string,
-  accountId: string | null = null,
-  baseUrl?: string,
-): ProviderCredentialAccess {
-  return {
-    accountId,
-    ...(baseUrl === undefined ? {} : { baseUrl }),
-    id: "credential-id",
-    isDefault: false,
-    label: "Provider credential",
-    secret,
-    source,
-  };
-}
-
-function model(
-  id: string,
-  label: string,
-  reasoningEfforts: readonly AgentReasoningEffort[],
-  contextWindow: number | null = null,
-  inputModalities: readonly string[] | null = null,
-  outputModalities: readonly string[] | null = null,
-  pricing: ProviderModelPricing | null = null,
-): AgentModelOption {
-  return {
-    contextWindow,
-    id,
-    inputModalities,
-    label,
-    outputModalities,
-    pricing,
-    reasoningEfforts,
-  };
-}
-
-function catalog(
-  defaultModel: string,
-  models: readonly AgentModelOption[],
-): AgentModelCatalog {
-  return { defaultModel, models };
 }
 
 function discoveryFetch(

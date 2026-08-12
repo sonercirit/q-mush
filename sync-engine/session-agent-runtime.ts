@@ -611,6 +611,7 @@ export async function runSessionAgent(
     );
     throw error;
   } finally {
+    models.agent.close?.();
     runtime.realtime?.clearToolStreams(runtime.userId, runtime.detail.id);
   }
 }

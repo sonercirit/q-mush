@@ -1,6 +1,6 @@
 import { balancedCredentialId } from "../shared/provider-credential-pool.ts";
 import { isProviderId, type ProviderId } from "../shared/provider-id.ts";
-import type { ProviderCredential } from "./provider-client.tsx";
+import type { ProviderCredential } from "./provider-credential-model.ts";
 import {
   modelCredentialOptions,
   modelCredentialValue,

@@ -1,5 +1,5 @@
 import type { AgentSessionDetail } from "../shared/session-model.ts";
-import type { ProviderViewState } from "./provider-client.tsx";
+import type { ProviderViewState } from "./provider-credential-model.ts";
 
 export function selectedSessionCredentialAvailable(
   detail: AgentSessionDetail | undefined,

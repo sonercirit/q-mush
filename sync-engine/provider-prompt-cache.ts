@@ -1,0 +1,68 @@
+import type { AgentConversationMessage } from "../shared/agent-loop.ts";
+import { isRecord } from "../shared/auth-model.ts";
+
+// Anthropic-compatible endpoints accept at most four cache breakpoints per
+// request. Q Mush spends one on the static tools/system prefix and two rolling
+// ones near the transcript tail, so each step reads the previous step's cache
+// entry even when a step appends more blocks than the provider's automatic
+// prefix lookback covers.
+const ROLLING_BREAKPOINT_GAP = 2;
+
+// The one-hour TTL costs more per cache write but keeps a session's prefix
+// warm across think time, tool runs, and user pauses that outlive the default
+// five-minute cache.
+const PROMPT_CACHE_CONTROL: Readonly<Record<string, string>> = {
+  ttl: "1h",
+  type: "ephemeral",
+};
+
+function cacheableIndexAtOrBefore(
+  messages: readonly AgentConversationMessage[],
+  start: number,
+): number | undefined {
+  for (
+    let index = Math.min(start, messages.length - 1);
+    index >= 0;
+    index -= 1
+  ) {
+    if ((messages[index]?.content.length ?? 0) > 0) {
+      return index;
+    }
+  }
+
+  return undefined;
+}
+
+export function promptCacheBreakpoints(
+  messages: readonly AgentConversationMessage[],
+): ReadonlySet<number> {
+  const breakpoints = new Set<number>();
+  const last = cacheableIndexAtOrBefore(messages, messages.length - 1);
+
+  if (last === undefined) {
+    return breakpoints;
+  }
+
+  breakpoints.add(last);
+  const previous = cacheableIndexAtOrBefore(
+    messages,
+    last - ROLLING_BREAKPOINT_GAP,
+  );
+
+  if (previous !== undefined) {
+    breakpoints.add(previous);
+  }
+
+  return breakpoints;
+}
+
+export function withPromptCacheControl(
+  parts: readonly unknown[],
+): readonly unknown[] {
+  const last = parts.length - 1;
+  return parts.map((part, index) =>
+    index === last && isRecord(part)
+      ? { ...part, cache_control: PROMPT_CACHE_CONTROL }
+      : part,
+  );
+}

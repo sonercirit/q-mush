@@ -1,6 +1,6 @@
 import { createSignal, Show, type JSX } from "solid-js";
 import { setupDialogFocus } from "./dialog-focus.ts";
-import type { ProviderPanelConfiguration } from "./provider-client.tsx";
+import type { ProviderPanelConfiguration } from "./provider-panel-configuration.ts";
 import type { SessionReassignmentDialogController } from "./session-reassignment-dialog-controller.ts";
 
 type ReassignmentDialogProps = Readonly<{

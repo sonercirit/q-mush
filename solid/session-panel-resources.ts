@@ -1,5 +1,5 @@
 import type { Accessor } from "solid-js";
-import type { ProviderViewState } from "./provider-client.tsx";
+import type { ProviderViewState } from "./provider-credential-model.ts";
 import type { RunnerViewState } from "./runner-client.tsx";
 
 export interface SessionPanelResources {

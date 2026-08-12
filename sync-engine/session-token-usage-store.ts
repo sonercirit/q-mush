@@ -15,6 +15,10 @@ function sumReported(column: AnySQLiteColumn): SQL<number> {
   return sql<number>`coalesce(sum(CASE WHEN ${completeUsage} THEN ${column} ELSE 0 END), 0)`;
 }
 
+function assistantScope(condition: ReturnType<typeof and>): SQL | undefined {
+  return and(eq(agentMessages.role, "assistant"), condition);
+}
+
 function usageSummary(options: {
   readonly condition: ReturnType<typeof and>;
   readonly database: Pick<AppDatabase, "select">;
@@ -29,12 +33,24 @@ function usageSummary(options: {
       stepCount: sql<number>`count(*)`,
     })
     .from(agentMessages)
-    .where(and(eq(agentMessages.role, "assistant"), options.condition))
+    .where(assistantScope(options.condition))
+    .get();
+  // The latest reported step's input: everything before that request was
+  // available for caching, so cache rates divide by summed input minus this.
+  // Match the summed rows' completeness predicate, or a partially reported
+  // step would subtract input the sums never counted.
+  const lastReported = options.database
+    .select({ inputTokens: agentMessages.inputTokens })
+    .from(agentMessages)
+    .where(and(sql`${completeUsage}`, assistantScope(options.condition)))
+    .orderBy(sql`${agentMessages.createdAt} DESC, ${agentMessages.id} DESC`)
+    .limit(1)
     .get();
   return {
     cacheWriteInputTokens: usage?.cacheWriteInputTokens ?? 0,
     cachedInputTokens: usage?.cachedInputTokens ?? 0,
     inputTokens: usage?.inputTokens ?? 0,
+    lastInputTokens: lastReported?.inputTokens ?? 0,
     outputTokens: usage?.outputTokens ?? 0,
     reportedStepCount: usage?.reportedStepCount ?? 0,
     stepCount: usage?.stepCount ?? 0,

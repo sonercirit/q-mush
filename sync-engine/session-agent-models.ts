@@ -94,6 +94,7 @@ function modelOptions(
     ...agentModelRoutingOptions(detail.openRouterProviderTag),
     ...(onDelta === undefined ? {} : { onDelta }),
     ...(onStepStart === undefined ? {} : { onStepStart }),
+    promptCacheKey: detail.id,
     provider: detail.provider,
     providerPricing: detail.providerPricing,
     reasoningEffort: detail.reasoningEffort,

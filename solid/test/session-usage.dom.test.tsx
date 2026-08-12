@@ -11,6 +11,9 @@ const USAGE = {
   cacheWriteInputTokens: 200,
   cachedInputTokens: 600,
   inputTokens: 1_000,
+  // The second step's request: 1,000 summed minus 250 leaves 750 tokens that
+  // were available for caching, of which 600 were read.
+  lastInputTokens: 250,
   outputTokens: 300,
   reportedStepCount: 2,
   stepCount: 3,
@@ -40,16 +43,17 @@ test("shows whole-session and visible-segment usage with partial coverage", () =
     expect(output).toContain("Output: 300");
     expect(output).toContain("Cached: 600");
     expect(output).toContain("Cache write: 200");
-    expect(output).toContain("Cache rate: 60%");
+    expect(output).toContain("Cache rate: 80%");
     expect(output).toContain("2 of 3 steps");
   }
 });
 
-test("omits cache rate when no reported input exists", () => {
+test("omits cache rate when nothing was available for caching", () => {
   const usage = {
     ...USAGE,
     cachedInputTokens: 0,
-    inputTokens: 0,
+    inputTokens: 400,
+    lastInputTokens: 400,
     reportedStepCount: 1,
     stepCount: 1,
   };

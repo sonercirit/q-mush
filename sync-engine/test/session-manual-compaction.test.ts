@@ -373,6 +373,7 @@ describe("manual session compaction", () => {
     });
     expect(compacted?.tokenUsage).toEqual({
       ...STEP_TOKEN_USAGE,
+      lastInputTokens: STEP_TOKEN_USAGE.inputTokens,
       reportedStepCount: 1,
       stepCount: 1,
     });

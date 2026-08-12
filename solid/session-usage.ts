@@ -1,11 +1,11 @@
 import {
-  tokenCacheRate,
+  summaryTokenCacheRate,
   type AgentTokenUsageSummary,
 } from "../shared/session-token-usage.ts";
 import { formatTokenCount } from "./session-context-client.tsx";
 
 export function sessionUsageText(usage: AgentTokenUsageSummary): string {
-  const cacheRate = tokenCacheRate(usage);
+  const cacheRate = summaryTokenCacheRate(usage);
   const coverage =
     usage.reportedStepCount === usage.stepCount
       ? `${String(usage.stepCount)} steps`

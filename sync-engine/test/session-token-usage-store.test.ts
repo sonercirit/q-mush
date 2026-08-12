@@ -4,6 +4,7 @@ import type { AgentTokenUsage } from "../../shared/agent-loop.ts";
 import { agentMessages } from "../../shared/database/schema.ts";
 import type { AgentSessionUsageUpdate } from "../../shared/session-model.ts";
 import type { SessionStore } from "../../sync-engine/session-store.ts";
+import { storedSessionTokenUsage } from "../../sync-engine/session-token-usage-store.ts";
 import {
   TEST_NOW,
   TEST_USER_ID,
@@ -23,6 +24,12 @@ const NEXT_SEGMENT_TOKEN_USAGE = {
   cachedInputTokens: 200,
   inputTokens: 400,
   outputTokens: 100,
+} as const;
+
+const SINGLE_STEP_SUMMARY = {
+  ...TOKEN_USAGE,
+  lastInputTokens: TOKEN_USAGE.inputTokens,
+  reportedStepCount: 1,
 } as const;
 
 function appendStep(
@@ -65,11 +72,7 @@ test("persists model-step usage on its assistant message and aggregates it", () 
 
   const detail = setup.store.get(TEST_USER_ID, STORE_SESSION_ID);
   expect(detail?.messages.at(-1)?.tokenUsage).toEqual(TOKEN_USAGE);
-  expect(detail?.tokenUsage).toEqual({
-    ...TOKEN_USAGE,
-    reportedStepCount: 1,
-    stepCount: 1,
-  });
+  expect(detail?.tokenUsage).toEqual({ ...SINGLE_STEP_SUMMARY, stepCount: 1 });
   expect(detail?.segmentTokenUsage).toEqual(detail?.tokenUsage);
   expect(setup.store.list(TEST_USER_ID)[0]).not.toHaveProperty("tokenUsage");
   expect(
@@ -85,6 +88,25 @@ test("persists model-step usage on its assistant message and aggregates it", () 
       .all()
       .at(-1),
   ).toEqual({ cached: 600, input: 1_000, output: 200, written: 50 });
+  setup.database.$client.close();
+});
+
+test("a partially reported step never becomes the cache-rate divisor", () => {
+  const setup = runningStore();
+  appendStep(setup.store, "Reported step", TEST_NOW + 2, TOKEN_USAGE);
+  appendStep(setup.store, "Partial step", TEST_NOW + 3);
+  setup.database
+    .update(agentMessages)
+    .set({ inputTokens: 9_999 })
+    .where(eq(agentMessages.content, "Partial step"))
+    .run();
+
+  // The sums skip the partial row, so the last-input subtraction must too:
+  // otherwise rates divide by summed input minus tokens never counted.
+  expect(storedSessionTokenUsage(setup.database, STORE_SESSION_ID)).toEqual({
+    ...SINGLE_STEP_SUMMARY,
+    stepCount: 2,
+  });
   setup.database.$client.close();
 });
 
@@ -112,21 +134,19 @@ test("aggregates partial usage coverage by each message's segment", () => {
     cacheWriteInputTokens: 75,
     cachedInputTokens: 800,
     inputTokens: 1_400,
+    lastInputTokens: NEXT_SEGMENT_TOKEN_USAGE.inputTokens,
     outputTokens: 300,
     reportedStepCount: 2,
     stepCount: 5,
   });
   expect(session?.segmentTokenUsage).toEqual({
     ...NEXT_SEGMENT_TOKEN_USAGE,
+    lastInputTokens: NEXT_SEGMENT_TOKEN_USAGE.inputTokens,
     reportedStepCount: 1,
     stepCount: 2,
   });
   expect(
     setup.store.history(TEST_USER_ID, STORE_SESSION_ID, null)?.tokenUsage,
-  ).toEqual({
-    ...TOKEN_USAGE,
-    reportedStepCount: 1,
-    stepCount: 3,
-  });
+  ).toEqual({ ...SINGLE_STEP_SUMMARY, stepCount: 3 });
   setup.database.$client.close();
 });

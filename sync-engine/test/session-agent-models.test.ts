@@ -115,6 +115,16 @@ function sessionModelOptions(
 }
 
 describe("session agent models", () => {
+  test("keys the agent model's prompt cache to the session", () => {
+    const { factory, selections } = modelSelections();
+
+    createSessionAgentModels(sessionModelOptions(factory));
+
+    expect(selections[0]).toMatchObject({
+      promptCacheKey: TEST_SESSION_DETAIL.id,
+    });
+  });
+
   test("passes a global fallback routing selection to the agent model", () => {
     const { factory, selections } = modelSelections();
 

@@ -30,6 +30,10 @@ import type {
   AgentProviderCredential,
 } from "./agent-model-options.ts";
 import type { ModelRequestSleep } from "./agent-model-retry.ts";
+import {
+  ANTHROPIC_VERSION,
+  anthropicRequestBody,
+} from "./anthropic-request.ts";
 import { genericProviderEndpoint } from "./generic-provider-url.ts";
 import { readOpenAiOAuthCredential } from "./openai-credential.ts";
 import {
@@ -37,10 +41,18 @@ import {
   providerResponsesInput,
 } from "./provider-attachment-input.ts";
 import { completeProviderHttp } from "./provider-http.ts";
+import {
+  promptCacheBreakpoints,
+  withPromptCacheControl,
+} from "./provider-prompt-cache.ts";
+import type {
+  ProviderModelRequest,
+  ProviderRequestProtocol,
+} from "./provider-request.ts";
 import type { ProviderTextDelta } from "./provider-stream.ts";
 import {
-  completeProviderWebSocket,
   ProviderWebSocketError,
+  ProviderWebSocketSession,
   type ProviderWebSocketFactory,
 } from "./provider-websocket.ts";
 
@@ -72,6 +84,13 @@ function usesCodexOAuth(
   return provider === "openai" && credential.source === "oauth";
 }
 
+function usesAnthropicFormat(
+  provider: ProviderId,
+  credential: AgentProviderCredential,
+): boolean {
+  return provider === "generic" && credential.apiFormat === "anthropic";
+}
+
 function endpoint(
   provider: ProviderId,
   credential: AgentProviderCredential,
@@ -86,7 +105,12 @@ function endpoint(
     case "openrouter":
       return OPENROUTER_COMPLETIONS_URL;
     case "generic":
-      return genericProviderEndpoint(credential.baseUrl, "chat/completions");
+      return genericProviderEndpoint(
+        credential.baseUrl,
+        usesAnthropicFormat(provider, credential)
+          ? "messages"
+          : "chat/completions",
+      );
   }
 }
 
@@ -112,12 +136,22 @@ export function agentProviderRequestHeaders(
   provider: ProviderId,
   credential: AgentProviderCredential,
   accept: string,
+  promptCacheKey?: string,
 ): Headers {
   const headers = new Headers({
     accept,
     "content-type": "application/json",
   });
   const token = accessToken(provider, credential);
+
+  if (usesAnthropicFormat(provider, credential)) {
+    headers.set("anthropic-version", ANTHROPIC_VERSION);
+    if (token.length > 0) {
+      headers.set("x-api-key", token);
+    }
+    return headers;
+  }
+
   if (token.length > 0) {
     headers.set("authorization", `Bearer ${token}`);
   }
@@ -139,6 +173,13 @@ export function agentProviderRequestHeaders(
     }
 
     headers.set("originator", "q_mush");
+
+    // The Codex backend routes a session to the machine that already holds its
+    // prompt cache, so the stable session identifier is what keeps hit rates
+    // high across steps.
+    if (promptCacheKey !== undefined) {
+      headers.set("session_id", promptCacheKey);
+    }
 
     setChatGptAccountHeader(headers, credential.accountId);
   }
@@ -212,53 +253,98 @@ function openRouterProviderPreferences(
   return routing?.type === "sort" ? { sort: routing.sort } : undefined;
 }
 
-function requestBody(
-  messages: readonly AgentConversationMessage[],
-  model: string,
-  provider: ProviderId,
-  openRouterProviderRouting: OpenRouterProviderRouting | undefined,
-  responsesProtocol: boolean,
-  reasoningEffort: AgentReasoningEffort | undefined,
-  systemPrompt: string,
-  tools: readonly AgentToolDefinition[],
-  selectedTools: readonly AgentSessionToolName[],
-  dynamicToolCache: boolean,
-  stream = false,
-): unknown {
+// OpenRouter forwards Anthropic-style cache_control markers to providers that
+// price cached prefixes and strips them elsewhere. Generic OpenAI-format
+// endpoints get plain messages: local runtimes such as Ollama reject array
+// content with tool metadata, and only the Anthropic protocol is known to
+// honor the markers. OpenAI itself caches automatically, keyed by
+// prompt_cache_key.
+function usesCacheBreakpoints(request: ProviderModelRequest): boolean {
+  return request.provider === "openrouter";
+}
+
+function chatMessages(request: ProviderModelRequest): readonly unknown[] {
+  if (!usesCacheBreakpoints(request)) {
+    return [
+      { content: request.systemPrompt, role: "system" },
+      ...request.messages.map((message) => providerChatMessage(message)),
+    ];
+  }
+  const breakpoints = promptCacheBreakpoints(request.messages);
+  return [
+    {
+      content: withPromptCacheControl([
+        { text: request.systemPrompt, type: "text" },
+      ]),
+      role: "system",
+    },
+    ...request.messages.map((message, index) =>
+      providerChatMessage(message, breakpoints.has(index)),
+    ),
+  ];
+}
+
+// prompt_cache_key is an OpenAI parameter; OpenRouter tolerates and may
+// forward it, but strict generic OpenAI-compatible servers reject unknown
+// fields, so generic requests omit it.
+function promptCacheKeyField(
+  request: ProviderModelRequest,
+): Readonly<Record<string, string>> {
+  return request.promptCacheKey === undefined || request.provider === "generic"
+    ? {}
+    : { prompt_cache_key: request.promptCacheKey };
+}
+
+function requestBody(request: ProviderModelRequest): unknown {
+  if (request.protocol === "anthropic") {
+    return anthropicRequestBody(request);
+  }
+
+  const responsesProtocol = request.protocol === "responses";
   const reasoning = reasoningConfiguration(
-    provider,
+    request.provider,
     responsesProtocol,
-    reasoningEffort,
+    request.reasoningEffort,
+  );
+  const tools = toolConfiguration(
+    request.tools,
+    request.selectedTools,
+    responsesProtocol,
+    request.dynamicToolCache,
   );
 
   if (!responsesProtocol) {
     return {
-      messages: [
-        { content: systemPrompt, role: "system" },
-        ...messages.map(providerChatMessage),
-      ],
-      model,
-      ...(provider === "openrouter" && openRouterProviderRouting !== undefined
-        ? { provider: openRouterProviderPreferences(openRouterProviderRouting) }
+      messages: chatMessages(request),
+      model: request.model,
+      ...(request.provider === "openrouter" &&
+      request.openRouterProviderRouting !== undefined
+        ? {
+            provider: openRouterProviderPreferences(
+              request.openRouterProviderRouting,
+            ),
+          }
         : {}),
+      ...promptCacheKeyField(request),
       ...reasoning,
-      ...(stream
+      ...(request.stream
         ? { stream: true, stream_options: { include_usage: true } }
         : {}),
-      ...toolConfiguration(tools, selectedTools, false, dynamicToolCache),
+      ...tools,
     };
   }
 
   return {
     include: ["reasoning.encrypted_content"],
-    input: messages.flatMap(providerResponsesInput),
-    instructions: systemPrompt,
-    model,
+    input: request.messages.flatMap(providerResponsesInput),
+    instructions: request.systemPrompt,
+    model: request.model,
     parallel_tool_calls: false,
+    ...promptCacheKeyField(request),
     ...reasoning,
     store: false,
-    ...(stream ? { stream: true } : {}),
-    ...toolConfiguration(tools, selectedTools, true, dynamicToolCache),
+    ...(request.stream ? { stream: true } : {}),
+    ...tools,
   };
 }
 
@@ -293,6 +379,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
   readonly #onDelta: ((delta: ProviderTextDelta) => void) | undefined;
   readonly #onStepStart: () => void;
   readonly #openRouterProviderRouting: OpenRouterProviderRouting | undefined;
+  readonly #promptCacheKey: string | undefined;
   readonly #provider: ProviderId;
   readonly #reasoningEffort: AgentReasoningEffort | undefined;
   readonly #sleep: ModelRequestSleep | undefined;
@@ -300,6 +387,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
   readonly #selectedTools: readonly AgentSessionToolName[];
   readonly #tools: readonly AgentToolDefinition[];
   readonly #webSocket: ProviderWebSocketFactory;
+  readonly #webSocketSession = new ProviderWebSocketSession();
 
   constructor(options: ChatCompletionsAgentModelOptions) {
     this.#credential = options.credential;
@@ -313,6 +401,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
       (options.openRouterProviderTag === undefined
         ? undefined
         : { tag: options.openRouterProviderTag, type: "provider" });
+    this.#promptCacheKey = options.promptCacheKey;
     this.#provider = options.provider;
     this.#reasoningEffort = options.reasoningEffort ?? undefined;
     this.#sleep = options.sleep;
@@ -326,6 +415,10 @@ export class ChatCompletionsAgentModel implements AgentModel {
 
   readonly startStep = (): void => {
     this.#onStepStart();
+  };
+
+  readonly close = (): void => {
+    this.#webSocketSession.close();
   };
 
   async complete(...parameters: CompletionArguments): Promise<AgentModelStep> {
@@ -394,22 +487,32 @@ export class ChatCompletionsAgentModel implements AgentModel {
 
   #requestBody(
     messages: readonly AgentConversationMessage[],
-    responsesProtocol: boolean,
+    protocol: ProviderRequestProtocol,
     stream: boolean,
   ): unknown {
-    return requestBody(
+    return requestBody({
+      dynamicToolCache: this.#dynamicToolCache,
       messages,
-      this.#model,
-      this.#provider,
-      this.#openRouterProviderRouting,
-      responsesProtocol,
-      this.#reasoningEffort,
-      this.#systemPrompt,
-      this.#tools,
-      this.#selectedTools,
-      this.#dynamicToolCache,
+      model: this.#model,
+      openRouterProviderRouting: this.#openRouterProviderRouting,
+      promptCacheKey: this.#promptCacheKey,
+      protocol,
+      provider: this.#provider,
+      reasoningEffort: this.#reasoningEffort,
+      selectedTools: this.#selectedTools,
       stream,
-    );
+      systemPrompt: this.#systemPrompt,
+      tools: this.#tools,
+    });
+  }
+
+  #httpProtocol(): ProviderRequestProtocol {
+    if (usesCodexOAuth(this.#provider, this.#credential)) {
+      return "responses";
+    }
+    return usesAnthropicFormat(this.#provider, this.#credential)
+      ? "anthropic"
+      : "chat_completions";
   }
 
   #webSocketOptions(signal: AbortSignal | undefined): {
@@ -430,15 +533,16 @@ export class ChatCompletionsAgentModel implements AgentModel {
       this.#provider,
       this.#credential,
       "application/websocket-events",
+      this.#promptCacheKey,
     );
     const codexOAuth = usesCodexOAuth(this.#provider, this.#credential);
-    const body = this.#requestBody(messages, true, false);
+    const body = this.#requestBody(messages, "responses", false);
 
     if (!isRecord(body)) {
       throw new Error("The model request body was invalid");
     }
 
-    return completeProviderWebSocket({
+    return this.#webSocketSession.complete({
       body,
       createSocket: this.#webSocket,
       headers: headersRecord(headers),
@@ -451,19 +555,20 @@ export class ChatCompletionsAgentModel implements AgentModel {
 
   #completeHttp(...parameters: CompletionArguments): Promise<AgentModelStep> {
     const input = completionInput(parameters);
-    const responsesProtocol = usesCodexOAuth(this.#provider, this.#credential);
+    const protocol = this.#httpProtocol();
     return completeProviderHttp(
       {
-        body: this.#requestBody(input.messages, responsesProtocol, true),
+        body: this.#requestBody(input.messages, protocol, true),
         fetch: this.#fetch,
         headers: agentProviderRequestHeaders(
           this.#provider,
           this.#credential,
           "text/event-stream",
+          this.#promptCacheKey,
         ),
         onDelta: this.#onDelta,
+        protocol,
         provider: this.#provider,
-        responsesProtocol,
         sleep: this.#sleep,
         url: endpoint(this.#provider, this.#credential),
       },

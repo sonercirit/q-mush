@@ -23,7 +23,7 @@ import {
   modelModalitiesLabel,
   renderModelModalities,
 } from "./model-modalities-client.tsx";
-import type { ProviderViewState } from "./provider-client.tsx";
+import type { ProviderViewState } from "./provider-credential-model.ts";
 import { renderDebugBoundary } from "./render-debug.tsx";
 import type { RunnerViewState } from "./runner-client.tsx";
 import { SessionAutoCompactToggle } from "./session-autocompact-toggle.tsx";

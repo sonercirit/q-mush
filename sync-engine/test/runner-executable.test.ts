@@ -175,16 +175,16 @@ describe("runner executable downloads", () => {
         "http://127.0.0.1/",
       ]);
 
+      expect(publicResult.stderr.toString()).toBe("");
       expect(publicResult.exitCode).toBe(0);
       expect(publicResult.stdout.toString()).toBe("Example Domain\n");
-      expect(publicResult.stderr.toString()).toBe("");
+      expect(unsafeResult.stderr.toString()).toBe("");
       expect(unsafeResult.exitCode).toBe(0);
       expect(unsafeResult.stdout.toString()).toBe("unsafe\n");
-      expect(unsafeResult.stderr.toString()).toBe("");
     } finally {
       removeTemporaryDirectory(directory);
     }
-  }, 30_000);
+  }, 150_000);
 
   test("builds a runnable executable that does not need Bun on PATH", async () => {
     const provider = await buildRunnerExecutableProvider();

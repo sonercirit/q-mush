@@ -104,7 +104,12 @@ export class ModelConversationCompactor implements AgentConversationCompactor {
     const [messages, signal] = parameters;
     const input = compactionMessages(messages);
     this.#onRequest?.(AGENT_COMPACTION_REQUEST_MESSAGE);
-    const step: AgentModelStep = await this.#model.complete(input, signal);
+    let step: AgentModelStep;
+    try {
+      step = await this.#model.complete(input, signal);
+    } finally {
+      this.#model.close?.();
+    }
 
     if (step.toolCalls.length > 0 || step.content.trim().length === 0) {
       throw new InvalidCompactionSummaryError();
