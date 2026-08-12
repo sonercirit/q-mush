@@ -11,7 +11,11 @@ import {
   type RunnerProcessResult,
 } from "./runner-process.ts";
 
-const DEFAULT_CONTAINER_IMAGE = "debian:bookworm-slim";
+// Arch publishes amd64-only images; hosts that cannot run amd64 (no
+// emulation, or a runtime not defaulting to it) need a multi-arch
+// Q_MUSH_CONTAINER_IMAGE override (startup fails loudly with that
+// guidance otherwise).
+const DEFAULT_CONTAINER_IMAGE = "archlinux:latest";
 const CONTAINER_WORKSPACE = "/workspace";
 const CONTAINER_IDENTIFIER_PATTERN = /^[A-Za-z\d][A-Za-z\d_.-]{0,199}$/u;
 type RunnerContainerRunOptions = Pick<
@@ -124,31 +128,18 @@ function configuredValue(
   return value === undefined || value.length === 0 ? fallback : value;
 }
 
-function runtimeUser(): string | undefined {
-  return process.getuid === undefined || process.getgid === undefined
-    ? undefined
-    : `${String(process.getuid())}:${String(process.getgid())}`;
-}
-
-function containerEnvironment(): readonly string[] {
-  const environment: string[] = [];
-  const entries = [
-    ["HOME", "/tmp/q-mush-home"],
-    ["TMPDIR", "/tmp"],
-  ] as const;
-  for (const [name, value] of entries) {
-    environment.push("--env", `${name}=${value}`);
-  }
-  return environment;
-}
-
 function runtimeArguments(
   root: string,
   name: string,
   image: string,
 ): readonly string[] {
   const mount = `type=bind,source=${root},target=${CONTAINER_WORKSPACE}`;
-  const user = runtimeUser();
+  // The session container is the agent's own disposable machine: root with
+  // the runtime's default capabilities and network access, so package
+  // installs (pacman on the default Arch image) work. Isolation comes from
+  // the container boundary and per-session teardown, not host-uid mapping.
+  // --user 0:0 enforces the root contract even when an override image
+  // declares a USER directive.
   return [
     "run",
     "--detach",
@@ -158,14 +149,8 @@ function runtimeArguments(
     "--label",
     "dev.q-mush.owner=session",
     "--init",
-    "--network",
-    "none",
-    "--cap-drop",
-    "ALL",
-    "--security-opt",
-    "no-new-privileges",
-    ...(user === undefined ? [] : ["--user", user]),
-    ...containerEnvironment(),
+    "--user",
+    "0:0",
     "--mount",
     mount,
     "--workdir",
@@ -174,7 +159,7 @@ function runtimeArguments(
     "/bin/sh",
     image,
     "-c",
-    'mkdir -p "$HOME" && while :; do sleep 3600; done',
+    "while :; do sleep 3600; done",
   ];
 }
 
@@ -193,9 +178,26 @@ function processError(
   action: string,
   result: RunnerProcessResult,
 ): Error {
-  const detail = result.standardError.trim() || result.standardOutput.trim();
+  // Match the full detail: pull chatter often pushes the diagnostic past
+  // the displayed prefix. The platform branch bounds its gap so long
+  // single-line outputs cannot trigger measurable backtracking.
+  const fullDetail =
+    result.standardError.trim() || result.standardOutput.trim();
+  const detail = fullDetail.slice(0, 500);
+  // The default Arch image is amd64-only; hosts that cannot run it (ARM64
+  // without emulation) need the image override, so say so. Docker reports
+  // "no matching manifest", Podman "no image found in image index (or
+  // manifest list) for architecture"; emulated pulls that succeed can
+  // still fail at start with "exec format error".
+  const guidance =
+    /no matching manifest|no image found in (?:image index|manifest list) for architecture|platform[^\n]{0,200}does not match|exec format error/iu.test(
+      fullDetail,
+    )
+      ? " The configured image does not support this host architecture; set Q_MUSH_CONTAINER_IMAGE to a compatible image."
+      : "";
+  const separator = /[.!?]$/u.test(detail) ? "" : ".";
   return new Error(
-    `Container execution is unavailable: ${runtime} could not ${action}${detail.length === 0 ? "" : `: ${detail.slice(0, 500)}`}`,
+    `Container execution is unavailable: ${runtime} could not ${action}${detail.length === 0 ? "" : `: ${detail}`}${separator}${guidance}`,
   );
 }
 

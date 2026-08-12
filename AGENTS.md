@@ -10,31 +10,29 @@ Living project memory.
 ## Working Agreements
 
 - Always research online before a change, unasked: search current provider docs
-  and issue trackers (brave-search skill) for each integration or surprise —
-  search finds switches probes miss. Then verify: probe real APIs with local
-  credentials, enumerate schemas via validation errors, read usage metrics.
+  and issue trackers (brave-search skill) — search finds switches probes miss.
+  Then verify: probe real APIs with local credentials, enumerate schemas via
+  validation errors, read usage metrics.
 - Call a capability impossible only when evidence excludes it — docs searched,
-  schema enumerated — otherwise record an open question.
-- Preserve patterns, add tools only as needed, and proactively improve whatever
-  you touch — code health, tests, docs, performance, security, DX: ship small
-  improvements with the change, larger ones as immediate follow-ups.
+  schema enumerated — else record an open question.
+- Preserve patterns, add tools only as needed, and proactively improve what you
+  touch — code health, tests, docs, performance, security, DX: small
+  improvements ship with the change, larger ones as immediate follow-ups.
 - Practice TDD: failing test first, implement, refactor green.
 - Follow DRY and KISS: authoritative logic, no premature abstractions.
 - Never invent numeric limits or tunables: probe omission first, prefer the
-  provider default, else derive from provider metadata, docs, or feedback.
-- Integrate completely the first time: wire every session capability (reasoning,
-  caching, attachments, limits) to each protocol's native control, recording
-  what a protocol lacks.
+  provider default, else derive from metadata, docs, or feedback.
+- Integrate completely the first time: wire every session capability to each
+  protocol's native control, recording what a protocol lacks.
 - No reward hacking: never weaken tests, special-case checks, or claim
   unperformed verification; disclose whatever stays unverified. Fix defects on
   sight in the branch at hand, unprompted, even when pre-existing or out of
-  scope — never punt them to a separate PR or ask permission first; when an
-  experiment proves the obvious fix harmful, codify why in a test.
+  scope; when an experiment proves the obvious fix harmful, codify why in a
+  test.
 - Record new decisions, gotchas, and lessons here in the same change, unprompted
-  — a repeated user instruction means a rule is missing, so add it; condense
-  elsewhere to fit the size policy. When evidence overturns a recorded finding,
-  fix the code it justified and every stale record — here, code comments,
-  handoff, PR text — in that change; act, don't ask.
+  — a repeated user instruction means a rule is missing; condense elsewhere to
+  fit the size policy. When evidence overturns a recorded finding, fix the code
+  it justified and every stale record in that change; act, don't ask.
 - Keep workflows local-first: narrow checks per change, broad suites once
   captured, then rerun only the narrowest failing scope.
 - Never commit secrets, generated artifacts, or env files.
@@ -252,29 +250,32 @@ Living project memory.
   `compile.outfile` (`outputs[0]` is bundled JS): build in a temp directory,
   read the outfile before cleanup.
 - Bare-metal file tools resolve relative paths against the runner workspace but
-  accept any runner-account-accessible path; container sessions and attachment
-  records stay contained (file tools run on the host). `read` pages its source.
-  The directory picker browses beyond a session workspace with runner-account
-  permissions, returns only directory metadata, bounds listings, and times out
-  stalls. Stopping a session aborts its model request and pushes runner-command
-  cancellation, terminating an active shell command. OpenAI API-key and OAuth
-  requests prefer Responses WebSockets, falling back to HTTP streaming;
-  OpenRouter and generic endpoints stream chat completions, Anthropic-format
-  endpoints Messages events. OpenAI OAuth refreshes its token bundle before
-  expiry. Session creation requires an explicit model ID with no built-in
-  fallbacks. Catalogs: OpenAI `/v1/models`, OpenRouter `/api/v1/models/user`,
-  ChatGPT Codex `/models`, or the generic `/models`; Anthropic-format catalogs
-  read `display_name`, `max_input_tokens`, and the `capabilities` tree
-  (`agent-model-discovery-anthropic.ts`: per-level `effort` support gated on
-  adaptive thinking, modalities only from `image_input`/`pdf_input` leaves),
-  page via `has_more`/`last_id` at `limit=1000` with stale-cursor and page-count
-  guards, and probe the endpoint's OpenAI-style listing only where capabilities
-  left efforts unknown. Codex parsing retains streamed output-text and
-  function-call argument deltas since completed events may omit `output`. Only
-  explicitly listed efforts are offered; OpenAI's catalog lacks reasoning
-  metadata. Optional reasoning uses `reasoning_effort` for OpenAI and generic
-  chat completions and `reasoning.effort` for OpenRouter and Codex Responses;
-  the Anthropic Messages format maps efforts to `output_config.effort` plus
+  accept any runner-account-accessible path; container file tools and attachment
+  records stay contained (they run on the host). Container shells run as root in
+  a disposable per-session Arch container (default `archlinux:latest`) with
+  network and default capabilities, so pacman works; only the workspace is
+  bind-mounted. `read` pages its source. The directory picker browses beyond a
+  session workspace with runner-account permissions, returns only directory
+  metadata, bounds listings, and times out stalls. Stopping a session aborts its
+  model request and pushes runner-command cancellation, terminating an active
+  shell command. OpenAI API-key and OAuth requests prefer Responses WebSockets,
+  falling back to HTTP streaming; OpenRouter and generic endpoints stream chat
+  completions, Anthropic-format endpoints Messages events. OpenAI OAuth
+  refreshes its token bundle before expiry. Session creation requires an
+  explicit model ID with no built-in fallbacks. Catalogs: OpenAI `/v1/models`,
+  OpenRouter `/api/v1/models/user`, ChatGPT Codex `/models`, or the generic
+  `/models`; Anthropic-format catalogs read `display_name`, `max_input_tokens`,
+  and the `capabilities` tree (`agent-model-discovery-anthropic.ts`: per-level
+  `effort` support gated on adaptive thinking, modalities only from
+  `image_input`/`pdf_input` leaves), page via `has_more`/`last_id` at
+  `limit=1000` with stale-cursor and page-count guards, and probe the endpoint's
+  OpenAI-style listing only where capabilities left efforts unknown. Codex
+  parsing retains streamed output-text and function-call argument deltas since
+  completed events may omit `output`. Only explicitly listed efforts are
+  offered; OpenAI's catalog lacks reasoning metadata. Optional reasoning uses
+  `reasoning_effort` for OpenAI and generic chat completions and
+  `reasoning.effort` for OpenRouter and Codex Responses; the Anthropic Messages
+  format maps efforts to `output_config.effort` plus
   `thinking: {type: "adaptive", display: "summarized"}` on provider-default
   budgets, sending neither for `none` and `minimal` as `low` (rejected
   otherwise). Adaptive-only models (Fable) ignore `enabled`; newer models

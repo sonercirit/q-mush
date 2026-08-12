@@ -214,28 +214,34 @@ category. Q Mush has no built-in model-price table and shows unavailable rather
 than guessing a missing price. Automatic compaction is enabled per session by
 default and replaces completed history with a model-generated handoff once usage
 reaches 95%, then transparently continues the active session from that summary.
-Automatic and manual compaction model calls are included in cumulative cost. It
-can be turned off, and a ready session can be compacted manually without
-continuing it. Session transcripts and status survive page reloads; a ready,
-stopped, or failed session accepts follow-up instructions. When an assigned
-runner is removed, the session shows **Choose runner** instead of **Failed**,
-preserves its transcript and configuration, and disables follow-up, continue,
-image, and compaction controls until an online replacement and a confirmed
-working directory are selected. Reassignment itself does not resume work. **Stop
+Automatic and manual compaction model calls count toward cumulative cost. It can
+be turned off, and a ready session can be compacted manually without continuing
+it. Session transcripts and status survive page reloads; a ready, stopped, or
+failed session accepts follow-up instructions. When an assigned runner is
+removed, the session shows **Choose runner** instead of **Failed**, keeps its
+transcript and configuration, and disables follow-up, continue, image, and
+compaction controls until an online replacement and a confirmed working
+directory are selected. Reassignment itself does not resume work. **Stop
 session** aborts the model request and cancels an active runner command.
 
-The runner executes tools with the runner process's local account permissions.
-In bare-metal sessions file tools accept any path that account can access,
-resolving relative paths against the selected workspace; shell commands are
-intentionally full shell commands rooted in that directory. Container sessions
-confine file tools to the workspace, matching the container's isolation. Before
-a workspace is selected, the authenticated directory browser can inspect
-directories readable by that same runner account; each response contains only
-the canonical location, parent, and at most 500 child directories. Only use
-runners and model credentials you trust with the selected project. The selected
-agent file is sent to the model provider as project instructions. Provider
-secrets remain on the Q Mush server: the browser and runner work protocol never
-receive them.
+The runner executes file tools and bare-metal shells with the runner process's
+local account permissions. In bare-metal sessions file tools accept any path
+that account can access, resolving relative paths against the selected
+workspace; shell commands are intentionally full commands rooted in that
+directory. Container sessions confine file tools to the workspace, matching the
+container's mount; container shells run as root in the disposable session
+container with network access. With a rootful runtime that root is host root
+over the mounted workspace and can leave root-owned files (hooks, setuid
+binaries) a host user later runs, so trust container sessions like the
+workspace; rootless Podman maps files to the runner account. The default
+`archlinux:latest` image is amd64-only; unless the runtime runs amd64 (native or
+configured emulation) set `Q_MUSH_CONTAINER_IMAGE` (`Q_MUSH_CONTAINER_RUNTIME`
+selects docker or podman). The authenticated directory browser inspects
+directories readable by that account; responses hold the canonical location,
+parent, and up to 500 child directories. Only use runners and model credentials
+you trust with the selected project; the selected agent file goes to the model
+provider as project instructions. Provider secrets remain on the Q Mush server:
+the browser and runner work protocol never receive them.
 
 OpenAI API keys and connected accounts prefer the streaming Responses WebSocket
 and fall back to HTTP streaming when that transport is unavailable. OpenRouter

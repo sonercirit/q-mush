@@ -32,7 +32,7 @@ export function SessionExecutionEnvironmentSelect(props: {
         },
         {
           description:
-            "Isolated ephemeral container with only the workspace mounted",
+            "Root in a disposable container (Arch Linux by default) with network access and the workspace mounted",
           label: "Container",
           value: "container",
         },

@@ -73,7 +73,64 @@ function createTrackingPath(value: unknown): string {
 }
 
 describe("RunnerContainerManager", () => {
-  test("starts one hardened container per session and maps the workspace", async () => {
+  test("defaults to the Arch Linux image", async () => {
+    const fake = successfulFake();
+    const manager = new RunnerContainerManager({
+      environment: {},
+      run: fake.run,
+    });
+    await manager.prepare("session-1", temporaryDirectory());
+
+    expect(fake.calls[0]?.executable).toBe("docker");
+    expect(fake.calls[0]?.arguments).toContain("archlinux:latest");
+  });
+
+  test.each([
+    [
+      "docker: no matching manifest for linux/arm64 in the manifest list entries",
+      true,
+    ],
+    [
+      'Error: choosing an image from manifest list docker.io/library/archlinux:latest: no image found in image index for architecture "arm64"',
+      true,
+    ],
+    // Pull chatter precedes the diagnostic; matching must span past the
+    // 500-character display truncation.
+    [
+      `Unable to find image 'archlinux:latest' locally\n${"latest: pulling layer\n".repeat(30)}docker: no matching manifest for linux/arm64/v8 in the manifest list entries`,
+      true,
+    ],
+    // Emulated pulls can succeed and still start a mismatched binary.
+    ["exec /bin/sh: exec format error", true],
+    // Unrelated failures must not claim an architecture mismatch.
+    ["Error response from daemon: connection refused", false],
+  ])(
+    "explains architecture mismatches with the image override",
+    async (standardError, expectGuidance) => {
+      const calls: FakeCall[] = [];
+      const manager = new RunnerContainerManager({
+        run: containerOperationRun(calls, {
+          run: () =>
+            Promise.resolve(processResult({ exitCode: 125, standardError })),
+        }),
+      });
+      const guidance = "set Q_MUSH_CONTAINER_IMAGE to a compatible image";
+      let failure: unknown;
+      try {
+        await manager.prepare("session-1", temporaryDirectory());
+      } catch (error) {
+        failure = error;
+      }
+
+      if (!(failure instanceof Error)) {
+        throw new TypeError("The container start did not fail");
+      }
+      expect(failure.message).toContain(standardError.slice(0, 500));
+      expect(failure.message.includes(guidance)).toBe(expectGuidance);
+    },
+  );
+
+  test("starts one root container per session and maps the workspace", async () => {
     const fake = successfulFake();
     const root = temporaryDirectory();
     const manager = new RunnerContainerManager({
@@ -101,24 +158,32 @@ describe("RunnerContainerManager", () => {
     const start = fake.calls[0];
     expect(start).toBeDefined();
     expect(start?.executable).toBe("podman");
-    expect(start?.arguments).toEqual(
-      expect.arrayContaining([
-        "--rm",
-        "--name",
-        "q-mush-test-session",
-        "--network",
-        "none",
-        "--cap-drop",
-        "ALL",
-        "--security-opt",
-        "no-new-privileges",
-        "--mount",
-        `type=bind,source=${root},target=/workspace`,
-        "--workdir",
-        "/workspace",
-        "example/image:latest",
-      ]),
-    );
+    // Full-freedom container: exact argv pins that the agent runs as an
+    // explicitly enforced root (--user 0:0 beats image USER directives)
+    // with default capabilities and network access (no --network/
+    // --cap-drop/--security-opt/--env in any spelling) alongside the
+    // retained per-session lifecycle flags.
+    expect(start?.arguments).toEqual([
+      "run",
+      "--detach",
+      "--rm",
+      "--name",
+      "q-mush-test-session",
+      "--label",
+      "dev.q-mush.owner=session",
+      "--init",
+      "--user",
+      "0:0",
+      "--mount",
+      `type=bind,source=${root},target=/workspace`,
+      "--workdir",
+      "/workspace",
+      "--entrypoint",
+      "/bin/sh",
+      "example/image:latest",
+      "-c",
+      "while :; do sleep 3600; done",
+    ]);
     const executions = fake.calls.filter(
       ({ arguments: args }) => args[0] === "exec",
     );

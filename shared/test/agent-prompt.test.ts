@@ -4,6 +4,24 @@ import {
   createAgentSystemPrompt,
 } from "../../shared/agent-prompt.ts";
 
+test("describes the root Arch container environment for container sessions", () => {
+  const prompt = createAgentSystemPrompt(null, "container");
+
+  expect(prompt).toContain("root");
+  expect(prompt).toContain("Arch Linux");
+  expect(prompt).toContain("pacman");
+  // The image ships without synced databases; a bare pacman -S fails and
+  // partial upgrades (-Sy + install) are unsupported on Arch.
+  expect(prompt).toContain("pacman -Syu");
+  expect(prompt).toContain("/workspace");
+  expect(prompt).toContain("permission error");
+  expect(prompt).toContain("chown");
+  expect(prompt).toContain("stat -c %u:%g /workspace");
+  expect(prompt).toContain("use the network");
+  expect(prompt).toContain("unless the runner overrides the image");
+  expect(prompt).not.toContain("network access is disabled");
+});
+
 test("adds a selected workspace agent file to the system prompt", () => {
   expect(createAgentSystemPrompt(null)).toBe(
     `${AGENT_SYSTEM_PROMPT}\nFile and shell tools execute directly on the selected runner.`,
