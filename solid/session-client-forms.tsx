@@ -72,7 +72,9 @@ function createLocalPromptEcho(options: {
   readonly onInput: (value: string) => void;
   readonly prompt: () => string;
 }) {
-  const [textarea, setTextareaElement] = createSignal<HTMLTextAreaElement>();
+  const [textarea, setTextareaElement] = createSignal<
+    HTMLInputElement | HTMLTextAreaElement
+  >();
   const [localPrompt, setLocalPrompt] = createSignal(untrack(options.prompt));
   let syncTimer: ReturnType<typeof setTimeout> | undefined;
   const clearSyncTimer = (): void => {
@@ -85,9 +87,9 @@ function createLocalPromptEcho(options: {
     clearSyncTimer();
     if (localPrompt() !== options.prompt()) options.onInput(localPrompt());
   };
-  const handleInput = (
-    event: InputEvent & { readonly currentTarget: HTMLTextAreaElement },
-  ): void => {
+  const handleInput = (event: {
+    readonly currentTarget: HTMLInputElement | HTMLTextAreaElement;
+  }): void => {
     setLocalPrompt(event.currentTarget.value);
     clearSyncTimer();
     syncTimer = setTimeout(syncPrompt, PROMPT_SYNC_DELAY_MS);
@@ -96,7 +98,9 @@ function createLocalPromptEcho(options: {
     clearSyncTimer();
     setLocalPrompt(options.prompt());
   };
-  const setTextarea = (element: HTMLTextAreaElement): void => {
+  const setTextarea = (
+    element: HTMLInputElement | HTMLTextAreaElement,
+  ): void => {
     setTextareaElement(element);
   };
   const handleKeyDown = (
@@ -147,7 +151,7 @@ function createLocalPromptEcho(options: {
 }
 
 function promptEcho(
-  props: PromptEventProps & { readonly prompt: string },
+  props: Pick<PromptEventProps, "onInput"> & { readonly prompt: string },
   externalWins = false,
 ) {
   return createLocalPromptEcho({
@@ -157,6 +161,40 @@ function promptEcho(
     },
     prompt: () => props.prompt,
   });
+}
+
+export function SessionDraftEchoInput(props: {
+  readonly disabled: boolean;
+  readonly id: string;
+  readonly name: string;
+  readonly numeric?: boolean;
+  readonly onInput: (value: string) => void;
+  readonly placeholder: string;
+  readonly value: string;
+}): JSX.Element {
+  const syncDraft = (value: string): void => {
+    props.onInput(value);
+  };
+  const echo = createLocalPromptEcho({
+    onInput: syncDraft,
+    prompt: () => props.value,
+  });
+  return (
+    <input
+      class="mt-2 min-w-0 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none"
+      disabled={props.disabled}
+      id={props.id}
+      name={props.name}
+      onBlur={echo.syncPrompt}
+      onInput={echo.handleInput}
+      placeholder={props.placeholder}
+      ref={echo.setTextarea}
+      {...(props.numeric === true
+        ? { min: "1", step: "1", type: "number" }
+        : { type: "text" })}
+      value={echo.localPrompt()}
+    />
+  );
 }
 
 function promptEvents(props: PromptEventProps) {

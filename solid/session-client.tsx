@@ -26,7 +26,10 @@ import {
 import type { ProviderViewState } from "./provider-credential-model.ts";
 import { renderDebugBoundary } from "./render-debug.tsx";
 import type { RunnerViewState } from "./runner-client.tsx";
-import { SessionPromptInput } from "./session-client-forms.tsx";
+import {
+  SessionDraftEchoInput,
+  SessionPromptInput,
+} from "./session-client-forms.tsx";
 import { SessionDraftCompactionToggles } from "./session-compaction-toggle.tsx";
 import { formatTokenCount } from "./session-context-client.tsx";
 import { SessionContextTokenCapInput } from "./session-context-token-cap-input.tsx";
@@ -336,19 +339,14 @@ function NewSessionForm(
       {renderFormField(
         "session-agent-file-path",
         <>Agent file path (optional)</>,
-        <input
-          class="mt-2 min-w-0 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none"
+        <SessionDraftEchoInput
           disabled={props.state.creating}
           id="session-agent-file-path"
           name="agentFilePath"
-          onInput={(event) => {
-            props.controller.setDraftField(
-              "agentFilePath",
-              event.currentTarget.value,
-            );
+          onInput={(value) => {
+            props.controller.setDraftField("agentFilePath", value);
           }}
           placeholder="AGENTS.md, config/instructions.md, or /absolute/path"
-          type="text"
           value={props.state.draft.agentFilePath ?? ""}
         />,
       )}

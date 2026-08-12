@@ -112,11 +112,11 @@ Living project memory.
   continues from the handoff; idle sessions compact manually or, opted in, after
   30 idle minutes; compaction soft-deletes prior messages, inserting a
   replayable handoff. The composer stays mounted across statuses, explaining
-  unavailable actions, preserving drafts; composer text fields echo a local
-  signal debounced into the shared draft — submit paths (blur, shortcut,
-  capture-phase submit) must flush first; local preferences filter transcript
-  categories. Provider secrets stay out of browser and runner work payloads. The
-  working-directory field opens `solid/directory-picker-client.tsx` backed by
+  unavailable actions, preserving drafts; draft text fields echo a local signal
+  debounced into the shared draft — submit paths (blur, shortcut, capture-phase
+  submit) flush first; local preferences filter transcript categories. Provider
+  secrets stay out of browser and runner work payloads. The working-directory
+  field opens `solid/directory-picker-client.tsx` backed by
   `/api/runners/:id/directories`. Each run, `read_agent_file` loads exact-root
   `AGENTS.md` (else `CLAUDE.md`).
 
