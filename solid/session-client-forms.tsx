@@ -72,7 +72,7 @@ function createLocalPromptEcho(options: {
   readonly onInput: (value: string) => void;
   readonly prompt: () => string;
 }) {
-  const [textarea, setTextareaElement] = createSignal<
+  const [element, setElementSignal] = createSignal<
     HTMLInputElement | HTMLTextAreaElement
   >();
   const [localPrompt, setLocalPrompt] = createSignal(untrack(options.prompt));
@@ -98,17 +98,19 @@ function createLocalPromptEcho(options: {
     clearSyncTimer();
     setLocalPrompt(options.prompt());
   };
-  const setTextarea = (
-    element: HTMLInputElement | HTMLTextAreaElement,
+  const setElement = (
+    control: HTMLInputElement | HTMLTextAreaElement,
   ): void => {
-    setTextareaElement(element);
+    setElementSignal(control);
   };
   const handleKeyDown = (
     event: SessionPromptKeyEvent,
     delegate: (event: SessionPromptKeyEvent) => void,
   ): void => {
     // Composer shortcuts requestSubmit() synchronously, so flush before
-    // delegating; a pending timer syncs the draft shortly regardless.
+    // delegating. A readOnly composer still receives keydown; the flush
+    // stays safe because unavailable composers gate onInput consumer-side
+    // (setFollowUp no-ops while disabled), not because no event arrives.
     if (sessionComposerShortcut(event) !== undefined) {
       syncPrompt();
     }
@@ -117,9 +119,9 @@ function createLocalPromptEcho(options: {
   createEffect(() => {
     // A capture-phase listener runs before the form's own submit handler,
     // so requestSubmit(), button.click(), and assistive-technology
-    // activation all read a flushed draft even while the textarea is
-    // focused with a pending sync.
-    const form = textarea()?.form;
+    // activation all read a flushed draft even while the field is focused
+    // with a pending sync.
+    const form = element()?.form;
     if (form === null || form === undefined) return;
     form.addEventListener("submit", syncPrompt, true);
     onCleanup(() => {
@@ -132,7 +134,7 @@ function createLocalPromptEcho(options: {
       if (
         options.externalWins === true ||
         syncTimer === undefined ||
-        textarea() !== document.activeElement
+        element() !== document.activeElement
       ) {
         clearSyncTimer();
         setLocalPrompt(prompt);
@@ -145,7 +147,7 @@ function createLocalPromptEcho(options: {
     handleKeyDown,
     localPrompt,
     resetLocalPrompt,
-    setTextarea,
+    setElement,
     syncPrompt,
   };
 }
@@ -188,7 +190,7 @@ export function SessionDraftEchoInput(props: {
       onBlur={echo.syncPrompt}
       onInput={echo.handleInput}
       placeholder={props.placeholder}
-      ref={echo.setTextarea}
+      ref={echo.setElement}
       {...(props.numeric === true
         ? { min: "1", step: "1", type: "number" }
         : { type: "text" })}
@@ -248,7 +250,7 @@ export function SessionPromptInput(
         }}
         onPaste={promptEvents(props).onPaste}
         placeholder="Describe the change you want the agent to make…"
-        ref={echo.setTextarea}
+        ref={echo.setElement}
         value={echo.localPrompt()}
       />
       <div class="mt-3">{renderSessionImages(props, "session-images")}</div>
@@ -348,7 +350,7 @@ export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
         onPaste={promptEvents(props).onPaste}
         placeholder="Give this session another instruction…"
         {...(props.disabled ? { readOnly: true } : {})}
-        ref={echo.setTextarea}
+        ref={echo.setElement}
         value={promptValue()}
       />
       {renderSessionImages(props, "follow-up-images")}

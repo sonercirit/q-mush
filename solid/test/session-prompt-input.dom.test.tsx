@@ -1,7 +1,11 @@
 import { createSignal } from "solid-js";
 import { expect, test, vi } from "vitest";
 import { SessionPromptInput } from "../session-client-forms.tsx";
-import { mountTestView, useFakeTestClock } from "./dom-test-helpers.ts";
+import {
+  mountTestView,
+  setTestInputValue,
+  useFakeTestClock,
+} from "./dom-test-helpers.ts";
 import { trackedDisposals } from "./nested-scroll-test-helpers.tsx";
 
 const disposals = trackedDisposals();
@@ -56,11 +60,6 @@ function mountPromptInput() {
   };
 }
 
-function type(textarea: HTMLTextAreaElement, value: string): void {
-  textarea.value = value;
-  textarea.dispatchEvent(new InputEvent("input", { bubbles: true }));
-}
-
 function expectFlushedBeforeSubmit(
   onInput: ReturnType<typeof vi.fn>,
   submitted: ReturnType<typeof vi.fn>,
@@ -80,11 +79,11 @@ test("new-session typing echoes locally before the shared draft", () => {
   // state; the textarea now updates from a local signal and syncs later.
   // Keystrokes arrive in separate tasks, so advance real time between
   // them: each next key must land inside the delay and reset it.
-  type(textarea, "Fix");
+  setTestInputValue(textarea, "Fix");
   vi.advanceTimersByTime(100);
-  type(textarea, "Fix the");
+  setTestInputValue(textarea, "Fix the");
   vi.advanceTimersByTime(100);
-  type(textarea, "Fix the app");
+  setTestInputValue(textarea, "Fix the app");
   vi.advanceTimersByTime(149);
 
   expect(textarea.value).toBe("Fix the app");
@@ -99,7 +98,7 @@ test("new-session typing echoes locally before the shared draft", () => {
 test("form submission flushes pending typing even while focused", () => {
   const { form, onInput, submitted, textarea } = mountPromptInput();
 
-  type(textarea, "Create me now");
+  setTestInputValue(textarea, "Create me now");
   textarea.focus();
   // requestSubmit, button.click(), and assistive tech all reach the form
   // submit event without blurring the textarea first.
@@ -111,7 +110,7 @@ test("form submission flushes pending typing even while focused", () => {
 test("clicking Create flushes without a blur", () => {
   const { onInput, submit, submitted, textarea } = mountPromptInput();
 
-  type(textarea, "Fix the flaky login test");
+  setTestInputValue(textarea, "Fix the flaky login test");
   textarea.focus();
   // macOS Firefox and Safari do not focus (or blur) on button click, so
   // the click path must flush through the form submit event alone.
@@ -124,7 +123,7 @@ test("clicking Create flushes without a blur", () => {
 test("an external insert wins over pending typing", () => {
   const { onInput, setPrompt, textarea } = mountPromptInput();
 
-  type(textarea, "half-typed dra");
+  setTestInputValue(textarea, "half-typed dra");
   textarea.focus();
   // insertPrompt acknowledges success to its caller, so the inserted body
   // must replace in-flight typing instead of being overwritten later.
@@ -159,7 +158,7 @@ test.each([
 ] as const)("%s flushes the draft before submission", (_name, flush) => {
   const { onInput, textarea } = mountPromptInput();
 
-  type(textarea, "Submit me");
+  setTestInputValue(textarea, "Submit me");
   flush(textarea);
 
   expect(onInput).toHaveBeenCalledWith("Submit me");

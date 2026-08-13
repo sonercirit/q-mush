@@ -7,6 +7,7 @@ import { SessionController } from "../session-controller.ts";
 import {
   mountTestView,
   queryTestElementAs,
+  setTestInputValue,
   useFakeTestClock,
 } from "./dom-test-helpers.ts";
 import { trackedDisposals } from "./nested-scroll-test-helpers.tsx";
@@ -49,12 +50,6 @@ function mountedDraftInput(selector: string): {
   return { controller, input };
 }
 
-function typeValue(input: HTMLInputElement, value: string): void {
-  input.value = value;
-  const typed = new InputEvent("input", { bubbles: true });
-  input.dispatchEvent(typed);
-}
-
 // The prompt textarea froze Firefox first, but every draft field that
 // patches the whole view state per keystroke shares the mechanism; the
 // optional inputs echo locally and sync on the same delay.
@@ -78,14 +73,14 @@ test.each([
   ({ field, first, read, second }) => {
     const { controller, input } = mountedDraftInput(`#${field}`);
 
-    typeValue(input, first);
+    setTestInputValue(input, first);
     expect(input.value).toBe(first);
     expect(read(controller)).toBe("");
 
     vi.advanceTimersByTime(150);
     expect(read(controller)).toBe(first);
 
-    typeValue(input, second);
+    setTestInputValue(input, second);
     input.dispatchEvent(new FocusEvent("blur"));
     expect(read(controller)).toBe(second);
   },
@@ -96,7 +91,7 @@ test("form submission flushes pending optional-field typing while focused", () =
   const form = input.form;
   if (form === null) throw new Error("The agent file input has no form");
 
-  typeValue(input, "docs/AGENTS.md");
+  setTestInputValue(input, "docs/AGENTS.md");
   const submission = new SubmitEvent("submit", {
     bubbles: true,
     cancelable: true,
