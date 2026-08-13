@@ -240,7 +240,7 @@ describe("agent sessions", () => {
 
     expect(await expectSessionReaches(setup, response, "failed")).toMatchObject(
       {
-        // Four 3s ticks: run start, step start, failure write, settle.
+        // Four 3s post-start ticks: poll, agent file, step, failure write.
         activeDurationMs: 12_000,
         activeStartedAt: null,
         messages: [
@@ -314,7 +314,7 @@ describe("agent sessions", () => {
     const response = await setup.sessions.collection(imageRequest);
 
     expect(await expectSessionReaches(setup, response, "idle")).toMatchObject({
-      // Four 3s ticks: run start, step start, message write, settle.
+      // Four 3s post-start ticks: poll, agent file, step, message write.
       activeDurationMs: 12_000,
       activeStartedAt: null,
       messages: [

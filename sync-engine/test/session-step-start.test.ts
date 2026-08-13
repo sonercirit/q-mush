@@ -30,6 +30,20 @@ function storedStepStartedAt(store: SessionStore): number | null | undefined {
   return store.get(TEST_USER_ID, SESSION_ID)?.stepStartedAt;
 }
 
+// Plants a stale step start directly so a path's own defensive clear stays
+// load-bearing even when earlier transitions already cleared the column.
+function plantStaleStepStart(
+  setup: ReturnType<typeof createStore>,
+  at: number,
+): void {
+  setup.database
+    .update(agentSessions)
+    .set({ stepStartedAt: new Date(at) })
+    .where(eq(agentSessions.id, SESSION_ID))
+    .run();
+  expect(storedStepStartedAt(setup.store)).toBe(at);
+}
+
 function stopSession(store: SessionStore): boolean {
   return store.stop(TEST_USER_ID, SESSION_ID, NOW + 20);
 }
@@ -79,9 +93,9 @@ describe("session step start persistence", () => {
   });
 
   test("the shared timing update clears the step start with the run", () => {
-    // Eleven call sites (transitions, restarts, provider/tool updates,
-    // pending inputs) route through this helper; the next timing column
-    // must not be forgettable here.
+    // Every settling call site (transitions, restarts, provider/tool
+    // updates, pending inputs) routes through this helper; the next timing
+    // column must not be forgettable here.
     expect(
       sessionTimingUpdate(
         { activeDurationMs: 5, activeStartedAt: NOW },
@@ -106,16 +120,9 @@ describe("session step start persistence", () => {
     "%s clears a stale planted step start defensively",
     (_label, transition, activeStartedAt) => {
       const setup = createStore();
-      const created = createTestSession(setup.store);
-      // A queued session never gets a runtime step-start write; plant one
-      // directly so the defensive clears in the queued transitions stay
-      // load-bearing under refactors.
-      setup.database
-        .update(agentSessions)
-        .set({ stepStartedAt: new Date(NOW + 5) })
-        .where(eq(agentSessions.id, created.id))
-        .run();
-      expect(storedStepStartedAt(setup.store)).toBe(NOW + 5);
+      createTestSession(setup.store);
+      // A queued session never gets a runtime step-start write.
+      plantStaleStepStart(setup, NOW + 5);
 
       expect(transition(setup.store)).toBe(true);
 
@@ -126,8 +133,11 @@ describe("session step start persistence", () => {
   );
 
   test("requeueing a finished session leaves no stale step start", () => {
-    const { store } = runningStoreWithStep(NOW + 10);
+    const setup = runningStoreWithStep(NOW + 10);
+    const { store } = setup;
     expect(store.transitionCurrent(SESSION_ID, "idle", NOW + 20)).toBe(true);
+    // The idle transition already cleared the step start.
+    plantStaleStepStart(setup, NOW + 25);
 
     const queued = store.queue(TEST_USER_ID, SESSION_ID, NOW + 30, {
       content: "Follow up",

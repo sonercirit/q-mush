@@ -5,18 +5,19 @@ import { summaryFromDetail } from "../session-codec.ts";
 import { SessionController } from "../session-controller.ts";
 import { SessionList } from "../session-detail-client.tsx";
 import { initialSessionViewState } from "../session-state.ts";
-import { disposeTestViews, mountTestView } from "./dom-test-helpers.ts";
+import {
+  disposeTestViews,
+  mountTestView,
+  useFakeTestClock,
+} from "./dom-test-helpers.ts";
 import { mountTestSessionDetail } from "./session-dom-test-helpers.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
 const disposals: (() => void)[] = [];
 
 function useFakeClock(startMs: number): void {
-  vi.useFakeTimers();
+  useFakeTestClock(disposals);
   vi.setSystemTime(new Date(startMs));
-  disposals.push(() => {
-    vi.useRealTimers();
-  });
 }
 
 afterEach(() => {

@@ -3,7 +3,7 @@ export interface SessionTiming<StartedAt extends Date | number> {
   readonly activeStartedAt: StartedAt | null;
 }
 
-export interface SessionStepTiming<
+export interface SessionRunStepTiming<
   StartedAt extends Date | number,
 > extends SessionTiming<StartedAt> {
   readonly stepStartedAt: StartedAt | null;

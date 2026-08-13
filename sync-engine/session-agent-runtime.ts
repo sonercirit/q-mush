@@ -480,15 +480,15 @@ export async function runSessionAgent(
       {
         attachment,
         currentCredential: runtime.credential,
-        onStepStart: () => {
-          markSessionStepStart(runtime);
-        },
         currentModel,
         currentModelId: runtime.detail.model,
         currentProvider: runtime.detail.provider,
         currentProviderPricing: runtime.detail.providerPricing,
         currentProviderTag: runtime.detail.openRouterProviderTag,
         factory: runtime.modelFactory,
+        onStepStart: () => {
+          markSessionStepStart(runtime);
+        },
         prompt: typeof promptValue === "string" ? promptValue : null,
         resources: runtime,
         userId: runtime.userId,

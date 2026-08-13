@@ -8,7 +8,7 @@ import type { ProviderId } from "./provider-credential-store.ts";
 import type { ProviderModelPricing } from "./provider-model-pricing.ts";
 import type { RunnerExecutionEnvironment } from "./runner-command-broker.ts";
 import type { SessionPendingInputContent } from "./session-pending-input.ts";
-import type { SessionStepTiming } from "./session-timing.ts";
+import type { SessionRunStepTiming } from "./session-timing.ts";
 import type { AgentTokenUsageSummary } from "./session-token-usage.ts";
 
 export const AGENT_SESSION_STATUSES = [
@@ -89,7 +89,7 @@ export interface AgentSessionMessage extends AttachmentContentFields {
   readonly turnId?: string | null;
 }
 
-export interface AgentSessionSummary extends SessionStepTiming<number> {
+export interface AgentSessionSummary extends SessionRunStepTiming<number> {
   readonly agentFilePath: string | null;
   readonly autoCompact: boolean;
   readonly costBasis: AgentSessionCostBasis;
