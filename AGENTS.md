@@ -187,10 +187,9 @@ Living project memory.
   use Bun APIs and `bun:sqlite`. Fixtures stub provider discovery; tests never
   hit live provider APIs.
 - `tsconfig.json` configures strict, no-emit, bundler-style checking with unused
-  and unreachable code diagnostics. Library declaration checking is off: Drizzle
-  (ORM 1.0.0-rc.4, TypeScript 7.0.2) publishes optional cross-dialect
-  declarations that fail here; application source stays fully checked. Re-enable
-  only after an upstream Drizzle fix.
+  and unreachable code diagnostics. Library declaration checking is off —
+  Drizzle publishes optional cross-dialect declarations that fail here; app
+  source stays fully checked; re-enable after an upstream fix.
 - `eslint.config.ts` uses type-aware strict/stylistic `typescript-eslint`
   presets, imports `.gitignore`, bans non-const assertions, and enforces
   exhaustive switches and canonical named imports (one declaration per module
@@ -201,9 +200,8 @@ Living project memory.
   unsafe DOM HTML injection, `dangerouslySetInnerHTML`, and HTML-like `Response`
   bodies; HTML-like data and TSX pass.
 - `knip.config.ts` checks every issue type and entry exports;
-  `knip.production.config.ts` limits the graph to runtime source. Both passes
-  run, so tests cannot keep production code alive and unused test helpers still
-  fail.
+  `knip.production.config.ts` limits the graph to runtime source. Both run:
+  tests cannot keep production code alive; unused test helpers still fail.
 - `.jscpd.json` maps all JS/TS extensions to TSX for cross-extension detection;
   import declarations are ignored; clones of ≥20 tokens and one line fail the
   zero threshold.

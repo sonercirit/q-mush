@@ -162,7 +162,7 @@ function storedTerminalExists(
       return false;
     }
   }
-  // Sessions compacted before transcript steps were persisted (731664a) end
+  // Sessions compacted before transcript steps were persisted (PR #166) end
   // with the handoff user message as the latest active row; current
   // compactions settle through the assistant branch above.
   return (

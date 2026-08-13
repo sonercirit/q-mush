@@ -13,7 +13,7 @@ export const AGENT_COMPACTION_REQUEST_MESSAGE = `Compact the conversation above 
 // restart recovery - carries the delivery instruction (issue #204).
 export const COMPACTION_HANDOFF_INSTRUCTION = `Treat the summary below as prior context and continue from it. If it contains a finished answer or deliverable that was never delivered, deliver it now instead of repeating research or verification:`;
 
-const COMPACTION_PREFIX = `The earlier conversation was compacted into this handoff summary. ${COMPACTION_HANDOFF_INSTRUCTION}\n\n`;
+const COMPACTION_PREFIX = `The earlier conversation was compacted. ${COMPACTION_HANDOFF_INSTRUCTION}\n\n`;
 
 export interface AgentConversationCompactor {
   compact(...parameters: CompactionArguments): Promise<CompactedConversation>;

@@ -43,7 +43,7 @@ describe("agent conversation compaction", () => {
     });
     expect(compacted.messages).toEqual([
       {
-        content: `The earlier conversation was compacted into this handoff summary. ${TEST_COMPACTION_HANDOFF_INSTRUCTION}\n\nKeep the current changes and run tests.`,
+        content: `The earlier conversation was compacted. ${TEST_COMPACTION_HANDOFF_INSTRUCTION}\n\nKeep the current changes and run tests.`,
         role: "user",
       },
     ]);
