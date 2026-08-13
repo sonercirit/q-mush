@@ -17,7 +17,7 @@ Living project memory.
   schema enumerated — else record an open question.
 - Preserve patterns, add tools only as needed, proactively improve what you
   touch — code health, tests, docs, performance, security, DX: small
-  improvements ship with the change, larger ones follow immediately.
+  improvements ship with the change; larger ones follow immediately.
 - Practice TDD: failing test first, implement, refactor green.
 - Follow DRY and KISS: authoritative logic, no premature abstractions.
 - Never invent numeric limits or tunables: probe omission first, prefer the
