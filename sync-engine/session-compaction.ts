@@ -4,7 +4,10 @@ import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 import type { RestartHandoff } from "../shared/session-model.ts";
-import { AGENT_COMPACTION_REQUEST_MESSAGE } from "./agent-compaction.ts";
+import {
+  AGENT_COMPACTION_REQUEST_MESSAGE,
+  COMPACTION_HANDOFF_INSTRUCTION,
+} from "./agent-compaction.ts";
 import type { CompactionUsage } from "./session-compaction-usage.ts";
 import { retireManualCompactionOperations } from "./session-manual-compaction-query.ts";
 import { sessionSegment } from "./session-segment.ts";
@@ -17,16 +20,15 @@ import {
   storedUserMessageValues,
 } from "./session-store-values.ts";
 import {
+  COMPACTION_MESSAGE_PREFIX,
   settleTerminalRuntime,
   terminalRuntimeCondition,
 } from "./session-terminal-store.ts";
 import { rotateSessionTurn } from "./session-turn-store.ts";
 import { runtimeUsageValues } from "./session-usage-values.ts";
 
-const COMPACTION_MESSAGE_PREFIX = "Conversation compacted:\n\n";
-
 function compactionMessage(summary: string): string {
-  return `${COMPACTION_MESSAGE_PREFIX}${summary}`;
+  return `${COMPACTION_MESSAGE_PREFIX}${COMPACTION_HANDOFF_INSTRUCTION}\n\n${summary}`;
 }
 
 function compactionTranscriptValues(

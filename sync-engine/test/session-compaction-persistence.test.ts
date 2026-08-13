@@ -9,6 +9,7 @@ import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
+import { testCompactionHandoffMessage } from "./compaction-test-fixtures.ts";
 import {
   appendCompactionAssistantMessage,
   requireCompactionSession,
@@ -107,7 +108,7 @@ describe("session compaction persistence", () => {
       currentContextTokens: 0,
       messages: [
         {
-          content: "Conversation compacted:\n\nContinue from this handoff.",
+          content: testCompactionHandoffMessage("Continue from this handoff."),
           role: "user",
         },
       ],
@@ -119,7 +120,7 @@ describe("session compaction persistence", () => {
     });
     expect(setup.store.conversation(STORE_SESSION_ID)).toEqual([
       {
-        content: "Conversation compacted:\n\nContinue from this handoff.",
+        content: testCompactionHandoffMessage("Continue from this handoff."),
         role: "user",
       },
     ]);

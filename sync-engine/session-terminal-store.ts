@@ -134,7 +134,9 @@ export function settleTerminalRuntime(
   return settledStatus;
 }
 
-const COMPACTION_PREFIX = "Conversation compacted:\n\n";
+// The persisted handoff must keep starting with this prefix: terminal
+// recovery matches it, and session-compaction.ts builds the message.
+export const COMPACTION_MESSAGE_PREFIX = "Conversation compacted:\n\n";
 
 function storedTerminalExists(
   database: Pick<AppDatabase, "select">,
@@ -160,9 +162,12 @@ function storedTerminalExists(
       return false;
     }
   }
+  // Sessions compacted before transcript steps were persisted (PR #166) end
+  // with the handoff user message as the latest active row; current
+  // compactions settle through the assistant branch above.
   return (
     active?.role === "user" &&
-    active.content.startsWith(COMPACTION_PREFIX) &&
+    active.content.startsWith(COMPACTION_MESSAGE_PREFIX) &&
     latest.some(({ isDeleted }) => isDeleted)
   );
 }

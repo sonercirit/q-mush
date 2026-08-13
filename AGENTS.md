@@ -109,7 +109,8 @@ Living project memory.
   Auto-compaction defaults on: at 95% it summarizes completed history and
   continues from the handoff; idle sessions compact manually or, opted in, after
   30 idle minutes; compaction soft-deletes prior messages, inserting a
-  replayable handoff. The composer stays mounted across statuses, explaining
+  replayable handoff; every replay says deliver an undelivered drafted answer,
+  don't re-verify. The composer stays mounted across statuses, explaining
   unavailable actions, preserving drafts; draft text fields echo a local signal
   debounced into the shared draft — submit paths (blur, shortcut, capture-phase
   submit) flush first; local preferences filter transcript categories. Provider
@@ -186,10 +187,9 @@ Living project memory.
   use Bun APIs and `bun:sqlite`. Fixtures stub provider discovery; tests never
   hit live provider APIs.
 - `tsconfig.json` configures strict, no-emit, bundler-style checking with unused
-  and unreachable code diagnostics. Library declaration checking is off: Drizzle
-  (ORM 1.0.0-rc.4, TypeScript 7.0.2) publishes optional cross-dialect
-  declarations that fail here; application source stays fully checked. Re-enable
-  only after an upstream Drizzle fix.
+  and unreachable code diagnostics. Library declaration checking is off —
+  Drizzle publishes optional cross-dialect declarations that fail here; app
+  source stays fully checked; re-enable after an upstream fix.
 - `eslint.config.ts` uses type-aware strict/stylistic `typescript-eslint`
   presets, imports `.gitignore`, bans non-const assertions, and enforces
   exhaustive switches and canonical named imports (one declaration per module
@@ -200,9 +200,8 @@ Living project memory.
   unsafe DOM HTML injection, `dangerouslySetInnerHTML`, and HTML-like `Response`
   bodies; HTML-like data and TSX pass.
 - `knip.config.ts` checks every issue type and entry exports;
-  `knip.production.config.ts` limits the graph to runtime source. Both passes
-  run, so tests cannot keep production code alive and unused test helpers still
-  fail.
+  `knip.production.config.ts` limits the graph to runtime source. Both run:
+  tests cannot keep production code alive; unused test helpers still fail.
 - `.jscpd.json` maps all JS/TS extensions to TSX for cross-extension detection;
   import declarations are ignored; clones of ≥20 tokens and one line fail the
   zero threshold.
@@ -256,27 +255,26 @@ Living project memory.
   a disposable per-session Arch container (default `archlinux:latest`) with
   network and default capabilities, so pacman works; only the workspace is
   bind-mounted. `read` pages its source. The directory picker browses beyond a
-  session workspace with runner-account permissions, returns only directory
-  metadata, bounds listings, and times out stalls. Stopping a session aborts its
-  model request and pushes runner-command cancellation, terminating an active
-  shell command. OpenAI API-key and OAuth requests prefer Responses WebSockets,
-  falling back to HTTP streaming; OpenRouter and generic endpoints stream chat
-  completions, Anthropic-format endpoints Messages events. OpenAI OAuth
-  refreshes its token bundle before expiry. Session creation requires an
-  explicit model ID with no built-in fallbacks. Catalogs: OpenAI `/v1/models`,
-  OpenRouter `/api/v1/models/user`, ChatGPT Codex `/models`, or the generic
-  `/models`; Anthropic-format catalogs read `display_name`, `max_input_tokens`,
-  and the `capabilities` tree (`agent-model-discovery-anthropic.ts`: per-level
-  `effort` support gated on adaptive thinking, modalities only from
-  `image_input`/`pdf_input` leaves), page via `has_more`/`last_id` at
-  `limit=1000` with stale-cursor and page-count guards, and probe the endpoint's
-  OpenAI-style listing only where capabilities left efforts unknown. Codex
-  parsing retains streamed output-text and function-call argument deltas since
-  completed events may omit `output`. Only explicitly listed efforts are
-  offered; OpenAI's catalog lacks reasoning metadata. Optional reasoning uses
-  `reasoning_effort` for OpenAI and generic chat completions and
-  `reasoning.effort` for OpenRouter and Codex Responses; the Anthropic Messages
-  format maps efforts to `output_config.effort` plus
+  session workspace with runner-account permissions, returns bounded
+  directory-only metadata, and times out stalls. Stopping a session aborts its
+  model request and cancels runner commands, ending an active shell. OpenAI
+  API-key and OAuth requests prefer Responses WebSockets, falling back to HTTP
+  streaming; OpenRouter and generic endpoints stream chat completions,
+  Anthropic-format endpoints Messages events. OpenAI OAuth refreshes its token
+  bundle before expiry. Session creation requires an explicit model ID; no
+  fallbacks. Catalogs: OpenAI `/v1/models`, OpenRouter `/api/v1/models/user`,
+  ChatGPT Codex `/models`, or the generic `/models`; Anthropic-format catalogs
+  read `display_name`, `max_input_tokens`, and the `capabilities` tree
+  (`agent-model-discovery-anthropic.ts`: per-level `effort` support gated on
+  adaptive thinking, modalities only from `image_input`/`pdf_input` leaves),
+  page via `has_more`/`last_id` at `limit=1000` with stale-cursor and page-count
+  guards, and probe the endpoint's OpenAI-style listing only where capabilities
+  left efforts unknown. Codex parsing retains streamed output-text and
+  function-call argument deltas since completed events may omit `output`. Only
+  listed efforts are offered; OpenAI's catalog lacks reasoning metadata.
+  Optional reasoning uses `reasoning_effort` for OpenAI and generic chat
+  completions and `reasoning.effort` for OpenRouter and Codex Responses; the
+  Anthropic Messages format maps efforts to `output_config.effort` plus
   `thinking: {type: "adaptive", display: "summarized"}` on provider-default
   budgets, sending neither for `none` and `minimal` as `low` (rejected
   otherwise). Adaptive-only models (Fable) ignore `enabled`; newer models
