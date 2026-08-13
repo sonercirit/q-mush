@@ -65,10 +65,10 @@ Living project memory.
   `sync-engine/runner-executable.ts` fingerprints runner source and compiler,
   builds in a private temp directory, caches in memory, serves
   `/runner/executable`. Development restarts queue new agent work, let active
-  steps finish, then replace the server process, so a session can request its
-  own restart. Textual bodies precompress once per handler, negotiating `zstd`,
-  Brotli, gzip, then deflate; `/favicon.svg` revalidates with ETag, separate
-  from PWA icons.
+  steps finish, then replace the server process, so a session can safely request
+  its own restart. Textual bodies precompress once per handler, negotiating
+  `zstd`, Brotli, gzip, then deflate; `/favicon.svg` revalidates with ETag,
+  separate from PWA icons.
 - `solid/pages.tsx` renders both server page shells via Solid's SSR runtime;
   `sync-engine/pages.ts` loads it with Vite's SSR runner. The browser app mounts
   from `solid/client.tsx`; routes live in `shared/routes.ts`.
@@ -84,8 +84,8 @@ Living project memory.
     redirects live in `oauth.ts`; cookie and response helpers in `http.ts`.
     `solid/client.tsx` reads `/api/auth/session`, gates the control center, and
     posts logout.
-- `sync-engine/runner-store.ts` persists runner registrations in `runners`: one
-  active registration per machine fingerprint, one default runner per user.
+- `sync-engine/runner-store.ts` persists user runner registrations in `runners`:
+  one active registration per machine fingerprint, one default runner per user.
   `sync-engine/runners.ts` issues hashed opaque setup tokens, owns authenticated
   management and token-authenticated callback APIs, deriving installer commands
   from the request origin. `sync-engine/runner-installer.ts` emits the
@@ -97,8 +97,8 @@ Living project memory.
   Updates use a source/compiler ETag and SHA-256 digest, atomically replace the
   executable, and restart it; development restarts drain active sessions first.
   Reinstalling for the same user and machine rotates the registration to its new
-  token instead of adding a runner; other registrations stay protected; tokens
-  never appear in lists.
+  token instead of adding a second runner; other registrations stay protected;
+  tokens never appear in lists.
 - Browser messages sort by time then ID; live output anchors after the
   initiating message, snapshots replace it. `session-agent-read.ts` byte-bounds
   transcript messages, assistant calls, the system prompt, and tool definitions.
