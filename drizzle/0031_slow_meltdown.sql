@@ -1,0 +1,1 @@
+ALTER TABLE `agent_sessions` ADD `step_started_at` integer;

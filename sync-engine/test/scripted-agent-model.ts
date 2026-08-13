@@ -34,9 +34,14 @@ interface AgentModelRequest<T> {
 
 export class ScriptedAgentModel implements AgentModel {
   readonly requests: AgentConversationMessage[][] = [];
+  stepStarts = 0;
   readonly #onComplete:
     ((requestCount: number) => Promise<void> | void) | undefined;
   readonly #steps: AgentModelStep[];
+
+  readonly startStep = (): void => {
+    this.stepStarts += 1;
+  };
 
   constructor(steps: ScriptedStep[], options: ScriptedModelOptions = {}) {
     this.#onComplete = options.onComplete;

@@ -3,6 +3,12 @@ export interface SessionTiming<StartedAt extends Date | number> {
   readonly activeStartedAt: StartedAt | null;
 }
 
+export interface SessionRunStepTiming<
+  StartedAt extends Date | number,
+> extends SessionTiming<StartedAt> {
+  readonly stepStartedAt: StartedAt | null;
+}
+
 export function formatSessionTime(milliseconds: number): string {
   const seconds = Math.floor(milliseconds / 1_000);
   const hours = Math.floor(seconds / 3_600);

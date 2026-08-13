@@ -4,7 +4,10 @@ import type { AppDatabase } from "../shared/database.ts";
 import { agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID } from "../shared/ids.ts";
 import type { AgentSessionStatus } from "../shared/session-model.ts";
-import { activeSessionDuration } from "../shared/session-timing.ts";
+import {
+  activeSessionDuration,
+  type SessionTiming,
+} from "../shared/session-timing.ts";
 
 export interface SessionFilter {
   readonly id?: string;
@@ -184,12 +187,17 @@ export function readActiveSessionTiming(
 }
 
 export function sessionTimingUpdate(
-  session: StoredSessionTiming,
+  session: SessionTiming<Date | number>,
   now: number,
-): { readonly activeDurationMs: number; readonly activeStartedAt: null } {
+): {
+  readonly activeDurationMs: number;
+  readonly activeStartedAt: null;
+  readonly stepStartedAt: null;
+} {
   return {
     activeDurationMs: activeSessionDuration(session, now),
     activeStartedAt: null,
+    stepStartedAt: null,
   };
 }
 

@@ -7,6 +7,7 @@ import {
   type PendingAskQuestions,
 } from "../shared/ask-questions.ts";
 import type { AgentSessionStatus } from "../shared/session-model.ts";
+import type { SessionRunStepTiming } from "../shared/session-timing.ts";
 import { activeQuestionSession } from "./ask-questions-session.ts";
 import type { RecoverableQuestionIdentity } from "./session-lifecycle-types.ts";
 
@@ -26,9 +27,7 @@ export interface StoredQuestionRequest {
   readonly userId: string;
 }
 
-export interface StoredQuestionSession {
-  readonly activeDurationMs: number;
-  readonly activeStartedAt: number | null;
+export interface StoredQuestionSession extends SessionRunStepTiming<number> {
   readonly executionGeneration: number;
   readonly id: string;
   readonly interruptedHandoff: string | null;
@@ -238,6 +237,7 @@ function updateQuestionSession(
       ? { activeDurationMs: activeDuration(session, now) }
       : {}),
     activeStartedAt: null,
+    stepStartedAt: null,
     interruptedHandoff: null,
     status,
     ...auditedUpdate(actorId, now),

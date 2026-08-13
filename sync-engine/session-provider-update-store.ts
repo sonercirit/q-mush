@@ -9,8 +9,10 @@ import {
   sessionProviderSelectionMatches,
   type SessionProviderUpdateInput,
 } from "../shared/session-provider-update.ts";
-import { activeSessionDuration } from "../shared/session-timing.ts";
-import { workspaceSessionCondition } from "./session-store-persistence.ts";
+import {
+  sessionTimingUpdate,
+  workspaceSessionCondition,
+} from "./session-store-persistence.ts";
 import { serializeProviderPricing } from "./session-store-read.ts";
 import { updateSessionAndEndGenerationTurn } from "./session-turn-store.ts";
 export type SessionProviderUpdateStoreResult = Readonly<{
@@ -77,11 +79,7 @@ export function updateStoredSessionProvider(
     ...updatedAuditFields(input.userId, input.now),
   };
   const timing = active
-    ? {
-        status: "idle" as const,
-        activeDurationMs: activeSessionDuration(existing, input.now),
-        activeStartedAt: null,
-      }
+    ? { status: "idle" as const, ...sessionTimingUpdate(existing, input.now) }
     : {};
   const condition = workspaceSessionCondition(input, input.expectedGeneration);
   const generation = input.expectedGeneration;

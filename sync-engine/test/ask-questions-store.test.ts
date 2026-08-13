@@ -171,6 +171,7 @@ function runningSession(): StoredQuestionSession {
   return {
     activeDurationMs: 20,
     activeStartedAt: NOW,
+    stepStartedAt: NOW + 5,
     executionGeneration: 3,
     id: SESSION_ID,
     interruptedHandoff: "durable-shutdown-marker",
@@ -277,6 +278,7 @@ describe("ask questions store", () => {
       activeStartedAt: null,
       interruptedHandoff: null,
       status: "paused",
+      stepStartedAt: null,
     });
     expect(persistence.state.requests[0]).toMatchObject({
       createdById: USER_ID,

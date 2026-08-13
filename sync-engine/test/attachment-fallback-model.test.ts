@@ -36,13 +36,22 @@ function options(
   inputModalities: readonly string[] | null,
   selections = [FALLBACK],
 ) {
-  const complete = vi.fn(() => Promise.resolve(providerStep("explained")));
+  const stepStarts: string[] = [];
+  const complete = vi.fn(() => {
+    // Records ordering: the step must be marked before the request.
+    stepStarts.push("complete");
+    return Promise.resolve(providerStep("explained"));
+  });
   const factory = vi.fn(() => ({ complete }));
   return {
     complete,
     factory,
+    stepStarts,
     value: {
       attachment: ATTACHMENT,
+      onStepStart: () => {
+        stepStarts.push("step-start");
+      },
       currentCredential: CURRENT_CREDENTIAL,
       currentModel: testAgentModelOption({
         id: "current-model",
@@ -90,6 +99,10 @@ describe("explain attachment", () => {
       model: "pdf-model",
       provider: "openai",
     });
+
+    // A slow explanation is its own visible step, marked before the
+    // request, not a continuation of the preceding agent step.
+    expect(setup.stepStarts).toEqual(["step-start", "complete"]);
 
     expect(setup.factory).toHaveBeenCalledWith(
       expect.objectContaining({

@@ -5,6 +5,7 @@ import { agentSessions } from "../shared/database/schema.ts";
 const ACTIVE_SESSION_STATE_SELECTION = {
   activeDurationMs: agentSessions.activeDurationMs,
   activeStartedAt: agentSessions.activeStartedAt,
+  stepStartedAt: agentSessions.stepStartedAt,
   agentFileContent: agentSessions.agentFileContent,
   agentFileName: agentSessions.agentFileName,
   currentSegment: agentSessions.currentSegment,

@@ -27,6 +27,7 @@ function storedSessionSelection() {
   return {
     activeDurationMs: agentSessions.activeDurationMs,
     activeStartedAt: agentSessions.activeStartedAt,
+    stepStartedAt: agentSessions.stepStartedAt,
     agentFilePath: agentSessions.agentFilePath,
     autoCompact: agentSessions.autoCompact,
     costBasis: agentSessions.costBasis,
@@ -64,6 +65,7 @@ type StoredSessionSummary = Pick<
   typeof agentSessions.$inferSelect,
   | "activeDurationMs"
   | "activeStartedAt"
+  | "stepStartedAt"
   | "agentFilePath"
   | "autoCompact"
   | "costBasis"
@@ -127,6 +129,7 @@ export function summarizeStoredSession(
     userContextTokenCap,
     hasOlderSegments: currentSegment > 0,
     activeStartedAt: stored.activeStartedAt?.getTime() ?? null,
+    stepStartedAt: stored.stepStartedAt?.getTime() ?? null,
     createdAt: stored.createdAt.getTime(),
     providerPricing: parseProviderPricing(stored.providerPricing),
     pendingQuestions: null,

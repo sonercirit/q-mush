@@ -110,6 +110,7 @@ export function createSessionAgentModels(options: {
   readonly factory: AgentModelFactory;
   readonly id?: () => string;
   readonly isCurrent: () => boolean;
+  readonly onStepStart?: () => void;
   readonly realtime: RealtimeHub | undefined;
   readonly streamId?: string;
   readonly toolStream?: ToolStreamPublisher;
@@ -120,6 +121,7 @@ export function createSessionAgentModels(options: {
   const startStep = (): void => {
     streamId = id();
     options.toolStream?.startStep(streamId);
+    options.onStepStart?.();
   };
   const onDelta: AgentModelFactoryOptions["onDelta"] = (delta) => {
     if (!options.isCurrent()) {
@@ -206,6 +208,9 @@ export function createSessionAgentModels(options: {
             options.credential,
             systemPrompt,
             onDelta,
+            // The compactor stream ID is already fresh; its step start only
+            // needs the persistence hook, not another stream reset.
+            options.onStepStart,
           ),
         ),
         publishCompactionRequest,

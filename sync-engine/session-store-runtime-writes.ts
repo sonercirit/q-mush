@@ -81,6 +81,12 @@ export function setRuntimeAgentFile(
   });
 }
 
+export function markRuntimeStepStart(options: RuntimeWriteTarget): void {
+  updateRunningSession(options, {
+    stepStartedAt: new Date(options.now),
+  });
+}
+
 function compactRuntime(
   options: RuntimeWriteTarget & {
     readonly restartHandoff?: RestartHandoff | null;

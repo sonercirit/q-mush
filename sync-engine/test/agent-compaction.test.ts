@@ -35,6 +35,9 @@ describe("agent conversation compaction", () => {
     ];
     const compacted = await compactor.compact(conversation);
 
+    // Compaction is a model step: the step timer must restart at its
+    // request, not keep timing the preceding agent step.
+    expect(model.stepStarts).toBe(1);
     expect(compacted.summary).toBe("Keep the current changes and run tests.");
     expect(compacted).toMatchObject({
       contextTokens: 12_345,

@@ -5,18 +5,19 @@ import { summaryFromDetail } from "../session-codec.ts";
 import { SessionController } from "../session-controller.ts";
 import { SessionList } from "../session-detail-client.tsx";
 import { initialSessionViewState } from "../session-state.ts";
-import { disposeTestViews, mountTestView } from "./dom-test-helpers.ts";
+import {
+  disposeTestViews,
+  mountTestView,
+  useFakeTestClock,
+} from "./dom-test-helpers.ts";
 import { mountTestSessionDetail } from "./session-dom-test-helpers.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
 const disposals: (() => void)[] = [];
 
 function useFakeClock(startMs: number): void {
-  vi.useFakeTimers();
+  useFakeTestClock(disposals);
   vi.setSystemTime(new Date(startMs));
-  disposals.push(() => {
-    vi.useRealTimers();
-  });
 }
 
 afterEach(() => {
@@ -41,10 +42,21 @@ function runDurationText(container: ParentNode): string | undefined {
   );
 }
 
-test("a mounted session timer starts when the session begins running", () => {
-  useFakeClock(10_000);
+function stepDurationText(container: ParentNode): string | undefined {
+  return (
+    container.querySelector("[data-session-step-duration='true']")
+      ?.textContent ?? undefined
+  );
+}
+
+function mountQueuedSession(startMs: number) {
+  useFakeClock(startMs);
   const queued = { ...TEST_SESSION_DETAIL, status: "queued" as const };
-  const { container, controller } = mountTestSessionDetail(queued, disposals);
+  return { queued, ...mountTestSessionDetail(queued, disposals) };
+}
+
+test("a mounted session timer starts when the session begins running", () => {
+  const { container, controller, queued } = mountQueuedSession(10_000);
 
   expect(sessionTimeText(container)).toBe("Time: 0s");
   controller.applyDetail({
@@ -57,6 +69,47 @@ test("a mounted session timer starts when the session begins running", () => {
 
   expect(sessionTimeText(container)).toBe("Time: 2s");
   expect(runDurationText(container)).toBe("Run: 2s");
+});
+
+test("a running session shows and ticks its current step duration", () => {
+  const { container, controller, queued } = mountQueuedSession(20_000);
+
+  expect(stepDurationText(container)).toBeUndefined();
+
+  const running = {
+    ...queued,
+    activeStartedAt: Date.now(),
+    status: "running" as const,
+    stepStartedAt: Date.now(),
+    updatedAt: queued.updatedAt + 1,
+  };
+  controller.applyDetail(running);
+  vi.advanceTimersByTime(3_000);
+
+  expect(stepDurationText(container)).toBe("Step: 3s");
+
+  // A later model step resets the visible step clock below the run clock.
+  controller.applyDetail({
+    ...running,
+    stepStartedAt: Date.now(),
+    updatedAt: running.updatedAt + 1,
+  });
+  vi.advanceTimersByTime(1_000);
+
+  expect(stepDurationText(container)).toBe("Step: 1s");
+  expect(runDurationText(container)).toBe("Run: 4s");
+
+  // A stale step timestamp without an active run must render nothing.
+  controller.applyDetail({
+    ...running,
+    activeStartedAt: null,
+    status: "idle",
+    stepStartedAt: Date.now(),
+    updatedAt: running.updatedAt + 2,
+  });
+
+  expect(stepDurationText(container)).toBeUndefined();
+  expect(runDurationText(container)).toBeUndefined();
 });
 
 test("a retained sidebar row keeps ticking its run duration", () => {
@@ -98,8 +151,19 @@ test("a retained sidebar row keeps ticking its run duration", () => {
   );
   expect(runLabel()).toBe("Run: 3s");
 
+  // A step-start change alone must replace the retained row so the Step
+  // timer rebases; summaryFromDetail must carry the field for that to work.
+  const stepped = {
+    ...summaryFromDetail({ ...TEST_SESSION_DETAIL, stepStartedAt: 52_000 }),
+    activeStartedAt: running.activeStartedAt,
+    status: "running" as const,
+  };
+  expect(stepped.stepStartedAt).toBe(52_000);
+  controller.applyRealtime([stepped, other]);
+  expect(stepDurationText(container)).toBe("Step: 1s");
+
   controller.applyRealtime([
-    { ...running, activeStartedAt: null, status: "idle" as const },
+    { ...stepped, activeStartedAt: null, status: "idle" as const },
     other,
   ]);
   expect(runLabel()).toBeUndefined();

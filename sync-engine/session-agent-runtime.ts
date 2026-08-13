@@ -86,6 +86,17 @@ function writeRuntime(
   runtime.notify();
 }
 
+function markSessionStepStart(runtime: SessionAgentRuntimeDependencies): void {
+  // Status- and generation-guarded: a racing stop or restart makes this
+  // write match zero rows instead of throwing.
+  runtime.store.markRuntimeStepStart(
+    runtime.detail.id,
+    runtime.now(),
+    runtime.detail.generation,
+  );
+  runtime.notify();
+}
+
 function recordRuntimeUsage(
   runtime: SessionAgentRuntimeDependencies,
   usage: AgentSessionUsageUpdate,
@@ -211,6 +222,9 @@ async function loadModels(
     detail: runtime.detail,
     factory: runtime.modelFactory,
     isCurrent: runtime.isCurrent,
+    onStepStart: () => {
+      markSessionStepStart(runtime);
+    },
     realtime: runtime.realtime,
     ...(options.streamId === undefined ? {} : { streamId: options.streamId }),
     ...(options.toolStream === undefined
@@ -472,6 +486,9 @@ export async function runSessionAgent(
         currentProviderPricing: runtime.detail.providerPricing,
         currentProviderTag: runtime.detail.openRouterProviderTag,
         factory: runtime.modelFactory,
+        onStepStart: () => {
+          markSessionStepStart(runtime);
+        },
         prompt: typeof promptValue === "string" ? promptValue : null,
         resources: runtime,
         userId: runtime.userId,

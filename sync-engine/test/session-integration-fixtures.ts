@@ -358,7 +358,22 @@ export function connectedSessionSetup(
           selectedReasoningEfforts.push(reasoningEffort);
           selectedSystemPrompts.push(systemPrompt);
           selectedTools.push(tools);
-          return model;
+          // Forward the persistence hook so integration tests observe the
+          // runtime -> store step-start composition, mirroring production
+          // models that call startStep before each request. Delegate instead
+          // of spreading: class-based test models keep prototype methods.
+          const { onStepStart } = factoryOptions;
+          return onStepStart === undefined
+            ? model
+            : {
+                close: () => model.close?.(),
+                complete: (...completeArguments) =>
+                  model.complete(...completeArguments),
+                startStep: () => {
+                  model.startStep?.();
+                  onStepStart();
+                },
+              };
         }),
       now,
       randomId: () => {

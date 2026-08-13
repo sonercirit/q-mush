@@ -18,6 +18,7 @@ import {
   commitRuntimeTerminal,
   compactRuntimeConversation,
   compactRuntimeTerminal,
+  markRuntimeStepStart,
   setRuntimeAgentFile,
   settleRuntimeFailure,
   updateRuntimeUsage,
@@ -118,6 +119,14 @@ export abstract class SessionStoreRuntime {
       agentFile,
       ...this.#target(sessionId, now, generation),
     });
+  }
+
+  markRuntimeStepStart(
+    sessionId: string,
+    now: number,
+    generation: number,
+  ): void {
+    markRuntimeStepStart(this.#target(sessionId, now, generation));
   }
 
   commitRuntimeTerminal(

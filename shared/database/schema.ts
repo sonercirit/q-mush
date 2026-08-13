@@ -389,6 +389,7 @@ export const agentSessions = sqliteTable(
       .default(false),
     activeDurationMs: integer("active_duration_ms").notNull().default(0),
     activeStartedAt: integer("active_started_at", { mode: "timestamp_ms" }),
+    stepStartedAt: integer("step_started_at", { mode: "timestamp_ms" }),
     costBasis: text("cost_basis", {
       enum: ["none", "reported", "estimated"],
     })

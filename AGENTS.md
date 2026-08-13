@@ -146,9 +146,10 @@ Living project memory.
   choices persist per session. `shared/agent-prompt.ts` builds the model system
   prompt and transcript display; reasoning summaries persist as `thinking`
   messages excluded from replay. Session and transcript rows live in
-  `agent_sessions` and `agent_messages`; interrupted processes mark active
-  sessions failed for resumption; rebuilt conversations add error results for
-  interrupted tool calls only on resume.
+  `agent_sessions` and `agent_messages`; `step_started_at` sets per model step,
+  clears with `activeStartedAt` (metrics show a live Step timer); interrupted
+  processes mark active sessions failed for resumption; rebuilds add error
+  results for interrupted tool calls only on resume.
 
 - `openai.ts`, `openrouter.ts`, and `generic-provider.ts` implement model
   connections. Generic providers store a normalized base URL, optional key, and
@@ -217,7 +218,7 @@ Living project memory.
   `GOOGLE_REDIRECT_URI`; the two must appear together, and the exact callback
   `http://localhost:12345/api/auth/google/callback` must be registered on the
   Google OAuth client. Never expose the client secret to browser code.
-- `DATABASE_PATH` selects SQLite (default `data/q-mush.sqlite`; `data/` is
+- `DATABASE_PATH` selects SQLite (default `data/q-mush.sqlite`; `data/`
   ignored). Update `shared/database/schema.ts`, register tables in
   `databaseSchema`, `bun run db:generate`, and commit the migration and
   metadata; `bun run db:migrate` runs without HTTP. Drizzle Kit runs its config
@@ -290,6 +291,6 @@ Living project memory.
 - Shell commands require a positive timeout; on macOS/Linux each gets a POSIX
   session, and stop/timeout signals only its group. Agent launches and runner
   commands otherwise have no application-owned step, queue, or time limits;
-  outside compaction, providers replay the whole conversation without a timeout.
+  outside compaction, providers replay the conversation without a timeout.
 - Add new runtime roots and standalone build entries to the matching Knip
   configs; exclude test support from production patterns.
