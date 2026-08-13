@@ -204,8 +204,8 @@ Living project memory.
   `knip.production.config.ts` limits the graph to runtime source. Both run:
   tests cannot keep production code alive; unused test helpers still fail.
 - `.jscpd.json` maps all JS/TS extensions to TSX for cross-extension detection;
-  import declarations are ignored; clones of ≥20 tokens and one line fail the
-  zero threshold.
+  imports are ignored; clones of ≥20 tokens and one line fail the zero
+  threshold.
 - `scripts/repository-check.ts` lists tracked, unignored files and calls the
   policy APIs under `scripts/`: no files at 20,000 Unicode code points
   (`bun.lock`, `drizzle/` excepted), no JS/TS tests outside `test` directories,
