@@ -197,8 +197,9 @@ function compactionRequestIds(
   );
 }
 
-// Mirrors the persisted handoff shape (prefix, delivery instruction,
-// summary); the sync-engine constants cannot cross the workspace boundary.
+// Handoff-shaped placeholder (prefix, instruction, summary); the
+// sync-engine constants cannot cross the workspace boundary and nothing
+// here asserts on the wording.
 const HANDOFF_MESSAGE =
   "Conversation compacted:\n\nTreat the summary below as prior context and continue from it:\n\nContinue from this handoff.";
 
