@@ -37,7 +37,7 @@ const CURRENT_BASE_MIGRATIONS = [
   "0027_worthless_sentinels.sql",
 ] as const;
 const CURRENT_BASE_TIMESTAMP = 1_785_753_783_416;
-const IDLE_COMPACT_MIGRATION_TIMESTAMP = 1_786_555_592_457;
+const STEP_STARTED_MIGRATION_TIMESTAMP = 1_786_576_532_455;
 
 let temporaryDirectory: string | undefined;
 
@@ -62,8 +62,8 @@ function agentSessionColumnNames(database: Database): readonly string[] {
   return query.all().map((column) => column.name);
 }
 
-test("upgrades migration 0027 through the api-format migration", async () => {
-  temporaryDirectory = mkdtempSync(join(tmpdir(), "q-mush-0028-upgrade-"));
+test("upgrades migration 0027 through the step-started migration", async () => {
+  temporaryDirectory = mkdtempSync(join(tmpdir(), "q-mush-base-upgrade-"));
   const path = join(temporaryDirectory, "current-base.sqlite");
   const currentBaseDatabase = new Database(path, { create: true });
   for (const migration of CURRENT_BASE_MIGRATIONS) {
@@ -95,11 +95,14 @@ test("upgrades migration 0027 through the api-format migration", async () => {
   expect(agentSessionColumnNames(upgradedDatabase.$client)).toContain(
     "idle_compact",
   );
+  expect(agentSessionColumnNames(upgradedDatabase.$client)).toContain(
+    "step_started_at",
+  );
   const latestMigration = upgradedDatabase.$client
     .query<{ readonly createdAt: number }, []>(
       "SELECT created_at AS createdAt FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 1",
     )
     .get();
-  expect(latestMigration?.createdAt).toBe(IDLE_COMPACT_MIGRATION_TIMESTAMP);
+  expect(latestMigration?.createdAt).toBe(STEP_STARTED_MIGRATION_TIMESTAMP);
   upgradedDatabase.$client.close();
 });

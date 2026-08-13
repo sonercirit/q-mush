@@ -272,6 +272,8 @@ test("requires explicit context, cost, and compaction metadata from session resp
     { ...DETAIL, autoCompact: undefined },
     { ...DETAIL, idleCompact: "yes" },
     { ...DETAIL, costBasis: undefined },
+    { ...DETAIL, stepStartedAt: undefined },
+    { ...DETAIL, stepStartedAt: 1.5 },
     { ...DETAIL, costBasis: "none", costUsd: 1 },
     { ...DETAIL, maxContextTokens: undefined },
     { ...DETAIL, modelContextTokens: undefined },

@@ -4,8 +4,10 @@ import { updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentSessions } from "../shared/database/schema.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
-import { activeSessionDuration } from "../shared/session-timing.ts";
-import { workspaceSessionCondition } from "./session-store-persistence.ts";
+import {
+  sessionTimingUpdate,
+  workspaceSessionCondition,
+} from "./session-store-persistence.ts";
 import { updateSessionAndEndGenerationTurn } from "./session-turn-store.ts";
 
 export type SessionToolUpdateStoreResult =
@@ -56,9 +58,8 @@ export function updateStoredSessionTools(
       values: {
         ...(endsActiveTurn
           ? {
-              activeDurationMs: activeSessionDuration(existing, input.now),
-              activeStartedAt: null,
               status: "idle" as const,
+              ...sessionTimingUpdate(existing, input.now),
             }
           : {}),
         executionGeneration: sql`${agentSessions.executionGeneration} + 1`,

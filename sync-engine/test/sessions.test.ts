@@ -234,12 +234,13 @@ describe("agent sessions", () => {
       new FailingModel(),
       "api_key",
       undefined,
-      { now: () => (now += 4_000) },
+      { now: () => (now += 3_000) },
     );
     const response = await setup.sessions.collection(createSessionRequest());
 
     expect(await expectSessionReaches(setup, response, "failed")).toMatchObject(
       {
+        // Four 3s ticks: run start, step start, failure write, settle.
         activeDurationMs: 12_000,
         activeStartedAt: null,
         messages: [
@@ -313,7 +314,8 @@ describe("agent sessions", () => {
     const response = await setup.sessions.collection(imageRequest);
 
     expect(await expectSessionReaches(setup, response, "idle")).toMatchObject({
-      activeDurationMs: 9_000,
+      // Four 3s ticks: run start, step start, message write, settle.
+      activeDurationMs: 12_000,
       activeStartedAt: null,
       messages: [
         {

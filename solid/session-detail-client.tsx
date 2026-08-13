@@ -132,7 +132,11 @@ function sessionCostText(
 function SessionMetrics(props: {
   readonly session: Pick<
     AgentSessionSummary,
-    "activeDurationMs" | "activeStartedAt" | "costBasis" | "costUsd"
+    | "activeDurationMs"
+    | "activeStartedAt"
+    | "costBasis"
+    | "costUsd"
+    | "stepStartedAt"
   >;
 }): JSX.Element {
   const now = createLiveNow(() => props.session.activeStartedAt !== null);
@@ -146,6 +150,20 @@ function SessionMetrics(props: {
         {(startedAt) => (
           <span class="text-emerald-200" data-session-run-duration="true">
             {`Run: ${formatSessionTime(Math.max(0, now() - startedAt))}`}
+          </span>
+        )}
+      </Show>
+      <Show
+        when={
+          props.session.activeStartedAt === null
+            ? null
+            : props.session.stepStartedAt
+        }
+        keyed
+      >
+        {(stepStartedAt) => (
+          <span class="text-emerald-200/80" data-session-step-duration="true">
+            {`Step: ${formatSessionTime(Math.max(0, now() - stepStartedAt))}`}
           </span>
         )}
       </Show>
@@ -290,6 +308,7 @@ function sessionListRowMatches(
     left.depth === right.depth &&
     leftSession.activeDurationMs === rightSession.activeDurationMs &&
     leftSession.activeStartedAt === rightSession.activeStartedAt &&
+    leftSession.stepStartedAt === rightSession.stepStartedAt &&
     leftSession.costBasis === rightSession.costBasis &&
     leftSession.costUsd === rightSession.costUsd &&
     leftSession.executionEnvironment === rightSession.executionEnvironment &&

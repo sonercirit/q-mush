@@ -115,6 +115,28 @@ function sessionModelOptions(
 }
 
 describe("session agent models", () => {
+  test("notifies the step-start hook when a model step begins", () => {
+    const { factory, selections } = modelSelections();
+    const stepStarts: number[] = [];
+
+    const models = createSessionAgentModels(
+      sessionModelOptions(factory, {
+        onStepStart: () => stepStarts.push(Date.now()),
+      }),
+    );
+    selections[0]?.onStepStart?.();
+    selections[0]?.onStepStart?.();
+
+    expect(stepStarts).toHaveLength(2);
+    expect(models.agent).toBeDefined();
+
+    // The compactor's model step restarts the same persisted step clock.
+    models.createCompactor();
+    selections[1]?.onStepStart?.();
+
+    expect(stepStarts).toHaveLength(3);
+  });
+
   test("keys the agent model's prompt cache to the session", () => {
     const { factory, selections } = modelSelections();
 
@@ -176,14 +198,21 @@ describe("session agent models", () => {
     const { hub, socket } = realtimeSetup();
     const summary = promiseGate<AgentModelStep>();
     const selections: Parameters<AgentModelFactory>[0][] = [];
+    const stepStarts: number[] = [];
     let nextStreamId = 0;
     const factory: AgentModelFactory = (options) => {
       selections.push(options);
-      return { complete: () => summary.wait() };
+      return {
+        complete: () => summary.wait(),
+        ...(options.onStepStart === undefined
+          ? {}
+          : { startStep: options.onStepStart }),
+      };
     };
     const models = createSessionAgentModels(
       sessionModelOptions(factory, {
         id: () => `stream-${String((nextStreamId += 1))}`,
+        onStepStart: () => stepStarts.push(stepStarts.length),
         realtime: hub,
       }),
     );
@@ -212,6 +241,10 @@ describe("session agent models", () => {
     await compaction;
     models.publishCompactionSettled();
     expectRealtimeDeltas(socket, [...streamed, compactionSettled()]);
+    // The compactor model carries the persistence hook (fired once above),
+    // not the stream rotation: the deltas stayed on stream-2 throughout.
+    expect(stepStarts).toEqual([0]);
+    expect(nextStreamId).toBe(2);
   });
 
   test("does not publish settlement before compaction persistence", async () => {

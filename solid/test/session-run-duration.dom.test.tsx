@@ -41,10 +41,21 @@ function runDurationText(container: ParentNode): string | undefined {
   );
 }
 
-test("a mounted session timer starts when the session begins running", () => {
-  useFakeClock(10_000);
+function stepDurationText(container: ParentNode): string | undefined {
+  return (
+    container.querySelector("[data-session-step-duration='true']")
+      ?.textContent ?? undefined
+  );
+}
+
+function mountQueuedSession(startMs: number) {
+  useFakeClock(startMs);
   const queued = { ...TEST_SESSION_DETAIL, status: "queued" as const };
-  const { container, controller } = mountTestSessionDetail(queued, disposals);
+  return { queued, ...mountTestSessionDetail(queued, disposals) };
+}
+
+test("a mounted session timer starts when the session begins running", () => {
+  const { container, controller, queued } = mountQueuedSession(10_000);
 
   expect(sessionTimeText(container)).toBe("Time: 0s");
   controller.applyDetail({
@@ -57,6 +68,47 @@ test("a mounted session timer starts when the session begins running", () => {
 
   expect(sessionTimeText(container)).toBe("Time: 2s");
   expect(runDurationText(container)).toBe("Run: 2s");
+});
+
+test("a running session shows and ticks its current step duration", () => {
+  const { container, controller, queued } = mountQueuedSession(20_000);
+
+  expect(stepDurationText(container)).toBeUndefined();
+
+  const running = {
+    ...queued,
+    activeStartedAt: Date.now(),
+    status: "running" as const,
+    stepStartedAt: Date.now(),
+    updatedAt: queued.updatedAt + 1,
+  };
+  controller.applyDetail(running);
+  vi.advanceTimersByTime(3_000);
+
+  expect(stepDurationText(container)).toBe("Step: 3s");
+
+  // A later model step resets the visible step clock below the run clock.
+  controller.applyDetail({
+    ...running,
+    stepStartedAt: Date.now(),
+    updatedAt: running.updatedAt + 1,
+  });
+  vi.advanceTimersByTime(1_000);
+
+  expect(stepDurationText(container)).toBe("Step: 1s");
+  expect(runDurationText(container)).toBe("Run: 4s");
+
+  // A stale step timestamp without an active run must render nothing.
+  controller.applyDetail({
+    ...running,
+    activeStartedAt: null,
+    status: "idle",
+    stepStartedAt: Date.now(),
+    updatedAt: running.updatedAt + 2,
+  });
+
+  expect(stepDurationText(container)).toBeUndefined();
+  expect(runDurationText(container)).toBeUndefined();
 });
 
 test("a retained sidebar row keeps ticking its run duration", () => {

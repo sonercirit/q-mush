@@ -106,6 +106,9 @@ export class ModelConversationCompactor implements AgentConversationCompactor {
     this.#onRequest?.(AGENT_COMPACTION_REQUEST_MESSAGE);
     let step: AgentModelStep;
     try {
+      // Compaction is a model step: restart the visible step clock at its
+      // request instead of letting the previous step keep timing.
+      this.#model.startStep?.();
       step = await this.#model.complete(input, signal);
     } finally {
       this.#model.close?.();

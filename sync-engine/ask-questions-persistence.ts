@@ -25,6 +25,7 @@ type StoredDatabaseQuestionSession = Pick<
   typeof agentSessions.$inferSelect,
   | "activeDurationMs"
   | "activeStartedAt"
+  | "stepStartedAt"
   | "executionGeneration"
   | "id"
   | "interruptedHandoff"
@@ -68,6 +69,7 @@ function storedQuestionSession(
   return {
     ...session,
     activeStartedAt: session.activeStartedAt?.getTime() ?? null,
+    stepStartedAt: session.stepStartedAt?.getTime() ?? null,
     updatedAt: session.updatedAt.getTime(),
   };
 }
@@ -108,6 +110,10 @@ function requestUpdateValues(update: Partial<StoredQuestionRequest>) {
   };
 }
 
+function nullableDate(value: number | null): Date | null {
+  return value === null ? null : new Date(value);
+}
+
 function sessionUpdateValues(
   update: Partial<StoredQuestionSession>,
 ): Partial<typeof agentSessions.$inferInsert> {
@@ -118,12 +124,10 @@ function sessionUpdateValues(
       : { activeDurationMs: update.activeDurationMs }),
     ...(update.activeStartedAt === undefined
       ? {}
-      : {
-          activeStartedAt:
-            update.activeStartedAt === null
-              ? null
-              : new Date(update.activeStartedAt),
-        }),
+      : { activeStartedAt: nullableDate(update.activeStartedAt) }),
+    ...(update.stepStartedAt === undefined
+      ? {}
+      : { stepStartedAt: nullableDate(update.stepStartedAt) }),
     ...(update.interruptedHandoff === undefined
       ? {}
       : { interruptedHandoff: update.interruptedHandoff }),

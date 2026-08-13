@@ -259,6 +259,9 @@ function readSummary(value: unknown): AgentSessionSummary {
     activeStartedAtValue === null
       ? null
       : readFiniteNumber(activeStartedAtValue);
+  const stepStartedAtValue = value["stepStartedAt"];
+  const stepStartedAt =
+    stepStartedAtValue === null ? null : readFiniteNumber(stepStartedAtValue);
   const agentFilePath = readNullableString(value["agentFilePath"]);
   let providerPricing: ProviderModelPricing | null;
   try {
@@ -318,6 +321,8 @@ function readSummary(value: unknown): AgentSessionSummary {
     activeStartedAt === undefined ||
     agentFilePath === undefined ||
     (activeStartedAt !== null && !Number.isSafeInteger(activeStartedAt)) ||
+    stepStartedAt === undefined ||
+    (stepStartedAt !== null && !Number.isSafeInteger(stepStartedAt)) ||
     typeof autoCompact !== "boolean" ||
     typeof idleCompact !== "boolean" ||
     (costBasis !== "none" &&
@@ -389,6 +394,7 @@ function readSummary(value: unknown): AgentSessionSummary {
   return {
     activeDurationMs,
     activeStartedAt,
+    stepStartedAt,
     agentFilePath,
     autoCompact,
     idleCompact,
@@ -567,6 +573,7 @@ export function summaryFromDetail(
   return {
     activeDurationMs: detail.activeDurationMs,
     activeStartedAt: detail.activeStartedAt,
+    stepStartedAt: detail.stepStartedAt,
     agentFilePath: detail.agentFilePath,
     autoCompact: detail.autoCompact,
     idleCompact: detail.idleCompact,

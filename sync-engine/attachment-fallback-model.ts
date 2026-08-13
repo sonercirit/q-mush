@@ -34,6 +34,7 @@ export async function explainAttachment(
     readonly currentProviderPricing: ProviderModelPricing | null;
     readonly currentProviderTag: string | null;
     readonly factory: AgentModelFactory;
+    readonly onStepStart?: () => void;
     readonly prompt: string | null;
     readonly resources: AttachmentFallbackRuntimeResources;
     readonly userId: string;
@@ -99,6 +100,9 @@ export async function explainAttachment(
   });
   let step;
   try {
+    // The explanation is its own model request: restart the visible step
+    // clock so a slow fallback does not extend the preceding agent step.
+    options.onStepStart?.();
     step = await model.complete(
       [{ attachments: [options.attachment], content: "", role: "user" }],
       signal,

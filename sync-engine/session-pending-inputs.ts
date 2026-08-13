@@ -13,11 +13,11 @@ import type {
   AgentSessionPendingInput,
   AgentSessionPendingInputKind,
 } from "../shared/session-model.ts";
-import { activeSessionDuration } from "../shared/session-timing.ts";
 import { storedActiveSessionState } from "./session-active-query.ts";
 import { retireManualCompactionOperations } from "./session-manual-compaction-query.ts";
 import { currentSessionSegment } from "./session-segment.ts";
 import { notifySessionSteeringInput } from "./session-steering-wakeup.ts";
+import { sessionTimingUpdate } from "./session-store-persistence.ts";
 import type { StoredUserMessageInput } from "./session-store-types.ts";
 import {
   nextStoredMessageTimestamp,
@@ -637,8 +637,7 @@ export function settleNormalSessionBoundary(options: {
     const changed = transaction
       .update(agentSessions)
       .set({
-        activeDurationMs: activeSessionDuration(session, options.now),
-        activeStartedAt: null,
+        ...sessionTimingUpdate(session, options.now),
         interruptedHandoff: null,
         status: queued ? "queued" : "idle",
         updatedAt: new Date(options.now),

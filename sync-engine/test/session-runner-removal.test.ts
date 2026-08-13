@@ -38,6 +38,7 @@ function testSession(): AgentSessionDetail {
     ...base,
     activeDurationMs: 0,
     activeStartedAt: null,
+    stepStartedAt: null,
     costUsd: 0,
     createdAt: 1,
     credentialId: "credential-1",
