@@ -15,9 +15,9 @@ Living project memory.
   validation errors, read usage metrics.
 - Call a capability impossible only when evidence excludes it — docs searched,
   schema enumerated — else record an open question.
-- Preserve patterns, add tools only as needed, and proactively improve what you
+- Preserve patterns, add tools only as needed, proactively improve what you
   touch — code health, tests, docs, performance, security, DX: small
-  improvements ship with the change, larger ones as immediate follow-ups.
+  improvements ship with the change; larger ones follow immediately.
 - Practice TDD: failing test first, implement, refactor green.
 - Follow DRY and KISS: authoritative logic, no premature abstractions.
 - Never invent numeric limits or tunables: probe omission first, prefer the
@@ -87,18 +87,18 @@ Living project memory.
 - `sync-engine/runner-store.ts` persists user runner registrations in `runners`:
   one active registration per machine fingerprint, one default runner per user.
   `sync-engine/runners.ts` issues hashed opaque setup tokens, owns authenticated
-  management and token-authenticated callback APIs, and derives installer
-  commands from the request origin. `sync-engine/runner-installer.ts` emits the
+  management and token-authenticated callback APIs, deriving installer commands
+  from the request origin. `sync-engine/runner-installer.ts` emits the
   macOS/Linux one-liner: it picks an x64/ARM64 glibc/musl target and starts a
   downloaded standalone executable under `~/.q-mush/runner`; no Bun needed. The
   runner reports metadata and 15-second heartbeats over its authenticated
   WebSocket, checks updates at startup and every five minutes, rechecks via
-  handshake version after restarts, and replaces an older socket on reconnect.
+  handshake version after restarts, replacing an older socket on reconnect.
   Updates use a source/compiler ETag and SHA-256 digest, atomically replace the
   executable, and restart it; development restarts drain active sessions first.
-  Reinstalling for the same user and machine rotates the registration to the new
-  token instead of adding a second runner; other registrations stay protected,
-  and tokens never appear in lists.
+  Reinstalling for the same user and machine rotates the registration to its new
+  token instead of adding a second runner; other registrations stay protected;
+  tokens never appear in lists.
 - Browser messages sort by time then ID; live output anchors after the
   initiating message, snapshots replace it. `session-agent-read.ts` byte-bounds
   transcript messages, assistant calls, the system prompt, and tool definitions.
@@ -167,7 +167,7 @@ Living project memory.
   land late and 128-token blocks hide small growth. Codex sockets stay open per
   run (tested cache-neutral), reconnect on failure, close at run end. UI rates
   divide by summed input minus the final request (summary) or the prior step's
-  input (per step), clamped at 100%; the divisor counts fully reported steps.
+  input (per step), clamped at 100%, counting only fully reported steps.
   OpenAI/Codex requests carry the session ID as `prompt_cache_key` and the Codex
   `session_id` header (cache routing); that surface rejects
   `prompt_cache_breakpoint`/`prompt_cache_retention`. OpenRouter and
@@ -190,7 +190,7 @@ Living project memory.
 - `tsconfig.json` configures strict, no-emit, bundler-style checking with unused
   and unreachable code diagnostics. Library declaration checking is off —
   Drizzle publishes optional cross-dialect declarations that fail here; app
-  source stays fully checked; re-enable after an upstream fix.
+  source stays fully checked; re-enable after an upstream Drizzle fix.
 - `eslint.config.ts` uses type-aware strict/stylistic `typescript-eslint`
   presets, imports `.gitignore`, bans non-const assertions, and enforces
   exhaustive switches and canonical named imports (one declaration per module
