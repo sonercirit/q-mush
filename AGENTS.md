@@ -31,10 +31,10 @@ Living project memory.
   test.
 - Record new decisions, gotchas, and lessons here in the same change, unprompted
   — a repeated user instruction means a rule is missing; condense elsewhere to
-  fit the size policy. When evidence overturns a finding, fix the code it
-  justified and every stale record in that change; act, don't ask.
+  fit the size policy. When evidence overturns a recorded finding, fix the code
+  it justified and every stale record in that change; act, don't ask.
 - Keep workflows local-first: narrow checks per change, broad suites once
-  captured, then rerun the narrowest failing scope.
+  captured, then rerun only the narrowest failing scope.
 - Never commit secrets, generated artifacts, or env files.
 
 ## Setup, Commands
