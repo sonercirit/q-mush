@@ -30,7 +30,10 @@ export function orchestrationActions(
     database,
     discoverSessionMetadata: () =>
       Promise.resolve(
-        Object.assign({}, { maxContextTokens: 1, providerPricing: null }),
+        Object.assign(
+          {},
+          { maxContextTokens: 1, maxOutputTokens: null, providerPricing: null },
+        ),
       ),
     launchSession: () => false,
     listOnlineRunners: () => [],

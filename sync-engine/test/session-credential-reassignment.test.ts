@@ -223,6 +223,7 @@ describe("session credential reassignment endpoint", () => {
         {
           id: "session-1",
           maxContextTokens: 64_000,
+          maxOutputTokens: null,
           providerPricing: null,
         },
       ],

@@ -13,6 +13,7 @@ import {
   TEST_USER_ID,
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
+import { createSessionInput } from "./session-store-create-hardening-helpers.ts";
 import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
 
 function setup() {
@@ -22,21 +23,14 @@ function setup() {
   const store = new SessionStore(database);
   const created = store.create(
     {
-      autoCompact: true,
-      credentialId: "credential-1",
-      executionEnvironment: "bare_metal",
-      images: [],
-      maxContextTokens: null,
+      ...createSessionInput({
+        credentialId: "credential-1",
+        prompt: "test",
+        runnerId: "runner-1",
+        workingDirectory: "/tmp",
+      }),
       model: "gpt-5-codex",
-      openRouterProviderTag: null,
-      prompt: "test",
-      provider: "openai",
-      providerPricing: null,
-      reasoningEffort: null,
-      runnerId: "runner-1",
       tools: ["read", "bash"],
-      userId: TEST_USER_ID,
-      workingDirectory: "/tmp",
       workspaceId: TEST_WORKSPACE_ID,
     },
     1,

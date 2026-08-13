@@ -1,0 +1,1 @@
+ALTER TABLE `agent_sessions` ADD `max_output_tokens` integer;

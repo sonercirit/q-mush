@@ -1,4 +1,5 @@
 import { expect, test, vi } from "vitest";
+import { testAgentModelOption } from "../../shared/test/agent-model-fixtures.ts";
 import { createReactiveState } from "../reactive-state.ts";
 import type { SessionViewState } from "../session-client.tsx";
 import { summaryFromDetail } from "../session-codec.ts";
@@ -84,24 +85,15 @@ test("fork editor warns only after choosing a different provider or model", asyn
           ? {
               defaultModel: detail.model,
               models: [
-                {
-                  contextWindow: 128_000,
+                testAgentModelOption({
                   id: detail.model,
-                  inputModalities: ["text"],
                   label: "Source model",
-                  outputModalities: ["text"],
-                  pricing: null,
-                  reasoningEfforts: [],
-                },
-                {
-                  contextWindow: 128_000,
+                }),
+                testAgentModelOption({
                   id: "different-model",
-                  inputModalities: ["text"],
                   label: "Different model",
-                  outputModalities: ["text"],
-                  pricing: null,
                   reasoningEfforts: ["high"],
-                },
+                }),
               ],
             }
           : detail,

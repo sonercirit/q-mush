@@ -29,6 +29,7 @@ function apiKeyChatOptions(
       secret: "sk-chat",
       source: "api_key",
     },
+    maxOutputTokens: null,
     model,
     ...(promptCacheKey === undefined ? {} : { promptCacheKey }),
     provider,
@@ -100,6 +101,7 @@ describe("prompt cache request state", () => {
         captured = request;
         return Promise.resolve(completedEventResponse());
       },
+      maxOutputTokens: null,
       model: "gpt-5-codex",
       promptCacheKey: SESSION_KEY,
       provider: "openai",

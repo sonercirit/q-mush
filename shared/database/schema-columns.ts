@@ -13,6 +13,7 @@ export function sessionContextColumns() {
       .notNull()
       .default(0),
     maxContextTokens: integer("max_context_tokens"),
+    maxOutputTokens: integer("max_output_tokens"),
     userContextTokenCap: integer("user_context_token_cap"),
   };
 }

@@ -105,20 +105,20 @@ export function recordedMessageValues(
       toolCalls: JSON.stringify(message.toolCalls),
     };
   }
-  if (message.role === "thinking") {
+  if (message.role === "tool") {
     return {
-      ...emptyToolMetadata(),
       content: message.content,
-      role: "thinking",
+      images: null,
+      role: "tool",
+      toolCallId: message.toolCallId,
+      toolCalls: null,
+      toolName: message.toolName,
     };
   }
   return {
+    ...emptyToolMetadata(),
     content: message.content,
-    images: null,
-    role: "tool",
-    toolCallId: message.toolCallId,
-    toolCalls: null,
-    toolName: message.toolName,
+    role: message.role,
   };
 }
 

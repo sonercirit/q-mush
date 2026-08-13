@@ -27,6 +27,7 @@ function createProviderUpdateSession(
     executionEnvironment: "bare_metal" as const,
     images: [],
     maxContextTokens: 128_000,
+    maxOutputTokens: null,
     model: "gpt-4.1-mini",
     openRouterProviderTag: null,
     prompt: "Initial context",
@@ -117,6 +118,7 @@ function sessionRow(setupValue: ReturnType<typeof setup>) {
       credentialId: agentSessions.providerCredentialId,
       generation: agentSessions.executionGeneration,
       maxContextTokens: agentSessions.maxContextTokens,
+      maxOutputTokens: agentSessions.maxOutputTokens,
       model: agentSessions.model,
       pricing: agentSessions.providerPricing,
       provider: agentSessions.provider,
@@ -195,6 +197,26 @@ describe("session provider update", () => {
     expect(
       setupValue.store.queue(TEST_USER_ID, updated.id, TEST_NOW + 2).status,
     ).toBe("queued");
+  });
+
+  test("persists the catalog output limit for untagged model targets", async () => {
+    const setupValue = setup();
+    const [option] = testModelCatalog("vendor/model", "Model").models;
+    if (option === undefined) throw new Error("Fixture catalog is empty");
+    setupValue.dependencies.discoverModels = () =>
+      Promise.resolve({
+        defaultModel: option.id,
+        models: [{ ...option, maxOutputTokens: 64_000 }],
+      });
+
+    const updated = await applySessionProviderUpdate(
+      setupValue.dependencies,
+      TEST_USER_ID,
+      { ...setupValue.input, openRouterProviderTag: null },
+    );
+
+    expect(updated.maxOutputTokens).toBe(64_000);
+    expect(sessionRow(setupValue)?.maxOutputTokens).toBe(64_000);
   });
 
   test("retains a cap below the target model limit", async () => {

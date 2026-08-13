@@ -44,7 +44,7 @@ async function quotaResponse(
         ? "openrouter"
         : "openai",
     credential,
-    "application/json",
+    { accept: "application/json" },
   );
   return runtime.fetch(url, { headers });
 }

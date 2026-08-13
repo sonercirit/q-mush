@@ -1,7 +1,9 @@
 import { and, asc, eq } from "drizzle-orm";
 import {
   readAgentToolCalls,
+  truncationFromNotice,
   type AgentConversationMessage,
+  type AgentStepTruncation,
   type AgentToolCall,
 } from "../shared/agent-loop.ts";
 import type { AppDatabase } from "../shared/database.ts";
@@ -272,6 +274,15 @@ export function readStoredSessionMessages(
     .all()
     .map(summarizeStoredMessage)
     .sort(compareAgentSessionMessages);
+}
+
+export function storedConversationTruncation(
+  messages: readonly AgentSessionMessage[],
+): AgentStepTruncation | undefined {
+  const trailing = messages.at(-1);
+  return trailing?.role === "error"
+    ? truncationFromNotice(trailing.content)
+    : undefined;
 }
 
 export function conversationFromMessages(

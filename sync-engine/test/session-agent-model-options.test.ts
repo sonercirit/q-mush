@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { discoverAgentModels } from "../../sync-engine/agent-model-discovery.ts";
+import { discoverAgentModelsWithFetch } from "../../sync-engine/agent-model-discovery.ts";
 import {
   catalog,
   containsAny,
@@ -157,7 +157,7 @@ describe("agent model option discovery", () => {
       ]),
       {},
       (provider, selectedCredential) =>
-        discoverAgentModels(provider, selectedCredential, () =>
+        discoverAgentModelsWithFetch(provider, selectedCredential, () =>
           Promise.resolve(
             new Response("provider-secret", {
               status: 429,

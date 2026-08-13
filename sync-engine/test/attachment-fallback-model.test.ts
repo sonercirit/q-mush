@@ -70,7 +70,11 @@ function options(
           Promise.resolve({
             defaultModel: "pdf-model",
             models: [
-              testAgentModelOption({ id: "pdf-model", label: "PDF model" }),
+              testAgentModelOption({
+                id: "pdf-model",
+                label: "PDF model",
+                maxOutputTokens: 32_000,
+              }),
             ],
           }),
         readCredential: () => Promise.resolve(FALLBACK_CREDENTIAL),
@@ -107,11 +111,30 @@ describe("explain attachment", () => {
     expect(setup.factory).toHaveBeenCalledWith(
       expect.objectContaining({
         credential: FALLBACK_CREDENTIAL,
+        maxOutputTokens: 32_000,
         model: "pdf-model",
         providerPricing: null,
         systemPrompt: "Extract requirements",
       }),
     );
+  });
+
+  test("appends the truncation notice to a length-stopped explanation", async () => {
+    const setup = options(["text"]);
+    const factory = vi.fn(() => ({
+      complete: () =>
+        Promise.resolve({
+          ...providerStep("Partial explanation"),
+          truncation: "max_tokens" as const,
+        }),
+    }));
+
+    const explanation = await explainAttachment({ ...setup.value, factory });
+
+    // The tool result must not read as a finished explanation.
+    expect(explanation.content).toContain("Partial explanation");
+    expect(explanation.content).toContain("truncated");
+    expect(explanation.content).toContain("maximum output tokens");
   });
 
   test("uses the session model when it supports the file modality", async () => {

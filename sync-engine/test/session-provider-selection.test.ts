@@ -50,6 +50,7 @@ async function expectSuccessfulMetadata(
     metadataWithoutProviderDiscovery(input, discoverProviders),
   ).resolves.toEqual({
     maxContextTokens: 128_000,
+    maxOutputTokens: null,
     providerPricing: null,
   });
 }
@@ -206,8 +207,8 @@ describe("OpenRouter session provider validation", () => {
     expect(result).toMatchObject({
       preparedProviderState: {
         metadataUpdates: [
-          { id: "session-1", maxContextTokens: 64_000 },
-          { id: "session-2", maxContextTokens: 64_000 },
+          { id: "session-1", maxContextTokens: 64_000, maxOutputTokens: null },
+          { id: "session-2", maxContextTokens: 64_000, maxOutputTokens: null },
         ],
       },
     });
@@ -252,6 +253,7 @@ describe("OpenRouter session provider validation", () => {
 
     await expect(metadataWithRecordedDiscovery(calls)).resolves.toEqual({
       maxContextTokens: 64_000,
+      maxOutputTokens: null,
       providerPricing: { input: "0.0000002", output: "0.0000008" },
     });
     expect(calls[0]?.[3]).toEqual({ force: true });
@@ -297,6 +299,7 @@ describe("OpenRouter session provider validation", () => {
       ),
     ).resolves.toEqual({
       maxContextTokens: null,
+      maxOutputTokens: null,
       providerPricing: null,
     });
   });

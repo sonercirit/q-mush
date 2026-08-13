@@ -16,10 +16,21 @@ import {
 import type { ProviderModelRequest } from "./provider-request.ts";
 
 export const ANTHROPIC_VERSION = "2023-06-01";
+// Documented opt-in: pre-4.5 models degrade an input+max_tokens overshoot
+// to stop_reason "model_context_window_exceeded" instead of rejecting the
+// request; 4.5+ models already behave this way without the header.
+export const ANTHROPIC_CONTEXT_WINDOW_BETA =
+  "model-context-window-exceeded-2025-08-26";
 
 export type AnthropicRequestOptions = Pick<
   ProviderModelRequest,
-  "messages" | "model" | "reasoningEffort" | "stream" | "systemPrompt" | "tools"
+  | "maxOutputTokens"
+  | "messages"
+  | "model"
+  | "reasoningEffort"
+  | "stream"
+  | "systemPrompt"
+  | "tools"
 >;
 
 interface AnthropicMessage {
@@ -71,6 +82,8 @@ function anthropicMessage(
       ];
       return content.length === 0 ? undefined : { content, role: "assistant" };
     }
+    case "compaction_notice":
+      return undefined;
     case "tool":
       return {
         content: [
@@ -132,14 +145,21 @@ function anthropicTools(
 export function anthropicRequestBody(
   options: AnthropicRequestOptions,
 ): unknown {
-  // The request sends no output or thinking budgets, deferring to provider
-  // defaults. A selected reasoning effort maps to the Messages API's
-  // `output_config.effort` and turns on adaptive thinking with visible
-  // summaries: adaptive-only models (Fable) ignore `enabled`, and newer
-  // models default `display` to "omitted", which streams empty thinking text
-  // while still billing thinking tokens. "none" sends neither parameter, and
-  // "minimal" (an OpenAI level the Messages API rejects — valid levels are
-  // low through max) maps to "low".
+  // The Messages API documents max_tokens as required; the catalog's
+  // per-model maximum output tokens supplies it when discovery reported one,
+  // and permissive proxies accept the omission otherwise. The maximum is
+  // deliberately not clamped to the remaining context: without a tokenizer
+  // any input estimate is a guess, and an overshoot would truncate output
+  // under our own `max_tokens` stop instead of the API's explicit
+  // `model_context_window_exceeded` degradation — native on 4.5+ models and
+  // opted into on earlier ones via ANTHROPIC_CONTEXT_WINDOW_BETA.
+  // Thinking budgets stay on provider defaults. A selected reasoning effort
+  // maps to the `output_config.effort` and turns on adaptive thinking with
+  // visible summaries: adaptive-only models (Fable) ignore `enabled`, and
+  // newer models default `display` to "omitted", which streams empty
+  // thinking text while still billing thinking tokens. "none" sends neither
+  // parameter, and "minimal" (an OpenAI level the Messages API rejects —
+  // valid levels are low through max) maps to "low".
   const effort =
     options.reasoningEffort === "minimal" ? "low" : options.reasoningEffort;
   const reasoning =
@@ -150,6 +170,9 @@ export function anthropicRequestBody(
           thinking: { display: "summarized", type: "adaptive" },
         };
   return {
+    ...(options.maxOutputTokens === null
+      ? {}
+      : { max_tokens: options.maxOutputTokens }),
     messages: anthropicMessages(options.messages),
     model: options.model,
     ...reasoning,

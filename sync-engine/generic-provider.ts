@@ -3,7 +3,7 @@ import type { ProviderCredentialDetails } from "../shared/provider-credential-st
 import { PROVIDER_API_FORMATS } from "../shared/provider-id.ts";
 import {
   AgentModelDiscoveryError,
-  discoverAgentModels,
+  discoverAgentModelsWithFetch,
 } from "./agent-model-discovery.ts";
 import type { GoogleAuth } from "./auth.ts";
 import { normalizeGenericProviderBaseUrl } from "./generic-provider-url.ts";
@@ -62,7 +62,7 @@ async function readGenericCredentialDetails(
     baseUrl,
   };
   try {
-    await discoverAgentModels(
+    await discoverAgentModelsWithFetch(
       "generic",
       { ...endpoint, secret: apiKey, source: "api_key" },
       (request) => runtime.fetch(request),

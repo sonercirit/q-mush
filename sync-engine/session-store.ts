@@ -1,5 +1,8 @@
 import type { AgentImage } from "../shared/agent-images.ts";
-import type { AgentConversationMessage } from "../shared/agent-loop.ts";
+import type {
+  AgentConversationMessage,
+  AgentStepTruncation,
+} from "../shared/agent-loop.ts";
 import type { AgentSessionToolName } from "../shared/agent-tools.ts";
 import type { PendingAskQuestions } from "../shared/ask-questions.ts";
 import type { AppDatabase } from "../shared/database.ts";
@@ -55,6 +58,7 @@ import {
   appendUnknownRestartToolResults,
   conversationFromMessages,
   readStoredSessionMessages,
+  storedConversationTruncation,
   withInterruptedToolResults,
 } from "./session-store-read.ts";
 import {
@@ -188,6 +192,11 @@ export class SessionStore extends SessionStoreRestarts {
         readStoredSessionMessages(this.#database, sessionId),
         interrupted,
       ),
+    );
+  }
+  conversationTruncation(sessionId: string): AgentStepTruncation | undefined {
+    return storedConversationTruncation(
+      readStoredSessionMessages(this.#database, sessionId),
     );
   }
   protected readRestartSession(userId: string, sessionId: string) {

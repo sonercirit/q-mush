@@ -35,6 +35,7 @@ export function updateStoredSessionProvider(
   read: ReadProviderUpdateSession,
   input: SessionProviderUpdateInput & {
     readonly maxContextTokens: number | null;
+    readonly maxOutputTokens: number | null;
     readonly now: number;
     readonly providerPricing: ProviderModelPricing | null;
     readonly userId: string;
@@ -69,6 +70,7 @@ export function updateStoredSessionProvider(
     currentSegment: sql<number>`${agentSessions.currentSegment} + 1`,
     executionGeneration: sql`${agentSessions.executionGeneration} + 1`,
     maxContextTokens: input.maxContextTokens,
+    maxOutputTokens: input.maxOutputTokens,
     model: input.model,
     interruptedHandoff: null,
     provider: input.provider,

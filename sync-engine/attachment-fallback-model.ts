@@ -3,7 +3,10 @@ import {
   type AgentAttachment,
 } from "../shared/agent-attachments.ts";
 import type { AgentModelOption } from "../shared/agent-configuration.ts";
-import type { AgentModelStep } from "../shared/agent-loop.ts";
+import {
+  TRUNCATION_NOTICES,
+  type AgentModelStep,
+} from "../shared/agent-loop.ts";
 import { modelSupportsAttachmentModality } from "../shared/attachment-fallback.ts";
 import type {
   ProviderCredentialAccess,
@@ -74,6 +77,7 @@ export async function explainAttachment(
     const catalog = await options.resources.discoverModels?.(
       selection.provider,
       credential,
+      signal,
     );
     const fallbackModel = catalog?.models.find(
       ({ id }) => id === selection.model,
@@ -91,6 +95,7 @@ export async function explainAttachment(
       : selectedModel.pricing;
   const model = createFallbackModel(options.factory, {
     credential,
+    maxOutputTokens: selectedModel.maxOutputTokens,
     model: selectedModelId,
     openRouterProviderTag:
       selection?.openRouterProviderTag ?? options.currentProviderTag,
@@ -111,7 +116,12 @@ export async function explainAttachment(
     model.close?.();
   }
   return {
-    content: step.content,
+    // Surface a length stop in the tool result itself so the agent never
+    // relies on an incomplete explanation as if it were finished.
+    content:
+      step.truncation === undefined
+        ? step.content
+        : `${step.content}\n\n${TRUNCATION_NOTICES[step.truncation]}`,
     model: selectedModelId,
     provider: selectedProvider,
     providerPricing: selectedPricing,

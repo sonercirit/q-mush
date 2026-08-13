@@ -1,4 +1,5 @@
 import { and, desc, eq, isNull, type SQL } from "drizzle-orm";
+import { isTruncationNotice } from "../shared/agent-loop.ts";
 import { updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
@@ -153,7 +154,13 @@ function storedTerminalExists(
     .where(eq(agentMessages.sessionId, sessionId))
     .orderBy(desc(agentMessages.createdAt), desc(agentMessages.id))
     .all();
-  const active = latest.find(({ isDeleted }) => !isDeleted);
+  const activeRows = latest.filter(({ isDeleted }) => !isDeleted);
+  // A truncated terminal step persists its assistant answer plus a trailing
+  // truncation notice; the pair is just as settled as a bare assistant row.
+  const active =
+    activeRows[0]?.role === "error" && isTruncationNotice(activeRows[0].content)
+      ? activeRows[1]
+      : activeRows[0];
   if (active?.role === "assistant") {
     try {
       const calls: unknown = JSON.parse(active.toolCalls ?? "null");

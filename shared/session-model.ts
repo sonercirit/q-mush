@@ -103,6 +103,7 @@ export interface AgentSessionSummary extends SessionRunStepTiming<number> {
   readonly id: string;
   readonly idleCompact: boolean;
   readonly maxContextTokens: number | null;
+  readonly maxOutputTokens: number | null;
   readonly userContextTokenCap: number | null;
   readonly model: string;
   readonly openRouterProviderTag: string | null;

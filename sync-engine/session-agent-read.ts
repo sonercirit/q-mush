@@ -8,6 +8,7 @@ export const READ_SESSION_CATEGORIES = [
   "assistant",
   "thinking",
   "tool",
+  "error",
   "tools",
 ] as const;
 export type ReadSessionCategory = (typeof READ_SESSION_CATEGORIES)[number];
@@ -35,7 +36,7 @@ interface ReadSessionRecord {
   readonly content: string;
   readonly createdAt: number;
   readonly id: string;
-  readonly role: "assistant" | "thinking" | "tool" | "user";
+  readonly role: "assistant" | "error" | "thinking" | "tool" | "user";
   readonly toolCallId?: string;
   readonly toolCalls?: readonly AgentToolCall[];
   readonly toolName?: string;
@@ -117,7 +118,7 @@ function boundedToolCalls(toolCalls: readonly AgentToolCall[]): {
 }
 
 type ReadSessionMessage = AgentSessionMessage & {
-  readonly role: "assistant" | "thinking" | "tool" | "user";
+  readonly role: "assistant" | "error" | "thinking" | "tool" | "user";
 };
 
 function commonRecord(message: ReadSessionMessage, content: string) {
@@ -170,6 +171,7 @@ function isReadSessionMessage(
 ): message is ReadSessionMessage {
   return (
     message.role === "assistant" ||
+    message.role === "error" ||
     message.role === "thinking" ||
     message.role === "tool" ||
     message.role === "user"

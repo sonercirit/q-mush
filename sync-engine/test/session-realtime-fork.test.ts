@@ -92,6 +92,7 @@ function catalog(contextWindow = 128_000) {
         id: TEST_SESSION_DETAIL.model,
         inputModalities: ["text"],
         label: "Test model",
+        maxOutputTokens: null,
         outputModalities: ["text"],
         pricing: null,
         reasoningEfforts: [] as const,

@@ -397,6 +397,29 @@ describe("session option pagination", () => {
         )[0],
       )["reasoningEfforts"],
     ).toEqual(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
+    // Non-positive and fractional catalog limits are dropped, valid ones
+    // pass through.
+    const boundedLimits = testArray(
+      parsed(
+        testSessionOptionsInput("models"),
+        testSessionOptionsSource({
+          models: [
+            testModelOption("good", {
+              contextWindow: 128_000,
+              maxOutputTokens: 64_000,
+            }),
+            testModelOption("bad", { contextWindow: 0, maxOutputTokens: 1.5 }),
+          ],
+        }),
+      )["items"],
+    ).map((item) => [
+      testRecord(item)["contextWindow"],
+      testRecord(item)["maxOutputTokens"],
+    ]);
+    expect(boundedLimits).toEqual([
+      [128_000, 64_000],
+      [null, null],
+    ]);
     expect(
       testArray(
         parsed(

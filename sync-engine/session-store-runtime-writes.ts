@@ -1,4 +1,4 @@
-import { type SQL } from "drizzle-orm";
+import { and, eq, isNull, type SQL } from "drizzle-orm";
 import type { AgentFile } from "../shared/agent-file.ts";
 import type { AgentRecordedMessage } from "../shared/agent-loop.ts";
 import { updatedAuditFields } from "../shared/audit.ts";
@@ -65,10 +65,18 @@ function updateRunningSession(
     readonly executionGeneration?: number | SQL;
   },
 ): void {
+  updateRunningSessionWhere(options, values, runningSessionCondition(options));
+}
+
+function updateRunningSessionWhere(
+  options: RuntimeWriteTarget,
+  values: Parameters<typeof updateRunningSession>[1],
+  condition: SQL | undefined,
+): void {
   options.resources.database
     .update(agentSessions)
     .set({ ...values, ...updatedAuditFields(SYSTEM_ID, options.now) })
-    .where(runningSessionCondition(options))
+    .where(condition)
     .run();
 }
 
@@ -118,6 +126,27 @@ export function compactRuntimeConversation(
   options: Omit<Parameters<typeof compactRuntime>[0], "restartHandoff">,
 ): void {
   compactRuntime(options, false);
+}
+
+export function setRuntimeMaxOutputTokens(
+  options: RuntimeWriteTarget & {
+    readonly credentialId: string;
+    readonly maxOutputTokens: number;
+  },
+): void {
+  // Discovery is asynchronous: a reassignment may have swapped the
+  // credential (nulling the limit for a re-probe) while this run's
+  // discovery was in flight. Write only while the discovering credential
+  // is still attached and the limit is still unset.
+  updateRunningSessionWhere(
+    options,
+    { maxOutputTokens: options.maxOutputTokens },
+    and(
+      runningSessionCondition(options),
+      eq(agentSessions.providerCredentialId, options.credentialId),
+      isNull(agentSessions.maxOutputTokens),
+    ),
+  );
 }
 
 export function updateRuntimeUsage(

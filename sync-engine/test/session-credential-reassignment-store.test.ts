@@ -73,6 +73,8 @@ function setup(): {
   for (const [id, provider, userId] of [
     [SOURCE, "openai", USER_ID],
     [TARGET, "openai", USER_ID],
+    ["generic-source", "generic", USER_ID],
+    ["generic-target", "generic", USER_ID],
     ["openrouter-source", "openrouter", USER_ID],
     ["openrouter-target", "openrouter", USER_ID],
     ["foreign-target", "openai", OTHER_USER_ID],
@@ -102,10 +104,11 @@ function addSession(
   options: {
     readonly contextWindow?: number | null;
     readonly deleted?: boolean;
+    readonly maxOutputTokens?: number | null;
     readonly model?: string;
     readonly openRouterProviderTag?: string | null;
     readonly pricing?: string | null;
-    readonly provider?: "openai" | "openrouter";
+    readonly provider?: "generic" | "openai" | "openrouter";
   } = {},
 ): void {
   database
@@ -115,6 +118,7 @@ function addSession(
       ...(options.deleted === true ? { isDeleted: true } : {}),
       id,
       maxContextTokens: options.contextWindow,
+      maxOutputTokens: options.maxOutputTokens,
       model: options.model ?? "test-model",
       openRouterProviderTag: options.openRouterProviderTag,
       provider: options.provider ?? "openai",
@@ -256,6 +260,46 @@ describe("session credential reassignment store", () => {
     ).toHaveLength(3);
   });
 
+  test("clears the output limit when a generic credential is reassigned", () => {
+    const { database, store } = setup();
+    for (const [id, credentialId, options] of [
+      [
+        "generic-session",
+        "generic-source",
+        { maxOutputTokens: 64_000, provider: "generic" },
+      ],
+      ["openai-session", SOURCE, { maxOutputTokens: 32_000 }],
+    ] as const) {
+      addSession(database, id, credentialId, options);
+    }
+
+    expectMigratedSessionCount(
+      store.reassign({
+        credentialId: "generic-target",
+        now: NOW + 1,
+        provider: "generic",
+        userId: USER_ID,
+      }),
+      1,
+    );
+    expectMigratedSessionCount(reassign(store), 1);
+
+    const limits = new Map(
+      database
+        .select({
+          id: agentSessions.id,
+          maxOutputTokens: agentSessions.maxOutputTokens,
+        })
+        .from(agentSessions)
+        .all()
+        .map((row) => [row.id, row.maxOutputTokens]),
+    );
+    // The generic endpoint may differ, so its limit re-probes lazily; the
+    // OpenAI credential change keeps the stored limit.
+    expect(limits.get("generic-session")).toBeNull();
+    expect(limits.get("openai-session")).toBe(32_000);
+  });
+
   test("requires the target credential to be accessible in the selected scope", () => {
     const { database, store } = setup();
     const workspaceId = `workspace-${USER_ID}`;
@@ -328,6 +372,7 @@ describe("session credential reassignment store", () => {
         {
           id: "session-1",
           maxContextTokens: 64_000,
+          maxOutputTokens: null,
           providerPricing: {
             input: "0.0000002",
             output: "0.0000008",

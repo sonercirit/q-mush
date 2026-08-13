@@ -1,3 +1,4 @@
+import { isTruncationNotice } from "../shared/agent-loop.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { sessionToolOutput } from "./session-agent-tools.ts";
 
@@ -21,6 +22,24 @@ export function spawnedSessionReport(
   const terminalAssistant = completed.messages.findLast(
     ({ role, toolCalls }) => role === "assistant" && toolCalls.length === 0,
   );
+  // A truncation notice lands directly after its assistant step; carry it
+  // into the callback so the parent never mistakes a cut-short answer for
+  // a finished one.
+  const terminalIndex =
+    terminalAssistant === undefined
+      ? -1
+      : completed.messages.indexOf(terminalAssistant);
+  const trailingNotice =
+    terminalIndex >= 0 ? completed.messages[terminalIndex + 1] : undefined;
+  const noticedAssistant =
+    terminalAssistant !== undefined &&
+    trailingNotice?.role === "error" &&
+    isTruncationNotice(trailingNotice.content)
+      ? {
+          ...terminalAssistant,
+          content: `${terminalAssistant.content}\n\n${trailingNotice.content}`,
+        }
+      : terminalAssistant;
   const assistant = completed.messages.findLast(
     ({ role }) => role === "assistant",
   );
@@ -38,7 +57,7 @@ export function spawnedSessionReport(
         }
     : completed.status === "stopped"
       ? completed.messages.findLast(({ role }) => role !== "thinking")
-      : terminalAssistant;
+      : noticedAssistant;
   const summary = sessionToolOutput({
     lastMessage:
       lastMessage === undefined

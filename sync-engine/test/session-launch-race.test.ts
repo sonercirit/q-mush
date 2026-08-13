@@ -361,6 +361,7 @@ function agentActionsSetup(
     discoverSessionMetadata: () =>
       Promise.resolve().then(() => ({
         maxContextTokens: null,
+        maxOutputTokens: null,
         providerPricing: null,
       })),
     draining: () => false,

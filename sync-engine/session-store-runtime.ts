@@ -20,6 +20,7 @@ import {
   compactRuntimeTerminal,
   markRuntimeStepStart,
   setRuntimeAgentFile,
+  setRuntimeMaxOutputTokens,
   settleRuntimeFailure,
   updateRuntimeUsage,
 } from "./session-store-runtime-writes.ts";
@@ -127,6 +128,20 @@ export abstract class SessionStoreRuntime {
     generation: number,
   ): void {
     markRuntimeStepStart(this.#target(sessionId, now, generation));
+  }
+
+  setRuntimeMaxOutputTokens(
+    sessionId: string,
+    credentialId: string,
+    maxOutputTokens: number,
+    now: number,
+    generation: number,
+  ): void {
+    setRuntimeMaxOutputTokens({
+      credentialId,
+      maxOutputTokens,
+      ...this.#target(sessionId, now, generation),
+    });
   }
 
   commitRuntimeTerminal(

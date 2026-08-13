@@ -1,6 +1,7 @@
 import { createSignal } from "solid-js";
 import { afterEach, expect, test, vi } from "vitest";
 import type { AgentModelCatalog } from "../../shared/agent-configuration.ts";
+import { testAgentModelOption } from "../../shared/test/agent-model-fixtures.ts";
 import {
   createProviderViewState,
   type ProviderCredential,
@@ -175,15 +176,10 @@ function verifySessionCommand(
 
 function selectedAccountModel(payload: Record<string, unknown>) {
   const openRouter = payload["provider"] === "openrouter";
-  return {
-    contextWindow: 128_000,
+  return testAgentModelOption({
     id: openRouter ? "openrouter/model" : "openai-model",
-    inputModalities: ["text"],
     label: openRouter ? "OpenRouter model" : "OpenAI model",
-    outputModalities: ["text"],
-    pricing: null,
-    reasoningEfforts: [],
-  };
+  });
 }
 
 afterEach(() => {

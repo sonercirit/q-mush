@@ -174,6 +174,7 @@ export async function prepareOpenRouterSessionCredentialProviderState(options: {
     metadataUpdates.push({
       id: session.id,
       maxContextTokens: provider.contextWindow,
+      maxOutputTokens: null,
       providerPricing: provider.pricing,
     });
   }
@@ -189,6 +190,7 @@ export type SessionMetadataResult =
   | { readonly error: "provider_unavailable" | "validation_failed" }
   | {
       readonly maxContextTokens: number | null;
+      readonly maxOutputTokens: number | null;
       readonly providerPricing: AgentSessionSummary["providerPricing"];
     };
 
@@ -280,6 +282,8 @@ export async function sessionMetadata(
         ? { error: "provider_unavailable" }
         : {
             maxContextTokens: selected.contextWindow,
+            // OpenRouter serving-provider listings carry no output limit.
+            maxOutputTokens: null,
             providerPricing: selected.pricing,
           };
     } catch (error) {
@@ -292,11 +296,13 @@ export async function sessionMetadata(
     const model = catalog.models.find(({ id }) => id === input.model);
     return {
       maxContextTokens: model?.contextWindow ?? null,
+      maxOutputTokens: model?.maxOutputTokens ?? null,
       providerPricing: model?.pricing ?? null,
     };
   } catch (error) {
     return credentialFailure(options, error, {
       maxContextTokens: null,
+      maxOutputTokens: null,
       providerPricing: null,
     });
   }

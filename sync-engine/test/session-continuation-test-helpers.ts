@@ -30,6 +30,7 @@ export function testModelCatalog(
         id: modelId,
         inputModalities: null,
         label,
+        maxOutputTokens: null,
         outputModalities: null,
         pricing: null,
         reasoningEfforts: ["high"],

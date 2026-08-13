@@ -1,7 +1,10 @@
 import { describe, expect, test } from "vitest";
 import { AGENT_SYSTEM_PROMPT } from "../../shared/agent-prompt.ts";
 import { isRecord } from "../../shared/auth-model.ts";
-import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
+import {
+  agentProviderRequestHeaders,
+  ChatCompletionsAgentModel,
+} from "../../sync-engine/agent-model.ts";
 import {
   cachedText,
   cachedTextMessage,
@@ -13,6 +16,13 @@ type ModelOptions = ConstructorParameters<typeof ChatCompletionsAgentModel>[0];
 
 const BASE_URL = "https://anthropic.example.test/v1";
 const KNOWN_MODEL = "claude-test-4";
+const ANTHROPIC_CREDENTIAL = {
+  accountId: null,
+  apiFormat: "anthropic",
+  baseUrl: BASE_URL,
+  secret: "anthropic-secret",
+  source: "api_key",
+} as const;
 
 function anthropicEvents(events: readonly unknown[]): Response {
   const body = events
@@ -27,36 +37,43 @@ function anthropicEvents(events: readonly unknown[]): Response {
   });
 }
 
-function doneEvents(): Response {
+function textStopEvents(options: {
+  readonly stopReason: string;
+  readonly text: string;
+  readonly usage: Readonly<Record<string, number>>;
+}): Response {
   return anthropicEvents([
-    {
-      message: {
-        usage: {
-          cache_creation_input_tokens: 40,
-          cache_read_input_tokens: 900,
-          input_tokens: 60,
-        },
-      },
-      type: "message_start",
-    },
+    { message: { usage: options.usage }, type: "message_start" },
     {
       content_block: { text: "", type: "text" },
       index: 0,
       type: "content_block_start",
     },
     {
-      delta: { text: "Done.", type: "text_delta" },
+      delta: { text: options.text, type: "text_delta" },
       index: 0,
       type: "content_block_delta",
     },
     { index: 0, type: "content_block_stop" },
     {
-      delta: { stop_reason: "end_turn" },
+      delta: { stop_reason: options.stopReason },
       type: "message_delta",
-      usage: { output_tokens: 5 },
+      usage: { output_tokens: options.text.length },
     },
     { type: "message_stop" },
   ]);
+}
+
+function doneEvents(): Response {
+  return textStopEvents({
+    stopReason: "end_turn",
+    text: "Done.",
+    usage: {
+      cache_creation_input_tokens: 40,
+      cache_read_input_tokens: 900,
+      input_tokens: 60,
+    },
+  });
 }
 
 function expectAbsentProperties(
@@ -101,13 +118,7 @@ function anthropicHarness(
   const requests: Request[] = [];
   const remaining = [...responses];
   const model = new ChatCompletionsAgentModel({
-    credential: {
-      accountId: null,
-      apiFormat: "anthropic",
-      baseUrl: BASE_URL,
-      secret: "anthropic-secret",
-      source: "api_key",
-    },
+    credential: ANTHROPIC_CREDENTIAL,
     fetch: (request) => {
       requests.push(request);
       const response = remaining.shift();
@@ -116,6 +127,7 @@ function anthropicHarness(
       }
       return Promise.resolve(response);
     },
+    maxOutputTokens: null,
     model: KNOWN_MODEL,
     provider: "generic",
     ...options,
@@ -131,7 +143,65 @@ function anthropicHarness(
   };
 }
 
+async function recordRequestBody(
+  harness: AnthropicHarness,
+  index: number,
+): Promise<Readonly<Record<string, unknown>>> {
+  const body = await harness.requestBody(index);
+  if (!isRecord(body)) {
+    throw new Error("The captured body was not a record");
+  }
+  return body;
+}
+
 describe("anthropic-format generic provider", () => {
+  test("sends the catalog max output tokens when the session carries them", async () => {
+    const harness = anthropicHarness([doneEvents()], {
+      maxOutputTokens: 64_000,
+    });
+    await harness.complete();
+
+    const body = await recordRequestBody(harness, 0);
+    expect(body["max_tokens"]).toBe(64_000);
+  });
+
+  test("identifies a non-streaming Messages completion by protocol", () => {
+    const headers = agentProviderRequestHeaders(
+      "generic",
+      {
+        ...ANTHROPIC_CREDENTIAL,
+        baseUrl: "https://api.anthropic.com/v1",
+      },
+      {
+        accept: "application/json",
+        protocol: "anthropic",
+      },
+    );
+
+    expect(headers.get("anthropic-beta")).toBe(
+      "model-context-window-exceeded-2025-08-26",
+    );
+  });
+
+  test("sends the context-window beta only to the official endpoint", async () => {
+    const harness = anthropicHarness([doneEvents()], {
+      credential: {
+        accountId: null,
+        apiFormat: "anthropic",
+        baseUrl: "https://api.anthropic.com/v1",
+        secret: "anthropic-secret",
+        source: "api_key",
+      },
+    });
+    await harness.complete();
+
+    // Pre-4.5 first-party models otherwise reject input+max_tokens context
+    // overshoots; the documented beta degrades them to a stop reason.
+    expect(harness.requests[0]?.headers.get("anthropic-beta")).toBe(
+      "model-context-window-exceeded-2025-08-26",
+    );
+  });
+
   test("sends a cached Messages request and reads the streamed step", async () => {
     const harness = anthropicHarness([doneEvents()], { tools: ["read"] });
 
@@ -167,15 +237,15 @@ describe("anthropic-format generic provider", () => {
     const request = harness.requests[0];
     expect(request?.url).toBe(`${BASE_URL}/messages`);
     expect(request?.headers.get("anthropic-version")).toBe("2023-06-01");
+    // Proxies and gateways 400 on unknown beta names; the context-window
+    // beta stays first-party-only.
+    expect(request?.headers.has("anthropic-beta")).toBe(false);
     expect(request?.headers.get("x-api-key")).toBe("anthropic-secret");
     expect(request?.headers.has("authorization")).toBe(false);
 
-    const body = await harness.requestBody(0);
-    if (!isRecord(body)) {
-      throw new Error("The captured body was not a record");
-    }
-    // No invented output budget or reasoning parameter: the provider's own
-    // defaults govern when nothing is selected.
+    const body = await recordRequestBody(harness, 0);
+    // No reasoning parameter and no invented output budget: without catalog
+    // metadata the provider's own defaults govern.
     expectAbsentProperties(body, ["max_tokens", "output_config", "thinking"]);
     expect(body["stream"]).toBe(true);
     expect(body).not.toHaveProperty("prompt_cache_key");
@@ -352,6 +422,47 @@ describe("anthropic-format generic provider", () => {
       "does not support effort level",
     );
     expect(harness.requests).toHaveLength(1);
+  });
+
+  test.each(["max_tokens", "model_context_window_exceeded"] as const)(
+    "reports %s stops as truncation",
+    async (stopReason) => {
+      const harness = anthropicHarness([
+        textStopEvents({
+          stopReason,
+          text: "Partial",
+          usage: { input_tokens: 3 },
+        }),
+      ]);
+
+      const step = await harness.complete();
+
+      expect(step.content).toBe("Partial");
+      expect(step.truncation).toBe(stopReason);
+    },
+  );
+
+  async function completedTruncation(
+    response: Response,
+  ): Promise<string | undefined> {
+    const step = await anthropicHarness([response]).complete();
+    return step.truncation;
+  }
+
+  test("reports no truncation for an end_turn stop", async () => {
+    expect(await completedTruncation(doneEvents())).toBeUndefined();
+  });
+
+  test("reports truncation from a non-streaming stopped message", async () => {
+    const stopped = Response.json({
+      content: [{ text: "Cut short.", type: "text" }],
+      role: "assistant",
+      stop_reason: "max_tokens",
+      type: "message",
+      usage: { input_tokens: 4, output_tokens: 2 },
+    });
+
+    expect(await completedTruncation(stopped)).toBe("max_tokens");
   });
 
   test("parses a non-streaming JSON message response", async () => {

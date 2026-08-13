@@ -11,6 +11,7 @@ export function testAgentModelOption(
     id: "vendor/model",
     inputModalities: ["text"],
     label: "Model",
+    maxOutputTokens: null,
     outputModalities: ["text"],
     pricing: null,
     reasoningEfforts: [],

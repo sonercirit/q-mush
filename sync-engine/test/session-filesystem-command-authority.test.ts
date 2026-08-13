@@ -235,7 +235,11 @@ test("agent directory browsing passes parent identity, authorization, and signal
     browseDirectories: browse,
     database,
     discoverSessionMetadata: () =>
-      Promise.resolve({ maxContextTokens: null, providerPricing: null }),
+      Promise.resolve({
+        maxContextTokens: null,
+        maxOutputTokens: null,
+        providerPricing: null,
+      }),
     draining: () => false,
     launchSession: () => true,
     listOnlineRunners: () => [

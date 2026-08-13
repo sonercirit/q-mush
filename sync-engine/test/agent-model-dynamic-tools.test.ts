@@ -13,6 +13,7 @@ test("OpenAI dynamic allowed_tools keeps the full cached catalog stable", async 
     credential: codexOAuthCredential(),
     dynamicToolCache: true,
     fetch: () => Promise.reject(new Error("HTTP fallback should not run")),
+    maxOutputTokens: null,
     model: "gpt-5-codex",
     provider: "openai",
     tools: ["read", "parallel"],

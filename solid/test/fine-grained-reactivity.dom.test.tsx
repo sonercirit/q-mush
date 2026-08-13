@@ -481,6 +481,7 @@ test("session resources, drafts, realtime lists, and selected details update in 
     id: "model-1",
     inputModalities: ["text"] as const,
     label: modelLabel,
+    maxOutputTokens: null,
     outputModalities: ["text"] as const,
     pricing: null,
     reasoningEfforts: ["high"] as const,

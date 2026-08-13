@@ -25,12 +25,13 @@ const IMAGE_MESSAGE = {
   images: [TEST_AGENT_IMAGE],
   role: "user" as const,
 };
+function apiKeyCredential(secret: string) {
+  return { accountId: null, secret, source: "api_key" as const };
+}
+
 const OPENROUTER_IMAGE_OPTIONS = {
-  credential: {
-    accountId: null,
-    secret: "sk-or-secret",
-    source: "api_key" as const,
-  },
+  credential: apiKeyCredential("sk-or-secret"),
+  maxOutputTokens: null,
   model: "openai/gpt-4.1-mini",
   provider: "openrouter" as const,
 };
@@ -123,11 +124,10 @@ function genericModel(
 ): ChatCompletionsAgentModel {
   return capturedModel(capture, {
     credential: {
-      accountId: null,
+      ...apiKeyCredential(options.secret),
       baseUrl: options.baseUrl,
-      secret: options.secret,
-      source: "api_key",
     },
+    maxOutputTokens: null,
     model: options.model,
     provider: "generic",
     ...(options.reasoningEffort === undefined
@@ -157,7 +157,7 @@ function respondingModel(
 }
 
 function codexModel(
-  options: Omit<ModelOptions, "credential" | "provider">,
+  options: Omit<ModelOptions, "credential" | "maxOutputTokens" | "provider">,
 ): ChatCompletionsAgentModel {
   return new ChatCompletionsAgentModel({
     ...options,
@@ -166,6 +166,7 @@ function codexModel(
       secret: createOpenAiOAuthSecret(),
       source: "oauth",
     },
+    maxOutputTokens: null,
     provider: "openai",
   });
 }
@@ -208,13 +209,8 @@ describe("chat completions agent model", () => {
     };
     const model = respondingModel(
       {
-        credential: {
-          accountId: "account-1",
-          secret: "sk-or-secret",
-          source: "api_key",
-        },
-        model: "openai/gpt-4.1-mini",
-        provider: "openrouter",
+        ...OPENROUTER_IMAGE_OPTIONS,
+        credential: { ...apiKeyCredential("sk-or-secret"), accountId: "a-1" },
         reasoningEffort: "high",
         systemPrompt: "Workspace instructions from AGENTS.md",
       },
@@ -467,11 +463,8 @@ describe("chat completions agent model", () => {
     const capture = new RequestCapture();
     const model = respondingModel(
       {
-        credential: {
-          accountId: null,
-          secret: "sk-openai-secret",
-          source: "api_key",
-        },
+        credential: apiKeyCredential("sk-openai-secret"),
+        maxOutputTokens: null,
         model: "gpt-5-codex",
         provider: "openai",
         reasoningEffort: "low",
@@ -616,7 +609,8 @@ describe("chat completions agent model", () => {
 
   test("shows the provider's error message", async () => {
     const model = new ChatCompletionsAgentModel({
-      credential: { accountId: null, secret: "secret", source: "api_key" },
+      credential: apiKeyCredential("secret"),
+      maxOutputTokens: null,
       fetch: () =>
         Promise.resolve(
           createJsonResponse(

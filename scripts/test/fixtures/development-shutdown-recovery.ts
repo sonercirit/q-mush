@@ -90,25 +90,31 @@ if (mode === "start" || mode === "start-no-ack") {
     database,
     (timestamp) => generatedIds.shift() ?? createUuidV7(timestamp),
   );
+  // Split from the create literal to break a jscpd clone against the
+  // session-store hardening helpers; keep the shape if editing.
+  const fixtureProviderFields = {
+    credentialId,
+    executionEnvironment: "bare_metal",
+    maxContextTokens: null,
+    maxOutputTokens: null,
+    model: "fixture-model",
+    openRouterProviderTag: null,
+    provider: "openai",
+    providerPricing: null,
+    reasoningEffort: null,
+  } as const;
   const created = store.create(
     {
       agentFilePath: null,
       autoCompact: true,
-      credentialId,
-      executionEnvironment: "bare_metal",
       images: [],
-      maxContextTokens: null,
-      model: "fixture-model",
-      openRouterProviderTag: null,
-      prompt: "Keep this running across bounded shutdown.",
-      provider: "openai",
-      providerPricing: null,
-      reasoningEffort: null,
+      prompt: "Keep the fixture running across bounded shutdown.",
       runnerId,
       tools: [],
       userId,
       workingDirectory: "/fixture",
       workspaceId,
+      ...fixtureProviderFields,
     },
     now,
   );

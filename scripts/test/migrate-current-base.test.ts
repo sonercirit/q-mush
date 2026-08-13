@@ -38,6 +38,7 @@ const CURRENT_BASE_MIGRATIONS = [
 ] as const;
 const CURRENT_BASE_TIMESTAMP = 1_785_753_783_416;
 const STEP_STARTED_MIGRATION_TIMESTAMP = 1_786_576_532_455;
+const MAX_OUTPUT_TOKENS_MIGRATION_TIMESTAMP = 1_786_595_654_131;
 
 let temporaryDirectory: string | undefined;
 
@@ -62,7 +63,7 @@ function agentSessionColumnNames(database: Database): readonly string[] {
   return query.all().map((column) => column.name);
 }
 
-test("upgrades migration 0027 through the step-started migration", async () => {
+test("upgrades migration 0027 through the latest migrations", async () => {
   temporaryDirectory = mkdtempSync(join(tmpdir(), "q-mush-base-upgrade-"));
   const path = join(temporaryDirectory, "current-base.sqlite");
   const currentBaseDatabase = new Database(path, { create: true });
@@ -98,11 +99,18 @@ test("upgrades migration 0027 through the step-started migration", async () => {
   expect(agentSessionColumnNames(upgradedDatabase.$client)).toContain(
     "step_started_at",
   );
-  const latestMigration = upgradedDatabase.$client
+  expect(agentSessionColumnNames(upgradedDatabase.$client)).toContain(
+    "max_output_tokens",
+  );
+  const migrationTimestamps = upgradedDatabase.$client
     .query<{ readonly createdAt: number }, []>(
-      "SELECT created_at AS createdAt FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 1",
+      "SELECT created_at AS createdAt FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 2",
     )
-    .get();
-  expect(latestMigration?.createdAt).toBe(STEP_STARTED_MIGRATION_TIMESTAMP);
+    .all()
+    .map(({ createdAt }) => createdAt);
+  expect(migrationTimestamps).toEqual([
+    MAX_OUTPUT_TOKENS_MIGRATION_TIMESTAMP,
+    STEP_STARTED_MIGRATION_TIMESTAMP,
+  ]);
   upgradedDatabase.$client.close();
 });

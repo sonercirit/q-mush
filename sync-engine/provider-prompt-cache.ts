@@ -16,18 +16,26 @@ const PROMPT_CACHE_CONTROL: Readonly<Record<string, string>> = {
   type: "ephemeral",
 };
 
+function cacheableMessage(
+  message: AgentConversationMessage | undefined,
+): boolean {
+  return (
+    message !== undefined &&
+    message.role !== "compaction_notice" &&
+    message.content.length > 0
+  );
+}
+
 function cacheableIndexAtOrBefore(
   messages: readonly AgentConversationMessage[],
   start: number,
 ): number | undefined {
-  for (
-    let index = Math.min(start, messages.length - 1);
-    index >= 0;
-    index -= 1
-  ) {
-    if ((messages[index]?.content.length ?? 0) > 0) {
+  let index = Math.min(start, messages.length - 1);
+  while (index >= 0) {
+    if (cacheableMessage(messages[index])) {
       return index;
     }
+    index -= 1;
   }
 
   return undefined;

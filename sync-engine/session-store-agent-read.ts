@@ -26,7 +26,7 @@ export interface ReadSessionSnapshot {
   };
 }
 
-type TranscriptRole = "assistant" | "thinking" | "tool" | "user";
+type TranscriptRole = "assistant" | "error" | "thinking" | "tool" | "user";
 
 function storedToolCalls(value: string | null): readonly AgentToolCall[] {
   return readStoredToolCalls(value);
@@ -37,6 +37,7 @@ function isTranscriptRole(
 ): role is TranscriptRole {
   return (
     role === "assistant" ||
+    role === "error" ||
     role === "thinking" ||
     role === "tool" ||
     role === "user"

@@ -42,12 +42,14 @@ export function model(
   inputModalities: readonly string[] | null = null,
   outputModalities: readonly string[] | null = null,
   pricing: ProviderModelPricing | null = null,
+  maxOutputTokens: number | null = null,
 ): AgentModelOption {
   return {
     contextWindow,
     id,
     inputModalities,
     label,
+    maxOutputTokens,
     outputModalities,
     pricing,
     reasoningEfforts,
