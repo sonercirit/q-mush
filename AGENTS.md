@@ -15,9 +15,9 @@ Living project memory.
   validation errors, read usage metrics.
 - Call a capability impossible only when evidence excludes it — docs searched,
   schema enumerated — else record an open question.
-- Preserve patterns, add tools only as needed, and proactively improve what you
+- Preserve patterns, add tools only as needed, proactively improve what you
   touch — code health, tests, docs, performance, security, DX: small
-  improvements ship with the change, larger ones as immediate follow-ups.
+  improvements ship with the change, larger ones follow immediately.
 - Practice TDD: failing test first, implement, refactor green.
 - Follow DRY and KISS: authoritative logic, no premature abstractions.
 - Never invent numeric limits or tunables: probe omission first, prefer the
@@ -31,10 +31,10 @@ Living project memory.
   test.
 - Record new decisions, gotchas, and lessons here in the same change, unprompted
   — a repeated user instruction means a rule is missing; condense elsewhere to
-  fit the size policy. When evidence overturns a recorded finding, fix the code
-  it justified and every stale record in that change; act, don't ask.
+  fit the size policy. When evidence overturns a finding, fix the code and every
+  stale record in that change; act, don't ask.
 - Keep workflows local-first: narrow checks per change, broad suites once
-  captured, then rerun only the narrowest failing scope.
+  captured, then rerun the narrowest failing scope.
 - Never commit secrets, generated artifacts, or env files.
 
 ## Setup, Commands
@@ -53,7 +53,7 @@ Living project memory.
 - Production source has four enforced top-level workspaces: `solid` owns browser
   UI, `sync-engine` the Bun server and integrations, `runner` the standalone
   runner, and `shared` cross-workspace code. The first three import only
-  themselves and `shared`; `shared` imports no other workspace, and code outside
+  themselves and `shared`; `shared` imports no workspace, and code outside
   `scripts` cannot import `scripts`.
 - `sync-engine/server.ts` serves the browser JavaScript and Tailwind CSS that
   Vite builds in memory. Browser state, session updates, and runner work use
@@ -63,12 +63,11 @@ Living project memory.
   coalescing bursts into the ignored `data/development-server.restart` trigger
   `bun run dev:restart` writes; plain `dev` restarts only on that trigger.
   `sync-engine/runner-executable.ts` fingerprints runner source and compiler,
-  builds in a private temp directory, caches in memory, serves
-  `/runner/executable`. Development restarts queue new agent work, let active
-  steps finish, then replace the server process, so a session can safely request
-  its own restart. Textual bodies precompress once per handler, negotiating
-  `zstd`, Brotli, gzip, then deflate; `/favicon.svg` revalidates with ETag,
-  separate from PWA icons.
+  builds in a private temp dir, caches in memory, serves `/runner/executable`.
+  Development restarts queue new agent work, let active steps finish, then
+  replace the server process, so a session can request its own restart. Textual
+  bodies precompress once per handler, negotiating `zstd`, Brotli, gzip, then
+  deflate; `/favicon.svg` revalidates with ETag apart from PWA icons.
 - `solid/pages.tsx` renders both server page shells via Solid's SSR runtime;
   `sync-engine/pages.ts` loads it with Vite's SSR runner. The browser app mounts
   from `solid/client.tsx`; routes live in `shared/routes.ts`.
@@ -84,21 +83,21 @@ Living project memory.
     redirects live in `oauth.ts`; cookie and response helpers in `http.ts`.
     `solid/client.tsx` reads `/api/auth/session`, gates the control center, and
     posts logout.
-- `sync-engine/runner-store.ts` persists user runner registrations in `runners`:
-  one active registration per machine fingerprint, one default runner per user.
+- `sync-engine/runner-store.ts` persists runner registrations in `runners`: one
+  active registration per machine fingerprint, one default runner per user.
   `sync-engine/runners.ts` issues hashed opaque setup tokens, owns authenticated
-  management and token-authenticated callback APIs, and derives installer
-  commands from the request origin. `sync-engine/runner-installer.ts` emits the
+  management and token-authenticated callback APIs, deriving installer commands
+  from the request origin. `sync-engine/runner-installer.ts` emits the
   macOS/Linux one-liner: it picks an x64/ARM64 glibc/musl target and starts a
   downloaded standalone executable under `~/.q-mush/runner`; no Bun needed. The
   runner reports metadata and 15-second heartbeats over its authenticated
-  WebSocket, checks updates at startup and every five minutes, rechecks via
-  handshake version after restarts, and replaces an older socket on reconnect.
-  Updates use a source/compiler ETag and SHA-256 digest, atomically replace the
-  executable, and restart it; development restarts drain active sessions first.
-  Reinstalling for the same user and machine rotates the registration to the new
-  token instead of adding a second runner; other registrations stay protected,
-  and tokens never appear in lists.
+  WebSocket, checks updates at startup and five-minutely, rechecks via handshake
+  version after restarts, replacing an older socket on reconnect. Updates use a
+  source/compiler ETag and SHA-256 digest, atomically replace the executable,
+  and restart it; development restarts drain active sessions first. Reinstalling
+  for the same user and machine rotates the registration to its new token
+  instead of adding a runner; other registrations stay protected; tokens never
+  appear in lists.
 - Browser messages sort by time then ID; live output anchors after the
   initiating message, snapshots replace it. `session-agent-read.ts` byte-bounds
   transcript messages, assistant calls, the system prompt, and tool definitions.
@@ -164,10 +163,10 @@ Living project memory.
   `solid/provider-*` client modules.
 - Measure cache hits against the cacheable prefix (total input dilutes with
   fresh tool output); persistent shortfalls are bugs, lone misses noise — writes
-  land late and 128-token blocks hide small growth. Codex sockets stay open per
-  run (tested cache-neutral), reconnect on failure, close at run end. UI rates
+  land late, 128-token blocks hide small growth. Codex sockets stay open per run
+  (tested cache-neutral), reconnect on failure, close at run end. UI rates
   divide by summed input minus the final request (summary) or the prior step's
-  input (per step), clamped at 100%; the divisor counts fully reported steps.
+  input (per step), clamped at 100%, counting only fully reported steps.
   OpenAI/Codex requests carry the session ID as `prompt_cache_key` and the Codex
   `session_id` header (cache routing); that surface rejects
   `prompt_cache_breakpoint`/`prompt_cache_retention`. OpenRouter and
@@ -204,8 +203,8 @@ Living project memory.
   `knip.production.config.ts` limits the graph to runtime source. Both run:
   tests cannot keep production code alive; unused test helpers still fail.
 - `.jscpd.json` maps all JS/TS extensions to TSX for cross-extension detection;
-  imports are ignored; clones of ≥20 tokens and one line fail the zero
-  threshold.
+  import declarations are ignored; clones of ≥20 tokens and one line fail the
+  zero threshold.
 - `scripts/repository-check.ts` lists tracked, unignored files and calls the
   policy APIs under `scripts/`: no files at 20,000 Unicode code points
   (`bun.lock`, `drizzle/` excepted), no JS/TS tests outside `test` directories,
