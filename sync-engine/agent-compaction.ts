@@ -6,7 +6,7 @@ import type {
 import { forEachAssistantToolCall } from "./agent-conversation.ts";
 
 const AUTO_COMPACTION_THRESHOLD = 0.95;
-export const AGENT_COMPACTION_REQUEST_MESSAGE = `Compact the conversation above into a concise handoff summary now. Preserve the user's goals, important decisions, constraints, relevant file paths, changes already made, command and test results, unresolved errors, and concrete next steps. If a complete final answer or deliverable is drafted but not yet delivered, include it - verbatim when it fits a concise summary, otherwise tightly condensed - and mark it as the finished answer. Do not call tools. Return only the summary.`;
+export const AGENT_COMPACTION_REQUEST_MESSAGE = `Compact the conversation above into a concise handoff summary now. Preserve the user's goals, important decisions, constraints, relevant file paths, changes already made, command and test results, unresolved errors, and concrete next steps. If a complete final answer or deliverable is drafted but not yet delivered, include it (verbatim when it fits a concise summary, otherwise tightly condensed) and mark it as the finished answer. Do not call tools. Return only the summary.`;
 
 // Shared with the persisted handoff in session-compaction.ts so every
 // replay path - auto-compaction, manual, idle, compact-and-continue, and
