@@ -31,8 +31,8 @@ Living project memory.
   test.
 - Record new decisions, gotchas, and lessons here in the same change, unprompted
   — a repeated user instruction means a rule is missing; condense elsewhere to
-  fit the size policy. When evidence overturns a finding, fix the code and every
-  stale record in that change; act, don't ask.
+  fit the size policy. When evidence overturns a finding, fix the code it
+  justified and every stale record in that change; act, don't ask.
 - Keep workflows local-first: narrow checks per change, broad suites once
   captured, then rerun the narrowest failing scope.
 - Never commit secrets, generated artifacts, or env files.
@@ -53,7 +53,7 @@ Living project memory.
 - Production source has four enforced top-level workspaces: `solid` owns browser
   UI, `sync-engine` the Bun server and integrations, `runner` the standalone
   runner, and `shared` cross-workspace code. The first three import only
-  themselves and `shared`; `shared` imports no workspace, and code outside
+  themselves and `shared`; `shared` imports no other workspace, and code outside
   `scripts` cannot import `scripts`.
 - `sync-engine/server.ts` serves the browser JavaScript and Tailwind CSS that
   Vite builds in memory. Browser state, session updates, and runner work use
@@ -63,11 +63,12 @@ Living project memory.
   coalescing bursts into the ignored `data/development-server.restart` trigger
   `bun run dev:restart` writes; plain `dev` restarts only on that trigger.
   `sync-engine/runner-executable.ts` fingerprints runner source and compiler,
-  builds in a private temp dir, caches in memory, serves `/runner/executable`.
-  Development restarts queue new agent work, let active steps finish, then
-  replace the server process, so a session can request its own restart. Textual
-  bodies precompress once per handler, negotiating `zstd`, Brotli, gzip, then
-  deflate; `/favicon.svg` revalidates with ETag apart from PWA icons.
+  builds in a private temp directory, caches in memory, serves
+  `/runner/executable`. Development restarts queue new agent work, let active
+  steps finish, then replace the server process, so a session can request its
+  own restart. Textual bodies precompress once per handler, negotiating `zstd`,
+  Brotli, gzip, then deflate; `/favicon.svg` revalidates with ETag, separate
+  from PWA icons.
 - `solid/pages.tsx` renders both server page shells via Solid's SSR runtime;
   `sync-engine/pages.ts` loads it with Vite's SSR runner. The browser app mounts
   from `solid/client.tsx`; routes live in `shared/routes.ts`.
@@ -91,13 +92,13 @@ Living project memory.
   macOS/Linux one-liner: it picks an x64/ARM64 glibc/musl target and starts a
   downloaded standalone executable under `~/.q-mush/runner`; no Bun needed. The
   runner reports metadata and 15-second heartbeats over its authenticated
-  WebSocket, checks updates at startup and five-minutely, rechecks via handshake
-  version after restarts, replacing an older socket on reconnect. Updates use a
-  source/compiler ETag and SHA-256 digest, atomically replace the executable,
-  and restart it; development restarts drain active sessions first. Reinstalling
-  for the same user and machine rotates the registration to its new token
-  instead of adding a runner; other registrations stay protected; tokens never
-  appear in lists.
+  WebSocket, checks updates at startup and every five minutes, rechecks via
+  handshake version after restarts, replacing an older socket on reconnect.
+  Updates use a source/compiler ETag and SHA-256 digest, atomically replace the
+  executable, and restart it; development restarts drain active sessions first.
+  Reinstalling for the same user and machine rotates the registration to its new
+  token instead of adding a runner; other registrations stay protected; tokens
+  never appear in lists.
 - Browser messages sort by time then ID; live output anchors after the
   initiating message, snapshots replace it. `session-agent-read.ts` byte-bounds
   transcript messages, assistant calls, the system prompt, and tool definitions.
