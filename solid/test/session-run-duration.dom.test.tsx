@@ -151,8 +151,19 @@ test("a retained sidebar row keeps ticking its run duration", () => {
   );
   expect(runLabel()).toBe("Run: 3s");
 
+  // A step-start change alone must replace the retained row so the Step
+  // timer rebases; summaryFromDetail must carry the field for that to work.
+  const stepped = {
+    ...summaryFromDetail({ ...TEST_SESSION_DETAIL, stepStartedAt: 52_000 }),
+    activeStartedAt: running.activeStartedAt,
+    status: "running" as const,
+  };
+  expect(stepped.stepStartedAt).toBe(52_000);
+  controller.applyRealtime([stepped, other]);
+  expect(stepDurationText(container)).toBe("Step: 1s");
+
   controller.applyRealtime([
-    { ...running, activeStartedAt: null, status: "idle" as const },
+    { ...stepped, activeStartedAt: null, status: "idle" as const },
     other,
   ]);
   expect(runLabel()).toBeUndefined();
