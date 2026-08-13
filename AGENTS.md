@@ -189,7 +189,7 @@ Living project memory.
 - `tsconfig.json` configures strict, no-emit, bundler-style checking with unused
   and unreachable code diagnostics. Library declaration checking is off —
   Drizzle publishes optional cross-dialect declarations that fail here; app
-  source stays fully checked; re-enable after an upstream fix.
+  source stays fully checked; re-enable after an upstream Drizzle fix.
 - `eslint.config.ts` uses type-aware strict/stylistic `typescript-eslint`
   presets, imports `.gitignore`, bans non-const assertions, and enforces
   exhaustive switches and canonical named imports (one declaration per module
