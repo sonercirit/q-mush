@@ -164,8 +164,8 @@ Living project memory.
   `solid/provider-*` client modules.
 - Measure cache hits against the cacheable prefix (total input dilutes with
   fresh tool output); persistent shortfalls are bugs, lone misses noise — writes
-  land late, 128-token blocks hide small growth. Codex sockets stay open per run
-  (tested cache-neutral), reconnect on failure, close at run end. UI rates
+  land late and 128-token blocks hide small growth. Codex sockets stay open per
+  run (tested cache-neutral), reconnect on failure, close at run end. UI rates
   divide by summed input minus the final request (summary) or the prior step's
   input (per step), clamped at 100%, counting only fully reported steps.
   OpenAI/Codex requests carry the session ID as `prompt_cache_key` and the Codex
