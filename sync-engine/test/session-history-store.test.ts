@@ -4,6 +4,7 @@ import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
+import { testCompactionHandoffMessage } from "./compaction-test-fixtures.ts";
 import {
   appendCompactionAssistantMessage,
   runningCompactionStore,
@@ -27,7 +28,7 @@ test("compaction advances durable segment identity and pages old messages", () =
     hasOlderSegments: true,
     messages: [
       {
-        content: "Conversation compacted:\n\nContinue after handoff",
+        content: testCompactionHandoffMessage("Continue after handoff"),
         role: "user",
       },
     ],

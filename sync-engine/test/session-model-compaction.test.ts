@@ -11,6 +11,7 @@ import {
   TEST_AUTHENTICATED_USER,
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
+import { TEST_COMPACTION_HANDOFF_INSTRUCTION } from "./compaction-test-fixtures.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 import { testModelCatalog } from "./session-continuation-test-helpers.ts";
 import {
@@ -333,9 +334,11 @@ describe("session models and compaction", () => {
     );
 
     expect(model.requests).toHaveLength(3);
-    expect(model.requests.at(-1)?.at(0)?.content).toContain(
-      "Compact continuation handoff.",
-    );
+    const continuation = model.requests.at(-1)?.at(0)?.content;
+    expect(continuation).toContain("Compact continuation handoff.");
+    // The persisted handoff replay instructs delivery of an undelivered
+    // drafted answer instead of re-verification (issue #204).
+    expect(continuation).toContain(TEST_COMPACTION_HANDOFF_INSTRUCTION);
     const continuedText = JSON.stringify(continued);
     expect(continuedText).toContain("Compact continuation handoff.");
     expect(continuedText).not.toContain("Initial work complete.");

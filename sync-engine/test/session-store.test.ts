@@ -18,6 +18,7 @@ import {
   TEST_USER_ID,
   testAuditFields,
 } from "./authenticated-integration-test-helpers.ts";
+import { testCompactionHandoffMessage } from "./compaction-test-fixtures.ts";
 import {
   markTestSessionRunning,
   runningStore,
@@ -392,8 +393,9 @@ describe("session store", () => {
 
     expect(store.conversation(SESSION_ID)).toEqual([
       {
-        content:
-          "Conversation compacted:\n\nKeep the completed work and run tests.",
+        content: testCompactionHandoffMessage(
+          "Keep the completed work and run tests.",
+        ),
         role: "user",
       },
     ]);

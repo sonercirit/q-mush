@@ -12,6 +12,7 @@ import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
+import { testCompactionHandoffMessage } from "./compaction-test-fixtures.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 import { STEP_TOKEN_USAGE } from "./session-agent-loop-test-helpers.ts";
 import { IDLE_RUNTIME_SIGNALS } from "./session-agent-runtime-test-helpers.ts";
@@ -366,7 +367,7 @@ describe("manual session compaction", () => {
       currentContextTokens: 0,
       messages: [
         {
-          content: "Conversation compacted:\n\nManual handoff",
+          content: testCompactionHandoffMessage("Manual handoff"),
           role: "user",
         },
       ],

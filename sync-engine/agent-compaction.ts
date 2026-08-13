@@ -6,9 +6,14 @@ import type {
 import { forEachAssistantToolCall } from "./agent-conversation.ts";
 
 const AUTO_COMPACTION_THRESHOLD = 0.95;
-export const AGENT_COMPACTION_REQUEST_MESSAGE = `Compact the conversation above into a concise handoff summary now. Preserve the user's goals, important decisions, constraints, relevant file paths, changes already made, command and test results, unresolved errors, and concrete next steps. Do not call tools. Return only the summary.`;
+export const AGENT_COMPACTION_REQUEST_MESSAGE = `Compact the conversation above into a concise handoff summary now. Preserve the user's goals, important decisions, constraints, relevant file paths, changes already made, command and test results, unresolved errors, and concrete next steps. If a complete final answer or deliverable is drafted but not yet delivered, include it - verbatim when it fits a concise summary, otherwise tightly condensed - and mark it as the finished answer. Do not call tools. Return only the summary.`;
 
-const COMPACTION_PREFIX = `The earlier conversation was compacted into this handoff summary. Treat it as prior context and continue from it:\n\n`;
+// Shared with the persisted handoff in session-compaction.ts so every
+// replay path - auto-compaction, manual, idle, compact-and-continue, and
+// restart recovery - carries the delivery instruction (issue #204).
+export const COMPACTION_HANDOFF_INSTRUCTION = `Treat the summary below as prior context and continue from it. If it contains a finished answer or deliverable that was never delivered, deliver it now instead of repeating research or verification:`;
+
+const COMPACTION_PREFIX = `The earlier conversation was compacted into this handoff summary. ${COMPACTION_HANDOFF_INSTRUCTION}\n\n`;
 
 export interface AgentConversationCompactor {
   compact(...parameters: CompactionArguments): Promise<CompactedConversation>;

@@ -1,3 +1,4 @@
+import { inArray } from "drizzle-orm";
 import { expect, test } from "vitest";
 import type { AgentRecordedMessage } from "../../shared/agent-loop.ts";
 import { agentMessages } from "../../shared/database/schema.ts";
@@ -141,6 +142,33 @@ test("interrupted terminal child recovery preserves a pending spawn callback", (
   });
   expect(pending).toEqual([{ detail: settled, userId: TEST_USER_ID }]);
   setup.database.$client.close();
+});
+
+test("recovery settles a session whose active message is the persisted handoff", () => {
+  const setup = runningCompactionStore();
+  const session = requireCompactionSession(setup.store);
+  setup.store.compactRuntimeConversation(
+    session.id,
+    "Handoff-only durable summary.",
+    { contextTokens: null, costBasis: "reported", costUsd: 1 },
+    TEST_NOW + 2,
+    session.generation,
+    TEST_NOW + 2,
+  );
+  // Soft-delete the compaction transcript so the handoff user message is the
+  // latest active row: recovery must match the real persisted prefix, so a
+  // compactionMessage reordering fails here through production writes alone.
+  setup.database
+    .update(agentMessages)
+    .set({ isDeleted: true })
+    .where(inArray(agentMessages.role, ["assistant", "compaction_request"]))
+    .run();
+
+  const recreated = recreateCommitted(setup, session.id);
+  expectCompactedIdleSession(recreated, "Handoff-only durable summary.", {
+    costUsd: 1,
+  });
+  closeCompactionStore(setup);
 });
 
 test("recreation recognizes a committed compaction without repeating it", () => {

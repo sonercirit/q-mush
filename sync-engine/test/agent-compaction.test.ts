@@ -3,7 +3,10 @@ import {
   ModelConversationCompactor,
   shouldCompactContext,
 } from "../../sync-engine/agent-compaction.ts";
-import { TEST_COMPACTION_REQUEST_MESSAGE } from "./compaction-test-fixtures.ts";
+import {
+  TEST_COMPACTION_HANDOFF_INSTRUCTION,
+  TEST_COMPACTION_REQUEST_MESSAGE,
+} from "./compaction-test-fixtures.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 
 describe("agent conversation compaction", () => {
@@ -40,8 +43,7 @@ describe("agent conversation compaction", () => {
     });
     expect(compacted.messages).toEqual([
       {
-        content:
-          "The earlier conversation was compacted into this handoff summary. Treat it as prior context and continue from it:\n\nKeep the current changes and run tests.",
+        content: `The earlier conversation was compacted into this handoff summary. ${TEST_COMPACTION_HANDOFF_INSTRUCTION}\n\nKeep the current changes and run tests.`,
         role: "user",
       },
     ]);
