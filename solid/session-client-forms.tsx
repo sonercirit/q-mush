@@ -54,15 +54,153 @@ interface SessionFollowUpProps extends PromptEventProps, SessionImagesProps {
   readonly submitShortcut: SessionComposerShortcut;
 }
 
-const FOLLOW_UP_SYNC_DELAY_MS = 150;
+const PROMPT_SYNC_DELAY_MS = 150;
 const COMPOSER_BUTTON_CLASSES =
   "min-h-11 w-full rounded-xl bg-cyan-300 px-4 py-3 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto";
 
+// Typing writes a local signal and syncs the shared draft on a short delay:
+// per-keystroke patches of the whole session view state re-run every memo
+// reading it, which froze Firefox on long prompts. Shortcut, action, and
+// form-submit paths flush synchronously so submits always read the latest
+// text.
+function createLocalPromptEcho(options: {
+  // With externalWins, a conflicting external write (insertPrompt) cancels
+  // pending typing and replaces the local text, so an acknowledged insert
+  // is never silently undone; without it (follow-up), in-progress typing
+  // survives concurrent rollbacks.
+  readonly externalWins?: boolean;
+  readonly onInput: (value: string) => void;
+  readonly prompt: () => string;
+}) {
+  const [element, setElementSignal] = createSignal<
+    HTMLInputElement | HTMLTextAreaElement
+  >();
+  const [localPrompt, setLocalPrompt] = createSignal(untrack(options.prompt));
+  let syncTimer: ReturnType<typeof setTimeout> | undefined;
+  const clearSyncTimer = (): void => {
+    if (syncTimer !== undefined) {
+      clearTimeout(syncTimer);
+      syncTimer = undefined;
+    }
+  };
+  const syncPrompt = (): void => {
+    clearSyncTimer();
+    if (localPrompt() !== options.prompt()) options.onInput(localPrompt());
+  };
+  const handleInput = (event: {
+    readonly currentTarget: HTMLInputElement | HTMLTextAreaElement;
+  }): void => {
+    setLocalPrompt(event.currentTarget.value);
+    clearSyncTimer();
+    syncTimer = setTimeout(syncPrompt, PROMPT_SYNC_DELAY_MS);
+  };
+  const resetLocalPrompt = (): void => {
+    clearSyncTimer();
+    setLocalPrompt(options.prompt());
+  };
+  const setElement = (
+    control: HTMLInputElement | HTMLTextAreaElement,
+  ): void => {
+    setElementSignal(control);
+  };
+  const handleKeyDown = (
+    event: SessionPromptKeyEvent,
+    delegate: (event: SessionPromptKeyEvent) => void,
+  ): void => {
+    // Composer shortcuts requestSubmit() synchronously, so flush before
+    // delegating. A readOnly composer still receives keydown; the flush
+    // stays safe because unavailable composers gate onInput consumer-side
+    // (setFollowUp no-ops while disabled), not because no event arrives.
+    if (sessionComposerShortcut(event) !== undefined) {
+      syncPrompt();
+    }
+    delegate(event);
+  };
+  createEffect(() => {
+    // A capture-phase listener runs before the form's own submit handler,
+    // so requestSubmit(), button.click(), and assistive-technology
+    // activation all read a flushed draft even while the field is focused
+    // with a pending sync.
+    const form = element()?.form;
+    if (form === null || form === undefined) return;
+    form.addEventListener("submit", syncPrompt, true);
+    onCleanup(() => {
+      form.removeEventListener("submit", syncPrompt, true);
+    });
+  });
+  createEffect(
+    on(options.prompt, (prompt, previousPrompt) => {
+      if (prompt === previousPrompt) return;
+      if (
+        options.externalWins === true ||
+        syncTimer === undefined ||
+        element() !== document.activeElement
+      ) {
+        clearSyncTimer();
+        setLocalPrompt(prompt);
+      }
+    }),
+  );
+  onCleanup(clearSyncTimer);
+  return {
+    handleInput,
+    handleKeyDown,
+    localPrompt,
+    resetLocalPrompt,
+    setElement,
+    syncPrompt,
+  };
+}
+
+function promptEcho(
+  props: Pick<PromptEventProps, "onInput"> & { readonly prompt: string },
+  externalWins = false,
+) {
+  return createLocalPromptEcho({
+    externalWins,
+    onInput: (value) => {
+      props.onInput(value);
+    },
+    prompt: () => props.prompt,
+  });
+}
+
+export function SessionDraftEchoInput(props: {
+  readonly disabled: boolean;
+  readonly id: string;
+  readonly name: string;
+  readonly numeric?: boolean;
+  readonly onInput: (value: string) => void;
+  readonly placeholder: string;
+  readonly value: string;
+}): JSX.Element {
+  const syncDraft = (value: string): void => {
+    props.onInput(value);
+  };
+  const echo = createLocalPromptEcho({
+    onInput: syncDraft,
+    prompt: () => props.value,
+  });
+  return (
+    <input
+      class="mt-2 min-w-0 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none"
+      disabled={props.disabled}
+      id={props.id}
+      name={props.name}
+      onBlur={echo.syncPrompt}
+      onInput={echo.handleInput}
+      placeholder={props.placeholder}
+      ref={echo.setElement}
+      {...(props.numeric === true
+        ? { min: "1", step: "1", type: "number" }
+        : { type: "text" })}
+      value={echo.localPrompt()}
+    />
+  );
+}
+
 function promptEvents(props: PromptEventProps) {
   return {
-    onInput: (event: InputEvent & { currentTarget: HTMLTextAreaElement }) => {
-      props.onInput(event.currentTarget.value);
-    },
     onPaste: (event: ClipboardEvent) => {
       const files = readPastedAgentImageFiles(event);
       if (files.length > 0) {
@@ -90,6 +228,9 @@ function renderSessionImages(
 export function SessionPromptInput(
   props: SessionPromptInputProps,
 ): JSX.Element {
+  // insertPrompt acknowledges success, so an external write must win over
+  // in-flight typing here; the follow-up composer keeps typing priority.
+  const echo = promptEcho(props, true);
   return (
     <div class="md:col-span-2">
       <label class="text-sm font-medium text-slate-200" for="session-prompt">
@@ -100,12 +241,17 @@ export function SessionPromptInput(
         disabled={props.disabled}
         id="session-prompt"
         name="prompt"
+        // The capture-phase form-submit listener guarantees click submits;
+        // blur is a secondary flush for tab-away and window switches.
+        onBlur={echo.syncPrompt}
+        onInput={echo.handleInput}
         onKeyDown={(event) => {
-          props.onKeyDown(event);
+          echo.handleKeyDown(event, props.onKeyDown);
         }}
+        onPaste={promptEvents(props).onPaste}
         placeholder="Describe the change you want the agent to make…"
-        value={props.prompt}
-        {...promptEvents(props)}
+        ref={echo.setElement}
+        value={echo.localPrompt()}
       />
       <div class="mt-3">{renderSessionImages(props, "session-images")}</div>
     </div>
@@ -127,38 +273,10 @@ function composerActionProps(
 }
 
 export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
-  const [localPrompt, setLocalPrompt] = createSignal(
-    untrack(() => props.prompt),
-  );
-  const [textarea, setTextarea] = createSignal<HTMLTextAreaElement>();
-  let syncTimer: ReturnType<typeof setTimeout> | undefined;
-  const clearSyncTimer = (): void => {
-    if (syncTimer !== undefined) {
-      clearTimeout(syncTimer);
-      syncTimer = undefined;
-    }
-  };
-  const syncPrompt = (): void => {
-    clearSyncTimer();
-    if (localPrompt() !== props.prompt) props.onInput(localPrompt());
-  };
-  const schedulePromptSync = (): void => {
-    clearSyncTimer();
-    syncTimer = setTimeout(syncPrompt, FOLLOW_UP_SYNC_DELAY_MS);
-  };
-  const handleInput = (
-    event: InputEvent & { readonly currentTarget: HTMLTextAreaElement },
-  ): void => {
-    setLocalPrompt(event.currentTarget.value);
-    schedulePromptSync();
-  };
-  const handleKeyDown = (
-    event: KeyboardEvent & { readonly currentTarget: HTMLTextAreaElement },
-  ): void => {
-    if (!props.disabled && sessionComposerShortcut(event) !== undefined) {
-      syncPrompt();
-    }
-    props.onKeyDown(event);
+  const echo = promptEcho(props);
+  const { localPrompt, syncPrompt } = echo;
+  const handleKeyDown = (event: SessionPromptKeyEvent): void => {
+    echo.handleKeyDown(event, props.onKeyDown);
   };
   const runAction = (action: (() => void) | undefined): void => {
     syncPrompt();
@@ -197,32 +315,17 @@ export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
   };
   createEffect(
     on(
-      () => props.prompt,
-      (prompt, previousPrompt) => {
-        if (
-          prompt !== previousPrompt &&
-          (syncTimer === undefined || textarea() !== document.activeElement)
-        ) {
-          setLocalPrompt(prompt);
-        }
-      },
-    ),
-  );
-  createEffect(
-    on(
       () => props.sessionId,
       (sessionId, previousSessionId) => {
         if (
           previousSessionId !== undefined &&
           sessionId !== previousSessionId
         ) {
-          clearSyncTimer();
-          setLocalPrompt(props.prompt);
+          echo.resetLocalPrompt();
         }
       },
     ),
   );
-  onCleanup(clearSyncTimer);
 
   return (
     <form
@@ -242,12 +345,12 @@ export function SessionFollowUp(props: SessionFollowUpProps): JSX.Element {
         aria-label="Follow-up instruction"
         class="min-h-20 w-full resize-y rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
         name="prompt"
-        onInput={handleInput}
+        onInput={echo.handleInput}
         onKeyDown={handleKeyDown}
         onPaste={promptEvents(props).onPaste}
         placeholder="Give this session another instruction…"
         {...(props.disabled ? { readOnly: true } : {})}
-        ref={setTextarea}
+        ref={echo.setElement}
         value={promptValue()}
       />
       {renderSessionImages(props, "follow-up-images")}

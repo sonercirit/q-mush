@@ -1,6 +1,7 @@
 import type { JSX } from "solid-js";
 import type { AgentModelOption } from "../shared/agent-configuration.ts";
 import { renderFormField } from "./form-field.tsx";
+import { SessionDraftEchoInput } from "./session-client-forms.tsx";
 import { formatTokenCount } from "./session-context-client.tsx";
 
 export function SessionContextTokenCapInput(props: {
@@ -17,18 +18,13 @@ export function SessionContextTokenCapInput(props: {
     "session-context-token-cap",
     <>Context token cap (optional)</>,
     <div>
-      <input
-        class="mt-2 min-w-0 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white placeholder:text-slate-600 focus:border-emerald-300/50 focus:outline-none"
+      <SessionDraftEchoInput
         disabled={props.disabled}
         id="session-context-token-cap"
-        min="1"
         name="userContextTokenCap"
-        onInput={(event) => {
-          props.onInput(event.currentTarget.value);
-        }}
+        numeric={true}
+        onInput={props.onInput}
         placeholder="Use the model limit"
-        step="1"
-        type="number"
         value={props.value}
       />
       <p class="mt-1 text-xs text-slate-500">

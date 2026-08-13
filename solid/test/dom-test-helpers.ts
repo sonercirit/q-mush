@@ -2,6 +2,11 @@ import type { JSX } from "solid-js";
 import { render } from "solid-js/web";
 import { expect, vi } from "vitest";
 
+export function useFakeTestClock(disposals: (() => void)[]): void {
+  vi.useFakeTimers({ shouldClearNativeTimers: true });
+  disposals.push(vi.useRealTimers);
+}
+
 export function mountTestView(
   renderView: () => JSX.Element,
   disposals: (() => void)[],
