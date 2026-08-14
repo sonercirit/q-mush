@@ -33,6 +33,7 @@ export function numberedModels(): AgentModelCatalog["models"] {
     id: `model-${position}`,
     inputModalities: position === "12" ? ["text", "image"] : ["text"],
     label: `Model ${position}`,
+    maxOutputTokens: null,
     outputModalities: ["text"],
     pricing: null,
     reasoningEfforts: ["high"],

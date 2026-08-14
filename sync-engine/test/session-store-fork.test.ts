@@ -31,6 +31,7 @@ function prepareForkSource() {
     // Non-default so the fork copy assertion cannot pass by accident.
     idleCompact: true,
     maxContextTokens: null,
+    maxOutputTokens: null,
     model: "fork-model",
     reasoningEffort: null,
     tools: ["read"],
@@ -197,6 +198,7 @@ describe("session store forks", () => {
     const result = forkAtToolMessage(store, {
       credentialId: source.credentialId,
       maxContextTokens: 256_000,
+      maxOutputTokens: null,
       model: "replacement/model",
       openRouterProviderTag: null,
       provider: "openrouter",

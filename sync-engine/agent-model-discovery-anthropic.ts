@@ -1,5 +1,6 @@
 import {
   AGENT_REASONING_EFFORTS,
+  MAXIMUM_AGENT_MODEL_OPTIONS,
   type AgentModelOption,
   type AgentReasoningEffort,
 } from "../shared/agent-configuration.ts";
@@ -114,4 +115,61 @@ export function withAnthropicCapabilities(
       ...(efforts === undefined ? {} : { reasoningEfforts: efforts }),
     },
   };
+}
+
+// Anthropic Models pages with `has_more`/`last_id` (20-item default);
+// request the documented 1000-item maximum. A page claiming more must
+// carry a fresh nonempty cursor and items — never loop or truncate —
+// within a default-page-size crawl budget derived from the shared option
+// cap so the page and item bounds cannot desynchronize.
+const ANTHROPIC_DEFAULT_PAGE_SIZE = 20;
+const MAXIMUM_ANTHROPIC_CATALOG_PAGES = Math.ceil(
+  MAXIMUM_AGENT_MODEL_OPTIONS / ANTHROPIC_DEFAULT_PAGE_SIZE,
+);
+
+export interface AnthropicModelListCrawl {
+  readonly fetchJson: (url: URL) => Promise<unknown>;
+  readonly listUrl: string;
+  readonly pageError: (message: string) => Error;
+  readonly readPage: (value: unknown) => readonly unknown[];
+  readonly tooManyOptionsError: () => Error;
+}
+
+export async function readAnthropicModelList(
+  crawl: AnthropicModelListCrawl,
+): Promise<readonly unknown[]> {
+  const items: unknown[] = [];
+  const seenCursors = new Set<string>();
+  let afterId: string | undefined;
+  while (seenCursors.size < MAXIMUM_ANTHROPIC_CATALOG_PAGES) {
+    const url = new URL(crawl.listUrl);
+    url.searchParams.set("limit", "1000");
+    if (afterId !== undefined) {
+      url.searchParams.set("after_id", afterId);
+    }
+    const value = await crawl.fetchJson(url);
+    const page = crawl.readPage(value);
+    items.push(...page);
+    if (items.length > MAXIMUM_AGENT_MODEL_OPTIONS) {
+      throw crawl.tooManyOptionsError();
+    }
+    if (!isRecord(value) || value["has_more"] !== true) {
+      return items;
+    }
+    const lastId = value["last_id"];
+    if (
+      typeof lastId !== "string" ||
+      lastId.length === 0 ||
+      seenCursors.has(lastId) ||
+      page.length === 0
+    ) {
+      throw crawl.pageError(
+        "The provider returned an inconsistent model catalog page",
+      );
+    }
+    seenCursors.add(lastId);
+    afterId = lastId;
+  }
+  // Pages were well-formed; the crawl budget ran out.
+  throw crawl.tooManyOptionsError();
 }

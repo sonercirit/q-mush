@@ -6,7 +6,7 @@ import type {
 } from "../../shared/provider-credential-store.ts";
 import { utf8ByteLength } from "../../shared/utf8.ts";
 import {
-  discoverAgentModels,
+  discoverAgentModelsWithFetch,
   isCredentialRejectionError,
   type AgentModelDiscoveryFetch,
 } from "../../sync-engine/agent-model-discovery.ts";
@@ -35,7 +35,7 @@ async function capturedDiscovery(
   body: unknown,
 ): Promise<{ readonly catalog: AgentModelCatalog; readonly request: Request }> {
   const capture = new RequestCapture();
-  const discovered = await discoverAgentModels(
+  const discovered = await discoverAgentModelsWithFetch(
     provider,
     providerCredential,
     discoveryFetch(body, capture),
@@ -49,7 +49,7 @@ async function capturedDiscovery(
 }
 
 function rejectedDiscovery(body: BodyInit): Promise<AgentModelCatalog> {
-  return discoverAgentModels(
+  return discoverAgentModelsWithFetch(
     "openai",
     credential("api_key", "sk-openai-secret"),
     () =>
@@ -63,8 +63,10 @@ function openRouterStatusFailure(
   secret: string,
   status: number,
 ): Promise<AgentModelCatalog> {
-  return discoverAgentModels("openrouter", credential("api_key", secret), () =>
-    Promise.resolve(new Response("denied", { status })),
+  return discoverAgentModelsWithFetch(
+    "openrouter",
+    credential("api_key", secret),
+    () => Promise.resolve(new Response("denied", { status })),
   );
 }
 

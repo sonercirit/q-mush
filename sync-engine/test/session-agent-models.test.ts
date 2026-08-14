@@ -137,12 +137,19 @@ describe("session agent models", () => {
     expect(stepStarts).toHaveLength(3);
   });
 
-  test("keys the agent model's prompt cache to the session", () => {
+  test("keys the prompt cache and catalog output limit to the session", () => {
     const { factory, selections } = modelSelections();
 
-    createSessionAgentModels(sessionModelOptions(factory));
+    createSessionAgentModels(
+      sessionModelOptions(factory, {
+        detail: { ...TEST_SESSION_DETAIL, maxOutputTokens: 64_000 },
+      }),
+    );
 
+    // Anthropic-format Messages requests require max_tokens; the persisted
+    // catalog metadata must reach every session model construction.
     expect(selections[0]).toMatchObject({
+      maxOutputTokens: 64_000,
       promptCacheKey: TEST_SESSION_DETAIL.id,
     });
   });
@@ -152,6 +159,7 @@ describe("session agent models", () => {
 
     createFallbackModel(factory, {
       credential: CREDENTIAL,
+      maxOutputTokens: null,
       model: "vendor/model",
       openRouterProviderTag: "q-mush-routing:exacto",
       prompt: null,

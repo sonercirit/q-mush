@@ -106,6 +106,7 @@ function openRouterModel(
       source: "api_key",
     },
     fetch: provider.fetch,
+    maxOutputTokens: null,
     model: "openai/gpt-4.1-mini",
     ...(deltas === undefined
       ? {}

@@ -89,6 +89,7 @@ describe("session models and compaction", () => {
           id: "gpt-discovered",
           inputModalities: null,
           label: "GPT Discovered",
+          maxOutputTokens: null,
           outputModalities: null,
           pricing: {
             cachedInput: "0.0000001",

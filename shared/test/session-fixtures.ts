@@ -1,8 +1,29 @@
 import { AGENT_SESSION_TOOL_NAMES } from "../agent-tools.ts";
-import type { AgentSessionDetail } from "../session-model.ts";
+import type {
+  AgentSessionDetail,
+  AgentSessionMessage,
+} from "../session-model.ts";
 
 export function startedAtUtc(): number {
   return Date.UTC(2026, 6, 27, 12, 0, 0);
+}
+
+export function testSessionMessage(
+  id: string,
+  content: string,
+  role: AgentSessionMessage["role"],
+  createdAt: number,
+): AgentSessionMessage {
+  return {
+    content,
+    createdAt,
+    id,
+    images: [],
+    role,
+    toolCallId: null,
+    toolCalls: [],
+    toolName: null,
+  };
 }
 
 export const TEST_SESSION_DETAIL: AgentSessionDetail = {
@@ -23,6 +44,7 @@ export const TEST_SESSION_DETAIL: AgentSessionDetail = {
   executionEnvironment: "bare_metal",
   id: "session-1",
   maxContextTokens: 200_000,
+  maxOutputTokens: null,
   userContextTokenCap: null,
   messages: [],
   model: "gpt-5-codex",

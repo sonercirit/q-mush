@@ -2,6 +2,7 @@ import type {
   AgentConversationMessage,
   AgentModel,
   AgentModelStep,
+  AgentStepTruncation,
 } from "../shared/agent-loop.ts";
 import { forEachAssistantToolCall } from "./agent-conversation.ts";
 
@@ -94,6 +95,26 @@ export function shouldCompactContext(
   );
 }
 
+const COMPACTION_TRUNCATION_INSTRUCTION: Readonly<
+  Record<AgentStepTruncation, string>
+> = {
+  max_tokens:
+    "The preceding assistant response reached the maximum output tokens and is partial. Preserve that fact explicitly in the summary; do not describe the response as a finished answer or deliverable.",
+  model_context_window_exceeded:
+    "The preceding assistant response is partial because the conversation filled the model context window. Preserve that fact explicitly in the summary; do not describe the response as a finished answer or deliverable.",
+};
+
+function compactionProviderMessage(
+  message: AgentConversationMessage,
+): AgentConversationMessage {
+  return message.role === "compaction_notice"
+    ? {
+        content: COMPACTION_TRUNCATION_INSTRUCTION[message.truncation],
+        role: "user",
+      }
+    : message;
+}
+
 export class ModelConversationCompactor implements AgentConversationCompactor {
   readonly #model: AgentModel;
   readonly #onRequest: ((content: string) => void) | undefined;
@@ -108,18 +129,25 @@ export class ModelConversationCompactor implements AgentConversationCompactor {
   ): Promise<CompactedConversation> {
     const [messages, signal] = parameters;
     const input = compactionMessages(messages);
+    const providerInput = input.map(compactionProviderMessage);
     this.#onRequest?.(AGENT_COMPACTION_REQUEST_MESSAGE);
     let step: AgentModelStep;
     try {
       // Compaction is a model step: restart the visible step clock at its
       // request instead of letting the previous step keep timing.
       this.#model.startStep?.();
-      step = await this.#model.complete(input, signal);
+      step = await this.#model.complete(providerInput, signal);
     } finally {
       this.#model.close?.();
     }
 
-    if (step.toolCalls.length > 0 || step.content.trim().length === 0) {
+    // A truncated summary would replace the whole conversation with an
+    // incomplete handoff; reject it like any other invalid summary.
+    if (
+      step.toolCalls.length > 0 ||
+      step.content.trim().length === 0 ||
+      step.truncation !== undefined
+    ) {
       throw new InvalidCompactionSummaryError();
     }
 

@@ -18,6 +18,9 @@ export function completionMessages(
     if (message === undefined) {
       continue;
     }
+    if (message.role === "compaction_notice") {
+      continue;
+    }
     if (message.role === "tool") {
       continue;
     }

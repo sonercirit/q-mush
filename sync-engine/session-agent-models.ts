@@ -54,6 +54,7 @@ export function createFallbackModel(
   factory: AgentModelFactory,
   selection: {
     readonly credential: ProviderCredentialAccess;
+    readonly maxOutputTokens: number | null;
     readonly model: string;
     readonly openRouterProviderTag?: string | null;
     readonly prompt: string | null;
@@ -63,6 +64,7 @@ export function createFallbackModel(
 ): AgentModel {
   return factory({
     credential: selection.credential,
+    maxOutputTokens: selection.maxOutputTokens,
     model: selection.model,
     ...agentModelRoutingOptions(selection.openRouterProviderTag),
     provider: selection.provider,
@@ -90,6 +92,7 @@ function modelOptions(
     }).preservesDynamicToolCache
       ? { dynamicToolCache: true }
       : {}),
+    maxOutputTokens: detail.maxOutputTokens,
     model: detail.model,
     ...agentModelRoutingOptions(detail.openRouterProviderTag),
     ...(onDelta === undefined ? {} : { onDelta }),

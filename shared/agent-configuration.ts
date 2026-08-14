@@ -19,6 +19,7 @@ export interface AgentModelOption {
   readonly id: string;
   readonly inputModalities: readonly string[] | null;
   readonly label: string;
+  readonly maxOutputTokens: number | null;
   readonly outputModalities: readonly string[] | null;
   readonly pricing: ProviderModelPricing | null;
   readonly reasoningEfforts: readonly AgentReasoningEffort[];

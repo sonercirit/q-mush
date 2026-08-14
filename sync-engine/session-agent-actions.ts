@@ -381,9 +381,9 @@ export class SessionAgentActions {
     const detail = readSessionSnapshot(this.#dependencies.database, {
       includeSystem: selected.has("system"),
       limit: input.limit,
-      roles: (["user", "assistant", "thinking", "tool"] as const).filter(
-        (role) => selected.has(role),
-      ),
+      roles: (
+        ["user", "assistant", "thinking", "tool", "error"] as const
+      ).filter((role) => selected.has(role)),
       sessionId: input.sessionId,
       userId,
       workspaceId,

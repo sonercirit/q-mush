@@ -25,16 +25,21 @@ import {
   type CompletionArguments,
   type OptionalStep,
 } from "./agent-completion.ts";
-import type {
-  AgentModelRequestOptions,
-  AgentProviderCredential,
+import {
+  usesAnthropicFormat,
+  type AgentModelRequestOptions,
+  type AgentProviderCredential,
 } from "./agent-model-options.ts";
 import type { ModelRequestSleep } from "./agent-model-retry.ts";
 import {
+  ANTHROPIC_CONTEXT_WINDOW_BETA,
   ANTHROPIC_VERSION,
   anthropicRequestBody,
 } from "./anthropic-request.ts";
-import { genericProviderEndpoint } from "./generic-provider-url.ts";
+import {
+  genericProviderEndpoint,
+  isOfficialAnthropicEndpoint,
+} from "./generic-provider-url.ts";
 import { readOpenAiOAuthCredential } from "./openai-credential.ts";
 import {
   providerChatMessage,
@@ -84,13 +89,6 @@ function usesCodexOAuth(
   return provider === "openai" && credential.source === "oauth";
 }
 
-function usesAnthropicFormat(
-  provider: ProviderId,
-  credential: AgentProviderCredential,
-): boolean {
-  return provider === "generic" && credential.apiFormat === "anthropic";
-}
-
 function endpoint(
   provider: ProviderId,
   credential: AgentProviderCredential,
@@ -132,20 +130,44 @@ export function setChatGptAccountHeader(
   }
 }
 
+export interface AgentProviderRequestHeaderOptions {
+  readonly accept: string;
+  readonly promptCacheKey?: string;
+  readonly protocol?: ProviderRequestProtocol;
+}
+
+function promptCacheKeyHeader(
+  promptCacheKey: string | undefined,
+): Readonly<Pick<AgentProviderRequestHeaderOptions, "promptCacheKey">> {
+  return promptCacheKey === undefined ? {} : { promptCacheKey };
+}
+
 export function agentProviderRequestHeaders(
   provider: ProviderId,
   credential: AgentProviderCredential,
-  accept: string,
-  promptCacheKey?: string,
+  options: AgentProviderRequestHeaderOptions,
 ): Headers {
   const headers = new Headers({
-    accept,
+    accept: options.accept,
     "content-type": "application/json",
   });
   const token = accessToken(provider, credential);
 
   if (usesAnthropicFormat(provider, credential)) {
     headers.set("anthropic-version", ANTHROPIC_VERSION);
+    if (
+      options.protocol === "anthropic" &&
+      isOfficialAnthropicEndpoint(credential.baseUrl)
+    ) {
+      // Sending the catalog maximum as max_tokens can exceed the context
+      // window on long conversations. 4.5+ models then stop with
+      // model_context_window_exceeded; this documented beta opts earlier
+      // models into the same degradation instead of a validation error.
+      // First-party Messages completion only: the beta changes nothing off
+      // api.anthropic.com, and proxies and gateways 400 on unrecognized
+      // beta names; discovery and other JSON endpoints stay reachable.
+      headers.set("anthropic-beta", ANTHROPIC_CONTEXT_WINDOW_BETA);
+    }
     if (token.length > 0) {
       headers.set("x-api-key", token);
     }
@@ -161,12 +183,12 @@ export function agentProviderRequestHeaders(
     headers.set("x-title", "Q Mush");
   } else if (usesCodexOAuth(provider, credential)) {
     if (
-      accept === "text/event-stream" ||
-      accept === "application/websocket-events"
+      options.accept === "text/event-stream" ||
+      options.accept === "application/websocket-events"
     ) {
       headers.set(
         "openai-beta",
-        accept === "application/websocket-events"
+        options.accept === "application/websocket-events"
           ? "responses_websockets=2026-02-06"
           : "responses=experimental",
       );
@@ -177,8 +199,8 @@ export function agentProviderRequestHeaders(
     // The Codex backend routes a session to the machine that already holds its
     // prompt cache, so the stable session identifier is what keeps hit rates
     // high across steps.
-    if (promptCacheKey !== undefined) {
-      headers.set("session_id", promptCacheKey);
+    if (options.promptCacheKey !== undefined) {
+      headers.set("session_id", options.promptCacheKey);
     }
 
     setChatGptAccountHeader(headers, credential.accountId);
@@ -375,6 +397,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
   readonly #credential: AgentProviderCredential;
   readonly #dynamicToolCache: boolean;
   readonly #fetch: AgentModelFetch;
+  readonly #maxOutputTokens: number | null;
   readonly #model: string;
   readonly #onDelta: ((delta: ProviderTextDelta) => void) | undefined;
   readonly #onStepStart: () => void;
@@ -393,6 +416,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
     this.#credential = options.credential;
     this.#dynamicToolCache = options.dynamicToolCache === true;
     this.#fetch = options.fetch ?? ((request) => globalThis.fetch(request));
+    this.#maxOutputTokens = options.maxOutputTokens ?? null;
     this.#model = options.model;
     this.#onDelta = options.onDelta;
     this.#onStepStart = options.onStepStart ?? (() => undefined);
@@ -492,6 +516,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
   ): unknown {
     return requestBody({
       dynamicToolCache: this.#dynamicToolCache,
+      maxOutputTokens: this.#maxOutputTokens,
       messages,
       model: this.#model,
       openRouterProviderRouting: this.#openRouterProviderRouting,
@@ -532,8 +557,10 @@ export class ChatCompletionsAgentModel implements AgentModel {
     const headers = agentProviderRequestHeaders(
       this.#provider,
       this.#credential,
-      "application/websocket-events",
-      this.#promptCacheKey,
+      {
+        accept: "application/websocket-events",
+        ...promptCacheKeyHeader(this.#promptCacheKey),
+      },
     );
     const codexOAuth = usesCodexOAuth(this.#provider, this.#credential);
     const body = this.#requestBody(messages, "responses", false);
@@ -560,12 +587,11 @@ export class ChatCompletionsAgentModel implements AgentModel {
       {
         body: this.#requestBody(input.messages, protocol, true),
         fetch: this.#fetch,
-        headers: agentProviderRequestHeaders(
-          this.#provider,
-          this.#credential,
-          "text/event-stream",
-          this.#promptCacheKey,
-        ),
+        headers: agentProviderRequestHeaders(this.#provider, this.#credential, {
+          accept: "text/event-stream",
+          ...promptCacheKeyHeader(this.#promptCacheKey),
+          protocol,
+        }),
         onDelta: this.#onDelta,
         protocol,
         provider: this.#provider,

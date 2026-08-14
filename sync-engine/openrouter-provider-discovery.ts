@@ -361,11 +361,9 @@ function createOpenRouterProviderDiscoverer(
       cache.delete(key);
     }
 
-    const headers = agentProviderRequestHeaders(
-      "openrouter",
-      credential,
-      "application/json",
-    );
+    const headers = agentProviderRequestHeaders("openrouter", credential, {
+      accept: "application/json",
+    });
     headers.delete("content-type");
     const abort = requestAbort(timeoutMilliseconds, requestOptions.signal);
     try {

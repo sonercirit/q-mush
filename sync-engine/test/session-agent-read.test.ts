@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { AgentSessionMessage } from "../../shared/session-model.ts";
+import { testSessionMessage } from "../../shared/test/session-fixtures.ts";
 import {
   DEFAULT_READ_SESSION_CATEGORIES,
   DEFAULT_READ_SESSION_LIMIT,
@@ -33,11 +34,12 @@ function message(
   content: string,
 ): AgentSessionMessage {
   return {
-    content,
-    createdAt: Number(id.replace(/\D/gu, "")) || 1,
-    id,
-    images: [],
-    role,
+    ...testSessionMessage(
+      id,
+      content,
+      role,
+      Number(id.replace(/\D/gu, "")) || 1,
+    ),
     toolCallId: role === "tool" ? "call-1" : null,
     toolCalls:
       role === "assistant"
@@ -182,6 +184,20 @@ describe("bounded session reads", () => {
     const tools = output({ categories: ["tools"] });
     expect(content(tools)["toolDefinitions"]).toEqual([TOOL_DEFINITION]);
     expect(content(tools)["records"]).toEqual([]);
+
+    // Truncation and failure notices persist as error rows; a parent
+    // reading a child's transcript must be able to select them.
+    const error = output({ categories: ["error"] }, [
+      message("message-1", "assistant", "Partial answer"),
+      message("message-2", "error", "The response was truncated"),
+    ]);
+    expect(records(content(error)["records"])).toEqual([
+      expect.objectContaining({
+        content: "The response was truncated",
+        id: "message-2",
+        role: "error",
+      }),
+    ]);
   });
 
   test("combines sections and applies last-X after role filtering", () => {

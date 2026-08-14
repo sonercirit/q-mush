@@ -1,4 +1,8 @@
-import type { AgentModelStep, AgentTokenUsage } from "../shared/agent-loop.ts";
+import type {
+  AgentModelStep,
+  AgentStepTruncation,
+  AgentTokenUsage,
+} from "../shared/agent-loop.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import { requiredRecordString } from "../shared/json-record.ts";
 import { readNonNegativeSafeInteger } from "../shared/validation.ts";
@@ -53,9 +57,21 @@ function toolUseCall(
   };
 }
 
+function readTruncation(delta: unknown): AgentStepTruncation | undefined {
+  if (!isRecord(delta)) {
+    return undefined;
+  }
+  const stopReason = delta["stop_reason"];
+  return stopReason === "max_tokens" ||
+    stopReason === "model_context_window_exceeded"
+    ? stopReason
+    : undefined;
+}
+
 export class AnthropicStreamAccumulator extends BufferedAccumulator {
   readonly protocol = "anthropic" as const;
   #stopped = false;
+  #truncation: AgentStepTruncation | undefined;
   #usage: AgentTokenUsage | null = null;
 
   finish(): AgentModelStep {
@@ -70,7 +86,13 @@ export class AnthropicStreamAccumulator extends BufferedAccumulator {
       this.buffers.thinking.join(""),
       this.recordedToolCalls(),
     );
-    return { ...step, tokenUsage: usage };
+    return {
+      ...step,
+      tokenUsage: usage,
+      ...(this.#truncation === undefined
+        ? {}
+        : { truncation: this.#truncation }),
+    };
   }
 
   get completed(): boolean {
@@ -95,6 +117,9 @@ export class AnthropicStreamAccumulator extends BufferedAccumulator {
         this.#pushDelta(parsed);
         return;
       case "message_delta":
+        // Length stops surface as step truncation; other reasons (end_turn,
+        // tool_use, stop_sequence, pause_turn, refusal) end steps normally.
+        this.#truncation ??= readTruncation(parsed["delta"]);
         this.#readOutputTokens(parsed["usage"]);
         return;
       case "message_stop":
@@ -185,6 +210,7 @@ export class AnthropicStreamAccumulator extends BufferedAccumulator {
       this.#readCompleteBlock(index, block);
     }
 
+    this.#truncation ??= readTruncation(message);
     this.#readUsage(message);
     this.#stopped = true;
   }

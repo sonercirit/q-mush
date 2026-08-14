@@ -241,6 +241,7 @@ test("reads a session agent file from the server", () => {
 function modelCatalogValue(
   inputModalities: unknown,
   includeInput = true,
+  maxOutputTokens: number | null | "omitted" = null,
 ): Readonly<Record<string, unknown>> {
   return {
     defaultModel: "gpt-test",
@@ -250,6 +251,7 @@ function modelCatalogValue(
         id: "gpt-test",
         ...(includeInput ? { inputModalities } : {}),
         label: "GPT Test",
+        ...(maxOutputTokens === "omitted" ? {} : { maxOutputTokens }),
         outputModalities: ["text"],
         pricing: null,
         reasoningEfforts: [],
@@ -267,6 +269,16 @@ test("requires explicit context and modality metadata from model responses", () 
   );
 });
 
+test("rejects omitted, non-positive, and fractional output token limits", () => {
+  // Every server path emits the key; the codec treats omission as invalid
+  // like the sibling context limits.
+  for (const invalid of ["omitted" as const, -5, 0, 1.5]) {
+    expect(() =>
+      readAgentModelCatalog(modelCatalogValue(["text"], true, invalid)),
+    ).toThrow("invalid agent model");
+  }
+});
+
 test("requires explicit context, cost, and compaction metadata from session responses", () => {
   for (const invalid of [
     { ...DETAIL, autoCompact: undefined },
@@ -276,6 +288,8 @@ test("requires explicit context, cost, and compaction metadata from session resp
     { ...DETAIL, stepStartedAt: 1.5 },
     { ...DETAIL, costBasis: "none", costUsd: 1 },
     { ...DETAIL, maxContextTokens: undefined },
+    { ...DETAIL, maxOutputTokens: 0 },
+    { ...DETAIL, maxOutputTokens: 1.5 },
     { ...DETAIL, modelContextTokens: undefined },
   ]) {
     expectInvalidSession(invalid);

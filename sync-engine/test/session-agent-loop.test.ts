@@ -165,6 +165,43 @@ describe("compacting agent session loop", () => {
     expect(compactionCost).toBe(0.15);
   });
 
+  test("a window-exceeded step completes without scheduling compaction", async () => {
+    // The provider already filled the model's window; summarizing the same
+    // transcript would meet the same wall, so the soft stop must settle as
+    // a completed (noticed) answer rather than convert into a failure.
+    const model = new ScriptedAgentModel([
+      {
+        ...highStep("Truncated terminal answer.", 99_000),
+        truncation: "model_context_window_exceeded" as const,
+      },
+    ]);
+    const compactorRequests: unknown[] = [];
+    const recordedMessages: unknown[] = [];
+
+    await runTestLoop({
+      createCompactor: recordingCompactor(compactorRequests, () =>
+        compacted("Unused handoff"),
+      ),
+      model,
+      recordMessage: recordingMessages(recordedMessages),
+    });
+
+    expect(compactorRequests).toHaveLength(0);
+    expect(model.requests).toHaveLength(1);
+    expect(recordedMessages).toEqual([
+      {
+        content: "Truncated terminal answer.",
+        role: "assistant",
+        toolCalls: [],
+      },
+      {
+        content:
+          "The response was truncated: the conversation filled the model's context window.",
+        role: "error",
+      },
+    ]);
+  });
+
   test("ignores stale high usage after the compacted handoff", async () => {
     const model = new ScriptedAgentModel([
       highStep("Before compaction."),

@@ -76,6 +76,13 @@ export type AgentConversationMessage =
       readonly toolCalls: readonly AgentToolCall[];
     }
   | {
+      // Internal-only context for compaction. Provider completion sanitization
+      // drops it so ordinary replay never gains the durable error row.
+      readonly content: "";
+      readonly role: "compaction_notice";
+      readonly truncation: AgentStepTruncation;
+    }
+  | {
       readonly content: string;
       readonly role: "tool";
       readonly toolCallId: string;
@@ -86,7 +93,7 @@ export type AgentRecordedMessage =
   | Extract<AgentConversationMessage, { readonly role: "assistant" | "tool" }>
   | {
       readonly content: string;
-      readonly role: "thinking";
+      readonly role: "error" | "thinking";
     };
 
 export interface AgentTokenUsage {
@@ -96,6 +103,13 @@ export interface AgentTokenUsage {
   readonly outputTokens: number;
 }
 
+// Soft truncation stops: generation ended early but the response is valid.
+// `max_tokens` hit the request's output cap; the context-window stop filled
+// the model's window (native on Anthropic 4.5+, opted into earlier via the
+// context-window beta).
+export type AgentStepTruncation =
+  "max_tokens" | "model_context_window_exceeded";
+
 export interface AgentModelStep {
   readonly content: string;
   readonly contextTokens: number | null;
@@ -103,6 +117,7 @@ export interface AgentModelStep {
   readonly thinking: string;
   readonly tokenUsage: AgentTokenUsage | null;
   readonly toolCalls: readonly AgentToolCall[];
+  readonly truncation?: AgentStepTruncation;
 }
 
 export interface AgentModel {
@@ -217,6 +232,34 @@ function storeMessages(
   return true;
 }
 
+const TRUNCATED_CALL_MESSAGE =
+  "Error: the response was truncated, so this tool call may be incomplete and was not executed. Retry it, in smaller steps if needed.";
+
+export const TRUNCATION_NOTICES: Readonly<Record<AgentStepTruncation, string>> =
+  {
+    max_tokens:
+      "The response was truncated: it reached the maximum output tokens.",
+    model_context_window_exceeded:
+      "The response was truncated: the conversation filled the model's context window.",
+  };
+
+export function isTruncationNotice(
+  content: string,
+): content is (typeof TRUNCATION_NOTICES)[AgentStepTruncation] {
+  return Object.values(TRUNCATION_NOTICES).some((notice) => notice === content);
+}
+
+export function truncationFromNotice(
+  content: string,
+): AgentStepTruncation | undefined {
+  if (content === TRUNCATION_NOTICES.max_tokens) {
+    return "max_tokens";
+  }
+  return content === TRUNCATION_NOTICES.model_context_window_exceeded
+    ? "model_context_window_exceeded"
+    : undefined;
+}
+
 async function takeAndStoreSteering(
   options: AgentLoopOptions,
   messages: AgentConversationMessage[],
@@ -275,6 +318,14 @@ export async function runAgentLoop(
       toolCalls: step.toolCalls,
     };
     recordedMessages.push(assistantMessage);
+    if (step.truncation !== undefined) {
+      // Record the soft stop durably so a truncated answer is never mistaken
+      // for a finished one; error rows stay out of provider replay.
+      recordedMessages.push({
+        content: TRUNCATION_NOTICES[step.truncation],
+        role: "error",
+      });
+    }
     await options.recordMessage(recordedMessages, {
       contextTokens: step.contextTokens,
       costBasis: step.costUsd === null ? null : "reported",
@@ -296,16 +347,21 @@ export async function runAgentLoop(
       const arguments_ = parseArguments(call.arguments);
       let result: RunnerCommandResult;
       try {
+        // A length stop can cut a call mid-argument, and a syntactically
+        // valid prefix may silently omit later arguments: never execute
+        // calls from a truncated step; fail them so the model retries.
         result =
-          arguments_ === undefined
-            ? { output: INVALID_ARGUMENTS_MESSAGE, state: "failed" }
-            : normalizedToolResult(
-                await options.executeTool({
-                  arguments: arguments_,
-                  id: call.id,
-                  name: call.name,
-                }),
-              );
+          step.truncation !== undefined
+            ? { output: TRUNCATED_CALL_MESSAGE, state: "failed" }
+            : arguments_ === undefined
+              ? { output: INVALID_ARGUMENTS_MESSAGE, state: "failed" }
+              : normalizedToolResult(
+                  await options.executeTool({
+                    arguments: arguments_,
+                    id: call.id,
+                    name: call.name,
+                  }),
+                );
       } catch (error) {
         await options.onToolResult?.(call, { error });
         throw error;

@@ -275,6 +275,47 @@ describe("session agent introspection tools", () => {
     setup.database.$client.close();
   });
 
+  test("returns persisted error notices through the error category", async () => {
+    const notice =
+      "The response was truncated: it reached the maximum output tokens.";
+    const model = scriptedModel([
+      {
+        content: "Reading error notices.",
+        toolCalls: [
+          toolCall(
+            "read_session",
+            { categories: ["error"], sessionId: SESSION_ID },
+            "read-errors",
+          ),
+        ],
+      },
+      { content: "Notices read.", toolCalls: [] },
+    ]);
+    // A truncation notice persisted before the read; the database-level
+    // role filter must return it for the error category.
+    const noticeRow = {
+      ...testAuditFields(SYSTEM_ID),
+      createdAt: new Date(0),
+      content: notice,
+      id: "error-notice-1",
+      role: "error" as const,
+      sessionId: SESSION_ID,
+      updatedAt: new Date(0),
+      userId: TEST_USER_ID,
+    };
+    const setup = await startToolSession(model);
+    setup.database.insert(agentMessages).values(noticeRow).run();
+    const read = testRecord(
+      parseTestJson((await readToolOutput(setup)) ?? "null"),
+    );
+    const noticeRecords = records(testRecord(read["content"])["records"]);
+    setup.database.$client.close();
+
+    expect(noticeRecords).toContainEqual(
+      expect.objectContaining({ content: notice, role: "error" }),
+    );
+  });
+
   test("uses read defaults and validates ownership and every argument", async () => {
     const model = scriptedModel([
       {

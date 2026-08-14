@@ -41,6 +41,7 @@ function storedSessionSelection() {
     id: agentSessions.id,
     idleCompact: agentSessions.idleCompact,
     maxContextTokens: agentSessions.maxContextTokens,
+    maxOutputTokens: agentSessions.maxOutputTokens,
     userContextTokenCap: agentSessions.userContextTokenCap,
     model: agentSessions.model,
     openRouterProviderTag: agentSessions.openRouterProviderTag,
@@ -78,6 +79,7 @@ type StoredSessionSummary = Pick<
   | "id"
   | "idleCompact"
   | "maxContextTokens"
+  | "maxOutputTokens"
   | "userContextTokenCap"
   | "model"
   | "openRouterProviderTag"

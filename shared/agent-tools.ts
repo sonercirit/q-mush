@@ -162,7 +162,7 @@ const SESSION_AGENT_TOOLS = [
   }),
   toolDefinition({
     description:
-      "Spawn another agent session and return immediately. Configure it with the same fields available in the new-session pane, including any working directory and any agent-file path (relative or absolute; container sessions keep agent files inside the workspace). When it finishes or fails, its last message is sent back to this session.",
+      "Spawn another agent session and return immediately. Configure it with the same fields as the new-session pane, including any working directory and agent-file path (relative or absolute; container sessions keep agent files inside the workspace). When it finishes or fails, its last message is sent back to this session.",
     name: "spawn_session",
     properties: {
       agentFilePath: {
@@ -311,15 +311,22 @@ const SESSION_AGENT_TOOLS = [
   }),
   toolDefinition({
     description:
-      "Read bounded sections of an owned session. Defaults to the last 20 user/assistant records. Select thinking for reasoning, tool for tool results, tools for effective definitions, and assistant for content plus tool calls.",
+      "Read bounded sections of an owned session. Defaults to the last 20 user/assistant records. Select thinking for reasoning, tool for results, error for failure and truncation notices, tools for definitions, and assistant for content plus tool calls.",
     name: "read_session",
     properties: {
       ...SESSION_ID_PARAMETER,
       categories: {
-        description:
-          "Nonempty selection of system, user, assistant, thinking, tool, and tools",
+        description: "Nonempty selection of the listed transcript categories",
         items: {
-          enum: ["system", "user", "assistant", "thinking", "tool", "tools"],
+          enum: [
+            "system",
+            "user",
+            "assistant",
+            "thinking",
+            "tool",
+            "error",
+            "tools",
+          ],
           type: "string",
         },
         minItems: 1,

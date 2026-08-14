@@ -15,7 +15,11 @@ import type {
 import type { ProviderModelPricing } from "../shared/provider-model-pricing.ts";
 import { utf8Prefix } from "../shared/utf8.ts";
 import { readPositiveSafeInteger } from "../shared/validation.ts";
-import { withAnthropicCapabilities } from "./agent-model-discovery-anthropic.ts";
+import {
+  readAnthropicModelList,
+  withAnthropicCapabilities,
+} from "./agent-model-discovery-anthropic.ts";
+import { usesAnthropicFormat } from "./agent-model-options.ts";
 import {
   agentProviderRequestHeaders,
   type AgentProviderCredential,
@@ -55,6 +59,7 @@ export type AgentModelDiscoveryFetch = (request: Request) => Promise<Response>;
 export type AgentModelDiscoverer = (
   provider: ProviderId,
   credential: ProviderCredentialAccess,
+  signal?: AbortSignal,
 ) => Promise<AgentModelCatalog>;
 
 interface PrioritizedModel {
@@ -169,10 +174,10 @@ function nestedValue(
   return isRecord(parent) ? parent[key] : undefined;
 }
 
-type ContextWindowRecord = Readonly<Record<string, unknown>>;
+type TokenLimitRecord = Readonly<Record<string, unknown>>;
 
-function modelContextWindow(
-  value: ContextWindowRecord,
+function modelTokenLimit(
+  value: TokenLimitRecord,
   keys: readonly string[],
 ): number | null {
   for (const key of keys) {
@@ -233,6 +238,7 @@ function modelOption(
   labelKey: string,
   efforts: readonly AgentReasoningEffort[],
   contextKeys: readonly string[],
+  outputTokenKeys: readonly string[] = [],
 ): AgentModelOption | undefined {
   if (!isRecord(value)) {
     return undefined;
@@ -245,7 +251,8 @@ function modelOption(
   }
 
   return {
-    contextWindow: modelContextWindow(value, contextKeys),
+    contextWindow: modelTokenLimit(value, contextKeys),
+    maxOutputTokens: modelTokenLimit(value, outputTokenKeys),
     ...(typeof value["fallback_prompt"] === "string"
       ? {
           fallbackPrompt:
@@ -380,8 +387,8 @@ function readOpenRouterCatalog(value: unknown): AgentModelCatalog {
   return createCatalog(models);
 }
 
-// OpenAI's standard model list has no capability metadata, so exclude known
-// non-chat families while retaining current and future GPT/o-series IDs.
+// OpenAI's standard list has no capability metadata; exclude known non-chat
+// families while retaining current and future GPT/o-series IDs.
 function supportsOpenAiAgentLoop(modelId: string): boolean {
   const normalized = modelId.toLowerCase();
   const supportedFamily =
@@ -428,6 +435,9 @@ function genericModelOption(
       "context_length",
       "max_input_tokens",
     ],
+    // Anthropic's Models API lists `max_tokens` (maximum output tokens);
+    // OpenAI-style listings lack it.
+    anthropicFormat ? ["max_tokens", "max_output_tokens"] : [],
   );
 }
 
@@ -470,18 +480,21 @@ function readAnthropicCatalog(items: readonly unknown[]): {
 }
 
 // Dual-format endpoints publish `supported_reasoning_efforts` on their
-// OpenAI-style listing at the same base URL; merge it best-effort.
+// OpenAI-style listing at the same base URL.
 async function fetchDiscoveryJson(
   fetch: AgentModelDiscoveryFetch,
   url: URL | string,
   headers: Headers,
+  signal?: AbortSignal,
 ): Promise<unknown> {
+  const timeout = AbortSignal.timeout(10_000);
   return readProviderResponse(
     await fetch(
       new Request(url, {
         headers,
         method: "GET",
-        signal: AbortSignal.timeout(10_000),
+        signal:
+          signal === undefined ? timeout : AbortSignal.any([signal, timeout]),
       }),
     ),
   );
@@ -490,14 +503,18 @@ async function fetchDiscoveryJson(
 async function mergeOpenAiListedEfforts(
   catalog: AgentModelCatalog,
   unknownEffortIds: ReadonlySet<string>,
-  credential: AgentProviderCredential,
-  fetch: AgentModelDiscoveryFetch,
+  source: {
+    readonly credential: AgentProviderCredential;
+    readonly fetch: AgentModelDiscoveryFetch;
+    readonly signal?: AbortSignal;
+  },
 ): Promise<AgentModelCatalog> {
   // Only metadata-free models are eligible; authoritative answers
   // (including explicit non-support) stay.
   if (unknownEffortIds.size === 0) {
     return catalog;
   }
+  const { credential, fetch, signal } = source;
   try {
     const headers = new Headers({ accept: "application/json" });
     if (credential.secret.length > 0) {
@@ -507,6 +524,7 @@ async function mergeOpenAiListedEfforts(
       fetch,
       genericProviderEndpoint(credential.baseUrl, "models"),
       headers,
+      signal,
     );
     const efforts = new Map<string, readonly AgentReasoningEffort[]>();
     for (const item of providerModelList(value, "data")) {
@@ -529,8 +547,13 @@ async function mergeOpenAiListedEfforts(
           : { ...model, reasoningEfforts: listed };
       }),
     };
-  } catch {
-    return catalog;
+  } catch (error) {
+    // Best-effort probe, but the caller's own cancellation must surface
+    // instead of resolving a canceled discovery successfully.
+    if (signal?.aborted !== true) {
+      return catalog;
+    }
+    throw error;
   }
 }
 
@@ -615,81 +638,59 @@ function discoveryRequest(
       : provider === "openrouter"
         ? OPENROUTER_MODELS_URL
         : genericProviderEndpoint(credential.baseUrl, "models");
-  const headers = agentProviderRequestHeaders(
-    provider,
-    credential,
-    "application/json",
-  );
+  const headers = agentProviderRequestHeaders(provider, credential, {
+    accept: "application/json",
+  });
   headers.delete("content-type");
   return { headers, url };
-}
-
-// Anthropic Models pages with `has_more`/`last_id` (20-item default);
-// request the documented 1000-item maximum. A page claiming more must
-// carry a fresh nonempty cursor and items — never loop or truncate —
-// within a default-page-size crawl budget.
-const MAXIMUM_ANTHROPIC_CATALOG_PAGES = MAXIMUM_AGENT_MODEL_OPTIONS / 20;
-
-async function readAnthropicModelList(
-  credential: AgentProviderCredential,
-  fetch: AgentModelDiscoveryFetch,
-): Promise<readonly unknown[]> {
-  const base = discoveryRequest("generic", credential);
-  const items: unknown[] = [];
-  const seenCursors = new Set<string>();
-  let afterId: string | undefined;
-  while (seenCursors.size < MAXIMUM_ANTHROPIC_CATALOG_PAGES) {
-    const url = new URL(base.url);
-    url.searchParams.set("limit", "1000");
-    if (afterId !== undefined) {
-      url.searchParams.set("after_id", afterId);
-    }
-    const value = await fetchDiscoveryJson(fetch, url, base.headers);
-    const page = providerModelList(value, "data");
-    items.push(...page);
-    if (items.length > MAXIMUM_AGENT_MODEL_OPTIONS) {
-      throw modelDiscoveryError(MODEL_CATALOG_HAS_TOO_MANY_OPTIONS);
-    }
-    if (!isRecord(value) || value["has_more"] !== true) {
-      return items;
-    }
-    const lastId = value["last_id"];
-    if (
-      typeof lastId !== "string" ||
-      lastId.length === 0 ||
-      seenCursors.has(lastId) ||
-      page.length === 0
-    ) {
-      throw modelDiscoveryError(
-        "The provider returned an inconsistent model catalog page",
-      );
-    }
-    seenCursors.add(lastId);
-    afterId = lastId;
-  }
-  // Pages were well-formed; the crawl budget ran out.
-  throw modelDiscoveryError(MODEL_CATALOG_HAS_TOO_MANY_OPTIONS);
 }
 
 export async function discoverAgentModels(
   provider: ProviderId,
   credential: AgentProviderCredential,
-  fetch: AgentModelDiscoveryFetch = (request) => globalThis.fetch(request),
+  signal?: AbortSignal,
+): Promise<AgentModelCatalog> {
+  return discoverAgentModelsWithFetch(
+    provider,
+    credential,
+    (request) => globalThis.fetch(request),
+    signal,
+  );
+}
+
+export async function discoverAgentModelsWithFetch(
+  provider: ProviderId,
+  credential: AgentProviderCredential,
+  fetch: AgentModelDiscoveryFetch,
+  signal?: AbortSignal,
 ): Promise<AgentModelCatalog> {
   try {
-    if (provider === "generic" && credential.apiFormat === "anthropic") {
+    if (usesAnthropicFormat(provider, credential)) {
+      const base = discoveryRequest("generic", credential);
       const { catalog, unknownEffortIds } = readAnthropicCatalog(
-        await readAnthropicModelList(credential, fetch),
+        await readAnthropicModelList({
+          fetchJson: (url) =>
+            fetchDiscoveryJson(fetch, url, base.headers, signal),
+          listUrl: base.url,
+          pageError: modelDiscoveryError,
+          readPage: (value) => providerModelList(value, "data"),
+          tooManyOptionsError: () =>
+            modelDiscoveryError(MODEL_CATALOG_HAS_TOO_MANY_OPTIONS),
+        }),
       );
-      return await mergeOpenAiListedEfforts(
-        catalog,
-        unknownEffortIds,
+      return await mergeOpenAiListedEfforts(catalog, unknownEffortIds, {
         credential,
         fetch,
-      );
+        ...(signal === undefined ? {} : { signal }),
+      });
     }
     const request = discoveryRequest(provider, credential);
-    const value = await fetchDiscoveryJson(fetch, request.url, request.headers);
+    const value = await fetchDiscoveryJson(
+      fetch,
+      request.url,
+      request.headers,
+      signal,
+    );
 
     if (provider === "openrouter") {
       return readOpenRouterCatalog(value);
@@ -702,7 +703,9 @@ export async function discoverAgentModels(
       ? readCodexCatalog(value)
       : readOpenAiCatalog(value);
   } catch (error) {
-    if (error instanceof AgentModelDiscoveryError) {
+    // Cancellation is the caller's own deadline or stop, not a provider
+    // failure; propagate it unwrapped.
+    if (error instanceof AgentModelDiscoveryError || signal?.aborted === true) {
       throw error;
     }
     throw modelDiscoveryError(safeAgentModelDiscoveryError(error));

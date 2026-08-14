@@ -180,16 +180,22 @@ function boundedModel(
   const validContextWindow =
     option.contextWindow === null ||
     (Number.isSafeInteger(option.contextWindow) && option.contextWindow > 0);
+  const validMaxOutputTokens =
+    option.maxOutputTokens === null ||
+    (Number.isSafeInteger(option.maxOutputTokens) &&
+      option.maxOutputTokens > 0);
   const reasoningEfforts = boundedReasoningEfforts(option.reasoningEfforts);
   truncated ||=
     named.id.truncated ||
     named.label.truncated ||
     pricing.truncated ||
     reasoningEfforts.truncated ||
-    !validContextWindow;
+    !validContextWindow ||
+    !validMaxOutputTokens;
   return {
     option: {
       contextWindow: validContextWindow ? option.contextWindow : null,
+      maxOutputTokens: validMaxOutputTokens ? option.maxOutputTokens : null,
       ...(option.fallbackPrompt === undefined
         ? {}
         : { fallbackPrompt: option.fallbackPrompt }),

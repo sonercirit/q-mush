@@ -14,6 +14,7 @@ export type ProviderRequestProtocol =
 
 export interface ProviderModelRequest {
   readonly dynamicToolCache: boolean;
+  readonly maxOutputTokens: number | null;
   readonly messages: readonly AgentConversationMessage[];
   readonly model: string;
   readonly openRouterProviderRouting: OpenRouterProviderRouting | undefined;

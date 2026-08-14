@@ -24,6 +24,7 @@ const MAXIMUM_PROMPT_LENGTH = 32_768;
 export type CreateSessionInput = Omit<
   CreateAgentSession,
   | "maxContextTokens"
+  | "maxOutputTokens"
   | "parentUserInitiated"
   | "providerPricing"
   | "userId"

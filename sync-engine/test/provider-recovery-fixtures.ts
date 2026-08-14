@@ -130,6 +130,7 @@ export function apiKeyModel(options: {
       source: "api_key",
     },
     fetch: neverFetch,
+    maxOutputTokens: null,
     model: "api-test-model",
     ...(options.onDelta === undefined ? {} : { onDelta: options.onDelta }),
     provider: "openai",
@@ -146,6 +147,7 @@ function oauthModel(
   return new ChatCompletionsAgentModel({
     credential: codexOAuthCredential(),
     fetch,
+    maxOutputTokens: null,
     model: "gpt-5-codex",
     provider: "openai",
     sleep,

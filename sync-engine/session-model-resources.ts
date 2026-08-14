@@ -1,14 +1,6 @@
-import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
 import type { AttachmentFallbackSelection } from "../shared/attachment-fallback.ts";
-import type {
-  ProviderCredentialAccess,
-  ProviderId,
-} from "../shared/provider-credential-store.ts";
-
-type SessionModelDiscoverer = (
-  provider: ProviderId,
-  credential: ProviderCredentialAccess,
-) => Promise<AgentModelCatalog>;
+import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
+import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
 
 type AttachmentFallbackCredentialReader = (
   userId: string,
@@ -17,6 +9,6 @@ type AttachmentFallbackCredentialReader = (
 
 export interface AttachmentFallbackRuntimeResources {
   readonly attachmentFallbacks?: () => readonly AttachmentFallbackSelection[];
-  readonly discoverModels?: SessionModelDiscoverer;
+  readonly discoverModels?: AgentModelDiscoverer;
   readonly readCredential?: AttachmentFallbackCredentialReader;
 }

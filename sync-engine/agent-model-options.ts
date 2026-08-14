@@ -21,9 +21,20 @@ export type AgentProviderCredential = Pick<
   "accountId" | "apiFormat" | "baseUrl" | "secret" | "source"
 >;
 
+// The one authoritative "does this session speak Anthropic Messages?"
+// predicate: request building, discovery, and the lazy output-limit refresh
+// must agree on it.
+export function usesAnthropicFormat(
+  provider: ProviderId,
+  credential: Pick<AgentProviderCredential, "apiFormat">,
+): boolean {
+  return provider === "generic" && credential.apiFormat === "anthropic";
+}
+
 export interface AgentModelRequestOptions {
   readonly credential: AgentProviderCredential;
   readonly dynamicToolCache?: boolean;
+  readonly maxOutputTokens: number | null;
   readonly model: string;
   readonly onDelta?: (delta: ProviderTextDelta) => void;
   readonly onStepStart?: () => void;

@@ -3,7 +3,7 @@ import type {
   AgentModelCatalog,
   AgentModelOption,
 } from "../../shared/agent-configuration.ts";
-import { discoverAgentModels } from "../../sync-engine/agent-model-discovery.ts";
+import { discoverAgentModelsWithFetch } from "../../sync-engine/agent-model-discovery.ts";
 import { createJsonResponse } from "../../sync-engine/http.ts";
 import {
   anthropicFormatCredential,
@@ -34,7 +34,7 @@ async function discoverAnthropicFormat(
   readonly requests: Request[];
 }> {
   const requests: Request[] = [];
-  const discovered = await discoverAgentModels(
+  const discovered = await discoverAgentModelsWithFetch(
     "generic",
     anthropicFormatCredential(),
     (request) => {
@@ -66,6 +66,7 @@ test("discovers Anthropic-format models and merges OpenAI-listed efforts", async
           display_name: "Claude Test 4",
           id: "claude-test-4",
           max_input_tokens: 200_000,
+          max_tokens: 64_000,
           type: "model",
         },
       ],
@@ -85,6 +86,10 @@ test("discovers Anthropic-format models and merges OpenAI-listed efforts", async
       "Claude Test 4",
       ["none", "low", "high", "max"],
       200_000,
+      null,
+      null,
+      null,
+      64_000,
     ),
   );
   expect(requests).toHaveLength(2);
@@ -94,6 +99,8 @@ test("discovers Anthropic-format models and merges OpenAI-listed efforts", async
   );
   expect(primary?.headers.get("x-api-key")).toBe("anthropic-secret");
   expect(primary?.headers.get("anthropic-version")).toBe("2023-06-01");
+  // Discovery must stay reachable everywhere: no beta names on catalogs.
+  expect(primary?.headers.has("anthropic-beta")).toBe(false);
   expect(primary?.headers.has("authorization")).toBe(false);
   expect(secondary?.url).toBe("https://anthropic.example.test/v1/models");
   expect(secondary?.headers.get("authorization")).toBe(
@@ -364,6 +371,34 @@ test("fails discovery when a has_more page lacks a fresh cursor", async () => {
     }),
   ).rejects.toThrow("too many options");
   expect(page).toBe(500);
+});
+
+test("propagates an abort raised during the OpenAI-style effort probe", async () => {
+  const controller = new AbortController();
+  const reason = new DOMException("The operation was aborted", "AbortError");
+
+  // The Anthropic page succeeds; the caller's deadline fires before the
+  // best-effort second probe. A canceled discovery must reject instead of
+  // resolving successfully with the partial catalog.
+  await expect(
+    discoverAgentModelsWithFetch(
+      "generic",
+      anthropicFormatCredential(),
+      (request) => {
+        if (request.headers.has("x-api-key")) {
+          return Promise.resolve(
+            createJsonResponse({
+              data: [capabilityListing({}, "claude-test-4", "Claude Test 4")],
+              has_more: false,
+            }),
+          );
+        }
+        controller.abort(reason);
+        return Promise.reject(reason);
+      },
+      controller.signal,
+    ),
+  ).rejects.toThrow("aborted");
 });
 
 test("keeps the Anthropic-format catalog when no OpenAI listing exists", async () => {

@@ -34,6 +34,7 @@ export interface SessionCredentialReassignmentSnapshot {
 export interface SessionCredentialMetadataUpdate {
   readonly id: string;
   readonly maxContextTokens: number | null;
+  readonly maxOutputTokens: number | null;
   readonly providerPricing: ProviderModelPricing | null;
 }
 
@@ -123,11 +124,15 @@ function applyMetadataUpdates(
   transaction: Pick<AppDatabase, "update">,
   updates: readonly SessionCredentialMetadataUpdate[],
 ): void {
+  // Only OpenRouter reassignments produce updates; generic reassignments
+  // instead clear the output limit below so the lazy pre-request refresh
+  // re-probes the possibly different endpoint's catalog.
   for (const update of updates) {
     transaction
       .update(agentSessions)
       .set({
         maxContextTokens: update.maxContextTokens,
+        maxOutputTokens: update.maxOutputTokens,
         providerPricing: serializeProviderPricing(update.providerPricing),
       })
       .where(eq(agentSessions.id, update.id))
@@ -275,6 +280,13 @@ export class SessionCredentialReassignmentStore {
           .update(agentSessions)
           .set({
             providerCredentialId: options.credentialId,
+            // A generic credential may point at a different endpoint whose
+            // limit for the same model differs; clearing it lets the lazy
+            // pre-request refresh re-probe the new catalog. OpenAI-format
+            // requests never send it, so the reset is harmless there.
+            ...(options.provider === "generic"
+              ? { maxOutputTokens: null }
+              : {}),
             ...updatedAuditFields(options.userId, options.now),
           })
           .where(

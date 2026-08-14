@@ -16,7 +16,12 @@ export async function discoverSessionAgentMetadata(
   credential: ProviderCredentialAccess,
   ownerId: string,
   rejectCredentialErrors: boolean,
-): Promise<Pick<AgentSessionDetail, "maxContextTokens" | "providerPricing">> {
+): Promise<
+  Pick<
+    AgentSessionDetail,
+    "maxContextTokens" | "maxOutputTokens" | "providerPricing"
+  >
+> {
   const metadata = await sessionMetadata({
     credential,
     discoverModels: dependencies.discoverModels,

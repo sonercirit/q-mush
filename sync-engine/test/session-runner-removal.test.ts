@@ -44,6 +44,7 @@ function testSession(): AgentSessionDetail {
     credentialId: "credential-1",
     currentContextTokens: 0,
     executionEnvironment: "bare_metal",
+    maxOutputTokens: null,
     generation: 0,
     hasOlderSegments: false,
     id: SESSION_ID,

@@ -1,13 +1,33 @@
 import { describe, expect, test } from "vitest";
+import type { AgentConversationMessage } from "../../shared/agent-loop.ts";
 import {
   ModelConversationCompactor,
   shouldCompactContext,
 } from "../../sync-engine/agent-compaction.ts";
+import { completionMessages } from "../../sync-engine/agent-completion.ts";
 import {
   TEST_COMPACTION_HANDOFF_INSTRUCTION,
   TEST_COMPACTION_REQUEST_MESSAGE,
 } from "./compaction-test-fixtures.ts";
+import { providerStep } from "./provider-step-fixtures.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+
+const PARTIAL_ANSWER = {
+  content: "Partial answer",
+  role: "assistant" as const,
+  toolCalls: [],
+};
+
+function truncationNotice(): Extract<
+  AgentConversationMessage,
+  { readonly role: "compaction_notice" }
+> {
+  return {
+    content: "",
+    role: "compaction_notice",
+    truncation: "max_tokens",
+  };
+}
 
 describe("agent conversation compaction", () => {
   test("uses a 95% threshold only when the context limit is known", () => {
@@ -56,4 +76,43 @@ describe("agent conversation compaction", () => {
     );
     expect(model.requests[0]?.at(-1)?.role).toBe("user");
   });
+
+  test("sends a truncation marker only to the compactor", async () => {
+    const model = new ScriptedAgentModel([
+      { content: "The prior answer was truncated.", toolCalls: [] },
+    ]);
+    const compactor = new ModelConversationCompactor(model);
+
+    await compactor.compact([PARTIAL_ANSWER, truncationNotice()]);
+
+    expect(model.requests[0]).toEqual([
+      PARTIAL_ANSWER,
+      {
+        content:
+          "The preceding assistant response reached the maximum output tokens and is partial. Preserve that fact explicitly in the summary; do not describe the response as a finished answer or deliverable.",
+        role: "user",
+      },
+      { content: TEST_COMPACTION_REQUEST_MESSAGE, role: "user" },
+    ]);
+    expect(model.requests[0]).not.toContainEqual(truncationNotice());
+    expect(completionMessages([[PARTIAL_ANSWER, truncationNotice()]])).toEqual([
+      PARTIAL_ANSWER,
+    ]);
+  });
+
+  test.each(["max_tokens", "model_context_window_exceeded"] as const)(
+    "rejects a summary truncated by a %s stop",
+    async (truncation) => {
+      // A truncated summary replaces the whole conversation if accepted;
+      // compaction must fail instead of persisting an incomplete handoff.
+      const compactor = new ModelConversationCompactor({
+        complete: () =>
+          Promise.resolve(providerStep("Cut-short summary", { truncation })),
+      });
+
+      await expect(
+        compactor.compact([{ content: "Work", role: "user" }]),
+      ).rejects.toThrow("invalid compaction summary");
+    },
+  );
 });

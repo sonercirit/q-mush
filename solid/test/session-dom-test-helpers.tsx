@@ -228,23 +228,7 @@ export function installResponseFetch(
   restoreFetchAfterTest(originalFetch, disposals);
 }
 
-export function transcriptTestMessage(
-  id: string,
-  content: string,
-  role: AgentSessionMessage["role"],
-  createdAt: number,
-): AgentSessionMessage {
-  return {
-    content,
-    createdAt,
-    id,
-    images: [],
-    role,
-    toolCallId: null,
-    toolCalls: [],
-    toolName: null,
-  };
-}
+export { testSessionMessage as transcriptTestMessage } from "../../shared/test/session-fixtures.ts";
 
 export function applyTranscriptDelta(
   controller: SessionController,

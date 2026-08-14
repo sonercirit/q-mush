@@ -1,5 +1,9 @@
 import { describe, expect, test, vi } from "vitest";
-import type { AgentModel, AgentModelStep } from "../../shared/agent-loop.ts";
+import {
+  TRUNCATION_NOTICES,
+  type AgentModel,
+  type AgentModelStep,
+} from "../../shared/agent-loop.ts";
 import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { ModelConversationCompactor } from "../../sync-engine/agent-compaction.ts";
@@ -186,6 +190,41 @@ async function runGatedManualCompaction(options: {
 }
 
 describe("manual session compaction", () => {
+  test("marks a stored terminal truncation in standalone compaction", async () => {
+    const model = new ScriptedAgentModel([
+      { content: "The partial answer must be continued.", toolCalls: [] },
+    ]);
+    const setup = manualRuntime(model);
+    setup.store.appendRuntimeAgentMessages(
+      SESSION_ID,
+      [
+        {
+          content: "Partial answer from the completed run.",
+          role: "assistant",
+          toolCalls: [],
+        },
+        { content: TRUNCATION_NOTICES.max_tokens, role: "error" },
+      ],
+      TEST_NOW + 2,
+      setup.detail.generation,
+    );
+
+    await startManualCompaction(setup.runtime);
+
+    expect(model.requests).toHaveLength(1);
+    const input = model.requests[0];
+    expect(input).toContainEqual({
+      content:
+        "The preceding assistant response reached the maximum output tokens and is partial. Preserve that fact explicitly in the summary; do not describe the response as a finished answer or deliverable.",
+      role: "user",
+    });
+    expectCompactedIdleSession(
+      setup.store,
+      "The partial answer must be continued.",
+    );
+    closeSessionTestDatabase(setup.database);
+  });
+
   test("persists the actual wall-clock compaction duration", async () => {
     const gate = promiseGate<AgentModelStep>();
     const setup = runningManualStore();

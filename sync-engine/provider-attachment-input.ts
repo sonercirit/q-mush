@@ -112,6 +112,8 @@ export function providerChatMessage(
               })),
             }),
       };
+    case "compaction_notice":
+      return undefined;
     case "tool":
       return {
         content: chatContent(message.content, undefined, cached),
@@ -159,6 +161,8 @@ export function providerResponsesInput(
         })),
       ];
     }
+    case "compaction_notice":
+      return [];
     case "tool":
       return [
         {

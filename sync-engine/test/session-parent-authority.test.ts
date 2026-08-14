@@ -166,7 +166,11 @@ function authoritySetup(options: {
       if (options.gateMetadata === true) {
         await metadataGate.wait();
       }
-      return { maxContextTokens: null, providerPricing: null };
+      return {
+        maxContextTokens: null,
+        maxOutputTokens: null,
+        providerPricing: null,
+      };
     },
     draining: () => false,
     launchSession: launch,

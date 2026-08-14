@@ -32,6 +32,7 @@ export function createSessionInput(options: {
     executionEnvironment: "bare_metal",
     images: [],
     maxContextTokens: null,
+    maxOutputTokens: null,
     model: "gpt-4.1-mini",
     openRouterProviderTag: null,
     prompt: options.prompt,

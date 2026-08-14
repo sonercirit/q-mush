@@ -27,6 +27,7 @@ type SessionAgentCredentialSelection = Pick<
 
 interface SessionAgentMetadata {
   readonly maxContextTokens: number | null;
+  readonly maxOutputTokens: number | null;
   readonly providerPricing: AgentSessionDetail["providerPricing"];
 }
 

@@ -2,6 +2,7 @@ import {
   runAgentLoop,
   throwIfAgentAborted,
   type AgentConversationMessage,
+  type AgentLoopResult,
   type AgentMessageRecorder,
   type AgentModel,
   type AgentModelStep,
@@ -62,9 +63,15 @@ function shouldCompactFinalStep(
   );
 }
 
+type CompactionTruncation = Extract<
+  AgentConversationMessage,
+  { readonly role: "compaction_notice" }
+>["truncation"];
+
 interface CompactionState {
   latestStep: AgentModelStep | undefined;
   manualPending: boolean;
+  notice: CompactionTruncation | undefined;
   pending: boolean;
   progressSinceCompaction: boolean;
   restartPendingOnCompletion: boolean;
@@ -83,13 +90,16 @@ async function compactConversation(
   options: CompactConversationOptions,
   input: {
     readonly messages: readonly AgentConversationMessage[];
+    readonly notice?: CompactionTruncation;
     readonly signal: AbortSignal | undefined;
   },
 ): Promise<readonly AgentConversationMessage[]> {
-  const { messages, signal } = input;
+  const { messages, notice, signal } = input;
   const startedAt = options.now();
   try {
-    const compacted = await options.createCompactor().compact(messages, signal);
+    const compacted = await options
+      .createCompactor()
+      .compact(withCompactionNotice(messages, notice), signal);
     const finish = () => {
       throwIfAgentAborted(signal);
     };
@@ -104,6 +114,7 @@ async function compactConversation(
 
 function resetCompactionState(compaction: CompactionState): void {
   compaction.manualPending = false;
+  compaction.notice = undefined;
   compaction.pending = false;
   compaction.progressSinceCompaction = false;
   compaction.stepExceedsThreshold = false;
@@ -128,6 +139,23 @@ function compactionFinished(
   );
 }
 
+function compactionNotice(
+  notice: CompactionTruncation | undefined,
+): readonly AgentConversationMessage[] {
+  // Internal marker: ModelConversationCompactor turns it into a targeted
+  // instruction; all normal provider serializers omit it from replay.
+  return notice === undefined
+    ? []
+    : [{ content: "", role: "compaction_notice", truncation: notice }];
+}
+
+function withCompactionNotice(
+  messages: readonly AgentConversationMessage[],
+  notice: CompactionTruncation | undefined,
+): readonly AgentConversationMessage[] {
+  return [...messages, ...compactionNotice(notice)];
+}
+
 async function preparedMessagesWithCompaction(
   options: CompactingAgentLoopOptions,
   compaction: CompactionState,
@@ -141,7 +169,11 @@ async function preparedMessagesWithCompaction(
   if (!manual && !compaction.pending) {
     return messages;
   }
-  const compacted = await compactConversation(options, { messages, signal });
+  const compacted = await compactConversation(options, {
+    messages,
+    ...(compaction.notice === undefined ? {} : { notice: compaction.notice }),
+    signal,
+  });
   resetCompactionState(compaction);
   return compacted;
 }
@@ -149,8 +181,39 @@ async function preparedMessagesWithCompaction(
 async function compactLoopMessages(
   options: CompactingAgentLoopOptions,
   messages: readonly AgentConversationMessage[],
+  notice?: CompactionTruncation,
 ): Promise<readonly AgentConversationMessage[]> {
-  return compactConversation(options, { messages, signal: options.signal });
+  return compactConversation(options, {
+    messages,
+    ...(notice === undefined ? {} : { notice }),
+    signal: options.signal,
+  });
+}
+
+function setLatestStep(
+  compaction: CompactionState,
+  step: AgentModelStep,
+  options: Pick<CompactingAgentLoopOptions, "autoCompact" | "maxContextTokens">,
+  allowCompaction: boolean,
+): void {
+  compaction.latestStep = step;
+  compaction.notice = step.truncation;
+  // A window-exceeded stop already filled the model's window; summarizing
+  // the same transcript would meet the same wall, so it settles noticed.
+  compaction.stepExceedsThreshold =
+    step.truncation !== "model_context_window_exceeded" &&
+    shouldCompactFinalStep(options, step.contextTokens);
+  compaction.pending =
+    (allowCompaction || compaction.progressSinceCompaction) &&
+    compaction.stepExceedsThreshold;
+}
+
+async function compactAndContinue(
+  options: CompactingAgentLoopOptions,
+  final: AgentLoopResult,
+  compaction: CompactionState,
+): Promise<readonly AgentConversationMessage[]> {
+  return compactLoopMessages(options, final.messages, compaction.notice);
 }
 
 export async function runCompactingAgentLoop(
@@ -192,6 +255,7 @@ export async function runCompactingAgentLoop(
     const compaction: CompactionState = {
       latestStep: undefined,
       manualPending: false,
+      notice: undefined,
       pending: false,
       progressSinceCompaction: false,
       restartPendingOnCompletion: false,
@@ -206,14 +270,7 @@ export async function runCompactingAgentLoop(
       model: {
         complete: async (conversation, signal) => {
           const step = await options.model.complete(conversation, signal);
-          compaction.latestStep = step;
-          compaction.stepExceedsThreshold = shouldCompactFinalStep(
-            options,
-            step.contextTokens,
-          );
-          compaction.pending =
-            (allowCompaction || compaction.progressSinceCompaction) &&
-            compaction.stepExceedsThreshold;
+          setLatestStep(compaction, step, options, allowCompaction);
           return step;
         },
         ...(options.model.startStep === undefined
@@ -287,12 +344,12 @@ export async function runCompactingAgentLoop(
       await options.onStepBoundary?.(),
     );
     if (manual) {
-      messages = await compactLoopMessages(options, final.messages);
+      messages = await compactAndContinue(options, final, compaction);
       allowCompaction = false;
       continue;
     }
     if (compaction.pending) {
-      messages = await compactLoopMessages(options, final.messages);
+      messages = await compactAndContinue(options, final, compaction);
       allowCompaction = false;
       throwIfAgentAborted(options.signal);
       if (

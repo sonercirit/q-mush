@@ -49,6 +49,10 @@ import {
   compactionUsage,
   type CompactionUsage,
 } from "./session-compaction-usage.ts";
+import {
+  discoverCurrentSessionModel,
+  sessionMaxOutputTokens,
+} from "./session-current-model.ts";
 import type { AttachmentFallbackRuntimeResources } from "./session-model-resources.ts";
 import { SessionRecorder } from "./session-recorder.ts";
 import { executeSessionSleepTool } from "./session-sleep-tool.ts";
@@ -89,12 +93,8 @@ function writeRuntime(
 function markSessionStepStart(runtime: SessionAgentRuntimeDependencies): void {
   // Status- and generation-guarded: a racing stop or restart makes this
   // write match zero rows instead of throwing.
-  runtime.store.markRuntimeStepStart(
-    runtime.detail.id,
-    runtime.now(),
-    runtime.detail.generation,
-  );
-  runtime.notify();
+  const { store } = runtime;
+  writeRuntime(runtime, store.markRuntimeStepStart.bind(store));
 }
 
 function recordRuntimeUsage(
@@ -216,10 +216,17 @@ async function loadModels(
   writeRuntime(runtime, (sessionId, now, generation) => {
     runtime.store.setRuntimeAgentFile(sessionId, agentFile, now, generation);
   });
+  const maxOutputTokens = await sessionMaxOutputTokens(
+    runtime,
+    (apply) => {
+      writeRuntime(runtime, apply);
+    },
+    runtime.signal,
+  );
   const models = createSessionAgentModels({
     agentFile,
     credential: runtime.credential,
-    detail: runtime.detail,
+    detail: { ...runtime.detail, maxOutputTokens },
     factory: runtime.modelFactory,
     isCurrent: runtime.isCurrent,
     onStepStart: () => {
@@ -248,15 +255,23 @@ export async function compactSessionConversation(
     return "handoff";
   }
   const conversation = sessionConversation(runtime);
+  const truncation = runtime.store.conversationTruncation(runtime.detail.id);
   const compactor = models.createCompactor();
   const startedAt = runtime.now();
-  const estimateCost = (
-    step: Pick<Parameters<typeof compactionUsage>[0], "costUsd" | "tokenUsage">,
-  ) => estimateAgentStepCost(runtime.detail, step.tokenUsage);
   try {
-    const final = await compactor.compact(conversation, runtime.signal);
+    const final = await compactor.compact(
+      truncation === undefined
+        ? conversation
+        : [
+            ...conversation,
+            { content: "", role: "compaction_notice", truncation } as const,
+          ],
+      runtime.signal,
+    );
     throwIfAgentAborted(runtime.signal);
-    const usage = compactionUsage(final, estimateCost);
+    const usage = compactionUsage(final, (step) =>
+      estimateAgentStepCost(runtime.detail, step.tokenUsage),
+    );
     recordCompaction(
       runtime,
       final.summary,
@@ -466,13 +481,7 @@ export async function runSessionAgent(
     if (attachment === undefined) {
       throw new Error("The runner returned invalid file attachment data");
     }
-    const catalog = await runtime.discoverModels?.(
-      runtime.detail.provider,
-      runtime.credential,
-    );
-    const currentModel = catalog?.models.find(
-      ({ id }) => id === runtime.detail.model,
-    );
+    const currentModel = await discoverCurrentSessionModel(runtime, signal);
     if (currentModel === undefined) {
       throw new Error("The session model is unavailable for file explanation");
     }

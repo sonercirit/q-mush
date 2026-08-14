@@ -333,6 +333,9 @@ function highContextRecoveredRunSetup(
     .run();
   let createdAt = TEST_NOW + 10;
   for (const message of messages) {
+    if (message.role === "compaction_notice") {
+      throw new Error("Recovered fixtures cannot persist compaction markers");
+    }
     setup.storeSetup.database
       .insert(agentMessages)
       .values({

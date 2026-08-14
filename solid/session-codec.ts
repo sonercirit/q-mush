@@ -68,6 +68,10 @@ function readPositiveSafeInteger(value: unknown): number | null {
   return Number.isSafeInteger(value) ? value : null;
 }
 
+function isNullOrPositiveSafeInteger(value: unknown): value is number | null {
+  return value === null || readPositiveSafeInteger(value) !== null;
+}
+
 function readModelPricing(value: unknown): ProviderModelPricing | null {
   const pricing = readProviderModelPricing(value);
   if (pricing === undefined) {
@@ -107,6 +111,10 @@ function readModelOption(value: unknown): AgentModelOption {
     throw new Error("The server returned an invalid agent model");
   }
 
+  const maxOutputTokens = value["maxOutputTokens"];
+  if (!isNullOrPositiveSafeInteger(maxOutputTokens)) {
+    throw new Error("The server returned an invalid agent model");
+  }
   return {
     contextWindow,
     fallbackPrompt:
@@ -114,6 +122,7 @@ function readModelOption(value: unknown): AgentModelOption {
     id,
     inputModalities: readModelModalities(inputModalitiesValue),
     label,
+    maxOutputTokens,
     outputModalities: readModelModalities(outputModalitiesValue),
     pricing: readModelPricing(pricingValue),
     reasoningEfforts: readModelReasoningEfforts(value["reasoningEfforts"]),
@@ -281,6 +290,7 @@ function readSummary(value: unknown): AgentSessionSummary {
   const hasOlderSegments = value["hasOlderSegments"];
   const id = value["id"];
   const maxContextTokens = value["maxContextTokens"];
+  const maxOutputTokens = value["maxOutputTokens"];
   const userContextTokenCap = value["userContextTokenCap"];
   const model = value["model"];
   const pendingQuestions =
@@ -343,14 +353,9 @@ function readSummary(value: unknown): AgentSessionSummary {
     !Number.isSafeInteger(generation) ||
     typeof hasOlderSegments !== "boolean" ||
     typeof id !== "string" ||
-    (maxContextTokens !== null &&
-      (typeof maxContextTokens !== "number" ||
-        !Number.isSafeInteger(maxContextTokens) ||
-        maxContextTokens <= 0)) ||
-    (userContextTokenCap !== null &&
-      (typeof userContextTokenCap !== "number" ||
-        !Number.isSafeInteger(userContextTokenCap) ||
-        userContextTokenCap <= 0)) ||
+    !isNullOrPositiveSafeInteger(maxContextTokens) ||
+    !isNullOrPositiveSafeInteger(maxOutputTokens) ||
+    !isNullOrPositiveSafeInteger(userContextTokenCap) ||
     typeof model !== "string" ||
     pendingQuestions === undefined ||
     (pendingQuestions !== null &&
@@ -408,6 +413,7 @@ function readSummary(value: unknown): AgentSessionSummary {
     hasOlderSegments,
     id,
     maxContextTokens,
+    maxOutputTokens,
     userContextTokenCap,
     model,
     openRouterProviderTag,
@@ -534,10 +540,7 @@ export function readSessionDetail(value: unknown): AgentSessionDetail {
   const segmentTokenUsage = readTokenUsageSummary(value["segmentTokenUsage"]);
   const tokenUsage = readTokenUsageSummary(value["tokenUsage"]);
   if (
-    (modelContextTokens !== null &&
-      (typeof modelContextTokens !== "number" ||
-        !Number.isSafeInteger(modelContextTokens) ||
-        modelContextTokens <= 0)) ||
+    !isNullOrPositiveSafeInteger(modelContextTokens) ||
     segmentTokenUsage === undefined ||
     tokenUsage === undefined
   ) {
@@ -587,6 +590,7 @@ export function summaryFromDetail(
     hasOlderSegments: detail.hasOlderSegments,
     id: detail.id,
     maxContextTokens: detail.maxContextTokens,
+    maxOutputTokens: detail.maxOutputTokens,
     userContextTokenCap: detail.userContextTokenCap,
     model: detail.model,
     openRouterProviderTag: detail.openRouterProviderTag,

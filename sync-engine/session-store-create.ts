@@ -29,6 +29,7 @@ export interface CreateAgentSession extends Pick<
   | "autoCompact"
   | "executionEnvironment"
   | "maxContextTokens"
+  | "maxOutputTokens"
   | "model"
   | "openRouterProviderTag"
   | "provider"
@@ -64,6 +65,7 @@ export interface ForkAgentSession extends Pick<
     CreateAgentSession,
     | "credentialId"
     | "maxContextTokens"
+    | "maxOutputTokens"
     | "model"
     | "openRouterProviderTag"
     | "provider"
@@ -83,6 +85,7 @@ function validateSessionConfiguration(
   input: Pick<
     CreateAgentSession,
     | "maxContextTokens"
+    | "maxOutputTokens"
     | "userContextTokenCap"
     | "openRouterProviderTag"
     | "provider"
@@ -94,6 +97,12 @@ function validateSessionConfiguration(
       input.maxContextTokens <= 0)
   ) {
     throw new Error("The agent session context limit is invalid");
+  }
+  if (
+    input.maxOutputTokens !== null &&
+    (!Number.isSafeInteger(input.maxOutputTokens) || input.maxOutputTokens <= 0)
+  ) {
+    throw new Error("The agent session output limit is invalid");
   }
   if (
     input.userContextTokenCap !== undefined &&
@@ -120,6 +129,7 @@ function storedSessionValues(
     | "idleCompact"
     | "executionEnvironment"
     | "maxContextTokens"
+    | "maxOutputTokens"
     | "userContextTokenCap"
     | "model"
     | "openRouterProviderTag"
@@ -150,6 +160,7 @@ function storedSessionValues(
     id,
     idleCompact: input.idleCompact ?? false,
     maxContextTokens: input.maxContextTokens,
+    maxOutputTokens: input.maxOutputTokens ?? null,
     userContextTokenCap: input.userContextTokenCap ?? null,
     model: input.model,
     openRouterProviderTag: input.openRouterProviderTag,
