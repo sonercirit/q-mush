@@ -19,6 +19,7 @@ import {
   testAuditFields,
 } from "./authenticated-integration-test-helpers.ts";
 import { testCompactionHandoffMessage } from "./compaction-test-fixtures.ts";
+import { testConversation } from "./session-store-conversation-helpers.ts";
 import {
   markTestSessionRunning,
   runningStore,
@@ -392,7 +393,7 @@ describe("session store", () => {
       TEST_NOW + 3,
     );
 
-    expect(store.conversation(SESSION_ID)).toEqual([
+    expect(testConversation(store, SESSION_ID)).toEqual([
       {
         content: testCompactionHandoffMessage(
           "Keep the completed work and run tests.",
@@ -463,12 +464,12 @@ describe("session store", () => {
     expect(
       setup.store.transitionCurrent(SESSION_ID, "idle", TEST_NOW + 2),
     ).toBe(true);
-    const before = setup.store.conversation(SESSION_ID);
+    const before = testConversation(setup.store, SESSION_ID);
 
     const queued = setup.store.queue(TEST_USER_ID, SESSION_ID, TEST_NOW + 3);
 
     expect(queued.status).toBe("queued");
-    expect(setup.store.conversation(SESSION_ID)).toEqual(before);
+    expect(testConversation(setup.store, SESSION_ID)).toEqual(before);
     expect(setup.store.get(TEST_USER_ID, SESSION_ID)?.status).toBe("queued");
     setup.database.$client.close();
   });
@@ -646,7 +647,7 @@ describe("session store", () => {
       images: [],
       toolCalls: [],
     });
-    expect(store.conversation(SESSION_ID)).toEqual([
+    expect(testConversation(store, SESSION_ID)).toEqual([
       ...initialConversation(),
       assistantMessage,
       interruptedToolResult,

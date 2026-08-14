@@ -4,6 +4,7 @@ import { RecordingTestSocket } from "../../shared/test/websocket-fixtures.ts";
 import type { ModelRequestSleep } from "../../sync-engine/agent-model-retry.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
+import { testApiKeyCredential } from "./agent-model-credential-fixtures.ts";
 import { codexOAuthCredential } from "./prompt-cache-fixtures.ts";
 import { expectDoneStep } from "./provider-step-fixtures.ts";
 
@@ -163,11 +164,7 @@ export function apiKeyModel(options: {
   readonly webSocket: WebSocketFactory;
 }): ChatCompletionsAgentModel {
   return new ChatCompletionsAgentModel({
-    credential: {
-      accountId: null,
-      secret: "sk-openai",
-      source: "api_key",
-    },
+    credential: testApiKeyCredential("sk-openai", { id: "test-credential" }),
     fetch: options.fetch ?? neverFetch,
     maxOutputTokens: null,
     model: "api-test-model",

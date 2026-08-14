@@ -12,6 +12,7 @@ export function openRouterCredential(
     id,
     isDefault: false,
     label: "OpenRouter key",
+    credentialFingerprint: "test-credential-fingerprint",
     secret: `secret-${id}`,
     source: "api_key",
   };

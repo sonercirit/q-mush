@@ -52,6 +52,7 @@ export interface ProviderCredentialSummary extends ProviderCredentialDetails {
 }
 
 export interface ProviderCredentialAccess extends ProviderCredentialSummary {
+  readonly credentialFingerprint: string;
   readonly secret: string;
 }
 
@@ -516,6 +517,7 @@ export class ProviderCredentialStore {
         columns: {
           apiFormat: true,
           baseUrl: true,
+          credentialFingerprint: true,
           encryptedCredential: true,
           id: true,
           label: true,
@@ -554,6 +556,7 @@ export class ProviderCredentialStore {
       accountId: stored.providerAccountId,
       ...(stored.apiFormat === null ? {} : { apiFormat: stored.apiFormat }),
       ...(stored.baseUrl === null ? {} : { baseUrl: stored.baseUrl }),
+      credentialFingerprint: stored.credentialFingerprint,
       id: stored.id,
       isDefault: stored.isDefault,
       isGlobal: stored.isGlobal,
@@ -566,7 +569,11 @@ export class ProviderCredentialStore {
       workspaceIds: this.#workspaceIds(userId, credentialId),
     };
     return workspaceId === undefined
-      ? { ...legacyCredentialSummary(summary), secret: summary.secret }
+      ? {
+          ...legacyCredentialSummary(summary),
+          credentialFingerprint: summary.credentialFingerprint,
+          secret: summary.secret,
+        }
       : summary;
   }
 
@@ -657,6 +664,7 @@ export class ProviderCredentialStore {
     const updated = this.#database
       .update(providerCredentials)
       .set({
+        credentialFingerprint: fingerprintCredential(secret),
         encryptedCredential: this.#cipher.seal(
           secret,
           encryptionContext(userId, credentialId),

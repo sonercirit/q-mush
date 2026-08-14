@@ -1,6 +1,7 @@
 import type { AgentModelStep } from "../shared/agent-loop.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
+import type { AgentProviderCredential } from "./agent-model-options.ts";
 import {
   fetchModelRequestAttempt,
   modelResponseRetryAfterMilliseconds,
@@ -9,8 +10,16 @@ import {
   type ModelRequestSleep,
 } from "./agent-model-retry.ts";
 import type { AgentModelFetch } from "./agent-model.ts";
+import {
+  anthropicReplayIdentity,
+  type AnthropicReplayIdentity,
+} from "./anthropic-replay-identity.ts";
+import { unavailableAnthropicResponseIdentity } from "./anthropic-response-identity.ts";
 import { ProviderStreamError } from "./provider-error.ts";
-import { readProviderEventStream } from "./provider-event-stream.ts";
+import {
+  readProviderEventStream,
+  type AnthropicEventStreamOptions,
+} from "./provider-event-stream.ts";
 import {
   createProviderStreamAccumulator,
   type ProviderTextDelta,
@@ -18,9 +27,12 @@ import {
 
 export interface ProviderHttpOptions {
   readonly body: unknown;
+  readonly credential: AgentProviderCredential;
+  readonly credentialFingerprint: string;
   readonly fetch: AgentModelFetch;
   readonly headers: Headers;
   readonly onDelta: ((delta: ProviderTextDelta) => void) | undefined;
+  readonly model: string;
   readonly protocol: "anthropic" | "chat_completions" | "responses";
   readonly provider: ProviderId;
   readonly sleep: ModelRequestSleep | undefined;
@@ -100,6 +112,29 @@ function streamFailure(
   return new RetryableModelRequestError(error, { retryAfterMilliseconds });
 }
 
+function anthropicIdentity(
+  options: ProviderHttpOptions,
+): AnthropicReplayIdentity {
+  if (options.protocol !== "anthropic") {
+    unavailableAnthropicResponseIdentity();
+  }
+  return anthropicReplayIdentity(
+    options.provider,
+    options.credential,
+    options.model,
+    options.credentialFingerprint,
+  );
+}
+
+function anthropicStreamOptions(
+  options: ProviderHttpOptions,
+): AnthropicEventStreamOptions {
+  const identity = anthropicIdentity(options);
+  return options.onDelta === undefined
+    ? { identity }
+    : { identity, onDelta: options.onDelta };
+}
+
 async function readAcceptedResponse(
   response: Response,
   options: ProviderHttpOptions,
@@ -109,10 +144,16 @@ async function readAcceptedResponse(
   }
 
   if (response.headers.get("content-type")?.includes("application/json")) {
-    const accumulator = createProviderStreamAccumulator(
-      options.protocol === "anthropic" ? "anthropic" : "chat_completions_json",
-      options.onDelta,
-    );
+    const accumulator =
+      options.protocol === "anthropic"
+        ? createProviderStreamAccumulator(
+            "anthropic",
+            anthropicStreamOptions(options),
+          )
+        : createProviderStreamAccumulator(
+            "chat_completions_json",
+            options.onDelta,
+          );
     try {
       accumulator.push(await response.json());
       return accumulator.finish();
@@ -127,11 +168,17 @@ async function readAcceptedResponse(
   }
 
   try {
-    return await readProviderEventStream(
-      response,
-      options.protocol,
-      options.onDelta,
-    );
+    return options.protocol === "anthropic"
+      ? await readProviderEventStream(
+          response,
+          "anthropic",
+          anthropicStreamOptions(options),
+        )
+      : await readProviderEventStream(
+          response,
+          options.protocol,
+          options.onDelta,
+        );
   } catch (error) {
     throw streamFailure(error, response);
   }

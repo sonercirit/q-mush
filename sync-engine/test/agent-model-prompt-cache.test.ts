@@ -23,6 +23,7 @@ function apiKeyChatOptions(
   return {
     credential: {
       accountId: null,
+      id: "test-api-key-credential",
       ...(provider === "generic"
         ? { baseUrl: "https://generic.example.test/v1" }
         : {}),

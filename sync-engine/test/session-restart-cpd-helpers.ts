@@ -25,6 +25,7 @@ const RESTART_TEST_CREDENTIAL: ProviderCredentialAccess = {
   id: "018bcfe5-6800-7000-8000-000000000042",
   isDefault: false,
   label: "Restart test key",
+  credentialFingerprint: "test-credential-fingerprint",
   secret: "restart-test-secret",
   source: "api_key",
 };

@@ -1,6 +1,9 @@
 import { describe, expect, test } from "vitest";
 import { createdAuditFields } from "../../shared/audit.ts";
-import { CredentialCipher } from "../../shared/credential-cipher.ts";
+import {
+  CredentialCipher,
+  fingerprintCredential,
+} from "../../shared/credential-cipher.ts";
 import { createDatabase } from "../../shared/database.ts";
 import { users } from "../../shared/database/schema.ts";
 import { SYSTEM_ID } from "../../shared/ids.ts";
@@ -110,6 +113,7 @@ function addAndRead(
 
   expect(store.read(TEST_USER_ID, CREDENTIAL_ID)).toEqual({
     accountId: metadata.accountId,
+    credentialFingerprint: fingerprintCredential(secret),
     id: CREDENTIAL_ID,
     label: metadata.label,
     isDefault: false,

@@ -150,8 +150,9 @@ Living project memory.
   `anthropic-version` to `/models` and streamed `/messages`
   (`anthropic-request.ts`, `provider-stream-anthropic.ts`; images/PDFs map to
   native blocks). Credentials live in `provider_credentials` with per-record
-  AES-256-GCM encryption; API responses expose only metadata; one credential may
-  be the user's default across providers. Shared behavior:
+  AES-256-GCM encryption and a shared fingerprint over secret, endpoint, and API
+  format; API responses expose only metadata; one credential may be the user's
+  default across providers. Shared behavior:
   `provider-credentials.ts`, `connected-account-oauth.ts`, the
   `solid/provider-*` client modules.
 - Measure cache hits against the cacheable prefix (total input dilutes with
@@ -276,13 +277,17 @@ Living project memory.
   `reasoning.effort` for OpenRouter and Codex Responses; the Anthropic Messages
   format sends `output_config.effort`; unless persisted `adaptiveThinking` is
   false it adds `thinking: {type: "adaptive", display: "summarized"}`. Lazy
-  model metadata refresh fills null fields independently and never replaces a
-  known capability or output limit while learning the other. It sends neither
-  for `none` and maps `minimal` to `low`. Adaptive-only models (Fable) ignore
-  `enabled`; newer models default `display` to `omitted` — empty thinking text
-  plus a signature while thinking tokens bill. The local proxy tolerates
-  tool-loop replay without signed thinking blocks; strict endpoints may not.
-  Streamed reasoning deltas group by `output_index` and `summary_index`;
+  metadata refresh fills null fields independently, preserving known values. It
+  sends neither for `none` and maps `minimal` to `low`. Adaptive-only models
+  (Fable) ignore `enabled`; newer models default `display` to `omitted` — empty
+  thinking text plus a signature while thinking tokens bill. Anthropic replay
+  binds model, credential fingerprint, format, and endpoint; incomplete,
+  unsupported, or unsigned blocks disable it, only empty text drops, and corrupt
+  stored replay is absent. `pause_turn` replays validated blocks and container,
+  capped at five continuations; an unusable terminal step drops replay.
+  Cache-control never marks thinking/redacted-thinking or a trailing paused-turn
+  replay. The local proxy tolerates unsigned tool-loop replay; strict endpoints
+  may not. Streamed reasoning deltas group by output/summary index;
   separate summary parts with paragraphs since completed responses may omit
   them. OpenAI's WebSocket Mode has a 60-minute limit; the canonical
   `websocket_connection_limit_reached` and observed underscore-free variant

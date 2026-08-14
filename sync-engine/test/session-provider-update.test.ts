@@ -67,6 +67,7 @@ function setup(userContextTokenCap?: number) {
             id: credentialId,
             isDefault: false,
             label: "OpenRouter",
+            credentialFingerprint: "test-credential-fingerprint",
             secret: "secret",
             source: "api_key" as const,
           }

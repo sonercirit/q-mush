@@ -24,6 +24,7 @@ const CREDENTIAL: ProviderCredentialAccess = {
   id: "credential-1",
   isDefault: false,
   label: "OpenRouter",
+  credentialFingerprint: "test-credential-fingerprint",
   secret: "provider-secret",
   source: "api_key",
 };

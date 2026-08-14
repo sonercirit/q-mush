@@ -18,7 +18,7 @@ export function agentModelOpenRouterProviderRouting(
 
 export type AgentProviderCredential = Pick<
   ProviderCredentialAccess,
-  "accountId" | "apiFormat" | "baseUrl" | "secret" | "source"
+  "accountId" | "apiFormat" | "baseUrl" | "id" | "secret" | "source"
 >;
 
 // The one authoritative "does this session speak Anthropic Messages?"
@@ -34,6 +34,7 @@ export function usesAnthropicFormat(
 export interface AgentModelRequestOptions {
   readonly adaptiveThinking?: boolean | null;
   readonly credential: AgentProviderCredential;
+  readonly credentialFingerprint?: string;
   readonly dynamicToolCache?: boolean;
   readonly maxOutputTokens: number | null;
   readonly model: string;

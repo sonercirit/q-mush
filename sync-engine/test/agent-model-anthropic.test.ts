@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import type { AgentConversationMessage } from "../../shared/agent-loop.ts";
 import { AGENT_SYSTEM_PROMPT } from "../../shared/agent-prompt.ts";
 import { isRecord } from "../../shared/auth-model.ts";
 import {
@@ -6,74 +7,120 @@ import {
   ChatCompletionsAgentModel,
 } from "../../sync-engine/agent-model.ts";
 import {
+  ANTHROPIC_READ_CALL,
+  ANTHROPIC_READ_REPLAY_BLOCK,
+  ANTHROPIC_TEST_BASE_URL,
+  ANTHROPIC_TEST_CREDENTIAL,
+  ANTHROPIC_TEST_CREDENTIAL_FINGERPRINT,
+  ANTHROPIC_TEST_PROVENANCE,
+  anthropicHarness,
+  doneAnthropicEvents,
+  KNOWN_ANTHROPIC_MODEL,
+  textReplayBlock,
+} from "./anthropic-model-test-helpers.ts";
+import {
+  anthropicAssistant,
+  anthropicReplayConversation,
+  capturedAssistantContent,
+  SIGNED_ANTHROPIC_REPLAY,
+  signedReplayHarness,
+} from "./anthropic-replay-request-helpers.ts";
+import {
   cachedText,
   cachedTextMessage,
+  chatCompletionsDone,
   TEST_PROMPT_CACHE_CONTROL,
 } from "./prompt-cache-fixtures.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
 
-type ModelOptions = ConstructorParameters<typeof ChatCompletionsAgentModel>[0];
+const KNOWN_MODEL = KNOWN_ANTHROPIC_MODEL;
+const SIGNED_REPLAY = SIGNED_ANTHROPIC_REPLAY;
 
-const BASE_URL = "https://anthropic.example.test/v1";
-const KNOWN_MODEL = "claude-test-4";
-const ANTHROPIC_CREDENTIAL = {
-  accountId: null,
-  apiFormat: "anthropic",
-  baseUrl: BASE_URL,
-  secret: "anthropic-secret",
-  source: "api_key",
-} as const;
-
-function anthropicEvents(events: readonly unknown[]): Response {
-  const body = events
-    .map((event) =>
-      isRecord(event)
-        ? `event: ${String(event["type"])}\ndata: ${JSON.stringify(event)}\n\n`
-        : "",
-    )
-    .join("");
-  return new Response(body, {
-    headers: { "content-type": "text/event-stream" },
-  });
+function readAssistant(providerReplay?: typeof SIGNED_REPLAY) {
+  return anthropicAssistant(providerReplay);
 }
 
-function textStopEvents(options: {
-  readonly stopReason: string;
-  readonly text: string;
-  readonly usage: Readonly<Record<string, number>>;
-}): Response {
-  return anthropicEvents([
-    { message: { usage: options.usage }, type: "message_start" },
-    {
-      content_block: { text: "", type: "text" },
-      index: 0,
-      type: "content_block_start",
-    },
-    {
-      delta: { text: options.text, type: "text_delta" },
-      index: 0,
-      type: "content_block_delta",
-    },
-    { index: 0, type: "content_block_stop" },
-    {
-      delta: { stop_reason: options.stopReason },
-      type: "message_delta",
-      usage: { output_tokens: options.text.length },
-    },
-    { type: "message_stop" },
+function readToolResult(content: string) {
+  return {
+    content,
+    role: "tool" as const,
+    toolCallId: ANTHROPIC_READ_CALL.id,
+    toolName: ANTHROPIC_READ_CALL.name,
+  };
+}
+
+function replayConversation(options: {
+  readonly providerReplay?: typeof SIGNED_REPLAY;
+  readonly toolContent: string;
+}) {
+  return anthropicReplayConversation(options);
+}
+
+async function assistantContent(
+  harness: ReturnType<typeof anthropicHarness>,
+): Promise<unknown> {
+  return capturedAssistantContent(harness);
+}
+
+function thinkingOnlyAssistant(replay: typeof SIGNED_REPLAY) {
+  return {
+    content: "",
+    providerReplay: replay,
+    role: "assistant" as const,
+    toolCalls: [],
+  };
+}
+
+function thinkingOnlyReplay() {
+  return {
+    ...SIGNED_REPLAY,
+    blocks: SIGNED_REPLAY.blocks.slice(0, 2),
+  };
+}
+
+async function replayOnlyMessages(
+  messages: readonly AgentConversationMessage[],
+): Promise<unknown> {
+  const harness = signedReplayHarness();
+  await harness.complete(messages);
+  return (await requestRecord(harness, 0))["messages"];
+}
+
+async function completeReplayRequest(options: {
+  readonly providerReplay: typeof SIGNED_REPLAY;
+  readonly toolContent: string;
+}) {
+  const harness = signedReplayHarness();
+  await harness.complete(replayConversation(options));
+  return { content: await assistantContent(harness), harness };
+}
+
+async function captureOpenAiFormatReplayRequest(
+  providerReplay: typeof SIGNED_REPLAY,
+) {
+  const capturedRequests: Request[] = [];
+  const capture = (request: Request): Promise<Response> => {
+    capturedRequests.push(request);
+    return Promise.resolve(Response.json(chatCompletionsDone()));
+  };
+  const model = new ChatCompletionsAgentModel({
+    credential: { ...ANTHROPIC_TEST_CREDENTIAL, apiFormat: "openai" },
+    fetch: capture,
+    maxOutputTokens: null,
+    model: "gpt-4.1-mini",
+    provider: "generic",
+  });
+  await model.complete([
+    { content: "Hello", role: "user" },
+    anthropicAssistant(providerReplay),
+    readToolResult("Setup"),
   ]);
-}
-
-function doneEvents(): Response {
-  return textStopEvents({
-    stopReason: "end_turn",
-    text: "Done.",
-    usage: {
-      cache_creation_input_tokens: 40,
-      cache_read_input_tokens: 900,
-      input_tokens: 60,
-    },
-  });
+  const captured = capturedRequests[0];
+  if (captured === undefined) {
+    throw new Error("No OpenAI request was captured");
+  }
+  const body: unknown = await captured.json();
+  return body;
 }
 
 function expectAbsentProperties(
@@ -85,16 +132,57 @@ function expectAbsentProperties(
   }
 }
 
+function expectUnsignedReplay(content: unknown): void {
+  const serialized = JSON.stringify(content);
+  for (const privateField of ["caller", "omitted-signature", "redacted-data"]) {
+    expect(serialized).not.toContain(privateField);
+  }
+}
+
+async function requestRecord(
+  harness: ReturnType<typeof anthropicHarness>,
+  index: number,
+): Promise<Readonly<Record<string, unknown>>> {
+  const body = await harness.requestBody(index);
+  if (!isRecord(body)) {
+    throw new Error("The captured body was not a record");
+  }
+  return body;
+}
+
 async function effortRequestBody(
   effort: "minimal" | "none" | "xhigh",
   adaptiveThinking: boolean | null = true,
 ): Promise<unknown> {
-  const harness = anthropicHarness([doneEvents()], {
+  const harness = anthropicHarness([doneAnthropicEvents()], {
     adaptiveThinking,
     reasoningEffort: effort,
   });
   await harness.complete();
   return harness.requestBody(0);
+}
+
+function officialAnthropicCredential() {
+  return {
+    ...ANTHROPIC_TEST_CREDENTIAL,
+    baseUrl: "https://api.anthropic.com/v1",
+  };
+}
+
+async function replayContentForIdentity(
+  options: Pick<
+    NonNullable<Parameters<typeof anthropicHarness>[1]>,
+    "credential" | "credentialFingerprint"
+  >,
+): Promise<unknown> {
+  const harness = anthropicHarness([doneAnthropicEvents()], options);
+  await harness.complete(
+    replayConversation({
+      providerReplay: SIGNED_REPLAY,
+      toolContent: "Setup",
+    }),
+  );
+  return assistantContent(harness);
 }
 
 function invalidRequestResponse(message: string): Response {
@@ -107,79 +195,22 @@ function invalidRequestResponse(message: string): Response {
   );
 }
 
-interface AnthropicHarness {
-  readonly complete: (
-    messages?: Parameters<ChatCompletionsAgentModel["complete"]>[0],
-  ) => ReturnType<ChatCompletionsAgentModel["complete"]>;
-  readonly requestBody: (index: number) => Promise<unknown>;
-  readonly requests: Request[];
-}
-
-function anthropicHarness(
-  responses: readonly Response[],
-  options: Partial<ModelOptions> = {},
-): AnthropicHarness {
-  const requests: Request[] = [];
-  const remaining = [...responses];
-  const model = new ChatCompletionsAgentModel({
-    credential: ANTHROPIC_CREDENTIAL,
-    fetch: (request) => {
-      requests.push(request);
-      const response = remaining.shift();
-      if (response === undefined) {
-        throw new Error("No scripted response remains");
-      }
-      return Promise.resolve(response);
-    },
-    maxOutputTokens: null,
-    model: KNOWN_MODEL,
-    provider: "generic",
-    ...options,
-  });
-  return {
-    complete: (messages = [{ content: "Hello", role: "user" }]) =>
-      model.complete(messages),
-    requestBody: async (index) => {
-      const body: unknown = await requests[index]?.json();
-      return body;
-    },
-    requests,
-  };
-}
-
-async function recordRequestBody(
-  harness: AnthropicHarness,
-  index: number,
-): Promise<Readonly<Record<string, unknown>>> {
-  const body = await harness.requestBody(index);
-  if (!isRecord(body)) {
-    throw new Error("The captured body was not a record");
-  }
-  return body;
-}
-
 describe("anthropic-format generic provider", () => {
   test("sends the catalog max output tokens when the session carries them", async () => {
-    const harness = anthropicHarness([doneEvents()], {
+    const harness = anthropicHarness([doneAnthropicEvents()], {
       maxOutputTokens: 64_000,
     });
     await harness.complete();
 
-    const body = await recordRequestBody(harness, 0);
+    const body = await requestRecord(harness, 0);
     expect(body["max_tokens"]).toBe(64_000);
   });
 
   test("identifies a non-streaming Messages completion by protocol", () => {
     const headers = agentProviderRequestHeaders(
       "generic",
-      {
-        ...ANTHROPIC_CREDENTIAL,
-        baseUrl: "https://api.anthropic.com/v1",
-      },
-      {
-        accept: "application/json",
-        protocol: "anthropic",
-      },
+      officialAnthropicCredential(),
+      { accept: "application/json", protocol: "anthropic" },
     );
 
     expect(headers.get("anthropic-beta")).toBe(
@@ -188,14 +219,8 @@ describe("anthropic-format generic provider", () => {
   });
 
   test("sends the context-window beta only to the official endpoint", async () => {
-    const harness = anthropicHarness([doneEvents()], {
-      credential: {
-        accountId: null,
-        apiFormat: "anthropic",
-        baseUrl: "https://api.anthropic.com/v1",
-        secret: "anthropic-secret",
-        source: "api_key",
-      },
+    const harness = anthropicHarness([doneAnthropicEvents()], {
+      credential: officialAnthropicCredential(),
     });
     await harness.complete();
 
@@ -207,28 +232,25 @@ describe("anthropic-format generic provider", () => {
   });
 
   test("sends a cached Messages request and reads the streamed step", async () => {
-    const harness = anthropicHarness([doneEvents()], { tools: ["read"] });
+    const harness = anthropicHarness([doneAnthropicEvents()], {
+      tools: ["read"],
+    });
 
     const step = await harness.complete([
       { content: "Hello", role: "user" },
-      {
-        content: "Reading.",
-        role: "assistant",
-        toolCalls: [
-          { arguments: '{"path":"SETUP.md"}', id: "read-call", name: "read" },
-        ],
-      },
-      {
-        content: "# Q Mush setup",
-        role: "tool",
-        toolCallId: "read-call",
-        toolName: "read",
-      },
+      readAssistant(),
+      readToolResult("# Q Mush setup"),
     ]);
 
     expect(step).toEqual(
       providerStep("Done.", {
         contextTokens: 1_000,
+        providerReplay: {
+          blocks: [{ text: "Done.", type: "text" }],
+          model: KNOWN_MODEL,
+          protocol: "anthropic",
+          provenance: ANTHROPIC_TEST_PROVENANCE,
+        },
         tokenUsage: {
           cacheWriteInputTokens: 40,
           cachedInputTokens: 900,
@@ -239,7 +261,7 @@ describe("anthropic-format generic provider", () => {
     );
 
     const request = harness.requests[0];
-    expect(request?.url).toBe(`${BASE_URL}/messages`);
+    expect(request?.url).toBe(`${ANTHROPIC_TEST_BASE_URL}/messages`);
     expect(request?.headers.get("anthropic-version")).toBe("2023-06-01");
     // Proxies and gateways 400 on unknown beta names; the context-window
     // beta stays first-party-only.
@@ -247,7 +269,7 @@ describe("anthropic-format generic provider", () => {
     expect(request?.headers.get("x-api-key")).toBe("anthropic-secret");
     expect(request?.headers.has("authorization")).toBe(false);
 
-    const body = await recordRequestBody(harness, 0);
+    const body = await requestRecord(harness, 0);
     // No reasoning parameter and no invented output budget: without catalog
     // metadata the provider's own defaults govern.
     expectAbsentProperties(body, ["max_tokens", "output_config", "thinking"]);
@@ -267,15 +289,7 @@ describe("anthropic-format generic provider", () => {
     expect(body["messages"]).toEqual([
       cachedTextMessage("user", "Hello"),
       {
-        content: [
-          { text: "Reading.", type: "text" },
-          {
-            id: "read-call",
-            input: { path: "SETUP.md" },
-            name: "read",
-            type: "tool_use",
-          },
-        ],
+        content: [textReplayBlock("Reading."), ANTHROPIC_READ_REPLAY_BLOCK],
         role: "assistant",
       },
       {
@@ -292,64 +306,143 @@ describe("anthropic-format generic provider", () => {
     ]);
   });
 
-  test("streams tool calls and thinking from Messages events", async () => {
-    const deltas: string[] = [];
-    const harness = anthropicHarness(
-      [
-        anthropicEvents([
-          {
-            message: { usage: { input_tokens: 12 } },
-            type: "message_start",
-          },
-          {
-            content_block: { thinking: "", type: "thinking" },
-            index: 0,
-            type: "content_block_start",
-          },
-          {
-            delta: { thinking: "Inspect first.", type: "thinking_delta" },
-            index: 0,
-            type: "content_block_delta",
-          },
-          {
-            content_block: { id: "call-9", name: "read", type: "tool_use" },
-            index: 1,
-            type: "content_block_start",
-          },
-          {
-            delta: { partial_json: '{"path":', type: "input_json_delta" },
-            index: 1,
-            type: "content_block_delta",
-          },
-          {
-            delta: { partial_json: '"src"}', type: "input_json_delta" },
-            index: 1,
-            type: "content_block_delta",
-          },
-          { type: "message_delta", usage: { output_tokens: 9 } },
-          { type: "message_stop" },
-        ]),
-      ],
-      {
-        onDelta: (delta) => {
-          deltas.push(delta.thinking);
-        },
-      },
-    );
-
-    const step = await harness.complete([{ content: "Go", role: "user" }]);
-
-    expect(step.thinking).toBe("Inspect first.");
-    expect(step.toolCalls).toEqual([
-      { arguments: '{"path":"src"}', id: "call-9", name: "read" },
-    ]);
-    expect(step.tokenUsage).toEqual({
-      cacheWriteInputTokens: 0,
-      cachedInputTokens: 0,
-      inputTokens: 12,
-      outputTokens: 9,
+  test("marks an eligible replay block without mutating signed thinking", async () => {
+    const { content } = await completeReplayRequest({
+      providerReplay: SIGNED_REPLAY,
+      toolContent: "",
     });
-    expect(deltas.join("")).toBe("Inspect first.");
+
+    const expected = SIGNED_REPLAY.blocks.map((block, index, blocks) =>
+      index === blocks.length - 1
+        ? { ...block, cache_control: TEST_PROMPT_CACHE_CONTROL }
+        : block,
+    );
+    expect(content).toEqual(expected);
+    if (!Array.isArray(content)) {
+      throw new Error("The replayed content was not an array");
+    }
+    expect(content.slice(0, -1)).toEqual(SIGNED_REPLAY.blocks.slice(0, -1));
+  });
+
+  test("keeps a thinking-only replay through completion sanitization", async () => {
+    const replay = thinkingOnlyReplay();
+    const messages = await replayOnlyMessages([
+      thinkingOnlyAssistant(replay),
+      { content: "Continue", role: "user" },
+    ]);
+
+    expect(messages).toEqual([
+      { content: replay.blocks, role: "assistant" },
+      cachedTextMessage("user", "Continue"),
+    ]);
+  });
+
+  test("moves a replay-only breakpoint to the nearest eligible message", async () => {
+    const replay = thinkingOnlyReplay();
+    const history: AgentConversationMessage[] = [
+      { content: "First", role: "user" },
+      thinkingOnlyAssistant(replay),
+      { content: "Middle", role: "user" },
+      { content: "Last", role: "user" },
+    ];
+    const messages = await replayOnlyMessages(history);
+
+    expect(messages).toEqual([
+      cachedTextMessage("user", "First"),
+      { content: replay.blocks, role: "assistant" },
+      {
+        content: [
+          { text: "Middle", type: "text" },
+          {
+            cache_control: TEST_PROMPT_CACHE_CONTROL,
+            text: "Last",
+            type: "text",
+          },
+        ],
+        role: "user",
+      },
+    ]);
+  });
+
+  test("omits signed replay only after rotation-sensitive identity changes", async () => {
+    for (const [credential, credentialFingerprint] of [
+      [
+        { ...ANTHROPIC_TEST_CREDENTIAL, id: "other-credential" },
+        "other-fingerprint",
+      ],
+      [
+        {
+          ...ANTHROPIC_TEST_CREDENTIAL,
+          baseUrl: "https://other-anthropic.example.test/v1",
+        },
+        ANTHROPIC_TEST_CREDENTIAL_FINGERPRINT,
+      ],
+      [
+        { ...ANTHROPIC_TEST_CREDENTIAL, secret: "rotated-secret" },
+        "rotated-fingerprint",
+      ],
+    ] as const) {
+      const content = await replayContentForIdentity({
+        credential,
+        credentialFingerprint,
+      });
+      expectUnsignedReplay(content);
+    }
+  });
+
+  test("does not derive replay provenance from plaintext secret", async () => {
+    const content = await replayContentForIdentity({
+      credential: {
+        ...ANTHROPIC_TEST_CREDENTIAL,
+        secret: "same-stored-fingerprint-new-plaintext",
+      },
+      credentialFingerprint: ANTHROPIC_TEST_CREDENTIAL_FINGERPRINT,
+    });
+
+    expect(JSON.stringify(content)).toContain("omitted-signature");
+  });
+
+  test("omits stale signed replay after a model change", async () => {
+    const { content } = await completeReplayRequest({
+      providerReplay: { ...SIGNED_REPLAY, model: "claude-other" },
+      toolContent: "Setup",
+    });
+
+    expectUnsignedReplay(content);
+    expect(content).toEqual([
+      textReplayBlock("Reading."),
+      {
+        ...ANTHROPIC_READ_REPLAY_BLOCK,
+        cache_control: TEST_PROMPT_CACHE_CONTROL,
+      },
+    ]);
+  });
+
+  test("drops signed replay when tool-call sanitization changes the assistant", async () => {
+    const harness = signedReplayHarness();
+
+    await harness.complete([
+      { content: "Hello", role: "user" },
+      {
+        ...readAssistant(SIGNED_REPLAY),
+        toolCalls: [
+          { ...ANTHROPIC_READ_CALL, arguments: '{"path":"OTHER.md"}' },
+        ],
+      },
+      readToolResult("Setup"),
+    ]);
+
+    const serialized = JSON.stringify(await harness.requestBody(0));
+    expect(serialized).not.toContain("omitted-signature");
+    expect(serialized).not.toContain("providerReplay");
+    expect(serialized).toContain("OTHER.md");
+  });
+
+  test("keeps private replay metadata out of OpenAI-format requests", async () => {
+    const body = await captureOpenAiFormatReplayRequest(SIGNED_REPLAY);
+
+    expect(JSON.stringify(body)).not.toContain("providerReplay");
+    expect(JSON.stringify(body)).not.toContain("omitted-signature");
   });
 
   test("maps a selected reasoning effort to output_config and thinking", async () => {
@@ -367,7 +460,7 @@ describe("anthropic-format generic provider", () => {
   });
 
   test("maps image and PDF attachments to native content blocks", async () => {
-    const harness = anthropicHarness([doneEvents()]);
+    const harness = anthropicHarness([doneAnthropicEvents()]);
     await harness.complete([
       {
         attachments: [
@@ -433,73 +526,5 @@ describe("anthropic-format generic provider", () => {
       "does not support effort level",
     );
     expect(harness.requests).toHaveLength(1);
-  });
-
-  test.each(["max_tokens", "model_context_window_exceeded"] as const)(
-    "reports %s stops as truncation",
-    async (stopReason) => {
-      const harness = anthropicHarness([
-        textStopEvents({
-          stopReason,
-          text: "Partial",
-          usage: { input_tokens: 3 },
-        }),
-      ]);
-
-      const step = await harness.complete();
-
-      expect(step.content).toBe("Partial");
-      expect(step.truncation).toBe(stopReason);
-    },
-  );
-
-  async function completedTruncation(
-    response: Response,
-  ): Promise<string | undefined> {
-    const step = await anthropicHarness([response]).complete();
-    return step.truncation;
-  }
-
-  test("reports no truncation for an end_turn stop", async () => {
-    expect(await completedTruncation(doneEvents())).toBeUndefined();
-  });
-
-  test("reports truncation from a non-streaming stopped message", async () => {
-    const stopped = Response.json({
-      content: [{ text: "Cut short.", type: "text" }],
-      role: "assistant",
-      stop_reason: "max_tokens",
-      type: "message",
-      usage: { input_tokens: 4, output_tokens: 2 },
-    });
-
-    expect(await completedTruncation(stopped)).toBe("max_tokens");
-  });
-
-  test("parses a non-streaming JSON message response", async () => {
-    const harness = anthropicHarness([
-      Response.json({
-        content: [
-          { text: "Plain.", type: "text" },
-          {
-            id: "call-2",
-            input: { command: "ls" },
-            name: "bash",
-            type: "tool_use",
-          },
-        ],
-        role: "assistant",
-        type: "message",
-        usage: { input_tokens: 7, output_tokens: 3 },
-      }),
-    ]);
-
-    const step = await harness.complete([{ content: "Hi", role: "user" }]);
-
-    expect(step.content).toBe("Plain.");
-    expect(step.toolCalls).toEqual([
-      { arguments: '{"command":"ls"}', id: "call-2", name: "bash" },
-    ]);
-    expect(step.tokenUsage).toMatchObject({ inputTokens: 7, outputTokens: 3 });
   });
 });

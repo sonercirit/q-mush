@@ -5,6 +5,7 @@ import {
 } from "../../shared/agent-loop.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
+import { testApiKeyCredential } from "./agent-model-credential-fixtures.ts";
 import { captureRejection, requireError } from "./promise-test-helpers.ts";
 import { cachedTextMessage } from "./prompt-cache-fixtures.ts";
 
@@ -100,11 +101,9 @@ function openRouterModel(
   deltas?: ProviderTextDelta[],
 ): ChatCompletionsAgentModel {
   return new ChatCompletionsAgentModel({
-    credential: {
-      accountId: null,
-      secret: "sk-or-secret",
-      source: "api_key",
-    },
+    credential: testApiKeyCredential("sk-or-secret", {
+      id: "test-credential",
+    }),
     fetch: provider.fetch,
     maxOutputTokens: null,
     model: "openai/gpt-4.1-mini",

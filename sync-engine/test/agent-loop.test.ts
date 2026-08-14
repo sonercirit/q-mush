@@ -173,11 +173,6 @@ describe("first-party agent loop", () => {
       id: "call-1",
       name: "read",
     };
-    const assistantMessage = {
-      content: "I will inspect the project.",
-      role: "assistant" as const,
-      toolCalls: [readCall],
-    };
     const toolMessage = {
       content: "# Q Mush",
       role: "tool" as const,
@@ -189,7 +184,7 @@ describe("first-party agent loop", () => {
         content: "I will inspect the project.",
         contextTokens: 12_000,
         thinking: "I should read the project documentation first.",
-        toolCalls: assistantMessage.toolCalls,
+        toolCalls: [readCall],
       },
       {
         content: "The project is ready.",
@@ -214,7 +209,11 @@ describe("first-party agent loop", () => {
         content: "I should read the project documentation first.",
         role: "thinking",
       },
-      assistantMessage,
+      {
+        content: "I will inspect the project.",
+        role: "assistant",
+        toolCalls: [readCall],
+      },
       toolMessage,
       { content: "The project is ready.", role: "assistant", toolCalls: [] },
     ]);

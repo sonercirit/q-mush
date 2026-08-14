@@ -1,7 +1,10 @@
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import { describe, expect, test } from "vitest";
-import { createCredentialCipher } from "../../shared/credential-cipher.ts";
+import {
+  createCredentialCipher,
+  fingerprintCredential,
+} from "../../shared/credential-cipher.ts";
 import { ProviderCredentialStore } from "../../shared/provider-credential-store.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
 import {
@@ -347,11 +350,15 @@ describe("OpenAI credentials", () => {
       TEST_USER_ID,
       FIRST_OAUTH_ID,
     );
-    expect(JSON.parse(refreshed?.secret ?? "null")).toEqual({
+    const refreshedSecret = refreshed?.secret ?? "";
+    expect(JSON.parse(refreshedSecret || "null")).toEqual({
       access: "refreshed-access-token",
       expires: TEST_NOW + 7_200_000,
       refresh: "refreshed-refresh-token",
     });
+    expect(refreshed?.credentialFingerprint).toBe(
+      fingerprintCredential(refreshedSecret),
+    );
     expect(await readFormBody(providerRequests.at(-1))).toEqual({
       client_id: CLIENT_ID,
       grant_type: "refresh_token",

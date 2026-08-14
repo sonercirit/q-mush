@@ -1,4 +1,6 @@
 import type { AgentModelStep } from "../shared/agent-loop.ts";
+import type { AnthropicReplayIdentity } from "./anthropic-replay-identity.ts";
+import { unavailableAnthropicResponseIdentity } from "./anthropic-response-identity.ts";
 import {
   createProviderStreamAccumulator,
   type ProviderTextDelta,
@@ -22,12 +24,40 @@ function parseEventData(data: string): unknown {
   }
 }
 
+type ProviderTextDeltaHandler = (delta: ProviderTextDelta) => void;
+
+export interface AnthropicEventStreamOptions {
+  readonly identity: AnthropicReplayIdentity;
+  readonly onDelta?: ProviderTextDeltaHandler;
+}
+
+export function readProviderEventStream(
+  response: Response,
+  protocol: "anthropic",
+  options: AnthropicEventStreamOptions,
+): Promise<AgentModelStep>;
+export function readProviderEventStream(
+  response: Response,
+  protocol: "chat_completions" | "responses",
+  onDelta?: ProviderTextDeltaHandler,
+): Promise<AgentModelStep>;
 export async function readProviderEventStream(
   response: Response,
   protocol: "anthropic" | "chat_completions" | "responses",
-  onDelta?: (delta: ProviderTextDelta) => void,
+  options?: AnthropicEventStreamOptions | ProviderTextDeltaHandler,
 ): Promise<AgentModelStep> {
-  const accumulator = createProviderStreamAccumulator(protocol, onDelta);
+  const accumulator =
+    protocol === "anthropic"
+      ? createProviderStreamAccumulator(
+          "anthropic",
+          typeof options === "object"
+            ? options
+            : unavailableAnthropicResponseIdentity(),
+        )
+      : createProviderStreamAccumulator(
+          protocol,
+          typeof options === "function" ? options : undefined,
+        );
   const body = response.body;
   if (body === null) {
     throw new Error("The provider returned no event stream");

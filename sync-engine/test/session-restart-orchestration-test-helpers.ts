@@ -10,6 +10,7 @@ export const CREDENTIAL = restartTestCredential(
   {
     accountId: "provider-account",
     label: "Restart orchestration key",
+    credentialFingerprint: "test-credential-fingerprint",
     secret: "provider-secret",
   },
 );

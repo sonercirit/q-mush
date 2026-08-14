@@ -40,6 +40,7 @@ const CURRENT_BASE_TIMESTAMP = 1_785_753_783_416;
 const STEP_STARTED_MIGRATION_TIMESTAMP = 1_786_576_532_455;
 const MAX_OUTPUT_TOKENS_MIGRATION_TIMESTAMP = 1_786_595_654_131;
 const ADAPTIVE_THINKING_MIGRATION_TIMESTAMP = 1_786_746_755_573;
+const PROVIDER_REPLAY_MIGRATION_TIMESTAMP = 1_786_892_251_575;
 
 let temporaryDirectory: string | undefined;
 
@@ -57,9 +58,12 @@ async function applyMigration(database: Database, file: string): Promise<void> {
   }
 }
 
-function agentSessionColumnNames(database: Database): readonly string[] {
+function tableColumnNames(
+  database: Database,
+  table: "agent_messages" | "agent_sessions",
+): readonly string[] {
   const query = database.query<{ readonly name: string }, []>(
-    "PRAGMA table_info(agent_sessions)",
+    `PRAGMA table_info(${table})`,
   );
   return query.all().map((column) => column.name);
 }
@@ -78,15 +82,18 @@ test("upgrades migration 0027 through the latest migrations", async () => {
     "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)",
     ["0027_worthless_sentinels.sql", CURRENT_BASE_TIMESTAMP],
   );
-  expect(agentSessionColumnNames(currentBaseDatabase)).not.toContain(
+  expect(tableColumnNames(currentBaseDatabase, "agent_sessions")).not.toContain(
     "user_context_token_cap",
+  );
+  expect(tableColumnNames(currentBaseDatabase, "agent_messages")).not.toContain(
+    "provider_replay",
   );
   currentBaseDatabase.close();
 
   const upgradedDatabase = createDatabase(path);
-  expect(agentSessionColumnNames(upgradedDatabase.$client)).toContain(
-    "user_context_token_cap",
-  );
+  expect(
+    tableColumnNames(upgradedDatabase.$client, "agent_sessions"),
+  ).toContain("user_context_token_cap");
   const credentialColumns = upgradedDatabase.$client
     .query<{ readonly name: string }, []>(
       "SELECT name FROM pragma_table_info('provider_credentials')",
@@ -94,18 +101,21 @@ test("upgrades migration 0027 through the latest migrations", async () => {
     .all()
     .map((column) => column.name);
   expect(credentialColumns).toContain("api_format");
-  expect(agentSessionColumnNames(upgradedDatabase.$client)).toContain(
+  const sessionColumns = tableColumnNames(
+    upgradedDatabase.$client,
+    "agent_sessions",
+  );
+  for (const column of [
     "idle_compact",
-  );
-  expect(agentSessionColumnNames(upgradedDatabase.$client)).toContain(
     "step_started_at",
-  );
-  expect(agentSessionColumnNames(upgradedDatabase.$client)).toContain(
     "max_output_tokens",
-  );
-  expect(agentSessionColumnNames(upgradedDatabase.$client)).toContain(
     "adaptive_thinking",
-  );
+  ]) {
+    expect(sessionColumns).toContain(column);
+  }
+  expect(
+    tableColumnNames(upgradedDatabase.$client, "agent_messages"),
+  ).toContain("provider_replay");
   const migrationTimestamps = upgradedDatabase.$client
     .query<{ readonly createdAt: number }, []>(
       "SELECT created_at AS createdAt FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 3",
@@ -113,9 +123,9 @@ test("upgrades migration 0027 through the latest migrations", async () => {
     .all()
     .map(({ createdAt }) => createdAt);
   expect(migrationTimestamps).toEqual([
+    PROVIDER_REPLAY_MIGRATION_TIMESTAMP,
     ADAPTIVE_THINKING_MIGRATION_TIMESTAMP,
     MAX_OUTPUT_TOKENS_MIGRATION_TIMESTAMP,
-    STEP_STARTED_MIGRATION_TIMESTAMP,
   ]);
   upgradedDatabase.$client.close();
 });

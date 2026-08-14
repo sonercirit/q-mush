@@ -23,6 +23,7 @@ const CURRENT_CREDENTIAL = {
   isDefault: true,
   isGlobal: true,
   label: "Current",
+  credentialFingerprint: "test-credential-fingerprint",
   secret: "secret",
   source: "api_key" as const,
 };

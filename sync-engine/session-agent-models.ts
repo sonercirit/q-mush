@@ -66,6 +66,7 @@ export function createFallbackModel(
   return factory({
     adaptiveThinking: selection.adaptiveThinking,
     credential: selection.credential,
+    credentialFingerprint: selection.credential.credentialFingerprint,
     maxOutputTokens: selection.maxOutputTokens,
     model: selection.model,
     ...agentModelRoutingOptions(selection.openRouterProviderTag),
@@ -88,6 +89,7 @@ function modelOptions(
   return {
     adaptiveThinking: detail.adaptiveThinking,
     credential,
+    credentialFingerprint: credential.credentialFingerprint,
     ...(sessionToolCacheCapability({
       credentialSource: credential.source,
       provider: detail.provider,

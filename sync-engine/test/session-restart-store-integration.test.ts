@@ -15,6 +15,7 @@ import {
   runningRestartStore,
   type RestartStoreSetup,
 } from "./session-compaction-test-helpers.ts";
+import { TEST_REPLAY_IDENTITY } from "./session-replay-test-helpers.ts";
 import {
   expectRestartState,
   restartStoreAtStatus,
@@ -193,7 +194,9 @@ test("projects paused handoffs without synthetic interrupted tool results", () =
     },
     status: "paused",
   });
-  expect(setup.store.conversation(STORE_SESSION_ID, false)).toHaveLength(2);
+  expect(
+    setup.store.conversation(STORE_SESSION_ID, TEST_REPLAY_IDENTITY, false),
+  ).toHaveLength(2);
   expect(setup.store.pendingRestartHandoffs()).toHaveLength(1);
   closeCompactionStore(setup);
 });

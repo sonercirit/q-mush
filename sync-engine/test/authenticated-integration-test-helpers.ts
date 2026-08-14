@@ -169,6 +169,11 @@ export function ensureWaveOneColumns(database: AppDatabase): void {
   if (!messageColumns.some(({ name }) => name === "turn_id")) {
     database.$client.run("ALTER TABLE agent_messages ADD COLUMN turn_id text");
   }
+  if (!messageColumns.some(({ name }) => name === "provider_replay")) {
+    database.$client.run(
+      "ALTER TABLE agent_messages ADD COLUMN provider_replay text",
+    );
+  }
   database.$client.run(`
     CREATE TABLE IF NOT EXISTS agent_question_requests (
       id text PRIMARY KEY NOT NULL,
@@ -340,14 +345,18 @@ export function ensureWaveOneColumns(database: AppDatabase): void {
   );
 }
 
-export function createSchemaCompatibleTestDatabase(): AppDatabase {
-  const database = createDatabase(":memory:");
+export function createSchemaCompatibleTestDatabase(
+  path = ":memory:",
+): AppDatabase {
+  const database = createDatabase(path);
   ensureWaveOneColumns(database);
   return database;
 }
 
-export function createAuthenticatedTestDatabase(): AppDatabase {
-  const database = createSchemaCompatibleTestDatabase();
+export function createAuthenticatedTestDatabase(
+  path = ":memory:",
+): AppDatabase {
+  const database = createSchemaCompatibleTestDatabase(path);
 
   database
     .insert(users)
@@ -428,6 +437,7 @@ export function createTestProviderCredential(
   return {
     ...identity,
     label: "Agent key",
+    credentialFingerprint: "test-credential-fingerprint",
     secret: "provider-secret",
     source,
     ...overrides,

@@ -49,6 +49,7 @@ import {
   compactionUsage,
   type CompactionUsage,
 } from "./session-compaction-usage.ts";
+import { readSessionConversation } from "./session-conversation.ts";
 import {
   discoverCurrentSessionModel,
   sessionRequestMetadata,
@@ -189,15 +190,6 @@ export function isRestartHandoffError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "RestartHandoff";
 }
 
-function sessionConversation(
-  runtime: SessionAgentRuntimeDependencies,
-): ReturnType<SessionStore["conversation"]> {
-  return runtime.store.conversation(
-    runtime.detail.id,
-    runtime.detail.restartHandoff === null,
-  );
-}
-
 async function loadModels(
   runtime: SessionAgentRuntimeDependencies,
   options: {
@@ -254,7 +246,7 @@ export async function compactSessionConversation(
   if (runtime.restartHandoffRequested()) {
     return "handoff";
   }
-  const conversation = sessionConversation(runtime);
+  const conversation = readSessionConversation(runtime);
   const truncation = runtime.store.conversationTruncation(runtime.detail.id);
   const compactor = models.createCompactor();
   const startedAt = runtime.now();
@@ -396,7 +388,7 @@ export async function runSessionAgent(
   runtime: SessionAgentRuntimeDependencies,
 ): Promise<"complete" | "handoff"> {
   const streamId = createUuidV7();
-  const initialMessages = sessionConversation(runtime);
+  const initialMessages = readSessionConversation(runtime);
   const messages =
     runtime.continuous && initialMessages.at(-1)?.role === "assistant"
       ? [...initialMessages, { content: "Continue.", role: "user" as const }]

@@ -1,3 +1,4 @@
+import { and, eq } from "drizzle-orm";
 import type { AgentImage } from "../shared/agent-images.ts";
 import type {
   AgentConversationMessage,
@@ -6,13 +7,17 @@ import type {
 import type { AgentSessionToolName } from "../shared/agent-tools.ts";
 import type { PendingAskQuestions } from "../shared/ask-questions.ts";
 import type { AppDatabase } from "../shared/database.ts";
-import { agentSessions } from "../shared/database/schema.ts";
+import {
+  agentSessions,
+  providerCredentials,
+} from "../shared/database/schema.ts";
 import { createUuidV7, SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 import type { SessionHistoryPage } from "../shared/session-history.ts";
 import type {
   AgentSessionDetail,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
+import type { AnthropicReplayIdentity } from "./anthropic-replay-identity.ts";
 import { createAskQuestionsPersistence } from "./ask-questions-persistence.ts";
 import { AskQuestionsStore } from "./ask-questions-store.ts";
 import { CurrentSessionStore } from "./session-current-store.ts";
@@ -56,7 +61,8 @@ import {
 import {
   appendInterruptedRunnerToolResult,
   appendUnknownRestartToolResults,
-  conversationFromMessages,
+  conversationFromInternalMessages,
+  readInternalSessionMessages,
   readStoredSessionMessages,
   storedConversationTruncation,
   withInterruptedToolResults,
@@ -183,15 +189,45 @@ export class SessionStore extends SessionStoreRestarts {
       sessionId,
     });
   }
+  credentialFingerprint(credentialId: string): string | undefined {
+    return this.#database
+      .select({ value: providerCredentials.credentialFingerprint })
+      .from(providerCredentials)
+      .where(
+        and(
+          eq(providerCredentials.id, credentialId),
+          eq(providerCredentials.isDeleted, false),
+        ),
+      )
+      .get()?.value;
+  }
   conversation(
     sessionId: string,
+    identity: AnthropicReplayIdentity,
     interrupted = true,
   ): readonly AgentConversationMessage[] {
-    return conversationFromMessages(
+    const internal = readInternalSessionMessages(this.#database, sessionId);
+    if (!interrupted) {
+      return conversationFromInternalMessages(internal, identity);
+    }
+    const replayById = new Map(
+      internal
+        .filter(({ providerReplay }) => providerReplay !== undefined)
+        .map(({ message, providerReplay }) => [message.id, providerReplay]),
+    );
+    return conversationFromInternalMessages(
       withInterruptedToolResults(
-        readStoredSessionMessages(this.#database, sessionId),
-        interrupted,
-      ),
+        internal.map(({ message }) => message),
+        true,
+      ).map((message) => {
+        const providerReplay =
+          message.role === "assistant" ? replayById.get(message.id) : undefined;
+        return {
+          message,
+          ...(providerReplay === undefined ? {} : { providerReplay }),
+        };
+      }),
+      identity,
     );
   }
   conversationTruncation(sessionId: string): AgentStepTruncation | undefined {

@@ -1,4 +1,5 @@
 import type { AgentAttachment } from "./agent-attachments.ts";
+import type { AnthropicAssistantReplay } from "./anthropic-replay.ts";
 import { isRecord } from "./auth-model.ts";
 import { parseOptionalJsonRecord } from "./json-record.ts";
 import type { AgentSessionUsageUpdate } from "./session-model.ts";
@@ -63,6 +64,8 @@ export function readAgentToolCalls(
   });
 }
 
+export type AgentProviderReplay = AnthropicAssistantReplay;
+
 export type AgentConversationMessage =
   | {
       readonly content: string;
@@ -72,6 +75,7 @@ export type AgentConversationMessage =
     }
   | {
       readonly content: string;
+      readonly providerReplay?: AgentProviderReplay;
       readonly role: "assistant";
       readonly toolCalls: readonly AgentToolCall[];
     }
@@ -114,6 +118,7 @@ export interface AgentModelStep {
   readonly content: string;
   readonly contextTokens: number | null;
   readonly costUsd: number | null;
+  readonly providerReplay?: AgentProviderReplay;
   readonly thinking: string;
   readonly tokenUsage: AgentTokenUsage | null;
   readonly toolCalls: readonly AgentToolCall[];
@@ -314,6 +319,9 @@ export async function runAgentLoop(
 
     const assistantMessage: AgentConversationMessage = {
       content: step.content,
+      ...(step.providerReplay === undefined
+        ? {}
+        : { providerReplay: step.providerReplay }),
       role: "assistant",
       toolCalls: step.toolCalls,
     };

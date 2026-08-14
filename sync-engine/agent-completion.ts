@@ -3,10 +3,29 @@ import {
   type AgentConversationMessage,
   type AgentModelStep,
 } from "../shared/agent-loop.ts";
+import {
+  anthropicReplayMatchesAssistant,
+  type AnthropicAssistantReplay,
+} from "../shared/anthropic-replay.ts";
 export type CompletionArguments = readonly [
   messages: readonly AgentConversationMessage[],
   signal?: AbortSignal,
 ];
+
+function matchingProviderReplay(
+  message: Extract<AgentConversationMessage, { readonly role: "assistant" }>,
+  toolCalls: readonly ReturnType<typeof normalizeAgentToolCall>[],
+): AnthropicAssistantReplay | undefined {
+  const normalized = toolCalls.filter((call) => call !== undefined);
+  return message.providerReplay !== undefined &&
+    anthropicReplayMatchesAssistant(
+      message.providerReplay,
+      message.content,
+      normalized,
+    )
+    ? message.providerReplay
+    : undefined;
+}
 
 export function completionMessages(
   parameters: CompletionArguments,
@@ -55,8 +74,18 @@ export function completionMessages(
         emittedCalls.add(call.id);
         return true;
       });
-    if (message.content.length > 0 || toolCalls.length > 0) {
-      sanitized.push({ ...message, toolCalls });
+    const providerReplay = matchingProviderReplay(message, toolCalls);
+    if (
+      message.content.length > 0 ||
+      toolCalls.length > 0 ||
+      providerReplay !== undefined
+    ) {
+      sanitized.push({
+        content: message.content,
+        ...(providerReplay === undefined ? {} : { providerReplay }),
+        role: "assistant",
+        toolCalls,
+      });
     }
     const callIds = new Set(toolCalls.map(({ id }) => id));
     const emittedResults = new Set<string>();

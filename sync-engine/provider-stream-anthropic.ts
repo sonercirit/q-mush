@@ -10,6 +10,7 @@ import {
   isProviderStreamErrorEvent,
   readProviderStreamError,
 } from "./provider-error.ts";
+import { AnthropicReplayCapture } from "./provider-stream-anthropic-replay.ts";
 import { BufferedAccumulator } from "./provider-stream-buffers.ts";
 import {
   providerEventIndex,
@@ -20,13 +21,12 @@ import {
 const INVALID_EVENT = "The Anthropic model returned an invalid event";
 const INVALID_DELTA = "The Anthropic model returned an invalid content delta";
 const INVALID_BLOCK = "The Anthropic model returned an invalid content block";
+const INVALID_MESSAGE = "The Anthropic model returned an invalid message";
 
 function tokenCount(value: unknown): number {
   return readNonNegativeSafeInteger(value) ?? 0;
 }
 
-// Anthropic reports fresh, cache-read, and cache-write input separately, while
-// Q Mush records the total prompt size like the OpenAI-compatible providers.
 function anthropicUsage(
   usage: Readonly<Record<string, unknown>>,
   outputTokens: number,
@@ -57,10 +57,16 @@ function toolUseCall(
   };
 }
 
-function readTruncation(delta: unknown): AgentStepTruncation | undefined {
-  if (!isRecord(delta)) {
-    return undefined;
+function completeToolArguments(input: unknown): string {
+  try {
+    return JSON.stringify(input);
+  } catch {
+    return "{}";
   }
+}
+
+function readTruncation(delta: unknown): AgentStepTruncation | undefined {
+  if (!isRecord(delta)) return undefined;
   const stopReason = delta["stop_reason"];
   return stopReason === "max_tokens" ||
     stopReason === "model_context_window_exceeded"
@@ -68,17 +74,33 @@ function readTruncation(delta: unknown): AgentStepTruncation | undefined {
     : undefined;
 }
 
+function eventIndex(
+  event: Readonly<Record<string, unknown>>,
+): number | undefined {
+  return readNonNegativeSafeInteger(event["index"]);
+}
+
 export class AnthropicStreamAccumulator extends BufferedAccumulator {
   readonly protocol = "anthropic" as const;
+  readonly #replay: AnthropicReplayCapture;
   #stopped = false;
   #truncation: AgentStepTruncation | undefined;
   #usage: AgentTokenUsage | null = null;
+
+  constructor(
+    model: string,
+    provenance: string,
+    onDelta?: ConstructorParameters<typeof BufferedAccumulator>[0],
+  ) {
+    super(onDelta);
+    this.#replay = new AnthropicReplayCapture(model, provenance);
+  }
 
   finish(): AgentModelStep {
     if (!this.#stopped) {
       throw new Error("The provider response ended before completion");
     }
-
+    const providerReplay = this.#replay.finish();
     const usage = this.#usage;
     const step = providerStep(
       this.buffers.text.join(""),
@@ -88,6 +110,7 @@ export class AnthropicStreamAccumulator extends BufferedAccumulator {
     );
     return {
       ...step,
+      ...(providerReplay === undefined ? {} : { providerReplay }),
       tokenUsage: usage,
       ...(this.#truncation === undefined
         ? {}
@@ -100,33 +123,32 @@ export class AnthropicStreamAccumulator extends BufferedAccumulator {
   }
 
   push(streamEvent: unknown): void {
-    const parsed = this.readEvent(streamEvent, INVALID_EVENT);
-
-    if (isProviderStreamErrorEvent(parsed)) {
-      throw readProviderStreamError(parsed);
+    const event = this.readEvent(streamEvent, INVALID_EVENT);
+    if (isProviderStreamErrorEvent(event)) {
+      throw readProviderStreamError(event);
     }
-
-    switch (parsed["type"]) {
+    switch (event["type"]) {
       case "message_start":
-        this.#readUsage(parsed["message"]);
+        this.#readUsage(event["message"]);
         return;
       case "content_block_start":
-        this.#startBlock(parsed);
+        this.#startBlock(event);
         return;
       case "content_block_delta":
-        this.#pushDelta(parsed);
+        this.#pushDelta(event);
+        return;
+      case "content_block_stop":
+        this.#replay.stop(eventIndex(event));
         return;
       case "message_delta":
-        // Length stops surface as step truncation; other reasons (end_turn,
-        // tool_use, stop_sequence, pause_turn, refusal) end steps normally.
-        this.#truncation ??= readTruncation(parsed["delta"]);
-        this.#readOutputTokens(parsed["usage"]);
+        this.#truncation ??= readTruncation(event["delta"]);
+        this.#readOutputTokens(event["usage"]);
         return;
       case "message_stop":
         this.#stopped = true;
         return;
       case "message":
-        this.#readCompleteMessage(parsed);
+        this.#readCompleteMessage(event);
         return;
       default:
         return;
@@ -134,19 +156,13 @@ export class AnthropicStreamAccumulator extends BufferedAccumulator {
   }
 
   #readUsage(message: unknown): void {
-    if (!isRecord(message) || !isRecord(message["usage"])) {
-      return;
-    }
-
+    if (!isRecord(message) || !isRecord(message["usage"])) return;
     const usage = message["usage"];
     this.#usage = anthropicUsage(usage, tokenCount(usage["output_tokens"]));
   }
 
   #readOutputTokens(usage: unknown): void {
-    if (!isRecord(usage)) {
-      return;
-    }
-
+    if (!isRecord(usage)) return;
     const outputTokens = tokenCount(usage["output_tokens"]);
     this.#usage =
       this.#usage === null
@@ -156,60 +172,58 @@ export class AnthropicStreamAccumulator extends BufferedAccumulator {
 
   #startBlock(event: Readonly<Record<string, unknown>>): void {
     const block = event["content_block"];
-
-    if (!isRecord(block)) {
-      throw new Error(INVALID_BLOCK);
-    }
-
-    if (block["type"] === "tool_use") {
-      this.registerToolCall(
-        providerEventIndex(event, "index", "content block index"),
-        toolUseCall(block, ""),
-      );
+    if (!isRecord(block)) throw new Error(INVALID_BLOCK);
+    const index =
+      block["type"] === "tool_use"
+        ? providerEventIndex(event, "index", "content block index")
+        : eventIndex(event);
+    this.#replay.start(index, block);
+    if (block["type"] === "tool_use" && index !== undefined) {
+      this.registerToolCall(index, toolUseCall(block, ""));
     }
   }
 
   #pushDelta(event: Readonly<Record<string, unknown>>): void {
     const delta = event["delta"];
-
-    if (!isRecord(delta)) {
-      throw new Error(INVALID_DELTA);
+    if (!isRecord(delta)) throw new Error(INVALID_DELTA);
+    const index = eventIndex(event);
+    switch (delta["type"]) {
+      case "text_delta":
+        this.pushText(requiredRecordString(delta, "text", INVALID_DELTA));
+        break;
+      case "thinking_delta":
+        this.pushThinking(
+          requiredRecordString(delta, "thinking", INVALID_DELTA),
+        );
+        break;
+      case "input_json_delta":
+        this.#appendToolInput(event);
+        break;
+      default:
+        break;
     }
-
-    if (delta["type"] === "text_delta") {
-      this.pushText(requiredRecordString(delta, "text", INVALID_DELTA));
-      return;
-    }
-
-    if (delta["type"] === "thinking_delta") {
-      this.pushThinking(requiredRecordString(delta, "thinking", INVALID_DELTA));
-      return;
-    }
-
-    if (delta["type"] === "input_json_delta") {
-      this.appendToolCallArguments(
-        providerEventIndex(event, "index", "content block index"),
-        requiredRecordString(delta, "partial_json", INVALID_DELTA),
-      );
-    }
+    this.#replay.delta(index, delta);
   }
 
-  // Non-streaming responses return one complete message object instead of an
-  // event sequence.
+  #appendToolInput(event: Readonly<Record<string, unknown>>): void {
+    const index = eventIndex(event);
+    const delta = event["delta"];
+    if (index === undefined || !this.toolCalls.has(index) || !isRecord(delta)) {
+      return;
+    }
+    this.appendToolCallArguments(
+      index,
+      requiredRecordString(delta, "partial_json", INVALID_DELTA),
+    );
+  }
+
   #readCompleteMessage(message: Readonly<Record<string, unknown>>): void {
     const content = message["content"];
-
-    if (!Array.isArray(content)) {
-      throw new Error("The Anthropic model returned an invalid message");
+    if (!Array.isArray(content)) throw new Error(INVALID_MESSAGE);
+    for (const [index, value] of content.entries()) {
+      if (!isRecord(value)) throw new Error(INVALID_BLOCK);
+      this.#readCompleteBlock(index, value);
     }
-
-    for (const [index, block] of content.entries()) {
-      if (!isRecord(block)) {
-        throw new Error(INVALID_BLOCK);
-      }
-      this.#readCompleteBlock(index, block);
-    }
-
     this.#truncation ??= readTruncation(message);
     this.#readUsage(message);
     this.#stopped = true;
@@ -219,21 +233,26 @@ export class AnthropicStreamAccumulator extends BufferedAccumulator {
     index: number,
     block: Readonly<Record<string, unknown>>,
   ): void {
-    if (block["type"] === "text") {
-      this.pushText(requiredRecordString(block, "text", INVALID_BLOCK));
-      return;
-    }
-
-    if (block["type"] === "thinking") {
-      this.pushThinking(requiredRecordString(block, "thinking", INVALID_BLOCK));
-      return;
-    }
-
-    if (block["type"] === "tool_use") {
-      this.registerToolCall(
-        index,
-        toolUseCall(block, JSON.stringify(block["input"] ?? {})),
-      );
+    this.#replay.complete(index, block);
+    switch (block["type"]) {
+      case "text":
+        this.pushText(requiredRecordString(block, "text", INVALID_BLOCK));
+        return;
+      case "thinking":
+        this.pushThinking(
+          requiredRecordString(block, "thinking", INVALID_BLOCK),
+        );
+        return;
+      case "tool_use": {
+        const input = block["input"] ?? {};
+        this.registerToolCall(
+          index,
+          toolUseCall(block, completeToolArguments(input)),
+        );
+        return;
+      }
+      default:
+        return;
     }
   }
 }

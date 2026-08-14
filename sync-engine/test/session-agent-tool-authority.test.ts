@@ -16,6 +16,7 @@ import {
   runningCompactionStore,
 } from "./session-compaction-test-helpers.ts";
 import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
+import { TEST_REPLAY_IDENTITY } from "./session-replay-test-helpers.ts";
 
 function currentExecution(
   store: ReturnType<typeof runningCompactionStore>["store"],
@@ -79,6 +80,7 @@ describe("session agent tool authority", () => {
           id: detail.credentialId,
           isDefault: true,
           label: "Tool authority credential",
+          credentialFingerprint: "test-credential-fingerprint",
           secret: "provider-secret",
           source: "api_key",
         },
@@ -103,7 +105,7 @@ describe("session agent tool authority", () => {
     ).resolves.toBe("complete");
 
     const outputs = setup.store
-      .conversation(detail.id)
+      .conversation(detail.id, TEST_REPLAY_IDENTITY)
       .filter(({ role }) => role === "tool")
       .map(({ content }) => content);
     expect(outputs).toHaveLength(2);

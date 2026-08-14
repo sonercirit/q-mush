@@ -1,11 +1,14 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
+import type { SelectedFields } from "drizzle-orm/sqlite-core";
 import {
   readAgentToolCalls,
   truncationFromNotice,
   type AgentConversationMessage,
+  type AgentProviderReplay,
   type AgentStepTruncation,
   type AgentToolCall,
 } from "../shared/agent-loop.ts";
+import { parseAnthropicAssistantReplay } from "../shared/anthropic-replay.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
 import type { IdGenerator } from "../shared/ids.ts";
@@ -18,7 +21,11 @@ import type {
   AgentSessionMessage,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
-import { STORED_SESSION_MESSAGE_SELECTION } from "./session-message-selection.ts";
+import type { AnthropicReplayIdentity } from "./anthropic-replay-identity.ts";
+import {
+  INTERNAL_SESSION_MESSAGE_SELECTION,
+  STORED_SESSION_MESSAGE_SELECTION,
+} from "./session-message-selection.ts";
 import { sessionSegmentQuery } from "./session-segment.ts";
 import { readStoredSessionUserId } from "./session-store-state.ts";
 import { appendSystemMessageAndTouchSession } from "./session-store-values.ts";
@@ -53,6 +60,48 @@ type StoredMessage = Omit<
   readonly outputTokens: number | null;
   readonly toolCalls: string | null;
 };
+
+type InternalStoredMessage = StoredMessage & {
+  readonly providerReplay: string | null;
+};
+
+export interface InternalSessionMessage {
+  readonly message: AgentSessionMessage;
+  readonly providerReplay?: AgentProviderReplay;
+}
+
+function storedProviderReplay(
+  value: string | null,
+  role: AgentSessionMessage["role"],
+): AgentProviderReplay | undefined {
+  if (role === "assistant") {
+    try {
+      return parseAnthropicAssistantReplay(value);
+    } catch {
+      // Replay is private optimization metadata. Corruption must not make the
+      // public transcript, session continuation, or fork unreadable.
+      return undefined;
+    }
+  }
+  if (value !== null) {
+    throw new Error(
+      "Stored provider replay is attached to a non-assistant message",
+    );
+  }
+  return undefined;
+}
+
+function summarizeInternalStoredMessage(
+  stored: InternalStoredMessage,
+): InternalSessionMessage {
+  const { providerReplay, ...publicFields } = stored;
+  const message = summarizeStoredMessage(publicFields);
+  const replay = storedProviderReplay(providerReplay, message.role);
+  return {
+    message,
+    ...(replay === undefined ? {} : { providerReplay: replay }),
+  };
+}
 
 export function summarizeStoredMessage(
   stored: StoredMessage,
@@ -253,27 +302,56 @@ export function withInterruptedToolResults(
   return complete;
 }
 
+function currentSegmentMessageCondition(
+  database: Pick<AppDatabase, "select">,
+  sessionId: string,
+) {
+  return and(
+    eq(agentMessages.isDeleted, false),
+    eq(agentMessages.sessionId, sessionId),
+    eq(
+      agentMessages.segment,
+      sessionSegmentQuery(database, eq(agentSessions.id, sessionId)),
+    ),
+  );
+}
+
+function messageQuery<Select extends SelectedFields>(
+  database: Pick<AppDatabase, "select">,
+  sessionId: string,
+  selection: Select,
+) {
+  return database
+    .select(selection)
+    .from(agentMessages)
+    .where(currentSegmentMessageCondition(database, sessionId));
+}
+
+export function readInternalSessionMessages(
+  database: Pick<AppDatabase, "select">,
+  sessionId: string,
+): readonly InternalSessionMessage[] {
+  const internal: readonly InternalStoredMessage[] = messageQuery(
+    database,
+    sessionId,
+    INTERNAL_SESSION_MESSAGE_SELECTION,
+  ).all();
+  const summarized = internal.map(summarizeInternalStoredMessage);
+  return summarized.sort((left, right) =>
+    compareAgentSessionMessages(left.message, right.message),
+  );
+}
+
 export function readStoredSessionMessages(
   database: Pick<AppDatabase, "select">,
   sessionId: string,
 ): readonly AgentSessionMessage[] {
-  return database
-    .select(STORED_SESSION_MESSAGE_SELECTION)
-    .from(agentMessages)
-    .where(
-      and(
-        eq(agentMessages.isDeleted, false),
-        eq(agentMessages.sessionId, sessionId),
-        eq(
-          agentMessages.segment,
-          sessionSegmentQuery(database, eq(agentSessions.id, sessionId)),
-        ),
-      ),
-    )
-    .orderBy(asc(agentMessages.createdAt), asc(agentMessages.id))
-    .all()
-    .map(summarizeStoredMessage)
-    .sort(compareAgentSessionMessages);
+  const stored: readonly StoredMessage[] = messageQuery(
+    database,
+    sessionId,
+    STORED_SESSION_MESSAGE_SELECTION,
+  ).all();
+  return stored.map(summarizeStoredMessage).sort(compareAgentSessionMessages);
 }
 
 export function storedConversationTruncation(
@@ -285,15 +363,32 @@ export function storedConversationTruncation(
     : undefined;
 }
 
-export function conversationFromMessages(
-  messages: readonly AgentSessionMessage[],
+function replayForIdentity(
+  internal: InternalSessionMessage,
+  identity: AnthropicReplayIdentity,
+): InternalSessionMessage {
+  return internal.providerReplay === undefined ||
+    (internal.providerReplay.model === identity.model &&
+      internal.providerReplay.provenance === identity.provenance)
+    ? internal
+    : { message: internal.message };
+}
+
+export function conversationFromInternalMessages(
+  messages: readonly InternalSessionMessage[],
+  identity: AnthropicReplayIdentity,
 ): readonly AgentConversationMessage[] {
   const conversation: AgentConversationMessage[] = [];
-  for (const message of messages) {
+  for (const source of messages) {
+    const internal = replayForIdentity(source, identity);
+    const message = internal.message;
     switch (message.role) {
       case "assistant":
         conversation.push({
           content: message.content,
+          ...(internal.providerReplay === undefined
+            ? {}
+            : { providerReplay: internal.providerReplay }),
           role: "assistant",
           toolCalls: message.toolCalls,
         });

@@ -126,6 +126,7 @@ async function recoverRunner(
 const CREDENTIAL = restartTestCredential("restart-recreation-credential", {
   accountId: "restart-recreation-account",
   label: "Restart recreation key",
+  credentialFingerprint: "test-credential-fingerprint",
   secret: "restart-recreation-secret",
 });
 

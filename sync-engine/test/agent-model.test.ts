@@ -6,7 +6,10 @@ import { isRecord } from "../../shared/auth-model.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import { createJsonResponse } from "../../sync-engine/http.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
-import { createOpenAiOAuthSecret } from "./oauth-test-helpers.ts";
+import {
+  testApiKeyCredential,
+  testOpenAiOAuthCredential,
+} from "./agent-model-credential-fixtures.ts";
 import { captureRejection, requireError } from "./promise-test-helpers.ts";
 import {
   cachedTextMessage,
@@ -26,7 +29,7 @@ const IMAGE_MESSAGE = {
   role: "user" as const,
 };
 function apiKeyCredential(secret: string) {
-  return { accountId: null, secret, source: "api_key" as const };
+  return testApiKeyCredential(secret);
 }
 
 const OPENROUTER_IMAGE_OPTIONS = {
@@ -161,11 +164,7 @@ function codexModel(
 ): ChatCompletionsAgentModel {
   return new ChatCompletionsAgentModel({
     ...options,
-    credential: {
-      accountId: "chatgpt-account",
-      secret: createOpenAiOAuthSecret(),
-      source: "oauth",
-    },
+    credential: testOpenAiOAuthCredential(),
     maxOutputTokens: null,
     provider: "openai",
   });
@@ -210,7 +209,10 @@ describe("chat completions agent model", () => {
     const model = respondingModel(
       {
         ...OPENROUTER_IMAGE_OPTIONS,
-        credential: { ...apiKeyCredential("sk-or-secret"), accountId: "a-1" },
+        credential: {
+          ...apiKeyCredential("sk-or-secret"),
+          accountId: "a-1",
+        },
         reasoningEffort: "high",
         systemPrompt: "Workspace instructions from AGENTS.md",
       },

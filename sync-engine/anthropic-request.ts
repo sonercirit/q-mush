@@ -4,13 +4,22 @@ import {
 } from "../shared/agent-attachments.ts";
 import type { AgentConversationMessage } from "../shared/agent-loop.ts";
 import type { AgentToolDefinition } from "../shared/agent-tools.ts";
+import {
+  anthropicReplayMatchesAssistant,
+  type AnthropicAssistantReplay,
+} from "../shared/anthropic-replay.ts";
 import { parseOptionalJsonRecord } from "../shared/json-record.ts";
+import {
+  anthropicReplayIdentity,
+  type AnthropicReplayIdentity,
+} from "./anthropic-replay-identity.ts";
 import {
   textInputItems,
   userAttachments,
 } from "./provider-attachment-input.ts";
 import {
   promptCacheBreakpoints,
+  withAnthropicReplayCacheControl,
   withPromptCacheControl,
 } from "./provider-prompt-cache.ts";
 import type { ProviderModelRequest } from "./provider-request.ts";
@@ -25,9 +34,12 @@ export const ANTHROPIC_CONTEXT_WINDOW_BETA =
 export type AnthropicRequestOptions = Pick<
   ProviderModelRequest,
   | "adaptiveThinking"
+  | "credential"
+  | "credentialFingerprint"
   | "maxOutputTokens"
   | "messages"
   | "model"
+  | "provider"
   | "reasoningEffort"
   | "stream"
   | "systemPrompt"
@@ -36,7 +48,12 @@ export type AnthropicRequestOptions = Pick<
 
 interface AnthropicMessage {
   readonly content: readonly unknown[];
+  readonly replay?: AnthropicAssistantReplay;
   readonly role: "assistant" | "user";
+}
+
+interface ConvertedAnthropicMessage extends AnthropicMessage {
+  readonly sourceIndex: number;
 }
 
 // Anthropic accepts images and PDF documents; other attachment modalities
@@ -60,8 +77,39 @@ function attachmentBlocks(attachment: AgentAttachment): readonly unknown[] {
   ];
 }
 
+function matchingReplay(
+  message: Extract<AgentConversationMessage, { readonly role: "assistant" }>,
+  identity: AnthropicReplayIdentity,
+): AnthropicAssistantReplay | undefined {
+  const replay = message.providerReplay;
+  return replay?.model === identity.model &&
+    replay.provenance === identity.provenance &&
+    anthropicReplayMatchesAssistant(replay, message.content, message.toolCalls)
+    ? replay
+    : undefined;
+}
+
+function assistantBlocks(
+  message: Extract<AgentConversationMessage, { readonly role: "assistant" }>,
+  replay: AnthropicAssistantReplay | undefined,
+): readonly unknown[] {
+  if (replay !== undefined) {
+    return replay.blocks;
+  }
+  return [
+    ...textInputItems(message.content, "text"),
+    ...message.toolCalls.map((call) => ({
+      id: call.id,
+      input: parseOptionalJsonRecord(call.arguments) ?? {},
+      name: call.name,
+      type: "tool_use" as const,
+    })),
+  ];
+}
+
 function anthropicMessage(
   message: AgentConversationMessage,
+  identity: AnthropicReplayIdentity,
 ): AnthropicMessage | undefined {
   switch (message.role) {
     case "user": {
@@ -72,16 +120,15 @@ function anthropicMessage(
       return content.length === 0 ? undefined : { content, role: "user" };
     }
     case "assistant": {
-      const content = [
-        ...textInputItems(message.content, "text"),
-        ...message.toolCalls.map((call) => ({
-          id: call.id,
-          input: parseOptionalJsonRecord(call.arguments) ?? {},
-          name: call.name,
-          type: "tool_use",
-        })),
-      ];
-      return content.length === 0 ? undefined : { content, role: "assistant" };
+      const replay = matchingReplay(message, identity);
+      const content = assistantBlocks(message, replay);
+      return content.length === 0
+        ? undefined
+        : {
+            content,
+            ...(replay === undefined ? {} : { replay }),
+            role: "assistant",
+          };
     }
     case "compaction_notice":
       return undefined;
@@ -99,30 +146,71 @@ function anthropicMessage(
   }
 }
 
+function applyAnthropicMessageBreakpoint(
+  messages: ConvertedAnthropicMessage[],
+  start: number,
+): void {
+  let index = start;
+  while (index >= 0) {
+    const currentIndex = index;
+    const message = messages.at(currentIndex);
+    index -= 1;
+    if (message === undefined) {
+      continue;
+    }
+    if (message.replay === undefined) {
+      if (message.content.length === 0) {
+        continue;
+      }
+      messages[currentIndex] = {
+        ...message,
+        content: withPromptCacheControl(message.content),
+      };
+      return;
+    }
+    const content = withAnthropicReplayCacheControl(message.replay.blocks);
+    if (content !== undefined) {
+      messages[currentIndex] = { ...message, content };
+      return;
+    }
+  }
+}
+
 function anthropicMessages(
   messages: readonly AgentConversationMessage[],
+  identity: AnthropicReplayIdentity,
 ): readonly unknown[] {
   const breakpoints = promptCacheBreakpoints(messages);
-  const merged: { content: unknown[]; role: "assistant" | "user" }[] = [];
+  const converted: ConvertedAnthropicMessage[] = [];
 
-  for (const [index, message] of messages.entries()) {
-    const converted = anthropicMessage(message);
-
-    if (converted === undefined) {
-      continue;
+  for (const [sourceIndex, message] of messages.entries()) {
+    const result = anthropicMessage(message, identity);
+    if (result !== undefined) {
+      converted.push({ ...result, sourceIndex });
     }
+  }
 
-    const content = breakpoints.has(index)
-      ? withPromptCacheControl(converted.content)
-      : converted.content;
+  for (const sourceIndex of breakpoints) {
+    let index = converted.length - 1;
+    while (
+      index >= 0 &&
+      (converted[index]?.sourceIndex ?? Number.NEGATIVE_INFINITY) > sourceIndex
+    ) {
+      index -= 1;
+    }
+    applyAnthropicMessageBreakpoint(converted, index);
+  }
+
+  const merged: { content: unknown[]; role: "assistant" | "user" }[] = [];
+  for (const message of converted) {
     const previous = merged.at(-1);
 
-    if (previous?.role === converted.role) {
-      previous.content.push(...content);
+    if (previous?.role === message.role) {
+      previous.content.push(...message.content);
       continue;
     }
 
-    merged.push({ content: [...content], role: converted.role });
+    merged.push({ content: [...message.content], role: message.role });
   }
 
   return merged;
@@ -176,7 +264,15 @@ export function anthropicRequestBody(
     ...(options.maxOutputTokens === null
       ? {}
       : { max_tokens: options.maxOutputTokens }),
-    messages: anthropicMessages(options.messages),
+    messages: anthropicMessages(
+      options.messages,
+      anthropicReplayIdentity(
+        options.provider,
+        options.credential,
+        options.model,
+        options.credentialFingerprint,
+      ),
+    ),
     model: options.model,
     ...reasoning,
     ...(options.stream ? { stream: true } : {}),

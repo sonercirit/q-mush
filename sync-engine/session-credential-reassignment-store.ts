@@ -1,8 +1,9 @@
-import { and, asc, eq, ne, type SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, ne, type SQL } from "drizzle-orm";
 import { readOpenRouterProviderRouting } from "../shared/agent-configuration.ts";
 import { updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import {
+  agentMessages,
   agentSessions,
   providerCredentials,
 } from "../shared/database/schema.ts";
@@ -207,6 +208,33 @@ function targetIsAccessible(
   );
 }
 
+function clearReassignedSessionReplay(
+  transaction: Pick<AppDatabase, "update">,
+  sessions: readonly SessionCredentialReassignmentSession[],
+  userId: string,
+  now: number,
+): void {
+  if (sessions.length === 0) {
+    return;
+  }
+  transaction
+    .update(agentMessages)
+    .set({
+      providerReplay: null,
+      ...updatedAuditFields(userId, now),
+    })
+    .where(
+      and(
+        inArray(
+          agentMessages.sessionId,
+          sessions.map(({ id }) => id),
+        ),
+        isNotNull(agentMessages.providerReplay),
+      ),
+    )
+    .run();
+}
+
 export class SessionCredentialReassignmentStore {
   readonly #database: AppDatabase;
 
@@ -258,18 +286,11 @@ export class SessionCredentialReassignmentStore {
         }
 
         const prepared = options.preparedProviderState;
-        const currentSessions =
-          prepared === undefined
-            ? undefined
-            : sessionsToReassign(transaction, options);
+        const sessions = sessionsToReassign(transaction, options);
         if (
           prepared !== undefined &&
-          (currentSessions === undefined ||
-            !snapshotsMatch(currentSessions, prepared.expectedSessions) ||
-            !metadataUpdatesAreComplete(
-              currentSessions,
-              prepared.metadataUpdates,
-            ))
+          (!snapshotsMatch(sessions, prepared.expectedSessions) ||
+            !metadataUpdatesAreComplete(sessions, prepared.metadataUpdates))
         ) {
           return undefined;
         }
@@ -277,6 +298,12 @@ export class SessionCredentialReassignmentStore {
         if (prepared !== undefined) {
           applyMetadataUpdates(transaction, prepared.metadataUpdates);
         }
+        clearReassignedSessionReplay(
+          transaction,
+          sessions,
+          options.userId,
+          options.now,
+        );
 
         transaction
           .update(agentSessions)

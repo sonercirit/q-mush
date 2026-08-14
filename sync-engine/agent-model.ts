@@ -77,6 +77,7 @@ const OPENROUTER_COMPLETIONS_URL =
 export type AgentModelFetch = (request: Request) => Promise<Response>;
 
 export interface ChatCompletionsAgentModelOptions extends AgentModelRequestOptions {
+  readonly credentialFingerprint?: string;
   readonly fetch?: AgentModelFetch;
   readonly sleep?: ModelRequestSleep;
   readonly webSocket?: ProviderWebSocketFactory;
@@ -396,6 +397,7 @@ function defaultWebSocket(
 export class ChatCompletionsAgentModel implements AgentModel {
   readonly #adaptiveThinking: boolean | null;
   readonly #credential: AgentProviderCredential;
+  readonly #credentialFingerprint: string;
   readonly #dynamicToolCache: boolean;
   readonly #fetch: AgentModelFetch;
   readonly #maxOutputTokens: number | null;
@@ -416,6 +418,8 @@ export class ChatCompletionsAgentModel implements AgentModel {
   constructor(options: ChatCompletionsAgentModelOptions) {
     this.#adaptiveThinking = options.adaptiveThinking ?? null;
     this.#credential = options.credential;
+    this.#credentialFingerprint =
+      options.credentialFingerprint ?? options.credential.id;
     this.#dynamicToolCache = options.dynamicToolCache === true;
     this.#fetch = options.fetch ?? ((request) => globalThis.fetch(request));
     this.#maxOutputTokens = options.maxOutputTokens ?? null;
@@ -531,6 +535,8 @@ export class ChatCompletionsAgentModel implements AgentModel {
   ): unknown {
     return requestBody({
       adaptiveThinking: this.#adaptiveThinking,
+      credential: this.#credential,
+      credentialFingerprint: this.#credentialFingerprint,
       dynamicToolCache: this.#dynamicToolCache,
       maxOutputTokens: this.#maxOutputTokens,
       messages,
@@ -602,6 +608,8 @@ export class ChatCompletionsAgentModel implements AgentModel {
     return completeProviderHttp(
       {
         body: this.#requestBody(input.messages, protocol, true),
+        credential: this.#credential,
+        credentialFingerprint: this.#credentialFingerprint,
         fetch: this.#fetch,
         headers: agentProviderRequestHeaders(this.#provider, this.#credential, {
           accept: "text/event-stream",
@@ -609,6 +617,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
           protocol,
         }),
         onDelta: this.#onDelta,
+        model: this.#model,
         protocol,
         provider: this.#provider,
         sleep: this.#sleep,
