@@ -140,9 +140,9 @@ Living project memory.
   transcript display; reasoning summaries persist as `thinking` messages omitted
   from replay. Session and transcript rows sit in `agent_sessions` and
   `agent_messages`; `step_started_at` sets per model step, clears with
-  `activeStartedAt` (live Step timer in metrics); interrupted processes mark
-  active sessions failed for resumption; rebuilds add error results for
-  interrupted tool calls on resume only.
+  `activeStartedAt` (live Step timer); interrupted processes mark active
+  sessions failed for resumption; rebuilds add interrupted tool errors on
+  resume.
 
 - `openai.ts`, `openrouter.ts`, and `generic-provider.ts` implement model
   connections. Generic providers store a normalized base URL, optional key, and
@@ -266,8 +266,8 @@ Living project memory.
   `/v1/models`, OpenRouter `/api/v1/models/user`, ChatGPT Codex `/models`, or
   the generic `/models`; Anthropic-format catalogs read `display_name`,
   `max_input_tokens`, `max_tokens`, and the `capabilities` tree
-  (`agent-model-discovery-anthropic.ts`: per-level `effort` support gated on
-  adaptive thinking, modalities only from `image_input`/`pdf_input` leaves),
+  (`agent-model-discovery-anthropic.ts`: effort and adaptive-thinking support
+  are independent; modalities come only from `image_input`/`pdf_input` leaves),
   page via `has_more`/`last_id` at `limit=1000` with stale-cursor and page-count
   guards, probing the endpoint's OpenAI-style listing only where capabilities
   left efforts unknown. Codex parsing retains streamed output-text and
@@ -275,24 +275,21 @@ Living project memory.
   listed efforts are offered; OpenAI's catalog lacks reasoning data. Optional
   reasoning uses `reasoning_effort` for OpenAI and generic chat completions and
   `reasoning.effort` for OpenRouter and Codex Responses; the Anthropic Messages
-  format maps efforts to `output_config.effort` plus
-  `thinking: {type: "adaptive", display: "summarized"}` on provider-default
-  budgets, sending neither for `none` and `minimal` as `low` (rejected
-  otherwise). Adaptive-only models (Fable) ignore `enabled`; newer models
-  default `display` to `omitted` — empty thinking text plus a signature while
-  thinking tokens bill. The local proxy tolerates tool-loop replay without
-  signed thinking blocks; strict endpoints may not. Streamed reasoning deltas
-  group by `output_index` and `summary_index`; separate summary parts with
-  paragraphs since completed responses may omit them. OpenAI's WebSocket Mode
-  guide documents a 60-minute connection limit and requires reconnecting; the
-  canonical `websocket_connection_limit_reached` and the underscore-free
-  `websocketconnectionlimit_reached` observed in Issue #236 replace the socket
-  immediately once per step, then use bounded retries if the limit repeats,
-  replaying only an unpersisted step. Other WebSocket/accepted HTTP
-  interruptions or provider errors use bounded retries; all replays reset
-  partial UI deltas and exhausted WebSockets fall back to HTTP. Permanent errors
-  and aborts do not retry; terminal failures persist as non-replayed `error`
-  messages.
+  format sends `output_config.effort`; unless persisted `adaptiveThinking` is
+  false it adds `thinking: {type: "adaptive", display: "summarized"}`. It sends
+  neither for `none` and maps `minimal` to `low`. Adaptive-only models (Fable)
+  ignore `enabled`; newer models default `display` to `omitted` — empty thinking
+  text plus a signature while thinking tokens bill. The local proxy tolerates
+  tool-loop replay without signed thinking blocks; strict endpoints may not.
+  Streamed reasoning deltas group by `output_index` and `summary_index`;
+  separate summary parts with paragraphs since completed responses may omit
+  them. OpenAI's WebSocket Mode has a 60-minute limit; the canonical
+  `websocket_connection_limit_reached` and observed underscore-free variant
+  replace the socket once per step, then bound retries, replaying only an
+  unpersisted step. Other WebSocket/accepted HTTP interruptions or provider
+  errors retry before persistence; replays reset partial UI deltas and exhausted
+  WebSockets fall back to HTTP. Permanent errors and aborts do not retry;
+  terminal failures persist as non-replayed `error` messages.
 - Shell commands require a positive timeout; on macOS/Linux each gets a POSIX
   session; stop/timeout signals only its group. Agent launches and runner
   commands otherwise have no application-owned step, queue, or time limits;

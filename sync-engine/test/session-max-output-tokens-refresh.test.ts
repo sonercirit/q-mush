@@ -1,10 +1,13 @@
+import { eq } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
+import { agentSessions } from "../../shared/database/schema.ts";
 import { testAgentModelCatalog } from "../../shared/test/agent-model-fixtures.ts";
 import type { AgentModelRequestOptions } from "../agent-model-options.ts";
 import {
   compactSessionConversation,
   runSessionAgent,
 } from "../session-agent-runtime.ts";
+import type { RuntimeModelMetadata } from "../session-store-runtime.ts";
 import { TEST_USER_ID } from "./authenticated-integration-test-helpers.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
@@ -18,28 +21,50 @@ import {
 } from "./session-compaction-test-helpers.ts";
 import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
 
-// Sessions created before the max_output_tokens column - or reassigned onto
-// an Anthropic-format credential - have no persisted output limit even
-// though Messages requests require max_tokens.
-describe("lazy max output tokens refresh", () => {
+// Sessions created before the request-metadata columns - or reassigned onto
+// an Anthropic-format credential - refresh catalog metadata before requesting.
+interface RefreshMetadata {
+  readonly adaptiveThinking: boolean | null;
+  readonly maxOutputTokens: number | null;
+}
+
+describe("lazy Anthropic request metadata refresh", () => {
   interface RefreshHarness {
     readonly detail: ReturnType<typeof requireCompactionSession>;
     readonly discoveryCalls: () => number;
     readonly runtime: Parameters<typeof runSessionAgent>[0];
-    readonly persisted: () => number | null | undefined;
+    readonly persisted: () => RefreshMetadata | undefined;
     readonly selections: AgentModelRequestOptions[];
     readonly close: () => void;
   }
 
+  function clearAdaptiveThinking(
+    setup: ReturnType<typeof runningCompactionStore>,
+  ): void {
+    const detail = requireCompactionSession(setup.store);
+    setup.database
+      .update(agentSessions)
+      .set({ adaptiveThinking: null })
+      .where(eq(agentSessions.id, detail.id))
+      .run();
+  }
+
   function refreshHarness(options: {
+    readonly adaptiveThinking?: boolean | null;
     readonly apiFormat?: "anthropic" | "openai";
     readonly discoveryFails?: boolean;
+    readonly maxOutputTokens?: number | null;
     readonly steps: readonly string[];
   }): RefreshHarness {
     let discoveryCalls = 0;
     const setup = runningCompactionStore();
     const detail = requireCompactionSession(setup.store);
-    expect(detail.maxOutputTokens).toBeNull();
+    clearAdaptiveThinking(setup);
+    const runtimeDetail = {
+      ...requireCompactionSession(setup.store),
+      provider: "generic" as const,
+    };
+    expect(runtimeDetail.maxOutputTokens).toBeNull();
     const model = new ScriptedAgentModel(
       options.steps.map((content) => ({ content, toolCalls: [] })),
     );
@@ -59,15 +84,22 @@ describe("lazy max output tokens refresh", () => {
         secret: "anthropic-secret",
         source: "api_key" as const,
       },
-      detail: { ...detail, provider: "generic" as const },
+      detail: runtimeDetail,
       discoverModels: () => {
         discoveryCalls += 1;
         return options.discoveryFails === true
           ? Promise.reject(new Error("Discovery unavailable"))
           : Promise.resolve(
               testAgentModelCatalog({
+                adaptiveThinking:
+                  options.adaptiveThinking === undefined
+                    ? false
+                    : options.adaptiveThinking,
                 id: detail.model,
-                maxOutputTokens: 64_000,
+                maxOutputTokens:
+                  options.maxOutputTokens === undefined
+                    ? 64_000
+                    : options.maxOutputTokens,
               }),
             );
       },
@@ -89,8 +121,15 @@ describe("lazy max output tokens refresh", () => {
       },
       detail,
       discoveryCalls: () => discoveryCalls,
-      persisted: () =>
-        setup.store.get(TEST_USER_ID, detail.id)?.maxOutputTokens,
+      persisted: () => {
+        const session = setup.store.get(TEST_USER_ID, detail.id);
+        return session === undefined
+          ? undefined
+          : {
+              adaptiveThinking: session.adaptiveThinking,
+              maxOutputTokens: session.maxOutputTokens,
+            };
+      },
       runtime,
       selections,
     };
@@ -101,7 +140,7 @@ describe("lazy max output tokens refresh", () => {
     readonly discoveryFails?: boolean;
   }): Promise<{
     readonly discoveryCalls: number;
-    readonly persisted: number | null | undefined;
+    readonly persisted: RefreshMetadata | undefined;
     readonly selected: AgentModelRequestOptions | undefined;
   }> {
     const harness = refreshHarness({
@@ -118,11 +157,31 @@ describe("lazy max output tokens refresh", () => {
     };
   }
 
-  test("discovers, persists, and uses the catalog limit before the first request", async () => {
+  test("discovers, persists, and uses catalog request metadata", async () => {
     const { persisted, selected } = await runRefresh({});
 
-    expect(selected).toMatchObject({ maxOutputTokens: 64_000 });
-    expect(persisted).toBe(64_000);
+    expect(selected).toMatchObject({
+      adaptiveThinking: false,
+      maxOutputTokens: 64_000,
+    });
+    expect(persisted).toEqual({
+      adaptiveThinking: false,
+      maxOutputTokens: 64_000,
+    });
+  });
+
+  test("persists adaptive support when the output limit stays unknown", async () => {
+    const harness = refreshHarness({ maxOutputTokens: null, steps: ["Done."] });
+    const expected = {
+      adaptiveThinking: false,
+      maxOutputTokens: null,
+    };
+
+    const outcome = await runSessionAgent(harness.runtime);
+    expect(outcome).toBe("complete");
+    expect(harness.selections[0]).toMatchObject(expected);
+    expect(harness.persisted()).toEqual(expected);
+    harness.close();
   });
 
   test("probes the catalog once across a compact-and-continue run", async () => {
@@ -143,11 +202,17 @@ describe("lazy max output tokens refresh", () => {
   });
 
   function expectUnrefreshed(outcome: {
-    readonly persisted: number | null | undefined;
+    readonly persisted: RefreshMetadata | undefined;
     readonly selected: AgentModelRequestOptions | undefined;
   }): void {
-    expect(outcome.selected).toMatchObject({ maxOutputTokens: null });
-    expect(outcome.persisted).toBeNull();
+    expect(outcome.selected).toMatchObject({
+      adaptiveThinking: null,
+      maxOutputTokens: null,
+    });
+    expect(outcome.persisted).toEqual({
+      adaptiveThinking: null,
+      maxOutputTokens: null,
+    });
   }
 
   test("leaves the omission when discovery fails", async () => {
@@ -190,34 +255,58 @@ describe("lazy max output tokens refresh", () => {
 
   test("drops a discovery result raced by credential reassignment", () => {
     const setup = runningCompactionStore();
-    const writeLimit = (credentialId: string, limit: number, at: number) => {
+    clearAdaptiveThinking(setup);
+    const writeMetadata = (
+      credentialId: string,
+      metadata: RuntimeModelMetadata,
+      at: number,
+    ) => {
       const detail = requireCompactionSession(setup.store);
-      setup.store.setRuntimeMaxOutputTokens(
+      setup.store.setRuntimeModelMetadata(
         detail.id,
         credentialId,
-        limit,
+        metadata,
         at,
         detail.generation,
       );
-      return setup.store.get(TEST_USER_ID, detail.id)?.maxOutputTokens;
+      const refreshed = setup.store.get(TEST_USER_ID, detail.id);
+      return refreshed === undefined
+        ? undefined
+        : {
+            adaptiveThinking: refreshed.adaptiveThinking,
+            maxOutputTokens: refreshed.maxOutputTokens,
+          };
     };
     const attachedCredentialId = requireCompactionSession(
       setup.store,
     ).credentialId;
+    const unknown = { adaptiveThinking: null, maxOutputTokens: null };
 
     // The reassignment swapped credentials while discovery was in flight;
-    // the stale credential's limit must not attach to the new endpoint.
-    expect(writeLimit("replaced-credential", 64_000, 1_700_000_000_200)).toBe(
-      null,
-    );
-    // The attached credential's own discovery still persists.
-    expect(writeLimit(attachedCredentialId, 32_000, 1_700_000_000_300)).toBe(
-      32_000,
-    );
-    // A set limit never gets overwritten by a late duplicate.
-    expect(writeLimit(attachedCredentialId, 16_000, 1_700_000_000_400)).toBe(
-      32_000,
-    );
+    // stale metadata must not attach to the new endpoint.
+    expect(
+      writeMetadata(
+        "replaced-credential",
+        { adaptiveThinking: false, maxOutputTokens: 64_000 },
+        1_700_000_000_200,
+      ),
+    ).toEqual(unknown);
+    // The attached credential's own discovery persists both fields.
+    expect(
+      writeMetadata(
+        attachedCredentialId,
+        { adaptiveThinking: false, maxOutputTokens: 32_000 },
+        1_700_000_000_300,
+      ),
+    ).toEqual({ adaptiveThinking: false, maxOutputTokens: 32_000 });
+    // Known metadata never gets overwritten by a late duplicate.
+    expect(
+      writeMetadata(
+        attachedCredentialId,
+        { adaptiveThinking: true, maxOutputTokens: 16_000 },
+        1_700_000_000_400,
+      ),
+    ).toEqual({ adaptiveThinking: false, maxOutputTokens: 32_000 });
     closeSessionTestDatabase(setup.database);
   });
 });

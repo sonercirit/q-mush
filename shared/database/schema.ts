@@ -397,6 +397,7 @@ export const agentSessions = sqliteTable(
       .default("none"),
     costUsd: real("cost_usd").notNull().default(0),
     ...sessionContextColumns(),
+    adaptiveThinking: integer("adaptive_thinking", { mode: "boolean" }),
     agentFilePath: text("agent_file_path"),
     agentFileName: text("agent_file_name"),
     agentFileContent: text("agent_file_content"),

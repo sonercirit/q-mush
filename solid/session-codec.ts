@@ -1,7 +1,6 @@
 import {
   isAgentModelId,
   isAgentReasoningEffort,
-  isOpenRouterProviderSelection,
   isOpenRouterProviderTag,
   type AgentModelCatalog,
   type AgentModelOption,
@@ -10,13 +9,11 @@ import {
 } from "../shared/agent-configuration.ts";
 import { readAgentFile } from "../shared/agent-file.ts";
 import { readAgentToolCalls } from "../shared/agent-loop.ts";
-import { readAgentSessionToolNames } from "../shared/agent-tools.ts";
 import {
   readPendingAskQuestions,
   type PendingAskQuestions,
 } from "../shared/ask-questions.ts";
-import { isRecord, readNullableString } from "../shared/auth-model.ts";
-import { isProviderId } from "../shared/provider-id.ts";
+import { isRecord } from "../shared/auth-model.ts";
 import {
   readProviderModelPricing,
   type ProviderModelPricing,
@@ -24,17 +21,18 @@ import {
 import type {
   AgentSessionDetail,
   AgentSessionMessage,
-  AgentSessionStatus,
-  AgentSessionSummary,
   AgentSessionTurn,
 } from "../shared/session-model.ts";
 import {
+  isNullOrPositiveSafeInteger,
   readFiniteNumber,
   readNonNegativeSafeInteger,
+  readPositiveSafeInteger,
   stringArray,
 } from "../shared/validation.ts";
 import { readSessionContentFields } from "./session-message-codec.ts";
 import { decodedSessionMessage } from "./session-message-decoder.ts";
+import { readSessionSummary } from "./session-summary-codec.ts";
 import { readTokenUsageSummary } from "./session-usage-codec.ts";
 
 function readModelReasoningEfforts(
@@ -60,18 +58,6 @@ function readModelModalities(value: unknown): readonly string[] | null {
   return items;
 }
 
-function readPositiveSafeInteger(value: unknown): number | null {
-  if (typeof value !== "number" || value <= 0) {
-    return null;
-  }
-
-  return Number.isSafeInteger(value) ? value : null;
-}
-
-function isNullOrPositiveSafeInteger(value: unknown): value is number | null {
-  return value === null || readPositiveSafeInteger(value) !== null;
-}
-
 function readModelPricing(value: unknown): ProviderModelPricing | null {
   const pricing = readProviderModelPricing(value);
   if (pricing === undefined) {
@@ -85,6 +71,7 @@ function readModelOption(value: unknown): AgentModelOption {
     throw new Error("The server returned an invalid agent model");
   }
 
+  const adaptiveThinkingValue = value["adaptiveThinking"];
   const contextWindowValue =
     value["contextWindow"] === undefined
       ? value["context_window"]
@@ -98,6 +85,8 @@ function readModelOption(value: unknown): AgentModelOption {
   const pricingValue = value["pricing"];
 
   if (
+    (adaptiveThinkingValue !== null &&
+      typeof adaptiveThinkingValue !== "boolean") ||
     !isAgentModelId(id) ||
     (fallbackPromptValue !== undefined &&
       fallbackPromptValue !== null &&
@@ -116,6 +105,7 @@ function readModelOption(value: unknown): AgentModelOption {
     throw new Error("The server returned an invalid agent model");
   }
   return {
+    adaptiveThinking: adaptiveThinkingValue,
     contextWindow,
     fallbackPrompt:
       typeof fallbackPromptValue === "string" ? fallbackPromptValue : null,
@@ -185,254 +175,6 @@ export function readOpenRouterProviderCatalog(
     };
   });
   return { providers };
-}
-
-function readStatus(value: unknown): AgentSessionStatus | undefined {
-  switch (value) {
-    case "completed":
-    case "failed":
-    case "idle":
-    case "paused":
-    case "queued":
-    case "running":
-    case "stopped":
-      return value;
-    default:
-      return undefined;
-  }
-}
-
-const RESTART_HANDOFF_KEYS = new Set([
-  "executionGeneration",
-  "operation",
-  "pendingInput",
-  "requestedBy",
-  "restartId",
-]);
-
-function hasRestartHandoffShape(
-  value: Readonly<Record<string, unknown>>,
-): boolean {
-  const keys = Object.keys(value);
-  return (
-    keys.length === RESTART_HANDOFF_KEYS.size &&
-    keys.every((key) => RESTART_HANDOFF_KEYS.has(key))
-  );
-}
-
-function readRestartHandoff(
-  value: unknown,
-): AgentSessionSummary["restartHandoff"] | undefined {
-  if (value === null) {
-    return null;
-  }
-  if (!isRecord(value)) {
-    return undefined;
-  }
-  const executionGeneration = readFiniteNumber(value["executionGeneration"]);
-  const operation = value["operation"];
-  const pendingInput = value["pendingInput"];
-  const requestedBy = value["requestedBy"];
-  const restartId = value["restartId"];
-  return executionGeneration !== undefined &&
-    executionGeneration >= 0 &&
-    Number.isSafeInteger(executionGeneration) &&
-    (operation === "agent" ||
-      operation === "compact" ||
-      operation === "compact_and_continue") &&
-    Array.isArray(pendingInput) &&
-    pendingInput.length === 0 &&
-    (requestedBy === "runner" || requestedBy === "server") &&
-    typeof restartId === "string" &&
-    restartId.length > 0 &&
-    restartId.length <= 200 &&
-    hasRestartHandoffShape(value)
-    ? {
-        executionGeneration,
-        operation,
-        pendingInput: [],
-        requestedBy,
-        restartId,
-      }
-    : undefined;
-}
-
-function readSummary(value: unknown): AgentSessionSummary {
-  if (!isRecord(value)) {
-    throw new Error("The server returned an invalid agent session");
-  }
-
-  const activeDurationMs = readFiniteNumber(value["activeDurationMs"]);
-  const activeStartedAtValue = value["activeStartedAt"];
-  const activeStartedAt =
-    activeStartedAtValue === null
-      ? null
-      : readFiniteNumber(activeStartedAtValue);
-  const stepStartedAtValue = value["stepStartedAt"];
-  const stepStartedAt =
-    stepStartedAtValue === null ? null : readFiniteNumber(stepStartedAtValue);
-  const agentFilePath = readNullableString(value["agentFilePath"]);
-  let providerPricing: ProviderModelPricing | null;
-  try {
-    providerPricing = readModelPricing(value["providerPricing"]);
-  } catch {
-    throw new Error("The server returned an invalid agent session");
-  }
-  const autoCompact = value["autoCompact"];
-  const idleCompact = value["idleCompact"];
-  const costBasis = value["costBasis"];
-  const costUsd = readFiniteNumber(value["costUsd"]);
-  const createdAt = readFiniteNumber(value["createdAt"]);
-  const credentialId = value["credentialId"];
-  const currentContextTokens = readFiniteNumber(value["currentContextTokens"]);
-  const executionEnvironment = value["executionEnvironment"];
-  const generation = readFiniteNumber(value["generation"]);
-  const hasOlderSegments = value["hasOlderSegments"];
-  const id = value["id"];
-  const maxContextTokens = value["maxContextTokens"];
-  const maxOutputTokens = value["maxOutputTokens"];
-  const userContextTokenCap = value["userContextTokenCap"];
-  const model = value["model"];
-  const pendingQuestions =
-    value["pendingQuestions"] === undefined ||
-    value["pendingQuestions"] === null
-      ? null
-      : readPendingAskQuestions(value["pendingQuestions"]);
-  const providerValue = value["provider"];
-  const provider = isProviderId(providerValue) ? providerValue : undefined;
-  const openRouterProviderTagValue = value["openRouterProviderTag"];
-  const openRouterProviderTag =
-    provider === "openrouter"
-      ? readNullableString(openRouterProviderTagValue)
-      : openRouterProviderTagValue === null
-        ? null
-        : undefined;
-  const parentExecutionGenerationValue = value["parentExecutionGeneration"];
-  const parentExecutionGeneration =
-    parentExecutionGenerationValue === null
-      ? null
-      : readFiniteNumber(parentExecutionGenerationValue);
-  const parentSessionId = readNullableString(value["parentSessionId"]);
-  const reasoningEffort = readNullableString(value["reasoningEffort"]);
-  const restartHandoff = readRestartHandoff(value["restartHandoff"]);
-  const runnerId = value["runnerId"];
-  const runnerRequired = value["runnerRequired"];
-  const status = readStatus(value["status"]);
-  const title = value["title"];
-  const tools = readAgentSessionToolNames(value["tools"]);
-  const updatedAt = readFiniteNumber(value["updatedAt"]);
-  const workingDirectory = value["workingDirectory"];
-  const workspaceId = value["workspaceId"];
-
-  if (
-    activeDurationMs === undefined ||
-    activeDurationMs < 0 ||
-    !Number.isSafeInteger(activeDurationMs) ||
-    activeStartedAt === undefined ||
-    agentFilePath === undefined ||
-    (activeStartedAt !== null && !Number.isSafeInteger(activeStartedAt)) ||
-    stepStartedAt === undefined ||
-    (stepStartedAt !== null && !Number.isSafeInteger(stepStartedAt)) ||
-    typeof autoCompact !== "boolean" ||
-    typeof idleCompact !== "boolean" ||
-    (costBasis !== "none" &&
-      costBasis !== "reported" &&
-      costBasis !== "estimated") ||
-    costUsd === undefined ||
-    costUsd < 0 ||
-    (costBasis === "none" && costUsd !== 0) ||
-    createdAt === undefined ||
-    typeof credentialId !== "string" ||
-    currentContextTokens === undefined ||
-    currentContextTokens < 0 ||
-    !Number.isSafeInteger(currentContextTokens) ||
-    (executionEnvironment !== "bare_metal" &&
-      executionEnvironment !== "container") ||
-    generation === undefined ||
-    generation < 0 ||
-    !Number.isSafeInteger(generation) ||
-    typeof hasOlderSegments !== "boolean" ||
-    typeof id !== "string" ||
-    !isNullOrPositiveSafeInteger(maxContextTokens) ||
-    !isNullOrPositiveSafeInteger(maxOutputTokens) ||
-    !isNullOrPositiveSafeInteger(userContextTokenCap) ||
-    typeof model !== "string" ||
-    pendingQuestions === undefined ||
-    (pendingQuestions !== null &&
-      pendingQuestions.executionGeneration !== generation) ||
-    provider === undefined ||
-    openRouterProviderTag === undefined ||
-    (openRouterProviderTag !== null &&
-      !isOpenRouterProviderSelection(openRouterProviderTag)) ||
-    parentExecutionGeneration === undefined ||
-    (parentExecutionGeneration !== null &&
-      (!Number.isSafeInteger(parentExecutionGeneration) ||
-        parentExecutionGeneration < 0)) ||
-    parentSessionId === undefined ||
-    (parentExecutionGeneration !== null && parentSessionId === null) ||
-    value["providerPricing"] === undefined ||
-    reasoningEffort === undefined ||
-    (reasoningEffort !== null && !isAgentReasoningEffort(reasoningEffort)) ||
-    restartHandoff === undefined ||
-    (restartHandoff !== null &&
-      restartHandoff.executionGeneration !== generation) ||
-    (status === "paused" &&
-      (restartHandoff === null) === (pendingQuestions === null)) ||
-    (pendingQuestions !== null && status !== "paused") ||
-    (restartHandoff !== null && pendingQuestions !== null) ||
-    (restartHandoff !== null &&
-      status !== "paused" &&
-      status !== "queued" &&
-      status !== "running") ||
-    typeof runnerId !== "string" ||
-    typeof runnerRequired !== "boolean" ||
-    status === undefined ||
-    typeof title !== "string" ||
-    tools === undefined ||
-    updatedAt === undefined ||
-    typeof workingDirectory !== "string" ||
-    typeof workspaceId !== "string"
-  ) {
-    throw new Error("The server returned an invalid agent session");
-  }
-
-  return {
-    activeDurationMs,
-    activeStartedAt,
-    stepStartedAt,
-    agentFilePath,
-    autoCompact,
-    idleCompact,
-    costBasis,
-    costUsd,
-    createdAt,
-    credentialId,
-    currentContextTokens,
-    executionEnvironment,
-    generation,
-    hasOlderSegments,
-    id,
-    maxContextTokens,
-    maxOutputTokens,
-    userContextTokenCap,
-    model,
-    openRouterProviderTag,
-    parentExecutionGeneration,
-    parentSessionId,
-    provider,
-    providerPricing,
-    pendingQuestions,
-    reasoningEffort,
-    restartHandoff,
-    runnerId,
-    runnerRequired,
-    status,
-    title,
-    tools,
-    updatedAt,
-    workingDirectory,
-    workspaceId,
-  };
 }
 
 function readToolCalls(value: unknown) {
@@ -547,7 +289,7 @@ export function readSessionDetail(value: unknown): AgentSessionDetail {
     throw new Error("The server returned invalid agent session details");
   }
   return {
-    ...readSummary(value),
+    ...readSessionSummary(value),
     agentFile: readAgentFile(value["agentFile"]),
     messages: value["messages"].map(readMessage),
     modelContextTokens,
@@ -557,57 +299,5 @@ export function readSessionDetail(value: unknown): AgentSessionDetail {
     ...(Array.isArray(value["turns"])
       ? { turns: value["turns"].map(readTurn) }
       : {}),
-  };
-}
-
-export function readSessionList(
-  value: unknown,
-): readonly AgentSessionSummary[] {
-  if (!isRecord(value) || !Array.isArray(value["sessions"])) {
-    throw new Error("The server returned an invalid agent session list");
-  }
-
-  return value["sessions"].map(readSummary);
-}
-
-export function summaryFromDetail(
-  detail: AgentSessionDetail,
-): AgentSessionSummary {
-  return {
-    activeDurationMs: detail.activeDurationMs,
-    activeStartedAt: detail.activeStartedAt,
-    stepStartedAt: detail.stepStartedAt,
-    agentFilePath: detail.agentFilePath,
-    autoCompact: detail.autoCompact,
-    idleCompact: detail.idleCompact,
-    costBasis: detail.costBasis,
-    costUsd: detail.costUsd,
-    createdAt: detail.createdAt,
-    credentialId: detail.credentialId,
-    currentContextTokens: detail.currentContextTokens,
-    executionEnvironment: detail.executionEnvironment,
-    generation: detail.generation,
-    hasOlderSegments: detail.hasOlderSegments,
-    id: detail.id,
-    maxContextTokens: detail.maxContextTokens,
-    maxOutputTokens: detail.maxOutputTokens,
-    userContextTokenCap: detail.userContextTokenCap,
-    model: detail.model,
-    openRouterProviderTag: detail.openRouterProviderTag,
-    parentExecutionGeneration: detail.parentExecutionGeneration,
-    parentSessionId: detail.parentSessionId,
-    provider: detail.provider,
-    providerPricing: detail.providerPricing,
-    pendingQuestions: detail.pendingQuestions,
-    reasoningEffort: detail.reasoningEffort,
-    restartHandoff: detail.restartHandoff,
-    runnerId: detail.runnerId,
-    runnerRequired: detail.runnerRequired,
-    status: detail.status,
-    title: detail.title,
-    tools: detail.tools,
-    updatedAt: detail.updatedAt,
-    workingDirectory: detail.workingDirectory,
-    workspaceId: detail.workspaceId,
   };
 }

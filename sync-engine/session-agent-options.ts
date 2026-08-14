@@ -194,6 +194,7 @@ function boundedModel(
     !validMaxOutputTokens;
   return {
     option: {
+      adaptiveThinking: option.adaptiveThinking,
       contextWindow: validContextWindow ? option.contextWindow : null,
       maxOutputTokens: validMaxOutputTokens ? option.maxOutputTokens : null,
       ...(option.fallbackPrompt === undefined

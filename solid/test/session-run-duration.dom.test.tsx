@@ -1,10 +1,10 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { createReactiveState } from "../reactive-state.ts";
 import type { SessionViewState } from "../session-client.tsx";
-import { summaryFromDetail } from "../session-codec.ts";
 import { SessionController } from "../session-controller.ts";
 import { SessionList } from "../session-detail-client.tsx";
 import { initialSessionViewState } from "../session-state.ts";
+import { summaryFromDetail } from "../session-summary-codec.ts";
 import {
   disposeTestViews,
   mountTestView,

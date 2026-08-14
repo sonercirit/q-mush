@@ -1,8 +1,5 @@
 import {
-  AGENT_REASONING_EFFORTS,
   MAXIMUM_AGENT_MODEL_OPTIONS,
-  isAgentModelId,
-  isAgentReasoningEffort,
   type AgentModelCatalog,
   type AgentModelOption,
   type AgentReasoningEffort,
@@ -12,13 +9,14 @@ import type {
   ProviderCredentialAccess,
   ProviderId,
 } from "../shared/provider-credential-store.ts";
-import type { ProviderModelPricing } from "../shared/provider-model-pricing.ts";
-import { utf8Prefix } from "../shared/utf8.ts";
-import { readPositiveSafeInteger } from "../shared/validation.ts";
 import {
   readAnthropicModelList,
   withAnthropicCapabilities,
 } from "./agent-model-discovery-anthropic.ts";
+import {
+  modelOption,
+  reasoningEfforts,
+} from "./agent-model-discovery-option.ts";
 import { usesAnthropicFormat } from "./agent-model-options.ts";
 import {
   agentProviderRequestHeaders,
@@ -32,11 +30,7 @@ const OPENAI_CODEX_MODELS_URL = "https://chatgpt.com/backend-api/codex/models";
 const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models/user";
 const MODEL_CLIENT_VERSION = "1.0.0";
 const MAXIMUM_RESPONSE_LENGTH = 5 * 1024 * 1024;
-const MAXIMUM_MODEL_LABEL_BYTES = 300;
-const MAXIMUM_MODEL_FALLBACK_PROMPT_BYTES = 4_000;
-const MAXIMUM_MODEL_METADATA_ITEMS = 20;
 const MAXIMUM_MODEL_METADATA_INPUT_ITEMS = 100;
-const MAXIMUM_MODEL_METADATA_TEXT_BYTES = 100;
 const MODEL_CATALOG_TOO_LARGE = "The provider model catalog was too large";
 const MODEL_CATALOG_HAS_TOO_MANY_OPTIONS =
   "The provider model catalog has too many options";
@@ -99,180 +93,6 @@ export function safeAgentModelDiscoveryError(error: unknown): string {
   return error instanceof AgentModelDiscoveryError
     ? error.message
     : "Model discovery failed because the provider is unavailable";
-}
-
-function modelLabel(value: unknown, fallback: string): string {
-  return typeof value === "string" && value.trim().length > 0
-    ? utf8Prefix(value.trim(), MAXIMUM_MODEL_LABEL_BYTES)
-    : fallback;
-}
-
-function boundedArray(value: unknown): readonly unknown[] | undefined {
-  return Array.isArray(value)
-    ? value.slice(0, MAXIMUM_MODEL_METADATA_INPUT_ITEMS)
-    : undefined;
-}
-
-function reasoningEfforts(value: unknown): readonly AgentReasoningEffort[] {
-  const candidates = boundedArray(value);
-  if (candidates === undefined) {
-    return [];
-  }
-
-  const efforts: AgentReasoningEffort[] = [];
-
-  for (const item of candidates) {
-    const effort = isRecord(item) ? item["effort"] : item;
-
-    if (isAgentReasoningEffort(effort) && !efforts.includes(effort)) {
-      efforts.push(effort);
-      if (efforts.length === AGENT_REASONING_EFFORTS.length) {
-        break;
-      }
-    }
-  }
-
-  return efforts;
-}
-
-function uniqueStrings(value: unknown): readonly string[] | null {
-  const candidates = boundedArray(value);
-  if (candidates === undefined) {
-    return null;
-  }
-
-  const selected: string[] = [];
-  const seen = new Set<string>();
-  for (const item of candidates) {
-    if (selected.length >= MAXIMUM_MODEL_METADATA_ITEMS) {
-      break;
-    }
-    if (typeof item !== "string" || item.length === 0) {
-      continue;
-    }
-    const bounded = utf8Prefix(item, MAXIMUM_MODEL_METADATA_TEXT_BYTES);
-    if (bounded.length > 0 && !seen.has(bounded)) {
-      seen.add(bounded);
-      selected.push(bounded);
-    }
-  }
-  return selected;
-}
-
-function nestedValue(
-  value: Readonly<Record<string, unknown>>,
-  key: string,
-  parentKey: string,
-): unknown {
-  const direct = value[key];
-
-  if (direct !== undefined) {
-    return direct;
-  }
-
-  const parent = value[parentKey];
-  return isRecord(parent) ? parent[key] : undefined;
-}
-
-type TokenLimitRecord = Readonly<Record<string, unknown>>;
-
-function modelTokenLimit(
-  value: TokenLimitRecord,
-  keys: readonly string[],
-): number | null {
-  for (const key of keys) {
-    const contextWindow = readPositiveSafeInteger(
-      nestedValue(value, key, "capabilities"),
-    );
-
-    if (contextWindow !== null) {
-      return contextWindow;
-    }
-  }
-
-  return null;
-}
-
-function modelPricing(value: unknown): ProviderModelPricing | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-
-  const pricing: Partial<
-    Record<
-      "cacheWriteInput" | "cachedInput" | "input" | "output",
-      string | number
-    >
-  > = {};
-  const add = (
-    target: "cacheWriteInput" | "cachedInput" | "input" | "output",
-    keys: readonly string[],
-  ): void => {
-    for (const key of keys) {
-      const price = value[key];
-      const boundedPrice =
-        typeof price === "string"
-          ? utf8Prefix(price.trim(), MAXIMUM_MODEL_METADATA_TEXT_BYTES)
-          : price;
-      if (
-        (typeof boundedPrice === "string" && boundedPrice.length > 0) ||
-        (typeof boundedPrice === "number" &&
-          Number.isFinite(boundedPrice) &&
-          boundedPrice >= 0)
-      ) {
-        pricing[target] = boundedPrice;
-        return;
-      }
-    }
-  };
-  add("cacheWriteInput", ["cache_write_input", "input_cache_write"]);
-  add("cachedInput", ["cached_input", "input_cache_read"]);
-  add("input", ["prompt", "input"]);
-  add("output", ["completion", "output"]);
-  return Object.keys(pricing).length === 0 ? null : pricing;
-}
-
-function modelOption(
-  value: unknown,
-  idKey: string,
-  labelKey: string,
-  efforts: readonly AgentReasoningEffort[],
-  contextKeys: readonly string[],
-  outputTokenKeys: readonly string[] = [],
-): AgentModelOption | undefined {
-  if (!isRecord(value)) {
-    return undefined;
-  }
-
-  const id = value[idKey];
-
-  if (!isAgentModelId(id)) {
-    return undefined;
-  }
-
-  return {
-    contextWindow: modelTokenLimit(value, contextKeys),
-    maxOutputTokens: modelTokenLimit(value, outputTokenKeys),
-    ...(typeof value["fallback_prompt"] === "string"
-      ? {
-          fallbackPrompt:
-            utf8Prefix(
-              value["fallback_prompt"].trim(),
-              MAXIMUM_MODEL_FALLBACK_PROMPT_BYTES,
-            ) || null,
-        }
-      : {}),
-    id,
-    inputModalities: uniqueStrings(
-      nestedValue(value, "input_modalities", "architecture"),
-    ),
-    label: modelLabel(value[labelKey], id),
-    outputModalities: uniqueStrings(
-      nestedValue(value, "output_modalities", "architecture"),
-    ),
-    pricing: modelPricing(value["pricing"]),
-    reasoningEfforts: efforts,
-  };
 }
 
 function uniqueModels(

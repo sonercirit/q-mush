@@ -4,7 +4,7 @@ import type {
   AgentSessionMessage,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
-import { summaryFromDetail } from "./session-codec.ts";
+import { summaryFromDetail } from "./session-summary-codec.ts";
 
 export function replaceSessionSummary(
   sessions: readonly AgentSessionSummary[],

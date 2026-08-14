@@ -45,6 +45,7 @@ export function model(
   maxOutputTokens: number | null = null,
 ): AgentModelOption {
   return {
+    adaptiveThinking: null,
     contextWindow,
     id,
     inputModalities,

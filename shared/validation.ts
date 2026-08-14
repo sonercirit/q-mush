@@ -32,6 +32,12 @@ export function readPositiveSafeInteger(value: unknown): number | null {
     : null;
 }
 
+export function isNullOrPositiveSafeInteger(
+  value: unknown,
+): value is number | null {
+  return value === null || readPositiveSafeInteger(value) !== null;
+}
+
 export function stringArray(value: unknown): readonly string[] | undefined {
   return Array.isArray(value) && value.every((item) => typeof item === "string")
     ? value

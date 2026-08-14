@@ -29,6 +29,7 @@ import {
   transitionTestSession,
   unsupportedFixtureStatus,
 } from "./session-launch-race-helpers.ts";
+import { EMPTY_SESSION_REQUEST_MODEL_METADATA } from "./session-race-test-helpers.ts";
 import {
   createStore,
   createTestSession,
@@ -359,11 +360,7 @@ function agentActionsSetup(
     database: setup.database,
     discoverModels: testModelCatalog,
     discoverSessionMetadata: () =>
-      Promise.resolve().then(() => ({
-        maxContextTokens: null,
-        maxOutputTokens: null,
-        providerPricing: null,
-      })),
+      Promise.resolve().then(() => EMPTY_SESSION_REQUEST_MODEL_METADATA),
     draining: () => false,
     launchSession: (_credential, detail) => launch.fail(detail),
     listOnlineRunners: () => [],

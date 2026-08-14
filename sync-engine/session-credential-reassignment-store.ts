@@ -32,6 +32,7 @@ export interface SessionCredentialReassignmentSnapshot {
 }
 
 export interface SessionCredentialMetadataUpdate {
+  readonly adaptiveThinking: boolean | null;
   readonly id: string;
   readonly maxContextTokens: number | null;
   readonly maxOutputTokens: number | null;
@@ -131,6 +132,7 @@ function applyMetadataUpdates(
     transaction
       .update(agentSessions)
       .set({
+        adaptiveThinking: update.adaptiveThinking,
         maxContextTokens: update.maxContextTokens,
         maxOutputTokens: update.maxOutputTokens,
         providerPricing: serializeProviderPricing(update.providerPricing),
@@ -281,11 +283,10 @@ export class SessionCredentialReassignmentStore {
           .set({
             providerCredentialId: options.credentialId,
             // A generic credential may point at a different endpoint whose
-            // limit for the same model differs; clearing it lets the lazy
-            // pre-request refresh re-probe the new catalog. OpenAI-format
-            // requests never send it, so the reset is harmless there.
+            // model capabilities and output limit differ; clearing them lets
+            // the lazy pre-request refresh re-probe the new catalog.
             ...(options.provider === "generic"
-              ? { maxOutputTokens: null }
+              ? { adaptiveThinking: null, maxOutputTokens: null }
               : {}),
             ...updatedAuditFields(options.userId, options.now),
           })

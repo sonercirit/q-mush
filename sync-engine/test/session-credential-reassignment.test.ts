@@ -7,6 +7,7 @@ import {
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { closeTrackedDatabases } from "./database-test-helpers.ts";
+import { testSessionCredentialMetadataUpdate } from "./session-credential-metadata-fixtures.ts";
 import { expectErrorResponse } from "./session-reassignment-race-helpers.ts";
 
 type ReassignmentEndpointOptions = Omit<
@@ -219,14 +220,7 @@ describe("session credential reassignment endpoint", () => {
           openRouterProviderTag: "together",
         },
       ],
-      metadataUpdates: [
-        {
-          id: "session-1",
-          maxContextTokens: 64_000,
-          maxOutputTokens: null,
-          providerPricing: null,
-        },
-      ],
+      metadataUpdates: [testSessionCredentialMetadataUpdate()],
     };
     const snapshot = vi.fn(() => ({
       sessions: preparedProviderState.expectedSessions,

@@ -3,6 +3,7 @@ import {
   readAgentModelCatalog,
   readSessionDetail,
 } from "../../solid/session-codec.ts";
+import { summaryFromDetail } from "../session-summary-codec.ts";
 import {
   TEST_AGENT_IMAGE,
   testUserImageMessage,
@@ -28,6 +29,37 @@ const RESTART_HANDOFF = {
   requestedBy: "server",
   restartId: "restart-1",
 } as const;
+
+test("projects session details to summary-only fields", () => {
+  const usage = {
+    cacheWriteInputTokens: 0,
+    cachedInputTokens: 0,
+    inputTokens: 1,
+    lastInputTokens: 1,
+    outputTokens: 0,
+    reportedStepCount: 1,
+    stepCount: 1,
+  };
+  const summary = summaryFromDetail({
+    ...DETAIL,
+    segmentTokenUsage: usage,
+    tokenUsage: usage,
+    turns: [],
+  });
+
+  for (const detailOnlyKey of [
+    "agentFile",
+    "messages",
+    "modelContextTokens",
+    "pendingInputs",
+    "segmentTokenUsage",
+    "tokenUsage",
+    "turns",
+  ]) {
+    expect(summary).not.toHaveProperty(detailOnlyKey);
+  }
+  expect(summary.adaptiveThinking).toBe(DETAIL.adaptiveThinking);
+});
 
 test("reads message image metadata from the server", () => {
   const detail = {
@@ -247,6 +279,7 @@ function modelCatalogValue(
     defaultModel: "gpt-test",
     models: [
       {
+        adaptiveThinking: null,
         contextWindow: 128_000,
         id: "gpt-test",
         ...(includeInput ? { inputModalities } : {}),

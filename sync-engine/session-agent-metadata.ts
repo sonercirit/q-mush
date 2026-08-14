@@ -19,7 +19,10 @@ export async function discoverSessionAgentMetadata(
 ): Promise<
   Pick<
     AgentSessionDetail,
-    "maxContextTokens" | "maxOutputTokens" | "providerPricing"
+    | "adaptiveThinking"
+    | "maxContextTokens"
+    | "maxOutputTokens"
+    | "providerPricing"
   >
 > {
   const metadata = await sessionMetadata({

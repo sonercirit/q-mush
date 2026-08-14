@@ -26,6 +26,7 @@ import {
 
 export interface CreateAgentSession extends Pick<
   AgentSessionSummary,
+  | "adaptiveThinking"
   | "autoCompact"
   | "executionEnvironment"
   | "maxContextTokens"
@@ -63,6 +64,7 @@ export interface ForkAgentSession extends Pick<
   readonly idleCompact: boolean;
   readonly configuration?: Pick<
     CreateAgentSession,
+    | "adaptiveThinking"
     | "credentialId"
     | "maxContextTokens"
     | "maxOutputTokens"
@@ -84,6 +86,7 @@ export type ForkSessionResult = Readonly<{
 function validateSessionConfiguration(
   input: Pick<
     CreateAgentSession,
+    | "adaptiveThinking"
     | "maxContextTokens"
     | "maxOutputTokens"
     | "userContextTokenCap"
@@ -91,6 +94,14 @@ function validateSessionConfiguration(
     | "provider"
   >,
 ): void {
+  if (
+    input.adaptiveThinking !== null &&
+    typeof input.adaptiveThinking !== "boolean"
+  ) {
+    throw new Error(
+      "The agent session adaptive-thinking capability is invalid",
+    );
+  }
   if (
     input.maxContextTokens !== null &&
     (!Number.isSafeInteger(input.maxContextTokens) ||
@@ -123,6 +134,7 @@ function validateSessionConfiguration(
 function storedSessionValues(
   input: Pick<
     CreateAgentSession,
+    | "adaptiveThinking"
     | "agentFilePath"
     | "autoCompact"
     | "credentialId"
@@ -154,6 +166,7 @@ function storedSessionValues(
 ) {
   return {
     ...createdAuditFields(input.userId, now),
+    adaptiveThinking: input.adaptiveThinking,
     agentFilePath: input.agentFilePath ?? null,
     autoCompact: input.autoCompact,
     executionEnvironment: input.executionEnvironment,

@@ -1,8 +1,8 @@
 import { createSignal, untrack } from "solid-js";
 import { afterEach, expect, test, vi } from "vitest";
-import { summaryFromDetail } from "../session-codec.ts";
 import { SessionDetailBody } from "../session-detail-body.tsx";
 import type { LoadedSessionDetailViewProps } from "../session-detail-view-props.ts";
+import { summaryFromDetail } from "../session-summary-codec.ts";
 import { disposeTestViews, queryTestTranscript } from "./dom-test-helpers.ts";
 import { defineElementSize } from "./element-size-test-helpers.ts";
 import { sessionDetailState } from "./session-detail-test-state.ts";

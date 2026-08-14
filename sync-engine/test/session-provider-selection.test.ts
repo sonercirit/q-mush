@@ -5,13 +5,36 @@ import { SESSION_OPENROUTER_PROVIDERS_PATH } from "../../shared/routes.ts";
 import { testAgentModelCatalog } from "../../shared/test/agent-model-fixtures.ts";
 import { AgentModelDiscoveryError } from "../../sync-engine/agent-model-discovery.ts";
 import { ProviderCredentialRejectionError } from "../../sync-engine/provider-error.ts";
+import type { SessionCredentialMetadataUpdate } from "../../sync-engine/session-credential-reassignment-store.ts";
 import {
   openRouterProvidersForUser,
   prepareOpenRouterSessionCredentialProviderState,
   sessionMetadata,
+  type SessionRequestModelMetadata,
 } from "../../sync-engine/session-provider-selection.ts";
 import { TEST_OPENROUTER_PROVIDER_CATALOG } from "./openrouter-provider-catalog-fixture.ts";
 import { openRouterCredential } from "./openrouter-provider-discovery-helpers.ts";
+
+function metadata(
+  overrides: Partial<SessionRequestModelMetadata> = {},
+): SessionRequestModelMetadata {
+  return {
+    adaptiveThinking: null,
+    maxContextTokens: 64_000,
+    maxOutputTokens: null,
+    providerPricing: null,
+    ...overrides,
+  };
+}
+
+function metadataUpdate(id: string): SessionCredentialMetadataUpdate {
+  return {
+    ...metadata({
+      providerPricing: { input: "0.0000002", output: "0.0000008" },
+    }),
+    id,
+  };
+}
 
 const USER: AuthenticatedUser = {
   email: "owner@example.test",
@@ -48,11 +71,7 @@ async function expectSuccessfulMetadata(
 ): Promise<void> {
   await expect(
     metadataWithoutProviderDiscovery(input, discoverProviders),
-  ).resolves.toEqual({
-    maxContextTokens: 128_000,
-    maxOutputTokens: null,
-    providerPricing: null,
-  });
+  ).resolves.toEqual(metadata({ maxContextTokens: 128_000 }));
 }
 
 function metadataOptions(
@@ -207,8 +226,8 @@ describe("OpenRouter session provider validation", () => {
     expect(result).toMatchObject({
       preparedProviderState: {
         metadataUpdates: [
-          { id: "session-1", maxContextTokens: 64_000, maxOutputTokens: null },
-          { id: "session-2", maxContextTokens: 64_000, maxOutputTokens: null },
+          metadataUpdate("session-1"),
+          metadataUpdate("session-2"),
         ],
       },
     });
@@ -251,11 +270,11 @@ describe("OpenRouter session provider validation", () => {
   test("force-validates explicit tags and uses endpoint metadata", async () => {
     const calls: unknown[][] = [];
 
-    await expect(metadataWithRecordedDiscovery(calls)).resolves.toEqual({
-      maxContextTokens: 64_000,
-      maxOutputTokens: null,
-      providerPricing: { input: "0.0000002", output: "0.0000008" },
-    });
+    await expect(metadataWithRecordedDiscovery(calls)).resolves.toEqual(
+      metadata({
+        providerPricing: { input: "0.0000002", output: "0.0000008" },
+      }),
+    );
     expect(calls[0]?.[3]).toEqual({ force: true });
   });
 
@@ -297,11 +316,7 @@ describe("OpenRouter session provider validation", () => {
       sessionMetadata(
         metadataOptions({ ...discoveryFailure, input: automaticInput }),
       ),
-    ).resolves.toEqual({
-      maxContextTokens: null,
-      maxOutputTokens: null,
-      providerPricing: null,
-    });
+    ).resolves.toEqual(metadata({ maxContextTokens: null }));
   });
 
   test("propagates tagged-provider credential rejections when requested", async () => {

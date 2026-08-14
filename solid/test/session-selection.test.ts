@@ -18,6 +18,7 @@ const CATALOG: AgentModelCatalog = {
   defaultModel: "powerful",
   models: [
     {
+      adaptiveThinking: null,
       contextWindow: null,
       id: "balanced",
       inputModalities: null,
@@ -28,6 +29,7 @@ const CATALOG: AgentModelCatalog = {
       reasoningEfforts: ["low", "medium"],
     },
     {
+      adaptiveThinking: null,
       contextWindow: null,
       id: "powerful",
       inputModalities: null,

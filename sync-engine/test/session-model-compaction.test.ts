@@ -85,6 +85,7 @@ describe("session models and compaction", () => {
       defaultModel: "gpt-discovered",
       models: [
         {
+          adaptiveThinking: null,
           contextWindow: 200_000,
           id: "gpt-discovered",
           inputModalities: null,

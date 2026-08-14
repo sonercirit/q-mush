@@ -7,6 +7,7 @@ export function testAgentModelOption(
   overrides: Partial<AgentModelOption> = {},
 ): AgentModelOption {
   return {
+    adaptiveThinking: null,
     contextWindow: 128_000,
     id: "vendor/model",
     inputModalities: ["text"],

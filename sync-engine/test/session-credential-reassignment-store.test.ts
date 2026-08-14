@@ -25,6 +25,7 @@ import {
   expectedOpenRouterSessionMetadata,
   openRouterSessionMetadataSelection,
 } from "./openrouter-provider-catalog-fixture.ts";
+import { testSessionCredentialMetadataUpdate } from "./session-credential-metadata-fixtures.ts";
 
 const NOW = 1_700_000_000_000;
 const USER_ID = "user-1";
@@ -102,6 +103,7 @@ function addSession(
   id: string,
   credentialId = SOURCE,
   options: {
+    readonly adaptiveThinking?: boolean | null;
     readonly contextWindow?: number | null;
     readonly deleted?: boolean;
     readonly maxOutputTokens?: number | null;
@@ -116,6 +118,7 @@ function addSession(
     .values({
       ...createdAuditFields(USER_ID, NOW),
       ...(options.deleted === true ? { isDeleted: true } : {}),
+      adaptiveThinking: options.adaptiveThinking,
       id,
       maxContextTokens: options.contextWindow,
       maxOutputTokens: options.maxOutputTokens,
@@ -260,15 +263,23 @@ describe("session credential reassignment store", () => {
     ).toHaveLength(3);
   });
 
-  test("clears the output limit when a generic credential is reassigned", () => {
+  test("clears Anthropic metadata when a generic credential is reassigned", () => {
     const { database, store } = setup();
     for (const [id, credentialId, options] of [
       [
         "generic-session",
         "generic-source",
-        { maxOutputTokens: 64_000, provider: "generic" },
+        {
+          adaptiveThinking: false,
+          maxOutputTokens: 64_000,
+          provider: "generic",
+        },
       ],
-      ["openai-session", SOURCE, { maxOutputTokens: 32_000 }],
+      [
+        "openai-session",
+        SOURCE,
+        { adaptiveThinking: true, maxOutputTokens: 32_000 },
+      ],
     ] as const) {
       addSession(database, id, credentialId, options);
     }
@@ -284,20 +295,27 @@ describe("session credential reassignment store", () => {
     );
     expectMigratedSessionCount(reassign(store), 1);
 
-    const limits = new Map(
+    const metadata = new Map(
       database
         .select({
+          adaptiveThinking: agentSessions.adaptiveThinking,
           id: agentSessions.id,
           maxOutputTokens: agentSessions.maxOutputTokens,
         })
         .from(agentSessions)
         .all()
-        .map((row) => [row.id, row.maxOutputTokens]),
+        .map((row) => [row.id, row]),
     );
-    // The generic endpoint may differ, so its limit re-probes lazily; the
-    // OpenAI credential change keeps the stored limit.
-    expect(limits.get("generic-session")).toBeNull();
-    expect(limits.get("openai-session")).toBe(32_000);
+    // The generic endpoint may differ, so its metadata re-probes lazily; the
+    // OpenAI credential change keeps the stored metadata.
+    expect(metadata.get("generic-session")).toMatchObject({
+      adaptiveThinking: null,
+      maxOutputTokens: null,
+    });
+    expect(metadata.get("openai-session")).toMatchObject({
+      adaptiveThinking: true,
+      maxOutputTokens: 32_000,
+    });
   });
 
   test("requires the target credential to be accessible in the selected scope", () => {
@@ -369,15 +387,12 @@ describe("session credential reassignment store", () => {
     });
     expectMigratedSessionCount(
       reassignOpenRouter(store, snapshot, [
-        {
-          id: "session-1",
-          maxContextTokens: 64_000,
-          maxOutputTokens: null,
+        testSessionCredentialMetadataUpdate({
           providerPricing: {
             input: "0.0000002",
             output: "0.0000008",
           },
-        },
+        }),
       ]),
       1,
     );

@@ -33,37 +33,39 @@ function capabilitySupported(
 }
 
 // Undefined means efforts are unknown (fallback-eligible), while an array —
-// possibly empty — is authoritative: explicit denials and unverifiable
-// adaptive support must not be overwritten by the OpenAI-style fallback
-// listing. Efforts are offered only alongside adaptive thinking because
-// selecting one turns on `thinking: {type: "adaptive"}`, which
-// adaptive-incapable models reject — including effort-capable
-// extended-thinking-only models (Claude Opus 4.5), which stay effortless
-// here until sessions carry per-model thinking capabilities.
+// possibly empty — is authoritative. Effort is independent of thinking, so
+// adaptive-incapable models can still offer levels; sessions persist the
+// adaptive leaf separately and omit `thinking` for those requests.
+interface AnthropicEffortCapabilities {
+  readonly adaptiveThinking: boolean | null;
+  readonly efforts: readonly AgentReasoningEffort[] | undefined;
+}
+
 function anthropicCapabilityEfforts(
   capabilities: unknown,
-): readonly AgentReasoningEffort[] | undefined {
+): AnthropicEffortCapabilities {
   const effort = capabilityRecord(capabilities, "effort");
   const thinking = capabilityRecord(capabilities, "thinking");
   const adaptive = capabilityRecord(thinking, "types")?.["adaptive"];
-  const adaptiveSupported = isRecord(adaptive)
-    ? adaptive["supported"] === true
-    : adaptive === true;
-  // An explicit denial — a thinking node whose own leaf withholds support,
-  // or an adaptive leaf (record or boolean shorthand) that does — is
-  // authoritative even without effort metadata; when every leaf is absent,
-  // support is unknown.
-  if (
-    thinking?.["supported"] === false ||
-    (adaptive !== undefined && !adaptiveSupported)
-  ) {
-    return [];
-  }
+  const adaptiveThinking =
+    thinking?.["supported"] === false
+      ? false
+      : adaptive === undefined
+        ? null
+        : isRecord(adaptive)
+          ? adaptive["supported"] === true
+            ? true
+            : adaptive["supported"] === false
+              ? false
+              : null
+          : typeof adaptive === "boolean"
+            ? adaptive
+            : null;
   if (effort === undefined) {
-    return undefined;
+    return { adaptiveThinking, efforts: undefined };
   }
-  if (effort["supported"] !== true || !adaptiveSupported) {
-    return [];
+  if (effort["supported"] !== true) {
+    return { adaptiveThinking, efforts: [] };
   }
   // The documented tree has no "none" leaf; skipping it defends against a
   // server publishing one, which would otherwise duplicate the prepended
@@ -71,9 +73,12 @@ function anthropicCapabilityEfforts(
   const efforts = AGENT_REASONING_EFFORTS.filter(
     (level) => level !== "none" && capabilitySupported(effort, level),
   );
-  // Affirmed effort support without named levels reads as unknown, not
-  // none: adaptive is confirmed, so listing-sourced levels are safe.
-  return efforts.length === 0 ? undefined : ["none", ...efforts];
+  // Affirmed effort support without named levels reads as unknown, not none:
+  // levels from a dual-format listing can safely fill the missing detail.
+  return {
+    adaptiveThinking,
+    efforts: efforts.length === 0 ? undefined : ["none", ...efforts],
+  };
 }
 
 // Modalities are derived only when the tree actually describes them: proxies
@@ -105,12 +110,14 @@ export function withAnthropicCapabilities(
   entry: Readonly<Record<string, unknown>>,
 ): AnthropicCapabilityOption {
   const capabilities = entry["capabilities"];
-  const efforts = anthropicCapabilityEfforts(capabilities);
+  const { adaptiveThinking, efforts } =
+    anthropicCapabilityEfforts(capabilities);
   const modalities = anthropicCapabilityModalities(capabilities);
   return {
     effortsAuthoritative: efforts !== undefined,
     option: {
       ...option,
+      adaptiveThinking,
       ...(modalities === null ? {} : { inputModalities: modalities }),
       ...(efforts === undefined ? {} : { reasoningEfforts: efforts }),
     },

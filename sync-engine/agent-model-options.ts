@@ -32,6 +32,7 @@ export function usesAnthropicFormat(
 }
 
 export interface AgentModelRequestOptions {
+  readonly adaptiveThinking?: boolean | null;
   readonly credential: AgentProviderCredential;
   readonly dynamicToolCache?: boolean;
   readonly maxOutputTokens: number | null;

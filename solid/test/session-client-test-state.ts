@@ -19,6 +19,7 @@ export function sessionClientTestState(): SessionViewState {
         defaultModel: "gpt-5-codex",
         models: [
           {
+            adaptiveThinking: null,
             contextWindow: 200_000,
             id: "gpt-5-codex",
             inputModalities: ["text", "image", "audio"],
@@ -29,6 +30,7 @@ export function sessionClientTestState(): SessionViewState {
             reasoningEfforts: ["medium", "high", "xhigh"],
           },
           {
+            adaptiveThinking: null,
             contextWindow: 64_000,
             id: "image-model",
             inputModalities: ["image"],

@@ -2,9 +2,9 @@ import { expect, test } from "vitest";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { createReactiveState } from "../../solid/reactive-state.ts";
 import type { SessionViewState } from "../../solid/session-client.tsx";
-import { summaryFromDetail } from "../../solid/session-codec.ts";
 import { SessionController } from "../../solid/session-controller.ts";
 import { initialSessionViewState } from "../../solid/session-state.ts";
+import { summaryFromDetail } from "../../solid/session-summary-codec.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 import { transcriptMessage } from "./transcript-ordering-fixtures.ts";
 

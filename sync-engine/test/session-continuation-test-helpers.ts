@@ -26,6 +26,7 @@ export function testModelCatalog(
     defaultModel: modelId,
     models: [
       {
+        adaptiveThinking: null,
         contextWindow: 100_000,
         id: modelId,
         inputModalities: null,

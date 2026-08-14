@@ -87,8 +87,12 @@ function expectAbsentProperties(
 
 async function effortRequestBody(
   effort: "minimal" | "none" | "xhigh",
+  adaptiveThinking: boolean | null = true,
 ): Promise<unknown> {
-  const harness = anthropicHarness([doneEvents()], { reasoningEffort: effort });
+  const harness = anthropicHarness([doneEvents()], {
+    adaptiveThinking,
+    reasoningEffort: effort,
+  });
   await harness.complete();
   return harness.requestBody(0);
 }
@@ -406,6 +410,13 @@ describe("anthropic-format generic provider", () => {
     expect(await effortRequestBody("minimal")).toMatchObject({
       output_config: { effort: "low" },
     });
+  });
+
+  test("sends effort without adaptive thinking when the model rejects it", async () => {
+    const body = await effortRequestBody("xhigh", false);
+
+    expect(body).toMatchObject({ output_config: { effort: "xhigh" } });
+    expect(body).not.toHaveProperty("thinking");
   });
 
   test("surfaces a provider effort rejection", async () => {

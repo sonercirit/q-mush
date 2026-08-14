@@ -26,6 +26,7 @@ export function createSessionInput(options: {
   readonly workingDirectory?: string;
 }): CreateAgentSession {
   return {
+    adaptiveThinking: null,
     agentFilePath: null,
     autoCompact: true,
     credentialId: options.credentialId,

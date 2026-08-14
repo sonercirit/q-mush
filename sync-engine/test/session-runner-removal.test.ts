@@ -36,6 +36,7 @@ function testSession(): AgentSessionDetail {
   };
   return {
     ...base,
+    adaptiveThinking: null,
     activeDurationMs: 0,
     activeStartedAt: null,
     stepStartedAt: null,

@@ -121,6 +121,7 @@ describe("session store forks", () => {
     const fork = requireForked(result);
     expect(fork).toMatchObject({
       autoCompact: source.autoCompact,
+      adaptiveThinking: source.adaptiveThinking,
       credentialId: source.credentialId,
       idleCompact: source.idleCompact,
       executionEnvironment: source.executionEnvironment,
@@ -196,6 +197,7 @@ describe("session store forks", () => {
     const { database, source, store } = prepareForkSource();
 
     const result = forkAtToolMessage(store, {
+      adaptiveThinking: false,
       credentialId: source.credentialId,
       maxContextTokens: 256_000,
       maxOutputTokens: null,
@@ -207,6 +209,7 @@ describe("session store forks", () => {
     });
 
     expect(requireForked(result)).toMatchObject({
+      adaptiveThinking: false,
       credentialId: source.credentialId,
       executionEnvironment: source.executionEnvironment,
       maxContextTokens: 256_000,

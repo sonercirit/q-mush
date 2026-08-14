@@ -90,6 +90,7 @@ export interface AgentSessionMessage extends AttachmentContentFields {
 }
 
 export interface AgentSessionSummary extends SessionRunStepTiming<number> {
+  readonly adaptiveThinking: boolean | null;
   readonly agentFilePath: string | null;
   readonly autoCompact: boolean;
   readonly costBasis: AgentSessionCostBasis;
