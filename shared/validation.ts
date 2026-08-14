@@ -53,9 +53,10 @@ export function readIdentifier(value: unknown): string | undefined {
 export function readBoundedString(
   value: unknown,
   maximumLength: number,
+  allowEmpty = false,
 ): string | undefined {
   return typeof value === "string" &&
-    value.length > 0 &&
+    (allowEmpty || value.length > 0) &&
     value.length <= maximumLength
     ? value
     : undefined;
@@ -93,4 +94,68 @@ export function abortSignalError(signal: AbortSignal, message: string): Error {
   return reason instanceof Error
     ? reason
     : new DOMException(message, "AbortError");
+}
+
+export function throwIfSignalAborted(
+  signal: AbortSignal | undefined,
+  message: string,
+): void {
+  if (signal?.aborted === true) throw abortSignalError(signal, message);
+}
+
+interface AbortableOperationOptions {
+  readonly abortMessage: string;
+  readonly failureMessage?: string;
+  readonly onAbort?: () => void;
+}
+
+export function executeWithAbortSignal<Value>(
+  signal: AbortSignal,
+  options: AbortableOperationOptions,
+  execute: () => Promise<Value>,
+): Promise<Value> {
+  const failure = (error: unknown): Error =>
+    error instanceof Error
+      ? error
+      : new Error(options.failureMessage ?? "The operation failed");
+  if (signal.aborted) {
+    options.onAbort?.();
+    return Promise.reject(abortSignalError(signal, options.abortMessage));
+  }
+  return new Promise<Value>((resolve, reject) => {
+    const cleanup = (): void => {
+      signal.removeEventListener("abort", aborted);
+    };
+    const aborted = (): void => {
+      options.onAbort?.();
+      reject(abortSignalError(signal, options.abortMessage));
+    };
+    signal.addEventListener("abort", aborted, { once: true });
+    let pending: Promise<Value>;
+    try {
+      pending = execute();
+    } catch (error) {
+      cleanup();
+      reject(failure(error));
+      return;
+    }
+    void pending.then(
+      (value) => {
+        cleanup();
+        resolve(value);
+      },
+      (error: unknown) => {
+        cleanup();
+        reject(failure(error));
+      },
+    );
+  });
+}
+
+// Spread helper for exact-optional signal fields: omits the key entirely
+// when no signal is provided instead of writing `signal: undefined`.
+export function optionalSignal(signal: AbortSignal | undefined): {
+  readonly signal?: AbortSignal;
+} {
+  return signal === undefined ? {} : { signal };
 }

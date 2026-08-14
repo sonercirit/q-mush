@@ -23,12 +23,8 @@ import type {
 } from "../shared/session-model.ts";
 import { forEachAssistantToolCall } from "./agent-conversation.ts";
 import { estimateAgentStepCost } from "./agent-cost.ts";
-import { createAgentSkills, type AgentSkillExecutor } from "./agent-skills.ts";
-import {
-  isAskQuestionsPause,
-  isAskQuestionsToolName,
-  pauseForAskQuestions,
-} from "./ask-questions-pause.ts";
+import { createAgentSkills } from "./agent-skills.ts";
+import { isAskQuestionsPause } from "./ask-questions-pause.ts";
 import { explainAttachment } from "./attachment-fallback-model.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
@@ -40,6 +36,10 @@ import {
   type SessionAgentModels,
 } from "./session-agent-models.ts";
 import { currentExecutionTools } from "./session-agent-tool-authority.ts";
+import {
+  executeAuthorizedRuntimeTool,
+  type AgentToolDispatcher,
+} from "./session-agent-tool-execution.ts";
 import {
   executeSessionAgentTool,
   type SessionAgentToolActions,
@@ -288,10 +288,6 @@ export async function compactSessionConversation(
 const RESTART_INTERRUPTED_TOOL_OUTPUT =
   "Error: the runner disconnected before this tool call returned; retry it after restart.";
 
-type AgentToolDispatcher = (
-  ...parameters: Parameters<AgentSkillExecutor>
-) => Promise<RunnerCommandResult>;
-
 function restartInterruptedToolResult(): RunnerCommandResult {
   return { output: RESTART_INTERRUPTED_TOOL_OUTPUT, state: "canceled" };
 }
@@ -339,45 +335,16 @@ async function executeAgentTool(
         state: "failed",
       };
     }
-    if (isAskQuestionsToolName(call.name)) {
-      return {
-        output: pauseForAskQuestions(
-          {
-            notify: (userId, sessionId) => {
-              if (
-                userId === runtime.userId &&
-                sessionId === runtime.detail.id
-              ) {
-                runtime.notify();
-              }
-            },
-            now: runtime.now,
-            questions: runtime.store.questions(),
-          },
-          {
-            arguments: call.arguments,
-            executionGeneration: runtime.detail.generation,
-            selected: stepTools.has("ask_questions"),
-            sessionId: runtime.detail.id,
-            source: "direct",
-            toolCallId: call.id,
-            userId: runtime.userId,
-          },
-        ),
-        state: "completed",
-      };
-    }
-    const skillOutput = skills.executeResult(
-      call.name,
-      call.arguments,
-      toolSignal,
-      call.id,
-    );
-    const result = await (skillOutput ??
-      dispatchTool(call.name, call.arguments, toolSignal, call.id));
-    return skillOutput === undefined
-      ? result
-      : await boundRuntimeToolOutput(runtime, toolSignal, result);
+    return await executeAuthorizedRuntimeTool({
+      call,
+      dispatch: dispatchTool,
+      executeSkill: skills.executeResult,
+      outerSignal: toolSignal,
+      runtime,
+      stepTools,
+      transformSkillResult: (result, signal) =>
+        boundRuntimeToolOutput(runtime, signal, result),
+    });
   } catch (error) {
     if (isAskQuestionsPause(error)) {
       throw error;
@@ -482,6 +449,9 @@ export async function runSessionAgent(
       throw new Error("The runner returned invalid file attachment data");
     }
     const currentModel = await discoverCurrentSessionModel(runtime, signal);
+    // Discovery may ignore cancellation and settle after the wrapper already
+    // reported timed-out; never start explanation model work afterward.
+    throwIfAgentAborted(signal);
     if (currentModel === undefined) {
       throw new Error("The session model is unavailable for file explanation");
     }
@@ -516,7 +486,11 @@ export async function runSessionAgent(
     if (usage !== undefined) {
       recordRuntimeUsage(runtime, usage);
     }
-    return { output: explanation.content, state: "completed" };
+    // Server-generated output bypassed the runner spill; bound it here.
+    return await boundRuntimeToolOutput(runtime, signal, {
+      output: explanation.content,
+      state: "completed",
+    });
   };
   const dispatchTool: AgentToolDispatcher = (
     name,
@@ -542,6 +516,7 @@ export async function runSessionAgent(
         runtime.sessionTools,
         name,
         toolArguments,
+        signal,
       ).then((result) => boundRuntimeToolOutput(runtime, signal, result));
     }
     return dispatchRunnerTool(name, toolArguments, signal, callId);

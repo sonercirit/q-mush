@@ -13,6 +13,7 @@ import {
   type AgentSessionToolName,
   type AgentSessionToolOption,
 } from "../shared/agent-tools.ts";
+import { SHARED_TOOL_LIMITS_STATEMENT } from "../shared/tool-limits.ts";
 import { ToolParameterDetails } from "./tool-parameter-details.tsx";
 
 const CLASSIFICATION_LABELS = {
@@ -222,6 +223,12 @@ export function SessionToolPicker(props: {
             Choose what the agent may use in this session. You can run a session
             with none selected. Use each info button to inspect its
             authoritative schema.
+          </p>
+          <p
+            class="mt-1 text-xs leading-5 text-slate-500"
+            data-tool-limits-note="true"
+          >
+            {SHARED_TOOL_LIMITS_STATEMENT}
           </p>
           <div class="mt-3 grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-3">
             <For each={otherOptions}>{optionControl}</For>

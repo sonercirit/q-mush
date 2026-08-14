@@ -56,6 +56,17 @@ export type AgentModelDiscoverer = (
   signal?: AbortSignal,
 ) => Promise<AgentModelCatalog>;
 
+export async function discoverModelOption(
+  discover: AgentModelDiscoverer,
+  provider: ProviderId,
+  credential: ProviderCredentialAccess,
+  model: string,
+  signal?: AbortSignal,
+): Promise<AgentModelOption | undefined> {
+  const catalog = await discover(provider, credential, signal);
+  return catalog.models.find(({ id }) => id === model);
+}
+
 interface PrioritizedModel {
   readonly model: AgentModelOption;
   readonly priority: number;

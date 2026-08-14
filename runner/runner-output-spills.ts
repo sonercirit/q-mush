@@ -6,7 +6,7 @@ import {
   applyToolOutputNotice,
   boundedToolOutput,
   boundedToolOutputLines,
-  MAXIMUM_TOOL_OUTPUT_BYTES,
+  MAXIMUM_TOOL_OUTPUT_KILOBYTES,
   MAXIMUM_TOOL_OUTPUT_LINES,
   toolOutputLimitNotice,
 } from "../shared/tool-output-limits.ts";
@@ -30,7 +30,7 @@ export function readContinuation(
     false,
   );
   if (shown.shownLines === 0 && requested.length > 0) {
-    return `[Line ${String(offset)} exceeds the ${String(MAXIMUM_TOOL_OUTPUT_BYTES / 1_024)}KB read limit. Use offset/limit on the same file or bash to read a bounded segment.]`;
+    return `[Line ${String(offset)} exceeds the ${String(MAXIMUM_TOOL_OUTPUT_KILOBYTES)}KB read limit. Use offset/limit on the same file or bash to read a bounded segment.]`;
   }
   const nextOffset = start + shown.shownLines + 1;
   return nextOffset <= lines.length

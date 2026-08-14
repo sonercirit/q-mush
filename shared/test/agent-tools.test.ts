@@ -7,6 +7,7 @@ import {
   selectedAgentTools,
 } from "../../shared/agent-tools.ts";
 import { isRecord } from "../../shared/auth-model.ts";
+import { MAXIMUM_TOOL_EXECUTION_SECONDS } from "../tool-limits.ts";
 
 function expectParallelRecipients(
   tools: ReturnType<typeof selectedAgentTools>,
@@ -43,6 +44,31 @@ test("lets parallel call every eligible tool and skill by default", () => {
   ]);
 });
 
+test("keeps per-tool descriptions free of the shared global limits", () => {
+  const read = AGENT_TOOLS.find(
+    ({ function: definition }) => definition.name === "read",
+  );
+
+  // The read description keeps its per-call paging semantics but the
+  // authoritative limit statement lives in the shared tool-limits module.
+  expect(read?.function.description).not.toContain("50KB");
+  expect(read?.function.description).not.toContain("2,000");
+  expect(read?.function.description).toContain("offset");
+});
+
+test("bounds the bash timeout by the global execution limit", () => {
+  const bash = AGENT_TOOLS.find((tool) => tool.function.name === "bash");
+
+  if (bash?.function.name !== "bash") {
+    throw new Error("The bash tool definition is unavailable");
+  }
+  expect(bash.function.parameters.properties.timeout).toMatchObject({
+    maximum: MAXIMUM_TOOL_EXECUTION_SECONDS,
+    minimum: 1,
+    type: "integer",
+  });
+});
+
 test("defines the sleep duration in bounded whole seconds", () => {
   const sleep = AGENT_TOOLS.find(
     ({ function: definition }) => definition.name === "sleep",
@@ -56,10 +82,10 @@ test("defines the sleep duration in bounded whole seconds", () => {
   const properties = sleep.function.parameters.properties;
   const durationSeconds = properties.durationSeconds;
   expect(Object.keys(properties)).toEqual(["durationSeconds"]);
-  expect(durationSeconds.description).toBe(
-    "Duration to sleep in seconds (1-3,600)",
-  );
-  expect(durationSeconds.maximum).toBe(3_600);
+  expect(durationSeconds.description).toBe("Duration to sleep in seconds");
+  // The sleep exemption from the global wrapper is safe only while the
+  // sleep maximum equals the global limit; pin the relationship.
+  expect(durationSeconds.maximum).toBe(MAXIMUM_TOOL_EXECUTION_SECONDS);
   expect(durationSeconds.minimum).toBe(1);
   expect(durationSeconds.type).toBe("integer");
 });

@@ -4,6 +4,7 @@ import {
   ATTACHMENT_READ_COMMAND,
   ATTACHMENT_WRITE_COMMAND,
 } from "../shared/attachment-reference.ts";
+import { readBoundedString } from "../shared/validation.ts";
 import {
   containedRunnerPath,
   resolveRunnerWorkspace,
@@ -16,8 +17,8 @@ function requiredString(
   arguments_: Readonly<Record<string, unknown>>,
   key: string,
 ): string {
-  const value = arguments_[key];
-  if (typeof value !== "string" || value.length === 0) {
+  const value = readBoundedString(arguments_[key], Number.MAX_SAFE_INTEGER);
+  if (value === undefined) {
     throw new Error(`Attachment argument ${key} is invalid`);
   }
   return value;

@@ -1,9 +1,11 @@
 import { describe, expect, test, vi } from "vitest";
+import { MAXIMUM_TOOL_EXECUTION_SECONDS } from "../../shared/tool-limits.ts";
 import { executeSessionSleepTool } from "../session-sleep-tool.ts";
 import {
   notifySessionSteeringInput,
   waitForSessionSteeringInput,
 } from "../session-steering-wakeup.ts";
+import { expectNoTimers } from "./timer-test-helpers.ts";
 
 async function advance(milliseconds: number): Promise<void> {
   await vi.advanceTimersByTimeAsync(milliseconds);
@@ -37,10 +39,6 @@ function startSleep(
     options.pending ?? inactiveSteering,
     (waitSignal) => waitForSessionSteeringInput(sessionId, waitSignal),
   );
-}
-
-function expectNoTimers(): void {
-  expect(vi.getTimerCount()).toBe(0);
 }
 
 function elapsedMilliseconds(output: string): number {
@@ -93,6 +91,16 @@ describe("session sleep tool", () => {
     });
   });
 
+  test("completes a maximum-duration sleep inside the global tool limit", async () => {
+    await withFakeTimers(async () => {
+      const maximum = startSleep(MAXIMUM_TOOL_EXECUTION_SECONDS, "maximum");
+      await vi.runAllTimersAsync();
+
+      await expect(maximum).resolves.toMatch(/Slept for the full duration/);
+      expectNoTimers();
+    });
+  });
+
   test("rejects invalid and unreasonably long durations", async () => {
     const signal = new AbortController().signal;
     const wait = () => Promise.resolve();
@@ -103,7 +111,7 @@ describe("session sleep tool", () => {
       Number.NaN,
       Number.POSITIVE_INFINITY,
       1.5,
-      3_601,
+      MAXIMUM_TOOL_EXECUTION_SECONDS + 1,
     ]) {
       await expect(
         executeSessionSleepTool(

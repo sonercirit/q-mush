@@ -8,12 +8,13 @@ import {
   unlink,
   writeFile,
 } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { executeRunnerTool } from "../../runner/runner-tools.ts";
 import { openSecureRunnerPath } from "../../runner/runner-workspace.ts";
 import { MAXIMUM_AGENT_ATTACHMENT_BYTES } from "../../shared/agent-attachments.ts";
 import { AGENT_TOOLS } from "../../shared/agent-tools.ts";
+import { MAXIMUM_TOOL_EXECUTION_SECONDS } from "../../shared/tool-limits.ts";
 import {
   observeRunnerRejection,
   requireRunnerError,
@@ -43,6 +44,16 @@ async function captureToolError(
   return requireRunnerError(
     await observeRunnerRejection(executeRunnerTool(...parameters)),
   );
+}
+
+async function expectMissingFile(path: string): Promise<void> {
+  try {
+    await readFile(path, "utf8");
+  } catch (error) {
+    expect(error).toMatchObject({ code: "ENOENT" });
+    return;
+  }
+  throw new Error("Expected the file to be absent");
 }
 
 interface SwappedPathFixture {
@@ -230,10 +241,18 @@ describe("runner tools", () => {
     expect(written).toContain("Wrote 14 bytes to ..notes.");
   });
 
-  test("reads and writes sibling paths outside the workspace", async () => {
+  async function nestedWorkspace(): Promise<{
+    readonly outside: string;
+    readonly root: string;
+  }> {
     const outside = await workspace();
     const root = join(outside, "workspace");
     await mkdir(root);
+    return { outside, root };
+  }
+
+  test("reads and writes sibling paths outside the workspace", async () => {
+    const { outside, root } = await nestedWorkspace();
     await writeFile(join(outside, "HANDOFF.md"), "handoff notes\n", "utf8");
 
     expect(
@@ -293,6 +312,21 @@ describe("runner tools", () => {
     expect(output).toContain("Exit code: 0");
   });
 
+  test("rejects shell timeouts beyond the global execution limit", async () => {
+    const root = await workspace();
+    const error = await captureToolError(root, "bash", {
+      command: "printf completed",
+      timeout: MAXIMUM_TOOL_EXECUTION_SECONDS + 1,
+    });
+
+    expect(error.message).toBe(
+      `Tool argument timeout must be an integer from 1 to ${String(MAXIMUM_TOOL_EXECUTION_SECONDS)}`,
+    );
+    await expect(
+      executeBash(root, "printf completed", MAXIMUM_TOOL_EXECUTION_SECONDS),
+    ).resolves.toContain("Exit code: 0");
+  });
+
   test("runs independent base tools through the parallel wrapper", async () => {
     const root = await workspace();
 
@@ -314,6 +348,73 @@ describe("runner tools", () => {
     expect(output).toContain("Wrote 6 bytes to second.txt");
     expect(await readFile(join(root, "first.txt"), "utf8")).toBe("first");
     expect(await readFile(join(root, "second.txt"), "utf8")).toBe("second");
+  });
+
+  // Cancellation fires while the mutator is still resolving its path; the
+  // pre-mutation fence must drop the abandoned call before it writes.
+  async function cancelDuringPathResolution(
+    root: string,
+    name: "edit" | "write",
+    arguments_: Record<string, unknown>,
+  ): Promise<Error> {
+    const controller = new AbortController();
+    return captureToolError(
+      root,
+      name,
+      arguments_,
+      controller.signal,
+      undefined,
+      {
+        mapAbsolutePath: (mapped) => {
+          controller.abort();
+          return mapped;
+        },
+      },
+    );
+  }
+
+  test("writes nothing when canceled during path resolution", async () => {
+    const path = join(await workspace(), "cancel-write.txt");
+
+    const error = await cancelDuringPathResolution(dirname(path), "write", {
+      content: "must not be written",
+      path: basename(path),
+    });
+
+    expect(error.message).toContain("stopped");
+    await expectMissingFile(path);
+  });
+
+  test("writes nothing when already canceled", async () => {
+    const controller = new AbortController();
+    const root = await workspace();
+    const path = join(root, "created-before-cancel", "message.txt");
+    controller.abort();
+
+    const error = await captureToolError(
+      root,
+      "write",
+      { content: "must not be written", path },
+      controller.signal,
+    );
+
+    expect(error.message).toContain("stopped");
+    const exists = await Bun.file(path).exists();
+    expect(exists).toBe(false);
+  });
+
+  test("edits nothing when canceled during path resolution", async () => {
+    const root = await workspace();
+    const seeded = join(root, "cancel-edit.txt");
+    await writeFile(seeded, "original", "utf8");
+
+    const error = await cancelDuringPathResolution(root, "edit", {
+      edits: [{ newText: "changed", oldText: "original" }],
+      path: "cancel-edit.txt",
+    });
+
+    expect(error.message).toContain("stopped");
+    expect(await readFile(seeded, "utf8")).toBe("original");
   });
 
   test("rejects overlapping edits without changing the file", async () => {

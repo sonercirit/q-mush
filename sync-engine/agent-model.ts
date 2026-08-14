@@ -19,6 +19,7 @@ import {
 import { isRecord } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
 import { createServerWebSocket } from "../shared/server-websocket.ts";
+import { optionalSignal } from "../shared/validation.ts";
 import {
   completionMessages,
   completionSignal,
@@ -562,7 +563,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
   } {
     return {
       ...(this.#onDelta === undefined ? {} : { onDelta: this.#onDelta }),
-      ...(signal === undefined ? {} : { signal }),
+      ...optionalSignal(signal),
     };
   }
 

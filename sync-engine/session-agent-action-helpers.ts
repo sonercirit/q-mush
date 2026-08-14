@@ -1,14 +1,12 @@
-import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { isBalancedCredentialId } from "../shared/provider-credential-pool.ts";
-import type {
-  ProviderCredentialAccess,
-  ProviderId,
-} from "../shared/provider-credential-store.ts";
+import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import type {
   AgentSessionDetail,
   RestartHandoffOperation,
 } from "../shared/session-model.ts";
+import { abortSignalError } from "../shared/validation.ts";
+import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
 import { createJsonResponse } from "./http.ts";
 import type { ModelCredentialPool } from "./model-credential-pool.ts";
 import {
@@ -29,10 +27,7 @@ type SessionAgentCredentialSelection = Pick<
 export interface SessionAgentActionDependencies {
   readonly settled?: (sessionId: string) => Promise<void>;
   readonly database: AppDatabase;
-  readonly discoverModels: (
-    provider: ProviderId,
-    credential: ProviderCredentialAccess,
-  ) => Promise<AgentModelCatalog>;
+  readonly discoverModels: AgentModelDiscoverer;
   readonly store: SessionStore;
   readonly now: () => number;
   readonly draining: () => boolean;
@@ -48,7 +43,12 @@ export interface SessionAgentActionDependencies {
     credential: ProviderCredentialAccess,
     userId: string,
     rejectCredentialErrors: boolean,
+<<<<<<< HEAD
   ) => Promise<SessionRequestModelMetadata>;
+=======
+    signal?: AbortSignal,
+  ) => Promise<SessionAgentMetadata>;
+>>>>>>> 8261006 (Apply a global tool execution limit)
   readonly readCredential: (
     userId: string,
     selection: SessionAgentCredentialSelection,
@@ -145,6 +145,7 @@ export async function spawnAgentSession(options: {
   readonly authority: SessionExecutionAuthority;
   readonly dependencies: SessionAgentActionDependencies;
   readonly input: SpawnSessionToolInput;
+  readonly signal?: AbortSignal;
   readonly userId: string;
 }): Promise<string> {
   const parent = options.dependencies.store.get(
@@ -172,7 +173,13 @@ export async function spawnAgentSession(options: {
       credential,
       options.userId,
       balanced,
+      options.signal,
     );
+    // Discovery settles even when the deadline fires mid-flight; never
+    // create a child after the caller already reported timed-out.
+    if (options.signal?.aborted === true) {
+      throw abortSignalError(options.signal, "The spawn was canceled");
+    }
     const created = options.dependencies.store.create(
       {
         ...input,

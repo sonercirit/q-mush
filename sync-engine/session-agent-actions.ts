@@ -6,6 +6,7 @@ import {
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type { RunnerSummary } from "../shared/runner-model.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
+import { throwIfSignalAborted } from "../shared/validation.ts";
 import { createJsonResponse } from "./http.ts";
 import {
   pauseQueuedSessionForRestart,
@@ -17,6 +18,7 @@ import {
 import {
   compactSessionForAgent,
   steerSessionForAgent,
+  type CompactionSelection,
   type SessionControlActionDependencies,
 } from "./session-agent-control.ts";
 import { listSessionsOutput } from "./session-agent-list.ts";
@@ -44,6 +46,7 @@ import {
   type SpawnedSessionCompletion,
 } from "./session-child-lifecycle.ts";
 import type { SessionDetailLookup } from "./session-command-types.ts";
+import { directoryUnavailable } from "./session-directory-cancellation.ts";
 import type { SessionExecutionAuthority } from "./session-execution-authority.ts";
 import type {
   RunnerDirectoryBrowseResult,
@@ -135,36 +138,53 @@ export class SessionAgentActions {
       }
       return sessionId;
     };
+    // The per-call deadline joins the session-wide signal so mutation and
+    // discovery stop when the tool time limit fires.
+    const withDeadline = (callSignal: AbortSignal): AbortSignal =>
+      AbortSignal.any([signal, callSignal]);
     return {
-      compactSession: guardParent("compact_session", (sessionId) =>
+      compactSession: guardParent("compact_session", (sessionId, callSignal) =>
         this.#compact({
           authority: { ...authority, tool: "compact_session" },
           sessionId,
+          signal: withDeadline(callSignal),
           userId,
           workspaceId: parentWorkspaceId(),
         }),
       ),
-      continueSession: guardParent("continue_session", (sessionId) =>
-        this.#queue(
-          userId,
-          anotherSession(sessionId),
-          authority,
-          undefined,
-          parentWorkspaceId(),
-        ),
+      continueSession: guardParent(
+        "continue_session",
+        (sessionId, callSignal) =>
+          this.#queue(
+            userId,
+            anotherSession(sessionId),
+            authority,
+            undefined,
+            parentWorkspaceId(),
+            withDeadline(callSignal),
+          ),
       ),
-      browseRunnerDirectories: (runnerId, path) =>
+      browseRunnerDirectories: (runnerId, path, callSignal) =>
         this.#browseDirectories(
           userId,
           runnerId,
           path,
           authority,
           () => currentParentTool("browse_runner_directories"),
-          signal,
+          // Cancels the broker command at the limit; the wrapper still
+          // reports timed-out even when an execution never settles.
+          withDeadline(callSignal),
           parentWorkspaceId(),
         ),
-      getSessionOptions: guardParent("get_session_options", (input) =>
-        this.#options(userId, input, parentWorkspaceId()),
+      getSessionOptions: guardParent(
+        "get_session_options",
+        (input, callSignal) =>
+          this.#options(
+            userId,
+            input,
+            parentWorkspaceId(),
+            withDeadline(callSignal),
+          ),
       ),
       listRunners: guardParent("list_runners", () =>
         sessionToolOutput(
@@ -192,17 +212,20 @@ export class SessionAgentActions {
             parentWorkspaceId(),
           ),
       ),
-      sendToSession: guardParent("send_to_session", (sessionId, message) =>
-        this.#queue(
-          userId,
-          anotherSession(sessionId),
-          authority,
-          message,
-          parentWorkspaceId(),
-        ),
+      sendToSession: guardParent(
+        "send_to_session",
+        (sessionId, message, callSignal) =>
+          this.#queue(
+            userId,
+            anotherSession(sessionId),
+            authority,
+            message,
+            parentWorkspaceId(),
+            withDeadline(callSignal),
+          ),
       ),
-      spawnSession: guardParent("spawn_session", (input) =>
-        this.#spawn(authority, userId, input),
+      spawnSession: guardParent("spawn_session", (input, callSignal) =>
+        this.#spawn(authority, userId, input, withDeadline(callSignal)),
       ),
       steerSession: guardParent("steer_session", (sessionId, message) =>
         this.#steer(userId, sessionId, message, parentWorkspaceId()),
@@ -336,6 +359,7 @@ export class SessionAgentActions {
         result.status === "listed" ? result.listing : { error: result.status },
       );
     } catch {
+      directoryUnavailable(signal);
       return sessionToolOutput({ error: "directory_unavailable" });
     }
   }
@@ -410,10 +434,12 @@ export class SessionAgentActions {
     userId: string,
     input: GetSessionOptionsToolInput,
     workspaceId: string,
+    signal: AbortSignal,
   ): Promise<string> {
     return sessionAgentOptions({
       dependencies: this.#dependencies,
       input,
+      signal,
       userId,
       workspaceId,
     });
@@ -430,6 +456,7 @@ export class SessionAgentActions {
     authority?: SessionExecutionAuthority,
     message?: string,
     workspaceId?: string,
+    signal?: AbortSignal,
   ): Promise<string> {
     const target = this.#detail(userId, sessionId, workspaceId);
     const unavailable = unavailableSessionResponse(target);
@@ -450,6 +477,9 @@ export class SessionAgentActions {
       userId,
       target,
       (credential) => {
+        // Credential access can outlive the tool deadline; never queue or
+        // launch after the caller already reported timed-out.
+        throwIfSignalAborted(signal, "The queue request was canceled");
         const queued = this.#dependencies.store.queue(
           userId,
           sessionId,
@@ -534,6 +564,7 @@ export class SessionAgentActions {
     authority: SessionExecutionAuthority,
     userId: string,
     input: SpawnSessionToolInput,
+    signal: AbortSignal,
   ): Promise<string> {
     const parentWorkspaceId = this.#dependencies.store.get(
       userId,
@@ -559,18 +590,12 @@ export class SessionAgentActions {
       authority,
       dependencies: this.#dependencies,
       input,
+      signal,
       userId,
     });
   }
 
-  #compact(input: {
-    readonly authority: SessionExecutionAuthority & {
-      readonly tool: "compact_session";
-    };
-    readonly sessionId: string;
-    readonly userId: string;
-    readonly workspaceId: string;
-  }): Promise<string> {
+  #compact(input: CompactionSelection): Promise<string> {
     return compactSessionForAgent(this.#dependencies, input);
   }
 

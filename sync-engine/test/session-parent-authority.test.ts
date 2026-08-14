@@ -257,15 +257,22 @@ async function fenceAtGate(
   gate.release(undefined);
 }
 
+function expectOnlyParentSession(setup: AuthoritySetup): void {
+  expect(setup.store.list(TEST_USER_ID)).toHaveLength(1);
+  closeAuthoritySetup(setup);
+}
+
 async function expectStaleSpawn(
   gate: PromiseGate,
   setup: AuthoritySetup,
-  result: Promise<string>,
 ): Promise<void> {
+  const result = setup.actions.spawnSession(
+    spawnInput(),
+    new AbortController().signal,
+  );
   await fenceAtGate(gate, setup);
   expect(await result).toContain("parent_stale");
-  expect(setup.store.list(TEST_USER_ID)).toHaveLength(1);
-  closeAuthoritySetup(setup);
+  expectOnlyParentSession(setup);
 }
 
 function targetDetail(setup: AuthoritySetup) {
@@ -294,9 +301,9 @@ async function expectCompactionScheduled(
   setup: AuthoritySetup,
   sessionId = TARGET_SESSION_ID,
 ): Promise<void> {
-  expect(await setup.actions.compactSession(sessionId)).toContain(
-    "compaction_scheduled",
-  );
+  expect(
+    await setup.actions.compactSession(sessionId, new AbortController().signal),
+  ).toContain("compaction_scheduled");
 }
 
 async function expectCompactionRejected(
@@ -361,18 +368,51 @@ async function expectPendingCompaction(
   ).toBe(true);
 }
 
+async function expectDeadlineRejection(
+  setup: AuthoritySetup,
+  gate: PromiseGate,
+  deadline: AbortController,
+  result: Promise<string>,
+): Promise<void> {
+  await gate.entered;
+  // The global tool limit fired while the gated stage was pending; the
+  // caller already reported timed-out, so nothing may mutate or launch.
+  deadline.abort(new DOMException("The tool call timed out", "TimeoutError"));
+  gate.release(undefined);
+  await expect(result).rejects.toThrow("timed out");
+  expect(setup.launch).not.toHaveBeenCalled();
+}
+
+function targetOperation(
+  setup: AuthoritySetup,
+  operation: "compact" | "continue" | "send",
+  signal: AbortSignal,
+): Promise<string> {
+  return operation === "compact"
+    ? setup.actions.compactSession(TARGET_SESSION_ID, signal)
+    : operation === "continue"
+      ? setup.actions.continueSession(TARGET_SESSION_ID, signal)
+      : setup.actions.sendToSession(TARGET_SESSION_ID, "late message", signal);
+}
+
+function credentialCaseSetup(): {
+  readonly before: ReturnType<SessionStore["get"]>;
+  readonly setup: AuthoritySetup;
+} {
+  const setup = setupWithTarget("credential");
+  return { before: setup.store.get(TEST_USER_ID, TARGET_SESSION_ID), setup };
+}
+
 describe("cross-session parent execution authority", () => {
   test.each(["compact", "continue", "send"] as const)(
     "rejects credential-paused %s after the parent is fenced",
     async (operation) => {
-      const setup = setupWithTarget("credential");
-      const before = setup.store.get(TEST_USER_ID, TARGET_SESSION_ID);
-      const result =
-        operation === "compact"
-          ? setup.actions.compactSession(TARGET_SESSION_ID)
-          : operation === "continue"
-            ? setup.actions.continueSession(TARGET_SESSION_ID)
-            : setup.actions.sendToSession(TARGET_SESSION_ID, "stale message");
+      const { before, setup } = credentialCaseSetup();
+      const result = targetOperation(
+        setup,
+        operation,
+        new AbortController().signal,
+      );
       await expectTargetUnchangedAfterFencing(
         setup,
         setup.credentialGate,
@@ -388,7 +428,11 @@ describe("cross-session parent execution authority", () => {
     fenceParent(setup);
 
     expectSessionActionThrows(
-      () => setup.actions.compactSession(TARGET_SESSION_ID),
+      () =>
+        setup.actions.compactSession(
+          TARGET_SESSION_ID,
+          new AbortController().signal,
+        ),
       "stopped",
     );
     expectSessionActionThrows(
@@ -434,9 +478,12 @@ describe("cross-session parent execution authority", () => {
     const { runtime, target } = activeRuntime(setup);
     await expectPendingCompaction(setup, target);
     expect(setup.launchOperations).toEqual([]);
-    expect(await setup.actions.compactSession(TARGET_SESSION_ID)).toContain(
-      "compaction_already_scheduled",
-    );
+    expect(
+      await setup.actions.compactSession(
+        TARGET_SESSION_ID,
+        new AbortController().signal,
+      ),
+    ).toContain("compaction_already_scheduled");
     expect(
       setup.store.manualCompactionPending(TARGET_SESSION_ID, target.generation),
     ).toBe(true);
@@ -462,21 +509,41 @@ describe("cross-session parent execution authority", () => {
     closeSetup(idle);
   });
 
+  test.each(["compact", "continue", "send"] as const)(
+    "rejects credential-paused %s after the deadline fires",
+    async (operation) => {
+      const { before, setup } = credentialCaseSetup();
+      const deadline = new AbortController();
+      await expectDeadlineRejection(
+        setup,
+        setup.credentialGate,
+        deadline,
+        targetOperation(setup, operation, deadline.signal),
+      );
+      expectTargetUnchanged(setup, before);
+      closeAuthoritySetup(setup);
+    },
+  );
+
   test("does not create a child when the parent is fenced during credential access", async () => {
     const setup = authoritySetup({ gateCredential: true });
-    await expectStaleSpawn(
-      setup.credentialGate,
-      setup,
-      setup.actions.spawnSession(spawnInput()),
-    );
+    await expectStaleSpawn(setup.credentialGate, setup);
   });
 
   test("does not create a child when the parent is fenced during metadata discovery", async () => {
     const setup = authoritySetup({ gateMetadata: true });
-    await expectStaleSpawn(
-      setup.metadataGate,
+    await expectStaleSpawn(setup.metadataGate, setup);
+  });
+
+  test("does not create a child when the deadline fires during metadata discovery", async () => {
+    const setup = authoritySetup({ gateMetadata: true });
+    const deadline = new AbortController();
+    await expectDeadlineRejection(
       setup,
-      setup.actions.spawnSession(spawnInput()),
+      setup.metadataGate,
+      deadline,
+      setup.actions.spawnSession(spawnInput(), deadline.signal),
     );
+    expectOnlyParentSession(setup);
   });
 });

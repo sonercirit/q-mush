@@ -7,6 +7,7 @@ import { isRecord } from "../shared/auth-model.ts";
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import {
   abortSignalError,
+  executeWithAbortSignal,
   readBoundedString,
   readBoundedTrimmedString,
   readFiniteNumber,
@@ -166,34 +167,6 @@ function parseCatalog(value: unknown): OpenRouterProviderCatalog {
   };
 }
 
-async function abortable<Value>(
-  signal: AbortSignal,
-  operation: () => Promise<Value>,
-): Promise<Value> {
-  if (signal.aborted) {
-    throw abortSignalError(signal, "The operation was aborted");
-  }
-  return await new Promise<Value>((resolve, reject) => {
-    const aborted = (): void => {
-      reject(abortSignalError(signal, "The operation was aborted"));
-    };
-    signal.addEventListener("abort", aborted, { once: true });
-    let pending: Promise<Value>;
-    try {
-      pending = operation();
-    } catch (error) {
-      signal.removeEventListener("abort", aborted);
-      reject(
-        error instanceof Error ? error : new Error("The operation failed"),
-      );
-      return;
-    }
-    void pending.then(resolve, reject).finally(() => {
-      signal.removeEventListener("abort", aborted);
-    });
-  });
-}
-
 async function responseBody(
   response: Response,
   signal: AbortSignal,
@@ -206,7 +179,11 @@ async function responseBody(
   let length = 0;
   try {
     for (;;) {
-      const part = await abortable(signal, () => reader.read());
+      const part = await executeWithAbortSignal(
+        signal,
+        { abortMessage: "The operation was aborted" },
+        () => reader.read(),
+      );
       if (part.done) {
         return bytes.subarray(0, length);
       }
@@ -375,7 +352,11 @@ function createOpenRouterProviderDiscoverer(
           signal: abort.signal,
         },
       );
-      const response = await abortable(abort.signal, () => fetch(request));
+      const response = await executeWithAbortSignal(
+        abort.signal,
+        { abortMessage: "The operation was aborted" },
+        () => fetch(request),
+      );
       const catalog = parseCatalog(await responseJson(response, abort.signal));
       const cachedAt = now();
       cacheCatalog(

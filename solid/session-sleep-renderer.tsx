@@ -1,11 +1,19 @@
 import type { JSX } from "solid-js";
 import { parseOptionalJsonRecord } from "../shared/json-record.ts";
 import { formatSessionTime } from "../shared/session-timing.ts";
+import { MAXIMUM_TOOL_EXECUTION_SECONDS } from "../shared/tool-limits.ts";
 import { renderStructuredCode } from "./session-syntax.tsx";
 
 const MILLISECONDS_PER_SECOND = 1_000;
-const MAXIMUM_SLEEP_DURATION_MILLISECONDS = 3_600_000;
-const MAXIMUM_SLEEP_DURATION_SECONDS = 3_600;
+// Display-only sanity bound: use whichever bound is larger. Transcripts
+// recorded before the global limit lowered the schema maximum to 1,800s
+// legitimately contain sleeps up to 3,600s and need friendly rendering.
+const MAXIMUM_SLEEP_DURATION_SECONDS = Math.max(
+  3_600,
+  MAXIMUM_TOOL_EXECUTION_SECONDS,
+);
+const MAXIMUM_SLEEP_DURATION_MILLISECONDS =
+  MAXIMUM_SLEEP_DURATION_SECONDS * MILLISECONDS_PER_SECOND;
 
 function formatSleepDuration(milliseconds: number): string {
   return formatSessionTime(milliseconds).replace(/ 0[ms]$/u, "");

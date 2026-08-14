@@ -185,7 +185,7 @@ test("passes a custom agent file path to the runner", async () => {
   await expect(result).resolves.toBeNull();
 });
 
-test("cancellation uses the parent session identity for agent-file and directory commands", async () => {
+test("broker cancellation reaches a directory request", async () => {
   const broker = queuedBroker();
   const setup = helpers(broker);
   const signal = new AbortController().signal;
@@ -211,6 +211,25 @@ function actionDefaults() {
     notify: () => undefined,
   };
 }
+
+test("a directory deadline retains its abort reason", async () => {
+  const controller = new AbortController();
+  const broker = queuedBroker();
+  const setup = helpers(broker);
+  const result = setup.requests.browseDirectories(
+    directoryRequest(() => true),
+    controller.signal,
+  );
+  const reason = new DOMException("Deadline reached", "AbortError");
+
+  controller.abort(reason);
+
+  await expect(result).rejects.toMatchObject({
+    message: "Deadline reached",
+    name: "AbortError",
+  });
+  setup.close();
+});
 
 test("agent directory browsing passes parent identity, authorization, and signal", async () => {
   const signal = new AbortController().signal;
@@ -262,8 +281,42 @@ test("agent directory browsing passes parent identity, authorization, and signal
   }).actions(session.id, TEST_USER_ID, session.generation, signal);
 
   await expect(
-    actions.browseRunnerDirectories(RUNNER_ID, WORKING_DIRECTORY),
+    actions.browseRunnerDirectories(
+      RUNNER_ID,
+      WORKING_DIRECTORY,
+      new AbortController().signal,
+    ),
   ).resolves.toContain(`"path": "${WORKING_DIRECTORY}"`);
   expect(browse).toHaveBeenCalledOnce();
+
+  // A per-call deadline signal combines with the session signal: aborting
+  // the deadline aborts the dispatched browse without touching the session.
+  const deadline = new AbortController();
+  const combinedSignals: AbortSignal[] = [];
+  browse.mockImplementation((_request, receivedSignal) => {
+    combinedSignals.push(receivedSignal);
+    return Promise.resolve({
+      listing: {
+        directories: [],
+        parent: null,
+        path: WORKING_DIRECTORY,
+        truncated: false,
+      },
+      status: "listed" as const,
+    });
+  });
+  await actions.browseRunnerDirectories(
+    RUNNER_ID,
+    WORKING_DIRECTORY,
+    deadline.signal,
+  );
+  const combined = combinedSignals[0];
+  if (combined === undefined) {
+    throw new Error("The combined browse signal is unavailable");
+  }
+  expect(combined.aborted).toBe(false);
+  deadline.abort(new Error("Deadline reached"));
+  expect(combined.aborted).toBe(true);
+  expect(signal.aborted).toBe(false);
   database.$client.close();
 });

@@ -3,7 +3,7 @@ import type { AuthenticatedUser } from "../../shared/auth-model.ts";
 import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
 import { SESSION_OPENROUTER_PROVIDERS_PATH } from "../../shared/routes.ts";
 import { testAgentModelCatalog } from "../../shared/test/agent-model-fixtures.ts";
-import { AgentModelDiscoveryError } from "../../sync-engine/agent-model-discovery.ts";
+import { AgentModelDiscoveryError } from "../../sync-engine/agent-model-discovery-fetch.ts";
 import { ProviderCredentialRejectionError } from "../../sync-engine/provider-error.ts";
 import type { SessionCredentialMetadataUpdate } from "../../sync-engine/session-credential-reassignment-store.ts";
 import {
@@ -317,6 +317,29 @@ describe("OpenRouter session provider validation", () => {
         metadataOptions({ ...discoveryFailure, input: automaticInput }),
       ),
     ).resolves.toEqual(metadata({ maxContextTokens: null }));
+  });
+
+  test("propagates cancellation instead of returning fallback metadata", async () => {
+    const timeout = new DOMException("The tool call timed out", "TimeoutError");
+    const aborted = new AbortController();
+    aborted.abort(timeout);
+    // Both discovery shapes: cancellation must reject even where provider
+    // failures degrade to fallback metadata, or a timed-out spawn would
+    // still create a child from the fallback.
+    const shapes = [
+      metadataOptions({
+        discoverModels: () => Promise.reject(timeout),
+        input: { ...SELECTED_INPUT, openRouterProviderTag: null },
+        signal: aborted.signal,
+      }),
+      metadataOptions({
+        discoverProviders: () => Promise.reject(timeout),
+        signal: aborted.signal,
+      }),
+    ];
+    for (const options of shapes) {
+      await expect(sessionMetadata(options)).rejects.toBe(timeout);
+    }
   });
 
   test("propagates tagged-provider credential rejections when requested", async () => {

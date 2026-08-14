@@ -531,6 +531,7 @@ function launchRaceTests(expected: LaunchRaceExpectation): void {
       setup.actions,
       "spawn_session",
       spawnInput(setup, "Delegate through the production spawn path"),
+      new AbortController().signal,
     );
 
     if (expected.race === "restart") {
@@ -569,6 +570,7 @@ function launchRaceTests(expected: LaunchRaceExpectation): void {
       setup.actions,
       "continue_session",
       { sessionId: setup.target.id },
+      new AbortController().signal,
     );
 
     expect(parseToolOutput(output)).toEqual({ error: expected.error });
@@ -596,10 +598,12 @@ async function spawnAndInspect(
   inspect: (spawned: ReturnType<typeof spawnedSession>) => void,
 ): Promise<void> {
   const setup = agentActionsSetup("none", false);
-  await executeSessionAgentTool(setup.actions, "spawn_session", {
-    ...spawnInput(setup, "Create the child"),
-    ...input,
-  });
+  await executeSessionAgentTool(
+    setup.actions,
+    "spawn_session",
+    { ...spawnInput(setup, "Create the child"), ...input },
+    new AbortController().signal,
+  );
   inspect(spawnedSession(setup));
   closeSessionTestDatabase(setup.database);
 }
@@ -626,6 +630,7 @@ test.each([
         setup.actions,
         "spawn_session",
         { ...spawnInput(setup, "Do not create this child"), [flag]: invalid },
+        new AbortController().signal,
       );
 
       expect(output).toEqual({

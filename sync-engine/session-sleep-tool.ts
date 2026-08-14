@@ -1,7 +1,9 @@
-import { setTimeout } from "node:timers/promises";
 import { throwIfAgentAborted } from "../shared/agent-loop.ts";
+import { MAXIMUM_TOOL_EXECUTION_SECONDS } from "../shared/tool-limits.ts";
+import { abortSignalError } from "../shared/validation.ts";
 
-const MAXIMUM_SLEEP_DURATION_SECONDS = 3_600;
+// Exported so the runtime exemption and schema share one authoritative bound.
+export const MAXIMUM_SLEEP_DURATION_SECONDS = MAXIMUM_TOOL_EXECUTION_SECONDS;
 const MILLISECONDS_PER_SECOND = 1_000;
 
 function requestedDuration(
@@ -62,8 +64,18 @@ export async function executeSessionSleepTool(
     if (hasPendingSteeringInput()) {
       return sleepResult(expectedMilliseconds, now() - startedAt, true);
     }
-    const completed = setTimeout(expectedMilliseconds, false, {
-      signal: sleepSignal,
+    // The global timer (not node:timers/promises) keeps this fake-timer
+    // testable; abort clears it and resolves through the shared handler.
+    const completed = new Promise<boolean>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        sleepSignal.removeEventListener("abort", aborted);
+        resolve(false);
+      }, expectedMilliseconds);
+      const aborted = (): void => {
+        clearTimeout(timer);
+        reject(abortSignalError(sleepSignal, "The sleep was aborted"));
+      };
+      sleepSignal.addEventListener("abort", aborted, { once: true });
     }).catch(ignoreInternalAbort);
     const steeringArrived = await Promise.race([steering, completed]);
     throwIfAgentAborted(signal);

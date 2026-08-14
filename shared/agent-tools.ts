@@ -6,9 +6,15 @@ import {
 } from "./ask-questions-tool.ts";
 import { PAGE_FETCH_TOOL_DEFINITION } from "./page-fetch.ts";
 import { MODEL_PROVIDER_IDS } from "./provider-id.ts";
+import { MAXIMUM_TOOL_EXECUTION_SECONDS } from "./tool-limits.ts";
 
 const NUMBER_PARAMETER = { type: "number" } as const;
 const STRING_PARAMETER = { type: "string" } as const;
+const WHOLE_SECONDS = {
+  maximum: MAXIMUM_TOOL_EXECUTION_SECONDS,
+  minimum: 1,
+  type: "integer",
+} as const;
 const BOOLEAN_PARAMETER = { type: "boolean" } as const;
 const STRING_ARRAY_PARAMETER = {
   items: STRING_PARAMETER,
@@ -48,7 +54,7 @@ const FILE_PATH_PARAMETER = {
 const BASE_AGENT_TOOLS = [
   toolDefinition({
     description:
-      "Read up to 2,000 lines or 50KB from a UTF-8 text file per call, including q-mush-attachment links supplied in messages. Use offset and limit to continue reading the same file.",
+      "Read a bounded page from a UTF-8 text file, including q-mush-attachment links supplied in messages. Use offset and limit to continue reading the same file.",
     name: "read",
     properties: {
       limit: {
@@ -79,7 +85,7 @@ const BASE_AGENT_TOOLS = [
   }),
   toolDefinition({
     description:
-      "Execute a bash command from the workspace directory. Returns bounded stdout, stderr, and the exit status. A positive timeout in seconds is required.",
+      "Execute a bash command from the workspace directory. Returns bounded stdout, stderr, and the exit status.",
     name: "bash",
     properties: {
       command: {
@@ -87,10 +93,8 @@ const BASE_AGENT_TOOLS = [
         type: "string",
       },
       timeout: {
-        description:
-          "Required positive timeout in seconds; no default or configured maximum is applied",
-        minimum: 1,
-        type: "number",
+        description: "Required timeout in seconds",
+        ...WHOLE_SECONDS,
       },
     },
     required: ["command", "timeout"],
@@ -152,10 +156,8 @@ const SESSION_AGENT_TOOLS = [
     name: "sleep",
     properties: {
       durationSeconds: {
-        description: "Duration to sleep in seconds (1-3,600)",
-        maximum: 3_600,
-        minimum: 1,
-        type: "integer",
+        description: "Duration to sleep in seconds",
+        ...WHOLE_SECONDS,
       },
     },
     required: ["durationSeconds"],
@@ -230,7 +232,7 @@ const SESSION_AGENT_TOOLS = [
   }),
   toolDefinition({
     description:
-      "Browse directories on an owned online runner. Use the returned canonical path as workingDirectory for reassign_session; start at ~ and navigate explicitly rather than guessing a path.",
+      "Browse directories on an owned online runner. Use the returned canonical path as workingDirectory for reassign_session; start at ~ and navigate explicitly.",
     name: "browse_runner_directories",
     properties: {
       path: {
@@ -252,7 +254,7 @@ const SESSION_AGENT_TOOLS = [
   }),
   toolDefinition({
     description:
-      "List sessions with pagination (page defaults to 1; pageSize defaults to 20, max 26). Search is case-insensitive across title, status, model, provider, and working directory.",
+      "List sessions with pagination (page defaults to 1; pageSize defaults to 20, max 26). Search spans title, status, model, provider, and working directory.",
     name: "list_sessions",
     properties: {
       page: {

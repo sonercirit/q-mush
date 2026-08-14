@@ -430,6 +430,7 @@ class DrizzleSessionIntegration
         credential,
         userId,
         rejectCredentialErrors,
+        signal,
       ) =>
         discoverSessionAgentMetadata(
           {
@@ -440,6 +441,7 @@ class DrizzleSessionIntegration
           credential,
           userId,
           rejectCredentialErrors,
+          signal,
         ),
       launchSession: (credential, detail, userId, operation) =>
         this.#launch(detail, credential, userId, operation),

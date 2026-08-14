@@ -17,10 +17,8 @@ import {
 import type { RunnerSummary } from "../../shared/runner-model.ts";
 import { normalizeSearchText } from "../../shared/search.ts";
 import { GLOBAL_WORKSPACE_ID } from "../../shared/workspace-model.ts";
-import {
-  AgentModelDiscoveryError,
-  type AgentModelDiscoverer,
-} from "../../sync-engine/agent-model-discovery.ts";
+import { AgentModelDiscoveryError } from "../../sync-engine/agent-model-discovery-fetch.ts";
+import type { AgentModelDiscoverer } from "../../sync-engine/agent-model-discovery.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
 import type { OpenRouterProviderDiscoverer } from "../../sync-engine/openrouter-provider-discovery.ts";
 import { createRunnerIntegration } from "../../sync-engine/runners.ts";

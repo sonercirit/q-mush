@@ -21,6 +21,7 @@ import type {
   RunnerCommandOutputDelta,
   RunnerCommandResult,
 } from "../shared/runner-command-broker.ts";
+import { MAXIMUM_TOOL_EXECUTION_SECONDS } from "../shared/tool-limits.ts";
 import { MAXIMUM_TOOL_OUTPUT_LINES } from "../shared/tool-output-limits.ts";
 import {
   createPageFetchRunnerTool,
@@ -39,6 +40,12 @@ import {
   throwIfRunnerCommandStopped,
 } from "./runner-process.ts";
 import {
+  optionalInteger,
+  requiredInteger,
+  requiredString,
+  type ToolArguments,
+} from "./runner-tool-arguments.ts";
+import {
   containedRunnerPath,
   openSecureRunnerPath,
   resolveRunnerPath,
@@ -49,7 +56,10 @@ const MAX_FILE_BYTES = 1024 * 1024;
 const DEFAULT_READ_LINES = MAXIMUM_TOOL_OUTPUT_LINES;
 const MAXIMUM_EDITS = 100;
 
-type ToolArguments = Readonly<Record<string, unknown>>;
+function throwIfRunnerToolStopped(signal: AbortSignal | undefined): void {
+  if (signal?.aborted !== true) return;
+  throw new Error("The runner command was stopped");
+}
 
 type RunnerToolStream = (
   delta: Omit<RunnerCommandOutputDelta, "sequence">,
@@ -71,73 +81,6 @@ export interface RunnerToolExecutionOptions {
   readonly pageFetch?: PageFetchRunnerTool;
   readonly shell?: RunnerShellExecutor;
   readonly stream?: RunnerToolStream;
-}
-
-function requiredString(
-  arguments_: ToolArguments,
-  name: string,
-  maximumLength: number,
-  allowEmpty = false,
-): string {
-  const value = arguments_[name];
-
-  if (
-    typeof value !== "string" ||
-    (!allowEmpty && value.length === 0) ||
-    value.length > maximumLength
-  ) {
-    throw new Error(`Tool argument ${name} must be a valid string`);
-  }
-
-  return value;
-}
-
-function readOptionalInteger(
-  arguments_: ToolArguments,
-  name: string,
-  minimum: number,
-  maximum = Number.MAX_SAFE_INTEGER,
-): number | undefined {
-  const value = arguments_[name];
-
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (
-    typeof value !== "number" ||
-    !Number.isSafeInteger(value) ||
-    value < minimum ||
-    value > maximum
-  ) {
-    throw new Error(`Tool argument ${name} must be an integer`);
-  }
-
-  return value;
-}
-
-function optionalInteger(
-  arguments_: ToolArguments,
-  name: string,
-  fallback: number,
-  minimum: number,
-  maximum: number,
-): number {
-  return readOptionalInteger(arguments_, name, minimum, maximum) ?? fallback;
-}
-
-function requiredInteger(
-  arguments_: ToolArguments,
-  name: string,
-  minimum: number,
-): number {
-  const value = readOptionalInteger(arguments_, name, minimum);
-
-  if (value === undefined) {
-    throw new Error(`Tool argument ${name} must be an integer`);
-  }
-
-  return value;
 }
 
 function pathResolutionOptions(
@@ -218,13 +161,14 @@ interface RunnerFileToolArguments {
   readonly arguments_: ToolArguments;
   readonly options: RunnerToolExecutionOptions | undefined;
   readonly root: string;
+  readonly signal: AbortSignal | undefined;
 }
 
 function runnerFileToolArguments(
   parameters: Parameters<RunnerFileTool>,
 ): RunnerFileToolArguments {
-  const [root, arguments_, , options] = parameters;
-  return { arguments_, options, root };
+  const [root, arguments_, signal, options] = parameters;
+  return { arguments_, options, root, signal };
 }
 
 function resolvedFileToolArguments(
@@ -251,13 +195,13 @@ async function readTool(
     path,
     ownedSpillPath(path) ? undefined : MAX_FILE_BYTES,
   );
-  const offset = optionalInteger(arguments_, "offset", 1, 1, 1_000_000_000);
+  const lineBounds = { maximum: 1_000_000_000, minimum: 1 };
+  const offset = optionalInteger(arguments_, "offset", 1, lineBounds);
   const limit = optionalInteger(
     arguments_,
     "limit",
     DEFAULT_READ_LINES,
-    1,
-    1_000_000_000,
+    lineBounds,
   );
   return readContinuation(content, offset, limit);
 }
@@ -328,7 +272,13 @@ async function writeTool(
     MAX_FILE_BYTES,
     true,
   );
+  // Cancellation may fire while path resolution is in flight; do not begin
+  // any filesystem mutation after the caller has already stopped waiting.
+  throwIfRunnerToolStopped(context.signal);
   await mkdir(dirname(context.path), { recursive: true });
+  // Directory creation can outlive the caller's deadline; fence the content
+  // write independently so no new file mutation starts after cancellation.
+  throwIfRunnerToolStopped(context.signal);
   await writeFile(context.path, content, "utf8");
   return `Wrote ${String(Buffer.byteLength(content))} bytes to ${displayPath(context.root, context.path)}.`;
 }
@@ -415,6 +365,9 @@ async function editTool(
   const context = await resolvedFileToolArguments(editParameters, false);
   const replacements = editReplacements(context.arguments_);
   const content = await readTextFile(context.path, MAX_FILE_BYTES);
+  // Cancellation may fire while the reads above are in flight; fence before
+  // mutating the file.
+  throwIfRunnerToolStopped(context.signal);
   const edits = locateEdits(content, replacements);
   let updated = content;
 
@@ -433,7 +386,10 @@ async function bashTool(
   options?: RunnerToolExecutionOptions,
 ): Promise<string> {
   const command = requiredString(arguments_, "command", 32_768);
-  const timeoutSeconds = requiredInteger(arguments_, "timeout", 1);
+  const timeoutSeconds = requiredInteger(arguments_, "timeout", {
+    maximum: MAXIMUM_TOOL_EXECUTION_SECONDS,
+    minimum: 1,
+  });
   if (options?.shell !== undefined) {
     const result = await options.shell(
       root,
@@ -516,12 +472,8 @@ type ParallelToolArguments = readonly [
   options: RunnerToolExecutionOptions | undefined,
 ];
 
-interface ParallelToolContext {
-  readonly arguments_: ToolArguments;
+interface ParallelToolContext extends RunnerFileToolArguments {
   readonly execution: RunnerParallelExecutionOptions | undefined;
-  readonly options: RunnerToolExecutionOptions | undefined;
-  readonly root: string;
-  readonly signal: AbortSignal | undefined;
 }
 
 function parallelToolContext(
@@ -681,6 +633,7 @@ export async function executeRunnerTool(
   ...parameters: ExecuteRunnerToolArguments
 ): Promise<string> {
   const resolved = await resolvedRunnerTool(parameters);
+  throwIfRunnerToolStopped(resolved.signal);
   return executeResolvedRunnerTool(resolved);
 }
 
@@ -688,6 +641,7 @@ export async function executeRunnerToolResult(
   ...parameters: ExecuteRunnerToolArguments
 ): Promise<RunnerCommandResult> {
   const resolved = await resolvedRunnerTool(parameters);
+  throwIfRunnerToolStopped(resolved.signal);
   const spills = resolved.options?.outputSpills;
   if (resolved.name === "parallel") {
     const result = await parallelToolResult(...parallelArguments(resolved));

@@ -27,7 +27,7 @@ type AgentSkillArgumentParameters = Readonly<{
   readonly callId: string | undefined;
   readonly signal: AbortSignal | undefined;
 }>;
-export type AgentSkillExecutor = (
+type AgentSkillExecutor = (
   ...parameters: AgentSkillParameters
 ) => Promise<RunnerCommandResult | string>;
 

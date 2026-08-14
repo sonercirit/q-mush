@@ -1,4 +1,5 @@
 import type { SessionAgentToolName } from "../shared/agent-tools.ts";
+import { abortSignalError } from "../shared/validation.ts";
 import type { SessionAgentActionDependencies } from "./session-agent-action-helpers.ts";
 import {
   compactSessionAction,
@@ -31,10 +32,11 @@ interface SessionControlSelection {
   readonly workspaceId: string;
 }
 
-interface CompactionSelection extends SessionControlSelection {
+export interface CompactionSelection extends SessionControlSelection {
   readonly authority: SessionExecutionAuthority & {
     readonly tool: Extract<SessionAgentToolName, "compact_session">;
   };
+  readonly signal: AbortSignal;
 }
 
 interface SteeringSelection extends SessionControlSelection {
@@ -52,8 +54,18 @@ export function compactSessionForAgent(
       compactSession: (ownerId, targetId, targetWorkspaceId) =>
         compactSession(
           {
-            credential: (...parameters) =>
-              dependencies.withCredential(...parameters),
+            credential: (userId, detail, action) =>
+              dependencies.withCredential(userId, detail, (credential) => {
+                // Credential access can outlive the tool deadline; never
+                // queue or launch after the caller reported timed-out.
+                if (selection.signal.aborted) {
+                  throw abortSignalError(
+                    selection.signal,
+                    "The compaction was canceled",
+                  );
+                }
+                return action(credential);
+              }),
             launch: (detail, credential, owner, operation) =>
               dependencies.launchSession(credential, detail, owner, operation),
             notify: dependencies.notify,

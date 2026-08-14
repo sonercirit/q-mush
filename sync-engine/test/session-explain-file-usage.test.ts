@@ -66,14 +66,22 @@ function catalog(currentCanReadPdf: boolean): AgentModelCatalog {
   };
 }
 
+function explainFileStep(
+  extra: Readonly<Record<string, unknown>> = {},
+): Parameters<typeof scriptedModel>[0][number] {
+  return {
+    content: "I will explain the PDF.",
+    ...extra,
+    toolCalls: [toolCall("explain_file", { path: "spec.pdf" })],
+  };
+}
+
 function usageModel(costUsd: number | null) {
   return scriptedModel([
-    {
-      content: "I will explain the PDF.",
+    explainFileStep({
       contextTokens: MAIN_CONTEXT_TOKENS,
       costUsd: MAIN_COST_USD,
-      toolCalls: [toolCall("explain_file", { path: "spec.pdf" })],
-    },
+    }),
     {
       content: "The PDF explanation.",
       contextTokens: AUXILIARY_CONTEXT_TOKENS,
@@ -83,6 +91,17 @@ function usageModel(costUsd: number | null) {
     },
     { content: "Explanation complete.", toolCalls: [] },
   ]);
+}
+
+async function completeRunnerToolCommand(
+  setup: SessionSetup,
+  tool: string,
+  output: string,
+): Promise<void> {
+  await waitForSessionValue(setup.latestRunnerCommand, (value) =>
+    isRecord(value) ? value["tool"] === tool : false,
+  );
+  expect(completeRunnerCommand(setup, output).status).toBe(204);
 }
 
 type SessionSetup = ReturnType<typeof connectedSessionSetup>;
@@ -98,11 +117,11 @@ function usageSetup(costUsd: number | null, currentCanReadPdf: boolean) {
 }
 
 async function completeExplainFile(setup: SessionSetup): Promise<unknown> {
-  await waitForSessionValue(setup.latestRunnerCommand, (value) =>
-    isRecord(value) ? value["tool"] === "explain_file" : false,
+  await completeRunnerToolCommand(
+    setup,
+    "explain_file",
+    JSON.stringify(ATTACHMENT),
   );
-  const completion = completeRunnerCommand(setup, JSON.stringify(ATTACHMENT));
-  expect(completion.status).toBe(204);
   return completedParentDetail(setup, "idle");
 }
 
@@ -168,6 +187,38 @@ describe("explain file usage", () => {
 
     expectUsage(detail, "estimated", 0.37);
     expect(setup.selectedPricing).toEqual([CURRENT_PRICING, FALLBACK_PRICING]);
+    closeSessionTestDatabase(setup.database);
+  });
+
+  test("bounds an oversized model explanation like any tool output", async () => {
+    const oversized = `explained ${"x".repeat(60 * 1_024)} FINAL-TAIL-MARKER`;
+    const model = scriptedModel([
+      explainFileStep(),
+      { content: oversized, toolCalls: [] },
+      { content: "Explanation complete.", toolCalls: [] },
+    ]);
+    const setup = connectedSessionSetup(model, "api_key", () =>
+      Promise.resolve(catalog(true)),
+    );
+    await startToolSessionSetup(setup);
+    await completeRunnerToolCommand(
+      setup,
+      "explain_file",
+      JSON.stringify(ATTACHMENT),
+    );
+    // The oversized explanation triggers the shared spill path.
+    await completeRunnerToolCommand(
+      setup,
+      "spill_tool_output",
+      "/tmp/explanation.txt",
+    );
+    const detail = await completedParentDetail(setup, "idle");
+
+    const explanation = isRecord(detail)
+      ? JSON.stringify(detail["messages"])
+      : "";
+    expect(explanation).toContain("saved to /tmp/explanation.txt");
+    expect(explanation).not.toContain("FINAL-TAIL-MARKER");
     closeSessionTestDatabase(setup.database);
   });
 });

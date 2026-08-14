@@ -34,7 +34,7 @@ const MAXIMUM_IDENTIFIER_LENGTH = 200;
 const MAXIMUM_PATH_LENGTH = 4_096;
 const MAXIMUM_TOOL_NAME_LENGTH = 100;
 
-function requiredString(
+function recordString(
   record: Readonly<Record<string, unknown>>,
   key: string,
   maximumLength: number,
@@ -53,14 +53,14 @@ export function readRunnerCommand(value: unknown): RunnerToolCommand {
   const executionEnvironment = readRunnerExecutionEnvironment(
     command["executionEnvironment"],
   );
-  const id = requiredString(command, "id", MAXIMUM_IDENTIFIER_LENGTH);
-  const sessionId = requiredString(
+  const id = recordString(command, "id", MAXIMUM_IDENTIFIER_LENGTH);
+  const sessionId = recordString(
     command,
     "sessionId",
     MAXIMUM_IDENTIFIER_LENGTH,
   );
-  const tool = requiredString(command, "tool", MAXIMUM_TOOL_NAME_LENGTH);
-  const workingDirectory = requiredString(
+  const tool = recordString(command, "tool", MAXIMUM_TOOL_NAME_LENGTH);
+  const workingDirectory = recordString(
     command,
     "workingDirectory",
     MAXIMUM_PATH_LENGTH,

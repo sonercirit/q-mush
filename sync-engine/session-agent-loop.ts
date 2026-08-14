@@ -7,6 +7,7 @@ import {
   type AgentModel,
   type AgentModelStep,
 } from "../shared/agent-loop.ts";
+import { optionalSignal } from "../shared/validation.ts";
 import {
   shouldCompactContext,
   type AgentConversationCompactor,
@@ -329,7 +330,7 @@ export async function runCompactingAgentLoop(
           }
         }
       },
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
+      ...optionalSignal(options.signal),
       ...(options.takeSteeringMessages === undefined
         ? {}
         : { takeSteeringMessages: options.takeSteeringMessages }),

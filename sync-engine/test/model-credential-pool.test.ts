@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { CredentialPoolBalancer } from "../../shared/credential-pool-balancer.ts";
 import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
-import { AgentModelDiscoveryError } from "../agent-model-discovery.ts";
+import { AgentModelDiscoveryError } from "../agent-model-discovery-fetch.ts";
 import { ModelCredentialPool } from "../model-credential-pool.ts";
 import { ProviderCredentialRejectionError } from "../provider-error.ts";
 import {
@@ -58,6 +58,13 @@ function createSetup() {
     balancer,
   );
   return { balancer, database, pool };
+}
+
+function credentialLoadGate() {
+  return {
+    entered: Promise.withResolvers<undefined>(),
+    release: Promise.withResolvers<undefined>(),
+  };
 }
 
 describe("model credential pool", () => {
@@ -119,6 +126,31 @@ describe("model credential pool", () => {
       [expect.objectContaining({ id: SECOND_CREDENTIAL_ID })],
       [expect.objectContaining({ id: SECOND_CREDENTIAL_ID })],
     ]);
+    database.$client.close();
+  });
+
+  test("propagates cancellation during balanced credential loading", async () => {
+    const database = testDatabase();
+    const gate = credentialLoadGate();
+    const pool = modelPool(database, async (_userId, selection) => {
+      if (selection.credentialId === FIRST_CREDENTIAL_ID) {
+        gate.entered.resolve(undefined);
+        await gate.release.promise;
+      }
+      return createTestProviderCredential(selection.credentialId);
+    });
+    const controller = new AbortController();
+    const pending = pool.representative(
+      TEST_USER_ID,
+      SELECTION,
+      controller.signal,
+    );
+    await gate.entered.promise;
+    const reason = new DOMException("Deadline reached", "AbortError");
+    controller.abort(reason);
+    gate.release.resolve(undefined);
+
+    await expect(pending).rejects.toBe(reason);
     database.$client.close();
   });
 

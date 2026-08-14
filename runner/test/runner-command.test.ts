@@ -392,6 +392,30 @@ describe("runner WebSocket protocol", () => {
     await spills.cleanup();
   }
 
+  test("fences result execution before dispatch when already canceled", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const root = await temporaryDirectory();
+    const shellCalls: string[] = [];
+
+    const result = await executeRunnerToolResult(
+      root,
+      "bash",
+      { command: "printf must-not-run", timeout: 5 },
+      controller.signal,
+      undefined,
+      {
+        shell: (_root, command) => {
+          shellCalls.push(command);
+          return Promise.resolve("completed");
+        },
+      },
+    ).catch((error: unknown) => error);
+
+    expect(result).toBeInstanceOf(Error);
+    expect(shellCalls).toEqual([]);
+  });
+
   test("reads a contained spill under a symlinked temporary directory", async () => {
     const realTemporary = await temporaryDirectory();
     const linkedTemporary = join(await temporaryDirectory(), "tmp-link");

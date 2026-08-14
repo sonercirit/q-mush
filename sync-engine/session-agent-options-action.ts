@@ -10,7 +10,8 @@ import {
   type ProviderCredentialAccess,
 } from "../shared/provider-credential-store.ts";
 import type { RunnerSummary } from "../shared/runner-model.ts";
-import { safeAgentModelDiscoveryError } from "./agent-model-discovery.ts";
+import { throwIfSignalAborted } from "../shared/validation.ts";
+import { safeAgentModelDiscoveryError } from "./agent-model-discovery-fetch.ts";
 import type { ModelCredentialPool } from "./model-credential-pool.ts";
 import type { SessionAgentActionDependencies } from "./session-agent-action-helpers.ts";
 import {
@@ -49,13 +50,16 @@ async function singleCredential(
   dependencies: SessionAgentOptionDependencies,
   userId: string,
   selection: Parameters<SessionAgentActionDependencies["readCredential"]>[1],
+  signal: AbortSignal | undefined,
 ): Promise<readonly ProviderCredentialAccess[]> {
   let credential;
   try {
     credential = await dependencies.readCredential(userId, selection);
   } catch {
+    throwIfSignalAborted(signal, "Model option discovery was canceled");
     return [];
   }
+  throwIfSignalAborted(signal, "Model option discovery was canceled");
   return credential?.id === selection.credentialId ? [credential] : [];
 }
 
@@ -64,6 +68,7 @@ async function modelOptions(
   userId: string,
   input: GetSessionOptionsToolInput,
   workspaceId: string,
+  signal: AbortSignal | undefined,
 ): Promise<SessionOptionsSource["models"]> {
   if (
     input.category !== "models" ||
@@ -95,17 +100,28 @@ async function modelOptions(
   }
   const credentials =
     balanced && dependencies.modelCredentialPool !== undefined
-      ? await dependencies.modelCredentialPool.representative(userId, selection)
-      : await singleCredential(dependencies, userId, selection);
+      ? await dependencies.modelCredentialPool.representative(
+          userId,
+          selection,
+          signal,
+        )
+      : await singleCredential(dependencies, userId, selection, signal);
+  throwIfSignalAborted(signal, "Model option discovery was canceled");
   if (credentials.length === 0) {
     throw new Error("The model credential or provider is unavailable");
   }
-  let failure: unknown;
+  let failure: unknown = new Error("Model discovery failed");
   for (const credential of credentials) {
     try {
-      return (await dependencies.discoverModels(selection.provider, credential))
-        .models;
+      return (
+        await dependencies.discoverModels(
+          selection.provider,
+          credential,
+          signal,
+        )
+      ).models;
     } catch (error) {
+      throwIfSignalAborted(signal, "Model option discovery was canceled");
       failure = error;
     }
   }
@@ -185,11 +201,18 @@ function credentialOptions(
 export async function sessionAgentOptions(options: {
   readonly dependencies: SessionAgentOptionDependencies;
   readonly input: GetSessionOptionsToolInput;
+  readonly signal?: AbortSignal;
   readonly userId: string;
   readonly workspaceId: string;
 }): Promise<string> {
   const { dependencies, input, userId, workspaceId } = options;
-  const models = await modelOptions(dependencies, userId, input, workspaceId);
+  const models = await modelOptions(
+    dependencies,
+    userId,
+    input,
+    workspaceId,
+    options.signal,
+  );
   const offset = optionsPageOffset(input.page);
   const credentialPage = credentialOptions(
     dependencies,

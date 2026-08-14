@@ -1,6 +1,7 @@
 import type { AgentModelStep } from "../shared/agent-loop.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
+import { optionalSignal } from "../shared/validation.ts";
 import {
   fetchModelRequestAttempt,
   modelResponseRetryAfterMilliseconds,
@@ -145,7 +146,7 @@ export async function completeProviderHttp(
     body: JSON.stringify(options.body),
     headers: options.headers,
     method: "POST",
-    ...(signal === undefined ? {} : { signal }),
+    ...optionalSignal(signal),
   });
   let streamed = false;
   const retryAttempt = async (): Promise<AgentModelStep> => {

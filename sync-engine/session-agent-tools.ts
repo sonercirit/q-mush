@@ -58,11 +58,19 @@ export interface SessionAgentToolActions {
   readonly browseRunnerDirectories: (
     runnerId: string,
     path: string,
+    signal: AbortSignal,
   ) => Promise<string>;
-  readonly compactSession: (sessionId: string) => Promise<string>;
-  readonly continueSession: (sessionId: string) => Promise<string>;
+  readonly compactSession: (
+    sessionId: string,
+    signal: AbortSignal,
+  ) => Promise<string>;
+  readonly continueSession: (
+    sessionId: string,
+    signal: AbortSignal,
+  ) => Promise<string>;
   readonly getSessionOptions: (
     input: GetSessionOptionsToolInput,
+    signal: AbortSignal,
   ) => Promise<string>;
   readonly listRunners: () => string;
   readonly listSessions: (input: ListSessionsToolInput) => string;
@@ -75,8 +83,12 @@ export interface SessionAgentToolActions {
   readonly sendToSession: (
     sessionId: string,
     message: string,
+    signal: AbortSignal,
   ) => Promise<string>;
-  readonly spawnSession: (input: SpawnSessionToolInput) => Promise<string>;
+  readonly spawnSession: (
+    input: SpawnSessionToolInput,
+    signal: AbortSignal,
+  ) => Promise<string>;
   readonly steerSession: (
     sessionId: string,
     message: string,
@@ -220,6 +232,7 @@ export function executeSessionAgentTool(
   actions: SessionAgentToolActions,
   name: SessionAgentToolName,
   arguments_: RunnerCommandArguments,
+  signal: AbortSignal,
 ): Promise<RunnerCommandResult> {
   try {
     let output: Promise<string>;
@@ -244,24 +257,25 @@ export function executeSessionAgentTool(
             "The browse_runner_directories arguments are invalid",
           );
         }
-        output = actions.browseRunnerDirectories(runnerId, path);
+        output = actions.browseRunnerDirectories(runnerId, path, signal);
         break;
       }
       case "compact_session":
         if (!hasOnlySessionToolArguments(arguments_, ["sessionId"])) {
           throw new Error("compact_session received invalid arguments");
         }
-        output = actions.compactSession(sessionId(arguments_));
+        output = actions.compactSession(sessionId(arguments_), signal);
         break;
       case "continue_session":
         if (!hasOnlySessionToolArguments(arguments_, ["sessionId"])) {
           throw new Error("continue_session received invalid arguments");
         }
-        output = actions.continueSession(sessionId(arguments_));
+        output = actions.continueSession(sessionId(arguments_), signal);
         break;
       case "get_session_options":
         output = actions.getSessionOptions(
           getSessionOptionsToolInput(arguments_),
+          signal,
         );
         break;
       case "list_runners":
@@ -295,10 +309,11 @@ export function executeSessionAgentTool(
         output = actions.sendToSession(
           sessionId(arguments_),
           message(arguments_),
+          signal,
         );
         break;
       case "spawn_session":
-        output = actions.spawnSession(spawnInput(arguments_));
+        output = actions.spawnSession(spawnInput(arguments_), signal);
         break;
       case "steer_session":
         output = actions.steerSession(

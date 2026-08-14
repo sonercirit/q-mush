@@ -3,6 +3,24 @@ import {
   AGENT_SYSTEM_PROMPT,
   createAgentSystemPrompt,
 } from "../../shared/agent-prompt.ts";
+import { SHARED_TOOL_LIMITS_STATEMENT } from "../../shared/tool-limits.ts";
+
+test("states the global tool limits once for every environment", () => {
+  // The shared statement is authoritative; per-tool descriptions must not
+  // repeat the limits.
+  expect(SHARED_TOOL_LIMITS_STATEMENT).toContain("30 minutes");
+  expect(SHARED_TOOL_LIMITS_STATEMENT).toContain("2,000");
+  expect(SHARED_TOOL_LIMITS_STATEMENT).toContain("50KB");
+  // ask_questions pauses the session instead of running work, so the time
+  // limit does not cover the wait for an answer; the statement must say so.
+  expect(SHARED_TOOL_LIMITS_STATEMENT).toContain("ask_questions");
+  // A parallel call is one budgeted call: its batch shares the time limit.
+  expect(SHARED_TOOL_LIMITS_STATEMENT).toContain("parallel batch shares");
+  expect(createAgentSystemPrompt(null)).toContain(SHARED_TOOL_LIMITS_STATEMENT);
+  expect(createAgentSystemPrompt(null, "container")).toContain(
+    SHARED_TOOL_LIMITS_STATEMENT,
+  );
+});
 
 test("describes the root Arch container environment for container sessions", () => {
   const prompt = createAgentSystemPrompt(null, "container");
@@ -24,7 +42,7 @@ test("describes the root Arch container environment for container sessions", () 
 
 test("adds a selected workspace agent file to the system prompt", () => {
   expect(createAgentSystemPrompt(null)).toBe(
-    `${AGENT_SYSTEM_PROMPT}\nFile and shell tools execute directly on the selected runner.`,
+    `${AGENT_SYSTEM_PROMPT}\nFile and shell tools execute directly on the selected runner.\n${SHARED_TOOL_LIMITS_STATEMENT}`,
   );
 
   const prompt = createAgentSystemPrompt({

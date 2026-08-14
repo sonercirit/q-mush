@@ -5,15 +5,19 @@ import type {
   ProviderId,
 } from "../../shared/provider-credential-store.ts";
 import { utf8ByteLength } from "../../shared/utf8.ts";
+import { isCredentialRejectionError } from "../../sync-engine/agent-model-discovery-fetch.ts";
 import {
   discoverAgentModelsWithFetch,
-  isCredentialRejectionError,
   type AgentModelDiscoveryFetch,
 } from "../../sync-engine/agent-model-discovery.ts";
 import { createJsonResponse } from "../../sync-engine/http.ts";
 import { catalog, credential, model } from "./agent-model-discovery-helpers.ts";
 import { createOpenAiOAuthSecret } from "./oauth-test-helpers.ts";
 import { captureRejection } from "./promise-test-helpers.ts";
+
+function deferredSignal() {
+  return Promise.withResolvers<undefined>();
+}
 
 class RequestCapture {
   request?: Request;
@@ -49,13 +53,13 @@ async function capturedDiscovery(
 }
 
 function rejectedDiscovery(body: BodyInit): Promise<AgentModelCatalog> {
+  const response = new Response(body, {
+    headers: { "content-type": "application/json" },
+  });
   return discoverAgentModelsWithFetch(
     "openai",
     credential("api_key", "sk-openai-secret"),
-    () =>
-      Promise.resolve(
-        new Response(body, { headers: { "content-type": "application/json" } }),
-      ),
+    () => Promise.resolve(response),
   );
 }
 
@@ -234,6 +238,33 @@ describe("agent model discovery", () => {
     );
     expect(request.url).toBe("https://models.example.test/openai/v1/models");
     expectBearer(request, "generic-secret");
+  });
+
+  test("aborts and cancels a stalled discovery response body", async () => {
+    const controller = new AbortController();
+    const canceled = deferredSignal();
+    const body = new ReadableStream<Uint8Array>({
+      cancel: () => {
+        canceled.resolve(undefined);
+      },
+      pull: () => {
+        // Intentionally stall after the response headers arrive.
+      },
+    });
+    const pending = discoverAgentModelsWithFetch(
+      "openai",
+      credential("api_key", "sk-openai-secret"),
+      () => Promise.resolve(new Response(body)),
+      controller.signal,
+    );
+    const captured = pending.catch((error: unknown) => error);
+    const reason = new DOMException("Deadline reached", "AbortError");
+
+    await Promise.resolve();
+    controller.abort(reason);
+
+    await expect(captured).resolves.toBe(reason);
+    await expect(canceled.promise).resolves.toBeUndefined();
   });
 
   test("aborts an oversized streamed catalog before fully buffering it", async () => {

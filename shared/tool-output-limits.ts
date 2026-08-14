@@ -1,6 +1,7 @@
 import { utf8ByteLength, utf8Prefix } from "./utf8.ts";
 
-export const MAXIMUM_TOOL_OUTPUT_BYTES = 50 * 1_024;
+export const MAXIMUM_TOOL_OUTPUT_KILOBYTES = 50;
+const MAXIMUM_TOOL_OUTPUT_BYTES = MAXIMUM_TOOL_OUTPUT_KILOBYTES * 1_024;
 export const MAXIMUM_TOOL_OUTPUT_LINES = 2_000;
 
 export interface BoundedToolOutput {
@@ -52,10 +53,10 @@ export function applyToolOutputNotice(output: string, notice: string): string {
 }
 
 export function toolOutputLimitNotice(spillPath: string): string {
-  return `Output exceeds the per-call limit (${String(MAXIMUM_TOOL_OUTPUT_LINES)} lines or ${String(MAXIMUM_TOOL_OUTPUT_BYTES)} bytes). The full output has been saved to ${spillPath}. Use the read tool with offset/limit to continue.`;
+  return `Output exceeds the per-call limit (${String(MAXIMUM_TOOL_OUTPUT_LINES)} lines or ${String(MAXIMUM_TOOL_OUTPUT_KILOBYTES)}KB). The full output has been saved to ${spillPath}. Use the read tool with offset/limit to continue.`;
 }
 
 export function hardTruncatedToolOutput(output: string): string {
-  const notice = `Output exceeds the per-call limit (${String(MAXIMUM_TOOL_OUTPUT_LINES)} lines or ${String(MAXIMUM_TOOL_OUTPUT_BYTES)} bytes). The full output could not be saved because the session runner is unreachable; this output was hard-truncated.`;
+  const notice = `Output exceeds the per-call limit (${String(MAXIMUM_TOOL_OUTPUT_LINES)} lines or ${String(MAXIMUM_TOOL_OUTPUT_KILOBYTES)}KB). The full output could not be saved because the session runner is unreachable; this output was hard-truncated.`;
   return applyToolOutputNotice(output, notice);
 }
