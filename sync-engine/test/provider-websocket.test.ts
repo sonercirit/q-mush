@@ -229,7 +229,7 @@ test("keeps ordinary retry capacity after an immediate expiry reconnect", async 
   await replaceProviderSocket(retry.sockets, 2);
 
   expectDoneStep(await pending);
-  expect(delays[0]).toBe(1_000);
+  expect(delays).toEqual([1_000]);
 });
 
 test("bounds repeated connection-limit reconnects", async () => {
