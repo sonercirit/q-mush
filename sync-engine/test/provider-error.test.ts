@@ -54,6 +54,21 @@ describe("provider stream error classification", () => {
     ).toContain("code 503");
   });
 
+  test("marks connection-limit codes for WebSocket reconnect only", () => {
+    for (const code of [
+      "websocket_connection_limit_reached",
+      "websocketconnectionlimit_reached",
+    ]) {
+      const error = readProviderStreamError({
+        error: { code, type: "invalid_request_error" },
+        status: 400,
+        type: "error",
+      });
+      expect(error.reconnectWebSocket).toBe(true);
+      expect(error.transient).toBe(false);
+    }
+  });
+
   test("known permanent signals override unknown or transient ones", () => {
     const errors: readonly Readonly<Record<string, unknown>>[] = [
       { status: "401" },

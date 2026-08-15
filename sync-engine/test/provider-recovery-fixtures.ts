@@ -5,6 +5,7 @@ import type { ModelRequestSleep } from "../../sync-engine/agent-model-retry.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
 import { codexOAuthCredential } from "./prompt-cache-fixtures.ts";
+import { expectDoneStep } from "./provider-step-fixtures.ts";
 
 export const COMPLETED_EVENT = {
   response: {
@@ -22,11 +23,20 @@ export const COMPLETED_EVENT = {
 const USER_MESSAGE = [{ content: "Hello", role: "user" as const }];
 
 export class FakeProviderSocket extends RecordingTestSocket {
+  closeCode: number | undefined;
+  closeReason: string | undefined;
+
   constructor() {
     super({
       closeEvent: () => new CloseEvent("close", { code: 1000 }),
       readyState: WebSocket.CONNECTING,
     });
+  }
+
+  override close(code?: number, reason?: string): void {
+    this.closeCode = code;
+    this.closeReason = reason;
+    super.close();
   }
 
   fail(): void {
@@ -61,17 +71,7 @@ export function providerDelta(
   return { content, ...(reset ? { reset: true } : {}), thinking: "" };
 }
 
-function collectDelta(deltas: ProviderTextDelta[]): {
-  readonly onDelta: (delta: ProviderTextDelta) => void;
-} {
-  return {
-    onDelta: (delta) => {
-      deltas.push(delta);
-    },
-  };
-}
-
-function recordDelay(delays: number[]): ModelRequestSleep {
+export function recordDelay(delays: number[]): ModelRequestSleep {
   return async (milliseconds) => {
     await Promise.resolve();
     delays.push(milliseconds);
@@ -87,11 +87,6 @@ export class FakeProviderSockets {
     return socket;
   };
 
-  async closeAttempt(index: number): Promise<void> {
-    await this.waitForAttempt(index);
-    this.created[index]?.close();
-  }
-
   async waitForAttempt(index: number): Promise<void> {
     await vi.waitFor(() => {
       expect(this.created).toHaveLength(index + 1);
@@ -106,12 +101,55 @@ interface RetryingSocketSetup {
   readonly sockets: FakeProviderSockets;
 }
 
+export function requireProviderSocket(
+  sockets: FakeProviderSockets,
+  index: number,
+): FakeProviderSocket {
+  const socket = sockets.created[index];
+  if (socket === undefined) {
+    throw new Error(`Provider socket ${String(index)} was not created`);
+  }
+  return socket;
+}
+
+export function expireProviderSocket(
+  socket: FakeProviderSocket,
+  code: string,
+  retryAfterSeconds?: number,
+): void {
+  socket.receive({
+    error: {
+      code,
+      message:
+        "Responses websocket connection limit reached (60 minutes). Create a new websocket connection to continue.",
+      ...(retryAfterSeconds === undefined
+        ? {}
+        : { retry_after: retryAfterSeconds }),
+      type: "invalid_request_error",
+    },
+    status: 400,
+    type: "error",
+  });
+}
+
+export async function replaceProviderSocket(
+  sockets: FakeProviderSockets,
+  index = 1,
+): Promise<void> {
+  await sockets.waitForAttempt(index);
+  const replacement = requireProviderSocket(sockets, index);
+  replacement.open();
+  replacement.receive(COMPLETED_EVENT);
+}
+
 export function retryingSocket(): RetryingSocketSetup {
   const deltas: ProviderTextDelta[] = [];
   const delays: number[] = [];
   const sockets = new FakeProviderSockets();
   const model = apiKeyModel({
-    ...collectDelta(deltas),
+    onDelta: (delta) => {
+      deltas.push(delta);
+    },
     sleep: recordDelay(delays),
     webSocket: sockets.create,
   });
@@ -119,6 +157,7 @@ export function retryingSocket(): RetryingSocketSetup {
 }
 
 export function apiKeyModel(options: {
+  readonly fetch?: () => Promise<Response>;
   readonly onDelta?: (delta: ProviderTextDelta) => void;
   readonly sleep?: ModelRequestSleep;
   readonly webSocket: WebSocketFactory;
@@ -129,7 +168,7 @@ export function apiKeyModel(options: {
       secret: "sk-openai",
       source: "api_key",
     },
-    fetch: neverFetch,
+    fetch: options.fetch ?? neverFetch,
     maxOutputTokens: null,
     model: "api-test-model",
     ...(options.onDelta === undefined ? {} : { onDelta: options.onDelta }),
@@ -153,6 +192,14 @@ function oauthModel(
     sleep,
     webSocket,
   });
+}
+
+export function chatCompletedResponse(): Response {
+  const chunk = JSON.stringify({
+    choices: [{ message: { content: "Done." } }],
+    usage: { completion_tokens: 1, prompt_tokens: 1, total_tokens: 2 },
+  });
+  return new Response(`data: ${chunk}\n\ndata: [DONE]\n\n`);
 }
 
 export function completedEventResponse(): Response {
@@ -195,7 +242,8 @@ export async function expectBoundedHttpFallback(options: {
 
   await failWebSocketAttempts(sockets, options.failAttempt);
 
-  expect(await pending).toMatchObject({ content: "Done." });
-  expect(delays).toEqual([1_000, 2_000, 4_000]);
+  const step = await pending;
   expect(fetchCount).toBe(1);
+  expect(delays).toEqual([1_000, 2_000, 4_000]);
+  expectDoneStep(step);
 }

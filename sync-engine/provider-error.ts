@@ -3,6 +3,10 @@ import { isRecord } from "../shared/auth-model.ts";
 const ERROR_DETAIL_MAXIMUM_LENGTH = 500;
 const RETRY_AFTER_MAX_MILLISECONDS = 60_000;
 const SECRET_PATTERN = /\b(?:sk|sess|Bearer)[-_A-Za-z0-9.]{8,}\b/giu;
+const WEBSOCKET_RECONNECT_ERROR_CODES = new Set([
+  "websocket_connection_limit_reached",
+  "websocketconnectionlimit_reached",
+]);
 const TRANSIENT_ERROR_CODES = new Set([
   "api_connection_error",
   "conflict",
@@ -70,19 +74,26 @@ export function isProviderCredentialRejection(
 }
 
 export class ProviderStreamError extends Error {
+  readonly reconnectWebSocket: boolean;
   readonly retryAfterMilliseconds: number | undefined;
   readonly transient: boolean;
 
   constructor(
     message: string,
     transient: boolean,
-    retryAfterMilliseconds?: number,
+    options: ProviderStreamErrorOptions = {},
   ) {
     super(message);
     this.name = "ProviderStreamError";
-    this.retryAfterMilliseconds = retryAfterMilliseconds;
+    this.reconnectWebSocket = options.reconnectWebSocket === true;
+    this.retryAfterMilliseconds = options.retryAfterMilliseconds;
     this.transient = transient;
   }
+}
+
+interface ProviderStreamErrorOptions {
+  readonly reconnectWebSocket?: boolean;
+  readonly retryAfterMilliseconds?: number | undefined;
 }
 
 function requiredTrimmedString(value: unknown): string | undefined {
@@ -190,6 +201,13 @@ function providerErrorDetails(
   };
 }
 
+function codeIsWebSocketConnectionLimit(code: ProviderErrorCode): boolean {
+  if (typeof code === "number") {
+    return false;
+  }
+  return WEBSOCKET_RECONNECT_ERROR_CODES.has(code.toLowerCase());
+}
+
 function codeIsTransient(code: ProviderErrorCode): boolean {
   if (typeof code === "number") {
     return code === 408 || code === 409 || code === 429 || code >= 500;
@@ -245,7 +263,10 @@ export function readProviderStreamError(
   return new ProviderStreamError(
     providerErrorMessage(details),
     !permanent && (transient || isProviderStreamErrorEvent(event)),
-    details.retryAfterMilliseconds,
+    {
+      reconnectWebSocket: details.codes.some(codeIsWebSocketConnectionLimit),
+      retryAfterMilliseconds: details.retryAfterMilliseconds,
+    },
   );
 }
 

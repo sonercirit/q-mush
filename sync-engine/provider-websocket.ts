@@ -23,19 +23,26 @@ export type ProviderWebSocketFactory = (
 const OPEN_STATE = 1;
 
 export class ProviderWebSocketError extends Error {
+  readonly reconnectImmediately: boolean;
   readonly retryAfterMilliseconds: number | undefined;
   readonly started: boolean;
 
   constructor(
     message: string,
     started: boolean,
-    retryAfterMilliseconds?: number,
+    options: ProviderWebSocketErrorOptions = {},
   ) {
     super(message);
     this.name = "ProviderWebSocketError";
-    this.retryAfterMilliseconds = retryAfterMilliseconds;
+    this.reconnectImmediately = options.reconnectImmediately === true;
+    this.retryAfterMilliseconds = options.retryAfterMilliseconds;
     this.started = started;
   }
+}
+
+interface ProviderWebSocketErrorOptions {
+  readonly reconnectImmediately?: boolean;
+  readonly retryAfterMilliseconds?: number | undefined;
 }
 
 function abortError(): DOMException {
@@ -129,13 +136,17 @@ export class ProviderWebSocketSession {
         settle(error);
       };
       const failUnknown = (error: unknown): void => {
-        if (error instanceof ProviderStreamError && error.transient) {
+        if (
+          error instanceof ProviderStreamError &&
+          (error.transient || error.reconnectWebSocket)
+        ) {
           fail(
-            new ProviderWebSocketError(
-              error.message,
-              receivedEvent,
-              error.retryAfterMilliseconds,
-            ),
+            new ProviderWebSocketError(error.message, receivedEvent, {
+              reconnectImmediately: error.reconnectWebSocket,
+              retryAfterMilliseconds: error.reconnectWebSocket
+                ? undefined
+                : error.retryAfterMilliseconds,
+            }),
           );
           return;
         }

@@ -9,25 +9,22 @@ Living project memory.
 
 ## Working Agreements
 
-- Research online before a change, unasked: search current provider docs and
-  issue trackers (brave-search skill) — search finds switches probes miss. Then
-  verify: probe real APIs, enumerate schemas via validation errors, read usage
-  metrics.
-- Call a capability impossible only when evidence excludes it — docs searched,
-  schema enumerated — else record an open question.
-- Preserve patterns, add tools only as needed, improve what you touch — code
-  health, tests, docs, performance, security, DX: small improvements ship with
-  the change; larger ones follow immediately.
-- Practice TDD: failing test first, implement, refactor green.
-- DRY and KISS: authoritative logic, no premature abstractions.
-- Never invent numeric limits or tunables: probe omission first, prefer the
-  provider default, else derive from metadata or docs.
+- Research online: use brave-search on provider docs/trackers, then probe APIs,
+  schemas, and usage metrics.
+- Call capabilities impossible only with excluding evidence; else record an open
+  question.
+- Preserve patterns; add tools only as needed; improve touched code, tests,
+  docs, performance, security, and DX. Ship small improvements now, larger
+  later.
+- TDD: fail first, implement, refactor green.
+- DRY/KISS: authoritative logic, no premature abstraction.
+- Never invent tunables: probe omission, prefer provider defaults, else use
+  metadata or docs.
 - Integrate completely the first time: wire every session capability to each
   protocol's native control, recording what a protocol lacks.
 - No reward hacking: never weaken tests, special-case checks, or claim
-  unperformed verification; disclose what stays unverified. Fix defects on sight
-  in the branch at hand, unprompted, even pre-existing or out of scope; when an
-  experiment proves the obvious fix harmful, codify why in a test.
+  unperformed verification; disclose unverified work. Fix defects on sight even
+  if pre-existing/out of scope; when a fix proves harmful, codify why in a test.
 - Record new decisions, gotchas, and lessons here in the same change, unprompted
   — a repeated user instruction means a rule is missing; condense elsewhere to
   fit the size cap. When evidence overturns a recorded finding, fix the code it
@@ -286,11 +283,16 @@ Living project memory.
   thinking tokens bill. The local proxy tolerates tool-loop replay without
   signed thinking blocks; strict endpoints may not. Streamed reasoning deltas
   group by `output_index` and `summary_index`; separate summary parts with
-  paragraphs since completed responses may omit them. OpenAI Responses
-  WebSockets and accepted HTTP streams retry transient interruptions or provider
-  errors only before a model step persists; partial UI deltas reset on replay,
-  exhausted WebSockets fall back to HTTP. Permanent errors and aborts do not
-  retry; terminal failures persist as non-replayed `error` messages.
+  paragraphs since completed responses may omit them. OpenAI's WebSocket Mode
+  guide documents a 60-minute connection limit and requires reconnecting; the
+  canonical `websocket_connection_limit_reached` and the underscore-free
+  `websocketconnectionlimit_reached` observed in Issue #236 replace the socket
+  immediately once per step, then use bounded retries if the limit repeats,
+  replaying only an unpersisted step. Other WebSocket/accepted HTTP
+  interruptions or provider errors use bounded retries; all replays reset
+  partial UI deltas and exhausted WebSockets fall back to HTTP. Permanent errors
+  and aborts do not retry; terminal failures persist as non-replayed `error`
+  messages.
 - Shell commands require a positive timeout; on macOS/Linux each gets a POSIX
   session; stop/timeout signals only its group. Agent launches and runner
   commands otherwise have no application-owned step, queue, or time limits;

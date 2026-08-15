@@ -480,15 +480,28 @@ export class ChatCompletionsAgentModel implements AgentModel {
   ): Promise<OptionalStep> {
     const signal = completionSignal(parameters);
 
-    for (let attempt = 0; ; attempt += 1) {
+    let reconnectImmediately = true;
+    let transientAttempt = 0;
+    for (;;) {
       try {
         return await this.#completeWebSocket(...parameters);
       } catch (error) {
         this.#acceptWebSocketInterruption(error, signal);
-        const delay = PROVIDER_WEBSOCKET_RETRY_DELAYS_MILLISECONDS[attempt];
+        const immediate =
+          error instanceof ProviderWebSocketError && error.reconnectImmediately;
+        if (immediate && reconnectImmediately) {
+          // The documented expiry requires a fresh socket. Grant one immediate
+          // replacement per model step, independent of ordinary retry capacity;
+          // repeated limit events then use bounded transient backoff.
+          reconnectImmediately = false;
+          continue;
+        }
+        const delay =
+          PROVIDER_WEBSOCKET_RETRY_DELAYS_MILLISECONDS[transientAttempt];
         if (delay === undefined) {
           return undefined;
         }
+        transientAttempt += 1;
         await this.#waitForRetry(
           error instanceof ProviderWebSocketError &&
             error.retryAfterMilliseconds !== undefined
