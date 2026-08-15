@@ -61,16 +61,6 @@ export function providerDelta(
   return { content, ...(reset ? { reset: true } : {}), thinking: "" };
 }
 
-function collectDelta(deltas: ProviderTextDelta[]): {
-  readonly onDelta: (delta: ProviderTextDelta) => void;
-} {
-  return {
-    onDelta: (delta) => {
-      deltas.push(delta);
-    },
-  };
-}
-
 function recordDelay(delays: number[]): ModelRequestSleep {
   return async (milliseconds) => {
     await Promise.resolve();
@@ -106,12 +96,39 @@ interface RetryingSocketSetup {
   readonly sockets: FakeProviderSockets;
 }
 
+export function expireProviderSocket(
+  socket: FakeProviderSocket | undefined,
+  code: string,
+): void {
+  socket?.receive({
+    error: {
+      code,
+      message:
+        "Responses websocket connection limit reached (60 minutes). Create a new websocket connection to continue.",
+      type: "invalid_request_error",
+    },
+    status: 400,
+    type: "error",
+  });
+}
+
+export async function replaceProviderSocket(
+  sockets: FakeProviderSockets,
+  index = 1,
+): Promise<void> {
+  await sockets.waitForAttempt(index);
+  sockets.created[index]?.open();
+  sockets.created[index]?.receive(COMPLETED_EVENT);
+}
+
 export function retryingSocket(): RetryingSocketSetup {
   const deltas: ProviderTextDelta[] = [];
   const delays: number[] = [];
   const sockets = new FakeProviderSockets();
   const model = apiKeyModel({
-    ...collectDelta(deltas),
+    onDelta: (delta) => {
+      deltas.push(delta);
+    },
     sleep: recordDelay(delays),
     webSocket: sockets.create,
   });

@@ -23,6 +23,7 @@ export type ProviderWebSocketFactory = (
 const OPEN_STATE = 1;
 
 export class ProviderWebSocketError extends Error {
+  readonly immediate: boolean;
   readonly retryAfterMilliseconds: number | undefined;
   readonly started: boolean;
 
@@ -30,9 +31,11 @@ export class ProviderWebSocketError extends Error {
     message: string,
     started: boolean,
     retryAfterMilliseconds?: number,
+    immediate = false,
   ) {
     super(message);
     this.name = "ProviderWebSocketError";
+    this.immediate = immediate;
     this.retryAfterMilliseconds = retryAfterMilliseconds;
     this.started = started;
   }
@@ -129,12 +132,16 @@ export class ProviderWebSocketSession {
         settle(error);
       };
       const failUnknown = (error: unknown): void => {
-        if (error instanceof ProviderStreamError && error.transient) {
+        if (
+          error instanceof ProviderStreamError &&
+          (error.transient || error.reconnectWebSocket)
+        ) {
           fail(
             new ProviderWebSocketError(
               error.message,
               receivedEvent,
               error.retryAfterMilliseconds,
+              error.reconnectWebSocket,
             ),
           );
           return;

@@ -480,22 +480,27 @@ export class ChatCompletionsAgentModel implements AgentModel {
   ): Promise<OptionalStep> {
     const signal = completionSignal(parameters);
 
-    for (let attempt = 0; ; attempt += 1) {
+    let transientAttempt = 0;
+    for (;;) {
       try {
         return await this.#completeWebSocket(...parameters);
       } catch (error) {
         this.#acceptWebSocketInterruption(error, signal);
-        const delay = PROVIDER_WEBSOCKET_RETRY_DELAYS_MILLISECONDS[attempt];
-        if (delay === undefined) {
-          return undefined;
+        if (!(error instanceof ProviderWebSocketError && error.immediate)) {
+          const delay =
+            PROVIDER_WEBSOCKET_RETRY_DELAYS_MILLISECONDS[transientAttempt];
+          if (delay === undefined) {
+            return undefined;
+          }
+          transientAttempt += 1;
+          await this.#waitForRetry(
+            error instanceof ProviderWebSocketError &&
+              error.retryAfterMilliseconds !== undefined
+              ? error.retryAfterMilliseconds
+              : delay,
+            signal,
+          );
         }
-        await this.#waitForRetry(
-          error instanceof ProviderWebSocketError &&
-            error.retryAfterMilliseconds !== undefined
-            ? error.retryAfterMilliseconds
-            : delay,
-          signal,
-        );
       }
     }
   }

@@ -7,9 +7,11 @@ import {
   complete,
   COMPLETED_EVENT,
   expectBoundedHttpFallback,
+  expireProviderSocket,
   FakeProviderSocket,
   FakeProviderSockets,
   providerDelta,
+  replaceProviderSocket,
   retryingSocket,
 } from "./provider-recovery-fixtures.ts";
 import { expectDoneStep } from "./provider-step-fixtures.ts";
@@ -125,6 +127,46 @@ test("aborts immediately during WebSocket retry backoff", async () => {
   });
 });
 
+test.each([
+  "websocket_connection_limit_reached",
+  "websocketconnectionlimit_reached",
+])(
+  "reconnects immediately when the provider expires the socket (%s)",
+  async (code) => {
+    const { delays, deltas, pending, sockets } = retryingSocket();
+    const expired = sockets.created[0];
+    expired?.open();
+    expired?.receive({
+      delta: "Partial",
+      type: "response.output_text.delta",
+    });
+    expireProviderSocket(expired, code);
+
+    await replaceProviderSocket(sockets);
+    const replacement = sockets.created[1];
+
+    expectDoneStep(await pending);
+    expect(expired?.readyState).toBe(WebSocket.CLOSED);
+    expect(replacement?.sent).toHaveLength(1);
+    expect(delays).toHaveLength(0);
+    expect(deltas).toEqual([providerDelta("Partial"), providerDelta("", true)]);
+  },
+);
+
+test("keeps ordinary retry capacity after an immediate expiry reconnect", async () => {
+  const retry = retryingSocket();
+  const { delays, pending } = retry;
+  const expired = retry.sockets.created[0];
+  expired?.open();
+  expireProviderSocket(expired, "websocket_connection_limit_reached");
+  await retry.sockets.waitForAttempt(1);
+  retry.sockets.created[1]?.fail();
+  await replaceProviderSocket(retry.sockets, 2);
+
+  expectDoneStep(await pending);
+  expect(delays[0]).toBe(1_000);
+});
+
 test("retries partial output after a socket error without stale deltas", async () => {
   const { delays, deltas, pending, sockets } = retryingSocket();
   const partialSocket = sockets.created[0];
@@ -176,14 +218,13 @@ test("retries transient failed events and clears partial output", async () => {
     response: { error: null, id: "response-transient", status: "failed" },
     type: "response.failed",
   });
-  await sockets.waitForAttempt(1);
-  const successfulSocket = sockets.created[1];
-  successfulSocket?.open();
-  successfulSocket?.receive(COMPLETED_EVENT);
+  await replaceProviderSocket(sockets);
 
   expectDoneStep(await pending);
-  expect(delays).toEqual([1_000]);
-  expect(deltas).toEqual([providerDelta("Partial"), providerDelta("", true)]);
+  expect({ delays, deltas }).toStrictEqual({
+    delays: [1_000],
+    deltas: [providerDelta("Partial"), providerDelta("", true)],
+  });
 });
 
 test("passes through permanent failed events without another socket", async () => {
