@@ -74,6 +74,12 @@ async function readCpdLimits(rootDirectory: string): Promise<CpdLimits> {
 async function runCpd(): Promise<number> {
   const rootDirectory = resolve(import.meta.dirname, "..");
   const requestedPaths = process.argv.slice(2);
+  const unsupportedOption = requestedPaths.find((path) => path.startsWith("-"));
+  if (unsupportedOption !== undefined) {
+    throw new Error(
+      `CPD wrapper does not accept options: ${unsupportedOption}`,
+    );
+  }
   const scanPaths = (requestedPaths.length === 0 ? ["."] : requestedPaths).map(
     (path) => scanPathWithinProject(rootDirectory, path),
   );

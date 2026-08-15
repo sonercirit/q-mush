@@ -88,6 +88,9 @@ async function readStream(
 export async function runRunnerProcess(
   options: RunnerProcessOptions,
 ): Promise<RunnerProcessResult> {
+  if (options.signal?.aborted === true) {
+    throw new Error("The runner command was stopped");
+  }
   const state: {
     settled: boolean;
     termination: RunnerProcessTermination | undefined;
@@ -128,9 +131,6 @@ export async function runRunnerProcess(
           terminate("timed-out");
         }, options.timeoutSeconds * 1_000);
   options.signal?.addEventListener("abort", stop, { once: true });
-  if (options.signal?.aborted === true) {
-    stop();
-  }
 
   try {
     const [exitCode, standardError, standardOutput] = await Promise.all([

@@ -167,8 +167,6 @@ async function mountedOpenRouterEditor() {
   return mounted;
 }
 
-const chooseProviderUpdateOption = chooseTestOption;
-
 function expectOpenRouterDraft(container: ParentNode): void {
   expect(selectedProviderDraftValue(container, "sessionProviderModel")).toBe(
     "model-2",
@@ -320,7 +318,7 @@ test("rediscovers providers only when the session provider selection changes", a
 test("reselecting the current model preserves its serving provider", async () => {
   const { container, discoverProviders } = await mountedOpenRouterEditor();
 
-  chooseProviderUpdateOption(container, "#session-provider-model", "model-2");
+  chooseTestOption(container, "#session-provider-model", "model-2");
 
   expectOpenRouterDraft(container);
   expect(discoverProviders).toHaveBeenCalledTimes(1);
@@ -329,7 +327,7 @@ test("reselecting the current model preserves its serving provider", async () =>
 test("reselecting the current credential preserves its model and serving provider", async () => {
   const { container, discoverModels } = await mountedOpenRouterEditor();
 
-  chooseProviderUpdateOption(
+  chooseTestOption(
     container,
     "#session-provider-credential",
     "openrouter:credential-1",

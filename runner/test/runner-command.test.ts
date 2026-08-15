@@ -558,6 +558,30 @@ describe("runner WebSocket protocol", () => {
     expect(result).not.toContain("stopped");
   });
 
+  test("fences result execution before dispatch when already aborted", async () => {
+    const controller = new AbortController();
+    const shellCalls: string[] = [];
+    const root = await temporaryDirectory();
+
+    controller.abort();
+    const result = await executeRunnerToolResult(
+      root,
+      "bash",
+      { command: "printf must-not-run", timeout: 5 },
+      controller.signal,
+      undefined,
+      {
+        shell: (_root, command) => {
+          shellCalls.push(command);
+          return Promise.resolve("completed");
+        },
+      },
+    ).catch((error: unknown) => error);
+
+    expect(result).toBeInstanceOf(Error);
+    expect(shellCalls).toEqual([]);
+  });
+
   test("does not start a shell for an already-aborted signal", async () => {
     const root = await temporaryDirectory();
     const marker = join(root, "started.txt");

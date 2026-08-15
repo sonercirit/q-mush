@@ -1,10 +1,21 @@
 import { resolve } from "node:path";
 import {
+  createScanner,
   forEachChild,
+  isBindingElement,
+  isClassLike,
   isFunctionLike,
   isIdentifier,
+  isObjectBindingPattern,
+  isObjectLiteralElementLike,
   isPrivateIdentifier,
+  isPropertyAccessExpression,
+  isShorthandPropertyAssignment,
+  isTypeElement,
+  LanguageVariant,
+  ScriptTarget,
   SyntaxKind,
+  type NamedDeclaration,
   type Node,
   type SourceFile,
   type Symbol,
@@ -58,6 +69,39 @@ function symbolIsBoundWithin(
   );
 }
 
+function namedDeclarationHasName(
+  node: Node,
+  name: Node,
+): node is NamedDeclaration {
+  return "name" in node && node.name === name;
+}
+
+function propertyNameRemainsSignificant(node: Node): boolean {
+  if (!isIdentifier(node) && !isPrivateIdentifier(node)) {
+    return false;
+  }
+
+  const parent = node.parent;
+  if (
+    (isPropertyAccessExpression(parent) && parent.name === node) ||
+    (namedDeclarationHasName(parent, node) &&
+      (isObjectLiteralElementLike(parent) ||
+        isTypeElement(parent) ||
+        isClassLike(parent.parent)))
+  ) {
+    return true;
+  }
+
+  return (
+    isIdentifier(node) &&
+    ((isShorthandPropertyAssignment(parent) && parent.name === node) ||
+      (isBindingElement(parent) &&
+        isObjectBindingPattern(parent.parent) &&
+        parent.name === node &&
+        parent.propertyName === undefined))
+  );
+}
+
 function tokenFingerprints(
   functionNode: Node,
   sourceFile: SourceFile,
@@ -87,7 +131,8 @@ function tokenFingerprints(
       const symbol = checker.getSymbolAtLocation(node);
       if (
         symbol !== undefined &&
-        symbolIsBoundWithin(symbol, functionNode, sourceFile)
+        symbolIsBoundWithin(symbol, functionNode, sourceFile) &&
+        !propertyNameRemainsSignificant(node)
       ) {
         let canonical = canonicalNames.get(symbol);
         if (canonical === undefined) {
@@ -108,8 +153,48 @@ function tokenFingerprints(
   return {
     normalized: JSON.stringify(normalized),
     original: JSON.stringify(original),
-    tokens: normalized.length,
+    tokens: nativeTokenCount(functionNode, sourceFile),
   };
+}
+
+function nativeTokenCount(node: Node, sourceFile: SourceFile): number {
+  const scanner = createScanner(
+    ScriptTarget.Latest,
+    true,
+    LanguageVariant.JSX,
+    sourceFile.text,
+    undefined,
+    node.getStart(sourceFile),
+    node.getWidth(sourceFile),
+  );
+  const rescan = new Map<number, SyntaxKind>();
+  function record(current: Node): void {
+    if (current.kind === SyntaxKind.RegularExpressionLiteral) {
+      rescan.set(current.getStart(sourceFile), current.kind);
+    } else if (
+      current.kind === SyntaxKind.GreaterThanGreaterThanToken ||
+      current.kind === SyntaxKind.GreaterThanGreaterThanGreaterThanToken
+    ) {
+      rescan.set(current.getStart(sourceFile), current.kind);
+    }
+    forEachChild(current, record);
+  }
+
+  record(node);
+  let count = 0;
+  for (;;) {
+    let kind = scanner.scan();
+    const expected = rescan.get(scanner.getTokenStart());
+    if (expected === SyntaxKind.RegularExpressionLiteral) {
+      kind = scanner.reScanSlashToken();
+    } else if (expected !== undefined) {
+      kind = scanner.reScanGreaterToken();
+    }
+    if (kind === SyntaxKind.EndOfFileToken) {
+      return count;
+    }
+    count += 1;
+  }
 }
 
 function functionNodes(sourceFile: SourceFile): Node[] {
@@ -131,6 +216,18 @@ function location(sourceFile: SourceFile, position: number): CloneLocation {
   return { column: value.character + 1, line: value.line + 1 };
 }
 
+function functionSpansMinimumLines(
+  sourceFile: SourceFile,
+  node: Node,
+  minLines: number,
+): boolean {
+  const start = sourceFile.getLineAndCharacterOfPosition(
+    node.getStart(sourceFile),
+  );
+  const end = sourceFile.getLineAndCharacterOfPosition(node.getEnd());
+  return end.line - start.line >= minLines;
+}
+
 function occurrencesInSource(
   path: string,
   sourceFile: SourceFile,
@@ -143,7 +240,8 @@ function occurrencesInSource(
     const start = location(sourceFile, node.getStart(sourceFile));
     const end = location(sourceFile, node.getEnd());
 
-    return fingerprints.tokens >= minTokens && end.line - start.line >= minLines
+    return fingerprints.tokens >= minTokens &&
+      functionSpansMinimumLines(sourceFile, node, minLines)
       ? [
           {
             end,

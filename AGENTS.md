@@ -203,9 +203,9 @@ Living project memory.
 - Knip checks every issue type and entry export in test and production graphs;
   tests cannot keep production alive, and unused test helpers fail.
 - CPD maps all JS/TS extensions to TSX and ignores imports. Native-token and
-  complete-function alpha matches of ≥20 tokens and one line fail the zero
-  threshold; alpha ignores locally bound names but preserves free names, member
-  APIs, and literals.
+  complete-function alpha matches of ≥20 tokens spanning at least one line
+  boundary fail the zero threshold; alpha ignores locally bound names but
+  preserves free names, member APIs, and literals.
 - Repository policy scans tracked, unignored files: 20,000-code-point maximum
   (`bun.lock`, `drizzle/` excepted), tests only under `test`, and no app HTML
   files outside `test`/`fixtures`.
