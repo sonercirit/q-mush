@@ -81,15 +81,19 @@ export class ProviderStreamError extends Error {
   constructor(
     message: string,
     transient: boolean,
-    retryAfterMilliseconds?: number,
-    reconnectWebSocket = false,
+    options: ProviderStreamErrorOptions = {},
   ) {
     super(message);
     this.name = "ProviderStreamError";
-    this.reconnectWebSocket = reconnectWebSocket;
-    this.retryAfterMilliseconds = retryAfterMilliseconds;
+    this.reconnectWebSocket = options.reconnectWebSocket === true;
+    this.retryAfterMilliseconds = options.retryAfterMilliseconds;
     this.transient = transient;
   }
+}
+
+interface ProviderStreamErrorOptions {
+  readonly reconnectWebSocket?: boolean;
+  readonly retryAfterMilliseconds?: number | undefined;
 }
 
 function requiredTrimmedString(value: unknown): string | undefined {
@@ -197,7 +201,7 @@ function providerErrorDetails(
   };
 }
 
-function codeReconnectsWebSocket(code: ProviderErrorCode): boolean {
+function codeIsWebSocketConnectionLimit(code: ProviderErrorCode): boolean {
   return (
     typeof code === "string" &&
     WEBSOCKET_RECONNECT_ERROR_CODES.has(code.toLowerCase())
@@ -259,8 +263,10 @@ export function readProviderStreamError(
   return new ProviderStreamError(
     providerErrorMessage(details),
     !permanent && (transient || isProviderStreamErrorEvent(event)),
-    details.retryAfterMilliseconds,
-    details.codes.some(codeReconnectsWebSocket),
+    {
+      reconnectWebSocket: details.codes.some(codeIsWebSocketConnectionLimit),
+      retryAfterMilliseconds: details.retryAfterMilliseconds,
+    },
   );
 }
 

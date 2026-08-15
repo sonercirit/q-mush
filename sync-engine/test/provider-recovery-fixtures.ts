@@ -96,11 +96,22 @@ interface RetryingSocketSetup {
   readonly sockets: FakeProviderSockets;
 }
 
+export function requireProviderSocket(
+  sockets: FakeProviderSockets,
+  index: number,
+): FakeProviderSocket {
+  const socket = sockets.created[index];
+  if (socket === undefined) {
+    throw new Error(`Provider socket ${String(index)} was not created`);
+  }
+  return socket;
+}
+
 export function expireProviderSocket(
-  socket: FakeProviderSocket | undefined,
+  socket: FakeProviderSocket,
   code: string,
 ): void {
-  socket?.receive({
+  socket.receive({
     error: {
       code,
       message:
@@ -117,14 +128,21 @@ export async function replaceProviderSocket(
   index = 1,
 ): Promise<void> {
   await sockets.waitForAttempt(index);
-  sockets.created[index]?.open();
-  sockets.created[index]?.receive(COMPLETED_EVENT);
+  const replacement = requireProviderSocket(sockets, index);
+  replacement.open();
+  replacement.receive(COMPLETED_EVENT);
+}
+
+export function createProviderSockets(): {
+  readonly delays: number[];
+  readonly sockets: FakeProviderSockets;
+} {
+  return { delays: [], sockets: new FakeProviderSockets() };
 }
 
 export function retryingSocket(): RetryingSocketSetup {
   const deltas: ProviderTextDelta[] = [];
-  const delays: number[] = [];
-  const sockets = new FakeProviderSockets();
+  const { delays, sockets } = createProviderSockets();
   const model = apiKeyModel({
     onDelta: (delta) => {
       deltas.push(delta);
@@ -135,7 +153,12 @@ export function retryingSocket(): RetryingSocketSetup {
   return { delays, deltas, pending: complete(model), sockets };
 }
 
+export function recordProviderDelay(delays: number[]): ModelRequestSleep {
+  return recordDelay(delays);
+}
+
 export function apiKeyModel(options: {
+  readonly fetch?: () => Promise<Response>;
   readonly onDelta?: (delta: ProviderTextDelta) => void;
   readonly sleep?: ModelRequestSleep;
   readonly webSocket: WebSocketFactory;
@@ -146,7 +169,7 @@ export function apiKeyModel(options: {
       secret: "sk-openai",
       source: "api_key",
     },
-    fetch: neverFetch,
+    fetch: options.fetch ?? neverFetch,
     maxOutputTokens: null,
     model: "api-test-model",
     ...(options.onDelta === undefined ? {} : { onDelta: options.onDelta }),
@@ -170,6 +193,14 @@ function oauthModel(
     sleep,
     webSocket,
   });
+}
+
+export function chatCompletedResponse(): Response {
+  const chunk = JSON.stringify({
+    choices: [{ message: { content: "Done." } }],
+    usage: { completion_tokens: 1, prompt_tokens: 1, total_tokens: 2 },
+  });
+  return new Response(`data: ${chunk}\n\ndata: [DONE]\n\n`);
 }
 
 export function completedEventResponse(): Response {
@@ -212,7 +243,10 @@ export async function expectBoundedHttpFallback(options: {
 
   await failWebSocketAttempts(sockets, options.failAttempt);
 
-  expect(await pending).toMatchObject({ content: "Done." });
-  expect(delays).toEqual([1_000, 2_000, 4_000]);
+  const step = await pending;
   expect(fetchCount).toBe(1);
+  expect({ delays, step }).toMatchObject({
+    delays: [1_000, 2_000, 4_000],
+    step: { content: "Done." },
+  });
 }

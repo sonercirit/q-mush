@@ -30,15 +30,19 @@ export class ProviderWebSocketError extends Error {
   constructor(
     message: string,
     started: boolean,
-    retryAfterMilliseconds?: number,
-    immediate = false,
+    options: ProviderWebSocketErrorOptions = {},
   ) {
     super(message);
     this.name = "ProviderWebSocketError";
-    this.immediate = immediate;
-    this.retryAfterMilliseconds = retryAfterMilliseconds;
+    this.immediate = options.immediate === true;
+    this.retryAfterMilliseconds = options.retryAfterMilliseconds;
     this.started = started;
   }
+}
+
+interface ProviderWebSocketErrorOptions {
+  readonly immediate?: boolean;
+  readonly retryAfterMilliseconds?: number | undefined;
 }
 
 function abortError(): DOMException {
@@ -137,12 +141,10 @@ export class ProviderWebSocketSession {
           (error.transient || error.reconnectWebSocket)
         ) {
           fail(
-            new ProviderWebSocketError(
-              error.message,
-              receivedEvent,
-              error.retryAfterMilliseconds,
-              error.reconnectWebSocket,
-            ),
+            new ProviderWebSocketError(error.message, receivedEvent, {
+              immediate: error.reconnectWebSocket,
+              retryAfterMilliseconds: error.retryAfterMilliseconds,
+            }),
           );
           return;
         }

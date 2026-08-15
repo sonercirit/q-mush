@@ -4,14 +4,18 @@ import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
 import { captureRejection } from "./promise-test-helpers.ts";
 import {
   apiKeyModel,
+  chatCompletedResponse,
   complete,
   COMPLETED_EVENT,
+  createProviderSockets,
   expectBoundedHttpFallback,
   expireProviderSocket,
   FakeProviderSocket,
   FakeProviderSockets,
   providerDelta,
+  recordProviderDelay,
   replaceProviderSocket,
+  requireProviderSocket,
   retryingSocket,
 } from "./provider-recovery-fixtures.ts";
 import { expectDoneStep } from "./provider-step-fixtures.ts";
@@ -134,9 +138,9 @@ test.each([
   "reconnects immediately when the provider expires the socket (%s)",
   async (code) => {
     const { delays, deltas, pending, sockets } = retryingSocket();
-    const expired = sockets.created[0];
-    expired?.open();
-    expired?.receive({
+    const expired = requireProviderSocket(sockets, 0);
+    expired.open();
+    expired.receive({
       delta: "Partial",
       type: "response.output_text.delta",
     });
@@ -146,7 +150,7 @@ test.each([
     const replacement = sockets.created[1];
 
     expectDoneStep(await pending);
-    expect(expired?.readyState).toBe(WebSocket.CLOSED);
+    expect(expired.readyState).toBe(WebSocket.CLOSED);
     expect(replacement?.sent).toHaveLength(1);
     expect(delays).toHaveLength(0);
     expect(deltas).toEqual([providerDelta("Partial"), providerDelta("", true)]);
@@ -156,8 +160,8 @@ test.each([
 test("keeps ordinary retry capacity after an immediate expiry reconnect", async () => {
   const retry = retryingSocket();
   const { delays, pending } = retry;
-  const expired = retry.sockets.created[0];
-  expired?.open();
+  const expired = requireProviderSocket(retry.sockets, 0);
+  expired.open();
   expireProviderSocket(expired, "websocket_connection_limit_reached");
   await retry.sockets.waitForAttempt(1);
   retry.sockets.created[1]?.fail();
@@ -165,6 +169,29 @@ test("keeps ordinary retry capacity after an immediate expiry reconnect", async 
 
   expectDoneStep(await pending);
   expect(delays[0]).toBe(1_000);
+});
+
+test("bounds repeated connection-limit reconnects", async () => {
+  const { delays, sockets } = createProviderSockets();
+  const model = apiKeyModel({
+    fetch: () => Promise.resolve(chatCompletedResponse()),
+    sleep: recordProviderDelay(delays),
+    webSocket: sockets.create,
+  });
+  const pending = complete(model);
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await sockets.waitForAttempt(attempt);
+    const expired = requireProviderSocket(sockets, attempt);
+    expired.open();
+    expireProviderSocket(expired, "websocket_connection_limit_reached");
+  }
+
+  expect(delays).toEqual([1_000, 2_000, 4_000]);
+  expect({
+    socketCount: sockets.created.length,
+    step: await pending,
+  }).toMatchObject({ socketCount: 5, step: { content: "Done." } });
 });
 
 test("retries partial output after a socket error without stale deltas", async () => {

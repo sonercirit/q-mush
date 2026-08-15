@@ -9,13 +9,13 @@ Living project memory.
 
 ## Working Agreements
 
-- Research online before changes: search current provider docs and issue
-  trackers (brave-search skill), then probe APIs, schemas, and usage metrics.
+- Research online before changes: search provider docs/issue trackers, then
+  probe APIs, schemas, and usage metrics.
 - Call a capability impossible only when evidence excludes it; otherwise record
   an open question.
-- Preserve patterns; add tools only as needed; improve touched code health,
-  tests, docs, performance, security, and DX. Ship small improvements now,
-  larger ones immediately after.
+- Preserve patterns; add tools only as needed; improve touched code, tests,
+  docs, performance, security, and DX. Ship small improvements now, larger ones
+  after.
 - Practice TDD: failing test first, implement, refactor green.
 - DRY and KISS: authoritative logic, no premature abstractions.
 - Never invent numeric limits or tunables: probe omission first, prefer the
@@ -286,11 +286,12 @@ Living project memory.
   group by `output_index` and `summary_index`; separate summary parts with
   paragraphs since completed responses may omit them. OpenAI Responses
   WebSockets expire at the documented 60-minute limit; both the canonical and
-  observed connection-limit codes immediately replace the socket and replay an
-  unpersisted step. Other WebSocket/accepted HTTP interruptions or provider
-  errors use bounded retries; all replays reset partial UI deltas and exhausted
-  WebSockets fall back to HTTP. Permanent errors and aborts do not retry;
-  terminal failures persist as non-replayed `error` messages.
+  observed connection-limit codes replace the socket immediately once, then use
+  bounded retries if the limit repeats, replaying only an unpersisted step.
+  Other WebSocket/accepted HTTP interruptions or provider errors use bounded
+  retries; all replays reset partial UI deltas and exhausted WebSockets fall
+  back to HTTP. Permanent errors and aborts do not retry; terminal failures
+  persist as non-replayed `error` messages.
 - Shell commands require a positive timeout; on macOS/Linux each gets a POSIX
   session; stop/timeout signals only its group. Agent launches and runner
   commands otherwise have no application-owned step, queue, or time limits;
