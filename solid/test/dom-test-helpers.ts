@@ -57,6 +57,15 @@ export function clickTestButton(container: ParentNode, selector: string): void {
   control.click();
 }
 
+export function chooseTestOption(
+  container: ParentNode,
+  select: string,
+  value: string,
+): void {
+  clickTestButton(container, select);
+  clickTestButton(container, `[data-option-value='${value}']`);
+}
+
 export function queryTestTranscript(container: ParentNode): HTMLUListElement {
   const element = queryTestElement(
     container,

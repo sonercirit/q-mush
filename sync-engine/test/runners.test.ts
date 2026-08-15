@@ -108,9 +108,7 @@ function defaultRunnerRequest(runnerId: string): Request {
   );
 }
 
-function metadata(machineId: string, name = "workstation") {
-  return runnerMetadata(machineId, name);
-}
+const metadata = runnerMetadata;
 
 function connect(
   setup: Setup,

@@ -200,16 +200,15 @@ Living project memory.
   `solid/styles.css`) are rejected. First-party code rejects unsafe DOM HTML
   injection, `dangerouslySetInnerHTML`, and HTML-like `Response` bodies;
   HTML-like data and TSX pass.
-- `knip.config.ts` checks every issue type and entry exports;
-  `knip.production.config.ts` limits the graph to runtime source. Both run:
-  tests cannot keep production code alive; unused test helpers still fail.
-- `.jscpd.json` maps all JS/TS extensions to TSX for cross-extension detection;
-  import declarations are ignored; clones of ≥20 tokens and one line fail the
-  zero threshold.
-- `scripts/repository-check.ts` lists tracked, unignored files, calling the
-  policy APIs under `scripts/`: no files at 20,000 Unicode code points
-  (`bun.lock`, `drizzle/` excepted), no JS/TS tests outside `test` directories,
-  no `.htm(l)`/`.xhtml` app files outside `test`/`fixtures`.
+- Knip checks every issue type and entry export in test and production graphs;
+  tests cannot keep production alive, and unused test helpers fail.
+- CPD maps all JS/TS extensions to TSX and ignores imports. Native-token and
+  complete-function alpha matches of ≥20 tokens and one line fail the zero
+  threshold; alpha ignores locally bound names but preserves free names, member
+  APIs, and literals.
+- Repository policy scans tracked, unignored files: 20,000-code-point maximum
+  (`bun.lock`, `drizzle/` excepted), tests only under `test`, and no app HTML
+  files outside `test`/`fixtures`.
 
 ## Decisions and Gotchas
 

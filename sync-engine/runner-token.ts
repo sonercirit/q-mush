@@ -4,6 +4,7 @@ import {
   scryptSync,
   timingSafeEqual,
 } from "node:crypto";
+import { sha256Base64Url } from "../shared/sha256.ts";
 
 const LEGACY_DIGEST_BYTES = 32;
 const STORED_HASH_PREFIX = "scrypt";
@@ -16,7 +17,7 @@ function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
 }
 
 export function createTokenDigest(token: string): string {
-  return createHash("sha256").update(token).digest("base64url");
+  return sha256Base64Url(token);
 }
 
 export function createStoredTokenHash(token: string): string {

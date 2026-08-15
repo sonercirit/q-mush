@@ -12,9 +12,9 @@ import {
   createJsonResponse,
   createMethodNotAllowedResponse,
   parseJsonRequest,
+  requireRequestMethod,
 } from "./http.ts";
 import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
-import { requireRequestMethod } from "./request-method.ts";
 import type { SessionDetailReader } from "./session-command-types.ts";
 import { updateSessionCompactionMode } from "./session-compaction-actions.ts";
 import type { SessionNotification } from "./session-creation.ts";

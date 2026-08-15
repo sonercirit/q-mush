@@ -65,9 +65,7 @@ function createRunner(setup: Setup): void {
   ).toBe(201);
 }
 
-function metadata(machineFingerprint: string, name = "workstation") {
-  return runnerMetadata(machineFingerprint, name);
-}
+const metadata = runnerMetadata;
 
 function prepare(
   setup: Setup,

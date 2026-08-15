@@ -12,7 +12,7 @@ import { SessionPanel, type SessionViewState } from "../session-client.tsx";
 import { SessionController } from "../session-controller.ts";
 import { initialSessionViewState } from "../session-state.ts";
 import {
-  clickTestButton,
+  chooseTestOption,
   disposeTestViews,
   mountTestView,
   queryTestElement,
@@ -78,14 +78,7 @@ function createSessionTestController(
   return new SessionController(reactive, undefined, null, { command });
 }
 
-function chooseOption(
-  container: ParentNode,
-  select: string,
-  value: string,
-): void {
-  clickTestButton(container, select);
-  clickTestButton(container, `[data-option-value='${value}']`);
-}
+const chooseOption = chooseTestOption;
 
 const PRESERVED_DRAFT = {
   credential: "openrouter:credential-2",

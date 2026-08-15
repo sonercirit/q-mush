@@ -14,6 +14,7 @@ import { SessionDetail } from "../session-detail-client.tsx";
 import { SessionProviderUpdateEditor } from "../session-provider-update-client.tsx";
 import { initialSessionViewState } from "../session-state.ts";
 import {
+  chooseTestOption,
   clickTestButton,
   expectTestText,
   mountTestView,
@@ -166,14 +167,7 @@ async function mountedOpenRouterEditor() {
   return mounted;
 }
 
-function chooseProviderUpdateOption(
-  container: ParentNode,
-  selectId: string,
-  value: string,
-): void {
-  clickTestButton(container, selectId);
-  clickTestButton(container, `[data-option-value='${value}']`);
-}
+const chooseProviderUpdateOption = chooseTestOption;
 
 function expectOpenRouterDraft(container: ParentNode): void {
   expect(selectedProviderDraftValue(container, "sessionProviderModel")).toBe(
