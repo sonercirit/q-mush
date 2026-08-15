@@ -5,6 +5,7 @@ import type { ModelRequestSleep } from "../../sync-engine/agent-model-retry.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
 import { codexOAuthCredential } from "./prompt-cache-fixtures.ts";
+import { expectDoneStep } from "./provider-step-fixtures.ts";
 
 export const COMPLETED_EVENT = {
   response: {
@@ -22,11 +23,20 @@ export const COMPLETED_EVENT = {
 const USER_MESSAGE = [{ content: "Hello", role: "user" as const }];
 
 export class FakeProviderSocket extends RecordingTestSocket {
+  closeCode: number | undefined;
+  closeReason: string | undefined;
+
   constructor() {
     super({
       closeEvent: () => new CloseEvent("close", { code: 1000 }),
       readyState: WebSocket.CONNECTING,
     });
+  }
+
+  override close(code?: number, reason?: string): void {
+    this.closeCode = code;
+    this.closeReason = reason;
+    super.close();
   }
 
   fail(): void {
@@ -77,11 +87,6 @@ export class FakeProviderSockets {
     return socket;
   };
 
-  async closeAttempt(index: number): Promise<void> {
-    await this.waitForAttempt(index);
-    this.created[index]?.close();
-  }
-
   async waitForAttempt(index: number): Promise<void> {
     await vi.waitFor(() => {
       expect(this.created).toHaveLength(index + 1);
@@ -110,12 +115,16 @@ export function requireProviderSocket(
 export function expireProviderSocket(
   socket: FakeProviderSocket,
   code: string,
+  retryAfterSeconds?: number,
 ): void {
   socket.receive({
     error: {
       code,
       message:
         "Responses websocket connection limit reached (60 minutes). Create a new websocket connection to continue.",
+      ...(retryAfterSeconds === undefined
+        ? {}
+        : { retry_after: retryAfterSeconds }),
       type: "invalid_request_error",
     },
     status: 400,
@@ -235,8 +244,6 @@ export async function expectBoundedHttpFallback(options: {
 
   const step = await pending;
   expect(fetchCount).toBe(1);
-  expect({ delays, step }).toMatchObject({
-    delays: [1_000, 2_000, 4_000],
-    step: { content: "Done." },
-  });
+  expect(delays).toEqual([1_000, 2_000, 4_000]);
+  expectDoneStep(step);
 }

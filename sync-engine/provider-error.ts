@@ -202,10 +202,10 @@ function providerErrorDetails(
 }
 
 function codeIsWebSocketConnectionLimit(code: ProviderErrorCode): boolean {
-  return (
-    typeof code === "string" &&
-    WEBSOCKET_RECONNECT_ERROR_CODES.has(code.toLowerCase())
-  );
+  if (typeof code === "number") {
+    return false;
+  }
+  return WEBSOCKET_RECONNECT_ERROR_CODES.has(code.toLowerCase());
 }
 
 function codeIsTransient(code: ProviderErrorCode): boolean {

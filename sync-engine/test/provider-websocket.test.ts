@@ -150,11 +150,72 @@ test.each([
 
     expectDoneStep(await pending);
     expect(expired.readyState).toBe(WebSocket.CLOSED);
+    expect([expired.closeCode, expired.closeReason]).toEqual([
+      1011,
+      "Provider request failed",
+    ]);
     expect(replacement.sent).toHaveLength(1);
     expect(delays).toHaveLength(0);
     expect(deltas).toEqual([providerDelta("Partial"), providerDelta("", true)]);
   },
 );
+
+interface ExpiryAttemptsOptions {
+  readonly count: number;
+  readonly retryAfterSeconds?: number;
+  readonly sockets: FakeProviderSockets;
+}
+
+async function expireAttempts(options: ExpiryAttemptsOptions): Promise<void> {
+  for (let attempt = 0; attempt < options.count; attempt += 1) {
+    await options.sockets.waitForAttempt(attempt);
+    const expired = requireProviderSocket(options.sockets, attempt);
+    expired.open();
+    expireProviderSocket(
+      expired,
+      "websocket_connection_limit_reached",
+      options.retryAfterSeconds,
+    );
+  }
+}
+
+async function recoverAfterExpiries(
+  options: ExpiryAttemptsOptions,
+): Promise<void> {
+  await expireAttempts(options);
+  await replaceProviderSocket(options.sockets, options.count);
+}
+
+async function expectRecoveredSocket(options: {
+  readonly delays: number[];
+  readonly pending: ReturnType<typeof complete>;
+  readonly sockets: FakeProviderSockets;
+}): Promise<void> {
+  expectDoneStep(await options.pending);
+  expect(options.delays).toEqual([1_000]);
+  expect(options.sockets.created).toHaveLength(3);
+}
+
+test("reconnects immediately after a transient failure then socket expiry", async () => {
+  const { delays, pending, sockets } = retryingSocket();
+  const transient = requireProviderSocket(sockets, 0);
+  transient.fail();
+  await sockets.waitForAttempt(1);
+  const expired = requireProviderSocket(sockets, 1);
+  expired.open();
+  expireProviderSocket(expired, "websocket_connection_limit_reached");
+  await replaceProviderSocket(sockets, 2);
+
+  await expectRecoveredSocket({ delays, pending, sockets });
+  expect(expired.closeCode).toBe(1011);
+});
+
+test("ignores retry-after when a repeated socket expiry uses bounded backoff", async () => {
+  const { delays, pending, sockets } = retryingSocket();
+  await recoverAfterExpiries({ count: 2, retryAfterSeconds: 60, sockets });
+
+  await expectRecoveredSocket({ delays, pending, sockets });
+});
 
 test("keeps ordinary retry capacity after an immediate expiry reconnect", async () => {
   const retry = retryingSocket();
@@ -183,18 +244,11 @@ test("bounds repeated connection-limit reconnects", async () => {
   });
   const pending = complete(model);
 
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    await setup.sockets.waitForAttempt(attempt);
-    const expired = requireProviderSocket(setup.sockets, attempt);
-    expired.open();
-    expireProviderSocket(expired, "websocket_connection_limit_reached");
-  }
+  await expireAttempts({ count: 5, sockets: setup.sockets });
 
   expect(setup.delays).toEqual([1_000, 2_000, 4_000]);
-  expect({
-    socketCount: setup.sockets.created.length,
-    step: await pending,
-  }).toMatchObject({ socketCount: 5, step: { content: "Done." } });
+  expect(setup.sockets.created).toHaveLength(5);
+  expect((await pending).content).toBe("Done.");
 });
 
 test("retries partial output after a socket error without stale deltas", async () => {

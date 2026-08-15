@@ -143,7 +143,9 @@ export class ProviderWebSocketSession {
           fail(
             new ProviderWebSocketError(error.message, receivedEvent, {
               reconnectImmediately: error.reconnectWebSocket,
-              retryAfterMilliseconds: error.retryAfterMilliseconds,
+              retryAfterMilliseconds: error.reconnectWebSocket
+                ? undefined
+                : error.retryAfterMilliseconds,
             }),
           );
           return;

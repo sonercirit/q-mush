@@ -490,8 +490,9 @@ export class ChatCompletionsAgentModel implements AgentModel {
         const immediate =
           error instanceof ProviderWebSocketError && error.reconnectImmediately;
         if (immediate && reconnectImmediately) {
-          // This documented expiry means the socket itself must be replaced;
-          // reconnect once without applying ordinary transient backoff.
+          // The documented expiry requires a fresh socket. Grant one immediate
+          // replacement per model step, independent of ordinary retry capacity;
+          // repeated limit events then use bounded transient backoff.
           reconnectImmediately = false;
           continue;
         }
