@@ -1,4 +1,6 @@
 import {
+  createAnthropicAssistantReplay,
+  isAnthropicReplayBlock,
   isAnthropicReplayObject,
   projectAnthropicReplayFields,
   readAnthropicReplayBlockType,
@@ -6,6 +8,7 @@ import {
   type AnthropicReplayBlock,
   type AnthropicReplayObject,
 } from "../shared/anthropic-replay.ts";
+import { isRecord } from "../shared/auth-model.ts";
 
 interface MutableThinkingBlock {
   readonly signature: string;
@@ -30,14 +33,25 @@ interface MutableToolBlock {
   readonly id: string;
   readonly initialInput: AnthropicReplayObject;
   readonly name: string;
-  readonly type: "tool_use";
+  readonly type: "streamed_tool_use";
 }
 
 type MutableReplayBlock =
   | MutableThinkingBlock
   | MutableRedactedBlock
   | MutableTextBlock
-  | MutableToolBlock;
+  | MutableToolBlock
+  | MutableServerToolBlock
+  | AnthropicReplayBlock;
+
+interface MutableServerToolBlock {
+  readonly caller?: AnthropicReplayObject;
+  readonly id: string;
+  readonly initialInput: unknown;
+  readonly name: string;
+  readonly partialInput: string;
+  readonly type: "streamed_server_tool_use";
+}
 
 interface ReplayEntry {
   readonly block: MutableReplayBlock;
@@ -73,7 +87,9 @@ function initialTextBlock(
 ): MutableTextBlock | undefined {
   const text = optionalBlockString(block["text"]);
   const citations = fields["citations"];
-  if (text === undefined) return undefined;
+  if (text === undefined || (text.length > 0 && text.trim().length === 0)) {
+    return undefined;
+  }
   if (citations === undefined || citations === null) {
     return {
       ...(citations === null ? { citations } : {}),
@@ -87,30 +103,61 @@ function initialTextBlock(
     : { citations: citationObjects, text, type: "text" };
 }
 
-function initialToolBlock(
+interface StreamedToolIdentity {
+  readonly caller?: AnthropicReplayObject;
+  readonly id: string;
+  readonly name: string;
+}
+
+function streamedToolIdentity(
   block: Readonly<Record<string, unknown>>,
   fields: AnthropicReplayObject,
-): MutableToolBlock | undefined {
+): StreamedToolIdentity | undefined {
   const id = block["id"];
   const name = block["name"];
-  const candidateInput = block["input"] ?? {};
   const caller = fields["caller"];
   if (
     typeof id !== "string" ||
     typeof name !== "string" ||
     !validToolIdentity(id, name) ||
-    !isAnthropicReplayObject(candidateInput) ||
     (caller !== undefined && !isAnthropicReplayObject(caller))
   ) {
     return undefined;
   }
+  return { ...(caller === undefined ? {} : { caller }), id, name };
+}
+
+function initialToolBlock(
+  block: Readonly<Record<string, unknown>>,
+  fields: AnthropicReplayObject,
+): MutableToolBlock | undefined {
+  const identity = streamedToolIdentity(block, fields);
+  const candidateInput = block["input"] ?? {};
+  if (identity === undefined || !isAnthropicReplayObject(candidateInput)) {
+    return undefined;
+  }
   return {
     arguments: "",
-    ...(caller === undefined ? {} : { caller }),
-    id,
+    ...identity,
     initialInput: candidateInput,
-    name,
-    type: "tool_use",
+    type: "streamed_tool_use",
+  };
+}
+
+function initialServerToolBlock(
+  block: Readonly<Record<string, unknown>>,
+  fields: AnthropicReplayObject,
+): MutableServerToolBlock | undefined {
+  const identity = streamedToolIdentity(block, fields);
+  const input = block["input"] ?? {};
+  if (identity === undefined || !isAnthropicReplayBlock({ ...fields, input })) {
+    return undefined;
+  }
+  return {
+    ...identity,
+    initialInput: input,
+    partialInput: "",
+    type: "streamed_server_tool_use",
   };
 }
 
@@ -123,6 +170,7 @@ function initialReplayBlock(
   if (fields === undefined) return undefined;
   if (type === "text") return initialTextBlock(block, fields);
   if (type === "tool_use") return initialToolBlock(block, fields);
+  if (type === "server_tool_use") return initialServerToolBlock(block, fields);
   if (type === "thinking") {
     const thinking = optionalBlockString(block["thinking"]);
     const signature = optionalBlockString(block["signature"]);
@@ -130,30 +178,54 @@ function initialReplayBlock(
       ? undefined
       : { signature, thinking, type };
   }
-  const data = optionalBlockString(block["data"]);
-  return data === undefined ? undefined : { data, type };
+  if (type === "redacted_thinking") {
+    const data = optionalBlockString(block["data"]);
+    return data === undefined ? undefined : { data, type };
+  }
+  return isAnthropicReplayBlock(fields) ? fields : undefined;
+}
+
+function completedJsonInput(initialInput: unknown, delta: string): unknown {
+  if (delta.length === 0) return initialInput;
+  try {
+    return JSON.parse(delta);
+  } catch {
+    return undefined;
+  }
+}
+
+function completedToolFields<Input>(
+  block: MutableToolBlock | MutableServerToolBlock,
+  input: Input,
+) {
+  return {
+    ...(block.caller === undefined ? {} : { caller: block.caller }),
+    id: block.id,
+    input,
+    name: block.name,
+  };
 }
 
 function completedToolBlock(block: MutableToolBlock): ReplayCompletion {
-  let input: unknown = block.initialInput;
-  if (block.arguments.length > 0) {
-    try {
-      input = JSON.parse(block.arguments);
-    } catch {
-      return { valid: false };
-    }
-  }
+  const input = completedJsonInput(block.initialInput, block.arguments);
   return isAnthropicReplayObject(input)
     ? {
-        block: {
-          ...(block.caller === undefined ? {} : { caller: block.caller }),
-          id: block.id,
-          input,
-          name: block.name,
-          type: "tool_use",
-        },
+        block: { ...completedToolFields(block, input), type: "tool_use" },
         valid: true,
       }
+    : { valid: false };
+}
+
+function completedServerToolBlock(
+  block: MutableServerToolBlock,
+): ReplayCompletion {
+  const input = completedJsonInput(block.initialInput, block.partialInput);
+  const completed = {
+    ...completedToolFields(block, input),
+    type: "server_tool_use" as const,
+  };
+  return isAnthropicReplayBlock(completed)
+    ? { block: completed, valid: true }
     : { valid: false };
 }
 
@@ -172,12 +244,33 @@ function completedReplayBlock(block: MutableReplayBlock): ReplayCompletion {
       return completedStringBlock(block, block.signature);
     case "redacted_thinking":
       return completedStringBlock(block, block.data);
-    case "text":
+    case "text": {
+      const citations = block.citations;
       return block.text.trim().length === 0
         ? { valid: true }
-        : { block: { ...block }, valid: true };
-    case "tool_use":
+        : {
+            block: {
+              ...(citations === undefined ? {} : { citations }),
+              text: block.text,
+              type: "text",
+            },
+            valid: true,
+          };
+    }
+    case "streamed_tool_use":
       return completedToolBlock(block);
+    case "streamed_server_tool_use":
+      return completedServerToolBlock(block);
+    case "bash_code_execution_tool_result":
+    case "code_execution_tool_result":
+    case "container_upload":
+    case "server_tool_use":
+    case "text_editor_code_execution_tool_result":
+    case "tool_search_tool_result":
+    case "tool_use":
+    case "web_fetch_tool_result":
+    case "web_search_tool_result":
+      return { block, valid: true };
   }
 }
 
@@ -186,6 +279,7 @@ export class AnthropicReplayCapture {
   readonly #model: string;
   readonly #provenance: string;
   #available = true;
+  #container: string | undefined;
 
   constructor(model: string, provenance: string) {
     this.#model = model;
@@ -199,6 +293,20 @@ export class AnthropicReplayCapture {
 
   invalidate(): void {
     this.#unavailable();
+  }
+
+  readContainer(value: unknown): void {
+    if (value === undefined || value === null) return;
+    const id = isRecord(value) ? value["id"] : undefined;
+    if (
+      typeof id !== "string" ||
+      id.length === 0 ||
+      (this.#container !== undefined && this.#container !== id)
+    ) {
+      this.invalidate();
+      return;
+    }
+    this.#container = id;
   }
 
   #store(index: number | undefined, entry: ReplayEntry | undefined): void {
@@ -269,12 +377,11 @@ export class AnthropicReplayCapture {
     }
     return blocks.length === 0
       ? undefined
-      : {
+      : createAnthropicAssistantReplay(
           blocks,
-          model: this.#model,
-          protocol: "anthropic",
-          provenance: this.#provenance,
-        };
+          { model: this.#model, provenance: this.#provenance },
+          this.#container,
+        );
   }
 }
 
@@ -282,11 +389,24 @@ function appendCitation(
   block: MutableReplayBlock,
   citation: unknown,
 ): MutableTextBlock | undefined {
-  if (block.type !== "text" || !isAnthropicReplayObject(citation)) {
+  if (
+    block.type !== "text" ||
+    !isAnthropicReplayObject(citation) ||
+    (block.citations !== undefined &&
+      block.citations !== null &&
+      !replayObjectArray(block.citations))
+  ) {
     return undefined;
   }
-  const citations = block.citations ?? [];
+  const citations = replayObjectArray(block.citations) ?? [];
   return { ...block, citations: [...citations, citation] };
+}
+
+function appendServerToolInput(
+  block: MutableServerToolBlock,
+  partialJson: string,
+): MutableServerToolBlock {
+  return { ...block, partialInput: block.partialInput + partialJson };
 }
 
 function updatedReplayBlock(
@@ -309,10 +429,13 @@ function updatedReplayBlock(
     case "citations_delta":
       return appendCitation(block, delta["citation"]);
     case "input_json_delta":
-      return block.type === "tool_use" &&
+      return block.type === "streamed_tool_use" &&
         typeof delta["partial_json"] === "string"
         ? { ...block, arguments: block.arguments + delta["partial_json"] }
-        : undefined;
+        : block.type === "streamed_server_tool_use" &&
+            typeof delta["partial_json"] === "string"
+          ? appendServerToolInput(block, delta["partial_json"])
+          : undefined;
     default:
       return undefined;
   }

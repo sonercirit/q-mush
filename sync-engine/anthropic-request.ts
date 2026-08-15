@@ -10,7 +10,7 @@ import {
 } from "../shared/anthropic-replay.ts";
 import { parseOptionalJsonRecord } from "../shared/json-record.ts";
 import {
-  anthropicReplayIdentity,
+  anthropicReplayIdentityFrom,
   type AnthropicReplayIdentity,
 } from "./anthropic-replay-identity.ts";
 import {
@@ -149,6 +149,7 @@ function anthropicMessage(
 function applyAnthropicMessageBreakpoint(
   messages: ConvertedAnthropicMessage[],
   start: number,
+  preserveFinalReplay: boolean,
 ): void {
   let index = start;
   while (index >= 0) {
@@ -167,6 +168,9 @@ function applyAnthropicMessageBreakpoint(
         content: withPromptCacheControl(message.content),
       };
       return;
+    }
+    if (preserveFinalReplay && currentIndex === messages.length - 1) {
+      continue;
     }
     const content = withAnthropicReplayCacheControl(message.replay.blocks);
     if (content !== undefined) {
@@ -190,6 +194,9 @@ function anthropicMessages(
     }
   }
 
+  const preserveFinalReplay =
+    converted.at(-1)?.role === "assistant" &&
+    converted.at(-1)?.replay !== undefined;
   for (const sourceIndex of breakpoints) {
     let index = converted.length - 1;
     while (
@@ -198,7 +205,7 @@ function anthropicMessages(
     ) {
       index -= 1;
     }
-    applyAnthropicMessageBreakpoint(converted, index);
+    applyAnthropicMessageBreakpoint(converted, index, preserveFinalReplay);
   }
 
   const merged: { content: unknown[]; role: "assistant" | "user" }[] = [];
@@ -214,6 +221,15 @@ function anthropicMessages(
   }
 
   return merged;
+}
+
+function continuationContainer(
+  messages: readonly AgentConversationMessage[],
+  identity: AnthropicReplayIdentity,
+): string | undefined {
+  const last = messages.at(-1);
+  if (last?.role !== "assistant") return undefined;
+  return matchingReplay(last, identity)?.container;
 }
 
 function anthropicTools(
@@ -260,21 +276,16 @@ export function anthropicRequestBody(
             ? {}
             : { thinking: { display: "summarized", type: "adaptive" } }),
         };
+  const identity = anthropicReplayIdentityFrom(options);
+  const container = continuationContainer(options.messages, identity);
   return {
     ...(options.maxOutputTokens === null
       ? {}
       : { max_tokens: options.maxOutputTokens }),
-    messages: anthropicMessages(
-      options.messages,
-      anthropicReplayIdentity(
-        options.provider,
-        options.credential,
-        options.model,
-        options.credentialFingerprint,
-      ),
-    ),
+    messages: anthropicMessages(options.messages, identity),
     model: options.model,
     ...reasoning,
+    ...(container === undefined ? {} : { container }),
     ...(options.stream ? { stream: true } : {}),
     system: withPromptCacheControl([
       { text: options.systemPrompt, type: "text" },

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
+import { testApiKeyCredential } from "./agent-model-credential-fixtures.ts";
 import { captureRejection, requireError } from "./promise-test-helpers.ts";
 
 const USER_MESSAGE = [{ content: "Hello", role: "user" as const }];
@@ -25,10 +26,8 @@ describe("provider HTTP connection-limit classification", () => {
     const modelOptions: ConstructorParameters<
       typeof ChatCompletionsAgentModel
     >[0] = {
-      credential: Object.freeze({
-        accountId: null,
-        secret: "sk-or-secret",
-        source: "api_key" as const,
+      credential: testApiKeyCredential("sk-or-secret", {
+        id: "openrouter-test-credential",
       }),
       fetch: () => {
         fetchCount += 1;

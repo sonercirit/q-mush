@@ -52,13 +52,30 @@ export function textReplayBlock(
   };
 }
 
-export function toolReplayBlock(options: {
+interface ReplayToolBlockOptions {
   readonly caller?: AnthropicReplayObject;
   readonly id: string;
   readonly input: AnthropicReplayObject;
   readonly name: string;
-}): AnthropicReplayBlock {
-  return { ...options, type: "tool_use" };
+}
+
+function typedToolReplayBlock(
+  options: ReplayToolBlockOptions,
+  type: "server_tool_use" | "tool_use",
+): AnthropicReplayBlock {
+  return { ...options, type };
+}
+
+export function serverToolReplayBlock(
+  options: ReplayToolBlockOptions,
+): AnthropicReplayBlock {
+  return typedToolReplayBlock(options, "server_tool_use");
+}
+
+export function toolReplayBlock(
+  options: ReplayToolBlockOptions,
+): AnthropicReplayBlock {
+  return typedToolReplayBlock(options, "tool_use");
 }
 
 function anthropicReadReplayBlock(

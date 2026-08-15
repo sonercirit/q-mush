@@ -16,13 +16,32 @@ export interface AnthropicReplayObject {
 type ReplayFields = Readonly<Record<string, AnthropicReplayValue>>;
 
 type AnthropicReplayBlockType =
-  "redacted_thinking" | "text" | "thinking" | "tool_use";
+  | "bash_code_execution_tool_result"
+  | "code_execution_tool_result"
+  | "container_upload"
+  | "redacted_thinking"
+  | "server_tool_use"
+  | "text"
+  | "text_editor_code_execution_tool_result"
+  | "thinking"
+  | "tool_search_tool_result"
+  | "tool_use"
+  | "web_fetch_tool_result"
+  | "web_search_tool_result";
 
 const REPLAY_BLOCK_KEYS = {
+  bash_code_execution_tool_result: ["content", "tool_use_id", "type"],
+  code_execution_tool_result: ["content", "tool_use_id", "type"],
+  container_upload: ["file_id", "type"],
   redacted_thinking: ["data", "type"],
+  server_tool_use: ["caller", "id", "input", "name", "type"],
   text: ["citations", "text", "type"],
+  text_editor_code_execution_tool_result: ["content", "tool_use_id", "type"],
   thinking: ["signature", "thinking", "type"],
+  tool_search_tool_result: ["content", "tool_use_id", "type"],
   tool_use: ["caller", "id", "input", "name", "type"],
+  web_fetch_tool_result: ["caller", "content", "tool_use_id", "type"],
+  web_search_tool_result: ["caller", "content", "tool_use_id", "type"],
 } as const satisfies Readonly<
   Record<AnthropicReplayBlockType, readonly string[]>
 >;
@@ -44,17 +63,57 @@ export type AnthropicReplayBlock = ReplayFields &
       }
     | {
         readonly id: string;
+        readonly input: AnthropicReplayValue;
+        readonly name: string;
+        readonly type: "server_tool_use";
+      }
+    | {
+        readonly file_id: string;
+        readonly type: "container_upload";
+      }
+    | {
+        readonly content: AnthropicReplayValue;
+        readonly tool_use_id: string;
+        readonly type: AnthropicServerToolResultBlockType;
+      }
+    | {
+        readonly id: string;
         readonly input: AnthropicReplayObject;
         readonly name: string;
         readonly type: "tool_use";
       }
   );
 
+type AnthropicServerToolResultBlockType = Exclude<
+  AnthropicReplayBlockType,
+  | "container_upload"
+  | "redacted_thinking"
+  | "server_tool_use"
+  | "text"
+  | "thinking"
+  | "tool_use"
+>;
+
 export interface AnthropicAssistantReplay {
   readonly blocks: readonly AnthropicReplayBlock[];
+  readonly container?: string;
   readonly model: string;
   readonly protocol: "anthropic";
   readonly provenance: string;
+}
+
+export function createAnthropicAssistantReplay(
+  blocks: readonly AnthropicReplayBlock[],
+  identity: Pick<AnthropicAssistantReplay, "model" | "provenance">,
+  container?: string,
+): AnthropicAssistantReplay {
+  return {
+    blocks,
+    ...(container === undefined ? {} : { container }),
+    model: identity.model,
+    protocol: "anthropic",
+    provenance: identity.provenance,
+  };
 }
 
 const INVALID_REPLAY = "Anthropic assistant replay data is invalid";
@@ -116,13 +175,56 @@ export function readAnthropicReplayBlockType(
     case "redacted_thinking":
     case "text":
     case "tool_use":
+    case "server_tool_use":
+    case "web_search_tool_result":
+    case "web_fetch_tool_result":
+    case "code_execution_tool_result":
+    case "container_upload":
+    case "bash_code_execution_tool_result":
+    case "text_editor_code_execution_tool_result":
+    case "tool_search_tool_result":
       return value;
     default:
       return undefined;
   }
 }
 
-function isReplayBlock(value: unknown): value is AnthropicReplayBlock {
+function isValidReplayOptionalFields(
+  value: AnthropicReplayObject,
+  type: AnthropicReplayBlockType,
+): boolean {
+  if (type === "text") {
+    const citations = value["citations"];
+    return (
+      citations === undefined ||
+      citations === null ||
+      (Array.isArray(citations) && citations.every(isAnthropicReplayObject))
+    );
+  }
+  if (
+    type === "tool_use" ||
+    type === "server_tool_use" ||
+    type === "web_fetch_tool_result" ||
+    type === "web_search_tool_result"
+  ) {
+    const caller = value["caller"];
+    return caller === undefined || isAnthropicReplayObject(caller);
+  }
+  return true;
+}
+
+function hasReplayToolIdentity(value: AnthropicReplayObject): boolean {
+  return (
+    typeof value["id"] === "string" &&
+    value["id"].length > 0 &&
+    typeof value["name"] === "string" &&
+    value["name"].length > 0
+  );
+}
+
+export function isAnthropicReplayBlock(
+  value: unknown,
+): value is AnthropicReplayBlock {
   if (!isAnthropicReplayObject(value)) {
     return false;
   }
@@ -130,7 +232,10 @@ function isReplayBlock(value: unknown): value is AnthropicReplayBlock {
   if (type === undefined) {
     return false;
   }
-  if (!hasOnlyReplayBlockKeys(value, type)) {
+  if (
+    !hasOnlyReplayBlockKeys(value, type) ||
+    !isValidReplayOptionalFields(value, type)
+  ) {
     return false;
   }
   switch (type) {
@@ -143,14 +248,31 @@ function isReplayBlock(value: unknown): value is AnthropicReplayBlock {
     case "redacted_thinking":
       return typeof value["data"] === "string" && value["data"].length > 0;
     case "text":
-      return typeof value["text"] === "string";
+      return (
+        typeof value["text"] === "string" && value["text"].trim().length > 0
+      );
     case "tool_use":
       return (
-        typeof value["id"] === "string" &&
-        value["id"].length > 0 &&
-        typeof value["name"] === "string" &&
-        value["name"].length > 0 &&
-        isAnthropicReplayObject(value["input"])
+        hasReplayToolIdentity(value) && isAnthropicReplayObject(value["input"])
+      );
+    case "server_tool_use":
+      return (
+        hasReplayToolIdentity(value) && isAnthropicReplayValue(value["input"])
+      );
+    case "container_upload":
+      return (
+        typeof value["file_id"] === "string" && value["file_id"].length > 0
+      );
+    case "bash_code_execution_tool_result":
+    case "code_execution_tool_result":
+    case "text_editor_code_execution_tool_result":
+    case "tool_search_tool_result":
+    case "web_fetch_tool_result":
+    case "web_search_tool_result":
+      return (
+        typeof value["tool_use_id"] === "string" &&
+        value["tool_use_id"].length > 0 &&
+        isAnthropicReplayValue(value["content"])
       );
   }
 }
@@ -165,21 +287,23 @@ function readAnthropicAssistantReplay(
     value["model"].length === 0 ||
     typeof value["provenance"] !== "string" ||
     value["provenance"].length === 0 ||
+    (value["container"] !== undefined &&
+      (typeof value["container"] !== "string" ||
+        value["container"].length === 0)) ||
     !Object.keys(value).every((key) =>
-      ["blocks", "model", "protocol", "provenance"].includes(key),
+      ["blocks", "container", "model", "protocol", "provenance"].includes(key),
     ) ||
     !Array.isArray(value["blocks"]) ||
     value["blocks"].length === 0 ||
-    !value["blocks"].every(isReplayBlock)
+    !value["blocks"].every(isAnthropicReplayBlock)
   ) {
     return undefined;
   }
-  return {
-    blocks: value["blocks"],
-    model: value["model"],
-    protocol: "anthropic",
-    provenance: value["provenance"],
-  };
+  return createAnthropicAssistantReplay(
+    value["blocks"],
+    { model: value["model"], provenance: value["provenance"] },
+    value["container"],
+  );
 }
 
 export function parseAnthropicAssistantReplay(

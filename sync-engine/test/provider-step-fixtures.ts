@@ -1,5 +1,9 @@
 import { expect } from "vitest";
-import type { AgentModelStep } from "../../shared/agent-loop.ts";
+import type { AgentModelStep, AgentToolCall } from "../../shared/agent-loop.ts";
+
+export function emptyProviderToolCall(id: string, name: string): AgentToolCall {
+  return { arguments: "{}", id, name };
+}
 
 export function providerStep(
   content: string,

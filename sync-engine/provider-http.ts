@@ -11,7 +11,7 @@ import {
 } from "./agent-model-retry.ts";
 import type { AgentModelFetch } from "./agent-model.ts";
 import {
-  anthropicReplayIdentity,
+  anthropicReplayIdentityFrom,
   type AnthropicReplayIdentity,
 } from "./anthropic-replay-identity.ts";
 import { unavailableAnthropicResponseIdentity } from "./anthropic-response-identity.ts";
@@ -32,6 +32,7 @@ export interface ProviderHttpOptions {
   readonly fetch: AgentModelFetch;
   readonly headers: Headers;
   readonly onDelta: ((delta: ProviderTextDelta) => void) | undefined;
+  readonly onStreamRetry?: () => void;
   readonly model: string;
   readonly protocol: "anthropic" | "chat_completions" | "responses";
   readonly provider: ProviderId;
@@ -118,12 +119,7 @@ function anthropicIdentity(
   if (options.protocol !== "anthropic") {
     unavailableAnthropicResponseIdentity();
   }
-  return anthropicReplayIdentity(
-    options.provider,
-    options.credential,
-    options.model,
-    options.credentialFingerprint,
-  );
+  return anthropicReplayIdentityFrom(options);
 }
 
 function anthropicStreamOptions(
@@ -208,6 +204,7 @@ export async function completeProviderHttp(
     } catch (error) {
       if (streamed && error instanceof RetryableModelRequestError) {
         options.onDelta?.({ content: "", reset: true, thinking: "" });
+        options.onStreamRetry?.();
         streamed = false;
       }
       throw error;

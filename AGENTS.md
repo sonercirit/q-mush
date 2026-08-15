@@ -283,8 +283,9 @@ Living project memory.
   thinking text plus a signature while thinking tokens bill. Anthropic replay
   binds model, credential fingerprint, format, and endpoint; incomplete,
   unsupported, or unsigned blocks disable it, only empty text drops, and corrupt
-  stored replay is absent. `pause_turn` replays validated blocks and container,
-  capped at five continuations; an unusable terminal step drops replay.
+  stored replay is absent. `pause_turn` replays exact validated blocks/container
+  without duplicate UI, sums usage, caps at five continuations, and drops an
+  unusable terminal replay.
   Cache-control never marks thinking/redacted-thinking or a trailing paused-turn
   replay. The local proxy tolerates unsigned tool-loop replay; strict endpoints
   may not. Streamed reasoning deltas group by output/summary index;

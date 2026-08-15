@@ -83,6 +83,7 @@ function eventIndex(
 export class AnthropicStreamAccumulator extends BufferedAccumulator {
   readonly protocol = "anthropic" as const;
   readonly #replay: AnthropicReplayCapture;
+  #pauseTurn = false;
   #stopped = false;
   #truncation: AgentStepTruncation | undefined;
   #usage: AgentTokenUsage | null = null;
@@ -110,6 +111,9 @@ export class AnthropicStreamAccumulator extends BufferedAccumulator {
     );
     return {
       ...step,
+      ...(this.#pauseTurn
+        ? { providerContinuation: "anthropic_pause_turn" as const }
+        : {}),
       ...(providerReplay === undefined ? {} : { providerReplay }),
       tokenUsage: usage,
       ...(this.#truncation === undefined
@@ -129,7 +133,7 @@ export class AnthropicStreamAccumulator extends BufferedAccumulator {
     }
     switch (event["type"]) {
       case "message_start":
-        this.#readUsage(event["message"]);
+        this.#readMessageStart(event["message"]);
         return;
       case "content_block_start":
         this.#startBlock(event);
@@ -141,7 +145,7 @@ export class AnthropicStreamAccumulator extends BufferedAccumulator {
         this.#replay.stop(eventIndex(event));
         return;
       case "message_delta":
-        this.#truncation ??= readTruncation(event["delta"]);
+        this.#readStopReason(event["delta"]);
         this.#readOutputTokens(event["usage"]);
         return;
       case "message_stop":
@@ -152,6 +156,13 @@ export class AnthropicStreamAccumulator extends BufferedAccumulator {
         return;
       default:
         return;
+    }
+  }
+
+  #readMessageStart(message: unknown): void {
+    this.#readUsage(message);
+    if (isRecord(message)) {
+      this.#replay.readContainer(message["container"]);
     }
   }
 
@@ -168,6 +179,13 @@ export class AnthropicStreamAccumulator extends BufferedAccumulator {
       this.#usage === null
         ? anthropicUsage(usage, outputTokens)
         : { ...this.#usage, outputTokens };
+  }
+
+  #readStopReason(value: unknown): void {
+    if (!isRecord(value)) return;
+    this.#truncation ??= readTruncation(value);
+    this.#pauseTurn ||= value["stop_reason"] === "pause_turn";
+    this.#replay.readContainer(value["container"]);
   }
 
   #startBlock(event: Readonly<Record<string, unknown>>): void {
@@ -224,7 +242,7 @@ export class AnthropicStreamAccumulator extends BufferedAccumulator {
       if (!isRecord(value)) throw new Error(INVALID_BLOCK);
       this.#readCompleteBlock(index, value);
     }
-    this.#truncation ??= readTruncation(message);
+    this.#readStopReason(message);
     this.#readUsage(message);
     this.#stopped = true;
   }

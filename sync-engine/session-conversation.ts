@@ -1,6 +1,6 @@
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
-import { anthropicReplayIdentity } from "./anthropic-replay-identity.ts";
+import { anthropicReplayIdentityFrom } from "./anthropic-replay-identity.ts";
 import type { SessionStore } from "./session-store.ts";
 
 export function readSessionConversation(runtime: {
@@ -15,12 +15,12 @@ export function readSessionConversation(runtime: {
   if (credentialFingerprint === undefined) {
     throw new Error("The provider credential is no longer available");
   }
-  const identity = anthropicReplayIdentity(
-    detail.provider,
-    runtime.credential,
-    detail.model,
+  const identity = anthropicReplayIdentityFrom({
+    credential: runtime.credential,
     credentialFingerprint,
-  );
+    model: detail.model,
+    provider: detail.provider,
+  });
   return runtime.store.conversation(
     detail.id,
     identity,

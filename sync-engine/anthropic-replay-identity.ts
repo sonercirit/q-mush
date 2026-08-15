@@ -8,12 +8,13 @@ export interface AnthropicReplayIdentity {
   readonly provenance: string;
 }
 
-export function anthropicReplayIdentity(
-  provider: ProviderId,
-  credential: AgentProviderCredential,
-  model: string,
-  credentialFingerprint: string,
-): AnthropicReplayIdentity {
+export function anthropicReplayIdentityFrom(options: {
+  readonly credential: AgentProviderCredential;
+  readonly credentialFingerprint: string;
+  readonly model: string;
+  readonly provider: ProviderId;
+}): AnthropicReplayIdentity {
+  const { credential, credentialFingerprint, model, provider } = options;
   return {
     model,
     provenance: createHash("sha256")

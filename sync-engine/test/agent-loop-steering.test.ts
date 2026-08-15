@@ -4,7 +4,10 @@ import {
   type AgentModel,
   type AgentRecordedMessage,
 } from "../../shared/agent-loop.ts";
-import { providerStep } from "./provider-step-fixtures.ts";
+import {
+  emptyProviderToolCall,
+  providerStep,
+} from "./provider-step-fixtures.ts";
 
 interface QueuedInput {
   readonly content: string;
@@ -59,7 +62,7 @@ async function runSteeringLoop(options: {
 
 function toolStep(content: string) {
   return providerStep(content, {
-    toolCalls: [{ arguments: "{}", id: "call-1", name: "read" }],
+    toolCalls: [emptyProviderToolCall("call-1", "read")],
   });
 }
 

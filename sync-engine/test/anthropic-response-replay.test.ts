@@ -1,6 +1,10 @@
 import { describe, expect, test } from "vitest";
-import type { AnthropicReplayObject } from "../../shared/anthropic-replay.ts";
-import { AnthropicStreamAccumulator } from "../../sync-engine/provider-stream-anthropic.ts";
+import {
+  parseAnthropicAssistantReplay,
+  serializeAnthropicAssistantReplay,
+  type AnthropicReplayBlock,
+  type AnthropicReplayObject,
+} from "../../shared/anthropic-replay.ts";
 import { recordedMessageValues } from "../../sync-engine/session-store-values.ts";
 import {
   ANTHROPIC_TEST_PROVENANCE,
@@ -10,6 +14,7 @@ import {
   JSON_RESPONSE_REPLAY_BLOCKS,
   KNOWN_ANTHROPIC_MODEL,
   redactedReplayBlock,
+  serverToolReplayBlock,
   textReplayBlock,
   textStopAnthropicEvents,
   thinkingReplayBlock,
@@ -19,103 +24,96 @@ import {
   capturedAssistantContent,
   type AnthropicHarness,
 } from "./anthropic-replay-request-helpers.ts";
-
-function messageStart(inputTokens = 1) {
-  return {
-    message: { usage: { input_tokens: inputTokens } },
-    type: "message_start",
-  };
-}
-
-function blockStart(
-  index: number,
-  contentBlock: Readonly<Record<string, unknown>>,
-) {
-  return { content_block: contentBlock, index, type: "content_block_start" };
-}
-
-function blockDelta(index: number, delta: Readonly<Record<string, unknown>>) {
-  return { delta, index, type: "content_block_delta" };
-}
-
-function blockStop(index: number) {
-  return { index, type: "content_block_stop" };
-}
-
-function streamedToolEvents(options: {
-  readonly id: string;
-  readonly index: number;
-  readonly initialInput?: AnthropicReplayObject;
-  readonly name: string;
-  readonly partialJson: string;
-}): readonly unknown[] {
-  return [
-    blockStart(options.index, {
-      id: options.id,
-      ...(options.initialInput === undefined
-        ? {}
-        : { input: options.initialInput }),
-      name: options.name,
-      type: "tool_use",
-    }),
-    blockDelta(options.index, {
-      partial_json: options.partialJson,
-      type: "input_json_delta",
-    }),
-    blockStop(options.index),
-  ];
-}
-
-function streamedReadEvents(id: string, index: number): readonly unknown[] {
-  return streamedToolEvents({
-    id,
-    index,
-    name: "read",
-    partialJson: "{}",
-  });
-}
-
-function futureBlock(index: number) {
-  return [
-    blockStart(index, { encrypted: "future-data", type: "future_block" }),
-    blockDelta(index, { fragment: "future-delta", type: "future_delta" }),
-    blockStop(index),
-  ];
-}
-
-function streamedTextEvents(text: string): readonly unknown[] {
-  return [
-    blockStart(1, { text: "", type: "text" }),
-    blockDelta(1, { text, type: "text_delta" }),
-    blockStop(1),
-    { type: "message_stop" },
-  ];
-}
-
-function stoppedEvents(events: readonly unknown[]): Response {
-  return anthropicEvents([messageStart(), ...events, { type: "message_stop" }]);
-}
-
-function finishAccumulator(events: readonly unknown[]) {
-  const accumulator = new AnthropicStreamAccumulator(
-    KNOWN_ANTHROPIC_MODEL,
-    ANTHROPIC_TEST_PROVENANCE,
-  );
-  for (const event of events) accumulator.push(event);
-  return accumulator.finish.bind(accumulator);
-}
+import {
+  anthropicBlockDelta,
+  anthropicBlockStart,
+  anthropicBlockStop,
+  anthropicJsonResponse,
+  anthropicMessageStart,
+  finishedAnthropicStep,
+  futureAnthropicBlock,
+  stoppedAnthropicEvents,
+  streamedAnthropicReadEvents,
+  streamedAnthropicTextBlockEvents,
+  streamedAnthropicTextEvents,
+  streamedAnthropicToolEvents,
+  streamedReplayEvents,
+} from "./anthropic-response-event-fixtures.ts";
+import { emptyProviderToolCall } from "./provider-step-fixtures.ts";
 
 function thinkingBlockStart(index: number) {
-  return blockStart(index, { thinking: "", type: "thinking" });
+  return anthropicBlockStart(index, { thinking: "", type: "thinking" });
 }
 
-function finishedStep(events: readonly unknown[]) {
-  return finishAccumulator(events)();
+function streamedTextStep(
+  text: string,
+  options: { readonly stopped: boolean },
+) {
+  return finishedAnthropicStep([
+    anthropicMessageStart(),
+    ...streamedAnthropicTextBlockEvents(0, text, options.stopped),
+    { type: "message_stop" },
+  ]);
 }
 
 function expectReplayUnavailable(step: unknown): void {
   expect(step).not.toHaveProperty("providerReplay");
 }
+
+test.each<AnthropicReplayBlock>([
+  { text: "   ", type: "text" },
+  { citations: "invalid", text: "Answer", type: "text" },
+  {
+    caller: "invalid",
+    id: "call-1",
+    input: {},
+    name: "read",
+    type: "tool_use",
+  },
+  {
+    caller: "invalid",
+    id: "server-call-1",
+    input: {},
+    name: "web_search",
+    type: "server_tool_use",
+  },
+  {
+    caller: "invalid",
+    content: [],
+    tool_use_id: "server-call-1",
+    type: "web_search_tool_result",
+  },
+])(
+  "rejects malformed optional replay fields in $type blocks",
+  (block: AnthropicReplayBlock) => {
+    const replay = {
+      blocks: [block],
+      model: KNOWN_ANTHROPIC_MODEL,
+      protocol: "anthropic" as const,
+      provenance: ANTHROPIC_TEST_PROVENANCE,
+    };
+    const serialized = JSON.stringify(replay);
+
+    expect(serializeAnthropicAssistantReplay(replay)).toBeNull();
+    expect(() => parseAnthropicAssistantReplay(serialized)).toThrow(
+      "Anthropic assistant replay data is invalid",
+    );
+  },
+);
+
+test("rejects an invalid replay container", () => {
+  const malformedReplay = {
+    blocks: [{ text: "Done.", type: "text" }] as const,
+    container: "",
+    model: KNOWN_ANTHROPIC_MODEL,
+    protocol: "anthropic" as const,
+    provenance: ANTHROPIC_TEST_PROVENANCE,
+  };
+  expect(serializeAnthropicAssistantReplay(malformedReplay)).toBeNull();
+  expect(() =>
+    parseAnthropicAssistantReplay(JSON.stringify(malformedReplay)),
+  ).toThrow("Anthropic assistant replay data is invalid");
+});
 
 function noArgumentReplayBlocks(text = "") {
   return [
@@ -127,15 +125,20 @@ function noArgumentReplayBlocks(text = "") {
 
 function signedNoArgumentToolResponse(text = ""): Response {
   return anthropicEvents([
-    messageStart(4),
+    anthropicMessageStart(4),
     thinkingBlockStart(0),
-    blockDelta(0, { thinking: "Inspect.", type: "thinking_delta" }),
-    blockDelta(0, { signature: "signed-thinking", type: "signature_delta" }),
-    blockStop(0),
-    blockStart(1, { text: "", type: "text" }),
-    ...(text.length === 0 ? [] : [blockDelta(1, { text, type: "text_delta" })]),
-    blockStop(1),
-    ...streamedToolEvents({
+    anthropicBlockDelta(0, { thinking: "Inspect.", type: "thinking_delta" }),
+    anthropicBlockDelta(0, {
+      signature: "signed-thinking",
+      type: "signature_delta",
+    }),
+    anthropicBlockStop(0),
+    anthropicBlockStart(1, { text: "", type: "text" }),
+    ...(text.length === 0
+      ? []
+      : [anthropicBlockDelta(1, { text, type: "text_delta" })]),
+    anthropicBlockStop(1),
+    ...streamedAnthropicToolEvents({
       id: "list-call",
       index: 2,
       initialInput: {},
@@ -182,10 +185,13 @@ function partialToolStop(
   stopReason: "max_tokens" | "model_context_window_exceeded",
 ): Response {
   return anthropicEvents([
-    messageStart(3),
-    blockStart(0, replayTool()),
-    blockDelta(0, { partial_json: '{"path":', type: "input_json_delta" }),
-    blockStop(0),
+    anthropicMessageStart(3),
+    anthropicBlockStart(0, replayTool()),
+    anthropicBlockDelta(0, {
+      partial_json: '{"path":',
+      type: "input_json_delta",
+    }),
+    anthropicBlockStop(0),
     {
       delta: { stop_reason: stopReason },
       type: "message_delta",
@@ -210,30 +216,43 @@ describe("Anthropic response replay", () => {
     const harness = anthropicHarness(
       [
         anthropicEvents([
-          messageStart(12),
+          anthropicMessageStart(12),
           thinkingBlockStart(0),
-          blockDelta(0, { thinking: "Inspect first.", type: "thinking_delta" }),
-          blockDelta(0, { signature: "signed-", type: "signature_delta" }),
-          blockDelta(0, { signature: "thinking", type: "signature_delta" }),
-          blockStop(0),
-          blockStart(1, {
+          anthropicBlockDelta(0, {
+            thinking: "Inspect first.",
+            type: "thinking_delta",
+          }),
+          anthropicBlockDelta(0, {
+            signature: "signed-",
+            type: "signature_delta",
+          }),
+          anthropicBlockDelta(0, {
+            signature: "thinking",
+            type: "signature_delta",
+          }),
+          anthropicBlockStop(0),
+          anthropicBlockStart(1, {
             data: "encrypted-redaction",
             type: "redacted_thinking",
           }),
-          blockStop(1),
-          blockStart(2, { text: "", type: "text" }),
-          blockDelta(2, { text: "Checking.", type: "text_delta" }),
-          blockStop(2),
-          blockStart(3, { id: "call-9", name: "read", type: "tool_use" }),
-          blockDelta(3, {
+          anthropicBlockStop(1),
+          anthropicBlockStart(2, { text: "", type: "text" }),
+          anthropicBlockDelta(2, { text: "Checking.", type: "text_delta" }),
+          anthropicBlockStop(2),
+          anthropicBlockStart(3, {
+            id: "call-9",
+            name: "read",
+            type: "tool_use",
+          }),
+          anthropicBlockDelta(3, {
             partial_json: '{"path":',
             type: "input_json_delta",
           }),
-          blockDelta(3, {
+          anthropicBlockDelta(3, {
             partial_json: '"src"}',
             type: "input_json_delta",
           }),
-          blockStop(3),
+          anthropicBlockStop(3),
           { type: "message_delta", usage: { output_tokens: 9 } },
           { type: "message_stop" },
         ]),
@@ -295,12 +314,12 @@ describe("Anthropic response replay", () => {
       step.providerReplay?.blocks,
     );
 
-    const unsigned = finishedStep([
-      messageStart(),
+    const unsigned = finishedAnthropicStep([
+      anthropicMessageStart(),
       thinkingBlockStart(0),
-      blockDelta(0, { thinking: "Reasoning", type: "thinking_delta" }),
-      blockStop(0),
-      ...streamedReadEvents("call-1", 1),
+      anthropicBlockDelta(0, { thinking: "Reasoning", type: "thinking_delta" }),
+      anthropicBlockStop(0),
+      ...streamedAnthropicReadEvents("call-1", 1),
       { type: "message_stop" },
     ]);
     expect(unsigned.thinking).toBe("Reasoning");
@@ -313,7 +332,10 @@ describe("Anthropic response replay", () => {
     expectReplayUnavailable(unsigned);
 
     const unknown = await anthropicHarness([
-      stoppedEvents([...futureBlock(0), ...streamedTextEvents("Still works.")]),
+      stoppedAnthropicEvents([
+        ...futureAnthropicBlock(0),
+        ...streamedAnthropicTextEvents("Still works."),
+      ]),
     ]).complete();
     expect(unknown.content).toBe("Still works.");
     expectReplayUnavailable(unknown);
@@ -326,25 +348,31 @@ describe("Anthropic response replay", () => {
       type: "char_location",
     };
     const cited = await anthropicHarness([
-      stoppedEvents([
-        blockStart(0, { citations: null, text: "", type: "text" }),
-        blockDelta(0, { citation, type: "citations_delta" }),
-        blockDelta(0, { text: "Cited answer.", type: "text_delta" }),
-        blockStop(0),
+      stoppedAnthropicEvents([
+        anthropicBlockStart(0, { citations: null, text: "", type: "text" }),
+        anthropicBlockDelta(0, { citation, type: "citations_delta" }),
+        anthropicBlockDelta(0, { text: "Cited answer.", type: "text_delta" }),
+        anthropicBlockStop(0),
       ]),
     ]).complete();
     expect(cited.providerReplay?.blocks).toEqual([
       textReplayBlock("Cited answer.", [citation]),
     ]);
 
-    const malformed = finishedStep([
-      messageStart(),
-      blockStart(0, { type: "text" }),
-      blockDelta(0, { text: "Answer", type: "text_delta" }),
-      blockDelta(0, { signature: "misplaced", type: "signature_delta" }),
-      blockStop(0),
-      blockDelta(9, { thinking: "Visible reasoning", type: "thinking_delta" }),
-      blockStop(9),
+    const malformed = finishedAnthropicStep([
+      anthropicMessageStart(),
+      anthropicBlockStart(0, { type: "text" }),
+      anthropicBlockDelta(0, { text: "Answer", type: "text_delta" }),
+      anthropicBlockDelta(0, {
+        signature: "misplaced",
+        type: "signature_delta",
+      }),
+      anthropicBlockStop(0),
+      anthropicBlockDelta(9, {
+        thinking: "Visible reasoning",
+        type: "thinking_delta",
+      }),
+      anthropicBlockStop(9),
       { type: "message_stop" },
     ]);
     expect(malformed).toMatchObject({
@@ -353,32 +381,61 @@ describe("Anthropic response replay", () => {
     });
     expectReplayUnavailable(malformed);
 
-    const mixed = finishedStep([
-      messageStart(),
-      blockStart(0, {
+    const mixed = finishedAnthropicStep([
+      anthropicMessageStart(),
+      anthropicBlockStart(0, {
         id: "server-call",
         input: {},
         name: "web_search",
         type: "server_tool_use",
       }),
-      blockDelta(0, {
+      anthropicBlockDelta(0, {
         partial_json: '{"query":"news"}',
         type: "input_json_delta",
       }),
-      blockStop(0),
-      ...streamedReadEvents("read-call", 1),
+      anthropicBlockStop(0),
+      ...streamedAnthropicReadEvents("read-call", 1),
       { type: "message_stop" },
     ]);
     expect(mixed.toolCalls).toEqual([
-      { arguments: "{}", id: "read-call", name: "read" },
+      emptyProviderToolCall("read-call", "read"),
     ]);
-    expectReplayUnavailable(mixed);
+    expect(mixed.providerReplay?.blocks).toEqual([
+      serverToolReplayBlock({
+        id: "server-call",
+        input: { query: "news" },
+        name: "web_search",
+      }),
+      toolReplayBlock({ id: "read-call", input: {}, name: "read" }),
+    ]);
+  });
+
+  test("captures streamed server results, uploads, and callers unchanged", () => {
+    const caller = { tool_id: "code-call", type: "code_execution_20260120" };
+    const blocks = [
+      {
+        caller,
+        content: [{ encrypted_content: "opaque", type: "web_search_result" }],
+        tool_use_id: "search-call",
+        type: "web_search_tool_result",
+      },
+      { file_id: "file-1", type: "container_upload" },
+    ] as const;
+    const events = [
+      anthropicMessageStart(),
+      ...streamedReplayEvents(blocks),
+      { type: "message_stop" },
+    ];
+
+    expect(finishedAnthropicStep(events).providerReplay?.blocks).toEqual(
+      blocks,
+    );
   });
 
   test("keeps JSON output without a signature and unfinished streamed output", async () => {
     const jsonStep = await anthropicHarness([
-      Response.json({
-        content: [
+      anthropicJsonResponse({
+        blocks: [
           { signature: null, thinking: "Reasoning", type: "thinking" },
           { text: "Answer", type: "text" },
           toolReplayBlock({
@@ -387,8 +444,6 @@ describe("Anthropic response replay", () => {
             name: "read",
           }),
         ],
-        type: "message",
-        usage: { input_tokens: 1, output_tokens: 1 },
       }),
     ]).complete();
     expect(jsonStep.toolCalls).toHaveLength(1);
@@ -403,12 +458,7 @@ describe("Anthropic response replay", () => {
     });
     expectReplayUnavailable(jsonStep);
 
-    const unfinished = finishedStep([
-      messageStart(),
-      blockStart(0, { text: "", type: "text" }),
-      blockDelta(0, { text: "Incomplete", type: "text_delta" }),
-      { type: "message_stop" },
-    ]);
+    const unfinished = streamedTextStep("Incomplete", { stopped: false });
     expect(unfinished.content).toBe("Incomplete");
     expectReplayUnavailable(unfinished);
   });
@@ -419,6 +469,10 @@ describe("Anthropic response replay", () => {
     expect(
       JSON.stringify(await replayNoArgumentTool(harness, step)),
     ).not.toContain('"text":""');
+
+    const whitespace = streamedTextStep("   ", { stopped: true });
+    expect(whitespace.content).toBe("   ");
+    expectReplayUnavailable(whitespace);
 
     expect(() =>
       recordedMessageValues({
@@ -451,23 +505,23 @@ describe("Anthropic response replay", () => {
 
   test("projects supported streamed fields and preserves tool caller", async () => {
     const harness = anthropicHarness([
-      stoppedEvents([
-        blockStart(0, {
+      stoppedAnthropicEvents([
+        anthropicBlockStart(0, {
           future_text_field: "ignored",
           text: "",
           type: "text",
         }),
-        blockDelta(0, { text: "Ready.", type: "text_delta" }),
-        blockStop(0),
-        blockStart(1, {
+        anthropicBlockDelta(0, { text: "Ready.", type: "text_delta" }),
+        anthropicBlockStop(0),
+        anthropicBlockStart(1, {
           ...replayTool({ type: "direct" }),
           future_tool_field: "ignored",
         }),
-        blockDelta(1, {
+        anthropicBlockDelta(1, {
           partial_json: '{"path":"README.md"}',
           type: "input_json_delta",
         }),
-        blockStop(1),
+        anthropicBlockStop(1),
       ]),
     ]);
 

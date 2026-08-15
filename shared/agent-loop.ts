@@ -118,6 +118,7 @@ export interface AgentModelStep {
   readonly content: string;
   readonly contextTokens: number | null;
   readonly costUsd: number | null;
+  readonly providerContinuation?: "anthropic_pause_turn";
   readonly providerReplay?: AgentProviderReplay;
   readonly thinking: string;
   readonly tokenUsage: AgentTokenUsage | null;
