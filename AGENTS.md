@@ -9,15 +9,15 @@ Living project memory.
 
 ## Working Agreements
 
-- Research online before changes: search provider docs/issue trackers, then
-  probe APIs, schemas, and usage metrics.
-- Call a capability impossible only when evidence excludes it; otherwise record
-  an open question.
+- Research online before changes: use brave-search on provider docs/issue
+  trackers, then probe APIs, schemas, and usage metrics.
+- Call a capability impossible only with excluding evidence; otherwise record an
+  open question.
 - Preserve patterns; add tools only as needed; improve touched code, tests,
   docs, performance, security, and DX. Ship small improvements now, larger ones
   after.
-- Practice TDD: failing test first, implement, refactor green.
-- DRY and KISS: authoritative logic, no premature abstractions.
+- Practice TDD: fail first, implement, refactor green.
+- DRY/KISS: authoritative logic, no premature abstractions.
 - Never invent numeric limits or tunables: probe omission first, prefer the
   provider default, else derive from metadata or docs.
 - Integrate completely the first time: wire every session capability to each

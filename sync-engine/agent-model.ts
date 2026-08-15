@@ -488,8 +488,10 @@ export class ChatCompletionsAgentModel implements AgentModel {
       } catch (error) {
         this.#acceptWebSocketInterruption(error, signal);
         const immediate =
-          error instanceof ProviderWebSocketError && error.immediate;
+          error instanceof ProviderWebSocketError && error.reconnectImmediately;
         if (immediate && reconnectImmediately) {
+          // This documented expiry means the socket itself must be replaced;
+          // reconnect once without applying ordinary transient backoff.
           reconnectImmediately = false;
           continue;
         }

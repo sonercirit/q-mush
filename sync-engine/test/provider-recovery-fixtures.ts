@@ -61,7 +61,7 @@ export function providerDelta(
   return { content, ...(reset ? { reset: true } : {}), thinking: "" };
 }
 
-function recordDelay(delays: number[]): ModelRequestSleep {
+export function recordDelay(delays: number[]): ModelRequestSleep {
   return async (milliseconds) => {
     await Promise.resolve();
     delays.push(milliseconds);
@@ -133,16 +133,10 @@ export async function replaceProviderSocket(
   replacement.receive(COMPLETED_EVENT);
 }
 
-export function createProviderSockets(): {
-  readonly delays: number[];
-  readonly sockets: FakeProviderSockets;
-} {
-  return { delays: [], sockets: new FakeProviderSockets() };
-}
-
 export function retryingSocket(): RetryingSocketSetup {
   const deltas: ProviderTextDelta[] = [];
-  const { delays, sockets } = createProviderSockets();
+  const delays: number[] = [];
+  const sockets = new FakeProviderSockets();
   const model = apiKeyModel({
     onDelta: (delta) => {
       deltas.push(delta);
@@ -151,10 +145,6 @@ export function retryingSocket(): RetryingSocketSetup {
     webSocket: sockets.create,
   });
   return { delays, deltas, pending: complete(model), sockets };
-}
-
-export function recordProviderDelay(delays: number[]): ModelRequestSleep {
-  return recordDelay(delays);
 }
 
 export function apiKeyModel(options: {

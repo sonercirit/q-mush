@@ -23,7 +23,7 @@ export type ProviderWebSocketFactory = (
 const OPEN_STATE = 1;
 
 export class ProviderWebSocketError extends Error {
-  readonly immediate: boolean;
+  readonly reconnectImmediately: boolean;
   readonly retryAfterMilliseconds: number | undefined;
   readonly started: boolean;
 
@@ -34,14 +34,14 @@ export class ProviderWebSocketError extends Error {
   ) {
     super(message);
     this.name = "ProviderWebSocketError";
-    this.immediate = options.immediate === true;
+    this.reconnectImmediately = options.reconnectImmediately === true;
     this.retryAfterMilliseconds = options.retryAfterMilliseconds;
     this.started = started;
   }
 }
 
 interface ProviderWebSocketErrorOptions {
-  readonly immediate?: boolean;
+  readonly reconnectImmediately?: boolean;
   readonly retryAfterMilliseconds?: number | undefined;
 }
 
@@ -142,7 +142,7 @@ export class ProviderWebSocketSession {
         ) {
           fail(
             new ProviderWebSocketError(error.message, receivedEvent, {
-              immediate: error.reconnectWebSocket,
+              reconnectImmediately: error.reconnectWebSocket,
               retryAfterMilliseconds: error.retryAfterMilliseconds,
             }),
           );

@@ -7,13 +7,12 @@ import {
   chatCompletedResponse,
   complete,
   COMPLETED_EVENT,
-  createProviderSockets,
   expectBoundedHttpFallback,
   expireProviderSocket,
   FakeProviderSocket,
   FakeProviderSockets,
   providerDelta,
-  recordProviderDelay,
+  recordDelay,
   replaceProviderSocket,
   requireProviderSocket,
   retryingSocket,
@@ -147,11 +146,11 @@ test.each([
     expireProviderSocket(expired, code);
 
     await replaceProviderSocket(sockets);
-    const replacement = sockets.created[1];
+    const replacement = requireProviderSocket(sockets, 1);
 
     expectDoneStep(await pending);
     expect(expired.readyState).toBe(WebSocket.CLOSED);
-    expect(replacement?.sent).toHaveLength(1);
+    expect(replacement.sent).toHaveLength(1);
     expect(delays).toHaveLength(0);
     expect(deltas).toEqual([providerDelta("Partial"), providerDelta("", true)]);
   },
@@ -164,7 +163,8 @@ test("keeps ordinary retry capacity after an immediate expiry reconnect", async 
   expired.open();
   expireProviderSocket(expired, "websocket_connection_limit_reached");
   await retry.sockets.waitForAttempt(1);
-  retry.sockets.created[1]?.fail();
+  const secondSocket = requireProviderSocket(retry.sockets, 1);
+  secondSocket.fail();
   await replaceProviderSocket(retry.sockets, 2);
 
   expectDoneStep(await pending);
@@ -172,24 +172,27 @@ test("keeps ordinary retry capacity after an immediate expiry reconnect", async 
 });
 
 test("bounds repeated connection-limit reconnects", async () => {
-  const { delays, sockets } = createProviderSockets();
+  const setup: { delays: number[]; sockets: FakeProviderSockets } = {
+    delays: [],
+    sockets: new FakeProviderSockets(),
+  };
   const model = apiKeyModel({
     fetch: () => Promise.resolve(chatCompletedResponse()),
-    sleep: recordProviderDelay(delays),
-    webSocket: sockets.create,
+    sleep: recordDelay(setup.delays),
+    webSocket: setup.sockets.create,
   });
   const pending = complete(model);
 
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    await sockets.waitForAttempt(attempt);
-    const expired = requireProviderSocket(sockets, attempt);
+    await setup.sockets.waitForAttempt(attempt);
+    const expired = requireProviderSocket(setup.sockets, attempt);
     expired.open();
     expireProviderSocket(expired, "websocket_connection_limit_reached");
   }
 
-  expect(delays).toEqual([1_000, 2_000, 4_000]);
+  expect(setup.delays).toEqual([1_000, 2_000, 4_000]);
   expect({
-    socketCount: sockets.created.length,
+    socketCount: setup.sockets.created.length,
     step: await pending,
   }).toMatchObject({ socketCount: 5, step: { content: "Done." } });
 });
