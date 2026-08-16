@@ -33,19 +33,6 @@ async function findSourceClones(
   });
 }
 
-function expectNoSourceClones(
-  sources: Readonly<Record<string, string>>,
-  minimums: { readonly lines: number; readonly tokens: number },
-): Promise<void> {
-  const { lines, tokens } = minimums;
-  const prefix = "q-mush-cpd-no-clones-";
-  return withTemporaryDirectory(prefix, (directory) =>
-    writeSources(directory, sources).then((paths) => {
-      expect(findNamedClones(directory, paths, lines, tokens)).toEqual([]);
-    }),
-  );
-}
-
 const RENAMED_SOURCES = {
   "first.ts": `function first(value: string) {
   return value.trim();
@@ -95,44 +82,19 @@ describe("CPD named clone detection", () => {
     expect(clones).toHaveLength(1);
   });
 
-  test("uses JSX custom extensions and unambiguous TypeScript", async () => {
-    const tsxClones = await findSourceClones(
-      "q-mush-cpd-es-tsx-",
-      {
-        "first.es": `function first(value) {
+  test("uses JSX custom extensions", async () => {
+    const clones = await findSourceClones("q-mush-cpd-es-tsx-", {
+      "first.es": `function first(value) {
   return <><section>{value}</section><aside>{value}</aside></>;
 }
 `,
-        "second.es6": `function second(input) {
+      "second.es6": `function second(input) {
   return <><section>{input}</section><aside>{input}</aside></>;
 }
 `,
-      },
-      1,
-      20,
-    );
-    const genericClones = await findSourceClones(
-      "q-mush-cpd-ts-generics-",
-      {
-        "first.ts": `function first() {
-  const identity = <Value>(value: Value): Value => value;
-  const primary = identity(1);
-  return primary + identity(2);
-}
-`,
-        "second.ts": `function second() {
-  const convert = <Input>(input: Input): Input => input;
-  const secondary = convert(1);
-  return secondary + convert(2);
-}
-`,
-      },
-      1,
-      20,
-    );
+    });
 
-    expect(tsxClones).toHaveLength(1);
-    expect(genericClones).toHaveLength(1);
+    expect(clones).toHaveLength(1);
   });
 
   test("honors native CPD line and inclusive token boundaries", async () => {
@@ -250,49 +212,28 @@ describe("CPD named clone detection", () => {
     );
   });
 
-  test("counts valid TypeScript generic arrows in native units", async () => {
-    const minTokens = 29;
-    const clones = await findSourceClones(
-      "q-mush-cpd-generic-token-units-",
-      {
-        "first.ts": `function first() {
-  const identity = <Value>(value: Value): Value => value;
-  return identity(1);
-}
-`,
-        "second.ts": `function second() {
-  const convert = <Input>(input: Input): Input => input;
-  return convert(1);
-}
-`,
-      },
-      1,
-      minTokens,
-    );
-
-    expect(clones[0]?.tokens).toBe(minTokens);
-  });
-
   test.each([
-    ["plain", "<Value>", 29],
-    ["comma-disambiguated", "<Value,>", 29],
-    ["const", "<const Value>", 30],
-    ["const comma-disambiguated", "<const Value,>", 30],
-    ["const constrained", "<const Value extends number>", 31],
-    ["const defaulted", "<const Value = number>", 31],
-    ["constrained", "<Value extends number>", 30],
-    ["defaulted", "<Value = number>", 30],
+    ["plain", "<Value>", 41],
+    ["comma-disambiguated", "<Value,>", 40],
+    ["const", "<const Value>", 42],
+    ["const comma-disambiguated", "<const Value,>", 41],
+    ["const constrained", "<const Value extends number>", 42],
+    ["const defaulted", "<const Value = number>", 42],
+    ["constrained", "<Value extends number>", 41],
+    ["defaulted", "<Value = number>", 41],
   ])(
     "counts %s generic arrows in native units",
     async (_label, typeParameter, nativeTokens) => {
       await withTemporaryDirectory("q-mush-cpd-generic-", async (directory) => {
         const paths = await writeSources(directory, {
           "first.ts": `function first() {
+  const prepare = (value: number) => value;
   const identity = ${typeParameter}(value: Value): Value => value;
   return identity(1);
 }
 `,
           "second.ts": `function second() {
+  const process = (input: number) => input;
   const convert = ${typeParameter.replaceAll("Value", "Input")}(input: Input): Input => input;
   return convert(1);
 }
@@ -308,6 +249,32 @@ describe("CPD named clone detection", () => {
       });
     },
   );
+
+  test("counts whole-file fallback tokens after an ambiguous arrow", async () => {
+    const clones = await findSourceClones(
+      "q-mush-cpd-fallback-",
+      {
+        "first.ts": `function first() {
+  const prepare = (value: number) => value;
+  const identity = <Value>(value: Value): Value =>
+    prepare(Number(value)) as Value;
+  return identity(1);
+}
+`,
+        "second.ts": `function second() {
+  const process = (input: number) => input;
+  const convert = <Input>(input: Input): Input =>
+    process(Number(input)) as Input;
+  return convert(1);
+}
+`,
+      },
+      1,
+      49,
+    );
+
+    expect(clones[0]?.tokens).toBe(49);
+  });
 
   test("suppresses nested clones already covered by their parents", async () => {
     const clones = await findSourceClones("q-mush-cpd-nested-report-", {
@@ -376,6 +343,22 @@ describe("CPD named clone detection", () => {
         findNamedClones(directory, ["first.tsx", "second.tsx"], 1, 1),
       ).toHaveLength(1);
     });
+  });
+
+  test("treats uppercase TypeScript extensions as TypeScript", async () => {
+    expect(
+      await findSourceClones(
+        "q-mush-cpd-uppercase-",
+        {
+          "first.TS":
+            "function first() { return <Value>(value: Value): Value => value; }\n",
+          "second.TS":
+            "function second() { return <Input>(input: Input): Input => input; }\n",
+        },
+        0,
+        1,
+      ),
+    ).toHaveLength(1);
   });
 
   test("reports every malformed source with deterministic locations", async () => {
@@ -511,22 +494,18 @@ describe("CPD named clone detection", () => {
     expect(clones).toHaveLength(1);
   });
 
-  test("keeps unresolved label spellings significant", async () => {
-    await expectNoSourceClones(
-      {
-        "first.js": `function first(value) {
-  if (value.trim() === "") break missing;
-  return value.trim().toLowerCase();
-}
-`,
-        "second.js": `function second(input) {
-  if (input.trim() === "") break absent;
-  return input.trim().toLowerCase();
-}
-`,
-      },
-      { lines: 1, tokens: 1 },
-    );
+  test("keeps top-level unresolved labels significant", async () => {
+    expect(
+      await findSourceClones(
+        "q-mush-cpd-top-labels-",
+        {
+          "first.js": "for (const value of []) { break missing; }\n",
+          "second.js": "for (const input of []) { break absent; }\n",
+        },
+        0,
+        1,
+      ),
+    ).toEqual([]);
   });
 
   test("keeps explicit and shorthand destructuring keys significant", async () => {

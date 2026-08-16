@@ -46,11 +46,11 @@ Living project memory.
 
 ## Architecture and Conventions
 
-- Production source has four enforced top-level workspaces: `solid` owns browser
-  UI, `sync-engine` the Bun server and integrations, `runner` the standalone
-  runner, and `shared` cross-workspace code. The first three import only
-  themselves and `shared`; `shared` imports no other workspace; code outside
-  `scripts` cannot import `scripts`.
+- Production source has four enforced workspaces: `solid` owns browser UI,
+  `sync-engine` the Bun server and integrations, `runner` the standalone runner,
+  and `shared` cross-workspace code. The first three import only themselves and
+  `shared`; `shared` imports no other workspace; code outside `scripts` cannot
+  import `scripts`.
 - `sync-engine/server.ts` serves the browser JavaScript and Tailwind CSS that
   Vite builds in memory. Browser state, session updates, and runner work use
   authenticated WebSockets at `/api/realtime` and `/api/runner/realtime`; no

@@ -19,6 +19,7 @@ import {
   isPropertyAccessExpression,
   isQualifiedName,
   isShorthandPropertyAssignment,
+  isSourceFile,
   isTypeElement,
   SyntaxKind,
   type NamedDeclaration,
@@ -75,8 +76,8 @@ interface TokenFingerprints {
 }
 
 interface SourceFingerprint {
+  readonly ambiguousGenericArrow: boolean;
   readonly positions: readonly number[];
-  readonly splitArrowStarts: ReadonlySet<number>;
   readonly tokens: readonly FingerprintToken[];
 }
 
@@ -158,7 +159,7 @@ function labelDeclaration(node: Node): Node | undefined {
   }
 
   let ancestor = parent.parent;
-  while (!isFunctionLike(ancestor)) {
+  while (!isFunctionLike(ancestor) && !isSourceFile(ancestor)) {
     if (isLabeledStatement(ancestor) && ancestor.label.text === node.text) {
       return ancestor.label;
     }
@@ -172,8 +173,8 @@ function sourceFingerprintTokens(
   checker: TypeChecker,
 ): SourceFingerprint {
   const positions: number[] = [];
-  const splitArrowStarts = new Set<number>();
   const tokens: FingerprintToken[] = [];
+  let ambiguousGenericArrow = false;
 
   function visit(node: Node): void {
     if (isArrowFunction(node)) {
@@ -186,9 +187,7 @@ function sourceFingerprintTokens(
           parameter.default === undefined &&
           !typeParameters.hasTrailingComma
         ) {
-          splitArrowStarts.add(
-            node.equalsGreaterThanToken.getStart(sourceFile),
-          );
+          ambiguousGenericArrow = true;
         }
       }
     }
@@ -223,7 +222,7 @@ function sourceFingerprintTokens(
   }
 
   visit(sourceFile);
-  return { positions, splitArrowStarts, tokens };
+  return { ambiguousGenericArrow, positions, tokens };
 }
 
 function tokenFingerprints(
@@ -288,6 +287,38 @@ function parserFilePath(path: string): string {
   return /^(?:\.cts|\.mts|\.ts)$/u.test(extension) ? "source.ts" : "source.tsx";
 }
 
+function fallbackTokenStarts(source: string): number[] {
+  const starts: number[] = [];
+  const alphanumeric = /[\p{Alphabetic}\p{Number}]/u;
+  let position = 0;
+
+  while (position < source.length) {
+    const character = String.fromCodePoint(source.codePointAt(position) ?? 0);
+    if (/\s/u.test(character)) {
+      position += character.length;
+      continue;
+    }
+    starts.push(position);
+    if (
+      alphanumeric.test(character) ||
+      character === "_" ||
+      character === "$"
+    ) {
+      position += character.length;
+      while (position < source.length) {
+        const next = String.fromCodePoint(source.codePointAt(position) ?? 0);
+        if (!alphanumeric.test(next) && next !== "_" && next !== "$") {
+          break;
+        }
+        position += next.length;
+      }
+    } else {
+      position += character.length;
+    }
+  }
+  return starts;
+}
+
 function sourceTokens(
   path: string,
   sourceFile: SourceFile,
@@ -299,17 +330,9 @@ function sourceTokens(
     tokens: true,
   });
   const fingerprint = sourceFingerprintTokens(sourceFile, checker);
-  const nativeStarts: number[] = [];
-
-  for (const token of parsed.tokens) {
-    const tokenCopies =
-      token.value === "=>" && fingerprint.splitArrowStarts.has(token.range[0])
-        ? 2
-        : 1;
-    nativeStarts.push(
-      ...Array.from({ length: tokenCopies }, () => token.range[0]),
-    );
-  }
+  const nativeStarts = fingerprint.ambiguousGenericArrow
+    ? fallbackTokenStarts(sourceFile.text)
+    : parsed.tokens.map((token) => token.range[0]);
   return {
     fingerprint: fingerprint.tokens,
     fingerprintPositions: fingerprint.positions,
@@ -467,21 +490,25 @@ export function findNamedClones(
     }
   }
 
-  return clones.filter(
-    ({ first, second }) =>
-      !clones.some(
-        (candidate) =>
-          candidate.first.path === first.path &&
-          candidate.first.startPosition <= first.startPosition &&
-          candidate.first.endPosition >= first.endPosition &&
-          candidate.second.path === second.path &&
-          candidate.second.startPosition <= second.startPosition &&
-          candidate.second.endPosition >= second.endPosition &&
-          (candidate.first.startPosition < first.startPosition ||
-            candidate.first.endPosition > first.endPosition ||
-            candidate.second.startPosition < second.startPosition ||
-            candidate.second.endPosition > second.endPosition),
-      ),
+  const cloneGroups = Map.groupBy(
+    clones,
+    (clone) => `${clone.first.path}\u0000${clone.second.path}`,
+  );
+  return [...cloneGroups.values()].flatMap((group) =>
+    group.filter(
+      ({ first, second }) =>
+        !group.some(
+          (candidate) =>
+            candidate.first.startPosition <= first.startPosition &&
+            candidate.first.endPosition >= first.endPosition &&
+            candidate.second.startPosition <= second.startPosition &&
+            candidate.second.endPosition >= second.endPosition &&
+            (candidate.first.startPosition < first.startPosition ||
+              candidate.first.endPosition > first.endPosition ||
+              candidate.second.startPosition < second.startPosition ||
+              candidate.second.endPosition > second.endPosition),
+        ),
+    ),
   );
 }
 

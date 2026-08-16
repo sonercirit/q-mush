@@ -666,6 +666,9 @@ async function resolvedRunnerTool(
     throw new Error("The runner command was stopped");
   }
   const root = await resolveRunnerWorkspace(workingDirectory);
+  if (parameters[3]?.aborted === true) {
+    throw new Error("The runner command was stopped");
+  }
   return {
     arguments_,
     name,
@@ -676,7 +679,7 @@ async function resolvedRunnerTool(
   };
 }
 
-/** @public Direct runner-tool helper for runner integrations. */
+/** @public */
 export async function executeRunnerTool(
   ...parameters: ExecuteRunnerToolArguments
 ): Promise<string> {

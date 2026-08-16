@@ -68,7 +68,7 @@ function diagnosticText(diagnostic: Diagnostic): string {
 }
 
 function sourceScriptKind(path: string): ScriptKind {
-  return /^(?:\.cts|\.mts|\.ts)$/u.test(extname(path))
+  return /^(?:\.cts|\.mts|\.ts)$/u.test(extname(path).toLowerCase())
     ? ScriptKind.TS
     : ScriptKind.TSX;
 }
