@@ -202,8 +202,9 @@ Living project memory.
   HTML-like data and TSX pass.
 - Knip checks every issue type and entry export in test and production graphs;
   tests cannot keep production alive, and unused test helpers fail.
-- CPD maps all JS/TS extensions to TSX and ignores imports. Native-token and
-  complete-function alpha matches of ≥20 tokens spanning at least one line
+- CPD maps all JS/TS extensions to TSX and ignores imports. Its parse-error path
+  deliberately matches native CPD's crude whole-file fallback tokenizer.
+  Native-token and complete-function alpha matches of ≥20 tokens spanning a line
   boundary fail the zero threshold; alpha ignores locally bound names but
   preserves free names, member APIs, and literals.
 - Repository policy scans tracked, unignored files: 20,000-code-point maximum

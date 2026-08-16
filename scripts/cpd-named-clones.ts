@@ -1,8 +1,7 @@
 import { parse } from "@typescript-eslint/typescript-estree";
-import { extname, resolve } from "node:path";
+import { resolve } from "node:path";
 import {
   forEachChild,
-  isArrowFunction,
   isBindingElement,
   isBreakStatement,
   isClassLike,
@@ -76,7 +75,6 @@ interface TokenFingerprints {
 }
 
 interface SourceFingerprint {
-  readonly ambiguousGenericArrow: boolean;
   readonly positions: readonly number[];
   readonly tokens: readonly FingerprintToken[];
 }
@@ -174,24 +172,8 @@ function sourceFingerprintTokens(
 ): SourceFingerprint {
   const positions: number[] = [];
   const tokens: FingerprintToken[] = [];
-  let ambiguousGenericArrow = false;
 
   function visit(node: Node): void {
-    if (isArrowFunction(node)) {
-      const typeParameters = node.typeParameters;
-      if (typeParameters?.length === 1) {
-        const parameter = typeParameters[0];
-        if (
-          parameter !== undefined &&
-          parameter.constraint === undefined &&
-          parameter.default === undefined &&
-          !typeParameters.hasTrailingComma
-        ) {
-          ambiguousGenericArrow = true;
-        }
-      }
-    }
-
     const children = node.getChildren(sourceFile);
     if (children.length > 0) {
       for (const child of children) {
@@ -222,7 +204,7 @@ function sourceFingerprintTokens(
   }
 
   visit(sourceFile);
-  return { ambiguousGenericArrow, positions, tokens };
+  return { positions, tokens };
 }
 
 function tokenFingerprints(
@@ -282,12 +264,8 @@ function tokenFingerprints(
   };
 }
 
-function parserFilePath(path: string): string {
-  const extension = extname(path).toLowerCase();
-  return /^(?:\.cts|\.mts|\.ts)$/u.test(extension) ? "source.ts" : "source.tsx";
-}
-
 function fallbackTokenStarts(source: string): number[] {
+  // Match native CPD's deliberately crude whole-file fallback after TSX parse errors.
   const starts: number[] = [];
   const alphanumeric = /[\p{Alphabetic}\p{Number}]/u;
   let position = 0;
@@ -320,19 +298,20 @@ function fallbackTokenStarts(source: string): number[] {
 }
 
 function sourceTokens(
-  path: string,
   sourceFile: SourceFile,
   checker: TypeChecker,
 ): SourceTokens {
-  const parsed = parse(sourceFile.text, {
-    filePath: parserFilePath(path),
-    range: true,
-    tokens: true,
-  });
+  let nativeStarts: readonly number[];
+  try {
+    nativeStarts = parse(sourceFile.text, {
+      filePath: "source.tsx",
+      range: true,
+      tokens: true,
+    }).tokens.map((token) => token.range[0]);
+  } catch {
+    nativeStarts = fallbackTokenStarts(sourceFile.text);
+  }
   const fingerprint = sourceFingerprintTokens(sourceFile, checker);
-  const nativeStarts = fingerprint.ambiguousGenericArrow
-    ? fallbackTokenStarts(sourceFile.text)
-    : parsed.tokens.map((token) => token.range[0]);
   return {
     fingerprint: fingerprint.tokens,
     fingerprintPositions: fingerprint.positions,
@@ -407,7 +386,7 @@ function occurrencesInSource(
   minLines: number,
   minTokens: number,
 ): FunctionOccurrence[] {
-  const tokens = sourceTokens(path, sourceFile, checker);
+  const tokens = sourceTokens(sourceFile, checker);
   return functionNodes(sourceFile).flatMap((node) => {
     const tokenCount = nativeTokenCount(node, sourceFile, tokens);
     if (

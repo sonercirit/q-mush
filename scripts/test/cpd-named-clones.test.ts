@@ -250,6 +250,26 @@ describe("CPD named clone detection", () => {
     },
   );
 
+  test("uses whole-file fallback tokens after any TSX parse failure", async () => {
+    const clones = await findSourceClones(
+      "q-mush-cpd-assertion-fallback-",
+      {
+        "first.ts": `function first(value: unknown) {
+  return <string>value + "multi word";
+}
+`,
+        "second.ts": `function second(input: unknown) {
+  return <string>input + "multi word";
+}
+`,
+      },
+      1,
+      20,
+    );
+
+    expect(clones[0]?.tokens).toBe(20);
+  });
+
   test("counts whole-file fallback tokens after an ambiguous arrow", async () => {
     const clones = await findSourceClones(
       "q-mush-cpd-fallback-",
