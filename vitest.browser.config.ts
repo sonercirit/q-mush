@@ -6,6 +6,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   plugins: [solid({ dev: false, hot: false }), tailwindcss()],
   test: {
+    allowOnly: false,
     browser: {
       enabled: true,
       headless: true,
@@ -15,6 +16,7 @@ export default defineConfig({
     },
     environment: "node",
     include: ["solid/test/**/*.browser.test.{ts,tsx}"],
+    passWithNoTests: false,
     testTimeout: 15_000,
   },
 });

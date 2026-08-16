@@ -74,9 +74,9 @@ Living project memory.
     `sync-engine/index.ts` injects the persistent connection; the auth factory
     falls back on in-memory SQLite. Shared PKCE, provider parsing, and redirects
     live in `oauth.ts`; cookie/response helpers in `http.ts`. `solid/client.tsx`
-    reads `/api/auth/session`, gates the app, posts logout. Browser layout
-    regressions use Vitest Browser Mode with Playwright Chromium and generated
-    Tailwind CSS; CI installs Chromium before tests.
+    reads `/api/auth/session`, gates the app, posts logout. Browser regressions
+    use real Chromium/Tailwind and production state/UI mutations, never
+    synthetic layout or CSS-only assertions; CI rejects `.only` and zero tests.
 - `sync-engine/runner-store.ts` persists runner registrations in `runners`: one
   active registration per machine fingerprint, one default per user.
   `sync-engine/runners.ts` issues hashed opaque setup tokens, owns authenticated

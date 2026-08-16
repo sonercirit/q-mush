@@ -1,11 +1,9 @@
 import { afterEach, expect, test } from "vitest";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
-import { summaryFromDetail } from "../session-summary-codec.ts";
+import type { SessionController } from "../session-controller.ts";
 import "../styles.css";
 import { queryTestElement, queryTestTranscript } from "./dom-test-helpers.ts";
-import { createSessionDetailReplacement } from "./session-detail-replacement-fixture.tsx";
-import { sessionDetailState } from "./session-detail-test-state.ts";
-import { mountSessionDetailBody } from "./session-dom-test-helpers.tsx";
+import { mountTestSessionDetail } from "./session-dom-test-helpers.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 import { transcriptMessage } from "./transcript-ordering-fixtures.ts";
 
@@ -14,6 +12,11 @@ const LARGE_CONTENT = Array.from(
   { length: 36 },
   (_, index) => `Layout line ${String(index)}`,
 ).join("\n\n");
+const INITIAL_DETAIL: AgentSessionDetail = {
+  ...TEST_SESSION_DETAIL,
+  messages: [transcriptMessage("initial", "Initial transcript", "user", 2)],
+  status: "running",
+};
 
 function nextPaint(): Promise<void> {
   return new Promise((resolve) => {
@@ -27,22 +30,14 @@ function nextPaint(): Promise<void> {
 
 function renderScrollFixture(): {
   readonly composer: HTMLTextAreaElement;
+  readonly controller: SessionController;
   readonly detail: HTMLDivElement;
-  readonly replaceDetail: (detail: AgentSessionDetail) => void;
   readonly toggle: HTMLButtonElement;
   readonly transcript: HTMLUListElement;
 } {
-  const initial = {
-    ...TEST_SESSION_DETAIL,
-    messages: [transcriptMessage("initial", "Initial transcript", "user", 2)],
-  };
-  const reactive = sessionDetailState(initial, [summaryFromDetail(initial)]);
-  const replacement = createSessionDetailReplacement();
-  const mounted = mountSessionDetailBody(
-    reactive,
+  const mounted = mountTestSessionDetail(
+    INITIAL_DETAIL,
     BROWSER_TEST_DISPOSALS,
-    undefined,
-    replacement.render,
   );
   const detailElement = queryTestElement(
     mounted.container,
@@ -63,37 +58,17 @@ function renderScrollFixture(): {
   ) {
     throw new TypeError("Invalid browser scroll regression fixture");
   }
-  const transcript = queryTestTranscript(mounted.container);
-  const detail = detailElement;
-  const composer = composerElement;
-  const toggle = toggleElement;
   return {
-    composer,
-    detail,
-    replaceDetail: replacement.replace,
-    toggle,
-    transcript,
+    composer: composerElement,
+    controller: mounted.controller,
+    detail: detailElement,
+    toggle: toggleElement,
+    transcript: queryTestTranscript(mounted.container),
   };
-}
-
-function appendSpacer(height: number): void {
-  const spacer = document.createElement("div");
-  spacer.style.height = `${String(height)}px`;
-  document.body.prepend(spacer);
-}
-
-function growSessionHeader(detail: HTMLElement): void {
-  const header = detail.firstElementChild;
-  if (!(header instanceof HTMLElement)) {
-    throw new TypeError("Missing session detail header");
-  }
-  header.style.paddingBottom = "600px";
 }
 
 function setComposerValue(composer: HTMLTextAreaElement, value: string): void {
   composer.value = value;
-  composer.style.height = "auto";
-  composer.style.height = `${String(composer.scrollHeight)}px`;
   composer.dispatchEvent(new InputEvent("input", { bubbles: true }));
 }
 
@@ -105,11 +80,10 @@ afterEach(() => {
 
 test("real session layout changes do not move the document or nested transcript", async () => {
   document.documentElement.style.scrollBehavior = "auto";
-  appendSpacer(1_000);
-  const { composer, detail, replaceDetail, toggle, transcript } =
+  const { composer, controller, detail, toggle, transcript } =
     renderScrollFixture();
   await nextPaint();
-  window.scrollTo(0, detail.offsetTop + 550);
+  window.scrollTo(0, 200);
   toggle.click();
   transcript.scrollTop = 0;
   transcript.dispatchEvent(new Event("scroll"));
@@ -119,22 +93,32 @@ test("real session layout changes do not move the document or nested transcript"
   expect(getComputedStyle(detail).overflowAnchor).toBe("none");
   expect(documentTop).toBeGreaterThan(0);
 
-  const withTranscript = {
-    ...TEST_SESSION_DETAIL,
-    messages: [
-      transcriptMessage("initial", "Initial transcript", "user", 2),
-      transcriptMessage("growth", LARGE_CONTENT, "assistant", 3),
-    ],
+  const withTranscript: AgentSessionDetail = {
+    ...INITIAL_DETAIL,
+    tokenUsage: {
+      cacheWriteInputTokens: 12_000,
+      cachedInputTokens: 95_000,
+      inputTokens: 123_456,
+      lastInputTokens: 12_345,
+      outputTokens: 12_345,
+      reportedStepCount: 11,
+      stepCount: 12,
+    },
   };
-  growSessionHeader(detail);
-  replaceDetail(withTranscript);
+  controller.applyDetail(withTranscript);
+  controller.applyDelta({
+    content: LARGE_CONTENT,
+    sessionId: withTranscript.id,
+    thinking: "",
+    type: "session_delta",
+  });
   await nextPaint();
-  expect(window.scrollY, "transcript growth").toBe(documentTop);
+  expect(window.scrollY, "live transcript and usage growth").toBe(documentTop);
   expect(transcript.scrollTop, "nested transcript after growth").toBe(
     transcriptTop,
   );
 
-  replaceDetail({
+  controller.applyDetail({
     ...withTranscript,
     agentFile: { content: LARGE_CONTENT, name: "AGENTS.md" },
   });
@@ -148,7 +132,7 @@ test("real session layout changes do not move the document or nested transcript"
   composer.setSelectionRange(8, 19);
   composer.focus({ preventScroll: true });
   await nextPaint();
-  expect(window.scrollY, "textarea and focus growth").toBe(documentTop);
+  expect(window.scrollY, "composer input and focus").toBe(documentTop);
   expect(transcript.scrollTop, "nested transcript after composer").toBe(
     transcriptTop,
   );
