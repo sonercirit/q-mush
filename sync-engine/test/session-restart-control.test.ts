@@ -26,6 +26,8 @@ function runnerGate(
 
 class TestRestartRuntimes implements RestartRuntimeControl {
   readonly blocked = new Set<string>();
+  readonly forceParked: string[] = [];
+  requestedDrains = 0;
   readonly drains: {
     readonly restartId: string;
     readonly scope: RestartScope;
@@ -68,6 +70,23 @@ class TestRestartRuntimes implements RestartRuntimeControl {
 
   mark(scope: RestartScope, restartId: string): Promise<void> {
     return this.drain(scope, restartId);
+  }
+
+  drainProgress(): readonly [] {
+    return [];
+  }
+
+  forcePark(): readonly string[] {
+    return this.forceParked;
+  }
+
+  async requestDrain(
+    scope: RestartScope,
+    restartId: string,
+  ): Promise<{ readonly settled: Promise<unknown> }> {
+    this.requestedDrains += 1;
+    await this.drain(scope, restartId);
+    return { settled: Promise.resolve() };
   }
 
   drainRequest(scope: RestartScope): RestartRequest | undefined {
@@ -165,6 +184,19 @@ describe("session restart control", () => {
     expect(runtimes.drains.map(({ restartId }) => restartId)).toEqual([
       "server-1",
       "server-1",
+    ]);
+  });
+
+  test("keeps final shutdown drain unbounded after its durable marker", async () => {
+    const { restart, runtimes } = control(() => "final-shutdown");
+
+    await restart.prepareServerShutdown();
+    await restart.drainServer();
+
+    expect(runtimes.requestedDrains).toBe(0);
+    expect(runtimes.drains).toEqual([
+      { restartId: "final-shutdown", scope: { kind: "server" } },
+      { restartId: "final-shutdown", scope: { kind: "server" } },
     ]);
   });
 

@@ -13,6 +13,16 @@ export interface RestartRequest {
   readonly restartId: string;
 }
 
+export interface RestartDrainProgress {
+  readonly elapsedMs: number;
+  readonly runnerId: string;
+  readonly sessionId: string;
+}
+
+export interface RestartDrainSettlement {
+  readonly settled: Promise<unknown>;
+}
+
 const BLOCKED_RUNNER_RESTART = Symbol("blocked runner restart");
 type RunnerRestartGate = RestartRequest | typeof BLOCKED_RUNNER_RESTART;
 
@@ -20,9 +30,11 @@ interface ActiveSessionRuntime {
   readonly boundary: RestartBoundary;
   readonly controller: AbortController;
   readonly generation: number;
+  restartRequestedAt: number | undefined;
   persistRestart:
     | ((request: RestartRequest, durable: boolean) => Promise<void> | void)
     | undefined;
+  forceParked: boolean;
   restartDurable: boolean;
   restartRequest: RestartRequest | undefined;
   clearDurable: (() => Promise<void> | void) | undefined;
@@ -78,9 +90,61 @@ export class SessionRuntimes {
   readonly #active = new Map<string, ActiveSessionRuntime>();
   readonly #drainingRunners = new Map<string, RunnerRestartGate>();
   #drainingServer: RestartRequest | undefined;
+  readonly #now: () => number;
+
+  constructor(now: () => number = Date.now) {
+    this.#now = now;
+  }
 
   get draining(): boolean {
     return this.#drainingServer !== undefined;
+  }
+
+  // Sessions still holding a requested restart open, longest wait first, so a
+  // drain can report exactly what it waits on.
+  drainProgress(scope?: RestartScope): readonly RestartDrainProgress[] {
+    const now = this.#now();
+    return [...this.#active]
+      .flatMap(([sessionId, runtime]) =>
+        runtime.restartRequestedAt === undefined ||
+        (scope !== undefined && !scopeIncludes(scope, runtime.runnerId))
+          ? []
+          : [
+              {
+                elapsedMs: now - runtime.restartRequestedAt,
+                runnerId: runtime.runnerId,
+                sessionId,
+              },
+            ],
+      )
+      .sort((first, second) => second.elapsedMs - first.elapsedMs);
+  }
+
+  // Force-parks the runtimes a drain still waits on: each already holds a
+  // durable handoff, so aborting leaves that parking in place for the next
+  // process instead of settling the session as stopped or failed.
+  forcePark(scope: RestartScope): readonly string[] {
+    const parked: string[] = [];
+    for (const [sessionId, runtime] of this.#active) {
+      if (
+        runtime.restartRequest === undefined ||
+        !scopeIncludes(scope, runtime.runnerId)
+      ) {
+        continue;
+      }
+      parked.push(sessionId);
+      runtime.forceParked = true;
+      // The durable handoff now owns the session's resumption, so it stops
+      // counting as pending drain work even while its runtime unwinds.
+      runtime.restartRequestedAt = undefined;
+      runtime.controller.abort(
+        new DOMException(
+          "The restart drain reached its limit",
+          "RestartHandoff",
+        ),
+      );
+    }
+    return parked;
   }
 
   active(sessionId: string): boolean {
@@ -174,6 +238,7 @@ export class SessionRuntimes {
         ...request,
         boundary: runtime.boundary,
       };
+      runtime.restartRequestedAt ??= this.#now();
       runtime.restartDurable ||= durable;
     }
     await Promise.all(
@@ -192,9 +257,24 @@ export class SessionRuntimes {
     await this.#request(scope, restartId, true);
   }
 
+  // Requests the drain and hands back the settlement wait so callers can bound
+  // it; the request itself, including durable persistence, always completes.
+  // The wait is wrapped because awaiting a returned promise would flatten it
+  // and reintroduce the unbounded wait.
+  async requestDrain(
+    scope: RestartScope,
+    restartId: string,
+    durable: boolean,
+  ): Promise<RestartDrainSettlement> {
+    const affected = await this.#request(scope, restartId, durable);
+    return {
+      settled: Promise.allSettled(affected.map(({ settled }) => settled)),
+    };
+  }
+
   async drain(scope: RestartScope, restartId: string): Promise<void> {
-    const affected = await this.#request(scope, restartId, false);
-    await Promise.allSettled(affected.map(({ settled }) => settled));
+    const { settled } = await this.requestDrain(scope, restartId, false);
+    await settled;
   }
 
   launch(
@@ -225,10 +305,12 @@ export class SessionRuntimes {
     const runtime: ActiveSessionRuntime = {
       boundary,
       controller,
+      forceParked: false,
       generation,
       persistRestart: undefined,
       restartDurable: false,
       restartRequest: undefined,
+      restartRequestedAt: undefined,
       clearDurable: undefined,
       runnerId,
       settled: Promise.resolve(),
@@ -260,7 +342,9 @@ export class SessionRuntimes {
       );
     }
     const clear = () => {
-      if (runtime.restartDurable) {
+      // A force-parked runtime never reached its own handoff boundary, so its
+      // durable marker is the only record that the session must resume.
+      if (runtime.restartDurable && !runtime.forceParked) {
         void runtime.clearDurable?.();
       }
       if (this.#active.get(sessionId) === runtime) {
@@ -286,6 +370,7 @@ export class SessionRuntimes {
         runtime.restartRequest?.restartId === restartId
       ) {
         runtime.restartRequest = undefined;
+        runtime.restartRequestedAt = undefined;
       }
     }
     this.#drainingRunners.delete(runnerId);

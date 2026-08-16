@@ -10,18 +10,18 @@ import type {
   PendingRestartSession,
   RestartHandoffRequester,
 } from "./session-restart-store.ts";
+import {
+  clearRestartTimer,
+  setRestartTimer,
+  type RestartSetTimeout,
+  type RestartTimer,
+} from "./session-restart-timers.ts";
 
 const CREDENTIAL_RETRY_DELAY_MS = 1_000;
 const CREDENTIAL_RETRY_MAX_DELAY_MS = 60_000;
 
-type RestartTimer = ReturnType<typeof setTimeout>;
-type RestartSetTimeout = (
-  callback: () => void,
-  delay: number,
-) => RestartTimer | number;
-
 interface SessionRestartCoordinatorDependencies {
-  readonly clearTimeout?: (id: RestartTimer | number) => void;
+  readonly clearTimeout?: (id: RestartTimer) => void;
   readonly setTimeout?: RestartSetTimeout;
 }
 
@@ -108,26 +108,20 @@ function restartHandoffsChanged(
 export class SessionRestartCoordinator {
   readonly #options: SessionRestartCoordinatorOptions;
   #attempts = new Map<string, number>();
-  readonly #clearTimeout: (id: RestartTimer | number) => void;
+  readonly #clearTimeout: (id: RestartTimer) => void;
   readonly #recoveries = new Map<string, Promise<unknown>>();
   readonly #recoveryRescans = new Set<string>();
   readonly #recoveringInterrupted = new Set<string>();
   readonly #setTimeout: RestartSetTimeout;
-  readonly #retryTimers = new Map<string, RestartTimer | number>();
+  readonly #retryTimers = new Map<string, RestartTimer>();
 
   constructor(
     options: SessionRestartCoordinatorOptions,
     dependencies: SessionRestartCoordinatorDependencies = {},
   ) {
     this.#options = options;
-    this.#clearTimeout =
-      dependencies.clearTimeout ??
-      ((id) => {
-        globalThis.clearTimeout(id);
-      });
-    this.#setTimeout =
-      dependencies.setTimeout ??
-      ((callback, delay) => globalThis.setTimeout(callback, delay));
+    this.#clearTimeout = dependencies.clearTimeout ?? clearRestartTimer;
+    this.#setTimeout = dependencies.setTimeout ?? setRestartTimer;
   }
 
   pendingRunnerRestart(runnerId: string): DurableRunnerRestartGate {

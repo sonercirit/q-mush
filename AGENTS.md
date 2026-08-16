@@ -9,24 +9,23 @@ Living project memory.
 
 ## Working Agreements
 
-- Research provider docs with Brave Search; probe APIs.
-- Don't call capabilities impossible without excluding evidence; otherwise
-  record an open question.
+- Research provider docs/trackers with Brave Search, then probe APIs, schemas,
+  and metrics. Call capabilities impossible only with excluding evidence;
+  otherwise record an open question.
 - Preserve patterns; add tools only as needed; improve touched code, tests,
-  docs, performance, security, and DX. Ship small improvements now.
-- TDD: fail first, implement, refactor green. DRY/KISS: authoritative logic, no
-  premature abstraction.
+  docs, performance, security, and DX. Ship small improvements now; practice
+  TDD, DRY, and KISS without premature abstraction.
 - Never invent tunables: probe omission, prefer provider defaults, else use
   metadata or docs.
 - Integrate completely the first time: wire every session capability to each
   protocol's native control, recording what a protocol lacks.
 - Never weaken tests, special-case checks, or claim unperformed verification;
-  disclose gaps. Fix defects on sight, including pre-existing ones; if a fix is
-  harmful, codify why in a test.
-- Record new decisions, gotchas, and lessons here in the same change, unprompted
-  — a repeated user instruction means a rule is missing; condense elsewhere to
-  fit the size cap. When evidence overturns a recorded finding, fix the code it
-  justified and every stale record in that change; act, don't ask.
+  disclose gaps. Fix defects on sight, including pre-existing/out-of-scope
+  ones; if harmful, codify why in a test.
+- Record new decisions, gotchas, and lessons here in the same change, unprompted;
+  repeated instructions mean a rule is missing. Condense to fit the cap. When
+  evidence overturns a finding, fix its code and every stale record; act, don't
+  ask.
 - Keep workflows local-first: narrow checks per change, broad suites once
   captured, then rerun failures.
 - Never commit secrets, generated artifacts, or env files.
@@ -53,10 +52,12 @@ Living project memory.
   source and local `.env`, coalescing bursts into the ignored restart trigger;
   `dev:restart` writes it, while plain `dev` restarts only from it.
   `runner-executable.ts` fingerprints runner source/compiler, builds privately,
-  caches in memory, serves `/runner/executable`. Restarts drain active steps and
-  queue new work, so sessions may request their own restart. Text handlers
-  precompress once, negotiating zstd, Brotli, gzip, deflate; `/favicon.svg`
-  revalidates separately with ETag.
+  caches in memory, serves `/runner/executable`. Development restarts reject new
+  steps, report pending sessions/tools, and after 120 seconds (or a second
+  request) force-park stragglers with durable handoffs; final shutdown remains
+  unbounded after its durable marker. Text handlers precompress once,
+  negotiating zstd, Brotli, gzip, deflate; `/favicon.svg` revalidates separately
+  with ETag.
 - `solid/pages.tsx` renders both server page shells via Solid's SSR runtime;
   `sync-engine/pages.ts` loads it with Vite's SSR runner. The browser app mounts
   from `solid/client.tsx`; routes live in `shared/routes.ts`.
@@ -89,8 +90,8 @@ Living project memory.
   token instead of adding a runner; other registrations stay protected; tokens
   never appear in lists.
 - Browser messages sort by time then ID; live output anchors at its initiator,
-  snapshots replace it. `session-agent-read.ts` byte-bounds transcript messages,
-  assistant calls, the system prompt, tool definitions.
+  snapshots replace it. `session-agent-read.ts` byte-bounds transcript/system/
+  tool-definition data.
 - `sync-engine/sessions.ts` and `session-store.ts` persist coding sessions. User
   messages take eight 10 MB PNG/JPEG/GIF/WebP images as multimodal input.
   Sessions record active time, cost, token usage, and context limit; reported
@@ -176,16 +177,12 @@ Living project memory.
   `brave_search` skill and key API. Users keep multiple encrypted keys in
   `provider_credentials`; failures fall through keys in creation order; secrets
   never reach browser, runner, or model provider.
-- `solid/client.tsx` is the browser entry, `solid/pages.tsx` owns
-  server-rendered shells, `solid/styles.css` is Tailwind's source. Vitest uses
-  an SSR Solid transform for string rendering and a Happy DOM project for
-  post-mount reactivity; run it under Bun — tests and app modules use Bun APIs
-  and `bun:sqlite`. Fixtures stub provider discovery; tests never hit live
-  provider APIs.
-- `tsconfig.json` configures strict, no-emit, bundler-style checking with unused
-  and unreachable code diagnostics. Library declaration checking is off —
-  Drizzle publishes optional cross-dialect declarations that fail here; app
-  source stays fully checked; re-enable after an upstream Drizzle fix.
+- Solid browser entry/shell/styles are `client.tsx`, `pages.tsx`, `styles.css`.
+  Vitest uses SSR Solid transforms and a Happy DOM project; run under Bun
+  because app/tests use Bun APIs and `bun:sqlite`. Fixtures stub discovery; no
+  live APIs.
+- Strict no-emit bundler TypeScript checks unused/unreachable code; library
+  declarations stay unchecked due to Drizzle's broken optional dialect types.
 - `eslint.config.ts` uses type-aware strict/stylistic `typescript-eslint`
   presets, imports `.gitignore`, bans non-const assertions, enforces exhaustive
   switches and canonical named imports (one declaration per module with inline

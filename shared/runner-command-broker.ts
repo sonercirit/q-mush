@@ -1,9 +1,21 @@
 import { randomUUID } from "node:crypto";
 import { RunnerCommandDelivery } from "./runner-command-delivery.ts";
 import {
+  type DispatchRunnerToolCommand,
+  type RunnerToolCommand,
+} from "./runner-command-model.ts";
+import {
+  abortRunnerCommand,
+  ignoreRunnerCommandCleanupError,
+  matchingRunnerCommands,
+  settlePendingRunnerCommand,
+  type PendingRunnerCommand,
+} from "./runner-command-pending.ts";
+import {
   RunnerCommandSurvivalState,
   type RunnerCommandSurvivalOptions,
 } from "./runner-command-survival.ts";
+import { RunnerDisconnectedError } from "./runner-disconnected-error.ts";
 import type {
   RunnerCommandOutputDelta,
   RunnerCommandResult,
@@ -14,53 +26,18 @@ export type {
   RunnerCommandResult,
 } from "./tool-stream.ts";
 
-export function failedRunnerCommandResult(
-  error: unknown,
-  maximumDetailLength: number,
-): RunnerCommandResult {
-  const detail = error instanceof Error ? error.message : String(error);
-  return {
-    output: `Error: ${detail.slice(0, maximumDetailLength)}`,
-    state: "failed",
-  };
-}
-
-export type RunnerExecutionEnvironment = "bare_metal" | "container";
-
-export const RUNNER_EXECUTION_CLEANUP_COMMAND = "cleanup_execution_environment";
-export const RUNNER_TERMINAL_CLEANUP_ARGUMENT = "terminal";
-export const RUNNER_TOOL_OUTPUT_SPILL_COMMAND = "spill_tool_output";
-export const RUNNER_TOOL_OUTPUT_SPILL_CONTENT_ARGUMENT = "content";
-
-export function readRunnerExecutionEnvironment(
-  value: unknown,
-): RunnerExecutionEnvironment | undefined {
-  if (value === undefined || value === "bare_metal") {
-    return "bare_metal";
-  }
-  return value === "container" ? value : undefined;
-}
-
-export type RunnerCommandArguments = Readonly<Record<string, unknown>>;
-
-export interface RunnerToolCommand {
-  readonly arguments: RunnerCommandArguments;
-  readonly executionEnvironment: RunnerExecutionEnvironment;
-  readonly id: string;
-  readonly sessionId: string;
-  readonly tool: string;
-  readonly workingDirectory: string;
-}
-
-export interface DispatchRunnerToolCommand extends Omit<
-  RunnerToolCommand,
-  "id"
-> {
-  readonly authorize?: () => boolean;
-  readonly generation?: number;
-  readonly queueIfUnavailable?: boolean;
-  readonly runnerId: string;
-}
+export {
+  failedRunnerCommandResult,
+  readRunnerExecutionEnvironment,
+  RUNNER_EXECUTION_CLEANUP_COMMAND,
+  RUNNER_TERMINAL_CLEANUP_ARGUMENT,
+  RUNNER_TOOL_OUTPUT_SPILL_COMMAND,
+  RUNNER_TOOL_OUTPUT_SPILL_CONTENT_ARGUMENT,
+  type DispatchRunnerToolCommand,
+  type RunnerCommandArguments,
+  type RunnerExecutionEnvironment,
+  type RunnerToolCommand,
+} from "./runner-command-model.ts";
 
 interface RunnerCommandBrokerOptions extends RunnerCommandSurvivalOptions {
   readonly cancel?: (runnerId: string, commandId: string) => void;
@@ -68,40 +45,7 @@ interface RunnerCommandBrokerOptions extends RunnerCommandSurvivalOptions {
   readonly deliver?: (runnerId: string, command: RunnerToolCommand) => boolean;
 }
 
-export class RunnerDisconnectedError extends Error {
-  constructor(message = "The runner disconnected before the command returned") {
-    super(message);
-    this.name = "RunnerDisconnectedError";
-  }
-}
-
-interface PendingCommand {
-  readonly abort: (() => void) | undefined;
-  readonly authorize: (() => boolean) | undefined;
-  readonly command: RunnerToolCommand;
-  connectionGeneration: number | undefined;
-  readonly generation: number | undefined;
-  readonly reject: (error: Error) => void;
-  readonly resolve: (result: RunnerCommandResult) => void;
-  readonly runnerId: string;
-  readonly signal: AbortSignal | undefined;
-  readonly stream: ((delta: RunnerCommandOutputDelta) => void) | undefined;
-  nextSequence: number;
-  phase: "in_flight" | "queued";
-  queuedAfterDisconnect: boolean;
-}
-
-function abortError(message: string): DOMException {
-  return new DOMException(message, "AbortError");
-}
-
-function ignoreCleanupError(callback: () => void): void {
-  try {
-    callback();
-  } catch {
-    // The broker has already fenced the command; cleanup is best effort.
-  }
-}
+type PendingCommand = PendingRunnerCommand;
 
 interface RejectedCommand {
   readonly command: RunnerToolCommand;
@@ -138,7 +82,9 @@ export class RunnerCommandBroker {
     stream?: (delta: RunnerCommandOutputDelta) => void,
   ): Promise<RunnerCommandResult> {
     if (signal?.aborted) {
-      return Promise.reject(abortError("The agent session was stopped"));
+      return Promise.reject(
+        abortRunnerCommand("The agent session was stopped"),
+      );
     }
     let initiallyAuthorized: boolean;
     try {
@@ -149,7 +95,9 @@ export class RunnerCommandBroker {
       );
     }
     if (!initiallyAuthorized) {
-      return Promise.reject(abortError("The agent session was stopped"));
+      return Promise.reject(
+        abortRunnerCommand("The agent session was stopped"),
+      );
     }
 
     const id = this.#commandId();
@@ -174,7 +122,7 @@ export class RunnerCommandBroker {
       if (!added) {
         return;
       }
-      this.#reject(id, abortError("The agent session was stopped"));
+      this.#reject(id, abortRunnerCommand("The agent session was stopped"));
     };
     return new Promise<RunnerCommandResult>((resolve, reject) => {
       const pending: PendingCommand = {
@@ -463,15 +411,19 @@ export class RunnerCommandBroker {
   #matchingPending(
     matches: (pending: PendingCommand) => boolean,
   ): PendingCommand[] {
-    return Array.from(this.#pending.values()).filter(matches);
+    return matchingRunnerCommands(this.#pending, matches);
+  }
+
+  #sessionPending(sessionId: string): PendingCommand[] {
+    return this.#matchingPending(
+      ({ command }) => command.sessionId === sessionId,
+    );
   }
 
   sessionCommandPhase(
     sessionId: string,
   ): "in_flight" | "queued" | "runner_disconnected" | undefined {
-    const commands = this.#matchingPending(
-      ({ command }) => command.sessionId === sessionId,
-    );
+    const commands = this.#sessionPending(sessionId);
     if (commands.length === 0) {
       return undefined;
     }
@@ -481,6 +433,11 @@ export class RunnerCommandBroker {
     return commands.every(({ phase }) => phase === "in_flight")
       ? "in_flight"
       : "queued";
+  }
+
+  // Tool names a session still has outstanding, for restart drain reporting.
+  sessionPendingTools(sessionId: string): readonly string[] {
+    return this.#sessionPending(sessionId).map(({ command }) => command.tool);
   }
 
   #settleAuthorized(
@@ -595,19 +552,15 @@ export class RunnerCommandBroker {
   runnerRemoved(runnerId: string): readonly RejectedCommand[] {
     return this.#rejectMatching(
       (pending) => pending.runnerId === runnerId,
-      () => abortError("The assigned runner was removed"),
+      () => abortRunnerCommand("The assigned runner was removed"),
     );
-  }
-
-  cancelSession(sessionId: string): void {
-    this.cancelSessionCommands(sessionId);
   }
 
   #cancelMatching(
     matches: (pending: PendingCommand) => boolean,
     message: string,
   ): readonly RunnerToolCommand[] {
-    return this.#rejectMatching(matches, () => abortError(message)).map(
+    return this.#rejectMatching(matches, () => abortRunnerCommand(message)).map(
       ({ command }) => command,
     );
   }
@@ -616,11 +569,10 @@ export class RunnerCommandBroker {
     sessionId: string,
     generation: number,
   ): readonly RunnerToolCommand[] {
-    const generationMatches = (pending: PendingCommand): boolean =>
-      pending.generation === generation;
     return this.#cancelMatching(
       (pending) =>
-        generationMatches(pending) && pending.command.sessionId === sessionId,
+        pending.generation === generation &&
+        pending.command.sessionId === sessionId,
       "The session tools changed",
     );
   }
@@ -635,7 +587,7 @@ export class RunnerCommandBroker {
   #rejectUnauthorized(pending: PendingCommand): void {
     this.#reject(
       pending.command.id,
-      abortError("The agent session was stopped"),
+      abortRunnerCommand("The agent session was stopped"),
     );
   }
 
@@ -653,7 +605,7 @@ export class RunnerCommandBroker {
       }
       if (this.#cancel !== undefined) {
         const cancel = this.#cancel;
-        ignoreCleanupError(() => {
+        ignoreRunnerCommandCleanupError(() => {
           cancel(pending.runnerId, commandId);
         });
       }
@@ -663,18 +615,11 @@ export class RunnerCommandBroker {
   }
 
   #settle(commandId: string, pending: PendingCommand): void {
-    this.#pending.delete(commandId);
-
-    if (pending.abort !== undefined && pending.signal !== undefined) {
-      const abort = pending.abort;
-      const signal = pending.signal;
-      ignoreCleanupError(() => {
-        signal.removeEventListener("abort", abort);
-      });
-    }
-
-    if (pending.phase === "queued") {
-      this.#delivery.remove(pending.runnerId, commandId);
-    }
+    settlePendingRunnerCommand(
+      this.#pending,
+      this.#delivery,
+      commandId,
+      pending,
+    );
   }
 }

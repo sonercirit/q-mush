@@ -8,6 +8,7 @@ import type { AgentSessionSummary } from "../shared/session-model.ts";
 
 import type { SessionDetailReader } from "./session-command-types.ts";
 import type { SessionRealtimeCommands } from "./session-realtime-commands.ts";
+import type { RestartDrainSessionProgress } from "./session-restart-control.ts";
 import type { DurableRunnerRestartGate } from "./session-restart-coordinator.ts";
 
 interface RunnerCommandDeliveryOptions {
@@ -41,6 +42,7 @@ export interface SessionIntegration extends SessionDetailReader {
   runnerOperational(runnerId: string, restartId?: string): void;
   directories(request: Request, runnerId: string): Promise<Response>;
   drain(): Promise<void>;
+  drainProgress(): readonly RestartDrainSessionProgress[];
   prepareFinalShutdown(): Promise<void>;
   hasPendingDatabaseWrites(): boolean;
   reconcileDatabaseWrites(): boolean;

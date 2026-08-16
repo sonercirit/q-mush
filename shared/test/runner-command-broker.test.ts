@@ -1,10 +1,10 @@
 import { describe, expect, test, vi } from "vitest";
 import {
   RunnerCommandBroker,
-  RunnerDisconnectedError,
   type RunnerCommandResult,
   type RunnerToolCommand,
 } from "../../shared/runner-command-broker.ts";
+import { RunnerDisconnectedError } from "../../shared/runner-disconnected-error.ts";
 import { captureBrokerRejection } from "./promise-test-helpers.ts";
 import {
   brokerRunnerCommand,
@@ -32,7 +32,7 @@ async function cancelAndExpectUnauthorized(
   broker: RunnerCommandBroker,
   result: Promise<RunnerCommandResult>,
 ): Promise<void> {
-  broker.cancelSession(SESSION_ID);
+  broker.cancelSessionCommands(SESSION_ID);
   await expectUnauthorizedRunnerCommand(result);
 }
 
@@ -583,7 +583,7 @@ describe("runner command broker", () => {
     const result = broker.dispatch(
       brokerRunnerCommand({ arguments: { command: "sleep 10" } }),
     );
-    broker.cancelSession(SESSION_ID);
+    broker.cancelSessionCommands(SESSION_ID);
 
     expect(broker.take(RUNNER_ID)).toBeUndefined();
     const error = await captureBrokerRejection(result);

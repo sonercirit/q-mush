@@ -12,15 +12,11 @@ import {
 import { createUuidV7 } from "../shared/ids.ts";
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import {
-  RunnerDisconnectedError,
   type RunnerCommandBroker,
   type RunnerCommandOutputDelta,
   type RunnerCommandResult,
 } from "../shared/runner-command-broker.ts";
-import type {
-  AgentSessionDetail,
-  AgentSessionUsageUpdate,
-} from "../shared/session-model.ts";
+import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { forEachAssistantToolCall } from "./agent-conversation.ts";
 import { estimateAgentStepCost } from "./agent-cost.ts";
 import { createAgentSkills, type AgentSkillExecutor } from "./agent-skills.ts";
@@ -35,6 +31,18 @@ import type { RealtimeHub } from "./realtime-hub.ts";
 import { loadSessionAgentFile } from "./session-agent-file.ts";
 import { runCompactingAgentLoop } from "./session-agent-loop.ts";
 import {
+  executeForSession,
+  isRestartHandoffError,
+  markSessionStepStart,
+  recordCompaction,
+  recordRuntimeUsage,
+  sessionConversation,
+  writeRuntime,
+} from "./session-agent-runtime-state.ts";
+
+export { isRestartHandoffError } from "./session-agent-runtime-state.ts";
+
+import {
   createSessionAgentModels,
   type AgentModelFactory,
   type SessionAgentModels,
@@ -44,11 +52,7 @@ import {
   executeSessionAgentTool,
   type SessionAgentToolActions,
 } from "./session-agent-tools.ts";
-import {
-  agentStepUsage,
-  compactionUsage,
-  type CompactionUsage,
-} from "./session-compaction-usage.ts";
+import { agentStepUsage, compactionUsage } from "./session-compaction-usage.ts";
 import {
   discoverCurrentSessionModel,
   sessionRequestMetadata,
@@ -80,122 +84,6 @@ export interface SessionAgentRuntimeDependencies extends AttachmentFallbackRunti
   readonly signal: AbortSignal;
   readonly store: SessionStore;
   readonly userId: string;
-}
-
-function writeRuntime(
-  runtime: SessionAgentRuntimeDependencies,
-  write: (sessionId: string, now: number, generation: number) => void,
-): void {
-  write(runtime.detail.id, runtime.now(), runtime.detail.generation);
-  runtime.notify();
-}
-
-function markSessionStepStart(runtime: SessionAgentRuntimeDependencies): void {
-  // Status- and generation-guarded: a racing stop or restart makes this
-  // write match zero rows instead of throwing.
-  const { store } = runtime;
-  writeRuntime(runtime, store.markRuntimeStepStart.bind(store));
-}
-
-function recordRuntimeUsage(
-  runtime: SessionAgentRuntimeDependencies,
-  usage: AgentSessionUsageUpdate,
-): void {
-  writeRuntime(runtime, (sessionId, now, generation) => {
-    runtime.store.updateRuntimeUsage(sessionId, usage, now, generation);
-  });
-}
-
-function recordCompactionContext(
-  runtime: SessionAgentRuntimeDependencies,
-  contextTokens: number | null,
-): void {
-  if (contextTokens !== null) {
-    recordRuntimeUsage(runtime, {
-      contextTokens,
-      costBasis: null,
-      costUsd: null,
-    });
-  }
-}
-
-function recordCompaction(
-  runtime: SessionAgentRuntimeDependencies,
-  summary: string,
-  usage: CompactionUsage,
-  startedAt: number,
-  terminal = false,
-): void {
-  recordCompactionContext(runtime, usage.contextTokens);
-  writeRuntime(runtime, (sessionId, now, generation) => {
-    if (terminal) {
-      runtime.store.compactRuntimeTerminal(
-        sessionId,
-        summary,
-        usage,
-        now,
-        generation,
-        startedAt,
-        runtime.detail.restartHandoff,
-      );
-      return;
-    }
-    runtime.store.compactRuntimeConversation(
-      sessionId,
-      summary,
-      usage,
-      now,
-      generation,
-      startedAt,
-    );
-  });
-}
-
-function isSessionRestartHandoff(
-  runtime: SessionAgentRuntimeDependencies,
-  error: unknown,
-): boolean {
-  return (
-    error instanceof RunnerDisconnectedError &&
-    runtime.restartHandoffRequested()
-  );
-}
-
-function restartHandoffError(): DOMException {
-  return new DOMException(
-    "The runner disconnected during a restart handoff",
-    "RestartHandoff",
-  );
-}
-
-async function executeForSession<Result>(
-  runtime: SessionAgentRuntimeDependencies,
-  execute: () => Promise<Result>,
-  handoff?: (error: DOMException) => void,
-): Promise<Result> {
-  try {
-    return await execute();
-  } catch (error) {
-    if (isSessionRestartHandoff(runtime, error)) {
-      const handoffError = restartHandoffError();
-      handoff?.(handoffError);
-      throw handoffError;
-    }
-    throw error;
-  }
-}
-
-export function isRestartHandoffError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "RestartHandoff";
-}
-
-function sessionConversation(
-  runtime: SessionAgentRuntimeDependencies,
-): ReturnType<SessionStore["conversation"]> {
-  return runtime.store.conversation(
-    runtime.detail.id,
-    runtime.detail.restartHandoff === null,
-  );
 }
 
 async function loadModels(
@@ -415,8 +303,9 @@ export async function runSessionAgent(
     handoffController.signal,
   ]);
   const stepTools = new Set<AgentSessionToolName>(runtime.detail.tools);
-  const stepBoundaryRequested = (): boolean =>
-    runtime.detail.restartHandoff === null && runtime.restartHandoffRequested();
+  // Resumed runs park at their next step boundary too; exempting them let a
+  // drain that caught one never converge.
+  const stepBoundaryRequested = runtime.restartHandoffRequested;
   const currentToolNames = (): readonly AgentSessionToolName[] | undefined =>
     currentExecutionTools({
       current: runtime.currentTools?.(),

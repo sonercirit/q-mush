@@ -26,7 +26,10 @@ import { openRouterProvidersForUser } from "./session-provider-selection.ts";
 import { recoverAnsweredQuestions } from "./session-question-actions.ts";
 import { reassignSessionRequest } from "./session-reassignment-request.ts";
 import type { SessionRequestHelpers } from "./session-request-helpers.ts";
-import type { SessionRestartControl } from "./session-restart-control.ts";
+import type {
+  RestartDrainSessionProgress,
+  SessionRestartControl,
+} from "./session-restart-control.ts";
 import type {
   DurableRunnerRestartGate,
   SessionRestartCoordinator,
@@ -241,6 +244,10 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
     return this.resources.restart.drainServer().then(async () => {
       await Promise.allSettled(this.resources.executionCleanup.pending);
     });
+  }
+
+  drainProgress(): readonly RestartDrainSessionProgress[] {
+    return this.resources.restart.drainProgress();
   }
 
   prepareFinalShutdown(): Promise<void> {
@@ -470,7 +477,7 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
             workspaceId,
             async (existing) => {
               this.resources.runtimes.abort(sessionId);
-              this.resources.broker.cancelSession(sessionId);
+              this.resources.broker.cancelSessionCommands(sessionId);
               await this.resources.runtimes.cleared(sessionId);
               if (existing.status !== "stopped") {
                 this.resources.store.stop(

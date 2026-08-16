@@ -337,6 +337,7 @@ export function realtimeTestSessions(
     detailForUser: () => undefined,
     directories: () => Promise.resolve(new Response()),
     drain: () => Promise.resolve(),
+    drainProgress: () => [],
     drainRunner: () => Promise.resolve(),
     item: () => new Response(),
     listForUser: () => [],
