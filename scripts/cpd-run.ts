@@ -1,8 +1,10 @@
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { findNamedClones, formatNamedClones } from "./cpd-named-clones.ts";
 import { listProjectFiles } from "./project-files.ts";
 
 const SOURCE_PATH_PATTERN = /\.(?:cjs|cts|es|es6|js|jsx|mjs|mts|ts|tsx)$/iu;
+const CPD_EXECUTABLE = fileURLToPath(import.meta.resolve("cpd/run-cpd.js"));
 
 interface CpdLimits {
   readonly minLines: number;
@@ -101,14 +103,11 @@ function enginePaths(scanPaths: readonly string[]): string[] {
 const defaultCpdDependencies: CpdDependencies = {
   listProjectFiles,
   runEngine: async (rootDirectory, scanPaths) => {
-    const cpd = Bun.spawn(
-      ["bun", "run", "--silent", "cpd:engine", "--", ...scanPaths],
-      {
-        cwd: rootDirectory,
-        stderr: "inherit",
-        stdout: "inherit",
-      },
-    );
+    const cpd = Bun.spawn([process.execPath, CPD_EXECUTABLE, ...scanPaths], {
+      cwd: rootDirectory,
+      stderr: "inherit",
+      stdout: "inherit",
+    });
     return cpd.exited;
   },
   namedClones: {

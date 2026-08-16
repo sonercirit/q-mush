@@ -662,10 +662,10 @@ async function resolvedRunnerTool(
   if (!isRunnerAgentToolName(name)) {
     throw new Error(`Unknown runner tool: ${name}`);
   }
-  const root = await resolveRunnerWorkspace(workingDirectory);
   if (signal?.aborted === true) {
     throw new Error("The runner command was stopped");
   }
+  const root = await resolveRunnerWorkspace(workingDirectory);
   return {
     arguments_,
     name,

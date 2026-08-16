@@ -29,7 +29,7 @@ export async function listProjectFiles(
   const paths = stdout
     .split("\0")
     .filter((path) => path !== "")
-    .sort((left, right) => left.localeCompare(right));
+    .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
   const existingPaths: string[] = [];
 
   for (const path of paths) {

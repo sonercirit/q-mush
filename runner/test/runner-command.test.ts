@@ -564,21 +564,22 @@ describe("runner WebSocket protocol", () => {
     const root = await temporaryDirectory();
 
     controller.abort();
-    const result = await executeRunnerToolResult(
-      root,
-      "bash",
-      { command: "printf must-not-run", timeout: 5 },
-      controller.signal,
-      undefined,
-      {
-        shell: (_root, command) => {
-          shellCalls.push(command);
-          return Promise.resolve("completed");
+    await expect(
+      executeRunnerToolResult(
+        join(root, "missing-workspace"),
+        "bash",
+        { command: "printf must-not-run", timeout: 5 },
+        controller.signal,
+        undefined,
+        {
+          shell: (_root, command) => {
+            shellCalls.push(command);
+            return Promise.resolve("completed");
+          },
         },
-      },
-    ).catch((error: unknown) => error);
+      ),
+    ).rejects.toThrow("The runner command was stopped");
 
-    expect(result).toBeInstanceOf(Error);
     expect(shellCalls).toEqual([]);
   });
 

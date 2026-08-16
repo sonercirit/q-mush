@@ -4,15 +4,20 @@ import {
   forEachChild,
   isArrowFunction,
   isBindingElement,
+  isBreakStatement,
   isClassLike,
+  isContinueStatement,
   isEnumMember,
   isFunctionLike,
   isIdentifier,
+  isJsxAttribute,
+  isLabeledStatement,
   isObjectBindingPattern,
   isObjectLiteralElementLike,
   isParameterPropertyDeclaration,
   isPrivateIdentifier,
   isPropertyAccessExpression,
+  isQualifiedName,
   isShorthandPropertyAssignment,
   isTypeElement,
   SyntaxKind,
@@ -42,12 +47,20 @@ export interface NamedClone {
 }
 
 interface FunctionOccurrence extends NamedCloneFragment {
+  readonly endPosition: number;
   readonly fingerprint: string;
   readonly originalFingerprint: string;
+  readonly startPosition: number;
   readonly tokens: number;
 }
 
+interface CloneOccurrence extends NamedClone {
+  readonly first: FunctionOccurrence;
+  readonly second: FunctionOccurrence;
+}
+
 interface FingerprintToken {
+  readonly binding: Node | Symbol | undefined;
   readonly isPrivate: boolean;
   readonly kind: SyntaxKind;
   readonly position: number;
@@ -108,10 +121,14 @@ function propertyNameRemainsSignificant(node: Node): boolean {
     (isBindingElement(parent) &&
       isObjectBindingPattern(parent.parent) &&
       (parent.propertyName === node ||
-        (parent.propertyName === undefined && parent.name === node))) ||
+        (parent.propertyName === undefined &&
+          parent.dotDotDotToken === undefined &&
+          parent.name === node))) ||
     (isParameterPropertyDeclaration(parent, parent.parent) &&
       parent.name === node) ||
     (isEnumMember(parent) && parent.name === node) ||
+    (isJsxAttribute(parent) && parent.name === node) ||
+    (isQualifiedName(parent) && parent.right === node) ||
     (namedDeclarationHasName(parent, node) &&
       (isObjectLiteralElementLike(parent) ||
         isTypeElement(parent) ||
@@ -127,6 +144,29 @@ function propertyNameRemainsSignificant(node: Node): boolean {
   );
 }
 
+function labelDeclaration(node: Node): Node | undefined {
+  if (!isIdentifier(node)) {
+    return undefined;
+  }
+
+  const parent = node.parent;
+  if (isLabeledStatement(parent) && parent.label === node) {
+    return node;
+  }
+  if (!isBreakStatement(parent) && !isContinueStatement(parent)) {
+    return undefined;
+  }
+
+  let ancestor = parent.parent;
+  while (!isFunctionLike(ancestor)) {
+    if (isLabeledStatement(ancestor) && ancestor.label.text === node.text) {
+      return ancestor.label;
+    }
+    ancestor = ancestor.parent;
+  }
+  return undefined;
+}
+
 function sourceFingerprintTokens(
   sourceFile: SourceFile,
   checker: TypeChecker,
@@ -140,17 +180,12 @@ function sourceFingerprintTokens(
       const typeParameters = node.typeParameters;
       if (typeParameters?.length === 1) {
         const parameter = typeParameters[0];
-        const splitArrow =
+        if (
           parameter !== undefined &&
-          (parameter.modifiers?.some(
-            (modifier) => modifier.kind === SyntaxKind.ConstKeyword,
-          ) === true ||
-            (parameter.constraint === undefined &&
-              parameter.default === undefined &&
-              !sourceFile.text
-                .slice(parameter.getEnd(), typeParameters.end)
-                .includes(",")));
-        if (splitArrow) {
+          parameter.constraint === undefined &&
+          parameter.default === undefined &&
+          !typeParameters.hasTrailingComma
+        ) {
           splitArrowStarts.add(
             node.equalsGreaterThanToken.getStart(sourceFile),
           );
@@ -170,13 +205,19 @@ function sourceFingerprintTokens(
     }
 
     const identifier = isIdentifier(node) || isPrivateIdentifier(node);
+    const propertyName = identifier && propertyNameRemainsSignificant(node);
+    const symbol =
+      identifier && !propertyName
+        ? checker.getSymbolAtLocation(node)
+        : undefined;
     positions.push(node.getStart(sourceFile));
     tokens.push({
+      binding: labelDeclaration(node) ?? symbol,
       isPrivate: isPrivateIdentifier(node),
       kind: node.kind,
       position: node.getStart(sourceFile),
-      propertyName: identifier && propertyNameRemainsSignificant(node),
-      symbol: identifier ? checker.getSymbolAtLocation(node) : undefined,
+      propertyName,
+      symbol,
       text: node.getText(sourceFile),
     });
   }
@@ -193,7 +234,7 @@ function tokenFingerprints(
 ): TokenFingerprints {
   const normalized: string[] = [];
   const original: string[] = [];
-  const canonicalNames = new Map<Symbol, string>();
+  const canonicalNames = new Map<Node | Symbol, string>();
   const freeSymbols = new Set<Symbol>();
   const startIndex = firstIndexAtLeast(
     tokenPositions,
@@ -210,17 +251,21 @@ function tokenFingerprints(
     let normalizedText = token.text;
     const symbol = token.symbol;
     if (
-      symbol !== undefined &&
+      token.binding !== undefined &&
       !token.propertyName &&
-      !freeSymbols.has(symbol)
+      (symbol === undefined || !freeSymbols.has(symbol))
     ) {
-      let canonical = canonicalNames.get(symbol);
+      let canonical = canonicalNames.get(token.binding);
       if (canonical === undefined) {
-        if (!symbolIsBoundWithin(symbol, functionNode, sourceFile)) {
+        if (
+          symbol !== undefined &&
+          token.binding === symbol &&
+          !symbolIsBoundWithin(symbol, functionNode, sourceFile)
+        ) {
           freeSymbols.add(symbol);
         } else {
           canonical = `owned${String(canonicalNames.size)}`;
-          canonicalNames.set(symbol, canonical);
+          canonicalNames.set(token.binding, canonical);
         }
       }
       if (canonical !== undefined) {
@@ -357,10 +402,12 @@ function occurrencesInSource(
     return [
       {
         end: location(sourceFile, node.getEnd()),
+        endPosition: node.getEnd(),
         fingerprint: fingerprints.normalized,
         originalFingerprint: fingerprints.original,
         path,
         start: location(sourceFile, node.getStart(sourceFile)),
+        startPosition: node.getStart(sourceFile),
         tokens: tokenCount,
       },
     ];
@@ -404,7 +451,7 @@ export function findNamedClones(
     }
   }
 
-  const clones: NamedClone[] = [];
+  const clones: CloneOccurrence[] = [];
 
   for (const occurrences of groups.values()) {
     for (const [index, second] of occurrences.entries()) {
@@ -420,7 +467,22 @@ export function findNamedClones(
     }
   }
 
-  return clones;
+  return clones.filter(
+    ({ first, second }) =>
+      !clones.some(
+        (candidate) =>
+          candidate.first.path === first.path &&
+          candidate.first.startPosition <= first.startPosition &&
+          candidate.first.endPosition >= first.endPosition &&
+          candidate.second.path === second.path &&
+          candidate.second.startPosition <= second.startPosition &&
+          candidate.second.endPosition >= second.endPosition &&
+          (candidate.first.startPosition < first.startPosition ||
+            candidate.first.endPosition > first.endPosition ||
+            candidate.second.startPosition < second.startPosition ||
+            candidate.second.endPosition > second.endPosition),
+      ),
+  );
 }
 
 export function formatNamedClones(clones: readonly NamedClone[]): string {

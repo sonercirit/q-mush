@@ -37,6 +37,7 @@ describe("script support", () => {
         writeFile(join(directory, ".gitignore"), "ignored.txt\n"),
         writeFile(join(directory, "tracked.txt"), "tracked\n"),
         writeFile(join(directory, "untracked.txt"), "untracked\n"),
+        writeFile(join(directory, "Z.txt"), "upper-case\n"),
         writeFile(join(directory, "ignored.txt"), "ignored\n"),
         writeFile(join(directory, "nested", "present.txt"), "present\n"),
         writeFile(join(directory, "deleted.txt"), "deleted\n"),
@@ -57,6 +58,7 @@ describe("script support", () => {
 
       await expect(listProjectFiles(directory)).resolves.toEqual([
         ".gitignore",
+        "Z.txt",
         "nested/present.txt",
         "tracked.txt",
         "untracked.txt",

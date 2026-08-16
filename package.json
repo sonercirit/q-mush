@@ -7,7 +7,6 @@
     "build": "vite build",
     "check": "bun run --parallel --no-exit-on-error --filter '*' repository-check format:check typecheck lint knip cpd",
     "cpd": "bun run scripts/cpd.ts",
-    "cpd:engine": "cpd",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun run scripts/migrate-database.ts",
     "dev": "bun run scripts/dev.ts",

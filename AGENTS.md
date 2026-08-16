@@ -202,11 +202,10 @@ Living project memory.
   HTML-like data and TSX pass.
 - Knip checks every issue type and entry export in test and production graphs;
   tests cannot keep production alive, and unused test helpers fail.
-- CPD uses TSX for JS/custom extensions, TS syntax, and ignores imports. It
-  tokenizes files once with typescript-eslint, splitting ambiguous TS generic
-  arrows like native OXC; regex, operators, templates, and JSX also match. Files
-  sort. Alpha function matches of ≥20 tokens crossing a line fail; local
-  bindings normalize, APIs/literals remain.
+- CPD maps all JS/TS extensions to TSX and ignores imports. Native-token and
+  complete-function alpha matches of ≥20 tokens spanning at least one line
+  boundary fail the zero threshold; alpha ignores locally bound names but
+  preserves free names, member APIs, and literals.
 - Repository policy scans tracked, unignored files: 20,000-code-point maximum
   (`bun.lock`, `drizzle/` excepted), tests only under `test`, and no app HTML
   files outside `test`/`fixtures`.

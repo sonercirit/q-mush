@@ -33,6 +33,19 @@ async function findSourceClones(
   });
 }
 
+function expectNoSourceClones(
+  sources: Readonly<Record<string, string>>,
+  minimums: { readonly lines: number; readonly tokens: number },
+): Promise<void> {
+  const { lines, tokens } = minimums;
+  const prefix = "q-mush-cpd-no-clones-";
+  return withTemporaryDirectory(prefix, (directory) =>
+    writeSources(directory, sources).then((paths) => {
+      expect(findNamedClones(directory, paths, lines, tokens)).toEqual([]);
+    }),
+  );
+}
+
 const RENAMED_SOURCES = {
   "first.ts": `function first(value: string) {
   return value.trim();
@@ -57,10 +70,12 @@ describe("CPD named clone detection", () => {
 `,
     });
 
-    expect(clones).toHaveLength(1);
-    expect(clones[0]?.tokens).toBe(37);
-    expect(clones[0]?.first.path).toBe("first.ts");
-    expect(clones[0]?.second.path).toBe("second.ts");
+    const [clone] = clones;
+    expect(clone?.tokens).toBe(37);
+    expect([clone?.first.path, clone?.second.path]).toEqual([
+      "first.ts",
+      "second.ts",
+    ]);
   });
 
   test("covers configured JavaScript extensions", async () => {
@@ -134,7 +149,8 @@ describe("CPD named clone detection", () => {
       expect(
         findNamedClones(directory, paths, 0, clone?.tokens ?? 1),
       ).toHaveLength(1);
-      expect(findNamedClones(directory, paths, 1, 1)).toEqual([]);
+      const oneLineClones = findNamedClones(directory, paths, 1, 1);
+      expect(oneLineClones).toEqual([]);
       await writeSources(directory, {
         "first.ts": `function first(value: string) {
   return value.trim(); }
@@ -254,9 +270,67 @@ describe("CPD named clone detection", () => {
       minTokens,
     );
 
+    expect(clones[0]?.tokens).toBe(minTokens);
+  });
+
+  test.each([
+    ["plain", "<Value>", 29],
+    ["comma-disambiguated", "<Value,>", 29],
+    ["const", "<const Value>", 30],
+    ["const comma-disambiguated", "<const Value,>", 30],
+    ["const constrained", "<const Value extends number>", 31],
+    ["const defaulted", "<const Value = number>", 31],
+    ["constrained", "<Value extends number>", 30],
+    ["defaulted", "<Value = number>", 30],
+  ])(
+    "counts %s generic arrows in native units",
+    async (_label, typeParameter, nativeTokens) => {
+      await withTemporaryDirectory("q-mush-cpd-generic-", async (directory) => {
+        const paths = await writeSources(directory, {
+          "first.ts": `function first() {
+  const identity = ${typeParameter}(value: Value): Value => value;
+  return identity(1);
+}
+`,
+          "second.ts": `function second() {
+  const convert = ${typeParameter.replaceAll("Value", "Input")}(input: Input): Input => input;
+  return convert(1);
+}
+`,
+        });
+        const renamed = findNamedClones(directory, paths, 1, nativeTokens);
+        const excluded = findNamedClones(directory, paths, 1, nativeTokens + 1);
+
+        expect([renamed[0]?.tokens, excluded.length]).toEqual([
+          nativeTokens,
+          0,
+        ]);
+      });
+    },
+  );
+
+  test("suppresses nested clones already covered by their parents", async () => {
+    const clones = await findSourceClones("q-mush-cpd-nested-report-", {
+      "first.ts": `function first(value: string) {
+  function normalize(input: string) {
+    return input.trim().toLowerCase().split("").reverse().join("");
+  }
+  return normalize(value);
+}
+`,
+      "second.ts": `function second(source: string) {
+  function transform(item: string) {
+    return item.trim().toLowerCase().split("").reverse().join("");
+  }
+  return transform(source);
+}
+`,
+    });
+
     expect(clones).toHaveLength(1);
-    const [clone] = clones;
-    expect(clone?.tokens).toBe(minTokens);
+    expect([clones[0]?.first.start.line, clones[0]?.second.start.line]).toEqual(
+      [1, 1],
+    );
   });
 
   test("reports a deterministic first renamed pair", async () => {
@@ -394,6 +468,67 @@ describe("CPD named clone detection", () => {
     expect(clones).toEqual([]);
   });
 
+  test("normalizes object-rest bindings", async () => {
+    const clones = await findSourceClones("q-mush-cpd-rest-", {
+      "first.ts": `function first(source: Record<string, string>) {
+  const { ...rest } = source;
+  return Object.values(rest).join("").trim().toLowerCase();
+}
+`,
+      "second.ts": `function second(input: Record<string, string>) {
+  const { ...remaining } = input;
+  return Object.values(remaining).join("").trim().toLowerCase();
+}
+`,
+    });
+
+    expect(clones).toHaveLength(1);
+  });
+
+  test.each([
+    ["continue", "continue"],
+    ["break", "break"],
+  ])("normalizes statement labels and %s references", async (_label, jump) => {
+    const clones = await findSourceClones("q-mush-cpd-labels-", {
+      "first.ts": `function first(values: string[]) {
+  outer: for (const value of values) {
+    if (value.trim() === "") ${jump} outer;
+    return value.trim().toLowerCase();
+  }
+  return "";
+}
+`,
+      "second.ts": `function second(items: string[]) {
+  scan: for (const item of items) {
+    if (item.trim() === "") ${jump} scan;
+    return item.trim().toLowerCase();
+  }
+  return "";
+}
+`,
+    });
+
+    expect(clones).toHaveLength(1);
+  });
+
+  test("keeps unresolved label spellings significant", async () => {
+    await expectNoSourceClones(
+      {
+        "first.js": `function first(value) {
+  if (value.trim() === "") break missing;
+  return value.trim().toLowerCase();
+}
+`,
+        "second.js": `function second(input) {
+  if (input.trim() === "") break absent;
+  return input.trim().toLowerCase();
+}
+`,
+      },
+      { lines: 1, tokens: 1 },
+    );
+  });
+
   test("keeps explicit and shorthand destructuring keys significant", async () => {
     const shorthandClones = await findSourceClones(
       "q-mush-cpd-destructuring-",
@@ -453,6 +588,56 @@ describe("CPD named clone detection", () => {
 
     expect(clones).toHaveLength(0);
   });
+
+  test("keeps qualified types significant", async () => {
+    const clones = await findSourceClones("q-mush-cpd-types-", {
+      "first.ts": `function first(seed: string) {
+  namespace Holder {
+    export namespace Inner { export type Alpha = string; export type Beta = string; }
+  }
+  const value: Holder.Inner.Alpha = seed;
+  return value.trim().toLowerCase().padStart(9, "0");
+}
+`,
+      "second.ts": `function second(seed: string) {
+  namespace Holder {
+    export namespace Inner { export type Alpha = string; export type Beta = string; }
+  }
+  const value: Holder.Inner.Beta = seed;
+  return value.trim().toLowerCase().padStart(9, "0");
+}
+`,
+    });
+
+    expect(clones).toHaveLength(0);
+  });
+
+  test.each([
+    ["component", "Box", "alpha", "beta"],
+    ["element", "div", "data-alpha", "data-beta"],
+  ])(
+    "keeps %s JSX attributes significant",
+    async (_label, tag, firstAttribute, secondAttribute) => {
+      const declarations =
+        tag === "Box"
+          ? "  const Box = (props: { alpha?: string; beta?: string }) => <i>{props.alpha ?? props.beta}</i>;\n"
+          : "";
+      const clones = await findSourceClones("q-mush-cpd-jsx-attributes-", {
+        "first.tsx": `function first(seed: string) {
+${declarations}  const value = seed.trim().toLowerCase();
+  return <${tag} ${firstAttribute}={value}>{value.padStart(9, "0")}</${tag}>;
+}
+`,
+        "second.tsx": `function second(seed: string) {
+${declarations}  const value = seed.trim().toLowerCase();
+  return <${tag} ${secondAttribute}={value}>{value.padStart(9, "0")}</${tag}>;
+}
+`,
+      });
+
+      expect(clones).toHaveLength(0);
+    },
+  );
 
   test("keeps local enum member names significant", async () => {
     const clones = await findSourceClones("q-mush-cpd-enum-members-", {
