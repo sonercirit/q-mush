@@ -104,6 +104,25 @@ export function createCredentialCipher(
   );
 }
 
-export function fingerprintCredential(value: string): string {
+function fingerprintCredential(value: string): string {
   return sha256Base64Url(value);
+}
+
+// The "openai" format is the historical default, so only the Anthropic format
+// extends the fingerprint; existing stored fingerprints stay valid. Adding and
+// rotating a secret must derive the same value.
+export function fingerprintProviderCredential(
+  secret: string,
+  endpoint: {
+    readonly apiFormat?: string | null;
+    readonly baseUrl?: string | null;
+  } = {},
+): string {
+  const formatted =
+    endpoint.apiFormat === "anthropic" ? `${secret}\nanthropic` : secret;
+  return fingerprintCredential(
+    endpoint.baseUrl === undefined || endpoint.baseUrl === null
+      ? formatted
+      : `${endpoint.baseUrl}\n${formatted}`,
+  );
 }

@@ -5,8 +5,10 @@ import {
 import type { AgentConversationMessage } from "../shared/agent-loop.ts";
 import type { AgentToolDefinition } from "../shared/agent-tools.ts";
 import {
+  anthropicReplayBlocksForRequest,
   anthropicReplayMatchesAssistant,
   type AnthropicAssistantReplay,
+  type AnthropicReplayBlock,
 } from "../shared/anthropic-replay.ts";
 import { parseOptionalJsonRecord } from "../shared/json-record.ts";
 import {
@@ -48,7 +50,7 @@ export type AnthropicRequestOptions = Pick<
 
 interface AnthropicMessage {
   readonly content: readonly unknown[];
-  readonly replay?: AnthropicAssistantReplay;
+  readonly replayBlocks?: readonly AnthropicReplayBlock[];
   readonly role: "assistant" | "user";
 }
 
@@ -91,10 +93,10 @@ function matchingReplay(
 
 function assistantBlocks(
   message: Extract<AgentConversationMessage, { readonly role: "assistant" }>,
-  replay: AnthropicAssistantReplay | undefined,
+  replayBlocks: readonly AnthropicReplayBlock[] | undefined,
 ): readonly unknown[] {
-  if (replay !== undefined) {
-    return replay.blocks;
+  if (replayBlocks !== undefined) {
+    return replayBlocks;
   }
   return [
     ...textInputItems(message.content, "text"),
@@ -121,12 +123,16 @@ function anthropicMessage(
     }
     case "assistant": {
       const replay = matchingReplay(message, identity);
-      const content = assistantBlocks(message, replay);
+      const replayBlocks =
+        replay === undefined
+          ? undefined
+          : anthropicReplayBlocksForRequest(replay.blocks);
+      const content = assistantBlocks(message, replayBlocks);
       return content.length === 0
         ? undefined
         : {
             content,
-            ...(replay === undefined ? {} : { replay }),
+            ...(replayBlocks === undefined ? {} : { replayBlocks }),
             role: "assistant",
           };
     }
@@ -146,33 +152,39 @@ function anthropicMessage(
   }
 }
 
+// A trailing assistant replay is sent back verbatim to continue a paused
+// turn, and merging joins every trailing assistant message into it, so no
+// breakpoint may mark any block of that final merged message.
+function preservedTrailingAssistantIndex(
+  messages: readonly ConvertedAnthropicMessage[],
+): number {
+  if (messages.at(-1)?.replayBlocks === undefined) {
+    return messages.length;
+  }
+  let index = messages.length - 1;
+  while (messages[index - 1]?.role === "assistant") {
+    index -= 1;
+  }
+  return index;
+}
+
 function applyAnthropicMessageBreakpoint(
   messages: ConvertedAnthropicMessage[],
   start: number,
-  preserveFinalReplay: boolean,
+  preservedFromIndex: number,
 ): void {
-  let index = start;
+  let index = Math.min(start, preservedFromIndex - 1);
   while (index >= 0) {
     const currentIndex = index;
     const message = messages.at(currentIndex);
     index -= 1;
-    if (message === undefined) {
+    if (message === undefined || message.content.length === 0) {
       continue;
     }
-    if (message.replay === undefined) {
-      if (message.content.length === 0) {
-        continue;
-      }
-      messages[currentIndex] = {
-        ...message,
-        content: withPromptCacheControl(message.content),
-      };
-      return;
-    }
-    if (preserveFinalReplay && currentIndex === messages.length - 1) {
-      continue;
-    }
-    const content = withAnthropicReplayCacheControl(message.replay.blocks);
+    const content =
+      message.replayBlocks === undefined
+        ? withPromptCacheControl(message.content)
+        : withAnthropicReplayCacheControl(message.replayBlocks);
     if (content !== undefined) {
       messages[currentIndex] = { ...message, content };
       return;
@@ -194,9 +206,7 @@ function anthropicMessages(
     }
   }
 
-  const preserveFinalReplay =
-    converted.at(-1)?.role === "assistant" &&
-    converted.at(-1)?.replay !== undefined;
+  const preservedFromIndex = preservedTrailingAssistantIndex(converted);
   for (const sourceIndex of breakpoints) {
     let index = converted.length - 1;
     while (
@@ -205,7 +215,7 @@ function anthropicMessages(
     ) {
       index -= 1;
     }
-    applyAnthropicMessageBreakpoint(converted, index, preserveFinalReplay);
+    applyAnthropicMessageBreakpoint(converted, index, preservedFromIndex);
   }
 
   const merged: { content: unknown[]; role: "assistant" | "user" }[] = [];

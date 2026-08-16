@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { createdAuditFields } from "../../shared/audit.ts";
 import {
   CredentialCipher,
-  fingerprintCredential,
+  fingerprintProviderCredential,
 } from "../../shared/credential-cipher.ts";
 import { createDatabase } from "../../shared/database.ts";
 import { users } from "../../shared/database/schema.ts";
@@ -113,13 +113,19 @@ function addAndRead(
 
   expect(store.read(TEST_USER_ID, CREDENTIAL_ID)).toEqual({
     accountId: metadata.accountId,
-    credentialFingerprint: fingerprintCredential(secret),
+    credentialFingerprint: fingerprintProviderCredential(secret),
     id: CREDENTIAL_ID,
     label: metadata.label,
     isDefault: false,
     secret,
     source: "api_key",
   });
+}
+
+function rotateSecret(store: ProviderCredentialStore, secret: string): void {
+  expect(
+    store.updateSecret(TEST_USER_ID, CREDENTIAL_ID, secret, TEST_NOW + 1),
+  ).toBe(true);
 }
 
 describe("provider credential agent access", () => {
@@ -130,19 +136,35 @@ describe("provider credential agent access", () => {
       label: "Work key",
     });
     expect(store.read("another-user", CREDENTIAL_ID)).toBeUndefined();
-    expect(
-      store.updateSecret(
-        TEST_USER_ID,
-        CREDENTIAL_ID,
-        "rotated-secret",
-        TEST_NOW + 1,
-      ),
-    ).toBe(true);
+    rotateSecret(store, "rotated-secret");
     expect(store.readSecret(TEST_USER_ID, CREDENTIAL_ID)).toBe(
       "rotated-secret",
     );
     store.remove(TEST_USER_ID, CREDENTIAL_ID, TEST_NOW + 1);
     expect(store.read(TEST_USER_ID, CREDENTIAL_ID)).toBeUndefined();
+    close();
+  });
+
+  test("preserves generic endpoint identity when rotating a secret", () => {
+    const { close, store } = createProviderStore();
+    const endpoint = {
+      accountId: null,
+      apiFormat: "anthropic" as const,
+      baseUrl: "https://anthropic.example.test/v1",
+      label: "Claude proxy",
+    };
+    store.add(TEST_USER_ID, "original-secret", endpoint, "api_key", TEST_NOW);
+
+    rotateSecret(store, "rotated-secret");
+    expect(store.read(TEST_USER_ID, CREDENTIAL_ID)).toMatchObject({
+      apiFormat: endpoint.apiFormat,
+      baseUrl: endpoint.baseUrl,
+      credentialFingerprint: fingerprintProviderCredential(
+        "rotated-secret",
+        endpoint,
+      ),
+      secret: "rotated-secret",
+    });
     close();
   });
 

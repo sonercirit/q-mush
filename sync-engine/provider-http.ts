@@ -31,9 +31,9 @@ export interface ProviderHttpOptions {
   readonly credentialFingerprint: string;
   readonly fetch: AgentModelFetch;
   readonly headers: Headers;
+  readonly model: string;
   readonly onDelta: ((delta: ProviderTextDelta) => void) | undefined;
   readonly onStreamRetry?: () => void;
-  readonly model: string;
   readonly protocol: "anthropic" | "chat_completions" | "responses";
   readonly provider: ProviderId;
   readonly sleep: ModelRequestSleep | undefined;

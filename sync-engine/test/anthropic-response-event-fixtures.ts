@@ -5,37 +5,15 @@ import type {
 import { AnthropicStreamAccumulator } from "../../sync-engine/provider-stream-anthropic.ts";
 import {
   ANTHROPIC_TEST_PROVENANCE,
+  anthropicBlockDelta,
+  anthropicBlockStart,
+  anthropicBlockStop,
   anthropicEvents,
+  anthropicMessageDelta,
+  anthropicMessageStart,
   KNOWN_ANTHROPIC_MODEL,
+  streamedAnthropicTextBlockEvents,
 } from "./anthropic-model-test-helpers.ts";
-
-export function anthropicMessageStart(inputTokens = 1, container?: unknown) {
-  return {
-    message: {
-      ...(container === undefined ? {} : { container }),
-      usage: { input_tokens: inputTokens },
-    },
-    type: "message_start",
-  };
-}
-
-export function anthropicBlockStart(
-  index: number,
-  contentBlock: Readonly<Record<string, unknown>>,
-) {
-  return { content_block: contentBlock, index, type: "content_block_start" };
-}
-
-export function anthropicBlockDelta(
-  index: number,
-  delta: Readonly<Record<string, unknown>>,
-) {
-  return { delta, index, type: "content_block_delta" };
-}
-
-export function anthropicBlockStop(index: number) {
-  return { index, type: "content_block_stop" };
-}
 
 export function streamedAnthropicToolEvents(options: {
   readonly id: string;
@@ -87,18 +65,6 @@ export function futureAnthropicBlock(index: number) {
   ];
 }
 
-export function streamedAnthropicTextBlockEvents(
-  index: number,
-  text: string,
-  stopped = true,
-): readonly unknown[] {
-  return [
-    anthropicBlockStart(index, { text: "", type: "text" }),
-    anthropicBlockDelta(index, { text, type: "text_delta" }),
-    ...(stopped ? [anthropicBlockStop(index)] : []),
-  ];
-}
-
 export function streamedAnthropicTextEvents(text: string): readonly unknown[] {
   return [
     ...streamedAnthropicTextBlockEvents(1, text),
@@ -120,17 +86,46 @@ export function anthropicJsonResponse(options: {
   readonly stopReason?: string;
 }): Response {
   return Response.json({
-    ...(options.container === undefined
-      ? {}
-      : { container: options.container }),
+    container: options.container,
     content: options.blocks,
     role: "assistant",
-    ...(options.stopReason === undefined
-      ? {}
-      : { stop_reason: options.stopReason }),
+    stop_reason: options.stopReason,
     type: "message",
     usage: { input_tokens: 1, output_tokens: 1 },
   });
+}
+
+export function anthropicReplayResponse(
+  blocks: readonly Readonly<Record<string, unknown>>[],
+  options: {
+    readonly stopReason?: string;
+    readonly stream: boolean;
+    readonly container?: unknown;
+  },
+): Response {
+  if (!options.stream) {
+    return anthropicJsonResponse({
+      blocks,
+      ...(options.container === undefined
+        ? {}
+        : { container: options.container }),
+      ...(options.stopReason === undefined
+        ? {}
+        : { stopReason: options.stopReason }),
+    });
+  }
+  return anthropicEvents([
+    anthropicMessageStart(1, options.container),
+    ...blocks.flatMap((block, index) =>
+      block["type"] === "text" && typeof block["text"] === "string"
+        ? streamedAnthropicTextBlockEvents(index, block["text"])
+        : [anthropicBlockStart(index, block), anthropicBlockStop(index)],
+    ),
+    ...(options.stopReason === undefined
+      ? []
+      : [anthropicMessageDelta(options.stopReason, 1)]),
+    { type: "message_stop" },
+  ]);
 }
 
 export function anthropicPauseTurnResponse(
@@ -138,34 +133,11 @@ export function anthropicPauseTurnResponse(
   stream: boolean,
   container?: unknown,
 ): Response {
-  if (!stream) {
-    return anthropicJsonResponse({
-      blocks,
-      container,
-      stopReason: "pause_turn",
-    });
-  }
-  return anthropicEvents([
-    anthropicMessageStart(1, container),
-    ...blocks.flatMap((block, index) =>
-      block["type"] === "text" && typeof block["text"] === "string"
-        ? [
-            anthropicBlockStart(index, { ...block, text: "" }),
-            anthropicBlockDelta(index, {
-              text: block["text"],
-              type: "text_delta",
-            }),
-            anthropicBlockStop(index),
-          ]
-        : [anthropicBlockStart(index, block), anthropicBlockStop(index)],
-    ),
-    {
-      delta: { stop_reason: "pause_turn" },
-      type: "message_delta",
-      usage: { output_tokens: 1 },
-    },
-    { type: "message_stop" },
-  ]);
+  return anthropicReplayResponse(blocks, {
+    ...(container === undefined ? {} : { container }),
+    stopReason: "pause_turn",
+    stream,
+  });
 }
 
 export function streamedReplayEvents(

@@ -6,18 +6,12 @@ import type { SessionStore } from "./session-store.ts";
 export function readSessionConversation(runtime: {
   readonly credential: ProviderCredentialAccess;
   readonly detail: AgentSessionDetail;
-  readonly store: Pick<SessionStore, "conversation" | "credentialFingerprint">;
+  readonly store: Pick<SessionStore, "conversation">;
 }) {
-  const { detail } = runtime;
-  const credentialFingerprint = runtime.store.credentialFingerprint(
-    detail.credentialId,
-  );
-  if (credentialFingerprint === undefined) {
-    throw new Error("The provider credential is no longer available");
-  }
+  const { credential, detail } = runtime;
   const identity = anthropicReplayIdentityFrom({
-    credential: runtime.credential,
-    credentialFingerprint,
+    credential,
+    credentialFingerprint: credential.credentialFingerprint,
     model: detail.model,
     provider: detail.provider,
   });

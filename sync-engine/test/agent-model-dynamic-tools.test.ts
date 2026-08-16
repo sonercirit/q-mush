@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import { isRecord } from "../../shared/auth-model.ts";
 import { ChatCompletionsAgentModel } from "../agent-model.ts";
+import { TEST_CREDENTIAL_FINGERPRINT } from "./agent-model-credential-fixtures.ts";
 import { codexOAuthCredential } from "./prompt-cache-fixtures.ts";
 import {
   COMPLETED_EVENT,
@@ -11,6 +12,7 @@ test("OpenAI dynamic allowed_tools keeps the full cached catalog stable", async 
   const sockets = new FakeProviderSockets();
   const model = new ChatCompletionsAgentModel({
     credential: codexOAuthCredential(),
+    credentialFingerprint: TEST_CREDENTIAL_FINGERPRINT,
     dynamicToolCache: true,
     fetch: () => Promise.reject(new Error("HTTP fallback should not run")),
     maxOutputTokens: null,

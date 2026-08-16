@@ -34,7 +34,7 @@ export function usesAnthropicFormat(
 export interface AgentModelRequestOptions {
   readonly adaptiveThinking?: boolean | null;
   readonly credential: AgentProviderCredential;
-  readonly credentialFingerprint?: string;
+  readonly credentialFingerprint: string;
   readonly dynamicToolCache?: boolean;
   readonly maxOutputTokens: number | null;
   readonly model: string;

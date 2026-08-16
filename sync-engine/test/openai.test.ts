@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, test } from "vitest";
 import {
   createCredentialCipher,
-  fingerprintCredential,
+  fingerprintProviderCredential,
 } from "../../shared/credential-cipher.ts";
 import { ProviderCredentialStore } from "../../shared/provider-credential-store.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
@@ -357,7 +357,7 @@ describe("OpenAI credentials", () => {
       refresh: "refreshed-refresh-token",
     });
     expect(refreshed?.credentialFingerprint).toBe(
-      fingerprintCredential(refreshedSecret),
+      fingerprintProviderCredential(refreshedSecret),
     );
     expect(await readFormBody(providerRequests.at(-1))).toEqual({
       client_id: CLIENT_ID,

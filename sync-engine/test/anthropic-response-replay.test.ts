@@ -8,33 +8,33 @@ import {
 import { recordedMessageValues } from "../../sync-engine/session-store-values.ts";
 import {
   ANTHROPIC_TEST_PROVENANCE,
+  anthropicBlockDelta,
+  anthropicBlockStart,
+  anthropicBlockStop,
   anthropicEvents,
   anthropicHarness,
+  anthropicMessageStart,
   doneAnthropicEvents,
   JSON_RESPONSE_REPLAY_BLOCKS,
   KNOWN_ANTHROPIC_MODEL,
   redactedReplayBlock,
   serverToolReplayBlock,
+  streamedAnthropicTextBlockEvents,
   textReplayBlock,
   textStopAnthropicEvents,
   thinkingReplayBlock,
   toolReplayBlock,
 } from "./anthropic-model-test-helpers.ts";
 import {
-  capturedAssistantContent,
+  capturedReplayRequest,
   type AnthropicHarness,
 } from "./anthropic-replay-request-helpers.ts";
 import {
-  anthropicBlockDelta,
-  anthropicBlockStart,
-  anthropicBlockStop,
   anthropicJsonResponse,
-  anthropicMessageStart,
   finishedAnthropicStep,
   futureAnthropicBlock,
   stoppedAnthropicEvents,
   streamedAnthropicReadEvents,
-  streamedAnthropicTextBlockEvents,
   streamedAnthropicTextEvents,
   streamedAnthropicToolEvents,
   streamedReplayEvents,
@@ -61,7 +61,7 @@ function expectReplayUnavailable(step: unknown): void {
 }
 
 test.each<AnthropicReplayBlock>([
-  { text: "   ", type: "text" },
+  { text: "", type: "text" },
   { citations: "invalid", text: "Answer", type: "text" },
   {
     caller: "invalid",
@@ -149,36 +149,24 @@ function signedNoArgumentToolResponse(text = ""): Response {
   ]);
 }
 
+function replayListRunners(
+  harness: AnthropicHarness,
+  step: Awaited<ReturnType<AnthropicHarness["complete"]>>,
+): Promise<unknown> {
+  return capturedReplayRequest(harness, step, {
+    content: "[]",
+    role: "tool",
+    toolCallId: "list-call",
+    toolName: "list_runners",
+  });
+}
+
 async function completedNoArgumentTool(text = "") {
   const harness = anthropicHarness([
     signedNoArgumentToolResponse(text),
     doneAnthropicEvents(),
   ]);
   return { harness, step: await harness.complete() };
-}
-
-async function replayNoArgumentTool(
-  harness: AnthropicHarness,
-  step: Awaited<ReturnType<AnthropicHarness["complete"]>>,
-): Promise<unknown> {
-  const assistant = {
-    content: step.content,
-    role: "assistant" as const,
-    toolCalls: step.toolCalls,
-  };
-  await harness.complete([
-    { content: "List runners", role: "user" },
-    step.providerReplay === undefined
-      ? assistant
-      : { ...assistant, providerReplay: step.providerReplay },
-    {
-      content: "[]",
-      role: "tool",
-      toolCallId: "list-call",
-      toolName: "list_runners",
-    },
-  ]);
-  return capturedAssistantContent(harness, 1);
 }
 
 function partialToolStop(
@@ -310,7 +298,7 @@ describe("Anthropic response replay", () => {
     expect(step.providerReplay?.blocks).toEqual(
       noArgumentReplayBlocks("Listing."),
     );
-    expect(await replayNoArgumentTool(harness, step)).toEqual(
+    expect(await replayListRunners(harness, step)).toEqual(
       step.providerReplay?.blocks,
     );
 
@@ -467,12 +455,14 @@ describe("Anthropic response replay", () => {
     const { harness, step } = await completedNoArgumentTool();
     expect(step.providerReplay?.blocks).toEqual(noArgumentReplayBlocks());
     expect(
-      JSON.stringify(await replayNoArgumentTool(harness, step)),
+      JSON.stringify(await replayListRunners(harness, step)),
     ).not.toContain('"text":""');
 
+    // Whitespace-only text is real assistant content: dropping it from the
+    // replay would make it stop matching the persisted message.
     const whitespace = streamedTextStep("   ", { stopped: true });
     expect(whitespace.content).toBe("   ");
-    expectReplayUnavailable(whitespace);
+    expect(whitespace.providerReplay?.blocks).toEqual([textReplayBlock("   ")]);
 
     expect(() =>
       recordedMessageValues({
@@ -543,18 +533,18 @@ describe("Anthropic response replay", () => {
     "model_context_window_exceeded",
   ] as const) {
     test(`reports ${stopReason} stops as truncation`, async () => {
-      const harness = anthropicHarness([
+      const step = await anthropicHarness([
         textStopAnthropicEvents({
           stopReason,
           text: "Partial",
           usage: { input_tokens: 3 },
         }),
-      ]);
+      ]).complete();
 
-      const step = await harness.complete();
-
-      expect(step.content).toBe("Partial");
-      expect(step.truncation).toBe(stopReason);
+      expect(step).toMatchObject({
+        content: "Partial",
+        truncation: stopReason,
+      });
     });
   }
 

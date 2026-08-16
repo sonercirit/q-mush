@@ -56,13 +56,6 @@ function textStep(content: string, options?: Partial<AgentModelStep>) {
   return stepWithContinuation(content, options ?? {});
 }
 
-function resolvedTextStep(
-  content: string,
-  options?: Partial<AgentModelStep>,
-): Promise<AgentModelStep> {
-  return Promise.resolve(textStep(content, options));
-}
-
 function replayToolStep(
   content: string,
   callId: string,
@@ -99,13 +92,9 @@ async function expectPauseFailure(
 }
 
 test("combines repeated pause turns into one exact assistant step", async () => {
-  const first = pausedTextStep("First. ", {
+  const first = containedPauseStep({
     contextTokens: 10,
     costUsd: 0.1,
-    providerReplay: replay([{ text: "First. ", type: "text" }], {
-      container: "container-1",
-    }),
-    thinking: "Think one. ",
     tokenUsage: usage(1),
   });
   const second = pausedTextStep("Second. ", {
@@ -232,35 +221,95 @@ test("rejects unsafe paused responses before requesting a continuation", async f
   );
 });
 
-test("rejects a changed replay identity or container during continuation", async () => {
-  const changedIdentity = completeAnthropicPauseTurns(
-    INITIAL_MESSAGES,
-    pausedTextStep("First."),
-    () => {
-      const changedReplay = replay([{ text: "Second.", type: "text" }], {
-        model: "claude-other",
-      });
-      return resolvedTextStep("Second.", { providerReplay: changedReplay });
-    },
-  );
-  await expect(changedIdentity).rejects.toThrow(PAUSE_ERROR);
-
-  const changedContainer = completeAnthropicPauseTurns(
-    INITIAL_MESSAGES,
-    pausedTextStep("First.", {
-      providerReplay: replay([{ text: "First.", type: "text" }], {
-        container: "container-1",
-      }),
+function containedPauseStep(
+  options: Partial<AgentModelStep> = {},
+): AgentModelStep {
+  return pausedTextStep("First. ", {
+    providerReplay: replay([{ text: "First. ", type: "text" }], {
+      container: "container-1",
     }),
-    () =>
-      resolvedTextStep("Second.", {
-        providerReplay: replay([{ text: "Second.", type: "text" }], {
-          container: "container-2",
-        }),
+    thinking: "Think one. ",
+    ...options,
+  });
+}
+
+const SECOND_REPLAY_VARIANTS = {
+  "a changed replay container": { container: "container-2" },
+  "a foreign replay identity": { model: "claude-other" },
+} as const;
+
+function secondStep(
+  variant: keyof typeof SECOND_REPLAY_VARIANTS,
+  options: Partial<AgentModelStep>,
+): AgentModelStep {
+  return textStep("Second.", {
+    providerReplay: replay(
+      [{ text: "Second.", type: "text" }],
+      SECOND_REPLAY_VARIANTS[variant],
+    ),
+    thinking: "Think two.",
+    ...options,
+  });
+}
+
+test.each(["a changed replay container", "a foreign replay identity"] as const)(
+  "rejects %s while pausing again",
+  async (variant) => {
+    const rejected = completeAnthropicPauseTurns(
+      INITIAL_MESSAGES,
+      containedPauseStep(),
+      () =>
+        Promise.resolve(
+          secondStep(variant, {
+            providerContinuation: "anthropic_pause_turn",
+          }),
+        ),
+    );
+
+    await expect(rejected).rejects.toThrow(PAUSE_ERROR);
+  },
+);
+
+test.each([
+  [
+    "an unusable replay",
+    (): AgentModelStep =>
+      providerStep("Second.", {
+        thinking: "Think two.",
       }),
-  );
-  await expect(changedContainer).rejects.toThrow(PAUSE_ERROR);
-});
+  ],
+  [
+    "a mismatched replay",
+    (): AgentModelStep =>
+      textStep("Second.", {
+        providerReplay: replay([{ text: "Other.", type: "text" }]),
+        thinking: "Think two.",
+      }),
+  ],
+  [
+    "a foreign replay identity",
+    (): AgentModelStep => secondStep("a foreign replay identity", {}),
+  ],
+  [
+    "a changed replay container",
+    (): AgentModelStep => secondStep("a changed replay container", {}),
+  ],
+])(
+  "completes a final continuation step carrying %s without replay",
+  async (_label, finalStep: () => AgentModelStep) => {
+    const combined = await completeAnthropicPauseTurns(
+      INITIAL_MESSAGES,
+      containedPauseStep(),
+      () => Promise.resolve(finalStep()),
+    );
+
+    expect(combined).toMatchObject({
+      content: "First. Second.",
+      thinking: "Think one. Think two.",
+    });
+    expect(combined).not.toHaveProperty("providerReplay");
+  },
+);
 
 test("keeps final client tool calls in a combined continuation", async () => {
   const finalCall = emptyProviderToolCall("call-1", "read");

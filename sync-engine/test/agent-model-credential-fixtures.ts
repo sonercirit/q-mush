@@ -1,6 +1,8 @@
 import type { AgentProviderCredential } from "../../sync-engine/agent-model-options.ts";
 import { createOpenAiOAuthSecret } from "./oauth-test-helpers.ts";
 
+export const TEST_CREDENTIAL_FINGERPRINT = "test-credential-fingerprint";
+
 export function testApiKeyCredential(
   secret: string,
   overrides: Partial<AgentProviderCredential> = {},

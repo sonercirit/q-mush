@@ -1,4 +1,3 @@
-import { and, eq } from "drizzle-orm";
 import type { AgentImage } from "../shared/agent-images.ts";
 import type {
   AgentConversationMessage,
@@ -7,10 +6,7 @@ import type {
 import type { AgentSessionToolName } from "../shared/agent-tools.ts";
 import type { PendingAskQuestions } from "../shared/ask-questions.ts";
 import type { AppDatabase } from "../shared/database.ts";
-import {
-  agentSessions,
-  providerCredentials,
-} from "../shared/database/schema.ts";
+import { agentSessions } from "../shared/database/schema.ts";
 import { createUuidV7, SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 import type { SessionHistoryPage } from "../shared/session-history.ts";
 import type {
@@ -188,18 +184,6 @@ export class SessionStore extends SessionStoreRestarts {
       cursor,
       sessionId,
     });
-  }
-  credentialFingerprint(credentialId: string): string | undefined {
-    return this.#database
-      .select({ value: providerCredentials.credentialFingerprint })
-      .from(providerCredentials)
-      .where(
-        and(
-          eq(providerCredentials.id, credentialId),
-          eq(providerCredentials.isDeleted, false),
-        ),
-      )
-      .get()?.value;
   }
   conversation(
     sessionId: string,

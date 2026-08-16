@@ -129,29 +129,69 @@ export function anthropicEvents(events: readonly unknown[]): Response {
   });
 }
 
+export function anthropicMessageStart(
+  usage: number | Readonly<Record<string, number>> = 1,
+  container?: unknown,
+) {
+  return {
+    message: {
+      ...(container === undefined ? {} : { container }),
+      usage: typeof usage === "number" ? { input_tokens: usage } : usage,
+    },
+    type: "message_start",
+  };
+}
+
+export function anthropicBlockStart(
+  index: number,
+  contentBlock: Readonly<Record<string, unknown>>,
+) {
+  return { content_block: contentBlock, index, type: "content_block_start" };
+}
+
+export function anthropicBlockDelta(
+  index: number,
+  delta: Readonly<Record<string, unknown>>,
+) {
+  return { delta, index, type: "content_block_delta" };
+}
+
+export function anthropicBlockStop(index: number) {
+  return { index, type: "content_block_stop" };
+}
+
+export function anthropicMessageDelta(
+  stopReason: string,
+  outputTokens: number,
+) {
+  return {
+    delta: { stop_reason: stopReason },
+    type: "message_delta",
+    usage: { output_tokens: outputTokens },
+  };
+}
+
+export function streamedAnthropicTextBlockEvents(
+  index: number,
+  text: string,
+  stopped = true,
+): readonly unknown[] {
+  return [
+    anthropicBlockStart(index, { text: "", type: "text" }),
+    anthropicBlockDelta(index, { text, type: "text_delta" }),
+    ...(stopped ? [anthropicBlockStop(index)] : []),
+  ];
+}
+
 export function textStopAnthropicEvents(options: {
   readonly stopReason: string;
   readonly text: string;
   readonly usage: Readonly<Record<string, number>>;
 }): Response {
   return anthropicEvents([
-    { message: { usage: options.usage }, type: "message_start" },
-    {
-      content_block: { text: "", type: "text" },
-      index: 0,
-      type: "content_block_start",
-    },
-    {
-      delta: { text: options.text, type: "text_delta" },
-      index: 0,
-      type: "content_block_delta",
-    },
-    { index: 0, type: "content_block_stop" },
-    {
-      delta: { stop_reason: options.stopReason },
-      type: "message_delta",
-      usage: { output_tokens: options.text.length },
-    },
+    anthropicMessageStart(options.usage),
+    ...streamedAnthropicTextBlockEvents(0, options.text),
+    anthropicMessageDelta(options.stopReason, options.text.length),
     { type: "message_stop" },
   ]);
 }
@@ -166,6 +206,13 @@ export function doneAnthropicEvents(): Response {
       input_tokens: 60,
     },
   });
+}
+
+export function anthropicHarnessWithFollowUp(
+  initialResponse: Response,
+  options: Partial<AnthropicModelOptions> = {},
+): AnthropicHarness {
+  return anthropicHarness([initialResponse, doneAnthropicEvents()], options);
 }
 
 export interface AnthropicHarness {

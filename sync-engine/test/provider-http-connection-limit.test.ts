@@ -1,6 +1,9 @@
 import { describe, expect, test } from "vitest";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
-import { testApiKeyCredential } from "./agent-model-credential-fixtures.ts";
+import {
+  TEST_CREDENTIAL_FINGERPRINT,
+  testApiKeyCredential,
+} from "./agent-model-credential-fixtures.ts";
 import { captureRejection, requireError } from "./promise-test-helpers.ts";
 
 const USER_MESSAGE = [{ content: "Hello", role: "user" as const }];
@@ -29,6 +32,7 @@ describe("provider HTTP connection-limit classification", () => {
       credential: testApiKeyCredential("sk-or-secret", {
         id: "openrouter-test-credential",
       }),
+      credentialFingerprint: TEST_CREDENTIAL_FINGERPRINT,
       fetch: () => {
         fetchCount += 1;
         return Promise.resolve(connectionLimitResponse());

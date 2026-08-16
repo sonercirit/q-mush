@@ -126,6 +126,19 @@ export interface AgentModelStep {
   readonly truncation?: AgentStepTruncation;
 }
 
+function assistantConversationMessage(
+  step: Pick<AgentModelStep, "content" | "providerReplay" | "toolCalls">,
+): Extract<AgentConversationMessage, { readonly role: "assistant" }> {
+  return {
+    content: step.content,
+    ...(step.providerReplay === undefined
+      ? {}
+      : { providerReplay: step.providerReplay }),
+    role: "assistant",
+    toolCalls: step.toolCalls,
+  };
+}
+
 export interface AgentModel {
   // Releases pooled provider resources (such as a kept-alive WebSocket) when
   // the owning run finishes; safe to omit and to call repeatedly.
@@ -318,14 +331,7 @@ export async function runAgentLoop(
       throw new Error("The model returned invalid context usage");
     }
 
-    const assistantMessage: AgentConversationMessage = {
-      content: step.content,
-      ...(step.providerReplay === undefined
-        ? {}
-        : { providerReplay: step.providerReplay }),
-      role: "assistant",
-      toolCalls: step.toolCalls,
-    };
+    const assistantMessage = assistantConversationMessage(step);
     recordedMessages.push(assistantMessage);
     if (step.truncation !== undefined) {
       // Record the soft stop durably so a truncated answer is never mistaken

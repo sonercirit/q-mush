@@ -37,13 +37,6 @@ function setStoredReplay(
     .run();
 }
 
-function expectConversationCorruption(
-  conversation: () => unknown,
-  message: string,
-): void {
-  expect(conversation).toThrow(message);
-}
-
 describe("stored provider replay", () => {
   test("public transcript reads never select private replay metadata", () => {
     const setup = runningStore();
@@ -124,7 +117,7 @@ describe("stored provider replay", () => {
     );
     expect(conversation()[1]).not.toHaveProperty("providerReplay");
     setStoredReplay(database, "user", JSON.stringify(REPLAY));
-    expectConversationCorruption(conversation, "non-assistant message");
+    expect(conversation).toThrow("non-assistant message");
     database.$client.close();
   });
 });

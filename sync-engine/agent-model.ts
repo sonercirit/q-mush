@@ -67,7 +67,6 @@ const OPENROUTER_COMPLETIONS_URL =
 export type AgentModelFetch = (request: Request) => Promise<Response>;
 
 export interface ChatCompletionsAgentModelOptions extends AgentModelRequestOptions {
-  readonly credentialFingerprint?: string;
   readonly fetch?: AgentModelFetch;
   readonly sleep?: ModelRequestSleep;
   readonly webSocket?: ProviderWebSocketFactory;
@@ -251,8 +250,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
   constructor(options: ChatCompletionsAgentModelOptions) {
     this.#adaptiveThinking = options.adaptiveThinking ?? null;
     this.#credential = options.credential;
-    this.#credentialFingerprint =
-      options.credentialFingerprint ?? options.credential.id;
+    this.#credentialFingerprint = options.credentialFingerprint;
     this.#dynamicToolCache = options.dynamicToolCache === true;
     this.#fetch = options.fetch ?? ((request) => globalThis.fetch(request));
     this.#maxOutputTokens = options.maxOutputTokens ?? null;
@@ -452,9 +450,9 @@ export class ChatCompletionsAgentModel implements AgentModel {
           ...promptCacheKeyHeader(this.#promptCacheKey),
           protocol,
         }),
+        model: this.#model,
         onDelta: this.#onDelta,
         ...(onStreamRetry === undefined ? {} : { onStreamRetry }),
-        model: this.#model,
         protocol,
         provider: this.#provider,
         sleep: this.#sleep,

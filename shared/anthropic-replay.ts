@@ -248,9 +248,10 @@ export function isAnthropicReplayBlock(
     case "redacted_thinking":
       return typeof value["data"] === "string" && value["data"].length > 0;
     case "text":
-      return (
-        typeof value["text"] === "string" && value["text"].trim().length > 0
-      );
+      // Whitespace-only text still belongs to the assistant message that the
+      // replay has to reproduce exactly; only empty text is dropped, because
+      // the Messages API rejects blank text blocks.
+      return typeof value["text"] === "string" && value["text"].length > 0;
     case "tool_use":
       return (
         hasReplayToolIdentity(value) && isAnthropicReplayObject(value["input"])
@@ -338,6 +339,16 @@ interface ReplayToolCall {
   readonly arguments: string;
   readonly id: string;
   readonly name: string;
+}
+
+export function anthropicReplayBlocksForRequest(
+  blocks: readonly AnthropicReplayBlock[],
+): readonly AnthropicReplayBlock[] {
+  // Anthropic rejects blank text blocks, so whitespace-only text is kept for
+  // matching but withheld from the request.
+  return blocks.filter(
+    (block) => block.type !== "text" || block.text.trim().length > 0,
+  );
 }
 
 export function anthropicReplayMatchesAssistant(

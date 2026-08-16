@@ -4,15 +4,16 @@ import type { ProviderTextDelta } from "../provider-stream.ts";
 import {
   anthropicEvents,
   anthropicHarness,
+  anthropicHarnessWithFollowUp,
+  anthropicMessageStart,
   doneAnthropicEvents,
   serverToolReplayBlock,
+  streamedAnthropicTextBlockEvents,
   toolReplayBlock,
 } from "./anthropic-model-test-helpers.ts";
 import {
   anthropicJsonResponse,
-  anthropicMessageStart,
   anthropicPauseTurnResponse,
-  streamedAnthropicTextBlockEvents,
 } from "./anthropic-response-event-fixtures.ts";
 import { emptyProviderToolCall } from "./provider-step-fixtures.ts";
 
@@ -57,10 +58,9 @@ describe("Anthropic pause_turn", () => {
     "continues a %s-streamed pause_turn with the assistant blocks unchanged",
     async function continuesPausedTurn(stream) {
       const serverToolCall = serverCall("web_search", { query: "news" });
-      const harness = anthropicHarness([
+      const harness = anthropicHarnessWithFollowUp(
         anthropicPauseTurnResponse([PAUSED_TEXT, serverToolCall], stream),
-        doneAnthropicEvents(),
-      ]);
+      );
 
       const step = await harness.complete();
       expect(harness.requests.length).toBe(2);

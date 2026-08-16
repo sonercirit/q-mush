@@ -1,7 +1,3 @@
-import {
-  readAgentAttachments,
-  type AgentAttachment,
-} from "../shared/agent-attachments.ts";
 import { throwIfAgentAborted } from "../shared/agent-loop.ts";
 import {
   isAgentSessionToolName,
@@ -14,22 +10,17 @@ import type { ProviderCredentialAccess } from "../shared/provider-credential-sto
 import {
   RunnerDisconnectedError,
   type RunnerCommandBroker,
-  type RunnerCommandOutputDelta,
   type RunnerCommandResult,
 } from "../shared/runner-command-broker.ts";
-import type {
-  AgentSessionDetail,
-  AgentSessionUsageUpdate,
-} from "../shared/session-model.ts";
+import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { forEachAssistantToolCall } from "./agent-conversation.ts";
 import { estimateAgentStepCost } from "./agent-cost.ts";
-import { createAgentSkills, type AgentSkillExecutor } from "./agent-skills.ts";
+import { createAgentSkills } from "./agent-skills.ts";
 import {
   isAskQuestionsPause,
   isAskQuestionsToolName,
   pauseForAskQuestions,
 } from "./ask-questions-pause.ts";
-import { explainAttachment } from "./attachment-fallback-model.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
 import { loadSessionAgentFile } from "./session-agent-file.ts";
@@ -39,23 +30,27 @@ import {
   type AgentModelFactory,
   type SessionAgentModels,
 } from "./session-agent-models.ts";
-import { currentExecutionTools } from "./session-agent-tool-authority.ts";
 import {
   executeSessionAgentTool,
   type SessionAgentToolActions,
 } from "./session-agent-tools.ts";
 import {
-  agentStepUsage,
   compactionUsage,
   type CompactionUsage,
 } from "./session-compaction-usage.ts";
 import { readSessionConversation } from "./session-conversation.ts";
-import {
-  discoverCurrentSessionModel,
-  sessionRequestMetadata,
-} from "./session-current-model.ts";
+import { sessionRequestMetadata } from "./session-current-model.ts";
 import type { AttachmentFallbackRuntimeResources } from "./session-model-resources.ts";
 import { SessionRecorder } from "./session-recorder.ts";
+import {
+  createRunnerToolDispatcher,
+  type AgentToolDispatcher,
+} from "./session-runner-tool-dispatcher.ts";
+import {
+  recordSessionRuntimeUsage,
+  writeSessionRuntime,
+  type SessionRuntimeWriter,
+} from "./session-runtime-write.ts";
 import { executeSessionSleepTool } from "./session-sleep-tool.ts";
 import { waitForSessionSteeringInput } from "./session-steering-wakeup.ts";
 import type { SessionStore } from "./session-store.ts";
@@ -83,28 +78,11 @@ export interface SessionAgentRuntimeDependencies extends AttachmentFallbackRunti
   readonly userId: string;
 }
 
-function writeRuntime(
-  runtime: SessionAgentRuntimeDependencies,
-  write: (sessionId: string, now: number, generation: number) => void,
-): void {
-  write(runtime.detail.id, runtime.now(), runtime.detail.generation);
-  runtime.notify();
-}
-
 function markSessionStepStart(runtime: SessionAgentRuntimeDependencies): void {
   // Status- and generation-guarded: a racing stop or restart makes this
   // write match zero rows instead of throwing.
   const { store } = runtime;
-  writeRuntime(runtime, store.markRuntimeStepStart.bind(store));
-}
-
-function recordRuntimeUsage(
-  runtime: SessionAgentRuntimeDependencies,
-  usage: AgentSessionUsageUpdate,
-): void {
-  writeRuntime(runtime, (sessionId, now, generation) => {
-    runtime.store.updateRuntimeUsage(sessionId, usage, now, generation);
-  });
+  writeSessionRuntime(runtime, store.markRuntimeStepStart.bind(store));
 }
 
 function recordCompactionContext(
@@ -112,7 +90,7 @@ function recordCompactionContext(
   contextTokens: number | null,
 ): void {
   if (contextTokens !== null) {
-    recordRuntimeUsage(runtime, {
+    recordSessionRuntimeUsage(runtime, {
       contextTokens,
       costBasis: null,
       costUsd: null,
@@ -128,7 +106,7 @@ function recordCompaction(
   terminal = false,
 ): void {
   recordCompactionContext(runtime, usage.contextTokens);
-  writeRuntime(runtime, (sessionId, now, generation) => {
+  writeSessionRuntime(runtime, (sessionId, now, generation) => {
     if (terminal) {
       runtime.store.compactRuntimeTerminal(
         sessionId,
@@ -205,13 +183,13 @@ async function loadModels(
       runtime.isCurrent,
     ),
   );
-  writeRuntime(runtime, (sessionId, now, generation) => {
+  writeSessionRuntime(runtime, (sessionId, now, generation) => {
     runtime.store.setRuntimeAgentFile(sessionId, agentFile, now, generation);
   });
   const metadata = await sessionRequestMetadata(
     runtime,
     (apply) => {
-      writeRuntime(runtime, apply);
+      writeSessionRuntime(runtime, apply);
     },
     runtime.signal,
   );
@@ -279,10 +257,6 @@ export async function compactSessionConversation(
 
 const RESTART_INTERRUPTED_TOOL_OUTPUT =
   "Error: the runner disconnected before this tool call returned; retry it after restart.";
-
-type AgentToolDispatcher = (
-  ...parameters: Parameters<AgentSkillExecutor>
-) => Promise<RunnerCommandResult>;
 
 function restartInterruptedToolResult(): RunnerCommandResult {
   return { output: RESTART_INTERRUPTED_TOOL_OUTPUT, state: "canceled" };
@@ -409,106 +383,20 @@ export async function runSessionAgent(
   const stepTools = new Set<AgentSessionToolName>(runtime.detail.tools);
   const stepBoundaryRequested = (): boolean =>
     runtime.detail.restartHandoff === null && runtime.restartHandoffRequested();
-  const currentToolNames = (): readonly AgentSessionToolName[] | undefined =>
-    currentExecutionTools({
-      current: runtime.currentTools?.(),
-      isCurrent: runtime.isCurrent,
-      persisted: runtime.detail.tools,
-    });
+  const { currentToolNames, dispatchRunnerTool } = createRunnerToolDispatcher({
+    executeForSession: (execute, handoff) =>
+      executeForSession(runtime, execute, handoff),
+    handoffController,
+    runtime,
+    toolSignal,
+    toolStream,
+    writeRuntime: ((write) => {
+      writeSessionRuntime(runtime, write);
+    }) satisfies SessionRuntimeWriter,
+  });
   const currentTools = (): ReadonlySet<AgentSessionToolName> | undefined => {
     const tools = readAgentSessionToolNames(currentToolNames());
     return tools === undefined ? undefined : new Set(tools);
-  };
-  const dispatchRunnerTool = async (
-    name: string,
-    toolArguments: Readonly<Record<string, unknown>>,
-    signal: AbortSignal = toolSignal,
-    callId?: string,
-  ): Promise<RunnerCommandResult> => {
-    const result = await executeForSession(
-      runtime,
-      () =>
-        runtime.broker.dispatch(
-          {
-            arguments: toolArguments,
-            authorize: () =>
-              currentToolNames()?.some((candidate) => candidate === name) ===
-              true,
-            executionEnvironment: runtime.detail.executionEnvironment,
-            generation: runtime.detail.generation,
-            runnerId: runtime.detail.runnerId,
-            sessionId: runtime.detail.id,
-            tool: name,
-            workingDirectory: runtime.detail.workingDirectory,
-          },
-          signal,
-          callId === undefined
-            ? undefined
-            : (delta: RunnerCommandOutputDelta) => {
-                toolStream.output(callId, delta);
-              },
-        ),
-      (error) => {
-        handoffController.abort(error);
-      },
-    );
-    if (name !== "explain_file" || result.state !== "completed") {
-      return result;
-    }
-    const promptValue = toolArguments["prompt"];
-    if (
-      promptValue !== undefined &&
-      (typeof promptValue !== "string" || promptValue.length > 4_000)
-    ) {
-      throw new Error(
-        "Tool argument prompt must be a string of at most 4000 characters",
-      );
-    }
-    let attachment: AgentAttachment | undefined;
-    try {
-      attachment = readAgentAttachments([JSON.parse(result.output)])?.[0];
-    } catch {
-      attachment = undefined;
-    }
-    if (attachment === undefined) {
-      throw new Error("The runner returned invalid file attachment data");
-    }
-    const currentModel = await discoverCurrentSessionModel(runtime, signal);
-    if (currentModel === undefined) {
-      throw new Error("The session model is unavailable for file explanation");
-    }
-    const explanation = await explainAttachment(
-      {
-        attachment,
-        currentCredential: runtime.credential,
-        currentModel,
-        currentModelId: runtime.detail.model,
-        currentProvider: runtime.detail.provider,
-        currentProviderPricing: runtime.detail.providerPricing,
-        currentProviderTag: runtime.detail.openRouterProviderTag,
-        factory: runtime.modelFactory,
-        onStepStart: () => {
-          markSessionStepStart(runtime);
-        },
-        prompt: typeof promptValue === "string" ? promptValue : null,
-        resources: runtime,
-        userId: runtime.userId,
-        workspaceId: runtime.detail.workspaceId,
-      },
-      signal,
-    );
-    const usage = agentStepUsage(
-      { contextTokens: null, ...explanation.usage },
-      (step) =>
-        estimateAgentStepCost(
-          { providerPricing: explanation.providerPricing },
-          step.tokenUsage,
-        ),
-    );
-    if (usage !== undefined) {
-      recordRuntimeUsage(runtime, usage);
-    }
-    return { output: explanation.content, state: "completed" };
   };
   const dispatchTool: AgentToolDispatcher = (
     name,

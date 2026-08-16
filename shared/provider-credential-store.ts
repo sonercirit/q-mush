@@ -1,6 +1,5 @@
-import { and, asc, count, eq, inArray, not, or, type SQL } from "drizzle-orm";
+import { count, eq } from "drizzle-orm";
 import { softDeletedAuditFields, updatedAuditFields } from "./audit.ts";
-import { accessibleConnectionIds } from "./connection-access.ts";
 import {
   connectionIsAccessible,
   connectionWorkspaceIsAvailable,
@@ -11,10 +10,9 @@ import {
   type ConnectionScopeConfiguration,
 } from "./connection-scopes.ts";
 import {
-  fingerprintCredential,
+  fingerprintProviderCredential,
   type CredentialCipher,
 } from "./credential-cipher.ts";
-import { escapedLikePattern, lowerLike } from "./database-search.ts";
 import type { AppDatabase } from "./database.ts";
 import {
   providerCredentials,
@@ -23,6 +21,21 @@ import {
 import { defaultValues } from "./default-store.ts";
 import { createUuidV7, SYSTEM_ID, type IdGenerator } from "./ids.ts";
 import { validPageWindow } from "./pagination.ts";
+import {
+  accessibleCredentialIds,
+  activeCredentialCondition,
+  activeCredentialSummaries,
+  credentialOrder,
+  credentialScope,
+  credentialSummarySelection,
+  fingerprintCondition,
+  legacyCredentialSummary,
+  matchingCredentialId,
+  modelCredentialCondition,
+  ownedDefaultCondition,
+  withEndpointFields,
+  type ProviderCredentialPage,
+} from "./provider-credential-store-query.ts";
 import {
   isProviderId,
   MODEL_PROVIDER_IDS,
@@ -35,6 +48,10 @@ export { isProviderId, type ProviderApiFormat, type ProviderId };
 
 export type ProviderCredentialSource = "api_key" | "oauth";
 export type CredentialProviderId = ProviderId | "brave_search";
+
+function encryptionContext(userId: string, credentialId: string): string {
+  return `${userId}:${credentialId}`;
+}
 
 export interface ProviderCredentialDetails {
   readonly accountId: string | null;
@@ -61,229 +78,6 @@ export class DuplicateProviderCredentialError extends Error {
     super("This provider credential is already stored");
     this.name = "DuplicateProviderCredentialError";
   }
-}
-
-function activeCredentialCondition(
-  provider: CredentialProviderId,
-  userId: string,
-  credentialId?: string,
-): SQL | undefined {
-  return and(
-    eq(providerCredentials.provider, provider),
-    eq(providerCredentials.userId, userId),
-    eq(providerCredentials.isDeleted, false),
-    credentialId === undefined
-      ? undefined
-      : eq(providerCredentials.id, credentialId),
-  );
-}
-
-function ownedDefaultCondition(
-  userId: string,
-  provider?: CredentialProviderId,
-): SQL | undefined {
-  const condition = and(
-    eq(providerCredentials.userId, userId),
-    not(providerCredentials.isDeleted),
-    providerCredentials.isDefault,
-  );
-  return provider === undefined
-    ? condition
-    : and(condition, eq(providerCredentials.provider, provider));
-}
-
-function encryptionContext(userId: string, credentialId: string): string {
-  return `${userId}:${credentialId}`;
-}
-
-function credentialOrder() {
-  return [asc(providerCredentials.createdAt), asc(providerCredentials.id)];
-}
-
-function credentialSummarySelection() {
-  return {
-    accountId: providerCredentials.providerAccountId,
-    apiFormat: providerCredentials.apiFormat,
-    baseUrl: providerCredentials.baseUrl,
-    id: providerCredentials.id,
-    isDefault: providerCredentials.isDefault,
-    isGlobal: providerCredentials.isGlobal,
-    label: providerCredentials.label,
-    source: providerCredentials.source,
-  };
-}
-
-function withEndpointFields<
-  Credential extends {
-    readonly apiFormat: ProviderApiFormat | null;
-    readonly baseUrl: string | null;
-  },
->({ apiFormat, baseUrl, ...credential }: Credential) {
-  return {
-    ...credential,
-    ...(apiFormat === null ? {} : { apiFormat }),
-    ...(baseUrl === null ? {} : { baseUrl }),
-  };
-}
-
-function accessibleActiveCredentialCondition(options: {
-  readonly credentialId?: string;
-  readonly database: AppDatabase;
-  readonly provider: CredentialProviderId;
-  readonly userId: string;
-  readonly workspaceId?: string;
-}): SQL | undefined {
-  const accessibleIds =
-    options.workspaceId === undefined
-      ? undefined
-      : accessibleCredentialIds(
-          options.database,
-          options.provider,
-          options.userId,
-          options.workspaceId,
-        );
-  return and(
-    activeCredentialCondition(
-      options.provider,
-      options.userId,
-      options.credentialId,
-    ),
-    accessibleIds === undefined
-      ? undefined
-      : inArray(providerCredentials.id, accessibleIds),
-  );
-}
-
-function credentialScope(
-  database: AppDatabase,
-  provider: CredentialProviderId,
-  userId: string,
-  credentialId: string | undefined,
-  workspaceId: string | undefined,
-): SQL | undefined {
-  return accessibleActiveCredentialCondition(
-    Object.assign(
-      { database, provider, userId },
-      credentialId === undefined ? {} : { credentialId },
-      workspaceId === undefined ? {} : { workspaceId },
-    ),
-  );
-}
-
-function activeCredentialSummaries(
-  database: AppDatabase,
-  provider: CredentialProviderId,
-  userId: string,
-  workspaceId?: string,
-): readonly ProviderCredentialSummary[] {
-  return database
-    .select(credentialSummarySelection())
-    .from(providerCredentials)
-    .where(credentialScope(database, provider, userId, undefined, workspaceId))
-    .orderBy(...credentialOrder())
-    .all()
-    .map(withEndpointFields);
-}
-
-function accessibleCredentialIds(
-  database: AppDatabase,
-  provider: CredentialProviderId,
-  userId: string,
-  workspaceId: string,
-): readonly string[] {
-  if (!connectionWorkspaceIsAvailable(database, userId, workspaceId)) {
-    return [];
-  }
-  return accessibleConnectionIds(
-    database,
-    {
-      associationOwnerId: providerCredentialWorkspaces.providerCredentialId,
-      associationTable: providerCredentialWorkspaces,
-      ownerGlobal: providerCredentials.isGlobal,
-      ownerId: providerCredentials.id,
-      ownerTable: providerCredentials,
-    },
-    userId,
-    workspaceId,
-    activeCredentialCondition(provider, userId),
-  );
-}
-
-function matchingCredentialId(
-  ...[database, condition]: readonly [
-    database: Pick<AppDatabase, "select">,
-    condition: SQL | undefined,
-  ]
-): string | undefined {
-  const selection = database.select({ id: providerCredentials.id });
-  return selection.from(providerCredentials).where(condition).get()?.id;
-}
-
-function fingerprintCondition(
-  provider: CredentialProviderId,
-  userId: string,
-  fingerprint: string,
-): SQL | undefined {
-  return and(
-    eq(providerCredentials.credentialFingerprint, fingerprint),
-    eq(providerCredentials.provider, provider),
-    eq(providerCredentials.userId, userId),
-  );
-}
-
-function modelCredentialCondition(
-  userId: string,
-  search?: string,
-  accessibleIds?: readonly string[],
-) {
-  const base = and(
-    eq(providerCredentials.userId, userId),
-    eq(providerCredentials.isDeleted, false),
-    inArray(providerCredentials.provider, MODEL_PROVIDER_IDS),
-    accessibleIds === undefined
-      ? undefined
-      : inArray(providerCredentials.id, accessibleIds),
-  );
-  if (search === undefined) {
-    return base;
-  }
-  const pattern = escapedLikePattern(search);
-  return and(
-    base,
-    or(
-      lowerLike(providerCredentials.id, pattern),
-      lowerLike(providerCredentials.baseUrl, pattern),
-      lowerLike(providerCredentials.providerAccountId, pattern),
-      lowerLike(providerCredentials.label, pattern),
-      lowerLike(providerCredentials.provider, pattern),
-      lowerLike(providerCredentials.source, pattern),
-    ),
-  );
-}
-
-function legacyCredentialSummary(
-  credential: ProviderCredentialSummary,
-): ProviderCredentialSummary {
-  return {
-    accountId: credential.accountId,
-    ...(credential.apiFormat === undefined
-      ? {}
-      : { apiFormat: credential.apiFormat }),
-    ...(credential.baseUrl === undefined
-      ? {}
-      : { baseUrl: credential.baseUrl }),
-    id: credential.id,
-    isDefault: credential.isDefault,
-    label: credential.label,
-    source: credential.source,
-  };
-}
-
-export interface ProviderCredentialPage {
-  readonly items: readonly (ProviderCredentialSummary & {
-    readonly provider: ProviderId;
-  })[];
-  readonly totalItems: number;
 }
 
 export class ProviderCredentialStore {
@@ -326,17 +120,7 @@ export class ProviderCredentialStore {
     now: number,
     workspaceIds: readonly string[] = [GLOBAL_WORKSPACE_ID],
   ): ProviderCredentialSummary {
-    // The "openai" format is the historical default, so only the Anthropic
-    // format extends the fingerprint; existing stored fingerprints stay valid.
-    const fingerprintedCredential =
-      details.apiFormat === "anthropic"
-        ? `${credential}\n${details.apiFormat}`
-        : credential;
-    const fingerprint = fingerprintCredential(
-      details.baseUrl === undefined
-        ? fingerprintedCredential
-        : `${details.baseUrl}\n${fingerprintedCredential}`,
-    );
+    const fingerprint = fingerprintProviderCredential(credential, details);
     const existing = this.#database
       .select({
         id: providerCredentials.id,
@@ -661,10 +445,14 @@ export class ProviderCredentialStore {
     secret: string,
     now: number,
   ): boolean {
+    const stored = this.#readStored(userId, credentialId);
+    if (stored === undefined) {
+      return false;
+    }
     const updated = this.#database
       .update(providerCredentials)
       .set({
-        credentialFingerprint: fingerprintCredential(secret),
+        credentialFingerprint: fingerprintProviderCredential(secret, stored),
         encryptedCredential: this.#cipher.seal(
           secret,
           encryptionContext(userId, credentialId),

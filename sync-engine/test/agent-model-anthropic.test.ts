@@ -105,6 +105,7 @@ async function captureOpenAiFormatReplayRequest(
   };
   const model = new ChatCompletionsAgentModel({
     credential: { ...ANTHROPIC_TEST_CREDENTIAL, apiFormat: "openai" },
+    credentialFingerprint: ANTHROPIC_TEST_CREDENTIAL_FINGERPRINT,
     fetch: capture,
     maxOutputTokens: null,
     model: "gpt-4.1-mini",

@@ -160,35 +160,22 @@
       "indexes": {
         "agent_messages_session_deletion_creation_index": {
           "name": "agent_messages_session_deletion_creation_index",
-          "columns": [
-            "session_id",
-            "is_deleted",
-            "created_at"
-          ],
+          "columns": ["session_id", "is_deleted", "created_at"],
           "isUnique": false
         },
         "agent_messages_session_segment_creation_index": {
           "name": "agent_messages_session_segment_creation_index",
-          "columns": [
-            "session_id",
-            "segment",
-            "created_at"
-          ],
+          "columns": ["session_id", "segment", "created_at"],
           "isUnique": false
         },
         "agent_messages_turn_index": {
           "name": "agent_messages_turn_index",
-          "columns": [
-            "turn_id"
-          ],
+          "columns": ["turn_id"],
           "isUnique": false
         },
         "agent_messages_user_deletion_index": {
           "name": "agent_messages_user_deletion_index",
-          "columns": [
-            "user_id",
-            "is_deleted"
-          ],
+          "columns": ["user_id", "is_deleted"],
           "isUnique": false
         }
       },
@@ -197,12 +184,8 @@
           "name": "agent_messages_user_id_users_id_fk",
           "tableFrom": "agent_messages",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -210,12 +193,8 @@
           "name": "agent_messages_session_id_agent_sessions_id_fk",
           "tableFrom": "agent_messages",
           "tableTo": "agent_sessions",
-          "columnsFrom": [
-            "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["session_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -223,12 +202,8 @@
           "name": "agent_messages_turn_id_agent_session_turns_id_fk",
           "tableFrom": "agent_messages",
           "tableTo": "agent_session_turns",
-          "columnsFrom": [
-            "turn_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["turn_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -341,27 +316,17 @@
       "indexes": {
         "agent_pending_inputs_session_deletion_sequence_index": {
           "name": "agent_pending_inputs_session_deletion_sequence_index",
-          "columns": [
-            "session_id",
-            "is_deleted",
-            "sequence"
-          ],
+          "columns": ["session_id", "is_deleted", "sequence"],
           "isUnique": false
         },
         "agent_pending_inputs_session_sequence_unique": {
           "name": "agent_pending_inputs_session_sequence_unique",
-          "columns": [
-            "session_id",
-            "sequence"
-          ],
+          "columns": ["session_id", "sequence"],
           "isUnique": true
         },
         "agent_pending_inputs_user_request_unique": {
           "name": "agent_pending_inputs_user_request_unique",
-          "columns": [
-            "user_id",
-            "client_request_id"
-          ],
+          "columns": ["user_id", "client_request_id"],
           "isUnique": true
         }
       },
@@ -370,12 +335,8 @@
           "name": "agent_pending_inputs_user_id_users_id_fk",
           "tableFrom": "agent_pending_inputs",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -383,12 +344,8 @@
           "name": "agent_pending_inputs_session_id_agent_sessions_id_fk",
           "tableFrom": "agent_pending_inputs",
           "tableTo": "agent_sessions",
-          "columnsFrom": [
-            "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["session_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -496,33 +453,22 @@
       "indexes": {
         "agent_question_requests_session_deletion_index": {
           "name": "agent_question_requests_session_deletion_index",
-          "columns": [
-            "session_id",
-            "is_deleted"
-          ],
+          "columns": ["session_id", "is_deleted"],
           "isUnique": false
         },
         "agent_question_requests_user_deletion_index": {
           "name": "agent_question_requests_user_deletion_index",
-          "columns": [
-            "user_id",
-            "is_deleted"
-          ],
+          "columns": ["user_id", "is_deleted"],
           "isUnique": false
         },
         "agent_question_requests_session_tool_call_unique": {
           "name": "agent_question_requests_session_tool_call_unique",
-          "columns": [
-            "session_id",
-            "tool_call_id"
-          ],
+          "columns": ["session_id", "tool_call_id"],
           "isUnique": true
         },
         "agent_question_requests_active_session_unique": {
           "name": "agent_question_requests_active_session_unique",
-          "columns": [
-            "session_id"
-          ],
+          "columns": ["session_id"],
           "isUnique": true,
           "where": "\"agent_question_requests\".\"answered_at\" IS NULL AND NOT \"agent_question_requests\".\"is_deleted\""
         }
@@ -532,12 +478,8 @@
           "name": "agent_question_requests_user_id_users_id_fk",
           "tableFrom": "agent_question_requests",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -545,12 +487,8 @@
           "name": "agent_question_requests_session_id_agent_sessions_id_fk",
           "tableFrom": "agent_question_requests",
           "tableTo": "agent_sessions",
-          "columnsFrom": [
-            "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["session_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -642,10 +580,7 @@
       "indexes": {
         "agent_session_operations_active_generation_unique": {
           "name": "agent_session_operations_active_generation_unique",
-          "columns": [
-            "session_id",
-            "execution_generation"
-          ],
+          "columns": ["session_id", "execution_generation"],
           "isUnique": true,
           "where": "NOT \"agent_session_operations\".\"is_deleted\""
         }
@@ -655,12 +590,8 @@
           "name": "agent_session_operations_user_id_users_id_fk",
           "tableFrom": "agent_session_operations",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -668,12 +599,8 @@
           "name": "agent_session_operations_session_id_agent_sessions_id_fk",
           "tableFrom": "agent_session_operations",
           "tableTo": "agent_sessions",
-          "columnsFrom": [
-            "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["session_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -782,18 +709,12 @@
       "indexes": {
         "agent_session_turns_session_segment_start_index": {
           "name": "agent_session_turns_session_segment_start_index",
-          "columns": [
-            "session_id",
-            "segment",
-            "started_at"
-          ],
+          "columns": ["session_id", "segment", "started_at"],
           "isUnique": false
         },
         "agent_session_turns_active_session_unique": {
           "name": "agent_session_turns_active_session_unique",
-          "columns": [
-            "session_id"
-          ],
+          "columns": ["session_id"],
           "isUnique": true,
           "where": "\"agent_session_turns\".\"ended_at\" IS NULL AND NOT \"agent_session_turns\".\"is_deleted\""
         }
@@ -803,12 +724,8 @@
           "name": "agent_session_turns_user_id_users_id_fk",
           "tableFrom": "agent_session_turns",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -816,12 +733,8 @@
           "name": "agent_session_turns_session_id_agent_sessions_id_fk",
           "tableFrom": "agent_session_turns",
           "tableTo": "agent_sessions",
-          "columnsFrom": [
-            "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["session_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -1156,20 +1069,12 @@
       "indexes": {
         "agent_sessions_user_workspace_deletion_update_index": {
           "name": "agent_sessions_user_workspace_deletion_update_index",
-          "columns": [
-            "user_id",
-            "workspace_id",
-            "is_deleted",
-            "updated_at"
-          ],
+          "columns": ["user_id", "workspace_id", "is_deleted", "updated_at"],
           "isUnique": false
         },
         "agent_sessions_runner_status_index": {
           "name": "agent_sessions_runner_status_index",
-          "columns": [
-            "runner_id",
-            "status"
-          ],
+          "columns": ["runner_id", "status"],
           "isUnique": false
         }
       },
@@ -1178,12 +1083,8 @@
           "name": "agent_sessions_user_id_users_id_fk",
           "tableFrom": "agent_sessions",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -1191,12 +1092,8 @@
           "name": "agent_sessions_workspace_id_workspaces_id_fk",
           "tableFrom": "agent_sessions",
           "tableTo": "workspaces",
-          "columnsFrom": [
-            "workspace_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["workspace_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -1204,12 +1101,8 @@
           "name": "agent_sessions_runner_id_runners_id_fk",
           "tableFrom": "agent_sessions",
           "tableTo": "runners",
-          "columnsFrom": [
-            "runner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["runner_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -1217,12 +1110,8 @@
           "name": "agent_sessions_provider_credential_id_provider_credentials_id_fk",
           "tableFrom": "agent_sessions",
           "tableTo": "provider_credentials",
-          "columnsFrom": [
-            "provider_credential_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["provider_credential_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -1328,18 +1217,12 @@
       "indexes": {
         "attachment_fallbacks_user_deletion_index": {
           "name": "attachment_fallbacks_user_deletion_index",
-          "columns": [
-            "user_id",
-            "is_deleted"
-          ],
+          "columns": ["user_id", "is_deleted"],
           "isUnique": false
         },
         "attachment_fallbacks_user_modality_active_unique": {
           "name": "attachment_fallbacks_user_modality_active_unique",
-          "columns": [
-            "user_id",
-            "modality"
-          ],
+          "columns": ["user_id", "modality"],
           "isUnique": true,
           "where": "NOT \"attachment_fallbacks\".\"is_deleted\""
         }
@@ -1349,12 +1232,8 @@
           "name": "attachment_fallbacks_user_id_users_id_fk",
           "tableFrom": "attachment_fallbacks",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -1362,12 +1241,8 @@
           "name": "attachment_fallbacks_provider_credential_id_provider_credentials_id_fk",
           "tableFrom": "attachment_fallbacks",
           "tableTo": "provider_credentials",
-          "columnsFrom": [
-            "provider_credential_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["provider_credential_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -1462,19 +1337,12 @@
       "indexes": {
         "prompts_user_deletion_update_index": {
           "name": "prompts_user_deletion_update_index",
-          "columns": [
-            "user_id",
-            "is_deleted",
-            "updated_at"
-          ],
+          "columns": ["user_id", "is_deleted", "updated_at"],
           "isUnique": false
         },
         "prompts_user_normalized_name_active_unique": {
           "name": "prompts_user_normalized_name_active_unique",
-          "columns": [
-            "user_id",
-            "normalized_name"
-          ],
+          "columns": ["user_id", "normalized_name"],
           "isUnique": true,
           "where": "NOT \"prompts\".\"is_deleted\""
         }
@@ -1484,12 +1352,8 @@
           "name": "prompts_user_id_users_id_fk",
           "tableFrom": "prompts",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -1574,18 +1438,12 @@
       "indexes": {
         "provider_credential_workspaces_user_deletion_index": {
           "name": "provider_credential_workspaces_user_deletion_index",
-          "columns": [
-            "user_id",
-            "is_deleted"
-          ],
+          "columns": ["user_id", "is_deleted"],
           "isUnique": false
         },
         "provider_credential_workspaces_active_unique": {
           "name": "provider_credential_workspaces_active_unique",
-          "columns": [
-            "provider_credential_id",
-            "workspace_id"
-          ],
+          "columns": ["provider_credential_id", "workspace_id"],
           "isUnique": true,
           "where": "NOT \"provider_credential_workspaces\".\"is_deleted\""
         }
@@ -1595,12 +1453,8 @@
           "name": "provider_credential_workspaces_user_id_users_id_fk",
           "tableFrom": "provider_credential_workspaces",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -1608,12 +1462,8 @@
           "name": "provider_credential_workspaces_provider_credential_id_provider_credentials_id_fk",
           "tableFrom": "provider_credential_workspaces",
           "tableTo": "provider_credentials",
-          "columnsFrom": [
-            "provider_credential_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["provider_credential_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -1621,12 +1471,8 @@
           "name": "provider_credential_workspaces_workspace_id_workspaces_id_fk",
           "tableFrom": "provider_credential_workspaces",
           "tableTo": "workspaces",
-          "columnsFrom": [
-            "workspace_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["workspace_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -1764,27 +1610,17 @@
       "indexes": {
         "provider_credentials_user_provider_deletion_index": {
           "name": "provider_credentials_user_provider_deletion_index",
-          "columns": [
-            "user_id",
-            "provider",
-            "is_deleted"
-          ],
+          "columns": ["user_id", "provider", "is_deleted"],
           "isUnique": false
         },
         "provider_credentials_user_provider_fingerprint_unique": {
           "name": "provider_credentials_user_provider_fingerprint_unique",
-          "columns": [
-            "user_id",
-            "provider",
-            "credential_fingerprint"
-          ],
+          "columns": ["user_id", "provider", "credential_fingerprint"],
           "isUnique": true
         },
         "provider_credentials_user_model_default_unique": {
           "name": "provider_credentials_user_model_default_unique",
-          "columns": [
-            "user_id"
-          ],
+          "columns": ["user_id"],
           "isUnique": true,
           "where": "\"provider_credentials\".\"provider\" IN ('openai', 'openrouter', 'generic') AND \"provider_credentials\".\"is_default\" AND NOT \"provider_credentials\".\"is_deleted\""
         }
@@ -1794,12 +1630,8 @@
           "name": "provider_credentials_user_id_users_id_fk",
           "tableFrom": "provider_credentials",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -1893,27 +1725,18 @@
       "indexes": {
         "provider_quota_reset_receipts_user_deletion_index": {
           "name": "provider_quota_reset_receipts_user_deletion_index",
-          "columns": [
-            "user_id",
-            "is_deleted"
-          ],
+          "columns": ["user_id", "is_deleted"],
           "isUnique": false
         },
         "provider_quota_reset_receipts_active_request_unique": {
           "name": "provider_quota_reset_receipts_active_request_unique",
-          "columns": [
-            "user_id",
-            "provider_credential_id",
-            "client_request_id"
-          ],
+          "columns": ["user_id", "provider_credential_id", "client_request_id"],
           "isUnique": true,
           "where": "NOT \"provider_quota_reset_receipts\".\"is_deleted\""
         },
         "provider_quota_reset_receipts_pending_credential_unique": {
           "name": "provider_quota_reset_receipts_pending_credential_unique",
-          "columns": [
-            "provider_credential_id"
-          ],
+          "columns": ["provider_credential_id"],
           "isUnique": true,
           "where": "NOT \"provider_quota_reset_receipts\".\"is_deleted\" AND \"provider_quota_reset_receipts\".\"outcome\" IS NULL"
         }
@@ -1923,12 +1746,8 @@
           "name": "provider_quota_reset_receipts_user_id_users_id_fk",
           "tableFrom": "provider_quota_reset_receipts",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -1936,12 +1755,8 @@
           "name": "provider_quota_reset_receipts_provider_credential_id_provider_credentials_id_fk",
           "tableFrom": "provider_quota_reset_receipts",
           "tableTo": "provider_credentials",
-          "columnsFrom": [
-            "provider_credential_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["provider_credential_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -2022,17 +1837,12 @@
       "indexes": {
         "provider_quota_settings_user_deletion_index": {
           "name": "provider_quota_settings_user_deletion_index",
-          "columns": [
-            "user_id",
-            "is_deleted"
-          ],
+          "columns": ["user_id", "is_deleted"],
           "isUnique": false
         },
         "provider_quota_settings_active_credential_unique": {
           "name": "provider_quota_settings_active_credential_unique",
-          "columns": [
-            "provider_credential_id"
-          ],
+          "columns": ["provider_credential_id"],
           "isUnique": true,
           "where": "NOT \"provider_quota_settings\".\"is_deleted\""
         }
@@ -2042,12 +1852,8 @@
           "name": "provider_quota_settings_user_id_users_id_fk",
           "tableFrom": "provider_quota_settings",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -2055,12 +1861,8 @@
           "name": "provider_quota_settings_provider_credential_id_provider_credentials_id_fk",
           "tableFrom": "provider_quota_settings",
           "tableTo": "provider_credentials",
-          "columnsFrom": [
-            "provider_credential_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["provider_credential_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -2145,18 +1947,12 @@
       "indexes": {
         "runner_workspaces_user_deletion_index": {
           "name": "runner_workspaces_user_deletion_index",
-          "columns": [
-            "user_id",
-            "is_deleted"
-          ],
+          "columns": ["user_id", "is_deleted"],
           "isUnique": false
         },
         "runner_workspaces_active_unique": {
           "name": "runner_workspaces_active_unique",
-          "columns": [
-            "runner_id",
-            "workspace_id"
-          ],
+          "columns": ["runner_id", "workspace_id"],
           "isUnique": true,
           "where": "NOT \"runner_workspaces\".\"is_deleted\""
         }
@@ -2166,12 +1962,8 @@
           "name": "runner_workspaces_user_id_users_id_fk",
           "tableFrom": "runner_workspaces",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -2179,12 +1971,8 @@
           "name": "runner_workspaces_runner_id_runners_id_fk",
           "tableFrom": "runner_workspaces",
           "tableTo": "runners",
-          "columnsFrom": [
-            "runner_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["runner_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -2192,12 +1980,8 @@
           "name": "runner_workspaces_workspace_id_workspaces_id_fk",
           "tableFrom": "runner_workspaces",
           "tableTo": "workspaces",
-          "columnsFrom": [
-            "workspace_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["workspace_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -2443,49 +2227,36 @@
       "indexes": {
         "runners_user_deletion_index": {
           "name": "runners_user_deletion_index",
-          "columns": [
-            "user_id",
-            "is_deleted"
-          ],
+          "columns": ["user_id", "is_deleted"],
           "isUnique": false
         },
         "runners_active_machine_unique": {
           "name": "runners_active_machine_unique",
-          "columns": [
-            "machine_fingerprint"
-          ],
+          "columns": ["machine_fingerprint"],
           "isUnique": true,
           "where": "\"runners\".\"is_deleted\" = false"
         },
         "runners_active_token_digest_unique": {
           "name": "runners_active_token_digest_unique",
-          "columns": [
-            "token_digest"
-          ],
+          "columns": ["token_digest"],
           "isUnique": true,
           "where": "\"runners\".\"is_deleted\" = false AND \"runners\".\"token_digest\" <> ''"
         },
         "runners_active_activation_id_unique": {
           "name": "runners_active_activation_id_unique",
-          "columns": [
-            "activation_id"
-          ],
+          "columns": ["activation_id"],
           "isUnique": true,
           "where": "\"runners\".\"is_deleted\" = false AND \"runners\".\"activation_id\" IS NOT NULL"
         },
         "runners_active_token_unique": {
           "name": "runners_active_token_unique",
-          "columns": [
-            "token_hash"
-          ],
+          "columns": ["token_hash"],
           "isUnique": true,
           "where": "\"runners\".\"is_deleted\" = false"
         },
         "runners_user_default_unique": {
           "name": "runners_user_default_unique",
-          "columns": [
-            "user_id"
-          ],
+          "columns": ["user_id"],
           "isUnique": true,
           "where": "NOT \"runners\".\"is_deleted\" AND \"runners\".\"is_default\""
         }
@@ -2495,12 +2266,8 @@
           "name": "runners_user_id_users_id_fk",
           "tableFrom": "runners",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -2609,24 +2376,17 @@
       "indexes": {
         "sessions_token_unique": {
           "name": "sessions_token_unique",
-          "columns": [
-            "token"
-          ],
+          "columns": ["token"],
           "isUnique": true
         },
         "sessions_user_id_index": {
           "name": "sessions_user_id_index",
-          "columns": [
-            "user_id"
-          ],
+          "columns": ["user_id"],
           "isUnique": false
         },
         "sessions_deletion_expiry_index": {
           "name": "sessions_deletion_expiry_index",
-          "columns": [
-            "is_deleted",
-            "expires_at"
-          ],
+          "columns": ["is_deleted", "expires_at"],
           "isUnique": false
         }
       },
@@ -2635,12 +2395,8 @@
           "name": "sessions_user_id_users_id_fk",
           "tableFrom": "sessions",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -2727,9 +2483,7 @@
       "indexes": {
         "users_google_subject_unique": {
           "name": "users_google_subject_unique",
-          "columns": [
-            "google_subject"
-          ],
+          "columns": ["google_subject"],
           "isUnique": true
         }
       },
@@ -2810,26 +2564,18 @@
       "indexes": {
         "workspaces_user_deletion_index": {
           "name": "workspaces_user_deletion_index",
-          "columns": [
-            "user_id",
-            "is_deleted"
-          ],
+          "columns": ["user_id", "is_deleted"],
           "isUnique": false
         },
         "workspaces_user_active_name_unique": {
           "name": "workspaces_user_active_name_unique",
-          "columns": [
-            "user_id",
-            "name"
-          ],
+          "columns": ["user_id", "name"],
           "isUnique": true,
           "where": "NOT \"workspaces\".\"is_deleted\""
         },
         "workspaces_user_default_unique": {
           "name": "workspaces_user_default_unique",
-          "columns": [
-            "user_id"
-          ],
+          "columns": ["user_id"],
           "isUnique": true,
           "where": "NOT \"workspaces\".\"is_deleted\" AND \"workspaces\".\"is_default\""
         }
@@ -2839,12 +2585,8 @@
           "name": "workspaces_user_id_users_id_fk",
           "tableFrom": "workspaces",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }

@@ -5,7 +5,10 @@ import {
 } from "../../shared/agent-loop.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
-import { testApiKeyCredential } from "./agent-model-credential-fixtures.ts";
+import {
+  TEST_CREDENTIAL_FINGERPRINT,
+  testApiKeyCredential,
+} from "./agent-model-credential-fixtures.ts";
 import { captureRejection, requireError } from "./promise-test-helpers.ts";
 import { cachedTextMessage } from "./prompt-cache-fixtures.ts";
 
@@ -104,6 +107,7 @@ function openRouterModel(
     credential: testApiKeyCredential("sk-or-secret", {
       id: "test-credential",
     }),
+    credentialFingerprint: TEST_CREDENTIAL_FINGERPRINT,
     fetch: provider.fetch,
     maxOutputTokens: null,
     model: "openai/gpt-4.1-mini",

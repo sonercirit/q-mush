@@ -48,6 +48,29 @@ export function signedReplayHarness(): AnthropicHarness {
   return anthropicHarness([doneAnthropicEvents()]);
 }
 
+// Replays a captured step as the assistant turn of a fresh request so tests
+// can assert exactly which blocks the provider receives.
+export async function capturedReplayRequest(
+  harness: AnthropicHarness,
+  step: Awaited<ReturnType<AnthropicHarness["complete"]>>,
+  followUp: AgentConversationMessage,
+): Promise<unknown> {
+  const assistant: AssistantMessage = {
+    content: step.content,
+    role: "assistant",
+    toolCalls: step.toolCalls,
+  };
+  if (step.providerReplay !== undefined) {
+    Object.assign(assistant, { providerReplay: step.providerReplay });
+  }
+  await harness.complete([
+    { content: "Go", role: "user" },
+    assistant,
+    followUp,
+  ]);
+  return capturedAssistantContent(harness, 1);
+}
+
 export async function capturedAssistantContent(
   harness: AnthropicHarness,
   requestIndex = 0,

@@ -87,7 +87,7 @@ function initialTextBlock(
 ): MutableTextBlock | undefined {
   const text = optionalBlockString(block["text"]);
   const citations = fields["citations"];
-  if (text === undefined || (text.length > 0 && text.trim().length === 0)) {
+  if (text === undefined) {
     return undefined;
   }
   if (citations === undefined || citations === null) {
@@ -246,7 +246,9 @@ function completedReplayBlock(block: MutableReplayBlock): ReplayCompletion {
       return completedStringBlock(block, block.data);
     case "text": {
       const citations = block.citations;
-      return block.text.trim().length === 0
+      // Empty text carries no assistant content; whitespace-only text does,
+      // so it stays in the replay and is withheld only from requests.
+      return block.text.length === 0
         ? { valid: true }
         : {
             block: {

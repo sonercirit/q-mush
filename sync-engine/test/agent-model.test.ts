@@ -1,5 +1,4 @@
 import { describe, expect, test } from "vitest";
-import type { AgentModelStep } from "../../shared/agent-loop.ts";
 import { AGENT_SYSTEM_PROMPT } from "../../shared/agent-prompt.ts";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import { isRecord } from "../../shared/auth-model.ts";
@@ -7,33 +6,38 @@ import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import { createJsonResponse } from "../../sync-engine/http.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import {
+  TEST_CREDENTIAL_FINGERPRINT,
   testApiKeyCredential,
-  testOpenAiOAuthCredential,
 } from "./agent-model-credential-fixtures.ts";
+import {
+  codexEventResponse,
+  codexModelOptions,
+  completeHello,
+  DONE_CODEX_OUTPUT,
+} from "./codex-response-fixtures.ts";
 import { captureRejection, requireError } from "./promise-test-helpers.ts";
 import {
   cachedTextMessage,
   chatCompletionsDone,
 } from "./prompt-cache-fixtures.ts";
-import { expectDoneStep } from "./provider-step-fixtures.ts";
 
 type ModelOptions = ConstructorParameters<typeof ChatCompletionsAgentModel>[0];
 
-const DONE_CODEX_OUTPUT = {
-  content: [{ text: "Done.", type: "output_text" }],
-  type: "message",
-};
 const IMAGE_MESSAGE = {
   content: "Implement this design",
   images: [TEST_AGENT_IMAGE],
   role: "user" as const,
 };
-function apiKeyCredential(secret: string) {
-  return testApiKeyCredential(secret);
+// Every model here authenticates with one fixture credential.
+function apiKeyOptions(secret: string) {
+  return {
+    credential: testApiKeyCredential(secret),
+    credentialFingerprint: TEST_CREDENTIAL_FINGERPRINT,
+  };
 }
 
 const OPENROUTER_IMAGE_OPTIONS = {
-  credential: apiKeyCredential("sk-or-secret"),
+  ...apiKeyOptions("sk-or-secret"),
   maxOutputTokens: null,
   model: "openai/gpt-4.1-mini",
   provider: "openrouter" as const,
@@ -125,11 +129,10 @@ function genericModel(
     readonly secret: string;
   },
 ): ChatCompletionsAgentModel {
+  const base = apiKeyOptions(options.secret);
   return capturedModel(capture, {
-    credential: {
-      ...apiKeyCredential(options.secret),
-      baseUrl: options.baseUrl,
-    },
+    ...base,
+    credential: { ...base.credential, baseUrl: options.baseUrl },
     maxOutputTokens: null,
     model: options.model,
     provider: "generic",
@@ -160,14 +163,9 @@ function respondingModel(
 }
 
 function codexModel(
-  options: Omit<ModelOptions, "credential" | "maxOutputTokens" | "provider">,
+  options: Parameters<typeof codexModelOptions>[0],
 ): ChatCompletionsAgentModel {
-  return new ChatCompletionsAgentModel({
-    ...options,
-    credential: testOpenAiOAuthCredential(),
-    maxOutputTokens: null,
-    provider: "openai",
-  });
+  return new ChatCompletionsAgentModel(codexModelOptions(options));
 }
 
 function capturedCodexModel(
@@ -176,26 +174,6 @@ function capturedCodexModel(
   model = "gpt-5-codex",
 ): ChatCompletionsAgentModel {
   return codexModel({ fetch: captureRequest(capture, () => response), model });
-}
-
-function codexEventResponse(
-  output: readonly unknown[],
-  prefix = "",
-  usage?: Readonly<Record<string, number>>,
-): Response {
-  const completed = {
-    response: { output, ...(usage === undefined ? {} : { usage }) },
-    type: "response.completed",
-  };
-  return new Response(
-    `${prefix}data: ${JSON.stringify(completed)}\n\ndata: [DONE]\n\n`,
-  );
-}
-
-function completeHello(
-  model: ChatCompletionsAgentModel,
-): Promise<AgentModelStep> {
-  return model.complete([{ content: "Hello", role: "user" }]);
 }
 
 describe("chat completions agent model", () => {
@@ -210,7 +188,7 @@ describe("chat completions agent model", () => {
       {
         ...OPENROUTER_IMAGE_OPTIONS,
         credential: {
-          ...apiKeyCredential("sk-or-secret"),
+          ...OPENROUTER_IMAGE_OPTIONS.credential,
           accountId: "a-1",
         },
         reasoningEffort: "high",
@@ -338,11 +316,9 @@ describe("chat completions agent model", () => {
   }
 
   test("maps all OpenRouter routing selections to provider preferences", async () => {
+    const sorts = ["price", "throughput", "latency", "exacto"] as const;
     const selections = [
-      [{ sort: "price", type: "sort" }, { sort: "price" }],
-      [{ sort: "throughput", type: "sort" }, { sort: "throughput" }],
-      [{ sort: "latency", type: "sort" }, { sort: "latency" }],
-      [{ sort: "exacto", type: "sort" }, { sort: "exacto" }],
+      ...sorts.map((sort) => [{ sort, type: "sort" }, { sort }] as const),
       [{ type: "no_fallbacks" }, { allow_fallbacks: false }],
       [
         { tag: "google-vertex/us", type: "order" },
@@ -384,9 +360,8 @@ describe("chat completions agent model", () => {
   test("filters definitions to the selected tools and skills", async () => {
     const capture = new RequestCapture();
     const selectedTools = ["read", "brave_search"] as const;
-    const model = openRouterModelWithTools(capture, selectedTools);
 
-    await completeHello(model);
+    await completeHello(openRouterModelWithTools(capture, selectedTools));
 
     expect(capturedToolNames(await capturedBody(capture))).toEqual(
       selectedTools,
@@ -395,9 +370,8 @@ describe("chat completions agent model", () => {
 
   test("omits the tool protocol when none are selected", async () => {
     const capture = new RequestCapture();
-    const model = openRouterModelWithTools(capture, []);
 
-    await completeHello(model);
+    await completeHello(openRouterModelWithTools(capture, []));
 
     const body = await capturedBody(capture);
     expect(body).not.toMatchObject({ tool_choice: "auto" });
@@ -465,7 +439,7 @@ describe("chat completions agent model", () => {
     const capture = new RequestCapture();
     const model = respondingModel(
       {
-        credential: apiKeyCredential("sk-openai-secret"),
+        ...apiKeyOptions("sk-openai-secret"),
         maxOutputTokens: null,
         model: "gpt-5-codex",
         provider: "openai",
@@ -489,10 +463,7 @@ describe("chat completions agent model", () => {
       [
         {
           summary: [
-            {
-              text: "I checked the prior tool result.",
-              type: "summary_text",
-            },
+            { text: "I checked the prior tool result.", type: "summary_text" },
           ],
           type: "reasoning",
         },
@@ -559,59 +530,9 @@ describe("chat completions agent model", () => {
     expect(JSON.stringify(body)).toContain("previous-call");
   });
 
-  test("uses streamed Codex output when the completed response omits it", async () => {
-    const model = codexModel({
-      fetch: () =>
-        Promise.resolve(
-          new Response(
-            [
-              'event: response.reasoning_summary_text.delta\ndata: {"type":"response.reasoning_summary_text.delta","output_index":0,"summary_index":0,"delta":"I considered"}',
-              'event: response.reasoning_summary_text.delta\ndata: {"type":"response.reasoning_summary_text.delta","output_index":0,"summary_index":0,"delta":" the request."}',
-              'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"Hello"}',
-              'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":" there."}',
-              'event: response.output_item.added\ndata: {"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"function-1","call_id":"call-1","name":"read","arguments":""}}',
-              'event: response.function_call_arguments.delta\ndata: {"type":"response.function_call_arguments.delta","output_index":1,"delta":"{\\"path\\":"}',
-              'event: response.function_call_arguments.delta\ndata: {"type":"response.function_call_arguments.delta","output_index":1,"delta":"\\"src/index.ts\\"}"}',
-              'event: response.completed\ndata: {"type":"response.completed","response":{"output":[]}}',
-              "data: [DONE]",
-              "",
-            ].join("\n\n"),
-          ),
-        ),
-      model: "codex-test-model",
-      reasoningEffort: "max",
-    });
-
-    expect(await completeHello(model)).toEqual({
-      content: "Hello there.",
-      contextTokens: null,
-      costUsd: null,
-      thinking: "I considered the request.",
-      tokenUsage: null,
-      toolCalls: [
-        {
-          arguments: '{"path":"src/index.ts"}',
-          id: "call-1",
-          name: "read",
-        },
-      ],
-    });
-  });
-
-  test("accepts Codex event streams without a local response-size limit", async () => {
-    const padding = `:${"x".repeat(10 * 1_024 * 1_024)}\n\n`;
-    const model = codexModel({
-      fetch: () =>
-        Promise.resolve(codexEventResponse([DONE_CODEX_OUTPUT], padding)),
-      model: "gpt-5-codex",
-    });
-
-    expectDoneStep(await completeHello(model));
-  });
-
   test("shows the provider's error message", async () => {
     const model = new ChatCompletionsAgentModel({
-      credential: apiKeyCredential("secret"),
+      ...apiKeyOptions("secret"),
       maxOutputTokens: null,
       fetch: () =>
         Promise.resolve(

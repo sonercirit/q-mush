@@ -57,14 +57,6 @@ function toolUseCall(
   };
 }
 
-function completeToolArguments(input: unknown): string {
-  try {
-    return JSON.stringify(input);
-  } catch {
-    return "{}";
-  }
-}
-
 function readTruncation(delta: unknown): AgentStepTruncation | undefined {
   if (!isRecord(delta)) return undefined;
   const stopReason = delta["stop_reason"];
@@ -262,11 +254,10 @@ export class AnthropicStreamAccumulator extends BufferedAccumulator {
         );
         return;
       case "tool_use": {
-        const input = block["input"] ?? {};
-        this.registerToolCall(
-          index,
-          toolUseCall(block, completeToolArguments(input)),
-        );
+        // A parsed JSON body always re-serializes; the whole event came from
+        // JSON.parse.
+        const input = JSON.stringify(block["input"] ?? {});
+        this.registerToolCall(index, toolUseCall(block, input));
         return;
       }
       default:

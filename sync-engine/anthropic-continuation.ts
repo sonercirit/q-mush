@@ -13,8 +13,9 @@ const INVALID_PAUSE =
   "The Anthropic response paused with content that cannot be continued safely";
 const MAX_PAUSE_CONTINUATIONS = 5;
 
-const ANTHROPIC_PAUSE_LIMIT =
-  "The Anthropic response remained paused after 5 continuations";
+const ANTHROPIC_PAUSE_LIMIT = `The Anthropic response remained paused after ${String(
+  MAX_PAUSE_CONTINUATIONS,
+)} continuations`;
 
 interface AnthropicContinuationOutput {
   readonly content: string;
@@ -79,33 +80,40 @@ function continuationAssistant(
 }
 
 function completedStep(options: {
-  readonly blocks: AnthropicAssistantReplay["blocks"][number][];
   readonly content: string;
-  readonly container: string | undefined;
   readonly costUsd: number | null;
-  readonly identity: ReplayIdentity;
+  readonly providerReplay: AnthropicAssistantReplay | undefined;
   readonly step: AgentModelStep;
   readonly thinking: string;
   readonly tokenUsage: AgentTokenUsage | null;
 }): AgentModelStep {
-  const { identity, step } = options;
+  const { providerReplay, step } = options;
   return {
     content: options.content,
     contextTokens: step.contextTokens,
     costUsd: options.costUsd,
-    providerReplay: createAnthropicAssistantReplay(
-      options.blocks,
-      identity,
-      options.container,
-    ),
-    ...(step.providerContinuation === undefined
-      ? {}
-      : { providerContinuation: step.providerContinuation }),
+    ...(providerReplay === undefined ? {} : { providerReplay }),
     thinking: options.thinking,
     tokenUsage: options.tokenUsage,
     toolCalls: step.toolCalls,
     ...(step.truncation === undefined ? {} : { truncation: step.truncation }),
   };
+}
+
+function combinableReplay(
+  step: AgentModelStep,
+  identity: ReplayIdentity,
+  container: string | undefined,
+): AnthropicAssistantReplay | undefined {
+  const replay = step.providerReplay;
+  return replay !== undefined &&
+    sameReplayIdentity(replay, identity) &&
+    (replay.container === undefined ||
+      container === undefined ||
+      replay.container === container) &&
+    anthropicReplayMatchesAssistant(replay, step.content, step.toolCalls)
+    ? replay
+    : undefined;
 }
 
 export async function completeAnthropicPauseTurns(
@@ -124,11 +132,48 @@ export async function completeAnthropicPauseTurns(
   let costUsd: number | null | undefined;
   let thinking = "";
   let tokenUsage: AgentTokenUsage | null | undefined;
-  const blocks: AnthropicAssistantReplay["blocks"][number][] = [];
+  let blocks: readonly AnthropicAssistantReplay["blocks"][number][] = [];
   let identity: ReplayIdentity | undefined;
   let continuations = 0;
 
   for (;;) {
+    const paused = step.providerContinuation === "anthropic_pause_turn";
+    content += step.content;
+    thinking += step.thinking;
+    costUsd =
+      costUsd === undefined ? step.costUsd : addCost(costUsd, step.costUsd);
+    tokenUsage =
+      tokenUsage === undefined
+        ? step.tokenUsage
+        : addUsage(tokenUsage, step.tokenUsage);
+
+    if (!paused) {
+      // The terminal step ends the turn locally, so an unusable replay only
+      // costs a future cache prefix; nothing partial reaches the provider.
+      // Reaching this branch means at least one paused step set the identity.
+      const replay =
+        identity === undefined
+          ? undefined
+          : combinableReplay(step, identity, container);
+      return completedStep({
+        content,
+        costUsd,
+        providerReplay:
+          identity === undefined || replay === undefined
+            ? undefined
+            : createAnthropicAssistantReplay(
+                [...blocks, ...replay.blocks],
+                identity,
+                container ?? replay.container,
+              ),
+        step,
+        thinking,
+        tokenUsage,
+      });
+    }
+
+    // Every further paused step is replayed back to the provider verbatim, so
+    // its blocks must reproduce the assistant message exactly.
     const replay = pauseReplay(step);
     if (identity !== undefined && !sameReplayIdentity(replay, identity)) {
       throw new Error(INVALID_PAUSE);
@@ -140,29 +185,7 @@ export async function completeAnthropicPauseTurns(
       }
       container = replay.container;
     }
-    blocks.push(...replay.blocks);
-    content += step.content;
-    thinking += step.thinking;
-    costUsd =
-      costUsd === undefined ? step.costUsd : addCost(costUsd, step.costUsd);
-    tokenUsage =
-      tokenUsage === undefined
-        ? step.tokenUsage
-        : addUsage(tokenUsage, step.tokenUsage);
-
-    const paused = step.providerContinuation === "anthropic_pause_turn";
-    if (!paused) {
-      return completedStep({
-        blocks,
-        container,
-        content,
-        costUsd,
-        identity,
-        step,
-        thinking,
-        tokenUsage,
-      });
-    }
+    blocks = [...blocks, ...replay.blocks];
     if (step.toolCalls.length > 0 || step.truncation !== undefined) {
       throw new Error(INVALID_PAUSE);
     }

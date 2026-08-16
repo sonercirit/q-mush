@@ -5,12 +5,8 @@ import {
 } from "../../shared/agent-tools.ts";
 import { agentMessages } from "../../shared/database/schema.ts";
 import { SYSTEM_ID } from "../../shared/ids.ts";
-import type {
-  AgentSessionDetail,
-  AgentSessionMessage,
-} from "../../shared/session-model.ts";
+import { createTestUserImageMessage } from "../../shared/test/agent-image-message-fixtures.ts";
 import { RunnerStore } from "../../sync-engine/runner-store.ts";
-import type { SessionStore } from "../../sync-engine/session-store.ts";
 import { endGenerationSessionTurn } from "../../sync-engine/session-turn-store.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import {
@@ -37,79 +33,18 @@ import {
   STORE_RUNNER_ID,
   STORE_SESSION_ID,
 } from "./session-store-test-fixtures.ts";
+import {
+  expectedTranscriptRoles,
+  expectPersistedTurns,
+  initialConversation,
+  testSessionMessageRoles,
+} from "./session-store-transcript-test-helpers.ts";
 const RUNNER_ID = STORE_RUNNER_ID;
 const SESSION_ID = STORE_SESSION_ID;
 const USER_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000044";
 const THINKING_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000045";
 const ASSISTANT_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000046";
 const TOOL_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000047";
-
-function testUserImageMessage(
-  id: string,
-  content: string,
-): AgentSessionMessage {
-  const baseMessage = {
-    content,
-    createdAt: 2,
-    id,
-  };
-  const toolFields = {
-    toolCallId: null,
-    toolCalls: [],
-    toolName: null,
-  } as const;
-  return {
-    ...baseMessage,
-    ...toolFields,
-    images: [TEST_AGENT_IMAGE],
-    role: "user",
-  };
-}
-
-function testSessionMessageRoles(store: SessionStore) {
-  return store.get(TEST_USER_ID, SESSION_ID)?.messages.map(({ role }) => role);
-}
-
-function expectPersistedTurns(
-  actual: AgentSessionDetail["turns"],
-  firstBoundaryMessageId: string | undefined,
-  last: Readonly<{
-    readonly endedAt: number | null;
-    readonly startedAt: number;
-  }>,
-): void {
-  expect(actual).toEqual([
-    expect.objectContaining({
-      boundaryMessageId: firstBoundaryMessageId,
-      endedAt: TEST_NOW + 3,
-      startedAt: TEST_NOW,
-    }),
-    expect.objectContaining(last),
-  ]);
-}
-
-function expectedTranscriptRoles(
-  includeError: boolean,
-  includeFollowUp = false,
-): readonly string[] {
-  return [
-    "user",
-    "assistant",
-    ...(includeError ? ["error"] : []),
-    "tool",
-    ...(includeFollowUp ? ["user"] : []),
-  ];
-}
-
-function initialConversation() {
-  return [
-    {
-      content: "Inspect the repository\nand make it shine",
-      images: [TEST_AGENT_IMAGE],
-      role: "user" as const,
-    },
-  ];
-}
 
 describe("session store", () => {
   test("persists a session transcript and lifecycle", () => {
@@ -135,7 +70,8 @@ describe("session store", () => {
     expect(created.title).toBe("Inspect the repository");
     expect(created.messages).toEqual([
       {
-        ...testUserImageMessage(
+        ...createTestUserImageMessage(
+          TEST_AGENT_IMAGE,
           USER_MESSAGE_ID,
           "Inspect the repository\nand make it shine",
         ),
