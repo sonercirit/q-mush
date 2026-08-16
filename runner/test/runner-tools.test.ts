@@ -118,6 +118,27 @@ describe("runner tools", () => {
     );
   });
 
+  test("keeps empty write content and edit replacements valid", async () => {
+    const root = await workspace();
+    await executeRunnerTool(root, "write", {
+      content: "seed",
+      path: "empty.txt",
+    });
+    await executeRunnerTool(root, "edit", {
+      edits: [{ newText: "", oldText: "seed" }],
+      path: "empty.txt",
+    });
+    const emptyPath = join(root, "empty.txt");
+    expect(await readFile(emptyPath, "utf8")).toBe("");
+
+    const writeResult = await executeRunnerTool(root, "write", {
+      content: "",
+      path: "empty.txt",
+    });
+    expect(writeResult).toContain("Wrote 0 bytes");
+    expect(await Bun.file(emptyPath).text()).toBe("");
+  });
+
   test("loads explainable files inside and outside the workspace", async () => {
     const root = await explainWorkspace();
     const outside = await workspace();
@@ -365,6 +386,8 @@ describe("runner tools", () => {
       controller.signal,
       undefined,
       {
+        // Container execution maps host paths through this hook; use it to
+        // fire cancellation during the same asynchronous preparation stage.
         mapAbsolutePath: (mapped) => {
           controller.abort();
           return mapped;

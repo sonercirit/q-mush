@@ -52,12 +52,14 @@ export function readIdentifier(value: unknown): string | undefined {
 
 export function readBoundedString(
   value: unknown,
-  maximumLength: number,
-  allowEmpty = false,
+  options: {
+    readonly allowEmpty?: boolean;
+    readonly maximumLength: number;
+  },
 ): string | undefined {
   return typeof value === "string" &&
-    (allowEmpty || value.length > 0) &&
-    value.length <= maximumLength
+    (options.allowEmpty === true || value.length > 0) &&
+    value.length <= options.maximumLength
     ? value
     : undefined;
 }

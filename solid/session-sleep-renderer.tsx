@@ -6,8 +6,8 @@ import { renderStructuredCode } from "./session-syntax.tsx";
 
 const MILLISECONDS_PER_SECOND = 1_000;
 // Display-only sanity bound: use whichever bound is larger. Transcripts
-// recorded before the global limit lowered the schema maximum to 1,800s
-// legitimately contain sleeps up to 3,600s and need friendly rendering.
+// recorded before the schema maximum changed from 3,600s to the global
+// tool limit can legitimately contain hour-long sleeps.
 const MAXIMUM_SLEEP_DURATION_SECONDS = Math.max(
   3_600,
   MAXIMUM_TOOL_EXECUTION_SECONDS,

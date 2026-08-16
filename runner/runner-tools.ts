@@ -17,12 +17,10 @@ import {
   executeParallelResultCall,
   mapWithParallelConcurrency,
 } from "../shared/parallel.ts";
-import type {
-  RunnerCommandOutputDelta,
-  RunnerCommandResult,
-} from "../shared/runner-command-broker.ts";
+import type { RunnerCommandOutputDelta } from "../shared/runner-command-broker.ts";
 import { MAXIMUM_TOOL_EXECUTION_SECONDS } from "../shared/tool-limits.ts";
 import { MAXIMUM_TOOL_OUTPUT_LINES } from "../shared/tool-output-limits.ts";
+import type { RunnerCommandResult } from "../shared/tool-stream.ts";
 import {
   createPageFetchRunnerTool,
   PAGE_FETCH_TOOL_NAME,
@@ -270,7 +268,7 @@ async function writeTool(
     context.arguments_,
     "content",
     MAX_FILE_BYTES,
-    true,
+    { allowEmpty: true },
   );
   // Cancellation may fire while path resolution is in flight; do not begin
   // any filesystem mutation after the caller has already stopped waiting.
@@ -312,7 +310,9 @@ function editReplacements(
     }
 
     return {
-      newText: requiredString(replacement, "newText", MAX_FILE_BYTES, true),
+      newText: requiredString(replacement, "newText", MAX_FILE_BYTES, {
+        allowEmpty: true,
+      }),
       oldText: requiredString(replacement, "oldText", MAX_FILE_BYTES),
     };
   });

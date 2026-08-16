@@ -1,3 +1,4 @@
+import { createComponent } from "solid-js";
 import { expect, test } from "vitest";
 import {
   AGENT_SESSION_TOOL_NAMES,
@@ -15,9 +16,9 @@ function mountExpandedPicker(
   tools: readonly AgentSessionToolName[],
   onChange: (nextTools: readonly AgentSessionToolName[]) => void,
 ): HTMLDivElement {
-  const pickerProps = { disabled: false, onChange, tools };
   const container = mountTestView(
-    () => <SessionToolPicker {...pickerProps} />,
+    () =>
+      createComponent(SessionToolPicker, { disabled: false, onChange, tools }),
     disposals,
   );
   const expand = container.querySelector("[data-tool-picker-toggle='true']");

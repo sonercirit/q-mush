@@ -13,10 +13,10 @@ import {
   RUNNER_TOOL_OUTPUT_SPILL_COMMAND,
   RUNNER_TOOL_OUTPUT_SPILL_CONTENT_ARGUMENT,
   type RunnerCommandArguments,
-  type RunnerCommandResult,
   type RunnerToolCommand,
 } from "../shared/runner-command-broker.ts";
 import { RUNNER_DIRECTORY_COMMAND } from "../shared/runner-directory-model.ts";
+import type { RunnerCommandResult } from "../shared/tool-stream.ts";
 import { readBoundedString } from "../shared/validation.ts";
 import { loadRunnerAgentFile } from "./runner-agent-file.ts";
 import { executeAttachmentCommand } from "./runner-attachments.ts";
@@ -40,7 +40,7 @@ function recordString(
   maximumLength: number,
 ): string | undefined {
   const value = record[key];
-  return readBoundedString(value, maximumLength);
+  return readBoundedString(value, { maximumLength });
 }
 
 export function readRunnerCommand(value: unknown): RunnerToolCommand {

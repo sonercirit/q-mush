@@ -165,8 +165,8 @@ test("renders sleep calls and results with human-readable durations", () => {
       id: "seconds-maximum",
     },
     {
-      // Transcripts recorded before the 1,800s schema maximum keep their
-      // friendly rendering up to the historical 3,600s bound.
+      // Transcripts recorded under the historical 3,600s schema keep
+      // their friendly rendering.
       arguments: '{"durationSeconds":3600}',
       duration: "1h",
       id: "seconds-historical-hour",

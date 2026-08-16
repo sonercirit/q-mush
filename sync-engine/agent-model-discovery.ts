@@ -14,6 +14,13 @@ import {
   withAnthropicCapabilities,
 } from "./agent-model-discovery-anthropic.ts";
 import {
+  AgentModelDiscoveryError,
+  fetchDiscoveryJson,
+  modelDiscoveryError,
+  safeAgentModelDiscoveryError,
+  type AgentModelDiscoveryFetch,
+} from "./agent-model-discovery-fetch.ts";
+import {
   modelOption,
   reasoningEfforts,
 } from "./agent-model-discovery-option.ts";
@@ -23,15 +30,12 @@ import {
   type AgentProviderCredential,
 } from "./agent-model.ts";
 import { genericProviderEndpoint } from "./generic-provider-url.ts";
-import { isProviderCredentialRejection } from "./provider-error.ts";
 
 const OPENAI_MODELS_URL = "https://api.openai.com/v1/models";
 const OPENAI_CODEX_MODELS_URL = "https://chatgpt.com/backend-api/codex/models";
 const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models/user";
 const MODEL_CLIENT_VERSION = "1.0.0";
-const MAXIMUM_RESPONSE_LENGTH = 5 * 1024 * 1024;
 const MAXIMUM_MODEL_METADATA_INPUT_ITEMS = 100;
-const MODEL_CATALOG_TOO_LARGE = "The provider model catalog was too large";
 const MODEL_CATALOG_HAS_TOO_MANY_OPTIONS =
   "The provider model catalog has too many options";
 const INCOMPATIBLE_OPENAI_MODEL_MARKERS = [
@@ -47,8 +51,6 @@ const INCOMPATIBLE_OPENAI_MODEL_MARKERS = [
   "tts",
   "whisper",
 ] as const;
-
-export type AgentModelDiscoveryFetch = (request: Request) => Promise<Response>;
 
 export type AgentModelDiscoverer = (
   provider: ProviderId,
@@ -70,40 +72,6 @@ export async function discoverModelOption(
 interface PrioritizedModel {
   readonly model: AgentModelOption;
   readonly priority: number;
-}
-
-export class AgentModelDiscoveryError extends Error {
-  readonly status: number | undefined;
-
-  constructor(message: string, status?: number) {
-    super(message);
-    this.name = "AgentModelDiscoveryError";
-    this.status = status;
-  }
-}
-
-export function isCredentialRejectionError(error: unknown): boolean {
-  return (
-    isProviderCredentialRejection(error) ||
-    (error instanceof AgentModelDiscoveryError &&
-      (error.status === 401 ||
-        error.status === 402 ||
-        error.status === 403 ||
-        error.status === 429))
-  );
-}
-
-function modelDiscoveryError(
-  message: string,
-  status?: number,
-): AgentModelDiscoveryError {
-  return new AgentModelDiscoveryError(message, status);
-}
-
-export function safeAgentModelDiscoveryError(error: unknown): string {
-  return error instanceof AgentModelDiscoveryError
-    ? error.message
-    : "Model discovery failed because the provider is unavailable";
 }
 
 function uniqueModels(
@@ -312,25 +280,6 @@ function readAnthropicCatalog(items: readonly unknown[]): {
 
 // Dual-format endpoints publish `supported_reasoning_efforts` on their
 // OpenAI-style listing at the same base URL.
-async function fetchDiscoveryJson(
-  fetch: AgentModelDiscoveryFetch,
-  url: URL | string,
-  headers: Headers,
-  signal?: AbortSignal,
-): Promise<unknown> {
-  const timeout = AbortSignal.timeout(10_000);
-  return readProviderResponse(
-    await fetch(
-      new Request(url, {
-        headers,
-        method: "GET",
-        signal:
-          signal === undefined ? timeout : AbortSignal.any([signal, timeout]),
-      }),
-    ),
-  );
-}
-
 async function mergeOpenAiListedEfforts(
   catalog: AgentModelCatalog,
   unknownEffortIds: ReadonlySet<string>,
@@ -404,57 +353,6 @@ function readOpenAiCatalog(value: unknown): AgentModelCatalog {
         model !== undefined && supportsOpenAiAgentLoop(model.id),
     );
   return createCatalog(models);
-}
-
-async function readProviderResponse(response: Response): Promise<unknown> {
-  if (!response.ok) {
-    throw modelDiscoveryError(
-      `Model discovery failed with status ${String(response.status)}`,
-      response.status,
-    );
-  }
-
-  const declaredLength = Number(response.headers.get("content-length"));
-
-  if (
-    Number.isFinite(declaredLength) &&
-    declaredLength > MAXIMUM_RESPONSE_LENGTH
-  ) {
-    throw modelDiscoveryError(MODEL_CATALOG_TOO_LARGE);
-  }
-
-  const reader = response.body?.getReader();
-  if (reader === undefined) {
-    return null;
-  }
-  const bytes = Buffer.allocUnsafe(MAXIMUM_RESPONSE_LENGTH);
-  let length = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-      if (length + value.byteLength > MAXIMUM_RESPONSE_LENGTH) {
-        await reader.cancel().catch(() => undefined);
-        throw modelDiscoveryError(MODEL_CATALOG_TOO_LARGE);
-      }
-      bytes.set(value, length);
-      length += value.byteLength;
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  try {
-    const body = new TextDecoder("utf-8", { fatal: true }).decode(
-      bytes.subarray(0, length),
-    );
-    const value: unknown = JSON.parse(body);
-    return value;
-  } catch {
-    throw modelDiscoveryError("The provider returned an invalid model catalog");
-  }
 }
 
 function discoveryRequest(

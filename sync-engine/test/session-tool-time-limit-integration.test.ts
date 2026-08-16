@@ -59,10 +59,10 @@ async function withLimitSetup(
   }
 }
 
-// Let loadModels finish, start the first scripted model step, and enter its
-// tool dispatch before advancing the newly registered deadline timer.
-async function advancePastLimit(): Promise<void> {
-  await vi.advanceTimersByTimeAsync(0);
+async function advancePastLimit(dispatched: Promise<void>): Promise<void> {
+  // Never move the fake clock until the runner has observably received the
+  // actual tool call and its per-call deadline timer therefore exists.
+  await dispatched;
   await vi.advanceTimersByTimeAsync(MAXIMUM_TOOL_EXECUTION_MS);
 }
 
@@ -79,6 +79,34 @@ async function expectTimedOutRunOutput(
   expect(outputs[0]).toContain("30-minute limit");
 }
 
+function resolveOnTool(
+  expectedTool: string,
+  dispatched: { readonly resolve: (value?: undefined) => void },
+): (tool: string) => void {
+  return (tool) => {
+    if (tool === expectedTool) dispatched.resolve();
+  };
+}
+
+function observedBroker(options: {
+  readonly completes: (tool: string) => boolean;
+  readonly output?: (tool: string) => string;
+  readonly tool: string;
+}): {
+  readonly broker: ReturnType<typeof completingTestBroker>;
+  readonly dispatched: Promise<void>;
+} {
+  const dispatched = Promise.withResolvers<undefined>();
+  return {
+    broker: completingTestBroker(
+      options.completes,
+      options.output,
+      resolveOnTool(options.tool, dispatched),
+    ),
+    dispatched: dispatched.promise,
+  };
+}
+
 describe("global tool time limit integration", () => {
   test("fails a hung runner tool call at the limit and finishes the run", () =>
     withLimitSetup(async (setup) => {
@@ -93,13 +121,16 @@ describe("global tool time limit integration", () => {
       ]);
       // The broker answers the agent-file load, then the runner goes
       // silent for the session's actual tool call.
-      const broker = completingTestBroker((tool) => tool === "read_agent_file");
+      const { broker, dispatched } = observedBroker({
+        completes: (tool) => tool === "read_agent_file",
+        tool: "read",
+      });
       const run = runSessionAgent({
         ...limitRuntimeOptions(setup, "Time limit credential"),
         broker,
         modelFactory: () => model,
       });
-      await advancePastLimit();
+      await advancePastLimit(dispatched);
 
       await expectTimedOutRunOutput(run, setup);
       closeSessionTestDatabase(setup.database);
@@ -114,7 +145,16 @@ describe("global tool time limit integration", () => {
     const actions = unusedSessionToolActions({
       browseRunnerDirectories: (_runnerId, _path, signal) => record(signal),
       getSessionOptions: (_input, signal) => record(signal),
+      reassignSession: (_sessionId, _runnerId, _directory, signal) => {
+        void record(signal);
+        return "recorded";
+      },
       spawnSession: (_input, signal) => record(signal),
+      steerSession: (_sessionId, _message, signal) => record(signal),
+      stopSession: (_sessionId, _cascade, signal) => {
+        void record(signal);
+        return "recorded";
+      },
     });
     const deadline = new AbortController();
     const dispatch = (
@@ -127,6 +167,11 @@ describe("global tool time limit integration", () => {
       runnerId: "runner-1",
     });
     await dispatch("get_session_options", { category: "runners" });
+    await dispatch("reassign_session", {
+      runnerId: "runner-1",
+      sessionId: "session-1",
+      workingDirectory: "/work",
+    });
     await dispatch("spawn_session", {
       credentialId: "credential-1",
       executionEnvironment: "bare_metal",
@@ -137,14 +182,16 @@ describe("global tool time limit integration", () => {
       tools: [],
       workingDirectory: "/work",
     });
+    await dispatch("steer_session", {
+      message: "Change course",
+      sessionId: "session-1",
+    });
+    await dispatch("stop_session", { sessionId: "session-1" });
 
     // The deadline signal must reach each action so discovery requests and
     // broker dispatches are canceled when the global tool time limit fires.
-    expect(signals).toEqual([
-      deadline.signal,
-      deadline.signal,
-      deadline.signal,
-    ]);
+    expect(signals).toHaveLength(6);
+    expect(signals.every((signal) => signal === deadline.signal)).toBe(true);
   });
 
   test("starts no explanation model when discovery outlives the limit", () =>
@@ -169,10 +216,11 @@ describe("global tool time limit integration", () => {
         mediaType: "application/pdf",
         name: "spec.pdf",
       });
-      const broker = completingTestBroker(
-        () => true,
-        (tool) => (tool === "explain_file" ? attachment : "null"),
-      );
+      const { broker, dispatched } = observedBroker({
+        completes: () => true,
+        output: (tool) => (tool === "explain_file" ? attachment : "null"),
+        tool: "explain_file",
+      });
       const discovery =
         Promise.withResolvers<ReturnType<typeof testAgentModelCatalog>>();
       const run = runSessionAgent({
@@ -186,7 +234,7 @@ describe("global tool time limit integration", () => {
           return model;
         },
       });
-      await advancePastLimit();
+      await advancePastLimit(dispatched);
       discovery.resolve(
         testAgentModelCatalog({
           id: detail.model,

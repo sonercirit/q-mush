@@ -5,11 +5,11 @@ import type {
   ProviderId,
 } from "../../shared/provider-credential-store.ts";
 import { utf8ByteLength } from "../../shared/utf8.ts";
-import { isCredentialRejectionError } from "../../sync-engine/agent-model-discovery-fetch.ts";
 import {
-  discoverAgentModelsWithFetch,
+  isCredentialRejectionError,
   type AgentModelDiscoveryFetch,
-} from "../../sync-engine/agent-model-discovery.ts";
+} from "../../sync-engine/agent-model-discovery-fetch.ts";
+import { discoverAgentModelsWithFetch } from "../../sync-engine/agent-model-discovery.ts";
 import { createJsonResponse } from "../../sync-engine/http.ts";
 import { catalog, credential, model } from "./agent-model-discovery-helpers.ts";
 import { createOpenAiOAuthSecret } from "./oauth-test-helpers.ts";

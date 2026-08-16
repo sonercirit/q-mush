@@ -15,12 +15,12 @@ import {
   RunnerDisconnectedError,
   type RunnerCommandBroker,
   type RunnerCommandOutputDelta,
-  type RunnerCommandResult,
 } from "../shared/runner-command-broker.ts";
 import type {
   AgentSessionDetail,
   AgentSessionUsageUpdate,
 } from "../shared/session-model.ts";
+import type { RunnerCommandResult } from "../shared/tool-stream.ts";
 import { forEachAssistantToolCall } from "./agent-conversation.ts";
 import { estimateAgentStepCost } from "./agent-cost.ts";
 import { createAgentSkills } from "./agent-skills.ts";

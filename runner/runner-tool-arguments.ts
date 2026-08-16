@@ -11,9 +11,10 @@ export function requiredString(
   arguments_: ToolArguments,
   name: string,
   maximumLength: number,
-  allowEmpty = false,
+  options: { readonly allowEmpty?: boolean } = {},
 ): string {
-  const value = readBoundedString(arguments_[name], maximumLength, allowEmpty);
+  const candidate: unknown = arguments_[name];
+  const value = readBoundedString(candidate, { maximumLength, ...options });
 
   if (value === undefined) {
     throw new Error(`Tool argument ${name} must be a valid string`);

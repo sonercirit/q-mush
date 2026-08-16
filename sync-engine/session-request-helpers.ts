@@ -6,7 +6,7 @@ import {
   RUNNER_DIRECTORY_COMMAND,
   type RunnerDirectoryListing,
 } from "../shared/runner-directory-model.ts";
-import { readIdentifier } from "../shared/validation.ts";
+import { readIdentifier, throwIfSignalAborted } from "../shared/validation.ts";
 import type { GoogleAuth } from "./auth.ts";
 import { withAuthenticatedUser } from "./authenticated-request.ts";
 import {
@@ -16,7 +16,6 @@ import {
   createNoContentResponse,
   parseJsonRequest,
 } from "./http.ts";
-import { directoryUnavailable } from "./session-directory-cancellation.ts";
 
 export { readIdentifier };
 
@@ -139,7 +138,7 @@ export class SessionRequestHelpers {
         status: "listed",
       };
     } catch {
-      directoryUnavailable(signal);
+      throwIfSignalAborted(signal, "Directory browsing was canceled");
       return { status: "directory_unavailable" };
     }
   }

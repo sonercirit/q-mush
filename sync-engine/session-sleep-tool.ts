@@ -2,8 +2,8 @@ import { throwIfAgentAborted } from "../shared/agent-loop.ts";
 import { MAXIMUM_TOOL_EXECUTION_SECONDS } from "../shared/tool-limits.ts";
 import { abortSignalError } from "../shared/validation.ts";
 
-// Exported so the runtime exemption and schema share one authoritative bound.
-export const MAXIMUM_SLEEP_DURATION_SECONDS = MAXIMUM_TOOL_EXECUTION_SECONDS;
+// Sleep bypasses the generic wrapper and directly shares its authoritative bound.
+const MAXIMUM_SLEEP_DURATION_SECONDS = MAXIMUM_TOOL_EXECUTION_SECONDS;
 const MILLISECONDS_PER_SECOND = 1_000;
 
 function requestedDuration(

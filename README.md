@@ -162,13 +162,13 @@ legacy `q-mush-runner.js` installation to the self-updating executable. A
 removed registration is not reused: reinstalling that computer creates a new
 runner ID, and affected sessions must be reassigned explicitly.
 
-The browser control center is responsive from phone through wide desktop
-viewports. Session detail includes an app focus mode (separate from browser
-Fullscreen) that fills the app viewport while retaining a compact session rail;
-hover or keyboard focus expands the rail on desktop, while touch-sized layouts
-use the **Sessions** drawer. Selecting a session collapses it, and Escape closes
-the drawer before leaving focus mode. Focus mode keeps the mounted transcript,
-draft inputs, and scroll-lock state intact.
+The control center supports phone through wide desktop viewports. Session detail
+includes an app focus mode (separate from browser Fullscreen) that fills the app
+viewport while retaining a compact session rail; hover or keyboard focus expands
+the rail on desktop, while touch-sized layouts use the **Sessions** drawer.
+Selecting a session collapses it, and Escape closes the drawer before leaving
+focus mode. Focus mode keeps the mounted transcript, draft inputs, and
+scroll-lock state intact.
 
 After a runner and provider credential are ready, use **New agent session** in
 the control center. Select an online computer and credential; Q Mush discovers
@@ -177,49 +177,46 @@ efforts. Reasoning effort defaults to the maximum reported for the model. Then
 select the model, working directory, and task. Tasks and follow-up messages can
 select or paste up to eight PNG, JPEG, GIF, or WebP images of 10 MB each;
 attachments are persisted in the transcript and sent directly to the selected
-model provider. The working-directory field accepts a path directly or opens an
-interactive browser with Home, Up, and child-directory navigation; choosing a
-location writes its canonical path back to the form. Q Mush implements its own
-model/tool loop without an external agent framework. Before each initial or
-follow-up agent run, the runner loads `AGENTS.md` from the selected working
-directory, falling back to `CLAUDE.md`; when both exist, only `AGENTS.md` is
-used, and when neither exists, no project instructions are added. The chosen
-file persists with the session, joins the system prompt, and shows in the
-transcript. Agent launches and queued runner commands have no other
-application-owned limits. Each tool call gets a global 30-minute execution limit
-stated once in the tool picker and agent prompt, and a parallel batch shares one
-budget. Every shell command must choose a timeout within that limit. It exposes
-Pi's four base tool interfaces—`read`, `bash`, `edit`, and `write`—plus a
-`parallel` wrapper for 2+ independent calls and the server-side `brave_search`
-skill for current web results, with batched exact edits and bounded file and
-command output. `parallel` has no application-defined call maximum: a small
-worker pool bounds simultaneous execution while every accepted call runs and
-results keep input order. Each selectable tool and skill has an accessible info
-control with its authoritative description, classification, and parameter
-schema. Brave Search tries the signed-in user's saved keys in order when a key
-is rejected, rate limited, or temporarily unavailable. Transcripts show system
-instructions, complete tool definitions, reasoning summaries, tool calls, and
-tool results. Transcript prose renders as Markdown, fenced code is
-syntax-colored, and structured tool arguments/results are pretty-printed with
-colorized JSON. The session-tool group lets an agent list only its owner's
-online runners, inspect `runnerRequired` in session lists, browse canonical
-runner directories from `~`, and explicitly reassign another recoverable
-session. These tools never return runner tokens or other secrets, and
-reassignment does not continue or launch the target session. Context use
-includes a percentage, turns yellow at 80%, and red at 90%. The session list and
-transcript header also show cumulative active runtime across all runs plus
-cumulative model cost. A provider-reported charge is shown as **Cost**;
-otherwise Q Mush shows **Estimated cost** only when detailed token usage and
-provider-discovered pricing cover every consumed token category. Q Mush has no
-built-in model-price table and shows unavailable rather than guessing a missing
-price. Automatic compaction is enabled per session by default and replaces
-completed history with a model-generated handoff once usage reaches 95%, then
-transparently continues the active session from that summary. Automatic and
-manual compaction model calls count toward cumulative cost. It can be turned
-off, and a ready session can be compacted manually without continuing it.
-Transcripts and status survive page reloads; a ready, stopped, or failed session
-accepts follow-up instructions. When an assigned runner is removed, the session
-shows **Choose runner** instead of **Failed**, keeps its transcript and
+model provider. The working-directory field accepts a path or opens
+Home/Up/child navigation; choosing a location writes its canonical path to the
+form. Q Mush owns its model/tool loop. Before each initial or follow-up agent
+run, the runner loads `AGENTS.md` from the selected working directory, falling
+back to `CLAUDE.md`; when both exist, only `AGENTS.md` is used, and when neither
+exists, no project instructions are added. The chosen file persists with the
+session, joins the system prompt, and shows in the transcript. Each tool call
+gets a global 30-minute execution limit stated once in the tool picker and agent
+prompt, and a parallel batch shares one budget. Agent launches and queued runner
+commands have no other application-owned limits. Every shell command must choose
+a timeout within that limit. It exposes Pi's four base tool interfaces—`read`,
+`bash`, `edit`, and `write`—plus a `parallel` wrapper for 2+ independent calls
+and the server-side `brave_search` skill for current web results, with batched
+exact edits and bounded file and command output. `parallel` has no
+application-defined call maximum: a small worker pool bounds simultaneous
+execution while every accepted call runs and results keep input order. Each
+tool/skill has accessible authoritative details and its schema. Brave Search
+tries the signed-in user's saved keys in order when a key is rejected, rate
+limited, or temporarily unavailable. Transcripts show system instructions,
+complete tool definitions, reasoning summaries, tool calls, and tool results.
+Transcript prose renders as Markdown, fenced code is syntax-colored, and
+structured tool arguments/results are pretty-printed with colorized JSON. The
+session-tool group lets an agent list only its owner's online runners, inspect
+`runnerRequired` in session lists, browse canonical runner directories from `~`,
+and explicitly reassign another recoverable session. These tools never return
+runner tokens or other secrets, and reassignment does not continue or launch the
+target session. Context use includes a percentage, turns yellow at 80%, and red
+at 90%. The session list and transcript header also show cumulative active
+runtime across all runs plus cumulative model cost. A provider-reported charge
+is shown as **Cost**; otherwise Q Mush shows **Estimated cost** only when
+detailed token usage and provider-discovered pricing cover every consumed token
+category. Q Mush has no built-in model-price table and shows unavailable rather
+than guessing a missing price. Automatic compaction is enabled per session by
+default and replaces completed history with a model-generated handoff once usage
+reaches 95%, then transparently continues the active session from that summary.
+Automatic and manual compaction model calls count toward cumulative cost. It can
+be turned off, and a ready session can be compacted manually without continuing
+it. Transcripts and status survive page reloads; a ready, stopped, or failed
+session accepts follow-up instructions. When an assigned runner is removed, the
+session shows **Choose runner** instead of **Failed**, keeps its transcript and
 configuration, and disables follow-up, continue, image, and compaction controls
 until an online replacement and a confirmed working directory are chosen.
 Reassignment does not resume work. **Stop session** aborts the model request and

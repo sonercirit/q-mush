@@ -93,8 +93,8 @@ const BASE_AGENT_TOOLS = [
         type: "string",
       },
       timeout: {
-        description: "Required timeout in seconds",
         ...WHOLE_SECONDS,
+        description: "Required timeout in seconds",
       },
     },
     required: ["command", "timeout"],
@@ -156,8 +156,8 @@ const SESSION_AGENT_TOOLS = [
     name: "sleep",
     properties: {
       durationSeconds: {
-        description: "Duration to sleep in seconds",
         ...WHOLE_SECONDS,
+        description: "Duration to sleep in seconds",
       },
     },
     required: ["durationSeconds"],

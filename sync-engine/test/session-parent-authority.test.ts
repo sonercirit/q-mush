@@ -1,6 +1,8 @@
+import { eq } from "drizzle-orm";
 import { describe, expect, test, vi } from "vitest";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import type { AppDatabase } from "../../shared/database.ts";
+import { agentSessions } from "../../shared/database/schema.ts";
 import { RunnerStore } from "../../sync-engine/runner-store.ts";
 import { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
 import { startManualSessionCompactionForUserId } from "../../sync-engine/session-compaction-actions.ts";
@@ -403,7 +405,73 @@ function credentialCaseSetup(): {
   return { before: setup.store.get(TEST_USER_ID, TARGET_SESSION_ID), setup };
 }
 
+interface ImmediateMutationCase {
+  readonly execute: (
+    setup: AuthoritySetup,
+    signal: AbortSignal,
+  ) => Promise<string> | string;
+  readonly name: "reassign" | "steer" | "stop";
+}
+
+function immediateMutationCases(): readonly ImmediateMutationCase[] {
+  return [
+    {
+      execute: (setup, signal) =>
+        setup.actions.steerSession(TARGET_SESSION_ID, "late steering", signal),
+      name: "steer",
+    },
+    {
+      execute: (setup, signal) =>
+        setup.actions.reassignSession(
+          TARGET_SESSION_ID,
+          REPLACEMENT_RUNNER_ID,
+          "/late/reassignment",
+          signal,
+        ),
+      name: "reassign",
+    },
+    {
+      execute: (setup, signal) =>
+        setup.actions.stopSession(TARGET_SESSION_ID, true, signal),
+      name: "stop",
+    },
+  ];
+}
+
+function immediateMutationSetup(
+  name: ImmediateMutationCase["name"],
+): AuthoritySetup {
+  const setup = setupWithTarget("running");
+  if (name === "reassign") {
+    transition(setup.store, targetDetail(setup), "idle", TEST_NOW + 2);
+    const reassignmentTarget = setup.database.update(agentSessions);
+    reassignmentTarget
+      .set({ runnerRequired: true })
+      .where(eq(agentSessions.id, TARGET_SESSION_ID))
+      .run();
+  }
+  return setup;
+}
+
 describe("cross-session parent execution authority", () => {
+  test.each(immediateMutationCases())(
+    "rejects canceled $name before mutating the target",
+    async ({ execute, name }) => {
+      const setup = immediateMutationSetup(name);
+      const before = targetDetail(setup);
+      const deadline = new AbortController();
+      deadline.abort(
+        new DOMException("The tool call timed out", "TimeoutError"),
+      );
+
+      await expect(
+        Promise.resolve().then(() => execute(setup, deadline.signal)),
+      ).rejects.toThrow("timed out");
+      expectTargetUnchanged(setup, before);
+      expect(setup.notify).not.toHaveBeenCalled();
+      closeSetup(setup);
+    },
+  );
   test.each(["compact", "continue", "send"] as const)(
     "rejects credential-paused %s after the parent is fenced",
     async (operation) => {
@@ -436,7 +504,12 @@ describe("cross-session parent execution authority", () => {
       "stopped",
     );
     expectSessionActionThrows(
-      () => setup.actions.steerSession(TARGET_SESSION_ID, "stale steering"),
+      () =>
+        setup.actions.steerSession(
+          TARGET_SESSION_ID,
+          "stale steering",
+          new AbortController().signal,
+        ),
       "stopped",
     );
     expectTargetUnchanged(setup, before);
@@ -454,12 +527,22 @@ describe("cross-session parent execution authority", () => {
 
     await expectCompactionRejected(setup, "missing-session");
     expectSessionActionThrows(
-      () => setup.actions.steerSession("missing-session", "Do not deliver"),
+      () =>
+        setup.actions.steerSession(
+          "missing-session",
+          "Do not deliver",
+          new AbortController().signal,
+        ),
       "Session not found",
     );
     await expectCompactionRejected(setup, foreign.id);
     expectSessionActionThrows(
-      () => setup.actions.steerSession(foreign.id, "Do not cross scope"),
+      () =>
+        setup.actions.steerSession(
+          foreign.id,
+          "Do not cross scope",
+          new AbortController().signal,
+        ),
       "Session not found",
     );
     closeSetup(setup);
@@ -495,7 +578,11 @@ describe("cross-session parent execution authority", () => {
     const running = setupWithTarget("running");
 
     await expect(
-      running.actions.steerSession(TARGET_SESSION_ID, "Change direction"),
+      running.actions.steerSession(
+        TARGET_SESSION_ID,
+        "Change direction",
+        new AbortController().signal,
+      ),
     ).resolves.toContain("steering_scheduled");
     expect(
       running.store.get(TEST_USER_ID, TARGET_SESSION_ID)?.pendingInputs,
@@ -504,7 +591,11 @@ describe("cross-session parent execution authority", () => {
 
     const idle = setupWithTarget("idle");
     expect(() =>
-      idle.actions.steerSession(TARGET_SESSION_ID, "Too late"),
+      idle.actions.steerSession(
+        TARGET_SESSION_ID,
+        "Too late",
+        new AbortController().signal,
+      ),
     ).toThrow("send_to_session");
     closeSetup(idle);
   });

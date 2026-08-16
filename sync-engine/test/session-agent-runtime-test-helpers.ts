@@ -17,11 +17,13 @@ function completeTestBrokerCommand(
 export function completingTestBroker(
   completes: (tool: string) => boolean = () => true,
   outputFor: (tool: string) => string = () => "null",
+  onDeliver: (tool: string) => void = () => undefined,
 ): RunnerCommandBroker {
   let commandId = 0;
   const broker = new RunnerCommandBroker({
     commandId: () => `command-${String((commandId += 1))}`,
     deliver: (runnerId, command) => {
+      onDeliver(command.tool);
       if (!completes(command.tool)) return true;
       queueMicrotask(() => {
         completeTestBrokerCommand(
@@ -53,7 +55,10 @@ export async function completedRunToolOutputs(
     .map(({ content }) => content);
 }
 
-export function runtimeTestCredential(credentialId: string, label: string) {
+export function runtimeTestCredential(
+  credentialId: string,
+  label: string,
+): SessionAgentRuntimeDependencies["credential"] {
   return {
     accountId: null,
     id: credentialId,

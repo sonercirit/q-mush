@@ -1,8 +1,8 @@
-import type { RunnerCommandResult } from "../shared/runner-command-broker.ts";
 import {
   MAXIMUM_TOOL_EXECUTION_MINUTES,
   MAXIMUM_TOOL_EXECUTION_MS,
 } from "../shared/tool-limits.ts";
+import type { RunnerCommandResult } from "../shared/tool-stream.ts";
 import { abortSignalError } from "../shared/validation.ts";
 
 const TIME_LIMIT_MESSAGE = `Error: the tool call was canceled after exceeding the global ${String(MAXIMUM_TOOL_EXECUTION_MINUTES)}-minute limit. Cancellation is best-effort after a filesystem mutation begins, so verify its result before retrying.`;
@@ -23,7 +23,7 @@ export function executeToolWithinTimeLimit(
   outerSignal: AbortSignal,
 ): Promise<RunnerCommandResult> {
   const timeoutController = new AbortController();
-  const combined = AbortSignal.any([outerSignal, timeoutController.signal]);
+  const callSignal = AbortSignal.any([outerSignal, timeoutController.signal]);
   return new Promise<RunnerCommandResult>((resolve, reject) => {
     const rejectAborted = () => {
       // Error-valued reasons are preserved; non-Error reasons intentionally
@@ -48,7 +48,7 @@ export function executeToolWithinTimeLimit(
     const settle = (finish: () => void) => {
       clearTimeout(timer);
       // Abort the composite too: a straggler that ignored cancellation and
-      // kept listeners on the combined signal must not retain the
+      // kept listeners on the call signal must not retain the
       // long-lived session signal after its call settled.
       timeoutController.abort(
         new DOMException("The tool call settled", "AbortError"),
@@ -62,21 +62,26 @@ export function executeToolWithinTimeLimit(
     outerSignal.addEventListener("abort", onOuterAbort);
     const run = async (): Promise<void> => {
       try {
-        const result = await execute(combined);
+        const result = await execute(callSignal);
         settle(() => {
           resolve(result);
         });
       } catch (error) {
+        // If execution rejects because the outer signal fired, preserve the
+        // outer reason even when the operation supplied a different error.
+        const failure = outerSignal.aborted
+          ? abortSignalError(outerSignal, "The agent session was stopped")
+          : error;
         // The timer callback aborts and resolves synchronously, so a
         // cancellation rejection always lands after the timed-out result;
         // rejecting an already-settled promise is a harmless no-op that
         // still marks the rejection handled.
         settle(() => {
-          if (error instanceof Error) {
-            reject(error);
+          if (failure instanceof Error) {
+            reject(failure);
             return;
           }
-          reject(new Error(String(error)));
+          reject(new Error(String(failure)));
         });
       }
     };

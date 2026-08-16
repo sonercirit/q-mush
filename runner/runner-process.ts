@@ -1,8 +1,8 @@
-import type {
-  RunnerCommandOutputDelta,
-  RunnerCommandResult,
-} from "../shared/runner-command-broker.ts";
-import { MAXIMUM_TOOL_STREAM_DELTA_BYTES } from "../shared/tool-stream.ts";
+import type { RunnerCommandOutputDelta } from "../shared/runner-command-broker.ts";
+import {
+  MAXIMUM_TOOL_STREAM_DELTA_BYTES,
+  type RunnerCommandResult,
+} from "../shared/tool-stream.ts";
 import { utf8Prefix } from "../shared/utf8.ts";
 
 type RunnerProcessTermination = "stopped" | "timed-out";

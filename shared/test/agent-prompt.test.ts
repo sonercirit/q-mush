@@ -10,7 +10,7 @@ test("states the global tool limits once for every environment", () => {
   // repeat the limits.
   expect(SHARED_TOOL_LIMITS_STATEMENT).toContain("30 minutes");
   expect(SHARED_TOOL_LIMITS_STATEMENT).toContain("2,000");
-  expect(SHARED_TOOL_LIMITS_STATEMENT).toContain("50KB");
+  expect(SHARED_TOOL_LIMITS_STATEMENT).toContain("50 KB");
   // ask_questions pauses the session instead of running work, so the time
   // limit does not cover the wait for an answer; the statement must say so.
   expect(SHARED_TOOL_LIMITS_STATEMENT).toContain("ask_questions");

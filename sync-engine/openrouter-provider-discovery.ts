@@ -88,7 +88,7 @@ function finitePrice(value: unknown): string | number | undefined {
     const price = readFiniteNumber(value);
     return price !== undefined && price >= 0 ? price : undefined;
   }
-  const stringPrice = readBoundedString(value, 100);
+  const stringPrice = readBoundedString(value, { maximumLength: 100 });
   if (stringPrice === undefined) {
     return undefined;
   }

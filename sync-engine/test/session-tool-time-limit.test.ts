@@ -7,13 +7,18 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function hangingExecute(signal: AbortSignal): Promise<never> {
-  return new Promise((_resolve, reject) => {
-    signal.addEventListener("abort", () => {
-      reject(new DOMException("Aborted", "AbortError"));
+function abortingExecute(
+  message = "Aborted",
+): (signal: AbortSignal) => Promise<never> {
+  return (signal) =>
+    new Promise((_resolve, reject) => {
+      signal.addEventListener("abort", () => {
+        reject(new DOMException(message, "AbortError"));
+      });
     });
-  });
 }
+
+const hangingExecute = abortingExecute();
 
 function nonCooperativeExecute(): Promise<never> {
   return new Promise<never>(() => {
@@ -49,14 +54,14 @@ describe("global tool time limit", () => {
 
   test("fails a hung tool call at the limit and aborts its signal", async () => {
     const outer = timedOutOuterController();
-    let toolSignal: AbortSignal | undefined;
+    let callSignal: AbortSignal | undefined;
 
     const result = executeToolWithinTimeLimit((signal) => {
-      toolSignal = signal;
+      callSignal = signal;
       return hangingExecute(signal);
     }, outer.signal);
     await vi.advanceTimersByTimeAsync(MAXIMUM_TOOL_EXECUTION_MS - 1);
-    expect(toolSignal?.aborted).toBe(false);
+    expect(callSignal?.aborted).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
 
     await expect(result).resolves.toEqual({
@@ -64,7 +69,20 @@ describe("global tool time limit", () => {
         "Error: the tool call was canceled after exceeding the global 30-minute limit. Cancellation is best-effort after a filesystem mutation begins, so verify its result before retrying.",
       state: "timed-out",
     });
-    expect(toolSignal?.aborted).toBe(true);
+    expect(callSignal?.aborted).toBe(true);
+    expectNoTimers();
+  });
+
+  test("prefers the outer reason when execution rejects with another abort", async () => {
+    const outer = timedOutOuterController();
+    const result = executeToolWithinTimeLimit(
+      abortingExecute("Inner abort"),
+      outer.signal,
+    );
+    const assertion = expect(result).rejects.toThrow("Outer stop");
+
+    outer.abort(new Error("Outer stop"));
+    await assertion;
     expectNoTimers();
   });
 
@@ -131,19 +149,19 @@ describe("global tool time limit", () => {
     expectNoTimers();
   });
 
-  test("a normal completion aborts the combined signal it handed out", async () => {
+  test("a normal completion aborts the call signal it handed out", async () => {
     const outer = new AbortController();
-    let combined: AbortSignal | undefined;
+    let callSignal: AbortSignal | undefined;
 
     await executeToolWithinTimeLimit((signal) => {
-      combined = signal;
+      callSignal = signal;
       return Promise.resolve({ output: "done", state: "completed" });
     }, outer.signal);
 
-    // A straggler still listening on the combined signal must not retain
+    // A straggler still listening on the call signal must not retain
     // the long-lived session signal after its call settled; settle()
     // aborts the composite to release it.
-    expect(combined?.aborted).toBe(true);
+    expect(callSignal?.aborted).toBe(true);
     expect(outer.signal.aborted).toBe(false);
   });
 

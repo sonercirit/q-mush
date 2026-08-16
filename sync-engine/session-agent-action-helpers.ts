@@ -43,12 +43,8 @@ export interface SessionAgentActionDependencies {
     credential: ProviderCredentialAccess,
     userId: string,
     rejectCredentialErrors: boolean,
-<<<<<<< HEAD
-  ) => Promise<SessionRequestModelMetadata>;
-=======
     signal?: AbortSignal,
-  ) => Promise<SessionAgentMetadata>;
->>>>>>> 8261006 (Apply a global tool execution limit)
+  ) => Promise<SessionRequestModelMetadata>;
   readonly readCredential: (
     userId: string,
     selection: SessionAgentCredentialSelection,

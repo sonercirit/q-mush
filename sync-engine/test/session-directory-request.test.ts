@@ -10,13 +10,13 @@ import {
 test("returns an HTTP response when directory browsing is canceled", async () => {
   const { auth, database } = createAuthenticatedTestContext();
   const canceledCommands: string[] = [];
-  const delivered = Promise.withResolvers<undefined>();
+  const delivered = Promise.withResolvers<string>();
   const broker = new RunnerCommandBroker({
     cancel: (_runnerId, commandId) => {
       canceledCommands.push(commandId);
     },
-    deliver: () => {
-      delivered.resolve();
+    deliver: (_runnerId, command) => {
+      delivered.resolve(command.id);
       return true;
     },
   });
@@ -34,12 +34,12 @@ test("returns an HTTP response when directory browsing is canceled", async () =>
     "runner-1",
   );
 
-  await delivered.promise;
+  const deliveredCommandId = await delivered.promise;
   controller.abort();
 
   const settled = await response;
   expect(settled.status).toBe(502);
   expect(await settled.json()).toEqual({ error: "directory_unavailable" });
-  expect(canceledCommands).toHaveLength(1);
+  expect(canceledCommands).toEqual([deliveredCommandId]);
   database.$client.close();
 });

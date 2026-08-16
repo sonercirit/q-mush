@@ -46,7 +46,6 @@ import {
   type SpawnedSessionCompletion,
 } from "./session-child-lifecycle.ts";
 import type { SessionDetailLookup } from "./session-command-types.ts";
-import { directoryUnavailable } from "./session-directory-cancellation.ts";
 import type { SessionExecutionAuthority } from "./session-execution-authority.ts";
 import type {
   RunnerDirectoryBrowseResult,
@@ -202,7 +201,7 @@ export class SessionAgentActions {
       ),
       reassignSession: guardParent(
         "reassign_session",
-        (sessionId, runnerId, workingDirectory) =>
+        (sessionId, runnerId, workingDirectory, callSignal) =>
           this.#reassign(
             parentSessionId,
             userId,
@@ -210,6 +209,7 @@ export class SessionAgentActions {
             runnerId,
             workingDirectory,
             parentWorkspaceId(),
+            withDeadline(callSignal),
           ),
       ),
       sendToSession: guardParent(
@@ -227,17 +227,28 @@ export class SessionAgentActions {
       spawnSession: guardParent("spawn_session", (input, callSignal) =>
         this.#spawn(authority, userId, input, withDeadline(callSignal)),
       ),
-      steerSession: guardParent("steer_session", (sessionId, message) =>
-        this.#steer(userId, sessionId, message, parentWorkspaceId()),
+      steerSession: guardParent(
+        "steer_session",
+        (sessionId, message, callSignal) =>
+          this.#steer(
+            userId,
+            sessionId,
+            message,
+            parentWorkspaceId(),
+            withDeadline(callSignal),
+          ),
       ),
-      stopSession: guardParent("stop_session", (sessionId, cascade) =>
-        this.#stop(
-          parentSessionId,
-          userId,
-          sessionId,
-          cascade,
-          parentWorkspaceId(),
-        ),
+      stopSession: guardParent(
+        "stop_session",
+        (sessionId, cascade, callSignal) =>
+          this.#stop(
+            parentSessionId,
+            userId,
+            sessionId,
+            cascade,
+            parentWorkspaceId(),
+            withDeadline(callSignal),
+          ),
       ),
     };
   }
@@ -359,7 +370,7 @@ export class SessionAgentActions {
         result.status === "listed" ? result.listing : { error: result.status },
       );
     } catch {
-      directoryUnavailable(signal);
+      throwIfSignalAborted(signal, "Directory browsing was canceled");
       return sessionToolOutput({ error: "directory_unavailable" });
     }
   }
@@ -530,6 +541,7 @@ export class SessionAgentActions {
     runnerId: string,
     workingDirectory: string,
     workspaceId: string,
+    signal: AbortSignal,
   ): string {
     if (sessionId === parentSessionId) {
       throw new Error(
@@ -539,6 +551,7 @@ export class SessionAgentActions {
     if (this.#detail(userId, sessionId, workspaceId).id !== sessionId) {
       throw new Error("Session not found");
     }
+    throwIfSignalAborted(signal, "The reassignment was canceled");
     const result = this.#dependencies.store.reassign(
       userId,
       sessionId,
@@ -604,10 +617,12 @@ export class SessionAgentActions {
     sessionId: string,
     message: string,
     workspaceId: string,
+    signal: AbortSignal,
   ): Promise<string> {
     return steerSessionForAgent(this.#dependencies, {
       message,
       sessionId,
+      signal,
       userId,
       workspaceId,
     });
@@ -619,8 +634,10 @@ export class SessionAgentActions {
     sessionId: string,
     cascade: boolean,
     workspaceId: string,
+    signal: AbortSignal,
   ): string {
     const target = this.#detail(userId, sessionId, workspaceId);
+    throwIfSignalAborted(signal, "The stop was canceled");
     if (target.status !== "stopped") {
       this.#dependencies.store.stop(
         userId,

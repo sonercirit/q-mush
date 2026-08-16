@@ -1,5 +1,8 @@
 import type { SessionAgentToolName } from "../shared/agent-tools.ts";
-import { abortSignalError } from "../shared/validation.ts";
+import {
+  abortSignalError,
+  throwIfSignalAborted,
+} from "../shared/validation.ts";
 import type { SessionAgentActionDependencies } from "./session-agent-action-helpers.ts";
 import {
   compactSessionAction,
@@ -41,6 +44,7 @@ export interface CompactionSelection extends SessionControlSelection {
 
 interface SteeringSelection extends SessionControlSelection {
   readonly message: string;
+  readonly signal: AbortSignal;
 }
 
 export function compactSessionForAgent(
@@ -98,6 +102,7 @@ export function steerSessionForAgent(
   dependencies: SessionControlActionDependencies,
   selection: SteeringSelection,
 ): Promise<string> {
+  throwIfSignalAborted(selection.signal, "The steering was canceled");
   const output = steerSessionAction(
     {
       notify: (...parameters) => {

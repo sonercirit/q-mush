@@ -62,7 +62,7 @@ function readActivationReceipt(
   if (value === undefined) {
     return undefined;
   }
-  const receipt = readBoundedString(value, 200);
+  const receipt = readBoundedString(value, { maximumLength: 200 });
   if (receipt === undefined) {
     throw new Error("The runner connection message was invalid");
   }

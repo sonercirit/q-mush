@@ -1,10 +1,8 @@
 import type { AgentSessionToolName } from "../shared/agent-tools.ts";
-import type { RunnerCommandResult } from "../shared/runner-command-broker.ts";
-import { MAXIMUM_TOOL_EXECUTION_SECONDS } from "../shared/tool-limits.ts";
+import type { RunnerCommandResult } from "../shared/tool-stream.ts";
 import type { AgentSkills } from "./agent-skills.ts";
 import { pauseForAskQuestions } from "./ask-questions-pause.ts";
 import type { SessionAgentRuntimeDependencies } from "./session-agent-runtime.ts";
-import { MAXIMUM_SLEEP_DURATION_SECONDS } from "./session-sleep-tool.ts";
 import { executeToolWithinTimeLimit } from "./session-tool-time-limit.ts";
 
 interface RuntimeToolExecution {
@@ -93,9 +91,6 @@ function executeRuntimeTool(
 ): Promise<RunnerCommandResult> {
   const { call } = options;
   if (call.name === "sleep") {
-    if (MAXIMUM_SLEEP_DURATION_SECONDS !== MAXIMUM_TOOL_EXECUTION_SECONDS) {
-      throw new Error("The sleep duration and global tool limit must match");
-    }
     return options.dispatch(
       call.name,
       call.arguments,

@@ -11,13 +11,16 @@ import {
 } from "./runner-workspace.ts";
 
 const DIRECTORY = ".q-mush/attachments";
+const MAXIMUM_ATTACHMENT_ARGUMENT_LENGTH = 4_096;
 const MAXIMUM_REFERENCE_LENGTH = 8_192;
 
 function requiredString(
   arguments_: Readonly<Record<string, unknown>>,
   key: string,
 ): string {
-  const value = readBoundedString(arguments_[key], Number.MAX_SAFE_INTEGER);
+  const value = readBoundedString(arguments_[key], {
+    maximumLength: MAXIMUM_ATTACHMENT_ARGUMENT_LENGTH,
+  });
   if (value === undefined) {
     throw new Error(`Attachment argument ${key} is invalid`);
   }
@@ -71,17 +74,10 @@ export async function executeAttachmentCommand(
   arguments_: Readonly<Record<string, unknown>>,
 ): Promise<string | undefined> {
   if (tool === ATTACHMENT_WRITE_COMMAND) {
-    const { description, id, mediaType, name: suppliedName } = arguments_;
-    if (
-      typeof description !== "string" ||
-      description.length === 0 ||
-      typeof mediaType !== "string" ||
-      mediaType.length === 0 ||
-      typeof suppliedName !== "string" ||
-      suppliedName.length === 0
-    ) {
-      throw new Error("The attachment metadata is invalid");
-    }
+    const description = requiredString(arguments_, "description");
+    const mediaType = requiredString(arguments_, "mediaType");
+    const suppliedName = requiredString(arguments_, "name");
+    const id = requiredString(arguments_, "id");
     const name = displayName(suppliedName);
     const directory = await secureAttachmentDirectory(root, true);
     const attachmentId = safeIdentifier(requiredString({ id }, "id"));

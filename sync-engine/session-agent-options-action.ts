@@ -59,7 +59,6 @@ async function singleCredential(
     throwIfSignalAborted(signal, "Model option discovery was canceled");
     return [];
   }
-  throwIfSignalAborted(signal, "Model option discovery was canceled");
   return credential?.id === selection.credentialId ? [credential] : [];
 }
 
@@ -110,7 +109,7 @@ async function modelOptions(
   if (credentials.length === 0) {
     throw new Error("The model credential or provider is unavailable");
   }
-  let failure: unknown = new Error("Model discovery failed");
+  let failure: unknown;
   for (const credential of credentials) {
     try {
       return (

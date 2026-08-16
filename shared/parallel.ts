@@ -1,6 +1,8 @@
 import { Buffer } from "node:buffer";
-import type { RunnerCommandResult } from "./runner-command-broker.ts";
-import { aggregateToolStreamState } from "./tool-stream.ts";
+import {
+  aggregateToolStreamState,
+  type RunnerCommandResult,
+} from "./tool-stream.ts";
 import { utf8Prefix } from "./utf8.ts";
 import { abortSignalError } from "./validation.ts";
 
