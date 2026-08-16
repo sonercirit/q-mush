@@ -38,12 +38,11 @@ Living project memory.
 - Install/run: `bun install`; `bun run sync-engine/index.ts`
 - Develop: `bun run dev` (+ `dev:restart`, `dev:watch`); `bun run build`
 - Migrations: `bun run db:generate` / `db:migrate`
-- Test: `bun run test` (Vitest DOM/server plus Chromium) / `test:watch`; use
-  `bun run test:browser` for Chromium alone.
-- `bun run check` runs every static check, each standalone too; `bun run format`
-  / `lint:fix` write fixes.
-- CI (`.github/workflows/checks.yml`): tests, static checks, build, and
-  whitespace checks on Bun 1.3.14 with a frozen lockfile.
+- Test: `bun run test` (unit + headless Chromium); `test:watch` omits browsers;
+  `test:browser` uses the explicitly headless real-Chromium config.
+- `bun run check` runs all static checks; `format`/`lint:fix` write fixes.
+- CI (`.github/workflows/checks.yml`) runs tests/check/build/whitespace on Bun
+  1.3.14 with a frozen lockfile.
 
 ## Architecture and Conventions
 
