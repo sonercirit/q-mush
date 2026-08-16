@@ -53,6 +53,7 @@ function agentModelRoutingOptions(
 export function createFallbackModel(
   factory: AgentModelFactory,
   selection: {
+    readonly adaptiveThinking: boolean | null;
     readonly credential: ProviderCredentialAccess;
     readonly maxOutputTokens: number | null;
     readonly model: string;
@@ -63,6 +64,7 @@ export function createFallbackModel(
   },
 ): AgentModel {
   return factory({
+    adaptiveThinking: selection.adaptiveThinking,
     credential: selection.credential,
     maxOutputTokens: selection.maxOutputTokens,
     model: selection.model,
@@ -84,6 +86,7 @@ function modelOptions(
   onStepStart?: AgentModelFactoryOptions["onStepStart"],
 ): AgentModelFactoryOptions {
   return {
+    adaptiveThinking: detail.adaptiveThinking,
     credential,
     ...(sessionToolCacheCapability({
       credentialSource: credential.source,

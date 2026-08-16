@@ -13,6 +13,7 @@ export type ProviderRequestProtocol =
   "anthropic" | "chat_completions" | "responses";
 
 export interface ProviderModelRequest {
+  readonly adaptiveThinking: boolean | null;
   readonly dynamicToolCache: boolean;
   readonly maxOutputTokens: number | null;
   readonly messages: readonly AgentConversationMessage[];

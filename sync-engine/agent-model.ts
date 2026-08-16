@@ -394,6 +394,7 @@ function defaultWebSocket(
 }
 
 export class ChatCompletionsAgentModel implements AgentModel {
+  readonly #adaptiveThinking: boolean | null;
   readonly #credential: AgentProviderCredential;
   readonly #dynamicToolCache: boolean;
   readonly #fetch: AgentModelFetch;
@@ -413,6 +414,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
   readonly #webSocketSession = new ProviderWebSocketSession();
 
   constructor(options: ChatCompletionsAgentModelOptions) {
+    this.#adaptiveThinking = options.adaptiveThinking ?? null;
     this.#credential = options.credential;
     this.#dynamicToolCache = options.dynamicToolCache === true;
     this.#fetch = options.fetch ?? ((request) => globalThis.fetch(request));
@@ -528,6 +530,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
     stream: boolean,
   ): unknown {
     return requestBody({
+      adaptiveThinking: this.#adaptiveThinking,
       dynamicToolCache: this.#dynamicToolCache,
       maxOutputTokens: this.#maxOutputTokens,
       messages,

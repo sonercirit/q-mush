@@ -83,11 +83,12 @@ function forkDependencies(
   };
 }
 
-function catalog(contextWindow = 128_000) {
+function catalog(contextWindow = 128_000, adaptiveThinking = false) {
   return {
     defaultModel: TEST_SESSION_DETAIL.model,
     models: [
       {
+        adaptiveThinking,
         contextWindow,
         id: TEST_SESSION_DETAIL.model,
         inputModalities: ["text"],
@@ -132,7 +133,10 @@ describe("balanced session forks", () => {
       BALANCED_INPUT.forkPointMessageId,
       TEST_WORKSPACE_ID,
       TEST_NOW,
-      expect.objectContaining({ credentialId: SECOND_CREDENTIAL_ID }),
+      expect.objectContaining({
+        adaptiveThinking: false,
+        credentialId: SECOND_CREDENTIAL_ID,
+      }),
     );
     setup.database.$client.close();
   });

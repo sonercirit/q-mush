@@ -24,6 +24,7 @@ export const ANTHROPIC_CONTEXT_WINDOW_BETA =
 
 export type AnthropicRequestOptions = Pick<
   ProviderModelRequest,
+  | "adaptiveThinking"
   | "maxOutputTokens"
   | "messages"
   | "model"
@@ -167,7 +168,9 @@ export function anthropicRequestBody(
       ? {}
       : {
           output_config: { effort },
-          thinking: { display: "summarized", type: "adaptive" },
+          ...(options.adaptiveThinking === false
+            ? {}
+            : { thinking: { display: "summarized", type: "adaptive" } }),
         };
   return {
     ...(options.maxOutputTokens === null

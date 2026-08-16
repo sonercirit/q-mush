@@ -9,7 +9,7 @@ import type {
   ProviderCredentialAccess,
   ProviderId,
 } from "../shared/provider-credential-store.ts";
-import type { AgentSessionSummary } from "../shared/session-model.ts";
+import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
 import {
   isCredentialRejectionError,
@@ -172,6 +172,7 @@ export async function prepareOpenRouterSessionCredentialProviderState(options: {
       return { error: "provider_unavailable" };
     }
     metadataUpdates.push({
+      adaptiveThinking: null,
       id: session.id,
       maxContextTokens: provider.contextWindow,
       maxOutputTokens: null,
@@ -186,13 +187,17 @@ export async function prepareOpenRouterSessionCredentialProviderState(options: {
   };
 }
 
+export type SessionRequestModelMetadata = Pick<
+  AgentSessionDetail,
+  | "adaptiveThinking"
+  | "maxContextTokens"
+  | "maxOutputTokens"
+  | "providerPricing"
+>;
+
 export type SessionMetadataResult =
   | { readonly error: "provider_unavailable" | "validation_failed" }
-  | {
-      readonly maxContextTokens: number | null;
-      readonly maxOutputTokens: number | null;
-      readonly providerPricing: AgentSessionSummary["providerPricing"];
-    };
+  | SessionRequestModelMetadata;
 
 /**
  * Reassignment should call this with the candidate credential before changing
@@ -281,6 +286,7 @@ export async function sessionMetadata(
       return selected === undefined
         ? { error: "provider_unavailable" }
         : {
+            adaptiveThinking: null,
             maxContextTokens: selected.contextWindow,
             // OpenRouter serving-provider listings carry no output limit.
             maxOutputTokens: null,
@@ -295,12 +301,14 @@ export async function sessionMetadata(
     const catalog = await options.discoverModels(input.provider, credential);
     const model = catalog.models.find(({ id }) => id === input.model);
     return {
+      adaptiveThinking: model?.adaptiveThinking ?? null,
       maxContextTokens: model?.contextWindow ?? null,
       maxOutputTokens: model?.maxOutputTokens ?? null,
       providerPricing: model?.pricing ?? null,
     };
   } catch (error) {
     return credentialFailure(options, error, {
+      adaptiveThinking: null,
       maxContextTokens: null,
       maxOutputTokens: null,
       providerPricing: null,

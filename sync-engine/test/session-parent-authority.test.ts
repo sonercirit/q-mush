@@ -167,6 +167,7 @@ function authoritySetup(options: {
         await metadataGate.wait();
       }
       return {
+        adaptiveThinking: null,
         maxContextTokens: null,
         maxOutputTokens: null,
         providerPricing: null,

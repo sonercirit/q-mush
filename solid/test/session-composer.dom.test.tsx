@@ -3,7 +3,6 @@ import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
 import { createReactiveState } from "../reactive-state.ts";
 import type { SessionViewState } from "../session-client.tsx";
-import { summaryFromDetail } from "../session-codec.ts";
 import { sessionComposerUnavailableReason } from "../session-composer-availability.ts";
 import { SessionController } from "../session-controller.ts";
 import {
@@ -16,6 +15,7 @@ import {
   sessionCanQueuePendingInput,
 } from "../session-pending-input.ts";
 import { initialSessionViewState } from "../session-state.ts";
+import { summaryFromDetail } from "../session-summary-codec.ts";
 import type { SessionCommandTransport } from "../session-transport.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import {

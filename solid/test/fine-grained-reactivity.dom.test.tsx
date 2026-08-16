@@ -17,10 +17,10 @@ import {
 } from "../runner-client.tsx";
 import { RunnerController } from "../runner-controller.ts";
 import { SessionPanel, type SessionViewState } from "../session-client.tsx";
-import { summaryFromDetail } from "../session-codec.ts";
 import { SessionController } from "../session-controller.ts";
 import { SessionList } from "../session-detail-client.tsx";
 import { initialSessionViewState } from "../session-state.ts";
+import { summaryFromDetail } from "../session-summary-codec.ts";
 import {
   clickTestButton,
   disposeTestViews,
@@ -477,6 +477,7 @@ test("session resources, drafts, realtime lists, and selected details update in 
   const modelLabel = "Reactive model";
   const primaryCredentialLabel = "Primary";
   const model = {
+    adaptiveThinking: null,
     contextWindow: 128_000,
     id: "model-1",
     inputModalities: ["text"] as const,

@@ -137,18 +137,23 @@ describe("session agent models", () => {
     expect(stepStarts).toHaveLength(3);
   });
 
-  test("keys the prompt cache and catalog output limit to the session", () => {
+  test("keys request capabilities and catalog output limit to the session", () => {
     const { factory, selections } = modelSelections();
 
     createSessionAgentModels(
       sessionModelOptions(factory, {
-        detail: { ...TEST_SESSION_DETAIL, maxOutputTokens: 64_000 },
+        detail: {
+          ...TEST_SESSION_DETAIL,
+          adaptiveThinking: false,
+          maxOutputTokens: 64_000,
+        },
       }),
     );
 
     // Anthropic-format Messages requests require max_tokens; the persisted
     // catalog metadata must reach every session model construction.
     expect(selections[0]).toMatchObject({
+      adaptiveThinking: false,
       maxOutputTokens: 64_000,
       promptCacheKey: TEST_SESSION_DETAIL.id,
     });
@@ -158,6 +163,7 @@ describe("session agent models", () => {
     const { factory, selections } = modelSelections();
 
     createFallbackModel(factory, {
+      adaptiveThinking: null,
       credential: CREDENTIAL,
       maxOutputTokens: null,
       model: "vendor/model",

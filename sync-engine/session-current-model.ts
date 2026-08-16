@@ -25,82 +25,71 @@ export async function discoverCurrentSessionModel(
   return catalog?.models.find(({ id }) => id === source.detail.model);
 }
 
-// Sessions predating the max_output_tokens column, and sessions reassigned
-// onto an Anthropic-format credential, carry no persisted output limit even
-// though Messages requests require max_tokens. Refresh it lazily from the
-// catalog before the first request; discovery failures leave the omission
-// (permissive proxies accept it, and the model request will surface real
-// endpoint errors). Endpoints whose catalog omits the limit re-probe each
-// run — the deliberate cost of not persisting a "probed, absent" marker.
+interface SessionRequestMetadata {
+  readonly adaptiveThinking: boolean | null;
+  readonly maxOutputTokens: number | null;
+}
+
 type RefreshRuntime = CurrentModelSource & {
-  readonly credential: ProviderCredentialAccess;
-  readonly store: Pick<SessionStore, "get" | "setRuntimeMaxOutputTokens">;
+  readonly store: Pick<SessionStore, "get" | "setRuntimeModelMetadata">;
   readonly userId: string;
 };
 
-// runtime.detail is a launch-time snapshot; the live row carries a limit an
-// earlier loadModels in this run already persisted, so a two-phase run
-// (compact_and_continue) probes the catalog at most once. A missing row
-// falls back to the snapshot; a live null stays null (reassignment may have
-// cleared it).
-export function sessionMaxOutputTokens(
+// Sessions created before these metadata columns, and sessions reassigned onto
+// an Anthropic-format credential, can carry unknown request metadata. Refresh
+// both fields from one catalog probe before the first request. Provider failures
+// preserve the omissions; a canceled run still rejects promptly.
+export async function sessionRequestMetadata(
   runtime: RefreshRuntime,
   write: (
     apply: (sessionId: string, now: number, generation: number) => void,
   ) => void,
   signal?: AbortSignal,
-): Promise<number | null> {
+): Promise<SessionRequestMetadata> {
   const liveDetail = runtime.store.get(runtime.userId, runtime.detail.id);
-  const persistedLimit =
-    liveDetail === undefined
-      ? runtime.detail.maxOutputTokens
-      : liveDetail.maxOutputTokens;
-  return refreshedMaxOutputTokens(
-    {
-      ...runtime,
-      detail: { ...runtime.detail, maxOutputTokens: persistedLimit },
-    },
-    signal,
-    (value) => {
-      write((sessionId, now, generation) => {
-        runtime.store.setRuntimeMaxOutputTokens(
-          sessionId,
-          runtime.credential.id,
-          value,
-          now,
-          generation,
-        );
-      });
-    },
-  );
-}
-
-async function refreshedMaxOutputTokens(
-  source: CurrentModelSource,
-  signal: AbortSignal | undefined,
-  persist: (maxOutputTokens: number) => void,
-): Promise<number | null> {
+  const liveMetadata = liveDetail ?? runtime.detail;
+  const detail = {
+    ...runtime.detail,
+    adaptiveThinking: liveMetadata.adaptiveThinking,
+    maxOutputTokens: liveMetadata.maxOutputTokens,
+  };
+  const current = {
+    adaptiveThinking: detail.adaptiveThinking,
+    maxOutputTokens: detail.maxOutputTokens,
+  };
   if (
-    source.detail.maxOutputTokens !== null ||
-    !usesAnthropicFormat(source.detail.provider, source.credential)
+    !usesAnthropicFormat(detail.provider, runtime.credential) ||
+    (current.adaptiveThinking !== null && current.maxOutputTokens !== null)
   ) {
-    return source.detail.maxOutputTokens;
+    return current;
   }
-  let discovered: number | null;
+
+  let model: AgentModelOption | undefined;
   try {
-    discovered =
-      (await discoverCurrentSessionModel(source, signal))?.maxOutputTokens ??
-      null;
+    model = await discoverCurrentSessionModel({ ...runtime, detail }, signal);
   } catch (error) {
-    // A canceled run must settle promptly instead of reading the omission as
-    // "no limit"; only provider failures degrade to it.
-    if (signal?.aborted !== true) {
-      return null;
-    }
+    if (signal?.aborted !== true) return current;
     throw error;
   }
-  if (discovered !== null) {
-    persist(discovered);
+  const refreshed = {
+    adaptiveThinking:
+      current.adaptiveThinking ?? model?.adaptiveThinking ?? null,
+    maxOutputTokens: current.maxOutputTokens ?? model?.maxOutputTokens ?? null,
+  };
+  const learnsAdaptiveThinking =
+    current.adaptiveThinking === null && refreshed.adaptiveThinking !== null;
+  const learnsMaxOutputTokens =
+    current.maxOutputTokens === null && refreshed.maxOutputTokens !== null;
+  if (learnsAdaptiveThinking || learnsMaxOutputTokens) {
+    write((sessionId, now, generation) => {
+      runtime.store.setRuntimeModelMetadata(
+        sessionId,
+        runtime.credential.id,
+        refreshed,
+        now,
+        generation,
+      );
+    });
   }
-  return discovered;
+  return refreshed;
 }

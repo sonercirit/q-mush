@@ -17,6 +17,7 @@ import {
 } from "./session-agent-tools.ts";
 import type { SessionCredentialAction } from "./session-credential-access.ts";
 import type { SessionExecutionAuthority } from "./session-execution-authority.ts";
+import type { SessionRequestModelMetadata } from "./session-provider-selection.ts";
 import type { RestartRequest } from "./session-runtime.ts";
 import type { SessionStore } from "./session-store.ts";
 
@@ -24,12 +25,6 @@ type SessionAgentCredentialSelection = Pick<
   AgentSessionDetail,
   "credentialId" | "provider" | "workspaceId"
 >;
-
-interface SessionAgentMetadata {
-  readonly maxContextTokens: number | null;
-  readonly maxOutputTokens: number | null;
-  readonly providerPricing: AgentSessionDetail["providerPricing"];
-}
 
 export interface SessionAgentActionDependencies {
   readonly settled?: (sessionId: string) => Promise<void>;
@@ -53,7 +48,7 @@ export interface SessionAgentActionDependencies {
     credential: ProviderCredentialAccess,
     userId: string,
     rejectCredentialErrors: boolean,
-  ) => Promise<SessionAgentMetadata>;
+  ) => Promise<SessionRequestModelMetadata>;
   readonly readCredential: (
     userId: string,
     selection: SessionAgentCredentialSelection,

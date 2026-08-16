@@ -20,7 +20,7 @@ import {
   compactRuntimeTerminal,
   markRuntimeStepStart,
   setRuntimeAgentFile,
-  setRuntimeMaxOutputTokens,
+  setRuntimeModelMetadata,
   settleRuntimeFailure,
   updateRuntimeUsage,
 } from "./session-store-runtime-writes.ts";
@@ -99,6 +99,11 @@ function compactRuntime(
   }
 }
 
+export interface RuntimeModelMetadata {
+  readonly adaptiveThinking: boolean | null;
+  readonly maxOutputTokens: number | null;
+}
+
 export abstract class SessionStoreRuntime {
   protected abstract runtimeWriteResources(): SessionStoreWriteResources;
 
@@ -130,16 +135,16 @@ export abstract class SessionStoreRuntime {
     markRuntimeStepStart(this.#target(sessionId, now, generation));
   }
 
-  setRuntimeMaxOutputTokens(
+  setRuntimeModelMetadata(
     sessionId: string,
     credentialId: string,
-    maxOutputTokens: number,
+    metadata: RuntimeModelMetadata,
     now: number,
     generation: number,
   ): void {
-    setRuntimeMaxOutputTokens({
+    setRuntimeModelMetadata({
       credentialId,
-      maxOutputTokens,
+      ...metadata,
       ...this.#target(sessionId, now, generation),
     });
   }

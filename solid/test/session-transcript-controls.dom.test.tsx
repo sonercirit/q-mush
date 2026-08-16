@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi, type MockInstance } from "vitest";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
-import { summaryFromDetail } from "../session-codec.ts";
+import { summaryFromDetail } from "../session-summary-codec.ts";
 import { disposeTestViews, queryTestElement } from "./dom-test-helpers.ts";
 import { MemoryStorage } from "./memory-storage.ts";
 import {

@@ -30,6 +30,7 @@ export const TEST_SESSION_DETAIL: AgentSessionDetail = {
   activeDurationMs: 0,
   activeStartedAt: null,
   stepStartedAt: null,
+  adaptiveThinking: null,
   agentFile: null,
   agentFilePath: null,
   autoCompact: true,

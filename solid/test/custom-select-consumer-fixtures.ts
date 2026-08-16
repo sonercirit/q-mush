@@ -29,6 +29,7 @@ export function numberedCredentials(): readonly ProviderCredential[] {
 
 export function numberedModels(): AgentModelCatalog["models"] {
   return POSITIONS.map((position) => ({
+    adaptiveThinking: null,
     contextWindow: Number(position) * 1_000,
     id: `model-${position}`,
     inputModalities: position === "12" ? ["text", "image"] : ["text"],

@@ -51,6 +51,7 @@ export function testSessionInput(
   return {
     ...base,
     images: [TEST_AGENT_IMAGE],
+    adaptiveThinking: false,
     maxContextTokens: 200_000,
     reasoningEffort: "high",
     tools: AGENT_SESSION_TOOL_NAMES,

@@ -105,6 +105,7 @@ if (mode === "start" || mode === "start-no-ack") {
   } as const;
   const created = store.create(
     {
+      adaptiveThinking: null,
       agentFilePath: null,
       autoCompact: true,
       images: [],

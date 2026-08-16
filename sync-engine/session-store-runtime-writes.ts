@@ -1,4 +1,4 @@
-import { and, eq, isNull, type SQL } from "drizzle-orm";
+import { and, eq, isNull, or, sql, type SQL } from "drizzle-orm";
 import type { AgentFile } from "../shared/agent-file.ts";
 import type { AgentRecordedMessage } from "../shared/agent-loop.ts";
 import { updatedAuditFields } from "../shared/audit.ts";
@@ -58,11 +58,13 @@ function updateRunningSession(
   options: RuntimeWriteTarget,
   values: Omit<
     Partial<typeof agentSessions.$inferInsert>,
-    "costBasis" | "costUsd"
+    "adaptiveThinking" | "costBasis" | "costUsd" | "maxOutputTokens"
   > & {
+    readonly adaptiveThinking?: boolean | null | SQL;
     readonly costBasis?: AgentSessionCostBasis | SQL;
     readonly costUsd?: number | SQL;
     readonly executionGeneration?: number | SQL;
+    readonly maxOutputTokens?: number | null | SQL;
   },
 ): void {
   updateRunningSessionWhere(options, values, runningSessionCondition(options));
@@ -128,23 +130,29 @@ export function compactRuntimeConversation(
   compactRuntime(options, false);
 }
 
-export function setRuntimeMaxOutputTokens(
+export function setRuntimeModelMetadata(
   options: RuntimeWriteTarget & {
+    readonly adaptiveThinking: boolean | null;
     readonly credentialId: string;
-    readonly maxOutputTokens: number;
+    readonly maxOutputTokens: number | null;
   },
 ): void {
-  // Discovery is asynchronous: a reassignment may have swapped the
-  // credential (nulling the limit for a re-probe) while this run's
-  // discovery was in flight. Write only while the discovering credential
-  // is still attached and the limit is still unset.
+  // Discovery is asynchronous: a reassignment may have swapped the credential
+  // while this run's discovery was in flight. Fill only unknown fields while
+  // the discovering credential is still attached; known metadata always wins.
   updateRunningSessionWhere(
     options,
-    { maxOutputTokens: options.maxOutputTokens },
+    {
+      adaptiveThinking: sql`coalesce(${agentSessions.adaptiveThinking}, ${options.adaptiveThinking})`,
+      maxOutputTokens: sql`coalesce(${agentSessions.maxOutputTokens}, ${options.maxOutputTokens})`,
+    },
     and(
       runningSessionCondition(options),
       eq(agentSessions.providerCredentialId, options.credentialId),
-      isNull(agentSessions.maxOutputTokens),
+      or(
+        isNull(agentSessions.adaptiveThinking),
+        isNull(agentSessions.maxOutputTokens),
+      ),
     ),
   );
 }

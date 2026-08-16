@@ -19,7 +19,10 @@ import {
   createAuthenticatedTestDatabase,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
-import { sessionAgentActionDefaults } from "./session-race-test-helpers.ts";
+import {
+  EMPTY_SESSION_REQUEST_MODEL_METADATA,
+  sessionAgentActionDefaults,
+} from "./session-race-test-helpers.ts";
 
 const RUNNER_ID = "runner-filesystem";
 const SESSION_ID = "session-filesystem";
@@ -235,11 +238,7 @@ test("agent directory browsing passes parent identity, authorization, and signal
     browseDirectories: browse,
     database,
     discoverSessionMetadata: () =>
-      Promise.resolve({
-        maxContextTokens: null,
-        maxOutputTokens: null,
-        providerPricing: null,
-      }),
+      Promise.resolve(EMPTY_SESSION_REQUEST_MODEL_METADATA),
     draining: () => false,
     launchSession: () => true,
     listOnlineRunners: () => [

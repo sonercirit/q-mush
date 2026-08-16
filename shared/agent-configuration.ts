@@ -14,6 +14,7 @@ export const AGENT_REASONING_EFFORTS = [
 export type AgentReasoningEffort = (typeof AGENT_REASONING_EFFORTS)[number];
 
 export interface AgentModelOption {
+  readonly adaptiveThinking: boolean | null;
   readonly contextWindow: number | null;
   readonly fallbackPrompt?: string | null;
   readonly id: string;

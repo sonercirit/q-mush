@@ -51,7 +51,7 @@ import {
 } from "./session-compaction-usage.ts";
 import {
   discoverCurrentSessionModel,
-  sessionMaxOutputTokens,
+  sessionRequestMetadata,
 } from "./session-current-model.ts";
 import type { AttachmentFallbackRuntimeResources } from "./session-model-resources.ts";
 import { SessionRecorder } from "./session-recorder.ts";
@@ -216,7 +216,7 @@ async function loadModels(
   writeRuntime(runtime, (sessionId, now, generation) => {
     runtime.store.setRuntimeAgentFile(sessionId, agentFile, now, generation);
   });
-  const maxOutputTokens = await sessionMaxOutputTokens(
+  const metadata = await sessionRequestMetadata(
     runtime,
     (apply) => {
       writeRuntime(runtime, apply);
@@ -226,7 +226,7 @@ async function loadModels(
   const models = createSessionAgentModels({
     agentFile,
     credential: runtime.credential,
-    detail: { ...runtime.detail, maxOutputTokens },
+    detail: { ...runtime.detail, ...metadata },
     factory: runtime.modelFactory,
     isCurrent: runtime.isCurrent,
     onStepStart: () => {

@@ -8,10 +8,10 @@ import type {
 import type { ReactiveState } from "../reactive-state.ts";
 import { RenderDebugProvider, type RenderDebugView } from "../render-debug.tsx";
 import type { SessionViewState } from "../session-client.tsx";
-import { summaryFromDetail } from "../session-codec.ts";
 import { SessionController } from "../session-controller.ts";
 import { SessionDetailBody } from "../session-detail-body.tsx";
 import { SessionDetail } from "../session-detail-client.tsx";
+import { summaryFromDetail } from "../session-summary-codec.ts";
 import {
   DEFAULT_SESSION_TRANSCRIPT_FILTERS,
   type SessionTranscriptFilterStorage,

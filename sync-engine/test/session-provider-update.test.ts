@@ -22,6 +22,7 @@ function createProviderUpdateSession(
   userContextTokenCap?: number,
 ) {
   const values = {
+    adaptiveThinking: null,
     autoCompact: true,
     credentialId: "openai-source",
     executionEnvironment: "bare_metal" as const,
@@ -131,6 +132,20 @@ function sessionRow(setupValue: ReturnType<typeof setup>) {
     .get();
 }
 
+interface UntaggedMetadata {
+  readonly adaptiveThinking?: boolean;
+  readonly maxOutputTokens?: number;
+}
+
+function untaggedCatalog(metadata: Readonly<UntaggedMetadata>) {
+  const [option] = testModelCatalog("vendor/model", "Model").models;
+  if (option === undefined) throw new Error("Fixture catalog is empty");
+  return Promise.resolve({
+    defaultModel: option.id,
+    models: [{ ...option, ...metadata }],
+  });
+}
+
 describe("session provider update", () => {
   const applyUpdate = (
     setupValue: ReturnType<typeof setup>,
@@ -140,6 +155,25 @@ describe("session provider update", () => {
       ...setupValue.input,
       confirmedCacheDrop,
     });
+
+  async function applyUntaggedMetadata(
+    setupValue: ReturnType<typeof setup>,
+    metadata: Readonly<UntaggedMetadata>,
+  ) {
+    setupValue.dependencies.discoverModels = () => untaggedCatalog(metadata);
+    return applySessionProviderUpdate(setupValue.dependencies, TEST_USER_ID, {
+      ...setupValue.input,
+      openRouterProviderTag: null,
+    });
+  }
+
+  async function persistedUntaggedMetadata(
+    metadata: Readonly<UntaggedMetadata>,
+  ) {
+    const setupValue = setup();
+    const updated = await applyUntaggedMetadata(setupValue, metadata);
+    return { setupValue, updated };
+  }
 
   test("updates provider metadata and drops the current cache segment once", async () => {
     const setupValue = setup();
@@ -200,23 +234,23 @@ describe("session provider update", () => {
   });
 
   test("persists the catalog output limit for untagged model targets", async () => {
-    const setupValue = setup();
-    const [option] = testModelCatalog("vendor/model", "Model").models;
-    if (option === undefined) throw new Error("Fixture catalog is empty");
-    setupValue.dependencies.discoverModels = () =>
-      Promise.resolve({
-        defaultModel: option.id,
-        models: [{ ...option, maxOutputTokens: 64_000 }],
-      });
-
-    const updated = await applySessionProviderUpdate(
-      setupValue.dependencies,
-      TEST_USER_ID,
-      { ...setupValue.input, openRouterProviderTag: null },
-    );
+    const { setupValue, updated } = await persistedUntaggedMetadata({
+      maxOutputTokens: 64_000,
+    });
 
     expect(updated.maxOutputTokens).toBe(64_000);
     expect(sessionRow(setupValue)?.maxOutputTokens).toBe(64_000);
+  });
+
+  test("persists adaptive-thinking capability for untagged model targets", async () => {
+    const { setupValue, updated } = await persistedUntaggedMetadata({
+      adaptiveThinking: false,
+    });
+
+    expect(updated.adaptiveThinking).toBe(false);
+    expect(
+      setupValue.store.get(TEST_USER_ID, updated.id)?.adaptiveThinking,
+    ).toBe(false);
   });
 
   test("retains a cap below the target model limit", async () => {

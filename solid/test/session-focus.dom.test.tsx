@@ -4,9 +4,9 @@ import { createProviderViewState } from "../provider-credential-model.ts";
 import { createReactiveState } from "../reactive-state.ts";
 import { createRunnerViewState } from "../runner-client.tsx";
 import { SessionPanel, type SessionViewState } from "../session-client.tsx";
-import { summaryFromDetail } from "../session-codec.ts";
 import { SessionController } from "../session-controller.ts";
 import { initialSessionViewState } from "../session-state.ts";
+import { summaryFromDetail } from "../session-summary-codec.ts";
 import {
   clickTestButton,
   disposeTestViews,

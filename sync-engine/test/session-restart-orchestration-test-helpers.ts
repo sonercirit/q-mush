@@ -32,7 +32,12 @@ export function orchestrationActions(
       Promise.resolve(
         Object.assign(
           {},
-          { maxContextTokens: 1, maxOutputTokens: null, providerPricing: null },
+          {
+            adaptiveThinking: null,
+            maxContextTokens: 1,
+            maxOutputTokens: null,
+            providerPricing: null,
+          },
         ),
       ),
     launchSession: () => false,

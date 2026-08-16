@@ -2,13 +2,13 @@ import { sql } from "drizzle-orm";
 import { updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentSessions } from "../shared/database/schema.ts";
-import type { ProviderModelPricing } from "../shared/provider-model-pricing.ts";
 import { contextTokenCapValidationError } from "../shared/session-context-limit.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import {
   sessionProviderSelectionMatches,
   type SessionProviderUpdateInput,
 } from "../shared/session-provider-update.ts";
+import type { SessionRequestModelMetadata } from "./session-provider-selection.ts";
 import {
   sessionTimingUpdate,
   workspaceSessionCondition,
@@ -33,13 +33,11 @@ type ReadProviderUpdateSession = (
 export function updateStoredSessionProvider(
   database: AppDatabase,
   read: ReadProviderUpdateSession,
-  input: SessionProviderUpdateInput & {
-    readonly maxContextTokens: number | null;
-    readonly maxOutputTokens: number | null;
-    readonly now: number;
-    readonly providerPricing: ProviderModelPricing | null;
-    readonly userId: string;
-  },
+  input: SessionProviderUpdateInput &
+    SessionRequestModelMetadata & {
+      readonly now: number;
+      readonly userId: string;
+    },
 ): SessionProviderUpdateStoreResult {
   const identity = [input.userId, input.sessionId, input.workspaceId] as const;
   const existing = read(identity);
@@ -71,6 +69,7 @@ export function updateStoredSessionProvider(
     executionGeneration: sql`${agentSessions.executionGeneration} + 1`,
     maxContextTokens: input.maxContextTokens,
     maxOutputTokens: input.maxOutputTokens,
+    adaptiveThinking: input.adaptiveThinking,
     model: input.model,
     interruptedHandoff: null,
     provider: input.provider,

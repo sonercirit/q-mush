@@ -11,8 +11,8 @@ import {
 import type { RealtimeServerEvent } from "../realtime-client-codec.ts";
 import { createRunnerViewState } from "../runner-client.tsx";
 import { SessionPanel } from "../session-client.tsx";
-import { summaryFromDetail } from "../session-codec.ts";
 import { SessionController } from "../session-controller.ts";
+import { summaryFromDetail } from "../session-summary-codec.ts";
 import { mountTestView } from "./dom-test-helpers.ts";
 import { realtimeTestSetup } from "./realtime-client-test-setup.ts";
 import { runnerSummary } from "./runner-fixtures.ts";

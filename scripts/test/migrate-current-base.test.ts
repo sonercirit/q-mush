@@ -39,6 +39,7 @@ const CURRENT_BASE_MIGRATIONS = [
 const CURRENT_BASE_TIMESTAMP = 1_785_753_783_416;
 const STEP_STARTED_MIGRATION_TIMESTAMP = 1_786_576_532_455;
 const MAX_OUTPUT_TOKENS_MIGRATION_TIMESTAMP = 1_786_595_654_131;
+const ADAPTIVE_THINKING_MIGRATION_TIMESTAMP = 1_786_746_755_573;
 
 let temporaryDirectory: string | undefined;
 
@@ -102,13 +103,17 @@ test("upgrades migration 0027 through the latest migrations", async () => {
   expect(agentSessionColumnNames(upgradedDatabase.$client)).toContain(
     "max_output_tokens",
   );
+  expect(agentSessionColumnNames(upgradedDatabase.$client)).toContain(
+    "adaptive_thinking",
+  );
   const migrationTimestamps = upgradedDatabase.$client
     .query<{ readonly createdAt: number }, []>(
-      "SELECT created_at AS createdAt FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 2",
+      "SELECT created_at AS createdAt FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 3",
     )
     .all()
     .map(({ createdAt }) => createdAt);
   expect(migrationTimestamps).toEqual([
+    ADAPTIVE_THINKING_MIGRATION_TIMESTAMP,
     MAX_OUTPUT_TOKENS_MIGRATION_TIMESTAMP,
     STEP_STARTED_MIGRATION_TIMESTAMP,
   ]);

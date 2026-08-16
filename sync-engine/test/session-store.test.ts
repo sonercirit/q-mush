@@ -128,6 +128,7 @@ describe("session store", () => {
     expect(created.currentContextTokens).toBe(0);
     expect(created.autoCompact).toBe(true);
     expect(created.maxContextTokens).toBe(200_000);
+    expect(created.adaptiveThinking).toBe(false);
     expect(created.reasoningEffort).toBe("high");
     expect(created.tools).toEqual(AGENT_SESSION_TOOL_NAMES);
     expect(created.title).toBe("Inspect the repository");

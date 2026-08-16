@@ -28,6 +28,7 @@ function storedSessionSelection() {
     activeDurationMs: agentSessions.activeDurationMs,
     activeStartedAt: agentSessions.activeStartedAt,
     stepStartedAt: agentSessions.stepStartedAt,
+    adaptiveThinking: agentSessions.adaptiveThinking,
     agentFilePath: agentSessions.agentFilePath,
     autoCompact: agentSessions.autoCompact,
     costBasis: agentSessions.costBasis,
@@ -67,6 +68,7 @@ type StoredSessionSummary = Pick<
   | "activeDurationMs"
   | "activeStartedAt"
   | "stepStartedAt"
+  | "adaptiveThinking"
   | "agentFilePath"
   | "autoCompact"
   | "costBasis"

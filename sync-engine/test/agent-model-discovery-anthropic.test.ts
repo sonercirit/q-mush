@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import type {
   AgentModelCatalog,
   AgentModelOption,
+  AgentReasoningEffort,
 } from "../../shared/agent-configuration.ts";
 import { discoverAgentModelsWithFetch } from "../../sync-engine/agent-model-discovery.ts";
 import { createJsonResponse } from "../../sync-engine/http.ts";
@@ -11,13 +12,29 @@ import {
   model,
 } from "./agent-model-discovery-helpers.ts";
 
-function capabilityListing(
-  capabilities: Readonly<Record<string, unknown>>,
-  id: string,
-  displayName: string,
-  extra?: Readonly<Record<string, unknown>>,
-): unknown {
+interface CapabilityListingOptions {
+  readonly capabilities: Readonly<Record<string, unknown>>;
+  readonly displayName: string;
+  readonly extra?: Readonly<Record<string, unknown>>;
+  readonly id: string;
+}
+
+function capabilityListing({
+  capabilities,
+  displayName,
+  extra = {},
+  id,
+}: CapabilityListingOptions): unknown {
   return { capabilities, display_name: displayName, id, ...extra };
+}
+
+function expectedCapabilityModel(
+  id: string,
+  label: string,
+  reasoningEfforts: readonly AgentReasoningEffort[],
+  adaptiveThinking: boolean | null,
+): AgentModelOption {
+  return { ...model(id, label, reasoningEfforts), adaptiveThinking };
 }
 
 function expectSoleModel(
@@ -55,6 +72,13 @@ function dualListing(
     request.headers.has("x-api-key")
       ? createJsonResponse({ data: anthropicModels, has_more: false })
       : createJsonResponse({ data: openAiModels });
+}
+
+function singleCapabilityListing(
+  listing: CapabilityListingOptions,
+  openAiModel: Readonly<Record<string, unknown>>,
+): (request: Request) => Response {
+  return dualListing([capabilityListing(listing)], [openAiModel]);
 }
 
 test("discovers Anthropic-format models and merges OpenAI-listed efforts", async () => {
@@ -113,8 +137,8 @@ test("reads Anthropic capability efforts and modalities without a second probe",
   const { discovered, requests } = await discoverAnthropicFormat(
     dualListing(
       [
-        capabilityListing(
-          {
+        capabilityListing({
+          capabilities: {
             effort: {
               high: { supported: true },
               low: { supported: true },
@@ -133,25 +157,25 @@ test("reads Anthropic capability efforts and modalities without a second probe",
               types: { adaptive: { supported: true } },
             },
           },
-          "claude-caps-5",
-          "Claude Caps 5",
-          { max_input_tokens: 1_000_000, type: "model" },
-        ),
+          displayName: "Claude Caps 5",
+          extra: { max_input_tokens: 1_000_000, type: "model" },
+          id: "claude-caps-5",
+        }),
       ],
       [],
     ),
   );
 
-  expectSoleModel(
-    discovered,
-    model(
+  expectSoleModel(discovered, {
+    ...model(
       "claude-caps-5",
       "Claude Caps 5",
       ["none", "low", "medium", "high", "max"],
       1_000_000,
       ["text", "image", "pdf"],
     ),
-  );
+    adaptiveThinking: true,
+  });
   // Capability metadata answered efforts, so no OpenAI-style probe runs.
   expect(requests).toHaveLength(1);
 });
@@ -160,12 +184,12 @@ test("keeps generic modalities when capabilities lack modality leaves", async ()
   const { discovered } = await discoverAnthropicFormat(
     dualListing(
       [
-        capabilityListing(
-          { context_window: 128_000 },
-          "claude-proxy-1",
-          "Claude Proxy 1",
-          { input_modalities: ["text", "image"] },
-        ),
+        capabilityListing({
+          capabilities: { context_window: 128_000 },
+          displayName: "Claude Proxy 1",
+          extra: { input_modalities: ["text", "image"] },
+          id: "claude-proxy-1",
+        }),
       ],
       [],
     ),
@@ -205,25 +229,24 @@ test("follows Anthropic has_more cursors across pages", async () => {
 
 test("keeps authoritative Anthropic effort metadata over the OpenAI listing", async () => {
   const anthropicListing = [
-    capabilityListing(
-      {
+    capabilityListing({
+      capabilities: {
         effort: {
           high: { supported: true },
           supported: true,
         },
         thinking: { types: { adaptive: { supported: false } } },
       },
-      "claude-gated-1",
-      "Claude Gated 1",
-    ),
-    capabilityListing(
-      { effort: { supported: false } },
-      "claude-off-1",
-      "Claude Off 1",
-    ),
-    // Named levels but no adaptive leaf anywhere: efforts imply sending
-    // adaptive thinking, which is unverifiable here, so authoritative.
-    // With the boolean-shorthand adaptive leaf, support is confirmed.
+      displayName: "Claude Gated 1",
+      id: "claude-gated-1",
+    }),
+    capabilityListing({
+      capabilities: { effort: { supported: false } },
+      displayName: "Claude Off 1",
+      id: "claude-off-1",
+    }),
+    // Named levels do not depend on adaptive thinking. The separate
+    // capability is persisted so requests can omit a rejected thinking type.
     ...[
       { id: "claude-bare-1", label: "Claude Bare 1", thinking: undefined },
       {
@@ -232,14 +255,14 @@ test("keeps authoritative Anthropic effort metadata over the OpenAI listing", as
         thinking: { types: { adaptive: true } },
       },
     ].map(({ id, label, thinking }) =>
-      capabilityListing(
-        {
+      capabilityListing({
+        capabilities: {
           effort: { low: { supported: true }, supported: true },
           ...(thinking === undefined ? {} : { thinking }),
         },
+        displayName: label,
         id,
-        label,
-      ),
+      }),
     ),
     { display_name: "Claude Unknown 1", id: "claude-unknown-1" },
   ];
@@ -256,22 +279,26 @@ test("keeps authoritative Anthropic effort metadata over the OpenAI listing", as
     dualListing(anthropicListing, openAiListing),
   );
 
-  // Adaptive-incapable and explicitly unsupported models keep their
-  // authoritative empty efforts; only the metadata-free model accepts the
-  // OpenAI-style listing.
+  // Adaptive-incapable models retain their effort levels; only explicitly
+  // unsupported effort is authoritative empty, and metadata-free models use
+  // the OpenAI-style listing.
   expect(
-    discovered.models.map(({ id, reasoningEfforts }) => [id, reasoningEfforts]),
+    discovered.models.map(({ adaptiveThinking, id, reasoningEfforts }) => [
+      id,
+      reasoningEfforts,
+      adaptiveThinking,
+    ]),
   ).toEqual([
-    ["claude-gated-1", []],
-    ["claude-off-1", []],
-    ["claude-bare-1", []],
-    ["claude-short-1", ["none", "low"]],
-    ["claude-unknown-1", ["low", "high"]],
+    ["claude-gated-1", ["none", "high"], false],
+    ["claude-off-1", [], null],
+    ["claude-bare-1", ["none", "low"], null],
+    ["claude-short-1", ["none", "low"], true],
+    ["claude-unknown-1", ["low", "high"], null],
   ]);
   expect(requests).toHaveLength(2);
 });
 
-test("an adaptive-incapable model without effort metadata stays effortless", async () => {
+test("an adaptive-incapable model without effort metadata keeps effort unknown", async () => {
   // Full leaf, partial-tree denial, and boolean shorthand all count.
   for (const thinking of [
     { types: { adaptive: { supported: false } } },
@@ -279,25 +306,58 @@ test("an adaptive-incapable model without effort metadata stays effortless", asy
     { types: { adaptive: false } },
   ]) {
     const { discovered } = await discoverAnthropicFormat(
-      dualListing(
-        [capabilityListing({ thinking }, "claude-manual-1", "Claude Manual 1")],
-        [
-          {
-            id: "claude-manual-1",
-            supported_reasoning_efforts: ["low", "high"],
-          },
-        ],
+      singleCapabilityListing(
+        {
+          capabilities: { thinking },
+          displayName: "Claude Manual 1",
+          id: "claude-manual-1",
+        },
+        {
+          id: "claude-manual-1",
+          supported_reasoning_efforts: ["low", "high"],
+        },
       ),
     );
 
-    // The explicit non-support is authoritative even though the capability
-    // tree carries no effort node: the OpenAI-style listing must not
-    // enable efforts that would send a rejected adaptive thinking type.
+    // Adaptive non-support must not invent effort non-support. The fallback
+    // listing can provide levels, while the request path still omits adaptive
+    // thinking for this model.
     expectSoleModel(
       discovered,
-      model("claude-manual-1", "Claude Manual 1", []),
+      expectedCapabilityModel(
+        "claude-manual-1",
+        "Claude Manual 1",
+        ["low", "high"],
+        false,
+      ),
     );
   }
+});
+
+test("preserves unknown adaptive metadata when a leaf has no support flag", async () => {
+  const { discovered } = await discoverAnthropicFormat(
+    singleCapabilityListing(
+      {
+        capabilities: { thinking: { types: { adaptive: {} } } },
+        displayName: "Claude Unknown Adaptive 1",
+        id: "claude-unknown-adaptive-1",
+      },
+      {
+        id: "claude-unknown-adaptive-1",
+        supported_reasoning_efforts: ["low"],
+      },
+    ),
+  );
+
+  expectSoleModel(
+    discovered,
+    expectedCapabilityModel(
+      "claude-unknown-adaptive-1",
+      "Claude Unknown Adaptive 1",
+      ["low"],
+      null,
+    ),
+  );
 });
 
 test("affirmed effort support without named levels accepts listed efforts", async () => {
@@ -307,16 +367,27 @@ test("affirmed effort support without named levels accepts listed efforts", asyn
   };
   const { discovered } = await discoverAnthropicFormat(
     dualListing(
-      [capabilityListing(levelless, "claude-terse-1", "Claude Terse 1")],
+      [
+        capabilityListing({
+          capabilities: levelless,
+          displayName: "Claude Terse 1",
+          id: "claude-terse-1",
+        }),
+      ],
       [{ id: "claude-terse-1", supported_reasoning_efforts: ["low", "max"] }],
     ),
   );
 
-  // Support without levels reads as unknown, not none — and adaptive is
-  // confirmed, so levels from the OpenAI-style listing are safe to offer.
+  // Support without levels reads as unknown, not none; listed levels are
+  // safe to offer and adaptive support remains attached to the option.
   expectSoleModel(
     discovered,
-    model("claude-terse-1", "Claude Terse 1", ["low", "max"]),
+    expectedCapabilityModel(
+      "claude-terse-1",
+      "Claude Terse 1",
+      ["low", "max"],
+      true,
+    ),
   );
 });
 
@@ -325,7 +396,11 @@ test("a metadata-free duplicate cannot reopen an authoritative model", async () 
   const { discovered } = await discoverAnthropicFormat(
     dualListing(
       [
-        capabilityListing(effortless, "claude-dup-1", "Claude Dup 1"),
+        capabilityListing({
+          capabilities: effortless,
+          displayName: "Claude Dup 1",
+          id: "claude-dup-1",
+        }),
         { display_name: "Claude Dup 1 Again", id: "claude-dup-1" },
       ],
       [{ id: "claude-dup-1", supported_reasoning_efforts: ["low"] }],
@@ -388,7 +463,13 @@ test("propagates an abort raised during the OpenAI-style effort probe", async ()
         if (request.headers.has("x-api-key")) {
           return Promise.resolve(
             createJsonResponse({
-              data: [capabilityListing({}, "claude-test-4", "Claude Test 4")],
+              data: [
+                capabilityListing({
+                  capabilities: {},
+                  displayName: "Claude Test 4",
+                  id: "claude-test-4",
+                }),
+              ],
               has_more: false,
             }),
           );

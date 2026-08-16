@@ -5,9 +5,9 @@ import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { SESSION_REALTIME_OPERATIONS } from "../../shared/user-realtime-protocol.ts";
 import { createReactiveState } from "../../solid/reactive-state.ts";
 import type { SessionViewState } from "../../solid/session-client.tsx";
-import { summaryFromDetail } from "../../solid/session-codec.ts";
 import { SessionController } from "../../solid/session-controller.ts";
 import { initialSessionViewState } from "../../solid/session-state.ts";
+import { summaryFromDetail } from "../../solid/session-summary-codec.ts";
 import {
   DEFAULT_SESSION_TRANSCRIPT_FILTERS,
   writeSessionTranscriptFilters,

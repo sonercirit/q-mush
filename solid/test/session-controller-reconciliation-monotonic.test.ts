@@ -1,5 +1,4 @@
 import { expect, test } from "vitest";
-import { summaryFromDetail } from "../../solid/session-codec.ts";
 import {
   acknowledgeSessionDetail,
   newestSessionSummaries,
@@ -7,6 +6,7 @@ import {
   reconcileSessionSummaries,
   sessionDetailIsAtLeast,
 } from "../../solid/session-controller-reconciliation.ts";
+import { summaryFromDetail } from "../../solid/session-summary-codec.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
 function detail(

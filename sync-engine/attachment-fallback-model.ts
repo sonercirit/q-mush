@@ -94,6 +94,7 @@ export async function explainAttachment(
       ? options.currentProviderPricing
       : selectedModel.pricing;
   const model = createFallbackModel(options.factory, {
+    adaptiveThinking: selectedModel.adaptiveThinking,
     credential,
     maxOutputTokens: selectedModel.maxOutputTokens,
     model: selectedModelId,

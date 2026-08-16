@@ -18,9 +18,9 @@ import {
 import { readRunners } from "./runner-client.tsx";
 import {
   readSessionDetail,
-  readSessionList,
   readSessionPendingQuestions,
 } from "./session-codec.ts";
+import { readSessionSummary } from "./session-summary-codec.ts";
 
 interface RealtimeCommandErrorEvent {
   readonly commandId: string;
@@ -145,7 +145,13 @@ export function readRealtimeServerEvent(message: string): RealtimeServerEvent {
     case "runners":
       return { runners: readRunners(value), type: "runners" };
     case "sessions":
-      return { sessions: readSessionList(value), type: "sessions" };
+      if (!Array.isArray(value["sessions"])) {
+        throw new Error("The server returned an invalid agent session list");
+      }
+      return {
+        sessions: value["sessions"].map(readSessionSummary),
+        type: "sessions",
+      };
     case "session":
       return { session: readSessionDetail(value["session"]), type: "session" };
     case "session_questions":

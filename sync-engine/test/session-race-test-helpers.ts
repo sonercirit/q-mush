@@ -1,5 +1,12 @@
 import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 
+export const EMPTY_SESSION_REQUEST_MODEL_METADATA = {
+  adaptiveThinking: null,
+  maxContextTokens: null,
+  maxOutputTokens: null,
+  providerPricing: null,
+} as const;
+
 export function sessionAgentActionDefaults() {
   return {
     broker: new RunnerCommandBroker(),

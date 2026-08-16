@@ -7,7 +7,7 @@ import { SESSION_REALTIME_OPERATIONS } from "../shared/user-realtime-protocol.ts
 import { requestJson } from "./browser-http.ts";
 import type { RevisionState } from "./revision-state.ts";
 import type { SessionViewState } from "./session-client.tsx";
-import { readSessionDetail, readSessionList } from "./session-codec.ts";
+import { readSessionDetail } from "./session-codec.ts";
 import { sessionDetailState } from "./session-controller-detail.ts";
 import type { SessionRealtimeState } from "./session-controller-state.ts";
 import {
@@ -21,16 +21,25 @@ import {
 } from "./session-pending.ts";
 import { emptySessionReassignmentDraft } from "./session-reassignment-client.ts";
 import { mostRecentSessionDirectory } from "./session-state.ts";
+import { readSessionSummary } from "./session-summary-codec.ts";
 import type { SessionCommandTransport } from "./session-transport.ts";
 
 async function loadSessionSummaries(
   transport?: SessionCommandTransport,
 ): Promise<readonly AgentSessionSummary[]> {
-  return readSessionList(
+  const value: unknown =
     transport === undefined
       ? await requestJson(SESSIONS_PATH)
-      : await transport.command(SESSION_REALTIME_OPERATIONS.subscribe, {}),
-  );
+      : await transport.command(SESSION_REALTIME_OPERATIONS.subscribe, {});
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("sessions" in value) ||
+    !Array.isArray(value.sessions)
+  ) {
+    throw new Error("The server returned an invalid agent session list");
+  }
+  return value.sessions.map(readSessionSummary);
 }
 
 async function loadSessionDetail(
