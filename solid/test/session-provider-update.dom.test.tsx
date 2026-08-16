@@ -14,6 +14,7 @@ import { SessionDetail } from "../session-detail-client.tsx";
 import { SessionProviderUpdateEditor } from "../session-provider-update-client.tsx";
 import { initialSessionViewState } from "../session-state.ts";
 import {
+  chooseTestOption,
   clickTestButton,
   expectTestText,
   mountTestView,
@@ -164,15 +165,6 @@ async function mountedOpenRouterEditor() {
     ).toBe("together");
   });
   return mounted;
-}
-
-function chooseProviderUpdateOption(
-  container: ParentNode,
-  selectId: string,
-  value: string,
-): void {
-  clickTestButton(container, selectId);
-  clickTestButton(container, `[data-option-value='${value}']`);
 }
 
 function expectOpenRouterDraft(container: ParentNode): void {
@@ -326,7 +318,7 @@ test("rediscovers providers only when the session provider selection changes", a
 test("reselecting the current model preserves its serving provider", async () => {
   const { container, discoverProviders } = await mountedOpenRouterEditor();
 
-  chooseProviderUpdateOption(container, "#session-provider-model", "model-2");
+  chooseTestOption(container, "#session-provider-model", "model-2");
 
   expectOpenRouterDraft(container);
   expect(discoverProviders).toHaveBeenCalledTimes(1);
@@ -335,7 +327,7 @@ test("reselecting the current model preserves its serving provider", async () =>
 test("reselecting the current credential preserves its model and serving provider", async () => {
   const { container, discoverModels } = await mountedOpenRouterEditor();
 
-  chooseProviderUpdateOption(
+  chooseTestOption(
     container,
     "#session-provider-credential",
     "openrouter:credential-1",

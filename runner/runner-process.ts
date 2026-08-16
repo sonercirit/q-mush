@@ -26,6 +26,15 @@ export interface RunnerProcessOptions {
 }
 
 const MAXIMUM_OUTPUT_BYTES = 256 * 1_024;
+
+export function throwIfRunnerCommandStopped(
+  signal: AbortSignal | undefined,
+): void {
+  if (signal?.aborted === true) {
+    throw new Error("The runner command was stopped");
+  }
+}
+
 const COMMAND_GROUP_WRAPPER = `
 terminate_command_group() {
   trap - TERM
@@ -88,6 +97,7 @@ async function readStream(
 export async function runRunnerProcess(
   options: RunnerProcessOptions,
 ): Promise<RunnerProcessResult> {
+  throwIfRunnerCommandStopped(options.signal);
   const state: {
     settled: boolean;
     termination: RunnerProcessTermination | undefined;
@@ -128,9 +138,6 @@ export async function runRunnerProcess(
           terminate("timed-out");
         }, options.timeoutSeconds * 1_000);
   options.signal?.addEventListener("abort", stop, { once: true });
-  if (options.signal?.aborted === true) {
-    stop();
-  }
 
   try {
     const [exitCode, standardError, standardOutput] = await Promise.all([

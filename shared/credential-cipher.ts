@@ -1,10 +1,6 @@
 import { Buffer } from "node:buffer";
-import {
-  createCipheriv,
-  createDecipheriv,
-  createHash,
-  randomBytes,
-} from "node:crypto";
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { sha256Base64Url } from "./sha256.ts";
 
 const CIPHER_VERSION = "v1";
 const ENCRYPTION_ALGORITHM = "aes-256-gcm";
@@ -109,5 +105,5 @@ export function createCredentialCipher(
 }
 
 export function fingerprintCredential(value: string): string {
-  return createHash("sha256").update(value).digest("base64url");
+  return sha256Base64Url(value);
 }

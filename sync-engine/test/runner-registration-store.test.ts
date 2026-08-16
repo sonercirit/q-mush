@@ -65,14 +65,12 @@ function createRunner(setup: Setup): void {
   ).toBe(201);
 }
 
-function metadata(machineFingerprint: string, name = "workstation") {
-  return runnerMetadata(machineFingerprint, name);
-}
+type RunnerMetadata = ReturnType<typeof runnerMetadata>;
 
 function prepare(
   setup: Setup,
   token: string,
-  runnerMetadata: ReturnType<typeof metadata>,
+  runnerMetadata: RunnerMetadata,
   restartId?: string,
 ) {
   const proposal = setup.integration.preflightRegistration(
@@ -89,7 +87,7 @@ function prepare(
 
 function expectRegistrationPhase(
   setup: Setup,
-  runnerMetadata: ReturnType<typeof metadata>,
+  runnerMetadata: RunnerMetadata,
   receipt: string,
   phase: "finalized" | "prepared",
 ): void {
@@ -118,7 +116,7 @@ function activationGeneration(setup: Setup): number | undefined {
 
 function registrationState(
   setup: Setup,
-  runnerMetadata: ReturnType<typeof metadata>,
+  runnerMetadata: RunnerMetadata,
   receipt: string,
   token = FIRST_TOKEN,
 ) {
@@ -207,7 +205,7 @@ function firstRunnerDigest(database: Setup["database"]): string | undefined {
 
 function recreatedRegistration(
   setup: Setup,
-  runnerMetadata: ReturnType<typeof metadata>,
+  runnerMetadata: RunnerMetadata,
   activationId: string,
 ) {
   const recreated = integration(setup.database);
@@ -240,17 +238,19 @@ function expectLifecycleSettlement(
 function initializedRegistration(restartId?: string) {
   const setup = createSetup();
   createRunner(setup);
-  const runnerMetadata = metadata("machine-fingerprint-one");
-  const prepared = prepare(setup, FIRST_TOKEN, runnerMetadata, restartId);
-  return { prepared, runnerMetadata, setup };
+  const metadata = runnerMetadata("machine-fingerprint-one");
+  const prepared = prepare(setup, FIRST_TOKEN, metadata, restartId);
+  return { prepared, runnerMetadata: metadata, setup };
 }
 
 function rotateRunnerSetup() {
   const setup = createSetup();
   createRunner(setup);
   expect(
-    setup.integration.connect(FIRST_TOKEN, metadata("machine-fingerprint-one"))
-      ?.connection.id,
+    setup.integration.connect(
+      FIRST_TOKEN,
+      runnerMetadata("machine-fingerprint-one"),
+    )?.connection.id,
   ).toBe(FIRST_RUNNER_ID);
   createRunner(setup);
   return setup;
@@ -365,9 +365,9 @@ describe("runner registration durable state", () => {
   test("a prepared durable reservation gates conflicting scope", () => {
     const setup = createSetup();
     createRunner(setup);
-    const runnerMetadata = metadata("machine-fingerprint-one", "first");
-    const stale = prepare(setup, FIRST_TOKEN, runnerMetadata);
-    const freshMetadata = metadata("machine-fingerprint-one", "first");
+    const metadata = runnerMetadata("machine-fingerprint-one", "first");
+    const stale = prepare(setup, FIRST_TOKEN, metadata);
+    const freshMetadata = runnerMetadata("machine-fingerprint-one", "first");
     const fresh = setup.integration.preflightRegistration(
       FIRST_TOKEN,
       freshMetadata,
@@ -376,9 +376,9 @@ describe("runner registration durable state", () => {
     expect(fresh?.prepare(RESTART_ID)).toEqual({
       status: "registration_changed",
     });
-    expect(
-      registrationState(setup, runnerMetadata, stale.receipt),
-    ).toMatchObject({ phase: "prepared" });
+    expect(registrationState(setup, metadata, stale.receipt)).toMatchObject({
+      phase: "prepared",
+    });
     expect(
       registrationState(setup, freshMetadata, stale.receipt),
     ).toMatchObject({ phase: "prepared" });
@@ -481,7 +481,7 @@ describe("runner registration durable state", () => {
     const prepared = prepare(
       setup,
       SECOND_TOKEN,
-      metadata("machine-fingerprint-one", "rotated"),
+      runnerMetadata("machine-fingerprint-one", "rotated"),
     );
     finalizeRegistration(prepared);
 
@@ -505,7 +505,10 @@ describe("runner registration durable state", () => {
 
   test("token rotation is deferred until finalization and remains recoverable", () => {
     const setup = rotateRunnerSetup();
-    const rotatedMetadata = metadata("machine-fingerprint-one", "rotated");
+    const rotatedMetadata = runnerMetadata(
+      "machine-fingerprint-one",
+      "rotated",
+    );
     const prepared = prepare(setup, SECOND_TOKEN, rotatedMetadata);
 
     expectRunnerToken(setup.integration, FIRST_TOKEN, FIRST_TOKEN);

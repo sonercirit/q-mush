@@ -12,7 +12,7 @@ import { SessionPanel, type SessionViewState } from "../session-client.tsx";
 import { SessionController } from "../session-controller.ts";
 import { initialSessionViewState } from "../session-state.ts";
 import {
-  clickTestButton,
+  chooseTestOption,
   disposeTestViews,
   mountTestView,
   queryTestElement,
@@ -76,15 +76,6 @@ function createSessionTestController(
     sessions: [],
   });
   return new SessionController(reactive, undefined, null, { command });
-}
-
-function chooseOption(
-  container: ParentNode,
-  select: string,
-  value: string,
-): void {
-  clickTestButton(container, select);
-  clickTestButton(container, `[data-option-value='${value}']`);
 }
 
 const PRESERVED_DRAFT = {
@@ -245,7 +236,7 @@ test("changing the new-session account drives model loading and creation", async
   const { container, controller } = mountedSessionPanel(command);
 
   await waitForModel(container, "OpenAI model");
-  chooseOption(container, "#session-credential", "openrouter:credential-2");
+  chooseTestOption(container, "#session-credential", "openrouter:credential-2");
 
   await waitForModel(container, "OpenRouter model");
   controller.setDraftField("prompt", "Use the selected account");
@@ -278,7 +269,7 @@ test("choosing a balanced pool discovers and creates with its sentinel", async (
   });
 
   await waitForModel(container, "OpenAI model");
-  chooseOption(container, "#session-credential", "openai:balanced:openai");
+  chooseTestOption(container, "#session-credential", "openai:balanced:openai");
   await waitForModel(container, "Balanced OpenAI model");
   controller.setDraftField("prompt", "Balance this session");
   await controller.create();
@@ -337,12 +328,12 @@ test("preserves the new-session draft across background resource updates", async
   );
 
   await waitForModel(container, "OpenAI model");
-  chooseOption(container, "#session-runner", "runner-2");
-  chooseOption(container, "#session-credential", "openrouter:credential-2");
+  chooseTestOption(container, "#session-runner", "runner-2");
+  chooseTestOption(container, "#session-credential", "openrouter:credential-2");
   await waitForModel(container, "OpenRouter primary");
-  chooseOption(container, "#session-model", "openrouter/selected");
-  chooseOption(container, "#session-reasoning-effort", "low");
-  chooseOption(
+  chooseTestOption(container, "#session-model", "openrouter/selected");
+  chooseTestOption(container, "#session-reasoning-effort", "low");
+  chooseTestOption(
     container,
     "#session-openrouter-provider",
     "q-mush-routing:price",

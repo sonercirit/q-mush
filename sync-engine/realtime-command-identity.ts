@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { sha256Base64Url } from "../shared/sha256.ts";
 import type { UserRealtimeCommand } from "../shared/user-realtime-protocol.ts";
 import { utf8ByteLength } from "../shared/utf8.ts";
 
@@ -20,7 +20,7 @@ export function commandFingerprint(
     if (typeof serialized !== "string") {
       return undefined;
     }
-    return createHash("sha256").update(serialized).digest("base64url");
+    return sha256Base64Url(serialized);
   } catch {
     return undefined;
   }

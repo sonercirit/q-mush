@@ -46,11 +46,11 @@ Living project memory.
 
 ## Architecture and Conventions
 
-- Production source has four enforced top-level workspaces: `solid` owns browser
-  UI, `sync-engine` the Bun server and integrations, `runner` the standalone
-  runner, and `shared` cross-workspace code. The first three import only
-  themselves and `shared`; `shared` imports no other workspace; code outside
-  `scripts` cannot import `scripts`.
+- Production source has four enforced workspaces: `solid` owns browser UI,
+  `sync-engine` the Bun server and integrations, `runner` the standalone runner,
+  and `shared` cross-workspace code. The first three import only themselves and
+  `shared`; `shared` imports no other workspace; code outside `scripts` cannot
+  import `scripts`.
 - `sync-engine/server.ts` serves the browser JavaScript and Tailwind CSS that
   Vite builds in memory. Browser state, session updates, and runner work use
   authenticated WebSockets at `/api/realtime` and `/api/runner/realtime`; no
@@ -200,16 +200,16 @@ Living project memory.
   `solid/styles.css`) are rejected. First-party code rejects unsafe DOM HTML
   injection, `dangerouslySetInnerHTML`, and HTML-like `Response` bodies;
   HTML-like data and TSX pass.
-- `knip.config.ts` checks every issue type and entry exports;
-  `knip.production.config.ts` limits the graph to runtime source. Both run:
-  tests cannot keep production code alive; unused test helpers still fail.
-- `.jscpd.json` maps all JS/TS extensions to TSX for cross-extension detection;
-  import declarations are ignored; clones of ≥20 tokens and one line fail the
-  zero threshold.
-- `scripts/repository-check.ts` lists tracked, unignored files, calling the
-  policy APIs under `scripts/`: no files at 20,000 Unicode code points
-  (`bun.lock`, `drizzle/` excepted), no JS/TS tests outside `test` directories,
-  no `.htm(l)`/`.xhtml` app files outside `test`/`fixtures`.
+- Knip checks every issue type and entry export in test and production graphs;
+  tests cannot keep production alive, and unused test helpers fail.
+- CPD maps all JS/TS extensions to TSX and ignores imports. Its parse-error path
+  deliberately matches native CPD's crude whole-file fallback tokenizer.
+  Native-token and complete-function alpha matches of ≥20 tokens spanning a line
+  boundary fail the zero threshold; alpha ignores locally bound names but
+  preserves free names, member APIs, and literals.
+- Repository policy scans tracked, unignored files: 20,000-code-point maximum
+  (`bun.lock`, `drizzle/` excepted), tests only under `test`, and no app HTML
+  files outside `test`/`fixtures`.
 
 ## Decisions and Gotchas
 

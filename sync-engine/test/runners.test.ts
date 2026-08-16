@@ -108,17 +108,13 @@ function defaultRunnerRequest(runnerId: string): Request {
   );
 }
 
-function metadata(machineId: string, name = "workstation") {
-  return runnerMetadata(machineId, name);
-}
-
 function connect(
   setup: Setup,
   token: string,
   machineId: string,
   name?: string,
 ) {
-  return setup.integration.connect(token, metadata(machineId, name));
+  return setup.integration.connect(token, runnerMetadata(machineId, name));
 }
 
 function expectedPendingRunner(id: string): RunnerSummary {
@@ -362,7 +358,7 @@ describe("runner connections", () => {
   function prepareRegistration(setup: Setup, token: string, machineId: string) {
     return setup.integration.preflightRegistration(
       token,
-      metadata(machineId, "first"),
+      runnerMetadata(machineId, "first"),
     );
   }
 
@@ -423,7 +419,7 @@ describe("runner connections", () => {
 
     const proposal = setup.integration.preflightRegistration(
       SECOND_TOKEN,
-      metadata("machine-fingerprint-one", "reinstalled"),
+      runnerMetadata("machine-fingerprint-one", "reinstalled"),
     );
 
     expect(proposal).toMatchObject({
@@ -520,7 +516,7 @@ describe("runner connections", () => {
     setup.setNow(TEST_NOW + 30_000);
     const connected = setup.integration.connect(
       FIRST_TOKEN,
-      metadata("machine-fingerprint-one"),
+      runnerMetadata("machine-fingerprint-one"),
     );
     const connection = connected?.connection;
     expect(connection).toBeDefined();

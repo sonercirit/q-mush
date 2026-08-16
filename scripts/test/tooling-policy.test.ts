@@ -36,6 +36,11 @@ const CPD_IMPORT_PROBES = [
   sourceProbePath("cpd-import-policy-probe-a.ts"),
   sourceProbePath("cpd-import-policy-probe-b.ts"),
 ];
+const CPD_DASH_DIRECTORY = join(ROOT_DIRECTORY, "-cpd-path-probe");
+const CPD_DASH_PROBES = [
+  join(CPD_DASH_DIRECTORY, "first.ts"),
+  join(CPD_DASH_DIRECTORY, "second.ts"),
+];
 const RAW_HTML_FILE_PROBE = join(ROOT_DIRECTORY, "raw-html-policy-probe.html");
 
 interface CommandResult {
@@ -65,9 +70,9 @@ function expectCommandFailure(result: CommandResult): string {
 
 function runCpdImportProbes(): Promise<CommandResult> {
   return runCommand([
-    "node",
-    "node_modules/cpd/run-cpd.js",
-    "--no-colors",
+    "bun",
+    "run",
+    "scripts/cpd.ts",
     ...CPD_IMPORT_PROBES.map((probe) => relative(ROOT_DIRECTORY, probe)),
   ]);
 }
@@ -85,6 +90,7 @@ async function removeProbes(): Promise<void> {
     rm(KNIP_TEST_PROBE, { force: true }),
     rm(KNIP_TEST_SUPPORT_PROBE, { force: true, recursive: true }),
     ...CPD_IMPORT_PROBES.map((probe) => rm(probe, { force: true })),
+    rm(CPD_DASH_DIRECTORY, { force: true, recursive: true }),
     rm(RAW_HTML_FILE_PROBE, { force: true }),
   ]);
 }
@@ -272,7 +278,7 @@ console.log(database);
     expect(result.exitCode).toBe(0);
   });
 
-  test("CPD ignores imports without ignoring executable duplicates", async () => {
+  test("CPD ignores imports and owned identifier spelling", async () => {
     const duplicatedImports = `import {
   afterAll,
   afterEach,
@@ -294,21 +300,52 @@ console.log(database);
     expect(importResult.exitCode).toBe(0);
     expect(importResult.output).toContain("Found 0 clones");
 
-    const duplicatedImplementation = `export function normalizeDuplicatedValue(
+    const firstDuplicatedImplementation = `export function normalizeDuplicatedValue(
   input: string,
 ): string {
   const normalized = input.trim().toLowerCase();
   return normalized.split("").reverse().join("");
 }
 `;
+    const renamedDuplicatedImplementation = `export function transformDuplicatedValue(
+  source: string,
+): string {
+  const result = source.trim().toLowerCase();
+  return result.split("").reverse().join("");
+}
+`;
     await Promise.all(
       CPD_IMPORT_PROBES.map((probe) =>
-        writeFile(probe, duplicatedImplementation),
+        writeFile(
+          probe,
+          probe === CPD_IMPORT_PROBES[0]
+            ? firstDuplicatedImplementation
+            : renamedDuplicatedImplementation,
+        ),
       ),
     );
 
     const duplicateResult = await runCpdImportProbes();
     expect(expectCommandFailure(duplicateResult)).toContain("Found 1 clones");
+  });
+
+  test("CPD keeps normalized dash-prefixed paths as paths", async () => {
+    await mkdir(CPD_DASH_DIRECTORY);
+    await Promise.all(
+      CPD_DASH_PROBES.map((probe) =>
+        writeFile(probe, "export const uniqueValue = 1;\n"),
+      ),
+    );
+
+    const result = await runCommand([
+      "bun",
+      "run",
+      "scripts/cpd.ts",
+      `./${relative(ROOT_DIRECTORY, CPD_DASH_DIRECTORY)}`,
+    ]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("Found 0 clones");
   });
 
   test("repository check rejects application HTML files", async () => {

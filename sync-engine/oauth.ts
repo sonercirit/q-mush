@@ -1,6 +1,7 @@
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { createDatabase, type AppDatabase } from "../shared/database.ts";
 import { createUuidV7, type IdGenerator } from "../shared/ids.ts";
+import { sha256Base64Url } from "../shared/sha256.ts";
 import { requireRecord } from "../shared/validation.ts";
 import {
   createCookie,
@@ -280,7 +281,7 @@ function startPkceFlow(
   const verifier = generateOAuthToken(runtime.randomToken);
 
   return {
-    challenge: createHash("sha256").update(verifier).digest("base64url"),
+    challenge: sha256Base64Url(verifier),
     cookies: [
       createFlowCookie(names.state, state, names.path, secure),
       createFlowCookie(names.verifier, verifier, names.path, secure),

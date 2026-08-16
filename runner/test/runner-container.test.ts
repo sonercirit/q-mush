@@ -130,6 +130,19 @@ describe("RunnerContainerManager", () => {
     },
   );
 
+  test("preserves an already-stopped startup error", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const manager = new RunnerContainerManager();
+    const preparation = manager.prepare(
+      "session-stopped-before-start",
+      temporaryDirectory(),
+      controller.signal,
+    );
+
+    await expect(preparation).rejects.toThrow("The runner command was stopped");
+  });
+
   test("starts one root container per session and maps the workspace", async () => {
     const fake = successfulFake();
     const root = temporaryDirectory();

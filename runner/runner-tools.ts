@@ -21,7 +21,6 @@ import type {
   RunnerCommandOutputDelta,
   RunnerCommandResult,
 } from "../shared/runner-command-broker.ts";
-
 import { MAXIMUM_TOOL_OUTPUT_LINES } from "../shared/tool-output-limits.ts";
 import {
   createPageFetchRunnerTool,
@@ -37,6 +36,7 @@ import {
   formatRunnerProcessResult,
   runnerCommandResultFromOutput,
   runRunnerProcess,
+  throwIfRunnerCommandStopped,
 } from "./runner-process.ts";
 import {
   containedRunnerPath,
@@ -663,12 +663,15 @@ async function resolvedRunnerTool(
   if (!isRunnerAgentToolName(name)) {
     throw new Error(`Unknown runner tool: ${name}`);
   }
+  throwIfRunnerCommandStopped(signal);
+  const root = await resolveRunnerWorkspace(workingDirectory);
+  throwIfRunnerCommandStopped(signal);
   return {
     arguments_,
     name,
     options,
     parallelExecution,
-    root: await resolveRunnerWorkspace(workingDirectory),
+    root,
     signal,
   };
 }
@@ -678,9 +681,6 @@ export async function executeRunnerTool(
   ...parameters: ExecuteRunnerToolArguments
 ): Promise<string> {
   const resolved = await resolvedRunnerTool(parameters);
-  if (resolved.signal?.aborted === true) {
-    throw new Error("The runner command was stopped");
-  }
   return executeResolvedRunnerTool(resolved);
 }
 
