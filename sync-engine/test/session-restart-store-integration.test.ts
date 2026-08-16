@@ -157,6 +157,17 @@ test("skips startup time reads when no shutdown markers exist", () => {
   closeCompactionStore(setup);
 });
 
+function appendedAssistant(
+  setup: RestartStoreSetup,
+  content: string,
+  callId: string,
+  at: number,
+): void {
+  const toolCalls = [{ arguments: "{}", id: callId, name: "read" }];
+  const message = { content, role: "assistant" as const, toolCalls };
+  setup.store.appendCurrentAgentMessage(STORE_SESSION_ID, message, at);
+}
+
 function expectRestartCleared(setup: RestartStoreSetup): void {
   expect(readRawRestartHandoff(setup)).toBeNull();
   expect(setup.store.pendingRestartHandoffs()).toEqual([]);
@@ -198,6 +209,34 @@ test("projects paused handoffs without synthetic interrupted tool results", () =
     setup.store.conversation(STORE_SESSION_ID, TEST_REPLAY_IDENTITY, false),
   ).toHaveLength(2);
   expect(setup.store.pendingRestartHandoffs()).toHaveLength(1);
+  closeCompactionStore(setup);
+});
+
+test("fills non-trailing orphan tool calls without finishing a trailing handoff", () => {
+  const setup = runningRestartStore();
+  appendedAssistant(setup, "First command.", "call-1", TEST_NOW + 2);
+  expect(
+    setup.store.appendUserMessage(
+      TEST_USER_ID,
+      STORE_SESSION_ID,
+      "Continue.",
+      TEST_NOW + 3,
+    ),
+  ).toBe(true);
+  appendedAssistant(setup, "Trailing command.", "call-2", TEST_NOW + 4);
+
+  const conversation = setup.store.conversation(
+    STORE_SESSION_ID,
+    TEST_REPLAY_IDENTITY,
+    false,
+  );
+
+  expect(conversation).toContainEqual(
+    expect.objectContaining({ role: "tool", toolCallId: "call-1" }),
+  );
+  expect(conversation).not.toContainEqual(
+    expect.objectContaining({ role: "tool", toolCallId: "call-2" }),
+  );
   closeCompactionStore(setup);
 });
 

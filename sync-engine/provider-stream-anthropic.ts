@@ -74,6 +74,7 @@ function eventIndex(
 
 export class AnthropicStreamAccumulator extends BufferedAccumulator {
   readonly protocol = "anthropic" as const;
+  readonly #requestModel: string;
   readonly #replay: AnthropicReplayCapture;
   #pauseTurn = false;
   #stopped = false;
@@ -86,7 +87,8 @@ export class AnthropicStreamAccumulator extends BufferedAccumulator {
     onDelta?: ConstructorParameters<typeof BufferedAccumulator>[0],
   ) {
     super(onDelta);
-    this.#replay = new AnthropicReplayCapture(model, provenance);
+    this.#requestModel = model;
+    this.#replay = new AnthropicReplayCapture(provenance);
   }
 
   finish(): AgentModelStep {
@@ -103,10 +105,19 @@ export class AnthropicStreamAccumulator extends BufferedAccumulator {
     );
     return {
       ...step,
-      ...(this.#pauseTurn
-        ? { providerContinuation: "anthropic_pause_turn" as const }
-        : {}),
-      ...(providerReplay === undefined ? {} : { providerReplay }),
+      ...(step.toolCalls.length > 0 && providerReplay === undefined
+        ? { providerContinuation: "anthropic_replay_unavailable" as const }
+        : this.#pauseTurn
+          ? { providerContinuation: "anthropic_pause_turn" as const }
+          : {}),
+      ...(providerReplay === undefined
+        ? {}
+        : {
+            providerReplay:
+              providerReplay.model === this.#requestModel
+                ? providerReplay
+                : { ...providerReplay, requestModel: this.#requestModel },
+          }),
       tokenUsage: usage,
       ...(this.#truncation === undefined
         ? {}
@@ -154,6 +165,7 @@ export class AnthropicStreamAccumulator extends BufferedAccumulator {
   #readMessageStart(message: unknown): void {
     this.#readUsage(message);
     if (isRecord(message)) {
+      this.#replay.readModel(message["model"]);
       this.#replay.readContainer(message["container"]);
     }
   }
@@ -228,6 +240,7 @@ export class AnthropicStreamAccumulator extends BufferedAccumulator {
   }
 
   #readCompleteMessage(message: Readonly<Record<string, unknown>>): void {
+    this.#replay.readModel(message["model"]);
     const content = message["content"];
     if (!Array.isArray(content)) throw new Error(INVALID_MESSAGE);
     for (const [index, value] of content.entries()) {

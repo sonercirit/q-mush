@@ -100,11 +100,15 @@ export interface AnthropicAssistantReplay {
   readonly model: string;
   readonly protocol: "anthropic";
   readonly provenance: string;
+  readonly requestModel?: string;
 }
 
 export function createAnthropicAssistantReplay(
   blocks: readonly AnthropicReplayBlock[],
-  identity: Pick<AnthropicAssistantReplay, "model" | "provenance">,
+  identity: Pick<
+    AnthropicAssistantReplay,
+    "model" | "provenance" | "requestModel"
+  >,
   container?: string,
 ): AnthropicAssistantReplay {
   return {
@@ -113,7 +117,17 @@ export function createAnthropicAssistantReplay(
     model: identity.model,
     protocol: "anthropic",
     provenance: identity.provenance,
+    ...(identity.requestModel === undefined ||
+    identity.requestModel === identity.model
+      ? {}
+      : { requestModel: identity.requestModel }),
   };
+}
+
+export function anthropicReplayRequestModel(
+  replay: Pick<AnthropicAssistantReplay, "model" | "requestModel">,
+): string {
+  return replay.requestModel ?? replay.model;
 }
 
 const INVALID_REPLAY = "Anthropic assistant replay data is invalid";
@@ -288,11 +302,21 @@ function readAnthropicAssistantReplay(
     value["model"].length === 0 ||
     typeof value["provenance"] !== "string" ||
     value["provenance"].length === 0 ||
+    (value["requestModel"] !== undefined &&
+      (typeof value["requestModel"] !== "string" ||
+        value["requestModel"].length === 0)) ||
     (value["container"] !== undefined &&
       (typeof value["container"] !== "string" ||
         value["container"].length === 0)) ||
     !Object.keys(value).every((key) =>
-      ["blocks", "container", "model", "protocol", "provenance"].includes(key),
+      [
+        "blocks",
+        "container",
+        "model",
+        "protocol",
+        "provenance",
+        "requestModel",
+      ].includes(key),
     ) ||
     !Array.isArray(value["blocks"]) ||
     value["blocks"].length === 0 ||
@@ -302,7 +326,13 @@ function readAnthropicAssistantReplay(
   }
   return createAnthropicAssistantReplay(
     value["blocks"],
-    { model: value["model"], provenance: value["provenance"] },
+    {
+      model: value["model"],
+      provenance: value["provenance"],
+      ...(typeof value["requestModel"] === "string"
+        ? { requestModel: value["requestModel"] }
+        : {}),
+    },
     value["container"],
   );
 }

@@ -21,6 +21,7 @@ import {
 import { defaultValues } from "./default-store.ts";
 import { createUuidV7, SYSTEM_ID, type IdGenerator } from "./ids.ts";
 import { validPageWindow } from "./pagination.ts";
+import { credentialFingerprintOwner } from "./provider-credential-fingerprint.ts";
 import {
   accessibleCredentialIds,
   activeCredentialCondition,
@@ -28,7 +29,6 @@ import {
   credentialOrder,
   credentialScope,
   credentialSummarySelection,
-  fingerprintCondition,
   legacyCredentialSummary,
   matchingCredentialId,
   modelCredentialCondition,
@@ -121,14 +121,12 @@ export class ProviderCredentialStore {
     workspaceIds: readonly string[] = [GLOBAL_WORKSPACE_ID],
   ): ProviderCredentialSummary {
     const fingerprint = fingerprintProviderCredential(credential, details);
-    const existing = this.#database
-      .select({
-        id: providerCredentials.id,
-        isDeleted: providerCredentials.isDeleted,
-      })
-      .from(providerCredentials)
-      .where(fingerprintCondition(this.#provider, userId, fingerprint))
-      .get();
+    const existing = credentialFingerprintOwner(
+      this.#database,
+      this.#provider,
+      userId,
+      fingerprint,
+    );
 
     if (existing !== undefined && !existing.isDeleted) {
       throw new DuplicateProviderCredentialError();
@@ -449,10 +447,20 @@ export class ProviderCredentialStore {
     if (stored === undefined) {
       return false;
     }
+    const fingerprint = fingerprintProviderCredential(secret, stored);
+    const collision = credentialFingerprintOwner(
+      this.#database,
+      this.#provider,
+      userId,
+      fingerprint,
+    );
+    if (collision !== undefined && collision.id !== credentialId) {
+      return false;
+    }
     const updated = this.#database
       .update(providerCredentials)
       .set({
-        credentialFingerprint: fingerprintProviderCredential(secret, stored),
+        credentialFingerprint: fingerprint,
         encryptedCredential: this.#cipher.seal(
           secret,
           encryptionContext(userId, credentialId),

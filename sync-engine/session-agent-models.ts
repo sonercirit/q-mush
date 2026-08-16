@@ -13,6 +13,7 @@ import {
   agentModelOpenRouterProviderRouting,
   type AgentModelRequestOptions,
 } from "./agent-model-options.ts";
+import { anthropicResolvedModel } from "./anthropic-replay-identity-input.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
 import { sessionToolCacheCapability } from "./session-tool-capability.ts";
 import type { ToolStreamPublisher } from "./tool-stream-publisher.ts";
@@ -32,6 +33,7 @@ export interface SessionAgentModels {
   readonly agent: AgentModel;
   readonly createCompactor: () => ModelConversationCompactor;
   readonly publishCompactionSettled: () => void;
+  readonly resolvedModel?: string;
 }
 
 function agentModelRoutingOptions(
@@ -120,6 +122,7 @@ export function createSessionAgentModels(options: {
   readonly isCurrent: () => boolean;
   readonly onStepStart?: () => void;
   readonly realtime: RealtimeHub | undefined;
+  readonly resolvedModel?: string;
   readonly streamId?: string;
   readonly toolStream?: ToolStreamPublisher;
   readonly userId: string;
@@ -225,5 +228,6 @@ export function createSessionAgentModels(options: {
       );
     },
     publishCompactionSettled,
+    ...anthropicResolvedModel(options),
   };
 }

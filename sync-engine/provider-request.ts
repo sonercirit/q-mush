@@ -26,6 +26,7 @@ export interface ProviderModelRequest {
   readonly protocol: ProviderRequestProtocol;
   readonly provider: ProviderId;
   readonly reasoningEffort: AgentReasoningEffort | undefined;
+  readonly resolvedModel: string | undefined;
   readonly selectedTools: readonly AgentSessionToolName[];
   readonly stream: boolean;
   readonly systemPrompt: string;

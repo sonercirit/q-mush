@@ -11,6 +11,7 @@ import {
   type AnthropicReplayBlock,
 } from "../shared/anthropic-replay.ts";
 import { parseOptionalJsonRecord } from "../shared/json-record.ts";
+import { anthropicReplayIdentityInput } from "./anthropic-replay-identity-input.ts";
 import {
   anthropicReplayIdentityFrom,
   type AnthropicReplayIdentity,
@@ -43,6 +44,7 @@ export type AnthropicRequestOptions = Pick<
   | "model"
   | "provider"
   | "reasoningEffort"
+  | "resolvedModel"
   | "stream"
   | "systemPrompt"
   | "tools"
@@ -84,7 +86,8 @@ function matchingReplay(
   identity: AnthropicReplayIdentity,
 ): AnthropicAssistantReplay | undefined {
   const replay = message.providerReplay;
-  return replay?.model === identity.model &&
+  const resolvedModel = identity.resolvedModel ?? identity.model;
+  return replay?.model === resolvedModel &&
     replay.provenance === identity.provenance &&
     anthropicReplayMatchesAssistant(replay, message.content, message.toolCalls)
     ? replay
@@ -286,7 +289,9 @@ export function anthropicRequestBody(
             ? {}
             : { thinking: { display: "summarized", type: "adaptive" } }),
         };
-  const identity = anthropicReplayIdentityFrom(options);
+  const identity = anthropicReplayIdentityFrom(
+    anthropicReplayIdentityInput(options),
+  );
   const container = continuationContainer(options.messages, identity);
   return {
     ...(options.maxOutputTokens === null

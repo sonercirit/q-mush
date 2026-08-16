@@ -222,6 +222,9 @@ class DrizzleSessionIntegration
         this.#finisher.finish(detail, userId, error, recovered);
       },
       modelFactory: this.#modelFactory,
+      ...(dependencies.modelFetch === undefined
+        ? {}
+        : { modelFetch: dependencies.modelFetch }),
       readCredential: this.#readCredential,
       realtime: this.#realtime,
       shutdownInterrupted: this.#shutdown,

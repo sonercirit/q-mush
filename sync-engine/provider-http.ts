@@ -10,11 +10,8 @@ import {
   type ModelRequestSleep,
 } from "./agent-model-retry.ts";
 import type { AgentModelFetch } from "./agent-model.ts";
-import {
-  anthropicReplayIdentityFrom,
-  type AnthropicReplayIdentity,
-} from "./anthropic-replay-identity.ts";
-import { unavailableAnthropicResponseIdentity } from "./anthropic-response-identity.ts";
+import { anthropicReplayIdentityInput } from "./anthropic-replay-identity-input.ts";
+import { anthropicReplayIdentityFrom } from "./anthropic-replay-identity.ts";
 import { ProviderStreamError } from "./provider-error.ts";
 import {
   readProviderEventStream,
@@ -36,6 +33,7 @@ export interface ProviderHttpOptions {
   readonly onStreamRetry?: () => void;
   readonly protocol: "anthropic" | "chat_completions" | "responses";
   readonly provider: ProviderId;
+  readonly resolvedModel?: string;
   readonly sleep: ModelRequestSleep | undefined;
   readonly url: string;
 }
@@ -113,19 +111,12 @@ function streamFailure(
   return new RetryableModelRequestError(error, { retryAfterMilliseconds });
 }
 
-function anthropicIdentity(
-  options: ProviderHttpOptions,
-): AnthropicReplayIdentity {
-  if (options.protocol !== "anthropic") {
-    unavailableAnthropicResponseIdentity();
-  }
-  return anthropicReplayIdentityFrom(options);
-}
-
 function anthropicStreamOptions(
   options: ProviderHttpOptions,
 ): AnthropicEventStreamOptions {
-  const identity = anthropicIdentity(options);
+  const identity = anthropicReplayIdentityFrom(
+    anthropicReplayIdentityInput(options),
+  );
   return options.onDelta === undefined
     ? { identity }
     : { identity, onDelta: options.onDelta };

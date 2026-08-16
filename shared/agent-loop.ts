@@ -118,7 +118,8 @@ export interface AgentModelStep {
   readonly content: string;
   readonly contextTokens: number | null;
   readonly costUsd: number | null;
-  readonly providerContinuation?: "anthropic_pause_turn";
+  readonly providerContinuation?:
+    "anthropic_pause_turn" | "anthropic_replay_unavailable";
   readonly providerReplay?: AgentProviderReplay;
   readonly thinking: string;
   readonly tokenUsage: AgentTokenUsage | null;
@@ -293,6 +294,9 @@ function nextStepHasInput(
   return last !== undefined && last.role !== "assistant";
 }
 
+const UNSAFE_ANTHROPIC_CONTINUATION =
+  "The Anthropic response requested a tool with content that cannot be continued safely";
+
 export async function runAgentLoop(
   options: AgentLoopOptions,
 ): Promise<AgentLoopResult> {
@@ -354,6 +358,13 @@ export async function runAgentLoop(
         continue;
       }
       return { messages, status: "complete" };
+    }
+
+    if (
+      step.providerContinuation === "anthropic_replay_unavailable" &&
+      step.toolCalls.length > 0
+    ) {
+      throw new Error(UNSAFE_ANTHROPIC_CONTINUATION);
     }
 
     for (const call of step.toolCalls) {

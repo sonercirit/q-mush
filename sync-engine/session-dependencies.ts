@@ -2,6 +2,7 @@ import type { AppDatabase } from "../shared/database.ts";
 import type { IdGenerator } from "../shared/ids.ts";
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
+import type { AgentModelFetch } from "./agent-model.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
 import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
@@ -29,6 +30,7 @@ export interface SessionDependencies {
   readonly discoverModels?: AgentModelDiscoverer;
   readonly discoverOpenRouterProviders?: OpenRouterProviderDiscoverer;
   readonly modelFactory?: AgentModelFactory;
+  readonly modelFetch?: AgentModelFetch;
   readonly now?: () => number;
   readonly liveness?: SessionLivenessOptions;
   readonly randomId?: IdGenerator;

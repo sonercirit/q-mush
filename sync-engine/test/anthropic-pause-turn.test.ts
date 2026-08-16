@@ -71,9 +71,13 @@ describe("Anthropic pause_turn", () => {
       expect(body).toMatchObject({
         messages: [
           { role: "user" },
-          { content: [PAUSED_TEXT, serverToolCall], role: "assistant" },
+          {
+            content: [{ text: "Searching.", type: "text" }, serverToolCall],
+            role: "assistant",
+          },
         ],
       });
+      expect(PAUSED_TEXT.text).toBe("Searching. ");
     },
   );
 

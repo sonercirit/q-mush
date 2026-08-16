@@ -278,13 +278,12 @@ function completedReplayBlock(block: MutableReplayBlock): ReplayCompletion {
 
 export class AnthropicReplayCapture {
   readonly #entries = new Map<number, ReplayEntry>();
-  readonly #model: string;
-  readonly #provenance: string;
   #available = true;
   #container: string | undefined;
+  #model: string | undefined;
+  readonly #provenance: string;
 
-  constructor(model: string, provenance: string) {
-    this.#model = model;
+  constructor(provenance: string) {
     this.#provenance = provenance;
   }
 
@@ -295,6 +294,18 @@ export class AnthropicReplayCapture {
 
   invalidate(): void {
     this.#unavailable();
+  }
+
+  readModel(value: unknown): void {
+    if (
+      typeof value !== "string" ||
+      value.length === 0 ||
+      (this.#model !== undefined && this.#model !== value)
+    ) {
+      this.invalidate();
+      return;
+    }
+    this.#model = value;
   }
 
   readContainer(value: unknown): void {
@@ -365,6 +376,7 @@ export class AnthropicReplayCapture {
   finish(): AnthropicAssistantReplay | undefined {
     if (
       !this.#available ||
+      this.#model === undefined ||
       [...this.#entries.values()].some(({ stopped }) => !stopped)
     ) {
       return undefined;
@@ -381,7 +393,10 @@ export class AnthropicReplayCapture {
       ? undefined
       : createAnthropicAssistantReplay(
           blocks,
-          { model: this.#model, provenance: this.#provenance },
+          {
+            model: this.#model,
+            provenance: this.#provenance,
+          },
           this.#container,
         );
   }

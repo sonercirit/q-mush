@@ -79,6 +79,38 @@ function pausedTextStep(content: string, options?: Partial<AgentModelStep>) {
   });
 }
 
+type Completion = (
+  messages: readonly AgentConversationMessage[],
+  output: { readonly content: string; readonly thinking: string },
+) => Promise<AgentModelStep>;
+
+function scriptedCompletion(
+  ...steps: readonly AgentModelStep[]
+): ReturnType<typeof vi.fn<Completion>> {
+  const complete = vi.fn<Completion>();
+  for (const step of steps) complete.mockResolvedValueOnce(step);
+  return complete;
+}
+
+function pauseAssistant(
+  step: AgentModelStep,
+  content: string,
+  container?: string,
+): AgentConversationMessage {
+  const source = step.providerReplay;
+  if (source === undefined) throw new Error("The pause replay is unavailable");
+  return {
+    content,
+    providerReplay: {
+      ...source,
+      blocks: content.length === 0 ? [] : [{ text: content, type: "text" }],
+      ...(container === undefined ? {} : { container }),
+    },
+    role: "assistant",
+    toolCalls: [],
+  };
+}
+
 const PAUSE_ERROR =
   "The Anthropic response paused with content that cannot be continued safely";
 
@@ -115,15 +147,7 @@ test("combines repeated pause turns into one exact assistant step", async () => 
     thinking: "Think three.",
     tokenUsage: usage(3),
   });
-  const complete = vi
-    .fn<
-      (
-        messages: readonly AgentConversationMessage[],
-        output: { readonly content: string; readonly thinking: string },
-      ) => Promise<AgentModelStep>
-    >()
-    .mockResolvedValueOnce(second)
-    .mockResolvedValueOnce(final);
+  const complete = scriptedCompletion(second, final);
 
   const combined = await completeAnthropicPauseTurns(
     INITIAL_MESSAGES,
@@ -154,22 +178,51 @@ test("combines repeated pause turns into one exact assistant step", async () => 
   });
   expect(complete.mock.calls[1]?.[0]).toEqual([
     ...INITIAL_MESSAGES,
-    {
-      content: "First. ",
-      providerReplay: first.providerReplay,
-      role: "assistant",
-      toolCalls: [],
-    },
-    {
-      content: "Second. ",
-      providerReplay: second.providerReplay,
-      role: "assistant",
-      toolCalls: [],
-    },
+    pauseAssistant(first, "First."),
+    pauseAssistant(second, "Second.", "container-1"),
   ]);
   expect(complete.mock.calls[1]?.[1]).toEqual({
     content: "First. Second. ",
     thinking: "Think one. Think two. ",
+  });
+});
+
+test.each([
+  ["trailing spaces", "Answer.   ", "Answer."],
+  ["whitespace-only trailing text", "   ", ""],
+] as const)(
+  "right-trims %s only in the final preserved pause assistant",
+  async (_label, text, expectedText) => {
+    const first = pausedTextStep(text);
+    const complete = scriptedCompletion(textStep("Done."));
+
+    await completeAnthropicPauseTurns(INITIAL_MESSAGES, first, complete);
+
+    const continuation = complete.mock.calls[0]?.[0].at(-1);
+    expect(continuation).toMatchObject({ content: expectedText });
+    if (continuation?.role !== "assistant") {
+      throw new Error("The continuation assistant was not captured");
+    }
+    const expectedReplay = pauseAssistant(first, expectedText);
+    expect(continuation.providerReplay?.blocks).toEqual(
+      expectedReplay.role === "assistant"
+        ? expectedReplay.providerReplay?.blocks
+        : undefined,
+    );
+    expect(first.providerReplay?.blocks).toEqual([{ text, type: "text" }]);
+  },
+);
+
+test("keeps the accumulated container when a later pause omits it", async () => {
+  const first = containedPauseStep();
+  const second = pausedTextStep("Second.");
+  const final = textStep("Done.");
+  const complete = scriptedCompletion(second, final);
+
+  await completeAnthropicPauseTurns(INITIAL_MESSAGES, first, complete);
+
+  expect(complete.mock.calls[1]?.[0].at(-1)).toMatchObject({
+    providerReplay: { container: "container-1" },
   });
 });
 

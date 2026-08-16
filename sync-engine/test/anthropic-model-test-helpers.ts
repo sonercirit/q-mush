@@ -132,10 +132,12 @@ export function anthropicEvents(events: readonly unknown[]): Response {
 export function anthropicMessageStart(
   usage: number | Readonly<Record<string, number>> = 1,
   container?: unknown,
+  model = KNOWN_ANTHROPIC_MODEL,
 ) {
   return {
     message: {
       ...(container === undefined ? {} : { container }),
+      model,
       usage: typeof usage === "number" ? { input_tokens: usage } : usage,
     },
     type: "message_start",
@@ -234,6 +236,9 @@ export function anthropicHarness(
     credentialFingerprint:
       options.credentialFingerprint ?? ANTHROPIC_TEST_CREDENTIAL_FINGERPRINT,
     fetch: (request) => {
+      if (request.method === "GET") {
+        return Promise.resolve(Response.json({ id: KNOWN_ANTHROPIC_MODEL }));
+      }
       requests.push(request);
       const response = remaining.shift();
       if (response === undefined) {

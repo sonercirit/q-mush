@@ -281,22 +281,24 @@ Living project memory.
   sends neither for `none` and maps `minimal` to `low`. Adaptive-only models
   (Fable) ignore `enabled`; newer models default `display` to `omitted` — empty
   thinking text plus a signature while thinking tokens bill. Anthropic replay
-  binds model, credential fingerprint, format, and endpoint; incomplete,
-  unsupported, or unsigned blocks disable it, only empty text drops, and corrupt
-  stored replay is absent. `pause_turn` replays exact validated blocks/container
-  without duplicate UI, sums usage, caps at five continuations, and drops an
-  unusable terminal replay.
-  Cache-control never marks thinking/redacted-thinking or a trailing paused-turn
-  replay. The local proxy tolerates unsigned tool-loop replay; strict endpoints
-  may not. Streamed reasoning deltas group by output/summary index;
-  separate summary parts with paragraphs since completed responses may omit
-  them. OpenAI's WebSocket Mode has a 60-minute limit; the canonical
-  `websocket_connection_limit_reached` and observed underscore-free variant
-  replace the socket once per step, then bound retries, replaying only an
-  unpersisted step. Other WebSocket/accepted HTTP interruptions or provider
-  errors retry before persistence; replays reset partial UI deltas and exhausted
-  WebSockets fall back to HTTP. Permanent errors and aborts do not retry;
-  terminal failures persist as non-replayed `error` messages.
+  binds the response model (resolving aliases before reuse), credential
+  fingerprint, format, and endpoint; incomplete, unsupported, or unsigned
+  client-tool turns fail closed before tool execution. Only empty text drops
+  (whitespace stays but is withheld from requests); corrupt stored replay is
+  absent. `cache_control` marks only text/client `tool_use`, scanning backward;
+  trailing replay resent verbatim. `pause_turn` validates only resent blocks,
+  replays them/container without duplicate UI, sums usage, caps at five
+  continuations, and drops an unusable terminal replay. The local proxy
+  tolerates unsigned tool-loop replay; strict endpoints may not. Reasoning
+  deltas group by output/summary index; separate summary parts with paragraphs
+  since completed responses may omit them. OpenAI's WebSocket Mode has a
+  60-minute limit; the canonical `websocket_connection_limit_reached` and
+  observed underscore-free variant replace the socket once per step, then bound
+  retries, replaying only an unpersisted step. Other WebSocket/accepted HTTP
+  interruptions or provider errors retry before persistence; replays reset
+  partial UI deltas and exhausted WebSockets fall back to HTTP. Permanent errors
+  and aborts do not retry; terminal failures persist as non-replayed `error`
+  messages.
 - Shell commands require a positive timeout; on macOS/Linux each gets a POSIX
   session; stop/timeout signals only its group. Agent launches and runner
   commands otherwise have no application-owned step, queue, or time limits;

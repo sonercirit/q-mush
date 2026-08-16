@@ -11,6 +11,7 @@ import { ProviderCredentialStore } from "../../shared/provider-credential-store.
 import { hasTestDatabaseTable } from "./database-fixtures.ts";
 
 const CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000051";
+const SECOND_CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000052";
 const TEST_NOW = 1_700_000_000_000;
 const TEST_USER_ID = "018bcfe5-6800-7000-8000-000000000021";
 
@@ -91,6 +92,7 @@ function createProviderStore(options?: { readonly legacySchema?: boolean }): {
     new Uint8Array(32),
     () => new Uint8Array(12),
   );
+  const ids = [CREDENTIAL_ID, SECOND_CREDENTIAL_ID];
   return {
     close: () => {
       database.$client.close();
@@ -99,7 +101,7 @@ function createProviderStore(options?: { readonly legacySchema?: boolean }): {
       database,
       cipher,
       "openrouter",
-      () => CREDENTIAL_ID,
+      () => ids.shift() ?? SECOND_CREDENTIAL_ID,
     ),
   };
 }
@@ -121,6 +123,12 @@ function addAndRead(
     source: "api_key",
   });
 }
+
+const ENDPOINT = {
+  accountId: null,
+  baseUrl: "https://gateway.example.test/v1",
+  label: "Gateway",
+} as const;
 
 function rotateSecret(store: ProviderCredentialStore, secret: string): void {
   expect(
@@ -165,6 +173,32 @@ describe("provider credential agent access", () => {
       ),
       secret: "rotated-secret",
     });
+    close();
+  });
+
+  test("rejects a secret rotation that collides with a sibling identity", () => {
+    const { close, store } = createProviderStore();
+    store.add(TEST_USER_ID, "first-secret", ENDPOINT, "api_key", TEST_NOW);
+    store.add(
+      TEST_USER_ID,
+      "sibling-secret",
+      { ...ENDPOINT, label: "Sibling" },
+      "api_key",
+      TEST_NOW + 1,
+    );
+
+    expect(
+      store.updateSecret(
+        TEST_USER_ID,
+        CREDENTIAL_ID,
+        "sibling-secret",
+        TEST_NOW + 2,
+      ),
+    ).toBe(false);
+    expect(store.readSecret(TEST_USER_ID, CREDENTIAL_ID)).toBe("first-secret");
+    expect(store.readSecret(TEST_USER_ID, SECOND_CREDENTIAL_ID)).toBe(
+      "sibling-secret",
+    );
     close();
   });
 

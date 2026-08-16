@@ -5,6 +5,7 @@ import {
 } from "../shared/agent-loop.ts";
 import {
   anthropicReplayMatchesAssistant,
+  anthropicReplayRequestModel,
   type AnthropicAssistantReplay,
 } from "../shared/anthropic-replay.ts";
 export type CompletionArguments = readonly [
@@ -15,9 +16,12 @@ export type CompletionArguments = readonly [
 function matchingProviderReplay(
   message: Extract<AgentConversationMessage, { readonly role: "assistant" }>,
   toolCalls: readonly ReturnType<typeof normalizeAgentToolCall>[],
+  model: string | undefined,
 ): AnthropicAssistantReplay | undefined {
   const normalized = toolCalls.filter((call) => call !== undefined);
   return message.providerReplay !== undefined &&
+    (model === undefined ||
+      anthropicReplayRequestModel(message.providerReplay) === model) &&
     anthropicReplayMatchesAssistant(
       message.providerReplay,
       message.content,
@@ -29,6 +33,7 @@ function matchingProviderReplay(
 
 export function completionMessages(
   parameters: CompletionArguments,
+  model?: string,
 ): readonly AgentConversationMessage[] {
   const messages = parameters[0];
   const sanitized: AgentConversationMessage[] = [];
@@ -74,7 +79,7 @@ export function completionMessages(
         emittedCalls.add(call.id);
         return true;
       });
-    const providerReplay = matchingProviderReplay(message, toolCalls);
+    const providerReplay = matchingProviderReplay(message, toolCalls, model);
     if (
       message.content.length > 0 ||
       toolCalls.length > 0 ||

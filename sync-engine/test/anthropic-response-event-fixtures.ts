@@ -83,11 +83,13 @@ export function stoppedAnthropicEvents(events: readonly unknown[]): Response {
 export function anthropicJsonResponse(options: {
   readonly blocks: readonly Readonly<Record<string, unknown>>[];
   readonly container?: unknown;
+  readonly model?: string;
   readonly stopReason?: string;
 }): Response {
   return Response.json({
     container: options.container,
     content: options.blocks,
+    model: options.model ?? KNOWN_ANTHROPIC_MODEL,
     role: "assistant",
     stop_reason: options.stopReason,
     type: "message",
@@ -149,9 +151,12 @@ export function streamedReplayEvents(
   ]);
 }
 
-export function finishedAnthropicStep(events: readonly unknown[]) {
+export function finishedAnthropicStep(
+  events: readonly unknown[],
+  model = KNOWN_ANTHROPIC_MODEL,
+) {
   const accumulator = new AnthropicStreamAccumulator(
-    KNOWN_ANTHROPIC_MODEL,
+    model,
     ANTHROPIC_TEST_PROVENANCE,
   );
   for (const event of events) accumulator.push(event);

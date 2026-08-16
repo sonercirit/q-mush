@@ -21,6 +21,11 @@ export type AgentProviderCredential = Pick<
   "accountId" | "apiFormat" | "baseUrl" | "id" | "secret" | "source"
 >;
 
+export type AgentProviderDiscoveryCredential = Omit<
+  AgentProviderCredential,
+  "id"
+>;
+
 // The one authoritative "does this session speak Anthropic Messages?"
 // predicate: request building, discovery, and the lazy output-limit refresh
 // must agree on it.

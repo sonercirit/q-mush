@@ -126,6 +126,8 @@ describe("lazy Anthropic request metadata refresh", () => {
       },
       ...IDLE_RUNTIME_SIGNALS,
       isCurrent: () => true,
+      modelFetch: () =>
+        Promise.resolve(Response.json({ id: runtimeDetail.model })),
       modelFactory: (factoryOptions: AgentModelRequestOptions) => {
         selections.push(factoryOptions);
         return model;

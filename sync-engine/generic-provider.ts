@@ -66,7 +66,6 @@ async function readGenericCredentialDetails(
       "generic",
       {
         ...endpoint,
-        id: "credential-probe",
         secret: apiKey,
         source: "api_key",
       },

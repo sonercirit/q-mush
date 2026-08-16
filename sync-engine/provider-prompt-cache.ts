@@ -65,11 +65,11 @@ export function promptCacheBreakpoints(
   return breakpoints;
 }
 
-// Anthropic rejects cache_control on thinking and redacted_thinking blocks;
-// every other replayed block type accepts it, so the breakpoint lands on the
-// last eligible block of the message.
+// The Messages cache_control surface documents text and tool_use placements.
+// Other replay types stay byte-for-byte provider output while the scan moves
+// backward to the nearest documented block.
 function acceptsReplayCacheControl(block: AnthropicReplayBlock): boolean {
-  return block.type !== "thinking" && block.type !== "redacted_thinking";
+  return block.type === "text" || block.type === "tool_use";
 }
 
 export function withAnthropicReplayCacheControl(

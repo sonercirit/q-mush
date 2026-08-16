@@ -563,6 +563,7 @@ describe("Anthropic response replay", () => {
   test("reports truncation from a non-streaming stopped message", async () => {
     const stopped = Response.json({
       content: [{ text: "Cut short.", type: "text" }],
+      model: KNOWN_ANTHROPIC_MODEL,
       role: "assistant",
       stop_reason: "max_tokens",
       type: "message",
@@ -576,6 +577,7 @@ describe("Anthropic response replay", () => {
     const harness = anthropicHarness([
       Response.json({
         content: JSON_RESPONSE_REPLAY_BLOCKS,
+        model: KNOWN_ANTHROPIC_MODEL,
         role: "assistant",
         type: "message",
         usage: { input_tokens: 7, output_tokens: 3 },

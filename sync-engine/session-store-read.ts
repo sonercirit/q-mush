@@ -1,5 +1,4 @@
-import { and, eq } from "drizzle-orm";
-import type { SelectedFields } from "drizzle-orm/sqlite-core";
+import { and, eq, type SQL } from "drizzle-orm";
 import {
   readAgentToolCalls,
   truncationFromNotice,
@@ -8,7 +7,10 @@ import {
   type AgentStepTruncation,
   type AgentToolCall,
 } from "../shared/agent-loop.ts";
-import { parseAnthropicAssistantReplay } from "../shared/anthropic-replay.ts";
+import {
+  anthropicReplayRequestModel,
+  parseAnthropicAssistantReplay,
+} from "../shared/anthropic-replay.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
 import type { IdGenerator } from "../shared/ids.ts";
@@ -82,11 +84,6 @@ function storedProviderReplay(
       // public transcript, session continuation, or fork unreadable.
       return undefined;
     }
-  }
-  if (value !== null) {
-    throw new Error(
-      "Stored provider replay is attached to a non-assistant message",
-    );
   }
   return undefined;
 }
@@ -316,26 +313,44 @@ function currentSegmentMessageCondition(
   );
 }
 
-function messageQuery<Select extends SelectedFields>(
+function currentSegmentMessages<Result>(
+  query: { where(condition: SQL | undefined): Result },
   database: Pick<AppDatabase, "select">,
   sessionId: string,
-  selection: Select,
+): Result {
+  return query.where(currentSegmentMessageCondition(database, sessionId));
+}
+
+function messageQueryBuilders(
+  database: Pick<AppDatabase, "select">,
+  sessionId: string,
 ) {
-  return database
-    .select(selection)
-    .from(agentMessages)
-    .where(currentSegmentMessageCondition(database, sessionId));
+  return {
+    internal: () =>
+      currentSegmentMessages(
+        database.select(INTERNAL_SESSION_MESSAGE_SELECTION).from(agentMessages),
+        database,
+        sessionId,
+      ),
+    stored: () =>
+      currentSegmentMessages(
+        database.select(STORED_SESSION_MESSAGE_SELECTION).from(agentMessages),
+        database,
+        sessionId,
+      ),
+  };
 }
 
 export function readInternalSessionMessages(
   database: Pick<AppDatabase, "select">,
   sessionId: string,
 ): readonly InternalSessionMessage[] {
-  const internal: readonly InternalStoredMessage[] = messageQuery(
+  const internal: readonly InternalStoredMessage[] = messageQueryBuilders(
     database,
     sessionId,
-    INTERNAL_SESSION_MESSAGE_SELECTION,
-  ).all();
+  )
+    .internal()
+    .all();
   const summarized = internal.map(summarizeInternalStoredMessage);
   return summarized.sort((left, right) =>
     compareAgentSessionMessages(left.message, right.message),
@@ -346,11 +361,12 @@ export function readStoredSessionMessages(
   database: Pick<AppDatabase, "select">,
   sessionId: string,
 ): readonly AgentSessionMessage[] {
-  const stored: readonly StoredMessage[] = messageQuery(
+  const stored: readonly StoredMessage[] = messageQueryBuilders(
     database,
     sessionId,
-    STORED_SESSION_MESSAGE_SELECTION,
-  ).all();
+  )
+    .stored()
+    .all();
   return stored.map(summarizeStoredMessage).sort(compareAgentSessionMessages);
 }
 
@@ -367,8 +383,11 @@ function replayForIdentity(
   internal: InternalSessionMessage,
   identity: AnthropicReplayIdentity,
 ): InternalSessionMessage {
+  const resolvedModel = identity.resolvedModel;
   return internal.providerReplay === undefined ||
-    (internal.providerReplay.model === identity.model &&
+    (resolvedModel !== undefined &&
+      internal.providerReplay.model === resolvedModel &&
+      anthropicReplayRequestModel(internal.providerReplay) === identity.model &&
       internal.providerReplay.provenance === identity.provenance)
     ? internal
     : { message: internal.message };

@@ -117,7 +117,10 @@ describe("stored provider replay", () => {
     );
     expect(conversation()[1]).not.toHaveProperty("providerReplay");
     setStoredReplay(database, "user", JSON.stringify(REPLAY));
-    expect(conversation).toThrow("non-assistant message");
+    const user = conversation().find(({ role }) => role === "user");
+    expect({
+      hasReplay: user !== undefined && "providerReplay" in user,
+    }).toEqual({ hasReplay: false });
     database.$client.close();
   });
 });

@@ -29,10 +29,12 @@ import {
   usesAnthropicFormat,
   type AgentModelRequestOptions,
   type AgentProviderCredential,
+  type AgentProviderDiscoveryCredential,
 } from "./agent-model-options.ts";
 import { agentModelRequestBody } from "./agent-model-request.ts";
 import type { ModelRequestSleep } from "./agent-model-retry.ts";
 import { completeAnthropicPauseTurns } from "./anthropic-continuation.ts";
+import { resolveAnthropicModel } from "./anthropic-model-resolution.ts";
 import {
   ANTHROPIC_CONTEXT_WINDOW_BETA,
   ANTHROPIC_VERSION,
@@ -72,16 +74,20 @@ export interface ChatCompletionsAgentModelOptions extends AgentModelRequestOptio
   readonly webSocket?: ProviderWebSocketFactory;
 }
 
+export interface AgentProviderRequestCredential extends AgentProviderDiscoveryCredential {
+  readonly id?: string;
+}
+
 function usesCodexOAuth(
   provider: ProviderId,
-  credential: AgentProviderCredential,
+  credential: AgentProviderRequestCredential,
 ): boolean {
   return provider === "openai" && credential.source === "oauth";
 }
 
 function endpoint(
   provider: ProviderId,
-  credential: AgentProviderCredential,
+  credential: AgentProviderRequestCredential,
 ): string {
   if (usesCodexOAuth(provider, credential)) {
     return OPENAI_CODEX_RESPONSES_URL;
@@ -104,7 +110,7 @@ function endpoint(
 
 function accessToken(
   provider: ProviderId,
-  credential: AgentProviderCredential,
+  credential: AgentProviderRequestCredential,
 ): string {
   return provider === "openai" && credential.source === "oauth"
     ? readOpenAiOAuthCredential(credential.secret).access
@@ -134,7 +140,7 @@ function promptCacheKeyHeader(
 
 export function agentProviderRequestHeaders(
   provider: ProviderId,
-  credential: AgentProviderCredential,
+  credential: AgentProviderRequestCredential,
   options: AgentProviderRequestHeaderOptions,
 ): Headers {
   const headers = new Headers({
@@ -204,9 +210,12 @@ interface CompletionInput {
   readonly signal: AbortSignal | undefined;
 }
 
-function completionInput(parameters: CompletionArguments): CompletionInput {
+function completionInput(
+  parameters: CompletionArguments,
+  model?: string,
+): CompletionInput {
   return {
-    messages: completionMessages(parameters),
+    messages: completionMessages(parameters, model),
     signal: completionSignal(parameters),
   };
 }
@@ -363,6 +372,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
     messages: readonly AgentConversationMessage[],
     protocol: ProviderRequestProtocol,
     stream: boolean,
+    resolvedModel?: string,
   ): unknown {
     return agentModelRequestBody({
       adaptiveThinking: this.#adaptiveThinking,
@@ -377,6 +387,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
       protocol,
       provider: this.#provider,
       reasoningEffort: this.#reasoningEffort,
+      resolvedModel,
       selectedTools: this.#selectedTools,
       stream,
       systemPrompt: this.#systemPrompt,
@@ -433,15 +444,25 @@ export class ChatCompletionsAgentModel implements AgentModel {
     });
   }
 
-  #httpRequest(
+  async #httpRequest(
     messages: readonly AgentConversationMessage[],
     protocol: ProviderRequestProtocol,
     signal: AbortSignal | undefined,
     onStreamRetry?: () => void,
   ): Promise<AgentModelStep> {
+    const resolvedModel =
+      protocol === "anthropic"
+        ? await resolveAnthropicModel({
+            credential: this.#credential,
+            fetch: this.#fetch,
+            model: this.#model,
+            provider: this.#provider,
+            ...(signal === undefined ? {} : { signal }),
+          })
+        : undefined;
     return completeProviderHttp(
       {
-        body: this.#requestBody(messages, protocol, true),
+        body: this.#requestBody(messages, protocol, true, resolvedModel),
         credential: this.#credential,
         credentialFingerprint: this.#credentialFingerprint,
         fetch: this.#fetch,
@@ -455,6 +476,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
         ...(onStreamRetry === undefined ? {} : { onStreamRetry }),
         protocol,
         provider: this.#provider,
+        ...(resolvedModel === undefined ? {} : { resolvedModel }),
         sleep: this.#sleep,
         url: endpoint(this.#provider, this.#credential),
       },
@@ -465,13 +487,19 @@ export class ChatCompletionsAgentModel implements AgentModel {
   async #completeHttp(
     ...parameters: CompletionArguments
   ): Promise<AgentModelStep> {
-    const input = completionInput(parameters);
     const protocol = this.#httpProtocol();
+    const input = completionInput(parameters, this.#model);
     const step = await this.#httpRequest(
       input.messages,
       protocol,
       input.signal,
     );
+    if (
+      step.providerContinuation === "anthropic_replay_unavailable" &&
+      step.toolCalls.length > 0
+    ) {
+      return step;
+    }
     return protocol === "anthropic"
       ? completeAnthropicPauseTurns(
           input.messages,

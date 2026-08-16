@@ -191,9 +191,6 @@ export class SessionStore extends SessionStoreRestarts {
     interrupted = true,
   ): readonly AgentConversationMessage[] {
     const internal = readInternalSessionMessages(this.#database, sessionId);
-    if (!interrupted) {
-      return conversationFromInternalMessages(internal, identity);
-    }
     const replayById = new Map(
       internal
         .filter(({ providerReplay }) => providerReplay !== undefined)
@@ -202,7 +199,7 @@ export class SessionStore extends SessionStoreRestarts {
     return conversationFromInternalMessages(
       withInterruptedToolResults(
         internal.map(({ message }) => message),
-        true,
+        interrupted,
       ).map((message) => {
         const providerReplay =
           message.role === "assistant" ? replayById.get(message.id) : undefined;

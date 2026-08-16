@@ -67,13 +67,37 @@ function addCost(total: number | null, current: number | null): number | null {
   return total === null || current === null ? null : total + current;
 }
 
+function trimmedContinuationReplay(
+  replay: AnthropicAssistantReplay,
+): AnthropicAssistantReplay {
+  const blocks = [...replay.blocks];
+  for (let index = blocks.length - 1; index >= 0; index -= 1) {
+    const trailing = blocks[index];
+    if (trailing?.type !== "text") continue;
+    const text = trailing.text.trimEnd();
+    if (text.length === 0) {
+      blocks.splice(index, 1);
+    } else if (text !== trailing.text) {
+      blocks[index] = { ...trailing, text };
+    }
+    break;
+  }
+  return createAnthropicAssistantReplay(blocks, replay, replay.container);
+}
+
 function continuationAssistant(
   step: AgentModelStep,
   replay: AnthropicAssistantReplay,
+  container: string | undefined,
 ): AgentConversationMessage {
+  const trimmed = trimmedContinuationReplay(replay);
+  const content = step.content.trimEnd();
   return {
-    content: step.content,
-    providerReplay: replay,
+    content,
+    providerReplay:
+      container === undefined || trimmed.container === container
+        ? trimmed
+        : createAnthropicAssistantReplay(trimmed.blocks, trimmed, container),
     role: "assistant",
     toolCalls: [],
   };
@@ -92,6 +116,9 @@ function completedStep(options: {
     content: options.content,
     contextTokens: step.contextTokens,
     costUsd: options.costUsd,
+    ...(step.providerContinuation === "anthropic_replay_unavailable"
+      ? { providerContinuation: step.providerContinuation }
+      : {}),
     ...(providerReplay === undefined ? {} : { providerReplay }),
     thinking: options.thinking,
     tokenUsage: options.tokenUsage,
@@ -193,7 +220,7 @@ export async function completeAnthropicPauseTurns(
       throw new Error(ANTHROPIC_PAUSE_LIMIT);
     }
     continuations += 1;
-    messages = [...messages, continuationAssistant(step, replay)];
+    messages = [...messages, continuationAssistant(step, replay, container)];
     step = await complete(messages, { content, thinking });
   }
 }
