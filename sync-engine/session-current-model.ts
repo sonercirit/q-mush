@@ -72,8 +72,9 @@ export async function sessionRequestMetadata(
     throw error;
   }
   const refreshed = {
-    adaptiveThinking: model?.adaptiveThinking ?? current.adaptiveThinking,
-    maxOutputTokens: model?.maxOutputTokens ?? current.maxOutputTokens,
+    adaptiveThinking:
+      current.adaptiveThinking ?? model?.adaptiveThinking ?? null,
+    maxOutputTokens: current.maxOutputTokens ?? model?.maxOutputTokens ?? null,
   };
   const learnsAdaptiveThinking =
     current.adaptiveThinking === null && refreshed.adaptiveThinking !== null;

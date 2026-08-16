@@ -38,20 +38,33 @@ describe("lazy Anthropic request metadata refresh", () => {
     readonly close: () => void;
   }
 
-  function clearAdaptiveThinking(
+  function setCurrentMetadata(
     setup: ReturnType<typeof runningCompactionStore>,
+    metadata: RefreshMetadata,
   ): void {
     const detail = requireCompactionSession(setup.store);
     setup.database
       .update(agentSessions)
-      .set({ adaptiveThinking: null })
+      .set(metadata)
       .where(eq(agentSessions.id, detail.id))
       .run();
+  }
+
+  function clearAdaptiveThinking(
+    setup: ReturnType<typeof runningCompactionStore>,
+  ): void {
+    const detail = requireCompactionSession(setup.store);
+    setCurrentMetadata(setup, {
+      adaptiveThinking: null,
+      maxOutputTokens: detail.maxOutputTokens,
+    });
   }
 
   function refreshHarness(options: {
     readonly adaptiveThinking?: boolean | null;
     readonly apiFormat?: "anthropic" | "openai";
+    readonly currentAdaptiveThinking?: boolean | null;
+    readonly currentMaxOutputTokens?: number | null;
     readonly discoveryFails?: boolean;
     readonly maxOutputTokens?: number | null;
     readonly steps: readonly string[];
@@ -59,12 +72,19 @@ describe("lazy Anthropic request metadata refresh", () => {
     let discoveryCalls = 0;
     const setup = runningCompactionStore();
     const detail = requireCompactionSession(setup.store);
-    clearAdaptiveThinking(setup);
+    const currentMetadata = {
+      adaptiveThinking: options.currentAdaptiveThinking ?? null,
+      maxOutputTokens: options.currentMaxOutputTokens ?? null,
+    };
+    setCurrentMetadata(setup, currentMetadata);
     const runtimeDetail = {
       ...requireCompactionSession(setup.store),
       provider: "generic" as const,
     };
-    expect(runtimeDetail.maxOutputTokens).toBeNull();
+    expect({
+      adaptiveThinking: runtimeDetail.adaptiveThinking,
+      maxOutputTokens: runtimeDetail.maxOutputTokens,
+    }).toEqual(currentMetadata);
     const model = new ScriptedAgentModel(
       options.steps.map((content) => ({ content, toolCalls: [] })),
     );
@@ -170,6 +190,44 @@ describe("lazy Anthropic request metadata refresh", () => {
     });
   });
 
+  async function expectRequestMetadata(
+    harness: RefreshHarness,
+    expected: RefreshMetadata,
+  ): Promise<void> {
+    const outcome = await runSessionAgent(harness.runtime);
+    expect(outcome).toBe("complete");
+    expect(harness.selections).toMatchObject([expected]);
+    const persisted = harness.persisted();
+    harness.close();
+    expect(persisted).toEqual(expected);
+  }
+
+  test.each([
+    {
+      discovered: { adaptiveThinking: false, maxOutputTokens: 64_000 },
+      expected: { adaptiveThinking: false, maxOutputTokens: 32_000 },
+      persisted: { adaptiveThinking: null, maxOutputTokens: 32_000 },
+      title: "preserves a known output limit while refreshing adaptive support",
+    },
+    {
+      discovered: { adaptiveThinking: true, maxOutputTokens: 64_000 },
+      expected: { adaptiveThinking: false, maxOutputTokens: 64_000 },
+      persisted: { adaptiveThinking: false, maxOutputTokens: null },
+      title:
+        "preserves known adaptive non-support while refreshing the output limit",
+    },
+  ])("$title", async ({ discovered, expected, persisted }) => {
+    const harness = refreshHarness({
+      adaptiveThinking: discovered.adaptiveThinking,
+      currentAdaptiveThinking: persisted.adaptiveThinking,
+      currentMaxOutputTokens: persisted.maxOutputTokens,
+      maxOutputTokens: discovered.maxOutputTokens,
+      steps: ["Done."],
+    });
+
+    await expectRequestMetadata(harness, expected);
+  });
+
   test("persists adaptive support when the output limit stays unknown", async () => {
     const harness = refreshHarness({ maxOutputTokens: null, steps: ["Done."] });
     const expected = {
@@ -177,11 +235,7 @@ describe("lazy Anthropic request metadata refresh", () => {
       maxOutputTokens: null,
     };
 
-    const outcome = await runSessionAgent(harness.runtime);
-    expect(outcome).toBe("complete");
-    expect(harness.selections[0]).toMatchObject(expected);
-    expect(harness.persisted()).toEqual(expected);
-    harness.close();
+    await expectRequestMetadata(harness, expected);
   });
 
   test("probes the catalog once across a compact-and-continue run", async () => {

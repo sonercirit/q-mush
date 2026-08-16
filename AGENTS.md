@@ -10,12 +10,11 @@ Living project memory.
 ## Working Agreements
 
 - Research online: use brave-search on provider docs/trackers, then probe APIs,
-  schemas, and usage metrics.
-- Call capabilities impossible only with excluding evidence; else record an open
-  question.
+  schemas, usage metrics.
+- Call capabilities impossible only with excluding evidence; otherwise record an
+  open question.
 - Preserve patterns; add tools only as needed; improve touched code, tests,
-  docs, performance, security, and DX. Ship small improvements now, larger
-  later.
+  docs, performance, security, and DX. Ship small improvements now.
 - TDD: fail first, implement, refactor green.
 - DRY/KISS: authoritative logic, no premature abstraction.
 - Never invent tunables: probe omission, prefer provider defaults, else use
@@ -23,14 +22,15 @@ Living project memory.
 - Integrate completely the first time: wire every session capability to each
   protocol's native control, recording what a protocol lacks.
 - No reward hacking: never weaken tests, special-case checks, or claim
-  unperformed verification; disclose unverified work. Fix defects on sight even
-  if pre-existing/out of scope; when a fix proves harmful, codify why in a test.
+  unperformed verification; disclose unverified work. Fix defects on sight,
+  including pre-existing/out-of-scope ones; if a fix proves harmful, codify why
+  in a test.
 - Record new decisions, gotchas, and lessons here in the same change, unprompted
   — a repeated user instruction means a rule is missing; condense elsewhere to
   fit the size cap. When evidence overturns a recorded finding, fix the code it
   justified and every stale record in that change; act, don't ask.
 - Keep workflows local-first: narrow checks per change, broad suites once
-  captured, then rerun the narrowest failing scope.
+  captured, then rerun the narrowest failure.
 - Never commit secrets, generated artifacts, or env files.
 
 ## Setup, Commands
@@ -46,39 +46,34 @@ Living project memory.
 
 ## Architecture and Conventions
 
-- Production source has four enforced workspaces: `solid` owns browser UI,
-  `sync-engine` the Bun server and integrations, `runner` the standalone runner,
-  and `shared` cross-workspace code. The first three import only themselves and
-  `shared`; `shared` imports no other workspace; code outside `scripts` cannot
-  import `scripts`.
-- `sync-engine/server.ts` serves the browser JavaScript and Tailwind CSS that
-  Vite builds in memory. Browser state, session updates, and runner work use
-  authenticated WebSockets at `/api/realtime` and `/api/runner/realtime`; no
-  polling or SSE. Agents modify this repository via the running app:
-  `bun run dev:watch` watches production source and local `.env` files,
-  coalescing bursts into the ignored `data/development-server.restart` trigger
-  `bun run dev:restart` writes; plain `dev` restarts only on that trigger.
-  `sync-engine/runner-executable.ts` fingerprints runner source and compiler,
-  builds in a private temp directory, caches in memory, serves
-  `/runner/executable`. Development restarts queue new agent work, let active
-  steps finish, then replace the server process; a session can safely request
-  its own restart. Textual bodies precompress once per handler, negotiating
-  `zstd`, Brotli, gzip, then deflate; `/favicon.svg` revalidates with ETag,
-  separate from PWA icons.
+- Four enforced production workspaces: `solid` owns browser UI, `sync-engine`
+  the Bun server/integrations, `runner` the standalone runner, `shared`
+  cross-workspace code. The first three import only themselves and `shared`;
+  `shared` imports no other workspace; only `scripts` may import `scripts`.
+- `server.ts` serves Vite's in-memory browser JS/Tailwind CSS. Authenticated
+  WebSockets at `/api/realtime` and `/api/runner/realtime` handle browser state,
+  sessions, and runner work; no polling/SSE. `dev:watch` watches production
+  source and local `.env`, coalescing bursts into the ignored restart trigger;
+  `dev:restart` writes it, while plain `dev` restarts only from it.
+  `runner-executable.ts` fingerprints runner source/compiler, builds privately,
+  caches in memory, serves `/runner/executable`. Restarts drain active steps and
+  queue new work, so sessions may request their own restart. Text handlers
+  precompress once, negotiating zstd, Brotli, gzip, deflate; `/favicon.svg`
+  revalidates separately with ETag.
 - `solid/pages.tsx` renders both server page shells via Solid's SSR runtime;
   `sync-engine/pages.ts` loads it with Vite's SSR runner. The browser app mounts
   from `solid/client.tsx`; routes live in `shared/routes.ts`.
 - `sync-engine/auth.ts` implements Google OpenID Connect (authorization code
-  - PKCE) with HttpOnly state/verifier cookies, fetching the basic profile,
-    discarding provider tokens. `sync-engine/auth-store.ts` uses Drizzle with
-    Bun SQLite to upsert users and persist seven-day sessions. Primary keys are
+  - PKCE) with HttpOnly state/verifier cookies, fetching the basic profile and
+    discarding provider tokens. `sync-engine/auth-store.ts` uses Drizzle/Bun
+    SQLite to upsert users and persist seven-day sessions. Primary keys are
     UUIDv7; Google subjects and session cookie tokens are separate unique
-    fields; every table carries created/updated timestamps, actor IDs,
-    `isDeleted`. `shared/database.ts` applies committed `drizzle/` migrations on
-    open; `sync-engine/index.ts` injects the persistent connection; the auth
-    factory falls back on in-memory SQLite. Shared PKCE, provider parsing, and
-    redirects live in `oauth.ts`; cookie and response helpers in `http.ts`.
-    `solid/client.tsx` reads `/api/auth/session`, gates the app, posts logout.
+    fields; every table has created/updated timestamps, actor IDs, `isDeleted`.
+    `shared/database.ts` applies committed `drizzle/` migrations on open;
+    `sync-engine/index.ts` injects the persistent connection; the auth factory
+    falls back on in-memory SQLite. Shared PKCE, provider parsing, and redirects
+    live in `oauth.ts`; cookie/response helpers in `http.ts`. `solid/client.tsx`
+    reads `/api/auth/session`, gates the app, posts logout.
 - `sync-engine/runner-store.ts` persists runner registrations in `runners`: one
   active registration per machine fingerprint, one default per user.
   `sync-engine/runners.ts` issues hashed opaque setup tokens, owns authenticated
@@ -208,8 +203,8 @@ Living project memory.
   boundary fail the zero threshold; alpha ignores locally bound names but
   preserves free names, member APIs, and literals.
 - Repository policy scans tracked, unignored files: 20,000-code-point maximum
-  (`bun.lock`, `drizzle/` excepted), tests only under `test`, and no app HTML
-  files outside `test`/`fixtures`.
+  (`bun.lock`, `drizzle/` excepted), tests only under `test`, no app HTML
+  outside `test`/`fixtures`.
 
 ## Decisions and Gotchas
 
@@ -276,10 +271,12 @@ Living project memory.
   reasoning uses `reasoning_effort` for OpenAI and generic chat completions and
   `reasoning.effort` for OpenRouter and Codex Responses; the Anthropic Messages
   format sends `output_config.effort`; unless persisted `adaptiveThinking` is
-  false it adds `thinking: {type: "adaptive", display: "summarized"}`. It sends
-  neither for `none` and maps `minimal` to `low`. Adaptive-only models (Fable)
-  ignore `enabled`; newer models default `display` to `omitted` — empty thinking
-  text plus a signature while thinking tokens bill. The local proxy tolerates
+  false it adds `thinking: {type: "adaptive", display: "summarized"}`. Lazy
+  model metadata refresh fills null fields independently and never replaces a
+  known capability or output limit while learning the other. It sends neither
+  for `none` and maps `minimal` to `low`. Adaptive-only models (Fable) ignore
+  `enabled`; newer models default `display` to `omitted` — empty thinking text
+  plus a signature while thinking tokens bill. The local proxy tolerates
   tool-loop replay without signed thinking blocks; strict endpoints may not.
   Streamed reasoning deltas group by `output_index` and `summary_index`;
   separate summary parts with paragraphs since completed responses may omit
