@@ -110,6 +110,47 @@ function scrollingTranscript() {
   };
 }
 
+function documentScrollFixture() {
+  const reactive = sessionDetailState(TEST_SESSION_DETAIL);
+  const mounted = mountSessionDetailBody(reactive, DOM_TEST_DISPOSALS);
+  const detail = mounted.container.querySelector<HTMLDivElement>(
+    "[data-session-detail-view='true']",
+  );
+  const composer = mounted.container.querySelector<HTMLTextAreaElement>(
+    "[data-session-composer='true'] textarea",
+  );
+  const transcript = queryTestTranscript(mounted.container);
+  if (detail === null || composer === null) {
+    throw new TypeError("Missing document scroll regression fixture");
+  }
+  return { composer, detail, transcript };
+}
+
+function applyDocumentLayoutGrowth(options: {
+  readonly anchored: boolean;
+  readonly documentScrollTop: number;
+  readonly height: number;
+}): { readonly documentScrollTop: number; readonly height: number } {
+  return {
+    documentScrollTop: options.documentScrollTop + (options.anchored ? 100 : 0),
+    height: options.height + 100,
+  };
+}
+
+test("session updates cannot make the document repeatedly follow layout growth", () => {
+  const { composer, detail, transcript } = documentScrollFixture();
+  const anchored = !detail.classList.contains("[overflow-anchor:none]");
+  let layout = { documentScrollTop: 200, height: 500 };
+
+  for (const update of ["transcript", "agent file", "textarea", "focus"]) {
+    layout = applyDocumentLayoutGrowth({ ...layout, anchored });
+    expect(layout.documentScrollTop, update).toBe(200);
+  }
+  expect(layout.height).toBe(900);
+  expect(transcript).toBe(queryTestTranscript(detail));
+  expect(document.activeElement).not.toBe(composer);
+});
+
 function exerciseScrollGrowth(
   view: ReturnType<typeof scrollingTranscript>,
   content: string,

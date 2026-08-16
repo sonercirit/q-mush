@@ -179,7 +179,7 @@ export function SessionDetailBody(props: {
 
   return (
     <div
-      class="session-detail-view min-w-0"
+      class="session-detail-view min-w-0 [overflow-anchor:none]"
       data-session-detail-view="true"
       ref={nestedScrollRef}
     >
