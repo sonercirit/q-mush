@@ -7,6 +7,7 @@ import { writePrivateJsonFile } from "./runner-private-file.ts";
 import {
   formatRunnerProcessResult,
   runRunnerProcess,
+  throwIfRunnerCommandStopped,
   type RunnerProcessOptions,
   type RunnerProcessResult,
 } from "./runner-process.ts";
@@ -80,6 +81,7 @@ async function runContainerProcess(
   arguments_: readonly string[],
   options: RunnerContainerRunOptions,
 ): Promise<RunnerProcessResult> {
+  throwIfRunnerCommandStopped(options.signal);
   try {
     return await runRunnerProcess({
       arguments: arguments_,

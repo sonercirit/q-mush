@@ -36,6 +36,7 @@ import {
   formatRunnerProcessResult,
   runnerCommandResultFromOutput,
   runRunnerProcess,
+  throwIfRunnerCommandStopped,
 } from "./runner-process.ts";
 import {
   containedRunnerPath,
@@ -662,13 +663,9 @@ async function resolvedRunnerTool(
   if (!isRunnerAgentToolName(name)) {
     throw new Error(`Unknown runner tool: ${name}`);
   }
-  if (signal?.aborted === true) {
-    throw new Error("The runner command was stopped");
-  }
+  throwIfRunnerCommandStopped(signal);
   const root = await resolveRunnerWorkspace(workingDirectory);
-  if (parameters[3]?.aborted === true) {
-    throw new Error("The runner command was stopped");
-  }
+  throwIfRunnerCommandStopped(signal);
   return {
     arguments_,
     name,
