@@ -27,6 +27,17 @@ export interface AttachmentExplanation {
   readonly usage: Pick<AgentModelStep, "costUsd" | "tokenUsage">;
 }
 
+function throwIfAttachmentRestartRequested(
+  restartRequested: (() => boolean) | undefined,
+): void {
+  if (restartRequested?.() === true) {
+    throw new DOMException(
+      "The restart began before the attachment explanation model request",
+      "RestartHandoff",
+    );
+  }
+}
+
 export async function explainAttachment(
   options: {
     readonly attachment: AgentAttachment;
@@ -38,6 +49,7 @@ export async function explainAttachment(
     readonly currentProviderTag: string | null;
     readonly factory: AgentModelFactory;
     readonly onStepStart?: () => void;
+    readonly restartRequested?: () => boolean;
     readonly prompt: string | null;
     readonly resources: AttachmentFallbackRuntimeResources;
     readonly userId: string;
@@ -93,6 +105,7 @@ export async function explainAttachment(
     selection === undefined
       ? options.currentProviderPricing
       : selectedModel.pricing;
+  throwIfAttachmentRestartRequested(options.restartRequested);
   const model = createFallbackModel(options.factory, {
     adaptiveThinking: selectedModel.adaptiveThinking,
     credential,
@@ -108,6 +121,7 @@ export async function explainAttachment(
   try {
     // The explanation is its own model request: restart the visible step
     // clock so a slow fallback does not extend the preceding agent step.
+    throwIfAttachmentRestartRequested(options.restartRequested);
     options.onStepStart?.();
     step = await model.complete(
       [{ attachments: [options.attachment], content: "", role: "user" }],

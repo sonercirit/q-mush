@@ -1,4 +1,8 @@
 import type { PendingAskQuestions } from "../shared/ask-questions.ts";
+import {
+  readDevelopmentRestartProgress,
+  type DevelopmentRestartProgress,
+} from "../shared/development-shutdown.ts";
 import type { EngineHealthSnapshot } from "../shared/engine-health.ts";
 import {
   parseJsonRecord,
@@ -37,6 +41,10 @@ export type RealtimeServerEvent =
       readonly type: "command_success";
     }
   | { readonly instanceId: string; readonly type: "ready" }
+  | {
+      readonly progress: readonly DevelopmentRestartProgress[];
+      readonly type: "development_restart_progress";
+    }
   | { readonly health: EngineHealthSnapshot; readonly type: "health" }
   | ToolStreamDeltaFrame
   | ToolStreamSnapshotFrame
@@ -91,6 +99,13 @@ export function readRealtimeServerEvent(message: string): RealtimeServerEvent {
   switch (value["type"]) {
     case "ready":
       return { instanceId: requiredString(value, "instanceId"), type: "ready" };
+    case "q-mush:development-restart-progress": {
+      const progress = readDevelopmentRestartProgress(value["progress"]);
+      if (progress === undefined) {
+        throw new Error("The realtime server event was invalid");
+      }
+      return { progress, type: "development_restart_progress" };
+    }
     case "health": {
       const health = value["health"];
       if (

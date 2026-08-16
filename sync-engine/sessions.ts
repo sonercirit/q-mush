@@ -4,6 +4,7 @@ import { createUuidV7 } from "../shared/ids.ts";
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type { RestartHandoffOperation } from "../shared/session-model.ts";
+import { ActiveSessionTools } from "./active-session-tools.ts";
 import {
   discoverAgentModels,
   type AgentModelDiscoverer,
@@ -84,6 +85,7 @@ class DrizzleSessionIntegration
   extends SessionIntegrationApi
   implements SessionIntegration
 {
+  readonly #activeTools: ActiveSessionTools;
   readonly #broker: RunnerCommandBroker;
   readonly #auth: GoogleAuth;
   readonly #braveSearch: Pick<BraveSearchSkill, "execute">;
@@ -122,6 +124,7 @@ class DrizzleSessionIntegration
   ) {
     super();
     this.#auth = auth;
+    this.#activeTools = dependencies.activeTools ?? new ActiveSessionTools();
     this.#realtime = dependencies.realtime;
     this.#broker =
       dependencies.broker ??
@@ -177,8 +180,8 @@ class DrizzleSessionIntegration
       this.#runtimes,
       () => createUuidV7(this.#now()),
       {
-        pendingTools: (sessionId) =>
-          this.#broker.sessionPendingTools(sessionId),
+        pendingTools: (sessionId) => this.#activeTools.names(sessionId),
+        ...dependencies.restartTiming,
       },
     );
     this.#actions = createSessionAgentActions({
@@ -236,8 +239,11 @@ class DrizzleSessionIntegration
         this.#finisher.finish(detail, userId, error, recovered);
       },
       modelFactory: this.#modelFactory,
+      activeTools: this.#activeTools,
       readCredential: this.#readCredential,
       realtime: this.#realtime,
+      shouldPersistRestartMarker: (request) =>
+        request.requestedBy === "server" || !this.#shutdown.recoveryEnabled(),
       shutdownInterrupted: this.#shutdown,
       ...this.#sessionRuntimeState(),
     });
@@ -354,6 +360,7 @@ class DrizzleSessionIntegration
       runtimes: this.#runtimes,
       stopChildren: this.#actions.stopChildren.bind(this.#actions),
       stopLivenessScans: this.#liveness.stop,
+      shutdownInterrupted: this.#shutdown,
       store: this.#store,
       withCredentialAccess: this.#withCredential,
       workspaces: this.#workspaces,

@@ -540,7 +540,10 @@ export class RealtimeConnection {
       this.#listener(event);
       return;
     }
-    if (event.type === "health") {
+    if (
+      event.type === "health" ||
+      event.type === "development_restart_progress"
+    ) {
       this.#listener(event);
       return;
     }

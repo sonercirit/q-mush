@@ -1,5 +1,13 @@
 import { readDatabasePath } from "../shared/database/config.ts";
-import { FINAL_SHUTDOWN_PREPARED_MESSAGE } from "../shared/development-shutdown.ts";
+import {
+  DEVELOPMENT_RESTART_ESCALATE_MESSAGE,
+  DEVELOPMENT_RESTART_PROGRESS_MESSAGE,
+  DEVELOPMENT_RESTART_READY_MESSAGE,
+  DEVELOPMENT_RESTART_REQUEST_MESSAGE,
+  FINAL_SHUTDOWN_PREPARED_MESSAGE,
+  FINAL_SHUTDOWN_REQUEST_MESSAGE,
+  RESTART_PROGRESS_INTERVAL_MS,
+} from "../shared/development-shutdown.ts";
 import { createGoogleAuthFromEnvironment } from "./auth.ts";
 import { createBraveSearchSkillFromEnvironment } from "./brave-search.ts";
 import { createCoreIntegrationResources } from "./core-integration-resources.ts";
@@ -171,29 +179,107 @@ if (usesOpenAiLoopbackCallback(Bun.env)) {
     });
     console.log(`OpenAI OAuth callback is listening at ${callbackServer.url}`);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn(`OpenAI OAuth callback could not start: ${message}`);
+    console.warn(
+      `OpenAI OAuth callback could not start: ${errorMessage(error)}`,
+    );
   }
 }
 
-let shuttingDown = false;
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
-async function shutDown(): Promise<void> {
-  if (shuttingDown) {
-    return;
-  }
+let shutdownKind: "development_restart" | "final" | undefined;
+let developmentRestart: Promise<void> | undefined;
+let developmentTermination: Promise<void> | undefined;
 
-  shuttingDown = true;
+function stopMaintenance(): void {
   clearInterval(recoveryTimer);
   clearInterval(vacuumTimer);
   if (freeSpace.timer !== undefined) {
     clearInterval(freeSpace.timer);
   }
+}
+
+function publishRestartProgress(): void {
+  const progress = sessions.drainProgress();
+  const message = {
+    progress,
+    type: DEVELOPMENT_RESTART_PROGRESS_MESSAGE,
+  } as const;
+  console.log(
+    `Q Mush development restart is draining ${String(progress.length)} session(s)`,
+  );
+  process.send?.(message);
+  for (const userId of realtimeHub.userIds()) {
+    realtimeHub.publishUser(userId, message);
+    for (const workspaceId of realtimeHub.userWorkspaces(userId)) {
+      realtimeHub.publishUser(userId, message, workspaceId);
+    }
+  }
+}
+
+function restartDevelopment(): Promise<void> {
+  if (shutdownKind === "final") {
+    return Promise.resolve();
+  }
+  if (developmentRestart !== undefined) {
+    sessions.escalateDrain();
+    return developmentRestart;
+  }
+
+  shutdownKind = "development_restart";
+  stopMaintenance();
+  publishRestartProgress();
+  const progressTimer = setInterval(
+    publishRestartProgress,
+    RESTART_PROGRESS_INTERVAL_MS,
+  );
+  progressTimer.unref();
+  developmentRestart = sessions
+    .drain()
+    .then(() => {
+      publishRestartProgress();
+      process.send?.(DEVELOPMENT_RESTART_READY_MESSAGE);
+    })
+    .finally(() => {
+      clearInterval(progressTimer);
+    });
+  return developmentRestart;
+}
+
+function terminateDevelopmentRestart(): Promise<void> {
+  developmentTermination ??= (async () => {
+    sessions.escalateDrain();
+    try {
+      await developmentRestart;
+    } catch (error) {
+      console.error(
+        `Q Mush development restart drain failed: ${errorMessage(error)}`,
+      );
+    }
+    await Promise.all([server.stop(true), callbackServer?.stop(true)]);
+    writeResilience.close();
+    database.$client.close();
+    if (process.connected) {
+      process.disconnect?.();
+    }
+  })();
+  return developmentTermination;
+}
+
+async function shutDown(): Promise<void> {
+  if (shutdownKind !== undefined) {
+    return;
+  }
+
+  shutdownKind = "final";
+  stopMaintenance();
   await sessions.prepareFinalShutdown();
   recordDatabaseRetryFixtureEvent(Bun.env, "shutdown:prepared");
   process.send?.(FINAL_SHUTDOWN_PREPARED_MESSAGE);
   recordDatabaseRetryFixtureEvent(Bun.env, "shutdown:acknowledged");
-  await sessions.drain();
+  await sessions.drainFinal();
   recordDatabaseRetryFixtureEvent(Bun.env, "shutdown:drained");
   await Promise.all([server.stop(), callbackServer?.stop()]);
   recordDatabaseRetryFixtureEvent(Bun.env, "shutdown:servers-closed");
@@ -202,11 +288,24 @@ async function shutDown(): Promise<void> {
   recordDatabaseRetryFixtureEvent(Bun.env, "shutdown:database-closed");
 }
 
+process.on("message", (message) => {
+  if (message === DEVELOPMENT_RESTART_REQUEST_MESSAGE) {
+    void restartDevelopment();
+  } else if (message === DEVELOPMENT_RESTART_ESCALATE_MESSAGE) {
+    sessions.escalateDrain();
+  } else if (message === FINAL_SHUTDOWN_REQUEST_MESSAGE) {
+    void shutDown();
+  }
+});
 process.on("SIGINT", () => {
   void shutDown();
 });
 process.on("SIGTERM", () => {
-  void shutDown();
+  if (shutdownKind === "development_restart") {
+    void terminateDevelopmentRestart();
+  } else {
+    void shutDown();
+  }
 });
 startDatabaseRetryFixture(database, health, Bun.env);
 

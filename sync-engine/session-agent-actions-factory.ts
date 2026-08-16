@@ -1,3 +1,4 @@
+import type { ModelCredentialPool } from "./model-credential-pool.ts";
 import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
 import type { RunnerIntegration } from "./runners.ts";
 import { SessionAgentActions } from "./session-agent-actions.ts";
@@ -12,24 +13,18 @@ type AgentActionsDependencies = ConstructorParameters<
   typeof SessionAgentActions
 >[0];
 
-interface SessionAgentActionsResources extends Omit<
-  Pick<
-    AgentActionsDependencies,
-    | "broker"
-    | "database"
-    | "discoverModels"
-    | "modelCredentialPool"
-    | "notify"
-    | "now"
-    | "readCredential"
-    | "store"
-    | "withCredential"
-  >,
-  "modelCredentialPool"
+interface SessionAgentActionsResources extends Pick<
+  AgentActionsDependencies,
+  | "broker"
+  | "database"
+  | "discoverModels"
+  | "notify"
+  | "now"
+  | "readCredential"
+  | "store"
+  | "withCredential"
 > {
-  readonly modelCredentialPool: NonNullable<
-    AgentActionsDependencies["modelCredentialPool"]
-  >;
+  readonly modelCredentialPool: ModelCredentialPool;
   readonly cleanup: SessionExecutionCleanup;
   readonly discoverOpenRouterProviders: OpenRouterProviderDiscoverer;
   readonly launch: SessionLaunchBoundary["launch"];

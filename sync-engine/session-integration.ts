@@ -39,9 +39,12 @@ export interface SessionIntegration extends SessionDetailReader {
   runnerConnectionGeneration(runnerId: string): number;
   replaceRunnerConnection(runnerId: string, replacedGeneration: number): void;
   acknowledgeRunnerCancellation(runnerId: string, commandId: string): boolean;
+  cancelBoundedRunnerDrains(): void;
   runnerOperational(runnerId: string, restartId?: string): void;
   directories(request: Request, runnerId: string): Promise<Response>;
+  escalateDrain(): boolean;
   drain(): Promise<void>;
+  drainFinal(): Promise<void>;
   drainProgress(): readonly RestartDrainSessionProgress[];
   prepareFinalShutdown(): Promise<void>;
   hasPendingDatabaseWrites(): boolean;

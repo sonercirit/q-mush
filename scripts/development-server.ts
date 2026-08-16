@@ -1,7 +1,16 @@
 import { watch } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { FINAL_SHUTDOWN_PREPARED_MESSAGE } from "../shared/development-shutdown.ts";
+import {
+  DEVELOPMENT_RESTART_ESCALATE_MESSAGE,
+  DEVELOPMENT_RESTART_PROGRESS_MESSAGE,
+  DEVELOPMENT_RESTART_READY_MESSAGE,
+  DEVELOPMENT_RESTART_REQUEST_MESSAGE,
+  FINAL_SHUTDOWN_PREPARED_MESSAGE,
+  FINAL_SHUTDOWN_REQUEST_MESSAGE,
+  isDevelopmentRestartProgressMessage,
+} from "../shared/development-shutdown.ts";
+import { restartProgressReport } from "../shared/restart-progress.ts";
 
 const DEFAULT_SHUTDOWN_FORCE_MILLISECONDS = 1_000;
 const DEFAULT_SHUTDOWN_GRACE_MILLISECONDS = 10_000;
@@ -46,10 +55,21 @@ function positiveDelay(value: number | undefined, fallback: number): number {
     : value;
 }
 
+function settledWithin(
+  promise: Promise<unknown>,
+  milliseconds: number,
+): Promise<boolean> {
+  return Promise.race([
+    promise.then(() => true),
+    Bun.sleep(milliseconds).then(() => false),
+  ]);
+}
+
 export function startDevelopmentServer(
   options: DevelopmentServerOptions,
 ): DevelopmentServer {
-  let preparation = Promise.withResolvers<undefined>();
+  let finalPreparation = Promise.withResolvers<undefined>();
+  let restartReady = Promise.withResolvers<undefined>();
   let forced = Promise.withResolvers<undefined>();
   let forceRequested = false;
   const spawn = () =>
@@ -58,7 +78,14 @@ export function startDevelopmentServer(
       detached: true,
       ipc: (message) => {
         if (message === FINAL_SHUTDOWN_PREPARED_MESSAGE) {
-          preparation.resolve();
+          finalPreparation.resolve();
+        } else if (message === DEVELOPMENT_RESTART_READY_MESSAGE) {
+          restartReady.resolve();
+        } else if (isDevelopmentRestartProgressMessage(message)) {
+          const report = restartProgressReport(message.progress);
+          console.log(
+            `${DEVELOPMENT_RESTART_PROGRESS_MESSAGE}: ${report || "no pending sessions"}`,
+          );
         }
       },
       stderr: "inherit",
@@ -80,6 +107,7 @@ export function startDevelopmentServer(
   let child = spawn();
   let operation = Promise.resolve();
   let restartTimer: ReturnType<typeof setTimeout> | undefined;
+  let restarting = false;
   let stopping = false;
   let stopPromise: Promise<void> | undefined;
 
@@ -92,6 +120,18 @@ export function startDevelopmentServer(
       process.kill(pid, signal);
     } catch {
       child.kill(signal);
+    }
+  };
+
+  const sendChild = (message: string): boolean => {
+    if (child.exitCode !== null) {
+      return false;
+    }
+    try {
+      child.send(message);
+      return true;
+    } catch {
+      return false;
     }
   };
 
@@ -115,7 +155,19 @@ export function startDevelopmentServer(
   };
 
   const drainChild = async (): Promise<void> => {
-    signalChild("SIGTERM");
+    sendChild(DEVELOPMENT_RESTART_REQUEST_MESSAGE);
+    const ready = await settledWithin(
+      Promise.race([restartReady.promise, child.exited]),
+      preparationMilliseconds,
+    );
+    if (!ready) {
+      signalChild("SIGTERM");
+      await child.exited;
+      return;
+    }
+    if (child.exitCode === null) {
+      signalChild("SIGTERM");
+    }
     await child.exited;
   };
 
@@ -125,7 +177,7 @@ export function startDevelopmentServer(
       timeout.resolve(false);
     }, preparationMilliseconds);
     const prepared = await Promise.race([
-      preparation.promise.then(() => true),
+      finalPreparation.promise.then(() => true),
       child.exited.then(() => false),
       timeout.promise,
     ]);
@@ -134,13 +186,23 @@ export function startDevelopmentServer(
   };
 
   const shutDownChild = async (): Promise<void> => {
-    signalChild("SIGTERM");
+    const requested = sendChild(FINAL_SHUTDOWN_REQUEST_MESSAGE);
+    if (!requested) {
+      signalChild("SIGTERM");
+    }
     const prepared = await preparationFinishedWithin();
+    if (child.exitCode !== null) {
+      return;
+    }
+    // Compatibility for non-Bun children and fixtures: give the production
+    // engine's IPC request first ownership of final shutdown, and use SIGTERM
+    // only when IPC was unavailable or the child did not acknowledge it.
+    if (!prepared && requested) {
+      signalChild("SIGTERM");
+    }
     if (
-      child.exitCode !== null ||
-      (prepared &&
-        !forceRequested &&
-        (await childSettledWithin(graceMilliseconds, forced.promise)))
+      !forceRequested &&
+      (await childSettledWithin(graceMilliseconds, forced.promise))
     ) {
       return;
     }
@@ -152,21 +214,28 @@ export function startDevelopmentServer(
   };
 
   const scheduleRestart = (): void => {
+    if (restarting) {
+      sendChild(DEVELOPMENT_RESTART_ESCALATE_MESSAGE);
+      return;
+    }
     if (restartTimer !== undefined) {
       clearTimeout(restartTimer);
     }
 
     restartTimer = setTimeout(() => {
       restartTimer = undefined;
+      restarting = true;
       operation = operation.then(async () => {
         await drainChild();
 
         if (!stopping) {
-          preparation = Promise.withResolvers<undefined>();
+          finalPreparation = Promise.withResolvers<undefined>();
+          restartReady = Promise.withResolvers<undefined>();
           forced = Promise.withResolvers<undefined>();
           forceRequested = false;
           child = spawn();
         }
+        restarting = false;
       });
     }, options.restartDelayMilliseconds ?? 50);
   };

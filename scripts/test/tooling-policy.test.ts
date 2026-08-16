@@ -98,7 +98,10 @@ async function removeProbes(): Promise<void> {
 afterEach(removeProbes);
 
 describe("tooling policies", () => {
-  vi.setConfig({ testTimeout: 30_000 });
+  // These probes launch full type-aware ESLint/Knip processes. Under a full
+  // Vitest shard they can exceed the ordinary unit-test budget while the same
+  // assertions complete reliably when run alone.
+  vi.setConfig({ testTimeout: 60_000 });
 
   test("ESLint rejects unsafe HTML while allowing TSX", async () => {
     await Promise.all([

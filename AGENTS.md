@@ -52,12 +52,14 @@ Living project memory.
   source and local `.env`, coalescing bursts into the ignored restart trigger;
   `dev:restart` writes it, while plain `dev` restarts only from it.
   `runner-executable.ts` fingerprints runner source/compiler, builds privately,
-  caches in memory, serves `/runner/executable`. Development restarts reject new
-  steps, report pending sessions/tools, and after 120 seconds (or a second
-  request) force-park stragglers with durable handoffs; final shutdown remains
-  unbounded after its durable marker. Text handlers precompress once,
-  negotiating zstd, Brotli, gzip, deflate; `/favicon.svg` revalidates separately
-  with ETag.
+  caches in memory, serves `/runner/executable`. Development restarts use
+  supervisor/engine IPC (not SIGTERM to initiate the drain), reject new steps
+  and auxiliary requests, report every active tool to logs/IPC/UI, and after 120
+  seconds (or explicit escalation) force-park stragglers with durable handoffs;
+  live markers are fenced from liveness recovery, cleanup is bounded, while
+  final shutdown stays unbounded after its marker. Text handlers precompress
+  once, negotiating zstd, Brotli, gzip, deflate; `/favicon.svg` revalidates
+  separately with ETag.
 - `solid/pages.tsx` renders both server page shells via Solid's SSR runtime;
   `sync-engine/pages.ts` loads it with Vite's SSR runner. The browser app mounts
   from `solid/client.tsx`; routes live in `shared/routes.ts`.
@@ -114,7 +116,8 @@ Living project memory.
   categories and definitions; `get_session_options` pages spawn choices. Grouped
   tools manage non-blocking owned children, report final messages, resume idle
   parents; `parallel` takes 2+ calls on four ordered workers, bounds output,
-  propagates cancellation. `solid/session-transcript.tsx` renders prompts, tool
+  propagates cancellation. Assistant transcript/system/tool-definition reads are
+  byte-bounded. `solid/session-transcript.tsx` renders prompts, tool
   definitions, raw details, Markdown, code/JSON, diffs, and contextual results,
   preserving user line breaks; session lists page by ten. Live sessions use
   `solid/realtime-client.ts`, `solid/session-client.tsx`,

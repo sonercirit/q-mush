@@ -6,7 +6,10 @@ import {
   users,
   workspaces,
 } from "../../../shared/database/schema.ts";
-import { FINAL_SHUTDOWN_PREPARED_MESSAGE } from "../../../shared/development-shutdown.ts";
+import {
+  FINAL_SHUTDOWN_PREPARED_MESSAGE,
+  FINAL_SHUTDOWN_REQUEST_MESSAGE,
+} from "../../../shared/development-shutdown.ts";
 import { createUuidV7 } from "../../../shared/ids.ts";
 import { SessionRuntimes } from "../../../sync-engine/session-runtime.ts";
 import { ShutdownInterruptedSessionStore } from "../../../sync-engine/session-shutdown-interrupted-store.ts";
@@ -133,15 +136,20 @@ if (mode === "start" || mode === "start-no-ack") {
     });
     return new Promise(() => undefined);
   });
-  process.on("SIGTERM", () => {
+  const prepareShutdown = (): void => {
     void Bun.sleep(150)
       .then(() => runtimes.mark({ kind: "server" }, "bounded-final-shutdown"))
       .then(() => {
+        interrupted.enableRecovery();
         if (mode === "start") {
           process.send?.(FINAL_SHUTDOWN_PREPARED_MESSAGE);
         }
       });
+  };
+  process.on("message", (message) => {
+    if (message === FINAL_SHUTDOWN_REQUEST_MESSAGE) prepareShutdown();
   });
+  process.on("SIGTERM", prepareShutdown);
   await Bun.write(statePath, JSON.stringify({ sessionId, userId }));
   setInterval(() => undefined, 1_000);
 } else {

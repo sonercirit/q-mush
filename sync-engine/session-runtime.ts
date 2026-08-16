@@ -1,5 +1,8 @@
 import type { RestartHandoffRequester } from "../shared/session-model.ts";
-import type { SessionRestartRequester } from "./session-restart-requester.ts";
+import type {
+  RestartRequestPersistence,
+  SessionRestartRequester,
+} from "./session-restart-requester.ts";
 
 export type RestartScope =
   | { readonly kind: "server" }
@@ -31,9 +34,7 @@ interface ActiveSessionRuntime {
   readonly controller: AbortController;
   readonly generation: number;
   restartRequestedAt: number | undefined;
-  persistRestart:
-    | ((request: RestartRequest, durable: boolean) => Promise<void> | void)
-    | undefined;
+  persistRestart: RestartRequestPersistence | undefined;
   forceParked: boolean;
   restartDurable: boolean;
   restartRequest: RestartRequest | undefined;
@@ -120,18 +121,30 @@ export class SessionRuntimes {
       .sort((first, second) => second.elapsedMs - first.elapsedMs);
   }
 
-  // Force-parks the runtimes a drain still waits on: each already holds a
-  // durable handoff, so aborting leaves that parking in place for the next
-  // process instead of settling the session as stopped or failed.
-  forcePark(scope: RestartScope): readonly string[] {
+  // Force-parks the runtimes a drain still waits on. Persistence is invoked
+  // immediately beforehand with the force-park flag so a runner-scoped drain
+  // can keep its normal boundary semantics but still become crash-durable.
+  async forcePark(scope: RestartScope): Promise<readonly string[]> {
+    const candidates = [...this.#active.entries()].filter(
+      ([, runtime]) =>
+        runtime.restartRequest !== undefined &&
+        scopeIncludes(scope, runtime.runnerId),
+    );
+    await Promise.all(
+      candidates.flatMap(([, runtime]) => {
+        const request = runtime.restartRequest;
+        const needsDurablePersistence = !runtime.restartDurable;
+        runtime.restartDurable = true;
+        const persisted =
+          request === undefined || !needsDurablePersistence
+            ? undefined
+            : runtime.persistRestart?.(request, true, true);
+        return persisted === undefined ? [] : [persisted];
+      }),
+    );
     const parked: string[] = [];
-    for (const [sessionId, runtime] of this.#active) {
-      if (
-        runtime.restartRequest === undefined ||
-        !scopeIncludes(scope, runtime.runnerId)
-      ) {
-        continue;
-      }
+    for (const [sessionId, runtime] of candidates) {
+      if (runtime.restartRequest === undefined) continue;
       parked.push(sessionId);
       runtime.forceParked = true;
       // The durable handoff now owns the session's resumption, so it stops

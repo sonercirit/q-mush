@@ -576,6 +576,21 @@ describe("runner command broker", () => {
     expect(settled.every(({ status }) => status === "fulfilled")).toBe(true);
   });
 
+  test("deduplicates parallel same-tool names in pending progress", async () => {
+    let command = 0;
+    const broker = new RunnerCommandBroker({
+      commandId: () => `parallel-read-${String((command += 1))}`,
+    });
+    const results = [
+      broker.dispatch(brokerRunnerCommand({ tool: "read" })),
+      broker.dispatch(brokerRunnerCommand({ tool: "read" })),
+    ];
+
+    expect(broker.sessionPendingTools(SESSION_ID)).toEqual(["read"]);
+    broker.cancelSessionCommands(SESSION_ID);
+    await Promise.all(results.map((result) => captureBrokerRejection(result)));
+  });
+
   test("removes queued and in-flight commands when a session is stopped", async () => {
     const broker = new RunnerCommandBroker({
       commandId: () => "command-2",

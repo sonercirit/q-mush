@@ -66,6 +66,7 @@ interface ConnectedSessionOptions {
   readonly modelFactory?: AgentModelFactory;
   readonly now?: () => number;
   readonly providerDiscovery?: OpenRouterProviderDiscoverer;
+  readonly restartTiming?: SessionDependencies["restartTiming"];
   readonly onChange?: (userId: string, sessionId: string) => void;
   readonly onCredentialRead?: () => void;
   readonly readCredential?: (
@@ -381,6 +382,9 @@ export function connectedSessionSetup(
         const suffix = Number.parseInt(id.slice(-12), 10) + idBatch;
         return `${id.slice(0, -12)}${String(suffix).padStart(12, "0")}`;
       },
+      ...(options.restartTiming === undefined
+        ? {}
+        : { restartTiming: options.restartTiming }),
       workspaces: new WorkspaceStore(database),
     },
   );

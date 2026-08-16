@@ -17,6 +17,7 @@ import {
   type RunnerCommandResult,
 } from "../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
+import type { ActiveSessionTools } from "./active-session-tools.ts";
 import { forEachAssistantToolCall } from "./agent-conversation.ts";
 import { estimateAgentStepCost } from "./agent-cost.ts";
 import { createAgentSkills, type AgentSkillExecutor } from "./agent-skills.ts";
@@ -37,10 +38,9 @@ import {
   recordCompaction,
   recordRuntimeUsage,
   sessionConversation,
+  throwIfRestartRequested,
   writeRuntime,
 } from "./session-agent-runtime-state.ts";
-
-export { isRestartHandoffError } from "./session-agent-runtime-state.ts";
 
 import {
   createSessionAgentModels,
@@ -66,6 +66,7 @@ import { boundSessionToolOutput } from "./session-tool-output.ts";
 import { ToolStreamPublisher } from "./tool-stream-publisher.ts";
 
 export interface SessionAgentRuntimeDependencies extends AttachmentFallbackRuntimeResources {
+  readonly activeTools: ActiveSessionTools;
   readonly braveSearch: Pick<BraveSearchSkill, "execute">;
   readonly broker: RunnerCommandBroker;
   readonly credential: ProviderCredentialAccess;
@@ -104,6 +105,7 @@ async function loadModels(
   writeRuntime(runtime, (sessionId, now, generation) => {
     runtime.store.setRuntimeAgentFile(sessionId, agentFile, now, generation);
   });
+  throwIfRestartRequested(runtime);
   const metadata = await sessionRequestMetadata(
     runtime,
     (apply) => {
@@ -111,6 +113,7 @@ async function loadModels(
     },
     runtime.signal,
   );
+  throwIfRestartRequested(runtime);
   const models = createSessionAgentModels({
     agentFile,
     credential: runtime.credential,
@@ -216,6 +219,11 @@ async function executeAgentTool(
   if (isRestartHandoffError(toolSignal.reason)) {
     return restartInterruptedToolResult();
   }
+  const finishTracking = runtime.activeTools.begin(
+    runtime.detail.id,
+    call.id,
+    call.name,
+  );
   try {
     if (
       !isAgentSessionToolName(call.name) ||
@@ -277,6 +285,8 @@ async function executeAgentTool(
       return restartInterruptedToolResult();
     }
     throw error;
+  } finally {
+    finishTracking();
   }
 }
 
@@ -370,7 +380,9 @@ export async function runSessionAgent(
     if (attachment === undefined) {
       throw new Error("The runner returned invalid file attachment data");
     }
+    throwIfRestartRequested(runtime);
     const currentModel = await discoverCurrentSessionModel(runtime, signal);
+    throwIfRestartRequested(runtime);
     if (currentModel === undefined) {
       throw new Error("The session model is unavailable for file explanation");
     }
@@ -389,6 +401,7 @@ export async function runSessionAgent(
         },
         prompt: typeof promptValue === "string" ? promptValue : null,
         resources: runtime,
+        restartRequested: runtime.restartHandoffRequested,
         userId: runtime.userId,
         workspaceId: runtime.detail.workspaceId,
       },

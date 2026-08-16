@@ -78,8 +78,11 @@ async function expectDurableRetry(
   generated: { count: number },
   socket: TestSocket,
   attempt: Promise<string>,
+  type: "restart" | "restart_escalate" = "restart",
 ): Promise<void> {
-  expect(socket.sent).toEqual([restartRequest("restart-1")]);
+  expect(socket.sent).toEqual([
+    JSON.stringify({ restartId: "restart-1", type }),
+  ]);
   expect(generated.count).toBe(1);
   await socket.completeRestart("restart-1", attempt);
 }
@@ -138,7 +141,12 @@ async function retryPendingRestart(
   } else {
     await sockets[0].completeRestart("restart-1", firstAttempt);
   }
-  await expectDurableRetry(generated, sockets[1], restart.request(sockets[1]));
+  await expectDurableRetry(
+    generated,
+    sockets[1],
+    restart.request(sockets[1]),
+    preparation === "acknowledge" ? "restart_escalate" : "restart",
+  );
 }
 
 test.each([

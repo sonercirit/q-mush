@@ -136,6 +136,7 @@ test("recreated runtimes recover a durable runner handoff only through its exact
   const running = requireCompactionSession(setup.store);
 
   const attempts: string[] = [];
+  const firstRecovery = Promise.withResolvers<undefined>();
   const fixture = restartCoordinatorFixture(
     setup,
     (detail, _credential, userId, operation) => {
@@ -143,6 +144,7 @@ test("recreated runtimes recover a durable runner handoff only through its exact
       return true;
     },
     TEST_NOW + 3,
+    () => firstRecovery.promise.then(() => CREDENTIAL),
   );
 
   const coordinator = restoredCoordinator(fixture, {
@@ -167,7 +169,10 @@ test("recreated runtimes recover a durable runner handoff only through its exact
   expectRunnerAcceptance(fixture, false);
 
   const expectedLaunches = [`${TEST_USER_ID}:${running.id}:agent`];
-  await recoverRunner(coordinator, "restart-after-recreation");
+  coordinator.recover(STORE_RUNNER_ID);
+  coordinator.recover(STORE_RUNNER_ID, "restart-after-recreation");
+  firstRecovery.resolve(undefined);
+  await settleRestartRecovery({ steps: 5 });
   expectLaunches(attempts, expectedLaunches);
   expectRunnerAcceptance(fixture, true);
 

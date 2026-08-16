@@ -179,6 +179,8 @@ const INVALID_ARGUMENTS_MESSAGE =
 
 export function throwIfAgentAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted === true) {
+    const reason: unknown = signal.reason;
+    if (reason instanceof DOMException) throw reason;
     throw new DOMException("The agent session was stopped", "AbortError");
   }
 }

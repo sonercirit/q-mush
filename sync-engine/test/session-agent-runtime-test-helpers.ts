@@ -1,4 +1,5 @@
 import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import { ActiveSessionTools } from "../active-session-tools.ts";
 import type { SessionAgentRuntimeDependencies } from "../session-agent-runtime.ts";
 
 function completeTestBrokerCommand(
@@ -28,6 +29,7 @@ export function completingTestBroker(): RunnerCommandBroker {
 
 export const IDLE_RUNTIME_SIGNALS: Pick<
   SessionAgentRuntimeDependencies,
+  | "activeTools"
   | "continuous"
   | "hasPendingSteeringInput"
   | "manualCompactionRequested"
@@ -35,6 +37,7 @@ export const IDLE_RUNTIME_SIGNALS: Pick<
   | "realtime"
   | "restartHandoffRequested"
 > = {
+  activeTools: new ActiveSessionTools(),
   continuous: false,
   hasPendingSteeringInput: () => false,
   manualCompactionRequested: () => false,

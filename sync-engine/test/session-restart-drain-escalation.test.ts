@@ -5,6 +5,7 @@ import {
 } from "./session-integration-fixtures.ts";
 import { waitForSessionValue } from "./session-integration-helpers.ts";
 import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
+import { waitForRestartDrainCount } from "./session-restart-progress-test-helpers.ts";
 import {
   completeRestartCommands,
   createRestartSessions,
@@ -44,10 +45,7 @@ test("a second restart request force-parks sessions stuck in long tool calls", a
   const { ids, setup } = await startBusySessions();
 
   const first = setup.sessions.drain();
-  await waitForSessionValue(
-    () => setup.sessions.drainProgress().length,
-    (value) => value === RESTART_SESSION_COUNT,
-  );
+  await waitForRestartDrainCount(setup.sessions, RESTART_SESSION_COUNT);
   expect(
     setup.sessions
       .drainProgress()

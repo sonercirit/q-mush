@@ -20,6 +20,7 @@ interface RestartAttempt {
 }
 
 interface PendingRestart {
+  acknowledged: boolean;
   attempt: RestartAttempt | undefined;
   readonly restartId: string;
 }
@@ -68,7 +69,7 @@ export class RunnerRestartCoordinator {
       if (restartId.length === 0 || restartId.length > 200) {
         return Promise.reject(new Error("The runner restart ID is invalid"));
       }
-      pending = { attempt: undefined, restartId };
+      pending = { acknowledged: false, attempt: undefined, restartId };
       this.#pending = pending;
     }
     if (pending.attempt?.socket === socket) {
@@ -106,6 +107,7 @@ export class RunnerRestartCoordinator {
         pending.attempt === attempt &&
         restartAcknowledgement(rawEvent.data, pending.restartId)
       ) {
+        pending.acknowledged = true;
         pending.attempt = undefined;
         attempt.resolve(pending.restartId);
       }
@@ -132,7 +134,10 @@ export class RunnerRestartCoordinator {
     );
     try {
       socket.send(
-        JSON.stringify({ restartId: pending.restartId, type: "restart" }),
+        JSON.stringify({
+          restartId: pending.restartId,
+          type: pending.acknowledged ? "restart_escalate" : "restart",
+        }),
       );
     } catch (error) {
       this.#fail(

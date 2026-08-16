@@ -80,8 +80,9 @@ function isSessionRestartHandoff(
   error: unknown,
 ): boolean {
   return (
-    error instanceof RunnerDisconnectedError &&
-    runtime.restartHandoffRequested()
+    runtime.restartHandoffRequested() &&
+    ((error instanceof DOMException && error.name === "AbortError") ||
+      error instanceof RunnerDisconnectedError)
   );
 }
 
@@ -106,6 +107,17 @@ export async function executeForSession<Result>(
       throw handoffError;
     }
     throw error;
+  }
+}
+
+export function throwIfRestartRequested(
+  runtime: SessionAgentRuntimeDependencies,
+): void {
+  if (runtime.restartHandoffRequested()) {
+    throw new DOMException(
+      "The restart began before an auxiliary model request",
+      "RestartHandoff",
+    );
   }
 }
 

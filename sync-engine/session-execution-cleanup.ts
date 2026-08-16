@@ -21,6 +21,30 @@ export class SessionExecutionCleanup {
     return [...this.#pending.values()].map(({ promise }) => promise);
   }
 
+  cancelPending(): void {
+    for (const sessionId of this.#pending.keys()) {
+      this.#broker.cancelSessionCommands(sessionId);
+    }
+  }
+
+  async drainPending(milliseconds: number): Promise<void> {
+    const pending = [...this.pending];
+    if (pending.length === 0) return;
+    const timedOut = Promise.withResolvers<boolean>();
+    const timer = setTimeout(() => {
+      this.cancelPending();
+      timedOut.resolve(true);
+    }, milliseconds);
+    const completed = Promise.allSettled(pending).then(() => false);
+    try {
+      if (await Promise.race([completed, timedOut.promise])) {
+        await completed;
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   clearOffline(sessionId: string): void {
     this.#offline.delete(sessionId);
   }

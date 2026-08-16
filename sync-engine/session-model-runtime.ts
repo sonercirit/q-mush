@@ -1,6 +1,7 @@
 import type { AttachmentFallbackSelection } from "../shared/attachment-fallback.ts";
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
+import type { ActiveSessionTools } from "./active-session-tools.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
 import type { SessionAgentActions } from "./session-agent-actions.ts";
@@ -14,6 +15,7 @@ export interface SessionModelRuntimeResources extends Omit<
   AttachmentFallbackRuntimeResources,
   "attachmentFallbacks"
 > {
+  readonly activeTools: ActiveSessionTools;
   readonly actions: SessionAgentActions;
   readonly attachmentFallbacks?: (
     userId: string,
@@ -36,6 +38,7 @@ export function sessionModelRuntime(
   restartHandoffRequested: () => boolean = () => false,
 ): SessionAgentRuntimeDependencies {
   return {
+    activeTools: resources.activeTools,
     ...(resources.attachmentFallbacks === undefined
       ? {}
       : {

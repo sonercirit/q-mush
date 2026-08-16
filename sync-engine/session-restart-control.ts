@@ -3,6 +3,7 @@ import type {
   ProviderCredentialAccess,
   ProviderId,
 } from "../shared/provider-credential-store.ts";
+import { restartProgressReport } from "../shared/restart-progress.ts";
 import type { RestartCredentialSelection } from "./session-restart-recovery.ts";
 import {
   clearRestartTimer,
@@ -25,7 +26,7 @@ export interface RestartRuntimeControl {
   readonly drainProgress: (
     scope?: RestartScope,
   ) => readonly RestartDrainProgress[];
-  readonly forcePark: (scope: RestartScope) => readonly string[];
+  readonly forcePark: (scope: RestartScope) => Promise<readonly string[]>;
   readonly mark: (scope: RestartScope, restartId: string) => Promise<unknown>;
   readonly requestDrain: (
     scope: RestartScope,
@@ -39,38 +40,30 @@ export interface RestartRuntimeControl {
   readonly start: (runnerId?: string) => void;
 }
 
-interface RestartDrainTimers {
+interface RestartDrainOptions {
   readonly clearTimeout: (id: RestartTimer) => void;
-  readonly log: (message: string) => void;
   readonly pendingTools: (sessionId: string) => readonly string[];
   readonly setTimeout: RestartSetTimeout;
+  readonly warn: (message: string) => void;
 }
 
 export interface RestartDrainSessionProgress extends RestartDrainProgress {
   readonly tools: readonly string[];
 }
 
-function drainProgressReport(
-  progress: readonly RestartDrainSessionProgress[],
-): string {
-  return progress
-    .map(({ elapsedMs, sessionId, tools }) => {
-      const waiting = tools.length === 0 ? "no tool call" : tools.join(", ");
-      return `${sessionId} (${waiting}, ${String(Math.round(elapsedMs / 1_000))}s)`;
-    })
-    .join("; ");
-}
-
 export interface SessionRestartControl extends Pick<
   RestartRuntimeControl,
   "accepts" | "blockRunner" | "restoreRunner"
 > {
+  readonly cancelBoundedRunnerDrains: () => void;
   readonly drainProgress: (
     scope?: RestartScope,
   ) => readonly RestartDrainSessionProgress[];
   readonly draining: () => boolean;
   readonly drainServer: () => Promise<void>;
+  readonly drainServerFinal: () => Promise<void>;
   readonly drainRunner: (runnerId: string, restartId: string) => Promise<void>;
+  readonly escalateServerDrain: () => boolean;
   readonly pendingRunnerRestart: (runnerId: string) => string | undefined;
   readonly prepareServerShutdown: () => Promise<void>;
   readonly recover: (
@@ -80,26 +73,36 @@ export interface SessionRestartControl extends Pick<
   readonly resumeRunner: (runnerId: string, restartId: string) => boolean;
 }
 
+interface BoundedDrain {
+  readonly bounded: Promise<void>;
+  readonly escalate: () => void;
+  readonly finish: () => void;
+  readonly timer: RestartTimer;
+}
+
 export function createSessionRestartControl(
   runtimes: RestartRuntimeControl,
   generateRestartId: () => string,
-  timers: Partial<RestartDrainTimers> = {},
+  options: Partial<RestartDrainOptions> = {},
 ): SessionRestartControl {
-  const setDrainTimer = timers.setTimeout ?? setRestartTimer;
-  const clearDrainTimer = timers.clearTimeout ?? clearRestartTimer;
-  const log =
-    timers.log ??
+  const setDrainTimer = options.setTimeout ?? setRestartTimer;
+  const clearDrainTimer = options.clearTimeout ?? clearRestartTimer;
+  const warn =
+    options.warn ??
     ((message: string) => {
-      console.log(message);
+      console.warn(message);
     });
-  const pendingTools = timers.pendingTools ?? (() => []);
+  const pendingTools = options.pendingTools ?? (() => []);
   const drainProgress = (
     scope?: RestartScope,
   ): readonly RestartDrainSessionProgress[] =>
-    runtimes.drainProgress(scope).map((progress) => ({
-      ...progress,
-      tools: pendingTools(progress.sessionId),
-    }));
+    runtimes
+      .drainProgress(scope)
+      .slice(0, 100)
+      .map((progress) => ({
+        ...progress,
+        tools: [...new Set(pendingTools(progress.sessionId))].slice(0, 100),
+      }));
   const serverRestartId = (): string | undefined => {
     const existing = runtimes.drainRequest({ kind: "server" });
     return existing?.requestedBy === "server" ? existing.restartId : undefined;
@@ -118,14 +121,20 @@ export function createSessionRestartControl(
   const nextServerRestartId = (): string =>
     serverRestartId() ?? generatedRestartId();
   let finalShutdownPrepared = false;
-  const boundedDrains = new Map<
-    string,
-    { readonly bounded: Promise<void>; readonly escalate: () => void }
-  >();
-  // Bounds one scope's settlement wait: the drain converges when every
-  // affected runtime settles, when the limit expires, or as soon as a second
-  // request for the same scope escalates it. Force-parking keeps the durable
-  // handoffs the request already persisted, so nothing is stopped.
+  const boundedDrains = new Map<string, BoundedDrain>();
+  const forcePark = (
+    scope: RestartScope,
+    requested: Promise<unknown>,
+  ): Promise<void> =>
+    requested.then(async () => {
+      const report = restartProgressReport(drainProgress(scope));
+      const parked = await runtimes.forcePark(scope);
+      if (parked.length > 0) {
+        warn(
+          `Q Mush force-parked ${String(parked.length)} session(s) still running at the restart drain limit: ${report}`,
+        );
+      }
+    });
   const boundedDrain = (
     scope: RestartScope,
     restartId: string,
@@ -137,30 +146,16 @@ export function createSessionRestartControl(
       existing.escalate();
       return existing.bounded;
     }
-    // Registered synchronously so a second request arriving while the first
-    // still persists escalates it instead of starting a rival wait.
     const requested = runtimes.requestDrain(scope, restartId, durable);
     const escalation = Promise.withResolvers<undefined>();
+    let escalated = false;
+    const finish = () => {
+      escalation.resolve(undefined);
+    };
     const escalate = () => {
-      // Force-parking only after the request settles guarantees each affected
-      // runtime already carries its durable handoff.
-      void requested.then(
-        () => {
-          // Reported before force-parking, which aborts the very tool calls
-          // the report names.
-          const report = drainProgressReport(drainProgress(scope));
-          const parked = runtimes.forcePark(scope);
-          if (parked.length > 0) {
-            log(
-              `Q Mush force-parked ${String(parked.length)} session(s) still running at the restart drain limit: ${report}`,
-            );
-          }
-          escalation.resolve(undefined);
-        },
-        () => {
-          escalation.resolve(undefined);
-        },
-      );
+      if (escalated || finalShutdownPrepared) return;
+      escalated = true;
+      void forcePark(scope, requested).then(finish, escalation.reject);
     };
     const timer = setDrainTimer(escalate, RESTART_DRAIN_LIMIT_MS);
     const bounded = Promise.race([
@@ -172,7 +167,7 @@ export function createSessionRestartControl(
         clearDrainTimer(timer);
         boundedDrains.delete(key);
       });
-    boundedDrains.set(key, { bounded, escalate });
+    boundedDrains.set(key, { bounded, escalate, finish, timer });
     return bounded;
   };
   return {
@@ -186,15 +181,27 @@ export function createSessionRestartControl(
       }
       return runtimes.resumeRunner(runnerId, restartId);
     },
+    cancelBoundedRunnerDrains: () => {
+      finalShutdownPrepared = true;
+      for (const [key, drain] of boundedDrains) {
+        if (key.startsWith("runner:")) {
+          clearDrainTimer(drain.timer);
+          drain.finish();
+        }
+      }
+    },
     drainProgress,
     drainServer: async () => {
-      const scope = { kind: "server" } as const;
-      const restartId = nextServerRestartId();
-      if (finalShutdownPrepared) {
-        await runtimes.drain(scope, restartId);
-        return;
-      }
-      await boundedDrain(scope, restartId, true);
+      await boundedDrain({ kind: "server" }, nextServerRestartId(), true);
+    },
+    drainServerFinal: () =>
+      runtimes
+        .drain({ kind: "server" }, nextServerRestartId())
+        .then(() => undefined),
+    escalateServerDrain: () => {
+      const drain = boundedDrains.get("server");
+      drain?.escalate();
+      return drain !== undefined;
     },
     prepareServerShutdown: async () => {
       await runtimes.mark({ kind: "server" }, nextServerRestartId());
@@ -210,7 +217,7 @@ export function createSessionRestartControl(
         await boundedDrain({ kind: "server" }, id, true);
         return;
       }
-      await boundedDrain({ kind: "runner", runnerId }, restartId, true);
+      await boundedDrain({ kind: "runner", runnerId }, restartId, false);
     },
     draining: () => runtimes.draining,
     pendingRunnerRestart: (runnerId) => runnerRestartId(runnerId),

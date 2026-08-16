@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { RESTART_DRAIN_LIMIT_MS } from "../../shared/development-shutdown.ts";
 import { testDeferred } from "../../shared/test/promise-fixtures.ts";
 import { createSessionRestartControl } from "../../sync-engine/session-restart-control.ts";
@@ -6,47 +6,13 @@ import {
   SessionRuntimes,
   type RestartRequest,
 } from "../../sync-engine/session-runtime.ts";
+import { SessionRestartTestClock } from "./session-restart-test-clock.ts";
 
 interface PendingRuntime {
   readonly aborted: () => boolean;
   readonly cleared: () => boolean;
   readonly durable: () => readonly RestartRequest[];
   readonly finish: () => void;
-}
-
-class TestClock {
-  #now = 1_000;
-  readonly #timers = new Map<
-    number,
-    { readonly at: number; readonly callback: () => void }
-  >();
-  #nextId = 1;
-
-  readonly clearTimeout = (
-    id: number | ReturnType<typeof setTimeout>,
-  ): void => {
-    if (typeof id === "number") {
-      this.#timers.delete(id);
-    }
-  };
-
-  readonly now = (): number => this.#now;
-
-  readonly setTimeout = (callback: () => void, delay: number): number => {
-    const id = this.#nextId++;
-    this.#timers.set(id, { at: this.#now + delay, callback });
-    return id;
-  };
-
-  advance(milliseconds: number): void {
-    this.#now += milliseconds;
-    for (const [id, timer] of [...this.#timers]) {
-      if (timer.at <= this.#now) {
-        this.#timers.delete(id);
-        timer.callback();
-      }
-    }
-  }
 }
 
 function pendingRuntime(
@@ -88,14 +54,14 @@ function pendingRuntime(
   };
 }
 
-async function flush(): Promise<void> {
-  for (let index = 0; index < 8; index += 1) {
-    await Promise.resolve();
-  }
+async function waitUntil(predicate: () => boolean): Promise<void> {
+  await vi.waitFor(() => {
+    expect(predicate()).toBe(true);
+  });
 }
 
 function testRestartControl(
-  clock: TestClock,
+  clock: SessionRestartTestClock,
   runtimes: SessionRuntimes,
   logged: string[] = [],
 ) {
@@ -105,39 +71,51 @@ function testRestartControl(
     () => `restart-${String((restartId += 1))}`,
     {
       clearTimeout: clock.clearTimeout,
-      log: (message) => logged.push(message),
+      warn: (message) => logged.push(message),
       pendingTools: (sessionId) => [`bash:${sessionId}`],
       setTimeout: clock.setTimeout,
     },
   );
 }
 
+function restartRuntimeFixture(logged: string[] = []) {
+  const clock = new SessionRestartTestClock();
+  const runtimes = new SessionRuntimes(clock.now);
+  return {
+    clock,
+    control: testRestartControl(clock, runtimes, logged),
+    runtimes,
+  };
+}
+
 async function drainingServer(
   sessionIds: readonly (readonly [string, string])[],
   logged: string[] = [],
 ) {
-  const clock = new TestClock();
-  const runtimes = new SessionRuntimes(clock.now);
-  const control = testRestartControl(clock, runtimes, logged);
+  const fixture = restartRuntimeFixture(logged);
   const sessions = sessionIds.map(([sessionId, runnerId]) =>
-    pendingRuntime(runtimes, sessionId, runnerId),
+    pendingRuntime(fixture.runtimes, sessionId, runnerId),
   );
   await Promise.resolve();
-  return { clock, control, runtimes, sessions };
+  return { ...fixture, sessions };
 }
 
 // Wrapped: returning the promise itself would flatten into the awaited
 // result, so the caller would block on the whole drain instead of starting it.
 async function startedDrain(
   control: ReturnType<typeof testRestartControl>,
+  kind: "runner" | "server" = "server",
 ): Promise<{ readonly drained: Promise<void> }> {
-  const drained = control.drainServer();
-  await flush();
+  const drained =
+    kind === "server"
+      ? control.drainServer()
+      : control.drainRunner("runner-1", "runner-restart");
+  await waitUntil(() => control.drainProgress().length > 0);
   return { drained };
 }
 
 async function advanceDrain(
-  clock: TestClock,
+  clock: SessionRestartTestClock,
   control: ReturnType<typeof testRestartControl>,
   milliseconds: number,
 ): Promise<void> {
@@ -162,6 +140,26 @@ async function singleSessionDrain(logged: string[] = []) {
 function expectForceParked(session: PendingRuntime): void {
   expect(session.aborted()).toBe(true);
   expect(session.durable()).toHaveLength(1);
+}
+
+function pendingRunnerDrain() {
+  const fixture = restartRuntimeFixture();
+  const runtime = pendingRuntime(
+    fixture.runtimes,
+    "runner-session",
+    "runner-1",
+  );
+  return { ...fixture, runtime };
+}
+
+function expectRunnerRequest(runtimes: SessionRuntimes): void {
+  expect(
+    runtimes.drainRequest({ kind: "runner", runnerId: "runner-1" }),
+  ).toEqual({
+    boundary: "handoff",
+    requestedBy: "runner",
+    restartId: "runner-restart",
+  });
 }
 
 describe("bounded restart drain", () => {
@@ -204,6 +202,42 @@ describe("bounded restart drain", () => {
     expectForceParked(stuck);
   });
 
+  test("timer and repeated-request escalation race force-parks once", async () => {
+    const logged: string[] = [];
+    const fixture = await singleSessionDrain(logged);
+    const { clock, control, session: stuck } = fixture;
+    const { drained: first } = await startedDrain(control);
+
+    const second = control.drainServer();
+    clock.advance(RESTART_DRAIN_LIMIT_MS);
+    await Promise.all([first, second]);
+
+    expectForceParked(stuck);
+    expect(stuck.durable()).toHaveLength(1);
+    expect(logged).toHaveLength(1);
+  });
+
+  test("runner drains preserve runner provenance without a server durable marker", async () => {
+    const { control, runtime, runtimes } = pendingRunnerDrain();
+    const { drained } = await startedDrain(control, "runner");
+    expect(runtime.durable()).toEqual([]);
+    runtime.finish();
+    await drained;
+    expectRunnerRequest(runtimes);
+  });
+
+  test("final preparation neutralizes armed runner escalation timers", async () => {
+    const { clock, control, runtime } = pendingRunnerDrain();
+    const { drained: runnerDrain } = await startedDrain(control, "runner");
+    await control.prepareServerShutdown();
+    control.cancelBoundedRunnerDrains();
+    clock.advance(RESTART_DRAIN_LIMIT_MS);
+    await runnerDrain;
+
+    expect(runtime.aborted()).toBe(false);
+    runtime.finish();
+  });
+
   test("reports the sessions, tool calls and elapsed time a drain waits on", async () => {
     const logged: string[] = [];
     const { clock, control } = await drainingServer(
@@ -235,12 +269,12 @@ describe("bounded restart drain", () => {
 
     clock.advance(RESTART_DRAIN_LIMIT_MS);
     await drained;
-    expect(control.drainProgress()).toEqual([]);
+    await waitUntil(() => control.drainProgress().length === 0);
     expect(logged).toEqual([
       expect.stringContaining(
         "force-parked 2 session(s) still running at the restart drain limit",
       ),
     ]);
-    expect(logged[0]).toContain("session-1 (bash:session-1, 122s)");
+    expect(logged[0]).toContain("session-1 bash:session-1 (122s)");
   });
 });

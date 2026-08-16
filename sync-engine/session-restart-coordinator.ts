@@ -112,6 +112,7 @@ export class SessionRestartCoordinator {
   readonly #recoveries = new Map<string, Promise<unknown>>();
   readonly #recoveryRescans = new Set<string>();
   readonly #recoveringInterrupted = new Set<string>();
+  readonly #pendingRestartIds = new Map<string, string>();
   readonly #setTimeout: RestartSetTimeout;
   readonly #retryTimers = new Map<string, RestartTimer>();
 
@@ -134,10 +135,6 @@ export class SessionRestartCoordinator {
     if (runnerId !== undefined && this.#options.restart.draining()) {
       return;
     }
-    if (runnerId !== undefined && this.#recoveries.has(runnerId)) {
-      this.#recoveryRescans.add(runnerId);
-      return;
-    }
     if (runnerId !== undefined) {
       const pending = this.#options.store.pendingRestartHandoffs(runnerId);
       const gate = pendingRestartGate(pending);
@@ -147,6 +144,13 @@ export class SessionRestartCoordinator {
           gate.requestedBy === "runner" &&
           gate.restartId !== restartId)
       ) {
+        return;
+      }
+      if (this.#recoveries.has(runnerId)) {
+        if (restartId !== undefined) {
+          this.#pendingRestartIds.set(runnerId, restartId);
+        }
+        this.#recoveryRescans.add(runnerId);
         return;
       }
       if (!this.#recoveringInterrupted.has(runnerId)) {
@@ -222,6 +226,12 @@ export class SessionRestartCoordinator {
     this.#scheduleRetry(runnerId, restartId);
   }
 
+  #takeRestartId(runnerId: string, fallback?: string): string | undefined {
+    const restartId = this.#pendingRestartIds.get(runnerId) ?? fallback;
+    this.#pendingRestartIds.delete(runnerId);
+    return restartId;
+  }
+
   #trackRecovery(
     runnerId: string,
     restartId: string | undefined,
@@ -234,8 +244,9 @@ export class SessionRestartCoordinator {
         if (this.#finishRecovery(runnerId, recovered)) {
           return;
         }
+        const nextRestartId = this.#takeRestartId(runnerId, restartId);
         if (pendingCredentials || pendingLaunches) {
-          this.#retryRecovery(runnerId, restartId);
+          this.#retryRecovery(runnerId, nextRestartId);
         } else {
           const pendingAfter = pendingRestartHandoffKeys(
             this.#options.store.pendingRestartHandoffs(runnerId),
@@ -247,7 +258,7 @@ export class SessionRestartCoordinator {
             (rescanRequested ||
               restartHandoffsChanged(pendingBefore, pendingAfter))
           ) {
-            this.#recover(runnerId, restartId);
+            this.#recover(runnerId, nextRestartId);
           } else {
             this.#resetRetry(runnerId);
           }
@@ -255,7 +266,10 @@ export class SessionRestartCoordinator {
       },
       () => {
         if (!this.#finishRecovery(runnerId, recovered)) {
-          this.#retryRecovery(runnerId, restartId);
+          this.#retryRecovery(
+            runnerId,
+            this.#takeRestartId(runnerId, restartId),
+          );
         }
       },
     );

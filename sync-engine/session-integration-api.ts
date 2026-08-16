@@ -1,5 +1,6 @@
 import type { PendingAskQuestions } from "../shared/ask-questions.ts";
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
+import { RESTART_CLEANUP_LIMIT_MS } from "../shared/development-shutdown.ts";
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type {
   AgentSessionDetail,
@@ -36,6 +37,7 @@ import type {
 } from "./session-restart-coordinator.ts";
 import type { RunnerRemovalCoordinator } from "./session-runner-removal.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
+import type { ShutdownInterruptedSessionStore } from "./session-shutdown-interrupted-store.ts";
 import { readSessionStopInput } from "./session-stop-input.ts";
 import type { SessionStore } from "./session-store.ts";
 import { forRequestWorkspace } from "./session-workspace-request.ts";
@@ -92,6 +94,10 @@ export interface SessionIntegrationApiResources {
   readonly runtimes: SessionRuntimes;
   readonly stopChildren: (detail: AgentSessionDetail, userId: string) => void;
   readonly stopLivenessScans: () => void;
+  readonly shutdownInterrupted: Pick<
+    ShutdownInterruptedSessionStore,
+    "beginLiveDrain" | "enableRecovery"
+  >;
   readonly store: SessionStore;
   readonly withCredentialAccess: Parameters<
     typeof openRouterProvidersForUser
@@ -240,19 +246,36 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
     return this.resources.broker.acknowledgeCancellation(runnerId, commandId);
   }
 
-  drain(): Promise<void> {
-    return this.resources.restart.drainServer().then(async () => {
-      await Promise.allSettled(this.resources.executionCleanup.pending);
-    });
+  cancelBoundedRunnerDrains(): void {
+    this.resources.restart.cancelBoundedRunnerDrains();
+  }
+
+  async drain(): Promise<void> {
+    this.resources.shutdownInterrupted.beginLiveDrain();
+    await this.resources.restart.drainServer();
+    await this.resources.executionCleanup.drainPending(
+      RESTART_CLEANUP_LIMIT_MS,
+    );
+  }
+
+  async drainFinal(): Promise<void> {
+    await this.resources.restart.drainServerFinal();
+    await Promise.allSettled(this.resources.executionCleanup.pending);
+  }
+
+  escalateDrain(): boolean {
+    return this.resources.restart.escalateServerDrain();
   }
 
   drainProgress(): readonly RestartDrainSessionProgress[] {
     return this.resources.restart.drainProgress();
   }
 
-  prepareFinalShutdown(): Promise<void> {
+  async prepareFinalShutdown(): Promise<void> {
     this.resources.stopLivenessScans();
-    return this.resources.restart.prepareServerShutdown();
+    this.resources.shutdownInterrupted.enableRecovery();
+    await this.resources.restart.prepareServerShutdown();
+    this.resources.restart.cancelBoundedRunnerDrains();
   }
 
   drainRunner(runnerId: string, restartId: string): Promise<void> {

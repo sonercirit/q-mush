@@ -76,8 +76,8 @@ class TestRestartRuntimes implements RestartRuntimeControl {
     return [];
   }
 
-  forcePark(): readonly string[] {
-    return this.forceParked;
+  forcePark(): Promise<readonly string[]> {
+    return Promise.resolve(this.forceParked);
   }
 
   async requestDrain(
@@ -191,7 +191,7 @@ describe("session restart control", () => {
     const { restart, runtimes } = control(() => "final-shutdown");
 
     await restart.prepareServerShutdown();
-    await restart.drainServer();
+    await restart.drainServerFinal();
 
     expect(runtimes.requestedDrains).toBe(0);
     expect(runtimes.drains).toEqual([

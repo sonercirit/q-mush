@@ -5,9 +5,9 @@ import type {
 } from "../shared/session-model.ts";
 import { isAskQuestionsPause } from "./ask-questions-pause.ts";
 import { isDiskFullFailure } from "./database-write-resilience.ts";
+import { isRestartHandoffError } from "./session-agent-runtime-state.ts";
 import {
   compactSessionConversation,
-  isRestartHandoffError,
   runSessionAgent,
 } from "./session-agent-runtime.ts";
 import type { SessionNotification } from "./session-creation.ts";

@@ -23,11 +23,12 @@ async function readStartCount(pathname: string): Promise<number> {
 async function waitForStartCount(
   pathname: string,
   expected: number,
+  timeout = 5_000,
 ): Promise<void> {
   await expect
     .poll(() => readStartCount(pathname), {
       interval: 10,
-      timeout: 5_000,
+      timeout,
     })
     .toBeGreaterThanOrEqual(expected);
 }
@@ -35,6 +36,18 @@ async function waitForStartCount(
 async function waitForFile(pathname: string): Promise<void> {
   await expect
     .poll(() => Bun.file(pathname).exists(), { interval: 10, timeout: 5_000 })
+    .toBe(true);
+}
+
+async function waitForFileContent(
+  pathname: string,
+  content: string,
+): Promise<void> {
+  await expect
+    .poll(async () => (await Bun.file(pathname).text()).includes(content), {
+      interval: 10,
+      timeout: 5_000,
+    })
     .toBe(true);
 }
 
@@ -132,6 +145,7 @@ await new Promise(() => {});
       cwd: directory,
       restartDelayMilliseconds: 20,
       restartTriggerPath: triggerPath,
+      shutdownPreparationMilliseconds: 50,
     });
 
     await waitForStartCount(startsPath, 1);
@@ -145,6 +159,62 @@ await new Promise(() => {});
     await server?.stop();
     await rm(directory, { force: true, recursive: true });
   }
+});
+
+test("development restart uses IPC and a repeated trigger escalates before SIGTERM", async () => {
+  await useDevelopmentServer(
+    "q-mush-dev-protocol-test-",
+    async (directory, triggerPath) => {
+      const childPath = join(directory, "restart-child.ts");
+      const eventsPath = join(directory, "restart-events.txt");
+      await Bun.write(
+        childPath,
+        `import { appendFileSync } from "node:fs";
+const eventsPath = process.argv[2];
+if (eventsPath === undefined) throw new Error("Missing events path");
+const record = (event) => appendFileSync(eventsPath, event + "\\n");
+record("started");
+process.on("message", (message) => {
+  if (message === "q-mush:development-restart-request") record("development-request");
+  if (message === "q-mush:development-restart-escalate") {
+    record("development-escalate");
+    process.send?.("q-mush:development-restart-ready");
+  }
+  if (message === "q-mush:final-shutdown-request") {
+    record("final-request");
+    process.send?.("q-mush:final-shutdown-prepared");
+  }
+});
+process.on("SIGTERM", () => { record("sigterm"); process.exit(); });
+setInterval(() => {}, 1_000);
+`,
+      );
+      const server = startDevelopmentServer({
+        command: [process.execPath, childPath, eventsPath],
+        cwd: directory,
+        restartDelayMilliseconds: 10,
+        restartTriggerPath: triggerPath,
+        shutdownPreparationMilliseconds: 500,
+      });
+      await waitForFile(eventsPath);
+
+      await triggerDevelopmentRestart(triggerPath);
+      await waitForFileContent(eventsPath, "development-request");
+      await triggerDevelopmentRestart(triggerPath);
+      await waitForStartCount(eventsPath, 2);
+
+      const events = (await Bun.file(eventsPath).text()).trim().split("\n");
+      expect(events.slice(0, 5)).toEqual([
+        "started",
+        "development-request",
+        "development-escalate",
+        "sigterm",
+        "started",
+      ]);
+      await server.stop();
+      await waitForFileContent(eventsPath, "final-request");
+    },
+  );
 });
 
 test("bounds shutdown and force-closes active server resources", async () => {
@@ -273,6 +343,53 @@ const RECOVERY_FIXTURE_PATH = join(
   "fixtures",
   "development-shutdown-recovery.ts",
 );
+
+test("the production engine exits after a drained development restart", async () => {
+  await useDevelopmentServer(
+    "q-mush-dev-index-restart-test-",
+    async (directory, triggerPath) => {
+      const databasePath = join(directory, "index.sqlite");
+      const startsPath = join(directory, "index-starts.txt");
+      const wrapperPath = join(directory, "index-wrapper.ts");
+      await Bun.write(
+        wrapperPath,
+        `import { appendFileSync } from "node:fs";
+const [indexPath, startsPath, databasePath] = process.argv.slice(2);
+if (indexPath === undefined || startsPath === undefined || databasePath === undefined) {
+  throw new Error("Missing production index fixture argument");
+}
+Bun.env.DATABASE_PATH = databasePath;
+Bun.env.PORT = "0";
+await import(indexPath);
+appendFileSync(startsPath, "started\\n");
+`,
+      );
+      const server = startDevelopmentServer({
+        command: [
+          process.execPath,
+          wrapperPath,
+          INDEX_PATH,
+          startsPath,
+          databasePath,
+        ],
+        cwd: PROJECT_ROOT,
+        restartDelayMilliseconds: 10,
+        restartTriggerPath: triggerPath,
+        shutdownPreparationMilliseconds: 1_000,
+      });
+
+      try {
+        await waitForStartCount(startsPath, 1, 60_000);
+        await triggerDevelopmentRestart(triggerPath);
+        await waitForStartCount(startsPath, 2, 60_000);
+        await server.stop();
+      } catch (error) {
+        await server.forceStop();
+        throw error;
+      }
+    },
+  );
+}, 90_000);
 
 async function runRecoveryFixture(
   databasePath: string,

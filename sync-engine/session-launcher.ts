@@ -3,6 +3,7 @@ import type {
   AgentSessionDetail,
   RestartHandoffOperation,
 } from "../shared/session-model.ts";
+import type { ActiveSessionTools } from "./active-session-tools.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
 import type { SessionAgentActions } from "./session-agent-actions.ts";
@@ -24,6 +25,7 @@ export type FinishSession = (
 ) => void;
 
 interface SessionLauncherDependencies {
+  readonly activeTools: ActiveSessionTools;
   readonly actions: SessionAgentActions;
   readonly attachmentFallbacks?: SessionModelRuntimeResources["attachmentFallbacks"];
   readonly braveSearch: Pick<BraveSearchSkill, "execute">;
@@ -43,6 +45,9 @@ interface SessionLauncherDependencies {
     ShutdownInterruptedSessionStore,
     "clear" | "mark"
   >;
+  readonly shouldPersistRestartMarker?: (request: {
+    readonly requestedBy: "runner" | "server";
+  }) => boolean;
   readonly store: SessionStore;
 }
 
@@ -81,8 +86,13 @@ export class SessionLauncher {
             )
               ? "compact_and_continue"
               : operation,
-          persist: (request, durable) => {
-            if (durable) {
+          persist: (request, durable, forcePark = false) => {
+            if (
+              durable &&
+              (forcePark ||
+                (this.#dependencies.shouldPersistRestartMarker?.(request) ??
+                  request.requestedBy === "server"))
+            ) {
               this.#dependencies.shutdownInterrupted.mark(
                 detail.id,
                 detail.generation,
@@ -105,6 +115,7 @@ export class SessionLauncher {
           now: this.#dependencies.now,
           operation,
           resources: {
+            activeTools: this.#dependencies.activeTools,
             actions: this.#dependencies.actions,
             ...(this.#dependencies.attachmentFallbacks === undefined
               ? {}
