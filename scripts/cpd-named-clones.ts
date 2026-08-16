@@ -264,6 +264,14 @@ function tokenFingerprints(
   };
 }
 
+function codePointCharacter(source: string, position: number): string {
+  const codePoint = source.codePointAt(position);
+  if (codePoint === undefined) {
+    throw new RangeError("Character position is outside the source");
+  }
+  return String.fromCodePoint(codePoint);
+}
+
 function fallbackTokenStarts(source: string): number[] {
   // Match native CPD's deliberately crude whole-file fallback after TSX parse errors.
   const starts: number[] = [];
@@ -271,7 +279,7 @@ function fallbackTokenStarts(source: string): number[] {
   let position = 0;
 
   while (position < source.length) {
-    const character = String.fromCodePoint(source.codePointAt(position) ?? 0);
+    const character = codePointCharacter(source, position);
     if (/\s/u.test(character)) {
       position += character.length;
       continue;
@@ -284,7 +292,7 @@ function fallbackTokenStarts(source: string): number[] {
     ) {
       position += character.length;
       while (position < source.length) {
-        const next = String.fromCodePoint(source.codePointAt(position) ?? 0);
+        const next = codePointCharacter(source, position);
         if (!alphanumeric.test(next) && next !== "_" && next !== "$") {
           break;
         }

@@ -138,6 +138,7 @@ export async function runCpd(
   const scanPaths = (requestedPaths.length === 0 ? ["."] : requestedPaths).map(
     (path) => scanPathWithinProject(rootDirectory, path),
   );
+  const { minLines, minTokens } = await readCpdLimits(rootDirectory);
   const projectPaths = await dependencies.listProjectFiles(rootDirectory);
   const sourcePaths = projectPaths.filter(
     (path) =>
@@ -158,7 +159,6 @@ export async function runCpd(
     return cpdExitCode;
   }
 
-  const { minLines, minTokens } = await readCpdLimits(rootDirectory);
   const namedScan = dependencies.namedClones.scan({
     minLines,
     minTokens,

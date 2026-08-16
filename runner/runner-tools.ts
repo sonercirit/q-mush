@@ -676,7 +676,7 @@ async function resolvedRunnerTool(
   };
 }
 
-/** @public */
+/** @public Direct runner-tool helper for runner integrations. */
 export async function executeRunnerTool(
   ...parameters: ExecuteRunnerToolArguments
 ): Promise<string> {

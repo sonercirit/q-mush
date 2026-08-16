@@ -113,6 +113,7 @@ describe("CPD wrapper", () => {
             runCpd(directory, [], probe.dependencies),
           ).rejects.toThrow(/\.jscpd\.json/u);
         }
+        expect(probe.enginePaths).toEqual([]);
         expect(probe.namedSourcePaths).toEqual([]);
       },
     );
@@ -124,6 +125,7 @@ describe("CPD wrapper", () => {
       async (directory) => {
         const probe = dependencyProbe({ engineExitCode: 2 });
 
+        await writeLimits(directory, { minLines: 1, minTokens: 20 });
         expect(await runCpd(directory, [], probe.dependencies)).toBe(2);
         expect(probe.namedSourcePaths).toEqual([]);
         expect(probe.output).toEqual([]);
