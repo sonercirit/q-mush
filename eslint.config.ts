@@ -9,6 +9,7 @@ import { configs } from "typescript-eslint";
 
 const gitignorePath = fileURLToPath(new URL(".gitignore", import.meta.url));
 const ROOT_DIRECTORY = dirname(gitignorePath);
+const ALLOWED_SIDE_EFFECT_IMPORTS = new Set(["./styles.css", "../styles.css"]);
 const APPLICATION_WORKSPACES = new Set([
   "runner",
   "shared",
@@ -180,6 +181,12 @@ const solidConfig = {
   plugins: { solid: solidPlugin },
 };
 
+function canonicalImportSource(node: {
+  readonly source: { readonly value?: unknown };
+}): string {
+  return String(node.source.value);
+}
+
 const canonicalImportsRule: Rule.RuleModule = {
   meta: {
     type: "problem",
@@ -208,7 +215,7 @@ const canonicalImportsRule: Rule.RuleModule = {
 
         if (
           node.specifiers.length === 0 &&
-          node.source.value !== "./styles.css"
+          !ALLOWED_SIDE_EFFECT_IMPORTS.has(canonicalImportSource(node))
         ) {
           context.report({ messageId: "sideEffect", node });
         }
@@ -216,7 +223,7 @@ const canonicalImportsRule: Rule.RuleModule = {
         for (const specifier of node.specifiers) {
           if (
             specifier.type === "ImportDefaultSpecifier" &&
-            !DEFAULT_ONLY_DEPENDENCIES.has(String(node.source.value))
+            !DEFAULT_ONLY_DEPENDENCIES.has(canonicalImportSource(node))
           ) {
             context.report({ messageId: "default", node: specifier });
           }

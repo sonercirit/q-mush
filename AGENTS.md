@@ -38,7 +38,8 @@ Living project memory.
 - Install/run: `bun install`; `bun run sync-engine/index.ts`
 - Develop: `bun run dev` (+ `dev:restart`, `dev:watch`); `bun run build`
 - Migrations: `bun run db:generate` / `db:migrate`
-- Test: `bun run test` / `test:watch`
+- Test: `bun run test` (Vitest DOM/server plus Chromium) / `test:watch`; use
+  `bun run test:browser` for Chromium alone.
 - `bun run check` runs every static check, each standalone too; `bun run format`
   / `lint:fix` write fixes.
 - CI (`.github/workflows/checks.yml`): tests, static checks, build, and
@@ -73,7 +74,9 @@ Living project memory.
     `sync-engine/index.ts` injects the persistent connection; the auth factory
     falls back on in-memory SQLite. Shared PKCE, provider parsing, and redirects
     live in `oauth.ts`; cookie/response helpers in `http.ts`. `solid/client.tsx`
-    reads `/api/auth/session`, gates the app, posts logout.
+    reads `/api/auth/session`, gates the app, posts logout. Browser layout
+    regressions use Vitest Browser Mode with Playwright Chromium and generated
+    Tailwind CSS; CI installs Chromium before tests.
 - `sync-engine/runner-store.ts` persists runner registrations in `runners`: one
   active registration per machine fingerprint, one default per user.
   `sync-engine/runners.ts` issues hashed opaque setup tokens, owns authenticated
@@ -192,10 +195,10 @@ Living project memory.
   switches and canonical named imports (one declaration per module with inline
   `type` markers). Default imports: only `@eslint/js`, `@tailwindcss/vite`,
   `vite-plugin-solid`; aliases, namespaces, dynamic imports, import attributes,
-  import-equals, `import()` types, and side-effect imports (except
-  `solid/styles.css`) are rejected. First-party code rejects unsafe DOM HTML
-  injection, `dangerouslySetInnerHTML`, and HTML-like `Response` bodies;
-  HTML-like data and TSX pass.
+  import-equals, `import()` types, and side-effect imports (except the
+  production and browser-test imports of `solid/styles.css`) are rejected.
+  First-party code rejects unsafe DOM HTML injection, `dangerouslySetInnerHTML`,
+  and HTML-like `Response` bodies; HTML-like data and TSX pass.
 - Knip checks every issue type and entry export in test and production graphs;
   tests cannot keep production alive, and unused test helpers fail.
 - CPD maps all JS/TS extensions to TSX and ignores imports. Its parse-error path

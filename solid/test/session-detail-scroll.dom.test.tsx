@@ -1,16 +1,20 @@
-import { createSignal, untrack } from "solid-js";
 import { afterEach, expect, test, vi } from "vitest";
-import { SessionDetailBody } from "../session-detail-body.tsx";
-import type { LoadedSessionDetailViewProps } from "../session-detail-view-props.ts";
+import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { summaryFromDetail } from "../session-summary-codec.ts";
 import { disposeTestViews, queryTestTranscript } from "./dom-test-helpers.ts";
 import { defineElementSize } from "./element-size-test-helpers.ts";
+import { createSessionDetailReplacement } from "./session-detail-replacement-fixture.tsx";
 import { sessionDetailState } from "./session-detail-test-state.ts";
 import {
   DOM_TEST_DISPOSALS,
   mountSessionDetailBody,
 } from "./session-dom-test-helpers.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
+import {
+  expectScrollTestPaint,
+  type SessionScrollTestView,
+  unlockScrollTestView,
+} from "./session-scroll-test-view.ts";
 import { transcriptMessage } from "./transcript-ordering-fixtures.ts";
 
 afterEach(() => {
@@ -18,7 +22,7 @@ afterEach(() => {
   disposeTestViews(DOM_TEST_DISPOSALS);
 });
 
-function scrollingTranscript() {
+function scrollingTranscript(): SessionScrollTestView {
   const detail = {
     ...TEST_SESSION_DETAIL,
     messages: [
@@ -34,49 +38,42 @@ function scrollingTranscript() {
     (callback: FrameRequestCallback): number => frames.push(callback),
   );
   vi.stubGlobal("cancelAnimationFrame", () => undefined);
-  let updateTranscript:
-    ((content: string, appendMessage?: boolean) => void) | undefined;
+  const replacement = createSessionDetailReplacement();
   const mounted = mountSessionDetailBody(
     reactive,
     DOM_TEST_DISPOSALS,
     undefined,
-    (props) => {
-      const [view, setView] = createSignal<LoadedSessionDetailViewProps>(
-        untrack(() => props.view),
-      );
-      updateTranscript = (content, appendMessage = false) => {
-        setView((current) => {
-          const messages = appendMessage
-            ? [
-                ...current.detail.messages,
-                transcriptMessage(
-                  `assistant-${String(current.detail.messages.length)}`,
-                  content,
-                  "assistant",
-                  current.detail.messages.length + 2,
-                ),
-              ]
-            : current.detail.messages.map((message, index) =>
-                index === current.detail.messages.length - 1
-                  ? { ...message, content }
-                  : message,
-              );
-          const nextDetail = { ...current.detail, messages };
-          return {
-            ...current,
-            detail: nextDetail,
-            state: { ...current.state, detail: nextDetail },
-          };
-        });
-      };
-      return <SessionDetailBody {...props} view={view()} />;
-    },
+    replacement.render,
   );
+  const updateTranscript = (content: string, appendMessage = false): void => {
+    const current = detailState();
+    const messages = appendMessage
+      ? [
+          ...current.messages,
+          transcriptMessage(
+            `assistant-${String(current.messages.length)}`,
+            content,
+            "assistant",
+            current.messages.length + 2,
+          ),
+        ]
+      : current.messages.map((message, index) =>
+          index === current.messages.length - 1
+            ? { ...message, content }
+            : message,
+        );
+    transitionTo({ ...current, messages });
+  };
+  let detailState = (): AgentSessionDetail => detail;
+  const transitionTo = (next: AgentSessionDetail): void => {
+    detailState = () => next;
+    replacement.replace(next);
+  };
   const transcript = queryTestTranscript(mounted.container);
   const toggle = mounted.container.querySelector<HTMLButtonElement>(
     "[data-scroll-lock-toggle='true']",
   );
-  if (toggle === null || updateTranscript === undefined) {
+  if (toggle === null) {
     throw new TypeError("Missing scroll test controls");
   }
   let scrollHeight = 500;
@@ -107,49 +104,9 @@ function scrollingTranscript() {
       transcript.dispatchEvent(new Event("scroll"));
     },
     stream: updateTranscript,
+    transitionTo,
   };
 }
-
-function documentScrollFixture() {
-  const reactive = sessionDetailState(TEST_SESSION_DETAIL);
-  const mounted = mountSessionDetailBody(reactive, DOM_TEST_DISPOSALS);
-  const detail = mounted.container.querySelector<HTMLDivElement>(
-    "[data-session-detail-view='true']",
-  );
-  const composer = mounted.container.querySelector<HTMLTextAreaElement>(
-    "[data-session-composer='true'] textarea",
-  );
-  const transcript = queryTestTranscript(mounted.container);
-  if (detail === null || composer === null) {
-    throw new TypeError("Missing document scroll regression fixture");
-  }
-  return { composer, detail, transcript };
-}
-
-function applyDocumentLayoutGrowth(options: {
-  readonly anchored: boolean;
-  readonly documentScrollTop: number;
-  readonly height: number;
-}): { readonly documentScrollTop: number; readonly height: number } {
-  return {
-    documentScrollTop: options.documentScrollTop + (options.anchored ? 100 : 0),
-    height: options.height + 100,
-  };
-}
-
-test("session updates cannot make the document repeatedly follow layout growth", () => {
-  const { composer, detail, transcript } = documentScrollFixture();
-  const anchored = !detail.classList.contains("[overflow-anchor:none]");
-  let layout = { documentScrollTop: 200, height: 500 };
-
-  for (const update of ["transcript", "agent file", "textarea", "focus"]) {
-    layout = applyDocumentLayoutGrowth({ ...layout, anchored });
-    expect(layout.documentScrollTop, update).toBe(200);
-  }
-  expect(layout.height).toBe(900);
-  expect(transcript).toBe(queryTestTranscript(detail));
-  expect(document.activeElement).not.toBe(composer);
-});
 
 function exerciseScrollGrowth(
   view: ReturnType<typeof scrollingTranscript>,
@@ -205,8 +162,7 @@ test("scrolling up releases the lock before a queued scroll can snap back", () =
 
 test("scrolling back to the bottom restores streaming scroll lock", () => {
   const view = scrollingTranscript();
-  view.scrollTo(200);
-  view.expectLocked(false);
+  unlockScrollTestView(view);
   view.stream("Output ignored while unlocked");
   view.expectFrames(0);
 
@@ -217,12 +173,33 @@ test("scrolling back to the bottom restores streaming scroll lock", () => {
   view.expectTop(700);
 });
 
+test("an in-place session transition resets an unlocked transcript at its end", () => {
+  const view = scrollingTranscript();
+  unlockScrollTestView(view);
+
+  view.transitionTo({
+    ...TEST_SESSION_DETAIL,
+    id: "created-or-forked-session",
+    messages: [
+      transcriptMessage("new-user", "Created session task", "user", 4),
+      transcriptMessage("new-agent", "Created response", "assistant", 5),
+    ],
+    title: "Created or forked session",
+    updatedAt: 5,
+  });
+
+  view.expectLocked(true);
+  expectScrollTestPaint(view, 900);
+
+  view.stream("Later growth in the replacement session");
+  view.paintAfterLayout(1_000);
+  view.expectTop(1_000);
+});
+
 test("scroll lock waits for transcript layout before using its new height", () => {
   const view = scrollingTranscript();
   view.stream("A newly rendered message", true);
 
   view.expectTop(0);
-  view.expectFrames(1);
-  view.paintAfterLayout(900);
-  view.expectTop(900);
+  expectScrollTestPaint(view, 900);
 });
