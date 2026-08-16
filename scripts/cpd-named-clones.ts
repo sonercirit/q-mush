@@ -1,19 +1,20 @@
-import { resolve } from "node:path";
+import { parse } from "@typescript-eslint/typescript-estree";
+import { extname, resolve } from "node:path";
 import {
-  createScanner,
   forEachChild,
+  isArrowFunction,
   isBindingElement,
   isClassLike,
+  isEnumMember,
   isFunctionLike,
   isIdentifier,
   isObjectBindingPattern,
   isObjectLiteralElementLike,
+  isParameterPropertyDeclaration,
   isPrivateIdentifier,
   isPropertyAccessExpression,
   isShorthandPropertyAssignment,
   isTypeElement,
-  LanguageVariant,
-  ScriptTarget,
   SyntaxKind,
   type NamedDeclaration,
   type Node,
@@ -46,10 +47,30 @@ interface FunctionOccurrence extends NamedCloneFragment {
   readonly tokens: number;
 }
 
+interface FingerprintToken {
+  readonly isPrivate: boolean;
+  readonly kind: SyntaxKind;
+  readonly position: number;
+  readonly propertyName: boolean;
+  readonly symbol: Symbol | undefined;
+  readonly text: string;
+}
+
 interface TokenFingerprints {
   readonly normalized: string;
   readonly original: string;
-  readonly tokens: number;
+}
+
+interface SourceFingerprint {
+  readonly positions: readonly number[];
+  readonly splitArrowStarts: ReadonlySet<number>;
+  readonly tokens: readonly FingerprintToken[];
+}
+
+interface SourceTokens {
+  readonly fingerprint: readonly FingerprintToken[];
+  readonly fingerprintPositions: readonly number[];
+  readonly nativeStarts: readonly number[];
 }
 
 function symbolIsBoundWithin(
@@ -84,6 +105,13 @@ function propertyNameRemainsSignificant(node: Node): boolean {
   const parent = node.parent;
   if (
     (isPropertyAccessExpression(parent) && parent.name === node) ||
+    (isBindingElement(parent) &&
+      isObjectBindingPattern(parent.parent) &&
+      (parent.propertyName === node ||
+        (parent.propertyName === undefined && parent.name === node))) ||
+    (isParameterPropertyDeclaration(parent, parent.parent) &&
+      parent.name === node) ||
+    (isEnumMember(parent) && parent.name === node) ||
     (namedDeclarationHasName(parent, node) &&
       (isObjectLiteralElementLike(parent) ||
         isTypeElement(parent) ||
@@ -94,24 +122,42 @@ function propertyNameRemainsSignificant(node: Node): boolean {
 
   return (
     isIdentifier(node) &&
-    ((isShorthandPropertyAssignment(parent) && parent.name === node) ||
-      (isBindingElement(parent) &&
-        isObjectBindingPattern(parent.parent) &&
-        parent.name === node &&
-        parent.propertyName === undefined))
+    isShorthandPropertyAssignment(parent) &&
+    parent.name === node
   );
 }
 
-function tokenFingerprints(
-  functionNode: Node,
+function sourceFingerprintTokens(
   sourceFile: SourceFile,
   checker: TypeChecker,
-): TokenFingerprints {
-  const normalized: string[] = [];
-  const original: string[] = [];
-  const canonicalNames = new Map<Symbol, string>();
+): SourceFingerprint {
+  const positions: number[] = [];
+  const splitArrowStarts = new Set<number>();
+  const tokens: FingerprintToken[] = [];
 
   function visit(node: Node): void {
+    if (isArrowFunction(node)) {
+      const typeParameters = node.typeParameters;
+      if (typeParameters?.length === 1) {
+        const parameter = typeParameters[0];
+        const splitArrow =
+          parameter !== undefined &&
+          (parameter.modifiers?.some(
+            (modifier) => modifier.kind === SyntaxKind.ConstKeyword,
+          ) === true ||
+            (parameter.constraint === undefined &&
+              parameter.default === undefined &&
+              !sourceFile.text
+                .slice(parameter.getEnd(), typeParameters.end)
+                .includes(",")));
+        if (splitArrow) {
+          splitArrowStarts.add(
+            node.equalsGreaterThanToken.getStart(sourceFile),
+          );
+        }
+      }
+    }
+
     const children = node.getChildren(sourceFile);
     if (children.length > 0) {
       for (const child of children) {
@@ -119,82 +165,140 @@ function tokenFingerprints(
       }
       return;
     }
-
     if (node.kind === SyntaxKind.EndOfFileToken) {
       return;
     }
 
-    const text = node.getText(sourceFile);
-    let normalizedText = text;
+    const identifier = isIdentifier(node) || isPrivateIdentifier(node);
+    positions.push(node.getStart(sourceFile));
+    tokens.push({
+      isPrivate: isPrivateIdentifier(node),
+      kind: node.kind,
+      position: node.getStart(sourceFile),
+      propertyName: identifier && propertyNameRemainsSignificant(node),
+      symbol: identifier ? checker.getSymbolAtLocation(node) : undefined,
+      text: node.getText(sourceFile),
+    });
+  }
 
-    if (isIdentifier(node) || isPrivateIdentifier(node)) {
-      const symbol = checker.getSymbolAtLocation(node);
-      if (
-        symbol !== undefined &&
-        symbolIsBoundWithin(symbol, functionNode, sourceFile) &&
-        !propertyNameRemainsSignificant(node)
-      ) {
-        let canonical = canonicalNames.get(symbol);
-        if (canonical === undefined) {
+  visit(sourceFile);
+  return { positions, splitArrowStarts, tokens };
+}
+
+function tokenFingerprints(
+  functionNode: Node,
+  sourceFile: SourceFile,
+  tokens: readonly FingerprintToken[],
+  tokenPositions: readonly number[],
+): TokenFingerprints {
+  const normalized: string[] = [];
+  const original: string[] = [];
+  const canonicalNames = new Map<Symbol, string>();
+  const freeSymbols = new Set<Symbol>();
+  const startIndex = firstIndexAtLeast(
+    tokenPositions,
+    functionNode.getStart(sourceFile),
+  );
+  const end = functionNode.getEnd();
+
+  for (let index = startIndex; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token === undefined || token.position >= end) {
+      break;
+    }
+
+    let normalizedText = token.text;
+    const symbol = token.symbol;
+    if (
+      symbol !== undefined &&
+      !token.propertyName &&
+      !freeSymbols.has(symbol)
+    ) {
+      let canonical = canonicalNames.get(symbol);
+      if (canonical === undefined) {
+        if (!symbolIsBoundWithin(symbol, functionNode, sourceFile)) {
+          freeSymbols.add(symbol);
+        } else {
           canonical = `owned${String(canonicalNames.size)}`;
           canonicalNames.set(symbol, canonical);
         }
-        normalizedText = isPrivateIdentifier(node)
-          ? `#${canonical}`
-          : canonical;
+      }
+      if (canonical !== undefined) {
+        normalizedText = token.isPrivate ? `#${canonical}` : canonical;
       }
     }
 
-    original.push(`${String(node.kind)}:${text}`);
-    normalized.push(`${String(node.kind)}:${normalizedText}`);
+    original.push(`${String(token.kind)}:${token.text}`);
+    normalized.push(`${String(token.kind)}:${normalizedText}`);
   }
 
-  visit(functionNode);
   return {
     normalized: JSON.stringify(normalized),
     original: JSON.stringify(original),
-    tokens: nativeTokenCount(functionNode, sourceFile),
   };
 }
 
-function nativeTokenCount(node: Node, sourceFile: SourceFile): number {
-  const scanner = createScanner(
-    ScriptTarget.Latest,
-    true,
-    LanguageVariant.JSX,
-    sourceFile.text,
-    undefined,
-    node.getStart(sourceFile),
-    node.getWidth(sourceFile),
-  );
-  const rescan = new Map<number, SyntaxKind>();
-  function record(current: Node): void {
-    if (current.kind === SyntaxKind.RegularExpressionLiteral) {
-      rescan.set(current.getStart(sourceFile), current.kind);
-    } else if (
-      current.kind === SyntaxKind.GreaterThanGreaterThanToken ||
-      current.kind === SyntaxKind.GreaterThanGreaterThanGreaterThanToken
-    ) {
-      rescan.set(current.getStart(sourceFile), current.kind);
-    }
-    forEachChild(current, record);
-  }
+function parserFilePath(path: string): string {
+  const extension = extname(path).toLowerCase();
+  return /^(?:\.cts|\.mts|\.ts)$/u.test(extension) ? "source.ts" : "source.tsx";
+}
 
-  record(node);
-  let count = 0;
-  for (;;) {
-    let kind = scanner.scan();
-    const expected = rescan.get(scanner.getTokenStart());
-    if (expected === SyntaxKind.RegularExpressionLiteral) {
-      kind = scanner.reScanSlashToken();
-    } else if (expected !== undefined) {
-      kind = scanner.reScanGreaterToken();
-    }
-    if (kind === SyntaxKind.EndOfFileToken) {
-      return count;
-    }
-    count += 1;
+function sourceTokens(
+  path: string,
+  sourceFile: SourceFile,
+  checker: TypeChecker,
+): SourceTokens {
+  const parsed = parse(sourceFile.text, {
+    filePath: parserFilePath(path),
+    range: true,
+    tokens: true,
+  });
+  const fingerprint = sourceFingerprintTokens(sourceFile, checker);
+  const nativeStarts: number[] = [];
+
+  for (const token of parsed.tokens) {
+    const tokenCopies =
+      token.value === "=>" && fingerprint.splitArrowStarts.has(token.range[0])
+        ? 2
+        : 1;
+    nativeStarts.push(
+      ...Array.from({ length: tokenCopies }, () => token.range[0]),
+    );
   }
+  return {
+    fingerprint: fingerprint.tokens,
+    fingerprintPositions: fingerprint.positions,
+    nativeStarts,
+  };
+}
+
+function firstIndexAtLeast(values: readonly number[], target: number): number {
+  let low = 0;
+  let high = values.length;
+
+  while (low < high) {
+    const middle = low + Math.floor((high - low) / 2);
+    const value = values[middle];
+    if (value !== undefined && value < target) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  return low;
+}
+
+function nativeTokenCount(
+  node: Node,
+  sourceFile: SourceFile,
+  tokens: SourceTokens,
+): number {
+  const start = node.getStart(sourceFile);
+  const end = node.getEnd();
+  return (
+    firstIndexAtLeast(tokens.nativeStarts, end) -
+    firstIndexAtLeast(tokens.nativeStarts, start)
+  );
 }
 
 function functionNodes(sourceFile: SourceFile): Node[] {
@@ -235,24 +339,31 @@ function occurrencesInSource(
   minLines: number,
   minTokens: number,
 ): FunctionOccurrence[] {
+  const tokens = sourceTokens(path, sourceFile, checker);
   return functionNodes(sourceFile).flatMap((node) => {
-    const fingerprints = tokenFingerprints(node, sourceFile, checker);
-    const start = location(sourceFile, node.getStart(sourceFile));
-    const end = location(sourceFile, node.getEnd());
-
-    return fingerprints.tokens >= minTokens &&
-      functionSpansMinimumLines(sourceFile, node, minLines)
-      ? [
-          {
-            end,
-            fingerprint: fingerprints.normalized,
-            originalFingerprint: fingerprints.original,
-            path,
-            start,
-            tokens: fingerprints.tokens,
-          },
-        ]
-      : [];
+    const tokenCount = nativeTokenCount(node, sourceFile, tokens);
+    if (
+      tokenCount < minTokens ||
+      !functionSpansMinimumLines(sourceFile, node, minLines)
+    ) {
+      return [];
+    }
+    const fingerprints = tokenFingerprints(
+      node,
+      sourceFile,
+      tokens.fingerprint,
+      tokens.fingerprintPositions,
+    );
+    return [
+      {
+        end: location(sourceFile, node.getEnd()),
+        fingerprint: fingerprints.normalized,
+        originalFingerprint: fingerprints.original,
+        path,
+        start: location(sourceFile, node.getStart(sourceFile)),
+        tokens: tokenCount,
+      },
+    ];
   });
 }
 
@@ -319,7 +430,7 @@ export function formatNamedClones(clones: readonly NamedClone[]): string {
 
   return [
     ...clones.flatMap(({ first, second, tokens }) => [
-      "Clone found after normalizing locally bound names (tsx)",
+      "Clone found after normalizing locally bound names",
       ` - ${first.path} [${String(first.start.line)}:${String(first.start.column)} - ${String(first.end.line)}:${String(first.end.column)}] (${String(tokens)} tokens)`,
       `   ${second.path} [${String(second.start.line)}:${String(second.start.column)} - ${String(second.end.line)}:${String(second.end.column)}]`,
     ]),

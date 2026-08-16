@@ -80,8 +80,8 @@ describe("CPD named clone detection", () => {
     expect(clones).toHaveLength(1);
   });
 
-  test("parses configured nonstandard extensions as TSX", async () => {
-    const clones = await findSourceClones(
+  test("uses JSX custom extensions and unambiguous TypeScript", async () => {
+    const tsxClones = await findSourceClones(
       "q-mush-cpd-es-tsx-",
       {
         "first.es": `function first(value) {
@@ -96,11 +96,31 @@ describe("CPD named clone detection", () => {
       1,
       20,
     );
+    const genericClones = await findSourceClones(
+      "q-mush-cpd-ts-generics-",
+      {
+        "first.ts": `function first() {
+  const identity = <Value>(value: Value): Value => value;
+  const primary = identity(1);
+  return primary + identity(2);
+}
+`,
+        "second.ts": `function second() {
+  const convert = <Input>(input: Input): Input => input;
+  const secondary = convert(1);
+  return secondary + convert(2);
+}
+`,
+      },
+      1,
+      20,
+    );
 
-    expect(clones).toHaveLength(1);
+    expect(tsxClones).toHaveLength(1);
+    expect(genericClones).toHaveLength(1);
   });
 
-  test("honors native CPD line spans and inclusive token thresholds", async () => {
+  test("honors native CPD line and inclusive token boundaries", async () => {
     await withTemporaryDirectory("q-mush-cpd-limits-", async (directory) => {
       const paths = await writeSources(directory, {
         "first.ts": "function first(value: string) { return value.trim(); }\n",
@@ -115,6 +135,16 @@ describe("CPD named clone detection", () => {
         findNamedClones(directory, paths, 0, clone?.tokens ?? 1),
       ).toHaveLength(1);
       expect(findNamedClones(directory, paths, 1, 1)).toEqual([]);
+      await writeSources(directory, {
+        "first.ts": `function first(value: string) {
+  return value.trim(); }
+`,
+        "second.ts": `function second(input: string) {
+  return input.trim(); }
+`,
+      });
+      expect(findNamedClones(directory, paths, 1, 1)).toHaveLength(1);
+      expect(findNamedClones(directory, paths, 2, 1)).toEqual([]);
     });
   });
 
@@ -123,24 +153,31 @@ describe("CPD named clone detection", () => {
       "q-mush-cpd-token-units-",
       async (directory) => {
         const paths = await writeSources(directory, {
-          "first.ts": `export function first(value: string): string {
+          "first.tsx": `export function first(value: string): string {
   return value.trim();
 }
 `,
-          "second.ts": `export function second(input: string): string {
+          "second.tsx": `export function second(input: string): string {
   return input.trim();
 }
 `,
         });
-
-        const tokenThresholdClones = findNamedClones(directory, paths, 1, 20);
-        expect(tokenThresholdClones).toEqual([]);
         const replaceSources = (sources: readonly [string, string]) =>
           Promise.all(
             paths.map((path, index) =>
               writeFile(join(directory, path), sources[index] ?? ""),
             ),
           );
+        const expectNativeTokenBoundary = (
+          nativeTokens: number,
+          expectedClones: number,
+        ) => {
+          expect(
+            findNamedClones(directory, paths, 1, nativeTokens),
+          ).toHaveLength(expectedClones);
+        };
+
+        expectNativeTokenBoundary(20, 0);
         await replaceSources([
           `function first(value: string): boolean {
   return /a+b?/giu.test(value);
@@ -151,8 +188,7 @@ describe("CPD named clone detection", () => {
 }
 `,
         ]);
-        const compoundTokenClones = findNamedClones(directory, paths, 1, 20);
-        expect(compoundTokenClones).toEqual([]);
+        expectNativeTokenBoundary(20, 0);
         await replaceSources([
           `function first(left: number, right: number): number {
   return left >>> right;
@@ -163,10 +199,64 @@ describe("CPD named clone detection", () => {
 }
 `,
         ]);
-        const shiftTokenClones = findNamedClones(directory, paths, 1, 21);
-        expect(shiftTokenClones).toEqual([]);
+        expectNativeTokenBoundary(21, 0);
+        await replaceSources([
+          `function first(value: string) {
+  return <><section>{value}</section><aside>{value}</aside></>;
+}
+`,
+          `function second(input: string) {
+  return <><section>{input}</section><aside>{input}</aside></>;
+}
+`,
+        ]);
+        expectNativeTokenBoundary(34, 1);
+        await replaceSources([
+          `function first(value: string) {
+  const label = ` +
+            "`prefix ${value}`" +
+            `;
+  const upper = value.trim().toUpperCase();
+  return upper.concat(label).padStart(10, "0");
+}
+`,
+          `function second(input: string) {
+  const tag = ` +
+            "`prefix ${input}`" +
+            `;
+  const transformed = input.trim().toUpperCase();
+  return transformed.concat(tag).padStart(10, "0");
+}
+`,
+        ]);
+        expectNativeTokenBoundary(20, 1);
       },
     );
+  });
+
+  test("counts valid TypeScript generic arrows in native units", async () => {
+    const minTokens = 29;
+    const clones = await findSourceClones(
+      "q-mush-cpd-generic-token-units-",
+      {
+        "first.ts": `function first() {
+  const identity = <Value>(value: Value): Value => value;
+  return identity(1);
+}
+`,
+        "second.ts": `function second() {
+  const convert = <Input>(input: Input): Input => input;
+  return convert(1);
+}
+`,
+      },
+      1,
+      minTokens,
+    );
+
+    expect(clones).toHaveLength(1);
+    const [clone] = clones;
+    expect(clone?.tokens).toBe(minTokens);
   });
 
   test("reports a deterministic first renamed pair", async () => {
@@ -304,16 +394,78 @@ describe("CPD named clone detection", () => {
     expect(clones).toEqual([]);
   });
 
-  test("keeps shorthand destructuring keys significant", async () => {
-    const clones = await findSourceClones("q-mush-cpd-destructuring-", {
-      "first.ts": `function first(source: Record<string, string>) {
+  test("keeps explicit and shorthand destructuring keys significant", async () => {
+    const shorthandClones = await findSourceClones(
+      "q-mush-cpd-destructuring-",
+      {
+        "first.ts": `function first(source: Record<string, string>) {
   const { alpha } = source;
   return alpha.trim().toLowerCase().split("").reverse().join("");
 }
 `,
-      "second.ts": `function second(input: Record<string, string>) {
+        "second.ts": `function second(input: Record<string, string>) {
   const { beta } = input;
   return beta.trim().toLowerCase().split("").reverse().join("");
+}
+`,
+      },
+    );
+    const explicitClones = await findSourceClones(
+      "q-mush-cpd-explicit-destructuring-",
+      {
+        "first.ts": `function first(value: string) {
+  const source = { alpha: value, beta: value };
+  const { alpha: local } = source;
+  return local.trim().toLowerCase().split("").reverse().join("");
+}
+`,
+        "second.ts": `function second(input: string) {
+  const source = { alpha: input, beta: input };
+  const { beta: local } = source;
+  return local.trim().toLowerCase().split("").reverse().join("");
+}
+`,
+      },
+    );
+
+    expect(shorthandClones).toHaveLength(0);
+    expect(explicitClones).toHaveLength(0);
+  });
+
+  test("keeps constructor parameter-property names significant", async () => {
+    const clones = await findSourceClones(
+      "q-mush-cpd-parameter-properties-",
+      {
+        "first.ts": `function first() {
+  class Record { constructor(public alpha: string) {} }
+  return Record;
+}
+`,
+        "second.ts": `function second() {
+  class Item { constructor(public beta: string) {} }
+  return Item;
+}
+`,
+      },
+      1,
+      20,
+    );
+
+    expect(clones).toHaveLength(0);
+  });
+
+  test("keeps local enum member names significant", async () => {
+    const clones = await findSourceClones("q-mush-cpd-enum-members-", {
+      "first.ts": `function first(seed: string) {
+  enum Level { Alpha = 1, Beta = 2 }
+  const names = Object.keys(Level).join("-");
+  return names.concat(seed).trim().toLowerCase().padStart(9, "0");
+}
+`,
+      "second.ts": `function second(seed: string) {
+  enum Grade { Gamma = 1, Delta = 2 }
+  const names = Object.keys(Grade).join("-");
+  return names.concat(seed).trim().toLowerCase().padStart(9, "0");
 }
 `,
     });

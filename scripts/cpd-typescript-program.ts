@@ -1,4 +1,4 @@
-import { join, resolve } from "node:path";
+import { extname, join, resolve } from "node:path";
 import {
   createCompilerHost,
   createProgram,
@@ -67,6 +67,12 @@ function diagnosticText(diagnostic: Diagnostic): string {
   return `${diagnostic.file.fileName}:${String(location.line + 1)}:${String(location.character + 1)} - ${message}`;
 }
 
+function sourceScriptKind(path: string): ScriptKind {
+  return /^(?:\.cts|\.mts|\.ts)$/u.test(extname(path))
+    ? ScriptKind.TS
+    : ScriptKind.TSX;
+}
+
 export function createCpdProgram(
   rootDirectory: string,
   relativePaths: readonly string[],
@@ -93,7 +99,7 @@ export function createCpdProgram(
                 text,
                 languageVersion,
                 true,
-                ScriptKind.TSX,
+                sourceScriptKind(fileName),
               );
         }
         return defaultHost.getSourceFile(fileName, languageVersion, onError);

@@ -26,7 +26,10 @@ export async function listProjectFiles(
     );
   }
 
-  const paths = stdout.split("\0").filter((path) => path !== "");
+  const paths = stdout
+    .split("\0")
+    .filter((path) => path !== "")
+    .sort((left, right) => left.localeCompare(right));
   const existingPaths: string[] = [];
 
   for (const path of paths) {
