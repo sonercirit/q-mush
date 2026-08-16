@@ -3,6 +3,9 @@ import { defineConfig } from "vitest/config";
 
 const TEST_FILE_EXTENSIONS = "{cjs,cts,js,jsx,mjs,mts,ts,tsx}";
 const TEST_INCLUDE = [`**/test/**/*.{spec,test}.${TEST_FILE_EXTENSIONS}`];
+const BROWSER_TEST_INCLUDE = [
+  `**/test/**/*.browser.{spec,test}.${TEST_FILE_EXTENSIONS}`,
+];
 const DOM_TEST_INCLUDE = [
   `**/test/**/*.dom.{spec,test}.${TEST_FILE_EXTENSIONS}`,
 ];
@@ -24,7 +27,11 @@ export default defineConfig({
         test: {
           allowOnly: false,
           environment: "node",
-          exclude: [...NON_SOURCE_TEST_EXCLUDE, ...DOM_TEST_INCLUDE],
+          exclude: [
+            ...NON_SOURCE_TEST_EXCLUDE,
+            ...BROWSER_TEST_INCLUDE,
+            ...DOM_TEST_INCLUDE,
+          ],
           include: TEST_INCLUDE,
           name: "server",
           testTimeout: 15_000,
@@ -46,7 +53,7 @@ export default defineConfig({
         test: {
           allowOnly: false,
           environment: "happy-dom",
-          exclude: NON_SOURCE_TEST_EXCLUDE,
+          exclude: [...NON_SOURCE_TEST_EXCLUDE, ...BROWSER_TEST_INCLUDE],
           include: DOM_TEST_INCLUDE,
           name: "dom",
           server: { deps: { inline: [/solid-js/u] } },

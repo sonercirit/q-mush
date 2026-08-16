@@ -78,7 +78,7 @@ function scrollRevision(
     detail.agentFile === null
       ? "none"
       : `${detail.agentFile.name}:${String(detail.agentFile.content.length)}`;
-  return `${agentFileRevision}:${String(messages.length)}:${messages.at(-1)?.id ?? ""}`;
+  return `${detail.id}:${agentFileRevision}:${String(messages.length)}:${messages.at(-1)?.id ?? ""}`;
 }
 
 function isAtScrollEnd(element: HTMLElement): boolean {
@@ -141,6 +141,7 @@ export function SessionDetailBody(props: {
   const [forkPointMessageId, setForkPointMessageId] = createSignal<string>();
   const [scrollLockEnabled, setScrollLockEnabled] = createSignal(true);
   const [transcript, setTranscript] = createSignal<HTMLUListElement>();
+  let currentSessionId: string | undefined;
   let pendingScrollFrame: number | undefined;
   let programmaticScrollTop: number | undefined;
   let shouldScrollToEnd = true;
@@ -174,12 +175,28 @@ export function SessionDetailBody(props: {
     setShortcutPlatform(navigator.platform);
   });
   createEffect(
+    on(
+      () => view().detail.id,
+      (sessionId) => {
+        if (currentSessionId === undefined) {
+          currentSessionId = sessionId;
+          return;
+        }
+        if (sessionId === currentSessionId) return;
+        currentSessionId = sessionId;
+        shouldScrollToEnd = true;
+        programmaticScrollTop = undefined;
+        setScrollLockEnabled(true);
+      },
+    ),
+  );
+  createEffect(
     on(() => scrollRevision(view().detail, visibleMessages()), scrollToEnd),
   );
 
   return (
     <div
-      class="session-detail-view min-w-0"
+      class="session-detail-view min-w-0 [overflow-anchor:none]"
       data-session-detail-view="true"
       ref={nestedScrollRef}
     >

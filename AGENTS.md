@@ -38,7 +38,8 @@ Living project memory.
 - Install/run: `bun install`; `bun run sync-engine/index.ts`
 - Develop: `bun run dev` (+ `dev:restart`, `dev:watch`); `bun run build`
 - Migrations: `bun run db:generate` / `db:migrate`
-- Test: `bun run test` / `test:watch`
+- Test: `bun run test` (Vitest DOM/server plus Chromium) / `test:watch`; use
+  `bun run test:browser` for Chromium alone.
 - `bun run check` runs every static check, each standalone too; `bun run format`
   / `lint:fix` write fixes.
 - CI (`.github/workflows/checks.yml`): tests, static checks, build, and
@@ -73,7 +74,9 @@ Living project memory.
     `sync-engine/index.ts` injects the persistent connection; the auth factory
     falls back on in-memory SQLite. Shared PKCE, provider parsing, and redirects
     live in `oauth.ts`; cookie/response helpers in `http.ts`. `solid/client.tsx`
-    reads `/api/auth/session`, gates the app, posts logout.
+    reads `/api/auth/session`, gates the app, posts logout. Browser regressions
+    use real Chromium/Tailwind and production state/UI mutations, never
+    synthetic layout or CSS-only assertions; CI rejects `.only` and zero tests.
 - `sync-engine/runner-store.ts` persists runner registrations in `runners`: one
   active registration per machine fingerprint, one default per user.
   `sync-engine/runners.ts` issues hashed opaque setup tokens, owns authenticated
@@ -121,15 +124,16 @@ Living project memory.
   `solid/session-controller.ts`: model deltas combine once per frame per
   session, other events are immediate, unchanged snapshots suppress
   notifications, keyed messages rerender only changes. The long-lived Solid root
-  preserves focus and scroll; the transcript starts at and returns to the bottom
-  when messages or the agent file change. `agent-model-discovery.ts` queries
-  metadata, signal-cancelable; `shared/agent-configuration.ts` owns catalog
-  types/validation. New sessions take the default online runner (else the first)
-  and credential, first discovered model, latest working directory, top reported
-  effort. Unknown modalities imply no attachment support; choices show provider
-  and Q Mush modalities. `solid/custom-select.tsx` shares search normalization,
-  paginates past ten items, owns accessible keyboard/focus. Focus mode fills the
-  app viewport (not browser Fullscreen), keeping drafts and scroll; its rail
+  preserves focus and scroll; the changing session detail is not a document
+  scroll anchor, and only bottom-pinned transcripts follow live output.
+  `agent-model-discovery.ts` queries metadata, signal-cancelable;
+  `shared/agent-configuration.ts` owns catalog types/validation. New sessions
+  take the default online runner (else the first) and credential, first
+  discovered model, latest working directory, top reported effort. Unknown
+  modalities imply no attachment support; choices show provider and Q Mush
+  modalities. `solid/custom-select.tsx` shares search normalization, paginates
+  past ten items, owns accessible keyboard/focus. Focus mode fills the app
+  viewport (not browser Fullscreen), keeping drafts and scroll; its rail
   overlays on desktop, becomes a drawer, collapses on selection, closing with
   Escape first. `shared/agent-prompt.ts` builds the model system prompt and
   transcript display; reasoning summaries persist as `thinking` messages omitted
@@ -191,10 +195,10 @@ Living project memory.
   switches and canonical named imports (one declaration per module with inline
   `type` markers). Default imports: only `@eslint/js`, `@tailwindcss/vite`,
   `vite-plugin-solid`; aliases, namespaces, dynamic imports, import attributes,
-  import-equals, `import()` types, and side-effect imports (except
-  `solid/styles.css`) are rejected. First-party code rejects unsafe DOM HTML
-  injection, `dangerouslySetInnerHTML`, and HTML-like `Response` bodies;
-  HTML-like data and TSX pass.
+  import-equals, `import()` types, and side-effect imports (except the
+  production and browser-test imports of `solid/styles.css`) are rejected.
+  First-party code rejects unsafe DOM HTML injection, `dangerouslySetInnerHTML`,
+  and HTML-like `Response` bodies; HTML-like data and TSX pass.
 - Knip checks every issue type and entry export in test and production graphs;
   tests cannot keep production alive, and unused test helpers fail.
 - CPD maps all JS/TS extensions to TSX and ignores imports. Its parse-error path

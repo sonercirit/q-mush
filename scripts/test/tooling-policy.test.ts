@@ -231,6 +231,7 @@ console.log(
       writeFile(
         ESLINT_VALID_IMPORT_POLICY_PROBE,
         `import { createDatabase, type AppDatabase } from "../../shared/database.ts";
+import "../styles.css";
 
 const database: AppDatabase = createDatabase(":memory:");
 console.log(database);
