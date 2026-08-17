@@ -363,7 +363,7 @@ export function createAuthenticatedTestDatabase(): AppDatabase {
     .insert(sessions)
     .values({
       ...testAuditFields(),
-      expiresAt: new Date(TEST_NOW + 60_000),
+      expiresAt: new Date(TEST_NOW + 7 * 24 * 60 * 60 * 1_000),
       id: SESSION_ID,
       token: SESSION_TOKEN,
       userId: TEST_USER_ID,

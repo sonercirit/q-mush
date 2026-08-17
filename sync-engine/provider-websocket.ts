@@ -1,9 +1,7 @@
 import type { AgentModelStep } from "../shared/agent-loop.ts";
 import { ProviderStreamError } from "./provider-error.ts";
-import {
-  createProviderStreamAccumulator,
-  type ProviderTextDelta,
-} from "./provider-stream.ts";
+import type { ProviderRequestLifecycleOptions } from "./provider-request-lifecycle.ts";
+import { createProviderStreamAccumulator } from "./provider-stream.ts";
 
 interface ProviderWebSocket extends EventTarget {
   readonly readyState: number;
@@ -57,11 +55,10 @@ function messageText(event: Event): string {
   return event.data;
 }
 
-interface ProviderWebSocketRequest {
+interface ProviderWebSocketRequest extends ProviderRequestLifecycleOptions {
   readonly body: Readonly<Record<string, unknown>>;
   readonly createSocket: ProviderWebSocketFactory;
   readonly headers: Readonly<Record<string, string>>;
-  readonly onDelta?: (delta: ProviderTextDelta) => void;
   readonly signal?: AbortSignal;
   readonly url: string;
 }
@@ -98,6 +95,7 @@ export class ProviderWebSocketSession {
     if (options.signal?.aborted === true) {
       return Promise.reject(abortError());
     }
+    options.onRequestState?.("admission");
 
     return new Promise<AgentModelStep>((resolve, reject) => {
       const accumulator = createProviderStreamAccumulator(
@@ -110,6 +108,7 @@ export class ProviderWebSocketSession {
         options.createSocket(options.url, { headers: options.headers });
       let opened = reusedSocket !== undefined;
       let receivedEvent = false;
+      let requestActive = false;
       let settled = false;
       const settle = (
         error: Error | undefined,
@@ -188,6 +187,10 @@ export class ProviderWebSocketSession {
           invalidProviderMessage = false;
           accumulator.push(value);
           receivedEvent = true;
+          if (!requestActive) {
+            requestActive = true;
+            options.onRequestState?.("active");
+          }
 
           if (accumulator.completed) {
             settle(undefined, accumulator.finish());

@@ -34,6 +34,7 @@ import {
   queuedSessionDetails,
   queuedSessionOwnerIds,
 } from "./session-queued.ts";
+import type { SessionRuntimes } from "./session-runtime.ts";
 import {
   createStoredSession,
   type CreateAgentSession,
@@ -92,7 +93,12 @@ export class SessionStore extends SessionStoreRestarts {
   readonly #manualCompactions: ManualCompactionStore;
   readonly #questions: AskQuestionsStore;
   readonly #resources: readonly [AppDatabase, IdGenerator];
-  constructor(database: AppDatabase, generateId: IdGenerator = createUuidV7) {
+  readonly #runtimes: Pick<SessionRuntimes, "pending"> | undefined;
+  constructor(
+    database: AppDatabase,
+    generateId: IdGenerator = createUuidV7,
+    runtimes?: Pick<SessionRuntimes, "pending">,
+  ) {
     super(database, generateId);
     this.#resources = [database, generateId];
     this.#manualCompactions = new ManualCompactionStore(database, generateId);
@@ -101,6 +107,7 @@ export class SessionStore extends SessionStoreRestarts {
       persistence: createAskQuestionsPersistence(database),
       systemActorId: SYSTEM_ID,
     });
+    this.#runtimes = runtimes;
   }
   get #database(): AppDatabase {
     return this.#resources[0];
@@ -163,6 +170,7 @@ export class SessionStore extends SessionStoreRestarts {
       userId,
       sessionId,
       workspaceId,
+      this.#runtimes?.pending.bind(this.#runtimes),
     );
   }
   list(userId: string, workspaceId?: string): readonly AgentSessionSummary[] {
@@ -171,6 +179,7 @@ export class SessionStore extends SessionStoreRestarts {
       this.#readPendingQuestions.bind(this),
       userId,
       workspaceId,
+      this.#runtimes?.pending.bind(this.#runtimes),
     );
   }
   history(

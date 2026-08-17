@@ -107,6 +107,33 @@ test("reads generic provider sessions", () => {
   );
 });
 
+test("reads and validates a running session pending component", () => {
+  const pending = { component: "provider_admission" as const, since: 7 };
+  expect(
+    readSessionDetail({
+      ...DETAIL,
+      runtimePending: pending,
+      status: "running",
+    }).runtimePending,
+  ).toEqual(pending);
+  for (const invalid of [
+    { ...DETAIL, runtimePending: undefined },
+    { ...DETAIL, runtimePending: pending },
+    {
+      ...DETAIL,
+      runtimePending: { component: "unknown", since: 7 },
+      status: "running",
+    },
+    {
+      ...DETAIL,
+      runtimePending: { component: "provider_request", since: 1.5 },
+      status: "running",
+    },
+  ]) {
+    expectInvalidSession(invalid);
+  }
+});
+
 test("reads persisted session error messages", () => {
   const error = {
     content: "The provider connection failed",

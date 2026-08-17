@@ -129,6 +129,21 @@ function sessionCostText(
   }
 }
 
+function stepElapsedTime(startedAt: number, now: number): string {
+  return formatSessionTime(Math.max(0, now - startedAt));
+}
+
+function StepDuration(props: {
+  readonly now: number;
+  readonly startedAt: number;
+}): JSX.Element {
+  return (
+    <span class="text-emerald-200/80" data-session-step-duration="true">
+      {`Step: ${stepElapsedTime(props.startedAt, props.now)}`}
+    </span>
+  );
+}
+
 function SessionMetrics(props: {
   readonly session: Pick<
     AgentSessionSummary,
@@ -136,6 +151,7 @@ function SessionMetrics(props: {
     | "activeStartedAt"
     | "costBasis"
     | "costUsd"
+    | "runtimePending"
     | "stepStartedAt"
   >;
 }): JSX.Element {
@@ -162,8 +178,13 @@ function SessionMetrics(props: {
         keyed
       >
         {(stepStartedAt) => (
-          <span class="text-emerald-200/80" data-session-step-duration="true">
-            {`Step: ${formatSessionTime(Math.max(0, now() - stepStartedAt))}`}
+          <StepDuration now={now()} startedAt={stepStartedAt} />
+        )}
+      </Show>
+      <Show when={props.session.runtimePending} keyed>
+        {(pending) => (
+          <span class="text-amber-200/90" data-session-pending-component="true">
+            {`Pending: ${pending.component.replaceAll("_", " ")}`}
           </span>
         )}
       </Show>
@@ -318,6 +339,9 @@ function sessionListRowMatches(
       (rightSession.pendingQuestions === null) &&
     leftSession.provider === rightSession.provider &&
     leftSession.reasoningEffort === rightSession.reasoningEffort &&
+    leftSession.runtimePending?.component ===
+      rightSession.runtimePending?.component &&
+    leftSession.runtimePending?.since === rightSession.runtimePending?.since &&
     leftSession.runnerRequired === rightSession.runnerRequired &&
     leftSession.status === rightSession.status &&
     leftSession.title === rightSession.title

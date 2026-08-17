@@ -57,6 +57,7 @@ export function createFallbackModel(
     readonly credential: ProviderCredentialAccess;
     readonly maxOutputTokens: number | null;
     readonly model: string;
+    readonly onRequestState?: AgentModelFactoryOptions["onRequestState"];
     readonly openRouterProviderTag?: string | null;
     readonly prompt: string | null;
     readonly provider: ProviderId;
@@ -68,6 +69,9 @@ export function createFallbackModel(
     credential: selection.credential,
     maxOutputTokens: selection.maxOutputTokens,
     model: selection.model,
+    ...(selection.onRequestState === undefined
+      ? {}
+      : { onRequestState: selection.onRequestState }),
     ...agentModelRoutingOptions(selection.openRouterProviderTag),
     provider: selection.provider,
     providerPricing: selection.providerPricing,
@@ -84,6 +88,7 @@ function modelOptions(
   systemPrompt: string,
   onDelta?: AgentModelFactoryOptions["onDelta"],
   onStepStart?: AgentModelFactoryOptions["onStepStart"],
+  onRequestState?: AgentModelFactoryOptions["onRequestState"],
 ): AgentModelFactoryOptions {
   return {
     adaptiveThinking: detail.adaptiveThinking,
@@ -100,6 +105,7 @@ function modelOptions(
     ...agentModelRoutingOptions(detail.openRouterProviderTag),
     ...(onDelta === undefined ? {} : { onDelta }),
     ...(onStepStart === undefined ? {} : { onStepStart }),
+    ...(onRequestState === undefined ? {} : { onRequestState }),
     promptCacheKey: detail.id,
     provider: detail.provider,
     providerPricing: detail.providerPricing,
@@ -116,6 +122,7 @@ export function createSessionAgentModels(options: {
   readonly factory: AgentModelFactory;
   readonly id?: () => string;
   readonly isCurrent: () => boolean;
+  readonly onRequestState?: AgentModelFactoryOptions["onRequestState"];
   readonly onStepStart?: () => void;
   readonly realtime: RealtimeHub | undefined;
   readonly streamId?: string;
@@ -203,6 +210,7 @@ export function createSessionAgentModels(options: {
         systemPrompt,
         onDelta,
         startStep,
+        options.onRequestState,
       ),
     ),
     createCompactor: () => {
@@ -217,6 +225,7 @@ export function createSessionAgentModels(options: {
             // The compactor stream ID is already fresh; its step start only
             // needs the persistence hook, not another stream reset.
             options.onStepStart,
+            options.onRequestState,
           ),
         ),
         publishCompactionRequest,

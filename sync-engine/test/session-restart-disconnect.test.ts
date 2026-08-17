@@ -88,6 +88,7 @@ test("disconnect during an in-flight runner command persists the exact restart h
     notify: () => undefined,
     now: () => TEST_NOW + 2,
     operation: "agent",
+    pendingComponent: () => undefined,
     resources: {
       actions: orchestrationActions(setup.database, setup.store),
       braveSearch: { execute: () => Promise.resolve("unused search") },

@@ -8,6 +8,7 @@ import {
   complete,
   COMPLETED_EVENT,
   expectBoundedHttpFallback,
+  expectProviderSocketReleased,
   expireProviderSocket,
   FakeProviderSocket,
   FakeProviderSockets,
@@ -59,6 +60,37 @@ test("prefers the Responses WebSocket for OpenAI API keys", async () => {
   socket?.receive(COMPLETED_EVENT);
 
   expectDoneStep(await pending);
+});
+
+test("reports reused WebSocket admission until the provider acknowledges it", async () => {
+  const states: ("active" | "admission")[] = [];
+  const sockets = new FakeProviderSockets();
+  const model = apiKeyModel({
+    onRequestState: states.push.bind(states),
+    webSocket: sockets.create,
+  });
+
+  const first = complete(model);
+  const socket = requireProviderSocket(sockets, 0);
+  socket.open();
+  expect(states).toEqual(["admission"]);
+  socket.receive({ response: { id: "response-1" }, type: "response.created" });
+  expect(states).toEqual(["admission", "active"]);
+  socket.receive(COMPLETED_EVENT);
+  await first;
+
+  const controller = new AbortController();
+  const stalled = model.complete(
+    [{ content: "Continue", role: "user" }],
+    controller.signal,
+  );
+  expect(socket.sent).toHaveLength(2);
+  expect(states).toEqual(["admission", "active", "admission"]);
+  expect(socket.listenerCount("message")).toBe(1);
+
+  controller.abort();
+  await expect(stalled).rejects.toMatchObject({ name: "AbortError" });
+  expectProviderSocketReleased(socket);
 });
 
 test("reuses one WebSocket across steps and reconnects after idle close", async () => {

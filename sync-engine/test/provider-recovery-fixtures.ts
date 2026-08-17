@@ -3,6 +3,10 @@ import type { AgentConversationMessage } from "../../shared/agent-loop.ts";
 import { RecordingTestSocket } from "../../shared/test/websocket-fixtures.ts";
 import type { ModelRequestSleep } from "../../sync-engine/agent-model-retry.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
+import {
+  providerRequestStateHandler,
+  type ProviderRequestLifecycleOptions,
+} from "../../sync-engine/provider-request-lifecycle.ts";
 import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
 import { codexOAuthCredential } from "./prompt-cache-fixtures.ts";
 import { expectDoneStep } from "./provider-step-fixtures.ts";
@@ -24,7 +28,12 @@ const USER_MESSAGE = [{ content: "Hello", role: "user" as const }];
 
 export class FakeProviderSocket extends RecordingTestSocket {
   closeCode: number | undefined;
+  closeCount = 0;
   closeReason: string | undefined;
+  readonly #listeners = new Map<
+    string,
+    Set<EventListenerOrEventListenerObject>
+  >();
 
   constructor() {
     super({
@@ -33,10 +42,48 @@ export class FakeProviderSocket extends RecordingTestSocket {
     });
   }
 
+  #changeListener(
+    action: "add" | "remove",
+    type: string,
+    callback: EventListenerOrEventListenerObject,
+  ): void {
+    const listeners = this.#listeners.get(type) ?? new Set();
+    if (action === "add") {
+      listeners.add(callback);
+      this.#listeners.set(type, listeners);
+      return;
+    }
+    listeners.delete(callback);
+    if (listeners.size === 0) this.#listeners.delete(type);
+  }
+
+  override addEventListener(
+    type: string,
+    callback: EventListenerOrEventListenerObject | null,
+    options?: AddEventListenerOptions | boolean,
+  ): void {
+    super.addEventListener(type, callback, options);
+    if (callback !== null) this.#changeListener("add", type, callback);
+  }
+
   override close(code?: number, reason?: string): void {
     this.closeCode = code;
+    this.closeCount += 1;
     this.closeReason = reason;
     super.close();
+  }
+
+  override removeEventListener(
+    type: string,
+    callback: EventListenerOrEventListenerObject | null,
+    options?: EventListenerOptions | boolean,
+  ): void {
+    super.removeEventListener(type, callback, options);
+    if (callback !== null) this.#changeListener("remove", type, callback);
+  }
+
+  listenerCount(type: string): number {
+    return this.#listeners.get(type)?.size ?? 0;
   }
 
   fail(): void {
@@ -52,6 +99,13 @@ export class FakeProviderSocket extends RecordingTestSocket {
 type WebSocketFactory = NonNullable<
   ConstructorParameters<typeof ChatCompletionsAgentModel>[0]["webSocket"]
 >;
+
+export function expectProviderSocketReleased(socket: FakeProviderSocket): void {
+  expect(socket.closeCount).toBe(1);
+  expect(
+    ["message", "error", "close"].map((type) => socket.listenerCount(type)),
+  ).toEqual([0, 0, 0]);
+}
 
 export function complete(
   model: ChatCompletionsAgentModel,
@@ -146,22 +200,25 @@ export function retryingSocket(): RetryingSocketSetup {
   const deltas: ProviderTextDelta[] = [];
   const delays: number[] = [];
   const sockets = new FakeProviderSockets();
-  const model = apiKeyModel({
-    onDelta: (delta) => {
-      deltas.push(delta);
-    },
+  const collectDelta = (delta: ProviderTextDelta): void => {
+    deltas.push(delta);
+  };
+  const modelOptions = {
+    onDelta: collectDelta,
     sleep: recordDelay(delays),
     webSocket: sockets.create,
-  });
+  };
+  const model = apiKeyModel(modelOptions);
   return { delays, deltas, pending: complete(model), sockets };
 }
 
-export function apiKeyModel(options: {
-  readonly fetch?: () => Promise<Response>;
-  readonly onDelta?: (delta: ProviderTextDelta) => void;
-  readonly sleep?: ModelRequestSleep;
-  readonly webSocket: WebSocketFactory;
-}): ChatCompletionsAgentModel {
+export function apiKeyModel(
+  options: ProviderRequestLifecycleOptions & {
+    readonly fetch?: () => Promise<Response>;
+    readonly sleep?: ModelRequestSleep;
+    readonly webSocket: WebSocketFactory;
+  },
+): ChatCompletionsAgentModel {
   return new ChatCompletionsAgentModel({
     credential: {
       accountId: null,
@@ -172,6 +229,7 @@ export function apiKeyModel(options: {
     maxOutputTokens: null,
     model: "api-test-model",
     ...(options.onDelta === undefined ? {} : { onDelta: options.onDelta }),
+    onRequestState: providerRequestStateHandler(options.onRequestState),
     provider: "openai",
     ...(options.sleep === undefined ? {} : { sleep: options.sleep }),
     webSocket: options.webSocket,

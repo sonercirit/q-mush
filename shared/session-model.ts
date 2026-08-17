@@ -89,6 +89,18 @@ export interface AgentSessionMessage extends AttachmentContentFields {
   readonly turnId?: string | null;
 }
 
+export type SessionRuntimePendingComponent =
+  | "engine_tool"
+  | "provider_admission"
+  | "provider_request"
+  | "runner_command"
+  | "startup";
+
+export interface SessionRuntimePending {
+  readonly component: SessionRuntimePendingComponent;
+  readonly since: number;
+}
+
 export interface AgentSessionSummary extends SessionRunStepTiming<number> {
   readonly adaptiveThinking: boolean | null;
   readonly agentFilePath: string | null;
@@ -115,6 +127,7 @@ export interface AgentSessionSummary extends SessionRunStepTiming<number> {
   readonly pendingQuestions: PendingAskQuestions | null;
   readonly reasoningEffort: AgentReasoningEffort | null;
   readonly restartHandoff: RestartHandoff | null;
+  readonly runtimePending: SessionRuntimePending | null;
   readonly runnerId: string;
   readonly runnerRequired: boolean;
   readonly status: AgentSessionStatus;

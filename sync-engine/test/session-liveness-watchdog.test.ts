@@ -5,7 +5,10 @@ import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 import type { SessionDependencies } from "../../sync-engine/session-dependencies.ts";
 import { createSessionLivenessWatchdog } from "../../sync-engine/session-liveness-scheduler.ts";
 import { SessionLivenessWatchdog } from "../../sync-engine/session-liveness-watchdog.ts";
-import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
+import {
+  SessionRuntimes,
+  type SessionPendingComponent,
+} from "../../sync-engine/session-runtime.ts";
 import { ShutdownInterruptedSessionStore } from "../../sync-engine/session-shutdown-interrupted-store.ts";
 import { notifySessionSteeringInput } from "../../sync-engine/session-steering-wakeup.ts";
 import {
@@ -120,17 +123,56 @@ function launchRuntime(
   setup: ReturnType<typeof runningSetup>,
   runtimes: SessionRuntimes,
   generation: number,
+  component?: SessionPendingComponent,
 ) {
   const deferred = Promise.withResolvers<undefined>();
+  let signal: AbortSignal | undefined;
   expect(
     runtimes.launch(
       setup.detail.id,
       STORE_RUNNER_ID,
       generation,
-      () => deferred.promise,
+      ({ controller, pendingComponent }) => {
+        signal = controller.signal;
+        if (component !== undefined) pendingComponent(component);
+        return component === "provider_admission"
+          ? new Promise<never>((_resolve, reject) => {
+              const rejectAbort = () => {
+                reject(
+                  new DOMException("The session was aborted", "AbortError"),
+                );
+              };
+              controller.signal.addEventListener("abort", rejectAbort, {
+                once: true,
+              });
+            })
+          : deferred.promise;
+      },
     ),
   ).toBe(true);
-  return deferred;
+  return {
+    ...deferred,
+    get signal() {
+      return signal;
+    },
+  };
+}
+
+function launchPendingRuntime(
+  setup: ReturnType<typeof runningSetup>,
+  component: SessionPendingComponent,
+) {
+  const runtimes = new SessionRuntimes(() => Date.now());
+  const runtime = launchRuntime(
+    setup,
+    runtimes,
+    setup.detail.generation,
+    component,
+  );
+  if (runtime.signal === undefined) {
+    throw new Error("The pending runtime signal was unavailable");
+  }
+  return { ...runtime, runtimes };
 }
 
 function dispatchBash(
@@ -292,6 +334,42 @@ test("requires the stored execution generation to match its runtime", () => {
 
   expectStoredStatus(setup, "failed");
   runtime.resolve();
+  closeSetup(setup);
+});
+
+test("fails provider admission that remains unacknowledged beyond the grace bound", () => {
+  const setup = runningSetup();
+  const runtime = launchPendingRuntime(setup, "provider_admission");
+  const watchdog = watchdogSetup(setup, {
+    graceMs: 1_000,
+    runtimes: runtime.runtimes,
+  });
+
+  scanPastGrace(watchdog);
+
+  expectStoredStatus(setup, "failed");
+  expect(
+    setup.store.get(TEST_USER_ID, setup.detail.id)?.messages.at(-1)?.content,
+  ).toContain("provider request was not acknowledged");
+  expect(
+    setup.store.get(TEST_USER_ID, setup.detail.id)?.runtimePending,
+  ).toBeNull();
+  expect(runtime.signal).toMatchObject({ aborted: true });
+  closeSetup(setup);
+});
+
+test("does not time out an acknowledged provider request", () => {
+  const setup = runningSetup();
+  const activeProvider = launchPendingRuntime(setup, "provider_request");
+  const watchdog = watchdogSetup(setup, {
+    graceMs: 1_000,
+    runtimes: activeProvider.runtimes,
+  });
+
+  scanPastGrace(watchdog, 20 * 60_000);
+
+  expectStoredStatus(setup, "running");
+  activeProvider.resolve();
   closeSetup(setup);
 });
 

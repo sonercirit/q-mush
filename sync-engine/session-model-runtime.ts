@@ -8,6 +8,10 @@ import type { AgentModelFactory } from "./session-agent-models.ts";
 import type { SessionAgentRuntimeDependencies } from "./session-agent-runtime.ts";
 import type { AttachmentFallbackRuntimeResources } from "./session-model-resources.ts";
 import { hasPendingSteeringInput } from "./session-pending-inputs.ts";
+import {
+  sessionPendingComponentFromProviderState,
+  type SessionPendingComponent,
+} from "./session-runtime.ts";
 import type { SessionStore } from "./session-store.ts";
 
 export interface SessionModelRuntimeResources extends Omit<
@@ -34,6 +38,7 @@ export function sessionModelRuntime(
   userId: string,
   controller: AbortController,
   restartHandoffRequested: () => boolean = () => false,
+  markPending: (component: SessionPendingComponent) => void = () => undefined,
 ): SessionAgentRuntimeDependencies {
   return {
     ...(resources.attachmentFallbacks === undefined
@@ -59,8 +64,12 @@ export function sessionModelRuntime(
       resources.store.executionIsCurrent(userId, detail.id, detail.generation),
     manualCompactionRequested: () =>
       resources.store.manualCompactionPending(detail.id, detail.generation),
+    markPending: (state) => {
+      markPending(sessionPendingComponentFromProviderState(state));
+    },
     modelFactory: resources.modelFactory,
     now: resources.now,
+    pendingComponent: markPending,
     restartHandoffRequested,
     notify: () => {
       if (

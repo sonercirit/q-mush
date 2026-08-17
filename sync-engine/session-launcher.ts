@@ -12,7 +12,10 @@ import type { SessionModelRuntimeResources } from "./session-model-runtime.ts";
 import type { DurableRestartPersistence } from "./session-restart-requester.ts";
 import type { RestartHandoffIdentity } from "./session-restart-store.ts";
 import { runPersistedSession } from "./session-run.ts";
-import type { SessionRuntimes } from "./session-runtime.ts";
+import type {
+  SessionPendingComponent,
+  SessionRuntimes,
+} from "./session-runtime.ts";
 import type { ShutdownInterruptedSessionStore } from "./session-shutdown-interrupted-store.ts";
 import type { SessionStore } from "./session-store.ts";
 
@@ -71,7 +74,23 @@ export class SessionLauncher {
       detail.runnerId,
       detail.generation,
       operation === "agent" ? "step" : "handoff",
-      async ({ controller, restartRequest, settled }) => {
+      async ({ controller, pendingComponent, restartRequest, settled }) => {
+        const reportPending = (component: SessionPendingComponent): void => {
+          pendingComponent(component);
+          try {
+            if (
+              this.#dependencies.store.executionIsCurrent(
+                userId,
+                detail.id,
+                detail.generation,
+              )
+            ) {
+              this.#dependencies.notify(userId, detail.id);
+            }
+          } catch {
+            // Diagnostic publication must not interrupt the model request.
+          }
+        };
         const restartPersistence: DurableRestartPersistence = {
           clear: clearShutdownMarker,
           operation: () =>
@@ -129,6 +148,7 @@ export class SessionLauncher {
           restartPersistence,
           store: this.#dependencies.store,
           userId,
+          pendingComponent: reportPending,
         });
       },
     );

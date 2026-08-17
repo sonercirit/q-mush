@@ -5,6 +5,7 @@ import { agentSessions } from "../shared/database/schema.ts";
 import type {
   AgentSessionDetail,
   AgentSessionSummary,
+  SessionRuntimePending,
 } from "../shared/session-model.ts";
 import { userSessionFilter } from "./session-filter.ts";
 import { storedPendingInputs } from "./session-pending-inputs.ts";
@@ -23,6 +24,11 @@ import {
 } from "./session-token-usage-store.ts";
 import { readSessionTurns } from "./session-turn-store.ts";
 
+type ReadRuntimePending = (
+  sessionId: string,
+  generation: number,
+) => SessionRuntimePending | undefined;
+
 type ReadPendingQuestions = (
   userId: string,
   sessionId: string,
@@ -34,6 +40,7 @@ export function readStoredSessionDetail(
   userId: string,
   sessionId: string,
   workspaceId?: string,
+  readRuntimePending: ReadRuntimePending = () => undefined,
 ): AgentSessionDetail | undefined {
   const stored = selectStoredSessions(
     database,
@@ -44,7 +51,12 @@ export function readStoredSessionDetail(
   }
 
   return {
-    ...summarizeStoredSession(stored),
+    ...summarizeStoredSession(
+      stored,
+      stored.status === "running"
+        ? (readRuntimePending(sessionId, stored.executionGeneration) ?? null)
+        : null,
+    ),
     modelContextTokens: stored.maxContextTokens,
     pendingQuestions: readPendingQuestions(userId, sessionId),
     agentFile: storedSessionAgentFile(database, sessionId),
@@ -70,6 +82,7 @@ export function listStoredSessions(
   readPendingQuestions: ReadPendingQuestions,
   userId: string,
   workspaceId?: string,
+  readRuntimePending: ReadRuntimePending = () => undefined,
 ): readonly AgentSessionSummary[] {
   return selectStoredSessions(
     database,
@@ -78,7 +91,12 @@ export function listStoredSessions(
     .orderBy(desc(agentSessions.updatedAt), desc(agentSessions.id))
     .all()
     .map((stored) => {
-      const summary = summarizeStoredSession(stored);
+      const summary = summarizeStoredSession(
+        stored,
+        stored.status === "running"
+          ? (readRuntimePending(stored.id, stored.executionGeneration) ?? null)
+          : null,
+      );
       return {
         ...summary,
         pendingQuestions: readPendingQuestions(userId, summary.id),

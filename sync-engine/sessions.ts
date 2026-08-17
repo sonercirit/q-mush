@@ -104,7 +104,7 @@ class DrizzleSessionIntegration
   readonly #finisher: SessionFinisher;
   readonly #failureReconciler = new SessionFailureReconciler();
   readonly #runners: RunnerIntegration;
-  readonly #runtimes = new SessionRuntimes();
+  readonly #runtimes: SessionRuntimes;
   readonly #restart;
   readonly #restartGate: SessionRestartCoordinator;
   readonly #removal: RunnerRemovalCoordinator;
@@ -140,6 +140,7 @@ class DrizzleSessionIntegration
       dependencies.modelFactory ??
       ((options) => new ChatCompletionsAgentModel(options));
     this.#now = dependencies.now ?? Date.now;
+    this.#runtimes = new SessionRuntimes(this.#now);
     this.#providers = providers;
     this.#credentialPool = new ModelCredentialPool({
       database,
@@ -151,6 +152,7 @@ class DrizzleSessionIntegration
     this.#store = new SessionStore(
       database,
       dependencies.randomId ?? createUuidV7,
+      this.#runtimes,
     );
     this.#shutdown = new ShutdownInterruptedSessionStore({
       database,

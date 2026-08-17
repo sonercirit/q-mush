@@ -42,6 +42,13 @@ function runDurationText(container: ParentNode): string | undefined {
   );
 }
 
+function pendingComponentText(container: ParentNode): string | undefined {
+  return (
+    container.querySelector("[data-session-pending-component='true']")
+      ?.textContent ?? undefined
+  );
+}
+
 function stepDurationText(container: ParentNode): string | undefined {
   return (
     container.querySelector("[data-session-step-duration='true']")
@@ -110,6 +117,20 @@ test("a running session shows and ticks its current step duration", () => {
 
   expect(stepDurationText(container)).toBeUndefined();
   expect(runDurationText(container)).toBeUndefined();
+});
+
+test("a running session identifies its pending runtime component", () => {
+  const { container, controller, queued } = mountQueuedSession(30_000);
+
+  controller.applyDetail({
+    ...queued,
+    activeStartedAt: Date.now(),
+    runtimePending: { component: "provider_admission", since: Date.now() },
+    status: "running",
+    updatedAt: queued.updatedAt + 1,
+  });
+
+  expect(pendingComponentText(container)).toBe("Pending: provider admission");
 });
 
 test("a retained sidebar row keeps ticking its run duration", () => {

@@ -50,6 +50,7 @@ import {
   promptCacheBreakpoints,
   withPromptCacheControl,
 } from "./provider-prompt-cache.ts";
+import { providerRequestStateHandler } from "./provider-request-lifecycle.ts";
 import type {
   ProviderModelRequest,
   ProviderRequestProtocol,
@@ -401,6 +402,8 @@ export class ChatCompletionsAgentModel implements AgentModel {
   readonly #maxOutputTokens: number | null;
   readonly #model: string;
   readonly #onDelta: ((delta: ProviderTextDelta) => void) | undefined;
+  readonly #onRequestState:
+    AgentModelRequestOptions["onRequestState"] | undefined;
   readonly #onStepStart: () => void;
   readonly #openRouterProviderRouting: OpenRouterProviderRouting | undefined;
   readonly #promptCacheKey: string | undefined;
@@ -421,6 +424,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
     this.#maxOutputTokens = options.maxOutputTokens ?? null;
     this.#model = options.model;
     this.#onDelta = options.onDelta;
+    this.#onRequestState = options.onRequestState;
     this.#onStepStart = options.onStepStart ?? (() => undefined);
     this.#openRouterProviderRouting =
       options.openRouterProviderRouting ??
@@ -558,10 +562,12 @@ export class ChatCompletionsAgentModel implements AgentModel {
 
   #webSocketOptions(signal: AbortSignal | undefined): {
     onDelta?: (delta: ProviderTextDelta) => void;
+    onRequestState: NonNullable<AgentModelRequestOptions["onRequestState"]>;
     signal?: AbortSignal;
   } {
     return {
       ...(this.#onDelta === undefined ? {} : { onDelta: this.#onDelta }),
+      onRequestState: providerRequestStateHandler(this.#onRequestState),
       ...(signal === undefined ? {} : { signal }),
     };
   }
@@ -598,6 +604,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
 
   #completeHttp(...parameters: CompletionArguments): Promise<AgentModelStep> {
     const input = completionInput(parameters);
+    this.#onRequestState?.("active");
     const protocol = this.#httpProtocol();
     return completeProviderHttp(
       {

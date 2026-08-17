@@ -240,8 +240,8 @@ describe("agent sessions", () => {
 
     expect(await expectSessionReaches(setup, response, "failed")).toMatchObject(
       {
-        // Four 3s post-start ticks: poll, agent file, step, failure write.
-        activeDurationMs: 12_000,
+        // Pending runner/provider reports add two clock ticks.
+        activeDurationMs: 18_000,
         activeStartedAt: null,
         messages: [
           { role: "user" },
@@ -314,8 +314,8 @@ describe("agent sessions", () => {
     const response = await setup.sessions.collection(imageRequest);
 
     expect(await expectSessionReaches(setup, response, "idle")).toMatchObject({
-      // Four 3s post-start ticks: poll, agent file, step, message write.
-      activeDurationMs: 12_000,
+      // Pending runner/provider reports add two clock ticks.
+      activeDurationMs: 18_000,
       activeStartedAt: null,
       messages: [
         {

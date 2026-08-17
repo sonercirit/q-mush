@@ -32,25 +32,39 @@ function readStatus(value: unknown): AgentSessionStatus | undefined {
   }
 }
 
-const RESTART_HANDOFF_KEYS = new Set([
+function exactObjectKeys(value: object, expected: readonly string[]): boolean {
+  const keys = Object.keys(value);
+  return (
+    keys.length === expected.length &&
+    expected.every((key) => keys.includes(key))
+  );
+}
+
+const RESTART_HANDOFF_KEYS = [
   "executionGeneration",
   "operation",
   "pendingInput",
   "requestedBy",
   "restartId",
-]);
+] as const;
+
+function readRecord(
+  value: unknown,
+): Readonly<Record<string, unknown>> | null | undefined {
+  return value === null ? null : isRecord(value) ? value : undefined;
+}
 
 function readRestartHandoff(
   value: unknown,
 ): AgentSessionSummary["restartHandoff"] | undefined {
-  if (value === null) return null;
-  if (!isRecord(value)) return undefined;
-  const executionGeneration = readFiniteNumber(value["executionGeneration"]);
-  const keys = Object.keys(value);
-  const operation = value["operation"];
-  const pendingInput = value["pendingInput"];
-  const requestedBy = value["requestedBy"];
-  const restartId = value["restartId"];
+  const record = readRecord(value);
+  if (record === null) return null;
+  if (record === undefined) return undefined;
+  const executionGeneration = readFiniteNumber(record["executionGeneration"]);
+  const operation = record["operation"];
+  const pendingInput = record["pendingInput"];
+  const requestedBy = record["requestedBy"];
+  const restartId = record["restartId"];
   return executionGeneration !== undefined &&
     executionGeneration >= 0 &&
     Number.isSafeInteger(executionGeneration) &&
@@ -63,8 +77,7 @@ function readRestartHandoff(
     typeof restartId === "string" &&
     restartId.length > 0 &&
     restartId.length <= 200 &&
-    keys.length === RESTART_HANDOFF_KEYS.size &&
-    keys.every((key) => RESTART_HANDOFF_KEYS.has(key))
+    exactObjectKeys(record, RESTART_HANDOFF_KEYS)
     ? {
         executionGeneration,
         operation,
@@ -72,6 +85,37 @@ function readRestartHandoff(
         requestedBy,
         restartId,
       }
+    : undefined;
+}
+
+function isRuntimePendingComponent(
+  value: unknown,
+): value is NonNullable<AgentSessionSummary["runtimePending"]>["component"] {
+  switch (value) {
+    case "engine_tool":
+    case "provider_admission":
+    case "provider_request":
+    case "runner_command":
+    case "startup":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function readRuntimePending(
+  value: unknown,
+): AgentSessionSummary["runtimePending"] | undefined {
+  if (value === null) return null;
+  const record = isRecord(value) ? value : undefined;
+  if (record === undefined) return undefined;
+  const component = record["component"];
+  const since = readFiniteNumber(record["since"]);
+  return isRuntimePendingComponent(component) &&
+    since !== undefined &&
+    Number.isSafeInteger(since) &&
+    exactObjectKeys(record, ["component", "since"])
+    ? { component, since }
     : undefined;
 }
 
@@ -126,6 +170,7 @@ export function readSessionSummary(value: unknown): AgentSessionSummary {
   const parentSessionId = readNullableString(value["parentSessionId"]);
   const reasoningEffort = readNullableString(value["reasoningEffort"]);
   const restartHandoff = readRestartHandoff(value["restartHandoff"]);
+  const runtimePending = readRuntimePending(value["runtimePending"]);
   const runnerId = value["runnerId"];
   const runnerRequired = value["runnerRequired"];
   const status = readStatus(value["status"]);
@@ -186,6 +231,8 @@ export function readSessionSummary(value: unknown): AgentSessionSummary {
     reasoningEffort === undefined ||
     (reasoningEffort !== null && !isAgentReasoningEffort(reasoningEffort)) ||
     restartHandoff === undefined ||
+    runtimePending === undefined ||
+    (runtimePending !== null && status !== "running") ||
     (restartHandoff !== null &&
       restartHandoff.executionGeneration !== generation) ||
     (status === "paused" &&
@@ -235,6 +282,7 @@ export function readSessionSummary(value: unknown): AgentSessionSummary {
     providerPricing,
     reasoningEffort,
     restartHandoff,
+    runtimePending,
     runnerId,
     runnerRequired,
     status,
@@ -276,6 +324,7 @@ function summaryFields(detail: AgentSessionDetail): AgentSessionSummary {
     providerPricing: detail.providerPricing,
     reasoningEffort: detail.reasoningEffort,
     restartHandoff: detail.restartHandoff,
+    runtimePending: detail.runtimePending,
     runnerId: detail.runnerId,
     runnerRequired: detail.runnerRequired,
     status: detail.status,
