@@ -1,3 +1,4 @@
+import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 interface BrowserTestProcess {
@@ -32,7 +33,7 @@ export async function runBrowserTests(
   const browserTests = dependencies.spawn(
     ["vitest", "run", "--config", "vitest.browser.config.ts", ...arguments_],
     {
-      cwd: fileURLToPath(new URL("..", import.meta.url)),
+      cwd: dirname(dirname(fileURLToPath(import.meta.url))),
       env: headlessEnvironment(),
       stderr: "inherit",
       stdin: "inherit",

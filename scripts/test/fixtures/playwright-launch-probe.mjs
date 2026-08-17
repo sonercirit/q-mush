@@ -1,39 +1,45 @@
-import { registerHooks } from "node:module";
+import process from "node:process";
+import { chromium } from "playwright";
 
-const PLAYWRIGHT_ENTRY = "/node_modules/playwright/index.mjs";
-const PLAYWRIGHT_IMPORT = "import playwright from 'playwright-core';";
-const PROBE = `
-const playwrightCore = await import("playwright-core/lib/coreBundle");
-playwright.chromium.launch = (options = {}) => {
-  const serverPlaywright = playwrightCore.server.createPlaywright({
-    sdkLanguage: "javascript",
-  });
-  const browserType = serverPlaywright.chromium;
-  const prototype = Object.getPrototypeOf(Object.getPrototypeOf(browserType));
-  const effective = prototype._validateLaunchOptions.call(browserType, options);
-  console.log(
-    "PLAYWRIGHT_LAUNCH_PROBE=" +
-      JSON.stringify({
-        configuredHeadless: options.headless,
-        effectiveHeadless: effective.headless,
-        playwrightDebug: process.env.PWDEBUG,
-      }),
+const REQUIRED_NODE_VERSION = "24.15.0";
+const EXPECTED_FAILURE =
+  "Playwright launch probe executable unexpectedly started";
+const LAUNCH_PATTERN = /<launching> ([^\n]+)/u;
+
+if (process.versions.node !== REQUIRED_NODE_VERSION) {
+  process.stderr.write(
+    `Playwright launch probe requires Node ${REQUIRED_NODE_VERSION}; found ${process.versions.node}. Use the CI-pinned Node version.\n`,
   );
-  return Promise.reject(new Error("Browser launch captured by policy probe"));
-};
-`;
+  process.exitCode = 2;
+} else {
+  const options = { executablePath: process.execPath, headless: true };
 
-registerHooks({
-  load(url, context, nextLoad) {
-    const result = nextLoad(url, context);
-    if (!url.endsWith(PLAYWRIGHT_ENTRY)) return result;
-    const source = result.source?.toString();
-    if (source === undefined || !source.includes(PLAYWRIGHT_IMPORT)) {
-      throw new Error("Could not instrument the Playwright entrypoint");
+  try {
+    const browserServer = await chromium.launchServer(options);
+    await browserServer.close();
+    throw new Error(EXPECTED_FAILURE);
+  } catch (error) {
+    if (!(error instanceof Error)) {
+      throw new TypeError(
+        "Playwright launch probe received a non-Error failure",
+        { cause: error },
+      );
     }
-    return {
-      ...result,
-      source: source.replace(PLAYWRIGHT_IMPORT, PLAYWRIGHT_IMPORT + PROBE),
-    };
-  },
-});
+    const launchCommand = LAUNCH_PATTERN.exec(error.message)?.[1];
+    if (launchCommand === undefined) {
+      process.stderr.write(
+        `Playwright launch probe could not inspect launch arguments: ${error.message}\n`,
+      );
+      process.exitCode = 2;
+    } else {
+      process.stdout.write(
+        `PLAYWRIGHT_LAUNCH_PROBE=${JSON.stringify({
+          configuredHeadless: options.headless,
+          effectiveHeadless: launchCommand.includes(" --headless "),
+          playwrightDebug: process.env.PWDEBUG,
+        })}\n`,
+      );
+      process.exitCode = 1;
+    }
+  }
+}

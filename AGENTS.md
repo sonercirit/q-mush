@@ -42,8 +42,8 @@ Living project memory.
   `test:browser` pins instance-level headless mode and disables inherited
   `PWDEBUG` before running real Chromium.
 - `bun run check` runs all static checks; `format`/`lint:fix` write fixes.
-- CI (`.github/workflows/checks.yml`) runs tests/check/build/whitespace on Bun
-  1.3.14 with a frozen lockfile.
+- CI runs tests/check/build/whitespace on Bun 1.3.14 with a frozen lockfile; the
+  test lane pins Node 24.15.0 for browser policy probes.
 
 ## Architecture and Conventions
 

@@ -1,10 +1,11 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { chmod, copyFile, readFile, writeFile } from "node:fs/promises";
+import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type LaunchOptions } from "playwright";
 import { afterEach, expect, test } from "vitest";
 import { createVitest, parseCLI } from "vitest/node";
 import { isRecord } from "../../shared/validation.ts";
+import { withTemporaryDirectory } from "./temporary-directory.ts";
 
 const ROOT_DIRECTORY = join(import.meta.dirname, "../..");
 const PLAYWRIGHT_LAUNCH_PROBE = fileURLToPath(
@@ -86,50 +87,80 @@ interface PlaywrightLaunchResult {
 }
 
 async function runGuardedPlaywrightLaunchProbe(): Promise<PlaywrightLaunchResult> {
-  const inheritedPath = process.env["PATH"];
-  const probe = Bun.spawn(["bun", "run", "test:browser"], {
-    cwd: ROOT_DIRECTORY,
-    env: {
-      ...process.env,
-      ...(inheritedPath === undefined
-        ? {}
-        : {
-            PATH: inheritedPath
-              .split(":")
-              .filter((entry) => !entry.startsWith("/tmp/bun-node-"))
-              .join(":"),
-          }),
-      NODE_OPTIONS: `--import=${PLAYWRIGHT_LAUNCH_PROBE}`,
-      PWDEBUG: "1",
+  return withTemporaryDirectory(
+    "q-mush-browser-launch-probe-",
+    async (directory) => {
+      const executable = join(directory, "vitest");
+      const inheritedPath = (process.env["PATH"] ?? "")
+        .split(delimiter)
+        .filter((entry) => !entry.startsWith("/tmp/bun-node-"))
+        .join(delimiter);
+      const node = Bun.which("node", { PATH: inheritedPath });
+      if (node === null) {
+        throw new Error("Playwright launch probe requires Node 24.15.0");
+      }
+      await Promise.all([
+        copyFile(
+          join(ROOT_DIRECTORY, "scripts", "test-browser.ts"),
+          join(directory, "test-browser.ts"),
+        ),
+        copyFile(
+          join(ROOT_DIRECTORY, "scripts", "test-browser-runner.ts"),
+          join(directory, "test-browser-runner.ts"),
+        ),
+        copyFile(
+          join(ROOT_DIRECTORY, "scripts", "script-entry.ts"),
+          join(directory, "script-entry.ts"),
+        ),
+        writeFile(join(directory, "package.json"), '{"type":"module"}'),
+        writeFile(
+          executable,
+          `#!${node}\nawait import(${JSON.stringify(PLAYWRIGHT_LAUNCH_PROBE)});\n`,
+        ),
+      ]);
+      await chmod(executable, 0o755);
+      const probe = Bun.spawn(
+        ["bun", "run", join(directory, "test-browser.ts")],
+        {
+          cwd: ROOT_DIRECTORY,
+          env: {
+            ...process.env,
+            PATH: `${directory}${delimiter}${inheritedPath}`,
+            PWDEBUG: "1",
+          },
+          stderr: "pipe",
+          stdout: "pipe",
+        },
+      );
+      const output = new Response(probe.stdout).text();
+      const errors = new Response(probe.stderr).text();
+      const exitCode = await probe.exited;
+      const [stdout, stderr] = await Promise.all([output, errors]);
+      if (exitCode !== 1) {
+        throw new Error(`Playwright launch probe failed: ${stderr}`);
+      }
+      const result = /PLAYWRIGHT_LAUNCH_PROBE=(\{[^\n]+\})/u.exec(stdout)?.[1];
+      if (result === undefined) {
+        throw new Error(`Playwright launch probe did not run: ${stderr}`);
+      }
+      const parsed: unknown = JSON.parse(result);
+      if (
+        !isRecord(parsed) ||
+        typeof parsed["configuredHeadless"] !== "boolean" ||
+        typeof parsed["effectiveHeadless"] !== "boolean" ||
+        typeof parsed["playwrightDebug"] !== "string"
+      ) {
+        throw new TypeError(
+          "Playwright launch probe returned an invalid result",
+        );
+      }
+      return {
+        configuredHeadless: parsed["configuredHeadless"],
+        effectiveHeadless: parsed["effectiveHeadless"],
+        playwrightDebug: parsed["playwrightDebug"],
+      };
     },
-    stderr: "pipe",
-    stdout: "pipe",
-  });
-  const output = new Response(probe.stdout).text();
-  const errors = new Response(probe.stderr).text();
-  const exitCode = await probe.exited;
-  const [stdout, stderr] = await Promise.all([output, errors]);
-  if (exitCode === 0) {
-    throw new Error("Playwright launch probe unexpectedly passed");
-  }
-  const result = /PLAYWRIGHT_LAUNCH_PROBE=(\{[^\n]+\})/u.exec(stdout)?.[1];
-  if (result === undefined) {
-    throw new Error(`Playwright launch probe did not run: ${stderr}`);
-  }
-  const parsed: unknown = JSON.parse(result);
-  if (
-    !isRecord(parsed) ||
-    typeof parsed["configuredHeadless"] !== "boolean" ||
-    typeof parsed["effectiveHeadless"] !== "boolean" ||
-    typeof parsed["playwrightDebug"] !== "string"
-  ) {
-    throw new TypeError("Playwright launch probe returned an invalid result");
-  }
-  return {
-    configuredHeadless: parsed["configuredHeadless"],
-    effectiveHeadless: parsed["effectiveHeadless"],
-    playwrightDebug: parsed["playwrightDebug"],
-  };
+  );
 }
 
 test("fresh Playwright process proves PWDEBUG defense at effective launch", async () => {
@@ -155,7 +186,15 @@ test("package and CI structurally use the guarded browser launcher", async () =>
         isRecord(step) && typeof step["run"] === "string" ? [step["run"]] : [],
       )
     : [];
+  const workflowSteps: unknown[] = Array.isArray(steps) ? steps : [];
+  const setupNode = workflowSteps.find(
+    (step) => isRecord(step) && step["uses"] === "actions/setup-node@v6",
+  );
+  const nodeConfiguration = isRecord(setupNode) ? setupNode["with"] : undefined;
 
+  expect(
+    isRecord(nodeConfiguration) ? nodeConfiguration["node-version"] : undefined,
+  ).toBe("24.15.0");
   expect(scripts.get("test:browser")).toBe("bun run scripts/test-browser.ts");
   expect(scripts.get("test")).toBe("bun run test:unit && bun run test:browser");
   expect(commands).toContain("bun run test:browser");

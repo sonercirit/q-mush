@@ -49,7 +49,7 @@ test("browser launcher forwards filters while disabling inherited Playwright deb
     "session-detail",
     "--browser.headless=false",
   ]);
-  expect(probe.calls[0]?.options.cwd).toBe(`${ROOT_DIRECTORY}/`);
+  expect(probe.calls[0]?.options.cwd).toBe(ROOT_DIRECTORY);
   expect(probe.calls[0]?.options.env["PWDEBUG"]).toBe("0");
 });
 
