@@ -7,10 +7,8 @@ import {
 import { RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
 import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
 import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
-import {
-  readSessionCredential,
-  type SessionCredentialReaders,
-} from "./session-credential-access.ts";
+import { readSessionCredential } from "./session-credential-access.ts";
+import type { SessionCredentialReaders } from "./session-credential-readers.ts";
 import {
   optionalCredentialRejection,
   requireSessionMetadata,

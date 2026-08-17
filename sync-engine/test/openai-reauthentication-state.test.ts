@@ -1,0 +1,281 @@
+import { Buffer } from "node:buffer";
+import { afterEach, describe, expect, test } from "vitest";
+import { createCredentialCipher } from "../../shared/credential-cipher.ts";
+import { ProviderCredentialStore } from "../../shared/provider-credential-store.ts";
+import { createOpenAiIntegrationFromEnvironment } from "../openai.ts";
+import { ProviderCredentialReauthenticationRequiredError } from "../provider-error.ts";
+import {
+  addTestProviderCredential,
+  addTestUser,
+  createAuthenticatedRequest,
+  createAuthenticatedTestContext,
+  TEST_FOREIGN_USER_ID,
+  TEST_NOW,
+  TEST_USER_ID,
+} from "./authenticated-integration-test-helpers.ts";
+import { closeTrackedDatabases } from "./database-test-helpers.ts";
+import { promiseGate } from "./session-race-test-helpers.ts";
+
+const CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000099";
+const CREDENTIAL_KEY = Buffer.alloc(32, 13).toString("base64url");
+const databases: ReturnType<
+  typeof createAuthenticatedTestContext
+>["database"][] = [];
+
+function openAiRefreshTestContext() {
+  const { auth, database } = createAuthenticatedTestContext();
+  databases.unshift(database);
+  return { auth, database };
+}
+
+function closeRefreshDatabases(): void {
+  closeTrackedDatabases(databases);
+}
+
+afterEach(closeRefreshDatabases);
+
+function setupRefresh(response: Response | Promise<Response>) {
+  const { auth, database } = openAiRefreshTestContext();
+  const store = new ProviderCredentialStore(
+    database,
+    createCredentialCipher(CREDENTIAL_KEY),
+    "openai",
+    () => CREDENTIAL_ID,
+  );
+  store.add(
+    TEST_USER_ID,
+    JSON.stringify({
+      access: "revoked-access",
+      expires: TEST_NOW + 7 * 24 * 60 * 60 * 1_000,
+      refresh: "revoked-refresh",
+    }),
+    { accountId: "account", label: "OpenAI account" },
+    "oauth",
+    TEST_NOW,
+  );
+  const environment = {
+    OPENAI_CREDENTIAL_KEY: CREDENTIAL_KEY,
+    OPENAI_CLIENT_ID: "test-client",
+  };
+  let refreshRequests = 0;
+  const dependencies = {
+    database,
+    fetch: () => {
+      refreshRequests += 1;
+      return Promise.resolve(response);
+    },
+    now: () => TEST_NOW,
+  };
+  const integration = createOpenAiIntegrationFromEnvironment(
+    environment,
+    auth,
+    dependencies,
+  );
+  return {
+    database,
+    integration,
+    refreshRequests: () => refreshRequests,
+    store,
+  };
+}
+
+function expectReauthenticationState(
+  store: ProviderCredentialStore,
+  required: boolean,
+): void {
+  expect(store.list(TEST_USER_ID)).toContainEqual(
+    expect.objectContaining({
+      id: CREDENTIAL_ID,
+      requiresReauthentication: required,
+    }),
+  );
+}
+
+function gatedRefreshSetup() {
+  const refresh = promiseGate<Response>();
+  return { refresh, setup: setupRefresh(refresh.wait()) };
+}
+
+function forceRefresh(
+  setup: ReturnType<typeof setupRefresh>,
+): ReturnType<typeof setup.integration.readCredential> {
+  return setup.integration.readCredential(
+    TEST_USER_ID,
+    CREDENTIAL_ID,
+    undefined,
+    { force: true },
+  );
+}
+
+function releaseSuccessfulRefresh(
+  refresh: ReturnType<typeof promiseGate<Response>>,
+): void {
+  refresh.release(
+    Response.json({
+      access_token: "replacement-access",
+      expires_in: 3_600,
+      refresh_token: "replacement-refresh",
+    }),
+  );
+}
+
+const EXTERNAL_ROTATION_SECRET = JSON.stringify({
+  access: "external-access",
+  expires: TEST_NOW + 7_200_000,
+  refresh: "external-refresh",
+});
+
+function replacementSecret(): string {
+  return JSON.stringify({
+    access: "replacement-access",
+    expires: TEST_NOW + 3_600_000,
+    refresh: "replacement-refresh",
+  });
+}
+
+describe("OpenAI terminal OAuth refresh rejection", () => {
+  test("coalesces concurrent forced refreshes and persists the rotated token once", async () => {
+    const gated = gatedRefreshSetup();
+    const { refresh, setup } = gated;
+    const first = forceRefresh(setup);
+    const second = forceRefresh(setup);
+
+    await refresh.entered;
+    releaseSuccessfulRefresh(refresh);
+
+    await expect(Promise.all([first, second])).resolves.toMatchObject([
+      { secret: replacementSecret() },
+      { secret: replacementSecret() },
+    ]);
+    expect(setup.refreshRequests()).toBe(1);
+    expectReauthenticationState(setup.store, false);
+  });
+
+  test("ignores a stale refresh rejection after another request rotates the credential", async () => {
+    const { refresh, setup } = gatedRefreshSetup();
+    const first = forceRefresh(setup);
+
+    await refresh.entered;
+    setup.store.updateSecret(
+      TEST_USER_ID,
+      CREDENTIAL_ID,
+      EXTERNAL_ROTATION_SECRET,
+      TEST_NOW,
+    );
+    const lateUnauthorized = forceRefresh(setup);
+    refresh.release(
+      Response.json({ error: "refresh_token_reused" }, { status: 401 }),
+    );
+
+    await expect(lateUnauthorized).resolves.toMatchObject({
+      secret: EXTERNAL_ROTATION_SECRET,
+    });
+    await expect(first).resolves.toMatchObject({
+      secret: EXTERNAL_ROTATION_SECRET,
+    });
+    expect(setup.refreshRequests()).toBe(1);
+    const [listed] = setup.store.list(TEST_USER_ID);
+    expect(listed?.requiresReauthentication).toBe(false);
+  });
+
+  test("reuses an already rotated credential without issuing another refresh", async () => {
+    const setup = setupRefresh(
+      Response.json({ error: "unexpected" }, { status: 500 }),
+    );
+    setup.store.updateSecret(
+      TEST_USER_ID,
+      CREDENTIAL_ID,
+      EXTERNAL_ROTATION_SECRET,
+      TEST_NOW,
+    );
+
+    await expect(
+      setup.integration.readCredential(TEST_USER_ID, CREDENTIAL_ID, undefined, {
+        force: true,
+        rejectedSecret: replacementSecret(),
+      }),
+    ).resolves.toMatchObject({ secret: EXTERNAL_ROTATION_SECRET });
+    expect(setup.refreshRequests()).toBe(0);
+  });
+
+  test("cannot mark another user's or provider's credential", () => {
+    const { database } = openAiRefreshTestContext();
+    addTestUser(database);
+    addTestProviderCredential(database, "foreign-credential", "openai", {
+      source: "oauth",
+      userId: TEST_FOREIGN_USER_ID,
+    });
+    addTestProviderCredential(database, "openrouter-credential", "openrouter", {
+      source: "oauth",
+    });
+    const openAiStore = new ProviderCredentialStore(
+      database,
+      createCredentialCipher(CREDENTIAL_KEY),
+      "openai",
+    );
+
+    expect(
+      openAiStore.markRequiresReauthentication(
+        TEST_USER_ID,
+        "openrouter-credential",
+        TEST_NOW,
+      ),
+    ).toBe(false);
+    expect(
+      openAiStore.markRequiresReauthentication(
+        TEST_USER_ID,
+        "foreign-credential",
+        TEST_NOW,
+      ),
+    ).toBe(false);
+  });
+
+  test.each([
+    [401, "refresh_token_invalidated"],
+    [403, "forbidden"],
+    [400, "invalid_grant"],
+    [400, "invalid_client"],
+    [400, "refresh_token_expired"],
+    [400, "refresh_token_reused"],
+  ])(
+    "marks the credential for re-login after status %i",
+    async (status, code) => {
+      const setup = setupRefresh(Response.json({ error: code }, { status }));
+
+      const failure = forceRefresh(setup);
+      await expect(failure).rejects.toBeInstanceOf(
+        ProviderCredentialReauthenticationRequiredError,
+      );
+      expectReauthenticationState(setup.store, true);
+      const summaries = await setup.integration.credentials(
+        createAuthenticatedRequest("/api/openai/credentials"),
+      );
+      const serialized = await summaries.text();
+      expect(serialized).toContain('"requiresReauthentication":true');
+      expect(serialized).not.toContain("revoked-access");
+      expect(serialized).not.toContain("revoked-refresh");
+      const cannotUpdate = setup.store.updateSecret(
+        "another-user",
+        CREDENTIAL_ID,
+        "attacker-secret",
+        TEST_NOW + 1,
+      );
+      expect(cannotUpdate).toBe(false);
+      const cannotMark = setup.store.markRequiresReauthentication(
+        "another-user",
+        CREDENTIAL_ID,
+        TEST_NOW + 1,
+      );
+      expect(cannotMark).toBe(false);
+      expect(
+        setup.store.updateSecret(
+          TEST_USER_ID,
+          CREDENTIAL_ID,
+          replacementSecret(),
+          TEST_NOW + 2,
+        ),
+      ).toBe(true);
+      expectReauthenticationState(setup.store, false);
+    },
+  );
+});

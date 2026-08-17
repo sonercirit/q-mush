@@ -18,8 +18,8 @@ import {
   type OAuthRuntime,
 } from "./oauth.ts";
 import { readOpenAiOAuthCredential } from "./openai-credential.ts";
+import { openAiRefreshReauthenticationError } from "./openai-refresh-rejection.ts";
 import { createApiKeyMetadataReader } from "./provider-credentials.ts";
-import { ProviderCredentialRejectionError } from "./provider-error.ts";
 import {
   createProviderIntegration,
   readProviderIntegrationConfiguration,
@@ -142,6 +142,7 @@ async function prepareCredential(
   runtime: OAuthRuntime,
   clientId: string,
   credential: ProviderCredentialAccess,
+  force = false,
 ): Promise<string | undefined> {
   if (credential.source !== "oauth") {
     return undefined;
@@ -149,7 +150,10 @@ async function prepareCredential(
 
   const stored = readOpenAiOAuthCredential(credential.secret);
 
-  if (stored.expires > runtime.now() + TOKEN_REFRESH_LEEWAY_MILLISECONDS) {
+  if (
+    !force &&
+    stored.expires > runtime.now() + TOKEN_REFRESH_LEEWAY_MILLISECONDS
+  ) {
     return undefined;
   }
 
@@ -162,28 +166,7 @@ async function prepareCredential(
       refresh_token: stored.refresh,
     },
     "OpenAI rejected the refresh token",
-    async (response) => {
-      if (response.status === 401 || response.status === 403) {
-        return new ProviderCredentialRejectionError(
-          "OpenAI rejected the refresh token",
-          response.status,
-        );
-      }
-      if (response.status !== 400) return undefined;
-      let body: unknown;
-      try {
-        body = await response.json();
-      } catch {
-        return undefined;
-      }
-      const code = isRecord(body) ? body["error"] : undefined;
-      return code === "invalid_grant" || code === "invalid_client"
-        ? new ProviderCredentialRejectionError(
-            "OpenAI rejected the refresh token",
-            400,
-          )
-        : undefined;
-    },
+    openAiRefreshReauthenticationError,
   );
   return readTokenSecret(runtime, tokens, stored.refresh);
 }
@@ -383,8 +366,8 @@ function createOpenAiIntegration(
       workspaceCookie: "q_mush_openai_workspace",
     }),
     dependencies: context.dependencies,
-    prepareCredential: (runtime, credential) =>
-      prepareCredential(runtime, clientId, credential),
+    prepareCredential: (runtime, credential, force) =>
+      prepareCredential(runtime, clientId, credential, force),
     createQuotaReader: createOpenAiQuotaReader,
     createQuotaResetter: createCodexQuotaResetter,
     provider: "openai",

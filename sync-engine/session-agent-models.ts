@@ -1,4 +1,3 @@
-import type { AgentFile } from "../shared/agent-file.ts";
 import type { AgentModel } from "../shared/agent-loop.ts";
 import { createAgentSystemPrompt } from "../shared/agent-prompt.ts";
 import { createUuidV7 } from "../shared/ids.ts";
@@ -11,11 +10,11 @@ import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { ModelConversationCompactor } from "./agent-compaction.ts";
 import {
   agentModelOpenRouterProviderRouting,
+  type AgentCredentialRefresher,
   type AgentModelRequestOptions,
 } from "./agent-model-options.ts";
-import type { RealtimeHub } from "./realtime-hub.ts";
+import type { SessionAgentModelCreationOptions } from "./session-agent-model-options.ts";
 import { sessionToolCacheCapability } from "./session-tool-capability.ts";
-import type { ToolStreamPublisher } from "./tool-stream-publisher.ts";
 
 interface AgentModelFactoryOptions
   extends
@@ -61,6 +60,7 @@ export function createFallbackModel(
     readonly prompt: string | null;
     readonly provider: ProviderId;
     readonly providerPricing: ProviderModelPricing | null;
+    readonly refreshCredential?: AgentCredentialRefresher;
   },
 ): AgentModel {
   return factory({
@@ -71,6 +71,9 @@ export function createFallbackModel(
     ...agentModelRoutingOptions(selection.openRouterProviderTag),
     provider: selection.provider,
     providerPricing: selection.providerPricing,
+    ...(selection.refreshCredential === undefined
+      ? {}
+      : { refreshCredential: selection.refreshCredential }),
     systemPrompt:
       selection.prompt ??
       "Describe the supplied attachment faithfully for another text-only model. Return only the useful textual result.",
@@ -84,6 +87,7 @@ function modelOptions(
   systemPrompt: string,
   onDelta?: AgentModelFactoryOptions["onDelta"],
   onStepStart?: AgentModelFactoryOptions["onStepStart"],
+  refreshCredential?: AgentCredentialRefresher,
 ): AgentModelFactoryOptions {
   return {
     adaptiveThinking: detail.adaptiveThinking,
@@ -104,24 +108,15 @@ function modelOptions(
     provider: detail.provider,
     providerPricing: detail.providerPricing,
     reasoningEffort: detail.reasoningEffort,
+    ...(refreshCredential === undefined ? {} : { refreshCredential }),
     systemPrompt,
     tools: detail.tools,
   };
 }
 
-export function createSessionAgentModels(options: {
-  readonly agentFile: AgentFile | null;
-  readonly credential: ProviderCredentialAccess;
-  readonly detail: AgentSessionDetail;
-  readonly factory: AgentModelFactory;
-  readonly id?: () => string;
-  readonly isCurrent: () => boolean;
-  readonly onStepStart?: () => void;
-  readonly realtime: RealtimeHub | undefined;
-  readonly streamId?: string;
-  readonly toolStream?: ToolStreamPublisher;
-  readonly userId: string;
-}): SessionAgentModels {
+export function createSessionAgentModels(
+  options: SessionAgentModelCreationOptions,
+): SessionAgentModels {
   const id = options.id ?? createUuidV7;
   let streamId = options.streamId ?? id();
   const startStep = (): void => {
@@ -203,6 +198,7 @@ export function createSessionAgentModels(options: {
         systemPrompt,
         onDelta,
         startStep,
+        options.refreshCredential,
       ),
     ),
     createCompactor: () => {
@@ -217,6 +213,7 @@ export function createSessionAgentModels(options: {
             // The compactor stream ID is already fresh; its step start only
             // needs the persistence hook, not another stream reset.
             options.onStepStart,
+            options.refreshCredential,
           ),
         ),
         publishCompactionRequest,

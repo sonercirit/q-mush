@@ -23,23 +23,19 @@ import type {
 } from "../shared/session-model.ts";
 import { forEachAssistantToolCall } from "./agent-conversation.ts";
 import { estimateAgentStepCost } from "./agent-cost.ts";
-import { createAgentSkills, type AgentSkillExecutor } from "./agent-skills.ts";
-import {
-  isAskQuestionsPause,
-  isAskQuestionsToolName,
-  pauseForAskQuestions,
-} from "./ask-questions-pause.ts";
+import { createAgentSkills } from "./agent-skills.ts";
 import { explainAttachment } from "./attachment-fallback-model.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
 import { loadSessionAgentFile } from "./session-agent-file.ts";
 import { runCompactingAgentLoop } from "./session-agent-loop.ts";
-import {
-  createSessionAgentModels,
-  type AgentModelFactory,
-  type SessionAgentModels,
-} from "./session-agent-models.ts";
+import type { AgentModelFactory } from "./session-agent-models.ts";
 import { currentExecutionTools } from "./session-agent-tool-authority.ts";
+import {
+  boundRuntimeToolOutput,
+  executeAgentTool,
+  type AgentToolDispatcher,
+} from "./session-agent-tool-execution.ts";
 import {
   executeSessionAgentTool,
   type SessionAgentToolActions,
@@ -53,12 +49,16 @@ import {
   discoverCurrentSessionModel,
   sessionRequestMetadata,
 } from "./session-current-model.ts";
+import { sessionModelContextOptions } from "./session-model-context-options.ts";
 import type { AttachmentFallbackRuntimeResources } from "./session-model-resources.ts";
 import { SessionRecorder } from "./session-recorder.ts";
+import {
+  createRuntimeSessionAgentModels,
+  type RuntimeSessionAgentModels,
+} from "./session-runtime-models.ts";
 import { executeSessionSleepTool } from "./session-sleep-tool.ts";
 import { waitForSessionSteeringInput } from "./session-steering-wakeup.ts";
 import type { SessionStore } from "./session-store.ts";
-import { boundSessionToolOutput } from "./session-tool-output.ts";
 import { ToolStreamPublisher } from "./tool-stream-publisher.ts";
 
 export interface SessionAgentRuntimeDependencies extends AttachmentFallbackRuntimeResources {
@@ -89,10 +89,7 @@ function writeRuntime(
   write(runtime.detail.id, runtime.now(), runtime.detail.generation);
   runtime.notify();
 }
-
 function markSessionStepStart(runtime: SessionAgentRuntimeDependencies): void {
-  // Status- and generation-guarded: a racing stop or restart makes this
-  // write match zero rows instead of throwing.
   const { store } = runtime;
   writeRuntime(runtime, store.markRuntimeStepStart.bind(store));
 }
@@ -106,19 +103,6 @@ function recordRuntimeUsage(
   });
 }
 
-function recordCompactionContext(
-  runtime: SessionAgentRuntimeDependencies,
-  contextTokens: number | null,
-): void {
-  if (contextTokens !== null) {
-    recordRuntimeUsage(runtime, {
-      contextTokens,
-      costBasis: null,
-      costUsd: null,
-    });
-  }
-}
-
 function recordCompaction(
   runtime: SessionAgentRuntimeDependencies,
   summary: string,
@@ -126,7 +110,12 @@ function recordCompaction(
   startedAt: number,
   terminal = false,
 ): void {
-  recordCompactionContext(runtime, usage.contextTokens);
+  if (usage.contextTokens !== null)
+    recordRuntimeUsage(runtime, {
+      contextTokens: usage.contextTokens,
+      costBasis: null,
+      costUsd: null,
+    });
   writeRuntime(runtime, (sessionId, now, generation) => {
     if (terminal) {
       runtime.store.compactRuntimeTerminal(
@@ -185,10 +174,6 @@ async function executeForSession<Result>(
   }
 }
 
-export function isRestartHandoffError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "RestartHandoff";
-}
-
 function sessionConversation(
   runtime: SessionAgentRuntimeDependencies,
 ): ReturnType<SessionStore["conversation"]> {
@@ -204,7 +189,7 @@ async function loadModels(
     readonly streamId?: string;
     readonly toolStream?: ToolStreamPublisher;
   } = {},
-): Promise<SessionAgentModels> {
+): Promise<RuntimeSessionAgentModels> {
   const agentFile = await executeForSession(runtime, () =>
     loadSessionAgentFile(
       runtime.broker,
@@ -223,15 +208,11 @@ async function loadModels(
     },
     runtime.signal,
   );
-  const models = createSessionAgentModels({
+  const modelContext = sessionModelContextOptions({
     agentFile,
     credential: runtime.credential,
     detail: { ...runtime.detail, ...metadata },
-    factory: runtime.modelFactory,
     isCurrent: runtime.isCurrent,
-    onStepStart: () => {
-      markSessionStepStart(runtime);
-    },
     realtime: runtime.realtime,
     ...(options.streamId === undefined ? {} : { streamId: options.streamId }),
     ...(options.toolStream === undefined
@@ -239,7 +220,14 @@ async function loadModels(
       : { toolStream: options.toolStream }),
     userId: runtime.userId,
   });
-  return models;
+  return createRuntimeSessionAgentModels({
+    ...modelContext,
+    factory: runtime.modelFactory,
+    markStepStart: () => {
+      markSessionStepStart(runtime);
+    },
+    readCredential: runtime.readCredential,
+  });
 }
 
 export async function compactSessionConversation(
@@ -282,113 +270,6 @@ export async function compactSessionConversation(
     return "complete";
   } finally {
     models.publishCompactionSettled();
-  }
-}
-
-const RESTART_INTERRUPTED_TOOL_OUTPUT =
-  "Error: the runner disconnected before this tool call returned; retry it after restart.";
-
-type AgentToolDispatcher = (
-  ...parameters: Parameters<AgentSkillExecutor>
-) => Promise<RunnerCommandResult>;
-
-function restartInterruptedToolResult(): RunnerCommandResult {
-  return { output: RESTART_INTERRUPTED_TOOL_OUTPUT, state: "canceled" };
-}
-
-function boundRuntimeToolOutput(
-  runtime: SessionAgentRuntimeDependencies,
-  signal: AbortSignal,
-  result: RunnerCommandResult,
-): Promise<RunnerCommandResult> {
-  return boundSessionToolOutput(
-    {
-      broker: runtime.broker,
-      detail: runtime.detail,
-      isCurrent: runtime.isCurrent,
-      signal,
-    },
-    result,
-  );
-}
-
-async function executeAgentTool(
-  runtime: SessionAgentRuntimeDependencies,
-  stepTools: ReadonlySet<AgentSessionToolName>,
-  currentTools: () => ReadonlySet<AgentSessionToolName> | undefined,
-  skills: ReturnType<typeof createAgentSkills>,
-  dispatchTool: AgentToolDispatcher,
-  toolSignal: AbortSignal,
-  call: Parameters<typeof runCompactingAgentLoop>[0]["executeTool"] extends (
-    input: infer Input,
-  ) => Promise<RunnerCommandResult | string>
-    ? Input
-    : never,
-): Promise<RunnerCommandResult> {
-  if (isRestartHandoffError(toolSignal.reason)) {
-    return restartInterruptedToolResult();
-  }
-  try {
-    if (
-      !isAgentSessionToolName(call.name) ||
-      !stepTools.has(call.name) ||
-      currentTools()?.has(call.name) !== true
-    ) {
-      return {
-        output: `Error: ${call.name} is not enabled for this session.`,
-        state: "failed",
-      };
-    }
-    if (isAskQuestionsToolName(call.name)) {
-      return {
-        output: pauseForAskQuestions(
-          {
-            notify: (userId, sessionId) => {
-              if (
-                userId === runtime.userId &&
-                sessionId === runtime.detail.id
-              ) {
-                runtime.notify();
-              }
-            },
-            now: runtime.now,
-            questions: runtime.store.questions(),
-          },
-          {
-            arguments: call.arguments,
-            executionGeneration: runtime.detail.generation,
-            selected: stepTools.has("ask_questions"),
-            sessionId: runtime.detail.id,
-            source: "direct",
-            toolCallId: call.id,
-            userId: runtime.userId,
-          },
-        ),
-        state: "completed",
-      };
-    }
-    const skillOutput = skills.executeResult(
-      call.name,
-      call.arguments,
-      toolSignal,
-      call.id,
-    );
-    const result = await (skillOutput ??
-      dispatchTool(call.name, call.arguments, toolSignal, call.id));
-    return skillOutput === undefined
-      ? result
-      : await boundRuntimeToolOutput(runtime, toolSignal, result);
-  } catch (error) {
-    if (isAskQuestionsPause(error)) {
-      throw error;
-    }
-    if (
-      isRestartHandoffError(error) ||
-      isRestartHandoffError(toolSignal.reason)
-    ) {
-      return restartInterruptedToolResult();
-    }
-    throw error;
   }
 }
 
@@ -499,6 +380,9 @@ export async function runSessionAgent(
           markSessionStepStart(runtime);
         },
         prompt: typeof promptValue === "string" ? promptValue : null,
+        ...(models.attachmentRefreshCredential === undefined
+          ? {}
+          : { refreshCredential: models.attachmentRefreshCredential }),
         resources: runtime,
         userId: runtime.userId,
         workspaceId: runtime.detail.workspaceId,

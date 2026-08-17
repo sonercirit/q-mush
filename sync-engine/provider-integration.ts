@@ -23,14 +23,15 @@ import {
   type OAuthEndpoints,
   type OAuthRuntime,
 } from "./oauth.ts";
-import type {
-  ProviderCredentialRead,
-  ProviderCredentialReader,
-} from "./provider-credential-reader.ts";
+import type { ProviderCredentialReader } from "./provider-credential-reader.ts";
 import {
   ProviderCredentialEndpoints,
   type ProviderCredentialInputDetails,
 } from "./provider-credentials.ts";
+import {
+  createPreparedCredentialReader,
+  type ProviderCredentialPreparer,
+} from "./provider-prepared-credential.ts";
 import { ProviderQuotaEndpoints } from "./provider-quota-endpoints.ts";
 import type {
   ProviderQuotaReader,
@@ -118,21 +119,18 @@ export function createProviderIntegration(options: {
     readonly readBaseUrl?: (value: unknown) => string | undefined;
   };
   readonly dependencies: OAuthDependencies;
-  readonly prepareCredential?: (
-    runtime: OAuthRuntime,
-    credential: ProviderCredentialAccess,
-  ) => Promise<string | undefined>;
+  readonly prepareCredential?: ProviderCredentialPreparer;
   readonly prepareSessionCredentialProviderState?: (
     context: SessionCredentialProviderPreparationContext & {
       readonly credential: ProviderCredentialAccess;
     },
   ) => Promise<SessionCredentialProviderPreparationResult>;
-  readonly provider: ProviderId;
-  readonly readCredentialDetails: CredentialDetailsReader;
   readonly createQuotaReader: (runtime: OAuthRuntime) => ProviderQuotaReader;
   readonly createQuotaResetter: (
     runtime: OAuthRuntime,
   ) => ProviderQuotaResetter;
+  readonly provider: ProviderId;
+  readonly readCredentialDetails: CredentialDetailsReader;
 }): ProviderIntegration {
   const runtime = createOAuthRuntime(options.dependencies);
   const store =
@@ -219,35 +217,16 @@ export function createProviderIntegration(options: {
           runtime,
         );
 
-  const readCredential: ProviderCredentialRead = async (
-    userId,
-    credentialId,
-    workspaceId,
-  ) => {
-    const credential = credentials.readCredential(
-      userId,
-      credentialId,
-      workspaceId,
-    );
-
-    if (credential === undefined || options.prepareCredential === undefined) {
-      return credential;
-    }
-
-    const preparedSecret = await options.prepareCredential(runtime, credential);
-
-    if (preparedSecret === undefined) {
-      return credential;
-    }
-
-    credentials.updateCredentialSecret(
-      userId,
-      credentialId,
-      preparedSecret,
-      runtime.now(),
-    );
-    return { ...credential, secret: preparedSecret };
+  const storedCredentials = {
+    persistSecret: credentials.updateCredentialSecret.bind(credentials),
+    readCredential: credentials.readCredential.bind(credentials),
   };
+  const readCredential = createPreparedCredentialReader({
+    credentials: storedCredentials,
+    prepareCredential: options.prepareCredential,
+    runtime,
+    store,
+  });
   const quota = new ProviderQuotaEndpoints(options.auth, {
     now: runtime.now,
     quotaStore,

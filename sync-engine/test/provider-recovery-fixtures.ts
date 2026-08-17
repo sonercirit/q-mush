@@ -25,12 +25,14 @@ const USER_MESSAGE = [{ content: "Hello", role: "user" as const }];
 export class FakeProviderSocket extends RecordingTestSocket {
   closeCode: number | undefined;
   closeReason: string | undefined;
+  readonly headers: Readonly<Record<string, string>>;
 
-  constructor() {
+  constructor(headers: Readonly<Record<string, string>> = {}) {
     super({
       closeEvent: () => new CloseEvent("close", { code: 1000 }),
       readyState: WebSocket.CONNECTING,
     });
+    this.headers = headers;
   }
 
   override close(code?: number, reason?: string): void {
@@ -81,8 +83,8 @@ export function recordDelay(delays: number[]): ModelRequestSleep {
 export class FakeProviderSockets {
   readonly created: FakeProviderSocket[] = [];
 
-  readonly create: WebSocketFactory = () => {
-    const socket = new FakeProviderSocket();
+  readonly create: WebSocketFactory = (_url, options) => {
+    const socket = new FakeProviderSocket(options.headers);
     this.created.push(socket);
     return socket;
   };
@@ -109,6 +111,25 @@ export function requireProviderSocket(
   if (socket === undefined) {
     throw new Error(`Provider socket ${String(index)} was not created`);
   }
+  return socket;
+}
+
+function unauthorizedProviderSocket(socket: FakeProviderSocket): void {
+  socket.receive({
+    error: { code: "invalid_token", message: "Access token revoked" },
+    status: 401,
+    type: "error",
+  });
+}
+
+export async function openAndRejectProviderSocket(
+  sockets: FakeProviderSockets,
+  index: number,
+): Promise<FakeProviderSocket> {
+  await sockets.waitForAttempt(index);
+  const socket = requireProviderSocket(sockets, index);
+  socket.open();
+  unauthorizedProviderSocket(socket);
   return socket;
 }
 
@@ -214,8 +235,10 @@ export async function failWebSocketAttempts(
   ) => {
     socket.fail();
   },
+  start = 0,
 ): Promise<void> {
-  for (let attempt = 0; attempt < 4; attempt += 1) {
+  for (let offset = 0; offset < 4; offset += 1) {
+    const attempt = start + offset;
     await sockets.waitForAttempt(attempt);
     const socket = sockets.created[attempt];
     if (socket !== undefined) {

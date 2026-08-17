@@ -1,7 +1,6 @@
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
 import { createDatabase, type AppDatabase } from "../shared/database.ts";
 import { createUuidV7 } from "../shared/ids.ts";
-import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type { RestartHandoffOperation } from "../shared/session-model.ts";
 import {
@@ -27,13 +26,8 @@ import {
   type ManualCompactionDependencies,
 } from "./session-compaction-actions.ts";
 import type { SessionLaunchBoundary } from "./session-creation.ts";
-import {
-  readSessionCredential,
-  withSessionCredential,
-  type SessionCredentialAction,
-  type SessionCredentialReaders,
-  type SessionCredentialSelection,
-} from "./session-credential-access.ts";
+import type { SessionCredentialReaders } from "./session-credential-readers.ts";
+import { SessionCredentialAccess } from "./session-credential-service.ts";
 import {
   permissiveWorkspaceReader,
   type SessionDependencies,
@@ -94,6 +88,7 @@ class DrizzleSessionIntegration
   readonly #now: () => number;
   readonly #onChange = new Set<(userId: string, sessionId: string) => void>();
   readonly #providers: SessionCredentialReaders;
+  readonly #credentials: SessionCredentialAccess;
   readonly #realtime: RealtimeHub | undefined;
   readonly #realtimeCommands: RealtimeSessionCommands;
   readonly #questions: SessionQuestionActionDependencies;
@@ -141,9 +136,10 @@ class DrizzleSessionIntegration
       ((options) => new ChatCompletionsAgentModel(options));
     this.#now = dependencies.now ?? Date.now;
     this.#providers = providers;
+    this.#credentials = new SessionCredentialAccess(providers);
     this.#credentialPool = new ModelCredentialPool({
       database,
-      readCredential: this.#readCredential,
+      readCredential: this.#credentials.read,
     });
     this.#workspaces = dependencies.workspaces ?? permissiveWorkspaceReader;
     this.#requests = new SessionRequestHelpers(auth, this.#broker, runners);
@@ -198,7 +194,7 @@ class DrizzleSessionIntegration
             runnerIsAvailable: this.#runnerAvailable,
             runtimes: this.#runtimes,
             store: this.#store,
-            withCredential: this.#withCredential,
+            withCredential: this.#credentials.with,
           },
           answered,
         ),
@@ -222,7 +218,7 @@ class DrizzleSessionIntegration
         this.#finisher.finish(detail, userId, error, recovered);
       },
       modelFactory: this.#modelFactory,
-      readCredential: this.#readCredential,
+      readCredential: this.#credentials.readForSession,
       realtime: this.#realtime,
       shutdownInterrupted: this.#shutdown,
       ...this.#sessionRuntimeState(),
@@ -341,7 +337,7 @@ class DrizzleSessionIntegration
       stopChildren: this.#actions.stopChildren.bind(this.#actions),
       stopLivenessScans: this.#liveness.stop,
       store: this.#store,
-      withCredentialAccess: this.#withCredential,
+      withCredentialAccess: this.#credentials.with,
       workspaces: this.#workspaces,
     };
   }
@@ -354,7 +350,7 @@ class DrizzleSessionIntegration
           this.#launch(detail, credential, ownerId),
         notify: this.#notify,
         readCredential: (ownerId, detail, action) =>
-          this.#readCredential(ownerId, detail).then((credential) => {
+          this.#credentials.read(ownerId, detail).then((credential) => {
             if (credential !== undefined) {
               action(credential);
             }
@@ -403,7 +399,7 @@ class DrizzleSessionIntegration
   ): ManualCompactionDependencies {
     return {
       ...this.#launchBoundary(),
-      credential: this.#withCredential,
+      credential: this.#credentials.with,
       operation,
     };
   }
@@ -456,10 +452,10 @@ class DrizzleSessionIntegration
           request.workspaceId,
         ),
       ...this.#context(),
-      readCredential: this.#readCredential,
+      readCredential: this.#credentials.read,
       runnerIsAvailable: this.#runnerAvailable,
       store: this.#store,
-      withCredential: this.#withCredential,
+      withCredential: this.#credentials.with,
     });
   }
 
@@ -489,19 +485,6 @@ class DrizzleSessionIntegration
     }
   };
 
-  readonly #readCredential = async (
-    userId: string,
-    selection: SessionCredentialSelection,
-  ): Promise<ProviderCredentialAccess | undefined> =>
-    readSessionCredential(this.#providers, userId, selection);
-
-  readonly #withCredential = (
-    userId: string,
-    selection: SessionCredentialSelection,
-    action: SessionCredentialAction,
-  ): Promise<Response> =>
-    withSessionCredential(this.#providers, userId, selection, action);
-
   async #modelsForUser(
     request: Request,
     user: AuthenticatedUser,
@@ -510,7 +493,7 @@ class DrizzleSessionIntegration
       discoverModels: this.#models,
       request,
       user,
-      withCredential: this.#withCredential,
+      withCredential: this.#credentials.with,
       workspaces: this.#workspaces,
     });
   }
@@ -523,7 +506,7 @@ class DrizzleSessionIntegration
       discoverOpenRouterProviders: this.#discoverProviders,
       launchBoundary: () => this.#launchBoundary(),
       runnerIsAvailable: this.#runnerAvailable,
-      withCredential: this.#withCredential,
+      withCredential: this.#credentials.with,
     };
   }
 }

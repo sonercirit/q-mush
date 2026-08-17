@@ -65,6 +65,7 @@ describe("provider stream error classification", () => {
         type: "error",
       });
       expect(error.reconnectWebSocket).toBe(true);
+      expect(error.status).toBe(400);
       expect(error.transient).toBe(false);
     }
   });

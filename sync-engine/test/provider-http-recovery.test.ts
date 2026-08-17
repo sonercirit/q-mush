@@ -1,12 +1,18 @@
 import { describe, expect, test } from "vitest";
 import {
   runAgentLoop,
+  type AgentModelStep,
   type AgentRecordedMessage,
 } from "../../shared/agent-loop.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
+import { createOpenAiOAuthSecret } from "./oauth-test-helpers.ts";
 import { captureRejection, requireError } from "./promise-test-helpers.ts";
 import { cachedTextMessage } from "./prompt-cache-fixtures.ts";
+import {
+  failWebSocketAttempts,
+  FakeProviderSockets,
+} from "./provider-recovery-fixtures.ts";
 
 const FIRST_REQUEST_ID = "d128368f-4052-4f00-9233-61153d3f5953";
 const SECOND_REQUEST_ID = "5a18ebce-f9b5-4375-9beb-833abb711910";
@@ -74,8 +80,8 @@ class ProviderResponses {
   readonly requests: Request[] = [];
   readonly #responses: Response[];
 
-  constructor(responses: Response[]) {
-    this.#responses = responses;
+  constructor(responses: readonly Response[]) {
+    this.#responses = [...responses];
   }
 
   readonly fetch = async (request: Request): Promise<Response> => {
@@ -205,6 +211,104 @@ describe("provider HTTP step recovery", () => {
   function recoveredResponse(): Response {
     return Response.json({ choices: [{ message: { content: "Recovered." } }] });
   }
+
+  function oauthHttpRecoveryModel(
+    provider: ProviderResponses,
+    sockets: FakeProviderSockets,
+    refreshes: string[],
+  ): ChatCompletionsAgentModel {
+    return new ChatCompletionsAgentModel({
+      credential: {
+        accountId: "account",
+        secret: createOpenAiOAuthSecret(),
+        source: "oauth",
+      },
+      fetch: provider.fetch,
+      maxOutputTokens: null,
+      model: "gpt-5-codex",
+      provider: "openai",
+      refreshCredential: (credential) => {
+        refreshes.push(credential.secret);
+        return Promise.resolve({
+          ...credential,
+          secret: JSON.stringify({
+            access: "refreshed-access",
+            expires: 1_800_000_000_000,
+            refresh: "refreshed-refresh",
+          }),
+        });
+      },
+      sleep: provider.sleep,
+      webSocket: sockets.create,
+    });
+  }
+
+  function expectHttpOAuthRecovery(
+    provider: ProviderResponses,
+    sockets: FakeProviderSockets,
+    refreshes: readonly string[],
+  ): void {
+    expect(provider.requests).toHaveLength(2);
+    expect(provider.requests[0]?.headers.get("authorization")).toContain(
+      "oauth-access-token",
+    );
+    expect(provider.requests[1]?.headers.get("authorization")).toBe(
+      "Bearer refreshed-access",
+    );
+    expect(refreshes).toHaveLength(1);
+    expect(sockets.created).toHaveLength(8);
+  }
+
+  async function httpOAuthRecovery(responses: readonly Response[]): Promise<{
+    readonly pending: Promise<AgentModelStep>;
+    readonly provider: ProviderResponses;
+    readonly refreshes: readonly string[];
+    readonly sockets: FakeProviderSockets;
+  }> {
+    const provider = new ProviderResponses(responses);
+    const refreshes: string[] = [];
+    const sockets = new FakeProviderSockets();
+    const model = oauthHttpRecoveryModel(provider, sockets, refreshes);
+    const pending = model.complete(USER_MESSAGE);
+    await failWebSocketAttempts(sockets);
+    await failWebSocketAttempts(sockets, undefined, 4);
+    return { pending, provider, refreshes, sockets };
+  }
+
+  const unauthorizedResponse = (error: string): Response =>
+    Response.json({ error }, { status: 401 });
+
+  async function expectHttpRecoveryResult(
+    setup: Awaited<ReturnType<typeof httpOAuthRecovery>>,
+    succeeds: boolean,
+  ): Promise<void> {
+    if (succeeds) {
+      await expect(setup.pending).resolves.toMatchObject({
+        content: "Recovered.",
+      });
+    } else {
+      await expect(setup.pending).rejects.toMatchObject({ status: 401 });
+    }
+    expectHttpOAuthRecovery(setup.provider, setup.sockets, setup.refreshes);
+  }
+
+  test("forces one OAuth refresh after an HTTP 401 and retries with the refreshed token", async () => {
+    const setup = await httpOAuthRecovery([
+      unauthorizedResponse("revoked"),
+      recoveredResponse(),
+    ]);
+
+    await expectHttpRecoveryResult(setup, true);
+  });
+
+  test("never loops after the retried HTTP request also returns 401", async () => {
+    const setup = await httpOAuthRecovery([
+      unauthorizedResponse("revoked"),
+      unauthorizedResponse("still revoked"),
+    ]);
+
+    await expectHttpRecoveryResult(setup, false);
+  });
 
   test("recovers from interrupted, early-EOF, and truncated accepted bodies", async () => {
     const cases: readonly {

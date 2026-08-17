@@ -67,6 +67,16 @@ export class ProviderCredentialRejectionError extends Error {
   }
 }
 
+export class ProviderCredentialReauthenticationRequiredError extends ProviderCredentialRejectionError {
+  constructor(providerName: string, status: 400 | 401 | 403 = 401) {
+    super(
+      `${providerName} login has expired. Connect the account again to continue.`,
+      status,
+    );
+    this.name = "ProviderCredentialReauthenticationRequiredError";
+  }
+}
+
 export function isProviderCredentialRejection(
   error: unknown,
 ): error is ProviderCredentialRejectionError {
@@ -76,6 +86,7 @@ export function isProviderCredentialRejection(
 export class ProviderStreamError extends Error {
   readonly reconnectWebSocket: boolean;
   readonly retryAfterMilliseconds: number | undefined;
+  readonly status: number | undefined;
   readonly transient: boolean;
 
   constructor(
@@ -87,6 +98,7 @@ export class ProviderStreamError extends Error {
     this.name = "ProviderStreamError";
     this.reconnectWebSocket = options.reconnectWebSocket === true;
     this.retryAfterMilliseconds = options.retryAfterMilliseconds;
+    this.status = options.status;
     this.transient = transient;
   }
 }
@@ -94,6 +106,7 @@ export class ProviderStreamError extends Error {
 interface ProviderStreamErrorOptions {
   readonly reconnectWebSocket?: boolean;
   readonly retryAfterMilliseconds?: number | undefined;
+  readonly status?: number | undefined;
 }
 
 function requiredTrimmedString(value: unknown): string | undefined {
@@ -266,6 +279,7 @@ export function readProviderStreamError(
     {
       reconnectWebSocket: details.codes.some(codeIsWebSocketConnectionLimit),
       retryAfterMilliseconds: details.retryAfterMilliseconds,
+      status: details.status,
     },
   );
 }

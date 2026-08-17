@@ -13,6 +13,7 @@ import {
   createSessionAgentModels,
   type AgentModelFactory,
 } from "../../sync-engine/session-agent-models.ts";
+import { createRuntimeSessionAgentModels } from "../../sync-engine/session-runtime-models.ts";
 import { TEST_COMPACTION_REQUEST_MESSAGE } from "./compaction-test-fixtures.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
 import { RecordingRealtimeSocket } from "./realtime-hub-test-helpers.ts";
@@ -157,6 +158,30 @@ describe("session agent models", () => {
       maxOutputTokens: 64_000,
       promptCacheKey: TEST_SESSION_DETAIL.id,
     });
+  });
+
+  test("constructs one runtime refresher and shares it with agent, compactor, and native attachment models", () => {
+    const { factory, selections } = modelSelections();
+    const models = createRuntimeSessionAgentModels({
+      agentFile: null,
+      credential: { ...CREDENTIAL, source: "oauth" },
+      detail: TEST_SESSION_DETAIL,
+      factory,
+      isCurrent: () => true,
+      markStepStart: () => undefined,
+      readCredential: () => Promise.resolve(undefined),
+      realtime: undefined,
+      userId: "user-1",
+    });
+    models.createCompactor();
+
+    expect(models.attachmentRefreshCredential).toBeTypeOf("function");
+    expect(
+      selections.map(({ refreshCredential }) => refreshCredential),
+    ).toEqual([
+      models.attachmentRefreshCredential,
+      models.attachmentRefreshCredential,
+    ]);
   });
 
   test("passes a global fallback routing selection to the agent model", () => {

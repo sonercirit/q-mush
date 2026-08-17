@@ -322,6 +322,7 @@ describe("session provider update", () => {
       TEST_USER_ID,
       "openrouter-target",
       TEST_WORKSPACE_ID,
+      undefined,
     );
     expect(sessionRow(setupValue)).toEqual(
       expect.objectContaining({ provider: "openai" }),

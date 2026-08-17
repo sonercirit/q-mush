@@ -71,6 +71,30 @@ test("renders a generic endpoint form with an optional API key", () => {
   expect(html).not.toContain("Quota");
 });
 
+test("surfaces an explicit OpenAI re-login state", () => {
+  const controller = new ProviderController(
+    OPENAI_PANEL,
+    createReactiveState(
+      providerViewState([
+        {
+          accountId: "account-1",
+          id: "credential-1",
+          isDefault: true,
+          label: "Expired account",
+          requiresReauthentication: true,
+          source: "oauth",
+        },
+      ]),
+    ),
+  );
+  const html = renderSolidToString(() => openAiProviderPanel(controller));
+
+  expect(html).toContain("Re-login required");
+  expect(html).toContain(
+    "This OpenAI login has expired. Connect the account again before using it in a session.",
+  );
+});
+
 test("renders provider default controls", () => {
   const controller = new ProviderController(
     OPENAI_PANEL,

@@ -113,7 +113,18 @@ function ProviderCredentialItem(props: CredentialItemProps): JSX.Element {
                   : "OpenAI API endpoint"
                 : "API key"}
           </span>
+          <Show when={props.credential.requiresReauthentication}>
+            <span class="rounded-full border border-amber-300/30 bg-amber-300/10 px-2.5 py-1 text-xs font-semibold text-amber-100">
+              Re-login required
+            </span>
+          </Show>
         </div>
+        <Show when={props.credential.requiresReauthentication}>
+          <p class="mt-2 text-sm font-medium text-amber-100" role="alert">
+            This OpenAI login has expired. Connect the account again before
+            using it in a session.
+          </p>
+        </Show>
         <p class="path-wrap mt-2 text-sm text-slate-400">
           {props.credential.baseUrl ??
             props.credential.accountId ??

@@ -13,11 +13,13 @@ import type {
   ProviderId,
 } from "../shared/provider-credential-store.ts";
 import type { ProviderModelPricing } from "../shared/provider-model-pricing.ts";
+import type { AgentCredentialRefresher } from "./agent-model-options.ts";
 import {
   createFallbackModel,
   type AgentModelFactory,
 } from "./session-agent-models.ts";
 import type { AttachmentFallbackRuntimeResources } from "./session-model-resources.ts";
+import { createOpenAiSessionCredentialRefresher } from "./session-openai-credential-refresh.ts";
 
 export interface AttachmentExplanation {
   readonly content: string;
@@ -39,6 +41,7 @@ export async function explainAttachment(
     readonly factory: AgentModelFactory;
     readonly onStepStart?: () => void;
     readonly prompt: string | null;
+    readonly refreshCredential?: AgentCredentialRefresher;
     readonly resources: AttachmentFallbackRuntimeResources;
     readonly userId: string;
     readonly workspaceId: string;
@@ -93,6 +96,15 @@ export async function explainAttachment(
     selection === undefined
       ? options.currentProviderPricing
       : selectedModel.pricing;
+  const refreshCredential =
+    selection === undefined
+      ? options.refreshCredential
+      : createOpenAiSessionCredentialRefresher({
+          credential,
+          readCredential: options.resources.readCredential,
+          selection: { ...selection, workspaceId: options.workspaceId },
+          userId: options.userId,
+        });
   const model = createFallbackModel(options.factory, {
     adaptiveThinking: selectedModel.adaptiveThinking,
     credential,
@@ -103,6 +115,7 @@ export async function explainAttachment(
     prompt: options.prompt,
     provider: selectedProvider,
     providerPricing: selectedPricing,
+    ...(refreshCredential === undefined ? {} : { refreshCredential }),
   });
   let step;
   try {

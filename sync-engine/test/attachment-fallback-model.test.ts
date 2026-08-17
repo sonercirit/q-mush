@@ -2,7 +2,9 @@ import { describe, expect, test, vi } from "vitest";
 import type { AgentAttachment } from "../../shared/agent-attachments.ts";
 import type { AttachmentFallbackSelection } from "../../shared/attachment-fallback.ts";
 import { testAgentModelOption } from "../../shared/test/agent-model-fixtures.ts";
+import type { AgentCredentialRefresher } from "../agent-model-options.ts";
 import { explainAttachment } from "../attachment-fallback-model.ts";
+import type { AgentModelFactory } from "../session-agent-models.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
 
 const ATTACHMENT: AgentAttachment = {
@@ -24,12 +26,13 @@ const CURRENT_CREDENTIAL = {
   isGlobal: true,
   label: "Current",
   secret: "secret",
-  source: "api_key" as const,
+  source: "oauth" as const,
 };
 const FALLBACK_CREDENTIAL = {
   ...CURRENT_CREDENTIAL,
   id: FALLBACK.credentialId,
   label: "Fallback",
+  source: "oauth" as const,
 };
 
 function options(
@@ -42,10 +45,15 @@ function options(
     stepStarts.push("complete");
     return Promise.resolve(providerStep("explained"));
   });
-  const factory = vi.fn(() => ({ complete }));
+  const factoryCalls: Parameters<AgentModelFactory>[0][] = [];
+  const factory: AgentModelFactory = (modelOptions) => {
+    factoryCalls.push(modelOptions);
+    return { complete };
+  };
   return {
     complete,
     factory,
+    factoryCalls,
     stepStarts,
     value: {
       attachment: ATTACHMENT,
@@ -91,7 +99,7 @@ async function expectFallbackRequired(
 ): Promise<void> {
   const setup = options(inputModalities, []);
   await expect(explainAttachment(setup.value)).rejects.toThrow(message);
-  expect(setup.factory).not.toHaveBeenCalled();
+  expect(setup.factoryCalls).toEqual([]);
 }
 
 describe("explain attachment", () => {
@@ -108,7 +116,7 @@ describe("explain attachment", () => {
     // request, not a continuation of the preceding agent step.
     expect(setup.stepStarts).toEqual(["step-start", "complete"]);
 
-    expect(setup.factory).toHaveBeenCalledWith(
+    expect(setup.factoryCalls).toContainEqual(
       expect.objectContaining({
         credential: FALLBACK_CREDENTIAL,
         maxOutputTokens: 32_000,
@@ -137,16 +145,49 @@ describe("explain attachment", () => {
     expect(explanation.content).toContain("maximum output tokens");
   });
 
-  test("uses the session model when it supports the file modality", async () => {
+  test("uses the session model and its existing refresher for native files", async () => {
     const setup = options(["text", "file"]);
+    const refreshCredential: AgentCredentialRefresher = (credential) =>
+      Promise.resolve(credential);
 
-    await explainAttachment(setup.value);
+    await explainAttachment({ ...setup.value, refreshCredential });
 
-    expect(setup.factory).toHaveBeenCalledWith(
+    expect(setup.factoryCalls).toContainEqual(
       expect.objectContaining({
         credential: CURRENT_CREDENTIAL,
         model: "current-model",
+        refreshCredential,
       }),
+    );
+  });
+
+  test("binds a distinct OpenAI OAuth fallback refresher to that credential", async () => {
+    const setup = options(["text"]);
+    const currentRefreshCredential: AgentCredentialRefresher = (credential) =>
+      Promise.resolve(credential);
+    const readCredential = vi.fn(setup.value.resources.readCredential);
+
+    await explainAttachment({
+      ...setup.value,
+      refreshCredential: currentRefreshCredential,
+      resources: { ...setup.value.resources, readCredential },
+    });
+
+    const refreshCredential = setup.factoryCalls[0]?.refreshCredential;
+    if (refreshCredential === undefined) {
+      throw new Error("The fallback model has no credential refresher");
+    }
+    expect(refreshCredential).not.toBe(currentRefreshCredential);
+    await expect(refreshCredential(FALLBACK_CREDENTIAL)).resolves.toBe(
+      FALLBACK_CREDENTIAL,
+    );
+    expect(readCredential).toHaveBeenLastCalledWith(
+      "user-1",
+      {
+        ...FALLBACK,
+        workspaceId: "workspace-1",
+      },
+      { force: true, rejectedSecret: FALLBACK_CREDENTIAL.secret },
     );
   });
 

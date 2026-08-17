@@ -7,7 +7,6 @@ import { isAskQuestionsPause } from "./ask-questions-pause.ts";
 import { isDiskFullFailure } from "./database-write-resilience.ts";
 import {
   compactSessionConversation,
-  isRestartHandoffError,
   runSessionAgent,
 } from "./session-agent-runtime.ts";
 import type { SessionNotification } from "./session-creation.ts";
@@ -17,6 +16,7 @@ import {
   sessionModelRuntime,
   type SessionModelRuntimeResources,
 } from "./session-model-runtime.ts";
+import { isRestartHandoffError } from "./session-restart-handoff-error.ts";
 import type {
   DurableRestartPersistence,
   SessionRestartRequester,

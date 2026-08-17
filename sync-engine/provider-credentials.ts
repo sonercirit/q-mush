@@ -286,10 +286,10 @@ export class ProviderCredentialEndpoints {
     credentialId: string,
     secret: string,
     now: number,
-  ): void {
-    if (this.#store?.updateSecret(userId, credentialId, secret, now) !== true) {
-      throw new Error("The provider credential is no longer available");
-    }
+  ): boolean {
+    return (
+      this.#store?.updateSecret(userId, credentialId, secret, now) === true
+    );
   }
 
   addConnectedAccount(
