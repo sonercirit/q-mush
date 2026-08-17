@@ -17,6 +17,8 @@ import {
 } from "./anthropic-response-event-fixtures.ts";
 import { emptyProviderToolCall } from "./provider-step-fixtures.ts";
 
+const PAUSE_ERROR =
+  "The Anthropic response paused with content that cannot be continued safely";
 const PAUSED_TEXT = { text: "Searching. ", type: "text" } as const;
 const PAUSED_DELTA = { content: PAUSED_TEXT.text, thinking: "" } as const;
 const RESET_DELTA = { content: "", reset: true, thinking: "" } as const;
@@ -36,6 +38,13 @@ function expectedContinuationDeltas(
   continuation: readonly ProviderTextDelta[],
 ): readonly ProviderTextDelta[] {
   return [PAUSED_DELTA, RESET_DELTA, PAUSED_DELTA, ...continuation];
+}
+
+async function expectPauseRejected(
+  harness: ReturnType<typeof anthropicHarness>,
+): Promise<void> {
+  await expect(harness.complete()).rejects.toThrow(PAUSE_ERROR);
+  expect(harness.requests).toHaveLength(1);
 }
 
 function serverCall(name: string, input: AnthropicReplayObject) {
@@ -121,10 +130,7 @@ describe("Anthropic pause_turn", () => {
       }),
     ]);
 
-    await expect(harness.complete()).rejects.toThrow(
-      "The Anthropic response paused with content that cannot be continued safely",
-    );
-    expect(harness.requests).toHaveLength(1);
+    await expectPauseRejected(harness);
   });
 
   test("keeps paused output visible once while continuing", async () => {
@@ -214,6 +220,18 @@ describe("Anthropic pause_turn", () => {
           serverToolCall,
         ]),
       );
+    },
+  );
+
+  test.each([true, false])(
+    "fails a %s-streamed whitespace-only pause before sending a user-only follow-up",
+    async (stream) => {
+      const harness = anthropicHarness([
+        anthropicPauseTurnResponse([{ text: "   ", type: "text" }], stream),
+        doneAnthropicEvents(),
+      ]);
+
+      await expectPauseRejected(harness);
     },
   );
 

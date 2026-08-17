@@ -46,24 +46,23 @@ Living project memory.
   `shared` imports no other workspace; only `scripts` may import `scripts`.
 - `server.ts` serves in-memory Vite JS/Tailwind CSS. Authenticated WebSockets at
   `/api/realtime` and `/api/runner/realtime` handle browser/session/runner work;
-  no polling/SSE. `dev:watch` coalesces source/local `.env` changes into the
-  ignored trigger that `dev:restart` writes; plain `dev` restarts from it.
-  `runner-executable.ts` fingerprints, privately builds, caches, and serves
-  `/runner/executable`. Restarts drain active steps and queue new work. Text
-  handlers precompress once (zstd/Brotli/gzip/deflate); favicon ETags.
+  no polling/SSE. `dev:watch` coalesces source and `.env` changes into the
+  ignored restart trigger; `dev:restart` writes it. `runner-executable.ts`
+  fingerprints, privately builds, caches, and serves `/runner/executable`.
+  Restarts drain active steps and queue new work. Text handlers precompress once
+  (zstd/Brotli/gzip/deflate); favicon ETags.
 - `solid/pages.tsx` renders both server page shells via Solid's SSR runtime;
   `sync-engine/pages.ts` loads it with Vite's SSR runner. The browser app mounts
   from `solid/client.tsx`; routes live in `shared/routes.ts`.
 - `auth.ts` implements Google OIDC code + PKCE with HttpOnly state/verifier
-  cookies, fetching the basic profile and discarding provider tokens.
-  `auth-store.ts` uses Drizzle/Bun SQLite for users and seven-day sessions.
-  Primary keys are UUIDv7; Google subjects/session tokens are separate unique
-  fields; tables carry timestamps, actor IDs, `isDeleted`. `shared/database.ts`
-  applies migrations; `index.ts` injects persistence, with in-memory fallback.
-  Shared PKCE/provider parsing/redirects live in `oauth.ts`, HTTP helpers in
-  `http.ts`; `solid/client.tsx` gates the app via `/api/auth/session` and
-  logout. Browser regressions use real Chromium/Tailwind and production state/UI
-  mutations, never synthetic layout or CSS-only assertions.
+  cookies, fetching the profile and discarding provider tokens. `auth-store.ts`
+  uses Drizzle/Bun SQLite for users and seven-day sessions. UUIDv7 primary keys,
+  Google subjects, and session tokens are separate; tables carry timestamps,
+  actor IDs, `isDeleted`. `shared/database.ts` applies migrations; `index.ts`
+  injects persistence with an in-memory fallback. Shared OAuth logic lives in
+  `oauth.ts`, HTTP helpers in `http.ts`; `solid/client.tsx` gates the app via
+  `/api/auth/session` and logout. Browser regressions use real Chromium/Tailwind
+  and production state/UI mutations, never synthetic layout or CSS-only checks.
 - `runner-store.ts` persists one active runner per machine fingerprint and one
   default per user. `runners.ts` owns authenticated management and opaque hashed
   setup-token callbacks; install commands use request origin.
@@ -262,24 +261,25 @@ Living project memory.
   (Fable) ignore `enabled`; newer models default `display` to `omitted` — empty
   thinking text plus a signature while thinking tokens bill. Anthropic replay
   binds the response model (resolving aliases once per run when supported),
-  credential fingerprint, format, and endpoint. Retrieve failures leave aliases
-  unresolved and omit replay without aborting Messages. Exact JSON-safe blocks,
-  including additive fields, persist; corrupt metadata warns but leaves the
-  transcript readable. Durable client-tool continuations require matching replay
-  and result IDs; missing, stale, incomplete, unsupported, or unsigned turns
-  fail closed before tool execution. Only empty text drops (whitespace stays but
-  is withheld from requests); pause trimming derives content and replay together
-  across every trailing text block. `cache_control` marks only text/client
-  `tool_use`, scanning backward; trailing replay is resent verbatim.
-  `pause_turn` validates resent blocks, replays them/container without duplicate
-  UI, sums usage, caps at five continuations, and fails terminal client tools
-  closed when replay cannot combine. The local proxy tolerates unsigned
-  tool-loop replay; strict endpoints may not. Reasoning deltas group by
-  output/summary index; separate summary parts with paragraphs since completed
-  responses may omit them. OpenAI's WebSocket Mode has a 60-minute limit; the
-  canonical `websocket_connection_limit_reached` and observed underscore-free
-  variant replace the socket once per step, then bound retries, replaying only
-  an unpersisted step. Other WebSocket/accepted HTTP interruptions or provider
+  credential fingerprint, format, and endpoint. Failed alias retrieval leaves
+  text-only Messages running; client tools fail closed without identity. Exact
+  JSON-safe blocks, including additive fields, persist; corrupt metadata warns
+  but leaves transcripts readable. Durable client-tool continuations require
+  matching replay and result IDs; missing, stale, incomplete, unsupported, or
+  unsigned turns fail closed before tool execution. Only empty text drops
+  (whitespace stays but is withheld from requests); pause trimming derives
+  content and replay together across every trailing text block and fails a pause
+  if none remain replayable. `cache_control` marks only text/client `tool_use`,
+  scanning backward; trailing replay is resent verbatim. `pause_turn` validates
+  resent blocks, replays them/container without duplicate UI, sums usage, caps
+  at five continuations, and fails terminal client tools closed when replay
+  cannot combine. The local proxy tolerates unsigned tool-loop replay; strict
+  endpoints may not. Reasoning deltas group by output/summary index; separate
+  summary parts with paragraphs since completed responses may omit them.
+  OpenAI's WebSocket Mode has a 60-minute limit; the canonical
+  `websocket_connection_limit_reached` and observed underscore-free variant
+  replace the socket once per step, then bound retries, replaying only an
+  unpersisted step. Other WebSocket/accepted HTTP interruptions or provider
   errors retry before persistence; replays reset partial UI deltas and exhausted
   WebSockets fall back to HTTP. Permanent errors and aborts do not retry;
   terminal failures persist as non-replayed `error` messages.

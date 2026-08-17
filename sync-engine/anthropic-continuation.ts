@@ -5,6 +5,7 @@ import type {
 } from "../shared/agent-loop.ts";
 import {
   anthropicReplayAssistantText,
+  anthropicReplayBlocksForRequest,
   anthropicReplayMatchesAssistant,
   createAnthropicAssistantReplay,
   type AnthropicAssistantReplay,
@@ -89,6 +90,9 @@ function trimmedContinuation(
       blocks[index] = { ...trailing, text };
     }
     break;
+  }
+  if (anthropicReplayBlocksForRequest(blocks).length === 0) {
+    throw new Error(INVALID_PAUSE);
   }
   return {
     content: anthropicReplayAssistantText(blocks),

@@ -235,6 +235,15 @@ function emptyOutputDelta(): ProviderTextDelta {
   return { content: "", reset: true, thinking: "" };
 }
 
+function failUnresolvedAnthropicToolsClosed(
+  step: AgentModelStep,
+  resolvedModel: string | undefined,
+): AgentModelStep {
+  return resolvedModel === undefined && step.toolCalls.length > 0
+    ? { ...step, providerContinuation: "anthropic_replay_unavailable" }
+    : step;
+}
+
 export class ChatCompletionsAgentModel implements AgentModel {
   readonly #adaptiveThinking: boolean | null;
   readonly #credential: AgentProviderCredential;
@@ -500,7 +509,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
     if (protocol === "anthropic") {
       this.#assertAnthropicContinuationReplays(messages, resolvedModel);
     }
-    return completeProviderHttp(
+    const step = await completeProviderHttp(
       {
         body: this.#requestBody(messages, protocol, true, resolvedModel),
         credential: this.#credential,
@@ -522,6 +531,9 @@ export class ChatCompletionsAgentModel implements AgentModel {
       },
       signal,
     );
+    return protocol === "anthropic"
+      ? failUnresolvedAnthropicToolsClosed(step, resolvedModel)
+      : step;
   }
 
   async #completeHttp(

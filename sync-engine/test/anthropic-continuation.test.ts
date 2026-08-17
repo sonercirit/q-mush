@@ -113,6 +113,14 @@ async function runTrimmedContinuation(
   return continuationResult(complete);
 }
 
+async function expectPauseRejectedBeforeContinuation(
+  step: AgentModelStep,
+): Promise<void> {
+  const complete = scriptedCompletion(textStep("Done."));
+  await expectPauseFailure(step, complete);
+  expect(complete).not.toHaveBeenCalled();
+}
+
 function pauseAssistant(
   step: AgentModelStep,
   content: string,
@@ -208,28 +216,42 @@ test("combines repeated pause turns into one exact assistant step", async () => 
   });
 });
 
-test.each([
-  ["trailing spaces", "Answer.   ", "Answer."],
-  ["whitespace-only trailing text", "   ", ""],
-] as const)(
-  "right-trims %s only in the final preserved pause assistant",
-  async (_label, text, expectedText) => {
-    const complete = scriptedCompletion(textStep("Done."));
-    const first = pausedTextStep(text);
-    const continuation = await runTrimmedContinuation(first, complete);
-    expect(continuation).toMatchObject({ content: expectedText });
-    if (continuation?.role !== "assistant") {
-      throw new Error("The continuation assistant was not captured");
-    }
-    const expectedReplay = pauseAssistant(first, expectedText);
-    expect(continuation.providerReplay?.blocks).toEqual(
-      expectedReplay.role === "assistant"
-        ? expectedReplay.providerReplay?.blocks
-        : undefined,
-    );
-    expect(first.providerReplay?.blocks).toEqual([{ text, type: "text" }]);
-  },
-);
+test("fails a whitespace-only pause before omitting its assistant turn", async () => {
+  const first = pausedTextStep("   ");
+
+  await expectPauseRejectedBeforeContinuation(first);
+
+  expect(first.providerReplay?.blocks).toEqual([{ text: "   ", type: "text" }]);
+});
+
+test("fails a pause whose remaining replay blocks are all withheld", async () => {
+  await expectPauseRejectedBeforeContinuation(
+    pausedTextStep("", {
+      providerReplay: replay([
+        { text: " ", type: "text" },
+        { text: "\t", type: "text" },
+      ]),
+    }),
+  );
+});
+
+test("right-trims trailing spaces only in the final preserved pause assistant", async () => {
+  const text = "Answer.   ";
+  const complete = scriptedCompletion(textStep("Done."));
+  const first = pausedTextStep(text);
+  const continuation = await runTrimmedContinuation(first, complete);
+  expect(continuation).toMatchObject({ content: "Answer." });
+  if (continuation?.role !== "assistant") {
+    throw new Error("The continuation assistant was not captured");
+  }
+  const expectedReplay = pauseAssistant(first, "Answer.");
+  expect(continuation.providerReplay?.blocks).toEqual(
+    expectedReplay.role === "assistant"
+      ? expectedReplay.providerReplay?.blocks
+      : undefined,
+  );
+  expect(first.providerReplay?.blocks).toEqual([{ text, type: "text" }]);
+});
 
 test("right-trims every trailing text block from content and replay together", async () => {
   const serverBlock: AnthropicReplayBlock = {

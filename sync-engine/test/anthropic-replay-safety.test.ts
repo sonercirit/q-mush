@@ -28,6 +28,12 @@ const THINKING = "Inspect first.";
 const SIGNATURE = "signed-thinking";
 const CALL_ID = "read-call";
 
+const DEFAULT_COMPLETION_BLOCKS = [{ text: "Done.", type: "text" }] as const;
+const UNRESOLVED_MODEL_RESPONSES = [
+  ["a missing retrieve route", () => new Response("missing", { status: 404 })],
+  ["a malformed retrieve response", () => Response.json({ type: "model" })],
+] as const;
+
 const SIGNED_THINKING = {
   signature: SIGNATURE,
   thinking: THINKING,
@@ -100,21 +106,26 @@ function jsonSignedToolStep(responseModel: string): Promise<AgentModelStep> {
   );
 }
 
-async function expectNoUnsafeContinuation(step: AgentModelStep): Promise<void> {
+async function expectNoToolSideEffect(
+  model: Pick<ChatCompletionsAgentModel, "complete">,
+): Promise<void> {
   const executeTool = vi.fn(() => Promise.resolve("unsafe side effect"));
-  const complete = vi.fn().mockResolvedValueOnce(step);
-
   const loop = runAgentLoop({
     executeTool,
     initialMessages: [{ content: "Inspect", role: "user" }],
-    model: { complete },
+    model,
     recordMessage: () => undefined,
   });
+
   await expect(loop).rejects.toThrow("cannot be continued safely");
-  expect({
-    completes: complete.mock.calls.length,
-    tools: executeTool.mock.calls,
-  }).toEqual({ completes: 1, tools: [] });
+  expect(executeTool).not.toHaveBeenCalled();
+}
+
+async function expectNoUnsafeContinuation(step: AgentModelStep): Promise<void> {
+  const complete = vi.fn().mockResolvedValueOnce(step);
+
+  await expectNoToolSideEffect({ complete });
+  expect(complete).toHaveBeenCalledTimes(1);
 }
 
 function unsupportedStream(): AgentModelStep {
@@ -178,6 +189,37 @@ function testModel(
   );
 }
 
+function unresolvedModel(
+  unresolvedResponse: () => Response,
+  completionBlocks: readonly Readonly<
+    Record<string, unknown>
+  >[] = DEFAULT_COMPLETION_BLOCKS,
+): { readonly model: ChatCompletionsAgentModel; readonly requests: Request[] } {
+  const requests: Request[] = [];
+  return {
+    model: testModel((request) => {
+      return request.method === "GET"
+        ? unresolvedResponse()
+        : modelCompletion(FIRST_SNAPSHOT, completionBlocks);
+    }, requests),
+    requests,
+  };
+}
+
+async function expectUnresolvedToolIdentityFailsClosed(
+  unresolvedResponse: () => Response,
+): Promise<void> {
+  const { model, requests } = unresolvedModel(
+    unresolvedResponse,
+    signedToolBlocks(),
+  );
+  await expectNoToolSideEffect(model);
+  expect({
+    gets: modelRequestCount(requests, "GET"),
+    posts: modelRequestCount(requests, "POST"),
+  }).toEqual({ gets: 1, posts: 1 });
+}
+
 function aliasReplayMessage(): AgentConversationMessage {
   return {
     content: "Answer.",
@@ -195,9 +237,9 @@ function aliasReplayMessage(): AgentConversationMessage {
 
 function modelCompletion(
   model: string,
-  blocks: readonly Readonly<Record<string, unknown>>[] = [
-    { text: "Done.", type: "text" },
-  ],
+  blocks: readonly Readonly<
+    Record<string, unknown>
+  >[] = DEFAULT_COMPLETION_BLOCKS,
 ): Response {
   return anthropicJsonResponse({ blocks, model });
 }
@@ -316,26 +358,23 @@ describe("Anthropic replay safety", () => {
     });
   });
 
-  test.each([
-    [
-      "a missing retrieve route",
-      () => new Response("missing", { status: 404 }),
-    ],
-    ["a malformed retrieve response", () => Response.json({ type: "model" })],
-  ] as const)(
+  test.each(UNRESOLVED_MODEL_RESPONSES)(
     "continues Messages requests after %s and caches the unresolved result",
     async (_label, unresolvedResponse) => {
-      const requests: Request[] = [];
-      const model = testModel((request) => {
-        if (request.method === "GET") return unresolvedResponse();
-        return modelCompletion(FIRST_SNAPSHOT);
-      }, requests);
+      const { model, requests } = unresolvedModel(unresolvedResponse);
 
       await model.complete([{ content: "First", role: "user" }]);
       await model.complete([{ content: "Second", role: "user" }]);
 
       expect(modelRequestCount(requests, "GET")).toBe(1);
       expect(modelRequestCount(requests, "POST")).toBe(2);
+    },
+  );
+
+  test.each(UNRESOLVED_MODEL_RESPONSES)(
+    "fails signed client tools closed after %s",
+    async (_label, unresolvedResponse) => {
+      await expectUnresolvedToolIdentityFailsClosed(unresolvedResponse);
     },
   );
 
