@@ -39,7 +39,8 @@ Living project memory.
 - Develop: `bun run dev` (+ `dev:restart`, `dev:watch`); `bun run build`
 - Migrations: `bun run db:generate` / `db:migrate`
 - Test: `bun run test` (unit + headless Chromium); `test:watch` omits browsers;
-  `test:browser` uses the explicitly headless real-Chromium config.
+  `test:browser` pins instance-level headless mode and disables inherited
+  `PWDEBUG` before running real Chromium.
 - `bun run check` runs all static checks; `format`/`lint:fix` write fixes.
 - CI (`.github/workflows/checks.yml`) runs tests/check/build/whitespace on Bun
   1.3.14 with a frozen lockfile.

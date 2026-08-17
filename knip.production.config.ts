@@ -11,6 +11,8 @@ export default {
     "scripts/migrate-database.ts!",
     "scripts/repository-check.ts!",
     "scripts/restart-development-server.ts!",
+    "scripts/test-browser.ts!",
+    "vitest.browser.config.ts!",
   ],
   ignoreFiles: ["knip.config.ts"],
   project: [
