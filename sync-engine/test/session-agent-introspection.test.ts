@@ -47,7 +47,6 @@ function credential(
     id,
     isDefault: false,
     label,
-    credentialFingerprint: "test-credential-fingerprint",
     secret: `secret-${id}`,
     source,
   };
@@ -192,7 +191,6 @@ describe("session agent introspection tools", () => {
     const balancedCredentials = [
       {
         ...credential(CREDENTIAL_ID, "Primary"),
-        credentialFingerprint: "test-credential-fingerprint",
         secret: "provider-secret",
       },
       credential(secondCredentialId, "Secondary"),
@@ -364,7 +362,6 @@ describe("session agent introspection tools", () => {
     const openAiCredentials = [
       {
         ...credential(CREDENTIAL_ID, "Primary OpenAI"),
-        credentialFingerprint: "test-credential-fingerprint",
         secret: "provider-secret",
       },
       ...Array.from({ length: 10 }, (_, index) =>

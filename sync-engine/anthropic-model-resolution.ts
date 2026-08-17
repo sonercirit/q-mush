@@ -12,27 +12,59 @@ export type AnthropicModelResolutionFetch = (
   request: Request,
 ) => Promise<Response>;
 
+export interface AnthropicModelResolution {
+  readonly model?: string;
+  readonly retryable: boolean;
+}
+
+function resolvedModel(model: string): AnthropicModelResolution {
+  return { model, retryable: false };
+}
+
+function unresolvedModel(retryable = false): AnthropicModelResolution {
+  return { retryable };
+}
+
+function retryableStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500;
+}
+
 function throwIfCallerAborted(signal: AbortSignal | undefined): void {
   signal?.throwIfAborted();
 }
 
-async function responseJson(response: Response): Promise<unknown> {
+const RETRYABLE_TRANSPORT_FAILURE = Symbol("retryable transport failure");
+
+async function transportAttempt<Value>(
+  attempt: () => Promise<Value>,
+  signal: AbortSignal | undefined,
+): Promise<Value | typeof RETRYABLE_TRANSPORT_FAILURE> {
   try {
-    return JSON.parse(await response.text());
+    return await attempt();
+  } catch {
+    throwIfCallerAborted(signal);
+    return RETRYABLE_TRANSPORT_FAILURE;
+  }
+}
+
+async function responseJson(response: Response): Promise<unknown> {
+  const text = await response.text();
+  try {
+    return JSON.parse(text);
   } catch {
     return undefined;
   }
 }
 
-export async function resolveAnthropicModel(options: {
+export async function resolveAnthropicModelAttempt(options: {
   readonly credential: AgentProviderCredential;
   readonly fetch: AnthropicModelResolutionFetch;
   readonly model: string;
   readonly provider: ProviderId;
   readonly signal?: AbortSignal;
-}): Promise<string | undefined> {
+}): Promise<AnthropicModelResolution> {
   if (!usesAnthropicFormat(options.provider, options.credential)) {
-    return options.model;
+    return resolvedModel(options.model);
   }
   const headers = new Headers({
     accept: "application/json",
@@ -46,24 +78,37 @@ export async function resolveAnthropicModel(options: {
     options.signal === undefined
       ? timeout
       : AbortSignal.any([options.signal, timeout]);
-  let response: Response;
-  try {
-    response = await options.fetch(
-      new Request(
-        `${genericProviderEndpoint(options.credential.baseUrl, "models")}/${encodeURIComponent(options.model)}`,
-        { headers, method: "GET", signal },
+  const response = await transportAttempt(
+    () =>
+      options.fetch(
+        new Request(
+          `${genericProviderEndpoint(options.credential.baseUrl, "models")}/${encodeURIComponent(options.model)}`,
+          { headers, method: "GET", signal },
+        ),
       ),
-    );
-  } catch {
-    throwIfCallerAborted(options.signal);
-    return undefined;
+    options.signal,
+  );
+  if (response === RETRYABLE_TRANSPORT_FAILURE) {
+    return unresolvedModel(true);
   }
   throwIfCallerAborted(options.signal);
   if (!response.ok) {
-    return undefined;
+    return unresolvedModel(retryableStatus(response.status));
   }
-  const value = await responseJson(response);
+  const value = await transportAttempt(
+    () => responseJson(response),
+    options.signal,
+  );
+  if (value === RETRYABLE_TRANSPORT_FAILURE) {
+    return unresolvedModel(true);
+  }
   throwIfCallerAborted(options.signal);
   const id = isRecord(value) ? value["id"] : undefined;
-  return isAgentModelId(id) ? id : undefined;
+  return isAgentModelId(id) ? resolvedModel(id) : unresolvedModel();
+}
+
+export async function resolveAnthropicModel(
+  options: Parameters<typeof resolveAnthropicModelAttempt>[0],
+): Promise<string | undefined> {
+  return (await resolveAnthropicModelAttempt(options)).model;
 }

@@ -174,28 +174,40 @@ function continuationReplay(
   if (results.length === 0) return undefined;
   const expectedIds = assistant.toolCalls.map(({ id }) => id);
   const resultIds = results.map(({ toolCallId }) => toolCallId);
+  const expectedIdSet = new Set(expectedIds);
+  const resultIdSet = new Set(resultIds);
   const replay = matchingReplay(assistant, identity);
   if (
     replay === undefined ||
     expectedIds.length === 0 ||
-    expectedIds.length !== resultIds.length ||
-    new Set(expectedIds).size !== expectedIds.length ||
-    new Set(resultIds).size !== resultIds.length ||
-    expectedIds.some((id, callIndex) => id !== resultIds[callIndex])
+    expectedIdSet.size !== resultIdSet.size ||
+    expectedIds.some((id) => !resultIdSet.has(id))
   ) {
     throw new Error(UNSAFE_TOOL_REPLAY);
   }
   return replay;
 }
 
+function trailingToolAssistantIndex(
+  messages: readonly AgentConversationMessage[],
+): number | undefined {
+  if (messages.at(-1)?.role !== "tool") return undefined;
+  let assistantIndex = messages.length - 1;
+  while (messages[assistantIndex]?.role === "tool") {
+    assistantIndex -= 1;
+  }
+  return messages[assistantIndex]?.role === "assistant"
+    ? assistantIndex
+    : undefined;
+}
+
 export function assertAnthropicContinuationReplays(
   messages: readonly AgentConversationMessage[],
   identity: AnthropicReplayIdentity,
 ): void {
-  for (const [index, message] of messages.entries()) {
-    if (message.role === "assistant" && messages[index + 1]?.role === "tool") {
-      continuationReplay(messages, index, identity);
-    }
+  const assistantIndex = trailingToolAssistantIndex(messages);
+  if (assistantIndex !== undefined) {
+    continuationReplay(messages, assistantIndex, identity);
   }
 }
 
@@ -287,12 +299,10 @@ function continuationContainer(
   if (last?.role === "assistant") {
     return matchingReplay(last, identity)?.container;
   }
-  if (last?.role !== "tool") return undefined;
-  let assistantIndex = messages.length - 1;
-  while (messages[assistantIndex]?.role === "tool") {
-    assistantIndex -= 1;
-  }
-  return continuationReplay(messages, assistantIndex, identity)?.container;
+  const assistantIndex = trailingToolAssistantIndex(messages);
+  return assistantIndex === undefined
+    ? undefined
+    : continuationReplay(messages, assistantIndex, identity)?.container;
 }
 
 function anthropicTools(

@@ -40,6 +40,7 @@ async function explainFileResult(
   toolArguments: Readonly<Record<string, unknown>>,
   signal: AbortSignal,
   output: string,
+  currentResolvedModel?: string | null,
 ): Promise<string> {
   const promptValue = toolArguments["prompt"];
   if (
@@ -72,6 +73,7 @@ async function explainFileResult(
       currentProvider: runtime.detail.provider,
       currentProviderPricing: runtime.detail.providerPricing,
       currentProviderTag: runtime.detail.openRouterProviderTag,
+      ...(currentResolvedModel === undefined ? {} : { currentResolvedModel }),
       factory: runtime.modelFactory,
       onStepStart: () => {
         const { store } = runtime;
@@ -99,6 +101,7 @@ async function explainFileResult(
 }
 
 export function createRunnerToolDispatcher(options: {
+  readonly currentResolvedModel?: string | null;
   readonly executeForSession: (
     execute: () => Promise<RunnerCommandResult>,
     handoff: (error: DOMException) => void,
@@ -155,6 +158,7 @@ export function createRunnerToolDispatcher(options: {
         toolArguments,
         signal,
         result.output,
+        options.currentResolvedModel,
       ),
       state: "completed",
     };

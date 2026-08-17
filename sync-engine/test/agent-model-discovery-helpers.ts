@@ -17,7 +17,6 @@ export function credential(
 ): ProviderCredentialAccess {
   return {
     accountId,
-    credentialFingerprint: "test-credential-fingerprint",
     ...(baseUrl === undefined ? {} : { baseUrl }),
     id: "credential-id",
     isDefault: false,

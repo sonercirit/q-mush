@@ -14,7 +14,6 @@ const OPENROUTER_CREDENTIAL = restartTestCredential("openrouter-credential", {
   accountId: "openrouter-account",
   isDefault: true,
   label: "OpenRouter key",
-  credentialFingerprint: "test-credential-fingerprint",
   secret: "openrouter-secret",
 });
 

@@ -36,6 +36,7 @@ export async function explainAttachment(
     readonly currentProvider: ProviderId;
     readonly currentProviderPricing: ProviderModelPricing | null;
     readonly currentProviderTag: string | null;
+    readonly currentResolvedModel?: string | null;
     readonly factory: AgentModelFactory;
     readonly onStepStart?: () => void;
     readonly prompt: string | null;
@@ -93,6 +94,8 @@ export async function explainAttachment(
     selection === undefined
       ? options.currentProviderPricing
       : selectedModel.pricing;
+  const resolvedModel =
+    selection === undefined ? options.currentResolvedModel : selectedModel.id;
   const model = createFallbackModel(options.factory, {
     adaptiveThinking: selectedModel.adaptiveThinking,
     credential,
@@ -103,6 +106,7 @@ export async function explainAttachment(
     prompt: options.prompt,
     provider: selectedProvider,
     providerPricing: selectedPricing,
+    ...(resolvedModel === undefined ? {} : { resolvedModel }),
   });
   let step;
   try {

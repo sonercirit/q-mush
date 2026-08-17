@@ -170,14 +170,21 @@ function officialAnthropicCredential() {
   };
 }
 
-async function expectRejectedReplay(
+async function expectReplayOutcome(
   messages: readonly AgentConversationMessage[],
+  unsafe: boolean,
 ): Promise<void> {
   const harness = signedReplayHarness();
-  await expect(harness.complete(messages)).rejects.toThrow(
-    UNSAFE_TOOL_REPLAY_ERROR,
-  );
-  expect(harness.requests).toHaveLength(0);
+  if (unsafe) {
+    await expect(harness.complete(messages)).rejects.toThrow(
+      UNSAFE_TOOL_REPLAY_ERROR,
+    );
+    expect(harness.requests).toHaveLength(0);
+    return;
+  }
+  await harness.complete(messages);
+  expectUnsignedReplay(await assistantContent(harness));
+  expect(harness.requests).toHaveLength(1);
 }
 
 function replayWithoutClientTool() {
@@ -442,22 +449,23 @@ describe("anthropic-format generic provider", () => {
     expect(JSON.stringify(content)).toContain("omitted-signature");
   });
 
-  test("fails stale signed tool replay closed after a model change", async () => {
-    await expectRejectedReplay(staleReplayConversation());
-  });
+  test("degrades stale signed tool replay after a historical model change", () =>
+    expectReplayOutcome(staleReplayConversation(), false));
 
-  test("fails closed when tool-call sanitization changes the assistant", async () => {
-    await expectRejectedReplay([
-      { content: "Hello", role: "user" },
-      {
-        ...readAssistant(SIGNED_REPLAY),
-        toolCalls: [
-          { ...ANTHROPIC_READ_CALL, arguments: '{"path":"OTHER.md"}' },
-        ],
-      },
-      readToolResult("Setup"),
-    ]);
-  });
+  test("fails closed when tool-call sanitization changes the assistant", () =>
+    expectReplayOutcome(
+      [
+        { content: "Hello", role: "user" },
+        {
+          ...readAssistant(SIGNED_REPLAY),
+          toolCalls: [
+            { ...ANTHROPIC_READ_CALL, arguments: '{"path":"OTHER.md"}' },
+          ],
+        },
+        readToolResult("Setup"),
+      ],
+      true,
+    ));
 
   test("keeps private replay metadata out of OpenAI-format requests", async () => {
     const body = await captureOpenAiFormatReplayRequest(SIGNED_REPLAY);
@@ -466,17 +474,14 @@ describe("anthropic-format generic provider", () => {
     expect(JSON.stringify(body)).not.toContain("omitted-signature");
   });
 
-  test("fails a durable client-tool continuation closed without exact replay", async () => {
-    await expectRejectedReplay(
-      replayConversation({
-        toolContent: "Setup",
-      }),
-    );
-  });
+  test("fails a trailing client-tool continuation closed without exact replay", () =>
+    expectReplayOutcome(
+      replayConversation({ toolContent: "Setup" }).slice(0, -1),
+      true,
+    ));
 
-  test("fails a stale durable client-tool continuation closed", async () => {
-    await expectRejectedReplay(staleReplayConversation());
-  });
+  test("fails a stale trailing client-tool continuation closed", () =>
+    expectReplayOutcome(staleReplayConversation().slice(0, -1), true));
 
   test("recovers a continuation container through trailing tool results", async () => {
     const harness = signedReplayHarness();
@@ -487,9 +492,8 @@ describe("anthropic-format generic provider", () => {
     });
   });
 
-  test("rejects a continuation container when the result IDs do not match", async () => {
-    await expectRejectedReplay(containedReplayConversation("different-call"));
-  });
+  test("rejects a continuation container when the result IDs do not match", () =>
+    expectReplayOutcome(containedReplayConversation("different-call"), true));
 
   test("does not recover a container across a non-tool intervening turn", async () => {
     const harness = signedReplayHarness();

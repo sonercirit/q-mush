@@ -25,6 +25,37 @@ const REPLAY = {
   provenance: "test-provenance",
 };
 
+function appendReplayAssistant(
+  setup: ReturnType<typeof runningStore>,
+  toolCalls: readonly { readonly id: string; readonly name: string }[],
+): void {
+  setup.store.appendCurrentAgentMessage(
+    STORE_SESSION_ID,
+    {
+      content: "Answer",
+      providerReplay: REPLAY,
+      role: "assistant",
+      toolCalls: toolCalls.map(({ id, name }) => ({
+        arguments: "{}",
+        id,
+        name,
+      })),
+    },
+    TEST_NOW + 2,
+  );
+}
+
+function conversationWithReplay(
+  setup: ReturnType<typeof runningStore>,
+  finishTrailingCalls = true,
+) {
+  return setup.store.conversation(
+    STORE_SESSION_ID,
+    replayIdentity(REPLAY.model, REPLAY.provenance),
+    finishTrailingCalls,
+  );
+}
+
 function setStoredReplay(
   database: AppDatabase,
   role: "assistant" | "user",
@@ -73,26 +104,33 @@ describe("stored provider replay", () => {
     ).toThrow("Anthropic assistant replay data is invalid");
   });
 
+  test("preserves private replay while filling interrupted tool results", () => {
+    const setup = runningStore();
+    const { database } = setup;
+    appendReplayAssistant(setup, [
+      { id: "first-call", name: "read" },
+      { id: "second-call", name: "read" },
+    ]);
+
+    const conversation = conversationWithReplay(setup);
+
+    expect(conversation[1]).toMatchObject({ providerReplay: REPLAY });
+    expect(
+      conversation
+        .slice(2)
+        .map((message) =>
+          message.role === "tool" ? message.toolCallId : message.role,
+        ),
+    ).toEqual(["first-call", "second-call"]);
+    database.$client.close();
+  });
+
   test("keeps replay private, ignores corrupt assistant metadata, and rejects misplaced replay", () => {
     const setup = runningStore();
     const { database, store } = setup;
-    store.appendCurrentAgentMessage(
-      STORE_SESSION_ID,
-      {
-        content: "Answer",
-        providerReplay: REPLAY,
-        role: "assistant",
-        toolCalls: [],
-      },
-      TEST_NOW + 2,
-    );
+    appendReplayAssistant(setup, []);
 
-    expect(
-      store.conversation(
-        STORE_SESSION_ID,
-        replayIdentity(REPLAY.model, REPLAY.provenance),
-      )[1],
-    ).toMatchObject({
+    expect(conversationWithReplay(setup)[1]).toMatchObject({
       providerReplay: REPLAY,
     });
     expect(

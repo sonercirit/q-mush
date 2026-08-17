@@ -115,7 +115,6 @@ describe("pending-input realtime integration", () => {
     const credential = createTestProviderCredential("credential", "api_key", {
       accountId: null,
       label: "Test credential",
-      credentialFingerprint: "test-credential-fingerprint",
       secret: "test-token",
     });
     const callbacks = { launch: vi.fn(() => true), notify: vi.fn() };

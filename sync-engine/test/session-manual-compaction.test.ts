@@ -81,7 +81,6 @@ function runtimeDependencies(
       id: options.detail.credentialId,
       isDefault: true,
       label: "Manual compaction credential",
-      credentialFingerprint: "test-credential-fingerprint",
       secret: "provider-secret",
       source: "api_key",
     },

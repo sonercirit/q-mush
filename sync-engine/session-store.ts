@@ -61,7 +61,7 @@ import {
   readInternalSessionMessages,
   readStoredSessionMessages,
   storedConversationTruncation,
-  withInterruptedToolResults,
+  withInterruptedInternalToolResults,
 } from "./session-store-read.ts";
 import {
   failInterruptedStoredSession,
@@ -191,23 +191,8 @@ export class SessionStore extends SessionStoreRestarts {
     interrupted = true,
   ): readonly AgentConversationMessage[] {
     const internal = readInternalSessionMessages(this.#database, sessionId);
-    const replayById = new Map(
-      internal
-        .filter(({ providerReplay }) => providerReplay !== undefined)
-        .map(({ message, providerReplay }) => [message.id, providerReplay]),
-    );
     return conversationFromInternalMessages(
-      withInterruptedToolResults(
-        internal.map(({ message }) => message),
-        interrupted,
-      ).map((message) => {
-        const providerReplay =
-          message.role === "assistant" ? replayById.get(message.id) : undefined;
-        return {
-          message,
-          ...(providerReplay === undefined ? {} : { providerReplay }),
-        };
-      }),
+      withInterruptedInternalToolResults(internal, interrupted),
       identity,
     );
   }

@@ -101,7 +101,6 @@ describe("lazy Anthropic request metadata refresh", () => {
         id: detail.credentialId,
         isDefault: true,
         label: "Refresh credential",
-        credentialFingerprint: "test-credential-fingerprint",
         secret: "anthropic-secret",
         source: "api_key" as const,
       },

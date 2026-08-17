@@ -398,6 +398,9 @@ export async function runSessionAgent(
   const stepBoundaryRequested = (): boolean =>
     runtime.detail.restartHandoff === null && runtime.restartHandoffRequested();
   const { currentToolNames, dispatchRunnerTool } = createRunnerToolDispatcher({
+    ...(models.resolvedModel === undefined
+      ? {}
+      : { currentResolvedModel: models.resolvedModel }),
     executeForSession: (execute, handoff) =>
       executeForSession(runtime, execute, handoff),
     handoffController,

@@ -25,7 +25,6 @@ export function testCredential(
 ): ProviderCredentialAccess {
   return {
     accountId: null,
-    credentialFingerprint: "test-credential-fingerprint",
     id,
     isDefault: false,
     label: id,

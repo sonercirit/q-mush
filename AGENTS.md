@@ -265,21 +265,25 @@ Living project memory.
   leaves text-only Messages running but blocks both client-tool execution and
   provider-directed pause follow-up. Exact JSON-safe blocks, including additive
   fields, persist; corrupt metadata warns but leaves transcripts readable.
-  Durable client-tool continuations require matching replay and result IDs;
-  missing, stale, incomplete, unsupported, or unsigned turns fail closed before
-  tool execution. Only empty text drops (whitespace stays but is withheld from
-  content and replay together across every trailing text block and fails a pause
-  if none remain replayable. `cache_control` marks only text/client `tool_use`,
-  scanning backward; trailing replay is resent verbatim. `pause_turn` validates
-  resent blocks, replays them/container without duplicate UI, sums usage, caps
-  at five continuations, and fails terminal client tools closed when replay
-  cannot combine. The local proxy tolerates unsigned tool-loop replay; strict
-  endpoints may not. Reasoning deltas group by output/summary index; separate
-  summary parts with paragraphs since completed responses may omit them.
-  OpenAI's WebSocket Mode has a 60-minute limit; the canonical
-  `websocket_connection_limit_reached` and observed underscore-free variant
-  replace the socket once per step, then bound retries, replaying only an
-  unpersisted step. Other WebSocket/accepted HTTP interruptions or provider
+  Durable client-tool continuations require matching replay and result IDs; only
+  the trailing tool-result turn fails closed when replay is missing, stale,
+  incomplete, unsupported, or unsigned. Older incompatible tool history falls
+  back to plain reconstruction. Trailing result IDs use deduplicated,
+  order-insensitive sets. Transient retrieval failures retry later; permanent
+  unresolved identities stay cached. Known resolved identities flow to agent,
+  compactor, and attachment fallback. Only empty text drops (whitespace stays
+  but is withheld from content and replay together across every trailing text
+  block and fails a pause if none remain replayable. `cache_control` marks only
+  text/client `tool_use`, scanning backward; trailing replay is resent verbatim.
+  `pause_turn` validates resent blocks, replays them/container without duplicate
+  UI, sums usage, caps at five continuations, and fails terminal client tools
+  closed when replay cannot combine. The local proxy tolerates unsigned
+  tool-loop replay; strict endpoints may not. Reasoning deltas group by
+  output/summary index; separate summary parts with paragraphs since completed
+  responses may omit them. OpenAI's WebSocket Mode has a 60-minute limit; the
+  canonical `websocket_connection_limit_reached` and observed underscore-free
+  variant replace the socket once per step, then bound retries, replaying only
+  an unpersisted step. Other WebSocket/accepted HTTP interruptions or provider
   errors retry before persistence; replays reset partial UI deltas and exhausted
   WebSockets fall back to HTTP. Permanent errors and aborts do not retry;
   terminal failures persist as non-replayed `error` messages.

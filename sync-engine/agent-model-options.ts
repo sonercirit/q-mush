@@ -4,11 +4,21 @@ import {
   type OpenRouterProviderRouting,
 } from "../shared/agent-configuration.ts";
 import type { AgentSessionToolName } from "../shared/agent-tools.ts";
+import { fingerprintProviderCredential } from "../shared/credential-cipher.ts";
 import type {
   ProviderCredentialAccess,
   ProviderId,
 } from "../shared/provider-credential-store.ts";
 import type { ProviderTextDelta } from "./provider-stream.ts";
+
+export function agentCredentialFingerprint(
+  credential: Pick<
+    ProviderCredentialAccess,
+    "apiFormat" | "baseUrl" | "secret"
+  >,
+): string {
+  return fingerprintProviderCredential(credential.secret, credential);
+}
 
 export function agentModelOpenRouterProviderRouting(
   selection: string | null | undefined,

@@ -80,7 +80,6 @@ describe("session agent tool authority", () => {
           id: detail.credentialId,
           isDefault: true,
           label: "Tool authority credential",
-          credentialFingerprint: "test-credential-fingerprint",
           secret: "provider-secret",
           source: "api_key",
         },

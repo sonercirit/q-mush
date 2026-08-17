@@ -356,7 +356,11 @@ describe("OpenAI credentials", () => {
       expires: TEST_NOW + 7_200_000,
       refresh: "refreshed-refresh-token",
     });
-    expect(refreshed?.credentialFingerprint).toBe(
+    const refreshedStored = readStoredProviderCredentials(
+      database,
+      "openai",
+    ).find(({ id }) => id === FIRST_OAUTH_ID);
+    expect(refreshedStored?.credentialFingerprint).toBe(
       fingerprintProviderCredential(refreshedSecret),
     );
     expect(await readFormBody(providerRequests.at(-1))).toEqual({

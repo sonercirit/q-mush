@@ -437,7 +437,6 @@ export function createTestProviderCredential(
   return {
     ...identity,
     label: "Agent key",
-    credentialFingerprint: "test-credential-fingerprint",
     secret: "provider-secret",
     source,
     ...overrides,

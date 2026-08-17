@@ -10,6 +10,7 @@ import type { ProviderModelPricing } from "../shared/provider-model-pricing.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { ModelConversationCompactor } from "./agent-compaction.ts";
 import {
+  agentCredentialFingerprint,
   agentModelOpenRouterProviderRouting,
   type AgentModelRequestOptions,
 } from "./agent-model-options.ts";
@@ -62,17 +63,21 @@ export function createFallbackModel(
     readonly prompt: string | null;
     readonly provider: ProviderId;
     readonly providerPricing: ProviderModelPricing | null;
+    readonly resolvedModel?: string | null;
   },
 ): AgentModel {
   return factory({
     adaptiveThinking: selection.adaptiveThinking,
     credential: selection.credential,
-    credentialFingerprint: selection.credential.credentialFingerprint,
+    credentialFingerprint: agentCredentialFingerprint(selection.credential),
     maxOutputTokens: selection.maxOutputTokens,
     model: selection.model,
     ...agentModelRoutingOptions(selection.openRouterProviderTag),
     provider: selection.provider,
     providerPricing: selection.providerPricing,
+    ...(selection.resolvedModel === undefined
+      ? {}
+      : { resolvedModel: selection.resolvedModel }),
     systemPrompt:
       selection.prompt ??
       "Describe the supplied attachment faithfully for another text-only model. Return only the useful textual result.",
@@ -91,7 +96,7 @@ function modelOptions(
   return {
     adaptiveThinking: detail.adaptiveThinking,
     credential,
-    credentialFingerprint: credential.credentialFingerprint,
+    credentialFingerprint: agentCredentialFingerprint(credential),
     ...(sessionToolCacheCapability({
       credentialSource: credential.source,
       provider: detail.provider,

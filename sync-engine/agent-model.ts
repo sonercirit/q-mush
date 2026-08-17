@@ -37,7 +37,7 @@ import {
   completeAnthropicPauseTurns,
   INVALID_ANTHROPIC_PAUSE,
 } from "./anthropic-continuation.ts";
-import { resolveAnthropicModel } from "./anthropic-model-resolution.ts";
+import { resolveAnthropicModelAttempt } from "./anthropic-model-resolution.ts";
 import {
   anthropicReplayIdentityFrom,
   anthropicReplayMatchesIdentity,
@@ -485,12 +485,21 @@ export class ChatCompletionsAgentModel implements AgentModel {
     if (this.#resolvedModel !== undefined) {
       return Promise.resolve(this.#resolvedModel ?? undefined);
     }
-    this.#resolvedModelPromise ??= resolveAnthropicModel({
+    if (this.#resolvedModelPromise !== undefined) {
+      return this.#resolvedModelPromise;
+    }
+    const resolution = resolveAnthropicModelAttempt({
       credential: this.#credential,
       fetch: this.#fetch,
       model: this.#model,
       provider: this.#provider,
       ...(signal === undefined ? {} : { signal }),
+    });
+    this.#resolvedModelPromise = resolution.then((result) => {
+      if (result.retryable) {
+        this.#resolvedModelPromise = undefined;
+      }
+      return result.model;
     });
     return this.#resolvedModelPromise;
   }
@@ -523,12 +532,9 @@ export class ChatCompletionsAgentModel implements AgentModel {
     messages: readonly AgentConversationMessage[],
     protocol: ProviderRequestProtocol,
     signal: AbortSignal | undefined,
+    resolvedModel: string | undefined,
     onStreamRetry?: () => void,
   ): Promise<AgentModelStep> {
-    const resolvedModel =
-      protocol === "anthropic"
-        ? await this.#anthropicResolvedModel(signal)
-        : undefined;
     if (protocol === "anthropic") {
       this.#assertAnthropicContinuationReplays(messages, resolvedModel);
     }
@@ -567,14 +573,18 @@ export class ChatCompletionsAgentModel implements AgentModel {
   ): Promise<AgentModelStep> {
     const protocol = this.#httpProtocol();
     const input = completionInput(parameters, this.#model);
+    const resolvedModel =
+      protocol === "anthropic"
+        ? await this.#anthropicResolvedModel(input.signal)
+        : undefined;
     if (protocol === "anthropic") {
-      const resolvedModel = await this.#anthropicResolvedModel(input.signal);
       this.#assertAnthropicContinuationReplays(parameters[0], resolvedModel);
     }
     const step = await this.#httpRequest(
       input.messages,
       protocol,
       input.signal,
+      resolvedModel,
     );
     if (
       step.providerContinuation === "anthropic_replay_unavailable" &&
@@ -596,6 +606,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
               messages,
               protocol,
               input.signal,
+              resolvedModel,
               restoreOutput,
             );
           },

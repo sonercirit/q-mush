@@ -263,18 +263,35 @@ export function withInterruptedToolResults(
   messages: readonly AgentSessionMessage[],
   finishTrailingCalls: boolean,
 ): readonly AgentSessionMessage[] {
-  const complete: AgentSessionMessage[] = [];
+  return withInterruptedInternalToolResults(
+    messages.map((message) => ({ message })),
+    finishTrailingCalls,
+  ).map(({ message }) => message);
+}
+
+function interruptedInternalToolResult(
+  pending: PendingToolResult,
+): InternalSessionMessage {
+  return { message: interruptedToolResult(pending) };
+}
+
+export function withInterruptedInternalToolResults(
+  messages: readonly InternalSessionMessage[],
+  finishTrailingCalls: boolean,
+): readonly InternalSessionMessage[] {
+  const complete: InternalSessionMessage[] = [];
   let pending: readonly PendingToolResult[] = [];
   const finishPending = () => {
-    complete.push(...pending.map(interruptedToolResult));
+    complete.push(...pending.map(interruptedInternalToolResult));
     pending = [];
   };
 
-  for (const message of messages) {
+  for (const internal of messages) {
+    const { message } = internal;
     switch (message.role) {
       case "assistant":
         finishPending();
-        complete.push(message);
+        complete.push(internal);
         pending = message.toolCalls.map((call) => ({
           call,
           createdAt: message.createdAt,
@@ -282,18 +299,18 @@ export function withInterruptedToolResults(
         }));
         break;
       case "tool":
-        complete.push(message);
+        complete.push(internal);
         pending = pending.filter(({ call }) => call.id !== message.toolCallId);
         break;
       case "user":
         finishPending();
-        complete.push(message);
+        complete.push(internal);
         break;
       case "compaction_request":
       case "error":
       case "system":
       case "thinking":
-        complete.push(message);
+        complete.push(internal);
         break;
     }
   }

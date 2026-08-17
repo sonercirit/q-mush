@@ -1,15 +1,16 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, expectTypeOf, test } from "vitest";
 import { createdAuditFields } from "../../shared/audit.ts";
 import {
   CredentialCipher,
   fingerprintProviderCredential,
 } from "../../shared/credential-cipher.ts";
 import { createDatabase } from "../../shared/database.ts";
-import { users } from "../../shared/database/schema.ts";
+import { providerCredentials, users } from "../../shared/database/schema.ts";
 import { SYSTEM_ID } from "../../shared/ids.ts";
 import {
   DuplicateProviderCredentialError,
   ProviderCredentialStore,
+  type ProviderCredentialAccess,
 } from "../../shared/provider-credential-store.ts";
 import { hasTestDatabaseTable } from "./database-fixtures.ts";
 
@@ -72,6 +73,7 @@ function ensureCredentialScopeSchema(
 
 function createProviderStore(options?: { readonly legacySchema?: boolean }): {
   readonly close: () => void;
+  readonly database: ReturnType<typeof createDatabase>;
   readonly store: ProviderCredentialStore;
 } {
   const database = createDatabase(":memory:");
@@ -100,6 +102,7 @@ function createProviderStore(options?: { readonly legacySchema?: boolean }): {
     close: () => {
       database.$client.close();
     },
+    database,
     store: new ProviderCredentialStore(
       database,
       cipher,
@@ -118,7 +121,6 @@ function addAndRead(
 
   expect(store.read(TEST_USER_ID, CREDENTIAL_ID)).toEqual({
     accountId: metadata.accountId,
-    credentialFingerprint: fingerprintProviderCredential(secret),
     id: CREDENTIAL_ID,
     label: metadata.label,
     isDefault: false,
@@ -187,6 +189,13 @@ function rotateSecret(store: ProviderCredentialStore, secret: string): void {
 }
 
 describe("provider credential agent access", () => {
+  test("keeps the storage fingerprint off the broad secret-bearing type", () => {
+    type HasFingerprint =
+      "credentialFingerprint" extends keyof ProviderCredentialAccess
+        ? true
+        : false;
+    expectTypeOf<HasFingerprint>().toEqualTypeOf<false>();
+  });
   test("reads an owned active credential with its metadata and secret", () => {
     const { close, store } = createProviderStore();
     addAndRead(store, "sk-or-secret", {
@@ -204,7 +213,7 @@ describe("provider credential agent access", () => {
   });
 
   test("preserves generic endpoint identity when rotating a secret", () => {
-    const { close, store } = createProviderStore();
+    const { close, database, store } = createProviderStore();
     const endpoint = {
       accountId: null,
       apiFormat: "anthropic" as const,
@@ -217,12 +226,19 @@ describe("provider credential agent access", () => {
     expect(store.read(TEST_USER_ID, CREDENTIAL_ID)).toMatchObject({
       apiFormat: endpoint.apiFormat,
       baseUrl: endpoint.baseUrl,
-      credentialFingerprint: fingerprintProviderCredential(
-        "rotated-secret",
-        endpoint,
-      ),
       secret: "rotated-secret",
     });
+    const stored = database
+      .select({
+        fingerprint: providerCredentials.credentialFingerprint,
+        id: providerCredentials.id,
+      })
+      .from(providerCredentials)
+      .all()
+      .find(({ id }) => id === CREDENTIAL_ID);
+    expect(stored?.fingerprint).toBe(
+      fingerprintProviderCredential("rotated-secret", endpoint),
+    );
     close();
   });
 

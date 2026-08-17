@@ -138,7 +138,6 @@ function genericSession(response: Response): {
       id: "generic-credential",
       isDefault: false,
       label: "Generic test provider",
-      credentialFingerprint: "test-credential-fingerprint",
       secret: "test-secret",
       source: "api_key",
     },

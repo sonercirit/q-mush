@@ -35,6 +35,35 @@ const UNRESOLVED_MODEL_RESPONSES = [
   ["a malformed retrieve response", () => Response.json({ type: "model" })],
 ] as const;
 
+const TRANSIENT_RESOLUTION_FAILURES = [
+  [
+    "network failure",
+    () => Promise.reject<Response>(new TypeError("temporary network failure")),
+  ],
+  [
+    "request timeout",
+    () => Promise.resolve(new Response(null, { status: 408 })),
+  ],
+  ["rate limit", () => Promise.resolve(new Response(null, { status: 429 }))],
+  [
+    "server failure",
+    () => Promise.resolve(new Response(null, { status: 503 })),
+  ],
+  [
+    "response-body failure",
+    () =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream({
+            pull(controller) {
+              controller.error(new TypeError("temporary body failure"));
+            },
+          }),
+        ),
+      ),
+  ],
+] as const;
+
 const SIGNED_THINKING = {
   signature: SIGNATURE,
   thinking: THINKING,
@@ -167,11 +196,25 @@ function modelRequestCount(
   return requests.filter((request) => request.method === method).length;
 }
 
+function expectModelExchangeCounts(
+  requests: readonly Request[],
+  counts: { readonly gets: number; readonly posts: number },
+): void {
+  expect([
+    modelRequestCount(requests, "GET"),
+    modelRequestCount(requests, "POST"),
+  ]).toEqual([counts.gets, counts.posts]);
+}
+
 function expectSingleModelExchange(requests: readonly Request[]): void {
-  expect({
-    gets: modelRequestCount(requests, "GET"),
-    posts: modelRequestCount(requests, "POST"),
-  }).toEqual({ gets: 1, posts: 1 });
+  expectModelExchangeCounts(requests, { gets: 1, posts: 1 });
+}
+
+async function completeTwice(
+  model: Pick<ChatCompletionsAgentModel, "complete">,
+): Promise<void> {
+  await model.complete([{ content: "First", role: "user" }]);
+  await model.complete([{ content: "Second", role: "user" }]);
 }
 
 function modelOptions(fetch: (request: Request) => Promise<Response>) {
@@ -183,6 +226,28 @@ function modelOptions(fetch: (request: Request) => Promise<Response>) {
     model: REQUEST_ALIAS,
     provider: "generic" as const,
   };
+}
+
+function transientResolutionModel(
+  requests: Request[],
+  firstResolution: () => Promise<Response>,
+): ChatCompletionsAgentModel {
+  let failed = false;
+  return new ChatCompletionsAgentModel(
+    modelOptions((request) => {
+      requests.push(request);
+      if (request.method === "GET") {
+        if (!failed) {
+          failed = true;
+          return firstResolution();
+        }
+        return Promise.resolve(
+          Response.json({ id: FIRST_SNAPSHOT, type: "model" }),
+        );
+      }
+      return Promise.resolve(modelCompletion(FIRST_SNAPSHOT));
+    }),
+  );
 }
 
 function testModel(
@@ -363,11 +428,21 @@ describe("Anthropic replay safety", () => {
     async (_label, unresolvedResponse) => {
       const { model, requests } = unresolvedModel(unresolvedResponse);
 
-      await model.complete([{ content: "First", role: "user" }]);
-      await model.complete([{ content: "Second", role: "user" }]);
+      await completeTwice(model);
 
-      expect(modelRequestCount(requests, "GET")).toBe(1);
-      expect(modelRequestCount(requests, "POST")).toBe(2);
+      expectModelExchangeCounts(requests, { gets: 1, posts: 2 });
+    },
+  );
+
+  test.each(TRANSIENT_RESOLUTION_FAILURES)(
+    "retries model resolution after a transient %s on a later request",
+    async (_label, firstResolution) => {
+      const requests: Request[] = [];
+      const model = transientResolutionModel(requests, firstResolution);
+
+      await completeTwice(model);
+
+      expectModelExchangeCounts(requests, { gets: 2, posts: 2 });
     },
   );
 
