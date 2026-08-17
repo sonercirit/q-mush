@@ -87,44 +87,28 @@ interface PlaywrightLaunchResult {
 
 async function runGuardedPlaywrightLaunchProbe(): Promise<PlaywrightLaunchResult> {
   const inheritedPath = process.env["PATH"];
-  const node = Bun.which(
-    "node",
-    inheritedPath === undefined
-      ? undefined
-      : {
-          PATH: inheritedPath
-            .split(":")
-            .filter((entry) => !entry.startsWith("/tmp/bun-node-"))
-            .join(":"),
-        },
-  );
-  if (node === null) {
-    throw new Error("Playwright launch probe requires Node.js");
-  }
-  const probe = Bun.spawn(
-    [
-      node,
-      "node_modules/vitest/vitest.mjs",
-      "run",
-      "--config",
-      "vitest.browser.config.ts",
-    ],
-    {
-      cwd: ROOT_DIRECTORY,
-      env: {
-        ...process.env,
-        NODE_OPTIONS: `--import=${PLAYWRIGHT_LAUNCH_PROBE}`,
-        PWDEBUG: "0",
-      },
-      stderr: "pipe",
-      stdout: "pipe",
+  const probe = Bun.spawn(["bun", "run", "test:browser"], {
+    cwd: ROOT_DIRECTORY,
+    env: {
+      ...process.env,
+      ...(inheritedPath === undefined
+        ? {}
+        : {
+            PATH: inheritedPath
+              .split(":")
+              .filter((entry) => !entry.startsWith("/tmp/bun-node-"))
+              .join(":"),
+          }),
+      NODE_OPTIONS: `--import=${PLAYWRIGHT_LAUNCH_PROBE}`,
+      PWDEBUG: "1",
     },
-  );
-  const [exitCode, stderr, stdout] = await Promise.all([
-    probe.exited,
-    new Response(probe.stderr).text(),
-    new Response(probe.stdout).text(),
-  ]);
+    stderr: "pipe",
+    stdout: "pipe",
+  });
+  const output = new Response(probe.stdout).text();
+  const errors = new Response(probe.stderr).text();
+  const exitCode = await probe.exited;
+  const [stdout, stderr] = await Promise.all([output, errors]);
   if (exitCode === 0) {
     throw new Error("Playwright launch probe unexpectedly passed");
   }
