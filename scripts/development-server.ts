@@ -69,10 +69,22 @@ function settledWithin(
   ]);
 }
 
+function childExitOrInterruption(
+  child: Readonly<{ exited: Promise<number> }>,
+  interruption: Promise<unknown>,
+): Promise<boolean> {
+  return Promise.race([
+    child.exited.then(() => true),
+    interruption.then(() => false),
+  ]);
+}
+
 export function startDevelopmentServer(
   options: DevelopmentServerOptions,
 ): DevelopmentServer {
   let finalPreparation = Promise.withResolvers<undefined>();
+  const finalShutdown = Promise.withResolvers<undefined>();
+  let finalShutdownSent = false;
   let restartReady = Promise.withResolvers<undefined>();
   let forced = Promise.withResolvers<undefined>();
   let forceRequested = false;
@@ -110,6 +122,7 @@ export function startDevelopmentServer(
   );
   let child = spawn();
   let operation = Promise.resolve();
+  let finalShutdownRequested = false;
   let restartTimer: ReturnType<typeof setTimeout> | undefined;
   let restarting = false;
   let stopping = false;
@@ -141,6 +154,13 @@ export function startDevelopmentServer(
     }
   };
 
+  const sendFinalShutdown = (): boolean => {
+    if (finalShutdownSent) return true;
+    const sent = sendChild(FINAL_SHUTDOWN_REQUEST_MESSAGE);
+    finalShutdownSent = sent;
+    return sent;
+  };
+
   const childSettledWithin = (
     milliseconds: number,
     interruption?: Promise<unknown>,
@@ -160,11 +180,23 @@ export function startDevelopmentServer(
     });
   };
 
-  const terminateChild = async (waitMilliseconds: number): Promise<void> => {
+  const terminateChild = async (
+    waitMilliseconds: number,
+    deadline?: RestartDeadline,
+    cancelForFinalShutdown = false,
+  ): Promise<void> => {
+    if (cancelForFinalShutdown && finalShutdownRequested) return;
     signalChild("SIGTERM");
     if (await childSettledWithin(waitMilliseconds)) return;
+    if (cancelForFinalShutdown && finalShutdownRequested) return;
     signalChild("SIGKILL");
-    if (!(await childSettledWithin(forceMilliseconds))) {
+    const forceWait =
+      deadline === undefined
+        ? forceMilliseconds
+        : deadline.remaining() === 0
+          ? 0
+          : Math.min(forceMilliseconds, deadline.remaining());
+    if (forceWait > 0 && !(await childSettledWithin(forceWait))) {
       child.unref();
       throw new Error("The development server did not terminate after SIGKILL");
     }
@@ -179,12 +211,14 @@ export function startDevelopmentServer(
       type: DEVELOPMENT_RESTART_REQUEST_MESSAGE,
     });
     const restartReadyOrExited = await settledWithin(
-      Promise.race([restartReady.promise, child.exited]),
+      Promise.race([restartReady.promise, child.exited, finalShutdown.promise]),
       restartDeadline.remaining(),
     );
-    if (child.exitCode !== null) return;
+    if (child.exitCode !== null || finalShutdownRequested) return;
     await terminateChild(
       restartReadyOrExited ? restartDeadline.remaining() : 0,
+      restartDeadline,
+      true,
     );
   };
 
@@ -203,7 +237,7 @@ export function startDevelopmentServer(
   };
 
   const shutDownChild = async (): Promise<void> => {
-    const requested = sendChild(FINAL_SHUTDOWN_REQUEST_MESSAGE);
+    const requested = sendFinalShutdown();
     if (!requested) {
       signalChild("SIGTERM");
     }
@@ -213,6 +247,9 @@ export function startDevelopmentServer(
     // engine's IPC request first ownership of final shutdown, and use SIGTERM
     // only when IPC was unavailable or the child did not acknowledge it.
     if (!prepared && requested) signalChild("SIGTERM");
+    if (prepared && !forceRequested) {
+      if (await childExitOrInterruption(child, forced.promise)) return;
+    }
     if (
       !forceRequested &&
       (await childSettledWithin(graceMilliseconds, forced.promise))
@@ -242,6 +279,7 @@ export function startDevelopmentServer(
           restartReady = Promise.withResolvers<undefined>();
           forced = Promise.withResolvers<undefined>();
           forceRequested = false;
+          finalShutdownSent = false;
           child = spawn();
         }
         restarting = false;
@@ -259,9 +297,16 @@ export function startDevelopmentServer(
     restartTrigger.close();
   };
 
-  const forceStop = (): Promise<void> => {
+  const beginStop = (): void => {
     stopping = true;
+    finalShutdownRequested = true;
+    finalShutdown.resolve();
     closeSupervisorResources();
+    if (restarting) sendFinalShutdown();
+  };
+
+  const forceStop = (): Promise<void> => {
+    beginStop();
     forceRequested = true;
     forced.resolve();
     stopPromise ??= shutDownChild();
@@ -275,9 +320,7 @@ export function startDevelopmentServer(
         return stopPromise;
       }
 
-      stopping = true;
-
-      closeSupervisorResources();
+      beginStop();
       stopPromise = shutDownChild();
       return stopPromise;
     },

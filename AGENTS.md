@@ -56,10 +56,11 @@ Living project memory.
   supervisor-issued absolute 120-second deadline, reject new steps and
   provider/auxiliary requests, report scoped active-tool counts, force-park
   stragglers only after durable handoffs, then use bounded cleanup/termination;
-  repeated requests escalate immediately. Final shutdown promotes any live
-  restart and stays unbounded after its durable marker; live markers are fenced
-  from liveness recovery. Text handlers precompress once, negotiating zstd,
-  Brotli, gzip, deflate; `/favicon.svg` revalidates separately with ETag.
+  repeated requests escalate immediately. Final shutdown cancels the supervisor
+  deadline, promotes runner handoffs to a server marker, and stays unbounded
+  after that marker; live markers are fenced from liveness recovery. Text
+  handlers precompress once, negotiating zstd, Brotli, gzip, deflate;
+  `/favicon.svg` revalidates separately with ETag.
 - `solid/pages.tsx` renders both server page shells via Solid's SSR runtime;
   `sync-engine/pages.ts` loads it with Vite's SSR runner. The browser app mounts
   from `solid/client.tsx`; routes live in `shared/routes.ts`.
@@ -85,7 +86,8 @@ Living project memory.
   downloaded standalone executable under `~/.q-mush/runner`; no Bun needed.
   Runners report metadata and 15-second heartbeats over authenticated
   WebSockets, check updates at startup and five-minute intervals, recheck via
-  handshake version after restarts, replacing an older socket on reconnect.
+  handshake version after restarts, replacing an older socket on reconnect;
+  restart IDs clear only after both `restart_ready` and operational settlement.
   Updates use a source/compiler ETag and SHA-256 digest, atomically replace and
   restart the executable; development restarts drain active sessions first.
   Reinstalling for the same user and machine rotates the registration to its new

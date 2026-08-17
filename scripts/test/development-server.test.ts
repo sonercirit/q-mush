@@ -8,7 +8,10 @@ import {
   type DevelopmentServer,
 } from "../development-server.ts";
 import { createDevelopmentShutdown } from "../development-shutdown.ts";
-import { withTemporaryDirectory } from "./temporary-directory.ts";
+import {
+  waitForTemporaryFileContent,
+  withTemporaryDirectory,
+} from "./temporary-directory.ts";
 
 async function readStartCount(pathname: string): Promise<number> {
   const file = Bun.file(pathname);
@@ -36,18 +39,6 @@ async function waitForStartCount(
 async function waitForFile(pathname: string): Promise<void> {
   await expect
     .poll(() => Bun.file(pathname).exists(), { interval: 10, timeout: 5_000 })
-    .toBe(true);
-}
-
-async function waitForFileContent(
-  pathname: string,
-  content: string,
-): Promise<void> {
-  await expect
-    .poll(async () => (await Bun.file(pathname).text()).includes(content), {
-      interval: 10,
-      timeout: 5_000,
-    })
     .toBe(true);
 }
 
@@ -183,6 +174,7 @@ process.on("message", (message) => {
   if (message === "q-mush:final-shutdown-request") {
     record("final-request");
     process.send?.("q-mush:final-shutdown-prepared");
+    process.exit();
   }
 });
 process.on("SIGTERM", () => { record("sigterm"); process.exit(); });
@@ -199,7 +191,7 @@ setInterval(() => {}, 1_000);
       await waitForFile(eventsPath);
 
       await triggerDevelopmentRestart(triggerPath);
-      await waitForFileContent(eventsPath, "development-request");
+      await waitForTemporaryFileContent(eventsPath, "development-request");
       await triggerDevelopmentRestart(triggerPath);
       await waitForStartCount(eventsPath, 2);
 
@@ -212,7 +204,7 @@ setInterval(() => {}, 1_000);
         "started",
       ]);
       await server.stop();
-      await waitForFileContent(eventsPath, "final-request");
+      await waitForTemporaryFileContent(eventsPath, "final-request");
     },
   );
 });
@@ -238,7 +230,7 @@ setInterval(() => undefined, 1_000);
         cwd: directory,
         restartDelayMilliseconds: 10,
         restartTriggerPath: triggerPath,
-        shutdownForceMilliseconds: 40,
+        shutdownForceMilliseconds: 300,
         shutdownPreparationMilliseconds: 100,
       } as const;
       const server = startDevelopmentServer(serverOptions);
@@ -247,7 +239,8 @@ setInterval(() => undefined, 1_000);
         const startedAt = performance.now();
         await triggerDevelopmentRestart(triggerPath);
         await waitForStartCount(startsPath, 2);
-        expect(performance.now() - startedAt).toBeLessThan(500);
+        const elapsed = performance.now() - startedAt;
+        expect(elapsed).toBeLessThan(250);
       } finally {
         await server.stop();
       }

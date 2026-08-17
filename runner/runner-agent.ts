@@ -331,14 +331,23 @@ async function connectRunner(
         () => {
           installOperationalHandlers(socket);
         },
-        (version) => {
-          if (version !== Q_MUSH_RUNNER_VERSION) {
-            runnerUpdateTrigger.observe(
-              new Response(null, {
-                headers: { "x-q-mush-runner-version": version },
-              }),
-            );
-          }
+        {
+          onOperational: (restartId) => {
+            if (!runnerRestart.operational(restartId)) {
+              throw new RunnerConnectionError(
+                "The runner restart settlement was invalid",
+              );
+            }
+          },
+          onVersion: (version) => {
+            if (version !== Q_MUSH_RUNNER_VERSION) {
+              runnerUpdateTrigger.observe(
+                new Response(null, {
+                  headers: { "x-q-mush-runner-version": version },
+                }),
+              );
+            }
+          },
         },
       );
       onOperational(socket);

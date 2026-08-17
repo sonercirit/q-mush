@@ -22,7 +22,7 @@ function registrationForStartup(
   startup: RunnerStartupRestart,
   installed: string[],
   installation: string,
-  onVersion?: (version: string) => void,
+  handlers: Parameters<typeof completeRunnerRegistration>[3] = {},
 ): RegistrationSetup {
   const socket = new RegistrationSocket();
   const connection = startup.connection();
@@ -32,7 +32,7 @@ function registrationForStartup(
     () => {
       installed.push(installation);
     },
-    onVersion,
+    handlers,
   );
   return { connection, installed, promise, socket, startup };
 }
@@ -45,7 +45,7 @@ function registration(
     new RunnerStartupRestart(restartId ?? undefined),
     [],
     "operational",
-    onVersion,
+    onVersion === undefined ? {} : { onVersion },
   );
 }
 
@@ -238,6 +238,27 @@ test("stores final receipt but does not consume restart identity on a pre-operat
   );
   expect(setup.installed).toEqual([]);
   finalizedRestartState(setup, "receipt-finalized");
+});
+
+test("reports the settled restart identity only after operational registration", async () => {
+  const operationalRestartIds: (string | undefined)[] = [];
+  const setup = registrationForStartup(
+    new RunnerStartupRestart("restart-operational"),
+    [],
+    "operational",
+    {
+      onOperational: (restartId) => {
+        operationalRestartIds.push(restartId);
+      },
+    },
+  );
+  receiveThroughFinalized(setup, "registration-settlement", "receipt-final");
+
+  expect(operationalRestartIds).toEqual([]);
+  setup.socket.receive(operational("registration-settlement"));
+  await expect(setup.promise).resolves.toBeUndefined();
+
+  expect(operationalRestartIds).toEqual(["restart-operational"]);
 });
 
 test("installs command handling before operational acknowledgement and resolution", async () => {

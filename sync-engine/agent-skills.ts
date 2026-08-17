@@ -52,6 +52,7 @@ interface AgentSkillsOptions {
     name: string,
     runnerCommand: boolean,
   ) => () => void;
+  readonly restartRequested?: () => boolean;
   readonly tools: readonly AgentSessionToolName[];
   readonly userId: string;
   readonly workspaceId?: string;
@@ -169,6 +170,13 @@ function executeParallelSkills(
       executeParallelResultCall(
         recipientName,
         async () => {
+          if (options.restartRequested?.() === true) {
+            return {
+              output:
+                "Error: this parallel tool call was canceled because the server is restarting.",
+              state: "canceled",
+            };
+          }
           const nestedCallId = `${callId ?? "parallel"}:${nestedId}`;
           const runnerCommand =
             toolName !== BRAVE_SEARCH_TOOL_NAME &&

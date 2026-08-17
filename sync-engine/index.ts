@@ -276,6 +276,7 @@ async function shutDown(): Promise<void> {
   writeResilience.close();
   database.$client.close();
   recordDatabaseRetryFixtureEvent(Bun.env, "shutdown:database-closed");
+  if (process.connected) process.disconnect?.();
 }
 
 process.on("message", (message) => {

@@ -21,6 +21,21 @@ import {
 import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
 import { escalateAndCloseDrain } from "./session-restart-test-helpers.ts";
 
+function closeRestartBoundarySetup(
+  setup: ReturnType<typeof connectedSessionSetup>,
+): void {
+  closeSessionTestDatabase(setup.database);
+}
+
+function waitForRunnerTool(
+  setup: ReturnType<typeof connectedSessionSetup>,
+  tool: string,
+): Promise<unknown> {
+  return waitForSessionValue(setup.latestRunnerCommand, (command) =>
+    isRecord(command) ? command["tool"] === tool : false,
+  );
+}
+
 const ATTACHMENT = {
   data: "AQ==",
   mediaType: "application/pdf",
@@ -67,9 +82,7 @@ test("a deferred explain_file discovery cannot start its auxiliary model after d
       : discovered.promise.then(currentModelCatalog);
   });
   await startToolSessionSetup(setup);
-  await waitForSessionValue(setup.latestRunnerCommand, (command) =>
-    isRecord(command) ? command["tool"] === "explain_file" : false,
-  );
+  await waitForRunnerTool(setup, "explain_file");
   expect(completeRunnerCommand(setup, JSON.stringify(ATTACHMENT)).status).toBe(
     204,
   );
@@ -83,7 +96,94 @@ test("a deferred explain_file discovery cannot start its auxiliary model after d
   await drain;
 
   expect(modelRequests).toBe(1);
-  closeSessionTestDatabase(setup.database);
+  closeRestartBoundarySetup(setup);
+});
+
+function batchedToolModel() {
+  return scriptedModel([
+    providerStep("Run both tools.", {
+      toolCalls: [
+        toolCall("read", { path: "deferred.txt" }, "deferred-read"),
+        toolCall("brave_search", { query: "must not start" }, "late-search"),
+      ],
+    }),
+  ]);
+}
+
+function parallelSearchModel() {
+  const toolUses = Array.from({ length: 5 }, (_, index) => ({
+    parameters: { query: `query-${String(index)}` },
+    recipient_name: "brave_search",
+  }));
+  return scriptedModel([
+    providerStep("Search in parallel.", {
+      toolCalls: [toolCall("parallel", { tool_uses: toolUses })],
+    }),
+  ]);
+}
+
+test("a later tool in one model batch cannot start after drain", async () => {
+  let searchCalls = 0;
+  const setup = connectedSessionSetup(
+    batchedToolModel(),
+    "api_key",
+    undefined,
+    {
+      braveSearch: {
+        execute: () => {
+          searchCalls += 1;
+          return Promise.resolve("unexpected search");
+        },
+      },
+    },
+  );
+  await startToolSessionSetup(setup);
+  await waitForRunnerTool(setup, "read");
+
+  const drain = setup.sessions.drain();
+  expect(completeRunnerCommand(setup, "read complete").status).toBe(204);
+  await drain;
+
+  expect(searchCalls).toBe(0);
+  closeRestartBoundarySetup(setup);
+});
+
+test("queued parallel children cannot start after drain", async () => {
+  const releases = Array.from({ length: 4 }, () => testDeferred<undefined>());
+  const started: number[] = [];
+  const setup = connectedSessionSetup(
+    parallelSearchModel(),
+    "api_key",
+    undefined,
+    {
+      braveSearch: {
+        execute: (_userId, _workspaceId, arguments_) => {
+          const query = arguments_["query"];
+          const index =
+            typeof query === "string"
+              ? Number(query.slice("query-".length))
+              : -1;
+          started.push(index);
+          return (
+            releases[index]?.promise.then(() => "done") ??
+            Promise.resolve("unexpected")
+          );
+        },
+      },
+    },
+  );
+  await startToolSessionSetup(setup);
+  await waitForSessionValue(
+    () => started.length,
+    (length) => length === 4,
+  );
+
+  const drain = setup.sessions.drain();
+  for (const release of releases) release.resolve(undefined);
+  await drain;
+
+  expect(started).toEqual([0, 1, 2, 3]);
+  closeRestartBoundarySetup(setup);
 });
 
 test("restart progress counts parallel wrapper and runner calls exactly once", async () => {

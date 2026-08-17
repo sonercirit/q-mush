@@ -47,6 +47,11 @@ function incrementalCoordinator(generated: { count: number }) {
   });
 }
 
+function incrementalFixture() {
+  const generated = { count: 0 };
+  return { generated, restart: incrementalCoordinator(generated) };
+}
+
 function restartFixture(restartId = "restart-1") {
   return {
     restart: coordinator(restartId),
@@ -82,12 +87,29 @@ async function expectDurableRetry(
   socket: TestSocket,
   attempt: Promise<string>,
   type: "restart" | "restart_escalate" = "restart",
+  restartId = "restart-1",
+  expectedCount = 1,
 ): Promise<void> {
-  expect(socket.sent).toEqual([
-    JSON.stringify({ restartId: "restart-1", type }),
-  ]);
-  expect(generated.count).toBe(1);
-  await socket.completeRestart("restart-1", attempt);
+  expect(socket.sent).toEqual([JSON.stringify({ restartId, type })]);
+  expect(generated.count).toBe(expectedCount);
+  await socket.completeRestart(restartId, attempt);
+}
+
+async function nextRestartAttempt(
+  restart: RunnerRestartCoordinator,
+  generated: { count: number },
+  restartId = "restart-1",
+  expectedCount = 1,
+): Promise<void> {
+  const socket = new TestSocket();
+  await expectDurableRetry(
+    generated,
+    socket,
+    restart.request(socket),
+    "restart",
+    restartId,
+    expectedCount,
+  );
 }
 
 async function expectPending(promise: Promise<string>): Promise<void> {
@@ -128,6 +150,34 @@ test("includes a pending pre-acknowledgement restart in reconnect context", asyn
   expect(context.activationReceipt).toBe("receipt-1");
   sockets[0].close();
   await expect(pending).rejects.toThrow("before restart was safe");
+});
+
+test("clears an acknowledged restart once the replacement is operational", async () => {
+  const socket = new TestSocket();
+  const { generated, restart } = incrementalFixture();
+  const first = restart.request(socket);
+
+  socket.emitAcknowledgement("restart-1");
+  await expect(first).resolves.toBe("restart-1");
+  expect(restart.connectionContext({})).toEqual({ restartId: "restart-1" });
+
+  expect(restart.operational("restart-1")).toBe(true);
+  expect(restart.pending).toBe(false);
+  expect(restart.connectionContext({})).toEqual({});
+
+  await nextRestartAttempt(restart, generated, "restart-2", 2);
+});
+
+test("clears a restart when replacement operation precedes a delayed ready frame", async () => {
+  const socket = new TestSocket();
+  const restart = coordinator("restart-delayed-ready");
+  const attempt = restart.request(socket);
+
+  expect(restart.operational("restart-delayed-ready")).toBe(true);
+  expect(restart.pending).toBe(true);
+  socket.emitAcknowledgement("restart-delayed-ready");
+  await expect(attempt).resolves.toBe("restart-delayed-ready");
+  expect(restart.pending).toBe(false);
 });
 
 test("retains the acknowledged restart ID for replacement launch", async () => {
@@ -237,11 +287,8 @@ test("a failed restart send can retry the same durable restart ID", async () => 
     }
   }
   const failedSocket = new ThrowingSocket();
-  const retrySocket = new TestSocket();
-  const generated = { count: 0 };
-  const restart = incrementalCoordinator(generated);
+  const { generated, restart } = incrementalFixture();
 
   await expect(restart.request(failedSocket)).rejects.toThrow("send failed");
-  const retried = restart.request(retrySocket);
-  await expectDurableRetry(generated, retrySocket, retried);
+  await nextRestartAttempt(restart, generated);
 });

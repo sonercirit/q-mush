@@ -307,10 +307,17 @@ export class SessionRuntimes {
       scopeIncludes(scope, runnerId),
     );
     for (const runtime of affected) {
-      runtime.restartRequest ??= {
+      const scopedRequest = {
         ...request,
         boundary: runtime.boundary,
       };
+      if (
+        runtime.restartRequest === undefined ||
+        (scope.kind === "server" &&
+          runtime.restartRequest.requestedBy === "runner")
+      ) {
+        runtime.restartRequest = scopedRequest;
+      }
       runtime.restartRequestedAt ??= this.#now();
       runtime.restartDurable ||= durable;
     }

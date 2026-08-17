@@ -4,7 +4,9 @@ import type {
   AgentModel,
   AgentModelStep,
 } from "../../shared/agent-loop.ts";
+import { agentSessions } from "../../shared/database/schema.ts";
 import { DEVELOPMENT_RESTART_LIFECYCLE_MS } from "../../shared/development-shutdown.ts";
+import { parseRestartHandoff } from "../../sync-engine/session-restart-store.ts";
 import { TEST_USER_ID } from "./authenticated-integration-test-helpers.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
 import { toolCall } from "./session-agent-tool-setup.ts";
@@ -31,6 +33,14 @@ import { SessionRestartTestClock } from "./session-restart-test-clock.ts";
 
 const AGENT_FILE_COMMAND = "read_agent_file";
 
+function interruptedHandoff(setup: RestartStepSetup) {
+  const stored = setup.database
+    .select({ handoff: agentSessions.interruptedHandoff })
+    .from(agentSessions)
+    .get();
+  return parseRestartHandoff(stored?.handoff ?? null);
+}
+
 // Always asks for one more tool call, so any step started after a drain begins
 // shows up as an extra model request.
 class EndlessToolModel implements AgentModel {
@@ -48,19 +58,53 @@ class EndlessToolModel implements AgentModel {
   }
 }
 
-async function startBusySession(
+type InitializedSession = Readonly<{
+  id: string;
+  setup: RestartStepSetup;
+}>;
+
+async function initializedSessionWithOptions(
   model: AgentModel,
-  commandPrefix: string,
-): Promise<{ readonly id: string; readonly setup: RestartStepSetup }> {
-  const setup = connectedSessionSetup(model, "api_key", undefined, {
-    commandId: nextCommandId(commandPrefix),
-  });
-  const id = (await createRestartSessions(setup, 1))[0];
-  if (id === undefined) {
-    throw new Error("The drain step fixture created no session");
-  }
+  options: Parameters<typeof connectedSessionSetup>[3],
+): Promise<InitializedSession> {
+  const setup = connectedSessionSetup(model, "api_key", undefined, options);
+  const [id] = await createRestartSessions(setup, 1);
+  if (id === undefined)
+    throw new Error("The restart fixture created no session");
   await completeRestartCommands(setup, AGENT_FILE_COMMAND, () => "null", 1);
   return { id, setup };
+}
+
+function initializedSingleSession(
+  model: AgentModel,
+  commandPrefix: string,
+): Promise<InitializedSession> {
+  return initializedSessionWithOptions(model, {
+    commandId: nextCommandId(commandPrefix),
+  });
+}
+
+async function waitForBusyRunnerTool(
+  initialized: InitializedSession,
+): Promise<InitializedSession> {
+  await waitForRestartCommands(initialized.setup, "bash", 1);
+  return initialized;
+}
+
+async function startSingleBusySession(
+  model: AgentModel,
+  commandPrefix: string,
+): Promise<InitializedSession> {
+  return waitForBusyRunnerTool(
+    await initializedSingleSession(model, commandPrefix),
+  );
+}
+
+function startBusySession(
+  model: AgentModel,
+  commandPrefix: string,
+): Promise<InitializedSession> {
+  return initializedSingleSession(model, commandPrefix);
 }
 
 async function busyEndlessSession(commandPrefix: string): Promise<{
@@ -128,17 +172,13 @@ async function deadlineSession(
   commandPrefix: string,
   clock: SessionRestartTestClock,
 ): Promise<DeadlineSession> {
-  const setup = connectedSessionSetup(model, "api_key", undefined, {
-    now: clock.now,
-    commandId: nextCommandId(commandPrefix),
-    restartTiming: sessionRestartTiming(clock),
-  });
-  const ids = await createRestartSessions(setup, 1);
-  const id = ids.at(0);
-  if (id === undefined) throw new Error("The deadline fixture has no session");
-  await completeRestartCommands(setup, AGENT_FILE_COMMAND, () => "null", 1);
-  await waitForRestartCommands(setup, "bash", 1);
-  return { id, setup };
+  return waitForBusyRunnerTool(
+    await initializedSessionWithOptions(model, {
+      now: clock.now,
+      commandId: nextCommandId(commandPrefix),
+      restartTiming: sessionRestartTiming(clock),
+    }),
+  );
 }
 
 async function forceDrainAtDeadline(
@@ -226,6 +266,28 @@ test("a forced runner drain persists and resumes its runner handoff", async () =
     (status) => status === "idle",
   );
   closeSessionTestDatabase(setup.database);
+});
+
+test("final shutdown promotes an active runner drain to a durable server marker", async () => {
+  const { setup } = await startSingleBusySession(
+    new EndlessToolModel(),
+    "final-promotion-command",
+  );
+
+  const runnerDrain = setup.sessions.drainRunner(
+    RUNNER_ID,
+    "runner-before-final",
+  );
+  await waitForRestartDrainCount(setup.sessions, 1);
+  expect(interruptedHandoff(setup)).toBeNull();
+
+  await setup.sessions.prepareFinalShutdown();
+  expect(interruptedHandoff(setup)).toMatchObject({
+    requestedBy: "server",
+  });
+
+  closeSessionTestDatabase(setup.database);
+  void runnerDrain;
 });
 
 test("no new model step starts once a drain begins", async () => {

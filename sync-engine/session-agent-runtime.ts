@@ -217,7 +217,10 @@ async function executeAgentTool(
     ? Input
     : never,
 ): Promise<RunnerCommandResult> {
-  if (isRestartHandoffError(toolSignal.reason)) {
+  if (
+    isRestartHandoffError(toolSignal.reason) ||
+    runtime.restartHandoffRequested()
+  ) {
     return restartInterruptedToolResult();
   }
   const trackOuterCall =
@@ -467,6 +470,7 @@ export async function runSessionAgent(
     braveSearch: runtime.braveSearch,
     currentTools: currentToolNames,
     executeTool: dispatchTool,
+    restartRequested: runtime.restartHandoffRequested,
     trackTool: (callId, name, runnerCommand) =>
       trackTool(callId ?? createUuidV7(), name, { runnerCommand }),
     tools: runtime.detail.tools,

@@ -154,6 +154,10 @@ async function singleSessionDrain(logged: string[] = []) {
   return { ...drained, session: onlySession(drained.sessions) };
 }
 
+function serverRestartRequest(restartId: string): RestartRequest {
+  return { boundary: "step", requestedBy: "server", restartId };
+}
+
 function expectForceParked(session: PendingRuntime): void {
   expect(session.aborted()).toBe(true);
   expect(session.durable()).toHaveLength(1);
@@ -191,9 +195,7 @@ describe("bounded restart drain", () => {
     await advanceDrain(clock, control, DEVELOPMENT_RESTART_LIFECYCLE_MS);
 
     expectForceParked(stuck);
-    expect(stuck.durable()).toEqual([
-      { boundary: "step", requestedBy: "server", restartId: "restart-1" },
-    ]);
+    expect(stuck.durable()).toEqual([serverRestartRequest("restart-1")]);
     stuck.finish();
     await runtimes.cleared("session-1");
     expect(stuck.cleared()).toBe(false);
@@ -284,6 +286,7 @@ describe("bounded restart drain", () => {
     const { clock, control, runtime } = pendingRunnerDrain();
     const { drained: runnerDrain } = await startedDrain(control, "runner");
     await control.prepareServerShutdown();
+    expect(runtime.durable()).toEqual([serverRestartRequest("restart-1")]);
     clock.advance(DEVELOPMENT_RESTART_LIFECYCLE_MS);
 
     let runnerSettled = false;

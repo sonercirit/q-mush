@@ -74,6 +74,7 @@ interface RegistrationState {
 
 interface RegistrationContext {
   readonly installOperationalHandlers: () => void;
+  readonly onOperational: ((restartId: string | undefined) => void) | undefined;
   readonly onVersion: ((version: string) => void) | undefined;
   readonly send: (message: string) => boolean;
   readonly settle: (error?: RunnerConnectionError) => void;
@@ -268,16 +269,22 @@ function receiveRegistrationMessage(
         invalidRegistration(context);
         return;
       }
+      context.onOperational?.(context.startupConnection.restartId);
       context.settle();
     }
   }
+}
+
+export interface RunnerRegistrationHandlers {
+  readonly onOperational?: (restartId: string | undefined) => void;
+  readonly onVersion?: (version: string) => void;
 }
 
 export function completeRunnerRegistration(
   socket: RunnerRegistrationSocket,
   startupConnection: RunnerStartupConnection,
   installOperationalHandlers: () => void,
-  onVersion?: (version: string) => void,
+  handlers: RunnerRegistrationHandlers = {},
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const state: RegistrationState = {
@@ -309,7 +316,8 @@ export function completeRunnerRegistration(
     };
     const context: RegistrationContext = {
       installOperationalHandlers,
-      onVersion,
+      onOperational: handlers.onOperational,
+      onVersion: handlers.onVersion,
       send,
       settle,
       startupConnection,

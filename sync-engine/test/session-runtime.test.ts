@@ -241,7 +241,7 @@ describe("session runtimes", () => {
     expect(runtimes.draining).toBe(false);
   });
 
-  test("preserves the first request during overlapping drains", async () => {
+  test("promotes a runner request when an overlapping server drain takes authority", async () => {
     const runtimes = new SessionRuntimes();
     const runtime = deferredRuntime(runtimes, "session-1", "runner-1");
     await Promise.resolve();
@@ -252,8 +252,8 @@ describe("session runtimes", () => {
     ];
     const storedRequest = runtime.request();
     expect(storedRequest).toMatchObject({
-      requestedBy: "runner",
-      restartId: "runner-restart",
+      requestedBy: "server",
+      restartId: "server-restart",
     });
 
     runtime.finish();

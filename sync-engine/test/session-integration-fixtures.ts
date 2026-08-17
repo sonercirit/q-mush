@@ -22,6 +22,7 @@ import {
   type AgentModelDiscoverer,
 } from "../../sync-engine/agent-model-discovery.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
+import type { BraveSearchSkill } from "../../sync-engine/brave-search.ts";
 import type { OpenRouterProviderDiscoverer } from "../../sync-engine/openrouter-provider-discovery.ts";
 import { createRunnerIntegration } from "../../sync-engine/runners.ts";
 import type { AgentModelFactory } from "../../sync-engine/session-agent-models.ts";
@@ -54,6 +55,7 @@ type FixtureCredentials = Readonly<
 >;
 
 interface ConnectedSessionOptions {
+  readonly braveSearch?: Pick<BraveSearchSkill, "execute">;
   readonly broker?: RunnerCommandBroker;
   readonly commandId?: () => string;
   readonly credentials?: FixtureCredentials;
@@ -328,7 +330,7 @@ export function connectedSessionSetup(
     runnerIntegration,
     { openai: reader("openai"), openrouter: reader("openrouter") },
     {
-      braveSearch: {
+      braveSearch: options.braveSearch ?? {
         execute: () =>
           Promise.resolve("Error: no Brave Search API keys are available."),
       },

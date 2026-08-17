@@ -21,6 +21,8 @@ interface RestartAttempt {
 
 interface PendingRestart {
   attempt: RestartAttempt | undefined;
+  operational: boolean;
+  ready: boolean;
   readonly restartId: string;
   sent: boolean;
 }
@@ -58,6 +60,8 @@ export class RunnerRestartCoordinator {
     }
     this.#pending ??= {
       attempt: undefined,
+      operational: false,
+      ready: true,
       restartId,
       sent: true,
     };
@@ -79,6 +83,15 @@ export class RunnerRestartCoordinator {
       : current;
   }
 
+  operational(restartId: string | undefined): boolean {
+    const pending = this.#pending;
+    if (restartId === undefined) return pending === undefined;
+    if (pending?.restartId !== restartId) return false;
+    pending.operational = true;
+    this.#complete(pending);
+    return true;
+  }
+
   request(socket: RunnerRestartSocket): Promise<string> {
     if (socket.readyState !== WebSocket.OPEN) {
       return Promise.reject(
@@ -93,6 +106,8 @@ export class RunnerRestartCoordinator {
       }
       pending = {
         attempt: undefined,
+        operational: false,
+        ready: false,
         restartId,
         sent: false,
       };
@@ -150,7 +165,9 @@ export class RunnerRestartCoordinator {
         restartAcknowledgement(rawEvent.data, pending.restartId)
       ) {
         pending.attempt = undefined;
+        pending.ready = true;
         attempt.resolve(pending.restartId);
+        this.#complete(pending);
       }
     });
     const failOnSocketEvent = (
@@ -190,6 +207,17 @@ export class RunnerRestartCoordinator {
           ? error
           : new Error("The runner restart request could not be sent"),
       );
+    }
+  }
+
+  #complete(pending: PendingRestart): void {
+    if (
+      this.#pending === pending &&
+      pending.operational &&
+      pending.ready &&
+      pending.attempt === undefined
+    ) {
+      this.#pending = undefined;
     }
   }
 
