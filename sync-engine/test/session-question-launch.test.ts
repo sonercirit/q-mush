@@ -117,8 +117,7 @@ function answeringSetup(
           answers: [
             {
               questionId: "direction",
-              value:
-                options.freeText === true ? "proceed".repeat(100) : "proceed",
+              value: options.freeText === true ? "😀".repeat(2_000) : "proceed",
             },
           ],
           requestId: pending.id,
@@ -220,7 +219,7 @@ describe("answered question launch claims", () => {
     await finishResumedRun(setup);
     expect(setup.selectedSystemPrompts).toHaveLength(2);
     expect(setup.selectedSystemPrompts[1]).toContain(
-      `${String(MINIMUM_TOOL_OUTPUT_CHARACTERS)} Unicode characters`,
+      `${MINIMUM_TOOL_OUTPUT_CHARACTERS.toLocaleString("en-US")} Unicode characters`,
     );
     expect(setup.selectedSystemPrompts[1]).not.toContain(
       "20,000 Unicode characters",

@@ -1,7 +1,11 @@
 import { expect, test } from "vitest";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import { agentSessions } from "../../shared/database/schema.ts";
-import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
+import {
+  DEFAULT_TOOL_SETTINGS,
+  MINIMUM_TOOL_OUTPUT_CHARACTERS,
+} from "../../shared/tool-limits.ts";
+import { unicodeCharacterCount } from "../../shared/tool-output-limits.ts";
 import {
   DEFAULT_LIST_SESSIONS_PAGE_SIZE,
   MAXIMUM_LIST_SESSIONS_PAGE_SIZE,
@@ -9,8 +13,8 @@ import {
 import {
   TEST_USER_ID,
   TEST_WORKSPACE_ID,
-  testAuditFields,
 } from "./authenticated-integration-test-helpers.ts";
+import { addSessionListFixtures } from "./session-agent-list-fixtures.ts";
 import { jsonRecord, records } from "./session-agent-output-helpers.ts";
 import {
   closeToolSession,
@@ -27,6 +31,55 @@ import {
   RUNNER_ID,
   SESSION_ID,
 } from "./session-integration-fixtures.ts";
+
+function paginatedSetup(maximum: number) {
+  const model = scriptedModel([
+    {
+      content: "Inspect a bounded session-list page.",
+      toolCalls: [toolCall("list_sessions", { pageSize: 2 })],
+    },
+    { content: "Bounded page checked.", toolCalls: [] },
+  ]);
+  return startToolSession(model, {
+    toolSettings: {
+      read: () => ({
+        ...DEFAULT_TOOL_SETTINGS,
+        outputLimitCharacters: maximum,
+      }),
+    },
+  });
+}
+
+test("keeps a valid paginated envelope at the shared Unicode boundary", async () => {
+  const maximum = MINIMUM_TOOL_OUTPUT_CHARACTERS;
+  const setup = await paginatedSetup(maximum);
+  addSessionListFixtures({
+    count: 3,
+    database: setup.database,
+    id: (index) => `bounded-list-session-${String(index)}`,
+    status: () => "idle",
+    title: () => "😀".repeat(1_800),
+    workingDirectory: () => "/work/project",
+  });
+  const [output] = findToolResultContents(
+    await completedParentDetail(setup, "idle"),
+    "list_sessions",
+  );
+  const parsed = jsonRecord(output ?? "null");
+
+  expect(unicodeCharacterCount(output ?? "")).toBeLessThanOrEqual(maximum);
+  expect(parsed).toMatchObject({
+    hasNext: true,
+    page: 1,
+    returnedItems: 1,
+    totalItems: 4,
+    truncated: true,
+    truncation: { items: true, outputCharacters: true },
+  });
+  expect(parsed["notice"]).toContain("Tool output truncated");
+  expect(output).not.toContain("�");
+  closeToolSession(setup);
+});
 
 test("paginates, validates, and bounds session listings at dispatch", async () => {
   const listCalls = [
@@ -51,26 +104,15 @@ test("paginates, validates, and bounds session listings at dispatch", async () =
     { content: "Pagination checked.", toolCalls: [] },
   ]);
   const setup = await startToolSession(model);
-  setup.database
-    .insert(agentSessions)
-    .values(
-      Array.from({ length: 24 }, (_, index) => ({
-        ...testAuditFields(),
-        executionEnvironment: "bare_metal" as const,
-        id: `list-session-${String(index).padStart(2, "0")}`,
-        model: "gpt-4.1-mini",
-        provider: "openai" as const,
-        providerCredentialId: CREDENTIAL_ID,
-        runnerId: RUNNER_ID,
-        status: index < 5 ? ("running" as const) : ("idle" as const),
-        title: index === 2 ? "Needle Session" : `Session ${String(index)}`,
-        tools: JSON.stringify(AGENT_SESSION_TOOL_NAMES),
-        userId: TEST_USER_ID,
-        workingDirectory: `/work/project-${String(index)}`,
-        workspaceId: TEST_WORKSPACE_ID,
-      })),
-    )
-    .run();
+  addSessionListFixtures({
+    count: 24,
+    database: setup.database,
+    id: (index) => `list-session-${String(index).padStart(2, "0")}`,
+    status: (index) => (index < 5 ? "running" : "idle"),
+    title: (index) =>
+      index === 2 ? "Needle Session" : `Session ${String(index)}`,
+    workingDirectory: (index) => `/work/project-${String(index)}`,
+  });
   const outputs = findToolResultContents(
     await completedParentDetail(setup, "idle"),
     "list_sessions",

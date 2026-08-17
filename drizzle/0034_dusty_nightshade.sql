@@ -10,7 +10,7 @@ CREATE TABLE `tool_settings` (
 	`output_limit_characters` integer NOT NULL,
 	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE restrict,
 	CONSTRAINT "tool_settings_execution_range_check" CHECK("tool_settings"."execution_limit_minutes" >= 1 AND "tool_settings"."execution_limit_minutes" <= 35791),
-	CONSTRAINT "tool_settings_output_range_check" CHECK("tool_settings"."output_limit_characters" >= 100 AND "tool_settings"."output_limit_characters" <= 22369409)
+	CONSTRAINT "tool_settings_output_range_check" CHECK("tool_settings"."output_limit_characters" >= 2000 AND "tool_settings"."output_limit_characters" <= 22369409)
 );
 --> statement-breakpoint
 CREATE INDEX `tool_settings_user_deletion_index` ON `tool_settings` (`user_id`,`is_deleted`);--> statement-breakpoint
@@ -37,7 +37,7 @@ CREATE TABLE `__new_agent_session_turns` (
 	CONSTRAINT "agent_session_turns_segment_nonnegative_check" CHECK("__new_agent_session_turns"."segment" >= 0),
 	CONSTRAINT "agent_session_turns_generation_nonnegative_check" CHECK("__new_agent_session_turns"."execution_generation" >= 0),
 	CONSTRAINT "agent_session_turns_tool_execution_range_check" CHECK("__new_agent_session_turns"."tool_execution_limit_minutes" >= 1 AND "__new_agent_session_turns"."tool_execution_limit_minutes" <= 35791),
-	CONSTRAINT "agent_session_turns_tool_output_range_check" CHECK("__new_agent_session_turns"."tool_output_limit_characters" >= 100 AND "__new_agent_session_turns"."tool_output_limit_characters" <= 22369409),
+	CONSTRAINT "agent_session_turns_tool_output_range_check" CHECK("__new_agent_session_turns"."tool_output_limit_characters" >= 2000 AND "__new_agent_session_turns"."tool_output_limit_characters" <= 22369409),
 	CONSTRAINT "agent_session_turns_end_check" CHECK("__new_agent_session_turns"."ended_at" IS NULL OR "__new_agent_session_turns"."ended_at" >= "__new_agent_session_turns"."started_at")
 );
 --> statement-breakpoint

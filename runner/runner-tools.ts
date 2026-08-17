@@ -189,7 +189,12 @@ async function readTool(
     DEFAULT_READ_LINES,
     lineBounds,
   );
-  return readContinuation(content, offset, limit);
+  return readContinuation(
+    content,
+    offset,
+    limit,
+    options?.outputLimitCharacters,
+  );
 }
 
 async function explainFileTool(

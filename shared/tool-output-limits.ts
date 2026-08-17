@@ -29,7 +29,7 @@ export function unicodeCharacterPrefix(value: string, maximum: number): string {
   return codePointPrefix(value, maximum);
 }
 
-function toolOutputTruncationNotice(maximum: number): string {
+export function toolOutputTruncationNotice(maximum: number): string {
   return `${TOOL_OUTPUT_NOTICE_PREFIX}${maximum.toLocaleString("en-US")}${TOOL_OUTPUT_NOTICE_SUFFIX}`;
 }
 

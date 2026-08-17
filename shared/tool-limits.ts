@@ -13,7 +13,11 @@ const MAXIMUM_TIMER_MILLISECONDS = 2_147_483_647;
 export const MAXIMUM_TOOL_EXECUTION_MINUTES = Math.floor(
   MAXIMUM_TIMER_MILLISECONDS / MILLISECONDS_PER_MINUTE,
 );
-export const MINIMUM_TOOL_OUTPUT_CHARACTERS = 100;
+/**
+ * Holds the largest compact, item-free continuation envelope emitted by the
+ * structured session tools, including bounded request filters and identity.
+ */
+export const MINIMUM_TOOL_OUTPUT_CHARACTERS = 2_000;
 /**
  * A runner result is JSON-framed on the 128 MiB realtime transport. This is
  * derived from the worst-case JSON encoding, including framing and the one

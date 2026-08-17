@@ -289,9 +289,9 @@ Project memory.
   engine/runner deadline, sleep, skills/session tools, and final model-facing
   result bound; changes apply next run and realtime updates stay user-scoped.
   `parallel` shares one budget; `ask_questions` waits outside it. One truncation
-  path/notice owns model-facing output; pagination stays positional while
-  input/security/transport bounds stay independent. Shell has a runner timer;
-  each POSIX command gets a session and stop/timeout signals its process group.
-  Write/edit cancellation is best-effort post-mutation.
+  path/notice owns model-facing output; positional pagination keeps valid
+  continuation envelopes; input/security/transport bounds stay separate. Shell
+  has a runner timer; each POSIX command gets a session and stop/timeout signals
+  its process group. Write/edit cancellation is best-effort post-mutation.
 - Add runtime roots/standalone build entries to matching Knip configs; exclude
   test support from production patterns.

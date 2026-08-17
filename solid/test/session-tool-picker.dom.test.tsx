@@ -6,20 +6,16 @@ import {
   type AgentSessionToolName,
 } from "../../shared/agent-tools.ts";
 import { CONFIGURED_TOOL_SETTINGS } from "../../shared/test/tool-settings-fixtures.ts";
-import {
-  DEFAULT_TOOL_SETTINGS,
-  formatToolLimitsStatement,
-  type ToolSettings,
-} from "../../shared/tool-limits.ts";
+import type { ToolSettings } from "../../shared/tool-limits.ts";
 import { SessionToolPicker } from "../session-tool-picker.tsx";
 import { mountTestView } from "./dom-test-helpers.ts";
 import { trackedDisposals } from "./nested-scroll-test-helpers.tsx";
+import {
+  expectConfiguredBashMaximum,
+  expectNoToolLimitsNote,
+} from "./session-tool-test-helpers.ts";
 
 const disposals = trackedDisposals();
-const DEFAULT_LIMITS_STATEMENT = formatToolLimitsStatement(
-  DEFAULT_TOOL_SETTINGS,
-);
-
 function mountExpandedPicker(
   tools: readonly AgentSessionToolName[],
   onChange: (nextTools: readonly AgentSessionToolName[]) => void,
@@ -58,54 +54,18 @@ function clickGroupToggle(
   return selected;
 }
 
-test("does not claim default limits while current settings are unavailable", () => {
+test("does not render the session-owned limits note", () => {
   const container = mountExpandedPicker(
     AGENT_SESSION_TOOL_NAMES,
     () => undefined,
+    CONFIGURED_TOOL_SETTINGS,
   );
 
+  expectNoToolLimitsNote(container);
   expect(
-    container.querySelector("[data-tool-limits-unavailable='true']")
-      ?.textContent,
-  ).toContain("unavailable");
-  expect(container.querySelector("[data-tool-limits-note='true']")).toBeNull();
-  expect(container.textContent).not.toContain(DEFAULT_LIMITS_STATEMENT);
-});
-
-test("shows the shared global limits once instead of per tool", () => {
-  const container = mountExpandedPicker(
-    AGENT_SESSION_TOOL_NAMES,
-    () => undefined,
-    DEFAULT_TOOL_SETTINGS,
-  );
-  const note = container.querySelector("[data-tool-limits-note='true']");
-
-  expect(note?.textContent).toBe(DEFAULT_LIMITS_STATEMENT);
-  expect(
-    container.querySelectorAll("[data-tool-limits-note='true']"),
-  ).toHaveLength(1);
-});
-
-test("shows configured limits exactly once", () => {
-  const settings = CONFIGURED_TOOL_SETTINGS;
-  const container = mountExpandedPicker(
-    AGENT_SESSION_TOOL_NAMES,
-    () => undefined,
-    settings,
-  );
-
-  expect(
-    container.querySelectorAll("[data-tool-limits-note='true']"),
-  ).toHaveLength(1);
-  expect(container.textContent).toContain(formatToolLimitsStatement(settings));
-  expect(container.textContent).not.toContain(DEFAULT_LIMITS_STATEMENT);
-  const bashDetails = container.querySelector<HTMLButtonElement>(
-    "[data-tool-details='bash']",
-  );
-  bashDetails?.click();
-  expect(
-    container.querySelector("[data-tool-detail-panel='bash']")?.textContent,
-  ).toContain("420");
+    container.querySelector("[data-tool-limits-unavailable='true']"),
+  ).toBeNull();
+  expectConfiguredBashMaximum(container);
 });
 
 test("the group toggle enables every session tool in canonical order", () => {

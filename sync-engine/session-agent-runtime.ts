@@ -301,10 +301,12 @@ function restartInterruptedToolResult(): RunnerCommandResult {
 function boundRuntimeToolOutput(
   runtime: SessionAgentRuntimeDependencies,
   result: RunnerCommandResult,
+  toolName?: string,
 ): RunnerCommandResult {
   return boundSessionToolOutput(
     result,
     runtime.toolSettings ?? DEFAULT_TOOL_SETTINGS,
+    toolName,
   );
 }
 
@@ -553,8 +555,8 @@ export async function runSessionAgent(
     }
     return messages;
   };
-  const finalizeToolResult = (result: RunnerCommandResult) =>
-    boundRuntimeToolOutput(runtime, result);
+  const finalizeToolResult = (result: RunnerCommandResult, toolName: string) =>
+    boundRuntimeToolOutput(runtime, result, toolName);
   try {
     return await runCompactingAgentLoop({
       agentCost: (step) =>

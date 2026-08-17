@@ -63,6 +63,7 @@ import { OpenRouterProviderSelect } from "./session-provider-select.tsx";
 import { runnerSelectOptions } from "./session-reassignment-client.ts";
 import { selectedSessionCredentialAvailable } from "./session-resource-availability.ts";
 import type { SessionRunnerViewProps } from "./session-runner-view-props.ts";
+import { SessionToolLimitsHeader } from "./session-tool-limits-note.tsx";
 import { SessionToolPicker } from "./session-tool-picker.tsx";
 
 export type {
@@ -552,19 +553,7 @@ export function SessionPanel(
         inert={props.controller.directoryPicker.view().open}
         {...renderDebugBoundary("sessions-panel", "Agent sessions panel")}
       >
-        <p class="text-sm font-medium text-emerald-300">
-          First-party agent runtime
-        </p>
-        <h2
-          class="mt-2 text-2xl font-semibold text-white"
-          id="agent-sessions-title"
-        >
-          New agent session
-        </h2>
-        <p class="mt-3 max-w-3xl leading-7 text-slate-400">
-          Start and steer coding sessions on your connected computers. Q Mush
-          owns the model loop and runner tools end to end.
-        </p>
+        <SessionToolLimitsHeader settings={() => props.toolSettings?.()} />
         <NewSessionForm
           controller={props.controller}
           credentials={credentials()}

@@ -99,6 +99,11 @@ function parsedCommand(overrides: Partial<RunnerToolCommand> = {}) {
   });
 }
 
+function expectNoReadContinuation(output: string): void {
+  expect(output).not.toContain("Use offset=");
+  expect(output).not.toContain("�");
+}
+
 function expectRawOverflow(output: string, maximum: number): void {
   expect(unicodeCharacterCount(output)).toBe(maximum + 1);
   expect(output).not.toContain("Tool output truncated");
@@ -140,11 +145,11 @@ describe("runner WebSocket protocol", () => {
       { length: 2_501 },
       (_value, index) => `${String(index + 1).padStart(4, "0")}-line`,
     );
-    const session = await sessionWithFile(
-      "session-many-lines",
-      "many-lines.txt",
-      lines.join("\n"),
-    );
+    const session = await readSession({
+      content: lines.join("\n"),
+      path: "many-lines.txt",
+      sessionId: "session-many-lines",
+    });
     const output = await executeSession(
       session,
       "read",
@@ -155,6 +160,56 @@ describe("runner WebSocket protocol", () => {
     expect(output).toContain(lines[0]);
     expect(output).toContain(lines[2_500]);
     expect(output).not.toContain("Tool output truncated");
+  });
+
+  test("retains the continuation marker when the character limit shortens a read page", async () => {
+    const maximum = 180;
+    const lines = Array.from(
+      { length: 200 },
+      (_value, index) =>
+        `${String(index + 1).padStart(3, "0")}-${"😀".repeat(8)}`,
+    );
+    const session = await sessionWithFile(
+      "session-bounded-continuation",
+      "bounded-continuation.txt",
+      lines.join("\n"),
+    );
+    const output = await executeSession(
+      session,
+      "read",
+      { limit: lines.length, path: "bounded-continuation.txt" },
+      maximum,
+    );
+
+    expect(unicodeCharacterCount(output)).toBeLessThanOrEqual(maximum);
+    const continuation =
+      /\[Showing lines 1-(\d+) of 200\. Use offset=(\d+) to continue\.\]$/u.exec(
+        output,
+      );
+    expect(continuation).not.toBeNull();
+    expect(continuation?.[2]).toBe(
+      String(Number.parseInt(continuation?.[1] ?? "0", 10) + 1),
+    );
+    expect(output).not.toContain(lines.at(-1));
+    expect(output).not.toContain("�");
+  });
+
+  test("does not advertise a continuation past a partially shown line", async () => {
+    const maximum = 120;
+    const session = await readSession({
+      content: `${"😀".repeat(500)}\ntail`,
+      path: "long-line.txt",
+      sessionId: "session-long-line",
+    });
+    const output = await executeSession(
+      session,
+      "read",
+      { limit: 2, path: "long-line.txt" },
+      maximum,
+    );
+
+    expectRawOverflow(output, maximum);
+    expectNoReadContinuation(output);
   });
 
   test("uses offset and limit only to select a page", async () => {
@@ -203,9 +258,9 @@ describe("runner WebSocket protocol", () => {
     );
 
     expectRawOverflow(output, maximum);
+    expectNoReadContinuation(output);
     expect(output).not.toContain("does not fit");
     expect(output).not.toContain("saved to");
-    expect(output).not.toContain("�");
   });
 
   test("retains failed runner-tool overflow without adding a notice", async () => {

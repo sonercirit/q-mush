@@ -28,7 +28,7 @@ const FINALIZER_FIXTURES: readonly FinalizerFixture[] = [
   {
     arguments: "{}",
     execute: () =>
-      Promise.resolve({ output: "failure".repeat(100), state: "failed" }),
+      Promise.resolve({ output: "failure".repeat(2_000), state: "failed" }),
     name: "failed execution",
   },
   {
@@ -85,6 +85,10 @@ test.each(FINALIZER_FIXTURES)(
       (message) => message.role === "tool" && message.toolCallId === call.id,
     );
     expect(finalizeToolResult).toHaveBeenCalledTimes(1);
+    expect(finalizeToolResult).toHaveBeenCalledWith(
+      expect.any(Object),
+      call.name,
+    );
     if (fixture.name === "invalid arguments") {
       expect(result?.content).toBe(
         "Error: the tool arguments were not a JSON object.",
@@ -92,6 +96,13 @@ test.each(FINALIZER_FIXTURES)(
       expect(unicodeCharacterCount(result?.content ?? "")).toBeLessThanOrEqual(
         MINIMUM_TOOL_OUTPUT_CHARACTERS,
       );
+      return;
+    }
+    if (fixture.truncation !== undefined) {
+      expect(unicodeCharacterCount(result?.content ?? "")).toBeLessThanOrEqual(
+        MINIMUM_TOOL_OUTPUT_CHARACTERS,
+      );
+      expect(result?.content).not.toContain("Tool output truncated");
       return;
     }
     expect(result?.content).toContain("Tool output truncated");

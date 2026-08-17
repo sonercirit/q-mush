@@ -7,6 +7,11 @@ import {
 import type { AgentSessionToolOption } from "../../shared/agent-tools.ts";
 import type { ProviderCredentialSummary } from "../../shared/provider-credential-store.ts";
 import type { RunnerSummary } from "../../shared/runner-model.ts";
+import { MINIMUM_TOOL_OUTPUT_CHARACTERS } from "../../shared/tool-limits.ts";
+import {
+  toolOutputTruncationNotice,
+  unicodeCharacterCount,
+} from "../../shared/tool-output-limits.ts";
 import { sessionOptionsOutput } from "../../sync-engine/session-agent-options.ts";
 import {
   modelOptionIds,
@@ -15,6 +20,7 @@ import {
   testSessionOptionsSource,
 } from "./session-agent-option-fixtures.ts";
 import {
+  boundedStructuredToolOutput,
   jsonRecord,
   testArray,
   testRecord,
@@ -432,6 +438,40 @@ describe("session option pagination", () => {
         name: "read",
       },
     ]);
+  });
+
+  test("keeps get_session_options JSON and pagination at the Unicode boundary", () => {
+    const maximum = MINIMUM_TOOL_OUTPUT_CHARACTERS;
+    const output = boundedStructuredToolOutput(
+      modelOptionsOutput("😀".repeat(2_000), false),
+      maximum,
+      "get_session_options",
+    );
+    const read = jsonRecord(output);
+    const items = testArray(read["items"]);
+
+    expect(unicodeCharacterCount(output)).toBeLessThanOrEqual(maximum);
+    expect(read).toMatchObject({
+      category: "models",
+      filters: {},
+      hasNext: false,
+      hasPrevious: false,
+      page: 1,
+      pageSize: 10,
+      totalItems: 10,
+      totalPages: 1,
+      truncated: true,
+      truncation: {
+        items: true,
+        outputCharacters: true,
+        sourceFields: false,
+      },
+    });
+    expect(items.length).toBeLessThan(10);
+    expect(read["returnedItems"]).toBe(items.length);
+    expect(read["notice"]).toBe(toolOutputTruncationNotice(maximum));
+    expect(output.split("Tool output truncated")).toHaveLength(2);
+    expect(output).not.toContain("�");
   });
 
   test("preserves serialized pages for the shared final character bound", () => {

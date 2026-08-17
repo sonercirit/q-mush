@@ -14,10 +14,7 @@ import {
   type AgentSessionToolName,
   type AgentSessionToolOption,
 } from "../shared/agent-tools.ts";
-import {
-  formatToolLimitsStatement,
-  type ToolSettings,
-} from "../shared/tool-limits.ts";
+import type { ToolSettings } from "../shared/tool-limits.ts";
 import { ToolParameterDetails } from "./tool-parameter-details.tsx";
 
 const CLASSIFICATION_LABELS = {
@@ -244,27 +241,6 @@ export function SessionToolPicker(props: {
             with none selected. Use each info button to inspect its
             authoritative schema.
           </p>
-          <Show
-            fallback={
-              <p
-                class="mt-1 text-xs leading-5 text-amber-200"
-                data-tool-limits-unavailable="true"
-              >
-                Current global tool limits are unavailable. Reload them before
-                starting a session.
-              </p>
-            }
-            when={props.settings}
-          >
-            {(settings) => (
-              <p
-                class="mt-1 text-xs leading-5 text-slate-500"
-                data-tool-limits-note="true"
-              >
-                {formatToolLimitsStatement(settings())}
-              </p>
-            )}
-          </Show>
           <div class="mt-3 grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-3">
             <For each={otherOptions()}>{optionControl}</For>
           </div>

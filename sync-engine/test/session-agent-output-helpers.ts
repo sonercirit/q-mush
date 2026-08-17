@@ -1,4 +1,18 @@
 import { isRecord } from "../../shared/auth-model.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
+import { boundSessionToolOutput } from "../session-tool-output.ts";
+
+export function boundedStructuredToolOutput(
+  output: string,
+  maximum: number,
+  toolName: string,
+): string {
+  return boundSessionToolOutput(
+    { output, state: "completed" },
+    { ...DEFAULT_TOOL_SETTINGS, outputLimitCharacters: maximum },
+    toolName,
+  ).output;
+}
 
 export function jsonRecord(value: string): Readonly<Record<string, unknown>> {
   const parsed: unknown = JSON.parse(value);

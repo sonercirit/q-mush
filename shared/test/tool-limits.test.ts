@@ -46,7 +46,7 @@ describe("tool settings", () => {
         executionLimitMinutes: MAXIMUM_TOOL_EXECUTION_MINUTES + 1,
         outputLimitCharacters: 20_000,
       },
-      { executionLimitMinutes: 30, outputLimitCharacters: 99 },
+      { executionLimitMinutes: 30, outputLimitCharacters: 1_999 },
       {
         executionLimitMinutes: 30,
         outputLimitCharacters: MAXIMUM_TOOL_OUTPUT_CHARACTERS + 1,

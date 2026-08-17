@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   DEFAULT_TOOL_SETTINGS,
-  MINIMUM_TOOL_OUTPUT_CHARACTERS,
   toolExecutionLimitMilliseconds,
 } from "../../shared/tool-limits.ts";
 import {
@@ -152,7 +151,7 @@ describe("global tool time limit", () => {
   test("bounds generated timeout output through the finalizer", async () => {
     vi.useFakeTimers();
     const outer = new AbortController();
-    const settings = oneMinuteSettings(MINIMUM_TOOL_OUTPUT_CHARACTERS);
+    const settings = oneMinuteSettings(100);
     const result = executeToolWithinTimeLimit(
       hangingExecute,
       outer.signal,
@@ -161,9 +160,7 @@ describe("global tool time limit", () => {
 
     const timedOut = await advanceAndReadTimeout(result, 60_000);
     expectTimeoutResult(timedOut, "Tool output truncated");
-    expect(unicodeCharacterCount(timedOut.output)).toBe(
-      MINIMUM_TOOL_OUTPUT_CHARACTERS,
-    );
+    expect(unicodeCharacterCount(timedOut.output)).toBe(100);
   });
 
   test("uses the configured deadline and message", async () => {
