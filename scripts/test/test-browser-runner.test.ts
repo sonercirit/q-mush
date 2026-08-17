@@ -42,6 +42,10 @@ test("browser launcher forwards filters while disabling inherited Playwright deb
 
   expect(probe.calls).toHaveLength(1);
   expect(probe.calls[0]?.command).toEqual([
+    "bun",
+    "--no-orphans",
+    "x",
+    "--bun",
     "vitest",
     "run",
     "--config",

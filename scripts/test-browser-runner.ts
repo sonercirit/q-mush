@@ -31,7 +31,17 @@ export async function runBrowserTests(
   dependencies: BrowserTestDependencies = defaultDependencies,
 ): Promise<number> {
   const browserTests = dependencies.spawn(
-    ["vitest", "run", "--config", "vitest.browser.config.ts", ...arguments_],
+    [
+      "bun",
+      "--no-orphans",
+      "x",
+      "--bun",
+      "vitest",
+      "run",
+      "--config",
+      "vitest.browser.config.ts",
+      ...arguments_,
+    ],
     {
       cwd: dirname(dirname(fileURLToPath(import.meta.url))),
       env: headlessEnvironment(),

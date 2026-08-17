@@ -39,11 +39,11 @@ Living project memory.
 - Develop: `bun run dev` (+ `dev:restart`, `dev:watch`); `bun run build`
 - Migrations: `bun run db:generate` / `db:migrate`
 - Test: `bun run test` (unit + headless Chromium); `test:watch` omits browsers;
-  `test:browser` pins instance-level headless mode and disables inherited
-  `PWDEBUG` before running real Chromium.
+  `test:browser` runs its Bun/Vitest descendants with no-orphans cleanup, pins
+  instance-level headless mode, and disables inherited `PWDEBUG` before real
+  Chromium.
 - `bun run check` runs all static checks; `format`/`lint:fix` write fixes.
-- CI runs tests/check/build/whitespace on Bun 1.3.14 with a frozen lockfile; the
-  test lane pins Node 24.15.0 for browser policy probes.
+- CI runs tests/check/build/whitespace on Bun 1.3.14 with a frozen lockfile.
 
 ## Architecture and Conventions
 
