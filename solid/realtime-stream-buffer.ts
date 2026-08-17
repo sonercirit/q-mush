@@ -1,4 +1,6 @@
 import {
+  MAXIMUM_TOOL_STREAMS_PER_SESSION,
+  MAXIMUM_TOOL_STREAMS_PER_USER,
   MAXIMUM_TOOL_STREAM_FIELD_BYTES,
   applyToolStreamDelta,
   type ToolStreamChannel,
@@ -157,21 +159,55 @@ function reconciledToolEntry(
 }
 
 export class RealtimeStreamBuffer {
-  readonly #pending = new Map<string, BufferedStreamUpdate>();
+  readonly #pendingBySession = new Map<
+    string,
+    Map<string, BufferedStreamUpdate>
+  >();
+  readonly #terminalToolEntries = new Map<string, ToolStreamEntry>();
   readonly #toolEntries = new Map<string, ToolStreamEntry>();
 
   get pending(): boolean {
-    return this.#pending.size > 0;
+    return this.#pendingBySession.size > 0;
   }
 
   clear(): void {
-    this.#pending.clear();
+    this.clearPending();
+    this.#terminalToolEntries.clear();
     this.#toolEntries.clear();
   }
 
+  clearPending(): void {
+    this.#pendingBySession.clear();
+  }
+
+  #pendingSession(
+    sessionId: string,
+    create = false,
+  ): Map<string, BufferedStreamUpdate> | undefined {
+    const current = this.#pendingBySession.get(sessionId);
+    if (current !== undefined || !create) return current;
+    const pending = new Map<string, BufferedStreamUpdate>();
+    this.#pendingBySession.set(sessionId, pending);
+    return pending;
+  }
+
+  #deletePending(
+    sessionId: string,
+    include: (update: BufferedStreamUpdate) => boolean,
+  ): void {
+    const pending = this.#pendingSession(sessionId);
+    if (pending === undefined) return;
+    deleteMapEntries(pending, include);
+    if (pending.size === 0) this.#pendingBySession.delete(sessionId);
+  }
+
   clearToolSession(sessionId: string): void {
-    deleteMapEntries(this.#pending, (update) =>
+    this.#deletePending(sessionId, (update) =>
       toolSessionMatches(update, sessionId),
+    );
+    deleteMapEntries(
+      this.#terminalToolEntries,
+      (entry) => entry.sessionId === sessionId,
     );
     deleteMapEntries(
       this.#toolEntries,
@@ -187,17 +223,34 @@ export class RealtimeStreamBuffer {
     }
   }
 
+  #pendingForEvent(
+    event: Pick<StreamServerEvent, "sessionId">,
+    key: string,
+  ): {
+    readonly pending: Map<string, BufferedStreamUpdate> | undefined;
+    readonly value: BufferedStreamUpdate | undefined;
+  } {
+    const pending = this.#pendingSession(event.sessionId);
+    return { pending, value: pending?.get(key) };
+  }
+
   #queueSessionDelta(event: SessionDelta): void {
+    const key = modelKey(event);
     if (event.reset === true) {
-      deleteMapEntries(this.#pending, (update) =>
+      this.#deletePending(event.sessionId, (update) =>
         modelSessionMatches(update, event.sessionId),
       );
     }
-    const key = modelKey(event);
-    const pending = this.#pending.get(key);
-    const previous = pending?.kind === "model" ? pending.value : undefined;
+    const { pending: existingPending, value } = this.#pendingForEvent(
+      event,
+      key,
+    );
+    const pending =
+      existingPending ?? this.#pendingSession(event.sessionId, true);
+    if (pending === undefined) return;
+    const previous = value?.kind === "model" ? value.value : undefined;
     if (previous === undefined) {
-      this.#pending.set(key, {
+      pending.set(key, {
         kind: "model",
         value: {
           content: [event.content],
@@ -213,9 +266,13 @@ export class RealtimeStreamBuffer {
 
   #queueToolUpdate(event: ToolStreamDeltaFrame): void {
     const key = toolKey(event);
-    const pending = this.#pending.get(key);
-    const buffered = pending?.kind === "tool" ? pending.value : undefined;
-    const current = buffered?.entry ?? this.#toolEntries.get(key);
+    const found = this.#pendingForEvent(event, key);
+    const buffered =
+      found.value?.kind === "tool" ? found.value.value : undefined;
+    const current =
+      buffered?.entry ??
+      this.#terminalToolEntries.get(key) ??
+      this.#toolEntries.get(key);
     const validationEvent =
       event.channel === undefined ? event : { ...event, content: "" };
     const result = applyToolStreamDelta(current, validationEvent);
@@ -237,51 +294,123 @@ export class RealtimeStreamBuffer {
     }
     next.entry = result.entry;
     next.terminal = result.terminal;
-    this.#pending.set(key, { kind: "tool", value: next });
+    const pending =
+      found.pending ?? this.#pendingSession(event.sessionId, true);
+    pending?.set(key, { kind: "tool", value: next });
   }
 
-  takeNext(): RealtimeStreamBatch | undefined {
-    const key = this.#pending.keys().next().value;
-    return key === undefined ? undefined : this.#takeKey(key);
+  #backgroundSession(
+    selectedSessionId: string | undefined,
+  ): string | undefined {
+    for (const sessionId of this.#pendingBySession.keys()) {
+      if (sessionId !== selectedSessionId) return sessionId;
+    }
+    return undefined;
+  }
+
+  #takeFirst(
+    sessionId: string,
+    rotate: boolean,
+  ): RealtimeStreamUpdate | undefined {
+    const pending = this.#pendingBySession.get(sessionId);
+    const next = pending?.entries().next();
+    if (pending === undefined || next?.done !== false) return undefined;
+    const [key, update] = next.value;
+    pending.delete(key);
+    if (pending.size === 0) {
+      this.#pendingBySession.delete(sessionId);
+    } else if (rotate) {
+      this.#pendingBySession.delete(sessionId);
+      this.#pendingBySession.set(sessionId, pending);
+    }
+    return this.#materialize(key, update);
+  }
+
+  takeNext(
+    maximumUpdates = 1,
+    selectedSessionId?: string,
+    withinBudget: () => boolean = () => true,
+  ): RealtimeStreamBatch | undefined {
+    const updates: RealtimeStreamUpdate[] = [];
+    let selectedTurn =
+      selectedSessionId !== undefined &&
+      this.#pendingBySession.has(selectedSessionId);
+    while (
+      updates.length < maximumUpdates &&
+      (updates.length === 0 || withinBudget())
+    ) {
+      const backgroundSessionId = this.#backgroundSession(selectedSessionId);
+      const preferredSessionId = selectedTurn
+        ? selectedSessionId
+        : backgroundSessionId;
+      const fallbackSessionId = selectedTurn
+        ? backgroundSessionId
+        : selectedSessionId;
+      const sessionId =
+        preferredSessionId !== undefined &&
+        this.#pendingBySession.has(preferredSessionId)
+          ? preferredSessionId
+          : fallbackSessionId;
+      if (sessionId === undefined) break;
+      const update = this.#takeFirst(
+        sessionId,
+        sessionId !== selectedSessionId,
+      );
+      if (update === undefined) break;
+      updates.push(update);
+      selectedTurn = !selectedTurn;
+    }
+    return streamBatch(updates);
   }
 
   takeSessionKind(
     sessionId: string,
     kind: BufferedStreamUpdate["kind"],
   ): RealtimeStreamBatch | undefined {
-    const match = (update: BufferedStreamUpdate): boolean =>
-      update.kind === kind &&
-      (kind === "model"
-        ? modelSessionMatches(update, sessionId)
-        : toolSessionMatches(update, sessionId));
-    return this.#take(match);
+    return this.#takeSession(sessionId, (update) => update.kind === kind);
   }
 
   takeSession(sessionId: string): RealtimeStreamBatch | undefined {
-    return this.#take(
-      (update) =>
-        modelSessionMatches(update, sessionId) ||
-        toolSessionMatches(update, sessionId),
-    );
+    return this.#takeSession(sessionId, () => true);
   }
 
-  #take(
+  #takeSession(
+    sessionId: string,
     include: (update: BufferedStreamUpdate) => boolean,
   ): RealtimeStreamBatch | undefined {
+    const pending = this.#pendingBySession.get(sessionId);
+    if (pending === undefined) return undefined;
     const updates: RealtimeStreamUpdate[] = [];
-    for (const [key, update] of this.#pending) {
+    for (const [key, update] of pending) {
       if (!include(update)) continue;
-      this.#pending.delete(key);
+      pending.delete(key);
       updates.push(this.#materialize(key, update));
     }
+    if (pending.size === 0) this.#pendingBySession.delete(sessionId);
     return streamBatch(updates);
   }
 
-  #takeKey(key: string): RealtimeStreamBatch | undefined {
-    const update = this.#pending.get(key);
-    if (update === undefined) return undefined;
-    this.#pending.delete(key);
-    return streamBatch([this.#materialize(key, update)]);
+  #trimToolEntries(
+    entries: Map<string, ToolStreamEntry>,
+    sessionId: string,
+  ): void {
+    let sessionEntries = 0;
+    for (const entry of entries.values()) {
+      if (entry.sessionId === sessionId) sessionEntries += 1;
+    }
+    while (sessionEntries > MAXIMUM_TOOL_STREAMS_PER_SESSION) {
+      for (const [key, entry] of entries) {
+        if (entry.sessionId !== sessionId) continue;
+        entries.delete(key);
+        sessionEntries -= 1;
+        break;
+      }
+    }
+    while (entries.size > MAXIMUM_TOOL_STREAMS_PER_USER) {
+      const oldest = entries.keys().next().value;
+      if (oldest === undefined) break;
+      entries.delete(oldest);
+    }
   }
 
   #materialize(
@@ -292,12 +421,29 @@ export class RealtimeStreamBuffer {
       return materializeModelUpdate(update.value);
     }
     const entry = materializeToolUpdate(update.value);
-    this.#toolEntries.set(key, entry);
+    const terminal = update.value.terminal;
+    this.#terminalToolEntries.delete(key);
+    this.#toolEntries.delete(key);
+    const entries = terminal ? this.#terminalToolEntries : this.#toolEntries;
+    entries.set(key, entry);
+    this.#trimToolEntries(entries, entry.sessionId);
     return {
       entry,
-      terminal: update.value.terminal,
+      terminal,
       type: "tool_update",
     };
+  }
+
+  #deleteToolStream(
+    entries: Map<string, ToolStreamEntry>,
+    snapshot: ToolStreamSnapshotFrame,
+  ): void {
+    deleteMapEntries(
+      entries,
+      (entry) =>
+        entry.sessionId === snapshot.sessionId &&
+        entry.streamId === snapshot.streamId,
+    );
   }
 
   applyToolSnapshot(
@@ -306,16 +452,18 @@ export class RealtimeStreamBuffer {
     const retained = new Map<string, ToolStreamEntry>();
     for (const received of snapshot.streams) {
       const key = toolKey(received);
-      const entry = reconciledToolEntry(this.#toolEntries.get(key), received);
+      const entry = reconciledToolEntry(
+        this.#terminalToolEntries.get(key) ?? this.#toolEntries.get(key),
+        received,
+      );
       if (entry !== undefined) retained.set(key, entry);
     }
-    deleteMapEntries(
-      this.#toolEntries,
-      (entry) =>
-        entry.sessionId === snapshot.sessionId &&
-        entry.streamId === snapshot.streamId,
-    );
-    for (const [key, entry] of retained) this.#toolEntries.set(key, entry);
+    this.#deleteToolStream(this.#toolEntries, snapshot);
+    for (const [key, entry] of retained) {
+      if (this.#terminalToolEntries.has(key)) continue;
+      this.#toolEntries.set(key, entry);
+      this.#trimToolEntries(this.#toolEntries, entry.sessionId);
+    }
     return { ...snapshot, streams: [...retained.values()] };
   }
 }

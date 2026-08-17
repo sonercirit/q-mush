@@ -34,10 +34,7 @@ import {
   sessionCanResume,
   sessionIsActive,
 } from "./session-controller-guards.ts";
-import {
-  applyWhenViewingNewestHistory,
-  showNewestSessionHistory,
-} from "./session-controller-history.ts";
+import { showNewestSessionHistory } from "./session-controller-history.ts";
 import { SessionLoadController } from "./session-controller-load.ts";
 import type {
   SessionStreamBatch,
@@ -165,8 +162,9 @@ export class SessionController {
     });
   }
   applyStreamBatch(event: SessionStreamBatch): void {
-    if (this.#view.value.history.page !== undefined) return;
-    this.#live.applyStreamBatch(event);
+    this.#applyNewestSnapshot(() => {
+      this.#live.applyStreamBatch(event);
+    });
   }
   applyQuestions(
     event: Extract<RealtimeServerEvent, { type: "session_questions" }>,
@@ -179,14 +177,14 @@ export class SessionController {
     });
   }
   applyToolDelta(event: Parameters<SessionRealtimeState["applyToolDelta"]>[0]) {
-    applyWhenViewingNewestHistory(this.#view, () => {
+    this.#applyNewestSnapshot(() => {
       this.#live.applyToolDelta(event);
     });
   }
   applyToolSnapshot(
     event: Parameters<SessionRealtimeState["applyToolSnapshot"]>[0],
   ) {
-    applyWhenViewingNewestHistory(this.#view, () => {
+    this.#applyNewestSnapshot(() => {
       this.#live.applyToolSnapshot(event);
     });
   }

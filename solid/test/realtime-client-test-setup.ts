@@ -9,7 +9,9 @@ const LOCATION = {
 
 interface RealtimeTestSetupOptions {
   readonly listener?: (event: RealtimeClientEvent) => void;
+  readonly now?: () => number;
   readonly requestFrame?: (callback: () => void) => number;
+  readonly selectedSession?: () => string | undefined;
 }
 
 interface RealtimeTestSetup {
@@ -35,6 +37,7 @@ export function realtimeTestSetup(
         return socket;
       },
       location: LOCATION,
+      ...(options.now === undefined ? {} : { now: options.now }),
       requestFrame:
         options.requestFrame ??
         ((callback) => {
@@ -45,6 +48,9 @@ export function realtimeTestSetup(
         timers.push(callback);
         return timers.length;
       },
+      ...(options.selectedSession === undefined
+        ? {}
+        : { selectedSession: options.selectedSession }),
     },
   );
   connection.start();

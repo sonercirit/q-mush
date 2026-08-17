@@ -64,6 +64,15 @@ export class SessionRealtimeState {
   readonly #streamedContent = new Map<string, StreamedSessionContent>();
   readonly #view: RevisionState<SessionViewState>;
 
+  #toolStreamAllowed(sessionId: string, requireDetail: boolean): boolean {
+    const view = this.#view.value;
+    return (
+      !view.stopping &&
+      view.selectedId === sessionId &&
+      (!requireDetail || view.detail !== undefined)
+    );
+  }
+
   constructor(view: RevisionState<SessionViewState>) {
     this.#view = view;
   }
@@ -217,6 +226,7 @@ export class SessionRealtimeState {
     for (const update of event.updates) {
       if (update.type === "tool_update") {
         if (
+          view.stopping ||
           view.selectedId !== update.entry.sessionId ||
           detail?.id !== update.entry.sessionId ||
           !sessionDetailIsActive(detail)
@@ -270,31 +280,24 @@ export class SessionRealtimeState {
       ...(toolStreamsChanged ? { toolStreams } : {}),
     });
   }
-  #selectedForToolStream(sessionId: string, requireDetail: boolean): boolean {
-    return (
-      this.#view.value.selectedId === sessionId &&
-      (!requireDetail || this.#view.value.detail !== undefined)
-    );
-  }
-
   applyToolDelta(
     event: Extract<RealtimeServerEvent, { type: "tool_stream" }>,
   ): void {
-    if (!this.#selectedForToolStream(event.sessionId, true)) return;
+    if (!this.#toolStreamAllowed(event.sessionId, true)) return;
     const current = this.#view.value.toolStreams.find(
       (entry) => toolStreamKey(entry) === toolStreamKey(event),
     );
     const result = applyToolStreamDelta(current, event);
     if (!result.accepted) return;
-    this.applyToolUpdate({
+    this.#applyToolUpdate({
       entry: result.entry,
       terminal: result.terminal,
       type: "tool_update",
     });
   }
 
-  applyToolUpdate(event: RealtimeToolStreamUpdate): void {
-    if (!this.#selectedForToolStream(event.entry.sessionId, true)) return;
+  #applyToolUpdate(event: RealtimeToolStreamUpdate): void {
+    if (!this.#toolStreamAllowed(event.entry.sessionId, true)) return;
     const next = replaceToolStream(this.#view.value.toolStreams, event);
     if (toolStreamsMatch(this.#view.value.toolStreams, next)) return;
     this.#view.patch({ toolStreams: next });
@@ -303,7 +306,7 @@ export class SessionRealtimeState {
   applyToolSnapshot(
     event: Extract<RealtimeServerEvent, { type: "tool_stream_snapshot" }>,
   ): void {
-    if (!this.#selectedForToolStream(event.sessionId, false)) return;
+    if (!this.#toolStreamAllowed(event.sessionId, false)) return;
     const current = new Map(
       this.#view.value.toolStreams
         .filter((entry) => entry.streamId === event.streamId)

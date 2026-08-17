@@ -119,29 +119,29 @@ Living project memory.
   tools manage non-blocking owned children, report final messages, resume idle
   parents; `parallel` takes 2+ calls on four ordered workers, bounds output,
   propagates cancellation. `solid/session-transcript.tsx` renders prompts, tool
-  definitions, raw details, Markdown, code/JSON, diffs, and contextual results,
-  preserving user line breaks; session lists page by ten. Live streams use
-  `realtime-client.ts`/`realtime-stream-buffer.ts`: fragments coalesce; frames
-  update in order. Resets replace buffered models; barriers precede stream
-  snapshots/final state; stale frames cannot revive terminal tools. Paused
-  sessions resync tools. Other events apply immediately; no-op snapshots
-  suppress notices; keyed messages rerender on change. The long-lived Solid root
-  preserves focus/scroll; session detail disables document anchoring and only
-  bottom-pinned transcripts follow output. `agent-model-discovery.ts` queries
-  metadata, signal-cancelable; `shared/agent-configuration.ts` owns catalog
-  types/validation. New sessions take the default online runner (else the first)
-  and credential, first discovered model, latest working directory, top reported
-  effort. Unknown modalities imply no attachment support; choices show provider
-  and Q Mush modalities. `solid/custom-select.tsx` shares search normalization,
-  paginates past ten items, owns accessible keyboard/focus. Focus mode fills the
-  app viewport (not browser Fullscreen), keeping drafts and scroll; its rail
-  overlays on desktop, becomes a drawer, collapses on selection, closing with
-  Escape first. `shared/agent-prompt.ts` builds the model system prompt and
-  transcript display; reasoning summaries persist as `thinking` messages omitted
-  from replay. Session and transcript rows sit in `agent_sessions` and
-  `agent_messages`; `step_started_at` sets per model step, clears with
-  `activeStartedAt` (live Step timer); interrupted processes mark active
-  sessions failed for resumption; rebuilds add interrupted tool errors on
+  definitions, details, Markdown, code/JSON, diffs/results, preserving line
+  breaks; session lists by ten. Live streams coalesce into fair four-key/8 ms
+  frames, alternating selected and background work. Mutation/stop requests
+  freeze model/tool UI so results cannot mix pre/post-mutation state; reconnect
+  drops unrendered fragments, then resyncs paused tools. Snapshot barriers plus
+  100/session, 1,000/user tombstone caps block revival and permit reuse. Resets
+  replace models; other events are immediate; no-op snapshots suppress notices.
+  The Solid root keeps focus/scroll; session detail disables document anchoring
+  and only bottom-pinned transcripts follow output. `agent-model-discovery.ts`
+  queries metadata, signal-cancelable; `shared/agent-configuration.ts` owns
+  catalog types/validation. New sessions take the default online runner (else
+  the first) and credential, first discovered model, latest working directory,
+  top reported effort. Unknown modalities imply no attachment support; choices
+  show provider and Q Mush modalities. `solid/custom-select.tsx` shares search
+  normalization, paginates past ten items, owns accessible keyboard/focus. Focus
+  mode fills the app viewport (not browser Fullscreen), keeping drafts and
+  scroll; its rail overlays on desktop, becomes a drawer, collapses on
+  selection, closing with Escape first. `shared/agent-prompt.ts` builds the
+  model system prompt and transcript display; reasoning summaries persist as
+  `thinking` messages omitted from replay. Session and transcript rows sit in
+  `agent_sessions` and `agent_messages`; `step_started_at` sets per model step,
+  clears with `activeStartedAt` (live Step timer); interrupted processes mark
+  active sessions failed for resumption; rebuilds add interrupted tool errors on
   resume.
 
 - `openai.ts`, `openrouter.ts`, and `generic-provider.ts` implement model

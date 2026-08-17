@@ -38,9 +38,15 @@ type DeferredStateEvent = Extract<
 >;
 
 const RECONNECT_DELAYS = [250, 500, 1_000, 2_000, 5_000] as const;
+const MAXIMUM_STREAM_UPDATES_PER_FRAME = 4;
+const MAXIMUM_STREAM_FRAME_MILLISECONDS = 8;
 const MAXIMUM_PENDING_COMMANDS = 1_000;
 const MAXIMUM_PENDING_COMMAND_BYTES = 128 * 1024 * 1024;
 const UNKNOWN_OUTCOME_ERROR = "outcome_unknown";
+
+function noSelectedSession(): undefined {
+  return undefined;
+}
 
 function normalizedCommandError(error: string): string {
   return error === "command_outcome_unknown" || error === UNKNOWN_OUTCOME_ERROR
@@ -96,8 +102,10 @@ export class RealtimeConnection {
   readonly #createSocket: BrowserWebSocketFactory;
   readonly #listener: RealtimeListener;
   readonly #location: RealtimeLocation;
+  readonly #now: () => number;
   readonly #requestFrame: FrameCallback;
   readonly #setTimeout: (callback: () => void, delay: number) => number;
+  readonly #selectedSession: () => string | undefined;
   readonly #clearTimeout: (id: number) => void;
   #instanceId: string | undefined;
   #hasConnected = false;
@@ -129,18 +137,22 @@ export class RealtimeConnection {
       readonly clearTimeout?: (id: number) => void;
       readonly createSocket?: BrowserWebSocketFactory;
       readonly location?: RealtimeLocation;
+      readonly now?: () => number;
       readonly requestFrame?: FrameCallback;
+      readonly selectedSession?: () => string | undefined;
       readonly setTimeout?: (callback: () => void, delay: number) => number;
     } = {},
   ) {
     this.#createSocket = options.createSocket ?? ((url) => new WebSocket(url));
     this.#listener = listener;
     this.#location = options.location ?? window.location;
+    this.#now = options.now ?? (() => performance.now());
     this.#requestFrame =
       options.requestFrame ??
       ((callback) => window.requestAnimationFrame(callback));
     this.#clearTimeout = options.clearTimeout ?? window.clearTimeout;
     this.#setTimeout = options.setTimeout ?? window.setTimeout;
+    this.#selectedSession = options.selectedSession ?? noSelectedSession;
   }
 
   onReconnect(listener: () => void): () => void {
@@ -264,6 +276,12 @@ export class RealtimeConnection {
     });
   }
 
+  #clearDisconnectedStreams(): void {
+    this.#sessionDeltaGeneration += 1;
+    this.#sessionDeltaFrame = undefined;
+    this.#streamBuffer.clearPending();
+  }
+
   #connect(): void {
     if (this.#stopped) {
       return;
@@ -316,6 +334,7 @@ export class RealtimeConnection {
         this.#socket = undefined;
         this.#instanceId = undefined;
         this.#discardDeferredStateEvents();
+        this.#clearDisconnectedStreams();
         this.#rejectPendingCommands(UNKNOWN_OUTCOME_ERROR);
         if (!this.#hasConnected && this.#queuedCommands.length > 0) {
           this.#rejectQueuedCommands(UNKNOWN_OUTCOME_ERROR);
@@ -396,7 +415,15 @@ export class RealtimeConnection {
     if (sessionId === undefined) {
       this.#sessionDeltaFrame = undefined;
       if (!this.#stopped) {
-        this.#deliverStreamBatch(this.#streamBuffer.takeNext());
+        const frameStartedAt = this.#now();
+        this.#deliverStreamBatch(
+          this.#streamBuffer.takeNext(
+            MAXIMUM_STREAM_UPDATES_PER_FRAME,
+            this.#selectedSession(),
+            () =>
+              this.#now() - frameStartedAt < MAXIMUM_STREAM_FRAME_MILLISECONDS,
+          ),
+        );
         this.#scheduleSessionDelta();
       }
       return;

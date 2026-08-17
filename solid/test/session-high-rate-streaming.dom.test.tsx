@@ -5,6 +5,7 @@ import type { RealtimeClientEvent } from "../realtime-stream-buffer.ts";
 import type { SessionController } from "../session-controller.ts";
 import { streamingRealtimeFixture } from "./realtime-stream-test-fixture.ts";
 import {
+  installResponseFetch,
   mountTestSessionDetail,
   type MountedTestSession,
 } from "./session-dom-test-helpers.tsx";
@@ -162,7 +163,8 @@ function applyNextStreamFrame(
   expectStreamMeasurements(fixture, trackedView.count(), expected);
 }
 
-test("high-rate model and tool streams apply one bounded view update per frame", () => {
+test("high-rate model and tool streams apply one bounded view update per frame", async () => {
+  installResponseFetch(TEST_NAVIGATION_SESSION, disposals);
   const fixture = highRateFixture();
   const prompt = fixture.container.querySelector<HTMLTextAreaElement>(
     "[data-session-composer='true'] textarea[name='prompt']",
@@ -185,15 +187,10 @@ test("high-rate model and tool streams apply one bounded view update per frame",
   });
   applyNextStreamFrame(fixture, trackedView, {
     batches: 1,
-    events: 1,
+    events: 2,
     viewUpdates: 1,
   });
-  expect(fixture.stream.pendingFrames).toHaveLength(1);
-  applyNextStreamFrame(fixture, trackedView, {
-    batches: 2,
-    events: 2,
-    viewUpdates: 2,
-  });
+  expect(fixture.stream.pendingFrames).toHaveLength(0);
   const modelContent = fixture.controller.state.detail?.messages.at(-1);
   const tool = fixture.controller.state.toolStreams[0];
   expect(modelContent?.content).toBe(
@@ -220,8 +217,10 @@ test("high-rate model and tool streams apply one bounded view update per frame",
   const selection = fixture.controller.select(TEST_NAVIGATION_SESSION.id);
   expect(fixture.controller.state.selectedId).toBe(TEST_NAVIGATION_SESSION.id);
   fixture.stream.pendingFrames.shift()?.();
-  const selectedAfterFrame = fixture.controller.state.selectedId;
-  expect(selectedAfterFrame).toBe(TEST_NAVIGATION_SESSION.id);
-  expect(fixture.appliedBatches()).toBe(3);
-  void selection;
+  await selection;
+  expect(fixture.controller.state).toMatchObject({
+    detail: { id: TEST_NAVIGATION_SESSION.id, messages: [] },
+    selectedId: TEST_NAVIGATION_SESSION.id,
+  });
+  expect(fixture.appliedBatches()).toBe(2);
 });

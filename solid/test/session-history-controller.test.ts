@@ -9,6 +9,20 @@ import { initialSessionViewState } from "../session-state.ts";
 
 const EXPECTED_TOOL_OUTPUTS = ["first tool", "second tool"] as const;
 
+const STREAM_MUTATION_CASES = [
+  { name: "question answer", state: { answeringQuestions: true } },
+  { name: "compaction", state: { compacting: true } },
+  { name: "creation", state: { creating: true } },
+  { name: "fork", state: { forking: true } },
+  { name: "reassignment", state: { reassigning: true } },
+  { name: "send", state: { sending: true } },
+  { name: "stop", state: { stopping: true } },
+  { name: "tool update", state: { updatingTools: true } },
+] as const satisfies readonly {
+  readonly name: string;
+  readonly state: Partial<SessionViewState>;
+}[];
+
 const historicalPage = {
   currentSegment: 1,
   messages: [
@@ -155,21 +169,35 @@ test("a mixed barrier batch reconciles the selected view once", () => {
   expectToolOutputs(controller, EXPECTED_TOOL_OUTPUTS);
 });
 
-test("keeps buffered tool updates visible while a stop is pending", () => {
-  const controller = selectedController(
-    { ...TEST_SESSION_DETAIL, status: "running" },
-    { stopping: true },
-  );
+test.each(STREAM_MUTATION_CASES)(
+  "freezes model, tool, and snapshot streams during $name mutations",
+  ({ state }) => {
+    const controller = selectedController(
+      { ...TEST_SESSION_DETAIL, status: "running" },
+      state,
+    );
 
-  controller.applyStreamBatch(streamBatch());
+    controller.applyStreamBatch(streamBatch());
+    controller.applyToolDelta({
+      callId: "direct-tool",
+      index: 2,
+      sequence: 0,
+      sessionId: TEST_SESSION_DETAIL.id,
+      state: "preparing",
+      streamId: "stream-batch",
+      type: "tool_stream",
+    });
+    controller.applyToolSnapshot({
+      sessionId: TEST_SESSION_DETAIL.id,
+      streamId: "stream-batch",
+      streams: [streamEntry(0, "snapshot output")],
+      type: "tool_stream_snapshot",
+    });
 
-  const stoppedMessages = controller.state.detail?.messages;
-  const stoppedTools = controller.state.toolStreams.map(({ stdout }) => stdout);
-  expect({ stoppedMessages, stoppedTools }).toEqual({
-    stoppedMessages: [],
-    stoppedTools: EXPECTED_TOOL_OUTPUTS,
-  });
-});
+    expect(controller.state.detail?.messages).toEqual([]);
+    expect(controller.state.toolStreams).toEqual([]);
+  },
+);
 
 test("ignores buffered tool updates after a terminal session snapshot", () => {
   const controller = selectedController({

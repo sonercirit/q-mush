@@ -285,48 +285,58 @@ function App(): JSX.Element {
   const openRouter = new ProviderController(OPENROUTER_PANEL);
   const prompts = new PromptController();
   const runners = new RunnerController();
-  const realtime = new RealtimeConnection((event) => {
-    switch (event.type) {
-      case "health":
-        setStorageHealth(event.health);
-        break;
-      case "runners":
-        runners.applyRealtime(event.runners);
-        break;
-      case "sessions":
-        agentSessions.applyRealtime(event.sessions);
-        break;
-      case "session":
-        agentSessions.applyDetail(event.session);
-        break;
-      case "session_questions":
-        agentSessions.applyQuestions(event);
-        break;
-      case "sessions_changed":
-        void agentSessions.refresh();
-        break;
-      case "session_compaction_request":
-      case "session_compaction_settled":
-        agentSessions.applyCompaction(event);
-        break;
-      case "stream_batch":
-        agentSessions.applyStreamBatch(event);
-        break;
-      case "tool_stream_snapshot":
-        agentSessions.applyToolSnapshot(event);
-        break;
-      case "command_error":
-      case "command_success":
-      case "ready":
-        break;
-    }
-  });
-  const agentSessions = new SessionController(undefined, undefined, undefined, {
-    command: (operation, payload, idempotencyKey) =>
-      realtime.command(operation, payload, idempotencyKey),
-    onReconnect: (listener) => realtime.onReconnect(listener),
-    yieldToStateApplication: () => realtime.yieldToStateApplication(),
-  });
+  const realtime: RealtimeConnection = new RealtimeConnection(
+    (event) => {
+      switch (event.type) {
+        case "health":
+          setStorageHealth(event.health);
+          break;
+        case "runners":
+          runners.applyRealtime(event.runners);
+          break;
+        case "sessions":
+          agentSessions.applyRealtime(event.sessions);
+          break;
+        case "session":
+          agentSessions.applyDetail(event.session);
+          break;
+        case "session_questions":
+          agentSessions.applyQuestions(event);
+          break;
+        case "sessions_changed":
+          void agentSessions.refresh();
+          break;
+        case "session_compaction_request":
+        case "session_compaction_settled":
+          agentSessions.applyCompaction(event);
+          break;
+        case "stream_batch":
+          agentSessions.applyStreamBatch(event);
+          break;
+        case "tool_stream_snapshot":
+          agentSessions.applyToolSnapshot(event);
+          break;
+        case "command_error":
+        case "command_success":
+        case "ready":
+          break;
+      }
+    },
+    {
+      selectedSession: (): string | undefined => agentSessions.state.selectedId,
+    },
+  );
+  const agentSessions: SessionController = new SessionController(
+    undefined,
+    undefined,
+    undefined,
+    {
+      command: (operation, payload, idempotencyKey) =>
+        realtime.command(operation, payload, idempotencyKey),
+      onReconnect: (listener) => realtime.onReconnect(listener),
+      yieldToStateApplication: () => realtime.yieldToStateApplication(),
+    },
+  );
   const providerControllers = [
     openAi,
     openRouter,
