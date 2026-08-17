@@ -260,14 +260,14 @@ Living project memory.
   sends neither for `none` and maps `minimal` to `low`. Adaptive-only models
   (Fable) ignore `enabled`; newer models default `display` to `omitted` — empty
   thinking text plus a signature while thinking tokens bill. Anthropic replay
-  binds the response model (resolving aliases once per run when supported),
-  credential fingerprint, format, and endpoint. Failed alias retrieval leaves
-  text-only Messages running; client tools fail closed without identity. Exact
-  JSON-safe blocks, including additive fields, persist; corrupt metadata warns
-  but leaves transcripts readable. Durable client-tool continuations require
-  matching replay and result IDs; missing, stale, incomplete, unsupported, or
-  unsigned turns fail closed before tool execution. Only empty text drops
-  (whitespace stays but is withheld from requests); pause trimming derives
+  binds the alias, resolved response model, credential/format/endpoint
+  provenance, and exact assistant artifact. Failed or unavailable identity
+  leaves text-only Messages running but blocks both client-tool execution and
+  provider-directed pause follow-up. Exact JSON-safe blocks, including additive
+  fields, persist; corrupt metadata warns but leaves transcripts readable.
+  Durable client-tool continuations require matching replay and result IDs;
+  missing, stale, incomplete, unsupported, or unsigned turns fail closed before
+  tool execution. Only empty text drops (whitespace stays but is withheld from
   content and replay together across every trailing text block and fails a pause
   if none remain replayable. `cache_control` marks only text/client `tool_use`,
   scanning backward; trailing replay is resent verbatim. `pause_turn` validates

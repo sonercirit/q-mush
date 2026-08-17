@@ -11,7 +11,7 @@ import {
   type AnthropicAssistantReplay,
 } from "../shared/anthropic-replay.ts";
 
-const INVALID_PAUSE =
+export const INVALID_ANTHROPIC_PAUSE =
   "The Anthropic response paused with content that cannot be continued safely";
 const MAX_PAUSE_CONTINUATIONS = 5;
 
@@ -37,7 +37,7 @@ function pauseReplay(step: AgentModelStep): AnthropicAssistantReplay {
     replay === undefined ||
     !anthropicReplayMatchesAssistant(replay, step.content, step.toolCalls)
   ) {
-    throw new Error(INVALID_PAUSE);
+    throw new Error(INVALID_ANTHROPIC_PAUSE);
   }
   return replay;
 }
@@ -92,7 +92,7 @@ function trimmedContinuation(
     break;
   }
   if (anthropicReplayBlocksForRequest(blocks).length === 0) {
-    throw new Error(INVALID_PAUSE);
+    throw new Error(INVALID_ANTHROPIC_PAUSE);
   }
   return {
     content: anthropicReplayAssistantText(blocks),
@@ -227,18 +227,18 @@ export async function completeAnthropicPauseTurns(
     // its blocks must reproduce the assistant message exactly.
     const replay = pauseReplay(step);
     if (identity !== undefined && !sameReplayIdentity(replay, identity)) {
-      throw new Error(INVALID_PAUSE);
+      throw new Error(INVALID_ANTHROPIC_PAUSE);
     }
     identity ??= replay;
     if (replay.container !== undefined) {
       if (container !== undefined && container !== replay.container) {
-        throw new Error(INVALID_PAUSE);
+        throw new Error(INVALID_ANTHROPIC_PAUSE);
       }
       container = replay.container;
     }
     blocks = [...blocks, ...replay.blocks];
     if (step.toolCalls.length > 0 || step.truncation !== undefined) {
-      throw new Error(INVALID_PAUSE);
+      throw new Error(INVALID_ANTHROPIC_PAUSE);
     }
     if (continuations >= MAX_PAUSE_CONTINUATIONS) {
       throw new Error(ANTHROPIC_PAUSE_LIMIT);

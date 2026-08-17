@@ -13,6 +13,7 @@ import {
 import { parseOptionalJsonRecord } from "../shared/json-record.ts";
 import {
   anthropicReplayIdentityFrom,
+  anthropicReplayMatchesIdentity,
   type AnthropicReplayIdentity,
 } from "./anthropic-replay-identity.ts";
 import {
@@ -84,11 +85,8 @@ function matchingReplay(
   identity: AnthropicReplayIdentity,
 ): AnthropicAssistantReplay | undefined {
   const replay = message.providerReplay;
-  const resolvedModel = identity.resolvedModel;
-  return resolvedModel !== undefined &&
-    replay?.model === resolvedModel &&
-    (replay.requestModel ?? replay.model) === identity.model &&
-    replay.provenance === identity.provenance &&
+  return replay !== undefined &&
+    anthropicReplayMatchesIdentity(replay, identity) &&
     anthropicReplayMatchesAssistant(replay, message.content, message.toolCalls)
     ? replay
     : undefined;

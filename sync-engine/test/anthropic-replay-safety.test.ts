@@ -14,6 +14,7 @@ import {
   anthropicBlockStart,
   anthropicBlockStop,
   anthropicMessageStart,
+  serverToolReplayBlock,
 } from "./anthropic-model-test-helpers.ts";
 import {
   anthropicJsonResponse,
@@ -166,6 +167,13 @@ function modelRequestCount(
   return requests.filter((request) => request.method === method).length;
 }
 
+function expectSingleModelExchange(requests: readonly Request[]): void {
+  expect({
+    gets: modelRequestCount(requests, "GET"),
+    posts: modelRequestCount(requests, "POST"),
+  }).toEqual({ gets: 1, posts: 1 });
+}
+
 function modelOptions(fetch: (request: Request) => Promise<Response>) {
   return {
     credential: ANTHROPIC_TEST_CREDENTIAL,
@@ -191,16 +199,12 @@ function testModel(
 
 function unresolvedModel(
   unresolvedResponse: () => Response,
-  completionBlocks: readonly Readonly<
-    Record<string, unknown>
-  >[] = DEFAULT_COMPLETION_BLOCKS,
+  completion: () => Response = () => modelCompletion(FIRST_SNAPSHOT),
 ): { readonly model: ChatCompletionsAgentModel; readonly requests: Request[] } {
   const requests: Request[] = [];
   return {
     model: testModel((request) => {
-      return request.method === "GET"
-        ? unresolvedResponse()
-        : modelCompletion(FIRST_SNAPSHOT, completionBlocks);
+      return request.method === "GET" ? unresolvedResponse() : completion();
     }, requests),
     requests,
   };
@@ -209,15 +213,11 @@ function unresolvedModel(
 async function expectUnresolvedToolIdentityFailsClosed(
   unresolvedResponse: () => Response,
 ): Promise<void> {
-  const { model, requests } = unresolvedModel(
-    unresolvedResponse,
-    signedToolBlocks(),
+  const { model, requests } = unresolvedModel(unresolvedResponse, () =>
+    modelCompletion(FIRST_SNAPSHOT, signedToolBlocks()),
   );
   await expectNoToolSideEffect(model);
-  expect({
-    gets: modelRequestCount(requests, "GET"),
-    posts: modelRequestCount(requests, "POST"),
-  }).toEqual({ gets: 1, posts: 1 });
+  expectSingleModelExchange(requests);
 }
 
 function aliasReplayMessage(): AgentConversationMessage {
@@ -375,6 +375,43 @@ describe("Anthropic replay safety", () => {
     "fails signed client tools closed after %s",
     async (_label, unresolvedResponse) => {
       await expectUnresolvedToolIdentityFailsClosed(unresolvedResponse);
+    },
+  );
+
+  test("fails client tools closed when the response model differs from the resolved request", async () => {
+    const requests: Request[] = [];
+    const model = testModel(
+      (request) =>
+        providerResponse(request, FIRST_SNAPSHOT, () =>
+          modelCompletion(MOVED_SNAPSHOT, signedToolBlocks()),
+        ),
+      requests,
+    );
+
+    await expectNoToolSideEffect(model);
+    expectSingleModelExchange(requests);
+  });
+
+  test.each(UNRESOLVED_MODEL_RESPONSES)(
+    "fails a server-tool pause closed after %s",
+    async (_label, unresolvedResponse) => {
+      const serverTool = serverToolReplayBlock({
+        id: "paused-server-call",
+        input: { query: "headlines" },
+        name: "web_search",
+      });
+      const { model, requests } = unresolvedModel(unresolvedResponse, () =>
+        anthropicJsonResponse({
+          blocks: [SIGNED_THINKING, serverTool],
+          model: FIRST_SNAPSHOT,
+          stopReason: "pause_turn",
+        }),
+      );
+
+      await expect(
+        model.complete([{ content: "Inspect", role: "user" }]),
+      ).rejects.toThrow("cannot be continued safely");
+      expectSingleModelExchange(requests);
     },
   );
 

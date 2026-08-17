@@ -16,6 +16,7 @@ import {
   type AgentSessionToolName,
   type AgentToolDefinition,
 } from "../shared/agent-tools.ts";
+import { anthropicReplayMatchesAssistant } from "../shared/anthropic-replay.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
 import { createServerWebSocket } from "../shared/server-websocket.ts";
@@ -32,9 +33,16 @@ import {
 } from "./agent-model-options.ts";
 import { agentModelRequestBody } from "./agent-model-request.ts";
 import type { ModelRequestSleep } from "./agent-model-retry.ts";
-import { completeAnthropicPauseTurns } from "./anthropic-continuation.ts";
+import {
+  completeAnthropicPauseTurns,
+  INVALID_ANTHROPIC_PAUSE,
+} from "./anthropic-continuation.ts";
 import { resolveAnthropicModel } from "./anthropic-model-resolution.ts";
-import { anthropicReplayIdentityFrom } from "./anthropic-replay-identity.ts";
+import {
+  anthropicReplayIdentityFrom,
+  anthropicReplayMatchesIdentity,
+  type AnthropicReplayIdentity,
+} from "./anthropic-replay-identity.ts";
 import {
   ANTHROPIC_CONTEXT_WINDOW_BETA,
   ANTHROPIC_VERSION,
@@ -235,13 +243,28 @@ function emptyOutputDelta(): ProviderTextDelta {
   return { content: "", reset: true, thinking: "" };
 }
 
-function failUnresolvedAnthropicToolsClosed(
+function validateAnthropicStepContinuation(
   step: AgentModelStep,
-  resolvedModel: string | undefined,
+  identity: AnthropicReplayIdentity,
 ): AgentModelStep {
-  return resolvedModel === undefined && step.toolCalls.length > 0
-    ? { ...step, providerContinuation: "anthropic_replay_unavailable" }
-    : step;
+  if (
+    step.toolCalls.length === 0 &&
+    step.providerContinuation !== "anthropic_pause_turn"
+  ) {
+    return step;
+  }
+  const replay = step.providerReplay;
+  if (
+    replay !== undefined &&
+    anthropicReplayMatchesIdentity(replay, identity) &&
+    anthropicReplayMatchesAssistant(replay, step.content, step.toolCalls)
+  ) {
+    return step;
+  }
+  if (step.providerContinuation === "anthropic_pause_turn") {
+    throw new Error(INVALID_ANTHROPIC_PAUSE);
+  }
+  return { ...step, providerContinuation: "anthropic_replay_unavailable" };
 }
 
 export class ChatCompletionsAgentModel implements AgentModel {
@@ -532,7 +555,10 @@ export class ChatCompletionsAgentModel implements AgentModel {
       signal,
     );
     return protocol === "anthropic"
-      ? failUnresolvedAnthropicToolsClosed(step, resolvedModel)
+      ? validateAnthropicStepContinuation(
+          step,
+          this.#anthropicReplayIdentity(resolvedModel),
+        )
       : step;
   }
 

@@ -7,10 +7,7 @@ import {
   type AgentStepTruncation,
   type AgentToolCall,
 } from "../shared/agent-loop.ts";
-import {
-  anthropicReplayRequestModel,
-  parseAnthropicAssistantReplay,
-} from "../shared/anthropic-replay.ts";
+import { parseAnthropicAssistantReplay } from "../shared/anthropic-replay.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
 import type { IdGenerator } from "../shared/ids.ts";
@@ -23,7 +20,10 @@ import type {
   AgentSessionMessage,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
-import type { AnthropicReplayIdentity } from "./anthropic-replay-identity.ts";
+import {
+  anthropicReplayMatchesIdentity,
+  type AnthropicReplayIdentity,
+} from "./anthropic-replay-identity.ts";
 import {
   INTERNAL_SESSION_MESSAGE_SELECTION,
   STORED_SESSION_MESSAGE_SELECTION,
@@ -387,12 +387,8 @@ function replayForIdentity(
   internal: InternalSessionMessage,
   identity: AnthropicReplayIdentity,
 ): InternalSessionMessage {
-  const resolvedModel = identity.resolvedModel;
   return internal.providerReplay === undefined ||
-    (resolvedModel !== undefined &&
-      internal.providerReplay.model === resolvedModel &&
-      anthropicReplayRequestModel(internal.providerReplay) === identity.model &&
-      internal.providerReplay.provenance === identity.provenance)
+    anthropicReplayMatchesIdentity(internal.providerReplay, identity)
     ? internal
     : { message: internal.message };
 }
