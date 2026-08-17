@@ -20,7 +20,7 @@ import {
   reconcileStream,
   resolveStreamBase,
   retainCompactionStream,
-  sessionIsActive,
+  sessionDetailIsActive,
   streamMessages,
   streamedContent,
   type StreamedSessionContent,
@@ -88,7 +88,7 @@ export class SessionRealtimeState {
 
   applyDetail(detail: AgentSessionDetail): void {
     const persistable = persistedDetail(detail);
-    const active = sessionIsActive(persistable);
+    const active = sessionDetailIsActive(persistable);
     if (!active) {
       this.#clearCompaction(detail.id);
     }
@@ -178,7 +178,7 @@ export class SessionRealtimeState {
       view.selectedId === event.sessionId && view.detail?.id === event.sessionId
         ? view.detail
         : undefined;
-    if (detail === undefined || !sessionIsActive(detail) || view.stopping)
+    if (detail === undefined || !sessionDetailIsActive(detail) || view.stopping)
       return;
     const messages = persistedMessages(detail);
     const request = createDisplaySessionMessage({
@@ -219,7 +219,7 @@ export class SessionRealtimeState {
         if (
           view.selectedId !== update.entry.sessionId ||
           detail?.id !== update.entry.sessionId ||
-          !sessionIsActive(detail)
+          !sessionDetailIsActive(detail)
         ) {
           continue;
         }
@@ -236,11 +236,11 @@ export class SessionRealtimeState {
       const visibleSelectedDetail =
         selected && detail?.id === delta.sessionId ? detail : undefined;
       const active =
-        selectedDetail !== undefined && sessionIsActive(selectedDetail);
+        selectedDetail !== undefined && sessionDetailIsActive(selectedDetail);
 
       if (
         selectedDetail !== undefined &&
-        (!sessionIsActive(selectedDetail) || view.stopping)
+        (!sessionDetailIsActive(selectedDetail) || view.stopping)
       )
         continue;
 

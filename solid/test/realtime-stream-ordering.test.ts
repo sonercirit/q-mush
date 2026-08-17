@@ -1,7 +1,13 @@
 import { expect, test } from "vitest";
 import type { RealtimeServerEvent } from "../realtime-client-codec.ts";
-import type { RealtimeStreamBatch } from "../realtime-stream-buffer.ts";
+import type {
+  RealtimeClientEvent,
+  RealtimeStreamBatch,
+} from "../realtime-stream-buffer.ts";
+import { SessionController } from "../session-controller.ts";
 import { streamingRealtimeFixture } from "./realtime-stream-test-fixture.ts";
+import { sessionDetailState } from "./session-detail-test-state.ts";
+import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
 const SESSION_ID = "session-ordered";
 const STREAM_ID = "stream-ordered";
@@ -12,8 +18,11 @@ interface StreamingTestConnection extends ReturnType<
   readonly batches: () => readonly RealtimeStreamBatch[];
 }
 
-function streamingTestConnection(instanceId: string): StreamingTestConnection {
-  const stream = streamingRealtimeFixture(instanceId);
+function streamingTestConnection(
+  instanceId: string,
+  listener?: (event: RealtimeClientEvent) => void,
+): StreamingTestConnection {
+  const stream = streamingRealtimeFixture(instanceId, listener);
   return {
     ...stream,
     batches: () =>
@@ -88,6 +97,16 @@ function snapshotWithStreams(
 function expectNextFrame(stream: StreamingTestConnection): void {
   expect(stream.pendingFrames).toHaveLength(1);
   stream.pendingFrames.shift()?.();
+}
+
+function expectToolSync(sent: readonly string[] | undefined): void {
+  expect(sent).toContain(
+    JSON.stringify({
+      sessionId: SESSION_ID,
+      streamId: STREAM_ID,
+      type: "sync_tools",
+    }),
+  );
 }
 
 function expectBatch(
@@ -218,4 +237,88 @@ test("flushes tool terminal state before stale snapshots without resurrection", 
     },
     [],
   );
+});
+
+function selectedRunningController(): SessionController {
+  const detail = {
+    ...TEST_SESSION_DETAIL,
+    id: SESSION_ID,
+    status: "running" as const,
+  };
+  return new SessionController(sessionDetailState(detail), undefined, null);
+}
+
+function applyStreamEvent(
+  controller: SessionController,
+  event: RealtimeClientEvent,
+): void {
+  if (event.type === "session") controller.applyDetail(event.session);
+  else if (event.type === "stream_batch") controller.applyStreamBatch(event);
+  else if (event.type === "tool_stream_snapshot")
+    controller.applyToolSnapshot(event);
+}
+
+test("keeps paused ask-questions tool state through terminal output and reconnect", () => {
+  const controller = selectedRunningController();
+  const stream = streamingTestConnection("paused-instance", (event) => {
+    applyStreamEvent(controller, event);
+  });
+  sendRunningTool(stream, "question output");
+  receiveSnapshotBarrier(stream, toolSnapshot(2, "question output"));
+  expect(controller.state.toolStreams).toMatchObject([
+    { state: "running", stdout: "question output" },
+  ]);
+  stream.emitted.length = 0;
+  while (stream.pendingFrames.length > 0) stream.pendingFrames.shift()?.();
+
+  stream.receive({
+    session: {
+      ...TEST_SESSION_DETAIL,
+      generation: 2,
+      id: SESSION_ID,
+      pendingQuestions: {
+        createdAt: 3,
+        executionGeneration: 2,
+        id: "paused-questions",
+        questions: [
+          {
+            id: "direction",
+            options: [
+              { label: "Continue", value: "continue" },
+              { label: "Stop", value: "stop" },
+            ],
+            prompt: "What next?",
+            type: "single_choice",
+          },
+        ],
+        toolCallId: "ordered-call",
+      },
+      status: "paused",
+    },
+    type: "session",
+  });
+  expectToolSync(stream.setup.sockets[0]?.sent);
+  expectNextFrame(stream);
+  expect(controller.state.detail).toMatchObject({
+    pendingQuestions: { id: "paused-questions" },
+    status: "paused",
+  });
+
+  const initialSocket = stream.setup.sockets[0];
+  initialSocket?.close();
+  stream.setup.timers.shift()?.();
+  const reconnected = stream.setup.sockets[1];
+  reconnected?.open("paused-reconnected-instance");
+  expectToolSync(reconnected?.sent);
+
+  reconnected?.receive(toolDelta(3, { state: "completed" }));
+  expectNextFrame(stream);
+
+  expectBatch(stream, 0, {
+    entry: { sequence: 3, stdout: "question output" },
+    terminal: true,
+    type: "tool_update",
+  });
+  expect(controller.state.toolStreams).toEqual([]);
+  stream.stop();
 });

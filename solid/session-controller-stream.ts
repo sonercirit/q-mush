@@ -3,6 +3,7 @@ import type {
   AgentSessionMessage,
 } from "../shared/session-model.ts";
 import type { RealtimeServerEvent } from "./realtime-client-codec.ts";
+import { sessionIsActive } from "./session-controller-guards.ts";
 import {
   isStreamedMessage,
   sortedMessages,
@@ -45,12 +46,8 @@ export function persistedDetail(
   return messages === detail.messages ? detail : { ...detail, messages };
 }
 
-export function sessionIsActive(detail: AgentSessionDetail): boolean {
-  return (
-    detail.status === "queued" ||
-    detail.status === "running" ||
-    detail.status === "paused"
-  );
+export function sessionDetailIsActive(detail: AgentSessionDetail): boolean {
+  return sessionIsActive(detail.status);
 }
 
 // A buffered stream matches persisted text exactly or as its tail when the

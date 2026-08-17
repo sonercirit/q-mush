@@ -14,6 +14,7 @@ import {
   type RealtimeClientEvent,
   type RealtimeStreamBatch,
 } from "./realtime-stream-buffer.ts";
+import { sessionIsActive } from "./session-controller-guards.ts";
 
 interface BrowserWebSocket extends EventTarget {
   readonly readyState: number;
@@ -552,10 +553,7 @@ export class RealtimeConnection {
     if (event.type === "session") {
       const sessionId = event.session.id;
       this.#deliverStreamBatch(this.#streamBuffer.takeSession(sessionId));
-      if (
-        event.session.status !== "queued" &&
-        event.session.status !== "running"
-      ) {
+      if (!sessionIsActive(event.session.status)) {
         this.#toolSnapshotRequests.delete(event.session.id);
         this.#streamBuffer.clearToolSession(event.session.id);
       } else {

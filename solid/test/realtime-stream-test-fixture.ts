@@ -6,6 +6,7 @@ export interface StreamingRealtimeFixture {
   readonly emitted: RealtimeClientEvent[];
   readonly pendingFrames: (() => void)[];
   readonly receive: (event: RealtimeServerEvent) => void;
+  readonly setup: ReturnType<typeof realtimeTestSetup>;
   readonly stop: () => void;
 }
 
@@ -38,6 +39,7 @@ export function streamingRealtimeFixture(
     emitted,
     pendingFrames: setup.requestFrames,
     receive,
+    setup,
     stop,
   };
 }
